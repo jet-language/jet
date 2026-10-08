@@ -180,7 +180,12 @@ fn scalar_count(bytes: View<U8>, end: Int) -> Int Never! {
 
 fn text(value: String) -> DataTree Never! { DataTree.Text(~value) }
 // Rust: crates/jet-foundation/src/XmlPull.rs:264
-fn optional_text(value: String?) -> DataTree Never! { if value == { .Val(s) -> DataTree.Text(^s) .None -> DataTree.Null } }
+fn optional_text(value: String?) -> DataTree Never! {
+    if value == {
+        .Val(s) -> DataTree.Text(^s)
+        .None -> DataTree.Null
+    }
+}
 // Rust: crates/jet-foundation/src/XmlPull.rs:268
 fn object(entries: ^[(key: String, value: DataTree)]) -> DataTree Never! { stream.object_from_entries(^entries) }
 // Rust: crates/jet-foundation/src/XmlPull.rs:277
@@ -234,11 +239,17 @@ fn xml_entry(entries: View<(key: String, value: DataTree)>, key: String) -> Data
 }
 fn text_value(value: DataTree?) -> String? Never! {
     item :: value ?? return None
-    if item == { .Text(body) -> Val(~body) else -> None }
+    if item == {
+        .Text(body) -> Val(~body)
+        else -> None
+    }
 }
 fn array_value(value: DataTree?) -> [DataTree]? Never! {
     item :: value ?? return None
-    if item == { .Array(items) -> Val(~items) else -> None }
+    if item == {
+        .Array(items) -> Val(~items)
+        else -> None
+    }
 }
 fn field_kind(value: DataTree?) -> String Never! {
     item :: value ?? return "missing"
@@ -270,7 +281,7 @@ fn xml_schema_order(entries: View<(key: String, value: DataTree)>) -> [String]? 
             "text" | "cdata" | "comment" -> if has("lexical") -> ["$xml", "value", "lexical"] else -> ["$xml", "value"]
             "entity_ref" -> if has("lexical") -> ["$xml", "name", "resolved_value", "lexical"] else -> ["$xml", "name", "resolved_value"]
             "processing_instruction" -> if has("lexical") -> ["$xml", "target", "value", "lexical"] else -> ["$xml", "target", "value"]
-            else -> return None
+            else -> { return None }
         }
     } else if text_field("$xml_event") == .Val(kind) {
         order = if kind == {
@@ -284,7 +295,7 @@ fn xml_schema_order(entries: View<(key: String, value: DataTree)>) -> [String]? 
             "processing_instruction" -> ["$xml_event", "target", "value", "lexical"]
             "element_end" -> ["$xml_event", "name", "close_lexical"]
             "document_end" -> ["$xml_event"]
-            else -> return None
+            else -> { return None }
         }
     } else {
         found := false
@@ -404,14 +415,14 @@ fn lexical_semantic(value: DataTree, key: String) -> DataTree? Never! {
     if !has_canonical_xml_object(value) -> return None
     whole_kind :: text_value(field(value, "$xml"))
     event_kind :: text_value(field(value, "$xml_event"))
-    if key == "open_lexical" && (whole_kind == Val("element") || event_kind == Val("element_start")) {
+    if key == "open_lexical" && ((whole_kind ?? "") == "element" || (event_kind ?? "") == "element_start") {
         return Val(strip_lexical(object([
             (key: "name", value: field(value, "name") ?? return None),
             (key: "namespaces", value: field(value, "namespaces") ?? return None),
             (key: "attributes", value: field(value, "attributes") ?? return None),
             (key: "empty_style", value: field(value, "empty_style") ?? return None)])))
     }
-    if key == "close_lexical" && (whole_kind == Val("element") || event_kind == Val("element_end")) {
+    if key == "close_lexical" && ((whole_kind ?? "") == "element" || (event_kind ?? "") == "element_end") {
         return Val(object([(key: "name", value: field(value, "name") ?? return None)]))
     }
     if key != "lexical" -> return None
@@ -449,7 +460,10 @@ fn clean(value: DataTree) -> DataTree Never! {
             loop entry in stream.object_entries(value) {
                 lexical :: entry.key == "lexical" || entry.key == "open_lexical" || entry.key == "close_lexical"
                 trusted :: if lexical -> {
-                    if lexical_semantic(value, entry.key) == { .Val(expected) -> lexical_evidence_matches(entry.value, expected) .None -> false }
+                    if lexical_semantic(value, entry.key) == {
+                        .Val(expected) -> lexical_evidence_matches(entry.value, expected)
+                        .None -> false
+                    }
                 } else -> true
                 item := clean(entry.value)
                 if !trusted && item == .Object(_) {
@@ -486,17 +500,22 @@ fn part_value(part: Part) -> DataTree Never! {
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:805
 fn namespace_value(namespace: Namespace) -> DataTree Never! {
-    leaf("namespace", [(key: "prefix", value: optional_text(namespace.prefix)), (key: "namespace_uri", value: text(namespace.namespace_uri)), (key: "quote", value: text(if namespace.quote == Char{39} -> "single" else -> "double"))], namespace.raw)
+    leaf("namespace", [(key: "prefix", value: optional_text(namespace.prefix)), (key: "namespace_uri", value: text(namespace.namespace_uri)), (key: "quote", value: text(if namespace.quote == (Char{39}) -> "single" else -> "double"))], namespace.raw)
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:824
 fn attribute_value(attribute: Attribute) -> DataTree Never! {
     parts := [DataTree]{}
     loop part in attribute.parts -> parts.push(part_value(part))
-    leaf("attribute", [(key: "name", value: name_value(attribute.name)), (key: "parts", value: DataTree.Array(^parts)), (key: "normalized_value", value: optional_text(attribute.normalized)), (key: "quote", value: text(if attribute.quote == Char{39} -> "single" else -> "double"))], attribute.raw)
+    leaf("attribute", [(key: "name", value: name_value(attribute.name)), (key: "parts", value: DataTree.Array(^parts)), (key: "normalized_value", value: optional_text(attribute.normalized)), (key: "quote", value: text(if attribute.quote == (Char{39}) -> "single" else -> "double"))], attribute.raw)
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:847
 fn wire_bytes(text: String, encoding: WireEncoding) -> [U8] Never! {
-    encode_text(text, if encoding == { .UTF8 -> RenderEncoding.UTF8 .Utf16Le -> RenderEncoding.Utf16Le .Utf16Be -> RenderEncoding.Utf16Be })
+    target :: if encoding == {
+        .UTF8 -> RenderEncoding.UTF8
+        .Utf16Le -> RenderEncoding.Utf16Le
+        .Utf16Be -> RenderEncoding.Utf16Be
+    }
+    encode_text(text, target)
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:855
 fn byte_lexical(raw: ^[U8], semantic: ^DataTree) -> DataTree Never! {
@@ -536,11 +555,20 @@ fn lexical_value_to_wire(value: ^DataTree, encoding: WireEncoding) -> DataTree N
         .DocumentStart -> {
             bom := [DataTree]{}
             loop byte in item.bom -> bom.push(DataTree.Int(Int{byte}))
-            object([(key: "$xml_event", value: text("document_start")), (key: "encoding", value: text(if encoding == { .UTF8 -> "UTF-8" .Utf16Le -> "UTF-16LE" .Utf16Be -> "UTF-16BE" })), (key: "bom", value: DataTree.Array(^bom))])
+            label :: if encoding == {
+                .UTF8 -> "UTF-8"
+                .Utf16Le -> "UTF-16LE"
+                .Utf16Be -> "UTF-16BE"
+            }
+            object([(key: "$xml_event", value: text("document_start")), (key: "encoding", value: text(label)), (key: "bom", value: DataTree.Array(^bom))])
         }
         .DocumentEnd -> object([(key: "$xml_event", value: text("document_end"))])
         .Declaration(version, declared, standalone, _) -> {
-            fields := [(key: String, value: DataTree)]{(key: "version", value: text(version)), (key: "encoding", value: optional_text(declared)), (key: "standalone", value: if standalone == { .Val(b) -> DataTree.Bool(b) .None -> DataTree.Null })}
+            standalone_value :: if standalone == {
+                .Val(b) -> DataTree.Bool(b)
+                .None -> DataTree.Null
+            }
+            fields := [(key: String, value: DataTree)]{(key: "version", value: text(version)), (key: "encoding", value: optional_text(declared)), (key: "standalone", value: standalone_value)}
             out := [(key: String, value: DataTree)]{(key: "$xml_event", value: text("declaration"))}
             loop entry in fields -> &out.push(~entry)
             out.push((key: "lexical", value: byte_lexical(~item.raw_bytes, strip_lexical(object(^fields)))))
@@ -584,11 +612,14 @@ struct ElementFrame { name: Name, namespaces: [DataTree], attributes: [DataTree]
 struct ByteElementFrame { name: DataTree, namespaces: DataTree, attributes: DataTree, children: [DataTree], empty_style: DataTree, open_lexical: DataTree }
 // Rust: crates/jet-foundation/src/XmlPull.rs:1057
 fn finish_element(frame: ^ElementFrame, close_raw: String?) -> DataTree Never! {
-    empty :: close_raw.is_none()
+    empty :: close_raw == None
     name :: name_value(frame.name)
     style :: text(if empty -> "empty" else -> "explicit")
     semantic :: strip_lexical(object([(key: "name", value: ~name), (key: "namespaces", value: DataTree.Array(~frame.namespaces)), (key: "attributes", value: DataTree.Array(~frame.attributes)), (key: "empty_style", value: ~style)]))
-    close :: if close_raw == { .Val(raw) -> lexical(raw, object([(key: "name", value: name_value(frame.name))])) .None -> DataTree.Null }
+    close :: if close_raw == {
+        .Val(raw) -> lexical(raw, object([(key: "name", value: name_value(frame.name))]))
+        .None -> DataTree.Null
+    }
     object([(key: "$xml", value: text("element")), (key: "name", value: ^name), (key: "namespaces", value: DataTree.Array(^frame.namespaces)), (key: "attributes", value: DataTree.Array(^frame.attributes)), (key: "children", value: DataTree.Array(^frame.children)), (key: "empty_style", value: ^style), (key: "open_lexical", value: lexical(frame.open_raw, ^semantic)), (key: "close_lexical", value: ^close)])
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:1081
@@ -605,10 +636,16 @@ fn parse_document_with(source: String, options: ParseOptions) -> DataTree XMLFau
     stack := [ElementFrame]{}
     loop {
         candidate :: &scanner.next() ?? return Err(err)
-        event :: if candidate == { .Val(value) -> value .None -> break }
+        event :: candidate ?? break
         node :: if event == {
             .DocumentStart | .DocumentEnd -> next
-            .Declaration(version, encoding, standalone, raw) -> Val(leaf("declaration", [(key: "version", value: text(version)), (key: "encoding", value: optional_text(encoding)), (key: "standalone", value: if standalone == { .Val(b) -> DataTree.Bool(b) .None -> DataTree.Null })], raw))
+            .Declaration(version, encoding, standalone, raw) -> {
+                standalone_value :: if standalone == {
+                    .Val(b) -> DataTree.Bool(b)
+                    .None -> DataTree.Null
+                }
+                Val(leaf("declaration", [(key: "version", value: text(version)), (key: "encoding", value: optional_text(encoding)), (key: "standalone", value: standalone_value)], raw))
+            }
             .DocumentWhitespace(value, raw) -> Val(leaf("document_whitespace", [(key: "value", value: text(value))], raw))
             .Doctype(name, public_id, system_id, internal_subset, raw) -> Val(leaf("doctype", [(key: "name", value: text(name)), (key: "public_id", value: optional_text(public_id)), (key: "system_id", value: optional_text(system_id)), (key: "internal_subset", value: optional_text(internal_subset))], raw))
             .ElementStart(name, namespaces, attributes, empty, raw) -> {
@@ -650,7 +687,10 @@ fn parse_document_bytes_with(bytes: [U8], options: ParseOptions) -> DataTree XML
     events := [DataTree]{}
     loop {
         candidate :: &scanner.next() ?? return Err(err)
-        if candidate == { .Val(item) -> &events.push(stream_event_value(item)) .None -> break }
+        if candidate == {
+            .Val(item) -> &events.push(stream_event_value(item))
+            .None -> break
+        }
     }
     fold_events(events)
 }
@@ -661,34 +701,38 @@ fn parse_document_bytes_with(bytes: [U8], options: ParseOptions) -> DataTree XML
     stack := [ByteElementFrame]{}
     ended := false
     loop event in events {
-        if ended -> return err(XMLFault.shape("XML event after document_end"))
+        if ended -> return Err(XMLFault.shape("XML event after document_end"))
         kind :: required_text(event, "$xml_event") ?? return Err(XMLFault.shape(err))
         node :: if kind == {
             "document_start" -> {
                 exact_keys(event, ["$xml_event", "encoding", "bom"]) ?? return Err(err)
-                if document_start.is_some() -> return err(XMLFault.shape("duplicate XML document_start"))
-                encoding :: field(event, "encoding") ?? return err(XMLFault.shape("document_start lacks encoding"))
-                bom :: field(event, "bom") ?? return err(XMLFault.shape("document_start lacks bom"))
+                if document_start != None -> return Err(XMLFault.shape("duplicate XML document_start"))
+                encoding :: field(event, "encoding") ?? return Err(XMLFault.shape("document_start lacks encoding"))
+                bom :: field(event, "bom") ?? return Err(XMLFault.shape("document_start lacks bom"))
                 document_start = Val(DocumentStart{encoding: ~encoding, bom: ~bom})
                 None
             }
             "document_end" -> {
                 exact_keys(event, ["$xml_event"]) ?? return Err(err)
-                if document_start.is_none() || !stack.is_empty() -> return err(XMLFault.shape("document_end requires one closed root element"))
+                if document_start == None || !stack.is_empty() -> return Err(XMLFault.shape("document_end requires one closed root element"))
                 ended = true
                 None
             }
             "element_start" -> {
-                if document_start.is_none() -> return err(XMLFault.shape("XML event before document_start"))
+                if document_start == None -> return Err(XMLFault.shape("XML event before document_start"))
                 exact_keys(event, ["$xml_event", "name", "namespaces", "attributes", "empty_style", "open_lexical"]) ?? return Err(err)
                 style :: required_text(event, "empty_style") ?? return Err(XMLFault.shape(err))
-                empty :: if style == { "empty" -> true "explicit" -> false else -> return Err(XMLFault.shape("empty_style must be empty or explicit")) }
+                empty :: if style == {
+                    "empty" -> true
+                    "explicit" -> false
+                    else -> { return Err(XMLFault.shape("empty_style must be empty or explicit")) }
+                }
                 frame :: ByteElementFrame{
-                    name: ~(field(event, "name") ?? return err(XMLFault.shape("element_start lacks name"))),
-                    namespaces: ~(field(event, "namespaces") ?? return err(XMLFault.shape("element_start lacks namespaces"))),
-                    attributes: ~(field(event, "attributes") ?? return err(XMLFault.shape("element_start lacks attributes"))), children: [],
-                    empty_style: ~(field(event, "empty_style") ?? return err(XMLFault.shape("element_start lacks empty_style"))),
-                    open_lexical: ~(field(event, "open_lexical") ?? return err(XMLFault.shape("element_start lacks open_lexical")))
+                    name: field(event, "name") ?? return Err(XMLFault.shape("element_start lacks name")),
+                    namespaces: field(event, "namespaces") ?? return Err(XMLFault.shape("element_start lacks namespaces")),
+                    attributes: field(event, "attributes") ?? return Err(XMLFault.shape("element_start lacks attributes")), children: [],
+                    empty_style: field(event, "empty_style") ?? return Err(XMLFault.shape("element_start lacks empty_style")),
+                    open_lexical: field(event, "open_lexical") ?? return Err(XMLFault.shape("element_start lacks open_lexical"))
                 }
                 if empty -> Val(finish_byte_element(^frame, DataTree.Null)) else -> {
                     &stack.push(^frame)
@@ -697,15 +741,15 @@ fn parse_document_bytes_with(bytes: [U8], options: ParseOptions) -> DataTree XML
             }
             "element_end" -> {
                 exact_keys(event, ["$xml_event", "name", "close_lexical"]) ?? return Err(err)
-                end_name :: parse_name(field(event, "name") ?? return err(XMLFault.shape("element_end lacks name"))) ?? return Err(err)
-                frame :: stack.pop() ?? return err(XMLFault.shape("element stack underflow"))
+                end_name :: parse_name(field(event, "name") ?? return Err(XMLFault.shape("element_end lacks name"))) ?? return Err(err)
+                frame :: &stack.pop() ?? return Err(XMLFault.shape("element stack underflow"))
                 open_name :: parse_name(frame.name) ?? return Err(err)
-                if open_name.local != end_name.local || open_name.namespace_uri != end_name.namespace_uri -> return err(XMLFault.at_kind(0, Reason.MismatchedTag, "element_end does not match the open expanded name"))
-                close :: ~(field(event, "close_lexical") ?? return err(XMLFault.shape("element_end lacks close_lexical")))
+                if open_name.local != end_name.local || open_name.namespace_uri != end_name.namespace_uri -> return Err(XMLFault.at_kind(0, Reason.MismatchedTag, "element_end does not match the open expanded name"))
+                close :: field(event, "close_lexical") ?? return Err(XMLFault.shape("element_end lacks close_lexical"))
                 Val(finish_byte_element(^frame, ^close))
             }
             else -> {
-                if document_start.is_none() -> return err(XMLFault.shape("XML event before document_start"))
+                if document_start == None -> return Err(XMLFault.shape("XML event before document_start"))
                 if event == .Object(_) {} else { return Err(XMLFault.shape("XML event must be an Object")) }
                 found := false
                 entries := [(key: String, value: DataTree)]{}
@@ -725,14 +769,14 @@ fn parse_document_bytes_with(bytes: [U8], options: ParseOptions) -> DataTree XML
             if stack.is_empty() -> document_children.push(^item) else -> stack[stack.len() - 1].children.push(^item)
         }
     }
-    if !ended || !stack.is_empty() -> return err(XMLFault.shape("XML event stream did not form a complete document"))
-    start :: document_start ?? return err(XMLFault.shape("XML event stream lacks document_start"))
+    if !ended || !stack.is_empty() -> return Err(XMLFault.shape("XML event stream did not form a complete document"))
+    start :: document_start ?? return Err(XMLFault.shape("XML event stream lacks document_start"))
     roots := 0
     loop node in document_children {
         kind :: required_text(node, "$xml") ?? ""
         if kind == "element" -> roots += 1
     }
-    if roots != 1 -> return err(XMLFault.shape("XML document must contain exactly one root element"))
+    if roots != 1 -> return Err(XMLFault.shape("XML document must contain exactly one root element"))
     object([(key: "$xml", value: text("document")), (key: "encoding", value: ^start.encoding), (key: "bom", value: ^start.bom), (key: "children", value: DataTree.Array(^document_children))])
 }
     // Rust: crates/jet-foundation/src/XmlPull.rs:1389
@@ -769,16 +813,16 @@ fn parse_document_bytes_with(bytes: [U8], options: ParseOptions) -> DataTree XML
                 else -> return Err(XMLFault.shape("empty_style must be empty or explicit"))
             }
             output.push(object([(key: "$xml_event", value: text("element_start")),
-                (key: "name", value: ~(field(value, "name") ?? return err(XMLFault.shape("element lacks name")))),
-                (key: "namespaces", value: ~(field(value, "namespaces") ?? return err(XMLFault.shape("element lacks namespaces")))),
-                (key: "attributes", value: ~(field(value, "attributes") ?? return err(XMLFault.shape("element lacks attributes")))),
+                (key: "name", value: field(value, "name") ?? return Err(XMLFault.shape("element lacks name"))),
+                (key: "namespaces", value: field(value, "namespaces") ?? return Err(XMLFault.shape("element lacks namespaces"))),
+                (key: "attributes", value: field(value, "attributes") ?? return Err(XMLFault.shape("element lacks attributes"))),
                 (key: "empty_style", value: text(style)),
-                (key: "open_lexical", value: ~(field(value, "open_lexical") ?? return err(XMLFault.shape("element lacks open_lexical"))))]))
+                (key: "open_lexical", value: field(value, "open_lexical") ?? return Err(XMLFault.shape("element lacks open_lexical")))]))
             loop child in children -> push_node(child, &output) ?? return Err(err)
             if style == "explicit" {
                 output.push(object([(key: "$xml_event", value: text("element_end")),
-                    (key: "name", value: ~(field(value, "name") ?? return err(XMLFault.shape("element lacks name")))),
-                    (key: "close_lexical", value: ~(field(value, "close_lexical") ?? return err(XMLFault.shape("element lacks close_lexical"))))]))
+                    (key: "name", value: field(value, "name") ?? return Err(XMLFault.shape("element lacks name"))),
+                    (key: "close_lexical", value: field(value, "close_lexical") ?? return Err(XMLFault.shape("element lacks close_lexical")))]))
             }
             return
         }
@@ -792,8 +836,8 @@ fn parse_document_bytes_with(bytes: [U8], options: ParseOptions) -> DataTree XML
     if kind != "document" -> return Err(XMLFault.shape("XML whole value must be a document"))
     children :: array_value(field(value, "children")) ?? return Err(XMLFault.shape("XML document children must be an Array"))
     output := [DataTree]{object([(key: "$xml_event", value: text("document_start")),
-        (key: "encoding", value: ~(field(value, "encoding") ?? return err(XMLFault.shape("document lacks encoding")))),
-        (key: "bom", value: ~(field(value, "bom") ?? return err(XMLFault.shape("document lacks bom"))))])}
+        (key: "encoding", value: field(value, "encoding") ?? return Err(XMLFault.shape("document lacks encoding"))),
+        (key: "bom", value: field(value, "bom") ?? return Err(XMLFault.shape("document lacks bom")))]))}
     loop child in children -> push_node(child, &output) ?? return Err(err)
     output.push(object([(key: "$xml_event", value: text("document_end"))]))
     ^output
@@ -807,19 +851,26 @@ fn lexical_raw(value: DataTree, key: String, semantic: DataTree) -> String? Neve
 // Rust: crates/jet-foundation/src/XmlPull.rs:1544
 fn required_text(value: DataTree, key: String) -> String String! {
     item :: field(value, key) ?? return Err("XML {key} must be text")
-    if item == { .Text(s) -> ~s else -> Err("XML {key} must be text") }
+    if item == {
+        .Text(s) -> ~s
+        else -> Err("XML {key} must be text")
+    }
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:1551
 fn optional_text_field(value: DataTree, key: String) -> String? String! {
     item :: field(value, key) ?? return Err("XML {key} must be text or null")
-    if item == { .Text(s) -> Val(~s) .Null -> None else -> Err("XML {key} must be text or null") }
+    if item == {
+        .Text(s) -> Val(~s)
+        .Null -> None
+        else -> Err("XML {key} must be text or null")
+    }
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:1559
 fn escape_text(value: String) -> String Never! { value.replace("&", "&amp;").replace("<", "&lt;") }
 // Rust: crates/jet-foundation/src/XmlPull.rs:1563
 fn escape_attribute(value: String, quote: Char) -> String Never! {
     escaped :: escape_text(value)
-    if quote == Char{39} -> escaped.replace("'", "&apos;") else -> escaped.replace("\"", "&quot;")
+    if quote == (Char{39}) -> escaped.replace("'", "&apos;") else -> escaped.replace("\"", "&quot;")
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:1572
 fn deterministic_leaf(value: DataTree, kind: String) -> String String! {
@@ -940,7 +991,7 @@ fn render_element_open(value: DataTree, output: &String) String! {
             loop child in children -> render_node(child, &output) ?? return Err(err)
             close_semantic :: object([(key: "name", value: ~name)])
             if lexical_raw(value, "close_lexical", close_semantic) == .Val(raw) -> output += raw
-            else if style == .Text("explicit") {
+            else if style == (DataTree.Text("explicit")) {
                 raw_name :: required_text(name, "raw") ?? return Err(err)
                 output += "</{raw_name}>"
             }
@@ -1022,7 +1073,7 @@ impl StreamWriter {
                 standalone :: if standalone_field == {
                     .Null -> None
                     .Bool(value) -> Val(value)
-                    else -> return Err(XMLFault.shape("declaration standalone must be Bool or Null"))
+                    else -> { return Err(XMLFault.shape("declaration standalone must be Bool or Null")) }
                 }
                 self.declaration = true
                 deterministic = "<?xml version=\"{version}\""
@@ -1034,7 +1085,7 @@ impl StreamWriter {
                 exact_keys(event, ["$xml_event", "value", "lexical"])
                 if self.root_seen && !self.root_closed -> return Err(XMLFault.state("document_whitespace is not legal inside an element"))
                 value :: required_text(event, "value") ?? return Err(XMLFault.shape(err))
-                if value.is_empty() || !value.chars().all(c -> c == ' ' || c == '\t' || c == Char{13} || c == '\n') -> return Err(XMLFault.shape("document_whitespace contains a non-XML-S character"))
+                if value.is_empty() || !value.chars().all(c -> c == ' ' || c == '\t' || c == (Char{13}) || c == '\n') -> return Err(XMLFault.shape("document_whitespace contains a non-XML-S character"))
                 deterministic = value
             }
             "doctype" -> {
@@ -1051,7 +1102,7 @@ impl StreamWriter {
                 empty :: if style == {
                     "empty" -> true
                     "explicit" -> false
-                    else -> return Err(XMLFault.shape("empty_style must be empty or explicit"))
+                    else -> { return Err(XMLFault.shape("empty_style must be empty or explicit")) }
                 }
                 parent :: self.namespaces.last().map(context -> ~context) ?? base_namespaces()
                 context :: validate_start(event, name, ^parent)
@@ -1137,12 +1188,18 @@ fn exact_leaf_keys(value: DataTree, kind: String) XMLFault! {
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:2096
 fn byte_array(value: DataTree) -> [U8] XMLFault! {
-    values :: if value == { .Array(items) -> items else -> return Err(XMLFault.shape("XML byte value must be an Array<Int>")) }
+    values :: if value == {
+        .Array(items) -> items
+        else -> { return Err(XMLFault.shape("XML byte value must be an Array<Int>")) }
+    }
     bytes := [U8]{}
     loop item in values {
-        byte :: if item == { .Int(number) -> number else -> return Err(XMLFault.shape("XML byte value must contain only Int")) }
-        converted :: U8.from_int(byte) ?? return Err(XMLFault.shape("XML byte is outside 0..255"))
-        bytes.push(converted)
+        byte :: if item == {
+            .Int(number) -> number
+            else -> { return Err(XMLFault.shape("XML byte value must contain only Int")) }
+        }
+        if byte < 0 || byte > 255 -> return Err(XMLFault.shape("XML byte is outside 0..255"))
+        &bytes.push(U8{byte})
     }
     bytes
 }
@@ -1225,7 +1282,7 @@ fn valid_event_raw_bytes(event: DataTree, kind: String) -> [U8]? Never! {
     key :: if kind == {
         "element_start" -> "open_lexical"
         "element_end" -> "close_lexical"
-        "document_start" | "document_end" -> return None
+        "document_start" | "document_end" -> { return None }
         else -> "lexical"
     }
     lexical :: field(event, key) ?? return None
@@ -1359,8 +1416,11 @@ fn canonical_node(value: DataTree, options: CanonicalOptions, parent_scope: Name
     attributes :: array_value(field(value, "attributes")) ?? return Err(XMLFault.shape("element attributes must be an array"))
     attrs := [CanonicalAttribute]{}
     visible := NamespaceSet.new()
-    if name.prefix == .Val(prefix) { _ :: &visible.insert(Val(prefix)) }
-    else if name.namespace_uri != None { _ :: &visible.insert(None) }
+    if name.prefix == .Val(prefix) {
+        _ :: &visible.insert(Val(prefix))
+    } else if name.namespace_uri != None {
+        _ :: &visible.insert(None)
+    }
     loop attribute in attributes {
         attr_name :: parse_name(field(attribute, "name") ?? return Err(XMLFault.shape("attribute lacks name")))
         if attr_name.prefix == .Val(prefix) -> _ :: &visible.insert(Val(prefix))
@@ -1444,14 +1504,17 @@ fn canonical_leaf(value: DataTree, kind: String, output: &String) XMLFault! {
     }
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:2694
-fn normalize_lines(value: String) -> String Never! { value.replace("\u{D}\n", "\n").replace("\u{D}", "\n") }
+fn normalize_lines(value: String) -> String Never! {
+    cr :: "{Char{13}}"
+    value.replace("{cr}\n", "\n").replace(cr, "\n")
+}
 // Rust: crates/jet-foundation/src/XmlPull.rs:2697
 fn canonical_text_escape(value: String) -> String Never! {
     normalize_lines(value).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:2703
 fn canonical_attr_escape(value: String) -> String Never! {
-    value.replace("&", "&amp;").replace("<", "&lt;").replace("\"", "&quot;").replace("\t", "&#x9;").replace("\n", "&#xA;").replace("\u{D}", "&#xD;")
+    value.replace("&", "&amp;").replace("<", "&lt;").replace("\"", "&quot;").replace("\t", "&#x9;").replace("\n", "&#xA;").replace("{Char{13}}", "&#xD;")
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:2714
 fn xml_tag_of(value: DataTree) -> String? Never! {
@@ -1483,10 +1546,10 @@ fn selector_matches(local: String, namespace_uri: String?, selector: String) -> 
     if selector.starts_with("{{") {
         rest :: selector.removeprefix("{{")
         parts :: rest.split_once("}}") ?? return false
-        return local == parts.after && namespace_uri == Val(parts.before)
+        return local == parts.after && namespace_uri == (Val(parts.before))
     }
     // A prefix:local spelling is never a namespace-prefix selector.
-    local == selector && (namespace_uri == None || namespace_uri == Val(""))
+    local == selector && (namespace_uri == None || namespace_uri == (Val("")))
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:2780
 fn text_like_chars(node: DataTree) -> String? XMLFault! {
@@ -1515,7 +1578,10 @@ fn is_simple_content(children: [DataTree]) -> Bool Never! {
 fn document_root(document: DataTree) -> DataTree XMLFault! {
     if xml_tag_of(document) != Val("document") -> return Err(projection_err("$", "XML root expects a document node"))
     content :: field(document, "children") ?? return Err(projection_err("$", "XML document children missing"))
-    children :: if content == { .Array(items) -> items else -> return Err(projection_err("$", "XML document children must be an array")) }
+    children :: if content == {
+        .Array(items) -> items
+        else -> { return Err(projection_err("$", "XML document children must be an array")) }
+    }
     root := DataTree?{None}
     loop child in children {
         if (xml_tag_of(child) ?? "") == "element" {
@@ -1540,7 +1606,10 @@ fn expanded_name_parts(node: DataTree) -> (raw: String, prefix: String?, local: 
 fn lookup_attribute(element: DataTree, name: String) -> String? XMLFault! {
     if xml_tag_of(element) != Val("element") -> return Err(projection_err("$", "attribute helper requires an element node"))
     content :: field(element, "attributes") ?? return Err(projection_err("$", "XML element attributes missing"))
-    attributes :: if content == { .Array(items) -> items else -> return Err(projection_err("$", "XML element attributes must be an array")) }
+    attributes :: if content == {
+        .Array(items) -> items
+        else -> { return Err(projection_err("$", "XML element attributes must be an array")) }
+    }
     loop attribute in attributes {
         if xml_tag_of(attribute) != Val("attribute") -> return Err(projection_err("$", "XML attributes array must contain attribute nodes"))
         attr_name :: field(attribute, "name") ?? return Err(projection_err("$", "XML attribute name missing"))
@@ -1556,15 +1625,24 @@ fn lookup_attribute(element: DataTree, name: String) -> String? XMLFault! {
 fn element_content(element: DataTree) -> [DataTree] XMLFault! {
     if xml_tag_of(element) != Val("element") -> return Err(projection_err("$", "content helper requires an element node"))
     content :: field(element, "children") ?? return Err(projection_err("$", "XML element children missing"))
-    if content == { .Array(children) -> ^children else -> return Err(projection_err("$", "XML element children must be an array")) }
+    if content == {
+        .Array(children) -> ^children
+        else -> { return Err(projection_err("$", "XML element children must be an array")) }
+    }
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:2915
 fn project_element_value(element: DataTree, path: String) -> DataTree XMLFault! {
     if xml_tag_of(element) != Val("element") -> return Err(projection_err(path, "Codable projection requires an element node"))
     attr_value :: field(element, "attributes") ?? return Err(projection_err(path, "XML element attributes missing"))
-    attributes :: if attr_value == { .Array(items) -> items else -> return Err(projection_err(path, "XML element attributes must be an array")) }
+    attributes :: if attr_value == {
+        .Array(items) -> items
+        else -> { return Err(projection_err(path, "XML element attributes must be an array")) }
+    }
     child_value :: field(element, "children") ?? return Err(projection_err(path, "XML element children missing"))
-    children :: if child_value == { .Array(items) -> items else -> return Err(projection_err(path, "XML element children must be an array")) }
+    children :: if child_value == {
+        .Array(items) -> items
+        else -> { return Err(projection_err(path, "XML element children must be an array")) }
+    }
     entries := [(key: String, value: DataTree)]{}
     loop attribute in attributes {
         if xml_tag_of(attribute) != Val("attribute") -> return Err(projection_err(path, "XML attributes array must contain attribute nodes"))
@@ -1734,7 +1812,7 @@ impl ByteLexer {
     // Rust: crates/jet-foundation/src/XmlPull.rs:4931
      fn encoding(self: &ByteLexer) -> WireEncoding? Never! { self.encoding }
     // Rust: crates/jet-foundation/src/XmlPull.rs:4934
-     fn bom(self: &ByteLexer) -> View<U8> Never! { self.bom.view() }
+     fn bom(self: ByteLexer) -> View<U8> from self { self.bom[0..<self.bom.len()] }
     // Rust: crates/jet-foundation/src/XmlPull.rs:4937
     fn fail<T>(self: &ByteLexer, kind: Reason, reason: String) -> T XMLFault! {
         error :: XMLFault.at_kind(self.wire_offset, kind, ^reason)
@@ -1744,21 +1822,21 @@ impl ByteLexer {
     // Rust: crates/jet-foundation/src/XmlPull.rs:4942
     fn choose_encoding(self: &ByteLexer, final_input: Bool) XMLFault! {
         if self.encoding != None -> return
-        if byte_prefix(self.undecided.view(), 0, [U8]{0xef, 0xbb, 0xbf}.view()) {
+        if byte_prefix(self.undecided[0..<self.undecided.len()], 0, [U8]{0xef, 0xbb, 0xbf}[0..<3]) {
             self.encoding = Val(WireEncoding.UTF8)
             self.bom = take_bytes(&self.undecided, 3)
             self.wire_offset = 3
-        } else if byte_prefix(self.undecided.view(), 0, [U8]{0xff, 0xfe}.view()) {
+        } else if byte_prefix(self.undecided[0..<self.undecided.len()], 0, [U8]{0xff, 0xfe}[0..<2]) {
             self.encoding = Val(WireEncoding.Utf16Le)
             self.bom = take_bytes(&self.undecided, 2)
             self.wire_offset = 2
-        } else if byte_prefix(self.undecided.view(), 0, [U8]{0xfe, 0xff}.view()) {
+        } else if byte_prefix(self.undecided[0..<self.undecided.len()], 0, [U8]{0xfe, 0xff}[0..<2]) {
             self.encoding = Val(WireEncoding.Utf16Be)
             self.bom = take_bytes(&self.undecided, 2)
             self.wire_offset = 2
         } else if self.undecided.len() >= 4 {
-            if byte_prefix(self.undecided.view(), 0, [U8]{0, 60, 0, 63}.view()) -> self.encoding = Val(WireEncoding.Utf16Be)
-            else if byte_prefix(self.undecided.view(), 0, [U8]{60, 0, 63, 0}.view()) -> self.encoding = Val(WireEncoding.Utf16Le)
+            if byte_prefix(self.undecided[0..<self.undecided.len()], 0, [U8]{0, 60, 0, 63}[0..<4]) -> self.encoding = Val(WireEncoding.Utf16Be)
+            else if byte_prefix(self.undecided[0..<self.undecided.len()], 0, [U8]{60, 0, 63, 0}[0..<4]) -> self.encoding = Val(WireEncoding.Utf16Le)
             else { self.encoding = Val(WireEncoding.UTF8) }
         } else if final_input || self.undecided.len() >= 3 { self.encoding = Val(WireEncoding.UTF8) }
         if self.encoding != None {
@@ -1804,7 +1882,7 @@ impl ByteLexer {
                 .UTF8 -> {
                     if self.pending.is_empty() -> break
                     first :: Int{self.pending[0]}
-                    width :: if first < 0x80 -> 1 else if (first & 0xe0) == 0xc0 -> 2 else if (first & 0xf0) == 0xe0 -> 3 else if (first & 0xf8) == 0xf0 -> 4 else -> return self.fail(Reason.InvalidEncoding, "invalid UTF-8 leading byte")
+                    width :: if first < 0x80 -> 1 else if (first & 0xe0) == 0xc0 -> 2 else if (first & 0xf0) == 0xe0 -> 3 else if (first & 0xf8) == 0xf0 -> 4 else -> { return self.fail(Reason.InvalidEncoding, "invalid UTF-8 leading byte") }
                     if self.pending.len() < width -> break
                     raw :: take_bytes(&self.pending, width)
                     text :: String.from_bytes(raw) ?? return self.fail(Reason.InvalidEncoding, "invalid UTF-8 sequence")
@@ -1814,7 +1892,7 @@ impl ByteLexer {
                 .Utf16Le | .Utf16Be -> {
                     if self.pending.len() < 2 -> break
                     little :: encoding == WireEncoding.Utf16Le
-                    unit :: read_word(self.pending.view(), 0, little)
+                    unit :: read_word(self.pending[0..<self.pending.len()], 0, little)
                     width :: if unit >= 0xd800 && unit <= 0xdbff -> 4 else -> 2
                     if self.pending.len() < width -> break
                     raw :: take_bytes(&self.pending, width)
@@ -1822,7 +1900,7 @@ impl ByteLexer {
                         if unit >= 0xdc00 && unit <= 0xdfff -> return self.fail(Reason.InvalidEncoding, "unpaired UTF-16 low surrogate")
                         Char{unit}
                     } else -> {
-                        low :: read_word(raw.view(), 2, little)
+                        low :: read_word(raw[0..<raw.len()], 2, little)
                         if low < 0xdc00 || low > 0xdfff -> return self.fail(Reason.InvalidEncoding, "unpaired UTF-16 high surrogate")
                         Char{0x10000 + (unit - 0xd800) * 1024 + low - 0xdc00}
                     }
@@ -1850,15 +1928,16 @@ impl ByteLexer {
             if self.eof && self.pending.is_empty() -> return Val(TokenBoundary{count: self.units.len(), kind: .Text})
             return None
         }
-        loop ending in [MarkupEnd]{MarkupEnd{lead: "<!--", end: "-->"}, MarkupEnd{lead: "<![CDATA[", end: "]]>"}, MarkupEnd{lead: "<?", end: "?>"}} {
-            if unit_prefix(self.units.view(), 0, ending.lead) {
+        endings :: [MarkupEnd]{MarkupEnd{lead: "<!--", end: "-->"}, MarkupEnd{lead: "<![CDATA[", end: "]]>"}, MarkupEnd{lead: "<?", end: "?>"}}
+        loop ending in endings {
+            if unit_prefix(self.units[0..<self.units.len()], 0, ending.lead) {
                 loop index in 0..<self.units.len() {
-                    if unit_prefix(self.units.view(), index, ending.end) -> return Val(TokenBoundary{count: index + ending.end.len(), kind: .Markup})
+                    if unit_prefix(self.units[0..<self.units.len()], index, ending.end) -> return Val(TokenBoundary{count: index + ending.end.len(), kind: .Markup})
                 }
                 return None
             }
         }
-        doctype :: unit_prefix(self.units.view(), 0, "<!DOCTYPE")
+        doctype :: unit_prefix(self.units[0..<self.units.len()], 0, "<!DOCTYPE")
         quote := Char?{None}
         bracket := 0
         loop index in 1..<self.units.len() {
@@ -1867,7 +1946,7 @@ impl ByteLexer {
                 if scalar == expected -> quote = None
                 next
             }
-            if scalar == Char{39} || scalar == '"' -> quote = Val(scalar)
+            if scalar == (Char{39}) || scalar == '"' -> quote = Val(scalar)
             else if doctype && scalar == '[' -> bracket += 1
             else if doctype && scalar == ']' -> bracket -= 1
             else if scalar == '>' && bracket == 0 -> return Val(TokenBoundary{count: index + 1, kind: .Markup})
@@ -2001,7 +2080,7 @@ impl StreamScanner {
         scanner := Scanner{source: token.text.bytes(), wire_encoding: Val(encoding), offset: 0, started: true, ended: false, root_seen: self.root_seen, root_closed: self.root_closed, declaration_seen: self.declaration_seen, doctype_seen: self.doctype_seen, declared_entities: ~self.declared_entities, stack: ~self.stack, options: ~self.options, nodes: self.nodes, text_bytes: self.text_bytes, entity_replacement_bytes: self.entity_replacement_bytes}
         candidate :: &scanner.next() ?? {
             error := ^err
-            local_scalars :: scalar_count(scanner.source.view(), error.offset.min(scanner.source.len()))
+            local_scalars :: scalar_count(scanner.source[0..<scanner.source.len()], error.offset.min(scanner.source.len()))
             error.offset = self.wire_consumed
             loop index in 0..<local_scalars -> error.offset += token.scalar_bytes[index]
             local_line :: error.line ?? 1
@@ -2126,12 +2205,12 @@ fn predefined(name: String) -> String? Never! {
             radix :: if name.starts_with("#x") -> 16 else -> 10
             index := if radix == 16 -> 2 else -> 1
             if !name.starts_with("#") || index >= bytes.len() -> return None
-            if bytes[index] == U8{43} -> index += 1
+            if bytes[index] == (U8{43}) -> index += 1
             if index >= bytes.len() -> return None
             number := 0
             loop index < bytes.len() {
                 byte :: Int{bytes[index]}
-                digit :: if byte >= 48 && byte <= 57 -> byte - 48 else if byte >= 65 && byte <= 70 -> byte - 55 else if byte >= 97 && byte <= 102 -> byte - 87 else -> return None
+                digit :: if byte >= 48 && byte <= 57 -> byte - 48 else if byte >= 65 && byte <= 70 -> byte - 55 else if byte >= 97 && byte <= 102 -> byte - 87 else -> { return None }
                 if digit >= radix -> return None
                 number = number * radix + digit
                 if number > 0xffffffff -> return None
@@ -2196,7 +2275,7 @@ fn take_doctype_literal(source: View<U8>, cursor: &Int) -> String XMLFault! {
     skip_ascii_space(source, &cursor)
     if cursor >= source.len() -> return Err(XMLFault.at(cursor, "DOCTYPE external identifier lacks quoted value"))
     quote :: source[cursor]
-    if quote != U8{39} && quote != U8{34} -> return Err(XMLFault.at(cursor, "DOCTYPE external identifier must be quoted"))
+    if quote != (U8{39}) && quote != (U8{34}) -> return Err(XMLFault.at(cursor, "DOCTYPE external identifier must be quoted"))
     cursor += 1
     start :: cursor
     loop cursor < source.len() && source[cursor] != quote -> cursor += 1
@@ -2212,12 +2291,13 @@ fn doctype_fields(inside: String) -> DoctypeFields XMLFault! {
     quote := Char?{None}
     offset := 0
     loop offset < bytes.len() {
-        scalar :: utf8_scalar(bytes.view(), offset)
+        scalar :: utf8_scalar(bytes[0..<bytes.len()], offset)
         character :: scalar.value
         if quote == .Val(expected) {
             if character == expected -> quote = None
-        } else if character == Char{39} || character == '"' -> quote = Val(character)
-        else if character == '[' {
+        } else if character == (Char{39}) || character == '"' {
+            quote = Val(character)
+        } else if character == '[' {
             subset_start = Val(offset)
             break
         }
@@ -2226,16 +2306,16 @@ fn doctype_fields(inside: String) -> DoctypeFields XMLFault! {
     header := ""
     internal_subset := String?{None}
     if subset_start == .Val(start) {
-        tail :: byte_text(bytes.view(), start + 1, bytes.len()).trim_end()
+        tail :: byte_text(bytes[0..<bytes.len()], start + 1, bytes.len()).trim_end()
         if !tail.ends_with("]") -> return Err(XMLFault.at(start, "DOCTYPE internal subset lacks ]"))
-        header = byte_text(bytes.view(), 0, start).trim()
+        header = byte_text(bytes[0..<bytes.len()], 0, start).trim()
         internal_subset = Val(tail.slice(0, tail.len() - 1))
     } else { header = inside.trim() }
     header_bytes :: header.bytes()
-    name_end :: whitespace_offset(header_bytes.view(), 0)
-    name :: byte_text(header_bytes.view(), 0, name_end)
+    name_end :: whitespace_offset(header_bytes[0..<header_bytes.len()], 0)
+    name :: byte_text(header_bytes[0..<header_bytes.len()], 0, name_end)
     if !valid_name(name) -> return Err(XMLFault.at(0, "invalid DOCTYPE name"))
-    external :: byte_text(header_bytes.view(), name_end, header_bytes.len()).trim()
+    external :: byte_text(header_bytes[0..<header_bytes.len()], name_end, header_bytes.len()).trim()
     if external.is_empty() -> return DoctypeFields{name: ^name, public_id: None, system_id: None, internal_subset: ^internal_subset}
     cursor := 0
     if external.starts_with("SYSTEM") -> cursor = 6
@@ -2244,11 +2324,11 @@ fn doctype_fields(inside: String) -> DoctypeFields XMLFault! {
     external_bytes :: external.bytes()
     public_id := String?{None}
     if external.starts_with("PUBLIC") {
-        public :: take_doctype_literal(external_bytes.view(), &cursor) ?? return Err(err)
+        public :: take_doctype_literal(external_bytes[0..<external_bytes.len()], &cursor) ?? return Err(err)
         public_id = Val(^public)
     }
-    system :: take_doctype_literal(external_bytes.view(), &cursor) ?? return Err(err)
-    if !byte_text(external_bytes.view(), cursor, external_bytes.len()).trim().is_empty() -> return Err(XMLFault.at(cursor, "unexpected data after DOCTYPE identifier"))
+    system :: take_doctype_literal(external_bytes[0..<external_bytes.len()], &cursor) ?? return Err(err)
+    if !byte_text(external_bytes[0..<external_bytes.len()], cursor, external_bytes.len()).trim().is_empty() -> return Err(XMLFault.at(cursor, "unexpected data after DOCTYPE identifier"))
     DoctypeFields{name: ^name, public_id: ^public_id, system_id: Val(^system), internal_subset: ^internal_subset}
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:5567
@@ -2258,7 +2338,7 @@ fn take_entity_literal(source: View<U8>, cursor: &Int) -> String XMLFault! {
     skip_ascii_space(source, &cursor)
     if cursor >= source.len() -> return Err(XMLFault.at(cursor, "ENTITY declaration lacks quoted value"))
     quote :: source[cursor]
-    if quote != U8{39} && quote != U8{34} -> return Err(XMLFault.at(cursor, "ENTITY declaration value must be quoted"))
+    if quote != (U8{39}) && quote != (U8{34}) -> return Err(XMLFault.at(cursor, "ENTITY declaration value must be quoted"))
     cursor += 1
     start :: cursor
     loop cursor < source.len() && source[cursor] != quote -> cursor += 1
@@ -2271,7 +2351,7 @@ fn take_entity_literal(source: View<U8>, cursor: &Int) -> String XMLFault! {
 fn reject_parameter_entity_markup(subset: View<U8>, base: Int) XMLFault! {
     index := 0
     loop index < subset.len() {
-        if subset[index] == U8{37} {
+        if subset[index] == (U8{37}) {
             name_begin :: index + 1
             name_end := name_begin
             loop name_end < subset.len() {
@@ -2281,7 +2361,7 @@ fn reject_parameter_entity_markup(subset: View<U8>, base: Int) XMLFault! {
                 } else if !name_char(scalar.value) -> break
                 name_end += scalar.width
             }
-            if name_end > name_begin && name_end < subset.len() && subset[name_end] == U8{59} -> return Err(XMLFault.at_kind(base + index, Reason.Unsupported, "parameter entity references are unsupported"))
+            if name_end > name_begin && name_end < subset.len() && subset[name_end] == (U8{59}) -> return Err(XMLFault.at_kind(base + index, Reason.Unsupported, "parameter entity references are unsupported"))
         }
         index += utf8_scalar(subset, index).width
     }
@@ -2292,10 +2372,10 @@ fn general_entity_refs(value: String) -> [String] Never! {
     refs := [String]{}
     at := 0
     loop at < bytes.len() {
-        rel :: byte_find(bytes.view(), at, "&".bytes().view()) ?? break
+        rel :: byte_find(bytes[0..<bytes.len()], at, [U8]{38}[0..<1]) ?? break
         start :: at + rel
-        end :: byte_find(bytes.view(), start, ";".bytes().view()) ?? break
-        name :: byte_text(bytes.view(), start + 1, start + end)
+        end :: byte_find(bytes[0..<bytes.len()], start, [U8]{59}[0..<1]) ?? break
+        name :: byte_text(bytes[0..<bytes.len()], start + 1, start + end)
         if !name.is_empty() && !name.starts_with("#") && predefined(name) == None && valid_name(name) -> &refs.push(~name)
         at = start + end + 1
     }
@@ -2337,39 +2417,39 @@ fn declared_entity_table(subset: String?) -> DeclaredEntityTable XMLFault! {
     count := 0
     source :: subset ?? return DeclaredEntityTable{names: ^names, count: count}
     bytes :: source.bytes()
-    reject_parameter_entity_markup(bytes.view(), 0) ?? return Err(err)
+    reject_parameter_entity_markup(bytes[0..<bytes.len()], 0) ?? return Err(err)
     search_from := 0
     loop {
-        rel :: byte_find(bytes.view(), search_from, "<!ENTITY".bytes().view()) ?? break
+        rel :: byte_find(bytes[0..<bytes.len()], search_from, [U8]{60,33,69,78,84,73,84,89}[0..<8]) ?? break
         start :: search_from + rel
         count += 1
         cursor := start + 8
-        skip_ascii_space(bytes.view(), &cursor)
-        if cursor < bytes.len() && bytes[cursor] == U8{37} -> return Err(XMLFault.at_kind(start, Reason.Unsupported, "parameter entity declarations are unsupported"))
+        skip_ascii_space(bytes[0..<bytes.len()], &cursor)
+        if cursor < bytes.len() && bytes[cursor] == (U8{37}) -> return Err(XMLFault.at_kind(start, Reason.Unsupported, "parameter entity declarations are unsupported"))
         name_begin :: cursor
         loop cursor < bytes.len() {
-            scalar :: utf8_scalar(bytes.view(), cursor)
+            scalar :: utf8_scalar(bytes[0..<bytes.len()], cursor)
             if cursor == name_begin {
                 if !name_start(scalar.value) -> break
             } else if !name_char(scalar.value) -> break
             cursor += scalar.width
         }
         if cursor == name_begin -> return Err(XMLFault.at(start, "ENTITY declaration lacks name"))
-        name :: byte_text(bytes.view(), name_begin, cursor)
+        name :: byte_text(bytes[0..<bytes.len()], name_begin, cursor)
         if !valid_name(name) -> return Err(XMLFault.at(start, "invalid ENTITY declaration name"))
-        skip_ascii_space(bytes.view(), &cursor)
+        skip_ascii_space(bytes[0..<bytes.len()], &cursor)
         kind := DeclaredEntityKind.Internal
-        if byte_prefix(bytes.view(), cursor, "SYSTEM".bytes().view()) || byte_prefix(bytes.view(), cursor, "PUBLIC".bytes().view()) {
-            if byte_prefix(bytes.view(), cursor, "PUBLIC".bytes().view()) {
+        if byte_prefix(bytes[0..<bytes.len()], cursor, [U8]{83,89,83,84,69,77}[0..<6]) || byte_prefix(bytes[0..<bytes.len()], cursor, [U8]{80,85,66,76,73,67}[0..<6]) {
+            if byte_prefix(bytes[0..<bytes.len()], cursor, [U8]{80,85,66,76,73,67}[0..<6]) {
                 cursor += 6
-                _ :: take_entity_literal(bytes.view(), &cursor) ?? return Err(err)
+                _ :: take_entity_literal(bytes[0..<bytes.len()], &cursor) ?? return Err(err)
             } else { cursor += 6 }
-            _ :: take_entity_literal(bytes.view(), &cursor) ?? return Err(err)
-            skip_ascii_space(bytes.view(), &cursor)
-            if byte_prefix(bytes.view(), cursor, "NDATA".bytes().view()) -> return Err(XMLFault.at_kind(start, Reason.Unsupported, "unparsed external entities are unsupported"))
+            _ :: take_entity_literal(bytes[0..<bytes.len()], &cursor) ?? return Err(err)
+            skip_ascii_space(bytes[0..<bytes.len()], &cursor)
+            if byte_prefix(bytes[0..<bytes.len()], cursor, [U8]{78,68,65,84,65}[0..<5]) -> return Err(XMLFault.at_kind(start, Reason.Unsupported, "unparsed external entities are unsupported"))
             kind = DeclaredEntityKind.External
-        } else if cursor < bytes.len() && (bytes[cursor] == U8{39} || bytes[cursor] == U8{34}) {
-            value :: take_entity_literal(bytes.view(), &cursor) ?? return Err(err)
+        } else if cursor < bytes.len() && (bytes[cursor] == (U8{39}) || bytes[cursor] == (U8{34})) {
+            value :: take_entity_literal(bytes[0..<bytes.len()], &cursor) ?? return Err(err)
             replacements[~name] = ^value
         } else { return Err(XMLFault.at(start, "ENTITY declaration lacks value")) }
         if names.get(name) != None -> return Err(XMLFault.at(start, "duplicate ENTITY declaration"))
@@ -2395,15 +2475,15 @@ fn declaration_fields(data: String) -> DeclarationFields XMLFault! {
     cursor := 0
     fields := [StringField]{}
     loop cursor < bytes.len() {
-        skip_ascii_space(bytes.view(), &cursor)
+        skip_ascii_space(bytes[0..<bytes.len()], &cursor)
         if cursor == bytes.len() -> break
         key_start :: cursor
-        loop cursor < bytes.len() && !ascii_space(bytes[cursor]) && bytes[cursor] != U8{61} -> cursor += 1
-        key :: byte_text(bytes.view(), key_start, cursor)
-        skip_ascii_space(bytes.view(), &cursor)
-        if cursor >= bytes.len() || bytes[cursor] != U8{61} -> return Err(XMLFault.at(cursor, "XML declaration field needs ="))
+        loop cursor < bytes.len() && !ascii_space(bytes[cursor]) && bytes[cursor] != (U8{61}) -> cursor += 1
+        key :: byte_text(bytes[0..<bytes.len()], key_start, cursor)
+        skip_ascii_space(bytes[0..<bytes.len()], &cursor)
+        if cursor >= bytes.len() || bytes[cursor] != (U8{61}) -> return Err(XMLFault.at(cursor, "XML declaration field needs ="))
         cursor += 1
-        value :: take_doctype_literal(bytes.view(), &cursor) ?? return Err(err)
+        value :: take_doctype_literal(bytes[0..<bytes.len()], &cursor) ?? return Err(err)
         &fields.push(StringField{key: ~key, value: ^value})
     }
     if fields.is_empty() || fields[0].key != "version" -> return Err(XMLFault.at(0, "XML declaration must start with version"))
@@ -2464,12 +2544,12 @@ impl Scanner {
     fn classify(error: &XMLFault) Never! {
         if error.kind != Reason.Malformed { return }
         reason :: error.reason
-        if reason.contains("encoding") || reason.contains("version 1.0") { error.kind = Reason.InvalidEncoding }
-        else if reason.contains("mismatched") { error.kind = Reason.MismatchedTag }
-        else if reason.contains("name") || reason.contains("instruction target") { error.kind = Reason.InvalidName }
-        else if reason.contains("namespace") || reason.contains("prefix") { error.kind = Reason.Namespace }
-        else if reason.contains("duplicate expanded XML attribute") { error.kind = Reason.DuplicateAttribute }
-        else if reason.contains("entity") || reason.contains("character reference") { error.kind = Reason.Entity }
+        if reason.contains("encoding") || reason.contains("version 1.0") { error.kind = Reason.InvalidEncoding
+        } else if reason.contains("mismatched") { error.kind = Reason.MismatchedTag
+        } else if reason.contains("name") || reason.contains("instruction target") { error.kind = Reason.InvalidName
+        } else if reason.contains("namespace") || reason.contains("prefix") { error.kind = Reason.Namespace
+        } else if reason.contains("duplicate expanded XML attribute") { error.kind = Reason.DuplicateAttribute
+        } else if reason.contains("entity") || reason.contains("character reference") { error.kind = Reason.Entity }
     }
     // Rust: crates/jet-foundation/src/XmlPull.rs:5953
     fn limit<T>(self: &Scanner, reason: String) -> T XMLFault! {
@@ -2515,7 +2595,7 @@ impl Scanner {
     fn validate_characters(self: &Scanner, start: Int, end: Int) XMLFault! {
         offset := start
         loop offset < end {
-            scalar :: utf8_scalar(self.source.view(), offset)
+            scalar :: utf8_scalar(self.source[0..<self.source.len()], offset)
             if !valid_xml_char(scalar.value) {
                 return Err(XMLFault.at(offset, "XML contains forbidden character U+{scalar_hex(scalar.value)}"))
             }
@@ -2524,16 +2604,18 @@ impl Scanner {
     }
     // Rust: crates/jet-foundation/src/XmlPull.rs:6039
     fn starts(self: &Scanner, value: String) -> Bool Never! {
-        byte_prefix(self.source.view(), self.offset, value.bytes().view())
+        needle :: value.bytes()
+        byte_prefix(self.source[0..<self.source.len()], self.offset, needle[0..<needle.len()])
     }
     // Rust: crates/jet-foundation/src/XmlPull.rs:6042
     fn take_until(self: &Scanner, end: String, reason: String) -> TakenText XMLFault! {
         start :: self.offset
-        rel :: byte_find(self.source.view(), self.offset, end.bytes().view()) ?? return self.fail(reason)
+        needle :: end.bytes()
+        rel :: byte_find(self.source[0..<self.source.len()], self.offset, needle[0..<needle.len()]) ?? return self.fail(reason)
         token_end :: self.offset + rel + end.count_bytes()
         self.validate_characters(start, token_end) ?? return Err(err)
         self.offset = token_end
-        TakenText{raw: byte_text(self.source.view(), start, self.offset), body: byte_text(self.source.view(), start, self.offset - end.count_bytes())}
+        TakenText{raw: byte_text(self.source[0..<self.source.len()], start, self.offset), body: byte_text(self.source[0..<self.source.len()], start, self.offset - end.count_bytes())}
     }
     // Rust: crates/jet-foundation/src/XmlPull.rs:6055
     fn scope_uri(self: &Scanner, prefix: String?, local: View<NamespaceBinding>) -> String? Never! {
@@ -2571,13 +2653,13 @@ impl Scanner {
     // Rust: crates/jet-foundation/src/XmlPull.rs:6102
     fn reference(self: &Scanner) -> Reference XMLFault! {
         start :: self.offset
-        end :: byte_find(self.source.view(), start, ";".bytes().view()) ?? return self.fail("unterminated entity reference")
-        name :: byte_text(self.source.view(), start + 1, start + end)
+        end :: byte_find(self.source[0..<self.source.len()], start, [U8]{59}[0..<1]) ?? return self.fail("unterminated entity reference")
+        name :: byte_text(self.source[0..<self.source.len()], start + 1, start + end)
         if name.is_empty() -> return self.fail("empty entity reference")
         self.validate_characters(start, start + end + 1) ?? return Err(err)
         resolved :: self.resolve_entity(name) ?? return Err(err)
         self.offset = start + end + 1
-        Reference{raw: byte_text(self.source.view(), start, self.offset), name: name, resolved: ^resolved}
+        Reference{raw: byte_text(self.source[0..<self.source.len()], start, self.offset), name: name, resolved: ^resolved}
     }
     // Rust: crates/jet-foundation/src/XmlPull.rs:6120
     fn parse_parts(self: &Scanner, raw: String, source_base: Int) -> ParsedParts XMLFault! {
@@ -2587,16 +2669,16 @@ impl Scanner {
         at := 0
         all := true
         loop at < bytes.len() {
-            if byte_find(bytes.view(), at, "&".bytes().view()) == .Val(rel) {
+            if byte_find(bytes[0..<bytes.len()], at, [U8]{38}[0..<1]) == .Val(rel) {
                 if rel > 0 {
-                    literal :: byte_text(bytes.view(), at, at + rel)
+                    literal :: byte_text(bytes[0..<bytes.len()], at, at + rel)
                     value :: normalize_attribute_text(literal)
                     normalized += value
                     &parts.push(Part.Text(value: ^value, raw: ~literal))
                 }
                 start :: at + rel
-                end :: byte_find(bytes.view(), start, ";".bytes().view()) ?? return Err(XMLFault.at(source_base + start, "unterminated entity reference"))
-                name :: byte_text(bytes.view(), start + 1, start + end)
+                end :: byte_find(bytes[0..<bytes.len()], start, [U8]{59}[0..<1]) ?? return Err(XMLFault.at(source_base + start, "unterminated entity reference"))
+                name :: byte_text(bytes[0..<bytes.len()], start + 1, start + end)
                 resolved := self.resolve_entity(name) ?? {
                     mapped := ^err
                     mapped.offset = source_base + start
@@ -2610,10 +2692,10 @@ impl Scanner {
                     normalized = ""
                     all = false
                 }
-                &parts.push(Part.Entity(name: ~name, resolved: ^resolved, raw: byte_text(bytes.view(), start, start + end + 1)))
+                &parts.push(Part.Entity(name: ~name, resolved: ^resolved, raw: byte_text(bytes[0..<bytes.len()], start, start + end + 1)))
                 at = start + end + 1
             } else {
-                literal :: byte_text(bytes.view(), at, bytes.len())
+                literal :: byte_text(bytes[0..<bytes.len()], at, bytes.len())
                 value :: normalize_attribute_text(literal)
                 normalized += value
                 &parts.push(Part.Text(value: ^value, raw: ~literal))
@@ -2631,14 +2713,14 @@ impl Scanner {
             byte :: self.source[end]
             if quote == .Val(expected) {
                 if byte == expected -> quote = None
-            } else if byte == U8{39} || byte == U8{34} -> quote = Val(byte)
-            else if byte == U8{62} -> break
+            } else if byte == (U8{39}) || byte == (U8{34}) -> quote = Val(byte)
+            else if byte == (U8{62}) -> break
             end += 1
         }
         if end == self.source.len() -> return self.fail("unterminated opening tag")
         self.validate_characters(start, end + 1) ?? return Err(err)
-        trimmed_end :: trim_byte_end(self.source.view(), start + 1, end)
-        empty :: trimmed_end > start + 1 && self.source[trimmed_end - 1] == U8{47}
+        trimmed_end :: trim_byte_end(self.source[0..<self.source.len()], start + 1, end)
+        empty :: trimmed_end > start + 1 && self.source[trimmed_end - 1] == (U8{47})
         inner_end :: if empty -> trimmed_end - 1 else -> end
         inner :: self.source[start + 1..<inner_end]
         cursor := 0
@@ -2651,15 +2733,15 @@ impl Scanner {
             skip_scalar_space(inner, &cursor)
             if cursor >= inner.len() -> break
             astart :: cursor
-            loop cursor < inner.len() && !ascii_space(inner[cursor]) && inner[cursor] != U8{61} -> cursor += 1
+            loop cursor < inner.len() && !ascii_space(inner[cursor]) && inner[cursor] != (U8{61}) -> cursor += 1
             key :: byte_text(inner, astart, cursor)
             skip_ascii_space(inner, &cursor)
-            if cursor >= inner.len() || inner[cursor] != U8{61} -> return self.fail("XML attribute needs =")
+            if cursor >= inner.len() || inner[cursor] != (U8{61}) -> return self.fail("XML attribute needs =")
             cursor += 1
             skip_ascii_space(inner, &cursor)
             if cursor >= inner.len() -> return Err(XMLFault.at(start + cursor, "missing attribute value"))
             q :: inner[cursor]
-            if q != U8{39} && q != U8{34} -> return self.fail("XML attribute value must be quoted")
+            if q != (U8{39}) && q != (U8{34}) -> return self.fail("XML attribute value must be quoted")
             cursor += 1
             vstart :: cursor
             loop cursor < inner.len() && inner[cursor] != q -> cursor += 1
@@ -2692,7 +2774,7 @@ impl Scanner {
         }
         local := [NamespaceBinding]{}
         loop declaration in declarations -> &local.push(NamespaceBinding{prefix: ~declaration.prefix, uri: ~declaration.uri})
-        name :: self.resolved_name(raw_name, local.view(), false) ?? return Err(err)
+        name :: self.resolved_name(raw_name, local[0..<local.len()], false) ?? return Err(err)
         namespaces := [Namespace]{}
         loop declaration in declarations {
             &namespaces.push(Namespace{prefix: ^declaration.prefix, namespace_uri: ^declaration.uri, quote: declaration.quote, raw: ^declaration.raw})
@@ -2706,7 +2788,7 @@ impl Scanner {
             q :: attribute.quote
             raw :: ^attribute.raw
             if key == "xmlns" || key.starts_with("xmlns:") { next }
-            aname :: self.resolved_name(key, local.view(), true) ?? return Err(err)
+            aname :: self.resolved_name(key, local[0..<local.len()], true) ?? return Err(err)
             if &expanded.insert(aname.namespace_uri, aname.local) {
                 return self.fail("duplicate expanded XML attribute")
             }
@@ -2714,10 +2796,11 @@ impl Scanner {
             &attributes.push(Attribute{name: ^aname, parts: ^parsed.parts, normalized: ^parsed.normalized, quote: q, raw: ^raw})
         }
         self.offset = end + 1
-        raw :: byte_text(self.source.view(), start, self.offset)
+        raw :: byte_text(self.source[0..<self.source.len()], start, self.offset)
         self.root_seen = true
-        if !empty { &self.stack.push(Frame{name: ~name, namespaces: ^local}) }
-        else if self.stack.is_empty() { self.root_closed = true }
+        if !empty {
+            &self.stack.push(Frame{name: ~name, namespaces: ^local})
+        } else if self.stack.is_empty() { self.root_closed = true }
         Event.ElementStart(name: ^name, namespaces: ^namespaces, attributes: ^attributes, empty: empty, raw: ^raw)
     }
     // Rust: crates/jet-foundation/src/XmlPull.rs:6369
@@ -2830,10 +2913,10 @@ impl Scanner {
             raw :: ^taken.raw
             data :: taken.body.slice(2, taken.body.len())
             bytes :: data.bytes()
-            split :: whitespace_offset(bytes.view(), 0)
-            target :: byte_text(bytes.view(), 0, split)
+            split :: whitespace_offset(bytes[0..<bytes.len()], 0)
+            target :: byte_text(bytes[0..<bytes.len()], 0, split)
             if !valid_name(target) || ascii_equal(target, "xml") -> return self.fail("invalid processing instruction target")
-            value :: byte_text(bytes.view(), split, bytes.len()).trim_start()
+            value :: byte_text(bytes[0..<bytes.len()], split, bytes.len()).trim_start()
             return Val(Event.ProcessingInstruction(target: ^target, value: ^value, raw: ^raw))
         }
         if self.starts("<!DOCTYPE") {
@@ -2844,18 +2927,20 @@ impl Scanner {
             bracket := I32{0}
             loop i < self.source.len() {
                 character :: Char{Int{self.source[i]}}
-                if quote == .Val(q) { if character == q -> quote = None }
-                else if character == Char{39} || character == '"' -> quote = Val(character)
-                else if character == '[' { bracket += 1 }
-                else if character == ']' { bracket -= 1 }
-                else if character == '>' && bracket == 0 { break }
+                if quote == .Val(q) {
+                    if character == q -> quote = None
+                } else if character == (Char{39}) || character == '"' {
+                    quote = Val(character)
+                } else if character == '[' { bracket += 1
+                } else if character == ']' { bracket -= 1
+                } else if character == '>' && bracket == 0 { break }
                 i += 1
             }
             if i == self.source.len() { return self.fail("unterminated DOCTYPE") }
             self.validate_characters(start, i + 1) ?? return Err(err)
             self.offset = i + 1
-            raw :: byte_text(self.source.view(), start, self.offset)
-            inside :: byte_text(self.source.view(), start + 9, i).trim()
+            raw :: byte_text(self.source[0..<self.source.len()], start, self.offset)
+            inside :: byte_text(self.source[0..<self.source.len()], start + 9, i).trim()
             doctype :: doctype_fields(inside) ?? {
                 error :: ^err
                 return Err(XMLFault.at(start + 9 + error.offset, error.reason))
@@ -2884,18 +2969,19 @@ impl Scanner {
         }
         if self.starts("</") {
             start :: self.offset
-            rel :: byte_find(self.source.view(), start, ">".bytes().view()) ?? return self.fail("unterminated closing tag")
+            rel :: byte_find(self.source[0..<self.source.len()], start, [U8]{62}[0..<1]) ?? return self.fail("unterminated closing tag")
             self.validate_characters(start, start + rel + 1) ?? return Err(err)
-            raw_name :: byte_text(self.source.view(), start + 2, start + rel).trim()
+            raw_name :: byte_text(self.source[0..<self.source.len()], start + 2, start + rel).trim()
             frame :: self.stack.last() ?? return Err(XMLFault.at(start, "closing tag without opener"))
-            name :: self.resolved_name(raw_name, [NamespaceBinding]{}.view(), false) ?? return Err(err)
+            local :: [NamespaceBinding]{}
+            name :: self.resolved_name(raw_name, local[0..<0], false) ?? return Err(err)
             if name.namespace_uri != frame.name.namespace_uri || name.local != frame.name.local {
                 return self.fail("mismatched XML closing tag")
             }
             self.offset = start + rel + 1
             _ :: self.stack.pop()
             if self.stack.is_empty() { self.root_closed = true }
-            return Val(Event.ElementEnd(name: ^name, raw: byte_text(self.source.view(), start, self.offset)))
+            return Val(Event.ElementEnd(name: ^name, raw: byte_text(self.source[0..<self.source.len()], start, self.offset)))
         }
         if self.starts("<") {
             if self.root_closed { return self.fail("multiple XML root elements") }
@@ -2909,12 +2995,12 @@ impl Scanner {
         }
         start :: self.offset
         rel := 0
-        loop start + rel < self.source.len() && self.source[start + rel] != U8{60} && self.source[start + rel] != U8{38} -> rel += 1
+        loop start + rel < self.source.len() && self.source[start + rel] != (U8{60}) && self.source[start + rel] != (U8{38}) -> rel += 1
         self.validate_characters(start, start + rel) ?? return Err(err)
         self.offset += rel
-        raw :: byte_text(self.source.view(), start, self.offset)
+        raw :: byte_text(self.source[0..<self.source.len()], start, self.offset)
         if self.stack.is_empty() {
-            if !raw.chars().all(character -> character == ' ' || character == '\t' || character == Char{13} || character == '\n') {
+            if !raw.chars().all(character -> character == ' ' || character == '\t' || character == (Char{13}) || character == '\n') {
                 return self.fail("character data outside root element")
             }
             Val(Event.DocumentWhitespace(value: ~raw, raw: ^raw))
@@ -2929,14 +3015,14 @@ impl Scanner {
             error :: ^err
             located := ^error
             Scanner.classify(&located)
-            return Err(located.located(self.source.view(), self.path()))
+            return Err(located.located(self.source[0..<self.source.len()], self.path()))
         }
         if event == .Val(value) {
             self.charge_event(value) ?? {
                 error :: ^err
                 located := ^error
                 Scanner.classify(&located)
-                return Err(located.located(self.source.view(), self.path()))
+                return Err(located.located(self.source[0..<self.source.len()], self.path()))
             }
             return Val(^value)
         }
