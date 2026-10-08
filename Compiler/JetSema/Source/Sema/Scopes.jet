@@ -646,19 +646,24 @@ pub fn sema_scope_checked_type_name_rows(environment: SemaScopeEnvironment, name
 // One environment serves every module of a graph pass: the registration
 // graph, checked types and write-parameter facts stay, and the module's own
 // source facts replace the previous module's.
-pub fn sema_scope_environment_enter_module(environment: &SemaScopeEnvironment, module_row: SemaRegistrationModule, comptime_body_values: [SemaComptimeBodyValue]) Never! {
-    environment.module_identity = module_row.module_identity
-    environment.package_identity = module_row.package_identity
-    environment.module_name = module_row.module_name
-    environment.source_file = module_row.source_file
-    environment.source_origin = module_row.source_origin
-    environment.source_segments = module_row.source_segments
-    environment.declarations = [SemaScopeDeclaration]{}
-    environment.generic_params = [TGenericParam]{}
-    environment.comptime_body_values = comptime_body_values
-    environment.else_arms = module_row.program.else_arms
-    environment.debug_sites = module_row.program.debug_sites
-    environment.function_name = ""
+pub fn sema_scope_environment_enter_module(environment: &SemaScopeEnvironment, module_index: Int, comptime_body_values: [SemaComptimeBodyValue]) Never! {
+    // The graph payload loan permits only disjoint module-fact writes.
+    if &environment.registration_graph == .Val(graph) {
+        environment.module_identity = graph.modules[module_index].module_identity
+        environment.package_identity = graph.modules[module_index].package_identity
+        environment.module_name = graph.modules[module_index].module_name
+        environment.source_file = graph.modules[module_index].source_file
+        environment.source_origin = graph.modules[module_index].source_origin
+        environment.source_segments = graph.modules[module_index].source_segments
+        environment.declarations = [SemaScopeDeclaration]{}
+        environment.generic_params = [TGenericParam]{}
+        environment.comptime_body_values = comptime_body_values
+        environment.else_arms = graph.modules[module_index].program.else_arms
+        environment.debug_sites = graph.modules[module_index].program.debug_sites
+        environment.function_name = ""
+        return
+    }
+    panic("an owning registered-module pass lost its registration graph")
 }
 
 // A comptime probe checks one expression or function of `module_identity`
@@ -668,7 +673,9 @@ pub fn sema_scope_environment_enter_module(environment: &SemaScopeEnvironment, m
 // per-function fact starts empty, as in a newly built probe environment.
 // False when the graph has no such module.
 pub fn sema_scope_environment_enter_probe_module(environment: &SemaScopeEnvironment, module_identity: String, comptime_body_values: [SemaComptimeBodyValue]) -> Bool Never! {
-    if environment.registration_graph == .Val(graph) {
+    // Pin the payload window, not an owning Option match of the whole graph.
+    // Only disjoint context fields are written before this loan closes.
+    if &environment.registration_graph == .Val(graph) {
         module_index :: sema_registration_module_index(graph, module_identity) ?? return false
         environment.module_identity = graph.modules[module_index].module_identity
         environment.package_identity = graph.modules[module_index].package_identity
