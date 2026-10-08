@@ -1395,6 +1395,19 @@ canonical inventory through its digest-checked parent attachment.
 Generic and payload-role callers share one admission/inventory/image lookup.
 The factory fetches the immutable canonical manifest once per admitted
 attachment and reuses it for its per-type payload codecs, not once per payload.
+`Driver/SharedPayloadCodec.jet` stages checked data payloads recursively over
+that inventory. Its per-call journal owns allocations and initialized typed
+slots: failed children unwind in reverse order, and a completed parent takes
+its children into one actual typed drop action. Missing child drop bindings
+refuse before materialization; no guessed leaf helper repairs that provenance.
+Lists (including byte lists) use the admitted element stride, Maps use the
+entry row, and boxed members use their storage-wrapper box size. Binary32
+conversion preserves the exact widened IEEE word instead of rounding it.
+Replacing a payload moves the old owner into a returned retirement journal
+under the original held physical guard; the caller publishes/releases that
+guard before invoking old drop glue, so reentrant cleanup cannot deadlock it.
+This data codec alone does not supply a factory's physical native-slot
+capability/projector or turn a Source callback root into a native closure.
 
 The canonical ordinary-layout inventory records `Float32Bits` explicitly.
 A Map's third child is its ordinary entry-tuple layout; that row's stride,
