@@ -48,12 +48,17 @@ if (mode === 'assemble') {
   const library = process.env.JET_RUNTIME_C_LIB, rlib = process.env.JET_RUNTIME_NATIVE_RLIB;
   if (!library || !existsSync(library) || !rlib || !existsSync(rlib)) throw Error('fresh composed JET_RUNTIME_C_LIB and JET_RUNTIME_NATIVE_RLIB required');
   command('link', process.env.CC ?? 'cc', [join(root, 'Compiler/JetRuntime/Tests/world-sentry-fixture.c'), join(unit, 'fixture.o'), library, '-lpthread', '-ldl', '-lm', '-o', join(out, 'world-sentry-fixture')]);
+  command('logical-env-link', process.env.CC ?? 'cc', [join(root, 'Compiler/JetRuntime/Tests/LogicalEnvironmentTests.c'), join(unit, 'fixture.o'), library, '-lpthread', '-ldl', '-lm', '-o', join(out, 'logical-env-fixture')]);
   command('reference-link', 'rustc', ['--edition', '2021', join(root, 'Compiler/JetRuntime/Tests/sentry-ledger-reference.rs'), '--extern', `jet_runtime=${rlib}`, '-C', `link-arg=${join(unit, 'fixture.o')}`, '-o', join(out, 'ledger-reference')]);
 } else {
   const failures = [];
   try {
     const result = command('runtime-witnesses', join(out, 'world-sentry-fixture'), [], { timeout: 300000 });
     if (result.stdout !== '' || result.stderr !== '') throw Error('runtime witnesses changed empty output');
+  } catch (error) { failures.push(error.message); }
+  try {
+    const result = command('logical-env-witnesses', join(out, 'logical-env-fixture'), [], { timeout: 30000 });
+    if (result.stdout !== '' || result.stderr !== '') throw Error('logical environment witnesses changed empty output');
   } catch (error) { failures.push(error.message); }
   // Exercise both sides of the real stop boundary. Nonzero 70 is expected,
   // so retain both raw results rather than treating the first stop as failure.
