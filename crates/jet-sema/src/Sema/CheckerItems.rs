@@ -1918,6 +1918,11 @@ impl<'a> Checker<'a> {
             }
         }
     }
+    pub(crate) fn module_is_core_source(&self, owner: usize) -> bool {
+        self.name_ledger.module(owner)
+            .is_some_and(|module| module.package.starts_with("<corelib>/"))
+    }
+
     pub(crate) fn core_source_owner_module(&self, module: &str, type_name: &str) -> Option<usize> {
         let source = jet_foundation::CoreModuleExports::core_source_modules()
             .iter()
@@ -2239,7 +2244,7 @@ impl<'a> Checker<'a> {
         };
         registry.implements_trait(leaf, trait_name)
             || (trait_name == crate::Syntax::TRAIT_CLOSE
-                && self.name_ledger.module(owner).is_some_and(|module| module.package.starts_with("<corelib>/"))
+                && self.module_is_core_source(owner)
                 && registry.synthetic_close_types.contains(leaf))
     }
 
@@ -3130,6 +3135,8 @@ impl<'a> Checker<'a> {
         // history records use the same path with their concrete command argument.
         if let Some(core_fields) = core_constructable_fields(type_name)
             .or_else(|| core_generic_constructable_fields(type_name, type_args))
+            .filter(|_| !crate::Sema::CheckerCoreLib::core_record_literal_is_core_only(type_name)
+                || self.module_is_core_source(self.module_idx))
         {
             let provided_names: std::collections::HashSet<String> =
                 fields.iter().map(|(n, ..)| n.clone()).collect();
@@ -3145,8 +3152,10 @@ impl<'a> Checker<'a> {
                 let got = self.infer(fexpr);
                 self.clone_borrowed_struct_field_value(Some(fname), fexpr, got.as_ref());
                 self.expected_type = saved;
-                if let (Some(expected), Some(got)) = (expected_ty.as_ref(), got.as_ref()) {
-                    self.check_type_assignable(expected, got, fexpr.span());
+                if type_name == Syntax::TYPE_ERR {
+                    if let (Some(expected), Some(got)) = (expected_ty.as_ref(), got.as_ref()) {
+                        self.check_type_assignable(expected, got, fexpr.span());
+                    }
                 }
             }
             // Report missing fields.
