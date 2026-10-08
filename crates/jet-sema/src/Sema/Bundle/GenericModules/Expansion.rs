@@ -134,7 +134,7 @@ pub(crate) fn expand_generic_module_aliases(
         traits.register_synthetic_rollback();
         traits.register_synthetic_display_debug();
         traits.register_synthetic_close();
-        traits.register_synthetic_operators();
+        traits.register_synthetic_operators(|_| false);
         traits.register_synthetic_iter_index();
         traits.register_synthetic_io();
         traits.register_synthetic_driver();
