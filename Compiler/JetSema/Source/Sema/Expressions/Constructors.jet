@@ -1437,7 +1437,7 @@ fn sema_expression_typed_literal(head: Type?, body: TypedLitBody, span: Span, ex
             converted := checked
             value_span :: expr_span(value)
             line := sema_source_line_at(environment.source_segments, value_span) ?? 0
-            needs_conversion := (checked.ty == Type.Int && (if result_head == {.IntN(_, _) -> true else -> false})) || (sema_expr_is_integer(checked.ty) && (result_head == Type.Float || result_head == Type.Float32)) || (checked.ty == Type.Float && result_head == Type.Float32) || sema_expression_typed_literal_fixed_widening(checked.ty, result_head)
+            needs_conversion := (checked.ty == Type.Int && (if result_head == {.IntN(_, _) -> true else -> false})) || (sema_expr_is_integer(checked.ty) && (result_head == Type.Float || result_head == Type.Float32)) || (checked.ty == Type.Float && result_head == Type.Float32) || sema_expression_typed_literal_fixed_conversion(checked.ty, result_head)
             if needs_conversion {
                 converted = sema_expr_numeric_literal_conversion(checked, result_head, value_span, line, &diagnostics) ?? return None
             }
@@ -1452,7 +1452,7 @@ fn sema_expression_typed_literal(head: Type?, body: TypedLitBody, span: Span, ex
             converted := checked
             value_span :: expr_span(value)
             line := sema_source_line_at(environment.source_segments, value_span) ?? 0
-            needs_conversion := (checked.ty == Type.Int && (if result_head == {.IntN(_, _) -> true else -> false})) || (sema_expr_is_integer(checked.ty) && (result_head == Type.Float || result_head == Type.Float32)) || (checked.ty == Type.Float && result_head == Type.Float32) || sema_expression_typed_literal_fixed_widening(checked.ty, result_head)
+            needs_conversion := (checked.ty == Type.Int && (if result_head == {.IntN(_, _) -> true else -> false})) || (sema_expr_is_integer(checked.ty) && (result_head == Type.Float || result_head == Type.Float32)) || (checked.ty == Type.Float && result_head == Type.Float32) || sema_expression_typed_literal_fixed_conversion(checked.ty, result_head)
             if needs_conversion {
                 converted = sema_expr_numeric_literal_conversion(checked, result_head, value_span, line, &diagnostics) ?? return None
             }
@@ -1465,13 +1465,12 @@ fn sema_expression_typed_literal(head: Type?, body: TypedLitBody, span: Span, ex
     sema_expression_typed_literal_mismatch(result_head, span, &diagnostics)
 }
 
-// `U64{byte}` with `byte: U8`: a lossless fixed-width widening takes the
-// canonical numeric conversion instead of relabelling the narrow carrier
-// (Rust CheckerInfer/expr.rs typed-literal `numeric_widening_to` on IntN pairs).
-fn sema_expression_typed_literal_fixed_widening(source: Type, head: Type) -> Bool {
-    if source == .IntN(_, _) && head == .IntN(_, _) && source != head {
-        // A contained fixed range reports `Val(true)` here (the Rust `Some`).
-        return sema_expr_numeric_widening_to(source, head) == (Val(true))
+// Integer heads own an explicit conversion, including narrowing fixed carriers.
+// A changed result annotation alone cannot change the value's representation.
+fn sema_expression_typed_literal_fixed_conversion(source: Type, head: Type) -> Bool {
+    if source == .IntN(_, _) {
+        if head == Type.Int -> return true
+        if head == .IntN(_, _) -> return source != head
     }
     false
 }
@@ -1480,5 +1479,5 @@ fn sema_expression_typed_literal_fixed_widening(source: Type, head: Type) -> Boo
 // expected carrier, as in Rust's typed-literal inference.
 fn sema_expression_typed_literal_value_needs_head(value: Expr, head: Type) -> Bool Never! {
     if sema_expression_list_element_needs_expected_type(value) -> return true
-    sema_expr_decimal_literal_operand(value, true) && sema_expr_expects_machine_float(Val(head))
+    sema_expr_decimal_literal_operand(value, false) && sema_expr_expects_machine_float(Val(head))
 }
