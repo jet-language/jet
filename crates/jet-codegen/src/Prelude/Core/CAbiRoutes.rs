@@ -39,8 +39,11 @@ mod jet_c_abi_routes {
             std::ptr::null_mut()
         } else {
             let layout = std::alloc::Layout::from_size_align(len * std::mem::size_of::<S>(), 8).unwrap_or_else(|_| range_stop());
-            // SAFETY: the checked nonzero layout belongs to the runtime heap.
-            let buffer = unsafe { super::jet_c_abi::jet_rt_alloc(layout.size(), layout.align()) } as *mut S;
+            // SAFETY: `layout` has a nonzero size.
+            let buffer = unsafe { std::alloc::alloc(layout) } as *mut S;
+            if buffer.is_null() {
+                std::alloc::handle_alloc_error(layout);
+            }
             // SAFETY: `buffer` holds `len` slots.
             unsafe { std::ptr::copy_nonoverlapping(words.as_ptr(), buffer, len) };
             buffer
