@@ -2277,3 +2277,30 @@ out-of-range info tables, matching the seed's Vec indexing at
 `info-index-equals-length` and `negative-info-index` fatal modes; each
 must exit 101 with the existing sequence-OOB body (unsigned raw index).
 These native fatal modes have not yet been executed.
+
+### Native canonical text normalization
+
+`NativeTextNormalize.jet` carries the canonical/Hangul decomposition,
+nonstarter stable counting sort and in-place composition algorithm from the
+retired `kernel_text_normal.jet` into fixed-width runtime storage. Table
+lookups are generated static I64 decisions by `gen-unicode-tables.mjs` from
+checksum-verified Unicode 17.0.0 inputs; they allocate nothing and never call
+Core indexing. Composition uses the current seed's absent-starter and -1
+blocking sentinel, including class-zero compositions and intervening marks.
+
+`native_text_normalize_nfc` borrows an E4 Text header and returns an
+independent owned E4 Text header. Both `jet_text_nfc` and
+`jet_text_normalize_nfc` use that kernel. ASCII (including embedded NUL and
+empty input) clones the owner. Non-ASCII uses one scalar work buffer,
+reusable sorting scratch only for unordered runs, and one exact output
+buffer. No compatibility normalization or NFD route is added.
+
+`NativeTextNormalizeWitness.c` covers all 20,034 committed Unicode 17
+NormalizationTest rows in Parts 0–5 with c2=NFC(c1..c3) and
+c4=NFC(c4..c5), both exports, idempotence, leading marks, composition
+exclusions, Hangul, blocking, ASCII ownership and long descending CCC runs.
+`run-native-text-normalize.mjs` creates an oracle from the existing seed
+functions only, then links the client to a supplied fresh Jet object for
+direct seed comparison. Seed compilation and native execution belong to
+the heavy proof lane; parser/C11 and generator freshness are not native
+parity proof.

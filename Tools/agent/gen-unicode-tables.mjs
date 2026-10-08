@@ -24,6 +24,7 @@
 //   crates/jet-foundation/src/generated/UnicodeString.rs and
 //   crates/jet-codegen/src/Prelude/Core/UnicodeString.rs (string kernels)
 //   Compiler/JetRuntime/Source/UnicodeTables.jet (fixed-word runtime lookups)
+//   Compiler/JetRuntime/Source/UnicodeNormalizeTables.jet (NFC-only lookups)
 //
 // Pinned Unicode release: 17.0.0. Pinned sha256 of each input file (verified
 // before generating — mismatch aborts):
@@ -738,12 +739,29 @@ const jetTablesOut = HEADER_COMMENT.trimEnd() + "\n"
   + jetProperty("white_space", whiteSpaceRanges) + "\n"
   + jetProperty("cased", casedRanges) + "\n"
   + jetProperty("case_ignorable", caseIgnorableRanges);
+if ([...canonDecomp.values()].some((seq) => seq.length > 2)) {
+  throw new Error("canonical decomposition exceeds the NFC two-lane contract");
+}
+const jetNormalizeTablesOut = HEADER_COMMENT.trimEnd() + "\n"
+  + Object.entries(PINNED_SHA256).map(([file, hash]) => `// SHA256 ${file}: ${hash}\n`).join("")
+  + "// NFC canonical-only tables; static I64 decisions, no allocation/Core indexing.\n"
+  + "// Canonical mappings pack two 21-bit scalar lanes (low lane first).\n"
+  + jetMapping("canonical", canonDecomp) + "\n"
+  + "fn unicode_normal_ccc(cp: I64) -> I64 Never! {\n"
+  + jetLookupTree(cccRanges, "I64{0}", (row) => `I64{${row[2]}}`) + "}\n\n"
+  + "fn unicode_normal_compose(a: I64, b: I64) -> I64 Never! {\n"
+  + "    cp :: (a << I64{21}) | b\n"
+  + jetLookupTree(composePairs.map(([a, b, c]) => {
+    const key = (BigInt(a) << 21n) | BigInt(b);
+    return [key, key, c];
+  }), "I64{-1}", (row) => `I64{${row[2]}}`) + "}\n";
 
 const outPaths = [
   ["crates/jet-foundation/src/generated/UnicodeString.rs", stringModuleOut],
   ["crates/jet-codegen/src/Prelude/Core/UnicodeString.rs", stringFlatOut],
   ["crates/jet-codegen/src/Prelude/CoreLib/Top/UnicodeTables.rs", tablesFlatOut],
   ["Compiler/JetRuntime/Source/UnicodeTables.jet", jetTablesOut],
+  ["Compiler/JetRuntime/Source/UnicodeNormalizeTables.jet", jetNormalizeTablesOut],
 ];
 for (const [rel, text] of outPaths) {
   const full = path.join(process.cwd(), rel);
