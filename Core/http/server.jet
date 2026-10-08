@@ -7,9 +7,9 @@ use core.http.server as provider
 // Plain value constructors and deterministic policy live here. Transport and
 // callback-bearing mux/lifecycle operations retain their registered carriers.
 //
-// `bind` and `serve` stay native rows: their label-only `tls:` and
-// `deadline:` options take the payload directly and default to absent, a
-// contract a Jet `T?` parameter can't state without `Val(...)` at every call.
+// Public arity/label rows retain the existing implicit-Optional admission.
+// Their source entries receive the normalized options; no user-facing `Val`
+// spelling or new deadline/TLS default is introduced.
 
 enum HTTPCorsOrigins {
     Any
@@ -31,15 +31,27 @@ pub struct HTTPServerTLS {
 }
 
 pub fn mux() -> HTTPMux Never! {
-    provider.mux()
+    provider.__mux()
 }
 
 pub fn serve_once(addr: String, mux: HTTPMux) HTTPError! {
-    provider.serve_once(addr, mux) ?? return
+    provider.__serve_once(addr, mux) ?? return
 }
 
 pub fn serve_once_listener(listener: TCPListener, mux: HTTPMux) HTTPError! {
-    provider.serve_once_listener(listener, mux) ?? return
+    provider.__serve_once_listener(listener, mux) ?? return
+}
+
+pub fn __serve_entry(addr: String, mux: ^HTTPMux, tls: HTTPServerTLS?, deadline: Duration?) -[Net, Time.Wait]> Unit HTTPError! {
+    provider.__serve(addr, mux, tls, deadline)
+}
+
+pub fn __bind_entry(addr: String, mux: ^HTTPMux, tls: HTTPServerTLS?, deadline: Duration?) -[Net]> HTTPServer HTTPError! {
+    provider.__bind(addr, mux, tls, deadline)
+}
+
+pub fn __static_files_entry(mux: HTTPMux, prefix: String, root: String, index: Bool?, dotfiles: Bool?, follow_links: Bool?) -> Unit Never! {
+    provider.__static_files(mux, prefix, root, index, dotfiles, follow_links)
 }
 
 pub fn response(status: Int, body: String) -> HTTPResponse Never! {
@@ -70,15 +82,15 @@ pub fn json<T: Encode>(status: Int, body: T) -> HTTPResponse Never! {
 }
 
 pub fn static_file(path: String, content_type: String) -[FS, Net, Time.Wait]> HTTPResponse HTTPError! {
-    provider.static_file(path, content_type)
+    provider.__static_file(path, content_type)
 }
 
 pub fn static_file_range(request: HTTPRequest, path: String, content_type: String) -[FS, Net, Time.Wait]> HTTPResponse HTTPError! {
-    provider.static_file_range(request, path, content_type)
+    provider.__static_file_range(request, path, content_type)
 }
 
 pub fn static_files(mux: HTTPMux, prefix: String, root: String) Never! {
-    provider.static_files(mux, prefix, root)
+    provider.__static_files(mux, prefix, root, None, None, None)
 }
 
 pub fn tls(cert: String, key: String) -> HTTPServerTLS Never! {
@@ -109,7 +121,7 @@ pub fn cors_policy(origins: [String] | HTTPCorsOrigins, methods: [String]{[Strin
 }
 
 pub fn cors(mux: HTTPMux, policy: HTTPCorsPolicy) Never! {
-    provider.cors(mux, policy)
+    provider.__cors(mux, policy)
 }
 
 pub fn access_log(request: HTTPRequest, status: Int) -> String Never! {
@@ -133,7 +145,7 @@ fn access_log_path(path: String) -> String Never! {
 }
 
 pub fn request_id(mux: HTTPMux) Never! {
-    provider.request_id(mux)
+    provider.__request_id(mux)
 }
 
 fn cors_join(values: [String], fallback: ^String) -> String Never! {
