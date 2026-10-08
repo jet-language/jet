@@ -40,6 +40,20 @@ pub struct Session {
     pub proxy: String
 }
 
+
+// Keep the transport constructors on the existing native request/body
+// carriers; public convenience names now enter Jet before the raw leaf.
+pub fn get(url: String) -[Net, Time.Wait]> HTTPResponse HTTPError! {
+    provider.__get(url)
+}
+
+pub fn post(url: String, body: String) -[Net, Time.Wait]> HTTPResponse HTTPError! {
+    provider.__post(url, body)
+}
+
+pub fn request(method: String, url: String) -> HTTPRequest Never! {
+    provider.__request(method, url)
+}
 pub fn send(req: HTTPRequest) -[Net, Time.Wait]> HTTPResponse HTTPError! {
     req.send()
 }
