@@ -365,6 +365,11 @@ const FIXTURE_BINDINGS = new Map([
     "core/crypto/aes/nist_gcm.jet",
     "core/crypto/aes/seed_differential.jet",
   ]],
+  ["core.crypto.expert.x25519_raw", ["core/crypto/ct_x25519.jet"]],
+  ["core.crypto.sign", ["core/crypto/ct_ed25519.jet"]],
+  ["core.crypto.verify", ["core/crypto/ct_ed25519.jet"]],
+  ["core.crypto.expert.ed25519_sign", ["core/crypto/ct_ed25519.jet"]],
+  ["core.crypto.expert.ed25519_verify_strict", ["core/crypto/ct_ed25519.jet"]],
   ["collection.Condition.notify_one", [
     "core/sync/condition_deadline.jet",
     "core/sync/condition_notify_all.jet",
