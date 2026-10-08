@@ -1,0 +1,161 @@
+// Private native TimeGlueABI carriers; source Core Instant is generator-owned.
+// Time.rs4-9/303-309/484-489; CommonTypes2840-2843/2866-2874 derives.
+fn time_glue_word(address: I64) -> I64 {
+    #Unsafe("borrows an initialized aligned word inside a native time carrier") { return os_load_i64(address) }
+}
+fn time_glue_store(address: I64, value: I64) {
+    #Unsafe("owns a writable aligned word inside a fresh native time carrier") { os_store_i64(address, value) }
+}
+fn time_glue_clone(value: I64, bytes: I64) -> I64 {
+    result :: jet_rt_alloc(bytes, I64{8})
+    coll_copy(value, result, bytes)
+    result
+}
+fn time_glue_drop(value: I64, bytes: I64) {
+    if (value != I64{0}) -> jet_rt_free(value, bytes, I64{8})
+}
+fn time_glue_equal(left: I64, right: I64, bytes: I64) -> Bool {
+    at := I64{0}
+    loop at < bytes {
+        if time_glue_word(left + at) != time_glue_word(right + at) -> return false
+        at += I64{8}
+    }
+    true
+}
+fn time_glue_int(value: I64, field: I64) -> I64 { jet_int_owned_from_i64(time_glue_word(value + field)) }
+fn time_glue_pad(target: I64, value: I64, width: I64) {
+    // Use the existing decimal digit counter and emitter. Rust's 0-padding
+    // includes a sign in the minimum width and inserts zeros AFTER that sign.
+    length :: display_integer_length(value) + (if (value < I64{0}) -> I64{1} else -> I64{0})
+    zeros := width - length
+    if (zeros <= I64{0}) {
+        rt_text_push_number(target, value)
+        return
+    }
+    number := value
+    if (value < I64{0}) {
+        rt_text_push_word(target, I64{45}, I64{1})
+        // A negative number needing padding here has <19 magnitude digits;
+        // i64::MIN always takes the non-padding branch above.
+        number = -value
+    }
+    loop zeros > (I64{0}) {
+        rt_text_push_word(target, I64{48}, I64{1})
+        zeros -= I64{1}
+    }
+    rt_text_push_number(target, number)
+}
+#Export(c) fn jet_rt_record_new_JetDate(year: I64, month: I64, day: I64) -> I64 {
+    // CAbi10193-10194 is a record ctor, NOT the checked civil constructor.
+    y :: jet_int_owned_to_i64(year)
+    m :: jet_int_owned_to_i64(month)
+    d :: jet_int_owned_to_i64(day)
+    result :: jet_rt_alloc(TIME_DATE_BYTES, I64{8})
+    time_glue_store(result + TIME_DATE_YEAR, y)
+    time_glue_store(result + TIME_DATE_MONTH, m)
+    time_glue_store(result + TIME_DATE_DAY, d)
+    result
+}
+#Export(c) fn jet_rt_handle_clone_JetDate(value: I64) -> I64 { time_glue_clone(value, TIME_DATE_BYTES) }
+#Export(c) fn jet_rt_handle_drop_JetDate(value: I64) { time_glue_drop(value, TIME_DATE_BYTES) }
+#Export(c) fn jet_rt_handle_eq_JetDate(left: I64, right: I64) -> Bool { time_glue_equal(left, right, TIME_DATE_BYTES) }
+#Export(c) fn jet_rt_record_get_JetDate_year(value: I64) -> I64 { time_glue_int(value, TIME_DATE_YEAR) }
+#Export(c) fn jet_rt_record_get_JetDate_month(value: I64) -> I64 { time_glue_int(value, TIME_DATE_MONTH) }
+#Export(c) fn jet_rt_record_get_JetDate_day(value: I64) -> I64 { time_glue_int(value, TIME_DATE_DAY) }
+#Export(c) fn jet_rt_handle_show_JetDate(value: I64) -> I64 {
+    // Time280-286/1760-1765: negative year uses saturating_abs then width4.
+    target :: jet_rt_string_builder_new()
+    year := time_glue_word(value + TIME_DATE_YEAR)
+    if (year < I64{0}) {
+        rt_text_push_word(target, I64{45}, I64{1})
+        year = if (year == I64{-9223372036854775808}) -> I64{9223372036854775807} else -> -year
+    }
+    time_glue_pad(target, year, I64{4})
+    rt_text_push_word(target, I64{45}, I64{1})
+    time_glue_pad(target, time_glue_word(value + TIME_DATE_MONTH), I64{2})
+    rt_text_push_word(target, I64{45}, I64{1})
+    time_glue_pad(target, time_glue_word(value + TIME_DATE_DAY), I64{2})
+    jet_rt_string_builder_finish(target)
+}
+#Export(c) fn jet_rt_handle_display_JetDate(value: I64) -> I64 { jet_rt_handle_show_JetDate(value) }
+#Export(c) fn jet_rt_handle_debug_JetDate(value: I64) -> I64 { jet_rt_handle_show_JetDate(value) }
+#Export(c) fn jet_rt_record_new_JetPeriod(years: I64, months: I64, days: I64) -> I64 {
+    y :: jet_int_owned_to_i64(years)
+    m :: jet_int_owned_to_i64(months)
+    d :: jet_int_owned_to_i64(days)
+    result :: jet_rt_alloc(TIME_PERIOD_BYTES, I64{8})
+    time_glue_store(result + TIME_PERIOD_YEARS, y)
+    time_glue_store(result + TIME_PERIOD_MONTHS, m)
+    time_glue_store(result + TIME_PERIOD_DAYS, d)
+    result
+}
+#Export(c) fn jet_rt_handle_clone_JetPeriod(value: I64) -> I64 { time_glue_clone(value, TIME_PERIOD_BYTES) }
+#Export(c) fn jet_rt_handle_drop_JetPeriod(value: I64) { time_glue_drop(value, TIME_PERIOD_BYTES) }
+#Export(c) fn jet_rt_handle_eq_JetPeriod(left: I64, right: I64) -> Bool { time_glue_equal(left, right, TIME_PERIOD_BYTES) }
+#Export(c) fn jet_rt_record_get_JetPeriod_years(value: I64) -> I64 { time_glue_int(value, TIME_PERIOD_YEARS) }
+#Export(c) fn jet_rt_record_get_JetPeriod_months(value: I64) -> I64 { time_glue_int(value, TIME_PERIOD_MONTHS) }
+#Export(c) fn jet_rt_record_get_JetPeriod_days(value: I64) -> I64 { time_glue_int(value, TIME_PERIOD_DAYS) }
+#Export(c) fn jet_rt_handle_show_JetPeriod(value: I64) -> I64 {
+    // Time619-620: P{years}Y{months}M{days}D, no normalization.
+    target :: jet_rt_string_builder_new()
+    rt_text_push_word(target, I64{80}, I64{1})
+    rt_text_push_number(target, time_glue_word(value + TIME_PERIOD_YEARS))
+    rt_text_push_word(target, I64{89}, I64{1})
+    rt_text_push_number(target, time_glue_word(value + TIME_PERIOD_MONTHS))
+    rt_text_push_word(target, I64{77}, I64{1})
+    rt_text_push_number(target, time_glue_word(value + TIME_PERIOD_DAYS))
+    rt_text_push_word(target, I64{68}, I64{1})
+    jet_rt_string_builder_finish(target)
+}
+#Export(c) fn jet_rt_handle_display_JetPeriod(value: I64) -> I64 { jet_rt_handle_show_JetPeriod(value) }
+#Export(c) fn jet_rt_handle_debug_JetPeriod(value: I64) -> I64 { jet_rt_handle_show_JetPeriod(value) }
+#Export(c) fn jet_rt_handle_clone_JetLocalTime(value: I64) -> I64 {
+    result :: time_glue_clone(value, TIME_LOCAL_BYTES)
+    // Nanos is u32; upper half of its native word is padding, not semantics.
+    time_glue_store(result + TIME_LOCAL_NANOS, time_glue_word(value + TIME_LOCAL_NANOS) & I64{4294967295})
+    result
+}
+#Export(c) fn jet_rt_handle_drop_JetLocalTime(value: I64) { time_glue_drop(value, TIME_LOCAL_BYTES) }
+#Export(c) fn jet_rt_handle_eq_JetLocalTime(left: I64, right: I64) -> Bool {
+    time_glue_equal(left, right, TIME_LOCAL_NANOS) &&
+        (time_glue_word(left + TIME_LOCAL_NANOS) & I64{4294967295}) == (time_glue_word(right + TIME_LOCAL_NANOS) & I64{4294967295})
+}
+#Export(c) fn jet_rt_handle_show_JetLocalTime(value: I64) -> I64 {
+    // Time472-480: nanos unsigned, zero omitted, otherwise minimum 9 digits.
+    target :: jet_rt_string_builder_new()
+    time_glue_pad(target, time_glue_word(value + TIME_LOCAL_HOUR), I64{2})
+    rt_text_push_word(target, I64{58}, I64{1})
+    time_glue_pad(target, time_glue_word(value + TIME_LOCAL_MINUTE), I64{2})
+    rt_text_push_word(target, I64{58}, I64{1})
+    time_glue_pad(target, time_glue_word(value + TIME_LOCAL_SECOND), I64{2})
+    nanos :: time_glue_word(value + TIME_LOCAL_NANOS) & I64{4294967295}
+    if (nanos != I64{0}) {
+        rt_text_push_word(target, I64{46}, I64{1})
+        time_glue_pad(target, nanos, I64{9})
+    }
+    jet_rt_string_builder_finish(target)
+}
+#Export(c) fn jet_rt_handle_display_JetLocalTime(value: I64) -> I64 { jet_rt_handle_show_JetLocalTime(value) }
+#Export(c) fn jet_rt_handle_debug_JetLocalTime(value: I64) -> I64 { jet_rt_handle_show_JetLocalTime(value) }
+#Export(c) fn jet_rt_record_new_Duration(ns: I64) -> I64 {
+    raw :: jet_int_owned_to_i64(ns)
+    result :: jet_rt_alloc(TIME_DURATION_BYTES, I64{8})
+    time_glue_store(result + TIME_DURATION_NS, raw)
+    result
+}
+#Export(c) fn jet_rt_handle_clone_Duration(value: I64) -> I64 { time_glue_clone(value, TIME_DURATION_BYTES) }
+#Export(c) fn jet_rt_handle_drop_Duration(value: I64) { time_glue_drop(value, TIME_DURATION_BYTES) }
+#Export(c) fn jet_rt_handle_eq_Duration(left: I64, right: I64) -> Bool { time_glue_equal(left, right, TIME_DURATION_BYTES) }
+#Export(c) fn jet_rt_record_get_Duration_ns(value: I64) -> I64 { time_glue_int(value, TIME_DURATION_NS) }
+#Export(c) fn jet_rt_handle_show_Duration(value: I64) -> I64 {
+    // Duration195-197: signed ns followed by the literal "ns".
+    target :: jet_rt_string_builder_new()
+    rt_text_push_number(target, time_glue_word(value + TIME_DURATION_NS))
+    rt_text_push_word(target, I64{29550}, I64{2})
+    jet_rt_string_builder_finish(target)
+}
+#Export(c) fn jet_rt_handle_display_Duration(value: I64) -> I64 { jet_rt_handle_show_Duration(value) }
+#Export(c) fn jet_rt_handle_debug_Duration(value: I64) -> I64 { jet_rt_handle_show_Duration(value) }
+#Export(c) fn jet_rt_handle_clone_DurationUnit(value: I64) -> I64 { time_glue_clone(value, TIME_DURATION_UNIT_BYTES) }
+#Export(c) fn jet_rt_handle_drop_DurationUnit(value: I64) { time_glue_drop(value, TIME_DURATION_UNIT_BYTES) }
+#Export(c) fn jet_rt_handle_eq_DurationUnit(left: I64, right: I64) -> Bool { time_glue_equal(left, right, TIME_DURATION_UNIT_BYTES) }

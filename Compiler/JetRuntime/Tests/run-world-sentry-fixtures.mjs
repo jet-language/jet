@@ -2,7 +2,7 @@
 // One composed fixture: real World threads, all four MemSentry seed unit
 // witnesses, a Source inline raw-read stop, and canonical ledger byte parity.
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync, existsSync, statSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { candidateJetc0, frontReceipt } from '../../JetBackend/Tests/jet-front.mjs';
@@ -51,18 +51,32 @@ if (mode === 'assemble') {
   command('reference-link', 'rustc', ['--edition', '2021', join(root, 'Compiler/JetRuntime/Tests/sentry-ledger-reference.rs'), '--extern', `jet_runtime=${rlib}`, '-C', `link-arg=${join(unit, 'fixture.o')}`, '-o', join(out, 'ledger-reference')]);
 } else {
   const failures = [];
+  // Raw-check predicates now observe faults too. Never write to checkout/.jet,
+  // and each receipt uses new paths so append-only ledgers cannot hide duplicates.
+  const ledgers = mkdtempSync(join(out, 'ledger-'));
   try {
-    const result = command('runtime-witnesses', join(out, 'world-sentry-fixture'), [], { timeout: 300000 });
+    const result = command('runtime-witnesses', join(out, 'world-sentry-fixture'), [], { timeout: 300000,
+      env: { ...process.env, JET_MEMORY_LEDGER: join(ledgers, 'raw-checks/ledger.jsonl') } });
     if (result.stdout !== '' || result.stderr !== '') throw Error('runtime witnesses changed empty output');
   } catch (error) { failures.push(error.message); }
-  const referencePath = join(out, 'reference-ledger/ledger.jsonl'), nativePath = join(out, 'native-ledger/ledger.jsonl');
+  const referencePath = join(ledgers, 'reference/ledger.jsonl'), nativePath = join(ledgers, 'return/ledger.jsonl'), stopPath = join(ledgers, 'stop/ledger.jsonl');
   for (const [name, binary, args, path] of [['reference', join(out, 'ledger-reference'), [], referencePath], ['native', join(out, 'world-sentry-fixture'), ['ledger'], nativePath]]) {
     try { command(name, binary, args, { timeout: 30000, env: { ...process.env, JET_MEMORY_LEDGER: path } }); }
     catch (error) { failures.push(error.message); }
   }
+  const stopped = spawnSync(join(out, 'world-sentry-fixture'), ['ledger-stop'], { encoding: 'utf8', timeout: 30000,
+    env: { ...process.env, JET_MEMORY_LEDGER: stopPath } });
+  writeFileSync(join(out, 'ledger-stop.receipt.json'), JSON.stringify({ status: stopped.status, signal: stopped.signal,
+    error: stopped.error?.message ?? null, stdout: stopped.stdout, stderr: stopped.stderr }, null, 2) + '\n');
+  if (stopped.error || stopped.signal || stopped.status !== 70 || stopped.stdout !== '' || !stopped.stderr?.includes('R0802')) failures.push('fault+stop did not produce the canonical R0802 exit70');
   try {
     const reference = readFileSync(referencePath), native = readFileSync(nativePath);
     if (!reference.equals(native)) throw Error('ledger JSONL differs byte-for-byte from canonical Rust writer');
+    const stop = readFileSync(stopPath);
+    for (const [name, bytes] of [['fault-return', native], ['fault-stop', stop]]) {
+      if (bytes.toString('utf8').trimEnd().split('\n').length !== 1 || !bytes.length) throw Error(`${name} did not write exactly one ledger row`);
+    }
+    if (!stop.equals(native)) throw Error('fault-return and fault+stop ledger bytes differ');
     if ((statSync(nativePath).mode & 0o777) !== 0o600 || (statSync(dirname(nativePath)).mode & 0o777) !== 0o700) throw Error('ledger file/parent permissions differ');
   } catch (error) { failures.push(error.message); }
   if (failures.length) throw Error(failures.join('\n'));
