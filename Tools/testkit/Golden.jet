@@ -293,7 +293,7 @@ fn kit_golden_build(entry: KitEntry, tier: KitTier, plan: KitPlan, env: KitEnv, 
     cwd :: if step.cwd == "" -> source else -> files.join(work, kit_steps_expand(step.cwd, env, work, scratch, ""))
     policy :: kit_steps_policy(step, env) ?? return KitOutcome{verdict: kit_expect_verdict("ERROR", "time limit outside Duration range"), run: kit_exec_failed("time limit outside Duration range")}
     if step.isolate == "no-nix" {
-        args = kit_no_nix_argv(policy, args, scratch, step.isolate_network) ?? return KitOutcome{verdict: kit_expect_verdict("ERROR", err), run: kit_exec_failed(err)}
+        args = kit_no_nix_argv(policy, args, scratch, step.isolate_network) ?? return KitOutcome{verdict: kit_expect_verdict("ERROR", "{err}"), run: kit_exec_failed("{err}")}
     }
     result :: kit_exec_invoke_with_env(policy, args, cwd, scratch, "", overlay)
     failure :: kit_steps_failure(step, result)
