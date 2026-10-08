@@ -447,6 +447,11 @@ the actual emitted module has not disabled its Rust prelude. Actual public
 unsupported stored layouts remain explicitly unadmitted inventory rows; source
 nominals still hard-fail without their typed codec. These rows are port work,
 not permission to retain Rust in the native toolchain.
+Nested declaration bounds/defaults are read with balanced brackets before
+checking supplied arity. Seed types missing a Jet argument identity remain
+explicit unsupported rows with the actual declaration and reason; source
+nominals never receive this exception. Inventory consumers must preserve
+these seed-only rows and assign their runtime port owner.
 Every generated handle helper shares one provider-ownership gate: a name in
 `JetRuntime/exports.list` must have its exact drop, clone, Bool equality, or
 text-render C ABI validated against the Jet declaration before its Rust

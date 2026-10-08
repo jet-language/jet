@@ -549,16 +549,36 @@ const unsupportedGenericCarriers = new Map(); // proved seed TYPEs without a rec
 const unsupportedRawArguments = new Set([...fixedInts, "i64", "i128", "u128", "f32", "char"]);
 const classificationErrors = [];
 let classificationSite = null;
+function declarationParameters(at) {
+  const opener = /^(?:struct|enum)\s+\w+\s*</.exec(text.slice(at, at + 2000));
+  if (!opener) return null;
+  const start = at + opener[0].length;
+  const stack = [">"];
+  const closing = { "<": ">", "(": ")", "[": "]" };
+  for (let end = start; end < text.length; end++) {
+    const char = text[end];
+    if (closing[char]) stack.push(closing[char]);
+    else if (char === stack[stack.length - 1] && !(char === ">" && text[end - 1] === "-")) {
+      stack.pop();
+      if (!stack.length) return splitTop(text.slice(start, end));
+    } else if (char === "{" || char === ";") break;
+  }
+  throw new Error("generic record: unterminated declaration parameters");
+}
 function unsupportedSeedRecord(type, path, reason) {
   const found = declarationOf(qualify(type.replace(/<[\s\S]*>$/, ""), path).replace(/^crate::/, ""));
   if (!found || found.decls.length !== 1 || found.key.split("::").pop().startsWith("__jet_")) return false;
   const decl = found.decls[0];
-  unsupportedGenericCarriers.set(`${found.key}:${type}`, { type, qualified: `crate::${found.key}`,
-    declaration: { kind: decl.kind, path: decl.path, at: decl.at }, reason: `${reason}; actual seed declaration proved, no native record codec` });
+  const key = `${found.key}:${type}`;
+  const previous = unsupportedGenericCarriers.get(key)?.reason;
+  unsupportedGenericCarriers.set(key, { type, qualified: `crate::${found.key}`,
+    declaration: { kind: decl.kind, path: decl.path, at: decl.at },
+    reason: previous && !previous.includes(reason) ? `${previous}; ${reason}` : `${reason}; actual seed declaration proved, no native record codec` });
   return true;
 }
 function classificationFailure(error, type, path, consumer = classificationSite) {
-  if (consumer?.phase?.includes("record") && unsupportedSeedRecord(type, path, error.message)) return;
+  if ((consumer?.phase?.includes("record") || consumer?.phase === "source identity") &&
+      unsupportedSeedRecord(type, path, error.message)) return;
   if (!nativeListOnly) throw error;
   const declaration = declarationOf(qualify(type.replace(/<[\s\S]*>$/, ""), path).replace(/^crate::/, ""));
   classificationErrors.push({ type, reason: error.message, site: {
@@ -600,9 +620,8 @@ function runtimeHandleUnchecked(ty, path) {
   const structural = /^((?:[A-Za-z_]\w*::)*(?:[A-Z]\w*|__jet_\w+))<([\s\S]*)>$/.exec(ty);
   if (structural && /[<>()[\]]/.test(structural[2].replace(/\(\)/g, "")) && resolved?.decls.length === 1) {
     const decl = resolved.decls[0];
-    const head = /^(?:struct|enum)\s+\w+\s*<([^<>]*)>/.exec(text.slice(decl.at, decl.at + 2000));
-    if (head && decl.visible && !decl.gated) {
-      const params = splitTop(head[1]);
+    const params = declarationParameters(decl.at);
+    if (params && decl.visible && !decl.gated) {
       const supplied = splitTop(structural[2]);
       const required = params.filter((param) => !param.includes("=")).length;
       if (supplied.length < required || supplied.length > params.length) throw new Error(`generic record ${ty}: expected ${required}..${params.length} declaration arguments, got ${supplied.length}`);
