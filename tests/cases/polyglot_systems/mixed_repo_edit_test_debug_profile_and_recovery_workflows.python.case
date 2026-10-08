@@ -47,10 +47,10 @@ step: jet perf run run.jet --profile=debug --out {work}/python/profile.jettrace
 cwd: python
 env: NO_COLOR=1
 exit: 0
-file: python/profile.jettrace ~ "\"schema\":\"jet.trace\""
-file: python/profile.jettrace ~ "run.jet"
-file: python/profile.jettrace ~ "source_identity"
-file: python/profile.jettrace !~ "__jet_"
+file: python/profile.jettrace ~ "\"schema\":\"jet.trace\"" # original ed77c235f tests/polyglot_systems.rs:666 shared workflow trace contains schema; Python call1046
+file: python/profile.jettrace ~ "run.jet" # original ed77c235f tests/polyglot_systems.rs:667 shared workflow trace contains source name; Python call1046
+file: python/profile.jettrace ~ "source_identity" # original ed77c235f tests/polyglot_systems.rs:668 shared workflow trace contains source identity; Python call1046
+file: python/profile.jettrace !~ "__jet_" # original ed77c235f tests/polyglot_systems.rs:669 shared workflow trace excludes host wrappers; Python call1046
 step: jet perf view profile.jettrace --json
 cwd: python
 env: NO_COLOR=1

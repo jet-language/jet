@@ -47,10 +47,10 @@ step: jet perf run run.jet --profile=debug --out {work}/js/profile.jettrace
 cwd: js
 env: NO_COLOR=1
 exit: 0
-file: js/profile.jettrace ~ "\"schema\":\"jet.trace\""
-file: js/profile.jettrace ~ "run.jet"
-file: js/profile.jettrace ~ "source_identity"
-file: js/profile.jettrace !~ "__jet_"
+file: js/profile.jettrace ~ "\"schema\":\"jet.trace\"" # original ed77c235f tests/polyglot_systems.rs:666 shared workflow trace contains schema; JS call984
+file: js/profile.jettrace ~ "run.jet" # original ed77c235f tests/polyglot_systems.rs:667 shared workflow trace contains source name; JS call984
+file: js/profile.jettrace ~ "source_identity" # original ed77c235f tests/polyglot_systems.rs:668 shared workflow trace contains source identity; JS call984
+file: js/profile.jettrace !~ "__jet_" # original ed77c235f tests/polyglot_systems.rs:669 shared workflow trace excludes host wrappers; JS call984
 step: jet perf view profile.jettrace --json
 cwd: js
 env: NO_COLOR=1

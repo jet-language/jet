@@ -31,11 +31,11 @@ step: jet inspect bind cpp counter.hpp --target {jet-build-target} --clang {cap:
 cwd: cpp
 env: NO_COLOR=1
 exit: 0
-file: cpp/.jet/bindings/cpp/counter.jet ~ "jet-ffi-descriptor="
+file: cpp/.jet/bindings/cpp/counter.jet ~ "jet-ffi-descriptor=" # original ed77c235f tests/polyglot_systems.rs:827-829 generated C++ cache contains descriptor
 file: cpp/.jet/bindings/cpp/counter.provenance ~ "schema=jet-ffi-bridge-provenance-v1\n" # original common provenance
 file: cpp/.jet/bindings/cpp/counter.provenance line ^= "identity=" # original any line starts identity
-file: cpp/.jet/bindings/cpp/counter.provenance ~ "linked-archive="
-file: cpp/.jet/bindings/cpp/counter.provenance ~ "linked-archive-sha256="
+file: cpp/.jet/bindings/cpp/counter.provenance ~ "linked-archive=" # original ed77c235f tests/polyglot_systems.rs:833 C++ provenance contains linked archive
+file: cpp/.jet/bindings/cpp/counter.provenance ~ "linked-archive-sha256=" # original ed77c235f tests/polyglot_systems.rs:834 C++ provenance contains linked archive digest
 file: cpp/.jet/bindings/cpp/counter.link is-file
 copy: cpp/libcounter_impl.a archive.before
 append: cpp/libcounter_impl.a "\u0000" # original changed_archive.push(0)
@@ -75,10 +75,10 @@ step: jet perf run run.jet --profile=debug --out {work}/cpp/profile.jettrace
 cwd: cpp
 env: NO_COLOR=1
 exit: 0
-file: cpp/profile.jettrace ~ "\"schema\":\"jet.trace\""
-file: cpp/profile.jettrace ~ "run.jet"
-file: cpp/profile.jettrace ~ "source_identity"
-file: cpp/profile.jettrace !~ "__jet_"
+file: cpp/profile.jettrace ~ "\"schema\":\"jet.trace\"" # original ed77c235f tests/polyglot_systems.rs:666 shared workflow trace contains schema; C++ call853
+file: cpp/profile.jettrace ~ "run.jet" # original ed77c235f tests/polyglot_systems.rs:667 shared workflow trace contains source name; C++ call853
+file: cpp/profile.jettrace ~ "source_identity" # original ed77c235f tests/polyglot_systems.rs:668 shared workflow trace contains source identity; C++ call853
+file: cpp/profile.jettrace !~ "__jet_" # original ed77c235f tests/polyglot_systems.rs:669 shared workflow trace excludes host wrappers; C++ call853
 step: jet perf view profile.jettrace --json
 cwd: cpp
 env: NO_COLOR=1

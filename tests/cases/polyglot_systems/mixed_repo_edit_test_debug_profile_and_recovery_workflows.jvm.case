@@ -54,10 +54,10 @@ cwd: jvm
 env: NO_COLOR=1
 env: JAVA_HOME={cap:java_home}
 exit: 0
-file: jvm/profile.jettrace ~ "\"schema\":\"jet.trace\""
-file: jvm/profile.jettrace ~ "run.jet"
-file: jvm/profile.jettrace ~ "source_identity"
-file: jvm/profile.jettrace !~ "__jet_"
+file: jvm/profile.jettrace ~ "\"schema\":\"jet.trace\"" # original ed77c235f tests/polyglot_systems.rs:666 shared workflow trace contains schema; JVM call929
+file: jvm/profile.jettrace ~ "run.jet" # original ed77c235f tests/polyglot_systems.rs:667 shared workflow trace contains source name; JVM call929
+file: jvm/profile.jettrace ~ "source_identity" # original ed77c235f tests/polyglot_systems.rs:668 shared workflow trace contains source identity; JVM call929
+file: jvm/profile.jettrace !~ "__jet_" # original ed77c235f tests/polyglot_systems.rs:669 shared workflow trace excludes host wrappers; JVM call929
 step: jet perf view profile.jettrace --json
 cwd: jvm
 env: NO_COLOR=1
