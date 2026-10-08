@@ -221,6 +221,33 @@ fn kit_steps_parse(source: String) -> KitPlan {
             return plan
         }
         i :: plan.steps.len() - 1
+        if key == "env-clear" {
+            if value != "true" || plan.steps[i].env_clear || (plan.steps[i].action != "" && plan.steps[i].action != "spawn") {
+                plan.error = "line {line_number}: env-clear needs true once on a process step"
+                return plan
+            }
+            plan.steps[i].env_clear = true
+            next
+        }
+        if key == "isolate" {
+            isolation :: kit_steps_words(value) ?? []
+            if isolation.len() < 1 || isolation.len() > 2 || isolation[0] != "no-nix" {
+                plan.error = "line {line_number}: isolate needs no-nix [network=enabled|disabled]"
+                return plan
+            }
+            if plan.steps[i].isolate != "" || (plan.steps[i].action != "" && plan.steps[i].action != "spawn") {
+                plan.error = "line {line_number}: isolate requires a process step and may occur only once"
+                return plan
+            }
+            network :: if isolation.len() == 1 -> "disabled" else -> isolation[1].replace("network=", "")
+            if isolation.len() == 2 && isolation[1] != "network=enabled" && isolation[1] != "network=disabled" {
+                plan.error = "line {line_number}: isolate network must be enabled or disabled"
+                return plan
+            }
+            plan.steps[i].isolate = "no-nix"
+            plan.steps[i].isolate_network = network
+            next
+        }
         if key == "cwd" {
             path :: kit_steps_words(value) ?? []
             if path.len() != 1 || !kit_steps_relative_path(path[0]) {
@@ -387,6 +414,12 @@ fn kit_steps_required(plan: KitPlan, env: KitEnv, work: String, scratch: String)
         missing :: kit_exec_requires(requirement, env, work, scratch)
         if missing != None -> return missing
     }
+    loop step in plan.steps {
+        if step.isolate == "no-nix" {
+            missing :: kit_no_nix_required()
+            if missing != None -> return missing
+        }
+    }
     None
 }
 
@@ -433,9 +466,10 @@ fn kit_steps_invoke_step(step: KitStep, env: KitEnv, work: String, scratch: Stri
 }
 
 fn kit_steps_prepare(step: KitStep, env: KitEnv, work: String, scratch: String, snapshots: String, built: String, overlay: [KitEnvVar]) -> KitProcessInput String! {
+    policy :: kit_steps_policy(step, env) ?? return Err("time limit outside Duration range")
     environment :: kit_steps_step_environment(step, env, work, scratch, built, overlay)
     argv := [String]{}
-    loop argument in step.argv -> &argv.push(kit_steps_argv_env(kit_steps_expand(argument, env, work, scratch, built), env, scratch, environment))
+    loop argument in step.argv -> &argv.push(kit_steps_argv_env(kit_steps_expand(argument, env, work, scratch, built), policy, scratch, environment))
     if argv[0] == "jet" -> argv[0] = env.jet
     if argv[0] == "jetpack" {
         if env.jetpack == "" -> return Err("jetpack binary required")
@@ -447,12 +481,16 @@ fn kit_steps_prepare(step: KitStep, env: KitEnv, work: String, scratch: String, 
     }
     stdin :: if step.stdin == "" -> "" else -> files.read(files.join(snapshots, step.stdin)) ?? return Err("stdin snapshot: {err}")
     cwd :: if step.cwd == "" -> work else -> kit_steps_work_path(step.cwd, env, work, scratch, built) ?? return Err("cwd escapes work directory")
-    policy :: kit_steps_policy(step, env) ?? return Err("time limit outside Duration range")
+    if step.isolate == "no-nix" {
+        bootstrap :: if step.action == "spawn" -> files.join(scratch, "child-{step.label}") else -> scratch
+        argv = kit_no_nix_argv(policy, argv, bootstrap, step.isolate_network) ?? return Err(err)
+    }
     Ok(KitProcessInput{argv: argv, cwd: cwd, stdin: stdin, env: policy, overlay: environment})
 }
 
 fn kit_steps_policy(step: KitStep, env: KitEnv) -> KitEnv? {
     policy := env
+    policy.env_clear = step.env_clear
     if step.limit_time > 0 -> policy.timeout = Duration.seconds(step.limit_time) ?? return None
     if step.limit_memory > 0 -> policy.memory_limit = step.limit_memory
     Val(policy)
@@ -461,6 +499,8 @@ fn kit_steps_policy(step: KitStep, env: KitEnv) -> KitEnv? {
 fn kit_steps_failure(step: KitStep, result: KitRun) -> KitVerdict? {
     if step.limit_time > 0 && (result.timed_out || result.limit_hit == "time") -> return Val(kit_expect_verdict("FAIL", "limit hit: time={step.limit_time}s"))
     if step.limit_memory > 0 && result.limit_hit == "memory" -> return Val(kit_expect_verdict("FAIL", "limit hit: memory={step.limit_memory}KiB"))
+    isolated :: kit_no_nix_failure(step, result)
+    if isolated != None -> return isolated
     if result.code == 101 && (Int.parse(step.exit) ?? -1) == 101 && result.error == "" && !result.timed_out && result.signal == None -> return None
     kit_exec_process_failure(result)
 }

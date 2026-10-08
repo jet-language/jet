@@ -1,0 +1,771 @@
+# Port of tests/jetpack_dogfood.rs:26-83, command/run_phase:93-186.
+# The original is ignored: opt in to live signed-cache downloads and a real
+# compiler build, setting JETPACK_DOGFOOD=1 and JETPACK_DOGFOOD_TARGET_DIR.
+# {work} is the kit's fresh, disk-backed coordinated root; never a warm Hangar.
+# PENDING-GRAMMAR(batch-four): capture text, quoted JSON keys, object has/!has,
+# mkdir/symlink setup and ELF raw-byte prefix (must not UTF-8 decode the image).
+requires: env:JETPACK_DOGFOOD=1
+fixture: fixtures/no-nix
+env: JETPACK_ROOT={work}/store
+step: sh -eu -c 'test "${JETPACK_FIXTURES+x}" != x'
+step: realpath {work}
+capture: dogfood_root = text stdout.trim
+step: sh -eu -c 'case "$1" in /tmp|/tmp/*) exit 1;; /*) ;; *) exit 1;; esac' scenario {cap:dogfood_root}
+step: sh -eu -c 'case "$1" in /*) ;; *) exit 1;; esac; test -d "$1"' scenario {env:JETPACK_DOGFOOD_TARGET_DIR|}
+step: realpath {env:JETPACK_DOGFOOD_TARGET_DIR|}
+capture: target = text stdout.trim
+step: test -d {cap:target}
+step: sh -eu -c 'case "$1" in /tmp|/tmp/*) exit 1;; /*) ;; *) exit 1;; esac' scenario {cap:target}
+step: sh -eu -c 'printf %s "${CARGO_HOME:-$HOME/.cargo}"'
+capture: cargo_home = text stdout
+file: project absent
+file: store absent
+mkdir: project
+mkdir: home
+mkdir: tmp
+# Match the original source projection: copy env.jet; symlink the remaining
+# repository entries except .git/.jet/target/target-*; share only build target.
+copy: {root}/env.jet {work}/project/env.jet
+symlink: {root}/AGENTS.md project/AGENTS.md
+symlink: {root}/CONTRIBUTING.md project/CONTRIBUTING.md
+symlink: {root}/Cargo.lock project/Cargo.lock
+symlink: {root}/Cargo.toml project/Cargo.toml
+symlink: {root}/Core project/Core
+symlink: {root}/Compiler project/Compiler
+symlink: {root}/Docs project/Docs
+symlink: {root}/Examples project/Examples
+symlink: {root}/Jetpack project/Jetpack
+symlink: {root}/LICENSE project/LICENSE
+symlink: {root}/README.md project/README.md
+symlink: {root}/SECURITY.md project/SECURITY.md
+symlink: {root}/Source project/Source
+symlink: {root}/Tools project/Tools
+symlink: {root}/U64{max} project/U64{max}
+symlink: {root}/build.rs project/build.rs
+symlink: {root}/clippy.toml project/clippy.toml
+symlink: {root}/crates project/crates
+symlink: {root}/flake.lock project/flake.lock
+symlink: {root}/flake.nix project/flake.nix
+symlink: {root}/skills-lock.json project/skills-lock.json
+symlink: {root}/tests project/tests
+symlink: {root}/.agents project/.agents
+symlink: {root}/.envrc project/.envrc
+symlink: {root}/.github project/.github
+symlink: {root}/.gitignore project/.gitignore
+symlink: {cap:target} project/target
+step: jetpack update default --env compiler --yes --local-nix-catalog {root}/crates/jetpack/catalogs/jet-dev
+cwd: project
+isolate: no-nix network=enabled
+env-clear: true
+env: PATH=
+env: HOME={work}/home
+env: TMPDIR={work}/tmp
+env: JETPACK_NIX_FALLBACK_POLICY=deny
+env: CARGO_TARGET_DIR={cap:target}
+env: CARGO_INCREMENTAL=0
+env: CARGO_BUILD_JOBS=2
+env: CARGO_NET_OFFLINE=true
+env: CARGO_HOME={cap:cargo_home}
+env: RUST_MIN_STACK=8388608
+env: NO_COLOR=1
+exit: 0
+step online-tools: jetpack env --env compiler --trust --yes --local-nix-catalog {root}/crates/jetpack/catalogs/jet-dev -- bash -eu {work}/probe.sh
+cwd: project
+isolate: no-nix network=enabled
+env-clear: true
+env: PATH=
+env: HOME={work}/home
+env: TMPDIR={work}/tmp
+env: JETPACK_NIX_FALLBACK_POLICY=deny
+env: CARGO_TARGET_DIR={cap:target}
+env: CARGO_INCREMENTAL=0
+env: CARGO_BUILD_JOBS=2
+env: CARGO_NET_OFFLINE=true
+env: CARGO_HOME={cap:cargo_home}
+env: RUST_MIN_STACK=8388608
+env: NO_COLOR=1
+exit: 0
+stdout: $= "JETPACK_NATIVE_TOOLS_OK\n" # original predicate: native tool probe must finish
+step: jetpack env --env compiler --trust --yes --local-nix-catalog {root}/crates/jetpack/catalogs/jet-dev -- cargo build --locked --offline --bin jet -j 2
+cwd: project
+isolate: no-nix network=enabled
+env-clear: true
+env: PATH=
+env: HOME={work}/home
+env: TMPDIR={work}/tmp
+env: JETPACK_NIX_FALLBACK_POLICY=deny
+env: CARGO_TARGET_DIR={cap:target}
+env: CARGO_INCREMENTAL=0
+env: CARGO_BUILD_JOBS=2
+env: CARGO_NET_OFFLINE=true
+env: CARGO_HOME={cap:cargo_home}
+env: RUST_MIN_STACK=8388608
+env: NO_COLOR=1
+exit: 0
+# File::read_exact first 4 bytes proves the executable is ELF, not a shell stub.
+file: {work}/project/target/debug/jet ^= "\u007fELF" # original predicate: first four bytes are ELF, not a shell fixture
+step online-compiler-smoke: jetpack env --env compiler --trust --yes --local-nix-catalog {root}/crates/jetpack/catalogs/jet-dev -- {cap:target}/debug/jet run Examples/features/basics/hello.jet
+cwd: project
+isolate: no-nix network=enabled
+env-clear: true
+env: PATH=
+env: HOME={work}/home
+env: TMPDIR={work}/tmp
+env: JETPACK_NIX_FALLBACK_POLICY=deny
+env: CARGO_TARGET_DIR={cap:target}
+env: CARGO_INCREMENTAL=0
+env: CARGO_BUILD_JOBS=2
+env: CARGO_NET_OFFLINE=true
+env: CARGO_HOME={cap:cargo_home}
+env: RUST_MIN_STACK=8388608
+env: NO_COLOR=1
+exit: 0
+stdout.trim: = hello.out
+# All 36 env.compiler package references (env.jet:22-26), not one sample.
+step: jetpack explain cargo@nixpkgs --json
+cwd: project
+isolate: no-nix network=enabled
+json: stdout doc $.explain.entry.reference = "cargo@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain rustc@nixpkgs --json
+cwd: project
+isolate: no-nix network=enabled
+json: stdout doc $.explain.entry.reference = "rustc@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain clippy@nixpkgs --json
+cwd: project
+isolate: no-nix network=enabled
+json: stdout doc $.explain.entry.reference = "clippy@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain rustfmt@nixpkgs --json
+cwd: project
+isolate: no-nix network=enabled
+json: stdout doc $.explain.entry.reference = "rustfmt@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain sccache@nixpkgs --json
+cwd: project
+isolate: no-nix network=enabled
+json: stdout doc $.explain.entry.reference = "sccache@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain gcc@nixpkgs --json
+cwd: project
+isolate: no-nix network=enabled
+json: stdout doc $.explain.entry.reference = "gcc@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain clang@nixpkgs --json
+cwd: project
+isolate: no-nix network=enabled
+json: stdout doc $.explain.entry.reference = "clang@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain lld@nixpkgs --json
+cwd: project
+isolate: no-nix network=enabled
+json: stdout doc $.explain.entry.reference = "lld@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain pkg-config@nixpkgs --json
+cwd: project
+isolate: no-nix network=enabled
+json: stdout doc $.explain.entry.reference = "pkg-config@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain cmake@nixpkgs --json
+cwd: project
+isolate: no-nix network=enabled
+json: stdout doc $.explain.entry.reference = "cmake@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain gnumake@nixpkgs --json
+cwd: project
+isolate: no-nix network=enabled
+json: stdout doc $.explain.entry.reference = "gnumake@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain coreutils@nixpkgs --json
+cwd: project
+isolate: no-nix network=enabled
+json: stdout doc $.explain.entry.reference = "coreutils@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain findutils@nixpkgs --json
+cwd: project
+isolate: no-nix network=enabled
+json: stdout doc $.explain.entry.reference = "findutils@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain gnugrep@nixpkgs --json
+cwd: project
+isolate: no-nix network=enabled
+json: stdout doc $.explain.entry.reference = "gnugrep@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain gnused@nixpkgs --json
+cwd: project
+isolate: no-nix network=enabled
+json: stdout doc $.explain.entry.reference = "gnused@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain gawk@nixpkgs --json
+cwd: project
+isolate: no-nix network=enabled
+json: stdout doc $.explain.entry.reference = "gawk@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain diffutils@nixpkgs --json
+cwd: project
+isolate: no-nix network=enabled
+json: stdout doc $.explain.entry.reference = "diffutils@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain patch@nixpkgs --json
+cwd: project
+isolate: no-nix network=enabled
+json: stdout doc $.explain.entry.reference = "patch@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain bashInteractive@nixpkgs --json
+cwd: project
+isolate: no-nix network=enabled
+json: stdout doc $.explain.entry.reference = "bashInteractive@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain git@nixpkgs --json
+cwd: project
+isolate: no-nix network=enabled
+json: stdout doc $.explain.entry.reference = "git@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain curl@nixpkgs --json
+cwd: project
+isolate: no-nix network=enabled
+json: stdout doc $.explain.entry.reference = "curl@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain cacert@nixpkgs --json
+cwd: project
+isolate: no-nix network=enabled
+json: stdout doc $.explain.entry.reference = "cacert@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain nodejs_22@nixpkgs --json
+cwd: project
+isolate: no-nix network=enabled
+json: stdout doc $.explain.entry.reference = "nodejs_22@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain python3@nixpkgs --json
+cwd: project
+isolate: no-nix network=enabled
+json: stdout doc $.explain.entry.reference = "python3@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain ripgrep@nixpkgs --json
+cwd: project
+isolate: no-nix network=enabled
+json: stdout doc $.explain.entry.reference = "ripgrep@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain jq@nixpkgs --json
+cwd: project
+isolate: no-nix network=enabled
+json: stdout doc $.explain.entry.reference = "jq@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain gh@nixpkgs --json
+cwd: project
+isolate: no-nix network=enabled
+json: stdout doc $.explain.entry.reference = "gh@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain fd@nixpkgs --json
+cwd: project
+isolate: no-nix network=enabled
+json: stdout doc $.explain.entry.reference = "fd@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain util-linux@nixpkgs --json
+cwd: project
+isolate: no-nix network=enabled
+json: stdout doc $.explain.entry.reference = "util-linux@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain bubblewrap@nixpkgs --json
+cwd: project
+isolate: no-nix network=enabled
+json: stdout doc $.explain.entry.reference = "bubblewrap@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain tzdata@nixpkgs --json
+cwd: project
+isolate: no-nix network=enabled
+json: stdout doc $.explain.entry.reference = "tzdata@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain vulkan-loader@nixpkgs --json
+cwd: project
+isolate: no-nix network=enabled
+json: stdout doc $.explain.entry.reference = "vulkan-loader@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain wasm-tools@nixpkgs --json
+cwd: project
+isolate: no-nix network=enabled
+json: stdout doc $.explain.entry.reference = "wasm-tools@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain tree-sitter@nixpkgs --json
+cwd: project
+isolate: no-nix network=enabled
+json: stdout doc $.explain.entry.reference = "tree-sitter@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain zsh@nixpkgs --json
+cwd: project
+isolate: no-nix network=enabled
+json: stdout doc $.explain.entry.reference = "zsh@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain fish@nixpkgs --json
+cwd: project
+isolate: no-nix network=enabled
+json: stdout doc $.explain.entry.reference = "fish@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack hangar du --json
+cwd: project
+isolate: no-nix network=enabled
+env-clear: true
+env: PATH=
+env: HOME={work}/home
+env: TMPDIR={work}/tmp
+env: JETPACK_NIX_FALLBACK_POLICY=deny
+env: CARGO_TARGET_DIR={cap:target}
+env: CARGO_INCREMENTAL=0
+env: CARGO_BUILD_JOBS=2
+env: CARGO_NET_OFFLINE=true
+env: CARGO_HOME={cap:cargo_home}
+env: RUST_MIN_STACK=8388608
+env: NO_COLOR=1
+exit: 0
+copy: project/.jet/lock online.lock
+mkdir: replaced-catalog
+step offline-tools: jetpack env --env compiler --trust --yes --offline --local-nix-catalog {work}/replaced-catalog -- bash -eu {work}/probe.sh
+cwd: project
+isolate: no-nix network=disabled
+env-clear: true
+env: PATH=
+env: HOME={work}/home
+env: TMPDIR={work}/tmp
+env: JETPACK_NIX_FALLBACK_POLICY=deny
+env: CARGO_TARGET_DIR={cap:target}
+env: CARGO_INCREMENTAL=0
+env: CARGO_BUILD_JOBS=2
+env: CARGO_NET_OFFLINE=true
+env: CARGO_HOME={cap:cargo_home}
+env: RUST_MIN_STACK=8388608
+env: NO_COLOR=1
+exit: 0
+stdout: $= "JETPACK_NATIVE_TOOLS_OK\n" # original predicate: native tool probe must finish
+file: {work}/project/target/debug/jet ^= "\u007fELF" # original predicate: first four bytes are ELF, not a shell fixture
+step offline-compiler-smoke: jetpack env --env compiler --trust --yes --offline --local-nix-catalog {work}/replaced-catalog -- {cap:target}/debug/jet run Examples/features/basics/hello.jet
+cwd: project
+isolate: no-nix network=disabled
+env-clear: true
+env: PATH=
+env: HOME={work}/home
+env: TMPDIR={work}/tmp
+env: JETPACK_NIX_FALLBACK_POLICY=deny
+env: CARGO_TARGET_DIR={cap:target}
+env: CARGO_INCREMENTAL=0
+env: CARGO_BUILD_JOBS=2
+env: CARGO_NET_OFFLINE=true
+env: CARGO_HOME={cap:cargo_home}
+env: RUST_MIN_STACK=8388608
+env: NO_COLOR=1
+exit: 0
+stdout.trim: = hello.out
+step: jetpack explain cargo@nixpkgs --json
+cwd: project
+isolate: no-nix network=disabled
+json: stdout doc $.explain.entry.reference = "cargo@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain rustc@nixpkgs --json
+cwd: project
+isolate: no-nix network=disabled
+json: stdout doc $.explain.entry.reference = "rustc@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain clippy@nixpkgs --json
+cwd: project
+isolate: no-nix network=disabled
+json: stdout doc $.explain.entry.reference = "clippy@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain rustfmt@nixpkgs --json
+cwd: project
+isolate: no-nix network=disabled
+json: stdout doc $.explain.entry.reference = "rustfmt@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain sccache@nixpkgs --json
+cwd: project
+isolate: no-nix network=disabled
+json: stdout doc $.explain.entry.reference = "sccache@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain gcc@nixpkgs --json
+cwd: project
+isolate: no-nix network=disabled
+json: stdout doc $.explain.entry.reference = "gcc@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain clang@nixpkgs --json
+cwd: project
+isolate: no-nix network=disabled
+json: stdout doc $.explain.entry.reference = "clang@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain lld@nixpkgs --json
+cwd: project
+isolate: no-nix network=disabled
+json: stdout doc $.explain.entry.reference = "lld@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain pkg-config@nixpkgs --json
+cwd: project
+isolate: no-nix network=disabled
+json: stdout doc $.explain.entry.reference = "pkg-config@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain cmake@nixpkgs --json
+cwd: project
+isolate: no-nix network=disabled
+json: stdout doc $.explain.entry.reference = "cmake@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain gnumake@nixpkgs --json
+cwd: project
+isolate: no-nix network=disabled
+json: stdout doc $.explain.entry.reference = "gnumake@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain coreutils@nixpkgs --json
+cwd: project
+isolate: no-nix network=disabled
+json: stdout doc $.explain.entry.reference = "coreutils@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain findutils@nixpkgs --json
+cwd: project
+isolate: no-nix network=disabled
+json: stdout doc $.explain.entry.reference = "findutils@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain gnugrep@nixpkgs --json
+cwd: project
+isolate: no-nix network=disabled
+json: stdout doc $.explain.entry.reference = "gnugrep@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain gnused@nixpkgs --json
+cwd: project
+isolate: no-nix network=disabled
+json: stdout doc $.explain.entry.reference = "gnused@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain gawk@nixpkgs --json
+cwd: project
+isolate: no-nix network=disabled
+json: stdout doc $.explain.entry.reference = "gawk@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain diffutils@nixpkgs --json
+cwd: project
+isolate: no-nix network=disabled
+json: stdout doc $.explain.entry.reference = "diffutils@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain patch@nixpkgs --json
+cwd: project
+isolate: no-nix network=disabled
+json: stdout doc $.explain.entry.reference = "patch@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain bashInteractive@nixpkgs --json
+cwd: project
+isolate: no-nix network=disabled
+json: stdout doc $.explain.entry.reference = "bashInteractive@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain git@nixpkgs --json
+cwd: project
+isolate: no-nix network=disabled
+json: stdout doc $.explain.entry.reference = "git@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain curl@nixpkgs --json
+cwd: project
+isolate: no-nix network=disabled
+json: stdout doc $.explain.entry.reference = "curl@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain cacert@nixpkgs --json
+cwd: project
+isolate: no-nix network=disabled
+json: stdout doc $.explain.entry.reference = "cacert@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain nodejs_22@nixpkgs --json
+cwd: project
+isolate: no-nix network=disabled
+json: stdout doc $.explain.entry.reference = "nodejs_22@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain python3@nixpkgs --json
+cwd: project
+isolate: no-nix network=disabled
+json: stdout doc $.explain.entry.reference = "python3@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain ripgrep@nixpkgs --json
+cwd: project
+isolate: no-nix network=disabled
+json: stdout doc $.explain.entry.reference = "ripgrep@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain jq@nixpkgs --json
+cwd: project
+isolate: no-nix network=disabled
+json: stdout doc $.explain.entry.reference = "jq@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain gh@nixpkgs --json
+cwd: project
+isolate: no-nix network=disabled
+json: stdout doc $.explain.entry.reference = "gh@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain fd@nixpkgs --json
+cwd: project
+isolate: no-nix network=disabled
+json: stdout doc $.explain.entry.reference = "fd@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain util-linux@nixpkgs --json
+cwd: project
+isolate: no-nix network=disabled
+json: stdout doc $.explain.entry.reference = "util-linux@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain bubblewrap@nixpkgs --json
+cwd: project
+isolate: no-nix network=disabled
+json: stdout doc $.explain.entry.reference = "bubblewrap@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain tzdata@nixpkgs --json
+cwd: project
+isolate: no-nix network=disabled
+json: stdout doc $.explain.entry.reference = "tzdata@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain vulkan-loader@nixpkgs --json
+cwd: project
+isolate: no-nix network=disabled
+json: stdout doc $.explain.entry.reference = "vulkan-loader@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain wasm-tools@nixpkgs --json
+cwd: project
+isolate: no-nix network=disabled
+json: stdout doc $.explain.entry.reference = "wasm-tools@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain tree-sitter@nixpkgs --json
+cwd: project
+isolate: no-nix network=disabled
+json: stdout doc $.explain.entry.reference = "tree-sitter@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain zsh@nixpkgs --json
+cwd: project
+isolate: no-nix network=disabled
+json: stdout doc $.explain.entry.reference = "zsh@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack explain fish@nixpkgs --json
+cwd: project
+isolate: no-nix network=disabled
+json: stdout doc $.explain.entry.reference = "fish@nixpkgs"
+json: stdout doc $.explain.provider.producer_facts["nix.index.revision"] = "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts has "nix.cache.closure.receipt.sha256" # original predicate: contains_key, empty is permitted
+json: stdout doc $.explain.provider.producer_facts !has "nix.fallback.provenance" # original predicate: no fallback provenance
+step: jetpack hangar du --json
+cwd: project
+isolate: no-nix network=disabled
+env-clear: true
+env: PATH=
+env: HOME={work}/home
+env: TMPDIR={work}/tmp
+env: JETPACK_NIX_FALLBACK_POLICY=deny
+env: CARGO_TARGET_DIR={cap:target}
+env: CARGO_INCREMENTAL=0
+env: CARGO_BUILD_JOBS=2
+env: CARGO_NET_OFFLINE=true
+env: CARGO_HOME={cap:cargo_home}
+env: RUST_MIN_STACK=8388608
+env: NO_COLOR=1
+exit: 0
+file: project/.jet/lock == online.lock
+file: home/.jet/trust absent

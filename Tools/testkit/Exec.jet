@@ -43,6 +43,7 @@ fn kit_exec_failed(message: String) -> KitRun {
 }
 
 fn kit_exec_base_value(name: String, env: KitEnv, scratch: String) -> String? {
+    if env.env_clear -> return None
     if {
         name == "JET_COMPILER_EXTENSION" -> None
         name == "NO_COLOR" || name == "JET_RECEIPT_BYPASS" -> Val("1")
@@ -61,20 +62,23 @@ fn kit_exec_base_value(name: String, env: KitEnv, scratch: String) -> String? {
 // Inherit the caller's environment, removing only the compiler-extension hook.
 // Cache roots are run-wide; temporary, schema and jetpack roots are case-local.
 fn kit_exec_spec(env: KitEnv, argv: [String], cwd: String, scratch: String, overlay: [KitEnvVar]) -> ProcessSpec {
-    spec := process.cmd(argv).cwd(cwd).stdout(.Capture).stderr(.Capture).stdin(.Stream)
-        .timeout(env.timeout).env_remove("JET_COMPILER_EXTENSION")
-        .env("NO_COLOR", kit_exec_base_value("NO_COLOR", env, scratch) ?? "")
-        .env("CLICOLOR", kit_exec_base_value("CLICOLOR", env, scratch) ?? "")
-        .env("TERM", kit_exec_base_value("TERM", env, scratch) ?? "")
-        .env("JET_RECEIPT_BYPASS", kit_exec_base_value("JET_RECEIPT_BYPASS", env, scratch) ?? "")
-        .env("JET_REPL_HISTORY", kit_exec_base_value("JET_REPL_HISTORY", env, scratch) ?? "")
-        .env("JET_STORE_DIR", kit_exec_base_value("JET_STORE_DIR", env, scratch) ?? "")
-        .env("JET_FFI_CACHE_DIR", kit_exec_base_value("JET_FFI_CACHE_DIR", env, scratch) ?? "")
-        .env("TMPDIR", kit_exec_base_value("TMPDIR", env, scratch) ?? "")
-        .env("TMP", kit_exec_base_value("TMP", env, scratch) ?? "")
-        .env("TEMP", kit_exec_base_value("TEMP", env, scratch) ?? "")
-        .env("JETPACK_ROOT", kit_exec_base_value("JETPACK_ROOT", env, scratch) ?? "")
-        .env("JET_SCHEMA_CACHE_DIR", kit_exec_base_value("JET_SCHEMA_CACHE_DIR", env, scratch) ?? "")
+    spec := process.cmd(argv).cwd(cwd).stdout(.Capture).stderr(.Capture).stdin(.Stream).timeout(env.timeout)
+    if env.env_clear -> spec = spec.env_clear()
+    else {
+        spec = spec.env_remove("JET_COMPILER_EXTENSION")
+            .env("NO_COLOR", kit_exec_base_value("NO_COLOR", env, scratch) ?? "")
+            .env("CLICOLOR", kit_exec_base_value("CLICOLOR", env, scratch) ?? "")
+            .env("TERM", kit_exec_base_value("TERM", env, scratch) ?? "")
+            .env("JET_RECEIPT_BYPASS", kit_exec_base_value("JET_RECEIPT_BYPASS", env, scratch) ?? "")
+            .env("JET_REPL_HISTORY", kit_exec_base_value("JET_REPL_HISTORY", env, scratch) ?? "")
+            .env("JET_STORE_DIR", kit_exec_base_value("JET_STORE_DIR", env, scratch) ?? "")
+            .env("JET_FFI_CACHE_DIR", kit_exec_base_value("JET_FFI_CACHE_DIR", env, scratch) ?? "")
+            .env("TMPDIR", kit_exec_base_value("TMPDIR", env, scratch) ?? "")
+            .env("TMP", kit_exec_base_value("TMP", env, scratch) ?? "")
+            .env("TEMP", kit_exec_base_value("TEMP", env, scratch) ?? "")
+            .env("JETPACK_ROOT", kit_exec_base_value("JETPACK_ROOT", env, scratch) ?? "")
+            .env("JET_SCHEMA_CACHE_DIR", kit_exec_base_value("JET_SCHEMA_CACHE_DIR", env, scratch) ?? "")
+    }
     if env.memory_limit > 0 -> spec = spec.memory_limit(env.memory_limit)
     loop variable in overlay {
         if variable.value == {

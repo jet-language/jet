@@ -61,6 +61,9 @@ fn kit_steps_resolve_step(original: KitStep, context: KitStepCtx, state: KitStep
             if pending.label == step.label {
                 if step.limit_time == 0 -> step.limit_time = pending.step.limit_time
                 if step.limit_memory == 0 -> step.limit_memory = pending.step.limit_memory
+                step.isolate = pending.step.isolate
+                step.isolate_network = pending.step.isolate_network
+                step.env_clear = pending.step.env_clear
                 if original.replacements.len() == 0 -> step.replacements = pending.step.replacements
                 rules := pending.step.json_normalize
                 loop rule in step.json_normalize -> &rules.push(rule)

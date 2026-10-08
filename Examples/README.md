@@ -51,6 +51,22 @@ using it without a preceding build is a parse error.
 In argv only, `{env:NAME|default}` reads the effective environment after
 those overlays and unsets; unset or empty values expand to `default`.
 
+`env-clear: true` starts a process step without the caller's environment or
+kit defaults; explicit case and step `env:` overlays still apply, followed
+by `unset:`. On Linux, `isolate: no-nix` hides the host Nix store and disables
+networking for that step. Use `isolate: no-nix network=enabled` for an online
+phase. Both modes stage the executable's runtime closure outside `/nix`,
+hold the ELF loader on `/proc/self/fd/9`, and re-exec the resolved argv after
+mounting an empty tmpfs over `/nix`. Missing Linux or `unshare` is `SKIP-HOST`;
+namespace or runtime-staging failure is `ERROR`, never an unisolated run.
+
+The no-Nix cached-entry and signed-index repair cases use isolated offline
+steps. The repository compiler dogfood case is opt-in: set
+`JETPACK_DOGFOOD=1` and `JETPACK_DOGFOOD_TARGET_DIR` to an existing absolute,
+disk-backed target directory outside `/tmp`. It uses a fresh kit scratch
+project and Hangar, then replays the same lock without network or catalog
+discovery; it never treats a warm package store as the cold proof.
+
 `limit: time=SECONDS memory=KiB` bounds a step, with an explicit limit hit
 reported as `FAIL`. `elapsed: B <= FACTOR * A` compares captured monotonic
 durations for labelled steps. `normalize: version` replaces the exact
