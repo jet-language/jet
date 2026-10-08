@@ -263,6 +263,8 @@ fn lower_render_payload_info(p: MIRProgram, definition: MIRTypeDef, variant_name
 
 fn lower_helper_display(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     if lower_set_element(glue.ty) != None -> return lower_helper_set_render(p, &m, glue)
+    if lower_queue_element(glue.ty) != None -> return lower_helper_queue(p, &m, glue)
+    if lower_priority_queue_element(glue.ty) != None -> return lower_helper_priority_queue_render(p, &m, glue)
     layout :: lower_repr_layout(lower_repr(p, glue.ty)) ?? lir_layout_pointer()
     f := lower_helper_start(&m, glue, [LIRLayout]{layout}, Val(lir_layout_pointer()))
     operand :: ~f.open_params[0]
