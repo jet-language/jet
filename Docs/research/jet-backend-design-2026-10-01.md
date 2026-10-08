@@ -2155,6 +2155,18 @@ with `--wrap=jet_rt_free`. Its `.stdout` file is expected output, not an
 execution receipt. Whole-unit seed suppression and native caller/import/layout
 admission remain composition gates.
 
+`ServiceEnums.jet` uses those same enum-owner helpers for the private
+JetServiceRestart and JetServiceDelivery handles. Declaration-order tags
+from `Services.rs:39-44,92-96` render exactly `OneForOne`, `OneForAll`,
+`RestForOne` and `AtMostOnce`, `DurableAtLeastOnce`; show and display agree.
+These are native providers, not Core source-module registrations or Rust
+enum layout aliases. `ServiceEnumsWitness.c` checks every tag, pairwise
+equality, independent borrowed-input cloning, independent rendered owners,
+null drop and exact-once shell frees against real providers with
+`--wrap=jet_rt_free`. Its stdout fixture is an expectation, not an execution
+receipt. Native layout/MIR/import admission, seed-body suppression and actual
+link/execution remain the same composition gates.
+
 ### Native UI scalar and record carriers
 
 `UiCarriersABI.jet` in JetBackend/Source defines opaque native-private
