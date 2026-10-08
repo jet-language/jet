@@ -1323,6 +1323,10 @@ fn sema_expr_distinct_facts(ty: Type, environment: SemaScopeEnvironment, scopes:
     owner := sema_expression_type_symbol(&scopes, environment, name) ?? return None
     definition_value :: sema_scope_declaration_distinct(environment, owner.id) ?? return None
     if definition_value.quantity != None -> return None
+    base := definition_value.base
+    if environment.registration_graph == .Val(graph) {
+        base = sema_type_resolve_declared(graph, base, owner.module_name)
+    }
     numeric := false
     loop marker in definition_value.derives {
         if marker.name == "Numeric" -> numeric = true
@@ -1332,7 +1336,7 @@ fn sema_expr_distinct_facts(ty: Type, environment: SemaScopeEnvironment, scopes:
         value :: definition_value.range ?? return None
         range = Val(TIntegerBounds{lo: value.lo, hi: value.hi})
     }
-    Val(SemaExprDistinctFacts{name: name, base: definition_value.base, numeric: numeric, range: range})
+    Val(SemaExprDistinctFacts{name: name, base: base, numeric: numeric, range: range})
 }
 
 fn sema_expr_check_distinct_binary(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span, line: Int, left_facts: SemaExprDistinctFacts?, right_facts: SemaExprDistinctFacts?, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> TExpr? {

@@ -1059,7 +1059,9 @@ one concept on every type. `#Comparable` and `#Printable` derive from fields
 on structs and enums, and re-expose the base capability on distinct types.
 Distinct-only `#Numeric` exposes `+ - * /` and ordering for the same type
 (E0138); `#CodableAsBase` exposes base coding.
-`Usd + Eur` stays a type error; `.raw()` strips. **D-RANGETYPE1 — range-constrained
+`Usd + Eur` stays a type error; `.raw()` strips to the declaring type's base,
+including when the distinct type is imported. Nominal names in that base keep
+their declaring-module identity. **D-RANGETYPE1 — range-constrained
 types**: `distinct Int(0..10)` and inline `Int(0..10)` are `Int` values
 provably within bounds; literal
 conversion checks at compile time (E0135 out of bounds), runtime conversion
