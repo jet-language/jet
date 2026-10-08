@@ -17,6 +17,15 @@ struct Wrapper<T> { value: T }
 struct Pair<T> { first: T, second: T }
 struct ConcretePair { first: Secret, second: Secret }
 struct PlainPair { first: String, second: String }
+struct DrainPair { first: Secret, second: Secret }
+
+impl DrainPair.Close {
+    fn close(^self) {
+        print("drain")
+        taken :: ^self.first
+        print("drained {taken.id}")
+    }
+}
 
 fn direct() {
     held :: Secret{id: 8, token: "owned"}
@@ -68,6 +77,19 @@ fn plain_remainder() {
     print("plain {taken} {held.second}")
 }
 
+fn early_remainder(leave: Bool, first_id: Int) {
+    held :: Pair<Secret>{first: Secret{id: first_id, token: "owned"}, second: Secret{id: first_id + 1, token: "owned"}}
+    taken :: ^held.first
+    print("early {taken.id} {held.second.id}")
+    if leave { return }
+    print("fallthrough")
+}
+
+fn close_remainder() {
+    held :: DrainPair{first: Secret{id: 18, token: "owned"}, second: Secret{id: 19, token: "owned"}}
+    print("close remainder")
+}
+
 fn run() {
     wrapped()
     listed()
@@ -78,4 +100,7 @@ fn run() {
     remainder()
     concrete_remainder()
     plain_remainder()
+    early_remainder(true, 14)
+    early_remainder(false, 16)
+    close_remainder()
 }

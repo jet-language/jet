@@ -46,11 +46,14 @@ use jet_foundation.[
     SymbolID,
     TContract,
     TContractResult,
+    TExpr,
+    TIfCond,
     TFunc,
     TLocal,
     TMethodRef,
     TPanicLoc,
     TPanicLocal,
+    TStmt,
     TTypeDef,
     Type,
     mir_copy_ownership,
@@ -63,6 +66,9 @@ use jet_foundation.[
     mir_type_same_checked_type,
     stable_id,
     type_identity_equal,
+    tir_expr_children,
+    tir_if_cond_children,
+    tir_stmt_children,
 ]
 use jet_sema.[
     SemaGraphModuleResult,
@@ -407,6 +413,9 @@ struct JetCodegenBuilder {
     pub transactions: [JetCodegenTransactionState]
     pub transaction_cleanup_active: Bool
     pub drop_live_places: [JetCodegenDropLive]
+    // A checked-TIR pre-scan selects only roots with projected owning moves.
+    pub partial_move_roots: [String:Bool]
+    pub split_drop_roots: [U64:Bool]
     // Every drop-live record the function registered, kept after its frame
     // closes for the last-use pass (jet_codegen_move_last_uses).
     pub drop_live_all: [JetCodegenDropLive]
@@ -845,6 +854,8 @@ fn jet_codegen_new_builder(function: TFunc, program: JetCodegenProgram) -> JetCo
         transactions: [JetCodegenTransactionState]{},
         drop_live_places: [JetCodegenDropLive]{},
         drop_live_all: [JetCodegenDropLive]{},
+        partial_move_roots: [String:Bool]{},
+        split_drop_roots: [U64:Bool]{},
         transaction_cleanup_active: false,
         cleanup_frames: [JetCodegenCleanupFrame]{JetCodegenCleanupFrame{
             owner: None,
@@ -914,6 +925,8 @@ struct JetCodegenFunctionState {
     pub transaction_cleanup_active: Bool
     pub drop_live_places: [JetCodegenDropLive]
     pub drop_live_all: [JetCodegenDropLive]
+    pub partial_move_roots: [String:Bool]
+    pub split_drop_roots: [U64:Bool]
     pub cleanup_frames: [JetCodegenCleanupFrame]
     pub exit_tails: [String:U64]
     pub exit_value_slots: [JetCodegenExitValueSlot]
@@ -974,6 +987,8 @@ fn jet_codegen_begin_function(builder: &JetCodegenBuilder, program: JetCodegenPr
         transaction_cleanup_active: false,
         drop_live_places: [JetCodegenDropLive]{},
         drop_live_all: [JetCodegenDropLive]{},
+        partial_move_roots: [String:Bool]{},
+        split_drop_roots: [U64:Bool]{},
         cleanup_frames: [JetCodegenCleanupFrame]{JetCodegenCleanupFrame{
             owner: None,
             depth: 0,
@@ -1040,6 +1055,8 @@ fn jet_codegen_function_state(builder: JetCodegenBuilder, program: JetCodegenPro
         transaction_cleanup_active: builder.transaction_cleanup_active,
         drop_live_places: builder.drop_live_places,
         drop_live_all: builder.drop_live_all,
+        partial_move_roots: builder.partial_move_roots,
+        split_drop_roots: builder.split_drop_roots,
         cleanup_frames: builder.cleanup_frames,
         exit_tails: builder.exit_tails,
         exit_value_slots: builder.exit_value_slots,
@@ -1091,6 +1108,8 @@ fn jet_codegen_restore_function_state(builder: &JetCodegenBuilder, program: JetC
     builder.transaction_cleanup_active = state.transaction_cleanup_active
     builder.drop_live_places = state.drop_live_places
     builder.drop_live_all = state.drop_live_all
+    builder.partial_move_roots = state.partial_move_roots
+    builder.split_drop_roots = state.split_drop_roots
     builder.cleanup_frames = state.cleanup_frames
     builder.exit_tails = state.exit_tails
     builder.exit_value_slots = state.exit_value_slots
@@ -1325,18 +1344,339 @@ fn jet_codegen_phi_ownership(builder: JetCodegenBuilder, program: JetCodegenProg
     panic("Jet codegen phi joins incompatible ownership modes")
 }
 
+// Scan completed TIR before any local, parameter or capture is emitted.
+// Nested executables have their own scan; they must not split a same-named
+// binding in the enclosing function. Ordinary children reuse Foundation's walk.
+fn jet_codegen_partial_move_expression(expression: TExpr, roots: &[String:Bool]) Never! {
+    if expression.kind == .Move(value) {
+        if value.kind == .Field(_, _) && jet_codegen_ownership(value.ty).mode != MIROwnershipMode.Copy {
+            root :: jet_codegen_field_chain_root_local(value)
+            if root == .Val(local) -> roots[local.name] = true
+        }
+    }
+    if expression.kind == {
+        .Lambda(_) | .LambdaValue(_) -> return
+        .InlineBlock(body) -> {
+            jet_codegen_partial_move_statements(body, &roots)
+            return
+        }
+        .IfExpr(condition, then_body, then_value, else_body, else_value) -> {
+            jet_codegen_partial_move_condition(condition, &roots)
+            jet_codegen_partial_move_statements(then_body, &roots)
+            jet_codegen_partial_move_expression(then_value, &roots)
+            jet_codegen_partial_move_statements(else_body, &roots)
+            jet_codegen_partial_move_expression(else_value, &roots)
+            return
+        }
+        .ResultHandler(subject, _, ok_body, ok_value, _, err_body, err_value, terminal) -> {
+            jet_codegen_partial_move_expression(subject, &roots)
+            jet_codegen_partial_move_statements(ok_body, &roots)
+            jet_codegen_partial_move_expression(ok_value, &roots)
+            jet_codegen_partial_move_statements(err_body, &roots)
+            jet_codegen_partial_move_expression(err_value, &roots)
+            jet_codegen_partial_move_expression(terminal, &roots)
+            return
+        }
+        .SharedGuardWait(guard, condition, _) -> {
+            jet_codegen_partial_move_expression(guard, &roots)
+            jet_codegen_partial_move_expression(condition, &roots)
+            return
+        }
+        .HostCall(call) -> if call == {
+            .Helper(_, _, args) -> {
+                loop arg in args {
+                    if arg == {
+                        .Expr(value) | .Borrow(value) -> jet_codegen_partial_move_expression(value, &roots)
+                        .Lambda(_) -> {}
+                    }
+                }
+                return
+            }
+            .CCallback(_, _, _, _, _, _) -> return
+            else -> {}
+        }
+        .CoreClosureCall(kind) -> {
+            if kind == {
+                .Spawn(group, _, _, _) -> {
+                    if group == .Val(value) -> jet_codegen_partial_move_expression(value, &roots)
+                }
+                .Realtime(rate, frames, _) -> {
+                    jet_codegen_partial_move_expression(rate, &roots)
+                    jet_codegen_partial_move_expression(frames, &roots)
+                }
+                .Serve(address, _) -> jet_codegen_partial_move_expression(address, &roots)
+                .OnInterrupt(callback) -> jet_codegen_partial_move_expression(callback, &roots)
+                .UITextInputOnDrop(state, ime, _, _) -> {
+                    jet_codegen_partial_move_expression(state, &roots)
+                    jet_codegen_partial_move_expression(ime, &roots)
+                }
+                .UIButtonOnClick(label, shortcut, accessible_label, _, _) -> {
+                    jet_codegen_partial_move_expression(label, &roots)
+                    jet_codegen_partial_move_expression(shortcut, &roots)
+                    jet_codegen_partial_move_expression(accessible_label, &roots)
+                }
+                .UIPreview(name, viewport, _, _, _, _, _, _, _, _, _, _, _) -> {
+                    jet_codegen_partial_move_expression(name, &roots)
+                    if viewport == .Val(value) -> jet_codegen_partial_move_expression(value, &roots)
+                }
+                else -> {}
+            }
+            return
+        }
+        .FnValue(kind) -> if kind == .NamedFn(_, _) -> return
+        else -> {}
+    }
+    loop child in tir_expr_children(expression) -> jet_codegen_partial_move_expression(child, &roots)
+}
+
+fn jet_codegen_partial_move_condition(condition: TIfCond, roots: &[String:Bool]) Never! {
+    if condition == {
+        .WithPrelude(prelude, nested) -> {
+            jet_codegen_partial_move_statements(prelude, &roots)
+            jet_codegen_partial_move_condition(nested, &roots)
+        }
+        .And(left, right) -> {
+            jet_codegen_partial_move_condition(left, &roots)
+            jet_codegen_partial_move_condition(right, &roots)
+        }
+        else -> loop child in tir_if_cond_children(condition) -> jet_codegen_partial_move_expression(child, &roots)
+    }
+}
+
+fn jet_codegen_partial_move_statements(statements: [TStmt], roots: &[String:Bool]) Never! {
+    loop statement in statements {
+        if statement == {
+            .Reactive(_, _) -> next
+            .ContractScope(pre, body, post, _, _) -> {
+                loop contract in pre {
+                    jet_codegen_partial_move_expression(contract.condition, &roots)
+                    jet_codegen_partial_move_expression(contract.message, &roots)
+                }
+                jet_codegen_partial_move_statements(body, &roots)
+                loop contract in post {
+                    jet_codegen_partial_move_expression(contract.condition, &roots)
+                    jet_codegen_partial_move_expression(contract.message, &roots)
+                }
+                next
+            }
+            .RefutableBind(_, init, fallback, _) -> {
+                jet_codegen_partial_move_expression(init, &roots)
+                jet_codegen_partial_move_statements(fallback, &roots)
+                next
+            }
+            .TaskGroup(_, limit, body, _) -> {
+                if limit == .Val(value) -> jet_codegen_partial_move_expression(value, &roots)
+                jet_codegen_partial_move_statements(body, &roots)
+                next
+            }
+            .If(condition, then_body, else_body, _, _) -> {
+                jet_codegen_partial_move_condition(condition, &roots)
+                jet_codegen_partial_move_statements(then_body, &roots)
+                if else_body == .Val(body) -> jet_codegen_partial_move_statements(body, &roots)
+                next
+            }
+            .Loop(_, body, _) | .Inline(body, _) | .DebugOnly(body, _) | .Impure(body, _)
+            | .Region(body, _) | .Live(body, _) | .Shield(body, _) | .Unsafe(_, body)
+            | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Layout(_, _, body, _)
+            | .Transact(_, _, _, body, _) -> {
+                jet_codegen_partial_move_statements(body, &roots)
+                next
+            }
+            .While(_, condition, body, _) -> {
+                jet_codegen_partial_move_expression(condition, &roots)
+                jet_codegen_partial_move_statements(body, &roots)
+                next
+            }
+            .CountedLoop(_, init, condition, step, _, body, _) -> {
+                jet_codegen_partial_move_statements([TStmt]{init}, &roots)
+                jet_codegen_partial_move_expression(condition, &roots)
+                if step == .Val(value) -> jet_codegen_partial_move_statements([TStmt]{value}, &roots)
+                jet_codegen_partial_move_statements(body, &roots)
+                next
+            }
+            .ForRange(_, _, start, end, step, _, body, _, _) -> {
+                jet_codegen_partial_move_expression(start, &roots)
+                jet_codegen_partial_move_expression(end, &roots)
+                if step == .Val(value) -> jet_codegen_partial_move_expression(value, &roots)
+                jet_codegen_partial_move_statements(body, &roots)
+                next
+            }
+            .Range(_, _, source, start, end, step, _, _, body, _) -> {
+                if source == .Val(value) -> jet_codegen_partial_move_expression(value, &roots)
+                jet_codegen_partial_move_expression(start, &roots)
+                jet_codegen_partial_move_expression(end, &roots)
+                if step == .Val(value) -> jet_codegen_partial_move_expression(value, &roots)
+                jet_codegen_partial_move_statements(body, &roots)
+                next
+            }
+            .ForIn(_, _, _, source, collection, step, _, _, _, _, body, _) -> {
+                jet_codegen_partial_move_expression(source, &roots)
+                jet_codegen_partial_move_expression(collection, &roots)
+                if step == .Val(value) -> jet_codegen_partial_move_expression(value, &roots)
+                jet_codegen_partial_move_statements(body, &roots)
+                next
+            }
+            .Match(subject, arms, _, _) | .EnumMatch(subject, _, arms, _, _, _) -> {
+                jet_codegen_partial_move_expression(subject, &roots)
+                loop arm in arms -> jet_codegen_partial_move_statements(arm.body, &roots)
+                if statement == .EnumMatch(_, _, _, else_body, _, _) {
+                    if else_body == .Val(body) -> jet_codegen_partial_move_statements(body, &roots)
+                }
+                next
+            }
+            .RangeSwitch(subject, arms, else_body, _) -> {
+                jet_codegen_partial_move_expression(subject, &roots)
+                loop arm in arms -> jet_codegen_partial_move_statements(arm.body, &roots)
+                jet_codegen_partial_move_statements(else_body, &roots)
+                next
+            }
+            .MixedSwitch(subject, _, arms, else_body, _) -> {
+                jet_codegen_partial_move_expression(subject, &roots)
+                loop arm in arms {
+                    jet_codegen_partial_move_expression(arm.condition, &roots)
+                    jet_codegen_partial_move_statements(arm.body, &roots)
+                }
+                if else_body == .Val(body) -> jet_codegen_partial_move_statements(body, &roots)
+                next
+            }
+            .ContextBlock(guards, body, _) -> {
+                loop guard in guards -> jet_codegen_partial_move_expression(guard.value, &roots)
+                jet_codegen_partial_move_statements(body, &roots)
+                next
+            }
+            .ScopeMember(kind, body, _) -> {
+                if kind == .Timeout(duration) -> jet_codegen_partial_move_expression(duration, &roots)
+                jet_codegen_partial_move_statements(body, &roots)
+                next
+            }
+            .GCEdit(_, _, _, _, index_temp, edited, _) -> {
+                if index_temp == .Val(value) -> jet_codegen_partial_move_expression(value, &roots)
+                jet_codegen_partial_move_statements([TStmt]{edited}, &roots)
+                next
+            }
+            else -> {}
+        }
+        loop child in tir_stmt_children(statement) -> jet_codegen_partial_move_expression(child, &roots)
+    }
+}
+
+fn jet_codegen_partial_move_roots(statements: [TStmt], expression: TExpr?) -> [String:Bool] Never! {
+    roots := [String:Bool]{}
+    if expression == {
+        .Val(value) -> jet_codegen_partial_move_expression(value, &roots)
+        .None -> jet_codegen_partial_move_statements(statements, &roots)
+    }
+    roots
+}
+
+fn jet_codegen_place_covers_fields(root: MIRPlace, leaf: MIRPlace) -> Bool Never! {
+    if root.base != leaf.base || root.projections.len() > leaf.projections.len() -> return false
+    loop index in 0..<root.projections.len() {
+        if root.projections[index] == .Field(root_field, _) {
+            if leaf.projections[index] == .Field(leaf_field, _) {
+                if root_field == leaf_field -> next
+            }
+        }
+        return false
+    }
+    true
+}
+
 fn jet_codegen_set_drop_live(builder: &JetCodegenBuilder, program: JetCodegenProgram, place: MIRPlaceID, live: Bool) Never! {
-    matching := JetCodegenDropLive?{None}
-    loop record in builder.drop_live_places {
+    index := 0
+    loop index < builder.drop_live_places.len() {
+        record :: builder.drop_live_places[index]
         if record.place == place {
-            matching = Val(record)
+            value := jet_codegen_emit_value(&builder, program, record.span, Type.Bool, MIROperation.Constant{value: MIRConstant.Bool{value: live}})
+            _ := jet_codegen_emit(&builder, program, record.span, None, MIROperation.WritePlace{place: record.live, value: value})
+            return
+        }
+        index += 1
+    }
+    if builder.split_drop_roots.len() == 0 -> return
+    root :: jet_codegen_find_place(builder, program, place) ?? return
+    split := false
+    loop owner in builder.places {
+        if builder.split_drop_roots.get(owner.id.value) != None && owner.base == root.base {
+            split = true
             break
         }
     }
-    if matching == None -> return
-    record :: matching ?? panic("Jet codegen lost a drop-live record")
-    value := jet_codegen_emit_value(&builder, program, record.span, Type.Bool, MIROperation.Constant{value: MIRConstant.Bool{value: live}})
-    _ := jet_codegen_emit(&builder, program, record.span, None, MIROperation.WritePlace{place: record.live, value: value})
+    if !split -> return
+    index = 0
+    loop index < builder.drop_live_places.len() {
+        record :: builder.drop_live_places[index]
+        index += 1
+        leaf :: jet_codegen_find_place(builder, program, record.place) ?? panic("drop-live leaf has no MIR place")
+        if !jet_codegen_place_covers_fields(root, leaf) -> next
+        value := jet_codegen_emit_value(&builder, program, record.span, Type.Bool, MIROperation.Constant{value: MIRConstant.Bool{value: live}})
+        _ := jet_codegen_emit(&builder, program, record.span, None, MIROperation.WritePlace{place: record.live, value: value})
+    }
+}
+
+fn jet_codegen_drop_field_names(builder: JetCodegenBuilder, program: JetCodegenProgram, ty: Type) -> [String] Never! {
+    names := [String]{}
+    owner := jet_codegen_unwrap_pattern_tags(ty)
+    if owner == {
+        .Tuple(fields) -> {
+            loop field in fields -> &names.push(field.name)
+            return names
+        }
+        .Named(name) | .Apply(name, _) -> {
+            identity :: jet_codegen_find_nominal_identity(program.modules, builder.function.module_identity, name, builder.generic_type_names) ?? return names
+            row :: program.owners.type_def_rows.get(jet_codegen_qualified_function_key(identity.module_identity, identity.name)) ?? return names
+            if program.modules[row.module_index].declarations.type_defs[row.definition_index].kind == .Struct(fields, _) {
+                loop field in fields {
+                    if !field.computed -> &names.push(field.name)
+                }
+            }
+        }
+        else -> {}
+    }
+    names
+}
+
+fn jet_codegen_is_consuming_close_receiver(builder: JetCodegenBuilder, program: JetCodegenProgram, place: MIRPlaceID, ty: Type) -> Bool Never! {
+    hook :: jet_codegen_nominal_close_function(builder, program, ty) ?? return false
+    if jet_codegen_function_id(hook) != jet_codegen_function_id(builder.function) -> return false
+    owner :: jet_codegen_find_place(builder, program, place) ?? return false
+    if owner.projections.len() != 0 -> return false
+    if owner.base == .Parameter(_) {
+        loop binding in builder.bindings {
+            if binding.place == place && binding.name == "self" -> return true
+        }
+    }
+    false
+}
+
+// Containers, dynamic owners, nominal Close leaves and recursive back-edges
+// stay atomic; only stored struct/tuple members are traversed.
+fn jet_codegen_register_drop_leaves(builder: &JetCodegenBuilder, program: JetCodegenProgram, place: MIRPlaceID, ty: Type, initialized: Bool, structural_root: Bool, visiting: [String]) Never! {
+    ownership :: jet_codegen_ownership(ty)
+    if ownership.drop == MIRDropKind.NoDrop -> return
+    key :: "{jet_codegen_type_instance_id(ty, program.modules, builder.function.module_identity, builder.generic_type_names).value}"
+    if !structural_root && (jet_codegen_nominal_close_function(builder, program, ty) != None || visiting.contains(key) || jet_codegen_is_core_file_owner_type(builder, program, ty)) {
+        jet_codegen_register_drop_live(&builder, program, place, ty, ownership, initialized)
+        return
+    }
+    fields :: jet_codegen_drop_field_names(builder, program, ty)
+    if fields.len() == 0 {
+        jet_codegen_register_drop_live(&builder, program, place, ty, ownership, initialized)
+        return
+    }
+    ancestors := ~visiting
+    &ancestors.push(key)
+    // Cleanup reverses registration; stored fields unwind in declaration order.
+    index := fields.len()
+    loop index > 0 {
+        index -= 1
+        field_type :: jet_codegen_checked_host_field_type(builder, program, ty, fields[index])
+        if jet_codegen_ownership(field_type).drop == MIRDropKind.NoDrop -> next
+        field :: jet_codegen_host_field_id(builder, program, ty, fields[index])
+        span :: builder.current_span
+        leaf := jet_codegen_project_field_place(&builder, program, place, span, field_type, field)
+        jet_codegen_register_drop_leaves(&builder, program, leaf, field_type, initialized, false, ancestors)
+    }
 }
 
 // Rust `retain_place_access`: a place row referenced by several operations
@@ -1357,6 +1697,28 @@ fn jet_codegen_retain_place_access(builder: &JetCodegenBuilder, program: JetCode
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::LowerCtx::register_owned_drop
 fn jet_codegen_register_drop_live(builder: &JetCodegenBuilder, program: JetCodegenProgram, place: MIRPlaceID, ty: Type, ownership: MIROwnership, initialized: Bool) Never! {
     if ownership.drop == MIRDropKind.NoDrop || jet_codegen_ownership(ty).mode == MIROwnershipMode.Copy -> return
+    split := false
+    if builder.partial_move_roots.len() != 0 {
+        owner :: jet_codegen_find_place(builder, program, place) ?? panic("drop-live owner has no MIR place")
+        if owner.projections.len() == 0 {
+            loop binding in builder.bindings {
+                if binding.place == place && builder.partial_move_roots.get(binding.name) != None {
+                    split = true
+                    break
+                }
+            }
+        }
+    }
+    if split {
+        if jet_codegen_nominal_close_function(builder, program, ty) != None && !jet_codegen_is_consuming_close_receiver(builder, program, place, ty) {
+            panic("cannot lower projected move from `{ty}`: owner has its own Close implementation")
+        }
+        if jet_codegen_drop_field_names(builder, program, ty).len() != 0 {
+            builder.split_drop_roots[place.value] = true
+            jet_codegen_register_drop_leaves(&builder, program, place, ty, initialized, true, [String]{})
+            return
+        }
+    }
     identity := "{builder.function.key}|drop-live|{place.value}"
     local_id := MIRLocalID{value: stable_id("mir-local", identity)}
     live_place := MIRPlaceID{value: stable_id("mir-place", "{identity}|place")}
@@ -1425,7 +1787,8 @@ fn jet_codegen_emit_drop_cleanup(builder: &JetCodegenBuilder, program: JetCodege
     // Move access (Rust `emit_owned_place_cleanup`).
     jet_codegen_retain_place_access(&builder, program, record.place, MIRAccess.Move)
     value := jet_codegen_emit_value(&builder, program, record.span, record.ty, MIROperation.MovePlace{place: record.place})
-    scope_close := jet_codegen_scope_end_close_function(builder, program, record.ty)
+    owner :: jet_codegen_find_place(builder, program, record.place) ?? panic("drop cleanup has no MIR place")
+    scope_close := if owner.projections.len() == 0 -> jet_codegen_scope_end_close_function(builder, program, record.ty) else -> jet_codegen_nominal_close_function(builder, program, record.ty)
     if scope_close == {
         .Val(function) -> jet_codegen_emit_scope_end_close(&builder, program, function, record.ty, value, record.span)
         .None -> _ := jet_codegen_emit(&builder, program, record.span, None, MIROperation.Drop{value: value, kind: record.kind})
