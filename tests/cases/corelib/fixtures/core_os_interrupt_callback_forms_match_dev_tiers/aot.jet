@@ -1,0 +1,19 @@
+
+use core.sys as os
+use core.process as process
+
+fn named_callback() {
+    print("named")
+}
+
+fn run() {
+    indirect :: named_callback
+    os.on_interrupt(named_callback)
+    os.on_interrupt(indirect)
+    os.on_interrupt(() -> {
+        print("inline")
+        process.exit(0)
+    })
+    print("ready")
+    loop { }
+}
