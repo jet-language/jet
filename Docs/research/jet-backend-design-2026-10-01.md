@@ -2171,3 +2171,11 @@ constructor validation. Test-only C doors exercise clone/drop/equality with
 real Jet providers and allocation-ledger wrappers; they are not enrolled
 runtime exports. Canonical Result generation and selected-out ownership
 composition remain required before any of the thirteen seed sums close.
+
+`UiShortcutBinding.jet` owns the seed binding graph (inline Shortcut16,
+action E4, nullable NodeId E4) through one field-copy/drop pair shared by
+standalone binding and dispatch. The seed `Unhandled` dispatch is a unit
+variant: its inactive area neither owns nor compares fields. `Dispatched`
+clones/drops the inline binding without temporary carrier allocations.
+Unknown dispatch tags stop through the canonical record-variant panic.
+These success helpers remain private pending canonical Result composition.
