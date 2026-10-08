@@ -3321,9 +3321,8 @@ fn jet_eval_host_shape_node(machine: &JetEvalMachine, ty: MIRType, nodes: &[JetE
     node
 }
 
-// The native host entry has no machine, so it indexes the program per query.
-pub fn jet_eval_host_type_shape_from_program(program: &MIRProgram, checked_type: MIRType, span: Span) -> JetEvalHostTypeShape? {
-    rows :: jet_eval_program_rows(program)
+// The native host supplies one shape-only index for all its ABI queries.
+pub fn jet_eval_host_type_shape_from_program(program: &MIRProgram, rows: &JetEvalProgramRows, checked_type: MIRType, span: Span) -> JetEvalHostTypeShape? {
     jet_eval_host_type_shape_from_rows(program, rows, checked_type)
 }
 

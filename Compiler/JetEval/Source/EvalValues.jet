@@ -677,10 +677,9 @@ struct JetEvalMachine {
     pub internal_problem: JetEvalInternalProblem?
 }
 
-// Row positions in a checked program, built once per machine (and once per
-// program-only host-shape query) so evaluator lookups probe a map and borrow
-// the row instead of scanning, and copying, whole program tables. Id maps keep
-// the first row per id value; list maps keep every row in program order.
+// Row positions in a checked program, built once per machine or native host
+// shape context. Id maps keep the first row per id value; list maps keep every
+// row in program order. Shape contexts index only their projected tables.
 struct JetEvalProgramRows {
     pub functions: [U64:Int]
     pub fields: [U64:Int]
@@ -721,6 +720,7 @@ struct JetEvalFunctionRows {
 }
 
 fn jet_eval_program_rows(program: MIRProgram) -> JetEvalProgramRows Never! {
+    shape_rows := jet_eval_program_shape_rows(program)
     functions := [U64:Int]{}
     loop index in 0..<program.functions.len() {
         key :: program.functions[index].id.value
@@ -731,30 +731,15 @@ fn jet_eval_program_rows(program: MIRProgram) -> JetEvalProgramRows Never! {
         key :: program.fields[index].id.value
         if fields.get(key) == None -> fields[key] = index
     }
-    types := [U64:Int]{}
-    loop index in 0..<program.types.len() {
-        key :: program.types[index].id.value
-        if types.get(key) == None -> types[key] = index
-    }
     traits := [U64:Int]{}
     loop index in 0..<program.traits.len() {
         key :: program.traits[index].id.value
         if traits.get(key) == None -> traits[key] = index
     }
-    handles := [U64:Int]{}
-    loop index in 0..<program.handles.len() {
-        key :: program.handles[index].id.value
-        if handles.get(key) == None -> handles[key] = index
-    }
     foreign := [U64:Int]{}
     loop index in 0..<program.foreign.len() {
         key :: program.foreign[index].id.value
         if foreign.get(key) == None -> foreign[key] = index
-    }
-    modules := [U64:Int]{}
-    loop index in 0..<program.modules.len() {
-        key :: program.modules[index].id.value
-        if modules.get(key) == None -> modules[key] = index
     }
     source_files := [U64:Int]{}
     loop index in 0..<program.source_files.len() {
@@ -790,6 +775,49 @@ fn jet_eval_program_rows(program: MIRProgram) -> JetEvalProgramRows Never! {
         &rows.push(index)
         impls_by_trait[trait_ref.id.value] = rows
     }
+    function_rows := [JetEvalFunctionRows]{}
+    loop _ in 0..<program.functions.len() {
+        &function_rows.push(JetEvalFunctionRows{built: false, blocks: [U64:Int]{}, places: [U64:Int]{}, values: [U64:Int]{}, values_next: [Int]{}, locals: [U64:Int]{}, locals_next: [Int]{}})
+    }
+    JetEvalProgramRows{
+        functions: functions,
+        fields: fields,
+        types: ^shape_rows.types,
+        traits: traits,
+        handles: ^shape_rows.handles,
+        foreign: foreign,
+        modules: ^shape_rows.modules,
+        source_files: source_files,
+        core_calls: core_calls,
+        prelude_calls: prelude_calls,
+        constants: constants,
+        type_instances: type_instances,
+        impls_by_trait: impls_by_trait,
+        core_owners_by_nominal: ^shape_rows.core_owners_by_nominal,
+        core_owners_by_id: ^shape_rows.core_owners_by_id,
+        function_rows: function_rows,
+    }
+}
+
+// Native ABI shapes use only nominal definitions, Core registrations, source
+// modules and exact handle lifecycles. Keep the same duplicate-ID semantics as
+// the evaluator without indexing function signatures or type instances.
+fn jet_eval_program_shape_rows(program: MIRProgram) -> JetEvalProgramRows Never! {
+    types := [U64:Int]{}
+    loop index in 0..<program.types.len() {
+        key :: program.types[index].id.value
+        if types.get(key) == None -> types[key] = index
+    }
+    handles := [U64:Int]{}
+    loop index in 0..<program.handles.len() {
+        key :: program.handles[index].id.value
+        if handles.get(key) == None -> handles[key] = index
+    }
+    modules := [U64:Int]{}
+    loop index in 0..<program.modules.len() {
+        key :: program.modules[index].id.value
+        if modules.get(key) == None -> modules[key] = index
+    }
     core_owners_by_nominal := [U64:[Int]]{}
     core_owners_by_id := [U64:[Int]]{}
     loop index in 0..<program.core_owners.len() {
@@ -802,27 +830,23 @@ fn jet_eval_program_rows(program: MIRProgram) -> JetEvalProgramRows Never! {
         &id_rows.push(index)
         core_owners_by_id[id] = id_rows
     }
-    function_rows := [JetEvalFunctionRows]{}
-    loop _ in 0..<program.functions.len() {
-        &function_rows.push(JetEvalFunctionRows{built: false, blocks: [U64:Int]{}, places: [U64:Int]{}, values: [U64:Int]{}, values_next: [Int]{}, locals: [U64:Int]{}, locals_next: [Int]{}})
-    }
     JetEvalProgramRows{
-        functions: functions,
-        fields: fields,
+        functions: [U64:Int]{},
+        fields: [U64:Int]{},
         types: types,
-        traits: traits,
+        traits: [U64:Int]{},
         handles: handles,
-        foreign: foreign,
+        foreign: [U64:Int]{},
         modules: modules,
-        source_files: source_files,
-        core_calls: core_calls,
-        prelude_calls: prelude_calls,
-        constants: constants,
-        type_instances: type_instances,
-        impls_by_trait: impls_by_trait,
+        source_files: [U64:Int]{},
+        core_calls: [U64:Int]{},
+        prelude_calls: [U64:Int]{},
+        constants: [String:Int]{},
+        type_instances: [U64:[Int]]{},
+        impls_by_trait: [U64:[Int]]{},
         core_owners_by_nominal: core_owners_by_nominal,
         core_owners_by_id: core_owners_by_id,
-        function_rows: function_rows,
+        function_rows: [JetEvalFunctionRows]{},
     }
 }
 

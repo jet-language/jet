@@ -42,7 +42,9 @@ node Tools/perf/jetc-profile/emit-text.mjs prepare 747eef360 /path/to/new/pair
 
 Both programs use `emit-text.jet`: identifier-boundary, quoted/raw-string,
 comment, multiline-string, leading-zero ID, and full-width MIR ID assertions,
-then the same fold/unwrap/compact workload. The plain helper's byte argument
+then the same fold/unwrap/compact workload, with assertions that each pass
+actually rewrites its input. Pass timings use monotonic `time.instant()`
+differences, never wall-clock Unix timestamps. The plain helper's byte argument
 is adapted at its call site; neither arm's input, output, or measured pass
 sequence changes. Build both with the same compiler and optimization settings.
 After one warmup per arm, alternate at least three matched executions and keep
@@ -70,3 +72,42 @@ compiler worker is not contention in that worker. `strace` adds substantial
 overhead to syscall-heavy workloads; never use its wall time as the speed cell.
 Cold executable/image page-in and shared-machine scheduling must stay distinct
 from compiler locks, sleeps, subprocesses, and store synchronization.
+
+## Native startup implementation pair
+
+The `native-host-shape-view` cell compares the full-program Source projection
+with the shape-only projection and cached index. It changes marshalling, not
+host-shape policy: the same Source checker still validates nominal definitions,
+Core owner identities, source-module membership and owned handle lifecycles.
+The scoped program view retains the canonical header and only four collection
+tables: `types`, `core_owners`, `modules`, and `handles`. Its index is built once
+for every ABI query in a native compile, then released with the view. The full
+native compiler image and its identity/root checks are unchanged.
+
+Before measuring, the main agent must admit a written pre-flight. Use the same
+trusted hello project, build profile, environment and machine for both compiler
+artifacts. Persist every process's stdout/stderr and exit status through the
+proof lane; retain `/usr/bin/time -v` output, the canonical compile receipt,
+emitted `out.rs` and `JET_TRACE_FILE` trace. After one warmup per arm, interleave
+at least three matched trials under `plain/trial-001/` and
+`optimized/trial-001/`, and so on. Each trial has `rc`, `receipt`, `out.rs`,
+`trace.json` and `time.txt`.
+
+The shared `pair.json` records schema `jet.native-host-shape-pair.v1`,
+`source_sha256` (the actual common project-input hash), `machine` and
+`build_profile`; retain the exact immutable compiler paths and build receipts
+with that evidence. Publish the comparison with:
+
+```sh
+node Tools/perf/jetc-profile/startup.mjs /path/to/pair /path/to/new/receipt.json
+```
+
+The comparator requires complete AOT receipts with no reports and byte-identical
+emitted artifacts. Every median must strictly win: process wall time, compile
+trace duration and the interval from compile start to the first `main` parse
+span. The latter includes startup/load work before user-source parsing; it is
+not an off-CPU or lock-contention measurement. Losses, missing evidence or
+identity/output drift keep the cell open. Unit tests are in
+`Tools/perf/jetc-profile/startup.test.mjs`; the actual Source `TaskRoots.jet`
+fixture separately compares all registered handle shapes with the evaluator's
+full index and retains negative module/duplicate-ID checks.

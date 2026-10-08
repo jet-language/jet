@@ -495,6 +495,22 @@
           "output_validation": "regression assertions and byte-identical stdout after removing only timing rows",
           "comparator": "each optimized/plain median strictly below 1; equality, missing timing, or mismatched output is failure",
           "loss_owner": 4308
+        },
+        {
+          "id": "native-host-shape-view",
+          "scope": "existing native compiler ABI marshalling; canonical Source shape semantics and image identity/root checks unchanged",
+          "plain": "986c9f278:Compiler/Bootstrap/Host/Native.rs",
+          "optimized": "checkout:Compiler/Bootstrap/Host/Native.rs",
+          "program_driver": "same trusted hello project compiled by both immutable compiler artifacts",
+          "harness": "Tools/perf/jetc-profile/startup.mjs",
+          "arms": ["plain", "optimized"],
+          "metrics": ["wall_ns", "compile_ns", "pre_parse_ns"],
+          "warmups": 1,
+          "trials": 3,
+          "sampling": "interleaved matched trials, same source hash, machine, environment and compiler build profile; written pre-flight and main-agent admission required",
+          "output_validation": "complete canonical AOT compile receipts, zero reports, same source closure byte count and byte-identical emitted artifacts; Source TaskRoots parity and negative identity checks",
+          "comparator": "each optimized/plain median strictly below 1; equality, missing evidence, nonzero process exit or mismatched output is failure",
+          "loss_owner": 4308
         }
       ]
     }
