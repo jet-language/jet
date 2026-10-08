@@ -1,0 +1,8 @@
+# Original tests/core_files_opaque_handles.rs:274-311; original inputs and exact public subclaims.
+# PENDING-GRAMMAR(batch-four); PENDING-SAME-HEAD.
+fixture: file_handles_have_no_fd_fields_and_cannot_be_written_or_forged.fixture
+step: jet check --json main.jet
+exit: nonzero
+json: stdout doc $.reports[?code="E0302"] #>= 1
+json: stdout doc $.reports[?code="E0339"] #>= 1
+json: stdout doc $.reports[?code="E0605"] #>= 1
