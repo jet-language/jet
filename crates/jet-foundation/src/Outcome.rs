@@ -2334,11 +2334,32 @@ pub fn jet_runtime_register_atexit<T>(handlers: &mut Vec<T>, handler: T) {
     handlers.push(handler);
 }
 
-/// Drain registered handlers exactly once, in reverse registration order.
+/// Drain registered handlers exactly once, in registration order.
 pub fn jet_runtime_drain_atexit<T>(handlers: &mut Vec<T>, mut invoke: impl FnMut(T)) {
     let pending = std::mem::take(handlers);
-    for handler in pending.into_iter().rev() {
+    for handler in pending {
         invoke(handler);
+    }
+}
+
+#[cfg(test)]
+mod process_exit_queue_tests {
+    use super::{jet_runtime_drain_atexit, jet_runtime_register_atexit};
+
+    #[test]
+    fn pre_registered_exit_handlers_run_once_in_registration_order() {
+        let mut handlers = Vec::new();
+        for handler in [1, 2, 3] {
+            jet_runtime_register_atexit(&mut handlers, handler);
+        }
+
+        let mut observed = Vec::new();
+        jet_runtime_drain_atexit(&mut handlers, |handler| observed.push(handler));
+        assert_eq!(observed, [1, 2, 3]);
+        assert!(handlers.is_empty());
+
+        jet_runtime_drain_atexit(&mut handlers, |handler| observed.push(handler));
+        assert_eq!(observed, [1, 2, 3]);
     }
 }
 
