@@ -366,6 +366,18 @@ directly with valid Rust behavior. A redesigned surface maps valid Rust inputs
 to the new Jet contract and compares semantic values and errors. Do not keep a
 runtime compatibility layer merely to make that comparison.
 
+The native I/O runtime keeps the C-layout carriers declared by
+[`CAbiHost.rs`](../../crates/jet-codegen/src/Prelude/Core/CAbiHost.rs), not Rust
+enum or record layouts. A projected context independently owns its optional
+text children; constructing an error consumes the context header and transfers
+those children. The optional OS-code presence is a full machine word: any
+nonzero value is present, and an absent payload does not participate in equality.
+`HostIO.jet` streams Show and Debug into one result builder; its Rust-derived
+string Debug uses the shared Rust-mode quoting helper, including `\0` for NUL,
+not JSON quoting or the Jet source-literal NUL escape. The object-client
+[`IOWitness.c`](../../Compiler/JetRuntime/Tests/IOWitness.c) exercises the
+ownership, rendering, equality, and fatal projection/ordinal contracts.
+
 ## Dependency order
 
 Core work follows the dependency graph. These categories describe dependency
