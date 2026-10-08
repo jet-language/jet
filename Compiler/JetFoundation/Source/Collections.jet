@@ -12,8 +12,9 @@
 
 // Compiler-internal permutation: order[new index] is the original row index.
 // The caller supplies the complete permutation produced by its stable index
-// merge. Drain owning rows into unique empty slots, then refill the original
-// receiver (whose allocation and capacity pop retains). No row is read out of
+// merge. Drain owning rows into unique empty slots in reverse destination
+// order, then pop them back in canonical order into the original receiver
+// (whose allocation and capacity pop retains). No row is read out of
 // a borrowed indexed place and no owning payload is copied.
 pub fn compiler_apply_order<T>(rows: &[T], order: [Int]) Never! {
     count :: rows.len()
@@ -33,14 +34,13 @@ pub fn compiler_apply_order<T>(rows: &[T], order: [Int]) Never! {
     loop rows.len() > 0 {
         original :: rows.len() - 1
         row := &rows.pop() ?? panic("a nonempty compiler row list failed to pop")
-        slots[destinations[original]] = Val(^row)
+        slots[count - 1 - destinations[original]] = Val(^row)
     }
     loop slots.len() > 0 {
         slot := &slots.pop() ?? panic("a nonempty compiler slot list failed to pop")
         row := ^slot ?? panic("a compiler row permutation left an empty slot")
         &rows.push(^row)
     }
-    &rows.reverse()
 }
 
 pub enum SemaCollectionKind {

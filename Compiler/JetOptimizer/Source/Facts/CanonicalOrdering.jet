@@ -130,9 +130,9 @@ fn mir_pass_canonicalize_program_order(program: &MIRProgram) Never! {
 fn mir_pass_sort_modules(rows: &[MIRModule]) Never! {
     primary := [U64]{}
     text := [String]{}
-    loop row in rows {
-        &primary.push(row.id.value)
-        &text.push(row.key)
+    loop index in 0..<rows.len() {
+        &primary.push(rows[index].id.value)
+        &text.push(rows[index].key)
     }
     compiler_apply_order<MIRModule>(&rows, mir_pass_canonical_order(primary, [U64]{}, text))
 }
@@ -140,9 +140,9 @@ fn mir_pass_sort_modules(rows: &[MIRModule]) Never! {
 fn mir_pass_sort_imports(rows: &[MIRImport]) Never! {
     primary := [U64]{}
     secondary := [U64]{}
-    loop row in rows {
-        &primary.push(row.id.value)
-        &secondary.push(row.module_id.value)
+    loop index in 0..<rows.len() {
+        &primary.push(rows[index].id.value)
+        &secondary.push(rows[index].module_id.value)
     }
     compiler_apply_order<MIRImport>(&rows, mir_pass_canonical_order(primary, secondary, [String]{}))
 }
@@ -187,9 +187,9 @@ fn mir_pass_order_before(primary: [U64], secondary: [U64], text: [String], left:
 fn mir_pass_sort_functions(rows: &[MIRFunction]) Never! {
     primary := [U64]{}
     text := [String]{}
-    loop row in rows {
-        &primary.push(row.id.value)
-        &text.push(row.key)
+    loop index in 0..<rows.len() {
+        &primary.push(rows[index].id.value)
+        &text.push(rows[index].key)
     }
     compiler_apply_order<MIRFunction>(&rows, mir_pass_canonical_order(primary, [U64]{}, text))
 }
@@ -197,9 +197,9 @@ fn mir_pass_sort_functions(rows: &[MIRFunction]) Never! {
 fn mir_pass_sort_type_defs(rows: &[MIRTypeDef]) Never! {
     primary := [U64]{}
     text := [String]{}
-    loop row in rows {
-        &primary.push(row.id.value)
-        &text.push(row.key)
+    loop index in 0..<rows.len() {
+        &primary.push(rows[index].id.value)
+        &text.push(rows[index].key)
     }
     compiler_apply_order<MIRTypeDef>(&rows, mir_pass_canonical_order(primary, [U64]{}, text))
 }
@@ -207,9 +207,9 @@ fn mir_pass_sort_type_defs(rows: &[MIRTypeDef]) Never! {
 fn mir_pass_sort_traits(rows: &[MIRTraitDef]) Never! {
     primary := [U64]{}
     text := [String]{}
-    loop row in rows {
-        &primary.push(row.id.value)
-        &text.push(row.key)
+    loop index in 0..<rows.len() {
+        &primary.push(rows[index].id.value)
+        &text.push(rows[index].key)
     }
     compiler_apply_order<MIRTraitDef>(&rows, mir_pass_canonical_order(primary, [U64]{}, text))
 }
@@ -217,9 +217,9 @@ fn mir_pass_sort_traits(rows: &[MIRTraitDef]) Never! {
 fn mir_pass_sort_impls(rows: &[MIRImplDef]) Never! {
     primary := [U64]{}
     text := [String]{}
-    loop row in rows {
-        &primary.push(row.id.value)
-        &text.push(row.key)
+    loop index in 0..<rows.len() {
+        &primary.push(rows[index].id.value)
+        &text.push(rows[index].key)
     }
     compiler_apply_order<MIRImplDef>(&rows, mir_pass_canonical_order(primary, [U64]{}, text))
 }
@@ -227,9 +227,9 @@ fn mir_pass_sort_impls(rows: &[MIRImplDef]) Never! {
 fn mir_pass_sort_constants(rows: &[MIRConstantDef]) Never! {
     primary := [U64]{}
     text := [String]{}
-    loop row in rows {
-        &primary.push(row.id.value)
-        &text.push(row.key)
+    loop index in 0..<rows.len() {
+        &primary.push(rows[index].id.value)
+        &text.push(rows[index].key)
     }
     compiler_apply_order<MIRConstantDef>(&rows, mir_pass_canonical_order(primary, [U64]{}, text))
 }
@@ -252,9 +252,9 @@ fn mir_pass_sort_type_instances(rows: &[MIRType]) Never! {
 fn mir_pass_sort_fields(rows: &[MIRFieldRow]) Never! {
     primary := [U64]{}
     secondary := [U64]{}
-    loop row in rows {
-        &primary.push(row.id.value)
-        &secondary.push(row.owner.value)
+    loop index in 0..<rows.len() {
+        &primary.push(rows[index].id.value)
+        &secondary.push(rows[index].owner.value)
     }
     compiler_apply_order<MIRFieldRow>(&rows, mir_pass_canonical_order(primary, secondary, [String]{}))
 }
@@ -345,7 +345,7 @@ fn mir_pass_sort_link_ids(rows: &[MIRLinkUnitID]) Never! {
 
 fn mir_pass_sort_blocks(rows: &[MIRBasicBlock]) Never! {
     primary := [U64]{}
-    loop row in rows -> &primary.push(row.id.value)
+    loop index in 0..<rows.len() -> &primary.push(rows[index].id.value)
     compiler_apply_order<MIRBasicBlock>(&rows, mir_pass_canonical_order(primary, [U64]{}, [String]{}))
 }
 
