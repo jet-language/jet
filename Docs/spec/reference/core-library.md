@@ -52,6 +52,9 @@ Web live/store snapshots project the resident locked state; they do not keep
 another registry. Table source helpers retain shared column and state identity
 through the registered carrier leaves. Browser reports and server owners keep
 the existing serializer and process resources behind that same boundary.
+Table page loaders, generation checks, and publication stores operate on those
+same carriers. Cross-page key validation lends the existing page-key vectors
+under the registry's one lock before committing the accepted page.
 
 Types and error enums use PascalCase (`String`, `IOError`, `JSON`); functions
 and module segments use snake_case (`read`, `core.files`) (S54). Acronyms keep

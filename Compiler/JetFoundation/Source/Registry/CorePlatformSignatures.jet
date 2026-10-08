@@ -248,6 +248,16 @@ core.web.table __replace_columns WebTable<T>,^[WebTableColumn<T>] WebTable<T> T
 core.web.table __state WebTable<T> WebTableState T
 core.web.table __set_state WebTable<T>,^WebTableState - T
 core.web.table __alias WebTable<T> WebTable<T> T
+core.web.table __has_loader WebTable<T> Bool T
+core.web.table __invoke_loader WebTable<T>,^WebTableState Result<WebTablePage<T>,String> T
+core.web.table __generation WebTable<T>,^Bool u64 T
+core.web.table __query_facts WebTableState (index:Int,size:Int,server:Bool,sort:(column:String,descending:Bool)?,filter:(column:String,value:String)?)
+core.web.table __state_equal WebTableState,WebTableState Bool
+core.web.table __page_facts WebTablePage<T> (total:Int,index:Int,size:Int,count:Int,rows:Int,keys:Int) T
+core.web.table __commit_keys WebTable<T>,WebTablePage<T>,^fn(Int,[String];Result<(),String>) Result<(),String> T
+core.web.table __loading_store WebTable<T>,^Bool - T
+core.web.table __error_store WebTable<T>,^String - T
+core.web.table __page_store WebTable<T>,^WebTablePage<T>? - T
 core.crypto sha256 [u8] Digest256
 core.crypto sha1|sha224|sha384|sha3_224|sha3_256|sha3_384|sha3_512 [u8] String
 core.crypto hmac_sha256 [u8],[u8] [u8]

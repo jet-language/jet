@@ -119,7 +119,9 @@ fn core_call_effect_for(module_name: String, member: String) -> Effect? {
         module_name == "core.devtools" && member == "__publish_checked" -> None
         module_name == "core.web" && core_call_one_of(member, [String]{"__openapi_inputs", "__openapi_render", "__contract_stop", "__live_stats_snapshot"}) -> None
         module_name == "core.web.store" && core_call_one_of(member, [String]{"__transact", "__facts_snapshot"}) -> None
-        module_name == "core.web.table" && core_call_one_of(member, [String]{"__columns", "__replace_columns", "__state", "__set_state", "__alias"}) -> None
+        module_name == "core.web.table" && core_call_one_of(member, [String]{"__columns", "__replace_columns", "__state", "__set_state", "__alias",
+            "__has_loader", "__invoke_loader", "__generation", "__query_facts", "__state_equal", "__page_facts",
+            "__commit_keys", "__loading_store", "__error_store", "__page_store"}) -> None
         module_name == "core.process" && member == "__with_directory_raw" -> Val(Effect.FS)
         module_name == "core.time" && member == "__zone_env" -> Val(Effect.Env)
         module_name == "core.time" && core_call_one_of(member, [String]{"zone", "parse_zoned", "__zone_file_bytes"}) -> Val(Effect.FS)
