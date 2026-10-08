@@ -110,6 +110,7 @@ fn env_overlay_fixture_reused(name: I64, storage: I64, capacity: I64) {
     env_overlay_fixture_require(env_overlay_value_bytes(key, slots + I64{16}) == I64{-1})
     env_overlay_fixture_require(env_overlay_try_remove(key, slots + I64{8}, slots) == I64{1})
     env_overlay_fixture_require(encoding_word(slots + I64{8}) == I64{0})
+    env_overlay_fixture_require(env_overlay_equal(encoding_word(last + I64{16}), encoding_word(last + I64{24}), rt_text_data(first), rt_text_len(first)))
     env_overlay_snapshot_drop(snapshot, snapshot_length)
     env_overlay_fixture_require(env_overlay_try_remove(sibling_key, slots + I64{8}, slots) == I64{1})
     env_overlay_fixture_require(encoding_word(slots + I64{8}) == I64{1})
