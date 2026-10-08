@@ -1,0 +1,11 @@
+
+name: "package-entry"
+version: "0.1.0"
+fn build(b: BuildContext) -> BuildPlan {
+    b.generate("package_message") {
+        fn package_message() -> String { "package" }
+    }
+    app :: b.add_executable("app", ["main.jet", ".jet/generated/package-entry/package_message.jet"], [])
+    return b.plan(app)
+}
+
