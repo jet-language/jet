@@ -10993,6 +10993,44 @@ impl<'a> LowerCtx<'a> {
         self.function_id_for(&format!("{}::{helper}", module.key)).map(Some)
     }
 
+    pub(super) fn geometry_source_target(
+        &self,
+        owner: &Type,
+        operation: &str,
+    ) -> Result<Option<MirFunctionId>, LowerError> {
+        let Some(name) = owner.base_name() else { return Ok(None) };
+        if !crate::Sema::is_geometry_type(name) { return Ok(None) }
+        let type_id = self.type_id_for(name)?;
+        let Some(definition) = self.type_defs.iter().find(|definition| definition.id == type_id) else {
+            return Ok(None);
+        };
+        if !jet_foundation::CoreModuleExports::core_source_owns_type(&definition.key) {
+            return Ok(None);
+        }
+        let Some(source) = jet_foundation::CoreModuleExports::core_source_module("core.math") else {
+            return Ok(None);
+        };
+        let Some(module) = self.modules.iter().find(|module| module.path == source.path) else {
+            return Ok(None);
+        };
+        let mut selected = None;
+        for (target, functions) in &self.function_registry.by_target {
+            if target.module != module.key || target.method != operation || target.trait_name.is_some() {
+                continue;
+            }
+            for function in functions {
+                let Some(target_owner) = self.function_registry.owner_types.get(function) else { continue };
+                if target_owner.base_name().is_none_or(|head| canonical_target_type(&module.key, head) != definition.key) {
+                    continue;
+                }
+                if selected.replace(*function).is_some() {
+                    return Err(self.error(self.span(), "checked geometry source method is ambiguous"));
+                }
+            }
+        }
+        selected.map(Some).ok_or_else(|| self.error(self.span(), "checked geometry source method was pruned"))
+    }
+
     pub(super) fn lower_pattern(
         &mut self,
         pattern: &TPattern,

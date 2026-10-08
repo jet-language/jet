@@ -1735,6 +1735,21 @@ pub(super) fn lower_expr(
             func,
             args,
         } => {
+            if matches!(func.as_str(), "new" | "affine") {
+                if let Some(function) = ctx.geometry_source_target(&expr.ty, func)? {
+                    let returned = ctx.function_registry.method_call_return_type_for(function, &[], &expr.ty)
+                        .map_err(|message| ctx.error(ctx.span(), message))?
+                        .unwrap_or_else(|| expr.ty.clone());
+                    let owner = ctx.mir_type(&expr.ty)?;
+                    let args = args.iter().map(|argument| ctx.lower_plain_arg(argument)).collect::<Result<Vec<_>, _>>()?;
+                    let value = ctx.emit("geometry-source-constructor", Some(returned.clone()), MirOperation::Call {
+                        callee: MirCallee::Associated { function, owner }, args, type_args: Vec::new(),
+                    })?;
+                    return if super::is_plain_call_return(&returned, &expr.ty) {
+                        ctx.reconcile_plain_call_return(expr, value, &returned)
+                    } else { Ok(value) };
+                }
+            }
             if type_name == "Int" && func == "abs" {
                 if let Some(function) = ctx.precise_source_target(type_name, func)? {
                     let args = args.iter().map(|argument| ctx.lower_plain_arg(argument)).collect::<Result<Vec<_>, _>>()?;
