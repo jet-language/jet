@@ -74,8 +74,8 @@ step: jet perf view profile.jettrace --json
 cwd: c
 env: NO_COLOR=1
 exit: 0
-stdout: ~ "\"kind\":\"jet.trace.view\""
-stdout: ~ "\"flamegraph\":"
+stdout: ~ "\"kind\":\"jet.trace.view\"" # original ed77c235f tests/polyglot_systems.rs:680 shared workflow view contains kind; C call768
+stdout: ~ "\"flamegraph\":" # original ed77c235f tests/polyglot_systems.rs:681 shared workflow view contains flamegraph; C call768
 step: {cap:strip} {cap:strip_flag} libcounter.a
 cwd: c
 env: NO_COLOR=1
@@ -92,7 +92,7 @@ stdout: = mixed_repo_edit_test_debug_profile_and_recovery_workflows.c.out
 capture: before = text file c/.jet/bindings/c/counter.jet
 capture: stale = text file.replace_first("jet-ffi-descriptor=", "jet-ffi-descriptor=stale-") c/.jet/bindings/c/counter.jet
 cap:stale: != "{cap:before}" # original replacen changes the cached descriptor
-write: c/.jet/bindings/c/counter.jet mixed_repo_edit_test_debug_profile_and_recovery_workflows.capture.template
+write: c/.jet/bindings/c/counter.jet = "{cap:stale}"
 step: jet check run.jet
 cwd: c
 env: NO_COLOR=1

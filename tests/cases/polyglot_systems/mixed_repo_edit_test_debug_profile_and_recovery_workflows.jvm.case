@@ -63,8 +63,8 @@ cwd: jvm
 env: NO_COLOR=1
 env: JAVA_HOME={cap:java_home}
 exit: 0
-stdout: ~ "\"kind\":\"jet.trace.view\""
-stdout: ~ "\"flamegraph\":"
+stdout: ~ "\"kind\":\"jet.trace.view\"" # original ed77c235f tests/polyglot_systems.rs:680 shared workflow view contains kind; JVM call929
+stdout: ~ "\"flamegraph\":" # original ed77c235f tests/polyglot_systems.rs:681 shared workflow view contains flamegraph; JVM call929
 copy: jvm/Counter.java source.before
 append: jvm/Counter.java "\n// stale binding source\n"
 step: jet run run.jet
@@ -75,7 +75,7 @@ exit: nonzero
 stdout+stderr: ~ "E3208" # original mixed_assert_failed_with helper422-428
 copy: source.before jvm/Counter.java
 capture: stale = text file.replace("value += amount", "value += amount + 1") jvm/Counter.java
-write: jvm/Counter.java mixed_repo_edit_test_debug_profile_and_recovery_workflows.capture.template
+write: jvm/Counter.java = "{cap:stale}"
 step: jet inspect bind java Counter.java --pkg counter
 cwd: jvm
 env: NO_COLOR=1

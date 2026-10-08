@@ -55,8 +55,8 @@ step: jet perf view profile.jettrace --json
 cwd: js
 env: NO_COLOR=1
 exit: 0
-stdout: ~ "\"kind\":\"jet.trace.view\""
-stdout: ~ "\"flamegraph\":"
+stdout: ~ "\"kind\":\"jet.trace.view\"" # original ed77c235f tests/polyglot_systems.rs:680 shared workflow view contains kind; JS call984
+stdout: ~ "\"flamegraph\":" # original ed77c235f tests/polyglot_systems.rs:681 shared workflow view contains flamegraph; JS call984
 copy: js/ops.mjs source.before
 append: js/ops.mjs "\n// stale binding source\n"
 step: jet run run.jet
@@ -66,9 +66,9 @@ exit: nonzero
 stdout+stderr: ~ "E3208" # original mixed_assert_failed_with helper422-428
 copy: source.before js/ops.mjs
 capture: before = text file js/.jet/bindings/js/ops.jet
-capture: stale = text file.replace_first("jet-ffi-descriptor=", "jet-ffi-descriptor=stale-") js/.jet/bindings/js/ops.jet
-cap:stale: != "{cap:before}" # original replacen changes the cached descriptor
-write: js/.jet/bindings/js/ops.jet mixed_repo_edit_test_debug_profile_and_recovery_workflows.capture.template
+capture: stale_descriptor = text file.replace_first("jet-ffi-descriptor=", "jet-ffi-descriptor=stale-") js/.jet/bindings/js/ops.jet
+cap:stale_descriptor: != "{cap:before}" # original replacen changes the cached descriptor
+write: js/.jet/bindings/js/ops.jet = "{cap:stale_descriptor}"
 step: jet check run.jet
 cwd: js
 env: NO_COLOR=1
@@ -89,8 +89,8 @@ env: NO_COLOR=1
 exit: nonzero
 stdout+stderr: ~ "E3208" # original mixed_assert_failed_with helper422-428
 file: js/.jet/bindings/js/broken.jet absent
-capture: stale = text file.replace("return left + right", "return left + right + 1") js/ops.mjs
-write: js/ops.mjs mixed_repo_edit_test_debug_profile_and_recovery_workflows.capture.template
+capture: stale_runtime = text file.replace("return left + right", "return left + right + 1") js/ops.mjs
+write: js/ops.mjs = "{cap:stale_runtime}"
 step: jet inspect bind js ops.d.ts --runtime ops.mjs --pkg ops
 cwd: js
 env: NO_COLOR=1
