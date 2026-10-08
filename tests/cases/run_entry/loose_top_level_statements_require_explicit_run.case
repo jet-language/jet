@@ -1,0 +1,21 @@
+# HAND-PORT tests/run_entry.rs:20-33 loose_top_level_statements_require_explicit_run
+# PENDING-SEAM(compiler-lib): exact assertions; no runtime parity claim.
+fixture: loose_top_level_statements_require_explicit_run.fixture
+refused: compiler-lib
+# #[test]
+# fn loose_top_level_statements_require_explicit_run() {
+#     let source = "limit :: 2\nprint(limit)\n";
+#     let diagnostics =
+#         jet::compile(source).expect_err("ordinary files must not invent an implicit run");
+#     let diagnostic = diagnostics
+#         .iter()
+#         .find(|diagnostic| diagnostic.code == "E0621")
+#         .expect("explicit-run diagnostic");
+#     assert!(
+#         diagnostic.edit.is_none(),
+#         "the diagnostic must not offer an implicit-run rewrite: {diagnostic:?}"
+#     );
+# }
+step: jet check main.jet
+exit: nonzero
+

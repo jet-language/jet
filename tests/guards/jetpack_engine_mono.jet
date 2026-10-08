@@ -1,0 +1,11 @@
+use core.files as files
+
+// tests/jetpack_engine.rs:8511-8535; same committed fixture and exact find substring.
+#Test("mono_example_has_two_package_jet_members") {
+    root :: "tests/fixtures/jetpack-mono"
+    assert(files.exists("{root}/workspace.jet"))
+    assert(files.exists("{root}/packages/greeter/package.jet"))
+    assert(files.exists("{root}/packages/logger/package.jet"))
+    source :: files.read("{root}/workspace.jet") ?? panic("workspace fixture")
+    assert(source.contains("find(\"./packages\")"))
+}
