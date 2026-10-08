@@ -7833,20 +7833,22 @@ impl<'a> Checker<'a> {
         }
         // Operator hooks use operand-pair identity even with explicit dot syntax.
         // Their signatures are not ordinary name-only method candidates.
-        let operator_trait = match method {
-            "add" => Some(Syntax::TRAIT_ADD),
-            "sub" => Some(Syntax::TRAIT_SUB),
-            "mul" => Some(Syntax::TRAIT_MUL),
-            "div" => Some(Syntax::TRAIT_DIV),
-            "equal" => Some(Syntax::TRAIT_EQUATABLE),
-            "compare" => Some(Syntax::TRAIT_COMPARABLE),
-            _ => None,
-        };
+        let operator_trait = jet_foundation::Traits::operator_hook_trait(method);
+        let mut call_access = self.call_access_frame();
+        let mut pre_inferred_operator = None;
         let mut operator_signature = None;
         if let Some(trait_name) = operator_trait.filter(|_| args.len() == 1) {
             let (owner_type, _, traits) = self.capability_type_context(&recv_ty);
             if traits.operator_impls.iter().any(|row| row.left == owner_type.name() && row.trait_name == trait_name) {
-                let rhs = self.infer(&mut args[0].expr)?;
+                let rhs_place_type = self.place_expr_type(&args[0].expr).unwrap_or(Type::Bool);
+                let rhs = self.with_call_access(&mut call_access, |checker| {
+                    checker.check_call_argument_access(&args[0], AccessConvention::Read, &rhs_place_type, true);
+                    checker.borrow_ctx = true;
+                    let inferred = checker.infer(&mut args[0].expr);
+                    checker.check_call_argument_captures(&args[0].expr);
+                    inferred
+                })?;
+                pre_inferred_operator = Some(vec![Some(rhs.clone())]);
                 let (rhs_type, _, _) = self.capability_type_context(&rhs);
                 let (owner_type, registry, traits) = self.capability_type_context(&recv_ty);
                 if let Some(row) = traits.operator_impl_for(&owner_type, trait_name, &rhs_type) {
@@ -7864,6 +7866,14 @@ impl<'a> Checker<'a> {
                         *operator_rhs_out = Some(row.rhs.clone());
                         operator_signature = Some((owner, signature));
                     }
+                }
+                if operator_signature.is_none() {
+                    let diagnostic = self.missing_instance_method_diagnostic(
+                        method, &recv_ty, None,
+                        Self::missing_receiver_method_why(&recv_ty, method), span,
+                    );
+                    self.diags.push(diagnostic);
+                    return None;
                 }
             }
         }
@@ -8176,7 +8186,6 @@ impl<'a> Checker<'a> {
             return ret;
         }
         self.normalize_method_variadic_call(method, &msig, args, span);
-        let mut call_access = self.call_access_frame();
         let pre_inferred_method = self.instantiate_method_type_args(
             dispatch_type_name,
             method,
@@ -8186,6 +8195,7 @@ impl<'a> Checker<'a> {
             span,
             &mut call_access,
         );
+        let pre_inferred_method = pre_inferred_operator.or(pre_inferred_method);
         self.record_method_reference(&type_name, method, span);
         self.record_edge(
             crate::Sema::effect_key(Some(dispatch_type_name), method),

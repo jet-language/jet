@@ -2865,15 +2865,7 @@ fn sema_expr_check_method_call(receiver: Expr, method: String, method_span: Span
         special := sema_expr_try_method_special_routes(receiver, receiver_value, method, owner_type_args, type_args, args, method_span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         if special.handled -> return special.value
     }
-    operator_trait :: if {
-        method == "add" -> Val("Add")
-        method == "sub" -> Val("Sub")
-        method == "mul" -> Val("Mul")
-        method == "div" -> Val("Div")
-        method == "equal" -> Val("Equatable")
-        method == "compare" -> Val("Comparable")
-        else -> None
-    }
+    operator_trait :: sema_checked_operator_hook_trait(method)
     argument_types := [Type?]{}
     argument_index := 0
     loop argument_index < args.len() {
