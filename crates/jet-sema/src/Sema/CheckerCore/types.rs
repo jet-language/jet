@@ -3,6 +3,19 @@ use crate::Sema::{Checker, TypeRegistry};
 use crate::AST::Type;
 use std::collections::{HashMap, HashSet};
 impl<'a> Checker<'a> {
+    /// Builtin contracts yield only to the exact loaded Core declaration.
+    pub(crate) fn source_owns_nominal(&self, name: &str) -> bool {
+        let (namespace, leaf) = Self::split_type_name(name);
+        let Some(owner) = self.struct_owner_module(leaf, namespace) else { return false };
+        let registry = if owner == self.module_idx {
+            self.registry
+        } else {
+            let Some(module) = self.modules.and_then(|modules| modules.get(owner)) else { return false };
+            &module.registry
+        };
+        registry.contains(leaf) && registry.source_owns_type(leaf)
+    }
+
     /// D-TEXTHEAD-TYPE1=A: resolve a library-defined checked text through the
     /// ordinary nominal and trait registries. The returned name is canonical
     /// for imported types; the error comes from the ordinary trait impl.
