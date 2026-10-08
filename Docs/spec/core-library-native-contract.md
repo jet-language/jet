@@ -464,6 +464,18 @@ of a custom seed destructor. Show is exactly `TLSStream(<signed ID>)`.
 release, optional ownership and untouched callbacks. This does not claim a
 native TLS handshake engine or transport callback admission.
 
+The held native DB scope is 48 bytes: a raw backend ID, inline canonical
+24-byte row policy, owned user text and a nullable request-ID text owner.
+`RowPolicyHandles.jet` single-sources `row_policy_copy_into` and
+`row_policy_drop_fields`; both standalone row-policy handles and inline
+scope fields use them without temporary owner shells. Clone preserves the
+compiled policy and raw ID while independently cloning every text child.
+Drop releases the inline policy fields, user and optional request text, then
+the scope shell; it does not close the backend ID. Policy projection borrows
+the inline field, and user projection fills a caller-owned read/clone-only
+E4 descriptor. `DbScopeHandleWitness.c` checks those lifetimes, both compiled
+policies, absent versus present-empty requests and exact-once destruction.
+
 ## Dependency order
 
 Core work follows the dependency graph. These categories describe dependency
