@@ -426,9 +426,8 @@ pub fn sema_function_memory_has_unsupported_policies(declarations: [PolicyDeclar
 
 // `owner` is the owning type of a method (any spelling; its leaf name is
 // used), or "" for a free function.
-pub fn sema_function_memory_find(plan: SemaFunctionMemoryPlan, module_identity: String, owner: String, span: Span) -> SemaFunctionMemoryFunction? {
-    position :: plan.positions.get(sema_function_memory_key(module_identity, sema_serde_named_leaf(owner), span)) ?? return None
-    Val(plan.functions[position])
+pub fn sema_function_memory_position(plan: SemaFunctionMemoryPlan, module_identity: String, owner: String, span: Span) -> Int? {
+    plan.positions.get(sema_function_memory_key(module_identity, sema_serde_named_leaf(owner), span))
 }
 
 // The owner name a method's memory row is found by: the base name of its
