@@ -618,16 +618,10 @@ pub fn x64_execution_service(runtime_path: String, runtime_identity: String) -> 
                 loaded :: x64_load_image(image, runtime)
                 if loaded.errors.len() > 0 -> return x64_execution_service_error(loaded.errors.join("\n"))
                 begin :: os_library_symbol(runtime.library, "jet_rt_execution_begin")
-                if begin == 0 -> return x64_execution_service_error("pinned Core initialization lacks its canonical execution control")
-                started := 0
-                #Unsafe("Core startup is the producer's checked no-argument Unit static-fixup boundary, not a user entry") {
-                    started = os_call_address_three(begin, -1, -1, 0)
-                    if (started & 255) != 0 -> _ := os_call_address(loaded.entry, 0)
-                }
-                if (started & 255) == 0 -> return x64_execution_service_error("pinned Core initialization could not begin its execution scope")
-                status :: x64_execution_call(runtime, "jet_rt_session_status", 0)
-                _ := x64_execution_call(runtime, "jet_rt_execution_end", 0)
-                if status != 0 -> return x64_execution_service_error("pinned Core initialization stopped before publishing its getters (status {status})")
+                status :: os_library_symbol(runtime.library, "jet_rt_session_status")
+                end :: os_library_symbol(runtime.library, "jet_rt_execution_end")
+                failure :: x64_core_startup_bound(loaded, begin, status, end)
+                if failure != "" -> return x64_execution_service_error(failure)
                 runtime = x64_core_bind_exports(runtime, image, loaded)
                 core_image = Val(loaded)
                 core_identity = identity
