@@ -2314,6 +2314,7 @@ different: they retain the caller's original clock, so later ticks on that
 clock affect its attached secret's lifetime. Clock Show and Debug retain the
 `Clock { now: N }` rendering. Manual tick/wait arithmetic saturates at `Int`'s
 millisecond bounds.
+`time.clock(seed)` stays retired (E1004); use the type-owned `Clock.new(seed)` constructor.
 
 #### Named zones and local-time resolution
 

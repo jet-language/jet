@@ -1472,7 +1472,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 822a33c63b1e7a7f9d3f166fdf5a5bd98ca96a65f17af4cab6c6e233593d5bb2
+// Source SHA-256: 5a4d88ee4c30be0a53ed2a0484b0b0b3683df9a5efe436718487fc4485bd3f92
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -2198,7 +2198,6 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.time", "utc", "jet_time_zone_utc", true, &[]) .with_pure_route(CoreCallPureRoute::Time),
     CoreCallRecord::new("core.time", "zoned", "jet_time_zoned", true, &[true, true]) .with_pure_route(CoreCallPureRoute::Time),
     CoreCallRecord::new( "core.time", "zoned_local", "jet_time_zoned_local", true, &[true, true, true, true], ) .with_pure_route(CoreCallPureRoute::Time),
-    CoreCallRecord::source_owned("core.time", "clock", &[false]),
     CoreCallRecord::new( "core.encoding.json", "parse", "jet_std_json_parse", true, &[true], ),
     CoreCallRecord::new( "core.encoding.json", "loads", "jet_std_json_parse", true, &[true], ),
     CoreCallRecord::new( "core.encoding.json", "decode", "jet_std_json_decode_lenient", true, &[true], ) .without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
