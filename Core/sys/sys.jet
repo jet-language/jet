@@ -19,7 +19,9 @@ use core.text.parse as text
 #Layout(c)
 struct SysTargetPointer { pointer: *Int }
 
-SYS_TARGET_USIZE_MAX :: prep {
+SYS_TARGET_USIZE_MAX :: prep { target_usize_max() }
+
+fn target_usize_max() -> U64 Never! {
     layout :: SysTargetPointer.$layout
     size :: layout.size ?? panic("selected target has no concrete pointer layout")
     if size <= 0 || size > 8 -> panic("selected target pointer width does not fit the U64 carrier")
@@ -671,12 +673,13 @@ fn command_fact(argv: [String]) -[Exec, Time.Wait]> String Never! {
 }
 
 #Test("OS release fields preserve first-match and quote semantics") {
-    assert(release_field("VERSION_ID=\"6.1\"\nVERSION_ID=ignored", "VERSION_ID=") == Val("6.1"))
-    assert(release_field("PRETTY_NAME=\"\"\n", "PRETTY_NAME=") == Val(""))
-    assert(release_field("VERSION_ID='literal'", "VERSION_ID=") == Val("'literal'"))
+    assert_eq(release_field("VERSION_ID=\"6.1\"\nVERSION_ID=ignored", "VERSION_ID="), Val("6.1"))
+    assert_eq(release_field("PRETTY_NAME=\"\"\n", "PRETTY_NAME="), Val(""))
+    assert_eq(release_field("VERSION_ID='literal'", "VERSION_ID="), Val("'literal'"))
     assert(release_field(" VERSION_ID=indented", "VERSION_ID=") == None)
-    assert(release_field("VERSION_ID=\"6.1\"\r\n", "VERSION_ID=") == Val("6.1"))
-    assert(release_field("VERSION_ID=6.1\r", "VERSION_ID=") == Val("6.1\r"))
+    carriage :: String.from_bytes([U8]{13}) ?? panic("ASCII carriage return")
+    assert_eq(release_field("VERSION_ID=\"6.1\"{carriage}\n", "VERSION_ID="), Val("6.1"))
+    assert_eq(release_field("VERSION_ID=6.1{carriage}", "VERSION_ID="), Val("6.1{carriage}"))
 }
 
 fn call_value(row: (available: Bool, value: Int, errno: Int), operation: String, kind: IOOperation, resource: String?) -> Int IOError! {
