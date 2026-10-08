@@ -2162,3 +2162,12 @@ must supply true rodata-backed static views, not borrowed owners. Owned
 message/resource/shortcut text clones and drops transitively; the inline
 shortcut uses the same field helper as its standalone carrier. These helpers
 do not introduce C exports or thirteen named Result-alias carriers.
+
+`UiClipboard.jet` adds private seed-native success-payload helpers only.
+Clipboard text owns its E4 and a nullable independently owned text range;
+absence differs from a present zero range. Range offsets and clipboard-write
+character counts preserve raw usize bits without exact-Int conversion or
+constructor validation. Test-only C doors exercise clone/drop/equality with
+real Jet providers and allocation-ledger wrappers; they are not enrolled
+runtime exports. Canonical Result generation and selected-out ownership
+composition remain required before any of the thirteen seed sums close.
