@@ -201,3 +201,82 @@ fn s3_guard_vocabulary_senses() {
 #Test("vocabulary_page_has_one_definition_and_no_retired_senses") {
     s3_guard_vocabulary_senses()
 }
+
+// Port of tests/truthfulness.rs:1110-1173, including the Tower-record fallback.
+fn s3_truth_decision_id_byte(b: U8) -> Bool Never! {
+    s3_truth_ascii_word_byte(b) || b == (U8{45})
+}
+
+fn s3_truth_exact_decision_token(text: String, authority: String) -> Bool {
+    raw :: text.bytes()
+    length :: authority.bytes().len()
+    offset := 0
+    loop offset <= raw.len() {
+        found :: s3_truth_parse.find_from(text, authority, offset)
+        if found < 0 -> return false
+        end :: found + length
+        before := false
+        after := false
+        if found > 0 -> before = s3_truth_decision_id_byte(raw[found - 1])
+        if end < raw.len() -> after = s3_truth_decision_id_byte(raw[end])
+        if !before && !after -> return true
+        // The original match_indices is non-overlapping.
+        if length > 0 {
+            offset = end
+        } else {
+            offset = found + 1
+            loop offset < raw.len() && raw[offset] >= (U8{128}) && raw[offset] < (U8{192}) -> offset += 1
+        }
+    }
+    false
+}
+
+fn s3_truth_ratified_section(docs: String) -> String {
+    marker :: "## Ratified"
+    from :: s3_truth_parse.find(docs, marker)
+    assert(from >= 0, "Docs/spec/syntax-decisions.md missing ## Ratified")
+    rest :: policy_slice_bytes(docs, from + marker.bytes().len(), docs.bytes().len())
+    to :: s3_truth_parse.find(rest, "\n## ")
+    if to < 0 -> return rest
+    policy_slice_bytes(rest, 0, to)
+}
+
+fn s3_truth_ratified_decision_exists(docs: String, tower: String, authority: String) -> Bool {
+    loop raw in s3_truth_ratified_section(docs).lines() {
+        line := raw.trim_start()
+        if line.starts_with("- ") -> line = policy_slice_bytes(line, 2, line.bytes().len())
+        if !line.starts_with("**") -> next
+        rest :: policy_slice_bytes(line, 2, line.bytes().len())
+        end :: s3_truth_parse.find(rest, "**")
+        if end < 0 -> next
+        heading :: policy_slice_bytes(rest, 0, end)
+        if s3_truth_exact_decision_token(heading, authority) -> return true
+    }
+    split :: s3_truth_parse.rfind(authority, "=")
+    id := authority
+    if split >= 0 -> id = policy_slice_bytes(authority, 0, split)
+    marker :: "\"id\": \"{id}\""
+    found :: s3_truth_parse.find(tower, marker)
+    if found < 0 -> return false
+    tail :: policy_slice_bytes(tower, found + marker.bytes().len(), tower.bytes().len())
+    record_end :: s3_truth_parse.find(tail, "\n      \"id\": \"")
+    record := tail
+    if record_end >= 0 -> record = policy_slice_bytes(tail, 0, record_end)
+    if !record.contains("\"status\": \"ratified\"") -> return false
+    if split < 0 -> return true
+    outcome :: policy_slice_bytes(authority, split + 1, authority.bytes().len())
+    record.contains("\"outcome\": \"{outcome}\"")
+}
+
+fn s3_guard_exact_ratified_lookup() {
+    docs :: "## Proposed\n**D-PENDING=A**: not law. See D-LIVE and D-CITED.\n## Ratified\n**D-LIVE=A**: supersedes D-CITED.\n## Declined\n**D-NOPE=A**: declined.\n"
+    assert(s3_truth_ratified_decision_exists(docs, "", "D-LIVE"))
+    assert(!s3_truth_ratified_decision_exists(docs, "", "D-LIV"))
+    assert(!s3_truth_ratified_decision_exists(docs, "", "D-CITED"))
+    assert(!s3_truth_ratified_decision_exists(docs, "", "D-PENDING=A"))
+    assert(!s3_truth_ratified_decision_exists(docs, "", "D-NOPE=A"))
+}
+
+#Test("ratified_decision_lookup_requires_exact_id_and_ratified_status") {
+    s3_guard_exact_ratified_lookup()
+}

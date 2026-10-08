@@ -1,0 +1,14 @@
+# Port of tests/jetpack_jetos.rs:3140-3167; original sources/predicates retained, runtime PENDING-SAME-HEAD.
+opt-in: epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored
+fixture: os_vm_prove_requires_pinned_media_tools.fixture
+mkdir: package-root
+mkdir: tools
+copy: {root}/tests/fixtures/jetpack-config project
+step: jet os vm prove halcyon --disk halcyon.qcow2 --no-color --offline
+cwd: project
+env: JETPACK_ROOT={work}/package-root
+env: PATH={work}/tools
+exit: 2
+capture: expected = text file.trim_end expected.stderr
+stderr.trim_end: = "{cap:expected}"
+file: package-root/systems/vm-proofs absent

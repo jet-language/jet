@@ -1,0 +1,10 @@
+# Port of tests/jetpack_jetos.rs:2897-2910; original sources/predicates retained, runtime PENDING-SAME-HEAD.
+opt-in: epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored
+fixture: os_missing_external_root_is_friendly_and_exits_2.fixture
+mkdir: package-root
+env: JETPACK_ROOT={work}/package-root
+step: jet os build laptop@ --no-color
+exit: 2
+capture: expected = text file.trim_end expected.stderr
+stderr.trim_end: = "{cap:expected}"
+

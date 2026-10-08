@@ -1,0 +1,11 @@
+# Port of tests/jetpack_jetos.rs:2913-2925; original sources/predicates retained, runtime PENDING-SAME-HEAD.
+opt-in: epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored
+fixture: os_unknown_host_lists_available_systems.fixture
+mkdir: package-root
+env: JETPACK_ROOT={work}/package-root
+copy: {root}/tests/fixtures/jetpack-config project
+step: jet os build nope --no-color --offline
+cwd: project
+exit: 2
+stderr: = os_unknown_host_lists_available_systems.fixture/expected.stderr
+
