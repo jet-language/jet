@@ -3156,6 +3156,11 @@ when it is closed or at capacity, so callers that require backpressure must use
 the scheduler receiver surface. Cancellation closes the receiver and leaves
 its handle available for identity and ownership.
 Generic channels return `(Sender<T>, Receiver<T>)`; tasks send owned values and do not use `async`/`await` (`D-CONC-CHAN1`; `D-SHAPE-COPY1`). Cancellation and pause/resume are control-plane requests on owned task handles (`D-COROUTINE1`), while shared memory uses `Shared<T>` guards and `Condition` rather than a raw lock (`D-SHAREDGUARD1`).
+`Condition` and `RealtimeStream` remain native carriers. Their registered Core
+source owners supply their declared methods without manufacturing a struct or
+enum declaration. This ownership does not export `tasks.Condition`: use the
+existing bare `Condition` spelling, and keep ordinary application impls on
+these builtin carriers rejected.
 
 The source scheduler-channel constructors preserve that pair rather than
 returning `TaskState`. Bounded scheduler channels clamp capacities below one
