@@ -1,0 +1,14 @@
+# HAND-PORT tests/browser_lock.rs:119-159 jetpack_browser_reject_unknown_engine_and_missing_binary
+# PENDING-GRAMMAR: approved batch-two forms; no runtime parity claim.
+env: NO_COLOR=1
+requires: os:unix
+step: jetpack browser lock edge --binary {work}/missing
+exit: nonzero
+stderr: ~any "not supported" "edge" # original predicate
+step: jetpack browser lock firefox --binary {work}/no-such-bin
+exit: nonzero
+stderr: ~any "not found" "failed" # original predicate
+step: jetpack browser resolve firefox
+exit: nonzero
+stderr: ~any "no locked browser" "failed" # original predicate
+

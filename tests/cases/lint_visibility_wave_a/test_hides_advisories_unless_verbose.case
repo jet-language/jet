@@ -1,0 +1,13 @@
+# HAND-PORT tests/lint_visibility_wave_a.rs:149-169 test_hides_advisories_unless_verbose
+# PENDING-GRAMMAR: approved batch-two forms; no runtime parity claim.
+fixture: test_hides_advisories_unless_verbose.fixture
+env: NO_COLOR=1
+step: jet test --capture=all main.jet
+exit: 0
+stdout+stderr: !~ "[L0101]" # original predicate
+stdout+stderr: ~ "1 passed, 0 failed" # original predicate
+step: jet test --verbose --capture=all main.jet
+exit: 0
+stdout+stderr: ~ "[L0101]" # original predicate
+stdout+stderr: ~ "1 passed, 0 failed" # original predicate
+

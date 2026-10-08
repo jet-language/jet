@@ -1,0 +1,20 @@
+# HAND-PORT tests/lint_visibility_wave_a.rs:222-249 json_output_keeps_structure_with_hidden_advisories
+# PENDING-GRAMMAR: approved batch-two forms; no runtime parity claim.
+fixture: json_output_keeps_structure_with_hidden_advisories.fixture
+env: NO_COLOR=1
+step: jet run --json main.jet
+exit: 0
+stdout: = json_output_keeps_structure_with_hidden_advisories.stdout.expected
+stdout+stderr: !~ "[L0101]" # original predicate
+step: jet check --json main.jet
+exit: 0
+stdout: ~ "L0101" # original predicate
+stdout: ~ "\"ok\":true" # original predicate
+stdout: !~ "\"ok\":false" # original predicate
+step: jet test --json main.jet
+exit: 0
+stdout.trim_start: ^= "{" # original predicate
+stdout: ~ "\"action\":\"test\"" # original predicate
+stdout: ~ "\"ok\":true" # original predicate
+stdout+stderr: !~ "L0101" # original predicate
+

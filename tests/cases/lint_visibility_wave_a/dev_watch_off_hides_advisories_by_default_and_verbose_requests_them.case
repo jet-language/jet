@@ -1,0 +1,11 @@
+# HAND-PORT tests/lint_visibility_wave_a.rs:103-126 dev_watch_off_hides_advisories_by_default_and_verbose_requests_them
+# PENDING-GRAMMAR: approved batch-two forms; no runtime parity claim.
+fixture: dev_watch_off_hides_advisories_by_default_and_verbose_requests_them.fixture
+env: NO_COLOR=1
+step: jet dev main.jet --watch=off
+exit: 0
+stdout+stderr: !~ "[L0101]" # original predicate
+step: jet dev --verbose main.jet --watch=off
+exit: 0
+stdout+stderr: ~ "[L0101]" # original predicate
+
