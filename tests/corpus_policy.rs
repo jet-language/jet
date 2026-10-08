@@ -176,6 +176,17 @@ fn inline_package_keeps_the_reviewed_shield_group_site() {
 }
 
 #[test]
+fn cancellation_capsule_keeps_one_exact_shielded_loser_join() {
+    let policy = CorpusPolicy::load().unwrap();
+    let path = "Examples/features/concurrency/conformance_capsule.jet";
+    let source = include_str!("../Examples/features/concurrency/conformance_capsule.jet");
+    assert!(policy.evaluate_source(path, source).unwrap().is_empty());
+    let shifted = format!("\n{source}");
+    let error = policy.evaluate_source(path, &shifted).unwrap_err();
+    assert!(error.contains("stmt:task.group@4382..4510"), "{error}");
+}
+
+#[test]
 fn inventory_rejects_new_source_or_producer_without_a_row() {
     let policy = CorpusPolicy::load().unwrap();
     let error = policy
