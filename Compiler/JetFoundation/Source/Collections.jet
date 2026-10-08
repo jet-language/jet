@@ -585,14 +585,12 @@ fn collection_arg_is_callback(arg: CollectionArg) -> Bool Never! {
     }
 }
 
-// E0106 (#4432): `Unit` is the built-in no-information type (`-> Unit`,
-// `Result<Unit, E>`) the compiler carries as `Type.Named{name: "Unit"}`, so a
-// user type of that name would be indistinguishable from it. The Rust
-// reference's `Collections::RESERVED_TYPES` reserves it with the other
-// built-in type names; porting the rest of that list is the E0106 row of the
-// Rust-Jet parity ledger.
+// E0106: the same reserved vocabulary as Rust Collections::RESERVED_TYPES.
+// Source-owned Core declarations are admitted by registration, not by weakening
+// this predicate for users or for unrelated Core modules.
+SEMA_RESERVED_TYPES :: [String]{"HashMap", "BTreeMap", "Map", "Char", "Bits", "Bytes", "Set", "Rank", "PriorityQueue", "Cache", "Iter", "ViewIter", "MemoStats", "RemoveBy", "Ordering", "Range", "SharedGuard", "Shared.Weak", "Condition", "Tally", "Queue", "Decimal", "Duration", "DurationUnit", "RangeError", "ExpiringValue", "Authority", "Validate", "BuildContext", "BuildPlan", "BuildAction", "BuildTarget", "BuildToolchain", "BuildProbe", "BuildSigningIdentity", "BuildError", "ProgramInfo", "Cell", "CellReadGuard", "CellEditGuard", "Unit"}
 pub fn sema_reserved_type_name(name: String) -> Bool Never! {
-    name == "Unit"
+    SEMA_RESERVED_TYPES.contains(name)
 }
 
 pub fn sema_collection_receiver_element(receiver: Type) -> Type? {
