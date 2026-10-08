@@ -522,18 +522,6 @@ pub(crate) fn method_call_in_subset(
             && args.len() == 1
             && matches!(&args[0].expr, Expr::Lambda(lam) if lambda_in_subset(lam, cx, locals));
     }
-    // Shape (m) [c109 Phase 27]: a CALL THROUGH a fn-typed struct field — `w.step(4)`
-    // where `step: fn(Int) => Int` is a field on a covered struct, NOT a user method.
-    // Sema (CheckerInfer ~L2329) sets `recv_type == Some(<StructType>)` and re-routes the
-    // node through `infer_call_value`, but registers NO `method_sigs` entry (it is a field,
-    // not a method). The AST `emit_method_call` (Expression.rs ~L1573) detects this case
-    // FIRST — a `struct_fields` entry whose type is `Type::Fn` — and emits
-    // `(({recv}).{__jet_<field>})({args})` with PLAIN args (`emit_call_args(.., None, ..)`).
-    // We mirror that order: tried before the user-method/static shapes so a fn-field whose
-    // name happens to match a method name resolves to the field, exactly as the AST path.
-    if fn_field_call_in_subset(receiver, method, args, recv_type, cx, locals) {
-        return true;
-    }
     // Shape (l) [c109 Phase 24]: a JSON construction `JSON.Boolean(b)` / `JSON.Number(n)`
     // / `JSON.Text(s)` / `JSON.Array(xs)` / `JSON.Object(map)`. The receiver is the
     // bare `Ident("JSON")` (a type name, NOT a local), and `method` is a JSON variant.
@@ -1430,45 +1418,6 @@ pub(super) fn core_module_path_from_receiver(
     }
 }
 
-/// c109 Phase 27: is `recv.method(args)` a call THROUGH a fn-typed struct FIELD (not a
-/// user method)? Returns the field's `Type::Fn` when so. `recv_type` is the total sema
-/// fact (`Some(<StructType>)`, set by CheckerInfer's fn-field arm); the field must exist
-/// on a COVERED struct with a `Type::Fn` type and the same name as `method`. Mirrors the
-/// AST `emit_method_call` fn-field branch's guard (`struct_fields` lookup + `Type::Fn`).
-pub(crate) fn fn_field_call_ty<'a>(
-    method: &str,
-    recv_type: &Option<String>,
-    cx: &'a Cx,
-) -> Option<&'a Type> {
-    let ty_name = recv_type.as_ref()?;
-    if !is_covered_struct_ty(&Type::Named(ty_name.clone()), cx) {
-        return None;
-    }
-    let fields = cx.fact_struct_fields(ty_name)?;
-    let (_, fty) = fields.iter().find(|(n, _)| n == method)?;
-    matches!(fty, Type::Fn { .. }).then_some(fty)
-}
-
-/// c109 Phase 27: is `w.step(4)` (a call through a fn-typed struct field) in-subset? The
-/// receiver and every arg must be in-subset; args are emitted PLAINLY by the AST path
-/// (`emit_call_args(.., None, ..)`), so no convention/Arc-clone fact applies — exclude any
-/// labeled / Arc-clone arg defensively (sema never produces them here, but stay strict).
-pub(crate) fn fn_field_call_in_subset(
-    receiver: &Expr,
-    method: &str,
-    args: &[crate::AST::CallArg],
-    recv_type: &Option<String>,
-    cx: &Cx,
-    locals: &HashSet<String>,
-) -> bool {
-    if fn_field_call_ty(method, recv_type, cx).is_none() {
-        return false;
-    }
-    expr_in_subset(receiver, cx, locals)
-        && args.iter().all(|a| {
-            a.label.is_none() && !a.flags.shared_auto_clone && expr_in_subset(&a.expr, cx, locals)
-        })
-}
 
 /// c109 Phase 7: is a STATIC method call `Type.make(args)` inside the subset? The
 /// AST path (Expression.rs ~L1644) emits `__jet_<Type>::__jet_<method>(args)` for a

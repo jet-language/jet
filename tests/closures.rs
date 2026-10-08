@@ -491,3 +491,102 @@ fn run() {
         "a wrong return after carrier inference must still be E0113: {errors:#?}"
     );
 }
+
+#[test]
+fn member_namespaces_select_methods_and_explicit_callable_fields() {
+    let source = include_str!("../Examples/features/callable/member_namespaces.jet");
+    jet::compile(source).expect("same-named fields and methods must lower through their checked routes");
+}
+
+#[test]
+fn member_namespaces_keep_within_kind_duplicates() {
+    for (tag, source, text) in [
+        ("namespace_duplicate_field", "struct Worker { step: Int step: Int }\nfn run() {}", "field `step`"),
+        ("namespace_duplicate_method", "struct Worker { step: Int fn step(self) {} fn step(self) {} }\nfn run() {}", "method `step`"),
+    ] {
+        let errors = sema_errors(tag, source);
+        assert!(errors.iter().any(|diagnostic| diagnostic.code == "E0105" && diagnostic.what.contains(text)), "{errors:#?}");
+    }
+}
+
+#[test]
+fn member_namespaces_wrong_method_arguments_never_call_the_field() {
+    let source = r#"
+struct Worker {
+    step: fn() Int
+    fn step(self, amount: Int) Int !Never -> amount
+}
+fn run() {
+    worker :: Worker{step: () -> 1}
+    print(worker.step())
+}
+"#;
+    let errors = sema_errors("namespace_wrong_method_args", source);
+    assert!(errors.iter().any(|diagnostic| diagnostic.code == "E0766" && diagnostic.what.contains("amount")), "{errors:#?}");
+    assert!(!errors.iter().any(|diagnostic| diagnostic.code == "E0105"), "{errors:#?}");
+}
+
+#[test]
+fn member_namespaces_keep_generic_trait_default_and_operator_routes() {
+    let source = include_str!("../Compiler/JetSema/Tests/MemberNamespaceFixtures.jet");
+    jet::compile(source).expect("namespace selection must preserve established generic, trait and operator lowering");
+}
+
+#[test]
+fn member_namespaces_private_method_never_calls_public_field() {
+    let dir = common::unique_tmp("namespace_private_method");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("worker.jet"), "pub struct Worker { pub step: fn(Int) Int fn step(self, amount: Int) Int !Never -> amount }\n").unwrap();
+    let entry = dir.join("run.jet");
+    std::fs::write(&entry, "use worker.[Worker]\nfn run() { worker :: Worker{step: n -> n}\nprint(worker.step(1)) }\n").unwrap();
+    let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap()).unwrap();
+    let errors = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    assert!(errors.iter().any(|diagnostic| diagnostic.code == "E0605" && diagnostic.what.contains("step")), "{errors:#?}");
+    assert!(!errors.iter().any(|diagnostic| diagnostic.code == "E0105"), "{errors:#?}");
+}
+
+#[test]
+fn member_namespace_callable_field_normalization_is_idempotent() {
+    let dir = common::unique_tmp("namespace_recheck");
+    std::fs::create_dir_all(&dir).unwrap();
+    let entry = dir.join("run.jet");
+    std::fs::write(&entry, include_str!("../Examples/features/callable/member_namespaces.jet")).unwrap();
+    let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap()).unwrap();
+    for _ in 0..2 {
+        let errors = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+            .into_iter()
+            .filter(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error)
+            .collect::<Vec<_>>();
+        assert!(errors.is_empty(), "{errors:#?}");
+    }
+}
+
+#[test]
+fn member_namespaces_preserve_method_receiver_and_effect_checks() {
+    let receiver = r#"
+struct Worker {
+    step: fn(Int) Int
+    fn step(&self, amount: Int) Int !Never -> amount
+}
+fn run() {
+    worker := Worker{step: n -> n}
+    print(worker.step(1))
+}
+"#;
+    let errors = sema_errors("namespace_method_receiver", receiver);
+    assert!(errors.iter().any(|diagnostic| diagnostic.code == "E0224"), "{errors:#?}");
+
+    let effects = r#"
+struct Worker {
+    step: fn(Int) Int
+    fn step(self, amount: Int) Int -> {
+        print(amount)
+        amount
+    }
+}
+fn pure(worker: Worker) Int -[]> { worker.step(1) }
+fn run() {}
+"#;
+    let errors = sema_errors("namespace_method_effect", effects);
+    assert!(errors.iter().any(|diagnostic| diagnostic.code == "E0740"), "{errors:#?}");
+}

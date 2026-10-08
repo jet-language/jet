@@ -11,7 +11,6 @@ use crate::Codegen::TIR::clone_env;
 use crate::Codegen::TIR::core_enum_equal_type;
 use crate::Codegen::TIR::data_plan_for_core_call;
 use crate::Codegen::TIR::duration_new_unit;
-use crate::Codegen::TIR::fn_field_call_ty;
 use crate::Codegen::TIR::game_static_type;
 use crate::Codegen::TIR::handle_method_op;
 use crate::Codegen::TIR::handle_method_return_ty;
@@ -4171,8 +4170,8 @@ fn lower_method_call_impl(
         Err(error) => return invariant_method_expr(method_span, error),
     }
 
-    // D-CALLVALUE1=B: sema proved this `.call(...)` receiver is a function
-    // value. Lower it through the same TIR function-value node as `Expr::CallValue`.
+    // Sema normalizes callable fields and `.call(...)` to the established
+    // function-value route. Never choose a field by inspecting its name here.
     // `bind_arg_temporaries` keys temps by `site`; the receiver span is the
     // nested callee's start and would rebind `.call`'s args onto that call.
     if recv_type.as_deref() == Some(Syntax::INTERNAL_CALL_VALUE) {
@@ -5737,27 +5736,6 @@ fn lower_method_call_impl(
                 ty,
                 kind: TExprKind::DistinctRaw(Box::new(recv)),
             }
-        });
-    }
-    // Calling a checked function field uses the same argument and failure
-    // carrier boundary as every other function-value invocation. The stored
-    // callable returns the effective carrier (see `struct_field_type`).
-    if let Some(fn_ty @ Type::Fn { .. }) = fn_field_call_ty(method, recv_type, cx) {
-        return in_own_frame(|| {
-            let recv = lower_expr(receiver, cx, env);
-            let boxed = match &recv.ty {
-                Type::Named(name) => cx.fact_box_edge(&name, &method),
-                _ => false,
-            };
-            let callee = TExpr {
-                ty: fn_ty.with_effective_fn_returns(),
-                kind: TExprKind::Field {
-                    recv: Box::new(recv),
-                    field: method.to_string(),
-                    boxed,
-                },
-            };
-            lower_fn_value_call(None, callee, args, method_span.start as u32, cx, env)
         });
     }
     // D-ENC-DYN1=A+: a dynamic `Data` construction `Data.<Variant>(arg)` (the gate

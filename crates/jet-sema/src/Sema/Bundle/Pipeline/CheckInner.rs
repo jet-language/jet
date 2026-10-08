@@ -951,15 +951,6 @@ pub(super) fn check_bundle_opts_for_output_inner(
                     for item in &module.items {
                         match item {
                             Item::Struct(candidate) if candidate.name == s.name => {
-                                for field in &candidate.fields {
-                                    existing_member_sites.insert(
-                                        field.name.clone(),
-                                        (
-                                            format!("existing field `{}.{}`", s.name, field.name),
-                                            field.name_span,
-                                        ),
-                                    );
-                                }
                                 for method in &candidate.methods {
                                     existing_member_sites.insert(
                                         method.name.clone(),

@@ -3061,12 +3061,8 @@ fn covers_named_fn_value_binding() {
 
 #[test]
 fn covers_fn_field_struct_value_type() {
-    // c109 Phase 27: a struct with a FUNCTION-typed field is a covered VALUE type — the
-    // fn-typed field renders to `Box<dyn Fn(...)>` and needs no clone/deref decision at
-    // the field site (sema-independent — `build_cx` populates `struct_fields`). (The
-    // full construction + `w.step(4)` fn-field CALL is sema-dependent — `recv_type ==
-    // Some("Worker")` is a sema fact — so it is proven by the TIR feature
-    // integration targets + byte-parity.)
+    // Function-typed fields are covered value types. Calls through them are
+    // normalized by sema to the same checked route as `.call(...)`.
     let src = "struct Worker { step: fn(Int) -> Int }\nfn f() {}";
     let (toks, _) = crate::Lexer::lex(src);
     let prog = crate::Parser::parse(&toks).expect("parse");
@@ -3075,12 +3071,6 @@ fn covers_fn_field_struct_value_type() {
         &Type::Named("Worker".to_string()),
         &cx
     ));
-    // The fn-field-call shape resolves the field's Fn type from a covered struct's
-    // `struct_fields` (the `recv_type` half is supplied by the TIR feature
-    // integration targets).
-    assert!(fn_field_call_ty("step", &Some("Worker".to_string()), &cx).is_some());
-    // A non-existent / non-Fn field is not a fn-field call.
-    assert!(fn_field_call_ty("missing", &Some("Worker".to_string()), &cx).is_none());
 }
 
 #[test]

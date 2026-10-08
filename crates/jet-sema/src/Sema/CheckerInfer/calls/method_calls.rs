@@ -7945,37 +7945,7 @@ impl<'a> Checker<'a> {
         };
         let (_, dispatch_type_name) = self.struct_type_name_parts(&type_name);
         let display_type_name = self.display_type_name(&type_name, None);
-        // Reserved generic core records do not live in the ordinary struct
-        // registry. Their function-valued fields still use the same field
-        // call surface as user structs (`vjp_run.pull(seed)`).
-        if let Type::Apply {
-            name,
-            args: type_args,
-        } = &recv_ty
-        {
-            if let Some(field_ty) = core_generic_struct_field(name, method, type_args) {
-                if matches!(field_ty, Type::Fn { .. }) {
-                    *recv_type_out = Some(dispatch_type_name.to_string());
-                    let mut callee =
-                        Box::new(Expr::Field(receiver.clone(), method.to_string(), span));
-                    let end = args.last().map(|a| a.expr.span().end).unwrap_or(span.end);
-                    let call_span = Span::new(span.start, end);
-                    return self.infer_call_value(&mut callee, args, call_span);
-                }
-            }
-        }
-        if let Some(fields) = self.struct_fields_for_type_name(&type_name) {
-            if let Some((_, _, field_ty)) = fields.iter().find(|(fname, _, _)| fname == method) {
-                if matches!(field_ty, Type::Fn { .. }) {
-                    *recv_type_out = Some(dispatch_type_name.to_string());
-                    let mut callee =
-                        Box::new(Expr::Field(receiver.clone(), method.to_string(), span));
-                    let end = args.last().map(|a| a.expr.span().end).unwrap_or(span.end);
-                    let call_span = Span::new(span.start, end);
-                    return self.infer_call_value(&mut callee, args, call_span);
-                }
-            }
-        }
+        let field_name = method;
         let source_identity = if method == "bool" && args.len() == 1 {
             let (namespace, leaf) = self.struct_type_name_parts(&type_name);
             self.struct_owner_module(leaf, namespace)
@@ -7986,7 +7956,29 @@ impl<'a> Checker<'a> {
         let method = jet_foundation::CoreModuleExports::core_source_receiver_method(
             source_identity.as_deref().unwrap_or(&type_name), method, args.len(),
         );
-        let Some((owner_mod, mut msig)) = operator_signature.or_else(|| self.resolve_method_sig(&type_name, method)) else {
+        // D-MEMBER-NAMESPACE1=A: existence, not visibility or call validity,
+        // selects the method namespace. Only an absent method permits a
+        // callable field; normalize it to the existing function-value route
+        // so lowering consumes sema's selection instead of guessing by name.
+        let method_signature = operator_signature.or_else(|| self.resolve_method_sig(&type_name, method));
+        if method_signature.is_none() {
+            let core_field = match &recv_ty {
+                Type::Apply { name, args } => core_generic_struct_field(name, field_name, args),
+                _ => None,
+            };
+            let callable_field = core_field.as_ref().is_some_and(|ty| matches!(ty, Type::Fn { .. }))
+                || self.struct_fields_for_type_name(&type_name).is_some_and(|fields| {
+                    fields.iter().any(|(name, _, ty)| name == field_name && matches!(ty, Type::Fn { .. }))
+                });
+            if callable_field {
+                *recv_type_out = Some(Syntax::INTERNAL_CALL_VALUE.to_string());
+                let base = std::mem::replace(receiver, Box::new(Expr::Absent(span)));
+                *receiver = Box::new(Expr::Field(base, field_name.to_string(), span));
+                let end = args.last().map(|arg| arg.expr.span().end).unwrap_or(span.end);
+                return self.infer_call_value(receiver, args, Span::new(span.start, end));
+            }
+        }
+        let Some((owner_mod, mut msig)) = method_signature else {
             let iter_elem = match &recv_ty {
                 Type::Apply { name, args }
                     if name == Syntax::TYPE_ITER || name == Syntax::TYPE_VIEW_ITER =>

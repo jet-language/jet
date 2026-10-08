@@ -498,6 +498,31 @@ fn sema_call_typecheck_host_bound_arguments(callee: String, params: [SemaCallPar
 }
 
 fn sema_call_method_checked_from_value(state: &SemaOwnershipState, receiver: Expr, receiver_value: TExpr, candidate: SemaCallMethodCandidate, args: [CallArg], defaults: [SemaCallDefaultValue], expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic]) -> SemaCallChecked? {
+    // Declaration existence selects the method namespace. Check the chosen
+    // registered identity's visibility here, never while filtering candidates.
+    if environment.registration_graph == .Val(graph) {
+        visible := Bool?{None}
+        if graph.callable_rows.get(candidate.method.symbol.key) == .Val(row) {
+            visible = Val(if row == {
+                .Function(owner, index) -> sema_registration_visible(graph.modules[owner].functions[index].symbol.visibility, environment.module_identity, environment.package_identity, graph.modules[owner].module_identity, graph.modules[owner].package_identity)
+                .Foreign(owner, index) -> sema_registration_visible(graph.modules[owner].foreign_functions[index].symbol.visibility, environment.module_identity, environment.package_identity, graph.modules[owner].module_identity, graph.modules[owner].package_identity)
+                .NominalMethod(owner, nominal, index) -> sema_registration_visible(graph.modules[owner].nominals[nominal].methods[index].symbol.visibility, environment.module_identity, environment.package_identity, graph.modules[owner].module_identity, graph.modules[owner].package_identity)
+                .ImplMethod(owner, implementation, index) -> sema_registration_visible(graph.modules[owner].impls[implementation].methods[index].symbol.visibility, environment.module_identity, environment.package_identity, graph.modules[owner].module_identity, graph.modules[owner].package_identity)
+            })
+        } else if candidate.method.trait_owner == .Val(owner) {
+            row :: sema_type_graph_nominal_row(graph, owner.key) ?? return None
+            visible = Val(sema_call_trait_visible(graph, graph.modules[row.module_index].nominals[row.row], environment.module_identity, environment.package_identity))
+        } else if candidate.method.mangled {
+            panic("selected registered method has no canonical callable row")
+        }
+        // Only existing non-mangled host references lack a registered row.
+        // Graph-free local checks retain their existing declaration rules.
+        if visible == .Val(false) {
+            name :: candidate.method.name
+            &diagnostics.push(sema_error("E0605", span, "`{name}` exists but is private to its file", "only names marked `pub` can be used from another file (S18)", "add `pub` before `{name}`, or don't reach across files here"))
+            return None
+        }
+    }
     resolved_candidate := candidate
     params := sema_call_params_from_type_after(resolved_candidate.signature, resolved_candidate.receiver_offset) ?? return None
     source_args := args
