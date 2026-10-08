@@ -2103,7 +2103,7 @@ ms: i64,) -> Result<JetTCPStream, JetNetError> {
     if matches!(jet_deadline_remaining_ms(), Some(ms) if ms <= 0) {
         return Err(jet_net_deadline_timeout("tcp connect"));
     }
-    let query = host.clone();
+    let query = host.to_owned();
     let (resolve_sender, resolve_receiver) = std::sync::mpsc::sync_channel(1);
     std::thread::spawn(move || {
         use std::net::ToSocketAddrs;
@@ -2118,7 +2118,7 @@ ms: i64,) -> Result<JetTCPStream, JetNetError> {
             Ok(Err(error)) => {
                 return Err(jet_net_io_error(
                     "resolve socket address",
-                    Some(host.clone()),
+                    Some(host.to_owned()),
                     error,
                 ))
             }
@@ -2126,7 +2126,7 @@ ms: i64,) -> Result<JetTCPStream, JetNetError> {
             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                 return Err(JetNetError::Other(jet_net_detail(
                     "tcp connect",
-                    Some(host.clone()),
+                    Some(host.to_owned()),
                     None,
                     "socket address resolver stopped without a result".to_string(),
                     None,
@@ -2137,7 +2137,7 @@ ms: i64,) -> Result<JetTCPStream, JetNetError> {
     if addrs.is_empty() {
         return Err(JetNetError::AddressUnavailable(jet_net_detail(
             "tcp connect",
-            Some(host.clone()),
+            Some(host.to_owned()),
             None,
             format!("tcp connect failed: no address for `{}`", host),
             None,
@@ -2240,12 +2240,12 @@ fn jet_net_tcp_peer_socket_addr(stream: &JetTCPStream) -> Result<JetSocketAddr, 
 
 fn jet_net_tcp_listen(addr: &str) -> Result<JetTCPListener, JetNetError> {
     jet_scheduler_world_reject_uncontrolled("network");
-    let inner = std::net::TcpListener::bind(addr.as_str())
-        .map_err(|e| jet_net_io_error("tcp listen", Some(addr.clone()), e))?;
+    let inner = std::net::TcpListener::bind(addr)
+        .map_err(|e| jet_net_io_error("tcp listen", Some(addr.to_owned()), e))?;
     #[cfg(not(all(target_os = "wasi", target_env = "p2", target_arch = "wasm32")))]
     inner
         .set_nonblocking(true)
-        .map_err(|e| jet_net_io_error("tcp listen", Some(addr.clone()), e))?;
+        .map_err(|e| jet_net_io_error("tcp listen", Some(addr.to_owned()), e))?;
     Ok(JetTCPListener { inner })
 }
 
@@ -2317,14 +2317,14 @@ fn jet_net_tcp_connect(addr: &str) -> Result<JetTCPStream, JetNetError> {
     jet_scheduler_world_reject_uncontrolled("network");
     #[cfg(all(target_os = "wasi", target_env = "p2", target_arch = "wasm32"))]
     {
-        return std::net::TcpStream::connect(addr.as_str())
-            .map_err(|error| jet_net_io_error("tcp connect", Some(addr.clone()), error))
+        return std::net::TcpStream::connect(addr)
+            .map_err(|error| jet_net_io_error("tcp connect", Some(addr.to_owned()), error))
             .and_then(jet_net_tcp_stream);
     }
 
     #[cfg(not(all(target_os = "wasi", target_env = "p2", target_arch = "wasm32")))]
     {
-        let address = addr.clone();
+        let address = addr.to_owned();
         let worker_address = address.clone();
         let (sender, receiver) = std::sync::mpsc::sync_channel(1);
         std::thread::spawn(move || {
@@ -2709,12 +2709,12 @@ fn jet_net_sendfile(stream: &mut JetTCPStream, path: &str) -> Result<i64, JetNet
 
 fn jet_net_udp_bind(addr: &str) -> Result<JetUDPSocket, JetNetError> {
     jet_scheduler_world_reject_uncontrolled("network");
-    let inner = std::net::UdpSocket::bind(addr.as_str())
-        .map_err(|e| jet_net_io_error("udp bind", Some(addr.clone()), e))?;
+    let inner = std::net::UdpSocket::bind(addr)
+        .map_err(|e| jet_net_io_error("udp bind", Some(addr.to_owned()), e))?;
     #[cfg(not(all(target_os = "wasi", target_env = "p2", target_arch = "wasm32")))]
     inner
         .set_nonblocking(true)
-        .map_err(|e| jet_net_io_error("udp bind", Some(addr.clone()), e))?;
+        .map_err(|e| jet_net_io_error("udp bind", Some(addr.to_owned()), e))?;
     let inner = std::sync::Arc::new(inner);
     Ok(JetUDPSocket {
         inner: inner.clone(),

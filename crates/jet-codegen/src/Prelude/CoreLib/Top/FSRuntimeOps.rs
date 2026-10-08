@@ -116,7 +116,7 @@ pub(crate) fn jet_std_fs_temp_dir_path(prefix: &str) -> Result<String, jet_std::
     if jet_fault_should_fail("FS.Write") {
         return Err(jet_std::IOError::other(
             jet_std::IOOperation::Write,
-            Some(path.to_owned()),
+            Some(path.clone()),
             "fault injected: FS.Write",
         ));
     }
@@ -134,7 +134,7 @@ pub(crate) fn jet_std_fs_temp_file_path(prefix: &str) -> Result<String, jet_std:
     if jet_fault_should_fail("FS.Write") {
         return Err(jet_std::IOError::other(
             jet_std::IOOperation::Write,
-            Some(path.to_owned()),
+            Some(path.clone()),
             "fault injected: FS.Write",
         ));
     }

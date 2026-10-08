@@ -21,7 +21,7 @@ fn jet_walk8_open(root: &str, ignore: &str, enabled: bool) -> i64 {
     static NEXT: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(1);
     let key = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let path = std::path::PathBuf::from(root);
-    let context = JetWalk8Context { root: path.to_owned(), ignore: enabled.then(|| ignore.to_owned()), slots: vec![JetWalk8Slot { path, matcher: None, directory: None }] };
+    let context = JetWalk8Context { root: path.clone(), ignore: enabled.then(|| ignore.to_owned()), slots: vec![JetWalk8Slot { path, matcher: None, directory: None }] };
     jet_walk8_table().lock().expect("walk context table poisoned").insert(key, std::sync::Arc::new(std::sync::Mutex::new(context)));
     key
 }

@@ -507,7 +507,7 @@ fn jet_env_value_raw(name: &str) -> Option<std::ffi::OsString> {
     jet_env_read()
         .iter()
         .find(|(candidate, _)| jet_env_key_eq(candidate.as_os_str(), name))
-        .map(|(_, value)| value.to_owned())
+        .map(|(_, value)| value.clone())
 }
 
 fn jet_std_env_get(name: &str) -> Option<String> {
@@ -665,7 +665,7 @@ fn jet_std_env_vars() -> Result<Vec<String>, jet_std::EnvError> {
     for (name, value) in entries.iter() {
         let decoded_name = name.to_str().ok_or(jet_std::EnvError::NonUnicode)?;
         value.to_str().ok_or(jet_std::EnvError::NonUnicode)?;
-        names.push((name.to_owned(), decoded_name.to_string()));
+        names.push((name.clone(), decoded_name.to_string()));
     }
     names.sort_by(|(left, _), (right, _)| {
         let folded = jet_env_key_cmp(left.as_os_str(), right.as_os_str());
