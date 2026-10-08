@@ -1,0 +1,25 @@
+// D-ENV-MUTATE1 uses the canonical native-private fieldless EnvError handle.
+// CoreEnumPayloadRows orders InvalidName, InvalidValue, NonUnicode; the checked
+// record marshaller supplies those same variant indices. EncodingABI owns the
+// eight-byte tag carrier shared by EnvError's existing clone/drop/render paths.
+fn env_overlay_error_new(tag: I64) -> I64 {
+    value :: jet_rt_alloc(ENCODING_ENUM_BYTES, I64{8})
+    encoding_store(value + ENCODING_ENUM_TAG, tag)
+    value
+}
+
+#Export(c) fn jet_rt_record_new_EnvError_InvalidName() -> I64 {
+    env_overlay_error_new(I64{0})
+}
+
+#Export(c) fn jet_rt_record_new_EnvError_InvalidValue() -> I64 {
+    env_overlay_error_new(I64{1})
+}
+
+#Export(c) fn jet_rt_record_new_EnvError_NonUnicode() -> I64 {
+    env_overlay_error_new(I64{2})
+}
+
+#Export(c) fn jet_rt_record_tag_EnvError(value: I64) -> I64 {
+    encoding_word(value + ENCODING_ENUM_TAG)
+}
