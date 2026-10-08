@@ -1,0 +1,13 @@
+use core.encoding.json as json
+fn run() {
+    raw :: "{{\"name\":\"jet\",\"ok\":true}}"
+    data :: json.parse(raw) ?? panic("bad json")
+    if data == .Object(entries) {
+        print(entries.len())
+    }
+    obj := [String:JSON]{}
+    obj["name"] = JSON.Text("jet")
+    obj["ok"] = JSON.Bool(true)
+    obj["none"] = JSON.Null
+    print(json.to_string(JSON.Object(obj)))
+}
