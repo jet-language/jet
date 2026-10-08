@@ -11,6 +11,10 @@ extern void jet_rt_host_arguments(int64_t, char **, char **);
 extern void jet_time_raw_wall_sample(int64_t *, int64_t *, uint8_t *);
 extern int64_t jet_time_raw_host_monotonic_ns(void);
 extern int64_t jet_time_raw_wall_override_ms(int64_t *);
+extern int64_t jet_time_raw_world_wall_ms(int64_t *);
+extern int64_t jet_time_raw_world_monotonic_ns(int64_t *);
+extern int64_t jet_time_raw_controlled_monotonic_ns(int64_t *);
+extern int64_t jet_rt_time_monotonic_provider_set(int64_t);
 extern int64_t jet_time_raw_zone_env(Text *, Text **);
 extern int64_t jet_time_raw_zone_file_bytes(Text *, uint64_t **, int64_t *);
 extern int64_t jet_time_raw_embedded_zone_bytes(Text *, uint64_t **, int64_t *);
@@ -19,11 +23,24 @@ extern void jet_rt_int_drop(int64_t);
 extern void jet_rt_string_drop(Text *);
 extern void jet_rt_free(void *, int64_t, int64_t);
 static Text borrowed(const char *value) { return (Text){(unsigned char *)value, (int64_t)strlen(value), 0}; }
+static int64_t max_monotonic(int64_t *out) { *out = INT64_MAX; return 0x101; }
+static int64_t absent_monotonic(int64_t *out) { (void)out; return 0x100; }
 int main(void) {
     static char *argv[] = {"time-fixture", NULL};
     static char zone[] = "TZDIR=raw_\xff";
     static char *env[] = {"JET_PROVE_REPLAY_TIME_MS=not-a-number", "LEX_TEST_EPOCH=-17", zone, NULL};
     jet_rt_host_arguments(1, argv, env);
+    int64_t sample = 17;
+    assert(jet_time_raw_world_wall_ms(&sample) == 0 && sample == 17);
+    assert(jet_time_raw_world_monotonic_ns(&sample) == 0 && sample == 17);
+    int64_t previous = jet_rt_time_monotonic_provider_set((int64_t)(uintptr_t)&max_monotonic);
+    assert(jet_time_raw_controlled_monotonic_ns(&sample) == 1);
+    assert(jet_int_owned_to_i64(sample) == INT64_MAX);
+    jet_rt_int_drop(sample);
+    assert(jet_rt_time_monotonic_provider_set((int64_t)(uintptr_t)&absent_monotonic) == (int64_t)(uintptr_t)&max_monotonic);
+    sample = 17;
+    assert(jet_time_raw_controlled_monotonic_ns(&sample) == 0 && sample == 17);
+    assert(jet_rt_time_monotonic_provider_set(previous) == (int64_t)(uintptr_t)&absent_monotonic);
     // A caller may discard its startup arrays after capture; reads use the
     // one runtime-owned snapshot, not std logical overlay state.
     zone[6] = 'X';

@@ -3,6 +3,8 @@
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <stdlib.h>
+#include <unistd.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
@@ -39,6 +41,12 @@ extern int64_t jet_socket_shutdown_raw(FD *, int64_t, ErrorOut *);
 extern void jet_socket_mark_closed_raw(FD *);
 extern int64_t jet_socket_ready_raw(FD *, int64_t, int64_t, ErrorOut *);
 extern void jet_fd_drop_raw(FD *);
+extern int64_t jet_socket_read_raw(FD *, uint64_t *, int64_t, ErrorOut *);
+extern int64_t jet_socket_write_raw(FD *, uint64_t *, int64_t, ErrorOut *);
+extern int64_t jet_socket_send_to_raw(FD *, uint64_t *, int64_t, Address *, ErrorOut *);
+extern int64_t jet_socket_receive_from_raw(FD *, uint64_t *, int64_t, Address *, ErrorOut *);
+extern int64_t jet_socket_unix_bind_raw(FD *, Text *, ErrorOut *);
+extern int64_t jet_socket_unix_connect_raw(FD *, Text *, ErrorOut *);
 extern void *jet_rt_alloc(int64_t, int64_t);
 extern void jet_rt_free(void *, int64_t, int64_t);
 extern void jet_rt_host_arguments(int64_t, char **, char **);
@@ -156,6 +164,54 @@ int main(void) {
     assert((fcntl(accepted->number, F_GETFD) & FD_CLOEXEC) != 0);
     assert(jet_socket_option_set_raw(client, IPPROTO_TCP, 1, 1, &facts) == 0);
     assert(jet_socket_option_get_raw(client, IPPROTO_TCP, 1, &option, &facts) == 0 && option == 1);
+    uint64_t payload[] = {1, 0, 255, 2}, incoming[4] = {0};
+    assert(jet_socket_write_raw(client, payload, 4, &facts) == 4);
+    int64_t received = jet_socket_read_raw(accepted, incoming, 4, &facts);
+    if (received < 0) {
+        assert(facts.code == EAGAIN);
+        assert((jet_socket_ready_raw(accepted, 1, 1000000000, &facts) & 1) != 0);
+        received = jet_socket_read_raw(accepted, incoming, 4, &facts);
+    }
+    assert(received == 4 && memcmp(incoming, payload, sizeof(payload)) == 0);
+
+    FD *datagram = jet_socket_create_raw(4, SOCK_DGRAM, 0, &facts);
+    FD *sender = jet_socket_create_raw(4, SOCK_DGRAM, 0, &facts);
+    endpoint.port = 0;
+    assert(datagram && sender && jet_socket_bind_raw(datagram, &endpoint, &facts) == 0);
+    assert(jet_socket_address_raw(datagram, false, &endpoint, &facts) == 0);
+    assert(jet_socket_send_to_raw(sender, payload, 4, &endpoint, &facts) == 4);
+    Address from = {0};
+    assert(jet_socket_receive_from_raw(datagram, incoming, 2, &from, &facts) == 4);
+    assert(incoming[0] == 1 && incoming[1] == 0 && from.ip.family == 4 && from.port > 0);
+    jet_fd_drop_raw(sender);
+    jet_fd_drop_raw(datagram);
+
+    FD *unix_listener = jet_socket_create_raw(1, SOCK_STREAM, 0, &facts);
+    unsigned char too_long[108];
+    memset(too_long, 'x', sizeof(too_long));
+    Text unix_path = {too_long, sizeof(too_long), 0};
+    assert(jet_socket_unix_bind_raw(unix_listener, &unix_path, &facts) == -4097 && facts.domain == 0);
+    too_long[0] = 0; // NUL wins even when the pathname is also overlength.
+    assert(jet_socket_unix_bind_raw(unix_listener, &unix_path, &facts) == -4098 && facts.domain == 0);
+    char pathname[] = "/tmp/jet-unix-XXXXXX";
+    int placeholder = mkstemp(pathname);
+    assert(placeholder >= 0);
+    close(placeholder);
+    assert(unlink(pathname) == 0);
+    unix_path = (Text){(unsigned char *)pathname, (int64_t)strlen(pathname), 0};
+    assert(jet_socket_unix_bind_raw(unix_listener, &unix_path, &facts) == 0);
+    assert(jet_socket_listen_raw(unix_listener, 128, &facts) == 0);
+    FD *unix_client = jet_socket_create_raw(1, SOCK_STREAM, 0, &facts);
+    assert(unix_client && jet_socket_unix_connect_raw(unix_client, &unix_path, &facts) == 0);
+    FD *unix_stream = jet_socket_accept_raw(unix_listener, NULL, &facts);
+    assert(unix_stream);
+    assert(jet_socket_write_raw(unix_client, payload, 4, &facts) == 4);
+    assert(jet_socket_read_raw(unix_stream, incoming, 4, &facts) == 4);
+    assert(memcmp(incoming, payload, sizeof(payload)) == 0);
+    jet_fd_drop_raw(unix_stream);
+    jet_fd_drop_raw(unix_client);
+    jet_fd_drop_raw(unix_listener);
+    assert(unlink(pathname) == 0);
     assert(jet_socket_shutdown_raw(accepted, 2, &facts) == 0);
     int closed_number = (int)accepted->number;
     jet_socket_mark_closed_raw(accepted);

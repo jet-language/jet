@@ -79,14 +79,22 @@ fn time_seconds_magnitude(seconds: I64) -> I64 {
     jet_rt_int_drop(whole)
     result
 }
+fn time_optional_i64(present: Bool, output: I64) -> I64 {
+    if !present -> return I64{0}
+    // World and provider callbacks expose raw i64 facts. Core Int? owns its
+    // canonical L4 word, including spills for i64 extrema.
+    value :: jet_int_owned_from_i64(sync_load(output))
+    sync_store(output, value)
+    I64{1}
+}
 #Export(c) fn jet_time_raw_world_wall_ms(output: I64) -> I64 {
-    if world_wall_ms(output) -> I64{1} else -> I64{0}
+    time_optional_i64(world_wall_ms(output), output)
 }
 #Export(c) fn jet_time_raw_world_monotonic_ns(output: I64) -> I64 {
-    if world_monotonic_ns(output) -> I64{1} else -> I64{0}
+    time_optional_i64(world_monotonic_ns(output), output)
 }
 #Export(c) fn jet_time_raw_controlled_monotonic_ns(output: I64) -> I64 {
-    if controlled_monotonic_ns(output) -> I64{1} else -> I64{0}
+    time_optional_i64(controlled_monotonic_ns(output), output)
 }
 #Export(c) fn jet_time_raw_wall_override_ms(output: I64) -> I64 {
     replay_name :: scheduler_msg_replay()
