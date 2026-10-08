@@ -491,3 +491,10 @@ HTTP CORS Origins owns either Any or an ordered list of text owners. Clone
 preserves empty lists and repetitions while duplicating every text owner.
 Drop releases only the active list and its initialized elements. The CORS
 policy embeds this variant's two words rather than allocating another box.
+
+CORS Policy deep-clones its embedded Origins and method/header text owners.
+Its field projections borrow Origins and the Bool byte in place; text
+projections fill caller stack headers over borrowed bytes. These headers
+must not be dropped or grown, and the policy must stay live while they are
+read or cloned. Cloning normalizes the low Bool byte without treating padding
+as part of the Bool value.
