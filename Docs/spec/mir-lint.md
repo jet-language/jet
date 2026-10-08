@@ -36,6 +36,16 @@ Payload access selected by an enum's own discriminant remains an invariant:
 record-import glue selects the matching tag before invoking a payload getter,
 so those getters do not introduce an independent user-visible stop point.
 
+The shared `mir_binary_can_trap` predicate consumes the operation and checked
+overflow policy: `Trap` on arithmetic or shifts is stopping, while bitwise and
+proven-total (`Unchecked`) operations are not. Exact Euclidean division and
+remainder carry checked `Panic` route facts for zero-divisor failures.
+Shield and transaction masks suppress cancellation `Check` polls, not
+`Propagate` after Panic-capable operations. The runtime delivery contract is
+`Compiler/JetRuntime/Source/Scheduler.jet::scheduler_delivered_status`: Shield
+retains panic/fault statuses while deferring cancellation/deadline statuses.
+Legality rejects cancellation checks and non-Panic propagation under a mask.
+
 ## Type compatibility
 
 The lint compares types with one relation, *compatible*. Each side is first

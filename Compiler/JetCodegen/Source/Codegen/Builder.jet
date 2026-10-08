@@ -1129,7 +1129,7 @@ fn jet_codegen_switch_block(builder: &JetCodegenBuilder, program: JetCodegenProg
     loop row in builder.loops {
         if row.continue_target == block {
             jet_codegen_emit_budget_site(&builder, program, "step", "jet_rt_comptime_step")
-            return jet_codegen_emit_poll(&builder, program, MIRPollKind.Check)
+            return jet_codegen_emit_poll(&builder, program, MIRPollKind.Check, false)
         }
     }
 }
@@ -1141,11 +1141,12 @@ fn jet_codegen_switch_block(builder: &JetCodegenBuilder, program: JetCodegenProg
 // each loop continue target, where every live value is owned by a cleanup
 // frame; `Propagate` directly follows each can-stop operation, before its
 // result is bound, so the stop path never drops a result the operation may
-// have left uninitialized. Cleanup, Shield and transaction regions are
-// masked: they carry no stop points.
-fn jet_codegen_emit_poll(builder: &JetCodegenBuilder, program: JetCodegenProgram, kind: MIRPollKind) Never! {
-    if !program.stop_points || builder.stop_cleanup_active || builder.transactions.len() > 0 -> return
-    if !jet_codegen_current_is_open(builder, program) || jet_codegen_in_shield(builder) -> return
+// have left uninitialized. Shield and transaction masks defer cancellation,
+// never Panic. Cleanup is already unwinding and cannot recursively propagate.
+fn jet_codegen_emit_poll(builder: &JetCodegenBuilder, program: JetCodegenProgram, kind: MIRPollKind, panic_capable: Bool) Never! {
+    if !program.stop_points || builder.stop_cleanup_active -> return
+    if !panic_capable && (builder.transactions.len() > 0 || jet_codegen_in_shield(builder)) -> return
+    if !jet_codegen_current_is_open(builder, program) -> return
     span := builder.current_span
     resume :: jet_codegen_new_block(&builder, program, span, "poll-resume")
     stop :: jet_codegen_new_block(&builder, program, span, "poll-stop")
@@ -1159,7 +1160,7 @@ fn jet_codegen_emit_poll(builder: &JetCodegenBuilder, program: JetCodegenProgram
 // compiler callable first enters one level of comptime depth, then the Check.
 fn jet_codegen_emit_entry_check(builder: &JetCodegenBuilder, program: JetCodegenProgram) Never! {
     jet_codegen_emit_budget_site(&builder, program, "enter", "jet_rt_comptime_enter")
-    jet_codegen_emit_poll(&builder, program, MIRPollKind.Check)
+    jet_codegen_emit_poll(&builder, program, MIRPollKind.Check, false)
 }
 
 fn jet_codegen_in_shield(builder: JetCodegenBuilder) -> Bool Never! {
@@ -1225,7 +1226,11 @@ fn jet_codegen_emit(builder: &JetCodegenBuilder, program: JetCodegenProgram, spa
         .WritePlace(place, _) | .ReplacePlace(place, _) -> jet_codegen_set_drop_live(&builder, program, place, true)
         else -> {}
     }
-    if mir_operation_can_stop(operation, builder.prelude_calls, builder.prelude_call_positions) -> jet_codegen_emit_poll(&builder, program, MIRPollKind.Propagate)
+    if mir_operation_can_stop(operation, builder.prelude_calls, builder.prelude_call_positions) {
+        panic_capable := true
+        if operation == .ScopeExit(_) -> panic_capable = false
+        jet_codegen_emit_poll(&builder, program, MIRPollKind.Propagate, panic_capable)
+    }
     result
 }
 
@@ -1249,7 +1254,11 @@ fn jet_codegen_emit_mir_type(builder: &JetCodegenBuilder, program: JetCodegenPro
         .WritePlace(place, _) | .ReplacePlace(place, _) -> jet_codegen_set_drop_live(&builder, program, place, true)
         else -> {}
     }
-    if mir_operation_can_stop(operation, builder.prelude_calls, builder.prelude_call_positions) -> jet_codegen_emit_poll(&builder, program, MIRPollKind.Propagate)
+    if mir_operation_can_stop(operation, builder.prelude_calls, builder.prelude_call_positions) {
+        panic_capable := true
+        if operation == .ScopeExit(_) -> panic_capable = false
+        jet_codegen_emit_poll(&builder, program, MIRPollKind.Propagate, panic_capable)
+    }
     value
 }
 

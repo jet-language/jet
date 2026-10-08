@@ -1642,6 +1642,15 @@ pub enum MIRBinaryDispatch { Primitive Prelude(call: MIRPreludeCallID, location:
 // bootstrap bridge checks this rule going out and re-derives the mode coming back.
 pub enum MIRBinaryOverflow { Unchecked Trap }
 
+// Trap is the checked policy fact; sema never puts it on a proven-total op.
+pub fn mir_binary_can_trap(op: MIRBinaryOp, overflow: MIRBinaryOverflow) -> Bool Never! {
+    if overflow != .Trap -> return false
+    if op == {
+        .Add | .Sub | .Mul | .Div | .FloorDiv | .Mod | .Rem | .Pow | .Shl | .Shr -> true
+        else -> false
+    }
+}
+
 pub enum MIRConversion { Transparent NumericCast SendFn Prelude(call: MIRPreludeCallID, location: MIRPanicLoc, fallibility: MIRCallFallibility) }
 
 pub struct MIREnumArg { pub field: MIRFieldID?, pub value: MIRValueID, pub boxed: Bool }
@@ -2241,6 +2250,9 @@ pub fn mir_terminator_value_uses(terminator: MIRTerminator) -> [MIRValueID] Neve
 // User/callback/wait operations can deliver stops. For Prelude routes, Panic
 // is a checked registry fact, independent of a returned failure carrier.
 pub fn mir_operation_can_stop(operation: MIROperation, prelude_calls: [MIRPreludeCall], prelude_positions: [U64:Int]) -> Bool Never! {
+    if operation == .Binary(op, _, overflow, _, _) {
+        if mir_binary_can_trap(op, overflow) -> return true
+    }
     loop call in mir_operation_prelude_calls(operation) {
         position :: prelude_positions.get(call.value) ?? next
         if prelude_calls[position].effect_kind == Val(Effect.Panic) -> return true
@@ -2254,6 +2266,13 @@ pub fn mir_operation_can_stop(operation: MIROperation, prelude_calls: [MIRPrelud
         }
         else -> false
     }
+}
+
+// Existing user/callback/Core operations can panic through the code they invoke.
+// ScopeExit alone only forwards an already-delivered stop.
+pub fn mir_operation_can_panic(operation: MIROperation, prelude_calls: [MIRPreludeCall], prelude_positions: [U64:Int]) -> Bool Never! {
+    if operation == .ScopeExit(_) -> return false
+    mir_operation_can_stop(operation, prelude_calls, prelude_positions)
 }
 
 pub enum MIROperationUseKind { Value Place }

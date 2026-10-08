@@ -51,6 +51,7 @@ use jet_foundation.[
     MIR_SCHEMA_VERSION,
     Span,
     mir_operation_can_stop,
+    mir_operation_can_panic,
     mir_operation_place_uses,
     mir_operation_prelude_calls,
     mir_operation_type_uses,
@@ -356,7 +357,7 @@ fn mir_pass_validate_stop_points(function: MIRFunction, definitions: MIRPassDefi
             else -> {}
         }
     }
-    if stopped -> return mir_pass_validate_stop_shields(function)
+    if stopped -> return mir_pass_validate_stop_shields(function, tables)
     None
 }
 
@@ -393,13 +394,13 @@ fn mir_pass_validate_resume_uses(function: MIRFunction, definitions: MIRPassDefi
     None
 }
 
-// Shield depth is the number of open Shield scopes; every path into a block
-// agrees on it, and it is zero at each Stopped.
-fn mir_pass_validate_stop_shields(function: MIRFunction) -> String? {
+// Cancellation masks may contain only propagation points for Panic-capable
+// operations. Every path agrees on depth; stopped exits close every mask.
+fn mir_pass_validate_stop_shields(function: MIRFunction, tables: MIRPassLegalityTables) -> String? {
     shields := [U64:Bool]{}
     any_shield := false
     loop scope in function.scopes {
-        if scope.kind == MIRScopeKind.Shield {
+        if scope.kind == MIRScopeKind.Shield || scope.kind == MIRScopeKind.Transaction {
             &shields.add(scope.id.value, true).drop("scope identities are unique")
             any_shield = true
         }
@@ -425,6 +426,11 @@ fn mir_pass_validate_stop_shields(function: MIRFunction) -> String? {
                 }
                 else -> {}
             }
+        }
+        if depth > 0 && block.terminator == .Poll(kind, _, _) {
+            if kind == .Check -> return Val("MIR cancellation check appears inside a cancellation mask")
+            last :: &block.instructions.last() ?? return Val("MIR masked propagation has no operation")
+            if !mir_operation_can_panic(last.operation, tables.prelude_calls, tables.prelude_positions) -> return Val("MIR masked propagation does not follow a Panic-capable operation")
         }
         if block.terminator == .Stopped && depth != 0 -> return Val("MIR Stopped leaves a Shield scope open")
         loop target in mir_terminator_targets(block.terminator) {

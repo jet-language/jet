@@ -98,3 +98,72 @@ fn checked_slice_routes_publish_panic_stop_facts() {
     }
     assert_eq!(prelude_route_effect("core.collections", "loop_range_has_next"), None);
 }
+
+#[test]
+fn checked_numeric_policy_classifies_only_trapping_operations() {
+    use jet_foundation::MIR::{mir_binary_can_trap, mir_operation_can_stop,
+        MirBinaryOp, MirBinaryOverflow, MirBinaryDispatch, MirValueId};
+    use jet_foundation::Effects::{prelude_route_effect, Effect};
+    for op in [MirBinaryOp::Add, MirBinaryOp::Sub, MirBinaryOp::Mul,
+        MirBinaryOp::Div, MirBinaryOp::FloorDiv, MirBinaryOp::Mod, MirBinaryOp::Rem,
+        MirBinaryOp::Pow, MirBinaryOp::Shl, MirBinaryOp::Shr] {
+        assert!(mir_binary_can_trap(op, MirBinaryOverflow::Trap));
+        assert!(!mir_binary_can_trap(op, MirBinaryOverflow::Unchecked));
+        let operation = MirOperation::Binary { op, overflow: MirBinaryOverflow::Trap,
+            dispatch: MirBinaryDispatch::Primitive, left: MirValueId(1), right: MirValueId(2) };
+        assert!(mir_operation_can_stop(&operation, |_| None));
+    }
+    for op in [MirBinaryOp::BitAnd, MirBinaryOp::BitOr, MirBinaryOp::BitXor] {
+        assert!(!mir_binary_can_trap(op, MirBinaryOverflow::Trap));
+    }
+    for member in ["div_euclid", "rem_euclid"] {
+        assert_eq!(prelude_route_effect("core.numeric", member), Some(Effect::Panic));
+    }
+}
+
+#[test]
+fn panic_propagation_crosses_shield_but_cancellation_checks_do_not() {
+    jet::run_compiler_work(|| {
+        let scratch = common::Scratch::new("mir_shield_panic");
+        std::fs::write(scratch.path.join("package.jet"),
+            "name: \"mir_shield_panic\"\nversion: \"0.1.0\"\n").unwrap();
+        let entry = scratch.path.join("main.jet");
+        std::fs::write(&entry, r#"
+fn trap(n: I64) {
+    shield {
+        result :: n + I64{1}
+        print(result)
+    }
+}
+fn run() { trap(I64{9223372036854775807}) }
+"#).unwrap();
+        let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap()).unwrap();
+        let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+            .into_iter().filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error)).collect();
+        assert!(errors.is_empty(), "{errors:#?}");
+        let request = MirArtifactRequest::new(MirArtifactTarget::RustAot,
+            MirArtifactKind::NativeExecutable, MirArtifactBuildMode::Dev);
+        let tir = jet::Codegen::TIR::lower_checked_tir_program_for(&bundle, request).unwrap();
+        let mut mir = jet::Codegen::TIR::lower_native_tir_to_mir(tir).unwrap();
+        mir.validate().unwrap();
+        let mut witnessed = false;
+        for function in &mut mir.functions {
+            for block in &mut function.blocks {
+                if block.instructions.last().is_some_and(|instruction|
+                    matches!(instruction.operation, MirOperation::Binary { overflow: jet_foundation::MIR::MirBinaryOverflow::Trap, .. })) {
+                    let MirTerminator::Poll { kind, .. } = &mut block.terminator else {
+                        panic!("shielded trapping operation has no propagation edge");
+                    };
+                    assert_eq!(*kind, MirPollKind::Propagate);
+                    // A cancellation-only check must remain masked at this site.
+                    *kind = MirPollKind::Check;
+                    witnessed = true;
+                    break;
+                }
+            }
+            if witnessed { break; }
+        }
+        assert!(witnessed);
+        assert!(mir.validate().is_err(), "verifier accepted a cancellation check under Shield");
+    });
+}

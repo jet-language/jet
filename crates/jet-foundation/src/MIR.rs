@@ -8772,6 +8772,14 @@ fn validate_function(
     validate_stop_points(function, &blocks, &place_rows, &dominators, prelude_ids)
 }
 
+/// The checked Trap policy is absent on sema-proven total operations.
+pub fn mir_binary_can_trap(op: MirBinaryOp, overflow: MirBinaryOverflow) -> bool {
+    overflow == MirBinaryOverflow::Trap && matches!(op,
+        MirBinaryOp::Add | MirBinaryOp::Sub | MirBinaryOp::Mul | MirBinaryOp::Div |
+        MirBinaryOp::FloorDiv | MirBinaryOp::Mod | MirBinaryOp::Rem | MirBinaryOp::Pow |
+        MirBinaryOp::Shl | MirBinaryOp::Shr)
+}
+
 /// Whether `operation` can stop (unified host/stop contract, #4720): it runs
 /// user or Core code, invokes a callback, or waits. Mirrors MIR.jet
 /// `mir_operation_can_stop`.
@@ -8779,6 +8787,11 @@ pub fn mir_operation_can_stop(
     operation: &MirOperation,
     mut effect: impl FnMut(MirPreludeCallId) -> Option<Effect>,
 ) -> bool {
+    if let MirOperation::Binary { op, overflow, .. } = operation {
+        if mir_binary_can_trap(*op, *overflow) {
+            return true;
+        }
+    }
     if operation_prelude_calls(operation).any(|call| effect(call) == Some(Effect::Panic)) {
         return true;
     }
@@ -8797,6 +8810,15 @@ pub fn mir_operation_can_stop(
         ),
         _ => false,
     }
+}
+
+/// User/Core/callback operations may panic through the code they invoke;
+/// ScopeExit by itself only forwards an already-delivered stop.
+pub fn mir_operation_can_panic(
+    operation: &MirOperation,
+    effect: impl FnMut(MirPreludeCallId) -> Option<Effect>,
+) -> bool {
+    !matches!(operation, MirOperation::ScopeExit { .. }) && mir_operation_can_stop(operation, effect)
 }
 
 /// Stop points (mirrors JetOptimizer Legality.jet mir_pass_validate_stop_points).
@@ -8833,7 +8855,7 @@ fn validate_stop_points(
         }
     }
     if stopped {
-        validate_stop_shields(function, blocks)?;
+        validate_stop_shields(function, blocks, prelude_calls)?;
     }
     Ok(())
 }
@@ -8876,12 +8898,12 @@ fn validate_resume_uses(
     Ok(())
 }
 
-/// Shield depth is the number of open Shield scopes; every path into a block
-/// agrees on it, and it is zero at each Stopped.
-fn validate_stop_shields(function: &MirFunction, blocks: &HashMap<MirBlockId, usize>) -> Result<(), MirValidationError> {
+/// Cancellation masks contain only propagation for Panic-capable operations.
+/// All paths agree on depth; stopped exits close every mask.
+fn validate_stop_shields(function: &MirFunction, blocks: &HashMap<MirBlockId, usize>, prelude_calls: &HashMap<MirPreludeCallId, &MirPreludeCall>) -> Result<(), MirValidationError> {
     let invalid = |message: &str| MirValidationError::InvalidOperation { function: function.id, message: message.to_string() };
     let shields: HashSet<MirScopeId> =
-        function.scopes.iter().filter(|scope| scope.kind == MirScopeKind::Shield).map(|scope| scope.id).collect();
+        function.scopes.iter().filter(|scope| matches!(scope.kind, MirScopeKind::Shield | MirScopeKind::Transaction)).map(|scope| scope.id).collect();
     if shields.is_empty() {
         return Ok(());
     }
@@ -8896,6 +8918,17 @@ fn validate_stop_shields(function: &MirFunction, blocks: &HashMap<MirBlockId, us
                 MirOperation::ScopeEnter { scope, .. } if shields.contains(scope) => depth += 1,
                 MirOperation::ScopeExit { scope } if shields.contains(scope) => depth -= 1,
                 _ => {}
+            }
+        }
+        if depth > 0 {
+            if let MirTerminator::Poll { kind, .. } = &block.terminator {
+                if *kind == MirPollKind::Check {
+                    return Err(invalid("MIR cancellation check appears inside a cancellation mask"));
+                }
+                if !block.instructions.last().is_some_and(|last|
+                    mir_operation_can_panic(&last.operation, |call| prelude_calls.get(&call).and_then(|row| row.effect))) {
+                    return Err(invalid("MIR masked propagation does not follow a Panic-capable operation"));
+                }
             }
         }
         if matches!(block.terminator, MirTerminator::Stopped) && depth != 0 {

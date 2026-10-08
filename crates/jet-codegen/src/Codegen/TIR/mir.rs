@@ -4406,7 +4406,7 @@ fn lower_function(
     for (offset, (name, ty, access)) in f.params.iter().enumerate() {
         ctx.bind_parameter(param_index + offset, name, ty, *access)?;
     }
-    ctx.emit_poll(MirPollKind::Check)?;
+    ctx.emit_poll(MirPollKind::Check, false)?;
     match body {
         Some(TLambdaBody::Expr(expr)) => {
             let value = ctx.lower_child(expr)?;
@@ -6713,13 +6713,13 @@ impl<'a> LowerCtx<'a> {
 
     /// Never read a can-stop result on the stop edge. Only the resume edge
     /// binds it into a lexical frame; Stopped exits through that frame's
-    /// ordinary drop chain. Cleanup, Shield and transaction bodies are masked.
-    pub(super) fn emit_poll(&mut self, kind: MirPollKind) -> Result<(), LowerError> {
-        if !self.function_registry.stop_points || self.stop_cleanup_active
-            || !self.transaction_restores.is_empty() || self.is_terminated()
+    /// ordinary drop chain. Shield/transaction masks defer cancellation only.
+    pub(super) fn emit_poll(&mut self, kind: MirPollKind, panic_capable: bool) -> Result<(), LowerError> {
+        if !self.function_registry.stop_points || self.stop_cleanup_active || self.is_terminated()
+            || !panic_capable && (!self.transaction_restores.is_empty()
             || self.defer_stack.iter().filter_map(|frame| frame.owner).any(|owner| {
                 self.scopes.iter().any(|scope| scope.id == owner && scope.kind == MirScopeKind::Shield)
-            })
+            }))
         {
             return Ok(());
         }
@@ -7915,6 +7915,7 @@ impl<'a> LowerCtx<'a> {
         let can_stop = mir_operation_can_stop(&operation, |call| {
             self.prelude_call_positions.get(&call).and_then(|position| self.prelude_calls[*position].effect)
         });
+        let panic_capable = can_stop && !matches!(&operation, MirOperation::ScopeExit { .. });
         if let Some(value_type) = &value_type {
             let ownership = match forced_ownership {
                 Some(ownership) => ownership,
@@ -7964,7 +7965,7 @@ impl<'a> LowerCtx<'a> {
             )?;
         }
         if can_stop {
-            self.emit_poll(MirPollKind::Propagate)?;
+            self.emit_poll(MirPollKind::Propagate, panic_capable)?;
         }
         Ok(value)
     }
