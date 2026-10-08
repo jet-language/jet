@@ -49,9 +49,11 @@ if (mode === "assemble") {
         const result = spawnSync(resolve(cli), ["check", path], { cwd: repo, encoding: "utf8", maxBuffer: 32 << 20 });
         const accepted = result.status === 0;
         const errors = [...new Set([...`${result.stdout ?? ""}\n${result.stderr ?? ""}`.matchAll(/\bE\d{4}\b/g)].map(match => match[0]))].sort();
+        const diagnosticOutput = `${result.stdout ?? ""}\n${result.stderr ?? ""}`.replace(/\u001b\[[0-9;]*m/g, "");
+        const errorCount = [...diagnosticOutput.matchAll(/^Error \[E\d{4}\]/gm)].length;
         const expectedErrors = row.errors && [...row.errors].sort();
-        const passed = !result.error && result.signal === null && result.status !== null && accepted === row.accepted && (!expectedErrors || JSON.stringify(errors) === JSON.stringify(expectedErrors));
-        receipts.push({ name: row.name, expectedAccepted: row.accepted, expectedErrors, accepted, errors, passed, toolExit: result.status, signal: result.signal, stdout: result.stdout, stderr: result.stderr, error: result.error?.message });
+        const passed = !result.error && result.signal === null && result.status !== null && accepted === row.accepted && (!expectedErrors || JSON.stringify(errors) === JSON.stringify(expectedErrors)) && (row.errorCount === undefined || errorCount === row.errorCount);
+        receipts.push({ name: row.name, expectedAccepted: row.accepted, expectedErrors, expectedErrorCount: row.errorCount, accepted, errors, errorCount, passed, toolExit: result.status, signal: result.signal, stdout: result.stdout, stderr: result.stderr, error: result.error?.message });
         console.log(`${row.name}: exit=${result.status} accepted=${accepted} expected=${row.accepted} ${passed ? "PASS" : "FAIL"}`);
     }
     writeFileSync(join(out, `${mode}-receipt.json`), JSON.stringify(receipts, null, 2) + "\n");
