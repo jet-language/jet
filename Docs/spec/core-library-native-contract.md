@@ -106,6 +106,14 @@ contain redacted provider descriptions only. The historical pair codec preserves
 UTF-8 values byte-for-byte, including embedded NUL; it rejects truncation,
 invalid UTF-8, and trailing bytes. Owned value buffers are wiped before release.
 
+Typed vault records own native Secret buffers. Equality compares the key bytes,
+not just immutable hashes, while Debug always prints a redacted key marker.
+Cloning creates independent key and provenance owners. Unsigned repository,
+generation, and timestamp words preserve all 64 bits. Immutable record identity
+binds the name, key type/material/public key, generation, opaque ID, creation
+time, provenance, and optional origin; lifecycle status/reason updates do not
+change that identity.
+
 Vault test hooks are explicitly initialized test transport, never an authority
 mechanism for production callers. Authorizer, trust-path, and fault overrides
 are thread-local and released at thread exit. Backup barriers are shared,

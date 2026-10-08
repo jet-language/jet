@@ -66,3 +66,40 @@ fn vault_fixture_check(condition: Bool) {
 #Export(c) fn jet_rt_vault_invalid_legacy_fixture(bytes: I64, length: I64) {
     vault_fixture_check(vault_decode_pairs(bytes, length) == I64{0})
 }
+
+// Exact Rust fixture558-591; the C free wrapper observes this actual Secret
+// buffer after wiping and before allocator release (not a parallel drop model).
+// out receives record, deep clone, and owned Debug text for the transport.
+#Export(c) fn stored_key_bytes_are_redacted_and_zeroized_on_drop(name: I64, bytes: I64, redacted: I64, forbidden: I64, out: I64) {
+    secret :: vault_secret_adopt(bytes)
+    record :: vault_record_allocate(name, I64{2}, I64{1}, I64{1}, I64{2}, secret)
+    at := I64{0}
+    loop {
+        if (at == I64{16}) -> break
+        rt_text_put(record + VAULT_RECORD_OPAQUE + at, I64{2})
+        at += I64{1}
+    }
+    rt_text_store(record + VAULT_RECORD_CREATED, I64{10})
+    rt_text_store(record + VAULT_RECORD_STATUS_MS, I64{10})
+    scratch :: jet_rt_alloc(I64{8192}, I64{8})
+    vault_fixture_check(vault_public_hash(I64{2}, secret, record + VAULT_RECORD_PUBLIC_HASH, scratch))
+    vault_record_hash(record, record + VAULT_RECORD_HASH, scratch)
+    jet_rt_free(scratch, I64{8192}, I64{8})
+    shown :: vault_record_debug(record)
+    vault_fixture_check(rt_text_find(shown, redacted, I64{0}, false) >= I64{0})
+    vault_fixture_check(rt_text_find(shown, forbidden, I64{0}, false) < I64{0})
+    clone :: vault_record_clone(record)
+    vault_fixture_check(vault_record_equal(record, clone))
+    clone_secret :: vault_secret_bytes(rt_text_word(clone + VAULT_RECORD_SECRET))
+    clone_data :: rt_text_word(clone_secret + DATA_SEQUENCE_DATA)
+    first :: host_u8_get(clone_data, I64{0})
+    host_u8_put(clone_data, I64{0}, first ~| I64{1})
+    vault_fixture_check(!vault_record_equal(record, clone))
+    host_u8_put(clone_data, I64{0}, first)
+    vault_fixture_check(vault_record_equal(record, clone))
+    rt_text_store(out, record)
+    rt_text_store(out + I64{8}, clone)
+    rt_text_store(out + I64{16}, shown)
+}
+#Export(c) fn jet_rt_vault_record_fixture_drop(record: I64) { vault_record_drop(record) }
+#Export(c) fn jet_rt_vault_record_fixture_debug(record: I64) -> I64 { vault_record_debug(record) }

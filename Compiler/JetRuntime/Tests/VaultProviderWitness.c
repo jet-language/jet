@@ -1,4 +1,4 @@
-// Real Jet error/pair-codec implementation only. No host vault provider.
+// Real Jet vault state/codec only; link -Wl,--wrap=jet_rt_free for zeroization.
 #include <assert.h>
 #include <stdint.h>
 #include <stddef.h>
@@ -10,6 +10,22 @@ extern void jet_rt_alloc_init(void);
 extern void errors_and_handles_are_redacted(int64_t, const Text *, const Text *, const Text *, const Text *, const TextList *);
 extern void jet_rt_vault_legacy_fixture(const void *, int64_t, const void *);
 extern void jet_rt_vault_invalid_legacy_fixture(const void *, int64_t);
+typedef struct { int64_t length, capacity; unsigned char *data; } ByteList;
+extern void *jet_rt_alloc(int64_t, int64_t);
+extern void __real_jet_rt_free(void *, int64_t, int64_t);
+extern void jet_rt_string_drop(Text *);
+extern void stored_key_bytes_are_redacted_and_zeroized_on_drop(const Text *, ByteList *, const Text *, const Text *, void **);
+extern void jet_rt_vault_record_fixture_drop(void *);
+extern Text *jet_rt_vault_record_fixture_debug(void *);
+static struct { void *data; int64_t capacity; unsigned frees; } observed[2];
+static size_t observed_count;
+void __wrap_jet_rt_free(void *data, int64_t size, int64_t align) {
+    for (size_t i = 0; i < observed_count; ++i) if (data == observed[i].data) {
+        assert(size == observed[i].capacity && align == 8 && ++observed[i].frees == 1);
+        for (int64_t byte = 0; byte < size; ++byte) assert(((const unsigned char *)data)[byte] == 0);
+    }
+    __real_jet_rt_free(data, size, align);
+}
 static Text text(const char *s) { return (Text){(const unsigned char *)s, (int64_t)strlen(s), 0}; }
 static const char *const display[] = {
     "invalid vault key name", "vault key not found", "vault key has a different type",
@@ -24,6 +40,36 @@ static const char *const debug[] = {
     "UnsupportedProvider", "InvalidEncoding", "DurabilityUnknown", "Crypto(OpenFailed)",
     "IO { operation: \"read\", redacted_path: \"<vault-store>\" }", "Internal { incident_id: \"vault-17\" }"
 };
+static void zeroization_fixture(void) {
+    unsigned char *data = jet_rt_alloc(40, 8);
+    memset(data, 0x5a, 40);
+    ByteList bytes = {32, 40, data};
+    Text name = text("transport"), redacted = text("<redacted>"), forbidden = text("90, 90");
+    void *parts[3];
+    stored_key_bytes_are_redacted_and_zeroized_on_drop(&name, &bytes, &redacted, &forbidden, parts);
+    assert(bytes.length == 0 && bytes.capacity == 0 && bytes.data == NULL);
+    ByteList *clone_key;
+    memcpy(&clone_key, (const unsigned char *)parts[1] + 176, sizeof(clone_key));
+    assert(clone_key->length == 32 && clone_key->capacity == 32);
+    assert(memcmp(clone_key->data, data, 32) == 0);
+    observed[0].data = data; observed[0].capacity = 40;
+    observed[1].data = clone_key->data; observed[1].capacity = 32; observed_count = 2;
+    jet_rt_string_drop(parts[2]);
+    // A pure Debug golden separately witnesses field order, fixed-array list
+    // rendering and all64 unsigned generation bits; Debug never validates codec.
+    unsigned char *record = parts[0];
+    memset(record + 16, 0xff, 8);
+    memset(record + 72, 3, 32); memset(record + 104, 4, 32); memset(record + 136, 5, 32);
+    Text *shown = jet_rt_vault_record_fixture_debug(record);
+    const char *golden = "VaultRecord { name: \"transport\", key_type: 2, generation: 18446744073709551615, status: Active, provenance: Imported, opaque_id: [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2], created_unix_ms: 10, status_unix_ms: 10, record_hash: [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3], public_key_hash: [4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4], reason_hash: [5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5], origin: None, key: \"<redacted>\" }";
+    assert(shown->length == (int64_t)strlen(golden) && memcmp(shown->data, golden, strlen(golden)) == 0);
+    jet_rt_string_drop(shown);
+    jet_rt_vault_record_fixture_drop(parts[0]);
+    assert(observed[0].frees == 1 && observed[1].frees == 0);
+    jet_rt_vault_record_fixture_drop(parts[1]);
+    assert(observed[0].frees == 1 && observed[1].frees == 1);
+    observed_count = 0;
+}
 int main(void) {
     jet_rt_alloc_init();
     Text forbidden[] = {text("secrets.age"), text("AGE-SECRET"), text("/home/"), text("hunter2"), text("ciphertext sentinel")};
@@ -53,6 +99,7 @@ int main(void) {
     jet_rt_vault_invalid_legacy_fixture(huge_count, 4);
     static const unsigned char overlong[] = {1,0,0,0, 0xff,0xff,0xff,0xff};
     jet_rt_vault_invalid_legacy_fixture(overlong, 8);
-    puts("vault witness OK (13 exact private errors, legacy codec, domain SHA256)");
+    zeroization_fixture();
+    puts("vault witness OK (13 errors, legacy codec, native Secret redaction/wipe)");
     return 0;
 }

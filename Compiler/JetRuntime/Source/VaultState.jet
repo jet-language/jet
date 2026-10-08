@@ -1,0 +1,437 @@
+// Owned native provider state; layout mirrors SecretsCrypto.rs:543-609.
+// Record key storage is the canonical native Secret, not a Rust Vec/key object.
+// Raw u64 bit words retain the entire reference range (including its high bit).
+VAULT_STORE_BYTES :: prep { I64{40} }
+VAULT_STORE_UUID :: prep { I64{0} }
+VAULT_STORE_REVISION :: prep { I64{16} }
+VAULT_STORE_STRINGS :: prep { I64{24} }
+VAULT_STORE_RECORDS :: prep { I64{32} }
+VAULT_RECORD_BYTES :: prep { I64{184} }
+VAULT_RECORD_NAME :: prep { I64{0} }
+VAULT_RECORD_TYPE :: prep { I64{8} }
+VAULT_RECORD_GENERATION :: prep { I64{16} }
+VAULT_RECORD_STATUS :: prep { I64{24} }
+VAULT_RECORD_PROVENANCE :: prep { I64{32} }
+VAULT_RECORD_OPAQUE :: prep { I64{40} }
+VAULT_RECORD_CREATED :: prep { I64{56} }
+VAULT_RECORD_STATUS_MS :: prep { I64{64} }
+VAULT_RECORD_HASH :: prep { I64{72} }
+VAULT_RECORD_PUBLIC_HASH :: prep { I64{104} }
+VAULT_RECORD_REASON_HASH :: prep { I64{136} }
+VAULT_RECORD_ORIGIN :: prep { I64{168} }
+VAULT_RECORD_SECRET :: prep { I64{176} }
+VAULT_ORIGIN_BYTES :: prep { I64{80} }
+VAULT_ORIGIN_UUID :: prep { I64{0} }
+VAULT_ORIGIN_NAME :: prep { I64{16} }
+VAULT_ORIGIN_GENERATION :: prep { I64{24} }
+VAULT_ORIGIN_OPAQUE :: prep { I64{32} }
+VAULT_ORIGIN_HASH :: prep { I64{48} }
+#Import(c) fn vault_secret_adopt(bytes: I64) -> I64 = "jet_rt_secret_from_bytes"
+#Import(c) fn vault_secret_bytes(secret: I64) -> I64 = "jet_rt_secret_bytes"
+#Import(c) fn vault_secret_drop(secret: I64) = "jet_rt_secret_drop"
+#Import(c) fn vault_native_nfc(text: I64) -> I64 = "jet_text_nfc"
+fn vault_unsigned_less(left: I64, right: I64) -> Bool {
+    (left ~| I64{-9223372036854775808}) < (right ~| I64{-9223372036854775808})
+}
+fn vault_bytes_zero(data: I64, length: I64) -> Bool {
+    at := I64{0}
+    loop at < length {
+        if (rt_text_byte(data + at) != I64{0}) -> return false
+        at += I64{1}
+    }
+    true
+}
+fn vault_put_u64(target: I64, value: I64) {
+    at := I64{0}
+    loop {
+        if (at == I64{8}) -> break
+        rt_text_put(target + at, (value >> (at * I64{8})) & I64{255})
+        at += I64{1}
+    }
+}
+// SecretsCrypto.rs:715-744; UTF-8 preflight only protects the raw test boundary.
+// NFC is the shared native provider48a5f5ae9, never Rust JetCString reinterpretation.
+fn vault_validate_text(text: I64, reason: Bool) -> Bool {
+    length :: rt_text_len(text)
+    limit :: if reason -> I64{256} else -> I64{128}
+    if (length == I64{0} || length > limit) -> return false
+    data :: rt_text_data(text)
+    if !vault_utf8_valid(data, length) -> return false
+    if !reason && (rt_text_byte(data) == I64{46}) && (length == I64{1} || (length == I64{2} && rt_text_byte(data + I64{1}) == I64{46})) -> return false
+    normalized :: vault_native_nfc(text)
+    same :: jet_rt_string_eq(text, normalized)
+    jet_rt_string_drop(normalized)
+    if !same -> return false
+    at := I64{0}
+    loop at < length {
+        cp :: rt_text_decode(data + at)
+        width :: rt_text_width(data + at)
+        if (cp < I64{32} || (cp >= I64{127} && cp <= I64{159})) -> return false
+        if ((at == I64{0} || at + width == length) && unicode_is_white_space(cp)) -> return false
+        if (!reason && (cp == I64{47} || cp == I64{92})) -> return false
+        if (reason && (cp == I64{8232} || cp == I64{8233})) -> return false
+        at += width
+    }
+    true
+}
+fn vault_origin_clone(origin: I64) -> I64 {
+    if (origin == I64{0}) -> return I64{0}
+    result :: jet_rt_alloc(VAULT_ORIGIN_BYTES, I64{8})
+    rt_text_bytes_copy(result, origin, VAULT_ORIGIN_BYTES)
+    rt_text_store(result + VAULT_ORIGIN_NAME, jet_rt_string_clone(rt_text_word(origin + VAULT_ORIGIN_NAME)))
+    result
+}
+fn vault_origin_drop(origin: I64) {
+    if (origin == I64{0}) -> return
+    jet_rt_string_drop(rt_text_word(origin + VAULT_ORIGIN_NAME))
+    jet_rt_free(origin, VAULT_ORIGIN_BYTES, I64{8})
+}
+fn vault_origin_equal(left: I64, right: I64) -> Bool {
+    if (left == I64{0} || right == I64{0}) -> return left == right
+    rt_text_equal_bytes(left + VAULT_ORIGIN_UUID, right + VAULT_ORIGIN_UUID, I64{16}) &&
+        jet_rt_string_eq(rt_text_word(left + VAULT_ORIGIN_NAME), rt_text_word(right + VAULT_ORIGIN_NAME)) &&
+        rt_text_word(left + VAULT_ORIGIN_GENERATION) == rt_text_word(right + VAULT_ORIGIN_GENERATION) &&
+        rt_text_equal_bytes(left + VAULT_ORIGIN_OPAQUE, right + VAULT_ORIGIN_OPAQUE, I64{16}) &&
+        rt_text_equal_bytes(left + VAULT_ORIGIN_HASH, right + VAULT_ORIGIN_HASH, I64{32})
+}
+// Allocates a fully initialized owner and adopts its sole Secret. Persistence
+// commits set the immutable identity/time/hash fields before encoding it.
+fn vault_record_allocate(name: I64, key_type: I64, generation: I64, status: I64, provenance: I64, secret: I64) -> I64 {
+    result :: jet_rt_alloc(VAULT_RECORD_BYTES, I64{8})
+    thread_zero(result, VAULT_RECORD_BYTES)
+    rt_text_store(result + VAULT_RECORD_NAME, jet_rt_string_clone(name))
+    rt_text_store(result + VAULT_RECORD_TYPE, key_type)
+    rt_text_store(result + VAULT_RECORD_GENERATION, generation)
+    rt_text_store(result + VAULT_RECORD_STATUS, status)
+    rt_text_store(result + VAULT_RECORD_PROVENANCE, provenance)
+    rt_text_store(result + VAULT_RECORD_SECRET, secret)
+    result
+}
+fn vault_record_clone(record: I64) -> I64 {
+    result :: jet_rt_alloc(VAULT_RECORD_BYTES, I64{8})
+    rt_text_bytes_copy(result, record, VAULT_RECORD_BYTES)
+    rt_text_store(result + VAULT_RECORD_NAME, jet_rt_string_clone(rt_text_word(record + VAULT_RECORD_NAME)))
+    rt_text_store(result + VAULT_RECORD_ORIGIN, vault_origin_clone(rt_text_word(record + VAULT_RECORD_ORIGIN)))
+    bytes :: data_sequence_clone(vault_secret_bytes(rt_text_word(record + VAULT_RECORD_SECRET)), DATA_TREE_BYTE_LIST)
+    rt_text_store(result + VAULT_RECORD_SECRET, vault_secret_adopt(bytes))
+    // Secret adopts the buffer and clears, but does not free, the donor shell.
+    jet_rt_free(bytes, DATA_SEQUENCE_BYTES, I64{8})
+    result
+}
+fn vault_record_drop(record: I64) {
+    if (record == I64{0}) -> return
+    jet_rt_string_drop(rt_text_word(record + VAULT_RECORD_NAME))
+    vault_origin_drop(rt_text_word(record + VAULT_RECORD_ORIGIN))
+    vault_secret_drop(rt_text_word(record + VAULT_RECORD_SECRET))
+    jet_rt_free(record, VAULT_RECORD_BYTES, I64{8})
+}
+// Rust derive compares key bytes too; immutable hashes never replace equality.
+fn vault_record_equal(left: I64, right: I64) -> Bool {
+    if !jet_rt_string_eq(rt_text_word(left + VAULT_RECORD_NAME), rt_text_word(right + VAULT_RECORD_NAME)) -> return false
+    at := VAULT_RECORD_TYPE
+    loop at < VAULT_RECORD_ORIGIN {
+        if rt_text_word(left + at) != rt_text_word(right + at) -> return false
+        at += I64{8}
+    }
+    if !vault_origin_equal(rt_text_word(left + VAULT_RECORD_ORIGIN), rt_text_word(right + VAULT_RECORD_ORIGIN)) -> return false
+    a :: vault_secret_bytes(rt_text_word(left + VAULT_RECORD_SECRET))
+    b :: vault_secret_bytes(rt_text_word(right + VAULT_RECORD_SECRET))
+    count :: rt_text_word(a + DATA_SEQUENCE_LENGTH)
+    if count != rt_text_word(b + DATA_SEQUENCE_LENGTH) -> return false
+    ad :: rt_text_word(a + DATA_SEQUENCE_DATA)
+    bd :: rt_text_word(b + DATA_SEQUENCE_DATA)
+    at = I64{0}
+    loop at < count {
+        if host_u8_get(ad, at) != host_u8_get(bd, at) -> return false
+        at += I64{1}
+    }
+    true
+}
+fn vault_store_new(uuid: I64) -> I64 {
+    result :: jet_rt_alloc(VAULT_STORE_BYTES, I64{8})
+    rt_text_bytes_copy(result + VAULT_STORE_UUID, uuid, I64{16})
+    rt_text_store(result + VAULT_STORE_REVISION, I64{0})
+    rt_text_store(result + VAULT_STORE_STRINGS, data_sequence_new(I64{0}, VAULT_PAIR_BYTES))
+    rt_text_store(result + VAULT_STORE_RECORDS, data_sequence_new(I64{0}, DATA_TREE_ELEMENT_BYTES))
+    result
+}
+fn vault_store_drop(store: I64) {
+    if (store == I64{0}) -> return
+    vault_pairs_drop(rt_text_word(store + VAULT_STORE_STRINGS))
+    records :: rt_text_word(store + VAULT_STORE_RECORDS)
+    count :: rt_text_word(records + DATA_SEQUENCE_LENGTH)
+    data :: rt_text_word(records + DATA_SEQUENCE_DATA)
+    at := I64{0}
+    loop at < count {
+        vault_record_drop(rt_text_word(data + at * DATA_TREE_ELEMENT_BYTES))
+        at += I64{1}
+    }
+    capacity :: rt_text_word(records + DATA_SEQUENCE_CAPACITY)
+    if (capacity != I64{0}) -> jet_rt_free(data, capacity * DATA_TREE_ELEMENT_BYTES, I64{8})
+    jet_rt_free(records, DATA_SEQUENCE_BYTES, I64{8})
+    jet_rt_free(store, VAULT_STORE_BYTES, I64{8})
+}
+fn vault_store_equal(left: I64, right: I64) -> Bool {
+    if !rt_text_equal_bytes(left + VAULT_STORE_UUID, right + VAULT_STORE_UUID, I64{16}) -> return false
+    if rt_text_word(left + VAULT_STORE_REVISION) != rt_text_word(right + VAULT_STORE_REVISION) -> return false
+    ap :: rt_text_word(left + VAULT_STORE_STRINGS)
+    bp :: rt_text_word(right + VAULT_STORE_STRINGS)
+    count :: rt_text_word(ap + DATA_SEQUENCE_LENGTH)
+    if count != rt_text_word(bp + DATA_SEQUENCE_LENGTH) -> return false
+    ad :: rt_text_word(ap + DATA_SEQUENCE_DATA)
+    bd :: rt_text_word(bp + DATA_SEQUENCE_DATA)
+    at := I64{0}
+    loop at < count {
+        if !jet_rt_string_eq(rt_text_word(ad + at * VAULT_PAIR_BYTES), rt_text_word(bd + at * VAULT_PAIR_BYTES)) -> return false
+        if !jet_rt_string_eq(rt_text_word(ad + at * VAULT_PAIR_BYTES + I64{8}), rt_text_word(bd + at * VAULT_PAIR_BYTES + I64{8})) -> return false
+        at += I64{1}
+    }
+    ar :: rt_text_word(left + VAULT_STORE_RECORDS)
+    br :: rt_text_word(right + VAULT_STORE_RECORDS)
+    count_records :: rt_text_word(ar + DATA_SEQUENCE_LENGTH)
+    if count_records != rt_text_word(br + DATA_SEQUENCE_LENGTH) -> return false
+    ar_data :: rt_text_word(ar + DATA_SEQUENCE_DATA)
+    br_data :: rt_text_word(br + DATA_SEQUENCE_DATA)
+    at = I64{0}
+    loop at < count_records {
+        if !vault_record_equal(rt_text_word(ar_data + at * DATA_TREE_ELEMENT_BYTES), rt_text_word(br_data + at * DATA_TREE_ELEMENT_BYTES)) -> return false
+        at += I64{1}
+    }
+    true
+}
+// Unsigned decimal without an exact Int, temporary string, or digit allocation.
+// q=floor((word unsigned)/10); recursion has at most20 fixed-width frames.
+fn vault_push_u64(target: I64, value: I64) {
+    half :: (value >> I64{1}) & I64{9223372036854775807}
+    quotient :: half / I64{5}
+    remainder :: (half % I64{5}) * I64{2} + (value & I64{1})
+    if (quotient != I64{0}) -> vault_push_u64(target, quotient)
+    rt_text_push_word(target, I64{48} + remainder, I64{1})
+}
+fn vault_debug_bytes(target: I64, bytes: I64, length: I64) {
+    rt_text_push_word(target, I64{91}, I64{1})
+    at := I64{0}
+    loop at < length {
+        if (at != I64{0}) -> rt_text_push_word(target, I64{8236}, I64{2}) // ", "
+        vault_push_u64(target, rt_text_byte(bytes + at))
+        at += I64{1}
+    }
+    rt_text_push_word(target, I64{93}, I64{1})
+}
+fn vault_origin_debug(target: I64, origin: I64) {
+    // "JetVaultOrigin { repo_uuid: "
+    rt_text_push_word(target, I64{8389209266807137610}, I64{8})
+    rt_text_push_word(target, I64{8872212664905462351}, I64{8})
+    rt_text_push_word(target, I64{8463776006944420384}, I64{8})
+    rt_text_push_word(target, I64{540697705}, I64{4})
+    vault_debug_bytes(target, origin + VAULT_ORIGIN_UUID, I64{16})
+    rt_text_push_word(target, I64{2322280078323359788}, I64{8}) // ", name: "
+    rt_text_push_rust_debug_str(target, rt_text_word(origin + VAULT_ORIGIN_NAME))
+    // ", generation: "
+    rt_text_push_word(target, I64{7021786293846089772}, I64{8})
+    rt_text_push_word(target, I64{35435332987252}, I64{6})
+    vault_push_u64(target, rt_text_word(origin + VAULT_ORIGIN_GENERATION))
+    // ", opaque_id: "
+    rt_text_push_word(target, I64{7310874233417965612}, I64{8})
+    rt_text_push_word(target, I64{138418612575}, I64{5})
+    vault_debug_bytes(target, origin + VAULT_ORIGIN_OPAQUE, I64{16})
+    // ", record_hash: "
+    rt_text_push_word(target, I64{7237970023832231980}, I64{8})
+    rt_text_push_word(target, I64{9071419541514335}, I64{7})
+    vault_debug_bytes(target, origin + VAULT_ORIGIN_HASH, I64{32})
+    rt_text_push_word(target, I64{32032}, I64{2}) // " }"
+}
+fn vault_record_debug(record: I64) -> I64 {
+    target :: jet_rt_string_builder_new()
+    // "VaultRecord { name: "
+    rt_text_push_word(target, I64{7162221442391957846}, I64{8})
+    rt_text_push_word(target, I64{7020584582313701999}, I64{8})
+    rt_text_push_word(target, I64{540697965}, I64{4})
+    rt_text_push_rust_debug_str(target, rt_text_word(record + VAULT_RECORD_NAME))
+    // ", key_type: "
+    rt_text_push_word(target, I64{8751724950884917292}, I64{8})
+    rt_text_push_word(target, I64{540697968}, I64{4})
+    vault_push_u64(target, rt_text_word(record + VAULT_RECORD_TYPE))
+    // ", generation: "
+    rt_text_push_word(target, I64{7021786293846089772}, I64{8})
+    rt_text_push_word(target, I64{35435332987252}, I64{6})
+    vault_push_u64(target, rt_text_word(record + VAULT_RECORD_GENERATION))
+    // ", status: "
+    rt_text_push_word(target, I64{8319683848551211052}, I64{8})
+    rt_text_push_word(target, I64{8250}, I64{2})
+    status :: rt_text_word(record + VAULT_RECORD_STATUS)
+    if {
+        (status == I64{1}) -> rt_text_push_word(target, I64{111559249781569}, I64{6}) // "Active"
+        (status == I64{2}) -> rt_text_push_word(target, I64{28259039740978514}, I64{7}) // "Retired"
+        (status == I64{3}) -> rt_text_push_word(target, I64{28259009777001810}, I64{7}) // "Revoked"
+        else -> panic("record variant index out of range")
+    }
+    // ", provenance: "
+    rt_text_push_word(target, I64{7954894537853247532}, I64{8})
+    rt_text_push_word(target, I64{35435181207137}, I64{6})
+    provenance :: rt_text_word(record + VAULT_RECORD_PROVENANCE)
+    if (provenance == I64{1}) {
+        rt_text_push_word(target, I64{7310575239085057351}, I64{8}) // "Generate"
+        rt_text_push_word(target, I64{100}, I64{1}) // "d"
+    } else if (provenance == I64{2}) {
+        rt_text_push_word(target, I64{7234316411285302601}, I64{8}) // "Imported"
+    } else -> panic("record variant index out of range")
+    // ", opaque_id: "
+    rt_text_push_word(target, I64{7310874233417965612}, I64{8})
+    rt_text_push_word(target, I64{138418612575}, I64{5})
+    vault_debug_bytes(target, record + VAULT_RECORD_OPAQUE, I64{16})
+    // ", created_unix_ms: "
+    rt_text_push_word(target, I64{7310575183467847724}, I64{8})
+    rt_text_push_word(target, I64{7881150267141742436}, I64{8})
+    rt_text_push_word(target, I64{2112115}, I64{3})
+    vault_push_u64(target, rt_text_word(record + VAULT_RECORD_CREATED))
+    // ", status_unix_ms: "
+    rt_text_push_word(target, I64{8319683848551211052}, I64{8})
+    rt_text_push_word(target, I64{8317409057592735071}, I64{8})
+    rt_text_push_word(target, I64{8250}, I64{2})
+    vault_push_u64(target, rt_text_word(record + VAULT_RECORD_STATUS_MS))
+    // ", record_hash: "
+    rt_text_push_word(target, I64{7237970023832231980}, I64{8})
+    rt_text_push_word(target, I64{9071419541514335}, I64{7})
+    vault_debug_bytes(target, record + VAULT_RECORD_HASH, I64{32})
+    // ", public_key_hash: "
+    rt_text_push_word(target, I64{7163375852442361900}, I64{8})
+    rt_text_push_word(target, I64{8314041146370517855}, I64{8})
+    rt_text_push_word(target, I64{2112104}, I64{3})
+    vault_debug_bytes(target, record + VAULT_RECORD_PUBLIC_HASH, I64{32})
+    // ", reason_hash: "
+    rt_text_push_word(target, I64{7957705928737955884}, I64{8})
+    rt_text_push_word(target, I64{9071419541514335}, I64{7})
+    vault_debug_bytes(target, record + VAULT_RECORD_REASON_HASH, I64{32})
+    rt_text_push_word(target, I64{7956003919315804204}, I64{8}) // ", origin"
+    rt_text_push_word(target, I64{8250}, I64{2}) // ": "
+    origin :: rt_text_word(record + VAULT_RECORD_ORIGIN)
+    if (origin == I64{0}) { rt_text_push_word(target, I64{1701736270}, I64{4}) } else {
+        rt_text_push_word(target, I64{173500362579}, I64{5}) // "Some("
+        vault_origin_debug(target, origin)
+        rt_text_push_word(target, I64{41}, I64{1})
+    }
+    // ", key: \"<redacted>\""
+    rt_text_push_word(target, I64{2459029689611264044}, I64{8})
+    rt_text_push_word(target, I64{7310577365076505148}, I64{8})
+    rt_text_push_word(target, I64{2244196}, I64{3})
+    rt_text_push_word(target, I64{32032}, I64{2})
+    jet_rt_string_builder_finish(target)
+}
+fn vault_store_debug(store: I64) -> I64 {
+    target :: jet_rt_string_builder_new()
+    // "VaultStore { repository_uuid: "
+    rt_text_push_word(target, I64{8031135795009380694}, I64{8})
+    rt_text_push_word(target, I64{8099004988725945714}, I64{8})
+    rt_text_push_word(target, I64{6879655728805147503}, I64{8})
+    rt_text_push_word(target, I64{35435164824949}, I64{6})
+    vault_debug_bytes(target, store + VAULT_STORE_UUID, I64{16})
+    rt_text_push_word(target, I64{7598532953533194284}, I64{8}) // ", revisi"
+    rt_text_push_word(target, I64{540700271}, I64{4}) // "on: "
+    vault_push_u64(target, rt_text_word(store + VAULT_STORE_REVISION))
+    rt_text_push_word(target, I64{7453010373645639724}, I64{8}) // ", string"
+    rt_text_push_word(target, I64{2322296575628370783}, I64{8}) // "_count: "
+    vault_push_u64(target, rt_text_word(rt_text_word(store + VAULT_STORE_STRINGS) + DATA_SEQUENCE_LENGTH))
+    rt_text_push_word(target, I64{7311136020079779884}, I64{8}) // ", key_ve"
+    rt_text_push_word(target, I64{8026363888824578930}, I64{8}) // "rsion_co"
+    rt_text_push_word(target, I64{138419662453}, I64{5}) // "unt: "
+    vault_push_u64(target, rt_text_word(rt_text_word(store + VAULT_STORE_RECORDS) + DATA_SEQUENCE_LENGTH))
+    rt_text_push_word(target, I64{32032}, I64{2})
+    jet_rt_string_builder_finish(target)
+}
+
+fn vault_put_u16(target: I64, value: I64) {
+    rt_text_put(target, value & I64{255})
+    rt_text_put(target + I64{1}, (value >> I64{8}) & I64{255})
+}
+// Scratch8192 is exclusive; the output32 must not alias it. Crypto primitives
+// consume raw packed key32, never a nominal Rust signing/X25519 carrier.
+fn vault_public_hash(key_type: I64, secret: I64, digest: I64, scratch: I64) -> Bool {
+    bytes :: vault_secret_bytes(secret)
+    if (rt_text_word(bytes + DATA_SEQUENCE_LENGTH) != I64{32}) -> return false
+    key :: rt_text_word(bytes + DATA_SEQUENCE_DATA)
+    public :: scratch + I64{4160}
+    if (key_type == I64{1}) {
+        rt_crypto_ed25519_public(key, public, scratch)
+    } else if (key_type == I64{2}) {
+        rt_crypto_x25519_public(key, public, scratch)
+    } else { return false }
+    domain :: scratch + I64{4096}
+    rt_text_store(domain, I64{8462299100363904586}) // "JVLT2 pu"
+    rt_text_store(domain + I64{8}, I64{8747515638088035426}) // "blic key"
+    rt_text_put(domain + I64{16}, key_type)
+    rt_sha256_parts(domain, I64{17}, public, I64{32}, digest, scratch)
+    thread_zero(scratch, I64{8192})
+    true
+}
+// Internal to the immutable-record hash: its digest lives in the same scratch,
+// so only the SHA schedule/domain are wiped here. The enclosing call wipes all.
+fn vault_key_digest(record: I64, digest: I64, scratch: I64) {
+    key_type :: rt_text_word(record + VAULT_RECORD_TYPE)
+    bytes :: vault_secret_bytes(rt_text_word(record + VAULT_RECORD_SECRET))
+    domain :: scratch + I64{4096}
+    rt_text_store(domain, I64{7307970220873504330}) // "JVLT2 ke"
+    rt_text_store(domain + I64{8}, I64{32481173248811129}) // "y bytes"
+    rt_text_put(domain + I64{15}, key_type)
+    rt_sha256_parts(domain, I64{16}, rt_text_word(bytes + DATA_SEQUENCE_DATA), I64{32}, digest, scratch)
+    rt_text_store(domain, I64{0})
+    rt_text_store(domain + I64{8}, I64{0})
+}
+// SecretsCrypto.rs:830-861. Caller has validated name lengths <=128 and key32;
+// the serialization workspace is bounded553 bytes, with no concatenation owner.
+// Mutable lifecycle status/time/reason are deliberately not in this identity.
+fn vault_record_hash(record: I64, digest: I64, scratch: I64) {
+    key_digest :: scratch + I64{4192}
+    vault_key_digest(record, key_digest, scratch)
+    buffer :: scratch + I64{4352}
+    rt_text_store(buffer, I64{7883868023223506506}) // "JVLT2 im"
+    rt_text_store(buffer + I64{8}, I64{2334391151659087213}) // "mutable "
+    rt_text_store(buffer + I64{16}, I64{110442657834354}) // "record"
+    cursor := I64{22}
+    rt_text_put(buffer + cursor, rt_text_word(record + VAULT_RECORD_TYPE))
+    rt_text_put(buffer + cursor + I64{1}, rt_text_word(record + VAULT_RECORD_PROVENANCE))
+    cursor += I64{2}
+    name :: rt_text_word(record + VAULT_RECORD_NAME)
+    name_length :: rt_text_len(name)
+    vault_put_u16(buffer + cursor, name_length)
+    cursor += I64{2}
+    rt_text_bytes_copy(buffer + cursor, rt_text_data(name), name_length)
+    cursor += name_length
+    vault_put_u64(buffer + cursor, rt_text_word(record + VAULT_RECORD_GENERATION))
+    cursor += I64{8}
+    rt_text_bytes_copy(buffer + cursor, record + VAULT_RECORD_OPAQUE, I64{16})
+    cursor += I64{16}
+    vault_put_u64(buffer + cursor, rt_text_word(record + VAULT_RECORD_CREATED))
+    cursor += I64{8}
+    rt_text_bytes_copy(buffer + cursor, record + VAULT_RECORD_PUBLIC_HASH, I64{32})
+    cursor += I64{32}
+    rt_text_bytes_copy(buffer + cursor, key_digest, I64{32})
+    cursor += I64{32}
+    origin :: rt_text_word(record + VAULT_RECORD_ORIGIN)
+    if (origin == I64{0}) {
+        end :: cursor + I64{75}
+        loop cursor < end {
+            rt_text_put(buffer + cursor, I64{0})
+            cursor += I64{1}
+        }
+    } else {
+        rt_text_put(buffer + cursor, I64{1})
+        cursor += I64{1}
+        rt_text_bytes_copy(buffer + cursor, origin + VAULT_ORIGIN_UUID, I64{16})
+        cursor += I64{16}
+        origin_name :: rt_text_word(origin + VAULT_ORIGIN_NAME)
+        origin_length :: rt_text_len(origin_name)
+        vault_put_u16(buffer + cursor, origin_length)
+        cursor += I64{2}
+        rt_text_bytes_copy(buffer + cursor, rt_text_data(origin_name), origin_length)
+        cursor += origin_length
+        vault_put_u64(buffer + cursor, rt_text_word(origin + VAULT_ORIGIN_GENERATION))
+        cursor += I64{8}
+        rt_text_bytes_copy(buffer + cursor, origin + VAULT_ORIGIN_OPAQUE, I64{16})
+        cursor += I64{16}
+        rt_text_bytes_copy(buffer + cursor, origin + VAULT_ORIGIN_HASH, I64{32})
+        cursor += I64{32}
+    }
+    rt_sha256_parts(buffer, cursor, I64{1}, I64{0}, digest, scratch)
+    thread_zero(scratch, I64{8192})
+}

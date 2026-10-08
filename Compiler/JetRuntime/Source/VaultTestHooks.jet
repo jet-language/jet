@@ -114,7 +114,7 @@ fn vault_test_set_text(offset: I64, text: I64) {
 // Reusable native barrier48: refs0 mutex8 participants16 remaining24
 // generation32 condition-sequence40. Mirrors std::sync::Barrier wait semantics.
 #Export(c) fn jet_rt_vault_test_barrier_new(participants: I64) -> I64 {
-    if (participants <= I64{0}) -> panic("vault test barrier needs participants")
+    if (participants < I64{0}) -> panic("vault test barrier needs a nonnegative participant count")
     barrier :: jet_rt_alloc(I64{48}, I64{8})
     thread_zero(barrier, I64{48})
     sync_store(barrier, I64{1})
@@ -129,6 +129,14 @@ fn vault_test_barrier_retain(barrier: I64) { _ := sync_add(barrier, I64{1}) }
 #Export(c) fn jet_rt_vault_test_barrier_wait(barrier: I64) {
     mutex :: barrier + I64{8}
     sync_mutex_lock(mutex)
+    // std::sync::Barrier::new(0), like new(1), releases each waiter immediately.
+    // Keep the mutex/generation publication edge even for the zero case.
+    if (sync_load(barrier + I64{16}) == I64{0}) {
+        sync_store(barrier + I64{32}, wrapping(sync_load(barrier + I64{32}) + I64{1}))
+        sync_cond_notify_all(barrier + I64{40})
+        sync_mutex_unlock(mutex)
+        return
+    }
     generation :: sync_load(barrier + I64{32})
     remaining :: sync_load(barrier + I64{24}) - I64{1}
     sync_store(barrier + I64{24}, remaining)

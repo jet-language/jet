@@ -162,6 +162,11 @@ int main(int argc, char **argv) {
     }
     assert(pthread_join(writer, NULL) == 0 && atomic_load(&completed) == 8);
     jet_rt_vault_test_barrier_drop(entered); jet_rt_vault_test_barrier_drop(resume);
+    for (int64_t count = 0; count <= 1; ++count) {
+        void *single = jet_rt_vault_test_barrier_new(count);
+        for (unsigned round = 0; round < 8; ++round) jet_rt_vault_test_barrier_wait(single);
+        jet_rt_vault_test_barrier_drop(single);
+    }
     assert(atomic_load(&destroyed) == 4);
     jet_rt_vault_set_test_trust_path(NULL); jet_rt_vault_set_test_fault(NULL);
     defaults();
