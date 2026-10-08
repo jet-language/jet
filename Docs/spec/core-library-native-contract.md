@@ -116,9 +116,20 @@ call and wiped before return. Domain-separated callers can hash up to four spans
 without allocating a concatenated message; the digest must not alias any
 input span. The algorithm is shared by vault and other runtime crypto callers.
 
-Vault provider errors are private to the persistence boundary and are distinct
-from the public `core.crypto.vault.VaultError` variants. Their diagnostics
-contain redacted provider descriptions only. The historical pair codec preserves
+Vault provider errors are private to the persistence boundary and follow the
+ratified 13-case source `core.crypto.vault.VaultError` order. Tag10 stores the real
+Core `CryptoError` inline I64 discriminant (OpenFailed0, VerifyFailed1,
+KeyRejected2, Length3, Unavailable4), never owned diagnostic strings or a box.
+IO owns operation/redacted-path text; Internal owns incident text.
+The richer seed crypto diagnostics are superseded by CoreFix8's source enum:
+OpenFailed maps by name to OpenFailed; encoding/version/algorithm/key/password
+policy rejection to KeyRejected; input/output length to Length; entropy/resource/
+internal failure to Unavailable. No richer payload is forwarded or retained.
+The private Vault Display retains its prefix and formats its Crypto payload
+using standard unit-enum variant names; Debug is `Crypto(<variant>)`.
+The generator rule is `Compiler/JetBackend/Source/Lower/Display.jet:423-424`;
+`JetEval/Source/Formatting/Values.jet:299,356` uses the same bare names.
+The historical pair codec preserves
 UTF-8 values byte-for-byte, including embedded NUL; it rejects truncation,
 invalid UTF-8, and trailing bytes. Owned value buffers are wiped before release.
 

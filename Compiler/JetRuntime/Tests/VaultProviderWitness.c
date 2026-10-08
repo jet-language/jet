@@ -10,7 +10,8 @@ extern void jet_rt_alloc_init(void);
 extern void jet_rt_thread_init(void);
 extern void jet_rt_thread_detach(void);
 extern void jet_rt_crypto_entropy_init(void);
-extern void errors_and_handles_are_redacted(int64_t, const Text *, const Text *, const Text *, const Text *, const TextList *);
+extern void errors_and_handles_are_redacted(int64_t, intptr_t, const Text *, const Text *, const Text *, const TextList *);
+extern void jet_rt_vault_crypto_projection_fixture(void);
 extern void jet_rt_vault_legacy_fixture(const void *, int64_t, const void *);
 extern void jet_rt_vault_invalid_legacy_fixture(const void *, int64_t);
 typedef struct { int64_t length, capacity; unsigned char *data; } ByteList;
@@ -39,7 +40,7 @@ static const char *const display[] = {
     "vault key is revoked", "vault is locked", "vault write authority denied",
     "vault changed since this write was prepared", "vault provider is unsupported on this platform",
     "vault store has invalid encoding", "vault write visibility is known but durability is uncertain",
-    "vault cryptography failed: encrypted data could not be opened", "vault read failed at <vault-store>",
+    "vault cryptography failed: OpenFailed", "vault read failed at <vault-store>",
     "internal vault failure; incident vault-17"
 };
 static const char *const debug[] = {
@@ -98,11 +99,24 @@ int main(void) {
     Text *needles[] = {&forbidden[0], &forbidden[1], &forbidden[2], &forbidden[3], &forbidden[4]};
     TextList list = {5, 5, needles};
     for (int64_t kind = 0; kind < 13; ++kind) {
-        Text first = text(kind == 10 ? "encrypted data could not be opened" : kind == 11 ? "read" : "vault-17");
-        Text second = text(kind == 10 ? "OpenFailed" : "<vault-store>");
+        Text first = text(kind == 11 ? "read" : "vault-17");
+        Text second = text("<vault-store>");
         Text expected_display = text(display[kind]), expected_debug = text(debug[kind]);
-        errors_and_handles_are_redacted(kind, &first, &second, &expected_display, &expected_debug, &list);
+        errors_and_handles_are_redacted(kind, kind == 10 ? 0 : (intptr_t)&first, &second, &expected_display, &expected_debug, &list);
     }
+    static const char *const crypto_display[] = {
+        "vault cryptography failed: OpenFailed", "vault cryptography failed: VerifyFailed",
+        "vault cryptography failed: KeyRejected", "vault cryptography failed: Length",
+        "vault cryptography failed: Unavailable"
+    };
+    static const char *const crypto_debug[] = {
+        "Crypto(OpenFailed)", "Crypto(VerifyFailed)", "Crypto(KeyRejected)", "Crypto(Length)", "Crypto(Unavailable)"
+    };
+    for (intptr_t ordinal = 0; ordinal < 5; ++ordinal) {
+        Text expected_display = text(crypto_display[ordinal]), expected_debug = text(crypto_debug[ordinal]);
+        errors_and_handles_are_redacted(10, ordinal, NULL, &expected_display, &expected_debug, &list);
+    }
+    jet_rt_vault_crypto_projection_fixture();
     static const unsigned char wire[] = {
         2,0,0,0, 5,0,0,0, 't','o','k','e','n', 7,0,0,0, 'h','u','n','t','e','r','2',
         0,0,0,0, 3,0,0,0, 0xc3,0xa9,0

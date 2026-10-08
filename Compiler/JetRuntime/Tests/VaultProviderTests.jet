@@ -9,6 +9,14 @@ fn vault_fixture_check(condition: Bool) {
     clone :: vault_error_clone(error)
     vault_fixture_check(vault_error_equal(error, clone))
     vault_fixture_check(vault_error_tag(error) == kind)
+    if (kind == I64{10}) {
+        vault_fixture_check(rt_text_word(error + VAULT_ERROR_FIRST) == first)
+        vault_fixture_check(rt_text_word(clone + VAULT_ERROR_FIRST) == first)
+        vault_fixture_check(rt_text_word(error + VAULT_ERROR_SECOND) == I64{0})
+        other :: vault_error_new(kind, (first + I64{1}) % I64{5}, I64{0})
+        vault_fixture_check(!vault_error_equal(error, other))
+        vault_error_drop(other)
+    }
     shown :: vault_error_display(error)
     debug :: vault_error_debug(error)
     vault_fixture_check(jet_rt_string_eq(shown, expected_display))
@@ -26,6 +34,19 @@ fn vault_fixture_check(condition: Bool) {
     jet_rt_string_drop(debug)
     vault_error_drop(error)
     vault_error_drop(clone)
+}
+#Export(c) fn jet_rt_vault_crypto_projection_fixture() {
+    vault_fixture_check(vault_crypto_from_provider(I64{0}) == VAULT_CRYPTO_LENGTH)
+    vault_fixture_check(vault_crypto_from_provider(I64{1}) == VAULT_CRYPTO_KEY_REJECTED)
+    vault_fixture_check(vault_crypto_from_provider(I64{2}) == VAULT_CRYPTO_KEY_REJECTED)
+    vault_fixture_check(vault_crypto_from_provider(I64{3}) == VAULT_CRYPTO_KEY_REJECTED)
+    vault_fixture_check(vault_crypto_from_provider(I64{4}) == VAULT_CRYPTO_OPEN_FAILED)
+    vault_fixture_check(vault_crypto_from_provider(I64{5}) == VAULT_CRYPTO_KEY_REJECTED)
+    vault_fixture_check(vault_crypto_from_provider(I64{6}) == VAULT_CRYPTO_LENGTH)
+    vault_fixture_check(vault_crypto_from_provider(I64{7}) == VAULT_CRYPTO_KEY_REJECTED)
+    vault_fixture_check(vault_crypto_from_provider(I64{8}) == VAULT_CRYPTO_UNAVAILABLE)
+    vault_fixture_check(vault_crypto_from_provider(I64{9}) == VAULT_CRYPTO_UNAVAILABLE)
+    vault_fixture_check(vault_crypto_from_provider(I64{10}) == VAULT_CRYPTO_UNAVAILABLE)
 }
 // Supplementary historical codec checks: exact bytes, every truncation, garbage,
 // malformed UTF-8, preserved NUL/Unicode strings, and canonical domain hash.

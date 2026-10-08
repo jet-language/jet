@@ -1,25 +1,64 @@
-// Private provider errors preserve SecretsCrypto.rs:347-391's 13 variants.
-// This is NOT Core's public VaultError (D-VAULT-ERRORS1). Text payloads contain
-// provider-selected redacted descriptions, never repository paths or key bytes.
+// Private persistence error owner follows the ratified 13-case VaultError order.
+// Crypto stores Core CryptoError's INLINE I64 discriminant, not a text owner or
+// runtime carrier. IO/Internal alone own provider-redacted Text payloads.
 // Searches of all refs for vault_record_hash found no reusable Jet codec;
 // 5933a61b2/d587c4035 contain only the public facade and vault_02 state/Linux.
 VAULT_ERROR_BYTES :: prep { I64{24} }
 VAULT_ERROR_TAG :: prep { I64{0} }
 VAULT_ERROR_FIRST :: prep { I64{8} }
 VAULT_ERROR_SECOND :: prep { I64{16} }
+VAULT_CRYPTO_OPEN_FAILED :: prep { I64{0} }
+VAULT_CRYPTO_VERIFY_FAILED :: prep { I64{1} }
+VAULT_CRYPTO_KEY_REJECTED :: prep { I64{2} }
+VAULT_CRYPTO_LENGTH :: prep { I64{3} }
+VAULT_CRYPTO_UNAVAILABLE :: prep { I64{4} }
+// Rich CryptoEntropy.rs:9-20 tags project by variant NAME, never by ordinal.
+// Every richer case is represented; public VerifyFailed has no rich seed case.
+fn vault_crypto_from_provider(kind: I64) -> I64 {
+    if (kind == I64{4}) -> return VAULT_CRYPTO_OPEN_FAILED
+    if (kind == I64{1} || kind == I64{2} || kind == I64{3} || kind == I64{5} || kind == I64{7}) -> return VAULT_CRYPTO_KEY_REJECTED
+    if (kind == I64{0} || kind == I64{6}) -> return VAULT_CRYPTO_LENGTH
+    if (kind == I64{8} || kind == I64{9} || kind == I64{10}) -> return VAULT_CRYPTO_UNAVAILABLE
+    panic("record variant index out of range")
+}
+// Native Lower/Display.jet:423-424 renders unit-only enum Display/Debug as
+// the variant name. JetEval Formatting/Values.jet:299,356 agrees.
+fn vault_crypto_name(target: I64, kind: I64) {
+    if {
+        (kind == VAULT_CRYPTO_OPEN_FAILED) -> {
+            rt_text_push_word(target, I64{7811881983778582607}, I64{8})
+            rt_text_push_word(target, I64{25701}, I64{2})
+        }
+        (kind == VAULT_CRYPTO_VERIFY_FAILED) -> {
+            rt_text_push_word(target, I64{7009423350811485526}, I64{8})
+            rt_text_push_word(target, I64{1684368489}, I64{4})
+        }
+        (kind == VAULT_CRYPTO_KEY_REJECTED) -> {
+            rt_text_push_word(target, I64{7162247765810570571}, I64{8})
+            rt_text_push_word(target, I64{6579572}, I64{3})
+        }
+        (kind == VAULT_CRYPTO_LENGTH) -> rt_text_push_word(target, I64{114849160783180}, I64{6})
+        (kind == VAULT_CRYPTO_UNAVAILABLE) -> {
+            rt_text_push_word(target, I64{7020101786482601557}, I64{8})
+            rt_text_push_word(target, I64{6646882}, I64{3})
+        }
+        else -> panic("record variant index out of range")
+    }
+}
 fn vault_error_tag(error: I64) -> I64 {
     kind :: rt_text_word(error + VAULT_ERROR_TAG)
     if (kind < I64{0} || kind > I64{12}) -> panic("record variant index out of range")
     kind
 }
-// Unit variants ignore both payloads; Crypto takes display/debug descriptions,
+// Unit variants ignore both payloads; Crypto borrows an inline discriminant;
 // IO takes operation/redacted-path, Internal takes its incident identifier.
 fn vault_error_new(kind: I64, first: I64, second: I64) -> I64 {
     if (kind < I64{0} || kind > I64{12}) -> panic("record variant index out of range")
+    if (kind == I64{10} && (first < VAULT_CRYPTO_OPEN_FAILED || first > VAULT_CRYPTO_UNAVAILABLE)) -> panic("record variant index out of range")
     result :: jet_rt_alloc(VAULT_ERROR_BYTES, I64{8})
     rt_text_store(result + VAULT_ERROR_TAG, kind)
-    rt_text_store(result + VAULT_ERROR_FIRST, if (kind >= I64{10}) -> jet_rt_string_clone(first) else -> I64{0})
-    rt_text_store(result + VAULT_ERROR_SECOND, if (kind == I64{10} || kind == I64{11}) -> jet_rt_string_clone(second) else -> I64{0})
+    rt_text_store(result + VAULT_ERROR_FIRST, if (kind == I64{10}) -> first else if (kind >= I64{11}) -> jet_rt_string_clone(first) else -> I64{0})
+    rt_text_store(result + VAULT_ERROR_SECOND, if (kind == I64{11}) -> jet_rt_string_clone(second) else -> I64{0})
     result
 }
 fn vault_error_clone(error: I64) -> I64 {
@@ -28,15 +67,16 @@ fn vault_error_clone(error: I64) -> I64 {
 fn vault_error_drop(error: I64) {
     if (error == I64{0}) -> return
     kind :: vault_error_tag(error)
-    if (kind >= I64{10}) -> jet_rt_string_drop(rt_text_word(error + VAULT_ERROR_FIRST))
-    if (kind == I64{10} || kind == I64{11}) -> jet_rt_string_drop(rt_text_word(error + VAULT_ERROR_SECOND))
+    if (kind >= I64{11}) -> jet_rt_string_drop(rt_text_word(error + VAULT_ERROR_FIRST))
+    if (kind == I64{11}) -> jet_rt_string_drop(rt_text_word(error + VAULT_ERROR_SECOND))
     jet_rt_free(error, VAULT_ERROR_BYTES, I64{8})
 }
 fn vault_error_equal(left: I64, right: I64) -> Bool {
     kind :: vault_error_tag(left)
     if kind != vault_error_tag(right) -> return false
-    if (kind >= I64{10} && !jet_rt_string_eq(rt_text_word(left + VAULT_ERROR_FIRST), rt_text_word(right + VAULT_ERROR_FIRST))) -> return false
-    if (kind == I64{10} || kind == I64{11}) -> return jet_rt_string_eq(rt_text_word(left + VAULT_ERROR_SECOND), rt_text_word(right + VAULT_ERROR_SECOND))
+    if (kind == I64{10}) -> return rt_text_word(left + VAULT_ERROR_FIRST) == rt_text_word(right + VAULT_ERROR_FIRST)
+    if (kind >= I64{11} && !jet_rt_string_eq(rt_text_word(left + VAULT_ERROR_FIRST), rt_text_word(right + VAULT_ERROR_FIRST))) -> return false
+    if (kind == I64{11}) -> return jet_rt_string_eq(rt_text_word(left + VAULT_ERROR_SECOND), rt_text_word(right + VAULT_ERROR_SECOND))
     true
 }
 fn vault_error_name(target: I64, kind: I64) {
@@ -148,7 +188,7 @@ fn vault_error_display(error: I64) -> I64 {
             rt_text_push_word(target, I64{8097879393565962361}, I64{8})
             rt_text_push_word(target, I64{7308332162361620840}, I64{8})
             rt_text_push_word(target, I64{2112100}, I64{3})
-            jet_rt_string_builder_push(target, rt_text_word(error + VAULT_ERROR_FIRST))
+            vault_crypto_name(target, rt_text_word(error + VAULT_ERROR_FIRST))
         }
         (kind == I64{11}) -> {
             rt_text_push_word(target, I64{35684407927158}, I64{6})
@@ -174,7 +214,7 @@ fn vault_error_debug(error: I64) -> I64 {
     vault_error_name(target, kind)
     if (kind == I64{10}) {
         rt_text_push_word(target, I64{40}, I64{1})
-        jet_rt_string_builder_push(target, rt_text_word(error + VAULT_ERROR_SECOND))
+        vault_crypto_name(target, rt_text_word(error + VAULT_ERROR_FIRST))
         rt_text_push_word(target, I64{41}, I64{1})
     } else if (kind == I64{11}) {
         rt_text_push_word(target, I64{7021786302599166752}, I64{8})
