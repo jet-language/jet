@@ -705,7 +705,7 @@ pub fn write_atomic(path: String, bytes: [U8]) IOError! -[FS.Write]> {
     parent_text :: String.from_bytes(parent.encoded) ?? panic("UTF-8 path span")
     pid :: core.files.__atomic_pid()
     loop sequence in 0..<128 {
-        candidate := parent
+        candidate := ~parent
         host_path.push(&candidate, host_path.from_text(".jet_tmp_{pid}_{sequence}", platform))
         candidate_text :: String.from_bytes(candidate.encoded) ?? panic("UTF-8 temporary path")
         reservation :: core.files.__atomic_reserve(path, candidate_text)
@@ -1442,7 +1442,7 @@ fn walk_impl(root: String, ignore: String?, files_only: Bool) -[FS]> [WalkEntry]
     queue := [(directory: Int, depth: Int)]{(directory: 0, depth: 0)}
     cursor := 0
     out := [WalkEntry]{}
-    first_error := None
+    first_error := IOError?{None}
     error_directory := -1
     loop cursor < queue.len() {
         pending :: queue[cursor]
