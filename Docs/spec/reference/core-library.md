@@ -35,6 +35,13 @@ name; there is no `jet.*` or `std.*` library namespace. Core wrappers keep
 source-facing types and policy in Jet while typed provider leaves perform the
 operations that require the host environment.
 
+Devtools checked publication constructs its package/module/panel identities
+and ordered, JSON-escaped field envelope in `Core/devtools/devtools.jet`.
+The private typed-payload leaf retains the existing validated event and global
+sink, including silent rejection of invalid events and no durable-delivery
+claim when no sink is installed. Volatile memory access retains the checked
+compiler intrinsic and its audited pointer obligations.
+
 Filesystem internal host calls use their canonical `core.files.__*` names
 directly. There is no second `__files7_*` alias layer: the Prelude's existing
 registry entries provide the raw host boundary until Jet runtime L7 replaces

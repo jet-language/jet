@@ -1485,7 +1485,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 7857d1a140871bc42e92d70a41ce554ee483ead5acb1efee86fa0b3d913ca0db
+// Source SHA-256: 2ca7a63110086a8e313312f60a6f89d8371511a33c35290fac63d3f1d2699b1e
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -2978,7 +2978,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     sema_web_call("core.web.browser", "__write_report_bytes", "jet_browser_report_write_bytes_raw", &[true, true]),
     sema_web_call("core.web.browser", "__server_start", "jet_browser_test_server_start", &[true]),
     sema_web_call("core.web.browser", "__server_stop", "jet_browser_test_server_stop", &[true]),
-    CoreCallRecord::new("core.devtools", "__publish_checked", "jet_devtools_publish", false, &[false, false, false, false, false]).with_interpreter_route(CoreCallInterpreterRoute::TypedIntrinsic),
+    CoreCallRecord::new("core.devtools", "__publish_payload", "jet_devtools_publish_payload", false, &[false, false, false, false, false]).with_interpreter_route(CoreCallInterpreterRoute::TypedIntrinsic),
     sema_web_call("core.web", "__openapi_inputs", "jet_openapi_router_inputs", &[true]),
     sema_web_call("core.web", "__openapi_render", "jet_web_openapi_from_routes", &[false, false, false, false]),
     CoreCallRecord::new("core.web", "__contract_stop", "jet_openapi_contract_stop_raw", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::TypedIntrinsic),

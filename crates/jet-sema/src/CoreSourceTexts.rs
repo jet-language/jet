@@ -3,6 +3,7 @@
 // `jet_foundation::CoreModuleExports::CoreSourceModule::module`.
 const CORE_SOURCE_TEXTS: &[(&str, &str)] = &[
     ("app", include_str!("../../../Core/app/app.jet")),
+    ("core.devtools", include_str!("../../../Core/devtools/devtools.jet")),
     ("core.archive", include_str!("../../../Core/archive/archive.jet")),
     ("core.archive.gzip", include_str!("../../../Core/archive/gzip.jet")),
     ("core.archive.zstd", include_str!("../../../Core/archive/zstd.jet")),

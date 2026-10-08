@@ -462,7 +462,7 @@ fn web_fixed_sig(
         ("core.web.browser", "__server_start") => Some((vec![(read, web_named("BrowserTestConfig"))],
             Some(web_result_error(web_named("BrowserTestServer"), "BrowserError")))),
         ("core.web.browser", "__server_stop") => Some((vec![(AccessConvention::Write, web_named("BrowserTestServer"))], None)),
-        ("core.devtools", "__publish_checked") => Some((vec![(moved, string.clone()), (moved, string.clone()),
+        ("core.devtools", "__publish_payload") => Some((vec![(moved, string.clone()), (moved, string.clone()),
             (moved, string.clone()), (moved, string.clone()), (moved, t.clone())], None)),
         ("core.web", "__openapi_inputs") => Some((vec![(read, http_router.clone())],
             Some(result_ty(web_list(web_named("OpenApiRouteInput")), string.clone())))),

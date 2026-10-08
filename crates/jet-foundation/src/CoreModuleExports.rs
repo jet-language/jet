@@ -25,7 +25,7 @@ pub enum CoreLeafKind {
 
 // BEGIN GENERATED CORE DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 7857d1a140871bc42e92d70a41ce554ee483ead5acb1efee86fa0b3d913ca0db
+// Source SHA-256: 2ca7a63110086a8e313312f60a6f89d8371511a33c35290fac63d3f1d2699b1e
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreModuleDeclaration {
     pub module: &'static str,
@@ -755,6 +755,7 @@ pub const CORE_MODULE_DECLARATIONS: &[CoreModuleDeclaration] = &[
 
 pub const CORE_SOURCE_MODULES: &[CoreSourceModule] = &[
     CoreSourceModule { module: "app", alias: "app", path: "Core/app/app.jet", owned_members: &["auth", "auth_oauth", "auth_routes", "auth_show", "live", "live_get", "live_show", "live_stats", "subscribe", "invalidate", "transact_invalidate", "signal_push", "sync"] },
+    CoreSourceModule { module: "core.devtools", alias: "core_core_devtools", path: "Core/devtools/devtools.jet", owned_members: &["publish"] },
     CoreSourceModule { module: "core.archive", alias: "core_archive", path: "Core/archive/archive.jet", owned_members: &["crc32", "adler32", "deflate", "inflate", "compress", "decompress", "zip_decompress", "zip_names_json", "list", "zip_open", "zip_next", "zip_read", "zip_write", "zip_close", "zip_extract", "unzip", "tar_add", "tar_get", "tar_names_json", "create"] },
     CoreSourceModule { module: "core.archive.gzip", alias: "core_core_archive_gzip", path: "Core/archive/gzip.jet", owned_members: &["compress", "compress_file", "compress_text", "crc", "decompress", "decompress_file", "decompress_text", "is_gzip", "isize", "magic", "peek_isize"] },
     CoreSourceModule { module: "core.archive.zstd", alias: "core_core_archive_zstd", path: "Core/archive/zstd.jet", owned_members: &["compress", "compress_file", "compress_text", "decompress", "decompress_file", "decompress_text", "is_zstd", "magic"] },
