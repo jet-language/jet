@@ -22,6 +22,7 @@ extern void jet_rt_string_drop(Text *);
     extern bool jet_rt_handle_eq_##T(int64_t, int64_t)
 DECLARE(JetDataPlotField); DECLARE(JetDataPlotValue);
 DECLARE(JetDataPlotSchema); DECLARE(JetDataPlotEncoding);
+DECLARE(JetDataPlotAggregate);
 DECLARE(JetDataPlotFacet); DECLARE(JetDataPlotDomain);
 DECLARE(JetDataPlotScale); DECLARE(JetDataPlotLayer);
 DECLARE(JetDataPlotError);
@@ -41,6 +42,7 @@ extern int64_t jet_rt_record_new_JetDataPlotSchema(Text *, Text *, Sequence *);
 extern Sequence *jet_rt_record_get_JetDataPlotSchema_columns(int64_t);
 extern int64_t jet_rt_record_new_JetDataPlotEncoding(int64_t, int64_t, int64_t);
 extern int64_t jet_rt_record_get_JetDataPlotEncoding_field(int64_t);
+extern int64_t jet_rt_record_get_JetDataPlotEncoding_aggregate(int64_t);
 extern int64_t jet_rt_record_new_JetDataPlotFacet(int64_t, int64_t, Text *, int64_t, int64_t);
 extern int64_t jet_rt_handle_field_JetDataPlotScale_domain(int64_t);
 extern const bool *jet_rt_handle_field_JetDataPlotScale_clamp(int64_t);
@@ -124,8 +126,35 @@ static Sequence *sequence(const int64_t *values, size_t count) {
 static int64_t number_bits(double x) { int64_t bits; memcpy(&bits, &x, 8); return bits; }
 static int64_t field(Text *text) { return jet_rt_record_new_JetDataPlotField(text, text, text); }
 static int64_t domain(int64_t kind, int64_t a, int64_t b) { int64_t p = record(3); words(p)[0] = kind; words(p)[1] = a; words(p)[2] = b; return p; }
+/* Named fixtures pin the Rust/seed ABI, NOT a Core enum conversion.
+ * Core declaration order Sum/Mean/Count/Min/Max requires an explicit adapter
+ * to these tags before crossing the ABI. None is constructor-only in Core.
+ * Current native schema gate refuses the mismatched Core declaration shape. */
+static const struct {const char *name;int64_t source_ordinal,abi_ordinal;} aggregate_cases[] = {
+    {"None", -1, 0}, {"Count", 2, 1}, {"Sum", 0, 2},
+    {"Mean", 1, 3}, {"Min", 3, 4}, {"Max", 4, 5}
+};
+static void aggregate_watch(int64_t p) { watch(p, 8, 8); }
+static void aggregate_mapping_fixtures(Text *text) {
+    for (size_t i = 0; i < sizeof aggregate_cases / sizeof aggregate_cases[0]; ++i) {
+        assert(aggregate_cases[i].name[0] && aggregate_cases[i].abi_ordinal == (int64_t)i);
+        assert(aggregate_cases[i].source_ordinal != aggregate_cases[i].abi_ordinal);
+        int64_t tag = record(1); words(tag)[0] = aggregate_cases[i].abi_ordinal;
+        int64_t copied_tag = jet_rt_handle_clone_JetDataPlotAggregate(tag);
+        assert(words(copied_tag)[0] == aggregate_cases[i].abi_ordinal);
+        assert(jet_rt_handle_eq_JetDataPlotAggregate(tag, copied_tag));
+        drop_pair(tag, copied_tag, aggregate_watch, jet_rt_handle_drop_JetDataPlotAggregate);
+        int64_t value = jet_rt_record_new_JetDataPlotEncoding(0, field(text), aggregate_cases[i].abi_ordinal);
+        int64_t copy = jet_rt_handle_clone_JetDataPlotEncoding(value);
+        assert(jet_rt_record_get_JetDataPlotEncoding_aggregate(value) == aggregate_cases[i].abi_ordinal);
+        assert(jet_rt_record_get_JetDataPlotEncoding_aggregate(copy) == aggregate_cases[i].abi_ordinal);
+        assert(jet_rt_handle_eq_JetDataPlotEncoding(value, copy));
+        drop_pair(value, copy, encoding_watch, jet_rt_handle_drop_JetDataPlotEncoding);
+    }
+}
 int main(void) {
     jet_rt_alloc_init(); Text *a = jet_rt_string_from_static("a", 1); Text *b = jet_rt_string_from_static("b", 1);
+    aggregate_mapping_fixtures(a);
     int64_t fields[] = {field(a), field(b)};
     int64_t schema = jet_rt_record_new_JetDataPlotSchema(a, a, sequence(fields, 2));
     int64_t schema_copy = jet_rt_handle_clone_JetDataPlotSchema(schema);
