@@ -1,0 +1,49 @@
+
+use core.encoding.json as json
+use core.text as text
+
+#[PublishedSchema, Codable]
+struct Published {
+    known: Int
+}
+
+#Codable
+struct Plain {
+    known: Int
+}
+
+#[Codable, DenyUnknownFields]
+struct Strict {
+    known: Int
+}
+
+fn published() -[]> String {
+    value :: json.decode<Published>("{{\"middle\":2,\"known\":7,\"future\":1,\"tail\":3}}") ?? panic("published decode")
+    return json.to_string(value)
+}
+
+fn plain() -[]> String {
+    value :: json.decode<Plain>("{{\"future\":1,\"known\":7,\"middle\":2}}") ?? panic("plain decode")
+    return json.to_string(value)
+}
+
+fn strict() -[]> String {
+    json.decode<Strict>("{{\"known\":7,\"extra\":1}}") ? _value -> return "strict accepted" ! errors -> return errors[0].reason
+}
+
+fn malformed() -[]> String {
+    json.decode<Published>("{{\"known\":7") ? _value -> return "malformed accepted" ! _error -> return "malformed rejected"
+}
+
+fn forced_deopt() -[]> String {
+    if text.casefold("Straße") != "strasse" { panic("casefold") }
+    return published()
+}
+
+fn run() {
+    print(published())
+    print(plain())
+    print(strict())
+    print(malformed())
+    print(forced_deopt())
+}

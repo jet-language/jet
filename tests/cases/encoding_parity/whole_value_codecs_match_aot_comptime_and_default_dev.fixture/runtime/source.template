@@ -1,0 +1,19 @@
+
+use core.encoding.json as json
+use core.encoding.jsonl as jsonl
+use core.encoding.csv as csv
+use core.encoding.xml as xml
+use core.encoding.cbor as cbor
+use core.encoding.base64 as base64
+use core.encoding.base32 as base32
+
+fn run() {
+    print(json.to_string(json.parse("{{\"b\":2,\"a\":1}}") ?? panic("json")))
+    print((jsonl.parse("{{\"a\":1}}\n{{\"a\":2}}\n") ?? panic("jsonl")).len())
+    print((csv.parse("name,score\nada,9\n") ?? panic("csv")).len())
+    print(xml.to_string(xml.parse("<r xmlns=\"urn:r\">a&amp;</r>") ?? panic("xml")))
+    print(json.to_string(cbor.parse(cbor.to_bytes(json.parse("{{\"a\":1}}") ?? panic("j")) ?? panic("e")) ?? panic("p")))
+    print((base64.decode("Zg==") ?? panic("b64")).len())
+    print((base64.decode_url("aGk") ?? panic("b64url")).len())
+    print((base32.decode("MZXQ====") ?? panic("b32")).len())
+}

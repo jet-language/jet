@@ -1,0 +1,17 @@
+
+use core.encoding.json as json
+use core.encoding.toml as toml
+
+fn run() {
+    open64 :: "[".repeat(64)
+    close64 :: "]".repeat(64)
+    json.parse("{open64}{close64}") ? _value -> { print("json64:accepted") } ! error -> { print("json64:{error.line}:{error.message}") }
+
+    open65 :: "[".repeat(65)
+    close65 :: "]".repeat(65)
+    json.parse("{open65}{close65}") ? _value -> { print("json65:accepted") } ! error -> { print("json65:{error.line}:{error.message}") }
+
+    toml.parse("value = {open64}{close64}") ? _value -> { print("toml64:accepted") } ! error -> { print("toml64:{error.line}:{error.message}") }
+
+    toml.parse("value = {open65}{close65}") ? _value -> { print("toml65:accepted") } ! error -> { print("toml65:{error.line}:{error.message}") }
+}

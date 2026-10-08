@@ -1,0 +1,25 @@
+# tests/encoding_parity.rs::datatree_scalar_and_unordered_parity_matches_all_tiers
+# Original source bytes and assertions; PENDING-SAME-HEAD, runtime UNRUN.
+# Expected literals below come from the Rust assertions, not captured/blessed output.
+env: NO_COLOR=1
+fixture: datatree_scalar_and_unordered_parity_matches_all_tiers.fixture
+capture: source = text file.replace("@DIR@", "{work}/probe") probe/source.template
+write: probe/run.jet = "{cap:source}"
+step: jet check probe/run.jet
+exit: 0
+step: jet build probe/run.jet
+exit: 0
+step probe_aot: built
+cwd: probe
+exit: 0
+stdout: = "strict\nstrict-error\ntext\n-42\n1.0\nfalse\nnone\nnone\nnone\ntrue\ntrue\nfalse\nfalse\ntrue\ntrue\nfalse\nfalse\n"
+step probe_dev: jet run probe/run.jet
+stdin: null
+exit: == probe_aot
+stdout: == probe_aot
+stderr: == probe_aot
+step: jet run --interpret probe/run.jet
+stdin: null
+exit: == probe_aot
+stdout: == probe_aot
+stderr: == probe_aot

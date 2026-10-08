@@ -1,0 +1,13 @@
+
+use core.encoding as encoding
+use core.encoding.json as json
+
+fn run() {
+    value :: json.parse("{{\"text\":\"quote: \\\" and music: \\uD834\\uDD1E\"}}") ?? panic("valid JSON")
+    print(json.to_string(value))
+    json.parse("{{\"a\":1,\"a\":}}") ? _value -> {
+        print("duplicate accepted")
+    } ! error -> {
+        print("{error.kind == encoding.EncodingErrorKind.Syntax}|{error.path}|{error.reason}")
+    }
+}
