@@ -1,0 +1,41 @@
+// #4833: dependency reach uses the root's canonical reach record, not ambient
+// siblings. The filesystem acceptance cases live in tests/cases/pkg; this
+// exercises the host's pure pre-open boundary with D-MOD-CYCLE1 examples.
+fn run() Never! {
+    isolated :: JetCLIRootPathReach{declared: [String]{"/project/deps/dep"}, sibling_dirs: [String]{}}
+    if jet_cli_path_dependency_reachable("/project/outside", isolated) {
+        panic("an in-tree declaration must not authorize an ambient sibling")
+    }
+    declared :: JetCLIRootPathReach{declared: [String]{"/project/deps/dep", "/project/shared"}, sibling_dirs: [String]{}}
+    if !jet_cli_path_dependency_reachable("/project/shared", declared) {
+        panic("an explicitly root-declared dependency must remain reachable")
+    }
+    siblings :: JetCLIRootPathReach{declared: [String]{"/Compiler/JetParser"}, sibling_dirs: [String]{"/Compiler"}}
+    if !jet_cli_path_dependency_reachable("/Compiler/JetLexer", siblings) {
+        panic("compiler sibling dependency closure must remain reachable")
+    }
+    if jet_cli_path_dependency_reachable("/CompilerOther/JetLexer", siblings) {
+        panic("a textual prefix is not an authorized directory boundary")
+    }
+    // A root's in-tree symlink declaration may resolve outside its tree.
+    // The record stores its resolved target and sibling parent, not the alias.
+    canonical_reach :: JetCLIRootPathReach{declared: [String]{"/packages/shared"}, sibling_dirs: [String]{"/packages"}}
+    if !jet_cli_path_dependency_reachable("/packages/shared", canonical_reach) {
+        panic("a transitive canonical target must match a root's symlink declaration")
+    }
+    if !jet_cli_path_dependency_reachable("/packages/sibling", canonical_reach) {
+        panic("canonical out-of-tree declarations must open their canonical siblings")
+    }
+    if jet_cli_path_dependency_reachable("/project/deps/shared", canonical_reach) {
+        panic("a textual symlink alias must not be stored in the reach record")
+    }
+    if jet_cli_path_dependency_reachable("/packages-other/shared", canonical_reach) {
+        panic("canonical sibling reach must respect directory boundaries")
+    }
+    if jet_cli_dependency_within("/project/dependency-other", "/project/dependency") {
+        panic("transitive containment must use component boundaries")
+    }
+    if !jet_cli_dependency_within("/project/dependency/sub", "/project/dependency") {
+        panic("nested transitive path dependencies must remain reachable")
+    }
+}
