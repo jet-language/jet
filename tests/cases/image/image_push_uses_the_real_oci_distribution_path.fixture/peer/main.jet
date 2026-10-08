@@ -3,13 +3,14 @@ package {
     authority: { holds: { allow: [IO, Mem.Alloc, FS, Net, Time.Wait] } }
 }
 // Real TCP peer port of tests/image.rs:138-209. Returns observations, never simulated snapshots.
-// Accept deadline uses kit time=20; existing Core has no nonblocking listener.
+// One shared 20s deadline, immediate queued accepts and 5ms polling match the original.
 use core.net as net
 use core.files as files
 use core.text as text
 use core.text.parse as parse
 use core.encoding.json as json
 use core.encoding.DataTree
+use core.time as time
 
 fn registry_slice(bytes: [U8], start: Int, end: Int) -> [U8] {
     out := [U8]{}
@@ -47,12 +48,20 @@ fn registry_words(value: String) -> [String] {
 }
 
 fn run() {
-    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("registry listen")
+    listener := net.tcp_listen("127.0.0.1:0") ?? panic("registry listen")
     address :: net.listener_local_socket_addr(listener) ?? panic("registry address")
     files.write("registry.port", "{net.socket_port(address)}") ?? panic("write registry port")
+    deadline :: time.instant() + 20s
     requests := [String]{}
-    loop requests.len() < 7 {
-        stream :: net.tcp_accept(listener) ?? panic("registry accept")
+    loop requests.len() < 7 && time.instant() < deadline {
+        stream :: if &listener.accept(deadline: 0s) == {
+            .Ok(stream) -> stream
+            .Err(_) -> {
+                // Original let-else retries ANY accept error, not just WouldBlock.
+                time.sleep(5ms)
+                next
+            }
+        }
         net.set_read_timeout(stream, 2000) ?? panic("registry two-second read timeout")
         request := [U8]{}
         header_end := -1
