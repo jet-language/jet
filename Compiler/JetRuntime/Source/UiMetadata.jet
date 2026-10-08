@@ -17,8 +17,7 @@ fn ui_borrow_text(value: I64, out: I64) {
     ui_carrier_store(out + I64{8}, ui_carrier_word(value + I64{8}))
     ui_carrier_store(out + I64{16}, ui_carrier_word(value + I64{16}))
 }
-#Export(c) fn jet_rt_handle_clone_JetUiAccessibility(value: I64) -> I64 {
-    result :: jet_rt_alloc(UI_ACCESSIBILITY_BYTES, I64{8})
+fn ui_accessibility_copy(value: I64, result: I64) {
     ui_carrier_store(result + UI_ACCESSIBILITY_NAME, ui_optional_text_clone(ui_carrier_word(value + UI_ACCESSIBILITY_NAME)))
     ui_carrier_store(result + UI_ACCESSIBILITY_DESCRIPTION, ui_optional_text_clone(ui_carrier_word(value + UI_ACCESSIBILITY_DESCRIPTION)))
     length :: ui_carrier_word(value + UI_ACCESSIBILITY_LENGTH)
@@ -41,10 +40,13 @@ fn ui_borrow_text(value: I64, out: I64) {
     ui_carrier_store(result + UI_ACCESSIBILITY_LENGTH, length)
     ui_carrier_store(result + UI_ACCESSIBILITY_CAPACITY, length)
     ui_carrier_store(result + UI_ACCESSIBILITY_DATA, data)
+}
+#Export(c) fn jet_rt_handle_clone_JetUiAccessibility(value: I64) -> I64 {
+    result :: jet_rt_alloc(UI_ACCESSIBILITY_BYTES, I64{8})
+    ui_accessibility_copy(value, result)
     result
 }
-#Export(c) fn jet_rt_handle_drop_JetUiAccessibility(value: I64) {
-    if (value == I64{0}) -> return
+fn ui_accessibility_fields_drop(value: I64) {
     ui_optional_text_drop(ui_carrier_word(value + UI_ACCESSIBILITY_NAME))
     ui_optional_text_drop(ui_carrier_word(value + UI_ACCESSIBILITY_DESCRIPTION))
     length :: ui_carrier_word(value + UI_ACCESSIBILITY_LENGTH)
@@ -57,6 +59,10 @@ fn ui_borrow_text(value: I64, out: I64) {
         index += I64{1}
     }
     if (capacity != I64{0}) -> jet_rt_free(data, capacity * UI_STATE_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_drop_JetUiAccessibility(value: I64) {
+    if (value == I64{0}) -> return
+    ui_accessibility_fields_drop(value)
     jet_rt_free(value, UI_ACCESSIBILITY_BYTES, I64{8})
 }
 #Export(c) fn jet_rt_handle_eq_JetUiAccessibility(left: I64, right: I64) -> Bool {

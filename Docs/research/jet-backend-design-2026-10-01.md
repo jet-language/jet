@@ -2188,3 +2188,10 @@ helper also used by standalone granted paths. Dropping releases every
 inline owner, then the original capacity-sized storage and List header.
 Equality preserves order and all fields, never comparing spare capacity.
 No constructor validation is imposed by these clone/drop/equality helpers.
+
+`UiAccessibilityProjection.jet` follows the seed's owned NodeId text and
+inline Accessibility40, not Core's differently shaped projection. The
+existing metadata provider owns the one field-copy/drop implementation
+shared by standalone accessibility and projection; no temporary metadata
+carrier is allocated. Nullable projections preserve absence, while present
+projections compare both identity and the full ordered metadata graph.
