@@ -91,9 +91,34 @@ fn shared_revision_stop() {
     jet_rt_native_shared_drop(shared)
 }
 
-// A root guard is the same cell plus one retained owner and a held canonical
-// permit. Env reaches no projection/split/wait operation: no extra heap token
-// or payload copy is needed, and each consumer scope drops its permit once.
+// Root guard: one retained cell owner and one canonical permit, no heap token.
+// Cell allocations are 8-aligned. Condition wait writes cell|1 into the
+// caller's token slot when reacquisition fails; its owner remains until drop.
+// SharedProtocol.rs:1572-1591 and MathTaskMem.rs:2770-2775/2995-3005 require
+// an unheld guard's access to stop, while drop must not release another permit.
+fn shared_guard_cell(guard: I64) -> I64 { guard & I64{-2} }
+
+fn shared_guard_held(guard: I64) -> Bool { guard != I64{0} && (guard & I64{1}) == I64{0} }
+
+fn shared_guard_invalid() {
+    text :: scheduler_text_new(I64{34})
+    buffer :: sync_load(text)
+    sync_store(buffer, I64{8450833612657485907})
+    sync_store(buffer + I64{8}, I64{7575181468589388385})
+    sync_store(buffer + I64{16}, I64{8007510541417412206})
+    sync_store(buffer + I64{24}, I64{8314037903335497842})
+    sync_store(buffer + I64{32}, I64{25701})
+    if !rt_task_panic_publish(buffer, I64{34}, I64{0}) -> scheduler_fatal(text)
+    jet_rt_string_drop(text)
+}
+
+fn shared_guard_payload(guard: I64) -> I64 {
+    if !shared_guard_held(guard) {
+        shared_guard_invalid()
+        return I64{0}
+    }
+    sync_load(shared_guard_cell(guard) + I64{64})
+}
 #Export(c) fn jet_rt_native_shared_guard_read(shared: I64) -> I64 {
     shared_retain(shared)
     shared_acquire(shared, false)
@@ -106,31 +131,41 @@ fn shared_revision_stop() {
     shared
 }
 
-#Export(c) fn jet_rt_native_shared_read_guard_read(guard: I64) -> I64 { sync_load(guard + I64{64}) }
+#Export(c) fn jet_rt_native_shared_read_guard_read(guard: I64) -> I64 { shared_guard_payload(guard) }
 
-#Export(c) fn jet_rt_native_shared_read_guard_deref(guard: I64) -> I64 {
-    sync_load(guard + I64{64})
+#Export(c) fn jet_rt_native_shared_read_guard_deref(guard: I64) -> I64 { shared_guard_payload(guard) }
+
+#Export(c) fn jet_rt_native_shared_edit_guard_read(guard: I64) -> I64 { shared_guard_payload(guard) }
+
+#Export(c) fn jet_rt_native_shared_edit_guard_edit(guard: I64) -> I64 { shared_guard_payload(guard) }
+
+#Export(c) fn jet_rt_native_shared_guard_revision(guard: I64) -> I64 {
+    if !shared_guard_held(guard) {
+        shared_guard_invalid()
+        return I64{0}
+    }
+    sync_load(shared_guard_cell(guard) + I64{48})
 }
 
-#Export(c) fn jet_rt_native_shared_edit_guard_read(guard: I64) -> I64 { sync_load(guard + I64{64}) }
-
-#Export(c) fn jet_rt_native_shared_edit_guard_edit(guard: I64) -> I64 { sync_load(guard + I64{64}) }
-
-#Export(c) fn jet_rt_native_shared_guard_revision(guard: I64) -> I64 { sync_load(guard + I64{48}) }
-
 #Export(c) fn jet_rt_native_shared_read_guard_drop(guard: I64) {
-    shared_release(guard, false)
-    jet_rt_native_shared_drop(guard)
+    cell :: shared_guard_cell(guard)
+    if shared_guard_held(guard) -> shared_release(cell, false)
+    jet_rt_native_shared_drop(cell)
 }
 
 #Export(c) fn jet_rt_native_shared_edit_guard_drop(guard: I64) {
-    revision :: sync_load(guard + I64{48})
+    cell :: shared_guard_cell(guard)
+    if !shared_guard_held(guard) {
+        jet_rt_native_shared_drop(cell)
+        return
+    }
+    revision :: sync_load(cell + I64{48})
     exhausted :: revision == I64{-1}
     // Rust JetSharedGuard::edit sets dirty=true on acquisition: even a
     // read-only edit guard, or a drop on a delivered stop rail, commits once.
-    if !exhausted -> sync_store(guard + I64{48}, wrapping(revision + I64{1}))
-    shared_release(guard, true)
-    jet_rt_native_shared_drop(guard)
+    if !exhausted -> sync_store(cell + I64{48}, wrapping(revision + I64{1}))
+    shared_release(cell, true)
+    jet_rt_native_shared_drop(cell)
     // The payload's final drop glue may reenter Shared. The permit and guard
     // owner must already be released before generation exhaustion is delivered.
     if exhausted -> shared_revision_stop()
