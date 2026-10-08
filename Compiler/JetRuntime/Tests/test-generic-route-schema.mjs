@@ -201,6 +201,31 @@ pub fn jet_fixture_plain(value: JetFixture) -> JetFixture { value }
   assert.deepEqual(inventory.nativeExports, []);
   assert.equal(readFileSync(join(fixture, "crates/jet-codegen/src/Prelude/Core/CAbiRoutes.rs"), "utf8"), baselineRust);
   assert.equal(readFileSync(join(fixture, "Compiler/JetBackend/Source/Lower/RuntimeRoutes.jet"), "utf8"), baselineJet);
+  // Owning one helper must suppress only its Rust definition; metadata and
+  // the remaining seed helpers still exist. All physical ABIs stay strict.
+  const providedGlue = "#Export(c) fn jet_rt_handle_drop_JetFixture(value: I64) {}\n#Export(c) fn jet_rt_handle_eq_JetFixture(left: I64, right: I64) -> Bool { true }\n";
+  put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: F64) -> F64 { value }\n" + providedGlue);
+  put("Compiler/JetRuntime/exports.list", "jet_fixture_scalar\njet_rt_handle_drop_JetFixture\njet_rt_handle_eq_JetFixture\n");
+  success(run());
+  success(run(true));
+  const ownedRust = readFileSync(join(fixture, "crates/jet-codegen/src/Prelude/Core/CAbiRoutes.rs"), "utf8");
+  const ownedJet = readFileSync(join(fixture, "Compiler/JetBackend/Source/Lower/RuntimeRoutes.jet"), "utf8");
+  assert.ok(!ownedRust.includes("fn jet_rt_handle_drop_JetFixture("));
+  assert.ok(!ownedRust.includes("fn jet_rt_handle_eq_JetFixture("));
+  assert.ok(ownedRust.includes("fn jet_rt_handle_clone_JetFixture("));
+  assert.equal(ownedJet, baselineJet, "provider ownership must not alter carrier tables");
+  put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: F64) -> F64 { value }\n" + providedGlue + "#Export(c) fn jet_rt_handle_clone_JetFixture(value: I64) -> I64 { value }\n");
+  put("Compiler/JetRuntime/exports.list", "jet_fixture_scalar\njet_rt_handle_drop_JetFixture\njet_rt_handle_eq_JetFixture\njet_rt_handle_clone_JetFixture\n");
+  success(run());
+  assert.ok(!readFileSync(join(fixture, "crates/jet-codegen/src/Prelude/Core/CAbiRoutes.rs"), "utf8").includes("fn jet_rt_handle_clone_JetFixture("));
+  assert.equal(readFileSync(join(fixture, "Compiler/JetBackend/Source/Lower/RuntimeRoutes.jet"), "utf8"), baselineJet);
+  put("Compiler/JetRuntime/exports.list", "jet_fixture_scalar\njet_rt_handle_drop_JetFixture\njet_rt_handle_eq_JetFixture\n");
+  put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: F64) -> F64 { value }\n" + providedGlue.replace("left: I64", "left: F64"));
+  const mismatchedGlue = run();
+  assert.notEqual(mismatchedGlue.status, 0);
+  assert.match(mismatchedGlue.stderr, /jet_rt_handle_eq_JetFixture.*does not match C ABI/);
+  put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: F64) -> F64 { value }\n");
+  put("Compiler/JetRuntime/exports.list", "jet_fixture_scalar\n");
   const genericRows = `CoreCallRecord::new("core.fixture", "measurement", "jet_fixture_measurement", true)\nCoreCallRecord::new("core.fixture", "pair", "jet_fixture_pair", true)\n`;
   put("crates/jet-foundation/src/Syntax/core_calls.rs", registry(genericRows));
   put("runtime.rs", declarations + `pub fn jet_fixture_measurement(value: JetMeasurement<f64>) -> JetMeasurement<f64> { value }\npub fn jet_fixture_pair(value: JetPair<f64,bool>) -> JetPair<f64,bool> { value }\n`);
@@ -367,7 +392,16 @@ pub fn source_tree() -> ${treeSource} { ${treeSource}::__jet_Empty }
   success(run());
   success(run(true));
   const owned = readFileSync(join(fixture, "crates/jet-codegen/src/Prelude/Core/CAbiRoutes.rs"), "utf8");
-  for (const [name] of streamDefinitions) assert.ok(owned.includes(`#[cfg(not(jet_native_pack))]\n    #[no_mangle]\n    pub extern "C" fn ${name}(`), `${name} seed body is not excluded from the native pack`);
+  // The generated Jet fixture above owns these exact definitions:
+  // Compiler/JetRuntime/Source/Fixture.jet:31-34 = Reader clone/drop,
+  // Cursor clone/drop (29 stream declarations follow the scalar on line 1).
+  for (const [name] of streamDefinitions) {
+    if (/^jet_rt_handle_(?:clone|drop)_/.test(name)) {
+      assert.ok(!owned.includes(`pub extern "C" fn ${name}(`), `${name} owned glue must have no duplicate Rust definition`);
+    } else {
+      assert.ok(owned.includes(`#[cfg(not(jet_native_pack))]\n    #[no_mangle]\n    pub extern "C" fn ${name}(`), `${name} seed body is not excluded from the native pack`);
+    }
+  }
   const streamMetadata = readFileSync(join(fixture, "Compiler/JetBackend/Source/Lower/RuntimeRoutes.jet"), "utf8");
   assert.match(streamMetadata, /export: "jet_reader_over", native_lists: true, params: \[LowerRouteCarrier\]\{LowerRouteCarrier.List\{elem: LowerRouteCarrier.Word\}\}/);
   assert.match(streamMetadata, /export: "jet_reader_take", native_lists: true, params: \[LowerRouteCarrier\]\{LowerRouteCarrier.HandleMut\{name: "JetReader"\}, LowerRouteCarrier.Word\}/);
