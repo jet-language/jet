@@ -197,7 +197,7 @@ fn x64_runtime_library(program: MIRProgram, explicit: [String]) -> X64RuntimeLib
         }
         &roots.push(entry_row.function)
     }
-    lowered :: lir_lower_callables(program, roots)
+    lowered :: lir_lower_native_imports(program, roots, LOWER_NATIVE_IMPORTS)
     if lowered.issues.len() > 0 {
         errors :: loop issue in lowered.issues -> "{issue.function}\t{issue.message}"
         return X64RuntimeLibraryResult{object: X64ExecutableResult{bytes: [U8]{}, errors: errors}, exports: exports}
@@ -207,6 +207,16 @@ fn x64_runtime_library(program: MIRProgram, explicit: [String]) -> X64RuntimeLib
         function :: lowered.callables.get(entry_row.function.value) ?? return runtime_export_error("export {entry_row.symbol} has no lowered callable")
         spec :: specs.get(entry_row.symbol) ?? return runtime_export_error("checked export {entry_row.symbol} is not in exports.list")
         &globals.push(X64RuntimeExport{function: function, symbol: entry_row.symbol, init_priority: spec.init_priority, fini_priority: spec.fini_priority})
+    }
+    loop (symbol, function) in lowered.native_exports {
+        // These symbols come only from actual imports, and the metadata
+        // excludes handwritten provider exports. No ABI thunk is introduced.
+        &globals.push(X64RuntimeExport{function: function, symbol: symbol, init_priority: -1, fini_priority: -1})
+    }
+    provided := [String:Bool]{}
+    loop entry_row in globals -> &provided.add(entry_row.symbol, true).drop("object exports have unique names")
+    loop symbol in LOWER_NATIVE_IMPORTS {
+        if provided.get(symbol) == None -> return runtime_export_error("native runtime pack is missing imported C symbol {symbol}")
     }
     X64RuntimeLibraryResult{object: x64_runtime_object(lowered.lir, globals), exports: exports}
 }
