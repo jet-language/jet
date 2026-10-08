@@ -538,12 +538,76 @@ fn lower_sort_run_size(f: &LowerFunction, width: LIRValueID, remaining: LIRValue
     result
 }
 
+// Local ownership is live across a callback: initialized full-stride keys,
+// scalar index buffers, and a moved closure. Each consuming action enters
+// its own typed cleanup scope, recapturing the current delivered Stop.
+fn lower_sort_release(p: MIRProgram, m: &LowerModule, f: &LowerFunction, order: LIRValueID, keys: LIRValueID, scratch: LIRValueID?, length: LIRValueID, key_count: LIRValueID, key_ty: MIRType, by_key: Bool, closure: LIRValueID, closure_ty: MIRType, moved_closure: Bool) Never! {
+    if by_key && lower_needs_drop(p, key_ty) {
+        zero :: lower_const(&f, 0)
+        release :: lower_sort_loop(&f, zero, key_count)
+        slot :: lower_list_address(&f, keys, release.at, lower_list_stride(p, key_ty))
+        key :: lower_read_at(p, &f, slot, 0, key_ty) ?? return
+        scope :: lower_stop_cleanup_enter(&m, &f)
+        lower_map_drop_value(p, &m, &f, key, key_ty)
+        lower_stop_cleanup_leave(&m, &f, scope)
+        lower_each_end(&f, release, [LIRValueID]{})
+    }
+    buffers_scope :: lower_stop_cleanup_enter(&m, &f)
+    if scratch == .Val(buffer) -> lower_list_free_buffer(&m, &f, buffer, length, 8)
+    lower_list_free_buffer(&m, &f, order, length, 8)
+    if by_key -> lower_list_free_buffer(&m, &f, keys, length, lower_list_stride(p, key_ty))
+    lower_stop_cleanup_leave(&m, &f, buffers_scope)
+    if moved_closure {
+        scope :: lower_stop_cleanup_enter(&m, &f)
+        lower_map_drop_value(p, &m, &f, closure, closure_ty)
+        lower_stop_cleanup_leave(&m, &f, scope)
+    }
+}
+
+// A failed callback may leave its result carrier unwritten. Guard before
+// reading it, release exactly the live prefix/scratch/closure, then enter the
+// caller's checked Propagate edge. There is no neutral-carrier fallback.
+fn lower_sort_callback_guard(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, order: LIRValueID, keys: LIRValueID, scratch: LIRValueID?, length: LIRValueID, key_count: LIRValueID, key_ty: MIRType, by_key: Bool, closure: LIRValueID, closure_ty: MIRType, moved_closure: Bool) Never! {
+    status :: lower_word(&f)
+    lower_call_runtime(&m, &f, "jet_rt_session_propagate", [LIRValueID]{}, Val(status))
+    zero :: lower_const(&f, 0)
+    stopped :: lower_numeric_compare(&f, LIRCondition.Ne, status, zero)
+    stop :: lower_new_block(&f)
+    resume :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: stopped, then_target: lower_target(stop, [LIRValueID]{}), else_target: lower_target(resume, [LIRValueID]{})})
+    lower_start(&f, stop, [LIRValueID]{})
+    lower_sort_release(p, &m, &f, order, keys, scratch, length, key_count, key_ty, by_key, closure, closure_ty, moved_closure)
+    lower_numeric_stopped(p, Val(c), &m, &f)
+    lower_start(&f, resume, [LIRValueID]{})
+}
+
+// Normal cleanup can itself publish a Stop. An already computed Err box is
+// still owned here; release it only on that new Stop, before propagation.
+fn lower_sort_release_guard(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, extra: LIRValueID?, extra_ty: MIRType) Never! {
+    status :: lower_word(&f)
+    lower_call_runtime(&m, &f, "jet_rt_session_propagate", [LIRValueID]{}, Val(status))
+    zero :: lower_const(&f, 0)
+    stopped :: lower_numeric_compare(&f, LIRCondition.Ne, status, zero)
+    stop :: lower_new_block(&f)
+    resume :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: stopped, then_target: lower_target(stop, [LIRValueID]{}), else_target: lower_target(resume, [LIRValueID]{})})
+    lower_start(&f, stop, [LIRValueID]{})
+    if extra == .Val(value) {
+        scope :: lower_stop_cleanup_enter(&m, &f)
+        lower_map_drop_value(p, &m, &f, value, extra_ty)
+        lower_stop_cleanup_leave(&m, &f, scope)
+    }
+    lower_numeric_stopped(p, Val(c), &m, &f)
+    lower_start(&f, resume, [LIRValueID]{})
+}
+
+
 // `xs.sort_by(key)` / `sort_by_desc(key)` (SortKernel.rs
 // jet_list_try_sort_by_key_kernel: every key computed once, in List order,
 // then a stable sort of the keys) and `xs.sort_by(compare)`
 // (jet_list_sort_by_compare, a stable sort under the comparator). The same
 // width-doubling index merge as canonical MIR row ordering sorts positions;
-// inverse permutation cycles transfer payloads within the original buffer.
+// hole rotations transfer payloads within the original buffer.
 // `mode`: 0 key ascending, 1 key descending, 2 comparator, 3/4 fallible key
 // ascending/descending
 // (jet_list_try_sort_by[_desc]: the first Err key stops before any later key
@@ -585,11 +649,12 @@ fn lower_closure_sort(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
     length :: lower_list_word(&f, list, 0)
     data :: lower_list_data(&f, list)
     stride :: lower_list_stride(p, elem)
+    key_stride :: lower_list_stride(p, key_ty)
     zero :: lower_const(&f, 0)
     one :: lower_const(&f, 1)
     order :: lower_list_buffer(&m, &f, length, 8)
     keys := order
-    if by_key -> keys = lower_list_buffer(&m, &f, length, 8)
+    if by_key -> keys = lower_list_buffer(&m, &f, length, key_stride)
     finish :: lower_new_block(&f)
 
     // Positions in List order; each key computed once, in that order.
@@ -600,7 +665,8 @@ fn lower_closure_sort(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
         item_address :: lower_list_address(&f, data, fill.at, stride)
         item :: lower_read_at(p, &f, item_address, 0, elem) ?? return
         computed :: lower_call_closure_box(p, &m, &f, closure, [LIRValueID]{item}, ret) ?? return lower_fail(&m, &f, "sort_by key closure has no result")
-        key := computed
+        lower_sort_callback_guard(p, c, &m, &f, order, keys, None, length, fill.at, key_ty, by_key, closure, closure_ty, closure_arg.access == .Move)
+        key_slot :: lower_list_address(&f, keys, fill.at, key_stride)
         if key_err == .Val(err_ty) {
             // A Result box: tag 1 Ok / 0 Err at 0, payload at 8.
             shell_size :: lower_result_box_size(p, key_ty, err_ty)
@@ -612,15 +678,8 @@ fn lower_closure_sort(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
             keep :: lower_new_block(&f)
             lower_seal(&f, LIRTerminator.Branch{condition: failed, then_target: lower_target(stop, [LIRValueID]{}), else_target: lower_target(keep, [LIRValueID]{})})
             lower_start(&f, stop, [LIRValueID]{})
-            if lower_needs_drop(p, key_ty) {
-                release :: lower_sort_loop(&f, zero, fill.at)
-                release_slot :: lower_sort_slot(&f, keys, release.at)
-                stale :: lower_read_at(p, &f, release_slot, 0, key_ty) ?? return
-                lower_map_drop_value(p, &m, &f, stale, key_ty)
-                lower_each_end(&f, release, [LIRValueID]{})
-            }
-            lower_list_free_buffer(&m, &f, order, length, 8)
-            lower_list_free_buffer(&m, &f, keys, length, 8)
+            lower_sort_release(p, &m, &f, order, keys, None, length, fill.at, key_ty, by_key, closure, closure_ty, closure_arg.access == .Move)
+            lower_sort_release_guard(p, c, &m, &f, Val(computed), ret)
             failure :: lower_pointer(&f)
             lower_alloc(&m, &f, failure, outcome_size)
             lower_emit(&f, LIRInst.Store{base: failure, offset: 0, value: zero})
@@ -628,14 +687,16 @@ fn lower_closure_sort(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
             moved_to :: lower_address(&f, failure, 8)
             lower_list_move(p, &f, moved_to, moved_from, err_ty)
             lower_free_shell(&m, &f, computed, shell_size)
-            if closure_arg.access == .Move -> lower_map_drop_value(p, &m, &f, closure, closure_ty)
             lower_seal(&f, LIRTerminator.Jump{target: lower_target(finish, [LIRValueID]{failure})})
             lower_start(&f, keep, [LIRValueID]{})
-            key = lower_read_at(p, &f, computed, 8, key_ty) ?? return
+            key :: lower_read_at(p, &f, computed, 8, key_ty) ?? return
+            // Inline keys borrow the Result payload's address: transfer the
+            // full key while that shell is still allocated.
+            lower_write_at(p, &f, key_slot, 0, key, key_ty)
             lower_free_shell(&m, &f, computed, shell_size)
+        } else {
+            lower_write_at(p, &f, key_slot, 0, computed, key_ty)
         }
-        key_slot :: lower_sort_slot(&f, keys, fill.at)
-        lower_write_at(p, &f, key_slot, 0, key, key_ty)
     }
     lower_each_end(&f, fill, [LIRValueID]{})
 
@@ -649,12 +710,11 @@ fn lower_closure_sort(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
     source :: lower_pointer(&f)
     target :: lower_pointer(&f)
     ordered :: lower_pointer(&f)
-    inverse :: lower_pointer(&f)
     lower_seal(&f, LIRTerminator.Jump{target: lower_target(pass_head, [LIRValueID]{one, order, scratch})})
     lower_start(&f, pass_head, [LIRValueID]{width, source, target})
     more_passes :: lower_flag(&f)
     lower_emit(&f, LIRInst.Compare{dst: more_passes, condition: LIRCondition.Lt, left: width, right: length})
-    lower_seal(&f, LIRTerminator.Branch{condition: more_passes, then_target: lower_target(pass_body, [LIRValueID]{}), else_target: lower_target(pass_done, [LIRValueID]{source, target})})
+    lower_seal(&f, LIRTerminator.Branch{condition: more_passes, then_target: lower_target(pass_body, [LIRValueID]{}), else_target: lower_target(pass_done, [LIRValueID]{source})})
     lower_start(&f, pass_body, [LIRValueID]{})
 
     run_head :: lower_new_block(&f)
@@ -706,8 +766,8 @@ fn lower_closure_sort(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
     right_at :: lower_sort_load(&f, source, right)
     before := LIRValueID{value: -1}
     if by_key {
-        right_slot :: lower_sort_slot(&f, keys, right_at)
-        left_slot :: lower_sort_slot(&f, keys, left_at)
+        right_slot :: lower_list_address(&f, keys, right_at, key_stride)
+        left_slot :: lower_list_address(&f, keys, left_at, key_stride)
         right_key :: lower_read_at(p, &f, right_slot, 0, key_ty) ?? return
         left_key :: lower_read_at(p, &f, left_slot, 0, key_ty) ?? return
         key_order :: if ascending -> lower_map_key_order(p, &m, &f, key_ty, right_key, left_key) else -> lower_map_key_order(p, &m, &f, key_ty, left_key, right_key)
@@ -718,6 +778,7 @@ fn lower_closure_sort(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
         right_item :: lower_read_at(p, &f, right_address, 0, elem) ?? return
         left_item :: lower_read_at(p, &f, left_address, 0, elem) ?? return
         verdict :: lower_call_closure_box(p, &m, &f, closure, [LIRValueID]{right_item, left_item}, ret) ?? return lower_fail(&m, &f, "sort_by comparator has no result")
+        lower_sort_callback_guard(p, c, &m, &f, order, keys, Val(scratch), length, zero, key_ty, by_key, closure, closure_ty, closure_arg.access == .Move)
         less_word :: lower_const(&f, less_index)
         before = lower_flag(&f)
         lower_emit(&f, LIRInst.Compare{dst: before, condition: LIRCondition.Eq, left: verdict, right: less_word})
@@ -753,53 +814,48 @@ fn lower_closure_sort(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
     next_width :: lower_word(&f)
     lower_emit(&f, LIRInst.Binary{dst: next_width, op: LIRBinaryOp.Add, left: width, right: width_step})
     lower_seal(&f, LIRTerminator.Jump{target: lower_target(pass_head, [LIRValueID]{next_width, target, source})})
-    lower_start(&f, pass_done, [LIRValueID]{ordered, inverse})
+    lower_start(&f, pass_done, [LIRValueID]{ordered})
 
-    // Reuse the spare scalar buffer for old-position -> new-position.
-    // Only inverse entries change during cycles; element storage keeps its
-    // original pointer and capacity, and no payload is cloned or dropped.
-    destinations :: lower_sort_loop(&f, zero, length)
-    original :: lower_sort_load(&f, ordered, destinations.at)
-    destination_slot :: lower_sort_slot(&f, inverse, original)
-    lower_emit(&f, LIRInst.Store{base: destination_slot, offset: 0, value: destinations.at})
-    lower_each_end(&f, destinations, [LIRValueID]{})
+    // order[new] = old. Mark completed entries with their own positions.
+    // Save one payload to open a hole, then move each source into the hole;
+    // only the saved payload crosses the temporary. No payload is cloned or
+    // dropped, and the original List data pointer and capacity are retained.
     temporary :: lower_new_storage(p, &f, elem)
     cycle :: lower_sort_loop(&f, zero, length)
+    cycle_save :: lower_new_block(&f)
     cycle_head :: lower_new_block(&f)
-    cycle_swap :: lower_new_block(&f)
+    cycle_move :: lower_new_block(&f)
+    cycle_restore :: lower_new_block(&f)
     cycle_done :: lower_new_block(&f)
-    lower_seal(&f, LIRTerminator.Jump{target: lower_target(cycle_head, [LIRValueID]{})})
-    lower_start(&f, cycle_head, [LIRValueID]{})
-    destination :: lower_sort_load(&f, inverse, cycle.at)
+    initial_source :: lower_sort_load(&f, ordered, cycle.at)
     misplaced :: lower_flag(&f)
-    lower_emit(&f, LIRInst.Compare{dst: misplaced, condition: LIRCondition.Ne, left: destination, right: cycle.at})
-    lower_seal(&f, LIRTerminator.Branch{condition: misplaced, then_target: lower_target(cycle_swap, [LIRValueID]{}), else_target: lower_target(cycle_done, [LIRValueID]{})})
-    lower_start(&f, cycle_swap, [LIRValueID]{})
-    here :: lower_list_address(&f, data, cycle.at, stride)
-    there :: lower_list_address(&f, data, destination, stride)
-    lower_list_move(p, &f, temporary, here, elem)
-    lower_list_move(p, &f, here, there, elem)
-    lower_list_move(p, &f, there, temporary, elem)
-    here_slot :: lower_sort_slot(&f, inverse, cycle.at)
-    there_slot :: lower_sort_slot(&f, inverse, destination)
-    there_destination :: lower_sort_load(&f, inverse, destination)
-    lower_emit(&f, LIRInst.Store{base: here_slot, offset: 0, value: there_destination})
-    lower_emit(&f, LIRInst.Store{base: there_slot, offset: 0, value: destination})
-    lower_seal(&f, LIRTerminator.Jump{target: lower_target(cycle_head, [LIRValueID]{})})
+    lower_emit(&f, LIRInst.Compare{dst: misplaced, condition: LIRCondition.Ne, left: initial_source, right: cycle.at})
+    lower_seal(&f, LIRTerminator.Branch{condition: misplaced, then_target: lower_target(cycle_save, [LIRValueID]{}), else_target: lower_target(cycle_done, [LIRValueID]{})})
+    lower_start(&f, cycle_save, [LIRValueID]{})
+    initial_address :: lower_list_address(&f, data, cycle.at, stride)
+    lower_list_move(p, &f, temporary, initial_address, elem)
+    hole :: lower_word(&f)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(cycle_head, [LIRValueID]{cycle.at})})
+    lower_start(&f, cycle_head, [LIRValueID]{hole})
+    next_source :: lower_sort_load(&f, ordered, hole)
+    hole_slot :: lower_sort_slot(&f, ordered, hole)
+    lower_emit(&f, LIRInst.Store{base: hole_slot, offset: 0, value: hole})
+    complete :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: complete, condition: LIRCondition.Eq, left: next_source, right: cycle.at})
+    lower_seal(&f, LIRTerminator.Branch{condition: complete, then_target: lower_target(cycle_restore, [LIRValueID]{}), else_target: lower_target(cycle_move, [LIRValueID]{})})
+    lower_start(&f, cycle_move, [LIRValueID]{})
+    hole_address :: lower_list_address(&f, data, hole, stride)
+    source_address :: lower_list_address(&f, data, next_source, stride)
+    lower_list_move(p, &f, hole_address, source_address, elem)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(cycle_head, [LIRValueID]{next_source})})
+    lower_start(&f, cycle_restore, [LIRValueID]{})
+    final_address :: lower_list_address(&f, data, hole, stride)
+    lower_list_move(p, &f, final_address, temporary, elem)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(cycle_done, [LIRValueID]{})})
     lower_start(&f, cycle_done, [LIRValueID]{})
     lower_each_end(&f, cycle, [LIRValueID]{})
-    lower_list_free_buffer(&m, &f, scratch, length, 8)
-
-    if by_key && lower_needs_drop(p, key_ty) {
-        release :: lower_sort_loop(&f, zero, length)
-        release_slot :: lower_sort_slot(&f, keys, release.at)
-        key :: lower_read_at(p, &f, release_slot, 0, key_ty) ?? return
-        lower_map_drop_value(p, &m, &f, key, key_ty)
-        lower_each_end(&f, release, [LIRValueID]{})
-    }
-    lower_list_free_buffer(&m, &f, order, length, 8)
-    if by_key -> lower_list_free_buffer(&m, &f, keys, length, 8)
-    if closure_arg.access == .Move -> lower_map_drop_value(p, &m, &f, closure, closure_ty)
+    lower_sort_release(p, &m, &f, order, keys, Val(scratch), length, length, key_ty, by_key, closure, closure_ty, closure_arg.access == .Move)
+    lower_sort_release_guard(p, c, &m, &f, None, ret)
     if outcome_size == 0 {
         lower_seal(&f, LIRTerminator.Jump{target: lower_target(finish, [LIRValueID]{})})
         lower_start(&f, finish, [LIRValueID]{})

@@ -55,6 +55,25 @@ fields into the builder; only scalar Copy facts are read. Saving an enclosing
 function's independent snapshot remains a distinct operation, not a borrowed
 view that could be invalidated when the builder begins a nested function.
 
+Native List key/comparator sorting uses stable index merges before relocating
+any receiver payload. Keys are evaluated once in input order and retained at
+their original positions, with scratch slots sized to their actual key layout,
+including inline tuples and owning named keys. A fallible Ok key is transferred
+before its Result shell is freed. Equal comparisons keep the left run first.
+Once comparisons complete, hole rotations move payloads inside the original
+List allocation without cloning or dropping them; its data pointer and capacity
+are retained. The index buffers and full-stride key buffer are scratch storage,
+not an allocation-free sorting promise.
+
+Callback results are not read until the delivered Stop guard succeeds. A
+callback Stop leaves the receiver untouched and releases only initialized
+keys, live scratch buffers, and a moved closure before taking the caller's
+checked Propagate edge. Each consuming Close action uses its own typed cleanup
+scope and exact opaque saved-flags token, including zero; a new Stop during
+cleanup remains visible, and the shared double-panic policy is unchanged.
+The `sort_key_contract` executable example covers deep payload permutations,
+tuple/named/fallible keys, stability, large-list comparison bounds, and boundaries.
+
 ## Read-only fact channel
 
 The frozen TIR exposes one typed, borrowed `TFactChannel` view. It projects facts
