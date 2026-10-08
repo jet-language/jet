@@ -67,6 +67,51 @@ fn vault_fixture_check(condition: Bool) {
     }
     jet_rt_free(slot, I64{8}, I64{8})
 }
+// Supplemental native inode ownership proof: real anonymous file, proc-fd link,
+// visible install gate, matching-inode cleanup and seed lock-substitution hook.
+// Transport names point to borrowed NUL-terminated literals (not fake fds).
+#Export(c) fn jet_rt_vault_linux_inode_fixture(root: I64, names: I64, payload: I64, fault: I64) {
+    data :: rt_text_word(names + DATA_SEQUENCE_DATA)
+    dot :: rt_text_data(rt_text_word(data))
+    next :: rt_text_data(rt_text_word(data + I64{8}))
+    final_name :: rt_text_data(rt_text_word(data + I64{16}))
+    lock_name :: rt_text_data(rt_text_word(data + I64{24}))
+    quarantine :: rt_text_data(rt_text_word(data + I64{32}))
+    acquired :: rt_text_data(rt_text_word(data + I64{40}))
+    scratch :: jet_rt_alloc(I64{352}, I64{8})
+    out :: scratch + I64{344}
+    vault_fixture_check(vault_linux_dir_at_root(root, out) == I64{0})
+    dirfd :: rt_text_word(out)
+    temp :: vault_linux_openat(dirfd, dot, I64{4259842}, I64{384}, scratch)
+    vault_fixture_check(temp >= I64{0})
+    vault_fixture_check(vault_linux_write_all(temp, rt_text_data(payload), rt_text_len(payload)))
+    vault_fixture_check(trap_syscall(I64{74}, temp, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}) == I64{0})
+    vault_fixture_check(vault_linux_link_file(temp, dirfd, next, scratch) == I64{0})
+    vault_fixture_check(vault_linux_install_exact(dirfd, next, final_name, temp, true, scratch) == I64{0})
+    vault_fixture_check(vault_linux_remove_exact(dirfd, final_name, temp, next, out, scratch) == I64{0})
+    vault_fixture_check(rt_text_word(out) == I64{1})
+    held :: vault_linux_openat(dirfd, lock_name, I64{193}, I64{384}, scratch)
+    vault_fixture_check(held >= I64{0})
+    jet_rt_vault_set_test_fault(fault)
+    vault_fixture_check(vault_linux_remove_exact(dirfd, lock_name, held, quarantine, out, scratch) == I64{0})
+    vault_fixture_check(rt_text_word(out) == I64{0})
+    jet_rt_vault_set_test_fault(I64{0})
+    replacement :: vault_linux_openat(dirfd, lock_name, I64{0}, I64{0}, scratch)
+    vault_fixture_check(replacement >= I64{0})
+    vault_fixture_check(!vault_linux_same_inode(replacement, held, scratch))
+    vault_fixture_check(trap_syscall(I64{0}, replacement, scratch, I64{12}, I64{0}, I64{0}, I64{0}) == I64{11})
+    vault_fixture_check(rt_text_word(scratch) == I64{7882815992864204146})
+    vault_fixture_check(rt_text_byte(scratch + I64{8}) == I64{101} && rt_text_byte(scratch + I64{9}) == I64{110} && rt_text_byte(scratch + I64{10}) == I64{116})
+    vault_fixture_check(vault_linux_remove_exact(dirfd, lock_name, replacement, quarantine, out, scratch) == I64{0})
+    vault_fixture_check(rt_text_word(out) == I64{1})
+    vault_fixture_check(vault_linux_remove_exact(dirfd, acquired, held, quarantine, out, scratch) == I64{0})
+    vault_fixture_check(rt_text_word(out) == I64{1})
+    vault_linux_close(replacement)
+    vault_linux_close(held)
+    vault_linux_close(temp)
+    vault_linux_close(dirfd)
+    jet_rt_free(scratch, I64{352}, I64{8})
+}
 // Supplementary historical codec checks: exact bytes, every truncation, garbage,
 // malformed UTF-8, preserved NUL/Unicode strings, and canonical domain hash.
 #Export(c) fn jet_rt_vault_legacy_fixture(bytes: I64, length: I64, expected_hash: I64) {

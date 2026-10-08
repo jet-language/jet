@@ -145,6 +145,16 @@ Every temporary/root descriptor closes on success and failure; only the
 successful held `.jet` descriptor transfers to the caller. Supplemental real
 filesystem fixtures cover accepted, writable and symlinked directories but
 do not claim the original full `prepare_generate_at` fixture before composition.
+The descriptor-relative inode gate retains the seed renameat2, proc-fd linkat,
+quarantine/reopen/compare and exact-owner unlink sequence
+(`SecretsCrypto.rs:2178-2342,2818-2834`). It checks both the visible staging
+inode and the installed inode, attempting exchange rollback on a mismatched
+installed inode. The seed's lock-substitution hook replaces the name after
+its first inode check; quarantine rechecks and restores that replacement rather
+than deleting it. `O_TMPFILE` staging and proc-fd linking have no named-temp
+fallback. Supplemental native fixtures use actual descriptors/files and the
+shared hook, not a C implementation of this policy. The full writer's crypto,
+state rechecks, lock ownership and durability protocol are separate callers.
 
 Typed vault records own native Secret buffers. Equality compares the key bytes,
 not just immutable hashes, while Debug always prints a redacted key marker.

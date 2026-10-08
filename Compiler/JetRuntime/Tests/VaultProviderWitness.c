@@ -14,6 +14,8 @@ extern void jet_rt_alloc_init(void);
 extern void jet_rt_thread_init(void);
 extern void jet_rt_thread_detach(void);
 extern void jet_rt_crypto_entropy_init(void);
+extern void jet_rt_vault_test_hooks_init(int64_t (*)(void *, void *));
+extern int64_t jet_rt_vault_test_hooks_destroy(void *, void *);
 extern void errors_and_handles_are_redacted(int64_t, intptr_t, const Text *, const Text *, const Text *, const TextList *);
 extern void jet_rt_vault_crypto_projection_fixture(void);
 extern void jet_rt_vault_legacy_fixture(const void *, int64_t, const void *);
@@ -29,6 +31,7 @@ extern void jet_rt_vault_origin_hash_bound_fixture(void *, const Text *, const u
 extern void jvlt2_codec_is_canonical_bounded_and_preserves_legacy_strings(const Text *, const Text *, const Text *, const Text *, const Text *);
 extern void jet_rt_vault_codec_duplicate_fixture(void *, const Text *);
 extern void jet_rt_vault_linux_dir_fixture(const Text *, int64_t);
+extern void jet_rt_vault_linux_inode_fixture(const Text *, const TextList *, const Text *, const Text *);
 extern void imported_origin_round_trips_and_invalid_combinations_reject(const Text *, const Text *);
 static struct { void *data; int64_t capacity; unsigned frees; } observed[2];
 static size_t observed_count;
@@ -105,6 +108,12 @@ static void linux_dir_fixture(void) {
     Text path = text(root);
     assert(mkdir(child, 0700) == 0);
     jet_rt_vault_linux_dir_fixture(&path, -1);
+    Text names[] = {text("."), text(".secrets.age.next.fixture"), text("secrets.age"),
+        text(".secrets.age.lock"), text(".secrets.age.lock.quarantine"), text(".secrets.age.lock.acquired")};
+    Text *paths[] = {&names[0], &names[1], &names[2], &names[3], &names[4], &names[5]};
+    TextList list = {6, 6, paths};
+    Text payload = text("real anonymous file bytes"), fault = text("substitute-lock-after-check");
+    jet_rt_vault_linux_inode_fixture(&path, &list, &payload, &fault);
     assert(chmod(child, 0777) == 0);
     jet_rt_vault_linux_dir_fixture(&path, 7);
     assert(chmod(child, 0700) == 0);
@@ -116,6 +125,7 @@ int main(void) {
     jet_rt_alloc_init();
     jet_rt_thread_init();
     jet_rt_crypto_entropy_init();
+    jet_rt_vault_test_hooks_init(jet_rt_vault_test_hooks_destroy);
     Text forbidden[] = {text("secrets.age"), text("AGE-SECRET"), text("/home/"), text("hunter2"), text("ciphertext sentinel")};
     Text *needles[] = {&forbidden[0], &forbidden[1], &forbidden[2], &forbidden[3], &forbidden[4]};
     TextList list = {5, 5, needles};

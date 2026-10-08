@@ -101,3 +101,170 @@ fn vault_linux_dir_at_root(root: I64, out: I64) -> I64 {
     rt_text_store(out, dir_fd)
     I64{0}
 }
+
+// SecretsCrypto.rs:2178-2257. Borrowed NUL names, exclusive scratch>=80.
+// Diagnostics adopt only provider-selected operation/redacted-path text.
+fn vault_linux_entry_io(operation: I64, length: I64, entry: Bool, scratch: I64) -> I64 {
+    rt_text_store(scratch, operation)
+    op :: jet_rt_string_from_static(scratch, length)
+    rt_text_store(scratch, if entry -> I64{7290611380957312572} else -> I64{8299417697488303676})
+    rt_text_store(scratch + I64{8}, if entry -> I64{268325516398} else -> I64{267989970804})
+    path :: jet_rt_string_from_static(scratch, I64{13})
+    error :: jet_rt_alloc(VAULT_ERROR_BYTES, I64{8})
+    rt_text_store(error + VAULT_ERROR_TAG, I64{11})
+    rt_text_store(error + VAULT_ERROR_FIRST, op)
+    rt_text_store(error + VAULT_ERROR_SECOND, path)
+    error
+}
+fn vault_linux_rename(dirfd: I64, old: I64, new: I64, flags: I64, scratch: I64) -> I64 {
+    result :: trap_syscall(I64{316}, dirfd, old, dirfd, new, flags, I64{0})
+    if (result >= I64{0}) -> return I64{0}
+    if (result == I64{-38} || result == I64{-22}) -> return vault_error_new(I64{7}, I64{0}, I64{0})
+    vault_linux_entry_io(I64{30518463306100329}, I64{7}, false, scratch)
+}
+fn vault_linux_unlink(dirfd: I64, name: I64, scratch: I64) -> I64 {
+    result :: trap_syscall(I64{263}, dirfd, name, I64{0}, I64{0}, I64{0}, I64{0})
+    if (result == I64{0}) -> return I64{0}
+    vault_linux_entry_io(I64{118121959288437}, I64{6}, true, scratch)
+}
+fn vault_linux_link_file(file: I64, dirfd: I64, name: I64, scratch: I64) -> I64 {
+    rt_text_store(scratch, I64{7310238724270485551})
+    rt_text_store(scratch + I64{8}, I64{52108257617516})
+    // Build /proc/self/fd/<decimal fd> directly in caller scratch, no builder.
+    number := file
+    end := I64{64}
+    loop {
+        end -= I64{1}
+        rt_text_put(scratch + end, I64{48} + number % I64{10})
+        number = number /% I64{10}
+        if (number == I64{0}) -> break
+    }
+    count :: I64{64} - end
+    rt_text_bytes_copy(scratch + I64{14}, scratch + end, count)
+    rt_text_put(scratch + I64{14} + count, I64{0})
+    result :: trap_syscall(I64{265}, I64{-100}, scratch, dirfd, name, I64{1024}, I64{0})
+    if (result == I64{0}) -> return I64{0}
+    if (result == I64{-38} || result == I64{-22}) -> return vault_error_new(I64{7}, I64{0}, I64{0})
+    vault_error_new(I64{6}, I64{0}, I64{0})
+}
+// SecretsCrypto.rs:2260-2277. Borrowed fds; exclusive stat scratch288.
+fn vault_linux_same_inode(left: I64, right: I64, scratch: I64) -> Bool {
+    if (vault_linux_stat(left, scratch) != I64{0}) -> return false
+    if (vault_linux_stat(right, scratch + VAULT_STAT_BYTES) != I64{0}) -> return false
+    rt_text_word(scratch) == rt_text_word(scratch + VAULT_STAT_BYTES) &&
+        rt_text_word(scratch + I64{8}) == rt_text_word(scratch + VAULT_STAT_BYTES + I64{8})
+}
+fn vault_linux_write_all(fd: I64, bytes: I64, count: I64) -> Bool {
+    at := I64{0}
+    loop at < count {
+        written :: trap_syscall(I64{1}, fd, bytes + at, count - at, I64{0}, I64{0}, I64{0})
+        if (written > I64{0}) { at += written } else if (written != I64{-4}) -> return false
+    }
+    true
+}
+// The exact seed substitution hook is consulted only for the lock basename.
+// Its borrowed native Text header/raw bytes occupy caller scratch after stat.
+fn vault_linux_lock_substitution(name: I64, scratch: I64) -> Bool {
+    rt_text_store(scratch, I64{8319385953628418862})
+    rt_text_store(scratch + I64{8}, I64{7165064478695317806})
+    rt_text_store(scratch + I64{16}, I64{107})
+    at := I64{0}
+    loop {
+        if (at == I64{18}) -> break
+        if (rt_text_byte(name + at) != rt_text_byte(scratch + at)) -> return false
+        at += I64{1}
+    }
+    rt_text_store(scratch, I64{8463505548608959859})
+    rt_text_store(scratch + I64{8}, I64{3272818884422231412})
+    rt_text_store(scratch + I64{16}, I64{7521905771990509153})
+    rt_text_store(scratch + I64{24}, I64{7037797})
+    rt_text_store(scratch + I64{288}, scratch)
+    rt_text_store(scratch + I64{296}, I64{27})
+    rt_text_store(scratch + I64{304}, I64{0})
+    jet_rt_vault_test_fault(scratch + I64{288})
+}
+// SecretsCrypto.rs:2279-2342. Scratch336: stat288 + raw local24 + outcome8.
+// Returns an owned error or zero; successful out is Bool encoded as word0/1.
+// Mutation is fd-relative. Reopen the quarantined entry and compare the HELD
+// inode again before permitting unlink. On substitution try restoring the name.
+fn vault_linux_quarantine_exact(dirfd: I64, name: I64, held: I64, quarantine: I64, out: I64, scratch: I64) -> I64 {
+    visible :: vault_linux_openat(dirfd, name, I64{0}, I64{0}, scratch)
+    if (visible == I64{-2}) {
+        rt_text_store(out, I64{0})
+        return I64{0}
+    }
+    if (visible < I64{0}) -> return vault_error_new(I64{6}, I64{0}, I64{0})
+    same :: vault_linux_same_inode(visible, held, scratch)
+    vault_linux_close(visible)
+    if !same {
+        rt_text_store(out, I64{0})
+        return I64{0}
+    }
+    if vault_linux_lock_substitution(name, scratch) {
+        acquired :: scratch + I64{288}
+        rt_text_store(acquired, I64{8319385953628418862})
+        rt_text_store(acquired + I64{8}, I64{7165064478695317806})
+        rt_text_store(acquired + I64{16}, I64{8244249722737471083})
+        rt_text_store(acquired + I64{24}, I64{25701})
+        error :: vault_linux_rename(dirfd, name, acquired, I64{1}, scratch)
+        if (error != I64{0}) -> return error
+        replacement :: vault_linux_openat(dirfd, name, I64{193}, I64{384}, scratch)
+        if (replacement < I64{0}) -> return vault_error_new(I64{6}, I64{0}, I64{0})
+        rt_text_store(acquired, I64{7882815992864204146})
+        rt_text_store(acquired + I64{8}, I64{7630437})
+        written :: vault_linux_write_all(replacement, acquired, I64{11})
+        synced :: if written -> trap_syscall(I64{74}, replacement, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}) else -> I64{-1}
+        vault_linux_close(replacement)
+        if (!written || synced != I64{0}) -> return vault_error_new(I64{6}, I64{0}, I64{0})
+    }
+    error :: vault_linux_rename(dirfd, name, quarantine, I64{1}, scratch)
+    if (error != I64{0}) -> return error
+    moved :: vault_linux_openat(dirfd, quarantine, I64{0}, I64{0}, scratch)
+    if (moved < I64{0}) -> return vault_error_new(I64{6}, I64{0}, I64{0})
+    matches :: vault_linux_same_inode(moved, held, scratch)
+    vault_linux_close(moved)
+    if !matches {
+        ignored :: vault_linux_rename(dirfd, quarantine, name, I64{1}, scratch)
+        vault_error_drop(ignored)
+    }
+    rt_text_store(out, if matches -> I64{1} else -> I64{0})
+    I64{0}
+}
+fn vault_linux_remove_exact(dirfd: I64, name: I64, held: I64, quarantine: I64, out: I64, scratch: I64) -> I64 {
+    result :: scratch + I64{328}
+    error :: vault_linux_quarantine_exact(dirfd, name, held, quarantine, result, scratch)
+    if (error != I64{0}) -> return error
+    if (rt_text_word(result) == I64{0}) {
+        rt_text_store(out, I64{0})
+        return I64{0}
+    }
+    unlinked :: vault_linux_unlink(dirfd, quarantine, scratch)
+    if (unlinked != I64{0}) -> return unlinked
+    rt_text_store(out, I64{1})
+    I64{0}
+}
+// SecretsCrypto.rs:2818-2834 only: the caller must already have staged/decoded
+// ciphertext, checked start state and retained its lock. This raw inode gate
+// performs the visible-name and installed-name checks, not a new writer policy.
+fn vault_linux_install_exact(dirfd: I64, next: I64, final_name: I64, temp: I64, absent: Bool, scratch: I64) -> I64 {
+    visible :: vault_linux_openat(dirfd, next, I64{0}, I64{0}, scratch)
+    if (visible < I64{0}) -> return vault_error_new(I64{6}, I64{0}, I64{0})
+    same :: vault_linux_same_inode(visible, temp, scratch)
+    vault_linux_close(visible)
+    if !same -> return vault_error_new(I64{6}, I64{0}, I64{0})
+    flags :: if absent -> I64{1} else -> I64{2}
+    error :: vault_linux_rename(dirfd, next, final_name, flags, scratch)
+    if (error != I64{0}) -> return error
+    installed :: vault_linux_openat(dirfd, final_name, I64{0}, I64{0}, scratch)
+    if (installed < I64{0}) -> return vault_error_new(I64{9}, I64{0}, I64{0})
+    matches :: vault_linux_same_inode(installed, temp, scratch)
+    vault_linux_close(installed)
+    if !matches {
+        if !absent {
+            ignored :: vault_linux_rename(dirfd, next, final_name, I64{2}, scratch)
+            vault_error_drop(ignored)
+        }
+        return vault_error_new(I64{9}, I64{0}, I64{0})
+    }
+    I64{0}
+}
