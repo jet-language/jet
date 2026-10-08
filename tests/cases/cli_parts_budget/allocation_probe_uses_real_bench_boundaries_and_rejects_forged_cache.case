@@ -1,0 +1,140 @@
+# Port of tests/cli_parts/budget.rs:98-210.
+# PENDING-SAME-HEAD: no runtime reference run.
+# PENDING-GRAMMAR(batch-four): pending predicate and step forms remain explicit.
+# PENDING-SEAM(budget-verify)
+refused: budget-verify
+fixture: fixtures/allocation
+step first: jet budget check --json
+exit: 0
+capture: report_path stdout doc $.budget.report_path
+entries: .jet/perf/reports = 1 # original predicate
+json: file {cap:report_path} canonical # original predicate
+json: file {cap:report_path} doc $.content.measurements #= 2
+json: file {cap:report_path} doc $.content.measurements[*].provider.kind = "AllocationProbe"
+json: file {cap:report_path} doc $.content.measurements[*].provider.identity = "arena"
+json: file {cap:report_path} doc $.content.measurements[*].provider.isolation = "benchmark-process-counter-reset-per-trial"
+json: file {cap:report_path} doc $.content.measurements[*].provider.version = "jet-arena-events-v1-warmup-auto-trials-20"
+step: jet budget check --json
+exit: 0
+stdout: !~ "ns/iter" # original predicate
+entries: .jet/perf/reports = 1 # original predicate
+file: {cap:report_path} exists
+copy: {cap:report_path} initial-report.json
+concat: {cap:report_path} initial-report.json forged.bytes
+step: jet budget check --json
+exit: 0
+entries: .jet/perf/reports = 2 # original predicate
+# Original source and EVERY assertion retained verbatim below; the named missing oracle prevents PASS.
+# #[test]
+# fn allocation_probe_uses_real_bench_boundaries_and_rejects_forged_cache() {
+#     use jet_foundation::PerformanceBudget::CanonicalJson;
+#     let dir = allocation_budget_project("allocation_probe_runtime");
+#     let run = || {
+#         Command::new(jet())
+#             .args(["budget", "check", "--json"])
+#             .current_dir(&dir)
+#             .output()
+#             .unwrap()
+#     };
+# 
+#     let first = run();
+#     assert_eq!(
+#         first.status.code(),
+#         Some(0),
+#         "stdout: {}\nstderr: {}",
+#         String::from_utf8_lossy(&first.stdout),
+#         String::from_utf8_lossy(&first.stderr)
+#     );
+#     let reports = dir.join(".jet/perf/reports");
+#     let paths = || {
+#         fs::read_dir(&reports)
+#             .unwrap()
+#             .map(|entry| entry.unwrap().path())
+#             .collect::<Vec<_>>()
+#     };
+#     let initial = paths();
+#     assert_eq!(initial.len(), 1);
+#     let bytes = fs::read(&initial[0]).unwrap();
+#     jet_foundation::PerformanceBudget::verify_budget_report(&bytes).unwrap();
+#     let CanonicalJson::Object(report) = CanonicalJson::parse_canonical(&bytes).unwrap() else {
+#         panic!("report")
+#     };
+#     let CanonicalJson::Object(content) = &report["content"] else {
+#         panic!("content")
+#     };
+#     let CanonicalJson::Array(measurements) = &content["measurements"] else {
+#         panic!("measurements")
+#     };
+#     assert_eq!(measurements.len(), 2);
+#     for measurement in measurements {
+#         let CanonicalJson::Object(measurement) = measurement else {
+#             panic!("measurement")
+#         };
+#         let CanonicalJson::Object(provider) = &measurement["provider"] else {
+#             panic!("provider")
+#         };
+#         assert_eq!(
+#             provider["kind"],
+#             CanonicalJson::String("AllocationProbe".into())
+#         );
+#         assert_eq!(provider["identity"], CanonicalJson::String("arena".into()));
+#         assert_eq!(
+#             provider["isolation"],
+#             CanonicalJson::String("benchmark-process-counter-reset-per-trial".into())
+#         );
+#         assert_eq!(
+#             provider["version"],
+#             CanonicalJson::String("jet-arena-events-v1-warmup-auto-trials-20".into())
+#         );
+#         let CanonicalJson::Array(samples) = &measurement["samples"] else {
+#             panic!("samples")
+#         };
+#         assert_eq!(samples.len(), 20);
+#         assert!(
+#             samples.windows(2).all(|pair| pair[0] == pair[1]),
+#             "reset boundary leaked calibration or a prior trial"
+#         );
+#         let CanonicalJson::Object(metric) = &measurement["metric"] else {
+#             panic!("metric")
+#         };
+#         let expected = match &metric["name"] {
+#             CanonicalJson::String(name) if name == "AllocationCount" => "1",
+#             CanonicalJson::String(name) if name == "AllocationBytes" => "8",
+#             other => panic!("unexpected metric: {other:?}"),
+#         };
+#         for sample in samples {
+#             let CanonicalJson::Object(sample) = sample else {
+#                 panic!("sample")
+#             };
+#             assert_eq!(sample["den"], CanonicalJson::Integer("1".into()));
+#             assert_eq!(sample["num"], CanonicalJson::Integer(expected.into()));
+#         }
+#     }
+# 
+#     let second = run();
+#     assert_eq!(second.status.code(), Some(0));
+#     assert!(
+#         !String::from_utf8_lossy(&second.stdout).contains("ns/iter"),
+#         "compatible report reran allocation workload"
+#     );
+#     assert_eq!(paths(), initial);
+# 
+#     fs::OpenOptions::new()
+#         .append(true)
+#         .open(&initial[0])
+#         .unwrap()
+#         .write_all(b"forged")
+#         .unwrap();
+#     let third = run();
+#     assert_eq!(
+#         third.status.code(),
+#         Some(0),
+#         "{}",
+#         String::from_utf8_lossy(&third.stderr)
+#     );
+#     assert_eq!(
+#         paths().len(),
+#         2,
+#         "forged report must not satisfy compatible cache identity"
+#     );
+# }
