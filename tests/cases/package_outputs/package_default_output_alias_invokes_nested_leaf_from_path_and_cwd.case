@@ -1,0 +1,43 @@
+# PORT tests/package_outputs.rs:318-381, stage_jetpack_phase1306-316.
+# KNOWN-FAILING #4817: original dogfood/jetpack package and phase1 fixture removed in6fc6f3862.
+# Original missing sources are intentionally not reconstructed or replaced with current Jetpack.
+# All6path/cwd+execution-mode combinations and every original predicate retained below.
+mkdir: phase1
+copy: {root}/dogfood/jetpack/tests/fixtures/phase1/package.jet phase1/package.jet
+copy: {root}/dogfood/jetpack/tests/fixtures/phase1/env.jet phase1/env.jet
+mkdir: phase1/.jet
+copy: {root}/dogfood/jetpack/tests/fixtures/phase1/fixture-state/lock phase1/.jet/lock
+mkdir: home
+copy: {root}/dogfood/jetpack dogfood/jetpack
+env: HOME={work}/home
+env: JETPACK_DOGFOOD_ROOT={work}/home/.cache/jet-dogfood/jetpack-store
+env: JETPACK_PROJECT_ROOT={work}/phase1
+env: JETPACK_OFFLINE=1
+env: NO_COLOR=1
+step: jet run {work}/dogfood/jetpack -- plan --json --offline
+exit: 0
+stdout: ~ "\"name\":\"dogfood\"" # Original output alias predicate rs372.
+stdout: ~ "\"selected_profiles\":[\"dogfood\"]" # Original selected-profile predicate rs376.
+step: jet run -- plan --json --offline
+cwd: dogfood/jetpack
+exit: 0
+stdout: ~ "\"name\":\"dogfood\"" # Original output alias predicate rs372.
+stdout: ~ "\"selected_profiles\":[\"dogfood\"]" # Original selected-profile predicate rs376.
+step: jet run --interpret {work}/dogfood/jetpack -- plan --json --offline
+exit: 0
+stdout: ~ "\"name\":\"dogfood\"" # Original output alias predicate rs372.
+stdout: ~ "\"selected_profiles\":[\"dogfood\"]" # Original selected-profile predicate rs376.
+step: jet run --interpret -- plan --json --offline
+cwd: dogfood/jetpack
+exit: 0
+stdout: ~ "\"name\":\"dogfood\"" # Original output alias predicate rs372.
+stdout: ~ "\"selected_profiles\":[\"dogfood\"]" # Original selected-profile predicate rs376.
+step: jet run --release {work}/dogfood/jetpack -- plan --json --offline
+exit: 0
+stdout: ~ "\"name\":\"dogfood\"" # Original output alias predicate rs372.
+stdout: ~ "\"selected_profiles\":[\"dogfood\"]" # Original selected-profile predicate rs376.
+step: jet run --release -- plan --json --offline
+cwd: dogfood/jetpack
+exit: 0
+stdout: ~ "\"name\":\"dogfood\"" # Original output alias predicate rs372.
+stdout: ~ "\"selected_profiles\":[\"dogfood\"]" # Original selected-profile predicate rs376.

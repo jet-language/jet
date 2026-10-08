@@ -1,0 +1,25 @@
+use core.files as s6_onboarding_files
+
+// DATA/editor-source subclaims of tests/onboarding_matrix.rs:41-80.
+// Rust-test-source scans at66/81-96 retire; the CLI half is its matching .case.
+fn s6_onboarding_matrix_docs() {
+    guide :: s6_onboarding_files.read("Docs/spec/guides/first-hour.md") ?? panic("first-hour guide")
+    states :: [String]{"## Terminal and editor state matrix", "| Install ready |", "| Scaffolded |", "| Valid edit |", "| Invalid edit |", "| Missing entry |", "| Ambiguous project |", "| Legacy layout |", "| Offline or unsupported host |", "| Learn next |"}
+    loop state in states -> assert(guide.contains(state), "first-hour matrix lost state {state}")
+    assert(guide.contains("jet ?") && guide.contains("jet ? run"))
+    assert(guide.contains("jet check run.jet") && guide.contains("jet test run.jet"))
+    example :: s6_onboarding_files.read("Examples/features/basics/first_hour.jet") ?? panic("first-hour example")
+    assert(example.contains("First-hour tour"))
+    assert(s6_onboarding_files.is_file("Examples/features/expected/basics/first_hour.out"))
+    vscode :: s6_onboarding_files.read("Tools/editors/vscode/extension.js") ?? panic("VS Code extension")
+    assert(vscode.contains("[\"run\", file]") && vscode.contains("[\"test\", file]"), "code lenses must invoke production jet")
+    docs :: [String]{"Tools/editors/vscode/README.md", "Tools/editors/zed/README.md"}
+    loop path in docs {
+        editor :: s6_onboarding_files.read(path) ?? panic("editor guide {path}")
+        assert(editor.contains("run/test code lenses") || (editor.contains("Run File") && editor.contains("Test File")), "editor guide lost run/test entry path: {path}")
+    }
+}
+
+#Test("onboarding matrix keeps public terminal/editor documentation") {
+    s6_onboarding_matrix_docs()
+}

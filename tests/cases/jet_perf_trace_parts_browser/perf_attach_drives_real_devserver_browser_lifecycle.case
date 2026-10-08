@@ -1,0 +1,35 @@
+# PORT tests/jet_perf_trace_parts/browser.rs:98-216 + support.rs37-72 exact TCP HTTP polling/nonce algorithm.
+# PENDING-GRAMMAR(batch-four); PENDING-SAME-HEAD; no mock relay, shell, or blessed bytes.
+# have_rustc is toolchain-availability, erased per owner. Real public dev lifecycle remains.
+fixture: perf_attach_drives_real_devserver_browser_lifecycle.fixture
+spawn dev: jet dev app.jet --target=web --port={free-port:browser}
+stdout: null
+stderr: null
+step: jet test client/browser_client.jet
+env: S6_BROWSER_PORT={free-port:browser}
+env: S6_BROWSER_PHASE=initial
+exit: 0
+spawn attach: jet perf attach {pid:dev} --out browser.jettrace
+step: jet test client/browser_client.jet
+env: S6_BROWSER_PORT={free-port:browser}
+env: S6_BROWSER_PHASE=attached
+exit: 0
+wait: attach
+exit: 0
+file: browser.jettrace is-file
+# Public view calls read_verified -> verify_jettrace (CmdPerf.rs2143/3404-3405), original hash-valid oracle.
+step: jet perf view browser.jettrace
+exit: 0
+file: browser.jettrace ~ "\"name\":\"handlers__init$handler0\""
+step: jet test client/browser_client.jet
+env: S6_BROWSER_PORT={free-port:browser}
+env: S6_BROWSER_PHASE=active
+exit: 0
+write: app.jet rebuilt.jet.txt
+step: jet test client/browser_client.jet
+env: S6_BROWSER_PORT={free-port:browser}
+env: S6_BROWSER_PHASE=rebuilt
+exit: 0
+signal dev: KILL
+wait: dev
+exit: any # Original ChildGuard::kill + wait, status unasserted.
