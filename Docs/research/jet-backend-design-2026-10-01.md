@@ -1288,7 +1288,8 @@ Fixed decimal, grouping and percentage use the same exact binary-rational
 ties-to-even rounding as scientific formatting and preserve the IEEE sign
 bit even when rounded to zero. Decimal byte units spell `KB` like the seed.
 Duration's `Int.MIN` double-minus spelling is intentionally seed-compatible:
-it matches the native Rust release overflow bug pending the owner's bug card.
+it matches the native Rust release overflow bug. #4798 / D-FMT-DURATION-MIN1
+(owner decision pending) tracks correcting both tiers; this is not Jet's spec.
 The compiler's shared selector-to-source map drives both Core reachability
 and expression lowering: a selected formatter is rooted by its checked
 function key and invoked as an ordinary user-function MIR call. Lookup is
@@ -1315,6 +1316,16 @@ String inputs use Core's explicit owned-copy pattern (`~value.trim()`); compare
 refreshes that source fix without regenerating the oracle. This is source-body seed parity, not native selector
 or runtime-pack proof. A mismatching kernel cannot retire until its parity
 cases pass; native generic Display/Debug/Show remain checked-type renderers.
+
+The RtL6b4 source-byte receipt observed all 23 kernels / 372 cases with zero
+failures and byte-identical stdout after `19c42b980`; trusted parsing also
+reported zero errors. The immutable expected-output SHA-256 is
+`f7c9a21168359f638c75fc031072856f283b5b5da6f9b93d55d618752cf1b54c`.
+This is Rust-seed source execution only: all 23 retirement rows stay HELD
+until `abeae0924` + `546f16027` compose on the new admitted E2 FINAL and
+canonical routing/Expr tables regenerate. The native Jet `exports.list`
+already contains none of those 23 kernels, so its removal/addition delta is
+empty; generic Display/Debug/Show remain synthesized typed renderers.
 
 `FloatBits.jet` contains ordinary Core-backed reference functions. Only the
 runtime-object driver may replace their validated checked IDs with internal
