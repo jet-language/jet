@@ -1,0 +1,43 @@
+
+struct D {
+    value: Int
+}
+
+struct Pair {
+    a: Int
+    b: Int
+}
+
+fn align(left: D, right: D) -> Pair { Pair{a: left.value, b: right.value} }
+
+impl D.Add {
+    fn add(self, rhs: D) -> D {
+        pair :: align(self, rhs)
+        return D{value: pair.a + pair.b}
+    }
+}
+
+enum Envelope {
+    Pair(left: D, right: D)
+}
+
+struct Shown {
+    value: Int
+}
+
+impl Shown.Display {
+    fn display(self) -> String { "shown={self.value}" }
+}
+
+fn mark(label: String, value: Int) -[IO]> D {
+    print(label)
+    return D{value: value}
+}
+
+fn run() {
+    print(D{value: 3})
+    print(D{value: 1} + D{value: 2})
+    print(Envelope.Pair{left: D{value: 4}, right: D{value: 5}})
+    print(Shown{value: 9})
+    print(mark("left", 1), mark("right", 2))
+}
