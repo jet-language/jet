@@ -8,6 +8,15 @@
 }
 #Export(c) fn jet_rt_observe_fixture_start(identity: I64, directory: I64) -> I64 { observe_live_start(identity, directory) }
 #Export(c) fn jet_rt_observe_fixture_publish(writer: I64, exit: I64) { observe_publish(writer, exit) }
+// Read-only observations of the production start path, never a fake writer
+// or thread controller. Writers and detached threads live for the process.
+#Export(c) fn jet_rt_observe_fixture_writer() -> I64 {
+    sync_mutex_lock(observe_root)
+    writer :: sync_load(observe_root + I64{72})
+    sync_mutex_unlock(observe_root)
+    writer
+}
+#Export(c) fn jet_rt_observe_fixture_periodic_started(writer: I64) -> I64 { sync_load(writer + I64{112}) }
 #Export(c) fn jet_rt_observe_fixture_sequence(writer: I64) -> I64 {
     sync_mutex_lock(writer)
     sequence :: sync_load(writer + I64{16})
