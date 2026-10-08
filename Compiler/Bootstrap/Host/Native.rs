@@ -1518,6 +1518,7 @@ fn bootstrap_required_callable<'a>(
 struct BootstrapNativeHelperRoots {
     callback_transfer: jet_foundation::MIR::MirFunctionId,
     host_type_shape: jet_foundation::MIR::MirFunctionId,
+    host_shape_rows: jet_foundation::MIR::MirFunctionId,
 }
 
 fn checked_bootstrap_callable<'a>(
@@ -1585,6 +1586,7 @@ fn checked_bootstrap_native_helper_roots(
     Ok(BootstrapNativeHelperRoots {
         callback_transfer: checked("jet_eval_callback_transfer")?,
         host_type_shape: checked("jet_eval_host_type_shape_from_program")?,
+        host_shape_rows: checked("jet_eval_program_shape_rows")?,
     })
 }
 
@@ -1870,18 +1872,29 @@ fn emit_bootstrap_native_compile_entry(
     let callback_transfer = helpers.callback_transfer.0.to_string();
     let host_type_shape = helpers.host_type_shape.0.to_string();
     let shape_callable = checked_bootstrap_callable(bindings, "jet_eval_host_type_shape_from_program")?;
-    if shape_callable.metadata.parameter_types.len() != 3 {
+    let shape_rows_callable = checked_bootstrap_callable(bindings, "jet_eval_program_shape_rows")?;
+    if shape_callable.metadata.parameter_types.len() != 4
+        || !shape_callable.metadata.parameter_types[..2].iter().all(|ty| ty.starts_with('&'))
+        || shape_rows_callable.metadata.parameter_types.len() != 1
+        || !shape_rows_callable.metadata.parameter_types[0].starts_with('&')
+        || shape_rows_callable.metadata.function != helpers.host_shape_rows
+    {
         return Err(BootstrapHostCodecError::InvalidMetadata(
-            "Source host-shape accessor must take its program, checked type, and source span".to_string(),
+            "Source host-shape accessor must borrow its program and cached rows, then take its checked type and source span; its row builder must borrow the program".to_string(),
         ));
     }
     let shape_arguments = bootstrap_call_arguments(
         &shape_callable.metadata.parameter_types,
         &[
-            ("__jet_shape_program", "__jet_shape_program.clone()"),
+            ("__jet_shape_program", "__jet_shape_program"),
+            ("__jet_shape_rows", "__jet_shape_rows"),
             ("__jet_shape_type", "__jet_shape_type.clone()"),
             ("__jet_shape_span", "__jet_shape_span.clone()"),
         ],
+    );
+    let shape_rows_arguments = bootstrap_call_arguments(
+        &shape_rows_callable.metadata.parameter_types,
+        &[("__jet_shape_program", "__jet_shape_program")],
     );
     let generated = r#"
 #[doc(hidden)]
@@ -2091,12 +2104,14 @@ pub fn __jet_bootstrap_compile_with_native(
             .and_then(|function| function.params.first())
             .map(|parameter| &parameter.ty)
             .ok_or_else(|| "checked Source Machine parameter disappeared".to_string())?;
-        // The Source projection exists only for these host-shape queries,
-        // which read type, field, Core-owner and handle rows: it is converted
-        // from the restored body-free signature program and dropped below.
-        let mut __jet_shape_program = crate::__jet_bootstrap_mir_program_from_host(
+        // Project only nominal definitions, Core owners, checked modules and
+        // exact handle lifecycles through the canonical MIR field converters.
+        // One Source index serves all ABI queries; no function/type-instance
+        // tables are converted, and the scoped view is dropped below.
+        let mut __jet_shape_program = crate::__jet_bootstrap_mir_host_shape_program_from_host(
             __jet_compiler_image.program.as_ref(),
         )?;
+        let mut __jet_shape_rows = __HOST_SHAPE_ROWS_SYMBOL__(__HOST_SHAPE_ROWS_ARGUMENTS__);
         let mut __jet_shape_for = |checked_type: &::jet_foundation::MIR::MirType|
             -> Result<crate::compiler_bootstrap_entry_codec::BootstrapEntryHostTypeShape, String> {
             let mut __jet_shape_type = __jet_bootstrap_type_from_host(checked_type)?;
@@ -2116,6 +2131,7 @@ pub fn __jet_bootstrap_compile_with_native(
             __jet_shared_payload_shapes.insert(key, __jet_shape_for(&payload_type)?);
         }
         drop(__jet_shape_for);
+        drop(__jet_shape_rows);
         drop(__jet_shape_program);
         let __jet_native_adapter = __JetBootstrapNativeAdapter::new_with_bindings(
             __jet_root_lease,
@@ -2193,6 +2209,8 @@ pub fn __jet_bootstrap_compile_with_native(
         .replace("__HOST_TYPE_SHAPE_ID__", &host_type_shape)
         .replace("__HOST_TYPE_SHAPE_SYMBOL__", &shape_callable.metadata.symbol)
         .replace("__HOST_TYPE_SHAPE_ARGUMENTS__", &shape_arguments)
+        .replace("__HOST_SHAPE_ROWS_SYMBOL__", &shape_rows_callable.metadata.symbol)
+        .replace("__HOST_SHAPE_ROWS_ARGUMENTS__", &shape_rows_arguments)
         .replace("__HOST_FIELD_OWNER__", &host_field.owner.0.to_string())
         .replace("__HOST_FIELD_ID__", &host_field.field.0.to_string())
         .replace("__NUMERIC_FIELD_OWNER__", &numeric_field.owner.0.to_string())
