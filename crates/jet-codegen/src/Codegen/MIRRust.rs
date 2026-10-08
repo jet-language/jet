@@ -25708,7 +25708,7 @@ impl<'a> RustEmitter<'a> {
                 let borrowed = if stream_query && index == 0 {
                     false
                 } else {
-                    self.core_call_argument_borrowed(route, index)
+                    self.core_call_argument_borrowed(route_row, index)
                 };
                 // `core.reactive.signal` constructs `JetSignal<JetInt>` directly.
                 // Keep its checked Int on the exact carrier; the other native
