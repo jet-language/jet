@@ -3612,7 +3612,7 @@ pub(super) fn json_events(v: &CtValue) -> String {
             out.push(format!("array_end {here}"));
             return;
         }
-        out.push(format!("value {here} {}", super::JSONInterp::display_datatree(t)));
+        out.push(format!("value {here} {}", super::JSONInterp::display_query_cell(t)));
     }
     let mut out = Vec::new();
     walk(String::new(), v, &mut out);

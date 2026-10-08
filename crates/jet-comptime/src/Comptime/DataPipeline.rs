@@ -102,7 +102,7 @@ pub(super) fn query_cell_text(value: &CtValue) -> String {
         CtValue::BigInt(value) => value.to_string_rep(),
         CtValue::Float(value) => value.render(),
         CtValue::Bool(value) => value.to_string(),
-        _ => super::JSONInterp::display_datatree(value),
+        _ => super::JSONInterp::display_query_cell(value),
     }
 }
 fn query_cell_sql_value(value: &CtValue) -> Option<sql_query::JetSqlValue> {
