@@ -820,6 +820,7 @@ pub(super) fn check_bundle_opts_for_output_inner(
                             types,
                             source_owned_types: st.registry.source_owned_types.clone(),
                             core_source_module: st.registry.core_source_module,
+                            operator_signatures: st.registry.operator_signatures.clone(),
                             error_types: st.registry.error_types.clone(),
                             unit_types: st.registry.unit_types.clone(),
                             unit_facts: st.registry.unit_facts.clone(),
