@@ -2,9 +2,9 @@
 // CoreEnumPayloadRows orders InvalidName, InvalidValue, NonUnicode; the checked
 // record marshaller supplies those same variant indices. EncodingABI owns the
 // eight-byte tag carrier shared by EnvError's existing clone/drop/render paths.
-fn env_overlay_error_new(tag: I64) -> I64 {
+fn env_overlay_error_new(kind: I64) -> I64 {
     value :: jet_rt_alloc(ENCODING_ENUM_BYTES, I64{8})
-    encoding_store(value + ENCODING_ENUM_TAG, tag)
+    encoding_store(value + ENCODING_ENUM_TAG, kind)
     value
 }
 
@@ -36,7 +36,7 @@ env_overlay_root := I64{0}
     if (env_overlay_root != I64{0}) -> return
     root :: jet_rt_alloc(I64{40}, I64{8})
     index := I64{0}
-    loop index < I64{5} {
+    loop index < (I64{5}) {
         encoding_store(root + index * I64{8}, I64{0})
         index += I64{1}
     }
@@ -75,7 +75,7 @@ fn env_overlay_remove_at(index: I64) {
     count :: encoding_word(env_overlay_root + I64{24})
     env_overlay_row_release(rows + index * I64{40})
     cursor := index
-    loop cursor + I64{1} < count {
+    loop cursor < (count - I64{1}) {
         rt_text_bytes_copy(rows + cursor * I64{40}, rows + (cursor + I64{1}) * I64{40}, I64{40})
         cursor += I64{1}
     }
