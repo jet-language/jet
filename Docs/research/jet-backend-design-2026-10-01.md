@@ -1418,6 +1418,12 @@ bodies that rustc accepts; the same bodies in dispatch form fail with E0502.
 
 ## Testing
 
+The golden-lowering driver's generated package grants `FS.Read`, `FS.Write`,
+`IO`, `Mem.Alloc`, `Panic`, and `Time`: these are the checked Lower unit's
+required effects. The harness must grant `Panic` for its checked-invariant
+failures as well as its file, allocation, and timing operations; otherwise
+driver compilation refuses before any golden can be lowered.
+
 `Compiler/JetBackend/Tests/LowerFixtures.jet` builds small checked-MIR programs
 by hand (hello, exact-Int arithmetic, locals with a loop and a phi, a switch,
 a range loop, string interpolation, structs, payload and tag enums, Options),
