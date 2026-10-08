@@ -1,0 +1,8 @@
+# HAND-PORT tests/web_build.rs:3953-3971 module_local_dev_is_validated_as_web_runtime
+# PENDING-KIT; PENDING-GRAMMAR; no runtime/reference proof.
+# Original build rejection and exact same-diagnostic predicates, unchanged sources.
+fixture: module_local_dev_is_validated_as_web_runtime.fixture
+env: NO_COLOR=1
+step: jet build --target web --json main.jet
+exit: nonzero
+json: stdout doc $.reports[?code="E-WEB-TIR-UNSUPPORTED"][?what~="`dev`"] #>= 1
