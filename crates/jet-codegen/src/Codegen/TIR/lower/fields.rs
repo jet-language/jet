@@ -1082,7 +1082,7 @@ mod parsed_core_record_tests {
     fn context(bundle: &ProgramBundle) -> Cx {
         let caller = &bundle.modules[0];
         let mut cx = crate::Codegen::build_cx_items(&caller.items, &caller.source,
-            &caller.display, None, &HashMap::new(), &bundle.edition);
+            &caller.display, None, &std::sync::Arc::new(HashMap::new()), &bundle.edition);
         register_imported_struct_shapes(&mut cx, bundle, 0);
         register_own_struct_shapes(&mut cx, bundle, 0);
         cx
@@ -1158,7 +1158,7 @@ mod parsed_core_record_tests {
         let bundle = parsed_bundle("core.web.table", "use core.web.table as table\npub struct WebTablePage<T> { pub rows: [T]\n pub label: String }\nfn run() {}\n");
         let caller = &bundle.modules[0];
         let mut cx = crate::Codegen::build_cx_items(&caller.items, &caller.source,
-            &caller.display, None, &HashMap::new(), &bundle.edition);
+            &caller.display, None, &std::sync::Arc::new(HashMap::new()), &bundle.edition);
         register_imported_struct_shapes(&mut cx, &bundle, 0);
         assert!(!cx.local_type_identities.contains_key("WebTablePage"),
             "a shadowed imported leaf must not acquire the caller's identity");
