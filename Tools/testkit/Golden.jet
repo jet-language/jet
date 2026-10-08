@@ -345,13 +345,6 @@ fn kit_golden_run_entry(entry: KitEntry, tier: KitTier, env: KitEnv, scratch: St
     kit_steps_execute(context, kit_golden_step_hooks())
 }
 
-fn kit_golden_step_hooks() -> KitStepHooks {
-    KitStepHooks{
-        invoke: (step: KitStep, index: Int, context: KitStepCtx, state: KitStepState) -> kit_golden_step_invoke(step, index, context, state),
-        check: (step: KitStep, index: Int, context: KitStepCtx, state: KitStepState) -> kit_golden_step_check(step, index, context, state)
-    }
-}
-
 fn kit_golden_step_invoke(step: KitStep, index: Int, context: KitStepCtx, previous: KitStepState) -> KitStepResult {
     golden :: context.golden ?? panic("golden step context required")
     plan :: context.plan

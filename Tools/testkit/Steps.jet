@@ -322,13 +322,6 @@ fn kit_steps_context(plan: KitPlan, id: String, env: KitEnv, work: String, scrat
     KitStepCtx{plan: plan, id: id, env: env, work: work, scratch: scratch, snapshots: snapshots, bless: bless, golden: None}
 }
 
-fn kit_steps_hooks() -> KitStepHooks {
-    KitStepHooks{
-        invoke: (step: KitStep, index: Int, context: KitStepCtx, state: KitStepState) -> kit_steps_invoke(step, index, context, state),
-        check: (step: KitStep, index: Int, context: KitStepCtx, state: KitStepState) -> kit_steps_check_state(step, index, context, state)
-    }
-}
-
 fn kit_steps_build_entry(step: KitStep) -> String {
     i := 2
     loop i < step.argv.len() {

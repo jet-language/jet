@@ -177,8 +177,8 @@ struct KitStep {
     exit: String
     assertions: [KitAssertion]
     cwd: String{""}
-    unset: [String]{[]}
-    environment: [KitEnvVar]{[]}
+    unset: [String]{[String]{}}
+    environment: [KitEnvVar]{[KitEnvVar]{}}
 }
 
 struct KitPlan {
@@ -240,6 +240,21 @@ struct KitStepResult {
 struct KitStepHooks {
     invoke: fn(KitStep, Int, KitStepCtx, KitStepState) -[Env, Exec, FS, IO, Mem.Alloc, Panic, Time, Time.Wait]> KitStepResult
     check: fn(KitStep, Int, KitStepCtx, KitStepState) -[Env, Exec, FS, IO, Mem.Alloc, Panic, Time, Time.Wait]> KitVerdict
+}
+
+// Keep callback factories beside their nominal types until #4780 is resolved.
+fn kit_golden_step_hooks() -> KitStepHooks {
+    KitStepHooks{
+        invoke: (step: KitStep, index: Int, context: KitStepCtx, state: KitStepState) -> kit_golden_step_invoke(step, index, context, state),
+        check: (step: KitStep, index: Int, context: KitStepCtx, state: KitStepState) -> kit_golden_step_check(step, index, context, state)
+    }
+}
+
+fn kit_steps_hooks() -> KitStepHooks {
+    KitStepHooks{
+        invoke: (step: KitStep, index: Int, context: KitStepCtx, state: KitStepState) -> kit_steps_invoke(step, index, context, state),
+        check: (step: KitStep, index: Int, context: KitStepCtx, state: KitStepState) -> kit_steps_check_state(step, index, context, state)
+    }
 }
 
 struct KitCaseResult {
