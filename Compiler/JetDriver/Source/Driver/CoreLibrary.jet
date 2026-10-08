@@ -1,0 +1,57 @@
+// Canonical all-Core producer input. The outer static host retains this recipe;
+// every factory checks it through this same Source pipeline and layout walker.
+use jet_backend.[CoreSharedCanonicalProducer, CoreSharedManifest, CoreSharedSource, core_shared_expected_manifest]
+
+pub enum JetDriverCoreLibraryPreparation {
+    Prepared(producer: CoreSharedCanonicalProducer, expected: CoreSharedManifest)
+    CompileRefused(compilation: JetDriverCompileResult)
+    SchemaRefused(errors: [String])
+}
+
+pub fn jet_driver_core_library_sources(rows: [JetDriverCoreSource]) -> [CoreSharedSource] Never! {
+    sources := [CoreSharedSource]{}
+    loop row in rows {
+        members := row.owned_members
+        &members.sort()
+        &sources.push(CoreSharedSource{
+            module_owner_key: jet_driver_core_source_owner_key(row.path),
+            path: row.path, source: row.source, owned_members: members,
+        })
+    }
+    &sources.sort_by((a: CoreSharedSource, b: CoreSharedSource) -> (a.module_owner_key <=> b.module_owner_key).then(a.path <=> b.path))
+    sources
+}
+
+// A library request carries compiler/host execution facts, never the importing
+// user's source authority, gates or evaluation entry. This empty authority table
+// is not passed to the program snapshot validator: CoreLibrary owns its graph.
+pub fn jet_driver_core_library_request(template: JetDriverCompileRequest, rows: [JetDriverCoreSource]) -> JetDriverCompileRequest Never! {
+    JetDriverCompileRequest{
+        authorized_sources: JetDriverAuthorizedSourceSnapshot{roots: [JetDriverAuthorizedSourceRoot]{}, entry_root_identity: "", entry_path: ""},
+        canonical_effect_source: template.canonical_effect_source,
+        core_sources: rows,
+        host_facts: template.host_facts,
+        eval_config: template.eval_config,
+        target: JetDriverCompileTarget.Native,
+        record_store: template.record_store,
+        trace_sink: template.trace_sink,
+        mir_lint_every_pass: template.mir_lint_every_pass,
+        compiler_threads: template.compiler_threads,
+    }
+}
+
+pub fn jet_driver_prepare_core_library(request: ^JetDriverCompileRequest) -> JetDriverCoreLibraryPreparation {
+    sources :: jet_driver_core_library_sources(request.core_sources)
+    producer_identity :: request.host_facts.compiler_identity ?? ""
+    compilation := jet_driver_compile_core_library_mir(^request)
+    if !compilation.complete || compilation.internal_problem != None || compilation.mir == None {
+        return JetDriverCoreLibraryPreparation.CompileRefused{compilation: ^compilation}
+    }
+    program :: compilation.mir ?? return JetDriverCoreLibraryPreparation.CompileRefused{compilation: ^compilation}
+    expected :: core_shared_expected_manifest(program, sources)
+    if expected.errors.len() != 0 -> return JetDriverCoreLibraryPreparation.SchemaRefused{errors: expected.errors}
+    JetDriverCoreLibraryPreparation.Prepared{
+        producer: CoreSharedCanonicalProducer{program: ^program, sources: sources, producer_identity: producer_identity},
+        expected: expected,
+    }
+}
