@@ -3174,6 +3174,9 @@ source owners supply their declared methods without manufacturing a struct or
 enum declaration. This ownership does not export `tasks.Condition`: use the
 existing bare `Condition` spelling, and keep ordinary application impls on
 these builtin carriers rejected.
+Qualified annotation checks derive these owner-only names and compiler-owned
+Core enum names from generated metadata, and still require a public type export
+from the imported module.
 
 The source scheduler-channel constructors preserve that pair rather than
 returning `TaskState`. Bounded scheduler channels clamp capacities below one
