@@ -324,6 +324,25 @@ Results, and skipping null for Options), then frees the box. Glue for nested
 boxes and inline members names further glue; the list grows while it is
 generated.
 
+Ordinary nominal drop selects the checked `Close.close` method for the concrete
+receiver, including a generic container's instantiated member type. Mono reaches
+that method even when no explicit call names it. Close implementations are indexed
+once by nominal declaration during preparation and reused by layout/drop queries.
+The consuming receiver parameter's own cleanup uses a separate structural role;
+all other values of that type, including recursive children and locals in close(),
+keep ordinary Close. Receiver-slot rebinding checks the original storage identity.
+No cleanup mask is invented by either role: checked MIR owns the cleanup bracket.
+
+For a moved Close-bearing field or payload, clearing bytes is not sufficient:
+an inline zero value can still have an observable Close body. Function-local
+live bits guard drop-rest on the moved path, expand only ancestors and leave
+siblings on ordinary glue. Conditional take clears only on its executed arm;
+field/root replacement drops the old guarded contents before resetting bits.
+Whole-owner local rebinding copies bits with the owner, and repeated fresh
+definitions reset them. These bits do not change any value's ABI layout. Whole
+escape into an aggregate, callee or return is rejected if a Close-bearing path
+can still be moved out (backward reaching definitions follow local bit transfers).
+
 ### Locals, places and SSA
 
 Every root place (a local, a parameter or a temporary, with no projections)

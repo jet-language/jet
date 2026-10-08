@@ -114,7 +114,7 @@ fn lower_lazy_callback_helper(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -
             next
         }
         arg :: lower_read_at(p, &f, source, 0, ty) ?? next
-        if access == .Move && !owned_inputs && (lower_is_inline(p, ty) || lower_needs_drop(p, ty)) {
+        if access == .Move && !owned_inputs && (lower_is_inline(p, ty) || lower_needs_drop(p, m, ty)) {
             layout :: lower_value_layout(f, arg)
             copied :: lower_new_value(&f, layout, LIRDrop.Trivial, ty.identity)
             lower_clone_into(p, &m, &f, arg, copied, ty)
@@ -217,7 +217,7 @@ fn lower_lazy_meta(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRTyp
     zero :: lower_const(&f, 0)
     lower_store_word(&f, descriptor, 0, lower_list_stride(p, ty))
     clone :: if lower_lazy_can_clone(p, ty, [String]{}) -> lower_lazy_helper_address(&m, &f, "lazy.clone", ty) else -> zero
-    drop :: if lower_needs_drop(p, ty) -> lower_lazy_helper_address(&m, &f, "lazy.drop", ty) else -> zero
+    drop :: if lower_needs_drop(p, m, ty) -> lower_lazy_helper_address(&m, &f, "lazy.drop", ty) else -> zero
     lower_emit(&f, LIRInst.Store{base: descriptor, offset: 8, value: clone})
     lower_emit(&f, LIRInst.Store{base: descriptor, offset: 16, value: drop})
     lower_emit(&f, LIRInst.Store{base: descriptor, offset: 24, value: zero})
