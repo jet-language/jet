@@ -1,20 +1,42 @@
 // Executable command metadata carriers (CLISchema.rs). Defaults in a decoded
 // record are the canonical recorded Display text, not evaluator values.
 use jet_foundation.[JobScope, JobSkip, JobCachePolicy, JobMetadata, ParamZone, StringMapEntry]
+use jet_foundation.[Item, Program, Func, Param, Expr, type_name, ast_job_metadata]
 
-pub enum CLIValueKind { Bool Int Float String Path }
+pub enum CLIValueKind {
+    Bool
+    Int
+    Float
+    String
+    Path
+}
 impl CLIValueKind {
     pub fn as_str(self) -> String Never! {
-        if self == { .Bool -> "Bool" .Int -> "Int" .Float -> "Float" .String -> "String" .Path -> "Path" }
+        if self == {
+            .Bool -> "Bool"
+            .Int -> "Int"
+            .Float -> "Float"
+            .String -> "String"
+            .Path -> "Path"
+        }
     }
 }
-pub enum CLIDefault { TypeDefault Recorded(value: String) }
+pub enum CLIDefault {
+    TypeDefault
+    Recorded(value: String)
+}
 impl CLIDefault {
     pub fn display(self) -> String Never! {
-        if self == { .TypeDefault -> "type default" .Recorded(value) -> value }
+        if self == {
+            .TypeDefault -> "type default"
+            .Recorded(value) -> value
+        }
     }
 }
-pub enum CLIInputShape { Flag Value(kind: CLIValueKind, optional: Bool, default: CLIDefault?) }
+pub enum CLIInputShape {
+    Flag
+    Value(kind: CLIValueKind, optional: Bool, default: CLIDefault?)
+}
 pub struct CLIInputSchema {
     pub field: String
     pub flag: String
@@ -30,7 +52,10 @@ impl CLIInputSchema {
         if self.shape == { .Value(_, optional, default) -> !optional && default == None else -> false }
     }
     pub fn value_kind(self) -> CLIValueKind Never! {
-        if self.shape == { .Flag -> CLIValueKind.Bool .Value(kind, _, _) -> kind }
+        if self.shape == {
+            .Flag -> CLIValueKind.Bool
+            .Value(kind, _, _) -> kind
+        }
     }
     pub fn default_display(self) -> String? Never! {
         if self.shape == {
@@ -74,12 +99,250 @@ pub struct JobFact {
     pub schedule: String?
 
     pub fn scope_name(self) -> String Never! {
-        if self.scope == { .Dev -> "dev" .Ship -> "ship" .Internal -> "internal" }
+        if self.scope == {
+            .Dev -> "dev"
+            .Ship -> "ship"
+            .Internal -> "internal"
+        }
     }
     pub fn metadata(self) -> JobMetadata Never! {
         JobMetadata{scope: self.scope, after: self.after, packages: self.packages, cwd: self.cwd, inputs: self.inputs, outputs: self.outputs, skip: self.skip, cache: self.cache, parallel: Val(self.parallel), limits: self.limits}
     }
 }
+
+// The registry is an owned metadata projection, not evidence that a job was
+// checked or run. Driver callers must supply the actual successful entry
+// projection; importing a helper module never extends the job argv namespace.
+pub struct JobRegistry {
+    jobs: [JobFact]
+
+    pub fn from_items(items: [Item]) -> JobRegistry Never! {
+        jobs := [JobFact]{}
+        loop item in items {
+            if item == .Func(function) {
+                if function.is_job -> &jobs.push(cli_schema_job_fact(function))
+            }
+        }
+        JobRegistry{jobs: ^jobs}
+    }
+    pub fn from_program(program: Program) -> JobRegistry Never! {
+        JobRegistry.from_items(program.items)
+    }
+    pub fn for_entry(programs: [Program], entry: Int) -> JobRegistry Never! {
+        if entry < 0 || entry >= programs.len() -> return JobRegistry{jobs: [JobFact]{}}
+        JobRegistry.from_program(programs[entry])
+    }
+    pub fn jobs(self) -> View<JobFact> Never! from self {
+        self.jobs[0..<self.jobs.len()]
+    }
+    pub fn visible_jobs(self) -> [View<JobFact>] Never! from self {
+        visible := [View<JobFact>]{}
+        loop index in 0..<self.jobs.len() {
+            if self.jobs[index].scope != .Internal -> &visible.push(self.jobs[index..<index + 1])
+        }
+        ^visible
+    }
+    pub fn find(self, name: String) -> View<JobFact>? Never! from self {
+        loop index in 0..<self.jobs.len() {
+            if self.jobs[index].name == name -> return Val(self.jobs[index..<index + 1])
+        }
+        None
+    }
+    pub fn find_visible(self, name: String) -> View<JobFact>? Never! from self {
+        loop index in 0..<self.jobs.len() {
+            if self.jobs[index].name == name && self.jobs[index].scope != .Internal -> return Val(self.jobs[index..<index + 1])
+        }
+        None
+    }
+    pub fn dependency_closure(self, root: String) -> [View<JobFact>] String! from self {
+        index :: cli_schema_job_index(self.jobs)
+        state := [Int]{}
+        loop _ in 0..<self.jobs.len() -> &state.push(0)
+        stack := [CLIJobVisit]{}
+        cli_schema_job_enter(self.jobs, index, root, &state, &stack)
+        rows := [View<JobFact>]{}
+        loop stack.len() > 0 {
+            next_row :: cli_schema_job_finish(self.jobs, index, &state, &stack)
+            row :: next_row ?? panic("a nonempty job traversal lost its next row")
+            &rows.push(self.jobs[row..<row + 1])
+        }
+        Ok(^rows)
+    }
+    pub fn validate_graph(self) String! {
+        index :: cli_schema_job_index(self.jobs)
+        names := index.keys().to_list()
+        &names.sort()
+        state := [Int]{}
+        loop _ in 0..<self.jobs.len() -> &state.push(0)
+        stack := [CLIJobVisit]{}
+        // Reuse the completed-node marks: visiting an already validated
+        // subtree cannot change Rust's lexically-first failing root.
+        loop name in names {
+            cli_schema_job_enter(self.jobs, index, name, &state, &stack)
+            loop stack.len() > 0 -> _ := cli_schema_job_finish(self.jobs, index, &state, &stack)
+        }
+        Ok()
+    }
+    pub fn completion_words(self) -> [String] Never! {
+        words := [String]{}
+        seen := [String:Bool]{}
+        loop job in self.jobs {
+            if job.scope == .Internal || seen.get(job.name) != None -> next
+            seen[job.name] = true
+            &words.push(job.name)
+        }
+        ^words
+    }
+}
+
+struct CLIJobVisit { row: Int, dependency: Int }
+
+fn cli_schema_job_index(jobs: [JobFact]) -> [String:Int] Never! {
+    index := [String:Int]{}
+    loop (row, job) in jobs {
+        if index.get(job.name) == None -> index[job.name] = row
+        else -> index[job.name] = -1
+    }
+    ^index
+}
+fn cli_schema_job_enter(jobs: [JobFact], index: [String:Int], name: String, state: &[Int], stack: &[CLIJobVisit]) String! {
+    row :: index.get(name) ?? return Err("job graph references unknown job `{name}`")
+    if row < 0 -> return Err("job `{name}` has an ambiguous declaration")
+    if state[row] == 2 -> return Ok()
+    if state[row] == 1 {
+        cycle := [String]{}
+        started := false
+        loop visit in stack {
+            if visit.row == row -> started = true
+            if started -> &cycle.push(jobs[visit.row].name)
+        }
+        &cycle.push(name)
+        return Err("job graph contains a cycle: {cycle.join(" -> ")}")
+    }
+    if jobs[row].parallel == 0 -> return Err("job `{name}` declares a zero parallel bound")
+    state[row] = 1
+    &stack.push(CLIJobVisit{row: row, dependency: 0})
+    Ok()
+}
+fn cli_schema_job_finish(jobs: [JobFact], index: [String:Int], state: &[Int], stack: &[CLIJobVisit]) -> Int? String! {
+    loop stack.len() > 0 {
+        last :: stack.len() - 1
+        row :: stack[last].row
+        dependency :: stack[last].dependency
+        if {
+            dependency < jobs[row].after.len() -> {
+                stack[last].dependency += 1
+                cli_schema_job_enter(jobs, index, jobs[row].after[dependency], &state, &stack)
+            }
+            else -> {
+                _ := &stack.pop()
+                state[row] = 2
+                return Ok(Val(row))
+            }
+        }
+    }
+    Ok(None)
+}
+fn cli_schema_job_argument(param: Param) -> JobArgumentSchema Never! {
+    optional :: if param.ty == { .Option(_) -> true else -> false }
+    boolean :: if param.ty == { .Bool -> true else -> false }
+    label :: if param.public_label == {
+        .Val(value) -> value.name
+        else -> param.name
+    }
+    default := String?{None}
+    if param.default == .Val(value) -> default = cli_schema_job_default(value)
+    JobArgumentSchema{name: param.name, label: label, ty: type_name(param.ty), required: !param.variadic && !optional && !boolean && param.default == None, default: default, variadic: param.variadic, zone: param.zone}
+}
+fn cli_schema_job_default(expression: Expr) -> String? Never! {
+    if expression == {
+        .Paren(inner, _) -> cli_schema_job_default(inner)
+        .Int(value, _, _, _) -> Val("{value}")
+        .Float(value, _, is_f32, _) -> {
+            // The typed constructor performs the actual width conversion;
+            // widening a Float carrier tagged F32 would lose its display law.
+            if is_f32 -> Val("{F32{value}}") else -> Val("{value}")
+        }
+        .Bool(value, _) -> Val(if value -> "true" else -> "false")
+        .Str(parts, _) -> {
+            if parts.len() == 1 {
+                if parts[0] == .Lit(text) -> return Val(text)
+            }
+            None
+        }
+        else -> None
+    }
+}
+fn cli_schema_job_doc(function: Func) -> String? Never! {
+    loop marker in function.markers {
+        if marker.name != "Doc" -> next
+        if marker.args.len() == 0 -> return None
+        if marker.args[0] == .Expr(value) {
+            if value == .Str(parts, _) {
+                if parts.len() == 1 {
+                    if parts[0] == .Lit(text) -> return Val(text)
+                }
+            }
+        }
+        return None
+    }
+    None
+}
+// JetShow and Rust Display share the shortest round-trippable digits but use
+// different notation. This adapter only changes notation, never recomputes a
+// floating-point value, so metadata has no second numeric formatter.
+fn cli_schema_job_float_display(value: Float) -> String Never! {
+    shown :: "{value}"
+    exponent_at :: shown.find("e")
+    if exponent_at < 0 {
+        if shown.ends_with(".0") -> return shown.slice(0..<(shown.len() - 2))
+        return shown
+    }
+    mantissa :: shown.slice(0..<exponent_at)
+    exponent :: Int.parse(shown.slice(exponent_at + 1..<shown.len())) ?? panic("canonical Float exponent is not an integer")
+    negative :: mantissa.starts_with("-")
+    unsigned :: if negative -> mantissa.slice(1..<mantissa.len()) else -> mantissa
+    dot :: unsigned.find(".")
+    digits :: unsigned.replace(".", "")
+    decimal :: (if dot < 0 -> unsigned.len() else -> dot) + exponent
+    sign :: if negative -> "-" else -> ""
+    if decimal <= 0 {
+        zero_bytes := [U8]{}
+        loop _ in 0..<(-decimal) -> &zero_bytes.push(U8{48})
+        zeros :: String.from_bytes(^zero_bytes) ?? panic("ASCII zero padding is not UTF-8")
+        return "{sign}0.{zeros}{digits}"
+    }
+    if decimal >= digits.len() {
+        zero_bytes := [U8]{}
+        loop _ in digits.len()..<decimal -> &zero_bytes.push(U8{48})
+        zeros :: String.from_bytes(^zero_bytes) ?? panic("ASCII zero padding is not UTF-8")
+        return "{sign}{digits}{zeros}"
+    }
+    "{sign}{digits.slice(0..<decimal)}.{digits.slice(decimal..<digits.len())}"
+}
+fn cli_schema_job_schedule(function: Func) -> String? Never! {
+    marker :: function.every ?? return None
+    if marker.arg == {
+        .Duration(integer, floating, suffix, _) -> {
+            number :: if integer == {
+                .Val(value) -> "{value}"
+                else -> if floating == { .Val(value) -> cli_schema_job_float_display(value) else -> "" }
+            }
+            Val("{number}{suffix}")
+        }
+        .WallClock(text, _) -> Val("day {text}")
+        .Expression(_) -> None
+    }
+}
+fn cli_schema_job_fact(function: Func) -> JobFact Never! {
+    metadata :: function.job_metadata ?? ast_job_metadata()
+    arguments := [JobArgumentSchema]{}
+    loop param in function.params {
+        if param.name != "self" -> &arguments.push(cli_schema_job_argument(param))
+    }
+    JobFact{name: function.name, scope: metadata.scope, doc: cli_schema_job_doc(function), arguments: ^arguments, after: metadata.after, packages: metadata.packages, cwd: metadata.cwd, inputs: metadata.inputs, outputs: metadata.outputs, skip: metadata.skip, cache: metadata.cache, parallel: metadata.parallel ?? 1, limits: metadata.limits, schedule: cli_schema_job_schedule(function)}
+}
+
 pub struct CLICommandSchema {
     pub entry_type: String
     pub description: String?
