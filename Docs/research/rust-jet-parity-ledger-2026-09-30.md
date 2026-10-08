@@ -316,3 +316,9 @@ an owner ruling before it counts as a port.
 - Must `jet fmt` (P3) and the dev-loop analyses (SD7) move before the freeze?
 - Should the 49 retired-status teaching rows the Rust parser still lists be
   ported or dropped (P2)?
+
+## Seed verification seams (#29; removed at Rust cutover)
+
+| Rust seed site | Jet owner | Removal condition |
+|---|---|---|
+| `CheckerInfer/expr.rs` E0211 Copy raise uses the bare `Type::name()` inside its quoted template, not the already quoted `show()` | `Ownership/Copy.jet` `sema_copy_diagnostic` uses bare `type_name` in the same single-quoted template | Dies at cutover with the Rust checker and Cargo UI verification harness; needed only to admit the Atomic port's existing three-case proof |
