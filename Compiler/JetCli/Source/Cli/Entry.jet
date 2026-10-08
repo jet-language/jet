@@ -485,7 +485,8 @@ fn jet_cli_function_count(program: Program, wanted: String) -> Int Never! {
 // stopped the walk.
 fn jet_cli_discover_sources(root: String, files: &[JetDriverAuthorizedSourceFile]) -[FS]> String? Never! {
     unretained := [AppAuthorizedDirectory]{}
-    jet_cli_walk_sources(root, "", 0, &files, &unretained, false)
+    budget := JetCLISourceBudget{entries: 0, bytes: 0, files: 0}
+    jet_cli_walk_sources(root, "", 0, &files, &unretained, false, &budget)
 }
 
 // Package/mod.rs `source_files_checked`: the package's discovered sources

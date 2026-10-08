@@ -3,7 +3,8 @@
 fn snapshot_fixture_files(root: String) -> [JetDriverAuthorizedSourceFile] {
     files := [JetDriverAuthorizedSourceFile]{}
     directories := [AppAuthorizedDirectory]{}
-    if jet_cli_walk_sources(root, "", 0, &files, &directories, true) == .Val(problem) -> panic(problem)
+    budget := JetCLISourceBudget{entries: 0, bytes: 0, files: 0}
+    if jet_cli_walk_sources(root, "", 0, &files, &directories, true, &budget) == .Val(problem) -> panic(problem)
     files
 }
 
@@ -13,6 +14,7 @@ fn run() {
     cli_files.create_dir_all("{root}/empty") ?? panic("empty directory")
     cli_files.create_dir_all("{root}/nested") ?? panic("nested project")
     cli_files.create_dir_all("{root}/.jet/bindings/c") ?? panic("foreign cache")
+    cli_files.create_dir_all("{root}/.jet/bindings/c/subdir") ?? panic("nonrecursive cache directory")
     defer cli_files.remove_all(root).drop("source snapshot cleanup")
     cli_files.write("{root}/main.jet", "fn run() { 1 }\n") ?? panic("entry")
     defer cli_files.remove_all("{root}-held").drop("moved source snapshot cleanup")
@@ -24,11 +26,15 @@ fn run() {
     cli_files.write("{root}/.jet/bindings/c/lib.jet", "binding\n") ?? panic("binding")
     cli_files.write("{root}/.jet/bindings/c/lib.metadata", "metadata\n") ?? panic("metadata")
     cli_files.write("{root}/.jet/bindings/c/lib.adapted.jet", "not a binding\n") ?? panic("adapted view")
+    cli_files.write("{root}/.jet/bindings/c/.hidden.jet", "hidden binding\n") ?? panic("hidden binding")
+    cli_files.write("{root}/.jet/bindings/c/lib.provenance", "provenance\n") ?? panic("provenance")
+    cli_files.write("{root}/.jet/bindings/c/subdir/ignored.jet", "not an immediate binding\n") ?? panic("nested cache")
     defer cli_files.remove("{root}/alias").drop("directory link cleanup")
 
     files := [JetDriverAuthorizedSourceFile]{}
     directories := [AppAuthorizedDirectory]{}
-    assert(jet_cli_walk_sources(root, "", 0, &files, &directories, true) == None)
+    budget := JetCLISourceBudget{entries: 0, bytes: 0, files: 0}
+    assert(jet_cli_walk_sources(root, "", 0, &files, &directories, true, &budget) == None)
     assert(files.len() == 3)
     assert(files[0].relative_path == "main.jet")
     assert(files[1].relative_path == "sub/module.jet")
@@ -63,14 +69,23 @@ fn run() {
     assert(jet_cli_read_held_source(held, "main.jet", -1) == .Err("file read bound exceeds the tree hashing bound"))
 
     caches := [JetDriverAuthorizedSourceFile]{}
-    assert(jet_cli_foreign_cache_files(root, &caches) == None)
-    assert(caches.len() == 2)
-    assert(caches[0].relative_path == ".jet/bindings/c/lib.jet")
-    assert(caches[1].relative_path == ".jet/bindings/c/lib.metadata")
+    assert(jet_cli_foreign_cache_files(root, &caches, &budget) == None)
+    assert(caches.len() == 4)
+    assert(caches[0].relative_path == ".jet/bindings/c/.hidden.jet")
+    assert(caches[1].relative_path == ".jet/bindings/c/lib.jet")
+    assert(caches[2].relative_path == ".jet/bindings/c/lib.metadata")
+    assert(caches[3].relative_path == ".jet/bindings/c/lib.provenance")
+    assert(budget.files == files.len() + caches.len())
     cli_files.hard_link("{root}/.jet/bindings/c/lib.jet", "{root}/cache-copy") ?? panic("cache hard link")
     rejected_cache := [JetDriverAuthorizedSourceFile]{}
-    assert(jet_cli_foreign_cache_files(root, &rejected_cache) != None)
+    assert(jet_cli_foreign_cache_files(root, &rejected_cache, &budget) != None)
     cli_files.remove("{root}/cache-copy") ?? panic("remove cache hard link")
+    cli_files.hard_link("{root}/.jet/bindings/c/lib.adapted.jet", "{root}/adapted-copy") ?? panic("adapted view hard link")
+    assert(jet_cli_foreign_cache_files(root, &rejected_cache, &budget) != None)
+    cli_files.remove("{root}/adapted-copy") ?? panic("remove adapted hard link")
+    cli_files.create_dir_all("{root}/.jet/bindings/c/not-a-file.jet") ?? panic("cache directory with Jet extension")
+    assert(jet_cli_foreign_cache_files(root, &rejected_cache, &budget) != None)
+    cli_files.remove_dir("{root}/.jet/bindings/c/not-a-file.jet") ?? panic("remove nonregular cache")
 
     cli_files.write("{root}/selected.other", "fn run() { 2 }\n") ?? panic("non-Jet selected input")
     selected :: jet_cli_read_rooted_source(root, "selected.other", 64) ?? panic("explicit non-Jet input")
@@ -78,16 +93,23 @@ fn run() {
     assert(snapshot_fixture_files(root).len() == 3)
     cli_files.hard_link("{root}/main.jet", "{root}/duplicate.other") ?? panic("source hard link")
     rejected := [JetDriverAuthorizedSourceFile]{}
-    assert(jet_cli_walk_sources(root, "", 0, &rejected, &directories, false) != None)
+    assert(jet_cli_walk_sources(root, "", 0, &rejected, &directories, false, &budget) != None)
     cli_files.remove("{root}/duplicate.other") ?? panic("remove hard link")
     cli_files.symlink("{root}/main.jet", "{root}/linked.jet") ?? panic("source file link")
-    assert(jet_cli_walk_sources(root, "", 0, &rejected, &directories, false) != None)
+    assert(jet_cli_walk_sources(root, "", 0, &rejected, &directories, false, &budget) != None)
     cli_files.remove("{root}/linked.jet") ?? panic("remove source link")
 
-    exhausted_entries := JetCLISourceBudget{entries: JET_CLI_MAX_SOURCE_FILES, bytes: 0}
+    exhausted_entries := JetCLISourceBudget{entries: JET_CLI_MAX_SOURCE_FILES, bytes: 0, files: 0}
     assert(jet_cli_walk_held_sources(root, "", 0, held, &rejected, &directories, false, &exhausted_entries) != None)
-    exhausted_bytes := JetCLISourceBudget{entries: 0, bytes: JET_CLI_MAX_SOURCE_TOTAL}
+    exhausted_bytes := JetCLISourceBudget{entries: 0, bytes: JET_CLI_MAX_SOURCE_TOTAL, files: 0}
     assert(jet_cli_walk_held_sources(root, "", 0, held, &rejected, &directories, false, &exhausted_bytes) != None)
+    exhausted_files := JetCLISourceBudget{entries: 0, bytes: 0, files: JET_CLI_MAX_SOURCE_FILES}
+    assert(jet_cli_cache_file(root, ".jet/bindings/c/lib.jet", &exhausted_files) == .Err(_))
+    assert(rejected_cache.len() == 0)
+    assert(jet_cli_cache_file(root, ".jet/bindings/c/lib.jet", &exhausted_bytes) == .Err(_))
+    assert(rejected_cache.len() == 0)
+    assert(jet_cli_source_read_limit(exhausted_files, selected.stat.size, "selected.other") == .Err(_))
+    assert(jet_cli_source_read_limit(exhausted_bytes, selected.stat.size, "selected.other") == .Err(_))
 
     // A replaced pathname cannot redirect a held source read or pass the
     // same parent-chain admission used by the build transport and snapshot.

@@ -110,15 +110,23 @@ fn jet_cli_is_project_boundary(directory: String) -[FS]> Bool Never! {
 struct JetCLISourceBudget {
     entries: Int
     bytes: Int
+    files: Int
 }
 
-fn jet_cli_walk_sources(root: String, relative: String, depth: Int, files: &[JetDriverAuthorizedSourceFile], directories: &[AppAuthorizedDirectory], retain_directories: Bool) -[FS]> String? Never! {
+fn jet_cli_source_read_limit(budget: JetCLISourceBudget, size: Int, path: String) -> Int String! {
+    if size > JET_CLI_MAX_SOURCE_BYTES -> return Err("`{path}` exceeds the {JET_CLI_MAX_SOURCE_BYTES}-byte file bound")
+    if budget.files >= JET_CLI_MAX_SOURCE_FILES -> return Err("authorized sources exceed the {JET_CLI_MAX_SOURCE_FILES}-file bound at `{path}`")
+    remaining :: JET_CLI_MAX_SOURCE_TOTAL - budget.bytes
+    if size > remaining -> return Err("authorized sources exceed the {JET_CLI_MAX_SOURCE_TOTAL}-byte total bound at `{path}`")
+    Ok(if remaining < JET_CLI_MAX_SOURCE_BYTES -> remaining else -> JET_CLI_MAX_SOURCE_BYTES)
+}
+
+fn jet_cli_walk_sources(root: String, relative: String, depth: Int, files: &[JetDriverAuthorizedSourceFile], directories: &[AppAuthorizedDirectory], retain_directories: Bool, budget: &JetCLISourceBudget) -[FS]> String? Never! {
     directory :: if relative == "" -> root else -> jet_cli_authority_path(root, relative)
     chain := [cli_files.Directory]{}
     names := [String]{}
     initial :: jet_cli_hold_root_chain(directory, &chain, &names) ?? return Val(err)
     if jet_cli_build_read_chain_current(&chain, &names, initial) == .Err(problem) -> return Val(problem)
-    budget := JetCLISourceBudget{entries: 0, bytes: 0}
     if jet_cli_walk_held_sources(root, relative, depth, chain[chain.len() - 1], &files, &directories, retain_directories, &budget) == .Val(problem) -> return Val(problem)
     if jet_cli_build_read_chain_current(&chain, &names, initial) == .Err(problem) -> return Val(problem)
     None
@@ -174,10 +182,10 @@ fn jet_cli_walk_held_sources(root: String, relative: String, depth: Int, held: c
         }
         if !name.ends_with(".jet") -> next
         if !stat.is_file -> return Val("`{path}` is not a regular file")
-        if files.len() >= JET_CLI_MAX_SOURCE_FILES -> return Val("the source walk exceeds the {JET_CLI_MAX_SOURCE_FILES}-file bound at `{path}`")
-        if stat.size > JET_CLI_MAX_SOURCE_TOTAL - budget.bytes -> return Val("the source walk exceeds the {JET_CLI_MAX_SOURCE_TOTAL}-byte total bound at `{path}`")
-        read :: jet_cli_read_held_source(held, name, JET_CLI_MAX_SOURCE_BYTES) ?? return Val("cannot read `{path}`: {err}")
+        limit :: jet_cli_source_read_limit(budget, stat.size, path) ?? return Val(err)
+        read :: jet_cli_read_held_source(held, name, limit) ?? return Val("cannot read `{path}`: {err}")
         budget.bytes += read.stat.size
+        budget.files += 1
         if !jet_cli_build_read_same_file(stat, read.stat) -> return Val("`{path}` changed while it was held")
         source :: String.from_bytes(^read.bytes) ?? return Val("cannot read `{path}`: file is not valid UTF-8")
         &files.push(JetDriverAuthorizedSourceFile{path: path, relative_path: child, identity: jet_cli_identity_key("file", read.stat), source: source})
@@ -211,52 +219,94 @@ fn jet_cli_held_project_boundary(directory: cli_files.Directory) -[FS]> Bool Str
     Ok(false)
 }
 
+struct JetCLICacheSource {
+    relative_path: String
+    read: JetCLIHeldSource
+}
+
 // One checked foreign-cache record under `root` (a binding or its sidecar).
-fn jet_cli_cache_file(root: String, relative: String, caches: &[JetDriverAuthorizedSourceFile]) -[FS]> String? Never! {
+fn jet_cli_cache_file(root: String, relative: String, budget: &JetCLISourceBudget) -[FS]> JetCLICacheSource String! {
     path :: jet_cli_authority_path(root, relative)
-    stat :: cli_files.stat(path) ?? return Val("cannot inspect `{path}`: {err}")
-    if stat.is_symlink -> return Val("`{path}` is a symbolic link")
-    if !stat.is_file -> return Val("`{path}` is not a regular file")
-    read :: jet_cli_read_rooted_source(root, relative, JET_CLI_MAX_SOURCE_BYTES) ?? return Val("cannot read `{path}`: {err}")
-    if !jet_cli_build_read_same_file(stat, read.stat) -> return Val("`{path}` changed while it was held")
-    source :: String.from_bytes(^read.bytes) ?? return Val("cannot read `{path}`: file is not valid UTF-8")
-    &caches.push(JetDriverAuthorizedSourceFile{path: path, relative_path: relative, identity: jet_cli_identity_key("file", read.stat), source: source})
-    None
+    stat :: cli_files.stat(path) ?? return Err("cannot inspect `{path}`: {err}")
+    if stat.is_symlink -> return Err("`{path}` is a symbolic link")
+    if !stat.is_file -> return Err("`{path}` is not a regular file")
+    limit :: jet_cli_source_read_limit(budget, stat.size, path)
+    read :: jet_cli_read_rooted_source(root, relative, limit) ?? return Err("cannot read `{path}`: {err}")
+    if !jet_cli_build_read_same_file(stat, read.stat) -> return Err("`{path}` changed while it was held")
+    budget.bytes += read.stat.size
+    budget.files += 1
+    Ok(JetCLICacheSource{relative_path: relative, read: read})
 }
 
 // Native.rs `collect_authorized_foreign_cache_files`: every generated C and
 // C++ binding (not the `.adapted.jet` views) with its `.metadata` and
 // `.provenance` sidecars, in relative-path order.
-fn jet_cli_foreign_cache_files(root: String, caches: &[JetDriverAuthorizedSourceFile]) -[FS]> String? Never! {
-    relatives := [String]{}
+fn jet_cli_foreign_cache_files(root: String, caches: &[JetDriverAuthorizedSourceFile], budget: &JetCLISourceBudget) -[FS]> String? Never! {
+    collected := [JetCLICacheSource]{}
     loop cache_directory in JET_CLI_FOREIGN_CACHE_DIRECTORIES {
         directory :: jet_cli_authority_path(root, cache_directory)
-        if !cli_files.is_dir(directory) -> next
+        directory_info :: cli_files.stat(directory) ?? {
+            if err == .NotFound(_) -> next
+            return Val("cannot inspect `{directory}`: {err}")
+        }
+        if directory_info.is_symlink || !directory_info.is_dir -> return Val("`{directory}` is not a real directory")
         held :: jet_cli_rooted_open_root(directory) ?? return Val(err.message)
+        held_info :: held.stat() ?? return Val("cannot inspect `{directory}`: {err}")
+        if held_info.id != directory_info.id -> return Val("`{directory}` changed while it was held")
         entries :: held.list() ?? return Val("cannot list `{directory}`: {err}")
+        if entries.len() > JET_CLI_MAX_SOURCE_FILES -> return Val("cache discovery exceeds the {JET_CLI_MAX_SOURCE_FILES}-entry bound")
+        discovery := JetCLISourceBudget{entries: entries.len(), bytes: 0, files: 0}
+        bindings := [JetCLICacheSource]{}
         loop entry in entries {
-            if !entry.name_is_unicode -> next
+            if !entry.name_is_unicode -> return Val("`{directory}` contains a cache name that cannot be addressed as UTF-8")
             name :: entry.name
             relative :: "{cache_directory}/{name}"
-            stat :: held.entry_stat(name) ?? return Val("cannot inspect `{jet_cli_authority_path(root, relative)}`: {err}")
-            if stat.is_symlink -> return Val("`{jet_cli_authority_path(root, relative)}` is a symbolic link")
-            if name.starts_with(".") || !name.ends_with(".jet") || name.ends_with(".adapted.jet") -> next
-            &relatives.push(relative)
-            stem :: name.slice(0..<(name.len() - 4))
-            loop extension in JET_CLI_FOREIGN_CACHE_SIDECARS {
-                sidecar_name :: "{stem}.{extension}"
-                sidecar :: "{cache_directory}/{sidecar_name}"
-                _ :: held.entry_stat(sidecar_name) ?? {
-                    if err == .NotFound(_) -> next
-                    return Val("cannot inspect `{jet_cli_authority_path(root, sidecar)}`: {err}")
-                }
-                &relatives.push(sidecar)
+            path :: jet_cli_authority_path(root, relative)
+            stat :: held.entry_stat(name) ?? return Val("cannot inspect `{path}`: {err}")
+            if stat.is_symlink -> return Val("`{path}` is a symbolic link")
+            if !name.ends_with(".jet") -> next
+            if !stat.is_file -> return Val("`{path}` is not a regular file")
+            // discover_files validates every .jet, including hidden bindings
+            // and adapted views, before its caller selects generated caches.
+            limit := jet_cli_source_read_limit(discovery, stat.size, path) ?? return Val(err)
+            adapted :: name.ends_with(".adapted.jet")
+            if !adapted {
+                shared_limit :: jet_cli_source_read_limit(budget, stat.size, path) ?? return Val(err)
+                if shared_limit < limit -> limit = shared_limit
             }
+            read :: jet_cli_read_held_source(held, name, limit) ?? return Val("cannot read `{path}`: {err}")
+            if !jet_cli_build_read_same_file(stat, read.stat) -> return Val("`{path}` changed while it was held")
+            discovery.bytes += read.stat.size
+            discovery.files += 1
+            if adapted -> next
+            budget.bytes += read.stat.size
+            budget.files += 1
+            &bindings.push(JetCLICacheSource{relative_path: relative, read: read})
+        }
+        current :: cli_files.stat(directory) ?? return Val("cannot revalidate `{directory}`: {err}")
+        if !current.is_dir || current.is_symlink || current.id != held_info.id -> return Val("`{directory}` changed while it was held")
+        // The reference discovers all bindings first, then opens metadata and
+        // provenance in that order. Convert UTF-8 only after final path sorting.
+        loop binding in bindings {
+            stem :: binding.relative_path.slice(0..<(binding.relative_path.len() - 4))
+            loop extension in JET_CLI_FOREIGN_CACHE_SIDECARS {
+                relative :: "{stem}.{extension}"
+                path :: jet_cli_authority_path(root, relative)
+                _ :: cli_files.stat(path) ?? {
+                    if err == .NotFound(_) -> next
+                    return Val("cannot inspect `{path}`: {err}")
+                }
+                sidecar :: jet_cli_cache_file(root, relative, &budget) ?? return Val(err)
+                &collected.push(sidecar)
+            }
+            &collected.push(^binding)
         }
     }
-    &relatives.sort()
-    loop relative in relatives {
-        if jet_cli_cache_file(root, relative, &caches) == .Val(problem) -> return Val(problem)
+    &collected.sort_by((left: JetCLICacheSource, right: JetCLICacheSource) -> left.relative_path <=> right.relative_path)
+    loop file in collected {
+        path :: jet_cli_authority_path(root, file.relative_path)
+        source :: String.from_bytes(^file.read.bytes) ?? return Val("cannot read `{path}`: file is not valid UTF-8")
+        &caches.push(JetDriverAuthorizedSourceFile{path: path, relative_path: file.relative_path, identity: jet_cli_identity_key("file", file.read.stat), source: source})
     }
     None
 }
@@ -682,7 +732,8 @@ pub fn jet_cli_prepare_overlays(anchor: String, entry: String, overlays: [JetCLI
     root_stat :: cli_files.stat(root) ?? return jet_cli_prepare_refused("can't securely read the source root `{root}`", "check that the directory exists and is readable", color)
     files := [JetDriverAuthorizedSourceFile]{}
     directories := [AppAuthorizedDirectory]{}
-    if jet_cli_walk_sources(root, "", 0, &files, &directories, true) == .Val(problem) {
+    budget := JetCLISourceBudget{entries: 0, bytes: 0, files: 0}
+    if jet_cli_walk_sources(root, "", 0, &files, &directories, true, &budget) == .Val(problem) {
         return jet_cli_prepare_refused("can't securely read the sources under `{root}`: {problem}", "remove the symbolic link or unreadable file, or check a file outside this tree", color)
     }
     prefix :: if root == "/" -> "/" else -> "{root}/"
@@ -696,8 +747,11 @@ pub fn jet_cli_prepare_overlays(anchor: String, entry: String, overlays: [JetCLI
             stat :: cli_files.stat(entry_path) ?? return jet_cli_prepare_refused("can't securely read the sources under `{root}`: cannot inspect `{entry_path}`: {err}", "remove the symbolic link or unreadable file, or check a file outside this tree", color)
             if stat.is_symlink -> return jet_cli_prepare_refused("can't securely read the sources under `{root}`: `{entry_path}` is a symbolic link", "remove the symbolic link or unreadable file, or check a file outside this tree", color)
             if stat.is_file {
-                read :: jet_cli_read_rooted_source(root, relative, JET_CLI_MAX_SOURCE_BYTES) ?? return jet_cli_prepare_refused("can't securely read the sources under `{root}`: cannot read `{entry_path}`: {err}", "remove the symbolic link or unreadable file, or check a file outside this tree", color)
+                limit :: jet_cli_source_read_limit(budget, stat.size, entry_path) ?? return jet_cli_prepare_refused(err, "reduce the source tree size", color)
+                read :: jet_cli_read_rooted_source(root, relative, limit) ?? return jet_cli_prepare_refused("can't securely read the sources under `{root}`: cannot read `{entry_path}`: {err}", "remove the symbolic link or unreadable file, or check a file outside this tree", color)
                 if !jet_cli_build_read_same_file(stat, read.stat) -> return jet_cli_prepare_refused("`{entry_path}` changed while it was held", "retry with a stable source tree", color)
+                budget.bytes += read.stat.size
+                budget.files += 1
                 source :: String.from_bytes(^read.bytes) ?? return jet_cli_prepare_refused("cannot read `{entry_path}`: file is not valid UTF-8", "save the source as UTF-8", color)
                 files = jet_cli_insert_source(^files, JetDriverAuthorizedSourceFile{path: entry_path, relative_path: relative, identity: jet_cli_identity_key("file", read.stat), source: source})
             }
@@ -708,6 +762,11 @@ pub fn jet_cli_prepare_overlays(anchor: String, entry: String, overlays: [JetCLI
         replaced := false
         loop index in 0..<files.len() {
             if files[index].path != path -> next
+            budget.bytes -= files[index].source.len()
+            budget.files -= 1
+            _ :: jet_cli_source_read_limit(budget, overlay.source.len(), path) ?? return jet_cli_prepare_refused(err, "reduce the source tree size", color)
+            budget.bytes += overlay.source.len()
+            budget.files += 1
             files[index].source = overlay.source
             replaced = true
         }
@@ -716,6 +775,9 @@ pub fn jet_cli_prepare_overlays(anchor: String, entry: String, overlays: [JetCLI
         if relative == "" || cli_files.exists(path) || !relative.ends_with(".jet") || jet_cli_outside_walk(root, relative) {
             return jet_cli_prepare_refused("`{overlay.path}` is not a checked source file of `{root}`", "check a `.jet` file that is not inside a skipped or nested project directory", color)
         }
+        _ :: jet_cli_source_read_limit(budget, overlay.source.len(), path) ?? return jet_cli_prepare_refused(err, "reduce the source tree size", color)
+        budget.bytes += overlay.source.len()
+        budget.files += 1
         added :: JetDriverAuthorizedSourceFile{path: path, relative_path: relative, identity: "authority-file-v1;kind=overlay;length={overlay.source.bytes().len()};modified_ns=none;device=none;inode=none", source: overlay.source}
         files = jet_cli_insert_source(^files, added)
     }
@@ -727,18 +789,8 @@ pub fn jet_cli_prepare_overlays(anchor: String, entry: String, overlays: [JetCLI
         return jet_cli_prepare_refused("`{entry}` is not a checked source file of `{root}`", "check a `.jet` file that is not inside a skipped or nested project directory", color)
     }
     caches := [JetDriverAuthorizedSourceFile]{}
-    if jet_cli_foreign_cache_files(root, &caches) == .Val(problem) {
+    if jet_cli_foreign_cache_files(root, &caches, &budget) == .Val(problem) {
         return jet_cli_prepare_refused("can't securely read the foreign bindings under `{root}`: {problem}", "remove the symbolic link or unreadable file, or regenerate the bindings with `jet bind`", color)
-    }
-    if caches.len() > JET_CLI_MAX_SOURCE_FILES || files.len() > JET_CLI_MAX_SOURCE_FILES - caches.len() -> return jet_cli_prepare_refused("authorized sources and foreign caches exceed the {JET_CLI_MAX_SOURCE_FILES}-file bound", "reduce the source tree size", color)
-    total_bytes := 0
-    loop file in files {
-        if file.source.len() > JET_CLI_MAX_SOURCE_BYTES || file.source.len() > JET_CLI_MAX_SOURCE_TOTAL - total_bytes -> return jet_cli_prepare_refused("authorized sources exceed the source byte bound", "reduce the source tree size", color)
-        total_bytes += file.source.len()
-    }
-    loop file in caches {
-        if file.source.len() > JET_CLI_MAX_SOURCE_TOTAL - total_bytes -> return jet_cli_prepare_refused("authorized sources and foreign caches exceed the {JET_CLI_MAX_SOURCE_TOTAL}-byte total bound", "reduce the source tree size", color)
-        total_bytes += file.source.len()
     }
     core_sources :: if jet_cli_core_sources() == {
         .Loaded(sources) -> sources
