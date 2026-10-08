@@ -217,7 +217,7 @@ fn trap_build_context(report: I64, file: I64, file_len: I64, line: I64, function
 }
 
 fn trap_can_publish() -> Bool {
-    scheduler_control_current() != I64{0} && sync_load(thread_base() + I64{64}) != I64{0}
+    scheduler_control_current() != I64{0} && (sync_load(thread_base() + I64{64}) & I64{2}) != I64{0}
 }
 
 fn trap_publish_report(report: I64, raw_message: I64, raw_length: I64) {
