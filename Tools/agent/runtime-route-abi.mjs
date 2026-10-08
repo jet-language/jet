@@ -48,15 +48,15 @@ function accepts(rust, jet) {
   const type = rust.replace(/\s+/g, "");
   if (type === "i64" || type === "u64" || type === "usize" || type === "isize" || type === "JetCString" || type.startsWith("*mut") || type.startsWith("*const")) return jet === "I64" || jet === "U64";
   if (type === "bool" || type === "u8") return jet === "Bool" || jet === "U8";
-  if (type === "f64") return jet === "F64";
+  if (type === "f64") return jet === "Float";
   return false;
 }
 
 export function validateRuntimeRoute(adapter, definition) {
   const expected = [...adapter.params.flatMap((param) => param.ctys), ...adapter.result.outs.map((out) => `*mut ${out.cty}`)];
-  const actual = definition.params.map((param) => /^[A-Za-z_]\w*\s*:\s*(I64|U64|F64|Bool|U8)$/.exec(param)?.[1]);
+  const actual = definition.params.map((param) => /^[A-Za-z_]\w*\s*:\s*(I64|U64|Float|Bool|U8)$/.exec(param)?.[1]);
   const suffix = definition.suffix;
-  const result = suffix === "" ? null : /^->\s*(I64|U64|F64|Bool|U8)$/.exec(suffix)?.[1];
+  const result = suffix === "" ? null : /^->\s*(I64|U64|Float|Bool|U8)$/.exec(suffix)?.[1];
   const valid = actual.length === expected.length && actual.every((type, index) => accepts(expected[index], type)) && (adapter.result.ret ? accepts(adapter.result.ret, result) : suffix === "");
   if (!valid) {
     const wanted = `(${expected.join(", ")})${adapter.result.ret ? ` -> ${adapter.result.ret}` : ""}`;

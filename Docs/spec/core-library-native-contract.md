@@ -116,6 +116,13 @@ when the shared object writer packages a runtime library. Atomic values still
 require their typed allocation, ordering and ownership contract; a raw machine
 compare-and-swap primitive does not establish that contract.
 
+Runtime C routes use canonical `Float` for a direct 64-bit floating argument or
+result, matching the Rust `f64` register carrier. The validator does not admit
+convenience spellings or a 32-bit floating carrier. Pointer and indirect output
+slots remain `I64` or `U64` words even when their payload is a float; byte and
+boolean carriers retain their separate checks. This is carrier validation, not
+a numeric conversion.
+
 `Collections.jet` owns the single runtime-wide `RT_HOST_U8_STRIDE` fact and
 `host_u8_get`/`host_u8_put` accessors. Later host layers reuse them; changing
 the compiler's U8 storage epoch flips this one fact with its byte-list fixtures.
