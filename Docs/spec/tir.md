@@ -82,6 +82,7 @@ Engines must not special-case these surface forms:
 | Surface | Core form | Authority |
 |---|---|---|
 | `freeze(x)` | `Clone`, `MaterializeView`, or `ExplicitCopy`, selected by the sema-approved source type; frozen provenance stays in capture metadata. | D-CONC-FREEZE1=A |
+| `^place` in a value position | `Move` of the checked place; a non-Copy field projection becomes MIR `MovePlace`, leaving that field empty for remainder cleanup. The checker must not materialize a copy of the operand or erase its take provenance. | D-COPY-DEFAULT1=A |
 | `task ^name { … }` | The existing task lambda with an explicit consuming capture; the task-crossing prover owns legality. | D-CONC-FREEZE1=A |
 
 The freeze example is a lowering rule, not an engine-side capture check. A

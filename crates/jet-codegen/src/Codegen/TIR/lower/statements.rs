@@ -2105,7 +2105,9 @@ fn split_owner_root(expr: &Expr) -> Option<String> {
 /// Returns the windowed place and its access when `init` is either spelling.
 pub(crate) fn place_window_init<'a>(init: &'a Expr, cx: &Cx) -> Option<(&'a Expr, PlaceAccess)> {
     match init {
-        Expr::Place(inner, access, _) => Some((inner.as_ref(), *access)),
+        Expr::Place(inner, access, _) if *access != PlaceAccess::Take => {
+            Some((inner.as_ref(), *access))
+        }
         Expr::MethodCall {
             receiver,
             method,

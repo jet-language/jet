@@ -4973,6 +4973,13 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         }
         Expr::Place(inner, access, span) => {
             in_own_frame(|| {
+                if *access == crate::AST::PlaceAccess::Take {
+                    let place = lower_owned_expr(inner, cx, env);
+                    return TExpr {
+                        ty: place.ty.clone(),
+                        kind: TExprKind::Move(Box::new(place)),
+                    };
+                }
                 if let Expr::Slice {
                     base,
                     start,
