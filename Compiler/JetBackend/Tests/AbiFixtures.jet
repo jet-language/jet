@@ -70,6 +70,19 @@ fn abi_alignment_module(hosted: Bool) -> LIRModule Never! {
     LIRModule{signatures: signatures, functions: [LIRFunction]{function}, data: [LIRData]{LIRData{id: LIRDataID{value: 0}, bytes: [U8]{U8{1}}, align: 64, relocs: [LIRDataReloc]{}}}}
 }
 
+// Convert keeps the low source-width bits and zero-extends (LIR contract).
+// Signedness does not change the Linux exit byte: ELF.jet's old start stub
+// passed RAX to exit_group, which also keeps only the low eight bits.
+fn abi_scalar_entry(name: String, layout: LIRLayout, value: Int) {
+    scalar := abi_alignment_module(false)
+    scalar.signatures[0].result = Val(layout)
+    scalar.functions[0].values[1].layout = layout
+    scalar.functions[0].blocks[0].insts = [LIRInst]{LIRInst.Const{dst: LIRValueID{value: 1}, value: value}}
+    scalar.data = [LIRData]{}
+    scalar_entry :: test_pack_entry(&scalar, LIRFunctionID{value: 0})
+    assert(test_pack_write(name, x64_relocatable_object(scalar, scalar_entry)))
+}
+
 fn abi_fixtures() {
     library :: abi_alignment_module(true)
     export :: X64RuntimeExport{function: LIRFunctionID{value: 0}, symbol: "jet_runtime_alignment_fixture"}
@@ -84,11 +97,10 @@ fn abi_fixtures() {
     assert(Int.from_u8(initialized.bytes[60]) == 11)
     files.write_bytes("runtime-init.o", initialized.bytes) ?? panic("cannot write runtime initializer fixture")
     assert(x64_runtime_object(abi_bool_module(false), [X64RuntimeExport]{init}).errors.len() > 0)
-    scalar := abi_alignment_module(false)
-    scalar.functions[0].blocks[0].insts = [LIRInst]{LIRInst.Const{dst: LIRValueID{value: 1}, value: 37}}
-    scalar.data = [LIRData]{}
-    scalar_entry :: test_pack_entry(&scalar, LIRFunctionID{value: 0})
-    assert(test_pack_write("word-entry-37", x64_relocatable_object(scalar, scalar_entry)))
+    abi_scalar_entry("word-entry-37", lir_layout_word(), 37)
+    abi_scalar_entry("i32-entry-minus1", LIRLayout{size: 4, align: 4, class: LIRABIClass.Integer}, -1)
+    abi_scalar_entry("u32-entry-max", LIRLayout{size: 4, align: 4, class: LIRABIClass.Integer}, 4294967295)
+    abi_scalar_entry("bool-entry-true", lir_layout_bool(), 1)
     abi_write_bool("bool-register-false", false, 0)
     abi_write_bool("bool-register-true", false, 1)
     abi_write_bool("bool-stack-false", true, 0)

@@ -85,6 +85,9 @@ for (const place of ["register", "stack"]) {
 }
 check("align64 (Jet pack)", `${outDir}/align64.exe`, { stdout: "", status: 0 });
 check("word-entry-37 (Jet adapter)", `${outDir}/word-entry-37.exe`, { stdout: "", status: 37 });
+for (const [name, status] of [["i32-entry-minus1", 255], ["u32-entry-max", 255], ["bool-entry-true", 1]]) {
+  check(`${name} (Jet adapter)`, `${outDir}/${name}.exe`, { stdout: "", status });
+}
 // align64.o/runtime-exports.o remain separate export/initializer writer witnesses.
 
 // Link one loader per fixture: `-rdynamic` exports the runtime's symbols to
