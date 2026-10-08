@@ -67,8 +67,8 @@ fn kit_expect_exact_with_count(id: String, path: String, expected: String?, actu
 fn kit_expect_no_count(text: String) -[]> Int { 0 }
 
 fn kit_expect_exact(id: String, path: String, expected: String?, actual: String, bless: KitBless, diagnostic: Bool) -> KitVerdict {
-    if diagnostic -> return kit_expect_exact_with_count(id, path, expected, actual, bless, kit_expect_diagnostics)
-    kit_expect_exact_with_count(id, path, expected, actual, bless, kit_expect_no_count)
+    if diagnostic -> return kit_expect_exact_with_count(id, path, expected, actual, bless, (text: String) -> kit_expect_diagnostics(text))
+    kit_expect_exact_with_count(id, path, expected, actual, bless, (text: String) -> kit_expect_no_count(text))
 }
 
 fn kit_expect_paths(actual: String, work: String, root: String, scratch: String) -> String {
