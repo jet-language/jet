@@ -156,6 +156,7 @@ enum LowerRuntimeIntrinsic {
     FloatBits
     FloatFromBits
     FunctionAddress(function: MIRFunctionID)
+    StaticText
 }
 
 struct LowerModule {
@@ -212,6 +213,7 @@ struct LowerContext {
     pub mir: MIRFunction
     pub result: LowerRepr
     pub fact_index: [U64:Int]
+    pub static_text: LowerStaticTextFacts
     pub block_index: [U64:Int]
     pub slots: [LowerSlot]
     pub place_slots: [U64:Int]
@@ -1028,10 +1030,20 @@ fn lower_function(p: MIRProgram, m: &LowerModule, function: MIRFunction, id: LIR
         }
     }
     if m.runtime_intrinsics.get(function.id.value) == .Val(intrinsic) {
+        if intrinsic == .StaticText {
+            // Valid calls expand at literal callsites; this compile-time-only
+            // declaration has no callable body or owned String parameter.
+            block :: lower_new_block(&f)
+            input :: lower_new_value(&f, lir_layout_pointer(), LIRDrop.Trivial, function.params[0].ty.identity)
+            lower_start(&f, block, [LIRValueID]{input})
+            lower_seal(&f, LIRTerminator.Unreachable)
+            return lir_builder_finish(f.builder)
+        }
         output_layout :: lower_repr_layout(lower_repr(p, function.return_type)) ?? panic("validated runtime intrinsic result layout")
         output :: lower_new_value(&f, output_layout, LIRDrop.Trivial, function.return_type.identity)
         block :: lower_new_block(&f)
         if intrinsic == {
+            .StaticText -> panic("StaticText is handled before callable result allocation")
             .FloatBits | .FloatFromBits -> {
                 // SSA Float values preserve all bits; the System V boundary
                 // transfers them to/from xmm registers without arithmetic.
@@ -1273,6 +1285,7 @@ fn lower_context(p: MIRProgram, m: &LowerModule, f: &LowerFunction, function: MI
         mir: ~function,
         result: result,
         fact_index: fact_index,
+        static_text: lower_static_text_facts(m, function),
         block_index: block_index,
         slots: slots,
         place_slots: place_slots,
@@ -1992,6 +2005,9 @@ fn lower_forward(c: LowerContext, m: &LowerModule, f: &LowerFunction, instructio
 }
 
 fn lower_constant(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, constant: MIRConstant) Never! {
+    if instruction.result == .Val(result) {
+        if c.static_text.elided.get(result.value) ?? false -> return lower_alias_absent(&f, instruction)
+    }
     if constant == .Unit -> return lower_alias_absent(&f, instruction)
     if lower_constant_reject(&m, &f, constant) -> return
     dst :: lower_result(p, c, &m, &f, instruction) ?? return
@@ -3268,6 +3284,7 @@ fn lower_prelude_render(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
 }
 
 fn lower_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, callee: MIRCallee, args: [MIRCallArg], type_args: [MIRType]) Never! {
+    if lower_is_static_text_call(m, callee) -> return lower_static_text_call(p, c, &m, &f, instruction, args)
     if callee == .TraitMethod(method, bound, receiver) -> return lower_trait_call(p, c, &m, &f, instruction, method, bound, receiver, args, type_args)
     if callee == .Foreign(foreign) && m.asm_foreign.get(foreign.value) == None {
         lower_asm_import_call(p, c, &m, &f, instruction, foreign.value, args, type_args)

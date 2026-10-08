@@ -271,6 +271,7 @@ fn lower_row_source(p: MIRProgram, m: LowerModule, index: Int) -> MIRFunction Ne
 // and release helper addresses, and every capture moved in (by value) or
 // its place's address (by reference).
 fn lower_closure(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, function: MIRFunctionID, captures: [MIRCaptureOperand]) Never! {
+    if m.runtime_intrinsics.get(function.value) == .Val(intrinsic) && intrinsic == .StaticText -> return lower_fail(&m, &f, "rt_static_text is literal-only and cannot be captured as a callable")
     index :: lower_function_index(m, function)
     if index < 0 -> return lower_fail(&m, &f, "closure over function {function.value}, which is not lowered (a generic instance's closure is not lowered at O0 yet)")
     source :: lower_row_source(p, m, index)

@@ -95,6 +95,7 @@ enum RuntimeIntrinsicShape {
     FloatBits
     FloatFromBits
     FunctionAddress(symbol: String, arity: Int)
+    StaticText
 }
 struct RuntimeIntrinsicSpec {
     pub name: String
@@ -107,6 +108,7 @@ fn runtime_intrinsic_specs() -> [RuntimeIntrinsicSpec] Never! {
     [RuntimeIntrinsicSpec]{
         RuntimeIntrinsicSpec{name: "rt_f64_bits", shape: .FloatBits},
         RuntimeIntrinsicSpec{name: "rt_f64_from_bits", shape: .FloatFromBits},
+        RuntimeIntrinsicSpec{name: "rt_static_text", shape: .StaticText},
         RuntimeIntrinsicSpec{name: "rt_thread_entry_address", shape: .FunctionAddress{symbol: "jet_rt_thread_entry", arity: 1}},
         RuntimeIntrinsicSpec{name: "rt_tls_shared_destructor_address", shape: .FunctionAddress{symbol: "jet_rt_tls_shared_destructor", arity: 2}},
         RuntimeIntrinsicSpec{name: "rt_scheduler_worker_address", shape: .FunctionAddress{symbol: "jet_rt_scheduler_worker", arity: 1}},
@@ -133,6 +135,13 @@ fn runtime_bitcast_signature(function: MIRFunction, to_bits: Bool) -> Bool Never
 
 fn runtime_address_signature(function: MIRFunction) -> Bool Never! {
     if function.kind != .Jet || function.form != .TopLevel || function.generic_params.len() != 0 || function.capture_params.len() != 0 || function.failure != .Infallible || function.params.len() != 0 -> return false
+    if function.return_type.kind == .IntN(signed, bits) -> return signed && bits == 64
+    false
+}
+
+fn runtime_static_text_signature(function: MIRFunction) -> Bool Never! {
+    if function.kind != .Jet || function.form != .TopLevel || function.generic_params.len() != 0 || function.capture_params.len() != 0 || function.failure != .Infallible || function.params.len() != 1 -> return false
+    if function.params[0].access != .Read || function.params[0].ty.kind != .String -> return false
     if function.return_type.kind == .IntN(signed, bits) -> return signed && bits == 64
     false
 }
@@ -246,6 +255,10 @@ fn x64_runtime_library(program: MIRProgram, explicit: [String]) -> X64RuntimeLib
             if selected != None -> return runtime_export_error("ambiguous checked runtime intrinsic {spec.name}")
             selected = Val(function.id)
             if spec.shape == {
+                .StaticText -> {
+                    if !runtime_static_text_signature(function) -> return runtime_export_error("runtime intrinsic rt_static_text must read one String and return I64")
+                    &intrinsics.add(function.id.value, LowerRuntimeIntrinsic.StaticText).drop("unique checked static-text intrinsic ID")
+                }
                 .FloatBits | .FloatFromBits -> {
                     to_bits :: spec.shape == .FloatBits
                     if !runtime_bitcast_signature(function, to_bits) -> return runtime_export_error("runtime bitcast {spec.name} has an invalid checked scalar signature")

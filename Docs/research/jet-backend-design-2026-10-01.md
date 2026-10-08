@@ -545,6 +545,23 @@ and fails rather than silently skipping a Jet-owned route whose ABI cannot
 be derived. Exact `Int`, typed `String`, write borrows, failures, and mismatched
 parameter/result widths are not raw route signatures. `--check` validates
 ownership and signatures as well as generated-file freshness.
+
+The runtime-only `rt_static_text(literal: String) -> I64` intrinsic is selected
+by checked function identity in `RuntimeLibrary.jet`, not by ordinary program
+lowering. Only a direct checked String literal is admitted; dynamic text and
+capturing the intrinsic as a callable produce named Lower refusals. Its
+literal's normal String constructor is elided only when that argument is the
+constant's sole MIR use. The result is a trivial-drop raw I64 address of a
+24-byte, align-8 static E4 header (process-lifetime, immutable by contract;
+emitted in `.data`): data@0 relocates to UTF-8 bytes, length@8, capacity=0@16.
+`LIRDataReloc` supplies the object and memory-image pointer through the
+canonical `.data`/`.rela.data` path; no runtime constructor or initializer
+fixup runs. These borrowed views must never reach `jet_rt_string_drop`:
+capacity zero does not prevent
+that function from freeing the header. The StaticText fixture checks the
+named non-literal refusal, header relocation/UTF-8 length, no allocation or
+drop in printed LIR, and native bytes read through the produced header.
+
 `node Tools/agent/gen-runtime.mjs <allparts.rs> --check` checks trap literals,
 the export list, and routes in one keep-going invocation. Without `--check`
 it regenerates them in dependency order. Narrow worker and held-job checks
