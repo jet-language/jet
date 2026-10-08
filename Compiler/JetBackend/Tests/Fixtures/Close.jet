@@ -1,7 +1,7 @@
 // #4792: instantiated ordinary drop must select Close, while the consuming
 // Close receiver's cleanup is structural-only. Moved fields are not live zeros.
-use jet_foundation.[MIRAccess, MIRBinaryOp, MIRBlockID, MIRConstant, MIRField, MIRFieldValue, MIRFunction, MIRFunctionID, MIRFunctionForm, MIRImplDef, MIROperation, MIROwnershipMode, MIRPlace, MIRPlaceBase, MIRPlaceID, MIRProjection, MIRProgram, MIRTerminator, MIRType, MIRTypeDef, MIRTypeDefKind, MIRTypeKind, MIRValueID, mir_field_id, mir_function_id, mir_type_from_kind, mir_type_id, mir_owned_ownership, mir_ownership_from_access]
-use jet_backend.[LIRCallee, LIRInst, LIRTerminator, lir_lower_entry, lir_print_module, x64_relocatable_object]
+use jet_foundation.[MIRAccess, MIRBinaryOp, MIRBlockID, MIRConstant, MIRField, MIRFieldValue, MIRFunction, MIRFunctionID, MIRFunctionForm, MIRImplDef, MIROperation, MIROwnershipMode, MIRPlace, MIRPlaceBase, MIRPlaceID, MIRProjection, MIRProgram, MIRTerminator, MIRType, MIRTypeDef, MIRTypeDefKind, MIRTypeID, MIRTypeKind, MIRValueID, mir_field_id, mir_function_id, mir_type_from_kind, mir_type_id, mir_type_with_identity, mir_owned_ownership, mir_ownership_from_access]
+use jet_backend.[LIRCallee, LIRInst, LIRTerminator, lir_lower_callables, lir_lower_entry, lir_print_module, x64_relocatable_object]
 
 fn fx_close_secret(b: &FxBuilder, id: Int) -> MIRValueID Never! {
     number :: fx_int_const(&b, id)
@@ -231,7 +231,8 @@ fn fx_close_pair_remainder(generic: Bool) -> MIRProgram Never! {
     p := fx_close_generic()
     secret :: fx_named("Secret")
     owner :: if generic -> "ClosePair" else -> "CloseDirectPair"
-    ty :: if generic -> fx_mono_apply(owner, [MIRType]{secret}) else -> fx_named(owner)
+    shape :: if generic -> fx_mono_apply(owner, [MIRType]{secret}) else -> fx_named(owner)
+    ty :: mir_type_with_identity(shape, mir_type_id("{owner}<Secret>"))
     if !generic -> &p.types.push(fx_type_def(owner, MIRTypeDefKind.Struct{fields: [MIRField]{fx_field(owner, "first", secret), fx_field(owner, "second", secret)}, methods: [MIRFunctionID]{}}))
     b := fx_builder()
     slot :: fx_local(&b, "pair", ty, mir_owned_ownership())
@@ -255,7 +256,17 @@ fn fx_close_pair_remainder(generic: Bool) -> MIRProgram Never! {
 struct FxCloseDropCall { pub block: Int, pub offset: Int? }
 
 fn fx_close_pair_remainder_checks(generic: Bool) -> Bool Never! {
-    lowered :: lir_lower_entry(fx_close_pair_remainder(generic), mir_function_id("run"))
+    program :: fx_close_pair_remainder(generic)
+    owner_type := MIRTypeID?{None}
+    loop function in program.functions {
+        if function.id == mir_function_id("run") {
+            loop local in function.locals {
+                if local.name == "pair" -> owner_type = ~local.ty.identity
+            }
+        }
+    }
+    if owner_type == None -> return false
+    lowered :: lir_lower_callables(program, [MIRFunctionID]{mir_function_id("run")})
     if lowered.issues.len() != 0 -> return false
     entry :: lowered.entry ?? return false
     root :: lowered.lir.functions[entry.value]
@@ -277,9 +288,14 @@ fn fx_close_pair_remainder_checks(generic: Bool) -> Bool Never! {
     owner := -1
     loop block in root.blocks {
         loop inst in block.insts {
-            // Secret is Int + String (16 bytes); Pair<Secret> is 32 bytes.
-            if inst == .StackSlot(dst, size, _) {
-                if size == 32 -> owner = dst.value
+            // The Struct's checked type is the MIR pair local's type. Its
+            // StackSlot is the owner storage; unrelated equal-sized slots
+            // cannot match, and duplicate typed slots fail the assertion.
+            if inst == .StackSlot(dst, _, _) {
+                if root.values[dst.value].jet_type == owner_type {
+                    if owner >= 0 -> return false
+                    owner = dst.value
+                }
             }
         }
     }
