@@ -1,0 +1,72 @@
+
+use core.encoding as encoding
+use core.encoding.json as json
+use core.files as files
+
+fn run() {
+    default_output :: files.create("{work}/default.json") ?? panic("create")
+    default_writer :: json.writer(^default_output) ?? panic("default writer")
+    default_writer.write(encoding.DataEvent.Null) ?? panic("default write")
+    default_writer.finish() ?? panic("default finish")
+    default_input :: files.open("{work}/default.json") ?? panic("default open")
+    default_reader :: json.reader(^default_input) ?? panic("default reader")
+    if default_reader.next() == {
+        .Ok(_) -> { print(true) }
+        .Err(_) -> { print(false) }
+    }
+
+    limits := encoding.EncodingLimits.safe()
+    limits.max_item_bytes = 2
+    input :: files.open("{work}/hostile.json") ?? panic("open")
+    reader :: json.reader(^input, limits) ?? panic("reader")
+    count := 0
+    loop count < 8 {
+        result :: reader.next()
+        if result == {
+            .Ok(_) -> { count++ }
+            .Err(first) -> {
+                again :: reader.next()
+                if again == {
+                    .Ok(_) -> { print("reader-not-latched") }
+                    .Err(second) -> {
+                        print(first.path)
+                        print(first.byte_offset == second.byte_offset && first.path == second.path && first.reason == second.reason)
+                    }
+                }
+                break
+            }
+        }
+    }
+
+    finished_output :: files.create("{work}/limited.json") ?? panic("create")
+    finished_writer :: json.writer(^finished_output) ?? panic("writer")
+    finished_writer.write(encoding.DataEvent.Null) ?? panic("write")
+    finished_writer.finish() ?? panic("finish")
+    after_finish :: finished_writer.write(encoding.DataEvent.Null)
+    if after_finish == {
+        .Ok(_) -> { print("finish-missed") }
+        .Err(first) -> {
+            after_flush :: &finished_writer.flush()
+            if after_flush == {
+                .Ok(_) -> { print("finish-not-latched") }
+                .Err(second) -> { print(first.byte_offset == second.byte_offset && first.reason == second.reason) }
+            }
+        }
+    }
+
+    escaped_limits := encoding.EncodingLimits.safe()
+    escaped_limits.max_item_bytes = 1
+    escaped_output :: files.create("{work}/limited.json") ?? panic("create")
+    escaped_writer :: json.writer(^escaped_output, escaped_limits) ?? panic("writer")
+    escaped_result :: escaped_writer.write(encoding.DataEvent.Text("\n"))
+    if escaped_result == {
+        .Ok(_) -> { print("escape-missed") }
+        .Err(first) -> {
+            escaped_again :: escaped_writer.finish()
+            if escaped_again == {
+                .Ok(_) -> { print("escape-not-latched") }
+                .Err(second) -> { print(first.byte_offset == second.byte_offset && first.reason == second.reason) }
+            }
+        }
+    }
+}

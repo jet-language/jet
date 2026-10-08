@@ -1,0 +1,16 @@
+# Port of tests/corelib_parts/compile.rs::core_args_parse_or_exit_handles_cli_boundaries_and_keeps_parse_pure; original source unchanged.
+# ORACLE-LITERAL: tests/corelib_parts/compile.rs:349.
+fixture: fixtures/core_args_parse_or_exit_handles_cli_boundaries_and_keeps_parse_pure
+step: jet build args_parse_or_exit.jet
+step: built --verbose
+stdout: = core_args_parse_or_exit_handles_cli_boundaries_and_keeps_parse_pure.out
+stderr: empty
+step: built --help
+stdout: ~ "Usage: args_parse_or_exit [options]" # original predicate
+stdout: ~ "--help" # original predicate
+stderr: empty
+step: built --verbse
+exit: 2
+stdout: empty
+stderr: ~ "unknown option `--verbse`" # original predicate
+stderr: ~ "did you mean `--verbose`?" # original predicate

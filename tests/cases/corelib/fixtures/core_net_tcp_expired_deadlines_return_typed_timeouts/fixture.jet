@@ -1,0 +1,36 @@
+
+use core.net as net
+use core.tasks as tasks
+use core.time as time
+
+fn run() {
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    typed_address :: net.listener_local_socket_addr(listener) ?? panic("address")
+    address :: net.socket_to_string(typed_address)
+    server :: task {
+        first := net.tcp_accept(listener) ?? return
+        time.sleep(100ms)
+        first.close() ?? return
+        second := net.tcp_accept(listener) ?? return
+        time.sleep(100ms)
+        second.close() ?? return
+    }
+
+    first := net.tcp_connect(address) ?? panic("first connect")
+    net.set_read_timeout(&first, 0) ?? panic("zero timeout")
+    if first.read(1) == {
+        .Ok(_) -> print("unexpected first read")
+        .Err(error) -> print(net.error_message(error))
+    }
+    first.close() ?? panic("first close")
+
+    second := net.tcp_connect(address) ?? panic("second connect")
+    #Context(deadline: time.now() - 1) {
+        if second.read(1) == {
+            .Ok(_) -> print("unexpected second read")
+            .Err(error) -> print(net.error_message(error))
+        }
+    }
+    second.close() ?? panic("second close")
+    server.join() ?? panic("server task failed")
+}

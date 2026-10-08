@@ -1,0 +1,31 @@
+
+use core.net as net
+use core.tasks as tasks
+use core.time as time
+
+fn run() {
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    typed_address :: net.listener_local_socket_addr(listener) ?? panic("address")
+    address :: net.socket_to_string(typed_address)
+    server :: task {
+        stream := net.tcp_accept(listener) ?? return
+        loop {
+            chunk := stream.read(65536) ?? return
+            if chunk.len() == 0 {
+                return
+            }
+            time.sleep(15ms)
+        }
+    }
+    client := net.tcp_connect(address) ?? panic("connect")
+    net.set_write_timeout(&client, 80) ?? panic("timeout")
+    started := time.now()
+    if client.write_text("x".repeat(16000000)) == {
+        .Ok(_) -> print("unexpected write")
+        .Err(error) -> print(net.error_message(error))
+    }
+    elapsed := time.now() - started
+    print(elapsed < 300)
+    client.close() ?? panic("close")
+    server.join() ?? panic("server task failed")
+}
