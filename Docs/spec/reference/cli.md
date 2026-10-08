@@ -777,6 +777,9 @@ Text and JSON share this validated snapshot, including published rendered values
 and sorted shape identities. Optional decision ledgers use the optimizer's existing
 authenticated codec with a 512 KiB transport bound; absence is explicitly
 `unavailable`, not evidence of a compiler decision. No process memory is read.
+Duplicate keys anywhere in a snapshot are rejected as corrupt or forged runtime
+transport by the strict Core JSON parser. This intentionally does not preserve
+the retired host's first-scalar/last-container duplicate-key behavior.
 
 The CLI's `inspect.accel` status projects typed authenticated runtime receipt
 rows separately from static vector and gate facts. Missing measurements stay

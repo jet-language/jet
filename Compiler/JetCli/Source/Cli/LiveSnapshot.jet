@@ -1,5 +1,7 @@
 // LiveInspect.rs: the closed runtime snapshot codec. Core owns JSON parsing;
-// the optimizer owns decision-ledger authentication. No runtime fact is inferred.
+// the optimizer owns decision-ledger authentication. Duplicate keys are corrupt
+// runtime transport and are rejected by Core's strict parser (Main ruling).
+// No runtime fact is inferred.
 use jet_foundation.[foundation_parse_protocol_json, foundation_json_quote]
 use jet_optimizer.[MIRDecisionLedger, mir_decision_ledger_read]
 use core.text as live_text
@@ -17,15 +19,8 @@ struct JetCLILiveSnapshot {
 }
 
 fn jet_cli_live_field(value: DataTree, key: String) -> DataTree? Never! {
-    if value == .Object(fields) { loop field in fields { if field.key == key -> return Val(field.value) } }
+    if value == .Object(fields) -> return fields.get(key)
     None
-}
-// checked_object collects into a BTreeMap (last duplicate wins), whereas
-// JSON::json_get reads the first occurrence. Preserve both contracts.
-fn jet_cli_live_last_field(value: DataTree, key: String) -> DataTree? Never! {
-    found := DataTree?{None}
-    if value == .Object(fields) { loop field in fields { if field.key == key -> found = Val(field.value) } }
-    found
 }
 // JSON.rs::json_int also accepts Float, using Rust's saturating i64 cast.
 // EventObservation's integer validator deliberately does NOT call this.
@@ -79,7 +74,7 @@ fn jet_cli_live_bool(value: DataTree, key: String, label: String) -> Bool JetCLI
     Err(jet_cli_read_error("{label} has invalid `{key}`"))
 }
 fn jet_cli_live_array(value: DataTree, key: String) -> [DataTree] JetCLIReadError! {
-    if jet_cli_live_last_field(value, key) == .Val(.Array(items)) {
+    if jet_cli_live_field(value, key) == .Val(.Array(items)) {
         if items.len() > 4096 -> return Err(jet_cli_read_error("live runtime snapshot has too many {key}"))
         return Ok(items)
     }
@@ -108,7 +103,7 @@ fn jet_cli_live_json(value: DataTree) -> String JetCLIReadError! {
             &names.sort()
             encoded := [String]{}
             loop name in names {
-                child :: jet_cli_live_field(value, name) ?? return Err(jet_cli_read_error("decision ledger field disappeared"))
+                child :: fields.get(name) ?? return Err(jet_cli_read_error("decision ledger field disappeared"))
                 &encoded.push("{foundation_json_quote(name)}:{jet_cli_live_json(child)}")
             }
             return Ok("{{{encoded.join(",")}}}")
@@ -116,7 +111,7 @@ fn jet_cli_live_json(value: DataTree) -> String JetCLIReadError! {
     }
 }
 fn jet_cli_live_decisions(root: DataTree) -> MIRDecisionLedger? JetCLIReadError! {
-    value :: jet_cli_live_last_field(root, "decisions") ?? return Ok(None)
+    value :: jet_cli_live_field(root, "decisions") ?? return Ok(None)
     if value == .Null -> return Ok(None)
     payload :: jet_cli_live_json(value)
     if payload.bytes().len() > 524288 -> return Err(jet_cli_read_error("live decision ledger exceeds its transport limit"))
@@ -124,7 +119,7 @@ fn jet_cli_live_decisions(root: DataTree) -> MIRDecisionLedger? JetCLIReadError!
     Ok(Val(ledger))
 }
 fn jet_cli_live_counts(root: DataTree, key: String, keys: [String], label: String) -> [String:Int] JetCLIReadError! {
-    value :: jet_cli_live_last_field(root, key) ?? return Err(jet_cli_read_error("live runtime snapshot has no {key}"))
+    value :: jet_cli_live_field(root, key) ?? return Err(jet_cli_read_error("live runtime snapshot has no {key}"))
     jet_cli_live_object(value, keys, [String]{}, label)
     counts := [String:Int]{}
     loop key in keys -> counts[key] = jet_cli_live_int(value, key, label, true)
@@ -176,7 +171,7 @@ fn jet_cli_live_decode(text: String) -> JetCLILiveSnapshot JetCLIReadError! {
     effects :: jet_cli_live_counts(root, "effects", [String]{"compute", "waiting", "channel", "time", "io"}, "live effects")
     resources :: jet_cli_live_counts(root, "resources", [String]{"workers", "running", "queued", "cancelled", "arenas", "arena_allocations", "arena_bytes"}, "live resources")
     runtime := JetCLILiveRuntime?{None}
-    if jet_cli_live_last_field(root, "runtime") == .Val(window) {
+    if jet_cli_live_field(root, "runtime") == .Val(window) {
         jet_cli_live_object(window, [String]{"elapsed_ns", "cpu_ns", "exit"}, [String]{}, "live runtime window")
         elapsed_ns :: jet_cli_live_int(window, "elapsed_ns", "live runtime window", true)
         cpu_ns :: jet_cli_live_optional_int(window, "cpu_ns", "live runtime window")
