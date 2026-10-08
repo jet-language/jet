@@ -27,6 +27,7 @@ use jet_driver.[
     jet_driver_compile_keep_going,
 ]
 use jet_backend.[lir_lower_entry, lir_print_module, x64_relocatable_object, x64_link_executable, x64_runtime_library]
+use jet_foundation.mir_program_bytes
 
 // Native-feed probes use the same checked driver and linker as the Jet host.
 // Neither an emitted Rust program nor a Rust MIR conversion enters this path.
@@ -79,6 +80,17 @@ fn jet_bootstrap_native(request: ^JetDriverCompileRequest, prefix: String, libra
 }
 
 fn jet_bootstrap_compile(request: ^JetDriverCompileRequest) -> JetDriverCompileResult Never! {
+    result := jet_bootstrap_compile_impl(^request)
+    if cli_sys.get("JET_FRONT_MIR_DUMP") == .Val(path) {
+        if result.complete && result.internal_problem == None {
+            program :: result.mir ?? return jet_driver_compile_escaped_failure("completed MIR observation has no checked program")
+            cli_files.write_bytes(path, mir_program_bytes(program)) ?? return jet_driver_compile_escaped_failure("cannot write canonical MIR observation")
+        }
+    }
+    result
+}
+
+fn jet_bootstrap_compile_impl(request: ^JetDriverCompileRequest) -> JetDriverCompileResult Never! {
     if cli_sys.get("JET_FRONT_LIBRARY_OBJECT_OUTPUT") == .Val(prefix) -> return jet_bootstrap_native(^request, prefix, true)
     if cli_sys.get("JET_FRONT_NATIVE_OUTPUT") == .Val(prefix) -> return jet_bootstrap_native(^request, prefix, false)
     if cli_sys.get("JET_KEEP_GOING") != Val("1") {

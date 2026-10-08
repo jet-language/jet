@@ -82,6 +82,9 @@ A mismatch replaces the original with `E3001` and sets unmet so no
 parent can catch the mismatch. Cancellation, deadlines, skips, unrecognized
 codes, and probes for another scope do not mutate the pending stop. Sentry
 records its raw fault detail before dropping it, never its rendered report.
+The bootstrap's opt-in `JET_FRONT_MIR_DUMP` observer writes canonical
+`mir_program_bytes` to its supplied path. It does not alter lowering mode;
+non-test regression proofs compare those bytes and their SHA-256 digests.
 
 ## Purpose and scope
 
