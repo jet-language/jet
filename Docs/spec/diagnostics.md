@@ -70,6 +70,11 @@ Build authority repairs use `--allow=Effect` (for example `--allow=Exec`);
 action stderr is decoded from the structured report before terminal rendering,
 so its line breaks remain actual lines rather than JSON escapes.
 
+Inline foreign bridge failures retain normalized tool stderr as diagnostic
+detail. A spanless failure does not identify a declaration: never label the
+first inline body as the culprit or infer a signature mismatch from arbitrary
+tool failure. A rejected generated adapter remains a compiler defect.
+
 ## Machine reports and causes
 
 The canonical machine envelope is `jet.report/v3`. Its `cause` array is
