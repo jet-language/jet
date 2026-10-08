@@ -1392,6 +1392,25 @@ fn core_fixed_sig_impl(
     }
 
     match (module, name) {
+        ("core.crypto", "__jetc_open_directory" | "__jetc_open_source" | "__jetc_create_named") => Some((
+            vec![(read, Type::String)], Some(Type::Named("__JetcRaw".into())))),
+        ("core.crypto", "__jetc_open_child_directory") => Some((
+            vec![(read, Type::Int), (read, Type::String)], Some(Type::Named("__JetcRaw".into())))),
+        ("core.crypto", "__jetc_tmpfile" | "__jetc_fsync" | "__jetc_close") => Some((
+            vec![(read, Type::Int)], Some(Type::Named("__JetcRaw".into())))),
+        ("core.crypto", "__jetc_read" | "__jetc_seek") => Some((
+            vec![(read, Type::Int), (read, Type::Int)], Some(Type::Named("__JetcRaw".into())))),
+        ("core.crypto", "__jetc_write") => Some((
+            vec![(read, Type::Int), (read, Type::List(Box::new(u8_ty()))), (read, Type::Int), (read, Type::Int)],
+            Some(Type::Named("__JetcRaw".into())))),
+        ("core.crypto", "__jetc_stat") => Some((
+            vec![(read, Type::Int)], Some(Type::Named("__JetcStat".into())))),
+        ("core.crypto", "__jetc_link") => Some((
+            vec![(read, Type::Int), (read, Type::Int), (read, Type::String)], Some(Type::Named("__JetcRaw".into())))),
+        ("core.crypto", "__migrate_v1") => Some((
+            vec![(read, Type::List(Box::new(u8_ty()))), (read, Type::Named("Path".into())),
+                (read, Type::List(Box::new(Type::Named("X25519PublicKey".into())))), (read, Type::Named("Path".into()))],
+            Some(result_ty(Type::Bool, Type::Named("FileCryptoError".into()))))),
         ("core.auth", "__state_load") => Some((vec![], Some(Type::List(Box::new(u8_ty()))))),
         ("core.auth", "__state_replace") => Some((vec![(read, Type::List(Box::new(u8_ty()))), (moved, Type::List(Box::new(u8_ty())))], Some(Type::Bool))),
         ("core.files", "__read_bytes_os") => Some((vec![(read, Type::String)], Some(result_ty(Type::List(Box::new(u8_ty())), io.clone())))),
