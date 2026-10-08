@@ -884,14 +884,14 @@ example retains the negative unsafe-outside-vetted scan.
     {
       "package": "jet",
       "file": "Core/encoding/cbor_stream.jet",
-      "line": 207,
+      "line": 209,
       "column": 9,
       "reason": "the retained key copies exactly the already validated text bytes"
     },
     {
       "package": "jet",
       "file": "Core/encoding/cbor_stream.jet",
-      "line": 308,
+      "line": 311,
       "column": 17,
       "reason": "the exact CBOR text allocation passed strict UTF-8 validation"
     },
@@ -982,77 +982,77 @@ example retains the negative unsafe-outside-vetted scan.
     {
       "package": "jet",
       "file": "Core/encoding/stream.jet",
-      "line": 299,
+      "line": 300,
       "column": 9,
       "reason": "the shared UTF-8 validator just accepted this owned byte allocation"
     },
     {
       "package": "jet",
       "file": "Core/encoding/stream.jet",
-      "line": 370,
+      "line": 371,
       "column": 9,
       "reason": "the shared UTF-8 validator just accepted this owned ASCII token"
     },
     {
       "package": "jet",
       "file": "Core/encoding/stream.jet",
-      "line": 375,
+      "line": 376,
       "column": 13,
       "reason": "retain a validated number lexeme in the private event carrier until typed decoding"
     },
     {
       "package": "jet",
       "file": "Core/encoding/stream.jet",
-      "line": 554,
+      "line": 555,
       "column": 9,
       "reason": "transfer already validated UTF-8 storage to inspect its actual owned capacity"
     },
     {
       "package": "jet",
       "file": "Core/encoding/stream.jet",
-      "line": 565,
+      "line": 566,
       "column": 9,
       "reason": "the private numeric event is projected only into the matching typed tree carrier"
     },
     {
       "package": "jet",
       "file": "Core/encoding/stream.jet",
-      "line": 835,
+      "line": 836,
       "column": 5,
       "reason": "the shared UTF-8 validator just accepted this owned allocation"
     },
     {
       "package": "jet",
       "file": "Core/encoding/stream.jet",
-      "line": 844,
+      "line": 845,
       "column": 5,
       "reason": "the byte position was checked against this String's storage length"
     },
     {
       "package": "jet",
       "file": "Core/encoding/stream.jet",
-      "line": 1404,
+      "line": 1405,
       "column": 5,
       "reason": "the shared UTF-8 validator accepted this exact owned formatter buffer"
     },
     {
       "package": "jet",
       "file": "Core/encoding/stream.jet",
-      "line": 1415,
+      "line": 1416,
       "column": 5,
       "reason": "transfer the owned UTF-8 String buffer before re-spelling its shortest digits"
     },
     {
       "package": "jet",
       "file": "Core/encoding/stream.jet",
-      "line": 1741,
+      "line": 1742,
       "column": 5,
       "reason": "owned validated UTF-8 allocation transfers in the encoding source seam"
     },
     {
       "package": "jet",
       "file": "Core/encoding/toml.jet",
-      "line": 718,
+      "line": 721,
       "column": 5,
       "reason": "inspect compiler-private Bytes and typed carriers; public DataTree variants are unchanged"
     },
@@ -1549,140 +1549,140 @@ example retains the negative unsafe-outside-vetted scan.
     {
       "package": "jet",
       "file": "Core/sys/sys.jet",
-      "line": 397,
+      "line": 395,
       "column": 1,
       "reason": "posix umask: the caller owns the process file-creation mask and restores it when other code relies on it"
     },
     {
       "package": "jet",
       "file": "Core/sys/sys.jet",
-      "line": 443,
+      "line": 441,
       "column": 5,
       "reason": "posix getpgid: inspect a process group"
     },
     {
       "package": "jet",
       "file": "Core/sys/sys.jet",
-      "line": 449,
+      "line": 447,
       "column": 5,
       "reason": "posix getsid: inspect a process session"
     },
     {
       "package": "jet",
       "file": "Core/sys/sys.jet",
-      "line": 454,
+      "line": 452,
       "column": 1,
       "reason": "posix getpriority: the caller vouches that `which` names this process or one it controls"
     },
     {
       "package": "jet",
       "file": "Core/sys/sys.jet",
-      "line": 461,
+      "line": 459,
       "column": 1,
       "reason": "posix setpriority: the caller owns the scheduling priority of the process it changes"
     },
     {
       "package": "jet",
       "file": "Core/sys/sys.jet",
-      "line": 465,
+      "line": 463,
       "column": 1,
       "reason": "posix utime: the caller owns the file whose timestamps it rewrites"
     },
     {
       "package": "jet",
       "file": "Core/sys/sys.jet",
-      "line": 472,
+      "line": 470,
       "column": 1,
       "reason": "posix stop: the caller accepts that the process ends here after the shared cleanup boundary"
     },
     {
       "package": "jet",
       "file": "Core/sys/sys.jet",
-      "line": 482,
+      "line": 480,
       "column": 1,
       "reason": "posix pipe: the caller owns both returned descriptors and closes each exactly once"
     },
     {
       "package": "jet",
       "file": "Core/sys/sys.jet",
-      "line": 488,
+      "line": 486,
       "column": 1,
       "reason": "posix close_fd: the caller owns `fd` and nothing uses it after this call"
     },
     {
       "package": "jet",
       "file": "Core/sys/sys.jet",
-      "line": 496,
+      "line": 494,
       "column": 1,
       "reason": "posix mkfifo: the caller owns `path` and removes the named pipe it creates"
     },
     {
       "package": "jet",
       "file": "Core/sys/sys.jet",
-      "line": 501,
+      "line": 499,
       "column": 1,
       "reason": "posix fork: the caller handles both the parent and the child return and reaps the child"
     },
     {
       "package": "jet",
       "file": "Core/sys/sys.jet",
-      "line": 505,
+      "line": 503,
       "column": 1,
       "reason": "posix setsid: the caller owns the process session topology it changes"
     },
     {
       "package": "jet",
       "file": "Core/sys/sys.jet",
-      "line": 509,
+      "line": 507,
       "column": 1,
       "reason": "posix wait: the caller owns the child processes it reaps"
     },
     {
       "package": "jet",
       "file": "Core/sys/sys.jet",
-      "line": 515,
+      "line": 513,
       "column": 1,
       "reason": "posix waitpid: the caller owns the child process it reaps"
     },
     {
       "package": "jet",
       "file": "Core/sys/sys.jet",
-      "line": 521,
+      "line": 519,
       "column": 1,
       "reason": "posix setuid: the caller drops or changes process credentials deliberately"
     },
     {
       "package": "jet",
       "file": "Core/sys/sys.jet",
-      "line": 525,
+      "line": 523,
       "column": 1,
       "reason": "posix setgid: the caller drops or changes process credentials deliberately"
     },
     {
       "package": "jet",
       "file": "Core/sys/sys.jet",
-      "line": 529,
+      "line": 527,
       "column": 1,
       "reason": "posix setpgrp: the caller owns the process group topology it changes"
     },
     {
       "package": "jet",
       "file": "Core/sys/sys.jet",
-      "line": 533,
+      "line": 531,
       "column": 1,
       "reason": "posix setpgid: the caller owns the process group topology it changes"
     },
     {
       "package": "jet",
       "file": "Core/sys/sys.jet",
-      "line": 537,
+      "line": 535,
       "column": 1,
       "reason": "posix kill: the caller owns or is entitled to signal the target process"
     },
     {
       "package": "jet",
       "file": "Core/sys/sys.jet",
-      "line": 541,
+      "line": 539,
       "column": 1,
       "reason": "posix initgroups: the caller changes supplementary groups deliberately"
     },
@@ -4124,8 +4124,8 @@ example retains the negative unsafe-outside-vetted scan.
 | jet | Core/email/email.jet | 413:5 | "DKIM known-answer fixture reads only synthetic key bytes" |
 | jet | Core/encoding/cbor.jet | 95:5 | "inspect private typed carriers without changing public DataTree variants" |
 | jet | Core/encoding/cbor.jet | 157:5 | "validated private carriers retain byte strings for typed Encode" |
-| jet | Core/encoding/cbor_stream.jet | 207:9 | "the retained key copies exactly the already validated text bytes" |
-| jet | Core/encoding/cbor_stream.jet | 308:17 | "the exact CBOR text allocation passed strict UTF-8 validation" |
+| jet | Core/encoding/cbor_stream.jet | 209:9 | "the retained key copies exactly the already validated text bytes" |
+| jet | Core/encoding/cbor_stream.jet | 311:17 | "the exact CBOR text allocation passed strict UTF-8 validation" |
 | jet | Core/encoding/csv.jet | 123:9 | "input is a String; original complete UTF-8 scalars and ASCII quote escapes entered the field" |
 | jet | Core/encoding/csv.jet | 318:5 | "the exact owned query bytes passed the shared strict UTF-8 validator" |
 | jet | Core/encoding/csv.jet | 768:9 | "each completed UTF-8 scalar was validated before its original bytes entered this field" |
@@ -4138,17 +4138,17 @@ example retains the negative unsafe-outside-vetted scan.
 | jet | Core/encoding/stream.jet | 26:5 | "check the private Bytes variant immediately before borrowing its backing" |
 | jet | Core/encoding/stream.jet | 33:5 | "the shared parser validated this exact numeric lexeme" |
 | jet | Core/encoding/stream.jet | 39:5 | "retain decoded JSON text until the target Decode contract is known" |
-| jet | Core/encoding/stream.jet | 299:9 | "the shared UTF-8 validator just accepted this owned byte allocation" |
-| jet | Core/encoding/stream.jet | 370:9 | "the shared UTF-8 validator just accepted this owned ASCII token" |
-| jet | Core/encoding/stream.jet | 375:13 | "retain a validated number lexeme in the private event carrier until typed decoding" |
-| jet | Core/encoding/stream.jet | 554:9 | "transfer already validated UTF-8 storage to inspect its actual owned capacity" |
-| jet | Core/encoding/stream.jet | 565:9 | "the private numeric event is projected only into the matching typed tree carrier" |
-| jet | Core/encoding/stream.jet | 835:5 | "the shared UTF-8 validator just accepted this owned allocation" |
-| jet | Core/encoding/stream.jet | 844:5 | "the byte position was checked against this String's storage length" |
-| jet | Core/encoding/stream.jet | 1404:5 | "the shared UTF-8 validator accepted this exact owned formatter buffer" |
-| jet | Core/encoding/stream.jet | 1415:5 | "transfer the owned UTF-8 String buffer before re-spelling its shortest digits" |
-| jet | Core/encoding/stream.jet | 1741:5 | "owned validated UTF-8 allocation transfers in the encoding source seam" |
-| jet | Core/encoding/toml.jet | 718:5 | "inspect compiler-private Bytes and typed carriers; public DataTree variants are unchanged" |
+| jet | Core/encoding/stream.jet | 300:9 | "the shared UTF-8 validator just accepted this owned byte allocation" |
+| jet | Core/encoding/stream.jet | 371:9 | "the shared UTF-8 validator just accepted this owned ASCII token" |
+| jet | Core/encoding/stream.jet | 376:13 | "retain a validated number lexeme in the private event carrier until typed decoding" |
+| jet | Core/encoding/stream.jet | 555:9 | "transfer already validated UTF-8 storage to inspect its actual owned capacity" |
+| jet | Core/encoding/stream.jet | 566:9 | "the private numeric event is projected only into the matching typed tree carrier" |
+| jet | Core/encoding/stream.jet | 836:5 | "the shared UTF-8 validator just accepted this owned allocation" |
+| jet | Core/encoding/stream.jet | 845:5 | "the byte position was checked against this String's storage length" |
+| jet | Core/encoding/stream.jet | 1405:5 | "the shared UTF-8 validator accepted this exact owned formatter buffer" |
+| jet | Core/encoding/stream.jet | 1416:5 | "transfer the owned UTF-8 String buffer before re-spelling its shortest digits" |
+| jet | Core/encoding/stream.jet | 1742:5 | "owned validated UTF-8 allocation transfers in the encoding source seam" |
+| jet | Core/encoding/toml.jet | 721:5 | "inspect compiler-private Bytes and typed carriers; public DataTree variants are unchanged" |
 | jet | Core/encoding/xml_engine.jet | 134:5 | "all callers iterate or check the UTF-8 byte bounds before borrowing this byte" |
 | jet | Core/encoding/xml_engine.jet | 173:5 | "the caller selected a scalar-aligned window of validated UTF-8 bytes" |
 | jet | Core/encoding/xml_engine.jet | 2218:5 | "attribute whitespace compaction preserves the already validated UTF-8 byte sequence" |
@@ -4219,26 +4219,26 @@ example retains the negative unsafe-outside-vetted scan.
 | jet | Core/service/service.jet | 2017:5 | "Services2917-3078: exclusive tree borrow; each write follows the native order" |
 | jet | Core/service/service.jet | 2132:5 | "Services3080-3100: pinned validation, group policy, one now, then weak name/tree match" |
 | jet | Core/service/service.jet | 2153:5 | "Services2847-2862: validated endpoint, then deliberately weak name/tree match, channel depth" |
-| jet | Core/sys/sys.jet | 397:1 | "posix umask: the caller owns the process file-creation mask and restores it when other code relies on it" |
-| jet | Core/sys/sys.jet | 443:5 | "posix getpgid: inspect a process group" |
-| jet | Core/sys/sys.jet | 449:5 | "posix getsid: inspect a process session" |
-| jet | Core/sys/sys.jet | 454:1 | "posix getpriority: the caller vouches that `which` names this process or one it controls" |
-| jet | Core/sys/sys.jet | 461:1 | "posix setpriority: the caller owns the scheduling priority of the process it changes" |
-| jet | Core/sys/sys.jet | 465:1 | "posix utime: the caller owns the file whose timestamps it rewrites" |
-| jet | Core/sys/sys.jet | 472:1 | "posix stop: the caller accepts that the process ends here after the shared cleanup boundary" |
-| jet | Core/sys/sys.jet | 482:1 | "posix pipe: the caller owns both returned descriptors and closes each exactly once" |
-| jet | Core/sys/sys.jet | 488:1 | "posix close_fd: the caller owns `fd` and nothing uses it after this call" |
-| jet | Core/sys/sys.jet | 496:1 | "posix mkfifo: the caller owns `path` and removes the named pipe it creates" |
-| jet | Core/sys/sys.jet | 501:1 | "posix fork: the caller handles both the parent and the child return and reaps the child" |
-| jet | Core/sys/sys.jet | 505:1 | "posix setsid: the caller owns the process session topology it changes" |
-| jet | Core/sys/sys.jet | 509:1 | "posix wait: the caller owns the child processes it reaps" |
-| jet | Core/sys/sys.jet | 515:1 | "posix waitpid: the caller owns the child process it reaps" |
-| jet | Core/sys/sys.jet | 521:1 | "posix setuid: the caller drops or changes process credentials deliberately" |
-| jet | Core/sys/sys.jet | 525:1 | "posix setgid: the caller drops or changes process credentials deliberately" |
-| jet | Core/sys/sys.jet | 529:1 | "posix setpgrp: the caller owns the process group topology it changes" |
-| jet | Core/sys/sys.jet | 533:1 | "posix setpgid: the caller owns the process group topology it changes" |
-| jet | Core/sys/sys.jet | 537:1 | "posix kill: the caller owns or is entitled to signal the target process" |
-| jet | Core/sys/sys.jet | 541:1 | "posix initgroups: the caller changes supplementary groups deliberately" |
+| jet | Core/sys/sys.jet | 395:1 | "posix umask: the caller owns the process file-creation mask and restores it when other code relies on it" |
+| jet | Core/sys/sys.jet | 441:5 | "posix getpgid: inspect a process group" |
+| jet | Core/sys/sys.jet | 447:5 | "posix getsid: inspect a process session" |
+| jet | Core/sys/sys.jet | 452:1 | "posix getpriority: the caller vouches that `which` names this process or one it controls" |
+| jet | Core/sys/sys.jet | 459:1 | "posix setpriority: the caller owns the scheduling priority of the process it changes" |
+| jet | Core/sys/sys.jet | 463:1 | "posix utime: the caller owns the file whose timestamps it rewrites" |
+| jet | Core/sys/sys.jet | 470:1 | "posix stop: the caller accepts that the process ends here after the shared cleanup boundary" |
+| jet | Core/sys/sys.jet | 480:1 | "posix pipe: the caller owns both returned descriptors and closes each exactly once" |
+| jet | Core/sys/sys.jet | 486:1 | "posix close_fd: the caller owns `fd` and nothing uses it after this call" |
+| jet | Core/sys/sys.jet | 494:1 | "posix mkfifo: the caller owns `path` and removes the named pipe it creates" |
+| jet | Core/sys/sys.jet | 499:1 | "posix fork: the caller handles both the parent and the child return and reaps the child" |
+| jet | Core/sys/sys.jet | 503:1 | "posix setsid: the caller owns the process session topology it changes" |
+| jet | Core/sys/sys.jet | 507:1 | "posix wait: the caller owns the child processes it reaps" |
+| jet | Core/sys/sys.jet | 513:1 | "posix waitpid: the caller owns the child process it reaps" |
+| jet | Core/sys/sys.jet | 519:1 | "posix setuid: the caller drops or changes process credentials deliberately" |
+| jet | Core/sys/sys.jet | 523:1 | "posix setgid: the caller drops or changes process credentials deliberately" |
+| jet | Core/sys/sys.jet | 527:1 | "posix setpgrp: the caller owns the process group topology it changes" |
+| jet | Core/sys/sys.jet | 531:1 | "posix setpgid: the caller owns the process group topology it changes" |
+| jet | Core/sys/sys.jet | 535:1 | "posix kill: the caller owns or is entitled to signal the target process" |
+| jet | Core/sys/sys.jet | 539:1 | "posix initgroups: the caller changes supplementary groups deliberately" |
 | jet | Core/testing/testing.jet | 354:5 | "the caller bounded this byte position by the String storage length" |
 | jet | Core/testing/testing.jet | 375:5 | "all appended bytes came from complete UTF-8 strings or ASCII" |
 | jet | Core/tui/tui.jet | 100:5 | "Core TUI reads owned encoded OS environment bytes from the current host; no UTF-8 assumption" |
