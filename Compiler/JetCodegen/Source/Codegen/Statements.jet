@@ -1657,7 +1657,7 @@ fn jet_codegen_lower_index_hook_assign(builder: &JetCodegenBuilder, program: Jet
         span: base.span,
         label: None,
         source_index: None,
-        binder_slot: None,
+        binder_slot: Val(0),
         spread: false,
         implicit_clone: false,
         shared_auto_clone: false,
@@ -1675,18 +1675,10 @@ fn jet_codegen_lower_index_hook_assign(builder: &JetCodegenBuilder, program: Jet
     lowered_call_args := if {
         direct_target != None -> {
             target :: direct_target ?? panic("checked IndexMut implementation disappeared")
-            jet_codegen_lower_call_args(&builder, program, call_args, target.params)
+            jet_codegen_lower_instance_args(&builder, program, call_args, target.params)
         } else -> {
             trait_method :: trait_target ?? panic("checked IndexMut trait method disappeared")
-            labels := [String]{}
-            variadic := [Bool]{}
-            conventions := [AccessConvention]{}
-            loop parameter in trait_method.method.params {
-                &labels.push(parameter.public_label)
-                &variadic.push(parameter.variadic)
-                &conventions.push(parameter.access)
-            }
-            jet_codegen_lower_call_args_for_signature(&builder, program, call_args, labels, variadic, conventions)
+            jet_codegen_lower_trait_method_args(&builder, program, call_args, trait_method.method)
         }
     }
     lowered_args := [MIRCallArg]{receiver_arg}
