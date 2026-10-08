@@ -308,6 +308,10 @@ Source-store Git launches retain their held directory descriptors in the existin
 slot before fork; the child performs only `dup2` and `fchdir`, without reopening
 source paths, allocating, or taking locks. An attached held cwd supersedes the
 lexical cwd; launches without that attachment keep the ordinary cwd behavior.
+The descriptor and attachment rows carry `Int` descriptor/errno facts and the
+existing `ProcessSpec` type, with read-convention inputs. Their named-field type
+projection is not a native-ABI proof: each adapter must also preserve the mapping
+between canonical semantic fields and the kernel's physical tuple slots.
 
 Package-to-JetOS projection stays on this split. jet-pkg-model reads the
 canonical Package outputs and computes the semantic graph identity.
