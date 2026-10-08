@@ -104,7 +104,7 @@ fn jet_walk8_read_dir(key: i64, slot: i64) -> (i64, Option<i64>, Option<String>)
     let context = jet_walk8_context(key);
     let mut context = context.lock().expect("walk context poisoned");
     let entry = &mut context.slots[slot as usize];
-    match jet_fs_read_directory_raw(&entry.path) {
+    match std::fs::read_dir(&entry.path) {
         Ok(directory) => { entry.directory = Some(directory); (0, None, None) },
         Err(error) => jet_walk8_error(error),
     }
@@ -118,7 +118,7 @@ fn jet_walk8_next(key: i64, slot: i64) -> (bool, i64, bool, bool, String, String
         Some(Ok(entry)) => entry,
     };
     let child = entry.path();
-    let file_type = jet_fs_entry_type_raw(&entry);
+    let file_type = entry.file_type();
     let directory = file_type.as_ref().is_ok_and(std::fs::FileType::is_dir);
     let file = file_type.as_ref().is_ok_and(std::fs::FileType::is_file);
     let shown = child.to_string_lossy().into_owned();

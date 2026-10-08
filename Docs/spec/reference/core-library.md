@@ -65,9 +65,8 @@ globbing, and temporary directory/lock creation also perform their fault policy
 in Jet. Directory copy probes read before write, exactly once before its existing
 raw tree operation. Temporary directory and file names share the same Jet prefix,
 process-ID, clock-fallback, and host-path policy.
-The native directory iterator, entry-type fact, directory-tree creation, and
-file-copy syscalls used by these operations are single-homed in the shared
-filesystem kernel, retaining native paths and each caller's error projection.
+Directory creation shares the existing `jet_std_fs_create_dir_all_raw` host
+operation; its callers keep their own fault preflight and error resource.
 Terminal reads and prompt/style/progress policy likewise use source-owned
 declarations. Their registered private facts call the single existing terminal
 and stdin kernels; the Rust seed entry points retain their fault preflight.
