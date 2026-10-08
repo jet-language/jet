@@ -1,0 +1,211 @@
+// Assembled with the production bootstrap inventory by run-gate-fixtures.mjs.
+// Source padding admits real independent method jobs under the unchanged byte
+// threshold; it is not a performance corpus or a substitute task implementation.
+fn method_wave_require(ok: Bool, message: String) Never! {
+    if !ok -> panic("BodyMethodWaveFixtures: {message}")
+}
+
+fn method_wave_source(negative: Bool) -> String Never! {
+    methods := [String]{}
+    loop index in 0..<8 {
+        padding := [U8]{}
+        loop _ in 0..<(4096 + index * 1024) -> &padding.push(U8{120})
+        comment :: String.from_bytes(padding) ?? panic("ASCII padding is not UTF-8")
+        body :: if negative && index == 2 -> "missing_method_value" else -> "self.value"
+        &methods.push("fn method_{index}(&self) -> Int Never! {{\n//{comment}\n{body}\n}}\n")
+    }
+    "struct Counter {{ value: Int\n{methods.join("")}\nfn window(&self, values: [Int]) -> View<Int> {{ first(values) }}\nfn fail(&self) -> Int Never! {{ panic(\"method panic\") }}\n}}\ntrait MethodTag {{ fn label_value(&self) -> Int Never!\nfn second_value(&self) -> Int Never! }}\nimpl Counter.MethodTag {{ fn label_value(&self) -> Int Never! {{ 8 }}\nfn second_value(&self) -> Int Never! {{ 9 }} }}\nstruct GenericOwner<T> {{ value: T\nfn owner_value(&self) -> Int Never! {{ 7 }}\nfn identity<U>(&self, value: U) -> U Never! {{ value }}\n}}\nstruct Rendered {{ value: Int }}\nimpl Rendered.Display {{ fn display(self) -> String {{ \"rendered\" }} }}\nimpl Rendered.Comparable {{ fn compare(self, other: Rendered) -> Ordering {{ .Equal }} }}\nfn first(values: [Int]) -> View<Int> {{ values[0..<1] }}\nfn run() {{}}\n"
+}
+
+fn method_wave_registration(source: String, keep_going: Bool) -> SemaRegistrationGraph {
+    parsed := parse_source(source.bytes())
+    method_wave_require(parsed.diagnostics.len() == 0, "real fixture source parses")
+    canonical := jet_driver_canonical_effect_module("effect IO\n") ?? panic("fixture effect declaration does not parse")
+    line_starts := [Int]{0}
+    bytes :: source.bytes()
+    loop index in 0..<bytes.len() {
+        if bytes[index] == (U8{10}) -> &line_starts.push(index + 1)
+    }
+    segment :: SemaSourceSegment{generated: Span{start: 0, end: bytes.len()}, source_file: "method-wave.jet", source_start: 0, line_starts: line_starts, origin: SemaSourceOrigin.Snapshot}
+    input :: SemaRegistrationModuleInput{package_identity: "method-wave", module_identity: "method-wave::main", module_name: "main", core_source_alias: "", module_path: "main.jet", source_file: "method-wave.jet", source_segments: [SemaSourceSegment]{segment}, source_origin: SemaSourceOrigin.Snapshot, program: parsed.program, foreign_handles: [SemaRegistrationForeignHandleFacts]{}, source: source}
+    canonical_identity :: canonical.module_identity
+    facts :: SemaBuildFacts{package_name: "method-wave", package_version: "0.1.0", os: "linux", profile: "dev", stamp_git: None, stamp_dirty: false, stamp_toolchain: "fixture", stamp_at: ""}
+    graph := sema_registration_prepare_graph([SemaRegistrationModuleInput]{input, canonical}, [SemaRegistrationImportEdge]{}, "method-wave", "method-wave::main", canonical_identity, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false)
+    graph.keep_going = keep_going
+    method_wave_require(graph.complete && graph.internal_problem == None, "registration is complete")
+    graph
+}
+
+fn method_wave_comptime_rows(graph: SemaRegistrationGraph, hooks: Shared<SemaRegistrationHostHooks>, negative: Bool) -> [SemaComptimeFunctionResult] {
+    memory_plan :: sema_function_memory_plan_from_graph(graph)
+    environment := sema_comptime_environment(~graph, [SemaComptimeItemValue]{})
+    probe := sema_comptime_probe_init(Val(SemaHostHookAccess.Callbacks{hooks: hooks}))
+    available :: sema_comptime_available_constants(graph, [SemaComptimeItemValue]{})
+    name :: if negative -> "method_2" else -> "method_0"
+    loop nominal in graph.modules[0].nominals {
+        loop method in nominal.methods {
+            if method.declaration.name != name -> next
+            checked :: sema_check_comptime_function(graph, &environment, &probe, available, memory_plan, [SemaComptimeItemValue]{}, graph.modules[0].module_identity, method.symbol.id.key)
+            method_wave_require(checked.complete == !negative, "the cached comptime row is a real checker result")
+            return [SemaComptimeFunctionResult]{checked}
+        }
+    }
+    panic("the comptime method witness is not registered")
+}
+
+fn method_wave_checked(graph: SemaRegistrationGraph, threads: CompilerThreads, cached: [SemaComptimeFunctionResult]) -> SemaGraphResult {
+    hooks :: shared SemaRegistrationHostHooks{numeric_unit_conversion_exact: None, typed_boundary_literal_validate: None}
+    stage := sema_collect_comptime_declarations(graph, [SemaRegistrationPackagePolicy]{}, hooks, threads, None)
+    sema_finalize_registration_graph(graph, None, ^stage, [SemaComptimeItemValue]{}, cached, hooks, threads, None)
+}
+
+fn method_wave_lowered(checked: SemaGraphResult, source: String) -> JetCodegenFunctions {
+    modules := ~checked.modules
+    functions := [TFunc]{}
+    loop module_result in modules {
+        loop function in module_result.functions -> &functions.push(function)
+    }
+    lower_functions(&functions, &modules, [MIRSourceFile]{MIRSourceFile{id: mir_source_file_id("method-wave.jet"), path: "method-wave.jet", source: source}}, compiler_threads_single(), None)
+}
+
+fn method_wave_panic_witness(value: TExpr, function_name: String) -> Int {
+    found := 0
+    if value.kind == .RequireStop(_, location, _) {
+        method_wave_require(location.function == function_name && location.file == "method-wave.jet" && location.line > 0, "panic retains the current method and authored source coordinates after worker/inline drain")
+        found += 1
+    }
+    loop child in tir_expr_children(value) -> found += method_wave_panic_witness(child, function_name)
+    found
+}
+
+fn method_wave_product_witnesses(graph: SemaRegistrationGraph, checked: SemaGraphResult, negative: Bool, keep_going: Bool, host_retry: Bool) {
+    raw_rows := 0
+    generated_anchor := Span?{None}
+    loop implementation in graph.modules[0].impls {
+        loop method in implementation.methods {
+            if method.declaration.name == "display" || method.declaration.name == "compare" {
+                method_wave_require(method.raw_protocol_return, "registered raw protocol return law is retained")
+                raw_rows += 1
+            }
+        }
+    }
+    method_wave_require(raw_rows == 2, "both real Display and Comparable impl rows are exercised")
+    loop nominal in graph.modules[0].nominals {
+        if nominal.symbol.name != "GeneratedOwner" -> next
+        loop method in nominal.methods {
+            if method.declaration.name == "generated_value" {
+                method_wave_require(method.declaration.compiler_generated, "the real derive provider produced a generated method")
+                generated_anchor = Val(nominal.symbol.span)
+            }
+        }
+    }
+    if generated_anchor == .Val(anchor) {
+        remapped := false
+        loop diagnostic in checked.diagnostics {
+            if diagnostic.severity == DIAGNOSTIC_ERROR && diagnostic.span == Val(anchor) && diagnostic.what.contains("missing_generated_value") {
+                method_wave_require(diagnostic.fix == "" && diagnostic.edit == None, "generated diagnostic keeps no non-authorable fix")
+                remapped = true
+            }
+        }
+        method_wave_require(remapped, "generated method error is remapped to the authored nominal")
+    }
+    publisher := false
+    consumer := false
+    raw_products := 0
+    panic_sites := 0
+    stub_sites := 0
+    loop module_result in checked.modules {
+        loop function in module_result.functions {
+            if function.name == "first" -> publisher = function.return_view_provenance != None
+            if function.name == "window" -> consumer = function.return_view_provenance != None
+            if function.name == "display" || function.name == "compare" {
+                expected :: if function.name == "display" -> Type.String else -> Type.Named{name: "Ordering"}
+                method_wave_require(function.ret == Val(expected) && function.params.len() > 0 && function.params[0].name == "self" && function.params[0].convention == AccessConvention.Read, "raw return and read receiver survive checking")
+                raw_products += 1
+            }
+            if function.name != "fail" && function.name != "method_2" -> next
+            loop statement in function.body {
+                loop value in tir_stmt_children(statement) {
+                    if function.name == "fail" -> panic_sites += method_wave_panic_witness(value, function.name)
+                    if function.name == "method_2" && negative && keep_going -> stub_sites += method_wave_panic_witness(value, function.name)
+                }
+            }
+        }
+    }
+    method_wave_require(publisher && consumer, "top-level return-view publication is consumed by a method")
+    method_wave_require(raw_products == 2 && panic_sites > 0, "raw protocol products and actual method panic are present")
+    if negative && keep_going && graph.modules[0].source.contains("missing_method_value") -> method_wave_require(stub_sites > 0, "real failed/cached-incomplete method produces its correctly located keep-going trap")
+    if !host_retry -> return
+    memory_plan :: sema_function_memory_plan_from_graph(graph)
+    types := [TTypeDef]{}
+    loop module_result in checked.modules {
+        loop type_definition in module_result.declarations.type_defs -> &types.push(type_definition)
+    }
+    environment := sema_check_pass_environment(graph, types)
+    hooks :: shared SemaRegistrationHostHooks{numeric_unit_conversion_exact: None, typed_boundary_literal_validate: None}
+    scopes := sema_check_module_summary_scopes(graph, &environment, Val(SemaHostHookAccess.Callbacks{hooks: hooks}), memory_plan, 0, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, [String:Int]{}, "fixture", None)
+    jobs := [SemaBodyJob]{}
+    loop nominal_index in 0..<graph.modules[0].nominals.len() {
+        nominal :: graph.modules[0].nominals[nominal_index]
+        loop method_index in 0..<nominal.methods.len() {
+            name :: nominal.methods[method_index].declaration.name
+            if name == "unit_value" || name == "after_unit" -> &jobs.push(SemaBodyJob.NominalMethod{ordinal: jobs.len(), nominal_index: nominal_index, method_index: method_index})
+        }
+    }
+    method_wave_require(jobs.len() == 2, "real host-reaching method and adjacent normal method are registered")
+    part := SemaBodyPart{scopes: ^scopes, items: ^jobs, bodies: [SemaParallelBody]{}}
+    method_wave_require(sema_check_body_part_in(environment, memory_plan, &part, 0) == 2, "both real method jobs were checked by the canonical worker")
+    method_wave_require(part.bodies.len() == 2 && part.bodies[0].wanted_hooks && !part.bodies[1].wanted_hooks, "actual conversion requests ordered owner retry; adjacent method does not inherit wanted")
+}
+
+fn method_wave_case(source: String, negative: Bool, keep_going: Bool, use_comptime: Bool, host_retry: Bool) {
+    graph :: method_wave_registration(source, keep_going)
+    threads :: CompilerThreads{cap: Val(2), cores: 2, memory_available: Val(268435456)}
+    memory_plan :: sema_function_memory_plan_from_graph(graph)
+    scanned := 0
+    all_jobs :: sema_check_method_jobs(graph, graph.modules[0], &scanned, false)
+    weights := [Int]{}
+    jobs :: sema_check_parallel_method_jobs(graph, graph.modules[0], memory_plan, [TGenericParam]{}, all_jobs, [String:Int]{}, &weights)
+    excluded := 0
+    loop nominal in graph.modules[0].nominals {
+        if nominal.generic_params.len() == 0 -> next
+        loop method in nominal.methods {
+            method_wave_require(!sema_check_method_parallel_eligible(graph, graph.modules[0], memory_plan, method, nominal.ty, [String:Int]{}), "declared generic owners stay inline")
+            excluded += 1
+        }
+    }
+    method_wave_require(excluded >= 2, "generic-owner and generic-method exclusion is exercised")
+    work := 0
+    loop weight in weights -> work += weight
+    method_wave_require(compiler_threads_admit(threads, jobs.len(), work, SEMA_BODY_MIN_BYTES_PER_THREAD, graph.modules[0].program.items.len() * SEMA_BODY_SCOPE_BYTES_PER_ITEM, 0) == 2, "real method wave admits two threads")
+    hooks :: shared SemaRegistrationHostHooks{numeric_unit_conversion_exact: None, typed_boundary_literal_validate: None}
+    cached :: if use_comptime -> method_wave_comptime_rows(graph, hooks, negative) else -> [SemaComptimeFunctionResult]{}
+    single :: method_wave_checked(graph, compiler_threads_single(), cached)
+    parallel :: method_wave_checked(graph, threads, cached)
+    default_threads :: CompilerThreads{cap: None, cores: 2, memory_available: Val(268435456)}
+    default_checked :: method_wave_checked(graph, default_threads, cached)
+    method_wave_require(single.complete == !negative, "baseline verdict is the expected real verdict")
+    method_wave_require("{single:Debug}" == "{parallel:Debug}", "all checked rows, diagnostics, spans and facts are byte-identical")
+    method_wave_require("{single:Debug}" == "{default_checked:Debug}", "default thread policy has identical checked products")
+    method_wave_product_witnesses(graph, single, negative, keep_going, host_retry)
+    single_lowered :: method_wave_lowered(single, source)
+    parallel_lowered :: method_wave_lowered(parallel, source)
+    method_wave_require("{single_lowered:Debug}" == "{parallel_lowered:Debug}", "lowered MIR rows and diagnostics are byte-identical")
+    default_lowered :: method_wave_lowered(default_checked, source)
+    method_wave_require("{single_lowered:Debug}" == "{default_lowered:Debug}", "default thread policy has identical lowered products")
+}
+
+fn run() {
+    positive :: method_wave_source(false)
+    negative :: method_wave_source(true)
+    method_wave_case(positive, false, false, false, false)
+    method_wave_case(negative, true, false, false, false)
+    method_wave_case(negative, true, true, false, false)
+    method_wave_case(positive, false, false, true, false)
+    method_wave_case(negative, true, true, true, false)
+    unit_source :: "{positive}\n#UnitFamily(WaveLength, base: meter) {{ meter\nfoot(scale: 381/1250) }}\nstruct UnitOwner {{ value: Int\nfn unit_value(&self) -> Meter Never! {{ converted :: Meter{{Foot.from_float(Float{{8.0}})}}\nconverted }}\nfn after_unit(&self) -> Int Never! {{ self.value }} }}\n"
+    method_wave_case(unit_source, true, true, false, true)
+    generated_source :: "{positive}\nderive T.BrokenWave {{ fn generated_value(self) -> Int Never! {{ missing_generated_value }} }}\n#BrokenWave\nstruct GeneratedOwner {{ value: Int }}\n"
+    method_wave_case(generated_source, true, true, false, false)
+    print("method body wave: real serial/parallel checked and lowered equivalence passed")
+}
