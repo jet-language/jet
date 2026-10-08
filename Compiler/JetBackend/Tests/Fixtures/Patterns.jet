@@ -314,8 +314,14 @@ fn fx_scan_float32_rejected(kind: Int) -> MIRProgram Never! {
 
 fn fx_scan_float32_rejection_checks() -> Bool Never! {
     loop kind in 0..<4 {
+        program :: fx_scan_float32_rejected(kind)
+        if kind == 0 {
+            if lower_scan_storage(program, fx_narrow(true, 64)) != 0 -> return false
+            if lower_scan_storage(program, fx_narrow(false, 32)) != 0 -> return false
+            if lower_scan_storage(program, mir_type_from_kind(MIRTypeKind.Float32)) != (-1) -> return false
+        }
         message :: if kind == 3 -> "Float32 conversions are not lowered at O0 yet" else -> "Float32 operations are not lowered at O0 yet"
-        if !fx_convert_has_issue(fx_scan_float32_rejected(kind), message) -> return false
+        if !fx_convert_has_issue(program, message) -> return false
     }
     true
 }

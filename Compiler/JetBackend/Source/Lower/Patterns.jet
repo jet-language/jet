@@ -26,7 +26,7 @@ fn lower_scan_storage(p: MIRProgram, ty: MIRType) -> Int Never! {
     if lower_repr(p, ty) == .Flag -> return 3
     if lower_text_type(ty) -> return 4
     if lower_list_element(ty) == .Val(elem) && elem.kind == .IntN(signed, bits) && !signed && bits == 8 -> return 6
-    if lower_integer_storage(p, ty) != None -> return 0
+    if lower_packed_storage_type(p, ty) == .Val(stored) && stored.kind == .IntN(_, _) -> return 0
     return -1
 }
 

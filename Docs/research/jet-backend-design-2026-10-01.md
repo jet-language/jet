@@ -233,6 +233,12 @@ adapter. A count outside I64 stops before the method, matching reference
 and retains its ordinary Err text. The conversion borrows the operand and
 does not broaden the Word ABI for other routes.
 
+Scan capture classification reuses the canonical `lower_packed_storage_type`
+alias/tag resolver for fixed integers, then requires an `IntN` storage kind.
+The shared word carrier therefore does not admit binary32 as an integer scan
+capture. The existing scan refusal fixture also checks I64/U32 admission and
+F32 refusal at this storage boundary.
+
 Result boxes reserve at least one eight-byte payload word after the tag,
 including zero-sized payloads. Runtime marshaling uses the same minimum,
 alignment and size as native construction and drop glue.
