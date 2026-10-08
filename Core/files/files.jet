@@ -606,7 +606,11 @@ pub fn read(path: String) -[FS.Read]> String IOError! {
 }
 
 
-pub fn map(path: String) -[FS.Read]> MappedFile IOError! { core.files.map(path) }
+pub fn map(path: String | Path) -[FS.Read]> MappedFile IOError! {
+    text :: path_text(path)
+    files8_preflight("FS.Read", .Read, text)
+    core.files.__files8_map(text)
+}
 
 
 pub fn write(path: String, text: String) IOError! -[FS.Write]> { core.files.write(path, text) }
@@ -633,7 +637,11 @@ pub fn write_at(path: String, offset: Int, bytes: [U8]) IOError! -[FS.Write]> {
 }
 
 
-pub fn fsync(path: String) IOError! -[FS.Write]> { core.files.fsync(path) }
+pub fn fsync(path: String | Path) IOError! -[FS.Write]> {
+    text :: path_text(path)
+    files8_preflight("FS.Write", .Flush, text)
+    core.files.__files8_fsync(text)
+}
 
 
 fn exists_impl(path: String) -> Bool Never! {
@@ -666,7 +674,45 @@ pub fn stat(path: String | Path) -[FS.Read]> Stat IOError! {
 pub fn lstat(path: String | Path) -[FS.Read]> Stat IOError! { stat(path) }
 
 
-pub fn set_mode(path: String, mode: Int) IOError! -[FS.Write]> { core.files.set_mode(path, mode) }
+pub fn set_mode(path: String | Path, mode: Int) IOError! -[FS.Write]> {
+    text :: path_text(path)
+    files8_preflight("FS.Write", .Write, text)
+    if core.files.__files8_platform() == 1 {
+        if !files8_u32(mode) -> return Err(files8_other(.Write, Val(text), "file mode must be between 0 and u32::MAX"))
+    } else if mode != 0 && mode != 1 {
+        return Err(files8_other(.Write, Val(text), "file mode must contain only the readonly bit on this platform"))
+    }
+    core.files.__files8_set_mode(text, mode)
+}
+
+pub fn chown(path: String | Path, owner: Int, group: Int) IOError! -[FS.Write]> {
+    text :: path_text(path)
+    if core.files.__files8_platform() != 1 -> return Err(files8_other(.Write, None, "chown is unavailable on this platform"))
+    if owner != -1 && !files8_u32(owner) -> return Err(files8_other(.Write, Val(text), "owner must be -1 or a non-negative u32"))
+    if group != -1 && !files8_u32(group) -> return Err(files8_other(.Write, Val(text), "group must be -1 or a non-negative u32"))
+    loop byte in text.bytes() {
+        if byte == (U8{0}) -> return Err(files8_other(.Write, Val(text), "path contains an interior NUL"))
+    }
+    core.files.__files8_chown(text, owner, group)
+}
+
+pub fn is_fifo(path: String | Path) -[FS.Read]> Bool IOError! {
+    text :: path_text(path)
+    files8_preflight("FS.Read", .Read, text)
+    mode :: core.files.__files8_stat_mode(text)
+    Ok((mode & 61440) == 4096)
+}
+
+fn files8_u32(value: Int) -> Bool Never! { value >= 0 && value <= 4294967295 }
+
+fn files8_other(operation: IOOperation, resource: String?, cause: String) -> IOError Never! {
+    IOError.Other(IOContext{operation: operation, resource: resource, os_code: None, cause: Val(cause)})
+}
+
+fn files8_preflight(probe: String, operation: IOOperation, path: String) IOError! {
+    if core.files.__fault_should_fail(probe) -> return Err(files8_other(operation, Val(path), "fault injected: {probe}"))
+    Ok(())
+}
 
 
 fn anchor_for_parts(drive: String, absolute: Bool) -> String Never! {
@@ -900,19 +946,29 @@ pub fn create_dir_all(path: String) IOError! -[FS]> {
 }
 
 
-pub fn remove(path: String) IOError! -[FS.Write]> { core.files.remove(path) }
+pub fn remove(path: String | Path) IOError! -[FS.Write]> {
+    text :: path_text(path)
+    files8_preflight("FS.Write", .Write, text)
+    core.files.__files8_remove(text)
+}
 
 
 pub fn remove_dir(path: String) IOError! -[FS.Write]> { core.files.remove_dir(path) }
 
 
-pub fn remove_all(path: String) IOError! -[FS]> {
-    if is_dir(path) ?? panic("is_dir failed") {
-        entries :: list_dir(path)
-        loop e in entries -> remove_all(e.path)
-    }
-    if lexists(path) ?? panic("lexists failed") -> core.files.remove(path)
-    return Ok()
+pub fn remove_all(path: String | Path) IOError! -[FS]> {
+    text :: path_text(path)
+    files8_preflight("FS.Write", .Write, text)
+    directory :: core.files.__files8_is_dir(text)
+    core.files.__files8_remove_all(text, directory)
+}
+
+pub fn copy(from: String | Path, to: String | Path) IOError! -[FS]> {
+    source :: path_text(from)
+    target :: path_text(to)
+    files8_preflight("FS.Read", .Read, source)
+    files8_preflight("FS.Write", .Write, target)
+    core.files.__files8_copy(source, target)
 }
 
 
@@ -953,7 +1009,16 @@ pub fn rename(from: String | Path, to: String | Path, if_exists: RenameIfExists{
 /// as given and is not resolved; later path operations follow it, so lexical
 /// `Path.is_within` cannot see an escape through a link — compare
 /// `canonicalize` results instead.
-pub fn symlink(original: String, link: String) IOError! -[FS.Write]> { core.files.symlink(original, link) }
+pub fn symlink(original: String | Path, link: String | Path) IOError! -[FS.Write]> {
+    source :: path_text(original)
+    target :: path_text(link)
+    files8_preflight("FS.Write", .Write, target)
+    platform :: core.files.__files8_platform()
+    if platform == 0 -> return Err(files8_other(.Write, Val(target), "symbolic links are unavailable on this platform"))
+    directory := false
+    if platform == 2 -> directory = core.files.__files8_symlink_directory(source)
+    core.files.__files8_symlink(source, target, directory)
+}
 
 
 pub fn hard_link(original: String, link: String) IOError! -[FS.Write]> { core.files.hard_link(original, link) }
@@ -1281,7 +1346,15 @@ pub fn glob(pattern: String) -[FS]> [String] IOError! {
 pub fn temp_dir(prefix: String) -[FS]> TempDir IOError! { core.files.temp_dir(prefix) }
 
 
-pub fn temp_file(prefix: String) -[FS]> TempFile IOError! { core.files.temp_file(prefix) }
+pub fn temp_file(prefix: String) -[FS]> TempFile IOError! {
+    clean :: temp_prefix(prefix)
+    clock :: core.files.__files8_temp_clock()
+    nanos :: if clock.clock_available -> clock.nanos else -> "0"
+    pid :: core.files.__files8_process_id()
+    path :: core.files.__host_path_join(core.files.__files8_temp_directory(), "{clean}_{pid}_{nanos}")
+    files8_preflight("FS.Write", .Write, path)
+    core.files.__files8_temp_file_at(^path)
+}
 
 
 /// Take an exclusive lock by creating `path` (create-new). A second `lock` on
@@ -1736,3 +1809,67 @@ pub fn topath(path: String) -[FS, Env]> String IOError! { core.files.canonicaliz
 pub fn cd(path: String) IOError! -[FS, Env]> { sys.set_current_dir(path) }
 
 
+
+#Test("filesystem u32 policy preserves chown and permission boundaries") {
+    assert(!files8_u32(-1))
+    assert(files8_u32(0))
+    assert(files8_u32(4294967295))
+    assert(!files8_u32(4294967296))
+    assert((4096 & 61440) == 4096)
+    assert((8192 & 61440) != 4096)
+    assert((32768 & 61440) != 4096)
+}
+
+// The held-resource rows retain their existing raw OS carriers. Callers above
+// own name validation, decoding, metadata projection and resource lifetime.
+fn __temp_path_sample() -[Time]> (clock_available: Bool, nanos: String) Never! {
+    core.files.__files8_temp_sample()
+}
+
+fn __host_path_is_absolute(path: String) -> Bool Never! {
+    core.files.__files8_path_absolute(path)
+}
+
+fn __link_reader_at(source: FileReader, into: Int, name: String) -[FS.Write]> (available: Bool, held: Bool, value: Int, errno: Int) Never! {
+    core.files.__files8_link_reader(source, into, name)
+}
+
+fn __open_reader(directory: Int, path: String, links: Int) -[FS.Read]> FileReader IOError! {
+    core.files.__files8_open_reader(directory, path, links)
+}
+
+fn __open_directory(directory: Int, path: String) -[FS.Read]> Int IOError! {
+    core.files.__files8_open_directory(directory, path)
+}
+
+fn __fsync_directory(directory: Int) IOError! -[FS.Write]> {
+    core.files.__files8_fsync_directory(directory)
+}
+
+fn __list_directory(directory: Int) -[FS.Read]> [[U8]] IOError! {
+    core.files.__files8_list_directory(directory)
+}
+
+fn __path_kind(path: String) -[FS.Read]> Int IOError! {
+    core.files.__files8_path_kind(path)
+}
+
+fn __remove_at(directory: Int, name: String, is_directory: Bool) IOError! -[FS.Write]> {
+    core.files.__files8_remove_at(directory, name, is_directory)
+}
+
+fn __xattr_names(path: String) -[FS.Read]> [String] IOError! {
+    core.files.__files8_xattr_names(path)
+}
+
+fn __xattr_set(path: String, name: String, value: [U8]) IOError! -[FS.Write]> {
+    core.files.__files8_xattr_set(path, name, value)
+}
+
+fn __writer_stat(writer: FileWriter) -[FS.Read]> [Int] IOError! {
+    core.files.__files8_writer_stat(writer)
+}
+
+fn __flock(directory: Int, operation: Int) IOError! -[FS.Write]> {
+    core.files.__files8_flock(directory, operation)
+}
