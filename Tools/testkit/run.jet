@@ -95,6 +95,8 @@ struct KitEnv {
     jetpack: String
     timeout: Duration
     memory_limit: Int
+    version: String{""}
+    version_error: String{""}
 }
 
 struct KitEnvVar {
@@ -117,6 +119,8 @@ struct KitRun {
     signal: Int?
     timed_out: Bool
     error: String
+    elapsed_ns: Int{0}
+    limit_hit: String{""}
 }
 struct KitOptions {
     suite: String
@@ -169,6 +173,10 @@ struct KitAssertion {
     path: String
     mode: String
     value: String
+    json_mode: String{""}
+    json_path: String{""}
+    json_op: String{""}
+    ratio: Float{0.0}
 }
 
 struct KitStep {
@@ -179,6 +187,9 @@ struct KitStep {
     cwd: String{""}
     unset: [String]{[]}
     environment: [KitEnvVar]{[]}
+    label: String{""}
+    limit_time: Int{0}
+    limit_memory: Int{0}
 }
 
 struct KitPlan {
@@ -226,10 +237,18 @@ struct KitStepCtx {
     golden: KitGoldenStepCtx?
 }
 
+struct KitCapturedStep {
+    label: String
+    stdout: String
+    stderr: String
+    elapsed_ns: Int
+}
+
 struct KitStepState {
     last: KitRun
     built: String
     built_once: Bool
+    history: [KitCapturedStep]{[]}
 }
 
 struct KitStepResult {
@@ -333,7 +352,14 @@ fn kit_execute_suites(options: KitOptions, root: String) -> Int {
         print("ERROR\tselection\t\tscratch: {err}")
         return 2
     }
-    env :: KitEnv{root: root, scratch: run_scratch, jet: jet, jetpack: jetpack, timeout: Duration.seconds(options.timeout), memory_limit: 0}
+    env := KitEnv{root: root, scratch: run_scratch, jet: jet, jetpack: jetpack, timeout: Duration.seconds(options.timeout), memory_limit: 0}
+    version_run :: kit_exec_invoke(env, [jet, "--version"], root, run_scratch, "")
+    if version_run.code == 0 && kit_exec_process_failure(version_run) == None {
+        env.version = kit_steps_version(version_run.stdout) ?? ""
+        if env.version == "" -> env.version_error = "unparseable jet --version banner"
+    } else {
+        env.version_error = "jet --version failed: {version_run.error} {version_run.stderr}"
+    }
     results := [KitCaseResult]{}
     ran_suites := [String]{}
     loop (index, item) in entries {

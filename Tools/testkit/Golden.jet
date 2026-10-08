@@ -290,9 +290,9 @@ fn kit_golden_build(entry: KitEntry, tier: KitTier, plan: KitPlan, env: KitEnv, 
     }
     case_env :: kit_steps_environment(plan, env, work, scratch, "")
     overlay :: kit_steps_step_environment(step, env, work, scratch, "", case_env)
-    cwd :: if step.cwd == "" -> source else -> files.join(work, step.cwd)
-    result :: kit_exec_invoke_with_env(env, args, cwd, scratch, "", overlay)
-    failure :: kit_exec_process_failure(result)
+    cwd :: if step.cwd == "" -> source else -> files.join(work, kit_steps_expand(step.cwd, env, work, scratch, ""))
+    result :: kit_exec_invoke_with_env(kit_steps_policy(step, env), args, cwd, scratch, "", overlay)
+    failure :: kit_steps_failure(step, result)
     if failure == {
         .Val(value) -> return KitOutcome{verdict: value, run: result}
         .None -> {}
@@ -404,7 +404,7 @@ fn kit_golden_step_check(step: KitStep, index: Int, context: KitStepCtx, state: 
         checked.exit = "{state.last.code}"
         if step.exit != "0" -> checked.exit = step.exit
     }
-    kit_steps_check(checked, context.id, state.last, context.env, context.work, context.scratch, context.snapshots, context.bless, context.plan.normalize, state.built, kit_golden_source_name(golden.entry))
+    kit_steps_check(checked, context.id, state.last, context.env, context.work, context.scratch, context.snapshots, context.bless, context.plan.normalize, state.built, kit_golden_source_name(golden.entry), state.history)
 }
 
 fn kit_golden_mark_tier_splits(results: &[KitCaseResult]) {

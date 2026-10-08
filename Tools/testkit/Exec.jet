@@ -1,6 +1,7 @@
 use core.process as process
 use core.files as files
 use core.sys as sys
+use core.time as time
 
 
 fn kit_exec_defaults() -> KitOptions {
@@ -44,6 +45,7 @@ fn kit_exec_failed(message: String) -> KitRun {
 // Inherit the caller's environment, removing only the compiler-extension hook.
 // Cache roots are run-wide; temporary, schema and jetpack roots are case-local.
 fn kit_exec_invoke_with_env(env: KitEnv, argv: [String], cwd: String, scratch: String, stdin: String, overlay: [KitEnvVar]) -> KitRun {
+    started :: time.instant()
     spec := process.cmd(argv).cwd(cwd).stdout(.Capture).stderr(.Capture).stdin(.Stream)
         .timeout(env.timeout).env_remove("JET_COMPILER_EXTENSION")
         .env("NO_COLOR", "1").env("CLICOLOR", "0").env("TERM", "dumb")
@@ -68,8 +70,19 @@ fn kit_exec_invoke_with_env(env: KitEnv, argv: [String], cwd: String, scratch: S
     }
     child.stdin.close()
     receipt :: child.wait() ?? return kit_exec_failed("wait: {err}")
+    limit_hit :: if receipt.limit_hit == {
+        .Val(limit) -> if limit == {
+            .WallTime -> "time"
+            .CpuTime -> "cpu"
+            .Memory -> "memory"
+            .OpenFiles -> "open-files"
+            .Output -> "output"
+        }
+        .None -> ""
+    }
     KitRun{stdout: receipt.output, stderr: receipt.errors, code: receipt.code,
-        signal: receipt.signal, timed_out: receipt.timed_out, error: input_error}
+        signal: receipt.signal, timed_out: receipt.timed_out, error: input_error,
+        elapsed_ns: started.elapsed().ns, limit_hit: limit_hit}
 }
 
 fn kit_exec_invoke(env: KitEnv, argv: [String], cwd: String, scratch: String, stdin: String) -> KitRun {
