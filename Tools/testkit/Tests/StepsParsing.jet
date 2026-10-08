@@ -52,10 +52,10 @@ fn kit_test_steps_env() -> KitEnv {
 #Test("missing host skips before a declarative capability refusal") {
     env :: kit_test_steps_env()
     missing :: kit_steps_parse("requires: os:not-{sys.family()}\nrefused: missing Windows COM host\n")
-    skipped :: kit_steps_execute(missing, "case", env, env.root, env.scratch, env.root, kit_test_steps_bless())
+    skipped :: kit_steps_execute(kit_steps_context(missing, "case", env, env.root, env.scratch, env.root, kit_test_steps_bless()), kit_steps_hooks())
     assert_eq(skipped.verdict.status, "SKIP-HOST")
     present :: kit_steps_parse("requires: os:{sys.family()}\nrefused: missing Windows COM host\n")
-    refused :: kit_steps_execute(present, "case", env, env.root, env.scratch, env.root, kit_test_steps_bless())
+    refused :: kit_steps_execute(kit_steps_context(present, "case", env, env.root, env.scratch, env.root, kit_test_steps_bless()), kit_steps_hooks())
     assert_eq(refused.verdict.status, "REFUSED")
     assert(refused.verdict.detail.contains("COM"))
 }
@@ -80,4 +80,34 @@ fn kit_test_steps_env() -> KitEnv {
     assert_eq(kit_steps_artifact("pkg/nested/deep/run.jet", root, ""), files.join(root, "pkg/nested/deep/.jet/build/run"))
     assert_eq(kit_steps_artifact("pkg/nested/hello.jet", root, "custom"), files.join(root, "pkg/.jet/build/custom"))
     files.remove_all(root) ?? panic("remove artifact scratch")
+}
+
+#Test("default step hooks resolve built after an explicit successful CLI build") {
+    root :: kit_test_core_scratch("steps-built")
+    kit_exec_write(files.join(root, "hello.jet"), "fn run() {{ print(\"hello\") }}\n")
+    kit_exec_write(files.join(root, "expected.out"), "hello\n")
+    env :: kit_test_golden_env(root)
+    plan :: kit_steps_parse("step: jet build hello.jet\nstep: built\nstdout: = expected.out\n")
+    outcome :: kit_steps_execute(kit_steps_context(plan, "case", env, root, root, root, kit_test_steps_bless()), kit_steps_hooks())
+    assert_eq(outcome.verdict.status, "PASS")
+    assert_eq(outcome.run.stdout, "hello\n")
+    missing :: kit_steps_parse("step: built\n")
+    refused :: kit_steps_execute(kit_steps_context(missing, "case", env, root, root, root, kit_test_steps_bless()), kit_steps_hooks())
+    assert_eq(refused.verdict.status, "REFUSED")
+    files.remove_all(root) ?? panic("remove steps-built scratch")
+}
+
+#Test("step cwd and environment overlay apply after case values and unset last") {
+    root :: kit_test_core_scratch("step-env")
+    kit_exec_write(files.join(root, "nested/marker"), "")
+    kit_exec_write(files.join(root, "expected.out"), "{root}/nested|step|unset")
+    env :: kit_test_golden_env(root)
+    plan := kit_steps_parse("env: TESTKIT_ORDER=case\nstep: sh -c 'printf \"%s|%s|%s\" \"$PWD\" \"$TESTKIT_ORDER\" \"${{JET_RECEIPT_BYPASS-unset}}\"'\nstdout: = expected.out\n")
+    plan.steps[0].cwd = "nested"
+    plan.steps[0].environment = [KitEnvVar{name: "TESTKIT_ORDER", value: Val("step")}]
+    plan.steps[0].unset = ["JET_RECEIPT_BYPASS"]
+    outcome :: kit_steps_execute(kit_steps_context(plan, "case", env, root, root, root, kit_test_steps_bless()), kit_steps_hooks())
+    assert_eq(outcome.verdict.status, "PASS")
+    assert_eq(outcome.run.stdout, "{root}/nested|step|unset")
+    files.remove_all(root) ?? panic("remove step-env scratch")
 }

@@ -73,14 +73,18 @@ pins CLI usage to the source name. Ordered `step:` commands accept quoted argv,
 `stdin:`, `exit:`, exact `stdout:` / `stderr:`, and `file:` assertions.
 `step: build` invokes the selected tier; `step: built [args…]` runs its artifact
 (and inserts a build if necessary). Ordinary setup commands can precede build.
-The artifact is `.jet/build/<entry-stem>` under the nearest package root, or
-under the entry's directory for a standalone program. A programmable build
-with a named executable declares `artifact: <name>` in its sidecar instead.
+The artifact is `.jet/build/<entry-stem>` (dots in the stem become underscores)
+under the nearest package root, or under the entry's directory for a standalone
+program. A programmable build with a named executable declares `artifact: <name>`
+in its sidecar instead.
 The kit checks that the artifact exists after a successful build; progress
 messages do not identify the executable.
 The default expected streams apply to the last step unless it has explicit
 stream assertions. `stdout: one-of FILE FILE` permits only those exact,
 documented host-dependent alternatives and must be edited by hand.
+Golden sidecars and CLI cases share one step sequencer and assertion checker.
+In a CLI case, `step: built [args…]` runs the artifact from the preceding
+successful `step: jet build <entry>`; Golden also supplies its implicit build.
 
 Use `--list`, `--cases FILE` (exact repository-relative IDs), or `--filter TEXT`
 to select cases. `--shard I/N` partitions the sorted corpus deterministically.

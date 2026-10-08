@@ -214,6 +214,19 @@ fn kit_steps_environment(plan: KitPlan, env: KitEnv, work: String, scratch: Stri
     overlay
 }
 
+fn kit_steps_step_environment(step: KitStep, env: KitEnv, work: String, scratch: String, built: String, overlay: [KitEnvVar]) -> [KitEnvVar] {
+    result := overlay
+    loop variable in step.environment {
+        value :: if variable.value == {
+            .Val(text) -> Val(kit_steps_expand(text, env, work, scratch, built))
+            .None -> None
+        }
+        &result.push(KitEnvVar{name: variable.name, value: value})
+    }
+    loop name in step.unset -> &result.push(KitEnvVar{name: name, value: None})
+    result
+}
+
 fn kit_steps_invoke_step(step: KitStep, env: KitEnv, work: String, scratch: String, snapshots: String, built: String, overlay: [KitEnvVar]) -> KitRun {
     argv := [String]{}
     loop argument in step.argv -> &argv.push(kit_steps_expand(argument, env, work, scratch, built))
@@ -227,7 +240,9 @@ fn kit_steps_invoke_step(step: KitStep, env: KitEnv, work: String, scratch: Stri
         argv[0] = built
     }
     stdin :: if step.stdin == "" -> "" else -> files.read(files.join(snapshots, step.stdin)) ?? return kit_exec_failed("stdin snapshot: {err}")
-    kit_exec_invoke_with_env(env, argv, work, scratch, stdin, overlay)
+    environment :: kit_steps_step_environment(step, env, work, scratch, built, overlay)
+    cwd :: if step.cwd == "" -> work else -> files.join(work, step.cwd)
+    kit_exec_invoke_with_env(env, argv, cwd, scratch, stdin, environment)
 }
 
 fn kit_steps_one_of(id: String, directory: String, snapshots: String, actual: String, bless: KitBless) -> KitVerdict {
@@ -303,29 +318,76 @@ fn kit_steps_artifact(entry: String, source: String, artifact: String) -> String
     files.join(files.join(root, ".jet/build"), if artifact == "" -> stem.replace(".", "_") else -> artifact)
 }
 
-fn kit_steps_execute(plan: KitPlan, id: String, env: KitEnv, work: String, scratch: String, snapshots: String, bless: KitBless) -> KitOutcome {
-    last := kit_exec_failed("no steps")
-    if plan.error != "" -> return KitOutcome{verdict: kit_expect_verdict("REFUSED", plan.error), run: last}
-    requirement :: kit_steps_required(plan, env, work, scratch)
+fn kit_steps_context(plan: KitPlan, id: String, env: KitEnv, work: String, scratch: String, snapshots: String, bless: KitBless) -> KitStepCtx {
+    KitStepCtx{plan: plan, id: id, env: env, work: work, scratch: scratch, snapshots: snapshots, bless: bless, golden: None}
+}
+
+fn kit_steps_hooks() -> KitStepHooks {
+    KitStepHooks{
+        invoke: (step: KitStep, index: Int, context: KitStepCtx, state: KitStepState) -> kit_steps_invoke(step, index, context, state),
+        check: (step: KitStep, index: Int, context: KitStepCtx, state: KitStepState) -> kit_steps_check_state(step, index, context, state)
+    }
+}
+
+fn kit_steps_build_entry(step: KitStep) -> String {
+    i := 2
+    loop i < step.argv.len() {
+        argument :: step.argv[i]
+        if !argument.starts_with("-") -> return argument
+        if kit_expect_named(["--profile", "--target", "--output", "--allow", "--deny", "--gate", "--set", "--threads", "--builder", "-p"], argument) -> i += 2
+        else -> i += 1
+    }
+    "run.jet"
+}
+
+fn kit_steps_invoke(step: KitStep, index: Int, context: KitStepCtx, previous: KitStepState) -> KitStepResult {
+    state := previous
+    if step.argv[0] == "build" -> return KitStepResult{state: state, verdict: kit_expect_verdict("REFUSED", "build step requires golden entry; cases use jet build")}
+    if step.argv[0] == "built" && !state.built_once -> return KitStepResult{state: state, verdict: kit_expect_verdict("REFUSED", "built step has no preceding successful build")}
+    overlay :: kit_steps_environment(context.plan, context.env, context.work, context.scratch, state.built)
+    state.last = kit_steps_invoke_step(step, context.env, context.work, context.scratch, context.snapshots, state.built, overlay)
+    if step.argv.len() > 1 && step.argv[0] == "jet" && step.argv[1] == "build" && state.last.code == 0 && kit_exec_process_failure(state.last) == None {
+        cwd :: if step.cwd == "" -> context.work else -> files.join(context.work, step.cwd)
+        entry := kit_steps_build_entry(step)
+        if files.exists(files.join(files.join(cwd, entry), "run.jet")) -> entry = files.join(entry, "run.jet")
+        state.built = kit_steps_artifact(entry, cwd, context.plan.artifact)
+        state.built_once = true
+        if !files.exists(state.built) -> return KitStepResult{state: state, verdict: kit_expect_verdict("ERROR", "CLI build artifact missing: {state.built}")}
+    }
+    KitStepResult{state: state, verdict: kit_expect_verdict("PASS", "")}
+}
+
+fn kit_steps_check_state(step: KitStep, index: Int, context: KitStepCtx, state: KitStepState) -> KitVerdict {
+    kit_steps_check(step, context.id, state.last, context.env, context.work, context.scratch, context.snapshots, context.bless, context.plan.normalize, state.built, "")
+}
+
+// All suites share this sequencing loop. Hooks supply only suite-specific
+// invocation and expectations, never an alternative parser or executor.
+fn kit_steps_execute(context: KitStepCtx, hooks: KitStepHooks) -> KitOutcome {
+    state := KitStepState{last: kit_exec_failed("no steps"), built: "", built_once: false}
+    plan :: context.plan
+    if plan.error != "" -> return KitOutcome{verdict: kit_expect_verdict("REFUSED", plan.error), run: state.last}
+    requirement :: kit_steps_required(plan, context.env, context.work, context.scratch)
     if requirement == {
-        .Val(value) -> return KitOutcome{verdict: value, run: last}
+        .Val(value) -> return KitOutcome{verdict: value, run: state.last}
         .None -> {}
     }
-    if plan.compile_only -> return KitOutcome{verdict: kit_expect_verdict("REFUSED", "run: none is golden-only"), run: last}
-    if plan.refused != "" -> return KitOutcome{verdict: kit_expect_verdict("REFUSED", plan.refused), run: last}
-    if plan.steps.len() == 0 -> return KitOutcome{verdict: kit_expect_verdict("REFUSED", "case has no steps"), run: last}
-    blessing :: kit_steps_bless_plan(plan, id, bless)
+    if plan.compile_only && context.golden == None -> return KitOutcome{verdict: kit_expect_verdict("REFUSED", "run: none is golden-only"), run: state.last}
+    if plan.refused != "" -> return KitOutcome{verdict: kit_expect_verdict("REFUSED", plan.refused), run: state.last}
+    if plan.steps.len() == 0 -> return KitOutcome{verdict: kit_expect_verdict("REFUSED", "case has no steps"), run: state.last}
+    blessing :: kit_steps_bless_plan(plan, context.id, context.bless)
     if blessing == {
-        .Val(value) -> return KitOutcome{verdict: value, run: last}
+        .Val(value) -> return KitOutcome{verdict: value, run: state.last}
         .None -> {}
     }
-    if plan.fixture != "" -> kit_exec_copy_tree(files.join(snapshots, plan.fixture), work, true)
-    overlay :: kit_steps_environment(plan, env, work, scratch, "")
-    loop step in plan.steps {
-        if step.argv[0] == "build" || step.argv[0] == "built" -> return KitOutcome{verdict: kit_expect_verdict("REFUSED", "build/built steps require golden entry"), run: last}
-        last = kit_steps_invoke_step(step, env, work, scratch, snapshots, "", overlay)
-        verdict :: kit_steps_check(step, id, last, env, work, scratch, snapshots, bless, plan.normalize, "", "")
-        if verdict.status != "PASS" -> return KitOutcome{verdict: verdict, run: last}
+    if plan.fixture != "" -> kit_exec_copy_tree(files.join(context.snapshots, plan.fixture), context.work, true)
+    loop (index, step) in plan.steps {
+        invoked :: hooks.invoke(step, index, context, state)
+        state = invoked.state
+        if invoked.verdict.status != "PASS" -> return KitOutcome{verdict: invoked.verdict, run: state.last}
+        verdict :: hooks.check(step, index, context, state)
+        if verdict.status != "PASS" -> return KitOutcome{verdict: verdict, run: state.last}
+        if plan.compile_only -> break
     }
-    KitOutcome{verdict: kit_expect_verdict("PASS", ""), run: last}
+    KitOutcome{verdict: kit_expect_verdict("PASS", ""), run: state.last}
 }

@@ -176,6 +176,9 @@ struct KitStep {
     stdin: String
     exit: String
     assertions: [KitAssertion]
+    cwd: String{""}
+    unset: [String]{[]}
+    environment: [KitEnvVar]{[]}
 }
 
 struct KitPlan {
@@ -204,6 +207,41 @@ struct KitTier {
     audit: Bool
 }
 
+struct KitGoldenStepCtx {
+    entry: KitEntry
+    tier: KitTier
+    source: String
+    expected: String
+    last_explicit: Bool
+}
+
+struct KitStepCtx {
+    plan: KitPlan
+    id: String
+    env: KitEnv
+    work: String
+    scratch: String
+    snapshots: String
+    bless: KitBless
+    golden: KitGoldenStepCtx?
+}
+
+struct KitStepState {
+    last: KitRun
+    built: String
+    built_once: Bool
+}
+
+struct KitStepResult {
+    state: KitStepState
+    verdict: KitVerdict
+}
+
+struct KitStepHooks {
+    invoke: fn(KitStep, Int, KitStepCtx, KitStepState) -[Env, Exec, FS, IO, Mem.Alloc, Panic, Time, Time.Wait]> KitStepResult
+    check: fn(KitStep, Int, KitStepCtx, KitStepState) -[Env, Exec, FS, IO, Mem.Alloc, Panic, Time, Time.Wait]> KitVerdict
+}
+
 struct KitCaseResult {
     suite: String
     case: String
@@ -216,13 +254,13 @@ struct KitCaseResult {
 struct KitSuite {
     name: String
     discover: fn(KitCtx) -[FS, Mem.Alloc, Panic]> [KitEntry]
-    run: fn(KitEntry, KitCtx) -[Env, Exec, FS, IO, Mem.Alloc, Panic, Time.Wait]> [KitOutcome]
+    run: fn(KitEntry, KitCtx) -[Env, Exec, FS, IO, Mem.Alloc, Panic, Time, Time.Wait]> [KitOutcome]
 }
 
 struct KitSelected {
     entry: KitEntry
     suite: String
-    run: fn(KitEntry, KitCtx) -[Env, Exec, FS, IO, Mem.Alloc, Panic, Time.Wait]> [KitOutcome]
+    run: fn(KitEntry, KitCtx) -[Env, Exec, FS, IO, Mem.Alloc, Panic, Time, Time.Wait]> [KitOutcome]
 }
 
 fn kit_suites() -> [KitSuite] {
