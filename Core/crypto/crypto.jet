@@ -39,6 +39,72 @@ module uuid
 
 module vault
 
+module jetc
+
+// Private whole-record physical facts for the temporary syscall seed.
+// `linux` is a compile-time host capability, consumed once at parent open.
+struct __JetcRaw { value: Int, errno: Int, bytes: [U8], linux: Bool }
+struct __JetcStat {
+    status: Int, errno: Int, dev: Int, ino: Int, len: Int,
+    mtime: Int, mtime_ns: Int, nlink: Int, is_file: Bool, is_dir: Bool,
+}
+struct JetcFd { fd: Int }
+impl JetcFd.Close {
+    fn close(^self) {
+        owner :: ^self
+        _ :: core.crypto.__jetc_close(owner.fd)
+    }
+}
+struct JetcTemp { file: JetcFd, path: String? }
+impl JetcTemp.Close {
+    fn close(^self) {
+        temp :: ^self
+        if temp.path == .Val(path) {
+            _ :: core.files.__remove_raw(path)
+        }
+    }
+}
+
+// Incremental SHA-256 uses the same compressor as the one-shot API. Pending
+// plaintext is secret-owned and never grows beyond one compression block.
+struct JetcHash { state: [Int], pending: Secret, length: Int }
+fn jetc_hash() -> JetcHash Never! {
+    JetcHash{state: copy_ints(C_SHA256_IV), pending: Secret.from_bytes([U8]{}), length: 0}
+}
+fn jetc_hash_update(hash: &JetcHash, data: [U8]) Never! {
+    hash.length += data.len()
+    offset := 0
+    if hash.pending.bytes.len() > 0 {
+        loop offset < data.len() && hash.pending.bytes.len() < 64 {
+            &hash.pending.bytes.push(data[offset])
+            offset += 1
+        }
+        if hash.pending.bytes.len() == 64 {
+            sha256_block(&hash.state, hash.pending.bytes, 0)
+            core.crypto.__zeroize(^hash.pending.bytes)
+            hash.pending.bytes = [U8]{}
+        }
+    }
+    loop offset + 64 <= data.len() {
+        sha256_block(&hash.state, data, offset)
+        offset += 64
+    }
+    loop offset < data.len() {
+        &hash.pending.bytes.push(data[offset])
+        offset += 1
+    }
+}
+fn jetc_hash_finish(hash: &JetcHash) -> [U8] Never! {
+    tail := ^hash.pending.bytes
+    hash.pending.bytes = [U8]{}
+    &tail.push(U8{128})
+    loop tail.len() %% 64 != 56 -> &tail.push(U8{0})
+    loop b in be64(hash.length * 8) -> &tail.push(b)
+    loop offset in 0..<tail.len(), 64 -> sha256_block(&hash.state, tail, offset)
+    core.crypto.__zeroize(^tail)
+    words_to_bytes(hash.state, 4)
+}
+
 C_MASK32 :: 4294967295
 
 C_MASK64 :: 18446744073709551615
@@ -529,17 +595,325 @@ pub fn open(identity: X25519SecretKey, box: Sealed, aad: [U8]) -> [U8] CryptoErr
 }
 
 pub fn file_seal(recipients: [X25519PublicKey], source: Path, destination: Path) -[FS, Rand]> Bool FileCryptoError! {
-    data :: host_read_file(source.to_string()) ?? return Err(FileCryptoError.SourceMissing)
-    sealed :: seal(recipients, data, [U8]{}) ?? return Err(FileCryptoError.PublishFailed)
-    host_write_file(destination.to_string(), sealed.bytes) ?? return Err(FileCryptoError.PublishFailed)
+    canonical :: jetc.canonical(recipients)
+    parent :: jetc_parent(destination.to_string())
+    // The portable oracle deliberately has no race-safe source snapshot.
+    if !parent.linux -> return Err(.SourceMissing)
+    input :: jetc_source(source.to_string(), .SourceMissing)
+    metadata :: jetc_stat(input, .SourceMissing)
+    if metadata.len < 0 || metadata.len > jetc.MAX_PLAIN -> return Err(.SourceMissing)
+    stage :: jetc_stage(parent)
+    hash := jetc_hash()
+    length := 0
+    loop {
+        part :: jetc_read(input, jetc.CHUNK, "seal-source-read", .SourceMissing)
+        if part.bytes.len() == 0 -> break
+        length += part.bytes.len()
+        if length > jetc.MAX_PLAIN -> return Err(.SourceMissing)
+        jetc_hash_update(&hash, part.bytes)
+        jetc_write(stage.file, part.bytes, "seal-stage-write")
+    }
+    if length != metadata.len -> return Err(.SourceMissing)
+    expected :: jetc_hash_finish(&hash)
+    jetc_sync(stage.file, "seal-stage-fsync")
+    jetc_seek(stage.file, .PublishFailed)
+    staged :: jetc_digest(stage.file, length, "seal-stage-read")
+    if !constant_time_equal_bytes(staged, expected) -> return Err(.SourceMissing)
+    second :: jetc_source(source.to_string(), .SourceMissing)
+    if !jetc_same_source(metadata, jetc_stat(second, .SourceMissing)) -> return Err(.SourceMissing)
+    current :: jetc_digest(second, length, "seal-source-recheck-read")
+    if !constant_time_equal_bytes(current, expected) -> return Err(.SourceMissing)
+    jetc_seek(stage.file, .PublishFailed)
+    stage_metadata :: jetc_stat(stage.file, .SourceMissing)
+    jetc_seal_stage(canonical, parent, stage, length, expected, stage_metadata, false)
     Ok(true)
 }
 
 pub fn file_open(identity: X25519SecretKey, source: Path, destination: Path) -[FS]> Bool FileCryptoError! {
-    data :: host_read_file(source.to_string()) ?? return Err(FileCryptoError.SourceMissing)
-    plain :: open_sealed(identity, Sealed{bytes: data}, [U8]{}) ?? return Err(FileCryptoError.OpenFailed)
-    host_write_file(destination.to_string(), plain) ?? return Err(FileCryptoError.PublishFailed)
+    input :: jetc_source(source.to_string(), .OpenFailed)
+    metadata :: jetc_stat(input, .OpenFailed)
+    fixed :: jetc_read_exact(input, 20, "open-input-read", .OpenFailed)
+    size :: jetc.header_length(fixed.bytes, metadata.len)
+    header :: jetc_read_exact(input, size, "open-input-read", .OpenFailed)
+    reader := jetc.reader(identity, fixed.bytes, header.bytes, metadata.len)
+    parent :: jetc_parent(destination.to_string())
+    output :: jetc_temp(parent, "jetc-open")
+    loop reader.remaining > 0 {
+        framing :: jetc_read_exact(input, 5, "open-input-read", .OpenFailed)
+        size :: jetc.integer(framing.bytes, 0, 4)
+        if !jetc.record_shape(size, framing.bytes[4]) -> return Err(.OpenFailed)
+        encrypted :: jetc_read_exact(input, size + jetc.TAG, "open-input-read", .OpenFailed)
+        clear :: jetc.open_chunk(&reader, framing.bytes, encrypted.bytes)
+        jetc_write(output.file, clear.bytes, "open-output-write")
+    }
+    trailing :: jetc_read(input, 1, "open-input-read", .OpenFailed)
+    jetc.finish(reader, trailing.bytes)
+    jetc_publish(^output, parent, "open")
     Ok(true)
+}
+
+// Internal source-owned migration coordinator, shared with expert.migrate_v1.
+// The legacy grammar intentionally retains its bounded whole-buffer contract.
+fn __migrate_v1(key: [U8], source: Path, recipients: [X25519PublicKey], destination: Path) -[FS, Rand]> Bool FileCryptoError! {
+    if source == destination -> return Err(.PublishFailed)
+    input :: jetc_source(source.to_string(), .SourceMissing)
+    total :: jetc_stat(input, .SourceMissing).len
+    if total > 1073741858 -> return Err(.OpenFailed)
+    data := Secret{bytes: [U8]{}}
+    loop {
+        part :: jetc_read(input, jetc.CHUNK, "migrate-v1-read-io", .SourceMissing)
+        if part.bytes.len() == 0 -> break
+        if data.bytes.len() + part.bytes.len() > 1073741858 -> return Err(.OpenFailed)
+        loop byte in part.bytes -> &data.bytes.push(byte)
+    }
+    if data.bytes.len() != total -> return Err(.SourceMissing)
+    plain := Secret{bytes: [U8]{}}
+    #Unsafe("the expert API explicitly authorizes authenticated legacy-v1 migration") {
+        plain.bytes = core.crypto.expert.open_v1(key, data.bytes) ?? return Err(.OpenFailed)
+    }
+    canonical :: jetc.canonical(recipients)
+    parent :: jetc_parent(destination.to_string())
+    stage :: jetc_stage(parent)
+    jetc_write(stage.file, plain.bytes, "migrate-stage-write")
+    jetc_sync(stage.file, "migrate-stage-fsync")
+    metadata :: jetc_stat(stage.file, .PublishFailed)
+    jetc_seek(stage.file, .PublishFailed)
+    expected :: sha256(plain.bytes).bytes
+    jetc_seal_stage(canonical, parent, stage, plain.bytes.len(), expected, metadata, true)
+    Ok(true)
+}
+
+struct JetcParent {
+    directory: JetcFd, path: String, destination: String,
+    name: String, metadata: __JetcStat, linux: Bool,
+}
+fn jetc_min(left: Int, right: Int) -> Int Never! {
+    if left < right -> left else -> right
+}
+fn jetc_fd(raw: __JetcRaw, error: FileCryptoError) -> JetcFd FileCryptoError! {
+    if raw.value < 0 -> return Err(error)
+    Ok(JetcFd{fd: raw.value})
+}
+fn jetc_stat(file: JetcFd, error: FileCryptoError) -> __JetcStat FileCryptoError! {
+    result :: core.crypto.__jetc_stat(file.fd)
+    if result.status < 0 -> return Err(error)
+    Ok(result)
+}
+fn jetc_walk_directory(path: String) -> JetcFd FileCryptoError! {
+    current := jetc_fd(core.crypto.__jetc_open_directory(if path.starts_with("/") -> "/" else -> "."), .PublishFailed)
+    loop name in path.split("/") {
+        if name == "" || name == "." -> next
+        if name == ".." -> return Err(.PublishFailed)
+        next :: jetc_fd(core.crypto.__jetc_open_child_directory(current.fd, name), .PublishFailed)
+        close(^current)
+        current = ^next
+    }
+    Ok(^current)
+}
+fn jetc_parent(destination: String) -> JetcParent FileCryptoError! {
+    loop byte in destination.bytes() {
+        if byte == (U8{0}) -> return Err(.PublishFailed)
+    }
+    name :: core.files.basename(destination)
+    if name == "" || name == "." || name == ".." -> return Err(.PublishFailed)
+    parent_text :: core.files.dirname(destination)
+    path :: if parent_text == "" -> "." else -> parent_text
+    opened :: core.crypto.__jetc_open_directory(path)
+    linux :: opened.linux
+    directory := jetc_fd(opened, .PublishFailed)
+    if linux {
+        checked :: jetc_walk_directory(path)
+        close(^directory)
+        directory = ^checked
+    }
+    metadata :: jetc_stat(directory, .PublishFailed)
+    if !metadata.is_dir -> return Err(.PublishFailed)
+    Ok(JetcParent{directory: ^directory, path: path, destination: destination,
+        name: name, metadata: metadata, linux: linux})
+}
+fn jetc_source(path: String, error: FileCryptoError) -> JetcFd FileCryptoError! {
+    file :: jetc_fd(core.crypto.__jetc_open_source(path), error)
+    if !jetc_stat(file, error).is_file -> return Err(error)
+    Ok(^file)
+}
+fn jetc_same_source(left: __JetcStat, right: __JetcStat) -> Bool Never! {
+    identity :: if core.files.__os_family() == "unix" -> left.dev == right.dev && left.ino == right.ino else -> true
+    identity && left.len == right.len && left.mtime == right.mtime && left.mtime_ns == right.mtime_ns
+}
+fn jetc_temp(parent: JetcParent, prefix: String) -> JetcTemp FileCryptoError! {
+    if parent.linux {
+        file :: jetc_fd(core.crypto.__jetc_tmpfile(parent.directory.fd), .PublishFailed)
+        if jetc_stat(file, .PublishFailed).nlink != 0 -> return Err(.PublishFailed)
+        return Ok(JetcTemp{file: ^file, path: None})
+    }
+    pid :: core.files.__atomic_pid()
+    loop attempt in 0..<128 {
+        sequence :: parent.directory.fd * 128 + attempt
+        name :: ".{prefix}-{pid}-{sequence}"
+        path :: core.files.join(parent.path, name)
+        result :: core.crypto.__jetc_create_named(path)
+        if result.value >= 0 -> return Ok(JetcTemp{file: JetcFd{fd: result.value}, path: Val(path)})
+        if result.errno != 17 -> return Err(.PublishFailed)
+    }
+    Err(.PublishFailed)
+}
+fn jetc_stage(parent: JetcParent) -> JetcTemp FileCryptoError! {
+    stage := jetc_temp(parent, "jetc-stage")
+    if stage.path == .Val(path) {
+        core.files.__remove_raw(path) ?? return Err(.PublishFailed)
+        stage.path = None
+    }
+    Ok(^stage)
+}
+fn jetc_io_fault(name: String, error: FileCryptoError) FileCryptoError! {
+    if core.testing.__fault_should_fail(name) -> return Err(error)
+    Ok()
+}
+fn jetc_read(file: JetcFd, count: Int, name: String, error: FileCryptoError) -> Secret FileCryptoError! {
+    loop {
+        if core.testing.__fault_should_fail("{name}.interrupted") -> next
+        jetc_io_fault(name, error)
+        if core.testing.__fault_should_fail("{name}.eof") -> return Ok(Secret{bytes: [U8]{}})
+        requested :: if core.testing.__fault_should_fail("{name}.short") -> jetc_min(count, 17) else -> count
+        result :: core.crypto.__jetc_read(file.fd, requested)
+        if result.value < 0 {
+            if result.errno == 4 -> next
+            return Err(error)
+        }
+        return Ok(Secret{bytes: ^result.bytes})
+    }
+}
+fn jetc_read_exact(file: JetcFd, count: Int, name: String, error: FileCryptoError) -> Secret FileCryptoError! {
+    if count == 0 -> return Ok(Secret{bytes: [U8]{}})
+    out := jetc_read(file, jetc_min(count, jetc.CHUNK), name, error)
+    if out.bytes.len() == 0 -> return Err(error)
+    loop out.bytes.len() < count {
+        part :: jetc_read(file, jetc_min(count - out.bytes.len(), jetc.CHUNK), name, error)
+        if part.bytes.len() == 0 -> return Err(error)
+        loop byte in part.bytes -> &out.bytes.push(byte)
+    }
+    Ok(^out)
+}
+fn jetc_write(file: JetcFd, bytes: [U8], name: String) FileCryptoError! {
+    offset := 0
+    loop offset < bytes.len() {
+        if core.testing.__fault_should_fail("{name}.interrupted") -> next
+        jetc_io_fault(name, .PublishFailed)
+        if core.testing.__fault_should_fail("{name}.zero") -> return Err(.PublishFailed)
+        count :: if core.testing.__fault_should_fail("{name}.short") -> jetc_min(bytes.len() - offset, 17) else -> bytes.len() - offset
+        result :: core.crypto.__jetc_write(file.fd, bytes, offset, count)
+        if result.value < 0 {
+            if result.errno == 4 -> next
+            return Err(.PublishFailed)
+        }
+        if result.value == 0 -> return Err(.PublishFailed)
+        offset += result.value
+    }
+    Ok()
+}
+fn jetc_seek(file: JetcFd, error: FileCryptoError) FileCryptoError! {
+    if core.crypto.__jetc_seek(file.fd, 0).value < 0 -> return Err(error)
+    Ok()
+}
+fn jetc_sync(file: JetcFd, name: String) FileCryptoError! {
+    jetc_io_fault(name, .PublishFailed)
+    if core.crypto.__jetc_fsync(file.fd).value < 0 -> return Err(.PublishFailed)
+    Ok()
+}
+fn jetc_digest(file: JetcFd, expected_length: Int, name: String) -> [U8] FileCryptoError! {
+    hash := jetc_hash()
+    length := 0
+    loop {
+        part :: jetc_read(file, jetc.CHUNK, name, .SourceMissing)
+        if part.bytes.len() == 0 -> break
+        length += part.bytes.len()
+        if length > expected_length || length > jetc.MAX_PLAIN -> return Err(.SourceMissing)
+        jetc_hash_update(&hash, part.bytes)
+    }
+    if length != expected_length -> return Err(.SourceMissing)
+    Ok(jetc_hash_finish(&hash))
+}
+fn jetc_revalidate(parent: JetcParent) FileCryptoError! {
+    current :: if parent.linux -> jetc_walk_directory(parent.path) else -> jetc_fd(core.crypto.__jetc_open_directory(parent.path), .PublishFailed)
+    before :: if parent.linux -> jetc_stat(parent.directory, .PublishFailed) else -> parent.metadata
+    after :: jetc_stat(current, .PublishFailed)
+    if before.dev != after.dev || before.ino != after.ino -> return Err(.PublishFailed)
+    Ok()
+}
+fn jetc_publish(output: ^JetcTemp, parent: JetcParent, operation: String) FileCryptoError! {
+    if parent.linux {
+        jetc_sync(output.file, "{operation}-output-fsync")
+        jetc_revalidate(parent)
+        if core.crypto.__jetc_link(output.file.fd, parent.directory.fd, parent.name).value < 0 -> return Err(.PublishFailed)
+        jetc_sync(parent.directory, "{operation}-directory-fsync")
+    } else {
+        if core.crypto.__jetc_fsync(output.file.fd).value < 0 -> return Err(.PublishFailed)
+        close(^output.file)
+        jetc_revalidate(parent)
+        path :: output.path ?? return Err(.PublishFailed)
+        core.files.hard_link(path, parent.destination) ?? return Err(.PublishFailed)
+        core.files.__remove_raw(path) ?? return Err(.PublishFailed)
+        directory :: jetc_fd(core.crypto.__jetc_open_directory(parent.path), .PublishFailed)
+        if core.crypto.__jetc_fsync(directory.fd).value < 0 -> return Err(.PublishFailed)
+        output.path = None
+    }
+    Ok()
+}
+fn jetc_seal_stage(recipients: [jetc.Recipient], parent: JetcParent, stage: JetcTemp,
+    length: Int, expected: [U8], metadata: __JetcStat, verify: Bool) FileCryptoError! -[FS, Rand]> {
+    file_id :: random_bytes(16) ?? return Err(.PublishFailed)
+    file_key :: Secret{bytes: random_bytes(32) ?? return Err(.PublishFailed)}
+    ephemeral :: Secret{bytes: random_bytes(32) ?? return Err(.PublishFailed)}
+    nonce_prefix :: random_bytes(16) ?? return Err(.PublishFailed)
+    writer := jetc.writer(recipients, length, file_id, ^file_key, ^ephemeral, nonce_prefix)
+    output :: jetc_temp(parent, "jetc-output")
+    operation :: if verify -> "migrate" else -> "seal"
+    jetc_write(output.file, jetc.bytes(writer.prefix, 0, 20), "{operation}-output-write")
+    jetc_write(output.file, jetc.bytes(writer.prefix, 20, writer.prefix.len()), "{operation}-output-write")
+    jetc_seek(stage.file, .SourceMissing)
+    hash := jetc_hash()
+    loop !writer.final {
+        count :: jetc_min(writer.remaining, jetc.CHUNK)
+        plain :: jetc_read_exact(stage.file, count, "{operation}-stage-read", .SourceMissing)
+        jetc_hash_update(&hash, plain.bytes)
+        if count < jetc.CHUNK {
+            trailing :: jetc_read(stage.file, 1, "{operation}-stage-read", .SourceMissing)
+            if trailing.bytes.len() != 0 || !jetc_same_source(metadata, jetc_stat(stage.file, .SourceMissing)) -> return Err(.SourceMissing)
+            if !constant_time_equal_bytes(jetc_hash_finish(&hash), expected) -> return Err(.SourceMissing)
+        }
+        record :: jetc.seal_chunk(&writer, plain.bytes)
+        jetc_write(output.file, jetc.bytes(record, 0, 4), "{operation}-output-write")
+        jetc_write(output.file, jetc.bytes(record, 4, 5), "{operation}-output-write")
+        jetc_write(output.file, jetc.bytes(record, 5, record.len()), "{operation}-output-write")
+    }
+    if verify {
+        jetc_sync(output.file, "migrate-verify-fsync")
+        jetc_io_fault("migrate-reopen-verify", .PublishFailed)
+        jetc_verify_output(output.file, writer, length) ?? return Err(.PublishFailed)
+    }
+    jetc_publish(^output, parent, operation)
+    Ok()
+}
+fn jetc_verify_output(input: JetcFd, writer: jetc.Writer, length: Int) FileCryptoError! {
+    jetc_seek(input, .OpenFailed)
+    metadata :: jetc_stat(input, .OpenFailed)
+    if metadata.len != writer.prefix.len() + (jetc.body_length(length) ?? return Err(.OpenFailed)) -> return Err(.OpenFailed)
+    prefix :: jetc_read_exact(input, writer.prefix.len(), "migrate-verify-read", .OpenFailed)
+    // Exact equality also verifies every original recipient stanza, ephemeral
+    // key and header tag, without retaining writer ephemeral private material.
+    if !constant_time_equal_bytes(prefix.bytes, writer.prefix) -> return Err(.OpenFailed)
+    reader := jetc.Reader{header_hash: writer.header_hash, key: Secret{bytes: ~writer.key.bytes},
+        nonce_prefix: writer.nonce_prefix, remaining: metadata.len - writer.prefix.len(), index: 1, final: false}
+    loop reader.remaining > 0 {
+        framing :: jetc_read_exact(input, 5, "migrate-verify-read", .OpenFailed)
+        size :: jetc.integer(framing.bytes, 0, 4)
+        if !jetc.record_shape(size, framing.bytes[4]) -> return Err(.OpenFailed)
+        encrypted :: jetc_read_exact(input, size + jetc.TAG, "migrate-verify-read", .OpenFailed)
+        _clear :: jetc.open_chunk(&reader, framing.bytes, encrypted.bytes)
+    }
+    trailing :: jetc_read(input, 1, "migrate-verify-read", .OpenFailed)
+    jetc.finish(reader, trailing.bytes)
+    Ok()
 }
 
 pub fn sign(signing_key: SigningKey, bytes: [U8]) -> Signature CryptoError! {
@@ -908,14 +1282,6 @@ fn phc_b64_value(b: U8) -> Int? {
     None
 }
 
-fn host_read_file(path: String) -[FS]> [U8] FileCryptoError! {
-    core.files.read_bytes(path) ?? return Err(FileCryptoError.SourceMissing)
-}
-
-fn host_write_file(path: String, bytes: [U8]) -[FS]> Bool FileCryptoError! {
-    _ :: core.files.write_bytes(path, bytes) ?? return Err(FileCryptoError.PublishFailed)
-    Ok(true)
-}
 
 C_SHA256_IV :: [Int]{0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19}
 
@@ -1045,51 +1411,53 @@ fn sha2_256(data: [U8], iv: [Int]) -> [U8] Never! {
     loop msg.len() % 64 != 56 -> &msg.push(U8{0})
     loop b in be64(bit_len) -> &msg.push(b)
     state := copy_ints(iv)
-    loop off in 0..<msg.len(), 64 {
-        w := [Int]{}
-        loop t in 0..<16 {
-            i :: off + t * 4
-            &w.push(be32_word(msg, i))
-        }
-        loop t in 16..<64 {
-            s0 :: rotr32(w[t - 15], 7) ~| rotr32(w[t - 15], 18) ~| (w[t - 15] >> 3)
-            s1 :: rotr32(w[t - 2], 17) ~| rotr32(w[t - 2], 19) ~| (w[t - 2] >> 10)
-            &w.push(wrap32(w[t - 16] + s0 + w[t - 7] + s1))
-        }
-        a := state[0]
-        b := state[1]
-        c := state[2]
-        d := state[3]
-        e := state[4]
-        f := state[5]
-        g := state[6]
-        h := state[7]
-        loop t in 0..<64 {
-            s1 :: rotr32(e, 6) ~| rotr32(e, 11) ~| rotr32(e, 25)
-            ch :: (e & f) ~| ((e ~| C_MASK32) & g)
-            temp1 :: wrap32(h + s1 + ch + C_SHA256_K[t] + w[t])
-            s0 :: rotr32(a, 2) ~| rotr32(a, 13) ~| rotr32(a, 22)
-            maj :: (a & b) ~| (a & c) ~| (b & c)
-            temp2 :: wrap32(s0 + maj)
-            h = g
-            g = f
-            f = e
-            e = wrap32(d + temp1)
-            d = c
-            c = b
-            b = a
-            a = wrap32(temp1 + temp2)
-        }
-        state[0] = wrap32(state[0] + a)
-        state[1] = wrap32(state[1] + b)
-        state[2] = wrap32(state[2] + c)
-        state[3] = wrap32(state[3] + d)
-        state[4] = wrap32(state[4] + e)
-        state[5] = wrap32(state[5] + f)
-        state[6] = wrap32(state[6] + g)
-        state[7] = wrap32(state[7] + h)
-    }
+    loop off in 0..<msg.len(), 64 -> sha256_block(&state, msg, off)
     words_to_bytes(state, 4)
+}
+
+fn sha256_block(state: &[Int], msg: [U8], off: Int) Never! {
+    w := [Int]{}
+    loop t in 0..<16 {
+        i :: off + t * 4
+        &w.push(be32_word(msg, i))
+    }
+    loop t in 16..<64 {
+        s0 :: rotr32(w[t - 15], 7) ~| rotr32(w[t - 15], 18) ~| (w[t - 15] >> 3)
+        s1 :: rotr32(w[t - 2], 17) ~| rotr32(w[t - 2], 19) ~| (w[t - 2] >> 10)
+        &w.push(wrap32(w[t - 16] + s0 + w[t - 7] + s1))
+    }
+    a := state[0]
+    b := state[1]
+    c := state[2]
+    d := state[3]
+    e := state[4]
+    f := state[5]
+    g := state[6]
+    h := state[7]
+    loop t in 0..<64 {
+        s1 :: rotr32(e, 6) ~| rotr32(e, 11) ~| rotr32(e, 25)
+        ch :: (e & f) ~| ((e ~| C_MASK32) & g)
+        temp1 :: wrap32(h + s1 + ch + C_SHA256_K[t] + w[t])
+        s0 :: rotr32(a, 2) ~| rotr32(a, 13) ~| rotr32(a, 22)
+        maj :: (a & b) ~| (a & c) ~| (b & c)
+        temp2 :: wrap32(s0 + maj)
+        h = g
+        g = f
+        f = e
+        e = wrap32(d + temp1)
+        d = c
+        c = b
+        b = a
+        a = wrap32(temp1 + temp2)
+    }
+    state[0] = wrap32(state[0] + a)
+    state[1] = wrap32(state[1] + b)
+    state[2] = wrap32(state[2] + c)
+    state[3] = wrap32(state[3] + d)
+    state[4] = wrap32(state[4] + e)
+    state[5] = wrap32(state[5] + f)
+    state[6] = wrap32(state[6] + g)
+    state[7] = wrap32(state[7] + h)
 }
 
 fn sha1_raw(data: [U8]) -> [U8] {
