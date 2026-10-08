@@ -24,7 +24,7 @@ fn fx_priority_queue_program(b: FxBuilder) -> MIRProgram Never! {
     p
 }
 
-// expect-stdout priority-queues: "[9, 7, 4, 1]\n9\n9\n7\n[4, 1]\n[12, 4, 1]\n4\n12\nNone\n[1]\n1\ntrue\n0\ntrue\nzebra\n[apple]\n"
+// expect-stdout priority-queues: "[9, 7, 4, 1]\n9\n9\n7\n[4, 1]\n[12, 4, 1]\n4\n12\nNone\n[1]\n1\ntrue\n0\ntrue\nzebra\n[apple]\n[5, 5, 3]\n5\n5\n3\nNone\n"
 // expect-runtime-only priority-queues: native max-heap and canonical text/Int ownership exports
 fn fx_priority_queues() -> MIRProgram Never! {
     b := fx_builder()
@@ -96,6 +96,24 @@ fn fx_priority_queues() -> MIRProgram Never! {
     fx_do(&b, MIROperation.Drop{value: saved, kind: MIRDropKind.Value})
     fx_do(&b, MIROperation.Drop{value: sorted, kind: MIRDropKind.Value})
     fx_do(&b, MIROperation.Drop{value: fresh, kind: MIRDropKind.Value})
+    duplicates :: fx_owned(&b, ty, MIROperation.Semantic{operation: MIRSemanticOp.StaticPreludeCall{call: fx_prelude_id("core.builtin", "priority_queue_new"), args: [MIRCallArg]{}, owner_type_args: [MIRType]{fx_int()}, type_args: [MIRType]{}}})
+    duplicate_root :: fx_local(&b, "duplicates", ty, mir_owned_ownership())
+    fx_do(&b, MIROperation.WritePlace{place: duplicate_root, value: duplicates})
+    duplicate_lent :: fx_value(&b, ty, mir_ownership_from_access(MIRAccess.Write), MIROperation.AddressOf{place: duplicate_root, access: MIRAccess.Write})
+    offered :: [Int]{5, 3, 5}
+    loop item in offered {
+        value :: fx_int_const(&b, item)
+        _ := fx_list_method(&b, "list_push", duplicate_lent, Val(duplicate_root), [MIRValueID]{value}, fx_unit(), false)
+    }
+    fx_print(&b, duplicates)
+    attempts :: [Int]{0, 1, 2, 3}
+    loop _ in attempts {
+        value :: fx_list_method(&b, "priority_queue_pop", duplicate_lent, Val(duplicate_root), [MIRValueID]{}, option_ty, true)
+        fx_print(&b, value)
+        fx_do(&b, MIROperation.Drop{value: value, kind: MIRDropKind.Value})
+    }
+    duplicate_retired :: fx_owned(&b, ty, MIROperation.MovePlace{place: duplicate_root})
+    fx_do(&b, MIROperation.Drop{value: duplicate_retired, kind: MIRDropKind.Value})
     fx_end(&b, MIRTerminator.Return{value: None})
     fx_priority_queue_program(b)
 }

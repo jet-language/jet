@@ -1,5 +1,9 @@
 // PriorityQueue<T> is a binary max-heap in the owned List header/buffer.
 // Heap swaps move bytes (never clone owners); all retirement uses List glue.
+// Reference: Prelude/Core/Collections.rs jet_priority_queue_* uses BinaryHeap.
+// Ord-equal values have unspecified identity order; native derived Ord compares
+// every stored member, so equal keys have identical observable payloads here.
+// TextValues.rs BinaryHeap Display/Debug and Values.rs Show sort highest-first.
 use jet_foundation.[
     MIRCallArg, MIRInstruction, MIRPlaceID, MIRPreludeCall, MIRPreludeCallID,
     MIRProgram, MIRType, MIRTypeKind, MIRValueID, mir_nominal_ref, mir_type_from_kind,
