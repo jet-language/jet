@@ -3240,6 +3240,12 @@ Arenas are the safe fast-allocation primitive; raw pointers and volatile access
 are separate unsafe operations. The source is
 [`Core/mem/mem.jet`](../../../Core/mem/mem.jet).
 
+Checked `core.data` source reads publication revisions through private generic
+`core.mem` leaves. Both the Shared owner and its captured ticket retain the
+existing canonical revision; neither accessor copies the payload or creates
+another generation counter. Their native free-function targets are mechanical
+generic adapters only and are removed with the native provider at cutover.
+
 An allocation view borrows its allocator's storage. It cannot be returned,
 stored, sent, or used after the allocator resets or closes: the checker reports
 **E0631** for an escaping view and **E0632** for a view used after invalidation.

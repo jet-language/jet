@@ -1845,3 +1845,22 @@ fn upper(text: String) -> String Never! {
     assert(JetDataPlotBackend.Browser.as_str() == "browser")
     assert(JetDataPlotSupport.Degraded.as_str() == "degraded")
 }
+
+fn data_query_revision_contract() Never! {
+    state :: shared Int{0}
+    initial :: state.capture()
+    assert(core.mem.__shared_revision<Int>(state) == 0)
+    assert(core.mem.__snapshot_revision<Int, Int>(initial) == 0)
+    if state.try_replace(^initial, 1) == {
+        .Ok(published) -> assert(published)
+        .Err(_) -> assert(false)
+    }
+    assert(core.mem.__shared_revision<Int>(state) == 1)
+    next_ticket :: state.capture()
+    assert(next_ticket.value() == 1)
+    assert(core.mem.__snapshot_revision<Int, Int>(next_ticket) == 1)
+}
+
+#Test("Query revision metadata reads the canonical Shared owner and ticket") {
+    data_query_revision_contract()
+}

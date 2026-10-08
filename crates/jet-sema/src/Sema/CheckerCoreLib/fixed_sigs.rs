@@ -1292,6 +1292,17 @@ fn core_fixed_sig_impl(
             Some(Type::Bool),
         )),
         ("core.mem", "__type_size") => Some((vec![], Some(Type::Int))),
+        ("core.mem", "__shared_revision") => Some((
+            vec![(read, Type::Shared(Box::new(Type::Named("__element".to_string()))))],
+            Some(Type::Int),
+        )),
+        ("core.mem", "__snapshot_revision") => Some((
+            vec![(read, Type::Apply {
+                name: Syntax::TYPE_SHARED_SNAPSHOT.to_string(),
+                args: vec![Type::Named("__element".to_string()), Type::Named("__projection".to_string())],
+            })],
+            Some(Type::Int),
+        )),
         ("core.encoding", "__coerce_now") => Some((vec![], Some(Type::Int))),
         ("core.encoding", "__coerce_emit") => Some((vec![(read, Type::String)], Some(unit.clone()))),
         ("core.encoding", "__read_byte") => Some((

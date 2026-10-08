@@ -520,6 +520,14 @@ fn core_sig_encoding_backing(request: CoreCallSignatureRequest) -> CoreTypedCall
     entry :: Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "key", ty: Type.String}, TypeTupleField{name: "value", ty: tree}}}
     entries :: Type.List{element: entry}
     cause :: core_sig_named("EncodingCause")
+    if module_name == "core.mem" && (member == "__shared_revision" || member == "__snapshot_revision") {
+        element :: core_sig_named("T")
+        snapshot :: member == "__snapshot_revision"
+        payload :: if snapshot -> Type.Apply{name: "SharedSnapshot", args: [Type]{element, core_sig_named("U")}} else -> Type.Shared{inner: element}
+        signature := core_sig_generic(module_name, member, [CoreCallTypedParameter]{core_sig_positional(payload, read)}, Val(Type.Int), core_sig_type_parameter("T", CoreCallTypeConstraint.Any))
+        if snapshot -> &signature.type_parameters.push(core_sig_type_parameter("U", CoreCallTypeConstraint.Any))
+        return Val(signature)
+    }
     if module_name == "core.mem" && core_sig_one_of(member, [String]{"__list_capacity", "__list_reserve_exact", "__type_size"}) {
         element :: core_sig_named("T")
         params := [CoreCallTypedParameter]{}

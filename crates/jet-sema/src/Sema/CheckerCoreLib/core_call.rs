@@ -898,6 +898,27 @@ fn resolved_core_fixed_sig(
     span: Span,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<(Vec<(AccessConvention, Type)>, Option<Type>)> {
+    if module == "core.mem" && matches!(name, "__shared_revision" | "__snapshot_revision") {
+        let snapshot = name == "__snapshot_revision";
+        let expected = if snapshot { 2 } else { 1 };
+        if type_args.len() != expected {
+            diags.push(Diagnostic::error(
+                "E0119",
+                format!("`{name}` expects {expected} type arguments"),
+                "the compiler-private revision primitive needs its checked owner and projection types".to_string(),
+                if snapshot { "write `__snapshot_revision<T, U>(snapshot)`".to_string() }
+                else { "write `__shared_revision<T>(shared)`".to_string() },
+                Some(span),
+            ));
+            return None;
+        }
+        let payload = if snapshot {
+            Type::Apply { name: Syntax::TYPE_SHARED_SNAPSHOT.to_string(), args: type_args.to_vec() }
+        } else {
+            Type::Shared(Box::new(type_args[0].clone()))
+        };
+        return Some((vec![(AccessConvention::Read, payload)], Some(Type::Int)));
+    }
     if module == "core.mem"
         && matches!(name, "__list_capacity" | "__list_reserve_exact" | "__type_size")
     {
@@ -2370,6 +2391,21 @@ impl<'a> Checker<'a> {
         args: &mut Vec<crate::AST::CallArg>,
         resolved_ret_out: &mut Option<Type>,
     ) -> Option<Type> {
+        if module == "core.mem" && matches!(name, "__shared_revision" | "__snapshot_revision") {
+            let vetted = self.name_ledger.module_alias(self.module_idx)
+                .and_then(jet_foundation::CoreModuleExports::core_source_module_by_alias)
+                .is_some_and(|source| source.module == "core.data");
+            if !vetted {
+                self.diags.push(Diagnostic::error(
+                    "E0510",
+                    format!("`{module}.{name}` is compiler-private"),
+                    "canonical Shared revision metadata is restricted to checked Core data source".to_string(),
+                    "use the public Shared capture and publication API".to_string(),
+                    Some(span),
+                ));
+                return None;
+            }
+        }
         let encoding_backing_leaf = (module == "core.mem"
             && matches!(name, "__list_capacity" | "__list_reserve_exact" | "__type_size"))
             || (module == "core.encoding"
