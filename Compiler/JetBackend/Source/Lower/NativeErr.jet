@@ -1,0 +1,90 @@
+// Err88 is a runtime-owned opaque handle, never the public three-field shell.
+// The seed path retains its original layout. lower_selected copies the one
+// native_pack argument into both MIRProgram and LowerModule before lowering.
+fn lower_native_err_type(p: MIRProgram, ty: MIRType) -> Bool {
+    if !p.native_pack -> return false
+    runtime :: lower_runtime_handle_type(p, ty) ?? return false
+    runtime.runtime == "JetErr" && lower_record_schema_with_handle(p, ty, Val(runtime)) != None
+}
+fn lower_native_err_member(p: MIRProgram, ty: MIRType, id: MIRFieldID) -> MIRField? {
+    definition :: lower_type_def(p, ty) ?? return None
+    if definition.kind == .Struct(fields, _) {
+        loop field in lower_stored_fields(fields) { if field.id == id -> return Val(~field) }
+    }
+    None
+}
+fn lower_native_err_field(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, handle: LIRValueID, ty: MIRType, id: MIRFieldID) Never! {
+    field :: lower_native_err_member(p, ty, id) ?? return lower_fail(&m, &f, "native Err field is missing")
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return
+    slot :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.StackSlot{dst: slot, size: 8, align: 8})
+    lower_record_load_value(p, &m, &f, handle, "jet_rt_record_get_JetErr_{field.name}", field.ty, slot, 0)
+    lower_emit(&f, LIRInst.Load{dst: dst, base: slot, offset: 0})
+}
+// Borrowed projection exposes only the public fields; metadata remains opaque.
+// A Some Option borrows a one-word payload cell inside Err88, not an Err box.
+fn lower_native_err_place(p: MIRProgram, f: &LowerFunction, handle: LIRValueID, ty: MIRType, id: MIRFieldID) -> LowerPlaceAddress? {
+    field :: lower_native_err_member(p, ty, id) ?? return None
+    if field.name != "message" && field.name != "code" && field.name != "cause" -> return None
+    offset :: if field.name == "message" -> Int.from_i64(ERR_MESSAGE) else if field.name == "code" -> Int.from_i64(ERR_CODE) else -> Int.from_i64(ERR_CAUSE)
+    cell :: lower_address(&f, handle, offset)
+    if field.ty.kind != .Option(_) -> return Val(LowerPlaceAddress{address: LowerFieldAddress{base: cell, offset: 0}, ty: field.ty, borrowed: true})
+    payload :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Load{dst: payload, base: cell, offset: 0})
+    null :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Const{dst: null, value: 0})
+    absent :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: absent, condition: LIRCondition.Eq, left: payload, right: null})
+    slot :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.StackSlot{dst: slot, size: 8, align: 8})
+    some :: lower_new_block(&f)
+    none :: lower_new_block(&f)
+    done :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: absent, then_target: lower_target(none, [LIRValueID]{}), else_target: lower_target(some, [LIRValueID]{})})
+    lower_start(&f, some, [LIRValueID]{})
+    lower_emit(&f, LIRInst.Store{base: slot, offset: 0, value: cell})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, none, [LIRValueID]{})
+    lower_emit(&f, LIRInst.Store{base: slot, offset: 0, value: null})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, done, [LIRValueID]{})
+    Val(LowerPlaceAddress{address: LowerFieldAddress{base: slot, offset: 0}, ty: field.ty, borrowed: true})
+}
+fn lower_native_err_construct(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, ty: MIRType, fields: [MIRFieldValue]) Never! {
+    assert(p.native_pack == m.native_pack)
+    args := [LIRValueID]{}
+    names :: [String]{"message", "code", "cause"}
+    loop name in names {
+        found := false
+        loop value in fields {
+            field :: lower_native_err_member(p, ty, value.field) ?? return lower_fail(&m, &f, "native Err constructor field is missing")
+            if field.name != name -> next
+            operand :: lower_use(&m, &f, value.value) ?? return
+            &args.push(operand)
+            found = true
+        }
+        if !found -> return lower_fail(&m, &f, "native Err constructor requires {name}")
+    }
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return
+    box :: args[2]
+    null :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Const{dst: null, value: 0})
+    absent :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: absent, condition: LIRCondition.Eq, left: box, right: null})
+    some :: lower_new_block(&f)
+    done :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: absent, then_target: lower_target(done, [LIRValueID]{null}), else_target: lower_target(some, [LIRValueID]{})})
+    lower_start(&f, some, [LIRValueID]{})
+    cause :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Load{dst: cause, base: box, offset: 0})
+    size :: lower_const(&f, 8)
+    align :: lower_const(&f, 8)
+    lower_call_runtime(&m, &f, "jet_rt_free", [LIRValueID]{box, size, align}, None)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{cause})})
+    transferred :: lower_pointer(&f)
+    lower_start(&f, done, [LIRValueID]{transferred})
+    lower_call_runtime(&m, &f, "jet_rt_record_new_JetErr", [LIRValueID]{args[0], args[1], transferred}, Val(dst))
+    // Constructor borrows+clones text/code, whereas MIR Struct transfers them.
+    lower_emit(&f, LIRInst.Drop{value: args[0]})
+    lower_emit(&f, LIRInst.Drop{value: args[1]})
+}

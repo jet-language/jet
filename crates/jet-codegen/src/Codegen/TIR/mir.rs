@@ -1560,6 +1560,7 @@ fn lower_tir_to_mir_with_stop_points(mut program: TirProgram, stop_points: bool)
     inline_known_constant_reads(&mut functions, &program.declarations.constants, &constants);
 
     Ok(MirProgram {
+        native_pack: false,
         schema_version: MIR_SCHEMA_VERSION,
         package_identity: program.package_identity.clone(),
         facts: lower_package_facts(&program),

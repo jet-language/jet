@@ -1580,3 +1580,29 @@ ambiguous pairing is reported, never treated as equality. `--bootstrap JETC0`
 provides a front-end diagnostic census before the probe can be built.
 Preparation and a receipt-only census never establish differential parity;
 only `summary.json` with `differential_verified: true` does.
+
+### Native-runtime ABI mode in checked MIR
+
+MIR schema 7 adds the mirrored `MIRProgram.native_pack` Boolean. Front-end
+producers and seed fixtures initialize it to false; only the explicit
+`lir_lower_native_imports` lowering boundary selects it as true. Ordinary
+native programs' stop-point production is a different fact. `lower_repr`
+can therefore select the runtime-owned native Err ABI without threading a
+second mode through every storage/clone/drop caller.
+
+In that mode the checked `Err` declaration with its canonical JetErr row is
+an opaque Err88 handle. Its getters retain the complete nested error, its
+constructor transfers the cause and borrows/clones message and code, and
+clone/drop/equality/rendering use the sole runtime provider. No generic
+three-field native record shell or `record.in`/`record.out` conversion is
+generated for JetErr. Borrowed place projections consult the shared
+`Source/ErrLayout.jet`; writes and moves remain forbidden. `lower_selected`
+copies its mode argument to both program and module and asserts equality
+before lowering either native or seed mode. The seed layout is unchanged.
+
+The Source and Rust canonical digests encode this fact in the same position.
+Bootstrap's field-difference mirror includes it. Both typed bootstrap MIR
+conversion and the compiler-image codec derive their fields from the updated
+real declarations, so their next generation includes the Boolean rather than
+defaulting a missing stream token. Schema-6 images must be regenerated; this
+seam belongs only to the post-gate compiler unit.

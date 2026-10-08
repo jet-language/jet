@@ -100,9 +100,17 @@ set(route, 'member', { k: 'str', v: 'u32.wrapping.add' }); context.convert(progr
 assert.equal(variant(context.convert(checkedBinary, named('MIROperation'), 'test').fields[2], 'MIRBinaryOverflow'), 'Unchecked');
 const tokens = ['0']; encode(context.convert(program, named('MIRProgram'), 'test'), named('MIRProgram'), schema, tokens);
 assert.equal(decodeStream(tokens.join('\n'), schema).program.schema_version, '0');
+assert.equal(decodeStream(tokens.join('\n'), schema).program.native_pack, false);
+set(program, 'native_pack', parseRustDebug('true'));
+const nativeTokens = ['0'];
+encode(context.convert(program, named('MIRProgram'), 'test'), named('MIRProgram'), schema, nativeTokens);
+assert.equal(decodeStream(nativeTokens.join('\n'), schema).program.native_pack, true);
+assert.notDeepEqual(nativeTokens, tokens);
+set(program, 'native_pack', parseRustDebug('false'));
 assert.throws(() => decodeStream(tokens.slice(0, -1).join('\n'), schema), /truncated/);
 assert.throws(() => decodeStream(tokens.concat('trailing').join('\n'), schema), /trailing/);
 const writer = jetWriter(schema);
 assert.match(writer, /fn mirw_mir_program\(/);
+assert.match(writer, /mirw_bool\(v\.native_pack, &out\)/);
 assert.match(writer, /mirw_mir_copy_fact\(v1, &out\)/);
 console.log('front-feed codec: all six checked schema mappings and strict observation passed');

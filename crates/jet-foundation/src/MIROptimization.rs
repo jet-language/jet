@@ -12301,6 +12301,7 @@ pub fn mir_program_bytes(program: &MirProgram) -> Vec<u8> {
 fn write_mir_program(mut writer: CanonicalWriter, program: &MirProgram) -> CanonicalWriter {
     writer.tag("mir");
     writer.u16(program.schema_version);
+    writer.bool(program.native_pack);
     writer.str(&program.package_identity);
     writer.str(&program.facts.project_root);
     writer.str(&program.facts.edition);
@@ -16443,6 +16444,7 @@ mod ownership_guard_tests {
             inline_guard_function(1, "candidate_caller", false, vec![bad_call, good_call]);
         let mut program = MirProgram {
             cffi: crate::MIR::MirCffiFacts::default(),
+            native_pack: false,
             schema_version: crate::MIR::MIR_SCHEMA_VERSION,
             package_identity: "inline-drop-guard".into(),
             facts: crate::MIR::MirPackageFacts::default(),

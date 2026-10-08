@@ -147,6 +147,11 @@ fn lower_native_glue_rewrite(p: MIRProgram, m: &LowerModule, function: LIRFuncti
 fn lower_native_glue_import(p: MIRProgram, m: &LowerModule, caller: String, symbol: String) Never! {
     if m.native_exports.get(symbol) != None -> return
     row :: lower_native_export(symbol) ?? return
+    // Err88's hand provider owns every export; a public three-field shell
+    // would erase identity, context, conversions and details.
+    if m.native_pack && lower_runtime_handle(row.jet_name) == .Val(runtime) {
+        if runtime.runtime == "JetErr" -> return
+    }
     ty :: lower_native_source_type(p, row.jet_name) ?? {
         &m.issues.push(LIRLoweringIssue{function: caller, message: "native export {symbol} requires the actual source declaration's native layout"})
         return

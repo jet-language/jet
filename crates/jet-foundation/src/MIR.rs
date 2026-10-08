@@ -21,7 +21,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt;
 use std::sync::{Arc, Mutex};
 
-pub const MIR_SCHEMA_VERSION: u16 = 6;
+pub const MIR_SCHEMA_VERSION: u16 = 7;
 
 macro_rules! mir_id {
     ($name:ident) => {
@@ -7112,6 +7112,8 @@ pub struct MirUnreachable {
 #[derive(Debug, Clone)]
 pub struct MirProgram {
     pub cffi: MirCffiFacts,
+    /// Explicit native-runtime ABI mode; seed producers always leave this false.
+    pub native_pack: bool,
     pub schema_version: u16,
     pub package_identity: String,
     pub facts: MirPackageFacts,
