@@ -54,20 +54,31 @@ fn alloc_policy_tracker_empty() -> Bool {
     if (jet_rt_program_allocator_fact(I64{0}) != I64{1} || jet_rt_program_allocator_fact(I64{1}) != huge || jet_rt_program_allocator_fact(I64{2}) != I64{0} || jet_rt_program_allocator_fact(I64{3}) != huge || !alloc_policy_tracker_empty()) {
         return I64{110}
     }
+    jet_rt_program_allocator_restore(I64{0}, I64{0})
+    if (jet_rt_program_allocator_fact(I64{0}) != I64{1} || jet_rt_program_allocator_fact(I64{1}) != huge || jet_rt_program_allocator_fact(I64{3}) != huge || jet_rt_program_allocator_fact(I64{4}) != I64{0} || jet_rt_program_allocator_fact(I64{5}) != I64{0}) {
+        return I64{116}
+    }
 
     // Both allocation doors use one reservation kernel. Tracker nodes bypass
     // it; restoring system policy cannot lose a still-live counted block.
     jet_rt_program_allocator_configure(I64{1}, I64{16})
+    if (jet_rt_program_allocator_fact(I64{0}) != I64{0} || jet_rt_program_allocator_fact(I64{1}) != I64{0} || jet_rt_program_allocator_fact(I64{3}) != I64{0}) {
+        return I64{117}
+    }
     regular :: jet_rt_alloc(I64{8}, I64{8})
     if (jet_rt_program_allocator_fact(I64{0}) != I64{1} || jet_rt_program_allocator_fact(I64{2}) != I64{8}) {
         return I64{111}
     }
-    jet_rt_program_allocator_configure(I64{0}, I64{0})
+    jet_rt_program_allocator_restore(I64{0}, I64{0})
     untracked :: jet_rt_alloc_try(I64{8}, I64{8})
     if (untracked == I64{0} || jet_rt_program_allocator_fact(I64{0}) != I64{1}) { return I64{112} }
     jet_rt_free(untracked, I64{8}, I64{8})
     if (jet_rt_program_allocator_fact(I64{2}) != I64{8}) { return I64{113} }
     jet_rt_free(regular, I64{8}, I64{8})
+    jet_rt_program_allocator_restore(I64{0}, I64{0})
+    if (jet_rt_program_allocator_fact(I64{0}) != I64{1} || jet_rt_program_allocator_fact(I64{1}) != I64{8} || jet_rt_program_allocator_fact(I64{3}) != I64{8}) {
+        return I64{118}
+    }
     if (jet_rt_program_allocator_fact(I64{2}) != I64{0} || !alloc_policy_tracker_empty()) {
         return I64{114}
     }
