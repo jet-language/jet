@@ -1420,6 +1420,15 @@ for (const [name, full] of handleRows) {
     throw new Error(`${name} carrier requires Jet clone/drop exports in sources.list and exports.list before adapter cutover`);
   }
 }
+// One ownership gate for every generated handle helper. Carrier metadata
+// remains unchanged; a Jet provider must implement this exact physical ABI.
+const jetOwnsHandleGlue = (symbol, parameters, result) => {
+  if (!jetRuntimeExports.has(symbol)) return false;
+  validateRuntimeRoute({ symbol, name: symbol,
+    params: parameters.map((type) => ({ ctys: [type] })),
+    result: { ret: result, outs: [] } }, jetRuntimeSignatures.get(symbol));
+  return true;
+};
 
 const rs = [];
 rs.push("// BEGIN GENERATED C-ABI ROUTES (Tools/agent/gen-c-abi-routes.mjs; do not hand-edit)");
@@ -1475,15 +1484,19 @@ rs.push("        len as i64");
 rs.push("    }");
 const cloneable = new Set(handleRows.filter(([, full]) => derivesClone(full)).map(([name]) => name));
 for (const [name, full] of handleRows) {
-  rs.push("");
-  rs.push("    #[no_mangle]");
-  rs.push(`    pub extern "C" fn jet_rt_handle_drop_${name}(value: *mut ${handleType(full)}) {`);
-  rs.push("        if !value.is_null() {");
-  rs.push("            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.");
-  rs.push(handleBridge(full) ? `            super::jet_c_abi_host::${handleBridge(full).stem}_drop(value);` : "            drop(unsafe { Box::from_raw(value) });");
-  rs.push("        }");
-  rs.push("    }");
-  if (!cloneable.has(name)) continue;
+  const pointer = `*mut ${handleType(full)}`;
+  if (!jetOwnsHandleGlue(`jet_rt_handle_drop_${name}`, [pointer], null)) {
+    rs.push("");
+    rs.push("    #[no_mangle]");
+    rs.push(`    pub extern "C" fn jet_rt_handle_drop_${name}(value: ${pointer}) {`);
+    rs.push("        if !value.is_null() {");
+    rs.push("            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.");
+    rs.push(handleBridge(full) ? `            super::jet_c_abi_host::${handleBridge(full).stem}_drop(value);` : "            drop(unsafe { Box::from_raw(value) });");
+    rs.push("        }");
+    rs.push("    }");
+  }
+  const ownedClone = jetOwnsHandleGlue(`jet_rt_handle_clone_${name}`, [pointer], pointer);
+  if (!cloneable.has(name) || ownedClone) continue;
   rs.push("");
   rs.push("    #[no_mangle]");
   rs.push(`    pub extern "C" fn jet_rt_handle_clone_${name}(value: *mut ${handleType(full)}) -> *mut ${handleType(full)} {`);
@@ -1499,7 +1512,8 @@ const rendered = (name, full) => {
 };
 for (const [name, full] of handleRows) {
   for (const [kind, trait, method] of [["display", "JetDisplay", "jet_display"], ["show", "JetShow", "jet_show"], ["debug", "JetDebug", "jet_debug"]]) {
-    if (!rendered(name, full)[kind]) continue;
+    const owned = jetOwnsHandleGlue(`jet_rt_handle_${kind}_${name}`, [`*mut ${handleType(full)}`], "JetCString");
+    if (!rendered(name, full)[kind] || owned) continue;
     rs.push("");
     rs.push("    #[no_mangle]");
     rs.push(`    pub extern "C" fn jet_rt_handle_${kind}_${name}(value: *mut ${handleType(full)}) -> JetCString {`);
@@ -1510,7 +1524,9 @@ for (const [name, full] of handleRows) {
 }
 const comparable = new Set(handleRows.filter(([, full]) => derives(full, "PartialEq")).map(([name]) => name));
 for (const [name, full] of handleRows) {
-  if (!comparable.has(name)) continue;
+  const pointer = `*mut ${handleType(full)}`;
+  const owned = jetOwnsHandleGlue(`jet_rt_handle_eq_${name}`, [pointer, pointer], "bool");
+  if (!comparable.has(name) || owned) continue;
   rs.push("");
   rs.push("    #[no_mangle]");
   rs.push(`    pub extern "C" fn jet_rt_handle_eq_${name}(left: *mut ${handleType(full)}, right: *mut ${handleType(full)}) -> bool {`);
