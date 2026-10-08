@@ -328,3 +328,9 @@ E0119; `CoreFailureRecordFixtures.jet` exercises the real parser and checker
 with both Core and user module origins. The generated `core_only` literal
 visibility does not affect public field reads. The Rust checker bridge
 exists only while the seed compiles Core and dies at cutover.
+
+`run-tier-parity-fixtures.mjs` is the manifest-driven continuation of the
+Atomic field runner: it checks the same source with supplied Rust and Jet
+compiler CLIs and records each actual exit and diagnostic code set. The
+`assemble` mode retains the whole-production fixture assembler and selects
+the fixture entry and arguments from the manifest, not a shadow checker.
