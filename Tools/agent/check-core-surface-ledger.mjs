@@ -1818,10 +1818,29 @@ function coreCallIdentity(expression, sourceLine) {
   if (args.length <= memberIndex || (moduleIndex !== null && args.length <= moduleIndex)) {
     throw new Error("dispatcher row adapter has no module/member identity at line " + sourceLine);
   }
+  let sourceMember = coreCallIdentityValue(args[memberIndex], "member", sourceLine);
+  if (constructor === "CoreCallRecord::source_owned") {
+    const value = expression.trim();
+    const context = "source-owned dispatcher line " + sourceLine;
+    let position = readRustCall(value, 0, context).end;
+    while (position < value.length) {
+      while (/\s/.test(value[position] || "")) position += 1;
+      if (position >= value.length) break;
+      // Identity readers also receive the remainder of a Rust row array.
+      if (value[position] !== ".") break;
+      const method = readRustCall(value, position + 1, context);
+      if (method.name === "with_source_target") {
+        expectRustArgumentCount(method.name, method.args, 1, context);
+        sourceMember = coreCallIdentityValue(method.args[0], "source target", sourceLine);
+      }
+      position = method.end;
+    }
+  }
   return {
     constructor: constructor,
     module: moduleIndex === null ? "" : coreCallIdentityValue(args[moduleIndex], "module", sourceLine),
     member: coreCallIdentityValue(args[memberIndex], "member", sourceLine),
+    sourceMember: sourceMember,
     receiverTypes: receiver ? coreCallReceiverTypes(args[0], sourceLine) : [],
   };
 }
@@ -2138,14 +2157,23 @@ function parseCoreSource(source) {
       }
     }
   }
+  const sourceTargets = new Map();
+  for (const row of dispatcherRows) {
+    if (row.kind === "receiver") continue;
+    const identity = coreCallIdentity(row.expression, row.sourceLine);
+    if (identity.constructor === "CoreCallRecord::source_owned") {
+      sourceTargets.set(row.module + "." + identity.member, identity.sourceMember);
+    }
+  }
   for (const sourceModule of sourceModules) {
     const sourceFunctions = new Set(Array.from(
       read(sourceModule.path).matchAll(/^\s*(?:#[A-Za-z_][A-Za-z0-9_]*(?:\("(?:[^"\\]|\\.)*"\))?\s+)*(?:pub\s+)?fn\s+([A-Za-z_][A-Za-z0-9_]*)/gm),
     ).map(function (match) { return match[1]; }));
     for (const member of sourceModule.ownedMembers) {
-      if (!sourceFunctions.has(member)) {
+      const target = sourceTargets.get(sourceModule.module + "." + member) ?? member;
+      if (!sourceFunctions.has(target)) {
         throw new Error("Core source module does not define owned member `" +
-          sourceModule.module + "." + member + "` at line " + sourceModule.sourceLine);
+          sourceModule.module + "." + member + "` target `" + target + "` at line " + sourceModule.sourceLine);
       }
     }
     const sourceTypes = new Set(Array.from(
@@ -5839,6 +5867,20 @@ function hostileFixtures() {
       "source-owned constructor fixture");
     if (actual !== 'core_call_with_ui_capabilities(core_call_source_owned("core.ui.host", "shortcut", [Bool]{false, false}), [String]{"UI.Shortcuts"})') {
       throw new Error("source-owned constructor lost its signature or UI capability facts: " + actual);
+    }
+  }));
+  results.push(holds("source-owned targets resolve generically without changing public identity", function () {
+    const actual = coreCallIdentity(
+      'CoreCallRecord::source_owned("core.fake", "call", &[false]).with_source_target("__checked_call"),',
+      1);
+    if (actual.module !== "core.fake" || actual.member !== "call" ||
+        actual.sourceMember !== "__checked_call") {
+      throw new Error("source-owned target changed the public identity or was ignored");
+    }
+    const ordinary = coreCallIdentity(
+      'CoreCallRecord::source_owned("core.fake", "call", &[false]),', 1);
+    if (ordinary.sourceMember !== "call") {
+      throw new Error("a source-owned declaration without a target lost its member");
     }
   }));
 
