@@ -2002,3 +2002,30 @@ exact-once destruction, per-field inequality and enum/render goldens. Its
 invalid-ordinal and exact-Int overflow modes exercise the established stops.
 Native execution remains unexercised until composed source-root ownership
 admission and generator ABI validation; syntax checks alone do not prove it.
+
+### Plugin records, log spans and asynchronous policy carriers
+
+`PluginABI.jet` defines inline 24-byte frames in the existing native List24
+header, and native faults owning that header. Frame sequence push moves the
+frame's text owners into inline storage and frees only its source shell;
+sequence get lends inline storage, never an independently droppable frame.
+Fault construction consumes the sequence holder; clone recursively copies its
+text owners and drop releases its children, buffer, holder and fault once.
+These contracts mirror `CAbiRoutes.rs:8496-8505,11755-11797` and the ordered
+derive equality in `jet-foundation/src/PluginWire.rs:28-43`.
+
+`LogABI.jet` stores LogSpan's raw i64 and owned name
+(`CommonTypes.rs:2704-2708`, `CAbiRoutes.rs:11738-11751`). `AsyncPolicyABI.jet`
+stores raw i64 capacity and overflow ordinal, with separately owned ordinal
+handles for overflow. Codec construction checks the ordinal but intentionally
+does not call policy validation: `CAbiRoutes.rs:9545-9558` permits zero and
+negative capacities; `ReactiveEventWatch.rs:808-841` distinguishes construction
+from validation. Exact Int arguments are borrowed and converted before
+allocation; Int getters return freshly owned exact values.
+
+`PluginPolicyWitness.c` requires real Jet exports and asserts free wrapping
+actually ran. It covers shell consumption, List growth, lent getters, recursive
+clone independence, exact-once destruction, ordered field/sequence equality,
+i64 edges, all unit enum values and invalid-ordinal/index stop modes. Its
+stdout fixture is an expected result, not an execution receipt. Native
+execution remains unexercised pending pack composition and ownership admission.
