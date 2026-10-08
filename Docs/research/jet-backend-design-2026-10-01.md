@@ -2229,3 +2229,21 @@ boundaries, independent owners, selected-out slots, and exact frees.
 Source approval and light parsing are not native execution or enrollment:
 the StaticText seam and these providers compose only after E2 r5 FINAL.
 
+`UiFormActionError.jet` uses the canonical ordered Map24 entry list from
+`Lower/Maps.jet`: each entry owns a String8 key and inline List24 of owned
+String messages. The seed-native error owns that map plus inline form
+messages (48 bytes total); offsets and strides live in `UiABI.jet`, and
+sequence offsets reuse `DataABI.jet`. Clone owns independent keys/messages,
+equality ignores capacity but preserves key/message order, and drop frees
+the original capacity-sized buffers exactly once.
+The three real `jet_web_forms_action_*` producers follow
+`WebForms.rs:1580-1601,2651-2667`: default creates an empty error, field/form
+consume and return the same carrier. Field names are ASCII identifiers of
+at most 256 bytes; invalid names append the exact seed form message and
+release both consumed inputs. Long messages retain every scalar starting
+before byte 4096, including a scalar crossing that boundary. In-place
+truncation preserves buffer ownership without an unnecessary allocation.
+These runtime providers do not claim typed-form callbacks, native route
+admission, or closure of parent map/Arc rows; admission and native witnesses
+remain gated on E2 r5 FINAL and the subsequent composed regeneration.
+
