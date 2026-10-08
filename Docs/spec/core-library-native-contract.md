@@ -236,7 +236,17 @@ Unrecovered reads stay explicit, allowing the recovered caller to perform its
 lock-aware recovery first. Supplemental transport fixtures carry independent
 starting/recipient hash vectors and exercise trim/case/duplicate/UTF-8 policy,
 historical owner ordering, typed trailer rejection, and component-path joins.
-These additions do not claim native execution or the full recovered writer.
+The durable writer consumes its lock on every exit, checks store/provider/start
+facts before encryption and again before staging visibility, verifies staged
+canonical plaintext, links the held current inode as backup and installs the
+anonymous O_TMPFILE with exact inode gates. The verified installed fd remains
+held through read/decode, rather than reopening its visible path. Old/backup
+removal also gates on the held inode. File sync_all sites retry EINTR through
+one cvt_r-equivalent helper. Cancellation before install is Conflict; a known
+installed result with uncertain directory durability is DurabilityUnknown;
+cancel-after-install is ignored as the seed requires. No automatic cleanup
+changes seed-visible names on error. Native execution and the exact filesystem
+fixture run remain composition proof obligations, not parser-proof claims.
 
 Typed vault records own native Secret buffers. Equality compares the key bytes,
 not just immutable hashes, while Debug always prints a redacted key marker.

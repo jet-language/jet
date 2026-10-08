@@ -723,3 +723,31 @@ fn vault_read_contents_at_root(root: I64, store_out: I64, hash_out: I64, kind_ou
     if (error != I64{0}) -> return error
     vault_read_contents_unrecovered_at_root(root, store_out, hash_out, kind_out)
 }
+
+// SecretsCrypto.rs:1673-1679. Provider policy stays in the shared recipient
+// decoder. Adopt a snapshot only after both store and provider are available.
+fn vault_read_at_root(root: I64, store_out: I64, hash_out: I64, provider_out: I64, kind_out: I64) -> I64 {
+    scratch :: jet_rt_alloc(I64{88}, I64{8})
+    error :: vault_read_contents_at_root(root, scratch, scratch + I64{8}, scratch + I64{72})
+    if (error != I64{0}) {
+        thread_zero(scratch, I64{88})
+        jet_rt_free(scratch, I64{88}, I64{8})
+        return error
+    }
+    provider_error :: vault_recipients_at_root(root, scratch + I64{80}, scratch + I64{40})
+    store :: rt_text_word(scratch)
+    if (provider_error != I64{0}) {
+        vault_store_drop(store)
+        thread_zero(scratch, I64{88})
+        jet_rt_free(scratch, I64{88}, I64{8})
+        return provider_error
+    }
+    data_sequence_drop(rt_text_word(scratch + I64{80}), DATA_TREE_BYTE_LIST)
+    rt_text_store(store_out, store)
+    rt_text_bytes_copy(hash_out, scratch + I64{8}, I64{32})
+    rt_text_bytes_copy(provider_out, scratch + I64{40}, I64{32})
+    rt_text_store(kind_out, rt_text_word(scratch + I64{72}))
+    thread_zero(scratch, I64{88})
+    jet_rt_free(scratch, I64{88}, I64{8})
+    I64{0}
+}
