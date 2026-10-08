@@ -722,9 +722,8 @@ mod jet_c_abi {
         guard(|| unsafe { drop(crate::jet_foundation::Numeric::JetInt::from_raw_owned(value)) })
     }
 
-    /// Remaining memory leaf: ONE domain while Rust atomic consumers remain.
-    /// Native Int.jet calls only after the final CAS has changed refs to zero.
-    #[cfg(jet_native_pack)]
+    /// Seed/verification only; IntHazard.jet owns the native symbol/domain.
+    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_rt_int_retire_zero(node: i64) {
         guard(|| unsafe { crate::jet_foundation::Numeric::jet_int_retire_raw_zero(node) })

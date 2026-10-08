@@ -1,6 +1,6 @@
 // Appended only to the native ABI witness's freshly emitted runtime source.
-// Crate-local access exercises the REAL remaining Numeric hazard domain, not
-// a second list or a mocked reader. Native allocator LIFO reuse witnesses free.
+// Crate-local access exercises native Rust numeric FORWARDERS into the ONE
+// Jet domain. Real Rust Drop + Jet reads share retirement; no copied reader.
 #[no_mangle]
 pub extern "C" fn jet_test_int_hazard_fixture() {
     use std::sync::{Arc, Barrier};
@@ -17,6 +17,9 @@ pub extern "C" fn jet_test_int_hazard_fixture() {
         fn jet_rt_int_drop(value: i64);
         fn jet_rt_alloc(size: usize, align: usize) -> *mut u8;
         fn jet_rt_free(ptr: *mut u8, size: usize, align: usize);
+        fn jet_rt_thread_bootstrap();
+        fn jet_rt_thread_detach();
+        fn jet_rt_int_clone_atomic(place: *const AtomicU64) -> i64;
     }
     let node_of = |raw: i64| ((raw as u64) & ((1_u64 << 62) - 1)) as usize;
     unsafe {
@@ -43,6 +46,7 @@ pub extern "C" fn jet_test_int_hazard_fixture() {
         let reader_slot = slot.clone();
         let reader_barrier = barrier.clone();
         let reader = std::thread::spawn(move || {
+            jet_rt_thread_bootstrap();
             let mut reloads = 0;
             let observed = JetInt::clone_from_atomic(raw as u64, || {
                 reloads += 1;
@@ -59,10 +63,13 @@ pub extern "C" fn jet_test_int_hazard_fixture() {
                 reader_slot.load(Ordering::SeqCst)
             });
             assert_eq!(observed.to_i64(), Some(0));
+            drop(observed);
+            jet_rt_thread_detach();
         });
         barrier.wait();
         slot.store(0, Ordering::SeqCst); // consume the atomic slot's owner
-        jet_rt_int_drop(raw);
+        // This is the real Rust owner's Drop, not a substitute C drop call.
+        drop(JetInt::from_raw_owned(raw));
         let while_hazarded = jet_rt_alloc(48, 8);
         assert_ne!(while_hazarded as usize, node, "freed a hazarded node");
         barrier.wait();
@@ -78,5 +85,27 @@ pub extern "C" fn jet_test_int_hazard_fixture() {
         jet_rt_free(keeper, 48, 8);
         jet_rt_int_drop(0);
         jet_rt_int_drop(-1);
+
+        // Continuous mixed owners: Rust removes publications and releases the
+        // final owner while attached Jet readers hazard/reload/retain nodes.
+        let slot = Arc::new(AtomicU64::new(0));
+        let reader_slot = slot.clone();
+        let reader = std::thread::spawn(move || {
+            jet_rt_thread_bootstrap();
+            for _ in 0..10000 {
+                let raw = jet_rt_int_clone_atomic(Arc::as_ptr(&reader_slot));
+                let owned = JetInt::from_raw_owned(raw);
+                assert!(matches!(owned.to_i64(), Some(0 | i64::MAX | i64::MIN)));
+                drop(owned); // actual native Rust Drop forwards to Jet
+            }
+            jet_rt_thread_detach();
+        });
+        for index in 0..10000 {
+            let next = jet_int_owned_from_i64(if index % 2 == 0 { i64::MAX } else { i64::MIN });
+            let old = slot.swap(next as u64, Ordering::SeqCst);
+            drop(JetInt::from_raw_owned(old as i64));
+        }
+        reader.join().expect("mixed-owner Jet reader failed");
+        drop(JetInt::from_raw_owned(slot.swap(0, Ordering::SeqCst) as i64));
     }
 }

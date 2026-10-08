@@ -110,7 +110,15 @@ if (mode !== "--corpus-only") {
   writeFileSync(join(out, "undefined-symbols.txt"), undefinedSymbols.stdout ?? "");
   const memorySeam = "jet_rt_int_retire_zero";
   const exactImports = (undefinedSymbols.stdout ?? "").match(/\b(?:jet_int_\w+|jet_rt_int_\w+)\b/gu) ?? [];
-  if (undefinedSymbols.error || undefinedSymbols.status !== 0 || exactImports.some((name) => name !== memorySeam) || !exactImports.includes(memorySeam)) failures.push("Jet object has missing/unregistered exact Int memory seam or numeric fallback");
+  if (undefinedSymbols.error || undefinedSymbols.status !== 0 || exactImports.length) failures.push("Jet object still imports an external exact Int numeric/retirement provider");
+  const definedSymbols = spawnSync("nm", ["-g", "--defined-only", "--format=posix", resolve(jetObject)], { encoding: "utf8" });
+  writeFileSync(join(out, "defined-symbols.txt"), definedSymbols.stdout ?? "");
+  for (const source of ["Int.jet", "IntHazard.jet"]) {
+    for (const match of readFileSync(join(root, "Compiler/JetRuntime/Source", source), "utf8").matchAll(/^#Export\(c\)\s+fn\s+(\w+)\(/gm)) {
+      if ((definedSymbols.stdout ?? "").split("\n").filter((line) => line.startsWith(`${match[1]} T `)).length !== 1) failures.push(`missing/nonunique Jet Int provider ${match[1]}`);
+    }
+  }
+  if (definedSymbols.error || definedSymbols.status !== 0) failures.push("Jet Int strong-symbol audit failed");
   const remaining = readFileSync(join(root, "Compiler/JetRuntime/remaining-int.list"), "utf8")
     .split("\n").filter((name) => name && !name.startsWith("#"));
   const demangledImports = spawnSync("nm", ["-C", "-u", resolve(jetObject)], { encoding: "utf8" });
@@ -125,13 +133,13 @@ if (mode !== "--corpus-only") {
     observedRemainingRustDefinitions: ownershipDefinitions,
     observedJetObjectOwnershipImports: ownershipImport,
     nativeUserIntDrop: "Lower.jet: .Int -> LowerRepr.Word; lower_drop -> LIRDrop.Trivial",
-    approvedCAbiMemorySeam: memorySeam,
+    nativeSoleRetirementProvider: memorySeam,
     separateLeakItem: "L4a provides jet_rt_int_drop; NativeInteg2 owns wiring general native boxed-Int drop/copy-retain glue. int_discard only frees private refs1 workspaces.",
   }, null, 2) + "\n");
-  if (demangledImports.error || demangledImports.status !== 0 || remainingDefinitions.error || remainingDefinitions.status !== 0 || ownershipImport.some((line) => !/\sjet_rt_int_retire_zero$/u.test(line))) {
+  if (demangledImports.error || demangledImports.status !== 0 || remainingDefinitions.error || remainingDefinitions.status !== 0 || ownershipImport.length || ownershipDefinitions.some((line) => /JET_INT_(?:HAZARDS|HAZARD_RECORD|RETIRED)/u.test(line))) {
     failures.push("unreported exact Int ownership import or ownership audit failure");
   }
   writeFileSync(join(out, "result.json"), JSON.stringify({ cases: count, stopCases: 6, concurrentHazardFixture: true, failures }, null, 2) + "\n");
   if (failures.length) throw Error(`exact Int ABI witness failed: ${failures.join(", ")}`);
-  console.log(`exact Int ABI: ${count} numeric/float cases + 6 exact stopped reports, clone/drop and concurrent hazard fixture; Rust/Jet identical, only explicit shared-domain retirement import`);
+  console.log(`exact Int ABI: ${count} numeric/float cases + 6 exact stopped reports, clone/drop and concurrent mixed-owner hazard fixture; Rust/Jet identical, ONE Jet retirement domain`);
 }

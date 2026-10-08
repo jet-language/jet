@@ -8,7 +8,7 @@
 // @88 compensation stack List*; @96 owner deadlines; @104 world;
 // @112 world flags; @120 world park; @128 sentry enabled; @136 sentry file;
 // @144 file length; @152 line; @160 reason; @168 reason length;
-// @176 fence depth; @184 sentry frames List*; @192/@200 reserved;
+// @176 fence depth; @184 sentry frames List*; @192 Int hazard record; @200 reserved;
 // @208 dynamic TLS native List<I64>* (also owns T1 capture/scope services);
 // @216/224 absolute futex timespec; @232/240 clock_gettime scratch;
 // @248 shared scratch word (scheduler worker-count out). Attach before the
@@ -296,6 +296,7 @@ fn thread_tls_destroy(table: I64, key: I64, attempt_only: Bool) -> Bool {
         jet_rt_free(table, I64{24}, I64{8})
     }
     sentry_thread_detach()
+    int_hazard_thread_detach()
     thread_unregister_tcb(tcb)
     thread_set_base(I64{0})
     jet_rt_free(tcb, I64{256}, I64{64})

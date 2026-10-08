@@ -119,6 +119,13 @@ lanes always publish zero-extended low bits, including after wrapping add,
 so subsequent compare-exchange uses scalar equality rather than stale carry
 bits. Exact `Int` requires its own canonical owner/hazard protocol and must
 never be routed to a fixed-width atomic operation.
+Native exact-Int readers and final-owner drops share `IntHazard.jet`'s one
+hazard domain, including any remaining native Rust numeric forwarders.
+Readers publish a hazard before validating and retaining a spilled node.
+Retirement scans that same domain; an unpublished, unprotected final owner
+can be freed, while a protected node remains retired until a later scan.
+The thread's hazard clears after TLS destructors, but its registry record
+remains process-lifetime so scanners cannot race record deallocation.
 
 
 ## Law 4 — Effects

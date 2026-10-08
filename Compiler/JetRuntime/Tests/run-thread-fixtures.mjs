@@ -38,6 +38,7 @@ if (mode === "assemble") {
     // Scheduler hooks are outside this deliberately thread-only fixture unit.
     .replace(/^    scheduler_thread_detach\(\)\n/m, "")
     .replace(/^    sentry_thread_detach\(\)\n/m, "")
+    .replace(/^    int_hazard_thread_detach\(\)\n/m, "")
     .replace(/^    if rt_task_panic_publish\(message, message_len, I64\{0\}\) -> return\n/m, "")
   ).join("\n");
   // The Shared factory, wrapper, import and private address intrinsic form
