@@ -103,12 +103,12 @@ pub mod jet_std {
 ${fieldErrorDeclaration}
 }
 `;
-  // The FINAL seed has this real Rust builtin parameter. It is unsupported
-  // by the parameter codec, not a missing emitted generic crate record.
+  // Preserve the canonical borrowed optional-text parameter codec. This is
+  // not admission of a nullable owned-Text result or a new generic record.
   put("crates/jet-foundation/src/Syntax/core_calls.rs", registry('CoreCallRecord::new("core.fixture", "optional", "jet_fixture_optional", true)\n'));
   put("runtime.rs", declarations + "pub fn jet_fixture_optional(value: Option<&String>) -> f64 { 0.0 }\n");
   success(run());
-  assert.ok(readFileSync(join(fixture, "crates/jet-codegen/src/Prelude/Core/CAbiRoutes.rs"), "utf8").includes("parameter types value: Option<&String>"));
+  assert.match(readFileSync(join(fixture, "crates/jet-codegen/src/Prelude/Core/CAbiRoutes.rs"), "utf8"), /fn jet_fixture_optional\(a0: JetCString\) -> f64/);
   const borrowed = declarations + "#[derive(Clone, PartialEq)]\npub struct JetBinMatchPart<'a> { pub bytes: &'a [u8] }\npub fn jet_fixture_parts(value: Vec<JetBinMatchPart<'_>>) -> f64 { 0.0 }\n";
   put("crates/jet-foundation/src/Syntax/core_calls.rs", registry('CoreCallRecord::new("core.fixture", "parts", "jet_fixture_parts", true)\n'));
   put("runtime.rs", borrowed);
