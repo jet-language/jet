@@ -37,6 +37,8 @@ assert.deepEqual(recordApplication("crate::Option<f64>"), { base: "crate::Option
 assert.equal(generatedRecordPath("grades.curve"), "__jet_grades_dcurve");
 assert.equal(generatedRecordPath("a_b::c/d"), "__jet_a_ub_c_cc_sd");
 assert.deepEqual(recordApplicationsIn("fn value(x: Pair<f64,bool>) -> Option<Pair<f64,bool>>", "Pair"), ["Pair<f64,bool>", "Pair<f64,bool>"]);
+assert.deepEqual(recordApplicationsIn("fn x(v: crate::module::Pair<f64,bool>) -> super::Pair<f64,bool>", "Pair"),
+  ["crate::module::Pair<f64,bool>", "super::Pair<f64,bool>"]);
 
 const pipeDefinitions = ["ProcessStdoutStream", "ProcessStderrStream"].flatMap((type) => [
   `#Export(c) fn jet_rt_handle_clone_${type}(value: I64) -> I64 { value }`,
@@ -143,6 +145,25 @@ pub fn jet_fixture_plain(value: JetFixture) -> JetFixture { value }
   put("runtime.rs", declarations + "#[derive(Clone,PartialEq)]\npub struct Arc<T> { pub value: T }\npub fn jet_fixture_arc(value: crate::Arc<f64>) -> f64 { 0.0 }\n");
   success(run());
   assert.ok(readFileSync(join(fixture, "crates/jet-codegen/src/Prelude/Core/CAbiRoutes.rs"), "utf8").includes("fn jet_fixture_arc("), "crate-local Arc must remain nominal");
+  put("crates/jet-foundation/src/Syntax/core_calls.rs", registry('CoreCallRecord::new("core.fixture", "box", "jet_fixture_box", true)\n'));
+  put("runtime.rs", declarations + "pub fn jet_fixture_box(value: Box<dyn FnOnce()>) -> f64 { 0.0 }\n");
+  success(run());
+  const boxList = spawnSync(process.execPath, [join(fixture, "Tools/agent/gen-c-abi-routes.mjs"), join(fixture, "runtime.rs"), "--native-list-only"], { encoding: "utf8" });
+  success(boxList);
+  assert.ok(JSON.parse(boxList.stdout).unsupportedRustCarriers.some((row) => row.qualified === "std::boxed::Box<dynFnOnce()>"));
+  put("runtime.rs", declarations + "#[derive(Clone,PartialEq)]\npub struct Box<T> { pub value: T }\npub fn jet_fixture_box(value: Box<f64>) -> f64 { 0.0 }\n");
+  success(run());
+  assert.ok(readFileSync(join(fixture, "crates/jet-codegen/src/Prelude/Core/CAbiRoutes.rs"), "utf8").includes(`jet_rt_record_new_${recordInstanceName("Box", ["f64"])}`), "local Box shadows the Rust prelude");
+  for (const [prefix, type] of [["#![no_implicit_prelude]\n", "Box"], ["#![no_std]\n", "Box"], ["", "crate::Box"]]) {
+    put("runtime.rs", prefix + declarations + `pub fn jet_fixture_box(value: ${type}<f64>) -> f64 { 0.0 }\n`);
+    assert.match(run().stderr, /unresolved or ambiguous declaration/);
+  }
+  put("crates/jet-foundation/src/Syntax/core_calls.rs", registry('CoreCallRecord::new("core.fixture", "ui", "jet_fixture_ui", true)\n'));
+  put("runtime.rs", declarations + "pub struct JetUiHostError;\npub type JetUiServiceResult<T> = Result<T, JetUiHostError>;\npub fn jet_fixture_ui() -> JetUiServiceResult<Option<String>> { unreachable!() }\n");
+  success(run());
+  const uiList = spawnSync(process.execPath, [join(fixture, "Tools/agent/gen-c-abi-routes.mjs"), join(fixture, "runtime.rs"), "--native-list-only"], { encoding: "utf8" });
+  success(uiList);
+  assert.ok(JSON.parse(uiList.stdout).unsupportedSumCarriers.some((row) => row.reason.includes("pub type JetUiServiceResult<T> = Result<T, JetUiHostError>")));
   put("crates/jet-foundation/src/Syntax/core_calls.rs", registry('CoreCallRecord::new("core.fixture", "unit", "jet_fixture_unit", true)\n'));
   const unitRecord = "#[derive(Clone)]\npub enum JetLoadable<T:Clone,E:Clone> { Idle, Loading, Loaded(T), Failed(E) }\npub fn jet_fixture_unit() -> JetLoadable<(),()> { unreachable!() }\n";
   put("runtime.rs", declarations + unitRecord);
@@ -366,9 +387,12 @@ pub fn source_tree() -> ${treeSource} { ${treeSource}::__jet_Empty }
     assert.match(unsupported.stderr, /SOURCE raw-machine TYPE specialization requires a typed identity\/record codec/);
   }
   put("runtime.rs", declarations + "pub fn jet_fixture_measurement(value: JetMeasurement<Vec<f64>>) -> JetMeasurement<f64> { value }\n");
-  const nested = run();
-  assert.notEqual(nested.status, 0);
-  assert.match(nested.stderr, /JetMeasurement<Vec<f64>>.*nested/);
+  success(run());
+  const nestedList = spawnSync(process.execPath, [join(fixture, "Tools/agent/gen-c-abi-routes.mjs"), join(fixture, "runtime.rs"), "--native-list-only"], { encoding: "utf8" });
+  success(nestedList);
+  assert.ok(JSON.parse(nestedList.stdout).unsupportedGenericCarriers.some((row) => row.type === "JetMeasurement<Vec<f64>>" && row.reason.includes("nested/structural")));
+  put("runtime.rs", declarations.replaceAll("JetMeasurement", "__jet_Measurement") + "pub fn jet_fixture_measurement(value: __jet_Measurement<Vec<f64>>) -> __jet_Measurement<f64> { value }\n");
+  assert.match(run().stderr, /nested or structural arguments are unsupported/);
 
   // Stream fixtures use the real Rust verification kernels. First inspect
   // retained seed marshalling, then compose one complete Jet-owned family.

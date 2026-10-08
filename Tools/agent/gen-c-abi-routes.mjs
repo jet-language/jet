@@ -285,6 +285,7 @@ const attributesBefore = (lineStart) => {
   return attributes;
 };
 const cfgsBefore = (lineStart) => attributesBefore(lineStart).filter((line) => line.startsWith("#[cfg("));
+const noRustPrelude = new Set();
 {
   // frames: { mod: name | null, impl: type name | null, gated }. An inherent
   // `impl Name {` of a non-generic type holds methods keyed `path::Name::method`.
@@ -299,6 +300,10 @@ const cfgsBefore = (lineStart) => attributesBefore(lineStart).filter((line) => l
   const isIdent = (c) => /[A-Za-z0-9_]/.test(c);
   while (i < n) {
     const c = text[i];
+    if (c === "#" && stack.every((frame) => frame.mod)) {
+      const attribute = /^#(!?)\[\s*(no_implicit_prelude|no_std)\s*\]/.exec(text.slice(i, i + 80));
+      if (attribute?.[1]) noRustPrelude.add(stack.map((frame) => frame.mod).join("::"));
+    }
     if (c === "/" && text[i + 1] === "/") { i = text.indexOf("\n", i); if (i < 0) break; continue; }
     if (c === "/" && text[i + 1] === "*") {
       let depth = 1; i += 2;
@@ -347,6 +352,9 @@ const cfgsBefore = (lineStart) => attributesBefore(lineStart).filter((line) => l
         if (m) {
           pendingMod = m[1];
           pendingGated = cfgsBefore(text.lastIndexOf("\n", i) + 1).some((cfg) => cfg !== '#[cfg(not(target_arch = "wasm32"))]');
+          if (attributesBefore(text.lastIndexOf("\n", i) + 1).includes("#[no_implicit_prelude]")) {
+            noRustPrelude.add([...stack.filter((frame) => frame.mod).map((frame) => frame.mod), m[1]].join("::"));
+          }
         }
       } else if (word === "impl" && stack.every((frame) => frame.mod)) {
         const m = /^\s+([A-Z][A-Za-z0-9_]*)\s*\{/.exec(text.slice(j, j + 120));
@@ -415,15 +423,16 @@ const cfgsBefore = (lineStart) => attributesBefore(lineStart).filter((line) => l
           types.set(key, list);
         }
       } else if (word === "type" && stack.every((frame) => frame.mod)) {
-        // RUST-EXIT S5: identify PortableCore's actual emitted sum alias,
-        // not an arbitrary record or a spelling-only JetOutcome exception.
-        const alias = /^\s+JetOutcome\s*<\s*T\s*,\s*E\s*>\s*=\s*Result\s*<\s*T\s*,\s*E\s*>\s*;/.exec(text.slice(j, j + 200));
+        // Actual emitted Result aliases, resolved through the same import
+        // table as records; an alias spelling alone conveys no carrier.
+        const alias = /^\s+([A-Z]\w*)\s*<([^<>]+)>\s*=\s*((?:(?:std|core)::result::)?Result)\s*<([^;]+)>\s*;/.exec(text.slice(j, j + 2000));
         const lineStart = text.lastIndexOf("\n", i) + 1;
         if (alias && /\bpub\b/.test(text.slice(lineStart, i))) {
           const path = stack.map((frame) => frame.mod).join("::");
-          const key = path ? `${path}::JetOutcome` : "JetOutcome";
+          const key = path ? `${path}::${alias[1]}` : alias[1];
           const list = types.get(key) ?? [];
           list.push({ visible: true, generic: true, kind: "rust-sum-alias", at: i, path, derives: [],
+            alias: { parameters: alias[2], target: alias[3], definition: `pub type ${alias[1]}<${alias[2]}> = ${alias[3]}<${alias[4]}>` },
             gated: cfgsBefore(lineStart).some((cfg) => cfg !== '#[cfg(not(target_arch = "wasm32"))]') || stack.some((frame) => frame.gated) });
           types.set(key, list);
         }
@@ -489,11 +498,15 @@ const nominalOutcome = [...types].some(([key, decls]) => key.split("::").pop() =
 const rustOutcomeAlias = (rustPath) => {
   const found = declarationOf(rustPath.replace(/^crate::/, ""));
   if (!found?.decls.some((decl) => decl.kind === "rust-sum-alias")) return false;
-  if (found.decls.length !== 1 || nominalOutcome) {
-    classificationFailure(new Error("JetOutcome sum alias: visible nominal declaration is ambiguous"), rustPath, "");
+  if (found.decls.length !== 1 || found.key.split("::").pop() === "JetOutcome" && nominalOutcome) {
+    classificationFailure(new Error(`${found.key} sum alias: visible nominal declaration is ambiguous`), rustPath, "");
     return false;
   }
-  return found.decls[0].visible && !found.decls[0].gated;
+  const decl = found.decls[0];
+  const target = decl.alias.target;
+  const shadow = target === "Result" ? declarationOf(decl.path ? `${decl.path}::Result` : "Result") : null;
+  const disabled = [...noRustPrelude].some((module) => !module || decl.path === module || decl.path.startsWith(`${module}::`));
+  return decl.visible && !decl.gated && (target !== "Result" || !shadow && !disabled);
 };
 
 // Computed route families (TIR routes.rs): precise_builtin_route spells every
@@ -651,7 +664,16 @@ const unsupportedGenericCarriers = new Map(); // proved seed TYPEs without a rec
 const unsupportedRawArguments = new Set([...fixedInts, "i64", "i128", "u128", "f32", "char"]);
 const classificationErrors = [];
 let classificationSite = null;
+function unsupportedSeedRecord(type, path, reason) {
+  const found = declarationOf(qualify(type.replace(/<[\s\S]*>$/, ""), path).replace(/^crate::/, ""));
+  if (!found || found.decls.length !== 1 || found.key.split("::").pop().startsWith("__jet_")) return false;
+  const decl = found.decls[0];
+  unsupportedGenericCarriers.set(`${found.key}:${type}`, { type, qualified: `crate::${found.key}`,
+    declaration: { kind: decl.kind, path: decl.path, at: decl.at }, reason: `${reason}; actual seed declaration proved, no native record codec` });
+  return true;
+}
 function classificationFailure(error, type, path, consumer = classificationSite) {
+  if (consumer?.phase?.includes("record") && unsupportedSeedRecord(type, path, error.message)) return;
   if (!nativeListOnly) throw error;
   const declaration = declarationOf(qualify(type.replace(/<[\s\S]*>$/, ""), path).replace(/^crate::/, ""));
   classificationErrors.push({ type, reason: error.message, site: {
@@ -669,7 +691,13 @@ const genericArgumentKinds = new Map([["f64", "Float"], ["bool", "Bool"], ["Stri
 function runtimeHandleUnchecked(ty, path) {
   const aliasPath = qualify(ty.replace(/<[\s\S]*>$/, ""), path);
   // RUST-EXIT S5: resolve imports before nominal TYPE structural validation.
-  const resolved = declarationOf(aliasPath.replace(/^crate::/, ""));
+  let resolved = declarationOf(aliasPath.replace(/^crate::/, ""));
+  // Rust's default prelude supplies Box only after local/import shadowing.
+  // Explicit crate::Box never inherits this fallback; disabled preludes do not.
+  if (!resolved && ty.replace(/<[\s\S]*>$/, "") === "Box" &&
+      ![...noRustPrelude].some((module) => !module || path === module || path.startsWith(`${module}::`))) {
+    resolved = { key: "std::boxed::Box", decls: [], external: true };
+  }
   if (resolved?.external && !/^crate::(?:std|core|alloc)::/.test(ty) &&
       !aliasPath.split("::").pop().startsWith("__jet_")) {
     const qualified = resolved.key + ty.slice(ty.replace(/<[\s\S]*>$/, "").length);
@@ -680,8 +708,21 @@ function runtimeHandleUnchecked(ty, path) {
   }
   if (rustOutcomeAlias(aliasPath)) {
     unsupportedSumCarriers.set(`${aliasPath}:${ty}`, { type: ty, qualified: aliasPath,
-      reason: "resolved pub type JetOutcome<T,E> = Result<T,E>; plain/tuple/list-element carrier has no sum C codec; seed-only" });
+      declaration: { key: resolved.key, at: resolved.decls[0].at },
+      reason: `resolved ${resolved.decls[0].alias.definition}; plain/tuple/list-element carrier has no sum C codec; seed-only` });
     return null;
+  }
+  const structural = /^((?:[A-Za-z_]\w*::)*(?:[A-Z]\w*|__jet_\w+))<([\s\S]*)>$/.exec(ty);
+  if (structural && /[<>()[\]]/.test(structural[2].replace(/\(\)/g, "")) && resolved?.decls.length === 1) {
+    const decl = resolved.decls[0];
+    const head = /^(?:struct|enum)\s+\w+\s*<([^<>]*)>/.exec(text.slice(decl.at, decl.at + 2000));
+    if (head && decl.visible && !decl.gated) {
+      const params = splitTop(head[1]);
+      const supplied = splitTop(structural[2]);
+      const required = params.filter((param) => !param.includes("=")).length;
+      if (supplied.length < required || supplied.length > params.length) throw new Error(`generic record ${ty}: expected ${required}..${params.length} declaration arguments, got ${supplied.length}`);
+      if (unsupportedSeedRecord(ty, path, "nested/structural TYPE specialization unsupported")) return null;
+    }
   }
   const application = recordApplication(ty);
   if (!application) return null;
