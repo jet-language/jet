@@ -701,6 +701,77 @@ impl Vec3 {
     }
 }
 
+impl Vec3 {
+    fn splat(x: Float) -> Vec3 Never! { Vec3.new(x, x, x) }
+    fn from_array(lanes: [Float#3]) -> Vec3 Never! { Vec3{lanes: lanes} }
+    fn to_array(self) -> [Float#3] Never! { ~self.lanes }
+    fn lane(self, index: Int) -> Float Never! {
+        if index < 0 || index >= 3 -> core.math.__numeric_stop("lane index {index} out of range for Vec3 (3 lanes)")
+        self.lanes[index]
+    }
+    fn dot(self, other: Vec3) -> Float Never! {
+        self.lanes[0] * other.lanes[0] + self.lanes[1] * other.lanes[1] + self.lanes[2] * other.lanes[2]
+    }
+    fn cross(self, other: Vec3) -> Vec3 Never! {
+        Vec3.new(
+            self.lanes[1] * other.lanes[2] - self.lanes[2] * other.lanes[1],
+            self.lanes[2] * other.lanes[0] - self.lanes[0] * other.lanes[2],
+            self.lanes[0] * other.lanes[1] - self.lanes[1] * other.lanes[0],
+        )
+    }
+    fn length(self) -> Float Never! { sqrt(self.dot(self)) }
+    fn normalize(self) -> Vec3 Never! {
+        length :: self.length()
+        if length == 0.0 -> return ~self
+        Vec3.new(self.lanes[0] / length, self.lanes[1] / length, self.lanes[2] / length)
+    }
+}
+impl Vec3.Add {
+    fn add(self, rhs: Vec3) -> Vec3 Never! {
+        Vec3.new(self.lanes[0] + rhs.lanes[0], self.lanes[1] + rhs.lanes[1], self.lanes[2] + rhs.lanes[2])
+    }
+}
+impl Vec3.Sub {
+    fn sub(self, rhs: Vec3) -> Vec3 Never! {
+        Vec3.new(self.lanes[0] - rhs.lanes[0], self.lanes[1] - rhs.lanes[1], self.lanes[2] - rhs.lanes[2])
+    }
+}
+impl Vec3.Mul {
+    fn mul(self, rhs: Vec3) -> Vec3 Never! {
+        Vec3.new(self.lanes[0] * rhs.lanes[0], self.lanes[1] * rhs.lanes[1], self.lanes[2] * rhs.lanes[2])
+    }
+}
+impl Vec3.Mul(Float) {
+    fn mul(self, rhs: Float) -> Vec3 Never! {
+        Vec3.new(self.lanes[0] * rhs, self.lanes[1] * rhs, self.lanes[2] * rhs)
+    }
+}
+impl Vec3.Div(Float) {
+    fn div(self, rhs: Float) -> Vec3 Never! {
+        Vec3.new(self.lanes[0] / rhs, self.lanes[1] / rhs, self.lanes[2] / rhs)
+    }
+}
+impl Float.Mul(Vec3) {
+    fn mul(self, rhs: Vec3) -> Vec3 Never! { rhs * self }
+}
+impl Float.Div(Vec3) {
+    fn div(self, rhs: Vec3) -> Vec3 Never! {
+        Vec3.new(self / rhs.lanes[0], self / rhs.lanes[1], self / rhs.lanes[2])
+    }
+}
+
+#Test("Vec3 source products retain scalar and Hadamard distinctions") {
+    value :: Vec3.new(2.0, 3.0, 4.0)
+    assert_eq((value * Vec3.new(5.0, 6.0, 7.0)).lane(2), 28.0)
+    assert_eq((value * 2.0).lane(1), 6.0)
+    assert_eq((2.0 * value).lane(1), 6.0)
+    assert_eq((value / 2.0).lane(2), 2.0)
+    assert_eq((12.0 / value).lane(1), 4.0)
+    assert_eq(Vec3.new(1.0, 0.0, 0.0).cross(Vec3.new(0.0, 1.0, 0.0)).lane(2), 1.0)
+    assert_eq(Vec3.splat(0.0).normalize().dot(value), 0.0)
+    assert_eq(Vec3.from_array(value.to_array()).lane(0), 2.0)
+}
+
 #Test("Vec2 source arithmetic preserves lane order and zero normalization") {
     value :: Vec2.new(3.0, 4.0)
     assert_eq(value.length(), 5.0)
