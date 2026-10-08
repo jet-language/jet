@@ -17,9 +17,7 @@ env: NO_COLOR=1
 step direct: jet run run.jet -- --minutes 1
 exit: 0
 stdout: = script_to_system_continuity_preserves_one_source.out
-capture: direct_error = text stderr
-capture: direct_report = text stdout.prepend("stdout:\n").append("\nstderr:\n{cap:direct_error}")
-cap:direct_report: ~ "L0104" # original compiler_text(stdout+stderr) predicate
+stdout|stderr: ~ "L0104" # original compiler_text predicate; needle cannot span labeled stream boundary
 step interpreted: jet run --interpret run.jet -- --minutes 1
 exit: 0
 stdout: = script_to_system_continuity_preserves_one_source.out
@@ -54,21 +52,17 @@ capture: package_before_install = opt-bytes file package.jet
 capture: lock_before_install = opt-bytes file .jet/lock
 step install: jetpack tool install ./ --as pulse --trust --no-color
 exit: != 0
-capture: install_error = text stderr
-capture: install_report = text stdout.prepend("stdout:\n").append("\nstderr:\n{cap:install_error}")
-cap:install_report: ~ "E1272" # original compiler_text predicate
-cap:install_report: ~ "need a pinned compatibility output" # original compiler_text predicate
-cap:install_report: ~ "does not invoke an installed Nix executable" # original compiler_text predicate
-cap:install_report: ~ "Provide a pinned fixture or verified Hangar output" # original compiler_text predicate
+stdout|stderr: ~ "E1272" # original compiler_text predicate; needle cannot span labeled stream boundary
+stdout|stderr: ~ "need a pinned compatibility output" # original compiler_text predicate
+stdout|stderr: ~ "does not invoke an installed Nix executable" # original compiler_text predicate
+stdout|stderr: ~ "Provide a pinned fixture or verified Hangar output" # original compiler_text predicate
 file: package.jet same-as {cap:package_before_install}
 file: .jet/lock same-as {cap:lock_before_install}
 file: run.jet same-as {cap:source}
 file: run.jet sha256 = "{cap:source_sha}"
 step test: jet test run.jet
 exit: 0
-capture: test_error = text stderr
-capture: test_report = text stdout.prepend("stdout:\n").append("\nstderr:\n{cap:test_error}")
-cap:test_report: ~ "1 passed" # original compiler_text predicate
+stdout|stderr: ~ "1 passed" # original compiler_text predicate; needle cannot span labeled stream boundary
 step package_run: jet run run.jet -- --minutes 1
 exit: 0
 stdout: = script_to_system_continuity_preserves_one_source.out
