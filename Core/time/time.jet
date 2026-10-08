@@ -440,7 +440,6 @@ impl LocalDate {
         Err("invalid overflow policy: {overflow}")
     }
     pub fn until(self, other: LocalDate, largest_unit: String{"day"}, smallest_unit: String{"day"}, rounding_mode: String{"trunc"}, increment: Int{1}) -> Duration Never! {
-        _ :: largest_unit
         duration_ns(civil_i64(civil_round(other.diff_days(self) * 86400000000000, smallest_unit, increment, rounding_mode)))
     }
     pub fn since(self, other: LocalDate, largest_unit: String{"day"}, smallest_unit: String{"day"}, rounding_mode: String{"trunc"}, increment: Int{1}) -> Duration Never! { other.until(self, largest_unit, smallest_unit, rounding_mode, increment) }
@@ -448,11 +447,11 @@ impl LocalDate {
     pub fn format_checked(self, pattern: String) -> String TextError! { civil_format_checked(pattern, self, local_time(0, 0, 0), None) }
 }
 impl LocalDate.Equatable {
-    fn equal(self, other: LocalDate) -> Bool Never! { self.date_y == other.date_y && self.date_m == other.date_m && self.date_d == other.date_d }
+    fn equal(self, rhs: LocalDate) -> Bool { self.date_y == rhs.date_y && self.date_m == rhs.date_m && self.date_d == rhs.date_d }
 }
-impl LocalDate.Comparable { fn compare(self, other: LocalDate) -> Ordering Never! { civil_order(civil_day(self), civil_day(other)) } }
-impl LocalDate.Display { fn display(self) -> String Never! { self.to_string() } }
-impl LocalDate.Debug { fn debug(self) -> String Never! { self.to_string() } }
+impl LocalDate.Comparable { fn compare(self, rhs: LocalDate) -> Ordering { civil_order(civil_day(self), civil_day(rhs)) } }
+impl LocalDate.Display { fn display(self) -> String { self.to_string() } }
+impl LocalDate.Debug { fn debug(^self) -> String { self.to_string() } }
 
 pub fn local_time(hour: Int, minute: Int, second: Int) -> LocalTime Never! { civil_time(hour, minute, second, 0) }
 pub fn time(hour: Int, minute: Int, second: Int) -> LocalTime Never! { local_time(hour, minute, second) }
@@ -480,17 +479,16 @@ impl LocalTime {
     pub fn floor(self, unit: String, increment: Int{1}) -> LocalTime Never! { self.round(unit, increment, "floor") }
     pub fn ceil(self, unit: String, increment: Int{1}) -> LocalTime Never! { self.round(unit, increment, "ceil") }
     pub fn until(self, other: LocalTime, largest_unit: String{"second"}, smallest_unit: String{"nanosecond"}, rounding_mode: String{"trunc"}, increment: Int{1}) -> Duration Never! {
-        _ :: largest_unit
         duration_ns(civil_i64(civil_round(civil_time_ns(other) - civil_time_ns(self), smallest_unit, increment, rounding_mode)))
     }
     pub fn since(self, other: LocalTime, largest_unit: String{"second"}, smallest_unit: String{"nanosecond"}, rounding_mode: String{"trunc"}, increment: Int{1}) -> Duration Never! { other.until(self, largest_unit, smallest_unit, rounding_mode, increment) }
     pub fn format(self, pattern: String) -> String Never! { civil_format(pattern, new(1970, 1, 1), self, None) }
     pub fn format_checked(self, pattern: String) -> String TextError! { civil_format_checked(pattern, new(1970, 1, 1), self, None) }
 }
-impl LocalTime.Equatable { fn equal(self, other: LocalTime) -> Bool Never! { civil_time_ns(self) == civil_time_ns(other) } }
-impl LocalTime.Comparable { fn compare(self, other: LocalTime) -> Ordering Never! { civil_order(civil_time_ns(self), civil_time_ns(other)) } }
-impl LocalTime.Display { fn display(self) -> String Never! { self.to_string() } }
-impl LocalTime.Debug { fn debug(self) -> String Never! { self.to_string() } }
+impl LocalTime.Equatable { fn equal(self, rhs: LocalTime) -> Bool { civil_time_ns(self) == civil_time_ns(rhs) } }
+impl LocalTime.Comparable { fn compare(self, rhs: LocalTime) -> Ordering { civil_order(civil_time_ns(self), civil_time_ns(rhs)) } }
+impl LocalTime.Display { fn display(self) -> String { self.to_string() } }
+impl LocalTime.Debug { fn debug(^self) -> String { self.to_string() } }
 
 pub fn period(years: Int, months: Int, days: Int) -> Period Never! { Period{years_value: years, months_value: months, days_value: days} }
 pub fn period_days(days: Int) -> Period Never! { period(0, 0, days) }
@@ -518,9 +516,9 @@ impl Period {
         }
     }
 }
-impl Period.Display { fn display(self) -> String Never! { self.to_string() } }
-impl Period.Debug { fn debug(self) -> String Never! { self.to_string() } }
-impl Period.Equatable { fn equal(self, other: Period) -> Bool Never! { self.years_value == other.years_value && self.months_value == other.months_value && self.days_value == other.days_value } }
+impl Period.Display { fn display(self) -> String { self.to_string() } }
+impl Period.Debug { fn debug(^self) -> String { self.to_string() } }
+impl Period.Equatable { fn equal(self, rhs: Period) -> Bool { self.years_value == rhs.years_value && self.months_value == rhs.months_value && self.days_value == rhs.days_value } }
 impl LocalDate {
     fn period_total(self, value: Period, unit: String) -> Float Never! {
         end :: self.add_period(value)
@@ -531,7 +529,7 @@ impl LocalDate {
         if unit == "week" || unit == "weeks" || unit == "w" -> return Float{end.diff_days(self)} / 7.0
         if unit == "month" || unit == "months" -> return Float{months} + residual / Float{anchor.days_in_month()}
         if unit == "year" || unit == "years" || unit == "y" {
-            year_days :: if anchor.is_leap_year() -> 366.0 else -> 365.0
+            year_days :: Float{if anchor.is_leap_year() -> 366 else -> 365}
             return Float{months} / 12.0 + residual / year_days
         }
         0.0
@@ -661,7 +659,6 @@ impl DateTime {
     pub fn floor(self, unit: String, increment: Int{1}) -> DateTime Never! { self.round(unit, increment, "floor") }
     pub fn ceil(self, unit: String, increment: Int{1}) -> DateTime Never! { self.round(unit, increment, "ceil") }
     pub fn until(self, other: DateTime, largest_unit: String{"second"}, smallest_unit: String{"nanosecond"}, rounding_mode: String{"trunc"}, increment: Int{1}) -> Duration Never! {
-        _ :: largest_unit
         duration_ns(civil_i64(civil_round(civil_datetime_ns(other) - civil_datetime_ns(self), smallest_unit, increment, rounding_mode)))
     }
     pub fn since(self, other: DateTime, largest_unit: String{"second"}, smallest_unit: String{"nanosecond"}, rounding_mode: String{"trunc"}, increment: Int{1}) -> Duration Never! { other.until(self, largest_unit, smallest_unit, rounding_mode, increment) }
@@ -674,19 +671,19 @@ impl DateTime {
     }
     pub fn in_zone(self, value: Zone) -> ZonedDateTime Never! { ZonedDateTime{instant: self, zone_value: value} }
 }
-impl DateTime.Equatable { fn equal(self, other: DateTime) -> Bool Never! { self.secs == other.secs && self.nanos == other.nanos && self.leap_second == other.leap_second } }
+impl DateTime.Equatable { fn equal(self, rhs: DateTime) -> Bool { self.secs == rhs.secs && self.nanos == rhs.nanos && self.leap_second == rhs.leap_second } }
 impl DateTime.Comparable {
-    fn compare(self, other: DateTime) -> Ordering Never! {
-        if self.secs != other.secs -> return civil_order(self.secs, other.secs)
-        if self.leap_second != other.leap_second {
+    fn compare(self, rhs: DateTime) -> Ordering {
+        if self.secs != rhs.secs -> return civil_order(self.secs, rhs.secs)
+        if self.leap_second != rhs.leap_second {
             if self.leap_second -> return Ordering.Greater
             return Ordering.Less
         }
-        civil_order(self.nanos, other.nanos)
+        civil_order(self.nanos, rhs.nanos)
     }
 }
-impl DateTime.Display { fn display(self) -> String Never! { self.to_string() } }
-impl DateTime.Debug { fn debug(self) -> String Never! { self.to_string() } }
+impl DateTime.Display { fn display(self) -> String { self.to_string() } }
+impl DateTime.Debug { fn debug(^self) -> String { self.to_string() } }
 impl DateTime {
     fn period_total(self, value: Period, unit: String) -> Float Never! {
         end :: self.add_period(value)
@@ -696,7 +693,7 @@ impl DateTime {
         residual :: Float{civil_datetime_ns(end) - civil_datetime_ns(anchor)}
         if unit == "month" || unit == "months" -> return Float{months} + residual / (Float{date.days_in_month()} * 86400000000000.0)
         if unit == "year" || unit == "years" || unit == "y" {
-            year_days :: if date.is_leap_year() -> 366.0 else -> 365.0
+            year_days :: Float{if date.is_leap_year() -> 366 else -> 365}
             return Float{months} / 12.0 + residual / (year_days * 86400000000000.0)
         }
         scale :: civil_unit_ns(unit) ?? return 0.0
@@ -1026,8 +1023,8 @@ impl Zone {
         saturating_sub_ns(last, first) /% 3600
     }
 }
-impl Zone.Display { fn display(self) -> String Never! { self.to_string() } }
-impl Zone.Debug { fn debug(self) -> String Never! { self.to_string() } }
+impl Zone.Display { fn display(self) -> String { self.to_string() } }
+impl Zone.Debug { fn debug(^self) -> String { self.to_string() } }
 pub fn zoned(value: DateTime, zone: Zone) -> ZonedDateTime Never! { ZonedDateTime{instant: value, zone_value: zone} }
 pub fn zoned_local(date: LocalDate, t: LocalTime, zone: Zone, disambiguation: String{"compatible"}) -> ZonedDateTime TimeError! {
     seconds :: civil_local_utc(zone, date, t, disambiguation)
@@ -1078,15 +1075,15 @@ impl ZonedDateTime {
     }
 }
 impl ZonedDateTime.Equatable {
-    fn equal(self, other: ZonedDateTime) -> Bool Never! {
+    fn equal(self, rhs: ZonedDateTime) -> Bool {
         left :: self.zone_value.data.guard_read()
-        right :: other.zone_value.data.guard_read()
-        self.instant == other.instant && left.value.name_value == right.value.name_value
+        right :: rhs.zone_value.data.guard_read()
+        self.instant == rhs.instant && left.value.name_value == right.value.name_value
     }
 }
-impl ZonedDateTime.Comparable { fn compare(self, other: ZonedDateTime) -> Ordering Never! { self.instant.compare(other.instant) } }
-impl ZonedDateTime.Display { fn display(self) -> String Never! { self.to_string() } }
-impl ZonedDateTime.Debug { fn debug(self) -> String Never! { self.to_string() } }
+impl ZonedDateTime.Comparable { fn compare(self, rhs: ZonedDateTime) -> Ordering { self.instant.compare(rhs.instant) } }
+impl ZonedDateTime.Display { fn display(self) -> String { self.to_string() } }
+impl ZonedDateTime.Debug { fn debug(^self) -> String { self.to_string() } }
 pub fn parse_zoned(value: String) -[Env, FS.Read]> ZonedDateTime TimeError! {
     raw :: value.bytes()
     if raw.len() == 0 || raw[raw.len() - 1] != (U8{93}) -> return Err(TimeError{reason: "RFC9557 datetime needs a [zone]: {value}"})
@@ -1269,10 +1266,10 @@ impl Instant {
     pub fn difference(self, other: Instant) -> Duration Never! { duration_ns(saturating_sub_ns(self.start_ns, other.start_ns)) }
     pub fn to_string(self) -> String Never! { "Instant" }
 }
-impl Instant.Equatable { fn equal(self, other: Instant) -> Bool Never! { self.start_ns == other.start_ns } }
-impl Instant.Comparable { fn compare(self, other: Instant) -> Ordering Never! { civil_order(self.start_ns, other.start_ns) } }
-impl Instant.Display { fn display(self) -> String Never! { self.to_string() } }
-impl Instant.Debug { fn debug(self) -> String Never! { self.to_string() } }
+impl Instant.Equatable { fn equal(self, rhs: Instant) -> Bool { self.start_ns == rhs.start_ns } }
+impl Instant.Comparable { fn compare(self, rhs: Instant) -> Ordering { civil_order(self.start_ns, rhs.start_ns) } }
+impl Instant.Display { fn display(self) -> String { self.to_string() } }
+impl Instant.Debug { fn debug(^self) -> String { self.to_string() } }
 
 // Wire codecs intentionally differ from strict public civil parsers.
 fn civil_codec_day(date: LocalDate) -> Int Never! {
@@ -1348,7 +1345,7 @@ fn civil_codec_datetime(value: String) -> DateTime TimeError! {
     Ok(civil_timestamp(seconds, nanos, leap))
 }
 impl LocalDate.Encode {
-    fn encode(self) -> DataTree Never! { DataTree.Text(civil_codec_date_text(self)) }
+    fn encode(self) -> DataTree { DataTree.Text(civil_codec_date_text(self)) }
 }
 impl LocalDate.Decode {
     fn decode(tree: DataTree) -> LocalDate [FieldError]! {
@@ -1360,23 +1357,22 @@ impl LocalDate.Decode {
     }
 }
 impl LocalTime.Encode {
-    fn encode(self) -> DataTree Never! { DataTree.Text("{pad2(self.hour(), 2)}:{pad2(self.minute(), 2)}:{pad2(civil_clamp(self.second(), 0, 59), 2)}") }
+    fn encode(self) -> DataTree { DataTree.Text("{pad2(self.hour(), 2)}:{pad2(self.minute(), 2)}:{pad2(civil_clamp(self.second(), 0, 59), 2)}") }
 }
 impl LocalTime.Decode {
     fn decode(tree: DataTree) -> LocalTime [FieldError]! {
         text :: tree.decode<String>()
-        result := civil_time_parts(text, false)
-        if result == .Ok(parts) {
-            if parts.hour < 0 || parts.hour > 23 || parts.minute < 0 || parts.minute > 59 || parts.second < 0 || parts.second > 59 -> result = Err(TimeError{reason: "time out of range: {text}"})
-        }
-        if result == {
-            .Ok(parts) -> Ok(local_time(parts.hour, parts.minute, parts.second))
+        if civil_time_parts(text, false) == {
+            .Ok(parts) -> {
+                if parts.hour < 0 || parts.hour > 23 || parts.minute < 0 || parts.minute > 59 || parts.second < 0 || parts.second > 59 -> return Err([FieldError]{FieldError{path: "", reason: "expected LocalTime: time out of range: {text}"}})
+                Ok(local_time(parts.hour, parts.minute, parts.second))
+            }
             .Err(error) -> Err([FieldError]{FieldError{path: "", reason: "expected LocalTime: {error.reason}"}})
         }
     }
 }
 impl DateTime.Encode {
-    fn encode(self) -> DataTree Never! {
+    fn encode(self) -> DataTree {
         date :: civil_codec_date_from_day(719162 + civil_floor(self.secs, 86400))
         fraction :: if self.nanos == 0 -> "" else -> ".{pad2(self.nanos, 9)}"
         second :: civil_mod(self.secs, 60) + (if self.leap_second -> 1 else -> 0)
@@ -1483,6 +1479,25 @@ impl Instant {
     assert_eq(t.to_string(), "01:02:03")
     assert_eq(parse_time("01:02:03.123456789") ?? panic("time"), t.add_duration(duration_ns(123456789)))
     assert_eq((parse_time("01:02:03.123456789") ?? panic("time")).encode(), DataTree.Text("01:02:03"))
+    invalid_times :: [String]{"-1:2:3", "24:2:3", "1:-1:3", "1:60:3", "1:2:-1", "1:2:60"}
+    loop text in invalid_times {
+        if DataTree.Text(text).decode<LocalTime>() == {
+            .Err(errors) -> {
+                assert_eq(errors.len(), 1)
+                assert_eq(errors[0].path, "")
+                assert_eq(errors[0].reason, "expected LocalTime: time out of range: {text}")
+            }
+            .Ok(_) -> assert(false)
+        }
+    }
+    if DataTree.Text("not a time").decode<LocalTime>() == {
+        .Err(errors) -> {
+            assert_eq(errors.len(), 1)
+            assert_eq(errors[0].path, "")
+            assert_eq(errors[0].reason, "expected LocalTime: invalid time: not a time")
+        }
+        .Ok(_) -> assert(false)
+    }
     dt :: DataTree.Text("2024-02-29T01:02:03.1a2Z").decode<DateTime>() ?? panic("DateTime codec")
     assert_eq(dt.nanosecond(), 120000000)
     assert_eq(dt.encode(), DataTree.Text("2024-02-29T01:02:03.120000000Z"))
