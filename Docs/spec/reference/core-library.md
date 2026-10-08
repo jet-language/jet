@@ -48,6 +48,9 @@ The private typed-payload leaf retains the existing validated event and global
 sink, including silent rejection of invalid events and no durable-delivery
 claim when no sink is installed. Volatile memory access retains the checked
 compiler intrinsic and its audited pointer obligations.
+Encoding stream capacity/reservation/layout operations use their canonical
+private `core.mem.__list_capacity`, `__list_reserve_exact`, and `__type_size`
+leaves directly; no public wrapper or duplicate alias is introduced.
 
 Email address, attachment, and envelope construction validates in
 `Core/email/email.jet`: control-character refusal precedes address parsing,
