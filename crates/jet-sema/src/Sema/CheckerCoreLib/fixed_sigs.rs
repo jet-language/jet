@@ -2422,7 +2422,7 @@ fn core_fixed_sig_raw(
             Some((vec![(read, float.clone())], Some(float)))
         }
         ("core.math", "round") => Some((vec![(read, float.clone())], Some(int.clone()))),
-        ("core.math", "pow") => Some((
+        ("core.math", "pow" | "hypot") => Some((
             vec![(read, Type::Float), (read, Type::Float)],
             Some(Type::Float),
         )),
@@ -8020,8 +8020,8 @@ pub(crate) fn apply_core_call_defaults(
 
 #[cfg(test)]
 mod tests {
-    use super::{core_fixed_sig, result_ty};
-    use crate::AST::Type;
+    use super::{core_call_semantic_signature, core_fixed_sig, result_ty};
+    use crate::AST::{AccessConvention, Type};
 
     #[test]
     fn synthesized_named_tuples_use_canonical_field_order() {
@@ -8037,6 +8037,19 @@ mod tests {
         let Type::Result { err, .. } = failure.unwrap() else { panic!("fallible dotenv"); };
         let Type::Tuple(fields) = *err else { panic!("tuple failure domain"); };
         assert_eq!(fields.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>(), ["cause", "not_found"]);
+    }
+
+    #[test]
+    fn hypot_raw_signature_preserves_polymorphic_checking() {
+        assert!(core_fixed_sig("core.math", "hypot").is_none());
+        assert_eq!(
+            core_call_semantic_signature("core.math", "hypot"),
+            Some((
+                vec![(AccessConvention::Read, Type::Float), (AccessConvention::Read, Type::Float)],
+                Type::Float,
+            )),
+        );
+        assert!(core_call_semantic_signature("core.math", "missing_member").is_none());
     }
 
     #[test]
