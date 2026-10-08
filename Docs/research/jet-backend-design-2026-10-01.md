@@ -2103,3 +2103,38 @@ indices as unsigned, flushes stdout and exits 101 without task publication
 or atexit. The existing witness stop mode remains unexercised. These callsites
 require the shared Encoding and Trap leaves in the composed runtime unit;
 source parsing alone does not resolve those dependencies or prove execution.
+
+### Environment, websocket, task failure and SIMD handle families
+
+EnvError and TaskStatus reuse the shared unit enum owner. Their three render
+routes preserve the custom text in `CommonTypes.rs:6631-6645,6678-6681` and
+`Services.rs:1080-1087,1111-1120`. `WsABI.jet` stores websocket error and
+message variants from `WsClient.rs:10-19,57-61`. IO errors own operation text;
+MessageTooLarge stores raw i64; Text/Binary/Close messages own their text,
+byte list or close reason. Every binary clone, comparison and drop uses the
+existing byte-list helpers and `RT_HOST_U8_STRIDE`, never a literal word
+stride. Websocket error rendering follows the custom show (`WsClient.rs:22-52`),
+including raw operation text and signed limits rather than derived debug.
+
+TaskFailure extends the existing `Task.jet` carrier in place. Its layout is
+single-sourced by `TaskFailureABI.jet`; no competing task failure carrier is
+introduced. Equality follows `Outcome.rs:2185-2188`. Show/display render a
+raw Panicked reason (`Values.rs:454-460`, `TextValues.rs:212-218`), while
+debug quotes it with the shared Rust String escaper (`TextValues.rs:221-227`).
+Wrong-variant access uses the shared record-variant language panic.
+
+`SimdLaneABI.jet` defines four raw IEEE f64 lane words for F64x4. Clone copies
+those words, equality compares lanes in order without a pointer shortcut,
+and all renders follow the array-backed debug tuple in
+`MathTaskMem.rs:397-423`, using the existing shortest f64 debug formatter.
+NaN is unequal even to itself; signed zero lanes compare equal.
+
+`HandleFamiliesWitness.c` requires the real Jet runtime and free wrapping.
+It covers all variant render/equality tables, deep text/byte/failure clones,
+exact-once destruction, raw i64 edges, inactive payload independence, byte
+list empty/nonempty cases and IEEE lane truth tables. Lane render goldens
+were produced by pinned rustc 1.97.1's debug tuple/array formatting. The C
+byte-list expectation derives from `WS_MESSAGE_U8_STRIDE`, which must match
+the composed runtime's canonical one-byte stride. Its wrong-variant mode and
+expected stdout remain unexercised; native ownership admission and execution
+are not established by parse or C syntax receipts.
