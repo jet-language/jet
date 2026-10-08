@@ -222,7 +222,7 @@ pub fn source_pair(first: f64, second: bool) -> ${pairSource}<f64,bool> { ${pair
   success(run());
   success(run(true));
   const owned = readFileSync(join(fixture, "crates/jet-codegen/src/Prelude/Core/CAbiRoutes.rs"), "utf8");
-  for (const [name] of streamDefinitions) assert.ok(!owned.includes(`pub extern "C" fn ${name}(`), `${name} retains a Rust C body`);
+  for (const [name] of streamDefinitions) assert.ok(owned.includes(`#[cfg(not(jet_native_pack))]\n    #[no_mangle]\n    pub extern "C" fn ${name}(`), `${name} seed body is not excluded from the native pack`);
   const streamMetadata = readFileSync(join(fixture, "Compiler/JetBackend/Source/Lower/RuntimeRoutes.jet"), "utf8");
   assert.match(streamMetadata, /export: "jet_reader_over", native_lists: true, params: \[LowerRouteCarrier\]\{LowerRouteCarrier.List\{elem: LowerRouteCarrier.Word\}\}/);
   assert.match(streamMetadata, /export: "jet_reader_take", native_lists: true, params: \[LowerRouteCarrier\]\{LowerRouteCarrier.HandleMut\{name: "JetReader"\}, LowerRouteCarrier.Word\}/);
