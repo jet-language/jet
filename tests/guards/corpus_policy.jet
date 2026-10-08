@@ -1,0 +1,394 @@
+// Closed-corpus semantic policy: the manifest owns provenance, the compiler AST
+// owns recurrence. This is test support, never a user-program lint.
+use core.files as policy_files
+use jet_foundation.[Program, DIAGNOSTIC_ERROR]
+use jet_parser.parse_source
+
+struct PolicySourceRow {
+    selector: String
+    role: String
+    profile: String
+    decision: String
+    proof: String
+    owner: String
+    reason: String
+}
+struct PolicyScopeRow { rule: String, selector: String, reason: String }
+struct PolicyProducerRow { selector: String, artifact: String, protocol: String, owner: String, reason: String }
+struct PolicyArtifactRow { selector: String, producer: String, kind: String, reason: String }
+struct PolicyFindingRow { id: String, rule: String, owner: String, proof: String }
+struct PolicyExceptionRow { rule: String, selector: String, site: String, expected: Int, protocol: String, reason: String }
+struct PolicyManifest {
+    sources: [PolicySourceRow]
+    scopes: [PolicyScopeRow]
+    producers: [PolicyProducerRow]
+    artifacts: [PolicyArtifactRow]
+    findings: [PolicyFindingRow]
+    exceptions: [PolicyExceptionRow]
+}
+struct PolicyRuleSpec { name: String, why: String, replacement: String }
+
+fn policy_rule_registry() -> [PolicyRuleSpec] {
+    [PolicyRuleSpec]{
+        PolicyRuleSpec{name: "raw-cli-fixed-shape", why: "maintained beginner programs must use the typed entry shape", replacement: "declare a typed #CLI entry struct and fn run(args: Args)"},
+        PolicyRuleSpec{name: "raw-cli-builder-shape", why: "a maintained CLI recipe must not rebuild the parser beside its typed entry", replacement: "use the resolved typed #CLI entry or the one approved args builder"},
+        PolicyRuleSpec{name: "fixture-cli-role", why: "a diagnostic fixture may retain parser syntax only as an explicitly classified fixture", replacement: "keep the exact negative or fixture role and do not copy its shape into teaching code"},
+        PolicyRuleSpec{name: "dogfood-stdlib-recipes", why: "the maintained dogfood recipe must use the canonical typed helper", replacement: "call the resolved Core helper instead of a local reimplementation"},
+        PolicyRuleSpec{name: "dogfood-path-containment", why: "path containment must use the typed path relation", replacement: "call Path.is_within for the normalized path values"},
+        PolicyRuleSpec{name: "dogfood-json", why: "dogfood wire values must use the typed JSON seam", replacement: "encode the typed report with the resolved JSON helper"},
+        PolicyRuleSpec{name: "dogfood-url-query", why: "URL query semantics must stay in the URL parser", replacement: "use the resolved URL query API"},
+        PolicyRuleSpec{name: "dogfood-list-equality", why: "typed lists already provide the canonical equality operation", replacement: "compare the lists with the resolved equality operation"},
+        PolicyRuleSpec{name: "dogfood-directory-setup", why: "directory creation must be idempotent", replacement: "use the idempotent directory setup helper"},
+        PolicyRuleSpec{name: "dogfood-ascii", why: "ASCII case folding must use the canonical ASCII helper", replacement: "call the resolved ASCII case-fold helper"},
+        PolicyRuleSpec{name: "datatree-domain-policy", why: "Tower must not duplicate generic DataTree equality or truthiness machinery", replacement: "use DataTree.equal_unordered for mechanical equality and keep named Tower policy helpers"},
+        PolicyRuleSpec{name: "dogfood-json-url-list", why: "dogfood JSON, URL, and list operations have one typed path", replacement: "use the typed JSON, URL, or list API"},
+        PolicyRuleSpec{name: "raw-cli-process-boundary", why: "a canonical program must not repeatedly reconstruct the process boundary", replacement: "use the one typed entry boundary or one explicit expert boundary"},
+        PolicyRuleSpec{name: "product-parser-regression", why: "the parser boundary must reject the recorded invalid shape", replacement: "keep the shared parser regression fixture and assertion"},
+        PolicyRuleSpec{name: "entry-implicit", why: "the first-contact program should be its top-level body", replacement: "move the ordinary first-contact body to top level"},
+        PolicyRuleSpec{name: "process_args_view", why: "the maintained corpus should use the canonical process argument view", replacement: "replace process.argv().skip(1) with process.args()"},
+        PolicyRuleSpec{name: "message_text", why: "the maintained corpus should use the message-level HTTP text default", replacement: "replace body().text(default_limit) with text()"},
+        PolicyRuleSpec{name: "redundant_fixed_cleanup", why: "the maintained corpus should keep plain Fixed output free of grouping cleanup", replacement: "delete the grouping-separator cleanup"},
+        PolicyRuleSpec{name: "unit-scalar-rewrap", why: "a scalar conversion must not unwrap and immediately rewrap the same unit", replacement: "use the linear unit operation directly"},
+        PolicyRuleSpec{name: "unit_scalar_rewrap", why: "the maintained corpus should use direct scalar unit arithmetic", replacement: "use unit * scalar, scalar * unit, or unit / scalar"},
+        PolicyRuleSpec{name: "path_containment_string_prefix", why: "the maintained corpus should use typed path containment", replacement: "replace the string prefix guard with Path.is_within()"},
+        PolicyRuleSpec{name: "complete_ascii_case_ladder", why: "the maintained corpus should use the direct ASCII case conversion", replacement: "replace the complete ladder with to_ascii_lower() or to_ascii_upper()"},
+        PolicyRuleSpec{name: "compiler-loop-fact", why: "the compiler-owned loop fact must be proved by sema", replacement: "retain the typed positive and negative loop fixtures"},
+        PolicyRuleSpec{name: "first-hour-doc-recipe", why: "the onboarding command must use the canonical runner", replacement: "run the example with `jet run`"},
+        PolicyRuleSpec{name: "build-root-fact", why: "the selected build entry is a liveness root", replacement: "retain the build-root and neighboring-lint proof"},
+        PolicyRuleSpec{name: "error-identity", why: "an unchanged fallible error should propagate through the entry", replacement: "use the bare fallible call"},
+        PolicyRuleSpec{name: "readonly-copy", why: "a proven read-only argument does not need an explicit copy sigil", replacement: "pass the read-only expression without the copy sigil"},
+        PolicyRuleSpec{name: "task-one-child", why: "one-child task groups add no scheduling policy", replacement: "call task.race or task.any directly"},
+        PolicyRuleSpec{name: "effect-row-inference", why: "positive effects already inferred by the body are redundant", replacement: "remove the redundant positive effect row"},
+        PolicyRuleSpec{name: "codable-structural", why: "structurally eligible records receive the canonical Codable behavior", replacement: "remove the bare #Codable marker"},
+        PolicyRuleSpec{name: "duration-constant-safe", why: "constant durations should use the checked unit literal", replacement: "write the constant as a duration literal such as `2h`"},
+        PolicyRuleSpec{name: "http-wrapper-json", why: "the maintained HTTP recipe should use the typed message and JSON seams", replacement: "use the message-text, typed-JSON, and request-free wrapper"},
+        PolicyRuleSpec{name: "http-message-text", why: "reading an HTTP response as text should use the message-level default", replacement: "call the response message text projection"},
+        PolicyRuleSpec{name: "http-typed-json", why: "HTTP JSON requests should use the typed request body seam", replacement: "call the typed JSON request helper"},
+        PolicyRuleSpec{name: "http-unused-request", why: "a request parameter unused by a route should not be carried through the wrapper", replacement: "use the request-free route form"},
+        PolicyRuleSpec{name: "crypto-naming-fact", why: "digest names must use the canonical typed surface", replacement: "use the typed digest API and its explicit projection"},
+        PolicyRuleSpec{name: "indexed-sequence", why: "sequence loops can carry the index as a fact", replacement: "write `loop (index, item) in items`"},
+        PolicyRuleSpec{name: "delimited-reader-config", why: "configured delimited input owns row boundaries and line numbers", replacement: "use the configured delimited reader"},
+        PolicyRuleSpec{name: "walk_files_filter", why: "the maintained corpus should use file-only traversal", replacement: "replace fs.walk with fs.walk_files"},
+        PolicyRuleSpec{name: "walk-files-filter", why: "file-only traversal should use the configured walk filter", replacement: "use the file-only walk helper or configured traversal"},
+        PolicyRuleSpec{name: "plain-format-fact", why: "plain fixed formatting must not be followed by grouping cleanup", replacement: "use the plain Fixed format projection"},
+        PolicyRuleSpec{name: "regex-capture-recipe", why: "the maintained filename recipe needs one anchored match and one capture", replacement: "match once with an anchored capture and use the captured value"},
+        PolicyRuleSpec{name: "bindgen-one-decoder", why: "one binding renderer emits one response decoder per protocol", replacement: "route all generated response calls through the single decoder"},
+        PolicyRuleSpec{name: "generated-protocol-override", why: "a generated protocol exception must be named and structurally distinct from the ordinary envelope", replacement: "declare an override identity with differs-from-ordinary-envelope proof"},
+        PolicyRuleSpec{name: "fixture-role-classification", why: "fixture semantics are classified before teaching-surface rules run", replacement: "add the exact fixture role and occurrence exception to the manifest"},
+        PolicyRuleSpec{name: "corpus-inventory", why: "every maintained source and generated producer needs an explicit manifest boundary", replacement: "add one exact manifest row with its role, owner, reason, and provenance"},
+    }
+}
+
+fn policy_violation(file: String, rule: String, site: String) -> String {
+    loop spec in policy_rule_registry() {
+        if spec.name == rule -> return "file={file}; rule={rule}; site={site}; why={spec.why}; replacement={spec.replacement}"
+    }
+    panic("unregistered corpus rule: {rule}")
+}
+fn policy_relative_path(path: String) -> String? {
+    if path.is_empty() || path.starts_with("/") -> return Some("manifest path is not a normalized relative path ({path})")
+    loop part in path.split("/") {
+        if part == ".." || part.is_empty() -> return Some("manifest path is not a normalized relative path ({path})")
+    }
+    None
+}
+fn policy_selector_path(selector: String) -> String {
+    if selector.starts_with("root:") || selector.starts_with("file:") -> return ~selector.slice(5, selector.len())
+    selector
+}
+fn policy_selector_error(value: String) -> String? {
+    if !value.starts_with("root:") && !value.starts_with("file:") -> return Some("selector must start with root: or file: ({value})")
+    policy_relative_path(policy_selector_path(value))
+}
+fn policy_producer_error(value: String) -> String? {
+    if !value.starts_with("producer:") -> return Some("producer selector must start with producer: ({value})")
+    parts :: value.slice(9, value.len()).split("#")
+    if parts.len() < 2 -> return Some("producer selector must name a symbol ({value})")
+    if policy_relative_path(parts[0]) == .Val(error) -> return Some(error)
+    if parts.len() != 2 || parts[1].is_empty() -> return Some("producer selector must name one non-empty symbol ({value})")
+    None
+}
+fn policy_artifact_error(value: String) -> String? {
+    if value.starts_with("path:") -> return policy_relative_path(~value.slice(5, value.len()))
+    if value.starts_with("family:") {
+        family :: value.slice(7, value.len())
+        if family.is_empty() || family.contains("/") -> return Some("artifact family is not a stable identifier ({value})")
+        return None
+    }
+    Some("artifact selector must start with path: or family: ({value})")
+}
+fn policy_unsigned(raw: String) -> Int? {
+    if raw.is_empty() -> return None
+    digits :: raw.bytes()
+    loop byte in digits { if byte < 48 || byte > 57 -> return None }
+    raw.parse<Int>()
+}
+fn policy_site_error(value: String) -> String? {
+    parts :: value.split("@")
+    if parts.len() < 2 -> return Some("semantic site must carry a span ({value})")
+    if parts.len() != 2 || parts[0].is_empty() -> return Some("semantic site kind is empty or malformed ({value})")
+    span :: parts[1].split("..")
+    if span.len() < 2 -> return Some("semantic site span must use start..end ({value})")
+    start :: policy_unsigned(span[0]) ?? return Some("bad site start ({value})")
+    end :: policy_unsigned(span[1]) ?? return Some("bad site end ({value})")
+    if span.len() != 2 -> return Some("bad site end ({value})")
+    if end < start -> return Some("site end precedes start ({value})")
+    None
+}
+fn policy_role_valid(role: String) -> Bool {
+    role == "canonical-teaching" || role == "expert-lesson" || role == "negative-diagnostic" || role == "raw-protocol" || role == "fixture-harness-boundary" || role == "generated-output" || role == "non-teaching-test-data"
+}
+fn policy_parse_manifest(text: String) -> PolicyManifest String! {
+    manifest := PolicyManifest{sources: [PolicySourceRow]{}, scopes: [PolicyScopeRow]{}, producers: [PolicyProducerRow]{}, artifacts: [PolicyArtifactRow]{}, findings: [PolicyFindingRow]{}, exceptions: [PolicyExceptionRow]{}}
+    section := ""
+    number := 0
+    loop raw in text.split("\n") {
+        number += 1
+        bytes :: raw.bytes()
+        carriage_return :: U8{13}
+        line :: if bytes.len() > 0 && bytes[bytes.len() - 1] == carriage_return -> ~raw.slice(0, raw.len() - 1) else -> raw
+        if line.is_empty() || line.starts_with("#") -> next
+        if line.starts_with("[") && line.ends_with("]") {
+            section = ~line.slice(1, line.len() - 1)
+            if section != "source" && section != "scope" && section != "producer" && section != "artifact" && section != "finding" && section != "exception" -> return Err("manifest line {number}: unknown section [{section}]")
+            next
+        }
+        fields :: line.split("\t")
+        expected :: if section == "source" -> 8 else if section == "scope" -> 4 else if section == "producer" -> 6 else if section == "artifact" || section == "finding" -> 5 else if section == "exception" -> 7 else -> 0
+        if fields.len() != expected || expected == 0 -> return Err("manifest line {number}: wrong field count or row outside a section")
+        labels :: if section == "source" -> [String]{"", "", "", "source profile", "source decision", "source proof", "source owner", "source reason"} else if section == "scope" -> [String]{"", "scope rule", "", "scope reason"} else if section == "producer" -> [String]{"", "", "", "producer protocol", "producer owner", "producer reason"} else if section == "artifact" -> [String]{"", "", "", "artifact kind", "artifact reason"} else if section == "finding" -> [String]{"", "finding id", "finding rule", "finding owner", "finding proof"} else -> [String]{"", "exception rule", "", "", "", "exception protocol", "exception reason"}
+        // Validate in field order, matching the Rust row constructors.
+        loop index in 1..<fields.len() {
+            error := String?{None}
+            if (section == "source" && index == 1) || (section == "scope" && index == 2) || (section == "exception" && index == 2) -> error = policy_selector_error(fields[index])
+            if (section == "producer" && index == 1) || (section == "artifact" && index == 2) -> error = policy_producer_error(fields[index])
+            if (section == "producer" && index == 2) || (section == "artifact" && index == 1) -> error = policy_artifact_error(fields[index])
+            if section == "source" && index == 2 && !policy_role_valid(fields[2]) -> error = Some("unknown corpus source role `{fields[2]}`")
+            if section == "exception" && index == 3 -> error = policy_site_error(fields[3])
+            if section == "exception" && index == 4 && policy_unsigned(fields[4]) == None -> error = Some("exception occurrence is not a positive integer")
+            if !labels[index].is_empty() && fields[index].is_empty() -> error = Some("{labels[index]} is empty")
+            if error == .Val(message) -> return Err("manifest line {number}: {message}")
+        }
+        if section == "source" -> &manifest.sources.push(PolicySourceRow{selector: fields[1], role: fields[2], profile: fields[3], decision: fields[4], proof: fields[5], owner: fields[6], reason: fields[7]})
+        if section == "scope" -> &manifest.scopes.push(PolicyScopeRow{rule: fields[1], selector: fields[2], reason: fields[3]})
+        if section == "producer" -> &manifest.producers.push(PolicyProducerRow{selector: fields[1], artifact: fields[2], protocol: fields[3], owner: fields[4], reason: fields[5]})
+        if section == "artifact" -> &manifest.artifacts.push(PolicyArtifactRow{selector: fields[1], producer: fields[2], kind: fields[3], reason: fields[4]})
+        if section == "finding" -> &manifest.findings.push(PolicyFindingRow{id: fields[1], rule: fields[2], owner: fields[3], proof: fields[4]})
+        if section == "exception" -> &manifest.exceptions.push(PolicyExceptionRow{rule: fields[1], selector: fields[2], site: fields[3], expected: policy_unsigned(fields[4]) ?? 0, protocol: fields[5], reason: fields[6]})
+        if fields[0] != "1" -> return Err("manifest line {number}: unsupported manifest version")
+    }
+    Ok(manifest)
+}
+fn policy_selector_matches(selector: String, path: String) -> Bool {
+    if selector.starts_with("file:") -> return policy_selector_path(selector) == path
+    if !selector.starts_with("root:") -> return false
+    root :: policy_selector_path(selector)
+    path == root || path.starts_with("{root}/")
+}
+fn policy_specificity(selector: String) -> Int {
+    if selector.starts_with("file:") -> return 100000 + selector.len() - 5
+    if selector.starts_with("root:") -> return selector.len() - 5
+    0
+}
+fn policy_source_row(manifest: PolicyManifest, path: String) -> PolicySourceRow? {
+    found := PolicySourceRow?{None}
+    best := -1
+    loop row in manifest.sources {
+        rank :: policy_specificity(row.selector)
+        if policy_selector_matches(row.selector, path) && rank >= best { found = Some(row)
+            best = rank
+        }
+    }
+    found
+}
+fn policy_protocol_error(protocol: String) -> String? {
+    if protocol == "ordinary-envelope" || protocol == "no-response-protocol" -> return None
+    if !protocol.starts_with("override:") -> return Some("generated protocol must be ordinary-envelope, no-response-protocol, or an override ({protocol})")
+    parts :: protocol.slice(9, protocol.len()).split(":")
+    if parts.len() < 2 -> return Some("generated protocol override must name identity and proof ({protocol})")
+    if parts[0].is_empty() || parts[0] == "ordinary-envelope" || parts.len() != 2 || parts[1] != "differs-from-ordinary-envelope" -> return Some("generated protocol override must prove a distinct protocol identity ({protocol})")
+    None
+}
+fn policy_exception_protocol_error(protocol: String) -> String? {
+    if protocol == "fixture" || protocol == "expert-lesson" || protocol == "negative-diagnostic" || protocol == "canonical-teaching" || protocol == "raw-protocol" || protocol == "fixture-harness-boundary" -> return None
+    if protocol.starts_with("override:") -> return policy_protocol_error(protocol)
+    Some("exception protocol must name its source boundary or a generated override ({protocol})")
+}
+fn policy_domain_guard(rule: String) -> Bool {
+    rule == "product-parser-regression" || rule == "compiler-loop-fact" || rule == "build-root-fact" || rule == "fixture-role-classification" || rule == "fixture-cli-role" || rule == "bindgen-one-decoder"
+}
+fn policy_registered(rule: String) -> Bool {
+    loop spec in policy_rule_registry() { if spec.name == rule -> return true }
+    false
+}
+fn policy_duplicate_errors(values: [String], kind: String) -> [String] {
+    seen := [String]{}
+    errors := [String]{}
+    loop value in values {
+        if seen.contains(value) -> &errors.push("duplicate {kind} selector {value}")
+        else -> &seen.push(value)
+    }
+    errors
+}
+fn policy_role_debug(role: String) -> String {
+    if role == "canonical-teaching" -> return "CanonicalTeaching"
+    if role == "expert-lesson" -> return "ExpertLesson"
+    if role == "negative-diagnostic" -> return "NegativeDiagnostic"
+    if role == "raw-protocol" -> return "RawProtocol"
+    if role == "fixture-harness-boundary" -> return "FixtureHarnessBoundary"
+    if role == "generated-output" -> return "GeneratedOutput"
+    "NonTeachingTestData"
+}
+fn policy_validate_manifest(manifest: PolicyManifest) -> [String] {
+    errors := [String]{}
+    names := [String]{}
+    loop row in manifest.sources -> &names.push(row.selector)
+    loop error in policy_duplicate_errors(names, "source") -> &errors.push(error)
+    scopes := [String]{}
+    loop scope in manifest.scopes {
+        key :: "{scope.rule}\t{scope.selector}"
+        if scopes.contains(key) -> &errors.push("duplicate scope {scope.rule} {scope.selector}")
+        else -> &scopes.push(key)
+    }
+    names = [String]{}
+    loop row in manifest.producers -> &names.push(row.selector)
+    loop error in policy_duplicate_errors(names, "producer") -> &errors.push(error)
+    names = [String]{}
+    loop row in manifest.artifacts -> &names.push(row.selector)
+    loop error in policy_duplicate_errors(names, "artifact") -> &errors.push(error)
+    names = [String]{}
+    loop row in manifest.findings -> &names.push(row.id)
+    loop error in policy_duplicate_errors(names, "finding") -> &errors.push(error)
+    loop finding in manifest.findings {
+        if !policy_registered(finding.rule) -> &errors.push("finding {finding.id} names unknown rule {finding.rule}")
+        if finding.owner.is_empty() || finding.proof.is_empty() -> &errors.push("finding {finding.id} has no owner or executable proof")
+        guarded := policy_domain_guard(finding.rule)
+        loop scope in manifest.scopes { if scope.rule == finding.rule -> guarded = true }
+        if !guarded -> &errors.push("finding {finding.id} rule {finding.rule} has no executable corpus or domain guard")
+    }
+    if manifest.findings.len() != 38 -> &errors.push("manifest must retain all 38 audited findings, found {manifest.findings.len()}")
+    loop scope in manifest.scopes {
+        if !policy_registered(scope.rule) -> &errors.push("scope names unknown rule {scope.rule}")
+        if policy_source_row(manifest, policy_selector_path(scope.selector)) == None -> &errors.push("scope {scope.rule} names an unclassified source selector {scope.selector}")
+        if scope.reason.is_empty() -> &errors.push("scope {scope.rule} {scope.selector} has no reason")
+    }
+    loop producer in manifest.producers {
+        if policy_protocol_error(producer.protocol) == .Val(error) {
+            path :: ~producer.selector.slice(9, producer.selector.len()).split("#")[0]
+            message :: policy_violation(path, "generated-protocol-override", "manifest:generated-protocol@0..0")
+            &errors.push("{message} ({error})")
+        }
+        has_artifact := false
+        loop artifact in manifest.artifacts {
+            if artifact.selector == producer.artifact && artifact.producer == producer.selector -> has_artifact = true
+        }
+        if !has_artifact -> &errors.push("producer {producer.selector} family has no artifact row")
+    }
+    loop artifact in manifest.artifacts {
+        declared := false
+        loop producer in manifest.producers { if producer.selector == artifact.producer -> declared = true }
+        if !declared -> &errors.push("artifact {artifact.selector} names unknown producer {artifact.producer}")
+    }
+    exceptions := [String]{}
+    loop exception in manifest.exceptions {
+        if !policy_registered(exception.rule) -> &errors.push("exception names unknown rule {exception.rule}")
+        key :: "{exception.rule}\t{exception.selector}\t{exception.site}"
+        if exceptions.contains(key) -> &errors.push("duplicate occurrence exception {exception.rule} {exception.selector} {exception.site}")
+        else -> &exceptions.push(key)
+        if exception.expected == 0 -> &errors.push("exception {exception.rule} {exception.site} has zero expected occurrences")
+        if !exception.selector.starts_with("file:") -> &errors.push("exception {exception.rule} {exception.site} is not occurrence-scoped to one file")
+        else {
+            source :: policy_source_row(manifest, policy_selector_path(exception.selector))
+            if source == .Val(row) {
+                if row.role != "expert-lesson" && row.role != "negative-diagnostic" {
+                    role :: policy_role_debug(row.role)
+                    &errors.push("exception {exception.rule} {exception.selector} requires an expert-lesson or negative-diagnostic source, found {role}")
+                }
+            } else {
+                &errors.push("exception {exception.rule} names an unclassified source {exception.selector}")
+            }
+        }
+        if exception.protocol.is_empty() || exception.reason.is_empty() -> &errors.push("exception {exception.rule} {exception.site} has no protocol or reason")
+        else if policy_exception_protocol_error(exception.protocol) == .Val(error) -> &errors.push("exception {exception.rule} {exception.site}: {error}")
+    }
+    errors
+}
+fn policy_manifest() -> PolicyManifest {
+    text :: policy_files.read("tests/corpus_policy.tsv") ?? panic("read corpus manifest")
+    policy_parse_manifest(text) ?? panic("checked-in corpus manifest is valid")
+}
+
+// The dependency contract is exercised on a real parser result, never a text
+// substitute. A build failure in the compiler packages blocks this guard port.
+fn policy_parse_program(source_label: String, source: String) -> Program String! {
+    parsed :: parse_source(source.bytes())
+    errors := [String]{}
+    loop diagnostic in parsed.diagnostics {
+        if diagnostic.severity == DIAGNOSTIC_ERROR -> &errors.push(diagnostic.code)
+    }
+    if errors.len() > 0 -> return Err("Jet parser rejected corpus source `{source_label}`: {errors.join(",")}")
+    Ok(parsed.program)
+}
+
+#Test("corpus policy compiler AST dependency") {
+    program :: policy_parse_program("planted", "fn run() {{ print(\"process.argv()\") }}") ?? panic("compiler parser rejected valid source")
+    assert_eq(program.items.len(), 1)
+}
+#Test("checked_manifest_has_all_audited_findings_and_provenance") {
+    manifest :: policy_manifest()
+    assert_eq(policy_validate_manifest(manifest), [String]{})
+    assert_eq(manifest.findings.len(), 38)
+    assert_eq(manifest.producers.len(), 26)
+    has_lua := false
+    loop artifact in manifest.artifacts { if artifact.selector == "family:lua-binding" -> has_lua = true }
+    assert(has_lua, "Lua artifact family is inventoried")
+    has_renderer := false
+    loop producer in manifest.producers {
+        if producer.selector.contains("LuaBind.rs") {
+            has_renderer = true
+            assert_eq(producer.protocol, "override:lua-raw-json:differs-from-ordinary-envelope")
+        }
+    }
+    assert(has_renderer, "Lua renderer is inventoried")
+}
+#Test("manifest_rejects_a_scope_without_source_coverage") {
+    manifest := policy_manifest()
+    &manifest.scopes.push(PolicyScopeRow{rule: "entry-implicit", selector: "file:unclassified/entry.jet", reason: "synthetic uncovered scope"})
+    assert(policy_validate_manifest(manifest).join("\n").contains("unclassified source selector"), "uncovered scope must fail")
+}
+#Test("manifest_rejects_a_finding_without_an_executable_guard") {
+    manifest := policy_manifest()
+    kept := [PolicyScopeRow]{}
+    loop scope in manifest.scopes { if scope.rule != "entry-implicit" -> &kept.push(scope) }
+    manifest.scopes = kept
+    assert(policy_validate_manifest(manifest).join("\n").contains("entry-implicit has no executable corpus or domain guard"), "orphan finding must fail")
+}
+#Test("corpus manifest parser planted invalid rows") {
+    assert_eq(policy_parse_manifest("[unknown]\n"), Err("manifest line 1: unknown section [unknown]"))
+    assert_eq(policy_parse_manifest("[scope]\n1\tentry-implicit\tfile:../escape.jet\twhy"), Err("manifest line 2: manifest path is not a normalized relative path (../escape.jet)"))
+    assert_eq(policy_parse_manifest("[exception]\n1\tentry-implicit\tfile:ok.jet\tfn:run@3..2\t1\tfixture\twhy"), Err("manifest line 2: site end precedes start (fn:run@3..2)"))
+    assert_eq(policy_parse_manifest("[scope]\n2\tentry-implicit\tfile:ok.jet\twhy"), Err("manifest line 2: unsupported manifest version"))
+    assert_eq(policy_parse_manifest("[scope]\n1\tentry-implicit\tfile:ok.jet"), Err("manifest line 2: wrong field count or row outside a section"))
+}
+#Test("corpus manifest validation planted duplicate and provenance violations") {
+    manifest := policy_manifest()
+    &manifest.sources.push(manifest.sources[0])
+    &manifest.artifacts.push(PolicyArtifactRow{selector: "family:planted", producer: "producer:new.rs#render", kind: "generated-output", reason: "planted"})
+    errors :: policy_validate_manifest(manifest)
+    assert(errors.contains("duplicate source selector {manifest.sources[0].selector}"), "duplicate source must fail")
+    assert(errors.contains("artifact family:planted names unknown producer producer:new.rs#render"), "missing provenance must fail")
+}
+#Test("exceptions_are_limited_to_expert_or_negative_sources") {
+    manifest :: policy_manifest()
+    loop exception in manifest.exceptions {
+        assert(exception.selector.starts_with("file:"), "exceptions use exact file selectors")
+        source :: policy_source_row(manifest, policy_selector_path(exception.selector)) ?? panic("exception source is classified")
+        assert(source.role == "expert-lesson" || source.role == "negative-diagnostic", "exception requires expert or negative source")
+    }
+}
+#Test("corpus manifest planted canonical-source exception") {
+    manifest := policy_manifest()
+    &manifest.exceptions.push(PolicyExceptionRow{rule: "entry-implicit", selector: "file:Examples/features/basics/hello.jet", site: "fn:run@0..0", expected: 1, protocol: "fixture", reason: "planted"})
+    error :: "exception entry-implicit file:Examples/features/basics/hello.jet requires an expert-lesson or negative-diagnostic source, found CanonicalTeaching"
+    assert(policy_validate_manifest(manifest).contains(error), "canonical source cannot absorb a violation")
+}
