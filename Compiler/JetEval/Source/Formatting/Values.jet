@@ -90,7 +90,9 @@ fn jet_eval_render_runtime_value(machine: &JetEvalMachine, value: JetEvalRuntime
                             child :: jet_eval_render_runtime_value(&machine, arg.value, format, Val(child_ty), span) ?? return None
                             if arg.name == .Val(label) {
                                 &rendered.push(if format == .Debug && labeled -> "{jet_eval_format_source_name(label)}: {child}" else -> "{label} = {child}")
-                            } else -> &rendered.push(child)
+                            } else {
+                                &rendered.push(child)
+                            }
                         }
                         if format == .Debug {
                             leaf :: jet_eval_format_source_name(variant)

@@ -1165,7 +1165,12 @@ pub fn core_source_value_hook(name: &str, operation: &str) -> Option<&'static st
     if !name.strip_prefix(crate::Diagnostics::CORE_SOURCE_ROOT).is_some_and(|rest| rest.starts_with('/')) {
         return None;
     }
+    if !name.ends_with("::Core/compute/solve.jet::Solver") {
+        return None;
+    }
     match operation {
+        "show" => Some("__show"),
+        "debug" => Some("__debug"),
         _ => None,
     }
 }
@@ -1284,5 +1289,17 @@ mod tests {
             .find(|entry| entry.module == "core.web")
             .expect("core.web declaration");
         assert_eq!(web.dependencies, &["core.http", "core.web.forms"]);
+    }
+
+    #[test]
+    fn private_value_hooks_require_the_exact_solver_declaration() {
+        let solver = "<corelib>/Core/compute/solve::Core/compute/solve.jet::Solver";
+        assert_eq!(core_source_value_hook(solver, "show"), Some("__show"));
+        assert_eq!(core_source_value_hook(solver, "debug"), Some("__debug"));
+        assert_eq!(core_source_value_hook(solver, "clone"), None);
+        for user in ["Solver", "user::Solver", "<corelib>/Core/other::Core/other/other.jet::Solver"] {
+            assert_eq!(core_source_value_hook(user, "show"), None);
+            assert_eq!(core_source_value_hook(user, "debug"), None);
+        }
     }
 }

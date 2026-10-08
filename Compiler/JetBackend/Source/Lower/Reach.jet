@@ -261,7 +261,8 @@ fn lower_reach_concrete_type(p: MIRProgram, q: &LowerPrepared, ty: MIRType, pare
     fingerprint :: lower_mono_fingerprint(ty)
     first :: q.lifecycle.get(fingerprint) ?? -1
     lower_reach_edges(p, &q, first, parent, "lifecycle of {mir_type_display_name(ty)}")
-    loop operation in [String]{"clone", "show"} {
+    operations :: [String]{"clone", "show", "debug"}
+    loop operation in operations {
         if mir_source_value_hook(p, ty, operation) == .Val(id) {
             lower_mono_request(p, &q, id, Val(ty), [MIRType]{}, parent, "source {operation} hook").drop("source value hook")
         }
