@@ -3452,6 +3452,10 @@ and Unix listen/shutdown/close require `Net` without `Time.Wait`. Accept,
 connect, byte transfer, DNS, and the other listed waiting operations retain
 their existing `Time.Wait` leaf. Reserved raw aliases mirror those same rows;
 moving public validation into Jet does not widen the authority contract.
+TCP reply, TCP option access, and UDP bind enter their Jet public functions
+before the corresponding reserved `__tcp_reply`, `__set_*`, `__nodelay`,
+`__ttl`, and `__udp_bind*` leaves. Raw leaves retain existing native error
+mapping, borrow/move conventions, and interpreter-route availability.
 
 DNS error classification is Jet source policy. Reserved Core-only
 `__dns_*_lookup` leaves call the existing resolver and return its raw string

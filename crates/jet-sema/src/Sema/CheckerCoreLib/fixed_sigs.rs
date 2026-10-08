@@ -5065,7 +5065,7 @@ fn core_fixed_sig_impl(
                 Type::Named("NetError".to_string()),
             )),
         )),
-        ("core.net", "set_timeout") => Some((
+        ("core.net", "set_timeout" | "__set_timeout") => Some((
             vec![
                 (
                     AccessConvention::Write,
@@ -5075,7 +5075,7 @@ fn core_fixed_sig_impl(
             ],
             Some(result_ty(unit_ty(), Type::Named("NetError".to_string()))),
         )),
-        ("core.net", "set_read_timeout" | "set_write_timeout") => Some((
+        ("core.net", "set_read_timeout" | "set_write_timeout" | "__set_read_timeout" | "__set_write_timeout") => Some((
             vec![
                 (
                     AccessConvention::Write,
@@ -5085,11 +5085,11 @@ fn core_fixed_sig_impl(
             ],
             Some(result_ty(unit_ty(), Type::Named("NetError".to_string()))),
         )),
-        ("core.net", "nodelay") => Some((
+        ("core.net", "nodelay" | "__nodelay") => Some((
             vec![(read, Type::Named("TCPStream".to_string()))],
             Some(result_ty(Type::Bool, Type::Named("NetError".to_string()))),
         )),
-        ("core.net", "set_nodelay") => Some((
+        ("core.net", "set_nodelay" | "__set_nodelay") => Some((
             vec![
                 (
                     AccessConvention::Write,
@@ -5099,11 +5099,11 @@ fn core_fixed_sig_impl(
             ],
             Some(result_ty(unit_ty(), Type::Named("NetError".to_string()))),
         )),
-        ("core.net", "ttl") => Some((
+        ("core.net", "ttl" | "__ttl") => Some((
             vec![(read, Type::Named("TCPStream".to_string()))],
             Some(result_ty(Type::Int, Type::Named("NetError".to_string()))),
         )),
-        ("core.net", "set_ttl") => Some((
+        ("core.net", "set_ttl" | "__set_ttl") => Some((
             vec![
                 (
                     AccessConvention::Write,
@@ -5128,7 +5128,7 @@ fn core_fixed_sig_impl(
             Some(result_ty(Type::Int, Type::Named("NetError".to_string()))),
         )),
         // Convenience: send a complete HTTP/1.1 response and close the stream.
-        ("core.net", "tcp_reply") => Some((
+        ("core.net", "tcp_reply" | "__tcp_reply") => Some((
             vec![
                 (AccessConvention::Move, Type::Named("TCPStream".to_string())),
                 (read, Type::String),
@@ -5136,14 +5136,14 @@ fn core_fixed_sig_impl(
             ],
             Some(result_ty(unit_ty(), Type::Named("NetError".to_string()))),
         )),
-        ("core.net", "udp_bind") => Some((
+        ("core.net", "udp_bind" | "__udp_bind") => Some((
             vec![(read, Type::String)],
             Some(result_ty(
                 Type::Named("UDPSocket".to_string()),
                 Type::Named("NetError".to_string()),
             )),
         )),
-        ("core.net", "udp_bind_addr") => Some((
+        ("core.net", "udp_bind_addr" | "__udp_bind_addr") => Some((
             vec![(read, Type::Named("SocketAddr".to_string()))],
             Some(result_ty(
                 Type::Named("UDPSocket".to_string()),
