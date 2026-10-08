@@ -57,7 +57,8 @@ export function compareStartup(plain, optimized) {
     }
   }
   for (const rows of [plain, optimized]) {
-    if (!rows[0].receipt.compiler_identity || rows.some(row => row.receipt.compiler_identity !== rows[0].receipt.compiler_identity)) throw new Error('compiler identity changed within an arm');
+    if (!rows[0].receipt.compiler_identity || rows[0].receipt.compiler_identity === 'unavailable') throw new Error('compiler identity unavailable');
+    if (rows.some(row => row.receipt.compiler_identity !== rows[0].receipt.compiler_identity)) throw new Error('compiler identity changed within an arm');
   }
   const metrics = {};
   for (const name of ['wall_ns', 'compile_ns', 'pre_parse_ns']) {
