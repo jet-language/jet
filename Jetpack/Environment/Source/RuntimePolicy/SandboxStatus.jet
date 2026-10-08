@@ -56,7 +56,11 @@ pub fn env_enforce_sandbox_policy(theme: Theme, json_output: Bool) -[IO, FS, Env
     if env_read_sandbox_policy() == {
         .Require -> {
             if json_output {
-                eprint(env_sandbox_json("E1275", "error", status))
+                text :: env_sandbox_json("E1275", "error", status) ?? {
+                    eprint("sandbox status JSON: {err.reason}")
+                    return Val(2)
+                }
+                eprint(text)
             } else {
                 theme.error_coded("E1275", SANDBOX_REQUIRED_MESSAGE, status.reason, "{SANDBOX_REQUIRED_FIX}.")
             }
@@ -80,7 +84,7 @@ pub fn env_warn_sandbox_fallback(theme: Theme) Never! -[IO, FS, Env, Exec, Time.
 }
 
 // The machine report for a sandbox refusal or warning.
-fn env_sandbox_json(code: String, severity: String, status: SandboxStatus) -> String Never! {
+fn env_sandbox_json(code: String, severity: String, status: SandboxStatus) -> String EncodingError! {
     refusal :: code == "E1275"
     fields := [String: DataTree]{}
     fields["schema_version"] = DataTree.Text("1")
