@@ -1004,6 +1004,18 @@ adapters.push({
   if (index < 0) adapters.push(row); else adapters[index] = row;
 }
 
+// The raw tagged-Int destructor is callable only after its Jet layer owns the
+// export. Earlier E1/E4 runtime epochs must not acquire a dangling route.
+if (jetRuntimeExports.has("jet_rt_int_drop") && !adapters.some((adapter) => adapter.name === "jet_rt_int_drop")) {
+  const adapter = {
+    symbol: "jet_rt_int_drop", name: "jet_rt_int_drop", external: true,
+    params: [{ jet: "Word", ctys: ["i64"] }],
+    result: { jet: "Plain{carrier: LowerRouteCarrier.Unit}", ret: null, outs: [] },
+    rows: ["JetRuntime.Int.drop"],
+  };
+  validateRuntimeRoute(adapter, jetRuntimeSignatures.get(adapter.name));
+  adapters.push(adapter);
+}
 // Core types the runtime holds natively: the Jet name -> native Rust type
 // tables generated Rust spells its types with (Codegen/Context.rs and
 // Syntax/predicates.rs, applied in MIRRust.rs `rust_type` order, with its
