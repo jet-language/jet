@@ -435,7 +435,7 @@ fn sema_incremental_publication(memo: &SemaModuleMemo?) {
 fn sema_incremental_query(memo: SemaModuleMemo, key: String, input: String, eligible: Bool) -> SemaBodyMemoQuery {
     replay := false
     permit :: memo.cache.state.guard_read()
-    if eligible && permit.value.generation == memo.generation && permit.value.scope_epochs.get(memo.module_identity) == Val(memo.epoch) {
+    if eligible && permit.value.generation == memo.generation && (permit.value.scope_epochs.get(memo.module_identity) ?? -1) == memo.epoch {
         if permit.value.rows.has_key(key) {
             row :: permit.value.rows[key]
             replay = row.generation == memo.generation && row.epoch == memo.epoch && row.input == input
@@ -446,7 +446,7 @@ fn sema_incremental_query(memo: SemaModuleMemo, key: String, input: String, elig
 
 fn sema_incremental_replay(query: SemaBodyMemoQuery) -> SemaBodyMemoValue? {
     permit :: query.module_memo.cache.state.guard_edit()
-    if permit.value.generation != query.module_memo.generation || permit.value.scope_epochs.get(query.module_memo.module_identity) != Val(query.module_memo.epoch) -> return None
+    if permit.value.generation != query.module_memo.generation || (permit.value.scope_epochs.get(query.module_memo.module_identity) ?? -1) != query.module_memo.epoch -> return None
     if !permit.value.rows.has_key(query.key) -> return None
     row :: permit.value.rows[query.key]
     if row.generation != query.module_memo.generation || row.epoch != query.module_memo.epoch || row.input != query.input -> return None
@@ -470,7 +470,7 @@ fn sema_incremental_accept(query: SemaBodyMemoQuery, body: SemaParallelBody) {
     if body.method_input == .Val(input) {
         if !input.memory_found || !input.memory_complete || !input.owner_generic_complete -> return
     }
-    if permit.value.generation != query.module_memo.generation || permit.value.scope_epochs.get(query.module_memo.module_identity) != Val(query.module_memo.epoch) -> return
+    if permit.value.generation != query.module_memo.generation || (permit.value.scope_epochs.get(query.module_memo.module_identity) ?? -1) != query.module_memo.epoch -> return
     // Only a retainable product is copied: failed/volatile checks still count
     // their real recompute but allocate no throwaway memo product.
     value := SemaBodyMemoValue{
