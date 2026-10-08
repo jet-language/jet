@@ -324,6 +324,9 @@ fn lower_reach_concrete_type(p: MIRProgram, q: &LowerPrepared, ty: MIRType, pare
     fingerprint :: lower_mono_fingerprint(ty)
     first :: q.lifecycle.get(fingerprint) ?? -1
     lower_reach_edges(p, &q, first, parent, "lifecycle of {mir_type_display_name(ty)}")
+    if lower_close_method(p, q.close_methods, ty) == .Val(method) {
+        lower_mono_request(p, &q, method, Val(ty), [MIRType]{}, parent, "Close of {mir_type_display_name(ty)}").drop("instantiated drop dependency")
+    }
     if ty.kind == {
         .Apply(_, args) -> {
             loop arg in args -> lower_mono_intern_type(&q, arg, parent)

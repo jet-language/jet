@@ -313,7 +313,7 @@ fn lower_queue_retire(p: MIRProgram, m: &LowerModule, f: &LowerFunction, queue: 
     cap :: lower_list_word(&f, queue, 8)
     head :: lower_list_word(&f, queue, 24)
     data :: lower_list_data(&f, queue)
-    if lower_needs_drop(p, elem) {
+    if lower_needs_drop(p, m, elem) {
         counted :: lower_record_loop_start(&f, length)
         address :: lower_queue_address(&f, data, head, cap, counted.index, lower_list_stride(p, elem))
         lower_drop_stored(p, &m, &f, address, 0, elem)
