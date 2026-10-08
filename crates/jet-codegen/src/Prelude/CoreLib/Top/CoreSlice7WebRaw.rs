@@ -4,18 +4,11 @@
 pub(crate) fn jet_openapi_contract_stop_raw(message: &String) -> ! {
     jet_runtime_stop("E2805", "", 0, message.as_str())
 }
-pub(crate) fn jet_live_stats_snapshot_raw() -> Option<(i64, i64, i64, u64, u64, u64)> {
-    let state = jet_live_registry().lock().ok()?;
-    Some((state.queries.len() as i64,
-        state.queries.values().filter(|query| query.lifecycle.active).count() as i64,
-        state.queries.values().filter(|query| query.lifecycle.active && query.lifecycle.refreshing).count() as i64,
-        state.evictions, state.invalidations, state.ws_pushes))
-}
 
 pub(crate) fn jet_store_facts_snapshot_raw<T: Clone + Send + Sync + 'static>(store: &JetWebStore<T>) -> (u64, u64, i64, i64, i64, bool) {
     let _transaction_lock = store.transaction_lock.lock();
     let ledger = store.ledger.lock().unwrap_or_else(|error| error.into_inner());
-    (ledger.current_generation, ledger.cursor, ledger.history.len() as i64,
+    (ledger.current_generation, ledger.cursor as u64, ledger.history.len() as i64,
         ledger.history_limit as i64, ledger.events.len() as i64,
         jet_web_store_history_capture_enabled())
 }

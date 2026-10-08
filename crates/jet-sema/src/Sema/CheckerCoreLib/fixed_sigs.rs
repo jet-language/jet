@@ -413,6 +413,7 @@ fn web_fixed_sig(
     name: &str,
 ) -> Option<(Vec<(AccessConvention, Type)>, Option<Type>)> {
     let read = AccessConvention::Read;
+    let moved = AccessConvention::Move;
     let string = Type::String;
     let int = Type::Int;
     let bool_ = Type::Bool;
@@ -452,6 +453,45 @@ fn web_fixed_sig(
     let form_submission = web_named("WebFormTypedSubmission");
     let form_field_state = web_named("WebFormFieldState");
     match (module, name) {
+        ("core.web.browser", "__report_options") => Some((vec![(read, web_named("BrowserTestReport"))],
+            Some(Type::Tuple(vec![("reporter".into(), Box::new(string.clone())), ("ui".into(), Box::new(bool_.clone()))])))),
+        ("core.web.browser", "__report_json" | "__report_html" | "__report_text") =>
+            Some((vec![(read, web_named("BrowserTestReport"))], Some(string.clone()))),
+        ("core.web.browser", "__write_report_bytes") => Some((vec![(read, string.clone()), (read, web_list(u8_ty()))],
+            Some(web_result_error(unit_ty(), "BrowserError")))),
+        ("core.web.browser", "__server_start") => Some((vec![(read, web_named("BrowserTestConfig"))],
+            Some(web_result_error(web_named("BrowserTestServer"), "BrowserError")))),
+        ("core.web.browser", "__server_stop") => Some((vec![(AccessConvention::Write, web_named("BrowserTestServer"))], None)),
+        ("core.devtools", "__publish_checked") => Some((vec![(moved, string.clone()), (moved, string.clone()),
+            (moved, string.clone()), (moved, string.clone()), (moved, t.clone())], None)),
+        ("core.web", "__openapi_inputs") => Some((vec![(read, http_router.clone())],
+            Some(result_ty(web_list(web_named("OpenApiRouteInput")), string.clone())))),
+        ("core.web", "__openapi_render") => Some((vec![(moved, web_list(web_named("OpenApiRouteInput"))),
+            (moved, string.clone()), (moved, string.clone()), (moved, web_list(web_named("OpenApiServer")))],
+            Some(result_ty(string.clone(), string.clone())))),
+        ("core.web", "__contract_stop") => Some((vec![(read, string.clone())], Some(web_named("Never")))),
+        ("core.web", "__live_stats_snapshot") => Some((vec![], Some(Type::Option(Box::new(Type::Tuple(vec![
+            ("queries".into(), Box::new(int.clone())), ("active".into(), Box::new(int.clone())),
+            ("refreshing".into(), Box::new(int.clone())),
+            ("evictions".into(), Box::new(Type::IntN { signed: false, bits: 64 })),
+            ("invalidations".into(), Box::new(Type::IntN { signed: false, bits: 64 })),
+            ("ws_pushes".into(), Box::new(Type::IntN { signed: false, bits: 64 })),
+        ])))))),
+        ("core.web.store", "__transact") => Some((vec![(read, web_apply("WebStore", t.clone())),
+            (moved, string.clone()), (moved, web_list(string.clone())), (moved, web_fn(t.clone(), unit_ty()))],
+            Some(web_apply("WebStoreTransaction", t.clone())))),
+        ("core.web.store", "__facts_snapshot") => Some((vec![(read, web_apply("WebStore", t.clone()))],
+            Some(Type::Tuple(vec![
+                ("generation".into(), Box::new(Type::IntN { signed: false, bits: 64 })),
+                ("cursor".into(), Box::new(Type::IntN { signed: false, bits: 64 })),
+                ("history_length".into(), Box::new(int.clone())), ("history_limit".into(), Box::new(int.clone())),
+                ("event_length".into(), Box::new(int.clone())), ("history_enabled".into(), Box::new(bool_.clone())),
+            ])))),
+        ("core.web.table", "__columns") => Some((vec![(read, table.clone())], Some(web_list(table_column.clone())))),
+        ("core.web.table", "__replace_columns") => Some((vec![(read, table.clone()), (moved, web_list(table_column.clone()))], Some(table.clone()))),
+        ("core.web.table", "__state") => Some((vec![(read, table.clone())], Some(table_state.clone()))),
+        ("core.web.table", "__set_state") => Some((vec![(read, table.clone()), (moved, table_state.clone())], None)),
+        ("core.web.table", "__alias") => Some((vec![(read, table.clone())], Some(table.clone()))),
         ("core.data.sketch", "empty") => Some((vec![], Some(string.clone()))),
         ("core.data.sketch", "merge") => Some((
             vec![(read, string.clone()), (read, string.clone())],
