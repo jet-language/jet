@@ -927,3 +927,66 @@ impl Mat4.Sub {
     assert_eq((matrix + matrix).to_array()[7], 16.0)
     assert_eq((matrix - matrix).to_array()[7], 0.0)
 }
+
+// Exact Int fields hold the normalized ratio. #4767 affects native Int
+// ownership, not this source policy or the arbitrary-precision contract.
+struct Fraction {
+    numerator: Int
+    denominator: Int
+}
+fn __fraction_new(numerator: Int, denominator: Int) -> Fraction? Never! {
+    if denominator == 0 -> return None
+    top := numerator
+    bottom := denominator
+    if bottom < 0 {
+        top = -top
+        bottom = -bottom
+    }
+    divisor :: gcd(top, bottom)
+    Val(Fraction{numerator: top /% divisor, denominator: bottom /% divisor})
+}
+fn __fraction_from_parts(numerator: Int, denominator: Int) -> Fraction Never! {
+    __fraction_new(numerator, denominator) ?? panic("invalid exact quotient")
+}
+fn __fraction_from_owned_parts(numerator: Int, denominator: Int) -> Fraction Never! {
+    __fraction_from_parts(numerator, denominator)
+}
+fn __fraction_from_int(value: Int) -> Fraction Never! {
+    Fraction{numerator: value, denominator: 1}
+}
+fn __fraction_add(left: Fraction, right: Fraction) -> Fraction Never! {
+    __fraction_from_parts(left.numerator * right.denominator + right.numerator * left.denominator, left.denominator * right.denominator)
+}
+fn __fraction_sub(left: Fraction, right: Fraction) -> Fraction Never! {
+    __fraction_from_parts(left.numerator * right.denominator - right.numerator * left.denominator, left.denominator * right.denominator)
+}
+fn __fraction_mul(left: Fraction, right: Fraction) -> Fraction Never! {
+    __fraction_from_parts(left.numerator * right.numerator, left.denominator * right.denominator)
+}
+fn __fraction_div(left: Fraction, right: Fraction) -> Fraction Never! {
+    if right.numerator == 0 -> panic("divided by zero")
+    __fraction_from_parts(left.numerator * right.denominator, left.denominator * right.numerator)
+}
+fn __fraction_numerator(value: Fraction) -> Int Never! { ~value.numerator }
+fn __fraction_denominator(value: Fraction) -> Int Never! { ~value.denominator }
+impl Fraction {
+    fn numerator(self) -> Int Never! { __fraction_numerator(self) }
+    fn denominator(self) -> Int Never! { __fraction_denominator(self) }
+}
+
+#Test("Fraction source construction reduces and fixes denominator sign") {
+    positive :: __fraction_from_parts(6, -8)
+    assert_eq(positive.numerator(), -3)
+    assert_eq(positive.denominator(), 4)
+    assert(__fraction_new(1, 0) == None)
+    zero :: __fraction_from_parts(0, -87)
+    assert_eq(zero.numerator(), 0)
+    assert_eq(zero.denominator(), 1)
+    one :: __fraction_from_int(1)
+    assert_eq(__fraction_add(positive, one).numerator(), 1)
+    assert_eq(__fraction_sub(one, positive).numerator(), 7)
+    assert_eq(__fraction_mul(positive, positive).denominator(), 16)
+    assert_eq(__fraction_div(one, positive).numerator(), -4)
+    large :: __fraction_from_owned_parts(18446744073709551616, 2)
+    assert_eq(large.numerator(), 9223372036854775808)
+}
