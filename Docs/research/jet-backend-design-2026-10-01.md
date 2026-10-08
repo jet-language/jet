@@ -1770,3 +1770,9 @@ C fixture registers exact output goldens for lock-protected read/edit, select
 ownership/probing, reverse once-only exit callbacks, and progress pull order.
 Progress-state hooks remain a separately named host-policy seam; this census
 does not assert their retirement or native execution.
+
+Five raw encoding keys in that census are callerless, not missing providers:
+exact-name research across the post-gate Codegen, Core registry, Core sources
+and crates finds no producer or body. Compiler cutover `e5e850ac2` removes their
+legacy Records recognizer and both Lower hooks from current canonical
+`39590da01`, without changing the separate typed rendering paths.
