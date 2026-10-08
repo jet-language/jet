@@ -1230,6 +1230,8 @@ fn builtin_type_registry() -> TypeRegistry {
     );
     TypeRegistry {
         types,
+        source_owned_types: HashSet::new(),
+        core_source_module: None,
         error_types: HashSet::new(),
         unit_types,
         unit_facts,

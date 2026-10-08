@@ -192,6 +192,24 @@ pub(super) fn check_bundle_opts_for_output_inner(
         .enumerate()
         .map(|(module_idx, m)| {
             count_program_copy(m.items.len());
+            let mut registry = builtin_type_registry();
+            registry.core_source_module = m.is_core_source()
+                .then(|| jet_foundation::CoreModuleExports::core_source_module_by_alias(&m.alias))
+                .flatten();
+            if let Some(source) = registry.core_source_module {
+                for row in jet_foundation::CoreModuleExports::CORE_SOURCE_OWNED_TYPES {
+                    if row.path == source.path && m.items.iter().any(|item| match item {
+                        Item::Struct(definition) => definition.name == row.name,
+                        Item::Enum(definition) => definition.name == row.name,
+                        Item::Distinct(definition) => definition.name == row.name,
+                        Item::TypeAlias(definition) => definition.name == row.name,
+                        _ => false,
+                    }) {
+                        registry.types.remove(row.name);
+                        registry.source_owned_types.insert(row.name);
+                    }
+                }
+            }
             ModuleState {
                 module_path: m.display.clone(),
                 source: m.source.clone(),
@@ -207,7 +225,7 @@ pub(super) fn check_bundle_opts_for_output_inner(
                 diverging_functions: std::sync::Arc::clone(&empty_divergence),
                 fixed_length_write_params: std::sync::Arc::clone(&empty_write_params),
                 funcs: HashMap::new(),
-                registry: builtin_type_registry(),
+                registry,
                 consts: HashMap::new(),
                 imports: HashMap::new(),
                 inline_foreign_imports: HashMap::new(),
@@ -798,6 +816,8 @@ pub(super) fn check_bundle_opts_for_output_inner(
                         }
                         TypeRegistry {
                             types,
+                            source_owned_types: st.registry.source_owned_types.clone(),
+                            core_source_module: st.registry.core_source_module,
                             error_types: st.registry.error_types.clone(),
                             unit_types: st.registry.unit_types.clone(),
                             unit_facts: st.registry.unit_facts.clone(),
