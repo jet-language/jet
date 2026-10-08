@@ -35,12 +35,15 @@ for (const line of ledger.slice(1)) {
         const route = jetFunction(dispatch);
         const implementation = jetFunction(body);
         if (!route.includes(`"${symbol}"`)) failures.push(`${symbol}: dispatch does not select symbol`);
-        if (!implementation.includes("lower_emit(") && !implementation.includes("lower_call_helper(") && !implementation.includes("lower_exact_arithmetic(")) failures.push(`${symbol}: body has no LIR implementation`);
+        if (!implementation.includes("lower_emit(") && !implementation.includes("lower_call_helper(") && !implementation.includes("lower_exact_arithmetic(") && !implementation.includes("lower_each_begin(")) failures.push(`${symbol}: body has no LIR implementation`);
         if (implementation.includes(`lower_call_runtime(&m, &f, "${symbol}"`)) failures.push(`${symbol}: body still calls Rust provider`);
         const [, dispatchName] = dispatch.split(":");
-        if (!entry.includes("lower_list_method(p, c,") || !jetFunction("Lists.jet:lower_list_method").includes(`${dispatchName}(`)) {
-            if (dispatchName !== "lower_list_method") failures.push(`${symbol}: dispatcher is not linked to List entry`);
-        }
+        const listEntry = jetFunction("Lists.jet:lower_list_method");
+        const closureEntry = jetFunction("Combinators.jet:lower_closure_method");
+        const linked = entry.includes(`${dispatchName}(p, c,`) ||
+            (entry.includes("lower_list_method(p, c,") && listEntry.includes(`${dispatchName}(`)) ||
+            (entry.includes("lower_closure_method(p, c,") && closureEntry.includes(`${dispatchName}(`));
+        if (!linked) failures.push(`${symbol}: dispatcher is not linked to MIR entry`);
         const [rustFile, rustName] = reference.split(":");
         if (!read(join(root, "crates/jet-codegen/src/Prelude", rustFile)).includes(`fn ${rustName}`)) failures.push(`${symbol}: missing reference ${reference}`);
         const [, bodyName] = body.split(":");
