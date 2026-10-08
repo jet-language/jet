@@ -39,6 +39,18 @@ fn fx_native_handle_checks() -> Bool Never! {
             if first != second -> return false
         }
     }
+    // Direct typed-body witnesses do not pretend these fixture declarations
+    // are production runtime owners. Export admission is tested by G1.
+    fields :: [String]{"x", "on", "name"}
+    loop field in fields -> lower_native_record_id(&m, fx_named("Pt"), "record.get", field).drop("registered typed getter witness")
+    lower_native_record_id(&m, fx_named("Pt"), "record.field", "name").drop("borrowed E4 field witness")
+    variants :: [String]{"Empty", "Has"}
+    loop variant in variants -> lower_native_record_id(&m, fx_named("Holder"), "record.new", variant).drop("native variant constructor witness")
+    lower_native_record_id(&m, fx_named("Holder"), "record.tag", "").drop("native tag witness")
+    lower_native_record_id(&m, fx_named("Holder"), "record.get", "Has").drop("owned nested getter witness")
+    bytes :: mir_type_from_kind(MIRTypeKind.List{inner: mir_type_from_kind(MIRTypeKind.IntN{signed: false, bits: 8})})
+    sequence_ops :: [String]{"new", "drop", "len", "push", "get"}
+    loop op in sequence_ops -> lower_native_record_id(&m, bytes, "record.seq.{op}", "List.Byte").drop("native sequence witness")
     // Unknown operations must neither register glue nor silently substitute it.
     count :: m.glue.len()
     if lower_native_handle_id(&m, fx_named("Pt"), "unknown") != None -> return false
