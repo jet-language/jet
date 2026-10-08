@@ -837,3 +837,93 @@ impl Vec4.Mul {
     assert_eq((Vec4.splat(2.0) - Vec4.splat(3.0)).lane(3), -1.0)
     assert_eq((Vec4.splat(2.0) * Vec4.splat(3.0)).lane(3), 6.0)
 }
+
+struct Mat3 {
+    lanes: [Float#9]
+}
+impl Mat3 {
+    fn new(m0: Float, m1: Float, m2: Float, m3: Float, m4: Float, m5: Float, m6: Float, m7: Float, m8: Float) -> Mat3 Never! {
+        Mat3{lanes: [Float#9]{m0, m1, m2, m3, m4, m5, m6, m7, m8}}
+    }
+    fn from_array(lanes: [Float#9]) -> Mat3 Never! { Mat3{lanes: lanes} }
+    fn to_array(self) -> [Float#9] Never! { ~self.lanes }
+    fn matmul(self, other: Mat3) -> Mat3 Never! {
+        result := ~self.lanes
+        loop column in 0..<3 {
+            loop row in 0..<3 {
+                total := Float{0.0}
+                loop k in 0..<3 -> total = total + self.lanes[k * 3 + row] * other.lanes[column * 3 + k]
+                result[column * 3 + row] = total
+            }
+        }
+        Mat3{lanes: result}
+    }
+    fn transform(self, value: Vec3) -> Vec3 Never! {
+        result := ~value.lanes
+        loop row in 0..<3 {
+            total := Float{0.0}
+            loop k in 0..<3 -> total = total + self.lanes[k * 3 + row] * value.lanes[k]
+            result[row] = total
+        }
+        Vec3{lanes: result}
+    }
+    fn transpose(self) -> Mat3 Never! {
+        result := ~self.lanes
+        loop column in 0..<3 {
+            loop row in 0..<3 -> result[column * 3 + row] = self.lanes[row * 3 + column]
+        }
+        Mat3{lanes: result}
+    }
+}
+impl Mat3.Add {
+    fn add(self, rhs: Mat3) -> Mat3 Never! {
+        result := ~self.lanes
+        loop i in 0..<9 -> result[i] = self.lanes[i] + rhs.lanes[i]
+        Mat3{lanes: result}
+    }
+}
+impl Mat3.Sub {
+    fn sub(self, rhs: Mat3) -> Mat3 Never! {
+        result := ~self.lanes
+        loop i in 0..<9 -> result[i] = self.lanes[i] - rhs.lanes[i]
+        Mat3{lanes: result}
+    }
+}
+impl Mat3.Mul {
+    fn mul(self, rhs: Mat3) -> Mat3 Never! { self.matmul(rhs) }
+}
+impl Mat3.Mul(Vec3) {
+    fn mul(self, rhs: Vec3) -> Vec3 Never! { self.transform(rhs) }
+}
+struct Mat4 {
+    lanes: [Float#16]
+}
+impl Mat4 {
+    fn new(m0: Float, m1: Float, m2: Float, m3: Float, m4: Float, m5: Float, m6: Float, m7: Float, m8: Float, m9: Float, m10: Float, m11: Float, m12: Float, m13: Float, m14: Float, m15: Float) -> Mat4 Never! {
+        Mat4{lanes: [Float#16]{m0, m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15}}
+    }
+}
+impl Mat4.Add {
+    fn add(self, rhs: Mat4) -> Mat4 Never! {
+        result := ~self.lanes
+        loop i in 0..<16 -> result[i] = self.lanes[i] + rhs.lanes[i]
+        Mat4{lanes: result}
+    }
+}
+impl Mat4.Sub {
+    fn sub(self, rhs: Mat4) -> Mat4 Never! {
+        result := ~self.lanes
+        loop i in 0..<16 -> result[i] = self.lanes[i] - rhs.lanes[i]
+        Mat4{lanes: result}
+    }
+}
+
+#Test("Mat3 source column-major products and transpose") {
+    matrix :: Mat3.new(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0)
+    assert_eq(matrix.transpose().to_array()[1], 4.0)
+    assert_eq(matrix.transform(Vec3.new(1.0, 2.0, 3.0)).lane(0), 30.0)
+    assert_eq(matrix.matmul(matrix).to_array()[0], 30.0)
+    assert_eq((matrix * matrix).to_array()[8], 150.0)
+    assert_eq((matrix + matrix).to_array()[7], 16.0)
+    assert_eq((matrix - matrix).to_array()[7], 0.0)
+}
