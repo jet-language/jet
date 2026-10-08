@@ -70,6 +70,9 @@ const fn effect_for(module: &str, method: &str) -> Option<Effect> {
             return None;
         }
     }
+    if same_text(module, "core.log") && same_text(method, "__metric_publish") {
+        return None;
+    }
     if same_text(module, "core.process") && same_text(method, "__with_directory_raw") {
         return Some(Effect::FS);
     }
@@ -203,9 +206,9 @@ const fn effect_for(module: &str, method: &str) -> Option<Effect> {
         };
     }
     if same_text(module, "core.web.browser") {
-        return if one_of(method, &["profile", "timeout"]) {
+        return if one_of(method, &["profile", "timeout", "__path_join", "__html_path"]) {
             None
-        } else if same_text(method, "locked") {
+        } else if one_of(method, &["locked", "__read_text", "__is_file", "__file_size", "__modified_ms"]) {
             Some(Effect::FS)
         } else if same_text(method, "config_from_env") {
             Some(Effect::Env)
@@ -1470,7 +1473,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: e91e5d100442d75eba4a11f092a647db6c5b9255b23a272d61e0a28aed2cbfb8
+// Source SHA-256: 56cd77d08fdf222a04d0ab264419bad6a47fd34d9dcf40213644f450abcd780d
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -1787,6 +1790,19 @@ pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.net", "unix_listen"),
     ("core.net", "tcp_reply"),
     ("core.net", "unix_accept"),
+    ("core.log", "__record_emit"),
+    ("core.log", "__flush"),
+    ("core.log", "__process_exit"),
+    ("core.log", "__span_allocate"),
+    ("core.log", "__span_enter"),
+    ("core.log", "__span_close"),
+    ("core.log", "__metric_publish"),
+    ("core.web.browser", "__path_join"),
+    ("core.web.browser", "__read_text"),
+    ("core.web.browser", "__is_file"),
+    ("core.web.browser", "__file_size"),
+    ("core.web.browser", "__modified_ms"),
+    ("core.web.browser", "__html_path"),
 ];
 
 pub const CORE_CALLS: &[CoreCallRecord] = &[
@@ -2703,6 +2719,13 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.log", "__sink_store", "jet_log_sink_store", true, &[true]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.log", "__sample_store", "jet_log_sample_store", true, &[false]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.log", "__sample_count_store", "jet_log_sample_count_store", true, &[false]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.log", "__record_emit", "jet_log_record_emit_raw", true, &[true, true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.log", "__flush", "jet_ring_log_flush", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.log", "__process_exit", "jet_log_process_exit", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.log", "__span_allocate", "jet_log_span_allocate_raw", true, &[true]).with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.log", "__span_enter", "jet_ring_log_enter", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.log", "__span_close", "jet_ring_log_close", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.log", "__metric_publish", "jet_log_publish_metric", true, &[true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.auth", "__store_load", "jet_auth_store_load", true, &[]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.auth", "__store_replace", "jet_auth_store_replace", true, &[true, false]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.sync", "text_merge", "jet_sync_text_merge", true, &[true, true], ),
@@ -2928,6 +2951,14 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     sema_web_call( "core.web.browser", "server_url", "jet_browser_test_server_url", &[true], ),
     sema_web_call( "core.web.browser", "server_logs", "jet_browser_test_server_logs", &[true], ),
     sema_web_call( "core.web.browser", "watch_changed", "jet_browser_test_watch_changed", &[true, false], ),
+    CoreCallRecord::new("core.web.browser", "__path_join", "jet_browser_path_join_raw", false, &[true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.web.browser", "__read_text", "jet_browser_read_text_raw", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.web.browser", "__is_file", "jet_browser_is_file_raw", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.web.browser", "__file_size", "jet_browser_file_size_raw", true, &[true]).with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.web.browser", "__modified_ms", "jet_browser_modified_ms_raw", true, &[true]).with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.web.browser", "__html_path", "jet_browser_html_path_raw", false, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.web.browser", "__connect_session", "jet_browser_connect_profile", false, &[true, true, false]).with_interpreter_route(CoreCallInterpreterRoute::TypedIntrinsic),
+    sema_web_call("core.web.browser", "__begin_fixture", "jet_browser_test_begin_named", &[true, true, true, false, true, false, false]),
     sema_web_call("core.web.forms", "new", "jet_web_forms_new", &[false]),
     sema_web_call( "core.web.forms", "field", "jet_web_forms_field", &[true, false, false, false], ),
     sema_web_call("core.web.forms", "set", "jet_web_forms_set", &[true, false, false]),

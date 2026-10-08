@@ -44,6 +44,10 @@ The Rust verification tier single-homes filesystem syscall tails in
 fault probes and call those tails; Jet entry points can perform the same
 preflight once before the raw call. Temporary and lock results still own the
 native cleanup resource, rather than substituting a path-only record.
+Logging and browser filesystem facts follow the same canonical boundary:
+Jet owns filtering, field normalization, configuration precedence and lock
+validation. Registered host leaves retain the existing log sink/span state
+and exact host path/metadata behavior until their runtime layers cut over.
 
 Types and error enums use PascalCase (`String`, `IOError`, `JSON`); functions
 and module segments use snake_case (`read`, `core.files`) (S54). Acronyms keep

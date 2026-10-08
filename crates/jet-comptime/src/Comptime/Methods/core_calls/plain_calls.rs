@@ -193,6 +193,11 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
         jet_foundation::Syntax::CoreCallCoverage::COMPTIME,
         span,
     )?;
+    if module == "core.web.browser" {
+        if let Some(result) = super::apply_browser_fs_leaf(method, &args, span) {
+            return result;
+        }
+    }
     // The foundation row owns the effect classification for every plain
     // symbol call. Only effect-free rows may enter the pure parity evaluator;
     // this prevents a new effectful row from accidentally gaining a second
@@ -260,6 +265,13 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
         // the AOT-only black-box effect has no observable CtValue equivalent.
         // D-OBS3: retain trace context in the shared log Prelude state even
         // when the default evaluator executes a service call.
+        ("core.log", "__metric_publish") => {
+            let [CtValue::Str(name), CtValue::Int(value)] = args.as_slice() else {
+                return Err(unsupported("core.log.__metric_publish expects String and Int", span));
+            };
+            log_kernel::metric_publish(name, *value);
+            Ok(CtValue::Unit)
+        }
         ("core.log", "__trace_store") => {
             log_kernel::set_trace_id(as_string(one(0)?, span)?);
             Ok(CtValue::Unit)

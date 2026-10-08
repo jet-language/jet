@@ -3293,6 +3293,7 @@ impl JetDbRequestScope { fn enter(_: Option<String>) -> Self { Self } }\n",
     if runtime_parts.contains(&MirRuntimePartId::Browser) {
         out.push_str(include_str!("../Prelude/CoreLib/Top/Browser.rs"));
         out.push_str(include_str!("../Prelude/BrowserTest.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/CoreSlice7BrowserRaw.rs"));
     }
     if runtime_parts.contains(&MirRuntimePartId::Args) {
         out.push_str(include_str!("../Prelude/CoreLib/Top/Args.rs"));
@@ -3836,6 +3837,7 @@ fn push_corelib_prelude_body(
     out.push_str("fn jet_log_process_exit(code: i64) { std::process::exit(code as i32); }\n");
     out.push_str(include_str!("../Prelude/Core/LogState.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/Log.rs"));
+    out.push_str(include_str!("../Prelude/CoreLib/Top/CoreSlice7LogRaw.rs"));
     out.push_str(include_str!(
         "../Prelude/CoreLib/Top/RingCsvLogTimeCrypto.rs"
     ));
@@ -4047,6 +4049,7 @@ impl JetDbRequestScope {{ fn enter(_: Option<String>) -> Self {{ Self }} }}\n",
     if needs_browser {
         out.push_str(include_str!("../Prelude/CoreLib/Top/Browser.rs"));
         out.push_str(include_str!("../Prelude/BrowserTest.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/CoreSlice7BrowserRaw.rs"));
     }
     if needs_args {
         out.push_str(include_str!("../Prelude/CoreLib/Top/Args.rs"));

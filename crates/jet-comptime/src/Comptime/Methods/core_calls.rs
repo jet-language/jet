@@ -247,11 +247,12 @@ mod log_kernel {
         eprintln!("{}", line);
     }
 
-    fn jet_log_process_exit(code: i64) {
+    pub(super) fn jet_log_process_exit(code: i64) {
         std::process::exit(code as i32);
     }
 
     include!("../../../../jet-codegen/src/Prelude/CoreLib/Top/Log.rs");
+    include!("../../../../jet-codegen/src/Prelude/CoreLib/Top/CoreSlice7LogRaw.rs");
 
     pub(super) fn set_trace_id(id: &str) {
         super::log_state::jet_ring_log_set_trace_id(id);
@@ -338,7 +339,42 @@ mod log_kernel {
     pub(super) fn close(span: &jet_std::LogSpan) {
         jet_ring_log_close(span);
     }
+    pub(super) fn metric_publish(name: &String, value: i64) {
+        jet_log_publish_metric(name, value);
+    }
 
+}
+
+mod browser_fs_kernel {
+    include!("../../../../jet-codegen/src/Prelude/CoreLib/Top/CoreSlice7BrowserRaw.rs");
+}
+
+fn apply_browser_fs_leaf(method: &str, args: &[CtValue], span: Span) -> Option<Result<CtValue, Diagnostic>> {
+    if !matches!(method, "__path_join" | "__html_path" | "__read_text" | "__is_file" | "__file_size" | "__modified_ms") {
+        return None;
+    }
+    let text = |index| match args.get(index) {
+        Some(CtValue::Str(value)) => Ok(value),
+        _ => Err(unsupported("browser filesystem leaf expects String arguments", span)),
+    };
+    Some((|| Ok(match method {
+        "__path_join" => CtValue::Str(browser_fs_kernel::jet_browser_path_join_raw(text(0)?, text(1)?)),
+        "__html_path" => CtValue::Str(browser_fs_kernel::jet_browser_html_path_raw(text(0)?)),
+        "__is_file" => CtValue::Bool(browser_fs_kernel::jet_browser_is_file_raw(text(0)?)),
+        "__read_text" => browser_fs_kernel::jet_browser_read_text_raw(text(0)?)
+            .map(|value| CtValue::Present(Box::new(CtValue::Str(value))))
+            .unwrap_or_else(|| CtValue::absent(Type::String)),
+        "__file_size" | "__modified_ms" => {
+            let value = if method == "__file_size" {
+                browser_fs_kernel::jet_browser_file_size_raw(text(0)?)
+            } else {
+                browser_fs_kernel::jet_browser_modified_ms_raw(text(0)?)
+            };
+            value.map(|value| CtValue::Present(Box::new(CtValue::Int(value))))
+                .unwrap_or_else(|| CtValue::absent(Type::Int))
+        },
+        _ => unreachable!("browser filesystem leaf was selected above"),
+    }))())
 }
 /// Set the shared Prelude log trace context for the MIR evaluator.
 ///

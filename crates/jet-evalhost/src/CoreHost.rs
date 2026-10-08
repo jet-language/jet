@@ -54,6 +54,7 @@ fn jet_log_process_exit(_code: i64) {}
 
 include!("../../jet-codegen/src/Prelude/Core/LogState.rs");
 include!("../../jet-codegen/src/Prelude/CoreLib/Top/Log.rs");
+include!("../../jet-codegen/src/Prelude/CoreLib/Top/CoreSlice7LogRaw.rs");
 
 // The Prelude owns every core.sys fact. This module supplies only the small
 // type/ambient surface needed to include that exact source; wrappers below

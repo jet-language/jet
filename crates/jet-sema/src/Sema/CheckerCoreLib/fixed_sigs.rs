@@ -4403,11 +4403,30 @@ fn core_fixed_sig_impl(
             ],
             None,
         )),
+        ("core.log", "__record_emit") => Some((vec![(read, Type::String), (read, Type::String),
+            (read, Type::List(Box::new(Type::Named("LogField".to_string()))))], None)),
+        ("core.log", "__flush") => Some((vec![], None)),
+        ("core.log", "__process_exit") => Some((vec![(read, Type::Int)], None)),
+        ("core.log", "__span_allocate") => Some((vec![(read, Type::String)], Some(Type::Tuple(vec![
+            ("id".to_string(), Box::new(Type::Int)), ("name".to_string(), Box::new(Type::String)),
+        ])))),
+        ("core.log", "__metric_publish") => Some((vec![(read, Type::String), (read, Type::Int)], None)),
+        ("core.web.browser", "__path_join") => Some((vec![(read, Type::String), (read, Type::String)], Some(Type::String))),
+        ("core.web.browser", "__html_path") => Some((vec![(read, Type::String)], Some(Type::String))),
+        ("core.web.browser", "__read_text") => Some((vec![(read, Type::String)], Some(Type::Option(Box::new(Type::String))))),
+        ("core.web.browser", "__is_file") => Some((vec![(read, Type::String)], Some(Type::Bool))),
+        ("core.web.browser", "__file_size" | "__modified_ms") => Some((vec![(read, Type::String)], Some(Type::Option(Box::new(Type::Int))))),
+        ("core.web.browser", "__connect_session") => Some((vec![(read, Type::String),
+            (read, Type::Named("BrowserProfile".to_string())), (moved, Type::Named("BrowserTimeout".to_string()))],
+            Some(result_ty(Type::Named("Browser".to_string()), Type::Named("BrowserError".to_string()))))),
+        ("core.web.browser", "__begin_fixture") => Some((vec![(read, Type::Named("BrowserTestConfig".to_string())),
+            (read, Type::String), (read, Type::String), (read, Type::Int), (read, Type::String), (read, Type::Int), (read, Type::Int)],
+            Some(result_ty(Type::Named("BrowserTestFixture".to_string()), Type::Named("BrowserError".to_string()))))),
         ("core.log", "span") => Some((
             vec![(read, string.clone())],
             Some(Type::Named("LogSpan".to_string())),
         )),
-        ("core.log", "enter" | "close") => {
+        ("core.log", "enter" | "close" | "__span_enter" | "__span_close") => {
             Some((vec![(read, Type::Named("LogSpan".to_string()))], None))
         }
         ("core.log", "set_sink") => {
