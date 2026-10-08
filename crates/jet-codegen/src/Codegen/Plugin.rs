@@ -1971,3 +1971,26 @@ mod io_error_generation_tests {
         assert!(generated.contains(guard));
     }
 }
+
+#[cfg(test)]
+mod io_error_bridge_generation_tests {
+    use super::{mangle_generated, plugin_host_import_bridge};
+
+    #[test]
+    fn host_error_bridges_decode_before_one_payload_free() {
+        let bridge = plugin_host_import_bridge(&["FS.Read", "FS.Write"]);
+        let read = mangle_generated("plugin_read_io_error");
+        let free = mangle_generated("plugin_free_io_error");
+        let sequence = format!(
+            "let value = {read}((ret_ptr as usize + 8) as i32);\n            \
+             {free}((ret_ptr as usize + 8) as i32);\n            \
+             Err(value)"
+        );
+        assert_eq!(
+            bridge.matches(&sequence).count(),
+            2,
+            "each canonical FS read/write error arm copies context before its one payload release",
+        );
+        assert_eq!(bridge.matches(&format!("{free}(")).count(), 2);
+    }
+}
