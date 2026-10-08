@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { candidateJetc0, frontReceipt } from '../../JetBackend/Tests/jet-front.mjs';
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const [output, mode, source] = process.argv.slice(2);
-const modes = ['assemble', 'assemble-stm', 'assemble-sync', 'assemble-observe', 'assemble-publication', 'lower', 'prepare-native', 'prepare-seed', 'link', 'link-seed', 'link-stm', 'run-stm', 'link-sync', 'run-sync', 'link-observe', 'run-observe', 'link-publication', 'run-publication', 'run', 'run-seed', 'cross', 'fatal', 'perf'];
+const modes = ['assemble', 'assemble-stm', 'assemble-sync', 'assemble-observe', 'assemble-publication', 'lower', 'prepare-native', 'prepare-seed', 'link', 'link-seed', 'link-stm', 'run-stm', 'link-sync', 'run-sync', 'link-observe', 'run-observe', 'link-publication', 'run-publication', 'link-weak', 'run-weak', 'run', 'run-seed', 'cross', 'fatal', 'perf'];
 if (!output || !modes.includes(mode)) throw Error(`usage: run-channel-fixtures.mjs OUT ${modes.join('|')} [FRESH_RUNTIME_RS]`);
 const out = resolve(output), fixture = join(out, 'fixture');
 const read = p => readFileSync(join(repo, p), 'utf8');
@@ -113,6 +113,15 @@ if (mode === 'assemble' || mode.startsWith('assemble-')) {
   writeFileSync(join(out, `${mode}.txt`), result.stdout + result.stderr);
   const expected = 'Shared World race/loser once/register once/reset owner only ok\nShared Process race/loser once/no World registration ok\n';
   if (result.stdout !== expected || result.stderr !== '') throw Error('invalid Shared publication fixture result');
+} else if (mode === 'link-weak') {
+  const lib = process.env.JET_CHANNEL_NATIVE_C_LIB;
+  if (!lib || !existsSync(lib)) throw Error('missing freshly compiled native fixture library');
+  command(process.env.CC ?? 'cc', ['-std=c11', '-Wall', '-Wextra', '-Werror', join(repo, 'Compiler/JetRuntime/Tests/shared-weak-fixture.c'), join(fixture, 'fixture.o'), lib, '-lpthread', '-ldl', '-lm', '-o', join(out, 'shared-weak-native')]);
+} else if (mode === 'run-weak') {
+  const result = command(join(out, 'shared-weak-native'), [], {timeout:120000});
+  writeFileSync(join(out, `${mode}.txt`), result.stdout + result.stderr);
+  const expected = 'Shared weak no resurrection/payload once/last weak frees Cell96 ok\nShared weak upgrade versus final strong drop 256 races ok\n';
+  if (result.stdout !== expected || result.stderr !== '') throw Error('invalid Shared weak fixture result');
 } else if (['link-stm', 'link-sync', 'link-observe'].includes(mode)) {
   const lib = process.env.JET_CHANNEL_NATIVE_C_LIB;
   if (!lib || !existsSync(lib)) throw Error('missing freshly compiled native fixture library');

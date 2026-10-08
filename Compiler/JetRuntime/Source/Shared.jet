@@ -1,9 +1,10 @@
 // Native Shared<NativeValue>. SharedProtocol.rs:280-330 is the policy:
 // concurrent readers, exclusive writer, waiting writers precede new readers.
 // Recursive acquisition has no special exception (it blocks as in Rust).
-// Cell88: atomic refs0, mutex8, condition sequence16, readers24, writer32,
+// Cell96: atomic strong refs0, mutex8, condition sequence16, readers24, writer32,
 // writers-waiting40, revision48, owned descriptor56, payload64, borrows72,
-// monomorphized payload drop function80 (slot address -> Unit; zero is trivial).
+// monomorphized payload drop function80 (slot address -> Unit; zero is trivial),
+// weak refs88 (one implicit weak while any strong owner remains).
 // Handles are opaque owned references to the cell; callbacks borrow the payload.
 fn shared_retain(shared: I64) { _ := sync_add(shared, I64{1}) }
 
@@ -54,8 +55,8 @@ fn shared_revision_stop() {
 }
 
 #Export(c) fn jet_rt_native_shared_new(slot: I64, meta: I64, drop_code: I64) -> I64 {
-    shared :: jet_rt_alloc(I64{88}, I64{8})
-    thread_zero(shared, I64{88})
+    shared :: jet_rt_alloc(I64{96}, I64{8})
+    thread_zero(shared, I64{96})
     owned_meta :: coll_meta_copy(meta)
     payload :: coll_slot_new(owned_meta)
     coll_copy(slot, payload, coll_payload(owned_meta))
@@ -63,6 +64,7 @@ fn shared_revision_stop() {
     sync_store(shared + I64{56}, owned_meta)
     sync_store(shared + I64{64}, payload)
     sync_store(shared + I64{80}, drop_code)
+    sync_store(shared + I64{88}, I64{1})
     shared
 }
 
@@ -196,7 +198,43 @@ fn shared_guard_payload(guard: I64) -> I64 {
     // A callback returning a pending stop still releases the allocation.
     jet_rt_free(payload, coll_size(meta), I64{8})
     coll_meta_drop(meta)
-    jet_rt_free(shared, I64{88}, I64{8})
+    // Final strong retirement (including publication losers and World reset)
+    // releases the collective weak only AFTER payload/descriptor destruction.
+    shared_weak_release(shared)
+}
+
+fn shared_weak_release(weak: I64) {
+    // sync_add is Linux's lock xadd; its full fence releases prior destruction
+    // and acquires preceding weak retirements before the last cell free.
+    if (sync_add(weak + I64{88}, I64{-1}) == I64{1}) {
+        jet_rt_free(weak, I64{96}, I64{8})
+    }
+}
+
+#Export(c) fn jet_rt_native_shared_downgrade(shared: I64) -> I64 {
+    // The caller borrows a live strong owner, hence the implicit weak is live.
+    _ := sync_add(shared + I64{88}, I64{1})
+    shared
+}
+
+#Export(c) fn jet_rt_native_shared_weak_upgrade(weak: I64, out: I64) -> Bool {
+    strong := sync_load(weak)
+    loop strong != (I64{0}) {
+        // sync_cas is Linux's lock cmpxchg (acquire/release full fence).
+        // Either this reservation wins before final strong retirement, or the
+        // retry observes zero. No payload access or resurrection at zero.
+        previous :: sync_cas(weak, strong, wrapping(strong + I64{1}))
+        if (previous == strong) {
+            sync_store(out, weak)
+            return true
+        }
+        strong = previous
+    }
+    false
+}
+
+#Export(c) fn jet_rt_native_shared_weak_drop(weak: I64) {
+    shared_weak_release(weak)
 }
 
 // Process-pinned publication registry, shared with World-lifetime site reset.

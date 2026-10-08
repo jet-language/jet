@@ -131,7 +131,7 @@ on an already-delivered stop rail. Generation exhaustion also releases both
 permit and owner before delivering its stop.
 
 Native `Shared<T>` construction supplies `(payload slot, NativeMeta descriptor,
-monomorphized payload-drop function)` to `jet_rt_native_shared_new`. Its 88-byte
+monomorphized payload-drop function)` to `jet_rt_native_shared_new`. Its 96-byte
 cell stores the function pointer at byte 80; the thunk borrows the owned slot
 address and returns `Unit`. Only the atomic `1 -> 0` strong-release transition
 invokes it, exactly once, outside all Shared locks. The glue performs the complete
@@ -139,12 +139,29 @@ typed destruction, including `T.Close` and owned fields. The provider must not
 also invoke the descriptor's drop callback. A null function is reserved for
 trivial payloads and means plain free, not a descriptor-drop fallback.
 
+Weak references use the appended count at byte 88; the drop-code pointer stays
+at byte 80 and every other existing field offset is unchanged. All strong
+owners collectively hold one implicit weak reservation. Downgrade reserves a
+weak without retaining the payload; upgrade atomically reserves a strong owner
+only while the strong count is nonzero, writing its out slot only on success.
+Final strong release destroys the payload and descriptor before retiring the
+implicit weak, while final weak release alone frees the cell. Native guard
+retention, publication losers and World reset use the same strong-release door.
+The existing `sync_cas`/`sync_add` Linux locked operations supply acquire/release
+fences; an expired weak may never resurrect a destroyed payload.
+
+The existing publication fixture assembly also supports `link-weak`/`run-weak`.
+Its C client checks failed upgrade leaves the out slot unchanged, exactly-once
+payload destruction, the counting allocator's remaining 96-byte cell until the
+last weak drops, and a two-thread upgrade/final-strong-drop race.
+
 Like Rust's `Arc<T>` releasing its final strong owner, the callback runs in the
 releasing caller's context. The provider adds neither a cleanup mask nor a
 session shield; releases inside a MIR cleanup frame inherit that frame's
 bracket. A callback that returns with pending stop still permits the provider
-to free the payload allocation, descriptor and cell before the caller propagates
-it. Reclamation on a pending stop is explicit, not unwind-dependent.
+to free the payload allocation and descriptor and release the strong owners'
+implicit weak reservation before the caller propagates it. Reclamation on a
+pending stop is explicit, not unwind-dependent.
 The seed-only C fixture retains its separate
 two-argument Rust-provider declaration for comparison; it is not a native alias
 and retires at cutover. Native runtime fixtures pass explicit drop functions,
