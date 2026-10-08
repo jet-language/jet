@@ -26,6 +26,11 @@ those fields and formats output; it does not re-run semantic decisions such as
 expression typing or overflow classification. `tir_covers` is the coverage
 proof for reachable functions.
 
+Restoring a codegen function snapshot consumes its already-owned non-Copy
+fields into the builder; only scalar Copy facts are read. Saving an enclosing
+function's independent snapshot remains a distinct operation, not a borrowed
+view that could be invalidated when the builder begins a nested function.
+
 ## Read-only fact channel
 
 The frozen TIR exposes one typed, borrowed `TFactChannel` view. It projects facts
