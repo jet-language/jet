@@ -58,12 +58,18 @@ fn alloc_align(address: I64, align: I64) -> I64 Never! {
     wrapping(address + mask) & !mask
 }
 
-fn alloc_map(bytes: I64, failed_size: I64) -> I64 {
-    #Unsafe("anonymous private mmap owns fresh writable bytes and cannot alias a live heap block") {
+fn alloc_map_try(bytes: I64) -> I64 {
+    #Unsafe("anonymous private mmap owns fresh writable bytes and cannot alias a live heap block; a failed syscall produces no allocation") {
         address :: os_syscall_i64(I64{9}, I64{0}, bytes, I64{3}, I64{34}, I64{-1}, I64{0})
-        if (address < I64{0}) -> alloc_stop(false, failed_size)
+        if (address < I64{0}) -> return I64{0}
         return address
     }
+}
+
+fn alloc_map(bytes: I64, failed_size: I64) -> I64 {
+    address :: alloc_map_try(bytes)
+    if (address == I64{0}) -> alloc_stop(false, failed_size)
+    address
 }
 
 fn alloc_unmap(address: I64, bytes: I64) {
@@ -121,8 +127,9 @@ fn alloc_link(slab: I64, head: I64) {
     }
 }
 
-fn alloc_new_slab(head: I64, slot: I64, failed_size: I64) -> I64 {
-    slab :: alloc_map(I64{65536}, failed_size)
+fn alloc_new_slab(head: I64, slot: I64) -> I64 {
+    slab :: alloc_map_try(I64{65536})
+    if (slab == I64{0}) -> return I64{0}
     first :: wrapping(slab + (if (slot > I64{64}) -> slot else -> I64{64}))
     end :: wrapping(slab + I64{65536})
     block := first
@@ -146,7 +153,11 @@ fn alloc_small(root: I64, size: I64, align: I64, slot: I64) -> I64 {
     pointer := I64{0}
     #Unsafe("the held heap lock protects the class list, block links and slab live count; the chosen block has at least size+16+align-1 bytes") {
         slab := os_load_i64(head)
-        if (slab == I64{0}) -> slab = alloc_new_slab(head, slot, if (size == I64{0}) -> I64{1} else -> size)
+        if (slab == I64{0}) -> slab = alloc_new_slab(head, slot)
+        if (slab == I64{0}) {
+            alloc_unlock(root)
+            return I64{0}
+        }
         block :: os_load_i64(wrapping(slab + I64{16}))
         remaining :: os_load_i64(block)
         os_store_i64(wrapping(slab + I64{16}), remaining)
@@ -168,9 +179,10 @@ fn alloc_large(size: I64, align: I64) -> I64 {
     // layout error. Refuse an unrepresentable mapping as allocation failure.
     overhead :: wrapping(align - I64{1})
     limit :: wrapping(I64{9223372036854775807} - I64{4111})
-    if overhead > limit || effective > wrapping(limit - overhead) -> alloc_stop(false, effective)
+    if overhead > limit || effective > wrapping(limit - overhead) -> return I64{0}
     bytes :: alloc_align(wrapping(effective + I64{16} + overhead), I64{4096})
-    mapping :: alloc_map(bytes, effective)
+    mapping :: alloc_map_try(bytes)
+    if (mapping == I64{0}) -> return I64{0}
     pointer :: alloc_align(wrapping(mapping + I64{16}), align)
     #Unsafe("pointer's two header words and the aligned payload are wholly within this fresh page-rounded mapping") {
         os_store_i64(wrapping(pointer - I64{16}), mapping)
@@ -179,12 +191,25 @@ fn alloc_large(size: I64, align: I64) -> I64 {
     pointer
 }
 
-#Export(c)
-fn jet_rt_alloc(size: I64, align: I64) -> I64 {
-    if !alloc_layout_valid(size, align) -> alloc_stop(true, size)
+// Session reserve is nullable on bad layout/OOM; every successful allocation
+// still uses the same heap and exact-layout free as ordinary native storage.
+fn alloc_try_validated(size: I64, align: I64) -> I64 {
     slot :: alloc_class(size, align)
     if (slot == I64{0}) -> alloc_large(size, align)
     else -> alloc_small(alloc_root, size, align, slot)
+}
+
+fn alloc_try(size: I64, align: I64) -> I64 {
+    if !alloc_layout_valid(size, align) -> return I64{0}
+    alloc_try_validated(size, align)
+}
+
+#Export(c)
+fn jet_rt_alloc(size: I64, align: I64) -> I64 {
+    if !alloc_layout_valid(size, align) -> alloc_stop(true, size)
+    pointer :: alloc_try_validated(size, align)
+    if (pointer == I64{0}) -> alloc_stop(false, if (size == I64{0}) -> I64{1} else -> size)
+    pointer
 }
 
 #Export(c)

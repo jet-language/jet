@@ -146,6 +146,14 @@ runtime with Jet callback assertions and uses C only to transport callback
 addresses. Its run phase covers one-, two- and eight-worker pools; root panic
 is compared byte-for-byte to a supplied freshly rendered Rust-tier reference.
 
+Native resident-session reservations use the same heap as ordinary native
+storage, but return a null place for an invalid layout or allocation failure.
+A failed slab mapping releases the heap lock without publishing slab metadata;
+a failed direct mapping never publishes a payload or its allocation header.
+The ordinary allocation door still delivers its existing fatal layout/OOM
+diagnostic. Successful reservations retain their original size and alignment
+for the shared exact-layout free operation, including aligned zero-size places.
+
 
 ### Exact integer carrier
 
