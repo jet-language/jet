@@ -1,6 +1,5 @@
-// Link against the real native UiNode + atomic SendFn providers. No replacement
-// retain/release functions live in this witness. Interim metadata providers are
-// required by UiNode's imports even when these two transfer cases leave them absent.
+// Link against the real native UiNode, metadata, and atomic SendFn providers.
+// No replacement retain/release functions live in this witness.
 #include <assert.h>
 #include <math.h>
 #include <pthread.h>

@@ -1670,10 +1670,17 @@ No separate SendFn refcount mechanism or exports are introduced.
 The private typed callback-call override remains an admission requirement;
 ordinary `Fn` values and Rust callback registry IDs cannot enter these native
 slots. E4 text and exact Int imports must resolve to their native Jet
-providers. Six accessibility/shortcut metadata clone/drop/equality imports
-are registered interim raw leaves in `Tools/agent/rust-leaves.tsv`; they
-remain opaque and die at the UI cutover. The UI pack is not Jet-only while
-those providers remain Rust.
+providers. Metadata clone/drop/equality is now Jet-owned in `UiNode.jet`.
+`UiABI.jet` single-sources Accessibility40 (optional name/description E4
+pointers, length/capacity/data), State16 (tag/payload), and Shortcut16 (owned
+E4 key pointer/modifier bits). Tags match `HostServices.rs:1617-1624`:
+Disabled=0, Busy=1, Expanded=2, Checked=3, Selected=4, Required=5, Value=6.
+Only Value owns a text payload; unit variants ignore their unused words.
+Clones allocate independent headers, state buffers and text. Equality follows
+Rust's field/variant/ordered-vector value equality, not pointer identity or
+capacity. Constructors must provide these native carriers, never Rust boxes.
+The six interim metadata ledger rows retire with this provider cutover;
+source/C syntax checks alone still do not admit a native UI pack.
 
 `UiNodeWitness.c` links the real native providers. It checks all 160 bytes'
 field contracts for absent and populated transfers, poisoned ignored words,
@@ -1683,6 +1690,16 @@ they never reuse an inherited GS base. Two threads additionally perform 100,000 
 each on one shared closure before its single final destruction. Its counted
 closure allocations and frees use the real Jet allocator, not a replacement.
 Source parsing and C syntax checks are not native byte-parity evidence.
+
+`UiMetadataWitness.c` additionally covers all seven state variants (including
+Expanded true/false and unequal Value text), optional name/description,
+ordered-state/length equality, normalized shortcut key/modifier equality,
+independent nested clone allocations, and node metadata transfer/clearing.
+Link the real composed runtime object with `-Wl,--wrap=jet_rt_free`: the wrapper
+only observes frees and always forwards to the real allocator. Every watched
+metadata header, state buffer, text header and text buffer must be freed once.
+The adjacent stdout golden is expected output until a composed native run
+observes it; it does not grant execution or public Core UI census credit.
 
 ### Native display runtime
 

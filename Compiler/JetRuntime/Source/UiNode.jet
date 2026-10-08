@@ -1,15 +1,8 @@
 // Native Node160 only. UiABI.jet is included by both runtime and Lower.
 // Text uses E4, children own a native List<UINode> header, and callbacks own
 // one SendFn Closure24 reference each. A clone is a distinct node, not an Rc.
-// Registered raw metadata leaves below are interim #32 dependencies:
-// replaced by the Jet runtime layer <UI>, die at cutover. Their allocations
-// stay opaque; this provider never reads a Rust metadata layout.
-#Import(c) fn ui_accessibility_clone(value: I64) -> I64 = "jet_rt_handle_clone_JetUiAccessibility"
-#Import(c) fn ui_accessibility_drop(value: I64) = "jet_rt_handle_drop_JetUiAccessibility"
-#Import(c) fn ui_accessibility_eq(left: I64, right: I64) -> Bool = "jet_rt_handle_eq_JetUiAccessibility"
-#Import(c) fn ui_shortcut_clone(value: I64) -> I64 = "jet_rt_handle_clone_JetUiShortcut"
-#Import(c) fn ui_shortcut_drop(value: I64) = "jet_rt_handle_drop_JetUiShortcut"
-#Import(c) fn ui_shortcut_eq(left: I64, right: I64) -> Bool = "jet_rt_handle_eq_JetUiShortcut"
+// Metadata uses the native Accessibility40/State16/Shortcut16 ABI in UiABI,
+// never a Rust allocation. HostServices.rs:1516-1519,1615-1631 define behavior.
 // ClosureRefs.jet (feaec0860) atomically owns every Closure24 refcount.
 // The UI boundary admits SendFn values only, but shares the existing glue.
 #Import(c) fn ui_sendfn_retain(value: I64) = "jet_rt_native_closure_retain"
@@ -28,6 +21,90 @@ fn ui_store(address: I64, word: I64) {
     #Unsafe("address exclusively owns one writable native node or children-header word") {
         os_store_i64(address, word)
     }
+}
+
+fn ui_optional_text_clone(value: I64) -> I64 {
+    if (value == I64{0}) -> I64{0} else -> ui_text_clone(value)
+}
+// HostServices.rs:1627-1631 derive(Clone): optional text and ordered states.
+#Export(c) fn jet_rt_handle_clone_JetUiAccessibility(value: I64) -> I64 {
+    result :: jet_rt_alloc(UI_ACCESSIBILITY_BYTES, I64{8})
+    ui_store(result + UI_ACCESSIBILITY_NAME, ui_optional_text_clone(ui_word(value + UI_ACCESSIBILITY_NAME)))
+    ui_store(result + UI_ACCESSIBILITY_DESCRIPTION, ui_optional_text_clone(ui_word(value + UI_ACCESSIBILITY_DESCRIPTION)))
+    length :: ui_word(value + UI_ACCESSIBILITY_LENGTH)
+    source :: ui_word(value + UI_ACCESSIBILITY_DATA)
+    data :: if (length == I64{0}) -> I64{0} else -> jet_rt_alloc(length * UI_STATE_BYTES, I64{8})
+    index := I64{0}
+    loop index < length {
+        state :: source + index * UI_STATE_BYTES
+        target :: data + index * UI_STATE_BYTES
+        tag :: ui_word(state)
+        ui_store(target, tag)
+        // Unit variants have no payload; never interpret their unused word.
+        payload :: if (tag == UI_STATE_VALUE) -> ui_text_clone(ui_word(state + UI_STATE_PAYLOAD)) else if (tag == UI_STATE_EXPANDED || tag == UI_STATE_CHECKED || tag == UI_STATE_SELECTED) -> ui_word(state + UI_STATE_PAYLOAD) else -> I64{0}
+        ui_store(target + UI_STATE_PAYLOAD, payload)
+        index += I64{1}
+    }
+    ui_store(result + UI_ACCESSIBILITY_LENGTH, length)
+    ui_store(result + UI_ACCESSIBILITY_CAPACITY, length)
+    ui_store(result + UI_ACCESSIBILITY_DATA, data)
+    result
+}
+#Export(c) fn jet_rt_handle_drop_JetUiAccessibility(value: I64) {
+    if (value == I64{0}) -> return
+    name :: ui_word(value + UI_ACCESSIBILITY_NAME)
+    description :: ui_word(value + UI_ACCESSIBILITY_DESCRIPTION)
+    if (name != I64{0}) -> ui_text_drop(name)
+    if (description != I64{0}) -> ui_text_drop(description)
+    length :: ui_word(value + UI_ACCESSIBILITY_LENGTH)
+    capacity :: ui_word(value + UI_ACCESSIBILITY_CAPACITY)
+    data :: ui_word(value + UI_ACCESSIBILITY_DATA)
+    index := I64{0}
+    loop index < length {
+        state :: data + index * UI_STATE_BYTES
+        if (ui_word(state) == UI_STATE_VALUE) -> ui_text_drop(ui_word(state + UI_STATE_PAYLOAD))
+        index += I64{1}
+    }
+    if (capacity != I64{0}) -> jet_rt_free(data, capacity * UI_STATE_BYTES, I64{8})
+    jet_rt_free(value, UI_ACCESSIBILITY_BYTES, I64{8})
+}
+// HostServices.rs:1616-1631 derive(PartialEq): variant, payload, then order.
+#Export(c) fn jet_rt_handle_eq_JetUiAccessibility(left: I64, right: I64) -> Bool {
+    if !ui_optional_text_eq(ui_word(left + UI_ACCESSIBILITY_NAME), ui_word(right + UI_ACCESSIBILITY_NAME)) -> return false
+    if !ui_optional_text_eq(ui_word(left + UI_ACCESSIBILITY_DESCRIPTION), ui_word(right + UI_ACCESSIBILITY_DESCRIPTION)) -> return false
+    length :: ui_word(left + UI_ACCESSIBILITY_LENGTH)
+    if (length != ui_word(right + UI_ACCESSIBILITY_LENGTH)) -> return false
+    left_data :: ui_word(left + UI_ACCESSIBILITY_DATA)
+    right_data :: ui_word(right + UI_ACCESSIBILITY_DATA)
+    index := I64{0}
+    loop index < length {
+        a :: left_data + index * UI_STATE_BYTES
+        b :: right_data + index * UI_STATE_BYTES
+        tag :: ui_word(a)
+        if (tag != ui_word(b)) -> return false
+        if (tag == UI_STATE_VALUE) {
+            if !ui_text_eq(ui_word(a + UI_STATE_PAYLOAD), ui_word(b + UI_STATE_PAYLOAD)) -> return false
+        } else if (tag == UI_STATE_EXPANDED || tag == UI_STATE_CHECKED || tag == UI_STATE_SELECTED) {
+            if (ui_word(a + UI_STATE_PAYLOAD) != ui_word(b + UI_STATE_PAYLOAD)) -> return false
+        }
+        index += I64{1}
+    }
+    true
+}
+// HostServices.rs:1516-1519 derive(Clone,PartialEq): normalized key and bits.
+#Export(c) fn jet_rt_handle_clone_JetUiShortcut(value: I64) -> I64 {
+    result :: jet_rt_alloc(UI_SHORTCUT_BYTES, I64{8})
+    ui_store(result + UI_SHORTCUT_KEY, ui_text_clone(ui_word(value + UI_SHORTCUT_KEY)))
+    ui_store(result + UI_SHORTCUT_MODIFIERS, ui_word(value + UI_SHORTCUT_MODIFIERS))
+    result
+}
+#Export(c) fn jet_rt_handle_drop_JetUiShortcut(value: I64) {
+    if (value == I64{0}) -> return
+    ui_text_drop(ui_word(value + UI_SHORTCUT_KEY))
+    jet_rt_free(value, UI_SHORTCUT_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_JetUiShortcut(left: I64, right: I64) -> Bool {
+    ui_text_eq(ui_word(left + UI_SHORTCUT_KEY), ui_word(right + UI_SHORTCUT_KEY)) && ui_word(left + UI_SHORTCUT_MODIFIERS) == ui_word(right + UI_SHORTCUT_MODIFIERS)
 }
 
 #[Unsafe("calls the last-owned native Closure24 release helper with its box as the sole SysV argument; the helper drops captures and frees its own allocation"), FFI(asm)]
@@ -170,8 +247,8 @@ fn ui_node_clone(value: I64, omitted: I64) -> I64 {
     // destroy it immediately. The other slot retains its normal ownership.
     accessibility :: if ((omitted & UI_NODE_SLOT_ACCESSIBILITY) == I64{0}) -> ui_word(value + UI_NODE_ACCESSIBILITY) else -> I64{0}
     shortcut :: if ((omitted & UI_NODE_SLOT_SHORTCUT) == I64{0}) -> ui_word(value + UI_NODE_SHORTCUT) else -> I64{0}
-    ui_store(result + UI_NODE_ACCESSIBILITY, if (accessibility == I64{0}) -> I64{0} else -> ui_accessibility_clone(accessibility))
-    ui_store(result + UI_NODE_SHORTCUT, if (shortcut == I64{0}) -> I64{0} else -> ui_shortcut_clone(shortcut))
+    ui_store(result + UI_NODE_ACCESSIBILITY, if (accessibility == I64{0}) -> I64{0} else -> jet_rt_handle_clone_JetUiAccessibility(accessibility))
+    ui_store(result + UI_NODE_SHORTCUT, if (shortcut == I64{0}) -> I64{0} else -> jet_rt_handle_clone_JetUiShortcut(shortcut))
     result
 }
 
@@ -192,8 +269,8 @@ fn ui_node_clone(value: I64, omitted: I64) -> I64 {
     if (color != I64{0}) -> ui_text_drop(color)
     accessibility :: ui_word(value + UI_NODE_ACCESSIBILITY)
     shortcut :: ui_word(value + UI_NODE_SHORTCUT)
-    if (accessibility != I64{0}) -> ui_accessibility_drop(accessibility)
-    if (shortcut != I64{0}) -> ui_shortcut_drop(shortcut)
+    if (accessibility != I64{0}) -> jet_rt_handle_drop_JetUiAccessibility(accessibility)
+    if (shortcut != I64{0}) -> jet_rt_handle_drop_JetUiShortcut(shortcut)
     jet_rt_free(value, UI_NODE_BYTES, I64{8})
 }
 
@@ -229,14 +306,14 @@ fn ui_optional_text_eq(left: I64, right: I64) -> Bool {
     if (left_accessibility == I64{0} || right_accessibility == I64{0}) {
         if (left_accessibility != right_accessibility) -> return false
     } else {
-        if !ui_accessibility_eq(left_accessibility, right_accessibility) -> return false
+        if !jet_rt_handle_eq_JetUiAccessibility(left_accessibility, right_accessibility) -> return false
     }
     left_shortcut :: ui_word(left + UI_NODE_SHORTCUT)
     right_shortcut :: ui_word(right + UI_NODE_SHORTCUT)
     if (left_shortcut == I64{0} || right_shortcut == I64{0}) {
         if (left_shortcut != right_shortcut) -> return false
     } else {
-        if !ui_shortcut_eq(left_shortcut, right_shortcut) -> return false
+        if !jet_rt_handle_eq_JetUiShortcut(left_shortcut, right_shortcut) -> return false
     }
     true
 }
@@ -256,7 +333,7 @@ fn ui_optional_text_eq(left: I64, right: I64) -> Bool {
     result :: ui_node_clone(value, UI_NODE_SLOT_ACCESSIBILITY)
     mask :: ui_word(result + UI_NODE_ABSENT_MASK)
     if (present != U8{0}) {
-        ui_store(result + UI_NODE_ACCESSIBILITY, ui_accessibility_clone(accessibility))
+        ui_store(result + UI_NODE_ACCESSIBILITY, jet_rt_handle_clone_JetUiAccessibility(accessibility))
         ui_store(result + UI_NODE_ABSENT_MASK, mask & !UI_NODE_SLOT_ACCESSIBILITY)
     } else {
         ui_store(result + UI_NODE_ABSENT_MASK, mask | UI_NODE_SLOT_ACCESSIBILITY)
@@ -267,7 +344,7 @@ fn ui_optional_text_eq(left: I64, right: I64) -> Bool {
     result :: ui_node_clone(value, UI_NODE_SLOT_SHORTCUT)
     mask :: ui_word(result + UI_NODE_ABSENT_MASK)
     if (present != U8{0}) {
-        ui_store(result + UI_NODE_SHORTCUT, ui_shortcut_clone(shortcut))
+        ui_store(result + UI_NODE_SHORTCUT, jet_rt_handle_clone_JetUiShortcut(shortcut))
         ui_store(result + UI_NODE_ABSENT_MASK, mask & !UI_NODE_SLOT_SHORTCUT)
     } else {
         ui_store(result + UI_NODE_ABSENT_MASK, mask | UI_NODE_SLOT_SHORTCUT)
