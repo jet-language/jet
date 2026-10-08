@@ -325,7 +325,33 @@ pub fn apply_impure_core_call_with_type_args(
     if let Some(result) = super::apply_raylib_core_call(module, method, &args, span) {
         return result;
     }
+    if module == "core.web.browser" {
+        if let Some(result) = super::apply_browser_fs_leaf(method, &args, span) {
+            return result;
+        }
+    }
     match (module, method) {
+        ("core.log", "__record_emit") => {
+            let level = log_string_arg(one(0)?, span)?;
+            let message = log_string_arg(one(1)?, span)?;
+            let fields = log_fields_arg(one(2)?, span)?;
+            super::log_kernel::jet_log_record_emit_raw(level, message, &fields);
+            Ok(CtValue::Unit)
+        }
+        ("core.log", "__span_allocate") => {
+            let (id, name) = super::log_kernel::jet_log_span_allocate_raw(log_string_arg(one(0)?, span)?);
+            Ok(CtValue::Struct { type_name: "(id,name)".to_string(), fields: vec![
+                ("id".to_string(), CtValue::Int(id)), ("name".to_string(), CtValue::Str(name)),
+            ] })
+        }
+        ("core.log", "__metric_publish") => {
+            super::log_kernel::metric_publish(log_string_arg(one(0)?, span)?, as_int(one(1)?, span)?);
+            Ok(CtValue::Unit)
+        }
+        ("core.log", "__process_exit") => {
+            super::log_kernel::jet_log_process_exit(as_int(one(0)?, span)?);
+            Ok(CtValue::Unit)
+        }
         // Every registered `core.log` row uses the shared Log.rs kernel. The
         // adapter only marshals erased CtValues; filtering, sampling, trace
         // context, formatting, sinks, and telemetry remain in that kernel.
@@ -387,11 +413,11 @@ pub fn apply_impure_core_call_with_type_args(
             let name = log_string_arg(one(0)?, span)?;
             Ok(ct_log_span(super::log_kernel::span(name)))
         }
-        ("core.log", "enter" | "close") => {
+        ("core.log", "enter" | "close" | "__span_enter" | "__span_close") => {
             let span_value = log_span_arg(one(0)?, span)?;
             match method {
-                "enter" => super::log_kernel::enter(&span_value),
-                "close" => super::log_kernel::close(&span_value),
+                "enter" | "__span_enter" => super::log_kernel::enter(&span_value),
+                "close" | "__span_close" => super::log_kernel::close(&span_value),
                 _ => unreachable!("core.log span row was not selected"),
             }
             Ok(CtValue::Unit)
@@ -406,7 +432,7 @@ pub fn apply_impure_core_call_with_type_args(
             super::log_kernel::jet_log_disabled_store(log_bool_arg(one(0)?, span)?);
             Ok(CtValue::Unit)
         }
-        ("core.log", "flush") => {
+        ("core.log", "flush" | "__flush") => {
             super::log_kernel::flush();
             Ok(CtValue::Unit)
         }

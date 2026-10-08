@@ -1230,6 +1230,13 @@ dispatcher_row plain core.log __format_store | CoreCallRecord::new("core.log", "
 dispatcher_row plain core.log __sink_store | CoreCallRecord::new("core.log", "__sink_store", "jet_log_sink_store", true, &[true]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
 dispatcher_row plain core.log __sample_store | CoreCallRecord::new("core.log", "__sample_store", "jet_log_sample_store", true, &[false]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
 dispatcher_row plain core.log __sample_count_store | CoreCallRecord::new("core.log", "__sample_count_store", "jet_log_sample_count_store", true, &[false]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+dispatcher_row adapter core.log __record_emit | CoreCallRecord::new("core.log", "__record_emit", "jet_log_record_emit_raw", true, &[true, true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+dispatcher_row adapter core.log __flush | CoreCallRecord::new("core.log", "__flush", "jet_ring_log_flush", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+dispatcher_row adapter core.log __process_exit | CoreCallRecord::new("core.log", "__process_exit", "jet_log_process_exit", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+dispatcher_row adapter core.log __span_allocate | CoreCallRecord::new("core.log", "__span_allocate", "jet_log_span_allocate_raw", true, &[true]).with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+dispatcher_row adapter core.log __span_enter | CoreCallRecord::new("core.log", "__span_enter", "jet_ring_log_enter", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+dispatcher_row adapter core.log __span_close | CoreCallRecord::new("core.log", "__span_close", "jet_ring_log_close", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+dispatcher_row adapter core.log __metric_publish | CoreCallRecord::new("core.log", "__metric_publish", "jet_log_publish_metric", true, &[true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
 dispatcher_row plain core.auth __store_load | CoreCallRecord::new("core.auth", "__store_load", "jet_auth_store_load", true, &[]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
 dispatcher_row plain core.auth __store_replace | CoreCallRecord::new("core.auth", "__store_replace", "jet_auth_store_replace", true, &[true, false]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
 dispatcher_row plain core.sync text_merge | CoreCallRecord::new( "core.sync", "text_merge", "jet_sync_text_merge", true, &[true, true], )
@@ -1533,6 +1540,14 @@ dispatcher_row plain core.web.browser server_stop | sema_web_call( "core.web.bro
 dispatcher_row plain core.web.browser server_url | sema_web_call( "core.web.browser", "server_url", "jet_browser_test_server_url", &[true], )
 dispatcher_row plain core.web.browser server_logs | sema_web_call( "core.web.browser", "server_logs", "jet_browser_test_server_logs", &[true], )
 dispatcher_row plain core.web.browser watch_changed | sema_web_call( "core.web.browser", "watch_changed", "jet_browser_test_watch_changed", &[true, false], )
+dispatcher_row adapter core.web.browser __path_join | CoreCallRecord::new("core.web.browser", "__path_join", "jet_browser_path_join_raw", false, &[true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+dispatcher_row adapter core.web.browser __read_text | CoreCallRecord::new("core.web.browser", "__read_text", "jet_browser_read_text_raw", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+dispatcher_row adapter core.web.browser __is_file | CoreCallRecord::new("core.web.browser", "__is_file", "jet_browser_is_file_raw", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+dispatcher_row adapter core.web.browser __file_size | CoreCallRecord::new("core.web.browser", "__file_size", "jet_browser_file_size_raw", true, &[true]).with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+dispatcher_row adapter core.web.browser __modified_ms | CoreCallRecord::new("core.web.browser", "__modified_ms", "jet_browser_modified_ms_raw", true, &[true]).with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+dispatcher_row adapter core.web.browser __html_path | CoreCallRecord::new("core.web.browser", "__html_path", "jet_browser_html_path_raw", false, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+dispatcher_row adapter core.web.browser __connect_session | CoreCallRecord::new("core.web.browser", "__connect_session", "jet_browser_connect_profile", false, &[true, true, false]).with_interpreter_route(CoreCallInterpreterRoute::TypedIntrinsic)
+dispatcher_row adapter core.web.browser __begin_fixture | sema_web_call("core.web.browser", "__begin_fixture", "jet_browser_test_begin_named", &[true, true, true, false, true, false, false])
 dispatcher_row plain core.web.forms new | sema_web_call("core.web.forms", "new", "jet_web_forms_new", &[false])
 dispatcher_row plain core.web.forms field | sema_web_call( "core.web.forms", "field", "jet_web_forms_field", &[true, false, false, false], )
 dispatcher_row plain core.web.forms set | sema_web_call("core.web.forms", "set", "jet_web_forms_set", &[true, false, false])
@@ -2341,3 +2356,16 @@ dispatcher_row plain core.service __workflow_replay_parts | CoreCallRecord::new(
 dispatcher_row plain core.service __tree_observation_parts | CoreCallRecord::new("core.service", "__tree_observation_parts", "jet_services_raw_tree_observation_parts", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
 dispatcher_row plain core.service __endpoint_identity_parts | CoreCallRecord::new("core.service", "__endpoint_identity_parts", "jet_services_raw_endpoint_identity_parts", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
 dispatcher_row plain core.service __endpoint_validation_snapshot | CoreCallRecord::new("core.service", "__endpoint_validation_snapshot", "jet_services_raw_endpoint_validation_snapshot", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+ambient_route core.log __record_emit
+ambient_route core.log __flush
+ambient_route core.log __process_exit
+ambient_route core.log __span_allocate
+ambient_route core.log __span_enter
+ambient_route core.log __span_close
+ambient_route core.log __metric_publish
+ambient_route core.web.browser __path_join
+ambient_route core.web.browser __read_text
+ambient_route core.web.browser __is_file
+ambient_route core.web.browser __file_size
+ambient_route core.web.browser __modified_ms
+ambient_route core.web.browser __html_path
