@@ -1287,3 +1287,72 @@ fn vault_fixture_decoded(root: I64, slots: I64) -> I64 {
     jet_rt_vault_clear_test_authorizer()
     jet_rt_free(slots, I64{64}, I64{8})
 }
+
+#Export(c) fn jet_rt_vault_fixture_import_plan(root: I64, name: I64, empty: I64, out: I64) {
+    // Real signing-key generation uses the shared default entropy provider.
+    key :: data_sequence_new(I64{32}, RT_HOST_U8_STRIDE)
+    vault_fixture_check(rt_crypto_entropy_fill(rt_text_word(key + DATA_SEQUENCE_DATA), I64{32}) == I64{0})
+    rt_text_store(key + DATA_SEQUENCE_LENGTH, I64{32})
+    vault_fixture_check(vault_prepare_at_root(root, name, I64{1}, I64{2}, I64{0}, key, jet_rt_string_clone(empty), out) == I64{0})
+}
+fn vault_fixture_stream_hash(stream: I64, expected: I64) {
+    scratch :: jet_rt_alloc(I64{608}, I64{8})
+    rt_sha256_parts(rt_text_data(stream), rt_text_len(stream), I64{1}, I64{0}, scratch + I64{576}, scratch)
+    vault_fixture_check(rt_text_equal_bytes(scratch + I64{576}, expected, I64{32}))
+    thread_zero(scratch, I64{608})
+    jet_rt_free(scratch, I64{608}, I64{8})
+}
+#Export(c) fn jet_rt_vault_fixture_operation(plan: I64, operation: I64) {
+    vault_fixture_stream_hash(operation, plan + VAULT_PLAN_OPERATION)
+}
+#Export(c) fn jet_rt_vault_fixture_binding_authorize(plan: I64, reason: I64, out: I64) {
+    vault_fixture_check(vault_authorize_write(plan, I64{1}, reason, out) == I64{0})
+}
+#Export(c) fn exact_operation_preview_provider_and_session_are_bound(root: I64, plan: I64, write: I64, preview: I64) {
+    vault_fixture_stream_hash(preview, write + VAULT_WRITE_PREVIEW)
+    rt_text_store(write + VAULT_WRITE_SESSION, wrapping(rt_text_word(write + VAULT_WRITE_SESSION) + I64{1}))
+    slots :: jet_rt_alloc(I64{16}, I64{8})
+    vault_fixture_error(vault_commit_at_root(root, plan, write, I64{2}, I64{1}, slots, slots + I64{8}), I64{6})
+    jet_rt_free(slots, I64{16}, I64{8})
+}
+#Export(c) fn jet_rt_vault_fixture_trust(plan: I64, path: I64) {
+    jet_rt_vault_set_test_trust_path(path)
+    vault_fixture_check(vault_headless_granted(plan + VAULT_PLAN_UUID))
+    jet_rt_vault_set_test_trust_path(I64{0})
+    vault_plan_drop(plan)
+    jet_rt_vault_clear_test_authorizer()
+}
+#Export(c) fn jet_rt_vault_fixture_legacy_cipher(recipient: I64, legacy: I64, out: I64) {
+    public :: jet_rt_alloc(I64{32}, I64{8})
+    vault_fixture_check(vault_crypto_decode_key(recipient, false, public))
+    vault_fixture_check(vault_crypto_encrypt(public, I64{1}, legacy, out) == I64{0})
+    thread_zero(public, I64{32})
+    jet_rt_free(public, I64{32}, I64{8})
+}
+#Export(c) fn jet_rt_vault_fixture_bytes_drop(bytes: I64) { vault_imported_drop(bytes) }
+#Export(c) fn historical_pairs_migrate_with_the_previewed_uuid_and_exact_start_hash(root: I64, name: I64, empty: I64, reason: I64, token: I64, value: I64, starting_stream: I64) {
+    slots :: jet_rt_alloc(I64{80}, I64{8})
+    plan :: vault_fixture_prepare(root, name, I64{1}, I64{1}, I64{0}, empty, slots)
+    vault_fixture_check(rt_text_word(plan + VAULT_PLAN_REVISION) == I64{0})
+    vault_fixture_stream_hash(starting_stream, plan + VAULT_PLAN_START_HASH)
+    rt_text_bytes_copy(slots + I64{64}, plan + VAULT_PLAN_UUID, I64{16})
+    write :: vault_fixture_authorize(plan, I64{1}, reason, slots)
+    vault_fixture_check(vault_commit_at_root(root, plan, write, I64{1}, I64{1}, slots, slots + I64{8}) == I64{0})
+    reference :: rt_text_word(slots + I64{8})
+    store :: vault_fixture_decoded(root, slots)
+    vault_fixture_check(rt_text_word(store + VAULT_STORE_REVISION) == I64{1})
+    vault_fixture_check(rt_text_equal_bytes(store + VAULT_STORE_UUID, slots + I64{64}, I64{16}))
+    vault_fixture_check(rt_text_equal_bytes(reference + VAULT_REF_UUID, slots + I64{64}, I64{16}))
+    strings :: rt_text_word(store + VAULT_STORE_STRINGS)
+    vault_fixture_check(rt_text_word(strings + DATA_SEQUENCE_LENGTH) == I64{1})
+    pair :: rt_text_word(strings + DATA_SEQUENCE_DATA)
+    vault_fixture_check(jet_rt_string_eq(rt_text_word(pair), token) && jet_rt_string_eq(rt_text_word(pair + I64{8}), value))
+    vault_store_drop(store)
+    vault_ref_drop(reference)
+    jet_rt_vault_clear_test_authorizer()
+    thread_zero(slots, I64{80})
+    jet_rt_free(slots, I64{80}, I64{8})
+}
+#Export(c) fn jet_rt_vault_fixture_generate_plan(root: I64, name: I64, empty: I64, out: I64) {
+    rt_text_store(out, vault_fixture_prepare(root, name, I64{1}, I64{1}, I64{0}, empty, out))
+}

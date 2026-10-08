@@ -75,6 +75,15 @@ extern void provider_change_invalidates_an_authorized_plan(const Text *, void *,
 extern void string_updates_preserve_typed_rows_in_the_shared_atomic_store(const Text *, const Text *, const Text *, const Text *, const Text *, const Text *);
 extern void lifecycle_timestamps_do_not_decrease_when_wall_clock_rolls_back(const Text *, const Text *, const Text *, const Text *, const Text *, const Text *);
 extern void decoder_rejects_a_downgraded_current_generation(const Text *, const Text *, const Text *, const Text *, const Text *);
+extern void jet_rt_vault_fixture_import_plan(const Text *, const Text *, const Text *, void **);
+extern void jet_rt_vault_fixture_operation(void *, const Text *);
+extern void jet_rt_vault_fixture_binding_authorize(void *, const Text *, void **);
+extern void exact_operation_preview_provider_and_session_are_bound(const Text *, void *, void *, const Text *);
+extern void jet_rt_vault_fixture_generate_plan(const Text *, const Text *, const Text *, void **);
+extern void jet_rt_vault_fixture_trust(void *, const Text *);
+extern void jet_rt_vault_fixture_legacy_cipher(const Text *, const ByteList *, ByteList **);
+extern void jet_rt_vault_fixture_bytes_drop(ByteList *);
+extern void historical_pairs_migrate_with_the_previewed_uuid_and_exact_start_hash(const Text *, const Text *, const Text *, const Text *, const Text *, const Text *, const Text *);
 static unsigned unavailable_calls;
 static int64_t unavailable_entropy(void *context, void *out, int64_t count) {
     assert(context == NULL && count == 32);
@@ -632,6 +641,98 @@ static void filesystem_batch_a(void) {
     lifecycle_timestamps_do_not_decrease_when_wall_clock_rolls_back(&root, &name, &empty, &initial, &rotation, &fault);
     fixture_remove_tree(clock);
 }
+static void fixture_append(unsigned char *out, size_t *length, const void *bytes, size_t count) {
+    assert(*length + count <= 512);
+    memcpy(out + *length, bytes, count); *length += count;
+}
+static void fixture_append_uint(unsigned char *out, size_t *length, uint64_t value, size_t count) {
+    unsigned char bytes[8];
+    for (size_t i = 0; i < count; ++i) bytes[i] = (unsigned char)(value >> (8 * i));
+    fixture_append(out, length, bytes, count);
+}
+static void filesystem_batch_b(void) {
+    Text name = text("release"), empty = text(""), reason = text("approved release signer");
+    char binding[] = "/tmp/jet-vault-binding-XXXXXX";
+    Text root = fixture_scratch(binding, 1);
+    void *raw_plan; jet_rt_vault_fixture_import_plan(&root, &name, &empty, &raw_plan);
+    const unsigned char *plan = raw_plan;
+    unsigned char operation[512], preview[512], zeros[72] = {0};
+    size_t op_len = 0, preview_len = 0;
+    fixture_append(operation, &op_len, "JVLT2 operation", 15);
+    fixture_append(operation, &op_len, plan + 40, 16);
+    fixture_append(operation, &op_len, plan + 56, 8);
+    fixture_append(operation, &op_len, plan + 64, 32);
+    fixture_append(operation, &op_len, plan + 96, 32);
+    fixture_append(operation, &op_len, (const unsigned char[]){2,1}, 2);
+    fixture_append_uint(operation, &op_len, 7, 2);
+    fixture_append(operation, &op_len, "release", 7);
+    fixture_append(operation, &op_len, zeros, 1);
+    fixture_append(operation, &op_len, zeros, 16);
+    fixture_append_uint(operation, &op_len, 0, 8);
+    fixture_append(operation, &op_len, zeros, 16);
+    fixture_append(operation, &op_len, zeros, 32);
+    fixture_append_uint(operation, &op_len, 0, 2);
+    fixture_append(operation, &op_len, plan + 128, 32);
+    fixture_append(operation, &op_len, plan + 160, 32);
+    fixture_append(operation, &op_len, zeros, 32);
+    Text operation_stream = {operation, (int64_t)op_len, 0};
+    jet_rt_vault_fixture_operation(raw_plan, &operation_stream);
+    fixture_authorizer(1);
+    void *write; jet_rt_vault_fixture_binding_authorize(raw_plan, &reason, &write);
+    fixture_append(preview, &preview_len, "JVLT2 authority preview", 23);
+    fixture_append(preview, &preview_len, plan + 216, 32);
+    fixture_append(preview, &preview_len, (const unsigned char[]){2,1}, 2);
+    fixture_append(preview, &preview_len, plan + 40, 16);
+    fixture_append_uint(preview, &preview_len, 0, 8);
+    fixture_append_uint(preview, &preview_len, 7, 2);
+    fixture_append(preview, &preview_len, "release", 7);
+    fixture_append_uint(preview, &preview_len, 0, 8);
+    fixture_append_uint(preview, &preview_len, 1, 8);
+    fixture_append_uint(preview, &preview_len, 0, 2);
+    fixture_append_uint(preview, &preview_len, 23, 2);
+    fixture_append(preview, &preview_len, "approved release signer", 23);
+    fixture_append(preview, &preview_len, plan + 280, 8);
+    Text preview_stream = {preview, (int64_t)preview_len, 0};
+    exact_operation_preview_provider_and_session_are_bound(&root, raw_plan, write, &preview_stream);
+    jet_rt_vault_fixture_generate_plan(&root, &name, &empty, &raw_plan);
+    plan = raw_plan;
+    char trust[512]; fixture_path(trust, sizeof(trust), binding, "trust");
+    char grant[80] = "grant:user:vault.write:";
+    static const char hex[] = "0123456789abcdef";
+    size_t at = strlen(grant);
+    for (size_t i = 0; i < 16; ++i) {
+        unsigned char byte = plan[40 + i];
+        grant[at++] = hex[byte >> 4]; grant[at++] = hex[byte & 15];
+    }
+    grant[at++] = '\n';
+    fixture_write(trust, (const unsigned char *)grant, at);
+    Text trust_path = text(trust); jet_rt_vault_fixture_trust(raw_plan, &trust_path);
+    fixture_remove_tree(binding);
+
+    char migration[] = "/tmp/jet-vault-migration-XXXXXX", path[512];
+    root = fixture_scratch(migration, 1);
+    fixture_path(path, sizeof(path), migration, ".jet/secrets-recipients");
+    unsigned char recipient_raw[128];
+    int fd = open(path, O_RDONLY); assert(fd >= 0);
+    ssize_t got = read(fd, recipient_raw, sizeof(recipient_raw));
+    assert(got == 63 && close(fd) == 0);
+    Text recipient = {recipient_raw, (int64_t)got, 0};
+    unsigned char legacy_raw[] = {1,0,0,0, 5,0,0,0, 't','o','k','e','n', 6,0,0,0, 's','e','c','r','e','t'};
+    ByteList legacy = {(int64_t)sizeof(legacy_raw), 0, legacy_raw};
+    ByteList *ciphertext; jet_rt_vault_fixture_legacy_cipher(&recipient, &legacy, &ciphertext);
+    fixture_path(path, sizeof(path), migration, ".jet/secrets.age");
+    fixture_write(path, ciphertext->data, (size_t)ciphertext->length);
+    jet_rt_vault_fixture_bytes_drop(ciphertext);
+    static const unsigned char starting_raw[] = {
+        'J','V','L','T','1',' ','s','t','a','r','t','i','n','g',' ','s','t','o','r','e',
+        1,0,0,0, 5,0, 't','o','k','e','n', 6,0,0,0, 's','e','c','r','e','t'
+    };
+    Text starting = {starting_raw, (int64_t)sizeof(starting_raw), 0};
+    Text token = text("token"), value = text("secret"), migrate = text("migrate and provision");
+    fixture_authorizer(1);
+    historical_pairs_migrate_with_the_previewed_uuid_and_exact_start_hash(&root, &name, &empty, &migrate, &token, &value, &starting);
+    fixture_remove_tree(migration);
+}
 int main(int argc, char **argv) {
     jet_rt_alloc_init();
     jet_rt_host_arguments(argc, argv, environ);
@@ -710,6 +811,7 @@ int main(int argc, char **argv) {
     plan_auth_fixtures();
     trust_home_fixtures();
     filesystem_batch_a();
+    filesystem_batch_b();
     puts("vault witness OK (13 errors, legacy+JVLT2 codec, imported origin/default entropy, native Secret redaction/wipe, long-origin hash, duplicate priority)");
     jet_rt_thread_detach();
     return 0;

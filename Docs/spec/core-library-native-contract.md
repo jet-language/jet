@@ -337,6 +337,11 @@ substitutes replay ciphertext, descriptors, or provider decisions. Direct decode
 store observations bypass recovery so installed revision assertions cannot be
 satisfied by a recovery side effect. Exact-reference retirement remains loadable,
 revocation rejects load, and denied authorization never creates a visible store.
+Operation and authority-preview witnesses build their expected byte streams
+independently from a real prepared imported-key plan, then compare shared SHA-256
+digests without calling the provider's serialization builders. Historical-pair
+migration checks the canonical starting-store hash and preserves the UUID shown
+in the authorized plan through the first installed JVLT2 revision.
 
 The internal X25519 boundary borrows 32-byte scalar and point spans and writes
 32 bytes to a disjoint output. Its 1536-byte, word-aligned scratch is exclusive
