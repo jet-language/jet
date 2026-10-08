@@ -255,7 +255,7 @@ pub(crate) fn register_distinct(
     }
 }
 
-/// D-TYPEALIAS1 / D-ALIAS-OP1=B: register `alias Name<T> :: …` — generic shortcuts only.
+/// D-VIS-REEXPORT1 / D-ALIAS-BIND2: bare nominal aliases preserve their target's identity.
 pub(crate) fn register_type_alias(
     a: &crate::AST::TypeAliasDef,
     registry: &mut TypeRegistry,
@@ -281,7 +281,7 @@ pub(crate) fn register_type_alias(
         ));
         return;
     }
-    if a.type_params.is_empty() {
+    if a.type_params.is_empty() && !matches!(&a.target, Type::Named(_)) {
         diags.push(crate::Generics::e0324(a.name_span));
         return;
     }

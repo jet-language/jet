@@ -6254,6 +6254,10 @@ impl<'a> Checker<'a> {
             other => other,
         };
         if let Type::Named(handle_ty) = handle_receiver {
+            let (namespace, leaf) = self.struct_type_name_parts(handle_ty);
+            let source_owned = self.struct_owner_module(leaf, namespace)
+                .is_some_and(|owner| jet_foundation::CoreModuleExports::core_source_owns_type(
+                    &self.canonical_nominal_name(owner, leaf)));
             // D-AUTHORITY-NAME1=A / D-AUTHORITY-WORD2=E: the carried
             // Authority value is ordinary data. Its only instance family is
             // the Prelude `with`/`without` narrowing pair.
@@ -6273,7 +6277,7 @@ impl<'a> Checker<'a> {
             // element type comes from the `[T]` arg, mirroring the ambient
             // `random.pick`/`random.shuffle`. Resolve element-aware here (the
             // `builtin_method_return` table only carries Int placeholders).
-            if handle_ty == crate::Syntax::RNG_TYPE
+            if !source_owned && handle_ty == crate::Syntax::RNG_TYPE
                 && matches!(method, "pick" | "weighted_pick" | "sample" | "shuffle")
             {
                 let handle_ty = handle_ty.clone();
@@ -6291,7 +6295,7 @@ impl<'a> Checker<'a> {
                     | "Duration"
                     | "Solver"
                     | "TestSuite"
-            ) {
+            ) && !source_owned {
                 if let Some(ret) =
                     Collections::builtin_method_return(&recv_ty, method, args.len(), false)
                 {
@@ -8071,6 +8075,16 @@ impl<'a> Checker<'a> {
                 }
             }
         }
+        let source_identity = if method == "bool" && args.len() == 1 {
+            let (namespace, leaf) = self.struct_type_name_parts(&type_name);
+            self.struct_owner_module(leaf, namespace)
+                .map(|owner| self.canonical_nominal_name(owner, leaf))
+        } else {
+            None
+        };
+        let method = jet_foundation::CoreModuleExports::core_source_receiver_method(
+            source_identity.as_deref().unwrap_or(&type_name), method, args.len(),
+        );
         let Some((owner_mod, mut msig)) = self.resolve_method_sig(&type_name, method) else {
             let iter_elem = match &recv_ty {
                 Type::Apply { name, args }
