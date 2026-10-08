@@ -431,13 +431,13 @@ impl LocalDate {
         if unit == "month" -> return new(self.date_y, self.date_m, 1)
         ~self
     }
-    pub fn with(self, year: Int, month: Int, day: Int, overflow: String{"constrain"}) -> LocalDate String! {
+    pub fn with(self, year: Int, month: Int, day: Int, overflow: String{"constrain"}) -> LocalDate TimeError! {
         if overflow == "constrain" || overflow == "clamp" -> return Ok(new(year, month, day))
         if overflow == "reject" {
             if month >= 1 && month <= 12 && day >= 1 && day <= days_in_month(year, month) -> return Ok(new(year, month, day))
-            return Err("date fields are outside the valid range: {civil_signed_pad(year, 4)}-{civil_signed_pad(month, 2)}-{civil_signed_pad(day, 2)}")
+            return Err(TimeError.new("date fields are outside the valid range: {civil_signed_pad(year, 4)}-{civil_signed_pad(month, 2)}-{civil_signed_pad(day, 2)}"))
         }
-        Err("invalid overflow policy: {overflow}")
+        Err(TimeError.new("invalid overflow policy: {overflow}"))
     }
     pub fn until(self, other: LocalDate, largest_unit: String{"day"}, smallest_unit: String{"day"}, rounding_mode: String{"trunc"}, increment: Int{1}) -> Duration Never! {
         duration_ns(civil_i64(civil_round(other.diff_days(self) * 86400000000000, smallest_unit, increment, rounding_mode)))
@@ -663,10 +663,10 @@ impl DateTime {
     }
     pub fn since(self, other: DateTime, largest_unit: String{"second"}, smallest_unit: String{"nanosecond"}, rounding_mode: String{"trunc"}, increment: Int{1}) -> Duration Never! { other.until(self, largest_unit, smallest_unit, rounding_mode, increment) }
     pub fn replace(self, year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int) -> DateTime Never! { __datetime_literal(year, month, day, hour, minute, second, self.nanos) }
-    pub fn with(self, year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int, overflow: String{"constrain"}) -> DateTime String! {
+    pub fn with(self, year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int, overflow: String{"constrain"}) -> DateTime TimeError! {
         date :: self.date().with(year, month, day, overflow)
         valid_second :: (second >= 0 && second <= 59) || (hour == 23 && minute == 59 && second == 60)
-        if overflow == "reject" && (hour < 0 || hour > 23 || minute < 0 || minute > 59 || !valid_second) -> return Err("time fields are outside the valid range: {civil_signed_pad(hour, 2)}:{civil_signed_pad(minute, 2)}:{civil_signed_pad(second, 2)}")
+        if overflow == "reject" && (hour < 0 || hour > 23 || minute < 0 || minute > 59 || !valid_second) -> return Err(TimeError.new("time fields are outside the valid range: {civil_signed_pad(hour, 2)}:{civil_signed_pad(minute, 2)}:{civil_signed_pad(second, 2)}"))
         Ok(__datetime_literal(date.date_y, date.date_m, date.date_d, hour, minute, second, self.nanos))
     }
     pub fn in_zone(self, value: Zone) -> ZonedDateTime Never! { ZonedDateTime{instant: self, zone_value: value} }
@@ -1048,11 +1048,8 @@ impl ZonedDateTime {
         zoned_local(date, t, self.zone_value, "compatible") ?? zoned(from_timestamp(civil_local_compatible(self.zone_value, date, t)), self.zone_value)
     }
     pub fn subtract_period(self, value: Period) -> ZonedDateTime Never! { self.add_period(value.negated()) }
-    pub fn with_time(self, t: LocalTime, disambiguation: String{"compatible"}) -> ZonedDateTime String! {
-        if zoned_local(self.date(), t, self.zone_value, disambiguation) == {
-            .Ok(value) -> Ok(value)
-            .Err(error) -> Err(error.reason)
-        }
+    pub fn with_time(self, t: LocalTime, disambiguation: String{"compatible"}) -> ZonedDateTime TimeError! {
+        zoned_local(self.date(), t, self.zone_value, disambiguation)
     }
     pub fn with_zone(self, zone: Zone) -> ZonedDateTime Never! { zoned(self.instant, zone) }
     pub fn until(self, other: ZonedDateTime, largest_unit: String{"second"}, smallest_unit: String{"nanosecond"}, rounding_mode: String{"trunc"}, increment: Int{1}) -> Duration Never! { self.instant.until(other.instant, largest_unit, smallest_unit, rounding_mode, increment) }
@@ -1404,7 +1401,7 @@ impl Instant {
     pub fn __difference(left: Instant, right: Instant) -> Duration Never! { left.difference(right) }
 }
 
-#Test("Civil dates preserve Gregorian arithmetic and String overflow errors") {
+#Test("Civil dates preserve Gregorian arithmetic and TimeError overflow reasons") {
     leap :: new(2024, 2, 29)
     assert_eq(leap.weekday(), 4)
     assert_eq(leap.iso_weekday(), 4)
@@ -1416,7 +1413,7 @@ impl Instant {
     assert_eq(parse_iso_week_date("2024-W09-4") ?? panic("ISO date"), leap)
     assert_eq(leap.until(new(2024, 3, 2)).ns, 172800000000000)
     if leap.with(2023, 2, 29, "reject") == {
-        .Err(reason) -> assert_eq(reason, "date fields are outside the valid range: 2023-02-29")
+        .Err(error) -> assert_eq(error.reason, "date fields are outside the valid range: 2023-02-29")
         .Ok(_) -> assert(false)
     }
     if parse("2023-02-29") == {
@@ -1571,11 +1568,11 @@ impl Instant {
     assert_eq(date.until(new(2024, 3, 1), "day", "day", "half_expand", 2).ns, 172800000000000)
     assert_eq(date.with(2023, 2, 29, "clamp") ?? panic("date clamp"), new(2023, 2, 28))
     if date.with(2024, -1, -1, "reject") == {
-        .Err(reason) -> assert_eq(reason, "date fields are outside the valid range: 2024--1--1")
+        .Err(error) -> assert_eq(error.reason, "date fields are outside the valid range: 2024--1--1")
         .Ok(_) -> assert(false)
     }
     if date.with(2024, 2, 29, "unknown") == {
-        .Err(reason) -> assert_eq(reason, "invalid overflow policy: unknown")
+        .Err(error) -> assert_eq(error.reason, "invalid overflow policy: unknown")
         .Ok(_) -> assert(false)
     }
     if date.format_checked("QQ") == {

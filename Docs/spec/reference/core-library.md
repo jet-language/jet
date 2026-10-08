@@ -2484,9 +2484,10 @@ produce E0067.
 
 Codec compatibility is intentionally separate from strict public parsing:
 the `LocalTime` wire format drops fractional seconds, and the `DateTime`
-wire decoder retains its permissive fraction policy. Existing error
-signatures are unchanged: `.with` and `.with_time` carry `String`, while
-the public parsing and local-zone constructors carry `TimeError`.
+wire decoder retains its permissive fraction policy. Civil `.with` and zoned
+`.with_time` return `TimeError`, as do public parsing and local-zone
+constructors. Inspect `error.reason` for validation or disambiguation details;
+`.with_time` preserves the error returned by `zoned_local`.
 Date `.until` and `.since` round their exact day-to-nanosecond intermediate
 before saturating the final `Duration` to its signed nanosecond range.
 

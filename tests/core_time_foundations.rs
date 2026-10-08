@@ -132,9 +132,9 @@ fn run() {
 }
 
 #[test]
-fn civil_with_methods_preserve_string_errors_across_tiers() {
+fn civil_with_methods_preserve_time_error_reasons_across_tiers() {
     tir_support::assert_tiers_agree(
-        "core_time_string_overflow",
+        "core_time_typed_overflow",
         r#"
 use core.time as time
 
@@ -142,17 +142,17 @@ fn run() {
     date :: time.new(2024, 1, 31)
     if date.with(2024, 2, 31, "reject") == {
         .Ok(_) -> print("date accepted")
-        .Err(message) -> print(message.starts_with("date fields are outside"))
+        .Err(error) -> print(error.reason == "date fields are outside the valid range: 2024-02-31")
     }
     datetime :: time.datetime(2024, 1, 31, 12, 0, 0)
     if datetime.with(2024, 1, 31, 24, 0, 0, "reject") == {
         .Ok(_) -> print("time accepted")
-        .Err(message) -> print(message.starts_with("time fields are outside"))
+        .Err(error) -> print(error.reason == "time fields are outside the valid range: 24:00:00")
     }
     zoned :: datetime.in_zone(time.utc())
     if zoned.with_time(time.local_time(1, 2, 3), "invalid") == {
         .Ok(_) -> print("zone accepted")
-        .Err(message) -> print(message.starts_with("invalid disambiguation"))
+        .Err(error) -> print(error.reason == "invalid disambiguation: invalid")
     }
 }
 "#,
