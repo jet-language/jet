@@ -2909,6 +2909,11 @@ the scheduler receiver surface. Cancellation closes the receiver and leaves
 its handle available for identity and ownership.
 Generic channels return `(Sender<T>, Receiver<T>)`; tasks send owned values and do not use `async`/`await` (`D-CONC-CHAN1`; `D-SHAPE-COPY1`). Cancellation and pause/resume are control-plane requests on owned task handles (`D-COROUTINE1`), while shared memory uses `Shared<T>` guards and `Condition` rather than a raw lock (`D-SHAREDGUARD1`).
 
+The source scheduler-channel constructors preserve that pair rather than
+returning `TaskState`. Bounded scheduler channels clamp capacities below one
+to one. Interval periods truncate to whole milliseconds and clamp to at least
+one millisecond; their first delivered tick is one.
+
 ### `core.prelude` — small compiler-owned helpers
 
 `core.prelude` is available without a separate package import. Its functions
