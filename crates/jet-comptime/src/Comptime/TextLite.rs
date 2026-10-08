@@ -1165,7 +1165,6 @@ pub(crate) fn apply_files_leaf(
             "__remove_dir_raw" => done(text_kernel::jet_std_fs_remove_dir_raw(&text(0)?), unit),
             "__remove_all_raw" => done(text_kernel::jet_std_fs_remove_all_raw(&text(0)?, boolean(1)?), unit),
             "__copy_raw" => done(text_kernel::jet_std_fs_copy_raw(&text(0)?, &text(1)?), unit),
-            "__copy_dir_raw" => done(text_kernel::jet_std_fs_copy_dir_raw(&text(0)?, &text(1)?), unit),
             "__hard_link_raw" => done(text_kernel::jet_std_fs_hard_link_raw(&text(0)?, &text(1)?), unit),
             "__fsync_raw" => done(text_kernel::jet_std_fs_fsync_raw(&text(0)?), unit),
             "__stat_mode_raw" => done(text_kernel::jet_std_fs_stat_mode_raw(&text(0)?), CtValue::Int),
@@ -1175,8 +1174,6 @@ pub(crate) fn apply_files_leaf(
             "__symlink_raw" => done(text_kernel::jet_std_fs_symlink_raw(&text(0)?, &text(1)?, boolean(2)?), unit),
             "__mkdtemp_raw" => done(text_kernel::jet_std_fs_temp_dir_path_raw(text(0)?), CtValue::Str),
             "__canonicalize_raw" => done(text_kernel::jet_std_fs_canonicalize_raw(&text(0)?), CtValue::Str),
-            "__glob_raw" => done(text_kernel::jet_std_fs_glob_raw(&text(0)?),
-                |paths| CtValue::List(paths.into_iter().map(CtValue::Str).collect())),
             "__list_dir_raw" => done(text_kernel::jet_std_fs_list_dir_raw(&text(0)?), |entries| {
                 CtValue::List(entries.into_iter().map(|entry| CtValue::Struct {
                     type_name: "DirEntry".to_string(), fields: vec![

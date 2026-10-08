@@ -40,6 +40,31 @@ mod fs_walk_kernel {
     ) -> Option<Result<CtValue, jet_foundation::Diagnostics::Diagnostic>> {
         if module != "core.files" { return None; }
         let value = match (method, args.as_slice()) {
+            ("__entries_context", [CtValue::Str(root), CtValue::Str(destination), CtValue::Bool(copying)]) => CtValue::Int(jet_entries8_open(root, destination, *copying)),
+            ("__entries_close", [CtValue::Int(context)]) => { jet_entries8_close(*context); CtValue::Unit },
+            ("__entries_release", [CtValue::Int(context), CtValue::Int(slot)]) => { jet_entries8_release(*context, *slot); CtValue::Unit },
+            ("__entries_shown", [CtValue::Int(context), CtValue::Int(slot)]) => CtValue::Str(jet_entries8_shown(*context, *slot)),
+            ("__entries_before", [CtValue::Int(context), CtValue::Int(left), CtValue::Int(right)]) => CtValue::Bool(jet_entries8_before(*context, *left, *right)),
+            ("__entries_read_dir" | "__entries_mkdir" | "__entries_copy", [CtValue::Int(context), CtValue::Int(slot)]) => {
+                let (kind, code, cause) = match method {
+                    "__entries_read_dir" => jet_entries8_read_dir(*context, *slot),
+                    "__entries_mkdir" => jet_entries8_mkdir(*context, *slot),
+                    _ => jet_entries8_copy(*context, *slot),
+                };
+                tuple(error_fields(kind, code, cause))
+            }
+            ("__entries_next", [CtValue::Int(context), CtValue::Int(slot)]) => {
+                let (end, child, kind, code, cause) = jet_entries8_next(*context, *slot);
+                let mut fields = vec![("end", CtValue::Bool(end)), ("child", CtValue::Int(child))];
+                fields.extend(error_fields(kind, code, cause));
+                tuple(fields)
+            }
+            ("__entries_file_type", [CtValue::Int(context), CtValue::Int(slot)]) => {
+                let (directory, file, kind, code, cause) = jet_entries8_file_type(*context, *slot);
+                let mut fields = vec![("directory", CtValue::Bool(directory)), ("file", CtValue::Bool(file))];
+                fields.extend(error_fields(kind, code, cause));
+                tuple(fields)
+            }
             ("__walk_context", [CtValue::Str(root), CtValue::Str(ignore), CtValue::Bool(enabled)]) => CtValue::Int(jet_walk8_open(root, ignore, *enabled)),
             ("__walk_close", [CtValue::Int(context)]) => { jet_walk8_close(*context); CtValue::Unit },
             ("__walk_matcher_new", [CtValue::Int(context)]) => { jet_walk8_matcher_new(*context); CtValue::Unit },
