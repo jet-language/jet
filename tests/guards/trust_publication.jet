@@ -1,0 +1,17 @@
+use core.files as s1_trust_publication_files
+// tests/jetpack_trust_root.rs:20-47, exact on-disk manifest/doc contract.
+#Test("trust_publication_contract_is_owned_pending_and_has_no_fake_root") {
+    publication :: "Docs/site/dist/keys"
+    manifest :: s1_trust_publication_files.read("{publication}/trust-manifest.json") ?? panic("manifest")
+    assert_eq(manifest.trim(), "{{\"schema\":1,\"domain\":\"jet-lang.dev\",\"status\":\"awaiting-key-ceremony\",\"root\":null,\"keys\":[],\"rotation\":\"offline threshold root rotation; publish a new manifest only after the old root verifies the new root\"}}")
+    assert(!s1_trust_publication_files.exists("{publication}/nix-index-v1.ed25519.pub"))
+    readme :: s1_trust_publication_files.read("{publication}/README.md") ?? panic("readme")
+    docs :: s1_trust_publication_files.read("Docs/spec/packaging/trust-root.md") ?? panic("docs")
+    assert(readme.contains("https://keys.jet-lang.dev/nix-index-v1.ed25519.pub") || docs.contains("https://keys.jet-lang.dev/nix-index-v1.ed25519.pub"))
+    assert(readme.contains("key-id:base64-public-key") || docs.contains("key-id:base64-public-key"))
+    assert(readme.contains("ed25519") || docs.contains("ed25519"))
+    assert(readme.contains("issued_unix") || docs.contains("issued_unix"))
+    assert(readme.contains("expires_unix") || docs.contains("expires_unix"))
+    assert(readme.contains("manual update") || docs.contains("manual update"))
+    assert(!manifest.contains("jet-test-index-v1"))
+}
