@@ -123,12 +123,28 @@ module scheduler {
     use core as core
 
     fn channel<T>() -> (sender: Sender<T>, receiver: Receiver<T>) Never! {
-        core.tasks.__channel_new<T>()
+        pair :: core.tasks.__channel_new<T>()
+        (sender: pair.sender, receiver: pair.receiver)
+    }
+
+    #Test("scheduler channel preserves its named sender and receiver") {
+        pair :: channel<Int>()
+        pair.sender.send(41)
+        assert_eq(pair.receiver.receive() ?? panic("channel closed"), 41)
+        pair.sender.close()
     }
 
     fn bounded<T>(capacity: Int) -> (sender: Sender<T>, receiver: Receiver<T>) Never! {
         limit :: if capacity < 1 -> 1 else -> capacity
-        core.tasks.__channel_bounded<T>(limit)
+        pair :: core.tasks.__channel_bounded<T>(limit)
+        (sender: pair.sender, receiver: pair.receiver)
+    }
+
+    #Test("scheduler bounded channel preserves its named sender and receiver") {
+        pair :: bounded<Int>(0)
+        pair.sender.send(42)
+        assert_eq(pair.receiver.receive() ?? panic("bounded channel closed"), 42)
+        pair.sender.close()
     }
 }
 
