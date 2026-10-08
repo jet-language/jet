@@ -17,6 +17,37 @@ use jet_foundation::Shape::ShapeProjectionKind;
 use jet_foundation::Syntax::CoreCallSymbol;
 use jet_foundation::MIR::*;
 
+#[derive(Default)]
+pub(super) struct CloseFacts {
+    nominal: std::cell::RefCell<HashMap<String, Option<MirFunctionId>>>,
+    owned: std::cell::RefCell<HashMap<String, bool>>,
+}
+
+impl CloseFacts {
+    pub(super) fn nominal(&self, program: &MirProgram, ty: &MirType) -> Option<MirFunctionId> {
+        let key = ty.canonical_key();
+        if let Some(answer) = self.nominal.borrow().get(&key) {
+            return *answer;
+        }
+        let answer = nominal_close_function(program, ty);
+        self.nominal.borrow_mut().insert(key, answer);
+        answer
+    }
+
+    pub(super) fn contains_owned(&self, program: &MirProgram, ty: &MirType) -> bool {
+        let key = ty.canonical_key();
+        if let Some(answer) = self.owned.borrow().get(&key) {
+            return *answer;
+        }
+        // Cache only completed roots: a recursive cycle assumption must not
+        // publish a negative answer for an independently queried child.
+        let answer = contains_owned_close_with(&program.types, ty,
+            &|ty| self.nominal(program, ty).is_some(), &mut Vec::new());
+        self.owned.borrow_mut().insert(key, answer);
+        answer
+    }
+}
+
 // Seed/verification tier only; native cleanup is source-owned Lower glue.
 // Match checked identities, never a leaf spelling such as user `Secret`.
 pub(super) fn nominal_close_function(program: &MirProgram, ty: &MirType) -> Option<MirFunctionId> {
@@ -3672,6 +3703,7 @@ struct RustEmitter<'a> {
     /// Memoized `type_derive_capability` answers for closed (non-generic,
     /// unbound) type rows, per trait name.
     derive_capability_cache: std::cell::RefCell<BTreeMap<String, BTreeMap<MirTypeId, bool>>>,
+    close_facts: CloseFacts,
     /// Lowest `visiting` index a cycle assumption reached in the current
     /// `type_derive_capability` frame (`usize::MAX` when none).
     derive_capability_cycle_floor: std::cell::Cell<usize>,
@@ -3878,6 +3910,7 @@ impl<'a> RustEmitter<'a> {
             cfg_state: std::cell::RefCell::new(None),
             history_runtime_metadata: std::cell::OnceCell::new(),
             derive_capability_cache: std::cell::RefCell::new(BTreeMap::new()),
+            close_facts: CloseFacts::default(),
             derive_capability_cycle_floor: std::cell::Cell::new(usize::MAX),
             derive_capability_pending: std::cell::RefCell::new(Vec::new()),
             history_callback_lifetime: std::cell::Cell::new("'static"),
@@ -28721,7 +28754,7 @@ impl<'a> RustEmitter<'a> {
     /// Render a typed cleanup graph. Local functions make recursive owned
     /// records finite without allocating a runtime visitor or cloning values.
     fn typed_drop_expression(&self, function: &MirFunction, ty: &MirType, value: &str, structural: bool) -> String {
-        if !contains_owned_close(self.program, ty, &mut Vec::new()) {
+        if !self.close_facts.contains_owned(self.program, ty) {
             return format!("{{ drop({value}); () }}");
         }
         let mut pending = vec![(ty.clone(), structural)];
@@ -28748,7 +28781,7 @@ impl<'a> RustEmitter<'a> {
                 format!("__jet_drop_{index}({value}); ")
             };
             let body = if !structural {
-                nominal_close_function(self.program, &ty).map(|id| {
+                self.close_facts.nominal(self.program, &ty).map(|id| {
                     let row = self.function_row(id);
                     let MirFunctionForm::TraitMethod { trait_ref, .. } = &row.form else {
                         panic!("checked Close implementation is not a trait method");
@@ -28820,7 +28853,7 @@ impl<'a> RustEmitter<'a> {
         }
         if let Some(node) = self.partial_drop_node(function, value) {
             let ty = self.value_type(function, value);
-            let structural = nominal_close_function(self.program, ty) == Some(function.id)
+            let structural = self.close_facts.nominal(self.program, ty) == Some(function.id)
                 && close_receiver_drop(function, value);
             let whole = self.typed_drop_expression(function, ty, "item", structural);
             return format!("{{ if let Some(item) = {}.take() {{ {whole}; }} {} () }}",
@@ -28856,7 +28889,7 @@ impl<'a> RustEmitter<'a> {
             MirDropKind::None => format!("{{ let _ = {}; () }}", self.value_move(value)),
             MirDropKind::Value => {
                 let ty = self.value_type(function, value);
-                let structural = nominal_close_function(self.program, ty) == Some(function.id)
+                let structural = self.close_facts.nominal(self.program, ty) == Some(function.id)
                     && close_receiver_drop(function, value);
                 self.typed_drop_expression(function, ty, &self.value_move(value), structural)
             }

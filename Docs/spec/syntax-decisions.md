@@ -2593,6 +2593,8 @@ Only the consuming receiver's storage in its own `Close` body is structural
 cleanup: another local of the same nominal type still closes normally.
 The Rust printer and MIREval implement this as seed/verification seams that
 die at cutover; native execution uses Jet-owned Lower cleanup glue.
+Their immutable cleanup facts are cached per program/type, and partial-move
+parity witnesses use owned payloads rather than Copy-only records.
 
 **S53 — Concurrency** *(historical record, superseded by D-CONC-SPAWN1=D)*:
 tasks/channels were once planned around `tasks.spawn` and handle-list

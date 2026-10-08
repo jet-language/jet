@@ -511,13 +511,11 @@ const CLOSE_CONTAINERS_EXPECTED: &str =
 
 #[test]
 fn generic_container_close_runs_once_on_rust_aot() {
-    let ran = compile_and_run(CLOSE_CONTAINERS, "jet_close_containers_aot");
-    assert!(
-        ran.status.success(),
-        "{}",
-        String::from_utf8_lossy(&ran.stderr)
-    );
-    assert_eq!(String::from_utf8(ran.stdout).unwrap(), CLOSE_CONTAINERS_EXPECTED);
+    assert!(common::have_rustc(), "resource-close runtime proof needs rustc");
+    let (code, stdout, stderr) =
+        common::build_and_run("jet_close_containers_aot", "main", CLOSE_CONTAINERS);
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(stdout, CLOSE_CONTAINERS_EXPECTED);
 }
 
 #[test]

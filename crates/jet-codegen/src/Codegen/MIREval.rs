@@ -4143,6 +4143,8 @@ struct Machine<'a, 'state, 'debug> {
     last_runtime_stop: Option<(String, String)>,
     atexit_handlers: Vec<RuntimeValue>,
     deadline_guards: Vec<(usize, MirScopeId, crate::scheduler::JetDeadlineGuard)>,
+    drop_only_values: HashMap<MirFunctionId, HashSet<MirValueId>>,
+    close_facts: super::MIRRust::CloseFacts,
     /// Held for the machine's lifetime so the scoped Web runtime policy is
     /// restored on drop; never read directly.
     _web_runtime_policy: crate::Comptime::AppLite::WebRuntimePolicyGuard,
@@ -4277,6 +4279,8 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             last_runtime_stop: None,
             atexit_handlers: Vec::new(),
             deadline_guards: Vec::new(),
+            drop_only_values: HashMap::new(),
+            close_facts: super::MIRRust::CloseFacts::default(),
             _web_runtime_policy: web_runtime_policy,
             forwarded_output: Arc::new(MirForwardedOutput::default()),
             forwards_output: false,
@@ -6175,7 +6179,6 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         instruction: &MirInstruction,
     ) -> Result<Action, Diagnostic> {
         let span = instruction.span;
-        let function = program_function(self.program, self.frames[frame_index].function)?;
         let result = match &instruction.operation {
             MirOperation::Call {
                 callee: MirCallee::Prelude(call),
@@ -6294,26 +6297,42 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     });
                 }
             }
-            MirOperation::MovePlace { place } if instruction.result.is_some_and(|value| {
-                function.blocks.iter().any(|block| block.instructions.iter().any(|row|
-                    matches!(row.operation, MirOperation::Drop { value: operand, kind: MirDropKind::Value } if operand == value)))
-                    && function.blocks.iter().all(|block| {
-                        !block.terminator.value_uses().contains(&value)
-                            && block.instructions.iter().all(|row|
-                                !row.operation.value_uses().contains(&value)
-                                    || matches!(row.operation, MirOperation::Drop { value: operand, .. } if operand == value))
-                    })
-            }) => {
-                let row = function.places.iter().find(|row| row.id == *place)
-                    .ok_or_else(|| mir_error_at("MIR cleanup place is unavailable", span))?;
-                if row.projections.is_empty() {
-                    let base = row.base.clone();
-                    let value = self.take_base_value(frame_index, &base, span)?;
-                    self.store_base_value(frame_index, &base, RuntimeValue::Moved, span)?;
-                    self.unregister_scope_guard(frame_index, *place);
-                    value
-                } else {
+            MirOperation::MovePlace { place } => {
+                let id = self.frames[frame_index].function;
+                if !self.drop_only_values.contains_key(&id) {
+                    let function = program_function(self.program, id)?;
+                    let mut values = HashSet::new();
+                    let mut other_uses = HashSet::new();
+                    for block in &function.blocks {
+                        for row in &block.instructions {
+                            match row.operation {
+                                MirOperation::Drop { value, kind: MirDropKind::Value } => {
+                                    values.insert(value);
+                                }
+                                MirOperation::Drop { .. } => {}
+                                _ => other_uses.extend(row.operation.value_uses()),
+                            }
+                        }
+                        other_uses.extend(block.terminator.value_uses());
+                    }
+                    values.retain(|value| !other_uses.contains(value));
+                    self.drop_only_values.insert(id, values);
+                }
+                if !instruction.result.is_some_and(|value| self.drop_only_values[&id].contains(&value)) {
                     self.move_place(frame_index, *place, span)?
+                } else {
+                    let function = program_function(self.program, id)?;
+                    let row = function.places.iter().find(|row| row.id == *place)
+                        .ok_or_else(|| mir_error_at("MIR cleanup place is unavailable", span))?;
+                    if row.projections.is_empty() {
+                        let base = row.base.clone();
+                        let value = self.take_base_value(frame_index, &base, span)?;
+                        self.store_base_value(frame_index, &base, RuntimeValue::Moved, span)?;
+                        self.unregister_scope_guard(frame_index, *place);
+                        value
+                    } else {
+                        self.move_place(frame_index, *place, span)?
+                    }
                 }
             }
             operation => {
@@ -7958,10 +7977,10 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 let is_shared_guard = mir_is_shared_guard_type(&value_ty);
                 let is_db_lease = value_ty.nominal_name() == Some("DBLease");
                 let function = program_function(self.program, self.frames[frame_index].function)?;
-                let structural = super::MIRRust::nominal_close_function(self.program, &value_ty) == Some(function.id)
+                let structural = self.close_facts.nominal(self.program, &value_ty) == Some(function.id)
                     && super::MIRRust::close_receiver_drop(function, *value);
                 let typed_close = matches!(kind, MirDropKind::Value)
-                    && super::MIRRust::contains_owned_close(self.program, &value_ty, &mut Vec::new());
+                    && self.close_facts.contains_owned(self.program, &value_ty);
                 let removed = self.frames[frame_index].values.remove(value);
                 if let Some(removed) = removed {
                     if let Some(state) = Self::realtime_state(&removed) {
@@ -8065,7 +8084,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             return Ok(());
         }
         if !structural {
-            if let Some(function) = super::MIRRust::nominal_close_function(self.program, ty) {
+            if let Some(function) = self.close_facts.nominal(self.program, ty) {
                 if !runtime_contains_moved(&value) {
                     let _ = self.invoke_function(function, vec![value], Vec::new(), span)?;
                     return Ok(());

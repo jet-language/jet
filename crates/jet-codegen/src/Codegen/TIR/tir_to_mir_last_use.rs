@@ -304,7 +304,7 @@ impl LowerCtx<'_> {
             if !row.projections.is_empty()
                 || row.persist_key.is_some()
                 || excluded_roots.contains(&root)
-                || self.scope_end_close(&row.ty).is_some()
+                || self.scope_end_close_for_place(place, &row.ty).is_some()
                 || is_view(&row.ty)
             {
                 continue;
