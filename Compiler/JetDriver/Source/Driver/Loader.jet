@@ -2476,12 +2476,34 @@ fn jet_driver_parse_wave(request: JetDriverCompileRequest, source_units: [JetDri
     weights := [Int]{}
     total := 0
     largest := 0
+    user_input_bytes := 0
+    core_input_bytes := 0
+    user_source_units := 0
+    core_source_units := 0
     loop position in first..<pending.len() {
         job :: jet_driver_parse_job(request, source_units[pending[position]])
         bytes :: jet_driver_parse_job_bytes(job)
         &weights.push(bytes)
         total += bytes
         if bytes > largest -> largest = bytes
+        // Loaded payloads selected for this wave, not lexer-consumed bytes:
+        // inline-package errors can reject before lexing, and Core filtering
+        // happens after parsing. Missing has no input; unqueued units are absent.
+        // String.len scheduling weights count scalars; count_bytes is the
+        // existing borrowed O(1) UTF-8 byte query, reached only while tracing.
+        if request.trace_sink != None {
+            if job == {
+                .Source(text) -> {
+                    user_input_bytes += text.count_bytes()
+                    user_source_units += 1
+                }
+                .Core(text, _) -> {
+                    core_input_bytes += text.count_bytes()
+                    core_source_units += 1
+                }
+                .Missing -> {}
+            }
+        }
         &jobs.push(job)
     }
     workers :: compiler_threads_admit(request.compiler_threads, jobs.len(), total, JET_DRIVER_PARSE_MIN_BYTES_PER_THREAD, largest * JET_DRIVER_PARSE_SCRATCH_PER_BYTE, 0)
@@ -2507,6 +2529,16 @@ fn jet_driver_parse_wave(request: JetDriverCompileRequest, source_units: [JetDri
         &results.extend(done)
     }
     &results.reverse()
+    // One input-volume delta per completed wave, summed by the trace reader;
+    // these are not token, AST, cache-hit, or physical parse-work counts.
+    if request.trace_sink == .Val(sink) {
+        sink.progress("counters.parse.user_input_bytes", user_input_bytes, 0)
+        sink.progress("counters.parse.core_input_bytes", core_input_bytes, 0)
+        sink.progress("counters.parse.total_input_bytes", user_input_bytes + core_input_bytes, 0)
+        sink.progress("counters.parse.user_source_units", user_source_units, 0)
+        sink.progress("counters.parse.core_source_units", core_source_units, 0)
+        sink.progress("counters.parse.source_units", user_source_units + core_source_units, 0)
+    }
     results
 }
 
