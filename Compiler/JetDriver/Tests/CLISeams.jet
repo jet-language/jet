@@ -27,6 +27,39 @@ fn seams_package_request(version: String?) -> JetDriverCompileRequest {
     request
 }
 
+fn seams_registration_inputs(request: JetDriverCompileRequest, expected_source_rows: Int) {
+    load :: jet_driver_load(request)
+    seams_require(load.complete && !jet_driver_has_errors(load.diagnostics), "registration fixture uses the real completed loader")
+    diagnostics := [Diagnostic]{}
+    inputs :: jet_driver_registration_module_inputs(load, [SemaForeignProviderInput]{}, &diagnostics) ?? panic("canonical registration inputs missing")
+    seams_require(diagnostics.len() == 0 && inputs.len() == load.modules.len(), "one canonical registration input per loaded module")
+    source_rows := 0
+    loop position in 0..<inputs.len() {
+        row :: inputs[position]
+        module_row :: load.modules[position]
+        seams_require(module_row.source_unit_index >= 0 && module_row.source_unit_index < load.source_units.len(), "ABI fallback still has a real catalog unit")
+        unit :: load.source_units[module_row.source_unit_index]
+        seams_require(row.package_identity == module_row.package_identity && row.module_identity == module_row.module_identity && row.module_name == module_row.module_name, "canonical module identities and registration order survive")
+        seams_require(row.module_path == jet_driver_module_display(unit.relative_path) && row.source_file == unit.path && row.source_origin == unit.source_origin, "canonical source location and origin survive")
+        seams_require(row.source_segments.len() == unit.source_segments.len(), "canonical source segment count survives")
+        loop segment_index in 0..<row.source_segments.len() {
+            actual :: row.source_segments[segment_index]
+            expected :: unit.source_segments[segment_index]
+            seams_require(actual.generated.start == expected.generated.start && actual.generated.end == expected.generated.end && actual.source_file == expected.source_file && actual.source_start == expected.source_start && actual.line_starts == expected.line_starts && actual.origin == expected.origin, "canonical source segments survive unchanged")
+        }
+        found_source := false
+        loop file in load.source_files {
+            if file.path == unit.path {
+                seams_require(row.source == file.source, "real source bytes survive including empty Core and private files")
+                found_source = true
+            }
+        }
+        if found_source -> source_rows += 1
+        else -> seams_require(row.source == "" && unit.root_index == -1 && unit.file_index == -1 && unit.root_identity == JET_DRIVER_CORE_SOURCE_ROOT, "only explicit metadata ABI fallback lacks a source-file row")
+    }
+    seams_require(source_rows == expected_source_rows, "source and metadata-only rows remain distinct")
+}
+
 fn seams_checked_projection() {
     source :: "fn serve() -> Int {{ 7 }}"
     retained :: jet_driver_checked_projection(seams_request(source, JetDriverCompileMode.Check))
@@ -39,6 +72,7 @@ fn seams_checked_projection() {
         seams_require(module_row.name_ledger != None && module_row.memory_facts != None && module_row.gate_ledger != None, "retained checked ledgers are not fabricated or discarded")
     }
     fallback_request :: seams_request("use core.devtools as tools\nfn serve() -> Int {{ 7 }}", JetDriverCompileMode.Check)
+    seams_registration_inputs(fallback_request, 1)
     fallback :: jet_driver_checked_projection(fallback_request)
     seams_require(fallback.compile.complete && fallback.compile.doc_modules.len() == 2 && fallback.source_modules.len() == 1, "explicit ABI-only Core fallback stays checked but is not a Review source")
     real_request := seams_request("use core.devtools as tools\nfn serve() -> Int {{ 7 }}", JetDriverCompileMode.Check)
@@ -46,6 +80,7 @@ fn seams_checked_projection() {
         JetDriverCoreSource{module_name: "core.devtools", alias: "core_devtools_fixture", path: "Core/devtools-fixture.jet", owner: "", owned_members: [String]{}, source: ""},
         JetDriverCoreSource{module_name: "core.devtools.fixture_private", alias: "core_devtools_fixture_private", path: "Core/devtools-fixture-private.jet", owner: "core.devtools", owned_members: [String]{}, source: ""},
     }
+    seams_registration_inputs(real_request, 3)
     real :: jet_driver_checked_projection(real_request)
     seams_require(real.compile.complete && real.compile.doc_modules.len() == 3 && real.source_modules.len() == 3, "empty real Core source and its private source remain source owners")
     found_core := false
