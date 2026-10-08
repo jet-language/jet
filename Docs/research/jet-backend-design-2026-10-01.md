@@ -1634,6 +1634,8 @@ E3015 what/why/fix snapshot is exercised by
 `Tests/test-native-output-diagnostic.mjs`. These consumers require the real
 composed candidate, host and matching runtime pack; metadata-only checks do
 not admit execution parity.
+Its registered What line starts `Output check not run:` in sentence case,
+matching the canonical snapshot and the shared user-facing case-law gate.
 
 
 `Tests/run-front-feed.mjs` selects **every** `pass` row in an explicit native
