@@ -523,3 +523,6 @@ these bindings do not change return-rail or host-route behavior.
 The bootstrap Core-call registry is one immutable static slice in foundation,
 evaluated once during compilation rather than expanded as a constant in each
 consumer. Its compile-time coverage assertions remain the same authority gate.
+
+Resident collection evaluation includes the same fixed-list bounds kernel as
+comptime and transports its arithmetic stop through the existing E3010 path.
