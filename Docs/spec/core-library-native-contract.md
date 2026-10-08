@@ -107,6 +107,13 @@ uses bounded radix-65536 limbs, fixed-index loops, and mask-based swaps, not
 secret-dependent branches or arbitrary-precision reduction. A zero shared
 result is rejected by recipient protocols, not by the RFC 7748 primitive.
 
+Vault signing-key public derivation uses the internal Ed25519 fixed-limb
+boundary with a borrowed 32-byte seed, 32-byte output, and exclusive 4096-byte
+scratch wiped before return. Its SHA-512 engine separately accepts a borrowed
+byte span, disjoint 64-byte digest, and 704-byte aligned scratch. Signed machine
+words carry hash bit patterns with wrapping additions and explicitly logical
+right shifts; scalar multiplication uses mask swaps and complete additions.
+
 A high-level native implementation must not be retained as an invisible runtime
 fallback for a Jet implementation. If an API changes identity or semantics,
 make the change at the contract boundary and migrate its users in one cutover.
