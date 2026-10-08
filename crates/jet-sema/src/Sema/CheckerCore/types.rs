@@ -15,6 +15,41 @@ impl<'a> Checker<'a> {
         };
         registry.contains(leaf) && registry.source_owns_type(leaf)
     }
+    pub(crate) fn has_source_operator_left(&self, left: &Type, trait_name: &str) -> bool {
+        let left_name = left.name();
+        self.modules.is_some_and(|modules| modules.iter().any(|module|
+            module.trait_reg.operator_impls.iter().any(|row|
+                row.left == left_name && row.trait_name == trait_name
+                && matches!(&row.rhs, Type::Named(name) | Type::Apply { name, .. }
+                    if module.registry.source_owns_type(Self::split_type_name(name).1)))))
+    }
+
+    pub(crate) fn source_operator_row(
+        &self, left: &Type, trait_name: &str, right: &Type,
+    ) -> Option<(usize, &jet_foundation::Traits::OperatorImpl)> {
+        let modules = self.modules?;
+        for operand in [left, right] {
+            let name = match operand {
+                Type::Named(name) | Type::Apply { name, .. } => name,
+                _ => continue,
+            };
+            if !self.source_owns_nominal(name) { continue; }
+            let (namespace, leaf) = Self::split_type_name(name);
+            let owner = self.struct_owner_module(leaf, namespace)?;
+            let module = modules.get(owner)?;
+            for row in &module.trait_reg.operator_impls {
+                if row.trait_name != trait_name { continue; }
+                let row_left = crate::Sema::Diagnostics::builtin_type_from_ident(&row.left)
+                    .unwrap_or_else(|| Type::Named(row.left.clone()));
+                let row_left = self.qualify_method_type(owner, &row_left, &HashSet::new());
+                let row_right = self.qualify_method_type(owner, &row.rhs, &HashSet::new());
+                if &row_left == left && &row_right == right {
+                    return Some((owner, row));
+                }
+            }
+        }
+        None
+    }
 
     /// D-TEXTHEAD-TYPE1=A: resolve a library-defined checked text through the
     /// ordinary nominal and trait registries. The returned name is canonical
