@@ -4684,6 +4684,33 @@ fn is_builtin_task_group(type_defs: &[MirTypeDef], name: &str) -> bool {
 /// the handle to that record's field layout (#3779).
 const BUILTIN_TASK_GROUP_IDENTITY_KEY: &str = "builtin:task-group";
 
+/// Bare Core carriers have an owner registered in Core.jet. Resolve only that
+/// exact source identity; an unrelated declaration with the same leaf cannot
+/// participate. Ordinary source nominals arrive already module-qualified.
+fn registered_core_nominal_key<'a>(type_defs: &'a [MirTypeDef], name: &str) -> Option<&'a str> {
+    if name.contains("::") || name.contains('.') {
+        return None;
+    }
+    let modules;
+    let module = match crate::Syntax::typed_head_kind(name) {
+        Some(kind) => kind.carrier_record_module()?,
+        None => {
+            modules = jet_foundation::CoreModuleExports::core_type_modules(name);
+            let [module] = modules.as_slice() else { return None };
+            *module
+        }
+    };
+    let source = jet_foundation::CoreModuleExports::core_source_module(module)?;
+    type_defs.iter()
+        .find(|row| {
+            row.key.starts_with(jet_foundation::Diagnostics::CORE_SOURCE_ROOT)
+                && row.key.rsplit_once("::").is_some_and(|(owner, leaf)| {
+                    leaf == name && owner.rsplit_once("::").is_some_and(|(_, path)| path == source.path)
+                })
+        })
+        .map(|row| row.key.as_str())
+}
+
 fn canonical_nominal_name(
     type_defs: &[MirTypeDef],
     name: &str,
@@ -4715,6 +4742,9 @@ fn canonical_nominal_name(
         if type_defs.iter().any(|ty| ty.key == leaf) {
             return Ok(leaf.to_string());
         }
+    }
+    if let Some(key) = registered_core_nominal_key(type_defs, name) {
+        return Ok(key.to_string());
     }
     // Sema/TIR supplies module-qualified identities for source nominals.
     // A bare name left here is a builtin or a generic parameter, never a
