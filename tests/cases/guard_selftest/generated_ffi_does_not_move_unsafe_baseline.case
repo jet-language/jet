@@ -1,0 +1,12 @@
+# Port of tests/guard_selftest.rs:56-59 -> tests/unsafe_ratchet.rs:110-127.
+# Transitional Node wrapper debt recorded in NODE-DEBT.tsv; scanner input bytes verbatim.
+requires: tool:node
+fixture: fixtures/ratchet
+copy: authored.txt main.jet
+step: node {root}/Tools/agent/check-unsafe-ratchet.mjs --root {work} --baseline {work}/safety.md --update
+exit: 0
+copy: safety.md before-baseline.txt
+copy: generated.txt .jet/bindings/c/generated.jet
+step: node {root}/Tools/agent/check-unsafe-ratchet.mjs --root {work} --baseline {work}/safety.md
+exit: 0
+file: safety.md == before-baseline.txt
