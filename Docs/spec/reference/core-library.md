@@ -1443,6 +1443,13 @@ raw X25519 still rejects non-contributory peers. See
 [`crypto_suite.jet`](../../../Examples/features/crypto/crypto_suite.jet) and
 [`crypto_envelope.jet`](../../../Examples/features/crypto/crypto_envelope.jet).
 
+AES-256-GCM uses a 32-byte key, a 12-byte nonce, and a 16-byte appended tag.
+Its source substitution uses fixed bitplane operations rather than
+secret-indexed lookup tables; GHASH uses 128 masked fixed-width steps.
+Open authenticates all 16 tag bytes before producing plaintext and returns
+`CryptoError.OpenFailed` for a bad tag. These source-level properties do not
+by themselves establish a machine-code timing guarantee for a compiler target.
+
 ### `core.crypto.random` — operating-system cryptographic randomness
 
 `core.crypto.random` is a fail-closed operating-system CSPRNG. It is distinct
