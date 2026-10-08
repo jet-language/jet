@@ -33,6 +33,43 @@ fn sentry_test_leave(save: I64) {
     jet_rt_string_drop(sync_load(save + I64{64}))
     jet_rt_string_drop(sync_load(save + I64{72}))
 }
+// Card #4889: every R08xx footer reports the same status as the stop boundary.
+fn sentry_test_report_exit() {
+    sentry_test_require(SENTRY_RUNTIME_EXIT_CODE == I64{70})
+    operation :: services_msg_sentry_read()
+    obligation :: services_msg_sentry_valid_ptr()
+    gate :: sentry_gate_name()
+    fault := I64{1}
+    loop fault <= (I64{4}) {
+        report :: sentry_report(fault, operation, obligation, I64{0}, false, gate)
+        data :: rt_text_data(report)
+        length :: rt_text_len(report)
+        at := I64{0}
+        exits := I64{0}
+        loop at + I64{9} <= length {
+            if ((at == I64{0} || trap_byte(data + at - I64{1}) == I64{10})
+                && trap_byte(data + at) == I64{101}
+                && trap_byte(data + at + I64{1}) == I64{120}
+                && trap_byte(data + at + I64{2}) == I64{105}
+                && trap_byte(data + at + I64{3}) == I64{116}
+                && trap_byte(data + at + I64{4}) == I64{58}
+                && trap_byte(data + at + I64{5}) == I64{32}) {
+                status :: ((trap_byte(data + at + I64{6}) - I64{48}) * I64{10}
+                    + trap_byte(data + at + I64{7}) - I64{48})
+                sentry_test_require(status == SENTRY_RUNTIME_EXIT_CODE)
+                sentry_test_require(trap_byte(data + at + I64{8}) == I64{10})
+                exits += I64{1}
+            }
+            at += I64{1}
+        }
+        sentry_test_require(exits == I64{1})
+        jet_rt_string_drop(report)
+        fault += I64{1}
+    }
+    jet_rt_string_drop(gate)
+    jet_rt_string_drop(obligation)
+    jet_rt_string_drop(operation)
+}
 #Export(c) fn jet_rt_sentry_fixture_worker(arguments: I64) -> I64 {
     // Parent gate is thread-confined, just like Rust thread_local GATE.
     sentry_test_require(jet_rt_sentry_check(I64{0}, I64{8}, I64{8}, I64{1}) == I64{0})
@@ -59,6 +96,7 @@ fn sentry_test_leave(save: I64) {
     sync_store(value, I64{7})
     frame := jet_rt_sentry_frame_enter()
     sentry_test_gate(save)
+    sentry_test_report_exit()
     jet_rt_sentry_register_stack_allocation(value, I64{8})
     sentry_test_require(jet_rt_sentry_check(value, I64{8}, I64{8}, I64{1}) == I64{0})
     jet_rt_sentry_frame_leave(frame)

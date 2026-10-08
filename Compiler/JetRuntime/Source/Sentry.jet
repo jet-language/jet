@@ -4,6 +4,8 @@
 // Frame32: unique id0 and triple (start,len,seq) native word List at8.
 // Expired stack ranges deduplicate by (start,len), retaining the newest seq.
 // Source literals borrowed by gate scopes remain alive with the calling image.
+// S36 / D-FAIL-EXIT1: metadata and the stop boundary share this fault status.
+SENTRY_RUNTIME_EXIT_CODE :: prep { I64{70} }
 sentry_root := I64{0}
 
 // runtime-init: 4
@@ -507,6 +509,9 @@ fn sentry_report(fault: I64, operation: I64, obligation: I64, component: I64, fe
         jet_rt_string_builder_push(report, component)
         sentry_append_owned(report, if fenced -> services_msg_sentry_fenced() else -> services_msg_sentry_unfenced())
     }
+    sentry_append_owned(report, services_msg_sentry_exit())
+    sentry_append_number(report, SENTRY_RUNTIME_EXIT_CODE)
+    rt_text_push_scalar(report, I64{10})
     footer :: if {
         (code == I64{2}) -> services_msg_sentry_footer2()
         (code == I64{3}) -> services_msg_sentry_footer3()
@@ -532,5 +537,5 @@ fn sentry_stop(fault: I64, component: I64, fenced: Bool) {
     trap_flush_stdout()
     trap_write_handle(report)
     jet_rt_string_drop(report)
-    trap_exit(I64{70})
+    trap_exit(SENTRY_RUNTIME_EXIT_CODE)
 }
