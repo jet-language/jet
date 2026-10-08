@@ -27,6 +27,59 @@ pub enum DBValue {
     Blob([U8])
 }
 
+#Equatable
+pub enum __PoolLifecycle {
+    Open
+    Draining
+    Drained
+}
+
+// Receipts have always been opaque public values: the pool produces them;
+// source owns their exact counters, equality and textual projection.
+#Equatable
+pub struct DBPoolReceipt {
+    lifecycle: __PoolLifecycle
+    max: Int
+    available: Int
+    leased: Int
+    opening: Int
+    ready: Bool
+    acquires: Int
+    releases: Int
+    timeouts: Int
+    open_failures: Int
+    unhealthy: Int
+    replacements: Int
+    replacement_failures: Int
+}
+impl DBPoolReceipt.Show { fn show(self) -> String { pool_receipt_text(self) } }
+impl DBPoolReceipt.Display { fn display(self) -> String { pool_receipt_text(self) } }
+impl DBPoolReceipt.Debug { fn debug(self) -> String { pool_receipt_text(self) } }
+
+fn pool_receipt_text(receipt: DBPoolReceipt) -> String Never! {
+    lifecycle :: if receipt.lifecycle == {
+        .Open -> "open"
+        .Draining -> "draining"
+        .Drained -> "drained"
+    }
+    ready :: if receipt.ready -> 1 else -> 0
+    "db.pool lifecycle={lifecycle} max={receipt.max} available={receipt.available} leased={receipt.leased} opening={receipt.opening} ready={ready} acquires={receipt.acquires} releases={receipt.releases} timeouts={receipt.timeouts} open_failures={receipt.open_failures} unhealthy={receipt.unhealthy} replacements={receipt.replacements} replacement_failures={receipt.replacement_failures}"
+}
+
+#Test("pool receipt text keeps every counter and lifecycle spelling") {
+    receipt := DBPoolReceipt{
+        lifecycle: .Open, max: 2, available: 1, leased: 0, opening: 1,
+        ready: true, acquires: 3, releases: 4, timeouts: 5, open_failures: 6,
+        unhealthy: 7, replacements: 8, replacement_failures: 9,
+    }
+    assert_eq(pool_receipt_text(receipt), "db.pool lifecycle=open max=2 available=1 leased=0 opening=1 ready=1 acquires=3 releases=4 timeouts=5 open_failures=6 unhealthy=7 replacements=8 replacement_failures=9")
+    receipt.lifecycle = .Draining
+    receipt.ready = false
+    assert_eq(pool_receipt_text(receipt), "db.pool lifecycle=draining max=2 available=1 leased=0 opening=1 ready=0 acquires=3 releases=4 timeouts=5 open_failures=6 unhealthy=7 replacements=8 replacement_failures=9")
+    receipt.lifecycle = .Drained
+    assert_eq(pool_receipt_text(receipt), "db.pool lifecycle=drained max=2 available=1 leased=0 opening=1 ready=0 acquires=3 releases=4 timeouts=5 open_failures=6 unhealthy=7 replacements=8 replacement_failures=9")
+}
+
 #[Error, Equatable]
 pub struct DBError { pub message: String }
 
@@ -34,6 +87,7 @@ impl DBError.Display { fn display(self) -> String { ~self.message } }
 impl DBError.Debug { fn debug(^self) -> String { self.message } }
 impl DBError -> Err { Err(self.message) }
 impl DBValue.Display { fn display(self) -> String { render_value(self) } }
+impl DBValue.Show { fn show(self) -> String { render_value(self) } }
 
 impl DBValue {
     pub fn is_null(self) -> Bool Never! {

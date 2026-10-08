@@ -3514,6 +3514,10 @@ affinity returns integer `0`/`1`, which the Boolean reader accepts. Blob reads
 preserve every byte, including empty blobs, without text conversion. `DBError`
 retains the driver's message rather than exposing a raw engine pointer.
 
+Pool receipts remain opaque values produced by a pool. Their equality and
+Show/Display/Debug projection are source-owned: each projection preserves the
+`db.pool lifecycle=...` text and the complete ordered set of pool counters.
+
 Core's private SQLite driver uses the bundled SQLite 3.45.0 amalgamation from
 `libsqlite3-sys` 0.28.0 through the audited C FFI, not a system SQLite library,
 preserving the database format, open flags, busy timeout and statement-cache

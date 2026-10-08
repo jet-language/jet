@@ -25,7 +25,7 @@ pub enum CoreLeafKind {
 
 // BEGIN GENERATED CORE DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 7eb016973d0e9432a54f192544a041852c7df0def02237783d66e8018d73ae32
+// Source SHA-256: 6b8bcfee37d773a1c4516ec536e308e205675d2d3e303ece814d060d5cfdb563
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreModuleDeclaration {
     pub module: &'static str,
@@ -300,8 +300,8 @@ const CORE_MODULE_29_MEMBERS: &[&str] = &["new", "Centroid", "TDigest"];
 const CORE_MODULE_29_TYPES: &[(&str, CoreLeafKind)] = &[("Centroid", CoreLeafKind::Plain), ("TDigest", CoreLeafKind::Plain)];
 const CORE_MODULE_29_DEPENDENCIES: &[&str] = &["core.data"];
 
-const CORE_MODULE_30_MEMBERS: &[&str] = &["decode", "migrate", "open", "open_memory", "pool", "policy", "policy_audit", "row_bool", "row_float", "row_int", "row_text", "row_value", "transaction", "DBConnection", "DBScope", "DBPool", "DBLease", "DBPoolReceipt", "DBError", "DBValue", "SQL", "__Driver", "__driver_open", "__driver_close", "__driver_begin", "__driver_begin_immediate", "__driver_commit", "__driver_rollback", "__driver_reset", "__driver_execute", "__driver_query", "__driver_query_one", "__driver_health"];
-const CORE_MODULE_30_TYPES: &[(&str, CoreLeafKind)] = &[("DBConnection", CoreLeafKind::Plain), ("DBScope", CoreLeafKind::Plain), ("DBPool", CoreLeafKind::Plain), ("DBLease", CoreLeafKind::Plain), ("DBPoolReceipt", CoreLeafKind::Plain), ("DBError", CoreLeafKind::Plain), ("DBValue", CoreLeafKind::Enum(&["Null", "Int", "Float", "Text", "Bool", "Blob"])), ("SQL", CoreLeafKind::Plain), ("__Driver", CoreLeafKind::Plain)];
+const CORE_MODULE_30_MEMBERS: &[&str] = &["decode", "migrate", "open", "open_memory", "pool", "policy", "policy_audit", "row_bool", "row_float", "row_int", "row_text", "row_value", "transaction", "DBConnection", "DBScope", "DBPool", "DBLease", "DBPoolReceipt", "DBError", "DBValue", "SQL", "__PoolLifecycle", "__Driver", "__driver_open", "__driver_close", "__driver_begin", "__driver_begin_immediate", "__driver_commit", "__driver_rollback", "__driver_reset", "__driver_execute", "__driver_query", "__driver_query_one", "__driver_health"];
+const CORE_MODULE_30_TYPES: &[(&str, CoreLeafKind)] = &[("DBConnection", CoreLeafKind::Plain), ("DBScope", CoreLeafKind::Plain), ("DBPool", CoreLeafKind::Plain), ("DBLease", CoreLeafKind::Plain), ("DBPoolReceipt", CoreLeafKind::Plain), ("DBError", CoreLeafKind::Plain), ("DBValue", CoreLeafKind::Enum(&["Null", "Int", "Float", "Text", "Bool", "Blob"])), ("SQL", CoreLeafKind::Plain), ("__PoolLifecycle", CoreLeafKind::Enum(&["Open", "Draining", "Drained"])), ("__Driver", CoreLeafKind::Plain)];
 const CORE_MODULE_30_DEPENDENCIES: &[&str] = &["core.encoding", "core.mem"];
 
 const CORE_MODULE_31_MEMBERS: &[&str] = &["Address", "Attachment", "DKIMConfig", "EmailError", "Envelope", "Limits", "Mailer", "Message", "RecipientPolicy", "RecipientReport", "SMTPAuth", "SMTPConfig", "SMTPSecurity", "SendReport", "TLSTrust", "address", "attachment", "envelope", "message", "serialize", "smtp", "smtp_from_env", "HTML", "dkim", "limits", "send_report", "smtp_auth"];
@@ -878,6 +878,8 @@ pub const CORE_SOURCE_OWNED_TYPES: &[CoreSourceOwnedType] = &[
     CoreSourceOwnedType { path: "Core/compute/solve.jet", name: "LinearSolver" },
     CoreSourceOwnedType { path: "Core/db/db.jet", name: "DBValue" },
     CoreSourceOwnedType { path: "Core/db/db.jet", name: "DBError" },
+    CoreSourceOwnedType { path: "Core/db/db.jet", name: "DBPoolReceipt" },
+    CoreSourceOwnedType { path: "Core/db/db.jet", name: "__PoolLifecycle" },
     CoreSourceOwnedType { path: "Core/db/db.jet", name: "__Driver" },
     CoreSourceOwnedType { path: "Core/encoding/json.jet", name: "JSONReader" },
     CoreSourceOwnedType { path: "Core/encoding/jsonl.jet", name: "JSONLReader" },
