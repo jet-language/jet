@@ -29,39 +29,6 @@ Unclassified samples and stack quality are reported, not silently redistributed.
 Physical callchains omit inline expansion to keep symbolization inside laneS.
 Re-render: `node Tools/perf/jetc-profile/profile.mjs render stacks.folded flamegraph.svg`.
 
-## Emit-text implementation pair
-
-`Tools/gauntlet/measurement-manifest.json` records the `emit-text-passes`
-implementation cell under `axes.compile_throughput.implementation_pairs`.
-This changes existing compiler internals, not a user-facing performance spelling.
-Prepare the two real programs from the immutable plain commit and this checkout:
-
-```sh
-node Tools/perf/jetc-profile/emit-text.mjs prepare 747eef360 /path/to/new/pair
-```
-
-Both programs use `emit-text.jet`: identifier-boundary, quoted/raw-string,
-comment, multiline-string, leading-zero ID, and full-width MIR ID assertions,
-then the same fold/unwrap/compact workload, with assertions that each pass
-actually rewrites its input. Pass timings use monotonic `time.instant()`
-differences, never wall-clock Unix timestamps. The plain helper's byte argument
-is adapted at its call site; neither arm's input, output, or measured pass
-sequence changes. Build both with the same compiler and optimization settings.
-After one warmup per arm, alternate at least three matched executions and keep
-stdout as `plain/trial-001.out`, `optimized/trial-001.out`, and so on.
-Then publish a new receipt:
-
-```sh
-node Tools/perf/jetc-profile/emit-text.mjs compare /path/to/pair /path/to/new/receipt.json
-```
-
-Comparison checks the prepared source hashes and exact non-timing stdout.
-Every pass median must strictly beat its plain counterpart: equality, missing
-trials, assertion failure, output drift, or any losing pass keeps the cell open.
-The paired cell supplements, never replaces, end-to-end compile-throughput
-and determinism gates. Comparator tests: `node --test
-Tools/perf/jetc-profile/emit-text.test.mjs`.
-
 ## Wall time is not an off-CPU trace
 
 A cycle-sampled busiest-thread estimate subtracted from wall time does not
