@@ -1429,6 +1429,15 @@ binary32 bounds are `0x38d1b717` and `0x5a0e1bca`; the binary64 bounds
 are not reused. Rust 1.90 `core/src/fmt/float.rs` and
 `core/src/num/flt2dec/decoder.rs` define these spelling/decoder rules.
 
+`Core/text/fmt.jet` contains the source-owned interpolation policy helpers:
+`quantity` trims only an incidental `.0` from Float display; `fixed_int` and
+`grouped_int_fixed` append fixed decimal places to an exact Int without
+Float conversion. `hex_decimal`, `bin_decimal`, and `oct_decimal` accept an
+optional sign followed by ASCII decimal digits, normalize zeros through
+exact Int, and preserve malformed input trimmed but otherwise unchanged.
+These reuse the historical `aa45bf8fc` formatting policy; they introduce
+no raw C runtime symbols.
+
 `FloatBits.jet` contains ordinary Core-backed reference functions. Only the
 runtime-object driver may replace their validated checked IDs with internal
 LIR `Bitcast` operations; normal program lowering executes their bodies.

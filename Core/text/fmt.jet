@@ -35,6 +35,53 @@ pub fn pad(text: String, width: Int, fill: String) -> String Never! { pad_right(
 pub fn grouped(n: Float, frac: Int) -> String Never! { group_decimal(float_fixed(n, frac)) }
 pub fn decimal(n: Float, frac: Int) -> String Never! { float_fixed(n, frac) }
 pub fn percent(n: Float, frac: Int) -> String Never! { "{float_fixed(n * 100.0, frac)}%" }
+
+// Compiler interpolation helpers reuse the source-owned formatting policy.
+// Ported from aa45bf8fc Core/text/runtime/kernel_fmt.jet; no C ABI adapter.
+pub fn quantity(n: Float) -> String Never! {
+    text :: "{n}"
+    if text.ends_with(".0") -> slice(text, 0, unicode.scalar_count(text) - 2) else -> text
+}
+
+pub fn fixed_int(n: Int, frac: Int) -> String Never! { exact_int_decimal(n, frac, false) }
+
+pub fn grouped_int_fixed(n: Int, frac: Int) -> String Never! { exact_int_decimal(n, frac, true) }
+
+fn exact_int_decimal(n: Int, frac: Int, grouped: Bool) -> String Never! {
+    whole :: if grouped -> grouped_int(n) else -> "{n}"
+    if frac <= 0 -> return whole
+    "{whole}.{"0".repeat(frac)}"
+}
+
+// The exact decimal spelling rail rejects everything except an optional
+// sign and ASCII digits. Malformed spellings return trimmed and unchanged.
+pub fn hex_decimal(value: String, width: Int) -> String Never! {
+    n :: decimal_spelling(value) ?? return value.trim()
+    hex(n, width)
+}
+
+pub fn bin_decimal(value: String) -> String Never! {
+    n :: decimal_spelling(value) ?? return value.trim()
+    bin(n)
+}
+
+pub fn oct_decimal(value: String) -> String Never! {
+    n :: decimal_spelling(value) ?? return value.trim()
+    oct(n)
+}
+
+fn decimal_spelling(value: String) -> Int? Never! {
+    text :: value.trim()
+    negative :: text.starts_with("-")
+    digits :: if negative || text.starts_with("+") -> slice(text, 1, unicode.scalar_count(text)) else -> text
+    if digits == "" -> return None
+    loop byte in digits.bytes() {
+        if byte < (U8{48}) || byte > (U8{57}) -> return None
+    }
+    magnitude :: digits.parse<Int>() ?? return None
+    Val(if negative -> -magnitude else -> magnitude)
+}
+
 pub fn sci(n: Float, frac: Int) -> String Never! {
     if !math.is_finite(n) -> return "{n}"
     if n == 0.0 -> return "{float_fixed(0.0, frac)}e+00"
