@@ -142,6 +142,12 @@ data-dependent as required by RFC 9106, not a constant-time substitution.
 Its BLAKE2b engine streams borrowed spans through one fixed 128-byte block
 buffer, avoiding a concatenated copy of the password and parameter fields.
 
+Age identities and recipients retain age v1's Bech32 checksum (constant 1),
+not the typed Core recipient format's Bech32m checksum. Identity output is
+uppercase `AGE-SECRET-KEY-1…`; recipient output is lowercase `age1…`. Parsing
+rejects mixed case and nonzero unused key bits. Header base64 is unpadded and
+canonical; padded, URL-safe, and nonzero-trailing-bit encodings are rejected.
+
 A high-level native implementation must not be retained as an invisible runtime
 fallback for a Jet implementation. If an API changes identity or semantics,
 make the change at the contract boundary and migrate its users in one cutover.
