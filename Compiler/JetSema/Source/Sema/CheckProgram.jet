@@ -2415,8 +2415,8 @@ fn sema_name_add_declaration(facts: &MIRNameFacts, module_index: Int, name: Stri
     &facts.declarations.push(MIRNameDeclaration{module_index: module_index, name: name, path: path, kind: kind, span: span, visibility: visibility})
 }
 
-fn sema_name_add_reference(facts: &MIRNameFacts, graph: SemaRegistrationGraph, owner_names: [String:String], span: Span, symbol: Symbol, kind: String) Never! {
-    module_index :: sema_registration_module_index(graph, symbol.module_name) ?? return
+fn sema_name_add_reference(facts: &MIRNameFacts, graph: SemaRegistrationGraph, owner_names: [String:String], module_indices: &[String:Int], span: Span, symbol: Symbol, kind: String) Never! {
+    module_index :: sema_registration_cached_module_index(graph, symbol.module_name, &module_indices) ?? return
     source_module :: graph.modules[module_index]
     declaration_name := symbol.name
     owner_key :: symbol.owner ?? ""
@@ -2702,6 +2702,7 @@ pub fn sema_name_build_facts(graph: SemaRegistrationGraph, modules: [SemaGraphMo
     }
     owner_names :: sema_name_owner_index(graph)
     symbol_index :: sema_name_symbol_index(graph)
+    module_indices := [String:Int]{}
     module_index := 0
     loop module_index < graph.modules.len() {
         source :: graph.modules[module_index]
@@ -2710,7 +2711,7 @@ pub fn sema_name_build_facts(graph: SemaRegistrationGraph, modules: [SemaGraphMo
         loop item in source.program.items -> sema_name_add_item(&facts, module_index, source.module_path, "", item)
         sema_name_add_display_paths(&facts, module_index, source.module_path, source.program.items)
         loop import in source.imports {
-            target_index := sema_registration_module_index(graph, import.target_module_identity)
+            target_index := sema_registration_cached_module_index(graph, import.target_module_identity, &module_indices)
             target_name := import.target_module_identity
             if target_index != None -> target_name = graph.modules[target_index ?? 0].module_name
             target_alias := import.declaration.alias
@@ -2722,16 +2723,16 @@ pub fn sema_name_build_facts(graph: SemaRegistrationGraph, modules: [SemaGraphMo
             sema_name_add_alias(&facts, module_index, target_alias, target_name, target_index, import.declaration.alias_span, import.visibility)
             if import.declaration.kind == {
                 .Unqualified(_, _, _, _, _) -> {
-                    loop binding in import.bindings -> sema_name_add_alias(&facts, module_index, binding.local, "{target_name}.{binding.original}", sema_registration_module_index(graph, binding.target_module_identity), binding.symbol.span, binding.visibility)
+                    loop binding in import.bindings -> sema_name_add_alias(&facts, module_index, binding.local, "{target_name}.{binding.original}", binding.target_module_index, binding.symbol.span, binding.visibility)
                 }
                 else -> {}
             }
         }
-        loop reference in checked.name_references -> sema_name_add_reference(&facts, graph, owner_names, reference.span, reference.symbol, reference.kind)
+        loop reference in checked.name_references -> sema_name_add_reference(&facts, graph, owner_names, &module_indices, reference.span, reference.symbol, reference.kind)
         loop call in checked.call_facts {
             callee :: call.callee ?? next
             resolved :: symbol_index.get(callee.key)
-            if resolved == .Val(declaration) -> sema_name_add_reference(&facts, graph, owner_names, call.span, declaration.symbol, declaration.kind)
+            if resolved == .Val(declaration) -> sema_name_add_reference(&facts, graph, owner_names, &module_indices, call.span, declaration.symbol, declaration.kind)
         }
         module_index += 1
     }
@@ -2752,9 +2753,10 @@ pub fn sema_name_build_facts(graph: SemaRegistrationGraph, modules: [SemaGraphMo
 // ahead of the failure diagnostics).
 pub fn sema_name_structure_facts(graph: SemaRegistrationGraph) -> [MIRStructureFact] Never! {
     facts := [MIRStructureFact]{}
+    module_indices := [String:Int]{}
     loop edge in graph.edges {
-        source_index :: sema_registration_module_index(graph, edge.source_module_identity) ?? next
-        target_index :: sema_registration_module_index(graph, edge.target_module_identity) ?? next
+        source_index :: sema_registration_cached_module_index(graph, edge.source_module_identity, &module_indices) ?? next
+        target_index :: sema_registration_cached_module_index(graph, edge.target_module_identity, &module_indices) ?? next
         source :: graph.modules[source_index]
         target :: graph.modules[target_index]
         &facts.push(MIRStructureFact{
