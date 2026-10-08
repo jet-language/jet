@@ -4,6 +4,11 @@
 // three 8-byte words. No String/Vec Rust layout is read here. These exports
 // replace the corresponding Rust exports when E2 cuts the pack over.
 
+// Host.jet owns the real Jet stdout buffer. Flush once before the first
+// stderr byte, so a partial stdout line survives a process-edge stop.
+fn trap_flush_stdout() {
+    jet_rt_stdout_flush()
+}
 
 fn trap_word(address: I64) -> I64 {
     #Unsafe("the caller borrows an initialized word of a live JetText or static require descriptor") {

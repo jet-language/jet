@@ -3665,6 +3665,9 @@ fn push_corelib_prelude_body(
     );
     out.push_str(include_str!("../Prelude/Core/CAbi.rs"));
     out.push_str("\n// JET_VETTED_UNSAFE_END: jet_c_abi\n");
+    out.push_str("\n// JET_VETTED_UNSAFE_BEGIN: jet_c_abi_host\n");
+    out.push_str(include_str!("../Prelude/Core/CAbiHost.rs"));
+    out.push_str("\n// JET_VETTED_UNSAFE_END: jet_c_abi_host\n");
     out.push_str(include_str!("../Prelude/Core/CAbiSession.rs"));
     // Card #1751: the one 80x24 terminal default, read by CommonTypes.rs's
     // TerminalPolicy::default (in the kernel closure above) and by

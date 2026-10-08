@@ -8,6 +8,12 @@ struct X64RuntimeLibraryResult {
     exports: [MIRExport]
 }
 
+struct RuntimeExportSpec {
+    int_index_seam: Bool
+    init_priority: Int
+    fini_priority: Int
+}
+
 fn runtime_export_error(message: String) -> X64RuntimeLibraryResult Never! {
     X64RuntimeLibraryResult{object: X64ExecutableResult{bytes: [U8]{}, errors: [String]{message}}, exports: [MIRExport]{}}
 }
@@ -102,7 +108,7 @@ fn x64_runtime_library(program: MIRProgram, explicit: [String]) -> X64RuntimeLib
     if !library {
         return runtime_export_error("runtime feed requires a checked NativeLibrary artifact")
     }
-    specs := [String:Bool]{}
+    specs := [String:RuntimeExportSpec]{}
     pending := [String:Bool]{}
     seam_count := 0
     loop line in explicit {
@@ -112,12 +118,19 @@ fn x64_runtime_library(program: MIRProgram, explicit: [String]) -> X64RuntimeLib
         loop field in text.split(" ").to_list() {
             if field != "" -> &fields.push(field)
         }
-        if fields.len() == 0 || fields.len() > 2 {
+        if fields.len() == 0 || fields.len() > 3 {
             return runtime_export_error("invalid runtime export row `{text}`")
         }
-        seam :: fields.len() == 2
-        if seam && fields[1] != "int-index-seam" {
-            return runtime_export_error("unknown runtime export qualifier `{fields[1]}`")
+        seam :: fields.len() == 2 && fields[1] == "int-index-seam"
+        init := -1
+        fini := -1
+        if fields.len() > 1 && !seam {
+            if fields.len() != 3 || (fields[1] != "init" && fields[1] != "fini") {
+                return runtime_export_error("unknown runtime export qualifier in `{text}`")
+            }
+            priority :: Int.parse(fields[2]) ?? return runtime_export_error("invalid runtime lifecycle priority in `{text}`")
+            if priority < 0 || priority > 65535 -> return runtime_export_error("runtime lifecycle priority must be in 0..65535")
+            if fields[1] == "init" -> init = priority else -> fini = priority
         }
         if specs.get(fields[0]) != None {
             return runtime_export_error("duplicate runtime export `{fields[0]}`")
@@ -126,7 +139,7 @@ fn x64_runtime_library(program: MIRProgram, explicit: [String]) -> X64RuntimeLib
         if seam_count > 1 {
             return runtime_export_error("exports.list allows only one explicit Int index seam")
         }
-        &specs.add(fields[0], seam).drop("checked absent above")
+        &specs.add(fields[0], RuntimeExportSpec{int_index_seam: seam, init_priority: init, fini_priority: fini}).drop("checked absent above")
         &pending.add(fields[0], true).drop("checked absent above")
     }
     if specs.len() == 0 {
@@ -171,8 +184,15 @@ fn x64_runtime_library(program: MIRProgram, explicit: [String]) -> X64RuntimeLib
     loop entry_row in exports {
         index :: rows.get(entry_row.function.value) ?? return runtime_export_error("export {entry_row.symbol} names a missing checked function")
         function :: program.functions[index]
-        seam :: specs.get(entry_row.symbol) ?? return runtime_export_error("checked export {entry_row.symbol} is not in exports.list")
-        if entry_row.abi != .C || !runtime_export_signature(function, seam) {
+        spec :: specs.get(entry_row.symbol) ?? return runtime_export_error("checked export {entry_row.symbol} is not in exports.list")
+        if spec.init_priority >= 0 || spec.fini_priority >= 0 {
+            empty := false
+            if function.return_type.kind == .Tuple(fields) -> empty = fields.len() == 0
+            if function.params.len() != 0 || !empty {
+                return runtime_export_error("runtime lifecycle export {entry_row.symbol} must take no parameters and return nothing")
+            }
+        }
+        if entry_row.abi != .C || !runtime_export_signature(function, spec.int_index_seam) {
             return runtime_export_error("export {entry_row.symbol} has an invalid infallible C carrier signature")
         }
         &roots.push(entry_row.function)
@@ -185,7 +205,8 @@ fn x64_runtime_library(program: MIRProgram, explicit: [String]) -> X64RuntimeLib
     globals := [X64RuntimeExport]{}
     loop entry_row in exports {
         function :: lowered.callables.get(entry_row.function.value) ?? return runtime_export_error("export {entry_row.symbol} has no lowered callable")
-        &globals.push(X64RuntimeExport{function: function, symbol: entry_row.symbol})
+        spec :: specs.get(entry_row.symbol) ?? return runtime_export_error("checked export {entry_row.symbol} is not in exports.list")
+        &globals.push(X64RuntimeExport{function: function, symbol: entry_row.symbol, init_priority: spec.init_priority, fini_priority: spec.fini_priority})
     }
     X64RuntimeLibraryResult{object: x64_runtime_object(lowered.lir, globals), exports: exports}
 }
