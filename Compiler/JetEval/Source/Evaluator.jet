@@ -8685,15 +8685,18 @@ fn jet_eval_typed_text_interp(machine: &JetEvalMachine, frame_index: Int, call: 
     loop literal in literals -> &literal_values.push(TComptimeValue.String{value: literal})
     hole_values := [TComptimeValue]{}
     loop hole in holes {
-        runtime :: jet_eval_value(&machine, frame_index, hole, span) ?? return None
-        data :: jet_eval_data(runtime, &machine, span) ?? return None
+        runtime :: machine.frames[frame_index].values.get(hole.value) ?? {
+            jet_eval_compiler_fail(&machine, span, "MIR typed interpolation value is unavailable")
+            return None
+        }
         if {
             kind == MIRTypedHeadKind.SQL -> {
+                data :: jet_eval_data(runtime, &machine, span) ?? return None
                 &hole_values.push(data)
             }
             else -> {
                 ty :: jet_eval_value_type(&machine, frame_index, hole, span) ?? return None
-                shown :: jet_eval_format_string_value_full(&machine, data, MIRStringFormat.Display, Val(ty), span) ?? return None
+                shown :: jet_eval_render_runtime_value(&machine, runtime, MIRStringFormat.Display, Val(ty), span) ?? return None
                 &hole_values.push(TComptimeValue.String{value: shown})
             }
         }
@@ -8795,16 +8798,20 @@ fn jet_eval_float_order(left: Float, right: Float) -> [Int] Never! {
     [Int]{0}
 }
 fn jet_eval_semantic_display(machine: &JetEvalMachine, frame_index: Int, value: MIRValueID, span: Span) -> String? {
-    runtime :: jet_eval_value(&machine, frame_index, value, span) ?? return None
-    data :: jet_eval_data(runtime, &machine, span) ?? return None
+    runtime :: machine.frames[frame_index].values.get(value.value) ?? {
+        jet_eval_compiler_fail(&machine, span, "MIR rendering value is unavailable")
+        return None
+    }
     ty :: jet_eval_value_type(&machine, frame_index, value, span) ?? return None
-    jet_eval_format_string_value_full(&machine, data, MIRStringFormat.Display, Val(ty), span)
+    jet_eval_render_runtime_value(&machine, runtime, MIRStringFormat.Display, Val(ty), span)
 }
 fn jet_eval_semantic_debug(machine: &JetEvalMachine, frame_index: Int, value: MIRValueID, span: Span) -> String? {
-    runtime :: jet_eval_value(&machine, frame_index, value, span) ?? return None
-    data :: jet_eval_data(runtime, &machine, span) ?? return None
+    runtime :: machine.frames[frame_index].values.get(value.value) ?? {
+        jet_eval_compiler_fail(&machine, span, "MIR rendering value is unavailable")
+        return None
+    }
     ty :: jet_eval_value_type(&machine, frame_index, value, span) ?? return None
-    jet_eval_format_string_value_full(&machine, data, MIRStringFormat.Debug, Val(ty), span)
+    jet_eval_render_runtime_value(&machine, runtime, MIRStringFormat.Debug, Val(ty), span)
 }
 
 fn jet_eval_require_locals(machine: &JetEvalMachine, frame_index: Int, context: MIRPanicContext, span: Span) -> String? {
@@ -8825,8 +8832,7 @@ fn jet_eval_require_locals(machine: &JetEvalMachine, frame_index: Int, context: 
             jet_eval_compiler_fail(&machine, span, "MIR RequireStop context local has no runtime value")
             return None
         }
-        data :: jet_eval_data(runtime, &machine, span) ?? return None
-        debug :: jet_eval_format_string_value_full(&machine, data, MIRStringFormat.Debug, Val(local_definition.ty), span) ?? return None
+        debug :: jet_eval_render_runtime_value(&machine, runtime, MIRStringFormat.Debug, Val(local_definition.ty), span) ?? return None
         &output.push("{local.name} = {debug}")
     }
     output.join(", ")

@@ -50,6 +50,8 @@ use jet_foundation.[
     mir_type_same_checked_type,
     core_enum_variants,
     core_source_owns_type,
+    core_source_value_hook,
+    mir_source_value_hook,
 ]
 
 fn jet_rust_emit_type_is_borrowed(ty: MIRType) -> Bool Never! {
@@ -1680,6 +1682,7 @@ fn jet_rust_emit_type_derive_names(ctx: &JetRustEmitContext, definition: MIRType
         if !derives.contains("PartialOrd") -> &derives.push("PartialOrd")
         if !derives.contains("Ord") -> &derives.push("Ord")
     }
+    if core_source_value_hook(definition.key, "debug") != None -> _ := &derives.remove("Debug", .Val)
     derives
 }
 
@@ -1978,6 +1981,23 @@ fn jet_rust_emit_used_carrierless_core_records(ctx: &JetRustEmitContext) -> [U64
     used
 }
 
+fn jet_rust_emit_source_hook_symbol(ctx: &JetRustEmitContext, definition: MIRTypeDef, operation: String) -> String? Never! {
+    _ := core_source_value_hook(definition.key, operation) ?? return None
+    instance :: ctx.type_instance_first.get(jet_rust_emit_id_key(definition.id.value)) ?? {
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "source value hook has no checked type instance", definition.key, Val(definition.span))
+        return None
+    }
+    id :: mir_source_value_hook(ctx.program, ctx.program.type_instances[instance], operation) ?? {
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "source value hook is missing or ambiguous", definition.key, Val(definition.span))
+        return None
+    }
+    row :: jet_rust_emit_function_index(ctx, id) ?? {
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "source value hook function is unavailable", definition.key, Val(definition.span))
+        return None
+    }
+    Val(jet_rust_emit_inherent_method_symbol(ctx.program.functions[row].name))
+}
+
 fn jet_rust_emit_type_definition(ctx: &JetRustEmitContext, definition: MIRTypeDef, carrierless_record: Bool, lines: &[String]) Never! {
     if !carrierless_record && jet_rust_emit_runtime_declares_type(&ctx, definition) -> return
     // MIRRust: a canonical Core native carrier is declared by the Prelude.
@@ -2063,13 +2083,24 @@ fn jet_rust_emit_type_definition(ctx: &JetRustEmitContext, definition: MIRTypeDe
         }
     }
     ctx.view_lifetime = outer_view_lifetime
+    if jet_rust_emit_source_hook_symbol(ctx, definition, "show") == .Val(symbol) {
+        debug_symbol :: jet_rust_emit_source_hook_symbol(ctx, definition, "debug") ?? {
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "source Show and Debug routes must be registered together", definition.key, Val(definition.span))
+            return
+        }
+        &lines.push("impl JetShow for {name} {{ fn jet_show(&self) -> String {{ self.{symbol}() }} }}")
+        &lines.push("impl JetDebug for {name} {{ fn jet_debug(&self) -> String {{ self.{debug_symbol}() }} }}")
+        &lines.push("impl std::fmt::Debug for {name} {{ fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {{ f.write_str(&self.{debug_symbol}()) }} }}")
+    }
     debug_derived := false
     loop trait_id in definition.derives {
         loop row in jet_rust_emit_trait_rows(ctx, trait_id) { if row.id == trait_id && row.name == "Debug" -> debug_derived = true }
     }
     debug_derived = debug_derived && jet_rust_emit_type_definition_derive_capability(&ctx, definition, "JetDebug")
     printable :: definition.auto_printable && jet_rust_emit_type_definition_derive_capability(&ctx, definition, "JetShow")
-    loop line in jet_codegen_auto_derive_lines(&ctx, definition, JetCodegenAutoDeriveFacts{type_id: definition.id, printable: printable, debug: debug_derived}) -> &lines.push(line)
+    if core_source_value_hook(definition.key, "show") == None {
+        loop line in jet_codegen_auto_derive_lines(&ctx, definition, JetCodegenAutoDeriveFacts{type_id: definition.id, printable: printable, debug: debug_derived}) -> &lines.push(line)
+    }
     if definition.layout != None {
         layout :: definition.layout ?? MIRStructLayout.C
         if layout == {

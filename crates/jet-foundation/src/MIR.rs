@@ -9141,6 +9141,40 @@ fn operation_source_files(operation: &MirOperation) -> Vec<MirSourceFileId> {
     }
 }
 
+/// Resolve private Core hooks through checked identities, never short names.
+/// Consumers prepare the selected IDs once before executing or emitting.
+pub fn mir_source_value_hook(
+    program: &MirProgram,
+    ty: &MirType,
+    operation: &str,
+) -> Option<MirFunctionId> {
+    let owner = match &ty.kind {
+        MirTypeKind::Tagged { inner, .. } => return mir_source_value_hook(program, inner, operation),
+        MirTypeKind::Apply { name, .. } => name,
+        _ => return None,
+    };
+    let hook = crate::CoreModuleExports::core_source_value_hook(&owner.name, operation)?;
+    let mut selected = None;
+    for function in &program.functions {
+        let MirFunctionForm::Method { owner: method_owner, self_access: Some(MirAccess::Read) } = &function.form else {
+            continue;
+        };
+        let MirTypeKind::Apply { name, .. } = &method_owner.kind else {
+            continue;
+        };
+        if name.id != owner.id || name.name != owner.name
+            || function.name.rsplit("::").next() != Some(hook)
+        {
+            continue;
+        }
+        if selected.is_some() {
+            return None;
+        }
+        selected = Some(function.id);
+    }
+    selected
+}
+
 pub use crate::MIROptimization::{
     mir_program_bytes, mir_program_digest, optimize_mir_program,
     require_canonical_mir_optimization, verify_mir_legality, MirLegalityError,

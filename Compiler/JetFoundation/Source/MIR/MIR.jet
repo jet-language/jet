@@ -3660,3 +3660,28 @@ pub struct MIRProgram {
     pub codec_migrations: [String:MIRSchemaMigrationPlan]
     pub unreachable: [MIRUnreachable]
 }
+
+// Resolve a private Core value hook through checked nominal and function
+// identities. Consumers prepare this once; a short user type name never wins.
+pub fn mir_source_value_hook(program: MIRProgram, ty: MIRType, operation: String) -> MIRFunctionID? Never! {
+    if ty.kind == .Tagged(_, inner) -> return mir_source_value_hook(program, inner, operation)
+    if ty.kind != .Apply(_, _) -> return None
+    if ty.kind == .Apply(owner, _) {
+        hook :: core_source_value_hook(owner.name, operation) ?? return None
+        found := MIRFunctionID?{None}
+        loop function in program.functions {
+            if function.form == .Method(method_owner, self_access) {
+                if self_access != (Val(MIRAccess.Read)) -> next
+                if method_owner.kind == .Apply(method_ref, _) {
+                    if method_ref.id != owner.id || method_ref.name != owner.name -> next
+                    parts :: function.name.split("::").to_list()
+                    if parts.len() == 0 || parts[parts.len() - 1] != hook -> next
+                    if found != None -> return None
+                    found = Val(function.id)
+                }
+            }
+        }
+        return found
+    }
+    None
+}
