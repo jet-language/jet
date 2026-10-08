@@ -1264,3 +1264,11 @@ The unused `__object_into_entries` and `__tree_tag` registry rows were removed
 along with their seed functions, signatures, gates and native lowering handlers.
 A repository-wide reference search found declarations and handlers only, not
 any Jet codec, Rust TIR/MIR emitter, JS or comptime consumer.
+
+The D-JSON3 `__coerce_now` and `__coerce_emit` registrations use the ambient
+interpreter route as well as the existing AOT host symbols. The resident
+aliases call the same epoch-millisecond sampling leaf and the same stderr
+leaf; when a capture sink is present, they marshal through the existing
+terminal newline frame. Coercion traversal and audit formatting remain in
+`json.jet`. The shipped hidden Time/IO effects remain unchanged pending the
+separately recorded effect-truthfulness ruling.

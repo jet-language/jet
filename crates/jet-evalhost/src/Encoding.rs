@@ -256,9 +256,40 @@ fn decode_under_ambient_core_call(
     Some(Ok(result))
 }
 
+// Aliases for the exact existing D-JSON3 clock and stderr leaves. The walk
+// and audit formatting stay in Core/encoding/json.jet.
+fn coerce_ambient_core_call(
+    module: &str,
+    method: &str,
+    args: Vec<CtValue>,
+    _span: Span,
+    _resolved_ret: Option<Type>,
+    sink: Option<&mut jet_codegen::Comptime::DevSink>,
+) -> Option<Result<CtValue, Diagnostic>> {
+    if module != "core.encoding" {
+        return None;
+    }
+    let value = match (method, args.as_slice()) {
+        ("__coerce_now", []) => CtValue::Int(
+            crate::enc_stream::runtime::jet_raw_json_coerce_now(),
+        ),
+        ("__coerce_emit", [CtValue::Str(line)]) => {
+            if let Some(sink) = sink {
+                sink.stderr.push_str(&crate::IO::term_prelude::jet_term_print_frame(line));
+            } else {
+                crate::enc_stream::runtime::jet_raw_json_coerce_emit(line);
+            }
+            CtValue::Unit
+        }
+        _ => return None,
+    };
+    Some(Ok(value))
+}
+
 pub(crate) fn register_interpreter_ambient(
     context: &mut crate::InterpreterAmbientContext,
 ) {
     context.register_core_call(decode_under_ambient_core_call);
+    context.register_core_call(coerce_ambient_core_call);
 }
 
