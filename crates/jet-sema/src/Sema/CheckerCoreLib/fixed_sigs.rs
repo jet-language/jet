@@ -3380,6 +3380,34 @@ fn core_fixed_sig_impl(
                 ("version".into(), Box::new(Type::Int)), ("migration".into(), Box::new(Type::String)),
             ])))),
         )),
+        ("core.service", "__delivery_read") => Some((
+            vec![(read, Type::Named("Delivery".into())), (read, Type::Bool)],
+            Some(result_ty(Type::Named("__DeliveryFacts".into()), Type::Named("ServiceError".into()))),
+        )),
+        ("core.service", "__delivery_probe") => Some((
+            vec![(read, Type::Named("Delivery".into()))],
+            Some(result_ty(unit_ty(), Type::Named("ServiceError".into()))),
+        )),
+        ("core.service", "__delivery_store") => Some((
+            vec![(read, Type::Named("Delivery".into()))], Some(Type::String),
+        )),
+        ("core.service", "__runtime_retry") => Some((
+            vec![(read, Type::Named("ServiceRuntime".into())), (read, Type::Named("Delivery".into()))],
+            Some(result_ty(Type::Named("Delivery".into()), Type::Named("ServiceError".into()))),
+        )),
+        ("core.service", "__endpoint_mailbox") => Some((
+            vec![(read, Type::Named("ServiceEndpoint".into()))],
+            Some(result_ty(Type::Named("__EndpointMailbox".into()), Type::Named("ServiceError".into()))),
+        )),
+        ("core.service", "__mailbox_started" | "__mailbox_draining") => Some((
+            vec![(read, Type::Named("__EndpointMailbox".into()))], Some(Type::Bool),
+        )),
+        ("core.service", "__mailbox_depth") => Some((
+            vec![(read, Type::Named("__EndpointMailbox".into()))], Some(Type::Int),
+        )),
+        ("core.service", "__mailbox_receive") => Some((
+            vec![(read, Type::Named("__EndpointMailbox".into()))], Some(Type::Named("__MailboxRead".into())),
+        )),
         ("core.service", "__state_load") => Some((
             vec![(read, Type::Named("ServiceTree".into())), (read, Type::Bool)],
             Some(result_ty(list_string.clone(), Type::Named("ServiceError".into()))),

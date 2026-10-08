@@ -1584,6 +1584,10 @@ pub(crate) fn service_handle_rust_type(name: &str) -> Option<&'static str> {
         "DeliveryEvent" => Some("JetDeliveryEvent"),
         "TaskOutcome" => Some("JetTaskOutcome"),
         "TaskStatus" => Some("JetTaskStatus"),
+        "__DeliveryFacts" => Some("JetServiceDeliveryFacts"),
+        "__DeliveryRecord" => Some("JetServiceDeliveryRecord"),
+        "__EndpointMailbox" => Some("JetServiceEndpointMailbox"),
+        "__MailboxRead" => Some("JetServiceMailboxRead"),
         _ => None,
     }
 }
@@ -2487,6 +2491,10 @@ impl Cx {
             (Some("core.encoding.csv"), "CSVReader") => Some("CSVReader"),
             (Some("core.encoding.csv"), "CSVWriter") => Some("CSVWriter"),
             (Some("core.encoding.csv"), "CSVRow") => Some("CSVRow"),
+            (Some("core.service"), "__DeliveryFacts") => Some("JetServiceDeliveryFacts"),
+            (Some("core.service"), "__DeliveryRecord") => Some("JetServiceDeliveryRecord"),
+            (Some("core.service"), "__EndpointMailbox") => Some("JetServiceEndpointMailbox"),
+            (Some("core.service"), "__MailboxRead") => Some("JetServiceMailboxRead"),
             (Some("core.encoding.xml"), "XMLReader") => Some("XMLReader"),
             (Some("core.encoding.xml"), "XMLWriter") => Some("XMLWriter"),
             (Some("core.encoding.xml"), "XMLLimits") => Some("XMLLimits"),
@@ -7931,6 +7939,20 @@ mod tests {
         assert!(crate::Codegen::TIR::tir_to_mir_types::is_compiler_owned_type(
             "<corelib>/Core/process::Core/process/process.jet::ProcessStreamMode"
         ));
+    }
+
+    #[test]
+    fn service_delivery_transport_aliases_match_the_jet_mapper() {
+        let jet = include_str!("../../../../Compiler/JetCodegen/Source/Emit/Types.jet");
+        for (alias, rust, jet_case) in [
+            ("__DeliveryFacts", "JetServiceDeliveryFacts", "\"__DeliveryFacts\" -> Val(\"JetServiceDeliveryFacts\")"),
+            ("__DeliveryRecord", "JetServiceDeliveryRecord", "\"__DeliveryRecord\" -> Val(\"JetServiceDeliveryRecord\")"),
+            ("__EndpointMailbox", "JetServiceEndpointMailbox", "\"__EndpointMailbox\" -> Val(\"JetServiceEndpointMailbox\")"),
+            ("__MailboxRead", "JetServiceMailboxRead", "\"__MailboxRead\" -> Val(\"JetServiceMailboxRead\")"),
+        ] {
+            assert_eq!(service_handle_rust_type(alias), Some(rust));
+            assert!(jet.contains(jet_case), "paired Jet mapper differs for {alias}");
+        }
     }
 
     #[test]

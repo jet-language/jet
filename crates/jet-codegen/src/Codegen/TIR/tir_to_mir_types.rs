@@ -2403,6 +2403,9 @@ const COMPILER_OWNED_CORE_RECORDS: &[(&str, &[&str])] = &[
     ("__ResolveError", &["kind", "has_os_code", "os_code", "message"]),
     ("AsyncPolicy", &["capacity", "overflow"]),
     ("CSVRow", &["fields", "line"]),
+    ("__DeliveryFacts", &["id", "key", "tree", "worker", "message", "authority", "generation", "state", "attempts", "retention_until", "deadline", "event_sequence", "duplicate", "records"]),
+    ("__DeliveryRecord", &["op", "fields"]),
+    ("__MailboxRead", &["status", "message"]),
     (
         "DataLineOptions",
         &[
