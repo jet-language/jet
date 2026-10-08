@@ -25,6 +25,7 @@ let prepared = [...lines.slice(0, start), canonical.slice(canonicalStart), ...li
 // Seed proofs retain their emitted, paired route set instead.
 if (mode === '--allparts') {
   for (const [module, file] of [
+    ['jet_native_meta', 'NativeMeta.rs'],
     ['jet_c_abi_routes', 'CAbiRoutes.rs'],
     ['jet_c_abi_iter', 'CAbiIter.rs'],
     ['jet_c_abi_task', 'CAbiTask.rs'],
@@ -38,7 +39,10 @@ if (mode === '--allparts') {
       const first = begin > 0 && rows[begin - 1] === '#[cfg(not(target_arch = "wasm32"))]' ? begin - 1 : begin;
       prepared = [...rows.slice(0, first), ...rows.slice(close + 1)].join('\n');
     }
-    prepared += '\n' + readFileSync(resolve(repo, `crates/jet-codegen/src/Prelude/Core/${file}`), 'utf8');
+    const source = readFileSync(resolve(repo, `crates/jet-codegen/src/Prelude/Core/${file}`), 'utf8');
+    prepared += module === 'jet_native_meta'
+      ? '\npub(crate) mod jet_native_meta {\n' + source.split('\n').map(line => `    ${line}`).join('\n') + '\n}\n'
+      : '\n' + source;
   }
 }
 const core = readFileSync(resolve(repo, 'crates/jet-codegen/src/Prelude/Core.rs'), 'utf8');
