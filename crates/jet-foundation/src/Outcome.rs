@@ -380,7 +380,14 @@ pub fn jet_journey_take() -> String {
 
 fn jet_journey_take_styled(style: JetReportStyle) -> String {
     let journey = jet_journey_take_hops().0;
-    jet_journey_block(journey.origin.as_ref(), &journey.hops, style, false)
+    let mut rendered = String::new();
+    jet_write_journey_block(
+        &mut rendered,
+        journey.origin.as_ref().map(JetJourneySite::from),
+        journey.hops.iter().map(JetJourneySite::from),
+        style, false, 0,
+    );
+    rendered
 }
 
 /// The journey a run has accumulated so far, moved off this thread.
@@ -553,10 +560,7 @@ impl JetErrorReport {
                 }
             }
             if depth != 0 {
-                for line in report.render_journey_with_style(style).lines() {
-                    indent(out, depth);
-                    writeln!(out, "{line}").unwrap();
-                }
+                report.write_journey_with_style(out, style, depth);
             }
         }
 
@@ -584,13 +588,18 @@ impl JetErrorReport {
     /// and the trail under it. The report edge uses this beside the root
     /// report for terminal and wire adapters.
     pub fn render_journey_with_style(&self, style: JetReportStyle) -> String {
-        let origin = self.origin.as_ref().map(jet_journey_hop_from_frame);
-        let hops = self
-            .source_journey
-            .iter()
-            .map(jet_journey_hop_from_frame)
-            .collect::<Vec<_>>();
-        jet_journey_block(origin.as_ref(), &hops, style, true)
+        let mut rendered = String::new();
+        self.write_journey_with_style(&mut rendered, style, 0);
+        rendered
+    }
+
+    fn write_journey_with_style(&self, out: &mut String, style: JetReportStyle, depth: usize) {
+        jet_write_journey_block(
+            out,
+            self.origin.as_ref().map(JetJourneySite::from),
+            self.source_journey.iter().map(JetJourneySite::from),
+            style, true, depth,
+        );
     }
 
     /// Render this already-projected report with the one terminal policy.
@@ -598,7 +607,7 @@ impl JetErrorReport {
     /// can consume the same facts without first making a display string.
     pub fn render_with_style(&self, style: JetReportStyle) -> String {
         let mut rendered = self.render_root(style);
-        rendered.push_str(&self.render_journey_with_style(style));
+        self.write_journey_with_style(&mut rendered, style, 0);
         jet_write_diagnostic_more_line(&mut rendered, JET_ENTRY_ERROR_CODE)
             .expect("String formatting cannot fail");
         rendered.push('\n');
@@ -1016,18 +1025,6 @@ fn jet_journey_frame_from_hop(hop: JourneyHop) -> JetErrorJourneyFrame {
     }
 }
 
-fn jet_journey_hop_from_frame(frame: &JetErrorJourneyFrame) -> JourneyHop {
-    JourneyHop {
-        site: JourneyFrame {
-            fn_name: frame.fn_name.clone(),
-            file: frame.file.clone(),
-            line: frame.line,
-            column: frame.column,
-        },
-        note: frame.note.clone(),
-        hops: frame.hops,
-    }
-}
 
 /// Project one escaping default error and the journey it accumulated into the
 /// report consumed by every report edge. This drains the journey exactly once
@@ -1148,6 +1145,52 @@ fn jet_report_columns(text: &str) -> usize {
     text.chars().count()
 }
 
+// A borrowed rendering view, not another journey owner or wire carrier.
+#[derive(Clone, Copy)]
+struct JetJourneySite<'a> {
+    function: &'a str,
+    file: &'a str,
+    line: u32,
+    column: u32,
+    note: &'a str,
+    hops: u32,
+}
+
+impl<'a> From<&'a JourneyHop> for JetJourneySite<'a> {
+    fn from(hop: &'a JourneyHop) -> Self {
+        Self {
+            function: &hop.site.fn_name, file: &hop.site.file,
+            line: hop.site.line, column: hop.site.column,
+            note: &hop.note, hops: hop.hops,
+        }
+    }
+}
+
+impl<'a> From<&'a JetErrorJourneyFrame> for JetJourneySite<'a> {
+    fn from(frame: &'a JetErrorJourneyFrame) -> Self {
+        Self {
+            function: &frame.fn_name, file: &frame.file,
+            line: frame.line, column: frame.column,
+            note: &frame.note, hops: frame.hops,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum JetJourneyLabel {
+    Origin,
+    Hop(usize),
+}
+
+impl std::fmt::Display for JetJourneyLabel {
+    fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Origin => out.write_str("failed here:"),
+            Self::Hop(number) => write!(out, "{number}."),
+        }
+    }
+}
+
 /// The journey block under the root failure: where the failure started, then
 /// E3002's trail of every site it passed. The root failure has already been
 /// stated by the time this prints, so a line only has to say where: `failed
@@ -1161,72 +1204,89 @@ fn jet_report_columns(text: &str) -> usize {
 /// this block, so the root failure above stays the one undimmed line and stays
 /// what the eye lands on. A column budget sheds this block's disposable parts
 /// and never reaches the root failure, which is not this function's line.
-fn jet_journey_block(origin: Option<&JourneyHop>, hops: &[JourneyHop], style: JetReportStyle, show_columns: bool) -> String {
-    const ORIGIN_LABEL: &str = "failed here:";
-    let sites = origin
-        .map(|hop| (ORIGIN_LABEL.to_string(), hop))
-        .into_iter()
-        .chain(
-            hops.iter()
-                .enumerate()
-                .map(|(index, hop)| (format!("{}.", index + 1), hop)),
-        )
-        .collect::<Vec<_>>();
-    if sites.is_empty() {
-        return String::new();
-    }
-    // One path budget for the whole block, decided by its widest site line,
-    // so one file never renders two different ways under one failure.
-    let layout = style
-        .width
-        .map(|width| (width, jet_journey_path_budget(&sites, width, show_columns)));
-    let mut lines = Vec::with_capacity(sites.len() + 1);
-    for (label, hop) in &sites {
-        if label.as_str() == "1." {
-            let total: u32 = hops.iter().map(|hop| hop.hops).sum();
-            lines.push(jet_journey_header(total, style.width));
+fn jet_write_journey_block<'a>(
+    out: &mut String,
+    origin: Option<JetJourneySite<'a>>,
+    hops: impl Iterator<Item = JetJourneySite<'a>> + Clone,
+    style: JetReportStyle,
+    error_report: bool,
+    depth: usize,
+) {
+    let sites = origin.into_iter().map(|site| (JetJourneyLabel::Origin, site))
+        .chain(hops.clone().enumerate().map(|(index, site)| (JetJourneyLabel::Hop(index + 1), site)));
+    // One path budget for the whole block, decided by its widest site line.
+    let layout = style.width
+        .map(|width| (width, jet_journey_path_budget(sites.clone(), width, error_report)));
+    for (label, site) in sites {
+        if matches!(label, JetJourneyLabel::Hop(1)) {
+            let total = hops.clone().map(|hop| hop.hops).sum();
+            jet_write_journey_line(out, style, depth, |out| {
+                jet_write_journey_header(out, total, style.width)
+            });
         }
-        lines.push(jet_journey_hop_line(label, hop, layout, show_columns));
+        jet_write_journey_line(out, style, depth, |out| {
+            match layout {
+                Some(layout) => jet_write_journey_hop_line(out, label, site, layout, error_report),
+                None => jet_write_journey_hop_text(out, label, site, site.file, site.note, error_report),
+            }
+        });
     }
-    let mut block = String::new();
-    for line in &lines {
-        // One SGR pair per line, not one around the block: a pager or a
-        // line-oriented filter that keeps one line still gets its reset.
-        if style.color {
-            block.push_str(JET_REPORT_DIM_SGR);
-        }
-        block.push_str(line);
-        if style.color {
-            block.push_str(JET_REPORT_SGR_RESET);
-        }
-        block.push('\n');
+}
+
+fn jet_write_journey_line(
+    out: &mut String,
+    style: JetReportStyle,
+    depth: usize,
+    write_line: impl FnOnce(&mut dyn std::fmt::Write) -> std::fmt::Result,
+) {
+    for _ in 0..depth {
+        out.push_str("  ");
     }
-    block
+    // One SGR pair per line preserves resets in line-oriented filters.
+    if style.color {
+        out.push_str(JET_REPORT_DIM_SGR);
+    }
+    write_line(out).expect("String formatting cannot fail");
+    if style.color {
+        out.push_str(JET_REPORT_SGR_RESET);
+    }
+    out.push('\n');
 }
 
 /// The header separates the root failure from its trail, so it must not wrap.
 /// When the full form does not fit, the reminder of the mechanism goes and the
 /// facts stay: the code and the hop count. That short form is the floor.
-fn jet_journey_header(total: u32, width: Option<usize>) -> String {
+fn jet_write_journey_header(
+    out: &mut dyn std::fmt::Write,
+    total: u32,
+    width: Option<usize>,
+) -> std::fmt::Result {
+    use std::fmt::Write as _;
     let plural = if total == 1 { "" } else { "s" };
     let code = JET_JOURNEY_DIAGNOSTIC_CODE;
-    let full = format!(" Trail [{code}] ({total} hop{plural} via ?, origin first):");
-    match width {
-        Some(width) if jet_report_columns(&full) > width => {
-            format!(" Trail [{code}] ({total} hop{plural}):")
-        }
-        _ => full,
+    let short = width.is_some_and(|width| {
+        let mut count = JetJourneyColumnCount(0);
+        write!(&mut count, " Trail [{code}] ({total} hop{plural} via ?, origin first):")
+            .expect("Column counting cannot fail");
+        count.0 > width
+    });
+    if short {
+        write!(out, " Trail [{code}] ({total} hop{plural}):")
+    } else {
+        write!(out, " Trail [{code}] ({total} hop{plural} via ?, origin first):")
     }
 }
 
 /// The columns left for a site's file path once the widest site line's fixed
 /// parts are paid for.
-fn jet_journey_path_budget(sites: &[(String, &JourneyHop)], width: usize, show_columns: bool) -> usize {
-    let widest = sites
-        .iter()
-        .map(|(label, hop)| jet_report_columns(&jet_journey_hop_text(label, hop, "", &hop.note, show_columns)))
-        .max()
-        .unwrap_or(0);
+fn jet_journey_path_budget<'a>(
+    sites: impl Iterator<Item = (JetJourneyLabel, JetJourneySite<'a>)>,
+    width: usize,
+    error_report: bool,
+) -> usize {
+    let widest = sites.map(|(label, site)| {
+        jet_journey_text_columns(label, site, "", site.note, error_report)
+    }).max().unwrap_or(0);
     width.saturating_sub(widest)
 }
 
@@ -1236,43 +1296,92 @@ fn jet_journey_path_budget(sites: &[(String, &JourneyHop)], width: usize, show_c
 /// address of the code to open, and nothing sheds it. What sheds, in order:
 /// leading path segments, then the note's tail. So a narrow terminal loses
 /// commentary, never a location, and never the root failure above.
-fn jet_journey_hop_line(label: &str, hop: &JourneyHop, layout: Option<(usize, usize)>, show_columns: bool) -> String {
-    let Some((width, path_budget)) = layout else {
-        return jet_journey_hop_text(label, hop, &hop.site.file, &hop.note, show_columns);
+fn jet_write_journey_hop_line(
+    out: &mut dyn std::fmt::Write,
+    label: JetJourneyLabel,
+    site: JetJourneySite<'_>,
+    (width, path_budget): (usize, usize),
+    error_report: bool,
+) -> std::fmt::Result {
+    let file = jet_report_elide_path(site.file, path_budget);
+    let note = if jet_journey_text_columns(label, site, &file, site.note, error_report) <= width {
+        std::borrow::Cow::Borrowed(site.note)
+    } else {
+        let fixed = jet_journey_text_columns(label, site, &file, "", error_report);
+        // The em dash and ellipsis cost four columns; omit a note that cannot
+        // show one character instead of leaving only ` — …`.
+        let room = width.saturating_sub(fixed + 4);
+        if room == 0 {
+            std::borrow::Cow::Borrowed("")
+        } else {
+            let mut note: String = site.note.chars().take(room).collect();
+            note.push('…');
+            std::borrow::Cow::Owned(note)
+        }
     };
-    let file = jet_report_elide_path(&hop.site.file, path_budget);
-    let full = jet_journey_hop_text(label, hop, &file, &hop.note, show_columns);
-    if jet_report_columns(&full) <= width {
-        return full;
-    }
-    let identity = jet_journey_hop_text(label, hop, &file, "", show_columns);
-    // ` — ` plus the ellipsis costs four columns; a note that cannot show one
-    // character on top of that goes entirely rather than leaving ` — …`.
-    let room = width.saturating_sub(jet_report_columns(&identity) + 4);
-    if room == 0 {
-        return identity;
-    }
-    let note: String = hop.note.chars().take(room).collect();
-    jet_journey_hop_text(label, hop, &file, &format!("{note}…"), show_columns)
+    jet_write_journey_hop_text(out, label, site, &file, &note, error_report)
 }
 
-fn jet_journey_hop_text(label: &str, hop: &JourneyHop, file: &str, note: &str, show_columns: bool) -> String {
-    use std::fmt::Write as _;
-    let mut line = format!(
-        "  {label} {} ({}:{}",
-        JetErrorTerminalText(&hop.site.fn_name), JetErrorTerminalText(file), hop.site.line
-    );
-    if show_columns && hop.site.column != 0 {
-        write!(line, ":{}", hop.site.column).unwrap();
+fn jet_write_journey_hop_text(
+    out: &mut dyn std::fmt::Write,
+    label: JetJourneyLabel,
+    site: JetJourneySite<'_>,
+    file: &str,
+    note: &str,
+    error_report: bool,
+) -> std::fmt::Result {
+    write!(out, "  {label} ")?;
+    jet_write_journey_source_text(out, site.function, error_report)?;
+    out.write_str(" (")?;
+    jet_write_journey_source_text(out, file, error_report)?;
+    write!(out, ":{}", site.line)?;
+    if error_report && site.column != 0 {
+        write!(out, ":{}", site.column)?;
     }
-    line.push(')');
-    if hop.hops > 1 {
-        write!(line, " ×{}", hop.hops).unwrap();
+    out.write_char(')')?;
+    if site.hops > 1 {
+        write!(out, " ×{}", site.hops)?;
     }
     if !note.is_empty() {
-        write!(line, " — {}", JetErrorTerminalText(note)).unwrap();
+        out.write_str(" — ")?;
+        jet_write_journey_source_text(out, note, error_report)?;
     }
-    line
+    Ok(())
+}
+
+fn jet_write_journey_source_text(
+    out: &mut dyn std::fmt::Write,
+    text: &str,
+    error_report: bool,
+) -> std::fmt::Result {
+    if error_report {
+        crate::RuntimeDiagnosticCore::jet_write_terminal_text(out, text)
+    } else {
+        // Standalone journey transport keeps its existing ordinary text policy.
+        out.write_str(text)
+    }
+}
+
+struct JetJourneyColumnCount(usize);
+
+impl std::fmt::Write for JetJourneyColumnCount {
+    fn write_str(&mut self, text: &str) -> std::fmt::Result {
+        self.0 += jet_report_columns(text);
+        Ok(())
+    }
+}
+
+fn jet_journey_text_columns(
+    label: JetJourneyLabel,
+    site: JetJourneySite<'_>,
+    file: &str,
+    note: &str,
+    error_report: bool,
+) -> usize {
+    let mut count = JetJourneyColumnCount(0);
+    jet_write_journey_hop_text(&mut count, label, site, file, note, error_report)
+        .expect("Column counting cannot fail");
+    count.0
 }
 
 /// Shed whole leading segments, never characters inside a name, so the file you
@@ -1411,6 +1520,19 @@ pub fn jet_err_with_context_frame(
 mod jet_error_wasm_bridge {
     use super::*;
     use std::cell::RefCell;
+
+    fn jet_journey_hop_from_frame(frame: &JetErrorJourneyFrame) -> JourneyHop {
+        JourneyHop {
+            site: JourneyFrame {
+                fn_name: frame.fn_name.clone(),
+                file: frame.file.clone(),
+                line: frame.line,
+                column: frame.column,
+            },
+            note: frame.note.clone(),
+            hops: frame.hops,
+        }
+    }
 
     // The Web tier owns only these byte slots. All error facts, journey
     // accumulation, conversion history, and report rendering stay in the
@@ -2051,6 +2173,19 @@ mod journey_tests {
     /// The example the card's before/after uses, so these cells and the real
     /// runs in `tests/terminal.rs` are the same program.
     const EXAMPLE: &str = "Examples/features/errors/error_context.jet";
+
+    #[test]
+    fn standalone_journey_keeps_ordinary_text_policy() {
+        jet_journey_reset();
+        jet_journey_origin("app.jet", 3, 7, "load");
+        jet_journey_frame("app.jet", 8, 9, "run", || "raw\n\x1bnote".to_string());
+        assert_eq!(
+            jet_journey_take(),
+            "  failed here: load (app.jet:3)\n\
+             \x20Trail [E3002] (1 hop via ?, origin first):\n\
+             \x20 1. run (app.jet:8) — raw\n\x1bnote\n"
+        );
+    }
 
     /// `error_context.jet`: `read_raw` returns `Err("file not found")` on line
     /// 4, and three calls carry it out.
