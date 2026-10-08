@@ -295,6 +295,23 @@ core.web.browser __is_file String Bool
 core.web.browser __file_size|__modified_ms String Int?
 core.web.browser __connect_session String,BrowserProfile,^BrowserTimeout Result<Browser,BrowserError>
 core.web.browser __begin_fixture BrowserTestConfig,String,String,Int,String,Int,Int Result<BrowserTestFixture,BrowserError>
+core.web.browser __report_options BrowserTestReport (reporter:String,ui:Bool)
+core.web.browser __report_json|__report_html|__report_text BrowserTestReport String
+core.web.browser __write_report_bytes String,[u8] Result<(),BrowserError>
+core.web.browser __server_start BrowserTestConfig Result<BrowserTestServer,BrowserError>
+core.web.browser __server_stop &BrowserTestServer -
+core.devtools __publish_checked ^String,^String,^String,^String,^T - T
+core.web __openapi_inputs HTTPRouter Result<[OpenApiRouteInput],String>
+core.web __openapi_render ^[OpenApiRouteInput],^String,^String,^[OpenApiServer] Result<String,String>
+core.web __contract_stop String Never
+core.web __live_stats_snapshot - (queries:Int,active:Int,refreshing:Int,evictions:u64,invalidations:u64,ws_pushes:u64)?
+core.web.store __transact WebStore<T>,^String,^[String],^fn(T;()) WebStoreTransaction<T> T
+core.web.store __facts_snapshot WebStore<T> (generation:u64,cursor:u64,history_length:Int,history_limit:Int,event_length:Int,history_enabled:Bool) T
+core.web.table __columns WebTable<T> [WebTableColumn<T>] T
+core.web.table __replace_columns WebTable<T>,^[WebTableColumn<T>] WebTable<T> T
+core.web.table __state WebTable<T> WebTableState T
+core.web.table __set_state WebTable<T>,^WebTableState - T
+core.web.table __alias WebTable<T> WebTable<T> T
 core.crypto sha256 [u8] Digest256
 core.crypto sha1|sha224|sha384|sha3_224|sha3_256|sha3_384|sha3_512 [u8] String
 core.crypto hmac_sha256 [u8],[u8] [u8]

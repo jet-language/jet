@@ -3297,6 +3297,7 @@ impl JetDbRequestScope { fn enter(_: Option<String>) -> Self { Self } }\n",
         out.push_str(include_str!("../Prelude/CoreLib/Top/Browser.rs"));
         out.push_str(include_str!("../Prelude/BrowserTest.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/CoreSlice7BrowserRaw.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/CoreSlice7ReportRaw.rs"));
     }
     if runtime_parts.contains(&MirRuntimePartId::Args) {
         out.push_str(include_str!("../Prelude/CoreLib/Top/Args.rs"));
@@ -3382,6 +3383,7 @@ fn push_typed_app_preludes(out: &mut String, runtime_parts: &BTreeSet<MirRuntime
         || runtime_parts.contains(&MirRuntimePartId::Apps)
     {
         out.push_str(LIVEQUERY_PRELUDE);
+        out.push_str(include_str!("../Prelude/CoreLib/Top/CoreSlice7LiveRaw.rs"));
     }
     if !runtime_parts.contains(&MirRuntimePartId::Apps) {
         return;
@@ -3396,6 +3398,7 @@ fn push_typed_app_preludes(out: &mut String, runtime_parts: &BTreeSet<MirRuntime
     out.push_str(&flat_prelude_body(WEB_TABLE_PRELUDE_RAW));
     out.push_str(&flat_prelude_body(WEB_VIRTUAL_PRELUDE_RAW));
     out.push_str(&flat_prelude_body(WEB_STORE_PRELUDE_RAW));
+    out.push_str(include_str!("../Prelude/CoreLib/Top/CoreSlice7WebRaw.rs"));
     out.push_str(&flat_prelude_body(WEBSERVERFN_PRELUDE_RAW));
 }
 
@@ -4052,6 +4055,7 @@ impl JetDbRequestScope {{ fn enter(_: Option<String>) -> Self {{ Self }} }}\n",
         out.push_str(include_str!("../Prelude/CoreLib/Top/Browser.rs"));
         out.push_str(include_str!("../Prelude/BrowserTest.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/CoreSlice7BrowserRaw.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/CoreSlice7ReportRaw.rs"));
     }
     if needs_args {
         out.push_str(include_str!("../Prelude/CoreLib/Top/Args.rs"));
@@ -4232,6 +4236,7 @@ fn push_app_preludes(out: &mut String, used_core: &std::collections::HashSet<Str
     }
     if needs_live {
         out.push_str(LIVEQUERY_PRELUDE);
+        out.push_str(include_str!("../Prelude/CoreLib/Top/CoreSlice7LiveRaw.rs"));
     }
     if needs_web_suite {
         out.push_str(&flat_prelude_body(CORE_WEB_PENDING_PRELUDE_RAW));
@@ -4243,6 +4248,7 @@ fn push_app_preludes(out: &mut String, used_core: &std::collections::HashSet<Str
         out.push_str(&flat_prelude_body(WEB_TABLE_PRELUDE_RAW));
         out.push_str(&flat_prelude_body(WEB_VIRTUAL_PRELUDE_RAW));
         out.push_str(&flat_prelude_body(WEB_STORE_PRELUDE_RAW));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/CoreSlice7WebRaw.rs"));
         out.push_str(&flat_prelude_body(WEBSERVERFN_PRELUDE_RAW));
     }
 }

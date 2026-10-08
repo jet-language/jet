@@ -230,6 +230,7 @@ mod web_kernel {
     };
 
     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/LiveQuery.rs");
+    include!("../../../jet-codegen/src/Prelude/CoreLib/Top/CoreSlice7LiveRaw.rs");
     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/HTTPRoute.rs");
     include!("../../../jet-codegen/src/Prelude/Core/WebPending.rs");
     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs");
@@ -238,6 +239,7 @@ mod web_kernel {
     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs");
     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs");
     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/WebStore.rs");
+    include!("../../../jet-codegen/src/Prelude/CoreLib/Top/CoreSlice7WebRaw.rs");
 
     #[allow(non_camel_case_types)]
     pub trait __jet_Encode {
@@ -2275,6 +2277,45 @@ fn web_table_state(value: web_kernel::JetWebTableState) -> CtValue {
         ],
     }
 }
+
+fn web_table_state_value(value: &CtValue, span: Span) -> Result<web_kernel::JetWebTableState, Diagnostic> {
+    let field = |name| web_record_field(value, name, span);
+    let sort = match field("sort")? {
+        CtValue::Present(value) => Some(web_kernel::JetWebTableSort {
+            column: web_string(web_record_field(value, "column", span)?, "sort column", span)?,
+            direction: web_table_direction_value(web_record_field(value, "direction", span)?, span)?,
+        }),
+        CtValue::Absent(_) => None,
+        _ => return Err(unsupported("WebTableState sort", span)),
+    };
+    let filter = match field("filter")? {
+        CtValue::Present(value) => Some(web_kernel::JetWebTableFilter {
+            column: web_string(web_record_field(value, "column", span)?, "filter column", span)?,
+            value: web_string(web_record_field(value, "value", span)?, "filter value", span)?,
+        }),
+        CtValue::Absent(_) => None,
+        _ => return Err(unsupported("WebTableState filter", span)),
+    };
+    Ok(web_kernel::JetWebTableState {
+        sort, filter,
+        page_index: web_int(field("page_index")?, "page index", span)?,
+        page_size: web_int(field("page_size")?, "page size", span)?,
+        selected_keys: web_strings(field("selected_keys")?, "selected keys", span)?,
+        selection_anchor: web_optional_string_value(field("selection_anchor")?, span)?,
+        page_mode: match web_enum_variant(field("page_mode")?, "WebTablePageMode", span)? {
+            "Client" => web_kernel::JetWebTablePageMode::Client,
+            "Server" => web_kernel::JetWebTablePageMode::Server,
+            _ => return Err(unsupported("WebTablePageMode", span)),
+        },
+    })
+}
+
+fn web_counter(value: u64) -> CtValue {
+    match i64::try_from(value) {
+        Ok(value) => CtValue::Int(value),
+        Err(_) => CtValue::BigInt(jet_foundation::Numeric::CtBigInt::from_u64(value)),
+    }
+}
 fn web_table_page(value: web_kernel::JetWebTablePage<CtValue>) -> CtValue {
     CtValue::Struct {
         type_name: "WebTablePage".to_string(),
@@ -2521,6 +2562,54 @@ pub fn apply_suite(
             .ok_or_else(|| unsupported(&format!("{module}.{method} argument {index}"), span))
     };
     match (module, method) {
+        ("core.web", "__live_stats_snapshot") => {
+            let value = web_kernel::jet_live_stats_snapshot_raw().map(
+                |(queries, active, refreshing, evictions, invalidations, pushes)|
+                    CtValue::Tuple(vec![CtValue::Int(queries), CtValue::Int(active),
+                        CtValue::Int(refreshing), web_counter(evictions), web_counter(invalidations), web_counter(pushes)]));
+            web_optional_value(value, result_type, span)
+        }
+        ("core.web", "__contract_stop") => {
+            web_kernel::jet_openapi_contract_stop_raw(&web_string(one(0)?, "OpenAPI error", span)?)
+        }
+        ("core.web.store", "__facts_snapshot") => {
+            let (generation, cursor, history, limit, events, enabled) =
+                web_kernel::jet_store_facts_snapshot_raw(web_store(one(0)?, span)?);
+            Ok(CtValue::Tuple(vec![web_counter(generation), web_counter(cursor),
+                CtValue::Int(history), CtValue::Int(limit), CtValue::Int(events), CtValue::Bool(enabled)]))
+        }
+        ("core.web.store", "__transact") => {
+            let store = web_store(one(0)?, span)?;
+            let action = web_string(one(1)?, "store action", span)?;
+            let fields = web_strings(one(2)?, "store fields", span)?;
+            let callback = one(3)?.clone();
+            Ok(web_store_transaction(web_kernel::jet_web_store_transaction(store, action, fields,
+                move |state| {
+                    super::Methods::invoke_standalone_closure_mut(&callback, state, span)
+                        .unwrap_or_else(|error| std::panic::panic_any(error));
+                })))
+        }
+        ("core.web.table", "__columns") => Ok(CtValue::List(
+            web_kernel::jet_table_columns_raw(web_table(one(0)?, span)?).into_iter()
+                .map(|column| opaque_web(WebTableColumnHandle(column))).collect())),
+        ("core.web.table", "__replace_columns") => {
+            let CtValue::List(values) = one(1)? else {
+                return Err(unsupported("table columns", span));
+            };
+            let columns = values.iter().map(|value| web_table_column(value, span).cloned())
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(opaque_web(WebTableHandle(web_kernel::jet_table_replace_columns_raw(
+                web_table(one(0)?, span)?, columns))))
+        }
+        ("core.web.table", "__state") => Ok(web_table_state(
+            web_kernel::jet_web_table_state(web_table(one(0)?, span)?))),
+        ("core.web.table", "__set_state") => {
+            web_kernel::jet_table_set_state_raw(web_table(one(0)?, span)?,
+                web_table_state_value(one(1)?, span)?);
+            Ok(CtValue::Unit)
+        }
+        ("core.web.table", "__alias") => Ok(opaque_web(WebTableHandle(
+            web_kernel::jet_table_alias_raw(web_table(one(0)?, span)?)))),
         ("core.reactive", "effect") => {
             let callback = one(0)?.clone();
             Ok(opaque_web(web_kernel::jet_reactive_effect(move || {
