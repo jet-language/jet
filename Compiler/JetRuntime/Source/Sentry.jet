@@ -506,13 +506,21 @@ fn sentry_stop(fault: I64, start: I64, alignment: I64, component: I64, fenced: B
     obligation :: services_msg_sentry_valid_ptr()
     gate :: sentry_gate_name()
     detail :: sentry_detail(fault, start, alignment)
+    publish :: scheduler_control_current() != I64{0} && (sync_load(thread_base() + I64{64}) & I64{1}) != I64{0} && !scheduler_cleanup_panic_fatal()
+    if publish {
+        if {
+            (sentry_code(fault) == I64{2}) -> test_scope_record_r0802(trap_word(detail), trap_word(detail + I64{8}))
+            (sentry_code(fault) == I64{3}) -> test_scope_record_r0803(trap_word(detail), trap_word(detail + I64{8}))
+            else -> test_scope_record_r0801(trap_word(detail), trap_word(detail + I64{8}))
+        }
+    }
     sentry_ledger(fault, gate, detail)
     report :: sentry_report(fault, operation, obligation, component, fenced, gate)
     jet_rt_string_drop(operation)
     jet_rt_string_drop(obligation)
     jet_rt_string_drop(gate)
     jet_rt_string_drop(detail)
-    if (scheduler_control_current() != I64{0} && sync_load(thread_base() + I64{64}) != I64{0}) {
+    if publish {
         record :: scheduler_stop_new(I64{5}, report)
         sync_store(record + I64{48}, I64{1})
         _ := scheduler_native_publish(record)

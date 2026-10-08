@@ -68,6 +68,14 @@ and the plain no-task output against its existing byte golden. Its
 `assemble/lower/link/run` modes require the fresh composed runtime for execution;
 source parsing alone is not a behavioral receipt.
 
+Native expectation probes consume only a pending panic with a recorded raw
+`E3001` or `R0801`–`R0803` stop in the innermost matching scope. A successful
+`jet_rt_test_catch_for_scope` clears the original scheduler stop and completes
+that expectation; a mismatch replaces it with `E3001` and sets unmet so no
+parent can catch the mismatch. Cancellation, deadlines, skips, unrecognized
+codes, and probes for another scope do not mutate the pending stop. Sentry
+records its raw fault detail before dropping it, never its rendered report.
+
 ## Purpose and scope
 
 Core modules own public behavior. A Core API must be useful for real programs,
