@@ -339,7 +339,7 @@ fn lower_helper_codec_csv_decode(p: MIRProgram, m: &LowerModule, glue: LowerGlue
     merge :: lower_new_block(&f)
     lower_seal(&f, LIRTerminator.Branch{condition: succeeded, then_target: lower_target(success, [LIRValueID]{}), else_target: lower_target(failure, [LIRValueID]{})})
     lower_start(&f, success, [LIRValueID]{})
-    if target.kind != .Unit {
+    if lower_repr(p, target) != .Absent {
         value :: lower_read_at(p, &f, decoded, 8, target) ?? panic("checked CSV row has native storage")
         lower_write_at(p, &f, output, 0, value, target)
     }

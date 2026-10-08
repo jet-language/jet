@@ -212,8 +212,10 @@ fn fx_asm_i64_const(b: &FxBuilder, value: Int) -> MIRValueID Never! {
 fn fx_inline_asm_exit() -> MIRProgram Never! {
     b := fx_builder()
     zero :: fx_asm_i64_const(&b, 0)
+    exit_group :: fx_asm_i64_const(&b, 231)
+    status :: fx_asm_i64_const(&b, 23)
     fx_asm_call(&b, "os_syscall_i64", [MIRValueID]{
-        fx_asm_i64_const(&b, 231), fx_asm_i64_const(&b, 23),
+        exit_group, status,
         zero, zero, zero, zero, zero,
     }, true).drop("exit_group result")
     fx_block(&b, U64{0}, MIRTerminator.Return{value: None})
