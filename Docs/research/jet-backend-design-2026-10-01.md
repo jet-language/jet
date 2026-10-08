@@ -1646,6 +1646,26 @@ allocator's initialized root page, never a new allocation on the stop path.
 The all-parts adapter refreshes the compiler-call process boundary using its
 stable `JET_NATIVE_COMPTIME_ACTIVE` declaration, not an explanatory comment.
 
+### Native UI node ABI
+
+`Compiler/JetBackend/Source/UiABI.jet` defines the canonical 160-byte native
+node layout in one table, included by both compiler and runtime manifests.
+It is not the layout of a legacy Rust UI allocation and must never be used
+to reinterpret one. Callback slots are raw native `SendFn` closure pointers,
+not registry IDs or general `Fn` values. The transfer adds three private
+logical arguments: IME mode, click closure, and drop closure. A present IME
+has mode 0 (Native) or 1 (Disabled); absent appended words are ignored.
+
+Native node cloning allocates a distinct node, clones its owned text and
+children, and atomically retains each callback once for the new node.
+Final destruction releases the callbacks outside locks. This layout
+publication is not a runtime-provider or byte-parity claim. The private
+typed-call override and atomic `SendFn` ownership leaves are required
+before admitting callback-bearing nodes. Accessibility and shortcut
+metadata still depend on registered raw leaves; the native UI pack cannot
+be described as Jet-only until their providers are replaced.
+
+### Native display runtime
 
 The allocator suite has a named `alloc_tests` entry; its library unit never
 declares a program `run` entry. C exports have no failure-row annotation.
