@@ -1,0 +1,35 @@
+# HAND-PORT tests/jetpack_engine.rs:3518-3539 run_dash_dash_propagates_failure_status
+# PENDING-GRAMMAR / PENDING-SAME-HEAD: authored, not runtime-proven.
+env: NO_COLOR=1
+refused: hangar-verified-fixture
+# Verbatim original setup and ALL predicates; no passing substitute for the named seam.
+# #[test]
+# fn run_dash_dash_propagates_failure_status() {
+#     let root = Scratch::new("root");
+#     let fixtures = Scratch::new("fx");
+#     let out_dir = Scratch::new("out");
+#     write_runnable_fixture(&fixtures.path, &root.path, &out_dir.path);
+# 
+#     let output = jetpack()
+#         .args([
+#             "run",
+#             "greet@nixpkgs",
+#             "--no-color",
+#             "--offline",
+#             "--",
+#             "false",
+#         ])
+#         .env("JETPACK_ROOT", &root.path)
+#         .env("JETPACK_FIXTURES", &fixtures.path)
+#         .output()
+#         .unwrap();
+#     assert!(!output.status.success());
+# }
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+mkdir: fixtures
+env: JETPACK_FIXTURES={work}/fixtures
+step: jetpack run greet@nixpkgs --no-color --offline -- false
+exit: nonzero
+

@@ -1,0 +1,42 @@
+# HAND-PORT tests/jetpack_engine.rs:3093-3118 list_shows_realized_package
+# PENDING-GRAMMAR / PENDING-SAME-HEAD: authored, not runtime-proven.
+env: NO_COLOR=1
+refused: hangar-verified-fixture
+# Verbatim original setup and ALL predicates; no passing substitute for the named seam.
+# #[test]
+# fn list_shows_realized_package() {
+#     let root = Scratch::new("root");
+#     let fixtures = Scratch::new("fixtures");
+#     let staging = Scratch::new("greet-out");
+#     write_runnable_fixture(&fixtures.path, &root.path, &staging.path);
+#     let built = jetpack()
+#         .args(["build", "greet@nixpkgs", "--no-color", "--offline"])
+#         .env("JETPACK_ROOT", &root.path)
+#         .env("JETPACK_FIXTURES", &fixtures.path)
+#         .output()
+#         .unwrap();
+#     assert!(
+#         built.status.success(),
+#         "stderr: {}",
+#         String::from_utf8_lossy(&built.stderr)
+#     );
+#     let out = jetpack()
+#         .args(["hangar", "list", "--no-color"])
+#         .env("JETPACK_ROOT", &root.path)
+#         .output()
+#         .unwrap();
+#     assert!(out.status.success());
+#     let stderr = String::from_utf8_lossy(&out.stderr);
+#     assert!(stderr.contains("greet"), "stderr: {stderr}");
+# }
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+mkdir: fixtures
+env: JETPACK_FIXTURES={work}/fixtures
+step: jetpack build greet@nixpkgs --no-color --offline
+exit: 0
+step: jetpack hangar list --no-color
+exit: 0
+stderr: ~ "greet" # original contains predicate
+
