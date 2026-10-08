@@ -21,7 +21,7 @@ env: S6_WEB_PATH=/actions/save
 env: S6_WEB_RESPONSE={work}/action.http
 exit: 0
 file: action.http ^= "HTTP/1.1 200" # Original starts_with.
-file: action.http.after_first("\r\n\r\n"): = "\"saved\""
+file.after_first("\r\n\r\n"): action.http = "\"saved\""
 signal server: KILL
 wait: server
 exit: any # Original ServerChild drop kill/wait ignores status.
