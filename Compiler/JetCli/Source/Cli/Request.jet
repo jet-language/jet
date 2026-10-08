@@ -121,6 +121,14 @@ fn jet_cli_source_read_limit(budget: JetCLISourceBudget, size: Int, path: String
     Ok(if remaining < JET_CLI_MAX_SOURCE_BYTES -> remaining else -> JET_CLI_MAX_SOURCE_BYTES)
 }
 
+fn jet_cli_replace_source_budget(budget: &JetCLISourceBudget, before: String, after: String, path: String) -> Int String! {
+    replacement :: JetCLISourceBudget{entries: budget.entries, bytes: budget.bytes - before.count_bytes(), files: budget.files - 1}
+    size :: after.count_bytes()
+    _ :: jet_cli_source_read_limit(replacement, size, path)
+    budget.bytes = replacement.bytes + size
+    Ok(budget.bytes)
+}
+
 fn jet_cli_walk_sources(root: String, relative: String, depth: Int, files: &[JetDriverAuthorizedSourceFile], directories: &[AppAuthorizedDirectory], retain_directories: Bool, budget: &JetCLISourceBudget) -[FS]> String? Never! {
     directory :: if relative == "" -> root else -> jet_cli_authority_path(root, relative)
     chain := [cli_files.Directory]{}
@@ -762,11 +770,7 @@ pub fn jet_cli_prepare_overlays(anchor: String, entry: String, overlays: [JetCLI
         replaced := false
         loop index in 0..<files.len() {
             if files[index].path != path -> next
-            budget.bytes -= files[index].source.len()
-            budget.files -= 1
-            _ :: jet_cli_source_read_limit(budget, overlay.source.len(), path) ?? return jet_cli_prepare_refused(err, "reduce the source tree size", color)
-            budget.bytes += overlay.source.len()
-            budget.files += 1
+            _ :: jet_cli_replace_source_budget(&budget, files[index].source, overlay.source, path) ?? return jet_cli_prepare_refused(err, "reduce the source tree size", color)
             files[index].source = overlay.source
             replaced = true
         }
@@ -775,10 +779,11 @@ pub fn jet_cli_prepare_overlays(anchor: String, entry: String, overlays: [JetCLI
         if relative == "" || cli_files.exists(path) || !relative.ends_with(".jet") || jet_cli_outside_walk(root, relative) {
             return jet_cli_prepare_refused("`{overlay.path}` is not a checked source file of `{root}`", "check a `.jet` file that is not inside a skipped or nested project directory", color)
         }
-        _ :: jet_cli_source_read_limit(budget, overlay.source.len(), path) ?? return jet_cli_prepare_refused(err, "reduce the source tree size", color)
-        budget.bytes += overlay.source.len()
+        size :: overlay.source.count_bytes()
+        _ :: jet_cli_source_read_limit(budget, size, path) ?? return jet_cli_prepare_refused(err, "reduce the source tree size", color)
+        budget.bytes += size
         budget.files += 1
-        added :: JetDriverAuthorizedSourceFile{path: path, relative_path: relative, identity: "authority-file-v1;kind=overlay;length={overlay.source.bytes().len()};modified_ns=none;device=none;inode=none", source: overlay.source}
+        added :: JetDriverAuthorizedSourceFile{path: path, relative_path: relative, identity: "authority-file-v1;kind=overlay;length={size};modified_ns=none;device=none;inode=none", source: overlay.source}
         files = jet_cli_insert_source(^files, added)
     }
     entry_found := false

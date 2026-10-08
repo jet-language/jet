@@ -110,6 +110,16 @@ fn run() {
     assert(rejected_cache.len() == 0)
     assert(jet_cli_source_read_limit(exhausted_files, selected.stat.size, "selected.other") == .Err(_))
     assert(jet_cli_source_read_limit(exhausted_bytes, selected.stat.size, "selected.other") == .Err(_))
+    // Raw source budgets count UTF-8 bytes, not String.len characters.
+    unicode_to_ascii := JetCLISourceBudget{entries: 0, bytes: JET_CLI_MAX_SOURCE_TOTAL, files: 2}
+    assert(jet_cli_replace_source_budget(&unicode_to_ascii, "é🙂", "abcdef", "replacement.jet") == .Ok(JET_CLI_MAX_SOURCE_TOTAL))
+    assert(unicode_to_ascii.files == 2)
+    ascii_to_unicode := JetCLISourceBudget{entries: 0, bytes: JET_CLI_MAX_SOURCE_TOTAL - 2, files: 2}
+    assert(jet_cli_replace_source_budget(&ascii_to_unicode, "abcd", "é🙂", "replacement.jet") == .Ok(JET_CLI_MAX_SOURCE_TOTAL))
+    assert(ascii_to_unicode.files == 2)
+    rejected_unicode := JetCLISourceBudget{entries: 0, bytes: JET_CLI_MAX_SOURCE_TOTAL, files: 2}
+    assert(jet_cli_replace_source_budget(&rejected_unicode, "abcd", "é🙂", "replacement.jet") == .Err(_))
+    assert(rejected_unicode.bytes == JET_CLI_MAX_SOURCE_TOTAL && rejected_unicode.files == 2)
 
     // A replaced pathname cannot redirect a held source read or pass the
     // same parent-chain admission used by the build transport and snapshot.
