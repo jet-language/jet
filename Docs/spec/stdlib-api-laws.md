@@ -486,3 +486,9 @@ every manifest entry.
 `Atomic<Int>` each store one inline, 8-byte, 8-aligned atomic word. The MIR
 layout is identical for all six admitted scalar types, including signed
 `I64`; an unsupported scalar does not acquire an atomic layout.
+
+An atomic is move-only and non-Clone: `~atomic` is rejected by the existing
+`E0211` copy check, as is copying a record or enum containing an atomic.
+The same recursive classification still permits non-atomic generic values
+whose payloads are duplicable. Moving an atomic transfers its publication
+owner; it does not allocate a shared handle.
