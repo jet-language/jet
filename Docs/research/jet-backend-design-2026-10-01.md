@@ -2102,3 +2102,37 @@ message goldens, exact FieldError backticks and all eight flag combinations.
 Native execution and MIR/caller/layout admission remain unexercised;
 source parsing and strict C11 syntax checks do not prove runtime parity.
 
+### Native civil-time ownership boundary
+
+`TimeGlueABI.jet` defines private Date24, Period24, LocalTime32, Duration8
+and DurationUnit8 carriers. It does not define Core Instant: that source
+value owns an exact Int field by value, as the Realtime deadline route
+already returns (`Realtime.jet:144-155`). Instant carrier admission belongs
+to the generator, not a Rust-pointer interpretation.
+
+Date/Period/Duration record constructors borrow and check exact Int inputs
+before allocation, store raw i64 and return fresh exact owners on get
+(`CAbiRoutes.rs:9382-9390,10174-10194,10982-11002`). These record constructors
+do not add civil-calendar validation. Clone/drop own only the shell.
+Equality follows declaration order (`Time.rs:4-9,303-309,484-489`,
+`CommonTypes.rs:2840-2843,2866-2874`). LocalTime nanos is u32, not signed
+i64; clone clears native upper-word padding and equality ignores it.
+There is no LocalTime record ctor/getter in this HAND family.
+
+All modes preserve the seed formats (`Time.rs:280-286,472-480,619-620`,
+`Duration.rs:195-197`), using existing decimal digit counting/emission and
+the existing text builder. Date years have minimum four digits and a
+separate negative sign; the seed's saturating absolute value makes i64::MIN
+render with magnitude i64::MAX (`Time.rs:1760-1765`). LocalTime emits
+unsigned nanos only when nonzero, padded to at least nine digits.
+Periods retain signed components without normalization; durations append
+`ns` to signed nanoseconds.
+
+`TimeGlueWitness.c` is a real-object client requiring `--wrap=jet_rt_free`
+with asserted interception and exact-once frees. It exercises boxed Int
+borrow/getter ownership, every equality field, nanos padding independence
+and civil/duration render goldens at raw integer boundaries.
+`date-overflow`, `period-overflow` and `duration-overflow` must stop at the
+existing native-range boundary. Native execution and MIR/caller/layout
+admission remain unexercised; parse/C11 syntax receipts are not parity proof.
+
