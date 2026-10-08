@@ -79,12 +79,16 @@ if (mode !== "--plan") {
                 writeFileSync(join(raw, "run.status.json"), `${JSON.stringify({ status: run.status, signal: run.signal, error: run.error?.message ?? null })}\n`);
                 if (run.error || run.status !== 0 || run.signal || run.stdout || run.stderr) failures.push(`raw run: ${run.error?.message ?? `rc=${run.status}, signal=${run.signal}, stdout=${JSON.stringify(run.stdout)}, stderr=${JSON.stringify(run.stderr)}`}`);
             }
-            const overflowHeadline = "Stop [E3001]: `panic: This addition overflows the value's type (the result is outside its range)`\n  --> <core.prelude>:0\n";
-            const boundsHeadline = "Stop [E3001]: `panic: the list has 0 items, so position 0 doesn't exist`\n  --> <core.prelude>:0\n";
+            // Rust/source numeric stop golden: Examples/features/expected/errors/u8_add_overflow.err.out:1.
+            const overflowHeadline = "Stop [E3010]: `This addition overflows the value's type (the result is outside its range)`\n  --> <core.prelude>:0\n";
+            // Rust/source bounds stop golden: Examples/features/expected/collections/list_bounds.err.out:1.
+            const boundsHeadline = "Stop [E3010]: `the list has 0 items, so position 0 doesn't exist`\n  --> <core.prelude>:0\n";
             for (const [name, entry, headline] of [
                 ["bits-extent", "coll_test_bits_extent_stop()", overflowHeadline],
                 ["chain-get-bounds", "coll_test_chain_bounds_stop(false)", boundsHeadline],
                 ["chain-contains-bounds", "coll_test_chain_bounds_stop(true)", boundsHeadline],
+                ["range-zero-step", "coll_test_range_argument_stop(false)", "Stop [E3001]: `panic: range loop stride must not be zero`\n  --> <core.prelude>:0\n"],
+                ["range-exhausted", "coll_test_range_argument_stop(true)", "Stop [E3001]: `panic: range loop value requested after exhaustion`\n  --> <core.prelude>:0\n"],
             ]) {
                 const directory = join(executableRoot, name);
                 mkdirSync(directory, { recursive: true });

@@ -711,6 +711,102 @@ fn coll_test_chain_bounds_stop(contains: Bool) {
     coll_test_require(false)
 }
 
+fn coll_test_range_walk(start: I64, end: I64, step: I64, has_step: U8, exclusive: U8, expected: I64, length: I64) {
+    first :: jet_int_owned_from_i64(start)
+    last :: jet_int_owned_from_i64(end)
+    stride :: jet_int_owned_from_i64(step)
+    cursor :: jet_loop_range_init(first, last, stride, has_step, exclusive)
+    jet_rt_int_drop(first)
+    jet_rt_int_drop(last)
+    jet_rt_int_drop(stride)
+    at := I64{0}
+    loop at < length {
+        coll_test_require(jet_loop_range_has_next(cursor))
+        value :: jet_loop_range_value(cursor)
+        coll_test_require(jet_int_owned_to_i64(value) == trap_word(expected + at * I64{8}))
+        jet_rt_int_drop(value)
+        jet_loop_range_advance(cursor)
+        at += I64{1}
+    }
+    coll_test_require(!jet_loop_range_has_next(cursor))
+    jet_loop_range_advance(cursor)
+    coll_test_require(!jet_loop_range_has_next(cursor))
+    jet_loop_cursor_drop(cursor)
+}
+
+fn coll_test_range() {
+    snapshot :: jet_rt_alloc(I64{64}, I64{8})
+    width := I64{32}
+    at := I64{0}
+    loop at < (I64{8}) {
+        trap_store(snapshot + at * I64{8}, coll_test_live(width))
+        width *= I64{2}
+        at += I64{1}
+    }
+    expected :: jet_rt_alloc(I64{32}, I64{8})
+    trap_store(expected, I64{1})
+    trap_store(expected + I64{8}, I64{2})
+    trap_store(expected + I64{16}, I64{3})
+    trap_store(expected + I64{24}, I64{4})
+    coll_test_range_walk(I64{1}, I64{5}, I64{0}, U8{0}, U8{255}, expected, I64{4})
+    trap_store(expected + I64{8}, I64{3})
+    trap_store(expected + I64{16}, I64{5})
+    coll_test_range_walk(I64{1}, I64{5}, I64{2}, U8{7}, U8{0}, expected, I64{3})
+    trap_store(expected, I64{5})
+    trap_store(expected + I64{8}, I64{3})
+    trap_store(expected + I64{16}, I64{1})
+    coll_test_range_walk(I64{5}, I64{0}, I64{-2}, U8{1}, U8{1}, expected, I64{3})
+    coll_test_range_walk(I64{5}, I64{1}, I64{-2}, U8{1}, U8{0}, expected, I64{3})
+    coll_test_range_walk(I64{5}, I64{1}, I64{-2}, U8{1}, U8{1}, expected, I64{2})
+    coll_test_range_walk(I64{3}, I64{1}, I64{1}, U8{1}, U8{0}, I64{0}, I64{0})
+    coll_test_range_walk(I64{1}, I64{3}, I64{-1}, U8{1}, U8{0}, I64{0}, I64{0})
+    coll_test_range_walk(I64{1}, I64{1}, I64{1}, U8{1}, U8{1}, I64{0}, I64{0})
+    trap_store(expected, I64{1})
+    coll_test_range_walk(I64{1}, I64{1}, I64{1}, U8{1}, U8{0}, expected, I64{1})
+    // Inclusive extrema must be returned; the following overflow ends, not panics.
+    trap_store(expected, I64{9223372036854775807})
+    coll_test_range_walk(I64{9223372036854775807}, I64{9223372036854775807}, I64{1}, U8{1}, U8{0}, expected, I64{1})
+    trap_store(expected, I64{-9223372036854775808})
+    coll_test_range_walk(I64{-9223372036854775808}, I64{-9223372036854775808}, I64{-1}, U8{1}, U8{0}, expected, I64{1})
+    // Ignored step owners may exceed I64: has_step=false must not narrow them.
+    enormous :: jet_int_pow(I64{2}, I64{80})
+    cursor :: jet_loop_range_init(I64{1}, I64{2}, enormous, U8{0}, U8{1})
+    jet_rt_int_drop(enormous)
+    coll_test_require(jet_loop_range_has_next(cursor))
+    value :: jet_loop_range_value(cursor)
+    coll_test_require(value == I64{1})
+    jet_rt_int_drop(value)
+    jet_loop_range_advance(cursor)
+    coll_test_require(!jet_loop_range_has_next(cursor))
+    jet_loop_cursor_drop(cursor)
+    jet_loop_cursor_drop(I64{0})
+    coll_test_require(jet_range_contains(I64{-3}, I64{3}, U8{0}, I64{-3}))
+    coll_test_require(jet_range_contains(I64{-3}, I64{3}, U8{0}, I64{3}))
+    coll_test_require(!jet_range_contains(I64{-3}, I64{3}, U8{255}, I64{3}))
+    coll_test_require(!jet_range_contains(I64{-3}, I64{3}, U8{0}, I64{-4}))
+    coll_test_require(!jet_range_contains(I64{3}, I64{-3}, U8{0}, I64{0}))
+    coll_test_require(jet_range_contains(I64{9223372036854775807}, I64{9223372036854775807}, U8{0}, I64{9223372036854775807}))
+    coll_test_require(!jet_range_contains(I64{9223372036854775807}, I64{9223372036854775807}, U8{1}, I64{9223372036854775807}))
+    jet_rt_free(expected, I64{32}, I64{8})
+    width = I64{32}
+    at = I64{0}
+    loop at < (I64{8}) {
+        coll_test_require(coll_test_live(width) == trap_word(snapshot + at * I64{8}))
+        width *= I64{2}
+        at += I64{1}
+    }
+    jet_rt_free(snapshot, I64{64}, I64{8})
+}
+
+fn coll_test_range_argument_stop(exhausted: Bool) {
+    jet_rt_alloc_init()
+    if exhausted {
+        cursor :: jet_loop_range_init(I64{1}, I64{1}, I64{1}, U8{1}, U8{1})
+        _ := jet_loop_range_value(cursor)
+    } else { _ := jet_loop_range_init(I64{1}, I64{2}, I64{0}, U8{1}, U8{0}) }
+    coll_test_require(false)
+}
+
 fn collections_tests() {
     jet_rt_alloc_init()
     coll_test_bytes()
@@ -720,6 +816,7 @@ fn collections_tests() {
     coll_test_ordered_map()
     coll_test_counter()
     coll_test_chain()
+    coll_test_range()
     // Fresh ceil(5/2) differs from the remaining floor(4/2) after one pull.
     stepped :: jet_rt_native_iter_step_by(coll_test_source(), I64{2})
     coll_test_require(iter_exact_length(stepped) == I64{3})
