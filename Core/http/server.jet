@@ -54,6 +54,12 @@ pub fn __static_files_entry(mux: HTTPMux, prefix: String, root: String, index: B
     provider.__static_files(mux, prefix, root, index, dotfiles, follow_links)
 }
 
+// Preserve HTTPMux.middleware's existing checked escaping-callback
+// admission before routing its receiver+callback into this source entry.
+pub fn __middleware_entry(mux: HTTPMux, middleware: ^fn(HTTPHandler) -> HTTPHandler) Never! -[Net]> {
+    provider.__middleware(mux, ^middleware)
+}
+
 pub fn response(status: Int, body: String) -> HTTPResponse Never! {
     response_body(status, Body.Text(body), core.http.headers())
 }
