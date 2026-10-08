@@ -1,0 +1,9 @@
+// A user function owns the Err spelling; its call is not a deferred arm
+// and keeps ordinary call-root automatic propagation.
+fn Err(message: String) -> Int Never! { return message.len() }
+fn first(flag: Bool) -> Int { if flag -> Err("bad") else -> 7 }
+fn last(flag: Bool) -> Int { if flag -> 7 else -> Err("bad") }
+fn run() {
+    print(first(true))
+    print(last(false))
+}
