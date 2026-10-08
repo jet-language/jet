@@ -637,6 +637,7 @@ impl<'a> Parser<'a> {
                             resolved_ret: None,
                             operator_rhs: None,
                             checked_widen: false,
+                            checked_callee: None,
                         };
                         self.allow_lowercase_leading_dot = previous_lowercase;
                         return Ok(result);
@@ -827,6 +828,7 @@ impl<'a> Parser<'a> {
                     resolved_ret: None,
                     operator_rhs: None,
                     checked_widen: false,
+                    checked_callee: None,
                 });
             }
             if !matches!(selector.as_str(), "all" | "race" | "any") {
@@ -922,6 +924,7 @@ impl<'a> Parser<'a> {
                     resolved_ret: None,
                     operator_rhs: None,
                     checked_widen: false,
+                    checked_callee: None,
                 }
             };
             let task_arg = if saw_named {
@@ -972,6 +975,7 @@ impl<'a> Parser<'a> {
                 resolved_ret: None,
                 operator_rhs: None,
                 checked_widen: false,
+                checked_callee: None,
             });
             }
 
@@ -1054,6 +1058,7 @@ impl<'a> Parser<'a> {
             resolved_ret: None,
             operator_rhs: None,
             checked_widen: false,
+            checked_callee: None,
         })
     }
 

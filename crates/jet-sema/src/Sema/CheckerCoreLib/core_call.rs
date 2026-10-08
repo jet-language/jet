@@ -1489,6 +1489,7 @@ impl<'a> Checker<'a> {
             resolved_ret: None,
             operator_rhs: None,
             checked_widen: false,
+            checked_callee: None,
         };
         let input = Expr::OrFallback {
             value: Box::new(input_call),

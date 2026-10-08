@@ -540,7 +540,7 @@ struct SemaDropStatement {
 
 pub fn sema_stmt_check_drop(expr: Expr, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDropStatement {
     if expr == {
-        .MethodCall(receiver, method, method_span, _, _, args, _, _, _, _) -> {
+        .MethodCall(receiver, method, method_span, _, _, args, _, _, _, _, _) -> {
             if method != "drop" -> return SemaDropStatement{handled: false, value: None}
             reason :: sema_drop_reason_problem(args)
             if reason == .Val(problem) -> &diagnostics.push(sema_error("E0407", method_span, problem.what, problem.why, problem.fix))

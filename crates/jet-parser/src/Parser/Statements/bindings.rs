@@ -1148,6 +1148,7 @@ fn desugar_layout_expr(layout_name: &str, e: &mut Expr) {
                     resolved_ret: None,
                     operator_rhs: None,
                     checked_widen: false,
+                    checked_callee: None,
                 };
                 return;
             }

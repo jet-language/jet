@@ -3204,6 +3204,7 @@ impl<'a> Checker<'a> {
                     resolved_ret: Some(destination_ty.clone()),
                     operator_rhs: None,
                     checked_widen: false,
+                    checked_callee: None,
                 };
                 return true;
             }

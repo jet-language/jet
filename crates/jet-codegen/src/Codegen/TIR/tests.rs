@@ -296,6 +296,65 @@ fn checked_bundle(src: &str) -> crate::AST::ProgramBundle {
     bundle
 }
 
+#[test]
+fn generated_comparable_calls_keep_exact_owners_when_template_spans_overlap() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let source = concat!(
+            "#Comparable\n",
+            "enum First { One Two }\n",
+            "#Comparable\n",
+            "enum Second { One Two }\n",
+            "fn used(a: First, b: First) -> Bool Never! { a < b }\n",
+            "fn run() {}\n",
+        );
+        let bundle = checked_bundle(source);
+        let first_identity = bundle.name_ledger
+            .declared_identity(bundle.entry, "First.compare")
+            .expect("First's executable compare declaration");
+        let used = bundle.modules[bundle.entry].items.iter().find_map(|item| {
+            match item {
+                Item::Func(function) if function.name == "used" => Some(function),
+                _ => None,
+            }
+        }).expect("checked used function");
+        let mut checked_targets = Vec::new();
+        for statement in &used.body {
+            statement.for_each_expr(&mut |expression| {
+                if let Expr::MethodCall { checked_callee: Some(identity), .. } = expression {
+                    checked_targets.push(identity.clone());
+                }
+            });
+        }
+        assert!(checked_targets.iter().any(|identity| identity == first_identity));
+        let functions = CostFunctionIndex::new(&bundle);
+        let (first_body, _) = functions.get(bundle.entry, "First.compare").expect("First body");
+        let (second_body, _) = functions.get(bundle.entry, "Second.compare").expect("Second body");
+        assert_eq!(first_body.name_span, second_body.name_span);
+        assert!(!std::ptr::eq(first_body, second_body));
+
+        let callables = cost_callables(&bundle, None);
+        let index = CostCallableIndex::new(&bundle, &callables);
+        let first = index.named(bundle.entry, Some("First"), "compare").expect("First index");
+        let second = index.named(bundle.entry, Some("Second"), "compare").expect("Second index");
+        assert_ne!(first, second);
+        let edges = checked_core_source_call_edges(&bundle, &callables, &index);
+        let caller = index.named(bundle.entry, None, "used").expect("used index");
+        assert!(edges.contains(&(caller, first)));
+        assert!(!edges.contains(&(caller, second)));
+
+        let mut reachable = vec![false; callables.len()];
+        reachable[first] = true;
+        let core_modules = HashSet::from([bundle.entry]);
+        let bodies = reachable_core_source_bodies(&callables, &core_modules, &reachable);
+        assert!(should_lower_imported_core_body(
+            &core_modules, &bodies, bundle.entry, Some("First"), "compare",
+        ));
+        assert!(!should_lower_imported_core_body(
+            &core_modules, &bodies, bundle.entry, Some("Second"), "compare",
+        ));
+    });
+}
+
 /// Compiler worker required; see `covers`.
 fn covers_after_sema(src: &str, fn_name: &str) -> bool {
     jet_foundation::CompilerStack::run_on_compiler_stack(|| {
@@ -1451,6 +1510,7 @@ fn covers_user_method_shadowing_builtin_name() {
         resolved_ret: None,
         operator_rhs: None,
         checked_widen: false,
+        checked_callee: None,
     };
     let mut locals = HashSet::new();
     locals.insert("b".to_string());

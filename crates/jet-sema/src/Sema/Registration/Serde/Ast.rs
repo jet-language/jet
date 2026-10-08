@@ -403,6 +403,7 @@ pub(super) fn data_tree_variant(variant: &str, args: Vec<Expr>, span: Span) -> E
             resolved_ret: None,
             operator_rhs: None,
             checked_widen: false,
+            checked_callee: None,
         }
     }
 }
@@ -473,6 +474,7 @@ pub(super) fn method_with_owner_args(
         resolved_ret: None,
         operator_rhs: None,
         checked_widen: false,
+        checked_callee: None,
     }
 }
 
@@ -488,6 +490,7 @@ pub(super) fn method_with_type_args(receiver: Expr, name: &str, type_args: Vec<T
         resolved_ret: None,
         operator_rhs: None,
         checked_widen: false,
+        checked_callee: None,
     }
 }
 

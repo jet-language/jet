@@ -25,6 +25,7 @@ pub(super) fn mark_at_maximal_place(expr: Expr, access: crate::AST::PlaceAccess,
             resolved_ret,
             operator_rhs,
             checked_widen,
+            checked_callee,
         } => Expr::MethodCall {
             receiver: Box::new(mark_at_maximal_place(*receiver, access, start)),
             method,
@@ -36,6 +37,7 @@ pub(super) fn mark_at_maximal_place(expr: Expr, access: crate::AST::PlaceAccess,
             resolved_ret,
             operator_rhs,
             checked_widen,
+            checked_callee,
         },
         Expr::Field(base, member, span) if contains_method_call(&base) => {
             Expr::Field(Box::new(mark_at_maximal_place(*base, access, start)), member, span)
@@ -846,6 +848,7 @@ impl<'a> Parser<'a> {
                     resolved_ret: None,
                     operator_rhs: None,
                     checked_widen: false,
+                    checked_callee: None,
                 })
             }
             // D-SHAPE-COPY1=A: `~x` — the one copy sigil, a prefix-verb
@@ -943,6 +946,7 @@ impl<'a> Parser<'a> {
                     resolved_ret: None,
                     operator_rhs: None,
                     checked_widen: false,
+                    checked_callee: None,
                 })
             }
             // D-ENUMDOT2=A: `.Variant`, `.Variant(arg)`, or `.Variant.{ field: val }` in

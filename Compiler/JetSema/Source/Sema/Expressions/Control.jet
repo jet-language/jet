@@ -312,7 +312,7 @@ fn sema_expression_carrier_payload(ty: Type) -> Type? {
 fn sema_expression_propagating_call(expr: Expr) -> Bool Never! {
     if expr == {
         .Call(call) -> call.name != "Ok" && call.name != "Err"
-        .MethodCall(_, _, _, _, _, _, _, _, _, _) -> true
+        .MethodCall(_, _, _, _, _, _, _, _, _, _, _) -> true
         .CallValue(callee, args, _) -> !sema_call_value_is_inline_loop(callee, args)
         else -> false
     }
@@ -428,7 +428,7 @@ fn sema_failure_call_provenance(expr: Expr?, environment: SemaScopeEnvironment, 
             }
             return SemaFailureProvenance{callee: call.name, definition: definition, contract: contract}
         }
-        .MethodCall(_, method, _, _, _, _, _, _, _, _) -> return SemaFailureProvenance{callee: "{method}()", definition: fallback, contract: "inferred failure contract"}
+        .MethodCall(_, method, _, _, _, _, _, _, _, _, _) -> return SemaFailureProvenance{callee: "{method}()", definition: fallback, contract: "inferred failure contract"}
         else -> {}
     }
     SemaFailureProvenance{callee: "this fallible expression", definition: fallback, contract: "inferred failure contract"}
@@ -936,7 +936,7 @@ fn sema_fallback_unit_call_name(value: Expr) -> String? Never! {
     if value == {
         .Paren(inner, _) -> sema_fallback_unit_call_name(inner)
         .Call(call) -> Val(call.name)
-        .MethodCall(_, method, _, _, _, _, _, _, _, _) -> Val(method)
+        .MethodCall(_, method, _, _, _, _, _, _, _, _, _) -> Val(method)
         .CallValue(_, _, _) -> Val("this call")
         else -> None
     }

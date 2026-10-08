@@ -3094,7 +3094,7 @@ fn sema_expr_unit_probe_shape(expr: Expr) -> Bool Never! {
         .Ident(_, _) | .Field(_, _, _) | .UnitLit(_, _, _, _, _, _) -> true
         .Paren(inner, _) -> sema_expr_unit_probe_shape(inner)
         .Unary(op, inner, _) -> op == UnOp.Neg && sema_expr_unit_probe_shape(inner)
-        .MethodCall(receiver, _, _, _, _, _, _, _, _, _) -> receiver == .Ident(_, _)
+        .MethodCall(receiver, _, _, _, _, _, _, _, _, _, _) -> receiver == .Ident(_, _)
         .Call(call) -> call.name == "measurement"
         else -> false
     }
@@ -3471,7 +3471,7 @@ fn sema_check_expression_inner(expr: Expr, expected: Type?, environment: SemaSco
             sema_expr_check_direct_call(call, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         }
         .CallValue(callee, args, span) -> sema_expr_check_indirect_call(callee, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-        .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, _, _, _, _) -> {
+        .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, _, _, _, _, _) -> {
             // D-CAP-RECEIVER1=D: check the ordinary unmarked call, then
             // compare the written receiver mark with its resolved convention.
             unmarked :: sema_receiver_mark_begin(&state, receiver)
@@ -3591,14 +3591,14 @@ fn sema_expr_is_bare_subject(expr: Expr) -> Bool Never! {
 fn sema_expr_is_bare_member_chain(expr: Expr) -> Bool Never! {
     if expr == {
         .Field(base, _, _) -> sema_expr_is_bare_subject(base) || sema_expr_is_bare_member_chain(base)
-        .MethodCall(receiver, _, _, _, _, _, _, _, _, _) -> sema_expr_is_bare_subject(receiver) || sema_expr_is_bare_member_chain(receiver)
+        .MethodCall(receiver, _, _, _, _, _, _, _, _, _, _) -> sema_expr_is_bare_subject(receiver) || sema_expr_is_bare_member_chain(receiver)
         else -> false
     }
 }
 
 // D-SHAPE3a=A: `.new(...)` is inferred construction, never subject shorthand.
 fn sema_expr_is_inferred_constructor(expr: Expr) -> Bool Never! {
-    if expr == .MethodCall(receiver, method, _, _, _, _, _, _, _, _) -> return method == "new" && sema_expr_is_bare_subject(receiver)
+    if expr == .MethodCall(receiver, method, _, _, _, _, _, _, _, _, _) -> return method == "new" && sema_expr_is_bare_subject(receiver)
     false
 }
 
@@ -3606,7 +3606,7 @@ fn sema_expr_bare_member_chain_text(expr: Expr) -> String Never! {
     if expr == {
         .Ident(name, _) -> if name == "" -> "" else -> ".member"
         .Field(base, member, _) -> "{sema_expr_bare_member_chain_text(base)}.{member}"
-        .MethodCall(receiver, method, _, _, _, _, _, _, _, _) -> "{sema_expr_bare_member_chain_text(receiver)}.{method}(…)"
+        .MethodCall(receiver, method, _, _, _, _, _, _, _, _, _) -> "{sema_expr_bare_member_chain_text(receiver)}.{method}(…)"
         else -> ".member"
     }
 }
@@ -3616,7 +3616,7 @@ fn sema_expr_replace_bare_subject(expr: Expr, subject: String) -> Expr Never! {
     if expr == {
         .Ident(name, span) -> if name == "" -> Expr.Ident{name: subject, span: span} else -> ~expr
         .Field(base, member, span) -> Expr.Field{base: sema_expr_replace_bare_subject(base, subject), member: member, span: span}
-        .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, recv_type, resolved_ret, operator_rhs, checked_widen) -> Expr.MethodCall{receiver: sema_expr_replace_bare_subject(receiver, subject), method: method, method_span: method_span, owner_type_args: owner_type_args, type_args: type_args, args: args, recv_type: recv_type, resolved_ret: resolved_ret, operator_rhs: operator_rhs, checked_widen: checked_widen}
+        .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, recv_type, resolved_ret, operator_rhs, checked_widen, checked_callee) -> Expr.MethodCall{receiver: sema_expr_replace_bare_subject(receiver, subject), method: method, method_span: method_span, owner_type_args: owner_type_args, type_args: type_args, args: args, recv_type: recv_type, resolved_ret: resolved_ret, operator_rhs: operator_rhs, checked_widen: checked_widen, checked_callee: checked_callee}
         else -> ~expr
     }
 }

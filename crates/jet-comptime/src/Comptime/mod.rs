@@ -3433,6 +3433,7 @@ pub fn evaluate_checked_text_check<'a>(
         resolved_ret: None,
         operator_rhs: None,
         checked_widen: false,
+        checked_callee: None,
     };
     let (value, _) = evaluate_with_imports_opts_collecting_structs_and_methods(
         &check,

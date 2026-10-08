@@ -797,6 +797,7 @@ fn lower_method_chain(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             operator_rhs,
             resolved_ret,
             checked_widen,
+            checked_callee: _,
         } = call
         else {
             unreachable!("method chain contains only method calls")
@@ -9169,6 +9170,7 @@ fn unit_lit_elaborated(e: &Expr, cx: &Cx) -> Option<Expr> {
             resolved_ret: None,
             operator_rhs: None,
             checked_widen: false,
+            checked_callee: None,
         });
     }
     if suffix != Syntax::UNIT_SUFFIX_IMAGINARY {
