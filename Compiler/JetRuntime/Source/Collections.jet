@@ -1205,7 +1205,10 @@ fn coll_loop_range_stop(exhausted: Bool) {
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     last :: jet_int_owned_to_i64(end)
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
-    if (stride == I64{0}) { coll_loop_range_stop(false) }
+    if (stride == I64{0}) {
+        coll_loop_range_stop(false)
+        return I64{0}
+    }
     cursor :: jet_rt_alloc(I64{40}, I64{8})
     trap_store(cursor, first)
     trap_store(cursor + I64{8}, last)
@@ -1227,7 +1230,10 @@ fn coll_loop_range_stop(exhausted: Bool) {
 }
 
 #Export(c) fn jet_loop_range_value(cursor: I64) -> I64 {
-    if !jet_loop_range_has_next(cursor) -> coll_loop_range_stop(true)
+    if !jet_loop_range_has_next(cursor) {
+        coll_loop_range_stop(true)
+        return I64{0}
+    }
     jet_int_owned_from_i64(trap_word(cursor))
 }
 
