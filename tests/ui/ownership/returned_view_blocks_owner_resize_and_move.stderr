@@ -1,0 +1,17 @@
+Error [E0212]: `values` cannot be changed by `.push()` while `result` is still looking into it
+  --> returned_view_blocks_owner_resize_and_move.jet:8:5
+    |
+  8 |     values.push(4)
+    |     ^^^^^^
+ Why: `result` is a live read view into `values[…]`; changing or moving the owner could invalidate that view
+ Fix: Finish using `result` before changing `values`, narrow the view's scope, or make an owned copy
+More: jet-lang.dev/e/E0212
+
+Error [E0224]: This call writes `values`, but `values` has no `&` mark
+  --> returned_view_blocks_owner_resize_and_move.jet:8:5
+    |
+  8 |     values.push(4)
+    |     ^^^^^^
+ Why: The method is declared with `&self`, so the call writes the named place it is called on; the mark sits on that place, the same way `edit(&buf)` and `consume(^text)` mark arguments
+ Fix: Write `&values`
+More: jet-lang.dev/e/E0224
