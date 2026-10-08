@@ -68,6 +68,13 @@ change this rendering. `DataTree` remains the native nominal pending the
 ordered Object/public Map representation ruling; its policy uses borrowed
 ordered Object leaves rather than replacing the carrier.
 
+Compact and pretty JSON serialization route through their Jet `Encode` wrappers;
+the old native serializer dispatcher rows are metadata-only source-owned rows.
+The CBOR whole-value rows likewise execute their existing source encoders and
+parser. Alphabet decoders already use source ownership, not native dispatcher
+aliases. `Examples/features/serde/encoding_source_cutover.jet` records focused
+vectors for these routing contracts.
+
 `EncodingLimits` has these fields:
 
 - `buffer_bytes`, `max_depth`, `max_item_bytes`,

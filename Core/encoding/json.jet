@@ -87,22 +87,23 @@ pub fn parse(text: String) -> DataTree EncodingError! { parse_json(text, false) 
 /// value at the first name's position.
 pub fn parse_allow_duplicates(text: String) -> DataTree EncodingError! { parse_json(text, true) }
 
-/// Same as `parse`. Kept as the documented sibling verb for typed lowering.
+/// Dynamic lenient decode stays on its existing route until its host leaves land.
 pub fn decode(text: String) -> DataTree EncodingError! { parse_json(text, false) }
+
 /// Python-compatible spelling for JSON parsing.
 pub fn loads(text: String) -> DataTree EncodingError! { parse(text) }
 
 /// Python-compatible file-shaped spelling for JSON parsing.
 pub fn load(text: String) -> DataTree EncodingError! { parse(text) }
 /// Compact JSON text. Object keys keep insertion order.
-pub fn to_string(value: DataTree) -> String Never! { render_json(value, false) }
+pub fn to_string<T: Encode>(value: T) -> String Never! { render_json(value.encode(), false) }
 /// Python-compatible spelling for compact JSON serialization.
 pub fn dumps(value: DataTree) -> String Never! { render_json(value, false) }
 /// Python-compatible file-shaped spelling for JSON serialization.
 pub fn dump(value: DataTree) -> String Never! { render_json(value, false) }
 
 /// Two-space indented JSON text.
-pub fn to_string_pretty(value: DataTree) -> String Never! { render_json(value, true) }
+pub fn to_string_pretty<T: Encode>(value: T) -> String Never! { render_json(value.encode(), true) }
 
 /// RFC 8785 JSON Canonicalization Scheme bytes (D-JSONCANON1=A): compact,
 /// object keys sorted by unsigned UTF-16 code units, ECMAScript `Number`
