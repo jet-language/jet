@@ -1993,3 +1993,16 @@ constructors perform the existing checked exact-Int-to-i64 conversion and
 getters produce fresh exact Int owners; clone/drop never treat those raw
 words as Int handles. Typed Field/Axis/Legend/Capability list helpers share
 the existing native List holder allocator and lend indexed child handles.
+
+`DataPlotGraph.jet`, `DataPlotVariants.jet`, and `DataPlotError.jet` retain
+ordered recursive ownership without a second formatter or collection ABI.
+The private Transform carrier is a tag plus at most three payload words.
+Schema consumes typed Field lists; nested record getters clone, while native
+handle-field getters lend the existing child or expose scalar field storage.
+Error's five optional texts are nullable owned E4 headers (a present empty
+text still has a header), and its optional Rust i64 index is an inline
+presence/raw-value pair. This null-for-None convention is private storage:
+the existing nullable input-pointer and presence/outslot C ABI is unchanged.
+`DataPlotGraphWitness.c` checks ordered lists, every Transform variant,
+optional presence/empty-text distinction, IEEE domains and exact-once frees
+with the real Jet provider, never a Rust allocation or a provider mock.
