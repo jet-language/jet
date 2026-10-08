@@ -618,7 +618,7 @@ mod jet_c_abi {
 
     #[cfg(jet_native_pack)]
     unsafe extern "C" {
-        fn jet_rt_alloc(size: usize, align: usize) -> *mut u8;
+        pub(super) fn jet_rt_alloc(size: usize, align: usize) -> *mut u8;
         fn jet_rt_free(ptr: *mut u8, size: usize, align: usize);
     }
 
