@@ -24,7 +24,7 @@ use core.time as time
 // `v4.public` over the strict Ed25519 primitive. JSON goes through Jet's one
 // RFC 8259 parser and no token-controlled algorithm or purpose is dispatched.
 // Password hashes are opaque caller-supplied values compared in constant time.
-// Every session rule is Jet; the host keeps only the D-AUTH1=A byte cell.
+// Every session rule and the world-lifetime Shared byte store are Jet.
 
 /// Verification failure. Every variant and payload is part of the contract.
 #Error
@@ -314,12 +314,45 @@ fn b64url_value(b: U8) -> Int Never! {
 
 // ── Session store ───────────────────────────────────────────────────────────
 //
-// Users, sessions, magic-link tokens and OAuth states live in one process
-// store. Every rule (validation, expiry, constant-time token comparison,
-// single-use consumption, the OAuth state cap) is Jet below. The host keeps
-// only an opaque byte cell (D-AUTH1=A): `__store_load` reads it and
-// `__store_replace` swaps it atomically when it still holds the bytes this
-// call read, so concurrent mutations retry instead of losing an update.
+// Users, sessions, magic-link tokens and OAuth states share one world store.
+// The one-shot evaluator/world reset clears this site at its existing
+// quiescent boundary; no provider owns a parallel byte cell.
+struct AuthState { bytes: [U8] }
+
+fn init_auth_state() -> Shared<AuthState> Never! {
+    shared AuthState{bytes: [U8]{}}
+}
+
+fn auth_state() -> Shared<AuthState> Never! {
+    core.mem.__world_shared(init_auth_state)
+}
+
+pub fn __store_load() -[DB]> [U8] Never! {
+    state :: auth_state()
+    guard :: state.guard_read()
+    ~guard.value.bytes
+}
+
+pub fn __store_replace(expected: [U8], next: [U8]) -[DB]> Bool Never! {
+    state :: auth_state()
+    replace_auth_bytes(state, expected, next)
+}
+
+fn replace_auth_bytes(state: Shared<AuthState>, expected: [U8], next: [U8]) -> Bool Never! {
+    guard := state.guard_edit()
+    if guard.value.bytes != expected -> return false
+    guard.value.bytes = next
+    true
+}
+
+#Test("auth byte replacement compares the complete snapshot atomically") {
+    state :: init_auth_state()
+    assert(replace_auth_bytes(state, [U8]{}, [U8]{1, 2}))
+    assert(!replace_auth_bytes(state, [U8]{}, [U8]{3}))
+    assert(replace_auth_bytes(state, [U8]{1, 2}, [U8]{}))
+    guard :: state.guard_read()
+    assert_eq(guard.value.bytes.len(), 0)
+}
 
 /// Register an identity with an already-computed password hash.
 pub fn register_user(user_id: String, password_hash: String) Err! -[DB]> {
