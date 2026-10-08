@@ -1624,9 +1624,13 @@ dynamic code loading; `get`, `set`, `clear`, `copy`, `equal`, `getfile`,
 ### `core.sys` — environment and system facts
 
 `core.sys` exposes the process environment, working directory, platform facts,
-process identifiers, and explicitly unsafe POSIX controls. Environment names
-and values are checked by the provider; `get` returns `None` for an unset name,
-while `unset` and `vars` report `EnvError` for invalid or non-Unicode state.
+process identifiers, and explicitly unsafe POSIX controls. Jet source validates
+environment names and values; `get` returns `None` for an unset name or a
+non-Unicode value, while `unset` rejects invalid names and `vars` rejects
+non-Unicode names or values. Names use the platform's environment-key order.
+Mutation changes only Jet's process-lifetime logical overlay, never the host
+environment block. Child overlays snapshot once, apply sets in order, then
+apply removals; an explicitly empty value is not an absent value.
 
 ```jet
 use core.sys as sys

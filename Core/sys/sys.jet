@@ -36,11 +36,196 @@ pub fn usize_max() -> U64 Never! { SYS_TARGET_USIZE_MAX }
 }
 
 
-pub fn get(name: String) -[Env]> String? Never! { core.sys.get(name) }
+// Source owns validation, Unicode policy and child overlays. The existing
+// process cell remains the sole writer until the pinned Shared root lands.
+pub fn get(name: String) -[Env]> String? Never! {
+    decode_host_env(core.sys.__env_value(name))
+}
 
-pub fn unset(name: String) -[Env]> Bool EnvError! { core.sys.unset(name) }
+pub fn set(name: String, value: String) -[Env]> Never! {
+    if validate_env_name(name) == {
+        .Err(error) -> panic("core.sys.set: {error}")
+        .Ok(_) -> {}
+    }
+    if has_nul(value) -> panic("core.sys.set: {EnvError.InvalidValue}")
+    if core.sys.__env_set(name, value) == {
+        .Err(error) -> panic("core.sys.set: {error}")
+        .Ok(_) -> {}
+    }
+}
 
-pub fn vars() -[Env]> [String] EnvError! { core.sys.vars() }
+pub fn unset(name: String) -[Env]> Bool EnvError! {
+    validate_env_name(name)
+    core.sys.__env_remove(name)
+}
+
+pub fn vars() -[Env]> [String] EnvError! {
+    entry_names(__env_snapshot())
+}
+
+// Immutable host bytes are not the logical process environment.
+pub fn __startup_env() -> [(name: [U8], value: [U8])] Never! {
+    env_columns(core.sys.__startup_env_columns())
+}
+
+// Snapshot once, under the existing host cell's lock. No per-name rereads.
+pub fn __env_snapshot() -> [(name: [U8], value: [U8])] Never! {
+    env_columns(core.sys.__env_columns())
+}
+
+pub fn __env_present(name: String) -[Env]> Bool Never! {
+    core.sys.__env_value(name) != None
+}
+
+fn env_columns(columns: [[U8]]) -> [(name: [U8], value: [U8])] Never! {
+    entries := [(name: [U8], value: [U8])]{}
+    index := 0
+    loop index < columns.len() {
+        &entries.push((name: columns[index], value: columns[index + 1]))
+        index += 2
+    }
+    entries
+}
+
+// Process.rs:237-277: prepare the child environment entirely in source.
+// Explicit sets are applied in order, then every removal.
+pub fn __env_compose(snapshot: [(name: [U8], value: [U8])], clear: Bool,
+    names: [String], values: [String], removals: [String]) -> [(name: [U8], value: [U8])] IOError! {
+    assert(names.len() == values.len())
+    entries := if clear -> [(name: [U8], value: [U8])]{} else -> ~snapshot
+    loop index in 0..<names.len() {
+        name :: names[index]
+        if validate_env_name(name) == {
+            .Err(error) -> return Err(env_process_error(name, error))
+            .Ok(_) -> {}
+        }
+        value :: values[index]
+        if has_nul(value) -> return Err(env_process_error(name, EnvError.InvalidValue))
+        remove_process_entries(&entries, name.bytes())
+        &entries.push((name: name.bytes(), value: value.bytes()))
+    }
+    loop name in removals {
+        if validate_env_name(name) == {
+            .Err(error) -> return Err(env_process_error(name, error))
+            .Ok(_) -> {}
+        }
+        remove_process_entries(&entries, name.bytes())
+    }
+    Ok(entries)
+}
+
+fn env_process_error(name: String, error: EnvError) -> IOError Never! {
+    IOError.InvalidInput(IOContext{
+        operation: .Resolve, resource: Val(name), os_code: None, cause: Val("{error}"),
+    })
+}
+
+fn remove_process_entries(entries: &[(name: [U8], value: [U8])], name: [U8]) Never! {
+    loop {
+        if !remove_entry(&entries, name) -> return
+    }
+}
+
+fn validate_env_name(name: String) -> Unit EnvError! {
+    if name.bytes().len() == 0 || has_nul(name) -> return Err(EnvError.InvalidName)
+    loop byte in name.bytes() {
+        if byte == (U8{61}) -> return Err(EnvError.InvalidName)
+    }
+    Ok()
+}
+
+fn env_key_compare(left: [U8], right: [U8]) -> Int Never! {
+    core.sys.__env_key_compare(left, right)
+}
+
+fn entry_index(entries: [(name: [U8], value: [U8])], key: [U8]) -> Int Never! {
+    loop index in 0..<entries.len() {
+        if env_key_compare(entries[index].name, key) == 0 -> return index
+    }
+    -1
+}
+
+fn read_entry(entries: [(name: [U8], value: [U8])], key: [U8]) -> String? Never! {
+    index :: entry_index(entries, key)
+    if index < 0 -> return None
+    String.from_bytes(entries[index].value)
+}
+
+fn remove_entry(entries: &[(name: [U8], value: [U8])], key: [U8]) -> Bool Never! {
+    index :: entry_index(entries, key)
+    if index < 0 -> return false
+    _ :: &entries.remove(index)
+    true
+}
+
+fn replace_entry(entries: &[(name: [U8], value: [U8])], key: [U8], value: [U8]) Never! {
+    _ :: remove_entry(&entries, key)
+    &entries.push((name: key, value: value))
+}
+
+fn entry_names(entries: [(name: [U8], value: [U8])]) -> [String] EnvError! {
+    ordered := [(raw: [U8], name: String)]{}
+    loop entry in entries {
+        name :: String.from_bytes(entry.name) ?? return Err(EnvError.NonUnicode)
+        _ :: String.from_bytes(entry.value) ?? return Err(EnvError.NonUnicode)
+        &ordered.push((raw: entry.name, name: name))
+    }
+    loop index in 1..<ordered.len() {
+        position := index
+        loop position > 0 && env_key_compare(ordered[position - 1].raw, ordered[position].raw) > 0 {
+            previous :: ordered[position - 1]
+            ordered[position - 1] = ordered[position]
+            ordered[position] = previous
+            position -= 1
+        }
+    }
+    names := [String]{}
+    loop entry in ordered -> &names.push(entry.name)
+    Ok(names)
+}
+
+#Test("logical environment replacement and removal retain one last spelling") {
+    entries := [(name: [U8], value: [U8])]{}
+    replace_entry(&entries, "JET_ENV_A".bytes(), "old".bytes())
+    replace_entry(&entries, "JET_ENV_B".bytes(), "other".bytes())
+    replace_entry(&entries, "JET_ENV_A".bytes(), "".bytes())
+    assert_eq(entries.len(), 2)
+    assert_eq(String.from_bytes(entries[0].name), Val("JET_ENV_B"))
+    assert_eq(read_entry(entries, "JET_ENV_A".bytes()), Val(""))
+    assert(remove_entry(&entries, "JET_ENV_A".bytes()))
+    assert(!remove_entry(&entries, "JET_ENV_A".bytes()))
+}
+
+#Test("logical environment presence and Unicode enumeration differ") {
+    entries :: [(name: [U8], value: [U8])]{(name: "NO_COLOR".bytes(), value: [U8]{255})}
+    assert_eq(entry_index(entries, "NO_COLOR".bytes()), 0)
+    assert_eq(read_entry(entries, "NO_COLOR".bytes()), None)
+    if entry_names(entries) == {
+        .Err(error) -> assert(error == EnvError.NonUnicode)
+        .Ok(_) -> assert(false)
+    }
+}
+
+#Test("logical environment validates names and sorts names, not values") {
+    if validate_env_name("") == { .Err(_) -> {} .Ok(_) -> assert(false) }
+    if validate_env_name("A=B") == { .Err(_) -> {} .Ok(_) -> assert(false) }
+    entries :: [(name: [U8], value: [U8])]{
+        (name: "JET_ENV_Z".bytes(), value: "".bytes()),
+        (name: "JET_ENV_A".bytes(), value: "z".bytes())
+    }
+    assert_eq(entry_names(entries) ?? panic("Unicode entries"), [String]{"JET_ENV_A", "JET_ENV_Z"})
+}
+
+#Test("child environment applies sets before removals and retains raw values") {
+    snapshot :: [(name: [U8], value: [U8])]{
+        (name: "JET_ENV_A".bytes(), value: [U8]{255}),
+        (name: "JET_ENV_B".bytes(), value: "old".bytes()),
+    }
+    composed :: __env_compose(snapshot, false, [String]{"JET_ENV_B", "JET_ENV_B"},
+        [String]{"first", "second"}, [String]{"JET_ENV_B"}) ?? panic("valid overlay")
+    assert_eq(composed, [(name: [U8], value: [U8])]{snapshot[0]})
+    assert_eq(__env_compose(snapshot, true, [String]{}, [String]{}, [String]{}) ?? panic("clear"), [(name: [U8], value: [U8])]{})
+}
 
 pub fn current_dir() -[FS, Env]> String IOError! {
     if core.sys.__current_dir() == {
@@ -57,7 +242,7 @@ pub fn home_dir() -[Env]> String? Never! {
 
 pub fn name() -[Env]> String Never! { core.sys.name() }
 
-pub fn family() -[Env]> String Never! { core.sys.family() }
+pub fn family() -[Env]> String Never! { core.sys.__family_os() }
 
 pub fn arch() -[Env]> String Never! { core.sys.arch() }
 
@@ -183,9 +368,9 @@ pub fn expand(value: String) -[Env]> String Never! {
     }
 }
 
-pub fn pid() -[Env]> Int Never! { core.sys.getpid() }
+pub fn pid() -[Env]> Int Never! { getpid() }
 
-pub fn getpid() -[Env]> Int Never! { core.sys.getpid() }
+pub fn getpid() -[Env]> Int Never! { core.sys.__pid_os() }
 
 pub fn cpu_count() -[Env]> Int Never! {
     count :: core.sys.__cpu_count() ?? 1
@@ -278,7 +463,7 @@ pub fn getsid(pid: Int) -[Env]> Int IOError! {
     call_unit(core.sys.__utime(path, atime, mtime), "utime", .Write, Val(path))
 }
 
-pub fn sync() Never! -[FS, Env]> { core.sys.sync() }
+pub fn sync() Never! -[FS, Env]> { core.sys.__sync_os() }
 
 #Unsafe("posix stop: the caller accepts that the process ends here after the shared cleanup boundary") pub fn stop(code: Int) Never! -[Env, Exec]> {
     process.exit(code)
@@ -297,7 +482,11 @@ pub fn set_current_dir(path: String) IOError! -[FS, Env]> {
 }
 
 #Unsafe("posix close_fd: the caller owns `fd` and nothing uses it after this call") pub fn close_fd(fd: Int) Never! -[FS, Env]> {
-    core.sys.close_fd(fd)
+    core.sys.__close_fd_os(fd)
+}
+
+pub fn atexit(handler: fn()) Never! -[Env]> {
+    core.sys.__atexit_os(handler)
 }
 
 #Unsafe("posix mkfifo: the caller owns `path` and removes the named pipe it creates") pub fn mkfifo(path: String, mode: Int) IOError! -[FS, Env]> {
