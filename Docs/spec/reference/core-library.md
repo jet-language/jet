@@ -1995,6 +1995,12 @@ nonzero middle-frame identity, inverse rejects nonfinite determinants and
 absolute determinants at or below f64 epsilon, and point application rejects
 stale nonzero frames. Depth must be finite. Rays retain the transformed
 origin and the first matrix column as their direction.
+The compiler's existing nominal-space checks also recognize these registered
+source declaration identities. User declarations with the same final name do
+not acquire geometry privileges, and cross-space diagnostics are unchanged.
+`Transform2<Float>.then` and `.inverse` retain the seed route while the owner
+resolves their historical `Transform` return identity versus distinct source
+nominals; those two audit rows are not credited as cut over.
 
 ```jet
 fn rotate(v: Vec3, transform: Mat3) -> Vec3 {

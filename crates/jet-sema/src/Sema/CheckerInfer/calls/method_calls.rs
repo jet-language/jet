@@ -6588,7 +6588,8 @@ impl<'a> Checker<'a> {
         // same closed return oracle.  This is the sema boundary that rejects
         // a mismatched transform middle space before any backend sees it.
         if let Some(base) = recv_ty.base_name() {
-            if is_geometry_type(base) && !self.registry.contains(base) {
+            if is_geometry_type(base)
+                && (!self.registry.contains(base) || jet_foundation::CoreModuleExports::core_source_owns_type(base)) {
                 let args_len = args.len();
                 let mut arg_types = Vec::with_capacity(args_len);
                 for (idx, arg) in args.iter_mut().enumerate() {
@@ -6597,7 +6598,7 @@ impl<'a> Checker<'a> {
                         && matches!(
                             &recv_ty,
                             Type::Apply { name, .. }
-                                if matches!(name.as_str(), "Transform" | "Transform2")
+                                if matches!(crate::Sema::geometry_nominal_leaf(name), "Transform" | "Transform2")
                         )
                         && args_len == 2;
                     if depth_arg {
@@ -6652,7 +6653,7 @@ impl<'a> Checker<'a> {
                                 } else {
                                     expected
                                 };
-                                let operation = format!("{base}.{method}");
+                                let operation = format!("{}.{method}", crate::Sema::geometry_nominal_leaf(base));
                                 self.diags.push(Diagnostic::from_row(
                                     "E2520",
                                     &[

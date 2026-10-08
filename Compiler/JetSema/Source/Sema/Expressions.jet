@@ -1107,16 +1107,16 @@ fn sema_expr_check_math_binary(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span, li
 }
 fn sema_expr_geometry_is_point(ty: Type) -> Bool Never! {
     if ty == {
-        .Named(name) -> return name == "ScreenPoint" || name == "WorldPoint" || name == "ViewPoint" || name == "CameraPoint" || name == "DevicePoint"
-        .Apply(name, args) -> return name == "Point2" && args.len() == 2
+        .Named(name) -> return sema_geometry_nominal_leaf(name) == "ScreenPoint" || sema_geometry_nominal_leaf(name) == "WorldPoint" || sema_geometry_nominal_leaf(name) == "ViewPoint" || sema_geometry_nominal_leaf(name) == "CameraPoint" || sema_geometry_nominal_leaf(name) == "DevicePoint"
+        .Apply(name, args) -> return sema_geometry_nominal_leaf(name) == "Point2" && args.len() == 2
         else -> false
     }
 }
 
 fn sema_expr_geometry_is_delta(ty: Type) -> Bool Never! {
     if ty == {
-        .Named(name) -> return name == "ScreenDelta" || name == "WorldDelta" || name == "ViewDelta" || name == "CameraDelta" || name == "DeviceDelta"
-        .Apply(name, args) -> return name == "Delta2" && args.len() == 2
+        .Named(name) -> return sema_geometry_nominal_leaf(name) == "ScreenDelta" || sema_geometry_nominal_leaf(name) == "WorldDelta" || sema_geometry_nominal_leaf(name) == "ViewDelta" || sema_geometry_nominal_leaf(name) == "CameraDelta" || sema_geometry_nominal_leaf(name) == "DeviceDelta"
+        .Apply(name, args) -> return sema_geometry_nominal_leaf(name) == "Delta2" && args.len() == 2
         else -> false
     }
 }
@@ -1124,6 +1124,7 @@ fn sema_expr_geometry_is_delta(ty: Type) -> Bool Never! {
 fn sema_expr_geometry_space(ty: Type) -> Type? {
     if ty == {
         .Named(name) -> {
+            name :: sema_geometry_nominal_leaf(name)
             if name == "ScreenPoint" || name == "ScreenDelta" -> return Val(Type.Named{name: "Screen"})
             if name == "WorldPoint" || name == "WorldDelta" -> return Val(Type.Named{name: "World"})
             if name == "ViewPoint" || name == "ViewDelta" -> return Val(Type.Named{name: "View"})
@@ -1131,7 +1132,7 @@ fn sema_expr_geometry_space(ty: Type) -> Type? {
             if name == "DevicePoint" || name == "DeviceDelta" -> return Val(Type.Named{name: "Device"})
         }
         .Apply(name, args) -> {
-            if (name == "Point2" || name == "Delta2") && args.len() == 2 -> return Val(args[1])
+            if (sema_geometry_nominal_leaf(name) == "Point2" || sema_geometry_nominal_leaf(name) == "Delta2") && args.len() == 2 -> return Val(args[1])
         }
         else -> {}
     }
@@ -1140,7 +1141,7 @@ fn sema_expr_geometry_space(ty: Type) -> Type? {
 
 fn sema_expr_geometry_dynamic(ty: Type) -> Bool Never! {
     if ty == {
-        .Apply(name, _) -> return name == "Point2" || name == "Delta2"
+        .Apply(name, _) -> return sema_geometry_nominal_leaf(name) == "Point2" || sema_geometry_nominal_leaf(name) == "Delta2"
         else -> false
     }
 }
@@ -1154,6 +1155,13 @@ fn sema_expr_geometry_generic(name: String, source: Type) -> Type Never! {
 }
 
 fn sema_expr_geometry_result(op: BinOp, lhs: Type, rhs: Type) -> Type? {
+    result :: sema_expr_geometry_result_inner(op, lhs, rhs) ?? return None
+    source :: if sema_geometry_nominal_leaf(sema_expr_geometry_name(lhs)) != sema_expr_geometry_name(lhs) -> lhs else -> rhs
+    if result == (Type.Named{name: "__GeometrySpaceMismatch"}) || result == (Type.Named{name: "__GeometryUnsupported"}) -> return Val(result)
+    Val(sema_geometry_restore_owner(result, source))
+}
+
+fn sema_expr_geometry_result_inner(op: BinOp, lhs: Type, rhs: Type) -> Type? {
     left_point := sema_expr_geometry_is_point(lhs)
     right_point := sema_expr_geometry_is_point(rhs)
     left_delta := sema_expr_geometry_is_delta(lhs)
@@ -1189,7 +1197,8 @@ fn sema_expr_geometry_result(op: BinOp, lhs: Type, rhs: Type) -> Type? {
                             result = Val(sema_expr_geometry_generic("Delta2", lhs))
                         }
                         else -> {
-                            point_name :: if lhs == (Type.Named{name: "ScreenPoint"}) -> "ScreenDelta" else -> if lhs == (Type.Named{name: "WorldPoint"}) -> "WorldDelta" else -> if lhs == (Type.Named{name: "ViewPoint"}) -> "ViewDelta" else -> if lhs == (Type.Named{name: "CameraPoint"}) -> "CameraDelta" else -> if lhs == (Type.Named{name: "DevicePoint"}) -> "DeviceDelta" else -> ""
+                            point_leaf :: sema_geometry_nominal_leaf(sema_expr_geometry_name(lhs))
+                            point_name :: if point_leaf == "ScreenPoint" -> "ScreenDelta" else -> if point_leaf == "WorldPoint" -> "WorldDelta" else -> if point_leaf == "ViewPoint" -> "ViewDelta" else -> if point_leaf == "CameraPoint" -> "CameraDelta" else -> if point_leaf == "DevicePoint" -> "DeviceDelta" else -> ""
                             if point_name != "" -> result = Val(Type.Named{name: point_name})
                         }
                     }
@@ -3737,4 +3746,15 @@ pub fn sema_check_expression_with_lambda_escapes(expr: Expr, expected: Type?, en
     checked := sema_check_expression(expr, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     context.lambda_escapes = previous_lambda_escapes
     checked
+}
+
+#Test("Source coordinates preserve the existing same-space binary oracle") {
+    point :: Type.Named{name: "<corelib>/Core/math::Core/math/math.jet::ScreenPoint"}
+    delta :: Type.Named{name: "<corelib>/Core/math::Core/math/math.jet::ScreenDelta"}
+    world :: Type.Named{name: "<corelib>/Core/math::Core/math/math.jet::WorldDelta"}
+    assert(sema_expr_geometry_is_point(point))
+    assert_eq(sema_expr_geometry_space(point), Val(Type.Named{name: "Screen"}))
+    assert_eq(sema_expr_geometry_result(BinOp.Add, point, delta), Val(point))
+    assert_eq(sema_expr_geometry_result(BinOp.Add, point, world), Val(Type.Named{name: "__GeometrySpaceMismatch"}))
+    assert(!sema_expr_geometry_is_point(Type.Named{name: "user::ScreenPoint"}))
 }
