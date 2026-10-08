@@ -10624,20 +10624,6 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 if route.member == "expiring.get" {
                     return self.eval_expiring_get(receiver_value, args, frame_index, span);
                 }
-                if route.module == "core.handle"
-                    && matches!(
-                        route.member.as_str(),
-                        "clock.now" | "clock.tick" | "clock.advance" | "clock.wait"
-                    )
-                {
-                    return self.eval_clock_handle(
-                        &route.member,
-                        receiver_value,
-                        args,
-                        frame_index,
-                        span,
-                    );
-                }
                 if route.module == "core.handle" && route.member.starts_with("rng.") {
                     return self.eval_rng_handle(
                         &route.member,
@@ -17035,28 +17021,6 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 }
             }
         }
-        if family == jet_foundation::MIR::MirPreludeFamily::StaticPrelude && module == "core.clock"
-        {
-            use crate::Comptime::ClockRuntime;
-            let clock = match (member_name.as_str(), args.as_slice()) {
-                ("clock_new", [value]) => {
-                    let value = self.runtime_to_ct(value.clone(), span)?;
-                    ClockRuntime::jet_std_clock_new(crate::Comptime::Builtins::as_int(
-                        &value, span,
-                    )?)
-                }
-                ("clock_system", []) => ClockRuntime::jet_std_clock_system(),
-                _ => {
-                    return Err(mir_error_at(
-                        "MIR Clock constructor has an invalid checked call",
-                        span,
-                    ))
-                }
-            };
-            return Ok(RuntimeValue::Ambient(mir_runtime_owner_value(
-                MirClock::new(clock),
-            )));
-        }
         if family == jet_foundation::MIR::MirPreludeFamily::HandleMethod
             && module == "core.handle"
             && matches!(
@@ -21878,56 +21842,6 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         self.invoke_http_handler(handler, args, span)
     }
 
-    fn eval_clock_handle(
-        &mut self,
-        member: &str,
-        receiver: RuntimeValue,
-        args: &[MirValueId],
-        frame_index: usize,
-        span: Span,
-    ) -> Result<RuntimeValue, Diagnostic> {
-        use crate::Comptime::ClockRuntime;
-        let receiver = self.runtime_to_ct(receiver, span)?;
-        let clock = mir_runtime_owner::<MirClock>(&receiver)
-            .ok_or_else(|| mir_error_at("MIR Clock receiver has no native owner", span))?;
-        let mut clock = clock.lock().unwrap_or_else(|error| error.into_inner());
-        let argument = match args {
-            [] => None,
-            [arg] => {
-                let value = self.value(frame_index, *arg, span)?;
-                let value = self.materialize_runtime(value, span)?;
-                Some(runtime_to_data(value, span)?)
-            }
-            _ => return Err(mir_error_at("MIR Clock method has extra arguments", span)),
-        };
-        let integer = |value: MirEvalValue| {
-            let value = crate::Comptime::MirBridge::mir_to_ct_value(value, span)?;
-            crate::Comptime::Builtins::as_int(&value, span)
-        };
-        let now = match (member, argument) {
-            ("clock.now", None) => ClockRuntime::jet_clock_now(&clock),
-            ("clock.tick", Some(value)) => {
-                ClockRuntime::jet_clock_tick(&mut clock, integer(value)?)
-            }
-            ("clock.advance", Some(value)) => {
-                ClockRuntime::jet_clock_advance(&mut clock, integer(value)?)
-            }
-            ("clock.wait", Some(value)) => {
-                let ns = mir_time_field(&value, crate::Syntax::DURATION_TYPE, "ns", span)?;
-                ClockRuntime::jet_clock_tick(
-                    &mut clock,
-                    crate::scheduler::jet_std_time_duration_to_millis(ns),
-                )
-            }
-            _ => {
-                return Err(mir_error_at(
-                    "MIR Clock method has an invalid checked call",
-                    span,
-                ))
-            }
-        };
-        Ok(RuntimeValue::Data(MirEvalValue::Int(now)))
-    }
 
     /// The place a written handle operand lives in. A borrowed operand
     /// arrives as the owner's Address; a plain read names its source place.

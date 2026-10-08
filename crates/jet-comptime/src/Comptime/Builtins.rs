@@ -1374,50 +1374,6 @@ pub fn apply_mutating_with_type(
         }
         return Ok(value);
     }
-    // D-DET1 / #777: Clock + seeded Rng mutate in place for MirBridge handles.
-    let clock_next = if let CtValue::Struct { type_name, fields } = &*recv {
-        if type_name == crate::Syntax::CLOCK_TYPE && matches!(method, "tick" | "advance" | "wait") {
-            let now = fields
-                .iter()
-                .find_map(|(name, value)| match (name.as_str(), value) {
-                    ("now", CtValue::Int(now)) => Some(*now),
-                    _ => None,
-                })
-                .unwrap_or(0);
-            Some(match method {
-                "tick" => now.wrapping_add(as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?),
-                "advance" => as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?,
-                "wait" => match args.first() {
-                    Some(CtValue::Struct {
-                        type_name,
-                        fields: dfields,
-                    }) if type_name == crate::Syntax::DURATION_TYPE => {
-                        let millis = dfields
-                            .iter()
-                            .find_map(|(name, value)| match (name.as_str(), value) {
-                                ("ns", CtValue::Int(ns)) => Some(ns.saturating_div(1_000_000)),
-                                _ => None,
-                            })
-                            .unwrap_or(0);
-                        now.wrapping_add(millis)
-                    }
-                    _ => return Err(unsupported("Clock.wait expects a Duration", span)),
-                },
-                _ => unreachable!(),
-            })
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-    if let Some(next) = clock_next {
-        *recv = CtValue::Struct {
-            type_name: crate::Syntax::CLOCK_TYPE.to_string(),
-            fields: vec![("now".to_string(), CtValue::Int(next))],
-        };
-        return Ok(CtValue::Int(next));
-    }
     let rng_state = if let CtValue::Struct { type_name, fields } = &*recv {
         if type_name == crate::Syntax::RNG_TYPE {
             Some(
@@ -3183,15 +3139,6 @@ pub fn apply_method(
                     .next()
                     .ok_or_else(|| unsupported("`Loadable.or_else` requires a default", span))
             }
-        }
-        (CtValue::Struct { type_name, fields }, "now")
-            if type_name == crate::Syntax::CLOCK_TYPE =>
-        {
-            Ok(fields
-                .iter()
-                .find(|(n, _)| n == "now")
-                .map(|(_, v)| v.clone())
-                .unwrap_or(CtValue::Int(0)))
         }
         (CtValue::Struct { type_name, fields }, "in")
             if type_name == crate::Syntax::DURATION_TYPE =>
