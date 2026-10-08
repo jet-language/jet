@@ -35,7 +35,7 @@ assert.equal(generatedRecordPath("a_b::c/d"), "__jet_a_ub_c_cc_sd");
 assert.deepEqual(recordApplicationsIn("fn value(x: Pair<f64,bool>) -> Option<Pair<f64,bool>>", "Pair"), ["Pair<f64,bool>", "Pair<f64,bool>"]);
 
 try {
-  for (const name of ["gen-c-abi-routes.mjs", "runtime-route-abi.mjs"]) {
+  for (const name of ["gen-c-abi-routes.mjs", "runtime-route-abi.mjs", "native-route-handles.mjs"]) {
     const path = `Tools/agent/${name}`;
     mkdirSync(dirname(join(fixture, path)), { recursive: true });
     cpSync(join(root, path), join(fixture, path));
@@ -119,6 +119,8 @@ pub fn source_pair(first: f64, second: bool) -> ${pairSource}<f64,bool> { ${pair
   assert.ok(sourceJet.includes(`LowerRecordSchema{jet_name: "${pairInstance}", variants: "", fields: "first=Float,second=Flag"}`));
   assert.ok(sourceJet.includes(`jet_name: "${sampleKey}<Float>", runtime: "${sampleInstance}"`));
   assert.ok(sourceJet.includes(`jet_name: "${pairKey}<Float,Bool>", runtime: "${pairInstance}"`));
+  assert.ok(sourceJet.includes(`LowerNativeType{jet_name: "${sampleKey}<Float>", declaration: "${sampleKey}", arguments: "Float"}`));
+  assert.ok(sourceJet.includes(`LowerNativeExport{symbol: "jet_rt_handle_clone_${sampleInstance}", jet_name: "${sampleKey}<Float>", op: "handle.clone", member: ""}`));
   assert.ok(sourceRust.includes(`${sampleSource}::<f64> { __jet_value: m0, __jet_uncertainty: m1 }`));
   put("runtime.rs", declarations + "pub fn jet_fixture_measurement(value: JetMeasurement<Unbound>) -> JetMeasurement<f64> { value }\n");
   const unresolved = run();
