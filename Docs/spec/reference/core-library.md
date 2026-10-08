@@ -59,6 +59,10 @@ never escapes a raw operation. Ordinary Close first unloads any opened native
 library, then removes its staged payload, matching the verification provider's
 error path. Successful finish transfers those resources into the existing Mod.
 
+The canonical `core.files.__create_dir_all_raw` leaf calls the shared recursive
+directory-creation host operation without a second fault probe; source callers
+retain their own FS.Write preflight and the host's Write/path error context.
+
 Plugin loading retains literal-artifact checking, frozen Component interfaces,
 and tightened-authority wire conversion at the compiler boundary. Its private
 checked source target validates the existing unsigned `O:<handle>` wire and

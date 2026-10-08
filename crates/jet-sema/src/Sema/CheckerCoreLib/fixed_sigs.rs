@@ -482,6 +482,8 @@ fn web_fixed_sig(
         ("core.plugin", "__load_wire") => Some((vec![(read, string.clone()), (read, string.clone())], Some(string.clone()))),
         ("core.plugin", "__from_handle") => Some((vec![(read, Type::IntN { signed: false, bits: 64 })], Some(web_named("Plugin")))),
         ("core.plugin", "__stop") => Some((vec![(read, string.clone())], Some(web_named("Never")))),
+        ("core.files", "__create_dir_all_raw") => Some((vec![(read, string.clone())],
+            Some(result_ty(unit_ty(), web_named("IOError"))))),
 
         ("core.data.sketch", "empty") => Some((vec![], Some(string.clone()))),
         ("core.data.sketch", "merge") => Some((
