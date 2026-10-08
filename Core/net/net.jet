@@ -83,7 +83,7 @@ pub enum NetError {
 // displays its detail message; DNS NotFound alone adds the canonical prefix.
 fn net_error_text(err: NetError) -> String Never! {
     if err == .DNS(dns) {
-        if dns == {
+        return if dns == {
             .NotFound(name) -> "DNS name not found: `{name}`"
             .Failure(message) -> message
         }
@@ -204,10 +204,16 @@ fn socket_to_string_impl(addr: SocketAddr) -> String Never! {
     host :: socket_host(addr)
     port :: socket_port(addr)
     if !contains_byte(host, 58) -> return "{host}:{port}"
-    scope :: #Unsafe("read native IPv6 socket scope identifier") { core.net.__socket_scope(addr) } ?? 0
+    scope :: socket_scope(addr)
     if scope == 0 -> "[{host}]:{port}" else -> "[{host}%{scope}]:{port}"
 }
 pub fn socket_to_string(addr: SocketAddr) -> String Never! { socket_to_string_impl(addr) }
+
+fn socket_scope(addr: SocketAddr) -> Int Never! {
+    #Unsafe("read native IPv6 socket scope identifier") {
+        return core.net.__socket_scope(addr) ?? 0
+    }
+}
 pub fn socket_type(stream: TCPStream) -> String Never! { "stream" }
 
 pub fn tcp_listen(addr: String) -[Net, Time.Wait]> TCPListener NetError! {
@@ -551,26 +557,35 @@ fn dns_error(name: String, message: String) -> NetError Never! {
 
 #Test("DNS lookup errors preserve classification precedence and context") {
     missing :: dns_error("example.test", "DNS name not found: timeout")
-    assert(error_name(missing) == Val("example.test"))
-    if missing == { .DNS(.NotFound(name)) -> assert(name == "example.test"); else -> panic("DNS NotFound") }
+    expected_name :: Val("example.test")
+    assert(error_name(missing) == expected_name)
+    if missing == {
+        .DNS(.NotFound(name)) -> assert(name == "example.test")
+        else -> panic("DNS NotFound")
+    }
     cancelled :: dns_error("example.test", "network operation cancelled: timeout")
     if cancelled == {
         .Cancelled(detail) -> {
             assert(detail.operation == "dns")
             assert(detail.address == None)
-            assert(detail.name == Val("example.test"))
+            assert(detail.name == expected_name)
             assert(detail.os_code == None)
             assert(detail.message == "network operation cancelled: timeout")
         }
         else -> panic("DNS cancellation")
     }
     protocol :: dns_error("example.test", "network protocol error: timeout")
-    if protocol == { .Protocol(_) -> {}; else -> panic("DNS protocol") }
-    loop message in [String]{"network timed out", "network timeout", "DNS worker timeout"} {
-        if dns_error("example.test", message) == { .Timeout(_) -> {}; else -> panic("DNS timeout") }
+    if protocol == .Protocol(_) {
+    } else { panic("DNS protocol") }
+    loop message in ([String]{"network timed out", "network timeout", "DNS worker timeout"}) {
+        if dns_error("example.test", message) == .Timeout(_) {
+        } else { panic("DNS timeout") }
     }
     failure :: dns_error("example.test", "DNS lookup worker failed")
-    if failure == { .DNS(.Failure(message)) -> assert(message == "DNS lookup worker failed"); else -> panic("DNS failure") }
+    if failure == {
+        .DNS(.Failure(message)) -> assert(message == "DNS lookup worker failed")
+        else -> panic("DNS failure")
+    }
     assert(error_name(failure) == None)
 }
 
@@ -862,12 +877,14 @@ fn slice_bytes(raw: [U8], start: Int, end: Int) -> [U8] Never! {
 }
 
 #Test("ordered resolver errors keep caller context and platform codes") {
+    expected_address :: Val("example.test:443")
+    expected_os_code :: Val(13)
     denied :: resolve_error("example.test:443", __ResolveError{kind: 2, has_os_code: true, os_code: 13, message: "denied"})
     if denied == {
         .PermissionDenied(detail) -> {
             assert(detail.operation == "resolve socket address")
-            assert(detail.address == Val("example.test:443"))
-            assert(detail.name == None && detail.os_code == Val(13))
+            assert(detail.address == expected_address)
+            assert(detail.name == None && detail.os_code == expected_os_code)
             assert(detail.message == "resolve socket address failed: denied")
         }
         else -> assert(false)
@@ -880,6 +897,7 @@ fn slice_bytes(raw: [U8], start: Int, end: Int) -> [U8] Never! {
 }
 
 #Test("ordered resolver chooses the first answer and rejects empty success") {
+    expected_address :: Val("example.test:443")
     first :: socket_addr_parse("[::1]:443") ?? panic("first answer")
     second :: socket_addr_parse("127.0.0.1:443") ?? panic("second answer")
     chosen :: resolve_first("example.test:443", [SocketAddr]{first, second}) ?? panic("ordered answers")
@@ -887,7 +905,7 @@ fn slice_bytes(raw: [U8], start: Int, end: Int) -> [U8] Never! {
     if resolve_first("example.test:443", [SocketAddr]{}) == {
         .Err(.Other(detail)) -> {
             assert(detail.operation == "resolve socket address")
-            assert(detail.address == Val("example.test:443"))
+            assert(detail.address == expected_address)
             assert(detail.message == "resolve socket address failed: no address")
         }
         else -> assert(false)
@@ -895,10 +913,11 @@ fn slice_bytes(raw: [U8], start: Int, end: Int) -> [U8] Never! {
 }
 
 #Test("resolver error OS code presence is independent of its stored word") {
+    expected_os_code :: Val(0)
     absent :: resolve_error("example.test:0", __ResolveError{kind: 0, has_os_code: false, os_code: 17, message: "missing"})
     zero :: resolve_error("example.test:0", __ResolveError{kind: 0, has_os_code: true, os_code: 0, message: "present"})
     assert(error_os_code(absent) == None)
-    assert(error_os_code(zero) == Val(0))
+    assert(error_os_code(zero) == expected_os_code)
 }
 
 #Test("network service names and aliases") {
@@ -920,14 +939,14 @@ fn slice_bytes(raw: [U8], start: Int, end: Int) -> [U8] Never! {
     detail :: NetErrorDetail{operation: "read", address: Val("127.0.0.1:80"), name: Val("example.test"), message: "closed", os_code: Val(9)}
     error :: NetError.Closed(detail)
     assert(error_operation(error) == "read")
-    assert(error_address(error) == Val("127.0.0.1:80"))
-    assert(error_name(error) == Val("example.test"))
-    assert(error_os_code(error) == Val(9))
+    assert(error_address(error) == detail.address)
+    assert(error_name(error) == detail.name)
+    assert(error_os_code(error) == detail.os_code)
     assert(error_message(error) == "closed")
     missing :: NetError.DNS(NetDnsError.NotFound("example.test"))
     assert(error_operation(missing) == "dns")
     assert(error_address(missing) == None)
-    assert(error_name(missing) == Val("example.test"))
+    assert(error_name(missing) == detail.name)
     assert(error_os_code(missing) == None)
     assert(error_message(missing) == "DNS name not found: `example.test`")
     failure :: NetError.DNS(NetDnsError.Failure("resolver unavailable"))
@@ -941,7 +960,7 @@ fn parse_ipv4_bytes(text: String) -> [U8]? Never! {
     raw :: text.bytes()
     bytes := [U8]{}
     start := 0
-    loop i in 0..=raw.len() {
+    loop i in 0..<(raw.len() + 1) {
         if i < raw.len() && raw[i] != (U8{46}) -> next
         if i == start || i - start > 3 -> return None
         if i - start > 1 && raw[start] == (U8{48}) -> return None
@@ -1012,7 +1031,7 @@ fn parse_ip_bytes(text: String) -> [U8]? Never! {
     if compression < 0 && words.len() != 8 -> return None
     if compression >= 0 && words.len() >= 8 -> return None
     bytes := [U8]{}
-    loop i in 0..=words.len() {
+    loop i in 0..<(words.len() + 1) {
         if i == compression {
             loop _ in 0..<(8 - words.len()) {
                 &bytes.push(U8{0})
@@ -1039,7 +1058,7 @@ fn net_hex_word(word: Int) -> String Never! {
     value := word
     bytes := [U8]{}
     started := false
-    loop divisor in [Int]{4096, 256, 16, 1} {
+    loop divisor in ([Int]{4096, 256, 16, 1}) {
         digit :: (value /% divisor) %% 16
         if digit > 0 || started || divisor == 1 {
             started = true
@@ -1061,7 +1080,10 @@ fn format_ip_bytes(bytes: [U8]) -> String Never! {
     best_length := 1
     i := 0
     loop i < 8 {
-        if words[i] != 0 { i = i + 1; next }
+        if words[i] != 0 {
+            i = i + 1
+            next
+        }
         start :: i
         loop i < 8 && words[i] == 0 -> i = i + 1
         if i - start > best_length {
@@ -1085,11 +1107,11 @@ fn format_ip_bytes(bytes: [U8]) -> String Never! {
 }
 
 #Test("native address parsing and canonical formatting policy") {
-    loop text in [String]{"0.0.0.0", "127.0.0.1", "255.255.255.255", "::", "::1", "2001:db8::1", "::ffff:192.0.2.1", "1:2:3:4:5:6:7:8"} {
+    loop text in ([String]{"0.0.0.0", "127.0.0.1", "255.255.255.255", "::", "::1", "2001:db8::1", "::ffff:192.0.2.1", "1:2:3:4:5:6:7:8"}) {
         bytes :: parse_ip_bytes(text) ?? panic("valid IP address")
         assert(format_ip_bytes(bytes) == text)
     }
-    loop text in [String]{"01.2.3.4", "1.2.3", "256.2.3.4", "1.2.3.4.", ":::1", "1:::2", ":1:2:3:4:5:6:7", "1:2:3:4:5:6:7:", "1:2:3:4:5:6:7:8::", "::1::", "::ffff:01.2.3.4"} {
+    loop text in ([String]{"01.2.3.4", "1.2.3", "256.2.3.4", "1.2.3.4.", ":::1", "1:::2", ":1:2:3:4:5:6:7", "1:2:3:4:5:6:7:", "1:2:3:4:5:6:7:8::", "::1::", "::ffff:01.2.3.4"}) {
         assert(parse_ip_bytes(text) == None)
     }
     bytes :: parse_ip_bytes("2001:0DB8:0:0:1:0:0:1") ?? panic("uppercase IP")
@@ -1103,7 +1125,7 @@ fn format_ip_bytes(bytes: [U8]) -> String Never! {
     ipv6 :: ip_addr("2001:0DB8:0:0:1:0:0:1") ?? panic("IPv6 carrier")
     assert(!ip_is_ipv4(ipv6))
     assert(ip_to_string(ipv6) == "2001:db8::1:0:0:1")
-    loop text in [String]{"127.0.0.1:0", "192.0.2.1:65535", "[::1]:80", "[fe80::1%4294967295]:65535", "[::ffff:192.0.2.1]:53"} {
+    loop text in ([String]{"127.0.0.1:0", "192.0.2.1:65535", "[::1]:80", "[fe80::1%4294967295]:65535", "[::ffff:192.0.2.1]:53"}) {
         address :: socket_addr_parse(text) ?? panic("socket carrier")
         assert(socket_to_string(address) == text)
         roundtrip :: socket_addr_parse(socket_to_string(address)) ?? panic("socket roundtrip")
@@ -1112,11 +1134,9 @@ fn format_ip_bytes(bytes: [U8]) -> String Never! {
     }
     unscoped :: socket_addr_parse("[fe80::1%0]:80") ?? panic("zero scope")
     assert(socket_to_string(unscoped) == "[fe80::1]:80")
-    loop text in [String]{"[::1%4294967296]:80", "[::1%eth0]:80", "[::1]:65536", "127.0.0.1:-1"} {
-        if socket_addr_parse(text) == {
-            .Err(_) -> {}
-            .Ok(_) -> panic("invalid socket carrier accepted")
-        }
+    loop text in ([String]{"[::1%4294967296]:80", "[::1%eth0]:80", "[::1]:65536", "127.0.0.1:-1"}) {
+        if socket_addr_parse(text) == .Err(_) {
+        } else { panic("invalid socket carrier accepted") }
     }
 }
 
