@@ -64,6 +64,12 @@ retirement. The runtime library-object feed requires an observed retirement
 request, retired resources and zero retained roots in its frontend receipt
 before accepting the object.
 
+The Rust-debug MIR conversion feed preserves the bootstrap codec's field-name
+mapping for all NameLedger rows, including display paths: the checked Rust
+`MIRNameDisplayPath.module` becomes Jet `module_index`. Internal and display
+paths remain distinct checked strings; conversion must not infer or discard
+either path.
+
 The seed/native C-ABI fixture declares each allocator export once in its shared
 extern block. Its ABI metadata checks must pass in both configurations before a
 runtime pack is admitted. The transitional Rust producer build retains debug
