@@ -2920,6 +2920,7 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
     if semantic == .ClosureMethod(receiver, args, call) -> return lower_closure_method(p, c, &m, &f, instruction, receiver, args, call)
     if semantic == .BuiltinMethod(call, receiver, receiver_place, args, aggregate_fields) {
         row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "builtin method names missing Prelude call {call.value}")
+        if lower_value_builtin(p, c, &m, &f, instruction, row, receiver, args) -> return
         if lower_lazy_method(p, c, &m, &f, instruction, row, receiver, receiver_place, args) -> return
         if lower_string_method(p, c, &m, &f, instruction, row, receiver, receiver_place, args, aggregate_fields) -> return
         if lower_set_method(p, c, &m, &f, instruction, row, receiver, receiver_place, args) -> return
@@ -3638,6 +3639,7 @@ fn lower_helper_start(m: &LowerModule, glue: LowerGlue, params: [LIRLayout], res
 
 fn lower_helper_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     if glue.helper == "trait.drop" || glue.helper == "trait.clone" -> return lower_trait_payload_glue(p, &m, glue)
+    if glue.helper.starts_with("builtin.") -> return lower_helper_value_builtin(p, &m, glue)
     if glue.helper.starts_with("lazy.") -> return lower_lazy_helper(p, &m, glue)
     if glue.helper == "codec.csv.decode" -> return lower_helper_codec_csv_decode(p, &m, glue)
     if glue.helper == "closure.thunk" -> return lower_closure_thunk(&m, glue)
