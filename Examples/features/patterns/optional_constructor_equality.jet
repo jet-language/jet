@@ -1,0 +1,23 @@
+struct Checked {
+    integer_bounds: Int?
+}
+
+fn integer_bounds_exact(number: Int) -> Int { number }
+
+fn run() {
+    checked :: Checked{integer_bounds: Val(7)}
+    number :: 7
+    // A constructor containing a call is a value, not a pattern binding.
+    if checked.integer_bounds == Val(integer_bounds_exact(number)) {
+        print("same bounds")
+    }
+    print(checked.integer_bounds == Val(number + 1))
+    print(checked.integer_bounds == Val(checked.integer_bounds ?? 0))
+    flag :: Val(true)
+    print(flag == Val(true))
+    // The ratified bare-name payload continues to introduce a binding.
+    if checked.integer_bounds == Val(bounds) {
+        print(bounds)
+    }
+    print(checked.integer_bounds != Val(integer_bounds_exact(number)))
+}
