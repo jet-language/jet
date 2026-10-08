@@ -955,3 +955,115 @@ fn valid_record_payload(text: String) -> Bool Never! {
     assert(valid_record_payload("é"))
     assert(!valid_record_payload("\n"))
 }
+
+fn validate_tree_endpoint(tree: ServiceTree, endpoint: ServiceEndpoint) ServiceError! {
+    #Unsafe("Services2184: identity and pinned-generation checks precede authority validation") {
+        parts :: core.service.__tree_route_parts(tree)
+        identity :: core.service.__endpoint_identity_parts(endpoint)
+        if identity.authority != parts.authority || identity.tree != parts.name -> return Err(ServiceError.Revoked("service endpoint {identity.tree}/{identity.worker} is not issued by this authority"))
+        if !route_generation_allowed(parts.generation, parts.upgrade, identity.worker, identity.generation) {
+            return Err(stale_tree_endpoint(identity.tree, identity.worker, identity.generation, parts.generation))
+        }
+        return __authority_validate(endpoint)
+    }
+}
+
+fn route_generation_allowed(generation: Int, upgrade: (from_generation: Int, to_generation: Int, pinned: [String])?, worker: String, endpoint_generation: Int) -> Bool Never! {
+    if endpoint_generation == generation -> return true
+    if upgrade == {
+        .Val(receipt) -> {
+            if receipt.to_generation != generation || receipt.from_generation != endpoint_generation -> return false
+            loop name in receipt.pinned {
+                if name == worker -> return true
+            }
+        }
+        else -> {}
+    }
+    false
+}
+
+pub fn directory_resolve(tree: ServiceTree, name: String) -> ServiceEndpoint ServiceError! {
+    #Unsafe("Services6081: exact directory lookup, generation, proof, authority, running, draining order") {
+        entry :: core.service.__directory_entry(tree, name) ?? return Err(ServiceError.Unknown("directory has no entry `{name}`"))
+        parts :: core.service.__tree_route_parts(tree)
+        identity :: core.service.__endpoint_identity_parts(entry.endpoint)
+        if !route_generation_allowed(parts.generation, parts.upgrade, identity.worker, identity.generation) -> return Err(ServiceError.Stale("directory entry `{name}` is from generation {identity.generation}"))
+        if core.service.__validate_directory_proof(parts.authority, parts.name, entry.name, entry.endpoint, entry.signature) == {
+            .Err(error) -> return Err(error)
+            .Ok(_) -> {}
+        }
+        if __authority_validate(entry.endpoint) == {
+            .Err(.NotStarted(message)) -> return Err(ServiceError.Expired(message))
+            .Err(error) -> return Err(error)
+            .Ok(_) -> {}
+        }
+        worker :: core.service.__worker_route(tree, entry.endpoint) ?? return Err(ServiceError.Expired("directory entry `{name}` no longer names a running worker"))
+        if !worker.running -> return Err(ServiceError.Expired("directory entry `{name}` no longer names a running worker"))
+        loop draining in parts.draining {
+            if draining == identity.worker -> return Err(ServiceError.Unavailable("directory entry `{name}` is draining"))
+        }
+        return entry.endpoint
+    }
+}
+
+pub fn send(tree: ServiceTree, endpoint: ServiceEndpoint, message: String) ServiceError! {
+    #Unsafe("Services2558: source owns routing, message checks, worker gate, capacity error text, post-send ordering") {
+        if !core.service.__tree_started(tree) -> return Err(ServiceError.NotStarted("service tree is not started"))
+        if validate_tree_endpoint(tree, endpoint) == {
+            .Err(error) -> return Err(error)
+            .Ok(_) -> {}
+        }
+        if !valid_record_payload(message) -> return Err(ServiceError.Policy("service message exceeds the 1 MiB limit"))
+        message_bytes :: message.bytes().len()
+        parts :: core.service.__tree_route_parts(tree)
+        identity :: core.service.__endpoint_identity_parts(endpoint)
+        draining := false
+        loop name in parts.draining {
+            if name == identity.worker -> draining = true
+        }
+        // Native find_worker_mut validates again before selecting a worker.
+        if validate_tree_endpoint(tree, endpoint) == {
+            .Err(error) -> return Err(error)
+            .Ok(_) -> {}
+        }
+        worker :: core.service.__worker_route(tree, endpoint) ?? return Err(ServiceError.Unknown("endpoint {identity.tree}/{identity.worker} is not in this tree"))
+        if !worker.running || draining -> return Err(ServiceError.NotStarted("worker `{worker.name}` is not running"))
+        if core.service.__authority_try_send(endpoint, message) == {
+            .Err(.Full(_)) -> return Err(full_tree_mailbox(worker.name, worker.capacity))
+            .Err(error) -> return Err(error)
+            .Ok(_) -> {}
+        }
+        // Accounting is best effort in native: validation/find errors are ignored.
+        if validate_tree_endpoint(tree, endpoint) == {
+            .Ok(_) -> {
+                if core.service.__worker_route(tree, endpoint) == {
+                    .Val(current) -> core.service.__worker_sent_account(&tree, current.index, message_bytes)
+                    else -> {}
+                }
+            }
+            else -> {}
+        }
+    }
+}
+
+#Test("service route generation accepts only active or explicitly pinned predecessors") {
+    assert(route_generation_allowed(2, None, "w", 2))
+    assert(!route_generation_allowed(2, None, "w", 1))
+    receipt :: Val((from_generation: 1, to_generation: 2, pinned: [String]{"w"}))
+    assert(route_generation_allowed(2, receipt, "w", 1))
+    assert(!route_generation_allowed(2, receipt, "other", 1))
+    assert(!route_generation_allowed(3, receipt, "w", 1))
+}
+
+fn stale_tree_endpoint(tree: String, worker: String, generation: Int, current: Int) -> ServiceError Never! {
+    ServiceError.Stale("service endpoint {tree}/{worker}@g{generation} is stale (current generation {current})")
+}
+
+fn full_tree_mailbox(worker: String, capacity: Int) -> ServiceError Never! {
+    ServiceError.Full("mailbox for `{worker}` is full (capacity {capacity})")
+}
+
+#Test("service send capacity remap and endpoint generation text retain exact native spelling") {
+    assert(if full_tree_mailbox("worker", 3) == {.Full(message) -> message == "mailbox for `worker` is full (capacity 3)" else -> false})
+    assert(if stale_tree_endpoint("tree", "worker", 1, 2) == {.Stale(message) -> message == "service endpoint tree/worker@g1 is stale (current generation 2)" else -> false})
+}

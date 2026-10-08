@@ -3419,6 +3419,44 @@ fn core_fixed_sig_impl(
             vec![(AccessConvention::Write, Type::Named("ServiceTree".into())), (AccessConvention::Move, Type::String)],
             Some(result_ty(unit_ty(), Type::Named("ServiceError".into()))),
         )),
+        ("core.service", "__tree_route_parts") => Some((
+            vec![(read, Type::Named("ServiceTree".into()))], Some(Type::Tuple(vec![
+                ("authority".into(), Box::new(Type::String)), ("name".into(), Box::new(Type::String)),
+                ("generation".into(), Box::new(Type::Int)),
+                ("upgrade".into(), Box::new(Type::Option(Box::new(Type::Tuple(vec![
+                    ("from_generation".into(), Box::new(Type::Int)), ("to_generation".into(), Box::new(Type::Int)),
+                    ("pinned".into(), Box::new(list_string.clone())),
+                ]))))),
+                ("draining".into(), Box::new(list_string.clone())),
+            ])),
+        )),
+        ("core.service", "__directory_entry") => Some((
+            vec![(read, Type::Named("ServiceTree".into())), (read, Type::String)],
+            Some(Type::Option(Box::new(Type::Tuple(vec![
+                ("name".into(), Box::new(Type::String)), ("endpoint".into(), Box::new(Type::Named("ServiceEndpoint".into()))),
+                ("signature".into(), Box::new(Type::String)),
+            ])))),
+        )),
+        ("core.service", "__worker_route") => Some((
+            vec![(read, Type::Named("ServiceTree".into())), (read, Type::Named("ServiceEndpoint".into()))],
+            Some(Type::Option(Box::new(Type::Tuple(vec![
+                ("index".into(), Box::new(Type::Int)), ("name".into(), Box::new(Type::String)),
+                ("running".into(), Box::new(Type::Bool)), ("capacity".into(), Box::new(Type::Int)),
+                ("depth".into(), Box::new(Type::Int)),
+            ])))),
+        )),
+        ("core.service", "__worker_sent_account") => Some((
+            vec![(AccessConvention::Write, Type::Named("ServiceTree".into())), (read, Type::Int), (read, Type::Int)], None,
+        )),
+        ("core.service", "__authority_try_send") => Some((
+            vec![(read, Type::Named("ServiceEndpoint".into())), (AccessConvention::Move, Type::String)],
+            Some(result_ty(unit_ty(), Type::Named("ServiceError".into()))),
+        )),
+        ("core.service", "__validate_directory_proof") => Some((
+            vec![(read, Type::String), (read, Type::String), (read, Type::String),
+                (read, Type::Named("ServiceEndpoint".into())), (read, Type::String)],
+            Some(result_ty(unit_ty(), Type::Named("ServiceError".into()))),
+        )),
         ("core.service", "__state_load") => Some((
             vec![(read, Type::Named("ServiceTree".into())), (read, Type::Bool)],
             Some(result_ty(list_string.clone(), Type::Named("ServiceError".into()))),

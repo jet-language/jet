@@ -3635,6 +3635,12 @@ and limits in Jet and frame UTF-8 byte lengths there. Snapshot persistence and
 the snapshot field assignment remain inside the same existing host mutex;
 event persistence retains the existing locked store append before the local
 event record is appended. No lock guard or second authority is exposed.
+Directory resolution owns lookup, generation errors, expiration remapping,
+and running/draining checks in Jet; its proof check calls the existing
+authority operation without adding a registry or signing-key cache.
+Tree sends validate routing and payloads in Jet, preserve the native repeated
+authority checks, remap mailbox-capacity failures to the worker-specific text,
+and update accounting only after successful atomic authority sends.
 
 | Signature | Result | Description |
 |---|---|---|
