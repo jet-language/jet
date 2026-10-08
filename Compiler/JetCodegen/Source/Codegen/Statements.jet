@@ -2454,7 +2454,8 @@ fn jet_codegen_lower_statement(builder: &JetCodegenBuilder, program: JetCodegenP
         .SourceSpan(span) -> builder.current_span = span
         .Inline(body, _) -> jet_codegen_lower_statements(&builder, program, body)
         .Transact(handle, snapshots, stm, body, span) -> jet_codegen_lower_transaction(&builder, program, handle, snapshots, stm, body, span)
-        else -> panic("checked TIR statement lies outside the current Jet codegen contract")
+        .InvariantViolation(construct, span) -> panic(jet_codegen_lowering_error_message(builder.function, span, construct))
+        else -> panic(jet_codegen_lowering_error_message(builder.function, builder.current_span, "checked TIR statement lies outside the current Jet codegen contract"))
     }
 }
 

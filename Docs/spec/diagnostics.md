@@ -80,6 +80,13 @@ and never inherit the root diagnostic's location. If a source snapshot is
 unavailable, the projection must not invent a path, line, column, or `0:0`
 position. An explicitly supplied byte span remains unchanged.
 
+Checked-function lowering failures are compiler errors, not user diagnostics.
+Their internal error text identifies the owning source file, module, function,
+and the original byte span; an offset by itself must not require searching
+unrelated modules. Generated bodies can retain provider-template offsets, so
+the function's checked origin accompanies the span rather than guessing a file
+from the offset.
+
 ## No-OS E3301 contract
 
 E3301 is the registered rule for an OS-dependent API selected for a no-OS
