@@ -1,0 +1,15 @@
+# Port of run_interpret.rs:328-381. PENDING-GRAMMAR: step env.
+fixture: fixtures/c-extern
+env: JETPACK_ENV=1
+step: jet run --release run.jet
+env: JET_STORE_DIR={work}/cache/release/build
+stdout: = ../../../Examples/features/expected/lowlevel/cbind.out
+stderr: empty
+step: jet run run.jet
+env: JET_STORE_DIR={work}/cache/default/build
+stdout: = ../../../Examples/features/expected/lowlevel/cbind.out
+stderr: empty
+step: jet run --interpret run.jet
+env: JET_STORE_DIR={work}/cache/interpret/build
+stdout: = ../../../Examples/features/expected/lowlevel/cbind.out
+stderr: empty
