@@ -1,0 +1,53 @@
+// D-NET-IO-KIND1 revision2 corrected single-task deadline plan, not the superseded plan.
+fn s5_trickle_reset(error: NetError) -> Bool {
+    if error == { .ConnectionReset(_) -> true else -> false }
+}
+#Test("original successful byte trickle does not renew absolute request deadline") {
+    port :: s5_web_port()
+    s5_web_wait_up(port, 30000)
+    client :: net.tcp_connect("127.0.0.1:{port}") ?? panic("connect trickle")
+    net.set_read_timeout(client, 12000) ?? panic("original twelve-second read timeout")
+    crlf :: s5_web_crlf()
+    net.tcp_write_all_bytes(client, "GET /__jet_dev_version HTTP/1.1{crlf}Host: localhost".bytes()) ?? panic("incomplete header")
+    started :: time.start()
+    sent := 0
+    response_bytes := 0
+    closed := false
+    loop index in 0..<32 {
+        net.tcp_write_all_bytes(client, "x".bytes()) ?? panic("every trickle write must succeed")
+        sent = sent + 1
+        if client.read(8192, deadline: time.duration_ms(200)) == {
+            .Ok(part) -> {
+                response_bytes = response_bytes + part.len()
+                assert(part.is_empty(), "incomplete request received response bytes")
+                assert_eq(sent, 32, "connection closed before all successful trickle writes")
+                closed = true
+            }
+            .Err(error) -> if error == {
+                .Timeout(_) -> {}
+                else -> {
+                    assert(s5_trickle_reset(error), "unexpected trickle read failure")
+                    assert_eq(sent, 32, "connection reset before all successful trickle writes")
+                    closed = true
+                }
+            }
+        }
+    }
+    if !closed {
+        remaining :: 12000000000 - time.elapsed(started).ns
+        assert(remaining > 0, "trickle exhausted original twelve-second read timeout")
+        if client.read(8192, deadline: time.duration_ns(remaining)) == {
+            .Ok(part) -> {
+                response_bytes = response_bytes + part.len()
+                closed = part.is_empty()
+            }
+            .Err(error) -> { closed = s5_trickle_reset(error) }
+        }
+    }
+    elapsed :: time.elapsed(started).ns
+    net.tcp_close(client).drop("original client drop ignores close failure")
+    assert_eq(sent, 32)
+    assert(closed && response_bytes == 0, "incomplete request must close without a response")
+    assert(elapsed >= 9000000000, "deadline must allow successful trickle")
+    assert(elapsed < 11500000000, "successful bytes renewed request deadline")
+}
