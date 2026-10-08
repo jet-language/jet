@@ -758,6 +758,10 @@ fn run() {
         clean = false
     }
     if !fx_report_runtime("qualified-dir-entries", fx_qualified_dir_entries()) -> clean = false
+    if !fx_atomic_mir_layout_checks() {
+        print("issue atomic-mir-layout: canonical six scalar word layouts failed")
+        clean = false
+    }
     if !fx_runtime_bitcast_refusals() {
         print("issue runtime-bitcast: scalar layout/drop refusals failed")
         clean = false

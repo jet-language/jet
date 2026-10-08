@@ -1520,6 +1520,10 @@ fn layout_for_kind(kind: &MirTypeKind) -> MirLayout {
                             bits: 32,
                         }
                         | MirTypeKind::IntN {
+                            signed: true,
+                            bits: 64,
+                        }
+                        | MirTypeKind::IntN {
                             signed: false,
                             bits: 32,
                         }
