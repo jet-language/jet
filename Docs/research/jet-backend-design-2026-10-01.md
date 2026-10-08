@@ -1689,3 +1689,18 @@ the seed's observed rustc 1.97.1 commit `8bab26f4f` and that commit's
 shared-close, actual comptime-stop release and signal-reentrant borrow
 witnesses. Execution and allocation-ledger-zero remain unexercised; the latter
 requires the ProgramAllocator counting/facts provider, not a fake allocator.
+
+### Native default error carrier
+
+`JetBackend/Source/ErrLayout.jet` defines the native-pack Err88 ABI. It is not
+the legacy Rust seed layout or the source-visible three-field MIR record:
+identity, context, conversions and typed details remain owned by the opaque
+native handle. `JetRuntime/Source/Err.jet` clones every child independently;
+the C record constructor clones borrowed message/code but takes the cause,
+matching `CAbi.rs:372–377`. Getters return owned projections. Display/show/debug
+return message only (`Values.rs:317–330`); `ErrReport.jet` separately ports
+Outcome's recursive root report and ordered `jet.err/v1` serialization,
+including Unicode C1 control escapes and raw canonical typed field JSON.
+`Tests/err-report.c` exercises the real carrier and allocator LIVE BYTES fact
+(index 2), not historical allocation count, for a deep-clone/drop ledger.
+
