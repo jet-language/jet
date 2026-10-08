@@ -28,6 +28,46 @@ fn emit_native_aot(bundle: &jet::AST::ProgramBundle) -> String {
     )
 }
 
+#[test]
+fn view_materialization_borrows_the_source_at_the_kernel_boundary() {
+    let bundle = checked_project(
+        "view_copy_supplier",
+        "authority: { holds: { allow: [IO, Mem.Alloc] } }",
+        r#"
+fn copy_read(values: View<Int>) -> [Int] { ~values }
+fn copy_write(values: ViewMut<Int>) -> [Int] { ~values }
+fn copy_text(value: View<str>) -> String { ~value }
+fn run() {
+    fixed :: [Int#3]{1, 2, 3}
+    values := [Int]{4, 5, 6}
+    padded :: " text "
+    print(copy_read(fixed[0..1]))
+    print(copy_read(values[0..1]))
+    print(copy_write(&values[0..1]))
+    print(copy_text(padded.trim()))
+    print(fixed[0])
+    print(values[0])
+    print(padded)
+}
+"#,
+    );
+    let rust = emit_native_aot(&bundle);
+    for kernel in ["jet_view_copy(", "jet_string_view_copy("] {
+        let calls = rust
+            .lines()
+            .filter(|line| line.contains("__jet_v") && line.contains(kernel))
+            .collect::<Vec<_>>();
+        assert!(!calls.is_empty(), "missing {kernel} supplier:\n{rust}");
+        for call in calls {
+            assert!(!call.contains(".clone("), "supplier must not copy before {kernel}: {call}");
+            assert!(
+                call.contains(".as_ref()") || call.contains('&'),
+                "supplier must borrow into {kernel}: {call}"
+            );
+        }
+    }
+}
+
 /// Number of `impl <rust_trait> for <type>` headers in generated Rust for the
 /// program type `name`. Program types are emitted under their mangled
 /// module-qualified key, whose last path segment `::<name>` mangles to
