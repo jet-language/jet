@@ -63,6 +63,8 @@ fn data_plot_transform_clone(value: I64) -> I64 {
     data_tree_store(result + DP_TRANSFORM_TAG, kind)
     first := data_tree_word(value + DP_TRANSFORM_FIRST)
     second := data_tree_word(value + DP_TRANSFORM_SECOND)
+    // A borrowed bool field may have only its low byte initialized.
+    if kind == DP_TRANSFORM_SORT { second = second & I64{255} }
     third := I64{0}
     if kind == DP_TRANSFORM_AGGREGATE {
         first = data_plot_fields_clone(first)
@@ -94,6 +96,7 @@ fn data_plot_transform_eq(a: I64, b: I64) -> Bool {
     if kind == DP_TRANSFORM_AGGREGATE -> return data_plot_fields_eq(data_tree_word(a + DP_TRANSFORM_FIRST), data_tree_word(b + DP_TRANSFORM_FIRST)) && jet_rt_handle_eq_JetDataPlotField(data_tree_word(a + DP_TRANSFORM_SECOND), data_tree_word(b + DP_TRANSFORM_SECOND)) && data_tree_word(a + DP_TRANSFORM_THIRD) == data_tree_word(b + DP_TRANSFORM_THIRD)
     if !jet_rt_handle_eq_JetDataPlotField(data_tree_word(a + DP_TRANSFORM_FIRST), data_tree_word(b + DP_TRANSFORM_FIRST)) -> return false
     if kind == DP_TRANSFORM_BIN -> return rt_f64_from_bits(data_tree_word(a + DP_TRANSFORM_SECOND)) == rt_f64_from_bits(data_tree_word(b + DP_TRANSFORM_SECOND))
+    if kind == DP_TRANSFORM_SORT -> return (data_tree_word(a + DP_TRANSFORM_SECOND) & I64{255}) == (data_tree_word(b + DP_TRANSFORM_SECOND) & I64{255})
     if data_tree_word(a + DP_TRANSFORM_SECOND) != data_tree_word(b + DP_TRANSFORM_SECOND) -> return false
     if kind == DP_TRANSFORM_FILTER -> return jet_rt_handle_eq_JetDataPlotValue(data_tree_word(a + DP_TRANSFORM_THIRD), data_tree_word(b + DP_TRANSFORM_THIRD))
     true
@@ -131,6 +134,8 @@ fn data_plot_transforms_eq(a: I64, b: I64) -> Bool {
     result :: jet_rt_alloc(DP_SCALE_BYTES, I64{8})
     coll_copy(value, result, DP_SCALE_BYTES)
     data_tree_store(result + DP_SCALE_DOMAIN, jet_rt_handle_clone_JetDataPlotDomain(data_tree_word(value + DP_SCALE_DOMAIN)))
+    data_tree_store(result + DP_SCALE_CLAMP, data_tree_word(value + DP_SCALE_CLAMP) & I64{255})
+    data_tree_store(result + DP_SCALE_REVERSE, data_tree_word(value + DP_SCALE_REVERSE) & I64{255})
     result
 }
 #Export(c) fn jet_rt_handle_drop_JetDataPlotScale(value: I64) {
@@ -139,7 +144,7 @@ fn data_plot_transforms_eq(a: I64, b: I64) -> Bool {
     jet_rt_free(value, DP_SCALE_BYTES, I64{8})
 }
 #Export(c) fn jet_rt_handle_eq_JetDataPlotScale(a: I64, b: I64) -> Bool {
-    data_tree_word(a + DP_SCALE_CHANNEL) == data_tree_word(b + DP_SCALE_CHANNEL) && data_tree_word(a + DP_SCALE_KIND) == data_tree_word(b + DP_SCALE_KIND) && jet_rt_handle_eq_JetDataPlotDomain(data_tree_word(a + DP_SCALE_DOMAIN), data_tree_word(b + DP_SCALE_DOMAIN)) && data_tree_word(a + DP_SCALE_CLAMP) == data_tree_word(b + DP_SCALE_CLAMP) && data_tree_word(a + DP_SCALE_REVERSE) == data_tree_word(b + DP_SCALE_REVERSE)
+    data_tree_word(a + DP_SCALE_CHANNEL) == data_tree_word(b + DP_SCALE_CHANNEL) && data_tree_word(a + DP_SCALE_KIND) == data_tree_word(b + DP_SCALE_KIND) && jet_rt_handle_eq_JetDataPlotDomain(data_tree_word(a + DP_SCALE_DOMAIN), data_tree_word(b + DP_SCALE_DOMAIN)) && (data_tree_word(a + DP_SCALE_CLAMP) & I64{255}) == (data_tree_word(b + DP_SCALE_CLAMP) & I64{255}) && (data_tree_word(a + DP_SCALE_REVERSE) & I64{255}) == (data_tree_word(b + DP_SCALE_REVERSE) & I64{255})
 }
 #Export(c) fn jet_rt_handle_field_JetDataPlotScale_domain(value: I64) -> I64 { data_tree_word(value + DP_SCALE_DOMAIN) }
 #Export(c) fn jet_rt_handle_field_JetDataPlotScale_clamp(value: I64) -> I64 { value + DP_SCALE_CLAMP }

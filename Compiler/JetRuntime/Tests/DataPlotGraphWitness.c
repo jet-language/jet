@@ -156,8 +156,11 @@ int main(void) {
     drop_pair(numeric, numeric_copy, domain_watch, jet_rt_handle_drop_JetDataPlotDomain);
     int64_t categories[] = {pointer(jet_rt_string_clone(a)), pointer(jet_rt_string_clone(b))};
     int64_t scale = record(5); words(scale)[2] = domain(2, pointer(sequence(categories, 2)), 0); words(scale)[3] = 1;
+    words(scale)[3] = INT64_C(0x123456789abcde01);
+    words(scale)[4] = INT64_C(0x123456789abcde00);
     int64_t scale_copy = jet_rt_handle_clone_JetDataPlotScale(scale);
     assert(jet_rt_handle_eq_JetDataPlotScale(scale, scale_copy));
+    assert(words(scale_copy)[3] == 1 && words(scale_copy)[4] == 0);
     assert(jet_rt_handle_field_JetDataPlotScale_domain(scale) == words(scale)[2]);
     assert(*jet_rt_handle_field_JetDataPlotScale_clamp(scale)); assert(!*jet_rt_handle_field_JetDataPlotScale_reverse(scale));
     Sequence *cats = (Sequence *)(uintptr_t)words(words(scale_copy)[2])[1];
@@ -167,7 +170,7 @@ int main(void) {
     int64_t transforms[4];
     for (int64_t i = 0; i < 4; ++i) { transforms[i] = record(4); words(transforms[i])[0] = i; }
     words(transforms[0])[1] = field(a); words(transforms[0])[2] = 2; words(transforms[0])[3] = jet_rt_record_new_JetDataPlotValue_Number(2);
-    words(transforms[1])[1] = field(a); words(transforms[1])[2] = 1;
+    words(transforms[1])[1] = field(a); words(transforms[1])[2] = INT64_C(0x123456789abcde01);
     words(transforms[2])[1] = field(a); words(transforms[2])[2] = number_bits(0.5);
     int64_t group_fields[] = {field(a), field(b)};
     words(transforms[3])[1] = pointer(sequence(group_fields, 2)); words(transforms[3])[2] = field(a); words(transforms[3])[3] = 2;
@@ -178,6 +181,7 @@ int main(void) {
     Text header; jet_rt_handle_field_JetDataPlotLayer_name(layer, &header); assert(header.length == 1 && header.data[0] == 'a');
     assert(*jet_rt_handle_field_JetDataPlotLayer_opacity(layer) == 1);
     Sequence *copy_transforms = (Sequence *)(uintptr_t)words(layer_copy)[3];
+    assert(words(copy_transforms->data[1])[2] == 1); /* cloned bool ignores dirty upper bytes */
     words(copy_transforms->data[2])[2] = number_bits(NAN);
     assert(!jet_rt_handle_eq_JetDataPlotLayer(layer_copy, layer_copy));
     drop_pair(layer, layer_copy, layer_watch, jet_rt_handle_drop_JetDataPlotLayer);

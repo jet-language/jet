@@ -2006,3 +2006,26 @@ the existing nullable input-pointer and presence/outslot C ABI is unchanged.
 `DataPlotGraphWitness.c` checks ordered lists, every Transform variant,
 optional presence/empty-text distinction, IEEE domains and exact-once frees
 with the real Jet provider, never a Rust allocation or a provider mock.
+
+`DataPlotDeep.jet` owns selected-row Field/Value tuple lists, Inspection,
+Plan, Projection and Render. Plan retains only an opaque owned DataLimits
+pointer and uses the canonical runtime clone/drop/eq exports: it never
+reaches into the Limits carrier. Tuple/list equality remains ordered and
+Float payload equality remains IEEE, including nested NaN self-inequality.
+Inspection indices and selected-row indices are raw Rust i64 values.
+Scale flags and Sort descending clone/compare only the low byte so a
+borrowed byte-wide flag store cannot leak uninitialized upper-word bytes
+into equality; clones clear those unused bytes.
+
+Handle-only types without constructors have no enrolled native behavior
+producer yet. Future producers must build the exact private DataABI shape;
+generated source/MIR allocations and Rust allocations cannot be passed to
+these drops. Complete native-pack admission still requires the generator's
+all-or-none gate, composed dependency providers and checked caller layouts.
+
+`DataPlotDeepWitness.c` links the composed real Jet providers, including
+Limits, with both `--wrap=jet_rt_alloc` and `--wrap=jet_rt_free`. The scoped
+allocation ledger asserts size/alignment and exact-once release for every
+allocation, including opaque nested Limits owners, without inspecting that
+carrier's fields. It also checks tuple/list order, clone independence and
+nested NaN self-inequality. Syntax receipts are not execution receipts.
