@@ -1939,40 +1939,46 @@ fn testing_ambient_core_call(
         return None;
     }
     match method {
-        "golden" => {
-            let [CtValue::Str(path), CtValue::Str(actual)] = args.as_slice() else {
-                return Some(Err(testing_diag(
-                    "core.testing.golden received malformed arguments",
-                    span,
-                )));
-            };
-            Some(Ok(CtValue::Bool(
-                crate::testing_shared::jet_testing_golden_result(path, actual).is_ok_and(|value| value),
-            )))
-        }
-        "fixture" => {
+        "__evidence_read" => {
             let [CtValue::Str(path)] = args.as_slice() else {
-                return Some(Err(testing_diag(
-                    "core.testing.fixture received malformed arguments",
-                    span,
-                )));
+                return Some(Err(testing_diag("core.testing.__evidence_read received malformed arguments", span)));
             };
-            Some(Ok(CtValue::Str(
-                crate::testing_shared::jet_testing_fixture_result(path).unwrap_or_default(),
-            )))
+            let facts = crate::testing_shared::jet_testing_evidence_read_raw(path);
+            Some(Ok(CtValue::Struct { type_name: "__EvidenceRead".into(), fields: vec![("ok".into(), CtValue::Bool(facts.ok)), ("text".into(), CtValue::Str(facts.text)), ("missing".into(), CtValue::Bool(facts.missing))] }))
         }
-        "temp_dir" => {
-            let [CtValue::Str(prefix)] = args.as_slice() else {
-                return Some(Err(testing_diag(
-                    "core.testing.temp_dir received malformed arguments",
-                    span,
-                )));
+        // I9 preserved gap: this tier has never observed native failure TLS.
+        "__record_failure" if matches!(args.as_slice(), [CtValue::Str(_), CtValue::Str(_)]) => Some(Ok(CtValue::Unit)),
+        "__clear_failure" if args.is_empty() => Some(Ok(CtValue::Unit)),
+        "__temp_facts" if args.is_empty() => {
+            let facts = crate::testing_shared::jet_testing_temp_facts_raw();
+            Some(Ok(CtValue::Struct { type_name: "__TempFacts".into(), fields: vec![("pid".into(), CtValue::Int(facts.pid as i64)), ("thread".into(), CtValue::Str(facts.thread))] }))
+        }
+        "__temp_join" => {
+            let [CtValue::Str(name)] = args.as_slice() else {
+                return Some(Err(testing_diag("core.testing.__temp_join received malformed arguments", span)));
             };
-            Some(
-                crate::testing_shared::jet_testing_temp_dir_path(prefix)
-                    .map(CtValue::Str)
-                    .map_err(|error| testing_diag(error.to_string(), span)),
-            )
+            let facts = crate::testing_shared::jet_testing_temp_join_raw(name);
+            Some(Ok(CtValue::Struct { type_name: "__TempPath".into(), fields: vec![("path".into(), CtValue::Bytes(facts.path)), ("text".into(), CtValue::Str(facts.text))] }))
+        }
+        "__temp_remove" => {
+            let [CtValue::Bytes(path)] = args.as_slice() else {
+                return Some(Err(testing_diag("core.testing.__temp_remove received malformed arguments", span)));
+            };
+            let facts = crate::testing_shared::jet_testing_temp_remove_raw(path);
+            Some(Ok(CtValue::Struct { type_name: "__TempRemove".into(), fields: vec![("ok".into(), CtValue::Bool(facts.ok)), ("missing".into(), CtValue::Bool(facts.missing)), ("cause".into(), CtValue::Str(facts.cause))] }))
+        }
+        "__temp_create" => {
+            let [CtValue::Bytes(path)] = args.as_slice() else {
+                return Some(Err(testing_diag("core.testing.__temp_create received malformed arguments", span)));
+            };
+            let facts = crate::testing_shared::jet_testing_temp_create_raw(path);
+            Some(Ok(CtValue::Struct { type_name: "__TempCreate".into(), fields: vec![("ok".into(), CtValue::Bool(facts.ok)), ("cause".into(), CtValue::Str(facts.cause))] }))
+        }
+        "__text_window" => {
+            let [CtValue::Str(text), CtValue::Int(start), CtValue::Int(end)] = args.as_slice() else {
+                return Some(Err(testing_diag("core.testing.__text_window received malformed arguments", span)));
+            };
+            Some(Ok(CtValue::Str(crate::testing_shared::jet_testing_text_window_raw(text, *start as u64, *end as u64))))
         }
         _ => None,
     }

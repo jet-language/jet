@@ -412,36 +412,6 @@ fn jet_testing_history_record(
         universal_proof: record.universal_proof,
     }
 }
-pub(crate) fn jet_testing_histories<Command>(
-    seed: i64,
-    cases: i64,
-    strategy: Option<JetHistoryStrategy<Command>>,
-    model: Box<dyn Fn(Vec<Command>) -> jet_std::DataTree>,
-    actual: Box<dyn Fn(Vec<Command>) -> jet_std::DataTree>,
-    observe: Box<dyn Fn(jet_std::DataTree) -> jet_std::DataTree>,
-) -> Result<jet_std::JetTestComparison, String>
-where
-    Command: crate::jet_testing_history_foundation::HistoryCommand + 'static,
-{
-    let model = Box::new(move |commands: &Vec<Command>| {
-        Ok::<_, JetErr>(model(commands.clone()))
-    });
-    let actual = Box::new(move |commands: &Vec<Command>| {
-        Ok::<_, JetErr>(actual(commands.clone()))
-    });
-    let observe = Box::new(move |value: &jet_std::DataTree| {
-        Ok::<_, JetErr>(observe(value.clone()))
-    });
-    jet_testing_histories_with_provenance(
-        seed,
-        cases,
-        strategy,
-        model,
-        actual,
-        observe,
-        None,
-    )
-}
 
 /// Compiler-private entrypoint used when the checked caller carries selected
 /// artifact/callback provenance outside the six Jet-visible history values.

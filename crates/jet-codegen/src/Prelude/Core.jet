@@ -173,8 +173,8 @@ module core.tasks exports { after, current_task, interval, yield_now, Receiver, 
 source_module core.tasks path Core/tasks/tasks.jet alias core_core_tasks owns { acquire, after, channel, clear, current_task, delay_ms, get, interval, is_interval, is_timer, lock, notify, put, recv, release, reset, result, run, shutdown, start, stop, wait, waitall, waitany, yield_now, is_cancelled, is_ready, timeout, sleep, try_recv, cancel, is_closed, is_locked, size, capacity, generation, spawn_name }
 module core.term exports { Reader, Writer, binread, binwrite, buffered, choose, confirm, eprint, input, input_secret, print, progress, read_all_input, read_key, read_until, readline, stderr, stdin, stdout, style, style_force, take, terminal_height, terminal_width, Key, Stderr, StdinHandle, Stdout, WinSize, __stdio_write, __stdio_bytes, __stdio_flush, __stdio_fault, __stdout_terminal, __stderr_terminal, __stdin_line } types { Reader:plain, Writer:plain, Key:plain(Char|Enter|Escape|Backspace|Tab|Delete|Up|Down|Left|Right|F|Ctrl|Unknown), Stderr:plain, StdinHandle:plain, Stdout:plain, WinSize:plain } depends_on [core.files]
 source_module core.term path Core/term/term.jet alias core_core_term owns { binread, binwrite, buffered, choose, confirm, eprint, input, input_secret, print, progress, read_all_input, read_key, read_until, readline, stderr, stdin, stdout, style, style_force, terminal_height, terminal_width } types { Stdout, Stderr, StdinHandle }
-module core.testing exports { assert_equal, compare, corpus, fake_clock, fake_data, fake_rng, fixture, golden, histories, snap, status, temp_dir, test_suite, world, Clock, Fake, RNG, TestSuite } types { Count:plain, DeterministicWorld:plain, EventID:plain, HandleID:plain, HistoryBounds:plain, HistoryCase:plain, HistoryDistribution:plain, HistoryOperation:plain, HistoryPrecondition:plain, HistoryRNG:plain, HistoryScheduleChoice:plain, HistoryStrategy:generic(1), HistoryValue:plain, TaskID:plain, TypedHistoryCase:generic(1), TestComparison:plain, Clock:plain, Fake:plain, RNG:plain, TestSuite:plain } depends_on [core.files, core.math.random, core.sys, core.time]
-source_module core.testing path Core/testing/testing.jet alias core_core_testing owns { assert_equal, compare, corpus, fake_clock, fake_data, fake_rng, fixture, golden, snap, status, temp_dir, test_suite, world } types { Fake }
+module core.testing exports { assert_equal, compare, corpus, fake_clock, fake_data, fake_rng, fixture, golden, histories, snap, status, temp_dir, test_suite, world, Clock, Fake, RNG, TestSuite_allocation, __evidence_read, __record_failure, __clear_failure, __temp_facts, __temp_join, __temp_remove, __temp_create, __text_window, __suite_snapshot, __histories_with_provenance, __EvidenceRead, __TempFacts, __TempPath, __TempRemove, __TempCreate } types { Count:plain, DeterministicWorld:plain, EventID:plain, HandleID:plain, HistoryBounds:plain, HistoryCase:plain, HistoryDistribution:plain, HistoryOperation:plain, HistoryPrecondition:plain, HistoryRNG:plain, HistoryScheduleChoice:plain, HistoryStrategy:generic(1), HistoryValue:plain, TaskID:plain, TypedHistoryCase:generic(1), TestComparison:plain, Clock:plain, Fake:plain, RNG:plain, TestSuite:plain, __EvidenceRead:plain, __TempFacts:plain, __TempPath:plain, __TempRemove:plain, __TempCreate:plain } depends_on [core.files, core.math.random, core.sys, core.time]
+source_module core.testing path Core/testing/testing.jet alias core_core_testing owns { assert_equal, compare, corpus, fake_clock, fake_data, fake_rng, fixture, golden, histories, snap, status, temp_dir, test_suite, world_allocation } types { Fake }
 module core.text exports { Cursor, byte_count, byte_views, casefold, caseless_eq, center, char_indices, display_width, ends_any, grapheme_views, graphemes, has_control, inspect, is_alphabetic, is_ascii, is_numeric, is_whitespace, line_views, lower, nfc, nfd, nfkc, nfkd, pad_end, pad_start, rsplitn, scalar_count, scalars, sentences, splitn, starts_any, trim, trim_end, trim_start, upper, word_views, words, IndexedCp, cursor, cursor_advance } types { Cursor:plain, IndexedCp:plain } depends_on [core]
 source_module core.text path Core/text/text.jet alias core_text owns { byte_count, byte_views, casefold, caseless_eq, center, char_indices, cursor, cursor_advance, display_width, ends_any, grapheme_views, graphemes, has_control, inspect, is_alphabetic, is_ascii, is_numeric, is_whitespace, line_views, lower, nfc, nfd, nfkc, nfkd, pad_end, pad_start, rsplitn, scalar_count, scalars, sentences, splitn, starts_any, trim, trim_end, trim_start, upper, word_views, words }
 source_module core.text.fmt path Core/text/fmt.jet alias core_text_fmt owns { bin, bytes, decimal, duration, grouped, hex, number, oct, ordinal, pad, pad_center, pad_left, pad_right, percent, plural, pretty, sci }
@@ -402,17 +402,22 @@ dispatcher_row plain core.process argv | CoreCallRecord::new("core.process", "ar
 dispatcher_row plain core.process on_signal | CoreCallRecord::new( "core.process", "on_signal", "jet_process_on_signal", true, &[true], )
 dispatcher_row plain core.plugin load | CoreCallRecord::new("core.plugin", "load", "jet_plugin_load", true, &[true, true]) .without_direct_aot()
 dispatcher_row plain core.mod load | CoreCallRecord::new("core.mod", "load", "jet_mod_load", true, &[true, true])
-dispatcher_row plain core.testing golden | CoreCallRecord::new( "core.testing", "golden", "jet_testing_golden", true, &[true, true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
-dispatcher_row plain core.testing fixture | CoreCallRecord::new( "core.testing", "fixture", "jet_testing_fixture", true, &[true], )
-dispatcher_row plain core.testing temp_dir | CoreCallRecord::new( "core.testing", "temp_dir", "jet_testing_temp_dir", true, &[true], )
 dispatcher_row plain core.testing fake_clock | CoreCallRecord::new( "core.testing", "fake_clock", "jet_std_clock_new", true, &[false], )
 dispatcher_row plain core.testing fake_rng | CoreCallRecord::new( "core.testing", "fake_rng", "jet_std_rng_new", true, &[false], )
-dispatcher_row plain core.testing test_suite | CoreCallRecord::new( "core.testing", "test_suite", "jet_test_suite_new", true, &[], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
 dispatcher_row plain core.testing compare | CoreCallRecord::new("core.testing", "compare", "jet_testing_compare", true, &[true, true, true, true])
-dispatcher_row plain core.testing histories | CoreCallRecord::new("core.testing", "histories", "jet_testing_histories", true, &[true, true, false, true, true, true]) .with_max_arity(6)
 dispatcher_row plain core.testing assert_equal | CoreCallRecord::new("core.testing", "assert_equal", "jet_testing_assert_equal", true, &[true])
 dispatcher_row plain core.testing status | CoreCallRecord::new("core.testing", "status", "jet_testing_status", true, &[true])
 dispatcher_row plain core.testing world | CoreCallRecord::new( "core.testing", "world", "jet_testing_world", true, &[false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+dispatcher_row plain core.testing __evidence_read | CoreCallRecord::new("core.testing", "__evidence_read", "jet_testing_evidence_read_raw", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+dispatcher_row plain core.testing __record_failure | CoreCallRecord::new("core.testing", "__record_failure", "jet_testing_record_failure", true, &[false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+dispatcher_row plain core.testing __clear_failure | CoreCallRecord::new("core.testing", "__clear_failure", "jet_testing_clear_failure", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+dispatcher_row plain core.testing __temp_facts | CoreCallRecord::new("core.testing", "__temp_facts", "jet_testing_temp_facts_raw", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+dispatcher_row plain core.testing __temp_join | CoreCallRecord::new("core.testing", "__temp_join", "jet_testing_temp_join_raw", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+dispatcher_row plain core.testing __temp_remove | CoreCallRecord::new("core.testing", "__temp_remove", "jet_testing_temp_remove_raw", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+dispatcher_row plain core.testing __temp_create | CoreCallRecord::new("core.testing", "__temp_create", "jet_testing_temp_create_raw", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+dispatcher_row plain core.testing __text_window | CoreCallRecord::new("core.testing", "__text_window", "jet_testing_text_window_raw", true, &[true, false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+dispatcher_row plain core.testing __suite_snapshot | CoreCallRecord::new("core.testing", "__suite_snapshot", "jet_test_suite_new", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+dispatcher_row plain core.testing __histories_with_provenance | CoreCallRecord::new("core.testing", "__histories_with_provenance", "jet_testing_histories_with_provenance", true, &[true, true, false, true, true, true]).with_max_arity(6)
 dispatcher_row plain core.math pi | CoreCallRecord::new("core.math", "pi", "jet_std_math_pi", true, &[]) .with_pure_route(CoreCallPureRoute::Math)
 dispatcher_row plain core.math cmp | CoreCallRecord::new("core.math", "cmp", "jet_std_math_cmp", true, &[false, false]) .with_native_int_result()
 dispatcher_row plain core.math is_finite | CoreCallRecord::new("core.math", "is_finite", "jet_std_math_is_finite", true, &[false]) .with_pure_route(CoreCallPureRoute::Math)
@@ -1821,13 +1826,20 @@ ambient_route core.event policy_sync
 ambient_route core.event new
 ambient_route core.event with_policy
 ambient_route core.event async_result
-ambient_route core.testing golden
-ambient_route core.testing test_suite
 ambient_route core.testing compare
-ambient_route core.testing histories
 ambient_route core.testing assert_equal
 ambient_route core.testing status
 ambient_route core.testing world
+ambient_route core.testing __evidence_read
+ambient_route core.testing __record_failure
+ambient_route core.testing __clear_failure
+ambient_route core.testing __temp_facts
+ambient_route core.testing __temp_join
+ambient_route core.testing __temp_remove
+ambient_route core.testing __temp_create
+ambient_route core.testing __text_window
+ambient_route core.testing __suite_snapshot
+ambient_route core.testing __histories_with_provenance
 ambient_route core.watcher files
 ambient_route core.watcher process_pid
 ambient_route core.watcher port
@@ -1856,7 +1868,6 @@ ambient_route core.sys name
 ambient_route core.sys __getuid
 ambient_route core.sys __geteuid
 ambient_route core.sys __getgid
-ambient_route core.testing fixture
 ambient_route core.files __rename_at
 ambient_route core.files fsync
 ambient_route core.files symlink
@@ -1959,7 +1970,6 @@ ambient_route core.process pipeline
 ambient_route core.process argv
 ambient_route core.plugin load
 ambient_route core.mod load
-ambient_route core.testing temp_dir
 ambient_route core.math from_bits
 ambient_route core.math.random seed
 ambient_route core.math.random __rng_state

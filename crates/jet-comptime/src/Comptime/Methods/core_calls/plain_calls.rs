@@ -211,7 +211,7 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
         }
     }
 
-    if module == "core.testing" && method == "histories" {
+    if module == "core.testing" && method == "__histories_with_provenance" {
         return apply_testing_histories(args, type_args, span, history_schema);
     }
     if let Some(result) = apply_raylib_core_call(module, method, &args, span) {

@@ -953,6 +953,11 @@ pub(crate) fn root_prelude_rust_type_name(name: &str) -> Option<&str> {
         // The allocation-failure record is declared once at the Prelude root
         // (PortableAlloc.rs); every Rust projection spells it `AllocError`.
         n if n == Syntax::TYPE_ALLOC_ERROR => Some("AllocError"),
+        "__EvidenceRead" => Some("JetTestingEvidenceRead"),
+        "__TempFacts" => Some("JetTestingTempFacts"),
+        "__TempPath" => Some("JetTestingTempPath"),
+        "__TempRemove" => Some("JetTestingTempRemove"),
+        "__TempCreate" => Some("JetTestingTempCreate"),
         "Transaction" => Some("JetTransaction"),
         "Counter" => Some("JetCounter"),
         "OrderedMap" => Some("JetOrderedMap"),

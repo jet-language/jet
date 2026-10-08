@@ -945,7 +945,7 @@ pub fn apply_impure_core_call_with_type_args(
         {
             apply_core_call_with_type(module, method, args, span, repl_mode, resolved_ret)
         }
-        ("core.testing", "histories") => {
+        ("core.testing", "__histories_with_provenance") => {
             super::apply_core_call_without_ambient_with_type_args(
                 module,
                 method,
