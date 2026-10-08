@@ -103,12 +103,12 @@ example retains the negative unsafe-outside-vetted scan.
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 215,
+  "total": 555,
   "counts": {
     "Examples": 38,
-    "jet": 89,
+    "jet": 220,
     "jetpack": 1,
-    "tests": 87
+    "tests": 296
   },
   "regions": [
     {
@@ -583,198 +583,569 @@ example retains the negative unsafe-outside-vetted scan.
     {
       "package": "jet",
       "file": "Core/auth/auth.jet",
-      "line": 126,
+      "line": 112,
       "column": 5,
       "reason": "auth PASETO v4.public verification uses the fixed Ed25519 primitive"
     },
     {
       "package": "jet",
       "file": "Core/crypto/crypto.jet",
-      "line": 785,
+      "line": 679,
+      "column": 5,
+      "reason": "the expert API explicitly authorizes authenticated legacy-v1 migration"
+    },
+    {
+      "package": "jet",
+      "file": "Core/crypto/crypto.jet",
+      "line": 1220,
       "column": 5,
       "reason": "crypto expert: Argon2id password hashing"
     },
     {
       "package": "jet",
       "file": "Core/crypto/crypto.jet",
-      "line": 812,
+      "line": 1247,
       "column": 5,
       "reason": "crypto expert: Argon2id password verification"
     },
     {
       "package": "jet",
+      "file": "Core/crypto/jetc.jet",
+      "line": 96,
+      "column": 5,
+      "reason": "Core JETC2 applies the fixed XChaCha20-Poly1305 suite and protocol-owned nonce/AAD domains"
+    },
+    {
+      "package": "jet",
+      "file": "Core/crypto/jetc.jet",
+      "line": 104,
+      "column": 5,
+      "reason": "Core JETC2 authenticates a bounded record before releasing its plaintext"
+    },
+    {
+      "package": "jet",
       "file": "Core/crypto/vault.jet",
-      "line": 70,
+      "line": 110,
       "column": 5,
       "reason": "vault typed load provider boundary"
     },
     {
       "package": "jet",
       "file": "Core/crypto/vault.jet",
-      "line": 77,
+      "line": 117,
       "column": 5,
       "reason": "vault typed current provider boundary"
     },
     {
       "package": "jet",
       "file": "Core/crypto/vault.jet",
-      "line": 84,
+      "line": 123,
       "column": 5,
       "reason": "vault typed status provider boundary"
     },
     {
       "package": "jet",
       "file": "Core/crypto/vault.jet",
-      "line": 91,
+      "line": 130,
       "column": 5,
       "reason": "vault typed versions provider boundary"
     },
     {
       "package": "jet",
       "file": "Core/crypto/vault.jet",
-      "line": 98,
+      "line": 137,
       "column": 5,
       "reason": "vault typed generation provider boundary"
     },
     {
       "package": "jet",
       "file": "Core/crypto/vault.jet",
-      "line": 105,
+      "line": 144,
       "column": 5,
       "reason": "vault typed store provider boundary"
     },
     {
       "package": "jet",
       "file": "Core/crypto/vault.jet",
-      "line": 113,
+      "line": 152,
       "column": 5,
       "reason": "vault key import: signing key material"
     },
     {
       "package": "jet",
       "file": "Core/crypto/vault.jet",
-      "line": 121,
+      "line": 160,
       "column": 5,
       "reason": "vault key import: X25519 secret material"
     },
     {
       "package": "jet",
       "file": "Core/crypto/vault.jet",
-      "line": 129,
+      "line": 168,
       "column": 5,
       "reason": "vault wrapped import provider boundary"
     },
     {
       "package": "jet",
       "file": "Core/crypto/vault.jet",
-      "line": 136,
+      "line": 175,
       "column": 5,
       "reason": "vault typed rotation provider boundary"
     },
     {
       "package": "jet",
       "file": "Core/crypto/vault.jet",
-      "line": 144,
+      "line": 182,
       "column": 5,
       "reason": "vault typed retirement provider boundary"
     },
     {
       "package": "jet",
       "file": "Core/crypto/vault.jet",
-      "line": 152,
+      "line": 189,
       "column": 5,
       "reason": "vault typed revocation provider boundary"
     },
     {
       "package": "jet",
       "file": "Core/crypto/vault.jet",
-      "line": 160,
+      "line": 196,
       "column": 5,
       "reason": "vault write authorization provider boundary"
     },
     {
       "package": "jet",
       "file": "Core/crypto/vault.jet",
-      "line": 168,
+      "line": 203,
       "column": 5,
       "reason": "vault wrapped authorization provider boundary"
     },
     {
       "package": "jet",
       "file": "Core/crypto/vault.jet",
-      "line": 176,
+      "line": 209,
       "column": 5,
       "reason": "vault typed generation commit provider boundary"
     },
     {
       "package": "jet",
       "file": "Core/crypto/vault.jet",
-      "line": 184,
+      "line": 215,
       "column": 5,
       "reason": "vault typed store commit provider boundary"
     },
     {
       "package": "jet",
       "file": "Core/crypto/vault.jet",
-      "line": 192,
+      "line": 221,
       "column": 5,
       "reason": "vault key import commit: signing key material"
     },
     {
       "package": "jet",
       "file": "Core/crypto/vault.jet",
-      "line": 200,
+      "line": 227,
       "column": 5,
       "reason": "vault key import commit: X25519 secret material"
     },
     {
       "package": "jet",
       "file": "Core/crypto/vault.jet",
-      "line": 208,
+      "line": 233,
       "column": 5,
       "reason": "vault wrapped import commit provider boundary"
     },
     {
       "package": "jet",
       "file": "Core/crypto/vault.jet",
-      "line": 216,
+      "line": 239,
       "column": 5,
       "reason": "vault typed rotation commit provider boundary"
     },
     {
       "package": "jet",
       "file": "Core/crypto/vault.jet",
-      "line": 224,
+      "line": 245,
       "column": 5,
       "reason": "vault typed retirement commit provider boundary"
     },
     {
       "package": "jet",
       "file": "Core/crypto/vault.jet",
-      "line": 232,
+      "line": 251,
       "column": 5,
       "reason": "vault typed revocation commit provider boundary"
     },
     {
       "package": "jet",
       "file": "Core/crypto/vault.jet",
-      "line": 239,
+      "line": 257,
       "column": 5,
       "reason": "vault passphrase export provider boundary"
     },
     {
       "package": "jet",
       "file": "Core/crypto/vault.jet",
-      "line": 247,
+      "line": 264,
       "column": 5,
       "reason": "vault recipient export provider boundary"
     },
     {
       "package": "jet",
+      "file": "Core/data/data.jet",
+      "line": 1119,
+      "column": 9,
+      "reason": "native path bytes originate from the host environment and are split at ASCII boundaries"
+    },
+    {
+      "package": "jet",
+      "file": "Core/data/data.jet",
+      "line": 1729,
+      "column": 5,
+      "reason": "inspect existing private Decode carriers only inside checked Core data source"
+    },
+    {
+      "package": "jet",
+      "file": "Core/db/db.jet",
+      "line": 41,
+      "column": 9,
+      "reason": "consume the unique SQLite queue handle through its existing host close leaf"
+    },
+    {
+      "package": "jet",
+      "file": "Core/db/db.jet",
+      "line": 47,
+      "column": 5,
+      "reason": "open the existing SQLite bridge and immediately adopt its handle into a consuming Core resource"
+    },
+    {
+      "package": "jet",
+      "file": "Core/db/db.jet",
+      "line": 54,
+      "column": 5,
+      "reason": "borrow the live unique queue handle for BEGIN"
+    },
+    {
+      "package": "jet",
+      "file": "Core/db/db.jet",
+      "line": 57,
+      "column": 5,
+      "reason": "borrow the live unique queue handle for COMMIT"
+    },
+    {
+      "package": "jet",
+      "file": "Core/db/db.jet",
+      "line": 60,
+      "column": 5,
+      "reason": "borrow the live unique queue handle for ROLLBACK"
+    },
+    {
+      "package": "jet",
+      "file": "Core/db/db.jet",
+      "line": 63,
+      "column": 5,
+      "reason": "execute bound queue SQL on the exclusively borrowed SQLite handle; host only marshals its existing wire"
+    },
+    {
+      "package": "jet",
+      "file": "Core/db/db.jet",
+      "line": 68,
+      "column": 5,
+      "reason": "query bound queue SQL on the exclusively borrowed SQLite handle; host only marshals its existing wire"
+    },
+    {
+      "package": "jet",
       "file": "Core/email/email.jet",
-      "line": 545,
+      "line": 77,
+      "column": 5,
+      "reason": "DKIM decoding: borrow encoded bytes and keep partial output in a zeroizing Secret"
+    },
+    {
+      "package": "jet",
+      "file": "Core/email/email.jet",
+      "line": 413,
+      "column": 5,
+      "reason": "DKIM known-answer fixture reads only synthetic key bytes"
+    },
+    {
+      "package": "jet",
+      "file": "Core/encoding/cbor.jet",
+      "line": 95,
+      "column": 5,
+      "reason": "inspect private typed carriers without changing public DataTree variants"
+    },
+    {
+      "package": "jet",
+      "file": "Core/encoding/cbor.jet",
+      "line": 157,
+      "column": 5,
+      "reason": "validated private carriers retain byte strings for typed Encode"
+    },
+    {
+      "package": "jet",
+      "file": "Core/encoding/cbor_stream.jet",
+      "line": 207,
+      "column": 9,
+      "reason": "the retained key copies exactly the already validated text bytes"
+    },
+    {
+      "package": "jet",
+      "file": "Core/encoding/cbor_stream.jet",
+      "line": 308,
+      "column": 17,
+      "reason": "the exact CBOR text allocation passed strict UTF-8 validation"
+    },
+    {
+      "package": "jet",
+      "file": "Core/encoding/csv.jet",
+      "line": 123,
+      "column": 9,
+      "reason": "input is a String; original complete UTF-8 scalars and ASCII quote escapes entered the field"
+    },
+    {
+      "package": "jet",
+      "file": "Core/encoding/csv.jet",
+      "line": 318,
+      "column": 5,
+      "reason": "the exact owned query bytes passed the shared strict UTF-8 validator"
+    },
+    {
+      "package": "jet",
+      "file": "Core/encoding/csv.jet",
+      "line": 768,
+      "column": 9,
+      "reason": "each completed UTF-8 scalar was validated before its original bytes entered this field"
+    },
+    {
+      "package": "jet",
+      "file": "Core/encoding/json.jet",
+      "line": 101,
+      "column": 5,
+      "reason": "preserve the shipped decoder's hidden stderr effect at its existing host boundary"
+    },
+    {
+      "package": "jet",
+      "file": "Core/encoding/json.jet",
+      "line": 109,
+      "column": 5,
+      "reason": "preserve the shipped decoder's hidden wall-clock snapshot at its existing host boundary"
+    },
+    {
+      "package": "jet",
+      "file": "Core/encoding/json.jet",
+      "line": 706,
+      "column": 5,
+      "reason": "preserve the native compiler-private DataTree carriers in Core JSON event projection"
+    },
+    {
+      "package": "jet",
+      "file": "Core/encoding/json.jet",
+      "line": 854,
+      "column": 5,
+      "reason": "Core JSON rendering borrows native private payloads without exposing their constructors"
+    },
+    {
+      "package": "jet",
+      "file": "Core/encoding/stream.jet",
+      "line": 12,
+      "column": 9,
+      "reason": "the Object variant was checked immediately before borrowing its ordered backing"
+    },
+    {
+      "package": "jet",
+      "file": "Core/encoding/stream.jet",
+      "line": 20,
+      "column": 5,
+      "reason": "transfer the owned ordered entries allocation into the native Object carrier"
+    },
+    {
+      "package": "jet",
+      "file": "Core/encoding/stream.jet",
+      "line": 26,
+      "column": 5,
+      "reason": "check the private Bytes variant immediately before borrowing its backing"
+    },
+    {
+      "package": "jet",
+      "file": "Core/encoding/stream.jet",
+      "line": 33,
+      "column": 5,
+      "reason": "the shared parser validated this exact numeric lexeme"
+    },
+    {
+      "package": "jet",
+      "file": "Core/encoding/stream.jet",
+      "line": 39,
+      "column": 5,
+      "reason": "retain decoded JSON text until the target Decode contract is known"
+    },
+    {
+      "package": "jet",
+      "file": "Core/encoding/stream.jet",
+      "line": 299,
+      "column": 9,
+      "reason": "the shared UTF-8 validator just accepted this owned byte allocation"
+    },
+    {
+      "package": "jet",
+      "file": "Core/encoding/stream.jet",
+      "line": 370,
+      "column": 9,
+      "reason": "the shared UTF-8 validator just accepted this owned ASCII token"
+    },
+    {
+      "package": "jet",
+      "file": "Core/encoding/stream.jet",
+      "line": 375,
       "column": 13,
-      "reason": "read the DKIM key length, then wipe this copy"
+      "reason": "retain a validated number lexeme in the private event carrier until typed decoding"
+    },
+    {
+      "package": "jet",
+      "file": "Core/encoding/stream.jet",
+      "line": 554,
+      "column": 9,
+      "reason": "transfer already validated UTF-8 storage to inspect its actual owned capacity"
+    },
+    {
+      "package": "jet",
+      "file": "Core/encoding/stream.jet",
+      "line": 565,
+      "column": 9,
+      "reason": "the private numeric event is projected only into the matching typed tree carrier"
+    },
+    {
+      "package": "jet",
+      "file": "Core/encoding/stream.jet",
+      "line": 835,
+      "column": 5,
+      "reason": "the shared UTF-8 validator just accepted this owned allocation"
+    },
+    {
+      "package": "jet",
+      "file": "Core/encoding/stream.jet",
+      "line": 844,
+      "column": 5,
+      "reason": "the byte position was checked against this String's storage length"
+    },
+    {
+      "package": "jet",
+      "file": "Core/encoding/stream.jet",
+      "line": 1404,
+      "column": 5,
+      "reason": "the shared UTF-8 validator accepted this exact owned formatter buffer"
+    },
+    {
+      "package": "jet",
+      "file": "Core/encoding/stream.jet",
+      "line": 1415,
+      "column": 5,
+      "reason": "transfer the owned UTF-8 String buffer before re-spelling its shortest digits"
+    },
+    {
+      "package": "jet",
+      "file": "Core/encoding/stream.jet",
+      "line": 1741,
+      "column": 5,
+      "reason": "owned validated UTF-8 allocation transfers in the encoding source seam"
+    },
+    {
+      "package": "jet",
+      "file": "Core/encoding/toml.jet",
+      "line": 718,
+      "column": 5,
+      "reason": "inspect compiler-private Bytes and typed carriers; public DataTree variants are unchanged"
+    },
+    {
+      "package": "jet",
+      "file": "Core/encoding/xml_engine.jet",
+      "line": 134,
+      "column": 5,
+      "reason": "all callers iterate or check the UTF-8 byte bounds before borrowing this byte"
+    },
+    {
+      "package": "jet",
+      "file": "Core/encoding/xml_engine.jet",
+      "line": 173,
+      "column": 5,
+      "reason": "the caller selected a scalar-aligned window of validated UTF-8 bytes"
+    },
+    {
+      "package": "jet",
+      "file": "Core/encoding/xml_engine.jet",
+      "line": 2218,
+      "column": 5,
+      "reason": "attribute whitespace compaction preserves the already validated UTF-8 byte sequence"
+    },
+    {
+      "package": "jet",
+      "file": "Core/encoding/yaml.jet",
+      "line": 320,
+      "column": 5,
+      "reason": "inspect compiler-private Bytes and typed carriers; public DataTree variants are unchanged"
+    },
+    {
+      "package": "jet",
+      "file": "Core/files/files.jet",
+      "line": 444,
+      "column": 1,
+      "reason": "the compiler store passes a live FileReader and Directory, with one NUL-free plain destination name; no source pathname is reopened"
+    },
+    {
+      "package": "jet",
+      "file": "Core/files/files.jet",
+      "line": 450,
+      "column": 1,
+      "reason": "compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor"
+    },
+    {
+      "package": "jet",
+      "file": "Core/http/server.jet",
+      "line": 76,
+      "column": 5,
+      "reason": "move the normalized response head and one-shot body into the transport carrier"
+    },
+    {
+      "package": "jet",
+      "file": "Core/http/server.jet",
+      "line": 139,
+      "column": 5,
+      "reason": "borrow the request's stored optional route-template metadata; no route selection or formatting policy"
+    },
+    {
+      "package": "jet",
+      "file": "Core/jobs/jobs.jet",
+      "line": 130,
+      "column": 5,
+      "reason": "queue preflight reads final-component metadata without following a symlink; metadata failures are ignored exactly as the SQLite provider does"
+    },
+    {
+      "package": "jet",
+      "file": "Core/jobs/jobs.jet",
+      "line": 135,
+      "column": 5,
+      "reason": "create the lexical parent with the existing raw recursive mkdir kernel before SQLite open"
+    },
+    {
+      "package": "jet",
+      "file": "Core/jobs/jobs.jet",
+      "line": 394,
+      "column": 13,
+      "reason": "match the queue's existing raw wall-clock wait without advancing controlled scheduler time"
+    },
+    {
+      "package": "jet",
+      "file": "Core/jobs/jobs.jet",
+      "line": 488,
+      "column": 5,
+      "reason": "publish already committed queue observations through the existing validated Devtools event/sink boundary"
+    },
+    {
+      "package": "jet",
+      "file": "Core/jobs/jobs.jet",
+      "line": 503,
+      "column": 5,
+      "reason": "publish source-projected queue status through the existing validated Devtools event/sink boundary"
     },
     {
       "package": "jet",
@@ -799,143 +1170,689 @@ example retains the negative unsafe-outside-vetted scan.
     },
     {
       "package": "jet",
+      "file": "Core/net/net.jet",
+      "line": 137,
+      "column": 5,
+      "reason": "checked IPv4/IPv6 octets transferred into the native address carrier"
+    },
+    {
+      "package": "jet",
+      "file": "Core/net/net.jet",
+      "line": 143,
+      "column": 5,
+      "reason": "read native address octets; no parsing or formatting policy in the carrier leaf"
+    },
+    {
+      "package": "jet",
+      "file": "Core/net/net.jet",
+      "line": 149,
+      "column": 5,
+      "reason": "read the native IP address discriminant"
+    },
+    {
+      "package": "jet",
+      "file": "Core/net/net.jet",
+      "line": 192,
+      "column": 5,
+      "reason": "validated IP octets, port and IPv6 numeric scope transferred into the socket carrier"
+    },
+    {
+      "package": "jet",
+      "file": "Core/net/net.jet",
+      "line": 199,
+      "column": 5,
+      "reason": "read socket IP representation; formatting stays in Jet"
+    },
+    {
+      "package": "jet",
+      "file": "Core/net/net.jet",
+      "line": 202,
+      "column": 5,
+      "reason": "read native socket port"
+    },
+    {
+      "package": "jet",
+      "file": "Core/net/net.jet",
+      "line": 214,
+      "column": 5,
+      "reason": "read native IPv6 socket scope identifier"
+    },
+    {
+      "package": "jet",
+      "file": "Core/net/net.jet",
+      "line": 413,
+      "column": 5,
+      "reason": "read the native UDP packet's socket-address carrier"
+    },
+    {
+      "package": "jet",
+      "file": "Core/process/process.jet",
+      "line": 94,
+      "column": 5,
+      "reason": "transfer a fully initialized Jet process plan into the temporary native ProcessSpec carrier; paired environment columns have equal length"
+    },
+    {
+      "package": "jet",
+      "file": "Core/service/service.jet",
+      "line": 154,
+      "column": 5,
+      "reason": "one existing registry read snapshots exact and candidate facts; no second authority or resource carrier"
+    },
+    {
+      "package": "jet",
+      "file": "Core/service/service.jet",
+      "line": 264,
+      "column": 5,
+      "reason": "read the existing endpoint's tree, worker and generation fields"
+    },
+    {
+      "package": "jet",
+      "file": "Core/service/service.jet",
+      "line": 271,
+      "column": 5,
+      "reason": "Services3081: check started before the single delivery-field write"
+    },
+    {
+      "package": "jet",
+      "file": "Core/service/service.jet",
+      "line": 278,
+      "column": 5,
+      "reason": "Services1415: root policy write precedes each declared group policy write"
+    },
+    {
+      "package": "jet",
+      "file": "Core/service/service.jet",
+      "line": 287,
+      "column": 5,
+      "reason": "Services3220: tree's exclusive write borrow covers count then clear"
+    },
+    {
+      "package": "jet",
+      "file": "Core/service/service.jet",
+      "line": 296,
+      "column": 5,
+      "reason": "Services3231: started and record checks precede adapter then authority writes"
+    },
+    {
+      "package": "jet",
+      "file": "Core/service/service.jet",
+      "line": 316,
+      "column": 5,
+      "reason": "the source exclusive tree borrow covers the same complete mutation as Rust &mut; no lock or interleaving window"
+    },
+    {
+      "package": "jet",
+      "file": "Core/service/service.jet",
+      "line": 347,
+      "column": 5,
+      "reason": "Services4437: authority lookup, durable load, first record, then checked framing"
+    },
+    {
+      "package": "jet",
+      "file": "Core/service/service.jet",
+      "line": 361,
+      "column": 5,
+      "reason": "Services4493: replay existing in-memory records without issuing a store read"
+    },
+    {
+      "package": "jet",
+      "file": "Core/service/service.jet",
+      "line": 396,
+      "column": 5,
+      "reason": "Services6729: copy the existing optional last-upgrade field"
+    },
+    {
+      "package": "jet",
+      "file": "Core/service/service.jet",
+      "line": 402,
+      "column": 5,
+      "reason": "Services1153: plain field projection; rollback store remains omitted from all text views"
+    },
+    {
+      "package": "jet",
+      "file": "Core/service/service.jet",
+      "line": 410,
+      "column": 5,
+      "reason": "Services1265: read the existing topology fields, preserve handler insertion order"
+    },
+    {
+      "package": "jet",
+      "file": "Core/service/service.jet",
+      "line": 428,
+      "column": 5,
+      "reason": "Services5867: durable replay before lookup; first matching run wins"
+    },
+    {
+      "package": "jet",
+      "file": "Core/service/service.jet",
+      "line": 443,
+      "column": 5,
+      "reason": "Services5879: durable replay before lookup; missing or nonterminal run is Policy"
+    },
+    {
+      "package": "jet",
+      "file": "Core/service/service.jet",
+      "line": 460,
+      "column": 5,
+      "reason": "Services6978: project existing runtime facts; source owns counts and text"
+    },
+    {
+      "package": "jet",
+      "file": "Core/service/service.jet",
+      "line": 541,
+      "column": 5,
+      "reason": "Allocation only: source supplies every Services.rs initializer field at 2d9953adf:1293-1319, in native evaluation order"
+    },
+    {
+      "package": "jet",
+      "file": "Core/service/service.jet",
+      "line": 616,
+      "column": 5,
+      "reason": "read the final path component's OS metadata kind without opening an identity handle"
+    },
+    {
+      "package": "jet",
+      "file": "Core/service/service.jet",
+      "line": 642,
+      "column": 5,
+      "reason": "read the checked service tree's generation field without mutating or copying its scheduler carrier"
+    },
+    {
+      "package": "jet",
+      "file": "Core/service/service.jet",
+      "line": 648,
+      "column": 5,
+      "reason": "read event-log storage length on the checked service tree"
+    },
+    {
+      "package": "jet",
+      "file": "Core/service/service.jet",
+      "line": 654,
+      "column": 5,
+      "reason": "read dead-letter storage length on the checked service tree"
+    },
+    {
+      "package": "jet",
+      "file": "Core/service/service.jet",
+      "line": 856,
+      "column": 5,
+      "reason": "Services5439-5507: synchronize before validation; exact version replay precedes active-version rejection"
+    },
+    {
+      "package": "jet",
+      "file": "Core/service/service.jet",
+      "line": 893,
+      "column": 5,
+      "reason": "Services5656-5705: exclusive tree borrow keeps replay and append cursor decisions indivisible"
+    },
+    {
+      "package": "jet",
+      "file": "Core/service/service.jet",
+      "line": 924,
+      "column": 5,
+      "reason": "Services5708-5789: first recorded definition wins; replay precedes terminal checks"
+    },
+    {
+      "package": "jet",
+      "file": "Core/service/service.jet",
+      "line": 977,
+      "column": 5,
+      "reason": "Services5792-5867: replay consumes recorded attempts, never derives another attempt from replayed state"
+    },
+    {
+      "package": "jet",
+      "file": "Core/service/service.jet",
+      "line": 1012,
+      "column": 5,
+      "reason": "Services5870-5950: two replay entries advance together; identical terminal completions are idempotent"
+    },
+    {
+      "package": "jet",
+      "file": "Core/service/service.jet",
+      "line": 1188,
+      "column": 5,
+      "reason": "Services1546: exclusive tree write borrow preserves validation, reparent, append ordering"
+    },
+    {
+      "package": "jet",
+      "file": "Core/service/service.jet",
+      "line": 1234,
+      "column": 5,
+      "reason": "Services7044: counter write precedes reachable-worker selection and canonical failure policy"
+    },
+    {
+      "package": "jet",
+      "file": "Core/service/service.jet",
+      "line": 1250,
+      "column": 5,
+      "reason": "Services4575: source owns adapter/authority/payload/count checks and record framing; store append before field push"
+    },
+    {
+      "package": "jet",
+      "file": "Core/service/service.jet",
+      "line": 1270,
+      "column": 5,
+      "reason": "Services4525: host record-write leaf retains existing mutex through store write and field assignment; no guard exposed"
+    },
+    {
+      "package": "jet",
+      "file": "Core/service/service.jet",
+      "line": 1302,
+      "column": 5,
+      "reason": "Services2184: identity and pinned-generation checks precede authority validation"
+    },
+    {
+      "package": "jet",
+      "file": "Core/service/service.jet",
+      "line": 1328,
+      "column": 5,
+      "reason": "Services6081: exact directory lookup, generation, proof, authority, running, draining order"
+    },
+    {
+      "package": "jet",
+      "file": "Core/service/service.jet",
+      "line": 1352,
+      "column": 5,
+      "reason": "Services2558: source owns routing, message checks, worker gate, capacity error text, post-send ordering"
+    },
+    {
+      "package": "jet",
+      "file": "Core/service/service.jet",
+      "line": 1451,
+      "column": 5,
+      "reason": "ServiceAuthority2504: one existing locked durable read, then the owned entry's state"
+    },
+    {
+      "package": "jet",
+      "file": "Core/service/service.jet",
+      "line": 1466,
+      "column": 5,
+      "reason": "ServiceAuthority2517: same locked read; receipt fields and signature are source policy"
+    },
+    {
+      "package": "jet",
+      "file": "Core/service/service.jet",
+      "line": 1480,
+      "column": 5,
+      "reason": "ServiceAuthority2535-2647: one locked read, then exact record filtering, error order and signature validation"
+    },
+    {
+      "package": "jet",
+      "file": "Core/service/service.jet",
+      "line": 1529,
+      "column": 5,
+      "reason": "ServiceAuthority2650: validate/read first, then an exact zero-retention runtime and existing retry operation"
+    },
+    {
+      "package": "jet",
+      "file": "Core/service/service.jet",
+      "line": 1540,
+      "column": 5,
+      "reason": "ServiceAuthority1297: identity checks, existing two registry reads/captured Arc, conditional depth check, one receive"
+    },
+    {
+      "package": "jet",
+      "file": "Core/service/service.jet",
+      "line": 1629,
+      "column": 5,
+      "reason": "Services2864: local queued-message/idempotency matching stays source; existing cryptographic ID leaf"
+    },
+    {
+      "package": "jet",
+      "file": "Core/service/service.jet",
+      "line": 1649,
+      "column": 5,
+      "reason": "Services3127: no enclosing lock; source owns local deduplication/admission/rollback orchestration"
+    },
+    {
+      "package": "jet",
+      "file": "Core/service/service.jet",
+      "line": 1722,
+      "column": 5,
+      "reason": "Services2629: no enclosing guard; existing atomic authority operations retain their locks"
+    },
+    {
+      "package": "jet",
+      "file": "Core/service/service.jet",
+      "line": 1814,
+      "column": 5,
+      "reason": "Services2693-2762: retain authority requeue then mailbox-restore ordering and both failure texts"
+    },
+    {
+      "package": "jet",
+      "file": "Core/service/service.jet",
+      "line": 1875,
+      "column": 5,
+      "reason": "Services1464-1544: checked function item is passed through; source owns validation and every seed"
+    },
+    {
+      "package": "jet",
+      "file": "Core/service/service.jet",
+      "line": 2017,
+      "column": 5,
+      "reason": "Services2917-3078: exclusive tree borrow; each write follows the native order"
+    },
+    {
+      "package": "jet",
+      "file": "Core/service/service.jet",
+      "line": 2132,
+      "column": 5,
+      "reason": "Services3080-3100: pinned validation, group policy, one now, then weak name/tree match"
+    },
+    {
+      "package": "jet",
+      "file": "Core/service/service.jet",
+      "line": 2153,
+      "column": 5,
+      "reason": "Services2847-2862: validated endpoint, then deliberately weak name/tree match, channel depth"
+    },
+    {
+      "package": "jet",
       "file": "Core/sys/sys.jet",
-      "line": 158,
+      "line": 397,
       "column": 1,
       "reason": "posix umask: the caller owns the process file-creation mask and restores it when other code relies on it"
     },
     {
       "package": "jet",
       "file": "Core/sys/sys.jet",
-      "line": 174,
+      "line": 443,
       "column": 5,
       "reason": "posix getpgid: inspect a process group"
     },
     {
       "package": "jet",
       "file": "Core/sys/sys.jet",
-      "line": 180,
+      "line": 449,
       "column": 5,
       "reason": "posix getsid: inspect a process session"
     },
     {
       "package": "jet",
       "file": "Core/sys/sys.jet",
-      "line": 185,
+      "line": 454,
       "column": 1,
       "reason": "posix getpriority: the caller vouches that `which` names this process or one it controls"
     },
     {
       "package": "jet",
       "file": "Core/sys/sys.jet",
-      "line": 189,
+      "line": 461,
       "column": 1,
       "reason": "posix setpriority: the caller owns the scheduling priority of the process it changes"
     },
     {
       "package": "jet",
       "file": "Core/sys/sys.jet",
-      "line": 193,
+      "line": 465,
       "column": 1,
       "reason": "posix utime: the caller owns the file whose timestamps it rewrites"
     },
     {
       "package": "jet",
       "file": "Core/sys/sys.jet",
-      "line": 199,
+      "line": 472,
       "column": 1,
       "reason": "posix stop: the caller accepts that the process ends here after the shared cleanup boundary"
     },
     {
       "package": "jet",
       "file": "Core/sys/sys.jet",
-      "line": 206,
+      "line": 482,
       "column": 1,
       "reason": "posix pipe: the caller owns both returned descriptors and closes each exactly once"
     },
     {
       "package": "jet",
       "file": "Core/sys/sys.jet",
-      "line": 210,
+      "line": 488,
       "column": 1,
       "reason": "posix close_fd: the caller owns `fd` and nothing uses it after this call"
     },
     {
       "package": "jet",
       "file": "Core/sys/sys.jet",
-      "line": 214,
+      "line": 496,
       "column": 1,
       "reason": "posix mkfifo: the caller owns `path` and removes the named pipe it creates"
     },
     {
       "package": "jet",
       "file": "Core/sys/sys.jet",
-      "line": 218,
+      "line": 501,
       "column": 1,
       "reason": "posix fork: the caller handles both the parent and the child return and reaps the child"
     },
     {
       "package": "jet",
       "file": "Core/sys/sys.jet",
-      "line": 222,
+      "line": 505,
       "column": 1,
       "reason": "posix setsid: the caller owns the process session topology it changes"
     },
     {
       "package": "jet",
       "file": "Core/sys/sys.jet",
-      "line": 226,
+      "line": 509,
       "column": 1,
       "reason": "posix wait: the caller owns the child processes it reaps"
     },
     {
       "package": "jet",
       "file": "Core/sys/sys.jet",
-      "line": 230,
+      "line": 515,
       "column": 1,
       "reason": "posix waitpid: the caller owns the child process it reaps"
     },
     {
       "package": "jet",
       "file": "Core/sys/sys.jet",
-      "line": 234,
+      "line": 521,
       "column": 1,
       "reason": "posix setuid: the caller drops or changes process credentials deliberately"
     },
     {
       "package": "jet",
       "file": "Core/sys/sys.jet",
-      "line": 238,
+      "line": 525,
       "column": 1,
       "reason": "posix setgid: the caller drops or changes process credentials deliberately"
     },
     {
       "package": "jet",
       "file": "Core/sys/sys.jet",
-      "line": 242,
+      "line": 529,
       "column": 1,
       "reason": "posix setpgrp: the caller owns the process group topology it changes"
     },
     {
       "package": "jet",
       "file": "Core/sys/sys.jet",
-      "line": 246,
+      "line": 533,
       "column": 1,
       "reason": "posix setpgid: the caller owns the process group topology it changes"
     },
     {
       "package": "jet",
       "file": "Core/sys/sys.jet",
-      "line": 250,
+      "line": 537,
       "column": 1,
       "reason": "posix kill: the caller owns or is entitled to signal the target process"
     },
     {
       "package": "jet",
       "file": "Core/sys/sys.jet",
-      "line": 254,
+      "line": 541,
       "column": 1,
       "reason": "posix initgroups: the caller changes supplementary groups deliberately"
+    },
+    {
+      "package": "jet",
+      "file": "Core/testing/testing.jet",
+      "line": 354,
+      "column": 5,
+      "reason": "the caller bounded this byte position by the String storage length"
+    },
+    {
+      "package": "jet",
+      "file": "Core/testing/testing.jet",
+      "line": 375,
+      "column": 5,
+      "reason": "all appended bytes came from complete UTF-8 strings or ASCII"
+    },
+    {
+      "package": "jet",
+      "file": "Core/tui/tui.jet",
+      "line": 100,
+      "column": 5,
+      "reason": "Core TUI reads owned encoded OS environment bytes from the current host; no UTF-8 assumption"
+    },
+    {
+      "package": "jet",
+      "file": "Core/tui/tui.jet",
+      "line": 126,
+      "column": 5,
+      "reason": "Core TUI samples the same stdout terminal fact consumed by terminal style/progress"
+    },
+    {
+      "package": "jet",
+      "file": "Core/tui/tui.jet",
+      "line": 652,
+      "column": 5,
+      "reason": "Core TUI test: normalized style words and explicit absent UI slots"
+    },
+    {
+      "package": "jet",
+      "file": "Core/ui/host.jet",
+      "line": 154,
+      "column": 5,
+      "reason": "Core UI capability facts come from the current retained provider, not a fabricated default"
+    },
+    {
+      "package": "jet",
+      "file": "Core/ui/host.jet",
+      "line": 160,
+      "column": 5,
+      "reason": "Core UI dialog crosses the current provider boundary; its typed cancellation and denial are preserved"
+    },
+    {
+      "package": "jet",
+      "file": "Core/ui/host.jet",
+      "line": 166,
+      "column": 5,
+      "reason": "Core UI save dialog crosses the current provider boundary with the original typed request"
+    },
+    {
+      "package": "jet",
+      "file": "Core/ui/host.jet",
+      "line": 180,
+      "column": 5,
+      "reason": "Core UI dialog request transfer: validated grant and explicit absent directory, filter list, and multiple-selection slot"
+    },
+    {
+      "package": "jet",
+      "file": "Core/ui/host/accessibility.jet",
+      "line": 7,
+      "column": 5,
+      "reason": "Core accessibility attaches metadata to the canonical node through the current retained provider"
+    },
+    {
+      "package": "jet",
+      "file": "Core/ui/host/accessibility.jet",
+      "line": 16,
+      "column": 5,
+      "reason": "Core accessibility projects metadata from the canonical node, never a second provider tree"
+    },
+    {
+      "package": "jet",
+      "file": "Core/ui/host/clipboard.jet",
+      "line": 6,
+      "column": 5,
+      "reason": "Core clipboard reads through the current retained provider; the raw host owns platform access"
+    },
+    {
+      "package": "jet",
+      "file": "Core/ui/host/clipboard.jet",
+      "line": 12,
+      "column": 5,
+      "reason": "Core clipboard transfers the exact UTF-8 text to the current retained provider"
+    },
+    {
+      "package": "jet",
+      "file": "Core/ui/host/drag_drop.jet",
+      "line": 33,
+      "column": 5,
+      "reason": "Core drag/drop consumes one typed event from the current retained provider queue"
+    },
+    {
+      "package": "jet",
+      "file": "Core/ui/host/ime.jet",
+      "line": 25,
+      "column": 5,
+      "reason": "Core IME consumes one typed event from the current retained provider queue"
+    },
+    {
+      "package": "jet",
+      "file": "Core/ui/host/shortcuts.jet",
+      "line": 11,
+      "column": 5,
+      "reason": "Core shortcut registration uses the current retained provider's canonical action registry"
+    },
+    {
+      "package": "jet",
+      "file": "Core/ui/host/shortcuts.jet",
+      "line": 17,
+      "column": 5,
+      "reason": "Core shortcut dispatch uses the current retained provider's canonical action registry"
+    },
+    {
+      "package": "jet",
+      "file": "Core/ui/ui.jet",
+      "line": 126,
+      "column": 5,
+      "reason": "Core creates the real retained GTK renderer through the registered host allocation boundary"
+    },
+    {
+      "package": "jet",
+      "file": "Core/ui/ui.jet",
+      "line": 131,
+      "column": 5,
+      "reason": "Core creates the real retained terminal renderer through the registered host allocation boundary"
+    },
+    {
+      "package": "jet",
+      "file": "Core/ui/ui.jet",
+      "line": 136,
+      "column": 5,
+      "reason": "Core creates the real retained null renderer through the registered host allocation boundary"
+    },
+    {
+      "package": "jet",
+      "file": "Core/ui/ui.jet",
+      "line": 147,
+      "column": 5,
+      "reason": "Core UI accessibility slot transfer: explicitly present validated metadata"
+    },
+    {
+      "package": "jet",
+      "file": "Core/ui/ui.jet",
+      "line": 164,
+      "column": 5,
+      "reason": "Core UI shortcut slot transfer: explicitly present validated shortcut"
+    },
+    {
+      "package": "jet",
+      "file": "Core/ui/ui.jet",
+      "line": 191,
+      "column": 5,
+      "reason": "Core UI host slot transfer: audited kind, role, explicit absent slots, and normalized style words"
+    },
+    {
+      "package": "jet",
+      "file": "Core/ui/ui.jet",
+      "line": 197,
+      "column": 5,
+      "reason": "Core UI viewport transfer: source supplies a valid device and bounded positive dimensions"
     },
     {
       "package": "jet",
@@ -1006,6 +1923,1469 @@ example retains the negative unsafe-outside-vetted scan.
       "line": 181,
       "column": 9,
       "reason": "host replay uses a stack cell for the CMSDK UART0 control register and never dereferences the target address"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/aes/nist_gcm.jet",
+      "line": 11,
+      "column": 5,
+      "reason": "published KAT or frozen seed AES-GCM fixture"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/aes/seed_differential.jet",
+      "line": 11,
+      "column": 5,
+      "reason": "published KAT or frozen seed AES-GCM fixture"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 13,
+      "column": 9,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 17,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 30,
+      "column": 9,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 34,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 47,
+      "column": 9,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 51,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 64,
+      "column": 9,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 68,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 81,
+      "column": 9,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 85,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 96,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 107,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 118,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 129,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 140,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 151,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 162,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 173,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 184,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 195,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 206,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 217,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 228,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 239,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 250,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 261,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 272,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 283,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 294,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 305,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 321,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 332,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 348,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 359,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 375,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 386,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 402,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 413,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 429,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 440,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 456,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 467,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 483,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 494,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 510,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 521,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 537,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 548,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 564,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 575,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 591,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 602,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 618,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 629,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 645,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 656,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 672,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 683,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 699,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 710,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 726,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 737,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 753,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 764,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 780,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 791,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 807,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 818,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 834,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 845,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 861,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 872,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 888,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 899,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 915,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 926,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 942,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 953,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 969,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 980,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 996,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1007,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1023,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1034,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1050,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1061,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1077,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1088,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1104,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1115,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1131,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1142,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1158,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1169,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1185,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1196,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1212,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1223,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1239,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1250,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1266,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1277,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1293,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1304,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1320,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1331,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1342,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1353,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1364,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1375,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1386,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1397,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1408,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1424,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1440,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1456,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1474,
+      "column": 9,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1478,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1491,
+      "column": 9,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1495,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1508,
+      "column": 9,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1512,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1525,
+      "column": 9,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1529,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1542,
+      "column": 9,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1546,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1559,
+      "column": 9,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1563,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1576,
+      "column": 9,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1580,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1593,
+      "column": 9,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1597,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1610,
+      "column": 9,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1614,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1627,
+      "column": 9,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1631,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1644,
+      "column": 9,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1648,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1661,
+      "column": 9,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1665,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1678,
+      "column": 9,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1682,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1695,
+      "column": 9,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1699,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1712,
+      "column": 9,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1716,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1729,
+      "column": 9,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1733,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1746,
+      "column": 9,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1750,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1763,
+      "column": 9,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1767,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1780,
+      "column": 9,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1784,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1797,
+      "column": 9,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1801,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1814,
+      "column": 9,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1818,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1831,
+      "column": 9,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1835,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1848,
+      "column": 9,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1852,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1865,
+      "column": 9,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1869,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1882,
+      "column": 9,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1886,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1899,
+      "column": 9,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1903,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1916,
+      "column": 9,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1920,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1933,
+      "column": 9,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1937,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1950,
+      "column": 9,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1954,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1967,
+      "column": 9,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1971,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1984,
+      "column": 9,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 1988,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 2001,
+      "column": 9,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 2005,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 2018,
+      "column": 9,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 2022,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 2035,
+      "column": 9,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 2039,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 2052,
+      "column": 9,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 2056,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 2069,
+      "column": 9,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 2073,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 2086,
+      "column": 9,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 2090,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 2103,
+      "column": 9,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 2107,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 2120,
+      "column": 9,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 2124,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 2137,
+      "column": 9,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 2141,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 2154,
+      "column": 9,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 2158,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 2171,
+      "column": 9,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 2175,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 2188,
+      "column": 9,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 2192,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 2205,
+      "column": 9,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 2209,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 2220,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_ed25519.jet",
+      "line": 2236,
+      "column": 9,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/ct_x25519.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "published/frozen X25519 test inputs"
     },
     {
       "package": "tests",
@@ -1625,10 +4005,10 @@ example retains the negative unsafe-outside-vetted scan.
 | crate/package | regions |
 | --- | ---: |
 | Examples | 38 |
-| jet | 89 |
+| jet | 220 |
 | jetpack | 1 |
-| tests | 87 |
-| **total** | **215** |
+| tests | 296 |
+| **total** | **555** |
 
 ### Regions
 
@@ -1701,57 +4081,188 @@ example retains the negative unsafe-outside-vetted scan.
 | jet | Compiler/JetBackend/Source/OS/Linux.jet | 230:5 | "`name` is a NUL-terminated copy of `path`" |
 | jet | Compiler/JetBackend/Source/OS/Linux.jet | 242:5 | "`name` is a NUL-terminated copy of `symbol`; dlsym only reads the library's symbol table" |
 | jet | Compiler/JetBackend/Tests/ComptimeScalars.jet | 29:9 | "the identity returns its single owning String unchanged; decoding has copied it" |
-| jet | Core/auth/auth.jet | 126:5 | "auth PASETO v4.public verification uses the fixed Ed25519 primitive" |
-| jet | Core/crypto/crypto.jet | 785:5 | "crypto expert: Argon2id password hashing" |
-| jet | Core/crypto/crypto.jet | 812:5 | "crypto expert: Argon2id password verification" |
-| jet | Core/crypto/vault.jet | 70:5 | "vault typed load provider boundary" |
-| jet | Core/crypto/vault.jet | 77:5 | "vault typed current provider boundary" |
-| jet | Core/crypto/vault.jet | 84:5 | "vault typed status provider boundary" |
-| jet | Core/crypto/vault.jet | 91:5 | "vault typed versions provider boundary" |
-| jet | Core/crypto/vault.jet | 98:5 | "vault typed generation provider boundary" |
-| jet | Core/crypto/vault.jet | 105:5 | "vault typed store provider boundary" |
-| jet | Core/crypto/vault.jet | 113:5 | "vault key import: signing key material" |
-| jet | Core/crypto/vault.jet | 121:5 | "vault key import: X25519 secret material" |
-| jet | Core/crypto/vault.jet | 129:5 | "vault wrapped import provider boundary" |
-| jet | Core/crypto/vault.jet | 136:5 | "vault typed rotation provider boundary" |
-| jet | Core/crypto/vault.jet | 144:5 | "vault typed retirement provider boundary" |
-| jet | Core/crypto/vault.jet | 152:5 | "vault typed revocation provider boundary" |
-| jet | Core/crypto/vault.jet | 160:5 | "vault write authorization provider boundary" |
-| jet | Core/crypto/vault.jet | 168:5 | "vault wrapped authorization provider boundary" |
-| jet | Core/crypto/vault.jet | 176:5 | "vault typed generation commit provider boundary" |
-| jet | Core/crypto/vault.jet | 184:5 | "vault typed store commit provider boundary" |
-| jet | Core/crypto/vault.jet | 192:5 | "vault key import commit: signing key material" |
-| jet | Core/crypto/vault.jet | 200:5 | "vault key import commit: X25519 secret material" |
-| jet | Core/crypto/vault.jet | 208:5 | "vault wrapped import commit provider boundary" |
-| jet | Core/crypto/vault.jet | 216:5 | "vault typed rotation commit provider boundary" |
-| jet | Core/crypto/vault.jet | 224:5 | "vault typed retirement commit provider boundary" |
-| jet | Core/crypto/vault.jet | 232:5 | "vault typed revocation commit provider boundary" |
-| jet | Core/crypto/vault.jet | 239:5 | "vault passphrase export provider boundary" |
-| jet | Core/crypto/vault.jet | 247:5 | "vault recipient export provider boundary" |
-| jet | Core/email/email.jet | 545:13 | "read the DKIM key length, then wipe this copy" |
+| jet | Core/auth/auth.jet | 112:5 | "auth PASETO v4.public verification uses the fixed Ed25519 primitive" |
+| jet | Core/crypto/crypto.jet | 679:5 | "the expert API explicitly authorizes authenticated legacy-v1 migration" |
+| jet | Core/crypto/crypto.jet | 1220:5 | "crypto expert: Argon2id password hashing" |
+| jet | Core/crypto/crypto.jet | 1247:5 | "crypto expert: Argon2id password verification" |
+| jet | Core/crypto/jetc.jet | 96:5 | "Core JETC2 applies the fixed XChaCha20-Poly1305 suite and protocol-owned nonce/AAD domains" |
+| jet | Core/crypto/jetc.jet | 104:5 | "Core JETC2 authenticates a bounded record before releasing its plaintext" |
+| jet | Core/crypto/vault.jet | 110:5 | "vault typed load provider boundary" |
+| jet | Core/crypto/vault.jet | 117:5 | "vault typed current provider boundary" |
+| jet | Core/crypto/vault.jet | 123:5 | "vault typed status provider boundary" |
+| jet | Core/crypto/vault.jet | 130:5 | "vault typed versions provider boundary" |
+| jet | Core/crypto/vault.jet | 137:5 | "vault typed generation provider boundary" |
+| jet | Core/crypto/vault.jet | 144:5 | "vault typed store provider boundary" |
+| jet | Core/crypto/vault.jet | 152:5 | "vault key import: signing key material" |
+| jet | Core/crypto/vault.jet | 160:5 | "vault key import: X25519 secret material" |
+| jet | Core/crypto/vault.jet | 168:5 | "vault wrapped import provider boundary" |
+| jet | Core/crypto/vault.jet | 175:5 | "vault typed rotation provider boundary" |
+| jet | Core/crypto/vault.jet | 182:5 | "vault typed retirement provider boundary" |
+| jet | Core/crypto/vault.jet | 189:5 | "vault typed revocation provider boundary" |
+| jet | Core/crypto/vault.jet | 196:5 | "vault write authorization provider boundary" |
+| jet | Core/crypto/vault.jet | 203:5 | "vault wrapped authorization provider boundary" |
+| jet | Core/crypto/vault.jet | 209:5 | "vault typed generation commit provider boundary" |
+| jet | Core/crypto/vault.jet | 215:5 | "vault typed store commit provider boundary" |
+| jet | Core/crypto/vault.jet | 221:5 | "vault key import commit: signing key material" |
+| jet | Core/crypto/vault.jet | 227:5 | "vault key import commit: X25519 secret material" |
+| jet | Core/crypto/vault.jet | 233:5 | "vault wrapped import commit provider boundary" |
+| jet | Core/crypto/vault.jet | 239:5 | "vault typed rotation commit provider boundary" |
+| jet | Core/crypto/vault.jet | 245:5 | "vault typed retirement commit provider boundary" |
+| jet | Core/crypto/vault.jet | 251:5 | "vault typed revocation commit provider boundary" |
+| jet | Core/crypto/vault.jet | 257:5 | "vault passphrase export provider boundary" |
+| jet | Core/crypto/vault.jet | 264:5 | "vault recipient export provider boundary" |
+| jet | Core/data/data.jet | 1119:9 | "native path bytes originate from the host environment and are split at ASCII boundaries" |
+| jet | Core/data/data.jet | 1729:5 | "inspect existing private Decode carriers only inside checked Core data source" |
+| jet | Core/db/db.jet | 41:9 | "consume the unique SQLite queue handle through its existing host close leaf" |
+| jet | Core/db/db.jet | 47:5 | "open the existing SQLite bridge and immediately adopt its handle into a consuming Core resource" |
+| jet | Core/db/db.jet | 54:5 | "borrow the live unique queue handle for BEGIN" |
+| jet | Core/db/db.jet | 57:5 | "borrow the live unique queue handle for COMMIT" |
+| jet | Core/db/db.jet | 60:5 | "borrow the live unique queue handle for ROLLBACK" |
+| jet | Core/db/db.jet | 63:5 | "execute bound queue SQL on the exclusively borrowed SQLite handle; host only marshals its existing wire" |
+| jet | Core/db/db.jet | 68:5 | "query bound queue SQL on the exclusively borrowed SQLite handle; host only marshals its existing wire" |
+| jet | Core/email/email.jet | 77:5 | "DKIM decoding: borrow encoded bytes and keep partial output in a zeroizing Secret" |
+| jet | Core/email/email.jet | 413:5 | "DKIM known-answer fixture reads only synthetic key bytes" |
+| jet | Core/encoding/cbor.jet | 95:5 | "inspect private typed carriers without changing public DataTree variants" |
+| jet | Core/encoding/cbor.jet | 157:5 | "validated private carriers retain byte strings for typed Encode" |
+| jet | Core/encoding/cbor_stream.jet | 207:9 | "the retained key copies exactly the already validated text bytes" |
+| jet | Core/encoding/cbor_stream.jet | 308:17 | "the exact CBOR text allocation passed strict UTF-8 validation" |
+| jet | Core/encoding/csv.jet | 123:9 | "input is a String; original complete UTF-8 scalars and ASCII quote escapes entered the field" |
+| jet | Core/encoding/csv.jet | 318:5 | "the exact owned query bytes passed the shared strict UTF-8 validator" |
+| jet | Core/encoding/csv.jet | 768:9 | "each completed UTF-8 scalar was validated before its original bytes entered this field" |
+| jet | Core/encoding/json.jet | 101:5 | "preserve the shipped decoder's hidden stderr effect at its existing host boundary" |
+| jet | Core/encoding/json.jet | 109:5 | "preserve the shipped decoder's hidden wall-clock snapshot at its existing host boundary" |
+| jet | Core/encoding/json.jet | 706:5 | "preserve the native compiler-private DataTree carriers in Core JSON event projection" |
+| jet | Core/encoding/json.jet | 854:5 | "Core JSON rendering borrows native private payloads without exposing their constructors" |
+| jet | Core/encoding/stream.jet | 12:9 | "the Object variant was checked immediately before borrowing its ordered backing" |
+| jet | Core/encoding/stream.jet | 20:5 | "transfer the owned ordered entries allocation into the native Object carrier" |
+| jet | Core/encoding/stream.jet | 26:5 | "check the private Bytes variant immediately before borrowing its backing" |
+| jet | Core/encoding/stream.jet | 33:5 | "the shared parser validated this exact numeric lexeme" |
+| jet | Core/encoding/stream.jet | 39:5 | "retain decoded JSON text until the target Decode contract is known" |
+| jet | Core/encoding/stream.jet | 299:9 | "the shared UTF-8 validator just accepted this owned byte allocation" |
+| jet | Core/encoding/stream.jet | 370:9 | "the shared UTF-8 validator just accepted this owned ASCII token" |
+| jet | Core/encoding/stream.jet | 375:13 | "retain a validated number lexeme in the private event carrier until typed decoding" |
+| jet | Core/encoding/stream.jet | 554:9 | "transfer already validated UTF-8 storage to inspect its actual owned capacity" |
+| jet | Core/encoding/stream.jet | 565:9 | "the private numeric event is projected only into the matching typed tree carrier" |
+| jet | Core/encoding/stream.jet | 835:5 | "the shared UTF-8 validator just accepted this owned allocation" |
+| jet | Core/encoding/stream.jet | 844:5 | "the byte position was checked against this String's storage length" |
+| jet | Core/encoding/stream.jet | 1404:5 | "the shared UTF-8 validator accepted this exact owned formatter buffer" |
+| jet | Core/encoding/stream.jet | 1415:5 | "transfer the owned UTF-8 String buffer before re-spelling its shortest digits" |
+| jet | Core/encoding/stream.jet | 1741:5 | "owned validated UTF-8 allocation transfers in the encoding source seam" |
+| jet | Core/encoding/toml.jet | 718:5 | "inspect compiler-private Bytes and typed carriers; public DataTree variants are unchanged" |
+| jet | Core/encoding/xml_engine.jet | 134:5 | "all callers iterate or check the UTF-8 byte bounds before borrowing this byte" |
+| jet | Core/encoding/xml_engine.jet | 173:5 | "the caller selected a scalar-aligned window of validated UTF-8 bytes" |
+| jet | Core/encoding/xml_engine.jet | 2218:5 | "attribute whitespace compaction preserves the already validated UTF-8 byte sequence" |
+| jet | Core/encoding/yaml.jet | 320:5 | "inspect compiler-private Bytes and typed carriers; public DataTree variants are unchanged" |
+| jet | Core/files/files.jet | 444:1 | "the compiler store passes a live FileReader and Directory, with one NUL-free plain destination name; no source pathname is reopened" |
+| jet | Core/files/files.jet | 450:1 | "compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor" |
+| jet | Core/http/server.jet | 76:5 | "move the normalized response head and one-shot body into the transport carrier" |
+| jet | Core/http/server.jet | 139:5 | "borrow the request's stored optional route-template metadata; no route selection or formatting policy" |
+| jet | Core/jobs/jobs.jet | 130:5 | "queue preflight reads final-component metadata without following a symlink; metadata failures are ignored exactly as the SQLite provider does" |
+| jet | Core/jobs/jobs.jet | 135:5 | "create the lexical parent with the existing raw recursive mkdir kernel before SQLite open" |
+| jet | Core/jobs/jobs.jet | 394:13 | "match the queue's existing raw wall-clock wait without advancing controlled scheduler time" |
+| jet | Core/jobs/jobs.jet | 488:5 | "publish already committed queue observations through the existing validated Devtools event/sink boundary" |
+| jet | Core/jobs/jobs.jet | 503:5 | "publish source-projected queue status through the existing validated Devtools event/sink boundary" |
 | jet | Core/mem/mem.jet | 36:1 | "`addr` is the address of a live, aligned `T` that stays valid for every use of the returned pointer" |
 | jet | Core/mem/mem.jet | 40:1 | "`pointer` names a live, aligned, readable `T` for the whole access" |
 | jet | Core/mem/mem.jet | 44:1 | "`pointer` names a live, aligned, writable `T` for the whole access" |
-| jet | Core/sys/sys.jet | 158:1 | "posix umask: the caller owns the process file-creation mask and restores it when other code relies on it" |
-| jet | Core/sys/sys.jet | 174:5 | "posix getpgid: inspect a process group" |
-| jet | Core/sys/sys.jet | 180:5 | "posix getsid: inspect a process session" |
-| jet | Core/sys/sys.jet | 185:1 | "posix getpriority: the caller vouches that `which` names this process or one it controls" |
-| jet | Core/sys/sys.jet | 189:1 | "posix setpriority: the caller owns the scheduling priority of the process it changes" |
-| jet | Core/sys/sys.jet | 193:1 | "posix utime: the caller owns the file whose timestamps it rewrites" |
-| jet | Core/sys/sys.jet | 199:1 | "posix stop: the caller accepts that the process ends here after the shared cleanup boundary" |
-| jet | Core/sys/sys.jet | 206:1 | "posix pipe: the caller owns both returned descriptors and closes each exactly once" |
-| jet | Core/sys/sys.jet | 210:1 | "posix close_fd: the caller owns `fd` and nothing uses it after this call" |
-| jet | Core/sys/sys.jet | 214:1 | "posix mkfifo: the caller owns `path` and removes the named pipe it creates" |
-| jet | Core/sys/sys.jet | 218:1 | "posix fork: the caller handles both the parent and the child return and reaps the child" |
-| jet | Core/sys/sys.jet | 222:1 | "posix setsid: the caller owns the process session topology it changes" |
-| jet | Core/sys/sys.jet | 226:1 | "posix wait: the caller owns the child processes it reaps" |
-| jet | Core/sys/sys.jet | 230:1 | "posix waitpid: the caller owns the child process it reaps" |
-| jet | Core/sys/sys.jet | 234:1 | "posix setuid: the caller drops or changes process credentials deliberately" |
-| jet | Core/sys/sys.jet | 238:1 | "posix setgid: the caller drops or changes process credentials deliberately" |
-| jet | Core/sys/sys.jet | 242:1 | "posix setpgrp: the caller owns the process group topology it changes" |
-| jet | Core/sys/sys.jet | 246:1 | "posix setpgid: the caller owns the process group topology it changes" |
-| jet | Core/sys/sys.jet | 250:1 | "posix kill: the caller owns or is entitled to signal the target process" |
-| jet | Core/sys/sys.jet | 254:1 | "posix initgroups: the caller changes supplementary groups deliberately" |
+| jet | Core/net/net.jet | 137:5 | "checked IPv4/IPv6 octets transferred into the native address carrier" |
+| jet | Core/net/net.jet | 143:5 | "read native address octets; no parsing or formatting policy in the carrier leaf" |
+| jet | Core/net/net.jet | 149:5 | "read the native IP address discriminant" |
+| jet | Core/net/net.jet | 192:5 | "validated IP octets, port and IPv6 numeric scope transferred into the socket carrier" |
+| jet | Core/net/net.jet | 199:5 | "read socket IP representation; formatting stays in Jet" |
+| jet | Core/net/net.jet | 202:5 | "read native socket port" |
+| jet | Core/net/net.jet | 214:5 | "read native IPv6 socket scope identifier" |
+| jet | Core/net/net.jet | 413:5 | "read the native UDP packet's socket-address carrier" |
+| jet | Core/process/process.jet | 94:5 | "transfer a fully initialized Jet process plan into the temporary native ProcessSpec carrier; paired environment columns have equal length" |
+| jet | Core/service/service.jet | 154:5 | "one existing registry read snapshots exact and candidate facts; no second authority or resource carrier" |
+| jet | Core/service/service.jet | 264:5 | "read the existing endpoint's tree, worker and generation fields" |
+| jet | Core/service/service.jet | 271:5 | "Services3081: check started before the single delivery-field write" |
+| jet | Core/service/service.jet | 278:5 | "Services1415: root policy write precedes each declared group policy write" |
+| jet | Core/service/service.jet | 287:5 | "Services3220: tree's exclusive write borrow covers count then clear" |
+| jet | Core/service/service.jet | 296:5 | "Services3231: started and record checks precede adapter then authority writes" |
+| jet | Core/service/service.jet | 316:5 | "the source exclusive tree borrow covers the same complete mutation as Rust &amp;mut; no lock or interleaving window" |
+| jet | Core/service/service.jet | 347:5 | "Services4437: authority lookup, durable load, first record, then checked framing" |
+| jet | Core/service/service.jet | 361:5 | "Services4493: replay existing in-memory records without issuing a store read" |
+| jet | Core/service/service.jet | 396:5 | "Services6729: copy the existing optional last-upgrade field" |
+| jet | Core/service/service.jet | 402:5 | "Services1153: plain field projection; rollback store remains omitted from all text views" |
+| jet | Core/service/service.jet | 410:5 | "Services1265: read the existing topology fields, preserve handler insertion order" |
+| jet | Core/service/service.jet | 428:5 | "Services5867: durable replay before lookup; first matching run wins" |
+| jet | Core/service/service.jet | 443:5 | "Services5879: durable replay before lookup; missing or nonterminal run is Policy" |
+| jet | Core/service/service.jet | 460:5 | "Services6978: project existing runtime facts; source owns counts and text" |
+| jet | Core/service/service.jet | 541:5 | "Allocation only: source supplies every Services.rs initializer field at 2d9953adf:1293-1319, in native evaluation order" |
+| jet | Core/service/service.jet | 616:5 | "read the final path component's OS metadata kind without opening an identity handle" |
+| jet | Core/service/service.jet | 642:5 | "read the checked service tree's generation field without mutating or copying its scheduler carrier" |
+| jet | Core/service/service.jet | 648:5 | "read event-log storage length on the checked service tree" |
+| jet | Core/service/service.jet | 654:5 | "read dead-letter storage length on the checked service tree" |
+| jet | Core/service/service.jet | 856:5 | "Services5439-5507: synchronize before validation; exact version replay precedes active-version rejection" |
+| jet | Core/service/service.jet | 893:5 | "Services5656-5705: exclusive tree borrow keeps replay and append cursor decisions indivisible" |
+| jet | Core/service/service.jet | 924:5 | "Services5708-5789: first recorded definition wins; replay precedes terminal checks" |
+| jet | Core/service/service.jet | 977:5 | "Services5792-5867: replay consumes recorded attempts, never derives another attempt from replayed state" |
+| jet | Core/service/service.jet | 1012:5 | "Services5870-5950: two replay entries advance together; identical terminal completions are idempotent" |
+| jet | Core/service/service.jet | 1188:5 | "Services1546: exclusive tree write borrow preserves validation, reparent, append ordering" |
+| jet | Core/service/service.jet | 1234:5 | "Services7044: counter write precedes reachable-worker selection and canonical failure policy" |
+| jet | Core/service/service.jet | 1250:5 | "Services4575: source owns adapter/authority/payload/count checks and record framing; store append before field push" |
+| jet | Core/service/service.jet | 1270:5 | "Services4525: host record-write leaf retains existing mutex through store write and field assignment; no guard exposed" |
+| jet | Core/service/service.jet | 1302:5 | "Services2184: identity and pinned-generation checks precede authority validation" |
+| jet | Core/service/service.jet | 1328:5 | "Services6081: exact directory lookup, generation, proof, authority, running, draining order" |
+| jet | Core/service/service.jet | 1352:5 | "Services2558: source owns routing, message checks, worker gate, capacity error text, post-send ordering" |
+| jet | Core/service/service.jet | 1451:5 | "ServiceAuthority2504: one existing locked durable read, then the owned entry's state" |
+| jet | Core/service/service.jet | 1466:5 | "ServiceAuthority2517: same locked read; receipt fields and signature are source policy" |
+| jet | Core/service/service.jet | 1480:5 | "ServiceAuthority2535-2647: one locked read, then exact record filtering, error order and signature validation" |
+| jet | Core/service/service.jet | 1529:5 | "ServiceAuthority2650: validate/read first, then an exact zero-retention runtime and existing retry operation" |
+| jet | Core/service/service.jet | 1540:5 | "ServiceAuthority1297: identity checks, existing two registry reads/captured Arc, conditional depth check, one receive" |
+| jet | Core/service/service.jet | 1629:5 | "Services2864: local queued-message/idempotency matching stays source; existing cryptographic ID leaf" |
+| jet | Core/service/service.jet | 1649:5 | "Services3127: no enclosing lock; source owns local deduplication/admission/rollback orchestration" |
+| jet | Core/service/service.jet | 1722:5 | "Services2629: no enclosing guard; existing atomic authority operations retain their locks" |
+| jet | Core/service/service.jet | 1814:5 | "Services2693-2762: retain authority requeue then mailbox-restore ordering and both failure texts" |
+| jet | Core/service/service.jet | 1875:5 | "Services1464-1544: checked function item is passed through; source owns validation and every seed" |
+| jet | Core/service/service.jet | 2017:5 | "Services2917-3078: exclusive tree borrow; each write follows the native order" |
+| jet | Core/service/service.jet | 2132:5 | "Services3080-3100: pinned validation, group policy, one now, then weak name/tree match" |
+| jet | Core/service/service.jet | 2153:5 | "Services2847-2862: validated endpoint, then deliberately weak name/tree match, channel depth" |
+| jet | Core/sys/sys.jet | 397:1 | "posix umask: the caller owns the process file-creation mask and restores it when other code relies on it" |
+| jet | Core/sys/sys.jet | 443:5 | "posix getpgid: inspect a process group" |
+| jet | Core/sys/sys.jet | 449:5 | "posix getsid: inspect a process session" |
+| jet | Core/sys/sys.jet | 454:1 | "posix getpriority: the caller vouches that `which` names this process or one it controls" |
+| jet | Core/sys/sys.jet | 461:1 | "posix setpriority: the caller owns the scheduling priority of the process it changes" |
+| jet | Core/sys/sys.jet | 465:1 | "posix utime: the caller owns the file whose timestamps it rewrites" |
+| jet | Core/sys/sys.jet | 472:1 | "posix stop: the caller accepts that the process ends here after the shared cleanup boundary" |
+| jet | Core/sys/sys.jet | 482:1 | "posix pipe: the caller owns both returned descriptors and closes each exactly once" |
+| jet | Core/sys/sys.jet | 488:1 | "posix close_fd: the caller owns `fd` and nothing uses it after this call" |
+| jet | Core/sys/sys.jet | 496:1 | "posix mkfifo: the caller owns `path` and removes the named pipe it creates" |
+| jet | Core/sys/sys.jet | 501:1 | "posix fork: the caller handles both the parent and the child return and reaps the child" |
+| jet | Core/sys/sys.jet | 505:1 | "posix setsid: the caller owns the process session topology it changes" |
+| jet | Core/sys/sys.jet | 509:1 | "posix wait: the caller owns the child processes it reaps" |
+| jet | Core/sys/sys.jet | 515:1 | "posix waitpid: the caller owns the child process it reaps" |
+| jet | Core/sys/sys.jet | 521:1 | "posix setuid: the caller drops or changes process credentials deliberately" |
+| jet | Core/sys/sys.jet | 525:1 | "posix setgid: the caller drops or changes process credentials deliberately" |
+| jet | Core/sys/sys.jet | 529:1 | "posix setpgrp: the caller owns the process group topology it changes" |
+| jet | Core/sys/sys.jet | 533:1 | "posix setpgid: the caller owns the process group topology it changes" |
+| jet | Core/sys/sys.jet | 537:1 | "posix kill: the caller owns or is entitled to signal the target process" |
+| jet | Core/sys/sys.jet | 541:1 | "posix initgroups: the caller changes supplementary groups deliberately" |
+| jet | Core/testing/testing.jet | 354:5 | "the caller bounded this byte position by the String storage length" |
+| jet | Core/testing/testing.jet | 375:5 | "all appended bytes came from complete UTF-8 strings or ASCII" |
+| jet | Core/tui/tui.jet | 100:5 | "Core TUI reads owned encoded OS environment bytes from the current host; no UTF-8 assumption" |
+| jet | Core/tui/tui.jet | 126:5 | "Core TUI samples the same stdout terminal fact consumed by terminal style/progress" |
+| jet | Core/tui/tui.jet | 652:5 | "Core TUI test: normalized style words and explicit absent UI slots" |
+| jet | Core/ui/host.jet | 154:5 | "Core UI capability facts come from the current retained provider, not a fabricated default" |
+| jet | Core/ui/host.jet | 160:5 | "Core UI dialog crosses the current provider boundary; its typed cancellation and denial are preserved" |
+| jet | Core/ui/host.jet | 166:5 | "Core UI save dialog crosses the current provider boundary with the original typed request" |
+| jet | Core/ui/host.jet | 180:5 | "Core UI dialog request transfer: validated grant and explicit absent directory, filter list, and multiple-selection slot" |
+| jet | Core/ui/host/accessibility.jet | 7:5 | "Core accessibility attaches metadata to the canonical node through the current retained provider" |
+| jet | Core/ui/host/accessibility.jet | 16:5 | "Core accessibility projects metadata from the canonical node, never a second provider tree" |
+| jet | Core/ui/host/clipboard.jet | 6:5 | "Core clipboard reads through the current retained provider; the raw host owns platform access" |
+| jet | Core/ui/host/clipboard.jet | 12:5 | "Core clipboard transfers the exact UTF-8 text to the current retained provider" |
+| jet | Core/ui/host/drag_drop.jet | 33:5 | "Core drag/drop consumes one typed event from the current retained provider queue" |
+| jet | Core/ui/host/ime.jet | 25:5 | "Core IME consumes one typed event from the current retained provider queue" |
+| jet | Core/ui/host/shortcuts.jet | 11:5 | "Core shortcut registration uses the current retained provider's canonical action registry" |
+| jet | Core/ui/host/shortcuts.jet | 17:5 | "Core shortcut dispatch uses the current retained provider's canonical action registry" |
+| jet | Core/ui/ui.jet | 126:5 | "Core creates the real retained GTK renderer through the registered host allocation boundary" |
+| jet | Core/ui/ui.jet | 131:5 | "Core creates the real retained terminal renderer through the registered host allocation boundary" |
+| jet | Core/ui/ui.jet | 136:5 | "Core creates the real retained null renderer through the registered host allocation boundary" |
+| jet | Core/ui/ui.jet | 147:5 | "Core UI accessibility slot transfer: explicitly present validated metadata" |
+| jet | Core/ui/ui.jet | 164:5 | "Core UI shortcut slot transfer: explicitly present validated shortcut" |
+| jet | Core/ui/ui.jet | 191:5 | "Core UI host slot transfer: audited kind, role, explicit absent slots, and normalized style words" |
+| jet | Core/ui/ui.jet | 197:5 | "Core UI viewport transfer: source supplies a valid device and bounded positive dimensions" |
 | jet | Jetpack/Publication/Source/Sign.jet | 58:5 | "export a fresh Core signing seed only to descriptor-relative owner-only key publication; the Core key owner is wiped on every outcome" |
 | jet | Jetpack/Publication/Source/Sign.jet | 113:5 | "import the protected seed into Core signing without a second raw-secret copy; close the temporary Core Secret on success and failure" |
 | jet | Jetpack/Publication/Source/Sign.jet | 137:5 | "package author signatures require Core's strict Ed25519 verification; no raw verifier or helper process" |
@@ -1762,6 +4273,215 @@ example retains the negative unsafe-outside-vetted scan.
 | jet | Tools/agent-eval/domain-foundations/area-embedded/pkg/mmio_fixed.jet | 4:5 | "board.sensor_v1 GPIO register 0x40000100 is a volatile MMIO word" |
 | jet | Tools/agent-eval/domain-foundations/area-embedded/pkg/run.jet | 111:5 | "host replay uses a stack cell as a stand-in for the board register" |
 | jetpack | crates/jetpack/batteries/embedded/embedded.jet | 181:9 | "host replay uses a stack cell for the CMSDK UART0 control register and never dereferences the target address" |
+| tests | tests/conformance/corpus/core/crypto/aes/nist_gcm.jet | 11:5 | "published KAT or frozen seed AES-GCM fixture" |
+| tests | tests/conformance/corpus/core/crypto/aes/seed_differential.jet | 11:5 | "published KAT or frozen seed AES-GCM fixture" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 13:9 | "frozen Ed25519 sign witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 17:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 30:9 | "frozen Ed25519 sign witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 34:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 47:9 | "frozen Ed25519 sign witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 51:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 64:9 | "frozen Ed25519 sign witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 68:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 81:9 | "frozen Ed25519 sign witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 85:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 96:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 107:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 118:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 129:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 140:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 151:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 162:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 173:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 184:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 195:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 206:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 217:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 228:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 239:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 250:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 261:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 272:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 283:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 294:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 305:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 321:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 332:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 348:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 359:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 375:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 386:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 402:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 413:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 429:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 440:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 456:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 467:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 483:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 494:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 510:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 521:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 537:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 548:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 564:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 575:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 591:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 602:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 618:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 629:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 645:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 656:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 672:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 683:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 699:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 710:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 726:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 737:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 753:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 764:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 780:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 791:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 807:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 818:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 834:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 845:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 861:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 872:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 888:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 899:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 915:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 926:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 942:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 953:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 969:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 980:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 996:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1007:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1023:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1034:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1050:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1061:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1077:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1088:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1104:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1115:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1131:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1142:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1158:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1169:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1185:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1196:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1212:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1223:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1239:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1250:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1266:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1277:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1293:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1304:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1320:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1331:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1342:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1353:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1364:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1375:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1386:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1397:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1408:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1424:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1440:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1456:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1474:9 | "frozen Ed25519 sign witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1478:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1491:9 | "frozen Ed25519 sign witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1495:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1508:9 | "frozen Ed25519 sign witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1512:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1525:9 | "frozen Ed25519 sign witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1529:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1542:9 | "frozen Ed25519 sign witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1546:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1559:9 | "frozen Ed25519 sign witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1563:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1576:9 | "frozen Ed25519 sign witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1580:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1593:9 | "frozen Ed25519 sign witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1597:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1610:9 | "frozen Ed25519 sign witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1614:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1627:9 | "frozen Ed25519 sign witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1631:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1644:9 | "frozen Ed25519 sign witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1648:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1661:9 | "frozen Ed25519 sign witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1665:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1678:9 | "frozen Ed25519 sign witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1682:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1695:9 | "frozen Ed25519 sign witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1699:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1712:9 | "frozen Ed25519 sign witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1716:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1729:9 | "frozen Ed25519 sign witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1733:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1746:9 | "frozen Ed25519 sign witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1750:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1763:9 | "frozen Ed25519 sign witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1767:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1780:9 | "frozen Ed25519 sign witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1784:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1797:9 | "frozen Ed25519 sign witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1801:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1814:9 | "frozen Ed25519 sign witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1818:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1831:9 | "frozen Ed25519 sign witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1835:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1848:9 | "frozen Ed25519 sign witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1852:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1865:9 | "frozen Ed25519 sign witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1869:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1882:9 | "frozen Ed25519 sign witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1886:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1899:9 | "frozen Ed25519 sign witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1903:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1916:9 | "frozen Ed25519 sign witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1920:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1933:9 | "frozen Ed25519 sign witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1937:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1950:9 | "frozen Ed25519 sign witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1954:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1967:9 | "frozen Ed25519 sign witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1971:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1984:9 | "frozen Ed25519 sign witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 1988:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 2001:9 | "frozen Ed25519 sign witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 2005:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 2018:9 | "frozen Ed25519 sign witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 2022:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 2035:9 | "frozen Ed25519 sign witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 2039:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 2052:9 | "frozen Ed25519 sign witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 2056:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 2069:9 | "frozen Ed25519 sign witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 2073:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 2086:9 | "frozen Ed25519 sign witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 2090:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 2103:9 | "frozen Ed25519 sign witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 2107:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 2120:9 | "frozen Ed25519 sign witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 2124:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 2137:9 | "frozen Ed25519 sign witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 2141:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 2154:9 | "frozen Ed25519 sign witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 2158:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 2171:9 | "frozen Ed25519 sign witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 2175:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 2188:9 | "frozen Ed25519 sign witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 2192:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 2205:9 | "frozen Ed25519 sign witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 2209:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 2220:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_ed25519.jet | 2236:9 | "public Ed25519 acceptance witness" |
+| tests | tests/conformance/corpus/core/crypto/ct_x25519.jet | 5:5 | "published/frozen X25519 test inputs" |
 | tests | tests/conformance/corpus/core/crypto/expert/aes256gcm_open.jet | 8:5 | "fixed NIST AES-256-GCM vector" |
 | tests | tests/conformance/corpus/core/crypto/expert/aes256gcm_seal.jet | 7:5 | "fixed NIST AES-256-GCM vector" |
 | tests | tests/conformance/corpus/core/crypto/expert/argon2id.jet | 8:5 | "fixed Argon2id known-answer vector" |
