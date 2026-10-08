@@ -1479,6 +1479,8 @@ fn sema_expression_typed_literal_fixed_conversion(source: Type, head: Type) -> B
 
 // `Float{0.5}` / `F32{-1.5}`: the machine-float head is the decimal literal's
 // expected carrier, as in Rust's typed-literal inference.
+// `through_binary = false`: bare/signed decimals contextualize, but compound
+// numeric syntax keeps its operand types (ScalarConversionFixtures.jet).
 fn sema_expression_typed_literal_value_needs_head(value: Expr, head: Type) -> Bool Never! {
     if sema_expression_list_element_needs_expected_type(value) -> return true
     sema_expr_decimal_literal_operand(value, false) && sema_expr_expects_machine_float(Val(head))
