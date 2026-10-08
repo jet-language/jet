@@ -1,0 +1,14 @@
+# Port of tests/authority_manifest.rs:118-165. Receipt sources copied verbatim.
+# PENDING-GRAMMAR: cwd and relational file comparisons.
+# The sibling target is outside the staged project root, but inside the case worktree.
+requires: os:unix
+fixture: fixtures
+copy: symlink-outside/authority.jsonl symlink-outside/before.jsonl
+step: mkdir -p receipts/.jet
+exit: 0
+step: ln -s {work}/symlink-outside receipts/.jet/receipts
+exit: 0
+step: jet run run.jet
+cwd: receipts
+exit: nonzero
+file: symlink-outside/authority.jsonl == symlink-outside/before.jsonl
