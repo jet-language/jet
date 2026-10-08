@@ -260,6 +260,17 @@ fn trap_native_index_range_stop() {
     trap_exit(I64{101})
 }
 
+// Vec::with_capacity(capacity as usize) and growth overflow are foreign
+// Rust String panics under CAbi guard: body + newline, exit 101, not a Jet stop.
+fn rt_seq_capacity_overflow_stop() {
+    trap_flush_stdout()
+    trap_write_word(I64{8751735851445150051}, I64{8})
+    trap_write_word(I64{8028904877209317152}, I64{8})
+    trap_write_word(I64{119}, I64{1})
+    trap_msg_newline()
+    trap_exit(I64{101})
+}
+
 #Export(c) fn jet_panic(file: I64, line: I64, message: I64) {
     trap_simple(I64{0}, trap_word(file), trap_word(file + I64{8}), trap_line(line), trap_word(message), trap_word(message + I64{8}))
 }

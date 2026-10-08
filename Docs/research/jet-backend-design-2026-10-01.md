@@ -2038,7 +2038,7 @@ uses the existing panic path with `record variant index out of range`.
 
 `JetRuntime/Tests/DataEventWitness.c` requires the real Jet object,
 `--wrap=jet_rt_free`, and `DATA_EVENT_U8_STRIDE` matching the runtime's single
-U8 epoch (base 8). It covers all variants and getters, boxed i64 edges,
+U8 epoch (canonical packed 1). It covers all variants and getters, boxed i64 edges,
 fresh-owner getters, Float NaN/infinity/signed-zero equality, independent
 strings and byte holders, borrowed byte getters, and exact-once frees.
 Separate `native-overflow` and `wrong-variant` modes must stop through the
@@ -2072,4 +2072,32 @@ stdout, saves the direct reference's stderr as the process-mode golden,
 asserts message/location, and byte-compares the wrong-variant output.
 This runner has not been executed; parser/C syntax receipts alone do not
 prove native panic-byte parity or native execution.
+
+### DataTree sequence foreign-stop parity
+
+The List/Entries `_get` exports follow
+`CAbiRoutes.rs:8240-8241,8253-8254`: `vec[index as usize]` is a plain foreign
+Vec panic under guard, not a language `#require` stop. `data_sequence_slot`
+calls the shared `rt_seq_index_oob_stop(length,index)` from held
+`c39d89b6b` before computing a data pointer or cloning an entry key. The
+helper flushes stdout, prints the exact bounds body with the index as u64,
+and exits 101 without task publication, diagnostic footer or atexit.
+
+`data_sequence_new` rejects negative capacity and capacity times the native
+stride exceeding i64::MAX before multiplication/allocation. Growth at the
+same byte-capacity limit follows the same shared
+`rt_seq_capacity_overflow_stop()` in Trap: flush stdout, raw
+`capacity overflow\n`, exit 101. This replaces the former language overflow
+stop and is shared by all native List/Entries constructors.
+
+The C witness has eight List/Entries modes: index0/index-1 on an empty list,
+capacity-1, and capacity `i64::MAX / stride + 1`. The three
+`DataSequence*.stderr` files are canonical expected bytes;
+`Tests/run-data-sequence-stops.mjs OUT DATA_TREE_WITNESS` requires empty stdout,
+exact stderr and exact exit101 for each mode. These native process cases
+have not been executed. The composed source unit must include the index helper
+from c39d89b6b as well as the capacity helper before caller/import admission.
+DataTree/DataEvent runtime byte paths use `RT_HOST_U8_STRIDE` and host U8
+accessors; their C witnesses default to canonical packed stride1 and keep all
+byte indexing/allocation expectations derived from their stride constant.
 

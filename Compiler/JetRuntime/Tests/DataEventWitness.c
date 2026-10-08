@@ -1,5 +1,5 @@
 // Link the real Jet runtime object with -Wl,--wrap=jet_rt_free.
-// Define DATA_EVENT_U8_STRIDE for the runtime's single U8 epoch (base = 8).
+// Define DATA_EVENT_U8_STRIDE for the runtime's single U8 epoch (packed = 1).
 #include <assert.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -7,7 +7,7 @@
 #include <stdio.h>
 #include <string.h>
 #ifndef DATA_EVENT_U8_STRIDE
-#define DATA_EVENT_U8_STRIDE 8
+#define DATA_EVENT_U8_STRIDE 1
 #endif
 _Static_assert(DATA_EVENT_U8_STRIDE == 1 || DATA_EVENT_U8_STRIDE == 8, "native U8 epoch");
 typedef struct { unsigned char *data; int64_t length, capacity; } Text;
