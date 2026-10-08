@@ -1,0 +1,11 @@
+
+use core.process as process
+
+fn run() {
+    bounded :: process.cmd(["{work}/flood.sh"]).output_limit(1024)
+    result :: process.pipeline([bounded, process.cmd(["cat"])])
+    if result == {
+        .Ok(_) -> { print("limit:accepted") }
+        .Err(_) -> { print("limit:refused") }
+    }
+}

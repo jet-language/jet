@@ -1,0 +1,15 @@
+# Port of tests/corelib_parts/platform.rs:489-529; source and scripts verbatim after original Rust format expansion.
+# PENDING-SAME-HEAD; no snapshots blessed.
+fixture: fixtures/core_process_pipeline_honors_final_redirection_modes
+write: main.jet main.template
+write: first.sh first.sh.template
+chmod: first.sh 755
+write: last.sh last.sh.template
+chmod: last.sh 755
+requires: os:unix
+step: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = "edge\ntrue\n\nfirst-err\n\n"
+stderr: = "final-err\n"

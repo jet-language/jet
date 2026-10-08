@@ -1,0 +1,24 @@
+# Port of tests/corelib_parts/platform.rs:420-486; source and scripts verbatim after original Rust format expansion.
+# PENDING-SAME-HEAD; no snapshots blessed.
+fixture: fixtures/core_process_builder_pipeline_and_spawn_run
+write: main.jet main.template
+write: probe.sh probe.sh.template
+chmod: probe.sh 755
+write: emit.sh emit.sh.template
+chmod: emit.sh 755
+write: cat.sh cat.sh.template
+chmod: cat.sh 755
+write: lines.sh lines.sh.template
+chmod: lines.sh 755
+requires: os:unix
+mkdir: work
+step: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: ~ "true\n0\nfalse\n" # original contains
+stdout: ~ "env=ok\n" # original contains
+stdout: ~ "cwd={work}/work\n" # original contains
+stdout: ~ "stdin=from-stdin\n" # original contains
+stdout: ~ "pipe-ok\n" # original contains
+stdout: ~ "line-one\n" # original contains

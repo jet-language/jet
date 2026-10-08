@@ -1,0 +1,12 @@
+
+use core.process as process
+
+fn run() {
+    result :: process.pipeline([
+        process.cmd(["{work}/first.sh"]),
+        process.cmd(["{work}/last.sh"]).stdout(.Inherit).stderr(.Inherit)
+    ]) ?? panic("pipeline failed")
+    print(result.success)
+    print(result.output)
+    print(result.errors)
+}

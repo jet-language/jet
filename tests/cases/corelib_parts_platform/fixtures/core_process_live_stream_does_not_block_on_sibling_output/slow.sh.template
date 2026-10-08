@@ -1,0 +1,8 @@
+#!/bin/sh
+dd if=/dev/zero bs=131072 count=1 1>&2 2>/dev/null &
+writer=$!
+(sleep 2; kill -9 "$writer" 2>/dev/null) >/dev/null 2>&1 &
+killer=$!
+wait "$writer"
+kill "$killer" 2>/dev/null || true
+printf 'done\n'

@@ -1,0 +1,26 @@
+
+use core.process as process
+use core.time as time
+
+fn run() {
+    timeout :: Duration.seconds(2) ?? panic("duration")
+    spec :: process.cmd(["{work}/probe.sh"]).cwd("{work}/work").env_clear().env("JET_PROCESS_TEST", "ok").stdin(.Capture).stdout(.Capture).stderr(.Capture).timeout(timeout).output_limit(10000)
+    probe_child :: spec.spawn() ?? panic("spawn failed")
+    probe_child.stdin.write("from-stdin\n") ?? panic("write failed")
+    result :: probe_child.wait() ?? panic("wait failed")
+    print(result.success)
+    print(result.code)
+    print(result.timed_out)
+    print(result.output)
+
+    piped :: process.pipeline([process.cmd(["{work}/emit.sh"]), process.cmd(["{work}/cat.sh"])]) ?? panic("pipeline failed")
+    print(piped.success)
+    print(piped.output)
+
+    child :: process.cmd(["{work}/lines.sh"]).stdout(.Stream).spawn() ?? panic("spawn failed")
+    loop line in child.stdout.lines() {
+        print(line)
+    }
+    waited :: child.wait() ?? panic("wait failed")
+    print(waited.success)
+}
