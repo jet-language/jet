@@ -1,8 +1,8 @@
 // core.data.sketch.tdigest — the shipped unit-weight, step-quantile digest.
 // All samples, including non-finite values, follow the original insertion and
-// compression order. Shared storage preserves aliasing and thread safety.
+// compression order. Cloning produces an independent centroid value.
 pub struct TDigest {
-    centroids: Shared<[Centroid]>
+    centroids: [Centroid]
 
     impl Display {
         fn display(self) -> String { "TDigest" }
@@ -18,19 +18,17 @@ pub fn new() -> TDigest Never! { TDigest.new() }
 
 impl TDigest {
     pub fn new() -> TDigest Never! {
-        TDigest{centroids: shared [Centroid]{}}
+        TDigest{centroids: [Centroid]{}}
     }
 
     /// Record one sample with the shipped unit weight.
-    pub fn add(self, value: Float) Never! {
-        guard := self.centroids.guard_edit()
-        add_sample(&guard.value, value)
+    pub fn add(&self, value: Float) Never! {
+        add_sample(&self.centroids, value)
     }
 
     /// Return the first centroid whose cumulative weight reaches q * total.
     pub fn quantile(self, q: Float) -> Float Never! {
-        guard :: self.centroids.guard_read()
-        step_quantile(guard.value, q)
+        step_quantile(self.centroids, q)
     }
 }
 
@@ -96,19 +94,21 @@ fn step_quantile(values: [Centroid], q: Float) -> Float Never! {
 }
 
 #Test("unit-weight digest retains shipped step quantiles") {
-    digest :: new()
+    digest := new()
     assert_eq(digest.quantile(Float{0.5}), Float{0.0})
-    digest.add(Float{2.0})
-    digest.add(Float{1.0})
+    &digest.add(Float{2.0})
+    &digest.add(Float{1.0})
     assert_eq(digest.quantile(Float{0.5}), Float{1.0})
     assert_eq(digest.quantile(Float{0.51}), Float{2.0})
     assert_eq(digest.quantile(Float{-1.0}), Float{1.0})
     assert_eq(digest.quantile(Float{2.0}), Float{2.0})
 }
 
-#Test("digest aliases share samples") {
-    digest :: new()
-    alias :: ~digest
-    alias.add(Float{7.0})
+#Test("digest clones have independent samples") {
+    digest := new()
+    &digest.add(Float{7.0})
+    clone := ~digest
+    &clone.add(Float{1.0})
     assert_eq(digest.quantile(Float{0.5}), Float{7.0})
+    assert_eq(clone.quantile(Float{0.5}), Float{1.0})
 }

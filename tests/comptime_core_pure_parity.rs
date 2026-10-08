@@ -998,18 +998,18 @@ use core.data.sketch.reservoir as reservoir
 fn sketch_edges() -> String {
     cardinality := hll.new()
     empty_count :: cardinality.count()
-    cardinality.add("same")
-    cardinality.add("same")
+    &cardinality.add("same")
+    &cardinality.add("same")
     distribution := tdigest.new()
     empty_quantile :: distribution.quantile(0.5)
-    distribution.add(-1.0)
-    distribution.add(1.0)
+    &distribution.add(-1.0)
+    &distribution.add(1.0)
     frequencies := cms.new()
     missing :: frequencies.count("missing")
-    frequencies.add("seen")
+    &frequencies.add("seen")
     sample := reservoir.new(0)
-    sample.add("first")
-    sample.add("second")
+    &sample.add("first")
+    &sample.add("second")
     return "{empty_count}|{cardinality.count()}|{empty_quantile}|{distribution.quantile(0.0)}|{distribution.quantile(1.0)}|{missing}|{frequencies.count("seen")}|{sample.sample().len()}"
 }"#,
             ),
