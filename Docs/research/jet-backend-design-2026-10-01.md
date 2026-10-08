@@ -1457,6 +1457,19 @@ following Propagate poll's resume edge. Prefetched HasNext/Value operations
 remain non-stopping. A cancelled map callback must report task cancellation,
 never return a short successful collection or silently end a for-loop.
 
+File and stdin line producers keep the three-argument native ABI
+`(source, by_value, element_meta) -> NativeIter`. The source argument is a
+borrowed four-word Jet callback adapter `[payload, next, release, clone]`,
+not a Rust owner or an OS descriptor. Lowering supplies typed source-method
+callbacks, preserving source buffering, UTF-8 validation, CR/LF handling,
+fault checkpoints and `<core.prelude>:0` error rendering. The runtime copies
+callbacks into a kind-28 iterator's existing closure fields; no second
+producer/context allocation is required. A pull returns EOF (0), a moved slot
+(1), or a stopped rail (-1, with an unwritten output). Borrowed file/stdin
+sources are eagerly snapshotted; owned sources are lazy. Process producers
+retain the shared pipe through its clone callback, independently of the child.
+Encoding producers own a checked reader and preserve its nested EOF result.
+
 ### Jet-authored runtime object
 
 `Compiler/JetRuntime` is a separate package, assembled from its own
