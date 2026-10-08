@@ -63,6 +63,10 @@ continues; the earliest error is selected by native directory-path ordering.
 Terminal reads and prompt/style/progress policy likewise use source-owned
 declarations. Their registered private facts call the single existing terminal
 and stdin kernels; the Rust seed entry points retain their fault preflight.
+Raylib's display/input/texture operations keep the existing registered host
+bindings, with source-owned argument policy. Font shaping returns the existing
+host result through a private leaf; the Jet entry owns the exact failure panic
+and never selects an approximate fallback implicitly.
 
 Types and error enums use PascalCase (`String`, `IOError`, `JSON`); functions
 and module segments use snake_case (`read`, `core.files`) (S54). Acronyms keep

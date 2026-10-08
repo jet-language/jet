@@ -1872,11 +1872,15 @@ pub fn jet_ui_host_shortcuts_dispatch(
 }
 
 pub fn jet_font_shape(text: &str, face: &JetFontFace) -> JetGlyphRun {
-    jet_ui_with_current_host(|host| {
-        host.shape_text(text, face).unwrap_or_else(|error| {
-            panic!("font shaping host contract failure: {error:?}")
-        })
+    jet_font_shape_raw(text, face).unwrap_or_else(|cause| {
+        panic!("font shaping host contract failure: {cause}")
     })
+}
+
+// OWNER #32: single host shaping operation; source owns the panic policy.
+// Replaced by Jet runtime layer L8, dies at cutover.
+pub fn jet_font_shape_raw(text: &str, face: &JetFontFace) -> Result<JetGlyphRun, String> {
+    jet_ui_with_current_host(|host| host.shape_text(text, face).map_err(|error| format!("{error:?}")))
 }
 #[cfg(target_arch = "wasm32")]
 const JET_WASM_FONT_MAX_TEXT_BYTES: usize = 4 * 1024 * 1024;

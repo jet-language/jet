@@ -1280,6 +1280,7 @@ fn core_fixed_sig_impl(
     }
 
     match (module, name) {
+        ("core.font", "__shape_text") => Some((vec![(read, Type::String), (read, Type::Named("FontFace".into()))], Some(result_ty(Type::Named("GlyphRun".into()), Type::String)))),
         ("core.term", "__terminal8_fault" | "__terminal8_env_has") => Some((vec![(read, Type::String)], Some(Type::Bool))),
         ("core.term", "__terminal8_env") => Some((vec![(read, Type::String)], Some(Type::Option(Box::new(Type::String))))),
         ("core.term", "__terminal8_write_stdout" | "__terminal8_write_stderr") => Some((vec![(read, Type::String), (read, Type::Bool)], Some(Type::Option(Box::new(Type::String))))),
@@ -5868,25 +5869,25 @@ fn core_fixed_sig_impl(
         )),
         // D-RAYLIB1=A / D-FLAGSHIP-RAYLIB1=A: first bounded `core.game.raylib`
         // bridge. The surface is intentionally tiny and display-gated.
-        ("core.game.raylib", "window_open") => Some((
+        ("core.game.raylib", "window_open" | "__window_open") => Some((
             vec![(read, Type::Int), (read, Type::Int), (read, Type::String)],
             Some(Type::Named("RaylibWindow".to_string())),
         )),
-        ("core.game.raylib", "window_should_close") => Some((
+        ("core.game.raylib", "window_should_close" | "__window_should_close") => Some((
             vec![(read, Type::Named("RaylibWindow".to_string()))],
             Some(Type::Bool),
         )),
-        ("core.game.raylib", "window_ready") => Some((
+        ("core.game.raylib", "window_ready" | "__window_ready") => Some((
             vec![(read, Type::Named("RaylibWindow".to_string()))],
             Some(Type::Bool),
         )),
-        ("core.game.raylib", "begin_drawing") => {
+        ("core.game.raylib", "begin_drawing" | "__begin_drawing") => {
             Some((vec![(read, Type::Named("RaylibWindow".to_string()))], None))
         }
-        ("core.game.raylib", "clear_background") => {
+        ("core.game.raylib", "clear_background" | "__clear_background") => {
             Some((vec![(read, Type::Named("RaylibColor".to_string()))], None))
         }
-        ("core.game.raylib", "draw_rectangle") => Some((
+        ("core.game.raylib", "draw_rectangle" | "__draw_rectangle") => Some((
             vec![
                 (read, Type::Int),
                 (read, Type::Int),
@@ -5896,7 +5897,7 @@ fn core_fixed_sig_impl(
             ],
             None,
         )),
-        ("core.game.raylib", "draw_text") => Some((
+        ("core.game.raylib", "draw_text" | "__draw_text") => Some((
             vec![
                 (read, Type::String),
                 (read, Type::Int),
@@ -5906,12 +5907,12 @@ fn core_fixed_sig_impl(
             ],
             None,
         )),
-        ("core.game.raylib", "end_drawing") => Some((vec![], None)),
-        ("core.game.raylib", "close_window") => {
+        ("core.game.raylib", "end_drawing" | "__end_drawing") => Some((vec![], None)),
+        ("core.game.raylib", "close_window" | "__close_window") => {
             Some((vec![(read, Type::Named("RaylibWindow".to_string()))], None))
         }
-        ("core.game.raylib", "key_down") => Some((vec![(read, Type::String)], Some(Type::Bool))),
-        ("core.game.raylib", "set_target_fps") => Some((vec![(read, Type::Int)], None)),
+        ("core.game.raylib", "key_down" | "__key_down") => Some((vec![(read, Type::String)], Some(Type::Bool))),
+        ("core.game.raylib", "set_target_fps" | "__set_target_fps") => Some((vec![(read, Type::Int)], None)),
         ("core.game.raylib", "color") => Some((
             vec![
                 (read, Type::Int),
@@ -5929,19 +5930,19 @@ fn core_fixed_sig_impl(
             vec![(read, Type::Named("RaylibSound".to_string()))],
             Some(Type::Bool),
         )),
-        ("core.game.raylib", "gamepad_down") => Some((
+        ("core.game.raylib", "gamepad_down" | "__gamepad_down") => Some((
             vec![(read, Type::Int), (read, Type::String)],
             Some(Type::Bool),
         )),
-        ("core.game.raylib", "gamepad_axis") => Some((
+        ("core.game.raylib", "gamepad_axis" | "__gamepad_axis") => Some((
             vec![(read, Type::Int), (read, Type::String)],
             Some(Type::Float),
         )),
-        ("core.game.raylib", "load_texture_atlas") => Some((
+        ("core.game.raylib", "load_texture_atlas" | "__load_texture_atlas") => Some((
             vec![(read, Type::String)],
             Some(Type::Named("RaylibTextureAtlas".to_string())),
         )),
-        ("core.game.raylib", "draw_sprite") => Some((
+        ("core.game.raylib", "draw_sprite" | "__draw_sprite") => Some((
             vec![
                 (read, Type::Named("RaylibTextureAtlas".to_string())),
                 (read, Type::String),

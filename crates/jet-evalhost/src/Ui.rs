@@ -2016,7 +2016,7 @@ fn jet_ui_font_ambient_core_call(
                 ambient_font_style(style, span)?,
             )))
         })()),
-        ("core.font", "shape") => Some((|| {
+        ("core.font", "shape" | "__shape_text") => Some((|| {
             let text = match args.first() {
                 Some(CtValue::Str(value)) => value,
                 _ => return Err(unsupported("core.font.shape() expects String text", span)),
@@ -2026,14 +2026,16 @@ fn jet_ui_font_ambient_core_call(
                     .ok_or_else(|| unsupported("core.font.shape() expects FontFace", span))?,
                 span,
             )?;
-            let run = ui_rt::jet_ui_with_current_host(|host| host.shape_text(text, &face))
-            .map_err(|error| {
-                Diagnostic::runtime_host_fault(
-                    String::new(),
-                    format!("font shaping host contract failure: {error:?}"),
-                )
-            })?;
-            Ok(ambient_glyph_run_value(run))
+            let run = ui_rt::jet_font_shape_raw(text, &face);
+            if method == "__shape_text" {
+                return Ok(match run {
+                    Ok(run) => CtValue::Present(Box::new(ambient_glyph_run_value(run))),
+                    Err(cause) => CtValue::failed(Box::new(CtValue::Str(cause))),
+                });
+            }
+            Ok(ambient_glyph_run_value(run.map_err(|cause| {
+                Diagnostic::runtime_host_fault(String::new(), format!("font shaping host contract failure: {cause}"))
+            })?))
         })()),
         _ => None,
     }
