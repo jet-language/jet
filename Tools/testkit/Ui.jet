@@ -1,14 +1,6 @@
 use core.files as files
 
 
-struct KitUiDirective {
-    name: String
-    argv: [String]
-    parent: Bool
-    exit: String
-    streams: String
-    capability: String
-}
 
 // Ordered exactly like uiInvocation: the first invocation row wins. Hook-only
 // rows never change the plain check; unavailable facts are never substituted.
@@ -36,15 +28,6 @@ fn kit_ui_directives() -> [KitUiDirective] {
     rows
 }
 
-struct KitUiCall {
-    argv: [String]
-    parent: Bool
-    exit: String
-    streams: String
-    stdin: String
-    extension: String
-    refused: String
-}
 
 fn kit_ui_arg(source: String, name: String) -> String? {
     found := ""
@@ -259,26 +242,8 @@ fn kit_ui_run(entry: KitEntry, ctx: KitCtx) -> [KitOutcome] {
     outcomes
 }
 
-struct KitUiRegistryRow {
-    code: String
-    plane: String
-    active: Bool
-    edit: Bool
-    reason: Bool
-}
 
-struct KitUiPlane {
-    name: String
-    edits: Int
-    reasons: Int
-    total: Int
-}
 
-struct KitUiAllowance {
-    code: String
-    side: String
-    card: String
-}
 
 fn kit_ui_field(body: String, key: String) -> String {
     loop raw in body.split("\n") {
