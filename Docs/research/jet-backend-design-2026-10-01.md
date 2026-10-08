@@ -1737,3 +1737,18 @@ post-gate compiler unit. Before retirement their only name references were the
 legacy `lower_record_data_leaf` recognizer, not physical runtime calls. The
 recognizer and both CoreCall/StaticPreludeCall hooks are removed together; no
 replacement erased provider or compatibility alias is introduced.
+
+### Shared derivation types and evidence codec source composition
+
+`JetFoundation/Source/DerivationTypes.jet` owns the canonical frame/resource and
+derivation method/disposition/reference declarations formerly in `MIR/MIR.jet`.
+Compiler MIR, evidence, the bootstrap schema reader and the backend/optimizer
+fixture units consume these same declarations; no re-export or duplicate type
+schema remains in MIR. The bootstrap source list includes the shared file.
+
+Evidence's bounded big-endian encoder lives in `Evidence/EvidenceEncode.jet`;
+`EvidenceCodec.jet` retains decoding. Both consume the single
+`EvidenceCodecTables.jet` error/code table definitions. The move preserves the
+wire implementation and allows the native runtime to compose encoding without
+the frame-schedule JSON decoder or Core JSON. Source moves do not establish
+runtime ABI admission or native execution parity; those require composed gates.

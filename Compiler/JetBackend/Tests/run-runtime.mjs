@@ -57,6 +57,7 @@ if (from <= 0 && until >= 0) {
   mkdirSync(join(library, "Source"), { recursive: true });
   renameSync(join(library, "unit.jet"), join(library, "Source/Runtime.jet"));
   const support = [];
+  // SUPPORT_ITEMS includes DerivationTypes; do not duplicate it from MIR.jet.
   for (const [path, names] of SUPPORT_ITEMS) for (const name of names) support.push(item(path, new RegExp(`^(pub )?(struct|enum) ${name}\\b`)));
   support.push(item("Compiler/JetFoundation/Source/Types/Types.jet", /^(pub )?fn param_zone_name\(/));
   const backend = [

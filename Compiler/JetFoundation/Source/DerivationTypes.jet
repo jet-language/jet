@@ -1,0 +1,89 @@
+// Canonical derivation/frame resource types shared by compiler MIR and runtime
+// evidence. Declarations moved intact from MIR.jet; no parallel carrier schema.
+
+pub enum MIRResourceAccessMode { Read Write Move }
+
+pub enum MIRResourceIdentity { Named(name: String) Unknown }
+
+pub enum MIRResourceRegion {
+    Whole
+    Bytes(start: Int, length: Int)
+    Unknown
+}
+
+pub struct MIRResourceLayout {
+    pub size: Int
+    pub align: Int
+    pub layout: String
+    pub device: String
+}
+
+pub struct MIRResourceAccess {
+    pub resource: MIRResourceIdentity
+    pub mode: MIRResourceAccessMode
+    pub region: MIRResourceRegion
+    pub layout: MIRResourceLayout?
+    pub temporary: Bool
+}
+
+pub enum MIRFrameCompletion {
+    Synchronous
+    Pending(token: String)
+    Event(token: String)
+}
+
+pub struct MIRFrameOperation {
+    pub name: String
+    pub source_index: Int
+    pub accesses: [MIRResourceAccess]
+    pub completion: MIRFrameCompletion
+    pub completion_provider: String?
+    pub external_effect: Bool
+}
+
+pub struct MIRFrameDependency {
+    pub before: Int
+    pub after: Int
+    pub resource: String
+    pub reason: String
+}
+
+pub struct MIRFrameTransfer {
+    pub before: Int
+    pub after: Int
+    pub resource: String
+    pub from_device: String
+    pub to_device: String
+}
+
+pub struct MIRFrameReuse {
+    pub previous_resource: String
+    pub next_resource: String
+    pub previous_last_use: Int
+    pub next_first_use: Int
+    pub legal: Bool
+    pub reason: String
+}
+
+pub struct MIRFrameRetention {
+    pub resource: String
+    pub operation: Int
+    pub owner: String
+    pub completion_token: String?
+    pub completed: Bool
+}
+
+pub struct MIRFrameSchedule {
+    pub operations: [MIRFrameOperation]
+    pub dependencies: [MIRFrameDependency]
+    pub transfers: [MIRFrameTransfer]
+    pub reuse: [MIRFrameReuse]
+    pub retentions: [MIRFrameRetention]
+    pub conservative: [String]
+}
+
+pub enum MIRDerivationMethod { StaticDerivation FormalProof RecordedExecution SampledAgreement ExternalAssumption }
+
+pub enum MIRDerivationDisposition { Current Stale Expired Redacted Unavailable Unsupported BudgetExhausted Unknown }
+
+pub struct MIRDerivationRef { pub id: String }

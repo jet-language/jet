@@ -76,6 +76,7 @@ function body(path) {
   return `// [unit source: ${path}]\n${kept.join("\n")}\n`;
 }
 const support = [];
+// Shared DerivationTypes declarations enter through SUPPORT_ITEMS, not MIR.jet.
 for (const [path, names] of SUPPORT_ITEMS) for (const name of names) support.push(item(path, new RegExp(`^(pub )?(struct|enum) ${name}\\b`)));
 support.push(item("Compiler/JetFoundation/Source/Types/Types.jet", /^pub fn param_zone_name\(/));
 const golden = "Compiler/JetBackend/Tests/GoldenLower.jet";

@@ -14,6 +14,16 @@ use std::fmt::Write as _;
 const SOURCE_MIR_SCHEMA: &str = include_str!("../../JetFoundation/Source/MIR/MIR.jet");
 const SOURCE_SUPPORT_SCHEMAS: &[(&str, &[&str])] = &[
     (
+        include_str!("../../JetFoundation/Source/DerivationTypes.jet"),
+        &[
+            "MIRResourceAccessMode", "MIRResourceIdentity", "MIRResourceRegion",
+            "MIRResourceLayout", "MIRResourceAccess", "MIRFrameCompletion",
+            "MIRFrameOperation", "MIRFrameDependency", "MIRFrameTransfer",
+            "MIRFrameReuse", "MIRFrameRetention", "MIRFrameSchedule",
+            "MIRDerivationMethod", "MIRDerivationDisposition", "MIRDerivationRef",
+        ],
+    ),
+    (
         include_str!("../../JetFoundation/Source/Registry/CoreCalls.jet"),
         &[
             "Effect",
@@ -251,7 +261,7 @@ pub(crate) fn append_runtime_mir_codec(
     emit_special_structural_converters(out, symbols)?;
     writeln!(
         out,
-        "\n// Typed Source-MIR/native-MIR projection generated from Compiler/JetFoundation/Source/MIR/MIR.jet.\n"
+        "\n// Typed Source-MIR/native-MIR projection generated from MIR/MIR.jet and DerivationTypes.jet.\n"
     )
     .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
 

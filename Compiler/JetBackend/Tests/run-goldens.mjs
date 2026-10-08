@@ -386,6 +386,7 @@ const BACKEND = [
 
 function assembleUnit() {
   const support = [];
+  // SUPPORT_ITEMS also owns the canonical shared DerivationTypes declarations.
   for (const [path, names] of SUPPORT_ITEMS) for (const name of names) support.push(item(path, name));
   const zone = read("Compiler/JetFoundation/Source/Types/Types.jet").split("\n");
   const zoneStart = zone.findIndex((line) => line.startsWith("pub fn param_zone_name("));
