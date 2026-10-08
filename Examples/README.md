@@ -23,6 +23,18 @@ node Tools/agent/run-feature-examples.mjs
 For the contributor workflow around the executable and its environment, see
 [`AGENTS.md`](../AGENTS.md) and [`Tools/agent/jet-env`](../Tools/agent/jet-env).
 
+Public CLI scenarios live in `tests/cases/**/*.case` and run once in fresh
+scratch directories through the same step parser as golden sidecars:
+
+```sh
+jet build Tools/testkit
+testkit cases --jet /absolute/path/to/jet --scratch /outside/checkout
+```
+
+Each scenario may stage a `fixture:` directory relative to its `.case` file;
+exact stdout, stderr, and file snapshots live beside the scenario. Program
+fixtures belong outside `Tools/testkit`, whose `.jet` files are package members.
+
 ## Find an example
 
 Start with the smallest source in [`features/basics/`](features/basics/), then
