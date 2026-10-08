@@ -380,13 +380,11 @@ fn sema_call_binder_refs_read(keys: [String], start: Int, context: SemaCheckCont
     false
 }
 
-// Rust `source_arg_order` + `bind_arg_temporaries`: once a default reads an
-// earlier parameter, every supplied argument is evaluated into
-// `binder_ref_<site>_<slot>` in written order, then every default in
-// declaration order, so a default reads the value already passed and runs
-// after every supplied argument. The receiver stays in the call, as in the
-// reference. Borrowed arguments are pinned as borrows so a default can read
-// them too.
+// Declaration-order grouping must not reorder written expressions. Pin raw
+// supplied arguments in written order, then defaults in declaration order,
+// so binder references read the already-passed values. Methods and Fn calls
+// pin their receiver/callee first; this helper owns only argument pins.
+// Borrowed places are pinned as borrows, fresh values retain an owned pin.
 fn sema_call_pin_binder_arguments(typed: SemaCallTypedArguments, params: [SemaCallParam], lowered: &[TCallArg], environment: SemaScopeEnvironment, scopes: SemaScopeTable, span: Span) -> [TStmt] Never! {
     bindings := [TStmt]{}
     if !typed.pin_arguments -> return bindings
@@ -474,8 +472,8 @@ fn sema_call_lower_bound_arguments(typed: SemaCallTypedArguments, params: [SemaC
             template_items: [SymbolID]{},
             borrow: param.convention == AccessConvention.Read && !sema_call_is_scalar(value.ty),
             mut_borrow: param.convention == AccessConvention.Write,
-            clone: arg.flags.implicit_clone || arg.flags.shared_auto_clone,
-            arc_clone: false,
+            clone: arg.flags.implicit_clone,
+            arc_clone: arg.flags.shared_auto_clone,
             fn_coerce: None,
             widen_to_vec: widen_to_vec,
             widen_to_union: widen_to_union,

@@ -2500,9 +2500,13 @@ fn jet_codegen_lower_trait_method_args(builder: &JetCodegenBuilder, program: Jet
 
 fn jet_codegen_lower_instance_args(builder: &JetCodegenBuilder, program: JetCodegenProgram, args: [TCallArg], params: [TParameter]) -> [MIRCallArg] {
     if params.len() == 0 || params[0].name != "self" -> panic("checked instance signature has no canonical receiver")
-    explicit := [TParameter]{}
-    loop index in 1..<params.len() -> &explicit.push(params[index])
-    lowered := jet_codegen_lower_call_args(&builder, program, args, explicit)
+    variadic := [Bool]{}
+    conventions := [AccessConvention]{}
+    loop index in 1..<params.len() {
+        &variadic.push(params[index].variadic)
+        &conventions.push(params[index].access)
+    }
+    lowered := jet_codegen_lower_call_args_for_signature(&builder, program, args, variadic, conventions)
     loop index in 0..<lowered.len() -> lowered[index].binder_slot = Val(index + 1)
     lowered
 }
