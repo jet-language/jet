@@ -16,6 +16,20 @@ fn run() {
     assert(json.stdout == "{{\"schema\":\"jet.status/v1\",\"action\":\"try\",\"ok\":true,\"reports\":[],\"name\":\"Sample\",\"kept\":false,\"claims_rechecked\":2,\"claims_reused\":5,\"receipt_id\":\"try-ea90da779060\"}}\n")
     assert(json.stderr == "" && json.exit_code == JET_DRIVER_EXIT_OK)
 
+    assert((jet_cli_try_counter_delta(4, 9) ?? panic("actual monotonic delta")) == 5)
+    assert((jet_cli_try_counter_delta(4, 4) ?? panic("actual unchanged delta")) == 0)
+    if jet_cli_try_counter_delta(4, 3) == {
+        .Ok(_) -> panic("decreasing counters must not become a zero measurement")
+        .Err(problem) -> if problem == {
+            .Read(_) -> panic("counter invariant must preserve the internal fault route")
+            .Output(output) -> {
+                assert(output.stdout == "")
+                assert(output.stderr.contains("incremental body counters decreased within one try invocation"))
+                assert(output.exit_code != JET_DRIVER_EXIT_OK)
+            }
+        }
+    }
+
     queries := jet_driver_compiler_queries_new()
     cold :: jet_driver_compiler_queries_stats(&queries)
     assert(cold.item_hits == 0 && cold.item_recomputes == 0 && cold.live_items == 0)
@@ -39,11 +53,40 @@ fn run() {
     at :: original.find("{{ 1 }}") ?? panic("fixture edit")
     cli_files.write(plan_file, "{{\"version\":1,\"name\":\"Body\",\"entry\":\"run.jet\",\"edits\":[{{\"path\":\"run.jet\",\"start\":{at + 2},\"end\":{at + 3},\"new_text\":\"2\"}}]}}") ?? panic("try plan")
     parsed :: jet_cli_try_read_plan(plan_file) ?? panic("try plan parsing")
-    staged :: jet_cli_try_stage(parsed) ?? panic("try stage")
+    session := jet_driver_compiler_queries_new()
+    baseline := jet_cli_try_check(&session, entry, true) ?? panic("actual retained baseline")
+    before :: jet_driver_compiler_queries_stats(&session)
+    staged :: jet_cli_try_stage(parsed, &baseline) ?? panic("try stage")
     assert(staged.len() == 1 && staged[0].before == original.bytes())
     replacement :: String.from_bytes(staged[0].after) ?? panic("fixture source")
     assert(replacement == original.replace("{{ 1 }}", "{{ 2 }}"))
-    measured :: jet_cli_try_verdict(entry, staged, replacement) ?? panic("actual incremental verdict")
+    // The original graph/index/source ownership remains authoritative even if
+    // the disk is changed after the one baseline check. There is no reindex.
+    rename :: JetCLITryPlan{name: "Rename", entry: entry, action: .Rename("changed", "renamed")}
+    renamed :: jet_cli_try_stage(rename, &baseline) ?? panic("same-graph rename")
+    rename_ops :: jet_cli_try_semantic_ops(rename, &baseline) ?? panic("same-graph rename operations")
+    assert(renamed.len() == 1 && renamed[0].before == original.bytes())
+    assert(renamed[0].after == original.replace("changed", "renamed").bytes())
+    assert(rename_ops.len() == 1 && rename_ops[0].kind == "rename" && rename_ops[0].targets.len() >= 1)
+    cli_files.write(entry, original.replace("changed", "intruder")) ?? panic("ownership witness mutation")
+    same_rename :: jet_cli_try_stage(rename, &baseline) ?? panic("retained source, not reread")
+    same_ops :: jet_cli_try_semantic_ops(rename, &baseline) ?? panic("retained index, not rebuild")
+    assert(same_rename[0].before == renamed[0].before && same_rename[0].after == renamed[0].after)
+    assert(same_ops[0].targets[0].stable_id == rename_ops[0].targets[0].stable_id)
+    assert(same_ops[0].targets[0].before == rename_ops[0].targets[0].before)
+    same_counts :: jet_driver_compiler_queries_stats(&session)
+    assert(same_counts.item_hits == before.item_hits && same_counts.item_recomputes == before.item_recomputes)
+    broken := baseline
+    broken.sources = [String:String]{}
+    if jet_cli_try_stage(rename, &broken) == {
+        .Ok(_) -> panic("missing checked ownership must not reread the changed disk")
+        .Err(problem) -> if problem == {
+            .Read(_) -> panic("missing checked ownership is an internal invariant")
+            .Output(output) -> assert(output.stderr.contains("the retained rename index lost its original source ownership"))
+        }
+    }
+    cli_files.write(entry, original) ?? panic("restore original ownership witness")
+    measured :: jet_cli_try_verdict(&session, before, entry, staged, replacement) ?? panic("actual incremental verdict")
     assert(jet_cli_errors(measured.diagnostics).len() == 0)
     assert(measured.claims_rechecked >= 1 && measured.claims_reused >= 1)
     assert((cli_files.read(entry) ?? panic("original after speculation")) == original)
