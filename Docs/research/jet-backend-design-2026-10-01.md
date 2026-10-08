@@ -1659,6 +1659,14 @@ The unit-only wire consumer refuses property records.
 Jet object and fresh remaining native archive, exercising ownership, flags,
 and wire round trips without duplicate test providers. Capture fixtures cover
 32-level nesting, detach cleanup, and eight pthreads with isolated output.
+The `scopes` case covers borrowed-input ownership, replacement/take/clear
+failure pairs, first-stop-wins, nested/duplicate/zero expectation IDs,
+ordinary-failure exclusion, completed precedence, parent stop reset,
+timeout-depth pruning, skip reset, and full detach cleanup across eight
+pthreads. `TestScopeTests.jet` in the World/Sentry fixture unit additionally
+witnesses mismatch/unmet publication into the real task stop record and
+Instant saturation/backwards-clock arithmetic. These fixtures require the
+fresh composed object; syntax/parse receipts alone do not prove behavior.
 `test-unit-runtime.mjs FIXTURE_EXE` compares exact status/stdout/stderr across
 capture policies, text/JSON reports, empty reports, UTF-8/control characters,
 shuffle boundaries, and malformed/property records. Runtime admission also
