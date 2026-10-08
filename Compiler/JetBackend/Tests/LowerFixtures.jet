@@ -758,6 +758,11 @@ fn run() {
         clean = false
     }
     if !fx_report_runtime("qualified-dir-entries", fx_qualified_dir_entries()) -> clean = false
+    if !fx_f32_constant_bits_checks() {
+        print("issue f32-constant-bits: binary32 rounding or exceptional payload failed")
+        clean = false
+    }
+    if !fx_report_runtime("f32-constants", fx_f32_constants()) -> clean = false
     if !fx_runtime_bitcast_refusals() {
         print("issue runtime-bitcast: scalar layout/drop refusals failed")
         clean = false
