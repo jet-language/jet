@@ -730,7 +730,7 @@ fn sema_call_core_check_fixed_record(record: CoreCallRecord, args: [CallArg], ty
             return None
         }
     }
-    if record.module_name == "core.mem" && (record.member == "__shared_revision" || record.member == "__snapshot_revision") {
+    if record.module_name == "core.mem" && (record.member == "__shared_revision" || record.member == "__snapshot_revision" || record.member == "__query_plan" || record.member == "__watch_clock") {
         if !environment.source_file.starts_with("<corelib>/") || environment.module_name != "core.data" {
             &diagnostics.push(sema_error("E0510", span, "Shared revision leaves are compiler-private", "canonical publication metadata is restricted to checked Core data source", "use the public Shared capture and publication API"))
             return None

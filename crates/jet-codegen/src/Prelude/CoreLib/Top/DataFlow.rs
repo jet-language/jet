@@ -529,6 +529,31 @@ fn jet_data_query<T: Clone + 'static>(
     .unwrap_or_else(|error| panic!("invalid compiler query metadata: {error}"));
     jet_std::DataQuery::from_rows(rows.clone(), 0, plan)
 }
+
+// Existing Rows identity construction, exposed only as an opaque raw leaf.
+// The public Rows factory remains native/uncredited until the source cutover.
+fn jet_data_raw_query_plan<T>(rows: &Vec<T>) -> JetTablePlan {
+    jet_table_plan_from_descriptors(std::any::type_name::<T>(), &[], rows.len() as u128)
+        .unwrap_or_else(|error| panic!("invalid compiler query metadata: {error}"))
+}
+
+#[cfg(test)]
+mod query_plan_leaf_contract {
+    use super::*;
+
+    #[test]
+    fn user_record_plan_identity_is_byte_identical_to_native_rows_factory() {
+        #[derive(Clone)]
+        struct UserRecord { value: i64 }
+        let rows = vec![UserRecord { value: 7 }];
+        assert_eq!(rows[0].value, 7);
+        let raw = jet_data_raw_query_plan(&rows);
+        let native = jet_data_query(&rows).rows_frame().unwrap().plan;
+        assert_eq!(raw, native);
+        assert_eq!(raw.source.schema.row_type.as_str(), std::any::type_name::<UserRecord>());
+        assert_eq!(raw.inspect().unwrap().canonical_key(), native.inspect().unwrap().canonical_key());
+    }
+}
 fn jet_data_track<T, K, F>(
     rows: &Vec<T>,
     key: F,

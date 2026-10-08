@@ -946,6 +946,7 @@ pub(crate) fn core_ui_rust_type_name(name: &str) -> Option<String> {
 /// always inserts `jet_std::`.
 pub(crate) fn root_prelude_rust_type_name(name: &str) -> Option<&str> {
     match name {
+        "__TablePlan" => Some("JetTablePlan"),
         n if n == Syntax::TYPE_MEMO_STATS => Some("JetMemoStats"),
         n if n == Syntax::TYPE_AUTHORITY => Some("JetAuthority"),
         n if n == Syntax::DETERMINISTIC_WORLD_TYPE => Some("JetDeterministicWorld"),
@@ -7897,6 +7898,18 @@ fn walk_type_edge<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn private_query_plan_carrier_matches_both_type_maps() {
+        assert_eq!(root_prelude_rust_type_name("__TablePlan"), Some("JetTablePlan"));
+        let jet_map = include_str!("../../../../Compiler/JetCodegen/Source/Emit/Types.jet");
+        assert!(jet_map.contains("\"__TablePlan\" -> Val(\"JetTablePlan\")"));
+        let registry = include_str!("../Prelude/Core.jet");
+        let data = registry.lines().find(|line| line.starts_with("module core.data exports ")).unwrap();
+        let (exports, types) = data.split_once(" types ").unwrap();
+        assert!(!exports.contains("__TablePlan"));
+        assert!(types.contains("__TablePlan:plain"));
+    }
 
     #[test]
     fn source_file_handles_use_the_native_owned_carriers() {

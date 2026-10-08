@@ -2500,3 +2500,11 @@ fn data_query_state_map<T, U>(query: DataQueryState<T>, map: fn(T) -> U DataErro
     assert(data_watch_optional_key_order(None, None) == Ordering.Equal)
     assert(data_watch_optional_key_order(Val("same"), Val("same")) == Ordering.Equal)
 }
+
+#Test("Query Rows source retains its private opaque native plan") {
+    rows :: [Int]{3, 1, 2}
+    plan :: core.mem.__query_plan<Int>(rows)
+    query :: data_query_state_rows<Int>(rows, 0, plan)
+    assert_eq(data_query_state_collect<Int>(query) ?? panic("rows collect"), rows)
+    assert_eq(data_query_state_collect<Int>(query) ?? panic("rows replay"), rows)
+}

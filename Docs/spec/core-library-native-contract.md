@@ -178,6 +178,17 @@ selects a URL loader only for `http://` and `https://`. `load_default` applies
 provider-owned formats return structured `DataError` values with kind `Bridge`; native
 and web adapters do not repeat extension detection or default selection.
 
+The Query source cutover retains the native typed Rows plan as an opaque
+compiler-private `__TablePlan`. Its raw `__query_plan<T>` leaf reuses the
+existing Rows factory's exact native type name and canonical plan construction;
+there is no source plan constructor, native-field projection, or public type
+export. The Rows factory remains native/uncredited while its row-type identity
+has a per-tier gap. Four-mode Query, tracked revisions and maintained watches
+are activated together: held source batches do not replace the native spine.
+Watch wall-clock sampling likewise uses the existing native sample leaf with
+its Unix-millisecond/zero-fallback behavior and unchanged effect contract.
+
+
 `core.tasks.current_task` formats its control trace in Jet and supplies idle
 defaults there. Its native leaves return optional raw TLS pause and cancellation
 flags, without formatting or choosing an idle value. Terminal `eprint` owns its
