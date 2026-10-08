@@ -510,3 +510,12 @@ other hosts. Neither bridge writes the operating-system environment.
 `RealtimeStream.cancel(&self)` forwards its write-borrowed stream to
 `core.rt.__cancel(&self)`. The public method and its provider call both retain
 the explicit write-access marker; cancellation does not consume the stream.
+
+## Browser resident adapter cleanup
+
+The unused `BrowserHost::eval_core_call` plain-call dispatcher is removed,
+along with its orphan-only `profile_value`, `profile_ct`, `timeout_ct`, and
+`locked_ct` conversions. Repository-wide binding, qualified-call, string, and
+macro searches found no callers. Unrelated compiler/MIR `eval_core_call`
+functions are not that binding. The resident method adapter, handle table,
+live timeout/locked conversions, and included AOT providers are unchanged.
