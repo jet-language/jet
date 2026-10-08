@@ -218,6 +218,20 @@ The private lock guard owns a directory fd, a file fd and 16 inline nonce bytes.
 Drop uses `.secrets.age.lock.done.<lowercase-nonce>` with the exact inode gate,
 ignores cleanup errors as the seed does, closes both descriptors, and wipes its
 owned memory. Substituted entries are restored rather than unlinked.
+Acquisition creates the exclusive 0600 lock with openat2, uses one entropy fill
+for its nonce, records the current process start, writes all lock fields and
+fsyncs before adopting the guard. Errors before adoption close descriptors but
+leave the created lock name as the seed does. Stale recovery requires an owned
+regular file with full-nanosecond age strictly greater than 600 seconds, a dead
+or reused PID, exact expected state in current or backup, and exact inode
+quarantine using the file's verbatim nonce. Both snapshots are evaluated and
+backup read errors propagate even when the current snapshot matches.
+Backup recovery takes a non-stale-recovering lock, removes a same-repository
+typed successor's backup, or installs the backup by inode-checked exchange or
+noreplace. Historical-to-typed migration is a valid successor; unsigned revision
+ordering preserves the full u64 range. Every recovered read runs this policy
+before its unrecovered snapshot, with raw rename errors propagated and fsync or
+installed-inode uncertainty reported as DurabilityUnknown.
 Unrecovered reads stay explicit, allowing the recovered caller to perform its
 lock-aware recovery first. Supplemental transport fixtures carry independent
 starting/recipient hash vectors and exercise trim/case/duplicate/UTF-8 policy,

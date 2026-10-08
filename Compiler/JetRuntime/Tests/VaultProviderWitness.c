@@ -48,6 +48,7 @@ extern void jet_rt_vault_proc_parse_fixture(const Text *, _Bool, int64_t);
 extern void jet_rt_vault_proc_read_fixture(void);
 extern void jet_rt_vault_lock_fields_fixture(const Text *, int64_t, _Bool, int64_t, int64_t, const Text *);
 extern void jet_rt_vault_lock_guard_fixture(const Text *, const Text *);
+extern void jet_rt_vault_lock_acquire_fixture(const Text *);
 extern void imported_origin_round_trips_and_invalid_combinations_reject(const Text *, const Text *);
 extern void jet_rt_vault_crypto_fixture(const ByteList *);
 extern void jet_rt_vault_crypto_unavailable_fixture(int64_t (*)(void *, void *, int64_t));
@@ -361,6 +362,8 @@ static void lock_guard_fixtures(void) {
     jet_rt_vault_lock_guard_fixture(&path, NULL);
     assert(access(lock, F_OK) == -1 && errno == ENOENT);
     assert(access(done, F_OK) == -1 && errno == ENOENT);
+    jet_rt_vault_lock_acquire_fixture(&path);
+    assert(access(lock, F_OK) == -1 && errno == ENOENT);
     jet_rt_vault_lock_guard_fixture(&path, &fault);
     struct stat before, after;
     assert(stat(lock, &before) == 0);

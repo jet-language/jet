@@ -779,3 +779,39 @@ fn jet_rt_vault_lock_guard_fixture(root: I64, fault: I64) {
     thread_zero(scratch, I64{368})
     jet_rt_free(scratch, I64{368}, I64{8})
 }
+
+fn jet_rt_vault_lock_acquire_fixture(root: I64) {
+    scratch :: jet_rt_alloc(I64{464}, I64{8})
+    thread_zero(scratch, I64{464})
+    repo :: scratch + I64{336}
+    hash :: scratch + I64{352}
+    slot :: scratch + I64{384}
+    vault_fixture_check(vault_recover_backup_at_root(root) == I64{0})
+    vault_fixture_check(vault_acquire_lock_mode(root, repo, I64{-1}, hash, false, slot) == I64{0})
+    guard :: rt_text_word(slot)
+    vault_fixture_check(!vault_bytes_zero(guard + VAULT_LOCK_NONCE, I64{16}))
+    rt_text_store(slot, I64{91})
+    conflict :: vault_acquire_lock_mode(root, repo, I64{-1}, hash, false, slot)
+    vault_fixture_check(conflict != I64{0} && vault_error_tag(conflict) == I64{6})
+    vault_fixture_check(rt_text_word(slot) == I64{91})
+    vault_error_drop(conflict)
+    name :: scratch + I64{392}
+    rt_text_store(name, I64{8319385953628418862})
+    rt_text_store(name + I64{8}, I64{7165064478695317806})
+    rt_text_store(name + I64{16}, I64{107})
+    file :: vault_linux_openat(rt_text_word(guard + VAULT_LOCK_DIR), name, I64{0}, I64{0}, scratch)
+    vault_fixture_check(file >= I64{0})
+    vault_fixture_check(vault_linux_read_file(file, slot, scratch) == I64{0})
+    vault_linux_close(file)
+    bytes :: rt_text_word(slot)
+    vault_fixture_check(vault_lock_fields(rt_text_word(bytes + DATA_SEQUENCE_DATA), rt_text_word(bytes + DATA_SEQUENCE_LENGTH), repo, I64{-1}, hash, scratch + I64{416}, scratch))
+    pid :: trap_syscall(I64{39}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+    vault_fixture_check(rt_text_word(scratch + I64{416}) == pid)
+    vault_hex_put(scratch, guard + VAULT_LOCK_NONCE, I64{16})
+    vault_fixture_check(rt_text_equal_bytes(scratch, rt_text_word(scratch + I64{432}), I64{32}))
+    thread_zero(rt_text_word(bytes + DATA_SEQUENCE_DATA), rt_text_word(bytes + DATA_SEQUENCE_CAPACITY))
+    data_sequence_drop(bytes, DATA_TREE_BYTE_LIST)
+    vault_lock_drop(guard)
+    thread_zero(scratch, I64{464})
+    jet_rt_free(scratch, I64{464}, I64{8})
+}

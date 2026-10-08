@@ -715,3 +715,11 @@ fn vault_read_contents_unrecovered_at_root(root: I64, store_out: I64, hash_out: 
     jet_rt_free(scratch, I64{640}, I64{8})
     result
 }
+
+// SecretsCrypto.rs:1666-1672. Recovery errors propagate before any read output
+// is written; callers needing a lock-held snapshot use the unrecovered path.
+fn vault_read_contents_at_root(root: I64, store_out: I64, hash_out: I64, kind_out: I64) -> I64 {
+    error :: vault_recover_backup_at_root(root)
+    if (error != I64{0}) -> return error
+    vault_read_contents_unrecovered_at_root(root, store_out, hash_out, kind_out)
+}
