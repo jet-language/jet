@@ -1584,10 +1584,12 @@ An instrumented raw read skips its native load after a delivered fault and
 leaves its payload unwritten for the MIR Propagate cleanup edge.
 Shield defers cancellation/deadline/interrupt-class stops but never suppresses
 a panic or runtime fault; both Check and Propagate expose those immediately.
-Raw Deref is a can-stop MIR operation. Its Propagate is emitted before the
-result is bound into a lexical cleanup frame, including inside Shield; MIR
-legality requires all result reads, projections and drops to be dominated by
-the resume edge. Cleanup never reads or drops an unwritten raw-read result.
+Only raw `Ptr<T>` Deref is a can-stop MIR operation: Builder supplies its
+checked operand type to the predicate; Shared/ref Deref emits no Propagate.
+Its Propagate is emitted before the result is bound into a lexical cleanup
+frame, including inside Shield; MIR legality checks the same operand metadata
+and requires all result reads, projections and drops to be dominated by the
+resume edge. Cleanup never reads or drops an unwritten raw-read result.
 `run-world-sentry-fixtures.mjs` drives real controlled-thread timer ordering,
 all four MemSentry seed unit witnesses, a trivially copied inline Source read
 whose stopped frame is observed as released, and byte-for-byte JSONL parity

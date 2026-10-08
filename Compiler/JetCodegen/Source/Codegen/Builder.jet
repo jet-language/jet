@@ -1195,6 +1195,16 @@ fn jet_codegen_terminate(builder: &JetCodegenBuilder, program: JetCodegenProgram
     builder.blocks[at].terminator = terminator
 }
 
+// Read checked operand metadata only for Deref; no type cloning/search for
+// the common call path and no sentry Propagate after Shared/ref dereferences.
+fn jet_codegen_operation_can_stop(builder: JetCodegenBuilder, operation: MIROperation) -> Bool Never! {
+    if operation == .Deref(value) {
+        position :: builder.value_positions.get(value.value) ?? return false
+        return mir_operation_can_stop(operation, Val(builder.values[position].ty))
+    }
+    mir_operation_can_stop(operation, None)
+}
+
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::LowerCtx::emit
 fn jet_codegen_emit(builder: &JetCodegenBuilder, program: JetCodegenProgram, span: Span, ty: Type?, requested: MIROperation) -> MIRValueID? {
     // D-MEM-COPYSEM1: a read parameter's place has no storage to give up,
@@ -1227,7 +1237,7 @@ fn jet_codegen_emit(builder: &JetCodegenBuilder, program: JetCodegenProgram, spa
         .WritePlace(place, _) | .ReplacePlace(place, _) -> jet_codegen_set_drop_live(&builder, program, place, true)
         else -> {}
     }
-    if mir_operation_can_stop(operation) -> jet_codegen_emit_poll(&builder, program, MIRPollKind.Propagate)
+    if jet_codegen_operation_can_stop(builder, operation) -> jet_codegen_emit_poll(&builder, program, MIRPollKind.Propagate)
     result
 }
 
@@ -1251,7 +1261,7 @@ fn jet_codegen_emit_mir_type(builder: &JetCodegenBuilder, program: JetCodegenPro
         .WritePlace(place, _) | .ReplacePlace(place, _) -> jet_codegen_set_drop_live(&builder, program, place, true)
         else -> {}
     }
-    if mir_operation_can_stop(operation) -> jet_codegen_emit_poll(&builder, program, MIRPollKind.Propagate)
+    if jet_codegen_operation_can_stop(builder, operation) -> jet_codegen_emit_poll(&builder, program, MIRPollKind.Propagate)
     value
 }
 

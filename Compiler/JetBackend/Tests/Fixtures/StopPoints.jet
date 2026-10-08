@@ -23,13 +23,30 @@
 use jet_foundation.[
     MIRAccess, MIRBinaryOp, MIRBlockID, MIRCallArg, MIRCallee, MIRConstant,
     MIRDropKind, MIRFunction, MIROperation, MIRPollKind, MIRProgram, MIRScope,
-    MIRScopeFact, MIRScopeID, MIRScopeKind, MIRTerminator, MIRType, MIRTypeDef, MIRUnsafeGate,
-    mir_function_id,
+    MIRScopeFact, MIRScopeID, MIRScopeKind, MIRTerminator, MIRType, MIRTypeDef, MIRTypeKind, MIRUnsafeGate, MIRValueID,
+    mir_function_id, mir_operation_can_stop, mir_nominal_ref, mir_type_from_kind,
 ]
+
+// The exact predicate used by Builder and Legality: a raw Source Deref gets
+// Propagate; Shared/ref reads and missing operand metadata do not.
+fn fx_can_stop_deref_check() -> Bool Never! {
+    deref :: MIROperation.Deref{value: MIRValueID{value: 1}}
+    raw :: mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref("Ptr"), args: [MIRType]{fx_i64()}})
+    shared :: mir_type_from_kind(MIRTypeKind.Shared{inner: fx_i64()})
+    guard :: mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref("SharedGuard"), args: [MIRType]{fx_i64()}})
+    malformed :: mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref("Ptr"), args: [MIRType]{}})
+    mir_operation_can_stop(deref, Val(raw)) &&
+        !mir_operation_can_stop(deref, Val(shared)) &&
+        !mir_operation_can_stop(deref, Val(guard)) &&
+        !mir_operation_can_stop(deref, Val(fx_i64())) &&
+        !mir_operation_can_stop(deref, Val(malformed)) &&
+        !mir_operation_can_stop(deref, None)
+}
 
 // expect-stdout stop-points: "42\n0\n1\n6\n10\nkept\n"
 // expect-static-only stop-points
 fn fx_stop_points() -> MIRProgram Never! {
+    if !fx_can_stop_deref_check() -> panic("raw Ptr alone requires Deref Propagate")
     // twice: b0 Check -> b1 | b2 Stopped
     t := fx_builder()
     n :: fx_param(&t, "n", fx_int(), mir_copy_ownership())

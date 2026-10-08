@@ -2241,9 +2241,17 @@ pub fn mir_terminator_value_uses(terminator: MIRTerminator) -> [MIRValueID] Neve
 // Whether `operation` can stop (unified host/stop contract, #4720): it runs
 // user or Core code, invokes a callback, or waits, so a stop may be delivered
 // before it returns. Only such an operation may precede a Propagate poll.
-pub fn mir_operation_can_stop(operation: MIROperation) -> Bool Never! {
+// Deref is also used for Shared/ref reads; only checked raw Ptr<T> performs
+// a sentry read (TIR/tir_to_mir_expr.rs:2316, Source Expressions.jet raw site).
+pub fn mir_operation_can_stop(operation: MIROperation, deref_type: MIRType?) -> Bool Never! {
     if operation == {
-        .Call(_, _, _) | .IndirectCall(_, _, _) | .CoreCall(_, _, _, _, _, _) | .ScopeExit(_) | .Deref(_) -> true
+        .Call(_, _, _) | .IndirectCall(_, _, _) | .CoreCall(_, _, _, _, _, _) | .ScopeExit(_) -> true
+        .Deref(_) -> {
+            if deref_type == .Val(ty) {
+                if ty.kind == .Apply(name, args) -> return name.name == "Ptr" && args.len() == 1
+            }
+            false
+        }
         .Semantic(semantic) -> if semantic == {
             .ClosureMethod(_, _, _) | .CoreClosureCall(_, _, _, _, _, _) | .PluginInvoke(_, _, _, _, _) | .TaskGroup(_, _, _) | .Select(_, _, _) | .PolicyFunction(_, _) | .InterruptFunction(_, _) | .HostCall(_, _) -> true
             .RequireStop(_, _, _, _, _, _, _) -> true

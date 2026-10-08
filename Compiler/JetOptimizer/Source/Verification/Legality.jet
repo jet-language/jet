@@ -345,7 +345,8 @@ fn mir_pass_validate_stop_points(function: MIRFunction, definitions: MIRPassDefi
                     count :: block.instructions.len()
                     if count == 0 -> return Val("MIR Propagate poll does not follow a can-stop operation")
                     last :: block.instructions[count - 1]
-                    if !mir_operation_can_stop(last.operation) -> return Val("MIR Propagate poll does not follow a can-stop operation")
+                    deref_type :: if last.operation == .Deref(value) -> mir_pass_value_type(function, definitions, value) else -> None
+                    if !mir_operation_can_stop(last.operation, deref_type) -> return Val("MIR Propagate poll does not follow a can-stop operation")
                     if last.result == .Val(result) {
                         failure :: mir_pass_validate_resume_uses(function, definitions, dominance, result, resume)
                         if failure != None -> return failure

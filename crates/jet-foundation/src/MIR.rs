@@ -8768,9 +8768,14 @@ fn validate_function(
 /// Whether `operation` can stop (unified host/stop contract, #4720): it runs
 /// user or Core code, invokes a callback, or waits. Mirrors MIR.jet
 /// `mir_operation_can_stop`.
-pub fn mir_operation_can_stop(operation: &MirOperation) -> bool {
+pub fn mir_operation_can_stop(operation: &MirOperation, deref_type: Option<&MirType>) -> bool {
     match operation {
-        MirOperation::Call { .. } | MirOperation::IndirectCall { .. } | MirOperation::CoreCall { .. } | MirOperation::Deref { .. } => true,
+        MirOperation::Call { .. } | MirOperation::IndirectCall { .. } | MirOperation::CoreCall { .. } => true,
+        // tir_to_mir_expr.rs:2316 emits raw Ptr reads; the same MIR operation
+        // at 2129/2184 also reads Shared/ref carriers without sentry policy.
+        MirOperation::Deref { .. } => deref_type.is_some_and(|ty| {
+            matches!(ty.kind(), MirTypeKind::Apply { name, args } if name.name == "Ptr" && args.len() == 1)
+        }),
         MirOperation::Semantic(semantic) => matches!(
             semantic,
             MirSemanticOp::ClosureMethod { .. }
@@ -8806,7 +8811,13 @@ fn validate_stop_points(
                     return Err(invalid("MIR poll resumes and stops on the same block"));
                 }
                 if *kind == MirPollKind::Propagate {
-                    let Some(last) = block.instructions.last().filter(|last| mir_operation_can_stop(&last.operation)) else {
+                    let Some(last) = block.instructions.last().filter(|last| {
+                        let deref_type = match &last.operation {
+                            MirOperation::Deref { value } => function.values.iter().find(|(id, ..)| id == value).map(|(_, ty, ..)| ty),
+                            _ => None,
+                        };
+                        mir_operation_can_stop(&last.operation, deref_type)
+                    }) else {
                         return Err(invalid("MIR Propagate poll does not follow a can-stop operation"));
                     };
                     if let Some(result) = last.result {
