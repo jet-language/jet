@@ -663,7 +663,9 @@ pub fn sema_scope_environment_enter_module(environment: &SemaScopeEnvironment, m
 // per-function fact starts empty, as in a newly built probe environment.
 // False when the graph has no such module.
 pub fn sema_scope_environment_enter_probe_module(environment: &SemaScopeEnvironment, module_identity: String, comptime_body_values: [SemaComptimeBodyValue]) -> Bool Never! {
-    if environment.registration_graph == .Val(graph) {
+    // Pin the payload window, not an owning Option match of the whole graph.
+    // Only disjoint context fields are written before this loan closes.
+    if &environment.registration_graph == .Val(graph) {
         module_index :: sema_registration_module_index(graph, module_identity) ?? return false
         environment.module_identity = graph.modules[module_index].module_identity
         environment.package_identity = graph.modules[module_index].package_identity
