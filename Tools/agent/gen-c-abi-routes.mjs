@@ -1636,6 +1636,30 @@ const nativeExports = [
   ...nativeRecordExports(nativeTypes),
 ].filter((descriptor) => seedHelperNames.has(descriptor.name) && !jetRuntimeExports.has(descriptor.name));
 const nativeSourceExports = new Set(nativeExports.map((row) => row.name));
+// Explicit providers replace a type's representation, not individual Box
+// operations. Inspect the existing emission pass before either output mode:
+// no retained native-pack helper or adapter may touch that Rust layout.
+const ownedBoxTypes = handleRows.filter(([name, full]) => !handleBridge(full) &&
+  [...jetRuntimeExports].some((symbol) =>
+    ["drop", "clone", "eq", "display", "show", "debug"].some((op) => symbol === `jet_rt_handle_${op}_${name}`) ||
+    symbol.startsWith(`jet_rt_handle_field_${name}_`) ||
+    symbol === `jet_rt_record_new_${name}` || symbol === `jet_rt_record_tag_${name}` ||
+    symbol.startsWith(`jet_rt_record_new_${name}_`) || symbol.startsWith(`jet_rt_record_get_${name}_`)));
+const requireUnownedBox = (name, symbol) => {
+  throw new Error(`all-or-none ownership for ${name}: retained Rust Box-layout emission ${symbol} requires a complete Jet-owned type family`);
+};
+for (const [name, full] of ownedBoxTypes) {
+  const escaped = full.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pointer = new RegExp(`\\*(?:mut|const)\\s+[^;{}\\n]*?${escaped}(?![A-Za-z0-9_:<])`);
+  for (const match of rs.join("\n").matchAll(/pub extern "C" fn ([A-Za-z_]\w*)\(([^{}]*?)\{/g)) {
+    if (!jetRuntimeExports.has(match[1]) && !nativeSourceExports.has(match[1]) && pointer.test(match[2])) requireUnownedBox(name, match[1]);
+  }
+  for (const adapter of adapters) {
+    if (adapter.external || jetRuntimeExports.has(adapter.name)) continue;
+    const carried = [...adapter.params.map((param) => param.handle).filter(Boolean), ...adapter.result.handles];
+    if (carried.some((handle) => handle.full === full)) requireUnownedBox(name, adapter.name);
+  }
+}
 // Inventory uses the SAME descriptor pass as native-pack emission. It never
 // writes generated tables or treats this list as actual MIR layout admission.
 if (nativeListOnly) {

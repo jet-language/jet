@@ -444,7 +444,11 @@ Every generated handle helper shares one provider-ownership gate: a name in
 `JetRuntime/exports.list` must have its exact drop, clone, Bool equality, or
 text-render C ABI validated against the Jet declaration before its Rust
 definition is suppressed. Carrier tables do not change with provider
-ownership, and helpers without a provider retain their existing definition.
+ownership. Ownership is all-or-none per Box-layout type: once any lifecycle,
+render, equality, field, or record helper is Jet-owned, a retained native-pack
+Rust helper, record/sequence projection, or route adapter touching that type
+hard-fails before writing either output. Complete owned families exclude their
+seed definitions; canonical C-header bridges do not dereference Rust Boxes.
 These RUST-EXIT S5 seed compatibility rules disappear at cutover.
 The raw tagged-Int destructor `jet_rt_int_drop` receives metadata only once
 the Int layer owns that export in `exports.list`: one Word parameter, Unit
