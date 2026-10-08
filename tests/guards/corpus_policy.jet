@@ -27,6 +27,7 @@ struct PolicyManifest {
     exceptions: [PolicyExceptionRow]
 }
 struct PolicyRuleSpec { name: String, why: String, replacement: String }
+struct PolicyOccurrence { file: String, rule: String, site: String }
 
 fn policy_rule_registry() -> [PolicyRuleSpec] {
     [PolicyRuleSpec]{
@@ -146,7 +147,9 @@ fn policy_parse_manifest(text: String) -> PolicyManifest String! {
         number += 1
         bytes :: raw.bytes()
         carriage_return :: U8{13}
-        line :: if bytes.len() > 0 && bytes[bytes.len() - 1] == carriage_return -> ~raw.slice(0, raw.len() - 1) else -> raw
+        end := bytes.len()
+        loop end > 0 && bytes[end - 1] == carriage_return -> end -= 1
+        line :: ~raw.slice(0, end)
         if line.is_empty() || line.starts_with("#") -> next
         if line.starts_with("[") && line.ends_with("]") {
             section = ~line.slice(1, line.len() - 1)
@@ -313,9 +316,114 @@ fn policy_validate_manifest(manifest: PolicyManifest) -> [String] {
     }
     errors
 }
+
+fn policy_join(root: String, path: String) -> String {
+    if root.is_empty() || root == "." -> return path
+    if root.ends_with("/") -> return "{root}{path}"
+    "{root}/{path}"
+}
+fn policy_validate_manifest_paths(manifest: PolicyManifest, root: String) -> [String] {
+    errors := [String]{}
+    loop source in manifest.sources {
+        path :: policy_join(root, policy_selector_path(source.selector))
+        exists :: if source.selector.starts_with("root:") -> policy_files.is_dir(path) else -> policy_files.is_file(path)
+        if !exists -> &errors.push("manifest source selector does not exist: {source.selector}")
+    }
+    loop producer in manifest.producers {
+        path :: ~producer.selector.slice(9, producer.selector.len()).split("#")[0]
+        if !policy_files.is_file(policy_join(root, path)) -> &errors.push("manifest producer source does not exist: {producer.selector}")
+    }
+    loop exception in manifest.exceptions {
+        if exception.selector.starts_with("file:") && !policy_files.is_file(policy_join(root, policy_selector_path(exception.selector))) -> &errors.push("manifest exception source does not exist: {exception.selector}")
+    }
+    errors
+}
+fn policy_inventory_error(message: String, file: String, site_kind: String) -> String {
+    violation :: policy_violation(file, "corpus-inventory", "{site_kind}@0..0")
+    "{message}: {file}; {violation}"
+}
+fn policy_audit_inventory(manifest: PolicyManifest, files: [String], producers: [String]) -> [String] {
+    errors := [String]{}
+    loop file in files {
+        if policy_source_row(manifest, file) == None -> &errors.push(policy_inventory_error("unclassified eligible source", file, "inventory:source"))
+    }
+    loop producer in producers {
+        declared := false
+        loop row in manifest.producers { if row.selector == producer -> declared = true }
+        if !declared -> &errors.push(policy_inventory_error("unclassified generated-source producer", producer, "inventory:producer"))
+    }
+    errors
+}
+fn policy_validate_occurrences(manifest: PolicyManifest, selector: String, candidates: [PolicyOccurrence]) -> String? {
+    keys := [String]{}
+    loop candidate in candidates {
+        if candidate.file != selector -> return Some("candidate file {candidate.file} does not match {selector}")
+        key :: "{candidate.rule}\t{candidate.site}"
+        if !keys.contains(key) -> &keys.push(key)
+    }
+    &keys.sort()
+    loop key in keys {
+        parts :: key.split("\t")
+        rule :: parts[0]
+        site :: parts[1]
+        count := 0
+        loop candidate in candidates { if candidate.rule == rule && candidate.site == site -> count += 1 }
+        matches := 0
+        expected := 0
+        loop exception in manifest.exceptions {
+            if exception.rule == rule && exception.selector == "file:{selector}" && exception.site == site {
+                matches += 1
+                expected = exception.expected
+            }
+        }
+        if matches != 1 -> return Some("file={selector}; rule={rule}; site={site}; why=occurrence has no unique exception; replacement=add one exact exception")
+        if count != expected -> return Some("file={selector}; rule={rule}; site={site}; why=expected {expected} occurrence(s), found {count}; replacement=remove the additional occurrence or add a distinct reviewed site")
+    }
+    loop exception in manifest.exceptions {
+        if exception.selector != "file:{selector}" -> next
+        count := 0
+        loop candidate in candidates { if candidate.rule == exception.rule && candidate.site == exception.site -> count += 1 }
+        if count != exception.expected -> return Some("file={selector}; rule={exception.rule}; site={exception.site}; why=expected {exception.expected} occurrence(s), found {count}; replacement=remove the additional occurrence or update the exact reviewed site")
+    }
+    None
+}
+fn policy_apply_exceptions(manifest: PolicyManifest, path: String, candidates: [PolicyOccurrence]) -> [PolicyOccurrence] String! {
+    errors := [String]{}
+    loop exception in manifest.exceptions {
+        if exception.selector != "file:{path}" -> next
+        actual := 0
+        loop candidate in candidates { if candidate.rule == exception.rule && candidate.site == exception.site -> actual += 1 }
+        if actual != exception.expected -> &errors.push("file={path}; rule={exception.rule}; site={exception.site}; why=expected {exception.expected} occurrence(s), found {actual}; replacement=remove the additional occurrence or update the exact reviewed site")
+    }
+    if errors.len() > 0 -> return Err(errors.join("\n"))
+    remaining := [PolicyOccurrence]{}
+    consumed := [String: Int]{}
+    loop candidate in candidates {
+        key :: "{candidate.rule}\t{candidate.site}"
+        expected := Int?{None}
+        loop exception in manifest.exceptions {
+            if exception.rule == candidate.rule && exception.selector == "file:{path}" && exception.site == candidate.site {
+                expected = Some(exception.expected)
+                break
+            }
+        }
+        if expected == .Val(limit) {
+            seen :: (consumed.get(key) ?? 0) + 1
+            consumed[key] = seen
+            if seen > limit -> &remaining.push(candidate)
+        } else {
+            &remaining.push(candidate)
+        }
+    }
+    Ok(remaining)
+}
 fn policy_manifest() -> PolicyManifest {
     text :: policy_files.read("tests/corpus_policy.tsv") ?? panic("read corpus manifest")
-    policy_parse_manifest(text) ?? panic("checked-in corpus manifest is valid")
+    manifest :: policy_parse_manifest(text) ?? panic("checked-in corpus manifest is valid")
+    errors := policy_validate_manifest(manifest)
+    loop error in policy_validate_manifest_paths(manifest, ".") -> &errors.push(error)
+    assert_eq(errors, [String]{})
+    manifest
 }
 
 // The dependency contract is exercised on a real parser result, never a text
@@ -391,4 +499,35 @@ fn policy_parse_program(source_label: String, source: String) -> Program String!
     &manifest.exceptions.push(PolicyExceptionRow{rule: "entry-implicit", selector: "file:Examples/features/basics/hello.jet", site: "fn:run@0..0", expected: 1, protocol: "fixture", reason: "planted"})
     error :: "exception entry-implicit file:Examples/features/basics/hello.jet requires an expert-lesson or negative-diagnostic source, found CanonicalTeaching"
     assert(policy_validate_manifest(manifest).contains(error), "canonical source cannot absorb a violation")
+}
+
+#Test("inventory_rejects_new_source_or_producer_without_a_row") {
+    manifest :: policy_manifest()
+    error :: policy_audit_inventory(manifest, [String]{"unclassified/new-maintained-program.jet"}, [String]{}).join("\n")
+    assert(error.contains("unclassified eligible source"), "a synthetic source without a classification must fail")
+    assert(error.contains("rule=corpus-inventory"), "inventory rule identity")
+    assert(error.contains("site=inventory:source@0..0"), "inventory byte site")
+    assert(error.contains("replacement="), "inventory replacement")
+    assert_eq(error, "unclassified eligible source: unclassified/new-maintained-program.jet; file=unclassified/new-maintained-program.jet; rule=corpus-inventory; site=inventory:source@0..0; why=every maintained source and generated producer needs an explicit manifest boundary; replacement=add one exact manifest row with its role, owner, reason, and provenance")
+    producer_error :: policy_audit_inventory(manifest, [String]{"Examples/features/basics/hello.jet"}, [String]{"producer:new.rs#render"}).join("\n")
+    assert(producer_error.contains("unclassified generated-source producer"), "a synthetic producer without provenance must fail")
+    assert_eq(policy_audit_inventory(manifest, [String]{"Examples/features/basics/hello.jet"}, [String]{"producer:crates/jet-pkg-model/src/LuaBind.rs#render_jet"}), [String]{})
+}
+#Test("exception_matching_is_occurrence_scoped") {
+    manifest :: policy_manifest()
+    selector :: "tests/ui/E-CALL-VALUE_call_result_not_called.jet"
+    candidate :: PolicyOccurrence{file: selector, rule: "entry-implicit", site: "fn:run@0..0"}
+    assert_eq(policy_validate_occurrences(manifest, selector, [PolicyOccurrence]{candidate}), None)
+    duplicate :: policy_validate_occurrences(manifest, selector, [PolicyOccurrence]{candidate, candidate}) ?? panic("a second occurrence cannot reuse one exception")
+    assert(duplicate.contains("expected 1"), "duplicate occurrence must fail")
+    assert_eq(duplicate, "file=tests/ui/E-CALL-VALUE_call_result_not_called.jet; rule=entry-implicit; site=fn:run@0..0; why=expected 1 occurrence(s), found 2; replacement=remove the additional occurrence or add a distinct reviewed site")
+    assert_eq(policy_apply_exceptions(manifest, selector, [PolicyOccurrence]{candidate}), Ok([PolicyOccurrence]{}))
+}
+#Test("corpus occurrence exceptions reject missing and shifted sites") {
+    manifest :: policy_manifest()
+    selector :: "tests/ui/E-CALL-VALUE_call_result_not_called.jet"
+    shifted :: PolicyOccurrence{file: selector, rule: "entry-implicit", site: "fn:run@1..1"}
+    assert_eq(policy_validate_occurrences(manifest, selector, [PolicyOccurrence]{shifted}), Some("file=tests/ui/E-CALL-VALUE_call_result_not_called.jet; rule=entry-implicit; site=fn:run@1..1; why=occurrence has no unique exception; replacement=add one exact exception"))
+    assert_eq(policy_validate_occurrences(manifest, selector, [PolicyOccurrence]{}), Some("file=tests/ui/E-CALL-VALUE_call_result_not_called.jet; rule=entry-implicit; site=fn:run@0..0; why=expected 1 occurrence(s), found 0; replacement=remove the additional occurrence or update the exact reviewed site"))
+    assert_eq(policy_apply_exceptions(manifest, selector, [PolicyOccurrence]{}), Err("file=tests/ui/E-CALL-VALUE_call_result_not_called.jet; rule=entry-implicit; site=fn:run@0..0; why=expected 1 occurrence(s), found 0; replacement=remove the additional occurrence or update the exact reviewed site"))
 }
