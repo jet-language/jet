@@ -222,7 +222,11 @@ impl<'a> Checker<'a> {
         // literal argument (`f(5)` where `f` takes a `U8`) adopts that width and
         // is range-checked (E1003) at the literal. Restored after the argument.
         let saved_expected = self.expected_type.clone();
-        self.expected_type = Some(param_ty.clone());
+        self.expected_type = if !consumes && self.is_trait_parameter(param_ty) {
+            None
+        } else {
+            Some(param_ty.clone())
+        };
         let got = self.infer(&mut arg.expr);
         self.expected_type = saved_expected;
         if let Some(mut got) = got {
@@ -237,9 +241,15 @@ impl<'a> Checker<'a> {
             let reads_expiring_secret_loan = !consumes
                 && arg.convention == AccessConvention::Read
                 && crate::Sema::Diagnostics::expiring_secret_loan_matches(param_ty, &got);
+            let trait_identity = self.is_trait_parameter(param_ty)
+                && self.trait_parameter_identity(param_ty, &got);
+            let invariant_trait = arg.convention == AccessConvention::Write
+                && self.is_trait_parameter(param_ty);
+            let boxes_as_trait = !invariant_trait && self.trait_slot_accepts(param_ty, &got);
             let reported = query_callback_effect_bad
                 || reads_expiring_secret_loan
-                || self.check_type_assignable(param_ty, &got, arg.expr.span());
+                || (!trait_identity && !invariant_trait
+                    && self.check_type_assignable(param_ty, &got, arg.expr.span()));
             let fixed_widens = matches!(
                 (param_ty, &got),
                 (Type::List(want), Type::FixedList { elem: actual, .. }) if want == actual
@@ -253,6 +263,8 @@ impl<'a> Checker<'a> {
                 && !fixed_widens
                 && !union_widens
                 && !reads_expiring_secret_loan
+                && !trait_identity
+                && !boxes_as_trait
             {
                 if let Some(diag) = typed_text_mismatch(param_ty, &got, arg.expr.span()) {
                     self.diags.push(diag);

@@ -1110,7 +1110,7 @@ fn jet_rust_emit_partial_direct_borrow_call(ctx: &JetRustEmitContext, function: 
         if arg.value == value {
             if index >= borrow_mask.len() || !borrow_mask[index] -> return false
             if arg.access != MIRAccess.Read && arg.access != MIRAccess.Write -> return false
-            if arg.authority_boundary || arg.implicit_clone || arg.shared_auto_clone || arg.widen_fixed_to_list || arg.widen_to_union != None || arg.box_as_trait != None || arg.fn_coercion != None -> return false
+            if arg.authority_boundary || arg.implicit_clone || arg.shared_auto_clone || arg.widen_fixed_to_list || arg.widen_to_union != None || (arg.box_as_trait != None && arg.access != MIRAccess.Read) || arg.fn_coercion != None -> return false
             if {
                 arg.place == None -> {
                 if arg.access != MIRAccess.Read || jet_rust_emit_partial_value_reference(&ctx, function, value) == None -> return false

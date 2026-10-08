@@ -166,10 +166,6 @@ pub struct JetRustEmitContext {
     pub record_phantoms: [U64:String]{[U64:String]{}}
     pub type_by_name: [String:String]
     pub trait_names: [String:String]
-    // Trait id keys of declared (not compiler-owned) traits used as a
-    // single-bound trait object `Box<dyn T>`: each gets a clone-box
-    // supertrait so the boxed value is Clone (MIRRust dyn_clone_traits).
-    pub dyn_clone_traits: [String:Bool]
     pub field_names: [String:String]
     pub variant_names: [String:String]
     pub variant_source_names: [String:String]
@@ -606,36 +602,6 @@ fn jet_rust_emit_trait_name(ctx: &JetRustEmitContext, id: MIRTraitID) -> String 
     "__jet_missing_trait_{id.value}"
 }
 
-// MIRRust mir_type_single_trait_objects: record every declared trait that
-// `ty` uses as a single-bound trait object.
-fn jet_rust_emit_collect_dyn_clone_traits(ctx: &JetRustEmitContext, ty: MIRType) Never! {
-    if ty.kind == {
-        .TraitObject(bounds) -> {
-            if bounds.len() != 1 -> return
-            key :: jet_rust_emit_id_key(bounds[0].id.value)
-            index :: ctx.trait_index_by_id.get(key) ?? return
-            row :: ctx.program.traits[index]
-            if jet_rust_emit_compiler_owned_trait(row.name) || jet_rust_emit_compiler_owned_trait(row.key) -> return
-            ctx.dyn_clone_traits[key] = true
-        }
-        .Apply(_, inner) | .Union(inner) -> loop item in inner -> jet_rust_emit_collect_dyn_clone_traits(&ctx, item)
-        .List(inner) | .Shared(inner) | .Option(inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Tagged(_, inner) | .Quantity(inner, _) -> jet_rust_emit_collect_dyn_clone_traits(&ctx, inner)
-        .Map(key, value) | .Result(key, value) -> {
-            jet_rust_emit_collect_dyn_clone_traits(&ctx, key)
-            jet_rust_emit_collect_dyn_clone_traits(&ctx, value)
-        }
-        .Tuple(fields) -> loop field in fields -> jet_rust_emit_collect_dyn_clone_traits(&ctx, field.ty)
-        .Fn(signature) -> {
-            loop param in signature.params -> jet_rust_emit_collect_dyn_clone_traits(&ctx, param)
-            if signature.ret == .Val(ret) -> jet_rust_emit_collect_dyn_clone_traits(&ctx, ret)
-        }
-        .SendFn(params, ret, _) -> {
-            loop param in params -> jet_rust_emit_collect_dyn_clone_traits(&ctx, param)
-            if ret == .Val(result) -> jet_rust_emit_collect_dyn_clone_traits(&ctx, result)
-        }
-        else -> {}
-    }
-}
 
 fn jet_rust_emit_field_name(ctx: &JetRustEmitContext, id: MIRFieldID) -> String Never! {
     if ctx.field_names.get(jet_rust_emit_id_key(id.value)) == .Val(name) -> return name
@@ -1062,7 +1028,6 @@ fn jet_rust_emit_context(program: MIRProgram, config: JetRustEmitConfig) -> JetR
         type_names: types,
         type_by_name: type_by_name,
         trait_names: traits,
-        dyn_clone_traits: [String:Bool]{},
         field_names: fields,
         variant_names: variants,
         variant_source_names: variant_source_names,
@@ -1191,7 +1156,6 @@ fn jet_rust_emit_context(program: MIRProgram, config: JetRustEmitConfig) -> JetR
         symbol :: if jet_rust_emit_compiler_owned_trait(trait_row.name) -> jet_rust_emit_compiler_trait_symbol(trait_row.name) else -> jet_rust_emit_generated_path(trait_row.key)
         &ctx.trait_names.add(key, symbol).drop("the prior lookup proved this trait key is new")
     }
-    loop instance in ctx.program.type_instances -> jet_rust_emit_collect_dyn_clone_traits(&ctx, instance)
     loop foreign in ctx.program.foreign {
         key :: jet_rust_emit_id_key(foreign.id.value)
         if ctx.foreign_names.get(key) != None {

@@ -319,7 +319,58 @@ fn jet_rust_emit_string_view_argument(ctx: &JetRustEmitContext, function: MIRFun
     Val(jet_rust_emit_string_view_read(&ctx, function, arg.value))
 }
 
+fn jet_rust_emit_read_trait_place_is_loan(ctx: &JetRustEmitContext, function: MIRFunction, place: MIRPlaceID) -> Bool Never! {
+    index :: ctx.body_index.place_rows.get(place.value) ?? return false
+    row :: function.places[index]
+    if row.projections.len() != 0 || jet_rust_emit_read_trait_type(&ctx, row.ty) == None -> return false
+    if row.base == {
+        .Parameter(value) | .Capture(value) -> jet_rust_emit_read_trait_value_is_loan(&ctx, function, value)
+        .Local(local) -> ctx.ref_bindings.locals.get(local.value) != None
+        else -> false
+    }
+}
+
+fn jet_rust_emit_read_trait_value_is_loan(ctx: &JetRustEmitContext, function: MIRFunction, value: MIRValueID) -> Bool Never! {
+    if jet_rust_emit_read_trait_type(&ctx, jet_rust_emit_value_type(ctx, function, value)) == None -> return false
+    if ctx.ref_bindings.payloads.get(value.value) != None -> return true
+    instruction :: jet_rust_emit_find_value_instruction(ctx, function, value) ?? return false
+    if instruction.operation == {
+        .Parameter(index, _) -> jet_rust_emit_find_parameter(function, index).access == MIRAccess.Read
+        .Capture(slot) -> jet_rust_emit_capture_access(function, slot) == MIRAccess.Read
+        .ReadPlace(place) | .AddressOf(place, _) -> jet_rust_emit_read_trait_place_is_loan(&ctx, function, place)
+        else -> {
+            if !jet_rust_emit_inspected_transfer(&ctx, function, value) -> return false
+            read :: jet_rust_emit_transparent_read(ctx, function, value) ?? return false
+            jet_rust_emit_read_trait_value_is_loan(&ctx, function, read)
+        }
+    }
+}
+
+fn jet_rust_emit_read_trait_referent(ctx: &JetRustEmitContext, ty: MIRType, reference: String, borrowed: Bool) -> String Never! {
+    if !borrowed && jet_rust_emit_read_trait_type(&ctx, ty) != None -> return "({reference}).as_ref()"
+    reference
+}
+
+fn jet_rust_emit_read_trait_call_reference(ctx: &JetRustEmitContext, function: MIRFunction, arg: MIRCallArg) -> String Never! {
+    if ctx.ref_bindings.payloads.get(arg.value.value) != None -> return jet_rust_emit_ref_payload_reference(&ctx, function, arg.value)
+    value := arg.value
+    if jet_rust_emit_inspected_transfer(&ctx, function, value) {
+        if jet_rust_emit_transparent_read(ctx, function, value) == .Val(read) -> value = read
+    }
+    reference :: if arg.place == .Val(place) -> jet_rust_emit_place_reference(&ctx, function, place, MIRAccess.Read) else -> jet_rust_emit_borrowed_value_reference(&ctx, function, value, MIRAccess.Read)
+    borrowed :: if arg.place == .Val(place) -> jet_rust_emit_read_trait_place_is_loan(&ctx, function, place) else -> jet_rust_emit_read_trait_value_is_loan(&ctx, function, value)
+    jet_rust_emit_read_trait_referent(&ctx, jet_rust_emit_value_type(ctx, function, value), reference, borrowed)
+}
+
 fn jet_rust_emit_call_arg_with_borrow(ctx: &JetRustEmitContext, function: MIRFunction, arg: MIRCallArg, borrowed: Bool) -> String Never! {
+    source_ty :: jet_rust_emit_value_type(ctx, function, arg.value)
+    trait_source :: jet_rust_emit_read_trait_type(&ctx, source_ty) != None
+    if borrowed && arg.access == MIRAccess.Read && (arg.box_as_trait != None || trait_source) && !arg.authority_boundary && !arg.implicit_clone && !arg.shared_auto_clone && !arg.widen_fixed_to_list && arg.widen_to_union == None && arg.fn_coercion == None {
+        target :: if arg.box_as_trait == .Val(id) -> jet_rust_emit_checked_trait_box_target(&ctx, id, Val(function.span)) ?? return "" else -> source_ty
+        ty :: jet_rust_emit_read_trait_type(&ctx, target) ?? return ""
+        reference :: jet_rust_emit_read_trait_call_reference(&ctx, function, arg)
+        return "({reference}) as &{ty}"
+    }
     if borrowed && arg.access == MIRAccess.Read {
         // MIRRust call_arg_for_function: a string view (`&str`) lent to a
         // `String` read parameter. The parameter's Rust type is `&String`, so
@@ -372,6 +423,7 @@ fn jet_rust_emit_call_arg_with_borrow(ctx: &JetRustEmitContext, function: MIRFun
             value = "{wrapper}({value}) as {target}"
         }
     }
+    if borrowed && arg.access != MIRAccess.Write && (trait_box || trait_source) -> return "({value}).as_ref()"
     if borrowed && arg.access != MIRAccess.Write && !already_borrowed && !(value.starts_with("&(") || value.starts_with("&mut ")) -> value = "&({value})"
     return value
 }
@@ -3489,7 +3541,10 @@ fn jet_rust_emit_ref_payload_reference(ctx: &JetRustEmitContext, function: MIRFu
         instruction = jet_rust_emit_find_value_instruction(ctx, function, payload) ?? return "unreachable!(\"MIR reference binding read is missing\")"
     }
     // An element of an in-place loop borrows the walked list's row.
-    if instruction.operation == .LoopIterValue(_, cursor) -> return "{{ let (items, at) = *{jet_rust_emit_value_slot(cursor)}.as_ref().expect(\"MIR value\"); &items[at] }}"
+    if instruction.operation == .LoopIterValue(_, cursor) {
+        reference :: "{{ let (items, at) = *{jet_rust_emit_value_slot(cursor)}.as_ref().expect(\"MIR value\"); &items[at] }}"
+        return jet_rust_emit_read_trait_referent(&ctx, jet_rust_emit_value_type(ctx, function, value), reference, false)
+    }
     read := value
     if instruction.operation == {
         .EnumPayload(subject, _, _, _) | .OptionValue(subject) | .ResultValue(subject, _) -> read = subject
@@ -3497,20 +3552,18 @@ fn jet_rust_emit_ref_payload_reference(ctx: &JetRustEmitContext, function: MIRFu
     }
     place :: jet_rust_emit_immutable_read_place(&ctx, function, read) ?? return "unreachable!(\"MIR reference binding place is not stable\")"
     reference :: jet_rust_emit_place_reference(&ctx, function, place, MIRAccess.Read)
-    if instruction.operation == {
+    payload_reference :: if instruction.operation == {
         .EnumPayload(_, owner, variant, index) -> {
             kind :: MIRPayloadKind.Enum{owner: owner, variant: variant, index: index}
             payload :: if jet_rust_emit_payload_boxed(&ctx, kind) -> "&**payload" else -> "payload"
-            return "match {reference} {{ {jet_rust_emit_payload_pattern(&ctx, kind)} => {payload}, _ => unreachable!(\"MIR enum payload variant mismatch\") }}"
+            "match {reference} {{ {jet_rust_emit_payload_pattern(&ctx, kind)} => {payload}, _ => unreachable!(\"MIR enum payload variant mismatch\") }}"
         }
-        .ResultValue(_, ok) -> {
-            if ok -> return "match {reference} {{ Ok(value) => value, Err(_) => unreachable!(\"MIR result success payload missing\") }}"
-            return "match {reference} {{ Ok(_) => unreachable!(\"MIR result error payload missing\"), Err(error) => error }}"
-        }
-        .OptionValue(_) -> return "match {reference} {{ Ok(value) => value, Err(_) => unreachable!(\"MIR option payload missing\") }}"
-        else -> {}
+        .ResultValue(_, ok) -> if ok -> "match {reference} {{ Ok(value) => value, Err(_) => unreachable!(\"MIR result success payload missing\") }}" else -> "match {reference} {{ Ok(_) => unreachable!(\"MIR result error payload missing\"), Err(error) => error }}"
+        .OptionValue(_) -> "match {reference} {{ Ok(value) => value, Err(_) => unreachable!(\"MIR option payload missing\") }}"
+        else -> reference
     }
-    reference
+    borrowed :: if instruction.operation == .ReadPlace(original) -> jet_rust_emit_read_trait_place_is_loan(&ctx, function, original) else -> false
+    jet_rust_emit_read_trait_referent(&ctx, jet_rust_emit_value_type(ctx, function, value), payload_reference, borrowed)
 }
 
 // MIRRust rust_struct_literal: the compiler-owned default Err constructs through

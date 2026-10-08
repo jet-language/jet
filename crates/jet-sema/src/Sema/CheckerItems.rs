@@ -1463,7 +1463,11 @@ impl<'a> Checker<'a> {
                     self.with_call_access(&mut call_access, |checker| {
                         checker.check_call_argument_access(arg, *param_conv, param_ty, true);
                         let saved_expected = checker.expected_type.clone();
-                        checker.expected_type = Some(param_ty.clone());
+                        checker.expected_type = if checker.borrowed_trait_parameter(param_ty, *param_conv) {
+                            None
+                        } else {
+                            Some(param_ty.clone())
+                        };
                         let inferred = checker.infer(&mut arg.expr);
                         checker.expected_type = saved_expected;
                         checker.check_call_argument_captures(&arg.expr);
@@ -1475,16 +1479,17 @@ impl<'a> Checker<'a> {
                         self.widen_numeric_argument(&mut arg.expr, arg_ty, param_ty, *param_conv);
                     let arg_ty =
                         self.lift_optional_argument(&mut arg.expr, arg_ty, param_ty, *param_conv);
-                    let reported = self.check_type_assignable(param_ty, &arg_ty, arg.expr.span());
-                    // S48: a concrete value meets a trait-typed parameter; the
-                    // box is materialised at lowering, not spelled by the caller,
-                    // and it owns the value (same rule as a trait-object list
-                    // element — `~c` keeps a caller's copy, never a silent one).
-                    let boxes_as_trait = self.trait_slot_accepts(param_ty, &arg_ty);
-                    if boxes_as_trait {
+                    let trait_identity = self.is_trait_parameter(param_ty)
+                        && self.trait_parameter_identity(param_ty, &arg_ty);
+                    let invariant_trait = *param_conv == AccessConvention::Write
+                        && self.is_trait_parameter(param_ty);
+                    let reported = !trait_identity && !invariant_trait
+                        && self.check_type_assignable(param_ty, &arg_ty, arg.expr.span());
+                    let boxes_as_trait = !invariant_trait && self.trait_slot_accepts(param_ty, &arg_ty);
+                    if boxes_as_trait && *param_conv == AccessConvention::Move {
                         self.note_move_if_direct_ident(&arg.expr, "the method call");
                     }
-                    if !reported && arg_ty != *param_ty && !boxes_as_trait {
+                    if !reported && arg_ty != *param_ty && !boxes_as_trait && !trait_identity {
                         self.diags.push(Diagnostic::error(
                             "E0112",
                             format!(
@@ -1689,7 +1694,11 @@ impl<'a> Checker<'a> {
                 self.borrow_ctx = true;
             }
             let saved_expected = self.expected_type.clone();
-            self.expected_type = Some(param_ty.clone());
+            self.expected_type = if self.borrowed_trait_parameter(&param_ty, param.convention) {
+                None
+            } else {
+                Some(param_ty.clone())
+            };
             let arg_ty = self.with_call_access(&mut call_access, |checker| {
                 checker.check_call_argument_access(arg, param.convention, &param_ty, true);
                 let inferred = checker.infer(&mut arg.expr);
@@ -1702,8 +1711,17 @@ impl<'a> Checker<'a> {
                     self.widen_numeric_argument(&mut arg.expr, arg_ty, &param_ty, param.convention);
                 let arg_ty =
                     self.lift_optional_argument(&mut arg.expr, arg_ty, &param_ty, param.convention);
-                let reported = self.check_type_assignable(&param_ty, &arg_ty, arg.expr.span());
-                if !reported && arg_ty != param_ty {
+                let trait_identity = self.is_trait_parameter(&param_ty)
+                    && self.trait_parameter_identity(&param_ty, &arg_ty);
+                let invariant_trait = param.convention == AccessConvention::Write
+                    && self.is_trait_parameter(&param_ty);
+                let reported = !trait_identity && !invariant_trait
+                    && self.check_type_assignable(&param_ty, &arg_ty, arg.expr.span());
+                let boxes_as_trait = !invariant_trait && self.trait_slot_accepts(&param_ty, &arg_ty);
+                if boxes_as_trait && param.convention == AccessConvention::Move {
+                    self.note_move_if_direct_ident(&arg.expr, "the static method call");
+                }
+                if !reported && arg_ty != param_ty && !boxes_as_trait && !trait_identity {
                     self.diags.push(Diagnostic::error(
                         "E0112",
                         format!(

@@ -45,6 +45,9 @@ fn jet_rust_emit_function_param_type(ctx: &JetRustEmitContext, function: MIRFunc
 fn jet_rust_emit_capture_param(ctx: &JetRustEmitContext, capture: MIRCaptureParam) -> String Never! {
     rendered :: jet_rust_emit_type(&ctx, capture.ty)
     name :: jet_rust_emit_capture_name(capture.slot)
+    if capture.access == MIRAccess.Read {
+        if jet_rust_emit_read_trait_type(&ctx, capture.ty) == .Val(borrowed) -> return "{name}: &{borrowed}"
+    }
     if capture.access == {
         .Read -> "{name}: &{rendered}"
         .Write -> "{name}: &mut {rendered}"
@@ -64,8 +67,10 @@ fn jet_rust_emit_local_declaration(ctx: &JetRustEmitContext, local: MIRLocal) ->
     // MIRRust: a shared-capture local is one shared cell (S47/M2).
     if jet_rust_emit_local_is_shared(&ctx, local.id) -> return "let {jet_rust_emit_local_slot(local.id)}: std::rc::Rc<std::cell::RefCell<Option<{jet_rust_emit_type(&ctx, local.ty)}>>> = std::rc::Rc::new(std::cell::RefCell::new(None));"
     // MIRRust emit_slots: a reference binding holds the value it binds in place.
-    borrow :: if ctx.ref_bindings.locals.get(local.id.value) != None -> "&" else -> ""
-    "let mut {jet_rust_emit_local_slot(local.id)}: Option<{borrow}{jet_rust_emit_type(&ctx, local.ty)}> = None;"
+    reference_binding :: ctx.ref_bindings.locals.get(local.id.value) != None
+    borrow :: if reference_binding -> "&" else -> ""
+    ty :: if reference_binding -> jet_rust_emit_read_trait_type(&ctx, local.ty) ?? jet_rust_emit_type(&ctx, local.ty) else -> jet_rust_emit_type(&ctx, local.ty)
+    "let mut {jet_rust_emit_local_slot(local.id)}: Option<{borrow}{ty}> = None;"
 }
 
 // MIRRust emit_slots: a `Global` read of a shared constant holds the shared
@@ -1557,16 +1562,7 @@ fn jet_rust_emit_trait_method_definition(ctx: &JetRustEmitContext, definition: M
 fn jet_rust_emit_trait_definition(ctx: &JetRustEmitContext, definition: MIRTraitDef, lines: &[String]) Never! {
     visibility :: jet_rust_emit_visibility(definition.visibility)
     name :: jet_rust_emit_trait_name(&ctx, definition.id)
-    // MIRRust emit_trait_def: a trait used as `Box<dyn T>` clones its boxed
-    // value through a clone-box supertrait, so `Box<dyn T>` is Clone.
-    if ctx.dyn_clone_traits.get(jet_rust_emit_id_key(definition.id.value)) != None {
-        &lines.push("{visibility}trait {name}__JetCloneBox {{ fn __jet_clone_box(&self) -> Box<dyn {name}>; }}")
-        &lines.push("impl<JetSelf: {name} + Clone + 'static> {name}__JetCloneBox for JetSelf {{ fn __jet_clone_box(&self) -> Box<dyn {name}> {{ Box::new(self.clone()) }} }}")
-        &lines.push("impl Clone for Box<dyn {name}> {{ fn clone(&self) -> Self {{ (**self).__jet_clone_box() }} }}")
-        &lines.push("{visibility}trait {name}: {name}__JetCloneBox {{")
-    } else {
-        &lines.push("{visibility}trait {name} {{")
-    }
+    &lines.push("{visibility}trait {name} {{")
     previous_associated_types := ctx.current_associated_types
     associated_names := [String]{}
     loop associated in definition.associated_types {

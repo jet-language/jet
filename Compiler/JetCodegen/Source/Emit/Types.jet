@@ -55,7 +55,18 @@ fn jet_rust_emit_type_is_borrowed(ty: MIRType) -> Bool Never! {
     if ty.kind == MIRTypeKind.Int -> true else -> !mir_type_is_scalar(ty)
 }
 
+fn jet_rust_emit_read_trait_type(ctx: &JetRustEmitContext, ty: MIRType) -> String? Never! {
+    if ty.kind == .TraitObject(bounds) {
+        names :: loop bound in bounds -> jet_rust_emit_trait_name(&ctx, bound.id)
+        return Val("dyn {names.join(" + ")}")
+    }
+    None
+}
+
 fn jet_rust_emit_callable_param_type(ctx: &JetRustEmitContext, ty: MIRType, access: MIRAccess) -> String Never! {
+    if access == MIRAccess.Read {
+        if jet_rust_emit_read_trait_type(&ctx, ty) == .Val(borrowed) -> return "&{borrowed}"
+    }
     rendered :: jet_rust_emit_type(&ctx, ty)
     if access == {
         .Write -> "&mut {rendered}"
@@ -1280,9 +1291,7 @@ fn jet_rust_emit_type_derive_capability(ctx: &JetRustEmitContext, source: MIRTyp
         // Comparable over one), so it never derives `Ord`.
         .Float | .Float32 | .Measure(_) -> trait_name != "Ord"
         .Shared(_) | .Fn(_) | .SendFn(_, _, _) -> trait_name == "Clone"
-        // Only Clone, through the clone-box supertrait every trait used as a
-        // single-bound object gets (jet_rust_emit_trait_definition).
-        .TraitObject(bounds) -> trait_name == "Clone" && bounds.len() == 1 && ctx.dyn_clone_traits.get(jet_rust_emit_id_key(bounds[0].id.value)) != None
+        .TraitObject(_) -> false
         .List(inner) | .Option(inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> jet_rust_emit_type_derive_capability(&ctx, inner, trait_name, &visiting, bindings, generic_params)
         .Tagged(marker, inner) -> {
             if marker == (MIRTagMarker.Internal{internal_tag: MIRInternalTag.CppCallbackABI}) -> return trait_name != "JetShow" && trait_name != "JetDebug"
