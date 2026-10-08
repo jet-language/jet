@@ -1,6 +1,8 @@
 // Checked statement lowering to MIR CFG. Sema is the only component that
 // decides whether a source statement is legal; this file only projects facts.
 use jet_foundation.[
+    CanonicalPassSnapshot,
+    canonical_pass_debug_snapshot,
     AccessConvention,
     AutoVectorizationFacts,
     BinEndian,
@@ -133,6 +135,16 @@ fn jet_codegen_lower_block(builder: &JetCodegenBuilder, program: JetCodegenProgr
 }
 
 fn jet_codegen_lower_statements(builder: &JetCodegenBuilder, program: JetCodegenProgram, statements: [TStmt]) {
+    input := CanonicalPassSnapshot?{None}
+    if jet_codegen_journal_requested(program, "mir.lower-statements") -> input = Val(canonical_pass_debug_snapshot("tir", "mir.lower-statements", "{statements}"))
+    jet_codegen_lower_statements_inner(&builder, program, statements)
+    if input == .Val(snapshot) {
+        output :: canonical_pass_debug_snapshot("mir", "mir.lower-statements", "{builder.blocks}")
+        jet_codegen_journal_record(program, "mir.lower-statements", "crates/jet-codegen/src/Codegen/TIR/tir_to_mir_stmt.rs", snapshot, output)
+    }
+}
+
+fn jet_codegen_lower_statements_inner(builder: &JetCodegenBuilder, program: JetCodegenProgram, statements: [TStmt]) {
     index := 0
     loop index < statements.len() {
         if !jet_codegen_current_is_open(builder, program) -> return
