@@ -1992,13 +1992,13 @@ pub fn check_inferred_purity(
     }
 }
 
-pub fn e0743(trait_method: &str, span: Span) -> Diagnostic {
+pub fn e0743(trait_method: &str, span: Option<Span>) -> Diagnostic {
     Diagnostic::error(
         "E0743",
         format!("dynamic call `{trait_method}` has no effect bound"),
         "a trait value can select any implementation at runtime, so an enclosing effect ceiling needs the trait method's declared upper bound".to_string(),
         format!("declare an effect row on `{trait_method}`, such as `-[]>` for pure dispatch, or move this dynamic call outside the bounded function"),
-        Some(span),
+        span,
     )
 }
 
