@@ -1,0 +1,20 @@
+// core-conformance: core.jobs.checked_identity
+// Accepted by both semantic tiers: normalize the #Job name and String payload
+// before forwarding to the checked core.jobs.__enqueue source target.
+package {
+    name: "jobs-checked-identity"
+    authority: { holds: { allow: [DB, FS.Read, FS.Write, IO, Mem.Alloc, Time] } }
+}
+use core.jobs as jobs
+
+#Job(.Dev)
+fn accepted(payload: String) { print(payload) }
+
+fn run() {
+    queue := jobs.queue() ?? panic("queue authority/provider rejected")
+    first :: &queue.enqueue(accepted, "payload", key: "checked-identity") ?? panic("enqueue rejected checked job")
+    duplicate :: &queue.enqueue(accepted, "payload", key: "checked-identity") ?? panic("duplicate rejected checked job")
+    assert(first.job_type == "accepted")
+    assert(duplicate.duplicate)
+    assert(first.id == duplicate.id)
+}

@@ -1527,7 +1527,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 02ad0bc309892532287e4bed2a83dadbc8700b6c72c0aa2446e6eba7252361e0
+// Source SHA-256: 2b1f1355af10a79fb81a7be10f02a2cb16f8e4aa385ca28056155b51ef144e14
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -2852,26 +2852,11 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.db", "__queue_raw_rollback", "jet_db_queue_raw_rollback", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.db", "__queue_raw_execute", "jet_db_queue_raw_execute", true, &[false, true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).with_native_int_result(),
     CoreCallRecord::new("core.db", "__queue_raw_query", "jet_db_queue_raw_query", true, &[false, true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new( "core.jobs", "queue", "jet_job_queue_default", true, &[], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::source_owned("core.jobs", "queue", &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.jobs", "__publish_parts", "jet_job_queue_publish_parts", true, &[false, true, true, false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.jobs", "__sleep_ms", "jet_job_queue_sleep_ms", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::receiver_with_symbol( &["JobQueue"], "enqueue", "jet_job_queue_enqueue", true, &[true, true, true], ) .with_max_arity(4),
-    CoreCallRecord::receiver_with_symbol( &["JobQueue"], "delay", "jet_job_queue_delay", true, &[true, false, false, false], ),
-    CoreCallRecord::receiver_with_symbol( &["JobQueue"], "receipt", "jet_job_queue_receipt", true, &[true, true], ),
-    CoreCallRecord::receiver_with_symbol( &["JobQueue"], "inspect", "jet_job_queue_inspect", true, &[true, false, false], ),
-    CoreCallRecord::receiver_with_symbol( &["JobQueue"], "events", "jet_job_queue_events", true, &[true, true], ),
-    CoreCallRecord::receiver_with_symbol( &["JobQueue"], "claim", "jet_job_queue_claim", true, &[true, true, false], ),
-    CoreCallRecord::receiver_with_symbol( &["JobQueue"], "heartbeat", "jet_job_queue_heartbeat", true, &[true, true], ),
-    CoreCallRecord::receiver_with_symbol( &["JobQueue"], "acknowledge", "jet_job_queue_acknowledge", true, &[true, true, false], ),
-    CoreCallRecord::receiver_with_symbol( &["JobQueue"], "fail", "jet_job_queue_fail", true, &[true, true, false], ),
-    CoreCallRecord::receiver_with_symbol( &["JobQueue"], "cancel", "jet_job_queue_cancel", true, &[true, true, true], ) .with_max_arity(4),
-    CoreCallRecord::receiver_with_symbol( &["JobQueue"], "dead_letter", "jet_job_queue_dead_letter", true, &[true, true, true], ) .with_max_arity(4),
-    CoreCallRecord::receiver_with_symbol( &["JobQueue"], "recover_expired", "jet_job_queue_recover_expired", true, &[true], ),
-    CoreCallRecord::receiver_with_symbol( &["JobQueue"], "status", "jet_job_queue_status", true, &[true], ),
-    CoreCallRecord::receiver_with_symbol( &["JobQueue"], "pause", "jet_job_queue_pause", true, &[true], ),
-    CoreCallRecord::receiver_with_symbol( &["JobQueue"], "resume", "jet_job_queue_resume", true, &[true], ),
-    CoreCallRecord::receiver_with_symbol( &["JobQueue"], "wait", "jet_job_queue_wait", true, &[true, false], ),
-    CoreCallRecord::receiver_with_symbol( &["JobQueue"], "prune", "jet_job_queue_prune", true, &[true], ) .with_native_int_result(),
+    CoreCallRecord::receiver_with_symbol( &["JobQueue"], "enqueue", "", true, &[true, true, true], ) .with_max_arity(4).with_source_owned().with_source_target("core.jobs.__enqueue"),
+    CoreCallRecord::receiver_with_symbol( &["JobQueue"], "delay", "", true, &[true, false, false, false], ).with_source_owned().with_source_target("core.jobs.__delay"),
     CoreCallRecord::new( "core.db", "policy_audit", "jet_db_policy_audit", true, &[true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.db", "decode", "jet_db_decode", true, &[true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.db", "transaction", "jet_db_scope_transaction", false, &[true, true, true], ) .without_direct_aot() .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_native_int_result(),

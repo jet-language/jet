@@ -4781,50 +4781,19 @@ impl<'a> Checker<'a> {
         // service method. Keep the checked #Job identity and payload type at
         // this boundary; the provider/codegen layers only marshal the result.
         if let Type::Named(queue_type) = &recv_ty {
-            if queue_type == "JobQueue" {
-                let Some(method_ret) = job_queue_method_return(&recv_ty, method, args.len()) else {
+            if (queue_type == "JobQueue"
+                || (jet_foundation::CoreModuleExports::core_source_owns_type(queue_type)
+                    && queue_type.rsplit("::").next() == Some("JobQueue")))
+                && matches!(method, "enqueue" | "delay")
+            {
+                let Some(method_ret) = job_queue_method_return(&Type::Named("JobQueue".to_string()), method, args.len()) else {
                     // Unknown methods continue to ordinary receiver lookup so
                     // user diagnostics and suggestions remain intact.
                     return None;
                 };
-                *recv_type_out = Some(queue_type.clone());
-                let mutating = matches!(
-                    method,
-                    "enqueue"
-                        | "delay"
-                        | "claim"
-                        | "heartbeat"
-                        | "acknowledge"
-                        | "fail"
-                        | "cancel"
-                        | "dead_letter"
-                        | "recover_expired"
-                        | "pause"
-                        | "resume"
-                        | "wait"
-                        | "prune"
-                );
-                self.record_call_receiver_access(
-                    receiver,
-                    if mutating {
-                        AccessConvention::Write
-                    } else {
-                        AccessConvention::Read
-                    },
-                    span,
-                );
-                let expected = match method {
-                    "enqueue" => 2,
-                    "delay" => 3,
-                    "receipt" | "events" => 1,
-                    "inspect" | "claim" => 2,
-                    "heartbeat" => 1,
-                    "acknowledge" | "fail" => 2,
-                    "cancel" | "dead_letter" => 2,
-                    "recover_expired" | "status" | "pause" | "resume" | "prune" => 0,
-                    "wait" => 1,
-                    _ => unreachable!(),
-                };
+                *recv_type_out = Some("JobQueue".to_string());
+                self.record_call_receiver_access(receiver, AccessConvention::Write, span);
+                let expected = if method == "enqueue" { 2 } else { 3 };
                 let Some(ret) = method_ret else {
                     self.diags
                         .push(wrong_core_arity(method, expected, args.len(), span));
@@ -4846,14 +4815,6 @@ impl<'a> Checker<'a> {
                         "JobQueue.delay",
                         args,
                         &[(2, "for")],
-                        span,
-                        &mut self.diags,
-                    );
-                } else if matches!(method, "cancel" | "dead_letter") && args.len() == 3 {
-                    require_exact_labels(
-                        &format!("JobQueue.{method}"),
-                        args,
-                        &[(2, "lease_token")],
                         span,
                         &mut self.diags,
                     );
@@ -4945,101 +4906,9 @@ impl<'a> Checker<'a> {
                             self.expect_core_arg("JobQueue.delay", 2, &Type::Named("Duration".to_string()), arg);
                         }
                     }
-                    "receipt" | "events" => {
-                        if let Some(arg) = args.get_mut(0) {
-                            self.expect_core_arg(method, 0, &Type::String, arg);
-                        }
-                    }
-                    "inspect" => {
-                        if let Some(arg) = args.get_mut(0) {
-                            self.expect_core_arg(method, 0, &Type::Int, arg);
-                        }
-                        if let Some(arg) = args.get_mut(1) {
-                            self.expect_core_arg(method, 1, &Type::Bool, arg);
-                        }
-                    }
-                    "claim" => {
-                        if let Some(arg) = args.get_mut(0) {
-                            self.expect_core_arg(method, 0, &Type::String, arg);
-                        }
-                        if let Some(arg) = args.get_mut(1) {
-                            self.expect_core_arg(method, 1, &Type::Int, arg);
-                        }
-                    }
-                    "heartbeat" => {
-                        if let Some(arg) = args.get_mut(0) {
-                            self.expect_core_arg(
-                                method,
-                                0,
-                                &Type::Named("JobQueueClaim".to_string()),
-                                arg,
-                            );
-                        }
-                    }
-                    "acknowledge" => {
-                        if let Some(arg) = args.get_mut(0) {
-                            self.expect_core_arg(
-                                method,
-                                0,
-                                &Type::Named("JobQueueClaim".to_string()),
-                                arg,
-                            );
-                        }
-                        if let Some(arg) = args.get_mut(1) {
-                            self.expect_core_arg(
-                                method,
-                                1,
-                                &Type::Named("JobResult".to_string()),
-                                arg,
-                            );
-                        }
-                    }
-                    "fail" => {
-                        if let Some(arg) = args.get_mut(0) {
-                            self.expect_core_arg(
-                                method,
-                                0,
-                                &Type::Named("JobQueueClaim".to_string()),
-                                arg,
-                            );
-                        }
-                        if let Some(arg) = args.get_mut(1) {
-                            self.expect_core_arg(
-                                method,
-                                1,
-                                &Type::Named("JobError".to_string()),
-                                arg,
-                            );
-                        }
-                    }
-                    "cancel" | "dead_letter" => {
-                        if let Some(arg) = args.get_mut(0) {
-                            self.expect_core_arg(method, 0, &Type::String, arg);
-                        }
-                        if let Some(arg) = args.get_mut(1) {
-                            self.expect_core_arg(method, 1, &Type::String, arg);
-                        }
-                        if let Some(arg) = args.get_mut(2) {
-                            self.expect_core_arg(
-                                method,
-                                2,
-                                &Type::Option(Box::new(Type::String)),
-                                arg,
-                            );
-                        }
-                    }
-                    "wait" => {
-                        if let Some(arg) = args.get_mut(0) {
-                            self.expect_core_arg(
-                                method,
-                                0,
-                                &Type::Named("Duration".to_string()),
-                                arg,
-                            );
-                        }
-                    }
-                    _ => {}
+                    _ => unreachable!("only enqueue/delay retain the checked #Job contract"),
                 }
+                let ret = self.resolve_type(ret);
                 *resolved_ret_out = Some(ret.clone());
                 return Some(ret);
             }

@@ -2663,6 +2663,9 @@ fn sema_expr_try_method_special_routes(receiver: Expr, receiver_value: TExpr, me
     compiler_value := sema_call_try_compiler_value_method(receiver, receiver_value, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     if compiler_value.handled -> return compiler_value
 
+    queue := sema_call_try_job_queue_method(receiver, receiver_value, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if queue.handled -> return queue
+
     tree := sema_check_service_tree_method(method, receiver, receiver_value, args, expected, span, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     if tree == .Val(check) {
         if check.handled -> return check
