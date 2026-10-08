@@ -285,6 +285,11 @@ Sema publishes the checked initializer identity and source-selected lifetime
 for Core-only `core.mem.__*_shared(init)` operations. Lowering creates one typed
 MIR `Global` site per initializer, never a hardcoded initializer-name table or a
 per-caller cache.
+Monomorphization retains the site's checked identity and lifetime unchanged;
+the site's declared type is substituted by the ordinary constant-definition
+path. A site is not a frozen payload: nested constant serialization refuses it
+rather than materializing a second publication owner outside its getter.
+
 
 All native site cells belong to one pinned Core image. Dynamic images import
 its getters and never own or register cells. Before publishing getters, the

@@ -252,6 +252,7 @@ fn lower_static_tree(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRT
             return Val(lower_static_runtime(&m, decimal, "jet_rt_int_from_static"))
         }
         .Bytes(_) -> lower_fail(&m, &f, "Bytes constants are not lowered at O0 yet")
+        .SharedSite(_) -> lower_fail(&m, &f, "Shared publication sites must be read through their checked getter, not frozen as constant payloads")
         .Map(_) -> lower_fail(&m, &f, "Map constants are not lowered at O0 yet")
     }
     None
@@ -450,7 +451,8 @@ fn lower_shared_site_helper(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> 
     f.name = ~f.builder.name
     loop exported in m.shared_sites {
         if exported.initializer == site.initializer || exported.symbol == f.builder.name {
-            lower_fail(&m, &f, "duplicate or colliding Core publication getter {f.builder.name}")
+            message :: "duplicate or colliding Core publication getter {f.builder.name}"
+            lower_fail(&m, &f, message)
             return lir_builder_finish(f.builder)
         }
     }

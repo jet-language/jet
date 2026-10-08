@@ -6,7 +6,7 @@ use jet_foundation.[
     MIRStringFormat, MIRStringPart, MIRStringPartKind, MIRTerminator, MIRType, MIRTypeDef, MIRTypeDefKind, MIRValueID,
     MIRVariant, MIRVariantPayload, MIRVisibility,
     mir_field_id, mir_function_id, mir_owned_ownership, mir_type_id,
-    MIRSharedSite, MIRSharedLifetime, MIRTypeKind, MIRPreludeFamily, MIRPreludeABI,
+    MIRSharedSite, MIRSharedLifetime, MIRTypeKind, MIRPreludeFamily, MIRPreludeABI, MIRSemanticOp, MIRPreludeTypeArg,
     mir_shared_site_getter_symbol, mir_type_from_kind,
 ]
 use jet_backend.[
@@ -246,10 +246,10 @@ fn fx_shared_site_program(lifetime: MIRSharedLifetime) -> MIRProgram Never! {
     ty :: mir_type_from_kind(MIRTypeKind.Shared{inner: fx_string()})
     init := fx_builder()
     frozen :: fx_owned(&init, fx_string(), MIROperation.Global{name: "fixture.shared_text"})
-    owner :: fx_owned(&init, ty, MIROperation.StaticPreludeCall{
+    owner :: fx_owned(&init, ty, MIROperation.Semantic{operation: MIRSemanticOp.StaticPreludeCall{
         call: fx_prelude_id("core.mem", "shared_new"), args: [MIRCallArg]{fx_arg(frozen, MIRAccess.Move)},
-        owner_type_args: [], type_args: [],
-    })
+        owner_type_args: [MIRPreludeTypeArg]{}, type_args: [MIRType]{},
+    }})
     fx_block(&init, 0, MIRTerminator.Return{value: Val(owner)})
     initializer :: fx_function("init_shared_text", init, ty)
     key :: "shared-site:{initializer.id.value}"

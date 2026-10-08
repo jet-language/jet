@@ -108,8 +108,6 @@ pub struct LIRLowering {
     // Every requested callable's concrete native entry; empty on any issue.
     pub callables: [U64:LIRFunctionID]
     pub finalizer: LIRFunctionID?
-    // Every requested callable's concrete native entry; empty on any issue.
-    pub callables: [U64:LIRFunctionID]
     // Typed compiler boundaries write canonical storage supplied by the child.
     // The matching release borrows that storage and drops its initialized value.
     pub value_callables: [U64:LIRFunctionID]{[U64:LIRFunctionID]{}}
@@ -504,7 +502,8 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
         // Getters are published only after the host runs this noarg Unit
         // startup. Emit it last so helper bodies have discovered every fixup.
         startup :: lower_helper_id(&m, "core.shared.init", mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref("Unit"), args: [MIRType]{}}))
-        &functions.push(lower_helper_function(program, &m, m.glue[startup.value - m.glue_base]))
+        startup_glue :: ~m.glue[startup.value - m.glue_base]
+        &functions.push(lower_helper_function(program, &m, startup_glue))
         lowered_entry = Val(startup)
     }
     closures :: if !wrap_entry && m.issues.len() == 0 -> lower_closure_value_layouts(program, prepared, m) else -> [LIRClosureValueLayout]{}

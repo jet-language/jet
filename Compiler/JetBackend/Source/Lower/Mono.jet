@@ -460,6 +460,7 @@ fn lower_subst_types(types: [MIRType], bindings: LowerBindings) -> [MIRType] Nev
 fn lower_subst_constant(value: MIRConstant, bindings: LowerBindings) -> MIRConstant Never! {
     if value == {
         .Int(_, _, _) | .Float(_, _, _) | .Bool(_) | .Char(_) | .String(_) | .Bytes(_) | .Unit | .BigInt(_) -> value
+        .SharedSite(_) -> value
         .List(values) -> {
             mapped :: loop item in values -> lower_subst_constant(item, bindings)
             MIRConstant.List{values: mapped}
