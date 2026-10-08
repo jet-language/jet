@@ -4,6 +4,9 @@
 // node Tools/agent/test-port.mjs --census OUT.tsv [--inventory TESTS.tsv]
 // node Tools/agent/test-port.mjs --emit tests/ownership.rs::NAME --bless-from JET [--dry-run]
 // --emit FILE::* checks every function, keeps going, and reports hand-port refusals.
+// --attempt FILE.tsv selects human-PORT overrides: one FILE::FN per first column
+// (optional "function" header/comments). With --emit, selection is its intersection.
+// Only census retirement is bypassed; original assertions and rule G still apply.
 // Unsupported syntax/API facts and failed original assertions are HAND-PORT,
 // not permission to weaken a test. RETIRED rows name Rust-only subjects.
 // --report FILE records each decision; --exclusions FILE lists raw #[test]
@@ -12,6 +15,7 @@
 // as retired. Runtime receipts use the ref artifact; all-tier origins must agree.
 // --timeout SEC defaults to600s. Reference process failures are ERROR, not
 // HAND-PORT; every invocation records elapsed_ms and any ERROR makes exit nonzero.
+// Exit-101 receipts retain child stderr; reasons include its first20 lines.
 // Until M3/W2, plain UI blessing mirrors the kit's public check/render rules;
 // W2 replaces this mirror with testkit ui --bless. No new fixture directives.
 import { readFileSync, readdirSync, existsSync, realpathSync, mkdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
@@ -486,9 +490,12 @@ function invoke(binary, args, cwd, timeout, stdin, receipts) {
   const started = performance.now();
   const run = spawnSync(binary, args, { cwd, encoding: 'utf8', timeout, input: stdin, maxBuffer: 16 * 1024 * 1024, env });
   const elapsed_ms = Math.round(performance.now() - started);
-  receipts.push({ binary, args, cwd, elapsed_ms, code: run.status, signal: run.signal, error: run.error?.message ?? null });
+  const receipt = { binary, args, cwd, elapsed_ms, code: run.status, signal: run.signal, error: run.error?.message ?? null };
+  if (run.status === 101) receipt.stderr = run.stderr ?? '';
+  receipts.push(receipt);
   if (run.error || run.signal || run.status === null || run.status === 101) {
-    throw Object.assign(new Error(`reference invocation failed: ${run.error?.message ?? run.signal ?? run.status}`), { status: 'ERROR' });
+    const excerpt = run.status === 101 ? (run.stderr ?? '').split(/\r?\n/u).slice(0, 20).join('\n').trimEnd() : '';
+    throw Object.assign(new Error(`reference invocation failed: ${run.error?.message ?? run.signal ?? run.status}${excerpt ? `\n${excerpt}` : ''}`), { status: 'ERROR' });
   }
   return { code: run.status, stdout: run.stdout, stderr: run.stderr, elapsed_ms };
 }
@@ -839,7 +846,7 @@ export function makeReference(binary, root, scratch, timeout = 600000) {
 // partial cases when a later source/assertion fails. Existing cases are refused.
 export async function emitFunction(fn, options) {
   const root = options.root ?? ROOT;
-  if (classify(fn).disposition === 'retire-with-Rust') refuse('Rust-only function must be retired, not emitted');
+  if (classify(fn).disposition === 'retire-with-Rust' && !options.attempted) refuse('Rust-only function must be retired, not emitted');
   const checked = await checkOriginal(fn, options.reference, root);
   const suite = fn.file.replace(/^tests\//u, '').replace(/\.rs$/u, '').replaceAll('/', '_');
   const files = [];
@@ -881,7 +888,7 @@ export async function main(argv) {
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--dry-run') options.dryRun = true;
-    else if (['--root', '--inventory', '--census', '--emit', '--bless-from', '--scratch', '--report', '--exclusions', '--timeout'].includes(arg)) {
+    else if (['--root', '--inventory', '--census', '--emit', '--attempt', '--bless-from', '--scratch', '--report', '--exclusions', '--timeout'].includes(arg)) {
       if (!argv[i + 1]) refuse(`missing value for ${arg}`);
       options[arg.slice(2)] = argv[++i];
     } else refuse(`unknown option ${arg}`);
@@ -896,13 +903,23 @@ export async function main(argv) {
     parts: census.functions.filter((fn) => dirname(fn.file) !== 'tests').length,
     topLevel: census.functions.filter((fn) => dirname(fn.file) === 'tests').length, dispositions: {} };
   for (const fn of census.functions) { const { disposition } = classify(fn, census.helpers); counts.dispositions[disposition] = (counts.dispositions[disposition] ?? 0) + 1; }
-  if (!options.emit) { console.log(JSON.stringify(counts)); return 0; }
-  if (!options['bless-from']) refuse('--emit requires --bless-from JET');
-  const split = options.emit.lastIndexOf('::');
-  if (split < 0) refuse('--emit expects FILE::FN (or FILE::*)');
-  const file = options.emit.slice(0, split), name = options.emit.slice(split + 2);
-  const selected = census.functions.filter((fn) => fn.file === file && (name === '*' || name === fn.name));
-  if (!selected.length) refuse(`function not found: ${options.emit}`);
+  if (!options.emit && !options.attempt) { console.log(JSON.stringify(counts)); return 0; }
+  if (!options['bless-from']) refuse('--emit/--attempt requires --bless-from JET');
+  const attempts = new Set(options.attempt ? readFileSync(options.attempt, 'utf8').split(/\r?\n/u)
+    .map((line) => line.split('\t')[0].trim()).filter((id) => id && id !== 'function' && !id.startsWith('#')) : []);
+  if (options.attempt) {
+    const known = new Set(census.functions.map((fn) => `${fn.file}::${fn.name}`));
+    for (const id of attempts) if (!known.has(id)) refuse(`attempt function not found: ${id}`);
+  }
+  let file, name;
+  if (options.emit) {
+    const split = options.emit.lastIndexOf('::');
+    if (split < 0) refuse('--emit expects FILE::FN (or FILE::*)');
+    file = options.emit.slice(0, split); name = options.emit.slice(split + 2);
+  }
+  const selected = census.functions.filter((fn) => (!options.emit || fn.file === file && (name === '*' || name === fn.name))
+    && (!options.attempt || attempts.has(`${fn.file}::${fn.name}`)));
+  if (!selected.length) refuse(`function not found: ${options.emit ?? options.attempt}`);
   const scratchRoot = resolve(options.scratch ?? process.env.JET_SCRATCH_ROOT ?? join(process.env.HOME, '.cache/jet-dev/scratch/TestW4'));
   mkdirSync(scratchRoot, { recursive: true });
   const scratch = mkdtempSync(join(scratchRoot, 'test-port-'));
@@ -914,9 +931,10 @@ export async function main(argv) {
       const invocationStart = reference.invocations.length;
       let result;
       const retiredAssertions = retireRustAssertions(fn).retired.length;
-      if (classified.disposition === 'retire-with-Rust') result = { status: 'RETIRED', function: `${fn.file}::${fn.name}`, reason: classified.target };
+      const attempted = attempts.has(`${fn.file}::${fn.name}`);
+      if (classified.disposition === 'retire-with-Rust' && !attempted) result = { status: 'RETIRED', function: `${fn.file}::${fn.name}`, reason: classified.target };
       else {
-        try { result = await emitFunction(fn, { ...options, reference }); }
+        try { result = await emitFunction(fn, { ...options, reference, attempted }); }
         catch (error) {
           const primaryEdit = error.status !== 'ERROR' && /\.(?:edit|safety|applicability)\b/u.test(fn.body);
           const reason = primaryEdit ? `asserts primary Diagnostic.edit / Diagnostic.safety; jet.report/v3 exposes only all_edits (${error.message})` : error.message;
@@ -924,6 +942,7 @@ export async function main(argv) {
         }
       }
       result.disposition = classified.disposition; result.target = classified.target;
+      if (attempted) result.attempted = true;
       result.retiredAssertions = retiredAssertions;
       result.referenceInvocations = reference.invocations.slice(invocationStart);
       result.elapsed_ms = result.referenceInvocations.reduce((sum, invocation) => sum + invocation.elapsed_ms, 0);

@@ -359,3 +359,67 @@ console.log("progress display, not an artifact receipt");
     return true;
   });
 });
+
+test('exit-101 reference retains panic stderr in the reason and JSON receipt', async (t) => {
+  const root = fixture(t), binary = join(root, 'panicking-reference'), reportPath = join(root, 'report.json');
+  const panic = "thread 'main' panicked at compiler.rs:17: ICE witness";
+  writeFileSync(join(root, 'tests/sample.rs'), '#[test] fn panics() { jet::compile("fn run() {}").expect("ok"); }');
+  writeFileSync(binary, `#!/usr/bin/env node\nprocess.stderr.write(${JSON.stringify(`${panic}\nextra context\n`)}); process.exit(101);\n`, { mode: 0o755 });
+  const code = await main(['--root', root, '--scratch', root, '--emit', 'tests/sample.rs::*', '--bless-from', binary, '--dry-run', '--report', reportPath]);
+  const report = JSON.parse(readFileSync(reportPath, 'utf8')), row = report.results[0];
+  assert.equal(code, 2);
+  assert.equal(row.status, 'ERROR');
+  assert.ok(row.reason.includes(panic));
+  assert.equal(row.referenceInvocations[0].code, 101);
+  assert.equal(row.referenceInvocations[0].stderr, `${panic}\nextra context\n`);
+  assert.equal(existsSync(join(root, 'tests/ui')), false);
+});
+
+test('human PORT attempt bypasses only census retirement, never a failed assertion', async (t) => {
+  const root = fixture(t), binary = join(root, 'reference'), reportPath = join(root, 'report.json'), attempt = join(root, 'attempt.tsv');
+  const source = `#[test] fn accepts() {
+    let out = jet::compile("fn run() {}").expect("ok");
+    assert!(out.rust.contains("fn main"));
+  }
+  #[test] fn fails() {
+    jet::compile("fn run() {}").expect("ok");
+    assert!(false);
+  }
+  #[test] fn untouched() { assert!(true); }`;
+  writeFileSync(join(root, 'tests/selfhost_parser.rs'), source);
+  writeFileSync(attempt, '# Human PORT rulings\nfunction\ntests/selfhost_parser.rs::accepts\ntests/selfhost_parser.rs::fails\n');
+  writeFileSync(binary, '#!/usr/bin/env node\nif(process.argv.includes("--json")) console.log(JSON.stringify({status:"passed",contract:"jet.check/v1",schema_version:1,provenance:{diagnostics:0},rows:[]}));\n', { mode: 0o755 });
+  const original = functionsIn(source, 'tests/selfhost_parser.rs');
+  assert.equal(classify(original[0]).disposition, 'retire-with-Rust');
+  assert.equal(classify(original[1]).disposition, 'retire-with-Rust');
+  const code = await main(['--root', root, '--scratch', root, '--attempt', attempt, '--bless-from', binary, '--report', reportPath]);
+  const report = JSON.parse(readFileSync(reportPath, 'utf8'));
+  assert.equal(code, 2);
+  assert.equal(report.summary.selected, 2);
+  assert.equal(report.summary.converted, 1);
+  assert.equal(report.summary.handPort, 1);
+  assert.equal(report.summary.retired, 0);
+  const [accepted, failed] = report.results;
+  assert.equal(accepted.status, 'CONVERTED');
+  assert.equal(accepted.attempted, true);
+  assert.equal(accepted.retiredAssertions, 1);
+  assert.ok(existsSync(join(root, 'tests/ui/selfhost_parser/accepts.jet')));
+  assert.equal(failed.status, 'HAND-PORT');
+  assert.equal(failed.attempted, true);
+  assert.match(failed.reason, /original assert! not satisfied/u);
+  assert.equal(existsSync(join(root, 'tests/ui/selfhost_parser/fails.jet')), false);
+});
+
+test('attempt and emit selections intersect and unknown human rows are refused', async (t) => {
+  const root = fixture(t), attempt = join(root, 'attempt.tsv'), reportPath = join(root, 'report.json');
+  writeFileSync(join(root, 'tests/sample.rs'), '#[test] fn first() { assert!(true); }\n#[test] fn second() { assert!(false); }');
+  writeFileSync(attempt, 'tests/sample.rs::first\ntests/sample.rs::second\n');
+  const code = await main(['--root', root, '--scratch', root, '--attempt', attempt, '--emit', 'tests/sample.rs::second', '--bless-from', '/unused', '--dry-run', '--report', reportPath]);
+  const report = JSON.parse(readFileSync(reportPath, 'utf8'));
+  assert.equal(code, 2);
+  assert.equal(report.summary.selected, 1);
+  assert.equal(report.results[0].function, 'tests/sample.rs::second');
+  assert.equal(report.results[0].status, 'HAND-PORT');
+  writeFileSync(attempt, 'tests/sample.rs::missing\n');
+  await assert.rejects(main(['--root', root, '--attempt', attempt, '--bless-from', '/unused']), /attempt function not found/u);
+});
