@@ -86,7 +86,7 @@ fn jet_codegen_retained_cell_index(builder: JetCodegenBuilder, place: MIRPlaceID
 fn jet_codegen_retained_capture(builder: &JetCodegenBuilder, program: JetCodegenProgram, ty: MIRType, name: String, access: MIRAccess) -> JetCodegenRetainedCapture Never! {
     slot :: builder.capture_params.len()
     borrowed :: mir_ownership_from_access(access)
-    &builder.capture_params.push(MIRCaptureParam{slot: slot, name: name, span: builder.current_span, ty: ty, access: access, ownership: borrowed})
+    &builder.capture_params.push(MIRCaptureParam{slot: slot, name: name, span: builder.current_span, ty: ty, access: access, ownership: borrowed, place_only: true})
     resume :: builder.current
     builder.current = builder.entry
     value :: jet_codegen_emit_mir_type(&builder, program, builder.current_span, ty, borrowed, MIROperation.Capture{slot: slot})
