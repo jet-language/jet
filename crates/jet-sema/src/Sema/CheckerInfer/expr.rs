@@ -3015,7 +3015,7 @@ impl<'a> Checker<'a> {
             Expr::Call(call) => call.name.clone(),
             _ => return,
         };
-        if self.funcs.contains_key(&name) && !self.core_item_imports.contains_key(&name) {
+        if self.funcs.contains_key(&name) {
             return;
         }
         let Some(item) = self.core_item_imports.get(&name).cloned() else {
