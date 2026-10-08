@@ -1,0 +1,23 @@
+
+struct Sprite {
+    text: [U8]
+    width: Int
+
+    fn row_width(self, row: Int) -> Int { self.width * row }
+}
+
+struct Frame {
+    sprite: Sprite
+}
+
+fn frame_width(frame: Frame) -> Int { frame.sprite.width }
+
+fn run() {
+    sprite :: Sprite{text: [U8{1}, U8{2}, U8{3}], width: 4}
+    total := 0
+    loop row in 0..3 -> total += sprite.row_width(row)
+    print(total)
+    local_width :: sprite.width
+    frame :: Frame{sprite: sprite}
+    print(frame_width(frame) + local_width)
+}
