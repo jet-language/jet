@@ -82,6 +82,9 @@ owning Jet source function, not a separate Core dispatcher implementation. Host
 operations beneath that source may remain registered raw leaves while their
 runtime layer is ported; this does not create a second implementation of the
 public declaration's policy.
+Private source-part registration explicitly records built-in receiver
+implementation ownership in `impl_types`. An empty list does not suppress the
+part's own nominal declarations.
 Directory creation shares the existing `jet_std_fs_create_dir_all_raw` host
 operation; its callers keep their own fault preflight and error resource.
 
