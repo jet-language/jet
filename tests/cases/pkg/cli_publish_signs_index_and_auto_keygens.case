@@ -1,0 +1,59 @@
+# PORT tests/pkg.rs::cli_publish_signs_index_and_auto_keygens; original helpers172-293 preserved.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+fixture: cli_publish_signs_index_and_auto_keygens.fixture
+requires: tool:git
+mkdir: store
+step: git init --bare {work}/registry.git
+exit: any # Original helper status unasserted.
+step: git init -b main
+cwd: {work}/proj
+exit: any # Original helper status unasserted.
+step: git config user.email test@jet.test
+cwd: {work}/proj
+exit: any # Original helper status unasserted.
+step: git config user.name "Jet Test"
+cwd: {work}/proj
+exit: any # Original helper status unasserted.
+step: git add .
+cwd: {work}/proj
+exit: any # Original helper status unasserted.
+step: git commit -m init
+cwd: {work}/proj
+exit: any # Original helper status unasserted.
+step: git --git-dir {work}/registry.git symbolic-ref HEAD refs/heads/main
+exit: any # Original helper status unasserted.
+step: git clone file://{work}/registry.git {work}/review
+exit: any # Original helper status unasserted.
+mkdir: review/reviews/signedkit
+copy: reviews/signedkit/1.0.0.review review/reviews/signedkit/1.0.0.review
+step: git config user.email test@jet.test
+cwd: {work}/review
+exit: any # Original helper status unasserted.
+step: git config user.name "Jet Test"
+cwd: {work}/review
+exit: any # Original helper status unasserted.
+step: git add .
+cwd: {work}/review
+exit: any # Original helper status unasserted.
+step: git commit -m "approve core package"
+cwd: {work}/review
+exit: any # Original helper status unasserted.
+step: git push origin HEAD:main
+cwd: {work}/review
+exit: any # Original helper status unasserted.
+remove: review
+step: jet registry publish
+cwd: {work}/proj
+env: JET_REGISTRY_URL=file://{work}/registry.git
+env: JET_REGISTRY_CACHE_DIR={work}/cache
+env: JET_PACKAGE_STORE_DIR={work}/store
+env: JET_KEYS_DIR={work}/keys
+exit: 0
+step: git --git-dir {work}/registry.git show HEAD:index/signedkit/signedkit.jsonl
+exit: 0
+stdout: ~ "\"public_key\":\"" # Original contains predicate.
+stdout: ~ "\"signature\":\"" # Original contains predicate.
+stdout: !~ "\"public_key\":\"\"" # Original negative predicate.
+stdout: !~ "\"signature\":\"\"" # Original negative predicate.
+file: keys/jet.ed25519 is-file
+file: keys/jet.ed25519.pub is-file

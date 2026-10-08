@@ -1,0 +1,102 @@
+# PORT tests/pkg.rs::cli_concurrent_publish_keeps_one_immutable_version; original helpers172-293 preserved.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+fixture: cli_concurrent_publish_keeps_one_immutable_version.fixture
+requires: tool:git
+step: git init --bare {work}/registry.git
+exit: any # Original helper status unasserted.
+step: git init -b main
+cwd: {work}/left
+exit: any # Original helper status unasserted.
+step: git config user.email test@jet.test
+cwd: {work}/left
+exit: any # Original helper status unasserted.
+step: git config user.name "Jet Test"
+cwd: {work}/left
+exit: any # Original helper status unasserted.
+step: git add .
+cwd: {work}/left
+exit: any # Original helper status unasserted.
+step: git commit -m init
+cwd: {work}/left
+exit: any # Original helper status unasserted.
+step: git init -b main
+cwd: {work}/right
+exit: any # Original helper status unasserted.
+step: git config user.email test@jet.test
+cwd: {work}/right
+exit: any # Original helper status unasserted.
+step: git config user.name "Jet Test"
+cwd: {work}/right
+exit: any # Original helper status unasserted.
+step: git add .
+cwd: {work}/right
+exit: any # Original helper status unasserted.
+step: git commit -m init
+cwd: {work}/right
+exit: any # Original helper status unasserted.
+copy: different.txt right/run.jet
+step: git add .
+cwd: {work}/right
+exit: any # Original helper status unasserted.
+step: git commit -m "different source"
+cwd: {work}/right
+exit: any # Original helper status unasserted.
+step: git --git-dir {work}/registry.git symbolic-ref HEAD refs/heads/main
+exit: any # Original helper status unasserted.
+step: git clone file://{work}/registry.git {work}/review
+exit: any # Original helper status unasserted.
+mkdir: review/reviews/racekit
+copy: reviews/racekit/1.0.0.review review/reviews/racekit/1.0.0.review
+step: git config user.email test@jet.test
+cwd: {work}/review
+exit: any # Original helper status unasserted.
+step: git config user.name "Jet Test"
+cwd: {work}/review
+exit: any # Original helper status unasserted.
+step: git add .
+cwd: {work}/review
+exit: any # Original helper status unasserted.
+step: git commit -m "approve core package"
+cwd: {work}/review
+exit: any # Original helper status unasserted.
+step: git push origin HEAD:main
+cwd: {work}/review
+exit: any # Original helper status unasserted.
+remove: review
+step: jet registry keygen
+cwd: {work}/left
+env: JET_KEYS_DIR={work}/keys
+exit: 0
+copy: wins-empty.txt wins.txt
+spawn left: jet registry publish
+cwd: {work}/left
+env: JET_REGISTRY_URL=file://{work}/registry.git
+env: JET_REGISTRY_CACHE_DIR={work}/cache
+env: JET_PACKAGE_STORE_DIR={work}/left-store
+env: JET_KEYS_DIR={work}/keys
+spawn right: jet registry publish
+cwd: {work}/right
+env: JET_REGISTRY_URL=file://{work}/registry.git
+env: JET_REGISTRY_CACHE_DIR={work}/cache
+env: JET_PACKAGE_STORE_DIR={work}/right-store
+env: JET_KEYS_DIR={work}/keys
+wait: left
+exit: any # Original asserts exactly one success collectively below.
+when exit == 0: append: wins.txt "left\n"
+when exit != 0: stderr: ~ "E1234" # Original loser immutable-version diagnostic.
+wait: right
+exit: any # Original asserts exactly one success collectively below.
+when exit == 0: append: wins.txt "right\n"
+when exit != 0: stderr: ~ "E1234" # Original loser immutable-version diagnostic.
+file: wins.txt lines = 1
+step: git --git-dir {work}/registry.git show HEAD:index/racekit/racekit.jsonl
+exit: 0
+stdout: count-lines ~ "\"version\":\"1.0.0\"" = 1
+step: git --git-dir {work}/registry.git cat-file -e HEAD:artifacts/racekit/1.0.0/package.jet
+exit: 0
+step: git --git-dir {work}/registry.git cat-file -e HEAD:metadata/racekit.json
+exit: 0
+step: git --git-dir {work}/registry.git cat-file -e HEAD:transparency/log
+exit: 0
+step: git --git-dir {work}/registry.git cat-file -e HEAD:transparency/checkpoint
+exit: 0
