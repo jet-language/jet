@@ -1,0 +1,103 @@
+// SecretsCrypto.rs:1244-1354. Linux x86-64 raw descriptor policy; no Core fd
+// carrier. Paths borrow native raw-byte Text spans, never Rust Path/File objects.
+// os_syscall_i64 via the audited trap_syscall leaf preserves negative errno.
+VAULT_O_CLOEXEC :: prep { I64{524288} }
+VAULT_O_NOFOLLOW :: prep { I64{131072} }
+VAULT_O_DIRECTORY :: prep { I64{65536} }
+VAULT_RESOLVE :: prep { I64{12} }
+VAULT_STAT_BYTES :: prep { I64{144} }
+VAULT_STAT_MODE :: prep { I64{24} }
+VAULT_STAT_UID :: prep { I64{28} }
+// Only the temporary NUL shell is allocated; embedded NUL is invalid exactly
+// as CString::new. No normalization or UTF-8 conversion of filesystem bytes.
+fn vault_linux_path(path: I64) -> I64 {
+    length :: rt_text_len(path)
+    if (length < I64{0} || length == I64{9223372036854775807}) -> return I64{0}
+    data :: rt_text_data(path)
+    at := I64{0}
+    loop at < length {
+        if (rt_text_byte(data + at) == I64{0}) -> return I64{0}
+        at += I64{1}
+    }
+    result :: jet_rt_alloc(length + I64{1}, I64{1})
+    rt_text_bytes_copy(result, data, length)
+    rt_text_put(result + length, I64{0})
+    result
+}
+fn vault_linux_close(fd: I64) {
+    // close is not retried: Linux releases the descriptor even on EINTR.
+    if (fd >= I64{0}) {
+        _ := trap_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+    }
+}
+// name is a borrowed NUL path; how exclusively borrows 24 writable bytes.
+// Seed flags and resolve bits are literal policy: no openat fallback on failure.
+fn vault_linux_openat(dirfd: I64, name: I64, flags: I64, mode: I64, how: I64) -> I64 {
+    rt_text_store(how, flags | VAULT_O_NOFOLLOW | VAULT_O_CLOEXEC)
+    rt_text_store(how + I64{8}, mode)
+    rt_text_store(how + I64{16}, VAULT_RESOLVE)
+    trap_syscall(I64{437}, dirfd, name, how, I64{24}, I64{0}, I64{0})
+}
+// fstat's x86-64 kernel layout agrees with SentryLedger's newfstatat layout.
+// The caller owns all 144 scratch bytes; no allocation and no retained pointer.
+fn vault_linux_stat(fd: I64, scratch: I64) -> I64 {
+    trap_syscall(I64{5}, fd, scratch, I64{0}, I64{0}, I64{0}, I64{0})
+}
+fn vault_linux_dir_unsupported(errno: I64) -> Bool {
+    errno == I64{-18} || errno == I64{-20} || errno == I64{-22} || errno == I64{-38} || errno == I64{-40}
+}
+// Adopt synthesized operation/path owners directly, avoiding clone+drop copies.
+// scratch exclusively borrows 24 bytes and is reused only after the syscall.
+fn vault_linux_dir_io(stat: Bool, repository: Bool, scratch: I64) -> I64 {
+    rt_text_store(scratch, if stat -> I64{1952543859} else -> I64{1852141679})
+    operation :: jet_rt_string_from_static(scratch, I64{4})
+    rt_text_store(scratch, if repository -> I64{8388362703418520124} else -> I64{7218553786919384636})
+    rt_text_store(scratch + I64{8}, if repository -> I64{1048146543} else -> I64{4092521})
+    path :: jet_rt_string_from_static(scratch, if repository -> I64{12} else -> I64{11})
+    error :: jet_rt_alloc(VAULT_ERROR_BYTES, I64{8})
+    rt_text_store(error + VAULT_ERROR_TAG, I64{11})
+    rt_text_store(error + VAULT_ERROR_FIRST, operation)
+    rt_text_store(error + VAULT_ERROR_SECOND, path)
+    error
+}
+// Returns zero on success and adopts the held .jet fd into out. On error returns
+// a real private error owner; out is unchanged. Root may follow symlinks just
+// as File::open in the seed; the child .jet path may not follow any symlink.
+fn vault_linux_dir_at_root(root: I64, out: I64) -> I64 {
+    scratch :: jet_rt_alloc(VAULT_STAT_BYTES + I64{24}, I64{8})
+    root_path :: vault_linux_path(root)
+    root_fd :: if (root_path == I64{0}) -> I64{-22} else -> trap_syscall(I64{257}, I64{-100}, root_path, VAULT_O_CLOEXEC, I64{0}, I64{0}, I64{0})
+    if (root_path != I64{0}) -> jet_rt_free(root_path, rt_text_len(root) + I64{1}, I64{1})
+    if (root_fd < I64{0}) {
+        error :: vault_linux_dir_io(false, true, scratch)
+        jet_rt_free(scratch, VAULT_STAT_BYTES + I64{24}, I64{8})
+        return error
+    }
+    rt_text_store(scratch + VAULT_STAT_BYTES, I64{1952803374}) // ".jet\0"
+    dir_fd :: vault_linux_openat(root_fd, scratch + VAULT_STAT_BYTES, VAULT_O_DIRECTORY, I64{0}, scratch)
+    vault_linux_close(root_fd)
+    if (dir_fd < I64{0}) {
+        error :: if vault_linux_dir_unsupported(dir_fd) -> vault_error_new(I64{7}, I64{0}, I64{0}) else -> vault_linux_dir_io(false, false, scratch)
+        jet_rt_free(scratch, VAULT_STAT_BYTES + I64{24}, I64{8})
+        return error
+    }
+    if (vault_linux_stat(dir_fd, scratch) != I64{0}) {
+        vault_linux_close(dir_fd)
+        error :: vault_linux_dir_io(true, false, scratch)
+        jet_rt_free(scratch, VAULT_STAT_BYTES + I64{24}, I64{8})
+        return error
+    }
+    mode :: rt_text_word(scratch + VAULT_STAT_MODE) & I64{4294967295}
+    uid :: rt_text_word(scratch + VAULT_STAT_UID) & I64{4294967295}
+    user :: trap_syscall(I64{107}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+    // Seed authority_identity also rejects an unavailable session identity.
+    session :: trap_syscall(I64{124}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+    if (session < I64{0} || (mode & I64{61440}) != I64{16384} || uid != user || (mode & I64{18}) != I64{0}) {
+        vault_linux_close(dir_fd)
+        jet_rt_free(scratch, VAULT_STAT_BYTES + I64{24}, I64{8})
+        return vault_error_new(I64{7}, I64{0}, I64{0})
+    }
+    jet_rt_free(scratch, VAULT_STAT_BYTES + I64{24}, I64{8})
+    rt_text_store(out, dir_fd)
+    I64{0}
+}

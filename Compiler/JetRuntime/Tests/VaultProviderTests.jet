@@ -48,6 +48,25 @@ fn vault_fixture_check(condition: Bool) {
     vault_fixture_check(vault_crypto_from_provider(I64{9}) == VAULT_CRYPTO_UNAVAILABLE)
     vault_fixture_check(vault_crypto_from_provider(I64{10}) == VAULT_CRYPTO_UNAVAILABLE)
 }
+// Supplemental real filesystem boundary, not a substitute for the original
+// prepare_generate_at symlink fixture until the complete provider is composed.
+#Export(c) fn jet_rt_vault_linux_dir_fixture(root: I64, expected: I64) {
+    slot :: jet_rt_alloc(I64{8}, I64{8})
+    rt_text_store(slot, I64{-471})
+    error :: vault_linux_dir_at_root(root, slot)
+    if (expected == I64{-1}) {
+        vault_fixture_check(error == I64{0})
+        fd :: rt_text_word(slot)
+        vault_fixture_check(fd >= I64{0})
+        vault_linux_close(fd)
+    } else {
+        vault_fixture_check(error != I64{0})
+        vault_fixture_check(vault_error_tag(error) == expected)
+        vault_fixture_check(rt_text_word(slot) == I64{-471})
+        vault_error_drop(error)
+    }
+    jet_rt_free(slot, I64{8}, I64{8})
+}
 // Supplementary historical codec checks: exact bytes, every truncation, garbage,
 // malformed UTF-8, preserved NUL/Unicode strings, and canonical domain hash.
 #Export(c) fn jet_rt_vault_legacy_fixture(bytes: I64, length: I64, expected_hash: I64) {

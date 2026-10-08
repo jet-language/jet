@@ -133,6 +133,19 @@ The historical pair codec preserves
 UTF-8 values byte-for-byte, including embedded NUL; it rejects truncation,
 invalid UTF-8, and trailing bytes. Owned value buffers are wiped before release.
 
+The Linux vault directory boundary owns raw private descriptor words only.
+It follows the seed's root open and uses `openat2` for `.jet` with CLOEXEC,
+NOFOLLOW and RESOLVE_BENEATH|RESOLVE_NO_SYMLINKS; there is no fallback.
+The held directory must belong to the effective user, be a directory, and
+disallow group/other writes. Negative errno maps at the seed's exact boundary:
+EXDEV, ENOTDIR, EINVAL, ENOSYS and ELOOP become UnsupportedProvider; other
+open/stat failures retain operation and redacted-path IO payloads.
+Scratch follows the native x86-64 stat ABI already used by SentryLedger.
+Every temporary/root descriptor closes on success and failure; only the
+successful held `.jet` descriptor transfers to the caller. Supplemental real
+filesystem fixtures cover accepted, writable and symlinked directories but
+do not claim the original full `prepare_generate_at` fixture before composition.
+
 Typed vault records own native Secret buffers. Equality compares the key bytes,
 not just immutable hashes, while Debug always prints a redacted key marker.
 Cloning creates independent key and provenance owners. Unsigned repository,

@@ -1,9 +1,13 @@
+#define _POSIX_C_SOURCE 200809L
 // Real Jet vault state/codec only; link -Wl,--wrap=jet_rt_free for zeroization.
 #include <assert.h>
 #include <stdint.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
+#include <sys/stat.h>
+#include <unistd.h>
 typedef struct { const unsigned char *data; int64_t length, capacity; } Text;
 typedef struct { int64_t length, capacity; Text **data; } TextList;
 extern void jet_rt_alloc_init(void);
@@ -24,6 +28,7 @@ extern Text *jet_rt_vault_record_fixture_debug(void *);
 extern void jet_rt_vault_origin_hash_bound_fixture(void *, const Text *, const unsigned char *);
 extern void jvlt2_codec_is_canonical_bounded_and_preserves_legacy_strings(const Text *, const Text *, const Text *, const Text *, const Text *);
 extern void jet_rt_vault_codec_duplicate_fixture(void *, const Text *);
+extern void jet_rt_vault_linux_dir_fixture(const Text *, int64_t);
 extern void imported_origin_round_trips_and_invalid_combinations_reject(const Text *, const Text *);
 static struct { void *data; int64_t capacity; unsigned frees; } observed[2];
 static size_t observed_count;
@@ -91,6 +96,22 @@ static void zeroization_fixture(void) {
     assert(observed[0].frees == 1 && observed[1].frees == 1);
     observed_count = 0;
 }
+// Filesystem setup only; openat2/ownership policy and cleanup run in real Jet.
+static void linux_dir_fixture(void) {
+    char root[] = "/tmp/jet-vault-linux-XXXXXX", child[128], actual[128];
+    assert(mkdtemp(root) != NULL);
+    assert(snprintf(child, sizeof(child), "%s/.jet", root) > 0);
+    assert(snprintf(actual, sizeof(actual), "%s/actual", root) > 0);
+    Text path = text(root);
+    assert(mkdir(child, 0700) == 0);
+    jet_rt_vault_linux_dir_fixture(&path, -1);
+    assert(chmod(child, 0777) == 0);
+    jet_rt_vault_linux_dir_fixture(&path, 7);
+    assert(chmod(child, 0700) == 0);
+    assert(rename(child, actual) == 0 && symlink(actual, child) == 0);
+    jet_rt_vault_linux_dir_fixture(&path, 7);
+    assert(unlink(child) == 0 && rmdir(actual) == 0 && rmdir(root) == 0);
+}
 int main(void) {
     jet_rt_alloc_init();
     jet_rt_thread_init();
@@ -141,6 +162,7 @@ int main(void) {
     Text release = text("release"), source = text("source");
     imported_origin_round_trips_and_invalid_combinations_reject(&release, &source);
     zeroization_fixture();
+    linux_dir_fixture();
     puts("vault witness OK (13 errors, legacy+JVLT2 codec, imported origin/default entropy, native Secret redaction/wipe, long-origin hash, duplicate priority)");
     jet_rt_thread_detach();
     return 0;
