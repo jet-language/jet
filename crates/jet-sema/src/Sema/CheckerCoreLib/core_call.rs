@@ -2385,6 +2385,7 @@ impl<'a> Checker<'a> {
         let checked_backing_source = source_alias
             == Some(jet_foundation::CoreSourceParts::CORE_ENCODING_STREAM_ALIAS)
             || checked_csv
+            || source_alias == Some(jet_foundation::CoreSourceParts::CORE_ENCODING_CBOR_STREAM_ALIAS)
             || ((module == "core.mem" || (module == "core.encoding" && name == "__utf8_validate"))
                 && source_alias == Some(jet_foundation::CoreSourceParts::CORE_ENCODING_CBOR_PARSE_ALIAS));
         if encoding_backing_leaf && !checked_backing_source {
