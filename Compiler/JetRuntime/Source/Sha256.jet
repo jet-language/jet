@@ -91,7 +91,7 @@ fn rt_sha256_byte(left: I64, left_len: I64, right: I64, right_len: I64, third: I
 }
 // Four borrowed spans support HMAC/HKDF without concatenating secret input.
 // Guard the sum incrementally before any overflow; digest disjoint from inputs.
-fn rt_sha256_parts4(left: I64, left_len: I64, right: I64, right_len: I64, third: I64, third_len: I64, fourth: I64, fourth_len: I64, digest: I64, scratch: I64) {
+fn rt_sha2_32_parts4(left: I64, left_len: I64, right: I64, right_len: I64, third: I64, third_len: I64, fourth: I64, fourth_len: I64, digest: I64, scratch: I64, short: Bool) {
     if (left_len < I64{0} || right_len < I64{0} || third_len < I64{0} || fourth_len < I64{0} || left_len > I64{9223372036854775735} - right_len) {
         jet_rt_unreachable(I64{0}, I64{0})
         return
@@ -108,14 +108,25 @@ fn rt_sha256_parts4(left: I64, left_len: I64, right: I64, right_len: I64, third:
     }
     length :: first_three + fourth_len
     end :: ((length + I64{8}) / I64{64} + I64{1}) * I64{64}
-    rt_text_store(scratch, I64{0x6a09e667})
-    rt_text_store(scratch + I64{8}, I64{0xbb67ae85})
-    rt_text_store(scratch + I64{16}, I64{0x3c6ef372})
-    rt_text_store(scratch + I64{24}, I64{0xa54ff53a})
-    rt_text_store(scratch + I64{32}, I64{0x510e527f})
-    rt_text_store(scratch + I64{40}, I64{0x9b05688c})
-    rt_text_store(scratch + I64{48}, I64{0x1f83d9ab})
-    rt_text_store(scratch + I64{56}, I64{0x5be0cd19})
+    if short {
+        rt_text_store(scratch, I64{0xc1059ed8})
+        rt_text_store(scratch + I64{8}, I64{0x367cd507})
+        rt_text_store(scratch + I64{16}, I64{0x3070dd17})
+        rt_text_store(scratch + I64{24}, I64{0xf70e5939})
+        rt_text_store(scratch + I64{32}, I64{0xffc00b31})
+        rt_text_store(scratch + I64{40}, I64{0x68581511})
+        rt_text_store(scratch + I64{48}, I64{0x64f98fa7})
+        rt_text_store(scratch + I64{56}, I64{0xbefa4fa4})
+    } else {
+        rt_text_store(scratch, I64{0x6a09e667})
+        rt_text_store(scratch + I64{8}, I64{0xbb67ae85})
+        rt_text_store(scratch + I64{16}, I64{0x3c6ef372})
+        rt_text_store(scratch + I64{24}, I64{0xa54ff53a})
+        rt_text_store(scratch + I64{32}, I64{0x510e527f})
+        rt_text_store(scratch + I64{40}, I64{0x9b05688c})
+        rt_text_store(scratch + I64{48}, I64{0x1f83d9ab})
+        rt_text_store(scratch + I64{56}, I64{0x5be0cd19})
+    }
     schedule :: scratch + I64{64}
     off := I64{0}
     loop off < end {
@@ -178,8 +189,9 @@ fn rt_sha256_parts4(left: I64, left_len: I64, right: I64, right_len: I64, third:
         off += I64{64}
     }
     at := I64{0}
+    output_length :: if short -> I64{28} else -> I64{32}
     loop {
-        if (at >= I64{32}) -> break
+        if (at >= output_length) -> break
         word :: rt_text_word(scratch + (at / I64{4}) * I64{8})
         rt_text_put(digest + at, (word >> (I64{24} - (at % I64{4}) * I64{8})) & I64{255})
         at += I64{1}
@@ -192,6 +204,13 @@ fn rt_sha256_parts4(left: I64, left_len: I64, right: I64, right_len: I64, third:
         rt_text_store(scratch + at, I64{0})
         at += I64{8}
     }
+}
+fn rt_sha256_parts4(left: I64, left_len: I64, right: I64, right_len: I64, third: I64, third_len: I64, fourth: I64, fourth_len: I64, digest: I64, scratch: I64) {
+    rt_sha2_32_parts4(left, left_len, right, right_len, third, third_len, fourth, fourth_len, digest, scratch, false)
+}
+// SHA-224 is the same compression function, with its FIPS180-4 IV and output28.
+fn rt_crypto_sha224(input: I64, length: I64, output: I64, scratch: I64) {
+    rt_sha2_32_parts4(input, length, I64{1}, I64{0}, I64{1}, I64{0}, I64{1}, I64{0}, output, scratch, true)
 }
 fn rt_sha256_parts(left: I64, left_len: I64, right: I64, right_len: I64, digest: I64, scratch: I64) {
     rt_sha256_parts4(left, left_len, right, right_len, I64{1}, I64{0}, I64{1}, I64{0}, digest, scratch)

@@ -116,6 +116,19 @@ call and wiped before return. Domain-separated callers can hash two spans
 without allocating a concatenated message; the digest must not alias either
 input span. The algorithm is shared by vault and other runtime crypto callers.
 
+SHA-224 and SHA-384 share the SHA-256 and SHA-512 compression engines,
+respectively, changing only their standard initial states and output lengths.
+They borrow disjoint 28-byte and 48-byte digest outputs, with the same
+576-byte and 704-byte scratch contracts. SHA-1 borrows a 20-byte output and
+680-byte aligned scratch; it serves UUID v5 and existing legacy consumers,
+not new authentication. All three write padding virtually while borrowing
+input, and wipe caller-owned scratch before returning.
+
+Byte equality shares the authentication-tag comparison loop. Different public
+lengths compare unequal; equal-length spans scan every byte without an
+early exit or branch on byte values. Empty spans compare equal. This private
+boundary changes neither the public nominal secret carriers nor the Core API.
+
 The internal X25519 boundary borrows 32-byte scalar and point spans and writes
 32 bytes to a disjoint output. Its 1536-byte, word-aligned scratch is exclusive
 and wiped before return (1568 bytes for public-key derivation). Field arithmetic
