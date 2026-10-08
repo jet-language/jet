@@ -117,9 +117,7 @@ pub fn sci(n: Float, frac: Int) -> String Never! {
         i = i + 1
     }
     numerator = numerator * scale
-    rounded := numerator /% denominator
-    remainder :: numerator % denominator
-    if remainder * 2 > denominator || (remainder * 2 == denominator && rounded % 2 != 0) -> rounded = rounded + 1
+    rounded := round_ratio_even(numerator, denominator)
     if rounded == scale * 10 {
         rounded = scale
         exponent = exponent + 1
@@ -133,6 +131,14 @@ fn scaled_decimal(n: Int, precision: Int) -> String Never! {
     body :: pad_left(digits, precision + 1, "0")
     split :: body.bytes().len() - precision
     "{slice(body, 0, split)}.{slice(body, split, body.bytes().len())}"
+}
+
+// Exact positive rational rounding shared by scientific and fixed formats.
+fn round_ratio_even(numerator: Int, denominator: Int) -> Int Never! {
+    rounded := numerator /% denominator
+    remainder :: numerator % denominator
+    if remainder * 2 > denominator || (remainder * 2 == denominator && rounded % 2 != 0) -> rounded = rounded + 1
+    rounded
 }
 
 // Core/Fmt.rs:166-310: expand only one complete outer fragment, with quoted
@@ -261,7 +267,7 @@ fn bytes_scaled(n: Int, base: Int) -> String Never! {
         divisor = divisor * base
         unit = unit + 1
     }
-    suffix := if base == 1000 -> "kB" else -> "KiB"
+    suffix := if base == 1000 -> "KB" else -> "KiB"
     if unit == 2 -> suffix = if base == 1000 -> "MB" else -> "MiB"
     if unit == 3 -> suffix = if base == 1000 -> "GB" else -> "GiB"
     if unit == 4 -> suffix = if base == 1000 -> "TB" else -> "TiB"
@@ -287,6 +293,8 @@ fn bytes_scaled(n: Int, base: Int) -> String Never! {
 
 /// `n` is milliseconds. Composite output is bounded to three non-zero units.
 pub fn duration(n: Int) -> String Never! {
+    // Matches native bug; owner card: Rust i64::abs wraps at Int.MIN in release.
+    if n == -9223372036854775808 -> return "--9223372036854775808ms"
     sign := ""
     rest := n
     if rest < 0 {
@@ -374,27 +382,29 @@ fn radix(n: Int, base: Int) -> String {
     String.from_bytes(out) ?? "0"
 }
 
+// Core/Fmt.rs:7-9 formats the exact binary Float, ties-to-even, signed zero.
 fn float_fixed(n: Float, frac: Int) -> String Never! {
-    precision := frac
-    if precision < 0 -> precision = 0
-    scale := Float{1}
+    if !math.is_finite(n) -> return "{n}"
+    precision :: if frac < 0 -> 0 else -> frac
+    bits :: math.to_bits(n)
+    sign :: if bits < 0 -> "-" else -> ""
+    if n == 0.0 -> return "{sign}{scaled_decimal(0, precision)}"
+    binary_exponent :: (bits >> 52) & 2047
+    numerator := bits & 4503599627370495
+    shift := -1074
+    if binary_exponent != 0 {
+        numerator = numerator + 4503599627370496
+        shift = binary_exponent - 1075
+    }
+    denominator := 1
+    if shift >= 0 -> numerator = numerator << shift
+    else -> denominator = denominator << -shift
     i := 0
     loop i < precision {
-        scale = scale * Float{10}
+        numerator = numerator * 10
         i = i + 1
     }
-    scaled := n * scale
-    rounded := math.round(scaled)
-    sign := ""
-    if rounded < 0 {
-        sign = "-"
-        rounded = -rounded
-    }
-    digits :: radix(rounded, 10)
-    if precision == 0 -> return "{sign}{digits}"
-    body := pad_left(digits, precision + 1, "0")
-    split :: body.bytes().len() - precision
-    "{sign}{slice(body, 0, split)}.{slice(body, split, body.bytes().len())}"
+    "{sign}{scaled_decimal(round_ratio_even(numerator, denominator), precision)}"
 }
 
 fn group_decimal(text: String) -> String {
@@ -498,6 +508,20 @@ fn slice_b(raw: [U8], start: Int, end: Int) -> [U8] {
     assert_eq(sci(math.from_bits(1), 2), "4.94e-324")
     assert_eq(pad_left("x", 3, ""), "  x")
     assert_eq(pad_center("x", 6, "ab"), "abxaba")
+}
+
+#Test("fmt Rust fixed rounding signed zero and compatibility units") {
+    assert_eq(decimal(2.5, 0), "2")
+    assert_eq(decimal(3.5, 0), "4")
+    assert_eq(decimal(-2.5, -1), "-2")
+    assert_eq(decimal(0.125, 2), "0.12")
+    assert_eq(decimal(-0.0, 2), "-0.00")
+    assert_eq(decimal(-0.125, 0), "-0")
+    assert_eq(grouped(12345.625, 2), "12,345.62")
+    assert_eq(percent(-12345.625, 0), "-1,234,562%")
+    assert_eq(bytes(1001), "1 KB")
+    assert_eq(bytes(-1001), "-1 KB")
+    assert_eq(duration(-9223372036854775808), "--9223372036854775808ms")
 }
 
 #Test("fmt Rust nested fragment scanner") {

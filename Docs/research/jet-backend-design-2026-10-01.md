@@ -1483,6 +1483,11 @@ optional sign followed by ASCII decimal digits, normalize zeros through
 exact Int, and preserve malformed input trimmed but otherwise unchanged.
 These reuse the historical `aa45bf8fc` formatting policy; they introduce
 no raw C runtime symbols.
+Fixed decimal, grouping and percentage use the same exact binary-rational
+ties-to-even rounding as scientific formatting and preserve the IEEE sign
+bit even when rounded to zero. Decimal byte units spell `KB` like the seed.
+Duration's `Int.MIN` double-minus spelling is intentionally seed-compatible:
+it matches the native Rust release overflow bug pending the owner's bug card.
 The compiler's shared selector-to-source map drives both Core reachability
 and expression lowering: a selected formatter is rooted by its checked
 function key and invoked as an ordinary user-function MIR call. Lookup is
