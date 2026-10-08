@@ -2651,6 +2651,10 @@ shared codec shape and value tree follow D-ENC1, D-JSONVERB1, and D-SERDE13.
 The reason-only `HexError`, `base32.Base32Error`, `base64.Base64Error`, and
 `core.crypto.uuid.UUIDError` render only their `reason` in Display and Debug
 formatting. `encoding.HexError` and `encoding.hex.HexError` name the same type.
+`EncodingError.Display` is registered from its Core source declaration, not a
+second synthetic implementation. Its byte, line, column, path, and reason
+projection is the same on every execution tier.
+
 
 | Function or type | Returns | Description |
 | --- | --- | --- |

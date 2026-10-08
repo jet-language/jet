@@ -2799,10 +2799,6 @@ impl TraitRegistry {
         self.auto_equatable.insert("TLSVersion".to_string());
         self.trait_impls
             .insert((Syntax::TYPE_RANGE.to_string(), DISPLAY.to_string()));
-        // D-ENCSTREAM-SURFACE1=A: EncodingError Display is the exact stream error
-        // projection law; Format/Kind/Cause/Error compare by value.
-        self.trait_impls
-            .insert(("EncodingError".to_string(), DISPLAY.to_string()));
         self.trait_impls.insert(("PluginError".to_string(), DISPLAY.to_string()));
         self.auto_debug.insert("PluginError".to_string());
         self.auto_equatable.insert("PluginLimit".to_string());
