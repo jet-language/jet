@@ -452,6 +452,74 @@ fn web_fixed_sig(
     let form_submission = web_named("WebFormTypedSubmission");
     let form_field_state = web_named("WebFormFieldState");
     match (module, name) {
+<<<<<<< HEAD
+||||||| parent of 6af6612a1 (core.files: pair canonical raw recursive mkdir leaf)
+
+        ("core.devtools", "__publish_payload") => Some((vec![(moved, string.clone()), (moved, string.clone()),
+            (moved, string.clone()), (moved, string.clone()), (moved, t.clone())], None)),
+        ("core.email", "__address_parts") => Some((vec![(moved, Type::Option(Box::new(string.clone()))),
+            (moved, string.clone())], Some(web_named("Address")))),
+        ("core.email", "__attachment_parts") => Some((vec![(moved, string.clone()),
+            (moved, string.clone()), (moved, web_list(u8_ty()))], Some(web_named("Attachment")))),
+        ("core.email", "__envelope_parts") => Some((vec![(moved, web_named("Address")),
+            (moved, web_list(web_named("Address")))], Some(web_named("Envelope")))),
+        ("core.mod", "__supported") => Some((vec![], Some(bool_.clone()))),
+        ("core.mod", "__os") => Some((vec![], Some(string.clone()))),
+        ("core.mod", "__read_context") => Some((vec![(read, string.clone()), (read, web_named("ModGrant"))],
+            Some(result_ty(int.clone(), string.clone())))),
+        ("core.mod", "__parse_context" | "__check_context" | "__stage_context" | "__open_context") =>
+            Some((vec![(read, int.clone())], Some(result_ty(unit_ty(), string.clone())))),
+        ("core.mod", "__context_name") => Some((vec![(read, int.clone())], Some(string.clone()))),
+        ("core.mod", "__context_digest") => Some((vec![(read, int.clone())], Some(bool_.clone()))),
+        ("core.mod", "__exports_count") => Some((vec![(read, int.clone())], Some(int.clone()))),
+        ("core.mod", "__export_info") => Some((vec![(read, int.clone()), (read, int.clone())],
+            Some(Type::Tuple(vec![("name".into(), Box::new(string.clone())),
+                ("symbol".into(), Box::new(string.clone())), ("text".into(), Box::new(bool_.clone()))])))),
+        ("core.mod", "__resolve_export") => Some((vec![(read, int.clone()), (read, int.clone())],
+            Some(result_ty(unit_ty(), string.clone())))),
+        ("core.mod", "__resolve_symbol") => Some((vec![(read, int.clone()), (read, string.clone())],
+            Some(result_ty(unit_ty(), string.clone())))),
+        ("core.mod", "__close_context") => Some((vec![(read, int.clone())], None)),
+        ("core.mod", "__finish_context") => Some((vec![(read, int.clone())], Some(web_named("Mod")))),
+        ("core.plugin", "__load_wire") => Some((vec![(read, string.clone()), (read, string.clone())], Some(string.clone()))),
+        ("core.plugin", "__from_handle") => Some((vec![(read, Type::IntN { signed: false, bits: 64 })], Some(web_named("Plugin")))),
+        ("core.plugin", "__stop") => Some((vec![(read, string.clone())], Some(web_named("Never")))),
+
+=======
+
+        ("core.devtools", "__publish_payload") => Some((vec![(moved, string.clone()), (moved, string.clone()),
+            (moved, string.clone()), (moved, string.clone()), (moved, t.clone())], None)),
+        ("core.email", "__address_parts") => Some((vec![(moved, Type::Option(Box::new(string.clone()))),
+            (moved, string.clone())], Some(web_named("Address")))),
+        ("core.email", "__attachment_parts") => Some((vec![(moved, string.clone()),
+            (moved, string.clone()), (moved, web_list(u8_ty()))], Some(web_named("Attachment")))),
+        ("core.email", "__envelope_parts") => Some((vec![(moved, web_named("Address")),
+            (moved, web_list(web_named("Address")))], Some(web_named("Envelope")))),
+        ("core.mod", "__supported") => Some((vec![], Some(bool_.clone()))),
+        ("core.mod", "__os") => Some((vec![], Some(string.clone()))),
+        ("core.mod", "__read_context") => Some((vec![(read, string.clone()), (read, web_named("ModGrant"))],
+            Some(result_ty(int.clone(), string.clone())))),
+        ("core.mod", "__parse_context" | "__check_context" | "__stage_context" | "__open_context") =>
+            Some((vec![(read, int.clone())], Some(result_ty(unit_ty(), string.clone())))),
+        ("core.mod", "__context_name") => Some((vec![(read, int.clone())], Some(string.clone()))),
+        ("core.mod", "__context_digest") => Some((vec![(read, int.clone())], Some(bool_.clone()))),
+        ("core.mod", "__exports_count") => Some((vec![(read, int.clone())], Some(int.clone()))),
+        ("core.mod", "__export_info") => Some((vec![(read, int.clone()), (read, int.clone())],
+            Some(Type::Tuple(vec![("name".into(), Box::new(string.clone())),
+                ("symbol".into(), Box::new(string.clone())), ("text".into(), Box::new(bool_.clone()))])))),
+        ("core.mod", "__resolve_export") => Some((vec![(read, int.clone()), (read, int.clone())],
+            Some(result_ty(unit_ty(), string.clone())))),
+        ("core.mod", "__resolve_symbol") => Some((vec![(read, int.clone()), (read, string.clone())],
+            Some(result_ty(unit_ty(), string.clone())))),
+        ("core.mod", "__close_context") => Some((vec![(read, int.clone())], None)),
+        ("core.mod", "__finish_context") => Some((vec![(read, int.clone())], Some(web_named("Mod")))),
+        ("core.plugin", "__load_wire") => Some((vec![(read, string.clone()), (read, string.clone())], Some(string.clone()))),
+        ("core.plugin", "__from_handle") => Some((vec![(read, Type::IntN { signed: false, bits: 64 })], Some(web_named("Plugin")))),
+        ("core.plugin", "__stop") => Some((vec![(read, string.clone())], Some(web_named("Never")))),
+        ("core.files", "__create_dir_all_raw") => Some((vec![(read, string.clone())],
+            Some(result_ty(unit_ty(), web_named("IOError"))))),
+
+>>>>>>> 6af6612a1 (core.files: pair canonical raw recursive mkdir leaf)
         ("core.data.sketch", "empty") => Some((vec![], Some(string.clone()))),
         ("core.data.sketch", "merge") => Some((
             vec![(read, string.clone()), (read, string.clone())],

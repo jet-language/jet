@@ -44,6 +44,10 @@ public declaration's policy.
 Directory creation shares the existing `jet_std_fs_create_dir_all_raw` host
 operation; its callers keep their own fault preflight and error resource.
 
+The canonical `core.files.__create_dir_all_raw` leaf calls the shared recursive
+directory-creation host operation without a second fault probe; source callers
+retain their own FS.Write preflight and the host's Write/path error context.
+
 Filesystem internal host calls use their canonical `core.files.__*` names
 directly. There is no second `__files7_*` alias layer: the Prelude's existing
 registry entries provide the raw host boundary until Jet runtime L7 replaces
