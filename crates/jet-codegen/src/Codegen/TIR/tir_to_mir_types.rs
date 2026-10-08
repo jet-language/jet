@@ -2408,6 +2408,8 @@ const COMPILER_OWNED_CORE_RECORDS: &[(&str, &[&str])] = &[
     ("__TempPath", &["path", "text"]),
     ("__TempRemove", &["ok", "missing", "cause"]),
     ("__TempCreate", &["ok", "cause"]),
+    ("__JetcRaw", &["value", "errno", "bytes", "linux"]),
+    ("__JetcStat", &["status", "errno", "dev", "ino", "len", "mtime", "mtime_ns", "nlink", "is_file", "is_dir"]),
     (
         "DataLineOptions",
         &[

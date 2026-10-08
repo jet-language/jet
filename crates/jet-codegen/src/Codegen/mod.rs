@@ -3234,6 +3234,7 @@ fn push_typed_core_optional_parts(
         out.push_str(include_str!("../Prelude/Core/EnvProjection.rs"));
         out.push_str(include_str!("../Prelude/Core/FSOps.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/FileStream.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/CryptoFileIo.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/FSRuntimeOps.rs"));
         out.push_str(include_str!("../Prelude/Core/StdinReader.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/FSIoEnvOsTesting.rs"));
@@ -3974,6 +3975,7 @@ fn push_corelib_prelude_body(
         out.push_str(include_str!("../Prelude/Core/EnvProjection.rs"));
         out.push_str(include_str!("../Prelude/Core/FSOps.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/FileStream.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/CryptoFileIo.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/FSRuntimeOps.rs"));
         out.push_str(include_str!("../Prelude/Core/StdinReader.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/FSIoEnvOsTesting.rs"));

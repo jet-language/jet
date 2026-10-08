@@ -388,6 +388,7 @@ fn core_effect_legacy(module: &str, method: &str) -> Option<Effect> {
         // the deterministic implementation when no accelerator is installed.
         "core.compute" if method != "device_cpu" => Effect::GPU,
         "core.files" => Effect::FS,
+        "core.crypto" if method.starts_with("__jetc_") => Effect::FS,
         // D-BROWSER-AUTO1=A: browser automation is a versioned network protocol.
         "core.net"
         | "core.net.tls"

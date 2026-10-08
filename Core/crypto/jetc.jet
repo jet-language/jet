@@ -11,29 +11,6 @@ BASE :: 74
 STANZA :: 96
 TAG :: 16
 
-// These are internal distinctions, not additions to FileCryptoError.
-enum Failure {
-    OpenFailed
-    SourceIo
-    DestinationIo
-    DestinationExists
-    SealFailed
-}
-fn public_error(failure: Failure) -> crypto.FileCryptoError Never! {
-    if failure == {
-        .OpenFailed -> crypto.FileCryptoError.OpenFailed
-        .SourceIo -> crypto.FileCryptoError.SourceMissing
-        else -> crypto.FileCryptoError.PublishFailed
-    }
-}
-
-// D-TESTFAULT1=A / #4821. The same named boundary is used by the operation
-// and its fault schedule. Production has no active schedule. Cancellation is
-// intentionally absent: the public source API has no Time.Wait boundary.
-fn io_boundary(name: String, failure: Failure) crypto.FileCryptoError! {
-    if core.testing.__fault_should_fail(name) -> return Err(public_error(failure))
-    Ok()
-}
 
 struct Writer {
     prefix: [U8]
@@ -117,7 +94,10 @@ fn chunk_aad(hash: [U8], index: Int, length: Int, flags: U8) -> [U8] Never! {
 }
 fn seal(key: [U8], nonce: [U8], plain: [U8], aad: [U8]) -> [U8] crypto.FileCryptoError! {
     #Unsafe("Core JETC2 applies the fixed XChaCha20-Poly1305 suite and protocol-owned nonce/AAD domains") {
-        expert.xchacha20poly1305_seal(key, nonce, plain, aad) ?? return Err(.PublishFailed)
+        if expert.xchacha20poly1305_seal(key, nonce, plain, aad) == {
+            .Ok(bytes) -> return Ok(^bytes)
+            .Err(error) -> return Err(.SealFailed(error))
+        }
     }
 }
 fn open(key: [U8], nonce: [U8], cipher: [U8], aad: [U8]) -> [U8] crypto.FileCryptoError! {
@@ -143,10 +123,10 @@ fn record_shape(length: Int, flags: U8) -> Bool Never! {
 }
 
 fn canonical(recipients: [crypto.X25519PublicKey]) -> [Recipient] crypto.FileCryptoError! {
-    if recipients.len() < 1 || recipients.len() > 256 -> return Err(.PublishFailed)
+    if recipients.len() < 1 || recipients.len() > 256 -> return Err(.SealFailed(.Length))
     sorted := [Recipient]{}
     loop public in recipients {
-        if public.bytes.len() != 32 -> return Err(.PublishFailed)
+        if public.bytes.len() != 32 -> return Err(.SealFailed(.Length))
         &sorted.push(Recipient{id: id(public.bytes), public: public})
     }
     loop i in 1..<sorted.len() {
@@ -161,7 +141,7 @@ fn canonical(recipients: [crypto.X25519PublicKey]) -> [Recipient] crypto.FileCry
         sorted[j] = current
     }
     loop i in 1..<sorted.len() {
-        if sorted[i - 1].public.bytes == sorted[i].public.bytes -> return Err(.PublishFailed)
+        if sorted[i - 1].public.bytes == sorted[i].public.bytes -> return Err(.SealFailed(.KeyRejected))
     }
     Ok(sorted)
 }
@@ -171,10 +151,13 @@ fn canonical(recipients: [crypto.X25519PublicKey]) -> [Recipient] crypto.FileCry
 fn writer(sorted: [Recipient], plain_length: Int,
     file_id: [U8], file_key: ^crypto.Secret, ephemeral_secret: ^crypto.Secret,
     nonce_prefix: [U8]) -> Writer crypto.FileCryptoError! {
-    body :: body_length(plain_length) ?? return Err(.SourceMissing)
-    if file_id.len() != 16 || file_key.bytes.len() != 32 || ephemeral_secret.bytes.len() != 32 || nonce_prefix.len() != 16 -> return Err(.PublishFailed)
+    body :: body_length(plain_length) ?? return Err(.SourceIo)
+    if file_id.len() != 16 || file_key.bytes.len() != 32 || ephemeral_secret.bytes.len() != 32 || nonce_prefix.len() != 16 -> return Err(.SealFailed(.Length))
     ephemeral_key :: crypto.X25519SecretKey{bytes: ^ephemeral_secret.bytes}
-    ephemeral :: crypto.x25519_public(ephemeral_key) ?? return Err(.PublishFailed)
+    ephemeral :: if crypto.x25519_public(ephemeral_key) == {
+        .Ok(value) -> ^value
+        .Err(error) -> { return Err(.SealFailed(error)) }
+    }
     fixed := [U8]{74, 69, 84, 67, 2, 1, 1, 0}
     append(&fixed, little(BASE + STANZA * sorted.len() + TAG, 4))
     append(&fixed, little(body, 8))
@@ -186,9 +169,18 @@ fn writer(sorted: [Recipient], plain_length: Int,
     append(&header, little(0, 4))
     base :: ~header
     loop recipient in sorted {
-        shared :: crypto.x25519(ephemeral_key, recipient.public) ?? return Err(.PublishFailed)
-        kek :: crypto.hkdf_sha256(shared.bytes, file_id, info("JETC2 wrap key", ephemeral.bytes, recipient.public.bytes), 32) ?? return Err(.PublishFailed)
-        wrap_nonce :: crypto.hkdf_sha256(shared.bytes, file_id, info("JETC2 wrap nonce", ephemeral.bytes, recipient.public.bytes), 24) ?? return Err(.PublishFailed)
+        shared :: if crypto.x25519(ephemeral_key, recipient.public) == {
+            .Ok(value) -> ^value
+            .Err(error) -> { return Err(.SealFailed(error)) }
+        }
+        kek :: if crypto.hkdf_sha256(shared.bytes, file_id, info("JETC2 wrap key", ephemeral.bytes, recipient.public.bytes), 32) == {
+            .Ok(value) -> ^value
+            .Err(error) -> { return Err(.SealFailed(error)) }
+        }
+        wrap_nonce :: if crypto.hkdf_sha256(shared.bytes, file_id, info("JETC2 wrap nonce", ephemeral.bytes, recipient.public.bytes), 24) == {
+            .Ok(value) -> ^value
+            .Err(error) -> { return Err(.SealFailed(error)) }
+        }
         wrapped :: seal(kek.bytes, wrap_nonce.bytes, file_key.bytes, wrap_aad(fixed, base, recipient.id, recipient.public.bytes))
         append(&header, recipient.id)
         append(&header, recipient.public.bytes)
@@ -203,20 +195,20 @@ fn writer(sorted: [Recipient], plain_length: Int,
         nonce_prefix: nonce_prefix, remaining: plain_length, index: 1, final: false})
 }
 
-fn seal_chunk(state: &Writer, plain: [U8]) -> [U8] crypto.FileCryptoError! {
-    if state.final || state.index > MAX_RECORDS -> return Err(.SourceMissing)
+struct Record { framing: [U8], cipher: [U8] }
+fn seal_chunk(state: &Writer, plain: [U8]) -> Record crypto.FileCryptoError! {
+    if state.final || state.index > MAX_RECORDS -> return Err(.SourceIo)
     expected :: if state.remaining >= CHUNK -> CHUNK else -> state.remaining
-    if plain.len() != expected -> return Err(.SourceMissing)
+    if plain.len() != expected -> return Err(.SourceIo)
     flags :: if expected == CHUNK -> U8{0} else -> U8{1}
     encrypted :: seal(state.key.bytes, nonce(state.nonce_prefix, state.index), plain,
         chunk_aad(state.header_hash, state.index, expected, flags))
     record := little(expected, 4)
     &record.push(flags)
-    append(&record, encrypted)
     state.remaining -= expected
     state.index += 1
     state.final = flags == (U8{1})
-    Ok(record)
+    Ok(Record{framing: record, cipher: encrypted})
 }
 
 // Validate the fixed prefix before the coordinator allocates/reads a header.
@@ -296,11 +288,4 @@ fn finish(state: Reader, trailing: [U8]) crypto.FileCryptoError! {
     assert(!record_shape(CHUNK, U8{1}))
     assert(!record_shape(0, U8{0}))
     assert(!record_shape(0, U8{2}))
-}
-#Test("JETC2 internal file failures preserve the existing public projection") {
-    assert(public_error(.OpenFailed) == crypto.FileCryptoError.OpenFailed)
-    assert(public_error(.SourceIo) == crypto.FileCryptoError.SourceMissing)
-    assert(public_error(.DestinationIo) == crypto.FileCryptoError.PublishFailed)
-    assert(public_error(.DestinationExists) == crypto.FileCryptoError.PublishFailed)
-    assert(public_error(.SealFailed) == crypto.FileCryptoError.PublishFailed)
 }
