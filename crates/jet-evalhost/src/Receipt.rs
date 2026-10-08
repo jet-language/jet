@@ -61,10 +61,8 @@ fn ambient_core_call(
     _resolved_ret: Option<Type>,
     _sink: Option<&mut jet_codegen::Comptime::DevSink>,
 ) -> Option<Result<CtValue, Diagnostic>> {
-    // Receiver rows are represented by an empty Core module in the canonical
-    // registry. The route identity remains `core.handle.attach`; only this
-    // ambient callback sees the receiver projection's empty module.
-    if !module.is_empty() || method != "attach" {
+    // Only the registered raw leaf receives the payload and compiler metadata.
+    if module != "core.prelude" || method != "__receipt_attach" {
         return None;
     }
     let [value, CtValue::Str(section_name), CtValue::Str(type_name), CtValue::Str(schema_digest)] =

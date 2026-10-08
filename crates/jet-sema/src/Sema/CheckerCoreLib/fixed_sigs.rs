@@ -2581,7 +2581,7 @@ fn core_fixed_sig_impl(
             vec![(read, Type::Named("Instant".to_string()))],
             None,
         )),
-        ("core.rt", "callback") => Some((
+        ("core.rt", "callback" | "__callback") => Some((
             vec![
                 (read, Type::Int),
                 (read, Type::Int),
@@ -2601,6 +2601,30 @@ fn core_fixed_sig_impl(
                 ),
             ],
             Some(Type::Named("RealtimeStream".to_string())),
+        )),
+        ("core.rt", "__next_deadline") => Some((
+            vec![(read, Type::Named("RealtimeStream".to_string()))],
+            Some(Type::Named("Instant".to_string())),
+        )),
+        ("core.rt", "__receipt") => Some((
+            vec![(read, Type::Named("RealtimeStream".to_string()))],
+            Some(Type::Named("RealtimeReceipt".to_string())),
+        )),
+        ("core.rt", "__cancel") => Some((
+            vec![(AccessConvention::Write, Type::Named("RealtimeStream".to_string()))],
+            Some(Type::Unit),
+        )),
+        ("core.rt", "__is_cancelled") => Some((
+            vec![(read, Type::Named("RealtimeStream".to_string()))],
+            Some(Type::Bool),
+        )),
+        ("core.tasks", "__interval_ms") => Some((
+            vec![(read, Type::Int)],
+            Some(Type::Apply { name: "Receiver".to_string(), args: vec![Type::Int] }),
+        )),
+        ("core.tasks", "__condition_notify_one" | "__condition_notify_all") => Some((
+            vec![(read, Type::Named("Condition".to_string()))],
+            Some(Type::Unit),
         )),
         ("core.tasks", "timeout") => Some((
             vec![(read, Type::Named(crate::Syntax::DURATION_TYPE.to_string()))],

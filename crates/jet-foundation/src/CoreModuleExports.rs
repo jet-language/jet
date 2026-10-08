@@ -25,7 +25,7 @@ pub enum CoreLeafKind {
 
 // BEGIN GENERATED CORE DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 8d24cfecd4e63b1c069f55cd9a3ecc5ed8d3a4f442e2f97cce59d31424422863
+// Source SHA-256: 6f12d32f94f8b64ee6030efff596f9c851af25ff0bf3c9950e67a7ed11ee95d8
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreModuleDeclaration {
     pub module: &'static str,
@@ -464,7 +464,7 @@ const CORE_MODULE_70_MEMBERS: &[&str] = &["load", "PluginFrame", "PluginFault", 
 const CORE_MODULE_70_TYPES: &[(&str, CoreLeafKind)] = &[("PluginFrame", CoreLeafKind::Plain), ("PluginFault", CoreLeafKind::Plain), ("PluginLimit", CoreLeafKind::Enum(&["Fuel", "Memory", "Table", "Time", "Wire"])), ("PluginError", CoreLeafKind::Enum(&["Guest", "Denied", "Budget", "Defect"]))];
 const CORE_MODULE_70_DEPENDENCIES: &[&str] = &[];
 
-const CORE_MODULE_71_MEMBERS: &[&str] = &["keep", "always", "identity", "identity_int", "identity_float", "identity_bool", "const_int", "const_bool", "not_bool", "min_int", "max_int", "option_or_err"];
+const CORE_MODULE_71_MEMBERS: &[&str] = &["keep", "always", "identity", "identity_int", "identity_float", "identity_bool", "const_int", "const_bool", "not_bool", "min_int", "max_int", "option_or_err", "__receipt_attach"];
 const CORE_MODULE_71_TYPES: &[(&str, CoreLeafKind)] = &[];
 const CORE_MODULE_71_DEPENDENCIES: &[&str] = &["core"];
 
@@ -488,7 +488,7 @@ const CORE_MODULE_76_MEMBERS: &[&str] = &["compile", "compile_with", "escape", "
 const CORE_MODULE_76_TYPES: &[(&str, CoreLeafKind)] = &[("Pattern", CoreLeafKind::Plain), ("RegexFlag", CoreLeafKind::Plain), ("Match", CoreLeafKind::Plain), ("Node", CoreLeafKind::Plain), ("Regex", CoreLeafKind::Plain), ("RegexFlags", CoreLeafKind::Plain), ("RegexError", CoreLeafKind::Enum(&["Syntax", "Cache"]))];
 const CORE_MODULE_76_DEPENDENCIES: &[&str] = &["core.text"];
 
-const CORE_MODULE_77_MEMBERS: &[&str] = &["callback", "RealtimeStream"];
+const CORE_MODULE_77_MEMBERS: &[&str] = &["callback", "RealtimeStream", "__callback", "__next_deadline", "__receipt", "__cancel", "__is_cancelled"];
 const CORE_MODULE_77_TYPES: &[(&str, CoreLeafKind)] = &[("RealtimeStream", CoreLeafKind::Plain)];
 const CORE_MODULE_77_DEPENDENCIES: &[&str] = &[];
 
@@ -504,7 +504,7 @@ const CORE_MODULE_80_MEMBERS: &[&str] = &["arch", "atexit", "close_fd", "cpu_cou
 const CORE_MODULE_80_TYPES: &[(&str, CoreLeafKind)] = &[("EnvError", CoreLeafKind::Plain)];
 const CORE_MODULE_80_DEPENDENCIES: &[&str] = &["core.files", "core.process", "core.text.parse"];
 
-const CORE_MODULE_81_MEMBERS: &[&str] = &["after", "current_task", "interval", "yield_now", "Receiver", "TaskState", "delay_ms", "is_interval", "is_timer", "recv", "get", "result", "wait", "channel", "put", "clear", "shutdown", "stop", "reset", "lock", "acquire", "release", "notify", "start", "run", "waitall", "waitany", "is_cancelled", "is_ready", "timeout", "sleep", "try_recv", "cancel", "is_closed", "is_locked", "size", "capacity", "generation", "spawn_name", "__task_paused", "__task_cancelled", "__yield_now"];
+const CORE_MODULE_81_MEMBERS: &[&str] = &["after", "current_task", "interval", "yield_now", "Receiver", "TaskState", "delay_ms", "is_interval", "is_timer", "recv", "get", "result", "wait", "channel", "put", "clear", "shutdown", "stop", "reset", "lock", "acquire", "release", "notify", "start", "run", "waitall", "waitany", "is_cancelled", "is_ready", "timeout", "sleep", "try_recv", "cancel", "is_closed", "is_locked", "size", "capacity", "generation", "spawn_name", "__task_paused", "__task_cancelled", "__yield_now", "__interval_ms", "__channel_new", "__channel_bounded", "__condition_notify_one", "__condition_notify_all"];
 const CORE_MODULE_81_TYPES: &[(&str, CoreLeafKind)] = &[("Receiver", CoreLeafKind::Plain), ("TaskState", CoreLeafKind::Plain)];
 const CORE_MODULE_81_DEPENDENCIES: &[&str] = &["core.time"];
 
@@ -876,6 +876,7 @@ pub const CORE_SOURCE_OWNED_TYPES: &[CoreSourceOwnedType] = &[
     CoreSourceOwnedType { path: "Core/compute/compute.jet", name: "ComputeStream" },
     CoreSourceOwnedType { path: "Core/compute/compute.jet", name: "SparseTensor" },
     CoreSourceOwnedType { path: "Core/compute/compute.jet", name: "VJPRun" },
+    CoreSourceOwnedType { path: "Core/compute/solve.jet", name: "Solver" },
     CoreSourceOwnedType { path: "Core/compute/solve.jet", name: "LinearSolver" },
     CoreSourceOwnedType { path: "Core/encoding/csv.jet", name: "CSVReader" },
     CoreSourceOwnedType { path: "Core/encoding/csv.jet", name: "CSVWriter" },

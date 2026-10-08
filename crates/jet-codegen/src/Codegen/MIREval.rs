@@ -21702,8 +21702,8 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
     ) -> Result<RuntimeValue, Diagnostic> {
         let route = self.prelude_row(route_id, span)?;
         let bounded = match member {
-            member if member == crate::Syntax::INTERNAL_CHANNEL_NEW_METHOD => false,
-            member if member == crate::Syntax::INTERNAL_CHANNEL_BOUNDED_METHOD => true,
+            member if member == crate::Syntax::INTERNAL_CHANNEL_NEW_METHOD || member == "__channel_new" => false,
+            member if member == crate::Syntax::INTERNAL_CHANNEL_BOUNDED_METHOD || member == "__channel_bounded" => true,
             _ => {
                 return Err(mir_error_at(
                     "MIR channel constructor has an unknown Core member",
@@ -21776,7 +21776,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
     ) -> Result<RuntimeValue, Diagnostic> {
         let expected_symbol = match member {
             "after" => "jet_std::after_value",
-            "interval" => "jet_std::interval",
+            "__interval_ms" => "jet_std::interval",
             "__yield_now" => "jet_std::jet_task_yield",
             "__task_paused" => "jet_scheduler_task_paused",
             "__task_cancelled" => "jet_scheduler_task_cancelled_state",
@@ -21812,7 +21812,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     MirChannelEndpoint::Receiver(channel),
                 )))
             }
-            ("interval", [period]) => {
+            ("__interval_ms", [period]) => {
                 let delay = crate::scheduler::jet_task_interval_ms_defaulted(
                     mir_channel_timer_ms(period.clone(), span)? as i64,
                 );
@@ -22404,7 +22404,8 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         }
         if row.module == "core.tasks"
             && (row.member == crate::Syntax::INTERNAL_CHANNEL_NEW_METHOD
-                || row.member == crate::Syntax::INTERNAL_CHANNEL_BOUNDED_METHOD)
+                || row.member == crate::Syntax::INTERNAL_CHANNEL_BOUNDED_METHOD
+                || matches!(row.member.as_str(), "__channel_new" | "__channel_bounded"))
         {
             self.ensure_core_route(id, route, span)?;
             return self.eval_channel_constructor(route, &row.member, args, result_ty, span);
@@ -22412,10 +22413,25 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         if row.module == "core.tasks"
             && matches!(
                 row.member.as_str(),
-                "after" | "interval" | "yield_now" | "__task_paused" | "__task_cancelled"
+                "after" | "__interval_ms" | "__yield_now" | "__task_paused" | "__task_cancelled"
             )
         {
             return self.eval_task_runtime_call(&row.member, row.symbol.name(), args, span);
+        }
+        if row.module == "core.tasks"
+            && matches!(row.member.as_str(), "__condition_notify_one" | "__condition_notify_all")
+        {
+            self.ensure_core_route(id, route, span)?;
+            let [condition] = args.as_slice() else {
+                return Err(mir_error_at("MIR Condition notify leaf expects one Condition", span));
+            };
+            let condition = mir_condition_protocol(condition.clone(), span)?;
+            if row.member == "__condition_notify_all" {
+                shared_protocol::jet_shared_condition_notify_all(&condition);
+            } else {
+                shared_protocol::jet_shared_condition_notify_one(&condition);
+            }
+            return Ok(RuntimeValue::Data(MirEvalValue::Unit));
         }
         if let Some(result) = self.eval_typed_core_call(&row, &args, type_args, span)? {
             return Ok(result);
@@ -23090,7 +23106,9 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             mir_zeroize_owned_bytes(bytes, span)?;
             return Ok(RuntimeValue::Data(MirEvalValue::Unit));
         }
-        if row.module.is_empty() && row.member == "attach" {
+        if (row.module.is_empty() && row.member == "attach")
+            || (row.module == "core.prelude" && row.member == "__receipt_attach")
+        {
             let [payload_ty] = type_args else {
                 return Err(mir_error_at(
                     "MIR receipt attach requires one checked payload type argument",
