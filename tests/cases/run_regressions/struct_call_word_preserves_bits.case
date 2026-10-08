@@ -1,0 +1,25 @@
+# Port of run_regressions.rs:106-116; BOTH fixtures on BOTH run tiers.
+# Original literal oracle for the first fixture awaits a real reference snapshot.
+# PENDING-GRAMMAR: step-scoped env (fresh store and jetpack root for each fixture/tier).
+env: JETPACK_ENV=1
+env: NO_COLOR=1
+step: jet run {root}/tests/fixtures/struct_call_word_original.jet
+env: JET_STORE_DIR={work}/store-original-default
+env: JETPACK_ROOT={work}/jetpack-original-default
+stdout: = struct_call_word_original.out
+stderr: empty
+step: jet run --interpret {root}/tests/fixtures/struct_call_word_original.jet
+env: JET_STORE_DIR={work}/store-original-interpreter
+env: JETPACK_ROOT={work}/jetpack-original-interpreter
+stdout: = struct_call_word_original.out
+stderr: empty
+step: jet run {root}/Examples/features/basics/struct_call_word.jet
+env: JET_STORE_DIR={work}/store-example-default
+env: JETPACK_ROOT={work}/jetpack-example-default
+stdout: = ../../../Examples/features/expected/basics/struct_call_word.out
+stderr: empty
+step: jet run --interpret {root}/Examples/features/basics/struct_call_word.jet
+env: JET_STORE_DIR={work}/store-example-interpreter
+env: JETPACK_ROOT={work}/jetpack-example-interpreter
+stdout: = ../../../Examples/features/expected/basics/struct_call_word.out
+stderr: empty

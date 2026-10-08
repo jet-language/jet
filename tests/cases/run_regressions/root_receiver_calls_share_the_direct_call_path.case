@@ -1,0 +1,16 @@
+# Port of run_regressions.rs:141-163; source copied verbatim, exact oracle 12/12/3.5/3.
+# HISTORICAL SMOKE snapshot pending first admitted reference run; never hand-bless.
+# PENDING-GRAMMAR: step-scoped env (fresh store and jetpack root for each tier).
+fixture: fixtures/root_calls
+env: JETPACK_ENV=1
+env: NO_COLOR=1
+step: jet run main.jet
+env: JET_STORE_DIR={work}/store-default
+env: JETPACK_ROOT={work}/jetpack-default
+stdout: = root_calls.out
+stderr: empty
+step: jet run --interpret main.jet
+env: JET_STORE_DIR={work}/store-interpreter
+env: JETPACK_ROOT={work}/jetpack-interpreter
+stdout: = root_calls.out
+stderr: empty

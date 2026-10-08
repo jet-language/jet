@@ -1,0 +1,15 @@
+# Port of run_regressions.rs:86-93; both run tiers, exact stdout and empty stderr.
+# HISTORICAL SMOKE snapshot pending first admitted reference run; never hand-bless.
+# PENDING-GRAMMAR: step-scoped env (fresh store and jetpack root for each tier).
+env: JETPACK_ENV=1
+env: NO_COLOR=1
+step: jet run {root}/tests/fixtures/map_word_cells.jet
+env: JET_STORE_DIR={work}/store-default
+env: JETPACK_ROOT={work}/jetpack-default
+stdout: = map_word_cells.out
+stderr: empty
+step: jet run --interpret {root}/tests/fixtures/map_word_cells.jet
+env: JET_STORE_DIR={work}/store-interpreter
+env: JETPACK_ROOT={work}/jetpack-interpreter
+stdout: = map_word_cells.out
+stderr: empty

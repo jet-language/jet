@@ -1,0 +1,15 @@
+# Port of run_regressions.rs:169-176; original shared_owner_topology source unchanged.
+# HISTORICAL SMOKE snapshot pending first admitted reference run; never hand-bless.
+# PENDING-GRAMMAR: step-scoped env (fresh store and jetpack root for each tier).
+env: JETPACK_ENV=1
+env: NO_COLOR=1
+step: jet run {root}/tests/fixtures/shared_owner_topology.jet
+env: JET_STORE_DIR={work}/store-default
+env: JETPACK_ROOT={work}/jetpack-default
+stdout: = shared_owner_topology.out
+stderr: empty
+step: jet run --interpret {root}/tests/fixtures/shared_owner_topology.jet
+env: JET_STORE_DIR={work}/store-interpreter
+env: JETPACK_ROOT={work}/jetpack-interpreter
+stdout: = shared_owner_topology.out
+stderr: empty
