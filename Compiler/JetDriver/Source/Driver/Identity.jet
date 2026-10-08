@@ -351,6 +351,11 @@ struct JetDriverCompileTrace {
     exit_code: Int?
 }
 
+enum JetDriverLoadMode {
+    Program
+    CoreLibrary
+}
+
 struct JetDriverLoadResult {
     package_identity: String
     packages: [JetDriverPackageInfo]
@@ -364,6 +369,7 @@ struct JetDriverLoadResult {
     diagnostics: [Diagnostic]
     failed_stage: JetDriverStage?
     complete: Bool
+    mode: JetDriverLoadMode{JetDriverLoadMode.Program}
     // `JetDriverCompileMode.Doc`: the checked user modules, in load order.
     doc_modules: [JetDriverDocModule]{[JetDriverDocModule]{}}
 }
