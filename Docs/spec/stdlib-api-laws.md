@@ -285,6 +285,15 @@ The core-library slate ratifies these durable rules:
 - **D-CORE-USELIST1=A** — every grouped `use` uses square brackets. `as` gives
   a shorter local name; without `as`, the local name is the final component
   after the last dot. Existing brace item imports use the same list form.
+- **Stdio source representation** — `Stdout` and `Stderr` retain their declared
+  public `fd: Int` fields on every tier. Factories return `1` and `2`; record
+  construction, display, debug, and equality use those fields. The field is
+  informational: even a user-constructed token with another value writes to
+  its named process stream. Jet owns each public operation's fault checkpoint,
+  error context, and flush decision. Nonempty writes and line writes flush;
+  an empty write flushes only on a terminal. Write and its selected flush share
+  one held writer lock, and both failures keep the original `Write` context.
+  Explicit `flush` uses one `IO.Flush` checkpoint and a `Flush` context.
 
 ## Extended Core API doctrine
 
