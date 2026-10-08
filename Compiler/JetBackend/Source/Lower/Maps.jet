@@ -129,7 +129,6 @@ fn lower_map_key_order(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MI
 // Drops an owned LIR value through its consuming Close, when selected, or
 // physical cleanup. A helper parameter carries no LIR drop glue of its own.
 fn lower_map_drop_value(p: MIRProgram, m: &LowerModule, f: &LowerFunction, value: LIRValueID, ty: MIRType) Never! {
-    if lower_close_value(p, &m, &f, value, ty) -> return
     repr :: lower_repr(p, ty)
     if repr == .Inline(_) -> return lower_inline_drop(p, &m, &f, value, ty)
     if !lower_needs_drop(p, ty) -> return

@@ -286,7 +286,6 @@ fn lower_enum_glue_shape(p: MIRProgram, definition: MIRTypeDef, variant: MIRVari
 // split field, never a handle to pass to the runtime; an inline member's
 // glue drops its own members.
 fn lower_drop_stored(p: MIRProgram, m: &LowerModule, f: &LowerFunction, base: LIRValueID, offset: Int, ty: MIRType) Never! {
-    if lower_close_stored(p, &m, &f, base, offset, ty) -> return
     repr :: lower_repr(p, ty)
     if repr == .Unsupported(reason) -> return lower_fail(&m, &f, "drop glue field of {reason} is not lowered at O0 yet")
     if repr == .Inline(_) {
