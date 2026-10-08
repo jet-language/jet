@@ -145,7 +145,7 @@ fn jet_cli_live_decode(text: String) -> JetCLILiveSnapshot JetCLIReadError! {
     loop value in jet_cli_live_array(root, "values") {
         jet_cli_live_object(value, [String]{"value_id", "type_identity", "disposition", "reason"}, [String]{"rendered_value"}, "live value")
         disposition :: jet_cli_live_string(value, "disposition", "live value")
-        if ![String]{"kept", "migrated", "reset", "rejected"}.contains(disposition) -> return Err(jet_cli_read_error("live value has an unsupported disposition"))
+        if (![String]{"kept", "migrated", "reset", "rejected"}.contains(disposition)) -> return Err(jet_cli_read_error("live value has an unsupported disposition"))
         rendered := String?{None}
         if jet_cli_live_field(value, "rendered_value") == {
             None | .Val(.Null) -> {}

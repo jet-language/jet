@@ -18,13 +18,13 @@ fn jet_cli_live_event_closed(event: DataTree, key: String, allowed: [String]) ->
     Err(jet_cli_read_error("runtime event observation has invalid `{key}`"))
 }
 fn jet_cli_live_event_render(sequence: DataTree?) -> String JetCLIReadError! {
-    events :: if sequence == .Val(.Array(rows)) -> rows else -> return Err(jet_cli_read_error("runtime observation has no event sequence"))
+    events :: if sequence == .Val(.Array(rows)) -> rows else -> { return Err(jet_cli_read_error("runtime observation has no event sequence")) }
     if events.len() > 256 -> return Err(jet_cli_read_error("runtime event observation exceeds the 256-record limit"))
     keys :: [String]{"sequence", "source", "event_id", "owner_id", "subscription_id", "dispatch_id", "lifecycle", "queued", "blocked", "running", "capacity", "overflow", "priority", "failure", "terminal"}
     previous := 0
     lines := [String]{}
     loop event in events {
-        fields :: if event == .Object(fields) -> fields else -> return Err(jet_cli_read_error("runtime event observation is not an object"))
+        fields :: if event == .Object(fields) -> fields else -> { return Err(jet_cli_read_error("runtime event observation is not an object")) }
         if fields.len() != 15 -> return Err(jet_cli_read_error("runtime event observation contains an unsafe or unknown field"))
         loop field in fields { if !keys.contains(field.key) -> return Err(jet_cli_read_error("runtime event observation contains an unsafe or unknown field")) }
         sequence :: jet_cli_live_event_integer(event, "sequence", Val(0))

@@ -10,10 +10,10 @@ fn jet_cli_live_text(snapshot: JetCLILiveSnapshot) -> String Never! {
     }
     out := "jet inspect live · pid {snapshot.pid}\nprotocol={snapshot.protocol} session={snapshot.session_id} source={snapshot.source_id} build={snapshot.build_id} revision={snapshot.revision} world={snapshot.world_id}\n\ntask tree\n"
     if snapshot.tasks.len() == 0 -> out = "{out}  (no live tasks)\n"
-    loop task in snapshot.tasks {
-        deadline :: if task.deadline_ms == .Val(value) -> "{value}" else -> "-"
-        wait :: if task.wait == "" -> "-" else -> task.wait
-        out = "{out}  task {jet_cli_inspect_pad("{task.id}", 5)} parent {jet_cli_inspect_pad("{task.parent}", 5)} {jet_cli_inspect_pad(task.state, 8)} wait={wait} deadline={deadline} cancelled={task.cancelled}\n"
+    loop live_task in snapshot.tasks {
+        deadline :: if live_task.deadline_ms == .Val(value) -> "{value}" else -> "-"
+        wait :: if live_task.wait == "" -> "-" else -> live_task.wait
+        out = "{out}  task {jet_cli_inspect_pad("{live_task.id}", 5)} parent {jet_cli_inspect_pad("{live_task.parent}", 5)} {jet_cli_inspect_pad(live_task.state, 8)} wait={wait} deadline={deadline} cancelled={live_task.cancelled}\n"
     }
     out = "{out}\nchannels\n"
     if snapshot.channels.len() == 0 -> out = "{out}  (no live channels)\n"
@@ -32,8 +32,11 @@ fn jet_cli_live_text(snapshot: JetCLILiveSnapshot) -> String Never! {
     }
     if event_lines == .Val(events) {
         out = "{out}\nevents\n"
-        if events == "" -> out = "{out}  (no runtime event observations)\n"
-        else -> { loop line in events.split("\n") -> out = "{out}  {line}\n" }
+        if events == "" {
+            out = "{out}  (no runtime event observations)\n"
+        } else {
+            loop line in events.split("\n") -> out = "{out}  {line}\n"
+        }
     }
     out
 }
@@ -98,7 +101,7 @@ fn jet_cli_live_decisions_report(snapshot: JetCLILiveSnapshot, json: Bool) -> St
         counts[kind] = (counts.get(kind) ?? 0) + 1
     }
     kinds := [JetCLIStatusField]{}
-    loop kind in [String]{"tier", "inline", "vectorize", "parallel", "copy", "bounds", "deopt", "unreachable", "loop-invariant"} {
+    loop kind in ([String]{"tier", "inline", "vectorize", "parallel", "copy", "bounds", "deopt", "unreachable", "loop-invariant"}) {
         count :: counts.get(kind) ?? 0
         &kinds.push(jet_cli_status_field(kind, jet_cli_status_object([jet_cli_status_field("status", jet_cli_status_text(if count == 0 -> "not-applicable" else -> "present")), jet_cli_status_field("rows", jet_cli_status_int(count))])))
     }

@@ -141,7 +141,7 @@ fn jet_cli_cost_same(left: Diagnostic, right: Diagnostic) -> Bool Never! {
     left.code == right.code && left.severity == right.severity && left.span == right.span && left.what == right.what && left.why == right.why && left.fix == right.fix
 }
 fn jet_cli_cost_add(rows: &[Diagnostic], diagnostic: Diagnostic) Never! {
-    loop previous in rows { if jet_cli_cost_same(previous, diagnostic) -> return }
+    loop previous in rows { if jet_cli_cost_same(previous, diagnostic) { return } }
     &rows.push(diagnostic)
 }
 fn jet_cli_cost_diagnostics(report: TCostReport, sema: [Diagnostic]) -> [Diagnostic] Never! {

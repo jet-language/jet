@@ -81,7 +81,7 @@ fn jet_cli_fix_fn_header(source: String, open: Int) -> Int? Never! {
     loop end >= 3 {
         found := -1
         loop index in 0..<(end - 2) {
-            if bytes[index] == U8{102} && bytes[index + 1] == U8{110} && bytes[index + 2] == U8{32} -> found = index
+            if (bytes[index] == U8{102} && bytes[index + 1] == U8{110} && bytes[index + 2] == U8{32}) -> found = index
         }
         if found < 0 -> return None
         boundary := true
@@ -92,7 +92,7 @@ fn jet_cli_fix_fn_header(source: String, open: Int) -> Int? Never! {
         if boundary {
             paren := -1
             loop index in (found + 3)..<open {
-                if bytes[index] == U8{40} { paren = index; break }
+                if (bytes[index] == U8{40}) { paren = index; break }
             }
             if paren >= 0 {
                 if jet_cli_fix_matching_paren(source, paren + 1) == .Val(close) && close < open {
@@ -122,7 +122,7 @@ fn jet_cli_fix_replace_untyped(source: String, from: String, to: String) -> Stri
         found :: jet_cli_inspect_find(source, from, offset) ?? break
         out = "{out}{source.slice(offset..<found)}"
         after :: found + from.len()
-        out = "{out}{if after < source.len() && source.bytes()[after] == U8{60} -> from else -> to}"
+        out = "{out}{if (after < source.len() && source.bytes()[after] == U8{60}) -> from else -> to}"
         offset = after
     }
     "{out}{source.slice(offset..<source.len())}"
@@ -185,13 +185,13 @@ fn jet_cli_fix_inline_insertion(source: String) -> Int Never! {
     bytes :: source.bytes()
     first :: jet_driver_inline_trivia_end(bytes, 0)
     at := first
-    loop at > 0 && bytes[at - 1] != U8{10} -> at -= 1
+    loop (at > 0 && bytes[at - 1] != U8{10}) -> at -= 1
     loop index in at..<first {
         if !jet_driver_inline_space(Int.from_u8(bytes[index])) -> return first
     }
     loop at > 0 {
         previous := at - 1
-        loop previous > 0 && bytes[previous - 1] != U8{10} -> previous -= 1
+        loop (previous > 0 && bytes[previous - 1] != U8{10}) -> previous -= 1
         if !source.slice(previous..<at).trim_start().starts_with("///") -> break
         at = previous
     }
@@ -208,14 +208,14 @@ fn jet_cli_fix_rewrite_status(file: String, target: Int, selector: Int, prints: 
 
 fn jet_cli_fix_run(file: String, dry_run: Bool, edition: String?, all: Bool, color: Bool, quiet: Bool, json: Bool) -> JetDriverVerbOutput {
     before :: cli_files.read(file) ?? return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2105", "can't find the file `{file}`", jet_cli_why("E2105"), "correct the named problem, then run the command again", color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
-    edition_source :: if edition == Val("2027") -> jet_cli_fix_edition_2027(before) else -> before
+    edition_source :: if edition == (Val("2027")) -> jet_cli_fix_edition_2027(before) else -> before
     retired :: jet_cli_fmt_rewrite_retired_package_targets(edition_source, file)
     selectors :: jfmt_retired_interpolation_selector_edits(retired.text).len()
     prints :: jfmt_retired_print_family_edits(retired.text).len()
     types :: jfmt_retired_type_edits(retired.text).len()
     all_fixes :: if jet_cli_fix_collect(file, retired.text, true) == {
         .Fixes(found) -> found
-        .Refused(output) -> return output
+        .Refused(output) -> { return output }
     }
     fixes :: if all -> all_fixes else -> jet_cli_safe_fixes(all_fixes)
     skipped :: all_fixes.len() - fixes.len()
@@ -225,7 +225,7 @@ fn jet_cli_fix_run(file: String, dry_run: Bool, edition: String?, all: Bool, col
     loop applied.deferred > 0 && round < 16 {
         next_fixes :: if jet_cli_fix_collect(file, applied.source, all) == {
             .Fixes(found) -> found
-            .Refused(output) -> return output
+            .Refused(output) -> { return output }
         }
         next_applied :: jet_cli_fix_apply_non_overlapping(applied.source, next_fixes)
         if next_applied.source == applied.source -> break
@@ -234,7 +234,7 @@ fn jet_cli_fix_run(file: String, dry_run: Bool, edition: String?, all: Bool, col
         round += 1
     }
     status := ""
-    if edition == Val("2027") {
+    if edition == (Val("2027")) {
         loop note in jet_cli_fix_edition_audit(before, edition_source) -> status = "{status}{file}: edition 2027 migration: {note}\n"
     }
     if applied.source == before {

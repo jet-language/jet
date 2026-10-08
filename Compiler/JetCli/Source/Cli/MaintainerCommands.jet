@@ -10,9 +10,9 @@ use jet_driver.[JetDriverCompileMode, JetDriverCompileResult, JetDriverVerbOutpu
 use jet_foundation.diagnostic_render_all
 
 fn jet_cli_maintainer_error(code: String, what: String, why: String?, fix: String?, color: Bool, json: Bool, status: Int) -> JetDriverVerbOutput Never! {
-    copy :: jet_cli_diagnostic_copy(code)
-    reason :: why ?? copy.why
-    repair :: fix ?? copy.fix
+    diagnostic_copy :: jet_cli_diagnostic_copy(code)
+    reason :: why ?? diagnostic_copy.why
+    repair :: fix ?? diagnostic_copy.fix
     JetDriverVerbOutput{stdout: if json -> jet_cli_fail_json(code, what, reason, repair) else -> "", stderr: if json -> "" else -> jet_cli_report(code, what, reason, repair, color), exit_code: status}
 }
 
