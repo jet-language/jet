@@ -354,7 +354,8 @@ if (mode === "run") {
   append(`    print("jetpack-bootstrap: ${testNames.length} claims passed")\n}\n`);
 }
 if (mode === "publication") {
-  append("// [jetpack-bootstrap generated: internal native runtime-pack publisher]\nfn run() {\n    native_runtime_pack_publisher()\n}\n");
+  // Preserve the publisher's typed failure for the canonical entry reporter.
+  append("// [jetpack-bootstrap generated: internal native runtime-pack publisher]\nfn run() NativeRuntimePackError! {\n    native_runtime_pack_publisher()\n}\n");
 }
 
 await rm(projectDir, { recursive: true, force: true });

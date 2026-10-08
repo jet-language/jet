@@ -26,7 +26,7 @@ async function fixture(run) {
     await put("Jetpack/Bootstrap/tests.list", "# == Store ==\nJetpack/Store/Tests/Fixture.jet\n");
     await put(paths[0], "fn foundation_fixture() {}\n");
     await put(paths[1], "fn store_fixture() {}\n");
-    await put(entry, "fn native_runtime_pack_publisher() {}\n");
+    await put(entry, "fn native_runtime_pack_publisher() NativeRuntimePackError! {}\n");
     await put(paths[3], "fn cli_fixture() {}\n");
     await put("Jetpack/Store/Tests/Fixture.jet", '#Test("store fixture") {\n    assert(true)\n}\n');
     const invoke = (mode, extra = {}) => spawnSync(process.execPath, [assembler, mode], {
@@ -52,7 +52,7 @@ test("publication emits only the canonical Store closure plus one fixed forwardi
     assert.equal(source.includes("#Test"), false);
     assert.equal(source.includes("cli_fixture"), false);
     assert.equal((source.match(/\bfn run\(\)/g) ?? []).length, 1);
-    assert.equal(source.endsWith("// [jetpack-bootstrap generated: internal native runtime-pack publisher]\nfn run() {\n    native_runtime_pack_publisher()\n}\n"), true);
+    assert.equal(source.endsWith("// [jetpack-bootstrap generated: internal native runtime-pack publisher]\nfn run() NativeRuntimePackError! {\n    native_runtime_pack_publisher()\n}\n"), true);
   });
 });
 
