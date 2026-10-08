@@ -316,6 +316,9 @@ pub enum JetDataPlotAggregate {
     Max,
 }
 
+/// Raw native enum construction; source owns the plot policy using this value.
+pub fn jet_data_plot_aggregate_none() -> JetDataPlotAggregate { JetDataPlotAggregate::None }
+
 impl JetDataPlotAggregate {
     pub const fn as_str(self) -> &'static str {
         match self {

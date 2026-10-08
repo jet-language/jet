@@ -2730,6 +2730,9 @@ pub fn eval_data_call_in_state(
     data_plan: Option<&jet_foundation::MIR::MirDataPlan>,
     span: Span,
 ) -> Option<Result<CtValue, Diagnostic>> {
+    if module == "core.data.plot" && method == "__plot_aggregate_none" {
+        return Some(Ok(plot_aggregate_none_value()));
+    }
     // D-QUERY-RETAIN1=A: receiver Core rows carry an empty module. The
     // `Query`/`DataGroupedQuery` carrier is argument 0; callbacks are MIR
     // standalone closures invoked through the shared closure host. The
@@ -4445,6 +4448,10 @@ fn plot_channel_value(channel: data_plot_rt::JetDataPlotChannel) -> CtValue {
 
 fn plot_aggregate_value(aggregate: data_plot_rt::JetDataPlotAggregate) -> CtValue {
     plot_enum_value("JetDataPlotAggregate", aggregate.as_str())
+}
+
+pub(crate) fn plot_aggregate_none_value() -> CtValue {
+    plot_enum_value("JetDataPlotAggregate", &format!("{:?}", data_plot_rt::jet_data_plot_aggregate_none()))
 }
 
 fn plot_filter_op_value(op: data_plot_rt::JetDataPlotFilterOp) -> CtValue {

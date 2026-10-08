@@ -1583,7 +1583,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 169f4437fc277ec63d512b285567c3ad23e506fcc8cca61a5c5ff1621c518f34
+// Source SHA-256: 8bb854e8ba3d1e3bf804931ba515c4504577a616dec3e662ab9f8d4c50154592
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -2677,6 +2677,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.data.plot", "svg", "jet_data_plot_svg", true, &[true]),
     CoreCallRecord::new("core.data.plot", "show", "jet_data_plot_show", true, &[true]),
     CoreCallRecord::new( "core.data.plot", "render", "jet_data_plot_render", true, &[true, false], ),
+    CoreCallRecord::new("core.data.plot", "__plot_aggregate_none", "jet_data_plot_aggregate_none", true, &[]),
     CoreCallRecord::new("core.data", "plot", "jet_data_plot", true, &[true]),
     CoreCallRecord::new( "core.data", "left_join", "jet_data_left_join_checked_default", true, &[true, true, false, false], ) .without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.data", "pivot_sum", "jet_data_pivot_sum_checked_default", true, &[true, false, false, false]).without_direct_aot(),

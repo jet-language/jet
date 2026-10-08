@@ -520,6 +520,9 @@ fn core_sig_encoding_backing(request: CoreCallSignatureRequest) -> CoreTypedCall
     entry :: Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "key", ty: Type.String}, TypeTupleField{name: "value", ty: tree}}}
     entries :: Type.List{element: entry}
     cause :: core_sig_named("EncodingCause")
+    if module_name == "core.data.plot" && member == "__plot_aggregate_none" {
+        return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(core_sig_named("JetDataPlotAggregate"))))
+    }
     if module_name == "core.mem" && core_sig_one_of(member, [String]{"__list_capacity", "__list_reserve_exact", "__type_size"}) {
         element :: core_sig_named("T")
         params := [CoreCallTypedParameter]{}
