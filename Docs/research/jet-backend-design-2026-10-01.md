@@ -2182,6 +2182,23 @@ variant failure against the existing record-variant stop contract. Its
 stdout fixture is expected output only; native execution and source-layout
 admission require composition, not a syntax receipt.
 
+`ServiceValues.jet` implements the plain StateStore and Runtime carriers,
+not any channel, authority or task owner. Their private layouts in `DataABI`
+are an owned Text pointer and an owned Text pointer plus raw i64 retention.
+Constructors borrow inputs, clone Text and check exact Int narrowing before
+allocation; getters return fresh owners. Retention remains unchanged,
+including negative values. Runtime has no equality export. Show/display use
+the exact `Services.rs:1142-1150,1187-1195` formats and append the existing
+signed decimal formatter directly without allocating a temporary Text.
+The Runtime constructor follows `CAbiRoutes.rs:11319-11320`'s `native(m1)`:
+`CAbi.rs:169-172` stops on out-of-range exact Int. The native
+`jet_int_owned_to_i64` (`Int.jet:370-373`) selects `int_stop` reason 4,
+which delegates to `trap_native_index_range_stop` (`Int.jet:337-340`).
+`ServiceValuesWitness.c` tests both signed endpoints, negative and zero
+retention, NUL/Unicode Text, ownership and canonical narrowing stop modes
+against actual providers. Its stdout is an expectation; execution, native
+admission and old-body suppression remain composition checks.
+
 ### Native UI scalar and record carriers
 
 `UiCarriersABI.jet` in JetBackend/Source defines opaque native-private
