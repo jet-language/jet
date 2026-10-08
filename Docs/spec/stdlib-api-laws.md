@@ -492,3 +492,20 @@ An atomic is move-only and non-Clone: `~atomic` is rejected by the existing
 The same recursive classification still permits non-atomic generic values
 whose payloads are duplicable. Moving an atomic transfers its publication
 owner; it does not allocate a shared handle.
+
+All operations are sequentially consistent. The x64 native lowering lends
+the address of the actual atomic field, including inside a record or boxed
+`Result`; it does not copy the word into a temporary synchronization cell.
+The fixed-word Jet providers use aligned plain loads, `XCHG` stores
+(`store` and `publish`), and `LOCK` read-modify-write operations. `observe`
+is the same sequentially consistent operation as `load`.
+
+`new` and `try_new` allocate no atomic carrier and perform no fault probe.
+`try_new` returns `Ok` using the normal native `Result` metadata representation.
+`Atomic<Int>` owns its published exact integer; drop releases that owner.
+Its load and add return independent owned values, and compare-exchange tests
+numerical equality while retaining the observed node through the CAS.
+Fallible add borrows one 32-byte stack workspace, leaves the cell unchanged
+on refusal and converts the physical failed request to the canonical
+`AllocError` with allocator name `"exact-int"` using the existing record
+constructor, not a private error carrier.

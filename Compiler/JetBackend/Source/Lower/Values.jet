@@ -127,6 +127,7 @@ fn lower_inline_members(p: MIRProgram, ty: MIRType) -> [LowerMember] Never! {
 // A List or Map is an inline [len, cap, data] header (Lists.jet, Maps.jet), a
 // View<T> window the same header borrowing its buffer.
 fn lower_inline_size(p: MIRProgram, ty: MIRType) -> Int Never! {
+    if lower_atomic_scalar(p, ty) != None -> return 8
     if ty.kind == .List(_) | .Map(_, _) | .FixedList(_, _) -> return 24
     if lower_view_element(ty) != None -> return 24
     if lower_set_element(ty) != None -> return 24
@@ -478,6 +479,7 @@ fn lower_close_drop_glue(p: MIRProgram, m: &LowerModule, glue: LowerGlue, method
 }
 
 fn lower_needs_drop(p: MIRProgram, m: LowerModule, ty: MIRType) -> Bool Never! {
+    if lower_atomic_needs_drop(p, ty) -> return true
     if lower_repr(p, ty) == {
         .Handle(_, _) -> true
         .Boxed(_) -> true
@@ -507,6 +509,7 @@ fn lower_inline_drop(p: MIRProgram, m: &LowerModule, f: &LowerFunction, value: L
 }
 
 fn lower_inline_clone(p: MIRProgram, m: &LowerModule, f: &LowerFunction, source: LIRValueID, target: LIRValueID, ty: MIRType) Never! {
+    if !lower_atomic_clone_assert(p, &m, &f, ty) -> return
     aggregate :: lower_inline_type(p, ty) ?? return
     if !lower_needs_drop(p, m, aggregate) -> return lower_copy_bytes(&f, target, 0, source, 0, lower_inline_size(p, aggregate))
     signature :: lower_signature(&m, [LIRLayout]{lir_layout_pointer(), lir_layout_pointer()}, None)
