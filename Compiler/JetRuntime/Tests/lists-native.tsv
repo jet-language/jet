@@ -1,0 +1,23 @@
+symbol	dispatch	body	reference	semantics	limits
+jet_list_count	Lists.jet:lower_list_method_shape	Lists.jet:lower_list_method_shape	Core.rs:jet_list_count	borrowed equality walk; count each matching slot	stored elements
+jet_list_ends_with	Lists.jet:lower_list_method_more	Lists.jet:lower_helper_list_starts_with	Core/Collections.rs:jet_list_ends_with	length guard then suffix equality; empty suffix true	stored comparable elements
+jet_list_equal	Lists.jet:lower_list_method_more	Lists.jet:lower_list_method_more	Core/Collections.rs:jet_list_equal	delegate structural element equality	stored comparable elements
+jet_list_flatten	Lists.jet:lower_list_method_shape	Lists.jet:lower_list_method_shape	Core/Collections.rs:jet_list_flatten	one summed-length buffer; copy inner elements in order; release moved input	stored nested lists
+jet_list_get_opt	Lists.jet:lower_list_method	Lists.jet:lower_helper_list_get	Core/Collections.rs:jet_list_get_opt	negative/past-end None; independently owned cloned payload	stored elements
+jet_list_index_of	Lists.jet:lower_list_method_more	Lists.jet:lower_helper_list_index_of	Core/Collections.rs:jet_list_index_of	first equal index boxed as exact Int; otherwise None	stored comparable elements
+jet_list_insert	Lists.jet:lower_list_method_more	Lists.jet:lower_helper_list_insert	Core.rs:jet_list_insert	bounds 0 through len; reserve then shift owners; transfer incoming value	stored elements
+jet_list_is_empty	Lists.jet:lower_list_method	Lists.jet:lower_list_method	Core/Collections.rs:jet_list_is_empty	compare native length with zero	List/View header
+jet_list_join	Lists.jet:lower_list_method	Lists.jet:lower_helper_list_join	Core.rs:jet_list_join	show every element; separator only between elements	printable elements
+jet_list_len	Lists.jet:lower_list_method	Lists.jet:lower_list_method	Core/Collections.rs:jet_list_len	read native header length	List/View header
+jet_list_max	Lists.jet:lower_list_method_window	Lists.jet:lower_list_method_window	Core/Collections.rs:jet_list_max	last maximum wins ties; clone selected payload; empty None	ordered scalar elements; inline aggregates unsupported
+jet_list_min	Lists.jet:lower_list_method_window	Lists.jet:lower_list_method_window	Core/Collections.rs:jet_list_min	first minimum wins ties; clone selected payload; empty None	ordered scalar elements; inline aggregates unsupported
+jet_list_pop_kernel	Lists.jet:lower_list_method	Lists.jet:lower_helper_list_pop	Core/Collections.rs:jet_list_pop_kernel	empty None; decrement length and transfer last owner into box	stored elements
+jet_list_product	Lists.jet:lower_list_method_more	Lists.jet:lower_list_reduce_int	Core/Collections.rs:jet_list_product	exact Int fold starting at one; no intermediate narrowing	exact Int only
+jet_list_push	Lists.jet:lower_list_method	Lists.jet:lower_helper_list_push	Core/Collections.rs:jet_list_push	reserve moves existing owners; append transfers incoming owner; increment length	stored elements and absent Unit
+jet_list_remove_slot	Lists.jet:lower_list_method_shape	Lists.jet:lower_helper_list_remove	Core.rs:jet_list_remove_slot	invalid index stops; transfer selected owner; shift remaining owners down	stored elements
+jet_list_remove_value	Lists.jet:lower_list_method_shape	Lists.jet:lower_helper_list_remove	Core.rs:jet_list_remove_value	first equality match removed; absent None; transfer owner then shift	stored comparable elements
+jet_list_slice	Lists.jet:lower_list_method_window	Lists.jet:lower_list_method_window	Core/Collections.rs:jet_list_slice	clamp bounds; reversed window empty; clone selected window	stored elements
+jet_list_sort	Lists.jet:lower_list_method_more	Lists.jet:lower_helper_list_sort	Core/Collections.rs:jet_list_sort	stable ascending order; swap owners without clone/drop	ordered stored elements
+jet_list_sort_desc	Lists.jet:lower_list_method_more	Lists.jet:lower_helper_list_sort	Core/Collections.rs:jet_list_sort_desc	stable descending order; swap owners without clone/drop	ordered stored elements
+jet_list_starts_with	Lists.jet:lower_list_method_more	Lists.jet:lower_helper_list_starts_with	Core/Collections.rs:jet_list_starts_with	length guard then prefix equality; empty prefix true	stored comparable elements
+jet_list_sum	Lists.jet:lower_list_method_more	Lists.jet:lower_list_reduce_int	Core/Collections.rs:jet_list_sum	exact Int fold starting at zero; no intermediate narrowing	exact Int only
