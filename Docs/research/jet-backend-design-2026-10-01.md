@@ -2212,6 +2212,23 @@ is an expectation, not execution evidence. Named CAbi nominal route
 admission and seed-route regeneration must happen in the composed native
 unit; these providers do not introduce a second factory or protocol.
 
+`CountMinSketch.jet` is the native Count-Min producer and mutable owner.
+CR4 card #4828 (`D-SKETCH-CLONE1`) requires the seed's Arc/Mutex sharing:
+handle clones retain the same 4112-byte state, not independent row snapshots.
+The state contains reference count, mutex and four rows of 256 packed u32
+counters. `Sketch.rs:3-18,125-168` supplies the two wrapping FNV hashes,
+declaration-order row indexing, saturating increment and minimum count.
+Hashing is outside the lock; all four counter reads or mutations are inside
+one unchanged mutex scope. Count returns a fresh exact Int; show is exactly
+`CountMinSketch` (`Core.rs:666-670`) and does not read rows.
+The actual producer `JetCountMinSketch_new` and canonical
+`jet_rt_native_cms_add`/`jet_rt_native_cms_count` exports serve both runtime
+method callers and `CountMinSketchWitness.c`, without test-only adapters.
+The witness checks deterministic rows, clone-visible mutation, u32 saturation,
+concurrent shared increments and last-owner release with `--wrap=jet_rt_free`.
+Its stdout is expected output only. Native method-rail admission and
+seed-route regeneration remain composed native-backend gates.
+
 ### Native UI scalar and record carriers
 
 `UiCarriersABI.jet` in JetBackend/Source defines opaque native-private
