@@ -31,6 +31,7 @@ fn native_runtime_publication_input(blobs: [NativeRuntimePublicationBlob], objec
 }
 
 fn native_runtime_publication_steps(store: ArtifactStore, fields: [String: DataTree]) -[FS, Env, Exec, Time, Rand]> [NativeRuntimeObservedStep] NativeRuntimePackError! {
+    census := NativePackReadCensus{capture: false, objects: [ObjectHandle]{}}
     steps := [NativeRuntimeObservedStep]{}
     loop value in native_pack_array_field(fields, "steps") {
         row :: native_pack_fields(value, [String]{"schema", "id", "rc", "invocation", "inputs", "outputs", "log"})
@@ -41,7 +42,7 @@ fn native_runtime_publication_steps(store: ArtifactStore, fields: [String: DataT
         inputs :: native_pack_roles_field_empty(row, "inputs")
         outputs :: native_pack_roles_field_empty(row, "outputs")
         log :: native_pack_handle_field(row, "log")
-        _ :: native_pack_blob(store, log)
+        _ :: native_pack_blob(store, log, &census)
         // Every issued step record comes through the one Jet canonical codec.
         receipt :: store.publish_blob(native_pack_encode(value))
         &steps.push(NativeRuntimeObservedStep{id, observed_rc, invocation, inputs, outputs, receipt})
@@ -50,6 +51,7 @@ fn native_runtime_publication_steps(store: ArtifactStore, fields: [String: DataT
 }
 
 fn native_runtime_publication_execute(mode: String, request_path: String, result_path: String) NativeRuntimePackError! -[FS, Env, Exec, Time, Rand]> {
+    census := NativePackReadCensus{capture: false, objects: [ObjectHandle]{}}
     request :: json.parse(files.read(request_path))
     keys := [String]{"schema", "subject", "blobs", "admission", "rail_contract", "job", "proof_done", "proof_terminal", "final_source_tree", "generation", "raw_frontend", "steps", "compiler"}
     if mode == "publish" -> &keys.push("publication_authorization")
@@ -81,7 +83,7 @@ fn native_runtime_publication_execute(mode: String, request_path: String, result
     authorization :: native_pack_handle_field(fields, "publication_authorization")
     compiler :: native_pack_handle_field(fields, "compiler")
     published :: native_runtime_pack_publish(store, subject, evidence.approval(prepared, authorization), compiler)
-    composition :: NativeCandidateComposition.from_bytes(native_pack_blob(store, published.object))
+    composition :: NativeCandidateComposition.from_bytes(native_pack_blob(store, published.object, &census))
     result :: native_pack_encode(DataTree.Object([String: DataTree]{
         "schema": DataTree.Text("jet.native-runtime-published-candidate/v1"),
         "compiler": native_pack_handle_tree(compiler), "composition": native_pack_handle_tree(published.object),
