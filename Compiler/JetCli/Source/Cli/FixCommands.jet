@@ -250,7 +250,7 @@ fn jet_cli_fix_run(file: String, dry_run: Bool, edition: String?, all: Bool, col
         status = "{status}{jet_cli_fix_rewrite_status(file, retired.count, selectors, prints, types)}"
         if skipped > 0 -> status = "{status}{file}: skipped {skipped} suggestion{if skipped == 1 -> "" else -> "s"} for review (dry run)\n"
     } else {
-        log :: jet_cli_commit_fix(file, before.bytes(), applied.source.bytes()) ?? return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2105", err.message, jet_cli_why("E2105"), "correct the named problem, then run the command again", color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+        log :: jet_cli_commit_fix(file, before.bytes(), applied.source.bytes(), None) ?? return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2105", err.message, jet_cli_why("E2105"), "correct the named problem, then run the command again", color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
         if count == 0 && retired.count == 0 && selectors == 0 && prints == 0 && types == 0 -> status = "{status}{file}: applied edition migration\n"
         if count > 0 -> status = "{status}{file}: applied {count} fix{if count == 1 -> "" else -> "es"}\n"
         if skipped > 0 -> status = "{status}{file}: skipped {skipped} suggestion{if skipped == 1 -> "" else -> "s"} for review\n"

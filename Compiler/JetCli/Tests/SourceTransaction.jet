@@ -1,8 +1,18 @@
 // Assemble with Compiler and execute once with the real held-directory host.
+struct JetCLITransactionFixtureRoot {
+    path: String
+}
+impl JetCLITransactionFixtureRoot.Close {
+    fn close(^self) -[FS]> {
+        cli_files.remove_all(self.path).drop("test project cleanup")
+    }
+}
+
 fn run() {
     root :: "{cli_sys.temp_dir()}/jet-source-transaction-{cli_process.current_pid()}"
     cli_files.create_dir_all(root) ?? panic("test project")
-    defer cli_files.remove_all(root).drop("test project cleanup")
+    owner :: JetCLITransactionFixtureRoot{path: root}
+    defer close(^owner)
     cli_files.write("{root}/first.jet", "first") ?? panic("first source")
     cli_files.write("{root}/second.jet", "second") ?? panic("second source")
     changes :: [JetCLISourceChange]{
@@ -24,8 +34,10 @@ fn run() {
     assert(restored_first == "first" && restored_second == "second")
     journal :: cli_files.exists("{root}/.jet/codemods/transaction.journal")
     assert(!journal)
-    operations :: jet_cli_fix_rewrite("fn rün() { 1 }".bytes(), "fn rün() { 2 }".bytes())
-    assert(operations.len() == 1 && operations[0].from == Val("1") && operations[0].to == Val("2"))
+    operations :: jet_cli_fix_rewrite(`fn rün() { 1 }`.bytes(), `fn rün() { 2 }`.bytes())
+    assert(operations.len() == 1)
+    if operations[0].from == .Val(from) -> assert(from == "1") else { panic("rewrite from missing") }
+    if operations[0].to == .Val(to) -> assert(to == "2") else { panic("rewrite to missing") }
     assert(jet_cli_fix_rewrite([U8]{255}, [U8]{254}).len() == 0)
     escaped :: jet_cli_transaction_relative(root, "{root}/../outside.jet") == .Err(_)
     assert(escaped)
