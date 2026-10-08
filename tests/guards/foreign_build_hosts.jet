@@ -6,13 +6,14 @@ fn s1_host_read(path: String) -> String { s1_host_files.read(path) ?? panic("rea
 fn s1_host_maintained_lines(path: String) -> Int {
     count := 0
     loop line in s1_host_read(path).lines() {
-        trimmed :: line.trim()
+        // #4819: stored trim views ICE at String method calls; keep owned text.
+        trimmed :: ~line.trim()
         if !trimmed.is_empty() && !trimmed.starts_with("#") && !trimmed.starts_with("//") && !trimmed.starts_with("<!--") -> count += 1
     }
     count
 }
 
-#Test("adapters_use_one_jet_library_runner_and_fail_closed_outputs") {
+fn s1_host_adapters_use_one_jet_library_runner_and_fail_closed_outputs() {
     root :: "Tools/foreign-build-hosts"
     runner :: s1_host_read("{root}/jet-library.sh")
     powershell :: s1_host_read("{root}/jet-library.ps1")
@@ -51,7 +52,7 @@ fn s1_host_maintained_lines(path: String) -> Int {
     }
 }
 
-#Test("representative_projects_declare_exact_inputs_and_stay_under_ten_lines") {
+fn s1_host_representative_projects_declare_exact_inputs_and_stay_under_ten_lines() {
     root :: "tests/fixtures/foreign_build_hosts"
     hosts :: [String]{"cmake", "gradle", "bazel", "msbuild"}
     descriptors :: [String]{"CMakeLists.txt", "build.gradle", "BUILD.bazel", "host.proj"}
@@ -76,7 +77,7 @@ fn s1_host_maintained_lines(path: String) -> Int {
     }
 }
 
-#Test("host_descriptors_are_small_and_route_to_native_library_targets") {
+fn s1_host_descriptors_are_small_and_route_to_native_library_targets() {
     cmake :: s1_host_read("tests/fixtures/foreign_build_hosts/cmake/CMakeLists.txt")
     assert(cmake.contains("find_package(Jet REQUIRED)"))
     assert(cmake.contains("jet_library"))
@@ -127,4 +128,16 @@ fn s1_host_maintained_lines(path: String) -> Int {
     assert(docs.contains("jet-library-set-v1"))
     assert(docs.contains("lifecycle.cpp"))
     assert(docs.contains("CMAKE_TOOLCHAIN_FILE"))
+}
+
+#Test("adapters_use_one_jet_library_runner_and_fail_closed_outputs") {
+    s1_host_adapters_use_one_jet_library_runner_and_fail_closed_outputs()
+}
+
+#Test("representative_projects_declare_exact_inputs_and_stay_under_ten_lines") {
+    s1_host_representative_projects_declare_exact_inputs_and_stay_under_ten_lines()
+}
+
+#Test("host_descriptors_are_small_and_route_to_native_library_targets") {
+    s1_host_descriptors_are_small_and_route_to_native_library_targets()
 }
