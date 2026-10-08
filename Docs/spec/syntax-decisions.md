@@ -983,6 +983,10 @@ does not alter the method's declared generic signature.
 
 **S73 — Tuples**: named members only — `p :: (x: 1, y: 2)`, `p.x`, type
 position `(min: Int, max: Int)`. No positional tuples, no `.0`.
+Named tuple identity uses fields sorted by name at construction, irrespective of
+source spelling order. Synthesized Core signatures obey the same invariant,
+including tuples nested in containers, callbacks, and failure domains; assignment
+does not repair or suppress a mismatched identity.
 
 **S76 / D-FIXARR1 — Fixed-size lists**: `[T#N]` is a compile-time-length
 refinement of `[T]`, lowered to a **real stack array**. `::` + literal
