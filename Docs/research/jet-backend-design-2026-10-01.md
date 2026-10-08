@@ -2126,3 +2126,10 @@ the canonical TextDebug Unicode escape primitive and Trap interval table,
 with single-quote (not double-quote) short escaping. The frozen pinned Rust
 oracle covers every valid scalar; native renderer execution is a separate
 integration gate. No transient scalar text or second Unicode table is used.
+
+`UiEvents.jet` owns event text and the packed TUI I/O byte sequence transitively,
+reusing DataTree's byte-list clone/drop and HostServices' byte access. Inline
+resize dimensions preserve IEEE equality (including NaN self-inequality and
+signed-zero equivalence); timer elapsed values retain all i64 bits. Modifier
+and focus fields ignore padding beyond their seed byte width. The event
+ownership witness checks all variants, byte-list independence and exact frees.
