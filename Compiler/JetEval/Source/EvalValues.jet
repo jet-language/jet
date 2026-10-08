@@ -49,6 +49,7 @@ use jet_foundation.[
     diagnostic_from_registry,
     mir_type_display_name,
     stable_id,
+    mir_source_value_hook,
 ]
 use jet_sema.[
     SemaRegistrationHostHooks,
@@ -703,6 +704,9 @@ struct JetEvalProgramRows {
     // Per-function id rows, parallel to program.functions; each entry is
     // filled on the function's first lookup (jet_eval_function_rows_ready).
     pub function_rows: [JetEvalFunctionRows]
+    pub source_clone_hooks: [U64:MIRFunctionID]
+    pub source_show_hooks: [U64:MIRFunctionID]
+    pub source_debug_hooks: [U64:MIRFunctionID]
 }
 
 // Row positions in one function's id tables, so evaluator lookups for a
@@ -806,6 +810,22 @@ fn jet_eval_program_rows(program: MIRProgram) -> JetEvalProgramRows Never! {
     loop _ in 0..<program.functions.len() {
         &function_rows.push(JetEvalFunctionRows{built: false, blocks: [U64:Int]{}, places: [U64:Int]{}, values: [U64:Int]{}, values_next: [Int]{}, locals: [U64:Int]{}, locals_next: [Int]{}})
     }
+    source_clone_hooks := [U64:MIRFunctionID]{}
+    source_show_hooks := [U64:MIRFunctionID]{}
+    source_debug_hooks := [U64:MIRFunctionID]{}
+    loop instance in program.type_instances {
+        if instance.kind == .Apply(owner, _) {
+            if source_clone_hooks.get(owner.id.value) == None {
+                if mir_source_value_hook(program, instance, "clone") == .Val(id) -> source_clone_hooks[owner.id.value] = id
+            }
+            if source_show_hooks.get(owner.id.value) == None {
+                if mir_source_value_hook(program, instance, "show") == .Val(id) -> source_show_hooks[owner.id.value] = id
+            }
+            if source_debug_hooks.get(owner.id.value) == None {
+                if mir_source_value_hook(program, instance, "debug") == .Val(id) -> source_debug_hooks[owner.id.value] = id
+            }
+        }
+    }
     JetEvalProgramRows{
         functions: functions,
         fields: fields,
@@ -823,6 +843,9 @@ fn jet_eval_program_rows(program: MIRProgram) -> JetEvalProgramRows Never! {
         core_owners_by_nominal: core_owners_by_nominal,
         core_owners_by_id: core_owners_by_id,
         function_rows: function_rows,
+        source_clone_hooks: source_clone_hooks,
+        source_show_hooks: source_show_hooks,
+        source_debug_hooks: source_debug_hooks,
     }
 }
 
@@ -1666,6 +1689,104 @@ fn jet_eval_copy_value(value: JetEvalRuntimeValue, machine: &JetEvalMachine, spa
     }
     if !jet_eval_retain_value(&machine, value, span) -> return None
     Val(value)
+}
+
+// A MIR Copy is a semantic value copy. Frame/argument/address retention uses
+// copy_value above instead, and must never fork a borrowed receiver.
+fn jet_eval_semantic_copy(value: JetEvalRuntimeValue, ty: MIRType, machine: &JetEvalMachine, span: Span) -> JetEvalRuntimeValue? {
+    if !jet_eval_validate_borrow(value, &machine, span) -> return None
+    if ty.kind == .Tagged(_, inner) -> return jet_eval_semantic_copy(value, inner, &machine, span)
+    if ty.kind == .Apply(owner, args) {
+        if machine.rows.source_clone_hooks.get(owner.id.value) == .Val(id) {
+            return jet_eval_invoke(&machine, id, [JetEvalRuntimeValue]{value}, [JetEvalRuntimeValue]{}, span)
+        }
+        if machine.rows.types.get(owner.id.value) == .Val(row) {
+            definition :: machine.program.types[row]
+            if definition.kind == .Alias(inner) {
+                child_ty :: jet_eval_host_substitute_type(inner, definition.generic_params, args)
+                return jet_eval_semantic_copy(value, child_ty, &machine, span)
+            }
+        }
+    }
+    if value == {
+        .Result(ok, child) -> {
+            child_ty :: jet_eval_host_option_child_type(&machine, Val(ty), ok, span) ?? return None
+            copied :: jet_eval_semantic_copy(child, child_ty, &machine, span) ?? return None
+            return Val(JetEvalRuntimeValue.Result{ok: ok, value: ^copied})
+        }
+        .Aggregate(aggregate) -> {
+            if aggregate == {
+                .List(values) -> {
+                    child_ty :: jet_eval_host_sequence_element_type(&machine, Val(ty), span) ?? return None
+                    copied := [JetEvalRuntimeValue]{}
+                    loop child in values {
+                        next :: jet_eval_semantic_copy(child, child_ty, &machine, span) ?? {
+                            jet_eval_drop_values(&machine, copied, span)
+                            return None
+                        }
+                        &copied.push(^next)
+                    }
+                    return Val(JetEvalRuntimeValue.Aggregate{value: JetEvalRuntimeAggregate.List{values: ^copied}})
+                }
+                .Struct(name, fields) -> {
+                    copied := [JetEvalRuntimeField]{}
+                    loop field in fields {
+                        child_ty :: jet_eval_host_struct_field_type(&machine, Val(ty), field.name, span) ?? {
+                            loop prior in copied -> jet_eval_drop_value(&machine, prior.value, span)
+                            return None
+                        }
+                        child :: jet_eval_semantic_copy(field.value, child_ty, &machine, span) ?? {
+                            loop prior in copied -> jet_eval_drop_value(&machine, prior.value, span)
+                            return None
+                        }
+                        &copied.push(JetEvalRuntimeField{name: field.name, value: ^child})
+                    }
+                    return Val(JetEvalRuntimeValue.Aggregate{value: JetEvalRuntimeAggregate.Struct{type_name: name, fields: ^copied}})
+                }
+                .Enum(name, variant, args) -> {
+                    copied := [JetEvalRuntimeEnumArg]{}
+                    loop (index, arg) in args {
+                        child_ty :: jet_eval_host_enum_arg_type(&machine, Val(ty), variant, arg.name, index, span) ?? {
+                            loop prior in copied -> jet_eval_drop_value(&machine, prior.value, span)
+                            return None
+                        }
+                        child :: jet_eval_semantic_copy(arg.value, child_ty, &machine, span) ?? {
+                            loop prior in copied -> jet_eval_drop_value(&machine, prior.value, span)
+                            return None
+                        }
+                        &copied.push(JetEvalRuntimeEnumArg{name: arg.name, value: ^child})
+                    }
+                    return Val(JetEvalRuntimeValue.Aggregate{value: JetEvalRuntimeAggregate.Enum{type_name: name, variant: variant, args: ^copied}})
+                }
+                .Map(entries) -> {
+                    if ty.kind == .Map(key_ty, value_ty) {
+                        copied := [JetEvalRuntimeMapEntry]{}
+                        loop entry in entries {
+                            key :: jet_eval_semantic_copy(entry.key, key_ty, &machine, span) ?? {
+                                loop prior in copied {
+                                    jet_eval_drop_value(&machine, prior.key, span)
+                                    jet_eval_drop_value(&machine, prior.value, span)
+                                }
+                                return None
+                            }
+                            child :: jet_eval_semantic_copy(entry.value, value_ty, &machine, span) ?? {
+                                jet_eval_drop_value(&machine, key, span)
+                                loop prior in copied {
+                                    jet_eval_drop_value(&machine, prior.key, span)
+                                    jet_eval_drop_value(&machine, prior.value, span)
+                                }
+                                return None
+                            }
+                            &copied.push(JetEvalRuntimeMapEntry{key: ^key, value: ^child})
+                        }
+                        return Val(JetEvalRuntimeValue.Aggregate{value: JetEvalRuntimeAggregate.Map{entries: ^copied}})
+                    }
+                }
+            }
+        }
+        else -> {}
+    }
+    jet_eval_copy_value(value, &machine, span)
 }
 fn jet_eval_runtime_aggregate_data(value: JetEvalRuntimeAggregate, machine: &JetEvalMachine, span: Span) -> TComptimeValue? {
     if value == {

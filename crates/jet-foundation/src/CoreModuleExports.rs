@@ -1090,7 +1090,7 @@ pub fn core_source_owns_type(name: &str) -> bool {
 /// Private semantic routes for exact source declaration identities. These
 /// routes do not grant user-visible Clone, Display, or Debug implementations.
 pub fn core_source_value_hook(name: &str, operation: &str) -> Option<&'static str> {
-    if !name.starts_with(crate::Diagnostics::CORE_SOURCE_ROOT) {
+    if !name.strip_prefix(crate::Diagnostics::CORE_SOURCE_ROOT).is_some_and(|rest| rest.starts_with('/')) {
         return None;
     }
     if name.ends_with("::Core/time/time.jet::Clock") {

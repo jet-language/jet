@@ -37,3 +37,21 @@ fn system_process_and_files_internals_parse_as_trusted_core() {
 fn watcher_event_carriers_use_the_trusted_loader_lexing_contract() {
     parse_trusted_core("watcher", include_str!("../../../Core/watcher/watcher.jet"));
 }
+
+#[test]
+fn source_value_hooks_parse_as_trusted_compiler() {
+    for (name, source) in [
+        ("eval-values", include_str!("../../../Compiler/JetEval/Source/EvalValues.jet")),
+        ("eval-operations", include_str!("../../../Compiler/JetEval/Source/EvalOperations.jet")),
+        ("eval", include_str!("../../../Compiler/JetEval/Source/Evaluator.jet")),
+        ("eval-format", include_str!("../../../Compiler/JetEval/Source/Formatting/Values.jet")),
+        ("emit-types", include_str!("../../../Compiler/JetCodegen/Source/Emit/Types.jet")),
+        ("source-hook-registry", include_str!("../../../Compiler/JetFoundation/Source/Registry/CoreModules.jet")),
+        ("mir-hooks", include_str!("../../../Compiler/JetFoundation/Source/MIR/MIR.jet")),
+        ("native-values", include_str!("../../../Compiler/JetBackend/Source/Lower/Values.jet")),
+        ("native-reach", include_str!("../../../Compiler/JetBackend/Source/Lower/Reach.jet")),
+        ("native-display", include_str!("../../../Compiler/JetBackend/Source/Lower/Display.jet")),
+    ] {
+        parse_trusted_core(name, source);
+    }
+}
