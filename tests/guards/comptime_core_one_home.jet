@@ -64,7 +64,7 @@ fn s6_comptime_collapse_whitespace(source: String) -> String {
     architecture :: files.read("Docs/spec/architecture.md") ?? panic("read architecture classification")
     loop row in source.split("module_name: \"") {
         if row.starts_with("core.") {
-            namespace :: row.split("\"")[0].to_string()
+            namespace :: row.split("\"").to_list()[0].to_string()
             assert(architecture.contains("| `{namespace}` |"), "architecture classification is missing {namespace}")
         }
     }
