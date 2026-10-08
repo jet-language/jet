@@ -382,6 +382,17 @@ Certificate subject/issuer and peer name/cipher projections lend caller-owned
 E4 descriptors, which must not be freed, grown, or consumed. Signed validity
 timestamps remain raw i64 facts. `TLSCertificateWitness.c` exercises deep clones,
 parent lifetimes, list growth, and these borrowed projections.
+
+Native client identity owns its inline PEM byte-list header and a native
+Secret handle. Cloning copies only initialized U8 elements into independent
+buffers; dropping delegates private-key erasure and release to the canonical
+Secret provider, including its entire capacity and host U8 stride. Client
+configuration owns inline trust, optional identity, raw protocol-version tags,
+and an ALPN text list. Its trust projection borrows the parent's inline field.
+`TLSClientWitness.c` checks independence, optional identity, all trust variants,
+ALPN ownership, null drops, and private-key capacity erasure before deallocation.
+This data-provider contract does not claim TLS engine or certificate validation.
+
 ## Dependency order
 
 Core work follows the dependency graph. These categories describe dependency
