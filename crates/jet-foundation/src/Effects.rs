@@ -280,6 +280,7 @@ fn core_effect_legacy(module: &str, method: &str) -> Option<Effect> {
                 | "zoned"
                 | "zoned_local"
                 | "__embedded_zone_bytes"
+                | "__clock_mono_ns"
         ) | ("core.math.random", "rng")
     ) {
         return None;

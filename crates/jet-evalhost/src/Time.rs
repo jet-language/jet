@@ -88,9 +88,18 @@ pub(crate) fn ambient_core_call(
         ("__world_monotonic_ns", []) => optional_value(
             scheduler::jet_scheduler_world_monotonic_now_ns().map(CtValue::Int), Type::Int,
         ),
-        ("__host_monotonic_ns", []) => unsigned_value(scheduler::jet_time_monotonic_host_sample()),
+        ("__host_monotonic_ns" | "__clock_mono_ns", []) => unsigned_value(scheduler::jet_time_monotonic_host_sample()),
         ("__reject_uncontrolled", [CtValue::Str(effect)]) => {
             scheduler::jet_scheduler_world_reject_uncontrolled(effect);
+            CtValue::Unit
+        }
+        ("__sleep_ns", [nanos]) => {
+            let nanos = match nanos {
+                CtValue::Int(nanos) => *nanos,
+                CtValue::BigInt(nanos) => nanos.try_i64()?,
+                _ => return None,
+            };
+            jet_std_time_sleep_duration_ns(nanos);
             CtValue::Unit
         }
         ("__zone_env", [CtValue::Str(name)]) => optional_value(

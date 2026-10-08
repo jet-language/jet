@@ -1058,7 +1058,7 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
             Some(value) => CtValue::Present(Box::new(CtValue::Int(value))),
             None => CtValue::absent(Type::Int),
         }),
-        ("core.time", "__host_monotonic_ns") => {
+        ("core.time", "__host_monotonic_ns" | "__clock_mono_ns") => {
             let value = jet_foundation::Monotonic::jet_time_monotonic_host_sample();
             Ok(match i64::try_from(value) {
                 Ok(value) => CtValue::Int(value),

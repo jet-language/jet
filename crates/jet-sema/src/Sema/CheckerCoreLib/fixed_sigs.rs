@@ -2649,8 +2649,9 @@ fn core_fixed_sig_impl(
         ])))),
         ("core.time", "__world_wall_ms" | "__wall_override_ms" | "__controlled_monotonic_ns" | "__world_monotonic_ns") =>
             Some((vec![], Some(Type::Option(Box::new(Type::Int))))),
-        ("core.time", "__host_monotonic_ns") => Some((vec![], Some(Type::Int))),
+        ("core.time", "__host_monotonic_ns" | "__clock_mono_ns") => Some((vec![], Some(Type::Int))),
         ("core.time", "__reject_uncontrolled") => Some((vec![(read, Type::String)], Some(unit))),
+        ("core.time", "__sleep_ns") => Some((vec![(read, Type::Int)], Some(unit))),
         ("core.time", "__zone_env") =>
             Some((vec![(read, Type::String)], Some(Type::Option(Box::new(Type::String))))),
         ("core.time", "__zone_file_bytes" | "__embedded_zone_bytes") =>
