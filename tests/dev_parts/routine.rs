@@ -5935,7 +5935,7 @@ impl Email.Decode {
 
 fn run() {
     e := Email{addr: "a@b.com"}
-    s := json.to_string(e)
+    s := json.to_string(e) ?? panic("JSON encode")
     print(s)
     back := json.decode<Email>(s) ?? panic("decode failed")
     print(back.addr)

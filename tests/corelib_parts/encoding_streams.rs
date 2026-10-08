@@ -118,10 +118,10 @@ fn run() {
     print(encoded.len())
     loop byte in encoded -> print(Int.from_u8(byte))
     value :: cbor.parse(encoded, cbor.CBOROptions{max_depth: 256, max_items: 1000000, max_bytes: 1073741824, require_canonical: true}) ?? panic("parse")
-    print(json.to_string(value))
+    print(json.to_string(value) ?? panic("JSON encode"))
     permissive :: cbor.CBOROptions{max_depth: 256, max_items: 1000000, max_bytes: 1073741824, require_canonical: false}
     chunked :: cbor.parse([U8]{127, 98, 195, 169, 96, 255}, permissive) ?? panic("indefinite UTF-8")
-    print(json.to_string(chunked))
+    print(json.to_string(chunked) ?? panic("JSON encode"))
     if cbor.parse([U8]{127, 97, 195, 97, 169, 255}, permissive) == {
         .Ok(_) -> panic("split UTF-8 scalar accepted")
         .Err(error) -> {
@@ -210,7 +210,7 @@ fn json_object_entry_view_borrows_original_storage_without_allocating() {
 use core.encoding.json as json
 fn run() {
     tree :: json.parse("{{\"z\":[1,2],\"a\":\"kept\"}}") ?? panic("parse")
-    print(json.to_string(tree))
+    print(json.to_string(tree) ?? panic("JSON encode"))
     print(json.canonical(tree) ?? panic("canonical"))
 }
 "#;

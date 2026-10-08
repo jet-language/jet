@@ -1,7 +1,8 @@
 use core.math as image_json_math
 
 #Test("image JSON maps non-finite values to the existing InvalidData error") {
-    loop number in [Float]{image_json_math.nan(), image_json_math.infinity(), -image_json_math.infinity()} {
+    numbers :: [Float]{image_json_math.nan(), image_json_math.infinity(), -image_json_math.infinity()}
+    loop number in numbers {
         tree :: DataTree.Object([String: DataTree]{"nested": DataTree.Array([DataTree]{DataTree.Float(number)})})
         if image_json_text(tree) == {
             .Ok(_) -> panic("non-finite image JSON accepted")
