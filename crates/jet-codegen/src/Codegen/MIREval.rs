@@ -32967,7 +32967,7 @@ fn run() {
             // Supply a Write address directly so this tests the interception,
             // independently of the old consuming signature being corrected.
             let bundle = checked_bundle(
-                "fn run() {\n    bytes := [U8]{1, 2, 3}\n    core.crypto.__zeroize(^bytes)\n}",
+                "use core.crypto as crypto\nfn run() {\n    bytes := [U8]{1, 2, 3}\n    crypto.__zeroize(^bytes)\n}",
                 true,
             );
             let request = jet_foundation::MIR::MirArtifactRequest::new(
