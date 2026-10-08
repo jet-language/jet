@@ -241,6 +241,13 @@ adapter. A count outside I64 stops before the method, matching reference
 and retains its ordinary Err text. The conversion borrows the operand and
 does not broaden the Word ABI for other routes.
 
+`Int.to_radix(base)` remains checked `String`. Its runtime descriptor keeps
+the kernel's raw `Result<Text, Text>` ABI, and Lower supplies the canonical
+caller adapter: success retains the owned String directly, with no Result
+box; failure borrows the selected error text for `jet_rt_numeric_stop` at
+`<mir>`, line 0, matching MIRRust and JetEmit. The valid/invalid radix Lower
+fixtures cover both edges without making runtime execution claims.
+
 Scan capture classification reuses the canonical `lower_packed_storage_type`
 alias/tag resolver for fixed integers, then requires an `IntN` storage kind.
 The shared word carrier therefore does not admit binary32 as an integer scan

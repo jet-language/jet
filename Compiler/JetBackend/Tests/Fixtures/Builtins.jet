@@ -192,3 +192,25 @@ fn fx_try_capacity_unit() -> MIRProgram Never! { fx_try_capacity_program("unit")
 // expect-stdout try-capacity-unit-fault: "false\n5\nList\n1\n"
 // expect-runtime-only try-capacity-unit-fault: zero-sized capacity consumes one fault probe
 fn fx_try_capacity_unit_fault() -> MIRProgram Never! { fx_try_capacity_program("unit-fault") }
+
+fn fx_int_radix_program(radix: Int) -> MIRProgram Never! {
+    b := fx_builder()
+    value :: fx_int_const(&b, -31)
+    base :: fx_int_const(&b, radix)
+    text :: fx_list_method(&b, "int_to_radix", value, None, [MIRValueID]{base}, fx_string(), true)
+    fx_print(&b, text)
+    fx_do(&b, MIROperation.Drop{value: text, kind: MIRDropKind.Value})
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    p := fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, [MIRTypeDef]{})
+    &p.prelude_calls.push(fx_prelude(MIRPreludeFamily.BuiltinMethod, "core.builtin", "int_to_radix", "jet_std::jet_int_to_radix", 2, MIRPreludeABI.Value))
+    p
+}
+
+// expect-stdout int-radix: "-1f\n"
+// expect-runtime-only int-radix: exact-Int radix kernel returns owned Text
+fn fx_int_radix() -> MIRProgram Never! { fx_int_radix_program(16) }
+
+// expect-stdout int-radix-invalid: ""
+// expect-exit int-radix-invalid: 70
+// expect-runtime-only int-radix-invalid: kernel Err is the caller's arithmetic stop
+fn fx_int_radix_invalid() -> MIRProgram Never! { fx_int_radix_program(1) }
