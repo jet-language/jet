@@ -1,0 +1,193 @@
+// Assembled with production sources by the canonical gate fixture runner.
+// The linear oracle is the pre-index query, used only for semantic comparison.
+fn body_index_require(ok: Bool, message: String) Never! {
+    if !ok -> panic("ComptimeBodyIndexFixtures: {message}")
+}
+
+fn body_index_environment(module_identity: String, file: String) -> SemaScopeEnvironment Never! {
+    sema_scope_environment_init(None, module_identity, "body-index", "main", file, SemaSourceOrigin.Snapshot, [SemaSourceSegment]{}, [TTypeDef]{}, [SemaScopeDeclaration]{})
+}
+
+fn body_index_scopes(function_key: String) -> SemaScopeTable Never! {
+    scopes := sema_scope_init("body-index")
+    &scopes.frames.push(SemaScopeFrame{parent: 0, owner: function_key})
+    scopes.current = 1
+    scopes
+}
+
+fn body_index_value(module_identity: String, function_key: String, source: Span, site: Span, number: Int) -> SemaComptimeBodyValue Never! {
+    SemaComptimeBodyValue{
+        module_identity: module_identity,
+        key: sema_comptime_body_source_key(module_identity, function_key, source, site),
+        destination_key: sema_comptime_body_destination_key(function_key, source, site),
+        value: TComptimeValue.Int{value: number},
+        ty: Type.Int,
+    }
+}
+
+fn body_index_linear_value(values: [SemaComptimeBodyValue], module_identity: String, function_key: String, source: Span, site: Span) -> SemaComptimeBodyValue? {
+    key :: sema_comptime_body_source_key(module_identity, function_key, source, site)
+    found := SemaComptimeBodyValue?{None}
+    loop value in values {
+        if value.module_identity == module_identity && value.key == key {
+            if found != None -> return None
+            found = Val(value)
+        }
+    }
+    found
+}
+
+fn body_index_query(context: SemaCheckContext, module_identity: String, function_key: String, source: Span, site: Span) {
+    actual :: sema_comptime_body_value_find(context, module_identity, function_key, source, site)
+    expected :: body_index_linear_value(context.comptime_body_values, module_identity, function_key, source, site)
+    body_index_require(actual == expected, "indexed value query matches the original first/second-match rule")
+}
+
+fn body_index_source_identity() {
+    environment := body_index_environment("mod::one", "identity.jet")
+    scopes :: body_index_scopes("function::one")
+    other_scopes :: body_index_scopes("function::two")
+    source :: Span{start: 10, end: 20}
+    site :: Span{start: 3, end: 7}
+    expression :: Expr.Int{value: 1, span: source, width: None, raw: None}
+    context := sema_check_context_init()
+    _ := sema_comptime_body_capture(&context, environment, scopes, "base", expression, Type.Int, source, site)
+    environment.module_identity = "mod::two"
+    _ := sema_comptime_body_capture(&context, environment, scopes, "module", expression, Type.Int, source, site)
+    environment.module_identity = "mod::one"
+    _ := sema_comptime_body_capture(&context, environment, other_scopes, "function", expression, Type.Int, source, site)
+    _ := sema_comptime_body_capture(&context, environment, scopes, "source start", expression, Type.Int, Span{start: 11, end: 20}, site)
+    _ := sema_comptime_body_capture(&context, environment, scopes, "source end", expression, Type.Int, Span{start: 10, end: 21}, site)
+    _ := sema_comptime_body_capture(&context, environment, scopes, "site start", expression, Type.Int, source, Span{start: 4, end: 7})
+    _ := sema_comptime_body_capture(&context, environment, scopes, "site end", expression, Type.Int, source, Span{start: 3, end: 8})
+    body_index_require(context.comptime_body_sources.len() == 7, "source dedup preserves module/function and all source/site span endpoints")
+    expected_names :: [String]{"base", "module", "function", "source start", "source end", "site start", "site end"}
+    loop index in 0..<expected_names.len() -> body_index_require(context.comptime_body_sources[index].name == expected_names[index], "distinct source rows retain exact producer order")
+}
+
+fn body_index_identity_and_lifecycle() {
+    environment := body_index_environment("mod::one", "first.jet")
+    scopes :: body_index_scopes("function::one")
+    source :: Span{start: 10, end: 20}
+    site :: Span{start: 3, end: 7}
+    context := sema_check_context_init()
+    body_index_query(context, "mod::one", "function::one", source, site)
+    first :: sema_comptime_body_capture(&context, environment, scopes, "original", Expr.Int{value: 7, span: source, width: None, raw: Val("7")}, Type.Int, source, site)
+    environment.source_file = "replacement.jet"
+    duplicate :: sema_comptime_body_capture(&context, environment, scopes, "different", Expr.Bool{value: true, span: source}, Type.Bool, source, site)
+    body_index_require(duplicate == first && context.comptime_body_sources.len() == 1, "duplicate capture returns the entire first row, including file/name/expression/type")
+    variants :: [SemaComptimeBodyValue]{
+        body_index_value("mod::one", "function::one", source, site, 1),
+        body_index_value("mod::two", "function::one", source, site, 2),
+        body_index_value("mod::one", "function::two", source, site, 3),
+        body_index_value("mod::one", "function::one", Span{start: 11, end: 20}, site, 4),
+        body_index_value("mod::one", "function::one", Span{start: 10, end: 21}, site, 5),
+        body_index_value("mod::one", "function::one", source, Span{start: 4, end: 7}, 6),
+        body_index_value("mod::one", "function::one", source, Span{start: 3, end: 8}, 7),
+    }
+    sema_comptime_body_values_replace(&context, ~variants)
+    body_index_require(context.comptime_body_value_rows.len() == 2, "module identity is indexed separately from the canonical key")
+    body_index_query(context, "mod::one", "function::one", source, site)
+    body_index_query(context, "mod::two", "function::one", source, site)
+    body_index_query(context, "mod::one", "function::two", source, site)
+    body_index_query(context, "mod::one", "function::one", Span{start: 11, end: 20}, site)
+    body_index_query(context, "mod::one", "function::one", Span{start: 10, end: 21}, site)
+    body_index_query(context, "mod::one", "function::one", source, Span{start: 4, end: 7})
+    body_index_query(context, "mod::one", "function::one", source, Span{start: 3, end: 8})
+    replacements := ~variants
+    replacements[0] = body_index_value("mod::two", "function::two", source, site, 9)
+    sema_comptime_body_values_replace(&context, ^replacements)
+    body_index_require(sema_comptime_body_value_find(context, "mod::one", "function::one", source, site) == None, "same-length replacement drops the old key")
+    body_index_query(context, "mod::two", "function::two", source, site)
+    repeated :: body_index_value("mod::one", "function::one", source, site, 1)
+    sema_comptime_body_values_replace(&context, [SemaComptimeBodyValue]{repeated, repeated, repeated})
+    body_index_require(sema_comptime_body_value_find(context, "mod::one", "function::one", source, site) == None, "identical second and third rows remain ambiguous")
+    sema_comptime_body_values_truncate(&context, 2)
+    body_index_query(context, "mod::one", "function::one", source, site)
+    sema_comptime_body_values_truncate(&context, 1)
+    body_index_require(sema_comptime_body_value_find(context, "mod::one", "function::one", source, site) == Val(repeated), "truncating the second match restores uniqueness")
+    changed_value :: body_index_value("mod::one", "function::one", source, site, 99)
+    sema_comptime_body_values_replace(&context, [SemaComptimeBodyValue]{repeated, changed_value})
+    body_index_query(context, "mod::one", "function::one", source, site)
+    body_index_require(sema_comptime_body_value_find(context, "mod::one", "function::one", source, site) == None, "different second payload is equally ambiguous")
+    sema_comptime_body_values_replace(&context, [SemaComptimeBodyValue]{repeated})
+    sema_comptime_body_values_replace(&context, [SemaComptimeBodyValue]{changed_value})
+    body_index_require(sema_comptime_body_value_find(context, "mod::one", "function::one", source, site) == Val(changed_value), "same-key same-length replacement reads the current canonical payload")
+    wrong_module := repeated
+    wrong_module.module_identity = "mod::two"
+    sema_comptime_body_values_replace(&context, [SemaComptimeBodyValue]{repeated, wrong_module})
+    body_index_require(sema_comptime_body_value_find(context, "mod::one", "function::one", source, site) == Val(repeated), "an equal key with a different module is not a second match")
+    mark :: sema_check_context_mark(&context)
+    sema_comptime_body_source_append(&context, first)
+    _ := sema_comptime_body_capture(&context, environment, scopes, "temporary", Expr.Int{value: 8, span: source, width: None, raw: None}, Type.Int, source, Span{start: 30, end: 31})
+    sema_comptime_body_values_replace(&context, [SemaComptimeBodyValue]{repeated, wrong_module, repeated})
+    body_index_require(sema_comptime_body_value_find(context, "mod::one", "function::one", source, site) == None, "a probe may append a second matching value")
+    sema_check_context_rollback(&context, mark)
+    body_index_require(context.comptime_body_sources.len() == 1, "rollback restores the canonical source prefix")
+    body_index_require(sema_comptime_body_value_find(context, "mod::one", "function::one", source, site) == Val(repeated), "rollback rebuilds value uniqueness from the retained rows")
+    retained :: sema_comptime_body_capture(&context, environment, scopes, "after rollback", Expr.Bool{value: false, span: source}, Type.Bool, source, site)
+    body_index_require(retained == first && context.comptime_body_sources.len() == 1, "duplicate pop retains the first source index")
+    child := sema_check_context_snapshot(context)
+    start :: child.comptime_body_sources.len()
+    added :: sema_comptime_body_capture(&child, environment, scopes, "lambda", Expr.Int{value: 9, span: source, width: None, raw: None}, Type.Int, source, Span{start: 40, end: 41})
+    sema_expression_lambda_merge_context_facts(&child, &context, 0, 0, 0, start, 0, 0, 0)
+    merged :: sema_comptime_body_capture(&context, environment, scopes, "merged duplicate", Expr.Bool{value: false, span: source}, Type.Bool, source, Span{start: 40, end: 41})
+    body_index_require(merged == added && context.comptime_body_sources.len() == 2 && child.comptime_body_sources.len() == 2, "real lambda merge indexes its appended rows without changing snapshot identity")
+    replacement_parent := sema_check_context_init()
+    sema_comptime_body_source_append(&replacement_parent, added)
+    sema_comptime_body_source_append(&replacement_parent, first)
+    child = sema_check_context_snapshot(replacement_parent)
+    body_index_require(child.comptime_body_sources[0] == added && context.comptime_body_sources[0] == first, "same-length snapshot replacement preserves source order and parent independence")
+    reordered :: sema_comptime_body_capture(&child, environment, scopes, "reordered", Expr.Bool{value: false, span: source}, Type.Bool, source, site)
+    body_index_require(reordered == first && child.comptime_body_sources.len() == 2, "snapshot source replacement rebuilds row positions at the same length")
+    sema_comptime_body_sources_truncate(&child, 0)
+    sema_comptime_body_values_replace(&child, [SemaComptimeBodyValue]{})
+    _ := sema_comptime_body_capture(&child, environment, scopes, "fresh", Expr.Bool{value: false, span: source}, Type.Bool, source, site)
+    body_index_require(child.comptime_body_sources.len() == 1 && child.comptime_body_sources[0].name == "fresh" && context.comptime_body_sources.len() == 2, "reset and recapture do not use a stale row or alter the parent")
+    body_index_query(child, "mod::one", "function::one", source, site)
+    body_index_query(context, "mod::one", "function::one", source, site)
+}
+
+// Exercise the real producers and consumers at N, 2N, 4N, without a timing
+// claim. A separate source-bound work-count proof must observe production
+// events, not these fixture loop iterations or the deliberately linear oracle.
+fn body_index_size(size: Int) {
+    environment :: body_index_environment("scale::module", "scale.jet")
+    scopes :: body_index_scopes("scale::function")
+    context := sema_check_context_init()
+    values := [SemaComptimeBodyValue]{}
+    loop index in 0..<size {
+        source :: Span{start: index * 4, end: index * 4 + 2}
+        site :: Span{start: index * 4 + 2, end: index * 4 + 3}
+        _ := sema_comptime_body_capture(&context, environment, scopes, "row_{index}", Expr.Int{value: index, span: source, width: None, raw: None}, Type.Int, source, site)
+        &values.push(body_index_value("scale::module", "scale::function", source, site, index))
+    }
+    loop index in 0..<size {
+        source :: Span{start: index * 4, end: index * 4 + 2}
+        site :: Span{start: index * 4 + 2, end: index * 4 + 3}
+        existing :: sema_comptime_body_capture(&context, environment, scopes, "duplicate", Expr.Bool{value: true, span: source}, Type.Bool, source, site)
+        body_index_require(existing.name == "row_{index}" && context.comptime_body_sources[index].name == existing.name, "scaled duplicate capture retains source order and the first payload")
+    }
+    body_index_require(context.comptime_body_sources.len() == size, "scaled unique source cardinality")
+    duplicate := ~values[size - 1]
+    &values.push(duplicate)
+    mismatch := values[0]
+    mismatch.module_identity = "different::module"
+    &values.push(mismatch)
+    sema_comptime_body_values_replace(&context, ^values)
+    loop index in 0..<size {
+        source :: Span{start: index * 4, end: index * 4 + 2}
+        site :: Span{start: index * 4 + 2, end: index * 4 + 3}
+        body_index_query(context, "scale::module", "scale::function", source, site)
+        body_index_query(context, "scale::module", "absent::function", source, site)
+    }
+    body_index_require(sema_comptime_body_value_find(context, "scale::module", "scale::function", Span{start: (size - 1) * 4, end: (size - 1) * 4 + 2}, Span{start: (size - 1) * 4 + 2, end: (size - 1) * 4 + 3}) == None, "scaled second match is ambiguous")
+}
+
+fn run() {
+    body_index_source_identity()
+    body_index_identity_and_lifecycle()
+    body_index_size(64)
+    body_index_size(128)
+    body_index_size(256)
+}
