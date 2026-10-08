@@ -1,0 +1,8 @@
+# Port of tests/build_entry.rs:1423-1448; original sources verbatim, canonical machine diagnostics.
+# PENDING-SAME-HEAD; source acceptance != complete direct-driver nominal proof.
+fixture: fixtures/package_build_entry_duplicates_name_both_source_locations
+step: jet build run.jet --allow-exec --allow-fs --json
+exit: nonzero
+json: machine doc $.reports[?code="E3520"] #>= 1
+json: machine doc $.reports[?code="E3520"][0].what ~ "a.jet:1" # original diagnostic.what contains
+json: machine doc $.reports[?code="E3520"][0].what ~ "b.jet:1" # original diagnostic.what contains

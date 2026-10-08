@@ -1,0 +1,9 @@
+# Port of tests/build_entry.rs:3105-3145; original sources verbatim, canonical machine diagnostics.
+# PENDING-SAME-HEAD; source acceptance != complete direct-driver nominal proof.
+fixture: fixtures/nested_workspace_is_the_module_import_root
+step: jet build child/run.jet --json
+exit: nonzero
+json: machine doc $.reports[?code="E0603"] #>= 1
+json: machine doc $.reports[?code="E0603"][0].what = "can't find a project module named `project._outside`"
+json: machine doc $.reports[?code="E0603"][0].why = "project-local imports resolve declared module names, not filenames"
+json: machine doc $.reports[?code="E0603"][0].fix = "declare `module _outside { ... }` under this project"
