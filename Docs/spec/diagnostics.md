@@ -160,6 +160,9 @@ the native compiler cutover moves this scan to its Jet sources.
 Plain fixtures run `jet check` and record rendered stderr on failure, or
 exactly `(no errors)` on success, even when advisory lints exist. Lint fixtures
 run `jet check --verbose`: they must succeed and emit at least one warning.
+The lint invocation is admitted only after a same-head comparison against
+Cargo's `lint_snapshots` reports zero `.warn` mismatches; advisory differences
+are not filtered out.
 Only the CLI's final summary/explain envelope and volatile root paths are
 normalized; diagnostic bodies are retained. Group directories are recursive;
 project entries stop recursion. Fixed companions must check clean, build, and
