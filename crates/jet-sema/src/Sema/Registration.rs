@@ -1376,13 +1376,14 @@ pub(crate) fn check_effect_boundaries(
     items: &[Item],
     solved: &HashMap<String, EffectSet>,
     summaries: &HashMap<String, EffectSummary>,
+    modules: &[crate::AST::LoadedModule],
     diags: &mut Vec<Diagnostic>,
 ) {
-    fn unbounded_dispatch(
+    fn unbounded_dispatch<'a>(
         key: &str,
-        summaries: &HashMap<String, EffectSummary>,
+        summaries: &'a HashMap<String, EffectSummary>,
         seen: &mut HashSet<String>,
-    ) -> Option<(String, Span)> {
+    ) -> Option<(&'a str, Option<&'a super::MemoryFacts::MemoryCall>)> {
         if !seen.insert(key.to_string()) {
             return None;
         }
@@ -1392,14 +1393,12 @@ pub(crate) fn check_effect_boundaries(
                 .get(callee)
                 .is_some_and(|target| target.unbounded_trait_dispatch)
             {
-                let span = summary
+                let call = summary
                     .memory
                     .calls
                     .iter()
-                    .find(|call| call.callee == *callee)
-                    .map(|call| call.span)
-                    .unwrap_or_else(|| Span::new(0, 0));
-                return Some((callee.clone(), span));
+                    .find(|call| call.callee == *callee);
+                return Some((callee, call));
             }
             if let Some(found) = unbounded_dispatch(callee, summaries, seen) {
                 return Some(found);
@@ -1437,6 +1436,7 @@ pub(crate) fn check_effect_boundaries(
         identity: Option<&str>,
         solved: &HashMap<String, EffectSet>,
         summaries: &HashMap<String, EffectSummary>,
+        modules: &[crate::AST::LoadedModule],
         diags: &mut Vec<Diagnostic>,
     ) {
         let Some(declared_list) = &f.declared_effects else {
@@ -1445,9 +1445,23 @@ pub(crate) fn check_effect_boundaries(
         let key = identity
             .map(str::to_owned)
             .unwrap_or_else(|| effect_key(owner, &f.name));
-        if let Some((trait_method, span)) = unbounded_dispatch(&key, summaries, &mut HashSet::new())
+        if let Some((trait_method, call)) = unbounded_dispatch(&key, summaries, &mut HashSet::new())
         {
-            diags.push(e0743(&trait_method, span));
+            let owner = call.and_then(|call| {
+                modules.iter().find(|module| module.display == call.source)
+                    .map(|module| (module, call.span))
+            });
+            let mut diagnostic = e0743(trait_method, owner.map(|(_, span)| span));
+            if let Some((module, _)) = owner {
+                diagnostic.set_origin(std::sync::Arc::new(
+                    jet_foundation::Diagnostics::DiagnosticOrigin::new(
+                        module.display.clone(),
+                        module.path.to_string_lossy().into_owned(),
+                        module.source.clone(),
+                    ),
+                ));
+            }
+            diags.push(diagnostic);
             return;
         }
         // Validate names and build the declared set; an unknown name is E0119.
@@ -1537,25 +1551,25 @@ pub(crate) fn check_effect_boundaries(
     }
     for item in items {
         match item {
-            Item::Func(f) => check_one(f, None, None, solved, summaries, diags),
+            Item::Func(f) => check_one(f, None, None, solved, summaries, modules, diags),
             Item::Impl(i) => {
                 for m in &i.methods {
-                    check_one(m, Some(&i.type_name), None, solved, summaries, diags);
+                    check_one(m, Some(&i.type_name), None, solved, summaries, modules, diags);
                 }
             }
             Item::Struct(s) => {
                 for m in &s.methods {
-                    check_one(m, Some(&s.name), None, solved, summaries, diags);
+                    check_one(m, Some(&s.name), None, solved, summaries, modules, diags);
                 }
                 for block in &s.trait_impls {
                     for m in &block.methods {
-                        check_one(m, Some(&s.name), None, solved, summaries, diags);
+                        check_one(m, Some(&s.name), None, solved, summaries, modules, diags);
                     }
                 }
             }
             Item::Enum(e) => {
                 for m in &e.methods {
-                    check_one(m, Some(&e.name), None, solved, summaries, diags);
+                    check_one(m, Some(&e.name), None, solved, summaries, modules, diags);
                 }
             }
             Item::CodeModule(module) => {
@@ -1563,7 +1577,7 @@ pub(crate) fn check_effect_boundaries(
                     for item in body {
                         if let Item::Func(f) = item {
                             let identity = super::inline_effect_key(&module.name, &f.name);
-                            check_one(f, None, Some(&identity), solved, summaries, diags);
+                            check_one(f, None, Some(&identity), solved, summaries, modules, diags);
                         }
                     }
                 }

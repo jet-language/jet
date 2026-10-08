@@ -161,6 +161,40 @@ fn imported_effect_boundary_diagnostic_keeps_its_source_origin() {
 }
 
 #[test]
+fn transitive_unbounded_dispatch_keeps_the_foreign_call_origin() {
+    let root = common::unique_tmp("jet_foreign_dispatch_origin");
+    fs::create_dir_all(&root).unwrap();
+    let imported = root.join("worker.jet");
+    let imported_source =
+        "\n\npub trait Shape { fn area(self) Int }\n\npub fn inspect(shape: Shape) -> Int { shape.area() }\n";
+    fs::write(&imported, imported_source).unwrap();
+    let entry = root.join("main.jet");
+    let entry_source =
+        "use \"./worker\" as worker\nfn ceiling(shape: worker.Shape) -[IO]> Int { worker.inspect(shape) }\nfn run() {}\n";
+    fs::write(&entry, entry_source).unwrap();
+    let (diagnostics, _, _) =
+        jet::Driver::check_file_with_effect_facts(entry.to_str().unwrap(), None, false);
+    let diagnostic = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "E0743")
+        .expect("the transitive unbounded dispatch must be rejected");
+    let origin = diagnostic
+        .origin()
+        .expect("the actual dispatch needs its origin");
+    assert_eq!(std::path::Path::new(&origin.path), imported.as_path());
+    assert_eq!(origin.source.as_str(), imported_source);
+    let span = diagnostic.span.expect("the actual dispatch needs its span");
+    assert!(origin.source[span.start..span.end].contains("area"));
+    let rendered = jet::render_diagnostics(
+        entry.to_str().unwrap(),
+        entry_source,
+        std::slice::from_ref(diagnostic),
+    );
+    assert!(rendered.contains("worker.jet:5:"), "{rendered}");
+    assert!(!rendered.contains("main.jet:"), "{rendered}");
+}
+
+#[test]
 fn cross_module_same_name_effects_keep_qualified_rows() {
     let root = common::unique_tmp("jet_effect_collision");
     fs::create_dir_all(&root).unwrap();
