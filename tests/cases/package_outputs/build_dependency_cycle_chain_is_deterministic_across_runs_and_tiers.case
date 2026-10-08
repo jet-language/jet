@@ -1,0 +1,16 @@
+# Port of tests/package_outputs.rs:798-818 incl cycle_diagnostic():759-779.
+# PENDING-GRAMMAR: first-line selector and equality (TestW3b batch two).
+fixture: fixtures/cycle
+env: NO_COLOR=1
+step first: jet build run.jet
+exit: nonzero
+stderr: first-line ~ "build plan is invalid" ~ "`alpha` -> `gamma` -> `beta` -> `alpha`" # original predicate
+step: jet build run.jet
+exit: nonzero
+stderr: first-line ~ "build plan is invalid" == first # original predicate
+step: jet build --release run.jet
+exit: nonzero
+stderr: first-line ~ "build plan is invalid" == first # original predicate
+step: jet inspect graph run.jet
+exit: nonzero
+stderr: first-line ~ "build plan is invalid" == first # original predicate

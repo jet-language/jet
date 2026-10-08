@@ -1,0 +1,69 @@
+// Port of tests/http_server_lifecycle.rs:1686-1776 against public Core APIs.
+// PENDING-SEAM(http-server-options): workers=1, admission_queue=8 setup.
+use core.http.server as server
+use core.net as net
+
+struct S6InvalidCalls { value: Int }
+
+fn s6_invalid_crlf() -> String { String.from_bytes([U8]{13, 10}) ?? panic("CRLF") }
+
+fn s6_invalid_exchange(addr: String, lines: [String]) -> String {
+    stream :: net.tcp_connect(addr) ?? panic("connect")
+    stream.write_all(lines.join(s6_invalid_crlf()).bytes()) ?? panic("request write")
+    net.tcp_shutdown(stream, NetShutdown.Write) ?? panic("finish request")
+    parts := [String]{}
+    loop {
+        part :: stream.read_text(8192) ?? panic("response read")
+        if part == "" -> break
+        &parts.push(part)
+    }
+    parts.join("")
+}
+
+#Test("invalid response statuses fail closed without breaking pipelines") {
+    calls :: shared S6InvalidCalls{value: 0}
+    mux :: server.mux()
+    mux.get("/low", (_req: HTTPRequest) -> {
+        calls.value = calls.value + 1
+        Ok(server.response(99, "secret-status-99"))
+    })
+    mux.get("/high", (_req: HTTPRequest) -> {
+        calls.value = calls.value + 1
+        Ok(server.response(600, "secret-status-600"))
+    })
+    mux.get("/next", (_req: HTTPRequest) -> {
+        calls.value = calls.value + 1
+        Ok(server.response(200, "next"))
+    })
+    bound :: server.bind("127.0.0.1:0", mux) ?? panic("bind")
+    addr :: bound.local_addr() ?? panic("address")
+    serving :: task { bound.serve() ?? panic("server") }
+    crlf :: s6_invalid_crlf()
+    paths :: [String]{"/low", "/high"}
+    loop path in paths {
+        response :: s6_invalid_exchange(addr, [String]{"GET {path} HTTP/1.1", "Host: local", "", "GET /next HTTP/1.1", "Host: local", "Connection: close", "", ""})
+        assert(response.starts_with("HTTP/1.1 500 Internal Server Error"), "invalid status reached wire: {response}")
+        assert(response.contains("Content-Length: 25{crlf}"), "invalid status did not use generic 500 framing: {response}")
+        assert(!response.contains("secret-status"), "invalid response body leaked: {response}")
+        assert(response.count("HTTP/1.1") == 2, "invalid status broke response boundary: {response}")
+        assert(response.ends_with("{crlf}{crlf}next"), "successor response misaligned: {response}")
+    }
+    assert(calls.value == 4)
+    report :: bound.shutdown(30s) ?? panic("shutdown")
+    ^serving.join() ?? panic("server join")
+    assert(report.accepted == 2)
+    assert(report.completed == 2)
+    valid_statuses :: [Int]{100, 205, 299, 599}
+    loop status in valid_statuses {
+        response :: server.response(status, "valid")
+        assert(response.status() == status)
+        assert((response.body().text(1024) ?? panic("valid response body")) == "valid")
+    }
+    invalid_statuses :: [Int]{-9223372036854775808, -1, 0, 99, 600, 1000, 9223372036854775807}
+    loop status in invalid_statuses {
+        response :: server.response(status, "private")
+        assert(response.status() == 500, "invalid status {status} survived")
+        assert((response.body().text(1024) ?? panic("invalid response body")) == "500 Internal Server Error")
+        assert(response.headers.fields.len() == 0)
+    }
+}

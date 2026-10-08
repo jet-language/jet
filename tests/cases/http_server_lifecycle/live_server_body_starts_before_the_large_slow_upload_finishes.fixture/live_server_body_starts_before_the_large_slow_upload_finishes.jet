@@ -1,0 +1,47 @@
+// Port of tests/http_server_lifecycle.rs:1115-1159 against public Core APIs.
+use core.http.server as server
+use core.net as net
+
+#Test("handler pulls first chunk before slow upload finishes") {
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind")
+    addr :: listener.local_addr() ?? panic("address")
+    mux :: server.mux()
+    (first_tx, first_rx) :: channel<Int>()
+    mux.post("/slow", (req: HTTPRequest) -> {
+        chunks :: req.body().chunks(4096)
+        total := 0
+        first := true
+        loop packet in chunks {
+            chunk :: packet ?? panic("body chunk")
+            if first {
+                first_tx.send(chunk.len())
+                first = false
+            }
+            total += chunk.len()
+        }
+        assert(!first, "missing first body chunk")
+        Ok(server.response(200, "{total}"))
+    })
+    serving :: task { server.serve_once_listener(listener, mux) ?? panic("serve") }
+    length :: 512 * 1024
+    client :: net.tcp_connect(addr) ?? panic("connect")
+    crlf :: String.from_bytes([U8]{13, 10}) ?? panic("CRLF")
+    client.write_all("POST /slow HTTP/1.1{crlf}Host: local{crlf}Content-Length: {length}{crlf}Connection: close{crlf}{crlf}".bytes()) ?? panic("headers write")
+    chunk := [U8]{}
+    loop _ in 0..<4096 -> &chunk.push(7)
+    client.write_all(chunk) ?? panic("first write")
+    if {
+        first_length, first_rx -> assert(first_length == 4096)
+        after 2s -> panic("handler must pull before the upload finishes")
+    }
+    loop _ in 1..<(length / 4096) -> client.write_all(chunk) ?? panic("remaining write")
+    parts := [String]{}
+    loop {
+        part :: client.read_text(8192) ?? panic("response read")
+        if part == "" -> break
+        &parts.push(part)
+    }
+    response :: parts.join("")
+    ^serving.join() ?? panic("server join")
+    assert(response.ends_with("{length}"), response)
+}

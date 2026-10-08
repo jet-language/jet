@@ -1,0 +1,82 @@
+// Port of tests/http_server_lifecycle.rs:1433-1577 against public Core APIs.
+// PENDING-SEAM(http-server-options): workers=1, admission_queue=8 setup.
+use core.http.server as server
+use core.net as net
+
+struct S6HeadCalls { value: Int }
+
+fn s6_head_crlf() -> String {
+    String.from_bytes([U8]{13, 10}) ?? panic("CRLF")
+}
+
+fn s6_head_exchange(addr: String, lines: [String]) -> String {
+    stream :: net.tcp_connect(addr) ?? panic("connect")
+    stream.write_all(lines.join(s6_head_crlf()).bytes()) ?? panic("request write")
+    net.tcp_shutdown(stream, NetShutdown.Write) ?? panic("finish request")
+    parts := [String]{}
+    loop {
+        part :: stream.read_text(8192) ?? panic("response read")
+        if part == "" -> break
+        &parts.push(part)
+    }
+    parts.join("")
+}
+
+fn s6_head_assert(response: String, status: String, length: Int) {
+    crlf :: s6_head_crlf()
+    framed :: response.split_once("{crlf}{crlf}") ?? panic("response framing")
+    assert(framed.before.starts_with(status), response)
+    assert(framed.before.contains("Content-Length: {length}{crlf}"), response)
+    assert(framed.after == "", "HEAD emitted representation bytes: {response}")
+}
+
+#Test("HEAD preserves representation length without a wire body") {
+    calls :: shared S6HeadCalls{value: 0}
+    mux :: server.mux()
+    mux.get("/implicit", (_req: HTTPRequest) -> {
+        calls.value = calls.value + 1
+        Ok(server.response(200, "hello").header("x-origin", "get"))
+    })
+    mux.head("/explicit", (_req: HTTPRequest) -> {
+        calls.value = calls.value + 1
+        Ok(server.response(200, "explicit"))
+    })
+    mux.post("/post", (_req: HTTPRequest) -> Ok(server.response(200, "posted")))
+    mux.get("/empty", (_req: HTTPRequest) -> {
+        calls.value = calls.value + 1
+        Ok(server.response(204, "forbidden"))
+    })
+    bound :: server.bind("127.0.0.1:0", mux) ?? panic("bind")
+    addr :: bound.local_addr() ?? panic("address")
+    serving :: task { bound.serve() ?? panic("server") }
+    crlf :: s6_head_crlf()
+    implicit :: s6_head_exchange(addr, [String]{"HEAD /implicit HTTP/1.1", "Host: local", "Connection: close", "", ""})
+    s6_head_assert(implicit, "HTTP/1.1 200 OK", 5)
+    assert(implicit.contains("x-origin: get{crlf}"), "HEAD lost GET metadata: {implicit}")
+    explicit :: s6_head_exchange(addr, [String]{"HEAD /explicit HTTP/1.1", "Host: local", "Connection: close", "", ""})
+    s6_head_assert(explicit, "HTTP/1.1 200 OK", 8)
+    missing :: s6_head_exchange(addr, [String]{"HEAD /missing HTTP/1.1", "Host: local", "Connection: close", "", ""})
+    s6_head_assert(missing, "HTTP/1.1 404 Not Found", 13)
+    bad_route :: s6_head_exchange(addr, [String]{"HEAD /%FF HTTP/1.1", "Host: local", "Connection: close", "", ""})
+    s6_head_assert(bad_route, "HTTP/1.1 400 Bad Request", 15)
+    not_allowed :: s6_head_exchange(addr, [String]{"HEAD /post HTTP/1.1", "Host: local", "Connection: close", "", ""})
+    s6_head_assert(not_allowed, "HTTP/1.1 405 Method Not Allowed", 22)
+    no_content :: s6_head_exchange(addr, [String]{"HEAD /empty HTTP/1.1", "Host: local", "Connection: close", "", ""})
+    framed :: no_content.split_once("{crlf}{crlf}") ?? panic("204 framing")
+    assert(framed.before.starts_with("HTTP/1.1 204 No Content"), no_content)
+    assert(!framed.before.to_lower().contains("content-length:"), no_content)
+    assert(framed.after == "", no_content)
+    pipelined :: s6_head_exchange(addr, [String]{"HEAD /implicit HTTP/1.1", "Host: local", "", "GET /implicit HTTP/1.1", "Host: local", "Connection: close", "", ""})
+    relative :: pipelined.slice(1..<pipelined.len()).index_of("HTTP/1.1 200 OK")
+    assert(relative >= 0, "second response")
+    second :: relative + 1
+    first_response :: pipelined.slice(0..<second)
+    assert(first_response.contains("Content-Length: 5{crlf}"), pipelined)
+    assert(first_response.ends_with("{crlf}{crlf}"), "HEAD body shifted pipeline: {pipelined}")
+    assert(pipelined.slice(second..<pipelined.len()).ends_with("{crlf}{crlf}hello"), "GET response missing after HEAD: {pipelined}")
+    assert(calls.value == 5)
+    report :: bound.shutdown(30s) ?? panic("shutdown")
+    ^serving.join() ?? panic("server join")
+    assert(report.accepted == 7)
+    assert(report.completed == 7)
+}
