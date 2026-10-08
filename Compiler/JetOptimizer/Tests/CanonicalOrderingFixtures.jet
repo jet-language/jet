@@ -1,0 +1,34 @@
+// Assembled with the exact production sort helpers by run-lint-fixtures.mjs
+// --canonical-order; the MIR builders are shared with the lowering fixtures.
+fn order_function(id: U64, key: String, name: String) -> MIRFunction Never! {
+    function := fx_function(name, fx_builder(), fx_unit())
+    function.id = MIRFunctionID{value: id}
+    function.key = key
+    function
+}
+
+fn order_expect_functions(rows: [MIRFunction]) -> Bool Never! {
+    rows.len() == 4 && rows[0].name == "first" && rows[1].name == "equal-a" && rows[2].name == "equal-b" && rows[3].name == "last"
+}
+
+fn run() {
+    optimizer_rows := [MIRFunction]{order_function(9, "a", "last"), order_function(2, "b", "equal-a"), order_function(2, "a", "first"), order_function(2, "b", "equal-b")}
+    mir_pass_sort_functions(&optimizer_rows)
+    if !order_expect_functions(optimizer_rows) -> panic("optimizer changed canonical keys or equal-key stability")
+    mir_pass_sort_functions(&optimizer_rows)
+    if !order_expect_functions(optimizer_rows) -> panic("optimizer canonical order is not idempotent")
+
+    codegen_rows := [MIRFunction]{order_function(9, "a", "last"), order_function(2, "b", "equal-a"), order_function(2, "a", "first"), order_function(2, "b", "equal-b")}
+    jet_codegen_sort_functions(&codegen_rows)
+    if !order_expect_functions(codegen_rows) -> panic("codegen changed canonical keys or equal-key stability")
+
+    empty := [MIRFunction]{}
+    mir_pass_sort_functions(&empty)
+    jet_codegen_sort_functions(&empty)
+    if empty.len() != 0 -> panic("sorting inserted a function")
+    single := [MIRFunction]{order_function(3, "one", "single")}
+    mir_pass_sort_functions(&single)
+    jet_codegen_sort_functions(&single)
+    if single.len() != 1 || single[0].name != "single" -> panic("sorting changed a singleton")
+    print("PASS canonical borrowed-row sorting: stable keys, idempotence, empty, singleton")
+}
