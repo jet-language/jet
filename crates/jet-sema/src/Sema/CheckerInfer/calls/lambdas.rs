@@ -717,9 +717,9 @@ impl<'a> Checker<'a> {
                     self.flow.reachable = reachable;
                     Some(expected.clone())
                 } else {
-                    // The body may never run (a spawned task, a callback), so
-                    // a `return` inside it is a conditional return of the
-                    // enclosing function, not an unconditional one (card #2006).
+                    // The body may never run (a spawned task, a callback).
+                    // Its `return` exits the lambda (D-TAIL-RETURN1), so
+                    // checking it must preserve the enclosing reachability.
                     // An open value callback is checked once as a statement
                     // block for declarations/flow, then its tail is inferred
                     // as the callback value below. Drop only that first-pass
