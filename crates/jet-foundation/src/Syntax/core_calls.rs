@@ -1472,7 +1472,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 30f9acc583205f64befcce307ee37500f5e852b421b1115ceaf7ee89dd9ebef4
+// Source SHA-256: 6ce688a2c193115373335f8e2fab8f2419f94397f90b7589a3c2dd5202286669
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -1841,9 +1841,22 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.files", "canonicalize", "jet_std_fs_canonicalize", true, &[true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "__host_path_is_absolute", "jet_std::jet_fs_host_path_is_absolute_raw", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "__host_path_join", "jet_std::jet_fs_host_path_join_raw", true, &[true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.files", "walk", "jet_std_fs_walk", true, &[true, false]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::source_owned("core.files", "walk", &[true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.files", "walk_parallel", "jet_std_fs_walk_parallel", true, &[true, false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new( "core.files", "walk_files", "jet_std_fs_walk_files", true, &[true, false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::source_owned("core.files", "walk_files", &[true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.files", "__walk_context", "jet_walk8_open", true, &[true, true, false]).with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.files", "__walk_close", "jet_walk8_close", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.files", "__walk_validation_path", "jet_walk8_validation_path", true, &[false, false]).with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.files", "__walk_ancestors", "jet_walk8_ancestors", true, &[false, false]).with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.files", "__walk_metadata", "jet_walk8_metadata", true, &[false, false]).with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.files", "__walk_shown", "jet_walk8_shown", true, &[false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.files", "__walk_before", "jet_walk8_before", true, &[false, false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.files", "__walk_matcher_new", "jet_walk8_matcher_new", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.files", "__walk_rules", "jet_walk8_rules", true, &[false, false, true]).with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.files", "__walk_ignored", "jet_walk8_ignored", true, &[false, false, true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.files", "__walk_inherit", "jet_walk8_inherit", true, &[false, false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.files", "__walk_read_dir", "jet_walk8_read_dir", true, &[false, false]).with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.files", "__walk_next", "jet_walk8_next", true, &[false, false]).with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "glob", "jet_std_fs_glob", true, &[true]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.files", "read_at", "jet_std_fs_read_at", true, &[true, false, false], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.files", "write_at", "jet_std_fs_write_at", true, &[true, false, true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),

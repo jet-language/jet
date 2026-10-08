@@ -54,6 +54,12 @@ The same direct-boundary rule applies to the held reader, directory, xattr,
 writer-stat and lock operations: canonical private names select the existing
 host kernels without source pass-through facades. Path permission and ownership
 policy uses the compile-target OS family, not a duplicate platform detector.
+`walk` and `walk_files` own traversal in Jet: depth starts at zero for root
+entries, results sort by shown path, ancestor symlinks are refused, and each
+directory inherits the existing ignore matcher. The private context preserves
+native path identities (including non-Unicode names) until its scope guard
+releases it. Failed directory batches are discarded while already queued work
+continues; the earliest error is selected by native directory-path ordering.
 
 Types and error enums use PascalCase (`String`, `IOError`, `JSON`); functions
 and module segments use snake_case (`read`, `core.files`) (S54). Acronyms keep
