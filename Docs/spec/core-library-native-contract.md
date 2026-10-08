@@ -151,6 +151,18 @@ and retires at cutover. Native runtime fixtures pass explicit drop functions,
 including two threads each racing 100,000 clone/drop pairs and a null-glue
 case that must not fall back to the descriptor callback.
 
+The Shared site publication witness uses the actual native providers, not a
+Rust seed implementation. `run-channel-fixtures.mjs OUT assemble-publication`
+enrolls the registry observer after the production runtime; the existing
+`lower` mode emits the fixture object, and `link-publication`/`run-publication`
+link and exercise it with the freshly composed native library. Two initializers
+race to publish one winner; the losing payload drop runs once. World reset
+clears the cell and releases only its owner while a retained clone survives;
+republishing the same site must retain exactly one registry node. Process
+sites must never enter the World registry or be released by its reset.
+The observer only counts actual registry nodes after publishers have joined;
+the C client supplies callbacks and barriers, never publication or reset logic.
+
 ### Exact integer carrier
 
 An exact `Int` crosses the scalar ABI in one 64-bit word. Values whose two
