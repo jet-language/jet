@@ -477,18 +477,6 @@ mod mime_kernel {
     include!("../../../../jet-codegen/src/Prelude/CoreLib/JetStd/Mime.rs");
 }
 
-mod solver_kernel {
-    pub(crate) mod jet_std {
-        #[derive(Clone)]
-        pub(crate) struct Solver {
-            pub(crate) seed: i64,
-            pub(crate) checked: i64,
-            pub(crate) failures: i64,
-        }
-    }
-
-    include!("../../../../jet-codegen/src/Prelude/CoreLib/Top/Solver.rs");
-}
 
 
 mod time_kernel {
@@ -740,17 +728,6 @@ pub fn apply_core_pure_method(
 }
 
 
-pub(in super::super) fn solver_require(
-    recv: &CtValue,
-    args: &[CtValue],
-    span: Span,
-) -> Option<Result<(CtValue, CtValue), Diagnostic>> {
-    core_pure_parity::solver_require(recv, args, span)
-}
-
-pub(in super::super) fn solver_new(args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
-    core_pure_parity::solver_new(args, span)
-}
 
 pub fn display_core_pure_value(value: &CtValue) -> Option<String> {
     core_pure_parity::display(value)

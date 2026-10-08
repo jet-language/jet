@@ -1455,15 +1455,6 @@ pub fn apply_mutating_with_type(
         };
         return Ok(value);
     }
-    if matches!(&*recv, CtValue::Struct { type_name, .. } if type_name == crate::Syntax::SOLVER_TYPE)
-        && method == "require"
-    {
-        if let Some(result) = super::Methods::solver_require(recv, &args, span) {
-            let (ret, updated) = result?;
-            *recv = updated;
-            return Ok(ret);
-        }
-    }
     match (recv, method) {
         (CtValue::List(xs), "insert") => {
             super::CollectionEval::list_insert_args(xs, &args, span)?;

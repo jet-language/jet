@@ -57,7 +57,6 @@ use crate::Codegen::TIR::lower_require_stop;
 use crate::Codegen::TIR::lower_stmts;
 use crate::Codegen::TIR::module_call_source_return_type;
 use crate::Codegen::TIR::preserve_typed_list_shape;
-use crate::Codegen::TIR::solve_new_type;
 use crate::Codegen::TIR::struct_field_type;
 use crate::Codegen::TIR::tir_address_lifetime;
 use crate::Codegen::TIR::unit_type;
@@ -731,11 +730,9 @@ fn canonicalize_operator_method_identity(expr: &mut TExpr, cx: &Cx) {
 /// calls. These routes deliberately remain total: an absent AST annotation must
 /// not turn a known checked root/handle operation into an unresolved MIR call.
 fn fallback_checked_method_return(
-    receiver: &Expr,
     method: &str,
     recv_type: Option<&str>,
     cx: &Cx,
-    env: &LowerEnv,
 ) -> Option<Type> {
     let is_root = match recv_type {
         Some(name) => {
@@ -760,12 +757,6 @@ fn fallback_checked_method_return(
         && matches!(method, Syntax::TXN_ON_COMMIT | Syntax::TXN_ON_ROLLBACK)
     {
         return Some(Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string()));
-    }
-    if method == Syntax::MEM_ALLOC_NEW || method == "new" {
-        let locals = env.locals.keys().cloned().collect::<HashSet<_>>();
-        if solve_new_type(receiver, method, cx, &locals).is_some() {
-            return Some(Type::Named(Syntax::SOLVER_TYPE.to_string()));
-        }
     }
     None
 }
@@ -801,7 +792,7 @@ fn lower_method_chain(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             unreachable!("method chain contains only method calls")
         };
         let resolved_ret = resolved_ret.clone().or_else(|| {
-            fallback_checked_method_return(receiver, method, recv_type.as_deref(), cx, env)
+            fallback_checked_method_return(method, recv_type.as_deref(), cx)
         });
         // A field receiver does not persist `recv_type` on the AST method
         // node, and a specialized generic operator (`left < right` under

@@ -608,7 +608,6 @@ use crate::Codegen::TIR::resolve_closure_op;
 use crate::Codegen::TIR::resolve_numeric_conversion_op;
 use crate::Codegen::TIR::resolve_numeric_op;
 use crate::Codegen::TIR::resolve_self_ty;
-use crate::Codegen::TIR::solve_new_type;
 use crate::Codegen::TIR::source_arg_order;
 use crate::Codegen::TIR::spawn_body_carrier_ty;
 use crate::Codegen::TIR::spawn_label;
@@ -5743,35 +5742,8 @@ fn lower_method_call_impl(
             });
         }
     }
-    // D-SOLVER-LIB1=A: `solve.Solver.new(seed)` constructor. The receiver is a
-    // core module sentinel (`solve.Solver`), so the seed arg becomes the lowered recv.
     {
         let locals: HashSet<String> = env.locals.keys().cloned().collect();
-        if solve_new_type(receiver, method, cx, &locals).is_some() {
-            return in_own_frame(|| {
-                let Some(ty) = resolved_ret.cloned() else {
-                    return invariant_method_expr(
-                        method_span,
-                        "Solver.new without a resolved return type",
-                    );
-                };
-                let Some(seed_arg) = args.first() else {
-                    return invariant_method_expr(
-                        method_span,
-                        "Solver.new without its checked seed argument",
-                    );
-                };
-                let seed = lower_expr(&seed_arg.expr, cx, env);
-                TExpr {
-                    ty,
-                    kind: TExprKind::HandleMethod {
-                        recv: Box::new(seed),
-                        op: THandleOp::SolverNew,
-                        args: vec![],
-                    },
-                }
-            });
-        }
         if let Some(static_type) = game_static_type(receiver, method, cx, &locals) {
             return in_own_frame(|| {
                 let op = match (static_type, method) {

@@ -20,30 +20,6 @@ use std::collections::HashSet;
 /// Channel/Sender/Task (`receive`/`send`/`sender`/`detach` — producers not covered);
 /// `Match.group` (the `Option<Match>` unwrap chain isn't cleanly reachable).
 
-/// D-SOLVER-LIB1=A: is this `solve.Solver.new(seed)`?
-pub(crate) fn solve_new_type<'a>(
-    receiver: &'a Expr,
-    method: &str,
-    cx: &Cx,
-    locals: &HashSet<String>,
-) -> Option<&'a str> {
-    if method != "new" {
-        return None;
-    }
-    let Expr::Field(inner, solver_type, _) = receiver else {
-        return None;
-    };
-    let Expr::Ident(alias, _) = &**inner else {
-        return None;
-    };
-    if locals.contains(alias) {
-        return None;
-    }
-    if cx.any_core_import_module(alias) != Some(Syntax::CORE_SOLVE_MODULE) {
-        return None;
-    }
-    (solver_type == Syntax::SOLVER_TYPE).then_some(solver_type.as_str())
-}
 
 /// D-SHAPE-DURATION1=A: resolve a bare type-owned runtime constructor.
 pub(crate) fn duration_new_unit(
@@ -246,9 +222,6 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("Fake", "email", 0) => THandleOp::FakeEmail,
         ("Fake", "host", 0) => THandleOp::FakeHost,
         ("Fake", "address", 0) => THandleOp::FakeAddress,
-        ("Solver", "require", 1) => THandleOp::SolverRequire,
-        ("Solver", "failure_count", 0) => THandleOp::SolverFailureCount,
-        ("Solver", "status", 0) => THandleOp::SolverStatus,
         ("GameScene", "on_frame", 1) => THandleOp::GameSceneOnFrame {
             schedule: None,
             derivation: None,
@@ -533,7 +506,6 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
             | Syntax::RNG_TYPE
             | "HistoryRNG"
             | Syntax::FAKE_TYPE
-            | Syntax::SOLVER_TYPE
     ) {
         let emitted_borrow = match &op {
             THandleOp::ClockTick
@@ -557,8 +529,7 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
             | THandleOp::FakeName
             | THandleOp::FakeEmail
             | THandleOp::FakeHost
-            | THandleOp::FakeAddress
-            | THandleOp::SolverRequire => crate::Collections::BuiltinReceiverBorrow::EagerWrite,
+            | THandleOp::FakeAddress => crate::Collections::BuiltinReceiverBorrow::EagerWrite,
             _ => crate::Collections::BuiltinReceiverBorrow::Read,
         };
         debug_assert_eq!(
@@ -697,13 +668,6 @@ pub(crate) fn handle_method_return_ty(
         // pattern literal's holes.
         .or_else(|| crate::Sema::binary_reader_method_return(handle, method, nargs))
         .or_else(|| crate::Sema::text_cursor_method_return(handle, method, nargs))
-        .or_else(|| {
-            if handle == crate::Syntax::SOLVER_TYPE {
-                crate::Collections::builtin_method_return(receiver_ty, method, nargs, false)
-            } else {
-                None
-            }
-        })
         .or_else(|| match (handle, method, nargs) {
             ("GameAssets", "image", 1) => Some(Some(Type::Result {
                 ok: Box::new(Type::Named("GameImage".to_string())),

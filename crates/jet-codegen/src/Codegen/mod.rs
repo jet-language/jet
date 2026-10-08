@@ -3851,7 +3851,6 @@ fn push_corelib_prelude_body(
     out.push_str(include_str!("../Prelude/Core/NetPure.rs"));
     out.push_str(include_str!("../Prelude/Core/NetError.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/NetHTTP.rs"));
-    out.push_str(include_str!("../Prelude/CoreLib/Top/Solver.rs"));
     // Scheduler waits always call the deadline raiser, and FakeData below
     // always uses the seeded stream. They are kernel dependencies, not
     // conditional math surface.

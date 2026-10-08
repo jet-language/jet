@@ -35,7 +35,6 @@ use crate::Codegen::TIR::is_watch_method_name;
 use crate::Codegen::TIR::lambda_in_subset;
 use crate::Codegen::TIR::router_register_in_subset;
 use crate::Codegen::TIR::service_method_route;
-use crate::Codegen::TIR::solve_new_type;
 use crate::Codegen::TIR::subset::core_call_args_in_subset;
 use crate::Codegen::TIR::tls_static_op;
 use crate::Codegen::foreign_binding_method_key;
@@ -675,11 +674,6 @@ pub(crate) fn method_call_in_subset(
             args.len() <= 1
         };
         return return_ok && arity_ok && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-    }
-    // D-SOLVER-LIB1=A: `solve.Solver.new(seed)` mirrors `mem.Arena.new()`:
-    // receiver is a module-field sentinel, not a runtime value.
-    if solve_new_type(receiver, method, cx, locals).is_some() {
-        return args.len() == 1 && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
     }
     if duration_new_unit(receiver, method, locals).is_some() {
         return args.len() == 1 && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
