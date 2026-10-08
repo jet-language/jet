@@ -25,7 +25,7 @@ impl WebVirtualWindow {
     pub fn visible_count(self) -> Int Never! { sat_sub(self.end, self.start) }
     pub fn is_empty(self) -> Bool Never! { self.start >= self.end }
     pub fn contains(self, index: Int) -> Bool Never! { index >= self.start && index < self.end }
-    pub fn range(self) -> (Int, Int) Never! { (self.start, self.end) }
+    pub fn range(self) -> (start: Int, end: Int) Never! { (start: self.start, end: self.end) }
     pub fn within_frame_budget(self, maximum: Int) -> Bool Never! {
         self.visible_count() <= if maximum < 0 -> 0 else -> maximum
     }
@@ -312,7 +312,7 @@ fn sat_mul(a: Int, b: Int) -> Int Never! {
     assert_eq(w.visible_count(), 9223372036854775807)
     assert(!w.is_empty())
     assert(w.contains(0))
-    assert_eq(w.range(), (-9223372036854775808, 9223372036854775807))
+    assert_eq(w.range(), (start: -9223372036854775808, end: 9223372036854775807))
     assert(!w.within_frame_budget(-1))
     unchanged :: w.with_measurement(-1, 1)
     assert_eq(unchanged.start, w.start)
