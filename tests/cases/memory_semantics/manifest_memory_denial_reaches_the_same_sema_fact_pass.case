@@ -1,0 +1,7 @@
+# PORT tests/memory_semantics.rs:70-90.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no blessed snapshots.
+# Split: ; compiler-lib LEDGER-ONLY loaded bundle.package_guarantees.memory_denials exact ordered [Mem.Alloc]; public inspect/check rejection has no private guarantee vector; no exact AST/ApiFreeze/unit-kernel public projection in CmdInspect; archive includes original parse_family/check helpers
+fixture: manifest_memory_denial_reaches_the_same_sema_fact_pass.fixture
+step: jet check main.jet --json
+exit: nonzero
+json: machine doc $.reports[?code="E0921"] #>= 1

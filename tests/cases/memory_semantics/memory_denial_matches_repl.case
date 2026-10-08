@@ -1,0 +1,12 @@
+# PORT tests/memory_semantics.rs:136-153.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no blessed snapshots.
+fixture: memory_denial_matches_repl.fixture
+step: jet repl
+env: NO_COLOR=1
+env: XDG_STATE_HOME={work}/state
+stdin: memory_denial_matches_repl.fixture/input.txt
+exit: any
+# Original no exit assertion; banner/prompt overlap neither needle.
+stdout|stderr: ~ "memory denial"
+stdout: !~ "E0921"
+stderr: !~ "E0921"
