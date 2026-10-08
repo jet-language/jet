@@ -114,7 +114,7 @@ for (const name of names) assert.ok(!rustNames.has(name), `Jet-owned export ${na
 const listOut = /    fn list_out\([\s\S]*?\n    \}/.exec(rustText)?.[0];
 assert.ok(listOut?.includes("super::jet_c_abi::jet_rt_alloc(len * 8, 8)"), "List results must use the shared runtime heap");
 assert.ok(!listOut.includes("std::alloc::alloc("), "List results must not escape Rust's heap");
-for (const [name, stem] of [["IOError", "error"], ["IOContext", "context"], ["JetTaskFailure", "failure"]]) {
+for (const [name, stem] of [["IOError", "error"], ["IOContext", "context"], ["JetTaskFailure", "failure"], ["Jet__ResolveError", "resolve_error"]]) {
   if (!names.has(`jet_rt_handle_drop_${name}`)) continue;
   assert.ok(!new RegExp(`\\*(?:mut|const)\\s+crate::(?:jet_std::)?${name}\\b`).test(rustText), `${name} boundary still borrows Rust layout`);
   assert.ok(!new RegExp(`Box::new\\(crate::(?:jet_std::)?${name}\\b`).test(rustText), `${name} boundary still boxes a Rust value`);
@@ -129,7 +129,7 @@ const handRecords = handText.slice(handText.indexOf("mod host_records"), handTex
 assert.ok(!/\bBox\b|crate::jet_std::(?:IOError|IOContext)|super::JetTaskFailure/.test(handRecords), "hand records must use C headers on the seed tier too");
 assert.ok(!/to_owned|String::/.test(handRecords), "raw record projections must not create intermediate Rust Strings");
 const hostText = readFileSync(join(root, "crates/jet-codegen/src/Prelude/Core/CAbiHost.rs"), "utf8");
-for (const stem of ["error", "context", ...(names.has("jet_rt_handle_drop_JetTaskFailure") ? ["failure"] : [])]) {
+for (const stem of ["error", "context", ...(names.has("jet_rt_handle_drop_JetTaskFailure") ? ["failure"] : []), ...(names.has("jet_rt_handle_drop_Jet__ResolveError") ? ["resolve_error"] : [])]) {
   for (const operation of ["handle", "view", "take", "drop"]) assert.ok(hostText.includes(`fn ${stem}_${operation}(`), `missing ${stem}_${operation}`);
 }
 console.log("runtime route ABI: CHECK OK");

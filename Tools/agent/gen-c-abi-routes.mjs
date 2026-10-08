@@ -574,6 +574,8 @@ for (const [rust, type, stem] of [
   ["jet_std::IOContext", "JetCIOContext", "context"],
   ...(jetRuntimeExports.has("jet_rt_handle_drop_JetTaskFailure")
     ? [["JetTaskFailure", "JetCTaskFailure", "failure"]] : []),
+  ...(jetRuntimeExports.has("jet_rt_handle_drop_Jet__ResolveError")
+    ? [["Jet__ResolveError", "JetCResolveError", "resolve_error"]] : []),
 ]) {
   const key = declarationOf(rust)?.key;
   if (key !== undefined) handleBridges.set(key, { type, stem });
