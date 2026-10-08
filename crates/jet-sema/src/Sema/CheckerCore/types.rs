@@ -140,15 +140,16 @@ impl<'a> Checker<'a> {
         }
         if let Some((item, module)) = self.core_item_imports.get(name).zip(self.core_imports.get(name)) {
             if jet_foundation::CoreModuleExports::core_leaf_kind(module, item).is_some() {
-                return self.core_nominal_shadowing_builtin(module, item)
+                return self.core_source_owner_module(module, item)
+                    .map(|owner| self.canonical_nominal_name(owner, item))
                     .unwrap_or_else(|| item.clone());
             }
         }
         let (import_ns, leaf) = Self::split_type_name(name);
         if let Some(module) = import_ns.and_then(|alias| self.core_imports.get(alias)) {
             if jet_foundation::CoreModuleExports::core_leaf_kind(module, leaf).is_some() {
-                return self
-                    .core_nominal_shadowing_builtin(module, leaf)
+                return self.core_source_owner_module(module, leaf)
+                    .map(|owner| self.canonical_nominal_name(owner, leaf))
                     .unwrap_or_else(|| leaf.to_string());
             }
         }
@@ -248,10 +249,9 @@ impl<'a> Checker<'a> {
                     })
                 } else {
                     let item = self.core_item_imports.get(&n).map_or(n.as_str(), String::as_str);
-                    match self.core_nominal_shadowing_builtin(module, item) {
-                        Some(canonical) => Type::Named(canonical),
-                        None => Type::Named(item.to_string()),
-                    }
+                    self.core_source_owner_module(module, item)
+                        .map(|owner| Type::Named(self.canonical_nominal_name(owner, item)))
+                        .unwrap_or_else(|| Type::Named(item.to_string()))
                 }
             }
             Type::Named(n)
@@ -282,16 +282,9 @@ impl<'a> Checker<'a> {
                         crate::Sema::Diagnostics::core_crypto_nominal(Type::Named(leaf.to_string()))
                     })
                 } else {
-                    match jet_foundation::CoreModuleExports::core_leaf_kind(module, leaf) {
-                        Some(jet_foundation::CoreModuleExports::CoreLeafKind::Plain)
-                        | Some(jet_foundation::CoreModuleExports::CoreLeafKind::Generic(_))
-                        | Some(jet_foundation::CoreModuleExports::CoreLeafKind::Enum(_))
-                        | Some(jet_foundation::CoreModuleExports::CoreLeafKind::CryptoNominal)
-                        | None => Type::Named(
-                            self.core_nominal_shadowing_builtin(module, leaf)
-                                .unwrap_or_else(|| leaf.to_string()),
-                        ),
-                    }
+                    self.core_source_owner_module(module, leaf)
+                        .map(|owner| Type::Named(self.canonical_nominal_name(owner, leaf)))
+                        .unwrap_or_else(|| Type::Named(leaf.to_string()))
                 }
             }
             Type::Named(n)

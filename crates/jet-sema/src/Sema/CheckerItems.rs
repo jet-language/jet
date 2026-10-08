@@ -1974,15 +1974,6 @@ impl<'a> Checker<'a> {
             })
     }
 
-    /// A Core record whose leaf is also a built-in type name but which is not
-    /// that built-in (the `core.files.path` record `Path`) is identified by its
-    /// canonical path. Its bare leaf names the built-in, so the two never unify
-    /// by spelling.
-    pub(crate) fn core_nominal_shadowing_builtin(&self, module: &str, leaf: &str) -> Option<String> {
-        let owner = self.core_source_owner_module(module, leaf)?;
-        self.record_distinct_from_builtin(owner, leaf)
-            .then(|| self.canonical_nominal_name(owner, leaf))
-    }
 
     /// An imported function signature retains the declaration's nominal
     /// owners, including generated foreign records, implicit package
