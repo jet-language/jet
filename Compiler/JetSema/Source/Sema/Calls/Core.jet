@@ -350,11 +350,11 @@ fn sema_call_core_has_explicit_source_target(module_name: String, member: String
     row.symbol == CoreCallSymbol.SourceOwned && row.source_target != None
 }
 
-// Source exports resolve as ordinary functions. Only remaining static members
-// can become CoreCall nodes; this prevents registry rows from shadowing source.
+// Compiler-owned query contracts resolve before source facades. Other source
+// exports remain ordinary functions ahead of static Core records.
 pub fn sema_call_core_resolve_route(environment: SemaScopeEnvironment, module_name: String, member: String, type_args: [Type], expected_type_arg_count: Int, infer_when_omitted: Bool, actual_arity: Int, first_is_move: Bool, span: Span, diagnostics: &[Diagnostic]) -> SemaCoreCallRoute? {
     diagnostic_count := diagnostics.len()
-    source_identity :: if sema_call_core_has_explicit_source_target(module_name, member) || sema_call_core_native_resource_consumer(module_name, member, first_is_move) -> None else -> sema_call_core_module_identity(environment, module_name)
+    source_identity :: if sema_compiler_services_is_compiler_query(module_name, member) || sema_call_core_has_explicit_source_target(module_name, member) || sema_call_core_native_resource_consumer(module_name, member, first_is_move) -> None else -> sema_call_core_module_identity(environment, module_name)
     source :: if source_identity == {
         .Val(identity) -> sema_call_core_source_target(environment, identity, member, type_args, span, false, &diagnostics)
         .None -> None
@@ -378,7 +378,7 @@ pub fn sema_call_core_resolve_import_route(environment: SemaScopeEnvironment, sc
     // D-VERDICT-1321-1: `core.term` owns only the one-argument print, eprint
     // and progress wrappers; other arities keep the fixed Core route.
     variadic_term :: imported.module_name == "core.term" && (member == "print" || member == "eprint" || member == "progress") && actual_arity != 1
-    source :: if variadic_term || sema_call_core_has_explicit_source_target(imported.module_name, member) || sema_call_core_native_resource_consumer(imported.module_name, member, first_is_move) -> None else -> sema_call_core_source_target(environment, imported.module_identity, member, type_args, span, false, &diagnostics)
+    source :: if sema_compiler_services_is_compiler_query(imported.module_name, member) || variadic_term || sema_call_core_has_explicit_source_target(imported.module_name, member) || sema_call_core_native_resource_consumer(imported.module_name, member, first_is_move) -> None else -> sema_call_core_source_target(environment, imported.module_identity, member, type_args, span, false, &diagnostics)
     if source == {
         .Val(target) -> return Val(SemaCoreCallRoute.Source{target: target})
         .None -> {}

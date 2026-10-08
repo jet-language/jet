@@ -39,8 +39,14 @@ fn sema_compiler_services_result(value_name: String, error_name: String) -> Type
     Type.Result{ok: Type.Named{name: value_name}, err: Type.Named{name: error_name}}
 }
 
+// Routing needs only membership, not an allocated typed argument contract.
+// This same predicate guards construction of the compiler query contract.
+pub fn sema_compiler_services_is_compiler_query(module_name: String, member: String) -> Bool Never! {
+    module_name == "core.compiler" && (member == "lex" || member == "parse" || member == "check" || member == "source_map" || member == "manifest" || member == "package" || member == "lock" || member == "profiles")
+}
+
 pub fn sema_compiler_services_call_contract(module_name: String, member: String) -> SemaCompilerServicesCallContract? {
-    if module_name == "core.compiler" {
+    if sema_compiler_services_is_compiler_query(module_name, member) {
         value_name := if {
             member == "lex" -> "CompilerLexed"
             member == "parse" -> "CompilerSyntaxTree"
