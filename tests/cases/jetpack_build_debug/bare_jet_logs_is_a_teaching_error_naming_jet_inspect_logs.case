@@ -1,0 +1,10 @@
+# Port of tests/jetpack_build_debug.rs:114-143. PENDING-SAME-HEAD, PENDING-GRAMMAR(batch-four).
+fixture: fixtures/bare_jet_logs_is_a_teaching_error_naming_jet_inspect_logs
+mkdir: root
+env: JETPACK_ROOT={work}/root
+step: jetpack build --no-color
+exit: any # original setup build result was discarded
+step: jet logs weirdctl --json --no-color
+exit: 2
+stdout: ~ "\"code\":\"E2101\"" # original contains predicate, literal bytes
+stdout: ~ "jet inspect logs" # original contains predicate, literal bytes

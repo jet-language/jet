@@ -1,0 +1,33 @@
+
+use core.encoding.json as json
+
+#CLI
+struct Args {
+    #Doc("count") count: Int{1}
+}
+
+struct Pair {
+    left: Int
+    right: Int
+}
+
+enum Mark {
+    Low
+    High
+}
+
+#Codable
+struct Envelope<T> {
+    value: T
+}
+
+fn run(args: Args) {
+    pair :: Pair{left: args.count, right: 2}
+    other :: Pair{left: 2, right: 3}
+    print(pair == other)
+    print(pair < other)
+    print(Mark.Low == Mark.Low)
+    wire :: json.to_string(Envelope<Int>{value: args.count})
+    decoded :: json.decode<Envelope<Int>>(wire) ?? panic("decode")
+    print(decoded.value)
+}

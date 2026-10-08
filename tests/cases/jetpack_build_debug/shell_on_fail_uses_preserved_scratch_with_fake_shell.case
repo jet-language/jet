@@ -1,0 +1,11 @@
+# Port of tests/jetpack_build_debug.rs:176-211. PENDING-SAME-HEAD, PENDING-GRAMMAR(batch-four).
+fixture: fixtures/shell_on_fail_uses_preserved_scratch_with_fake_shell
+mkdir: root
+env: JETPACK_ROOT={work}/root
+when os windows: env: JETPACK_SHELL_ON_FAIL={work}/root/fake-shell.bat
+when os unix: env: JETPACK_SHELL_ON_FAIL={work}/root/fake-shell
+when os unix: chmod: root/fake-shell 0755
+env: JETPACK_FAILED_SCRATCH_MARKER={work}/root/shell-marker.txt
+step: jetpack build --shell-on-fail --no-color
+exit: nonzero
+file: root/shell-marker.txt ~ "failed-scratch" # original cwd contains predicate
