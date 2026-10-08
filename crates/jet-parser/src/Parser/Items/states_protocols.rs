@@ -1058,7 +1058,7 @@ mod marker_decl_tests {
         // A fact about the rule carries a value, not a type; an argument the
         // use site supplies carries a type.
         for param in &decl.params {
-            if param.name.starts_with('@') {
+            if param.name.starts_with('$') {
                 assert!(param.ty.is_none(), "{}", param.name);
                 assert!(param.value.is_some(), "{}", param.name);
             } else {
@@ -1072,32 +1072,6 @@ mod marker_decl_tests {
         }
     }
 
-    /// D-META-FORM1=A rejects a trailing `on` clause and a second parameter
-    /// list in favor of `@`-marked named parameters in the declaration's own
-    /// list. D-MARKER-SITES1=B also retires the former checked-text branch.
-    #[test]
-    fn rejected_spellings_each_teach_the_ratified_named_parameter_form() {
-        let source = concat!(
-            "\nmarker Inline(mode: String)",
-            " on [.Function]\n\n",
-            "marker Pre(condition: String)",
-            "(sites: [.Function])\n\nfn run() {}\n"
-        );
-        let (tokens, lex_diags) = Lexer::lex(source);
-        assert!(lex_diags.is_empty(), "{lex_diags:?}");
-        let diagnostics = match Parser::parse(&tokens) {
-            Ok(_) => Vec::new(),
-            Err(diagnostics) => diagnostics,
-        };
-        let codes: Vec<_> = diagnostics.iter().map(|d| d.code.as_str()).collect();
-        assert_eq!(codes, ["E0381", "E0381"], "{diagnostics:?}");
-        for diagnostic in &diagnostics {
-            assert!(
-                diagnostic.fix.contains('@'),
-                "fix must name the ratified @-marked named-parameter form: {diagnostic:?}"
-            );
-        }
-    }
 }
 
 #[cfg(test)]

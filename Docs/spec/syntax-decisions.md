@@ -7042,10 +7042,10 @@ The marker vocabulary is written as ordinary Jet source, not as a Rust table.
 
 - `crates/jet-codegen/src/Prelude/Markers.jet` holds one `marker Name(params…)`
   declaration per rule, in the ratified D-META-FORM1=A / D-MARKER-SITES1=B
-  form. A plain parameter
-  is an argument the use site writes; an `@`-marked parameter is a fact about
-  the rule: `@sites`, `@repeatable`, `@owns_menu`, `@inherits`, `@resolution`,
-  `@scopes`, `@companion`, `@retired`.
+  form, with D-DECL-META1=A's `$` metadata sigil. A plain parameter
+  is an argument the use site writes; a `$`-marked parameter is a fact about
+  the rule: `$sites`, `$repeatable`, `$owns_menu`, `$inherits`, `$resolution`,
+  `$scopes`, `$companion`, `$retired`.
 - `crates/jet-codegen/src/Prelude/Effects.jet` holds one `effect Name`
   declaration per effect root.
 - The Rust constants `Policy::APPLIED_RULES` and `Facts::EFFECT_ROOTS` no longer
@@ -7700,6 +7700,8 @@ with a machine-applicable fix, never an alias. Effect denials
 (`-[!Mem.Alloc]>`, `-[!Panic]>`), `?(text)`, `??`, `!x`, `!=`, patterns, and
 narrowing are unchanged, and carriers, layouts, and runtime are identical.
 Parser, formatter, type display, and diagnostics emit only the suffix form.
+An explicit effect ceiling precedes that contract (D-SIG-AFTER1=A):
+`fn save(entry: Entry) -[FS]> SaveError! { … }`. Formatting keeps this order.
 
 **2026-09-30 — D-CALLBACK-ERR1=A shipped** *(card #3708; owner ruling that
 Core declares its failures)*: a type parameter may be a failure domain, so a

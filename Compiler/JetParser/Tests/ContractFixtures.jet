@@ -75,6 +75,14 @@ fn pc_trait_effect_slots() {
     pc_require(if slots.program.items[0] == .Trait(value) -> value.methods.len() == 3 && value.methods[0].default_body == None && value.methods[1].default_body == None else -> false, "effect-arrow trait slots stay requirements")
     free :: parse_source("fn begin(name: String) Never! -[FS]>\nfn run() {{}}\n".bytes())
     pc_require(free.diagnostics.len() == 1 && free.diagnostics[0].code == "E0081", "a free effect-arrow function without a body is E0081")
+    // D-SIG-AFTER1=A / D-TYPE-SUFFIX1=A: effects precede the error contract.
+    once :: jet_format_source("fn save(path: String) IOError! {{}}\nfn sync() Err! {{}}\nfn bounded() -[FS]> IOError! {{}}\n", false)
+    pc_require(once.ok, "unit-fallible signatures format")
+    pc_require(once.text.contains("fn save(path: String) IOError!"), "unit success omits the plain arrow")
+    pc_require(once.text.contains("fn sync() Err!"), "explicit default error suffix")
+    pc_require(once.text.contains("fn bounded() -[FS]> IOError!"), "effect arrow precedes the error suffix")
+    twice :: jet_format_source(once.text, false)
+    pc_require(twice.ok && twice.text == once.text, "unit-fallible signatures format idempotently")
 }
 
 fn pc_marker_metadata() {
@@ -96,6 +104,23 @@ fn pc_marker_metadata() {
     }
     pc_require(seen == PC_MARKER_STATUS.len(), "every marker status is covered")
     pc_require((PC_MARKER_STATUS.get("Extern") ?? "") == "#Import", "Extern registry retirement")
+    // D-DECL-META1=A: rule facts are values in the same named-parameter list.
+    facts :: parse_source("marker Pre(condition: String, message: String, $sites: [.Function, .Method], $repeatable: true)\nfn run() {{}}\n".bytes())
+    pc_require(facts.diagnostics.len() == 0, "named marker metadata parses")
+    names := [String]{}
+    loop item in facts.program.items {
+        if item == .MarkerDecl(declaration) {
+            loop parameter in declaration.params {
+                &names.push(parameter.name)
+                if parameter.name.starts_with("$") {
+                    pc_require(parameter.ty == None && parameter.value != None, "marker facts carry values, not types")
+                } else {
+                    pc_require(parameter.ty != None, "marker use-site parameters carry types")
+                }
+            }
+        }
+    }
+    pc_require(names == [String]{"condition", "message", "$sites", "$repeatable"}, "marker fact and argument names keep source order")
 }
 
 fn pc_formatter_edit_boundaries() {
