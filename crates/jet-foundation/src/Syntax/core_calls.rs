@@ -78,7 +78,9 @@ const fn effect_for(module: &str, method: &str) -> Option<Effect> {
         || (same_text(module, "core.web.store") && one_of(method, &["__transact", "__facts_snapshot"]))
         || (same_text(module, "core.web.table") && one_of(method, &["__columns", "__replace_columns", "__state", "__set_state", "__alias",
             "__has_loader", "__invoke_loader", "__generation", "__query_facts", "__state_equal", "__page_facts",
-            "__commit_keys", "__loading_store", "__error_store", "__page_store"]))
+            "__commit_keys", "__loading_store", "__error_store", "__page_store",
+            "__state_store", "__has_key", "__page_accessor_keys", "__page_keys", "__page_replace_keys",
+            "__column_info", "__cell", "__rows", "__row_key", "__make_page"]))
     {
         return None;
     }
@@ -1579,7 +1581,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 0670aea1622749600f81112fa54eed2b6f6fe31e6aaf922965843231f9163578
+// Source SHA-256: 5a14e33f657ef77a2f829542ab9443879b66b66dc55c4498bd496c7652f20e9d
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -3237,6 +3239,16 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     sema_web_call("core.web.table", "__loading_store", "jet_table_loading_store_raw", &[true, false]),
     sema_web_call("core.web.table", "__error_store", "jet_table_error_store_raw", &[true, false]),
     sema_web_call("core.web.table", "__page_store", "jet_table_page_store_raw", &[true, false]),
+    sema_web_call("core.web.table", "__state_store", "jet_table_state_store_raw", &[true, false]),
+    sema_web_call("core.web.table", "__has_key", "jet_table_has_key_raw", &[true]),
+    sema_web_call("core.web.table", "__page_accessor_keys", "jet_table_page_accessor_keys_raw", &[true, false]),
+    sema_web_call("core.web.table", "__page_keys", "jet_table_page_keys_raw", &[true]),
+    sema_web_call("core.web.table", "__page_replace_keys", "jet_table_page_replace_keys_raw", &[false, false]),
+    sema_web_call("core.web.table", "__column_info", "jet_table_column_info_raw", &[true]),
+    sema_web_call("core.web.table", "__cell", "jet_table_cell_raw", &[true, true]),
+    sema_web_call("core.web.table", "__rows", "jet_table_rows_raw", &[true]),
+    sema_web_call("core.web.table", "__row_key", "jet_table_row_key_raw", &[true, true]),
+    sema_web_call("core.web.table", "__make_page", "jet_table_make_page_raw", &[false, false, false, false, false, false]),
     sema_web_call("core.web.forms", "new", "jet_web_forms_new", &[false]),
     sema_web_call( "core.web.forms", "field", "jet_web_forms_field", &[true, false, false, false], ),
     sema_web_call("core.web.forms", "set", "jet_web_forms_set", &[true, false, false]),

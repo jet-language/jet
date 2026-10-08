@@ -77,6 +77,10 @@ the existing serializer and process resources behind that same boundary.
 Table page loaders, generation checks, and publication stores operate on those
 same carriers. Cross-page key validation lends the existing page-key vectors
 under the registry's one lock before committing the accepted page.
+Client table ordering stays in Jet source: host leaves expose checked column
+accessors, shared row snapshots, and canonical page construction without a
+second key/filter/sort implementation.
+
 Types and error enums use PascalCase (`String`, `IOError`, `JSON`); functions
 and module segments use snake_case (`read`, `core.files`) (S54). Acronyms keep
 their declared spelling; see S66.

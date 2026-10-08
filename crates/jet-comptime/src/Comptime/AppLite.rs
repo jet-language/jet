@@ -2668,6 +2668,41 @@ pub fn apply_suite(
             web_kernel::jet_table_page_store_raw(web_table(one(0)?, span)?, page);
             Ok(CtValue::Unit)
         }
+        ("core.web.table", "__state_store") => {
+            web_kernel::jet_table_state_store_raw(web_table(one(0)?, span)?,
+                web_table_state_value(one(1)?, span)?);
+            Ok(CtValue::Unit)
+        }
+        ("core.web.table", "__has_key") => Ok(CtValue::Bool(
+            web_kernel::jet_table_has_key_raw(web_table(one(0)?, span)?))),
+        ("core.web.table", "__page_accessor_keys") => Ok(web_table_page(
+            web_kernel::jet_table_page_accessor_keys_raw(web_table(one(0)?, span)?,
+                web_table_page_value(one(1)?, span)?))),
+        ("core.web.table", "__page_keys") => Ok(CtValue::List(
+            web_kernel::jet_table_page_keys_raw(&web_table_page_value(one(0)?, span)?)
+                .into_iter().map(CtValue::Str).collect())),
+        ("core.web.table", "__page_replace_keys") => Ok(web_table_page(
+            web_kernel::jet_table_page_replace_keys_raw(web_table_page_value(one(0)?, span)?,
+                web_strings(one(1)?, "table page keys", span)?))),
+        ("core.web.table", "__column_info") => {
+            let (name, cell_type) = web_kernel::jet_table_column_info_raw(web_table_column(one(0)?, span)?);
+            Ok(CtValue::Tuple(vec![CtValue::Str(name), CtValue::Str(cell_type)]))
+        }
+        ("core.web.table", "__cell") => Ok(CtValue::Str(
+            web_kernel::jet_table_cell_raw(web_table_column(one(0)?, span)?, one(1)?))),
+        ("core.web.table", "__rows") => Ok(CtValue::List(
+            web_kernel::jet_table_rows_raw(web_table(one(0)?, span)?))),
+        ("core.web.table", "__row_key") => Ok(CtValue::Str(
+            web_kernel::jet_table_row_key_raw(web_table(one(0)?, span)?, one(1)?))),
+        ("core.web.table", "__make_page") => {
+            let CtValue::List(rows) = one(0)? else {
+                return Err(unsupported("table page rows", span));
+            };
+            Ok(web_table_page(web_kernel::jet_table_make_page_raw(rows.clone(),
+                web_strings(one(1)?, "table page keys", span)?,
+                web_int(one(2)?, "table total rows", span)?, web_int(one(3)?, "table page index", span)?,
+                web_int(one(4)?, "table page size", span)?, web_int(one(5)?, "table page count", span)?)))
+        }
         ("core.reactive", "effect") => {
             let callback = one(0)?.clone();
             Ok(opaque_web(web_kernel::jet_reactive_effect(move || {
