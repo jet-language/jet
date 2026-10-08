@@ -2327,3 +2327,23 @@ and checks shared mutation, multiple leases, surviving original/intermediate
 drops, nullable drop and the final exact-once World128 free. Native execution
 and composed caller admission are still required; source parsing and C11
 syntax checks do not establish runtime parity.
+
+### Native packed byte-list record routes
+
+`NativeByteList.jet` supplies the four List.Byte sequence routes over the
+shared `DataSequences.jet` geometry, index checks and reserve helper from
+`6d4fa9ba6` (a held composition dependency, not a private helper copy).
+The payload stride is one byte; the List24 header stores raw i64 length
+and capacity followed by the data pointer. Get returns the byte widened to
+u64. Push rejects values above 255 through the canonical foreign-range stop
+before reserve or mutation, then publishes length after initializing the
+byte. The seed C ABI uses raw machine counts here, not exact-Int handles.
+
+`NativeByteListWitness.c` checks zero/reserved capacities, the empty sentinel,
+repeated growth and all byte values against the physical contiguous buffer.
+Its fatal modes are `negative-capacity`, `negative-index`,
+`index-equals-length`, `index-over-length`, `byte-256` and `byte-u64-max`.
+The first requires the canonical capacity-overflow stop, the next three
+the shared sequence-OOB stop, and the final two the foreign range stop;
+all exit 101. Native execution/fatal snapshots and composed caller
+admission remain required, and syntax checks do not substitute for them.
