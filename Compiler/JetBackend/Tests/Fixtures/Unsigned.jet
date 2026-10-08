@@ -10,10 +10,10 @@ use jet_backend.[
     LIRCondition, LIRData, LIRDataID, LIRDrop, LIRFunction, LIRFunctionID, LIRInst,
     LIRJumpTarget, LIRLayout, LIRModule, LIRSignature, LIRSignatureID,
     LIRTerminator, LIRValue, LIRValueID, X64Alu, X64CompiledFunction,
-    X64ExecutableResult, X64Reloc, X64RelocTarget, elf64_static_executable,
+    X64ExecutableResult, X64Reloc, X64RelocTarget, X64RuntimeExport,
     lir_layout_bool, lir_layout_pointer, lir_layout_word, x64_alu_ri, x64_call_rel32,
-    x64_compile_module, x64_image_runtime, x64_link_text, x64_mov_ri,
-    x64_mov_rr, x64_pop, x64_push, x64_ret, x64_syscall,
+    x64_compile_module, x64_object_functions, x64_object_main, x64_mov_ri,
+    x64_mov_rr, x64_pop, x64_push, x64_ret,
 ]
 
 fn fx_u64() -> MIRType Never! { mir_type_from_kind(MIRTypeKind.IntN{signed: false, bits: 64}) }
@@ -173,7 +173,7 @@ fn fx_unsigned_rem_zero() -> MIRProgram Never! { fx_unsigned_failure(MIRBinaryOp
 // last: only five callee-saved registers exist, so it must spill. Argument
 // seven is imported from the stack. The driver supplies 0x100/0x101 words.
 // expect-stdout bool-abi: "9\n"
-// expect-static-only bool-abi
+// expect-object-only bool-abi
 fn fx_bool_abi_module() -> LIRModule Never! {
     values := [LIRValue]{}
     params := [LIRValueID]{}
@@ -260,16 +260,8 @@ fn fx_bool_abi_executable() -> X64ExecutableResult Never! {
     choose_module :: fx_bool_abi_module()
     compiled :: x64_compile_module(choose_module)
     if compiled.errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: compiled.errors}
-    code := [U8]{}
-    at :: x64_call_rel32(&code)
-    x64_mov_ri(&code, 7, 0)
-    x64_mov_ri(&code, 0, 231)
-    x64_syscall(&code)
-    functions := [X64CompiledFunction]{X64CompiledFunction{id: LIRFunctionID{value: -1}, name: "_start", code: code, relocs: [X64Reloc]{X64Reloc{at: at, target: X64RelocTarget.Function{id: LIRFunctionID{value: 2}}}}}}
+    functions := [X64CompiledFunction]{x64_object_main(LIRFunctionID{value: 2})}
     loop function in compiled.functions -> &functions.push(function)
     &functions.push(fx_bool_abi_driver())
-    linked := x64_link_text(functions, x64_image_runtime(), choose_module.data, true)
-    if linked.errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: linked.errors}
-    x64_link_static_text(&linked)
-    X64ExecutableResult{bytes: elf64_static_executable(linked.text, linked.offsets[0], linked.align, linked.data_offset), errors: [String]{}}
+    x64_object_functions(choose_module, functions, [X64RuntimeExport]{X64RuntimeExport{function: LIRFunctionID{value: -1}, symbol: "main"}})
 }

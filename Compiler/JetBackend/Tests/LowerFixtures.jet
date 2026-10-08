@@ -130,7 +130,7 @@ use jet_foundation.[
     mir_type_with_identity,
     stable_id,
 ]
-use jet_backend.[LIRFunctionID, LIRModule, lir_lint_module, lir_lower_entry, lir_print_module, x64_relocatable_object, x64_static_executable]
+use jet_backend.[LIRFunctionID, LIRModule, lir_lint_module, lir_lower_entry, lir_print_module, x64_relocatable_object]
 use core.files as files
 
 fn fx_span() -> Span Never! { Span{start: 0, end: 0} }
@@ -637,13 +637,8 @@ fn fx_compare_value(b: &FxBuilder, operation: MIROperation) -> MIRValueID Never!
     fx_copy(&b, fx_bool(), operation)
 }
 
-// Lower `program`, print its LIR and issues, and, when it is clean, compile
-// it (entry `run`) to a static x86-64 executable `<name>.elf`, a relocatable
-// object `<name>.o` for the compiled runtime, and an in-memory image
-// `<name>.image` with its load manifest `<name>.mem` (`align <origin>`,
-// `entry <offset>`, one `import <slot offset> <symbol>` line per runtime
-// import, then one `reloc <at> <target offset>` line per data pointer), in the
-// working directory; check-native-fixtures.mjs runs, links and loads them.
+// Lower `program`, print its LIR and issues, then write its relocatable object,
+// explicit fresh-pack executable and in-memory image/import manifest.
 fn fx_report(name: String, program: MIRProgram) -> Bool {
     lowered :: lir_lower_entry(program, mir_function_id("run"))
     print("== {name}")
@@ -651,12 +646,10 @@ fn fx_report(name: String, program: MIRProgram) -> Bool {
     loop issue in lowered.issues -> print("issue {issue.function}: {issue.message}")
     if lowered.issues.len() > 0 -> return false
     entry :: lowered.entry ?? panic("lowering without issues has an entry")
-    fx_report_image(name, lowered.lir, entry.value, true)
+    fx_report_image(name, lowered.lir, entry.value)
 }
 
-// These witnesses require canonical compiled runtime kernels absent from the
-// minimal freestanding runtime. They still produce both native artifact forms;
-// their checker requires an actual runtime library and exact expected output.
+// Runtime witnesses use the same admitted pack as every other fixture.
 fn fx_report_runtime(name: String, program: MIRProgram) -> Bool {
     lowered :: lir_lower_entry(program, mir_function_id("run"))
     print("== {name}")
@@ -664,7 +657,7 @@ fn fx_report_runtime(name: String, program: MIRProgram) -> Bool {
     loop issue in lowered.issues -> print("issue {issue.function}: {issue.message}")
     if lowered.issues.len() > 0 -> return false
     entry :: lowered.entry ?? panic("lowering without issues has an entry")
-    fx_report_image(name, lowered.lir, entry.value, false)
+    fx_report_image(name, lowered.lir, entry.value)
 }
 
 // The compile/write half of fx_report for a lint-clean LIR module (hand LIR
@@ -672,32 +665,26 @@ fn fx_report_runtime(name: String, program: MIRProgram) -> Bool {
 fn fx_report_lir(name: String, program: LIRModule) -> Bool {
     entry := -1
     loop function in program.functions { if function.name == "run" -> entry = function.id.value }
-    fx_report_image(name, program, entry, true)
+    fx_report_image(name, program, entry)
 }
 
 // Lints `program` and writes its images, started at function `entry` (a
 // lowered program's may be the generated entry, Lower/Entry.jet).
-fn fx_report_image(name: String, program: LIRModule, entry: Int, static_image: Bool) -> Bool {
+fn fx_report_image(name: String, input: LIRModule, entry: Int) -> Bool {
+    program := input
+    hosted_entry :: test_pack_entry(&program, LIRFunctionID{value: entry})
     issues :: lir_lint_module(program)
     loop issue in issues -> print("issue {issue.function}: {issue.message}")
     if issues.len() > 0 -> return false
     print("{name}: lint-clean")
-    if static_image {
-        image :: x64_static_executable(program, LIRFunctionID{value: entry})
-        loop error in image.errors -> print("native {name}: {error}")
-        if image.errors.len() > 0 -> return false
-        path :: "{name}.elf"
-        files.write_bytes(path, image.bytes) ?? panic("cannot write {path}")
-        files.set_mode(path, 0o755) ?? panic("cannot make {path} executable")
-        print("{name}: native image {path} ({image.bytes.len()} bytes)")
-    }
-    relocatable :: x64_relocatable_object(program, LIRFunctionID{value: entry})
+    relocatable :: x64_relocatable_object(program, hosted_entry)
     loop error in relocatable.errors -> print("object {name}: {error}")
     if relocatable.errors.len() > 0 -> return false
     object_path :: "{name}.o"
     files.write_bytes(object_path, relocatable.bytes) ?? panic("cannot write {object_path}")
     print("{name}: object {object_path} ({relocatable.bytes.len()} bytes)")
-    memory :: x64_memory_image(program, LIRFunctionID{value: entry})
+    if !test_pack_write(name, relocatable) -> return false
+    memory :: x64_memory_image(program, hosted_entry)
     loop error in memory.errors -> print("in-memory {name}: {error}")
     if memory.errors.len() > 0 -> return false
     image_path :: "{name}.image"
@@ -710,21 +697,17 @@ fn fx_report_image(name: String, program: LIRModule, entry: Int, static_image: B
     true
 }
 
-// A hand-linked static executable (hand LIR plus an x64 driver).
-fn fx_report_executable(name: String, image: X64ExecutableResult) -> Bool {
+// Hand-compiled dirty ABI callers are relocatable objects, not static images.
+fn fx_report_executable(name: String, object: X64ExecutableResult) -> Bool {
     print("== {name}")
-    loop error in image.errors -> print("native {name}: {error}")
-    if image.errors.len() > 0 -> return false
-    path :: "{name}.elf"
-    files.write_bytes(path, image.bytes) ?? panic("cannot write {path}")
-    files.set_mode(path, 0o755) ?? panic("cannot make {path} executable")
-    print("{name}: native image {path} ({image.bytes.len()} bytes)")
-    true
+    test_pack_write(name, object)
 }
 
 fn run() {
     abi_fixtures()
     clean := true
+    // Crossing the tagged inline and signed-word ranges must print exact decimal.
+    if !fx_report_runtime("image-overflow-decimal", fx_image_overflow_decimal()) -> clean = false
     if !fx_runtime_o1_check() {
         print("issue runtime-o1: library feed did not preserve canonical O1/export object bytes")
         clean = false

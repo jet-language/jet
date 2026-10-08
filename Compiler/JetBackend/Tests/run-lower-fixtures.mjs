@@ -3,12 +3,12 @@
 // with the sources it needs, as one package-free Jet file, and the in-process
 // loader unit (Tests/LoadImages.jet) beside it.
 //
-// usage: node Compiler/JetBackend/Tests/run-lower-fixtures.mjs <outdir>
+// usage: JET_RUNTIME_PACK=<admitted fresh Jet pack> node Compiler/JetBackend/Tests/run-lower-fixtures.mjs <outdir>
 // Append --abi to assemble just the ABI/alignment witnesses, or --sanitize
 // for just the sanitize-mode witnesses (Tests/SanitizeFixtures.jet).
-// then:  cd <outdir> && jet run unit.jet        (writes <fixture>.elf files)
-// then:  node Compiler/JetBackend/Tests/check-native-fixtures.mjs <outdir>
-//        (with JET_RUNTIME_C_LIB, it also runs every image through load.jet)
+// then: cd <outdir> && jet run unit.jet (writes objects and pack-linked .exe)
+// then: node Compiler/JetBackend/Tests/check-native-fixtures.mjs <outdir>
+// JET_RUNTIME_C_LIB is only an explicit supplementary seed verification rail.
 //
 // MIR.jet names three Foundation items (Span, Effect, ParamZone with
 // param_zone_name) whose files pull in the whole diagnostics registry; their
@@ -24,6 +24,9 @@ if (!outDir) {
   console.error("usage: run-lower-fixtures.mjs <outdir>");
   process.exit(64);
 }
+const runtimePack = process.env.JET_RUNTIME_PACK;
+if (!sanitizeOnlyArgument() && !runtimePack) throw new Error("JET_RUNTIME_PACK must explicitly name an admitted fresh Jet pack");
+function sanitizeOnlyArgument() { return process.argv.includes("--sanitize"); }
 // While other edits are in flight: FX_HEAD (comma-separated repo paths) reads
 // those files as committed at HEAD, and FX_EXCLUDE (comma-separated file
 // names without `.jet`) leaves those Lower and Fixtures files out.
@@ -141,10 +144,15 @@ const parts = [
   body("Compiler/JetBackend/Source/Image/RuntimeObject.jet"),
   ...(!small ? [body("Compiler/JetBackend/Source/Image/RuntimeLibrary.jet")] : []),
   ...(!small ? [body("Compiler/JetBackend/Source/Image/Memory.jet")] : []),
+  body("Compiler/JetBackend/Source/Image/Archive.jet"),
+  body("Compiler/JetBackend/Source/Image/StaticLink.jet"),
+  body("Compiler/JetBackend/Source/Image/RuntimePack.jet"),
+  body("Compiler/JetBackend/Tests/TestPack.jet"),
   ...(sanitizeOnly ? [body("Compiler/JetBackend/Tests/SanitizeFixtures.jet"), "fn run() { sanitize_fixtures() }"] : [body("Compiler/JetBackend/Tests/AbiFixtures.jet")]),
   ...(abiOnly ? ["fn run() { abi_fixtures() }"] : sanitizeOnly ? [] : [body("Compiler/JetBackend/Tests/LowerFixtures.jet"), ...sorted("Compiler/JetBackend/Tests/Fixtures").map(body)]),
 ];
 mkdirSync(outDir, { recursive: true });
+if (runtimePack) writeFileSync(`${outDir}/runtime-pack.txt`, `${resolve(runtimePack)}\n`);
 writeFileSync(`${outDir}/unit.jet`, [...coreUses, "", ...parts].join("\n"));
 
 // The loader unit needs only the image type, the OS layer and the loader. It
