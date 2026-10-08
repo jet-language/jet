@@ -123,6 +123,10 @@ under the registry's one lock before committing the accepted page.
 Client table ordering stays in Jet source: host leaves expose checked column
 accessors, shared row snapshots, and canonical page construction without a
 second key/filter/sort implementation.
+Qualified calls to a source-only Core export resolve to the loaded declaration,
+including calls from its own Core module (`core.sys.usize_max()` is one such
+export). Same-module native provider rows retain their host boundary when that
+row exists; qualified spelling does not invent another implementation.
 The same direct-boundary rule applies to the held reader, directory, xattr,
 writer-stat and lock operations: canonical private names select the existing
 host kernels without source pass-through facades. Path permission and ownership
@@ -889,6 +893,9 @@ Windows), `size_on_disk`, `modified` and `changed` (`DateTime`, nanosecond
 precision), and `created: DateTime?` (None where the file system keeps no
 birth time). `WalkEntry` exposes `path`,
 `relative`, `is_dir`, and `depth` through the checked type projection.
+The compiler-owned `IOOperation` enum describes the operation within this
+failure context. Its annotation is available to vetted Core source, not a new
+application-visible type export; user annotations retain E0119.
 
 Store-grade contracts (D-CORE-FILEERROR1, D-CORE-FILEOPEN1, D-CORE-FILESTAT1,
 D-CORE-FILEDIR1, D-CORE-HANDLEFD1, D-CORE-FILERENAME1, D-CORE-FILEXATTR1):

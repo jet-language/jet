@@ -213,6 +213,48 @@ fn core_rng_private_method_resolves_inside_own_impl() {
     assert!(errors.is_empty(), "private source RNG method errors: {errors:?}");
 }
 
+#[test]
+fn io_operation_annotations_are_core_only() {
+    let source = "fn retain(operation: IOOperation) -> IOOperation Never! { operation }\n";
+    let (_, diagnostics) = check_modules(&[
+        ("<corelib>/Core/term/term.jet", source, &[]),
+        ("pkg-a/src/main.jet", "fn run() {}\n", &[]),
+    ]);
+    assert!(error_codes(&diagnostics).is_empty(), "Core IOOperation: {diagnostics:?}");
+    let (_, diagnostics) = check("fn retain(operation: IOOperation) {}\nfn run() {}\n");
+    assert_eq!(error_codes(&diagnostics), ["E0119"], "{diagnostics:?}");
+}
+
+#[test]
+fn opaque_core_impl_methods_displace_only_their_builtin_names() {
+    let (_, diagnostics) = check_modules(&[
+        ("<corelib>/Core/tasks/tasks.jet",
+         "impl Condition { pub fn notify_one(self) Never! {} pub fn notify_all(self) Never! {} }\nfn own(condition: Condition) Never! { condition.notify_one() }\n",
+         &[]),
+        ("<corelib>/Core/rt/rt.jet",
+         "impl RealtimeStream { pub fn is_cancelled(self) -> Bool Never! { true } }\n",
+         &[]),
+        ("pkg-a/src/main.jet",
+         "use core.tasks as tasks\nuse core.rt as rt\nfn notify(condition: Condition) Never! { condition.notify_all() }\nfn observe(stream: RealtimeStream) -> Bool Never! { stream.is_cancelled() }\nfn other(text: String) -> Int Never! { text.len() }\nfn run() {}\n",
+         &[]),
+    ]);
+    assert!(error_codes(&diagnostics).is_empty(), "opaque Core methods: {diagnostics:?}");
+}
+
+#[test]
+fn source_only_core_qualified_calls_resolve_inside_and_across_core_modules() {
+    let (_, diagnostics) = check_modules(&[
+        ("<corelib>/Core/sys/sys.jet",
+         "pub fn usize_max() -> U64 Never! { U64{255} }\nfn own() -> U64 Never! { core.sys.usize_max() }\n",
+         &[]),
+        ("<corelib>/Core/tui/tui.jet",
+         "fn foreign() -> U64 Never! { core.sys.usize_max() }\n",
+         &[]),
+        ("pkg-a/src/main.jet", "fn run() {}\n", &[]),
+    ]);
+    assert!(error_codes(&diagnostics).is_empty(), "qualified Core source calls: {diagnostics:?}");
+}
+
 fn error_codes(diags: &[Diagnostic]) -> Vec<&str> {
     diags
         .iter()
