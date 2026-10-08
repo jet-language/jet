@@ -49,11 +49,47 @@ pub enum VaultError {
 }
 
 pub struct WrappedVaultKey {
-    pub bytes: [U8]
+    priv bytes: [U8]
+    priv mode: Int
+    priv key_type: Int
+    priv origin_name: String
+    priv origin_generation: Int
+    priv header_len: Int
+
+    pub fn from_bytes(bytes: ^[U8]) -> WrappedVaultKey KeyWrapError! { __wrapped_from_bytes(^bytes) }
+    pub fn bytes(self) -> [U8] Never! { __wrapped_bytes(self) }
 }
 
+pub fn __wrapped_from_bytes(bytes: ^[U8]) -> WrappedVaultKey KeyWrapError! {
+    meta :: wrapped_metadata(bytes) ?? return Err(err)
+    Ok(WrappedVaultKey{bytes: ^bytes, mode: meta.mode, key_type: meta.key_type,
+        origin_name: ^meta.name, origin_generation: meta.generation, header_len: meta.header_len})
+}
+pub fn __wrapped_bytes(wrapped: WrappedVaultKey) -> [U8] Never! { wrapped.bytes.copy() }
+
+impl WrappedVaultKey.Display {
+    fn display(self) -> String Never! {
+        mode :: if self.mode == 1 -> "recipient" else -> "passphrase"
+        key_type :: if self.key_type == 1 -> "signing" else -> "x25519"
+        "WrappedVaultKey(mode:{mode},type:{key_type},origin:{self.origin_name}@v{self.origin_generation})"
+    }
+}
+impl WrappedVaultKey.Debug { fn debug(self) -> String Never! { self.display() } }
+
 pub struct KeyUnlock {
-    pub bytes: [U8]
+    priv kind: Int
+    priv secret: View<U8>
+}
+// These retain a read borrow of the real owner's bytes, never a copied secret.
+pub fn __key_unlock_recipient(identity: X25519SecretKey) -> KeyUnlock Never! {
+    #Unsafe("vault unlock borrows the recipient's actual secret bytes") {
+        KeyUnlock{kind: 1, secret: identity.bytes[0..<identity.bytes.len()]}
+    }
+}
+pub fn __key_unlock_passphrase(passphrase: Secret) -> KeyUnlock Never! {
+    #Unsafe("vault unlock borrows the passphrase's actual secret bytes") {
+        KeyUnlock{kind: 2, secret: passphrase.bytes[0..<passphrase.bytes.len()]}
+    }
 }
 
 #Error
@@ -291,3 +327,147 @@ fn validate_reason(reason: String) -> Bool? {
     Val(true)
 }
 
+
+// JVKW/v1 parser policy salvaged from 5933a61b2 vault_02:jvkw_parse.
+// Integer cursors avoid allocating the non-secret header arrays just to validate them.
+struct WrappedMetadata {
+    mode: Int
+    key_type: Int
+    name: String
+    generation: Int
+    header_len: Int
+}
+
+fn wrap_error(reason: String) -> KeyWrapError Never! { KeyWrapError{reason: reason} }
+
+fn wrapped_take(bytes: [U8], at: &Int, count: Int) -> Int KeyWrapError! {
+    if count < 0 || at < 0 || at > bytes.len() || count > bytes.len() - at {
+        return Err(wrap_error("invalid wrapped vault key length"))
+    }
+    start :: at
+    at += count
+    Ok(start)
+}
+
+fn wrapped_uint(bytes: [U8], at: &Int, width: Int) -> Int KeyWrapError! {
+    start :: wrapped_take(bytes, &at, width) ?? return Err(err)
+    value := 0
+    shift := 0
+    loop i in 0..<width {
+        value += Int.from_u8(bytes[start + i]) << shift
+        shift += 8
+    }
+    Ok(value)
+}
+
+fn wrapped_nonzero(bytes: [U8], at: &Int, count: Int) -> Bool KeyWrapError! {
+    start :: wrapped_take(bytes, &at, count) ?? return Err(err)
+    nonzero := false
+    loop i in 0..<count {
+        if bytes[start + i] != (U8{0}) -> nonzero = true
+    }
+    Ok(nonzero)
+}
+
+fn wrapped_metadata(bytes: [U8]) -> WrappedMetadata KeyWrapError! {
+    if bytes.len() < 16 || bytes.len() > 8192 -> return Err(wrap_error("invalid wrapped vault key length"))
+    if bytes[0] != (U8{74}) || bytes[1] != (U8{86}) || bytes[2] != (U8{75}) || bytes[3] != (U8{87}) {
+        return Err(wrap_error("invalid wrapped vault key encoding"))
+    }
+    if bytes[4] != (U8{1}) -> return Err(wrap_error("unsupported wrapped vault key version"))
+    mode :: Int.from_u8(bytes[5])
+    if mode != 1 && mode != 2 -> return Err(wrap_error("unsupported wrapped vault key mode"))
+    key_type :: Int.from_u8(bytes[6])
+    if key_type != 1 && key_type != 2 -> return Err(wrap_error("unsupported wrapped vault key type"))
+    if bytes[7] != (U8{0}) -> return Err(wrap_error("invalid wrapped vault key encoding"))
+    fixed := 8
+    header_len :: wrapped_uint(bytes, &fixed, 4) ?? return Err(err)
+    ciphertext_len :: wrapped_uint(bytes, &fixed, 4) ?? return Err(err)
+    header_end :: 16 + header_len
+    if ciphertext_len != 64 || header_end + 80 != bytes.len() -> return Err(wrap_error("invalid wrapped vault key length"))
+    at := 16
+    repo_nonzero :: wrapped_nonzero(bytes, &at, 16) ?? return Err(err)
+    name_len :: wrapped_uint(bytes, &at, 2) ?? return Err(err)
+    if name_len < 1 || name_len > 128 -> return Err(wrap_error("invalid wrapped vault key length"))
+    name_at :: wrapped_take(bytes, &at, name_len) ?? return Err(err)
+    name_bytes := [U8]{}
+    loop i in 0..<name_len -> &name_bytes.push(bytes[name_at + i])
+    name :: String.from_bytes(^name_bytes) ?? return Err(wrap_error("invalid wrapped vault key encoding"))
+    validate_name(name) ?? return Err(wrap_error("invalid wrapped vault key encoding"))
+    generation :: wrapped_uint(bytes, &at, 8) ?? return Err(err)
+    opaque_nonzero :: wrapped_nonzero(bytes, &at, 16) ?? return Err(err)
+    hash_nonzero :: wrapped_nonzero(bytes, &at, 32) ?? return Err(err)
+    wrapped_take(bytes, &at, 8) ?? return Err(err)
+    export_nonzero :: wrapped_nonzero(bytes, &at, 16) ?? return Err(err)
+    wrapped_take(bytes, &at, 24) ?? return Err(err)
+    if !repo_nonzero || generation == 0 || !opaque_nonzero || !hash_nonzero || !export_nonzero {
+        return Err(wrap_error("invalid wrapped vault key encoding"))
+    }
+    if mode == 1 {
+        count :: wrapped_uint(bytes, &at, 2) ?? return Err(err)
+        if count < 1 || count > 16 -> return Err(wrap_error("invalid wrapped vault key length"))
+        wrapped_take(bytes, &at, 48) ?? return Err(err)
+        previous := -1
+        loop _ in 0..<count {
+            recipient :: wrapped_take(bytes, &at, 32) ?? return Err(err)
+            wrapped_take(bytes, &at, 48) ?? return Err(err)
+            if previous >= 0 {
+                order := 0
+                loop i in 0..<32 {
+                    a :: Int.from_u8(bytes[previous + i])
+                    b :: Int.from_u8(bytes[recipient + i])
+                    if a < b { order = -1; break }
+                    if a > b { order = 1; break }
+                }
+                if order >= 0 -> return Err(wrap_error("invalid wrapped vault key encoding"))
+            }
+            previous = recipient
+        }
+    } else {
+        wrapped_take(bytes, &at, 16) ?? return Err(err)
+        memory :: wrapped_uint(bytes, &at, 4) ?? return Err(err)
+        iterations :: wrapped_uint(bytes, &at, 4) ?? return Err(err)
+        lanes :: wrapped_uint(bytes, &at, 1) ?? return Err(err)
+        reserved :: wrapped_uint(bytes, &at, 3) ?? return Err(err)
+        if memory != 65536 || iterations != 3 || lanes != 1 || reserved != 0 {
+            return Err(wrap_error("invalid wrapped vault key encoding"))
+        }
+    }
+    if at != header_end -> return Err(wrap_error("invalid wrapped vault key length"))
+    Ok(WrappedMetadata{mode: mode, key_type: key_type, name: ^name, generation: generation, header_len: header_len})
+}
+
+#Test("Vault names and reasons use UTF-8 byte bounds and Unicode control rules") {
+    assert_eq(validate_name("release"), Val(true))
+    assert_eq(validate_name("."), None)
+    assert_eq(validate_name("a/b"), None)
+    assert_eq(validate_name("a\u{0085}b"), None)
+    assert_eq(validate_reason("a\u{009f}b"), None)
+    assert_eq(validate_reason("a\u{2028}b"), None)
+    assert_eq(validate_reason("e\u{0301}"), None)
+}
+
+#Test("JVKW passphrase header preserves public metadata without copying key material") {
+    // Exact JVKW/v1: 154-byte header, 64-byte ciphertext, 16-byte tag.
+    bytes := [U8]{74, 86, 75, 87, 1, 2, 1, 0, 154, 0, 0, 0, 64, 0, 0, 0}
+    loop _ in 0..<16 -> &bytes.push(U8{1})
+    &bytes.push(U8{4})
+    &bytes.push(U8{0})
+    loop b in "name".bytes() -> &bytes.push(b)
+    &bytes.push(U8{1})
+    loop _ in 0..<7 -> &bytes.push(U8{0})
+    loop _ in 0..<16 -> &bytes.push(U8{1})
+    loop _ in 0..<32 -> &bytes.push(U8{1})
+    loop _ in 0..<8 -> &bytes.push(U8{0})
+    loop _ in 0..<16 -> &bytes.push(U8{1})
+    loop _ in 0..<24 -> &bytes.push(U8{0})
+    loop _ in 0..<16 -> &bytes.push(U8{0})
+    loop b in [U8]{0, 0, 1, 0, 3, 0, 0, 0, 1, 0, 0, 0} -> &bytes.push(b)
+    loop _ in 0..<80 -> &bytes.push(U8{0})
+    meta :: wrapped_metadata(bytes) ?? panic("valid JVKW fixture rejected")
+    assert_eq(meta.mode, 2)
+    assert_eq(meta.key_type, 1)
+    assert_eq(meta.name, "name")
+    assert_eq(meta.generation, 1)
+    assert_eq(meta.header_len, 154)
+}
