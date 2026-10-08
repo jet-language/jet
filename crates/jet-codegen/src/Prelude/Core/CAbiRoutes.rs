@@ -5,7 +5,7 @@
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(non_snake_case, clippy::all)]
 mod jet_c_abi_routes {
-    use super::jet_c_abi::{borrowed, guard, handle, native, view, JetCString};
+    use super::jet_c_abi::{borrowed, guard, handle, jet_rt_alloc, native, view, JetCString};
 
     #[cold]
     fn range_stop() -> ! {
@@ -38,9 +38,9 @@ mod jet_c_abi_routes {
         let buffer = if len == 0 {
             std::ptr::null_mut()
         } else {
-            let layout = std::alloc::Layout::from_size_align(len * 8, 8).unwrap_or_else(|_| range_stop());
+            let layout = std::alloc::Layout::from_size_align(len * std::mem::size_of::<u64>(), std::mem::align_of::<u64>()).unwrap_or_else(|_| range_stop());
             // SAFETY: `layout` has a nonzero size.
-            let buffer = unsafe { std::alloc::alloc(layout) } as *mut u64;
+            let buffer = unsafe { jet_rt_alloc(layout.size(), layout.align()) } as *mut u64;
             if buffer.is_null() {
                 std::alloc::handle_alloc_error(layout);
             }
