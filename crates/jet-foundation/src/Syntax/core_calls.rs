@@ -1472,7 +1472,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: c086049d291dc324a89108ec9ede65bfd53163133d58299ede76c7f3e57a4362
+// Source SHA-256: 89a1a2c8e3c4d8b9bbef3a3b3e86926279e374c2945cc5abe0315fd380fc1292
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -2180,9 +2180,9 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.encoding.json", "parse", "jet_std_json_parse", true, &[true], ),
     CoreCallRecord::new( "core.encoding.json", "loads", "jet_std_json_parse", true, &[true], ),
     CoreCallRecord::new( "core.encoding.json", "decode", "jet_std_json_decode_lenient", true, &[true], ) .without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new( "core.encoding.json", "to_string", "jet_std_json_render", true, &[true], ),
+    CoreCallRecord::source_owned("core.encoding.json", "to_string", &[true]),
     CoreCallRecord::new( "core.encoding.json", "dumps", "jet_std_json_render", true, &[true], ),
-    CoreCallRecord::new( "core.encoding.json", "to_string_pretty", "jet_std_json_render_pretty", true, &[true], ),
+    CoreCallRecord::source_owned("core.encoding.json", "to_string_pretty", &[true]),
     CoreCallRecord::new( "core.encoding.csv", "decode", "jet_enc_csv_decode", true, &[true], ),
     CoreCallRecord::new( "core.game", "run", "jet_game_run", true, &[true, true, true, true], ) .without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.encoding.json", "events", "jet_std_json_events", true, &[true], ),
@@ -2433,8 +2433,8 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.encoding.xml", "root", "jet_std_xml_root", true, &[true], ),
     CoreCallRecord::new( "core.encoding.xml", "attribute", "jet_std_xml_attribute", true, &[true, true], ),
     CoreCallRecord::new( "core.encoding.xml", "content", "jet_std_xml_content", true, &[true], ),
-    CoreCallRecord::new("core.encoding.cbor", "to_bytes", "", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::TypedIntrinsic).without_direct_aot().with_marker(CoreMarkerApplication::deprecated("encode", "2027", "cbor.to_bytes", Some("2028"))),
-    CoreCallRecord::new("core.encoding.cbor", "parse", "", true, &[true]).with_max_arity(2).with_interpreter_route(CoreCallInterpreterRoute::TypedIntrinsic).without_direct_aot().with_marker(CoreMarkerApplication::deprecated("decode", "2027", "cbor.parse", Some("2028"))),
+    CoreCallRecord::source_owned("core.encoding.cbor", "to_bytes", &[true]).with_marker(CoreMarkerApplication::deprecated("encode", "2027", "cbor.to_bytes", Some("2028"))),
+    CoreCallRecord::source_owned("core.encoding.cbor", "parse", &[true]).with_max_arity(2).with_marker(CoreMarkerApplication::deprecated("decode", "2027", "cbor.parse", Some("2028"))),
     CoreCallRecord::new("core.encoding.binary", "pack_u8", "jet_std_binary_pack_u8", true, &[false]),
     CoreCallRecord::new("core.encoding.binary", "pack_i8", "jet_std_binary_pack_i8", true, &[false]),
     CoreCallRecord::new("core.encoding.binary", "pack_u16le", "jet_std_binary_pack_u16le", true, &[false]),
