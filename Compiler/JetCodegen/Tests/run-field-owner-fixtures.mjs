@@ -17,5 +17,5 @@ const unit = readFileSync(join(rungs, "L4/project/src/compiler.jet"), "utf8");
 const fixtures = readFileSync(join(repo, "Compiler/JetCodegen/Tests/FieldOwnerFixtures.jet"), "utf8");
 mkdirSync(join(out, "project/src"), { recursive: true });
 writeFileSync(join(out, "project/src/compiler.jet"), unit + "\n" + fixtures);
-writeFileSync(join(out, "project/package.jet"), 'name: "field_owner_contract_fixtures"\nversion: "0.1.0"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n');
+writeFileSync(join(out, "project/package.jet"), 'name: "field_owner_contract_fixtures"\nversion: "0.1.0"\nauthority: { holds: { allow: [IO, Mem.Alloc, Time.Wait] } }\n');
 console.log(`${out}/project/src/compiler.jet`);
