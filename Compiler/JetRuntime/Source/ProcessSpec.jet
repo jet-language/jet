@@ -21,8 +21,13 @@ fn process_optional_raw_eq(a: I64, b: I64) -> Bool {
     encoding_enum_eq(a, b)
 }
 fn process_text_list_clone(value: I64, pairs: Bool) -> I64 {
+    if !pairs {
+        result :: jet_rt_alloc(DATA_SEQUENCE_BYTES, I64{8})
+        data_text_list_copy_into(value, result)
+        return result
+    }
     length :: encoding_word(value + DATA_SEQUENCE_LENGTH)
-    stride :: if pairs -> DATA_TREE_ENTRY_BYTES else -> DATA_TREE_ELEMENT_BYTES
+    stride :: DATA_TREE_ENTRY_BYTES
     result :: data_sequence_new(length, stride)
     source :: encoding_word(value + DATA_SEQUENCE_DATA)
     target :: encoding_word(result + DATA_SEQUENCE_DATA)
@@ -36,7 +41,7 @@ fn process_text_list_clone(value: I64, pairs: Bool) -> I64 {
 }
 fn process_text_list_drop(value: I64, pairs: Bool) {
     if !pairs {
-        coll_text_list_drop(value, true)
+        data_text_list_drop_fields(value)
     } else {
         length :: encoding_word(value + DATA_SEQUENCE_LENGTH)
         data :: encoding_word(value + DATA_SEQUENCE_DATA)

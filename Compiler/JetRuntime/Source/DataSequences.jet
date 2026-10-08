@@ -52,3 +52,27 @@ fn data_u8_list_drop_fields(value: I64) {
     capacity :: rt_text_word(value + DATA_SEQUENCE_CAPACITY)
     if (capacity != I64{0}) -> jet_rt_free(rt_text_word(value + DATA_SEQUENCE_DATA), capacity * RT_HOST_U8_STRIDE, I64{8})
 }
+fn data_text_list_copy_into(source: I64, target: I64) {
+    length :: rt_text_word(source)
+    data :: if (length == I64{0}) -> I64{0} else -> jet_rt_alloc(length * I64{8}, I64{8})
+    rt_text_store(target, length)
+    rt_text_store(target + I64{8}, length)
+    rt_text_store(target + I64{16}, data)
+    original :: rt_text_word(source + I64{16})
+    at := I64{0}
+    loop at < length {
+        rt_text_store(data + at * I64{8}, jet_rt_string_clone(rt_text_word(original + at * I64{8})))
+        at += I64{1}
+    }
+}
+fn data_text_list_drop_fields(value: I64) {
+    data :: rt_text_word(value + I64{16})
+    length :: rt_text_word(value)
+    at := I64{0}
+    loop at < length {
+        jet_rt_string_drop(rt_text_word(data + at * I64{8}))
+        at += I64{1}
+    }
+    capacity :: rt_text_word(value + I64{8})
+    if (capacity != I64{0}) -> jet_rt_free(data, capacity * I64{8}, I64{8})
+}

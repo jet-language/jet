@@ -65,35 +65,11 @@ fn tls_trust_drop_fields(value: I64) {
 // projections their parent's lifetime without allocating temporary owners.
 TLS_CERT_BYTES :: prep { I64{128} }
 TLS_PEER_BYTES :: prep { I64{176} }
-fn tls_text_list_copy_into(source: I64, target: I64) {
-    length :: rt_text_word(source)
-    data :: if (length == I64{0}) -> I64{0} else -> jet_rt_alloc(length * I64{8}, I64{8})
-    rt_text_store(target, length)
-    rt_text_store(target + I64{8}, length)
-    rt_text_store(target + I64{16}, data)
-    original :: rt_text_word(source + I64{16})
-    at := I64{0}
-    loop at < length {
-        rt_text_store(data + at * I64{8}, jet_rt_string_clone(rt_text_word(original + at * I64{8})))
-        at += I64{1}
-    }
-}
-fn tls_text_list_drop_fields(value: I64) {
-    data :: rt_text_word(value + I64{16})
-    length :: rt_text_word(value)
-    at := I64{0}
-    loop at < length {
-        jet_rt_string_drop(rt_text_word(data + at * I64{8}))
-        at += I64{1}
-    }
-    capacity :: rt_text_word(value + I64{8})
-    if (capacity != I64{0}) -> jet_rt_free(data, capacity * I64{8}, I64{8})
-}
 fn tls_cert_clone_into(source: I64, target: I64) {
     data_u8_list_copy_into(source, target)
     data_u8_list_copy_into(source + I64{24}, target + I64{24})
     data_u8_list_copy_into(source + I64{48}, target + I64{48})
-    tls_text_list_copy_into(source + I64{72}, target + I64{72})
+    data_text_list_copy_into(source + I64{72}, target + I64{72})
     rt_text_store(target + I64{96}, rt_text_word(source + I64{96}))
     rt_text_store(target + I64{104}, rt_text_word(source + I64{104}))
     rt_text_store(target + I64{112}, jet_rt_string_clone(rt_text_word(source + I64{112})))
@@ -103,7 +79,7 @@ fn tls_cert_drop_fields(value: I64) {
     data_u8_list_drop_fields(value)
     data_u8_list_drop_fields(value + I64{24})
     data_u8_list_drop_fields(value + I64{48})
-    tls_text_list_drop_fields(value + I64{72})
+    data_text_list_drop_fields(value + I64{72})
     jet_rt_string_drop(rt_text_word(value + I64{112}))
     jet_rt_string_drop(rt_text_word(value + I64{120}))
 }
@@ -208,14 +184,14 @@ fn tls_secret_copy(value: I64) -> I64 {
     rt_text_store(result + I64{32}, cloned_identity)
     rt_text_store(result + I64{40}, rt_text_word(value + I64{40}))
     rt_text_store(result + I64{48}, rt_text_word(value + I64{48}))
-    tls_text_list_copy_into(value + I64{56}, result + I64{56})
+    data_text_list_copy_into(value + I64{56}, result + I64{56})
     result
 }
 #Export(c) fn jet_rt_handle_drop_JetTLSClientConfig(value: I64) {
     if (value == I64{0}) -> return
     tls_trust_drop_fields(value)
     jet_rt_handle_drop_JetTLSClientIdentity(rt_text_word(value + I64{32}))
-    tls_text_list_drop_fields(value + I64{56})
+    data_text_list_drop_fields(value + I64{56})
     jet_rt_free(value, I64{80}, I64{8})
 }
 // This projection borrows the parent's inline trust, never an owning clone.

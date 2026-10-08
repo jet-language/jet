@@ -594,3 +594,13 @@ A stronger comparative claim additionally requires the strict performance and
 frequency-weighted learnability evidence above. Execution order, active work
 records, blockers, and evidence logs belong in Tower rather than in this
 specification.
+
+### Shared native text-list ownership
+
+`DataSequences.jet` owns the inline List24 deep-text copy and field-only drop
+used by TLS certificate/config fields, ProcessSpec plain-text lists, and native
+Authority rights. Copy allocates only the destination buffer and clones each
+text; drop frees initialized text owners and the buffer, never the inline
+header. Owning holder APIs release their own shell separately. ProcessSpec's
+ordered pair lists retain their specialized two-text-per-entry representation.
+
