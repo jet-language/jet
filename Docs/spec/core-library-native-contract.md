@@ -435,6 +435,10 @@ and initialized bytes, ignoring capacity. Null drops are harmless. The
 `AttachmentWitness.c` composed-object client pins binary text/bytes, ownership,
 capacity-sized frees, mutation independence, and projection lifetimes. These
 data operations make no claim about SMTP transport or MIME serialization.
+`attachment_copy_into` and `attachment_drop_fields` in that same provider
+single-source field ownership for both heap handles and inline sequence slots;
+callers own their respective shells, so inline children never allocate a
+temporary attachment shell or free their enclosing sequence slot.
 
 Native network readiness snapshots use two normalized Bool words in
 `NetReadiness.jet`. Getters, clone and equality interpret the low byte of each
