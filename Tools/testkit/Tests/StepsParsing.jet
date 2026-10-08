@@ -125,3 +125,47 @@ fn kit_test_steps_env() -> KitEnv {
     assert_eq(plan.steps[0].assertions[2].json_path, "$[\"é·😀\"]")
     assert(kit_steps_parse_case("step: printf x\nstdout: ~ \"é·😀\"\n").error != "")
 }
+
+#Test("setup actions do not end the case environment header but process assertions end modifier adjacency") {
+    plan :: kit_steps_parse_case("mkdir: cache\nenv: SHARED=value\nnormalize: replace \"token\" \"shared\"\nstep: printf value\nenv: LOCAL=step\nexit: 0\nstep: printf value\n")
+    assert_eq(plan.error, "")
+    assert_eq(plan.environment, ["SHARED=value"])
+    assert_eq(plan.replacements.len(), 1)
+    assert_eq(plan.steps[0].environment.len(), 0)
+    assert_eq(plan.steps[1].environment.len(), 1)
+    assert_eq(plan.steps[2].environment.len(), 0)
+    assert(kit_steps_parse_case("step: printf value\nexit: 0\nenv: LOCAL=late\n").error.contains("modifier not adjacent"))
+    assert(kit_steps_parse_case("step: printf value\nmkdir: cache\nenv: LOCAL=late\n").error.contains("modifier not adjacent"))
+}
+
+#Test("exit relations and membership preserve explicit status assertions and validate earlier labels") {
+    plan :: kit_steps_parse_case("step prior: printf value\nexit: 7\nstep current: printf value\nexit: == prior\nexit: in [7, 8] # original status alternatives\n")
+    assert_eq(plan.error, "")
+    assert_eq(plan.steps[1].exit, "any")
+    assert_eq(plan.steps[1].assertions.len(), 2)
+    pinned :: kit_steps_parse_case("step prior: printf value\nstep current: printf value\nexit: 0\nexit: == prior\n")
+    assert_eq(pinned.error, "")
+    assert_eq(pinned.steps[1].exit, "0")
+    loop source in ["step current: printf value\nexit: == current\n", "step: printf value\nexit: == later\nstep later: printf value\n", "step: printf value\nexit: in [] # original predicate\n", "step: printf value\nexit: in [0, nope] # original predicate\n", "step: printf value\nexit: in [0, 1]\n"] {
+        assert(kit_steps_parse_case(source).error != "")
+    }
+    assert(kit_steps_parse_case("write: {{tmp}}/subject_{{pid:app}} = \"bytes\"\n").error == "")
+    assert(kit_steps_parse_case("write: {{root}}/subject = \"bytes\"\n").error.contains("escapes"))
+}
+
+#Test("exit relation checks exact optional status and membership failures") {
+    run :: KitRun{stdout: "", stderr: "", code: 7, signal: None, timed_out: false, error: ""}
+    state := KitStepState{last: run, built: "", built_once: false, history: [KitCapturedStep{label: "prior", stdout: "", stderr: "", elapsed_ns: 0, code: Val(7)}]}
+    relation :: KitAssertion{stream: "exit", path: "", mode: "==", value: "prior"}
+    assert_eq(kit_steps_exit_test(relation, state).status, "PASS")
+    state.last.code = 8
+    assert_eq(kit_steps_exit_test(relation, state).status, "FAIL")
+    membership :: KitAssertion{stream: "exit", path: "", mode: "in", value: "", alternatives: ["7", "8"]}
+    assert_eq(kit_steps_exit_test(membership, state).status, "PASS")
+    state.last.code = 9
+    assert_eq(kit_steps_exit_test(membership, state).status, "FAIL")
+    state.last.signal = Val(15)
+    state.history[0].code = None
+    assert_eq(kit_steps_exit_test(relation, state).status, "PASS")
+    assert_eq(kit_steps_exit_test(membership, state).status, "FAIL")
+}

@@ -142,3 +142,18 @@ use core.files as files
     assert_eq(cases_test_advanced(root, "select", source).verdict.status, "PASS")
     files.remove_all(root) ?? panic("remove first-spawnable scratch")
 }
+
+#Test("case temp directory exists before setup and path boundaries reject scratch escapes") {
+    root :: cases_test_root("filesystem-temp-setup")
+    source :: "requires: os:unix\nchmod: {{tmp}} 0700\nfile: {{tmp}} is-dir\nmkdir: {{tmp}}/nested\nwrite: {{tmp}}/nested/owned = \"temporary\"\nfile: {{tmp}}/nested/owned = \"temporary\"\nstep: jet -c 'printf %s \"$TMPDIR\"'\nstdout: = \"{{tmp}}\"\n"
+    assert_eq(cases_test_advanced(root, "setup", source).verdict.status, "PASS")
+    assert_eq(cases_test_advanced(root, "wrong", "mkdir: {{tmp}}/nested\nwrite: {{tmp}}/nested/value = \"x\"\nfile: {{tmp}}/nested/value = \"y\"\n").verdict.status, "FAIL")
+    loop (index, path) in ["{{tmp}}/../escape", "{{tmp}}/../../escape", "{{root}}/escape", "{{scratch}}/escape", "../escape"] {
+        assert_eq(cases_test_advanced(root, "escape-{index}", "mkdir: {path}\n").verdict.status, "REFUSED")
+    }
+    env :: kit_test_steps_env()
+    assert_eq(kit_steps_work_path("{{tmp}}/nested/value", env, "/owned/work", "/owned/scratch", ""), Val("/owned/scratch/tmp/nested/value"))
+    assert_eq(kit_steps_work_path("{{tmp}}/../escape", env, "/owned/work", "/owned/scratch", ""), None)
+    assert_eq(kit_steps_work_path("/owned/scratch/tmp-other/escape", env, "/owned/work", "/owned/scratch", ""), None)
+    files.remove_all(root) ?? panic("remove temp setup scratch")
+}

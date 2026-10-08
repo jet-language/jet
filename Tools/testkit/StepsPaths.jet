@@ -1,11 +1,11 @@
 use core.files as files
 
-// Validate the lexical work-relative form before execution; tokens can name
-// work, but must not redirect a destructive operation into root or scratch.
+// Destructive operations stay under work or the kit-owned scratch/tmp directory,
+// never the repository root or arbitrary scratch paths.
 fn kit_steps_relative_path(path: String) -> Bool {
     if path == "" || path.contains("{{root}}") || path.contains("{{scratch}}") -> return false
     relative := path.replace("{{work}}", ".").replace("{{tmp}}", ".").replace("{{sys:dll-suffix}}", "suffix")
-    loop prefix in ["{{cap:", "{{tool:"] {
+    loop prefix in ["{{cap:", "{{tool:", "{{pid:"] {
         loop {
             start :: kit_steps_byte_index(relative, prefix) ?? break
             after :: start + prefix.count_bytes()

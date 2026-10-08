@@ -171,3 +171,15 @@ fn kit_steps_json_preview(text: String) -> String {
     }
     preview
 }
+
+fn kit_steps_exit_codes(text: String) -> [String]? {
+    if !text.starts_with("[") || !text.ends_with("]") -> return None
+    result := [String]{}
+    loop raw in kit_steps_byte_slice(text, 1, text.count_bytes() - 1).split(",") {
+        code :: ~raw.trim()
+        if kit_steps_integer(code) == None -> return None
+        &result.push(code)
+    }
+    if result.len() == 0 -> return None
+    Val(result)
+}

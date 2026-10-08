@@ -36,6 +36,7 @@ fn kit_steps_first_line(text: String, needle: String) -> String? {
 fn kit_steps_check_assertion(assertion: KitAssertion, context: KitStepCtx, state: KitStepState, source_name: String, allow_bless: Bool) -> KitVerdict {
     if kit_steps_build_target_conditions(assertion.conditions) -> return kit_expect_verdict("REFUSED", "build-target")
     if !kit_steps_conditions(assertion.conditions, context, state) -> return kit_expect_verdict("PASS", "")
+    if assertion.stream == "exit" -> return kit_steps_exit_test(assertion, state)
     if assertion.stream == "process" -> return kit_steps_process_check(assertion, context, state)
     if assertion.stream == "elapsed" -> return if assertion.mode.starts_with("median-") -> kit_steps_median_test(assertion, state.history) else if assertion.mode == "absolute" -> kit_steps_elapsed_absolute_test(assertion, state.history) else -> kit_steps_elapsed(assertion, state.history)
     if assertion.stream == "tree" -> return kit_steps_tree_check(assertion, context, state)
@@ -277,4 +278,22 @@ fn kit_steps_check_assertion(assertion: KitAssertion, context: KitStepCtx, state
         }
     } else -> return kit_expect_verdict("REFUSED", "unsupported assertion: {assertion.mode}")
     if matches -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "stream predicate {assertion.mode} failed")
+}
+
+fn kit_steps_exit_test(assertion: KitAssertion, state: KitStepState) -> KitVerdict {
+    actual :: if state.last.signal == None -> Val(state.last.code) else -> None
+    if assertion.mode == "==" {
+        index := state.history.len()
+        loop index > 0 {
+            index -= 1
+            saved :: state.history[index]
+            if saved.label != assertion.value -> next
+            return if actual == saved.code -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "exit differs from {assertion.value}")
+        }
+        return kit_expect_verdict("ERROR", "exit label missing: {assertion.value}")
+    }
+    loop code in assertion.alternatives {
+        if actual == kit_steps_integer(code) -> return kit_expect_verdict("PASS", "")
+    }
+    kit_expect_verdict("FAIL", "exit is not in the expected integer list")
 }

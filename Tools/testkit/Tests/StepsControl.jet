@@ -68,3 +68,16 @@ use core.files as files
     assert_eq(cases_test_advanced(root, "skipped-when", failed).verdict.status, "FAIL")
     files.remove_all(root) ?? panic("remove empty-loop scratch")
 }
+
+#Test("line loops read transformed quoted files and reject invalid file subjects") {
+    root :: cases_test_root("control-line-files")
+    source :: "write: \"space name.txt\" = \"a\\nb\\n\\n\"\nfor line file.filter(!= \"\").trim \"space name.txt\" as row\nstep: printf '%s' {{row}}\ncapture: joined += text stdout\nend for\ncap:joined: = \"ab\"\n"
+    assert_eq(cases_test_advanced(root, "quoted", source).verdict.status, "PASS")
+    assert_eq(cases_test_advanced(root, "wrong", "{source}cap:joined: = \"wrong\"\n").verdict.status, "FAIL")
+    assert_eq(cases_test_advanced(root, "missing", "for line file absent as row\nstep: true\nend for\n").verdict.status, "ERROR")
+    loop selector in ["file", "file ../escape", "file {{root}}/escape", "file {{tmp}}/../escape", "file? value", "files value", "file value of prior"] {
+        plan :: kit_steps_parse_case("for line {selector} as row\nstep: true\nend for\n")
+        assert(plan.error.contains("invalid bounded loop"))
+    }
+    files.remove_all(root) ?? panic("remove line-file scratch")
+}

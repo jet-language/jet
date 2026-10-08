@@ -32,12 +32,12 @@ use core.files as files
 
 #Test("all canonical PTY event and per-fd spellings parse and refuse without running the child") {
     root :: cases_test_root("wiring-pty")
-    loop modifier in ["pty: true", "pty: true size 24x80", "pty: stdin,stdout,stderr", "pty-send: \"x\\n\" after 1ms", "pty-close: after 1ms", "pty-resize: 30x100 at 1ms"] {
+    loop modifier in ["pty: true", "pty: true size 24x80", "pty: true size 0x0", "pty: true size 0x80", "pty: stdin,stdout,stderr", "pty-send: \"x\\n\" after 1ms", "pty-close: after 1ms", "pty-resize: 30x100 at 1ms"] {
         refused :: cases_test_advanced(root, "pty", "step: false\n{modifier}\n")
         assert_eq(refused.verdict.status, "REFUSED")
         assert_eq(refused.verdict.detail, "pty")
     }
-    loop modifier in ["pty: false", "pty: output", "pty: true size 0x80", "pty-resize: 24x80 after 1ms", "stderr-to-stdout: false", "stdout: file ../escape"] {
+    loop modifier in ["pty: false", "pty: output", "pty: true size -1x80", "pty: true size nox0", "pty: true size 0x", "pty-resize: 24x80 after 1ms", "stderr-to-stdout: false", "stdout: file ../escape"] {
         refused :: cases_test_advanced(root, "noncanonical", "step: false\n{modifier}\n")
         assert_eq(refused.verdict.status, "REFUSED")
         assert(refused.verdict.detail != "pty")

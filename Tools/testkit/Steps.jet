@@ -25,6 +25,7 @@ fn kit_steps_parse(source: String) -> KitPlan {
     before_assertions := 0
     blocks := [String]{}
     modifier_adjacent := false
+    process_seen := false
     loop raw in source.split("\n") {
         line_number += 1
         plan = kit_steps_attach_conditions(plan, before_steps, before_assertions, conditions)
@@ -142,7 +143,7 @@ fn kit_steps_parse(source: String) -> KitPlan {
         }
         modifier :: kit_expect_named(["env", "unset", "env-clear", "isolate", "pty", "pty-send", "pty-resize", "pty-close", "stderr-to-stdout", "timeout", "cwd", "limit", "stdin"], key) || (key == "normalize" && (value.starts_with("json ") || value.starts_with("replace "))) || (kit_expect_named(["stdout", "stderr"], key) && (value == "null" || value.starts_with("file ")))
         process_line :: key == "step" || key.starts_with("step ") || key.starts_with("spawn ") || key.starts_with("session ") || key.starts_with("poll ")
-        if modifier && !modifier_adjacent && !((key == "env" || key == "normalize") && plan.steps.len() == 0) {
+        if modifier && !modifier_adjacent && !((key == "env" || key == "normalize") && !process_seen) {
             plan.error = "line {line_number}: modifier not adjacent to its step"
             return plan
         }
@@ -150,8 +151,10 @@ fn kit_steps_parse(source: String) -> KitPlan {
             plan.error = "line {line_number}: when cannot guard a step modifier"
             return plan
         }
-        if process_line -> modifier_adjacent = true
-        else if !modifier -> modifier_adjacent = false
+        if process_line {
+            modifier_adjacent = true
+            process_seen = true
+        } else if !modifier -> modifier_adjacent = false
         if !(key == "normalize" && value.starts_with("replace ")) && !kit_steps_capture_tokens(value, captures) {
             plan.error = "line {line_number}: undefined capture token"
             return plan
@@ -222,7 +225,7 @@ fn kit_steps_parse(source: String) -> KitPlan {
                 return plan
             } else -> raw_value
             assignment :: "{kit_steps_byte_slice(value, 0, equals)}={decoded}"
-            if plan.steps.len() == 0 -> &plan.environment.push(assignment)
+            if !process_seen -> &plan.environment.push(assignment)
             else -> &plan.steps[plan.steps.len() - 1].environment.push(KitEnvVar{name: kit_steps_byte_slice(value, 0, equals), value: Val(decoded)})
             next
         }
@@ -256,7 +259,7 @@ fn kit_steps_parse(source: String) -> KitPlan {
                     return plan
                 }
                 rule :: KitReplacement{from: words[1].text, to: words[2].text, literal_from: quoted}
-                if plan.steps.len() == 0 -> &plan.replacements.push(rule)
+                if !process_seen -> &plan.replacements.push(rule)
                 else -> &plan.steps[plan.steps.len() - 1].replacements.push(rule)
                 next
             }
@@ -265,7 +268,7 @@ fn kit_steps_parse(source: String) -> KitPlan {
                     plan.error = "line {line_number}: invalid JSON normalizer (same-line reason required)"
                     return plan
                 }
-                if plan.steps.len() == 0 -> &plan.json_normalize.push(rule)
+                if !process_seen -> &plan.json_normalize.push(rule)
                 else -> &plan.steps[plan.steps.len() - 1].json_normalize.push(rule)
                 next
             }
@@ -719,6 +722,28 @@ fn kit_steps_parse(source: String) -> KitPlan {
         }
         if key == "exit" {
             words :: kit_steps_words(value) ?? []
+            if words.len() == 2 && words[0] == "==" {
+                if !kit_steps_known_label(plan, words[1], i) {
+                    plan.error = "line {line_number}: exit relation needs an earlier completed label"
+                    return plan
+                }
+                if !plan.steps[i].exit_explicit -> plan.steps[i].exit = "any"
+                &plan.steps[i].assertions.push(KitAssertion{stream: "exit", path: "", mode: "==", value: words[1]})
+                next
+            }
+            if value.starts_with("in ") {
+                codes :: kit_steps_exit_codes(~kit_steps_byte_slice(value, 3, value.count_bytes()).trim()) ?? {
+                    plan.error = "line {line_number}: exit membership needs a nonempty integer list"
+                    return plan
+                }
+                if !kit_steps_reason(original) {
+                    plan.error = "line {line_number}: exit membership needs a partial reason"
+                    return plan
+                }
+                if !plan.steps[i].exit_explicit -> plan.steps[i].exit = "any"
+                &plan.steps[i].assertions.push(KitAssertion{stream: "exit", path: "", mode: "in", value: "", alternatives: codes})
+                next
+            }
             not_equal :: words.len() == 2 && words[0] == "!=" && kit_steps_integer(words[1]) != None && kit_steps_reason(original)
             ordinary :: value == "any" || value == "nonzero" || kit_steps_integer(value) != None
             if (!ordinary && !not_equal) || (value == "any" && !kit_steps_reason(original)) {
@@ -726,6 +751,7 @@ fn kit_steps_parse(source: String) -> KitPlan {
                 return plan
             }
             plan.steps[i].exit = value
+            plan.steps[i].exit_explicit = true
             next
         }
         if !kit_steps_subject_valid(key) {

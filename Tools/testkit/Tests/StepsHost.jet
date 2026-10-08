@@ -192,3 +192,13 @@ use core.sys as sys
     assert_eq(cases_test_advanced(root, "wrong", "{source}file: separator = \"wrong\"\n").verdict.status, "FAIL")
     files.remove_all(root) ?? panic("remove path-sep scratch")
 }
+
+#Test("compact negated directory guards match spaced boolean negation without hiding failures") {
+    root :: cases_test_root("host-dir-readable")
+    source :: "mkdir: readable\nwhen dir-readable readable: write: positive = \"yes\"\nwhen !dir-readable missing: write: negative = \"yes\"\nwhen ! dir-readable missing: write: spaced = \"yes\"\nwhen !dir-readable readable: step: false\nfile: positive = \"yes\"\nfile: negative = \"yes\"\nfile: spaced = \"yes\"\n"
+    assert_eq(cases_test_advanced(root, "guards", source).verdict.status, "PASS")
+    assert_eq(cases_test_advanced(root, "wrong", "{source}file: negative = \"wrong\"\n").verdict.status, "FAIL")
+    assert(kit_steps_parse_case("when !dir-readable: step: true\n").error.contains("invalid when condition"))
+    assert(kit_steps_parse_case("when !env-set: step: true\n").error.contains("invalid when condition"))
+    files.remove_all(root) ?? panic("remove directory guard scratch")
+}

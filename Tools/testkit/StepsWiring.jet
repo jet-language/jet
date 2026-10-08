@@ -2,7 +2,10 @@ use core.files as files
 
 fn kit_steps_terminal_size(text: String) -> Bool {
     pair :: text.split("x").to_list()
-    pair.len() == 2 && (Int.parse(pair[0]) ?? 0) > 0 && (Int.parse(pair[1]) ?? 0) > 0
+    if pair.len() != 2 -> return false
+    rows :: Int.parse(pair[0]) ?? return false
+    columns :: Int.parse(pair[1]) ?? return false
+    rows >= 0 && columns >= 0
 }
 
 fn kit_steps_wiring_valid(key: String, original: String) -> Bool {

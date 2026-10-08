@@ -325,6 +325,7 @@ struct KitStep {
     argv: [String]
     stdin: String
     exit: String
+    exit_explicit: Bool{false}
     assertions: [KitAssertion]
     cwd: String{""}
     unset: [String]{[String]{}}
@@ -403,6 +404,7 @@ struct KitCapturedStep {
     stdout: String
     stderr: String
     elapsed_ns: Int
+    code: Int?{Val(0)}
     raw_stdout: String{""}
     raw_stderr: String{""}
 }
@@ -485,6 +487,7 @@ fn kit_steps_execute(original_context: KitStepCtx, hooks: KitStepHooks) -> KitOu
         .Val(value) -> return KitOutcome{verdict: value, run: state.last}
         .None -> {}
     }
+    files.create_dir_all(files.join(context.scratch, "tmp")) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "create case temp directory: {err}"))
     if plan.fixture != "" -> kit_exec_copy_tree(files.join(context.snapshots, plan.fixture), context.work, true)
     loop name in plan.free_ports {
         port :: kit_steps_free_port(context) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "{err}"))
@@ -632,6 +635,7 @@ fn kit_steps_execute(original_context: KitStepCtx, hooks: KitStepHooks) -> KitOu
                 stdout: kit_steps_replace(kit_steps_normalize(state.json_stdout ?? state.last.stdout, context.env, context.work, context.scratch, plan.normalize, state.built, source_name), step.replacements, context, state, true, source_name),
                 stderr: kit_steps_replace(kit_steps_normalize(state.json_stderr ?? state.last.stderr, context.env, context.work, context.scratch, plan.normalize, state.built, source_name), step.replacements, context, state, true, source_name),
                 elapsed_ns: state.last.elapsed_ns,
+                code: if state.last.signal == None -> Val(state.last.code) else -> None,
                 raw_stdout: kit_steps_replace(state.last.stdout, step.replacements, context, state, false, source_name),
                 raw_stderr: kit_steps_replace(state.last.stderr, step.replacements, context, state, false, source_name)})
         }

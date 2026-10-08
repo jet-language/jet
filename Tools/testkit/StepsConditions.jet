@@ -26,7 +26,7 @@ fn kit_steps_condition_atom_valid(text: String) -> Bool {
     words :: kit_steps_words(kit_steps_body(text)) ?? return false
     if words.len() == 0 -> return false
     kind :: words[0]
-    if kit_expect_named(["os", "os-name", "arch", "env", "env-set", "captured", "!captured", "dir-readable"], kind) -> return words.len() == 2 && words[1] != ""
+    if kit_expect_named(["os", "os-name", "arch", "env", "env-set", "captured", "dir-readable"], kind) -> return words.len() == 2 && words[1] != ""
     if kind == "tool" -> return words.len() == 2 && words[1] != ""
     if kind == "probe" -> return words.len() >= 2
     if kind == "exit" -> return words.len() == 3 && kit_expect_named(["==", "!="], words[1]) && kit_steps_integer(words[2]) != None
@@ -67,7 +67,7 @@ fn kit_steps_condition_atom(text: String, context: KitStepCtx, state: KitStepSta
         present :: if kind == "env-set" -> value != None else -> (value ?? "") != ""
         return present != negative
     }
-    if kind == "captured" || kind == "!captured" {
+    if kind == "captured" {
         present := false
         loop capture in state.captures {
             if capture.name == words[1] {
@@ -77,7 +77,7 @@ fn kit_steps_condition_atom(text: String, context: KitStepCtx, state: KitStepSta
                 }
             }
         }
-        return present == (kind == "captured")
+        return present
     }
     if kind == "dir-readable" {
         path :: kit_steps_runtime_expand(words[1], context, state) ?? return false
@@ -149,7 +149,8 @@ fn kit_steps_condition_tree_atom(text: String, tokens: [KitWord], start: Int, co
     end := start
     loop end < tokens.len() && !kit_expect_named(["&&", "||", ")"], kit_steps_byte_slice(text, tokens[end].start, tokens[end].end)) -> end += 1
     if end == start -> return KitLinePredicate{valid: false, value: false, next: end}
-    atom :: kit_steps_byte_slice(text, tokens[start].start, tokens[end - 1].end)
+    negative :: token.starts_with("!")
+    atom :: kit_steps_byte_slice(text, tokens[start].start + (if negative -> 1 else -> 0), tokens[end - 1].end)
     if !kit_steps_condition_atom_valid(atom) -> return KitLinePredicate{valid: false, value: false, next: end}
     value := false
     if context == {
@@ -161,7 +162,7 @@ fn kit_steps_condition_tree_atom(text: String, tokens: [KitWord], start: Int, co
         }
         .None -> {}
     }
-    KitLinePredicate{valid: true, value: value, next: end}
+    KitLinePredicate{valid: true, value: value != negative, next: end}
 }
 
 fn kit_steps_condition_tree_and(text: String, tokens: [KitWord], start: Int, context: KitStepCtx?, state: KitStepState?) -> KitLinePredicate {

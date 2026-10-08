@@ -39,8 +39,16 @@ fn kit_steps_loop_valid(words: [String]) -> Bool {
         end :: if words[words.len() - 3] == "sorted" -> words.len() - 3 else -> words.len() - 2
         return end >= 3 && kit_steps_entries_valid(words.slice(2, end))
     }
-    if words[1] != "line" || !kit_steps_subject_valid(words[2]) -> return false
+    if words[1] != "line" || !kit_steps_loop_subject_valid(words[2], words.len() == 7) -> return false
     words.len() == 5 || (words.len() == 7 && words[3] == "of" && words[4] != "" && !words[4].contains(" ") && !words[4].contains("\t"))
+}
+
+fn kit_steps_loop_subject_valid(text: String, named: Bool) -> Bool {
+    words :: kit_steps_words(text) ?? return false
+    if words.len() == 0 || !kit_steps_subject_valid(words[0]) -> return false
+    subject :: kit_steps_subject(words[0])
+    if subject == "file" -> return !named && words.len() == 2 && kit_steps_relative_path(words[1])
+    words.len() == 1 && subject != "file?" && subject != "files"
 }
 
 fn kit_steps_repeat_valid(words: [String], text: String) -> Bool {
@@ -63,10 +71,15 @@ fn kit_steps_loop_values(step: KitStep, context: KitStepCtx, state: KitStepState
         if sorted -> &paths.sort_by(path -> files.basename(path))
         return Ok(paths)
     }
-    selector :: words[2]
+    selector_words :: kit_steps_words(words[2]) ?? return Err("invalid loop subject")
+    selector :: selector_words[0]
     source := state.last.stdout
     subject :: kit_steps_subject(selector)
-    if subject.starts_with("cap:") -> source = kit_steps_captured_subject(kit_steps_byte_slice(subject, 4, subject.count_bytes()), state.captures) ?? return Err("loop capture unavailable")
+    if subject == "file" {
+        path :: kit_steps_runtime_expand(selector_words[1], context, state) ?? return Err("loop file token unavailable")
+        location :: kit_steps_work_path(path, context.env, context.work, context.scratch, state.built) ?? return Err("loop file escapes work")
+        source = files.read(location) ?? return Err("loop file read: {err}")
+    } else if subject.starts_with("cap:") -> source = kit_steps_captured_subject(kit_steps_byte_slice(subject, 4, subject.count_bytes()), state.captures) ?? return Err("loop capture unavailable")
     else if words.len() == 7 -> source = kit_steps_history_stream(words[4], subject, state.history, true) ?? return Err("loop step label unavailable")
     else -> source = kit_steps_select_stream(state.last.stdout, state.last.stderr, subject)
     transformed :: kit_steps_transform(source, kit_steps_subject_transform(selector)) ?? return Err("loop subject transform failed")
