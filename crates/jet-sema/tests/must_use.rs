@@ -177,3 +177,15 @@ fn run() {
     let codes = err_codes(src);
     assert!(codes.is_empty(), "expected clean compile, got {:?}", codes);
 }
+
+#[test]
+fn operator_hooks_resolve_by_rhs_in_binary_and_dot_calls() {
+    let codes = err_codes(include_str!("../../../Compiler/JetSema/Tests/OperatorRhsFixtures.jet"));
+    assert!(codes.is_empty(), "unexpected errors: {codes:?}");
+}
+
+#[test]
+fn duplicate_operator_pair_is_coherence_error_not_method_name_collision() {
+    let codes = err_codes(include_str!("../../../tests/ui/operator_duplicate_hook.jet"));
+    assert_eq!(codes, ["E0908"], "unexpected errors: {codes:?}");
+}

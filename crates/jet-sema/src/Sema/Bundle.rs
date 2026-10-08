@@ -1232,6 +1232,7 @@ fn builtin_type_registry() -> TypeRegistry {
         types,
         source_owned_types: HashSet::new(),
         core_source_module: None,
+        operator_signatures: HashMap::new(),
         error_types: HashSet::new(),
         unit_types,
         unit_facts,
