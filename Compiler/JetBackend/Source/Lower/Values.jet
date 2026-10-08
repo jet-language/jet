@@ -399,7 +399,7 @@ fn lower_close_frame(m: &LowerModule, f: &LowerFunction) Never! {
 }
 
 fn lower_close_forget(f: &LowerFunction) Never! {
-    cell :: f.close_identity ?? return
+    cell :: (~f.close_identity) ?? return
     zero :: lower_pointer(&f)
     lower_emit(&f, LIRInst.Const{dst: zero, value: 0})
     lower_emit(&f, LIRInst.Store{base: cell, offset: 0, value: zero})
@@ -414,7 +414,7 @@ fn lower_close_transfer(c: LowerContext, f: &LowerFunction, value: MIRValueID) N
 // The structural role belongs to the original receiver's storage, not its
 // type. A rebind of that slot and every other value of T retain ordinary Close.
 fn lower_close_value_drop(p: MIRProgram, m: &LowerModule, f: &LowerFunction, value: LIRValueID, ty: MIRType, consume: Bool) Never! {
-    cell :: f.close_identity ?? return lower_fail(&m, &f, "Close receiver has no identity cell")
+    cell :: (~f.close_identity) ?? return lower_fail(&m, &f, "Close receiver has no identity cell")
     receiver :: lower_pointer(&f)
     lower_emit(&f, LIRInst.Load{dst: receiver, base: cell, offset: 0})
     zero :: lower_pointer(&f)
