@@ -135,18 +135,18 @@ pub fn ip_addr(text: String) -> IPAddr NetError! {
     if !valid_text(text) -> return Err(net_err("ip_addr", text, "IP address is empty or contains control bytes"))
     bytes :: parse_ip_bytes(text) ?? return Err(net_err("parse IP address", text, "invalid IP address `{text}`: invalid IP address syntax"))
     #Unsafe("checked IPv4/IPv6 octets transferred into the native address carrier") {
-        core.net.__ip_from_bytes(bytes)
+        return core.net.__ip_from_bytes(^bytes)
     }
 }
 
 fn ip_to_string_impl(addr: IPAddr) -> String Never! {
     #Unsafe("read native address octets; no parsing or formatting policy in the carrier leaf") {
-        format_ip_bytes(core.net.__ip_bytes(addr))
+        return format_ip_bytes(core.net.__ip_bytes(addr))
     }
 }
 pub fn ip_to_string(addr: IPAddr) -> String Never! { ip_to_string_impl(addr) }
 pub fn ip_is_ipv4(addr: IPAddr) -> Bool Never! {
-    #Unsafe("read the native IP address discriminant") { core.net.__ip_is_v4(addr) }
+    #Unsafe("read the native IP address discriminant") { return core.net.__ip_is_v4(addr) }
 }
 
 pub fn socket_addr(host: String, port: Int) -[Net]> SocketAddr NetError! {
@@ -190,15 +190,16 @@ pub fn socket_addr_parse(text: String) -> SocketAddr NetError! {
     }
     port :: parse_port(port_text) ?? return Err(invalid_socket(text))
     #Unsafe("validated IP octets, port and IPv6 numeric scope transferred into the socket carrier") {
-        core.net.__socket_from_parts(core.net.__ip_from_bytes(bytes), U16{port}, U32{0}, U32{scope})
+        ip :: core.net.__ip_from_bytes(^bytes)
+        return core.net.__socket_from_parts(^ip, U16{port}, U32{0}, U32{scope})
     }
 }
 
 pub fn socket_host(addr: SocketAddr) -> String Never! {
-    #Unsafe("read socket IP representation; formatting stays in Jet") { ip_to_string_impl(core.net.__socket_ip(addr)) }
+    #Unsafe("read socket IP representation; formatting stays in Jet") { return ip_to_string_impl(core.net.__socket_ip(addr)) }
 }
 pub fn socket_port(addr: SocketAddr) -> Int Never! {
-    #Unsafe("read native socket port") { core.net.__socket_port(addr) }
+    #Unsafe("read native socket port") { return core.net.__socket_port(addr) }
 }
 fn socket_to_string_impl(addr: SocketAddr) -> String Never! {
     host :: socket_host(addr)
@@ -409,7 +410,7 @@ pub fn udp_receive(socket: UDPSocket, limit: Int) -[Net, Time.Wait]> UDPPacket N
 
 pub fn udp_packet_data(packet: UDPPacket) -> String Never! { decode_utf8_lossy(packet.data) }
 pub fn udp_packet_addr(packet: UDPPacket) -> SocketAddr Never! {
-    #Unsafe("read the native UDP packet's socket-address carrier") { core.net.__udp_packet_addr(packet) }
+    #Unsafe("read the native UDP packet's socket-address carrier") { return core.net.__udp_packet_addr(packet) }
 }
 pub fn udp_packet_bytes(packet: UDPPacket) -> [U8] Never! { packet.data }
 pub fn udp_packet_original_len(packet: UDPPacket) -> Int Never! { packet.original_len }
@@ -1051,7 +1052,7 @@ fn net_hex_digit(byte: U8) -> Int Never! {
     if value >= 48 && value <= 57 -> return value - 48
     if value >= 65 && value <= 70 -> return value - 55
     if value >= 97 && value <= 102 -> return value - 87
-    -1
+    return -1
 }
 
 fn net_hex_word(word: Int) -> String Never! {

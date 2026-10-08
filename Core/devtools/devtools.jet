@@ -44,7 +44,7 @@ fn json_escape(text: String) -> String Never! {
             byte == 10 -> "\\n"
             byte == 13 -> "\\r"
             byte == 9 -> "\\t"
-            control -> "\\u00" + (String.from_bytes([U8]{hex[scalar /% 16], hex[scalar %% 16]}) ?? panic("ASCII escape"))
+            control -> "\\u00{String.from_bytes([U8]{hex[scalar /% 16], hex[scalar %% 16]}) ?? panic("ASCII escape")}"
             else -> ""
         }
         if piece.bytes().len() == 0 {
@@ -58,15 +58,14 @@ fn json_escape(text: String) -> String Never! {
 }
 
 fn envelope_fields(package: String, module_name: String, panel: String, field: String) -> String Never! {
-    "{{\"package\":\"" + json_escape(package) + "\",\"module\":\"" + json_escape(module_name) +
-        "\",\"panel\":\"" + json_escape(panel) + "\",\"field\":\"" + json_escape(field) + "\"}}"
+    "{{\"package\":\"{json_escape(package)}\",\"module\":\"{json_escape(module_name)}\",\"panel\":\"{json_escape(panel)}\",\"field\":\"{json_escape(field)}\"}}"
 }
 
 pub fn publish<T>(package: String, module_name: String, panel: String, field: String, value: T) Never! {
-    source :: package + "::" + module_name
-    entity :: source + "::" + panel
+    source :: "{package}::{module_name}"
+    entity :: "{source}::{panel}"
     fields :: envelope_fields(package, module_name, panel, field)
-    core.devtools.__publish_payload(source, entity, fields, field, value)
+    core.devtools.__publish_payload(^source, ^entity, ^fields, ^field, ^value)
 }
 
 #Test("devtools identity field envelope has canonical order and exact escapes") {

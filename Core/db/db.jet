@@ -51,22 +51,22 @@ pub fn __queue_open(path: String) -[DB]> __QueueDb? Never! {
     }
 }
 pub fn __queue_begin(driver: __QueueDb) -[DB]> Bool Never! {
-    #Unsafe("borrow the live unique queue handle for BEGIN") { core.db.__queue_raw_begin(driver.raw) }
+    #Unsafe("borrow the live unique queue handle for BEGIN") { return core.db.__queue_raw_begin(driver.raw) }
 }
 pub fn __queue_commit(driver: __QueueDb) -[DB]> Bool Never! {
-    #Unsafe("borrow the live unique queue handle for COMMIT") { core.db.__queue_raw_commit(driver.raw) }
+    #Unsafe("borrow the live unique queue handle for COMMIT") { return core.db.__queue_raw_commit(driver.raw) }
 }
 pub fn __queue_rollback(driver: __QueueDb) -[DB]> Bool Never! {
-    #Unsafe("borrow the live unique queue handle for ROLLBACK") { core.db.__queue_raw_rollback(driver.raw) }
+    #Unsafe("borrow the live unique queue handle for ROLLBACK") { return core.db.__queue_raw_rollback(driver.raw) }
 }
 pub fn __queue_execute(driver: &__QueueDb, sql: String, params: [DBValue]) -[DB]> Int DBError! {
     #Unsafe("execute bound queue SQL on the exclusively borrowed SQLite handle; host only marshals its existing wire") {
-        core.db.__queue_raw_execute(driver.raw, sql, params)
+        return core.db.__queue_raw_execute(driver.raw, sql, params)
     }
 }
 pub fn __queue_query(driver: &__QueueDb, sql: String, params: [DBValue]) -[DB]> [[String: DBValue]] DBError! {
     #Unsafe("query bound queue SQL on the exclusively borrowed SQLite handle; host only marshals its existing wire") {
-        core.db.__queue_raw_query(driver.raw, sql, params)
+        return core.db.__queue_raw_query(driver.raw, sql, params)
     }
 }
 

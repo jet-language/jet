@@ -14,7 +14,7 @@ use core as core
 // Ordinary source values: construction, matching, equality and ownership use
 // the compiler's existing record/enum rails, not service-specific handles.
 #Error
-enum ServiceError {
+pub enum ServiceError {
     Full(String)
     Ambiguous(String)
     Unknown(String)
@@ -27,7 +27,7 @@ enum ServiceError {
     Expired(String)
 
     impl Display {
-        fn display(self) -> String Never! { service_error_show(self) }
+        fn display(self) -> String { service_error_show(self) }
     }
 }
 
@@ -325,7 +325,7 @@ fn select_state_adapter(tree: &ServiceTree, store: ServiceStateStore, schema: St
         if !valid_service_text(schema, 256) -> return Err(ServiceError.Policy("service state schema is empty, too long, or contains control characters"))
         if version < 1 -> return Err(ServiceError.Policy("service state schema version must be positive"))
         core.service.__tree_write_state_adapter(&tree, event_log)
-        core.service.__tree_write_state_authority(&tree, store.path, schema, version, migration, event_log)
+        core.service.__tree_write_state_authority(&tree, ~store.path, schema, version, migration, event_log)
     }
 }
 
@@ -1113,7 +1113,7 @@ struct WorkflowActivityDefinition {
 
 fn workflow_activity_definition(tree: ServiceTree, index: Int, key: String) -> WorkflowActivityDefinition? Never! {
     loop step_index in 0..<core.service.__workflow_steps_len(tree, index) {
-        fields :: core.service.__workflow_step_at(tree, index, step_index).split(":")
+        fields :: core.service.__workflow_step_at(tree, index, step_index).split(":").to_list()
         if fields.len() == 5 && fields[0] == "activity" && fields[2] == key {
             attempt :: workflow_i64(fields[3]) ?? continue
             maximum :: workflow_i64(fields[4]) ?? continue
@@ -1160,7 +1160,7 @@ fn workflow_replay_retry(tree: &ServiceTree, index: Int, key: String, maximum: I
     if !actual.starts_with(prefix) || !actual.ends_with(suffix) -> return Err(ServiceError.Policy("workflow replay diverged: expected retry for `{key}`, got `{actual}`"))
     raw :: actual.bytes()
     range :: String.from_bytes(raw.slice(prefix.bytes().len(), raw.len() - suffix.bytes().len())) ?? return Err(ServiceError.Policy("workflow replay has an invalid retry decision for `{key}`"))
-    parts :: range.split("/")
+    parts :: range.split("/").to_list()
     if parts.len() < 2 -> return Err(ServiceError.Policy("workflow replay has an invalid retry decision for `{key}`"))
     attempt :: workflow_i64(parts[0]) ?? return Err(ServiceError.Policy("workflow replay has an invalid retry attempt for `{key}`"))
     recorded_limit_text := parts[1]
@@ -1679,7 +1679,7 @@ pub fn send_durable(tree: ServiceTree, endpoint: ServiceEndpoint, message: Strin
             .Err(error) -> {
                 if error == {
                     .Full(_) -> {
-                        _ :: core.service.__runtime_dead_letter(runtime, delivery)
+                        core.service.__runtime_dead_letter(runtime, delivery).drop("seed best-effort dead-letter transition ignores the result")
                         if core.service.__tree_dead_letter_count(tree) < 100000 -> core.service.__dead_letter_push(&tree, id)
                     }
                     else -> {}
