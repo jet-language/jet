@@ -272,6 +272,7 @@ const cfgsBefore = (lineStart) => attributesBefore(lineStart).filter((line) => l
             // `not(target_arch = "wasm32")`), here or on an enclosing module.
             gated: cfgs.some((cfg) => cfg !== '#[cfg(not(target_arch = "wasm32"))]') || stack.some((frame) => frame.gated),
             path,
+            at: i,
             // The inherent impl's type for a method (`Self` and the receiver).
             selfType: impl,
           });
@@ -376,7 +377,10 @@ const nominalOutcome = [...types].some(([key, decls]) => key.split("::").pop() =
 const rustOutcomeAlias = (rustPath) => {
   const found = declarationOf(rustPath.replace(/^crate::/, ""));
   if (!found?.decls.some((decl) => decl.kind === "rust-sum-alias")) return false;
-  if (found.decls.length !== 1 || nominalOutcome) throw new Error("JetOutcome sum alias: visible nominal declaration is ambiguous");
+  if (found.decls.length !== 1 || nominalOutcome) {
+    classificationFailure(new Error("JetOutcome sum alias: visible nominal declaration is ambiguous"), rustPath, "");
+    return false;
+  }
   return found.decls[0].visible && !found.decls[0].gated;
 };
 
@@ -529,12 +533,30 @@ const borrowedHandles = new Map(); // seed-only Rust lifetime carriers, not Jet 
 const unsupportedSumCarriers = new Map(); // declaration-proved seed alias, no plain C codec
 const unsupportedRustCarriers = new Map(); // std/core/alloc provenance, no C record codec
 const unsupportedGenericCarriers = new Map(); // proved seed TYPEs without a record codec
-const genericArgumentKinds = new Map([["f64", "Float"], ["bool", "Bool"], ["String", "String"], ["crate::jet_foundation::Numeric::JetInt", "Int"]]);
+const unsupportedRawArguments = new Set([...fixedInts, "i64", "i128", "u128", "f32", "char"]);
+const classificationErrors = [];
+let classificationSite = null;
+function classificationFailure(error, type, path, consumer = classificationSite) {
+  if (!nativeListOnly) throw error;
+  const declaration = declarationOf(qualify(type.replace(/<[\s\S]*>$/, ""), path).replace(/^crate::/, ""));
+  classificationErrors.push({ type, reason: error.message, site: {
+    runtime: resolve(runtimePath), module: path, consumer,
+    offsetUnits: "UTF-16 code units in emitted runtime text",
+    declaration: declaration ? { key: declaration.key, offsets: declaration.decls.map((decl) => decl.at) } : null,
+  } });
+}
 function runtimeHandle(ty, path) {
+  if (!nativeListOnly) return runtimeHandleUnchecked(ty, path);
+  try { return runtimeHandleUnchecked(ty, path); }
+  catch (error) { classificationFailure(error, ty, path); return null; }
+}
+const genericArgumentKinds = new Map([["f64", "Float"], ["bool", "Bool"], ["String", "String"], ["crate::jet_foundation::Numeric::JetInt", "Int"]]);
+function runtimeHandleUnchecked(ty, path) {
   const aliasPath = qualify(ty.replace(/<[\s\S]*>$/, ""), path);
   // RUST-EXIT S5: resolve imports before nominal TYPE structural validation.
   const resolved = declarationOf(aliasPath.replace(/^crate::/, ""));
-  if (resolved?.external && !/^crate::(?:std|core|alloc)::/.test(ty)) {
+  if (resolved?.external && !/^crate::(?:std|core|alloc)::/.test(ty) &&
+      !aliasPath.split("::").pop().startsWith("__jet_")) {
     const qualified = resolved.key + ty.slice(ty.replace(/<[\s\S]*>$/, "").length);
     unsupportedRustCarriers.set(qualified, { type: ty, qualified,
       reason: /dynFn(?:Mut|Once)?\b/.test(ty) ? "Rust closure carrier, no C callback codec; seed-only"
@@ -572,7 +594,7 @@ function runtimeHandle(ty, path) {
   }
   // Arguments name types in the caller's module, not the declaration's.
   const args = application.args.map((arg) => {
-    if (arg === "()") return arg;
+    if (arg === "()" || unsupportedRawArguments.has(arg)) return arg;
     if (genericArgumentKinds.has(arg)) return arg;
     if (/^(?:(?:crate|super|[a-z_][a-z0-9_]*)::)*(?:Numeric::)?JetInt$/.test(arg)) return "crate::jet_foundation::Numeric::JetInt";
     const argument = declarationOf(qualify(arg, path).replace(/^crate::/, ""));
@@ -583,15 +605,16 @@ function runtimeHandle(ty, path) {
   });
   const open = text.indexOf("{", decl.at);
   recordBindings(text.slice(decl.at, open), args, ty);
-  if (args.includes("()")) {
+  const unsupportedArgs = args.filter((arg) => arg === "()" || unsupportedRawArguments.has(arg));
+  if (unsupportedArgs.length) {
     if (found.key.split("::").pop().startsWith("__jet_")) {
-      throw new Error(`generic record ${ty}: SOURCE TYPE-Unit specialization requires a typed Unit codec`);
+      throw new Error(`generic record ${ty}: SOURCE ${unsupportedArgs.includes("()") ? "TYPE-Unit" : "raw-machine TYPE"} specialization requires a typed ${unsupportedArgs.includes("()") ? "Unit" : "identity/record"} codec`);
     }
-    // RUST-EXIT S5: the prior seed routes skip these results; no ZST payload
-    // schema exists, so keep them unadmitted rather than inventing a layout.
+    // RUST-EXIT S5: prior seed routes skip these TYPEs. Keep them unadmitted
+    // until a typed identity/record codec exists; never invent a layout.
     unsupportedGenericCarriers.set(`${requested}:${ty}`, { type: ty, qualified: requested,
       declaration: { kind: decl.kind, path: decl.path, at: decl.at },
-      reason: "seed TYPE-Unit specialization unsupported: actual generic declaration and arity proved, no unit-payload record codec; seed-only" });
+      reason: `${unsupportedArgs.includes("()") ? "seed TYPE-Unit specialization unsupported" : "seed raw-machine TYPE specialization unsupported"}: actual generic declaration and arity proved, no typed identity/record codec for ${unsupportedArgs.join(",")}; seed-only` });
     return null;
   }
   const name = recordInstanceName(found.key, args);
@@ -916,6 +939,7 @@ for (const match of handTable.matchAll(/exact_int_(binary|located)!\s*\{?\(?([^)
   for (const name of match[2].split(",").map((part) => part.trim()).filter(Boolean)) handAbi.set(name, parseSignature(`fn ${name}${macro[1]}`));
 }
 for (const [symbol, route] of [...routes].sort((a, b) => a[0].localeCompare(b[0]))) {
+  classificationSite = { phase: "route", symbol };
   // An exact-Int adapted symbol calls its owned kernel (MIRRust.rs
   // call_symbol_for_function); the route keeps the symbol.
   const target = exactAdapters.get(symbol) ?? symbol;
@@ -934,7 +958,9 @@ for (const [symbol, route] of [...routes].sort((a, b) => a[0].localeCompare(b[0]
     continue;
   }
   const skip = (reason) => {
-    if (jetRuntimeExports.has(name)) throw new Error(`Jet runtime route ${symbol}: cannot validate canonical C ABI: ${reason}`);
+    if (jetRuntimeExports.has(name)) {
+      classificationFailure(new Error(`Jet runtime route ${symbol}: cannot validate canonical C ABI: ${reason}`), classificationSite?.signature ?? symbol, classificationSite?.module ?? "");
+    }
     skipped.push(`${symbol} (${label}): ${reason}`);
   };
   if (exported.has(name)) { skip("export name taken"); continue; }
@@ -945,6 +971,7 @@ for (const [symbol, route] of [...routes].sort((a, b) => a[0].localeCompare(b[0]
   if (new Set(defs.map((def) => def.sig)).size !== 1) { skip("cfg-dependent signature"); continue; }
   const def = defs[0];
   const path = def.path;
+  classificationSite = { phase: "route", symbol, target, signature: def.sig, module: path, offset: def.at };
   if (path && !def.pub) { skip(`not public in ${path}`); continue; }
   // A method's receiver is its first parameter; `Self` is the impl's type.
   const selfSig = def.selfType
@@ -982,6 +1009,7 @@ for (const [symbol, route] of [...routes].sort((a, b) => a[0].localeCompare(b[0]
   if (!exported.has(name)) continue;
   adapters.push({ symbol, target, name, label, params, result, rows: route.rows });
 }
+classificationSite = null;
 
 // The raw tagged-Int destructor is callable only after its Jet layer owns the
 // export. Earlier E1/E4 runtime epochs must not acquire a dangling route.
@@ -1149,6 +1177,7 @@ const jetNames = new Map(); // Jet name -> runtime handle name
       for (const def of defs) {
         const signature = parseSignature(def.sig);
         if (!signature || signature.generics || def.gated || def.wasmOnly) continue;
+        classificationSite = { phase: "source generic", signature: def.sig, module: def.path, offset: def.at };
         for (const application of recordApplicationsIn(def.sig, base)) {
           const handle = runtimeHandle(application, def.path);
           if (!handle) continue; // Classified unadmitted carriers remain in the inventory.
@@ -1187,7 +1216,10 @@ const jetNames = new Map(); // Jet name -> runtime handle name
         }).map(([name]) => name).sort((a, b) => a.localeCompare(b));
         return names.find((name) => name.startsWith("<corelib>/")) ?? names[0];
       });
-      if (labels.some((label) => !label)) throw new Error(`generic record ${instance.full}: argument has no Jet runtime identity`);
+      if (labels.some((label) => !label)) {
+        classificationFailure(new Error(`generic record ${instance.full}: argument has no Jet runtime identity`), instance.full, "", { phase: "source identity", jetName });
+        continue;
+      }
       jetNames.set(`${jetName}<${labels.join(",")}>`, instance.name);
     }
   }
@@ -1310,7 +1342,7 @@ for (const [name, full] of handleRows) {
 // String, an Int or a record. Each schema row names its members' kinds, so the
 // lowering crosses a Jet type only when every member means the same carrier.
 // Records CAbi.rs writes by hand (their exports there) are not generated.
-const recordDecl = (full) => {
+const recordDeclUnchecked = (full) => {
   const found = declarationOf(full.replace(/^crate::/, ""));
   if (!found || found.decls.length !== 1) return null;
   const decl = found.decls[0];
@@ -1331,11 +1363,15 @@ const recordDecl = (full) => {
   if (/#\[cfg/.test(body)) return null;
   return { kind: decl.kind, path: decl.path, items: splitTop(body.replace(/#\[[^\]]*\]/g, "")).map((item) => substituteRecordType(item, bindings)) };
 };
+const recordDecl = (full) => {
+  try { return recordDeclUnchecked(full); }
+  catch (error) { classificationFailure(error, full, "", { phase: "record declaration" }); return null; }
+};
 const recordable = new Map(); // runtime name -> { full, kind, path, members }
 for (const [name, full] of handleRows) {
   const decl = recordDecl(full);
   if (!decl) {
-    if (concreteHandles.has(name)) throw new Error(`generic record ${full}: unsupported record declaration`);
+    if (concreteHandles.has(name)) classificationFailure(new Error(`generic record ${full}: unsupported record declaration`), full, "", { phase: "record declaration" });
     continue;
   }
   // Source nominal members use the emitters' plain __jet_ prefix; the schema
@@ -1356,7 +1392,7 @@ for (const [name, full] of handleRows) {
     }
   }
   if (ok) recordable.set(name, { full, kind: decl.kind, path: decl.path, members });
-  else if (concreteHandles.has(name)) throw new Error(`generic record ${full}: inaccessible or unsupported stored members`);
+  else if (concreteHandles.has(name)) classificationFailure(new Error(`generic record ${full}: inaccessible or unsupported stored members`), full, decl.path, { phase: "record stored members" });
 }
 // A member's carrier: { kind, ret, outCty, get(place), cty, make(param) }, or
 // null when no export carries it. `place` is a Rust place of the member.
@@ -1415,16 +1451,17 @@ const recordMember = (ty, path, site) => {
 // A record whose members all cross; a nested record must itself cross.
 const recordMembers = new Map(); // runtime name -> [{ name, carrier | null }]
 for (const [name, record] of recordable) {
+  classificationSite = { phase: "record members", record: record.full };
   const carried = record.members.map((member) => ({ name: member.name, rustName: member.rustName, carrier: member.ty === null ? null : recordMember(member.ty, record.path, `${name}.${member.name}`) }));
   if (carried.every((member, k) => record.members[k].ty === null || member.carrier)) recordMembers.set(name, carried);
-  else if (concreteHandles.has(name)) throw new Error(`generic record ${record.full}: a substituted member has an unsupported carrier`);
+  else if (concreteHandles.has(name)) classificationFailure(new Error(`generic record ${record.full}: a substituted member has an unsupported carrier`), record.full, record.path);
 }
 for (let changed = true; changed;) {
   changed = false;
   for (const [name, members] of recordMembers) {
     const nestedKinds = members.map((member) => member.carrier?.kind.replace(/^(?:Opt|List\.|Entries\.)/, "") ?? "").filter((kind) => kind.startsWith("Rec."));
     if (nestedKinds.every((kind) => recordMembers.has(kind.slice(4)) || handExports.has(`jet_rt_record_new_${kind.slice(4)}`))) continue;
-    if (concreteHandles.has(name)) throw new Error(`generic record ${recordable.get(name).full}: nested record schema is unsupported`);
+    if (concreteHandles.has(name)) classificationFailure(new Error(`generic record ${recordable.get(name).full}: nested record schema is unsupported`), recordable.get(name).full, "", { phase: "nested record schema" });
     recordMembers.delete(name);
     changed = true;
   }
@@ -1605,9 +1642,14 @@ if (nativeListOnly) {
     unsupportedGenericCarriers: [...unsupportedGenericCarriers.values()],
     skipped,
   };
+  const packet = classificationErrors.length ? { mode: "native-pack-classification-errors",
+    provenance: inventory.provenance, classificationErrors,
+    unsupportedGenericCarriers: inventory.unsupportedGenericCarriers,
+    unsupportedRustCarriers: inventory.unsupportedRustCarriers,
+    unsupportedSumCarriers: inventory.unsupportedSumCarriers } : inventory;
   // Wait for the pipe to drain; a direct process.exit can truncate large JSON.
-  await new Promise((done) => process.stdout.write(JSON.stringify(inventory) + "\n", done));
-  process.exit(0);
+  await new Promise((done) => process.stdout.write(JSON.stringify(packet) + "\n", done));
+  process.exit(classificationErrors.length ? 1 : 0);
 }
 for (const adapter of adapters) {
   if (adapter.external) continue;

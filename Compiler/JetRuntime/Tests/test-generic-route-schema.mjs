@@ -155,6 +155,35 @@ pub fn jet_fixture_plain(value: JetFixture) -> JetFixture { value }
   const sourceUnit = run();
   assert.notEqual(sourceUnit.status, 0);
   assert.match(sourceUnit.stderr, /SOURCE TYPE-Unit specialization requires a typed Unit codec/);
+  put("crates/jet-foundation/src/Syntax/core_calls.rs", registry('CoreCallRecord::new("core.fixture", "receiver", "jet_fixture_receiver", true)\n'));
+  const receiver = "#[derive(Clone)]\npub struct JetReceiver<T:Clone> { pub value: T }\npub fn jet_fixture_receiver() -> JetReceiver<i64> { unreachable!() }\n";
+  put("runtime.rs", declarations + receiver);
+  success(run());
+  assert.ok(readFileSync(join(fixture, "crates/jet-codegen/src/Prelude/Core/CAbiRoutes.rs"), "utf8").includes("result type JetReceiver<i64>"));
+  const rawList = spawnSync(process.execPath, [join(fixture, "Tools/agent/gen-c-abi-routes.mjs"), join(fixture, "runtime.rs"), "--native-list-only"], { encoding: "utf8" });
+  success(rawList);
+  assert.match(JSON.parse(rawList.stdout).unsupportedGenericCarriers[0].reason, /seed raw-machine TYPE specialization unsupported/);
+  put("runtime.rs", declarations + receiver.replaceAll("JetReceiver", "__jet_Receiver"));
+  const sourceRaw = run();
+  assert.notEqual(sourceRaw.status, 0);
+  assert.match(sourceRaw.stderr, /SOURCE raw-machine TYPE specialization requires a typed identity\/record codec/);
+  // List-only reports all classification failures, keeps exit 1, writes no
+  // output table, and never presents incomplete descriptors as admissions.
+  put("crates/jet-foundation/src/Syntax/core_calls.rs", registry('CoreCallRecord::new("core.fixture", "receiver", "jet_fixture_receiver", true)\nCoreCallRecord::new("core.fixture", "missing", "jet_fixture_missing", true)\n'));
+  put("runtime.rs", declarations + receiver.replaceAll("JetReceiver", "__jet_Receiver") + "pub fn jet_fixture_missing() -> MissingRecord<f64> { unreachable!() }\n");
+  const beforeErrorsRust = readFileSync(join(fixture, "crates/jet-codegen/src/Prelude/Core/CAbiRoutes.rs"), "utf8");
+  const beforeErrorsJet = readFileSync(join(fixture, "Compiler/JetBackend/Source/Lower/RuntimeRoutes.jet"), "utf8");
+  const allErrors = spawnSync(process.execPath, [join(fixture, "Tools/agent/gen-c-abi-routes.mjs"), join(fixture, "runtime.rs"), "--native-list-only"], { encoding: "utf8" });
+  assert.equal(allErrors.status, 1, allErrors.stderr + allErrors.stdout);
+  const packet = JSON.parse(allErrors.stdout);
+  assert.equal(packet.mode, "native-pack-classification-errors");
+  assert.equal(packet.nativeTypes, undefined);
+  assert.equal(packet.nativeExports, undefined);
+  for (const type of ["MissingRecord<f64>", "__jet_Receiver<i64>"]) {
+    assert.ok(packet.classificationErrors.some((error) => error.type === type && Number.isInteger(error.site.consumer.offset)));
+  }
+  assert.equal(readFileSync(join(fixture, "crates/jet-codegen/src/Prelude/Core/CAbiRoutes.rs"), "utf8"), beforeErrorsRust);
+  assert.equal(readFileSync(join(fixture, "Compiler/JetBackend/Source/Lower/RuntimeRoutes.jet"), "utf8"), beforeErrorsJet);
   put("crates/jet-foundation/src/Syntax/core_calls.rs", registry(""));
   put("runtime.rs", declarations);
   success(run());
@@ -283,9 +312,16 @@ pub fn source_tree() -> ${treeSource} { ${treeSource}::__jet_Empty }
   assert.match(unresolved.stderr, /JetMeasurement<Unbound>.*unresolved or unsupported argument Unbound/);
   for (const argument of ["u8", "i64", "u64", "f32"]) {
     put("runtime.rs", declarations + `pub fn jet_fixture_measurement(value: JetMeasurement<${argument}>) -> JetMeasurement<f64> { value }\n`);
+    success(run());
+    const unsupportedList = spawnSync(process.execPath, [join(fixture, "Tools/agent/gen-c-abi-routes.mjs"), join(fixture, "runtime.rs"), "--native-list-only"], { encoding: "utf8" });
+    success(unsupportedList);
+    const unsupportedSeed = JSON.parse(unsupportedList.stdout);
+    assert.ok(unsupportedSeed.unsupportedGenericCarriers.some((row) => row.type === `JetMeasurement<${argument}>` && row.reason.includes("seed raw-machine TYPE specialization unsupported")));
+    assert.ok(!unsupportedSeed.nativeTypes.some((row) => row.runtime === recordInstanceName("JetMeasurement", [argument])), `${argument} must not create an unmatched Lower row`);
+    put("runtime.rs", declarations.replaceAll("JetMeasurement", "__jet_Measurement") + `pub fn jet_fixture_measurement(value: __jet_Measurement<${argument}>) -> __jet_Measurement<f64> { value }\n`);
     const unsupported = run();
-    assert.notEqual(unsupported.status, 0, `${argument} must not create an unmatched Lower row`);
-    assert.ok(unsupported.stderr.includes(`JetMeasurement<${argument}>`) && unsupported.stderr.includes(`unsupported argument ${argument}`), unsupported.stderr);
+    assert.notEqual(unsupported.status, 0, `${argument} SOURCE specialization requires its own codec`);
+    assert.match(unsupported.stderr, /SOURCE raw-machine TYPE specialization requires a typed identity\/record codec/);
   }
   put("runtime.rs", declarations + "pub fn jet_fixture_measurement(value: JetMeasurement<Vec<f64>>) -> JetMeasurement<f64> { value }\n");
   const nested = run();
