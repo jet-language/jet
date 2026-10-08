@@ -567,8 +567,20 @@ fn runtime_page<T>(table: WebTable<T>) -> WebTablePage<T> String! {
         }
         if core.web.table.__generation(table, false) != generation || !core.web.table.__state_equal(core.web.table.__state(table), state) -> return Err("server table page response is stale")
         if validated == {
-            .Ok(page) -> {
-                accepted :: core.web.table.__accept_keys(table, page)
+            .Ok(checked) -> {
+                page :: checked.page
+                keys :: checked.keys
+                // WebTable.rs:296-311: cross-page collision is distinct from
+                // per-page validation; decide it in Jet while the raw gate
+                // lends each existing page's keys under one lock.
+                accepted :: core.web.table.__commit_keys(table, page, fn(other_page: Int, other_keys: [String]) String! {
+                    if other_page != query.index {
+                        loop key in other_keys {
+                            if keys.get(key) != None -> return Err("server table response duplicates a row key across pages")
+                        }
+                    }
+                    Ok()
+                })
                 if accepted == .Err(error) {
                     core.web.table.__loading_store(table, false)
                     core.web.table.__page_store(table, None)
@@ -612,7 +624,7 @@ fn publish_runtime_page<T>(table: WebTable<T>, state: WebTableState, page: WebTa
     core.web.table.__error_store(table, "")
 }
 
-fn validate_runtime_page<T>(table: WebTable<T>, page: WebTablePage<T>) -> WebTablePage<T> String! {
+fn validate_runtime_page<T>(table: WebTable<T>, page: WebTablePage<T>) -> (page: WebTablePage<T>, keys: [String:Bool]) String! {
     facts :: core.web.table.__page_facts(page)
     if facts.total < 0 -> return Err("server table page has negative total_rows")
     if facts.size < 1 || facts.size > 10000 -> return Err("server table page_size must be between 1 and 10000")
@@ -636,22 +648,22 @@ fn validate_runtime_page<T>(table: WebTable<T>, page: WebTablePage<T>) -> WebTab
     }
     keys :: core.web.table.__page_keys(canonical)
     if keys.len() != facts.rows -> return Err("server table row_keys must align with rows")
-    validate_runtime_keys(keys)?
-    Ok(canonical)
+    seen :: validate_runtime_keys(keys)?
+    Ok((page: canonical, keys: seen))
 }
 
 fn runtime_key_valid(key: String) -> Bool Never! {
     key != "" && key.bytes().len() <= 256 && !core.text.has_control(key)
 }
 
-fn validate_runtime_keys(keys: [String]) String! {
+fn validate_runtime_keys(keys: [String]) -> [String:Bool] String! {
     seen := [String:Bool]{}
     loop key in keys {
         if !runtime_key_valid(key) -> return Err("table row key must be non-empty, bounded, and printable")
         if seen.get(key) != None -> return Err("table row key `{key}` is duplicated")
         _ :: &seen.add(key, true)
     }
-    Ok()
+    Ok(seen)
 }
 
 fn runtime_column<T>(columns: [WebTableColumn<T>], name: String, operation: String) -> WebTableColumn<T> String! {

@@ -34,8 +34,17 @@ pub(crate) fn jet_table_invoke_loader_raw<T: Clone + Send + Sync + 'static>(tabl
     // Source tests presence before calling; this has no alternate loader policy.
     (table.server_page.as_ref().expect("checked table loader"))(state)
 }
-pub(crate) fn jet_table_accept_keys_raw<T: Clone + Send + Sync + 'static>(table: &JetWebTable<T>, page: &JetWebTablePage<T>) -> Result<(), String> {
-    table.accept_server_page_keys(page)
+pub(crate) fn jet_table_commit_keys_raw<T, F>(table: &JetWebTable<T>, page: &JetWebTablePage<T>, mut check: F) -> Result<(), String>
+where
+    F: FnMut(i64, &Vec<String>) -> Result<(), String>,
+{
+    let mut pages = table.server_key_pages.lock()
+        .map_err(|_| "server table page identity registry is unavailable".to_string())?;
+    for (index, keys) in pages.iter() {
+        check(*index, keys)?;
+    }
+    pages.insert(page.page_index, page.row_keys.clone());
+    Ok(())
 }
 pub(crate) fn jet_table_loading_store_raw<T>(table: &JetWebTable<T>, value: bool) {
     table.loading.set(value);
