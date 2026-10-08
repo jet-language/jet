@@ -1589,7 +1589,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: f26a04c493e6e05e0450e1cdca0ff3f4c6fb584ae371a9e750fcd71599e2bc2b
+// Source SHA-256: f5b85b68efd7c08adf75c167f048bb87e630f13da0f8daac2b77f7303aadf5a9
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -3589,7 +3589,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::receiver_with_symbol( &["DataGroupedQuery"], "count", "jet_data_group_count_query", true, &[true], ),
     CoreCallRecord::receiver_with_symbol( &["DataGroupedQuery"], "sum", "jet_data_group_sum_query", true, &[true, false], ),
     CoreCallRecord::receiver_with_symbol( &["DataGroupedQuery"], "mean", "jet_data_group_mean_query", true, &[true, false], ),
-    CoreCallRecord::receiver(&["ProcessStdin"], "close", &[]),
+    CoreCallRecord::receiver_with_symbol(&["ProcessStdin"], "close", "jet_process_stdin_close", true, &[]),
     CoreCallRecord::receiver_with_symbol( &["FileScope"], "read", "jet_std_fs_scope_read", true, &[true, true], ),
     CoreCallRecord::receiver_with_coverage(&["RealtimeStream"], "next_deadline", &[], CoreCallCoverage::from_bits(CoreCallCoverage::SEMA)),
     CoreCallRecord::receiver_with_coverage(&["RealtimeStream"], "receipt", &[], CoreCallCoverage::from_bits(CoreCallCoverage::SEMA)),
@@ -4299,6 +4299,23 @@ mod tests {
             .with_source_target("__take_bytes");
         assert!(plain.targets_source_function("core.term", "__take_bytes"));
         assert!(!plain.targets_source_function("core.term", "take"));
+    }
+
+    #[test]
+    fn process_stdin_close_registers_the_existing_provider_leaf() {
+        use super::{core_receiver_method, CoreCallRecord, CoreCallSymbol};
+        let row = core_receiver_method("ProcessStdin", "close")
+            .expect("canonical ProcessStdin.close row");
+        let original = CoreCallRecord::receiver(&["ProcessStdin"], "close", &[]);
+        assert_eq!(row.symbol, CoreCallSymbol::Prelude("jet_process_stdin_close"));
+        assert_eq!(row.signature, original.signature);
+        assert_eq!(row.effect(), original.effect());
+        assert_eq!(row.capability(), original.capability());
+        assert_eq!(row.coverage, original.coverage);
+        assert_eq!(row.interpreter_route, original.interpreter_route);
+        assert_eq!(row.aot_direct, original.aot_direct);
+        assert_eq!(row.receiver_types, original.receiver_types);
+        assert!(row.source_target.is_none());
     }
 
 }
