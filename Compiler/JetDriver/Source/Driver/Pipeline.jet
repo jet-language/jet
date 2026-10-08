@@ -1060,35 +1060,95 @@ fn jet_driver_compile_result(
     }
 }
 
-// `JetDriverCompileMode.Doc`: the checked user modules (Rust
-// `ProgramBundle.modules`), with the items sema settled. Core sources, the
-// compiler-owned effect module, and synthetic C modules are not the user's
-// API, so they are left out, as the Rust bundle leaves them out. A module of
-// another package keeps its module name as its alias.
-fn jet_driver_doc_modules(request: JetDriverCompileRequest, load: JetDriverLoadResult, graph: SemaGraphResult, registration: SemaRegistrationGraph, values: [SemaComptimeItemValue], effect_identity: String) -> [JetDriverDocModule] Never! {
+// Ordinary Doc preserves its user-only projection. The explicit retained
+// Check projection also retains Core/generated/ABI rows from this same graph;
+// its separate source index list identifies the actual Review source owners.
+fn jet_driver_doc_modules(request: JetDriverCompileRequest, load: JetDriverLoadResult, graph: SemaGraphResult, registration: SemaRegistrationGraph, values: [SemaComptimeItemValue], effect_identity: String, checked_projection: Bool, capture: &JetDriverCheckedProjectionCapture) -> [JetDriverDocModule] Never! {
     modules := [JetDriverDocModule]{}
     ledger :: shared name_ledger_from_facts(~graph.names)
     memory :: shared SemaCheckedMemoryFacts{declarations: graph.memory_declarations, projections: graph.memory_projections}
     layout_engine :: sema_comptime_reflection_layout_engine(registration)
     target_layout :: jet_target_layout_from_machine(registration.target_machine)
+    loaded_units := [String:Int]{}
+    seen := [String:Bool]{}
+    if checked_projection {
+        if graph.programs.len() != graph.modules.len() -> return [JetDriverDocModule]{}
+        loop loaded in load.modules {
+            if loaded_units.get(loaded.module_identity) != None -> return [JetDriverDocModule]{}
+            loaded_units[loaded.module_identity] = loaded.source_unit_index
+        }
+    }
     loop (index, graph_module) in graph.modules {
         if graph_module.module_identity == effect_identity || index >= graph.programs.len() -> next
-        unit_index :: loop loaded in load.modules {
+        unit_index :: if checked_projection -> loaded_units.get(graph_module.module_identity) ?? -1 else -> (loop loaded in load.modules {
             if loaded.module_identity == graph_module.module_identity -> break loaded.source_unit_index
-        } ?? -1
-        if unit_index < 0 || unit_index >= load.source_units.len() -> next
+        } ?? -1)
+        if unit_index < 0 || unit_index >= load.source_units.len() {
+            if checked_projection -> return [JetDriverDocModule]{}
+            next
+        }
         unit :: load.source_units[unit_index]
-        if unit.root_index < 0 || unit.file_index < 0 || unit.source_origin != SemaSourceOrigin.Snapshot || unit.root_index >= request.authorized_sources.roots.len() -> next
-        files :: request.authorized_sources.roots[unit.root_index].files
-        if unit.file_index >= files.len() -> next
-        alias :: if unit.package_identity == load.package_identity -> "" else -> unit.module_name
+        registered_index :: if checked_projection -> registration.module_rows.get(graph_module.module_identity) ?? -1 else -> index
+        if registered_index < 0 || registered_index >= registration.modules.len() -> return [JetDriverDocModule]{}
+        registered :: registration.modules[registered_index]
+        path := unit.path
+        physical_path := unit.path
+        source := if checked_projection -> registered.source else -> ""
+        alias := if unit.package_identity == load.package_identity -> "" else -> unit.module_name
+        source_owner := true
+        if checked_projection {
+            if seen.get(graph_module.module_identity) != None || registered.module_identity != graph_module.module_identity || jet_driver_module_identity(unit.package_identity, unit.relative_path) != graph_module.module_identity || registered.package_identity != unit.package_identity || graph_module.package_identity != unit.package_identity || registered.source_file != unit.path || graph_module.source_file != unit.path || registered.source_origin != unit.source_origin -> return [JetDriverDocModule]{}
+            seen[graph_module.module_identity] = true
+            if jet_driver_unit_is_core(unit) {
+                if unit.root_index != -1 || unit.root_identity != JET_DRIVER_CORE_SOURCE_ROOT || unit.package_identity != unit.path || unit.path != "{JET_DRIVER_CORE_SOURCE_ROOT}/{unit.relative_path}" || unit.source_origin != SemaSourceOrigin.CompilerGenerated -> return [JetDriverDocModule]{}
+                if unit.file_index >= 0 {
+                    if unit.file_index >= request.core_sources.len() -> return [JetDriverDocModule]{}
+                    row :: request.core_sources[unit.file_index]
+                    if row.module_name != unit.module_name || row.path != unit.relative_path || row.source != source -> return [JetDriverDocModule]{}
+                    path = row.path
+                    alias = row.alias
+                } else {
+                    // Loader's explicit ABI-only fallback, not an empty real
+                    // Core source. Keep its checked row internally, but it is
+                    // not a Rust-loaded source in Review's input digest.
+                    if unit.file_index != -1 || unit.relative_path != "{unit.module_name}.jet" || source != "" || core_module_export(unit.module_name) == None -> return [JetDriverDocModule]{}
+                    loop row in request.core_sources {
+                        if row.owner == "" && row.module_name == unit.module_name -> return [JetDriverDocModule]{}
+                    }
+                    source_owner = false
+                }
+            } else {
+                if unit.root_index < 0 || unit.root_index >= request.authorized_sources.roots.len() -> return [JetDriverDocModule]{}
+                root :: request.authorized_sources.roots[unit.root_index]
+                if root.identity != unit.root_identity -> return [JetDriverDocModule]{}
+                if unit.source_origin == SemaSourceOrigin.Snapshot {
+                    if unit.file_index < 0 || unit.file_index >= root.files.len() -> return [JetDriverDocModule]{}
+                    file :: root.files[unit.file_index]
+                    if jet_driver_display_path(jet_driver_entry_root_path(request.authorized_sources), file.path) != unit.path || file.source != source -> return [JetDriverDocModule]{}
+                    physical_path = file.path
+                } else {
+                    if unit.file_index != -1 || unit.source_origin != SemaSourceOrigin.CompilerGenerated -> return [JetDriverDocModule]{}
+                }
+            }
+            if source_owner -> &capture.source_modules.push(modules.len())
+            if graph_module.module_identity == load.entry_module_identity {
+                if !source_owner || capture.entry_module != None -> return [JetDriverDocModule]{}
+                capture.entry_module = Val(modules.len())
+            }
+        } else {
+            if unit.root_index < 0 || unit.file_index < 0 || unit.source_origin != SemaSourceOrigin.Snapshot || unit.root_index >= request.authorized_sources.roots.len() -> next
+            files :: request.authorized_sources.roots[unit.root_index].files
+            if unit.file_index >= files.len() -> next
+            physical_path = files[unit.file_index].path
+            source = files[unit.file_index].source
+        }
         &modules.push(JetDriverDocModule{
-            path: unit.path,
-            physical_path: files[unit.file_index].path,
+            path: path,
+            physical_path: physical_path,
             alias: alias,
-            source: files[unit.file_index].source,
+            source: source,
             pub_file: graph.programs[index].pub_file,
-            items: sema_checked_shape_defaults(graph.programs[index], registration.modules[index], values).items,
+            items: sema_checked_shape_defaults(graph.programs[index], registered, values).items,
             block_spans: graph.programs[index].block_spans,
             imports: graph.programs[index].imports,
             module_name: graph_module.module_name,
@@ -1104,6 +1164,7 @@ fn jet_driver_doc_modules(request: JetDriverCompileRequest, load: JetDriverLoadR
             layout_facts: sema_checked_layout_projections(graph.programs[index].items, layout_engine, graph_module.module_identity),
         })
     }
+    if checked_projection && (seen.len() != loaded_units.len() || capture.entry_module == None) -> return [JetDriverDocModule]{}
     modules
 }
 
@@ -1129,8 +1190,8 @@ fn jet_driver_resolve_entry_function(
 ) -> MIRFunctionID? {
     loop output in semantic_graph.outputs {
         if !output.selected -> next
-        module :: semantic_graph.modules[output.module_id]
-        key :: symbol_id(SymbolKind.Function, module.module_identity, "", output.semantic_name).key
+        source_module :: semantic_graph.modules[output.module_id]
+        key :: symbol_id(SymbolKind.Function, source_module.module_identity, "", output.semantic_name).key
         return jet_driver_find_lowered_function_id(functions, key)
     }
     entry :: jet_driver_entry_selection(load) ?? return None
@@ -3861,10 +3922,39 @@ fn jet_driver_native_emit_config(threads: CompilerThreads, mode: MIRArtifactBuil
     }
 }
 
+// This retained input is not a RootMemo cache-eligibility proof. All checked
+// rows remain in compile.doc_modules; source_modules selects real loaded
+// sources and excludes only Loader's explicit ABI-only Core fallback.
+pub struct JetDriverCheckedProjectionResult {
+    pub compile: JetDriverCompileResult
+    pub source_modules: [Int]
+    pub entry_module: Int?
+    pub schema_ingress: JetDriverSchemaIngress?
+}
+struct JetDriverCheckedProjectionCapture {
+    source_modules: [Int]{[Int]{}}
+    entry_module: Int?{None}
+    schema_ingress: JetDriverSchemaIngress?{None}
+}
+
+pub fn jet_driver_checked_projection(request: ^JetDriverCompileRequest) -> JetDriverCheckedProjectionResult {
+    capture := JetDriverCheckedProjectionCapture{}
+    kg := jet_driver_keep_going_log(None)
+    journal := canonical_pass_journal(CanonicalPassOptions{adapter_mode: request.adapter_mode, operation_ids: request.adapter_operation_ids})
+    compile := jet_driver_compile_stages(^request, &kg, false, true, &capture, &journal)
+    compile.canonical_routes = canonical_pass_take(&journal)
+    if !compile.complete {
+        capture.source_modules = [Int]{}
+        capture.entry_module = None
+    }
+    JetDriverCheckedProjectionResult{compile: ^compile, source_modules: capture.source_modules, entry_module: capture.entry_module, schema_ingress: capture.schema_ingress}
+}
+
 pub fn jet_driver_compile(request: ^JetDriverCompileRequest) -> JetDriverCompileResult {
     kg := jet_driver_keep_going_log(None)
     journal := canonical_pass_journal(CanonicalPassOptions{adapter_mode: request.adapter_mode, operation_ids: request.adapter_operation_ids})
-    result := jet_driver_compile_stages(^request, &kg, true, &journal)
+    capture := JetDriverCheckedProjectionCapture{}
+    result := jet_driver_compile_stages(^request, &kg, true, false, &capture, &journal)
     result.canonical_routes = canonical_pass_take(&journal)
     result
 }
@@ -3875,7 +3965,8 @@ pub fn jet_driver_compile(request: ^JetDriverCompileRequest) -> JetDriverCompile
 pub fn jet_driver_compile_mir(request: ^JetDriverCompileRequest) -> JetDriverCompileResult {
     kg := jet_driver_keep_going_log(None)
     journal := canonical_pass_journal(CanonicalPassOptions{adapter_mode: request.adapter_mode, operation_ids: request.adapter_operation_ids})
-    result := jet_driver_compile_stages(^request, &kg, false, &journal)
+    capture := JetDriverCheckedProjectionCapture{}
+    result := jet_driver_compile_stages(^request, &kg, false, false, &capture, &journal)
     result.canonical_routes = canonical_pass_take(&journal)
     result
 }
@@ -3888,7 +3979,8 @@ pub fn jet_driver_compile_mir(request: ^JetDriverCompileRequest) -> JetDriverCom
 pub fn jet_driver_compile_keep_going(request: ^JetDriverCompileRequest, options: JetDriverKeepGoing) -> JetDriverCompileResult {
     kg := jet_driver_keep_going_log(Val(options))
     journal := canonical_pass_journal(CanonicalPassOptions{adapter_mode: request.adapter_mode, operation_ids: request.adapter_operation_ids})
-    result := jet_driver_compile_stages(^request, &kg, true, &journal)
+    capture := JetDriverCheckedProjectionCapture{}
+    result := jet_driver_compile_stages(^request, &kg, true, false, &capture, &journal)
     result.canonical_routes = canonical_pass_take(&journal)
     if result.internal_problem == .Val(problem) -> jet_driver_keep_going_row(&kg, "internal", "-", "ICE", problem, "-")
     // Reports of a stage that returned early; recorded rows are not repeated.
@@ -3898,7 +3990,7 @@ pub fn jet_driver_compile_keep_going(request: ^JetDriverCompileRequest, options:
     result
 }
 
-fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKeepGoingLog, emit_rust: Bool, journal: &CanonicalPassJournal) -> JetDriverCompileResult {
+fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKeepGoingLog, emit_rust: Bool, checked_projection: Bool, capture: &JetDriverCheckedProjectionCapture, journal: &CanonicalPassJournal) -> JetDriverCompileResult {
     trace := jet_driver_empty_compile_trace()
     // Phase spans for the host trace (JET_TRACE_FILE). A phase an early
     // return abandons is closed by the next enclosing end the host records.
@@ -3909,6 +4001,7 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
         failure :: load.failed_stage ?? JetDriverStage.Load
         return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(failure), false, trace)
     }
+    if checked_projection && request.mode != JetDriverCompileMode.Check -> return jet_driver_compile_internal_result(load, trace, "the retained checked projection requires Check mode")
     canonical_effect_module_option := jet_driver_canonical_effect_module(request.canonical_effect_source)
     if canonical_effect_module_option == None {
         return jet_driver_compile_internal_result(load, trace, "the embedded compiler-owned Prelude effect source is invalid")
@@ -4010,7 +4103,7 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
     jet_driver_trace_lookup_counters(request.trace_sink, "register", register_lookups, SemaLookupCounters{module_lookups: 0, name_lookups: 0})
     if kg.enabled -> registration_graph.keep_going = true
     if request.mode == JetDriverCompileMode.Test -> registration_graph.test_mode = true
-    if request.mode == JetDriverCompileMode.Doc || request.mode == JetDriverCompileMode.Repl -> registration_graph.retain_programs = true
+    if checked_projection || request.mode == JetDriverCompileMode.Doc || request.mode == JetDriverCompileMode.Repl -> registration_graph.retain_programs = true
     if registration_graph.internal_problem != None {
         loop diagnostic in registration_graph.diagnostics -> &load.diagnostics.push(diagnostic)
         return jet_driver_compile_internal_result(
@@ -4097,7 +4190,9 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
         }
         return jet_driver_doc_failure(^result, request.mode, registration_graph)
     }
-    loop diagnostic in jet_driver_check_schema_migrations(request, registration_graph, checked_graph) -> &load.diagnostics.push(diagnostic)
+    schema_check :: jet_driver_check_schema_migrations(request, registration_graph, checked_graph, checked_projection)
+    capture.schema_ingress = schema_check.ingress
+    loop diagnostic in schema_check.diagnostics -> &load.diagnostics.push(diagnostic)
     stage_diagnostics = load.diagnostics
     load.diagnostics = [Diagnostic]{}
     if request.trace_sink == .Val(sink) -> sink.begin("comptime.bodies", "", -1, -1)
@@ -4186,6 +4281,13 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
         if !kg.enabled -> return jet_driver_compile_internal_result(load, trace, "staged method closure lost its checked function or registered owner")
         jet_driver_keep_going_row(&kg, "comptime.validate", "-", "ICE", "staged method closure lost its checked function or registered owner", "-")
     }
+    if checked_projection {
+        if !checked_graph.complete || jet_driver_has_errors(load.diagnostics) -> return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Check), false, trace)
+        load.doc_modules = jet_driver_doc_modules(request, load, checked_graph, resolved_registration, comptime_values, canonical_effect_module_identity, true, &capture)
+        if load.doc_modules.len() != load.modules.len() || capture.entry_module == None -> return jet_driver_compile_internal_result(load, trace, "the retained checked projection lost its loaded-module ownership bijection or canonical entry")
+        jet_driver_doc_gate_projection(&load.doc_modules, checked_graph, resolved_registration, request, load.packages)
+        return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, None, true, trace)
+    }
     if request.capture_cost_report {
         coverage :: sema_cost_coverage(resolved_registration, checked_graph, request.selected_entry)
         result := jet_driver_compile_result(load, load.diagnostics, None, None, None, None, None, checked_graph.complete && !jet_driver_has_errors(load.diagnostics), trace)
@@ -4196,15 +4298,15 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
         return result
     }
     if request.mode == JetDriverCompileMode.Doc {
-        load.doc_modules = jet_driver_doc_modules(request, load, checked_graph, resolved_registration, comptime_values, canonical_effect_module_identity)
+        load.doc_modules = jet_driver_doc_modules(request, load, checked_graph, resolved_registration, comptime_values, canonical_effect_module_identity, false, &capture)
         jet_driver_doc_gate_projection(&load.doc_modules, checked_graph, resolved_registration, request, load.packages)
     }
     if request.capture_build_program {
         module_sources := [SemaCompilerModuleSource]{}
         source_positions :: jet_driver_source_file_positions(load.source_files)
-        loop module in load.modules {
-            unit :: load.source_units[module.source_unit_index]
-            &module_sources.push(SemaCompilerModuleSource{module_identity: module.module_identity, source: jet_driver_source_text_at(load.source_files, source_positions, unit.path)})
+        loop source_module in load.modules {
+            unit :: load.source_units[source_module.source_unit_index]
+            &module_sources.push(SemaCompilerModuleSource{module_identity: source_module.module_identity, source: jet_driver_source_text_at(load.source_files, source_positions, unit.path)})
         }
         &module_sources.push(SemaCompilerModuleSource{module_identity: canonical_effect_module_identity, source: request.canonical_effect_source})
         load.build_program = jet_eval_compiler_services_program_info(resolved_registration, checked_graph, jet_driver_source_text_at(load.source_files, source_positions, request.authorized_sources.entry_path), module_sources)
