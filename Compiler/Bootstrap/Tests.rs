@@ -699,6 +699,7 @@ fn __jet_bootstrap_harness_entry(
             .unwrap_or_else(|error| panic!("cannot register task-root Source cursor: {error}"));
         let fixture_ok = crate::__jet_bootstrap_task_roots_fixture(
             &mut source_program,
+            checked_mir,
             &mut runtime_config,
             &callback_id,
             &capability.handle,
