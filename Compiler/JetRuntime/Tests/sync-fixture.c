@@ -219,14 +219,57 @@ static void observe_report(void) {
     jet_rt_observe_task_finish(id); jet_rt_string_drop(label); jet_rt_string_drop(wait); jet_rt_scheduler_control_drop(control);
     puts("Observe empty/parked exact report/owned once ok");
 }
+extern W jet_rt_observe_fixture_start(W,W), jet_rt_observe_fixture_sequence(W), jet_rt_observe_fixture_snapshot(W);
+extern void jet_rt_observe_fixture_publish(W,W), jet_rt_observe_fixture_value(W), jet_rt_observe_fixture_event(W), jet_rt_observe_fixture_ledger(W);
+extern void jet_rt_mem_arena_open(void), jet_rt_mem_arena_alloc(W), jet_rt_mem_arena_reset(W,W), jet_rt_mem_arena_close(void);
+typedef struct { W writer; unsigned final; } Publish;
+static void *final_writer(void *argument) {
+    Publish *p=argument; jet_rt_thread_attach();
+    for (unsigned i=0;i<100;i++) jet_rt_observe_fixture_publish(p->writer,p->final);
+    jet_rt_thread_detach(); return NULL;
+}
+static void observe_live(const char *directory) {
+    W identity[]={text("session"),text("source"),text("build"),text("revision"),text("world")};
+    W dir=text(directory),writer=jet_rt_observe_fixture_start((W)identity,dir);
+    assert(writer); jet_rt_string_drop(dir);
+    for (unsigned i=0;i<5;i++) jet_rt_string_drop(identity[i]);
+    W value[]={text("alpha"),text("Int"),text("rendered"),text(""),text("42")};
+    jet_rt_observe_fixture_value((W)value);
+    for (unsigned i=0;i<5;i++) jet_rt_string_drop(value[i]);
+    W event[]={0,text("event"),3,4,5,6,text("queued"),7,8,9,10,text("drop"),11,text(""),text("")};
+    jet_rt_observe_fixture_event((W)event);
+    unsigned strings[]={1,6,11,13,14};
+    for (unsigned i=0;i<5;i++) jet_rt_string_drop(event[strings[i]]);
+    W ledger=text("{\"decision\":\"accepted\"}"); jet_rt_observe_fixture_ledger(ledger); jet_rt_string_drop(ledger);
+    jet_rt_mem_arena_open(); jet_rt_mem_arena_alloc(32);
+    W snapshot=jet_rt_observe_fixture_snapshot(writer);
+    fputs("snapshot ",stdout);
+    assert(fwrite((void *)jet_rt_string_data(snapshot),1,jet_rt_string_byte_len(snapshot),stdout)==jet_rt_string_byte_len(snapshot));
+    putchar('\n'); jet_rt_string_drop(snapshot);
+    // First prove a race among final publishers increments exactly once.
+    pthread_t threads[8]; Publish final={writer,1};
+    for (unsigned i=0;i<8;i++) assert(!pthread_create(&threads[i],NULL,final_writer,&final));
+    for (unsigned i=0;i<8;i++) assert(!pthread_join(threads[i],NULL));
+    assert(jet_rt_observe_fixture_sequence(writer)==1);
+    // Once closed, actual periodic publications cannot replace the final file.
+    Publish periodic={writer,0};
+    for (unsigned i=0;i<8;i++) assert(!pthread_create(&threads[i],NULL,final_writer,&periodic));
+    for (unsigned i=0;i<8;i++) assert(!pthread_join(threads[i],NULL));
+    assert(jet_rt_observe_fixture_sequence(writer)==1);
+    jet_rt_mem_arena_reset(1,32); jet_rt_mem_arena_close();
+    puts("Observe final writers publish once/periodic cannot overwrite ok");
+}
 #endif
-int main(void) {
+int main(int argc,char **argv) {
     jet_rt_thread_attach(); nested_stm(); gate_stm(); rejected_stm();
 #ifdef JET_CONDITION_FIXTURE
     condition_tests();
 #endif
 #ifdef JET_OBSERVE_FIXTURE
-    observe_report();
+    assert(argc==2); observe_report(); observe_live(argv[1]);
+#endif
+#ifndef JET_OBSERVE_FIXTURE
+    (void)argc; (void)argv;
 #endif
     jet_rt_thread_detach(); return 0;
 }

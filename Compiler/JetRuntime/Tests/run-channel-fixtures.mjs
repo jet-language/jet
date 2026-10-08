@@ -111,16 +111,48 @@ if (mode === 'assemble' || mode.startsWith('assemble-')) {
   command(process.env.CC ?? 'cc', ['-std=c11', '-Wall', '-Wextra', '-Werror', ...flags, join(repo, 'Compiler/JetRuntime/Tests/sync-fixture.c'), join(fixture, 'fixture.o'), lib, '-lpthread', '-ldl', '-lm', '-o', join(out, `${kind}-native`)]);
 } else if (['run-stm', 'run-sync', 'run-observe'].includes(mode)) {
   const kind = mode.slice(4);
-  const result = command(join(out, `${kind}-native`), [], {timeout:120000});
+  const result = command(join(out, `${kind}-native`), kind === 'observe' ? [out] : [], {timeout:120000});
   writeFileSync(join(out, `${mode}.txt`), result.stdout + result.stderr);
+  let stdout = result.stdout;
+  if (kind === 'observe') {
+    const lines = stdout.split('\n').filter(line => line.startsWith('snapshot '));
+    if (lines.length !== 1) throw Error('missing actual native Observe snapshot');
+    const snapshot = lines[0].slice(9);
+    writeFileSync(join(out, 'observe-snapshot.json'), snapshot + '\n');
+    function golden(wire) {
+      const actual = JSON.parse(wire);
+      if (JSON.stringify(actual) !== wire) throw Error('Observe wire differs from compact canonical JSON');
+      if (!Number.isSafeInteger(actual.pid) || actual.pid <= 0 || typeof actual.start_id !== 'string'
+          || !Number.isSafeInteger(actual.captured_ms) || actual.captured_ms <= 0
+          || !Number.isSafeInteger(actual.runtime.elapsed_ns) || actual.runtime.elapsed_ns < 0
+          || (actual.runtime.cpu_ns !== null && (!Number.isSafeInteger(actual.runtime.cpu_ns) || actual.runtime.cpu_ns < 0))) throw Error('invalid actual process/clock facts');
+      const expected = {
+        protocol: 'jet.live.v1', session_id: 'session', source_id: 'source', build_id: 'build', revision: 'revision', world_id: 'world',
+        decisions: {decision:'accepted'},
+        values: [{value_id:'alpha',type_identity:'Int',disposition:'rendered',reason:'',rendered_value:'42'}],
+        schema_version:1, pid:actual.pid, start_id:actual.start_id, captured_ms:actual.captured_ms,
+        tasks: [{id:1,parent:0,label:'root',spawn_site:0,state:'running',wait:'',deadline_ms:null,cancelled:false}],
+        channels: [],
+        event_observations: [{sequence:1,source:'event',event_id:3,owner_id:4,subscription_id:5,dispatch_id:6,lifecycle:'queued',queued:7,blocked:8,running:9,capacity:10,overflow:'drop',priority:11,failure:'',terminal:''}],
+        effects: {compute:1,waiting:0,channel:0,time:0,io:0},
+        resources: {workers:actual.resources.workers,running:1,queued:0,cancelled:0,arenas:1,arena_allocations:1,arena_bytes:32},
+        runtime: {elapsed_ns:actual.runtime.elapsed_ns,cpu_ns:actual.runtime.cpu_ns,exit:true},
+      };
+      if (!Number.isSafeInteger(actual.resources.workers) || actual.resources.workers < 0 || JSON.stringify(expected) !== wire) throw Error('native Observe golden mismatch (Observe.rs:387-500)');
+      return actual.pid;
+    }
+    const pid = golden(snapshot);
+    golden(readFileSync(join(out, `jet-observe-${pid}.json`), 'utf8'));
+    stdout = stdout.replace(lines[0] + '\n', '');
+  }
   const expected = [
     'STM nested commit transfer/rollback/clone parity ok',
     'STM two-thread body gate serialization ok',
     'STM prepare rejection/no publication/drop/revision stop ok',
     ...(kind !== 'stm' ? ['Condition FIFO/drain/pending/wait/cancel/unheld access+drop ok'] : []),
-    ...(kind === 'observe' ? ['Observe empty/parked exact report/owned once ok'] : []),
+    ...(kind === 'observe' ? ['Observe empty/parked exact report/owned once ok', 'Observe final writers publish once/periodic cannot overwrite ok'] : []),
   ].join('\n') + '\n';
-  if (result.stdout !== expected || result.stderr !== '') throw Error(`invalid ${kind} fixture result`);
+  if (stdout !== expected || result.stderr !== '') throw Error(`invalid ${kind} fixture result`);
 } else if (mode === 'link-session') {
   const lib = process.env.JET_CHANNEL_NATIVE_C_LIB;
   if (!lib || !existsSync(lib)) throw Error('missing freshly compiled native fixture library');

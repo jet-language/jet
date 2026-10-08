@@ -179,6 +179,10 @@ fn condition_reacquire(cell: I64) -> Bool {
         sync_store(guard_slot, cell | I64{1})
         shared_release(cell, true)
         if !notified -> _ := scheduler_yield(reason, node + I64{8}, I64{-1})
+        // MathTaskMem.rs:2991-3033 always re-checks ready after each wait.
+        // A notify-one may pop an epoch/pending-stale registration that
+        // skipped parking; it still releases/reacquires and re-checks the
+        // predicate, so that notification cannot bypass the ready test.
         // Drop registration BEFORE reacquiring, as cleanup.finish1572-1577.
         condition_unregister(condition, node)
         reacquired :: condition_reacquire(cell)

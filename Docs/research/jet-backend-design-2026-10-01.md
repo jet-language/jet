@@ -1534,3 +1534,17 @@ retained owner, never another writer's permit or revision. The wait callback
 writes a single Bool byte; its error output transfers one E4 String owner only
 on a non-stopping error return. `assemble-sync`, `link-sync`, and `run-sync`
 include the Condition queue and cancellation-cleanup witnesses.
+
+Native observation stores the canonical five live identity fields, five
+Foundation live-value decision fields, and fifteen event metadata fields in
+owned native records, never Rust layout offsets or task payloads. The final
+writer shares a run mutex with periodic publication: close publishes at most
+once, and later periodic attempts cannot overwrite that file. Publication
+uses an exclusive mode-0600 staging file, complete writes, fsync, and atomic
+rename; oversize or failed publication still closes the run. Resident restart
+reopens the run and resets time origins, not identity or sequence. Environment
+startup reads the one logical Env cell; temporary-directory paths retain raw
+OS bytes instead of silently replacing invalid UTF-8. Arena facts come only
+from the canonical Mem registry. `ObserveTests.jet` and `run-observe` exercise
+the report edge, full `jet.live.v1` wire order, and competing final writers;
+those fixtures require the composed native providers, not a Rust-layout bridge.

@@ -1,19 +1,23 @@
 // Observe.rs native task/channel registry. It records only identities and
 // wait/resource facts, never a task payload, channel element or environment.
-// Root72: mutex0/next-task8/next-channel16/tasks24/task-count32/channels40/
-// workers48/queued56/exit-reported64. Task88: next0/id8/parent16/site24/label32/
-// state40/wait48/deadline-present56/deadline64/cancelled72/control80.
-// Channel64: next0/id8/depth16/bounded24/capacity32/send40/recv48/closed56.
+// Root160: mutex0/next-task8/next-channel16/tasks24/task-count32/channels40/
+// workers48/queued56/exit-reported64/writer72/event-sequence80/events88/
+// event-tail96/event-count104/values112/value-count120/ledger128. Words136..152
+// are reserved (arena facts must read the canonical MemSentry ledger).
+// Task88: next0/id8/parent16/site24/label32/state40/wait48/deadline-present56/
+// deadline64/cancelled72/control80. Channel64: next0/id8/depth16/bounded24/
+// capacity32/send40/recv48/closed56.
 observe_root := I64{0}
 observe_task_key := I64{0}
 
 // runtime-init: 4
 #Export(c) fn jet_rt_observe_init() {
     if (observe_root != I64{0}) -> return
-    observe_root = jet_rt_alloc(I64{72}, I64{8})
-    thread_zero(observe_root, I64{72})
+    observe_root = jet_rt_alloc(I64{160}, I64{8})
+    thread_zero(observe_root, I64{160})
     sync_store(observe_root + I64{8}, I64{2})
     sync_store(observe_root + I64{16}, I64{1})
+    sync_store(observe_root + I64{80}, I64{1})
     observe_task_key = jet_rt_tls_key_new(I64{0})
 }
 
@@ -261,9 +265,9 @@ fn observe_task_later(left: I64, right: I64) -> Bool {
 
 fn observe_task_sift(array: I64, count: I64, root: I64) {
     at := root
-    loop at < count /% I64{2} {
+    loop at < count /% (I64{2}) {
         child := at * I64{2} + I64{1}
-        if child + I64{1} < count && observe_task_later(sync_load(array + (child + I64{1}) * I64{8}), sync_load(array + child * I64{8})) -> child += I64{1}
+        if child + (I64{1}) < count && observe_task_later(sync_load(array + (child + I64{1}) * I64{8}), sync_load(array + child * I64{8})) -> child += I64{1}
         value :: sync_load(array + at * I64{8})
         other :: sync_load(array + child * I64{8})
         if !observe_task_later(other, value) -> return
@@ -277,31 +281,31 @@ fn observe_parked_details(details: I64) -> I64 {
     sync_mutex_lock(observe_root)
     count := I64{0}
     node := sync_load(observe_root + I64{24})
-    loop node != I64{0} {
-        if sync_load(node + I64{40}) == I64{2} -> count += I64{1}
+    loop node != (I64{0}) {
+        if sync_load(node + I64{40}) == (I64{2}) -> count += I64{1}
         node = sync_load(node)
     }
-    if count == I64{0} {
+    if count == (I64{0}) {
         sync_mutex_unlock(observe_root)
         return I64{0}
     }
     array :: jet_rt_alloc(count * I64{8}, I64{8})
     at := I64{0}
     node = sync_load(observe_root + I64{24})
-    loop node != I64{0} {
-        if sync_load(node + I64{40}) == I64{2} {
+    loop node != (I64{0}) {
+        if sync_load(node + I64{40}) == (I64{2}) {
             sync_store(array + at * I64{8}, node)
             at += I64{1}
         }
         node = sync_load(node)
     }
     at = count /% I64{2}
-    loop at > I64{0} {
+    loop at > (I64{0}) {
         at -= I64{1}
         observe_task_sift(array, count, at)
     }
     at = count
-    loop at > I64{1} {
+    loop at > (I64{1}) {
         at -= I64{1}
         first :: sync_load(array)
         sync_store(array, sync_load(array + at * I64{8}))
@@ -324,9 +328,9 @@ fn observe_parked_details(details: I64) -> I64 {
         observe_msg_blocked(entry)
         observe_msg_report_wait(entry)
         wait :: sync_load(node + I64{48})
-        if wait == I64{0} || rt_text_len(wait) == I64{0} -> observe_msg_unknown(entry) else -> observe_escape(entry, wait)
+        if wait == (I64{0}) || rt_text_len(wait) == (I64{0}) -> observe_msg_unknown(entry) else -> observe_escape(entry, wait)
         if {
-            rt_text_len(details) + rt_text_len(entry) > I64{65408} -> omitted += I64{1}
+            rt_text_len(details) + rt_text_len(entry) > (I64{65408}) -> omitted += I64{1}
             else -> rt_text_append(details, rt_text_data(entry), rt_text_len(entry))
         }
         at += I64{1}
@@ -334,7 +338,7 @@ fn observe_parked_details(details: I64) -> I64 {
     sync_mutex_unlock(observe_root)
     jet_rt_free(array, count * I64{8}, I64{8})
     jet_rt_string_drop(entry)
-    if omitted != I64{0} {
+    if omitted != (I64{0}) {
         observe_msg_omitted_head(details)
         observe_decimal_unsigned(details, omitted)
         observe_msg_omitted_tail(details)
@@ -345,8 +349,8 @@ fn observe_parked_details(details: I64) -> I64 {
 fn observe_has_live_child() -> Bool {
     sync_mutex_lock(observe_root)
     node := sync_load(observe_root + I64{24})
-    loop node != I64{0} {
-        if sync_load(node + I64{8}) != I64{1} {
+    loop node != (I64{0}) {
+        if sync_load(node + I64{8}) != (I64{1}) {
             sync_mutex_unlock(observe_root)
             return true
         }
@@ -359,16 +363,16 @@ fn observe_has_live_child() -> Bool {
 fn observe_cancel_live_tasks() {
     sync_mutex_lock(observe_root)
     capacity :: sync_load(observe_root + I64{32})
-    if capacity == I64{0} {
+    if capacity == (I64{0}) {
         sync_mutex_unlock(observe_root)
         return
     }
     controls :: jet_rt_alloc(capacity * I64{8}, I64{8})
     count := I64{0}
     node := sync_load(observe_root + I64{24})
-    loop node != I64{0} {
+    loop node != (I64{0}) {
         control :: sync_load(node + I64{80})
-        if sync_load(node + I64{8}) != I64{1} && control != I64{0} {
+        if sync_load(node + I64{8}) != (I64{1}) && control != (I64{0}) {
             scheduler_control_retain(control)
             sync_store(controls + count * I64{8}, control)
             count += I64{1}
@@ -390,12 +394,13 @@ fn observe_cancel_live_tasks() {
 // Presence0 leaves both distinct writable eight-byte outputs uninitialized.
 // Presence1 transfers one E4 String owner and the registered stop status70.
 #Export(c) fn jet_rt_observe_parked_tasks_report(rendered_out: I64, exit_code_out: I64) -> I64 {
-    if observe_root == I64{0} -> return I64{0}
-    if sync_swap(observe_root + I64{64}, I64{1}) != I64{0} -> return I64{0}
+    if observe_root == (I64{0}) -> return I64{0}
+    if sync_swap(observe_root + I64{64}, I64{1}) != (I64{0}) -> return I64{0}
+    observe_publish_exit()
     details :: jet_rt_string_builder_new()
     count := observe_parked_details(details)
     attempt := I64{0}
-    loop count == I64{0} && attempt < I64{25} {
+    loop count == (I64{0}) && attempt < (I64{25}) {
         if !observe_has_live_child() {
             jet_rt_string_drop(details)
             return I64{0}
@@ -407,7 +412,7 @@ fn observe_cancel_live_tasks() {
         attempt += I64{1}
     }
     observe_cancel_live_tasks()
-    if count == I64{0} {
+    if count == (I64{0}) {
         jet_rt_string_drop(details)
         return I64{0}
     }
