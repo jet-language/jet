@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 // Card #298: offline, checksum-verified Unicode 17.0.0 UCD table generator.
 // No network at build/compile time — this script is run by hand (or by a
-// maintainer script) against a local UCD snapshot dir, and its Rust output is
-// committed to the repo. No external crates (I6): plain Node + plain Rust.
+// maintainer script) against a local UCD snapshot dir. Rust verification output
+// and the compiler-private Jet segmentation data are committed together (I6).
 //
 // Usage:
-//   node Tools/agent/gen-unicode-tables.mjs [--check] [ucd-dir]
+//   node Tools/agent/gen-unicode-tables.mjs [--write | --check] [ucd-dir]
 //
 // <ucd-dir> must contain (fetched from https://www.unicode.org/Public/17.0.0/ucd/):
 //   UnicodeData.txt, CaseFolding.txt, SpecialCasing.txt, PropList.txt,
@@ -22,6 +22,8 @@
 //     and the JIT hosts, so every in-binary tier reads one table with no drift)
 //   crates/jet-foundation/src/generated/UnicodeString.rs and
 //   crates/jet-codegen/src/Prelude/Core/UnicodeString.rs (string kernels)
+// Emits the five WB/SB/filter tables as compact JUCD schema-1 Jet byte literals:
+//   Core/text/segmentation_tables.jet (compiler-private, Unicode 17.0.0)
 //
 // Pinned Unicode release: 17.0.0. Pinned sha256 of each input file (verified
 // before generating — mismatch aborts):
@@ -45,8 +47,9 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import path from "node:path";
 
-const checkOnly = process.argv[2] === "--check";
-const ucdDir = process.argv[checkOnly ? 3 : 2] ?? "tests/data/unicode/ucd";
+const args = process.argv.slice(2);
+const checkOnly = args.includes("--check");
+const ucdDir = args.find(arg => !arg.startsWith("--")) ?? "tests/data/unicode/ucd";
 
 function readChecked(rel) {
   const p = path.join(ucdDir, rel);
@@ -658,6 +661,44 @@ const outPaths = [
   ["crates/jet-codegen/src/Prelude/Core/UnicodeString.rs", stringFlatOut],
   ["crates/jet-codegen/src/Prelude/CoreLib/Top/UnicodeTables.rs", tablesFlatOut],
 ];
+// Reused JUCD schema-1 encoding from 7c42badbb. These five private Core data
+// tables use the very same parsed/pinned ranges as the Rust verification tier.
+function le(value, width) {
+  if (!Number.isSafeInteger(value) || value < 0 || value >= 2 ** (width * 8))
+    throw new Error(`asset field overflow: ${value}/${width}`);
+  return Array.from({ length: width }, (_, i) => Math.floor(value / 2 ** (i * 8)) & 255);
+}
+function segmentationAsset(symbol, rows, tagged) {
+  const widths = tagged ? [3, 3, 1] : [3, 3];
+  const stride = tagged ? 7 : 6;
+  const records = rows.flatMap(row => row.flatMap((field, i) => le(field, widths[i])));
+  const size = 40 + records.length;
+  const bytes = Buffer.from([
+    74, 85, 67, 68, ...le(1, 2), 0, 0, 17, 0, 0, 0,
+    ...[tagged ? 3 : 2, rows.length, stride, 40, size, 0, size].flatMap(n => le(n, 4)),
+    ...records,
+  ]);
+  for (let row = 0; row < rows.length; row++) {
+    let at = 40 + row * stride;
+    for (let field = 0; field < widths.length; field++) {
+      if (bytes.readUIntLE(at, widths[field]) !== rows[row][field])
+        throw new Error(`asset round trip: ${symbol}/${row}/${field}`);
+      at += widths[field];
+    }
+  }
+  const literal = Array.from(bytes, b => `\\x${b.toString(16).padStart(2, "0").toUpperCase()}`).join("");
+  return `// ${rows.length} JUCD records, ${stride} bytes each.\npub ${symbol} :: [U8]{"${literal}"}\n`;
+}
+const segmentationTables = [
+  ["UNICODE_WORD_BREAK", wordRanges, true],
+  ["UNICODE_SENTENCE_BREAK", sentenceRanges, true],
+  ["UNICODE_EXTENDED_PICTOGRAPHIC", extPictographic, false],
+  ["UNICODE_ALPHABETIC", mergePairRanges(alphabeticRanges), false],
+  ["UNICODE_NUMERIC", mergePairRanges(numericRanges), false],
+];
+outPaths.push(["Core/text/segmentation_tables.jet",
+  HEADER_COMMENT + "// Compiler-private data part; JUCD schema 1, Unicode 17.0.0, little-endian.\n"
+  + segmentationTables.map(([symbol, rows, tagged]) => segmentationAsset(symbol, rows, tagged)).join("\n")]);
 for (const [rel, text] of outPaths) {
   const full = path.join(process.cwd(), rel);
   if (checkOnly) {

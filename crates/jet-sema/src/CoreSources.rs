@@ -12,6 +12,7 @@ include!("CoreSourceTexts.rs");
 
 const CORE_PRIVATE_SOURCE_TEXTS: &[(&str, &str)] = &[
     (CORE_TEXT_STRING_MODULE, include_str!("../../../Core/text/string.jet")),
+    ("__core_text_segmentation_tables", include_str!("../../../Core/text/segmentation_tables.jet")),
     (CORE_ENCODING_STREAM_MODULE, include_str!("../../../Core/encoding/stream.jet")),
     (CORE_ENCODING_CBOR_PARSE_MODULE, include_str!("../../../Core/encoding/cbor_parse.jet")),
     (CORE_FILES_PATH_COMPONENTS_SOURCE_PART.source.module, include_str!("../../../Core/files/runtime/kernel_path_components.jet")),

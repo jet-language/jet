@@ -48,6 +48,16 @@ pub const CORE_TEXT_STRING_SOURCE_PART: CorePrivateSourcePart = CorePrivateSourc
     },
 };
 
+pub const CORE_TEXT_SEGMENTATION_TABLES_SOURCE_PART: CorePrivateSourcePart = CorePrivateSourcePart {
+    owner: CORE_TEXT_STRING_OWNER,
+    source: CoreSourceModule {
+        module: "__core_text_segmentation_tables",
+        alias: "__core_text_segmentation_tables",
+        path: "Core/text/segmentation_tables.jet",
+        owned_members: &[],
+    },
+};
+
 pub const CORE_ENCODING_STREAM_SOURCE_PART: CorePrivateSourcePart = CorePrivateSourcePart {
     owner: CORE_ENCODING_STREAM_OWNER,
     source: CoreSourceModule {
@@ -110,7 +120,7 @@ pub const CORE_ENCODING_XML_KERNEL_SOURCE_PART: CorePrivateSourcePart = CorePriv
 /// `CoreModuleExports::CORE_SOURCE_MODULES`: adding a row there would make the
 /// part publicly importable.
 pub const CORE_PRIVATE_SOURCE_PARTS: &[CorePrivateSourcePart] =
-    &[CORE_TEXT_STRING_SOURCE_PART, CORE_ENCODING_STREAM_SOURCE_PART, CORE_ENCODING_CBOR_PARSE_SOURCE_PART, CORE_FILES_PATH_COMPONENTS_SOURCE_PART, CORE_ENCODING_CBOR_STREAM_SOURCE_PART, CORE_ENCODING_XML_ENGINE_SOURCE_PART, CORE_ENCODING_XML_KERNEL_SOURCE_PART];
+    &[CORE_TEXT_STRING_SOURCE_PART, CORE_TEXT_SEGMENTATION_TABLES_SOURCE_PART, CORE_ENCODING_STREAM_SOURCE_PART, CORE_ENCODING_CBOR_PARSE_SOURCE_PART, CORE_FILES_PATH_COMPONENTS_SOURCE_PART, CORE_ENCODING_CBOR_STREAM_SOURCE_PART, CORE_ENCODING_XML_ENGINE_SOURCE_PART, CORE_ENCODING_XML_KERNEL_SOURCE_PART];
 
 pub fn core_private_source_part(owner: &str) -> Option<&'static CorePrivateSourcePart> {
     CORE_PRIVATE_SOURCE_PARTS
