@@ -1477,14 +1477,14 @@ pub(super) fn lower_or_fallback(
 }
 
 fn lower_expr_node(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
-    canonicalize_pre_tier_expr(match e {
+    super::method_calls::lower_checked_core_source_expr(canonicalize_pre_tier_expr(match e {
         Expr::MethodCall { .. } => lower_method_chain(e, cx, env),
         Expr::ListLit(elems, _) => lower_list_lit(elems, cx, env),
         Expr::OrFallback {
             value, fallback, ..
         } => lower_or_fallback(value, fallback, cx, env),
         _ => lower_expr_inner(e, cx, env),
-    })
+    }), cx)
 }
 
 /// Lower callee preconditions at the call site.  The argument values are

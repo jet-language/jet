@@ -1199,6 +1199,16 @@ impl CoreCallRecord {
         row.aot_direct = false;
         row
     }
+    /// Mark an already-normalized declaration (including a receiver) as source
+    /// owned without recomputing its signature, effects, or authority facts.
+    pub const fn with_source_owned(mut self) -> Self {
+        self.symbol = CoreCallSymbol::SourceOwned;
+        self.coverage = CoreCallCoverage::from_bits(CoreCallCoverage::SEMA);
+        self.interpreter_route = CoreCallInterpreterRoute::None;
+        self.aot_direct = false;
+        self
+    }
+
 
     pub const fn with_source_target(mut self, target: &'static str) -> Self {
         self.source_target = Some(target);
@@ -1213,6 +1223,16 @@ impl CoreCallRecord {
             Some(target) => Some(target),
             None => Some(self.member),
         }
+    }
+
+    /// Admit an implementation's checked signature without publishing another
+    /// public Core member or changing ordinary import visibility.
+    pub fn targets_source_function(self, module: &str, member: &str) -> bool {
+        let Some(target) = self.source_member() else { return false };
+        if target.starts_with("core.") {
+            return target.rsplit_once('.').is_some_and(|(owner, name)| owner == module && name == member);
+        }
+        self.module == module && target == member
     }
 
     /// Construct a row with an explicit consumer projection set. Use this for
@@ -1492,7 +1512,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 30f9acc583205f64befcce307ee37500f5e852b421b1115ceaf7ee89dd9ebef4
+// Source SHA-256: 025967f941efcd48fff5e599348b182e7657979e10134f70b950538a7a9a323e
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -3736,6 +3756,31 @@ mod tests {
         );
         assert_eq!(native.capability().provider, Some("core.files"));
         assert!(native.capability().is_well_formed());
+    }
+
+    #[test]
+    fn source_targets_preserve_receiver_facts_without_publishing_an_export() {
+        use super::{CoreCallRecord, CoreCallSymbol, CoreCallCoverage, CoreCallInterpreterRoute};
+        let original = CoreCallRecord::receiver_with_symbol(
+            &["JobQueue"], "enqueue", "jet_job_queue_enqueue", true, &[true, true, true],
+        ).with_max_arity(4);
+        let source = original.with_source_owned().with_source_target("core.jobs.__enqueue");
+        assert_eq!(source.symbol, CoreCallSymbol::SourceOwned);
+        assert_eq!(source.signature, original.signature);
+        assert_eq!(source.effect(), original.effect());
+        assert_eq!(source.capability(), original.capability());
+        assert_eq!(source.receiver_types, original.receiver_types);
+        assert_eq!(source.coverage, CoreCallCoverage::from_bits(CoreCallCoverage::SEMA));
+        assert_eq!(source.interpreter_route, CoreCallInterpreterRoute::None);
+        assert!(!source.aot_direct);
+        assert!(source.targets_source_function("core.jobs", "__enqueue"));
+        assert!(!source.targets_source_function("core.jobs", "enqueue"));
+        assert!(!source.targets_source_function("core.term", "__enqueue"));
+        assert!(!original.with_source_target("core.jobs.__enqueue").targets_source_function("core.jobs", "__enqueue"));
+        let plain = CoreCallRecord::source_owned("core.term", "take", &[true, false])
+            .with_source_target("__take_bytes");
+        assert!(plain.targets_source_function("core.term", "__take_bytes"));
+        assert!(!plain.targets_source_function("core.term", "take"));
     }
 
 }
