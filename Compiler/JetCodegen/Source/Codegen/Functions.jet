@@ -167,6 +167,7 @@ use jet_foundation.[
     core_call_key,
     core_call_symbol_name,
     compiler_apply_order,
+    compiler_transfer_rows,
     mir_empty_optimization_facts,
     mir_field_id,
     mir_module_id,
@@ -3363,9 +3364,9 @@ pub fn lower_functions(functions: &[TFunc], modules: &[SemaGraphModuleResult], s
         return jet_codegen_functions_from_rows([JetCodegenLoweredFunction]{}, functions, empty_index, modules, jet_codegen_trait_names(modules), ^types, ^constants)
     }
     rows := [TFunc]{}
-    jet_codegen_move_function_rows(&rows, &functions)
+    compiler_transfer_rows<TFunc>(&rows, &functions)
     program_modules := [SemaGraphModuleResult]{}
-    jet_codegen_move_module_rows(&program_modules, &modules)
+    compiler_transfer_rows<SemaGraphModuleResult>(&program_modules, &modules)
     function_index := jet_codegen_function_index(^rows)
     field_symbols := jet_codegen_field_symbol_index(program_modules)
     source_index := jet_codegen_source_index(source_files)
@@ -3386,24 +3387,11 @@ pub fn lower_functions(functions: &[TFunc], modules: &[SemaGraphModuleResult], s
     constants := jet_codegen_lower_constant_rows(program.modules)
     types := jet_codegen_declared_type_rows(program.function_index, program.modules)
     lowered := jet_codegen_functions_from_rows(lowered_rows, program.function_index.rows, program.function_index, program.modules, jet_codegen_trait_names(program.modules), ^types, ^constants)
-    jet_codegen_move_function_rows(&functions, &program.function_index.rows)
-    jet_codegen_move_module_rows(&modules, &program.modules)
+    compiler_transfer_rows<TFunc>(&functions, &program.function_index.rows)
+    compiler_transfer_rows<SemaGraphModuleResult>(&modules, &program.modules)
     lowered
 }
 
-// Moves every module of `from` onto the end of `to` in order, leaving `from`
-// empty; each pop moves one module (jet_codegen_move_function_rows).
-fn jet_codegen_move_module_rows(to: &[SemaGraphModuleResult], from: &[SemaGraphModuleResult]) Never! {
-    reversed := [SemaGraphModuleResult]{}
-    loop from.len() > 0 {
-        module_row := &from.pop() ?? { break }
-        &reversed.push(^module_row)
-    }
-    loop reversed.len() > 0 {
-        module_row := &reversed.pop() ?? { break }
-        &to.push(^module_row)
-    }
-}
 
 // A compiler thread is admitted for at least this many bytes of function
 // source, so a small program lowers on the calling thread.

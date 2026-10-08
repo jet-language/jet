@@ -42,6 +42,15 @@ The executable canonical-order fixture in
 production helpers and checks keys, stability, permutations, idempotence,
 empty input, and singleton input.
 
+Compiler graph/effect/lowering boundaries share `compiler_transfer_rows`:
+whole rows are popped into a temporary sequence and popped into the receiving
+owner in input order. This avoids treating an indexed aggregate field as an
+owning move while its original container still retains the payload. Assembly's
+optional MIR result is consumed as a whole local before its payload is projected.
+Post-effect compute validation borrows the existing globally solved module
+functions and returns only scalar row coordinates from lookups, rather than
+constructing a second owning function list or returning owning function snapshots.
+
 ## Read-only fact channel
 
 The frozen TIR exposes one typed, borrowed `TFactChannel` view. It projects facts

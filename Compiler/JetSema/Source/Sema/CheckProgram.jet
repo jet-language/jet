@@ -61,6 +61,7 @@ use jet_foundation.[
     compiler_threads_admit,
     compiler_threads_failure_text,
     compiler_threads_partition,
+    compiler_transfer_rows,
     expr_span,
     symbol_id,
     tir_symbol_local,
@@ -4067,9 +4068,11 @@ pub fn sema_finalize_registration_graph(graph: SemaRegistrationGraph, resolved: 
     loop module_index in 0..<modules.len() {
         source_index :: sema_registration_module_index(resolved_graph, modules[module_index].module_identity) ?? next
         source :: resolved_graph.modules[source_index]
+        functions := [TFunc]{}
+        compiler_transfer_rows<TFunc>(&functions, &modules[module_index].functions)
         &effect_inputs.push(SemaEffectModuleInput{
             module_identity: modules[module_index].module_identity,
-            functions: ^modules[module_index].functions,
+            functions: ^functions,
             sources: sema_comptime_effect_sources(source),
             call_facts: modules[module_index].call_facts,
             source_segments: source.source_segments,
@@ -4085,16 +4088,14 @@ pub fn sema_finalize_registration_graph(graph: SemaRegistrationGraph, resolved: 
     if !effects.complete -> complete = false
     loop effect_module_index in 0..<effects.modules.len() {
         effect_index :: sema_registration_module_index(resolved_graph, effects.modules[effect_module_index].module_identity) ?? next
-        modules[effect_index].functions = ^effects.modules[effect_module_index].functions
+        modules[effect_index].functions = [TFunc]{}
+        compiler_transfer_rows<TFunc>(&modules[effect_index].functions, &effects.modules[effect_module_index].functions)
     }
     resolved_compute_facts := [SemaComputeFunctionFacts]{}
-    effect_solved_functions := [TFunc]{}
     loop module_index in 0..<modules.len() {
-        module_result :: modules[module_index]
-        loop function_facts in module_result.compute_facts -> &resolved_compute_facts.push(function_facts)
-        loop function in module_result.functions -> &effect_solved_functions.push(function)
+        loop function_facts in modules[module_index].compute_facts -> &resolved_compute_facts.push(function_facts)
     }
-    compute_diagnostics := sema_compute_validate_autodiff_purity(resolved_compute_facts, effect_solved_functions)
+    compute_diagnostics := sema_compute_validate_autodiff_purity(resolved_compute_facts, modules)
     loop diagnostic in compute_diagnostics {
         if diagnostic.span == {
             .Val(span) -> {
