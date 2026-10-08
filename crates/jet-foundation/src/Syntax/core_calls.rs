@@ -1451,7 +1451,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: b454c91be110879ae2a395e8ad3c6a3d014cd74fdce711218c47d0e5eef86dec
+// Source SHA-256: 2b1162014369c13b47c495bc89cc1f0e12385d9c2b4a501d616ba41dd4c35fc9
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -1538,6 +1538,7 @@ pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.files", "__temp_path_sample"),
     ("core.files", "__temp_directory"),
     ("core.files", "__path_kind"),
+    ("core.files", "__create_dir_all_raw"),
     ("core.files", "set_mode"),
     ("core.files", "__open_reader"),
     ("core.files", "__open_writer"),
@@ -1792,6 +1793,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.files", "list_dir", "jet_std_fs_list_dir", true, &[true], ),
     CoreCallRecord::new( "core.files", "create_dir", "jet_std_fs_create_dir", true, &[true], ),
     CoreCallRecord::new( "core.files", "create_dir_all", "jet_std_fs_create_dir_all", true, &[true], ),
+    CoreCallRecord::new("core.files", "__create_dir_all_raw", "jet_std_fs_create_dir_all", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "copy", "jet_std_fs_copy", true, &[true, true]),
     CoreCallRecord::new( "core.files", "copy_dir", "jet_std_fs_copy_dir", true, &[true, true], ),
     CoreCallRecord::new( "core.files", "symlink", "jet_std_fs_symlink", true, &[true, true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
@@ -2774,6 +2776,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.db", "__queue_raw_execute", "jet_db_queue_raw_execute", true, &[false, true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).with_native_int_result(),
     CoreCallRecord::new("core.db", "__queue_raw_query", "jet_db_queue_raw_query", true, &[false, true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.jobs", "queue", "jet_job_queue_default", true, &[], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.jobs", "__publish_parts", "jet_job_queue_publish_parts", true, &[false, true, true, false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::receiver_with_symbol( &["JobQueue"], "enqueue", "jet_job_queue_enqueue", true, &[true, true, true], ) .with_max_arity(4),
     CoreCallRecord::receiver_with_symbol( &["JobQueue"], "delay", "jet_job_queue_delay", true, &[true, false, false, false], ),
     CoreCallRecord::receiver_with_symbol( &["JobQueue"], "receipt", "jet_job_queue_receipt", true, &[true, true], ),

@@ -3319,6 +3319,20 @@ pub fn apply_jobs_runtime(
     args: &[MirRuntimeValue],
     span: Span,
 ) -> Result<MirRuntimeValue, Diagnostic> {
+    if method == "__publish_parts" {
+        let text = |index| match queue_one(args, index, method, span)? {
+            MirRuntimeValue::Str(value) => Ok(value),
+            _ => Err(unsupported("core.jobs.__publish_parts expects String parts", span)),
+        };
+        jet_job_queue_publish_parts(
+            queue_int(queue_one(args, 0, method, span)?, "core.jobs", method, span)?,
+            text(1)?,
+            text(2)?,
+            text(3)?.clone(),
+            text(4)?.clone(),
+        );
+        return Ok(MirRuntimeValue::Unit);
+    }
     let endpoint = match jet_services_active_execution_endpoint() {
         Ok(endpoint) => endpoint,
         Err(error) => return Ok(queue_failed(error)),

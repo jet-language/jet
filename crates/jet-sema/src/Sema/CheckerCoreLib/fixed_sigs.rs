@@ -2854,6 +2854,16 @@ fn core_fixed_sig_impl(
                 Type::Named("ServiceError".to_string()),
             )),
         )),
+        ("core.jobs", "__publish_parts") => Some((
+            vec![
+                (read, Type::Int),
+                (read, Type::String),
+                (read, Type::String),
+                (read, Type::String),
+                (read, Type::String),
+            ],
+            Some(unit_ty()),
+        )),
         ("core.data.loader", "snapshot_reusable") => Some((
             vec![
                 (read, Type::Named("DataSnapshotIdentity".to_string())),
@@ -3811,6 +3821,10 @@ fn core_fixed_sig_impl(
         )),
         // #3593: policy-free provider leaves behind Core/files/files.jet. Only
         // embedded Core sources may spell the reserved `__` names.
+        ("core.files", "__create_dir_all_raw") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(unit_ty(), io.clone())),
+        )),
         ("core.files", "__open_reader") => Some((
             vec![(read, Type::Int), (read, Type::String), (read, Type::Int)],
             Some(result_ty(Type::Named("FileReader".to_string()), io.clone())),
