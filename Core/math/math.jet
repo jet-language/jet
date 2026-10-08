@@ -1600,3 +1600,117 @@ impl CameraDelta.Sub {
     assert_eq(camera.frame_id, 0)
     assert_eq((ViewDelta{x: 1.0, y: 2.0, frame_id: 9} + point).frame_id, 9)
 }
+
+struct DevicePoint { x: Float, y: Float, frame_id: Int }
+struct DeviceDelta { x: Float, y: Float, frame_id: Int }
+impl DevicePoint {
+    fn new(x: Float, y: Float) -> DevicePoint Never! { DevicePoint{x: x, y: y, frame_id: 0} }
+}
+impl DeviceDelta {
+    fn new(x: Float, y: Float) -> DeviceDelta Never! { DeviceDelta{x: x, y: y, frame_id: 0} }
+}
+impl DevicePoint.Add(DeviceDelta) {
+    fn add(self, rhs: DeviceDelta) -> DevicePoint Never! { DevicePoint{x: self.x + rhs.x, y: self.y + rhs.y, frame_id: self.frame_id} }
+}
+impl DevicePoint.Sub {
+    fn sub(self, rhs: DevicePoint) -> DeviceDelta Never! { DeviceDelta{x: self.x - rhs.x, y: self.y - rhs.y, frame_id: self.frame_id} }
+}
+impl DevicePoint.Sub(DeviceDelta) {
+    fn sub(self, rhs: DeviceDelta) -> DevicePoint Never! { DevicePoint{x: self.x - rhs.x, y: self.y - rhs.y, frame_id: self.frame_id} }
+}
+impl DeviceDelta.Add {
+    fn add(self, rhs: DeviceDelta) -> DeviceDelta Never! { DeviceDelta{x: self.x + rhs.x, y: self.y + rhs.y, frame_id: self.frame_id} }
+}
+impl DeviceDelta.Add(DevicePoint) {
+    fn add(self, rhs: DevicePoint) -> DevicePoint Never! { DevicePoint{x: self.x + rhs.x, y: self.y + rhs.y, frame_id: self.frame_id} }
+}
+impl DeviceDelta.Sub {
+    fn sub(self, rhs: DeviceDelta) -> DeviceDelta Never! { DeviceDelta{x: self.x - rhs.x, y: self.y - rhs.y, frame_id: self.frame_id} }
+}
+#Error
+struct TransformError { message: String }
+impl TransformError.Display {
+    fn display(self) -> String Never! { ~self.message }
+}
+// Phantom params follow existing KeyRef<T>/DataTracked<T,K> source declarations.
+// The seed erases both params and keeps f64 payloads even for F32 spellings.
+struct Point2<T, Space> { x: Float, y: Float, frame_id: Int }
+struct Delta2<T, Space> { x: Float, y: Float, frame_id: Int }
+impl Point2 {
+    fn new(x: Float, y: Float, frame_id: Int) -> Point2<T, Space> Never! {
+        Point2<T, Space>{x: x, y: y, frame_id: frame_id}
+    }
+}
+impl Delta2 {
+    fn new(x: Float, y: Float, frame_id: Int) -> Delta2<T, Space> Never! {
+        Delta2<T, Space>{x: x, y: y, frame_id: frame_id}
+    }
+}
+fn __coordinate_frame(left: Int, right: Int) -> Int TransformError! {
+    if left != 0 && right != 0 && left != right -> return Err(TransformError{message: "coordinate values belong to different frames"})
+    if left != 0 -> return Ok(left)
+    Ok(right)
+}
+impl Point2.Add(Delta2<T, Space>) {
+    fn add(self, rhs: Delta2<T, Space>) -> Point2<T, Space> TransformError! {
+        frame :: __coordinate_frame(self.frame_id, rhs.frame_id) ?? return Err(TransformError{message: "coordinate values belong to different frames"})
+        Ok(Point2<T, Space>{x: self.x + rhs.x, y: self.y + rhs.y, frame_id: frame})
+    }
+}
+impl Point2.Sub {
+    fn sub(self, rhs: Point2<T, Space>) -> Delta2<T, Space> TransformError! {
+        frame :: __coordinate_frame(self.frame_id, rhs.frame_id) ?? return Err(TransformError{message: "coordinate values belong to different frames"})
+        Ok(Delta2<T, Space>{x: self.x - rhs.x, y: self.y - rhs.y, frame_id: frame})
+    }
+}
+impl Point2.Sub(Delta2<T, Space>) {
+    fn sub(self, rhs: Delta2<T, Space>) -> Point2<T, Space> TransformError! {
+        frame :: __coordinate_frame(self.frame_id, rhs.frame_id) ?? return Err(TransformError{message: "coordinate values belong to different frames"})
+        Ok(Point2<T, Space>{x: self.x - rhs.x, y: self.y - rhs.y, frame_id: frame})
+    }
+}
+impl Delta2.Add {
+    fn add(self, rhs: Delta2<T, Space>) -> Delta2<T, Space> TransformError! {
+        frame :: __coordinate_frame(self.frame_id, rhs.frame_id) ?? return Err(TransformError{message: "coordinate values belong to different frames"})
+        Ok(Delta2<T, Space>{x: self.x + rhs.x, y: self.y + rhs.y, frame_id: frame})
+    }
+}
+impl Delta2.Add(Point2<T, Space>) {
+    fn add(self, rhs: Point2<T, Space>) -> Point2<T, Space> TransformError! {
+        frame :: __coordinate_frame(self.frame_id, rhs.frame_id) ?? return Err(TransformError{message: "coordinate values belong to different frames"})
+        Ok(Point2<T, Space>{x: self.x + rhs.x, y: self.y + rhs.y, frame_id: frame})
+    }
+}
+impl Delta2.Sub {
+    fn sub(self, rhs: Delta2<T, Space>) -> Delta2<T, Space> TransformError! {
+        frame :: __coordinate_frame(self.frame_id, rhs.frame_id) ?? return Err(TransformError{message: "coordinate values belong to different frames"})
+        Ok(Delta2<T, Space>{x: self.x - rhs.x, y: self.y - rhs.y, frame_id: frame})
+    }
+}
+#Test("Device and dynamic coordinates retain seed frame policy") {
+    point :: DevicePoint.new(7.0, 8.0)
+    delta :: DeviceDelta.new(3.0, 4.0)
+    assert_eq((point + delta).x, 10.0)
+    assert_eq((point - point).y, 0.0)
+    assert_eq((point - delta).x, 4.0)
+    assert_eq((delta + point).y, 12.0)
+    assert_eq((delta + delta).x, 6.0)
+    assert_eq((delta - delta).y, 0.0)
+    assert_eq(point.frame_id, 0)
+    assert_eq(__coordinate_frame(0, 12) ?? panic("frame"), 12)
+    assert_eq(__coordinate_frame(11, 0) ?? panic("frame"), 11)
+    assert_eq(__coordinate_frame(11, 11) ?? panic("frame"), 11)
+    if __coordinate_frame(11, 12) == {
+        .Ok(_) -> panic("mismatched frames accepted")
+        .Err(error) -> assert_eq(error.message, "coordinate values belong to different frames")
+    }
+    dynamic :: Point2<Float, World>.new(1.0, 2.0, 11)
+    shift :: Delta2<Float, World>.new(3.0, 4.0, 0)
+    moved :: (dynamic + shift) ?? panic("dynamic add")
+    assert_eq(moved.x, 4.0)
+    assert_eq(moved.frame_id, 11)
+    distance :: (moved - dynamic) ?? panic("dynamic difference")
+    assert_eq(distance.y, 4.0)
+    assert_eq((shift + dynamic ?? panic("reverse add")).frame_id, 11)
+    assert_eq((shift - shift ?? panic("delta sub")).x, 0.0)
+}
