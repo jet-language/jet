@@ -1235,6 +1235,21 @@ impl CoreCallRecord {
         self.module == module && target == member
     }
 
+    pub const fn with_source_target(mut self, target: &'static str) -> Self {
+        self.source_target = Some(target);
+        self
+    }
+
+    pub const fn source_member(self) -> Option<&'static str> {
+        if !matches!(self.symbol, CoreCallSymbol::SourceOwned) {
+            return None;
+        }
+        match self.source_target {
+            Some(target) => Some(target),
+            None => Some(self.member),
+        }
+    }
+
     /// Construct a row with an explicit consumer projection set. Use this for
     /// fixtures and deliberate exceptions so a tier omission is reviewable at
     /// the table edit instead of being hidden by a universal marker.
@@ -1512,7 +1527,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 025967f941efcd48fff5e599348b182e7657979e10134f70b950538a7a9a323e
+// Source SHA-256: fe5b47146fac96dc4c82c94e426c1448bbaf24a80e8938c90677db2e6015f363
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -2349,15 +2364,15 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.compute", "profile_f32_strict", "jet_compute_profile_f32_strict", true, &[], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.compute", "profile_show", "jet_compute_profile_show", true, &[], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.service", "tree", "jet_services_tree", true, &[false]) .without_direct_aot() .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new( "core.service", "tree_show", "jet_services_tree_show", true, &[true], ) .without_direct_aot() .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new( "core.service", "set_delivery", "jet_services_set_delivery", true, &[true, false], ) .without_direct_aot() .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::source_owned("core.service", "tree_show", &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::source_owned("core.service", "set_delivery", &[true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.service", "worker", "jet_services_worker", true, &[true, false, false, false, false], ) .without_direct_aot() .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.service", "start", "jet_services_start", true, &[true]) .without_direct_aot() .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.service", "stop", "jet_services_stop", true, &[true]) .without_direct_aot() .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.service", "endpoint_send", "jet_services_endpoint_send", true, &[true, false]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.service", "endpoint_receive", "jet_services_endpoint_receive", true, &[true]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.service", "endpoint_show", "jet_services_endpoint_show", true, &[true]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.service", "delivery_state_show", "jet_services_delivery_state_show", true, &[true]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::source_owned("core.service", "endpoint_show", &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::source_owned("core.service", "delivery_state_show", &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.service", "delivery_status", "jet_services_delivery_status", true, &[true]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.service", "append_event", "jet_services_append_event", true, &[true, false]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.service", "chaos_fail", "jet_services_chaos_fail", true, &[true]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_native_int_result(),
@@ -2369,27 +2384,27 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.service", "delivery_wait", "jet_services_delivery_wait", true, &[true]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.service", "directory_register", "jet_services_directory_register", true, &[true, false, false]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.service", "directory_resolve", "jet_services_directory_resolve", true, &[true, true]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.service", "drain_dead_letters", "jet_services_drain_dead_letters", true, &[true]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_native_int_result(),
+    CoreCallRecord::source_owned("core.service", "drain_dead_letters", &[true]),
     CoreCallRecord::new("core.service", "drain_worker", "jet_services_drain_worker", true, &[true, true]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.service", "fail_worker", "jet_services_fail_worker", true, &[true, true]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.service", "group", "jet_services_group", true, &[true, false, false]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.service", "handoff_generation", "jet_services_handoff_generation", true, &[true]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_native_int_result(),
     CoreCallRecord::new("core.service", "mailbox_depth", "jet_services_mailbox_depth", true, &[true, true]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_native_int_result(),
-    CoreCallRecord::new("core.service", "observe", "jet_services_observe", true, &[true]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::source_owned("core.service", "observe", &[true]),
     CoreCallRecord::new("core.service", "partition_worker", "jet_services_partition_worker", true, &[true, true]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.service", "receive", "jet_services_receive", true, &[true, true]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.service", "reconcile_worker", "jet_services_reconcile_worker", true, &[true, true]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.service", "replay_events", "jet_services_replay_events", true, &[true]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::source_owned("core.service", "replay_events", &[true]),
     CoreCallRecord::new("core.service", "restarts", "jet_services_restarts", true, &[true, true]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_native_int_result(),
-    CoreCallRecord::new("core.service", "restore_snapshot", "jet_services_restore_snapshot", true, &[true]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::source_owned("core.service", "restore_snapshot", &[true]),
     CoreCallRecord::new("core.service", "rollback_generation", "jet_services_rollback_generation", true, &[true]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_native_int_result(),
     CoreCallRecord::new("core.service", "send", "jet_services_send", true, &[true, true, false]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.service", "send_durable", "jet_services_send_durable", true, &[true, true, false, false]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.service", "set_restart", "jet_services_set_restart", true, &[true, false]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.service", "set_state_empty", "jet_services_set_state_empty", true, &[true]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.service", "set_state_event_log", "jet_services_set_state_event_log", true, &[true, false, false, false, false]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.service", "set_state_snapshot", "jet_services_set_state_snapshot", true, &[true, false, false, false, false]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.service", "upgrade_receipt", "jet_services_upgrade_receipt", true, &[true]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::source_owned("core.service", "set_restart", &[true, false]),
+    CoreCallRecord::source_owned("core.service", "set_state_empty", &[true]),
+    CoreCallRecord::source_owned("core.service", "set_state_event_log", &[true, false, false, false, false]),
+    CoreCallRecord::source_owned("core.service", "set_state_snapshot", &[true, false, false, false, false]),
+    CoreCallRecord::source_owned("core.service", "upgrade_receipt", &[true]),
     CoreCallRecord::new("core.service", "workflow_activity", "jet_services_workflow_activity", true, &[true, false, false, false, false]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.service", "workflow_activity_complete", "jet_services_workflow_activity_complete", true, &[true, false, false, false]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.service", "workflow_activity_retry", "jet_services_workflow_activity_retry", true, &[true, false, false, false]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
@@ -3353,9 +3368,9 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.encoding.xml", "to_bytes", "jet_std_xml_to_bytes", true, &[true, true]),
     CoreCallRecord::new("core.service", "workflow_start", "jet_services_workflow_start", true, &[true, false, false]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.sync", "text_edit", "jet_sync_text_edit", true, &[true, false, false, false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.service", "workflow_outcome", "jet_services_workflow_outcome", true, &[true, false]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::source_owned("core.service", "workflow_outcome", &[true, false]),
     CoreCallRecord::new("core.sync", "list_push", "jet_sync_list_push", true, &[false, false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.service", "workflow_history", "jet_services_workflow_history", true, &[true, false]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::source_owned("core.service", "workflow_history", &[true, false]),
     CoreCallRecord::new("core.sync", "policy_new", "jet_db_policy_new", true, &[true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     sema_web_call("core.web", "on", "jet_web_on", &[true, true, false]),
     CoreCallRecord::new("core.time", "__wall_sample", "jet_time_raw_wall_sample", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
@@ -3383,6 +3398,33 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.service", "__tree_generation", "jet_services_raw_tree_generation", true, &[true]).with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.service", "__tree_event_count", "jet_services_raw_tree_event_count", true, &[true]).with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.service", "__tree_dead_letter_count", "jet_services_raw_tree_dead_letter_count", true, &[true]).with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__tree_started", "jet_services_raw_tree_started", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__tree_has_snapshot", "jet_services_raw_tree_has_snapshot", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__tree_group_count", "jet_services_raw_tree_group_count", true, &[true]).with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__tree_write_delivery", "jet_services_raw_tree_write_delivery", true, &[true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__tree_write_restart", "jet_services_raw_tree_write_restart", true, &[true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__group_write_restart", "jet_services_raw_group_write_restart", true, &[true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__tree_clear_dead_letters", "jet_services_raw_tree_clear_dead_letters", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__tree_write_empty_adapter", "jet_services_raw_tree_write_empty_adapter", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__tree_clear_state_authority", "jet_services_raw_tree_clear_state_authority", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__endpoint_parts", "jet_services_raw_endpoint_parts", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__active_endpoint", "jet_services_active_execution_endpoint", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__endpoint_authority_parts", "jet_services_raw_endpoint_authority_parts", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::source_owned("core.service", "__authority_signing_key", &[true]),
+    CoreCallRecord::source_owned("core.service", "__authority_validate", &[true]),
+    CoreCallRecord::source_owned("core.service", "__upgrade_receipt_display", &[true]),
+    CoreCallRecord::new("core.service", "__tree_write_state_adapter", "jet_services_raw_tree_write_state_adapter", true, &[true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__tree_write_state_authority", "jet_services_raw_tree_write_state_authority", true, &[true, false, false, false, false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__tree_state_authority", "jet_services_raw_tree_state_authority", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__state_load", "jet_services_raw_state_load", true, &[true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__tree_event_records", "jet_services_raw_tree_event_records", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__tree_upgrade_receipt", "jet_services_raw_tree_upgrade_receipt", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__upgrade_receipt_parts", "jet_services_raw_upgrade_receipt_parts", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__tree_display_parts", "jet_services_raw_tree_display_parts", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__workflow_replay_parts", "jet_services_raw_workflow_replay_parts", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__tree_observation_parts", "jet_services_raw_tree_observation_parts", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__endpoint_identity_parts", "jet_services_raw_endpoint_identity_parts", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__endpoint_validation_snapshot", "jet_services_raw_endpoint_validation_snapshot", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
 ];
 // END GENERATED CORE CALLS
 

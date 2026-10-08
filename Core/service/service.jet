@@ -11,6 +11,506 @@ package {
 
 use core as core
 
+// Ordinary source values: construction, matching, equality and ownership use
+// the compiler's existing record/enum rails, not service-specific handles.
+#Error
+enum ServiceError {
+    Full(String)
+    Ambiguous(String)
+    Unknown(String)
+    NotStarted(String)
+    Policy(String)
+    Unavailable(String)
+    Partitioned(String)
+    Revoked(String)
+    Stale(String)
+    Expired(String)
+
+    impl Display {
+        fn display(self) -> String Never! { service_error_show(self) }
+    }
+}
+
+fn service_error_show(error: ServiceError) -> String Never! {
+    if error == {
+        .Full(message) -> message
+        .Ambiguous(message) -> message
+        .Unknown(message) -> message
+        .NotStarted(message) -> message
+        .Policy(message) -> message
+        .Unavailable(message) -> message
+        .Partitioned(message) -> message
+        .Revoked(message) -> message
+        .Stale(message) -> message
+        .Expired(message) -> message
+    }
+}
+
+enum DeliveryState {
+    Pending
+    Accepted
+    Delivering
+    Delivered
+    DeadLettered
+    Cancelled
+}
+
+pub fn delivery_state_show(state: DeliveryState) -> String Never! {
+    if state == {
+        .Pending -> "Pending"
+        .Accepted -> "Accepted"
+        .Delivering -> "Delivering"
+        .Delivered -> "Delivered"
+        .DeadLettered -> "DeadLettered"
+        .Cancelled -> "Cancelled"
+    }
+}
+
+struct DeliveryReceipt {
+    id: String
+    state: DeliveryState
+    attempts: Int
+    retention_until: Int
+    deadline: Int
+    idempotency_key: String
+    duplicate: Bool
+    authority: String
+    generation: Int
+    signature: String
+
+    impl Display {
+        fn display(self) -> String Never! { delivery_receipt_show(self) }
+    }
+}
+
+fn delivery_receipt_show(receipt: DeliveryReceipt) -> String Never! {
+    state :: delivery_state_show(receipt.state)
+    "DeliveryReceipt(id={receipt.id}, state={state}, attempts={receipt.attempts}, retention_until={receipt.retention_until}, deadline={receipt.deadline}, key={receipt.idempotency_key}, duplicate={receipt.duplicate}, authority={receipt.authority}, generation={receipt.generation}, signature={receipt.signature})"
+}
+
+enum TaskOutcome {
+    Finished
+    Panicked(String)
+    Cancelled
+    DeadlineBlown
+
+    impl Display {
+        fn display(self) -> String Never! { task_outcome_show(self) }
+    }
+    impl Debug {
+        fn debug(self) -> String Never! {
+            if self == {
+                .Panicked(reason) -> "Panicked({reason:Debug})"
+                else -> task_outcome_show(self)
+            }
+        }
+    }
+}
+
+fn task_outcome_show(outcome: TaskOutcome) -> String Never! {
+    if outcome == {
+        .Finished -> "Finished"
+        .Panicked(reason) -> "Panicked({reason})"
+        .Cancelled -> "Cancelled"
+        .DeadlineBlown -> "DeadlineBlown"
+    }
+}
+
+#Test("task outcome display and debug distinguish raw and quoted panic reasons") {
+    assert(task_outcome_show(TaskOutcome.Finished) == "Finished")
+    assert(task_outcome_show(TaskOutcome.Cancelled) == "Cancelled")
+    assert(task_outcome_show(TaskOutcome.DeadlineBlown) == "DeadlineBlown")
+    assert(task_outcome_show(TaskOutcome.Panicked("a\"b")) == "Panicked(a\"b)")
+    outcome :: TaskOutcome.Panicked("a\"b")
+    assert("{outcome:Debug}" == "Panicked(\"a\\\"b\")")
+}
+
+// Byte-exact current token-derived key. This intentionally does not introduce
+// a signing-key registry or strengthen the existing authority proof.
+pub fn __authority_signing_key(authority: String) -> [U8] ServiceError! {
+    raw :: authority.bytes()
+    if raw.len() != 67 || raw[0] != (U8{115}) || raw[1] != (U8{97}) || raw[2] != (U8{45}) {
+        return Err(ServiceError.Revoked("service authority proof is malformed"))
+    }
+    key := [U8]{}
+    loop i in 0..<32 {
+        high :: authority_hex_digit(Int.from_u8(raw[3 + i * 2])) ?? return Err(ServiceError.Revoked("service authority proof is malformed"))
+        low :: authority_hex_digit(Int.from_u8(raw[4 + i * 2])) ?? return Err(ServiceError.Revoked("service authority proof is malformed"))
+        &key.push(U8{high * 16 + low})
+    }
+    key
+}
+
+fn authority_hex_digit(value: Int) -> Int? Never! {
+    if value >= 48 && value <= 57 -> return Val(value - 48)
+    if value >= 65 && value <= 70 -> return Val(value - 65 + 10)
+    if value >= 97 && value <= 102 -> return Val(value - 97 + 10)
+    None
+}
+
+// ServiceAuthority::service_authority_validate_endpoint / authority_validate:
+// keep input checks and all authoritative fallback/status decisions in source.
+pub fn __authority_validate(endpoint: ServiceEndpoint) ServiceError! {
+    #Unsafe("one existing registry read snapshots exact and candidate facts; no second authority or resource carrier") {
+        identity :: core.service.__endpoint_identity_parts(endpoint)
+        if validate_endpoint_identity(identity.authority, identity.tree, identity.worker, identity.generation) == {
+            .Err(error) -> return Err(error)
+            .Ok(_) -> {}
+        }
+        snapshot :: if core.service.__endpoint_validation_snapshot(endpoint) == {
+            .Ok(value) -> value
+            .Err(error) -> {
+                return Err(error)
+            }
+        }
+        return authority_validate_snapshot(identity, snapshot.exact, snapshot.candidates)
+    }
+}
+
+// Exact policy order from ServiceAuthority::jet_services_authority_validate:
+// missing-key identity fallback, newer unpartitioned fallback; for an exact
+// row, tree/worker mismatch, partition, generation, then stopped/newer-started.
+fn authority_validate_snapshot(identity: (authority: String, tree: String, worker: String, generation: Int), exact: (authority: String, tree: String, worker: String, generation: Int, started: Bool, draining: Bool, partitioned: Bool)?, candidates: [(authority: String, tree: String, worker: String, generation: Int, started: Bool, draining: Bool, partitioned: Bool)]) ServiceError! {
+    if exact == {
+        .None -> {
+            loop candidate in candidates {
+                if candidate.tree == identity.tree && candidate.worker == identity.worker && candidate.generation == identity.generation {
+                    return Err(ServiceError.Revoked("service endpoint authority does not match the registered worker"))
+                }
+            }
+            loop candidate in candidates {
+                if candidate.tree == identity.tree && candidate.worker == identity.worker && candidate.authority == identity.authority && candidate.generation > identity.generation && !candidate.partitioned {
+                    return Err(ServiceError.Stale("service endpoint generation {identity.generation} is no longer current"))
+                }
+            }
+            return Err(ServiceError.Partitioned("service endpoint authority is not registered"))
+        }
+        .Val(state) -> {
+            if state.tree != identity.tree -> return Err(ServiceError.Revoked("service endpoint belongs to another tree"))
+            if state.worker != identity.worker -> return Err(ServiceError.Revoked("service endpoint belongs to another worker"))
+            if state.partitioned -> return Err(ServiceError.Partitioned("service endpoint authority is partitioned"))
+            if state.generation != identity.generation {
+                return Err(ServiceError.Stale("service endpoint generation {identity.generation} is not current (current generation {state.generation})"))
+            }
+            if !state.started && !state.draining {
+                loop candidate in candidates {
+                    if candidate.tree == identity.tree && candidate.worker == identity.worker && candidate.authority == identity.authority && candidate.generation > identity.generation && candidate.started && !candidate.partitioned {
+                        return Err(ServiceError.Stale("service endpoint generation {identity.generation} is no longer current"))
+                    }
+                }
+                return Err(ServiceError.NotStarted("service worker `{identity.worker}` is not running"))
+            }
+            return Ok()
+        }
+    }
+}
+
+#Test("endpoint snapshot preserves mismatch partition stale and stopped priorities") {
+    token :: "sa-000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    identity :: (authority: token, tree: "tree", worker: "worker", generation: 2)
+    empty :: [(authority: String, tree: String, worker: String, generation: Int, started: Bool, draining: Bool, partitioned: Bool)]{}
+    wrong_tree :: (authority: token, tree: "other", worker: "worker", generation: 1, started: false, draining: false, partitioned: true)
+    wrong_worker :: (authority: token, tree: "tree", worker: "other", generation: 1, started: false, draining: false, partitioned: true)
+    partitioned :: (authority: token, tree: "tree", worker: "worker", generation: 1, started: false, draining: false, partitioned: true)
+    stale :: (authority: token, tree: "tree", worker: "worker", generation: 1, started: false, draining: false, partitioned: false)
+    stopped :: (authority: token, tree: "tree", worker: "worker", generation: 2, started: false, draining: false, partitioned: false)
+    assert(if authority_validate_snapshot(identity, Val(wrong_tree), empty) == {.Err(.Revoked(message)) -> message == "service endpoint belongs to another tree" else -> false})
+    assert(if authority_validate_snapshot(identity, Val(wrong_worker), empty) == {.Err(.Revoked(message)) -> message == "service endpoint belongs to another worker" else -> false})
+    assert(if authority_validate_snapshot(identity, Val(partitioned), empty) == {.Err(.Partitioned(message)) -> message == "service endpoint authority is partitioned" else -> false})
+    assert(if authority_validate_snapshot(identity, Val(stale), empty) == {.Err(.Stale(message)) -> message == "service endpoint generation 2 is not current (current generation 1)" else -> false})
+    assert(if authority_validate_snapshot(identity, Val(stopped), empty) == {.Err(.NotStarted(message)) -> message == "service worker `worker` is not running" else -> false})
+    newer :: (authority: token, tree: "tree", worker: "worker", generation: 3, started: true, draining: false, partitioned: false)
+    peers := [(authority: String, tree: String, worker: String, generation: Int, started: Bool, draining: Bool, partitioned: Bool)]{}
+    &peers.push(newer)
+    assert(if authority_validate_snapshot(identity, Val(stopped), peers) == {.Err(.Stale(message)) -> message == "service endpoint generation 2 is no longer current" else -> false})
+    assert(if authority_validate_snapshot(identity, None, empty) == {.Err(.Partitioned(message)) -> message == "service endpoint authority is not registered" else -> false})
+    assert(if authority_validate_snapshot(identity, None, peers) == {.Err(.Stale(message)) -> message == "service endpoint generation 2 is no longer current" else -> false})
+    other_authority :: (authority: "sa-ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", tree: "tree", worker: "worker", generation: 2, started: false, draining: false, partitioned: false)
+    &peers.push(other_authority)
+    assert(if authority_validate_snapshot(identity, None, peers) == {.Err(.Revoked(message)) -> message == "service endpoint authority does not match the registered worker" else -> false})
+}
+
+fn validate_endpoint_identity(authority: String, tree: String, worker: String, generation: Int) ServiceError! {
+    if !valid_service_text(tree, 256) -> return Err(ServiceError.Policy("service tree is empty, too long, or contains control characters"))
+    if !valid_service_text(worker, 256) -> return Err(ServiceError.Policy("service worker is empty, too long, or contains control characters"))
+    if !valid_authority_token(authority) -> return Err(ServiceError.Policy("service authority must be a provider-issued opaque token"))
+    if __authority_signing_key(authority) == {
+        .Err(error) -> return Err(error)
+        .Ok(_) -> {}
+    }
+    if generation < 1 -> return Err(ServiceError.Policy("service endpoint generation must be positive"))
+}
+
+fn valid_authority_token(authority: String) -> Bool Never! {
+    raw :: authority.bytes()
+    if raw.len() != 67 || !authority.starts_with("sa-") -> return false
+    loop i in 3..<67 {
+        value :: Int.from_u8(raw[i])
+        if !((value >= 48 && value <= 57) || (value >= 97 && value <= 102)) -> return false
+    }
+    true
+}
+
+#Test("endpoint identity checks preserve native order and lowercase issuance") {
+    token :: "sa-000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    assert(if validate_endpoint_identity(token, " ", "worker", 1) == {.Ok(_) -> true else -> false})
+    assert(if validate_endpoint_identity("bad", "", "", 0) == {.Err(.Policy(message)) -> message == "service tree is empty, too long, or contains control characters" else -> false})
+    assert(if validate_endpoint_identity(token, "tree", "", 0) == {.Err(.Policy(message)) -> message == "service worker is empty, too long, or contains control characters" else -> false})
+    assert(if validate_endpoint_identity("sa-000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F", "tree", "worker", 1) == {.Err(.Policy(message)) -> message == "service authority must be a provider-issued opaque token" else -> false})
+    assert(if validate_endpoint_identity(token, "tree", "worker", 0) == {.Err(.Policy(message)) -> message == "service endpoint generation must be positive" else -> false})
+}
+
+pub fn endpoint_show(endpoint: ServiceEndpoint) -> String Never! {
+    #Unsafe("read the existing endpoint's tree, worker and generation fields") {
+        parts :: core.service.__endpoint_parts(endpoint)
+        return "Endpoint({parts.tree}/{parts.worker}@g{parts.generation})"
+    }
+}
+
+pub fn set_delivery(tree: &ServiceTree, delivery: ServiceDelivery) ServiceError! {
+    #Unsafe("Services3081: check started before the single delivery-field write") {
+        if core.service.__tree_started(tree) -> return Err(ServiceError.Policy("cannot change delivery after start"))
+        core.service.__tree_write_delivery(&tree, delivery)
+    }
+}
+
+pub fn set_restart(tree: &ServiceTree, restart: ServiceRestart) ServiceError! {
+    #Unsafe("Services1415: root policy write precedes each declared group policy write") {
+        if core.service.__tree_started(tree) -> return Err(ServiceError.Policy("cannot change restart policy after start"))
+        core.service.__tree_write_restart(&tree, restart)
+        count :: core.service.__tree_group_count(tree)
+        loop i in 0..<count -> core.service.__group_write_restart(&tree, i)
+    }
+}
+
+pub fn drain_dead_letters(tree: &ServiceTree) -> Int ServiceError! {
+    #Unsafe("Services3220: tree's exclusive write borrow covers count then clear") {
+        if !core.service.__tree_started(tree) -> return Err(ServiceError.NotStarted("service tree is not started"))
+        count :: core.service.__tree_dead_letter_count(tree)
+        core.service.__tree_clear_dead_letters(&tree)
+        return count
+    }
+}
+
+pub fn set_state_empty(tree: &ServiceTree) ServiceError! {
+    #Unsafe("Services3231: started and record checks precede adapter then authority writes") {
+        if core.service.__tree_started(tree) -> return Err(ServiceError.Policy("cannot change state adapter after start"))
+        if core.service.__tree_has_snapshot(tree) || core.service.__tree_event_count(tree) != 0 {
+            return Err(ServiceError.Policy("cannot discard state records while selecting Empty state adapter"))
+        }
+        core.service.__tree_write_empty_adapter(&tree)
+        core.service.__tree_clear_state_authority(&tree)
+    }
+}
+
+// Services3247/3274: identical checks, then adapter followed by authority.
+pub fn set_state_snapshot(tree: &ServiceTree, store: ServiceStateStore, schema: String, version: Int, migration: String) ServiceError! {
+    select_state_adapter(&tree, store, schema, version, migration, false)
+}
+
+pub fn set_state_event_log(tree: &ServiceTree, store: ServiceStateStore, schema: String, version: Int, migration: String) ServiceError! {
+    select_state_adapter(&tree, store, schema, version, migration, true)
+}
+
+fn select_state_adapter(tree: &ServiceTree, store: ServiceStateStore, schema: String, version: Int, migration: String, event_log: Bool) ServiceError! {
+    #Unsafe("the source exclusive tree borrow covers the same complete mutation as Rust &mut; no lock or interleaving window") {
+        if core.service.__tree_started(tree) -> return Err(ServiceError.Policy("cannot change state adapter after start"))
+        if core.service.__tree_has_snapshot(tree) || core.service.__tree_event_count(tree) != 0 {
+            return Err(ServiceError.Policy("cannot replace a state adapter after it has records"))
+        }
+        if migration != "reversible" && migration != "dual_write" && migration != "forward_only" {
+            return Err(ServiceError.Policy("unknown migration policy {migration:Debug}; write \"reversible\", \"dual_write\", or \"forward_only\""))
+        }
+        if !valid_service_text(store.path, 4096) -> return Err(ServiceError.Policy("service state store is empty, too long, or contains control characters"))
+        if !valid_service_text(schema, 256) -> return Err(ServiceError.Policy("service state schema is empty, too long, or contains control characters"))
+        if version < 1 -> return Err(ServiceError.Policy("service state schema version must be positive"))
+        core.service.__tree_write_state_adapter(&tree, event_log)
+        core.service.__tree_write_state_authority(&tree, store.path, schema, version, migration, event_log)
+    }
+}
+
+fn valid_service_text(text: String, limit: Int) -> Bool Never! {
+    raw :: text.bytes()
+    if raw.len() == 0 || raw.len() > limit -> return false
+    loop i in 0..<raw.len() {
+        value :: Int.from_u8(raw[i])
+        if value < 32 || value == 127 -> return false
+        if value == 194 && i + 1 < raw.len() {
+            next_byte :: Int.from_u8(raw[i + 1])
+            if next_byte >= 128 && next_byte <= 159 -> return false
+        }
+    }
+    true
+}
+
+pub fn restore_snapshot(tree: ServiceTree) -> String ServiceError! {
+    #Unsafe("Services4437: authority lookup, durable load, first record, then checked framing") {
+        authority :: core.service.__tree_state_authority(tree) ?? return Err(ServiceError.Policy("Snapshot state has no injected authority"))
+        records :: if core.service.__state_load(tree, false) == {
+            .Ok(value) -> value
+            .Err(error) -> {
+                return Err(error)
+            }
+        }
+        if records.len() == 0 -> return Err(ServiceError.Policy("no snapshot committed"))
+        return read_state_record("v{authority.version}:", records[0])
+    }
+}
+
+pub fn replay_events(tree: ServiceTree) -> String Never! {
+    #Unsafe("Services4493: replay existing in-memory records without issuing a store read") {
+        authority :: core.service.__tree_state_authority(tree)
+        version :: if authority == {.Val(value) -> value.version else -> 1}
+        records :: core.service.__tree_event_records(tree)
+        events := [String]{}
+        loop record in records {
+            event :: read_state_record("v{version}:", record) ?? return "StateReplayError(invalid_record)"
+            &events.push(event)
+        }
+        return events.join("|")
+    }
+}
+
+fn read_state_record(prefix: String, record: String) -> String ServiceError! {
+    if !record.starts_with(prefix) -> return Err(ServiceError.Policy("state record schema is incompatible"))
+    raw :: record.bytes()
+    start :: prefix.bytes().len()
+    separator := start
+    loop separator < raw.len() && raw[separator] != (U8{58}) -> separator = separator + 1
+    if separator == raw.len() -> return Err(ServiceError.Policy("state record is truncated"))
+    digits_start := start
+    if digits_start < separator && raw[digits_start] == (U8{43}) -> digits_start = digits_start + 1
+    if digits_start == separator -> return Err(ServiceError.Policy("state record length is invalid"))
+    length := 0
+    maximum :: core.sys.usize_max()
+    loop i in digits_start..<separator {
+        digit :: Int.from_u8(raw[i]) - 48
+        if digit < 0 || digit > 9 || length > (maximum - digit) /% 10 -> return Err(ServiceError.Policy("state record length is invalid"))
+        length = length * 10 + digit
+    }
+    if length != raw.len() - separator - 1 -> return Err(ServiceError.Policy("state record length does not match payload"))
+    String.from_bytes(raw.slice(separator + 1, raw.len())) ?? return Err(ServiceError.Policy("state record length does not match payload"))
+}
+
+pub fn upgrade_receipt(tree: ServiceTree) -> ServiceUpgradeReceipt ServiceError! {
+    #Unsafe("Services6729: copy the existing optional last-upgrade field") {
+        return core.service.__tree_upgrade_receipt(tree) ?? return Err(ServiceError.Policy("service tree has no completed generation handoff"))
+    }
+}
+
+pub fn __upgrade_receipt_display(receipt: ServiceUpgradeReceipt) -> String Never! {
+    #Unsafe("Services1153: plain field projection; rollback store remains omitted from all text views") {
+        parts :: core.service.__upgrade_receipt_parts(receipt)
+        pinned :: parts.pinned_shards.join(",")
+        return "ServiceUpgradeReceipt(from={parts.from_generation}, to={parts.to_generation}, migration={parts.migration}, rollback_available={parts.rollback_available}, pinned={pinned})"
+    }
+}
+
+pub fn tree_show(tree: ServiceTree) -> String Never! {
+    #Unsafe("Services1265: read the existing topology fields, preserve handler insertion order") {
+        parts :: core.service.__tree_display_parts(tree)
+        handlers := [String]{}
+        loop worker in parts.handlers -> &handlers.push("{worker.name}:{worker.handler}")
+        restart :: if parts.restart == {
+            .OneForOne -> "OneForOne"
+            .OneForAll -> "OneForAll"
+            .RestForOne -> "RestForOne"
+        }
+        delivery :: if parts.delivery == {
+            .AtMostOnce -> "AtMostOnce"
+            .DurableAtLeastOnce -> "DurableAtLeastOnce"
+        }
+        return "ServiceTree(name={parts.name}, workers={parts.workers}, handlers=[{handlers.join(",")}], started={parts.started}, restart={restart}, budget={parts.budget_max}/{parts.budget_per_ms}ms, delivery={delivery})"
+    }
+}
+
+pub fn workflow_history(tree: ServiceTree, run_id: Int) -> String ServiceError! {
+    #Unsafe("Services5867: durable replay before lookup; first matching run wins") {
+        workflows :: if core.service.__workflow_replay_parts(tree) == {
+            .Ok(value) -> value
+            .Err(error) -> {
+                return Err(error)
+            }
+        }
+        loop workflow in workflows {
+            if workflow.run_id == run_id -> return workflow.history.join("|")
+        }
+        return Err(ServiceError.Unknown("workflow run {run_id} not found"))
+    }
+}
+
+pub fn workflow_outcome(tree: ServiceTree, run_id: Int) -> TaskOutcome ServiceError! {
+    #Unsafe("Services5879: durable replay before lookup; missing or nonterminal run is Policy") {
+        workflows :: if core.service.__workflow_replay_parts(tree) == {
+            .Ok(value) -> value
+            .Err(error) -> {
+                return Err(error)
+            }
+        }
+        loop workflow in workflows {
+            if workflow.run_id == run_id {
+                return workflow.outcome ?? return Err(ServiceError.Policy("workflow run {run_id} has no recorded terminal outcome"))
+            }
+        }
+        return Err(ServiceError.Policy("workflow run {run_id} has no recorded terminal outcome"))
+    }
+}
+
+pub fn observe(tree: ServiceTree) -> String Never! {
+    #Unsafe("Services6978: project existing runtime facts; source owns counts and text") {
+        parts :: core.service.__tree_observation_parts(tree)
+        running := 0
+        paused := 0
+        cancel_requested := 0
+        pending := 0
+        finished := 0
+        panicked := 0
+        cancelled := 0
+        deadline_blown := 0
+        loop workflow in parts.workflows {
+            if workflow.status == 0 -> running = running + 1
+            else if workflow.status == 1 -> paused = paused + 1
+            else -> cancel_requested = cancel_requested + 1
+            if workflow.outcome == -1 -> pending = pending + 1
+            else if workflow.outcome == 0 -> finished = finished + 1
+            else if workflow.outcome == 1 -> panicked = panicked + 1
+            else if workflow.outcome == 2 -> cancelled = cancelled + 1
+            else -> deadline_blown = deadline_blown + 1
+        }
+        return "Observe(workers={parts.workers}, started={parts.started}, generation={parts.generation}, dead_letters={parts.dead_letters}, events={parts.events}, chaos={parts.chaos}, draining={parts.draining}, partitions={parts.partitions}, rollback={parts.rollback}, workflows={parts.workflows.len()},statuses={{running:{running},paused:{paused},cancel_requested:{cancel_requested}}},outcomes={{pending:{pending},finished:{finished},panicked:{panicked},cancelled:{cancelled},deadline_blown:{deadline_blown}}})"
+    }
+}
+
+#Test("service state records use UTF-8 byte lengths and exact corruption errors") {
+    assert((read_state_record("v1:", "v1:2:é") ?? panic("record")) == "é")
+    assert((read_state_record("v1:", "v1:+2:é") ?? panic("record")) == "é")
+    assert(if read_state_record("v1:", "v2:2:é") == {.Err(.Policy(message)) -> message == "state record schema is incompatible" else -> false})
+    assert(if read_state_record("v1:", "v1:1:é") == {.Err(.Policy(message)) -> message == "state record length does not match payload" else -> false})
+    assert(if read_state_record("v1:", "v1:-1:x") == {.Err(.Policy(message)) -> message == "state record length is invalid" else -> false})
+}
+
+#Test("service authority key decodes the existing token, including uppercase hex") {
+    key :: __authority_signing_key("sa-000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F") ?? panic("key")
+    assert(key.len() == 32)
+    loop i in 0..<32 -> assert(Int.from_u8(key[i]) == i)
+    assert(if __authority_signing_key("bad") == {.Err(.Revoked(message)) -> message == "service authority proof is malformed" else -> false})
+}
+
+#Test("service errors keep every message and delivery receipts keep every field") {
+    assert(service_error_show(ServiceError.Full("full")) == "full")
+    assert(service_error_show(ServiceError.Ambiguous("ambiguous")) == "ambiguous")
+    assert(service_error_show(ServiceError.Unknown("unknown")) == "unknown")
+    assert(service_error_show(ServiceError.NotStarted("not started")) == "not started")
+    assert(service_error_show(ServiceError.Policy("policy")) == "policy")
+    assert(service_error_show(ServiceError.Unavailable("unavailable")) == "unavailable")
+    assert(service_error_show(ServiceError.Partitioned("partitioned")) == "partitioned")
+    assert(service_error_show(ServiceError.Revoked("revoked")) == "revoked")
+    assert(service_error_show(ServiceError.Stale("stale")) == "stale")
+    assert(service_error_show(ServiceError.Expired("expired")) == "expired")
+    receipt :: DeliveryReceipt{id: "id", state: DeliveryState.Delivered, attempts: 3, retention_until: 4, deadline: 5, idempotency_key: "key", duplicate: true, authority: "authority", generation: 6, signature: "signature"}
+    assert(delivery_receipt_show(receipt) == "DeliveryReceipt(id=id, state=Delivered, attempts=3, retention_until=4, deadline=5, key=key, duplicate=true, authority=authority, generation=6, signature=signature)")
+}
+
 // core.service is the typed Jet facade for the registered service provider.
 // Topology, authority, delivery, state, and workflow values are provider
 // handles; this source module does not recreate their runtime state.
@@ -78,7 +578,7 @@ pub fn state_store(path: String) -[FS.Read]> ServiceStateStore ServiceError! {
 // the constructor's native symlink_metadata contract never had.
 fn state_path_kind(path: String) -[FS.Read]> Int IOError! {
     #Unsafe("read the final path component's OS metadata kind without opening an identity handle") {
-        core.files.__path_kind(path)
+        return core.files.__path_kind(path)
     }
 }
 
@@ -104,19 +604,19 @@ pub fn delivery_durable() -> ServiceDelivery Never! {
 
 pub fn directory_generation(tree: ServiceTree) -> Int Never! {
     #Unsafe("read the checked service tree's generation field without mutating or copying its scheduler carrier") {
-        core.service.__tree_generation(tree)
+        return core.service.__tree_generation(tree)
     }
 }
 
 pub fn event_count(tree: ServiceTree) -> Int Never! {
     #Unsafe("read event-log storage length on the checked service tree") {
-        core.service.__tree_event_count(tree)
+        return core.service.__tree_event_count(tree)
     }
 }
 
 pub fn dead_letter_count(tree: ServiceTree) -> Int Never! {
     #Unsafe("read dead-letter storage length on the checked service tree") {
-        core.service.__tree_dead_letter_count(tree)
+        return core.service.__tree_dead_letter_count(tree)
     }
 }
 
@@ -194,7 +694,7 @@ fn state_parent_lex(path: String, windows: Bool) -> String? Never! {
     prefix :: state_prefix(raw, windows)
     physical_root :: prefix.length < raw.len() && state_separator(raw[prefix.length], windows, false)
     rooted :: physical_root || prefix.implicit_root
-    curdir :: !rooted && prefix.length < raw.len() && raw[prefix.length] == U8{46}
+    curdir :: !rooted && prefix.length < raw.len() && raw[prefix.length] == (U8{46})
         && (raw.len() == prefix.length + 1 || state_separator(raw[prefix.length + 1], windows, prefix.verbatim))
     floor := prefix.length
     if physical_root -> floor = floor + 1
@@ -211,8 +711,8 @@ fn state_parent_lex(path: String, windows: Bool) -> String? Never! {
 }
 
 fn state_separator(value: U8, windows: Bool, verbatim: Bool) -> Bool Never! {
-    if windows && verbatim -> return value == U8{92}
-    value == U8{47} || (windows && value == U8{92})
+    if windows && verbatim -> return value == (U8{92})
+    value == (U8{47}) || (windows && value == (U8{92}))
 }
 
 fn state_component_begin(raw: [U8], end: Int, floor: Int, windows: Bool, verbatim: Bool) -> Int Never! {
@@ -227,7 +727,7 @@ fn state_trim_suffix(raw: [U8], limit: Int, floor: Int, windows: Bool, verbatim:
     end := limit
     loop end > floor {
         begin :: state_component_begin(raw, end, floor, windows, verbatim)
-        skipped :: begin == end || (!verbatim && end == begin + 1 && raw[begin] == U8{46})
+        skipped :: begin == end || (!verbatim && end == begin + 1 && raw[begin] == (U8{46}))
         if !skipped -> break
         end = begin
         if begin > floor -> end = begin - 1
@@ -248,7 +748,7 @@ fn state_next_separator(raw: [U8], start: Int, verbatim: Bool) -> Int Never! {
 }
 
 fn state_drive(raw: [U8], start: Int) -> Bool Never! {
-    if start + 1 >= raw.len() || raw[start + 1] != U8{58} -> return false
+    if start + 1 >= raw.len() || raw[start + 1] != (U8{58}) -> return false
     value :: Int.from_u8(raw[start])
     (value >= 65 && value <= 90) || (value >= 97 && value <= 122)
 }
@@ -256,8 +756,8 @@ fn state_drive(raw: [U8], start: Int) -> Bool Never! {
 fn state_prefix(raw: [U8], windows: Bool) -> StatePathPrefix Never! {
     if !windows -> return StatePathPrefix{length: 0, verbatim: false, implicit_root: false}
     if raw.len() >= 2 && state_separator(raw[0], true, false) && state_separator(raw[1], true, false) {
-        if raw.len() >= 4 && raw[0] == U8{92} && raw[1] == U8{92} && raw[2] == U8{63} && raw[3] == U8{92} {
-            if raw.len() >= 8 && raw[4] == U8{85} && raw[5] == U8{78} && raw[6] == U8{67} && state_separator(raw[7], true, false) {
+        if raw.len() >= 4 && raw[0] == (U8{92}) && raw[1] == (U8{92}) && raw[2] == (U8{63}) && raw[3] == (U8{92}) {
+            if raw.len() >= 8 && raw[4] == (U8{85}) && raw[5] == (U8{78}) && raw[6] == (U8{67}) && state_separator(raw[7], true, false) {
                 server_end :: state_next_separator(raw, 8, true)
                 share_start := server_end
                 if server_end < raw.len() -> share_start = server_end + 1
@@ -271,7 +771,7 @@ fn state_prefix(raw: [U8], windows: Bool) -> StatePathPrefix Never! {
             }
             return StatePathPrefix{length: state_next_separator(raw, 4, true), verbatim: true, implicit_root: true}
         }
-        if raw.len() >= 4 && raw[2] == U8{46} && state_separator(raw[3], true, false) {
+        if raw.len() >= 4 && raw[2] == (U8{46}) && state_separator(raw[3], true, false) {
             return StatePathPrefix{length: state_next_separator(raw, 4, false), verbatim: false, implicit_root: true}
         }
         server_end :: state_next_separator(raw, 2, false)
@@ -296,20 +796,20 @@ fn state_prefix(raw: [U8], windows: Bool) -> StatePathPrefix Never! {
     assert(state_parent_lex("", false) == None)
     assert(state_parent_lex("/", false) == None)
     assert(state_parent_lex("///", false) == None)
-    assert(state_parent_lex(".", false) == Val(""))
-    assert(state_parent_lex("./file", false) == Val("."))
-    assert(state_parent_lex("file", false) == Val(""))
-    assert(state_parent_lex("dir/./file", false) == Val("dir"))
-    assert(state_parent_lex("dir//sub/file", false) == Val("dir//sub"))
-    assert(state_parent_lex("link/../store", false) == Val("link/.."))
-    assert(state_parent_lex("dir///./", false) == Val(""))
-    assert(state_parent_lex("/dir/file/", false) == Val("/dir"))
-    assert(state_parent_lex("C:\\dir\\file", true) == Val("C:\\dir"))
-    assert(state_parent_lex("C:\\file", true) == Val("C:\\"))
-    assert(state_parent_lex("C:file", true) == Val("C:"))
+    assert(state_parent_lex(".", false) == (Val("")))
+    assert(state_parent_lex("./file", false) == (Val(".")))
+    assert(state_parent_lex("file", false) == (Val("")))
+    assert(state_parent_lex("dir/./file", false) == (Val("dir")))
+    assert(state_parent_lex("dir//sub/file", false) == (Val("dir//sub")))
+    assert(state_parent_lex("link/../store", false) == (Val("link/..")))
+    assert(state_parent_lex("dir///./", false) == (Val("")))
+    assert(state_parent_lex("/dir/file/", false) == (Val("/dir")))
+    assert(state_parent_lex("C:\\dir\\file", true) == (Val("C:\\dir")))
+    assert(state_parent_lex("C:\\file", true) == (Val("C:\\")))
+    assert(state_parent_lex("C:file", true) == (Val("C:")))
     assert(state_parent_lex("C:\\", true) == None)
-    assert(state_parent_lex("\\\\server\\share\\file", true) == Val("\\\\server\\share\\"))
+    assert(state_parent_lex("\\\\server\\share\\file", true) == (Val("\\\\server\\share\\")))
     assert(state_parent_lex("\\\\server\\share", true) == None)
-    assert(state_parent_lex("\\\\?\\C:\\dir\\.\\file", true) == Val("\\\\?\\C:\\dir\\."))
-    assert(state_parent_lex("\\\\.\\COM42\\file", true) == Val("\\\\.\\COM42\\"))
+    assert(state_parent_lex("\\\\?\\C:\\dir\\.\\file", true) == (Val("\\\\?\\C:\\dir\\.")))
+    assert(state_parent_lex("\\\\.\\COM42\\file", true) == (Val("\\\\.\\COM42\\")))
 }

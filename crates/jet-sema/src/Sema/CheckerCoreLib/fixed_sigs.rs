@@ -3407,6 +3407,129 @@ fn core_fixed_sig_impl(
             vec![(read, Type::Named("ServiceTree".to_string()))],
             Some(Type::Int),
         )),
+        ("core.service", "__tree_started" | "__tree_has_snapshot") =>
+            Some((vec![(read, Type::Named("ServiceTree".into()))], Some(Type::Bool))),
+        ("core.service", "__tree_group_count") =>
+            Some((vec![(read, Type::Named("ServiceTree".into()))], Some(Type::Int))),
+        ("core.service", "__tree_write_delivery") =>
+            Some((vec![(AccessConvention::Write, Type::Named("ServiceTree".into())),
+                (AccessConvention::Move, Type::Named("ServiceDelivery".into()))], None)),
+        ("core.service", "__tree_write_restart") =>
+            Some((vec![(AccessConvention::Write, Type::Named("ServiceTree".into())),
+                (AccessConvention::Move, Type::Named("ServiceRestart".into()))], None)),
+        ("core.service", "__group_write_restart") =>
+            Some((vec![(AccessConvention::Write, Type::Named("ServiceTree".into())),
+                (read, Type::Int)], None)),
+        ("core.service", "__tree_clear_dead_letters" | "__tree_write_empty_adapter" | "__tree_clear_state_authority") =>
+            Some((vec![(AccessConvention::Write, Type::Named("ServiceTree".into()))], None)),
+        ("core.service", "__endpoint_parts") =>
+            Some((vec![(read, Type::Named("ServiceEndpoint".into()))], Some(Type::Tuple(vec![
+                ("tree".into(), Box::new(Type::String)), ("worker".into(), Box::new(Type::String)),
+                ("generation".into(), Box::new(Type::Int))])))),
+        ("core.service", "__active_endpoint") =>
+            Some((vec![], Some(result_ty(Type::Named("ServiceEndpoint".into()), Type::Named("ServiceError".into()))))),
+        ("core.service", "__endpoint_authority_parts") =>
+            Some((vec![(read, Type::Named("ServiceEndpoint".into()))], Some(result_ty(Type::Tuple(vec![
+                ("authority".into(), Box::new(Type::String)), ("tree".into(), Box::new(Type::String)),
+                ("worker".into(), Box::new(Type::String)), ("generation".into(), Box::new(Type::Int)),
+                ("started".into(), Box::new(Type::Bool)), ("draining".into(), Box::new(Type::Bool)),
+                ("partitioned".into(), Box::new(Type::Bool))]), Type::Named("ServiceError".into()))))),
+        ("core.service", "__authority_signing_key") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(list_u8.clone(), Type::Named("ServiceError".into()))),
+        )),
+        ("core.service", "__authority_validate") => Some((
+            vec![(read, Type::Named("ServiceEndpoint".into()))],
+            Some(result_ty(unit_ty(), Type::Named("ServiceError".into()))),
+        )),
+        ("core.service", "__upgrade_receipt_display") => Some((
+            vec![(read, Type::Named("ServiceUpgradeReceipt".into()))], Some(Type::String),
+        )),
+        ("core.service", "__tree_write_state_adapter") => Some((
+            vec![(AccessConvention::Write, Type::Named("ServiceTree".into())), (read, Type::Bool)], None,
+        )),
+        ("core.service", "__tree_write_state_authority") => Some((
+            vec![(AccessConvention::Write, Type::Named("ServiceTree".into())),
+                (AccessConvention::Move, Type::String), (AccessConvention::Move, Type::String),
+                (read, Type::Int), (AccessConvention::Move, Type::String), (read, Type::Bool)], None,
+        )),
+        ("core.service", "__tree_state_authority") => Some((
+            vec![(read, Type::Named("ServiceTree".into()))],
+            Some(Type::Option(Box::new(Type::Tuple(vec![
+                ("store".into(), Box::new(Type::String)), ("schema".into(), Box::new(Type::String)),
+                ("version".into(), Box::new(Type::Int)), ("migration".into(), Box::new(Type::String)),
+            ])))),
+        )),
+        ("core.service", "__state_load") => Some((
+            vec![(read, Type::Named("ServiceTree".into())), (read, Type::Bool)],
+            Some(result_ty(list_string.clone(), Type::Named("ServiceError".into()))),
+        )),
+        ("core.service", "__tree_event_records") => Some((
+            vec![(read, Type::Named("ServiceTree".into()))], Some(list_string.clone()),
+        )),
+        ("core.service", "__tree_upgrade_receipt") => Some((
+            vec![(read, Type::Named("ServiceTree".into()))],
+            Some(Type::Option(Box::new(Type::Named("ServiceUpgradeReceipt".into())))),
+        )),
+        ("core.service", "__upgrade_receipt_parts") => Some((
+            vec![(read, Type::Named("ServiceUpgradeReceipt".into()))], Some(Type::Tuple(vec![
+                ("from_generation".into(), Box::new(Type::Int)),
+                ("to_generation".into(), Box::new(Type::Int)), ("migration".into(), Box::new(Type::String)),
+                ("rollback_available".into(), Box::new(Type::Bool)), ("pinned_shards".into(), Box::new(list_string.clone())),
+            ])),
+        )),
+        ("core.service", "__tree_display_parts") => Some((
+            vec![(read, Type::Named("ServiceTree".into()))], Some(Type::Tuple(vec![
+                ("name".into(), Box::new(Type::String)), ("workers".into(), Box::new(Type::Int)),
+                ("handlers".into(), Box::new(Type::List(Box::new(Type::Tuple(vec![
+                    ("name".into(), Box::new(Type::String)), ("handler".into(), Box::new(Type::String)),
+                ]))))),
+                ("started".into(), Box::new(Type::Bool)),
+                ("restart".into(), Box::new(Type::Named("ServiceRestart".into()))),
+                ("budget_max".into(), Box::new(Type::Int)), ("budget_per_ms".into(), Box::new(Type::Int)),
+                ("delivery".into(), Box::new(Type::Named("ServiceDelivery".into()))),
+            ])),
+        )),
+        ("core.service", "__workflow_replay_parts") => Some((
+            vec![(read, Type::Named("ServiceTree".into()))], Some(result_ty(
+                Type::List(Box::new(Type::Tuple(vec![
+                    ("run_id".into(), Box::new(Type::Int)), ("history".into(), Box::new(list_string.clone())),
+                    ("outcome".into(), Box::new(Type::Option(Box::new(Type::Named("TaskOutcome".into()))))),
+                ]))), Type::Named("ServiceError".into()),
+            )),
+        )),
+        ("core.service", "__tree_observation_parts") => Some((
+            vec![(read, Type::Named("ServiceTree".into()))], Some(Type::Tuple(vec![
+                ("workers".into(), Box::new(Type::Int)), ("started".into(), Box::new(Type::Bool)),
+                ("generation".into(), Box::new(Type::Int)), ("dead_letters".into(), Box::new(Type::Int)),
+                ("events".into(), Box::new(Type::Int)), ("chaos".into(), Box::new(Type::Int)),
+                ("draining".into(), Box::new(Type::Int)), ("partitions".into(), Box::new(Type::Int)),
+                ("rollback".into(), Box::new(Type::Bool)),
+                ("workflows".into(), Box::new(Type::List(Box::new(Type::Tuple(vec![
+                    ("status".into(), Box::new(Type::Int)), ("outcome".into(), Box::new(Type::Int)),
+                ]))))),
+            ])),
+        )),
+        ("core.service", "__endpoint_identity_parts") => Some((
+            vec![(read, Type::Named("ServiceEndpoint".into()))], Some(Type::Tuple(vec![
+                ("authority".into(), Box::new(Type::String)), ("tree".into(), Box::new(Type::String)),
+                ("worker".into(), Box::new(Type::String)), ("generation".into(), Box::new(Type::Int)),
+            ])),
+        )),
+        ("core.service", "__endpoint_validation_snapshot") => {
+            let facts = Type::Tuple(vec![
+                ("authority".into(), Box::new(Type::String)), ("tree".into(), Box::new(Type::String)),
+                ("worker".into(), Box::new(Type::String)), ("generation".into(), Box::new(Type::Int)),
+                ("started".into(), Box::new(Type::Bool)), ("draining".into(), Box::new(Type::Bool)),
+                ("partitioned".into(), Box::new(Type::Bool)),
+            ]);
+            Some((vec![(read, Type::Named("ServiceEndpoint".into()))], Some(result_ty(
+                Type::Tuple(vec![
+                    ("exact".into(), Box::new(Type::Option(Box::new(facts.clone())))),
+                    ("candidates".into(), Box::new(Type::List(Box::new(facts)))),
+                ]), Type::Named("ServiceError".into()),
+            ))))
+        },
         ("core.service", "drain_dead_letters") => Some((
             vec![(
                 AccessConvention::Write,

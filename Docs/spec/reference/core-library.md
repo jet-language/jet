@@ -3671,6 +3671,32 @@ read native storage metadata without reconstructing scheduler state.
 The private metadata carrier does not acquire a Windows identity handle;
 constructor validation therefore adds no identity-open failures.
 
+`ServiceError` and `DeliveryReceipt` are ordinary Jet enum/record values.
+All ten error cases carry a String; their service display is the message alone.
+Receipts retain every original field, including authority and signature, and
+their service display preserves the existing field order and labels.
+`TaskOutcome` retains Finished, Panicked(String), Cancelled and DeadlineBlown:
+display uses the raw panic reason, while Debug quotes and escapes that String.
+`core.rt.RealtimeReceipt` preserves the eight scalar provider facts in their
+original positional order.
+
+Restart/delivery/state-empty selection and dead-letter draining enforce their
+original validation order in Jet. Private single-field host leaves only read
+or write the existing service tree storage, under the caller's exclusive borrow.
+The signing key remains the exact 32 bytes decoded from the current `sa-`
+authority token; this port adds no key cache or security-policy change.
+The Core-internal `__authority_signing_key` shares that one decoder with jobs;
+it is source policy, not a second host signer or an additional authority store.
+Endpoint input and authority-status validation also live in that module.
+The reserved `__authority_validate` preserves native check order, including
+partition-before-generation for an exact registry entry, and reads one
+consistent snapshot of the existing endpoint registry for its fallback scans.
+
+Snapshot/event-log selection, replay framing, topology/observation text, and
+workflow history/outcome selection are Jet policies. Durable reads retain the
+existing host storage/replay operation during the Rust-seed tier; field
+projections expose only existing facts and retire at the Jet-runtime cutover.
+
 | Signature | Result | Description |
 |---|---|---|
 | `tree(name: String) -> ServiceTree` | tree | Create a named service topology. |
