@@ -33,6 +33,9 @@ extern void jet_rt_vault_codec_duplicate_fixture(void *, const Text *);
 extern void jet_rt_vault_linux_dir_fixture(const Text *, int64_t);
 extern void jet_rt_vault_linux_inode_fixture(const Text *, const TextList *, const Text *, const Text *);
 extern void jet_rt_vault_linux_read_fixture(const Text *, const Text *, const Text *, const Text *);
+extern void jet_rt_vault_identity_path_fixture(const Text *, _Bool, const Text *);
+extern void jet_rt_vault_recipients_fixture(const Text *, int64_t, int64_t, const void *, const Text *);
+extern void jet_rt_vault_plaintext_fixture(const ByteList *, int64_t, int64_t, int64_t, const void *);
 extern void imported_origin_round_trips_and_invalid_combinations_reject(const Text *, const Text *);
 extern void jet_rt_vault_crypto_fixture(const ByteList *);
 extern void jet_rt_vault_crypto_unavailable_fixture(int64_t (*)(void *, void *, int64_t));
@@ -137,6 +140,78 @@ static void linux_dir_fixture(void) {
     jet_rt_vault_linux_dir_fixture(&path, 7);
     assert(unlink(child) == 0 && rmdir(actual) == 0 && rmdir(root) == 0);
 }
+static void fixture_hash(unsigned char out[32], const char *hex) {
+    assert(strlen(hex) == 64);
+    for (size_t i = 0; i < 32; ++i) {
+        unsigned value;
+        assert(sscanf(hex + i * 2, "%2x", &value) == 1);
+        out[i] = (unsigned char)value;
+    }
+}
+static void canonical_read_fixtures(void) {
+    const char *current[] = {".", "./", "./.", ".//", "././", ".///.///"};
+    for (size_t i = 0; i < sizeof(current) / sizeof(current[0]); ++i) {
+        Text root = text(current[i]);
+        jet_rt_vault_identity_path_fixture(&root, 1, NULL);
+    }
+    const char *roots[] = {"", "/", "repo", "repo/", "a/..", "..", "./.."};
+    const char *paths[] = {"keys/secrets.identity", "/keys/secrets.identity", "repo/keys/secrets.identity",
+        "repo/keys/secrets.identity", "a/../keys/secrets.identity", "../keys/secrets.identity", "./../keys/secrets.identity"};
+    for (size_t i = 0; i < sizeof(roots) / sizeof(roots[0]); ++i) {
+        Text root = text(roots[i]), expected = text(paths[i]);
+        jet_rt_vault_identity_path_fixture(&root, 0, &expected);
+    }
+    Text recipient = text("age1t7rxyev2z3rw82stdlrrepyc39nvn86l5078zqkf5uasdy86jp6svpy7pa");
+    unsigned char hash[32];
+    fixture_hash(hash, "1a9258274b198888562a2487abb14465a488f7858694a873b1f2e39459bf0795");
+    jet_rt_vault_recipients_fixture(&recipient, 1, -1, hash, &recipient);
+    Text trimmed = text("\xc2\x85 \tage1t7rxyev2z3rw82stdlrrepyc39nvn86l5078zqkf5uasdy86jp6svpy7pa\xe2\x80\xa8\r\n\n");
+    jet_rt_vault_recipients_fixture(&trimmed, 1, -1, hash, &recipient);
+    char upper[63], duplicates[126], nonseparator[127];
+    for (size_t i = 0; i < 62; ++i) {
+        unsigned char byte = recipient.data[i];
+        upper[i] = (char)(byte >= 'a' && byte <= 'z' ? byte - 'a' + 'A' : byte);
+    }
+    upper[62] = 0;
+    Text uppercase = text(upper);
+    jet_rt_vault_recipients_fixture(&uppercase, 1, -1, hash, &recipient);
+    memcpy(duplicates, recipient.data, 62);
+    duplicates[62] = '\n';
+    memcpy(duplicates + 63, upper, 63);
+    Text duplicate = text(duplicates);
+    jet_rt_vault_recipients_fixture(&duplicate, 0, 8, NULL, NULL);
+    memcpy(nonseparator, recipient.data, 62);
+    nonseparator[62] = (char)0xc2;
+    nonseparator[63] = (char)0x85;
+    memcpy(nonseparator + 64, upper, 63);
+    Text invalid_line = text(nonseparator), empty = text(" \n\t\r\n");
+    jet_rt_vault_recipients_fixture(&invalid_line, 0, 8, NULL, NULL);
+    jet_rt_vault_recipients_fixture(&empty, 0, 8, NULL, NULL);
+    const unsigned char invalid_utf8[] = {0xff};
+    Text invalid = {invalid_utf8, 1, 0};
+    jet_rt_vault_recipients_fixture(&invalid, 0, 8, NULL, NULL);
+    static unsigned char historical[] = {
+        3,0,0,0, 4,0,0,0,'z','e','t','a',1,0,0,0,'Z',
+        5,0,0,0,'a','l','p','h','a',1,0,0,0,'A', 4,0,0,0,'b','e','t','a',1,0,0,0,'B'
+    };
+    ByteList plain = {(int64_t)sizeof(historical), (int64_t)sizeof(historical), historical};
+    fixture_hash(hash, "2c953f4ed1de1c8c078565f26cc0270f06d682d9baaa93e9917dbd60d68b471c");
+    jet_rt_vault_plaintext_fixture(&plain, 1, 3, -1, hash);
+    static unsigned char duplicate_bad_names[] = {
+        2,0,0,0, 5,0,0,0,' ','.','.','/',' ',0,0,0,0, 5,0,0,0,' ','.','.','/',' ',0,0,0,0
+    };
+    plain = (ByteList){(int64_t)sizeof(duplicate_bad_names), (int64_t)sizeof(duplicate_bad_names), duplicate_bad_names};
+    jet_rt_vault_plaintext_fixture(&plain, 0, 0, 8, NULL);
+    unsigned char typed[76] = {'J','V','L','T',2};
+    memset(typed + 8, 7, 16);
+    typed[24] = 1;
+    fixture_hash(typed + 44, "936503d3d3b1f85212ffd9fbcb83ccbd76d7610e0c459ceea26776c6a3e00039");
+    plain = (ByteList){76, 76, typed};
+    fixture_hash(hash, "031ee22add6dd48f32c41cf83ef105e40df8a7aee31e8cc9bcfe0df4640bc6fd");
+    jet_rt_vault_plaintext_fixture(&plain, 2, 0, -1, hash);
+    typed[75] ^= 1;
+    jet_rt_vault_plaintext_fixture(&plain, 0, 0, 8, NULL);
+}
 int main(void) {
     jet_rt_alloc_init();
     jet_rt_thread_init();
@@ -199,6 +274,7 @@ int main(void) {
     jet_rt_vault_crypto_fixture(&crypto_plain);
     crypto_plain.length = crypto_plain.capacity = 65537;
     jet_rt_vault_crypto_fixture(&crypto_plain);
+    canonical_read_fixtures();
     puts("vault witness OK (13 errors, legacy+JVLT2 codec, imported origin/default entropy, native Secret redaction/wipe, long-origin hash, duplicate priority)");
     jet_rt_thread_detach();
     return 0;

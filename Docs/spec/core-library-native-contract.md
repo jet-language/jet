@@ -178,6 +178,25 @@ and exclusive workspaces wipe on every exit. Store open/seal failures map to
 Locked at the seed persistence boundary; no rich crypto prose is invented.
 Supplemental default-provider fixtures cover empty/full/next STREAM chunks,
 wrong identities, tampered last tags, output preservation and Rand failure.
+Recipient policy splits newline-delimited UTF-8 input, Unicode-trims each line,
+canonicalizes lowercase age keys, rejects duplicates/empty/over-u16 counts,
+and hashes the sorted u16-count/u16-length canonical encoding. Public key slots
+are permuted in place; no keys or Text owners are cloned during sorting.
+Historical starting-store identity uses duplicate-first name validation and
+sorted u16-name/u32-value bytes, distinct from the legacy wire pair codec.
+Typed plaintext must exactly match its canonical re-encoding. Absence uses a
+zero-UUID empty store and its own starting-hash domain without reading identity
+or recipients. Owned decrypted plaintext and identity buffers wipe on release.
+Identity selection reuses the shared startup environment capture (`rt_env_get`):
+nonempty JET_KEYS_DIR, then HOME (including empty), USERPROFILE, then ".".
+Only component-wise CurDir roots take this environment route. Other roots
+append keys/secrets.identity directly, including the relative empty-root case.
+Identity opens deliberately follow symlinks; vault-directory opens do not.
+Unrecovered reads stay explicit, allowing the recovered caller to perform its
+lock-aware recovery first. Supplemental transport fixtures carry independent
+starting/recipient hash vectors and exercise trim/case/duplicate/UTF-8 policy,
+historical owner ordering, typed trailer rejection, and component-path joins.
+These additions do not claim native execution or the full recovered writer.
 
 Typed vault records own native Secret buffers. Equality compares the key bytes,
 not just immutable hashes, while Debug always prints a redacted key marker.

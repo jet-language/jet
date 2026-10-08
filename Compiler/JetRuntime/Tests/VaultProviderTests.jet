@@ -582,3 +582,80 @@ fn vault_fixture_opaque(record: I64, byte: I64, scratch: I64) {
     jet_rt_free(scratch, I64{8256}, I64{8})
     jet_rt_free(slots, I64{16}, I64{8})
 }
+
+fn jet_rt_vault_identity_path_fixture(root: I64, current: Bool, expected: I64) {
+    vault_fixture_check(vault_root_is_current(root) == current)
+    if (expected == I64{0}) -> return
+    path :: vault_identity_path(root)
+    vault_fixture_check(path != I64{0} && jet_rt_string_eq(path, expected))
+    vault_fixture_check(rt_text_byte(rt_text_data(path) + rt_text_len(path)) == I64{0})
+    jet_rt_string_drop(path)
+}
+fn jet_rt_vault_recipients_fixture(input: I64, count: I64, expected_error: I64, expected_hash: I64, expected_first: I64) {
+    scratch :: jet_rt_alloc(I64{40}, I64{8})
+    rt_text_store(scratch, I64{91})
+    rt_text_store(scratch + I64{8}, I64{1229782938247303441})
+    rt_text_store(scratch + I64{16}, I64{1229782938247303441})
+    rt_text_store(scratch + I64{24}, I64{1229782938247303441})
+    rt_text_store(scratch + I64{32}, I64{1229782938247303441})
+    error :: vault_recipients_decode(rt_text_data(input), rt_text_len(input), scratch, scratch + I64{8})
+    if (expected_error == I64{-1}) {
+        vault_fixture_check(error == I64{0})
+        keys :: rt_text_word(scratch)
+        vault_fixture_check(rt_text_word(keys + DATA_SEQUENCE_LENGTH) == count * VAULT_RECIPIENT_SLOT_BYTES)
+        vault_fixture_check(rt_text_equal_bytes(scratch + I64{8}, expected_hash, I64{32}))
+        first :: vault_crypto_key_text(rt_text_word(keys + DATA_SEQUENCE_DATA), false)
+        vault_fixture_check(jet_rt_string_eq(first, expected_first))
+        jet_rt_string_drop(first)
+        data_sequence_drop(keys, DATA_TREE_BYTE_LIST)
+    } else {
+        vault_fixture_check(error != I64{0} && rt_text_word(error) == expected_error)
+        vault_error_drop(error)
+        vault_fixture_check(rt_text_word(scratch) == I64{91})
+        at := I64{0}
+        loop at < (I64{32}) {
+            vault_fixture_check(rt_text_byte(scratch + I64{8} + at) == I64{17})
+            at += I64{1}
+        }
+    }
+    jet_rt_free(scratch, I64{40}, I64{8})
+}
+fn jet_rt_vault_plaintext_fixture(input: I64, kind: I64, count: I64, expected_error: I64, expected_hash: I64) {
+    scratch :: jet_rt_alloc(I64{48}, I64{8})
+    rt_text_store(scratch, I64{91})
+    rt_text_store(scratch + I64{8}, I64{1229782938247303441})
+    rt_text_store(scratch + I64{16}, I64{1229782938247303441})
+    rt_text_store(scratch + I64{24}, I64{1229782938247303441})
+    rt_text_store(scratch + I64{32}, I64{1229782938247303441})
+    rt_text_store(scratch + I64{40}, I64{92})
+    error :: vault_decode_plaintext(input, scratch, scratch + I64{8}, scratch + I64{40})
+    if (expected_error == I64{-1}) {
+        vault_fixture_check(error == I64{0})
+        store :: rt_text_word(scratch)
+        pairs :: rt_text_word(store + VAULT_STORE_STRINGS)
+        vault_fixture_check(rt_text_word(pairs + DATA_SEQUENCE_LENGTH) == count)
+        vault_fixture_check(rt_text_word(scratch + I64{40}) == kind)
+        vault_fixture_check(rt_text_equal_bytes(scratch + I64{8}, expected_hash, I64{32}))
+        if (kind == VAULT_START_HISTORICAL) {
+            vault_fixture_check(vault_bytes_zero(store + VAULT_STORE_UUID, I64{16}))
+            data :: rt_text_word(pairs + DATA_SEQUENCE_DATA)
+            vault_fixture_check(rt_text_byte(rt_text_data(rt_text_word(data))) == I64{97})
+            vault_fixture_check(rt_text_byte(rt_text_data(rt_text_word(data + VAULT_PAIR_BYTES))) == I64{98})
+            vault_fixture_check(rt_text_byte(rt_text_data(rt_text_word(data + I64{2} * VAULT_PAIR_BYTES))) == I64{122})
+        } else {
+            vault_fixture_check(rt_text_word(store + VAULT_STORE_REVISION) == I64{1})
+            vault_fixture_check(rt_text_byte(store + VAULT_STORE_UUID) == I64{7})
+        }
+        vault_store_drop(store)
+    } else {
+        vault_fixture_check(error != I64{0} && rt_text_word(error) == expected_error)
+        vault_error_drop(error)
+        vault_fixture_check(rt_text_word(scratch) == I64{91} && rt_text_word(scratch + I64{40}) == I64{92})
+        at := I64{0}
+        loop at < (I64{32}) {
+            vault_fixture_check(rt_text_byte(scratch + I64{8} + at) == I64{17})
+            at += I64{1}
+        }
+    }
+    jet_rt_free(scratch, I64{48}, I64{8})
+}

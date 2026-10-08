@@ -335,3 +335,129 @@ fn vault_linux_read_at_root(root: I64, name: I64, out: I64) -> I64 {
     jet_rt_free(slots, I64{32}, I64{8})
     result
 }
+
+// Path equality is component-wise: ".", "./", ".//" and "./." are CurDir,
+// while an empty path, a rooted path and any other component are not.
+fn vault_root_is_current(root: I64) -> Bool {
+    data :: rt_text_data(root)
+    length :: rt_text_len(root)
+    if (length == I64{0} || rt_text_byte(data) != I64{46}) -> return false
+    if (length == I64{1}) -> return true
+    if (rt_text_byte(data + I64{1}) != I64{47}) -> return false
+    at := I64{1}
+    loop at < length {
+        if (rt_text_byte(data + at) == I64{47}) {
+            at += I64{1}
+        } else {
+            if (rt_text_byte(data + at) != I64{46}) -> return false
+            at += I64{1}
+            if (at < length && rt_text_byte(data + at) != I64{47}) -> return false
+        }
+    }
+    true
+}
+// Reuse the ONE Host startup environment view, just as Deadline/Scheduler/
+// SentryLedger do. HostStartup.jet:227-239 owns rt_env_get: absent or invalid
+// UTF-8 is null; empty is a real empty Text. D-ENV-MUTATE1=A leaves std's host
+// environment immutable, so this capture preserves the seed std::env::var read.
+fn vault_identity_env(first: I64, second: I64, length: I64, scratch: I64) -> I64 {
+    rt_text_store(scratch, first)
+    rt_text_store(scratch + I64{8}, second)
+    view :: scratch + I64{16}
+    rt_text_store(view, scratch)
+    rt_text_store(view + I64{8}, length)
+    rt_text_store(view + I64{16}, I64{0})
+    rt_env_get(view)
+}
+// SecretsCrypto.rs:137-150,1237-1242. A final owned NUL path is assembled once;
+// no intermediate path joins/copies and no private getenv/environ provider.
+fn vault_identity_path(root: I64) -> I64 {
+    scratch :: jet_rt_alloc(I64{64}, I64{8})
+    base := root
+    owned_base := I64{0}
+    dot := false
+    suffix_kind := I64{0}
+    if vault_root_is_current(root) {
+        keys :: vault_identity_env(I64{6005907768099489098}, I64{1380533343}, I64{12}, scratch)
+        if (keys != I64{0} && rt_text_len(keys) != I64{0}) {
+            base = keys
+            owned_base = keys
+            suffix_kind = I64{1}
+        } else {
+            jet_rt_string_drop(keys)
+            home := vault_identity_env(I64{1162694472}, I64{0}, I64{4}, scratch)
+            if (home == I64{0}) -> home = vault_identity_env(I64{5066358610746233685}, I64{4541513}, I64{11}, scratch)
+            if (home == I64{0}) { dot = true } else {
+                base = home
+                owned_base = home
+            }
+            suffix_kind = I64{2}
+        }
+    }
+    base_length :: if dot -> I64{1} else -> rt_text_len(base)
+    base_data :: if dot -> I64{0} else -> rt_text_data(base)
+    at := I64{0}
+    if !dot {
+        loop at < base_length {
+            if (rt_text_byte(base_data + at) == I64{0}) {
+                jet_rt_string_drop(owned_base)
+                jet_rt_free(scratch, I64{64}, I64{8})
+                return I64{0}
+            }
+            at += I64{1}
+        }
+    }
+    suffix_length := I64{21}
+    if (suffix_kind == I64{0}) {
+        rt_text_store(scratch, I64{7162257430040634731})
+        rt_text_store(scratch + I64{8}, I64{7306080143728207218})
+        rt_text_store(scratch + I64{16}, I64{521644110958})
+    } else if (suffix_kind == I64{1}) {
+        suffix_length = I64{16}
+        rt_text_store(scratch, I64{3347146927126046067})
+        rt_text_store(scratch + I64{8}, I64{8751735924676977769})
+    } else {
+        suffix_length = I64{26}
+        rt_text_store(scratch, I64{8747515702797494830})
+        rt_text_store(scratch + I64{8}, I64{8387235652276793203})
+        rt_text_store(scratch + I64{16}, I64{7598819853036236403})
+        rt_text_store(scratch + I64{24}, I64{31092})
+    }
+    separator :: base_length != I64{0} && (dot || rt_text_byte(base_data + base_length - I64{1}) != I64{47})
+    if (base_length > I64{9223372036854775807} - suffix_length - I64{2}) {
+        jet_rt_string_drop(owned_base)
+        jet_rt_free(scratch, I64{64}, I64{8})
+        return I64{0}
+    }
+    length :: base_length + (if separator -> I64{1} else -> I64{0}) + suffix_length
+    result :: jet_rt_alloc(I64{24}, I64{8})
+    data :: jet_rt_alloc(length + I64{1}, I64{1})
+    if dot { rt_text_put(data, I64{46}) } else { rt_text_bytes_copy(data, base_data, base_length) }
+    cursor := base_length
+    if separator {
+        rt_text_put(data + cursor, I64{47})
+        cursor += I64{1}
+    }
+    rt_text_bytes_copy(data + cursor, scratch, suffix_length)
+    rt_text_put(data + length, I64{0})
+    rt_text_store(result, data)
+    rt_text_store(result + I64{8}, length)
+    rt_text_store(result + I64{16}, length + I64{1})
+    jet_rt_string_drop(owned_base)
+    jet_rt_free(scratch, I64{64}, I64{8})
+    result
+}
+// Identity reads intentionally follow symlinks, unlike vault-directory reads.
+// InvalidData is mapped by the subsequent crypto UTF-8 preflight to Locked.
+fn vault_identity_read_at_root(root: I64, out: I64) -> I64 {
+    path :: vault_identity_path(root)
+    if (path == I64{0}) -> return vault_error_new(I64{4}, I64{0}, I64{0})
+    file :: trap_syscall(I64{257}, I64{-100}, rt_text_data(path), VAULT_O_CLOEXEC, I64{0}, I64{0}, I64{0})
+    jet_rt_string_drop(path)
+    if (file < I64{0}) -> return vault_error_new(I64{4}, I64{0}, I64{0})
+    scratch :: jet_rt_alloc(I64{8}, I64{8})
+    error :: vault_linux_read_file(file, out, scratch)
+    vault_linux_close(file)
+    jet_rt_free(scratch, I64{8}, I64{8})
+    error
+}

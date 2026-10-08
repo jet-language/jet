@@ -477,3 +477,241 @@ fn vault_record_validate(record: I64, decoded: Bool, scratch: I64) -> I64 {
     }
     I64{-1}
 }
+
+// SecretsCrypto.rs:1492-1514. Canonicalizes owned pair slots by moving owners,
+// never cloning them. Duplicate detection precedes ANY name/value validation.
+// On failure pairs retain their original ordering and out is unchanged.
+fn vault_canonical_pairs(pairs: I64, out: I64) -> I64 {
+    count :: rt_text_word(pairs + DATA_SEQUENCE_LENGTH)
+    if (count > VAULT_MAX_STRINGS) -> return vault_error_new(I64{8}, I64{0}, I64{0})
+    data :: rt_text_word(pairs + DATA_SEQUENCE_DATA)
+    index_bytes :: count * DATA_TREE_ELEMENT_BYTES * I64{2}
+    indices :: if (index_bytes == I64{0}) -> I64{8} else -> jet_rt_alloc(index_bytes, I64{8})
+    second :: indices + index_bytes /% I64{2}
+    sorted :: vault_sorted_indices(data, count, false, indices, second)
+    at := I64{1}
+    loop at < count {
+        previous :: rt_text_word(rt_text_word(sorted + (at - I64{1}) * DATA_TREE_ELEMENT_BYTES))
+        name :: rt_text_word(rt_text_word(sorted + at * DATA_TREE_ELEMENT_BYTES))
+        if jet_rt_string_eq(previous, name) {
+            if (index_bytes != I64{0}) -> jet_rt_free(indices, index_bytes, I64{8})
+            return vault_error_new(I64{8}, I64{0}, I64{0})
+        }
+        at += I64{1}
+    }
+    length := I64{4}
+    at = I64{0}
+    loop at < count {
+        pair :: rt_text_word(sorted + at * DATA_TREE_ELEMENT_BYTES)
+        name :: rt_text_word(pair)
+        value :: rt_text_word(pair + I64{8})
+        if !vault_validate_text(name, false) {
+            if (index_bytes != I64{0}) -> jet_rt_free(indices, index_bytes, I64{8})
+            return vault_error_new(I64{0}, I64{0}, I64{0})
+        }
+        if (rt_text_len(value) > I64{1048576}) {
+            if (index_bytes != I64{0}) -> jet_rt_free(indices, index_bytes, I64{8})
+            return vault_error_new(I64{8}, I64{0}, I64{0})
+        }
+        length += I64{6} + rt_text_len(name) + rt_text_len(value)
+        at += I64{1}
+    }
+    canonical :: data_sequence_new(length, RT_HOST_U8_STRIDE)
+    encoded :: rt_text_word(canonical + DATA_SEQUENCE_DATA)
+    vault_put_u32(encoded, count)
+    cursor := I64{4}
+    at = I64{0}
+    loop at < count {
+        pair :: rt_text_word(sorted + at * DATA_TREE_ELEMENT_BYTES)
+        name :: rt_text_word(pair)
+        value :: rt_text_word(pair + I64{8})
+        name_length :: rt_text_len(name)
+        value_length :: rt_text_len(value)
+        vault_put_u16(encoded + cursor, name_length)
+        cursor += I64{2}
+        rt_text_bytes_copy(encoded + cursor, rt_text_data(name), name_length)
+        cursor += name_length
+        vault_put_u32(encoded + cursor, value_length)
+        cursor += I64{4}
+        rt_text_bytes_copy(encoded + cursor, rt_text_data(value), value_length)
+        cursor += value_length
+        at += I64{1}
+    }
+    visited :: if sorted == indices -> second else -> indices
+    if (count != I64{0}) -> thread_zero(visited, count * DATA_TREE_ELEMENT_BYTES)
+    first := I64{0}
+    loop first < count {
+        if (rt_text_word(visited + first * DATA_TREE_ELEMENT_BYTES) == I64{0}) {
+            source_first :: (rt_text_word(sorted + first * DATA_TREE_ELEMENT_BYTES) - data) /% VAULT_PAIR_BYTES
+            if source_first == first {
+                rt_text_store(visited + first * DATA_TREE_ELEMENT_BYTES, I64{1})
+                first += I64{1}
+                next
+            }
+            saved_name :: rt_text_word(data + first * VAULT_PAIR_BYTES)
+            saved_value :: rt_text_word(data + first * VAULT_PAIR_BYTES + I64{8})
+            destination := first
+            loop {
+                rt_text_store(visited + destination * DATA_TREE_ELEMENT_BYTES, I64{1})
+                source :: (rt_text_word(sorted + destination * DATA_TREE_ELEMENT_BYTES) - data) /% VAULT_PAIR_BYTES
+                target :: data + destination * VAULT_PAIR_BYTES
+                if source == first {
+                    rt_text_store(target, saved_name)
+                    rt_text_store(target + I64{8}, saved_value)
+                    break
+                }
+                rt_text_store(target, rt_text_word(data + source * VAULT_PAIR_BYTES))
+                rt_text_store(target + I64{8}, rt_text_word(data + source * VAULT_PAIR_BYTES + I64{8}))
+                destination = source
+            }
+        }
+        first += I64{1}
+    }
+    if (index_bytes != I64{0}) -> jet_rt_free(indices, index_bytes, I64{8})
+    rt_text_store(canonical + DATA_SEQUENCE_LENGTH, length)
+    rt_text_store(out, canonical)
+    I64{0}
+}
+VAULT_START_ABSENT :: prep { I64{0} }
+VAULT_START_HISTORICAL :: prep { I64{1} }
+VAULT_START_V2 :: prep { I64{2} }
+// Scratch608 = SHA576 + disjoint domain32. Digest32 is caller-owned/disjoint.
+fn vault_start_hash(kind: I64, bytes: I64, length: I64, out: I64, scratch: I64) {
+    domain :: scratch + I64{576}
+    if (kind == VAULT_START_ABSENT) {
+        rt_text_store(domain, I64{7088982680402679370})
+        rt_text_store(domain + I64{8}, I64{8031170618737976691})
+        rt_text_store(domain + I64{16}, I64{25970})
+        rt_sha256_parts(domain, I64{18}, I64{1}, I64{0}, out, scratch)
+    } else {
+        rt_text_store(domain, if (kind == VAULT_START_HISTORICAL) -> I64{8391085926961141322} else -> I64{8391085931256108618})
+        rt_text_store(domain + I64{8}, I64{8295744237529756257})
+        rt_text_store(domain + I64{16}, I64{1701998452})
+        rt_sha256_parts(domain, I64{20}, bytes, length, out, scratch)
+    }
+}
+// SecretsCrypto.rs:1525-1546. The caller retains the Zeroizing plaintext owner.
+// Outputs adopt one complete store/hash/kind only after every check succeeds.
+fn vault_decode_plaintext(plaintext: I64, store_out: I64, hash_out: I64, kind_out: I64) -> I64 {
+    bytes :: rt_text_word(plaintext + DATA_SEQUENCE_DATA)
+    length :: rt_text_word(plaintext + DATA_SEQUENCE_LENGTH)
+    scratch :: jet_rt_alloc(I64{624}, I64{8})
+    store_slot :: scratch + I64{608}
+    encoded_slot :: scratch + I64{616}
+    typed :: length >= I64{4} && rt_text_byte(bytes) == I64{74} && rt_text_byte(bytes + I64{1}) == I64{86} &&
+        rt_text_byte(bytes + I64{2}) == I64{76} && rt_text_byte(bytes + I64{3}) == I64{84}
+    if typed {
+        status :: vault_decode_v2(bytes, length, store_slot)
+        if (status != I64{-1}) {
+            jet_rt_free(scratch, I64{624}, I64{8})
+            return vault_error_new(status, I64{0}, I64{0})
+        }
+        store :: rt_text_word(store_slot)
+        encoded_status :: vault_encode_v2(store, encoded_slot)
+        if (encoded_status != I64{-1}) {
+            vault_store_drop(store)
+            jet_rt_free(scratch, I64{624}, I64{8})
+            return vault_error_new(encoded_status, I64{0}, I64{0})
+        }
+        encoded :: rt_text_word(encoded_slot)
+        identical :: rt_text_len(encoded) == length && rt_text_equal_bytes(rt_text_data(encoded), bytes, length)
+        vault_text_zero(encoded)
+        jet_rt_string_drop(encoded)
+        if !identical {
+            vault_store_drop(store)
+            jet_rt_free(scratch, I64{624}, I64{8})
+            return vault_error_new(I64{8}, I64{0}, I64{0})
+        }
+        vault_start_hash(VAULT_START_V2, bytes, length, hash_out, scratch)
+        rt_text_store(store_out, store)
+        rt_text_store(kind_out, VAULT_START_V2)
+    } else {
+        pairs :: vault_decode_pairs(bytes, length)
+        if (pairs == I64{0}) {
+            jet_rt_free(scratch, I64{624}, I64{8})
+            return vault_error_new(I64{8}, I64{0}, I64{0})
+        }
+        error :: vault_canonical_pairs(pairs, encoded_slot)
+        if (error != I64{0}) {
+            vault_pairs_drop(pairs)
+            jet_rt_free(scratch, I64{624}, I64{8})
+            return error
+        }
+        canonical :: rt_text_word(encoded_slot)
+        thread_zero(scratch, I64{16})
+        store :: vault_store_new(scratch)
+        vault_pairs_drop(rt_text_word(store + VAULT_STORE_STRINGS))
+        rt_text_store(store + VAULT_STORE_STRINGS, pairs)
+        vault_start_hash(VAULT_START_HISTORICAL, rt_text_word(canonical + DATA_SEQUENCE_DATA), rt_text_word(canonical + DATA_SEQUENCE_LENGTH), hash_out, scratch)
+        thread_zero(rt_text_word(canonical + DATA_SEQUENCE_DATA), rt_text_word(canonical + DATA_SEQUENCE_CAPACITY))
+        data_sequence_drop(canonical, DATA_TREE_BYTE_LIST)
+        rt_text_store(store_out, store)
+        rt_text_store(kind_out, VAULT_START_HISTORICAL)
+    }
+    thread_zero(scratch, I64{624})
+    jet_rt_free(scratch, I64{624}, I64{8})
+    I64{0}
+}
+// SecretsCrypto.rs:1516-1547. Identity and plaintext bytes are real owned
+// sequences; a borrowed E4 view passes identity text without a second copy.
+fn vault_decode_ciphertext_at_root(root: I64, ciphertext: I64, store_out: I64, hash_out: I64, kind_out: I64) -> I64 {
+    scratch :: jet_rt_alloc(I64{40}, I64{8})
+    error :: vault_identity_read_at_root(root, scratch)
+    if (error != I64{0}) {
+        jet_rt_free(scratch, I64{40}, I64{8})
+        return error
+    }
+    identity :: rt_text_word(scratch)
+    view :: scratch + I64{16}
+    rt_text_store(view, rt_text_word(identity + DATA_SEQUENCE_DATA))
+    rt_text_store(view + I64{8}, rt_text_word(identity + DATA_SEQUENCE_LENGTH))
+    rt_text_store(view + I64{16}, I64{0})
+    opened :: vault_crypto_decrypt(view, ciphertext, scratch + I64{8})
+    thread_zero(rt_text_word(identity + DATA_SEQUENCE_DATA), rt_text_word(identity + DATA_SEQUENCE_CAPACITY))
+    data_sequence_drop(identity, DATA_TREE_BYTE_LIST)
+    if (opened != I64{0}) {
+        jet_rt_free(scratch, I64{40}, I64{8})
+        return opened
+    }
+    plaintext :: rt_text_word(scratch + I64{8})
+    decoded :: vault_decode_plaintext(plaintext, store_out, hash_out, kind_out)
+    thread_zero(rt_text_word(plaintext + DATA_SEQUENCE_DATA), rt_text_word(plaintext + DATA_SEQUENCE_CAPACITY))
+    data_sequence_drop(plaintext, DATA_TREE_BYTE_LIST)
+    jet_rt_free(scratch, I64{40}, I64{8})
+    decoded
+}
+// SecretsCrypto.rs:1650-1664. No recipients or identity read on absence.
+// Recovery is deliberately NOT hidden here: the seed's recovered caller must
+// explicitly run its lock-aware recovery before entering this unrecovered path.
+fn vault_read_contents_unrecovered_at_root(root: I64, store_out: I64, hash_out: I64, kind_out: I64) -> I64 {
+    scratch :: jet_rt_alloc(I64{640}, I64{8})
+    name :: scratch + I64{576}
+    rt_text_store(name, I64{3347146927126046067})
+    rt_text_store(name + I64{8}, I64{6645601})
+    view :: scratch + I64{608}
+    rt_text_store(view, name)
+    rt_text_store(view + I64{8}, I64{11})
+    rt_text_store(view + I64{16}, I64{0})
+    slot :: scratch + I64{632}
+    error :: vault_linux_read_at_root(root, view, slot)
+    if (error != I64{0}) {
+        jet_rt_free(scratch, I64{640}, I64{8})
+        return error
+    }
+    ciphertext :: rt_text_word(slot)
+    if (ciphertext == I64{0}) {
+        thread_zero(scratch, I64{16})
+        store :: vault_store_new(scratch)
+        vault_start_hash(VAULT_START_ABSENT, I64{1}, I64{0}, hash_out, scratch)
+        rt_text_store(store_out, store)
+        rt_text_store(kind_out, VAULT_START_ABSENT)
+        thread_zero(scratch, I64{640})
+        jet_rt_free(scratch, I64{640}, I64{8})
+        return I64{0}
+    }
+    result :: vault_decode_ciphertext_at_root(root, ciphertext, store_out, hash_out, kind_out)
+    data_sequence_drop(ciphertext, DATA_TREE_BYTE_LIST)
+    thread_zero(scratch, I64{640})
+    jet_rt_free(scratch, I64{640}, I64{8})
+    result
+}
