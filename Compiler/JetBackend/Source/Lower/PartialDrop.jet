@@ -8,6 +8,7 @@ struct LowerPartialDrop {
     pub owner: String
     pub path: [LowerGlueField]
     pub live: LIRValueID
+    pub root_ty: MIRType
 }
 
 fn lower_option_type(inner: MIRType) -> MIRType Never! {
@@ -113,13 +114,34 @@ fn lower_partial_frame(p: MIRProgram, c: LowerContext, f: &LowerFunction) Never!
                 }
                 else -> next
             }
-            live :: lower_pointer(&f)
-            lower_emit(&f, LIRInst.StackSlot{dst: live, size: 1, align: 1})
-            one :: lower_flag(&f)
-            lower_emit(&f, LIRInst.Const{dst: one, value: 1})
-            lower_emit(&f, LIRInst.Store{base: live, offset: 0, value: one})
-            &f.partial_drops.push(LowerPartialDrop{result: result.value, owner: owner, path: path, live: live})
+            root_ty := ty
+            loop (index, slot) in c.slots {
+                if owner == "slot.{index}" -> root_ty = slot.ty
+            }
+            &f.partial_drops.push(LowerPartialDrop{result: result.value, owner: owner, path: path, root_ty: root_ty, live: LIRValueID{value: -1}})
         }
+    }
+    // A whole-owner move can rebind any same-typed local. Reserve its paths
+    // before lowering blocks, so the move copies bits rather than losing them.
+    seeds :: ~f.partial_drops
+    loop (slot, definition) in c.slots {
+        loop seed in seeds {
+            if mir_type_identity_key(seed.root_ty) != mir_type_identity_key(definition.ty) -> next
+            owner :: "slot.{slot}"
+            present := false
+            loop row in f.partial_drops {
+                if row.owner == owner && row.path.len() == seed.path.len() && lower_partial_prefix(row.path, seed.path) -> present = true
+            }
+            if !present -> &f.partial_drops.push(LowerPartialDrop{result: U64.MAX, owner: owner, path: seed.path, root_ty: definition.ty, live: LIRValueID{value: -1}})
+        }
+    }
+    loop (index, row) in f.partial_drops {
+        live :: lower_pointer(&f)
+        lower_emit(&f, LIRInst.StackSlot{dst: live, size: 1, align: 1})
+        one :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Const{dst: one, value: 1})
+        lower_emit(&f, LIRInst.Store{base: live, offset: 0, value: one})
+        f.partial_drops[index] = LowerPartialDrop{result: row.result, owner: row.owner, path: row.path, root_ty: row.root_ty, live: live}
     }
 }
 
@@ -150,18 +172,34 @@ fn lower_partial_reset(f: &LowerFunction, owner: String, prefix: [LowerGlueField
     }
 }
 
+fn lower_partial_assign(f: &LowerFunction, owner: String, source: String) Never! {
+    if owner == source -> return
+    loop row in f.partial_drops {
+        if row.owner != owner -> next
+        live := lower_flag(&f)
+        lower_emit(&f, LIRInst.Const{dst: live, value: 1})
+        loop from in f.partial_drops {
+            if from.owner != source || from.path.len() != row.path.len() || !lower_partial_prefix(from.path, row.path) -> next
+            bit :: lower_flag(&f)
+            lower_emit(&f, LIRInst.Load{dst: bit, base: from.live, offset: 0})
+            both :: lower_flag(&f)
+            lower_emit(&f, LIRInst.Binary{dst: both, op: .And, left: live, right: bit})
+            live = both
+        }
+        lower_emit(&f, LIRInst.Store{base: row.live, offset: 0, value: live})
+    }
+}
+
 // Expands only ancestors of a moved field; siblings retain ordinary glue.
 fn lower_partial_drop_node(p: MIRProgram, m: &LowerModule, f: &LowerFunction, base: LIRValueID, ty: MIRType, rows: [LowerPartialDrop], depth: Int) Never! {
     done :: lower_new_block(&f)
-    if depth > 0 {
-        loop row in rows {
-            if row.path.len() != depth -> next
-            live :: lower_flag(&f)
-            lower_emit(&f, LIRInst.Load{dst: live, base: row.live, offset: 0})
-            body :: lower_new_block(&f)
-            lower_seal(&f, LIRTerminator.Branch{condition: live, then_target: lower_target(body, [LIRValueID]{}), else_target: lower_target(done, [LIRValueID]{})})
-            lower_start(&f, body, [LIRValueID]{})
-        }
+    loop row in rows {
+        if row.path.len() != depth -> next
+        live :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Load{dst: live, base: row.live, offset: 0})
+        body :: lower_new_block(&f)
+        lower_seal(&f, LIRTerminator.Branch{condition: live, then_target: lower_target(body, [LIRValueID]{}), else_target: lower_target(done, [LIRValueID]{})})
+        lower_start(&f, body, [LIRValueID]{})
     }
     deeper := false
     loop row in rows {
@@ -229,10 +267,13 @@ fn lower_partial_drop_node(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ba
 }
 
 fn lower_partial_drop_value(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, value: MIRValueID, lowered: LIRValueID, ty: MIRType) -> Bool Never! {
-    owner :: lower_partial_owner(c, value)
+    lower_partial_drop_owned(p, &m, &f, lower_partial_owner(c, value), [LowerGlueField]{}, lowered, ty, true)
+}
+
+fn lower_partial_drop_owned(p: MIRProgram, m: &LowerModule, f: &LowerFunction, owner: String, prefix: [LowerGlueField], lowered: LIRValueID, ty: MIRType, consume: Bool) -> Bool Never! {
     rows := [LowerPartialDrop]{}
     loop row in f.partial_drops {
-        if row.owner == owner -> &rows.push(row)
+        if row.owner == owner && lower_partial_prefix(row.path, prefix) -> &rows.push(row)
     }
     if rows.len() == 0 -> return false
     partial :: lower_new_block(&f)
@@ -247,12 +288,16 @@ fn lower_partial_drop_value(p: MIRProgram, c: LowerContext, m: &LowerModule, f: 
     }
     lower_seal(&f, LIRTerminator.Jump{target: lower_target(ordinary, [LIRValueID]{})})
     lower_start(&f, ordinary, [LIRValueID]{})
-    if lower_is_inline(p, ty) -> lower_inline_drop(p, &m, &f, lowered, ty)
-    else -> lower_emit(&f, LIRInst.Drop{value: lowered})
+    if consume {
+        if lower_is_inline(p, ty) -> lower_inline_drop(p, &m, &f, lowered, ty)
+        else -> lower_emit(&f, LIRInst.Drop{value: lowered})
+    } else {
+        lower_partial_drop_node(p, &m, &f, lowered, ty, [LowerPartialDrop]{}, 0)
+    }
     lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
     lower_start(&f, partial, [LIRValueID]{})
-    lower_partial_drop_node(p, &m, &f, lowered, ty, rows, 0)
-    if lower_value_drop(f, lowered) != .Trivial {
+    lower_partial_drop_node(p, &m, &f, lowered, ty, rows, prefix.len())
+    if consume && lower_value_drop(f, lowered) != .Trivial {
         // The inlined drop-rest already released this box. Consume its LIR
         // ownership without running the ordinary glue a second time.
         released :: lower_new_value(&f, lir_layout_pointer(), LIRDrop.Trivial, ty.identity)
@@ -261,4 +306,12 @@ fn lower_partial_drop_value(p: MIRProgram, c: LowerContext, m: &LowerModule, f: 
     lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
     lower_start(&f, done, [LIRValueID]{})
     true
+}
+
+fn lower_partial_drop_stored(p: MIRProgram, m: &LowerModule, f: &LowerFunction, owner: String, prefix: [LowerGlueField], base: LIRValueID, offset: Int, ty: MIRType) Never! {
+    if f.partial_drops.len() != 0 {
+        stored :: lower_read_at(p, &f, base, offset, ty) ?? return
+        if lower_partial_drop_owned(p, &m, &f, owner, prefix, stored, ty, false) -> return
+    }
+    lower_drop_stored(p, &m, &f, base, offset, ty)
 }

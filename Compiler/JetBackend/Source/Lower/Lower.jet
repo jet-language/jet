@@ -2167,8 +2167,12 @@ fn lower_write_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
     if lower_map_index_write(p, c, &m, &f, slot, row, lowered) -> return
     if c.slots[slot].cell {
         walk :: lower_cell_walk(p, c, &m, &f, slot, row) ?? return
-        if replace -> lower_drop_stored(p, &m, &f, walk.base, walk.offset, row.ty)
-        return lower_write_at(p, &f, walk.base, walk.offset, lowered, row.ty)
+        prefix :: lower_partial_field_path(p, c.slots[slot].ty, row.projections) ?? [LowerGlueField]{}
+        if replace -> lower_partial_drop_stored(p, &m, &f, "slot.{slot}", prefix, walk.base, walk.offset, row.ty)
+        lower_write_at(p, &f, walk.base, walk.offset, lowered, row.ty)
+        if row.projections.len() == 0 -> lower_partial_assign(&f, "slot.{slot}", lower_partial_owner(c, value))
+        else -> lower_partial_reset(&f, "slot.{slot}", prefix)
+        return
     }
     held :: ~f.current[slot]
     if row.projections.len() == 0 {
@@ -2176,25 +2180,26 @@ fn lower_write_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
             // The caller's place: the old value is dropped once, here, and
             // the new one lands in the caller's storage.
             address :: (~f.params[c.slots[slot].write_param]) ?? return lower_fail(&m, &f, "Write parameter of place {place.value} has no pointer")
-            if replace -> lower_drop_stored(p, &m, &f, address, 0, row.ty)
+            if replace -> lower_partial_drop_stored(p, &m, &f, "slot.{slot}", [LowerGlueField]{}, address, 0, row.ty)
             lower_write_at(p, &f, address, 0, lowered, row.ty)
+            lower_partial_assign(&f, "slot.{slot}", lower_partial_owner(c, value))
             if lower_is_inline(p, row.ty) -> return lower_set_slot(&f, slot, Val(address))
-        } else if replace && lower_is_inline(p, row.ty) {
-            if lower_is_owned(c.slots[slot].ownership) {
-                if held == .Val(old) -> lower_inline_drop(p, &m, &f, old, row.ty)
-            }
-        } else if replace {
+        } else if replace && lower_is_owned(c.slots[slot].ownership) {
             if held == .Val(old) {
-                if lower_value_drop(f, old) != .Trivial -> lower_emit(&f, LIRInst.Drop{value: old})
+                if !lower_partial_drop_owned(p, &m, &f, "slot.{slot}", [LowerGlueField]{}, old, row.ty, true) {
+                    if lower_is_inline(p, row.ty) -> lower_inline_drop(p, &m, &f, old, row.ty)
+                    else if lower_value_drop(f, old) != .Trivial -> lower_emit(&f, LIRInst.Drop{value: old})
+                }
             }
         }
         lower_set_slot(&f, slot, Val(lowered))
-        if f.partial_drops.len() != 0 -> lower_partial_reset(&f, "slot.{slot}", [LowerGlueField]{})
+        lower_partial_assign(&f, "slot.{slot}", lower_partial_owner(c, value))
         return
     }
     root :: held ?? return lower_fail(&m, &f, "field of place {place.value} is written before the place has a value")
     walk :: lower_walk_projections(p, &m, &f, root, c.slots[slot].ty, row.projections) ?? return
-    if replace -> lower_drop_stored(p, &m, &f, walk.base, walk.offset, row.ty)
+    prefix :: lower_partial_field_path(p, c.slots[slot].ty, row.projections) ?? [LowerGlueField]{}
+    if replace -> lower_partial_drop_stored(p, &m, &f, "slot.{slot}", prefix, walk.base, walk.offset, row.ty)
     lower_write_at(p, &f, walk.base, walk.offset, lowered, row.ty)
     if f.partial_drops.len() != 0 {
         if lower_partial_field_path(p, c.slots[slot].ty, row.projections) == .Val(path) -> lower_partial_reset(&f, "slot.{slot}", path)
