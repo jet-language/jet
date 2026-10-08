@@ -262,7 +262,7 @@ fn lower_map_index_write(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
             loop (position, projection) in row.projections {
                 if position < count - 1 -> &prefix.push(projection)
             }
-            walked :: lower_walk_place(p, &m, &f, root, c.slots[slot].ty, prefix) ?? return true
+            walked :: lower_walk_place(p, c, &m, &f, root, c.slots[slot].ty, prefix) ?? return true
             if walked.borrowed {
                 lower_fail(&m, &f, "writing through a field of runtime handle is not lowered at O0 yet")
                 return true

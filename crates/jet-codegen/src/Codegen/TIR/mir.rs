@@ -58,7 +58,7 @@ use jet_foundation::MIR::{
     MirVectorFact, MirVectorLayout, MirVectorRule, MirVisibility, MirWebParamField,
     MirWebParamReconstruction, stable_id,
 };
-use jet_foundation::MIR::{MirPollKind, mir_operation_can_stop};
+use jet_foundation::MIR::{MirPollKind, mir_operation_can_stop, mir_operation_stop_operand, mir_operation_stop_place};
 /// Keep only derive requests whose implementation is part of this target's
 /// checked program. Type-site markers are broader than Rust trait conformance:
 /// a user derive provider (for example `#Summarize`) contributes inherent
@@ -7954,7 +7954,11 @@ impl<'a> LowerCtx<'a> {
         let identity = self.reserve_identity("operation", span, role, &detail)?;
         let value = MirValueId(stable_id("mir-value", &identity));
         let op_id = jet_foundation::MIR::MirOpId(stable_id("mir-op", &identity));
-        let can_stop = mir_operation_can_stop(&operation, |call| {
+        let operand_type = mir_operation_stop_operand(&operation)
+            .and_then(|value| self.values.iter().find(|(id, ..)| *id == value).map(|(_, ty, ..)| ty));
+        let accessed_place = mir_operation_stop_place(&operation)
+            .and_then(|place| self.places.iter().find(|row| row.id == place));
+        let can_stop = mir_operation_can_stop(&operation, operand_type, accessed_place, |call| {
             self.prelude_call_positions.get(&call).and_then(|position| self.prelude_calls[*position].effect)
         });
         let panic_capable = can_stop && !matches!(&operation, MirOperation::ScopeExit { .. });

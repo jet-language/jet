@@ -4,7 +4,7 @@
 use core.files as ff_files
 use jet_driver.[JetDriverCompileMode, jet_driver_present_diagnostics]
 use jet_cli.[jet_cli_compile_file]
-use jet_foundation.[DIAGNOSTIC_ERROR, MIRProgram, MIRFunctionID, MIRPlaceID, MIRBlockID, MIRInstruction, MIROperation, MIROpID, mir_terminator_targets]
+use jet_foundation.[DIAGNOSTIC_ERROR, Effect, Span, MIRAccess, MIRBinaryDispatch, MIRBinaryOp, MIRBinaryOverflow, MIRCallArg, MIRCallFallibility, MIRCallSignature, MIRCallee, MIRConversion, MIRCoreCallID, MIRDimension, MIRDimensionAxis, MIRIndexKind, MIRPanicContext, MIRPanicLoc, MIRPanicLocal, MIRPlace, MIRPlaceBase, MIRPreludeABI, MIRPreludeCall, MIRPreludeCallID, MIRPreludeFamily, MIRProgram, MIRFunctionID, MIRPlaceID, MIRBlockID, MIRInstruction, MIROperation, MIROpID, MIRProjection, MIRRequireKind, MIRScopeID, MIRSemanticOp, MIRSourceFileID, MIRSymbol, MIRTagMarker, MIRType, MIRTypeKind, MIRUnaryOp, MIRValueID, MIRValueFact, mir_operation_can_stop, mir_operation_can_panic, mir_type_from_kind, mir_terminator_targets]
 
 fn ff_native(name: String, program: MIRProgram, entry_id: MIRFunctionID, pack: GLPack) -> String {
     lowered :: lir_lower_entry(program, entry_id)
@@ -60,6 +60,91 @@ fn ff_case(file: String, name: String, pack: GLPack) -> String {
         }
     }
     "front-error"
+}
+
+// Pure predicate parity, not a hand-built production MIR or native golden.
+// The Rust test consumes exactly the same table and renders the same facts.
+fn ff_stop_type(name: String) -> MIRType {
+    fixed :: mir_type_from_kind(MIRTypeKind.IntN{signed: true, bits: 8})
+    if name == {
+        "i8" -> fixed
+        "u64" -> mir_type_from_kind(MIRTypeKind.IntN{signed: false, bits: 64})
+        "int" -> mir_type_from_kind(MIRTypeKind.Int)
+        "float" -> mir_type_from_kind(MIRTypeKind.Float)
+        "float32" -> mir_type_from_kind(MIRTypeKind.Float32)
+        "tagged-i8" -> mir_type_from_kind(MIRTypeKind.Tagged{marker: MIRTagMarker.User{name: "checked"}, inner: fixed})
+        "range-i8" -> mir_type_from_kind(MIRTypeKind.InlineRange{base: fixed, lo: -8, hi: 8})
+        "quantity-i8" -> mir_type_from_kind(MIRTypeKind.Quantity{base: fixed, dimension: MIRDimension{axes: [MIRDimensionAxis]{}}})
+        "list" -> mir_type_from_kind(MIRTypeKind.List{inner: fixed})
+        "map" -> mir_type_from_kind(MIRTypeKind.Map{key: fixed, value: fixed})
+        else -> panic("unknown predicate type {name}")
+    }
+}
+
+fn ff_stop_prelude(id: U64, effect: String) -> MIRPreludeCall {
+    checked_effect :: if effect == "Panic" -> Val(Effect.Panic) else if effect == "None" -> Effect?{None} else -> panic("unknown predicate effect {effect}")
+    MIRPreludeCall{id: MIRPreludeCallID{value: id}, family: MIRPreludeFamily.Host,
+        module_name: "predicate", member: "predicate", symbol: MIRSymbol.Runtime{name: "predicate"},
+        signature: MIRCallSignature{arity: 0, max_arity: 0, borrow_mask: [Bool]{}},
+        effect_kind: checked_effect, fallibility: MIRCallFallibility.Infallible,
+        abi: MIRPreludeABI.Value, authority: None, db_metadata: None}
+}
+
+fn ff_stop_predicate(table: String) {
+    rendered := [String]{}
+    count := 0
+    loop row in table.split("\n").to_list() {
+        if row == "" -> next
+        columns :: row.split("\t").to_list()
+        if columns.len() != 8 -> panic("predicate row must carry eight checked facts")
+        value :: MIRValueID{value: 1}
+        place_id :: MIRPlaceID{value: 1}
+        route :: MIRPreludeCallID{value: 3}
+        ty :: ff_stop_type(columns[2])
+        location :: MIRPanicLoc{file: MIRSourceFileID{value: 1}, line: 1, column: 1}
+        context :: MIRPanicContext{function: "predicate", source_line: "", caret: 0, locals: [MIRPanicLocal]{}}
+        operation :: if columns[1] == {
+            "neg" -> MIROperation.Unary{op: MIRUnaryOp.Neg, value: value}
+            "not" -> MIROperation.Unary{op: MIRUnaryOp.Not, value: value}
+            "cast" -> MIROperation.Convert{value: value, parameters: [MIRValueID]{}, target: ty, conversion: MIRConversion.NumericCast}
+            "binary-trap" | "binary-prelude" -> MIROperation.Binary{op: MIRBinaryOp.Add,
+                dispatch: MIRBinaryDispatch.Prelude{call: route, location: None},
+                overflow: if columns[1] == "binary-trap" -> MIRBinaryOverflow.Trap else -> MIRBinaryOverflow.Unchecked,
+                left: value, right: value}
+            "binary-total" -> MIROperation.Binary{op: MIRBinaryOp.Add, dispatch: MIRBinaryDispatch.Primitive,
+                overflow: MIRBinaryOverflow.Unchecked, left: value, right: value}
+            "read" -> MIROperation.ReadPlace{place: place_id}
+            "move" -> MIROperation.MovePlace{place: place_id}
+            "write" -> MIROperation.WritePlace{place: place_id, value: value}
+            "replace" -> MIROperation.ReplacePlace{place: place_id, value: value}
+            "scope-exit" -> MIROperation.ScopeExit{scope: MIRScopeID{value: 1}}
+            "require-stop" -> MIROperation.Semantic{operation: MIRSemanticOp.RequireStop{
+                call: route, kind: MIRRequireKind.Panic, condition: None, location: location,
+                context: context, values: [MIRValueID]{}, always_stops: true}}
+            "call" -> MIROperation.Call{callee: MIRCallee.User{function: MIRFunctionID{value: 1}}, args: [MIRCallArg]{}, type_args: [MIRType]{}}
+            "indirect-call" -> MIROperation.IndirectCall{callee: value, args: [MIRCallArg]{}, type_args: [MIRType]{}}
+            "core-call" -> MIROperation.CoreCall{call: MIRCoreCallID{value: 1}, route: route,
+                args: [MIRCallArg]{}, type_args: [MIRType]{}, fallibility: MIRCallFallibility.Infallible, data_plan: None}
+            else -> panic("unknown predicate operation {columns[1]}")
+        }
+        place :: MIRPlace{id: place_id, span: Span{start: 0, end: 0}, ty: ty,
+            base: MIRPlaceBase.Temporary{value: value}, access: MIRAccess.Read, persist_key: None,
+            projections: [MIRProjection]{MIRProjection.Index{
+                kind: if columns[2] == "map" -> MIRIndexKind.Map else -> MIRIndexKind.List,
+                index: value, call: MIRPreludeCallID{value: 1}, write_call: Val(MIRPreludeCallID{value: 2}),
+                location: location, context: None, span: Span{start: 0, end: 0}}}}
+        calls :: [MIRPreludeCall]{ff_stop_prelude(1, columns[3]), ff_stop_prelude(2, columns[4]), ff_stop_prelude(3, columns[5])}
+        positions :: [U64:Int]{1: 0, 2: 1, 3: 2}
+        stop :: mir_operation_can_stop(operation, Val(ty), Val(place), calls, positions)
+        can_panic :: mir_operation_can_panic(operation, Val(ty), Val(place), calls, positions)
+        if "{stop}" != columns[6] -> panic("{columns[0]} stop mismatch")
+        if "{can_panic}" != columns[7] -> panic("{columns[0]} panic mismatch")
+        &rendered.push("{columns[0]}\t{columns[1]}\t{columns[2]}\t{columns[3]}\t{columns[4]}\t{columns[5]}\t{stop}\t{can_panic}")
+        count += 1
+    }
+    if count == 0 -> panic("predicate table is empty")
+    ff_files.write("front-stop-predicate-results.tsv", "{rendered.join("\n")}\n") ?? panic("cannot write exercised Jet predicate results")
+    print("stop predicate: {count} shared rows verified")
 }
 
 // Focused production producer witness; never a successful golden or a
@@ -125,8 +210,18 @@ fn ff_cleanup_program(program: MIRProgram) {
                 if mir_pass_validate_stop_points(function, definitions, dominance, tables) != None -> panic("clean cleanup witness failed native Legality")
                 duplicate := last
                 duplicate.id = MIROpID{value: maximum + U64{1}}
-                duplicate.result = None
-                duplicate.ty = None
+                if last.result == .Val(old) {
+                    next_value := U64{0}
+                    metadata := MIRValueFact?{None}
+                    loop fact in function.values {
+                        if fact.id.value >= next_value -> next_value = fact.id.value + U64{1}
+                        if fact.id == old -> metadata = Val(fact)
+                    }
+                    fact := metadata ?? panic("cleanup call result lost its checked metadata")
+                    fact.id = MIRValueID{value: next_value}
+                    duplicate.result = Val(fact.id)
+                    &function.values.push(fact)
+                }
                 loop index in 0..<function.blocks.len() {
                     if function.blocks[index].id == stop {
                         instructions := [MIRInstruction]{duplicate}
@@ -161,6 +256,10 @@ fn ff_cleanup_case(file: String) {
 }
 
 fn run() {
+    if ff_files.read("front-stop-predicate.tsv") == .Val(table) {
+        ff_stop_predicate(table)
+        return
+    }
     if ff_files.read("front-cleanup-stop.txt") == .Val(file) {
         ff_cleanup_case(file.trim())
         return

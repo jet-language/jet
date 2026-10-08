@@ -45,6 +45,23 @@ The Rust seed represents this checked policy through `MirBinaryDispatch`:
 overflow is checked (and for division/remainder/power that can fail for other
 reasons), otherwise a primitive operation. Its `mir_binary_can_trap` consumes
 that dispatch's checked `Panic` effect, without reconstructing symbol names.
+
+The shared stop predicate also consumes the checked operand type for unary
+negation and the exact accessed place for projected operations. Fixed-width
+`Neg` may trap (including transparent tags, ranges, and quantities); exact
+integer negation, floating negation, `Not`, and sema-proven-total `NumericCast`
+do not gain stop points. A projected read, move, write, or replacement checks
+its getter's `Panic` fact; only a write or replacement also checks its setter.
+Total Map routes stay total. Merely registering a projected place does not
+evaluate it. `ScopeExit` can forward a stop but is not independently
+Panic-capable; `RequireStop` is explicitly stopping in both Rust and Jet.
+
+`tests/fixtures/mir_stop_predicate.tsv` is the common operation/fact table for
+the Rust `shared_stop_predicate_table` test and the Jet FrontFeed predicate
+witness. Set `JET_STOP_PREDICATE_RESULTS` when exercising the Rust test, then
+use `run-front-feed.mjs --stop-predicate --rust-predicate-results PATH --probe
+BINARY` to compare every input/result byte against the exercised Jet predicate.
+Preparation with `--assemble` does not claim parity or a successful golden.
 Shield and transaction masks suppress cancellation `Check` polls, not
 `Propagate` after Panic-capable operations. The runtime delivery contract is
 `Compiler/JetRuntime/Source/Scheduler.jet::scheduler_delivered_status`: Shield

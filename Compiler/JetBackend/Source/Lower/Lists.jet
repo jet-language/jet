@@ -128,7 +128,7 @@ fn lower_build_list(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
     loop (index, value) in values -> lower_store_value(p, &m, &f, data, stride * index, value, elem)
 }
 
-fn lower_index_address(p: MIRProgram, m: &LowerModule, f: &LowerFunction, list: LIRValueID, list_ty: MIRType, index: MIRValueID) -> LowerFieldAddress? {
+fn lower_index_address(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, list: LIRValueID, list_ty: MIRType, index: MIRValueID) -> LowerFieldAddress? {
     elem :: lower_list_element(list_ty) ?? {
         lower_fail(&m, &f, "non-List indexed place is not lowered at O0 yet")
         return None
@@ -150,7 +150,8 @@ fn lower_index_address(p: MIRProgram, m: &LowerModule, f: &LowerFunction, list: 
     valid :: lower_new_block(&f)
     lower_seal(&f, LIRTerminator.Branch{condition: invalid, then_target: lower_target(stop, [LIRValueID]{}), else_target: lower_target(valid, [LIRValueID]{})})
     lower_start(&f, stop, [LIRValueID]{})
-    lower_noreturn_call(&m, &f, "jet_rt_panic_list_bounds", [LIRValueID]{length, at})
+    lower_call_runtime(&m, &f, "jet_rt_panic_list_bounds", [LIRValueID]{length, at}, None)
+    lower_numeric_stopped(p, Val(c), &m, &f)
     lower_start(&f, valid, [LIRValueID]{})
     data :: lower_list_data(&f, list)
     Val(LowerFieldAddress{base: lower_list_address(&f, data, at, lower_list_stride(p, elem)), offset: 0})
@@ -164,7 +165,7 @@ fn lower_list_index(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
     list :: lower_use(&m, &f, base) ?? return
     ty :: lower_value_type(c, base) ?? return lower_fail(&m, &f, "List index without a checked base type is not lowered at O0 yet")
     elem :: lower_list_element(ty) ?? return lower_fail(&m, &f, "non-List indexed access is not lowered at O0 yet")
-    address :: lower_index_address(p, &m, &f, list, ty, index) ?? return
+    address :: lower_index_address(p, c, &m, &f, list, ty, index) ?? return
     lower_index_result(p, c, &m, &f, instruction, base, address.base, elem)
 }
 
@@ -219,7 +220,7 @@ fn lower_receiver_header(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
         return None
     }
     if row_place.projections.len() == 0 -> return Val(root)
-    address :: lower_walk_projections(p, &m, &f, root, c.slots[slot].ty, row_place.projections) ?? return None
+    address :: lower_walk_projections(p, c, &m, &f, root, c.slots[slot].ty, row_place.projections) ?? return None
     Val(lower_address(&f, address.base, address.offset))
 }
 

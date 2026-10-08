@@ -52,6 +52,8 @@ use jet_foundation.[
     Span,
     mir_operation_can_stop,
     mir_operation_can_panic,
+    mir_operation_stop_operand,
+    mir_operation_stop_place,
     mir_operation_place_uses,
     mir_operation_prelude_calls,
     mir_operation_type_uses,
@@ -329,6 +331,17 @@ fn mir_pass_validate_function(function: MIRFunction, pass: MIROptimizationPassID
     None
 }
 
+fn mir_pass_stop_operand_type(function: MIRFunction, definitions: MIRPassDefinitions, operation: MIROperation) -> MIRType? Never! {
+    value :: mir_operation_stop_operand(operation) ?? return None
+    mir_pass_value_type(function, definitions, value)
+}
+
+fn mir_pass_stop_accessed_place(function: MIRFunction, definitions: MIRPassDefinitions, operation: MIROperation) -> MIRPlace? Never! {
+    place :: mir_operation_stop_place(operation) ?? return None
+    at :: definitions.places.get(place.value) ?? return None
+    Val(function.places[at])
+}
+
 // Stop points (unified host/stop contract, #4720). A Propagate poll directly
 // follows a can-stop operation, and every read, projection or drop of that
 // operation's result (phi inputs by their incoming edge) is dominated by the
@@ -346,7 +359,7 @@ fn mir_pass_validate_stop_points(function: MIRFunction, definitions: MIRPassDefi
                     count :: block.instructions.len()
                     if count == 0 -> return Val("MIR Propagate poll does not follow a can-stop operation")
                     last :: block.instructions[count - 1]
-                    if !mir_operation_can_stop(last.operation, tables.prelude_calls, tables.prelude_positions) -> return Val("MIR Propagate poll does not follow a can-stop operation")
+                    if !mir_operation_can_stop(last.operation, mir_pass_stop_operand_type(function, definitions, last.operation), mir_pass_stop_accessed_place(function, definitions, last.operation), tables.prelude_calls, tables.prelude_positions) -> return Val("MIR Propagate poll does not follow a can-stop operation")
                     if last.result == .Val(result) {
                         failure :: mir_pass_validate_resume_uses(function, definitions, dominance, result, resume)
                         if failure != None -> return failure
@@ -359,7 +372,7 @@ fn mir_pass_validate_stop_points(function: MIRFunction, definitions: MIRPassDefi
             else -> {}
         }
     }
-    if stopped -> return mir_pass_validate_stop_shields(function, tables)
+    if stopped -> return mir_pass_validate_stop_shields(function, definitions, tables)
     None
 }
 
@@ -432,7 +445,7 @@ fn mir_pass_validate_resume_uses(function: MIRFunction, definitions: MIRPassDefi
 
 // Cancellation masks may contain only propagation points for Panic-capable
 // operations. Every path agrees on depth; stopped exits close every mask.
-fn mir_pass_validate_stop_shields(function: MIRFunction, tables: MIRPassLegalityTables) -> String? {
+fn mir_pass_validate_stop_shields(function: MIRFunction, definitions: MIRPassDefinitions, tables: MIRPassLegalityTables) -> String? {
     shields := [U64:Bool]{}
     any_shield := false
     loop scope in function.scopes {
@@ -466,7 +479,7 @@ fn mir_pass_validate_stop_shields(function: MIRFunction, tables: MIRPassLegality
         if depth > 0 && block.terminator == .Poll(kind, _, _) {
             if kind == .Check -> return Val("MIR cancellation check appears inside a cancellation mask")
             last :: &block.instructions.last() ?? return Val("MIR masked propagation has no operation")
-            if !mir_operation_can_panic(last.operation, tables.prelude_calls, tables.prelude_positions) -> return Val("MIR masked propagation does not follow a Panic-capable operation")
+            if !mir_operation_can_panic(last.operation, mir_pass_stop_operand_type(function, definitions, last.operation), mir_pass_stop_accessed_place(function, definitions, last.operation), tables.prelude_calls, tables.prelude_positions) -> return Val("MIR masked propagation does not follow a Panic-capable operation")
         }
         if block.terminator == .Stopped && depth != 0 -> return Val("MIR Stopped leaves a Shield scope open")
         loop target in mir_terminator_targets(block.terminator) {

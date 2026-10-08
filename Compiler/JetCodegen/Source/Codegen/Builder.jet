@@ -55,6 +55,8 @@ use jet_foundation.[
     Type,
     mir_copy_ownership,
     mir_operation_can_stop,
+    mir_operation_stop_operand,
+    mir_operation_stop_place,
     mir_copy_fact_for_ownership,
     mir_function_id,
     mir_owned_ownership,
@@ -1199,6 +1201,18 @@ fn jet_codegen_terminate(builder: &JetCodegenBuilder, program: JetCodegenProgram
 }
 
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::LowerCtx::emit
+fn jet_codegen_operation_can_stop(builder: JetCodegenBuilder, operation: MIROperation) -> Bool Never! {
+    operand_type := MIRType?{None}
+    if mir_operation_stop_operand(operation) == .Val(value) {
+        if builder.value_positions.get(value.value) == .Val(at) -> operand_type = Val(builder.values[at].ty)
+    }
+    accessed_place := MIRPlace?{None}
+    if mir_operation_stop_place(operation) == .Val(place) {
+        if builder.place_positions.get(place.value) == .Val(at) -> accessed_place = Val(builder.places[at])
+    }
+    mir_operation_can_stop(operation, operand_type, accessed_place, builder.prelude_calls, builder.prelude_call_positions)
+}
+
 fn jet_codegen_emit(builder: &JetCodegenBuilder, program: JetCodegenProgram, span: Span, ty: Type?, requested: MIROperation) -> MIRValueID? {
     // D-MEM-COPYSEM1: a read parameter's place has no storage to give up,
     // and neither has an element of a container (Rust `lower_receiver_place`
@@ -1230,7 +1244,7 @@ fn jet_codegen_emit(builder: &JetCodegenBuilder, program: JetCodegenProgram, spa
         .WritePlace(place, _) | .ReplacePlace(place, _) -> jet_codegen_set_drop_live(&builder, program, place, true)
         else -> {}
     }
-    if mir_operation_can_stop(operation, builder.prelude_calls, builder.prelude_call_positions) {
+    if jet_codegen_operation_can_stop(builder, operation) {
         panic_capable := true
         if operation == .ScopeExit(_) -> panic_capable = false
         jet_codegen_emit_poll(&builder, program, MIRPollKind.Propagate, panic_capable)
@@ -1258,7 +1272,7 @@ fn jet_codegen_emit_mir_type(builder: &JetCodegenBuilder, program: JetCodegenPro
         .WritePlace(place, _) | .ReplacePlace(place, _) -> jet_codegen_set_drop_live(&builder, program, place, true)
         else -> {}
     }
-    if mir_operation_can_stop(operation, builder.prelude_calls, builder.prelude_call_positions) {
+    if jet_codegen_operation_can_stop(builder, operation) {
         panic_capable := true
         if operation == .ScopeExit(_) -> panic_capable = false
         jet_codegen_emit_poll(&builder, program, MIRPollKind.Propagate, panic_capable)

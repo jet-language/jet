@@ -72,9 +72,9 @@ fn prelude_stop_classification_uses_checked_effect_not_call_spelling() {
     ];
     for semantic in operations {
         let operation = MirOperation::Semantic(semantic);
-        assert!(mir_operation_can_stop(&operation, |_| Some(Effect::Panic)));
-        assert!(!mir_operation_can_stop(&operation, |_| None));
-        assert!(!mir_operation_can_stop(&operation, |_| Some(Effect::Mem)));
+        assert!(mir_operation_can_stop(&operation, None, None, |_| Some(Effect::Panic)));
+        assert!(!mir_operation_can_stop(&operation, None, None, |_| None));
+        assert!(!mir_operation_can_stop(&operation, None, None, |_| Some(Effect::Mem)));
     }
     assert_eq!(prelude_route_effect("::JetAuthority", "with"), Some(Effect::Panic));
     assert_eq!(prelude_route_effect("::JetAuthority", "without"), None);
@@ -113,13 +113,13 @@ fn checked_numeric_policy_classifies_only_trapping_operations() {
         MirBinaryOp::Pow, MirBinaryOp::Shl, MirBinaryOp::Shr] {
         let operation = MirOperation::Binary { op, dispatch: dispatch.clone(),
             left: MirValueId(1), right: MirValueId(2) };
-        assert!(mir_operation_can_stop(&operation, |_| Some(Effect::Panic)));
-        assert!(!mir_operation_can_stop(&operation, |_| None));
+        assert!(mir_operation_can_stop(&operation, None, None, |_| Some(Effect::Panic)));
+        assert!(!mir_operation_can_stop(&operation, None, None, |_| None));
     }
     for op in [MirBinaryOp::BitAnd, MirBinaryOp::BitOr, MirBinaryOp::BitXor] {
         let operation = MirOperation::Binary { op, dispatch: MirBinaryDispatch::Primitive,
             left: MirValueId(1), right: MirValueId(2) };
-        assert!(!mir_operation_can_stop(&operation, |_| Some(Effect::Panic)));
+        assert!(!mir_operation_can_stop(&operation, None, None, |_| Some(Effect::Panic)));
     }
     for member in ["div_euclid", "rem_euclid"] {
         assert_eq!(prelude_route_effect("core.numeric", member), Some(Effect::Panic));
@@ -248,4 +248,86 @@ fn normal_cleanup_stop_consumes_first_and_runs_remaining_once() {
         let error = mir.validate().expect_err("verifier accepted replay of first cleanup");
         assert!(format!("{error:?}").contains("already-consumed cleanup input"), "{error:?}");
     });
+}
+
+/// FrontFeed.jet consumes this exact op table too. Its focused runner compares
+/// the two rendered result files, including all input facts, not just totals.
+#[test]
+fn shared_stop_predicate_table() {
+    use jet_foundation::Diagnostics::Span;
+    use jet_foundation::Effects::Effect;
+    use jet_foundation::MIR::*;
+    let table = include_str!("fixtures/mir_stop_predicate.tsv");
+    let mut rendered = String::new();
+    for row in table.lines() {
+        let columns: Vec<_> = row.split('\t').collect();
+        assert_eq!(columns.len(), 8, "{row}");
+        let value = MirValueId(1);
+        let place_id = MirPlaceId(1);
+        let getter = MirPreludeCallId(1);
+        let setter = MirPreludeCallId(2);
+        let route = MirPreludeCallId(3);
+        let fixed = || MirType::from_kind(MirTypeKind::IntN { signed: true, bits: 8 });
+        let ty = match columns[2] {
+            "i8" => fixed(),
+            "u64" => MirType::from_kind(MirTypeKind::IntN { signed: false, bits: 64 }),
+            "int" => MirType::from_kind(MirTypeKind::Int),
+            "float" => MirType::from_kind(MirTypeKind::Float),
+            "float32" => MirType::from_kind(MirTypeKind::Float32),
+            "tagged-i8" => MirType::from_kind(MirTypeKind::Tagged {
+                marker: MirTagMarker::User("checked".into()), inner: Box::new(fixed()) }),
+            "range-i8" => MirType::from_kind(MirTypeKind::InlineRange {
+                base: Box::new(fixed()), lo: -8, hi: 8 }),
+            "quantity-i8" => MirType::from_kind(MirTypeKind::Quantity {
+                base: Box::new(fixed()), dimension: MirDimension::scalar() }),
+            "list" => MirType::from_kind(MirTypeKind::List(Box::new(fixed()))),
+            "map" => MirType::from_kind(MirTypeKind::Map {
+                key: Box::new(fixed()), value: Box::new(fixed()) }),
+            other => panic!("unknown predicate type {other}"),
+        };
+        let location = MirPanicLoc { file: MirSourceFileId(1), line: 1, column: 1 };
+        let context = MirPanicContext { function: "predicate".into(), source_line: "".into(), caret: 0, locals: vec![] };
+        let operation = match columns[1] {
+            "neg" => MirOperation::Unary { op: MirUnaryOp::Neg, value },
+            "not" => MirOperation::Unary { op: MirUnaryOp::Not, value },
+            "cast" => MirOperation::Convert { value, parameters: vec![], target: ty.clone(), conversion: MirConversion::NumericCast },
+            "binary-trap" | "binary-prelude" => MirOperation::Binary {
+                op: MirBinaryOp::Add, dispatch: MirBinaryDispatch::Prelude { call: route, location: None },
+                left: value, right: value },
+            "binary-total" => MirOperation::Binary {
+                op: MirBinaryOp::Add, dispatch: MirBinaryDispatch::Primitive, left: value, right: value },
+            "read" => MirOperation::ReadPlace(place_id),
+            "move" => MirOperation::MovePlace { place: place_id },
+            "write" => MirOperation::WritePlace { place: place_id, value },
+            "replace" => MirOperation::ReplacePlace { place: place_id, value },
+            "scope-exit" => MirOperation::ScopeExit { scope: MirScopeId(1) },
+            "require-stop" => MirOperation::Semantic(MirSemanticOp::RequireStop {
+                call: route, kind: MirRequireKind::Panic, condition: None, location: location.clone(),
+                context, values: vec![], always_stops: true }),
+            "call" => MirOperation::Call { callee: MirCallee::User(MirFunctionId(1)), args: vec![], type_args: vec![] },
+            "indirect-call" => MirOperation::IndirectCall { callee: value, args: vec![], type_args: vec![] },
+            "core-call" => MirOperation::CoreCall { call: MirCoreCallId(1), route, args: vec![],
+                type_args: vec![], fallibility: MirCallFallibility::Infallible, data_plan: None },
+            other => panic!("unknown predicate operation {other}"),
+        };
+        let place = MirPlace { id: place_id, span: Span { start: 0, end: 0 }, ty: ty.clone(),
+            base: MirPlaceBase::Temporary(value), access: MirAccess::Read, persist_key: None,
+            projections: vec![MirProjection::Index {
+                kind: if columns[2] == "map" { MirIndexKind::Map } else { MirIndexKind::List },
+                index: value, call: getter, write_call: Some(setter), location, context: None,
+                span: Span { start: 0, end: 0 } }] };
+        let effect = |call| {
+            let fact = if call == getter { columns[3] } else if call == setter { columns[4] }
+                else if call == route { columns[5] } else { panic!("unlisted predicate route {call:?}") };
+            match fact { "Panic" => Some(Effect::Panic), "None" => None, other => panic!("unknown effect {other}") }
+        };
+        let stop = mir_operation_can_stop(&operation, Some(&ty), Some(&place), effect);
+        let panic = mir_operation_can_panic(&operation, Some(&ty), Some(&place), effect);
+        assert_eq!(stop.to_string(), columns[6], "{} stop", columns[0]);
+        assert_eq!(panic.to_string(), columns[7], "{} panic", columns[0]);
+        rendered.push_str(&format!("{}\t{stop}\t{panic}\n", columns[..6].join("\t")));
+    }
+    if let Some(path) = std::env::var_os("JET_STOP_PREDICATE_RESULTS") {
+        std::fs::write(path, rendered).expect("write exercised Rust predicate results");
+    }
 }

@@ -8769,7 +8769,7 @@ fn validate_function(
             }
         }
     }
-    validate_stop_points(function, &blocks, &place_rows, &dominators, prelude_ids)
+    validate_stop_points(function, &blocks, &declared_values, &place_rows, &dominators, prelude_ids)
 }
 
 /// Rust MIR stores the checked numeric policy in dispatch, not a separate
@@ -8785,21 +8785,63 @@ pub fn mir_binary_can_trap(
     }
 }
 
+/// Fact selectors shared by the producer, verifier, and native consumer.
+/// Registering a place or a liveness flag does not evaluate its projections.
+pub fn mir_operation_stop_operand(operation: &MirOperation) -> Option<MirValueId> {
+    match operation {
+        MirOperation::Unary { op: MirUnaryOp::Neg, value } => Some(*value),
+        _ => None,
+    }
+}
+
+pub fn mir_operation_stop_place(operation: &MirOperation) -> Option<MirPlaceId> {
+    match operation {
+        MirOperation::ReadPlace(place) | MirOperation::MovePlace { place }
+            | MirOperation::WritePlace { place, .. } | MirOperation::ReplacePlace { place, .. } => Some(*place),
+        _ => None,
+    }
+}
+
+pub fn mir_fixed_neg_can_trap(ty: &MirType) -> bool {
+    match ty.kind() {
+        MirTypeKind::IntN { bits, .. } => *bits > 0 && *bits <= 64,
+        MirTypeKind::InlineRange { base, .. } | MirTypeKind::Quantity { base, .. }
+            | MirTypeKind::Tagged { inner: base, .. } => mir_fixed_neg_can_trap(base),
+        _ => false,
+    }
+}
+
 /// Whether `operation` can stop (unified host/stop contract, #4720): it runs
 /// user or Core code, invokes a callback, or waits. Mirrors MIR.jet
 /// `mir_operation_can_stop`.
 pub fn mir_operation_can_stop(
     operation: &MirOperation,
+    operand_type: Option<&MirType>,
+    accessed_place: Option<&MirPlace>,
     mut effect: impl FnMut(MirPreludeCallId) -> Option<Effect>,
 ) -> bool {
     if let MirOperation::Binary { dispatch, .. } = operation {
         return mir_binary_can_trap(dispatch, effect);
     }
+    if mir_operation_stop_operand(operation).is_some() && operand_type.is_some_and(mir_fixed_neg_can_trap) {
+        return true;
+    }
+    if mir_operation_stop_place(operation).is_some() {
+        let writing = matches!(operation, MirOperation::WritePlace { .. } | MirOperation::ReplacePlace { .. });
+        if accessed_place.is_some_and(|place| place.projections.iter().any(|projection| {
+            let MirProjection::Index { call, write_call, .. } = projection else { return false; };
+            effect(*call) == Some(Effect::Panic)
+                || (writing && write_call.is_some_and(|call| effect(call) == Some(Effect::Panic)))
+        })) {
+            return true;
+        }
+    }
     if operation_prelude_calls(operation).any(|call| effect(call) == Some(Effect::Panic)) {
         return true;
     }
     match operation {
-        MirOperation::Call { .. } | MirOperation::IndirectCall { .. } | MirOperation::CoreCall { .. } => true,
+        MirOperation::Call { .. } | MirOperation::IndirectCall { .. } | MirOperation::CoreCall { .. }
+            | MirOperation::ScopeExit { .. } => true,
         MirOperation::Semantic(semantic) => matches!(
             semantic,
             MirSemanticOp::ClosureMethod { .. }
@@ -8810,6 +8852,7 @@ pub fn mir_operation_can_stop(
                 | MirSemanticOp::PolicyFunction { .. }
                 | MirSemanticOp::InterruptFunction { .. }
                 | MirSemanticOp::HostCall { .. }
+                | MirSemanticOp::RequireStop { .. }
         ),
         _ => false,
     }
@@ -8819,9 +8862,12 @@ pub fn mir_operation_can_stop(
 /// ScopeExit by itself only forwards an already-delivered stop.
 pub fn mir_operation_can_panic(
     operation: &MirOperation,
+    operand_type: Option<&MirType>,
+    accessed_place: Option<&MirPlace>,
     effect: impl FnMut(MirPreludeCallId) -> Option<Effect>,
 ) -> bool {
-    !matches!(operation, MirOperation::ScopeExit { .. }) && mir_operation_can_stop(operation, effect)
+    !matches!(operation, MirOperation::ScopeExit { .. })
+        && mir_operation_can_stop(operation, operand_type, accessed_place, effect)
 }
 
 /// Stop points (mirrors JetOptimizer Legality.jet mir_pass_validate_stop_points).
@@ -8832,6 +8878,7 @@ pub fn mir_operation_can_panic(
 fn validate_stop_points(
     function: &MirFunction,
     blocks: &HashMap<MirBlockId, usize>,
+    value_types: &HashMap<MirValueId, &MirType>,
     place_rows: &HashMap<MirPlaceId, &MirPlace>,
     dominators: &MirDominators,
     prelude_rows: &HashMap<MirPreludeCallId, &MirPreludeCall>,
@@ -8845,7 +8892,10 @@ fn validate_stop_points(
                     return Err(invalid("MIR poll resumes and stops on the same block"));
                 }
                 if *kind == MirPollKind::Propagate {
-                    let Some(last) = block.instructions.last().filter(|last| mir_operation_can_stop(&last.operation, |call| prelude_rows.get(&call).and_then(|row| row.effect))) else {
+                    let Some(last) = block.instructions.last().filter(|last| mir_operation_can_stop(&last.operation,
+                        mir_operation_stop_operand(&last.operation).and_then(|value| value_types.get(&value).copied()),
+                        mir_operation_stop_place(&last.operation).and_then(|place| place_rows.get(&place).copied()),
+                        |call| prelude_rows.get(&call).and_then(|row| row.effect))) else {
                         return Err(invalid("MIR Propagate poll does not follow a can-stop operation"));
                     };
                     if let Some(result) = last.result {
@@ -8859,7 +8909,7 @@ fn validate_stop_points(
         }
     }
     if stopped {
-        validate_stop_shields(function, blocks, prelude_rows)?;
+        validate_stop_shields(function, blocks, value_types, place_rows, prelude_rows)?;
     }
     Ok(())
 }
@@ -8946,7 +8996,7 @@ fn validate_resume_uses(
 
 /// Cancellation masks contain only propagation for Panic-capable operations.
 /// All paths agree on depth; stopped exits close every mask.
-fn validate_stop_shields(function: &MirFunction, blocks: &HashMap<MirBlockId, usize>, prelude_calls: &HashMap<MirPreludeCallId, &MirPreludeCall>) -> Result<(), MirValidationError> {
+fn validate_stop_shields(function: &MirFunction, blocks: &HashMap<MirBlockId, usize>, value_types: &HashMap<MirValueId, &MirType>, place_rows: &HashMap<MirPlaceId, &MirPlace>, prelude_calls: &HashMap<MirPreludeCallId, &MirPreludeCall>) -> Result<(), MirValidationError> {
     let invalid = |message: &str| MirValidationError::InvalidOperation { function: function.id, message: message.to_string() };
     let shields: HashSet<MirScopeId> =
         function.scopes.iter().filter(|scope| matches!(scope.kind, MirScopeKind::Shield | MirScopeKind::Transaction)).map(|scope| scope.id).collect();
@@ -8972,7 +9022,10 @@ fn validate_stop_shields(function: &MirFunction, blocks: &HashMap<MirBlockId, us
                     return Err(invalid("MIR cancellation check appears inside a cancellation mask"));
                 }
                 if !block.instructions.last().is_some_and(|last|
-                    mir_operation_can_panic(&last.operation, |call| prelude_calls.get(&call).and_then(|row| row.effect))) {
+                    mir_operation_can_panic(&last.operation,
+                        mir_operation_stop_operand(&last.operation).and_then(|value| value_types.get(&value).copied()),
+                        mir_operation_stop_place(&last.operation).and_then(|place| place_rows.get(&place).copied()),
+                        |call| prelude_calls.get(&call).and_then(|row| row.effect))) {
                     return Err(invalid("MIR masked propagation does not follow a Panic-capable operation"));
                 }
             }

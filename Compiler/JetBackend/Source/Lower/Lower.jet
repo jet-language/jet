@@ -57,6 +57,9 @@ use jet_foundation.[
     MIRValueID,
     MIRVariant,
     MIRVariantPayload,
+    mir_operation_can_stop,
+    mir_operation_stop_operand,
+    mir_operation_stop_place,
     mir_operation_value_uses,
     mir_symbol_name,
     mir_terminator_targets,
@@ -169,6 +172,8 @@ struct LowerModule {
     pub line_starts: [U64:[Int]]
     // MIR source file id -> its row in program.source_files.
     pub source_rows: [U64:Int]
+    // Shared stop classification indexes checked Prelude effects once.
+    pub prelude_positions: [U64:Int]
     pub asm_foreign: [U64:MIRFunctionID]
     pub foreign_rows: [U64:Int]
     // Concrete MIR function ID -> its LIR function row (Mono.jet's inventory
@@ -298,6 +303,7 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
         static_fixups: [LowerStaticFixup]{},
         line_starts: [U64:[Int]]{},
         source_rows: [U64:Int]{},
+        prelude_positions: [U64:Int]{},
         asm_foreign: ~prepared.asm_foreign,
         foreign_rows: ~prepared.foreign_rows,
         mir_rows: [U64:Int]{},
@@ -313,6 +319,9 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
     }
     loop (index, file) in program.source_files {
         if m.source_rows.get(file.id.value) == None -> &m.source_rows.add(file.id.value, index).drop("checked absent above")
+    }
+    loop (index, call) in program.prelude_calls {
+        if m.prelude_positions.get(call.id.value) == None -> &m.prelude_positions.add(call.id.value, index).drop("checked absent above")
     }
     // Every signature is registered before any body is lowered: calls name them.
     loop (index, descriptor) in prepared.functions {
@@ -747,6 +756,14 @@ fn lower_target(block: LIRBlockID, args: [LIRValueID]) -> LIRJumpTarget Never! {
 fn lower_value_type(c: LowerContext, value: MIRValueID) -> MIRType? {
     index :: c.fact_index.get(value.value) ?? return None
     Val(c.mir.values[index].ty)
+}
+
+fn lower_operation_can_stop(p: MIRProgram, c: LowerContext, m: LowerModule, operation: MIROperation) -> Bool Never! {
+    operand_type := MIRType?{None}
+    if mir_operation_stop_operand(operation) == .Val(value) -> operand_type = lower_value_type(c, value)
+    accessed_place := MIRPlace?{None}
+    if mir_operation_stop_place(operation) == .Val(place) -> accessed_place = lower_place_row(c.mir, place)
+    mir_operation_can_stop(operation, operand_type, accessed_place, p.prelude_calls, m.prelude_positions)
 }
 
 fn lower_value_owned(c: LowerContext, value: MIRValueID) -> Bool Never! {
@@ -1945,7 +1962,7 @@ fn lower_read_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
     if moving && row.projections.len() > 0 && !lower_projected_move_supported(&m, &f, row.projections) -> return
     walk := LowerFieldAddress{base: LIRValueID{value: -1}, offset: 0}
     if row.base == .Static(name) {
-        walk = lower_static_walk(p, &m, &f, row, name) ?? return
+        walk = lower_static_walk(p, c, &m, &f, row, name) ?? return
     } else {
         slot :: c.place_slots.get(place.value) ?? return lower_fail(&m, &f, "place {place.value} has no lowered root")
         if c.slots[slot].cell {
@@ -1962,7 +1979,7 @@ fn lower_read_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
                 if moving -> lower_clear_slot(p, c, &f, slot)
                 return
             }
-            walked :: lower_walk_place(p, &m, &f, root, c.slots[slot].ty, row.projections) ?? return
+            walked :: lower_walk_place(p, c, &m, &f, root, c.slots[slot].ty, row.projections) ?? return
             if moving && walked.borrowed -> return lower_fail(&m, &f, "moving out of a field of runtime handle is not lowered at O0 yet")
             walk = walked.address
         }
@@ -2031,7 +2048,7 @@ fn lower_write_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
     if row.base == .Static(name) {
         if lower_is_absent(f, value) -> return
         stored :: lower_use(&m, &f, value) ?? return
-        walk :: lower_static_walk(p, &m, &f, row, name) ?? return
+        walk :: lower_static_walk(p, c, &m, &f, row, name) ?? return
         if replace -> lower_drop_stored(p, &m, &f, walk.base, walk.offset, row.ty)
         return lower_write_at(p, &f, walk.base, walk.offset, stored, row.ty)
     }
@@ -2066,7 +2083,7 @@ fn lower_write_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
         return
     }
     root :: held ?? return lower_fail(&m, &f, "field of place {place.value} is written before the place has a value")
-    walk :: lower_walk_projections(p, &m, &f, root, c.slots[slot].ty, row.projections) ?? return
+    walk :: lower_walk_projections(p, c, &m, &f, root, c.slots[slot].ty, row.projections) ?? return
     if replace -> lower_drop_stored(p, &m, &f, walk.base, walk.offset, row.ty)
     lower_write_at(p, &f, walk.base, walk.offset, lowered, row.ty)
 }
@@ -2544,21 +2561,27 @@ fn lower_binary(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFuncti
     if left_layout != lir_layout_word() -> return lower_fail(&m, &f, "operator {lower_binary_name(op)} on {mir_type_display_name(left_ty)} is not lowered at O0 yet")
     narrow :: lower_narrow_bits(left_ty)
     checked :: if fixed_trap -> MIRBinaryOverflow.Trap else -> overflow
-    if narrow > 0 -> return lower_narrow_binary(&m, &f, dst, word_op, checked, lower_narrow_signed(left_ty), narrow, left_value, right_value)
+    can_trap :: lower_operation_can_stop(p, c, m, instruction.operation)
+    site :: if dispatch == .Prelude(_, location) -> location else -> MIRPanicLoc?{None}
+    location :: if can_trap -> lower_numeric_location(p, c, &m, &f, instruction, site) else -> [LIRValueID]{}
+    if narrow > 0 -> return lower_narrow_binary(p, c, &m, &f, dst, word_op, checked, lower_narrow_signed(left_ty), narrow, left_value, right_value, location)
     if fixed_trap && (word_op == .Shl || word_op == .Shr) {
         // Rust checked_shl/checked_shr: a count outside 0..<64 stops.
         width :: lower_const(&f, 64)
         out_of_range :: lower_flag(&f)
         lower_emit(&f, LIRInst.Compare{dst: out_of_range, condition: LIRCondition.UGe, left: right_value, right: width})
-        lower_check(&m, &f, out_of_range, "jet_rt_panic_overflow")
+        lower_numeric_shift_check(p, c, &m, &f, out_of_range, word_op, right_value, unsigned, 64, location)
     }
     if word_op == .Div || word_op == .Rem {
         zero :: lower_const(&f, 0)
-        is_zero :: lower_flag(&f)
-        lower_emit(&f, LIRInst.Compare{dst: is_zero, condition: LIRCondition.Eq, left: right_value, right: zero})
-        lower_check(&m, &f, is_zero, "jet_rt_panic_division_by_zero")
+        if can_trap {
+            is_zero :: lower_flag(&f)
+            lower_emit(&f, LIRInst.Compare{dst: is_zero, condition: LIRCondition.Eq, left: right_value, right: zero})
+            lower_numeric_check(p, Val(c), &m, &f, is_zero, location, "divided by zero")
+        }
         // Unsigned division has no overflowing quotient (FixedArithmetic.rs:350-396).
         if unsigned -> return lower_emit(&f, LIRInst.Binary{dst: dst, op: if word_op == .Div -> LIRBinaryOp.UDiv else -> LIRBinaryOp.URem, left: left_value, right: right_value})
+        if !can_trap && word_op == .Div -> return lower_emit(&f, LIRInst.Binary{dst: dst, op: LIRBinaryOp.Div, left: left_value, right: right_value})
         minus_one :: lower_const(&f, -1)
         is_minus_one :: lower_flag(&f)
         lower_emit(&f, LIRInst.Compare{dst: is_minus_one, condition: LIRCondition.Eq, left: right_value, right: minus_one})
@@ -2581,12 +2604,13 @@ fn lower_binary(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFuncti
         lower_emit(&f, LIRInst.Compare{dst: is_minimum, condition: LIRCondition.Eq, left: left_value, right: minimum})
         both := lower_flag(&f)
         lower_logic(&f, both, true, is_minus_one, is_minimum)
-        lower_check(&m, &f, both, "jet_rt_panic_overflow")
+        if can_trap -> lower_numeric_check(p, Val(c), &m, &f, both, location, lower_numeric_overflow_message("div"))
     }
     if checked == .Trap && (word_op == .Add || word_op == .Sub || word_op == .Mul) {
         overflowed :: lower_flag(&f)
         lower_emit(&f, LIRInst.Overflows{dst: overflowed, op: if unsigned -> lower_unsigned_overflow_op(word_op) else -> word_op, left: left_value, right: right_value})
-        lower_check(&m, &f, overflowed, "jet_rt_panic_overflow")
+        operation :: if word_op == .Add -> "add" else if word_op == .Sub -> "sub" else -> "mul"
+        lower_numeric_check(p, Val(c), &m, &f, overflowed, location, lower_numeric_overflow_message(operation))
     }
     lower_emit(&f, LIRInst.Binary{dst: dst, op: if unsigned && word_op == .Shr -> LIRBinaryOp.UShr else -> word_op, left: left_value, right: right_value})
 }
@@ -2658,17 +2682,18 @@ fn lower_unary(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunctio
     if layout != lir_layout_word() -> return lower_fail(&m, &f, "negation of {mir_type_display_name(ty)} is not lowered at O0 yet")
     zero :: lower_const(&f, 0)
     if lower_is_exact_int(ty) -> return lower_exact_arithmetic(&m, &f, dst, LIRBinaryOp.Sub, zero, operand, "jet_int_sub")
+    location :: lower_numeric_location(p, c, &m, &f, instruction, None)
     narrow :: lower_narrow_bits(ty)
     if narrow > 0 {
         negated :: lower_numeric_binary(&f, LIRBinaryOp.Sub, zero, operand)
-        lower_narrow_check(&m, &f, negated, lower_narrow_signed(ty), narrow)
+        lower_narrow_check(p, c, &m, &f, negated, lower_narrow_signed(ty), narrow, location, lower_numeric_overflow_message("sub"))
         return lower_emit(&f, LIRInst.Move{dst: dst, src: negated})
     }
     // Fixed negation traps on signed MIN or a nonzero unsigned operand, the
     // unrepresentable results (core-library.md:3097-3098), instead of wrapping.
     overflowed :: lower_flag(&f)
     lower_emit(&f, LIRInst.Overflows{dst: overflowed, op: if lower_is_unsigned_word(ty) -> LIRBinaryOp.USub else -> LIRBinaryOp.Sub, left: zero, right: operand})
-    lower_check(&m, &f, overflowed, "jet_rt_panic_overflow")
+    lower_numeric_check(p, Val(c), &m, &f, overflowed, location, lower_numeric_overflow_message("sub"))
     lower_emit(&f, LIRInst.Binary{dst: dst, op: LIRBinaryOp.Sub, left: zero, right: operand})
 }
 
@@ -3089,12 +3114,12 @@ fn lower_write_arg(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFun
         // The callee updates an inline aggregate in place: its storage is
         // the cell, and nothing is written back.
         if row.projections.len() == 0 -> return Val(LowerWriteBack{place: place, slot: slot, cell: root})
-        walk :: lower_walk_projections(p, &m, &f, root, c.slots[slot].ty, row.projections) ?? return None
+        walk :: lower_walk_projections(p, c, &m, &f, root, c.slots[slot].ty, row.projections) ?? return None
         return Val(LowerWriteBack{place: place, slot: slot, cell: lower_address(&f, walk.base, walk.offset)})
     }
     current := root
     if row.projections.len() > 0 {
-        walk :: lower_walk_projections(p, &m, &f, root, c.slots[slot].ty, row.projections) ?? return None
+        walk :: lower_walk_projections(p, c, &m, &f, root, c.slots[slot].ty, row.projections) ?? return None
         layout :: lower_repr_layout(lower_repr(p, row.ty)) ?? return None
         current = lower_new_value(&f, layout, LIRDrop.Trivial, row.ty.identity)
         lower_emit(&f, LIRInst.Load{dst: current, base: walk.base, offset: walk.offset})
@@ -3138,7 +3163,7 @@ fn lower_write_back(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
         lower_set_slot(&f, writeback.slot, Val(updated))
     } else {
         root :: (~f.current[writeback.slot]) ?? return lower_fail(&m, &f, "place {writeback.place.value} has no value")
-        walk :: lower_walk_projections(p, &m, &f, root, c.slots[writeback.slot].ty, row.projections) ?? return
+        walk :: lower_walk_projections(p, c, &m, &f, root, c.slots[writeback.slot].ty, row.projections) ?? return
         updated :: lower_new_value(&f, layout, LIRDrop.Trivial, row.ty.identity)
         lower_emit(&f, LIRInst.Load{dst: updated, base: writeback.cell, offset: 0})
         lower_emit(&f, LIRInst.Store{base: walk.base, offset: walk.offset, value: updated})
