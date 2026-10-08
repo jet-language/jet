@@ -20,6 +20,23 @@ use crate::AST::{
 };
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
+const OPERATOR_HOOKS: &[(&str, &str)] = &[
+    (Syntax::TRAIT_ADD, "add"),
+    (Syntax::TRAIT_SUB, "sub"),
+    (Syntax::TRAIT_MUL, "mul"),
+    (Syntax::TRAIT_DIV, "div"),
+    (Syntax::TRAIT_EQUATABLE, "equal"),
+    (Syntax::TRAIT_COMPARABLE, "compare"),
+];
+
+pub fn operator_hook_name(trait_name: &str) -> Option<&'static str> {
+    OPERATOR_HOOKS.iter().find_map(|&(name, hook)| (name == trait_name).then_some(hook))
+}
+
+pub fn operator_hook_trait(method: &str) -> Option<&'static str> {
+    OPERATOR_HOOKS.iter().find_map(|&(name, hook)| (hook == method).then_some(name))
+}
+
 /// D-OPMIX1 / D-FOUND-OPMIX1=A: one checked operator hook and its concrete
 /// right-hand type. `rhs` is always concrete in this table; a bare
 /// `impl Type.Op` is recorded with the owner's type as its right-hand operand.
@@ -1473,14 +1490,7 @@ impl TraitRegistry {
             return;
         }
         if operator_trait {
-            let expected_method = match trait_name {
-                Syntax::TRAIT_ADD => "add",
-                Syntax::TRAIT_SUB => "sub",
-                Syntax::TRAIT_MUL => "mul",
-                Syntax::TRAIT_DIV => "div",
-                Syntax::TRAIT_EQUATABLE => "equal",
-                _ => "compare",
-            };
+            let expected_method = operator_hook_name(trait_name).unwrap();
             let owner_name = owner_type.name();
             let rhs_name = rhs_type.name();
             let expected_result = match trait_name {

@@ -2433,12 +2433,17 @@ fn register_type_methods_inner(
             TypeDef::Struct { methods, .. } | TypeDef::Enum { methods, .. } => methods,
             TypeDef::Distinct { .. } | TypeDef::Alias { .. } => continue,
         };
-        for (m, trait_name, _) in methods {
-            if trait_name.is_some_and(is_operator_trait) {
-                continue;
-            }
+        for (m, trait_name, _) in &methods {
             if field_names.iter().any(|f| f == &m.name) {
                 diags.push(method_field_clash(&m.name, type_name, m.name_span));
+            }
+            if trait_name.is_some_and(is_operator_trait) {
+                if methods.iter().any(|(other, other_trait, _)| {
+                    other.name == m.name && !other_trait.is_some_and(is_operator_trait)
+                }) {
+                    diags.push(method_defined_twice(&m.name, type_name, m.name_span, false));
+                }
+                continue;
             }
             if methods_map.contains_key(&m.name) {
                 if !error_on_duplicate {
@@ -2495,7 +2500,14 @@ pub(crate) fn register_impl_methods(
     for item in items {
         let Item::Impl(i) = item else { continue };
         if i.trait_name.as_deref().is_some_and(is_operator_trait) {
+            let field_names = registry.field_names(&i.type_name);
             for method in &i.methods {
+                if field_names.iter().any(|name| name == &method.name) {
+                    diags.push(method_field_clash(&method.name, &i.type_name, method.name_span));
+                }
+                if registry.method(&i.type_name, &method.name).is_some() {
+                    diags.push(method_defined_twice(&method.name, &i.type_name, method.name_span, false));
+                }
                 let key = operator_signature_key(&i.type_name, i.trait_name.as_deref(), &method.name, i.operator_rhs.as_ref()).unwrap();
                 registry.operator_signatures.entry(key).or_insert_with(|| func_to_method_sig(method));
             }
@@ -2505,6 +2517,7 @@ pub(crate) fn register_impl_methods(
             continue;
         }
         let field_names = registry.field_names(&i.type_name);
+        let hook_signatures = &registry.operator_signatures;
         let Some(type_def) = registry.types.get_mut(&i.type_name) else {
             continue;
         };
@@ -2516,7 +2529,12 @@ pub(crate) fn register_impl_methods(
             if field_names.iter().any(|f| f == &m.name) {
                 diags.push(method_field_clash(&m.name, &i.type_name, m.name_span));
             }
-            if methods_map.contains_key(&m.name) {
+            let hook_name_clash = hook_signatures.keys().any(|key| {
+                let Some((owner, tail)) = key.split_once("::") else { return false; };
+                let Some((_, method_rhs)) = tail.split_once("::") else { return false; };
+                owner == i.type_name && method_rhs.split_once('<').is_some_and(|(name, _)| name == m.name)
+            });
+            if methods_map.contains_key(&m.name) || hook_name_clash {
                 let is_ctor = m.self_param().is_none();
                 diags.push(method_defined_twice(
                     &m.name,
