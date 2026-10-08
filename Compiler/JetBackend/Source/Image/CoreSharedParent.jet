@@ -54,7 +54,13 @@ fn core_shared_runtime_layout_decode(tree: DataTree) -> LIRLayout? Never! {
     align :: x64_execution_int(core_shared_abi_field(tree, "align") ?? return None) ?? return None
     name :: x64_execution_string(core_shared_abi_field(tree, "class") ?? return None) ?? return None
     if size <= 0 || align <= 0 || (align & (align - 1)) != 0 -> return None
-    class :: if name == "Integer" -> LIRABIClass.Integer else if name == "Pointer" -> LIRABIClass.Pointer else if name == "Float" -> LIRABIClass.Float else if name == "Memory" -> LIRABIClass.Memory else -> return None
+    class :: if {
+        name == "Integer" -> LIRABIClass.Integer
+        name == "Pointer" -> LIRABIClass.Pointer
+        name == "Float" -> LIRABIClass.Float
+        name == "Memory" -> LIRABIClass.Memory
+        else -> { return None }
+    }
     Val(LIRLayout{size: size, align: align, class: class})
 }
 pub fn core_shared_runtime_export_abis_decode(tree: DataTree) -> [String:CoreSharedRuntimeExportABI]? Never! {
@@ -262,13 +268,14 @@ pub fn core_shared_parent_callable(parent: &CoreSharedParent, attachment: CoreSh
     assert_eq(decoded.get(first.symbol), Val(first))
     assert_eq(decoded.get(second.symbol), Val(second))
     assert(core_shared_runtime_export_abis_decode(DataTree.Null) == None)
-    loop rows in [[CoreSharedRuntimeExportABI]]{
+    invalid_rows :: [[CoreSharedRuntimeExportABI]]{
         [CoreSharedRuntimeExportABI]{second, first},
         [CoreSharedRuntimeExportABI]{first, first},
         [CoreSharedRuntimeExportABI]{CoreSharedRuntimeExportABI{symbol: "", parameters: [LIRLayout]{}, result: None}},
         [CoreSharedRuntimeExportABI]{CoreSharedRuntimeExportABI{symbol: "jet_one", parameters: [LIRLayout]{LIRLayout{size: 0, align: 8, class: LIRABIClass.Integer}}, result: None}},
         [CoreSharedRuntimeExportABI]{CoreSharedRuntimeExportABI{symbol: "jet_one", parameters: [LIRLayout]{LIRLayout{size: 8, align: 3, class: LIRABIClass.Integer}}, result: None}},
-    } {
+    }
+    loop rows in invalid_rows {
         invalid :: core_parent_json.parse(x64_runtime_export_abi_json(rows)) ?? panic("invalid rows must still be JSON")
         assert(core_shared_runtime_export_abis_decode(invalid) == None)
     }
