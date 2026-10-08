@@ -510,3 +510,9 @@ normalizes only the low Bool byte. The new owner has no shared allocation.
 HTTP Compress Encoding owns a single ordinal word for Gzip. Clone and
 equality operate on that word; these helpers do not compress data or perform
 host I/O.
+
+HTTP Shutdown Report stores four raw signed counts. Its constructor borrows
+exact Int inputs and converts them in field order before allocation; an
+unrepresentable count takes the native-index-range stop. Each getter creates
+a fresh exact Int owner from the stored count. Clone copies all four raw
+words and does not retain the constructor's Int owners.
