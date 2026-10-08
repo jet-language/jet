@@ -108,7 +108,8 @@ export function functionsIn(text, file = '') {
     if (tokens[open]?.value !== '{') { test = false; continue; }
     const end = closeAt(tokens, open);
     result.push({ file, name, test, line: tokens[test ? attributeStart : i].line, endLine: tokens[end].endLine,
-      tokens: tokens.slice(open + 1, end), body: text.slice(tokens[open].end, tokens[end].start) });
+      tokens: tokens.slice(open + 1, end), lexicalTokens: tokens, signature: tokens.slice(i + 2, open),
+      body: text.slice(tokens[open].end, tokens[end].start) });
     test = false; i = end;
   }
   return result;
@@ -348,7 +349,7 @@ export function classify(fn, helpers = []) {
   else if (surfaces.includes('scan') && !surfaces.includes('internal')) { disposition = 'guard'; target = `tests/guards/${suite}.jet#${fn.name}`; }
   else { disposition = 'retire-with-Rust'; target = 'none: Rust crate implementation or harness unit'; }
   if (retirement.retired.length && disposition !== 'retire-with-Rust') disposition += '+retire-rust-asserts';
-  return { ...fn, surfaces: surfaces.join(','), disposition, target };
+  return { ...fn, helpers, surfaces: surfaces.join(','), disposition, target };
 }
 
 export function censusTsv(census) {
@@ -421,18 +422,6 @@ class Parser {
   statements(stop = null) {
     const result = [];
     while (this.i < this.tokens.length && (!stop || !this.peek(stop))) {
-      // The kit always builds through Jet; only the Rust-bootstrap availability
-      // guard with an otherwise empty early return is irrelevant to the port.
-      if (this.peek('if')) {
-        const rest = this.tokens.slice(this.i);
-        const qualifier = rest[2]?.value === 'common' ? ['common', '::'] : [];
-        const guard = ['if', '!', ...qualifier, 'have_rustc', '(', ')', '{', 'return', ';', '}'];
-        if (guard.every((value, i) => rest[i]?.kind !== 'string' && rest[i]?.value === value)
-            && rest[guard.length]?.value !== 'else') {
-          this.i += guard.length;
-          continue;
-        }
-      }
       if (this.peek('for')) {
         this.take(); const names = this.binding(); this.need('in');
         const iterable = this.expr(); this.need('{');
@@ -551,9 +540,80 @@ export function machineDiagnostics(run) {
   return result;
 }
 
+// Only resolve supported bootstrap helpers from their lexical binding. A same-
+// named local function is not the common/tir_support contract.
+function helperBinding(fn, name) {
+  const helpers = fn.helpers ?? [], parts = name.replace(/^crate::/u, '').split('::');
+  let path = parts;
+  const imports = fn.lexicalTokens ?? [];
+  const expand = (tokens, prefix = []) => {
+    for (const entry of topLevelSplit(tokens, ',')) {
+      const brace = entry.findIndex(token => token.value === '{');
+      if (brace >= 0) {
+        expand(entry.slice(brace + 1, closeAt(entry, brace)), [...prefix, ...entry.slice(0, brace).filter(token => token.kind === 'word').map(token => token.value)]);
+        continue;
+      }
+      const alias = entry.findIndex(token => token.value === 'as');
+      const words = entry.slice(0, alias < 0 ? entry.length : alias).filter(token => token.kind === 'word').map(token => token.value);
+      const full = [...prefix, ...words].filter(word => word !== 'crate');
+      const bound = alias < 0 ? full.at(-1) : entry[alias + 1]?.value;
+      if (parts[0] === bound) path = [...full, ...parts.slice(1)];
+    }
+  };
+  for (let i = 0; i < imports.length; i++) {
+    if (imports[i].kind !== 'word' || imports[i].value !== 'use') continue;
+    let end = i + 1;
+    while (end < imports.length && imports[end].value !== ';') end++;
+    expand(imports.slice(i + 1, end)); i = end;
+  }
+  const leaf = path.at(-1);
+  const local = helpers.filter(helper => helper.name === leaf && (helper.file === fn.file ||
+    (dirname(fn.file) !== 'tests' && dirname(helper.file) === dirname(fn.file))));
+  if (path.length === 1 && local.length === 1) return { helper: local[0], name: leaf };
+  if (path.length === 2 && ['common', 'tir_support'].includes(path[0])) {
+    const helper = helpers.find(candidate => candidate.name === leaf && candidate.file === `tests/${path[0]}/mod.rs`);
+    return { helper, name: path.join('::') };
+  }
+  return null;
+}
+
+function availabilityGuards(fn, tokens) {
+  const output = [];
+  const rustc = name => ['common::have_rustc', 'tir_support::have_rustc'].includes(helperBinding(fn, name)?.name);
+  for (let i = 0; i < tokens.length;) {
+    if (tokens[i]?.value !== 'if' || tokens[i]?.kind === 'string') { output.push(tokens[i++]); continue; }
+    let cursor = i + 1, negative = tokens[cursor]?.value === '!';
+    if (negative) cursor++;
+    const start = cursor;
+    while (tokens[cursor]?.kind === 'word' || tokens[cursor]?.value === '::') cursor++;
+    const name = tokens.slice(start, cursor).map(token => token.value).join('');
+    let accepted = negative && rustc(name);
+    if (!negative) {
+      const binding = helperBinding(fn, name), body = binding?.helper?.tokens ?? [];
+      const raw = body.map(token => token.raw).join(' ');
+      const call = raw.match(/^! ((?:[A-Za-z_]\w* :: )*[A-Za-z_]\w*) \( \)$/u);
+      accepted = binding?.helper?.name === 'skip_without_rustc' && !!call
+        && ['common::have_rustc', 'tir_support::have_rustc'].includes(helperBinding({ ...binding.helper, helpers: fn.helpers }, call[1].replaceAll(' ', ''))?.name);
+    }
+    if (!accepted || tokens[cursor]?.value !== '(' || tokens[cursor + 1]?.value !== ')' || tokens[cursor + 2]?.value !== '{') { output.push(tokens[i++]); continue; }
+    const open = cursor + 2, close = closeAt(tokens, open), body = tokens.slice(open + 1, close);
+    let j = 0;
+    while (body[j]?.value === 'eprintln' && body[j + 1]?.value === '!' && body[j + 2]?.value === '(') {
+      const end = closeAt(body, j + 2), args = body.slice(j + 3, end);
+      // A literal note has no expression side effects or original assertions.
+      if (args.length !== 1 || args[0].kind !== 'string' || body[end + 1]?.value !== ';') break;
+      j = end + 2;
+    }
+    const tail = body.slice(j).map(token => token.raw).join(' ');
+    if (!['return ;', 'return'].includes(tail) || tokens[close + 1]?.value === 'else') { output.push(tokens[i++]); continue; }
+    i = close + 1;
+  }
+  return output;
+}
+
 export function assertionPlan(fn) {
   const retirement = retireRustAssertions(fn);
-  const statements = new Parser(retirement.tokens).statements();
+  const statements = new Parser(availabilityGuards(fn, retirement.tokens)).statements();
   for (const statement of statements) checkAst(statement);
   Object.defineProperty(statements, 'retiredAssertions', { value: retirement.retired });
   return statements;
