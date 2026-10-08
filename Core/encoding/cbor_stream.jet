@@ -32,7 +32,8 @@ fn reserve<T>(allocation: stream.AllocationBudget, values: &[T], additional: Int
     Ok(mem.__list_capacity<T>(values) * mem.__type_size<T>() - old)
 }
 
-fn release<T>(allocation: stream.AllocationBudget, values: ^[T]) Never! {
+fn release<T>(allocation: stream.AllocationBudget, ^input: [T]) Never! {
+    values := ^input
     size :: mem.__list_capacity<T>(values) * mem.__type_size<T>()
     values = [T]{}
     allocation.release(size)
@@ -79,7 +80,7 @@ pub struct CBORPull {
         self.retained = 0
     }
 
-    fn fail(&self, failure: EncodingError) -> EncodingError Never! {
+    fn fail(&self, ^failure: EncodingError) -> EncodingError Never! {
         if self.terminal == .Val(first) -> return ~first
         &self.discard()
         self.terminal = Val(~failure)
@@ -132,7 +133,8 @@ pub struct CBORPull {
         capacity :: mem.__list_capacity<U8>(bytes)
         if bytes.len() < capacity -> return
         next :: if capacity == 0 -> 8 else -> capacity * 2
-        _ :: reserve<U8>(self.allocation, &bytes, next - bytes.len(), self.total, self.path(), "CBOR payload allocation failed") ?? return Err(err)
+        additional :: next - bytes.len()
+        _ :: reserve<U8>(self.allocation, &bytes, additional, self.total, self.path(), "CBOR payload allocation failed") ?? return Err(err)
     }
 
     fn payload(&self, length: U64, start: Int) -[IO]> [U8] EncodingError! {
@@ -207,7 +209,8 @@ pub struct CBORPull {
         #Unsafe("the retained key copies exactly the already validated text bytes") {
             key = encoding.__bytes_into_text(^stored)
         }
-        growth :: reserve<String>(self.allocation, &self.frames[at].keys, 1, start, self.path(), "CBOR map key table allocation failed") ?? {
+        path :: self.path()
+        growth :: reserve<String>(self.allocation, &self.frames[at].keys, 1, start, path, "CBOR map key table allocation failed") ?? {
             self.allocation.release(capacity)
             return Err(err)
         }
@@ -321,7 +324,8 @@ pub struct CBORPull {
             if self.frames.len() + 1 > self.limits.max_depth -> return Err(error(.Limit, start, self.path(), "max_depth {self.limits.max_depth} exceeded"))
             count :: &self.argument(additional, start) ?? return Err(err)
             if self.frames.len() == mem.__list_capacity<ReadFrame>(self.frames) {
-                _ :: reserve<ReadFrame>(self.allocation, &self.frames, 1, start, self.path(), "CBOR reader frame allocation failed") ?? return Err(err)
+                path :: self.path()
+                _ :: reserve<ReadFrame>(self.allocation, &self.frames, 1, start, path, "CBOR reader frame allocation failed") ?? return Err(err)
             }
             &self.frames.push(ReadFrame{object: major == 5, remaining: count, index: U64{0}, expecting_key: true, key: None, keys: [String]{}, keys_heap: U64{0}})
             return Ok(Val(if major == 4 -> DataEvent.ArrayStart else -> DataEvent.ObjectStart))
@@ -340,7 +344,7 @@ pub struct CBORPull {
 
     pub fn next(&self) -[IO]> DataEvent? EncodingError! {
         if self.terminal == .Val(first) -> return Err(~first)
-        value :: &self.next_inner() ?? return Err(&self.fail(err))
+        value :: &self.next_inner() ?? return Err(&self.fail(^err))
         if value == None && self.eof -> &self.discard()
         Ok(value)
     }
@@ -410,21 +414,22 @@ fn sift_entries(entries: &[(key: [U8], value: [U8])], root: Int, end: Int) Never
         child := at * 2 + 1
         if child + 1 < end && byte_before(entries[child].key, entries[child + 1].key) -> child += 1
         if !byte_before(entries[at].key, entries[child].key) -> return
-        &entries.swap(at, child)
+        &entries.__swap(at, child)
         at = child
     }
 }
 
 fn sort_entries(entries: &[(key: [U8], value: [U8])]) Never! {
-    start := entries.len() / 2
+    start := entries.len() /% 2
     loop start > 0 {
         start -= 1
-        sift_entries(&entries, start, entries.len())
+        end :: entries.len()
+        sift_entries(&entries, start, end)
     }
     end := entries.len()
     loop end > 1 {
         end -= 1
-        &entries.swap(0, end)
+        &entries.__swap(0, end)
         sift_entries(&entries, 0, end)
     }
 }
@@ -462,7 +467,7 @@ pub struct CBORPush {
         self.retained = 0
     }
 
-    fn fail(&self, failure: EncodingError) -> EncodingError Never! {
+    fn fail(&self, ^failure: EncodingError) -> EncodingError Never! {
         if self.terminal == .Val(first) -> return ~first
         &self.discard()
         self.terminal = Val(~failure)
@@ -553,7 +558,8 @@ pub struct CBORPush {
                 return Err(error(.Limit, self.total, "$", "max_total_bytes {maximum} exceeded"))
             }
         }
-        encoding.__write_bytes(&self.output, bytes) ?? {
+        window :: bytes[0..<bytes.len()]
+        encoding.__write_bytes(&self.output, window) ?? {
             release<U8>(self.allocation, ^bytes)
             return Err(io_error(self.total, "$", err))
         }
@@ -580,7 +586,8 @@ pub struct CBORPush {
         self.retained += size
     }
 
-    fn close_frame(&self, frame: ^WriteFrame) EncodingError! -[IO]> {
+    fn close_frame(&self, ^input: WriteFrame) EncodingError! -[IO]> {
+        frame := ^input
         heap :: frame_heap(frame)
         old := 0
         if frame.object {
@@ -648,7 +655,7 @@ pub struct CBORPush {
 
     pub fn write(&self, event: ^DataEvent) EncodingError! -[IO]> {
         if self.terminal == .Val(first) -> return Err(~first)
-        &self.write_inner(event) ?? return Err(&self.fail(err))
+        &self.write_inner(event) ?? return Err(&self.fail(^err))
     }
 
     pub fn flush(&self) EncodingError! -[IO]> {
@@ -692,4 +699,21 @@ pub fn writer(output: ^FileWriter, limits: EncodingLimits) -[FS]> CBORPush Encod
     out = [U8]{}
     length(&out, 4, 24)
     assert_eq(out, [U8]{152, 24})
+}
+
+#Test("CBOR entry heapsort preserves key order and paired payloads") {
+    entries := [(key: [U8], value: [U8])]{
+        (key: [U8]{3}, value: [U8]{30}),
+        (key: [U8]{1}, value: [U8]{10}),
+        (key: [U8]{2}, value: [U8]{20}),
+    }
+    sort_entries(&entries)
+    loop index in 0..<entries.len() {
+        assert_eq(entries[index].key, [U8]{U8{index + 1}})
+        assert_eq(entries[index].value, [U8]{U8{(index + 1) * 10}})
+    }
+    &entries.push((key: [U8]{0}, value: [U8]{0}))
+    sort_entries(&entries)
+    assert_eq(entries[0].key, [U8]{0})
+    assert_eq(entries[3].value, [U8]{30})
 }

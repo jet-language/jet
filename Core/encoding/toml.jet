@@ -679,7 +679,10 @@ fn render_toml(value: DataTree) -> String Never! {
 }
 
 fn render_toml_table(value: DataTree, prefix: String) -> String Never! {
-    if value != .Object(_) -> return ""
+    if value == {
+        .Object(_) -> {}
+        else -> return ""
+    }
     entries :: stream.object_entries(value)
     out := ""
     loop pair in entries {
