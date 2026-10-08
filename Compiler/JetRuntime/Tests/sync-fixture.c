@@ -92,20 +92,20 @@ static void nested_stm(void) {
     assert(atomic_load(&drops)==before_drop+5); // parent, rollback, stage, retired, final.
     puts("STM nested commit transfer/rollback/clone parity ok");
 }
-typedef struct { W cell; _Atomic unsigned attempted,entered,release; } Gate;
+typedef struct { W cell,expected; _Atomic unsigned attempted,entered,release; } Gate;
 static void *gate_worker(void *argument) {
     jet_rt_thread_attach(); Gate *g=argument;
     atomic_store(&g->attempted,1);
     W state=jet_rt_native_stm_begin(); atomic_store(&g->entered,1);
-    W out=0; jet_rt_native_shared_read_txn(g->cell,state,0,(W)read_word,(W)&out); assert(out==41);
-    jet_rt_native_shared_edit_txn(g->cell,state,42,(W)set_word,(W)&out);
+    W out=0; jet_rt_native_shared_read_txn(g->cell,state,0,(W)read_word,(W)&out); assert(out==g->expected);
+    jet_rt_native_shared_edit_txn(g->cell,state,g->expected+1,(W)set_word,(W)&out);
     jet_rt_native_stm_commit(state); jet_rt_thread_detach(); return NULL;
 }
 static void gate_stm(void) {
     W value=40,out=0,cell=jet_rt_native_shared_new((W)&value,&word_meta);
     W state=jet_rt_native_stm_begin();
     jet_rt_native_shared_edit_txn(cell,state,41,(W)set_word,(W)&out);
-    Gate g={.cell=cell}; pthread_t worker; assert(!pthread_create(&worker,NULL,gate_worker,&g));
+    Gate g={.cell=cell,.expected=41}; pthread_t worker; assert(!pthread_create(&worker,NULL,gate_worker,&g));
     while (!atomic_load(&g.attempted)) sched_yield();
     struct timespec delay={0,20000000}; nanosleep(&delay,NULL);
     assert(!atomic_load(&g.entered)); assert(jet_rt_sync_fixture_gate_depth()==1);
@@ -114,6 +114,22 @@ static void gate_stm(void) {
     assert(jet_rt_sync_fixture_cell_word(cell,48)==2);
     clean_cell(cell,1); assert(jet_rt_sync_fixture_gate_depth()==0);
     jet_rt_native_shared_drop(cell); puts("STM two-thread body gate serialization ok");
+}
+// The compiler's uncommitted Stm drop calls rollback, not commit. A second
+// attached thread must acquire the root gate and see no abandoned publication.
+static void dropped_root_stm(void) {
+    W value=40,out=0,cell=jet_rt_native_shared_new((W)&value,&word_meta);
+    W state=jet_rt_native_stm_begin();
+    jet_rt_native_shared_edit_txn(cell,state,999,(W)set_word,(W)&out);
+    Gate g={.cell=cell,.expected=40}; pthread_t worker; assert(!pthread_create(&worker,NULL,gate_worker,&g));
+    while (!atomic_load(&g.attempted)) sched_yield();
+    struct timespec delay={0,20000000}; nanosleep(&delay,NULL);
+    assert(!atomic_load(&g.entered)); assert(jet_rt_sync_fixture_gate_depth()==1);
+    jet_rt_native_stm_rollback(state); assert(!pthread_join(worker,NULL));
+    assert(atomic_load(&g.entered)); assert(cell_value(cell)==41);
+    assert(jet_rt_sync_fixture_cell_word(cell,48)==1);
+    clean_cell(cell,1); assert(jet_rt_sync_fixture_gate_depth()==0);
+    jet_rt_native_shared_drop(cell); puts("STM dropped uncommitted root releases second-thread gate ok");
 }
 static void rejected_stm(void) {
     W save[4],control=jet_rt_control_new(); jet_rt_control_enter(control,(W)save);
@@ -222,6 +238,7 @@ static void observe_report(void) {
 #endif
 int main(void) {
     jet_rt_thread_attach(); nested_stm(); gate_stm(); rejected_stm();
+    dropped_root_stm();
 #ifdef JET_CONDITION_FIXTURE
     condition_tests();
 #endif
