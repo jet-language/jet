@@ -2167,6 +2167,21 @@ null drop and exact-once shell frees against real providers with
 receipt. Native layout/MIR/import admission, seed-body suppression and actual
 link/execution remain the same composition gates.
 
+`ServiceError.jet` owns a private 16-byte tag/Text-pointer carrier in
+`DataABI.jet`, with declaration-order tags from `ServiceAuthority.rs:198-216`.
+Its ten constructors clone borrowed Text; clone is deep, equality compares
+the variant before its payload, and drop releases both owners exactly once.
+Each getter checks its variant before cloning Text, using the shared
+`rt_record_variant_panic` on mismatch just as `CAbiRoutes.rs:11197-11303` does.
+Show returns a fresh copy of the raw payload, including NUL and Unicode:
+`Services.rs:1248-1263` matches all ten variants to `m.clone()`, with no
+label, escaping or redaction. No display/debug API is added by analogy.
+The real-provider `ServiceErrorWitness.c` checks all variants, ownership,
+byte-exact show/getters and inequality; `wrong-N` modes test each getter's
+variant failure against the existing record-variant stop contract. Its
+stdout fixture is expected output only; native execution and source-layout
+admission require composition, not a syntax receipt.
+
 ### Native UI scalar and record carriers
 
 `UiCarriersABI.jet` in JetBackend/Source defines opaque native-private
