@@ -366,6 +366,24 @@ directly with valid Rust behavior. A redesigned surface maps valid Rust inputs
 to the new Jet contract and compares semantic values and errors. Do not keep a
 runtime compatibility layer merely to make that comparison.
 
+## Native command test suites
+
+The harness installs a named, non-capturing function value; this is a private
+runtime ingress, not a new Core API. `TestSuite` is an independently owned 24-byte
+snapshot of iteration, result, and runner. Running a snapshot updates the
+current thread's counters without rewriting that snapshot. Installation resets
+the counters, and each thread uses the existing dynamic TLS mechanism with a
+destructor that frees its state.
+
+The runner uses the ordinary native function-value box and inline tuple-result
+ABI, not a Rust or C pair-return convention. Installation deliberately retains
+one process-lifetime reference per install to model the seed's static function
+pointer. This reference is never released: repeated installation therefore
+leaks one reference per install, and old snapshots still safely invoke their
+old runner. Cloning and dropping snapshots copy/free only the 24-byte carrier.
+Capturing callbacks and sharing a counted function box across threads are not
+part of this harness contract.
+
 ## Dependency order
 
 Core work follows the dependency graph. These categories describe dependency
