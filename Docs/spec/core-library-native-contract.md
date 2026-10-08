@@ -207,6 +207,15 @@ with its typed clone glue. Dropping that temporary must not retire the source.
 The `flat-map-owned` and `list-try-collect` lowering fixtures require exact
 output plus linker-observed Jet allocator balance after source/result cleanup.
 
+Native resident-session reservations use the same heap as ordinary native
+storage, but return a null place for an invalid layout or allocation failure.
+A failed slab mapping releases the heap lock without publishing slab metadata;
+a failed direct mapping never publishes a payload or its allocation header.
+The ordinary allocation door still delivers its existing fatal layout/OOM
+diagnostic. Successful reservations retain their original size and alignment
+for the shared exact-layout free operation, including aligned zero-size places.
+
+
 Implicit process-stream loops retain and call the checked Core
 `__stdout_next_line` / `__stderr_next_line` bodies directly. Their native cursor
 shares the ordinary Iterable cursor's buffered-item, stride, and cleanup
