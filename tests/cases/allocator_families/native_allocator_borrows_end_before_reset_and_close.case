@@ -1,0 +1,20 @@
+# HAND-PORT tests/allocator_families.rs:656-702 native_allocator_borrows_end_before_reset_and_close
+# PENDING-KIT; PENDING-GRAMMAR; original assertions, no historical failing captures.
+# All three original AOT cases in separate original-equivalent packages; verbatim examples/current existing goldens and fixed-source literal; helper Rust unsafe scan retires.
+fixture: native_allocator_borrows_end_before_reset_and_close.fixture
+env: NO_COLOR=1
+step: jet build --profile=debug arena/main.jet
+exit: 0
+step: built
+exit: 0
+stdout: = native_allocator_borrows_end_before_reset_and_close.arena.expected
+step: jet build --profile=debug arena_regions/main.jet
+exit: 0
+step: built
+exit: 0
+stdout: = native_allocator_borrows_end_before_reset_and_close.arena_regions.expected
+step: jet build --profile=debug fixed/main.jet
+exit: 0
+step: built
+exit: 0
+stdout: = native_allocator_borrows_end_before_reset_and_close.fixed.expected
