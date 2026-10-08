@@ -9,7 +9,7 @@ limit: time=120
 exit: 0
 stdout: = production_process_limits_authority_and_descendant_cleanup.stdout.expected
 capture: child = text file.trim child.pid
-cap:child: is-u32
+cap:child: is-u32 # original ed77c235f tests/agent_workloads.rs:2530-2534 child PID trim then parse::<u32>().unwrap
 repeat while process {cap:child} proc-readable-nonzombie timeout 2s every 10ms fail "timed-out process left descendant"
 end repeat
 remove: child.pid
@@ -18,7 +18,7 @@ limit: time=120
 exit: 0
 stdout: = production_process_limits_authority_and_descendant_cleanup.stdout.expected
 capture: release_child = text file.trim child.pid
-cap:release_child: is-u32
+cap:release_child: is-u32 # original ed77c235f tests/agent_workloads.rs:2530-2534 release child PID trim then parse::<u32>().unwrap
 repeat while process {cap:release_child} proc-readable-nonzombie timeout 2s every 10ms fail "timed-out process left descendant"
 end repeat
 remove: child.pid
