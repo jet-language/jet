@@ -7839,7 +7839,8 @@ impl<'a> Checker<'a> {
         let mut operator_signature = None;
         if let Some(trait_name) = operator_trait.filter(|_| args.len() == 1) {
             let (owner_type, _, traits) = self.capability_type_context(&recv_ty);
-            if traits.operator_impls.iter().any(|row| row.left == owner_type.name() && row.trait_name == trait_name) {
+            if traits.operator_impls.iter().any(|row| row.left == owner_type.name() && row.trait_name == trait_name)
+                || self.has_source_operator_left(&recv_ty, trait_name) {
                 let rhs_place_type = self.place_expr_type(&args[0].expr).unwrap_or(Type::Bool);
                 let rhs = self.with_call_access(&mut call_access, |checker| {
                     checker.check_call_argument_access(&args[0], AccessConvention::Read, &rhs_place_type, true);
@@ -7851,19 +7852,21 @@ impl<'a> Checker<'a> {
                 pre_inferred_operator = Some(vec![Some(rhs.clone())]);
                 let (rhs_type, _, _) = self.capability_type_context(&rhs);
                 let (owner_type, registry, traits) = self.capability_type_context(&recv_ty);
-                if let Some(row) = traits.operator_impl_for(&owner_type, trait_name, &rhs_type) {
+                let source_row = self.source_operator_row(&recv_ty, trait_name, &rhs);
+                if let Some(row) = source_row.map(|(_, row)| row).or_else(|| traits.operator_impl_for(&owner_type, trait_name, &rhs_type)) {
                     let key = jet_foundation::Traits::operator_method_identity(&row.left, trait_name, method, &row.rhs);
-                    let owner = match &recv_ty {
+                    let owner = source_row.map(|(owner, _)| owner).unwrap_or_else(|| match &recv_ty {
                         Type::Named(name) | Type::Apply { name, .. } => {
                             let (namespace, leaf) = self.struct_type_name_parts(name);
                             self.struct_owner_module(leaf, namespace).unwrap_or(self.module_idx)
                         }
                         _ => self.module_idx,
-                    };
+                    });
+                    let registry = source_row.and_then(|(owner, _)| self.modules.map(|modules| &modules[owner].registry)).unwrap_or(registry);
                     let signature = registry.operator_signatures.get(&key).cloned();
                     if let Some(mut signature) = signature {
                         self.qualify_method_signature(owner, &row.left, &mut signature);
-                        *operator_rhs_out = Some(row.rhs.clone());
+                        *operator_rhs_out = Some(self.qualify_method_type(owner, &row.rhs, &std::collections::HashSet::new()));
                         operator_signature = Some((owner, signature));
                     }
                 }

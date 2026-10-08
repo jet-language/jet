@@ -1046,6 +1046,8 @@ fn expand_nested_generics_in_code_module(
     traits.register_synthetic_rollback();
     traits.register_synthetic_display_debug();
     traits.register_synthetic_close();
+    // Disposable bound-resolution prepass: its seeded rows never enter the
+    // checked registry; Pipeline registers the expanded items against bundle ownership.
     traits.register_synthetic_operators(|_| false);
     traits.register_synthetic_iter_index();
     traits.register_synthetic_io();
@@ -1963,6 +1965,8 @@ fn expand_alias(
         nested_traits.register_synthetic_rollback();
         nested_traits.register_synthetic_display_debug();
         nested_traits.register_synthetic_close();
+        // This discarded template registry resolves bounds only; the final
+        // Pipeline registry reseeds against loaded Core ownership.
         nested_traits.register_synthetic_operators(|_| false);
         nested_traits.register_synthetic_iter_index();
         nested_traits.register_synthetic_io();
