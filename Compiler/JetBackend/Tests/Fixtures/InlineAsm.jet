@@ -7,6 +7,8 @@
 // expect-stdout inline-asm-call-one-unit: "4\n73\n"
 // expect-stdout inline-asm-call-two-unit: "42\n73\n"
 // expect-stdout inline-asm-call-three-unit: "421\n73\n"
+// expect-stdout inline-asm-call-one-unit-i64: "4\n73\n"
+// expect-stdout inline-asm-call-two-unit-i64: "42\n73\n"
 // expect-stdout inline-asm-fixed: "ok\nok\n682863\n42\n42\n111\n0\n"
 // expect-stdout inline-asm-int-input: ""
 // expect-exit inline-asm-int-input: 70
@@ -194,8 +196,12 @@ fn fx_inline_asm_print_word(builder: &LIRFunctionBuilder, value: LIRValueID, pri
 // signature and the callback both have NO result; no incidental RAX is read.
 // Every nonzero arity encodes argument order, while the caller's marker
 // remains live across the call and the callback's actual runtime calls.
-fn fx_inline_asm_call_unit(arity: Int) -> LIRModule Never! {
-    name :: if arity == {
+fn fx_inline_asm_call_unit(arity: Int, raw_i64: Bool) -> LIRModule Never! {
+    name :: if raw_i64 -> if arity == {
+        1 -> "os_call1_unit_i64"
+        2 -> "os_call2_unit_i64"
+        else -> panic("raw I64 Unit assembly witness needs arity one or two")
+    } else -> if arity == {
         0 -> "os_call_address_unit"
         1 -> "os_call_address_one_unit"
         2 -> "os_call_address_two_unit"
@@ -203,14 +209,18 @@ fn fx_inline_asm_call_unit(arity: Int) -> LIRModule Never! {
         else -> panic("Unit assembly witness needs arity zero through three")
     }
     params := [String]{"address"}
-    if arity >= 1 -> &params.push("first")
-    if arity >= 2 -> &params.push("second")
+    if arity >= 1 -> &params.push(if raw_i64 -> "a" else -> "first")
+    if arity >= 2 -> &params.push(if raw_i64 -> "b" else -> "second")
     if arity >= 3 -> &params.push("third")
     lowered :: lir_lower_callables(fx_asm_program([MIRFunction]{fx_asm_leaf(name, params, false)}), [MIRFunctionID]{mir_function_id(name)})
     if lowered.issues.len() > 0 -> panic("Unit assembly callable refused: {lowered.issues}")
     p := lowered.lir
     signature :: lir_signature(p, p.functions[0].signature) ?? panic("Unit assembly callable has no checked signature")
     if signature.result != None -> panic("Unit assembly callable exposes an incidental result")
+    if signature.params.len() != arity + 1 -> panic("Unit assembly callable has the wrong parameter count")
+    loop layout in signature.params {
+        if layout != lir_layout_word() -> panic("Unit assembly callable has a non-word parameter")
+    }
     print_signature :: LIRSignatureID{value: p.signatures.len()}
     &p.signatures.push(LIRSignature{id: print_signature, convention: LIRCallConv.SystemV, params: [LIRLayout]{lir_layout_word()}, result: Val(lir_layout_word())})
     line_signature :: LIRSignatureID{value: p.signatures.len()}
@@ -261,6 +271,27 @@ fn fx_inline_asm_call_unit(arity: Int) -> LIRModule Never! {
     lir_builder_seal(&entry, LIRBlockID{value: 0}, [LIRValueID]{}, LIRTerminator.Return{value: None})
     &p.functions.push(lir_builder_finish(entry))
     p
+}
+
+// Deliberately wrong checked MIR signatures must refuse the SAME actual OS
+// template. Never publish an entry/callable after the exact lowering issue.
+fn fx_inline_asm_unit_signature_refusals() -> Bool Never! {
+    loop (index, name) in ([String]{"os_call1_unit_i64", "os_call2_unit_i64"}) {
+        params := [String]{"address", "a"}
+        if index == 1 -> &params.push("b")
+        loop invalid_result in ([Bool]{true, false}) {
+            leaf := fx_asm_leaf(name, params, invalid_result)
+            expected := "inline asm: return anchor disagrees with the function signature"
+            if !invalid_result {
+                leaf.params[1].ty = mir_type_from_kind(MIRTypeKind.IntN{signed: true, bits: 32})
+                expected = "inline asm: parameter a is not a machine word"
+            }
+            lowered :: lir_lower_callables(fx_asm_program([MIRFunction]{leaf}), [MIRFunctionID]{mir_function_id(name)})
+            if lowered.issues.len() != 1 || lowered.entry != None || lowered.callables.len() != 0 -> return false
+            if lowered.issues[0].message != expected -> return false
+        }
+    }
+    true
 }
 
 fn fx_inline_asm_refusals() -> Bool Never! {
