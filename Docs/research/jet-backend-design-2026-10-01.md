@@ -2195,3 +2195,11 @@ existing metadata provider owns the one field-copy/drop implementation
 shared by standalone accessibility and projection; no temporary metadata
 carrier is allocated. Nullable projections preserve absence, while present
 projections compare both identity and the full ordered metadata graph.
+
+`UiIme.jet` clones/drops the seed event's owned NodeId and optional
+composition, including composition text, inline selection range and
+optional marked range. Range words preserve raw usize bits through the
+clipboard range helpers; no text-offset validation is added to cloning.
+All four phase ordinals are checked through the shared variant panic
+before allocation or release. Absent composition/marked range remains
+distinct from a present empty composition/zero range.
