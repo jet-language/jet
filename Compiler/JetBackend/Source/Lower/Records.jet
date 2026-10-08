@@ -170,7 +170,8 @@ fn lower_record_sequence_kind(p: MIRProgram, ty: MIRType) -> String? {
 }
 
 fn lower_record_sequence_prefix(kind: String) -> String Never! {
-    "jet_rt_record_seq_{kind.split(\".\").to_list().join(\"_\")}"
+    suffix :: kind.split(".").to_list().join("_")
+    "jet_rt_record_seq_{suffix}"
 }
 
 // The runtime type a record of `ty` crosses a route as: a payload enum or a
@@ -711,8 +712,8 @@ fn lower_record_data_leaf(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &L
     bytes_view :: symbol == "jet_raw_bytes_view"
     view :: symbol == "jet_raw_object_entries_view" || bytes_view
     transfer :: symbol == "jet_raw_object_into_entries"
-    tag :: symbol == "jet_raw_tree_tag"
-    if !construct && !view && !transfer && !tag -> return false
+    is_tag :: symbol == "jet_raw_tree_tag"
+    if !construct && !view && !transfer && !is_tag -> return false
     if args.len() != 1 {
         lower_fail(&m, &f, "raw encoding leaf has no checked operand")
         return true
@@ -731,7 +732,7 @@ fn lower_record_data_leaf(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &L
     }
     value :: lower_use(&m, &f, args[0].value) ?? return true
     dst :: lower_result(p, c, &m, &f, instruction) ?? return true
-    if tag {
+    if is_tag {
         lower_emit(&f, LIRInst.Load{dst: dst, base: value, offset: 0})
         return true
     }

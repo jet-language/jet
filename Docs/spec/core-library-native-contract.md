@@ -94,6 +94,11 @@ values and fail-closed policy in Jet; the OS CSPRNG is a host cell. The raw
 algorithm controls in `core.crypto.expert` remain an explicit audited door, not
 a hidden provider policy.
 
+Native record-sequence provider symbols use `jet_rt_record_seq_` followed by
+the checked sequence kind with dots replaced by underscores. The lowering
+computes that suffix before interpolating the symbol, preserving the same
+typed carrier name without escaped string literals inside interpolation.
+
 `core.email` decodes DKIM key material into a fixed, zero-filled Secret buffer.
 It validates every encoded quartet before applying the final 32-byte length
 rule; a late alphabet or padding error still takes precedence over length.
