@@ -1606,9 +1606,8 @@ fn jet_eval_build_string(machine: &JetEvalMachine, parts: [MIRStringPart], frame
                     jet_eval_compiler_fail(&machine, span, "MIR string interpolation value is unavailable")
                     return None
                 }
-                value_data :: jet_eval_data(runtime_value, &machine, span) ?? return None
                 value_ty :: jet_eval_value_type(&machine, frame_index, value, span) ?? return None
-                rendered :: jet_eval_format_string_value_full(&machine, value_data, format, value_ty, span) ?? return None
+                rendered :: jet_eval_render_runtime_value(&machine, runtime_value, format, value_ty, span) ?? return None
                 output = "{output}{rendered}"
             }
         }

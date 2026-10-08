@@ -49,6 +49,7 @@ use jet_foundation.[
     diagnostic_from_registry,
     mir_type_display_name,
     stable_id,
+    mir_source_value_hook,
 ]
 use jet_sema.[
     SemaRegistrationHostHooks,
@@ -703,6 +704,9 @@ struct JetEvalProgramRows {
     // Per-function id rows, parallel to program.functions; each entry is
     // filled on the function's first lookup (jet_eval_function_rows_ready).
     pub function_rows: [JetEvalFunctionRows]
+    pub source_clone_hooks: [U64:MIRFunctionID]
+    pub source_show_hooks: [U64:MIRFunctionID]
+    pub source_debug_hooks: [U64:MIRFunctionID]
 }
 
 // Row positions in one function's id tables, so evaluator lookups for a
@@ -806,6 +810,22 @@ fn jet_eval_program_rows(program: MIRProgram) -> JetEvalProgramRows Never! {
     loop _ in 0..<program.functions.len() {
         &function_rows.push(JetEvalFunctionRows{built: false, blocks: [U64:Int]{}, places: [U64:Int]{}, values: [U64:Int]{}, values_next: [Int]{}, locals: [U64:Int]{}, locals_next: [Int]{}})
     }
+    source_clone_hooks := [U64:MIRFunctionID]{}
+    source_show_hooks := [U64:MIRFunctionID]{}
+    source_debug_hooks := [U64:MIRFunctionID]{}
+    loop instance in program.type_instances {
+        if instance.kind == .Apply(owner, _) {
+            if source_clone_hooks.get(owner.id.value) == None {
+                if mir_source_value_hook(program, instance, "clone") == .Val(id) -> source_clone_hooks[owner.id.value] = id
+            }
+            if source_show_hooks.get(owner.id.value) == None {
+                if mir_source_value_hook(program, instance, "show") == .Val(id) -> source_show_hooks[owner.id.value] = id
+            }
+            if source_debug_hooks.get(owner.id.value) == None {
+                if mir_source_value_hook(program, instance, "debug") == .Val(id) -> source_debug_hooks[owner.id.value] = id
+            }
+        }
+    }
     JetEvalProgramRows{
         functions: functions,
         fields: fields,
@@ -823,6 +843,9 @@ fn jet_eval_program_rows(program: MIRProgram) -> JetEvalProgramRows Never! {
         core_owners_by_nominal: core_owners_by_nominal,
         core_owners_by_id: core_owners_by_id,
         function_rows: function_rows,
+        source_clone_hooks: source_clone_hooks,
+        source_show_hooks: source_show_hooks,
+        source_debug_hooks: source_debug_hooks,
     }
 }
 

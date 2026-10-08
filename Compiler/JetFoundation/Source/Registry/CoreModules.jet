@@ -204,6 +204,15 @@ fn core_source_owns_type_in(rows: [CoreSourceOwnedType], name: String) -> Bool N
     false
 }
 
+// Private semantic routes belong to an exact source declaration, never a
+// short nominal spelling. They do not add public trait implementations.
+pub fn core_source_value_hook(name: String, operation: String) -> String? Never! {
+    if !name.starts_with("<corelib>/") -> return None
+    if operation == {
+        else -> None
+    }
+}
+
 // The variant names of a compiler-owned Core enum family with payload rows
 // (`IOError`, `IOOperation`, `ProcessStreamMode`, ...), in table order.
 pub fn core_enum_payload_variants(name: String) -> [String]? {

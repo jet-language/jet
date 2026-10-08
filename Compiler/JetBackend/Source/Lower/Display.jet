@@ -3,6 +3,7 @@
 use jet_foundation.[
     MIRField, MIRFunctionID, MIRImplDef, MIRProgram, MIRType, MIRTypeDef,
     mir_type_display_name, mir_type_same_checked_type,
+    mir_source_value_hook,
 ]
 enum LowerRenderMode { Display Show Debug }
 
@@ -90,6 +91,17 @@ fn lower_render_string(f: &LowerFunction) -> LIRValueID Never! {
 }
 
 fn lower_render_value(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRType, value: LIRValueID?, mode: LowerRenderMode) -> LowerText? {
+    if mir_source_value_hook(p, ty, if mode == .Debug -> "debug" else -> "show") == .Val(id) {
+        index :: lower_function_index(m, id)
+        if index < 0 {
+            lower_fail(&m, &f, "source show hook is not reachable")
+            return None
+        }
+        operand :: value ?? return None
+        text :: lower_render_string(&f)
+        lower_emit(&f, LIRInst.Call{dst: Val(text), signature: m.mir_signatures[index], callee: LIRCallee.Function{id: LIRFunctionID{value: index}}, args: [LIRValueID]{operand}})
+        return Val(LowerText{value: text, owned: true})
+    }
     loop implementation in p.impls {
         if mode == .Debug -> next
         if !lower_render_impl_selected(p, implementation, ty, mode == .Show) -> next
