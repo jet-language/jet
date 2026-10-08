@@ -6,13 +6,13 @@ fn core_net_dns_error_uses_canonical_acronym_type() {
     let source = r#"
 use core.net as net
 
-fn wrap_dns(error: net.NetDNSError) -> net.NetError Never! {
-    net.NetError.DNS(error)
+fn wrap_dns(error: NetDNSError) -> NetError Never! {
+    NetError.DNS(error)
 }
 
 fn run() {
-    _ :: wrap_dns(net.NetDNSError.NotFound("example.test"))
-    _ :: wrap_dns(net.NetDNSError.Failure("resolver unavailable"))
+    _ :: wrap_dns(NetDNSError.NotFound("example.test"))
+    _ :: wrap_dns(NetDNSError.Failure("resolver unavailable"))
 }
 "#;
     tir_support::compile_source("core_net_dns_error_canonical", source)

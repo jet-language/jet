@@ -3790,6 +3790,9 @@ provider report a typed `NetError` or `IOError`; the module does not silently
 turn a missing transport into a successful no-op. The implementation is
 [`Core/net/net.jet`](../../../Core/net/net.jet).
 
+DNS failures carry the built-in `NetDNSError` inside `NetError.DNS`: `NotFound`
+retains the queried name, while `Failure` retains the resolver's message.
+
 `SocketAddr` and `UDPPacket` retain the native provider carrier so resolver and
 socket results keep the nominal types accepted by transport operations. Jet owns
 IP parsing/canonical rendering, socket-text parsing/rendering, and lossy UDP
