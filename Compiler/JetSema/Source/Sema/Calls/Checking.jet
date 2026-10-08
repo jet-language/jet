@@ -16,6 +16,7 @@ use jet_foundation.[
     SymbolID,
     SymbolKind,
     TCallArg,
+    TListSpreadPart,
     TExpr,
     TExprKind,
     TLetTy,
@@ -301,8 +302,8 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
     slots := [Int]{}
     required_types := [Type]{}
     source_indices := [Int]{}
-    pin_arguments := false
-    binder_site := 0
+    pin_arguments := !binding.source_ordered
+    binder_site := span.start
     loop index in 0..<args.len() {
         slot :: sema_call_bound_slot(binding, binding.sources[index], args[index])
         if slot < 0 || slot >= params.len() -> return None
@@ -401,13 +402,10 @@ fn sema_call_pin_binder_arguments(typed: SemaCallTypedArguments, params: [SemaCa
     }
     loop index in order {
         slot :: typed.slots[index]
-        // A variadic slot spread over several arguments has no single slot
-        // temporary; those arguments stay in the call.
-        shared_slot := false
-        loop other in 0..<typed.slots.len() {
-            if other != index && typed.slots[other] == slot -> shared_slot = true
-        }
-        if shared_slot -> next
+        // Each written rest argument must be evaluated before grouping the
+        // tail. Its private pin cannot shadow a declaration-slot default.
+        pin_slot := slot
+        if params[slot].variadic -> pin_slot = -index - 1
         original :: ~lowered[index].value
         ty :: original.ty
         init := original
@@ -416,18 +414,23 @@ fn sema_call_pin_binder_arguments(typed: SemaCallTypedArguments, params: [SemaCa
             lowered[index].clone = false
             lowered[index].arc_clone = false
         }
-        borrowed :: lowered[index].borrow || lowered[index].mut_borrow
+        place_value :: if init.kind == {
+            .Local(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Deref(_) | .Borrow(_, _) -> true
+            else -> false
+        }
+        borrowed :: (lowered[index].borrow || lowered[index].mut_borrow) && place_value
         if borrowed {
             access :: if lowered[index].mut_borrow -> AccessConvention.Write else -> AccessConvention.Read
             init = sema_tir_expr(ty, TExprKind.Borrow{place: init, access: access}, original.span)
         }
-        symbol :: sema_call_binder_ref_symbol(environment, owner, typed.binder_site, slot, params[slot].name, ty, span)
-        local := tir_symbol_local("binder_ref_{typed.binder_site}_{slot}", span, symbol.id)
+        symbol :: sema_call_binder_ref_symbol(environment, owner, typed.binder_site, pin_slot, params[slot].name, ty, span)
+        local := tir_symbol_local("binder_ref_{typed.binder_site}_{pin_slot}", span, symbol.id)
         local.generated = true
         local.mutable = lowered[index].mut_borrow
         local.deref = borrowed
         local_value :: sema_tir_expr(ty, TExprKind.Local{local: local}, original.span)
-        lowered[index].value = if params[slot].convention == AccessConvention.Move -> sema_tir_expr(ty, TExprKind.Move{value: local_value}, original.span) else -> local_value
+        moves_pin :: params[slot].convention == AccessConvention.Move || (params[slot].variadic && !lowered[index].spread)
+        lowered[index].value = if moves_pin -> sema_tir_expr(ty, TExprKind.Move{value: local_value}, original.span) else -> local_value
         &bindings.push(TStmt.Let{local: local, let_ty: TLetTy.Inferred, init: init, gc_promotion: None, gc_transferred: false, span: span})
     }
     bindings
@@ -484,13 +487,107 @@ fn sema_call_lower_bound_arguments(typed: SemaCallTypedArguments, params: [SemaC
     lowered
 }
 
-pub fn sema_call_check_bound_arguments(state: &SemaOwnershipState, callee: String, params: [SemaCallParam], binding: SemaCallBinding, args: &[CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic]) -> [TCallArg]? {
-    typed :: sema_call_typecheck_bound_arguments(callee, params, None, false, binding, &args, environment, &scopes, &state, &tail_store, &context, span, &diagnostics, true) ?? return None
-    if typed.pin_arguments {
-        &diagnostics.push(sema_error("E0906", span, "a default argument of `{callee}` reads an earlier parameter on a call route that cannot pin it", "a default that names an earlier parameter reads that slot's already-passed value", "pass this argument explicitly"))
-        return None
+// Normalize the checked rest slot once, before publishing TIR. BuildList
+// owns scalar elements; ListSpread clones spread elements through the same
+// checked Clone/effect mechanism as a written list literal.
+fn sema_call_prepare_variadic_elements(typed: SemaCallTypedArguments, params: [SemaCallParam], args: [CallArg], lowered: &[TCallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
+    loop index in 0..<lowered.len() {
+        slot :: typed.slots[index]
+        if !params[slot].variadic -> next
+        value := ~lowered[index].value
+        if lowered[index].widen_to_vec {
+            // The boundary copy itself clones the fixed list's elements.
+            // Do not first clone the array and then clone that copy again.
+            if !lowered[index].clone && !lowered[index].arc_clone {
+                if !sema_expression_list_check_clone(value.ty, value.span, environment, &context, &diagnostics) -> return false
+            }
+            if args[index].convention == AccessConvention.Move -> value = sema_tir_expr(value.ty, TExprKind.Move{value: value}, value.span)
+            value = sema_tir_expr(typed.required_types[index], TExprKind.MaterializeView{value: value}, value.span)
+        } else if lowered[index].clone || lowered[index].arc_clone {
+            value = sema_tir_expr(value.ty, TExprKind.Clone{value: value, fact: tir_call_arg_copy_fact(lowered[index].arc_clone)}, value.span)
+        } else if args[index].convention == AccessConvention.Move {
+            value = sema_tir_expr(value.ty, TExprKind.Move{value: value}, value.span)
+        } else if lowered[index].spread {
+            // A lone spread is a direct List borrow; mixed spread cloning is
+            // judged below on the canonical ListSpread, not on its List root.
+            next
+        } else if !sema_ownership_type_is_copy(value.ty) {
+            places :: sema_ownership_places_from_expr_in_state(args[index].expr, scopes, &state)
+            borrowed := false
+            loop place in places {
+                loop binding in scopes.bindings {
+                    if binding.symbol.id.key == place.root_key && sema_ownership_binding_is_borrowed_param(binding) -> borrowed = true
+                }
+            }
+            copies_place :: places.len() > 0 && (borrowed || !sema_ownership_unmarked_moves_name(args[index].expr) || sema_ownership_is_share_site(state, args[index].span))
+            if copies_place {
+                if !sema_expression_list_check_clone(value.ty, value.span, environment, &context, &diagnostics) -> return false
+                value = sema_tir_expr(value.ty, TExprKind.Clone{value: value, fact: tir_call_arg_copy_fact(false)}, value.span)
+            } else {
+                if !sema_ownership_mark_unmarked_move(&state, args[index].expr, scopes, "the variadic list", &diagnostics) -> return false
+                value = sema_tir_expr(value.ty, TExprKind.Move{value: value}, value.span)
+            }
+        }
+        lowered[index].value = ^value
+        lowered[index].borrow = false
+        lowered[index].mut_borrow = false
+        lowered[index].clone = false
+        lowered[index].arc_clone = false
+        lowered[index].widen_to_vec = false
     }
-    Val(sema_call_lower_bound_arguments(typed, params, &args, environment))
+    true
+}
+
+fn sema_call_pack_variadic_arguments(typed: SemaCallTypedArguments, params: [SemaCallParam], lowered: [TCallArg], environment: SemaScopeEnvironment, context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic]) -> [TCallArg]? {
+    packed := [TCallArg]{}
+    loop slot in 0..<params.len() {
+        if !params[slot].variadic {
+            loop index in 0..<lowered.len() {
+                if typed.slots[index] == slot -> &packed.push(lowered[index])
+            }
+            next
+        }
+        list_ty :: sema_call_resolved_type(params[slot].ty ?? panic("checked variadic parameter has no type"), environment)
+        element :: if list_ty == {
+            .List(inner) -> inner
+            else -> panic("checked variadic parameter is not a List")
+        }
+        tail := [TCallArg]{}
+        loop index in 0..<lowered.len() {
+            if typed.slots[index] == slot -> &tail.push(lowered[index])
+        }
+        if tail.len() == 1 && tail[0].spread {
+            argument := tail[0]
+            argument.spread = false
+            &packed.push(^argument)
+            next
+        }
+        has_spread :: loop argument in tail { if argument.spread -> break true } ?? false
+        kind := TExprKind.List{values: [TExpr]{}, trait_coercion: None}
+        if has_spread {
+            if !sema_expression_list_check_clone(element, span, environment, &context, &diagnostics) -> return None
+            parts := [TListSpreadPart]{}
+            loop argument in tail {
+                if argument.spread -> &parts.push(TListSpreadPart.Spread{value: argument.value})
+                else -> &parts.push(TListSpreadPart.Element{value: argument.value})
+            }
+            kind = TExprKind.ListSpread{parts: ^parts}
+        } else {
+            values := [TExpr]{}
+            loop argument in tail -> &values.push(argument.value)
+            kind = TExprKind.List{values: ^values, trait_coercion: None}
+        }
+        value :: sema_tir_expr(list_ty, ^kind, span)
+        &packed.push(TCallArg{
+            value: ^value, template_items: [SymbolID]{},
+            borrow: params[slot].convention == AccessConvention.Read,
+            mut_borrow: params[slot].convention == AccessConvention.Write,
+            clone: false, arc_clone: false, fn_coerce: None,
+            widen_to_vec: false, widen_to_union: None, box_as_trait: None,
+            label: Val(params[slot].label), spread: false,
+        })
+    }
+    Val(^packed)
 }
 
 // This path runs Ownership after expression typing and before lowering. The
@@ -502,6 +599,8 @@ pub fn sema_call_check_bound_arguments_owned(state: &SemaOwnershipState, callee:
     ownership :: sema_ownership_check_call_arguments(&state, callee, params, &args, scopes, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return None
     lowered := sema_call_lower_bound_arguments(typed, params, &args, environment)
+    if !sema_call_prepare_variadic_elements(typed, params, args, &lowered, environment, &scopes, &state, &context, &diagnostics) -> return None
     pins := sema_call_pin_binder_arguments(typed, params, &lowered, environment, scopes, span)
-    Val((args: ^lowered, pins: ^pins))
+    packed :: sema_call_pack_variadic_arguments(typed, params, lowered, environment, &context, span, &diagnostics) ?? return None
+    Val((args: ^packed, pins: ^pins))
 }

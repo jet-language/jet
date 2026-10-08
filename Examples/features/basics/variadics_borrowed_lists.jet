@@ -1,0 +1,20 @@
+// #4894: forwarding read parameters never consumes the caller's List or String.
+fn join(parts: ...String) -> String { parts.join(",") }
+fn fresh() -> [String] { [String]{"fresh"} }
+fn inspect(parts: [String], item: String) {
+    print(join(...parts))
+    print(join(...parts))
+    print(join(item, item))
+    print(item)
+    print(parts.join(","))
+}
+
+fn run() {
+    parts :: [String]{"one", "two"}
+    item :: "borrowed"
+    inspect(parts, item)
+    print(parts.join(","))
+    print(item)
+    print(join(...[String]{"literal"}))
+    print(join(...fresh()))
+}

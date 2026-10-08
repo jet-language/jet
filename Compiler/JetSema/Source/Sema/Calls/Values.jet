@@ -1,6 +1,7 @@
 // Calls through a value whose type is Fn. The callee is checked first, then
 // the same binder/checker path as a named function is used.
 use jet_foundation.[
+    AccessConvention,
     CallArg,
     Diagnostic,
     Expr,
@@ -10,9 +11,11 @@ use jet_foundation.[
     TContract,
     TExpr,
     TExprKind,
+    TLetTy,
     TStmt,
     Type,
     expr_span,
+    tir_symbol_local,
 ]
 
 fn sema_call_value_root_name(callee: Expr) -> String? {
@@ -84,6 +87,22 @@ fn sema_call_value_checked_from_type(state: &SemaOwnershipState, callee: Expr, c
         resolved_binding = resolved
     }
     (lowered, pins) := sema_call_check_bound_arguments_owned(&state, "this function value", params, None, false, resolved_binding, &checked_args, environment, &scopes, &tail_store, &context, span, &diagnostics) ?? return None
+    call_callee := callee_value
+    if pins.len() > 0 {
+        owner :: sema_scope_function_owner_key(scopes)
+        pin_slot :: -checked_args.len() - 1
+        symbol :: sema_call_binder_ref_symbol(environment, owner, span.start, pin_slot, "callee", callee_value.ty, span)
+        local := tir_symbol_local("binder_ref_{span.start}_{pin_slot}", span, symbol.id)
+        local.generated = true
+        borrowed :: sema_ownership_places_from_expr_in_state(callee, scopes, &state).len() > 0
+        local.deref = borrowed
+        init := callee_value
+        if borrowed -> init = sema_tir_expr(init.ty, TExprKind.Borrow{place: init, access: AccessConvention.Read}, init.span)
+        ordered := [TStmt]{TStmt.Let{local: local, let_ty: TLetTy.Inferred, init: init, gc_promotion: None, gc_transferred: false, span: span}}
+        loop pin in pins -> &ordered.push(pin)
+        pins = ^ordered
+        call_callee = sema_tir_expr(callee_value.ty, TExprKind.Local{local: local}, callee_value.span)
+    }
     result_type_raw :: sema_call_signature_return(resolved_signature) ?? return None
     result_type :: sema_call_resolved_type(result_type_raw, environment)
     contract_bindings := [TStmt]{}
@@ -94,14 +113,14 @@ fn sema_call_value_checked_from_type(state: &SemaOwnershipState, callee: Expr, c
             contract_callee := Func?{None}
             if sema_contract_function_has_pre(environment, target.id) -> contract_callee = sema_contract_function_for_symbol(environment, target.id)
             if contract_callee == .Val(contract) {
-                slots :: loop source_index in 0..<resolved_binding.sources.len() -> sema_call_bound_slot(resolved_binding, resolved_binding.sources[source_index], checked_args[source_index])
+                slots :: loop slot in 0..<params.len() -> slot
                 checked_contract :: sema_contract_check_call(contract, &lowered, slots, span, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
                 contract_bindings = checked_contract.bindings
                 contract_nodes = checked_contract.contracts
             }
         }
     }
-    call_value :: sema_tir_expr(result_type, TExprKind.IndirectCall{callee: callee_value, type_args: [Type]{}, args: lowered, signature: resolved_signature}, span)
+    call_value :: sema_tir_expr(result_type, TExprKind.IndirectCall{callee: call_callee, type_args: [Type]{}, args: lowered, signature: resolved_signature}, span)
     contracted :: if {
         contract_nodes.len() > 0 -> {
             wrapped := contract_bindings

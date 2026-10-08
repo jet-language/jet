@@ -923,7 +923,7 @@ fn sema_call_direct_checked_from_target(state: &SemaOwnershipState, target: Sema
     contract_callee := Func?{None}
     if sema_contract_function_has_pre(environment, candidate.symbol.id) -> contract_callee = sema_contract_function_for_symbol(environment, candidate.symbol.id)
     if contract_callee == .Val(contract) {
-        slots :: loop source_index in 0..<resolved_binding.sources.len() -> sema_call_bound_slot(resolved_binding, resolved_binding.sources[source_index], args[source_index])
+        slots :: loop slot in 0..<params.len() -> slot
         checked_contract :: sema_contract_check_call(contract, &lowered, slots, call.name_span, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
         contract_bindings = checked_contract.bindings
         contract_nodes = checked_contract.contracts

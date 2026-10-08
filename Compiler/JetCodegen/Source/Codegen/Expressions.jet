@@ -572,43 +572,24 @@ fn jet_codegen_is_copy_type(ty: Type) -> Bool Never! {
     false
 }
 
-fn jet_codegen_formal_slot(label: String?, positional: Int, labels: [String], variadic: [Bool]) -> Int Never! {
-    if label != None {
-        wanted :: label
-        index := 0
-        loop index < labels.len() {
-            if labels[index] == wanted -> return index
-            index += 1
-        }
-        panic("checked call label has no MIR parameter slot")
-    }
-    if labels.len() == 0 -> return positional
-    if positional < labels.len() -> return positional
-    if variadic.len() > 0 && variadic[variadic.len() - 1] -> return variadic.len() - 1
-    positional
-}
 
 fn jet_codegen_lower_call_args(builder: &JetCodegenBuilder, program: JetCodegenProgram, args: [TCallArg], params: [TParameter]) -> [MIRCallArg] {
-    labels := [String]{}
     variadic := [Bool]{}
     conventions := [AccessConvention]{}
     loop parameter in params {
-        &labels.push(parameter.public_label)
         &variadic.push(parameter.variadic)
         &conventions.push(parameter.convention)
     }
-    jet_codegen_lower_call_args_for_signature(&builder, program, args, labels, variadic, conventions)
+    jet_codegen_lower_call_args_for_signature(&builder, program, args, variadic, conventions)
 }
 fn jet_codegen_lower_foreign_call_args(builder: &JetCodegenBuilder, program: JetCodegenProgram, args: [TCallArg], params: [SemaCheckedForeignParam]) -> [MIRCallArg] {
-    labels := [String]{}
     variadic := [Bool]{}
     conventions := [AccessConvention]{}
     loop parameter in params {
-        &labels.push(parameter.public_label)
         &variadic.push(parameter.variadic)
         &conventions.push(parameter.convention)
     }
-    jet_codegen_lower_call_args_for_signature(&builder, program, args, labels, variadic, conventions)
+    jet_codegen_lower_call_args_for_signature(&builder, program, args, variadic, conventions)
 }
 
 fn jet_codegen_lower_extern_args(builder: &JetCodegenBuilder, program: JetCodegenProgram, args: [TExternArg]) -> [MIRCallArg] {
@@ -646,16 +627,16 @@ fn jet_codegen_lower_extern_args(builder: &JetCodegenBuilder, program: JetCodege
     lowered
 }
 
-fn jet_codegen_lower_call_args_for_signature(builder: &JetCodegenBuilder, program: JetCodegenProgram, args: [TCallArg], labels: [String], variadic: [Bool], conventions: [AccessConvention]) -> [MIRCallArg] {
+fn jet_codegen_lower_call_args_for_signature(builder: &JetCodegenBuilder, program: JetCodegenProgram, args: [TCallArg], variadic: [Bool], conventions: [AccessConvention]) -> [MIRCallArg] {
+    if args.len() != conventions.len() -> panic("checked call argument count disagrees with its normalized signature")
     lowered := [MIRCallArg]{}
-    positional := 0
     index := 0
     loop index < args.len() {
         argument :: args[index]
         if argument.template_items.len() != 0 -> panic("checked runtime call contains compile-time template items")
-        slot := jet_codegen_formal_slot(argument.label, positional, labels, variadic)
-        formal := AccessConvention?{None}
-        if slot >= 0 && slot < conventions.len() -> formal = Val(conventions[slot])
+        if argument.spread -> panic("checked call retains an unpacked variadic argument")
+        slot := index
+        formal := Val(conventions[slot])
         materialize_view_clone := argument.clone && jet_codegen_is_string_view_value(builder, program, argument.value)
         access := jet_codegen_call_access(argument, formal)
         place := MIRPlaceID?{None}
@@ -702,11 +683,24 @@ fn jet_codegen_lower_call_args_for_signature(builder: &JetCodegenBuilder, progra
             None -> jet_codegen_emit_expr(&builder, program, argument.value)
             Val(place_id) -> {
                 operation := MIROperation.ReadPlace{place: place_id}
-                if access == MIRAccess.Move && !materialize_view_clone -> operation = MIROperation.MovePlace{place: place_id}
+                if access == MIRAccess.Move && !materialize_view_clone && !argument.clone && !argument.arc_clone -> operation = MIROperation.MovePlace{place: place_id}
                 jet_codegen_emit_value(&builder, program, argument.value.span, place_ty, operation)
             }
         }
         if materialize_view_clone -> value = jet_codegen_emit_value(&builder, program, argument.value.span, argument.value.ty, MIROperation.Copy{value: value, fact: MIRCopyFact.ViewMaterialize})
+        materialized_clone := (argument.clone || argument.arc_clone) && !materialize_view_clone
+        if materialized_clone -> value = jet_codegen_emit_value(&builder, program, argument.value.span, argument.value.ty, MIROperation.Copy{value: value, fact: if argument.arc_clone -> MIRCopyFact.Share else -> MIRCopyFact.Materialize})
+        // A synthetic rest List borrowed by the callee still belongs to the
+        // caller. Its cleanup slot owns the pack, not the lent argument.
+        is_pack := slot >= 0 && slot < variadic.len() && variadic[slot] && jet_codegen_collection_owned_temporary(argument.value)
+        if is_pack && formal == .Val(AccessConvention.Read) {
+            local := tir_generated_local("variadic_pack_{value.value}", argument.value.span)
+            pack_place := jet_codegen_bind_local(&builder, program, local, argument.value.ty, false, None, None, false)
+            _ := jet_codegen_emit(&builder, program, argument.value.span, None, MIROperation.WritePlace{place: pack_place, value: value})
+            access = MIRAccess.Read
+            value = jet_codegen_emit_value(&builder, program, argument.value.span, argument.value.ty, MIROperation.ReadPlace{place: pack_place})
+            place = Val(pack_place)
+        }
         fn_coercion := MIRFnCoercion?{None}
         if argument.fn_coerce != None {
             coercion :: argument.fn_coerce ?? TFnCoerce{ty: argument.value.ty, already_boxed: false}
@@ -740,7 +734,7 @@ fn jet_codegen_lower_call_args_for_signature(builder: &JetCodegenBuilder, progra
         clones_union := widen_to_union != None && access == MIRAccess.Read && place != None && !copy_source
         owned_last_use := access == MIRAccess.Move || box_as_trait != None || (widen_to_union != None && place == .None && !copy_source)
         call_place := place
-        if box_as_trait != None || argument.widen_to_union != None || materialize_view_clone -> call_place = None
+        if box_as_trait != None || argument.widen_to_union != None || materialize_view_clone || materialized_clone -> call_place = None
         &lowered.push(MIRCallArg{
             value: value,
             place: call_place,
@@ -750,8 +744,8 @@ fn jet_codegen_lower_call_args_for_signature(builder: &JetCodegenBuilder, progra
             source_index: Val(index),
             binder_slot: Val(slot),
             spread: argument.spread,
-            implicit_clone: (argument.clone && !materialize_view_clone) || clones_union,
-            shared_auto_clone: argument.arc_clone,
+            implicit_clone: clones_union,
+            shared_auto_clone: false,
             owned_last_use: owned_last_use,
             authority_boundary: false,
             fn_coercion: fn_coercion,
@@ -760,7 +754,6 @@ fn jet_codegen_lower_call_args_for_signature(builder: &JetCodegenBuilder, progra
             widen_to_union: widen_to_union,
             box_as_trait: box_as_trait,
         })
-        if argument.label == None -> positional += 1
         index += 1
     }
     lowered
@@ -1924,24 +1917,19 @@ fn jet_codegen_close_if_arm(builder: &JetCodegenBuilder, program: JetCodegenProg
 }
 
 fn jet_codegen_signature_call_args(builder: &JetCodegenBuilder, program: JetCodegenProgram, args: [TCallArg], signature: Type) -> [MIRCallArg] {
-    labels := [String]{}
     variadic := [Bool]{}
     conventions := [AccessConvention]{}
     if signature == {
-        .Fn(params, _, _, contract, metadata, _) -> {
+        .Fn(params, _, _, _, metadata, _) -> {
             index := 0
             loop _ in params {
-                label := ""
                 convention := AccessConvention.Read
                 is_variadic := false
-                if contract != None && index < contract.len() -> label = contract[index].label
                 if metadata != None {
                     facts :: metadata
-                    if label == "" && index < facts.names.len() -> label = facts.names[index]
                     if index < facts.conventions.len() -> convention = facts.conventions[index]
                     if index < facts.variadic.len() -> is_variadic = facts.variadic[index]
                 }
-                &labels.push(label)
                 &conventions.push(convention)
                 &variadic.push(is_variadic)
                 index += 1
@@ -1949,7 +1937,7 @@ fn jet_codegen_signature_call_args(builder: &JetCodegenBuilder, program: JetCode
         }
         else -> panic("checked indirect-call signature is not callable")
     }
-    jet_codegen_lower_call_args_for_signature(&builder, program, args, labels, variadic, conventions)
+    jet_codegen_lower_call_args_for_signature(&builder, program, args, variadic, conventions)
 }
 
 fn jet_codegen_function_id_for_name(builder: JetCodegenBuilder, program: JetCodegenProgram, name: String) -> MIRFunctionID Never! {
@@ -2485,7 +2473,7 @@ fn jet_codegen_method_receiver_arg(builder: &JetCodegenBuilder, program: JetCode
         span: receiver.span,
         label: None,
         source_index: None,
-        binder_slot: None,
+        binder_slot: Val(0),
         spread: false,
         implicit_clone: false,
         shared_auto_clone: false,
@@ -2499,15 +2487,24 @@ fn jet_codegen_method_receiver_arg(builder: &JetCodegenBuilder, program: JetCode
 }
 
 fn jet_codegen_lower_trait_method_args(builder: &JetCodegenBuilder, program: JetCodegenProgram, args: [TCallArg], signature: TTraitMethod) -> [MIRCallArg] {
-    labels := [String]{}
     variadic := [Bool]{}
     conventions := [AccessConvention]{}
     loop parameter in signature.params {
-        &labels.push(parameter.public_label)
         &variadic.push(parameter.variadic)
         &conventions.push(parameter.access)
     }
-    jet_codegen_lower_call_args_for_signature(&builder, program, args, labels, variadic, conventions)
+    lowered := jet_codegen_lower_call_args_for_signature(&builder, program, args, variadic, conventions)
+    loop index in 0..<lowered.len() -> lowered[index].binder_slot = Val(index + 1)
+    lowered
+}
+
+fn jet_codegen_lower_instance_args(builder: &JetCodegenBuilder, program: JetCodegenProgram, args: [TCallArg], params: [TParameter]) -> [MIRCallArg] {
+    if params.len() == 0 || params[0].name != "self" -> panic("checked instance signature has no canonical receiver")
+    explicit := [TParameter]{}
+    loop index in 1..<params.len() -> &explicit.push(params[index])
+    lowered := jet_codegen_lower_call_args(&builder, program, args, explicit)
+    loop index in 0..<lowered.len() -> lowered[index].binder_slot = Val(index + 1)
+    lowered
 }
 
 // #3740 (D-FAILURE-FOUNDATION1): a top-level function whose written failure
@@ -2884,7 +2881,7 @@ fn jet_codegen_lower_method_call(builder: &JetCodegenBuilder, program: JetCodege
             function_id := jet_codegen_function_id(function)
             callee = Val(MIRCallee.Method{function: function_id, owner: owner})
             &lowered_args.push(jet_codegen_method_receiver_arg(&builder, program, receiver, access))
-            loop argument in jet_codegen_lower_call_args(&builder, program, args, function.params) -> &lowered_args.push(argument)
+            loop argument in jet_codegen_lower_instance_args(&builder, program, args, function.params) -> &lowered_args.push(argument)
             jet_codegen_note_core_module(&builder, program, function.module_name)
         }
     }
@@ -4117,46 +4114,38 @@ fn jet_codegen_lower_list_spread(builder: &JetCodegenBuilder, program: JetCodege
         .List(inner) -> jet_codegen_unwrap_pattern_tags(inner)
         else -> panic("checked list spread result is not a List")
     }
-    trait_type := Type?{None}
-    if element == {
-        .TraitObject(bounds) -> {
-            if bounds.len() == 1 {
-                trait_type = Val(element)
-            }
-        }
-        .Named(name) -> {
-            if jet_codegen_trait_bound_is_declared(program.modules, name, builder.function.module_identity) {
-                trait_type = Val(Type.TraitObject{bounds: [String]{name}})
-            }
-        }
-        else -> {}
-    }
-    trait_coercion := if trait_type == {
-        None -> None
-        Val(target) -> {
-            jet_codegen_require_trait_box_target(target, builder, program)
-            identity :: jet_codegen_lower_type_for_function(target, builder, program).identity ?? panic("checked list spread trait target has no MIR identity")
-            Val(identity)
-        }
-    }
-    accumulator := jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.BuildList{values: [MIRValueID]{}, trait_coercion: trait_coercion})
+    accumulator := jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.BuildList{values: [MIRValueID]{}, trait_coercion: None})
     carrier := jet_codegen_failure_carrier_for_type(expression.ty)
     route := jet_codegen_intern_route(&builder, program, MIRPreludeFamily.BuiltinMethod, "core.builtin", "list_concat", "jet_list_concat", 2, [Bool]{true, true}, None, carrier, MIRPreludeABI.Value)
     loop part in parts {
+        chunk_access := MIRAccess.Move
         chunk := if part == {
             .Element(value) -> {
                 lowered := jet_codegen_lower_expr(&builder, program, value)
-                jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.BuildList{values: [MIRValueID]{lowered}, trait_coercion: trait_coercion})
+                lowered = jet_codegen_collection_slot_value(&builder, program, lowered, value, element)
+                jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.BuildList{values: [MIRValueID]{lowered}, trait_coercion: None})
             }
             .Spread(value) -> {
                 if jet_codegen_unwrap_pattern_tags(value.ty) == {
                     .List(_) -> {}
                     else -> panic("checked list spread operand is not a List")
                 }
-                jet_codegen_lower_expr(&builder, program, value)
+                source_place := MIRPlaceID?{None}
+                if !jet_codegen_is_move_kind(value.kind) -> source_place = jet_codegen_lower_expression_place(&builder, program, value, MIRAccess.Read)
+                if source_place == {
+                    Val(place) -> {
+                        chunk_access = MIRAccess.Read
+                        jet_codegen_emit_value(&builder, program, value.span, value.ty, MIROperation.ReadPlace{place: place})
+                    }
+                    None -> jet_codegen_lower_expr(&builder, program, value)
+                }
             }
         }
-        accumulator = jet_codegen_emit_static_prelude_call(&builder, program, expression.span, expression.ty, route, [MIRValueID]{accumulator, chunk})
+        args := [MIRCallArg]{
+            jet_codegen_host_call_value_arg(accumulator, expression.span, MIRAccess.Move, None),
+            jet_codegen_host_call_value_arg(chunk, expression.span, chunk_access, None),
+        }
+        accumulator = jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.StaticPreludeCall{call: route, args: ^args, owner_type_args: [MIRPreludeTypeArg]{}, type_args: [MIRType]{}}})
     }
     accumulator
 }
@@ -5188,33 +5177,8 @@ fn jet_codegen_lower_expr(builder: &JetCodegenBuilder, program: JetCodegenProgra
         }
         .IndirectCall(callee, type_args, args, signature) -> {
             callee_value := jet_codegen_lower_expr(&builder, program, callee)
-            labels := [String]{}
-            variadic := [Bool]{}
-            conventions := [AccessConvention]{}
-            if signature == {
-                .Fn(params, _, _, contract, metadata, _) -> {
-                    index := 0
-                    loop _ in params {
-                        label := ""
-                        convention := AccessConvention.Read
-                        is_variadic := false
-                        if contract != None && index < contract.len() -> label = contract[index].label
-                        if metadata != None {
-                            facts :: metadata
-                            if label == "" && index < facts.names.len() -> label = facts.names[index]
-                            if index < facts.conventions.len() -> convention = facts.conventions[index]
-                            if index < facts.variadic.len() -> is_variadic = facts.variadic[index]
-                        }
-                        &labels.push(label)
-                        &conventions.push(convention)
-                        &variadic.push(is_variadic)
-                        index += 1
-                    }
-                }
-                else -> panic("checked indirect-call signature is not callable")
-            }
             call_return_type := jet_codegen_callable_return_type(signature)
-            lowered_args := jet_codegen_lower_call_args_for_signature(&builder, program, args, labels, variadic, conventions)
+            lowered_args := jet_codegen_signature_call_args(&builder, program, args, signature)
             lowered_types := [MIRType]{}
             loop ty in type_args -> &lowered_types.push(jet_codegen_lower_type_for_function(ty, builder, program))
             jet_codegen_emit_value(&builder, program, expression.span, call_return_type, MIROperation.IndirectCall{callee: callee_value, args: lowered_args, type_args: lowered_types})
@@ -5257,23 +5221,17 @@ fn jet_codegen_lower_expr(builder: &JetCodegenBuilder, program: JetCodegenProgra
         .JSONLit(variant, argument, clone_arg) -> jet_codegen_lower_json_literal(&builder, program, expression, variant, argument, clone_arg)
         .DBValueLit(variant, argument, clone_arg) -> jet_codegen_lower_db_value_literal(&builder, program, expression, variant, argument, clone_arg)
         .List(values, trait_coercion) -> {
-            lowered_values := [MIRValueID]{}
-            loop value in values -> &lowered_values.push(jet_codegen_lower_expr(&builder, program, value))
-            lowered_coercion := if trait_coercion == {
-                None -> None
-                Val(ty) -> {
-                    jet_codegen_require_trait_box_target(ty, builder, program)
-                    loop value in values {
-                        if value.ty == {
-                            .TraitObject(_) -> if type_identity_key(value.ty) != type_identity_key(ty) -> panic("checked list trait coercion attempts an unsupported trait-object upcast")
-                            .Named(_) | .Apply(_, _) -> {}
-                            else -> panic("checked list trait coercion source is not nominal")
-                        }
-                    }
-                    jet_codegen_lower_type_for_function(ty, builder, program).identity
-                }
+            element :: if jet_codegen_unwrap_pattern_tags(expression.ty) == {
+                .List(inner) | .FixedList(inner, _) -> inner
+                else -> panic("checked List expression has no collection element type")
             }
-            jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.BuildList{values: lowered_values, trait_coercion: lowered_coercion})
+            target :: trait_coercion ?? element
+            lowered_values := [MIRValueID]{}
+            loop value in values {
+                lowered := jet_codegen_lower_expr(&builder, program, value)
+                &lowered_values.push(jet_codegen_collection_slot_value(&builder, program, lowered, value, target))
+            }
+            jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.BuildList{values: lowered_values, trait_coercion: None})
         }
         .Map(entries) -> {
             lowered_entries := [MIRMapEntry]{}
@@ -5326,7 +5284,7 @@ fn jet_codegen_lower_expr(builder: &JetCodegenBuilder, program: JetCodegenProgra
         }
         .MaterializeView(value) -> {
             lowered := jet_codegen_lower_expr(&builder, program, value)
-            jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Copy{value: lowered, fact: MIRCopyFact.ViewMaterialize})
+            jet_codegen_collection_materialize_view(&builder, program, lowered, value, expression.ty, expression.span)
         }
         .RequireStop(kind, location, always_stops) -> jet_codegen_lower_require_stop(&builder, program, expression, kind, always_stops, location)
         .AmbientInput(prompt) -> jet_codegen_lower_ambient_input(&builder, program, expression, prompt)

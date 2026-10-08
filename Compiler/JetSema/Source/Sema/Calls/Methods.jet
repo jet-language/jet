@@ -17,6 +17,7 @@ use jet_foundation.[
     TExpr,
     TExprKind,
     THostCall,
+    TLetTy,
     TMethodRef,
     TStmt,
     Type,
@@ -24,6 +25,7 @@ use jet_foundation.[
     expr_span,
     symbol_id,
     type_name,
+    tir_symbol_local,
 ]
 
 pub struct SemaMethodSpecialCheck {
@@ -553,26 +555,44 @@ fn sema_call_method_checked_from_value(state: &SemaOwnershipState, receiver: Exp
     ownership :: sema_ownership_check_method_call(&state, resolved_candidate.method.name, receiver, resolved_candidate.receiver_convention, params, &checked_args, scopes, span, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return None
     lowered := sema_call_lower_bound_arguments(typed, params, &checked_args, environment)
-    pins :: sema_call_pin_binder_arguments(typed, params, &lowered, environment, scopes, span)
+    if !sema_call_prepare_variadic_elements(typed, params, checked_args, &lowered, environment, &scopes, &state, &context, &diagnostics) -> return None
+    pins := [TStmt]{}
+    pinned_receiver := receiver_value
+    if typed.pin_arguments {
+        access :: resolved_candidate.receiver_convention
+        borrowed :: access != AccessConvention.Move && sema_ownership_places_from_expr_in_state(receiver, scopes, &state).len() > 0
+        pin_slot :: -typed.values.len() - 1
+        owner :: sema_scope_function_owner_key(scopes)
+        symbol :: sema_call_binder_ref_symbol(environment, owner, typed.binder_site, pin_slot, "receiver", receiver_value.ty, span)
+        local := tir_symbol_local("binder_ref_{typed.binder_site}_{pin_slot}", span, symbol.id)
+        local.generated = true
+        local.mutable = access == AccessConvention.Write
+        local.deref = borrowed
+        init := receiver_value
+        if borrowed -> init = sema_tir_expr(init.ty, TExprKind.Borrow{place: init, access: access}, init.span)
+        &pins.push(TStmt.Let{local: local, let_ty: TLetTy.Inferred, init: init, gc_promotion: None, gc_transferred: false, span: span})
+        value :: sema_tir_expr(receiver_value.ty, TExprKind.Local{local: local}, receiver_value.span)
+        pinned_receiver = if access == AccessConvention.Move -> sema_tir_expr(value.ty, TExprKind.Move{value: value}, value.span) else -> value
+    }
+    loop pin in sema_call_pin_binder_arguments(typed, params, &lowered, environment, scopes, span) -> &pins.push(pin)
+    lowered = sema_call_pack_variadic_arguments(typed, params, lowered, environment, &context, span, &diagnostics) ?? return None
     result_type_raw :: sema_call_signature_return(resolved_candidate.signature) ?? return None
     result_type_declared :: sema_call_resolved_type(result_type_raw, environment)
     transaction_depth :: scopes.transaction_depth
     result_type :: sema_call_shared_access_result_type(receiver_value.ty, resolved_candidate.method.name, result_type_declared, transaction_depth)
-    call_receiver := receiver_value
+    call_receiver := pinned_receiver
     contract_bindings := [TStmt]{}
     contract_nodes := [TContract]{}
     // The callee's declaration is copied only when it has `pre` clauses.
     contract_callee := Func?{None}
     if sema_contract_function_has_pre(environment, resolved_candidate.method.symbol) -> contract_callee = sema_contract_function_for_symbol(environment, resolved_candidate.method.symbol)
     if contract_callee == .Val(contract) {
-        receiver_arg :: TCallArg{value: receiver_value, template_items: [SymbolID]{}, borrow: resolved_candidate.receiver_convention == AccessConvention.Read && !sema_call_is_scalar(receiver_value.ty), mut_borrow: resolved_candidate.receiver_convention == AccessConvention.Write, clone: false, arc_clone: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: sema_call_box_as_trait(receiver_type, receiver_value.ty, environment), label: None, spread: false}
+        receiver_arg :: TCallArg{value: call_receiver, template_items: [SymbolID]{}, borrow: resolved_candidate.receiver_convention == AccessConvention.Read && !sema_call_is_scalar(call_receiver.ty), mut_borrow: resolved_candidate.receiver_convention == AccessConvention.Write, clone: false, arc_clone: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: sema_call_box_as_trait(receiver_type, call_receiver.ty, environment), label: None, spread: false}
         all_args := [TCallArg]{receiver_arg}
         loop argument in lowered -> &all_args.push(argument)
         receiver_slot :: resolved_candidate.receiver_offset - 1
         slots := [Int]{receiver_slot}
-        loop (source_index, source) in resolved_binding.sources {
-            &slots.push(sema_call_bound_slot(resolved_binding, source, checked_args[source_index]) + resolved_candidate.receiver_offset)
-        }
+        loop slot in 0..<params.len() -> &slots.push(slot + resolved_candidate.receiver_offset)
         checked_contract :: sema_contract_check_call(contract, &all_args, slots, span, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
         call_receiver = all_args[0].value
         lowered = [TCallArg]{}

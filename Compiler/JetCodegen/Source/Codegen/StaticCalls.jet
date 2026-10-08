@@ -58,11 +58,11 @@ fn jet_codegen_static_method_key(builder: JetCodegenBuilder, program: JetCodegen
 }
 
 fn jet_codegen_lower_static_prelude_args(builder: &JetCodegenBuilder, program: JetCodegenProgram, args: [TCallArg]) -> [MIRCallArg] {
-    labels := [String]{}
-    loop (index, argument) in args {
-        &labels.push(argument.label ?? "__jet_static_call_arg_{index}")
-    }
-    lowered := jet_codegen_lower_call_args_for_signature(&builder, program, args, labels, [Bool]{}, [AccessConvention]{})
+    // Intrinsic checking already bound these arguments. Its unmarked
+    // convention is Read; there is no language variadic slot on this route.
+    conventions := [AccessConvention]{}
+    loop _ in args -> &conventions.push(AccessConvention.Read)
+    lowered := jet_codegen_lower_call_args_for_signature(&builder, program, args, [Bool]{}, conventions)
     loop (index, source_argument) in args {
         lowered[index].label = None
         lowered[index].source_index = Val(index)

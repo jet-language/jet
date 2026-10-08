@@ -1,0 +1,20 @@
+// #4894: each packed value has the exact checked List element carrier.
+fn count(parts: ...(Int | String)) -> Int { parts.len() }
+fn rows(parts: ...([Int])) -> Int {
+    total := 0
+    loop row in parts -> total += row.len()
+    total
+}
+struct StaticCounter {
+    fn count(parts: ...String) -> Int { parts.len() }
+}
+fn run() {
+    tail :: [Int | String]{2, "three"}
+    print(count(1, ...tail, "four"))
+    fixed :: [Int#2]{1, 2}
+    print(rows(fixed, [Int]{3}))
+    print(fixed.len())
+    lists :: [[Int]]{[Int]{4}, [Int]{5, 6}}
+    print(rows([Int]{0}, ...lists))
+    print(StaticCounter.count("one", "two"))
+}
