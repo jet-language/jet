@@ -203,6 +203,7 @@ mod text_kernel {
     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/FSRuntimeOps.rs");
     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/FSWriteOps.rs");
     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/FileStream.rs");
+    include!("../../../jet-codegen/src/Prelude/CoreLib/Top/PlatformFamily.rs");
 
     pub(super) fn nfd(s: &str) -> String {
         jet_text_nfd(&s.to_string())
@@ -572,6 +573,24 @@ pub fn mir_fs_lock(path: &str) -> Result<MirFileOwner, crate::AST::CtValue> {
         .map(|owner| MirFileOwner {
             inner: MirFileOwnerKind::FileLock(owner),
         })
+        .map_err(io_error_ct)
+}
+
+pub fn mir_fs_temp_dir_raw(path: String) -> Result<MirFileOwner, crate::AST::CtValue> {
+    text_kernel::jet_std_fs_temp_dir_raw(path)
+        .map(|owner| MirFileOwner { inner: MirFileOwnerKind::TempDir(owner) })
+        .map_err(io_error_ct)
+}
+
+pub fn mir_fs_temp_file_raw(path: String) -> Result<MirFileOwner, crate::AST::CtValue> {
+    text_kernel::jet_std_fs_temp_file_raw(path)
+        .map(|owner| MirFileOwner { inner: MirFileOwnerKind::TempFile(owner) })
+        .map_err(io_error_ct)
+}
+
+pub fn mir_fs_lock_raw(path: &str) -> Result<MirFileOwner, crate::AST::CtValue> {
+    text_kernel::jet_std_fs_lock_raw(&path.to_string())
+        .map(|owner| MirFileOwner { inner: MirFileOwnerKind::FileLock(owner) })
         .map_err(io_error_ct)
 }
 
@@ -1139,7 +1158,55 @@ pub(crate) fn apply_files_leaf(
     let unit = |_: ()| CtValue::Unit;
     let run = || -> Result<CtValue, String> {
         Ok(match method {
-            "__temp_path_sample" => {
+            "__os_family" => CtValue::Str(text_kernel::jet_std_os_family()),
+            "__process_id_raw" => CtValue::Int(std::process::id() as i64),
+            "__map_raw" => done(text_kernel::jet_std::jet_std_files_map(&text(0)?), opaque_file),
+            "__remove_raw" => done(text_kernel::jet_std_fs_remove_raw(&text(0)?), unit),
+            "__remove_dir_raw" => done(text_kernel::jet_std_fs_remove_dir_raw(&text(0)?), unit),
+            "__remove_all_raw" => done(text_kernel::jet_std_fs_remove_all_raw(&text(0)?, boolean(1)?), unit),
+            "__copy_raw" => done(text_kernel::jet_std_fs_copy_raw(&text(0)?, &text(1)?), unit),
+            "__copy_dir_raw" => done(text_kernel::jet_std_fs_copy_dir_raw(&text(0)?, &text(1)?), unit),
+            "__hard_link_raw" => done(text_kernel::jet_std_fs_hard_link_raw(&text(0)?, &text(1)?), unit),
+            "__fsync_raw" => done(text_kernel::jet_std_fs_fsync_raw(&text(0)?), unit),
+            "__stat_mode_raw" => done(text_kernel::jet_std_fs_stat_mode_raw(&text(0)?), CtValue::Int),
+            "__chown_raw" => done(text_kernel::jet_std_fs_chown_raw(&text(0)?, int(1)?, int(2)?), unit),
+            "__set_mode_raw" => done(text_kernel::jet_std_fs_set_mode_raw(&text(0)?, int(1)?), unit),
+            "__symlink_directory_raw" => done(text_kernel::jet_std_fs_symlink_directory_raw(&text(0)?), CtValue::Bool),
+            "__symlink_raw" => done(text_kernel::jet_std_fs_symlink_raw(&text(0)?, &text(1)?, boolean(2)?), unit),
+            "__mkdtemp_raw" => done(text_kernel::jet_std_fs_temp_dir_path_raw(text(0)?), CtValue::Str),
+            "__canonicalize_raw" => done(text_kernel::jet_std_fs_canonicalize_raw(&text(0)?), CtValue::Str),
+            "__glob_raw" => done(text_kernel::jet_std_fs_glob_raw(&text(0)?),
+                |paths| CtValue::List(paths.into_iter().map(CtValue::Str).collect())),
+            "__list_dir_raw" => done(text_kernel::jet_std_fs_list_dir_raw(&text(0)?), |entries| {
+                CtValue::List(entries.into_iter().map(|entry| CtValue::Struct {
+                    type_name: "DirEntry".to_string(), fields: vec![
+                        ("name".to_string(), CtValue::Str(entry.name)),
+                        ("path".to_string(), CtValue::Str(entry.path)),
+                        ("is_dir".to_string(), CtValue::Bool(entry.is_dir)),
+                    ],
+                }).collect())
+            }),
+            "__walk_parallel_raw" => {
+                let ignore = match args.get(1) {
+                    Some(CtValue::Present(value)) => match value.as_ref() {
+                        CtValue::Str(value) => Some(value.as_str()),
+                        _ => return Err(format!("core.files.{method} ignore must be String?")),
+                    },
+                    Some(value) if value.is_clean_stop() => None,
+                    _ => return Err(format!("core.files.{method} ignore must be String?")),
+                };
+                done(text_kernel::fs_walk_parallel_with_ignore(&text(0)?, ignore), |entries| {
+                    CtValue::List(entries.into_iter().map(|entry| CtValue::Struct {
+                        type_name: "WalkEntry".to_string(), fields: vec![
+                            ("path".to_string(), CtValue::Str(entry.path)),
+                            ("relative".to_string(), CtValue::Str(entry.relative)),
+                            ("is_dir".to_string(), CtValue::Bool(entry.is_dir)),
+                            ("depth".to_string(), CtValue::Int(entry.depth)),
+                        ],
+                    }).collect())
+                })
+            },
+            "__temp_path_sample" | "__temp_clock_raw" => {
                 let (available, nanos) = text_kernel::jet_std::jet_fs_temp_path_sample_raw();
                 CtValue::Struct { type_name: "(clock_available,nanos)".to_string(),
                     fields: vec![("clock_available".to_string(), CtValue::Bool(available)), ("nanos".to_string(), CtValue::Str(nanos))] }
@@ -1150,7 +1217,7 @@ pub(crate) fn apply_files_leaf(
                     ("available".to_string(), CtValue::Bool(available)), ("held".to_string(), CtValue::Bool(held)),
                     ("fd".to_string(), CtValue::Int(fd.to_i64().expect("directory fd is i32")))] }
             },
-            "__temp_directory" => CtValue::Str(text_kernel::jet_std::jet_fs_temp_directory_raw()),
+            "__temp_directory" | "__temp_directory_raw" => CtValue::Str(text_kernel::jet_std::jet_fs_temp_directory_raw()),
             "__host_path_is_absolute" => CtValue::Bool(text_kernel::jet_std::jet_fs_host_path_is_absolute_raw(&text(0)?)),
             "__host_path_join" => CtValue::Str(text_kernel::jet_std::jet_fs_host_path_join_raw(&text(0)?, &text(1)?)),
             "__metadata_directory" => match text_kernel::jet_std::jet_fs_metadata_directory_raw(&text(0)?) {

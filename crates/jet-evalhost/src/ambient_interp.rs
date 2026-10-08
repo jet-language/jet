@@ -1998,6 +1998,23 @@ fn sys_getpid_ambient_core_call(
 /// (`CoreHost::jit_env_*`, the host copy of the Prelude `EnvInit` overlay), so
 /// `set`/`unset`/`vars`/`get` agree with each other and with spawned children,
 /// and `executable` is the Prelude `jet_std_os_executable` kernel.
+fn files_fault_ambient_core_call(
+    module: &str,
+    method: &str,
+    args: Vec<CtValue>,
+    span: Span,
+    _resolved_ret: Option<Type>,
+    _sink: Option<&mut DevSink>,
+) -> Option<Result<CtValue, Diagnostic>> {
+    if module != "core.files" || method != "__fault_should_fail" {
+        return None;
+    }
+    let [CtValue::Str(effect)] = args.as_slice() else {
+        return Some(Err(hardware_diag("core.files.__fault_should_fail expects one String", span)));
+    };
+    Some(Ok(CtValue::Bool(crate::fault_injection::jet_fault_should_fail(effect))))
+}
+
 fn sys_env_ambient_core_call(
     module: &str,
     method: &str,
@@ -2180,6 +2197,7 @@ pub fn with_interpreter_ambient<R>(
         context.register_core_call(sys_getpid_ambient_core_call);
         context.register_core_call(sys_env_ambient_core_call);
         context.register_core_call(testing_ambient_core_call);
+        context.register_core_call(files_fault_ambient_core_call);
         context.register_core_call(crate::Time::ambient_core_call);
         context.register_core_call(crate::IO::ambient_core_call);
         context.register_mir_extern(crate::Ffi::ambient_mir_extern_call);
