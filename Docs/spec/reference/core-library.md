@@ -2093,6 +2093,8 @@ above the vector's fixed width.
 The bare and `core.math`-qualified matrix and `F64x4` spellings identify the
 same source declaration. Matrix arithmetic preserves column-major indexing;
 `F64x4` uses its fixed `[F64#4]` array as the checked lane bridge.
+`Mat4` products accumulate from positive zero in row/column/k order; `*`
+between matrices is `matmul`, and `*` by a `Vec4` is `transform`.
 
 ```jet
 fn rotate(v: Vec3, transform: Mat3) -> Vec3 {
