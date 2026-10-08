@@ -757,8 +757,6 @@ pub enum THostCall {
     ExpectSnapshot(value: TExpr, snap_path: String)
     EnvSet(name: TExpr, value: TExpr, location: TPanicLoc)
     NumericBounds(ty: Type, member: String)
-    ExpiringSecretNew(value: TExpr, duration: TExpr, clock: TExpr, element: Type)
-    ExpiringValueNew(value: TExpr, duration: TExpr, clock: TExpr)
     CCallback(symbol: String, lambda: TLambda, ret: Type?, managed: Bool, plan_digest: String?, callback_identity: String?)
 }
 
@@ -1088,7 +1086,6 @@ pub enum THandleOp {
     MeasurementMethod(method: String)
     LayoutMethod(method: String)
     LoadableMethod(method: String)
-    ExpiringMethod(method: String)
     CivilTimeMethod(kind: String, method: String)
     EmailMethod(method: String)
     RegexMethod(kind: String, method: String)
@@ -2389,16 +2386,6 @@ fn tir_host_call_children(call: THostCall) -> [TExpr] Never! {
         .EnvSet(name, value, _) -> {
             &children.push(name)
             &children.push(value)
-        }
-        .ExpiringSecretNew(value, duration, clock, _) -> {
-            &children.push(value)
-            &children.push(duration)
-            &children.push(clock)
-        }
-        .ExpiringValueNew(value, duration, clock) -> {
-            &children.push(value)
-            &children.push(duration)
-            &children.push(clock)
         }
         .CCallback(_, lambda, _, _, _, _) -> loop child in tir_lambda_children(lambda) -> &children.push(child)
         else -> {}

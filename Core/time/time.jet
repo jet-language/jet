@@ -146,6 +146,7 @@ impl __ClockObserver {
 // Payloads remain owned; an explicit caller clock determines access.
 // Main's owner-approved private-field correction keeps deadline mutation out
 // of the public API; payload access always checks the strict expiry boundary.
+#!Debug
 pub struct ExpiringValue<T> {
     value: T
     deadline_ms: Int
@@ -153,18 +154,21 @@ pub struct ExpiringValue<T> {
 
 impl ExpiringValue {
     pub fn new<T>(value: T, ttl: Duration, clock: Clock) -> ExpiringValue<T> Never! {
-        observer :: clock.__observer()
-        ExpiringValue<T>{value: value, deadline_ms: saturating_add_ns(observer.now(), ttl.ns /% 1000000)}
+        ExpiringValue<T>{value: value, deadline_ms: __expiry_deadline(clock.now(), ttl)}
     }
 
     pub fn get(self, clock: Clock) -> T Expired! {
-        observer :: clock.__observer()
-        if observer.now() > self.deadline_ms -> return Err(Expired{})
+        if clock.now() > self.deadline_ms -> return Err(Expired{})
         Ok(~self.value)
     }
 
     pub fn expires_at_ms(self) -> Int Never! { self.deadline_ms }
     fn __show(self) -> String Never! { "Expiring(deadline={self.deadline_ms})" }
+}
+
+// The two expiry wrappers share the same saturating millisecond policy.
+pub fn __expiry_deadline(now_ms: Int, ttl: Duration) -> Int Never! {
+    saturating_add_ns(now_ms, ttl.ns /% 1000000)
 }
 
 #Test("ExpiringValue observes original clocks and expires strictly after its deadline") {

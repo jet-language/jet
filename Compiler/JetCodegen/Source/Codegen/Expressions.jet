@@ -4821,19 +4821,6 @@ fn jet_codegen_lower_expect_snapshot(builder: &JetCodegenBuilder, program: JetCo
     jet_codegen_emit_host_route_call(&builder, program, expression, call, ^args, [Bool]{false, false})
 }
 
-fn jet_codegen_lower_expiring_new(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, value: TExpr, duration: TExpr, clock: TExpr, elem: Type, secret: Bool) -> MIRValueID {
-    values := [TExpr]{value, duration, clock}
-    args := [MIRCallArg]{}
-    loop item in values -> &args.push(jet_codegen_numeric_call_arg(jet_codegen_lower_expr(&builder, program, item), expression.span))
-    carrier := jet_codegen_failure_carrier_for_type(expression.ty)
-    member := if secret -> "secret_new" else -> "new"
-    symbol := if secret -> "jet_expiring_secret_new" else -> "jet_expiring_new"
-    borrow_mask := [Bool]{false, true, true}
-    call := jet_codegen_intern_route(&builder, program, MIRPreludeFamily.StaticPrelude, "core.expiring", member, symbol, 3, borrow_mask, Val(Effect.Time), carrier, MIRPreludeABI.Value)
-    jet_codegen_apply_host_route_access(builder, program, &args, borrow_mask)
-    type_args := if secret -> [MIRType]{jet_codegen_lower_type_for_function(elem, builder, program)} else -> [MIRType]{jet_codegen_lower_type_for_function(value.ty, builder, program)}
-    jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.StaticPreludeCall{call: call, args: args, owner_type_args: [MIRPreludeTypeArg]{}, type_args: type_args}})
-}
 
 fn jet_codegen_lower_ambient_input(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, prompt: TExpr?) -> MIRValueID {
     prompt_value := MIRValueID?{None}
@@ -4966,8 +4953,6 @@ fn jet_codegen_lower_host_call(builder: &JetCodegenBuilder, program: JetCodegenP
             constant :: jet_codegen_numeric_bound_constant(ty, member) ?? panic("unsupported numeric bound `{member}` on {type_name(ty)}")
             return jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Constant{value: constant})
         }
-        .ExpiringSecretNew(value, duration, clock, elem) -> return jet_codegen_lower_expiring_new(&builder, program, expression, value, duration, clock, elem, true)
-        .ExpiringValueNew(value, duration, clock) -> return jet_codegen_lower_expiring_new(&builder, program, expression, value, duration, clock, value.ty, false)
         .StrMatchScan(subject, parts, probe) -> return jet_codegen_lower_string_match_scan(&builder, program, expression, subject, parts, probe)
         .BinMatchScan(subject, parts, probe) -> return jet_codegen_lower_binary_match_scan(&builder, program, expression, subject, parts, probe)
         .EnvSet(name, value, _) -> return jet_codegen_lower_env_set(&builder, program, expression, name, value)

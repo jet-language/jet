@@ -1354,6 +1354,18 @@ adds the `Time` effect. See
 [`vault_keys.jet`](../../../Examples/features/crypto/vault_keys.jet) and
 [`expiring_secret.jet`](../../../Examples/features/memory/expiring_secret.jet).
 
+The wrapper stores its optional credential and original clock observer in Jet.
+It samples that observer under the storage guard, and expires only when
+`now > deadline`; at equality the credential remains available. Expiry takes
+the payload out of its slot and ends the owned payload's scope, so its
+`Close` follows the same zeroization path as dropping still-live storage.
+The sole wipe host operation is the existing plain-byte `__zeroize` leaf.
+No observer or loan callback crosses that host boundary.
+Fields are private; `expires_at_ms()` reads the deadline and `.with(...)`
+is the fallible credential accessor. This is Main's owner-approved, veto-able
+private-field correction following Measurement/LogSpan, not a plaintext
+`secret()` accessor that bypasses expiry. Debug/Printable are opted out.
+
 ### `core.auth` — token verification and sessions
 
 `core.auth` verifies the closed JWT and PASETO forms and provides password,
@@ -2322,8 +2334,9 @@ millisecond bounds.
 `ExpiringValue.new(value, ttl, clock)` computes a saturating absolute
 millisecond deadline in Jet. `get(clock)` returns a copy of the payload until
 `now > deadline` (equality is still live), otherwise `Expired`. Zero and
-negative TTLs retain this same boundary. Show/Debug retain the existing
-`Expiring(deadline=N)` rendering. Its fields are private, with
+negative TTLs retain this same boundary. Show retains the existing
+`Expiring(deadline=N)` rendering; Debug remains unsupported (E0112), not a
+structural payload renderer. Its fields are private, with
 `expires_at_ms()` for the deadline and fallible `get(clock)` for payload
 access: this is Main's owner-approved, veto-able private-field correction,
 following the Measurement/LogSpan rule. The retired module constructor and

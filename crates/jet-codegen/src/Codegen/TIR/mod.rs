@@ -7272,19 +7272,6 @@ pub enum THostCall {
     },
     /// Numeric bounds constant: `{rust_type(ty)}::{member}`.
     NumericBounds { ty: Type, member: String },
-    /// `ExpiringSecret::<T>::new(value, ttl.ms, clock observer)`.
-    ExpiringSecretNew {
-        value: Box<TExpr>,
-        duration: Box<TExpr>,
-        clock: Box<TExpr>,
-        elem: Type,
-    },
-    /// `jet_expiring_new(value, duration_ms, clock_now)`.
-    ExpiringValueNew {
-        value: Box<TExpr>,
-        duration: Box<TExpr>,
-        clock: Box<TExpr>,
-    },
     /// D-CABI-CALLBACK1: `extern "C" fn` wrapper around a lowered lambda.
     CCallback {
         symbol: String,
@@ -9395,21 +9382,6 @@ fn collect_cost_expr_with_state_and_context(
             THostCall::EnvSet { name, value, .. } => {
                 collect_cost_expr(name, function, expr_span, loop_depth, sites);
                 collect_cost_expr(value, function, expr_span, loop_depth, sites);
-            }
-            THostCall::ExpiringSecretNew {
-                value,
-                duration,
-                clock,
-                ..
-            }
-            | THostCall::ExpiringValueNew {
-                value,
-                duration,
-                clock,
-            } => {
-                collect_cost_expr(value, function, expr_span, loop_depth, sites);
-                collect_cost_expr(duration, function, expr_span, loop_depth, sites);
-                collect_cost_expr(clock, function, expr_span, loop_depth, sites);
             }
             THostCall::CCallback { lambda, .. } => {
                 collect_cost_lambda(lambda, function, expr_span, loop_depth, sites);
@@ -14462,10 +14434,6 @@ pub enum THandleOp {
     /// `.loaded()` → `(recv).loaded()` → `Option<T>`.
     /// `.or_else(default)` → `(recv).or_else(a0)` → `T`.
     LoadableMethod {
-        method: String,
-    },
-    /// D-SHAPE-CTORVERB1=C: generic `ExpiringValue<T>` fallible accessors.
-    ExpiringMethod {
         method: String,
     },
     /// D-TIMEDEPTH1=A: method call on a civil-time type (Date/DateTime).

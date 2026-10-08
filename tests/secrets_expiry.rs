@@ -417,9 +417,9 @@ fn run() {
 }
 
 #[test]
-fn generic_ttl_remains_while_expiring_secret_replaces_rotting() {
+fn ttl_carriers_are_source_owned_and_retired_native_carriers_are_absent() {
     let compiled = jet::compile("fn run() {}").expect("empty program compiles");
-    assert!(compiled.rust.contains("struct JetExpiringSecret<T>"));
-    assert!(compiled.rust.contains("struct JetExpiring<T"));
+    assert!(!compiled.rust.contains("struct JetExpiringSecret<T>"));
+    assert!(!compiled.rust.contains("struct JetExpiring<T"));
     assert!(!compiled.rust.contains("struct JetRotting<T"));
 }

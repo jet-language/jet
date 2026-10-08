@@ -1826,10 +1826,14 @@ impl<'a> Checker<'a> {
                                         Some(args[2].expr.span()),
                                     ));
                             }
-                            let ret = Type::Apply {
-                                name: "ExpiringSecret".to_string(),
-                                args: vec![value_ty],
-                            };
+                            let owner = self.core_source_owner_module(&ns, type_name)?;
+                            let source_name = self.canonical_nominal_name(owner, type_name);
+                            let ret = self.check_static_method(
+                                &source_name, method, span, owner_type_args, type_args, args,
+                            )?;
+                            // Ordinary static lowering uses the checked source identity,
+                            // never the retired native ExpiringSecretNew carrier.
+                            *receiver = Box::new(Expr::Ident(source_name, receiver.span()));
                             let ret =
                                 if crate::Sema::Diagnostics::is_deterministic_clock_type(&clock_ty)
                                 {
@@ -1840,7 +1844,7 @@ impl<'a> Checker<'a> {
                                 } else {
                                     ret
                                 };
-                            *recv_type_out = Some("ExpiringSecret".to_string());
+                            *recv_type_out = None;
                             *resolved_ret_out = Some(ret.clone());
                             return Some(ret);
                         }
@@ -3527,7 +3531,10 @@ impl<'a> Checker<'a> {
                 if matches!(marker, crate::AST::TagMarker::Internal(crate::AST::InternalTag::DeterministicClock))
                     && matches!(
                         inner.as_ref(),
-                        Type::Apply { name, .. } if name == "ExpiringSecret"
+                        Type::Apply { name, .. }
+                            if name == "ExpiringSecret"
+                                || (jet_foundation::CoreModuleExports::core_source_owns_type(name)
+                                    && name.ends_with("::Core/crypto/vault.jet::ExpiringSecret"))
                     )
         );
         // Most fact tags are type-transparent. These compiler-owned tags
@@ -6380,7 +6387,10 @@ impl<'a> Checker<'a> {
                     return ret;
                 }
             }
-            if name == "ExpiringSecret" && method == "with" {
+            let source_expiring_secret =
+                jet_foundation::CoreModuleExports::core_source_owns_type(name)
+                    && name.ends_with("::Core/crypto/vault.jet::ExpiringSecret");
+            if (name == "ExpiringSecret" || source_expiring_secret) && method == "with" {
                 if !expiring_clock_is_deterministic {
                     self.record_effect(Effect::Time.name(), span);
                     if self.in_pure && self.det_suppress == 0 {
@@ -6393,11 +6403,17 @@ impl<'a> Checker<'a> {
                     _ => unreachable!(),
                 };
                 let result = self.finish_expiring_secret_with(&inner, args, span);
-                *recv_type_out = Some("ExpiringSecret".to_string());
-                return result.map(|ok| Type::Result {
-                    ok: Box::new(ok),
-                    err: Box::new(Type::Named("Expired".to_string())),
-                });
+                if !source_expiring_secret {
+                    *recv_type_out = Some("ExpiringSecret".to_string());
+                    return result.map(|ok| Type::Result {
+                        ok: Box::new(ok),
+                        err: Box::new(Type::Named("Expired".to_string())),
+                    });
+                }
+                // Preserve the existing non-escaping read-loan check, but
+                // let ordinary registered method inference/lowering invoke
+                // the source body (no callback crosses a Rust host leaf).
+                result?;
             }
             if name == "Pool" {
                 if let Some(ret) =

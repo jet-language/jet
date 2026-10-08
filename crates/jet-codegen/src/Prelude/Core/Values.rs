@@ -549,28 +549,3 @@ impl JetShow for JetExpired {
         "Expired".to_string()
     }
 }
-#[derive(Clone, Debug)]
-struct JetExpiring<T: Clone> {
-    value: T,
-    deadline_ms: i64,
-}
-impl<T: Clone> JetExpiring<T> {
-    fn new(value: T, deadline_ms: i64) -> Self {
-        JetExpiring { value, deadline_ms }
-    }
-    fn get(&self, now_ms: i64) -> Result<T, JetExpired> {
-        if now_ms > self.deadline_ms {
-            Err(JetExpired)
-        } else {
-            Ok(self.value.clone())
-        }
-    }
-    fn is_valid(&self, now_ms: i64) -> bool {
-        now_ms <= self.deadline_ms
-    }
-}
-impl<T: Clone + JetShow> JetShow for JetExpiring<T> {
-    fn jet_show(&self) -> String {
-        format!("Expiring(deadline={})", self.deadline_ms)
-    }
-}

@@ -2951,23 +2951,6 @@ impl THandleOp {
                 Some(Effect::Exec),
                 carrier,
             ),
-            ExpiringMethod { method } => match method.as_str() {
-                "get" => h(
-                    "expiring.get",
-                    "jet_expiring_get",
-                    2,
-                    2,
-                    &[true, true],
-                    Some(Effect::Time),
-                    carrier,
-                ),
-                "is_valid" => primitive(),
-                _ => {
-                    return Err(route_error(format!(
-                        "unknown checked ExpiringValue method `{method}`"
-                    )));
-                }
-            },
             HTTPServerMethod { kind, method } if kind == "WsConn" => match method.as_str() {
                 "send_text" => h(
                     "ws.send_text",
@@ -9418,33 +9401,6 @@ pub(super) fn expect_snapshot_route(
     )
 }
 
-/// Select the generic expiring-value constructor. `secret` chooses the
-/// capability-bearing wrapper while the element type remains a MIR type arg.
-pub(super) fn expiring_route(
-    secret: bool,
-    result: &Type,
-    carrier: &TFailureCarrier,
-) -> Result<TPreludeRoute, LowerError> {
-    let _ = result;
-    let (member, symbol) = if secret {
-        ("secret_new", "jet_expiring_secret_new")
-    } else {
-        ("new", "jet_expiring_new")
-    };
-    prelude_route_row(
-        MirPreludeFamily::StaticPrelude,
-        "core.expiring",
-        member,
-        symbol,
-        3,
-        3,
-        &[false, true, true],
-        Some(Effect::Time),
-        carrier,
-        MirPreludeAbi::Value,
-        "expiring constructor",
-    )
-}
 
 /// C callback construction has one runtime operand: the lowered closure.
 /// Extern symbol and return type stay as structured metadata on the MIR op.
@@ -9740,19 +9696,6 @@ pub(super) fn host_method_route(
             _ => {
                 return Err(route_error(format!(
                     "unknown checked CellEditGuard host method `{method}`"
-                )));
-            }
-        },
-        Type::Apply { name, .. } if name == "ExpiringSecret" => match method {
-            "with" => (
-                "ExpiringSecret.with",
-                "jet_expiring_secret_with",
-                2,
-                &[true, false],
-            ),
-            _ => {
-                return Err(route_error(format!(
-                    "unknown checked ExpiringSecret host method `{method}`"
                 )));
             }
         },

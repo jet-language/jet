@@ -7739,39 +7739,6 @@ fn lower_method_call_impl(
             };
         });
     }
-    // D-SHAPE-CTORVERB1=C: generic `ExpiringValue<T>` uses type-owned construction.
-    if recv_type.as_deref() == Some(Syntax::EXPIRING_VALUE_TYPE)
-        && matches!(method, "get" | "is_valid" | "force")
-    {
-        return in_own_frame(|| {
-            let recv_t = lower_expr(receiver, cx, env);
-            let result_ty = match method {
-                "get" => Type::Result {
-                    ok: Box::new(match &recv_t.ty {
-                        Type::Apply { args, .. } if !args.is_empty() => args[0].clone(),
-                        _ => Type::Named("Unknown".to_string()),
-                    }),
-                    err: Box::new(Type::Named("Expired".to_string())),
-                },
-                "is_valid" => Type::Bool,
-                _ => recv_t.ty.clone(),
-            };
-            let targs: Vec<TExpr> = args
-                .iter()
-                .map(|arg| lower_expr(&arg.expr, cx, env))
-                .collect();
-            return TExpr {
-                ty: result_ty,
-                kind: TExprKind::HandleMethod {
-                    recv: Box::new(recv_t),
-                    op: THandleOp::ExpiringMethod {
-                        method: method.to_string(),
-                    },
-                    args: targs,
-                },
-            };
-        });
-    }
     // D-RENDERTGT2=A (c133 M1/M2): a UI backend method (gate shape d7b).
     if matches!(
         recv_type.as_deref(),
@@ -8609,7 +8576,6 @@ fn lower_method_call_impl(
         let cell_receiver = recv_type
             .as_deref()
             .filter(|name| matches!(*name, "Cell" | "CellReadGuard" | "CellEditGuard"));
-        let is_expiring_secret = recv_type.as_deref() == Some("ExpiringSecret");
         if is_pool && matches!(method, "add" | "remove" | "ids") && args.len() <= 1 {
             return in_own_frame(|| {
                 let recv_t = lower_expr(receiver, cx, env);
@@ -9002,50 +8968,6 @@ fn lower_method_call_impl(
                     };
                 });
             }
-        }
-        if is_expiring_secret && method == "with" && args.len() == 1 {
-            return in_own_frame(|| {
-                let mut recv_shape = recv_peek.as_ref();
-                while let Some(Type::Tagged { inner, .. }) = recv_shape {
-                    recv_shape = Some(inner.as_ref());
-                }
-                let inner = match recv_shape {
-                    Some(Type::Apply { name, args })
-                        if name == "ExpiringSecret" && !args.is_empty() =>
-                    {
-                        args[0].clone()
-                    }
-                    _ => Type::Int,
-                };
-                let recv_t = lower_expr(receiver, cx, env);
-                let Expr::Lambda(lam) = &args[0].expr else {
-                    unreachable!("sema requires a lambda for ExpiringSecret.with");
-                };
-                let expected = std::slice::from_ref(&inner);
-                let tl = lower_lambda_expecting_host_borrow(lam, cx, env, expected, false);
-                let ty = resolved_ret.cloned().unwrap_or_else(|| Type::Result {
-                    ok: Box::new(lambda_body_ty_expecting(lam, cx, env, Some(expected))),
-                    err: Box::new(Type::Named("Expired".to_string())),
-                });
-                return TExpr {
-                    ty,
-                    kind: TExprKind::HostCall(Box::new(THostCall::Method {
-                        recv: Box::new(recv_t),
-                        method: "with".to_string(),
-                        args: vec![TExpr {
-                            ty: Type::Fn {
-                                params: vec![inner],
-                                ret: None,
-                                effect_bound: None,
-                                return_view_provenance: None,
-                                param_contract: None,
-                                call_metadata: None,
-                            },
-                            kind: TExprKind::Lambda(Box::new(tl)),
-                        }],
-                    })),
-                };
-            });
         }
     }
     // c109 Phase 11: a closure-taking collection method (`map`/`filter`/`each`/…).
@@ -11959,59 +11881,6 @@ fn lower_method_call_impl(
                                     box_as_trait: None,
                                 }],
                             },
-                        };
-                    });
-                }
-                if type_name == "ExpiringSecret" && method == "new" && args.len() == 3 {
-                    return in_own_frame(|| {
-                        let value = lower_expr(&args[0].expr, cx, env);
-                        let duration = lower_expr(&args[1].expr, cx, env);
-                        let clock = lower_expr(&args[2].expr, cx, env);
-                        let elem_ty = match resolved_ret {
-                            Some(Type::Apply { name, args })
-                                if name == "ExpiringSecret" && !args.is_empty() =>
-                            {
-                                args[0].clone()
-                            }
-                            _ => value.ty.clone(),
-                        };
-                        return TExpr {
-                            ty: Type::Apply {
-                                name: "ExpiringSecret".to_string(),
-                                args: vec![elem_ty.clone()],
-                            },
-                            kind: TExprKind::HostCall(Box::new(THostCall::ExpiringSecretNew {
-                                value: Box::new(value),
-                                duration: Box::new(duration),
-                                clock: Box::new(clock),
-                                elem: elem_ty,
-                            })),
-                        };
-                    });
-                }
-                if type_name == Syntax::EXPIRING_VALUE_TYPE && method == "new" && args.len() == 3 {
-                    return in_own_frame(|| {
-                        let value = lower_expr(&args[0].expr, cx, env);
-                        let duration = lower_expr(&args[1].expr, cx, env);
-                        let clock = lower_expr(&args[2].expr, cx, env);
-                        let elem_ty = match resolved_ret {
-                            Some(Type::Apply { name, args })
-                                if name == Syntax::EXPIRING_VALUE_TYPE && !args.is_empty() =>
-                            {
-                                args[0].clone()
-                            }
-                            _ => value.ty.clone(),
-                        };
-                        return TExpr {
-                            ty: Type::Apply {
-                                name: Syntax::EXPIRING_VALUE_TYPE.to_string(),
-                                args: vec![elem_ty],
-                            },
-                            kind: TExprKind::HostCall(Box::new(THostCall::ExpiringValueNew {
-                                value: Box::new(value),
-                                duration: Box::new(duration),
-                                clock: Box::new(clock),
-                            })),
                         };
                     });
                 }

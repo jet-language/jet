@@ -349,7 +349,6 @@ const PRELUDE_PARTS: &[&str] = &[
     include_str!("../Prelude/Core/RangeBounds.rs"),
     include_str!("../Prelude/Core/InlineRange.rs"),
     include_str!("../Prelude/Core/Disjoint.rs"),
-    include_str!("../Prelude/Core/ExpiringSecret.rs"),
     include_str!("../Prelude/Core/SetAlgebra.rs"),
     include_str!("../Prelude/Core/Duration.rs"),
     include_str!("../Prelude/Core/Measurement.rs"),

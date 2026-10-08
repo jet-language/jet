@@ -511,17 +511,6 @@ pub(crate) fn method_call_in_subset(
         }
         return false;
     }
-    if recv_type.as_deref() == Some("ExpiringSecret") {
-        if method == "new"
-            && args.len() == 3
-            && matches!(receiver, Expr::Ident(name, _) if name == "ExpiringSecret")
-        {
-            return args.iter().all(|arg| expr_in_subset(&arg.expr, cx, locals));
-        }
-        return method == "with"
-            && args.len() == 1
-            && matches!(&args[0].expr, Expr::Lambda(lam) if lambda_in_subset(lam, cx, locals));
-    }
     // Shape (m) [c109 Phase 27]: a CALL THROUGH a fn-typed struct field — `w.step(4)`
     // where `step: fn(Int) => Int` is a field on a covered struct, NOT a user method.
     // Sema (CheckerInfer ~L2329) sets `recv_type == Some(<StructType>)` and re-routes the
@@ -791,12 +780,6 @@ pub(crate) fn method_call_in_subset(
                     ("Cell", "new", 1) => {
                         return args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
                     }
-                    ("ExpiringSecret", "new", 3) => {
-                        return args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-                    }
-                    ("ExpiringValue", "new", 3) => {
-                        return args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-                    }
                     // D-PATHFS1: `Path.from(str)` — static constructor for typed paths.
                     // Like `Set.from`, admitted before `static_method_call_in_subset`
                     // blocks `from` (an intercepted name). Path is not a user type.
@@ -965,38 +948,6 @@ pub(crate) fn method_call_in_subset(
     if recv_type.as_deref() == Some("Loadable") && is_loadable_method_name(method, args.len()) {
         return expr_in_subset(receiver, cx, locals)
             && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-    }
-    // D-SHAPE-CTORVERB1=C: generic `ExpiringValue<T>` construction and access.
-    //
-    // Sema types `ExpiringValue.new(value, ttl, clock)` with `recv_type ==
-    // Some("ExpiringValue")` (CheckerInfer/calls/method_calls.rs ~1333), so the
-    // static-call shape further down — gated on `recv_type.is_none()` — can never
-    // see the constructor, and its `("ExpiringValue", "new", 3)` row was dead. The
-    // sibling `ExpiringSecret` already claims its own `new` on the matching
-    // `recv_type` arm above; this is the same shape for the same reason.
-    //
-    // The receiver is the bare TYPE NAME, not a value, so only the arguments are
-    // checked (a type-name ident is not a local and would fail `expr_in_subset`)
-    // — again mirroring the `ExpiringSecret.new` arm. Lowering resolves the
-    // identical key through `static_call_type_name_lower` and emits
-    // `THostCall::ExpiringValueNew` (lower/method_calls.rs ~6336), which AOT
-    // (TIR/emit/expressions.rs), the resident JIT (jit/lower_ctx.rs
-    // `THostCall::ExpiringValueNew`) and the interpreter (TIR/eval/exprs.rs) all
-    // consume — so the lowering this admits exists on every tier (I9).
-    if recv_type.as_deref() == Some(Syntax::EXPIRING_VALUE_TYPE) {
-        if method == "new"
-            && args.len() == 3
-            && matches!(receiver, Expr::Ident(name, _) if name == Syntax::EXPIRING_VALUE_TYPE)
-        {
-            return args.iter().all(|arg| expr_in_subset(&arg.expr, cx, locals));
-        }
-        if matches!(
-            (method, args.len()),
-            ("get", 1) | ("is_valid", 1) | ("force", 1)
-        ) {
-            return expr_in_subset(receiver, cx, locals)
-                && args.iter().all(|arg| expr_in_subset(&arg.expr, cx, locals));
-        }
     }
     // Shape (d7b) [D-RENDERTGT2=A]: a UI backend method.
     if matches!(
@@ -1575,15 +1526,6 @@ pub(crate) fn static_method_call_in_subset(
         return true;
     }
     if type_name == Syntax::TYPE_AUTHORITY && method == "from_rights" && args.len() == 1 {
-        return args.iter().all(|arg| expr_in_subset(&arg.expr, cx, locals));
-    }
-    if matches!((type_name, method, args.len()), ("ExpiringValue", "new", 3)) {
-        return args.iter().all(|arg| expr_in_subset(&arg.expr, cx, locals));
-    }
-    if matches!(
-        (type_name, method, args.len()),
-        ("ExpiringSecret", "new", 3)
-    ) {
         return args.iter().all(|arg| expr_in_subset(&arg.expr, cx, locals));
     }
     if matches!(

@@ -8091,60 +8091,6 @@ fn lower_host_call(
             )
         }
 
-        THostCall::ExpiringSecretNew {
-            value,
-            duration,
-            clock,
-            elem,
-        } => {
-            let mut args = vec![
-                ctx.lower_plain_arg(value)?,
-                ctx.lower_plain_arg(duration)?,
-                ctx.lower_plain_arg(clock)?,
-            ];
-            let carrier = super::TFailureCarrier::from_checked_type(&expr.ty);
-            let route = super::expiring_route(true, &expr.ty, &carrier)?;
-            apply_route_access(ctx, &route, &mut args)?;
-            let call = ctx.intern_prelude_route(route)?;
-            let type_args = vec![ctx.mir_type(elem)?];
-            ctx.emit(
-                "host-expiring-secret-new",
-                Some(expr.ty.clone()),
-                MirOperation::Semantic(MirSemanticOp::StaticPreludeCall {
-                    call,
-                    args,
-                    owner_type_args: Vec::new(),
-                    type_args,
-                }),
-            )
-        }
-        THostCall::ExpiringValueNew {
-            value,
-            duration,
-            clock,
-        } => {
-            let value_ty = value.ty.clone();
-            let mut args = vec![
-                ctx.lower_plain_arg(value)?,
-                ctx.lower_plain_arg(duration)?,
-                ctx.lower_plain_arg(clock)?,
-            ];
-            let carrier = super::TFailureCarrier::from_checked_type(&expr.ty);
-            let route = super::expiring_route(false, &expr.ty, &carrier)?;
-            apply_route_access(ctx, &route, &mut args)?;
-            let call = ctx.intern_prelude_route(route)?;
-            let type_args = vec![ctx.mir_type(&value_ty)?];
-            ctx.emit(
-                "host-expiring-value-new",
-                Some(expr.ty.clone()),
-                MirOperation::Semantic(MirSemanticOp::StaticPreludeCall {
-                    call,
-                    args,
-                    owner_type_args: Vec::new(),
-                    type_args,
-                }),
-            )
-        }
         THostCall::CCallback {
             symbol,
             lambda,
