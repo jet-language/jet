@@ -1,0 +1,22 @@
+struct Door {
+    state { Open, Closed }
+}
+impl Door {
+    #Transition(_, Open) fn begin() -[]> Door { return Door{} }
+    #Transition(Open, Closed) fn close(self: ^Door) -[]> Door { return self }
+}
+STATE_INFO :: prep { Door.reflect() }
+fn run() {
+    
+    // Original tests/reflect.rs:289-292 first terminal false.
+    print(STATE_INFO.states[0].terminal)
+    
+    // Original tests/reflect.rs:293-296 second terminal true.
+    print(STATE_INFO.states[1].terminal)
+    
+    // Original tests/reflect.rs:297-300 first reachable present true.
+    print(STATE_INFO.states[0].reachable ?? panic("Open reachability must be present"))
+    
+    // Original tests/reflect.rs:301-304 second reachable present true.
+    print(STATE_INFO.states[1].reachable ?? panic("Closed reachability must be present"))
+}

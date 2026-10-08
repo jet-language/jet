@@ -1,0 +1,66 @@
+
+#Error
+enum PatternError { Bad }
+Pattern :: distinct String
+impl Pattern.CheckedText {
+    type Error = PatternError
+    fn check(text: String) PatternError! -[]> {
+        return
+    }
+    fn encode_hole<T: Printable>(value: T) -[]> String {
+        return ""
+    }
+}
+fn run() {}
+
+REFLECTION_APP :: Output.Executable{ name: "reflection", entry: reflection_probe }
+REFLECTION_BASE :: prep { Pattern.reflect().base }
+fn reflection_implements() -> Bool {
+    found := false
+    loop name in Pattern.reflect().implements {
+        if name == "CheckedText" -> found = true
+    }
+    return found
+}
+REFLECTION_IMPLEMENTS :: prep { reflection_implements() }
+fn reflection_contract() -> [Bool] {
+    found := false
+    error_type := false
+    check_method := false
+    encode_method := false
+    loop contract in Pattern.reflect().trait_contracts {
+        if contract.name == "CheckedText" {
+            found = true
+            loop association in contract.associated_types {
+                if association.name == "Error" && association.type == "PatternError" -> error_type = true
+            }
+            loop method in contract.methods {
+                if method.name == "check" -> check_method = true
+                if method.name == "encode_hole" -> encode_method = true
+            }
+            break
+        }
+    }
+    return [found, error_type, check_method, encode_method]
+}
+REFLECTION_CONTRACT :: prep { reflection_contract() }
+fn reflection_probe() {
+    
+    // Original tests/reflect.rs:126-129 base String.
+    print(REFLECTION_BASE)
+    
+    // Original tests/reflect.rs:130-134 implements contains CheckedText.
+    print(REFLECTION_IMPLEMENTS)
+    
+    // Original tests/reflect.rs:135-141 first matching CheckedText contract exists.
+    print(REFLECTION_CONTRACT[0])
+    
+    // Original tests/reflect.rs:145-150 associated Error is PatternError.
+    print(REFLECTION_CONTRACT[1])
+    
+    // Original tests/reflect.rs:154-156 check method exists.
+    print(REFLECTION_CONTRACT[2])
+    
+    // Original tests/reflect.rs:157-159 encode_hole method exists.
+    print(REFLECTION_CONTRACT[3])
+}

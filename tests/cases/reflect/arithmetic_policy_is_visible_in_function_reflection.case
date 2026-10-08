@@ -1,0 +1,15 @@
+# HAND-PORT tests/reflect.rs:49-89 arithmetic_policy_is_visible_in_function_reflection
+# PENDING-KIT; PENDING-GRAMMAR; public reflection witness, no runtime proof.
+# ORACLE-LITERAL: every expected field/bool/count from original predicates.
+# Original source verbatim standalone and witness prefix. BuildContext.program.functions selects wrapped, reads first arithmetic row, prints exact operation/policy and requires real scope_span record fields (no numeric span expectation fabricated). Missing wrapped/row/scope fails.
+fixture: arithmetic_policy_is_visible_in_function_reflection.fixture
+env: NO_COLOR=1
+step: jet check --json original/source.jet
+exit: 0
+json: stdout doc $.reports #= 0
+step: jet build main.jet
+exit: 0
+step: built
+artifact: reflection
+exit: 0
+stdout: = arithmetic_policy_is_visible_in_function_reflection.stdout.expected
