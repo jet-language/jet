@@ -98,10 +98,10 @@ use core.files as files
     cases_test_source(root, "env", "env: TOKEN_VALUE=case\nstep: jet -c 'printf \"%s\" \"$1\"' scenario {{env:TOKEN_VALUE|fallback}}\nenv: TOKEN_VALUE=step\nstdout: = set.out\nstep: jet -c 'printf \"%s\" \"$1\"' scenario {{env:TOKEN_VALUE|fallback}}\nunset: TOKEN_VALUE\nstdout: = unset.out\nstep: jet -c 'printf \"%s\" \"$1\"' scenario {{env:TOKEN_VALUE|fallback}}\nenv: TOKEN_VALUE=\nstdout: = unset.out\nstep: jet -c 'printf \"%s\" \"$1\"' scenario {{env:NO_COLOR|fallback}}\nstdout: = base.out\n")
     context :: cases_test_context(root, files.join(root, "scratch"))
     assert_eq(kit_cases_run(cases_test_entry("env"), context)[0].verdict.status, "PASS")
-    loop token in ["{{env:NAME}}", "{{env:|fallback}}", "{{env:NAME|fallback", "{{env:bad-name|fallback}}"] {
+    loop token in ["{{env:|fallback}}", "{{env:NAME|fallback", "{{env:bad-name|fallback}}"] {
         assert(kit_steps_parse_case("step: printf '{token}'\n").error != "")
     }
-    assert(kit_steps_parse_case("env: TOKEN_VALUE={{env:NAME|fallback}}\nstep: printf x\n").error.contains("argv-only"))
+    assert_eq(kit_steps_parse_case("env: TOKEN_VALUE={{env:NAME|fallback}}\nstep: printf x\n").error, "")
     assert(kit_steps_parse_case("step: printf x\ncwd: {{env:NAME|fallback}}\n").error.contains("argv-only"))
     files.remove_all(root) ?? panic("remove argv environment scratch")
 }

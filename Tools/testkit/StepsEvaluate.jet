@@ -1,5 +1,6 @@
 use core.files as files
 use core.crypto as crypto
+use core.sys as sys
 fn kit_steps_path_tokens(value: String) -> Bool {
     value.contains("{{work}}") || value.contains("{{root}}") || value.contains("{{scratch}}") || value.contains("{{jet}}") || value.contains("{{jetpack}}")
 }
@@ -18,10 +19,11 @@ fn kit_steps_history_stream(reference: String, subject: String, history: [KitCap
 
 fn kit_steps_line_count_target(target: String, assertion: KitAssertion, history: [KitCapturedStep]) -> Int? {
     reference :: kit_steps_count_label(target)
-    if reference == "" -> return kit_steps_integer(target)
+    if reference == "" -> return kit_steps_numeric(target)
     factor :: Int.parse(target.slice(0, target.index("*") ?? 0)) ?? return None
     previous :: kit_steps_history_stream(reference, assertion.stream, history, false) ?? return None
-    Val(factor * kit_steps_lines(kit_steps_transform(previous, assertion.transform)))
+    transformed :: kit_steps_transform(previous, assertion.transform) ?? return None
+    Val(factor * kit_steps_lines(transformed))
 }
 
 fn kit_steps_first_line(text: String, needle: String) -> String? {
@@ -29,6 +31,7 @@ fn kit_steps_first_line(text: String, needle: String) -> String? {
 }
 
 fn kit_steps_check_assertion(assertion: KitAssertion, context: KitStepCtx, state: KitStepState, source_name: String, allow_bless: Bool) -> KitVerdict {
+    if !kit_steps_conditions(assertion.conditions, context, state) -> return kit_expect_verdict("PASS", "")
     if assertion.stream == "elapsed" -> return kit_steps_elapsed(assertion, state.history)
     if assertion.stream == "tree" -> return kit_steps_tree_check(assertion, context, state)
     if assertion.stream == "entries" {
@@ -52,7 +55,7 @@ fn kit_steps_check_assertion(assertion: KitAssertion, context: KitStepCtx, state
         if (context.bless.all || kit_expect_named(context.bless.ids, context.id)) && (assertion.mode == "=" || assertion.mode == "from") -> return kit_expect_verdict("REFUSED", "OR subjects do not choose which stream to bless")
         return left
     }
-    raw_match := assertion.mode == "^=" || assertion.json_mode != ""
+    raw_match := assertion.mode == "^=" || assertion.json_mode != "" || (assertion.rhs_literal && (kit_steps_path_tokens(assertion.value) || assertion.value.contains("{{cap:")))
     if kit_expect_named(["~", "!~", "~i", "!~i", "~any", "line"], assertion.mode) {
         raw_match = raw_match || kit_steps_path_tokens(assertion.value) || kit_steps_path_tokens(assertion.extra)
         loop value in assertion.alternatives {
@@ -62,6 +65,14 @@ fn kit_steps_check_assertion(assertion: KitAssertion, context: KitStepCtx, state
     stdout :: if raw_match -> state.last.stdout else -> state.json_stdout ?? state.last.stdout
     stderr :: if raw_match -> state.last.stderr else -> state.json_stderr ?? state.last.stderr
     actual := kit_steps_select_stream(stdout, stderr, assertion.stream)
+    if assertion.stream.starts_with("cap:") {
+        if (assertion.mode == "=" || assertion.mode == "!=") && assertion.value.starts_with("{{cap:") && assertion.value.ends_with("}}") {
+            left :: kit_steps_capture_named(assertion.stream.slice(4, assertion.stream.len()), state.captures) ?? return kit_expect_verdict("ERROR", "captured subject unavailable")
+            right :: kit_steps_capture_named(assertion.value.slice(5, assertion.value.len() - 1), state.captures) ?? return kit_expect_verdict("ERROR", "captured relation unavailable")
+            return if (left == right) == (assertion.mode == "=") -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "captured values differ")
+        }
+        actual = kit_steps_captured_subject(assertion.stream.slice(4, assertion.stream.len()), state.captures) ?? return kit_expect_verdict("ERROR", "captured subject unavailable")
+    }
     value := if assertion.mode == "same-as" -> assertion.value else -> kit_steps_runtime_expand(assertion.value, context, state) ?? return kit_expect_verdict("ERROR", "assertion token unavailable")
     extra := kit_steps_runtime_expand(assertion.extra, context, state) ?? return kit_expect_verdict("ERROR", "assertion token unavailable")
     if assertion.stream == "file" {
@@ -74,18 +85,29 @@ fn kit_steps_check_assertion(assertion: KitAssertion, context: KitStepCtx, state
         exists :: files.exists(path)
         if assertion.mode == "exists" -> return if exists -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "missing file: {assertion.path}")
         if assertion.mode == "absent" -> return if !exists -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "unexpected file: {assertion.path}")
+        if assertion.mode == "is-symlink" || assertion.mode == "not-symlink" {
+            info :: files.stat(path) ?? return kit_expect_verdict("FAIL", "symlink metadata unavailable")
+            return if info.is_symlink == (assertion.mode == "is-symlink") -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "symlink predicate failed")
+        }
+        if assertion.mode == "!is-file" || assertion.mode == "!is-dir" {
+            matches :: if assertion.mode == "!is-file" -> kit_steps_path_is_file(path) else -> files.is_dir(path)
+            return if !matches -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "negated file kind failed")
+        }
         if assertion.mode == "is-file" || assertion.mode == "is-dir" {
-            if !exists -> return kit_expect_verdict("FAIL", "missing file: {assertion.path}")
-            info :: files.stat(path) ?? return kit_expect_verdict("ERROR", "stat assertion file: {err}")
-            matches :: if assertion.mode == "is-file" -> info.is_file else -> info.is_dir
+            matches :: if assertion.mode == "is-file" -> kit_steps_path_is_file(path) else -> files.is_dir(path)
             return if matches -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "wrong file kind: {assertion.path}")
         }
         if assertion.mode == "same-as" {
             name :: assertion.value.slice(5, assertion.value.len() - 1)
             loop capture in state.captures {
-                if capture.name == name && capture.kind == "bytes" {
-                    actual_bytes :: if exists -> Val(files.read_bytes(path) ?? return kit_expect_verdict("ERROR", "file optional bytes: {err}")) else -> None
-                    return if actual_bytes == capture.bytes -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "optional file bytes differ")
+                if capture.name == name {
+                    if capture.value == {
+                        .Bytes(expected) -> {
+                            actual_bytes :: if exists -> Val(files.read_bytes(path) ?? return kit_expect_verdict("ERROR", "file optional bytes: {err}")) else -> None
+                            return if actual_bytes == expected -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "optional file bytes differ")
+                        }
+                        else -> return kit_expect_verdict("ERROR", "same-as needs an opt-bytes capture")
+                    }
                 }
             }
             return kit_expect_verdict("ERROR", "same-as needs an opt-bytes capture")
@@ -102,19 +124,20 @@ fn kit_steps_check_assertion(assertion: KitAssertion, context: KitStepCtx, state
             return if names == expected -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "directory names differ")
         }
         if !exists && !assertion.optional_file -> return kit_expect_verdict("FAIL", "missing file: {assertion.path}")
-        if assertion.mode == "size" || assertion.mode == "mode" || assertion.mode == "sha256" {
+        if assertion.mode == "size" || assertion.mode == "mode" || assertion.mode == "permissions" || assertion.mode == "sha256" {
             if !exists -> return kit_expect_verdict("FAIL", "missing file: {assertion.path}")
             info :: files.stat(path) ?? return kit_expect_verdict("ERROR", "file metadata: {err}")
             matches := false
             if assertion.mode == "size" -> matches = kit_steps_compare(info.size, extra, Int.parse(value) ?? -1)
             else if assertion.mode == "mode" -> matches = info.mode % 4096 == (kit_steps_octal(value) ?? -1)
+            else if assertion.mode == "permissions" -> matches = if sys.family() == "windows" -> "{info.readonly}" == value else -> kit_steps_octal_text(info.mode % 4096) == value
             else {
                 bytes :: files.read_bytes(path) ?? return kit_expect_verdict("ERROR", "file digest read: {err}")
                 matches = crypto.sha256(bytes).hex() == value
             }
             return if matches -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "file {assertion.mode} comparison failed")
         }
-        if assertion.mode == "==" || assertion.mode == "!=" {
+        if !assertion.rhs_literal && (assertion.mode == "==" || assertion.mode == "!=") {
             other :: kit_steps_work_path(value, context.env, context.work, context.scratch, state.built) ?? return kit_expect_verdict("REFUSED", "file relation escapes work directory")
             other_exists :: files.exists(other)
             if !other_exists && !assertion.optional_file -> return kit_expect_verdict("FAIL", "missing file: {value}")
@@ -122,6 +145,10 @@ fn kit_steps_check_assertion(assertion: KitAssertion, context: KitStepCtx, state
             right :: if other_exists -> files.read_bytes(other) ?? return kit_expect_verdict("ERROR", "read relation file: {err}") else -> [U8]{}
             equal :: left == right
             return if equal == (assertion.mode == "==") -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "file relation failed")
+        }
+        if assertion.rhs_literal && assertion.transform == "" && (assertion.mode == "=" || assertion.mode == "!=") {
+            bytes :: if exists -> files.read_bytes(path) ?? return kit_expect_verdict("ERROR", "read exact file: {err}") else -> [U8]{}
+            return if (bytes == value.bytes()) == (assertion.mode == "=") -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "file literal bytes differ")
         }
         if assertion.json_mode == "" && assertion.transform == "" && kit_expect_named(["~", "!~", "~i", "!~i", "^=", "~any", "empty", "nonempty", "count", "before", "line"], assertion.mode) {
             bytes :: if exists -> files.read_bytes(path) ?? return kit_expect_verdict("ERROR", "read assertion bytes: {err}") else -> [U8]{}
@@ -133,6 +160,13 @@ fn kit_steps_check_assertion(assertion: KitAssertion, context: KitStepCtx, state
             matches :: kit_steps_file_predicate(bytes, assertion.mode, value, extra, alternatives)
             return if matches -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "file byte predicate {assertion.mode} failed")
         }
+        if assertion.mode == "=" && assertion.transform == "" && assertion.rhs_transform == "" && !assertion.rhs_literal {
+            snapshot :: files.join(context.snapshots, value)
+            expected :: if files.exists(snapshot) -> Val(files.read_bytes(snapshot) ?? return kit_expect_verdict("ERROR", "read byte snapshot: {err}")) else -> None
+            bytes :: if exists -> files.read_bytes(path) ?? return kit_expect_verdict("ERROR", "read assertion bytes: {err}") else -> [U8]{}
+            bless :: if allow_bless -> context.bless else -> KitBless{ids: [], all: false, reason: "", allow_shrink: [], first_tier: context.bless.first_tier}
+            return kit_expect_exact_bytes(context.id, snapshot, expected, bytes, bless)
+        }
         actual = if exists -> files.read(path) ?? return kit_expect_verdict("ERROR", "read assertion file: {err}") else -> ""
     }
     if !raw_match {
@@ -143,7 +177,8 @@ fn kit_steps_check_assertion(assertion: KitAssertion, context: KitStepCtx, state
         }
     }
     actual = kit_steps_replace(actual, state.replacements, context, state, !raw_match, source_name)
-    actual = kit_steps_transform(actual, assertion.transform)
+    transformation :: kit_steps_runtime_expand(assertion.transform, context, state) ?? return kit_expect_verdict("ERROR", "transform token unavailable")
+    actual = kit_steps_transform(actual, transformation) ?? return kit_expect_verdict("FAIL", "subject transform failed: {assertion.transform}")
     if assertion.json_mode != "" {
         evaluated := assertion
         evaluated.value = value
@@ -154,13 +189,24 @@ fn kit_steps_check_assertion(assertion: KitAssertion, context: KitStepCtx, state
             .None -> kit_expect_verdict("PASS", "")
         }
     }
-    if assertion.mode == "==" {
+    if !assertion.rhs_literal && (assertion.mode == "==" || assertion.mode == "!=") {
         expected :: kit_steps_history_stream(value, assertion.stream, state.history, false) ?? return kit_expect_verdict("ERROR", "step label missing: {value}")
-        return if actual == kit_steps_transform(expected, assertion.transform) -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "stream differs from step {value}")
+        transformed :: kit_steps_transform(expected, transformation) ?? return kit_expect_verdict("FAIL", "prior subject transform failed")
+        return if (actual == transformed) == (assertion.mode == "==") -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "stream relation with {value} failed")
     }
     bless :: if allow_bless -> context.bless else ->
         KitBless{ids: [], all: false, reason: "", allow_shrink: [], first_tier: context.bless.first_tier}
-    if assertion.mode == "=" -> return kit_expect_exact(context.id, files.join(context.snapshots, value), kit_exec_optional(files.join(context.snapshots, value)), actual, bless, false)
+    if assertion.rhs_literal && (assertion.mode == "=" || assertion.mode == "!=") -> return if (actual == value) == (assertion.mode == "=") -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "literal stream differs")
+    if assertion.mode == "=" {
+        path :: files.join(context.snapshots, value)
+        expected :: kit_exec_optional(path)
+        if assertion.rhs_transform != "" {
+            text :: expected ?? return kit_expect_verdict("FAIL", "missing expected snapshot: {value}")
+            transformed :: kit_steps_transform(text, assertion.rhs_transform) ?? return kit_expect_verdict("FAIL", "expected snapshot transform failed")
+            return kit_expect_exact(context.id, path, Val(transformed), actual, bless, false)
+        }
+        return kit_expect_exact(context.id, path, expected, actual, bless, false)
+    }
     if assertion.mode == "one-of" -> return kit_steps_one_of(context.id, context.snapshots, value, actual, bless)
     if assertion.mode == "from" {
         start :: actual.index(value) ?? return kit_expect_verdict("FAIL", "missing suffix marker")
@@ -171,7 +217,8 @@ fn kit_steps_check_assertion(assertion: KitAssertion, context: KitStepCtx, state
         expected := value
         if assertion.mode == "first-line==" {
             previous :: kit_steps_history_stream(value, assertion.stream, state.history, false) ?? return kit_expect_verdict("ERROR", "first-line label missing")
-            expected = kit_steps_first_line(kit_steps_transform(previous, assertion.transform), extra) ?? return kit_expect_verdict("FAIL", "prior first-line selector missing")
+            transformed :: kit_steps_transform(previous, transformation) ?? return kit_expect_verdict("FAIL", "prior subject transform failed")
+            expected = kit_steps_first_line(transformed, extra) ?? return kit_expect_verdict("FAIL", "prior first-line selector missing")
         }
         return if selected == expected -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "first selected line differs")
     }
@@ -179,6 +226,11 @@ fn kit_steps_check_assertion(assertion: KitAssertion, context: KitStepCtx, state
         return if (actual == "") == (assertion.mode == "empty") -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "stream {assertion.mode} predicate failed")
     }
     if assertion.mode == "~i" || assertion.mode == "!~i" -> actual = kit_steps_ascii_lower(actual)
+    extended :: kit_steps_batch_test(actual, assertion, value, extra, context, state)
+    if extended == {
+        .Val(verdict) -> return verdict
+        .None -> {}
+    }
     matches := false
     if assertion.mode == "~" || assertion.mode == "~i" -> matches = actual.contains(value)
     else if assertion.mode == "!~" || assertion.mode == "!~i" -> matches = !actual.contains(value)

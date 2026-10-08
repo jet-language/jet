@@ -1,0 +1,61 @@
+use core.files as files
+
+#Test("MachineOutput original literal status report browser envelopes and every action payload pass through cases") {
+    // MachineOutput.rs:151-264 original literal inputs; only registered compiler rows need its public projection.
+    root :: cases_test_root("machine-originals")
+    directory :: files.join(root, "tests/cases/group")
+    report :: "{{\"schema\":\"jet.report/v3\",\"moment\":\"compile\",\"severity\":\"error\",\"code\":\"E0001\",\"what\":\"what\",\"why\":\"why\",\"fix\":\"fix\"}}"
+    status :: "{{\"schema\":\"jet.status/v1\",\"action\":\"facts\",\"ok\":true,\"reports\":[],\"facts\":[]}}"
+    kit_exec_write(files.join(directory, "records.txt"), "{status}\n{report}\n")
+    assert_eq(cases_test_advanced(root, "two", "step: cat\nstdin: records.txt\nstdout: machine-output = [status,report] # original predicate\n").verdict.status, "PASS")
+    assert_eq(cases_test_advanced(root, "wrong-kinds", "step: cat\nstdin: records.txt\nstdout: machine-output = [report,status] # original predicate\n").verdict.status, "FAIL")
+    relay :: "{{\"schema\":\"jet.status/v1\",\"action\":\"browser.relay\",\"ok\":true,\"reports\":[],\"nonce\":\"nonce\",\"pid\":42,\"started\":\"1\",\"sources\":\"00\"}}"
+    row :: "{{\"schema\":\"jet.status/v1\",\"action\":\"browser.relay.row\",\"ok\":true,\"reports\":[],\"start_ns\":10,\"duration_ns\":5,\"class\":\"event\",\"symbol\":\"load\"}}"
+    truncated :: "{{\"schema\":\"jet.status/v1\",\"action\":\"browser.relay.truncated\",\"ok\":true,\"reports\":[]}}"
+    kit_exec_write(files.join(directory, "relay.txt"), "{relay}\n{row}\n{truncated}\n")
+    assert_eq(cases_test_advanced(root, "relay", "step: cat\nstdin: relay.txt\nstdout: machine-output = [browser-relay,status,status] # original predicate\n").verdict.status, "PASS")
+    surfaces :: [
+        ["diagnostics", "\"diagnostics\":[]"], ["semindex", "\"semindex\":{{}}"], ["compiler", "\"compiler\":{{}}"],
+        ["canvas", "\"canvas\":{{}}"], ["structural_merge", "\"structural_merge\":{{}}"], ["budget", "\"budget\":{{}}"],
+        ["perf", "\"perf\":{{}}"], ["gc", "\"gc\":{{}}"], ["browser.relay", "\"browser\":{{\"relay\":{{}}}}"],
+        ["status", "\"status_report\":{{}}"], ["review", "\"review\":{{}}"], ["fill", "\"fill\":{{}}"],
+        ["import", "\"import\":{{}}"], ["inspect.dossier", "\"dossier\":{{}}"], ["inspect.impact", "\"impact\":{{}}"],
+        ["inspect.live", "\"live\":{{}}"], ["fmt", "\"fmt\":{{}}"], ["eval", "\"value\":null"], ["coverage", "\"coverage\":{{}}"],
+        ["test", "\"test\":{{}}"], ["inspect.build", "\"build\":{{}}"], ["inspect.parts", "\"parts\":[]"],
+        ["inspect.gates", "\"gates\":{{}}"], ["inspect.unsafe", "\"gates\":[]"], ["find", "\"matches\":[]"],
+        ["audit.copies", "\"copies\":[]"], ["try", "\"name\":\"example\""], ["remote.bind", "\"builder\":\"local\""], ["remote.list", "\"builders\":[]"]
+    ]
+    loop (index, surface) in surfaces {
+        document :: "{{\"schema\":\"jet.status/v1\",\"action\":\"{surface[0]}\",\"ok\":true,\"reports\":[],\"payload\":{{{surface[1]}}}}}\n"
+        kit_exec_write(files.join(directory, "surface.txt"), document)
+        kind :: if surface[0] == "browser.relay" -> "browser-relay" else -> "status"
+        assert_eq(cases_test_advanced(root, "surface-{index}", "step: cat\nstdin: surface.txt\nstdout: machine-output = [{kind}] # original predicate\n").verdict.status, "PASS")
+    }
+    loop pair in [["{{\"schema_version\":1,\"facts\":[]}}", "missing `schema`"], ["{{\"schema\":\"jet.report/v1\",\"moment\":\"tool\",\"status\":\"ok\",\"ok\":true}}", "expected `jet.report/v3`"]] {
+        kit_exec_write(files.join(directory, "invalid.txt"), pair[0])
+        result :: cases_test_advanced(root, "legacy", "step: cat\nstdin: invalid.txt\nstdout: machine-output = [report] # original predicate\n")
+        assert_eq(result.verdict.status, "FAIL")
+        assert(result.verdict.detail.contains(pair[1]))
+    }
+    files.remove_all(root) ?? panic("remove machine originals scratch")
+}
+
+#Test("MachineOutput report status nested edits and no-fix reasons are validated not just schema matched") {
+    root :: cases_test_root("machine-validation")
+    directory :: files.join(root, "tests/cases/group")
+    report :: "\"schema\":\"jet.report/v3\",\"moment\":\"compile\",\"severity\":\"error\",\"code\":\"E0001\",\"what\":\"what\",\"why\":\"why\",\"fix\":\"fix\""
+    edit :: "{{\"file\":\"a.jet\",\"span\":{{\"start\":0,\"end\":1}},\"new_text\":\"x\",\"safety\":\"safe\"}}"
+    loop kind in ["behavior", "design", "ambiguous"] {
+        document :: "{{{report},\"no_fix_reason\":{{\"kind\":\"{kind}\",\"next\":\"Review this action\"}}}}\n"
+        kit_exec_write(files.join(directory, "valid.txt"), document)
+        assert_eq(cases_test_advanced(root, "reason", "step: cat\nstdin: valid.txt\nstdout: machine-output = [report] # original predicate\n").verdict.status, "PASS")
+    }
+    kit_exec_write(files.join(directory, "valid.txt"), "{{\"schema\":\"jet.status/v1\",\"action\":\"check\",\"ok\":false,\"reports\":[{{{report},\"fix_edits\":[{edit}]}}]}}\n")
+    assert_eq(cases_test_advanced(root, "nested", "step: cat\nstdin: valid.txt\nstdout: machine-output = [status] # original predicate\n").verdict.status, "PASS")
+    invalid :: ["", "null", "{{\"schema\":\"jet.status/v1\",\"action\":\"\",\"ok\":true,\"reports\":[]}}", "{{\"schema\":\"jet.status/v1\",\"action\":\"a\\u0080\",\"ok\":true,\"reports\":[]}}", "{{\"schema\":\"jet.status/v1\",\"action\":\"check\",\"status\":null,\"ok\":true,\"reports\":[]}}", "{{\"schema\":\"jet.status/v1\",\"action\":\"check\",\"ok\":1,\"reports\":[]}}", "{{\"schema\":\"jet.status/v1\",\"action\":\"check\",\"ok\":true}}", "{{\"schema\":\"jet.status/v1\",\"action\":\"check\",\"ok\":true,\"reports\":[{{\"schema\":\"jet.report/v1\"}}]}}", "{{{report},\"fix_edits\":[],\"no_fix_reason\":{{}}}}", "{{{report},\"fix_edits\":[{{}}]}}", "{{{report},\"no_fix_reason\":{{\"kind\":\"wrong\",\"next\":\"Review\"}}}}", "{{{report},\"no_fix_reason\":{{\"kind\":\"design\",\"next\":\" \\t\"}}}}", "{{{report},\"no_fix_reason\":{{\"kind\":\"design\",\"next\":\"a\\n\"}}}}"]
+    loop (index, document) in invalid {
+        kit_exec_write(files.join(directory, "invalid.txt"), document)
+        assert_eq(cases_test_advanced(root, "invalid-{index}", "step: cat\nstdin: invalid.txt\nstdout: machine-output = [status] # original predicate\n").verdict.status, "FAIL")
+    }
+    files.remove_all(root) ?? panic("remove machine validation scratch")
+}

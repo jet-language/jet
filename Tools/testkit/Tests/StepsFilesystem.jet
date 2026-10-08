@@ -102,3 +102,43 @@ use core.files as files
     assert_eq(cases_test_advanced(root, "different", wrong).verdict.status, "FAIL")
     files.remove_all(root) ?? panic("remove names relation scratch")
 }
+
+#Test("literal write append exact RHS and explicit spaced snapshots preserve real case bytes") {
+    root :: cases_test_root("filesystem-literals")
+    directory :: files.join(root, "tests/cases/group")
+    kit_exec_write(files.join(directory, "space name.out"), "a\nb\n")
+    source :: "write: value = \"a\\n\"\nappend: value \"b\\n\"\nfile: value = \"a\\nb\\n\"\nfile: value = path \"space name.out\"\nstep: cat value\nstdout: = path \"space name.out\"\nstdout: = \"a\\nb\\n\"\nfile: missing !is-file\nfile: missing !is-dir\nwrite: {{tmp}}/owned = \"temporary\"\nfile: {{tmp}}/owned = \"temporary\"\nstep: jet -c 'printf %s \"$TMPDIR\"'\nstdout: = \"{{tmp}}\"\nsleep: 1ms\n"
+    assert_eq(cases_test_advanced(root, "exact", source).verdict.status, "PASS")
+    assert_eq(cases_test_advanced(root, "bare-quoted-write", "write: value \"no equals\"\n").verdict.status, "REFUSED")
+    assert_eq(cases_test_advanced(root, "wrong-literal", "write: value = \"x\"\nfile: value = \"y\"\n").verdict.status, "FAIL")
+    files.remove_all(root) ?? panic("remove literals scratch")
+}
+
+#Test("permission digest replacement and lstat captures retain exact case semantics") {
+    root :: cases_test_root("filesystem-capture-metadata")
+    source :: "requires: os:unix\nwrite: original = \"ABCDE\"\nchmod: original 0640\ncapture: mode = permissions file original\nfile: original permissions = \"{{cap:mode}}\"\nchmod: original 0600\nchmod: original {{cap:mode}}\nfile: original mode = 0640\ncapture: digest = sha256 file original\nfile: original sha256 = \"{{cap:digest}}\"\ncapture: replaced = replace-range file original 1 3 \"xy\"\ncap:replaced: = \"AxyDE\"\nsymlink: original link\nfile: link is-symlink\nfile: original not-symlink\nfile: link is-file\nfile: original !is-dir\n"
+    assert_eq(cases_test_advanced(root, "metadata", source).verdict.status, "PASS")
+    assert_eq(cases_test_advanced(root, "missing-lstat", "file: missing is-symlink\n").verdict.status, "REFUSED")
+    wrong :: "write: unicode = \"é\"\ncapture: broken = replace-range file unicode 1 2 \"x\"\n"
+    assert_eq(cases_test_advanced(root, "boundary", wrong).verdict.status, "FAIL")
+    files.remove_all(root) ?? panic("remove metadata capture scratch")
+}
+
+#Test("tree captures sorted lossy concatenation and child-is-file entry selection use real cases") {
+    root :: cases_test_root("filesystem-tree-captures")
+    directory :: files.join(root, "tests/cases/group")
+    kit_exec_write(files.join(directory, "tree/data/a"), "A")
+    files.write_bytes(files.join(directory, "tree/data/b"), [U8{255}]) ?? panic("write invalid UTF-8 fixture")
+    source :: "fixture: tree\ncapture: joined = concat-files data sorted\ncap:joined: = \"A�\"\ncapture: before = tree-contents data recursive\ncapture: same = tree-contents data recursive\ncap:before: = {{cap:same}}\nwrite: data/a = \"changed\"\ncapture: after = tree-contents data recursive\ncap:before: != {{cap:after}}\nmkdir: choices/absent\nmkdir: choices/valid\nwrite: choices/valid/needle = \"x\"\ncapture: found = first-entry choices child-is-file \"needle\"\nfile: {{cap:found}}/needle = \"x\"\n"
+    assert_eq(cases_test_advanced(root, "contents", source).verdict.status, "PASS")
+    missing :: "mkdir: empty\ncapture: absent = first-entry empty child-is-file \"needle\"\n"
+    assert_eq(cases_test_advanced(root, "no-match", missing).verdict.status, "FAIL")
+    files.remove_all(root) ?? panic("remove tree capture scratch")
+}
+
+#Test("first-spawnable accepts nonzero exit and prefixed capture observes marker precedence") {
+    root :: cases_test_root("filesystem-first-spawnable")
+    source :: "capture: selected = first-spawnable /jet-testkit-does-not-exist | sh -c 'exit 13'\nwhen captured selected: step: printf '%s' {{cap:selected}}\nstdout: = \"sh\"\nstep: printf 'SECOND=value2\\nFIRST=value1\\n'\ncapture: value = prefixed stdout \"FIRST=\" | \"SECOND=\"\ncap:value: = \"value1\"\ncapture: missing = first-spawnable /jet-testkit-does-not-exist\nwhen !captured missing: step: printf absent\nstdout: = \"absent\"\n"
+    assert_eq(cases_test_advanced(root, "select", source).verdict.status, "PASS")
+    files.remove_all(root) ?? panic("remove first-spawnable scratch")
+}

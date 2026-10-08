@@ -1,0 +1,105 @@
+use core.files as files
+use core.sys as sys
+
+#Test("host names families and normalized architectures support any-of and negation from case text") {
+    root :: cases_test_root("host-requirements")
+    loop pair in [["os", sys.family()], ["os-name", kit_steps_host_name()], ["arch", kit_steps_host_arch()]] {
+        pass :: "requires: {pair[0]}:absent|{pair[1]}\nstep: printf ok\nstdout: ~ ok # original predicate\n"
+        assert_eq(cases_test_advanced(root, "matches", pass).verdict.status, "PASS")
+        skip :: "requires: {pair[0]}:!{pair[1]}\nstep: printf ok\n"
+        assert_eq(cases_test_advanced(root, "negated", skip).verdict.status, "SKIP-HOST")
+    }
+    files.remove_all(root) ?? panic("remove host scratch")
+}
+
+#Test("host probes check exit and JSON output and alternatives fail rather than silently skip") {
+    root :: cases_test_root("host-probes")
+    loop requirement in ["requires: probe printf '%s' '{{\"ready\":true}}' json $.ready = true", "tools-any: absent-testkit-tool | printf+cat", "probes-any: false | true + printf ok"] {
+        assert_eq(cases_test_advanced(root, "pass", "{requirement}\nstep: printf ok\n").verdict.status, "PASS")
+    }
+    assert_eq(cases_test_advanced(root, "false-json", "requires: probe printf '%s' '{{\"ready\":false}}' json $.ready = true\nstep: printf ok\n").verdict.status, "SKIP-HOST")
+    loop requirement in ["tools-any: absent-testkit-tool", "probes-any: false | false + true"] -> assert_eq(cases_test_advanced(root, "none", "{requirement}\nstep: printf ok\n").verdict.status, "FAIL")
+    files.remove_all(root) ?? panic("remove probe scratch")
+}
+
+#Test("conditional steps assertions and nested when blocks execute only their selected branch") {
+    root :: cases_test_root("host-when")
+    source :: "when os {sys.family()}: step named: printf ok\nwhen os-name !{kit_steps_host_name()}: stdout: ~ wrong # original predicate\nwhen arch {kit_steps_host_arch()}: stdout: ~ ok # original predicate\nwhen named.stdout = \"ok\"\nwhen tool printf\nstep: printf yes\nstdout: ~ yes # original predicate\nend when\nend when\nwhen probe false: step: false\n"
+    assert_eq(cases_test_advanced(root, "branches", source).verdict.status, "PASS")
+    fail :: "step: printf ok\nwhen os {sys.family()}: stdout: ~ wrong # original predicate\n"
+    assert_eq(cases_test_advanced(root, "wrong", fail).verdict.status, "FAIL")
+    files.remove_all(root) ?? panic("remove conditions scratch")
+}
+
+#Test("opt-in cases report OPT-IN by default and execute only on opt-in or exact selection") {
+    root :: cases_test_root("host-opt-in")
+    cases_test_source(root, "ignored", "opt-in: original ignored expensive witness\nstep: printf ok\nstdout: ~ wrong # original predicate\n")
+    entry :: cases_test_entry("ignored")
+    context := cases_test_context(root, files.join(root, "scratch"))
+    assert_eq(kit_cases_run(entry, context)[0].verdict.status, "OPT-IN")
+    context.options.opt_in = true
+    assert_eq(kit_cases_run(entry, context)[0].verdict.status, "FAIL")
+    context.options.opt_in = false
+    context.options.filter = entry.path
+    assert_eq(kit_cases_run(entry, context)[0].verdict.status, "FAIL")
+    assert(kit_parse_options(["cases", "--opt-in"]).opt_in)
+    files.remove_all(root) ?? panic("remove opt-in scratch")
+}
+
+#Test("env lines expand against earlier effective values and env-words expand to separate argv words") {
+    root :: cases_test_root("host-environment")
+    directory :: files.join(root, "tests/cases/group")
+    kit_exec_write(files.join(directory, "environment.out"), "base:next\nalpha\nbeta\n")
+    source :: "env: VALUE=base\nstep: printf '%s\\n' {{env:VALUE}} {{env-words:WORDS|alpha beta}}\nenv: VALUE={{env:VALUE}}:next\nstdout: = environment.out\n"
+    assert_eq(cases_test_advanced(root, "effective", source).verdict.status, "PASS")
+    kit_exec_write(files.join(directory, "wrong.out"), "wrong")
+    wrong :: "step: printf '%s' {{env:ABSENT_TESTKIT|fallback}}\nstdout: = wrong.out\n"
+    assert_eq(cases_test_advanced(root, "fallback", wrong).verdict.status, "FAIL")
+    files.remove_all(root) ?? panic("remove env scratch")
+}
+
+#Test("modifiers are adjacent to process steps and cannot silently modify a step after a capture or assertion") {
+    root :: cases_test_root("host-adjacency")
+    pass :: "step: printf ok\nenv: VALUE=one\nunset: UNUSED\nstdout: ~ ok # original predicate\n"
+    assert_eq(cases_test_advanced(root, "adjacent", pass).verdict.status, "PASS")
+    loop separator in ["stdout: ~ ok # original predicate", "capture: value = text stdout", "mkdir: child"] {
+        source :: "step: printf ok\n{separator}\nenv: VALUE=two\n"
+        result :: cases_test_advanced(root, "nonadjacent", source)
+        assert_eq(result.verdict.status, "REFUSED")
+        assert(result.verdict.detail.contains("modifier not adjacent to its step"))
+    }
+    files.remove_all(root) ?? panic("remove adjacency scratch")
+}
+
+#Test("when boolean expressions preserve precedence short-circuit and reject unknown atoms") {
+    root :: cases_test_root("host-boolean")
+    source :: "step named: printf ok\nwhen exit == 0 && (stdout ~ \"ok\" || stdout ~ \"wrong\"): stdout: ~ ok # original predicate\nwhen ! (exit != 0 || named.stdout !~ \"ok\"): mkdir: selected\nfile: selected is-dir\nwhen stdout ~any \"ok\" \"other\": stdout: ~ ok # original predicate\nwhen exit == 0 || probe false: stdout: ~ ok # original predicate\n"
+    assert_eq(cases_test_advanced(root, "precedence", source).verdict.status, "PASS")
+    failed :: "step: printf ok\nwhen exit == 0 && stdout ~ \"ok\": stdout: ~ wrong # original predicate\n"
+    assert_eq(cases_test_advanced(root, "selected-failure", failed).verdict.status, "FAIL")
+    unknown :: "step: printf ok\nwhen made-up true || exit == 0: stdout: ~ ok # original predicate\n"
+    assert_eq(cases_test_advanced(root, "unknown-atom", unknown).verdict.status, "REFUSED")
+    files.remove_all(root) ?? panic("remove boolean scratch")
+}
+
+#Test("named free-port tokens run the real Jet bind-read-exit probe once and reuse the selected value") {
+    root :: cases_test_root("host-free-ports")
+    cases_test_source(root, "ports", "step: printf '%s\\n%s\\n' {{free-port:app}} {{free-port:app}}\nstdout: lines = 2 # original predicate\ncapture: first = text stdout.line(0)\ncapture: second = text stdout.line(1)\ncap:first: = {{cap:second}}\nstep: printf '%s' {{free-port:app}}\nstdout: = \"{{cap:first}}\"\nstdout: is-u32\nstep: printf '%s' {{free-port:other}}\nstdout: is-u32\n")
+    context := cases_test_context(root, files.join(root, "scratch"))
+    context.env.jet = sys.get("TESTKIT_JET") ?? panic("TESTKIT_JET must name the pinned real compiler for the free-port self-test")
+    context.env.root = files.cwd() ?? panic("free-port probe source root")
+    context.env.timeout = 600s
+    assert_eq(kit_cases_run(cases_test_entry("ports"), context)[0].verdict.status, "PASS")
+    files.remove_all(root) ?? panic("remove free-port scratch")
+}
+
+#Test("host-triple and capture condition atoms execute setup from real case text") {
+    root :: cases_test_root("host-triple-captures")
+    source :: "step: printf '%s' {{host-triple}}\nstdout: = \"{kit_steps_host_triple()}\"\ncapture: triple = text stdout\nwhen cap:triple = \"{kit_steps_host_triple()}\" && cap:triple ~ \"{kit_steps_host_arch()}\" && cap:triple ^= \"{kit_steps_host_arch()}\" && cap:triple in [\"wrong\",\"{kit_steps_host_triple()}\"]: mkdir: selected\nfile: selected is-dir\nwhen cap:triple != \"wrong\": file: selected is-dir\n"
+    assert_eq(cases_test_advanced(root, "atoms", source).verdict.status, "PASS")
+    failed :: "step: printf yes\ncapture: answer = text stdout\nwhen cap:answer in [\"yes\"]: stdout: = \"no\"\n"
+    assert_eq(cases_test_advanced(root, "failure", failed).verdict.status, "FAIL")
+    malformed :: "step: printf yes\ncapture: answer = text stdout\nwhen cap:answer in [yes]: stdout: = \"yes\"\n"
+    assert_eq(cases_test_advanced(root, "malformed", malformed).verdict.status, "REFUSED")
+    files.remove_all(root) ?? panic("remove host-triple scratch")
+}

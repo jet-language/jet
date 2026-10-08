@@ -71,6 +71,22 @@ fn kit_expect_exact(id: String, path: String, expected: String?, actual: String,
     kit_expect_exact_with_count(id, path, expected, actual, bless, (text: String) -[]> kit_expect_no_count(text))
 }
 
+fn kit_expect_exact_bytes(id: String, path: String, expected: [U8]?, actual: [U8], bless: KitBless) -> KitVerdict {
+    if expected == {
+        .Val(bytes) -> { if bytes == actual -> return kit_expect_verdict("PASS", "") }
+        .None -> {}
+    }
+    if bless.first_tier && (bless.all || kit_expect_named(bless.ids, id)) {
+        files.create_dir_all(files.dirname(path)) ?? return kit_expect_verdict("ERROR", "mkdir snapshot: {err}")
+        files.write_atomic(path, actual) ?? return kit_expect_verdict("ERROR", "write snapshot: {err}")
+        return kit_expect_verdict("PASS", "blessed {path}")
+    }
+    old :: expected ?? return kit_expect_verdict("FAIL", "missing expected stream: {path}")
+    old_text :: String.from_bytes(old) ?? return kit_expect_verdict("FAIL", "byte snapshot mismatch: {path}")
+    new_text :: String.from_bytes(actual) ?? return kit_expect_verdict("FAIL", "byte snapshot mismatch: {path}")
+    KitVerdict{status: "FAIL", detail: "snapshot mismatch: {path}", diff: kit_expect_unified(path, old_text, new_text)}
+}
+
 fn kit_expect_paths(actual: String, work: String, root: String, scratch: String) -> String {
     actual.replace(work, "{{work}}").replace(root, "{{root}}").replace(scratch, "{{scratch}}")
 }

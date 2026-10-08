@@ -52,7 +52,7 @@ fn kit_exec_base_value(name: String, env: KitEnv, scratch: String) -> String? {
         name == "JET_REPL_HISTORY" -> Val("off")
         name == "JET_STORE_DIR" -> Val(files.join(env.scratch, "store"))
         name == "JET_FFI_CACHE_DIR" -> Val(files.join(env.scratch, "ffi"))
-        name == "TMPDIR" || name == "TMP" || name == "TEMP" -> Val(scratch)
+        name == "TMPDIR" || name == "TMP" || name == "TEMP" -> Val(files.join(scratch, "tmp"))
         name == "JETPACK_ROOT" -> Val(files.join(scratch, "jetpack"))
         name == "JET_SCHEMA_CACHE_DIR" -> Val(files.join(scratch, "schema"))
         else -> sys.get(name)
@@ -106,6 +106,7 @@ fn kit_exec_receipt(receipt: ProcessReceipt, elapsed_ns: Int, input_error: Strin
 }
 
 fn kit_exec_invoke_with_env(env: KitEnv, argv: [String], cwd: String, scratch: String, stdin: String, overlay: [KitEnvVar]) -> KitRun {
+    files.create_dir_all(files.join(scratch, "tmp")) ?? return kit_exec_failed("create child temp directory: {err}")
     started :: time.instant()
     child := kit_exec_spec(env, argv, cwd, scratch, overlay).spawn() ?? return kit_exec_failed("spawn: {err}")
     input_error := ""
@@ -182,7 +183,19 @@ fn kit_exec_requires(requirement: String, env: KitEnv, work: String, scratch: St
         value :: assignment.slice(equals + 1, assignment.len())
         if (sys.get(name) ?? "") != value -> return Val(kit_expect_verdict("SKIP-HOST", requirement))
     } else if requirement.starts_with("os:") {
-        if requirement.slice(3, requirement.len()) != sys.family() -> return Val(kit_expect_verdict("SKIP-HOST", requirement))
+        if !kit_steps_host_matches(sys.family(), requirement.slice(3, requirement.len())) -> return Val(kit_expect_verdict("SKIP-HOST", requirement))
+    } else if requirement.starts_with("os-name:") {
+        if !kit_steps_host_matches(kit_steps_host_name(), requirement.slice(8, requirement.len())) -> return Val(kit_expect_verdict("SKIP-HOST", requirement))
+    } else if requirement.starts_with("arch:") {
+        if !kit_steps_host_matches(kit_steps_host_arch(), requirement.slice(5, requirement.len())) -> return Val(kit_expect_verdict("SKIP-HOST", requirement))
+    } else if requirement.starts_with("probe ") {
+        matched :: kit_steps_probe(requirement.slice(6, requirement.len()), env, work, scratch)
+        if !matched -> return Val(kit_expect_verdict("SKIP-HOST", requirement))
+    } else if requirement.starts_with("tools-any ") || requirement.starts_with("probes-any ") {
+        probes :: requirement.starts_with("probes-any ")
+        body :: requirement.slice(if probes -> 11 else -> 10, requirement.len())
+        matched :: kit_steps_capability_any(body, probes, env, work, scratch)
+        if !matched -> return Val(kit_expect_verdict("FAIL", requirement))
     } else {
         argv := [String]{}
         if {

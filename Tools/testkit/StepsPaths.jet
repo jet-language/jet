@@ -4,7 +4,7 @@ use core.files as files
 // work, but must not redirect a destructive operation into root or scratch.
 fn kit_steps_relative_path(path: String) -> Bool {
     if path == "" || path.contains("{{root}}") || path.contains("{{scratch}}") -> return false
-    relative := path.replace("{{work}}", ".").replace("{{sys:dll-suffix}}", "suffix")
+    relative := path.replace("{{work}}", ".").replace("{{tmp}}", ".").replace("{{sys:dll-suffix}}", "suffix")
     loop prefix in ["{{cap:", "{{tool:"] {
         loop {
             start :: relative.index(prefix) ?? break
@@ -21,7 +21,8 @@ fn kit_steps_relative_path(path: String) -> Bool {
 fn kit_steps_work_path(path: String, env: KitEnv, work: String, scratch: String, built: String) -> String? {
     expanded :: kit_steps_expand(path, env, work, scratch, built)
     absolute :: files.collapse(files.join(work, expanded))
-    if absolute != work && !absolute.starts_with("{work}/") -> return None
+    temporary :: files.join(scratch, "tmp")
+    if absolute != work && !absolute.starts_with("{work}/") && absolute != temporary && !absolute.starts_with("{temporary}/") -> return None
     Val(absolute)
 }
 

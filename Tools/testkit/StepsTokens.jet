@@ -1,5 +1,6 @@
 use core.process as process
 use core.sys as sys
+use core.files as files
 
 fn kit_steps_tool(alternatives: String) -> String? {
     loop name in alternatives.split("|") {
@@ -17,13 +18,34 @@ fn kit_steps_dll_suffix() -> String {
     ".so"
 }
 
+// Exact Layout.rs:709-719 host_triple table. Unknown pairs retain its fallback.
+fn kit_steps_host_triple() -> String {
+    arch :: kit_steps_host_arch()
+    os :: kit_steps_host_name()
+    if arch == "x86_64" || arch == "aarch64" {
+        if os == "linux" -> return "{arch}-unknown-linux-gnu"
+        if os == "windows" -> return "{arch}-pc-windows-msvc"
+        if os == "macos" -> return "{arch}-apple-darwin"
+    }
+    if os == "wasi" -> return "{arch}-wasi"
+    "{arch}-unknown-{os}"
+}
+
 fn kit_steps_runtime_expand(text: String, context: KitStepCtx, state: KitStepState) -> String? {
     expanded := kit_steps_expand(text, context.env, context.work, context.scratch, state.built)
     if expanded.contains("{{sys:dll-suffix}}") -> expanded = expanded.replace("{{sys:dll-suffix}}", kit_steps_dll_suffix())
+    loop pending in state.children {
+        expanded = expanded.replace("{{pid:{pending.label}}}", "{pending.child.id()}")
+    }
+    if expanded.contains("{{pid:") -> return None
+    loop reserved in state.free_ports -> expanded = expanded.replace("{{free-port:{reserved.name}}}", "{reserved.port}")
+    if expanded.contains("{{free-port:") -> return None
     loop capture in state.captures {
         token :: "{{cap:{capture.name}}}"
-        if capture.kind == "bytes" && expanded.contains(token) -> return None
-        expanded = expanded.replace(token, capture.value)
+        if capture.value == {
+            .Text(value) -> expanded = expanded.replace(token, value)
+            else -> { if expanded.contains(token) -> return None }
+        }
     }
     if expanded.contains("{{cap:") -> return None
     rest := expanded
@@ -81,10 +103,9 @@ fn kit_steps_resolve_step(original: KitStep, context: KitStepCtx, state: KitStep
 fn kit_steps_replacements(original: [KitReplacement], context: KitStepCtx, state: KitStepState) -> [KitReplacement]? {
     rules := [KitReplacement]{}
     loop rule in original {
-        from :: kit_steps_runtime_expand(rule.from, context, state) ?? return None
-        to :: kit_steps_runtime_expand(rule.to, context, state) ?? return None
+        from :: if rule.literal_from -> rule.from else -> kit_steps_runtime_expand(rule.from, context, state) ?? return None
         if from == "" -> return None
-        &rules.push(KitReplacement{from: from, to: to})
+        &rules.push(KitReplacement{from: from, to: rule.to, literal_from: rule.literal_from})
     }
     Val(rules)
 }
@@ -94,8 +115,32 @@ fn kit_steps_replace(text: String, rules: [KitReplacement], context: KitStepCtx,
     loop rule in rules {
         from := rule.from
         to :: rule.to
-        if normalized -> from = kit_steps_normalize(from, context.env, context.work, context.scratch, context.plan.normalize, state.built, source_name)
+        if normalized && !rule.literal_from -> from = kit_steps_normalize(from, context.env, context.work, context.scratch, context.plan.normalize, state.built, source_name)
         result = result.replace(from, to)
     }
     result
+}
+
+fn kit_steps_free_port_names(text: String) -> [String]? {
+    names := [String]{}
+    rest := text
+    loop {
+        start :: rest.index("{{free-port:") ?? break
+        after :: start + 11
+        end :: rest.slice(after, rest.len()).index("}}") ?? return None
+        name :: rest.slice(after, after + end)
+        if name == "" || name.contains(" ") || name.contains("{{") || name.contains(":") -> return None
+        &names.push(name)
+        rest = rest.slice(after + end + 1, rest.len())
+    }
+    Val(names)
+}
+
+fn kit_steps_free_port(context: KitStepCtx) -> Int Err! {
+    probe :: files.join(context.env.root, "Tools/testkit/probes/free_port.jet")
+    result :: kit_exec_invoke(context.env, [context.env.jet, "run", probe], context.work, context.scratch, "") ?? return Err("free-port probe: {err}")
+    if result.code != 0 || kit_exec_process_failure(result) != None -> return Err("free-port probe failed: {result.error} {result.stderr}")
+    port :: Int.parse(~result.stdout.trim()) ?? return Err("free-port probe did not print a port")
+    if port < 1 || port > 65535 -> return Err("free-port probe returned an invalid port")
+    Ok(port)
 }

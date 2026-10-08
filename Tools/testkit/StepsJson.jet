@@ -236,6 +236,7 @@ fn kit_steps_json_test(text: String, mode: String, path: String, op: String, lit
         if op == "#=" && literal == "0" -> return None
         return Val("JSON filter selected no values")
     }
+    if op == "valid" -> return None
     expected := DataTree.Null
     expected_type := ""
     count := 0
@@ -269,12 +270,12 @@ fn kit_steps_json_test(text: String, mode: String, path: String, op: String, lit
 fn kit_steps_json_assertion(value: String) -> KitAssertion? {
     body :: kit_steps_body(value)
     tokens :: kit_steps_tokens(body) ?? return None
-    if tokens.len() < 5 -> return None
+    if tokens.len() < 4 -> return None
     subject :: kit_steps_subject(tokens[0].text)
     if !kit_steps_subject_valid(tokens[0].text) -> return None
     offset :: if subject == "file" || subject == "file?" -> 1 else -> 0
     needed :: 4 + offset
-    if tokens.len() <= needed -> return None
+    if tokens.len() < needed -> return None
     stream :: if offset == 1 -> "file" else -> subject
     transform :: kit_steps_subject_transform(tokens[0].text)
     if transform != "" && !kit_steps_reason(value) -> return None
@@ -285,6 +286,11 @@ fn kit_steps_json_assertion(value: String) -> KitAssertion? {
     if kit_steps_json_path(kit_steps_json_preview(path)) == None -> return None
     source :: if offset == 1 -> tokens[1].text else -> ""
     if stream == "file" && !kit_steps_relative_path(source) -> return None
+    if op == "valid" {
+        if mode != "doc" || path != "$" || tokens.len() != needed || !kit_steps_reason(value) -> return None
+        return Val(KitAssertion{stream: stream, path: source, mode: "json", value: "", json_mode: mode, json_path: path, json_op: op, optional_file: subject == "file?", transform: transform})
+    }
+    if tokens.len() == needed -> return None
     literal := ~body.slice(tokens[needed].start, body.len()).trim()
     if op == "=" || op == "has" || op == "!has" {
         expected :: json.parse(kit_steps_json_preview(literal)) ?? return None

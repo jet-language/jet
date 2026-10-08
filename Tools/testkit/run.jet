@@ -26,6 +26,11 @@ fn kit_parse_options(args: [String]) -> KitOptions {
             i += 1
             next
         }
+        if flag == "--opt-in" {
+            options.opt_in = true
+            i += 1
+            next
+        }
         if flag == "--bless-all" {
             options.bless.all = true
             i += 1
@@ -139,6 +144,7 @@ struct KitOptions {
     results: String
     list: Bool
     coverage: Bool
+    opt_in: Bool{false}
     bless: KitBless
     error: String
 }
@@ -183,7 +189,10 @@ struct KitAssertion {
     optional_file: Bool{false}
     file_first: Bool{false}
     transform: String{""}
+    rhs_literal: Bool{false}
+    rhs_transform: String{""}
     alternatives: [String]{[String]{}}
+    conditions: [String]{[String]{}}
 }
 
 struct KitJSONNormalization {
@@ -218,16 +227,43 @@ struct KitPendingChild {
     input_error: String
 }
 
-struct KitCaptureResult {
-    value: String{""}
+struct KitLinePredicate {
+    valid: Bool
+    value: Bool
+    next: Int
+}
+
+struct KitScalar {
+    value: Int
+    next: Int
+}
+
+enum KitCapturedValue {
+    Text(String)
+    Bytes([U8]?)
+    Numbers([Int])
+    Tree([KitTreeItem])
+    Absent
+}
+
+struct KitSubjectResult {
+    value: KitCapturedValue{KitCapturedValue.Absent}
     verdict: KitVerdict
 }
 
 struct KitCapture {
     name: String
-    value: String
-    kind: String{""}
-    bytes: [U8]?{None}
+    value: KitCapturedValue
+}
+
+struct KitTreeItem {
+    path: String
+    bytes: [U8]
+}
+
+struct KitFreePort {
+    name: String
+    port: Int
 }
 
 struct KitInventoryItem {
@@ -252,6 +288,7 @@ struct KitJSONFilter {
 struct KitReplacement {
     from: String
     to: String
+    literal_from: Bool{false}
 }
 
 struct KitProcessInput {
@@ -272,6 +309,7 @@ struct KitStep {
     environment: [KitEnvVar]{[KitEnvVar]{}}
     label: String{""}
     action: String{""}
+    literal_input: Bool{false}
     limit_time: Int{0}
     limit_memory: Int{0}
     isolate: String{""}
@@ -279,6 +317,7 @@ struct KitStep {
     env_clear: Bool{false}
     json_normalize: [KitJSONNormalization]{[KitJSONNormalization]{}}
     replacements: [KitReplacement]{[KitReplacement]{}}
+    conditions: [String]{[String]{}}
 }
 
 struct KitPlan {
@@ -292,8 +331,10 @@ struct KitPlan {
     refused: String
     steps: [KitStep]
     error: String
+    opt_in: String{""}
     json_normalize: [KitJSONNormalization]{[KitJSONNormalization]{}}
     replacements: [KitReplacement]{[KitReplacement]{}}
+    free_ports: [String]{[String]{}}
 }
 
 struct KitOutcome {
@@ -348,6 +389,7 @@ struct KitStepState {
     captures: [KitCapture]{[KitCapture]{}}
     inventories: [KitInventory]{[KitInventory]{}}
     replacements: [KitReplacement]{[KitReplacement]{}}
+    free_ports: [KitFreePort]{[KitFreePort]{}}
 }
 
 struct KitStepResult {
@@ -377,7 +419,8 @@ fn kit_steps_hooks() -> KitStepHooks {
 
 // All suites share this sequencing loop. Hooks supply only suite-specific
 // invocation and expectations, never an alternative parser or executor.
-fn kit_steps_execute(context: KitStepCtx, hooks: KitStepHooks) -> KitOutcome {
+fn kit_steps_execute(original_context: KitStepCtx, hooks: KitStepHooks) -> KitOutcome {
+    context := original_context
     state := KitStepState{last: kit_exec_failed("no steps"), built: "", built_once: false}
     plan :: context.plan
     if plan.error != "" -> return KitOutcome{verdict: kit_expect_verdict("REFUSED", plan.error), run: state.last}
@@ -396,7 +439,31 @@ fn kit_steps_execute(context: KitStepCtx, hooks: KitStepHooks) -> KitOutcome {
         .None -> {}
     }
     if plan.fixture != "" -> kit_exec_copy_tree(files.join(context.snapshots, plan.fixture), context.work, true)
-    loop (index, original) in plan.steps {
+    loop name in plan.free_ports {
+        port :: kit_steps_free_port(context) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "{err}"))
+        &state.free_ports.push(KitFreePort{name: name, port: port})
+    }
+    loop index in 0..<context.plan.environment.len() {
+        context.plan.environment[index] = kit_steps_runtime_expand(context.plan.environment[index], context, state) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "case environment token unavailable"))
+    }
+    cursor := 0
+    loop cursor < plan.steps.len() {
+        index :: cursor
+        original :: plan.steps[index]
+        cursor += 1
+        if !kit_steps_conditions(original.conditions, context, state) -> next
+        if original.action == "when" {
+            if !kit_steps_condition(original.argv[0], context, state) {
+                depth := 1
+                loop cursor < plan.steps.len() && depth > 0 {
+                    if plan.steps[cursor].action == "when" -> depth += 1
+                    if plan.steps[cursor].action == "end when" -> depth -= 1
+                    cursor += 1
+                }
+            }
+            next
+        }
+        if original.action == "end when" -> next
         step := kit_steps_resolve_step(original, context, state) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "undefined capture or unavailable tool token"))
         invoked :: if kit_steps_setup_kind(step.action) || step.action == "spawn" || step.action == "wait" || step.action == "capture" || step.action == "write" || step.action == "inventory" ->
             kit_steps_action(step, context, state) else -> hooks.invoke(step, index, context, state)

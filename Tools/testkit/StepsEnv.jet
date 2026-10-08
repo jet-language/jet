@@ -1,28 +1,30 @@
-// Only argv admits environment tokens. Resolve against the same kit defaults
-// used by Exec, then the case/step overlays after final unset operations.
+
+// Resolve environment tokens against the effective environment before this line.
 fn kit_steps_env_token_end(argument: String, start: Int) -> Int? {
     bytes :: argument.bytes()
     i := start + 5
     depth := 1
-    pipe := -1
     loop i < bytes.len() {
         byte :: Int.from_u8(bytes[i])
         if byte == 123 -> depth += 1
         if byte == 125 {
             depth -= 1
-            if depth == 0 -> break
+            if depth == 0 -> return Val(i + 1)
         }
-        if byte == 124 && depth == 1 && pipe == -1 -> pipe = i
         i += 1
     }
-    if depth != 0 || pipe <= start + 5 -> return None
-    loop index in (start + 5)..<pipe {
-        byte :: Int.from_u8(bytes[index])
-        letter :: (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) || byte == 95
-        digit :: byte >= 48 && byte <= 57
-        if !letter && !(digit && index > start + 5) -> return None
+    None
+}
+
+fn kit_steps_env_name(name: String) -> Bool {
+    if name == "" -> return false
+    loop (index, byte) in name.bytes() {
+        code :: Int.from_u8(byte)
+        if code == 95 || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) -> next
+        if index > 0 && code >= 48 && code <= 57 -> next
+        return false
     }
-    Val(i + 1)
+    true
 }
 
 fn kit_steps_argv_env_valid(argument: String) -> Bool {
@@ -30,29 +32,69 @@ fn kit_steps_argv_env_valid(argument: String) -> Bool {
     loop {
         start :: rest.index("{{env:") ?? return true
         end :: kit_steps_env_token_end(rest, start) ?? return false
+        body :: rest.slice(start + 5, end - 1)
+        if body == "" || body.starts_with("|") -> return false
+        choices :: body.split("|").to_list()
+        if !kit_steps_env_name(choices[0]) -> return false
+        loop choice in choices.slice(1, choices.len()) {
+            if choice.starts_with("env:") && !kit_steps_env_name(choice.slice(4, choice.len())) -> return false
+        }
         rest = rest.slice(end, rest.len())
     }
 }
 
+fn kit_steps_env_value(name: String, env: KitEnv, scratch: String, overlay: [KitEnvVar]) -> String? {
+    value := kit_exec_base_value(name, env, scratch)
+    loop variable in overlay {
+        if variable.name == name -> value = variable.value
+    }
+    value
+}
+
+fn kit_steps_env_fallback(body: String, env: KitEnv, scratch: String, overlay: [KitEnvVar]) -> String {
+    choices :: body.split("|").to_list()
+    loop (index, choice) in choices {
+        if index > 0 && !choice.starts_with("env:") -> return ~choice
+        name :: if index == 0 -> choice else -> choice.slice(4, choice.len())
+        value :: kit_steps_env_value(name, env, scratch, overlay) ?? ""
+        if value != "" -> return value
+    }
+    ""
+}
+
 fn kit_steps_argv_env(argument: String, env: KitEnv, scratch: String, overlay: [KitEnvVar]) -> String {
-    if !argument.contains("{{env:") -> return ~argument
     rest := argument
     result := ""
     loop {
         start :: rest.index("{{env:") ?? break
-        end :: kit_steps_env_token_end(rest, start) ?? panic("validated argv environment token")
+        end :: kit_steps_env_token_end(rest, start) ?? panic("validated environment token")
         body :: rest.slice(start + 5, end - 1)
-        pipe :: body.index("|") ?? panic("validated environment separator")
-        name :: body.slice(0, pipe)
-        fallback :: body.slice(pipe + 1, body.len())
-        value := kit_exec_base_value(name, env, scratch)
-        loop variable in overlay {
-            if variable.name == name -> value = variable.value
-        }
-        text :: value ?? ""
-        expanded :: if text == "" -> fallback else -> text
+        expanded :: kit_steps_env_fallback(body, env, scratch, overlay)
         result = "{result}{rest.slice(0, start)}{expanded}"
         rest = rest.slice(end, rest.len())
     }
     "{result}{rest}"
+}
+
+fn kit_steps_whitespace_words(text: String) -> [String] {
+    words := [String]{}
+    bytes :: text.bytes()
+    start := 0
+    index := 0
+    loop index < bytes.len() {
+        scalar :: kit_steps_scalar(bytes, index)
+        if kit_steps_unicode_space(scalar.value) {
+            if index > start -> &words.push(text.slice(start, index))
+            start = scalar.next
+        }
+        index = scalar.next
+    }
+    if index > start -> &words.push(text.slice(start, index))
+    words
+}
+
+fn kit_steps_env_words(argument: String, env: KitEnv, scratch: String, overlay: [KitEnvVar]) -> [String]? {
+    if !argument.starts_with("{{env-words:") || !argument.ends_with("}}") -> return None
+    value :: kit_steps_env_fallback(argument.slice(11, argument.len() - 1), env, scratch, overlay)
+    Val(kit_steps_whitespace_words(value))
 }

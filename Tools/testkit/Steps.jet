@@ -1,4 +1,6 @@
 use core.files as files
+use core.process as process
+use core.sys as sys
 
 
 // The lexer decodes JSON-quoted tokens and retains raw spans for JSON literals.
@@ -16,11 +18,49 @@ fn kit_steps_parse(source: String) -> KitPlan {
     joined := [String]{}
     captures := [String]{}
     inventories := [String]{}
+    conditions := [String]{}
+    before_steps := 0
+    before_assertions := 0
+    blocks := [String]{}
+    modifier_adjacent := false
     loop raw in source.split("\n") {
         line_number += 1
-        line :: ~raw.trim()
+        plan = kit_steps_attach_conditions(plan, before_steps, before_assertions, conditions)
+        before_steps = plan.steps.len()
+        before_assertions = if before_steps == 0 -> 0 else -> plan.steps[before_steps - 1].assertions.len()
+        conditions = []
+        line := ~raw.trim()
         if line == "" || line.starts_with("#") -> next
-        colon :: line.index(":") ?? -1
+        if line == "end when" {
+            if blocks.len() == 0 || blocks[blocks.len() - 1] != "when" {
+                plan.error = "line {line_number}: unmatched end when"
+                return plan
+            }
+            blocks = blocks.slice(0, blocks.len() - 1)
+            &plan.steps.push(KitStep{argv: ["end when"], stdin: "", exit: "0", assertions: [], action: "end when"})
+            next
+        }
+        loop line.starts_with("when ") {
+            delimiter :: kit_steps_condition_colon(line)
+            end :: delimiter ?? line.len()
+            condition :: ~line.slice(5, end).trim()
+            if !kit_steps_condition_valid(condition) {
+                plan.error = "line {line_number}: invalid when condition"
+                return plan
+            }
+            if delimiter == None {
+                &blocks.push("when")
+                &plan.steps.push(KitStep{argv: [condition], stdin: "", exit: "0", assertions: [], action: "when"})
+                line = ""
+                break
+            }
+            &conditions.push(condition)
+            line = ~line.slice(end + 1, line.len()).trim()
+        }
+        if line == "" -> next
+        prefix :: if line.starts_with("cap:") -> 4 else -> 0
+        delimiter :: kit_steps_condition_colon(line.slice(prefix, line.len())) ?? -1
+        colon :: if delimiter < 0 -> -1 else -> delimiter + prefix
         if colon < 0 {
             plan.error = "line {line_number}: missing ':'"
             return plan
@@ -28,13 +68,40 @@ fn kit_steps_parse(source: String) -> KitPlan {
         key :: ~line.slice(0, colon).trim()
         original :: ~line.slice(colon + 1, line.len()).trim()
         value :: kit_steps_body(original)
-        if !kit_steps_capture_tokens(value, captures) {
+        port_names :: kit_steps_free_port_names(value) ?? {
+            plan.error = "line {line_number}: malformed free-port token"
+            return plan
+        }
+        loop name in port_names {
+            if !kit_expect_named(plan.free_ports, name) -> &plan.free_ports.push(name)
+        }
+        modifier :: kit_expect_named(["env", "unset", "env-clear", "isolate", "pty", "pty-send", "pty-resize", "pty-close", "stderr-to-stdout", "timeout", "cwd", "limit", "stdin"], key)
+        process_line :: key == "step" || key.starts_with("step ") || key.starts_with("spawn ") || key.starts_with("session ")
+        if modifier && !modifier_adjacent && !(key == "env" && plan.steps.len() == 0) {
+            plan.error = "line {line_number}: modifier not adjacent to its step"
+            return plan
+        }
+        if process_line -> modifier_adjacent = true
+        else if !modifier -> modifier_adjacent = false
+        if !(key == "normalize" && value.starts_with("replace ")) && !kit_steps_capture_tokens(value, captures) {
             plan.error = "line {line_number}: undefined capture token"
             return plan
         }
-        if value.contains("{{env:") && key != "step" && !key.starts_with("step ") && !key.starts_with("spawn ") {
+        if value.contains("{{env:") && key != "env" && key != "step" && !key.starts_with("step ") && !key.starts_with("spawn ") {
             plan.error = "line {line_number}: environment tokens are argv-only"
             return plan
+        }
+        if key == "opt-in" {
+            if value == "" || plan.opt_in != "" || plan.steps.len() != 0 {
+                plan.error = "line {line_number}: opt-in needs one nonempty header reason"
+                return plan
+            }
+            plan.opt_in = value
+            next
+        }
+        if key == "tools-any" || key == "probes-any" {
+            &plan.requires.push("{key} {value}")
+            next
         }
         if key == "requires" {
             &plan.requires.push(value)
@@ -81,12 +148,18 @@ fn kit_steps_parse(source: String) -> KitPlan {
         }
         if key == "normalize" {
             if value.starts_with("replace ") {
-                words :: kit_steps_words(value) ?? []
-                if words.len() != 3 || words[1] == "" {
+                words :: kit_steps_tokens(value) ?? []
+                if words.len() != 3 || words[1].text == "" {
                     plan.error = "line {line_number}: replace needs a nonempty source and replacement"
                     return plan
                 }
-                rule :: KitReplacement{from: words[1], to: words[2]}
+                first :: value.bytes()[words[1].start]
+                quoted :: first == (U8{34}) || first == (U8{39})
+                if !quoted && !kit_steps_capture_tokens(words[1].text, captures) {
+                    plan.error = "line {line_number}: undefined normalization capture token"
+                    return plan
+                }
+                rule :: KitReplacement{from: words[1].text, to: words[2].text, literal_from: quoted}
                 if plan.steps.len() == 0 -> &plan.replacements.push(rule)
                 else -> &plan.steps[plan.steps.len() - 1].replacements.push(rule)
                 next
@@ -116,6 +189,13 @@ fn kit_steps_parse(source: String) -> KitPlan {
             next
         }
         if kit_steps_setup_kind(key) {
+            if key == "append" {
+                tokens :: kit_steps_tokens(value) ?? []
+                if tokens.len() != 2 || (value.bytes()[tokens[1].start] != (U8{34}) && value.bytes()[tokens[1].start] != (U8{39})) {
+                    plan.error = "line {line_number}: append needs a quoted byte string"
+                    return plan
+                }
+            }
             words :: kit_steps_words(value) ?? []
             if !kit_steps_setup_valid(key, words) {
                 plan.error = "line {line_number}: invalid {key} setup action"
@@ -127,9 +207,29 @@ fn kit_steps_parse(source: String) -> KitPlan {
             next
         }
         if key == "copy" || key == "remove" || key == "concat" || key == "write" {
-            paths :: kit_steps_words(value) ?? {
+            tokens :: kit_steps_tokens(value) ?? {
                 plan.error = "line {line_number}: invalid file action paths"
                 return plan
+            }
+            paths := [String]{}
+            loop token in tokens -> &paths.push(token.text)
+            literal := false
+            if key == "write" {
+                if paths.len() == 3 && paths[1] == "=" {
+                    first :: value.bytes()[tokens[2].start]
+                    if first != (U8{34}) && first != (U8{39}) {
+                        plan.error = "line {line_number}: literal write needs a quoted string"
+                        return plan
+                    }
+                    paths = [paths[0], paths[2]]
+                    literal = true
+                } else if paths.len() == 2 {
+                    first :: value.bytes()[tokens[1].start]
+                    if first == (U8{34}) || first == (U8{39}) {
+                        plan.error = "line {line_number}: literal write uses '= \"<bytes>\"'"
+                        return plan
+                    }
+                }
             }
             if (key == "remove" && paths.len() != 1) || ((key == "copy" || key == "write") && paths.len() != 2) || (key == "concat" && paths.len() < 2) {
                 plan.error = "line {line_number}: invalid {key} path count"
@@ -145,7 +245,7 @@ fn kit_steps_parse(source: String) -> KitPlan {
                 }
                 &argv.push(path)
             }
-            &plan.steps.push(KitStep{argv: argv, stdin: "", exit: "0", assertions: [], action: key})
+            &plan.steps.push(KitStep{argv: argv, stdin: "", exit: "0", assertions: [], action: key, literal_input: literal})
             next
         }
         if key == "capture" {
@@ -390,6 +490,11 @@ fn kit_steps_parse(source: String) -> KitPlan {
         }
         &plan.steps[i].assertions.push(assertion)
     }
+    plan = kit_steps_attach_conditions(plan, before_steps, before_assertions, conditions)
+    if blocks.len() != 0 {
+        plan.error = "unclosed when block"
+        return plan
+    }
     loop label in pending {
         if !kit_expect_named(joined, label) {
             plan.error = "unjoined spawn label {label}"
@@ -429,6 +534,10 @@ fn kit_steps_version(banner: String) -> String? {
 
 fn kit_steps_expand(value: String, env: KitEnv, work: String, scratch: String, built: String) -> String {
     expanded :: value.replace("{{work}}", work).replace("{{root}}", env.root).replace("{{scratch}}", scratch)
+        .replace("{{tmp}}", files.join(scratch, "tmp")).replace("{{pid}}", "{process.current_pid()}")
+        .replace("{{jet-semver}}", env.version).replace("{{jet-dir}}", files.dirname(env.jet))
+        .replace("{{host-triple}}", kit_steps_host_triple())
+        .replace("{{path-sep}}", if sys.family() == "windows" -> ";" else -> ":")
         .replace("{{jetpack}}", env.jetpack).replace("{{jet}}", env.jet).replace("{{built}}", built)
     if expanded.contains("{{sys:dll-suffix}}") -> return expanded.replace("{{sys:dll-suffix}}", kit_steps_dll_suffix())
     expanded
@@ -465,7 +574,7 @@ fn kit_steps_environment(plan: KitPlan, env: KitEnv, work: String, scratch: Stri
         equals :: assignment.index("=") ?? -1
         if equals <= 0 -> panic("env requires NAME=VALUE")
         name :: assignment.slice(0, equals)
-        value :: kit_steps_expand(assignment.slice(equals + 1, assignment.len()), env, work, scratch, built)
+        value :: kit_steps_argv_env(kit_steps_expand(assignment.slice(equals + 1, assignment.len()), env, work, scratch, built), env, scratch, overlay)
         &overlay.push(KitEnvVar{name: name, value: Val(value)})
     }
     overlay
@@ -475,7 +584,7 @@ fn kit_steps_step_environment(step: KitStep, env: KitEnv, work: String, scratch:
     result := overlay
     loop variable in step.environment {
         value :: if variable.value == {
-            .Val(text) -> Val(kit_steps_expand(text, env, work, scratch, built))
+            .Val(text) -> Val(kit_steps_argv_env(kit_steps_expand(text, env, work, scratch, built), env, scratch, result))
             .None -> None
         }
         &result.push(KitEnvVar{name: variable.name, value: value})
@@ -491,10 +600,20 @@ fn kit_steps_invoke_step(step: KitStep, env: KitEnv, work: String, scratch: Stri
 }
 
 fn kit_steps_prepare(step: KitStep, env: KitEnv, work: String, scratch: String, snapshots: String, built: String, overlay: [KitEnvVar]) -> KitProcessInput Err! {
+    files.create_dir_all(files.join(scratch, "tmp")) ?? return Err("create child temp directory: {err}")
     policy :: kit_steps_policy(step, env) ?? return Err("time limit outside Duration range")
-    environment :: kit_steps_step_environment(step, env, work, scratch, built, overlay)
+    environment :: kit_steps_step_environment(step, policy, work, scratch, built, overlay)
     argv := [String]{}
-    loop argument in step.argv -> &argv.push(kit_steps_argv_env(kit_steps_expand(argument, env, work, scratch, built), policy, scratch, environment))
+    loop argument in step.argv {
+        expanded :: kit_steps_expand(argument, env, work, scratch, built)
+        if expanded.starts_with("{{env-words:") {
+            words :: kit_steps_env_words(expanded, policy, scratch, environment) ?? return Err("env-words token must occupy the entire argv word")
+            loop word in words -> &argv.push(word)
+        } else {
+            &argv.push(kit_steps_argv_env(expanded, policy, scratch, environment))
+        }
+    }
+    if argv.len() == 0 -> return Err("empty expanded argv")
     if argv[0] == "jet" -> argv[0] = env.jet
     if argv[0] == "jetpack" {
         if env.jetpack == "" -> return Err("jetpack binary required")
@@ -626,7 +745,8 @@ fn kit_steps_invoke(step: KitStep, index: Int, context: KitStepCtx, previous: Ki
     state := previous
     if step.argv[0] == "build" -> return KitStepResult{state: state, verdict: kit_expect_verdict("REFUSED", "build step requires golden entry; cases use jet build")}
     if step.argv[0] == "built" && !state.built_once -> return KitStepResult{state: state, verdict: kit_expect_verdict("ERROR", "built step has no preceding successful build")}
-    overlay :: kit_steps_environment(context.plan, context.env, context.work, context.scratch, state.built)
+    policy :: kit_steps_policy(step, context.env) ?? return kit_steps_action_error(state, "invalid process policy")
+    overlay :: kit_steps_environment(context.plan, policy, context.work, context.scratch, state.built)
     state.last = kit_steps_invoke_step(step, context.env, context.work, context.scratch, context.snapshots, state.built, overlay)
     if step.argv.len() > 1 && step.argv[0] == "jet" && step.argv[1] == "build" && state.last.code == 0 && kit_exec_process_failure(state.last) == None {
         cwd :: if step.cwd == "" -> context.work else -> files.join(context.work, kit_steps_expand(step.cwd, context.env, context.work, context.scratch, state.built))

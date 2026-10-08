@@ -26,12 +26,15 @@ fn kit_cases_discover(context: KitCtx) -> [KitEntry] {
 
 fn kit_cases_run(entry: KitEntry, context: KitCtx) -> [KitOutcome] {
     source :: files.read(files.join(context.root, entry.path)) ?? return [KitOutcome{verdict: kit_expect_verdict("ERROR", "read case: {err}"), run: kit_exec_failed("{err}")}]
+    plan :: kit_steps_parse_case(source)
+    exact_id :: context.options.cases != "" || context.options.filter == entry.path || kit_expect_named(context.options.bless.ids, entry.path)
+    if plan.error == "" && plan.opt_in != "" && !context.options.opt_in && !exact_id -> return [KitOutcome{verdict: kit_expect_verdict("OPT-IN", plan.opt_in), run: kit_steps_action_run()}]
     work :: files.join(context.scratch, "work")
     files.create_dir_all(work) ?? return [KitOutcome{verdict: kit_expect_verdict("ERROR", "case work: {err}"), run: kit_exec_failed("{err}")}]
     // Steps owns the single grammar, host requirements, fixture state staging,
     // token expansion, process policy, assertions and snapshot blessing.
     // CLI scenarios run once, independent of the golden tier selection.
-    steps :: kit_steps_context(kit_steps_parse_case(source), entry.path, context.env, work, context.scratch,
+    steps :: kit_steps_context(plan, entry.path, context.env, work, context.scratch,
         files.join(context.root, entry.project), context.bless)
     [kit_steps_execute(steps, kit_steps_hooks())]
 }

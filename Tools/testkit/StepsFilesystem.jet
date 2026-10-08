@@ -1,7 +1,5 @@
 use core.files as files
-use core.encoding.hex as hex
 use core.time as time
-use core.math as math
 
 fn kit_steps_compare(left: Int, op: String, right: Int) -> Bool {
     if op == "=" -> return left == right
@@ -50,9 +48,9 @@ fn kit_steps_duration_ns(text: String) -> Int? {
         }
     }
     // Reject unrepresentable durations rather than wrapping the deadline.
-    if whole > 9223372036854775807 / scale -> return None
+    if whole > 9223372036854775807 /% scale -> return None
     base :: whole * scale
-    tail :: fraction * (scale / denominator)
+    tail :: fraction * scale /% denominator
     if tail > 9223372036854775807 - base -> return None
     ns :: base + tail
     if ns <= 0 -> return None
@@ -72,10 +70,11 @@ fn kit_steps_octal(text: String) -> Int? {
 }
 
 fn kit_steps_setup_kind(key: String) -> Bool {
-    kit_expect_named(["mkdir", "truncate", "poke", "symlink", "hardlink", "chmod", "rename", "resize", "await"], key)
+    kit_expect_named(["mkdir", "truncate", "poke", "symlink", "hardlink", "chmod", "rename", "resize", "await", "append", "sleep"], key)
 }
 
 fn kit_steps_setup_valid(key: String, words: [String]) -> Bool {
+    if key == "sleep" -> return words.len() == 1 && kit_steps_duration_ns(words[0]) != None
     if key == "await" {
         if (words.len() != 2 && words.len() != 4) || words[0] != "file" || !kit_steps_relative_path(words[1]) -> return false
         return words.len() == 2 || (words[2] == "timeout" && kit_steps_duration_ns(words[3]) != None)
@@ -84,8 +83,9 @@ fn kit_steps_setup_valid(key: String, words: [String]) -> Bool {
     if key == "symlink" -> return words.len() == 2 && kit_steps_relative_path(words[1])
     if !kit_steps_relative_path(words[0]) -> return false
     if key == "mkdir" -> return words.len() == 1
+    if key == "append" -> return words.len() == 2
     if key == "hardlink" || key == "rename" -> return words.len() == 2 && kit_steps_relative_path(words[1])
-    if key == "chmod" -> return words.len() == 2 && kit_steps_octal(words[1]) != None
+    if key == "chmod" -> return words.len() == 2 && kit_steps_octal(kit_steps_json_preview(words[1])) != None
     if key == "truncate" || key == "resize" {
         if words.len() != 2 -> return false
         amount :: Int.parse(words[1]) ?? return false
@@ -93,16 +93,22 @@ fn kit_steps_setup_valid(key: String, words: [String]) -> Bool {
     }
     if words.len() != 5 || words[1] != "at" || (words[3] != "hex" && words[3] != "xor") -> return false
     if words[2] != "mid" && (Int.parse(words[2]) ?? -1) < 0 -> return false
-    _ :: hex.decode(words[4]) ?? return false
-    true
+    kit_steps_hex_valid(words[4])
 }
 
 fn kit_steps_setup_run(step: KitStep, env: KitEnv, work: String, scratch: String, built: String) -> KitVerdict {
+    if step.action == "sleep" {
+        duration :: time.duration_ns(kit_steps_duration_ns(step.argv[1]) ?? return kit_expect_verdict("REFUSED", "invalid sleep duration"))
+        time.sleep(duration)
+        return kit_expect_verdict("PASS", "")
+    }
     if step.action == "resize" -> return kit_expect_verdict("REFUSED", "sparse-set-len")
     raw :: if step.action == "await" -> step.argv[2] else if step.action == "symlink" -> step.argv[2] else -> step.argv[1]
     path :: kit_steps_work_path(raw, env, work, scratch, built) ?? return kit_expect_verdict("REFUSED", "setup path escapes work directory")
     if step.action == "mkdir" {
         files.create_dir_all(path) ?? return kit_expect_verdict("ERROR", "mkdir: {err}")
+    } else if step.action == "append" {
+        files.append_all(path, step.argv[2]) ?? return kit_expect_verdict("ERROR", "append: {err}")
     } else if step.action == "await" {
         timeout :: if step.argv.len() == 5 -> kit_steps_duration_ns(step.argv[4]) ?? return kit_expect_verdict("REFUSED", "invalid await timeout") else -> env.timeout.ns
         started :: time.instant()
@@ -125,15 +131,8 @@ fn kit_steps_setup_run(step: KitStep, env: KitEnv, work: String, scratch: String
         if size < 0 -> return kit_expect_verdict("ERROR", "truncate removes more bytes than the file contains")
         files.truncate(path, size) ?? return kit_expect_verdict("ERROR", "truncate: {err}")
     } else if step.action == "poke" {
-        info :: files.stat(path) ?? return kit_expect_verdict("ERROR", "poke stat: {err}")
-        offset :: if step.argv[3] == "mid" -> info.size / 2 else -> Int.parse(step.argv[3]) ?? return kit_expect_verdict("REFUSED", "invalid poke offset")
-        bytes := hex.decode(step.argv[5]) ?? return kit_expect_verdict("ERROR", "poke hex: {err}")
-        if offset > info.size || bytes.len() > info.size - offset -> return kit_expect_verdict("ERROR", "poke range extends beyond the file")
-        if step.argv[4] == "xor" {
-            original :: files.read_at(path, offset, bytes.len()) ?? return kit_expect_verdict("ERROR", "poke read: {err}")
-            loop i in 0..<bytes.len() -> bytes[i] = U8{math.xor(Int.from_u8(bytes[i]), Int.from_u8(original[i]))}
-        }
-        files.write_at(path, offset, bytes) ?? return kit_expect_verdict("ERROR", "poke: {err}")
+        // #4834: Core HexError's duplicate nominal identity prevents check lowering.
+        return kit_expect_verdict("ERROR", "poke hex blocked on #4834 (Core HexError duplicate)")
     }
     kit_expect_verdict("PASS", "")
 }
@@ -214,22 +213,22 @@ fn kit_steps_entry_matches(path: String, name: String, is_dir: Bool, is_file: Bo
     true
 }
 
-fn kit_steps_entries_walk(directory: String, depth: Int, words: [String], recursive: Bool, output: &[String]) Err! {
+fn kit_steps_entries_walk(directory: String, depth: Int, words: [String], recursive: Bool) -> [String] Err! {
+    output := [String]{}
     entries :: files.list_dir(directory) ?? return Err("entries directory: {err}")
     loop entry in entries {
         info :: files.stat(entry.path) ?? return Err("entries stat: {err}")
         if kit_steps_entry_matches(entry.path, entry.name, info.is_dir, info.is_file, depth, words) -> &output.push(entry.path)
         if recursive && info.is_dir && !info.is_symlink {
-            kit_steps_entries_walk(entry.path, depth + 1, words, recursive, &output) ?? return Err(err)
+            nested :: kit_steps_entries_walk(entry.path, depth + 1, words, recursive) ?? return Err(err)
+            loop path in nested -> &output.push(path)
         }
     }
-    Ok(())
+    Ok(output)
 }
 
 fn kit_steps_entries(directory: String, words: [String]) -> [String] Err! {
-    result := [String]{}
-    kit_steps_entries_walk(directory, 1, words, kit_expect_named(words, "recursive"), &result) ?? return Err(err)
-    Ok(result)
+    kit_steps_entries_walk(directory, 1, words, kit_expect_named(words, "recursive"))
 }
 
 fn kit_steps_entries_assertion(original: String) -> KitAssertion? {

@@ -18,29 +18,18 @@ fn kit_steps_known_relation(plan: KitPlan, reference: String, before: Int) -> Bo
 }
 
 fn kit_steps_subject(selector: String) -> String {
-    loop transform in ["trim_start", "trim_end", "trim"] {
-        suffix :: ".{transform}"
-        if selector.ends_with(suffix) -> return selector.slice(0, selector.len() - suffix.len())
-    }
-    ~selector
+    selector.slice(0, selector.index(".") ?? selector.len())
 }
 
 fn kit_steps_subject_transform(selector: String) -> String {
-    loop transform in ["trim_start", "trim_end", "trim"] {
-        if selector.ends_with(".{transform}") -> return transform
-    }
-    ""
+    dot :: selector.index(".") ?? return ""
+    selector.slice(dot + 1, selector.len())
 }
 
 fn kit_steps_subject_valid(selector: String) -> Bool {
-    kit_expect_named(["stdout", "stderr", "stdout+stderr", "stderr+stdout", "stdout|stderr", "stderr|stdout", "file", "file?"], kit_steps_subject(selector))
-}
-
-fn kit_steps_transform(text: String, transform: String) -> String {
-    if transform == "trim" -> return ~text.trim()
-    if transform == "trim_start" -> return strtext.trim_start(text)
-    if transform == "trim_end" -> return strtext.trim_end(text)
-    ~text
+    subject :: kit_steps_subject(selector)
+    known :: kit_expect_named(["stdout", "stderr", "stdout+stderr", "stderr+stdout", "stdout|stderr", "stderr|stdout", "file", "file?", "machine"], subject) || (subject.starts_with("cap:") && subject.len() > 4)
+    known && kit_steps_transform_valid(kit_steps_subject_transform(selector))
 }
 
 fn kit_steps_stream_assertion(key: String, original: String) -> KitAssertion? {
@@ -65,7 +54,10 @@ fn kit_steps_stream_assertion(key: String, original: String) -> KitAssertion? {
     data := ""
     extra := ""
     alternatives := [String]{}
+    literal := false
+    rhs_transform := ""
     arity :: tokens.len() - offset
+    if kit_steps_batch_form(mode) -> return kit_steps_batch_assertion(stream, path, transform, original, offset)
     if stream == "file" && mode == "same-as" {
         if arity != 2 -> return None
         data = tokens[offset + 1].text
@@ -81,18 +73,19 @@ fn kit_steps_stream_assertion(key: String, original: String) -> KitAssertion? {
         } else if kit_steps_string_array(data) == None -> return None
         return Val(KitAssertion{stream: stream, path: path, mode: mode, value: data, extra: extra})
     }
-    if stream == "file" && (mode == "size" || mode == "mode" || mode == "sha256") {
+    if stream == "file" && (mode == "size" || mode == "mode" || mode == "permissions" || mode == "sha256") {
         if arity != 3 || !kit_expect_named(["=", ">=", "<=", ">", "<"], tokens[offset + 1].text) -> return None
         extra = tokens[offset + 1].text
         data = tokens[offset + 2].text
-        if mode == "mode" {
-            if extra != "=" || kit_steps_octal(data) == None -> return None
+        token_value :: data.starts_with("{{cap:") && data.ends_with("}}")
+        if mode == "mode" || mode == "permissions" {
+            if extra != "=" || (!token_value && mode == "mode" && kit_steps_octal(data) == None) -> return None
         } else if mode == "sha256" {
-            if extra != "=" || data.len() != 64 -> return None
-        } else if (Int.parse(kit_steps_json_preview(data)) ?? -1) < 0 -> return None
+            if extra != "=" || (!token_value && data.len() != 64) -> return None
+        } else if !token_value && (Int.parse(data) ?? -1) < 0 -> return None
         return Val(KitAssertion{stream: stream, path: path, mode: mode, value: data, extra: extra, optional_file: subject == "file?"})
     }
-    if kit_expect_named(["empty", "nonempty", "exists", "absent", "is-file", "is-dir"], mode) {
+    if kit_expect_named(["empty", "nonempty", "exists", "absent", "is-file", "is-dir", "!is-file", "!is-dir", "is-symlink", "not-symlink"], mode) {
         if arity != 1 || (stream != "file" && mode != "empty" && mode != "nonempty") -> return None
         if mode == "nonempty" && !kit_steps_reason(original) -> return None
     } else if mode == "~" || mode == "!~" {
@@ -137,16 +130,25 @@ fn kit_steps_stream_assertion(key: String, original: String) -> KitAssertion? {
         data = tokens[offset + 1].text
         extra = tokens[offset + 2].text
     } else {
-        if !kit_expect_named(["=", "==", "!=", "~", "!~", "^=", "~i", "!~i"], mode) || arity != 2 -> return None
-        data = tokens[offset + 1].text
+        if !kit_expect_named(["=", "==", "!=", "~", "!~", "^=", "~i", "!~i"], mode) -> return None
+        explicit_path :: arity == 3 && tokens[offset + 1].text == "path"
+        if arity != 2 && !explicit_path -> return None
+        rhs :: tokens[offset + if explicit_path -> 2 else -> 1]
+        data = rhs.text
+        literal = !explicit_path && (value.bytes()[rhs.start] == (U8{34}) || value.bytes()[rhs.start] == (U8{39}))
+        if explicit_path && mode != "=" && mode != "!=" -> return None
+        if !literal && mode == "=" && data.ends_with(".trim") {
+            rhs_transform = "trim"
+            data = data.slice(0, data.len() - 5)
+        }
         if kit_expect_named(["~", "!~", "^=", "~i", "!~i"], mode) && !kit_steps_reason(original) -> return None
         if (mode == "~i" || mode == "!~i") && kit_steps_ascii_lower(data) != data -> return None
-        if mode == "!=" && stream != "file" -> return None
-        if (mode == "==" || mode == "!=") && stream == "file" && !kit_steps_relative_path(data) -> return None
+        if mode == "!=" && stream != "file" && arity != 2 -> return None
+        if !literal && (mode == "==" || mode == "!=") && stream == "file" && !kit_steps_relative_path(data) -> return None
     }
     // #4814: jet fmt adds a trailing comma inside Val(...) here; keep this layout
     Val(KitAssertion{stream: stream, path: path, mode: mode, value: data, extra: extra,
-        optional_file: subject == "file?", transform: transform, alternatives: alternatives})
+        optional_file: subject == "file?", transform: transform, alternatives: alternatives, rhs_literal: literal, rhs_transform: rhs_transform})
 }
 
 fn kit_steps_ascii_lower(text: String) -> String {
@@ -191,13 +193,14 @@ fn kit_steps_line_value(text: String, prefix: String, substring: String, tail: B
 
 
 fn kit_steps_count_target_valid(target: String) -> Bool {
-    star :: target.index("*") ?? -1
-    if star < 0 -> return (Int.parse(target) ?? -1) >= 0
+    if kit_steps_numeric(kit_steps_json_preview(target)) != None -> return true
+    star :: target.index("*") ?? return false
     (Int.parse(target.slice(0, star)) ?? -1) >= 0 && target.slice(star + 1, target.len()) != ""
 }
 
 fn kit_steps_count_label(target: String) -> String {
     star :: target.index("*") ?? return ""
+    if kit_steps_numeric(kit_steps_json_preview(target)) != None -> return ""
     target.slice(star + 1, target.len())
 }
 
@@ -211,6 +214,7 @@ fn kit_steps_select_stream(stdout: String, stderr: String, subject: String) -> S
     if subject == "stderr" -> return ~stderr
     if subject == "stdout+stderr" -> return "{stdout}{stderr}"
     if subject == "stderr+stdout" -> return "{stderr}{stdout}"
+    if subject == "machine" -> return if stdout.trim_start().starts_with("{{") -> ~stdout.trim() else -> ~stderr.trim()
     ~stdout
 }
 
