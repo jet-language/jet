@@ -3,10 +3,11 @@ use core.http as http
 use core.http.client as client
 use core.files as files
 use core.text.parse as txt
+use core.time as time
 
 fn http_crlf() -> String { String.from_bytes([U8]{13, 10}) ?? panic("CRLF") }
 fn http_read(stream: net.TCPStream) -> String {
-    net.set_read_timeout(stream, 5000) ?? panic("read timeout")
+    net.set_read_timeout(stream, 1000) ?? panic("read timeout")
     String.from_bytes(net.tcp_read_bytes(stream, 4096) ?? panic("read request")) ?? panic("request UTF-8")
 }
 fn http_reply(stream: net.TCPStream, file: String) {
@@ -39,19 +40,32 @@ fn require_proxy(request: HTTPRequest) {
     }
 }
 fn check_pre_response_errors() {
-    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    listener := net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     address :: net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic("address"))
     url :: "http://{address}/"
+    (stop_tx, stop_rx) :: channel<Int>()
     peer :: task {
-        loop i in 0..<3 {
-            stream :: net.tcp_accept(listener) ?? panic("accept")
-            _request :: http_read(stream)
-            if i < 2 {
-                http_reply(stream, "proxy-{i}.response")
-            } else {
-                net.tcp_close(stream) ?? panic("drop")
+        requests := [String]{}
+        // Original nonblocking accept + stop atomic: zero-deadline accepts queued
+        // sockets; Timeout alone = WouldBlock, any other failure panics.
+        loop stop_rx.try_receive() == None {
+            if &listener.accept(deadline: 0s) == {
+                .Ok(stream) -> {
+                    index :: requests.len()
+                    &requests.push(http_read(stream))
+                    if index < 2 {
+                        http_reply(stream, "proxy-{index}.response")
+                    } else {
+                        net.tcp_close(stream) ?? panic("drop")
+                    }
+                }
+                .Err(error) -> if error == {
+                    .Timeout(_) -> time.sleep(1ms)
+                    else -> panic("accept failed")
+                }
             }
         }
+        return requests
     }
     require_timeout(client.request("GET", url).timeout(-1))
     require_timeout(client.request("GET", url).connect_timeout(-1))
@@ -76,6 +90,10 @@ fn check_pre_response_errors() {
             else -> panic("original IO variant lost")
         }
     }
-    peer.join() ?? panic("peer")
+    stop_tx.send(1)
+    requests :: peer.join() ?? panic("peer")
+    assert_eq(requests.len(), 3, "pre-response transport count changed")
+    crlf :: http_crlf()
+    assert(requests[0].starts_with("CONNECT example.invalid:443 HTTP/1.1{crlf}") && requests[1].starts_with("CONNECT auth.invalid:443 HTTP/1.1{crlf}") && requests[2].starts_with("GET /io HTTP/1.1{crlf}"), "unexpected requests")
 }
 #Test("core_http_client_owns_pre_response_errors") { check_pre_response_errors() }

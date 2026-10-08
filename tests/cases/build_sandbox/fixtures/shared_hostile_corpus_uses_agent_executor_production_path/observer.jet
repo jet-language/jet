@@ -1,0 +1,30 @@
+// Original observer: build_sandbox.rs:1366-1385,1446-1449.
+use core.net as net
+use core.time as time
+use core.files as files
+use core.process as process
+fn run() {
+    args :: process.argv().skip(1).to_list()
+    listener := net.tcp_listen("127.0.0.1:0") ?? panic("bind observer")
+    port :: net.socket_port(net.listener_local_socket_addr(listener) ?? panic("address"))
+    files.write(args[0], "{port}") ?? panic("publish port")
+    deadline :: time.instant() + time.duration_ms(750)
+    reached := false
+    loop {
+        if &listener.accept(deadline: 0s) == {
+            .Ok(stream) -> {
+                net.tcp_close(stream) ?? panic("drop observer connection")
+                reached = true
+                break
+            }
+            .Err(error) -> if error == {
+                .Timeout(_) -> {
+                    if time.instant() >= deadline -> break
+                    time.sleep(5ms)
+                }
+                else -> break // Original ANY other error => false.
+            }
+        }
+    }
+    assert(!reached, "agent corpus reached network")
+}

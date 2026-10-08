@@ -3,10 +3,11 @@ use core.http as http
 use core.http.client as client
 use core.files as files
 use core.text.parse as txt
+use core.time as time
 
 fn http_crlf() -> String { String.from_bytes([U8]{13, 10}) ?? panic("CRLF") }
 fn http_read(stream: net.TCPStream) -> String {
-    net.set_read_timeout(stream, 5000) ?? panic("read timeout")
+    net.set_read_timeout(stream, 1000) ?? panic("read timeout")
     String.from_bytes(net.tcp_read_bytes(stream, 4096) ?? panic("read request")) ?? panic("request UTF-8")
 }
 fn http_reply(stream: net.TCPStream, file: String) {
@@ -24,15 +25,28 @@ fn require_redirect(request: HTTPRequest) {
     }
 }
 fn check_redirect_limits() {
-    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    listener := net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     address :: net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic("address"))
     base :: "http://{address}"
+    (stop_tx, stop_rx) :: channel<Int>()
     peer :: task {
-        loop _i in 0..<26 {
-            stream :: net.tcp_accept(listener) ?? panic("accept")
+        requests := [String]{}
+        // Exact original stop-atomic nonblocking observer, no finite26 cap.
+        loop stop_rx.try_receive() == None {
+            stream :: if &listener.accept(deadline: 0s) == {
+                .Ok(stream) -> stream
+                .Err(error) -> if error == {
+                    .Timeout(_) -> {
+                        time.sleep(1ms)
+                        next
+                    }
+                    else -> panic("accept failed")
+                }
+            }
             request :: http_read(stream)
             first :: request.lines().to_list()[0]
             target :: txt.split_ws(first)[1]
+            &requests.push(target)
             if target == "/redirect" {
                 http_reply(stream, "redirect.response")
             } else if target == "/target" {
@@ -53,6 +67,7 @@ fn check_redirect_limits() {
                 }
             }
         }
+        return requests
     }
     url :: "{base}/redirect"
     require_redirect(client.request("GET", url).redirects(-1))
@@ -65,6 +80,12 @@ fn check_redirect_limits() {
     within :: client.request("GET", "{base}/within/0").send() ?? panic("within")
     assert(within.status() == 200 && (within.body().bytes(8) ?? panic("within body")) == "ok".bytes(), "original default within boundary")
     require_redirect(client.request("GET", "{base}/over/0"))
-    peer.join() ?? panic("peer")
+    stop_tx.send(1)
+    requests :: peer.join() ?? panic("peer")
+    assert_eq(requests.len(), 26, "invalid redirect limit reached transport or redirect boundary behavior changed")
+    expected := [String]{"/redirect", "/redirect", "/target", "/redirect"}
+    loop step in 0..10 -> &expected.push("/within/{step}")
+    loop step in 0..10 -> &expected.push("/over/{step}")
+    assert_eq(requests, expected, "redirect boundaries sent an unexpected request sequence")
 }
 #Test("core_http_client_rejects_invalid_redirect_limits_before_transport") { check_redirect_limits() }
