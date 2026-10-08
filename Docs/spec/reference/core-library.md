@@ -22,6 +22,10 @@ Their reserved raw bindings preserve the existing host handles and shared read
 buffers until the Jet runtime replaces those leaves at cutover. File lines trim
 all trailing CR/LF bytes; process-pipe lines remove only one LF and its preceding
 CR, preserving an unterminated final CR.
+`ProcessStdin.close` registers its existing provider close directly under the
+canonical receiver name. Taking the optional writer drops the sole native
+descriptor; repeated closes are harmless. There is no extra Jet forwarding
+facade or source-level close policy at this host-only boundary.
 
 Caller-owned `RNG`, `testing.RNG`, and `math.random.RNG` name one Jet nominal:
 `RNG { state: U64 }`. It is not implicitly copyable; an explicit clone creates an

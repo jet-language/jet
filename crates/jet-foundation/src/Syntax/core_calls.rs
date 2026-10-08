@@ -1584,7 +1584,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 7faa8d6c67e79f4991b4c4479db6b34f3733f7dad8d97607645a445e693524d4
+// Source SHA-256: 432c89ef7993aa418cccfc3290c2c23d9ac6748bd170fba5afb1d0597f6f7873
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -3544,7 +3544,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::receiver_with_symbol( &["DataGroupedQuery"], "count", "jet_data_group_count_query", true, &[true], ),
     CoreCallRecord::receiver_with_symbol( &["DataGroupedQuery"], "sum", "jet_data_group_sum_query", true, &[true, false], ),
     CoreCallRecord::receiver_with_symbol( &["DataGroupedQuery"], "mean", "jet_data_group_mean_query", true, &[true, false], ),
-    CoreCallRecord::receiver(&["ProcessStdin"], "close", &[]),
+    CoreCallRecord::receiver_with_symbol(&["ProcessStdin"], "close", "jet_process_stdin_close", true, &[]),
     CoreCallRecord::receiver_with_symbol( &["FileScope"], "read", "jet_std_fs_scope_read", true, &[true, true], ),
     CoreCallRecord::receiver(&["RealtimeStream"], "next_deadline", &[]),
     CoreCallRecord::receiver(&["RealtimeStream"], "receipt", &[]),
@@ -4224,6 +4224,23 @@ mod tests {
             .with_source_target("__take_bytes");
         assert!(plain.targets_source_function("core.term", "__take_bytes"));
         assert!(!plain.targets_source_function("core.term", "take"));
+    }
+
+    #[test]
+    fn process_stdin_close_registers_the_existing_provider_leaf() {
+        use super::{core_receiver_method, CoreCallRecord, CoreCallSymbol};
+        let row = core_receiver_method("ProcessStdin", "close")
+            .expect("canonical ProcessStdin.close row");
+        let original = CoreCallRecord::receiver(&["ProcessStdin"], "close", &[]);
+        assert_eq!(row.symbol, CoreCallSymbol::Prelude("jet_process_stdin_close"));
+        assert_eq!(row.signature, original.signature);
+        assert_eq!(row.effect(), original.effect());
+        assert_eq!(row.capability(), original.capability());
+        assert_eq!(row.coverage, original.coverage);
+        assert_eq!(row.interpreter_route, original.interpreter_route);
+        assert_eq!(row.aot_direct, original.aot_direct);
+        assert_eq!(row.receiver_types, original.receiver_types);
+        assert!(row.source_target.is_none());
     }
 
 }
