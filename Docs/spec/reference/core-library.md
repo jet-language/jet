@@ -1285,6 +1285,13 @@ only redacted audit facts.
 Profile construction is Jet-owned and accepts exactly `bidi-2025.5` (version
 `2025.5`) or `bidi-2024.11` (version `2024.11`). It does not trim, case-fold,
 or substitute an unknown profile name.
+`connect_profile(endpoint, profile, timeout)` sequences the handshake in Jet:
+raw WebSocket connection and timeout setup, `session.status` ready/message
+validation, then `session.new` with ordered empty `alwaysMatch` capabilities.
+The session-started carrier fact is recorded before validating the session ID
+and capabilities. CDP requires the first `goog:cdp` field to be exactly true.
+Socket/command operations and the three native carrier tails remain registered
+raw leaves; there is no whole-handshake adapter.
 
 | API | Result | Description |
 | --- | --- | --- |

@@ -281,21 +281,6 @@ pub(crate) fn eval_core_call(
             jet_browser_connect(&string_arg(&args, 0, span)?),
             |browser| store("Browser", BrowserHostValue::Browser(browser)),
         ),
-        "connect_profile" => {
-            let endpoint = string_arg(&args, 0, span)?;
-            let profile = profile_value(
-                args.get(1).ok_or_else(|| host_error("profile", span))?,
-                span,
-            )?;
-            let timeout = timeout_value(
-                args.get(2).ok_or_else(|| host_error("timeout", span))?,
-                span,
-            )?;
-            result(
-                jet_browser_connect_profile(&endpoint, &profile, timeout),
-                |browser| store("Browser", BrowserHostValue::Browser(browser)),
-            )
-        }
         _ => return Err(host_error(method, span)),
     })
 }
