@@ -1,0 +1,17 @@
+Error [E1004]: `core.process` has no item `run`
+  --> taint_propagates_through_interpolation.jet:6:13
+    |
+  6 |     process.run(["echo", arg]) ?? return Err("test")
+    |             ^^^
+ Why: Standard library modules expose a fixed set of public items
+ Fix: Use one of: ProcessSignal, args, argv, check, cmd, current_pid, cwd, env, env_get, exit, on_signal, pipeline, run_spec, status_ok, stdin_text, which, Completed, ProcessReceipt, ProcessSpec, arg, args_extend, call, capture, check_call, check_output, combined_output, env_get_or, env_keys, env_set, env_truthy, failed, getoutput, getstatusoutput, list2cmdline, shell, signal_number, stderr_lines, stdout_lines, exited
+More: jet-lang.dev/e/E1004
+
+Error [E0721]: A `Input` value is denied at `process.run`
+  --> tests/ui/taint/taint_propagates_through_interpolation.jet:6:13
+    |
+  6 |     process.run(["echo", arg]) ?? return Err("test")
+    |             ^^^
+ Why: The declaration for `Input` denies `Exec`, which covers this destination
+ Fix: Remove the destination use, or pass the value through a matching `#Scrub(Input)` function
+More: jet-lang.dev/e/E0721

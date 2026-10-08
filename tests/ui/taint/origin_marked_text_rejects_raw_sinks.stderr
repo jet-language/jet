@@ -1,0 +1,35 @@
+Error [E0433]: This Sh value is thrown away
+  --> origin_marked_text_rejects_raw_sinks.jet:7:8
+    |
+  7 |     Sh.raw(raw)
+    |        ^^^
+ Why: `run` has no return type, so it returns nothing and the value of its last line is lost
+ Fix: If `run` should return it, write `-> Sh` after its parameter list; to discard it on purpose, write `.drop("reason")`
+More: jet-lang.dev/e/E0433
+
+Error [E0721]: A `$origin.fs` value is denied at `SQL.raw`
+  --> tests/ui/taint/origin_marked_text_rejects_raw_sinks.jet:5:9
+    |
+  5 |     SQL.raw(raw)
+    |         ^^^
+ Why: The declaration for `$origin.fs` denies `SQL.raw`, which covers this destination
+ Fix: Remove the destination use, decode the value into a declared type, or pass it through an audited #Scrub function
+More: jet-lang.dev/e/E0721
+
+Error [E0721]: A `$origin.fs` value is denied at `HTML.raw`
+  --> tests/ui/taint/origin_marked_text_rejects_raw_sinks.jet:6:10
+    |
+  6 |     HTML.raw(raw)
+    |          ^^^
+ Why: The declaration for `$origin.fs` denies `HTML.raw`, which covers this destination
+ Fix: Remove the destination use, decode the value into a declared type, or pass it through an audited #Scrub function
+More: jet-lang.dev/e/E0721
+
+Error [E0721]: A `$origin.fs` value is denied at `Sh.raw`
+  --> tests/ui/taint/origin_marked_text_rejects_raw_sinks.jet:7:8
+    |
+  7 |     Sh.raw(raw)
+    |        ^^^
+ Why: The declaration for `$origin.fs` denies `Sh.raw`, which covers this destination
+ Fix: Remove the destination use, decode the value into a declared type, or pass it through an audited #Scrub function
+More: jet-lang.dev/e/E0721
