@@ -5,9 +5,16 @@ fn fx_native_handle_checks() -> Bool Never! {
     p := fx_values_payload()
     aggregates :: fx_aggregates()
     &p.types.push(~aggregates.types[2])
+    prepared := lower_mono_empty()
+    lower_mono_index(p, &prepared)
     m := LowerModule{
         signatures: [LIRSignature]{},
+        checked_types: ~prepared.checked_types,
         test_harness: false,
+        test_rows: [Int]{},
+        test_indices: [U64:Int]{},
+        test_serial: false,
+        test_checks: [MIROutputCheck]{},
         native_pack: true,
         native_exports: [String:LIRFunctionID]{},
         signature_rows: [String:Int]{},
@@ -25,6 +32,7 @@ fn fx_native_handle_checks() -> Bool Never! {
         mir_results: [Int]{},
         glue_base: 0,
         glue: [LowerGlue]{},
+        close_methods: ~prepared.close_methods,
         glue_rows: [String:Int]{},
         issues: [LIRLoweringIssue]{},
         stop_points: false,
