@@ -125,7 +125,7 @@ handle a decoder call directly instead of first binding only its success value.
 Pattern payload and field types instantiate the checked subject's owner
 parameters before binding locals; a declaration's bare `T`/`E` does not escape
 into its concrete match. Associated types in a trait declaration use `Self::X`.
-Pattern field projections on structural tuples use the canonical tuple type
+Pattern-generated structural capture tuples use the canonical tuple type
 instance and field label, exactly like ordinary tuple field reads; they do not
 require a nominal declaration. Literal-field tests, bound fields (including
 read/write windows), capture tuples, and dispatch-subject projections share

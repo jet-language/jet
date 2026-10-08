@@ -219,3 +219,103 @@ fn test_key_shuffle() -> I64 {
     text
 }
 
+fn test_scope_msg_expected(builder: I64) {
+    rt_text_push_word(builder, I64{7234316346693023845}, I64{8})
+    rt_text_push_word(builder, I64{32}, I64{1})
+}
+
+fn test_scope_msg_region_stop(builder: I64) {
+    rt_text_push_word(builder, I64{7450486642255161460}, I64{8})
+    rt_text_push_word(builder, I64{8295753058167451497}, I64{8})
+    rt_text_push_word(builder, I64{7526756837609205620}, I64{8})
+    rt_text_push_word(builder, I64{32}, I64{1})
+}
+
+fn test_scope_msg_region_fail(builder: I64) {
+    rt_text_push_word(builder, I64{7450486642255161460}, I64{8})
+    rt_text_push_word(builder, I64{7359004335674388329}, I64{8})
+    rt_text_push_word(builder, I64{7104865}, I64{3})
+}
+
+fn test_scope_msg_stop_code(builder: I64) {
+    rt_text_push_word(builder, I64{8583984513765548129}, I64{8})
+    rt_text_push_word(builder, I64{543716457}, I64{4})
+}
+
+fn test_scope_msg_stop_message(builder: I64) {
+    rt_text_push_word(builder, I64{8583984513765548129}, I64{8})
+    rt_text_push_word(builder, I64{8315172272917933928}, I64{8})
+    rt_text_push_word(builder, I64{7957688057378333043}, I64{8})
+    rt_text_push_word(builder, I64{35680145727860}, I64{6})
+}
+
+fn test_scope_msg_code_message(builder: I64) {
+    rt_text_push_word(builder, I64{7863396495853647648}, I64{8})
+    rt_text_push_word(builder, I64{7142820503700599653}, I64{8})
+    rt_text_push_word(builder, I64{2338334030421061231}, I64{8})
+}
+
+fn test_scope_msg_passed(builder: I64) {
+    rt_text_push_word(builder, I64{8388271465511919660}, I64{8})
+    rt_text_push_word(builder, I64{28259044202475552}, I64{7})
+}
+
+fn test_scope_msg_got(builder: I64) {
+    rt_text_push_word(builder, I64{35684457324588}, I64{6})
+}
+
+fn test_scope_msg_colon(builder: I64) {
+    rt_text_push_word(builder, I64{8250}, I64{2})
+}
+
+fn test_scope_msg_timeout(builder: I64) {
+    rt_text_push_word(builder, I64{4212120672801745268}, I64{8})
+    rt_text_push_word(builder, I64{2336927755148816928}, I64{8})
+    rt_text_push_word(builder, I64{139241418612}, I64{5})
+}
+
+fn test_scope_msg_timeout_limit(builder: I64) {
+    rt_text_push_word(builder, I64{7596844059561063278}, I64{8})
+    rt_text_push_word(builder, I64{35679928524916}, I64{6})
+}
+
+fn test_scope_msg_ns(builder: I64) {
+    rt_text_push_word(builder, I64{29550}, I64{2})
+}
+
+fn test_scope_ordinary(text: I64) -> Bool {
+    if (text == I64{0}) { return false }
+    if (trap_word(text + I64{8}) != I64{29}) { return false }
+    data :: trap_word(text)
+    if (trap_byte(data + I64{0}) != I64{95}) { return false }
+    if (trap_byte(data + I64{1}) != I64{95}) { return false }
+    if (trap_byte(data + I64{2}) != I64{106}) { return false }
+    if (trap_byte(data + I64{3}) != I64{101}) { return false }
+    if (trap_byte(data + I64{4}) != I64{116}) { return false }
+    if (trap_byte(data + I64{5}) != I64{95}) { return false }
+    if (trap_byte(data + I64{6}) != I64{116}) { return false }
+    if (trap_byte(data + I64{7}) != I64{101}) { return false }
+    if (trap_byte(data + I64{8}) != I64{115}) { return false }
+    if (trap_byte(data + I64{9}) != I64{116}) { return false }
+    if (trap_byte(data + I64{10}) != I64{95}) { return false }
+    if (trap_byte(data + I64{11}) != I64{111}) { return false }
+    if (trap_byte(data + I64{12}) != I64{114}) { return false }
+    if (trap_byte(data + I64{13}) != I64{100}) { return false }
+    if (trap_byte(data + I64{14}) != I64{105}) { return false }
+    if (trap_byte(data + I64{15}) != I64{110}) { return false }
+    if (trap_byte(data + I64{16}) != I64{97}) { return false }
+    if (trap_byte(data + I64{17}) != I64{114}) { return false }
+    if (trap_byte(data + I64{18}) != I64{121}) { return false }
+    if (trap_byte(data + I64{19}) != I64{95}) { return false }
+    if (trap_byte(data + I64{20}) != I64{102}) { return false }
+    if (trap_byte(data + I64{21}) != I64{97}) { return false }
+    if (trap_byte(data + I64{22}) != I64{105}) { return false }
+    if (trap_byte(data + I64{23}) != I64{108}) { return false }
+    if (trap_byte(data + I64{24}) != I64{117}) { return false }
+    if (trap_byte(data + I64{25}) != I64{114}) { return false }
+    if (trap_byte(data + I64{26}) != I64{101}) { return false }
+    if (trap_byte(data + I64{27}) != I64{95}) { return false }
+    if (trap_byte(data + I64{28}) != I64{95}) { return false }
+    true
+}
+

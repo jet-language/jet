@@ -618,7 +618,7 @@ mod jet_c_abi {
 
     #[cfg(jet_native_pack)]
     unsafe extern "C" {
-        fn jet_rt_alloc(size: usize, align: usize) -> *mut u8;
+        pub(super) fn jet_rt_alloc(size: usize, align: usize) -> *mut u8;
         fn jet_rt_free(ptr: *mut u8, size: usize, align: usize);
     }
 
@@ -766,6 +766,7 @@ mod jet_c_abi {
         })
     }
 
+    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_loop_range_init(
         start: i64,
@@ -786,27 +787,32 @@ mod jet_c_abi {
         })
     }
 
+    #[cfg(not(jet_native_pack))]
     fn cursor<'a>(value: *mut super::JetLoopRangeCursor) -> &'a mut super::JetLoopRangeCursor {
         // SAFETY: `value` is a live cursor from `jet_loop_range_init` that the
         // caller owns for the duration of this call.
         unsafe { &mut *value }
     }
 
+    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_loop_range_has_next(value: *mut super::JetLoopRangeCursor) -> bool {
         guard(|| super::jet_loop_range_has_next(cursor(value)))
     }
 
+    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_loop_range_value(value: *mut super::JetLoopRangeCursor) -> i64 {
         guard(|| crate::jet_std::jet_int_from_i64(super::jet_loop_range_value(cursor(value))))
     }
 
+    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_loop_range_advance(value: *mut super::JetLoopRangeCursor) {
         guard(|| super::jet_loop_range_advance(cursor(value)))
     }
 
+    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_loop_cursor_drop(value: *mut super::JetLoopRangeCursor) {
         if !value.is_null() {

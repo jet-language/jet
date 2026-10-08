@@ -164,6 +164,44 @@ matching the reference thread-local queue destructor.
 runtime with Jet callback assertions and uses C only to transport callback
 addresses. Its run phase covers one-, two- and eight-worker pools; root panic
 is compared byte-for-byte to a supplied freshly rendered Rust-tier reference.
+The shared native affinity probe `scheduler_available_parallelism(fallback)`
+does not read the pool override: the worker pool retains its override and
+fallback 4, while joined parallel walking supplies fallback 1.
+
+Native resident-session reservations use the same heap as ordinary native
+storage, but return a null place for an invalid layout or allocation failure.
+A failed slab mapping releases the heap lock without publishing slab metadata;
+a failed direct mapping never publishes a payload or its allocation header.
+The ordinary allocation door still delivers its existing fatal layout/OOM
+diagnostic. Successful reservations retain their original size and alignment
+for the shared exact-layout free operation, including aligned zero-size places.
+
+`jet_rt_alloc_try(size: I64, align: I64) -> I64` is the shared native fallible
+door: zero means invalid layout, injected allocation failure, selected-program
+allocator refusal, or heap failure, without a Stop or stderr. The allocation
+fault channel observes before reservation; a refused reservation changes no
+accounting; a heap failure cancels its live reservation before returning.
+Ordinary `jet_rt_alloc` uses the same policy reserve and exact-layout free, but
+retains its fatal layout/OOM edge and does not observe the fallible fault rail.
+System-mode blocks keep the two-word heap header. Only counted payloads own
+private bypass-policy side-table nodes; freeing a tracked payload releases its
+reservation even after switching back to system mode. Policy facts retain
+historical allocation/request/high-water counters on cancelled heap requests,
+while live bytes and tracker nodes return to zero.
+
+The explicit native host policy edges are `jet_rt_program_allocator_configure`,
+`jet_rt_program_allocator_restore`, and `jet_rt_program_allocator_fact`
+(allocations, requested, live, high-water, cap, mode at indices 0..5). Hosts
+serialize run configuration, preserve mode and cap, and use the distinct
+restore edge to retain historical counters even after live bytes reach zero.
+Configure resets those counters only when no counted bytes remain live.
+These words carry unsigned source `usize` bits. The
+allocation schedule uses dynamic TLS, not a new task-control slot; its arming,
+fact and clearing edges implement the allocation channel only, not an effect
+path or the full fault-plan loop. `AllocationPolicyTests.jet` is included in
+the composed World/Sentry fixture and requires empty output, no pending Stop,
+fault/counting-cap refusal, cancellation after a real refused mmap, policy-
+switch-safe free, and zero live bytes/tracker nodes.
 
 The native runtime allocates nodes with `(size=48, align=8)` and limb buffers
 with `(size=capacity*4, align=4)` through the shared Jet allocator. A zero

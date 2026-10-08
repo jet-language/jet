@@ -41,6 +41,7 @@ jet_coll_merge_sorted
 jet_coll_nlargest
 jet_coll_nsmallest
 jet_coll_ordered_map
+jet_fault_should_fail_allocation
 jet_int_add
 jet_int_bit_and
 jet_int_bit_or
@@ -112,6 +113,11 @@ jet_fs_stat_raw
 jet_fs_unlink_raw
 jet_fs_xattr_get_raw
 jet_host_os_error_text_raw
+jet_loop_cursor_drop
+jet_loop_range_advance
+jet_loop_range_has_next
+jet_loop_range_init
+jet_loop_range_value
 jet_panic
 jet_panic_rich
 jet_process_close_stream_raw
@@ -133,8 +139,10 @@ jet_process_stream_line_bytes_raw
 jet_process_take_stream_raw
 jet_process_wait_raw
 jet_process_write_raw
+jet_range_contains
 jet_rt_alloc
 jet_rt_alloc_init init 0
+jet_rt_alloc_try
 jet_rt_c_string_free
 jet_rt_c_string_pack
 jet_rt_c_string_unpack
@@ -160,6 +168,11 @@ jet_rt_arg_entry
 jet_rt_env_count
 jet_rt_env_entry
 jet_rt_env_get
+jet_rt_fault_allocation_arm
+jet_rt_fault_allocation_clear
+jet_rt_fault_allocation_drop
+jet_rt_fault_allocation_fact
+jet_rt_fault_allocation_init init 3
 jet_rt_free
 jet_rt_global_register
 jet_rt_global_reset_registered
@@ -219,6 +232,11 @@ jet_rt_native_shared_new
 jet_rt_native_shared_read
 jet_rt_native_bits_clear
 jet_rt_native_bits_new
+jet_rt_native_condition_clone
+jet_rt_native_condition_drop
+jet_rt_native_condition_new
+jet_rt_native_condition_notify_all
+jet_rt_native_condition_notify_one
 jet_rt_native_iter_average_float
 jet_rt_native_iter_average_int
 jet_rt_native_iter_chunk_while
@@ -304,6 +322,8 @@ jet_rt_native_iter_windows
 jet_rt_native_iter_zip
 jet_rt_native_iter_zip_pad
 jet_rt_native_iter_zip_strict
+jet_rt_native_para_walk
+jet_rt_native_para_worker
 jet_rt_handle_clone_JetTaskFailure
 jet_rt_handle_clone_JetTaskGroup
 jet_rt_handle_drop_JetTaskFailure
@@ -325,9 +345,11 @@ jet_rt_native_task_spawn
 jet_rt_native_shared_edit_guard_drop
 jet_rt_native_shared_edit_guard_edit
 jet_rt_native_shared_edit_guard_read
+jet_rt_native_shared_edit_txn
 jet_rt_native_shared_guard_edit
 jet_rt_native_shared_guard_read
 jet_rt_native_shared_guard_revision
+jet_rt_native_shared_guard_wait
 jet_rt_native_shared_read_guard_deref
 jet_rt_native_shared_read_guard_drop
 jet_rt_native_shared_read_guard_read
@@ -335,11 +357,29 @@ jet_rt_host_init init 1
 jet_rt_net_poller_init init 4
 jet_rt_net_poller_worker
 jet_rt_net_resolver_worker
+jet_rt_native_shared_read_txn
+jet_rt_native_stm_begin
+jet_rt_native_stm_commit
+jet_rt_native_stm_rollback
+jet_rt_mem_allocation_probe_reset
+jet_rt_mem_allocation_probe_take
+jet_rt_mem_allocator_memory
+jet_rt_mem_arena_alloc
+jet_rt_mem_arena_close
+jet_rt_mem_arena_open
+jet_rt_mem_arena_release
+jet_rt_mem_arena_reset
+jet_rt_mem_arena_retain
+jet_rt_mem_registry_init init 1
+jet_rt_mem_resources
 jet_rt_numeric_stop
 jet_rt_panic_division_by_zero
 jet_rt_panic_list_bounds int-index-seam
 jet_rt_panic_message
 jet_rt_panic_overflow
+jet_rt_program_allocator_configure
+jet_rt_program_allocator_fact
+jet_rt_program_allocator_restore
 jet_rt_record_get_JetTaskFailure_Panicked
 jet_rt_record_new_JetTaskFailure_Cancelled
 jet_rt_record_new_JetTaskFailure_DeadlineBlown
@@ -421,6 +461,7 @@ jet_rt_stop_take_message
 jet_rt_task_exit_destructor
 jet_rt_task_exit_handlers
 jet_rt_task_exit_init
+jet_rt_stm_init init 4
 jet_rt_thread_attach
 jet_rt_thread_bootstrap
 jet_rt_thread_detach
@@ -454,12 +495,31 @@ jet_rt_test_capture_begin
 jet_rt_test_capture_init
 jet_rt_test_capture_print
 jet_rt_test_capture_take
+jet_rt_test_expect_fail_abort
+jet_rt_test_expect_fail_catch_scope
+jet_rt_test_expect_fail_enter_scope
+jet_rt_test_expect_fail_error
+jet_rt_test_expect_fail_leave_scope
+jet_rt_test_expect_fail_stopped_scope
+jet_rt_test_expect_fail_unmet
 jet_rt_test_finish_wire
 jet_rt_test_outcome_drop
 jet_rt_test_outcome_wire
 jet_rt_test_print
+jet_rt_test_record_stop
+jet_rt_test_skip_abort
+jet_rt_test_skip_scope
+jet_rt_test_take_whole_skip
+jet_rt_test_timeout_abort
+jet_rt_test_timeout_enter
+jet_rt_test_timeout_failure
+jet_rt_test_timeout_leave
+jet_rt_test_timeout_message
 jet_rt_test_unit_outcome
 jet_rt_stdout_flush fini 1
+jet_rt_testing_clear_failure
+jet_rt_testing_record_failure
+jet_rt_testing_take_failure
 jet_rt_unreachable
 jet_rt_view_end
 jet_rt_world_clone
@@ -474,9 +534,17 @@ jet_rt_world_new
 jet_rt_view_end
 jet_string_after
 jet_string_before
+jet_string_chars
 jet_string_contains
+jet_string_copy
+jet_string_count_bytes
 jet_string_ends_with
 jet_string_is_empty
+jet_string_lines
+jet_string_repeat
+jet_string_replace
+jet_string_slice
+jet_string_slice_builtin
 jet_string_starts_with
 jet_rt_world_reject_uncontrolled
 jet_rt_world_rng_next
@@ -596,6 +664,8 @@ jet_time_raw_world_monotonic_ns
 jet_time_raw_world_wall_ms
 jet_time_raw_zone_env
 jet_time_raw_zone_file_bytes
+jet_text_ascii_lower
+jet_text_ascii_upper
 jet_todo_stop
 jet_unicode_count
 jet_unicode_index_of
@@ -613,3 +683,12 @@ jet_world_advance
 jet_world_history
 jet_world_now
 jet_world_wait_idle
+jet_rt_comptime_init init 3
+jet_rt_comptime_begin
+jet_rt_comptime_step
+jet_rt_comptime_work
+jet_rt_comptime_enter
+jet_rt_comptime_leave
+jet_rt_comptime_end
+jet_rt_comptime_stop_write
+jet_numeric_checked_widen_at

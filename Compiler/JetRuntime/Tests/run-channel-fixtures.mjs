@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { candidateJetc0, frontReceipt } from '../../JetBackend/Tests/jet-front.mjs';
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const [output, mode, source] = process.argv.slice(2);
-const modes = ['assemble', 'lower', 'prepare-native', 'prepare-seed', 'link', 'link-seed', 'run', 'run-seed', 'cross', 'fatal', 'perf'];
+const modes = ['assemble', 'assemble-stm', 'assemble-sync', 'assemble-observe', 'lower', 'prepare-native', 'prepare-seed', 'link', 'link-seed', 'link-stm', 'run-stm', 'link-sync', 'run-sync', 'link-observe', 'run-observe', 'run', 'run-seed', 'cross', 'fatal', 'perf'];
 if (!output || !modes.includes(mode)) throw Error(`usage: run-channel-fixtures.mjs OUT ${modes.join('|')} [FRESH_RUNTIME_RS]`);
 const out = resolve(output), fixture = join(out, 'fixture');
 const read = p => readFileSync(join(repo, p), 'utf8');
@@ -55,10 +55,25 @@ const bridge = `
     queued == 1 && plain.notified.load(std::sync::atomic::Ordering::Acquire)
 }
 `;
-if (mode === 'assemble') {
+if (mode === 'assemble' || mode.startsWith('assemble-')) {
   mkdirSync(join(fixture, 'Source'), {recursive:true});
   const paths = read('Compiler/JetRuntime/sources.list').split('\n').map(s=>s.trim()).filter(s=>s&&!s.startsWith('#'));
   paths.push('Compiler/JetRuntime/Tests/ChannelTests.jet');
+  function include(path) { if (!paths.includes(path)) paths.push(path); }
+  if (mode !== 'assemble') {
+    include('Compiler/JetRuntime/Source/SharedTransactions.jet');
+    include('Compiler/JetRuntime/Tests/StmTests.jet');
+  }
+  if (mode === 'assemble-sync' || mode === 'assemble-observe') {
+    include('Compiler/JetRuntime/Source/Condition.jet');
+    include('Compiler/JetRuntime/Tests/SyncTests.jet');
+  }
+  if (mode === 'assemble-observe') {
+    include('Compiler/JetRuntime/Source/ObserveMessages.jet');
+    include('Compiler/JetRuntime/Source/Observe.jet');
+    include('Compiler/JetRuntime/Source/ObserveLive.jet');
+    include('Compiler/JetRuntime/Tests/ObserveTests.jet');
+  }
   const unit = paths.map(read).join('\n');
   const names = [...unit.matchAll(/^#Export\(c\)\s+fn\s+(\w+)\(/gm)].map(m=>m[1]);
   if (new Set(names).size !== names.length) throw Error('duplicate fixture exports');
@@ -88,6 +103,24 @@ if (mode === 'assemble') {
   const flags=seed?['-DJET_SEED','-Djet_rt_handle_clone_Closed=jet_fixture_rust_closed_clone','-Djet_rt_handle_drop_Closed=jet_fixture_rust_closed_drop','-Djet_rt_handle_eq_Closed=jet_fixture_rust_closed_eq','-Djet_rt_handle_show_Closed=jet_fixture_rust_closed_show']:['-DJET_CHANNEL_INTERNAL','-DJET_CLOSED_CROSS'];
   const objects=seed?[]:[join(fixture,'fixture.o')];
   command(process.env.CC??'cc',['-O2',...flags,join(repo,'Compiler/JetRuntime/Tests/channel-fixture.c'),...objects,lib,'-lpthread','-ldl','-lm','-o',join(out,seed?'channel-seed':'channel-native')]);
+} else if (['link-stm', 'link-sync', 'link-observe'].includes(mode)) {
+  const lib = process.env.JET_CHANNEL_NATIVE_C_LIB;
+  if (!lib || !existsSync(lib)) throw Error('missing freshly compiled native fixture library');
+  const kind = mode.slice(5);
+  const flags = kind === 'stm' ? [] : ['-DJET_CONDITION_FIXTURE', ...(kind === 'observe' ? ['-DJET_OBSERVE_FIXTURE'] : [])];
+  command(process.env.CC ?? 'cc', ['-std=c11', '-Wall', '-Wextra', '-Werror', ...flags, join(repo, 'Compiler/JetRuntime/Tests/sync-fixture.c'), join(fixture, 'fixture.o'), lib, '-lpthread', '-ldl', '-lm', '-o', join(out, `${kind}-native`)]);
+} else if (['run-stm', 'run-sync', 'run-observe'].includes(mode)) {
+  const kind = mode.slice(4);
+  const result = command(join(out, `${kind}-native`), [], {timeout:120000});
+  writeFileSync(join(out, `${mode}.txt`), result.stdout + result.stderr);
+  const expected = [
+    'STM nested commit transfer/rollback/clone parity ok',
+    'STM two-thread body gate serialization ok',
+    'STM prepare rejection/no publication/drop/revision stop ok',
+    ...(kind !== 'stm' ? ['Condition FIFO/drain/pending/wait/cancel/unheld access+drop ok'] : []),
+    ...(kind === 'observe' ? ['Observe empty/parked exact report/owned once ok'] : []),
+  ].join('\n') + '\n';
+  if (result.stdout !== expected || result.stderr !== '') throw Error(`invalid ${kind} fixture result`);
 } else if (mode === 'fatal') {
   const failures = [];
   for (const name of ['select-closed', 'select-empty']) {
