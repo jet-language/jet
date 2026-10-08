@@ -24,13 +24,13 @@ file: .jet/bindings/py/ops.provenance ~ "provider=PyPi" # original ed77c235f tes
 file: .jet/bindings/py/ops.provenance ~ "artifact.libjet_py_ops.a=" # original ed77c235f tests/ffi_python.rs:73 provenance contains artifact
 file: .jet/bindings/py/ops.provenance ~ "runtime-toolchain=" # original ed77c235f tests/ffi_python.rs:74 provenance contains runtime toolchain
 file: .jet/bindings/py/ops.provenance ~ "source-sha256=" # original ed77c235f tests/ffi_python.rs:75 provenance contains source digest
-capture: first_identity = prefixed file .jet/bindings/py/ops.provenance "identity="
+capture: first_identity = text file.filter(^= "identity=").line(0).strip_prefix("identity=") .jet/bindings/py/ops.provenance # original ed77c235f tests/ffi_python.rs:76-80 first lines.find_map strip_prefix identity
 file: .jet/bindings/py/.bridges/{cap:first_identity}/libjet_py_ops.a is-file
 remove: .jet/bindings/py/libjet_py_ops.a
 step: jet inspect bind py ops.py --pkg ops
 env: NO_COLOR=1
 exit: 0
-capture: cached_identity = prefixed file .jet/bindings/py/ops.provenance "identity="
+capture: cached_identity = text file.filter(^= "identity=").line(0).strip_prefix("identity=") .jet/bindings/py/ops.provenance # original ed77c235f tests/ffi_python.rs:97-102 first lines.find_map strip_prefix identity
 cap:cached_identity: = "{cap:first_identity}"
 file: .jet/bindings/py/libjet_py_ops.a is-file
 step: jet run main.jet
@@ -41,7 +41,7 @@ copy: changed.py ops.py
 step: jet inspect bind py ops.py --pkg ops
 env: NO_COLOR=1
 exit: 0
-capture: changed_identity = prefixed file .jet/bindings/py/ops.provenance "identity="
+capture: changed_identity = text file.filter(^= "identity=").line(0).strip_prefix("identity=") .jet/bindings/py/ops.provenance # original ed77c235f tests/ffi_python.rs:141-144 first lines.find_map strip_prefix identity
 cap:changed_identity: != "{cap:first_identity}"
 file: .jet/bindings/py/.bridges/{cap:changed_identity}/libjet_py_ops.a is-file
 step: jet inspect bind py bad.py --pkg bad
