@@ -1419,6 +1419,8 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
 /// compiler-owned declaration rows use the bare leaf. Keep both forms on the
 /// same Rust spelling and do not let arbitrary qualified user names acquire
 /// the Core email carrier by leaf coincidence.
+/// Source `DKIMConfig` selects Rust `DkimConfig`; projection callers supply the
+/// hidden secret type parameter separately.
 pub(crate) fn core_email_rust_type_name(name: &str) -> Option<&'static str> {
     let name = name
         .strip_prefix("<corelib>/Core/email::Core/email/email.jet::")
@@ -1441,7 +1443,7 @@ pub(crate) fn core_email_rust_type_name(name: &str) -> Option<&'static str> {
         "Limits" => Some("Limits"),
         "SMTPAuth" => Some("SMTPAuth"),
         "TLSTrust" => Some("TLSTrust"),
-        "DKIMConfig" => Some("DKIMConfig"),
+        "DKIMConfig" => Some("DkimConfig"),
         "SMTPConfig" => Some("SMTPConfig"),
         "Mailer" => Some("Mailer"),
         _ => None,
@@ -3518,7 +3520,9 @@ impl Cx {
                     && !self.type_names.contains(name) =>
             {
                 let ffi = self.ffi_crate.as_deref().unwrap_or("jet_ffi");
-                format!("{}jet_email::{}<{}::Secret>", self.root_prefix, name, ffi)
+                let rust = core_email_rust_type_name(name)
+                    .expect("compiler-owned email config has a native carrier");
+                format!("{}jet_email::{}<{}::Secret>", self.root_prefix, rust, ffi)
             }
             Type::Named(name)
                 if matches!(name.as_str(), "TLSTrust" | "Mailer")
@@ -3987,9 +3991,11 @@ impl Cx {
                 }
                 if matches!(resolved, "SMTPAuth" | "DKIMConfig" | "SMTPConfig") {
                     let ffi = self.ffi_crate.as_deref().unwrap_or("jet_ffi");
+                    let rust = core_email_rust_type_name(resolved)
+                        .expect("qualified Core email config has a native carrier");
                     return format!(
                         "{}jet_email::{}<{}::Secret>",
-                        self.root_prefix, resolved, ffi
+                        self.root_prefix, rust, ffi
                     );
                 }
                 if resolved == "TLSTrust" || resolved == "Mailer" {
@@ -8009,6 +8015,40 @@ fn walk_type_edge<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dkim_source_names_project_to_the_native_rust_head() {
+        for name in [
+            "DKIMConfig",
+            "email.DKIMConfig",
+            "core.email.DKIMConfig",
+            "core::email::DKIMConfig",
+            "<corelib>/Core/email::Core/email/email.jet::DKIMConfig",
+        ] {
+            assert_eq!(core_email_rust_type_name(name), Some("DkimConfig"));
+        }
+        assert_eq!(core_email_rust_type_name("user.DKIMConfig"), None);
+        assert_eq!(core_email_rust_type_name("user::DKIMConfig"), None);
+        assert_eq!(core_email_rust_type_name("DkimConfig"), None);
+
+        let source = "use core.email as email\nfn run() {}\n";
+        let (tokens, lex_diags) = crate::Lexer::lex(source);
+        assert!(lex_diags.is_empty(), "lex errors: {lex_diags:?}");
+        let program = crate::Parser::parse(&tokens).expect("parse failed");
+        let mut cx = build_cx(&program, source, "test.jet");
+        cx.ffi_crate = Some("provider_crypto".to_string());
+        for prefix in ["", "runtime::"] {
+            cx.root_prefix = prefix.to_string();
+            for name in ["DKIMConfig", "email.DKIMConfig"] {
+                assert_eq!(
+                    cx.rust_type(&Type::Named(name.to_string())),
+                    format!("{prefix}jet_email::DkimConfig<provider_crypto::Secret>")
+                );
+            }
+        }
+        cx.type_names.insert("DKIMConfig".to_string());
+        assert_eq!(cx.rust_type(&Type::Named("DKIMConfig".to_string())), "DKIMConfig");
+    }
 
     #[test]
     fn source_file_handles_use_the_native_owned_carriers() {

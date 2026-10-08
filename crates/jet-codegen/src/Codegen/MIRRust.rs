@@ -6107,7 +6107,7 @@ impl<'a> RustEmitter<'a> {
             return format!("JetExpiring<{}>", self.rust_type(&args[0]));
         }
         if let Some(email_name) = crate::Codegen::core_email_rust_type_name(&name.name) {
-            if matches!(email_name, "SMTPAuth" | "DKIMConfig" | "SMTPConfig") && args.is_empty() {
+            if matches!(email_name, "SMTPAuth" | "DkimConfig" | "SMTPConfig") && args.is_empty() {
                 let ffi = self
                     .config
                     .execution

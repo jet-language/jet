@@ -45,6 +45,24 @@ fn complex_unit_literals_use_registered_native_root_with_prefix() {
 }
 
 #[test]
+fn checked_dkim_config_uses_the_native_head_with_any_root_prefix() {
+    let bundle = checked_project(
+        "dkim_carrier_projection",
+        "authority: { holds: { allow: [Mem.Alloc] } }",
+        r#"
+use core.email as email
+fn consume(value: email.DKIMConfig?) {}
+fn run() { consume(None) }
+"#,
+    );
+    for prefix in ["", "runtime::"] {
+        let rust = emit_native_aot_with_root_prefix(&bundle, prefix);
+        assert!(rust.contains(&format!("{prefix}jet_email::DkimConfig<")), "{rust}");
+        assert!(!rust.contains("jet_email::DKIMConfig"), "{rust}");
+    }
+}
+
+#[test]
 fn checked_shell_text_uses_argv_carrier_with_any_root_prefix() {
     let bundle = checked_project(
         "shell_carrier_projection",
