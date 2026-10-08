@@ -132,7 +132,10 @@ pub fn append_line(text: String, value: DataTree) -> String EncodingError! {
         loop index in 0..<text.count_bytes() {
             if stream.byte_at(text, index) == (U8{10}) -> line += 1
         }
-        if needs_lf { offset += 1; line += 1 }
+        if needs_lf {
+            offset += 1
+            line += 1
+        }
         return Err(record_error(err, JSONLRecord{text: "", line: line, offset: offset}, count_rows(text)))
     }
     if text.count_bytes() == 0 -> return Ok("{encoded}\n")
