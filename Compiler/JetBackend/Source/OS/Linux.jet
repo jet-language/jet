@@ -467,6 +467,10 @@ pub fn x64_native_slot_error(address: Int, size: Int) -> String Never! {
 pub fn x64_native_slot_write_error(address: Int, size: Int, value: Int) -> String Never! {
     error :: x64_native_slot_error(address, size)
     if error != "" -> return error
+    x64_native_word_range_error(size, value)
+}
+pub fn x64_native_word_range_error(size: Int, value: Int) -> String Never! {
+    if size != 1 && size != 2 && size != 4 && size != 8 -> return "NativeSlotWidthInvalid: {size}"
     if size == 8 {
         if value < -9223372036854775808 || value > 18446744073709551615 -> return "NativeSlotValueOutOfRange: {size}"
     } else if value < 0 || value >= (1 << (size * 8)) -> return "NativeSlotValueOutOfRange: {size}"

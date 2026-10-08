@@ -1396,8 +1396,12 @@ release refuses a mismatched layout rather than truncating or guessing it.
 `core_shared_runtime_call` consumes the admitted runtime's sealed `export_abis`
 and symbol addresses. Its fixed zero-to-three-word argument path allocates no
 argument list, rejects mismatched arity and Float/Memory/wide carriers before
-invoking code, and masks narrow results. Refusals identify the export and the
-unsupported class/width. These helpers do not imply runtime or Core admission.
+invoking code. Parameters must be eight-byte words: narrower parameters refuse
+because the sealed layout does not encode signedness. The only admitted narrow
+result is Integer/1, with a Bool/U8 zero-extension contract (reached by
+`jet_rt_native_shared_weak_upgrade`); size-2/4 results refuse rather than silently
+zero-extending signed values. Refusals identify the export and unsupported
+class/width. These helpers do not imply runtime or Core admission.
 
 
 `x64_memory_core_shared_image` consumes the explicit pinned-Core lowering

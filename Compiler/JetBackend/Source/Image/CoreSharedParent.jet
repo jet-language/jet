@@ -107,8 +107,15 @@ pub fn core_shared_runtime_call_error(runtime: CoreSharedParentRuntime, symbol: 
     if arity < 0 || arity > 3 || row.parameters.len() != arity -> return "RuntimeLibraryExportABIArityMismatch: {symbol}: {arity}"
     loop (index, parameter) in row.parameters {
         if !core_shared_runtime_word_layout(parameter) -> return "RuntimeLibraryExportABIUnsupported: {symbol}: parameter {index}: {lir_abi_class_name(parameter.class)}/{parameter.size}"
+        if parameter.size != 8 -> return "RuntimeLibraryExportABIParameterSignednessUnknown: {symbol}: parameter {index}: {lir_abi_class_name(parameter.class)}/{parameter.size}"
     }
-    if row.result == .Val(output) && !core_shared_runtime_word_layout(output) -> return "RuntimeLibraryExportABIUnsupported: {symbol}: result: {lir_abi_class_name(output.class)}/{output.size}"
+    if row.result == .Val(output) {
+        if !core_shared_runtime_word_layout(output) -> return "RuntimeLibraryExportABIUnsupported: {symbol}: result: {lir_abi_class_name(output.class)}/{output.size}"
+        // Reached by Shared.jet's weak-upgrade Bool. This raw call surface
+        // defines Integer/1 results as Bool/U8; signed narrow results need
+        // signedness in the sealed ABI and are not admitted here.
+        if output.size != 8 && !(output.size == 1 && output.class == LIRABIClass.Integer) -> return "RuntimeLibraryExportABIResultSignednessUnknown: {symbol}: result: {lir_abi_class_name(output.class)}/{output.size}"
+    }
     ""
 }
 // Fixed arguments avoid allocating/copying an argument list on this hot path.
@@ -118,7 +125,7 @@ pub fn core_shared_runtime_call(runtime: CoreSharedParentRuntime, symbol: String
     row :: runtime.export_abis.get(symbol) ?? panic("validated runtime ABI disappeared")
     loop (index, parameter) in row.parameters {
         value :: if index == 0 -> first else if index == 1 -> second else -> third
-        range_error :: x64_native_slot_write_error(8, parameter.size, value)
+        range_error :: x64_native_word_range_error(parameter.size, value)
         if range_error != "" -> return CoreSharedRuntimeCallResult{word: 0, refusal_key: "RuntimeLibraryExportABIArgumentInvalid: {symbol}: parameter {index}: {range_error}"}
     }
     word := x64_native_call(runtime.symbols.get(symbol) ?? panic("validated runtime symbol disappeared"), arity, first, second, third)
@@ -369,4 +376,12 @@ pub fn core_shared_parent_callable(parent: &CoreSharedParent, attachment: CoreSh
     wide :: LIRLayout{size: 16, align: 8, class: LIRABIClass.Integer}
     runtime.export_abis["jet_word"] = CoreSharedRuntimeExportABI{symbol: "jet_word", parameters: [LIRLayout]{word}, result: Val(wide)}
     assert_eq(core_shared_runtime_call(runtime, "jet_word", 1, 0, 0, 0).refusal_key, "RuntimeLibraryExportABIUnsupported: jet_word: result: Integer/16")
+    narrow :: LIRLayout{size: 1, align: 1, class: LIRABIClass.Integer}
+    runtime.export_abis["jet_word"] = CoreSharedRuntimeExportABI{symbol: "jet_word", parameters: [LIRLayout]{narrow}, result: Val(word)}
+    assert_eq(core_shared_runtime_call(runtime, "jet_word", 1, -1, 0, 0).refusal_key, "RuntimeLibraryExportABIParameterSignednessUnknown: jet_word: parameter 0: Integer/1")
+    runtime.export_abis["jet_word"] = CoreSharedRuntimeExportABI{symbol: "jet_word", parameters: [LIRLayout]{word}, result: Val(narrow)}
+    assert_eq(core_shared_runtime_call_error(runtime, "jet_word", 1), "")
+    narrow_word :: LIRLayout{size: 4, align: 4, class: LIRABIClass.Integer}
+    runtime.export_abis["jet_word"] = CoreSharedRuntimeExportABI{symbol: "jet_word", parameters: [LIRLayout]{word}, result: Val(narrow_word)}
+    assert_eq(core_shared_runtime_call(runtime, "jet_word", 1, 0, 0, 0).refusal_key, "RuntimeLibraryExportABIResultSignednessUnknown: jet_word: result: Integer/4")
 }
