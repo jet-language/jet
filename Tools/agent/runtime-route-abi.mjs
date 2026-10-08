@@ -8,7 +8,8 @@ import { join } from "node:path";
 export function recordApplication(type) {
   const match = /^((?:[A-Za-z_]\w*::)*(?:[A-Z]\w*|__jet_\w+))(?:<([\s\S]*)>)?$/.exec(type.replace(/\s+/g, ""));
   if (!match) return null;
-  // Rust's prelude/container codecs are not emitted crate declarations.
+  // RUST-EXIT S5: seed-only Rust prelude/container codecs, removed at cutover,
+  // are not emitted crate declarations.
   // Keep explicit crate::Option (and source-qualified names) nominal: only
   // the actual builtin spelling/provenance bypasses record specialization.
   if (match[2] !== undefined && /^(?:Option|Result|Vec|(?:std|core)::(?:option::Option|result::Result|vec::Vec))$/.test(match[1])) return null;
