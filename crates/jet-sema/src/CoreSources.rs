@@ -18,6 +18,7 @@ const CORE_PRIVATE_SOURCE_TEXTS: &[(&str, &str)] = &[
     (CORE_ENCODING_CBOR_STREAM_ALIAS, include_str!("../../../Core/encoding/cbor_stream.jet")),
     (CORE_ENCODING_XML_ENGINE_MODULE, include_str!("../../../Core/encoding/xml_engine.jet")),
     (CORE_ENCODING_XML_KERNEL_MODULE, include_str!("../../../Core/encoding/xml_kernel.jet")),
+    ("__core_crypto_ct", include_str!("../../../Core/crypto/expert_ct.jet")),
 ];
 
 /// Source text of the Core source module (public or private part) whose
