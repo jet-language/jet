@@ -172,3 +172,19 @@ pub fn x64_comptime_decode_scalar(runtime: X64Runtime, ty: MIRType, word: Int) -
     }
     x64_comptime_value_failure("native result requires a composite layout/ownership descriptor")
 }
+
+// Decode (detach) first, then consume each native scalar owner exactly once.
+// Exact-Int words have trivial drop at O0, including big-integer handles;
+// only String carries the runtime drop selected by Lower.
+pub fn x64_comptime_drop_scalar(runtime: X64Runtime, ty: MIRType, word: Int) -> [String] {
+    if ty.kind == .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> return x64_comptime_drop_scalar(runtime, inner, word)
+    if !x64_comptime_scalar_supported(ty) -> return [String]{"cannot release unsupported native compiler scalar"}
+    if ty.kind != .String -> return [String]{}
+    if runtime.errors.len() > 0 -> return runtime.errors
+    function :: os_library_symbol(runtime.library, "jet_rt_string_drop")
+    if function == 0 -> return [String]{"unresolved runtime symbol jet_rt_string_drop"}
+    #Unsafe("word transfers one live String owner to the runtime's canonical consuming drop") {
+        _ := os_call_address(function, word)
+    }
+    [String]{}
+}
