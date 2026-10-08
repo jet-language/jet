@@ -7,12 +7,12 @@ copy: {root}/tests/agent_workloads/manifest.tsv manifest.tsv
 file: manifest.tsv first-line = "version\ttask_id\tdomain\tcase\tdeclared_outcome\tinput\texpected\tauthority\tadapters\tplatforms\tevidence\ttower_card\tloss_cards"
 for line file.after_first("\n").filter(!= "") manifest.tsv as r
 write: row.txt = "{r}"
-file: row.txt.append("_").replace("\t", "\n") lines = 13
-capture: version = text file row.txt.split("\t", 0)
+file.append("_").replace("\t", "\n"): row.txt lines = 13
+capture: version = text file.split("\t", 0) row.txt
 cap:version: = "1"
-capture: id = text file row.txt.split("\t", 1)
-capture: input = text file row.txt.split("\t", 5)
-capture: expected_path = text file row.txt.split("\t", 6)
+capture: id = text file.split("\t", 1) row.txt
+capture: input = text file.split("\t", 5) row.txt
+capture: expected_path = text file.split("\t", 6) row.txt
 cap:input: nonempty
 cap:input: !~ ":" # original corpus relative-path colon rejection
 cap:input.replace("\\", "/").append("/marker").replace("/", "\n"): each-line where != "" && != "." && != ".."

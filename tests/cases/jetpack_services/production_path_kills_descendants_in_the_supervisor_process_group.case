@@ -14,9 +14,9 @@ chmod: bin/systemd-run 755
 chmod: bin/systemctl 755
 step: jetpack services up --no-color
 await: file .jet/services/fixture/data/child.pid lines >= 1 timeout 5s every 50ms
-capture: child = text file .jet/services/fixture/data/child.pid.trim
+capture: child = text file.trim .jet/services/fixture/data/child.pid
 cap:child: is-u32
-capture: leader = text file .jet/services/fixture/pid.strip_prefix_lines("pid=").line(0)
+capture: leader = text file.strip_prefix_lines("pid=").line(0) .jet/services/fixture/pid
 cap:leader: is-u32
 cap:child: != "{cap:leader}"
 process {cap:child}: alive-nonzombie

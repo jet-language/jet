@@ -13,7 +13,7 @@ env: S6_WEB_PATH=/
 env: S6_WEB_RESPONSE={work}/page.http
 exit: 0
 file: page.http ^= "HTTP/1.1 200" # Original starts_with.
-file: page.http: ~ "EventSource(\"/__jet/reload\")" # Original contains predicate.
+file: page.http ~ "EventSource(\"/__jet/reload\")" # Original contains predicate.
 step: jet run client/request.jet
 env: S6_WEB_PORT={free-port:app}
 env: S6_WEB_METHOD=GET
@@ -23,8 +23,8 @@ env: S6_WEB_RELOAD_APP={work}/app.jet
 exit: 0
 # Original predicate: helper reads to EOF against absolute250ms then10s windows from send/shutdown and source append.
 file: reload.http ^= "HTTP/1.1 200" # Original starts_with.
-file: reload.http: ~ "text/event-stream" # Original contains predicate.
-file: reload.http: ~ "data: reload" # Original contains predicate.
+file: reload.http ~ "text/event-stream" # Original contains predicate.
+file: reload.http ~ "data: reload" # Original contains predicate.
 signal server: KILL
 wait: server
 exit: any # Original ServerChild drop kill/wait ignores status.

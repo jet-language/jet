@@ -8,7 +8,7 @@ step default: jet run process_policy.jet
 limit: time=120
 exit: 0
 stdout: = production_process_limits_authority_and_descendant_cleanup.stdout.expected
-capture: child = text file child.pid.trim
+capture: child = text file.trim child.pid
 cap:child: is-u32
 repeat while process {cap:child} alive-nonzombie timeout 2s every 10ms fail "timed-out process left descendant"
 end repeat
@@ -17,8 +17,8 @@ step release: jet run --release process_policy.jet
 limit: time=120
 exit: 0
 stdout: = production_process_limits_authority_and_descendant_cleanup.stdout.expected
-capture: child = text file child.pid.trim
-cap:child: is-u32
-repeat while process {cap:child} alive-nonzombie timeout 2s every 10ms fail "timed-out process left descendant"
+capture: release_child = text file.trim child.pid
+cap:release_child: is-u32
+repeat while process {cap:release_child} alive-nonzombie timeout 2s every 10ms fail "timed-out process left descendant"
 end repeat
 remove: child.pid

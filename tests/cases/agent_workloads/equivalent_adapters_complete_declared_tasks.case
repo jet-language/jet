@@ -34,10 +34,10 @@ copy: {root}/tests/agent_workloads/baselines/receipt.tsv pins.tsv
 file: pins.tsv first-line = "version\trun_id\tmachine\tadapter\ttask_id\texpressibility\tfinding\tinput_sha256\texpected_sha256\texit_code\tsource_tokens\tstdout_file\tstdout_sha256\tstderr_file\tstderr_sha256\tcold_ns\twarm_ns\twarm_stdout_sha256\twarm_stderr_sha256\toutput_stable\tscoring\ttool_version\tpolicy_digest"
 for line file.after_first("\n").filter(!= "") pins.tsv as pin
 write: pin.row = "{pin}"
-file: pin.row.append("_").replace("\t", "\n") lines = 23
-capture: adapter = text file pin.row.split("\t", 3)
+file.append("_").replace("\t", "\n"): pin.row lines = 23
+capture: adapter = text file.split("\t", 3) pin.row
 when !(cap:adapter in ["bash","python","node"]): step: fail "unknown pinned adapter"
-capture: pin_version = text file pin.row.split("\t", 21)
+capture: pin_version = text file.split("\t", 21) pin.row
 cap:pin_version: nonempty
 cap:pin_version: != "unknown"
 when cap:adapter = "bash"
@@ -69,13 +69,13 @@ copy: {root}/tests/agent_workloads/manifest.tsv manifest.tsv
 file: manifest.tsv first-line = "version\ttask_id\tdomain\tcase\tdeclared_outcome\tinput\texpected\tauthority\tadapters\tplatforms\tevidence\ttower_card\tloss_cards"
 for line file.after_first("\n").filter(!= "") manifest.tsv as row
 write: task.row = "{row}"
-file: task.row.append("_").replace("\t", "\n") lines = 13
-capture: version = text file task.row.split("\t", 0)
+file.append("_").replace("\t", "\n"): task.row lines = 13
+capture: version = text file.split("\t", 0) task.row
 cap:version: = "1"
-capture: id = text file task.row.split("\t", 1)
-capture: input = text file task.row.split("\t", 5)
-capture: expected_path = text file task.row.split("\t", 6)
-capture: authority = text file task.row.split("\t", 7)
+capture: id = text file.split("\t", 1) task.row
+capture: input = text file.split("\t", 5) task.row
+capture: expected_path = text file.split("\t", 6) task.row
+capture: authority = text file.split("\t", 7) task.row
 cap:authority: = "{cap:policy_authority}"
 cap:input: nonempty
 cap:input: !~ ":" # original corpus relative-path colon rejection
