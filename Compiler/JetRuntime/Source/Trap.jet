@@ -264,6 +264,21 @@ fn trap_native_index_range_stop() {
     trap_simple(I64{0}, trap_word(file), trap_word(file + I64{8}), trap_line(line), trap_word(message), trap_word(message + I64{8}))
 }
 
+// Zero-allocation specialization of jet_panic("<core.prelude>", 0, message).
+// trap_simple above does not task-publish; retain that same fatal path.
+// These 33 message bytes + prelude_end equal message_end + trap_context
+// with that 14-byte file, line 0, and empty function/source.
+fn rt_record_variant_panic() {
+    trap_header(I64{0})
+    trap_write_word(I64{8511913738388071794}, I64{8})
+    trap_write_word(I64{7575182590666699361}, I64{8})
+    trap_write_word(I64{8391735665924334702}, I64{8})
+    trap_write_word(I64{7453001576142499616}, I64{8})
+    trap_write_word(I64{101}, I64{1})
+    trap_msg_prelude_end()
+    trap_footer(I64{0})
+}
+
 fn trap_rich(file: I64, line: I64, function: I64, source: I64, column: I64, caret: I64, message: I64, locals: I64) {
     trap_header(I64{0})
     trap_write_handle(message)

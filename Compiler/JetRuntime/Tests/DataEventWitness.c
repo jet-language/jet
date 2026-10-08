@@ -20,6 +20,7 @@ extern void *jet_rt_alloc(int64_t, int64_t);
 extern void __real_jet_rt_free(void *, int64_t, int64_t);
 extern Text *jet_rt_string_from_static(const void *, int64_t);
 extern void jet_rt_string_drop(Text *);
+extern void jet_panic(Text *, int64_t, Text *);
 extern int64_t jet_int_owned_from_i64(int64_t);
 extern int64_t jet_int_owned_to_i64(int64_t);
 extern int64_t jet_int_add(int64_t, int64_t);
@@ -164,6 +165,11 @@ static void bytes_cases(void) {
 }
 int main(int argc, char **argv) {
     jet_rt_alloc_init();
+    if (argc > 1 && strcmp(argv[1],"panic-reference") == 0) {
+        const char file[] = "<core.prelude>", message[] = "record variant index out of range";
+        jet_panic(jet_rt_string_from_static(file,sizeof(file)-1),0,jet_rt_string_from_static(message,sizeof(message)-1));
+        assert(!"jet_panic reference must stop");
+    }
     if (argc > 1 && strcmp(argv[1],"native-overflow") == 0) {
         int64_t edge = jet_int_owned_from_i64(INT64_MAX);
         int64_t too_big = jet_int_add(edge,1); jet_rt_int_drop(edge);
