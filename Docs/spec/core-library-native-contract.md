@@ -380,6 +380,15 @@ host services and their authority/error carriers require their own real Jet
 host primitives before their remaining policy can be cut over; portable
 constructor ownership does not claim these boundaries are Jet-only.
 
+Service workflow start, step, activity, retry and completion decisions live in
+`Core/service/service.jet`. They retain the exclusive tree borrow across durable
+synchronization, validation, replay checks and cursor updates. The existing
+durable append and handle creation operations remain registered bootstrap leaves;
+field leaves only project or assign the existing carrier and die at cutover.
+Handle-only `activity_wait`, `all` and `sleep` remain native and uncredited:
+their decisions inspect cursor/history/status under the handle's existing mutex,
+so independently locked getters/setters would change the atomic region.
+
 ## Dependency order
 
 Core work follows the dependency graph. These categories describe dependency

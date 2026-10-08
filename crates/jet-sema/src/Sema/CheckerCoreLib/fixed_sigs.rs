@@ -3513,6 +3513,45 @@ fn core_fixed_sig_impl(
             vec![(read, Type::Named("ServiceTree".to_string()))],
             Some(Type::String),
         )),
+        ("core.service", "__workflow_sync_tree") => Some((
+            vec![(AccessConvention::Write, Type::Named("ServiceTree".into()))],
+            Some(result_ty(unit_ty(), Type::Named("ServiceError".into()))),
+        )),
+        ("core.service", "__workflow_append") => Some((
+            vec![(AccessConvention::Write, Type::Named("ServiceTree".into())), (AccessConvention::Move, Type::String)],
+            Some(result_ty(unit_ty(), Type::Named("ServiceError".into()))),
+        )),
+        ("core.service", "__workflow_handle") => Some((
+            vec![(read, Type::Named("ServiceTree".into())), (read, Type::Int)],
+            Some(result_ty(Type::Named("ServiceWorkflow".into()), Type::Named("ServiceError".into()))),
+        )),
+        ("core.service", "__workflow_count") => Some((
+            vec![(read, Type::Named("ServiceTree".into()))], Some(Type::Int),
+        )),
+        ("core.service", "__workflow_id_at") => Some((
+            vec![(read, Type::Named("ServiceTree".into())), (read, Type::Int)], Some(Type::String),
+        )),
+        ("core.service", "__workflow_version_at" | "__workflow_run_at" | "__workflow_cursor_at" | "__workflow_history_len" | "__workflow_steps_len" | "__workflow_activity_count") => Some((
+            vec![(read, Type::Named("ServiceTree".into())), (read, Type::Int)], Some(Type::Int),
+        )),
+        ("core.service", "__workflow_status_at") => Some((
+            vec![(read, Type::Named("ServiceTree".into())), (read, Type::Int)], Some(Type::Named("TaskStatus".into())),
+        )),
+        ("core.service", "__workflow_outcome_at") => Some((
+            vec![(read, Type::Named("ServiceTree".into())), (read, Type::Int)], Some(Type::Option(Box::new(Type::Named("TaskOutcome".into())))),
+        )),
+        ("core.service", "__workflow_event_at") => Some((
+            vec![(read, Type::Named("ServiceTree".into())), (read, Type::Int), (read, Type::Int)], Some(Type::Option(Box::new(Type::String))),
+        )),
+        ("core.service", "__workflow_step_at" | "__workflow_activity_key_at") => Some((
+            vec![(read, Type::Named("ServiceTree".into())), (read, Type::Int), (read, Type::Int)], Some(Type::String),
+        )),
+        ("core.service", "__workflow_activity_outcome_at") => Some((
+            vec![(read, Type::Named("ServiceTree".into())), (read, Type::Int), (read, Type::Int)], Some(Type::Named("TaskOutcome".into())),
+        )),
+        ("core.service", "__workflow_set_cursor") => Some((
+            vec![(AccessConvention::Write, Type::Named("ServiceTree".into())), (read, Type::Int), (read, Type::Int)], None,
+        )),
         ("core.service", "workflow_start") => Some((
             vec![
                 (

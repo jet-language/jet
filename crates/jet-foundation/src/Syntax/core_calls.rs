@@ -1489,7 +1489,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: cc5827b264353b43c848229ddfbd4158fe5abf0b80039cdb34609eee2d599110
+// Source SHA-256: 16d2df8594daf1178dbb3db75a8499f8c377840ba67ad314b864ba1008076124
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -2350,13 +2350,13 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::source_owned("core.service", "set_state_event_log", &[true, false, false, false, false]),
     CoreCallRecord::source_owned("core.service", "set_state_snapshot", &[true, false, false, false, false]),
     CoreCallRecord::source_owned("core.service", "upgrade_receipt", &[true]),
-    CoreCallRecord::new("core.service", "workflow_activity", "jet_services_workflow_activity", true, &[true, false, false, false, false]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.service", "workflow_activity_complete", "jet_services_workflow_activity_complete", true, &[true, false, false, false]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.service", "workflow_activity_retry", "jet_services_workflow_activity_retry", true, &[true, false, false, false]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::source_owned("core.service", "workflow_activity", &[true, false, false, false, false]),
+    CoreCallRecord::source_owned("core.service", "workflow_activity_complete", &[true, false, false, false]),
+    CoreCallRecord::source_owned("core.service", "workflow_activity_retry", &[true, false, false, false]),
     CoreCallRecord::new("core.service", "workflow_activity_wait", "jet_services_workflow_activity_wait", true, &[true, false, false]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.service", "workflow_all", "jet_services_workflow_all", true, &[true, false]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.service", "workflow_sleep", "jet_services_workflow_sleep", true, &[true, false]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.service", "workflow_step", "jet_services_workflow_step", true, &[true, false, false]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::source_owned("core.service", "workflow_step", &[true, false, false]),
     CoreCallRecord::new("core.data", "file", "jet_data_loader_file", true, &[true, true, true]),
     CoreCallRecord::new( "core.data", "file_member", "jet_data_loader_file_member", true, &[true, true, true, true], ),
     CoreCallRecord::new("core.data", "url", "jet_data_loader_url", true, &[true, true, true, true]),
@@ -3315,7 +3315,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.encoding.toml", "to_string", "jet_enc_toml_to_string", true, &[true]),
     CoreCallRecord::new("core.encoding.yaml", "to_string", "jet_enc_yaml_to_string", true, &[true]),
     CoreCallRecord::new("core.encoding.xml", "to_bytes", "jet_std_xml_to_bytes", true, &[true, true]),
-    CoreCallRecord::new("core.service", "workflow_start", "jet_services_workflow_start", true, &[true, false, false]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::source_owned("core.service", "workflow_start", &[true, false, false]),
     CoreCallRecord::new("core.sync", "text_edit", "jet_sync_text_edit", true, &[true, false, false, false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::source_owned("core.service", "workflow_outcome", &[true, false]),
     CoreCallRecord::new("core.sync", "list_push", "jet_sync_list_push", true, &[false, false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
@@ -3374,6 +3374,24 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.service", "__tree_observation_parts", "jet_services_raw_tree_observation_parts", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.service", "__endpoint_identity_parts", "jet_services_raw_endpoint_identity_parts", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.service", "__endpoint_validation_snapshot", "jet_services_raw_endpoint_validation_snapshot", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__workflow_sync_tree", "jet_services_workflow_sync_tree", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__workflow_append", "jet_services_workflow_append", true, &[true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__workflow_handle", "jet_services_workflow_handle", true, &[true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__workflow_count", "jet_services_raw_workflow_count", true, &[true]).with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__workflow_id_at", "jet_services_raw_workflow_id_at", true, &[true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__workflow_version_at", "jet_services_raw_workflow_version_at", true, &[true, false]).with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__workflow_run_at", "jet_services_raw_workflow_run_at", true, &[true, false]).with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__workflow_status_at", "jet_services_raw_workflow_status_at", true, &[true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__workflow_outcome_at", "jet_services_raw_workflow_outcome_at", true, &[true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__workflow_cursor_at", "jet_services_raw_workflow_cursor_at", true, &[true, false]).with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__workflow_history_len", "jet_services_raw_workflow_history_len", true, &[true, false]).with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__workflow_steps_len", "jet_services_raw_workflow_steps_len", true, &[true, false]).with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__workflow_event_at", "jet_services_raw_workflow_event_at", true, &[true, false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__workflow_step_at", "jet_services_raw_workflow_step_at", true, &[true, false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__workflow_activity_count", "jet_services_raw_workflow_activity_count", true, &[true, false]).with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__workflow_activity_key_at", "jet_services_raw_workflow_activity_key_at", true, &[true, false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__workflow_activity_outcome_at", "jet_services_raw_workflow_activity_outcome_at", true, &[true, false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__workflow_set_cursor", "jet_services_raw_workflow_set_cursor", true, &[true, false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
 ];
 // END GENERATED CORE CALLS
 

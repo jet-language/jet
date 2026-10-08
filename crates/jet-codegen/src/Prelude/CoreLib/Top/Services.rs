@@ -7078,3 +7078,21 @@ fn jet_services_observe(tree: &JetServiceTree) -> String {
         jet_services_workflow_observation(&tree.workflows)
     )
 }
+
+// Mechanical access to the existing exclusively borrowed workflow carrier.
+// Validation, lookup, replay and cursor policy are owned by core.service Jet.
+fn jet_services_raw_workflow_count(tree: &JetServiceTree) -> i64 { tree.workflows.len() as i64 }
+fn jet_services_raw_workflow_id_at(tree: &JetServiceTree, index: i64) -> String { tree.workflows[index as usize].id.clone() }
+fn jet_services_raw_workflow_version_at(tree: &JetServiceTree, index: i64) -> i64 { tree.workflows[index as usize].version }
+fn jet_services_raw_workflow_run_at(tree: &JetServiceTree, index: i64) -> i64 { tree.workflows[index as usize].run_id }
+fn jet_services_raw_workflow_status_at(tree: &JetServiceTree, index: i64) -> JetTaskStatus { tree.workflows[index as usize].status.clone() }
+fn jet_services_raw_workflow_outcome_at(tree: &JetServiceTree, index: i64) -> Option<JetTaskOutcome> { tree.workflows[index as usize].outcome.clone() }
+fn jet_services_raw_workflow_cursor_at(tree: &JetServiceTree, index: i64) -> i64 { tree.workflows[index as usize].replay_cursor as i64 }
+fn jet_services_raw_workflow_history_len(tree: &JetServiceTree, index: i64) -> i64 { tree.workflows[index as usize].history.len() as i64 }
+fn jet_services_raw_workflow_steps_len(tree: &JetServiceTree, index: i64) -> i64 { tree.workflows[index as usize].steps.len() as i64 }
+fn jet_services_raw_workflow_event_at(tree: &JetServiceTree, index: i64, cursor: i64) -> Option<String> { tree.workflows[index as usize].history.get(cursor as usize).cloned() }
+fn jet_services_raw_workflow_step_at(tree: &JetServiceTree, index: i64, step: i64) -> String { tree.workflows[index as usize].steps[step as usize].clone() }
+fn jet_services_raw_workflow_activity_count(tree: &JetServiceTree, index: i64) -> i64 { tree.workflows[index as usize].activity_outcomes.len() as i64 }
+fn jet_services_raw_workflow_activity_key_at(tree: &JetServiceTree, index: i64, pair: i64) -> String { tree.workflows[index as usize].activity_outcomes[pair as usize].0.clone() }
+fn jet_services_raw_workflow_activity_outcome_at(tree: &JetServiceTree, index: i64, pair: i64) -> JetTaskOutcome { tree.workflows[index as usize].activity_outcomes[pair as usize].1.clone() }
+fn jet_services_raw_workflow_set_cursor(tree: &mut JetServiceTree, index: i64, cursor: i64) { tree.workflows[index as usize].replay_cursor = cursor as usize; }
