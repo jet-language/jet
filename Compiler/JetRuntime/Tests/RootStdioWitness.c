@@ -136,12 +136,20 @@ static void check(int selected, int expected_status, const char *report) {
     }
 }
 
-int main(void) {
+int main(int argc, char **argv) {
+    const bool established = argc == 2 && strcmp(argv[1], "--established") == 0;
+    if (argc != 1 && !established) {
+        fputs("usage: RootStdioWitness [--established]\n", stderr);
+        return 2;
+    }
     check(0, 0, NULL);
     check(1, 70, "Stop [E3001]: ");
-    check(2, 1, "Error:");
+    // #4902 holds entry-Err atexit eligibility and cross-group report order.
+    // The default full witness retains that disputed case unchanged. This
+    // explicit preparation selector neither exercises nor claims that gate.
+    if (!established) check(2, 1, "Error:");
     check(3, 0, NULL);
     check(4, 0, NULL);
-    puts("root stdio: ok");
+    puts(established ? "root stdio established (mode2 held): ok" : "root stdio: ok");
     return 0;
 }
