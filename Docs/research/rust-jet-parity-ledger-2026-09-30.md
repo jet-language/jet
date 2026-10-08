@@ -323,6 +323,8 @@ Compiler-owned `TextError{message: String}` and `RangeError{reason: String}`
 use the same record shape for construction and field access. Their literal
 rows are authored in `core_constructable_fields` and generated into Jet's
 `CORE_RECORD_LITERAL_ROWS`; source declarations are not fabricated for them.
-`core_failure_record_literal_ok.jet` and `CoreFailureRecordFixtures.jet` cover
-the public construction and the shared table shape. The Rust checker bridge
+`core_failure_record_literal_user.jet` keeps user construction rejected with
+E0119; `CoreFailureRecordFixtures.jet` exercises the real parser and checker
+with both Core and user module origins. The generated `core_only` literal
+visibility does not affect public field reads. The Rust checker bridge
 exists only while the seed compiles Core and dies at cutover.

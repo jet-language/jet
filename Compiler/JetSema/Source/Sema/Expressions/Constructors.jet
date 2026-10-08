@@ -39,6 +39,7 @@ use jet_foundation.[
     core_enum_variant_payload,
     core_enum_variants,
     core_record_literal_fields,
+    core_record_literal_is_core_only,
     core_call,
     expr_span,
     regex_syntax_validate,
@@ -286,6 +287,7 @@ fn sema_expression_core_record_name(struct_name: String, type_args: [Type], expe
     }
     if sema_expression_type_symbol(&scopes, environment, name) != None -> return None
     if core_record_literal_fields(name) == None -> return None
+    if core_record_literal_is_core_only(name) && !sema_module_is_core_source(environment.module_identity) -> return None
     Val(name)
 }
 
