@@ -162,6 +162,8 @@ impl ExpiringValue {
         Ok(~self.value)
     }
 
+    pub fn is_valid(self, clock: Clock) -> Bool Never! { clock.now() <= self.deadline_ms }
+
     pub fn expires_at_ms(self) -> Int Never! { self.deadline_ms }
     fn __show(self) -> String Never! { "Expiring(deadline={self.deadline_ms})" }
 }
@@ -176,7 +178,9 @@ pub fn __expiry_deadline(now_ms: Int, ttl: Duration) -> Int Never! {
     cached :: ExpiringValue.new("fresh", Duration{ns: 2000000}, clock)
     &clock.tick(2)
     assert_eq(cached.get(clock) ?? panic("equality must remain valid"), "fresh")
+    assert(cached.is_valid(clock))
     &clock.tick(1)
+    assert(!cached.is_valid(clock))
     if cached.get(clock) == {
         .Err(_) -> {}
         .Ok(_) -> assert(false)
@@ -197,6 +201,7 @@ pub fn __expiry_deadline(now_ms: Int, ttl: Duration) -> Int Never! {
     high :: Clock.new(time_int_max())
     saturated :: ExpiringValue.new(17, Duration{ns: 1000000}, high)
     assert_eq(saturated.get(high) ?? panic("saturated deadline remains valid"), 17)
+    assert(saturated.is_valid(high))
 }
 impl Clock.Equatable {
     fn equal(self, other: Clock) -> Bool Never! { self.now() == other.now() }

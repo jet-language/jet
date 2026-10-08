@@ -44,6 +44,20 @@ impl ExpiringSecret {
     }
 }
 
+impl ExpiringSecret.Close {
+    fn close(^self) {
+        owner :: ^self
+        __close_secret_storage(owner.value)
+    }
+}
+
+// A Shared provider only releases its storage handle. Source takes the live
+// credential first, so provider cleanup never needs a source Close callback.
+fn __close_secret_storage<T>(value: Shared<T?>) Never! {
+    guard := value.guard_edit()
+    __take_expired(&guard)
+}
+
 // Take, reinitialize the shared slot, then end the owned payload's scope.
 // The approved general mono-time Close drop glue (#4792) owns cleanup.
 fn __take_expired<T>(guard: &SharedGuard<T?>) Never! {
@@ -74,6 +88,16 @@ impl ExpiryCloseProbe.Close {
     }
 }
 
+// Structural twin of ExpiringSecret's Shared<T?> + Close, specialized to a
+// counted probe because the public wrapper's closed crypto family rejects it.
+struct ExpiryCloseOwner { value: Shared<ExpiryCloseProbe?> }
+impl ExpiryCloseOwner.Close {
+    fn close(^self) {
+        owner :: ^self
+        __close_secret_storage(owner.value)
+    }
+}
+
 #Test("Expired storage takes its credential and closes it exactly once") {
     count :: shared ExpiryCloseCount{count: 0}
     storage :: shared (ExpiryCloseProbe?{Val(ExpiryCloseProbe{count: ~count})})
@@ -85,7 +109,7 @@ impl ExpiryCloseProbe.Close {
     }
     // Dropping still-live storage must run the same payload Close exactly once.
     if true {
-        live :: shared (ExpiryCloseProbe?{Val(ExpiryCloseProbe{count: ~count})})
+        live :: ExpiryCloseOwner{value: shared (ExpiryCloseProbe?{Val(ExpiryCloseProbe{count: ~count})})}
     }
     observed :: count.guard_read()
     assert_eq(observed.value.count, 2)

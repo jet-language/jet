@@ -2334,7 +2334,9 @@ millisecond bounds.
 `ExpiringValue.new(value, ttl, clock)` computes a saturating absolute
 millisecond deadline in Jet. `get(clock)` returns a copy of the payload until
 `now > deadline` (equality is still live), otherwise `Expired`. Zero and
-negative TTLs retain this same boundary. Show retains the existing
+negative TTLs retain this same boundary. `is_valid(clock)` observes the same
+clock explicitly and returns `now <= deadline`, including a saturated
+deadline. Show retains the existing
 `Expiring(deadline=N)` rendering; Debug remains unsupported (E0112), not a
 structural payload renderer. Its fields are private, with
 `expires_at_ms()` for the deadline and fallible `get(clock)` for payload

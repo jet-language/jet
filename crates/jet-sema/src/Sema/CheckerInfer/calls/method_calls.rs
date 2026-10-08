@@ -9,7 +9,7 @@ use crate::Sema::CheckerCoreLib::{
     civil_time_method_contract, civil_time_method_return, core_generic_struct_field,
     data_renamed_to_datatree, datatree_method_return, db_value_method_return, decode_error_ty,
     devserver_method_return, email_method_return, encoding_handle_method_return,
-    expiring_method_return, file_handle_method_return, http_nominal_leaf, http_type_method_return,
+    file_handle_method_return, http_nominal_leaf, http_type_method_return,
     is_allocator_type, is_db_value_type_name, is_geometry_type, is_json_type_name, is_layout_axis_type,
     is_layout_type, is_math_type,
     is_reflect_type_name, is_simd_lane_type, job_queue_method_return,
@@ -6360,32 +6360,18 @@ impl<'a> Checker<'a> {
         // The actual dispatch (`finish_pool_add` etc.) already lives in
         // `finish_builtin_method`, reached the same way Signal/Derived reach it.
         if let Type::Apply { name, .. } = &recv_ty {
-            if name == crate::Syntax::EXPIRING_VALUE_TYPE
-                || (method == "force"
-                    && jet_foundation::CoreModuleExports::core_source_owns_type(name)
-                    && name.ends_with("::Core/time/time.jet::ExpiringValue"))
+            if method == "force" && (name == crate::Syntax::EXPIRING_VALUE_TYPE
+                || (jet_foundation::CoreModuleExports::core_source_owns_type(name)
+                    && name.ends_with("::Core/time/time.jet::ExpiringValue")))
             {
-                if method == "force" {
-                    self.diags.push(Diagnostic::error(
-                            "E0511",
-                            "`ExpiringValue.force` bypasses expiry checking".to_string(),
-                            "TTL-wrapped values must use fallible `get(clock)` so expired access is handled explicitly".to_string(),
-                            "use `match item.get(clock) { .Ok(v) -> …; .Err(Expired) -> … }` instead".to_string(),
-                            Some(span),
-                        ));
-                }
-                if let Some(ret) = expiring_method_return(&recv_ty, method, args.len()) {
-                    if method == "get" && args.len() == 1 {
-                        self.expect_core_arg(
-                            "get",
-                            0,
-                            &Type::Named(crate::Syntax::CLOCK_TYPE.to_string()),
-                            &mut args[0],
-                        );
-                    }
-                    *recv_type_out = Some(crate::Syntax::EXPIRING_VALUE_TYPE.to_string());
-                    return ret;
-                }
+                self.diags.push(Diagnostic::error(
+                    "E0511",
+                    "`ExpiringValue.force` bypasses expiry checking".to_string(),
+                    "TTL-wrapped values must use fallible `get(clock)` so expired access is handled explicitly".to_string(),
+                    "use `match item.get(clock) { .Ok(v) -> …; .Err(Expired) -> … }` instead".to_string(),
+                    Some(span),
+                ));
+                return None;
             }
             let source_expiring_secret =
                 jet_foundation::CoreModuleExports::core_source_owns_type(name)
