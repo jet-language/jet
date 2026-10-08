@@ -603,7 +603,6 @@ use crate::Codegen::TIR::resolve_numeric_conversion_op;
 use crate::Codegen::TIR::resolve_numeric_op;
 use crate::Codegen::TIR::resolve_self_ty;
 use crate::Codegen::TIR::source_arg_order;
-use crate::Codegen::TIR::spawn_body_carrier_ty;
 use crate::Codegen::TIR::spawn_label;
 use crate::Codegen::TIR::struct_field_type;
 use crate::Codegen::TIR::tir_recv_jet_ty;
@@ -5469,17 +5468,20 @@ fn lower_method_call_impl(
         }
         if method == Syntax::INTERNAL_TASK_SPAWN_METHOD {
             if let Some(Expr::Lambda(lam)) = args.first().map(|a| &a.expr) {
-                let Some(_) = resolved_ret else {
+                let Some(carrier_ty) = resolved_ret.and_then(|ty| match ty {
+                    Type::Apply { name, args } if name == "Task" && args.len() == 1 => {
+                        Some(args[0].clone())
+                    }
+                    _ => None,
+                }) else {
                     return invariant_method_expr(
                         method_span,
-                        "task spawn without a resolved return type",
+                        "task spawn without a checked Task<carrier> return type",
                     );
                 };
                 return in_own_frame(|| {
-                    let carrier_ty = spawn_body_carrier_ty(lam, cx, env);
-                    // Sema's Task<T> is the source metadata; TIR retains the
-                    // closure carrier so join lowering can flatten its own E
-                    // into the enclosing function's carrier.
+                    // Sema owns both the Task element and the worker return.
+                    // Never probe the body or inherit the caller's carrier.
                     let mut spawn_env = clone_env(env);
                     spawn_env.ret_ty = Some(carrier_ty.clone());
                     let site = jit_spawn_site(lam, cx, env);
@@ -5556,16 +5558,19 @@ fn lower_method_call_impl(
                 "task-group spawn without a checked lambda argument",
             );
         };
-        let Some(_) = resolved_ret else {
+        let Some(carrier_ty) = resolved_ret.and_then(|ty| match ty {
+            Type::Apply { name, args } if name == "Task" && args.len() == 1 => {
+                Some(args[0].clone())
+            }
+            _ => None,
+        }) else {
             return invariant_method_expr(
                 method_span,
-                "task-group spawn without a resolved return type",
+                "task-group spawn without a checked Task<carrier> return type",
             );
         };
         return in_own_frame(|| {
-            let carrier_ty = spawn_body_carrier_ty(lam, cx, env);
-            // Group handles expose source Task<T> metadata through sema;
-            // TIR retains the closure carrier for join's flatten adapter.
+            // The checked Task element is also the closure's return carrier.
             let mut spawn_env = clone_env(env);
             spawn_env.ret_ty = Some(carrier_ty.clone());
             let site = jit_spawn_site(lam, cx, env);
