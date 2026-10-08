@@ -2730,7 +2730,18 @@ pub(crate) fn run_types(args: &[String], json: bool) {
     for module in &projection.bundle.modules {
         let mut registry =
             jet_foundation::Traits::TraitRegistry::auto_derives_for_items(&module.items);
-        registry.register_synthetic_operators();
+        registry.register_synthetic_operators(|name| {
+            module.path.strip_prefix(jet_foundation::Diagnostics::CORE_SOURCE_ROOT).is_ok_and(|path|
+                jet_foundation::CoreModuleExports::CORE_SOURCE_OWNED_TYPES.iter().any(|row|
+                    row.name == name && path == Path::new(row.path)
+                    && module.items.iter().any(|item| match item {
+                        jet_foundation::AST::Item::Struct(definition) => definition.name == name,
+                        jet_foundation::AST::Item::Enum(definition) => definition.name == name,
+                        jet_foundation::AST::Item::Distinct(definition) => definition.name == name,
+                        jet_foundation::AST::Item::TypeAlias(definition) => definition.name == name,
+                        _ => false,
+                    })))
+        });
         registered.extend(registry.operator_impls);
     }
     for implementation in &registered {
