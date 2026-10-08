@@ -23230,7 +23230,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             self.zeroize_place_path(address.frame, address.place, &[], span)?;
             return Ok(RuntimeValue::Data(MirEvalValue::Unit));
         }
-        let runtime_args = args
+        let mut runtime_args = args
             .into_iter()
             .map(|value| self.materialize_runtime(value, span))
             .collect::<Result<Vec<_>, Diagnostic>>()?;
@@ -28365,7 +28365,7 @@ fn mir_zeroize_secret_record(value: &mut MirEvalValue, span: Span) -> Result<(),
         .iter_mut()
         .find(|(name, _)| name == "bytes")
         .ok_or_else(|| mir_error_at("MIR expiring secret has no bytes field", span))?;
-    mir_zeroize_owned_bytes(bytes, span)
+    mir_zeroize_bytes(bytes, span)
 }
 
 type MirClock = std::sync::Mutex<crate::Comptime::ClockRuntime::jet_std::Clock>;
@@ -33006,6 +33006,45 @@ fn run() {
             interpret_stdout(EDIT_WAIT_PEER_CYCLE),
             "seen=2 ticket=3\n"
         );
+    }
+
+    #[test]
+    fn mir_expiring_secret_zeroize_preserves_original_record_storage() {
+        for bytes in [
+            MirEvalValue::Bytes(vec![0x11, 0x22, 0x33]),
+            MirEvalValue::List(vec![
+                MirEvalValue::Int(0x11),
+                MirEvalValue::Int(0x22),
+                MirEvalValue::Int(0x33),
+            ]),
+        ] {
+            let original = match &bytes {
+                MirEvalValue::Bytes(bytes) => bytes.as_ptr() as usize,
+                MirEvalValue::List(items) => items.as_ptr() as usize,
+                _ => unreachable!(),
+            };
+            let mut secret = MirEvalValue::Struct {
+                type_name: "Secret".into(),
+                fields: vec![("bytes".into(), bytes)],
+            };
+            mir_zeroize_secret_record(&mut secret, Span::new(0, 0))
+                .expect("expiry must wipe the resident secret record");
+            let MirEvalValue::Struct { fields, .. } = &secret else {
+                panic!("zeroize replaced the secret record");
+            };
+            match &fields[0].1 {
+                MirEvalValue::Bytes(bytes) => {
+                    assert_eq!(bytes.as_ptr() as usize, original);
+                    assert_eq!(bytes, &[0; 3]);
+                }
+                MirEvalValue::List(items) => {
+                    assert_eq!(items.as_ptr() as usize, original);
+                    assert_eq!(items.len(), 3);
+                    assert!(items.iter().all(|item| matches!(item, MirEvalValue::Int(0))));
+                }
+                _ => panic!("zeroize replaced the secret byte carrier"),
+            }
+        }
     }
 
     #[test]

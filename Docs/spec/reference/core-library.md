@@ -1570,8 +1570,10 @@ Unicode controls; reasons must also be NFC and exclude U+2028/U+2029.
 `ExpiringSecret<T>` is the lifetime wrapper for `Secret`, `SigningKey`, and
 `X25519SecretKey`. Construct it with an injected `Clock` and a `Duration`; use
 `.with` for a non-escaping read loan. Expiry returns `Expired`, and the wrapper
-destroys the owned credential through its zeroizing drop path. A system clock
-adds the `Time` effect. See
+destroys the owned credential through its zeroizing drop path. Expiry wipes the
+resident byte storage with the same volatile kernel used by explicit secret
+close, without a copied buffer or a replacement allocation. A system clock adds
+the `Time` effect. See
 [`vault_keys.jet`](../../../Examples/features/crypto/vault_keys.jet) and
 [`expiring_secret.jet`](../../../Examples/features/memory/expiring_secret.jet).
 
