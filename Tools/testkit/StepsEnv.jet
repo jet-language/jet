@@ -1,0 +1,58 @@
+// Only argv admits environment tokens. Resolve against the same kit defaults
+// used by Exec, then the case/step overlays after final unset operations.
+fn kit_steps_env_token_end(argument: String, start: Int) -> Int? {
+    bytes :: argument.bytes()
+    i := start + 5
+    depth := 1
+    pipe := -1
+    loop i < bytes.len() {
+        byte :: Int.from_u8(bytes[i])
+        if byte == 123 -> depth += 1
+        if byte == 125 {
+            depth -= 1
+            if depth == 0 -> break
+        }
+        if byte == 124 && depth == 1 && pipe == -1 -> pipe = i
+        i += 1
+    }
+    if depth != 0 || pipe <= start + 5 -> return None
+    loop index in (start + 5)..<pipe {
+        byte :: Int.from_u8(bytes[index])
+        letter :: (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) || byte == 95
+        digit :: byte >= 48 && byte <= 57
+        if !letter && !(digit && index > start + 5) -> return None
+    }
+    Val(i + 1)
+}
+
+fn kit_steps_argv_env_valid(argument: String) -> Bool {
+    rest := argument
+    loop {
+        start :: rest.index("{{env:") ?? return true
+        end :: kit_steps_env_token_end(rest, start) ?? return false
+        rest = rest.slice(end, rest.len())
+    }
+}
+
+fn kit_steps_argv_env(argument: String, env: KitEnv, scratch: String, overlay: [KitEnvVar]) -> String {
+    if !argument.contains("{{env:") -> return argument
+    rest := argument
+    result := ""
+    loop {
+        start :: rest.index("{{env:") ?? break
+        end :: kit_steps_env_token_end(rest, start) ?? panic("validated argv environment token")
+        body :: rest.slice(start + 5, end - 1)
+        pipe :: body.index("|") ?? panic("validated environment separator")
+        name :: body.slice(0, pipe)
+        fallback :: body.slice(pipe + 1, body.len())
+        value := kit_exec_base_value(name, env, scratch)
+        loop variable in overlay {
+            if variable.name == name -> value = variable.value
+        }
+        text :: value ?? ""
+        expanded :: if text == "" -> fallback else -> text
+        result = "{result}{rest.slice(0, start)}{expanded}"
+        rest = rest.slice(end, rest.len())
+    }
+    "{result}{rest}"
+}

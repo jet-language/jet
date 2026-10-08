@@ -68,9 +68,9 @@ fn kit_test_steps_env() -> KitEnv {
     run :: KitRun{stdout: "two words", stderr: "", code: 0, signal: None, timed_out: false, error: ""}
     plan :: kit_steps_parse("step: printf '%s' 'two words'\nstdout: = message.out\nstderr: empty\n")
     directory :: files.join(env.root, "Tools/testkit/Fixtures/steps")
-    assert_eq(kit_steps_check(plan.steps[0], "case", run, env, env.root, env.scratch, directory, kit_test_steps_bless(), plan.normalize, "", "").status, "PASS")
+    assert_eq(kit_steps_check(plan.steps[0], "case", run, env, env.root, env.scratch, directory, kit_test_steps_bless(), plan.normalize, "", "", KitStepState{last: run, built: "", built_once: false}).status, "PASS")
     bad :: KitRun{stdout: "two words", stderr: "", code: 3, signal: None, timed_out: false, error: ""}
-    assert_eq(kit_steps_check(plan.steps[0], "case", bad, env, env.root, env.scratch, directory, kit_test_steps_bless(), plan.normalize, "", "").status, "FAIL")
+    assert_eq(kit_steps_check(plan.steps[0], "case", bad, env, env.root, env.scratch, directory, kit_test_steps_bless(), plan.normalize, "", "", KitStepState{last: bad, built: "", built_once: false}).status, "FAIL")
 }
 
 #Test("build artifacts use the nearest package root or standalone entry directory") {
