@@ -2283,7 +2283,7 @@ fn jet_codegen_lower_statement(builder: &JetCodegenBuilder, program: JetCodegenP
                             value := jet_codegen_lower_expr(&builder, program, init)
                             place := jet_codegen_bind_local(&builder, program, local, init.ty, local.mutable, None, None, string_view)
                             if gc_root -> jet_codegen_mark_gc_root(&builder, program, place)
-                            _ := jet_codegen_emit(&builder, program, span, None, MIROperation.WritePlace{place: place, value: value})
+                            jet_codegen_initialize_retained_place(&builder, program, span, place, value)
                         }
                     }
                 }
