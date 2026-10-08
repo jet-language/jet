@@ -2067,6 +2067,22 @@ fn run() {
 | `math.saturating_add(a,b)`, `saturating_sub(a,b)`, `saturating_mul(a,b)` | `Int` | Perform integer arithmetic while clamping overflow to the representable endpoint. |
 | `math.factorial(n)` / `math.binomial(n, k)` / `math.perm(n, k)` | `?Int` | Return optional combinatorial results when the input or result is outside the supported integer domain; `comb` aliases `binomial`. |
 
+#### Exact numbers
+
+`Fraction` stores an arbitrary-precision numerator and a positive denominator,
+reduced by their greatest common divisor. Zero denominators are rejected;
+division by a zero fraction stops. A finite `Float` converts using its exact
+binary significand and exponent, without a decimal-text round trip.
+`Decimal` stores a sign, arbitrary-precision magnitude, and decimal scale.
+Parsing retains written scale, addition and subtraction use the finer operand
+scale, and multiplication removes trailing zeros only down to that finer scale.
+Division returns a `Fraction`; conversion to a `Decimal` rejects repeating
+denominators. Decimal rounding uses ties away from zero.
+
+The policies and rendering live in `Core/math/math.jet`. Checked precise TIR
+operations resolve their reserved helpers by the loaded math module identity;
+they do not resolve a user function with the same helper spelling.
+
 #### Measurement propagation
 
 A measured value stores a numeric value and a nonnegative standard uncertainty.

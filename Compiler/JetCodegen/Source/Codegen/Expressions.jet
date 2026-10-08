@@ -886,7 +886,89 @@ fn jet_codegen_precise_builtin_route(builder: &JetCodegenBuilder, program: JetCo
     jet_codegen_intern_route(&builder, program, MIRPreludeFamily.PreciseBuiltin, type_name, function, symbol, arity, borrow_mask, None, carrier, MIRPreludeABI.Value)
 }
 
-fn jet_codegen_lower_precise_builtin(builder: &JetCodegenBuilder, program: JetCodegenProgram, span: Span, result_type: Type, type_name: String, function: String, args: [TExpr], carrier: TFailureCarrier) -> MIRValueID {
+fn jet_codegen_precise_source_helper(owner: String, operation: String) -> String? Never! {
+    if owner == "Fraction" {
+        return if operation == {
+            "new" -> Val("__fraction_new")
+            "from_parts" -> Val("__fraction_from_parts")
+            "from_owned_parts" -> Val("__fraction_from_owned_parts")
+            "from_int" -> Val("__fraction_from_int")
+            "from_float" -> Val("__fraction_from_float")
+            "add" -> Val("__fraction_add")
+            "sub" -> Val("__fraction_sub")
+            "mul" -> Val("__fraction_mul")
+            "div" -> Val("__fraction_div")
+            "equal" -> Val("__fraction_equal")
+            "numerator" -> Val("__fraction_numerator")
+            "denominator" -> Val("__fraction_denominator")
+            "owned_numerator" -> Val("__fraction_owned_numerator")
+            "owned_denominator" -> Val("__fraction_owned_denominator")
+            "is_zero" -> Val("__fraction_is_zero")
+            "to_int" -> Val("__fraction_to_int")
+            "to_float" -> Val("__fraction_to_float")
+            "to_decimal" -> Val("__fraction_to_decimal")
+            "to_string" -> Val("__fraction_to_string")
+            else -> None
+        }
+    }
+    if owner == "Decimal" {
+        return if operation == {
+            "from_str" -> Val("__decimal_from_str")
+            "from_int" -> Val("__decimal_from_int")
+            "from_float" -> Val("__decimal_from_float")
+            "from_fraction" -> Val("__decimal_from_fraction")
+            "add" -> Val("__decimal_add")
+            "sub" -> Val("__decimal_sub")
+            "mul" -> Val("__decimal_mul")
+            "div" -> Val("__decimal_div")
+            "equal" -> Val("__decimal_equal")
+            "compare" -> Val("__decimal_compare")
+            "floor" -> Val("__decimal_floor")
+            "ceil" -> Val("__decimal_ceil")
+            "round" -> Val("__decimal_round")
+            "to_int" -> Val("__decimal_to_int")
+            "to_float" -> Val("__decimal_to_float")
+            "to_fraction" -> Val("__decimal_to_fraction")
+            "to_string" -> Val("__decimal_to_string")
+            else -> None
+        }
+    }
+    if owner == "Complex" {
+        return if operation == {
+            "abs" -> Val("__complex_abs")
+            "from_parts" -> Val("__complex_from_parts")
+            "add" -> Val("__complex_add")
+            "sub" -> Val("__complex_sub")
+            "mul" -> Val("__complex_mul")
+            "div" -> Val("__complex_div")
+            "to_string" -> Val("__complex_to_string")
+            else -> None
+        }
+    }
+    None
+}
+
+fn jet_codegen_lower_precise_builtin(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, type_name: String, function: String, args: [TExpr], carrier: TFailureCarrier) -> MIRValueID {
+    span :: expression.span
+    result_type :: expression.ty
+    helper := jet_codegen_precise_source_helper(type_name, function)
+    if helper == .Val(name) {
+        loop semantic_module in program.modules {
+            if semantic_module.module_name != "core.math" || semantic_module.nominal_positions.get(type_name) == None -> next
+            target :: jet_codegen_find_function_by_key(program.function_index, name, semantic_module.module_identity) ?? panic("checked precise source helper was pruned")
+            call_args := [MIRCallArg]{}
+            loop argument in args {
+                value :: jet_codegen_lower_expr(&builder, program, argument)
+                &call_args.push(jet_codegen_numeric_call_arg(value, argument.span))
+            }
+            returned :: jet_codegen_executable_function_return_type(target, [Type]{})
+            value :: jet_codegen_emit_value(&builder, program, span, returned, MIROperation.Call{callee: MIRCallee.User{function: jet_codegen_function_id(target)}, args: call_args, type_args: [MIRType]{}})
+            if jet_codegen_is_plain_call_return(returned, result_type) {
+                return jet_codegen_reconcile_plain_call_return(&builder, program, expression, target.key, value, returned)
+            }
+            return value
+        }
+    }
     values := [MIRValueID]{}
     loop argument in args -> &values.push(jet_codegen_lower_expr(&builder, program, argument))
     type_id := jet_codegen_type_instance_id(Type.Named{name: type_name}, program.modules, builder.function.module_identity, builder.generic_type_names)
@@ -904,7 +986,7 @@ fn jet_codegen_lower_registered_math_constructor(builder: &JetCodegenBuilder, pr
     if record.member == "fraction" && (!is_optional || !optional_failure) -> panic("checked core.math.fraction constructor lost its optional result policy")
     type_name := if record.member == "fraction" -> "Fraction" else -> "Decimal"
     function := if record.member == "fraction" -> "new" else -> "from_str"
-    Val(jet_codegen_lower_precise_builtin(&builder, program, expression.span, expression.ty, type_name, function, args, failure))
+    Val(jet_codegen_lower_precise_builtin(&builder, program, expression, type_name, function, args, failure))
 }
 
 
@@ -5084,7 +5166,7 @@ fn jet_codegen_lower_expr(builder: &JetCodegenBuilder, program: JetCodegenProgra
             jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Convert{value: value, parameters: [MIRValueID]{}, target: target, conversion: MIRConversion.Transparent})
         }
         .UnitConvert(_, argument, scale, offset, rounding, fallible, relative_uncertainty, file, line) -> jet_codegen_lower_unit_convert(&builder, program, expression, argument, scale, offset, rounding, fallible, relative_uncertainty, file, line)
-        .PreciseBuiltin(type_name, function, args) -> jet_codegen_lower_precise_builtin(&builder, program, expression.span, expression.ty, type_name, function, args, jet_codegen_failure_carrier_for_type(expression.ty))
+        .PreciseBuiltin(type_name, function, args) -> jet_codegen_lower_precise_builtin(&builder, program, expression, type_name, function, args, jet_codegen_failure_carrier_for_type(expression.ty))
         .MathBuiltin(type_name, function, args) -> jet_codegen_lower_math_builtin(&builder, program, expression, type_name, function, args)
         .CoreCall(record, args, _, type_args, widen_to_vec, data_plan, failure) -> {
             canonical_record := jet_codegen_canonical_core_record(record)

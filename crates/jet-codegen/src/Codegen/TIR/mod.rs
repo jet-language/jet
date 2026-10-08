@@ -10686,8 +10686,47 @@ fn checked_core_source_call_edges(
         let Some(source_path) = bundle.name_ledger.module_path(callable.module) else {
             continue;
         };
+        let authored_math = jet_foundation::CoreModuleExports::core_source_module("core.math")
+            .is_some_and(|source| bundle.modules[callable.module].alias == source.alias
+                && bundle.modules[callable.module].display.as_str() == source.path);
+        let mut precise_families = [false; 3];
+        // Source helper bodies have explicit checked calls. Their parameter
+        // names do not request every operation on the represented carrier.
+        if !authored_math {
+        for parameter in &function.params {
+            note_precise_source_type(&parameter.ty, &mut precise_families);
+        }
+        if let Some(returned) = &function.return_type {
+            note_precise_source_type(returned, &mut precise_families);
+        }
+        }
         for statement in &function.body {
-            statement.for_each_expr(&mut |expression: &Expr| match expression {
+            statement.for_each_expr(&mut |expression: &Expr| {
+                if !authored_math {
+                match expression {
+                    Expr::Call(call) => {
+                        if let Some(returned) = &call.resolved_ret {
+                            note_precise_source_type(returned, &mut precise_families);
+                        }
+                    }
+                    Expr::MethodCall { recv_type, resolved_ret, .. } => {
+                        if let Some(owner) = recv_type {
+                            note_precise_source_name(owner, &mut precise_families);
+                        }
+                        if let Some(returned) = resolved_ret {
+                            note_precise_source_type(returned, &mut precise_families);
+                        }
+                    }
+                    Expr::StructLit { type_name, .. } => {
+                        note_precise_source_name(type_name, &mut precise_families);
+                    }
+                    Expr::TypedLit { head: Some(ty), .. } => {
+                        note_precise_source_type(ty, &mut precise_families);
+                    }
+                    _ => {}
+                }
+                }
+                match expression {
                 Expr::Call(call) if core_modules.contains(&callable.module) => {
                     if let Some(target) = checked_local_function_call_target(
                         bundle,
@@ -10748,7 +10787,23 @@ fn checked_core_source_call_edges(
                     }
                 }
                 _ => {}
+                }
             });
+        }
+        if let Some(source) = jet_foundation::CoreModuleExports::core_source_module("core.math") {
+            for (target_index, target) in callables.iter().enumerate() {
+                if !bundle.modules.get(target.module).is_some_and(|module| {
+                    module.alias == source.alias && module.display.as_str() == source.path
+                }) {
+                    continue;
+                }
+                let Some(name) = target.source_name.as_deref() else { continue };
+                for (family, prefix) in ["__fraction_", "__decimal_", "__complex_"].iter().enumerate() {
+                    if precise_families[family] && name.starts_with(prefix) {
+                        edges.push((caller_index, target_index));
+                    }
+                }
+            }
         }
     }
     edges.sort_unstable();
@@ -10756,10 +10811,99 @@ fn checked_core_source_call_edges(
     edges
 }
 
+// Temporary bridge from the existing checked precise operation to its source
+// body. Both the bootstrap reachability closure and the MIR output gate use it.
+fn precise_source_helper(owner: &str, operation: &str) -> Option<&'static str> {
+    Some(match (owner, operation) {
+        ("Fraction", "new") => "__fraction_new",
+        ("Fraction", "from_parts") => "__fraction_from_parts",
+        ("Fraction", "from_owned_parts") => "__fraction_from_owned_parts",
+        ("Fraction", "from_int") => "__fraction_from_int",
+        ("Fraction", "from_float") => "__fraction_from_float",
+        ("Fraction", "add") => "__fraction_add",
+        ("Fraction", "sub") => "__fraction_sub",
+        ("Fraction", "mul") => "__fraction_mul",
+        ("Fraction", "div") => "__fraction_div",
+        ("Fraction", "equal") => "__fraction_equal",
+        ("Fraction", "numerator") => "__fraction_numerator",
+        ("Fraction", "denominator") => "__fraction_denominator",
+        ("Fraction", "owned_numerator") => "__fraction_owned_numerator",
+        ("Fraction", "owned_denominator") => "__fraction_owned_denominator",
+        ("Fraction", "is_zero") => "__fraction_is_zero",
+        ("Fraction", "to_int") => "__fraction_to_int",
+        ("Fraction", "to_float") => "__fraction_to_float",
+        ("Fraction", "to_decimal") => "__fraction_to_decimal",
+        ("Fraction", "to_string") => "__fraction_to_string",
+        ("Decimal", "from_str") => "__decimal_from_str",
+        ("Decimal", "from_int") => "__decimal_from_int",
+        ("Decimal", "from_float") => "__decimal_from_float",
+        ("Decimal", "from_fraction") => "__decimal_from_fraction",
+        ("Decimal", "add") => "__decimal_add",
+        ("Decimal", "sub") => "__decimal_sub",
+        ("Decimal", "mul") => "__decimal_mul",
+        ("Decimal", "div") => "__decimal_div",
+        ("Decimal", "equal") => "__decimal_equal",
+        ("Decimal", "compare") => "__decimal_compare",
+        ("Decimal", "floor") => "__decimal_floor",
+        ("Decimal", "ceil") => "__decimal_ceil",
+        ("Decimal", "round") => "__decimal_round",
+        ("Decimal", "to_int") => "__decimal_to_int",
+        ("Decimal", "to_float") => "__decimal_to_float",
+        ("Decimal", "to_fraction") => "__decimal_to_fraction",
+        ("Decimal", "to_string") => "__decimal_to_string",
+        ("Complex", "abs") => "__complex_abs",
+        ("Complex", "from_parts") => "__complex_from_parts",
+        ("Complex", "add") => "__complex_add",
+        ("Complex", "sub") => "__complex_sub",
+        ("Complex", "mul") => "__complex_mul",
+        ("Complex", "div") => "__complex_div",
+        ("Complex", "to_string") => "__complex_to_string",
+        _ => return None,
+    })
+}
+
+fn note_precise_source_name(name: &str, families: &mut [bool; 3]) {
+    for (index, owner) in ["Fraction", "Decimal", "Complex"].iter().enumerate() {
+        if name == *owner || (jet_foundation::CoreModuleExports::core_source_owns_type(name)
+            && name.rsplit("::").next() == Some(*owner))
+        {
+            families[index] = true;
+        }
+    }
+}
+
+fn note_precise_source_type(ty: &Type, families: &mut [bool; 3]) {
+    match ty.without_user_tags() {
+        Type::Named(name) | Type::Apply { name, .. } => note_precise_source_name(name, families),
+        Type::Option(inner) | Type::Shared(inner) | Type::List(inner) => {
+            note_precise_source_type(inner, families);
+        }
+        Type::Result { ok, err } => {
+            note_precise_source_type(ok, families);
+            note_precise_source_type(err, families);
+        }
+        _ => {}
+    }
+}
+
 #[cfg(test)]
 mod checked_function_reference_tests {
     use super::*;
 
+    #[test]
+    fn precise_checked_type_facts_bound_the_bootstrap_helper_family() {
+        let mut families = [false; 3];
+        note_precise_source_type(&Type::Named("Fraction".to_string()), &mut families);
+        assert_eq!(families, [true, false, false]);
+        let helpers = ["__fraction_mul", "__fraction_add", "__decimal_mul", "__complex_abs"];
+        let kept = helpers.into_iter().filter(|name| {
+            ["__fraction_", "__decimal_", "__complex_"].iter().enumerate()
+                .any(|(index, prefix)| families[index] && name.starts_with(prefix))
+        }).collect::<Vec<_>>();
+        assert_eq!(kept, ["__fraction_mul", "__fraction_add"]);
+        assert_eq!(precise_source_helper("Fraction", "mul"), Some("__fraction_mul"));
+        assert_eq!(precise_source_helper("Measurement", "mul"), None);
+    }
     #[test]
     fn core_module_function_reference_is_a_reachability_edge() {
         let reference = jet_foundation::Names::NameReference {
