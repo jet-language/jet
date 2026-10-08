@@ -1444,6 +1444,14 @@ bodies that rustc accepts; the same bodies in dispatch form fail with E0502.
 
 ## Testing
 
+The stage0-built golden driver keeps trimmed asm operands as borrowed views:
+matching a named register uses a guarded prefix removal and requires the
+remaining suffix to be the closing brace, rather than calling owned-String
+`slice` on a trimmed view. The `clobbers ` comment prefix uses the same guarded
+removal. Binary-pattern bit widths remain checked `U8` and are explicitly
+widened with `Int.from_u8` at the Lower constant boundary; stage0 does not
+construct an Int directly from a width's fixed storage.
+
 The golden-lowering driver's generated package grants `FS.Read`, `FS.Write`,
 `IO`, `Mem.Alloc`, `Panic`, and `Time`: these are the checked Lower unit's
 required effects. The harness must grant `Panic` for its checked-invariant

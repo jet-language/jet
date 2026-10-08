@@ -54,13 +54,14 @@ fn x64_asm_byte_register(text: String) -> Int Never! {
 fn x64_asm_reg(s: X64AsmState, text: String, read: Bool) -> Int Never! {
     operand :: text.trim()
     if operand.starts_with("{{") && operand.ends_with("}}") {
-        name :: operand.slice(1, operand.len() - 1)
+        tail :: operand.after("{{")
         loop (i, input) in s.names {
-            if input == name {
-                reg :: LIR_ASM_INPUTS[i]
-                if read && s.written[reg] -> return -1
-                return reg
-            }
+            if !tail.starts_with(input) -> next
+            suffix :: tail.after(input)
+            if suffix != "}}" -> next
+            reg :: LIR_ASM_INPUTS[i]
+            if read && s.written[reg] -> return -1
+            return reg
         }
         return -1
     }
@@ -88,7 +89,7 @@ fn x64_asm_line(s: &X64AsmState, line: String) -> String? Never! {
         if parts.len() > 1 {
             comment :: parts[1].trim()
             if comment.starts_with("clobbers ") {
-                loop token in comment.slice(9, comment.len()).replace(",", " ").split(" ") {
+                loop token in comment.after("clobbers ").replace(",", " ").split(" ") {
                     if token != "" && x64_asm_register(token) < 0 {
                         return Val("unsupported clobber register")
                     }
