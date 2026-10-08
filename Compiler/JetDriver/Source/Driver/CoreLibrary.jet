@@ -1,6 +1,6 @@
 // Canonical all-Core producer input. The outer static host retains this recipe;
 // every factory checks it through this same Source pipeline and layout walker.
-use jet_backend.[CoreSharedCanonicalProducer, CoreSharedManifest, CoreSharedSource, CoreSharedParent, CoreSharedParentAdmission, CoreSharedParentAttachment, CoreSharedParentGetterResult, CoreSharedParentRuntime, core_shared_expected_manifest, core_shared_parent_new, core_shared_parent_admit, core_shared_parent_getter]
+use jet_backend.[CoreSharedCanonicalProducer, CoreSharedManifest, CoreSharedSource, CoreSharedParent, CoreSharedParentAdmission, CoreSharedParentAttachment, CoreSharedParentGetterResult, CoreSharedParentCallableResult, CoreSharedParentRuntime, core_shared_expected_manifest, core_shared_parent_new, core_shared_parent_admit, core_shared_parent_getter, core_shared_parent_payload_manifest, core_shared_parent_payload_callable]
 
 pub enum JetDriverCoreLibraryPreparation {
     Prepared(producer: CoreSharedCanonicalProducer, expected: CoreSharedManifest)
@@ -108,4 +108,15 @@ pub fn jet_driver_core_source_parent_getter(host: &JetDriverCoreSourceParentHost
     guard :: host.attachment.guard_read()
     attachment :: guard.value ?? return CoreSharedParentGetterResult{shared: 0, code: "E0956", refusal_key: "CoreSharedNotAdmitted"}
     core_shared_parent_getter(&host.parent, attachment, site_key)
+}
+
+pub fn jet_driver_core_source_payload_manifest(host: JetDriverCoreSourceParentHost) -> CoreSharedManifest? Never! {
+    guard :: host.attachment.guard_read()
+    attachment :: guard.value ?? return None
+    core_shared_parent_payload_manifest(host.parent, attachment)
+}
+pub fn jet_driver_core_source_payload_callable(host: JetDriverCoreSourceParentHost, type_key: String, clone: Bool) -> CoreSharedParentCallableResult Never! {
+    guard :: host.attachment.guard_read()
+    attachment :: guard.value ?? return CoreSharedParentCallableResult{address: 0, refusal_key: "CoreSharedNotAdmitted"}
+    core_shared_parent_payload_callable(host.parent, attachment, type_key, clone)
 }

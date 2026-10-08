@@ -1387,6 +1387,11 @@ The boundary's ownership rails are fixed:
 Closure code and release resolve only through actual emitted callable rows.
 Missing exports are named refusals; the generic concrete-layout/provenance gap
 remains a named refusal, not an ID/offset guess or a copied factory root.
+Payload slot clone/drop lookup additionally checks the exact semantic identity,
+role and type key, a SystemV void signature, and two/one Pointer8 parameters.
+It returns only the actual parent-pinned address; missing or mismatched typed
+roles refuse before touching a slot. The Driver accesses the same admitted
+canonical inventory through its digest-checked parent attachment.
 
 The canonical ordinary-layout inventory records `Float32Bits` explicitly.
 A Map's third child is its ordinary entry-tuple layout; that row's stride,

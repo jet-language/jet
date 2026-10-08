@@ -317,6 +317,46 @@ pub fn core_shared_parent_callable(parent: &CoreSharedParent, attachment: CoreSh
     CoreSharedParentCallableResult{address: loaded.base + row.linked_offset, refusal_key: ""}
 }
 
+// Return the admitted canonical inventory, not a factory-derived layout table.
+pub fn core_shared_parent_payload_manifest(parent: CoreSharedParent, attachment: CoreSharedParentAttachment) -> CoreSharedManifest? Never! {
+    guard :: parent.state.guard_read()
+    manifest :: guard.value.manifest ?? return None
+    if !guard.value.ready || guard.value.poisoned || attachment.manifest_digest != manifest.digest -> return None
+    Val(manifest)
+}
+pub fn core_shared_payload_callable_error(row: CoreSharedCallableBinding, type_key: String, clone: Bool) -> String Never! {
+    role :: if clone -> "lazy.clone" else -> "lazy.drop"
+    if row.role != role || row.type_key != type_key || row.semantic_identity != "{role}:{type_key}" -> return "CoreSharedPayloadCallableRoleMismatch: {row.semantic_identity}"
+    if row.signature.convention != .SystemV || row.signature.result != None || row.signature.params.len() != (if clone -> 2 else -> 1) -> return "CoreSharedPayloadCallableSignatureMismatch: {row.semantic_identity}"
+    loop parameter in row.signature.params {
+        if parameter.size != 8 || parameter.align != 8 || parameter.class != LIRABIClass.Pointer -> return "CoreSharedPayloadCallableSignatureMismatch: {row.semantic_identity}"
+    }
+    ""
+}
+pub fn core_shared_parent_payload_callable(parent: CoreSharedParent, attachment: CoreSharedParentAttachment, type_key: String, clone: Bool) -> CoreSharedParentCallableResult Never! {
+    role :: if clone -> "lazy.clone" else -> "lazy.drop"
+    identity :: "{role}:{type_key}"
+    guard :: parent.state.guard_read()
+    manifest :: guard.value.manifest ?? return CoreSharedParentCallableResult{address: 0, refusal_key: "CoreSharedNotAdmitted"}
+    if !guard.value.ready || guard.value.poisoned || attachment.manifest_digest != manifest.digest -> return CoreSharedParentCallableResult{address: 0, refusal_key: "CoreSharedSchemaMismatch"}
+    binding :: guard.value.binding ?? return CoreSharedParentCallableResult{address: 0, refusal_key: "CoreSharedNotAdmitted"}
+    error :: core_shared_callable_inventory_error(binding)
+    if error != "" -> return CoreSharedParentCallableResult{address: 0, refusal_key: error}
+    row :: core_shared_callable_binding(binding, identity) ?? return CoreSharedParentCallableResult{address: 0, refusal_key: "CoreSharedCallableBindingMissing: {identity}"}
+    signature_error :: core_shared_payload_callable_error(row, type_key, clone)
+    if signature_error != "" -> return CoreSharedParentCallableResult{address: 0, refusal_key: signature_error}
+    loaded :: guard.value.loaded ?? return CoreSharedParentCallableResult{address: 0, refusal_key: "CoreSharedNotAdmitted"}
+    CoreSharedParentCallableResult{address: loaded.base + row.linked_offset, refusal_key: ""}
+}
+
+#Test("payload clone and drop roles bind only exact pinned pointer signatures") {
+    row := CoreSharedCallableBinding{semantic_identity: "lazy.drop:checked", role: "lazy.drop", type_key: "checked", symbol: "jet_core_callable_7", function: LIRFunctionID{value: 7}, signature: LIRSignature{id: LIRSignatureID{value: 3}, convention: .SystemV, params: [LIRLayout]{lir_layout_pointer()}, result: None}, linked_offset: 40}
+    assert_eq(core_shared_payload_callable_error(row, "checked", false), "")
+    assert_eq(core_shared_payload_callable_error(row, "checked", true), "CoreSharedPayloadCallableRoleMismatch: lazy.drop:checked")
+    row.signature.params = [LIRLayout]{lir_layout_word()}
+    assert_eq(core_shared_payload_callable_error(row, "checked", false), "CoreSharedPayloadCallableSignatureMismatch: lazy.drop:checked")
+}
+
 #Test("parent runtime ABI rows decode sealed layouts and refuse malformed inventories") {
     word :: LIRLayout{size: 8, align: 8, class: LIRABIClass.Integer}
     first :: CoreSharedRuntimeExportABI{symbol: "jet_one", parameters: [LIRLayout]{word}, result: Val(word)}
