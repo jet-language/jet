@@ -4442,9 +4442,7 @@ hex/base64 + `core.uuid` v4/v7 (D-UUIDENC1).
 **D-CRYPTO-ENVELOPE2=A — recipient JETC v2 files** *(ratified by owner,
 card #302)*: safe file crypto is
 `crypto.file_seal([X25519PublicKey], Path, Path)` and
-`crypto.file_open(&X25519SecretKey, Path, Path)`. The identity is a shared/read
-borrow (a bare parameter in Jet); both APIs return unit success with
-`FileCryptoError!` in current D-TYPE-SUFFIX1 syntax. Both stream bounded,
+`crypto.file_open(&X25519SecretKey, Path, Path)`. Both stream bounded,
 authenticated 1 MiB chunks through the canonical recipient JETC v2 format;
 sealing snapshots and revalidates the source before its four independent RNG
 requests, and neither operation overwrites or exposes partial output. Safe open
