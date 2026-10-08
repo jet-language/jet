@@ -194,6 +194,9 @@ fn host_is_tty(fd: I64) -> Bool {
 
 // runtime-fini: 1
 #Export(c) fn jet_rt_stdout_flush() {
+    // Alloc/Trap can reach this before Host init has published its buffer.
+    // No buffer exists then; never bootstrap or allocate from this flush edge.
+    if (host_root == I64{0}) -> return
     host_lock()
     _ := host_stdout_flush_locked()
     host_unlock()

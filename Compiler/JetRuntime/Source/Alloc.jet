@@ -256,6 +256,9 @@ fn alloc_write_size(size: I64) {
 
 fn alloc_stop(invalid_layout: Bool, size: I64) {
     if invalid_layout -> rt_trap_invalid_box_layout()
+    // Host-ready guarded, allocation-free drain before the first raw stderr
+    // byte. Host init's own mmap failure has no buffer and remains a no-op.
+    trap_flush_stdout()
     // std::alloc::handle_alloc_error: \"memory allocation of N bytes failed\\n\"
     // followed by SIGABRT, not a Jet program-stop exit status.
     alloc_write_word(I64{6998727353336423789}, I64{8})

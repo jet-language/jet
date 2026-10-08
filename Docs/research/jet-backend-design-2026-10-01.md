@@ -1728,3 +1728,10 @@ payload with its terminating newline and exits 101 (`Core/CAbi.rs:91-98`).
 The unreachable path adds its existing defect prefix before this writer,
 preserving its bytes. `HostFaultTests.jet` registers both exact-output
 subprocess witnesses in the composed World/Sentry fixture lane.
+
+Trap headers, unreachable defects and invalid-layout stops already drain the
+real stdout buffer before stderr. Allocator OOM now uses the same allocation-
+free drain; the Host flush is a no-op until startup publishes a buffer, avoiding
+recursive initialization on the allocation-failure path. The paired process/
+captured report fixture sends both streams to one descriptor and requires the
+buffered stdout line to precede the panic header, proving write order.

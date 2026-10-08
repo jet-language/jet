@@ -2,7 +2,7 @@
 // One composed fixture: real World threads, all four MemSentry seed unit
 // witnesses, a Source inline raw-read stop, and canonical ledger byte parity.
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync, existsSync, statSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync, existsSync, statSync, openSync, closeSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { candidateJetc0, frontReceipt } from '../../JetBackend/Tests/jet-front.mjs';
@@ -61,6 +61,17 @@ if (mode === 'assemble') {
     const pair = [mode, mode + 4].map(number => spawnSync(join(out, 'world-sentry-fixture'), ['trap-report', String(number)], { cwd: root, encoding: 'utf8', timeout: 30000 }));
     writeFileSync(join(out, `trap-report-${mode}.receipt.json`), JSON.stringify(pair, null, 2) + '\n');
     if (pair.some(result => result.error || result.signal || result.status !== 70 || result.stdout !== '') || pair[0].stderr !== pair[1].stderr || !pair[0].stderr.startsWith('Stop [E3001]: ')) failures.push(`trap report ${mode}: process/owned bytes or status differ`);
+  }
+  // A shared stdout/stderr descriptor proves chronology, not just two final
+  // buffers containing the expected bytes in an unobservable order.
+  for (const captured of [false, true]) {
+    const path = join(out, `trap-buffered-${captured}.bytes`);
+    const descriptor = openSync(path, 'w');
+    const result = spawnSync(join(out, 'world-sentry-fixture'), ['trap-buffered', captured ? '4' : '0'], { cwd: root, stdio: ['ignore', descriptor, descriptor], timeout: 30000 });
+    closeSync(descriptor);
+    writeFileSync(join(out, `trap-buffered-${captured}.receipt.json`), JSON.stringify({ status: result.status, signal: result.signal, error: result.error?.message ?? null }, null, 2) + '\n');
+    const bytes = readFileSync(path, 'utf8');
+    if (result.error || result.signal || result.status !== 70 || !bytes.startsWith('buffered stdout\nStop [E3001]: ')) failures.push(`buffered stdout order (${captured ? 'captured' : 'process'}) differs`);
   }
   for (const [name, bytes] of [
     ['host-fault', 'A\n'],

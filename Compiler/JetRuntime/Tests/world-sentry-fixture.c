@@ -17,6 +17,7 @@ extern void jet_panic_rich(Text *, int64_t, Text *, Text *, int64_t, int64_t, Te
 extern void jet_rt_require_stop(int64_t, int64_t *, Text *, Text *, Text *, Text *);
 extern int64_t jet_rt_trap_report_fixture(int64_t (*)(int64_t), int64_t, bool);
 extern int64_t jet_rt_host_fault_fixture(int64_t, bool);
+extern void jet_stdio_stdout_write_raw(Text *, bool, int64_t *, int64_t *);
 static int64_t trap_callback(int64_t mode) {
     Text file = {"trapfixture.jet", 15, 0}, function = {"check", 5, 0};
     Text source = {" panic()", 8, 0}, message = {"fault", 5, 0}, locals = {"answer=42", 9, 0};
@@ -31,12 +32,23 @@ static int64_t trap_callback(int64_t mode) {
     }
     return 0;
 }
+static int64_t buffered_trap_callback(int64_t mode) {
+    Text line = {"buffered stdout\n", sizeof("buffered stdout\n") - 1, 0};
+    int64_t error = 0, write_zero = 0;
+    jet_stdio_stdout_write_raw(&line, false, &error, &write_zero);
+    if (error || write_zero) return 1;
+    return trap_callback(mode);
+}
 int main(int argc, char **argv, char **envp) {
     jet_rt_host_arguments(argc, (int64_t)(uintptr_t)argv, (int64_t)(uintptr_t)envp);
     if (argc == 2 && strcmp(argv[1], "host-fault") == 0)
         return (int)jet_rt_host_fault_fixture((int64_t)(uintptr_t)"A", false);
     if (argc == 2 && strcmp(argv[1], "unreachable") == 0)
         return (int)jet_rt_host_fault_fixture((int64_t)(uintptr_t)"A", true);
+    if (argc == 3 && strcmp(argv[1], "trap-buffered") == 0) {
+        int mode = argv[2][0] - '0';
+        return (int)jet_rt_trap_report_fixture(buffered_trap_callback, mode % 4, mode >= 4);
+    }
     if (argc == 3 && strcmp(argv[1], "trap-report") == 0) {
         int mode = argv[2][0] - '0';
         return (int)jet_rt_trap_report_fixture(trap_callback, mode % 4, mode >= 4);
