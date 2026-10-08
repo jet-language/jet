@@ -1,0 +1,43 @@
+// tests/gate_law.rs21-40: existing policy API claims, no second policy engine.
+// E3415/what key/site/org-source gate_refusal subclaims remain compiler-lib ledger.
+// PENDING-SAME-HEAD nested package-test admission.
+
+fn s5_gate_law_declaration(key: PolicyKey, value: PolicyValue, scope: PolicyScope, source: String) -> PolicyDeclaration {
+    PolicyDeclaration{key: key, value: value, scope: scope, span: Span{start: 0, end: 0}, target: None, source: source}
+}
+
+#Test("all fourteen gate kinds have one key and an authoritative floor") {
+    keys := [PolicyKey]{}
+    loop row in POLICY_RULES {
+        if policy_key_is_audited_gate(row.key) -> &keys.push(row.key)
+    }
+    assert_eq(keys.len(), 14)
+    loop key in keys {
+        kind :: gate_kind_parse(policy_key_name(key)) ?? panic("every audited key has a gate kind")
+        assert_eq(gate_kind_policy_key(kind), key)
+        declarations :: [PolicyDeclaration]{
+            s5_gate_law_declaration(key, PolicyValue.Forbid, PolicyScope.Organization, "org-policy.jet"),
+            s5_gate_law_declaration(key, PolicyValue.GateOnly, PolicyScope.Package, "package.jet")
+        }
+        refused :: if policy_resolve_with_gates(key, declarations, GateSet{allowed: [key]}) == {
+            .Err(_) -> true
+            .Ok(_) -> false
+        }
+        assert(refused)
+        if key != PolicyKey.Unsafe && key != PolicyKey.Impure && key != PolicyKey.Nondeterministic {
+            assert_eq(policy_default_gate_value(key), PolicyValue.GateOnly)
+            default_refused :: if policy_parse_value(key, ".Default") == {
+                .Err(_) -> true
+                .Ok(_) -> false
+            }
+            obligations_refused :: if policy_parse_value(key, ".Obligations") == {
+                .Err(_) -> true
+                .Ok(_) -> false
+            }
+            assert(default_refused)
+            assert(obligations_refused)
+            allowed :: policy_parse_value(key, ".GateOnly") ?? panic("GateOnly must parse")
+            assert_eq(allowed, PolicyValue.GateOnly)
+        }
+    }
+}

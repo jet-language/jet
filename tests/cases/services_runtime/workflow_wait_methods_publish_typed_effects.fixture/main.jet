@@ -1,0 +1,11 @@
+
+fn time_wait(workflow: ServiceWorkflow, duration: Duration) -[Time]> {
+    workflow.sleep(duration) ?? return
+}
+
+fn activity_wait(workflow: ServiceWorkflow) -[IO]> {
+    workflow.activity("charge", "charge-1") ?? return
+    workflow.all(["charge-1"]) ?? return
+}
+
+fn run() {}

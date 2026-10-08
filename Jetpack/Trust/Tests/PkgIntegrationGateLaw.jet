@@ -1,0 +1,23 @@
+// tests/gate_law.rs65-75: KNOWN-FAILING #4843, real pre-write refusal law.
+// Existing store writers lost their project-policy check and return only Bool.
+// E3415 + what trust_grant/package.jet remains compiler-lib ledger; no API invented.
+// PENDING-SAME-HEAD nested package-test admission.
+
+#Test("trust writers refuse before touching the store") {
+    root :: trust_test_gate_dir("s5-gate-law")
+    files.write(files.join(root, "package.jet"), "name: \"law\"\nversion: \"0.1.0\"\npolicy: {{ trust_grant: .Forbid }}\n") ?? panic("original package policy")
+    store :: files.join(root, "trust")
+    grant :: trust_parse_grant_selector("build:audited", "repo") ?? panic("original grant selector")
+    grant_added :: trust_add_grant(store, grant)
+    grant_store_absent :: !files.exists(store)
+    hash_added :: trust_grant_hash(store, "audited")
+    hash_store_absent :: !files.exists(store)
+    pattern_added :: trust_add_pattern(store, "/reviewed/*")
+    pattern_store_absent :: !files.exists(store)
+    assert(!grant_added, "policy refuses the grant")
+    assert(!hash_added, "policy refuses the hash")
+    assert(!pattern_added, "policy refuses the pattern")
+    assert(grant_store_absent)
+    assert(hash_store_absent)
+    assert(pattern_store_absent)
+}
