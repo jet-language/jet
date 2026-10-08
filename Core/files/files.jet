@@ -1073,19 +1073,36 @@ fn copy_file_impl(from: String, to: String) IOError! -[FS]> {
 }
 
 
-pub fn copy_dir(from: String, to: String) IOError! -[FS]> {
-    create_dir_all(to)
-    entries :: list_dir(from)
-    loop e in entries {
-        dest :: join_impl(to, e.name)
-        if e.is_dir {
-            copy_dir(e.path, dest)
-        } else {
-            info :: stat(e.path)
-            if info.is_file && !info.is_symlink -> copy_file_impl(e.path, dest)
+pub fn copy_dir(from: String | Path, to: String | Path) IOError! -[FS]> {
+    source :: path_text(from)
+    destination :: path_text(to)
+    files8_preflight("FS.Read", .Read, source)
+    files8_preflight("FS.Write", .Write, destination)
+    context :: core.files.__entries_context(source, destination, true)
+    _guard :: core.mem.scope.guard(() -> core.files.__entries_close(context))
+    entries_copy_tree(context, 0, source)
+}
+
+fn entries_copy_tree(context: Int, directory: Int, resource: String) IOError! -[FS]> {
+    created :: core.files.__entries_mkdir(context, directory)
+    if created.cause != None -> return Err(walk_error(.Write, created.kind, created.code, created.cause, resource))
+    opened :: core.files.__entries_read_dir(context, directory)
+    if opened.cause != None -> return Err(walk_error(.Read, opened.kind, opened.code, opened.cause, resource))
+    loop {
+        entry :: core.files.__entries_next(context, directory)
+        if entry.cause != None -> return Err(walk_error(.Read, entry.kind, entry.code, entry.cause, resource))
+        if entry.end -> break
+        kind :: core.files.__entries_file_type(context, entry.child)
+        if kind.cause != None -> return Err(walk_error(.Read, kind.kind, kind.code, kind.cause, resource))
+        if kind.directory {
+            entries_copy_tree(context, entry.child, resource)
+        } else if kind.file {
+            copied :: core.files.__entries_copy(context, entry.child)
+            if copied.cause != None -> return Err(walk_error(.Write, copied.kind, copied.code, copied.cause, resource))
         }
+        core.files.__entries_release(context, entry.child)
     }
-    return Ok()
+    Ok()
 }
 
 
@@ -1324,14 +1341,16 @@ fn relative_impl(path: String, start: String) -> String Never! {
 pub fn relative(path: String, start: String) -> String Never! { relative_impl(path, start) }
 
 
-fn walk_error(kind: Int, code: Int?, cause: String?, resource: String) -> IOError Never! {
-    context :: IOContext{operation: .Read, resource: Val(resource), os_code: code, cause: cause}
+fn walk_error(operation: IOOperation, kind: Int, code: Int?, cause: String?, resource: String) -> IOError Never! {
+    context :: IOContext{operation: operation, resource: Val(resource), os_code: code, cause: cause}
     if kind == {
         1 -> IOError.InvalidInput(context)
         2 -> IOError.NotFound(context)
         3 -> IOError.PermissionDenied(context)
         4 -> IOError.TimedOut(context)
         5 -> IOError.Closed(context)
+        6 -> IOError.AlreadyExists(context)
+        7 -> IOError.Unsupported(context)
         else -> IOError.Other(context)
     }
 }
@@ -1340,17 +1359,17 @@ fn walk_validate(context: Int, directory: Int, root: String) IOError! -[FS]> {
     source :: core.files.__walk_validation_path(context, directory)
     loop ancestor in core.files.__walk_ancestors(context, source) {
         metadata :: core.files.__walk_metadata(context, ancestor)
-        if metadata.cause != None -> return Err(walk_error(metadata.kind, metadata.code, metadata.cause, root))
+        if metadata.cause != None -> return Err(walk_error(.Read, metadata.kind, metadata.code, metadata.cause, root))
         if metadata.symlink {
             path :: core.files.__walk_shown(context, ancestor)
-            return Err(walk_error(3, None, Val("filesystem walk path contains symlink: {path}"), root))
+            return Err(walk_error(.Read, 3, None, Val("filesystem walk path contains symlink: {path}"), root))
         }
     }
     metadata :: core.files.__walk_metadata(context, source)
-    if metadata.cause != None -> return Err(walk_error(metadata.kind, metadata.code, metadata.cause, root))
+    if metadata.cause != None -> return Err(walk_error(.Read, metadata.kind, metadata.code, metadata.cause, root))
     if !metadata.directory {
         path :: core.files.__walk_shown(context, source)
-        return Err(walk_error(0, None, Val("filesystem walk root is not a directory: {path}"), root))
+        return Err(walk_error(.Read, 0, None, Val("filesystem walk root is not a directory: {path}"), root))
     }
     Ok(())
 }
@@ -1359,15 +1378,15 @@ fn walk_batch(context: Int, directory: Int, depth: Int, root: String, ignore: St
     walk_validate(context, directory, root)
     if ignore != None {
         rules :: core.files.__walk_rules(context, directory, ignore ?? "")
-        if rules.cause != None -> return Err(walk_error(rules.kind, rules.code, rules.cause, core.files.__walk_shown(context, directory)))
+        if rules.cause != None -> return Err(walk_error(.Read, rules.kind, rules.code, rules.cause, core.files.__walk_shown(context, directory)))
     }
     opened :: core.files.__walk_read_dir(context, directory)
-    if opened.cause != None -> return Err(walk_error(opened.kind, opened.code, opened.cause, root))
+    if opened.cause != None -> return Err(walk_error(.Read, opened.kind, opened.code, opened.cause, root))
     entries := [WalkEntry]{}
     children := [Int]{}
     loop {
         entry :: core.files.__walk_next(context, directory)
-        if entry.cause != None -> return Err(walk_error(entry.kind, entry.code, entry.cause, root))
+        if entry.cause != None -> return Err(walk_error(.Read, entry.kind, entry.code, entry.cause, root))
         if entry.end -> break
         skipped := false
         if ignore != None {
@@ -1435,63 +1454,81 @@ pub fn walk_files(root: String | Path, ignore: String?) -[FS]> [WalkEntry] IOErr
 
 
 
-fn has_meta(seg: String) -> Bool Never! {
-    loop b in seg.bytes() {
-        n :: b
-        if n == 42 || n == 63 || n == 91 -> return true
+// Match the native byte grammar: '*' crosses separators, '?' is one byte,
+// brackets have no special meaning. Backtracking retains byte indexes only.
+fn entries_glob_match(pattern: [U8], path: [U8]) -> Bool Never! {
+    p := 0
+    t := 0
+    star := -1
+    restart := 0
+    loop t < path.len() {
+        if p < pattern.len() && (pattern[p] == (U8{63}) || (pattern[p] != (U8{42}) && pattern[p] == path[t])) {
+            p += 1
+            t += 1
+        } else if p < pattern.len() && pattern[p] == (U8{42}) {
+            star = p
+            p += 1
+            restart = t
+        } else if star >= 0 {
+            restart += 1
+            t = restart
+            p = star + 1
+        } else { return false }
     }
-    false
+    loop p < pattern.len() && pattern[p] == (U8{42}) -> p += 1
+    p == pattern.len()
 }
 
-
-fn glob_root(pattern: String) -> String Never! {
-    parts :: split_slash_impl(pattern)
-    static := [String]{}
-    i := 0
-    loop i < parts.len() {
-        if has_meta(parts[i]) -> break
-        &static.push(parts[i])
-        i = i + 1
+fn entries_glob_root(pattern: String, separator: U8) -> String Never! {
+    bytes :: pattern.bytes()
+    last := -1
+    loop index in 0..<bytes.len() {
+        if bytes[index] == (U8{42}) || bytes[index] == (U8{63}) -> break
+        if bytes[index] == separator -> last = index
     }
-    if !is_abs_impl(pattern) {
-        root :: join_parts(static)
-        if root.bytes().len() == 0 -> return "."
-        return root
-    }
-    drive := ""
-    raw :: pattern.bytes()
-    if raw.len() >= 2 && is_letter(raw[0]) && raw[1] == (U8{58}) -> drive = slice(raw, 0, 2)
-    body := [String]{}
-    j := 0
-    if drive.bytes().len() > 0 && static.len() > 0 && static[0] == drive -> j = 1
-    loop j < static.len() {
-        &body.push(static[j])
-        j = j + 1
-    }
-    compose(anchor_for_parts(drive, true), body)
+    if last <= 0 -> "." else -> slice(bytes, 0, last)
 }
 
+fn entries_glob_tree(context: Int, directory: Int, resource: String, output: &[String]) IOError! -[FS]> {
+    opened :: core.files.__entries_read_dir(context, directory)
+    if opened.cause != None -> return Err(walk_error(.Read, opened.kind, opened.code, opened.cause, resource))
+    children := [Int]{}
+    // Native collect fails on iteration errors before inspecting any file_type.
+    loop {
+        entry :: core.files.__entries_next(context, directory)
+        if entry.cause != None -> return Err(walk_error(.Read, entry.kind, entry.code, entry.cause, resource))
+        if entry.end -> break
+        &children.push(entry.child)
+    }
+    &children.sort_by((left: Int, right: Int) -> {
+        if core.files.__entries_before(context, left, right) -> return Ordering.Less
+        if core.files.__entries_before(context, right, left) -> return Ordering.Greater
+        Ordering.Equal
+    })
+    loop child in children {
+        &output.push(core.files.__entries_shown(context, child))
+        kind :: core.files.__entries_file_type(context, child)
+        if kind.cause != None -> return Err(walk_error(.Read, kind.kind, kind.code, kind.cause, resource))
+        if kind.directory -> entries_glob_tree(context, child, resource, &output)
+        core.files.__entries_release(context, child)
+    }
+    Ok()
+}
 
-pub fn glob(pattern: String) -[FS]> [String] IOError! {
-    if !has_meta(pattern) {
-        if exists_impl(pattern) -> return Ok([String]{~pattern})
-        return Ok([String]{})
-    }
-    root :: glob_root(pattern)
-    entries :: core.files.walk(~root)
-    out := [String]{}
-    loop e in entries {
-        candidate := e.path
-        relative_candidate := ~candidate
-        cbytes :: candidate.bytes()
-        if cbytes.len() >= 2 && cbytes[0] == (U8{46}) && is_separator(cbytes[1]) {
-            relative_candidate = slice(cbytes, 2, cbytes.len())
-        }
-        if glob_match_impl(pattern, candidate) || glob_match_impl(pattern, relative_candidate) {
-            &out.push(candidate)
-        }
-    }
-    Ok(out)
+pub fn glob(pattern: String | Path) -[FS]> [String] IOError! {
+    resource :: path_text(pattern)
+    files8_preflight("FS.Read", .Read, resource)
+    separator :: if core.files.__os_family() == "windows" -> U8{92} else -> U8{47}
+    root :: entries_glob_root(resource, separator)
+    context :: core.files.__entries_context(root, "", false)
+    _guard :: core.mem.scope.guard(() -> core.files.__entries_close(context))
+    paths := [String]{}
+    entries_glob_tree(context, 0, resource, &paths)
+    bytes :: resource.bytes()
+    matches := [String]{}
+    loop path in paths { if entries_glob_match(bytes, path.bytes()) -> &matches.push(path) }
+    &matches.sort()
+    Ok(matches)
 }
 
 
@@ -2193,3 +2230,53 @@ fn trim_file_line(bytes: &[U8]) Never! {
     }
 }
 
+
+#Test("glob keeps the native byte grammar and prefix base") {
+    assert(entries_glob_match("*.txt".bytes(), "./sub/deep.txt".bytes()))
+    assert(entries_glob_match("./?".bytes(), "./q".bytes()))
+    assert(!entries_glob_match("./?".bytes(), "./é".bytes()))
+    assert(entries_glob_match("./[x]".bytes(), "./[x]".bytes()))
+    assert(!entries_glob_match("./[x]".bytes(), "./x".bytes()))
+    assert(entries_glob_match("*a".bytes(), "*ba".bytes()))
+    assert_eq(entries_glob_root("literal", U8{47}), ".")
+    assert_eq(entries_glob_root("/literal", U8{47}), ".")
+    assert_eq(entries_glob_root("dir/*.txt", U8{47}), "dir")
+    assert_eq(entries_glob_root("dir\\*.txt", U8{92}), "dir")
+}
+
+#Test("copy directory preserves nested regular files and skips symlink entries") {
+    root :: mktemp("entries-copy-kat")
+    source :: join(root, "source")
+    destination :: join(root, "destination")
+    create_dir_all(join(source, "nested")) ?? panic("nested source")
+    write(join(source, "top.txt"), "top") ?? panic("top")
+    write(join(source, "nested/deep.txt"), "deep") ?? panic("deep")
+    if core.files.__os_family() == "unix" -> symlink("nested", join(source, "link")) ?? panic("symlink")
+    copy_dir(Path.from(source), Path.from(destination)) ?? panic("copy")
+    assert_eq(read(join(destination, "top.txt")) ?? panic("copied top"), "top")
+    assert_eq(read(join(destination, "nested/deep.txt")) ?? panic("copied deep"), "deep")
+    assert(!exists(join(destination, "link")))
+    remove_all(root) ?? panic("cleanup")
+}
+
+#Test("glob DFS uses native shown paths, literal brackets and a byte wildcard") {
+    root :: mktemp("entries-glob-kat")
+    create_dir_all(join(root, "sub")) ?? panic("sub")
+    write(join(root, "top.txt"), "top") ?? panic("top")
+    write(join(root, "sub/deep.txt"), "deep") ?? panic("deep")
+    write(join(root, "q"), "question") ?? panic("q")
+    write(join(root, "[x]"), "literal") ?? panic("literal")
+    expected := [String]{join(root, "sub/deep.txt"), join(root, "top.txt")}
+    &expected.sort()
+    assert_eq(glob(Path.from(join(root, "*.txt"))) ?? panic("star"), expected)
+    assert_eq(glob(join(root, "?")) ?? panic("question"), [String]{join(root, "q")})
+    assert_eq(glob(join(root, "[x]")) ?? panic("literal"), [String]{join(root, "[x]")})
+    remove_all(root) ?? panic("cleanup")
+}
+
+#Test("entries error projection retains source operation and top-level resource") {
+    context :: IOContext{operation: .Write, resource: Val("source"), os_code: Val(17), cause: Val("existing destination")}
+    assert_eq(walk_error(.Write, 6, Val(17), Val("existing destination"), "source"), IOError.AlreadyExists(context))
+    assert_eq(walk_error(.Read, 7, None, Val("unsupported"), "pattern"),
+        IOError.Unsupported(IOContext{operation: .Read, resource: Val("pattern"), os_code: None, cause: Val("unsupported")}))
+}

@@ -833,13 +833,28 @@ Whole-file and metadata functions:
 | `canonicalize(path)` / `absolute(path)` | `String !IOError` | Resolve an existing path with symlinks, or make an absolute lexical path without requiring existence. |
 | `walk(root, ignore)` / `walk_parallel(root, ignore)` | `[WalkEntry] !IOError` | Traverse recursively with an optional ignore-file name. The parallel spelling keeps the same ordering and no-follow policy. |
 | `walk_files(root, ignore)` | `[WalkEntry] !IOError` | Traverse regular files only. |
-| `glob(pattern)` | `[String] !IOError` | Return paths matching the bounded glob pattern. |
+| `glob(pattern)` | `[String] !IOError` | Return sorted shown paths matching the native byte glob grammar. |
 | `temp_dir(prefix)` / `temp_file(prefix)` | `TempDir` / `TempFile !IOError` | Create temporary resources whose handles retain `.path`. |
 | `lock(path)` | `FileLock !IOError` | Create an advisory lock whose handle owns its cleanup. |
 
 `exists` and `is_dir` follow a final symbolic link; a broken link returns
 false. Their false-on-host-error policy is Jet-owned; the host boundary
 supplies only the following-metadata fact or the host error.
+
+`glob` and `copy_dir` own their DFS policy in `Core/files/files.jet`. Native
+entries contexts retain `DirEntry` and source/destination paths, not reconstructed
+UTF-8 names. Directory copy processes unsorted `ReadDir` order, copies only
+regular files, and releases each entry after use. All host failures report the
+top-level source path, even for destination writes. Read then write fault
+preflights occur once, before traversal.
+
+Glob first collects each directory's children, orders native basenames, then
+visits depth-first without following directory symlinks. `*` matches any bytes
+(including separators), `?` consumes one byte, and brackets are literal.
+The starting directory is the prefix before the first `*`/`?`, cut at its last
+host separator; absent or empty directory prefixes mean `.`. Matching uses the
+native shown path unchanged, including a leading `./`, and there is no special
+literal-path existence shortcut. All glob errors report the original pattern.
 
 `absolute` keeps host lexical spelling, including `.` and `..`, repeated
 separators, and nonexistent paths. It leaves a host-absolute input unchanged;

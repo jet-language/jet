@@ -1475,6 +1475,25 @@ fn core_fixed_sig_impl(
             ]);
             Some((params, Some(Type::Tuple(fields))))
         }
+        ("core.files", "__entries_context") => Some((vec![(read, Type::String), (read, Type::String), (read, Type::Bool)], Some(Type::Int))),
+        ("core.files", "__entries_close") => Some((vec![(read, Type::Int)], Some(unit_ty()))),
+        ("core.files", "__entries_release") => Some((vec![(read, Type::Int), (read, Type::Int)], Some(unit_ty()))),
+        ("core.files", "__entries_shown") => Some((vec![(read, Type::Int), (read, Type::Int)], Some(Type::String))),
+        ("core.files", "__entries_before") => Some((vec![(read, Type::Int), (read, Type::Int), (read, Type::Int)], Some(Type::Bool))),
+        ("core.files", "__entries_read_dir" | "__entries_mkdir" | "__entries_copy" | "__entries_next" | "__entries_file_type") => {
+            let mut fields = Vec::new();
+            if name == "__entries_next" {
+                fields.extend([("end".into(), Box::new(Type::Bool)), ("child".into(), Box::new(Type::Int))]);
+            } else if name == "__entries_file_type" {
+                fields.extend([("directory".into(), Box::new(Type::Bool)), ("file".into(), Box::new(Type::Bool))]);
+            }
+            fields.extend([
+                ("kind".into(), Box::new(Type::Int)),
+                ("code".into(), Box::new(Type::Option(Box::new(Type::Int)))),
+                ("cause".into(), Box::new(Type::Option(Box::new(Type::String)))),
+            ]);
+            Some((vec![(read, Type::Int), (read, Type::Int)], Some(Type::Tuple(fields))))
+        }
         ("core.mem", "__list_capacity") => Some((
             vec![(read, Type::List(Box::new(Type::Named("__element".to_string()))))],
             Some(Type::Int),
@@ -1660,7 +1679,7 @@ fn core_fixed_sig_impl(
             Some((vec![(read, Type::String)], Some(result_ty(unit_ty(), io_error_ty())))),
         ("core.files", "__remove_all_raw") => Some((vec![(read, Type::String), (read, Type::Bool)],
             Some(result_ty(unit_ty(), io_error_ty())))),
-        ("core.files", "__copy_raw" | "__copy_dir_raw" | "__hard_link_raw") =>
+        ("core.files", "__copy_raw" | "__hard_link_raw") =>
             Some((vec![(read, Type::String), (read, Type::String)], Some(result_ty(unit_ty(), io_error_ty())))),
         ("core.files", "__list_dir_raw") => Some((vec![(read, Type::String)],
             Some(result_ty(Type::List(Box::new(Type::Named("DirEntry".to_string()))), io_error_ty())))),
@@ -1684,8 +1703,6 @@ fn core_fixed_sig_impl(
             Some(result_ty(Type::Named("FileLock".to_string()), io_error_ty())))),
         ("core.files", "__canonicalize_raw") => Some((vec![(read, Type::String)],
             Some(result_ty(Type::String, io_error_ty())))),
-        ("core.files", "__glob_raw") => Some((vec![(read, Type::String)],
-            Some(result_ty(Type::List(Box::new(Type::String)), io_error_ty())))),
         ("core.files", "exists" | "is_dir") => Some((vec![(read, path)], Some(bool_))),
         (
             "core.files",

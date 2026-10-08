@@ -1,6 +1,7 @@
 // core-conformance: core.files.copy_dir
 use core.files as files
 use core.testing as testing
+use core.sys as sys
 
 fn run() {
     root :: testing.temp_dir("files-copy-dir")
@@ -10,8 +11,14 @@ fn run() {
     destination_file :: destination.join("fixture.txt")
     files.create_dir(source) ?? panic("source")
     files.write(source_file, "fixture") ?? panic("seed")
+    nested :: source.join("nested")
+    files.create_dir(nested) ?? panic("nested")
+    files.write(nested.join("deep.txt"), "deep") ?? panic("deep")
+    if sys.name() == "linux" -> files.symlink("nested", source.join("link")) ?? panic("symlink")
     files.copy_dir(source, destination) ?? panic("copy_dir")
     print(true)
     assert((files.exists(destination_file) == true))
+    assert_eq(files.read(destination.join("nested").join("deep.txt")) ?? panic("copied nested"), "deep")
+    assert(!files.exists(destination.join("link")))
     files.remove_all(root) ?? panic("cleanup")
 }

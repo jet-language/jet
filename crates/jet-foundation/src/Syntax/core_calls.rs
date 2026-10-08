@@ -1589,7 +1589,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 8b0e7a2948eece29a432da6457f46825f05df65c7c2e833601dc94dc8344afb9
+// Source SHA-256: a16bdd75bec112466b52c4f18ae91680607ddc26b684655c3f8e92ffe3491bcd
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -1698,7 +1698,6 @@ pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.files", "__remove_dir_raw"),
     ("core.files", "__remove_all_raw"),
     ("core.files", "__copy_raw"),
-    ("core.files", "__copy_dir_raw"),
     ("core.files", "__list_dir_raw"),
     ("core.files", "__hard_link_raw"),
     ("core.files", "__fsync_raw"),
@@ -1712,7 +1711,6 @@ pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.files", "__temp_file_raw"),
     ("core.files", "__lock_raw"),
     ("core.files", "__canonicalize_raw"),
-    ("core.files", "__glob_raw"),
     ("core.files", "__temp_clock_raw"),
     ("core.files", "__process_id_raw"),
     ("core.files", "__temp_directory_raw"),
@@ -2051,7 +2049,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.files", "create_dir_all", "jet_std_fs_create_dir_all", true, &[true], ),
     CoreCallRecord::new("core.files", "__create_dir_all_raw", "jet_std_fs_create_dir_all_raw", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::source_owned("core.files", "copy", &[true, true]),
-    CoreCallRecord::new( "core.files", "copy_dir", "jet_std_fs_copy_dir", true, &[true, true], ),
+    CoreCallRecord::source_owned("core.files", "copy_dir", &[true, true]),
     CoreCallRecord::source_owned("core.files", "symlink", &[true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.files", "read_link", "jet_std_fs_read_link", true, &[true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::source_owned("core.files", "hard_link", &[true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
@@ -2081,7 +2079,17 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.files", "__walk_inherit", "jet_walk8_inherit", true, &[false, false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "__walk_read_dir", "jet_walk8_read_dir", true, &[false, false]).with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "__walk_next", "jet_walk8_next", true, &[false, false]).with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.files", "glob", "jet_std_fs_glob", true, &[true]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.files", "__entries_context", "jet_entries8_open", true, &[true, true, false]).with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.files", "__entries_close", "jet_entries8_close", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.files", "__entries_release", "jet_entries8_release", true, &[false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.files", "__entries_read_dir", "jet_entries8_read_dir", true, &[false, false]).with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.files", "__entries_next", "jet_entries8_next", true, &[false, false]).with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.files", "__entries_file_type", "jet_entries8_file_type", true, &[false, false]).with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.files", "__entries_mkdir", "jet_entries8_mkdir", true, &[false, false]).with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.files", "__entries_copy", "jet_entries8_copy", true, &[false, false]).with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.files", "__entries_before", "jet_entries8_before", true, &[false, false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.files", "__entries_shown", "jet_entries8_shown", true, &[false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::source_owned("core.files", "glob", &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.files", "read_at", "jet_std_fs_read_at", true, &[true, false, false], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.files", "write_at", "jet_std_fs_write_at", true, &[true, false, true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::source_owned("core.files", "fsync", &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
@@ -2098,7 +2106,6 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.files", "__remove_dir_raw", "jet_std_fs_remove_dir_raw", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "__remove_all_raw", "jet_std_fs_remove_all_raw", true, &[true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "__copy_raw", "jet_std_fs_copy_raw", true, &[true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.files", "__copy_dir_raw", "jet_std_fs_copy_dir_raw", true, &[true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "__list_dir_raw", "jet_std_fs_list_dir_raw", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "__hard_link_raw", "jet_std_fs_hard_link_raw", true, &[true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "__fsync_raw", "jet_std_fs_fsync_raw", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
@@ -2112,7 +2119,6 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.files", "__temp_file_raw", "jet_std_fs_temp_file_raw", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "__lock_raw", "jet_std_fs_lock_raw", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "__canonicalize_raw", "jet_std_fs_canonicalize_raw", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.files", "__glob_raw", "jet_std_fs_glob_raw", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "__temp_clock_raw", "jet_std::jet_fs_temp_path_sample_raw", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "__process_id_raw", "jet_std_os_pid", true, &[]).with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "__temp_directory_raw", "jet_std::jet_fs_temp_directory_raw", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
