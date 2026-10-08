@@ -249,7 +249,7 @@ fn native_pack_test_authorize(store: ArtifactStore, subject: ObjectHandle, evide
     store :: store_artifact_test_store(root, 1024 * 1024)
     fixture :: native_pack_test_fixture(store, "small codec fixture bytes")
     tree :: native_pack_input_tree(native_pack_blob(store, fixture.subject.lifecycle) ?? panic("lifecycle bytes")) ?? panic("lifecycle tree")
-    loop spelling in ([String]{".init_array.0", ".init_array.00001", ".init_array.00000.extra", ".init_array.000000", ".init_array. 00000"}) {
+    loop spelling in ([String]{".init_array.0", ".init_array.00001", ".init_array.00000.extra", ".init_array.000000", ".init_array. 00000", ".init_array.000é0", ".init_array.0000٠"}) {
         fields := native_pack_fields(tree, [String]{"schema", "pack", "jet_object", "entries", "sections", "relocations"}) ?? panic("lifecycle fields")
         entries := native_pack_array_field(fields, "entries") ?? panic("entries")
         entry := native_pack_fields(entries[0], [String]{"symbol", "phase", "priority", "provider", "section"}) ?? panic("entry")
@@ -264,4 +264,23 @@ fn native_pack_test_authorize(store: ArtifactStore, subject: ObjectHandle, evide
         }
     }
     store_artifact_test_cleanup(root)
+}
+
+#Test("native runtime lifecycle predicate covers every canonical decimal width") {
+    assert(native_pack_lifecycle_section_matches(".init_array.00000", "init", "0"))
+    assert(native_pack_lifecycle_section_matches(".init_array.00001", "init", "1"))
+    assert(native_pack_lifecycle_section_matches(".init_array.00010", "init", "10"))
+    assert(native_pack_lifecycle_section_matches(".init_array.00100", "init", "100"))
+    assert(native_pack_lifecycle_section_matches(".init_array.01000", "init", "1000"))
+    assert(native_pack_lifecycle_section_matches(".init_array.65535", "init", "65535"))
+    assert(native_pack_lifecycle_section_matches(".fini_array.00000", "fini", "0"))
+    assert(native_pack_lifecycle_section_matches(".fini_array.00001", "fini", "1"))
+    assert(native_pack_lifecycle_section_matches(".fini_array.00010", "fini", "10"))
+    assert(native_pack_lifecycle_section_matches(".fini_array.00100", "fini", "100"))
+    assert(native_pack_lifecycle_section_matches(".fini_array.01000", "fini", "1000"))
+    assert(native_pack_lifecycle_section_matches(".fini_array.65535", "fini", "65535"))
+    assert(!native_pack_lifecycle_section_matches(".init_array.000é0", "init", "0"))
+    assert(!native_pack_lifecycle_section_matches(".init_array.0000٠", "init", "0"))
+    assert(!native_pack_lifecycle_section_matches(".init_array.00000.extra", "init", "0"))
+    assert(!native_pack_lifecycle_section_matches(".init_array.000000", "init", "0"))
 }

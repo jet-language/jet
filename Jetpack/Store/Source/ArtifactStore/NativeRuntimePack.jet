@@ -694,11 +694,7 @@ fn native_pack_check_lifecycle(store: ArtifactStore, subject: NativeRuntimePackS
         if (phase != "init" && phase != "fini") || native_pack_decimal(priority) > 65535 {
             return Err(NativeRuntimePackError.Invalid("invalid lifecycle entry phase or priority"))
         }
-        expected_section := ".{phase}_array.".bytes()
-        digits :: priority.bytes()
-        loop _ in digits.len()..<5 -> &expected_section.push(U8{48})
-        loop byte in digits -> &expected_section.push(byte)
-        if native_pack_text_field(values, "section").bytes() != expected_section {
+        if !native_pack_lifecycle_section_matches(native_pack_text_field(values, "section"), phase, priority) {
             return Err(NativeRuntimePackError.Invalid("lifecycle section is not the exact admitted priority spelling"))
         }
         provider :: native_pack_handle_field(values, "provider")
@@ -818,4 +814,32 @@ fn native_pack_check_terminal(store: ArtifactStore, subject: NativeRuntimePackSu
     if end < start -> return Err(NativeRuntimePackError.Invalid("proofq terminal time precedes its actual start"))
     kind :: values.get("kind") ?? return Err(NativeRuntimePackError.Invalid("proofq metadata has no job kind"))
     if kind != "build" && kind != "test" && kind != "measure" -> return Err(NativeRuntimePackError.Invalid("unknown proofq job kind"))
+}
+
+// Fixed ASCII prefix + zero padding + canonical ASCII digits cover all 17
+// characters/bytes. No expected buffer or Unicode indexing is needed.
+fn native_pack_lifecycle_section_matches(section: String, phase: String, priority: String) -> Bool {
+    if section.len() != 17 || !section.ends_with(priority) -> return false
+    width :: priority.len()
+    if phase == "init" {
+        return if width == {
+            1 -> section.starts_with(".init_array.0000")
+            2 -> section.starts_with(".init_array.000")
+            3 -> section.starts_with(".init_array.00")
+            4 -> section.starts_with(".init_array.0")
+            5 -> section.starts_with(".init_array.")
+            else -> false
+        }
+    }
+    if phase == "fini" {
+        return if width == {
+            1 -> section.starts_with(".fini_array.0000")
+            2 -> section.starts_with(".fini_array.000")
+            3 -> section.starts_with(".fini_array.00")
+            4 -> section.starts_with(".fini_array.0")
+            5 -> section.starts_with(".fini_array.")
+            else -> false
+        }
+    }
+    false
 }
