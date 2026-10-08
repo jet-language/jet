@@ -82,6 +82,23 @@ such as [`Core.rs`](../../crates/jet-codegen/src/Prelude/Core.rs),
 [`CoreLib/`](../../crates/jet-codegen/src/Prelude/CoreLib/) provide registered
 leaves and adapters; they do not become an independent public API registry.
 
+### Borrowed UI-host callback scopes
+
+The seed `HostServices.rs` adapter exposes borrowed hosts only through the
+lexical `jet_ui_with_host` callback. Its lifetime-bound restoration guard and
+unsafe installer are private: safe callers cannot retain, forget, or reorder a
+guard while leaving a borrowed host in thread-local storage. The stored thin
+pointer addresses the wrapper's live stack-held host reference; no trait-object
+lifetime is transmuted. Unwinding restores the predecessor before that reference
+or the host borrow ends.
+
+Current-host access holds its mutable thread-local borrow throughout the host
+callback. Re-entry is refused with a diagnostic panic before a second mutable
+host reference can be created; nested host installation during that callback
+is likewise refused. Ordinary nested lexical host scopes remain valid.
+`crates/jet-codegen/tests/ui_host_scope.rs` covers the rejected dangling guard
+and recursive-callback rejection with subsequent access and unwind recovery.
+
 ## Jet semantics and native leaves
 
 Jet owns the parts that give an operation its meaning:
