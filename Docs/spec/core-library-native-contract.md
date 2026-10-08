@@ -378,6 +378,15 @@ not JSON quoting or the Jet source-literal NUL escape. The object-client
 [`IOWitness.c`](../../Compiler/JetRuntime/Tests/IOWitness.c) exercises the
 ownership, rendering, equality, and fatal projection/ordinal contracts.
 
+TLS root-certificate and trust data use native carriers independently of the
+TLS transport engine. `TLSCarriers.jet` transfers consumed list/root headers
+without copying their buffers; cloning creates independent byte storage using
+the canonical host U8 stride. The root PEM field is a borrowed list header,
+whereas a trust-variant projection returns an owned root clone. System trust
+has no active root buffer. These ownership operations do not perform certificate
+validation or a TLS handshake. `TLSRootsWitness.c` pins their ownership and
+wrong-variant contracts against the composed Jet object.
+
 ## Dependency order
 
 Core work follows the dependency graph. These categories describe dependency
