@@ -1773,6 +1773,9 @@ stops use the registered E30xx report family and exit 70. Scheduler, stream, and
 FFI producers enter the same report and cleanup boundary. Explicit process
 termination uses that cleanup boundary and preserves its requested exit code.
 Exit 101 is reserved for Jet defects.
+The ordinary process root also runs lexical `Close` and deferred cleanup before
+report delivery. A non-unwinding native call boundary transports a stop to its
+caller for cleanup; it must not turn that stop into a successful return value.
 
 **D-IGNORERET1 / D-IGNORERET2** *(as amended by D-MARK-DISCARD1=A,
 2026-07-11, card #498)*: discarding a fallible/`#MustUse` result requires
