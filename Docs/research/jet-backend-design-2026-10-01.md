@@ -512,17 +512,33 @@ seed kernels, including nested records and Option/Result/List payloads.
 resource E4 pointer, OS-code presence/value, and cause E4 pointer; it matches
 bytes 8–48 of `JetCIOError`. Its remaining seed-kernel boundaries use
 `context_handle`/`context_view`/`context_take` rather than Rust record addresses.
-Once the task layer owns its canonical drop, `JetTaskFailure` uses a 16-byte,
-eight-aligned `JetCTaskFailure` (canonical enum tag, nullable owned E4 reason)
-and `failure_handle`/`failure_view`/`failure_take`; earlier epochs keep their
-existing task representation. Every bridged carrier requires Jet-owned
-canonical clone/drop before route generation.
+Once the L8 task layer owns canonical clone/drop, `JetTaskFailure` uses a
+16-byte, eight-aligned `JetCTaskFailure` (canonical enum tag, nullable owned
+E4 reason) and `failure_handle`/`failure_view`/`failure_take`. Until that
+coordinated cutover the task record retains its seed representation.
+Every bridged carrier requires Jet-owned canonical clone/drop before
+route generation. Hand context/error record exports are seed-only under
+`cfg(not(jet_native_pack))` and use these same C headers. Context constructors
+transfer child owners and free only the 40-byte header; projections deep-clone
+E4 text directly, without an intermediate Rust String. Native packs contain
+only the Jet definitions. These seed/verification bodies die at cutover.
 Jet owns clone/drop and the E4 text children. Generated lifecycle, record,
 and field exports use the same ownership filter and ABI checks as routes.
 Mutable Rust-enum borrows and address-lending error fields/sequences are
 refused with their route or record name; a Rust enum address is never treated
 as the C header. Lifecycle source markers retain their init/fini priority in
 the shared export list.
+The unified generator runs host-error and host-carrier generators before
+export and route generation, so their outputs participate in `--check`.
+CString helpers called directly by `Lower/CForeign.jet` have a checked
+lowering-only ABI table in `runtime-route-abi.mjs`; they are not invented Rust
+routes. Packing borrows an E4 header and returns an owned NUL buffer; unpacking
+returns an owned E4 header; freeing takes pointer and size including NUL.
+For Jet-owned routes, generated `LowerRoute.native_lists` is true. Lists of
+records cross directly as native inline element buffers, with the checked
+record's native stride (for example SocketAddr56), not arrays of record
+handles. Seed routes retain the handle-buffer conversions. Both use the
+same data-pointer/length C call shape, and record schemas remain checked.
 A MIR-defined Core record (the general `Err`, `IOError`, `IOContext`; schemas in
 `Lower/Records.jet`) keeps its native layout and crosses a route as its runtime
 type's handle: a generated `record.out` helper builds it through

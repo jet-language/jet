@@ -47,7 +47,7 @@ import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { runtimeExportSignatures, validateRuntimeOwnership, validateRuntimeRoute } from "./runtime-route-abi.mjs";
+import { runtimeExportSignatures, validateLoweringRuntimeAbi, validateRuntimeOwnership, validateRuntimeRoute } from "./runtime-route-abi.mjs";
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const runtimePath = process.argv[2];
 const check = process.argv.includes("--check");
@@ -394,6 +394,7 @@ const jetRuntimeExports = new Set(readFileSync(`${repo}/Compiler/JetRuntime/expo
   .map((line) => line.split(/\s+/u)[0]));
 const jetRuntimeSignatures = runtimeExportSignatures(repo);
 validateRuntimeOwnership(jetRuntimeExports, jetRuntimeSignatures);
+validateLoweringRuntimeAbi(jetRuntimeSignatures);
 const fixedInts = new Set(["u8", "u16", "u32", "u64", "usize", "i8", "i16", "i32", "isize"]);
 
 // A handle type whose runtime declaration derives `Clone` also gets a clone
@@ -1106,7 +1107,6 @@ const recordDecl = (full) => {
 };
 const recordable = new Map(); // runtime name -> { full, kind, path, members }
 for (const [name, full] of handleRows) {
-  if (handExports.has(`jet_rt_record_tag_${name}`) || handExports.has(`jet_rt_record_new_${name}`)) continue;
   const decl = recordDecl(full);
   if (!decl) continue;
   const members = [];
@@ -1212,6 +1212,28 @@ for (const [name, members] of [...recordMembers].sort((a, b) => a[0].localeCompa
   const { full, kind } = recordable.get(name);
   const described = members.map((member) => (member.carrier ? `${member.name}=${member.carrier.kind}` : member.name)).join(",");
   recordSchemas.push(kind === "struct" ? { name, variants: "", fields: described } : { name, variants: described, fields: "" });
+  // Hand-written carrier helpers still need the real field schema. Their
+  // ownership changes where the definition lives, not the record's shape.
+  if (handExports.has(`jet_rt_record_tag_${name}`) || handExports.has(`jet_rt_record_new_${name}`)) {
+    const validate = (export_, ctys, ret) => {
+      if (!jetRuntimeExports.has(export_)) return;
+      validateRuntimeRoute({ symbol: export_, name: export_, params: ctys.map((cty) => ({ ctys: [cty] })), result: { ret, outs: [] } }, jetRuntimeSignatures.get(export_));
+    };
+    const pointer = `*mut ${handleType(full)}`;
+    if (kind === "struct") {
+      validate(`jet_rt_record_new_${name}`, members.map((member) => member.carrier.cty), pointer);
+      for (const { name: field, carrier } of members) {
+        validate(`jet_rt_record_get_${name}_${field}`, [pointer, ...(carrier.outCty ? [`*mut ${carrier.outCty}`] : [])], carrier.ret);
+      }
+    } else {
+      validate(`jet_rt_record_tag_${name}`, [pointer], "i64");
+      for (const { name: variant, carrier } of members) {
+        validate(`jet_rt_record_new_${name}_${variant}`, carrier ? [carrier.cty] : [], pointer);
+        if (carrier) validate(`jet_rt_record_get_${name}_${variant}`, [pointer, ...(carrier.outCty ? [`*mut ${carrier.outCty}`] : [])], carrier.ret);
+      }
+    }
+    continue;
+  }
   const getter = (export_, param, carrier, place) => {
     const out = carrier.outCty ? `, some: *mut ${carrier.outCty}` : "";
     rs.push("");
@@ -1334,12 +1356,12 @@ jet.push("    Result(ok: LowerRouteCarrier, err: LowerRouteCarrier)");
 jet.push("    Tuple(items: [LowerRouteCarrier])");
 jet.push("}");
 jet.push("");
-jet.push("pub struct LowerRoute { pub symbol: String, pub export: String, pub params: [LowerRouteCarrier], pub result: LowerRouteResult }");
+jet.push("pub struct LowerRoute { pub symbol: String, pub export: String, pub native_lists: Bool, pub params: [LowerRouteCarrier], pub result: LowerRouteResult }");
 jet.push("");
 jet.push("LOWER_RUNTIME_ROUTES :: prep { [LowerRoute]{");
 for (const adapter of adapters) {
   const params = adapter.params.map((param) => `LowerRouteCarrier.${param.jet}`).join(", ");
-  jet.push(`    LowerRoute{symbol: "${adapter.symbol}", export: "${adapter.name}", params: [LowerRouteCarrier]{${params}}, result: LowerRouteResult.${adapter.result.jet}},`);
+  jet.push(`    LowerRoute{symbol: "${adapter.symbol}", export: "${adapter.name}", native_lists: ${jetRuntimeExports.has(adapter.name)}, params: [LowerRouteCarrier]{${params}}, result: LowerRouteResult.${adapter.result.jet}},`);
 }
 jet.push("} }");
 jet.push("");
