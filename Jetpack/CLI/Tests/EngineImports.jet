@@ -1,0 +1,170 @@
+// Exact production-import engine claims; PENDING-SEAM(package-tests), no runtime proof claimed.
+fn engine_import_todo(plan: ImportPlan, path: String, word: String) -> Bool {
+    loop todo in plan.todos {
+        if todo.source_path == path && todo.message.contains(word) -> return true
+    }
+    false
+}
+fn engine_import_loss(facts: ProviderFacts, word: String) -> Bool {
+    loop loss in facts.losses {
+        if loss.reason.contains(word) -> return true
+    }
+    false
+}
+fn engine_import_report_conflict(report: ProviderFactReport, word: String) -> Bool {
+    loop conflict in report.conflicts {
+        if conflict.contains(word) -> return true
+    }
+    false
+}
+
+// ported from jetpack_engine.rs:1908-2010
+#Test("real_cargo_project_import_preserves_lock_facts_and_migration_findings") {
+    project :: files.tmpdir("jet-engine-real-cargo-") ?? panic("project fixture")
+    files.write(files.join(project, "Cargo.toml"), "[package]\nname = \"real-app\"\nversion = \"0.4.0\"\nlicense = \"MIT\"\nbuild = \"build.rs\"\n\n[dependencies]\nserde = \"1\"\n\n[target.'cfg(unix)'.dependencies]\ncc = \"1\"\n\n[dev-dependencies]\ninsta = \"1\"\n") ?? panic("manifest fixture")
+    files.write(files.join(project, "Cargo.lock"), "version = 4\n\n[[package]]\nname = \"serde\"\nversion = \"1.0.200\"\nsource = \"registry+https://example.invalid\"\nchecksum = \"serde-checksum\"\n\n[[package]]\nname = \"cc\"\nversion = \"1.0.99\"\nsource = \"registry+https://example.invalid\"\nchecksum = \"cc-checksum\"\n\n[[package]]\nname = \"insta\"\nversion = \"1.39.0\"\nsource = \"registry+https://example.invalid\"\nchecksum = \"insta-checksum\"\n") ?? panic("lock fixture")
+    plan :: cli_import_cargo(files.read(files.join(project, "Cargo.toml")) ?? panic("manifest read"), files.read(files.join(project, "Cargo.lock")) ?? panic("lock read"))
+    assert(engine_import_todo(plan, "Cargo.toml", "build script"))
+    cases :: [(name: String, version: String, reference: String)]{(name: "serde", version: "1.0.200", reference: "serde@cargo#version=1.0.200"), (name: "cc", version: "1.0.99", reference: "cc@cargo#version=1.0.99&platform=cfg(unix)")}
+    loop entry in cases {
+        assert(plan.emit_pkg_jet().contains("{entry.name}: {entry.reference}"))
+        facts :: plan.provider_facts.get(entry.reference) ?? panic("real project provider facts")
+        facts.validate() ?? panic("lossless Cargo dependency facts")
+        assert(facts.native_document.contains("Cargo.toml:"))
+        assert(facts.native_document.contains("Cargo.lock:"))
+        assert_eq(facts.resolved_source, "cargo:{entry.name}@{entry.version}")
+        assert_eq(facts.provenance.get("package.version"), Val("Cargo.lock.version"))
+        assert(facts.explain_lines().contains("native Cargo.toml+Cargo.lock: retained"))
+        assert_eq(ProviderFacts.from_json(facts.to_json()) ?? panic("Cargo provider export"), facts)
+        if entry.name == "cc" -> assert_eq(facts.selector.platform, "cfg(unix)")
+    }
+    insta :: plan.provider_facts.get("insta@cargo#version=1.39.0") ?? panic("real project dev-dependency facts")
+    insta.validate() ?? panic("lossless Cargo dev-dependency facts")
+    assert(!plan.emit_pkg_jet().contains("insta:"))
+    assert(engine_import_todo(plan, "Cargo.toml", "dev"))
+    cc_found := false
+    insta_found := false
+    loop dep in plan.deps {
+        if dep.name == "cc" -> cc_found = true
+        if dep.name == "insta" && dep.dev -> insta_found = true
+    }
+    assert(cc_found)
+    assert(insta_found)
+    files.remove_all(project).drop("fixture cleanup")
+}
+
+// ported from jetpack_engine.rs:2012-2033
+#Test("cargo_import_keeps_unlocked_target_identity_without_duplicate_selector_facts") {
+    plan :: cli_import_cargo("[package]\nname = \"app\"\nversion = \"0.1.0\"\n[target.'cfg(unix)'.dependencies]\ncc = \"1\"\n", "")
+    assert_eq(plan.deps[0].provider_ref, "cc@cargo#platform=cfg(unix)")
+    facts :: plan.provider_facts.get("cc@cargo#platform=cfg(unix)") ?? panic("unlocked target facts")
+    loop loss in facts.losses -> assert(!loss.reason.contains("duplicate selector fact `platform=cfg(unix)`"))
+    assert(engine_import_todo(plan, "Cargo.lock", "unresolved"))
+    assert(!plan.emit_pkg_jet().contains("cc:"))
+}
+
+// ported from jetpack_engine.rs:2272-2351
+#Test("real_project_import_reports_lossy_npm_requests_without_generated_refs") {
+    project :: files.tmpdir("jet-engine-real-npm-") ?? panic("project fixture")
+    files.write(files.join(project, "package.json"), "{{\n  \"name\": \"web-app\",\n  \"version\": \"1.2.3\",\n  \"dependencies\": {{\"vite\": \"^5.4.0\"}},\n  \"devDependencies\": {{\"typescript\": \"~5.5.0\"}},\n  \"optionalDependencies\": {{\"fsevents\": \"2.3.3\"}},\n  \"peerDependencies\": {{\"react\": \"^18.0.0\"}},\n  \"bundledDependencies\": [\"local-tool\"],\n  \"scripts\": {{\"build\": \"vite build\"}}\n}}\n") ?? panic("native fixture")
+    document :: files.read(files.join(project, "package.json")) ?? panic("native read")
+    plan :: cli_import_npm(document)
+    generated :: plan.emit_pkg_jet()
+    names :: [String]{"vite", "typescript", "fsevents", "react"}
+    loop name in names -> assert(!generated.contains("{name}:"))
+    cases :: [(name: String, field: String)]{(name: "vite", field: "dependencies"), (name: "typescript", field: "devDependencies"), (name: "react", field: "peerDependencies")}
+    loop entry in cases {
+        facts :: plan.provider_facts.get("{entry.name}@npm") ?? panic("unresolved npm facts")
+        assert(facts.native_document.contains("web-app"))
+        matched := false
+        loop loss in facts.losses {
+            if loss.source == "package.json.{entry.field}" -> matched = true
+        }
+        assert(matched)
+        assert(engine_import_todo(plan, "package.json", "unresolved"))
+    }
+    optional :: plan.provider_facts.get("fsevents#version=2.3.3@npm") ?? panic("exact optional npm facts")
+    optional.validate() ?? panic("lossless optional npm facts")
+    assert_eq(optional.provenance.get("package.dependency_kind"), Val("package.json.optionalDependencies"))
+    assert(optional.explain_lines().contains("native package.json: retained"))
+    assert_eq(ProviderFacts.from_json(optional.to_json()) ?? panic("npm facts export"), optional)
+    assert(engine_import_todo(plan, "package.json", "optional"))
+    assert(engine_import_todo(plan, "package.json", "bundled"))
+    legacy_build := false
+    loop todo in plan.todos {
+        if todo.message.contains("legacy build action") -> legacy_build = true
+    }
+    assert(legacy_build)
+    files.remove_all(project).drop("fixture cleanup")
+}
+
+// ported from jetpack_engine.rs:2353-2371
+#Test("cargo_import_reports_ambiguous_lock_identity_without_generation") {
+    plan :: cli_import_cargo("[package]\nname = \"app\"\nversion = \"0.1.0\"\n[dependencies]\nserde = \"1\"\n", "[[package]]\nname = \"serde\"\nversion = \"1.0.200\"\nsource = \"registry+one\"\n[[package]]\nname = \"serde\"\nversion = \"1.0.201\"\nsource = \"registry+two\"\n")
+    assert(!plan.emit_pkg_jet().contains("serde:"))
+    facts :: plan.provider_facts.get("serde@cargo") ?? panic("ambiguous Cargo facts")
+    matched := false
+    loop conflict in facts.conflicts {
+        if conflict.key == "provider.selector.version" && conflict.source == "Cargo.lock" -> matched = true
+    }
+    assert(matched)
+    assert(engine_import_todo(plan, "Cargo.lock", "conflicts"))
+}
+
+// ported from jetpack_engine.rs:10059-10125
+#Test("provider_conformance_real_path_preserves_registry_npm_and_cargo_facts") {
+    npm_document :: "{{\"name\":\"web\",\"version\":\"1.0.0\",\"license\":\"MIT\",\"dependencies\":{{\"vite\":\"5.4.0\"}},\"scripts\":{{\"build\":\"vite build\"}},\"repository\":{{\"type\":\"git\",\"url\":\"https://example.invalid/web.git\"}}}}"
+    npm :: cli_import_npm(npm_document)
+    npm_facts :: npm.provider_facts.get("vite#version=5.4.0@npm") ?? panic("exact npm dependency")
+    npm_facts.validate() ?? panic("lossless npm facts")
+    assert(npm.emit_pkg_jet().contains("vite: vite#version=5.4.0@npm"))
+    assert_eq(npm_facts.native_document, npm_document)
+    assert(npm_facts.explain_lines().contains("native package.json: retained"))
+    assert_eq(ProviderFacts.from_json(npm_facts.to_json()) ?? panic("npm export"), npm_facts)
+    cargo_manifest :: "[package]\nname = \"app\"\nversion = \"0.1.0\"\nlicense = \"MIT\"\nrepository = \"https://example.invalid/app.git\"\n[dependencies]\nserde = \"1\"\n[dev-dependencies]\ninsta = \"1\"\n"
+    cargo_lock :: "[[package]]\nname = \"serde\"\nversion = \"1.0.200\"\nsource = \"registry+https://example.invalid\"\nchecksum = \"serde-checksum\"\n"
+    cargo :: cli_import_cargo(cargo_manifest, cargo_lock)
+    cargo_facts :: cargo.provider_facts.get("serde#version=1.0.200@cargo") ?? panic("exact Cargo dependency")
+    cargo_facts.validate() ?? panic("lossless Cargo facts")
+    assert(cargo.emit_pkg_jet().contains("serde: serde#version=1.0.200@cargo"))
+    assert(cargo_facts.native_document.contains("Cargo.lock:"))
+    assert(cargo_facts.facts.has_key("provider.cargo.lock.serde.checksum"))
+    kind_found := false
+    loop reference in cargo.provider_facts.keys() {
+        facts :: cargo.provider_facts.get(reference) ?? panic("provider facts key")
+        if facts.facts.has_key("package.dependency_kind") -> kind_found = true
+    }
+    assert(kind_found)
+    registry_document :: "{{\"name\":\"web\",\"version\":\"1.0.0\",\"content_hash\":\"sha256-web\",\"license\":\"MIT\",\"yanked\":false,\"signature\":\"sig\",\"owner\":\"team-web\",\"source\":{{\"kind\":\"git\",\"url\":\"https://example.invalid/web.git\"}},\"hooks\":{{\"build\":{{\"digest\":\"hook-digest\"}}}}}}"
+    registry :: provider_normalize_document(ProviderFamily.JetRegistry, registry_document)
+    registry.validate() ?? panic("lossless registry facts")
+    shared :: registry.shared_facts()
+    assert(shared.facts.has_key("provider.registry.signature"))
+    assert(shared.facts.has_key("provider.registry.yanked"))
+    assert_eq(shared.native_document, registry_document)
+    assert(shared.explain_lines().contains("native json: retained"))
+    lock :: registry.lock_record("app", shared.reference, "x86_64-linux") ?? panic("registry lock")
+    locked :: ProviderFacts.from_json(lock.future_fields.get("provider-facts") ?? panic("provider facts in lock")) ?? panic("locked facts JSON")
+    assert_eq(locked, shared)
+}
+
+// ported from jetpack_engine.rs:10127-10180
+#Test("provider_conformance_real_path_refuses_mutable_missing_and_conflicting_facts") {
+    npm :: cli_import_npm("{{\"name\":\"web\",\"version\":\"1.0.0\",\"dependencies\":{{\"vite\":\"^5\"}}}}")
+    npm_facts :: npm.provider_facts.get("vite@npm") ?? panic("mutable npm facts")
+    assert(!npm.emit_pkg_jet().contains("vite: vite@npm"))
+    assert(engine_import_loss(npm_facts, "not an exact lock identity"))
+    assert(engine_import_todo(npm, "package.json", "unresolved"))
+    cargo :: cli_import_cargo("[package]\nname = \"app\"\nversion = \"0.1.0\"\n[dependencies]\nserde = \"1\"\n", "")
+    cargo_facts :: cargo.provider_facts.get("serde@cargo") ?? panic("missing Cargo lock facts")
+    assert(!cargo.emit_pkg_jet().contains("serde: serde@cargo"))
+    assert(engine_import_loss(cargo_facts, "no exact version"))
+    assert(engine_import_todo(cargo, "Cargo.lock", "missing"))
+    registry :: provider_normalize_document(ProviderFamily.JetRegistry, "{{\"name\":\"web\",\"version\":\"1.0.0\",\"content_hash\":\"sha256-a\"}}\n{{\"name\":\"web\",\"version\":\"1.0.0\",\"content_hash\":\"sha256-b\"}}")
+    assert(!registry.is_lossless())
+    assert(engine_import_report_conflict(registry, "conflicting native facts"))
+    if registry.lock_record("app", "web#version=1.0.0@jet-registry", "any") == {
+        .Ok(_) -> panic("conflicting registry facts entered lock")
+        .Err(error) -> assert(error.message.contains("conflict"))
+    }
+}
