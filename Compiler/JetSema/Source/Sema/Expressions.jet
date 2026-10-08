@@ -2275,6 +2275,10 @@ fn sema_expr_declared_function_named(scopes: SemaScopeTable, name: String) -> Bo
 }
 
 fn sema_expr_check_direct_call(call: Call, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    // A loaded declaration owns the call even when Core also imports the name.
+    if sema_expr_declared_function_named(scopes, call.name) {
+        return sema_expr_check_declared_direct_call(call, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    }
     if sema_expression_zip_family_name(call.name) && sema_scope_resolve_index(scopes, call.name) == None {
         return sema_expression_zip_free_call(call, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     }
@@ -2307,6 +2311,10 @@ fn sema_expr_check_direct_call(call: Call, expected: Type?, environment: SemaSco
         value :: checked_default ?? return None
         return Val(value)
     }
+    sema_expr_check_declared_direct_call(call, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+}
+
+fn sema_expr_check_declared_direct_call(call: Call, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     scopes.ownership_call_depth += 1
     target :: sema_call_resolve_direct(call.name, call.type_args, environment, &scopes, call.name_span, &diagnostics) ?? {
         scopes.ownership_call_depth -= 1
