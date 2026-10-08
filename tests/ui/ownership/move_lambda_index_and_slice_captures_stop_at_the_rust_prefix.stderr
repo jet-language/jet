@@ -1,0 +1,12 @@
+Error [E0121]: `values` was consumed by a lambda that captures it, so it can't be used here
+  --> move_lambda_index_and_slice_captures_stop_at_the_rust_prefix.jet:6:11
+    |
+  6 |     print(values.len())
+    |           ^^^^^^
+  --> move_lambda_index_and_slice_captures_stop_at_the_rust_prefix.jet:5:30
+    |
+  5 |     call(() -> { print(values[0]) })
+    |                              ^^^ `values` moved to a lambda that captures it here
+ Why: After a value moves somewhere else, its old name no longer gives access to it
+ Fix: Stop using `values` after the move, or give a lambda that captures it a copy with `~values` where it moved.
+More: jet-lang.dev/e/E0121
