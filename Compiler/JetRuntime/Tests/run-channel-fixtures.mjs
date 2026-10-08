@@ -120,7 +120,7 @@ if (mode === 'assemble' || mode.startsWith('assemble-')) {
 } else if (mode === 'run-weak') {
   const result = command(join(out, 'shared-weak-native'), [], {timeout:120000});
   writeFileSync(join(out, `${mode}.txt`), result.stdout + result.stderr);
-  const expected = 'Shared weak no resurrection/payload once/last weak frees Cell96 ok\nShared weak upgrade versus final strong drop 256 races ok\n';
+  const expected = 'Shared weak no resurrection/payload once/last weak frees Cell96 ok\nShared weak upgrade versus final strong drop 256 races ok\nShared physical clean/dirty/abort/resume/alias once/logical versus pin lifetime ok\n';
   if (result.stdout !== expected || result.stderr !== '') throw Error('invalid Shared weak fixture result');
 } else if (['link-stm', 'link-sync', 'link-observe'].includes(mode)) {
   const lib = process.env.JET_CHANNEL_NATIVE_C_LIB;

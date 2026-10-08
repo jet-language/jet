@@ -22,6 +22,9 @@ extern void jet_rt_native_shared_edit_guard_drop(W), jet_rt_native_shared_read_g
 extern W jet_rt_native_condition_new(void), jet_rt_native_condition_clone(W);
 extern void jet_rt_native_condition_drop(W), jet_rt_native_condition_notify_one(W), jet_rt_native_condition_notify_all(W);
 extern W jet_rt_native_shared_guard_wait(W,W,W,W,W,W);
+extern W jet_rt_shared_guard_acquire(W,W), jet_rt_shared_guard_wait_once(W,W);
+extern bool jet_rt_shared_guard_held(W);
+extern void jet_rt_shared_guard_drop(W);
 extern W jet_rt_native_stm_begin(void);
 extern void jet_rt_native_stm_commit(W), jet_rt_native_stm_rollback(W);
 extern void jet_rt_native_shared_read_txn(W,W,W,W,W), jet_rt_native_shared_edit_txn(W,W,W,W,W);
@@ -158,15 +161,35 @@ static void *condition_waiter(void *argument) {
         for (unsigned i=0;i<5;i++) { assert(accessors[i](token)==0); assert(jet_rt_control_status(w->control)==5); jet_rt_control_discard_stop(w->control); }
         jet_rt_native_shared_edit_guard_drop(token);
         // Another writer is still held by the main thread. Unheld drop MUST
-        // not clear it, decrement its borrows, or commit its revision.
+        // not clear its permit or commit its revision. Ordinary guards own a
+        // logical alias, not a lifetime physical borrow.
         assert(jet_rt_sync_fixture_cell_word(w->cell,32)==1);
-        assert(jet_rt_sync_fixture_cell_word(w->cell,72)==1);
+        assert(jet_rt_sync_fixture_cell_word(w->cell,72)==0);
         assert(jet_rt_sync_fixture_cell_word(w->cell,48)==0);
     } else {
         assert(result==0 && jet_rt_control_status(w->control)==0 && token==w->cell);
         jet_rt_native_shared_edit_guard_drop(token);
     }
     atomic_store(&w->done,1); jet_rt_control_leave((W)save); jet_rt_thread_detach(); return NULL;
+}
+static void *physical_condition_waiter(void *argument) {
+    jet_rt_thread_attach();
+    Wait *w=argument;
+    W save[4];
+    jet_rt_control_enter(w->control,(W)save);
+    W guard=jet_rt_shared_guard_acquire(w->cell,1);
+    assert(guard && jet_rt_shared_guard_held(guard));
+    W result=jet_rt_shared_guard_wait_once(guard,w->condition);
+    assert(result==1 && jet_rt_control_status(w->control)==1);
+    assert(!jet_rt_shared_guard_held(guard));
+    assert(jet_rt_sync_fixture_condition_count(w->condition)==0);
+    jet_rt_control_discard_stop(w->control);
+    jet_rt_shared_guard_drop(guard);
+    assert(jet_rt_sync_fixture_condition_count(w->condition)==0);
+    atomic_store(&w->done,1);
+    jet_rt_control_leave((W)save);
+    jet_rt_thread_detach();
+    return NULL;
 }
 static void condition_tests(void) {
     W condition=jet_rt_native_condition_new(); W alias=jet_rt_native_condition_clone(condition);
@@ -192,6 +215,19 @@ static void condition_tests(void) {
     assert(jet_rt_sync_fixture_condition_count(condition)==0);
     assert(jet_rt_sync_fixture_cell_word(cell,0)==2);
     jet_rt_native_shared_edit_guard_drop(guard); clean_cell(cell,1);
+    jet_rt_scheduler_control_drop(w.control);
+    // The physical Guard40 wait uses the SAME condition queue. Cancellation
+    // removes its sole registration before leaving its lease unheld.
+    jet_rt_sync_fixture_set_revision(cell,0);
+    w=(Wait){.cell=cell,.condition=condition,.control=jet_rt_control_new(),.cancel=1};
+    assert(!pthread_create(&worker,NULL,physical_condition_waiter,&w));
+    while (jet_rt_sync_fixture_condition_count(condition)!=1) sched_yield();
+    jet_rt_scheduler_control_cancel(w.control);
+    assert(!pthread_join(worker,NULL));
+    assert(atomic_load(&w.done));
+    assert(jet_rt_sync_fixture_condition_count(condition)==0);
+    assert(jet_rt_sync_fixture_cell_word(cell,48)==0);
+    clean_cell(cell,1);
     jet_rt_scheduler_control_drop(w.control);
     w=(Wait){.cell=cell,.condition=condition,.control=jet_rt_control_new()};
     assert(!pthread_create(&worker,NULL,condition_waiter,&w));
