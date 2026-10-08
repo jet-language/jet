@@ -58,6 +58,22 @@ static void register_cleanup(void) {
 }
 
 static int mode;
+// Canonical TrapMessages.jet header_panic + prelude_end + footer_e3001.
+// The direct machine panic captures header/reason/prelude/footer as a form1
+// E4 Root report; the Rust boundary prints those bytes without re-rendering.
+static const char root_stop_report[] =
+    "Stop [E3001]: `panic: stdio-root-stop`\n"
+    "  --> <core.prelude>:0\n"
+    " Why: The program hit a `panic`, `assert`, or `assert_eq` call that failed, "
+    "a bounds/key check triggered at runtime, or another program-side stop. "
+    "The shared report boundary owns the program-side stop; an unhandled entry "
+    "error is a returned report, not E3001. Jet file and line are shown in Jet "
+    "terms — never generated-Rust terms (I2).\n"
+    " Fix: Fix the logic that led to the failure. Program-side stops exit 70 "
+    "through the shared boundary; unhandled entry errors print their report "
+    "and exit 1; exit 101 is reserved for Jet defects.\n"
+    "More: jet-lang.dev/e/E3001\n";
+
 static void entry(void) {
     if (mode != 4) register_cleanup();
     static const unsigned char body[] = "body";
@@ -129,6 +145,9 @@ static void check(int selected, int expected_status, const char *report) {
     assert(strncmp(output, prefix, prefix_length) == 0);
     if (report == NULL) {
         assert(strcmp(output, prefix) == 0);
+    } else if (selected == 1) {
+        assert(used == prefix_length + strlen(report));
+        assert(memcmp(output + prefix_length, report, strlen(report)) == 0);
     } else {
         assert(strncmp(output + prefix_length, report, strlen(report)) == 0);
         assert(strstr(output + prefix_length + strlen(report), report) == NULL);
@@ -143,7 +162,7 @@ int main(int argc, char **argv) {
         return 2;
     }
     check(0, 0, NULL);
-    check(1, 70, "Stop [E3001]: ");
+    check(1, 70, root_stop_report);
     // #4902 holds entry-Err atexit eligibility and cross-group report order.
     // The default full witness retains that disputed case unchanged. This
     // explicit preparation selector neither exercises nor claims that gate.

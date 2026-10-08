@@ -124,6 +124,25 @@ fn runtime_e1003_is_a_stop_with_exit_70_on_every_hosted_tier() {
 }
 
 #[test]
+fn rng_draw_preserves_owned_exact_int_results_on_every_hosted_tier() {
+    // Both one-value intervals fit i64 but lie outside the inline Int range.
+    // The provider returns an already-owned tagged Int, never a raw i64 result.
+    let source = include_str!("fixtures/rng_owned_int_result.jet");
+    let files = [("main.jet", source)];
+    let runs = [
+        ("default", tir_support::default_run("rng_owned_int_result", source)),
+        ("interpreter", tir_support::interpreter_run("rng_owned_int_result", source)),
+        ("debug AOT", tir_support::build_and_run_full("rng_owned_int_result", "main", source)),
+        ("release AOT", tir_support::build_release_and_run_multi("rng_owned_int_result", "main.jet", &files)),
+    ];
+    for (tier, (code, stdout, stderr)) in runs {
+        assert_eq!(code, 0, "{tier}: {stderr}");
+        assert_eq!(stdout, "4611686018427387904\n-4611686018427387905\n", "{tier}");
+        assert!(stderr.is_empty(), "{tier}: {stderr}");
+    }
+}
+
+#[test]
 fn runtime_e1003_report_matches_the_registered_snapshot() {
     let report = jet_foundation::Outcome::jet_render_runtime_stop(
         "E1003", "", 0, "", "", 1, 1,
