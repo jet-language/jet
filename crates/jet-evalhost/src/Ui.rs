@@ -1820,6 +1820,20 @@ fn jet_ui_host_ambient_core_call(
         })());
     }
     match (module, method) {
+        ("core.tui", "__cap_env_bytes") => Some((|| {
+            ambient_expect_arity(&args, 1, "core.tui.__cap_env_bytes", span)?;
+            let CtValue::Str(name) = &args[0] else {
+                return Err(unsupported("core.tui.__cap_env_bytes value must be String", span));
+            };
+            Ok(ui_rt::jet_tui_cap_env_bytes(name).map_or_else(
+                || CtValue::absent(Type::List(Box::new(Type::IntN { signed: false, bits: 8 }))),
+                |bytes| CtValue::Present(Box::new(CtValue::Bytes(bytes))),
+            ))
+        })()),
+        ("core.term", "__stdout_terminal") => Some((|| {
+            ambient_expect_arity(&args, 0, "core.term.__stdout_terminal", span)?;
+            Ok(CtValue::Bool(crate::IO::term_prelude::jet_term_stdout_is_terminal()))
+        })()),
         ("core.tui", "capabilities") => Some((|| {
             ambient_expect_arity(&args, 0, "core.tui.capabilities", span)?;
             let caps = ui_rt::jet_tui_capabilities();
@@ -1862,7 +1876,7 @@ fn jet_ui_host_ambient_core_call(
             let ime = ambient_ime_mode(&args[1], span)?;
             Ok(ambient_node_value(ui_rt::jet_ui_text_input(&state, ime)))
         })()),
-        ("core.ui.host", "capabilities") => Some((|| {
+        ("core.ui.host", "capabilities" | "__capabilities") => Some((|| {
             ambient_expect_arity(&args, 0, "core.ui.host.capabilities", span)?;
             let facts = ui_rt::jet_ui_host_capabilities();
             Ok(ambient_capability_facts_value(facts))
@@ -1886,7 +1900,7 @@ fn jet_ui_host_ambient_core_call(
                 ambient_fs_grant_value,
             ))
         })()),
-        ("core.ui.host", "open_file") => Some((|| {
+        ("core.ui.host", "open_file" | "__open_file") => Some((|| {
             ambient_expect_arity(&args, 1, "core.ui.host.open_file", span)?;
             let request = ambient_file_request(&args[0], span)?;
             Ok(ambient_service_result(
@@ -1894,7 +1908,7 @@ fn jet_ui_host_ambient_core_call(
                 ambient_file_selection_value,
             ))
         })()),
-        ("core.ui.host", "save_file") => Some((|| {
+        ("core.ui.host", "save_file" | "__save_file") => Some((|| {
             ambient_expect_arity(&args, 1, "core.ui.host.save_file", span)?;
             let request = ambient_file_request(&args[0], span)?;
             Ok(ambient_service_result(
@@ -1920,14 +1934,14 @@ fn jet_ui_host_ambient_core_call(
                 ambient_accessibility_value,
             ))
         })()),
-        ("core.ui.host.clipboard", "read_text") => Some((|| {
+        ("core.ui.host.clipboard", "read_text" | "__read_text") => Some((|| {
             ambient_expect_arity(&args, 0, "core.ui.host.clipboard.read_text", span)?;
             Ok(ambient_service_result(
                 ui_rt::jet_ui_host_clipboard_read_text(),
                 ambient_clipboard_text_value,
             ))
         })()),
-        ("core.ui.host.clipboard", "write_text") => Some((|| {
+        ("core.ui.host.clipboard", "write_text" | "__write_text") => Some((|| {
             ambient_expect_arity(&args, 1, "core.ui.host.clipboard.write_text", span)?;
             let text = ambient_string(&args[0], "core.ui.host.clipboard.write_text", span)?;
             Ok(ambient_service_result(
@@ -1935,7 +1949,7 @@ fn jet_ui_host_ambient_core_call(
                 ambient_clipboard_write_value,
             ))
         })()),
-        ("core.ui.host.ime", "poll") => Some((|| {
+        ("core.ui.host.ime", "poll" | "__poll") => Some((|| {
             ambient_expect_arity(&args, 0, "core.ui.host.ime.poll", span)?;
             Ok(ambient_option_result(
                 ui_rt::jet_ui_host_ime_poll(),
@@ -1943,7 +1957,7 @@ fn jet_ui_host_ambient_core_call(
                 ambient_ime_event_value,
             ))
         })()),
-        ("core.ui.host.drag_drop", "poll") => Some((|| {
+        ("core.ui.host.drag_drop", "poll" | "__poll") => Some((|| {
             ambient_expect_arity(&args, 0, "core.ui.host.drag_drop.poll", span)?;
             Ok(ambient_option_result(
                 ui_rt::jet_ui_host_drag_poll(),
@@ -1960,7 +1974,7 @@ fn jet_ui_host_ambient_core_call(
                 ambient_shortcut_binding_value,
             ))
         })()),
-        ("core.ui.host.shortcuts", "register") => Some((|| {
+        ("core.ui.host.shortcuts", "register" | "__register") => Some((|| {
             ambient_expect_arity(&args, 1, "core.ui.host.shortcuts.register", span)?;
             let binding = ambient_shortcut_binding(&args[0], span)?;
             Ok(ambient_service_result(
@@ -1968,7 +1982,7 @@ fn jet_ui_host_ambient_core_call(
                 ambient_shortcut_binding_value,
             ))
         })()),
-        ("core.ui.host.shortcuts", "dispatch") => Some((|| {
+        ("core.ui.host.shortcuts", "dispatch" | "__dispatch") => Some((|| {
             ambient_expect_arity(&args, 1, "core.ui.host.shortcuts.dispatch", span)?;
             let shortcut = ambient_shortcut(&args[0], span)?;
             Ok(ambient_service_result(
@@ -1976,7 +1990,7 @@ fn jet_ui_host_ambient_core_call(
                 ambient_shortcut_dispatch_value,
             ))
         })()),
-        ("core.ui.host.accessibility", "attach") => Some((|| {
+        ("core.ui.host.accessibility", "attach" | "__attach") => Some((|| {
             ambient_expect_arity(&args, 2, "core.ui.host.accessibility.attach", span)?;
             let node = ambient_node(&args[0], span)?;
             let accessibility = ambient_accessibility(&args[1], span)?;
@@ -1985,7 +1999,7 @@ fn jet_ui_host_ambient_core_call(
                 ambient_node_value,
             ))
         })()),
-        ("core.ui.host.accessibility", "project") => Some((|| {
+        ("core.ui.host.accessibility", "project" | "__project") => Some((|| {
             ambient_expect_arity(&args, 2, "core.ui.host.accessibility.project", span)?;
             let node = ambient_node(&args[0], span)?;
             let node_id = ambient_node_id(&args[1], span)?;
