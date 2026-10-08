@@ -352,6 +352,10 @@ fn fx_prelude_rows() -> [MIRPreludeCall] Never! {
         fx_prelude(MIRPreludeFamily.StaticPrelude, "core.loop", "loop_range_value", "jet_loop_range_value", 1, MIRPreludeABI.Value),
         fx_prelude(MIRPreludeFamily.StaticPrelude, "core.loop", "loop_range_advance", "jet_loop_range_advance", 1, MIRPreludeABI.Value),
         fx_prelude(MIRPreludeFamily.StaticPrelude, "core.convert", "char_to_string", "jet_rt_char_to_string", 1, MIRPreludeABI.Value),
+        fx_prelude(MIRPreludeFamily.StaticPrelude, "::JetBitSet", "new", "JetBitSet::new", 0, MIRPreludeABI.Value),
+        fx_prelude(MIRPreludeFamily.BuiltinMethod, "core.builtin", "list_clear", "jet_list_clear", 1, MIRPreludeABI.Effect),
+        fx_prelude(MIRPreludeFamily.BuiltinMethod, "core.builtin", "bitset_add", "jet_bitset_add", 2, MIRPreludeABI.Value),
+        fx_prelude(MIRPreludeFamily.BuiltinMethod, "core.builtin", "bit_set_count", "jet_bit_set_count", 1, MIRPreludeABI.Value),
     }
 }
 
@@ -582,6 +586,34 @@ fn fx_control_flow() -> MIRProgram Never! {
     fx_program([MIRFunction]{fx_function("sum_to", s, fx_int()), fx_function("classify", c, fx_int()), fx_function("run", r, fx_unit())}, [MIRTypeDef]{})
 }
 
+// Empty construction, sparse mutations, clear twice, and reuse of the same
+// owning header. Expected counts: 0, 2, 0, 0, 1.
+fn fx_bits() -> MIRProgram Never! {
+    r := fx_builder()
+    bits :: fx_owned(&r, fx_named("BitSet"), MIROperation.Semantic{operation: MIRSemanticOp.StaticPreludeCall{call: fx_prelude_id("::JetBitSet", "new"), args: [MIRCallArg]{}, owner_type_args: [MIRType]{}, type_args: [MIRType]{}}})
+    empty :: fx_copy(&r, fx_int(), MIROperation.Semantic{operation: MIRSemanticOp.BuiltinMethod{call: fx_prelude_id("core.builtin", "bit_set_count"), receiver: bits, receiver_place: None, args: [MIRValueID]{}, aggregate_fields: None}})
+    fx_print(&r, empty)
+    indices :: [Int]{1, 65}
+    loop index in indices {
+        value :: fx_int_const(&r, index)
+        _ := fx_copy(&r, fx_bool(), MIROperation.Semantic{operation: MIRSemanticOp.BuiltinMethod{call: fx_prelude_id("core.builtin", "bitset_add"), receiver: bits, receiver_place: None, args: [MIRValueID]{value}, aggregate_fields: None}})
+    }
+    filled :: fx_copy(&r, fx_int(), MIROperation.Semantic{operation: MIRSemanticOp.BuiltinMethod{call: fx_prelude_id("core.builtin", "bit_set_count"), receiver: bits, receiver_place: None, args: [MIRValueID]{}, aggregate_fields: None}})
+    fx_print(&r, filled)
+    loop _ in 0..<2 {
+        fx_do(&r, MIROperation.Semantic{operation: MIRSemanticOp.BuiltinMethod{call: fx_prelude_id("core.builtin", "list_clear"), receiver: bits, receiver_place: None, args: [MIRValueID]{}, aggregate_fields: None}})
+        cleared :: fx_copy(&r, fx_int(), MIROperation.Semantic{operation: MIRSemanticOp.BuiltinMethod{call: fx_prelude_id("core.builtin", "bit_set_count"), receiver: bits, receiver_place: None, args: [MIRValueID]{}, aggregate_fields: None}})
+        fx_print(&r, cleared)
+    }
+    reused :: fx_int_const(&r, 5)
+    _ := fx_copy(&r, fx_bool(), MIROperation.Semantic{operation: MIRSemanticOp.BuiltinMethod{call: fx_prelude_id("core.builtin", "bitset_add"), receiver: bits, receiver_place: None, args: [MIRValueID]{reused}, aggregate_fields: None}})
+    count :: fx_copy(&r, fx_int(), MIROperation.Semantic{operation: MIRSemanticOp.BuiltinMethod{call: fx_prelude_id("core.builtin", "bit_set_count"), receiver: bits, receiver_place: None, args: [MIRValueID]{}, aggregate_fields: None}})
+    fx_print(&r, count)
+    fx_do(&r, MIROperation.Drop{value: bits, kind: MIRDropKind.Value})
+    fx_block(&r, 0, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{fx_function("run", r, fx_unit())}, [MIRTypeDef]{})
+}
+
 // struct Point { x: Int, y: Int }
 // enum Shape { Dot, Circle(r: Int) }
 // enum Color { Red, Green }
@@ -808,6 +840,7 @@ fn run() {
     if !fx_report("arithmetic", fx_arithmetic()) -> clean = false
     if !fx_report("control-flow", fx_control_flow()) -> clean = false
     if !fx_report("aggregates", fx_aggregates()) -> clean = false
+    if !fx_report("bits", fx_bits()) -> clean = false
     // Tests/Fixtures/*.jet
     if !fx_report("close-generic", fx_close_generic()) -> clean = false
     if !fx_report_runtime("close-cell-rebind", fx_close_cell_rebind()) -> clean = false

@@ -130,6 +130,20 @@ pub fn jet_fixture_plain(value: JetFixture) -> JetFixture { value }
   assert.ok(lookup.indexOf("loop handle in LOWER_RUNTIME_HANDLES") < lookup.indexOf("loop handle in LOWER_NATIVE_PROVIDER_HANDLES"), "seed lookup must never override an existing Rust row");
   put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: F64) -> F64 { value }\n");
   put("Compiler/JetRuntime/exports.list", "jet_fixture_scalar\n");
+  const bitsDefinitions = "#Export(c) fn jet_rt_native_bits_new() -> I64 { I64{0} }\n#Export(c) fn jet_rt_native_bits_clear(bits: I64) {}\n";
+  put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: F64) -> F64 { value }\n" + bitsDefinitions);
+  put("Compiler/JetRuntime/exports.list", "jet_fixture_scalar\njet_rt_native_bits_new\njet_rt_native_bits_clear\n");
+  success(run());
+  success(run(true));
+  const bitsJet = readFileSync(join(fixture, "Compiler/JetBackend/Source/Lower/RuntimeRoutes.jet"), "utf8");
+  const bitsRust = readFileSync(join(fixture, "crates/jet-codegen/src/Prelude/Core/CAbiRoutes.rs"), "utf8");
+  assert.ok(bitsJet.includes('export: "jet_rt_native_bits_new", native_lists: true, params: [LowerRouteCarrier]{}, result: LowerRouteResult.Plain{carrier: LowerRouteCarrier.Handle{name: "JetBitSet"}}'));
+  assert.ok(bitsJet.includes('export: "jet_rt_native_bits_clear", native_lists: true, params: [LowerRouteCarrier]{LowerRouteCarrier.HandleMut{name: "JetBitSet"}}, result: LowerRouteResult.Plain{carrier: LowerRouteCarrier.Unit}'));
+  assert.ok(!bitsRust.includes("fn jet_rt_native_bits_"), "native-only providers must not invent seed kernels");
+  put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: F64) -> F64 { value }\n" + bitsDefinitions.replace("bits: I64", "bits: F64"));
+  assert.match(run().stderr, /bits_clear.*does not match C ABI/);
+  put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: F64) -> F64 { value }\n");
+  put("Compiler/JetRuntime/exports.list", "jet_fixture_scalar\n");
   // Source-owned generics have actual mangled declarations and private,
   // mangled fields, not a historical native carrier name or a C route.
   const sampleKey = "<corelib>/Core/fixture::Core/fixture/fixture.jet::Sample";
