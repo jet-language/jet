@@ -1,0 +1,44 @@
+# Original tests/web_dev.rs:1220-1328; verbatim sources and original predicates.
+# PENDING-GRAMMAR(batch-four); PENDING-SEAM(read_bytes/DFileRaw).
+fixture: jet_dev_web_first_save_after_ready_rebuilds_with_revision_facts.fixture
+copy: {root}/tests/cases/web_dev/support.fixture/HTTP.jet claims/HTTP.jet
+env: S5_ROOT={work}
+session app raw: jet dev app.jet --target=web --json
+env: NO_COLOR=1
+stderr: null
+recv app line until ~ "App preview: " timeout 120s
+capture: port = text stdout.strip_prefix_lines("App preview: ").line(0).split("://",1).split("/",0).after_last(":")
+cap:port: is-u32
+json: cap:port doc $ <= 65535
+copy: edited.source app.jet
+step: jet test claims
+env: S5_PORT={cap:port}
+env: S5_PHASE=accepted
+exit: 0
+recv app line until ~ "\"action\":\"dev.rebuild\"" timeout 10s
+stdout.filter(~ "\"action\":\"dev.rebuild\"").line(0): ^= "{\"schema\":\"jet.status/v1\"" # original rebuilt.starts_with
+stdout.filter(~ "\"action\":\"dev.rebuild\"").line(0): ~ "\"ok\":true,\"reports\":[]" # original rebuilt.contains
+stdout.filter(~ "\"action\":\"dev.rebuild\"").line(0): ~ "\"candidate\":null" # original rebuilt.contains
+stdout.filter(~ "\"action\":\"dev.rebuild\"").line(0): ~ "\"accepted_revision\":2" # original rebuilt.contains
+copy: broken.source app.jet.tmp
+rename: app.jet.tmp app.jet
+step: jet test claims
+env: S5_PORT={cap:port}
+env: S5_PHASE=rejected
+exit: 0
+recv app line until ~ "\"action\":\"dev.rebuild\"" timeout 10s
+stdout.filter(~ "\"action\":\"dev.rebuild\"").line(0): ~ "\"ok\":false" # original rejected.contains
+stdout.filter(~ "\"action\":\"dev.rebuild\"").line(0): ~ "\"schema\":\"jet.report/v3\"" # original rejected.contains
+stdout.filter(~ "\"action\":\"dev.rebuild\"").line(0): ~ "E0003" # original rejected.contains
+stdout.filter(~ "\"action\":\"dev.rebuild\"").line(0): ~ "\"candidate\":3" # original rejected.contains
+stdout.filter(~ "\"action\":\"dev.rebuild\"").line(0): ~ "\"diagnostic_revision\":3" # original rejected.contains
+stdout.filter(~ "\"action\":\"dev.rebuild\"").line(0): ~ "\"accepted_revision\":2" # original rejected.contains
+stdout.filter(~ "\"action\":\"dev.rebuild\"").line(0): ~ "\"last_good_revision\":2" # original rejected.contains
+copy: original.source app.jet
+step: jet test claims
+env: S5_PORT={cap:port}
+env: S5_PHASE=recovered
+exit: 0
+signal app: KILL
+close app
+exit: any # original KillOnDrop ignores child status
