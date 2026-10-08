@@ -96,8 +96,8 @@ a hidden provider policy.
 
 The runtime SHA-256 byte boundary borrows its input and writes to a caller-owned
 32-byte digest. Its 576-byte, word-aligned scratch region is exclusive to the
-call and wiped before return. Domain-separated callers can hash two spans
-without allocating a concatenated message; the digest must not alias either
+call and wiped before return. Domain-separated callers can hash up to four spans
+without allocating a concatenated message; the digest must not alias any
 input span. The algorithm is shared by vault and other runtime crypto callers.
 
 Vault provider errors are private to the persistence boundary and are distinct
@@ -112,7 +112,10 @@ Cloning creates independent key and provenance owners. Unsigned repository,
 generation, and timestamp words preserve all 64 bits. Immutable record identity
 binds the name, key type/material/public key, generation, opaque ID, creation
 time, provenance, and optional origin; lifecycle status/reason updates do not
-change that identity.
+change that identity. The encoder checks that immutable hash before validating
+an optional origin name. Hashing therefore streams even over-limit origin names
+through borrowed spans and fixed scratch; a bad hash remains the earlier
+`InvalidEncoding` error, whereas a matching hash reaches `InvalidName`.
 
 Vault test hooks are explicitly initialized test transport, never an authority
 mechanism for production callers. Authorizer, trust-path, and fault overrides

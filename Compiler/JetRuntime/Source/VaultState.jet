@@ -377,9 +377,10 @@ fn vault_key_digest(record: I64, digest: I64, scratch: I64) {
     rt_text_store(domain, I64{0})
     rt_text_store(domain + I64{8}, I64{0})
 }
-// SecretsCrypto.rs:830-861. Caller has validated name lengths <=128 and key32;
-// the serialization workspace is bounded553 bytes, with no concatenation owner.
-// Mutable lifecycle status/time/reason are deliberately not in this identity.
+// SecretsCrypto.rs:830-861. Caller has validated the record name <=128/key32.
+// Encoder hashes BEFORE validating an optional origin name; that borrowed span
+// is deliberately unbounded here. Prefix<=269 plus tail56 use fixed scratch,
+// and parts4 streams the origin bytes without a concatenation allocation.
 fn vault_record_hash(record: I64, digest: I64, scratch: I64) {
     key_digest :: scratch + I64{4192}
     vault_key_digest(record, key_digest, scratch)
@@ -414,24 +415,59 @@ fn vault_record_hash(record: I64, digest: I64, scratch: I64) {
             rt_text_put(buffer + cursor, I64{0})
             cursor += I64{1}
         }
-    } else {
-        rt_text_put(buffer + cursor, I64{1})
-        cursor += I64{1}
-        rt_text_bytes_copy(buffer + cursor, origin + VAULT_ORIGIN_UUID, I64{16})
-        cursor += I64{16}
-        origin_name :: rt_text_word(origin + VAULT_ORIGIN_NAME)
-        origin_length :: rt_text_len(origin_name)
-        vault_put_u16(buffer + cursor, origin_length)
-        cursor += I64{2}
-        rt_text_bytes_copy(buffer + cursor, rt_text_data(origin_name), origin_length)
-        cursor += origin_length
-        vault_put_u64(buffer + cursor, rt_text_word(origin + VAULT_ORIGIN_GENERATION))
-        cursor += I64{8}
-        rt_text_bytes_copy(buffer + cursor, origin + VAULT_ORIGIN_OPAQUE, I64{16})
-        cursor += I64{16}
-        rt_text_bytes_copy(buffer + cursor, origin + VAULT_ORIGIN_HASH, I64{32})
-        cursor += I64{32}
+        rt_sha256_parts(buffer, cursor, I64{1}, I64{0}, digest, scratch)
+        thread_zero(scratch, I64{8192})
+        return
     }
-    rt_sha256_parts(buffer, cursor, I64{1}, I64{0}, digest, scratch)
+    rt_text_put(buffer + cursor, I64{1})
+    cursor += I64{1}
+    rt_text_bytes_copy(buffer + cursor, origin + VAULT_ORIGIN_UUID, I64{16})
+    cursor += I64{16}
+    origin_name :: rt_text_word(origin + VAULT_ORIGIN_NAME)
+    origin_length :: rt_text_len(origin_name)
+    vault_put_u16(buffer + cursor, origin_length & I64{65535})
+    cursor += I64{2}
+    tail :: scratch + I64{4800}
+    vault_put_u64(tail, rt_text_word(origin + VAULT_ORIGIN_GENERATION))
+    rt_text_bytes_copy(tail + I64{8}, origin + VAULT_ORIGIN_OPAQUE, I64{16})
+    rt_text_bytes_copy(tail + I64{24}, origin + VAULT_ORIGIN_HASH, I64{32})
+    rt_sha256_parts4(buffer, cursor, rt_text_data(origin_name), origin_length, tail, I64{56}, I64{1}, I64{0}, digest, scratch)
     thread_zero(scratch, I64{8192})
+}
+
+// -1 success, else private error ordinal; scratch8256 is caller-owned.
+// Encode955-991 hashes before optional origin-name validation. Decode1175-1187
+// validates lifecycle/public material before deriving its missing record hash;
+// its origin was already validated by the wire parser.
+fn vault_record_validate(record: I64, decoded: Bool, scratch: I64) -> I64 {
+    status :: rt_text_word(record + VAULT_RECORD_STATUS)
+    created :: rt_text_word(record + VAULT_RECORD_CREATED)
+    changed :: rt_text_word(record + VAULT_RECORD_STATUS_MS)
+    if (decoded && (created == I64{0} || vault_unsigned_less(changed, created))) -> return I64{8}
+    key_type :: rt_text_word(record + VAULT_RECORD_TYPE)
+    secret :: rt_text_word(record + VAULT_RECORD_SECRET)
+    if !vault_public_hash(key_type, secret, scratch + I64{8192}, scratch) -> return I64{8}
+    if !rt_text_equal_bytes(scratch + I64{8192}, record + VAULT_RECORD_PUBLIC_HASH, I64{32}) -> return I64{8}
+    if !decoded {
+        vault_record_hash(record, scratch + I64{8224}, scratch)
+        if !rt_text_equal_bytes(scratch + I64{8224}, record + VAULT_RECORD_HASH, I64{32}) -> return I64{8}
+    }
+    reason_zero :: vault_bytes_zero(record + VAULT_RECORD_REASON_HASH, I64{32})
+    if (status == I64{1} && (changed != created || !reason_zero)) -> return I64{8}
+    // Do not impose the decoder's inactive-reason/timestamp rules on encode.
+    if (decoded && status != I64{1} && reason_zero) -> return I64{8}
+    origin :: rt_text_word(record + VAULT_RECORD_ORIGIN)
+    if (!decoded && origin != I64{0}) {
+        if (rt_text_word(record + VAULT_RECORD_PROVENANCE) != I64{2} ||
+            vault_bytes_zero(origin + VAULT_ORIGIN_UUID, I64{16}) ||
+            vault_bytes_zero(origin + VAULT_ORIGIN_OPAQUE, I64{16}) ||
+            vault_bytes_zero(origin + VAULT_ORIGIN_HASH, I64{32}) ||
+            rt_text_word(origin + VAULT_ORIGIN_GENERATION) == I64{0}) -> return I64{8}
+        if !vault_validate_text(rt_text_word(origin + VAULT_ORIGIN_NAME), false) -> return I64{0}
+    }
+    if decoded {
+        vault_record_hash(record, scratch + I64{8224}, scratch)
+        rt_text_bytes_copy(record + VAULT_RECORD_HASH, scratch + I64{8224}, I64{32})
+    }
+    I64{-1}
 }

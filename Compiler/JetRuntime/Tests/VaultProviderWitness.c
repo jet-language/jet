@@ -17,6 +17,7 @@ extern void jet_rt_string_drop(Text *);
 extern void stored_key_bytes_are_redacted_and_zeroized_on_drop(const Text *, ByteList *, const Text *, const Text *, void **);
 extern void jet_rt_vault_record_fixture_drop(void *);
 extern Text *jet_rt_vault_record_fixture_debug(void *);
+extern void jet_rt_vault_origin_hash_bound_fixture(void *, const Text *, const unsigned char *);
 static struct { void *data; int64_t capacity; unsigned frees; } observed[2];
 static size_t observed_count;
 void __wrap_jet_rt_free(void *data, int64_t size, int64_t align) {
@@ -52,6 +53,17 @@ static void zeroization_fixture(void) {
     memcpy(&clone_key, (const unsigned char *)parts[1] + 176, sizeof(clone_key));
     assert(clone_key->length == 32 && clone_key->capacity == 32);
     assert(memcmp(clone_key->data, data, 32) == 0);
+    // Seed830-861 serialization golden, independently computed with Node's
+    // X25519/SHA256 for this actual fixture key. A4097-byte origin exceeds both
+    // the name limit and the old bounded concatenation workspace.
+    unsigned char origin_data[4097];
+    memset(origin_data, 'x', sizeof(origin_data));
+    Text origin_name = {origin_data, (int64_t)sizeof(origin_data), 0};
+    static const unsigned char origin_hash[32] = {
+        0xf9,0xd5,0x7d,0x14,0xf9,0x94,0x58,0x8b,0x07,0x9e,0xc3,0xc2,0x9b,0x37,0xef,0xab,
+        0xda,0xf2,0x9f,0xac,0x76,0x0f,0x2e,0x29,0x62,0x8a,0xa1,0x9c,0xd7,0x22,0xb2,0xed
+    };
+    jet_rt_vault_origin_hash_bound_fixture(parts[0], &origin_name, origin_hash);
     observed[0].data = data; observed[0].capacity = 40;
     observed[1].data = clone_key->data; observed[1].capacity = 32; observed_count = 2;
     jet_rt_string_drop(parts[2]);
@@ -100,6 +112,6 @@ int main(void) {
     static const unsigned char overlong[] = {1,0,0,0, 0xff,0xff,0xff,0xff};
     jet_rt_vault_invalid_legacy_fixture(overlong, 8);
     zeroization_fixture();
-    puts("vault witness OK (13 errors, legacy codec, native Secret redaction/wipe)");
+    puts("vault witness OK (13 errors, legacy codec, native Secret redaction/wipe, long-origin hash)");
     return 0;
 }

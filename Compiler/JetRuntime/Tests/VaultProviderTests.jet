@@ -103,3 +103,48 @@ fn vault_fixture_check(condition: Bool) {
 }
 #Export(c) fn jet_rt_vault_record_fixture_drop(record: I64) { vault_record_drop(record) }
 #Export(c) fn jet_rt_vault_record_fixture_debug(record: I64) -> I64 { vault_record_debug(record) }
+
+// Record hashing must not overflow scratch before rejecting a long origin name.
+// Hash/public metadata are otherwise the genuine native Secret fixture above.
+#Export(c) fn jet_rt_vault_origin_hash_bound_fixture(record: I64, name: I64, expected: I64) {
+    origin :: jet_rt_alloc(VAULT_ORIGIN_BYTES, I64{8})
+    at := I64{0}
+    loop {
+        if (at == I64{16}) -> break
+        rt_text_put(origin + VAULT_ORIGIN_UUID + at, I64{3})
+        rt_text_put(origin + VAULT_ORIGIN_OPAQUE + at, I64{5})
+        at += I64{1}
+    }
+    at = I64{0}
+    loop {
+        if (at == I64{32}) -> break
+        rt_text_put(origin + VAULT_ORIGIN_HASH + at, I64{6})
+        at += I64{1}
+    }
+    rt_text_store(origin + VAULT_ORIGIN_NAME, jet_rt_string_clone(name))
+    rt_text_store(origin + VAULT_ORIGIN_GENERATION, I64{4})
+    rt_text_store(record + VAULT_RECORD_ORIGIN, origin)
+    scratch :: jet_rt_alloc(I64{8288}, I64{8})
+    rt_text_store(scratch + I64{8256}, I64{72623859790382856})
+    rt_text_store(scratch + I64{8264}, I64{72623859790382856})
+    rt_text_store(scratch + I64{8272}, I64{72623859790382856})
+    rt_text_store(scratch + I64{8280}, I64{72623859790382856})
+    vault_record_hash(record, record + VAULT_RECORD_HASH, scratch)
+    vault_fixture_check(rt_text_equal_bytes(record + VAULT_RECORD_HASH, expected, I64{32}))
+    vault_fixture_check(vault_record_validate(record, false, scratch) == I64{0})
+    first :: rt_text_byte(record + VAULT_RECORD_HASH)
+    rt_text_put(record + VAULT_RECORD_HASH, first ~| I64{1})
+    vault_fixture_check(vault_record_validate(record, false, scratch) == I64{8})
+    // Both failures retain their seed priority and preserve the scratch fence.
+    at = I64{8256}
+    loop {
+        if (at == I64{8288}) -> break
+        vault_fixture_check(rt_text_word(scratch + at) == I64{72623859790382856})
+        at += I64{8}
+    }
+    vault_origin_drop(origin)
+    rt_text_store(record + VAULT_RECORD_ORIGIN, I64{0})
+    vault_record_hash(record, record + VAULT_RECORD_HASH, scratch)
+    thread_zero(scratch, I64{8288})
+    jet_rt_free(scratch, I64{8288}, I64{8})
+}
