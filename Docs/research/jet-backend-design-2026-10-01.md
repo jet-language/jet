@@ -1403,6 +1403,10 @@ refuse before materialization; no guessed leaf helper repairs that provenance.
 Lists (including byte lists) use the admitted element stride, Maps use the
 entry row, and boxed members use their storage-wrapper box size. Binary32
 conversion preserves the exact widened IEEE word instead of rounding it.
+Result selectors and payload offsets come from the ordinary Result definition
+in `Lower/Values.jet`, shared with `lower_result_box`, not a codec-local ABI.
+Map ordering propagates missing layouts and mismatched key shapes as named
+refusals through a fallible stable index merge before native materialization.
 Replacing a payload moves the old owner into a returned retirement journal
 under the original held physical guard; the caller publishes/releases that
 guard before invoking old drop glue, so reentrant cleanup cannot deadlock it.

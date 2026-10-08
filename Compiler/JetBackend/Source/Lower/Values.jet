@@ -156,11 +156,15 @@ fn lower_option_box_size(p: MIRProgram, inner: MIRType) -> Int Never! {
     if size < 8 -> 8 else -> size
 }
 
+// Ordinary Result construction and payload transport share this one layout.
+pub fn lower_result_selector(ok: Bool) -> Int Never! { if ok -> 1 else -> 0 }
+pub fn lower_result_payload_offset() -> Int Never! { 8 }
+
 fn lower_result_box_size(p: MIRProgram, ok: MIRType, err: MIRType) -> Int Never! {
     ok_size :: lower_size(p, ok).size
     err_size :: lower_size(p, err).size
     widest :: lower_align_up(if ok_size > err_size -> ok_size else -> err_size, 8)
-    8 + (if widest < 8 -> 8 else -> widest)
+    lower_result_payload_offset() + (if widest < 8 -> 8 else -> widest)
 }
 
 fn lower_enum_box_size(p: MIRProgram, definition: MIRTypeDef) -> Int Never! {

@@ -1916,8 +1916,8 @@ fn lower_instruction(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
             lower_emit(&f, LIRInst.Compare{dst: dst, condition: LIRCondition.Ne, left: boxed, right: null})
         }
         .OptionValue(subject) -> lower_load_payload(p, c, &m, &f, instruction, subject, 0)
-        .ResultOk(value) -> lower_result_box(p, c, &m, &f, instruction, value, 1)
-        .ResultErr(value) -> lower_result_box(p, c, &m, &f, instruction, value, 0)
+        .ResultOk(value) -> lower_result_box(p, c, &m, &f, instruction, value, lower_result_selector(true))
+        .ResultErr(value) -> lower_result_box(p, c, &m, &f, instruction, value, lower_result_selector(false))
         .ResultIsOk(subject) -> {
             boxed :: lower_use(&m, &f, subject) ?? return
             dst :: lower_result(p, c, &m, &f, instruction) ?? return
@@ -1926,7 +1926,7 @@ fn lower_instruction(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
             zero :: lower_const(&f, 0)
             lower_emit(&f, LIRInst.Compare{dst: dst, condition: LIRCondition.Ne, left: ok_word, right: zero})
         }
-        .ResultValue(subject, _) -> lower_load_payload(p, c, &m, &f, instruction, subject, 8)
+        .ResultValue(subject, _) -> lower_load_payload(p, c, &m, &f, instruction, subject, lower_result_payload_offset())
         .PatternCapture(matched, index) -> lower_pattern_capture(p, c, &m, &f, instruction, matched, index)
         .PatternMatched(matched) -> lower_pattern_matched(p, c, &m, &f, instruction, matched)
         .Slice(call, base, start, end, range, location) -> {
@@ -2469,14 +2469,14 @@ fn lower_present(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunct
     lower_store_value(p, &m, &f, dst, 0, value, inner)
 }
 
-// Result: the word at 0 is 1 for Ok and 0 for Err; the payload follows at 8.
+// Ordinary Result layout is defined alongside lower_result_box_size in Values.
 fn lower_result_box(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, value: MIRValueID, ok: Int) Never! {
     result_ty :: lower_checked_type(c, instruction) ?? return lower_fail(&m, &f, "Result without a checked type")
     if result_ty.kind == .Result(ok_ty, err_ty) {
         dst :: lower_result(p, c, &m, &f, instruction) ?? return
         lower_alloc(&m, &f, dst, lower_result_box_size(p, ok_ty, err_ty))
         lower_store_word(&f, dst, 0, ok)
-        lower_store_value(p, &m, &f, dst, 8, value, if ok == 1 -> ok_ty else -> err_ty)
+        lower_store_value(p, &m, &f, dst, lower_result_payload_offset(), value, if ok == lower_result_selector(true) -> ok_ty else -> err_ty)
         return
     }
     lower_fail(&m, &f, "Result construction of {mir_type_display_name(result_ty)} is not lowered at O0 yet")
