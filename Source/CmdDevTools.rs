@@ -8151,7 +8151,7 @@ pub(crate) fn run_eval(file: &str, pure_required: bool, mode: OutputMode) {
             // value, in the order the program produced it.
             if mode.json {
                 eprint!("{printed}");
-                println!("{}", render_eval_json(&value));
+                print_eval_json(&value);
             } else {
                 print!("{printed}");
                 if let Some(value) = render_eval_value(&value) {
@@ -8181,11 +8181,23 @@ fn render_eval_value(value: &jet::CtValue) -> Option<String> {
 /// line rather than a file, so a caret can point into the argument text.
 const EVAL_EXPRESSION_LABEL: &str = "<eval>";
 
-fn render_eval_json(value: &jet::CtValue) -> String {
-    let value = StatusValue::parse(&value.to_json()).expect("evaluated value must be valid JSON");
-    StatusEnvelope::new("eval", true)
-        .with_field("value", value)
-        .json()
+fn render_eval_json(value: &jet::CtValue) -> Result<String, String> {
+    let encoded = value.to_json()
+        .map_err(|error| jet_foundation::EncodingJson::encoding_error_show(&error))?;
+    let value = StatusValue::parse(&encoded)
+        .map_err(|error| format!("invalid evaluated JSON: {error:?}"))?;
+    Ok(StatusEnvelope::new("eval", true).with_field("value", value).json())
+}
+
+fn print_eval_json(value: &jet::CtValue) {
+    match render_eval_json(value) {
+        Ok(rendered) => println!("{rendered}"),
+        Err(reason) => {
+            println!("{}", StatusEnvelope::new("eval", false)
+                .with_field("error", StatusValue::from(reason)).json());
+            exit(ExitCodes::USER_ERROR);
+        }
+    }
 }
 
 /// S60 / D-PURE1: `jet eval "<expression>"` — the expression form of the same
@@ -8213,7 +8225,7 @@ pub(crate) fn run_eval_expression(source: &str, mode: OutputMode) {
             let value = evaluated.value.unwrap_or(jet::CtValue::Unit);
             if mode.json {
                 eprint!("{}{}", evaluated.stdout, evaluated.stderr);
-                println!("{}", render_eval_json(&value));
+                print_eval_json(&value);
             } else {
                 print!("{}", evaluated.stdout);
                 eprint!("{}", evaluated.stderr);
