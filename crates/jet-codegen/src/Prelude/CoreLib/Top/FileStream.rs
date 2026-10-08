@@ -316,3 +316,4 @@ pub(crate) fn jet_file_reader_line_bytes_raw(reader: &mut JetFileReader) -> Resu
         .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Read, &reader.path, error))?;
     Ok(bytes)
 }
+
