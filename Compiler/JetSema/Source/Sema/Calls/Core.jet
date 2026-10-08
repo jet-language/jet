@@ -32,9 +32,12 @@ use jet_foundation.[
     TGenericParam,
     TStmt,
     Type,
+    CoreCallSymbol,
+    TCallArg,
     core_call,
     core_call_accepts_arity,
     core_call_coverage_contains,
+    core_call_source_member,
     core_call_projection,
     core_call_typed_signature,
     core_call_typed_signature_for,
@@ -428,6 +431,32 @@ pub fn sema_call_core_check_typed_argument(value: TExpr, expected: Type, environ
     sema_expr_expected(typed, Val(expected), environment, &diagnostics)
 }
 
+// Width selection is the existing checked mathematical normalization; it is
+// separate from source forwarding and never widens F32 values.
+fn sema_call_core_normalized_source_record(record: CoreCallRecord, args: [TExpr]) -> CoreCallRecord Never! {
+    normalized := record
+    if record.symbol == CoreCallSymbol.SourceOwned && record.module_name == "core.math" && (record.member == "cmp" || record.member == "is_finite") && args.len() > 0 && args[0].ty == Type.Float32 {
+        normalized.source_target = Val("__{record.member}_f32")
+    }
+    normalized
+}
+
+fn sema_call_core_source_arguments(args: [TExpr], params: [SemaCallParam], environment: SemaScopeEnvironment) -> [TCallArg] Never! {
+    result := [TCallArg]{}
+    loop index in 0..<args.len() {
+        value :: args[index]
+        param :: params[index]
+        &result.push(TCallArg{value: value, template_items: [SymbolID]{},
+            borrow: param.convention == AccessConvention.Read && !sema_call_is_scalar(value.ty),
+            mut_borrow: param.convention == AccessConvention.Write, clone: false, arc_clone: false,
+            fn_coerce: None, widen_to_vec: false,
+            widen_to_union: sema_call_widen_union(param.ty ?? value.ty, value.ty),
+            box_as_trait: sema_call_box_as_trait(param.ty ?? value.ty, value.ty, environment),
+            label: None, spread: false})
+    }
+    result
+}
+
 pub fn sema_call_core_tir(record: CoreCallRecord, args: [TExpr], span: Span, type_args: [Type], widen_to_vec: [Bool], data_plan: MIRDataPlan?, result_type: Type, fallibility: TFailureCarrier, expected: Type?, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> TExpr? {
     process_run_boundary :: record.module_name == "core.process" && record.member == "run" && args.len() == record.signature.arity + 1
     if !core_call_accepts_arity(record, args.len()) && !process_run_boundary {
@@ -436,13 +465,24 @@ pub fn sema_call_core_tir(record: CoreCallRecord, args: [TExpr], span: Span, typ
         &diagnostics.push(sema_error("E0104", span, "`{record.module_name}.{record.member}` expects {range} argument(s), got {args.len()}", "the registered Core call arity is fixed", "provide the registered number of arguments"))
         return None
     }
-    if record.module_name == "core.math" && (record.member == "cmp" || record.member == "is_finite") {
-        identity :: sema_call_core_module_identity(environment, record.module_name) ?? return None
-        member :: if args.len() > 0 && args[0].ty == Type.Float32 -> "__{record.member}_f32" else -> record.member
-        if sema_call_core_source_target(environment, identity, member, type_args, span, &diagnostics) == .Val(target) {
-            value :: sema_tir_expr(result_type, TExprKind.Call{callee: target.symbol.id, type_args: type_args, args: args}, span)
-            return sema_expr_expected(value, expected, environment, &diagnostics)
+    normalized :: sema_call_core_normalized_source_record(record, args)
+    if core_call_source_member(normalized) == .Val(member) {
+        identity :: sema_call_core_module_identity(environment, record.module_name) ?? {
+            &diagnostics.push(sema_error("E0902", span, "source-owned Core module `{record.module_name}` is not loaded", "this declaration has no host implementation route", "load the owning Core source package"))
+            return None
         }
+        target :: sema_call_core_source_target(environment, identity, member, type_args, span, &diagnostics) ?? {
+            &diagnostics.push(sema_error("E0902", span, "source-owned Core call `{record.module_name}.{member}` has no checked source target", "this declaration must execute its owning Jet function", "load the matching Core source export"))
+            return None
+        }
+        params :: sema_call_params_from_type(target.signature) ?? return None
+        if params.len() != args.len() {
+            &diagnostics.push(sema_error("E0902", span, "source-owned Core target `{member}` has the wrong normalized arity", "the checked source signature must accept every normalized argument", "use the matching Core source export"))
+            return None
+        }
+        source_args :: sema_call_core_source_arguments(args, params, environment)
+        value :: sema_tir_expr(result_type, TExprKind.Call{callee: target.symbol.id, type_args: type_args, args: source_args}, span)
+        return sema_expr_expected(value, expected, environment, &diagnostics)
     }
     value := sema_tir_expr(result_type, TExprKind.CoreCall{record: record, args: args, source_span: span, type_args: type_args, widen_to_vec: widen_to_vec, data_plan: data_plan, fallibility: fallibility}, span)
     sema_expr_expected(value, expected, environment, &diagnostics)
