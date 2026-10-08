@@ -35,8 +35,8 @@
 //        [JET_MIR_EMIT=1] dumps freshly checked MIR with `jet emit --rust`, without compiling/running the Rust output.
 //        node Compiler/JetBackend/Tests/run-goldens.mjs <outdir> [--stage mir|convert|lower|run] [--until mir|convert|lower|run] [--case-list FILE | filter...]
 // A later stage reuses the files of the earlier ones in <outdir>.
-// Run-only reuses native artifacts and executed reference streams, not a Rust
-// front-end MIR dump; front-stage preconditions must not close its cases.
+// Run-only reuses native artifacts and compares golden byte/status oracles,
+// not a Rust front-end MIR dump; front-stage preconditions must not close cases.
 // --front jet uses candidate_jetc0 (or JET_FRONT_JETC0) in factory/AOT mode:
 // the mir stage compiles, lowers and links in one process, and the convert/lower
 // stages are unnecessary. No Rust dump, generated lowering driver or rustc is
