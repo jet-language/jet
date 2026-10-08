@@ -480,6 +480,18 @@ the inline field, and user projection fills a caller-owned read/clone-only
 E4 descriptor. `DbScopeHandleWitness.c` checks those lifetimes, both compiled
 policies, absent versus present-empty requests and exact-once destruction.
 
+The native delivery handle owns three independent text children in a 40-byte
+carrier, plus normalized duplicate Bool and raw signed generation facts.
+Construction borrows/clones text and range-converts borrowed exact Int before
+allocation; text getters return owned clones and generation returns a fresh
+exact Int. Clone and equality interpret the duplicate slot's low byte.
+Show preserves exactly `Delivery(` plus the raw ID bytes plus `)`, with no
+debug escaping or additional fields. `DeliveryHandleWitness.c` covers all
+equality fields, binary and empty text, independent projections, i64 edges
+and exact-sized deallocation. Its `native-overflow` mode requires the shared
+native-Int range stop (exit 70, empty stdout); process execution is separate
+from parser and C syntax receipts.
+
 ## Dependency order
 
 Core work follows the dependency graph. These categories describe dependency
