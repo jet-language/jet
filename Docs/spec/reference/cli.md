@@ -752,6 +752,18 @@ record, action cache status remains `unknown`. Build vector rows retain the
 compiler MIR's declaration order rather than acceleration inspection's
 key-sorted function view.
 
+Compiler check/compile/link node identities come from the final checked bundle,
+including selected generated modules, and use the shared Core build-key recipe.
+Source names are normalized relative to the selected source root before hashing;
+compile nodes depend on check identities, and link nodes on compile identities.
+Selected outputs are sorted and deduplicated; an unnamed output uses the actual
+entry file's stem. These static graph identities contain no measured duration or
+rebuild reason. Only actual build action observations can populate a BuildRecord.
+The native compile observation retains its actual object handle separately from
+the graph key: target, profile, and runtime-pack identity are not encoded in that
+static key, so it cannot serve as a native artifact cache identity. A compile
+observation never stamps an unexecuted check or link action.
+
 Acceleration inspection projects the optimizer's actual loop, vector, and
 acceleration proof rows for the selected profile and machine layout. It does
 not convert a source proof into a runtime measurement. Decision inspection

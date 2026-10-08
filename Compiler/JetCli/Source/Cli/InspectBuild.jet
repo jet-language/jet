@@ -1,7 +1,8 @@
 // Checked graph queries share the Driver invocation; no CLI graph reconstruction.
 use jet_driver.[JetDriverCompileRequest, JetDriverBuildQueryScope, JetDriverBuildQueryResult, JetDriverOptimizationQueryResult, JetDriverVerbOutput, jet_driver_query_build_plan, jet_driver_present_diagnostics, jet_driver_build_plan_json, jet_driver_build_explanation, jet_driver_optimization_query, jet_driver_report_problems, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
 use jet_foundation.[Diagnostic, DIAGNOSTIC_LINT, MIROptimizationDecision]
-use jet_store.BuildRecord
+use jet_store.[BuildRecord, BuildNodeRecord, ObjectHandle]
+use core.build.BuildGraphNode
 use core.math as build_math
 
 fn jet_cli_build_vector(query: JetDriverOptimizationQueryResult, json: Bool) -> String Never! {
@@ -146,6 +147,31 @@ fn jet_cli_build_duration(value: Float) -> String Never! {
     String.from_bytes(bytes) ?? panic("decimal digits are ASCII")
 }
 
+// Host must supply this pair only after successful native object production and
+// CAS publication. A graph key is not an artifact/cache key: it omits target,
+// profile and runtime identity. Retain the verified object handle separately;
+// the current RecordIndex contract has no native-object link kind.
+struct JetCLICompileNodeObservation {
+    node: BuildNodeRecord
+    object: ObjectHandle
+}
+
+fn jet_cli_build_compile_observation(executed: BuildGraphNode, duration_ms: Float, previous: BuildRecord?, object: ObjectHandle) -> JetCLICompileNodeObservation String! {
+    if executed.kind != "compile" -> return Err("native object production requires a compile node")
+    if duration_ms - duration_ms != 0.0 || duration_ms < 0.0 -> return Err("native compile duration is not a finite non-negative observation")
+    // CmdCompile15122-15129 names the first canonical input when a prior
+    // authenticated record exists. It does not claim that input changed.
+    reason :: if {
+        previous == None -> "first-run"
+        executed.inputs.len() > 0 -> "input:{executed.inputs[0]}"
+        else -> "first-run"
+    }
+    return Ok(JetCLICompileNodeObservation{
+        node: BuildNodeRecord{kind: executed.kind, key: executed.key, subject: executed.subject, duration_ms: duration_ms, why_ran: reason, inputs: executed.inputs},
+        object: object,
+    })
+}
+
 // Only authenticated producer evidence can supply timing/rebuild reasons.
 // Static node keys are not execution receipts (no synthetic first-run rows).
 pub fn jet_cli_build_nodes_report(record: BuildRecord, json: Bool) -> String Never! {
@@ -183,7 +209,7 @@ pub fn jet_cli_build_nodes_report(record: BuildRecord, json: Bool) -> String Nev
 pub fn jet_cli_build_nodes_host(request: JetDriverCompileRequest, scope: &JetDriverBuildQueryScope, file: String, program: String, record: BuildRecord?, json: Bool, color: Bool, verbose: Bool) -> JetDriverVerbOutput {
     query :: jet_driver_query_build_plan(request, &scope)
     if !query.complete || query.internal_problem != None -> return jet_cli_build_query_failure(request, query, file, json, color, verbose)
-    retained :: record ?? return jet_cli_inspect_b_report("E2104", "build execution-node evidence is unavailable", jet_cli_why("E2104"), "run the selected build with a runtime that records authenticated build-node receipts", color, json, JET_DRIVER_EXIT_USER_ERROR)
-    if retained.program != program -> return jet_cli_inspect_b_report("E2104", "build execution-node evidence belongs to another program", jet_cli_why("E2104"), "select the authenticated last-build record for this program", color, json, JET_DRIVER_EXIT_USER_ERROR)
+    retained :: record ?? return jet_cli_execute(jet_cli_inspect_b_report("E2104", "build execution-node evidence is unavailable", jet_cli_why("E2104"), "run the selected build with a runtime that records authenticated build-node receipts", color, json, JET_DRIVER_EXIT_USER_ERROR))
+    if retained.program != program -> return jet_cli_execute(jet_cli_inspect_b_report("E2104", "build execution-node evidence belongs to another program", jet_cli_why("E2104"), "select the authenticated last-build record for this program", color, json, JET_DRIVER_EXIT_USER_ERROR))
     return {stdout: jet_cli_build_nodes_report(retained, json), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }

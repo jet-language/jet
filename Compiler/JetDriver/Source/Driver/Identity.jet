@@ -1,5 +1,6 @@
 // Source, module, and package identities remain separate at the driver boundary.
 use jet_codegen.[TCostReport]
+use core.build.BuildGraphNode
 use jet_foundation.[
     CanonicalPassRecord,
     AppAuthorizedDirectory,
@@ -221,6 +222,10 @@ pub struct JetDriverCompileRequest {
     pub adapter_operation_ids: [String]{[String]{}}
     // Only fn-build staging asks for the checked reflection snapshot.
     pub capture_build_program: Bool{false}
+    // Internal static identities from the final checked source bundle.
+    // Inspection requests them without granting action execution or timing.
+    pub capture_build_nodes: Bool{false}
+    pub build_output_names: [String]{[String]{}}
     pub capture_cost_report: Bool{false}
     pub generated_modules: [JetDriverGeneratedModule]{[JetDriverGeneratedModule]{}}
     // The host's raw build-input transport; `None` refuses those services.
@@ -436,6 +441,7 @@ struct JetDriverLoadResult {
     // `JetDriverCompileMode.Doc`: the checked user modules, in load order.
     doc_modules: [JetDriverDocModule]{[JetDriverDocModule]{}}
     build_program: TComptimeValue?{None}
+    build_nodes: [BuildGraphNode]?{None}
 }
 
 // The entry package's written authority policy, for the host's application
@@ -486,6 +492,7 @@ pub struct JetDriverCompileResult {
     pub repl_session: ReplSession?{None}
     pub canonical_routes: [CanonicalPassRecord]{[CanonicalPassRecord]{}}
     pub build_program: TComptimeValue?{None}
+    pub build_nodes: [BuildGraphNode]?{None}
     pub cost_report: TCostReport?{None}
     pub cost_gaps: [String]{[]}
 }
