@@ -2251,3 +2251,25 @@ covers both variants, clone independence, empty lists with zero/nonzero
 capacity, all 256 byte values, ordered equality, differing lengths, inactive
 payload and null drops. Its expected stdout is not an execution receipt.
 Native linkage, packed composition and runtime behavior remain unexercised.
+
+### Native IP address Show
+
+`IpAddrShow.jet` renders the canonical IP24 transport without staging its
+network octets into a List or copying an address. Clone/drop/equality remain
+the existing providers from `18eb2f82f` in source-approved held composition
+`409730d54`; this Show provider does not duplicate them.
+
+The reference is `NetHTTP.rs:204-206,573-576` and pinned rustc 1.97.1
+`library/core/src/net/ip_addr.rs:1121-1126,1184-1191,1995-2000,2136-2195`.
+IPv4 uses dotted decimal. IPv6 uses shortest lowercase hex, compressing only
+the earliest longest zero span of at least two segments. Only IPv4-mapped
+addresses use `::ffff:` followed by dotted decimal; IPv4-compatible addresses
+remain hex. One existing Text builder receives the output with no temporary
+array, Int or Text allocation.
+
+`IpAddrShowWitness.c` exercises the real Show and reused ownership exports,
+borrowed-input preservation, independent clones, exact-once free interception,
+every IPv4 octet value and IPv6 zero spans, ties, single zeros, lowercase hex,
+mapped and compatible addresses. Its expected stdout is not an execution
+receipt. Source approval is not native runtime or packed-list admission;
+native link and behavior remain unexercised.
