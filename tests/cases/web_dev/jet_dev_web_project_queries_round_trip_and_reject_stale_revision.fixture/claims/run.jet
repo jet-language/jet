@@ -1,0 +1,58 @@
+use core.files as files
+use core.crypto as crypto
+
+fn s5_canvas_token() -> String {
+    text :: sys.get("S5_CANVAS") ?? panic("Canvas URL")
+    marker :: "session=".bytes()
+    bytes :: text.bytes()
+    start :: (s5_web_find(bytes, marker) ?? panic("session parameter")) + marker.len()
+    end := start
+    loop end < bytes.len() {
+        byte :: Int.from_u8(bytes[end])
+        if !((byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 70) || (byte >= 97 && byte <= 102)) -> break
+        end = end + 1
+    }
+    assert(end - start >= 32, "original Canvas session parser")
+    String.from_bytes_lossy(s5_web_bytes(bytes, start, end))
+}
+
+fn s5_canvas_get(path: String) -> S5HTTPResponse { s5_web_get(s5_web_port(), path, Val(s5_canvas_token())) ?? panic("Canvas GET") }
+fn s5_canvas_post(path: String, body: String) -> S5HTTPResponse { s5_web_post(s5_web_port(), path, body, Val(s5_canvas_token())) ?? panic("Canvas POST") }
+fn s5_canvas_body(response: S5HTTPResponse) -> String { String.from_bytes_lossy(response.body) }
+// ORACLE-PORT crates/jet-devserver/src/Canvas/source_model.rs:24-25, exact original source_revision expression.
+fn s5_canvas_revision(source: String) -> String { "sha256-{crypto.sha256(source.bytes()).hex()}" }
+fn s5_canvas_field(body: String, field: String) -> String {
+    marker :: "\"{field}\":\"".bytes()
+    bytes :: body.bytes()
+    start :: (s5_web_find(bytes, marker) ?? panic("json field")) + marker.len()
+    end := start
+    loop end < bytes.len() && Int.from_u8(bytes[end]) != 34 -> end = end + 1
+    assert(end < bytes.len(), "field terminator")
+    String.from_bytes_lossy(s5_web_bytes(bytes, start, end))
+}
+
+#Test("original project queries and stale project revision") {
+    root :: sys.get("S5_ROOT") ?? panic("root")
+    project_response :: s5_canvas_get("/canvas/project")
+    assert_eq(project_response.status, 200)
+    project_revision :: s5_canvas_field(s5_canvas_body(project_response), "project_revision")
+    source :: files.read(files.join(root, "app.jet")) ?? panic("source")
+    revision :: s5_canvas_revision(source)
+    search :: (String.from_bytes([U8]{123,34,115,99,104,101,109,97,95,118,101,114,115,105,111,110,34,58,49,44,34,111,112,34,58,34,112,114,111,106,101,99,116,95,115,101,97,114,99,104,34,44,34,115,111,117,114,99,101,95,105,100,34,58,34,97,112,112,46,106,101,116,34,44,34,114,101,118,105,115,105,111,110,34,58,34,64,82,69,86,64,34,44,34,112,114,111,106,101,99,116,95,114,101,118,105,115,105,111,110,34,58,34,64,80,82,79,74,69,67,84,64,34,44,34,113,117,101,114,121,34,58,34,104,101,108,112,101,114,34,125}) ?? panic("literal UTF-8")).replace("@REV@", revision).replace("@PROJECT@", project_revision)
+    response :: s5_canvas_post("/canvas/query", search)
+    assert_eq(response.status, 200)
+    body :: s5_canvas_body(response)
+    assert(body.contains("\"op\":\"project_search\""))
+    assert(body.contains("\"source_id\":\"helper.jet\""))
+    references :: (String.from_bytes([U8]{123,34,115,99,104,101,109,97,95,118,101,114,115,105,111,110,34,58,49,44,34,111,112,34,58,34,114,101,102,101,114,101,110,99,101,115,34,44,34,115,111,117,114,99,101,95,105,100,34,58,34,97,112,112,46,106,101,116,34,44,34,114,101,118,105,115,105,111,110,34,58,34,64,82,69,86,64,34,44,34,112,114,111,106,101,99,116,95,114,101,118,105,115,105,111,110,34,58,34,64,80,82,79,74,69,67,84,64,34,44,34,115,121,109,98,111,108,34,58,34,104,101,108,112,101,114,34,125}) ?? panic("literal UTF-8")).replace("@REV@", revision).replace("@PROJECT@", project_revision)
+    refs_response :: s5_canvas_post("/canvas/query", references)
+    assert_eq(refs_response.status, 200)
+    refs :: s5_canvas_body(refs_response)
+    assert(refs.contains("\"op\":\"references\""))
+    assert(refs.contains("\"kind\":\"reference\""))
+    files.write(files.join(root, "helper.jet"), (String.from_bytes([U8]{102,110,32,104,101,108,112,101,114,40,41,32,45,62,32,73,110,116,32,123,10,32,32,32,32,114,101,116,117,114,110,32,51,10,125,10}) ?? panic("literal UTF-8"))) ?? panic("edit helper")
+    stale_response :: s5_canvas_post("/canvas/query", search)
+    assert_eq(stale_response.status, 409)
+    assert(s5_canvas_body(stale_response).contains("\"kind\":\"conflict\""))
+    assert((files.read(files.join(root, "helper.jet")) ?? panic("helper after query")).contains("return 3"))
+}
