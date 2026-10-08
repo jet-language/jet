@@ -6,12 +6,25 @@ struct PackageFetchGitTransport {
 fn pkg_fetch_git_bad(detail: String) -> PackageFetchError Never! {
     pkg_fetch_error("E1203", "git dependency URL or revision is not allowed", detail, "use a public HTTPS, SSH, or Git URL, or a local file URL inside the project root")
 }
+// Rust also forbids the two Unicode line separators in subprocess arguments.
+fn pkg_fetch_git_has_control(text: String) -> Bool Never! {
+    if pkg_text_has_control(text) -> return true
+    bytes :: text.bytes()
+    if bytes.len() < 3 -> return false
+    loop index in 0..<(bytes.len() - 2) {
+        if Int.from_u8(bytes[index]) == 226 && Int.from_u8(bytes[index + 1]) == 128 {
+            last :: Int.from_u8(bytes[index + 2])
+            if last == 168 || last == 169 -> return true
+        }
+    }
+    false
+}
 fn pkg_fetch_git_revision(revision: String, cache: Bool) PackageFetchError! {
-    if revision == "" || revision.starts_with("-") || pkg_text_has_control(revision) || revision.contains("\u{2028}") || revision.contains("\u{2029}") -> return Err(pkg_fetch_git_bad("the revision is empty or contains unsafe characters"))
+    if revision == "" || revision.starts_with("-") || pkg_fetch_git_has_control(revision) -> return Err(pkg_fetch_git_bad("the revision is empty or contains unsafe characters"))
     if cache -> pkg_source_store_component(revision) ?? return Err(pkg_fetch_git_bad("the revision must be one safe cache path component"))
 }
 fn pkg_fetch_git_transport(root: String, url: String) -[FS, Env, Net, Time.Wait]> PackageFetchGitTransport PackageFetchError! {
-    if url == "" || url.starts_with("-") || pkg_text_has_control(url) || url.contains("\u{2028}") || url.contains("\u{2029}") -> return Err(pkg_fetch_git_bad("the URL is empty or contains unsafe characters"))
+    if url == "" || url.starts_with("-") || pkg_fetch_git_has_control(url) -> return Err(pkg_fetch_git_bad("the URL is empty or contains unsafe characters"))
     if url.starts_with("file://") {
         path :: url.removeprefix("file://")
         if !path.starts_with("/") || path.contains("?") || path.contains("#") || path.contains("\\") -> return Err(pkg_fetch_git_bad("file URLs must name a local absolute path"))

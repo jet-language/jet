@@ -13,13 +13,13 @@ fn pkg_capability_snapshot_parse(raw: String) -> PackageCapabilitySnapshot? Neve
         line :: raw_line.trim()
         if line == "" -> next
         if {
-            line.starts_with("api_version = ") -> version = Int.parse(line.removeprefix("api_version = ")) ?? return None
+            line.starts_with("api_version = ") -> version = Val(pkg_lock_parse_unsigned(line.removeprefix("api_version = "), 4294967295) ?? return None)
             line.starts_with("package = ") -> package = Val(line.removeprefix("package = "))
             line.starts_with("published_version = ") -> published = Val(line.removeprefix("published_version = "))
             line.starts_with("fn ") -> {
                 rest :: line.removeprefix("fn ")
                 name := rest
-                loop marker in [String]{"<", "("} {
+                loop marker in ([String]{"<", "("}) {
                     if name.split_once(marker) == .Val(pair) -> name = pair.before
                 }
                 if name.trim() == "" -> return None

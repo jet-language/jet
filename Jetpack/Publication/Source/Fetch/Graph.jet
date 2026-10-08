@@ -7,9 +7,18 @@ struct PackageFetchOptions {
 }
 #Error
 struct PackageFetchError { diagnostic: Diagnostic }
-struct PackageFetchResult { lock: LockFile; directories: [String: String] }
-struct PackageFetchNode { package: LockedPackage; directory: String }
-struct PackageFetchVersion { version: String; chain: [String] }
+struct PackageFetchResult {
+    lock: LockFile
+    directories: [String: String]
+}
+struct PackageFetchNode {
+    package: LockedPackage
+    directory: String
+}
+struct PackageFetchVersion {
+    version: String
+    chain: [String]
+}
 struct PackageFetchResolver {
     root: String
     previous: LockFile?
@@ -83,7 +92,9 @@ fn pkg_fetch_registry_config(resolver: PackageFetchResolver, name: String) -[Env
 fn pkg_fetch_record_version(resolver: &PackageFetchResolver, name: String, version: String, chain: [String]) PackageFetchError! {
     if resolver.versions.get(name) == .Val(previous) {
         if previous.version != version -> return Err(pkg_fetch_error("E1201", "dependency `{name}` has conflicting versions `{previous.version}` and `{version}`", "{previous.chain.join(" -> ")} conflicts with {chain.join(" -> ")}", "align the dependency versions in the owning packages"))
-    } else -> resolver.versions[name] = PackageFetchVersion{version: version, chain: chain}
+    } else {
+        resolver.versions[name] = PackageFetchVersion{version: version, chain: chain}
+    }
 }
 fn pkg_fetch_existing_provenance(resolver: PackageFetchResolver, name: String, version: String, hash: String) -> DependencyProvenance? Never! {
     package :: pkg_fetch_previous_package(resolver, name) ?? return None
@@ -91,7 +102,10 @@ fn pkg_fetch_existing_provenance(resolver: PackageFetchResolver, name: String, v
     package.provenance
 }
 fn pkg_fetch_resolve(verification: &StoreVerification, roots: HangarRoots, context: ProviderCtx, resolver: &PackageFetchResolver, name: String, spec: DepSpec, parent: String, chain: [String]) PackageFetchError! -[FS, Env, Exec, Net, Time, Time.Wait]> {
-    if resolver.nodes.has_key(name) -> return
+    if resolver.nodes.get(name) == .Val(existing) {
+        pkg_fetch_record_version(&resolver, name, existing.package.version, chain)
+        return
+    }
     if resolver.visiting.contains(name) -> return Err(pkg_fetch_error("E1207", "dependency graph contains a cycle at `{name}`", chain.join(" -> "), "remove the recursive package dependency"))
     &resolver.visiting.push(name)
     node :: if spec == {

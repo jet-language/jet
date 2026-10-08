@@ -11,12 +11,9 @@ fn publication_ensure_real_directory(path: String, label: String) IOError! -[FS,
     _ :: foundation_open_directory_authority(path)
 }
 fn publication_load_publish_lock(source: String) -[FS, Env]> LockFile? IOError! {
-    bytes :: if foundation_read_file_nofollow_at_root(source, UNIFIED_LOCK_FILE, PKG_MAX_LOCK_BYTES) == {
-        .Ok(value) -> value
-        .Err(error) -> if error == {
-            .NotFound(_) -> return Ok(None)
-            else -> return Err(error)
-        }
+    bytes :: foundation_read_file_nofollow_at_root(source, UNIFIED_LOCK_FILE, PKG_MAX_LOCK_BYTES) ?? {
+        if err == .NotFound(_) -> return Ok(None)
+        return Err(err)
     }
     text :: String.from_bytes(bytes) ?? return Err(publication_invalid_oci("published lock is not UTF-8"))
     parsed :: pkg_lock_parse(text) ?? return Err(publication_invalid_oci("published lock is invalid: {err.message()}"))
@@ -57,7 +54,10 @@ fn publication_snapshot_verified_artifact(repo: String, entry: PublicationIndexE
             }
         }
         .Ok(.None) -> {}
-        .Err(error) -> { close(^snapshot); return Err(error) }
+        .Err(error) -> {
+            close(^snapshot)
+            return Err(error)
+        }
     }
     Ok(PublicationArtifactSnapshot{source: snapshot})
 }

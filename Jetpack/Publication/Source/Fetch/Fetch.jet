@@ -106,14 +106,22 @@ fn pkg_fetch_locked_directories(verification: &StoreVerification, roots: HangarR
     Ok(directories)
 }
 fn pkg_fetch_locked_source(name: String, package: LockedPackage) -[FS, Env]> String PackageFetchError! {
-    loop component in [String]{name, package.version, package.fingerprint.removeprefix("sha256-")} -> pkg_source_store_component(component) ?? return Err(pkg_fetch_locked_error(name, "locked source store identity is not one safe component"))
+    loop component in ([String]{name, package.version, package.fingerprint.removeprefix("sha256-")}) {
+        pkg_source_store_component(component) ?? return Err(pkg_fetch_locked_error(name, "locked source store identity is not one safe component"))
+    }
     path :: pkg_source_store_path(name, package.version, package.fingerprint)
     expected :: package.content_hash ?? if package.locked == .Val(revision) -> revision.tree_hash else -> ""
     pkg_source_store_verify(name, path, expected) ?? return Err(PackageFetchError{diagnostic: err.diagnostic})
     Ok(path)
 }
 fn pkg_fetch_locked_foreign(roots: HangarRoots, root: String, package: LockedPackage, language: ForeignLanguage, reference: String) -[FS, Env]> String PackageFetchError! {
-    output :: if package.source == .Foreign(actual_language, actual_reference, path) && actual_language == language && actual_reference == reference -> path else -> return Err(pkg_fetch_locked_error(package.name, "the lock has no matching language-qualified provider identity"))
+    output := ""
+    if package.source == .Foreign(actual_language, actual_reference, path) {
+        if actual_language != language || actual_reference != reference -> return Err(pkg_fetch_locked_error(package.name, "the lock has no matching language-qualified provider identity"))
+        output = path
+    } else {
+        return Err(pkg_fetch_locked_error(package.name, "the lock has no matching language-qualified provider identity"))
+    }
     _ :: foundation_open_directory_authority(output) ?? return Err(pkg_fetch_locked_error(package.name, "locked Hangar output is unavailable: {err}"))
     envelope :: package.envelope ?? return Err(pkg_fetch_locked_error(package.name, "foreign lock record has no verified output envelope"))
     actual :: pkg_try_output_hash_of_in_hangar(output, roots.hangar_dir(), false) ?? return Err(pkg_fetch_locked_error(package.name, err.message()))
@@ -145,7 +153,8 @@ fn pkg_fetch_locked_registry(verification: &StoreVerification, roots: HangarRoot
         if dependency.package.name != name || dependency.package.version != package.version -> return Err(pkg_fetch_registry_error(name, "locked source metadata disagrees with its registry identity"))
         metadata :: publication_read_registry_package_metadata(snapshot.path(), name, package.version) ?? return Err(pkg_fetch_registry_error(name, "locked dependency metadata is invalid: {err}"))
         edges :: pkg_fetch_registry_edges(dependency, metadata, name)
-        expected := loop edge in edges -> edge.name
+        expected := [String]{}
+        loop edge in edges -> &expected.push(edge.name)
         loop child in pkg_lock_manifest_dependency_names(dependency) { if dependency.dependencies[child] != .Registry(_) -> &expected.push(child) }
         if pkg_overlay_sorted_unique(package.dependencies) != pkg_overlay_sorted_unique(expected) -> return Err(pkg_fetch_registry_error(name, "locked dependency roles, features, or constraints disagree with the artifact metadata"))
         receipt :: publication_authorize_package_candidate(manifest.policy, name, package.version, dependency.package.license, registry) ?? return Err(PackageFetchError{diagnostic: publication_package_policy_edge_diagnostic(manifest.package.name, "{name}#{package.version}", registry, err)})

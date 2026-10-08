@@ -4,6 +4,9 @@
     assert_eq(pkg_capability_snapshot_text([PackageCapabilitySnapshot]{first, second}), "a\nfn read(v: Value)\n--\nb\nfn a() Int\nfn z(v: &Value)")
     assert(pkg_capability_snapshot_parse("api_version = nope\npackage = a\npublished_version = 1\n") == None)
     assert(pkg_capability_snapshot_parse("api_version = 3\npackage = a\npublished_version = 1\nunknown\n") == None)
+    assert(pkg_capability_snapshot_parse("api_version = -1\npackage = a\npublished_version = 1\n") == None)
+    assert(pkg_capability_snapshot_parse("api_version = 4294967296\npackage = a\npublished_version = 1\n") == None)
+    assert(pkg_capability_snapshot_parse("api_version = 4294967295\npackage = a\npublished_version = 1\n") != None)
     changed :: pkg_capability_snapshot_parse("api_version = 3\npackage = b\npublished_version = 99\nfn z(v: Value)\nfn a() Int\n") ?? panic("changed")
     assert(pkg_lock_compute_fingerprint("tree", [String]{}, pkg_capability_snapshot_text([PackageCapabilitySnapshot]{first})) != pkg_lock_compute_fingerprint("tree", [String]{}, pkg_capability_snapshot_text([PackageCapabilitySnapshot]{changed})))
 }
@@ -15,6 +18,27 @@
     assert_eq(pkg_fetch_update_scope(Val(lock), PackageFetchOptions{}), [String]{})
     assert_eq(pkg_fetch_normalize_path("/a/b/../c"), "/a/c")
     assert_eq(pkg_fetch_normalize_path("../../a"), "../../a")
+}
+
+#Test("fetch cached version retains the canonical conflict diagnostic") {
+    resolver := PackageFetchResolver{root: "", previous: None, options: PackageFetchOptions{}, policy: PackagePolicy.default(), nodes: [String: PackageFetchNode]{}, versions: [String: PackageFetchVersion]{}, visiting: [String]{}, registry_plan: [String: PublicationIndexEntry]{}, update_scope: [String]{}, foreign: [String: ForeignRealization]{}, advisory_loaded: false, advisory: None}
+    pkg_fetch_record_version(&resolver, "shared", "1.0.0", [String]{"root", "first"}) ?? panic("first version")
+    pkg_fetch_record_version(&resolver, "shared", "1.0.0", [String]{"root", "second"}) ?? panic("same version")
+    if pkg_fetch_record_version(&resolver, "shared", "2.0.0", [String]{"root", "third"}) == {
+        .Ok(_) -> panic("conflicting cached version must fail")
+        .Err(error) -> {
+            assert_eq(error.diagnostic.code, "E1201")
+            assert_eq(error.diagnostic.what, "dependency `shared` has conflicting versions `1.0.0` and `2.0.0`")
+        }
+    }
+}
+
+#Test("fetch subprocess arguments reject both Unicode line separators") {
+    separator :: String.from_bytes([U8]{226, 128, 168}) ?? panic("UTF-8 line separator")
+    paragraph :: String.from_bytes([U8]{226, 128, 169}) ?? panic("UTF-8 paragraph separator")
+    assert(pkg_fetch_git_has_control("main{separator}forged"))
+    assert(pkg_fetch_git_has_control("main{paragraph}forged"))
+    assert(!pkg_fetch_git_has_control("main-é"))
 }
 #Test("fetch all-answer public destination policy rejects mixed and malformed DNS results") {
     assert(publication_addresses_public([[U8]]{[U8]{8, 8, 8, 8}}))

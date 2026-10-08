@@ -86,7 +86,12 @@ fn pkg_fetch_registry_plan(resolver: PackageFetchResolver, manifest: Manifest) -
     plan := [String: PublicationIndexEntry]{}
     loop name in selected.keys() {
         loop entry in entries[name] {
-            if publication_parse_semver(entry.version) == Val(selected[name]) { plan[name] = entry; break }
+            parsed :: publication_parse_semver(entry.version)
+            wanted :: Val(selected[name])
+            if parsed == wanted {
+                plan[name] = entry
+                break
+            }
         }
         if !plan.has_key(name) -> return Err(pkg_fetch_registry_error(name, "resolver selected a candidate with no immutable index entry"))
     }
