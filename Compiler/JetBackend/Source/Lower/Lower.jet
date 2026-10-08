@@ -551,7 +551,7 @@ fn lower_repr(p: MIRProgram, ty: MIRType) -> LowerRepr Never! {
             if lower_queue_element(ty) == .Val(elem) -> return lower_queue_repr(p, ty, elem)
             if lower_priority_queue_element(ty) == .Val(elem) -> return lower_priority_queue_repr(p, ty, elem)
             runtime :: lower_runtime_handle_type(p, ty)
-            if runtime == None && lower_runtime_missing_application(ty, LOWER_RUNTIME_HANDLES) == .Val(failure) -> return failure
+            if runtime == None && lower_runtime_missing_application(ty, &LOWER_RUNTIME_HANDLES) == .Val(failure) -> return failure
             schema :: lower_record_schema_with_handle(p, ty, runtime)
             // The canonical runtime name table excludes source-owned Core
             // shapes. Only exact Core paths may override their MIR definition,
