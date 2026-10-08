@@ -7903,7 +7903,9 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             },
                             kind: TExprKind::MethodCall {
                                 recv: Box::new(recv),
-                                method: crate::Codegen::TIR::TMethodRef::inherent(member),
+                                method: crate::Codegen::TIR::TMethodRef::inherent(
+                                    &Syntax::computed_field_getter_name(member),
+                                ),
                                 type_args: Vec::new(),
                                 args: vec![],
                                 source_first_string_literal: None,

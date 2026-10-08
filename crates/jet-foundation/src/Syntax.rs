@@ -953,6 +953,20 @@ pub use dictionary::*;
 mod predicates;
 pub use predicates::*;
 
+const COMPUTED_FIELD_GETTER_STEM: &str = "__computed_";
+
+/// Compiler-owned computed-field functions never occupy a user method name.
+/// Use the existing reserved machine-name lane, shared by all getter callers.
+pub fn computed_field_getter_name(field: &str) -> String {
+    format!("{GENERATED_NAME_PREFIX}{COMPUTED_FIELD_GETTER_STEM}{field}")
+}
+
+/// Recover the source field addressed by a compiler-owned computed getter.
+pub fn computed_field_getter_field(name: &str) -> Option<&str> {
+    name.strip_prefix(GENERATED_NAME_PREFIX)?
+        .strip_prefix(COMPUTED_FIELD_GETTER_STEM)
+}
+
 /// D-FIELDMEMO1=A: compiler-owned storage for one marked computed field.
 /// Keep this name in the syntax module so every engine addresses the same
 /// hidden member without inventing a second field naming rule.
