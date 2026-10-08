@@ -6,6 +6,7 @@
 extern void jet_rt_alloc_init(void);
 extern void jet_rt_x25519_fixture(const void *, const void *, const void *);
 extern void jet_rt_x25519_iteration_fixture(int64_t, const void *);
+extern void jet_rt_x25519_negative_carry_fixture(void);
 static unsigned char nibble(char c) {
     assert((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'));
     return (unsigned char)(c <= '9' ? c - '0' : c - 'a' + 10);
@@ -25,6 +26,7 @@ static void kat(const char *scalar, const char *point, const char *expected) {
 }
 int main(void) {
     jet_rt_alloc_init();
+    jet_rt_x25519_negative_carry_fixture();
     kat("a546e36bf0527c9d3b16154b82465edd62144c0ac1fc5a18506a2244ba449ac4",
         "e6db6867583030db3594c1a424b15f7c726624ec26b3353b10a903a6d0ab1c4c",
         "c3da55379de9c6908e94ea4df28d084f32eccf03491c71f754b4075577a28552");
