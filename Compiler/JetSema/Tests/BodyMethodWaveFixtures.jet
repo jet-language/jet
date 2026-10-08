@@ -289,6 +289,29 @@ fn method_wave_cache_line_case() {
     method_wave_require(measured.hits == primed.hits && measured.recomputes > primed.recomputes, "actual source segments prevent a span-preserving stale hit")
 }
 
+fn method_wave_cache_binding_case() {
+    before :: "struct Bound {{ value: Int }}\nstruct BindingOwner {{ fn read(self, bound: Bound) -> Int Never! {{ bound.value }} }}\n"
+    after :: "struct Bound {{ other: Int }}\nstruct BindingOwner {{ fn read(self, bound: Bound) -> Int Never! {{ bound.value }} }}\n"
+    before_graph :: method_wave_registration(before, false)
+    after_graph :: method_wave_registration(after, false)
+    before_func :: before_graph.modules[0].nominals[1].methods[0].declaration
+    after_func :: after_graph.modules[0].nominals[1].methods[0].declaration
+    method_wave_require(before.bytes().len() == after.bytes().len() && "{before_func:Debug}" == "{after_func:Debug}", "the binding regression preserves the complete method AST and source spans")
+    threads :: CompilerThreads{cap: Val(1), cores: 2, memory_available: Val(268435456)}
+    cache :: sema_incremental_cache_new()
+    first :: method_wave_cached_checked(before_graph, threads, cache)
+    baseline_before :: method_wave_checked(before_graph, threads, [SemaComptimeFunctionResult]{})
+    method_wave_require("{first:Debug}" == "{baseline_before:Debug}", "the first resolved-field check has canonical products")
+    primed :: sema_incremental_cache_stats(cache)
+    sema_incremental_cache_clear_measurement(cache)
+    second :: method_wave_cached_checked(after_graph, threads, cache)
+    baseline_after :: method_wave_checked(after_graph, threads, [SemaComptimeFunctionResult]{})
+    method_wave_require("{second:Debug}" == "{baseline_after:Debug}", "a changed resolved field cannot replay the old successful method")
+    method_wave_require(baseline_before.complete && !baseline_after.complete, "the real field lookup distinguishes the two binding inputs")
+    measured :: sema_incremental_cache_stats(cache)
+    method_wave_require(measured.hits == primed.hits && measured.recomputes > primed.recomputes, "the frozen nominal and scope inputs force a real binding recheck")
+}
+
 
 
 
@@ -302,6 +325,7 @@ fn run() {
     method_wave_case(negative, true, true, true, false)
     method_wave_cache_case(positive)
     method_wave_cache_line_case()
+    method_wave_cache_binding_case()
     unit_source :: "{positive}\n#UnitFamily(WaveLength, base: meter) {{ meter\nfoot(scale: 381/1250) }}\nstruct UnitOwner {{ value: Int\nfn unit_value(&self) -> Meter Never! {{ converted :: Meter{{Foot.from_float(Float{{8.0}})}}\nconverted }}\nfn after_unit(&self) -> Int Never! {{ self.value }} }}\n"
     method_wave_case(unit_source, true, true, false, true)
     method_wave_cache_host_case(unit_source)
