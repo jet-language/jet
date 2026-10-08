@@ -204,6 +204,7 @@ use jet_codegen.[
     lower_comptime_item,
     lower_foreign_artifacts,
     lower_functions,
+    jet_codegen_lower_native_program,
 ]
 use jet_eval.[
     JetEvalConfig,
@@ -3844,7 +3845,7 @@ fn jet_driver_native_emit_config(threads: CompilerThreads) -> JetRustEmitConfig 
 
 pub fn jet_driver_compile(request: ^JetDriverCompileRequest) -> JetDriverCompileResult {
     kg := jet_driver_keep_going_log(None)
-    jet_driver_compile_stages(^request, &kg, true)
+    jet_driver_compile_stages(^request, &kg, true, false)
 }
 
 // Native code generation consumes checked MIR directly. Emitting Rust is not
@@ -3852,7 +3853,14 @@ pub fn jet_driver_compile(request: ^JetDriverCompileRequest) -> JetDriverCompile
 // their diagnostics are identical to the ordinary compile path.
 pub fn jet_driver_compile_mir(request: ^JetDriverCompileRequest) -> JetDriverCompileResult {
     kg := jet_driver_keep_going_log(None)
-    jet_driver_compile_stages(^request, &kg, false)
+    jet_driver_compile_stages(^request, &kg, false, false)
+}
+
+// Native programs use the explicit stop-capable producer. Library emission
+// keeps jet_driver_compile_mir's plain MIR, so runtime leaves remain noreturn.
+pub fn jet_driver_compile_native_mir(request: ^JetDriverCompileRequest) -> JetDriverCompileResult {
+    kg := jet_driver_keep_going_log(None)
+    jet_driver_compile_stages(^request, &kg, false, true)
 }
 
 // JET_KEEP_GOING (the bootstrap entry reads it): every phase runs past the
@@ -3862,7 +3870,7 @@ pub fn jet_driver_compile_mir(request: ^JetDriverCompileRequest) -> JetDriverCom
 // the trace sink.
 pub fn jet_driver_compile_keep_going(request: ^JetDriverCompileRequest, options: JetDriverKeepGoing) -> JetDriverCompileResult {
     kg := jet_driver_keep_going_log(Val(options))
-    result := jet_driver_compile_stages(^request, &kg, true)
+    result := jet_driver_compile_stages(^request, &kg, true, false)
     if result.internal_problem == .Val(problem) -> jet_driver_keep_going_row(&kg, "internal", "-", "ICE", problem, "-")
     // Reports of a stage that returned early; recorded rows are not repeated.
     kg.diagnostic_mark = 0
@@ -3871,7 +3879,7 @@ pub fn jet_driver_compile_keep_going(request: ^JetDriverCompileRequest, options:
     result
 }
 
-fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKeepGoingLog, emit_rust: Bool) -> JetDriverCompileResult {
+fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKeepGoingLog, emit_rust: Bool, native_program: Bool) -> JetDriverCompileResult {
     trace := jet_driver_empty_compile_trace()
     // Phase spans for the host trace (JET_TRACE_FILE). A phase an early
     // return abandons is closed by the next enclosing end the host records.
@@ -4257,7 +4265,7 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
         jet_driver_keep_going_flush(&kg, request.trace_sink)
     }
 
-    lowered := lower_functions(&sema_functions, &runtime_semantic_modules, load.source_files, request.compiler_threads, request.trace_sink)
+    lowered := if native_program -> jet_codegen_lower_native_program(&sema_functions, &runtime_semantic_modules, load.source_files, request.compiler_threads, request.trace_sink) else -> lower_functions(&sema_functions, &runtime_semantic_modules, load.source_files, request.compiler_threads, request.trace_sink)
     if request.trace_sink == .Val(sink) -> sink.end("lower", lowered.functions.len())
     if lowered.functions.len() != sema_functions.len() {
         &load.diagnostics.push(jet_driver_diagnostic_without_span("E0003", "MIR lowering did not return every checked function", "a successful lowering preserves the complete checked function set", "report this incomplete codegen result as a compiler defect"))

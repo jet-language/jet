@@ -43,6 +43,14 @@ emits RequireStop then Unreachable without pre-call cleanup, unlike the Jet
 `jet_codegen_lower_fallback_panic` path in `Statements.jet`. This seam preserves
 that pre-existing plain-mode divergence rather than changing seed semantics.
 
+The factory selects `jet_driver_compile_native_mir` for native programs and
+the unchanged plain `jet_driver_compile_mir` for runtime-library objects.
+`jet_codegen_lower_native_program` shares the plain lowering implementation
+but enables stop points, not comptime budgets. This matches the Rust task
+boundary's panic-to-TaskFailure catch rather than letting an ordinary native
+task panic abort its whole process. Plain/no-task MIR production uses the
+same false-mode implementation; its output is expected to remain byte-identical.
+
 ## Purpose and scope
 
 Core modules own public behavior. A Core API must be useful for real programs,
