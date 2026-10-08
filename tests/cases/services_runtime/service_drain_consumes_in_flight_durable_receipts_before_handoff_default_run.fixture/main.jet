@@ -1,0 +1,29 @@
+
+use core.service as service
+use core.testing as testing
+use core.time as time
+
+fn worker() {}
+
+fn receipt_id(receipt: ^Delivery) -> Delivery {
+    return receipt
+}
+
+fn run() {
+    temp := testing.temp_dir("drain-durable")
+    store :: Path.from(temp).join("authority.log").to_string()
+    retention :: Duration.seconds(86400) ?? panic("retention")
+    runtime := service.runtime(store, retention: retention)
+    tree := service.tree("drain-durable")
+    endpoint :: tree.worker("api", worker, capacity: 2) ?? panic("worker")
+    tree.start() ?? panic("start")
+    tree.send(endpoint, "before") ?? panic("before")
+    tree.drain_worker(endpoint) ?? panic("drain")
+    receipt :: runtime.send(endpoint, "after", key: "after") ?? panic("send")
+    id :: receipt_id(receipt)
+    print("accepted")
+    print("first:{tree.receive(endpoint) ?? panic("first")}")
+    print("second:{tree.receive(endpoint) ?? panic("second")}")
+    runtime.commit(id) ?? panic("commit")
+    print("generation:{tree.handoff_generation() ?? panic("handoff")}")
+}

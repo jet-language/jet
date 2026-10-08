@@ -1,0 +1,17 @@
+
+use core.service as service
+
+fn worker() {}
+
+fn run() {
+    tree := service.tree("pinned-rollback")
+    endpoint :: tree.worker("api", worker, capacity: 1) ?? panic("worker")
+    tree.start() ?? panic("start")
+    tree.send(endpoint, "queued") ?? panic("send")
+    tree.drain_worker(endpoint) ?? panic("drain")
+    generation :: tree.handoff_generation() ?? panic("handoff")
+    print("handoff:{generation}")
+    print("rolled:{tree.rollback_generation() ?? panic("rollback")}")
+    print("message:{tree.receive(endpoint) ?? panic("receive")}")
+    tree.stop() ?? panic("stop")
+}

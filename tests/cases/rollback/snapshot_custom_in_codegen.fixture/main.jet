@@ -1,0 +1,27 @@
+
+struct Counter {
+    value: Int
+}
+struct CounterSnap { value: Int }
+impl Counter.Rollback {
+    type Snapshot = CounterSnap
+    fn snapshot(self) -> CounterSnap {
+        return CounterSnap{ value: self.value }
+    }
+    fn restore(&self, snap: ^CounterSnap) {
+        self.value = snap.value
+    }
+}
+enum Fail { Bad }
+fn bump(c: &Counter) -> Int !Fail {
+    #Transact {
+        c.value += 1
+        return Err(Fail.Bad)
+    }
+    return Ok(c.value)
+}
+fn run() {
+    c := Counter{ value: 0 }
+    _ :: bump(&c) ?? 0
+    print(c.value)
+}
