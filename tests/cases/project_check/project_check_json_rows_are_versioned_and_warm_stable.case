@@ -21,7 +21,7 @@ json: stdout doc $.rows[?name="Core closure"][0].status = "proven"
 json: stdout doc $.rows[?name="Core closure"][0].diagnostic = "E2391"
 json: stdout doc $.rows[?name="tier lowering"][0].status = "proven"
 json: stdout doc $.rows[?name="tier lowering"][0].diagnostic = "E2392"
-elapsed: cold > 0us # original predicate: as_micros() > 0
+elapsed: cold >= 1us # original ed77c235f tests/project_check.rs:648,684-686 as_micros() > 0
 step warm: jet check --json --verbose
 cwd: {work}/entry_resolution
 env: JET_RECEIPT_DIR={work}/receipts
@@ -33,4 +33,4 @@ json: stdout doc $.elapsed_ms >= 0
 json: stdout doc $.rows : array # original predicate
 stderr: ~ "ok: check current" # original predicate
 json: stdout doc $.rows == cold
-elapsed: warm > 0us # original predicate: as_micros() > 0
+elapsed: warm >= 1us # original ed77c235f tests/project_check.rs:653,684-686 as_micros() > 0
