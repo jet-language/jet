@@ -1,0 +1,2 @@
+CREATE TABLE users (id INTEGER PRIMARY KEY, price DECIMAL(10,2), active BOOLEAN NOT NULL, born DATE, opened TIME, created TIMESTAMP, data BLOB);
+CREATE TABLE audit (event TEXT NOT NULL);
