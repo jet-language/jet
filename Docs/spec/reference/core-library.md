@@ -1367,6 +1367,15 @@ persistent format authenticates type and origin, and failures redact paths,
 identities, recipients, backend text, and key bytes. Revocation is local
 bearer-copy state: an already exported envelope cannot be remotely erased.
 
+Wrapped backups are parsed in Jet before a `WrappedVaultKey` is constructed:
+JVKW/v1 length, version, mode, type, origin identity, sorted unique recipients,
+and fixed Argon2id parameters are checked without examining plaintext key bytes.
+`.bytes()` deliberately returns an owned copy of the encrypted backup.
+`KeyUnlock.Recipient` and `.Passphrase` retain read views of the original secret;
+the owner must remain live through wrapped import. No copied-secret carrier is
+created. Name and authorization-reason limits count UTF-8 bytes, and reject
+Unicode controls; reasons must also be NFC and exclude U+2028/U+2029.
+
 `ExpiringSecret<T>` is the lifetime wrapper for `Secret`, `SigningKey`, and
 `X25519SecretKey`. Construct it with an injected `Clock` and a `Duration`; use
 `.with` for a non-escaping read loan. Expiry returns `Expired`, and the wrapper

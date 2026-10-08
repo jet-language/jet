@@ -11,6 +11,7 @@ package {
 use core
 use core.crypto.expert as rawcrypto
 use core.crypto.random as random
+use core.crypto.vault.[KeyUnlock, WrappedVaultKey]
 
 // core.crypto - safe envelopes and expert primitives (D-ONCE-LAYER1=B).
 //
@@ -230,12 +231,17 @@ pub struct WrappedKey {
     pub bytes: [U8]
 }
 
-pub struct WrappedVaultKey {
-    pub bytes: [U8]
+// Vault key-wrap carriers have one canonical source owner in core.crypto.vault.
+pub fn __vault_wrapped_from_bytes(bytes: ^[U8]) -> WrappedVaultKey KeyWrapError! {
+    wrapped :: core.crypto.vault.__wrapped_from_bytes(^bytes) ?? return Err(KeyWrapError{reason: err.reason})
+    Ok(wrapped)
 }
-
-pub struct KeyUnlock {
-    pub bytes: [U8]
+pub fn __vault_wrapped_bytes(wrapped: WrappedVaultKey) -> [U8] Never! { core.crypto.vault.__wrapped_bytes(wrapped) }
+pub fn __vault_unlock_recipient(identity: X25519SecretKey) -> KeyUnlock Never! {
+    core.crypto.vault.__key_unlock_recipient(identity)
+}
+pub fn __vault_unlock_passphrase(passphrase: Secret) -> KeyUnlock Never! {
+    core.crypto.vault.__key_unlock_passphrase(passphrase)
 }
 
 pub struct PasswordHash {
