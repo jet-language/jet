@@ -113,21 +113,20 @@ fn sketches_have_one_semantic_home() {
 
 #[test]
 fn solver_has_one_semantic_home() {
-    let kernel = "CoreLib/Top/Solver.rs";
-    for (path, tier) in [
-        ("crates/jet-codegen/src/Codegen/mod.rs", "AOT"),
-        (
-            "crates/jet-comptime/src/Comptime/Methods/core_calls.rs",
-            "comptime/interpreter",
-        ),
+    let source = read("Core/compute/solve.jet");
+    assert!(source.contains("self.checked += 1"));
+    assert!(source.contains("if !ok -> self.failures += 1"));
+    assert!(source.contains("fn __show(self)"));
+    for path in [
+        "crates/jet-codegen/src/Codegen/mod.rs",
+        "crates/jet-comptime/src/Comptime/Methods/core_calls.rs",
     ] {
-        assert!(read(path).contains(kernel), "{tier} must include {kernel}");
+        assert!(!read(path).contains("CoreLib/Top/Solver.rs"));
     }
-
-    let pure = read("crates/jet-comptime/src/Comptime/CorePureParity.rs");
-    let math_time = read("crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs");
-    assert!(!pure.contains("failures + 1"));
-    assert!(!math_time.contains("fn jet_solver_"));
+    let mir = read("crates/jet-codegen/src/Codegen/MIREval.rs");
+    assert!(mir.contains("jet_foundation::MIR::mir_source_value_hook"));
+    let comptime = read("crates/jet-comptime/src/Comptime/Methods/dispatch.rs");
+    assert!(comptime.contains("CoreModuleExports::core_source_value_hook"));
 }
 
 #[test]

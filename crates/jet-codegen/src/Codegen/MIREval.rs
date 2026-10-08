@@ -6244,16 +6244,20 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     self.prelude_row(*route, span)?.fallibility,
                     jet_foundation::MIR::MirCallFallibility::Infallible
                 );
-                let values = self.call_args(frame_index, args, span)?;
-                let value = self.eval_core_call(
-                    *call,
-                    *route,
-                    values,
-                    type_args,
-                    instruction.ty.as_ref(),
-                    data_plan.as_ref(),
-                    span,
-                )?;
+                let value = if let Some(text) = self.plain_enum_display(frame_index, *route, args, span)? {
+                    text
+                } else {
+                    let values = self.call_args(frame_index, args, span)?;
+                    self.eval_core_call(
+                        *call,
+                        *route,
+                        values,
+                        type_args,
+                        instruction.ty.as_ref(),
+                        data_plan.as_ref(),
+                        span,
+                    )?
+                };
                 if (!route_is_fallible
                     && matches!(
                         fallibility,
@@ -6809,9 +6813,15 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 for part in parts {
                     match part {
                         MirStringPart::Literal(value) => output.push_str(value),
-                        MirStringPart::Value(value) => output.push_str(&mir_show(
-                            &runtime_to_data(self.value(frame_index, *value, span)?, span)?,
-                        )),
+                        MirStringPart::Value(value) => {
+                            let ty = self.value_type(frame_index, *value, span)?.clone();
+                            let value = self.value(frame_index, *value, span)?;
+                            if self.contains_source_render_hook(&ty, false, &mut Vec::new()) {
+                                output.push_str(&self.render_source_value(value, &ty, false, span)?);
+                            } else {
+                                output.push_str(&mir_show(&runtime_to_data(value, span)?));
+                            }
+                        }
                     }
                 }
                 Ok(RuntimeValue::Data(MirEvalValue::String(output)))
@@ -13879,6 +13889,175 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
     ) -> Result<RuntimeValue, Diagnostic> {
         self.eval_prelude_runtime(call, args, result_ty, span)
     }
+
+    fn contains_source_render_hook(
+        &self,
+        ty: &MirType,
+        debug: bool,
+        visiting: &mut Vec<jet_foundation::MIR::MirTypeId>,
+    ) -> bool {
+        let operation = if debug { "debug" } else { "show" };
+        if jet_foundation::MIR::mir_source_value_hook(self.program, ty, operation).is_some() {
+            return true;
+        }
+        match ty.kind() {
+            MirTypeKind::List(inner) | MirTypeKind::FixedList { elem: inner, .. }
+            | MirTypeKind::Shared(inner) | MirTypeKind::Option(inner)
+            | MirTypeKind::Tagged { inner, .. } => self.contains_source_render_hook(inner, debug, visiting),
+            MirTypeKind::Map { key, value } => self.contains_source_render_hook(key, debug, visiting)
+                || self.contains_source_render_hook(value, debug, visiting),
+            MirTypeKind::Result { ok, err } => self.contains_source_render_hook(ok, debug, visiting)
+                || self.contains_source_render_hook(err, debug, visiting),
+            _ => {
+                let Some(def) = self.native_printable_type_def(ty) else { return false };
+                if visiting.contains(&def.id) { return false; }
+                visiting.push(def.id);
+                let substitutions = self.native_print_substitutions(def, ty);
+                let found = match &def.kind {
+                    MirTypeDefKind::Struct { fields, .. } => fields.iter().any(|field| {
+                        !field.computed && self.contains_source_render_hook(
+                            &substitute_print_type(&field.ty, &substitutions), debug, visiting,
+                        )
+                    }),
+                    MirTypeDefKind::Enum { variants, .. } => variants.iter().any(|variant| match &variant.payload {
+                        MirVariantPayload::Unit => false,
+                        MirVariantPayload::Single(inner) => self.contains_source_render_hook(
+                            &substitute_print_type(inner, &substitutions), debug, visiting,
+                        ),
+                        MirVariantPayload::Named(fields) => fields.iter().any(|field| {
+                            self.contains_source_render_hook(&substitute_print_type(&field.ty, &substitutions), debug, visiting)
+                        }),
+                    }),
+                    _ => false,
+                };
+                visiting.pop();
+                found
+            }
+        }
+    }
+
+    /// Shared private Core render hooks also run in the comptime MIR machine.
+    /// Preserve the checked type while descending into containers: a short
+    /// runtime type name is not authority to call a private Core method.
+    fn render_source_value(
+        &mut self,
+        value: RuntimeValue,
+        ty: &MirType,
+        debug: bool,
+        span: Span,
+    ) -> Result<String, Diagnostic> {
+        let operation = if debug { "debug" } else { "show" };
+        if let Some(function) = jet_foundation::MIR::mir_source_value_hook(self.program, ty, operation) {
+            let result = self.invoke_function(function, vec![value], Vec::new(), span)?;
+            return match runtime_to_data(result, span)? {
+                MirEvalValue::String(text) => Ok(text),
+                _ => Err(mir_error_at("source value renderer did not return String", span)),
+            };
+        }
+        if let MirTypeKind::Tagged { inner, .. } | MirTypeKind::Shared(inner) = ty.kind() {
+            return self.render_source_value(value, inner, debug, span);
+        }
+        let value = self.materialize_runtime(value, span)?;
+        let value = runtime_to_data(value, span)?;
+        match (ty.kind(), &value) {
+            (MirTypeKind::List(inner) | MirTypeKind::FixedList { elem: inner, .. }, MirEvalValue::List(values)) => {
+                let mut rendered = Vec::with_capacity(values.len());
+                for child in values {
+                    rendered.push(self.render_source_value(RuntimeValue::Data(child.clone()), inner, debug, span)?);
+                }
+                return Ok(format!("[{}]", rendered.join(", ")));
+            }
+            (MirTypeKind::Map { key, value: inner }, MirEvalValue::Map(values)) => {
+                let mut rendered = Vec::with_capacity(values.len());
+                for (child_key, child) in values {
+                    let child_key = mir_const_key_value(child_key);
+                    let key = self.render_source_value(RuntimeValue::Data(child_key), key, debug, span)?;
+                    let child = self.render_source_value(RuntimeValue::Data(child.clone()), inner, debug, span)?;
+                    rendered.push((key, child));
+                }
+                return Ok(jet_foundation::StructuralDebug::jet_debug_map(rendered));
+            }
+            (MirTypeKind::Option(inner) | MirTypeKind::Result { ok: inner, .. }, MirEvalValue::Present(child)) => {
+                let child = self.render_source_value(RuntimeValue::Data((**child).clone()), inner, debug, span)?;
+                return Ok(if debug { format!("Val({child})") } else { child });
+            }
+            (MirTypeKind::Result { err: inner, .. }, MirEvalValue::FailedTold(child)) => {
+                let child = self.render_source_value(RuntimeValue::Data((**child).clone()), inner, debug, span)?;
+                return Ok(format!("Err({child})"));
+            }
+            _ => {}
+        }
+        if let Some(def) = self.native_printable_type_def(ty).cloned() {
+            let substitutions = self.native_print_substitutions(&def, ty);
+            match (&def.kind, &value) {
+                (MirTypeDefKind::Struct { fields, .. }, MirEvalValue::Struct { fields: values, .. }) => {
+                    let mut rendered = Vec::with_capacity(fields.len());
+                    for (index, field) in fields.iter().filter(|field| !field.computed).enumerate() {
+                        let Some((_, child)) = values.iter().find(|(name, _)| print_names_match(name, &field.name))
+                            .or_else(|| values.get(index)) else {
+                            return Err(mir_error_at("source render field is missing", span));
+                        };
+                        let child_ty = substitute_print_type(&field.ty, &substitutions);
+                        let child = self.render_source_value(RuntimeValue::Data(child.clone()), &child_ty, debug, span)?;
+                        rendered.push(jet_foundation::StructuralDebug::JetDebugField {
+                            name: mir_source_name(&field.name).to_string(),
+                            value: child,
+                            storage_index: index,
+                            redacted: debug && field.redact,
+                        });
+                    }
+                    return Ok(jet_foundation::StructuralDebug::jet_debug_record_fields(mir_source_name(&def.name), rendered));
+                }
+                (MirTypeDefKind::Enum { variants, .. }, MirEvalValue::Enum { variant, args, .. }) => {
+                    let Some(row) = variants.iter().find(|row| print_names_match(&row.name, variant)) else {
+                        return Err(mir_error_at("source render variant is missing", span));
+                    };
+                    let name = mir_source_name(&row.name);
+                    return match &row.payload {
+                        MirVariantPayload::Unit => Ok(name.to_string()),
+                        MirVariantPayload::Single(child_ty) => {
+                            let Some((_, child)) = args.first() else {
+                                return Err(mir_error_at("source render variant payload is missing", span));
+                            };
+                            let child_ty = substitute_print_type(child_ty, &substitutions);
+                            let child = self.render_source_value(RuntimeValue::Data(child.clone()), &child_ty, debug, span)?;
+                            Ok(jet_foundation::StructuralDebug::jet_debug_variant(name, Some(child)))
+                        }
+                        MirVariantPayload::Named(fields) => {
+                            let mut rendered = Vec::with_capacity(fields.len());
+                            for (index, field) in fields.iter().enumerate() {
+                                let Some((_, child)) = args.iter().find(|(name, _)| name.as_deref().is_some_and(|name| print_names_match(name, &field.name)))
+                                    .or_else(|| args.get(index)) else {
+                                    return Err(mir_error_at("source render variant field is missing", span));
+                                };
+                                let child_ty = substitute_print_type(&field.ty, &substitutions);
+                                let child = self.render_source_value(RuntimeValue::Data(child.clone()), &child_ty, debug, span)?;
+                                rendered.push(jet_foundation::StructuralDebug::JetDebugField {
+                                    name: mir_source_name(&field.name).to_string(),
+                                    value: child,
+                                    storage_index: index,
+                                    redacted: debug && field.redact,
+                                });
+                            }
+                            Ok(jet_foundation::StructuralDebug::jet_debug_record_fields(name, rendered))
+                        }
+                    };
+                }
+                _ => {}
+            }
+        }
+        if let Some(text) = self.render_native_print_value(&value, ty, &BTreeMap::new(), span, debug) {
+            return Ok(text);
+        }
+        let value = crate::Comptime::MirBridge::mir_to_ct_value(value, span)?;
+        if debug {
+            Ok(value.debug_rust())
+        } else {
+            Ok(ct_source_display(&value)
+                .or_else(|| crate::Comptime::display_core_pure_value(&value))
+                .unwrap_or_else(|| value.jet_show()))
+        }
+    }
     /// D-DISPLAYDBG1 / I9: `{value}` of a plain enum (every case a unit case),
     /// or a list/option/map/shared value holding one, renders each case as its
     /// source name, as `print` and the AOT/resident `JetDisplay` renders do.
@@ -13895,15 +14074,21 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             return Ok(None);
         };
         let row = self.prelude_row(call, span)?;
-        if row.module != "core.text.fmt" || row.member != "display" {
+        if row.module != "core.text.fmt" || !matches!(row.member.as_str(), "display" | "debug") {
             return Ok(None);
         }
+        let debug = row.member == "debug";
         let ty = self.value_type(frame_index, arg.value, span)?.clone();
-        if !self.displays_through_plain_enum(&ty) {
-            return Ok(None);
+        if !self.contains_source_render_hook(&ty, debug, &mut Vec::new()) {
+            if debug || !self.displays_through_plain_enum(&ty) {
+                return Ok(None);
+            }
+            let value = self.value(frame_index, arg.value, arg.span)?;
+            return self.native_print_value(value, &ty, span).map(Some);
         }
         let value = self.value(frame_index, arg.value, arg.span)?;
-        self.native_print_value(value, &ty, span).map(Some)
+        let text = self.render_source_value(value, &ty, debug, span)?;
+        Ok(Some(RuntimeValue::Data(MirEvalValue::String(text))))
     }
 
     fn displays_through_plain_enum(&self, ty: &MirType) -> bool {
@@ -13933,6 +14118,10 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         ty: &MirType,
         span: Span,
     ) -> Result<RuntimeValue, Diagnostic> {
+        if self.contains_source_render_hook(ty, false, &mut Vec::new()) {
+            let text = self.render_source_value(value, ty, false, span)?;
+            return Ok(RuntimeValue::Data(MirEvalValue::String(text)));
+        }
         if !self.native_print_shape(ty, &BTreeMap::new()) {
             return self.print_display_text(value, span);
         }
