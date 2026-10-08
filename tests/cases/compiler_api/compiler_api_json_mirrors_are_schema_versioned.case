@@ -1,0 +1,22 @@
+# HAND-PORT tests/compiler_api.rs:275-299 compiler_api_json_mirrors_are_schema_versioned
+# PENDING-KIT; no runtime/reference proof.
+# All four original compiler JSON public mirrors; exact raw starts_with/contains/not-contains unchanged.
+fixture: compiler_api_json_mirrors_are_schema_versioned.fixture
+step: jet inspect compiler lex main.jet
+exit: 0
+stdout: ^= "{\"schema\":\"jet.status/v1\"" # original JSON starts_with
+stdout: ~ "\"compiler\":{\"schema_version\":1,\"api_version\":1,\"operation\":\"lex\"" # original JSON contains
+stdout: ~ "\"tokens\":[" # original JSON contains
+step: jet inspect compiler parse main.jet
+exit: 0
+stdout: ~ "\"operation\":\"parse\"" # original JSON contains
+stdout: ~ "\"kind\":\"function\"" # original JSON contains
+step: jet inspect compiler check main.jet
+exit: 0
+stdout: ~ "\"operation\":\"check\"" # original JSON contains
+stdout: ~ "\"semantic_index\":{\"schema_version\":1" # original JSON contains
+stdout: !~ "semantic_index\\\"" # original JSON semantic facts not strings
+step: jet inspect compiler source-map mapping.txt
+exit: 0
+stdout: ~ "\"operation\":\"source_map\"" # original JSON contains
+stdout: ~ "\"generated_line\":2" # original JSON contains

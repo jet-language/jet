@@ -1,0 +1,39 @@
+
+struct Tree {
+    source: String
+    line_starts: Cell<[Int]?>
+}
+
+fn line_starts(tree: Tree) -> [Int] {
+    return tree.line_starts.get_or_set(() -> {
+        if tree.source.len() == 0 {
+            return [0]
+        }
+        print("index built")
+        return [0, tree.source.len()]
+    })
+}
+
+fn source_flag(value: Int) -> Bool {
+    if value == 0 {
+        return Err("source failed")
+    }
+    return value > 1
+}
+
+fn retain_flag(value: Bool) -> Bool { value }
+
+fn run() {
+    tree :: Tree{ source: "first\nsecond", line_starts: Cell.new(None) }
+    print(line_starts(tree))
+    kept :: [1, 2, 3].filter((value: Int) -> {
+        if value == 3 {
+            return true
+        }
+        if value == 2 {
+            return retain_flag(source_flag(value))
+        }
+        retain_flag(source_flag(value))
+    }) ?? []
+    print(kept.len())
+}
