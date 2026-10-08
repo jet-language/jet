@@ -554,8 +554,13 @@ Combining an emitted seed with held source/provider changes must be labelled
 as an uncomposed inventory, not native execution or retirement evidence.
 Seed-only Rust sum aliases and lifetime-only borrowed carriers are classified
 from their actual emitted declarations, not admitted as Jet record TYPE
-specializations. The `JetOutcome<T,E> = Result<T,E>` alias uses the existing
-top-level result codec; nested tuple sums remain explicitly unsupported.
+specializations. Declaration-proven `Result` aliases, including
+`JetUiServiceResult<T> = Result<T, JetUiHostError>`, use the existing top-level
+selected-out result codec. Actual arguments resolve in the caller's module,
+while fixed success/error types resolve in the alias declaration's module;
+renamed and glob imports preserve that provenance. The established
+`JetOutcome<T,JetAbsent>` Option projection is unchanged. Nested tuple sums
+remain explicitly unsupported; aliases do not invent ownership exports.
 Standard-library carriers resolve through the same explicit/glob use map,
 including unqualified `Arc`/`Box` imports. Their preserved qualified types
 and unsupported C record/callback-codec reasons appear in the inventory;

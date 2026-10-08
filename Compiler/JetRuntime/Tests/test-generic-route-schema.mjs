@@ -134,6 +134,37 @@ ${fieldErrorDeclaration}
   const sumList = spawnSync(process.execPath, [join(fixture, "Tools/agent/gen-c-abi-routes.mjs"), join(fixture, "runtime.rs"), "--native-list-only"], { encoding: "utf8" });
   success(sumList);
   assert.match(JSON.parse(sumList.stdout).unsupportedSumCarriers[0].reason, /resolved pub type JetOutcome.*seed-only/);
+  // A declaration-proven Result alias is the existing selected-out codec,
+  // not a named opaque carrier. Resolve actual and fixed payloads in their
+  // own modules, including renamed and glob imports of the alias.
+  const serviceAlias = `
+pub mod host {
+    #[derive(Clone, PartialEq)]
+    pub struct JetAliasError { pub message: String }
+    pub type JetUiServiceResult<T> = Result<T, JetAliasError>;
+}
+pub mod renamed {
+    use crate::host::JetUiServiceResult as Service;
+    pub fn jet_fixture_alias() -> Service<crate::JetFixture> { unreachable!() }
+}
+pub mod globbed {
+    use crate::host::*;
+    pub fn jet_fixture_alias_glob() -> JetUiServiceResult<crate::JetFixture> { unreachable!() }
+}
+`;
+  put("crates/jet-foundation/src/Syntax/core_calls.rs", registry('CoreCallRecord::new("core.fixture", "alias", "renamed::jet_fixture_alias", true)\nCoreCallRecord::new("core.fixture", "alias_glob", "globbed::jet_fixture_alias_glob", true)\n'));
+  put("runtime.rs", declarations + serviceAlias);
+  success(run());
+  success(run(true));
+  const aliasRust = readFileSync(join(fixture, "crates/jet-codegen/src/Prelude/Core/CAbiRoutes.rs"), "utf8");
+  const aliasJet = readFileSync(join(fixture, "Compiler/JetBackend/Source/Lower/RuntimeRoutes.jet"), "utf8");
+  assert.match(aliasRust, /jet_fixture_alias\(ok: \*mut \*mut crate::JetFixture, err: \*mut \*mut crate::host::JetAliasError\) -> i64/);
+  assert.match(aliasRust, /jet_fixture_alias_glob\(ok: \*mut \*mut crate::JetFixture, err: \*mut \*mut crate::host::JetAliasError\) -> i64/);
+  assert.ok(aliasRust.includes("Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }"));
+  assert.ok(aliasRust.includes("Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }"));
+  assert.ok(aliasJet.includes('LowerRouteResult.Result{ok: LowerRouteCarrier.Handle{name: "JetFixture"}, err: LowerRouteCarrier.Handle{name: "JetAliasError"}}'));
+  assert.ok(!aliasRust.includes("jet_rt_handle_drop_JetUiServiceResult"), "a Result alias must never invent ownership exports");
+  put("crates/jet-foundation/src/Syntax/core_calls.rs", registry('CoreCallRecord::new("core.fixture", "tuple", "jet_fixture_tuple", true)\n'));
   put("runtime.rs", declarations + "#[derive(Clone,PartialEq)]\npub struct JetOutcome<T,E> { pub value: T, pub error: E }\npub fn jet_fixture_tuple(value: crate::JetOutcome<f64,bool>) -> f64 { 0.0 }\n");
   success(run());
   assert.ok(readFileSync(join(fixture, "crates/jet-codegen/src/Prelude/Core/CAbiRoutes.rs"), "utf8").includes("fn jet_fixture_tuple("), "crate::JetOutcome nominal must retain its handle route");

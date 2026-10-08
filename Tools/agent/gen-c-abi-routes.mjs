@@ -432,7 +432,7 @@ const noRustPrelude = new Set();
           const key = path ? `${path}::${alias[1]}` : alias[1];
           const list = types.get(key) ?? [];
           list.push({ visible: true, generic: true, kind: "rust-sum-alias", at: i, path, derives: [],
-            alias: { parameters: alias[2], target: alias[3], definition: `pub type ${alias[1]}<${alias[2]}> = ${alias[3]}<${alias[4]}>` },
+            alias: { parameters: alias[2], target: alias[3], arguments: alias[4], definition: `pub type ${alias[1]}<${alias[2]}> = ${alias[3]}<${alias[4]}>` },
             gated: cfgsBefore(lineStart).some((cfg) => cfg !== '#[cfg(not(target_arch = "wasm32"))]') || stack.some((frame) => frame.gated) });
           types.set(key, list);
         }
@@ -630,6 +630,31 @@ const qualify = (ty, path) => {
   if (/^(?:crate|std|core|alloc)::/.test(ty)) return ty;
   if (ty.startsWith("super::")) return `crate::${path.split("::").slice(0, -1).filter(Boolean).concat(ty.slice(7)).join("::")}`;
   return path ? `crate::${path}::${ty}` : `crate::${ty}`;
+};
+// Expand only a declaration-proven Rust Result alias on the result edge.
+// Actual arguments resolve in the caller's module; fixed alias payloads
+// resolve in the declaration's module, even through renamed/glob imports.
+const resultAlias = (type, path) => {
+  const application = /^((?:[A-Za-z_]\w*::)*[A-Z]\w*)<([\s\S]*)>$/.exec(type);
+  if (!application) return null;
+  const full = qualify(application[1], path);
+  if (!rustOutcomeAlias(full)) return null;
+  const found = declarationOf(full.replace(/^crate::/, ""));
+  const decl = found.decls[0];
+  const parameters = recordBindings(`struct ${application[1].split("::").pop()}<${decl.alias.parameters}>`, splitTop(application[2]), type);
+  const qualified = (ty, module) => {
+    if (ty === "()" || ty === "String" || ty === "bool" || ty === "f32" || ty === "f64" || ty === "i64" || ty === "i128" || ty === "u128" || fixedInts.has(ty)) return ty;
+    const nested = /^([^<]+)<([\s\S]*)>$/.exec(ty);
+    if (nested) {
+      const base = nested[1] === "Option" || nested[1] === "Result" || nested[1] === "Vec" ? nested[1] : qualify(nested[1], module);
+      return `${base}<${splitTop(nested[2]).map((arg) => qualified(arg, module)).join(",")}>`;
+    }
+    return qualify(ty, module);
+  };
+  for (const [name, argument] of parameters) parameters.set(name, qualified(argument, path));
+  const args = splitTop(decl.alias.arguments.replace(/\s+/g, ""));
+  if (args.length !== 2) return null;
+  return `Result<${args.map((arg) => qualified(substituteRecordType(arg, parameters), decl.path)).join(",")}>`;
 };
 const recordDeclUnchecked = (full) => {
   const found = declarationOf(full.replace(/^crate::/, ""));
@@ -1071,6 +1096,16 @@ function resultShape(ty, path, nativeInt, rawFixed = false) {
   const outcomeCandidate = /^(?:(?:[a-z_][a-z0-9_]*::)*JetOutcome|Result)<(.*),JetAbsent>$/.exec(ty);
   const outcome = outcomeCandidate && (ty.startsWith("Result<") || rustOutcomeAlias(qualify(ty.slice(0, ty.indexOf("<")), path)))
     ? outcomeCandidate : null;
+  if (!outcome) {
+    const expanded = resultAlias(ty, path);
+    if (expanded) {
+      const shape = resultShape(expanded, "", nativeInt, rawFixed);
+      // Unsupported nested payloads retain the declaration-proven sum
+      // inventory reason; expansion is not admission of a new codec.
+      if (!shape) runtimeHandle(ty, path);
+      return shape;
+    }
+  }
   const generic = outcome ? [ty, "Option", outcome[1]] : /^(Option|Result)<(.*)>$/.exec(ty);
   const [somePattern, nonePattern] = outcome ? ["Ok", "Err(_)"] : ["Some", "None"];
   // A List result element: a plain slot word, or a new owned handle of a
