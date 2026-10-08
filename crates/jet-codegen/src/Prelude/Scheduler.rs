@@ -1053,7 +1053,7 @@ pub fn jet_scheduler_world_monotonic_now_ns() -> Option<i64> {
 /// deterministic world. Time, seeded pseudo-randomness, and scheduler waits
 /// use their dedicated seams; external effects must never silently use host
 /// state from inside the world.
-pub fn jet_scheduler_world_reject_uncontrolled(effect: &'static str) {
+pub fn jet_scheduler_world_reject_uncontrolled(effect: &str) {
     if jet_scheduler_current_world().is_none() {
         return;
     }

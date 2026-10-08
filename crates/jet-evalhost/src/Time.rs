@@ -89,6 +89,10 @@ pub(crate) fn ambient_core_call(
             scheduler::jet_scheduler_world_monotonic_now_ns().map(CtValue::Int), Type::Int,
         ),
         ("__host_monotonic_ns", []) => unsigned_value(scheduler::jet_time_monotonic_host_sample()),
+        ("__reject_uncontrolled", [CtValue::Str(effect)]) => {
+            scheduler::jet_scheduler_world_reject_uncontrolled(effect);
+            CtValue::Unit
+        }
         ("__zone_env", [CtValue::Str(name)]) => optional_value(
             time_rt::jet_time_zone_environment(name).map(CtValue::Str), Type::String,
         ),

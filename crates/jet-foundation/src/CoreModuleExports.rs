@@ -25,7 +25,7 @@ pub enum CoreLeafKind {
 
 // BEGIN GENERATED CORE DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 6f12d32f94f8b64ee6030efff596f9c851af25ff0bf3c9950e67a7ed11ee95d8
+// Source SHA-256: 2d3ab4270bcb9759c0e5630127fc10e53605cb389f4af3ccf784da545a0e0390
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreModuleDeclaration {
     pub module: &'static str,
@@ -536,7 +536,7 @@ const CORE_MODULE_88_MEMBERS: &[&str] = &["count", "ends_with", "find", "is_alnu
 const CORE_MODULE_88_TYPES: &[(&str, CoreLeafKind)] = &[];
 const CORE_MODULE_88_DEPENDENCIES: &[&str] = &["core.text"];
 
-const CORE_MODULE_89_MEMBERS: &[&str] = &["datetime", "days_in_month", "from_iso_week", "from_timestamp", "from_unix_microseconds", "from_unix_ms", "from_unix_nanoseconds", "from_unix_seconds", "instant", "is_leap_year", "local_time", "new", "now", "now_utc", "parse", "parse_iso_week_date", "parse_rfc3339", "parse_time", "parse_zoned", "period", "period_days", "period_months", "period_years", "sleep", "sleep_until", "start", "time", "today", "utc", "zone", "zoned", "add_days", "add_duration", "compare_date", "date_equals", "duration_as_seconds", "duration_ms", "duration_ns", "duration_seconds", "elapsed", "isoformat", "isoformat_date", "isoformat_time", "since", "unix_ms", "unix_ns", "unix_seconds", "weekday", "zoned_local", "Clock", "Date", "DateTime", "Duration", "Instant", "LocalDate", "LocalTime", "Period", "Stopwatch", "Zone", "ZonedDateTime", "add_hours", "add_minutes", "add_seconds", "between", "combine", "date_after", "date_before", "date_of", "days_between", "duration_abs", "duration_add", "duration_as_hours", "duration_as_minutes", "duration_as_ms", "duration_days", "duration_hours", "duration_is_zero", "duration_minutes", "duration_sub", "duration_zero", "end_of_day", "isoweekday", "max_date", "min_date", "replace_date", "replace_time", "start_of_day", "time_of", "weekday_sun0", "asctime", "ctime", "gmtime", "strftime", "utcoffset", "fromhours", "before", "after", "dayofweek", "todate", "totime", "TimeError", "__datetime_literal", "__wall_sample", "__world_wall_ms", "__wall_override_ms", "__controlled_monotonic_ns", "__world_monotonic_ns", "__host_monotonic_ns", "__zone_env", "__zone_file_bytes", "__embedded_zone_bytes"];
+const CORE_MODULE_89_MEMBERS: &[&str] = &["datetime", "days_in_month", "from_iso_week", "from_timestamp", "from_unix_microseconds", "from_unix_ms", "from_unix_nanoseconds", "from_unix_seconds", "instant", "is_leap_year", "local_time", "new", "now", "now_utc", "parse", "parse_iso_week_date", "parse_rfc3339", "parse_time", "parse_zoned", "period", "period_days", "period_months", "period_years", "sleep", "sleep_until", "start", "time", "today", "utc", "zone", "zoned", "add_days", "add_duration", "compare_date", "date_equals", "duration_as_seconds", "duration_ms", "duration_ns", "duration_seconds", "elapsed", "isoformat", "isoformat_date", "isoformat_time", "since", "unix_ms", "unix_ns", "unix_seconds", "weekday", "zoned_local", "Clock", "Date", "DateTime", "Duration", "Instant", "LocalDate", "LocalTime", "Period", "Stopwatch", "Zone", "ZonedDateTime", "add_hours", "add_minutes", "add_seconds", "between", "combine", "date_after", "date_before", "date_of", "days_between", "duration_abs", "duration_add", "duration_as_hours", "duration_as_minutes", "duration_as_ms", "duration_days", "duration_hours", "duration_is_zero", "duration_minutes", "duration_sub", "duration_zero", "end_of_day", "isoweekday", "max_date", "min_date", "replace_date", "replace_time", "start_of_day", "time_of", "weekday_sun0", "asctime", "ctime", "gmtime", "strftime", "utcoffset", "fromhours", "before", "after", "dayofweek", "todate", "totime", "TimeError", "__datetime_literal", "__wall_sample", "__world_wall_ms", "__wall_override_ms", "__controlled_monotonic_ns", "__world_monotonic_ns", "__host_monotonic_ns", "__zone_env", "__zone_file_bytes", "__embedded_zone_bytes", "__reject_uncontrolled"];
 const CORE_MODULE_89_TYPES: &[(&str, CoreLeafKind)] = &[("Clock", CoreLeafKind::Plain), ("Date", CoreLeafKind::Plain), ("DateTime", CoreLeafKind::Plain), ("Duration", CoreLeafKind::Plain), ("Instant", CoreLeafKind::Plain), ("LocalDate", CoreLeafKind::Plain), ("LocalTime", CoreLeafKind::Plain), ("Period", CoreLeafKind::Plain), ("Stopwatch", CoreLeafKind::Plain), ("Zone", CoreLeafKind::Plain), ("ZonedDateTime", CoreLeafKind::Plain), ("TimeError", CoreLeafKind::Plain)];
 const CORE_MODULE_89_DEPENDENCIES: &[&str] = &["core"];
 
@@ -904,6 +904,7 @@ pub const CORE_SOURCE_OWNED_TYPES: &[CoreSourceOwnedType] = &[
     CoreSourceOwnedType { path: "Core/time/time.jet", name: "Zone" },
     CoreSourceOwnedType { path: "Core/time/time.jet", name: "ZonedDateTime" },
     CoreSourceOwnedType { path: "Core/time/time.jet", name: "Instant" },
+    CoreSourceOwnedType { path: "Core/time/time.jet", name: "Stopwatch" },
     CoreSourceOwnedType { path: "Core/time/time.jet", name: "TimeError" },
     CoreSourceOwnedType { path: "Core/tui/tui.jet", name: "TUIColor" },
     CoreSourceOwnedType { path: "Core/tui/tui.jet", name: "TUIConstraint" },

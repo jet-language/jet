@@ -13,10 +13,10 @@ use core as core
 
 // Civil calendars, validation, codecs, wall-clock policy, and monotonic points
 // are source-owned. Host leaves supply clock samples, TZif bytes, and sleep.
-// `start` and `unix_ns` use wall-clock Unix nanoseconds; `instant` is monotonic.
+// `instant` and `start` are monotonic; Unix timestamp functions are wall-clock.
 // `t + 5min` remains an Instant and `b - a` remains a Duration.
 
-/// A running stopwatch started at a Unix-nanosecond wall-clock sample.
+/// A running stopwatch started at a host monotonic nanosecond sample.
 pub struct Stopwatch {
     pub start_ns: Int
 }
@@ -43,7 +43,10 @@ pub fn asctime(dt: DateTime) -> String Never! {
     "{days[date.weekday()]} {months[date.month() - 1]} {pad2(date.day(), 2)} {pad2(dt.hour(), 2)}:{pad2(dt.minute(), 2)}:{pad2(dt.second(), 2)} {date.year()}"
 }
 
-pub fn start() -[Time]> Stopwatch Never! { Stopwatch{start_ns: unix_ns()} }
+pub fn start() -[Time]> Stopwatch Never! {
+    core.time.__reject_uncontrolled("clock")
+    Stopwatch{start_ns: core.time.__host_monotonic_ns()}
+}
 
 pub fn sleep(duration: Duration) Never! -[Time]> {
     // Even a zero or negative delay is a deadline/cancellation wait boundary.
@@ -194,7 +197,7 @@ pub fn duration_ns(ns: Int) -> Duration Never! { Duration.nanoseconds(ns) ?? pan
 pub fn duration_as_seconds(d: Duration) -> Int Never! { d.ns /% 1000000000 }
 
 pub fn elapsed(watch: Stopwatch) -[Time]> Duration Never! {
-    duration_ns(saturating_sub_ns(unix_ns(), watch.start_ns))
+    duration_ns(saturating_sub_ns(core.time.__host_monotonic_ns(), watch.start_ns))
 }
 
 pub fn compare_date(a: LocalDate, b: LocalDate) -> Int Never! {
@@ -1577,4 +1580,12 @@ impl Instant {
     assert_eq(later.until(first, "day", "day", "half_expand", 200000).ns, time_int_min())
     assert_eq(first.until(later, "day", "day", "half_trunc", 200000).ns, time_int_max())
     assert_eq(first.until(later, "day", "day", "trunc", 200000).ns, 0)
+}
+
+#Test("Stopwatch start and elapsed share the host monotonic epoch") {
+    watch :: start()
+    later :: core.time.__host_monotonic_ns()
+    assert(watch.start_ns <= later)
+    assert(elapsed(watch).ns >= 0)
+    assert(watch.elapsed_millis() >= 0)
 }
