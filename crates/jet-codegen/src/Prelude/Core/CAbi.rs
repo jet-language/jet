@@ -200,7 +200,7 @@ mod jet_c_abi {
         let _ = catch_unwind(AssertUnwindSafe(move || {
             super::jet_runtime_boundary(move || -> () { resume_unwind(payload) })
         }));
-        std::process::exit(101)
+        super::jet_runtime_finalized_exit(101)
     }
 
     fn bytes<'a>(ptr: *const u8, len: usize) -> &'a [u8] {
@@ -324,17 +324,18 @@ mod jet_c_abi {
             // only the remaining record. No raw Stop layout or policy is read.
             let message = unsafe { jet_rt_stop_take_message(record) };
             unsafe { jet_rt_stop_drop(record) };
-            if !message.is_null() {
-                super::jet_runtime_process_report(Some(view(message)));
-                release(message);
-            }
+            super::jet_runtime_process_report(
+                (!message.is_null()).then(|| view(message)),
+            );
+            if !message.is_null() { release(message); }
             // The canonical Root producer supplies the requested native i32
             // exit carrier. Release all owned bytes before process::exit.
-            super::jet_runtime_finalized_exit(code as i32);
+            super::jet_runtime_terminal_tail(code as i32);
         }
         if let Some(code) = parked_exit {
             super::jet_runtime_finalized_exit(code);
         }
+        super::jet_runtime_flush_stdout();
         0
     }
 
@@ -393,7 +394,7 @@ mod jet_c_abi {
     fn comptime_fatal(status: u32, message: &str) -> ! {
         let kind = if status == 4 { super::JetStopKind::HostFault } else { super::JetStopKind::Panic };
         super::jet_native_comptime_channel_write(&comptime_site(kind, status, message.to_string()).encode());
-        std::process::exit(if status == 4 { 101 } else { 80 + status as i32 })
+        super::jet_runtime_finalized_exit(if status == 4 { 101 } else { 80 + status as i32 })
     }
 
     // The request's budget stop: the first one wins (from any thread, at that

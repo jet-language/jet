@@ -1047,7 +1047,7 @@ pub(crate) fn jet_native_comptime_fail(status: u32, message: &str) -> ! {
         loop { std::thread::park(); }
     }
     if let Some(fatal) = JET_NATIVE_COMPTIME_FATAL.get() { fatal(status, message) }
-    std::process::exit(if status == 4 { 101 } else { 80 + status as i32 })
+    jet_runtime_finalized_exit(if status == 4 { 101 } else { 80 + status as i32 })
 }
 
 // Spends `units` of fuel; true when the request's fuel ran out (the caller
@@ -1304,7 +1304,7 @@ fn jet_std_os_run_atexit() -> Option<Box<dyn std::any::Any + Send>> {
 
 fn jet_runtime_report_parked_tasks() -> Option<i32> {
     let report = jet_observe_parked_tasks_report()?;
-    eprint!("{}", report.rendered);
+    jet_runtime_process_report(Some(&report.rendered));
     Some(report.exit_code)
 }
 
@@ -1338,21 +1338,41 @@ fn jet_runtime_finalize_process(stopping: bool) -> (Option<i32>, Option<Box<dyn 
     (parked_exit, stop)
 }
 
+fn jet_runtime_flush_stdout() {
+    #[cfg(jet_native_pack)]
+    {
+        unsafe extern "C" { fn jet_rt_stdout_flush(); }
+        // SAFETY: the canonical process buffer owns its lock and lifetime.
+        // Before host init the export is a no-op; failed writes retain their
+        // pending suffix, never publish a Stop or enter language callbacks.
+        unsafe { jet_rt_stdout_flush() };
+    }
+}
+
 fn jet_runtime_process_report(report: Option<&str>) {
+    jet_runtime_flush_stdout();
     if let Some(report) = report {
         eprint!("{report}");
     }
 }
 
-fn jet_runtime_finalized_exit(code: i32) -> ! {
+// Report paths have already flushed the Jet buffer. Keep the final Rust sink
+// flush/exit tail private so native E4 report ownership can end before exit
+// without flushing the Jet buffer twice.
+fn jet_runtime_terminal_tail(code: i32) -> ! {
     let _ = std::io::Write::flush(&mut std::io::stdout());
     let _ = std::io::Write::flush(&mut std::io::stderr());
     std::process::exit(code)
 }
 
+fn jet_runtime_finalized_exit(code: i32) -> ! {
+    jet_runtime_flush_stdout();
+    jet_runtime_terminal_tail(code)
+}
+
 fn jet_runtime_finalized_stop_exit(code: i32, report: Option<&str>) -> ! {
     jet_runtime_process_report(report);
-    jet_runtime_finalized_exit(code)
+    jet_runtime_terminal_tail(code)
 }
 
 /// Lexical cleanup precedes this one process boundary. Process finalizers run
@@ -1379,6 +1399,7 @@ where
             if let Some(code) = parked_exit {
                 jet_runtime_finalized_exit(code);
             }
+            jet_runtime_flush_stdout();
             value
         }
         Err(payload) => jet_runtime_deliver_stop(payload, jet_runtime_process_exit),
@@ -1567,7 +1588,7 @@ fn jet_entry_report(error: String) -> String {
 
 fn jet_entry_error_exit(error: String) -> ! {
     let report = jet_entry_report(error);
-    eprint!("{report}");
+    jet_runtime_process_report(Some(&report));
     jet_runtime_explicit_exit(1)
 }
 
@@ -1576,7 +1597,7 @@ fn jet_entry_error_exit(error: String) -> ! {
 /// context, conversions, and the source journey cannot be recovered from
 /// `Display` text after the fact.
 fn jet_entry_error_exit_jet(error: JetErr) -> ! {
-    eprint!("{}", jet_error_report(&error).render());
+    jet_runtime_process_report(Some(&jet_error_report(&error).render()));
     jet_runtime_explicit_exit(1)
 }
 
@@ -1606,6 +1627,7 @@ fn jet_service_edge_report_rendered(report: String) -> ! {
         }
     }
     quoted.push('"');
+    jet_runtime_flush_stdout();
     eprintln!("{{\"target\":\"service\",\"report\":{quoted}}}");
     jet_runtime_explicit_exit(1)
 }
@@ -1640,11 +1662,13 @@ fn jet_scheduler_runtime_stop_with_report(report: JetStreamFailure) -> ! {
             exit_code: 70,
         }));
     }
+    jet_runtime_flush_stdout();
     eprint!("{}", report.rendered);
     jet_runtime_exit();
 }
 
 fn jet_runtime_caught_stop(message: &str) {
+    jet_runtime_flush_stdout();
     eprint!("{message}");
     if !message.ends_with('\n') {
         eprintln!();
@@ -1746,6 +1770,7 @@ fn jet_runtime_diagnostic(rendered: String) -> ! {
             exit_code: 70,
         }));
     }
+    jet_runtime_flush_stdout();
     eprintln!("{}", rendered);
     jet_runtime_exit();
 }
