@@ -885,6 +885,10 @@ The ordinary process root follows the same rule for a runtime stop: lexical
 `Close` and deferred cleanup run before the report is delivered with exit 70.
 A non-unwinding native call boundary transports the stop to its caller for
 cleanup, without exposing a successful return value.
+If the first stop happens in an exit handler, the remaining handlers already
+registered before that stop are still owed cleanup, in registration order.
+Handlers registered after the stop do not run; their adopted captures are
+released inside stopped cleanup. A second panic during stopped cleanup aborts.
 
 ### Handling and discarding failure values
 

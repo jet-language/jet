@@ -1700,11 +1700,65 @@ mod root_stop_regression {
     }
 
     #[test]
+    #[ignore]
+    fn callback_registration_timing() {
+        jet_runtime_boundary(|| {
+            let _body = JetDeferredClose::new(|| println!("close-body"));
+            println!("body");
+            jet_runtime_atexit::register(|| {
+                let _callback = JetDeferredClose::new(|| println!("close-callback"));
+                println!("atexit-first");
+                jet_runtime_atexit::register(|| println!("late-before-stop"));
+                jet_panic("<callback-stop>", 1, "callback-stop");
+            });
+            jet_runtime_atexit::register(|| {
+                println!("atexit-second");
+                let capture = JetDeferredClose::new(|| println!("drop-after-stop"));
+                jet_runtime_atexit::register(move || {
+                    let _borrowed = &capture;
+                    println!("unexpected-after-stop-body");
+                });
+            });
+        });
+        panic!("a stopped callback returned");
+    }
+
+    #[test]
+    #[ignore]
+    fn lexical_registration_after_stop() {
+        jet_runtime_boundary(|| {
+            let _body = JetDeferredClose::new(|| {
+                println!("close-body");
+                let capture = JetDeferredClose::new(|| println!("drop-after-stop"));
+                jet_runtime_atexit::register(move || {
+                    let _borrowed = &capture;
+                    println!("unexpected-after-stop-body");
+                });
+            });
+            println!("body");
+            jet_panic("<lexical-stop>", 1, "lexical-stop");
+        });
+        panic!("a stopped root returned");
+    }
+
+    #[test]
+    #[ignore]
+    fn stopped_callback_double_panic() {
+        jet_runtime_boundary(|| {
+            jet_runtime_atexit::register(|| jet_panic("<second-stop>", 1, "second-stop"));
+            jet_panic("<first-stop>", 1, "first-stop");
+        });
+        panic!("stopped cleanup returned");
+    }
+
+    #[test]
     fn carrier_roundtrip() {
         assert!(!jet_runtime_process_should_unwind());
         let mut stop = None;
         let value = jet_native_dispatch_boundary(&mut stop, || {
             assert!(jet_runtime_process_should_unwind());
+            assert!(jet_runtime_fault_should_unwind());
+            assert!(!jet_scheduler_panic_should_unwind(), "an ordinary Root is not a cancellation catch frame");
             let nested = JetRuntimeProcessBoundary::enter();
             drop(nested);
             assert!(jet_runtime_process_should_unwind());
@@ -1768,10 +1822,20 @@ mod root_stop_regression {
         carrier.status.success(),
         "carrier regression failed: {carrier:?}"
     );
-    for (probe, code) in [
-        ("ordinary_root", "E3001"),
-        ("rendered_diagnostic_root", "E3010"),
-        ("debug_dispatch", "E3010"),
+    for (probe, code, cleanup) in [
+        ("ordinary_root", "E3001", "body\nclose-second\nclose-first\n"),
+        ("rendered_diagnostic_root", "E3010", "body\nclose-second\nclose-first\n"),
+        ("debug_dispatch", "E3010", "body\nclose-second\nclose-first\n"),
+        (
+            "callback_registration_timing",
+            "E3001",
+            "body\nclose-body\natexit-first\nclose-callback\natexit-second\ndrop-after-stop\nlate-before-stop\n",
+        ),
+        (
+            "lexical_registration_after_stop",
+            "E3001",
+            "body\nclose-body\ndrop-after-stop\n",
+        ),
     ] {
         // Share the same file description for both streams so the assertion
         // observes report-vs-cleanup order, not two independently captured logs.
@@ -1790,15 +1854,40 @@ mod root_stop_regression {
             .unwrap();
         let transcript = std::fs::read_to_string(path).unwrap();
         assert_eq!(status.code(), Some(70), "{probe}: {transcript}");
-        assert!(transcript.contains("body\nclose-second\nclose-first\n"), "{probe}: {transcript}");
+        assert!(transcript.contains(cleanup), "{probe}: {transcript}");
         let report = format!("Stop [{code}]");
         assert_eq!(transcript.matches(&report).count(), 1, "{probe}: {transcript}");
+        let last_cleanup = cleanup.trim_end().rsplit('\n').next().unwrap();
         assert!(
-            transcript.find("close-first\n").unwrap() < transcript.find(&report).unwrap(),
-            "{probe}: report preceded lexical cleanup: {transcript}"
+            transcript.find(last_cleanup).unwrap() < transcript.find(&report).unwrap(),
+            "{probe}: report preceded owed cleanup: {transcript}"
         );
         assert!(!transcript.contains("unexpected-value"), "{probe}: {transcript}");
+        assert!(!transcript.contains("unexpected-after-stop-body"), "{probe}: {transcript}");
     }
+    let path = scratch.path.join("stopped_callback_double_panic.log");
+    let log = std::fs::File::create(&path).unwrap();
+    let status = Command::new(&binary)
+        .args([
+            "--exact",
+            "root_stop_regression::stopped_callback_double_panic",
+            "--ignored",
+            "--nocapture",
+        ])
+        .stdout(Stdio::from(log.try_clone().unwrap()))
+        .stderr(Stdio::from(log))
+        .status()
+        .unwrap();
+    let transcript = std::fs::read_to_string(path).unwrap();
+    assert!(!status.success(), "{transcript}");
+    assert_ne!(status.code(), Some(70), "{transcript}");
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        assert_eq!(status.signal(), Some(6), "{transcript}");
+    }
+    assert!(transcript.contains("panic in a destructor during cleanup\n"), "{transcript}");
+    assert!(!transcript.contains("Stop [E3001]"), "{transcript}");
 }
 
 #[test]
