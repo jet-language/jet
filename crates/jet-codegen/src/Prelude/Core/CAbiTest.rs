@@ -5,7 +5,7 @@
 #[cfg(not(target_arch = "wasm32"))]
 mod jet_c_abi_test {
     use super::*;
-    use super::jet_c_abi::{guard, view, JetCString};
+    use super::jet_c_abi::{guard, handle, take, view, JetCString};
 
     type TestTask = jet_std::JetTask<JetTestOutcome>;
     type Invoke = unsafe extern "C" fn(*mut u8) -> *mut u8;
@@ -63,7 +63,7 @@ mod jet_c_abi_test {
             let result = jet_evidence_with_expectation(expected, || jet_test_run(expected, || {
                 let invoke: Invoke = std::mem::transmute(invoke);
                 let error = jet_native_callback_body(|| invoke(env)) as JetCString;
-                if error.is_null() { Ok(()) } else { Err(*Box::from_raw(error)) }
+                if error.is_null() { Ok(()) } else { Err(take(error)) }
             }));
             Box::into_raw(Box::new(jet_test_unit_outcome(view(name).to_owned(), expected, result)))
         })
@@ -86,11 +86,12 @@ mod jet_c_abi_test {
             wire.push_str(&outcome.name);
             wire.push_str(&outcome.stdout);
             wire.push_str(&outcome.stderr);
-            Box::into_raw(Box::new(wire))
+            handle(wire)
         })
     }
 
     #[no_mangle]
+    // The caller retains the E4 wire carrier; parsing only borrows its UTF-8.
     pub unsafe extern "C" fn jet_rt_test_finish_wire(wire: JetCString) -> u8 {
         guard(|| {
             let mut wire = view(wire);

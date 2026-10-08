@@ -52,7 +52,6 @@ if (mode === '--allparts') {
     if (!text) throw new Error(`canonical ${name} missing`);
     prepared += '\n' + text;
   }
-  prepared += '\n' + readFileSync(resolve(repo, 'crates/jet-codegen/src/Prelude/Core/CAbiTest.rs'), 'utf8');
 }
 const core = readFileSync(resolve(repo, 'crates/jet-codegen/src/Prelude/Core.rs'), 'utf8');
 const marker = /^static JET_NATIVE_COMPTIME_ACTIVE:/gm;
