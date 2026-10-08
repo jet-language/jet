@@ -2194,3 +2194,55 @@ memory/provenance/TLS contracts remain separate target rows, not native-pointer
 casts. Date/time formatting and Pool construction are Core source-owner rows,
 not String/allocator runtime aliases. The private image-runtime stop/String
 allocator and L1/L3 canonical allocator/split providers are existing Jet bodies.
+
+### Native Realtime provider and source value boundary
+
+`Realtime.jet`, `RealtimeRing.jet` and `RealtimeABI.jet` port the worker,
+observations and bounded two-slot SPSC sample ring from `Realtime.rs`. A
+Stream208 shares exactly one existing Control128 cancellation authority.
+Handle clones retain the same worker; the last handle requests cancellation
+and performs a serialized, shielded physical join before releasing storage.
+The worker owns the moved callback environment and releases it once in a
+shielded scheduler-body scope, so a destructor's self-join stop cannot escape
+as a process-wide fatal panic. When the worker holds the final stream reference,
+it detaches its pthread before releasing its stream storage.
+
+The producer takes canonical exact-Int words for rate and frame count, a moved
+environment and invoke/release code pointers, a checked worker FunctionAddress,
+and a borrowed atomic skip word (zero selects its preallocated internal word).
+Invoke borrows the stream's reusable List24<Float> header. The data allocation
+and rational-deadline scratch are made once before spawn; deadline arithmetic
+reuses FloatShortest's Big32x40 storage without per-callback heap Int values.
+Waiting uses existing Scheduler/Sync primitives and deliberately does not
+register the sleeping worker for cancellation wake: cancellation joins at
+the deadline's callback boundary, matching the reference provider.
+
+Clock observations use the existing controlled-provider → World → HostTime
+chain. HostTime's bounded and exact-Int samples now share one process-monotonic
+epoch helper, not a second boot-clock baseline. Thread attachment is fresh:
+the worker does not inherit caller clock/provider/World TLS. Its callback and
+capture-release panic publication uses the stream's Control128.
+
+Source `Instant` and `RealtimeReceipt` remain ordinary structs. The
+`jet_rt_next_deadline` ABI returns an owned canonical Int word for
+`Instant.start_ns`, not a Rust Instant handle. `jet_rt_receipt` temporarily
+owns a native Receipt64 snapshot of eight **raw i64** facts, in source field
+order: requested rate, requested frames, completed callbacks, completed frames,
+missed, max lateness, start identity, end identity. The complete receipt
+constructor/getter/clone/drop/equality family is Jet-owned in the same batch:
+constructor parameters and getter results are **canonical exact-Int words**,
+not the snapshot's raw words. Native caller lowering must reconstruct the
+source struct through this boundary. Rust receipt Box glue must be suppressed
+only by ownership-aware canonical regeneration with the all-or-none receipt
+family guard; no native snapshot may reach a surviving Rust accessor.
+
+`Tests/RealtimeWitness.c` is an actual-provider C client, linked with
+`-pthread -Wl,--wrap=jet_rt_free`; its observing wrapper forwards every real
+free and asserts exactly one release for every watched allocation. It covers
+128-bit rational-index saturation, ring capacity/length/bit preservation and
+sequence wrap, a concurrent SPSC transfer, all eight canonical receipt getters
+including i64 extrema, borrowed-buffer reuse, fresh-worker clock TLS, skip
+accounting, handle cloning, cancellation/last-drop join, callback panic and
+self-join. Native witness execution, composition and caller lowering are not
+admitted by source parsing or C syntax checks alone.
+
