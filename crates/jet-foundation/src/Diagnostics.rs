@@ -1289,20 +1289,8 @@ fn row_no_fix_reason(row: &crate::Registry::DiagnosticRow) -> Option<NoFixReason
 /// line breaks become visible escape sequences in the human renderer.
 pub fn escape_terminal_text(value: &str) -> String {
     let mut escaped = String::with_capacity(value.len());
-    for character in value.chars() {
-        match character {
-            '\n' => escaped.push_str("\\n"),
-            '\r' => escaped.push_str("\\r"),
-            '\t' => escaped.push_str("\\t"),
-            character if character.is_control()
-                || matches!(character, '\u{2028}' | '\u{2029}') =>
-            {
-                use std::fmt::Write as _;
-                let _ = write!(escaped, "\\u{{{:04x}}}", character as u32);
-            }
-            character => escaped.push(character),
-        }
-    }
+    crate::RuntimeDiagnosticCore::jet_write_terminal_text(&mut escaped, value)
+        .expect("String formatting cannot fail");
     escaped
 }
 

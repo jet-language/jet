@@ -380,7 +380,7 @@ pub fn jet_journey_take() -> String {
 
 fn jet_journey_take_styled(style: JetReportStyle) -> String {
     let journey = jet_journey_take_hops().0;
-    jet_journey_block(journey.origin.as_ref(), &journey.hops, style)
+    jet_journey_block(journey.origin.as_ref(), &journey.hops, style, false)
 }
 
 /// The journey a run has accumulated so far, moved off this thread.
@@ -465,6 +465,16 @@ fn jet_error_json_quote(value: &str) -> String {
     out
 }
 
+const JET_ENTRY_ERROR_CODE: &str = "E3015";
+
+struct JetErrorTerminalText<'a>(&'a str);
+
+impl std::fmt::Display for JetErrorTerminalText<'_> {
+    fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        crate::RuntimeDiagnosticCore::jet_write_terminal_text(out, self.0)
+    }
+}
+
 impl JetErrorReport {
     fn from_error(
         error: &JetErr,
@@ -491,45 +501,82 @@ impl JetErrorReport {
         }
     }
 
-    fn render_root(&self) -> String {
-        fn render(report: &JetErrorReport, out: &mut String, depth: usize) {
-            if depth == 0 {
-                match &report.code {
-                    Some(code) => out.push_str(&format!("Error [{code}]: {}", report.message)),
-                    None => out.push_str(&format!("Error: {}", report.message)),
-                }
-            } else {
-                out.push_str(&"  ".repeat(depth));
-                out.push_str("cause: ");
-                out.push_str(&report.message);
-            }
-            if let Some(identity) = &report.typed_identity {
-                out.push_str(&format!(" (type: {identity})"));
-            }
-            for cause in &report.causes {
-                out.push('\n');
-                render(cause, out, depth + 1);
-            }
-            for frame in &report.context_frames {
-                out.push('\n');
-                out.push_str(&"  ".repeat(depth + 1));
-                out.push_str(&format!(
-                    "context ({}:{}): {}",
-                    frame.file, frame.line, frame.text
-                ));
-            }
-            for conversion in &report.conversion_history {
-                out.push('\n');
-                out.push_str(&"  ".repeat(depth + 1));
-                out.push_str(&format!(
-                    "conversion: {} -> {}",
-                    conversion.source, conversion.target
-                ));
+    fn render_root(&self, style: JetReportStyle) -> String {
+        use std::fmt::Write as _;
+
+        fn indent(out: &mut String, depth: usize) {
+            for _ in 0..depth {
+                out.push_str("  ");
             }
         }
 
+        fn render(report: &JetErrorReport, out: &mut String, depth: usize, style: JetReportStyle) {
+            if depth == 0 {
+                if let Some(code) = &report.code {
+                    writeln!(out, "error code: {}", JetErrorTerminalText(code)).unwrap();
+                }
+                if let Some(identity) = &report.typed_identity {
+                    writeln!(out, "type: {}", JetErrorTerminalText(identity)).unwrap();
+                }
+            } else {
+                indent(out, depth);
+                write!(out, "cause: {}", JetErrorTerminalText(&report.message)).unwrap();
+                match (&report.typed_identity, &report.code) {
+                    (Some(identity), Some(code)) => write!(out, " (type: {}; error code: {})", JetErrorTerminalText(identity), JetErrorTerminalText(code)).unwrap(),
+                    (Some(identity), None) => write!(out, " (type: {})", JetErrorTerminalText(identity)).unwrap(),
+                    (None, Some(code)) => write!(out, " (error code: {})", JetErrorTerminalText(code)).unwrap(),
+                    (None, None) => {}
+                }
+                out.push('\n');
+            }
+            for cause in &report.causes {
+                render(cause, out, depth + 1, style);
+            }
+            for frame in &report.context_frames {
+                indent(out, depth + 1);
+                writeln!(out, "context ({}:{}): {}", JetErrorTerminalText(&frame.file), frame.line, JetErrorTerminalText(&frame.text)).unwrap();
+            }
+            for conversion in &report.conversion_history {
+                indent(out, depth + 1);
+                writeln!(out, "conversion: {} -> {}", JetErrorTerminalText(&conversion.source), JetErrorTerminalText(&conversion.target)).unwrap();
+            }
+            if let Some(details) = &report.details {
+                indent(out, depth + 1);
+                writeln!(out, "variant: {}", JetErrorTerminalText(&details.variant)).unwrap();
+                for field in &details.fields {
+                    indent(out, depth + 1);
+                    writeln!(out, "{}: {}", JetErrorTerminalText(&field.name), JetErrorTerminalText(&field.value)).unwrap();
+                }
+                if let Some(span) = &details.source_span {
+                    indent(out, depth + 1);
+                    writeln!(out, "source span: {}..{}", span.start, span.end).unwrap();
+                }
+            }
+            if depth != 0 {
+                for line in report.render_journey_with_style(style).lines() {
+                    indent(out, depth);
+                    writeln!(out, "{line}").unwrap();
+                }
+            }
+        }
+
+        let row = jet_runtime_diagnostic_row(JET_ENTRY_ERROR_CODE)
+            .expect("registered entry error row is missing");
         let mut out = String::new();
-        render(self, &mut out, 0);
+        write!(out, "Error [{}]: ", row.code).unwrap();
+        for (prefix, template) in [
+            ("", row.what),
+            (" Why: ", row.why),
+            (" Fix: ", row.fix),
+        ] {
+            out.push_str(prefix);
+            jet_write_diagnostic_template(&mut out, template, |out, name| {
+                assert_eq!(name, "msg", "entry error row has an unsupported template hole");
+                crate::RuntimeDiagnosticCore::jet_write_terminal_text(out, &self.message)
+            }).expect("String formatting cannot fail");
+            out.push('\n');
+        }
+        render(self, &mut out, 0, style);
         out
     }
 
@@ -543,17 +590,19 @@ impl JetErrorReport {
             .iter()
             .map(jet_journey_hop_from_frame)
             .collect::<Vec<_>>();
-        jet_journey_block(origin.as_ref(), &hops, style)
+        jet_journey_block(origin.as_ref(), &hops, style, true)
     }
 
     /// Render this already-projected report with the one terminal policy.
     /// The projection and the rendering are separate so a wire or inspector
     /// can consume the same facts without first making a display string.
     pub fn render_with_style(&self, style: JetReportStyle) -> String {
-        jet_journey_compose(
-            &self.render_root(),
-            &self.render_journey_with_style(style),
-        )
+        let mut rendered = self.render_root(style);
+        rendered.push_str(&self.render_journey_with_style(style));
+        jet_write_diagnostic_more_line(&mut rendered, JET_ENTRY_ERROR_CODE)
+            .expect("String formatting cannot fail");
+        rendered.push('\n');
+        rendered
     }
 
     /// The stderr report edge: the terminal report, or under `jet run --json`
@@ -1112,7 +1161,7 @@ fn jet_report_columns(text: &str) -> usize {
 /// this block, so the root failure above stays the one undimmed line and stays
 /// what the eye lands on. A column budget sheds this block's disposable parts
 /// and never reaches the root failure, which is not this function's line.
-fn jet_journey_block(origin: Option<&JourneyHop>, hops: &[JourneyHop], style: JetReportStyle) -> String {
+fn jet_journey_block(origin: Option<&JourneyHop>, hops: &[JourneyHop], style: JetReportStyle, show_columns: bool) -> String {
     const ORIGIN_LABEL: &str = "failed here:";
     let sites = origin
         .map(|hop| (ORIGIN_LABEL.to_string(), hop))
@@ -1130,14 +1179,14 @@ fn jet_journey_block(origin: Option<&JourneyHop>, hops: &[JourneyHop], style: Je
     // so one file never renders two different ways under one failure.
     let layout = style
         .width
-        .map(|width| (width, jet_journey_path_budget(&sites, width)));
+        .map(|width| (width, jet_journey_path_budget(&sites, width, show_columns)));
     let mut lines = Vec::with_capacity(sites.len() + 1);
     for (label, hop) in &sites {
         if label.as_str() == "1." {
             let total: u32 = hops.iter().map(|hop| hop.hops).sum();
             lines.push(jet_journey_header(total, style.width));
         }
-        lines.push(jet_journey_hop_line(label, hop, layout));
+        lines.push(jet_journey_hop_line(label, hop, layout, show_columns));
     }
     let mut block = String::new();
     for line in &lines {
@@ -1172,10 +1221,10 @@ fn jet_journey_header(total: u32, width: Option<usize>) -> String {
 
 /// The columns left for a site's file path once the widest site line's fixed
 /// parts are paid for.
-fn jet_journey_path_budget(sites: &[(String, &JourneyHop)], width: usize) -> usize {
+fn jet_journey_path_budget(sites: &[(String, &JourneyHop)], width: usize, show_columns: bool) -> usize {
     let widest = sites
         .iter()
-        .map(|(label, hop)| jet_report_columns(&jet_journey_hop_text(label, hop, "", &hop.note)))
+        .map(|(label, hop)| jet_report_columns(&jet_journey_hop_text(label, hop, "", &hop.note, show_columns)))
         .max()
         .unwrap_or(0);
     width.saturating_sub(widest)
@@ -1187,16 +1236,16 @@ fn jet_journey_path_budget(sites: &[(String, &JourneyHop)], width: usize) -> usi
 /// address of the code to open, and nothing sheds it. What sheds, in order:
 /// leading path segments, then the note's tail. So a narrow terminal loses
 /// commentary, never a location, and never the root failure above.
-fn jet_journey_hop_line(label: &str, hop: &JourneyHop, layout: Option<(usize, usize)>) -> String {
+fn jet_journey_hop_line(label: &str, hop: &JourneyHop, layout: Option<(usize, usize)>, show_columns: bool) -> String {
     let Some((width, path_budget)) = layout else {
-        return jet_journey_hop_text(label, hop, &hop.site.file, &hop.note);
+        return jet_journey_hop_text(label, hop, &hop.site.file, &hop.note, show_columns);
     };
     let file = jet_report_elide_path(&hop.site.file, path_budget);
-    let full = jet_journey_hop_text(label, hop, &file, &hop.note);
+    let full = jet_journey_hop_text(label, hop, &file, &hop.note, show_columns);
     if jet_report_columns(&full) <= width {
         return full;
     }
-    let identity = jet_journey_hop_text(label, hop, &file, "");
+    let identity = jet_journey_hop_text(label, hop, &file, "", show_columns);
     // ` — ` plus the ellipsis costs four columns; a note that cannot show one
     // character on top of that goes entirely rather than leaving ` — …`.
     let room = width.saturating_sub(jet_report_columns(&identity) + 4);
@@ -1204,19 +1253,24 @@ fn jet_journey_hop_line(label: &str, hop: &JourneyHop, layout: Option<(usize, us
         return identity;
     }
     let note: String = hop.note.chars().take(room).collect();
-    jet_journey_hop_text(label, hop, &file, &format!("{note}…"))
+    jet_journey_hop_text(label, hop, &file, &format!("{note}…"), show_columns)
 }
 
-fn jet_journey_hop_text(label: &str, hop: &JourneyHop, file: &str, note: &str) -> String {
+fn jet_journey_hop_text(label: &str, hop: &JourneyHop, file: &str, note: &str, show_columns: bool) -> String {
+    use std::fmt::Write as _;
     let mut line = format!(
-        "  {label} {} ({file}:{})",
-        hop.site.fn_name, hop.site.line
+        "  {label} {} ({}:{}",
+        JetErrorTerminalText(&hop.site.fn_name), JetErrorTerminalText(file), hop.site.line
     );
+    if show_columns && hop.site.column != 0 {
+        write!(line, ":{}", hop.site.column).unwrap();
+    }
+    line.push(')');
     if hop.hops > 1 {
-        line.push_str(&format!(" ×{}", hop.hops));
+        write!(line, " ×{}", hop.hops).unwrap();
     }
     if !note.is_empty() {
-        line.push_str(&format!(" — {note}"));
+        write!(line, " — {}", JetErrorTerminalText(note)).unwrap();
     }
     line
 }
@@ -1799,13 +1853,50 @@ mod jet_error_wasm_bridge {
 
 
 pub fn jet_render_err(error: &JetErr) -> String {
-    JetErrorReport::from_error(error, None, Vec::new()).render_root()
+    error.to_string()
 }
 
 impl std::fmt::Display for JetErr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&jet_render_err(self))
+        jet_write_err_value(f, self, 0)
     }
+}
+
+// Printing a handled error value is not the unhandled-entry report edge.
+fn jet_write_err_value(out: &mut dyn std::fmt::Write, error: &JetErr, depth: usize) -> std::fmt::Result {
+    if depth == 0 {
+        match &error.code {
+            Ok(code) => write!(out, "Error [{code}]: {}", error.message)?,
+            Err(_) => write!(out, "Error: {}", error.message)?,
+        }
+    } else {
+        for _ in 0..depth {
+            out.write_str("  ")?;
+        }
+        write!(out, "cause: {}", error.message)?;
+    }
+    if let Some(identity) = &error.typed_identity {
+        write!(out, " (type: {identity})")?;
+    }
+    if let Ok(cause) = &error.cause {
+        out.write_char('\n')?;
+        jet_write_err_value(out, cause, depth + 1)?;
+    }
+    for frame in &error.context {
+        out.write_char('\n')?;
+        for _ in 0..=depth {
+            out.write_str("  ")?;
+        }
+        write!(out, "context ({}:{}): {}", frame.file, frame.line, frame.text)?;
+    }
+    for conversion in &error.conversions {
+        out.write_char('\n')?;
+        for _ in 0..=depth {
+            out.write_str("  ")?;
+        }
+        write!(out, "conversion: {} -> {}", conversion.source, conversion.target)?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1894,14 +1985,60 @@ mod err_tests {
         assert_eq!(JetErrorReport::from_json(&wire), Ok(report.clone()));
         assert_eq!(
             report.render_with_style(JetReportStyle::PLAIN),
-            "Error [CFG404]: loading config (type: IoError)\n\
-             \x20\x20cause: disk offline (type: IoError)\n\
+            "Error [E3015]: Entry returned an unhandled error: loading config\n\
+             \x20Why: The entry returned a failed outcome without a caller to handle it.\n\
+             \x20Fix: Handle the failed outcome before it reaches the entry, or fix the operation that returned the error.\n\
+             error code: CFG404\n\
+             type: IoError\n\
+             \x20\x20cause: disk offline (type: IoError; error code: IO001)\n\
              \x20\x20context (config.jet:42): while loading app.toml\n\
              \x20\x20conversion: IoError -> ConfigError\n\
-             \x20\x20failed here: load (config.jet:40)\n\
+             \x20\x20failed here: load (config.jet:40:12)\n\
              \x20Trail [E3002] (1 hop via ?, origin first):\n\
-             \x20 1. run (config.jet:42)\n"
+             \x20 1. run (config.jet:42:5)\n\
+             More: jet-lang.dev/e/E3015\n"
         );
+    }
+
+    #[test]
+    fn entry_report_escapes_data_and_keeps_recursive_facts_without_inventing_locations() {
+        jet_journey_reset();
+        let mut cause = jet_err_with_identity(
+            "disk\n\x1boffline".to_string(), Ok("IO001".to_string()),
+            Err(JetAbsent), "IoError".to_string(),
+        );
+        jet_err_add_context(&mut cause, "inner\tcontext".to_string(), "inner.jet".to_string(), 7);
+        jet_err_set_details(&mut cause, JetErrorDetails {
+            variant: "Offline".to_string(),
+            fields: vec![JetErrorField { name: "attempts".to_string(), value: "17".to_string() }],
+            source_span: Some(JetErrorSpan { start: 9, end: 12 }),
+        });
+        let error = jet_err("loading\u{2028}config".to_string(), Ok("CFG404".to_string()), Ok(cause));
+        let mut report = jet_error_report(&error);
+        report.causes[0].origin = Some(JetErrorJourneyFrame {
+            fn_name: "read".to_string(), file: "inner.jet".to_string(), line: 7,
+            column: 4, note: String::new(), hops: 1,
+        });
+        let wire = report.to_json();
+        let text = report.render_with_style(JetReportStyle::PLAIN);
+        assert!(text.starts_with("Error [E3015]: Entry returned an unhandled error: loading\\u{2028}config\n"));
+        assert!(text.contains("error code: CFG404\n"));
+        assert!(text.contains("cause: disk\\n\\u{001b}offline (type: IoError; error code: IO001)\n"));
+        assert!(text.contains("context (inner.jet:7): inner\\tcontext\n"));
+        assert!(text.contains("variant: Offline\n"));
+        assert!(text.contains("attempts: 17\n"));
+        assert!(text.contains("source span: 9..12\n"));
+        assert!(text.contains("failed here: read (inner.jet:7:4)\n"));
+        assert_eq!(text.matches("Error [E3015]").count(), 1);
+        assert_eq!(text.matches("More: ").count(), 1);
+        assert!(text.ends_with("More: jet-lang.dev/e/E3015\n"));
+        assert!(!text.contains("Stop ["));
+        assert!(!text.contains("Error [CFG404]"));
+        assert!(!text.contains("  --> "));
+        assert!(!text.contains(":0"));
+        assert!(!text.contains('\x1b'));
+        assert_eq!(report.to_json(), wire, "terminal escaping must not rewrite source data");
+        assert_eq!(JetErrorReport::from_json(&wire), Ok(report));
     }
 }
 
@@ -1963,10 +2100,13 @@ mod journey_tests {
         assert_eq!(report.source_journey.len(), 1);
         assert_eq!(
             report.render_with_style(JetReportStyle::PLAIN),
-            "Error: file not found\n\
-             \x20\x20failed here: load (app.jet:6) — reading config\n\
+            "Error [E3015]: Entry returned an unhandled error: file not found\n\
+             \x20Why: The entry returned a failed outcome without a caller to handle it.\n\
+             \x20Fix: Handle the failed outcome before it reaches the entry, or fix the operation that returned the error.\n\
+             \x20\x20failed here: load (app.jet:6:13) — reading config\n\
              \x20Trail [E3002] (1 hop via ?, origin first):\n\
-             \x20 1. run (app.jet:11)\n"
+             \x20 1. run (app.jet:11:5)\n\
+             More: jet-lang.dev/e/E3015\n"
         );
     }
 
@@ -2498,7 +2638,13 @@ pub fn jet_sentence_case_line(input: &str) -> String {
 /// line. The code is kept as data so custom project reports use the same
 /// shape without duplicating the host string.
 pub fn jet_diagnostic_more_line(code: &str) -> String {
-    format!("More: jet-lang.dev/e/{code}")
+    let mut rendered = String::new();
+    jet_write_diagnostic_more_line(&mut rendered, code).expect("String formatting cannot fail");
+    rendered
+}
+
+fn jet_write_diagnostic_more_line(out: &mut dyn std::fmt::Write, code: &str) -> std::fmt::Result {
+    write!(out, "More: jet-lang.dev/e/{code}")
 }
 
 
@@ -2656,6 +2802,16 @@ pub fn jet_render_runtime_stop_from_row(
 }
 
 // JET_HOST_RUNTIME_STOP_BEGIN
+fn jet_runtime_diagnostic_row(code: &str) -> Option<JetRuntimeDiagnosticRow> {
+    crate::Registry::active_runtime_diagnostic(code).map(|row| JetRuntimeDiagnosticRow {
+        code: row.code,
+        what: row.what,
+        why: row.why,
+        fix: row.fix,
+        template_holes: row.template_holes,
+    })
+}
+
 /// Foundation-side adapter. Embedded Preludes strip only this wrapper and
 /// append a generated lookup over the active Registry rows.
 pub fn jet_render_runtime_stop(
@@ -2669,13 +2825,7 @@ pub fn jet_render_runtime_stop(
     message: &str,
     locals: &str,
 ) -> JetRuntimeDiagnostic {
-    let row = crate::Registry::active_runtime_diagnostic(code).map(|row| JetRuntimeDiagnosticRow {
-        code: row.code,
-        what: row.what,
-        why: row.why,
-        fix: row.fix,
-        template_holes: row.template_holes,
-    });
+    let row = jet_runtime_diagnostic_row(code);
     jet_render_runtime_stop_from_row(
         row, code, file, line, fn_name, src_line, col, caret_len, message, locals,
     )
