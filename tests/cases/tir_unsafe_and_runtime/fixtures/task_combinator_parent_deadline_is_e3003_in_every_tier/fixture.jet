@@ -1,0 +1,22 @@
+use core.time as time
+
+fn slow(value: Int) -> Int {
+    time.sleep(1ms)
+    return value
+}
+
+fn run() {
+    #Context(deadline: 0) {
+        task.group workers {
+            if (task.all { slow(1), slow(2) }) == {
+                .Ok(results) -> {
+                    print(results[0], results[1])
+                }
+                .Err(error) -> {
+                    panic("unexpected child task failure")
+                }
+            }
+        }
+    }
+    print("unreachable")
+}
