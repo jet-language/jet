@@ -490,7 +490,7 @@ class InputPath {
 
 function checkAst(node, blockers = null) {
   if (!node) return;
-  const allowedCalls = ['jet::compile', 'jet::compile_with_path', 'include_str!', 'assert!', 'assert_eq!', 'assert_ne!', 'matches!', 'panic!', 'format!', 'common::unique_tmp', 'fs::create_dir_all', 'fs::write', 'common::build_and_run', 'tir_support::build_and_run', 'tir_support::assert_tiers_agree'];
+  const allowedCalls = ['jet::compile', 'jet::compile_with_path', 'test_port::codes', 'include_str!', 'assert!', 'assert_eq!', 'assert_ne!', 'matches!', 'panic!', 'format!', 'common::unique_tmp', 'fs::create_dir_all', 'fs::write', 'common::build_and_run', 'tir_support::build_and_run', 'tir_support::assert_tiers_agree'];
   const allowedMethods = ['iter', 'any', 'all', 'find', 'filter', 'collect', 'count', 'len', 'is_empty', 'contains', 'starts_with', 'ends_with', 'as_str', 'expect', 'expect_err', 'unwrap', 'unwrap_err', 'unwrap_or_else', 'is_ok', 'is_err', 'is_some', 'is_none', 'trim', 'replace', 'to_string', 'to_owned', 'join', 'to_str'];
   const unsupported = message => blockers ? blockers.add(message, node) : refuse(message);
   if (node.helperBlocker) unsupported(node.helperBlocker);
@@ -655,6 +655,48 @@ function canonicalRunCalls(fn, node) {
   }
 }
 
+// Complete local helper contracts, never a whitelist of the word `codes`.
+// compile returns errors only and drops successful lints; check returns every
+// diagnostic in order. Raw Loader/Sema bodies remain HAND-PORT: replacing them
+// with Driver would add build facts, extension hooks and package lint policy.
+function codesHelperKind(helper) {
+  if (helper?.name !== 'codes') return null;
+  const body = helper.tokens.map(token => token.raw).join(' ');
+  const signature = helper.signature?.map(token => token.raw).join(' ');
+  if (signature === '( src : & str ) -> Vec < String >') {
+    if (body === 'match jet :: compile ( src ) { Ok ( _ ) => Vec :: new ( ) , Err ( diags ) => diags . iter ( ) . map ( | d | d . code . clone ( ) ) . collect ( ) , }' ||
+        body === 'match jet :: compile ( src ) { Ok ( _ ) => Vec :: new ( ) , Err ( diags ) => diags . into_iter ( ) . map ( | d | d . code . to_string ( ) ) . collect ( ) , }') return 'compile-errors';
+    if (body === 'jet :: compile ( src ) . err ( ) . unwrap ( ) . into_iter ( ) . map ( | d | d . code . to_string ( ) ) . collect ( )') return 'required-errors';
+  }
+  if (signature === '( source : & str , stem : & str ) -> Vec < String >' &&
+      body === 'let root = common :: unique_tmp ( stem ) ; let path = root . join ( "main.jet" ) ; fs :: write ( & path , source ) . unwrap ( ) ; let diagnostics = jet :: check_with_path ( path . to_str ( ) . unwrap ( ) ) ; let _ = fs :: remove_dir_all ( root ) ; diagnostics . into_iter ( ) . map ( | diagnostic | diagnostic . code ) . collect ( )') return 'staged-all';
+  if (signature === '( entry : & str ) -> Vec < String >' &&
+      body === 'jet :: Driver :: check_file_with_effect_facts ( entry , None , false ) . 0 . iter ( ) . map ( | d | d . code . clone ( ) ) . collect ( )') return 'path-all';
+  if (signature === '( diags : & [ jet :: Diagnostics :: Diagnostic ] ) -> BTreeSet < String >' &&
+      body === 'diags . iter ( ) . map ( | d | d . code . clone ( ) ) . collect ( )') {
+    const lexical = helper.lexicalTokens.filter(token => token.kind !== 'string').map(token => token.raw).join(' ');
+    if (/(?:^|; )use std :: collections :: BTreeSet ;/u.test(lexical)) return 'diagnostic-set';
+  }
+  return null;
+}
+
+function canonicalCodesCalls(fn, node) {
+  if (!node || typeof node !== 'object') return;
+  if (node.type === 'call') {
+    const binding = helperBinding(fn, node.name);
+    if (binding?.helper?.name === 'codes') {
+      const kind = codesHelperKind(binding.helper);
+      if (!kind) refuse(`unmodeled call ${node.name}: local codes body or signature has no exact projection`);
+      node.name = 'test_port::codes';
+      node.codesKind = kind;
+    }
+  }
+  for (const value of Object.values(node)) {
+    if (Array.isArray(value)) value.forEach(child => canonicalCodesCalls(fn, child));
+    else if (value && typeof value === 'object') canonicalCodesCalls(fn, value);
+  }
+}
+
 function availabilityGuards(fn, tokens) {
   const output = [];
   const rustc = name => ['common::have_rustc', 'tir_support::have_rustc'].includes(helperBinding(fn, name)?.name);
@@ -709,6 +751,7 @@ export function assertionPlan(fn) {
   const retirement = retireRustAssertions(fn);
   const statements = new Parser(availabilityGuards(fn, retirement.tokens)).statements();
   statements.forEach(node => canonicalRunCalls(fn, node));
+  statements.forEach(node => canonicalCodesCalls(fn, node));
   for (const statement of statements) checkAst(statement);
   Object.defineProperty(statements, 'retiredAssertions', { value: retirement.retired });
   return statements;
@@ -781,6 +824,7 @@ export function analyzeFunction(fn) {
       try {
         const statements = parser.statements();
         statements.forEach(node => canonicalRunCalls(fn, node));
+        statements.forEach(node => canonicalCodesCalls(fn, node));
         statements.forEach(node => checkAst(node, blockers));
         modelStatements(statements, bindings);
       }
@@ -861,6 +905,38 @@ async function evaluate(node, env, context) {
         const path = resolve(dirname(join(context.root, context.fn.file)), args[0]);
         if (!path.startsWith(`${context.root}/`)) refuse('include_str escapes repository');
         return readFileSync(path, 'utf8');
+      }
+      if (node.name === 'test_port::codes') {
+        const kind = node.codesKind;
+        if (kind === 'diagnostic-set') {
+          if (args.length !== 1 || !Array.isArray(args[0]) || args[0].some(d => typeof d?.code !== 'string')) refuse('codes needs a diagnostic slice');
+          // Rust String ordering is UTF-8 byte ordering, not JS UTF-16 order.
+          return [...new Set(args[0].map(d => d.code))]
+            .map(value => ({ value, bytes: Buffer.from(value, 'utf8') }))
+            .sort((a, b) => Buffer.compare(a.bytes, b.bytes)).map(row => row.value);
+        }
+        if (!['compile-errors', 'required-errors', 'staged-all', 'path-all'].includes(kind)) refuse('codes call has no proven helper body');
+        const all = kind === 'staged-all' || kind === 'path-all';
+        let source, project = null;
+        if (kind === 'path-all') {
+          const path = args[0];
+          if (args.length !== 1 || !(path instanceof InputPath) || !path.project.files.has(path.path)) refuse('Driver codes needs a staged input path');
+          source = readFileSync(path.disk(), 'utf8');
+          project = { entry: path.path, files: [...path.project.files].map(([path, content]) => ({ path, content })) };
+        } else {
+          if (args.length !== (kind === 'staged-all' ? 2 : 1) || typeof args[0] !== 'string' ||
+              (kind === 'staged-all' && typeof args[1] !== 'string')) refuse('unsupported source codes arguments');
+          source = args[0];
+          if (kind === 'staged-all') project = { entry: 'main.jet', files: [{ path: 'main.jet', content: source }] };
+        }
+        const observed = await context.observe(source, 'compile', project, { allDiagnostics: all });
+        context.observations.push(observed);
+        if (kind === 'required-errors') {
+          context.assertions++;
+          if (observed.code === 0) refuse('original codes compile.err().unwrap() not satisfied');
+        }
+        if (!all && observed.code === 0) return [];
+        return observed.diagnostics.filter(d => all || d.severity.toLowerCase() === 'error').map(d => d.code);
       }
       if (['jet::compile', 'jet::compile_with_path'].includes(node.name)) {
         let project = null;
@@ -990,7 +1066,7 @@ export async function checkOriginal(fn, reference, root = ROOT) {
   const interpreterAgreement = allTier || fn.tokens.some((token) => token.kind === 'word' && token.value === 'run_interpreted');
   const suite = fn.file.replace(/^tests\//u, '').replace(/\.rs$/u, '').replaceAll('/', '_');
   let ordinal = 0;
-  context.observe = async (source, mode, project = null) => {
+  context.observe = async (source, mode, project = null, projection = {}) => {
     const name = ++ordinal === 1 ? fn.name : `${fn.name}_${ordinal}`;
     const category = mode === 'run' ? 'run' : lint ? 'ui_lint' : 'ui';
     if (project) {
@@ -1003,8 +1079,8 @@ export async function checkOriginal(fn, reference, root = ROOT) {
     }
     const entry = project?.entry ?? `${name}.jet`;
     const path = project ? `tests/${category}/${suite}/${name}/${entry}` : `tests/${category}/${suite}/${name}.jet`;
-    const observation = await reference(source, mode, { path, ...(project ? { project } : {}), lint: mode === 'compile' && lint, agreement: mode === 'run' && agreement, interpreterAgreement: mode === 'run' && interpreterAgreement });
-    return { ...observation, project, readsStderr };
+    const observation = await reference(source, mode, { path, ...(project ? { project } : {}), ...projection, lint: mode === 'compile' && lint, agreement: mode === 'run' && agreement, interpreterAgreement: mode === 'run' && interpreterAgreement });
+    return { ...observation, project, readsStderr, allDiagnostics: projection.allDiagnostics === true };
   };
   await executeStatements(plan, env, context);
   if (!context.observations.length) refuse('no supported Jet source invocation');
@@ -1040,7 +1116,7 @@ export async function draftFunction(fn, options) {
   const env = {}, reference = options.reference, captured = [], sources = [], mapped = [];
   const firstInvocation = reference.invocations?.length ?? 0;
   const context = { fn, root, reference, observations: [], assertions: 0, retiredAssertions: [] };
-  context.observe = async (source, mode, project = null) => {
+  context.observe = async (source, mode, project = null, projection = {}) => {
     const ordinal = sources.length + 1, entry = project?.entry ?? `${stem}.jet`;
     const staged = `tests/${mode === 'run' ? 'run' : 'ui'}/${suite}/${stem}/${entry}`, scope = `source-${ordinal}`;
     const files = project?.files ?? [{ path: entry, content: source }];
@@ -1053,7 +1129,7 @@ export async function draftFunction(fn, options) {
     const before = reference.invocations?.length ?? 0;
     let observation;
     try {
-      observation = await reference(source, mode, { path: staged, ...(project ? { project } : {}), agreement: context.allTier === true, interpreterAgreement: context.allTier === true });
+      observation = await reference(source, mode, { path: staged, ...(project ? { project } : {}), ...projection, agreement: context.allTier === true, interpreterAgreement: context.allTier === true });
       return observation;
     } finally {
       for (const receipt of reference.invocations?.slice(before) ?? []) {
@@ -1080,6 +1156,7 @@ export async function draftFunction(fn, options) {
     try {
       plan = new Parser(segment[0].value === 'for' && segment.at(-1).value === '}' ? segment : [...segment, terminator]).statements();
       plan.forEach(node => canonicalRunCalls(fn, node));
+      plan.forEach(node => canonicalCodesCalls(fn, node));
       plan.forEach(node => checkAst(node));
     } catch {
       // Unknown statements may consume or mutate an earlier binding. Later
@@ -1177,7 +1254,7 @@ export function makeReference(binary, root, scratch, timeout = 600000, captureSt
     }
     const lint = metadata.lint === true;
     const cwd = dir, argument = shown;
-    const flags = lint ? ['--verbose'] : [];
+    const flags = lint || metadata.allDiagnostics === true ? ['--verbose'] : [];
     const machine = call(binary, ['check', '--json', ...flags, argument], cwd);
     const diagnostics = machineDiagnostics(machine);
     if (machine.code !== 0 && !diagnostics.some((row) => row.severity.toLowerCase() === 'error')) refuse('failed check without an error diagnostic');
@@ -1214,6 +1291,7 @@ export async function emitFunction(fn, options) {
   const suite = fn.file.replace(/^tests\//u, '').replace(/\.rs$/u, '').replaceAll('/', '_');
   const files = [];
   checked.observations.forEach((observation, i) => {
+    if (observation.allDiagnostics && observation.diagnostics.some(d => d.severity.toLowerCase() !== 'error')) refuse('all-code warning projection needs an explicit verbose CLI case, not an error-only UI snapshot');
     const name = i === 0 ? fn.name : `${fn.name}_${i + 1}`;
     const prefix = `tests/${observation.mode === 'run' ? 'run' : observation.lint ? 'ui_lint' : 'ui'}/${suite}/${name}`;
     const path = `${prefix}.jet`;
