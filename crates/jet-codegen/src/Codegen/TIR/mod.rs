@@ -14811,4 +14811,4 @@ pub struct TFnCoerce {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;
