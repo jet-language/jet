@@ -1,0 +1,12 @@
+
+use core.compute as compute
+
+fn run() {
+    vulkan :: compute.device_vulkan()
+    webgpu :: compute.device_webgpu()
+    tensor :: compute.full([1], 1.0) ?? panic("tensor")
+    vulkan_tensor :: compute.on_device(tensor, vulkan) ?? panic("vulkan")
+    webgpu_tensor :: compute.on_device(tensor, webgpu) ?? panic("webgpu")
+    print(compute.device(vulkan_tensor))
+    print(compute.device(webgpu_tensor))
+}
