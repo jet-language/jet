@@ -504,3 +504,12 @@ startup columns cache immutable host `vars_os` separately. Both preserve
 platform encoded name/value bytes and let source `env_columns` pair them.
 The key comparison reuses Windows ordinal comparison and byte ordering on
 other hosts. Neither bridge writes the operating-system environment.
+
+### Realtime receipt presentation
+
+`Core/rt/rt.jet::RealtimeReceipt` owns `render_json`, `render`, and
+`frames_per_buffer`. The first two preserve the eight native receipt fields'
+fixed labels, order, punctuation and whitespace (`Realtime.rs:119-144`
+before removal); the last returns `requested_frames` (`Realtime.rs:147-149`).
+All three read the existing receipt without effects or new host leaves.
+The provider still owns bounded receipt observations and stream lifetime.
