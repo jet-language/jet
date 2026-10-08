@@ -553,3 +553,12 @@ The Jet Foundation collection/trait registries and Jet Sema builtin-owner
 registry had no Fake-specific path; they intentionally remain unchanged.
 Generated C-ABI/route views are regenerated centrally from these canonical
 removals; no old Fake handle or constructor is a compatibility path.
+
+## Browser resident adapter cleanup
+
+The unused `BrowserHost::eval_core_call` plain-call dispatcher is removed,
+along with its orphan-only `profile_value`, `profile_ct`, `timeout_ct`, and
+`locked_ct` conversions. Repository-wide binding, qualified-call, string, and
+macro searches found no callers. Unrelated compiler/MIR `eval_core_call`
+functions are not that binding. The resident method adapter, handle table,
+live timeout/locked conversions, and included AOT providers are unchanged.
