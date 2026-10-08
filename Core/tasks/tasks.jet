@@ -118,15 +118,18 @@ fn interval_milliseconds(period: time.Duration) -> Int Never! {
     milliseconds
 }
 
-// Distinct names keep the value-only TaskState convenience API separate from
-// the scheduler's real generic channel pair and its backpressure state.
-pub fn scheduler_channel<T>() -> (sender: Sender<T>, receiver: Receiver<T>) Never! {
-    core.tasks.__channel_new<T>()
-}
+// These functions back compiler-private channel rows, not new public API.
+module scheduler {
+    use core as core
 
-pub fn scheduler_channel_bounded<T>(capacity: Int) -> (sender: Sender<T>, receiver: Receiver<T>) Never! {
-    limit :: if capacity < 1 -> 1 else -> capacity
-    core.tasks.__channel_bounded<T>(limit)
+    fn channel<T>() -> (sender: Sender<T>, receiver: Receiver<T>) Never! {
+        core.tasks.__channel_new<T>()
+    }
+
+    fn bounded<T>(capacity: Int) -> (sender: Sender<T>, receiver: Receiver<T>) Never! {
+        limit :: if capacity < 1 -> 1 else -> capacity
+        core.tasks.__channel_bounded<T>(limit)
+    }
 }
 
 impl Condition {

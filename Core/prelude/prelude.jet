@@ -57,3 +57,14 @@ pub fn option_or_err<T>(value: ^T?, why: ^String) -> T Err! {
         .None -> Err(why)
     }
 }
+
+// Compiler-supplied #Receipt facts are not a user-constructible handle.
+// This private source target retains the typed payload and all three checked
+// metadata arguments; the raw store operation uses the existing encoder.
+module receipt {
+    use core as core
+
+    fn attach<T>(value: T, section_name: String, type_name: String, schema_digest: String) Never! {
+        core.prelude.__receipt_attach<T>(value, section_name, type_name, schema_digest)
+    }
+}

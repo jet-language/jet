@@ -2086,6 +2086,12 @@ non-square, nonfinite, singular, unsupported-device, and limit failures are
 | `solve.lu(a: Tensor)` | `LinearSolver !ComputeError` | Build a partial-pivoting LU factorization carrier for a square CPU tensor. |
 | `LinearSolver` | type | Stores solver kind, dimension, factors, pivots, and device. |
 
+The independent finite `Solver` counter is not an LU factorization:
+`Solver.new(seed)` starts with zero checks and failures, `&solver.require(ok)`
+counts every requirement and records failed ones, and `failure_count()` reads
+the failure count. `status()` returns `"ok"` until a failure, then `"failed"`.
+Copying this value copies its counters independently.
+
 The supported strict reproducible profiles are `F64Strict+Reproducible` and
 `F32Strict+Reproducible`. The solver is CPU-only and rejects tensors above the
 configured element limit rather than silently moving them to another device.
