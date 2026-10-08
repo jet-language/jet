@@ -1589,7 +1589,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 8f7ffba5f0e22c28478f433ef15f0958b050f4779bc8d6e2003a2f1fa0d18ac4
+// Source SHA-256: dc79d39dd8184cc96287351c8ed97adb0c9dfbbb85adde3748196bd43354739b
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -2653,7 +2653,8 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.data", "file_member", "jet_data_loader_file_member", true, &[true, true, true, true], ),
     CoreCallRecord::new("core.data", "url", "jet_data_loader_url", true, &[true, true, true, true]),
     CoreCallRecord::new( "core.data", "database", "jet_data_loader_database", true, &[true, true, true, true], ),
-    CoreCallRecord::new("core.data", "value", "jet_data_loader_value", true, &[true, true]),
+    CoreCallRecord::source_owned("core.data", "value", &[true, true]),
+    CoreCallRecord::new("core.mem", "__loader_new", "jet_data_loader_new", true, &[false, false, false, false, false, false, false]),
     CoreCallRecord::new("core.data", "snapshot", "jet_data_loader_snapshot", true, &[true]),
     CoreCallRecord::new( "core.data.loader", "bind", "jet_data_loader_bind", true, &[true, true], ),
     CoreCallRecord::new( "core.data.loader", "bind_text", "jet_data_loader_bind_text", true, &[true, true], ),
@@ -2695,8 +2696,8 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.data", "variance", "jet_data_variance_checked", true, &[true]),
     CoreCallRecord::new("core.data", "sum", "jet_data_sum_checked", true, &[true]),
     CoreCallRecord::new("core.data", "bar_text", "jet_data_bar_text_checked", true, &[true]),
-    CoreCallRecord::new("core.data", "csv", "jet_enc_csv_decode", true, &[true]),
-    CoreCallRecord::new("core.data", "json", "jet_data_json_decode", true, &[true]),
+    CoreCallRecord::source_owned("core.data", "csv", &[true]),
+    CoreCallRecord::source_owned("core.data", "json", &[true]),
     CoreCallRecord::new( "core.data", "csv_reader", "jet_data_csv_reader", true, &[false, false], ),
     CoreCallRecord::new( "core.data", "json_reader", "jet_data_json_reader", true, &[false, false], ),
     CoreCallRecord::new("core.text.fmt", "number", "jet_fmt_number", true, &[false]),

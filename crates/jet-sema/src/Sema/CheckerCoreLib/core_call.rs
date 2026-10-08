@@ -899,7 +899,7 @@ fn resolved_core_fixed_sig(
     diags: &mut Vec<Diagnostic>,
 ) -> Option<(Vec<(AccessConvention, Type)>, Option<Type>)> {
     if module == "core.mem"
-        && matches!(name, "__list_capacity" | "__list_reserve_exact" | "__type_size")
+        && matches!(name, "__list_capacity" | "__list_reserve_exact" | "__type_size" | "__loader_new")
     {
         let [element] = type_args else {
             diags.push(Diagnostic::error(
@@ -912,15 +912,14 @@ fn resolved_core_fixed_sig(
             return None;
         };
         let (parameters, result) = core_fixed_sig(module, name)?;
+        let substitution_name = if name == "__loader_new" { "T" } else { "__element" };
+        let substitution = std::collections::HashMap::from([(substitution_name.to_string(), element.clone())]);
         return Some((
             parameters.into_iter().map(|(access, ty)| {
-                let ty = match ty {
-                    Type::List(_) => Type::List(Box::new(element.clone())),
-                    ty => ty,
-                };
+                let ty = crate::Generics::substitute_type(&ty, &substitution);
                 (access, ty)
             }).collect(),
-            result,
+            result.map(|ty| crate::Generics::substitute_type(&ty, &substitution)),
         ));
     }
     if (module == "core.tasks" && matches!(name, "__channel_new" | "__channel_bounded"))
@@ -2410,6 +2409,21 @@ impl<'a> Checker<'a> {
         args: &mut Vec<crate::AST::CallArg>,
         resolved_ret_out: &mut Option<Type>,
     ) -> Option<Type> {
+        if module == "core.mem" && name == "__loader_new" {
+            let vetted = self.name_ledger.module_alias(self.module_idx)
+                .and_then(jet_foundation::CoreModuleExports::core_source_module_by_alias)
+                .is_some_and(|source| source.module == "core.data");
+            if !vetted {
+                self.diags.push(Diagnostic::error(
+                    "E0510",
+                    "data loader construction is compiler-private".to_string(),
+                    "the native loader constructor is restricted to checked Core data source".to_string(),
+                    "use core.data.value".to_string(),
+                    Some(span),
+                ));
+                return None;
+            }
+        }
         let encoding_backing_leaf = (module == "core.mem"
             && matches!(name, "__list_capacity" | "__list_reserve_exact" | "__type_size"))
             || (module == "core.encoding"
@@ -7660,5 +7674,24 @@ impl<'a> Checker<'a> {
         } else {
             compute_alias_ret.or(ret)
         }
+    }
+}
+
+#[cfg(test)]
+mod loader_constructor_signature_tests {
+    use super::*;
+
+    #[test]
+    fn substitutes_user_record_return_type() {
+        let record = Type::Named("UserRec".to_string());
+        let mut diagnostics = Vec::new();
+        let (_, result) = resolved_core_fixed_sig(
+            "core.mem", "__loader_new", &[record.clone()], Span::new(0, 0), &mut diagnostics,
+        ).expect("registered loader constructor");
+        assert!(diagnostics.is_empty());
+        assert_eq!(result, Some(result_ty(
+            Type::Apply { name: "DataLoader".to_string(), args: vec![record] },
+            Type::Named("DataError".to_string()),
+        )));
     }
 }
