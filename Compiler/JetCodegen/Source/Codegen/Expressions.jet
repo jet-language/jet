@@ -3699,7 +3699,7 @@ fn jet_codegen_emit_static_prelude_effect(builder: &JetCodegenBuilder, program: 
 // lowers (the dense row the stop record names), which MIR cannot know.
 fn jet_codegen_emit_budget_site(builder: &JetCodegenBuilder, program: JetCodegenProgram, member: String, symbol: String) Never! {
     if !program.comptime_budget || !jet_codegen_current_is_open(builder, program) -> return
-    span :: builder.current_span
+    span := builder.current_span
     offset_type :: Type.IntN{signed: false, bits: 64}
     start := jet_codegen_emit_value(&builder, program, span, offset_type, MIROperation.Constant{value: MIRConstant.Int{value: span.start, width: Val(MIRIntegerWidth{signed: false, bits: 64}), spelling: None}})
     end := jet_codegen_emit_value(&builder, program, span, offset_type, MIROperation.Constant{value: MIRConstant.Int{value: span.end, width: Val(MIRIntegerWidth{signed: false, bits: 64}), spelling: None}})
@@ -3715,7 +3715,7 @@ fn jet_codegen_emit_budget_leave(builder: &JetCodegenBuilder, program: JetCodege
         .Return(_) -> {}
         else -> return
     }
-    span :: builder.current_span
+    span := builder.current_span
     route := jet_codegen_static_prelude_call(&builder, program, "core.comptime", "leave", "jet_rt_comptime_leave", [Bool]{}, None, TFailureCarrier.Infallible, false)
     masked :: builder.stop_cleanup_active
     builder.stop_cleanup_active = true

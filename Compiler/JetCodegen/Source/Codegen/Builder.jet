@@ -1146,7 +1146,7 @@ fn jet_codegen_switch_block(builder: &JetCodegenBuilder, program: JetCodegenProg
 fn jet_codegen_emit_poll(builder: &JetCodegenBuilder, program: JetCodegenProgram, kind: MIRPollKind) Never! {
     if !program.stop_points || builder.stop_cleanup_active || builder.transactions.len() > 0 -> return
     if !jet_codegen_current_is_open(builder, program) || jet_codegen_in_shield(builder) -> return
-    span :: builder.current_span
+    span := builder.current_span
     resume :: jet_codegen_new_block(&builder, program, span, "poll-resume")
     stop :: jet_codegen_new_block(&builder, program, span, "poll-stop")
     jet_codegen_terminate(&builder, program, MIRTerminator.Poll{kind: kind, resume: resume, stop: stop})
