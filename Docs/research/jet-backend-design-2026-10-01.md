@@ -1418,6 +1418,17 @@ the pinned Dragon digit algorithm, with one bounded workspace released
 before returning. Rust-tier scalar C bodies remain seed/verification paths
 under `cfg(not(jet_native_pack))`; they do not define symbols in native packs.
 
+Binary32 has two raw-word C leaves, `jet_rt_float32_to_string(bits: I64)`
+and `jet_rt_float32_debug(bits: I64)`, returning the same owned E4 text.
+Only low32 is interpreted; upper32 is ignored. Its 24-bit decoder (bias
+127, subnormal unit 2^-149) feeds the shared bounded Dragon core, without
+widening to binary64. Display follows Rust f32 `{}`: fixed decimal, `-0`,
+and no mandatory `.0`. Debug follows Rust f32 `{:?}`: `-0.0`, integral
+`.0`, scientific notation below f32(1e-4) or at/above f32(1e16). Those
+binary32 bounds are `0x38d1b717` and `0x5a0e1bca`; the binary64 bounds
+are not reused. Rust 1.90 `core/src/fmt/float.rs` and
+`core/src/num/flt2dec/decoder.rs` define these spelling/decoder rules.
+
 `FloatBits.jet` contains ordinary Core-backed reference functions. Only the
 runtime-object driver may replace their validated checked IDs with internal
 LIR `Bitcast` operations; normal program lowering executes their bodies.
@@ -1440,6 +1451,13 @@ client calls the real Jet exports in the native pack and compares both
 float leaves byte for byte with a separately compiled Rust Debug oracle.
 It also checks scalar limits, UTF-8 boundaries, the boxed Int limb layout,
 Jet-owned exports, and that every Jet-object import resolves in the pack.
+The binary32 differential additionally covers every finite exponent with
+mantissa edges, decimal powers, threshold neighborhoods, decimal ties,
+2^24 integer transitions, signed zero, subnormals, NaN payloads and
+infinities, upper32-poisoned edge words, and one million deterministic
+random32 samples. The real native C witness compares both leaves against
+independent Rust f32 Display/Debug bytes; `binary32_byte_equal` is recorded
+separately from binary64 parity.
 The same runner executes the selected passing print/format goldens against
 that pack and records a one-million-float formatting cell for native Jet and
 the Rust reference, including a digest comparison and measured timing ratio.

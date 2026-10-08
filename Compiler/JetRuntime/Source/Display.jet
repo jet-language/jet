@@ -164,10 +164,10 @@ fn display_int_limb(data: I64, index: I64) -> I64 {
     text
 }
 
-fn display_float_decimal(raw: I64, digits: I64, count: I64, exponent: I64) -> I64 {
+fn display_float_decimal(raw: I64, digits: I64, count: I64, exponent: I64, debug: Bool) -> I64 {
     negative :: raw < I64{0}
     fraction := if exponent < count -> count - exponent else -> I64{0}
-    if (fraction < I64{1}) { fraction = I64{1} }
+    if (debug && fraction < I64{1}) { fraction = I64{1} }
     integer :: if (exponent > I64{0}) -> exponent else -> I64{1}
     length :: integer + fraction + (if (fraction > I64{0}) -> I64{1} else -> I64{0}) + (if negative -> I64{1} else -> I64{0})
     text :: display_new(length)
@@ -254,7 +254,7 @@ fn display_float(value: Float) -> I64 {
     digits :: scratch + I64{2624}
     text :: if {
         (magnitude < I64{4547007122018943789} || magnitude >= I64{4846369599423283200}) -> display_float_exponential(raw, digits, count, exponent)
-        else -> display_float_decimal(raw, digits, count, exponent)
+        else -> display_float_decimal(raw, digits, count, exponent, true)
     }
     jet_rt_free(scratch, I64{2688}, I64{8})
     text
@@ -263,3 +263,41 @@ fn display_float(value: Float) -> I64 {
 #Export(c) fn jet_rt_float_to_string(value: Float) -> I64 { display_float(value) }
 
 #Export(c) fn jet_rt_float_debug(value: Float) -> I64 { display_float(value) }
+
+// Raw binary32 ABI: upper bits are ignored; both exports return owned E4 text.
+// Rust f32 Display is fixed decimal without a mandatory .0; Debug preserves
+// .0 and uses scientific notation outside [f32(1e-4), f32(1e16)).
+fn display_float32(bits: I64, debug: Bool) -> I64 {
+    magnitude :: bits & I64{2147483647}
+    raw :: (bits & I64{4294967295}) << I64{32}
+    if ((magnitude >> I64{23}) == I64{255}) {
+        if ((magnitude & I64{8388607}) != I64{0}) {
+            return display_literal(I64{5136718}, I64{3})
+        }
+        if (raw < I64{0}) { return display_literal(I64{1718511917}, I64{4}) }
+        return display_literal(I64{6712937}, I64{3})
+    }
+    if (magnitude == I64{0}) {
+        if debug {
+            if (raw < I64{0}) { return display_literal(I64{808333357}, I64{4}) }
+            return display_literal(I64{3157552}, I64{3})
+        }
+        if (raw < I64{0}) { return display_literal(I64{12333}, I64{2}) }
+        return display_literal(I64{48}, I64{1})
+    }
+    scratch :: jet_rt_alloc(I64{2688}, I64{8})
+    float32_shortest(scratch, magnitude)
+    count :: display_word(scratch + I64{2656})
+    exponent :: display_word(scratch + I64{2664})
+    digits :: scratch + I64{2624}
+    text :: if {
+        (debug && (magnitude < I64{953267991} || magnitude >= I64{1510874058})) -> display_float_exponential(raw, digits, count, exponent)
+        else -> display_float_decimal(raw, digits, count, exponent, debug)
+    }
+    jet_rt_free(scratch, I64{2688}, I64{8})
+    text
+}
+
+#Export(c) fn jet_rt_float32_to_string(bits: I64) -> I64 { display_float32(bits, false) }
+
+#Export(c) fn jet_rt_float32_debug(bits: I64) -> I64 { display_float32(bits, true) }

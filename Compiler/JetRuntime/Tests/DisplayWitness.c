@@ -14,6 +14,8 @@ extern JetCText *jet_rt_bool_to_string(uint8_t);
 extern JetCText *jet_rt_char_to_string(int64_t);
 extern JetCText *jet_rt_float_to_string(double);
 extern JetCText *jet_rt_float_debug(double);
+extern JetCText *jet_rt_float32_to_string(int64_t);
+extern JetCText *jet_rt_float32_debug(int64_t);
 extern int64_t jet_rt_test_f64_bits(double);
 extern double jet_rt_test_f64_from_bits(int64_t);
 extern void (*__init_array_start[])(void), (*__init_array_end[])(void);
@@ -80,6 +82,18 @@ static void scalars(void) {
     EXPECT(jet_rt_int_to_string(tagged), "1234567890000000000000000001");
     node.negative = 1;
     EXPECT(jet_rt_int_to_string(tagged), "-1234567890000000000000000001");
+    EXPECT(jet_rt_float32_to_string(INT64_C(0x80000000)), "-0");
+    EXPECT(jet_rt_float32_debug(INT64_C(0x80000000)), "-0.0");
+    EXPECT(jet_rt_float32_to_string(INT64_C(0x3f800000)), "1");
+    EXPECT(jet_rt_float32_debug(INT64_C(0x3f800000)), "1.0");
+    EXPECT(jet_rt_float32_to_string(INT64_C(0x3dcccccd)), "0.1");
+    EXPECT(jet_rt_float32_debug(INT64_C(0x3dcccccd)), "0.1");
+    EXPECT(jet_rt_float32_to_string(INT64_C(0x7f800000)), "inf");
+    EXPECT(jet_rt_float32_debug(INT64_C(0xff800000)), "-inf");
+    EXPECT(jet_rt_float32_to_string(INT64_C(0x7fc00042)), "NaN");
+    EXPECT(jet_rt_float32_debug(INT64_C(0xff800001)), "NaN");
+    EXPECT(jet_rt_float32_to_string((int64_t)UINT64_C(0xdeadbeef3dcccccd)), "0.1");
+    EXPECT(jet_rt_float32_debug((int64_t)UINT64_C(0xdeadbeef80000000)), "-0.0");
 }
 static unsigned char input[4096];
 static uint64_t next, available;
@@ -133,6 +147,8 @@ __attribute__((used, noreturn)) void display_witness_main(void) {
             else benchmark();
             break;
         }
+        int narrow = byte == 'F';
+        if (narrow) byte = read_byte();
         for (unsigned i = 0; i < 16; ++i) {
             if (i) byte = read_byte();
             int digit = byte >= '0' && byte <= '9' ? byte - '0' : byte >= 'a' && byte <= 'f' ? byte - 'a' + 10 : -1;
@@ -141,11 +157,17 @@ __attribute__((used, noreturn)) void display_witness_main(void) {
             bits = (bits << 4) | (unsigned)digit;
         }
         if (read_byte() != '\n') { failed = 1; break; }
-        union { uint64_t bits; double value; } value = { .bits = bits };
-        union { double value; uint64_t bits; } back = { .value = jet_rt_test_f64_from_bits((int64_t)bits) };
-        if (back.bits != bits || (uint64_t)jet_rt_test_f64_bits(value.value) != bits) failed = 1;
-        JetCText *display = jet_rt_float_to_string(value.value);
-        JetCText *debug = jet_rt_float_debug(value.value);
+        JetCText *display, *debug;
+        if (narrow) {
+            display = jet_rt_float32_to_string((int64_t)bits);
+            debug = jet_rt_float32_debug((int64_t)bits);
+        } else {
+            union { uint64_t bits; double value; } value = { .bits = bits };
+            union { double value; uint64_t bits; } back = { .value = jet_rt_test_f64_from_bits((int64_t)bits) };
+            if (back.bits != bits || (uint64_t)jet_rt_test_f64_bits(value.value) != bits) failed = 1;
+            display = jet_rt_float_to_string(value.value);
+            debug = jet_rt_float_debug(value.value);
+        }
         write_all(1, hex, 16); write_all(1, "\t", 1);
         write_all(1, display->ptr, display->len); write_all(1, "\t", 1);
         write_all(1, debug->ptr, debug->len); write_all(1, "\n", 1);
