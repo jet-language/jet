@@ -1,0 +1,16 @@
+# Port of tests/library_outputs.rs:538-612; fixture source bytes unchanged.
+# Partial forms reproduce original predicates; literal expected bytes need no blessing.
+# PENDING-GRAMMAR(batch-four): host-name conditional; original mandatory C++ tool absence remains REFUSED.
+fixture: ../../../Examples/interop/guest_library
+step: jet build --lib library.jet
+file: .jet/build/libembedding{sys:dll-suffix} is-file
+file: .jet/build/embedding.h is-file
+file: .jet/build/embedding.h ~ "int64_t on_tick(int64_t p0);" # original predicate
+file: .jet/build/embedding.h ~ "int64_t reenter(int64_t p0);" # original predicate
+file: .jet/build/embedding.h ~ "void jet_text_free(JetText value);" # original predicate
+when os-name linux: step: {tool:c++|g++|clang++} -std=c++17 -I .jet/build foreign.cpp -o foreign -pthread -ldl -rdynamic
+when os-name macos: step: {tool:c++|g++|clang++} -std=c++17 -I .jet/build foreign.cpp -o foreign -pthread -ldl -Wl,-export_dynamic
+when os-name !linux|macos: step: {tool:c++|g++|clang++} -std=c++17 -I .jet/build foreign.cpp -o foreign -pthread
+step: {work}/foreign .jet/build/libembedding{sys:dll-suffix}
+stdout: = guest_embedding_contract_covers_lifecycle_threads_reentry_and_panic.out
+stderr: ~ "Stop [E3001]" # original predicate
