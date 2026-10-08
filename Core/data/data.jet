@@ -362,17 +362,38 @@ pub struct DataWatch<T> {
     pub status: DataWatchStatus
 }
 
+#[Copy, Comparable]
 pub enum JetDataPlotMark {
-    Bar
     Line
+    Bar
     Point
+    pub fn as_str(self) -> String Never! {
+        if self == {
+            .Line -> "line"
+            .Bar -> "bar"
+            .Point -> "point"
+        }
+    }
 }
 
+#[Copy, Comparable]
 pub enum JetDataPlotChannel {
     X
     Y
     Color
     Size
+    Text
+    Detail
+    pub fn as_str(self) -> String Never! {
+        if self == {
+            .X -> "x"
+            .Y -> "y"
+            .Color -> "color"
+            .Size -> "size"
+            .Text -> "text"
+            .Detail -> "detail"
+        }
+    }
 }
 
 pub enum JetDataPlotAggregate {
@@ -383,13 +404,24 @@ pub enum JetDataPlotAggregate {
     Max
 }
 
+#[Copy, Comparable]
 pub enum JetDataPlotFilterOp {
-    Eq
-    Ne
-    Lt
-    Le
-    Gt
-    Ge
+    Equal
+    NotEqual
+    Less
+    LessEqual
+    Greater
+    GreaterEqual
+    pub fn as_str(self) -> String Never! {
+        if self == {
+            .Equal -> "eq"
+            .NotEqual -> "ne"
+            .Less -> "lt"
+            .LessEqual -> "lte"
+            .Greater -> "gt"
+            .GreaterEqual -> "gte"
+        }
+    }
 }
 
 pub enum JetDataPlotValue {
@@ -404,10 +436,21 @@ pub enum JetDataPlotTransform {
     Aggregate
 }
 
+#[Copy, Comparable]
 pub enum JetDataPlotScaleKind {
     Linear
     Log
     Band
+    Point
+    pub fn as_str(self) -> String Never! {
+        if self == {
+            .Linear -> "linear"
+            .Log -> "log"
+            .Band -> "band"
+            .Point -> "point"
+        }
+    }
+    fn needs_numeric(self) -> Bool Never! { self == .Linear || self == .Log }
 }
 
 pub enum JetDataPlotDomain {
@@ -415,33 +458,80 @@ pub enum JetDataPlotDomain {
     Explicit
 }
 
+#[Copy, Comparable]
 pub enum JetDataPlotLegendPosition {
     Top
+    Right
     Bottom
     Left
-    Right
+    pub fn as_str(self) -> String Never! {
+        if self == {
+            .Top -> "top"
+            .Right -> "right"
+            .Bottom -> "bottom"
+            .Left -> "left"
+        }
+    }
 }
 
+#[Copy, Comparable]
 pub enum JetDataPlotFacetKind {
-    Wrap
-    Grid
+    Row
+    Column
+    pub fn as_str(self) -> String Never! {
+        if self == {
+            .Row -> "row"
+            .Column -> "column"
+        }
+    }
 }
 
+#[Copy, Comparable]
 pub enum JetDataPlotInteraction {
     Hover
     Select
+    Zoom
     Pan
+    Brush
+    pub fn as_str(self) -> String Never! {
+        if self == {
+            .Hover -> "hover"
+            .Select -> "select"
+            .Zoom -> "zoom"
+            .Pan -> "pan"
+            .Brush -> "brush"
+        }
+    }
 }
 
+#[Copy, Comparable]
 pub enum JetDataPlotBackend {
-    SVG
-    Text
+    Terminal
+    Browser
+    Native
+    Export
+    pub fn as_str(self) -> String Never! {
+        if self == {
+            .Terminal -> "terminal"
+            .Browser -> "browser"
+            .Native -> "native"
+            .Export -> "export"
+        }
+    }
 }
 
+#[Copy, Comparable]
 pub enum JetDataPlotSupport {
-    Full
-    Partial
+    Supported
+    Degraded
     Unsupported
+    pub fn as_str(self) -> String Never! {
+        if self == {
+            .Supported -> "supported"
+            .Degraded -> "degraded"
+            .Unsupported -> "unsupported"
+        }
+    }
 }
 
 pub enum JetDataPlotErrorKind {
@@ -1004,12 +1094,12 @@ pub fn svg<T>(plot: JetDataPlot<T>) -> String DataError! {
 }
 
 pub fn show<T>(plot: JetDataPlot<T>) -> JetDataPlotRender DataError! {
-    render<T>(plot, JetDataPlotBackend.SVG)
+    render<T>(plot, JetDataPlotBackend.Browser)
 }
 
 pub fn render<T>(plot: JetDataPlot<T>, backend: JetDataPlotBackend) -> JetDataPlotRender DataError! {
     plan :: normalize_plot_plan(plot.plan)
-    if backend == JetDataPlotBackend.Text {
+    if backend == JetDataPlotBackend.Terminal {
         return Ok(JetDataPlotRender{format: JetDataPlotRenderFormat.Text, body: render_plot_text(plan)})
     }
     Ok(JetDataPlotRender{format: JetDataPlotRenderFormat.SVG, body: render_plot_svg(plan)})
@@ -1649,4 +1739,17 @@ fn upper(text: String) -> String Never! {
 #Test("DataWatchStatus preserves all native status fields in display order") {
     status :: DataWatchStatus{mode: "maintained", revision: 2, retained_rows: 3, recomputations: 4, active: true, generation: 5, dirty: false, error: "", freshness_ms: 6, invalidation_cause: "input", refreshing: false, cancelled: false}
     assert(data_watch_status_text(status) == "DataWatchStatus{{mode: maintained, revision: 2, retained_rows: 3, recomputations: 4, active: true, generation: 5, dirty: false, error: , freshness_ms: 6, invalidation_cause: input, refreshing: false, cancelled: false}}")
+}
+
+#Test("Plot enums retain native spellings, variants and numeric classification") {
+    assert(JetDataPlotMark.Line.as_str() == "line")
+    assert(JetDataPlotChannel.Detail.as_str() == "detail")
+    assert(JetDataPlotFilterOp.LessEqual.as_str() == "lte")
+    assert(JetDataPlotScaleKind.Point.as_str() == "point")
+    assert(!JetDataPlotScaleKind.Point.needs_numeric())
+    assert(JetDataPlotLegendPosition.Right.as_str() == "right")
+    assert(JetDataPlotFacetKind.Column.as_str() == "column")
+    assert(JetDataPlotInteraction.Brush.as_str() == "brush")
+    assert(JetDataPlotBackend.Browser.as_str() == "browser")
+    assert(JetDataPlotSupport.Degraded.as_str() == "degraded")
 }
