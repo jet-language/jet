@@ -27,6 +27,7 @@ const fixtures = [
     ["view-field-provenance", "Compiler/JetSema/Tests/ViewFieldProvenance.jet"],
     ["core-failure-records", "Compiler/JetSema/Tests/CoreFailureRecordFixtures.jet"],
     ["effect-diagnostic-origins", "Compiler/JetSema/Tests/EffectDiagnosticOrigins.jet"],
+    ["body-method-wave", "Compiler/JetSema/Tests/BodyMethodWaveFixtures.jet"],
 ];
 for (const [name, path] of fixtures) {
     const project = join(out, name);
