@@ -1278,6 +1278,9 @@ failures, timeout, cancellation, closed connections, and unsupported targets.
 versioned WebDriver BiDi over `core.net.ws`, with a capability-checked CDP
 expert path. Profiles are isolated by default, and receipts and traces keep
 only redacted audit facts.
+Profile construction is Jet-owned and accepts exactly `bidi-2025.5` (version
+`2025.5`) or `bidi-2024.11` (version `2024.11`). It does not trim, case-fold,
+or substitute an unknown profile name.
 
 | API | Result | Description |
 | --- | --- | --- |
