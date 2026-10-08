@@ -43,7 +43,7 @@ pub struct Stdout {
     pub fn flush(&self) IOError! -[IO]> {
         stdio_flush(false)
     }
-    pub fn is_tty(&self) -> Bool Never! -[IO]> {
+    pub fn is_tty(&self) -[IO]> Bool Never! {
         core.term.__stdout_terminal()
     }
 }
@@ -63,7 +63,7 @@ pub struct Stderr {
     pub fn flush(&self) IOError! -[IO]> {
         stdio_flush(true)
     }
-    pub fn is_tty(&self) -> Bool Never! -[IO]> {
+    pub fn is_tty(&self) -[IO]> Bool Never! {
         core.term.__stderr_terminal()
     }
 }
@@ -338,8 +338,8 @@ fn stdio_flush(stderr: Bool) IOError! -[IO]> {
     if stdio_result(Val("custom Windows console error"), .Write, "stdout") == {
         .Err(error) -> if error == {
             .Other(context) -> {
-                assert(context.operation == .Write && context.resource == Val("stdout"))
-                assert(context.os_code == None && context.cause == Val("custom Windows console error"))
+                assert(context.operation == .Write && context.resource == (Val("stdout")))
+                assert(context.os_code == None && context.cause == (Val("custom Windows console error")))
             }
             else -> panic("stdio error kind")
         }
