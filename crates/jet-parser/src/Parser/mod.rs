@@ -1384,7 +1384,7 @@ mod s61_tests {
                 assert!(matches!(binding.init, Expr::PatternTest { .. }), "{rhs}");
             } else {
                 let Expr::Binary(BinOp::Eq, _, value, _) = &binding.init else { panic!("{rhs}: value equality") };
-                assert!(matches!(value.as_ref(), Expr::Call(call) if call.name == Syntax::LIT_VALUE), "{rhs}");
+                assert!(matches!(value.as_ref(), Expr::EnumLit { variant, args, .. } if variant == Syntax::LIT_VALUE && args.len() == 1), "{rhs}");
             }
         }
         let parsed = program("fn run() { result :: optional != Val(value) }");
