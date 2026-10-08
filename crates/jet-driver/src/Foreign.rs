@@ -466,6 +466,7 @@ fn materialize_namespace(
                 path: cache_path,
                 display: format!("{}.{}", language.root(), lib),
                 source,
+                core_identifier_demand: crate::Lexer::core_identifier_demand(&tokens),
                 alias,
                 imports: std::mem::take(&mut program.imports),
                 items: std::mem::take(&mut program.items),

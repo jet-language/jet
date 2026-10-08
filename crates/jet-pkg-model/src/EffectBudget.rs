@@ -977,6 +977,7 @@ mod tests {
             path: std::path::PathBuf::from(path),
             display: path.to_string(),
             source: source.to_string(),
+            core_identifier_demand: crate::Lexer::core_identifier_demand(&tokens),
             alias: alias.to_string(),
             imports: std::mem::take(&mut program.imports),
             items: std::mem::take(&mut program.items),

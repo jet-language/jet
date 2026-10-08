@@ -353,3 +353,57 @@ pub fn comments(toks: &[Token]) -> Vec<Token> {
         .cloned()
         .collect()
 }
+
+/// Compiler-internal Core demand from the existing canonical token stream.
+/// String payload and comments are not identifiers; interpolation expressions
+/// already carry their own canonical tokens and are visited without re-lexing.
+pub fn core_identifier_demand(tokens: &[Token]) -> jet_foundation::AST::CoreIdentifierDemand {
+    use jet_foundation::{CoreModuleExports, Prelude};
+
+    fn collect(
+        tokens: &[Token],
+        bare_names: &mut [bool],
+        prelude_entries: &[Prelude::Entry],
+        demand: &mut jet_foundation::AST::CoreIdentifierDemand,
+    ) {
+        for token in tokens {
+            match &token.kind {
+                TokKind::Ident(name) => {
+                    demand.option_or_err |= name == "or_err";
+                    for (index, bare) in CoreModuleExports::CORE_BARE_SOURCE_MODULES.iter().enumerate() {
+                        if name == bare.name || (name == "url" && bare.name == "URL") {
+                            bare_names[index] = true;
+                        }
+                    }
+                    if let Some(entry) = prelude_entries.iter().find(|entry| entry.name == name) {
+                        if let Prelude::Target::Core { module, .. } = entry.target {
+                            if !demand.prelude_modules.contains(&module) {
+                                demand.prelude_modules.push(module);
+                            }
+                        }
+                    }
+                }
+                TokKind::Str(parts) => {
+                    for part in parts {
+                        if let StrTokPart::Interp(nested) = part {
+                            collect(nested, bare_names, prelude_entries, demand);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    let mut demand = jet_foundation::AST::CoreIdentifierDemand::default();
+    let mut bare_names = [false; CoreModuleExports::CORE_BARE_SOURCE_MODULES.len()];
+    collect(tokens, &mut bare_names, Prelude::entries(), &mut demand);
+    for (index, bare) in CoreModuleExports::CORE_BARE_SOURCE_MODULES.iter().enumerate() {
+        if bare_names[index] && !demand.bare_modules.contains(&bare.module_name) {
+            demand.bare_modules.push(bare.module_name);
+        }
+    }
+    // Preserve the alias injector's existing BTreeSet module order.
+    demand.prelude_modules.sort_unstable();
+    demand
+}

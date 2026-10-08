@@ -1854,6 +1854,46 @@ fn bootstrap_private_self_compile_harness() {
         include_str!("../../Examples/features/expected/basics/pattern_matching.out"),
     );
 
+    // Exercise the real generated Runner/Driver path: metadata is data, not
+    // an automatic request to parse and check unrelated Core owner sources.
+    let core_words = jet_foundation::CoreModuleExports::CORE_BARE_SOURCE_MODULES
+        .iter().map(|row| row.name).collect::<Vec<_>>().join(" ");
+    let core_literals = jet_foundation::CoreModuleExports::CORE_BARE_SOURCE_MODULES
+        .iter().map(|row| format!("\"{}\"", row.name)).collect::<Vec<_>>().join(", ");
+    let core_data_source = format!(
+        "// {core_words} url or_err\n/* {core_words} Clock Path read_file */\n\
+         fn run() {{\n\
+             names :: [String]{{{core_literals}}}\n\
+             raw :: `{core_words} url or_err`\n\
+             multiline :: \"\"\"\n{core_words} url or_err\n\"\"\"\n\
+             nested :: \"{{\"URL\"}}\"\n\
+             print(names.len())\n\
+             print(raw)\n\
+             print(multiline)\n\
+             print(nested)\n\
+         }}\n"
+    );
+    let core_data_project = session.join("core-demand-literal-metadata");
+    write_source_fixture_project(&core_data_project, SOURCE_FIXTURE_MANIFEST, &core_data_source);
+    let core_data_output = session.join("core-demand-literal-metadata.rs");
+    let core_data_receipt = session.join("core-demand-literal-metadata.receipt");
+    run_generated_artifact(
+        &stage_two_binary,
+        "runner",
+        &core_data_project,
+        SMALL_ENTRY_RELATIVE,
+        &core_data_output,
+        &core_data_receipt,
+    );
+    let core_data_receipt_text = fs::read_to_string(&core_data_receipt).unwrap();
+    assert!(core_data_receipt_text.lines().any(|line| line == "complete=true"));
+    let core_data_reports = receipt_reports(&core_data_receipt);
+    assert!(
+        core_data_reports.iter().all(|report| !report.contains("\"severity\":\"error\"")),
+        "literal metadata must not demand unrelated Core: {core_data_reports:?}"
+    );
+    assert!(core_data_output.is_file(), "the checked metadata fixture must emit its backend source");
+
     let invalid_project = session.join("invalid-imported-source");
     let (invalid_entry, invalid_entry_source, imported_source_path, imported_source) =
         write_invalid_import_project(&invalid_project);
