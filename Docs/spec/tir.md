@@ -47,6 +47,18 @@ type parameters and canonical trait bounds into inference, including explicit
 type arguments. Lowering consumes the checked substitutions and bound evidence;
 it must not reconstruct a forwarded parameter's bounds from its spelling.
 
+Compile-time fragment lowering binds direct nominal `$layout`, `$name`, and
+`$fields` reads before ordinary field lowering, including reads inside reached
+helper functions. These values use the fragment caller's selected target and
+the checked nominal declarations through the shared target-aware reflection
+builder; a type name is never an evaluator local. Lexical reflected-value
+bindings still shadow nominal subjects. Jet-authored sema folds the same reads
+to typed compile-time literals before MIR lowering.
+Raw-pointer fields carry one address in the selected target's layout: their
+size and stride use its pointer width, and alignment uses its pointer
+alignment. The shared layout producer never needs the pointee's physical
+layout to project these facts.
+
 Fixed-array-to-list widening is a checked call-argument fact. MIR retains it
 even when the argument comes from a place, so native emission widens the
 array before lending the callee its growable-list borrow.

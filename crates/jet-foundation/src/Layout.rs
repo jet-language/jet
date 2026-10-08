@@ -1052,6 +1052,15 @@ impl<'a> TargetLayoutEngine<'a> {
             | Type::Tagged { inner: base, .. }
             | Type::Quantity { base, .. } => self.type_layout_inner(base, seen),
             Type::Named(name) => self.named_type_layout(name, seen),
+            // Raw pointers store one target address; the pointee's layout is
+            // irrelevant even when it is generic or recursively declared.
+            Type::Apply { name, args } if name == Syntax::TYPE_PTR => {
+                (args.len() == 1).then_some(ByteLayout {
+                    size: self.target.pointer_size,
+                    alignment: self.target.pointer_alignment,
+                    stride: self.target.pointer_size,
+                })
+            }
             Type::Apply { name, args } if name == Syntax::TYPE_ATOMIC => {
                 self.atomic_layout(args, seen)
             }
@@ -1376,5 +1385,47 @@ mod tests {
             })
         );
         assert_eq!(facts.fields[0].size, Some(12));
+    }
+
+    #[test]
+    fn raw_pointer_layout_uses_selected_target_without_pointee_layout() {
+        for (triple, pointer_size) in [
+            ("x86_64-unknown-linux-gnu", 8),
+            ("wasm32-unknown-unknown", 4),
+        ] {
+            let engine = TargetLayoutEngine::new(
+                std::iter::empty::<&Item>(),
+                TargetLayout::from_triple(triple),
+            );
+            for pointee in [Type::Int, Type::Named("UnresolvedPointee".into())] {
+                let definition = structure(
+                    StructLayout::C,
+                    vec![field("pointer", Type::Apply {
+                        name: crate::Syntax::TYPE_PTR.into(),
+                        args: vec![pointee],
+                    })],
+                );
+                let facts = engine.struct_facts(&definition);
+                assert_eq!(facts.bytes, Some(ByteLayout {
+                    size: pointer_size,
+                    alignment: pointer_size,
+                    stride: pointer_size,
+                }), "{triple}");
+                assert_eq!(facts.fields[0].offset, Some(0));
+                assert_eq!(facts.fields[0].size, Some(pointer_size));
+                assert_eq!(facts.fields[0].alignment, Some(pointer_size));
+                assert_eq!(facts.fields[0].stride, Some(pointer_size));
+            }
+            for args in [Vec::new(), vec![Type::Int, Type::Bool]] {
+                let malformed = structure(
+                    StructLayout::C,
+                    vec![field("pointer", Type::Apply {
+                        name: crate::Syntax::TYPE_PTR.into(),
+                        args,
+                    })],
+                );
+                assert_eq!(engine.struct_facts(&malformed).bytes, None);
+            }
+        }
     }
 }
