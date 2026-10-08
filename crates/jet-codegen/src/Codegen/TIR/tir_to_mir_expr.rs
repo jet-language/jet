@@ -4503,10 +4503,6 @@ pub(super) fn lower_expr(
                         | THandleOp::ClockTick
                         | THandleOp::ClockAdvance
                         | THandleOp::ClockWait
-                        | THandleOp::FakeName
-                        | THandleOp::FakeEmail
-                        | THandleOp::FakeHost
-                        | THandleOp::FakeAddress
                         | THandleOp::TcpStreamRead
                         | THandleOp::TcpStreamWrite
                         | THandleOp::TcpStreamClose

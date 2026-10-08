@@ -14239,12 +14239,6 @@ pub enum THandleOp {
     HistoryRngNextU64,
     /// D-TEST-STRATEGY1=A HistoryRng: `below(bound)` consumes the callback RNG.
     HistoryRngBelow,
-    /// D-TESTDATA1 Fake: locale and deterministic fake-data domain draws.
-    FakeLocale,
-    FakeName,
-    FakeEmail,
-    FakeHost,
-    FakeAddress,
     /// D-SOLVER-LIB1=A: `Solver.new(seed)` → `{root}jet_solver_new(seed)`.
     SolverNew,
     /// D-SOLVER-LIB1=A: `solver.require(ok)` → `{root}jet_solver_require(&mut solver, ok)`.

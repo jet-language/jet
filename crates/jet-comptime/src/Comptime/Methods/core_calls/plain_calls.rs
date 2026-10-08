@@ -1240,20 +1240,6 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
                 fields: vec![("state".to_string(), CtValue::Int(seed as i64))],
             })
         }
-        ("core.testing", "fake_data") => {
-            let seed = match one(0)? {
-                CtValue::Int(n) => *n,
-                _ => return Err(unsupported("testing.fake_data expects an Int seed", span)),
-            };
-            let fake = fake_data_kernel::jet_testing_fake_new(seed);
-            Ok(CtValue::Struct {
-                type_name: crate::Syntax::FAKE_TYPE.to_string(),
-                fields: vec![
-                    ("state".to_string(), CtValue::Int(fake.state as i64)),
-                    ("locale".to_string(), CtValue::Int(fake.locale as i64)),
-                ],
-            })
-        }
         ("core.testing", "compare") => {
             let cases = match one(0)? {
                 CtValue::List(values) => values.clone(),

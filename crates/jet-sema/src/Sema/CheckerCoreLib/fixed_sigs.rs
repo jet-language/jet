@@ -1861,10 +1861,6 @@ fn core_fixed_sig_impl(
             vec![(read, Type::Int)],
             Some(Type::Named("RNG".to_string())),
         )),
-        ("core.testing", "fake_data") => Some((
-            vec![(read, Type::Int)],
-            Some(Type::Named("Fake".to_string())),
-        )),
         ("core.testing", "test_suite") => {
             Some((vec![], Some(Type::Named("TestSuite".to_string()))))
         }

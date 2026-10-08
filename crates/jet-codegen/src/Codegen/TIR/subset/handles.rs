@@ -245,11 +245,6 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("RNG", "shuffle", 1) => THandleOp::RngShuffle,
         ("HistoryRNG", "next_u64", 0) => THandleOp::HistoryRngNextU64,
         ("HistoryRNG", "below", 1) => THandleOp::HistoryRngBelow,
-        ("Fake", "locale", 1) => THandleOp::FakeLocale,
-        ("Fake", "name", 0) => THandleOp::FakeName,
-        ("Fake", "email", 0) => THandleOp::FakeEmail,
-        ("Fake", "host", 0) => THandleOp::FakeHost,
-        ("Fake", "address", 0) => THandleOp::FakeAddress,
         ("Solver", "require", 1) => THandleOp::SolverRequire,
         ("Solver", "failure_count", 0) => THandleOp::SolverFailureCount,
         ("Solver", "status", 0) => THandleOp::SolverStatus,
@@ -558,10 +553,6 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
             | THandleOp::RngShuffle
             | THandleOp::HistoryRngNextU64
             | THandleOp::HistoryRngBelow
-            | THandleOp::FakeName
-            | THandleOp::FakeEmail
-            | THandleOp::FakeHost
-            | THandleOp::FakeAddress
             | THandleOp::SolverRequire => crate::Collections::BuiltinReceiverBorrow::EagerWrite,
             _ => crate::Collections::BuiltinReceiverBorrow::Read,
         };

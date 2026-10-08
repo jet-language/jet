@@ -274,7 +274,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // D-DET-CAPAPI: `Duration` value type for the widened clock surface.
         // D-AUTHORITY-NAME1=A: one ordinary, nameable rights carrier.
         | Syntax::TYPE_AUTHORITY
-        | "Clock" | "RNG" | Syntax::DETERMINISTIC_WORLD_TYPE | "Fake" | "Duration" | "DurationUnit" | "RangeError" | "Condition"
+        | "Clock" | "RNG" | Syntax::DETERMINISTIC_WORLD_TYPE | "Duration" | "DurationUnit" | "RangeError" | "Condition"
         // D-SHARED-REVISION1=A: the opaque owner-bound snapshot carrier and
         // its typed wrong-owner/exhaustion failures.
         | Syntax::TYPE_SHARED_SNAPSHOT | Syntax::TYPE_SHARED_REVISION_ERROR

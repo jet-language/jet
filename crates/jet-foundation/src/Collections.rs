@@ -555,7 +555,6 @@ pub fn builtin_method_return(
         Type::Named(n) if n == crate::Syntax::DETERMINISTIC_WORLD_TYPE => {
             deterministic_world_method_return(method, arg_count)
         }
-        Type::Named(n) if n == crate::Syntax::FAKE_TYPE => fake_method_return(method, arg_count),
         // D-SOLVER-LIB1=A: explicit finite solver handle. `new(seed)` constructs
         // state; `require(Bool)` records a checked constraint; query methods read it.
         Type::Named(n) if n == crate::Syntax::SOLVER_TYPE => {
@@ -2100,13 +2099,6 @@ fn history_rng_method_return(method: &str, nargs: usize) -> Option<Option<Type>>
     }
 }
 
-fn fake_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
-    match (method, nargs) {
-        ("name" | "email" | "host" | "address", 0) => Some(Some(Type::String)),
-        ("locale", 1) => Some(Some(Type::Named(crate::Syntax::FAKE_TYPE.to_string()))),
-        _ => None,
-    }
-}
 
 /// D-SOLVER-LIB1=A: explicit finite solver state. This first Core slice admits
 /// ordinary Bool constraints only; richer domains stay future library work.
@@ -2905,9 +2897,6 @@ pub fn builtin_method_mutates(recv_ty: &Type, method: &str) -> bool {
             )
         }
         Type::Named(n) if n == "HistoryRNG" => matches!(method, "next_u64" | "below"),
-        Type::Named(n) if n == crate::Syntax::FAKE_TYPE => {
-            matches!(method, "name" | "email" | "host" | "address")
-        }
         Type::Named(n) if n == crate::Syntax::SOLVER_TYPE => matches!(method, "require"),
         _ => false,
     }
@@ -3887,10 +3876,6 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             }]),
             _ => Some(vec![]),
         },
-        Type::Named(n) if n == crate::Syntax::FAKE_TYPE => match method {
-            "locale" => Some(vec![Type::String]),
-            _ => Some(vec![]),
-        },
         Type::Named(n) if n == crate::Syntax::SOLVER_TYPE => match method {
             "new" => Some(vec![Type::Int]),
             "require" => Some(vec![Type::Bool]),
@@ -3949,7 +3934,6 @@ pub fn builtin_receiver_borrow(recv_ty: &Type, method: &str) -> BuiltinReceiverB
                 if name == Syntax::CLOCK_TYPE
                     || name == Syntax::RNG_TYPE
                     || name == "HistoryRNG"
-                    || name == Syntax::FAKE_TYPE
                     || name == Syntax::SOLVER_TYPE
         )
     {

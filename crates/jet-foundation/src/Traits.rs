@@ -2699,7 +2699,6 @@ impl TraitRegistry {
             "RegexFlags",
             "RegexMatch",
             "RNG",
-            "Fake",
             "Size",
             "SocketAddr",
             "Solver",

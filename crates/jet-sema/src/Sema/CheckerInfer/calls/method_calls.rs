@@ -6287,7 +6287,6 @@ impl<'a> Checker<'a> {
                 "Clock"
                     | "RNG"
                     | crate::Syntax::DETERMINISTIC_WORLD_TYPE
-                    | "Fake"
                     | "Duration"
                     | "Solver"
                     | "TestSuite"
