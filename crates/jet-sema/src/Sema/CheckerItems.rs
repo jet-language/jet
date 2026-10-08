@@ -382,7 +382,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn qualify_method_signature(&self, owner_mod: usize, owner_name: &str, sig: &mut MethodSig) {
+    pub(crate) fn qualify_method_signature(&self, owner_mod: usize, owner_name: &str, sig: &mut MethodSig) {
         if owner_mod == self.module_idx {
             return;
         }
