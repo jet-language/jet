@@ -140,6 +140,7 @@ JetEval 19.9k, JetOptimizer 6.2k, JetDriver 6.1k, JetFoundation 41.0k
 
 | Rust has | Jet has | Gap | Size | Blocks self-hosting |
 |---|---|---|---|---|
+| Atomic patch-field scalar initialization (`CheckerItems.rs:3190,3262`, `atomic_field_inner`) | Normal struct literals ported by #4801; JetSema has no patch-literal producer | #4801 pending patch-literal parity: reuse the same Atomic inner expected type when patch literals are ported | S | n |
 | #3708 failure-set solve | lambda-local failure inference only | S1 | L | n (y if Core drops explicit `Never!`) |
 | Inferred failure unions | none | S2 | M | n |
 | Tail value checked against written return; E0113 value wording | tails not return-checked (RatDiscard) | S3 | M | n |
