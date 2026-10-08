@@ -618,8 +618,13 @@ mode uses the shared canonical record-variant panic, not a new trap.
 
 Workflow take/return APIs remain held without direct AOT; this carrier does not
 establish service or workflow behavior or native parity. The existing shared
-record-variant panic's task publication repair is a separate composition gate,
-recorded in `Tests/TaskOutcomeRoutes.tsv`; the getter does not work around it.
+record-variant panic's task publication repair and the canonical Prelude stop-fact
+classification fix are separate composition gates, recorded in
+`Tests/TaskOutcomeRoutes.tsv`. The getter explicitly returns its stopped zero
+word after shared panic publication; it never clones an inactive reason after
+publication returns. TaskFailure and TaskOutcome use one shared terminal render
+tail, with TaskOutcome adding only Finished; the fixture checks the unchanged
+TaskFailure bytes against the same raw and Debug vectors.
 The same table records the never-both retirement rule: if TaskOutcome enters
 `core.service types{}`, its native carrier glue, ABI constants, exports and
 fixtures retire in that same composition. No frozen registry, route or C ABI

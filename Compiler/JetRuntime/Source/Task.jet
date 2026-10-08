@@ -36,9 +36,8 @@ fn task_failure_new(kind: I64, owned_reason: I64) -> I64 {
 }
 // Values.rs:454-460/TextValues.rs:212-227: Panicked is raw in show/display
 // but Rust str Debug quoted in debug. Extend the existing carrier in place.
-fn task_failure_render(failure: I64, debug: Bool) -> I64 {
-    kind :: sync_load(failure + TASK_FAILURE_TAG)
-    result :: jet_rt_string_builder_new()
+// Normalize service outcome ordinals to TaskFailure's terminal variants.
+fn task_terminal_render(result: I64, kind: I64, reason: I64, debug: Bool) {
     if kind == TASK_FAILURE_CANCELLED {
         rt_text_push_word(result, I64{7308335478031147331}, I64{8})
         rt_text_push_word(result, I64{100}, I64{1})
@@ -48,10 +47,15 @@ fn task_failure_render(failure: I64, debug: Bool) -> I64 {
     } else {
         rt_text_push_word(result, I64{7234306451155345744}, I64{8})
         rt_text_push_word(result, I64{40}, I64{1})
-        reason :: sync_load(failure + TASK_FAILURE_REASON)
         if debug { rt_text_push_rust_debug_str(result, reason) } else { jet_rt_string_builder_push(result, reason) }
         rt_text_push_word(result, I64{41}, I64{1})
     }
+}
+fn task_failure_render(failure: I64, debug: Bool) -> I64 {
+    kind :: sync_load(failure + TASK_FAILURE_TAG)
+    reason :: if kind == TASK_FAILURE_PANICKED -> sync_load(failure + TASK_FAILURE_REASON) else -> I64{0}
+    result :: jet_rt_string_builder_new()
+    task_terminal_render(result, kind, reason, debug)
     result
 }
 #Export(c) fn jet_rt_handle_show_JetTaskFailure(failure: I64) -> I64 { task_failure_render(failure, false) }
@@ -68,7 +72,10 @@ fn task_outcome_new(kind: I64, owned_reason: I64) -> I64 {
 }
 #Export(c) fn jet_rt_record_tag_JetTaskOutcome(outcome: I64) -> I64 { sync_load(outcome + TASK_OUTCOME_TAG) }
 #Export(c) fn jet_rt_record_get_JetTaskOutcome_Panicked(outcome: I64) -> I64 {
-    if sync_load(outcome + TASK_OUTCOME_TAG) != TASK_OUTCOME_PANICKED -> rt_record_variant_panic()
+    if sync_load(outcome + TASK_OUTCOME_TAG) != TASK_OUTCOME_PANICKED {
+        rt_record_variant_panic()
+        return I64{0}
+    }
     jet_rt_string_clone(sync_load(outcome + TASK_OUTCOME_REASON))
 }
 #Export(c) fn jet_rt_record_new_JetTaskOutcome_Finished() -> I64 { task_outcome_new(TASK_OUTCOME_FINISHED, I64{0}) }
@@ -97,18 +104,10 @@ fn task_outcome_render(outcome: I64, debug: Bool) -> I64 {
     result :: jet_rt_string_builder_new()
     if kind == TASK_OUTCOME_FINISHED {
         rt_text_push_word(result, I64{7234303221339941190}, I64{8})
-    } else if kind == TASK_OUTCOME_CANCELLED {
-        rt_text_push_word(result, I64{7308335478031147331}, I64{8})
-        rt_text_push_word(result, I64{100}, I64{1})
-    } else if kind == TASK_OUTCOME_DEADLINE {
-        rt_text_push_word(result, I64{7308895159530382660}, I64{8})
-        rt_text_push_word(result, I64{474450193474}, I64{5})
     } else {
-        rt_text_push_word(result, I64{7234306451155345744}, I64{8})
-        rt_text_push_word(result, I64{40}, I64{1})
-        reason :: sync_load(outcome + TASK_OUTCOME_REASON)
-        if debug { rt_text_push_rust_debug_str(result, reason) } else { jet_rt_string_builder_push(result, reason) }
-        rt_text_push_word(result, I64{41}, I64{1})
+        terminal :: if kind == TASK_OUTCOME_CANCELLED -> TASK_FAILURE_CANCELLED else if kind == TASK_OUTCOME_DEADLINE -> TASK_FAILURE_DEADLINE else -> TASK_FAILURE_PANICKED
+        reason :: if kind == TASK_OUTCOME_PANICKED -> sync_load(outcome + TASK_OUTCOME_REASON) else -> I64{0}
+        task_terminal_render(result, terminal, reason, debug)
     }
     result
 }

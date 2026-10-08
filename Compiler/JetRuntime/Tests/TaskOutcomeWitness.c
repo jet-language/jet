@@ -25,6 +25,13 @@ extern bool jet_rt_handle_eq_JetTaskOutcome(TaskOutcome *,TaskOutcome *);
 extern Text *jet_rt_handle_show_JetTaskOutcome(TaskOutcome *);
 extern Text *jet_rt_handle_display_JetTaskOutcome(TaskOutcome *);
 extern Text *jet_rt_handle_debug_JetTaskOutcome(TaskOutcome *);
+extern TaskOutcome *jet_rt_record_new_JetTaskFailure_Cancelled(void);
+extern TaskOutcome *jet_rt_record_new_JetTaskFailure_DeadlineBlown(void);
+extern TaskOutcome *jet_rt_record_new_JetTaskFailure_Panicked(Text *);
+extern Text *jet_rt_handle_show_JetTaskFailure(TaskOutcome *);
+extern Text *jet_rt_handle_display_JetTaskFailure(TaskOutcome *);
+extern Text *jet_rt_handle_debug_JetTaskFailure(TaskOutcome *);
+extern void jet_rt_handle_drop_JetTaskFailure(TaskOutcome *);
 extern void jet_rt_string_drop(Text *);
 extern void __real_jet_rt_free(void *,int64_t,int64_t);
 #include "TextDebugGoldens.h"
@@ -67,18 +74,18 @@ static void rendered(Text *value,const void *bytes,int64_t len) {
     same_text(value,bytes,len);
     jet_rt_string_drop(value);
 }
+static void panic_text(Text *value,const void *reason,int64_t len) {
+    unsigned char expected[256];
+    assert(len>=0 && len<246);
+    memcpy(expected,"Panicked(",9);
+    memcpy(expected+9,reason,(size_t)len);
+    expected[9+len]=')';
+    rendered(value,expected,len+10);
+}
 static void panic_render(TaskOutcome *value,const void *raw,int64_t raw_len,const void *quoted,int64_t quoted_len) {
-    unsigned char display[256],debug[256];
-    assert(raw_len>=0 && quoted_len>=0 && raw_len<246 && quoted_len<246);
-    memcpy(display,"Panicked(",9);
-    memcpy(display+9,raw,(size_t)raw_len);
-    display[9+raw_len]=')';
-    memcpy(debug,"Panicked(",9);
-    memcpy(debug+9,quoted,(size_t)quoted_len);
-    debug[9+quoted_len]=')';
-    rendered(jet_rt_handle_show_JetTaskOutcome(value),display,raw_len+10);
-    rendered(jet_rt_handle_display_JetTaskOutcome(value),display,raw_len+10);
-    rendered(jet_rt_handle_debug_JetTaskOutcome(value),debug,quoted_len+10);
+    panic_text(jet_rt_handle_show_JetTaskOutcome(value),raw,raw_len);
+    panic_text(jet_rt_handle_display_JetTaskOutcome(value),raw,raw_len);
+    panic_text(jet_rt_handle_debug_JetTaskOutcome(value),quoted,quoted_len);
 }
 int main(int argc,char **argv) {
     jet_rt_alloc_init();
@@ -146,6 +153,27 @@ int main(int argc,char **argv) {
         outcome_watch(value);
         panic_render(value,debug_goldens[i].input,debug_goldens[i].input_length,debug_goldens[i].expected,debug_goldens[i].expected_length);
         jet_rt_handle_drop_JetTaskOutcome(value);
+        /* The shared tail must preserve every TaskFailure rendering byte. */
+        TaskOutcome *failure=jet_rt_record_new_JetTaskFailure_Panicked(&text);
+        assert(failure->tag==2);
+        watch(failure,16,8);
+        text_watch(failure->reason);
+        panic_text(jet_rt_handle_show_JetTaskFailure(failure),debug_goldens[i].input,debug_goldens[i].input_length);
+        panic_text(jet_rt_handle_display_JetTaskFailure(failure),debug_goldens[i].input,debug_goldens[i].input_length);
+        panic_text(jet_rt_handle_debug_JetTaskFailure(failure),debug_goldens[i].expected,debug_goldens[i].expected_length);
+        jet_rt_handle_drop_JetTaskFailure(failure);
+    }
+    TaskOutcome *failures[]={jet_rt_record_new_JetTaskFailure_Cancelled(),jet_rt_record_new_JetTaskFailure_DeadlineBlown()};
+    for(size_t i=0;i<2;++i) {
+        assert(failures[i]->tag==(int64_t)i);
+        watch(failures[i],16,8);
+        failures[i]->reason=(Text *)(uintptr_t)1;
+        const char *name=names[i+1];
+        int64_t n=(int64_t)strlen(name);
+        rendered(jet_rt_handle_show_JetTaskFailure(failures[i]),name,n);
+        rendered(jet_rt_handle_display_JetTaskFailure(failures[i]),name,n);
+        rendered(jet_rt_handle_debug_JetTaskFailure(failures[i]),name,n);
+        jet_rt_handle_drop_JetTaskFailure(failures[i]);
     }
     for(size_t i=0;i<3;++i) jet_rt_handle_drop_JetTaskOutcome(units[i]);
     jet_rt_handle_drop_JetTaskOutcome(NULL);
