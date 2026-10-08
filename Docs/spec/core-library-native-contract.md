@@ -47,6 +47,8 @@ native-dispatch metadata. A `source_module` row names the canonical Jet source
 path and the members that it owns. The corresponding `Core/**/*.jet` file owns
 public algorithms, validation, defaults, policy, effects, authority, typed
 errors, and composition.
+Native method-table inventories track only tables the compiler still ships;
+source-owned types must not keep obsolete native inventory entries after cutover.
 
 The generator must verify that:
 

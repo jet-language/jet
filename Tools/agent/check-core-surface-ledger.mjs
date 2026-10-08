@@ -119,10 +119,9 @@ const CORE_API_SYNTAX_MARKERS = [
 ];
 const AGENT_RUNNER = "tests/agent_workloads.rs::equivalent_adapters_complete_declared_tasks";
 const AGENT_SCORING = "#769:v1;exit=0;stdout=exact;cold=recorded;warm=equal;input=unchanged;scratch=closed";
-// Fake-data helpers are an internal deterministic test capability, not a
-// public collection container. Keep dispatch discovery strict without scoring
-// this private table as Core API.
-const PRIVATE_COLLECTION_METHOD_FUNCTIONS = new Set(["fake_method_return", "view_iter_method_return"]);
+// ViewIter shares Iter's scored operations. Keep dispatch discovery strict
+// without scoring the internal table as a separate Core container.
+const PRIVATE_COLLECTION_METHOD_FUNCTIONS = new Set(["view_iter_method_return"]);
 // Internal Prelude helpers may be present in the compiler dispatcher without
 // being public module members. Core.jet declares these adapter-only rows
 // alongside ordinary dispatcher rows; there is no second handwritten key list.
@@ -592,7 +591,6 @@ const TYPE_CONTAINER = {
   CompilerSyntaxTree: "core.compiler",
   CompilerNode: "core.compiler",
   BuildContext: "core.compiler",
-  Solver: "core.compute.solve",
   Authority: "core.process",
   Clock: "core.time",
   Duration: "core.time",
@@ -638,8 +636,6 @@ const COLLECTION_METHOD_FUNCTIONS = {
   deterministic_world_method_return: "DeterministicWorld",
   rng_method_return: "Rng",
   history_rng_method_return: "HistoryRng",
-  solver_method_return: "Solver",
-  fake_method_return: null,
   duration_method_return: "Duration",
   task_method_return: "Task",
   receiver_method_return: "Receiver",
