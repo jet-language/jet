@@ -1999,6 +1999,9 @@ handle; clone and the encoding getter deep-clone it; drop frees the child and
 then the shell. Equality follows the Rust declaration order in
 `EncodingTypes.rs:4-11` and `CommonTypes.rs:797-803`, including optional-total
 presence and comparing its payload only when present.
+Conversions happen before allocating the destination carrier. The shared stop
+is fatal: if a DataLimits scalar argument exceeds native range, its transferred
+encoding handle is not freed before process exit.
 
 The optional total constructor accepts a null pointer for absent, or a
 borrowed pointer to an exact Int word. Its getter returns raw presence 0/1 and
@@ -2012,4 +2015,34 @@ conversion stops. The `.stdout` file is expected output, not an execution
 receipt. This provider is held: native caller-layout/import admission and
 execution, plus whole-unit suppression of its Rust seed bodies, remain
 required before pack cutover.
+
+### Native DataEvent ownership boundary
+
+`JetRuntime/Source/DataEvent.jet` ports the 23 existing clone/drop/eq, tag,
+constructor and payload-getter exports, with no additional rendering surface.
+Its 16-byte native hand layout in `JetBackend/Source/DataABI.jet` is
+`[tag, payload]`, not a Rust or nominal Core/MIR enum layout. The 12 tags follow
+`CommonTypes.rs:282-295`: Null, Bool, Int, Float, Number, Text, Bytes,
+ArrayStart, ArrayEnd, ObjectStart, Key, ObjectEnd.
+
+`CAbiRoutes.rs:8730-8835` defines the unchanged ABI ownership. Bool normalizes
+the incoming u8 to 0/1. Int borrows the exact input and checks native i64 range
+before allocating, stores raw i64, and returns a fresh exact owner on get.
+Float preserves bits and uses IEEE equality, including unequal NaN and equal
+signed zeros; it has no JSON rendering finite-value restriction. Number, Text
+and Key clone borrowed strings on construction, clone owned strings on
+get/clone, and drop them with the event. Bytes consumes the native List holder;
+its getter lends the stored pointer, while clone duplicates its U8 data and
+drop frees data then holder. Units store zero payload. A wrong-variant getter
+uses the existing panic path with `record variant index out of range`.
+
+`JetRuntime/Tests/DataEventWitness.c` requires the real Jet object,
+`--wrap=jet_rt_free`, and `DATA_EVENT_U8_STRIDE` matching the runtime's single
+U8 epoch (base 8). It covers all variants and getters, boxed i64 edges,
+fresh-owner getters, Float NaN/infinity/signed-zero equality, independent
+strings and byte holders, borrowed byte getters, and exact-once frees.
+Separate `native-overflow` and `wrong-variant` modes must stop through the
+existing runtime paths. Its `.stdout` is expected output, not a native
+execution receipt. Native layout/import admission and whole-unit Rust seed
+suppression are still required before pack cutover.
 
