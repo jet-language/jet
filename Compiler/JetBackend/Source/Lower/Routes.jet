@@ -67,7 +67,7 @@ fn lower_route_contains_float32(p: MIRProgram, ty: MIRType) -> Bool Never! {
 fn lower_route_float32_result(p: MIRProgram, route: LowerRoute, ty: MIRType) -> Bool Never! {
     if route.export != "jet_reader_read_f32_le" && route.export != "jet_reader_read_f32_be" -> return false
     if ty.kind == .Result(ok, err) {
-        return lower_repr(p, ok) == .Float32Bits && lower_text_type(err) && route.result == .Result(LowerRouteCarrier.Word, LowerRouteCarrier.Text)
+        return lower_repr(p, ok) == .Float32Bits && lower_text_type(err) && route.result == (LowerRouteResult.Result{ok: LowerRouteCarrier.Word, err: LowerRouteCarrier.Text})
     }
     false
 }
@@ -217,7 +217,8 @@ fn lower_route_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
             &lowered.push(lower_list_word(&f, value, 0))
             if route.symbol == "jet_reader_over" || route.symbol == "jet_reader_over_owned" {
                 elem :: lower_list_element(ty) ?? return lower_fail(&m, &f, "Reader.over input has no checked List element")
-                if elem.kind != .IntN{signed: false, bits: 8} -> return lower_fail(&m, &f, "Reader.over input is not the canonical List<U8>")
+                byte :: if elem.kind == .IntN(signed, bits) -> !signed && bits == 8 else -> false
+                if !byte -> return lower_fail(&m, &f, "Reader.over input is not the canonical List<U8>")
                 &lowered.push(lower_const(&f, lower_list_stride(p, elem)))
             }
             next
@@ -350,7 +351,8 @@ fn lower_route_result(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
             if route.symbol == "jet_reader_take" {
                 success :: if ty.kind == .Result(payload, _) -> payload else -> panic("checked Reader.take result")
                 elem :: lower_list_element(success) ?? return lower_fail(&m, &f, "Reader.take result has no checked List element")
-                if elem.kind != .IntN{signed: false, bits: 8} -> return lower_fail(&m, &f, "Reader.take result is not the canonical List<U8>")
+                byte :: if elem.kind == .IntN(signed, bits) -> !signed && bits == 8 else -> false
+                if !byte -> return lower_fail(&m, &f, "Reader.take result is not the canonical List<U8>")
                 &call_args.push(lower_const(&f, lower_list_stride(p, elem)))
             }
             out :: lower_route_result_call(&m, &f, route.export, call_args, ok, err)
