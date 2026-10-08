@@ -18166,7 +18166,7 @@ impl<'a> RustEmitter<'a> {
                 .get(index)
                 .copied()
                 .unwrap_or(false),
-            MirCallee::Prelude(call) => self.core_call_argument_borrowed(*call, index),
+            MirCallee::Prelude(call) => self.core_call_argument_borrowed(self.prelude_row(*call), index),
             MirCallee::Foreign(_) => false,
             MirCallee::Indirect(value) => {
                 Self::callable_parameters(self.value_type(function, *value))
@@ -18186,8 +18186,7 @@ impl<'a> RustEmitter<'a> {
             && arg.fn_coercion.is_none()
     }
 
-    fn core_call_argument_borrowed(&self, route: MirPreludeCallId, index: usize) -> bool {
-        let row = self.prelude_row(route);
+    fn core_call_argument_borrowed(&self, row: &MirPreludeCall, index: usize) -> bool {
         // The native UI box retains its owned children. Borrow analysis and
         // emission must agree so a ReadPlace value is materialized exactly once.
         if row.symbol.name() == "jet_ui_box" {
@@ -18231,7 +18230,7 @@ impl<'a> RustEmitter<'a> {
                             && !self.borrowed_literal_route(*route);
                         if !self.direct_borrow_call_arg(
                             argument,
-                            self.core_call_argument_borrowed(*route, index),
+                            self.core_call_argument_borrowed(self.prelude_row(*route), index),
                         ) || literal_route
                         {
                             return false;
@@ -18569,7 +18568,7 @@ impl<'a> RustEmitter<'a> {
                     arg.value == value
                         && self.direct_borrow_call_arg(
                             arg,
-                            self.core_call_argument_borrowed(*route, index),
+                            self.core_call_argument_borrowed(self.prelude_row(*route), index),
                         )
                         && self.borrowed_literal_route(*route)
                 }),
