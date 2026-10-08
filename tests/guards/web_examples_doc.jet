@@ -1,4 +1,6 @@
 use core.files as files
+use core.text as web_doc_text
+// KNOWN-FAILING #4816: original Rust law also rejects app_hello.jet (no native/web/harness golden).
 
 // tests/web_examples_doc.rs:9-43. The original nonempty corpus, indexing,
 // and three-way golden existence assertions are unchanged.
@@ -11,8 +13,7 @@ use core.files as files
         count += 1
         name :: entry.name
         assert(doc.contains(name), "{name} missing from web backend doc")
-        raw :: name.bytes()
-        stem :: String.from_bytes(raw[0..(raw.len() - 5)]) ?? panic("web example stem")
+        stem :: web_doc_text.strip_suffix(name, ".jet")
         expected :: "Examples/features/expected/web/{stem}"
         assert(files.is_file("{expected}.out") || files.is_file("{expected}.web.out") || files.is_file("{expected}.harness.out"), "{name} has no golden")
     }

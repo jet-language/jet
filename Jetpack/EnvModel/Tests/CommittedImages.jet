@@ -1,0 +1,41 @@
+// Port of tests/image.rs:218-253. All original ImagePlan predicates.
+// Package-test execution PENDING-SAME-HEAD; repo root is passed explicitly.
+
+fn envmodel_test_committed_images(root: String) {
+    base :: files.join(root, "tests/fixtures/jetpack-typed")
+    source :: files.read(files.join(base, "image.jet")) ?? panic("read committed OCI image fixture")
+    plan :: envmodel_evaluate_env(source, base) ?? panic("committed OCI image evaluates")
+    assert_eq(plan.images.len(), 1)
+    image :: plan.images[0]
+    assert_eq(image.name, "server")
+    assert_eq(image.from, "server")
+    assert_eq(image.expose, [Int]{8080, 8443})
+    assert_eq(image.env_vars.len(), 1)
+    assert_eq(image.env_vars[0].key, "RUST_LOG")
+    assert_eq(image.env_vars[0].value, "info")
+    assert_eq(image.files, [String]{"config/app.toml"})
+}
+
+fn envmodel_test_committed_environment_image(root: String) {
+    base :: files.join(root, "tests/fixtures/jetpack-typed")
+    source :: files.read(files.join(base, "environment_image.jet")) ?? panic("read committed environment image fixture")
+    plan :: envmodel_evaluate_env(source, base) ?? panic("committed environment image evaluates")
+    assert_eq(plan.images.len(), 1)
+    image :: plan.images[0]
+    assert(image.from_environment)
+    assert_eq(image.from, "dev")
+    assert_eq(image.target, Val("linux.arm64"))
+    assert_eq(image.user, Val(10001))
+    assert_eq(image.entrypoint, Val("/bin/sh"))
+    assert_eq(image.health, Val("test -x /bin/sh"))
+    assert_eq(image.expose, [Int]{8080})
+    assert_eq(image.files, [String]{"config/app.toml"})
+}
+
+#Test("committed_oci_image_example_field_checks_clean") {
+    envmodel_test_committed_images(envmodel_test_repo_root())
+}
+
+#Test("committed_environment_image_example_field_checks_clean") {
+    envmodel_test_committed_environment_image(envmodel_test_repo_root())
+}

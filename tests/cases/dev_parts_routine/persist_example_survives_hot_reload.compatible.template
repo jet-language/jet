@@ -1,0 +1,24 @@
+// D-PERSIST-DEVSTATE1=A — `#Persist` pins live dev-loop state.
+// A module-level binding marked `#Persist` survives a `jet dev` hot reload
+// instead of resetting (identity = module path + binding name + compatible
+// shape). A function can mutate the pinned value while its code is reloaded.
+//
+// Plain `jet run` starts a fresh process, so the first run increments `counter`
+// from 0 and prints `1`; every plain run prints `1` for the same reason.
+// In `jet dev`, the first run also prints `1`. Edit an unrelated line, such as
+// the print label, and save: the next run prints `2` because the mutated value
+// survives the compatible hot swap. Change the binding shape, for example from
+// an integer to a float, and save: the next run prints `1.0`; state resets from
+// the new initializer instead of carrying the old integer value.
+//
+// Dev-tier carry-across lives in the shared runtime-heap persist store
+// (`jet_foundation::Persist`), consulted by the interpreter on hot-swap.
+// See tests/dev_parts/routine.rs::persist_example_survives_hot_reload.
+#Persist counter := 0
+
+fn run() {
+    counter += 1
+    print("count={counter}")
+}
+// --- expected output --------------------------------------------------
+// 1

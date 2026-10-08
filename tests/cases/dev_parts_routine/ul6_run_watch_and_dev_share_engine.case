@@ -1,0 +1,14 @@
+# Port of tests/dev_parts/routine.rs:6260-6293. Sources verbatim; ORACLE-LITERAL original predicates.
+# Runtime PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four) where used.
+refused: read_bytes
+fixture: ul6_run_watch_and_dev_share_engine.fixture
+env: NO_COLOR=1
+session app raw: jet run app.jet --watch
+sleep: 900ms
+write: app.jet ul6_run_watch_and_dev_share_engine.final.template
+sleep: 900ms
+signal app: KILL
+close app
+exit: any # original status unasserted after intentional child.kill
+stdout: ~any "watching" "v1" "v2" # original first watch disjunction
+stdout: ~any "v1" "changed" "v2" # original second watch disjunction
