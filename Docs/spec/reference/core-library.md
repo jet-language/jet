@@ -2108,6 +2108,12 @@ otherwise keeps the nonzero identity. These policies are authored in Jet.
 The stock coordinate types, `Point2`, `Delta2`, and `TransformError` are
 source-owned declarations. Bare, `math.Type` (when imported), and
 `core.math.Type` spellings identify the same declaration.
+`Transform` and `Transform2` keep the seed's f64 payload representation;
+scalar and space parameters are phantom identities. Composition checks
+nonzero middle-frame identity, inverse rejects nonfinite determinants and
+absolute determinants at or below f64 epsilon, and point application rejects
+stale nonzero frames. Depth must be finite. Rays retain the transformed
+origin and the first matrix column as their direction.
 
 ```jet
 fn rotate(v: Vec3, transform: Mat3) -> Vec3 {

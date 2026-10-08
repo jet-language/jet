@@ -1714,3 +1714,176 @@ impl Delta2.Sub {
     assert_eq((shift + dynamic ?? panic("reverse add")).frame_id, 11)
     assert_eq((shift - shift ?? panic("delta sub")).x, 0.0)
 }
+
+// Not exported from Core's public type table: payload extraction for the
+// existing geometry call contracts checked by sema, not a new coordinate API.
+trait GeometryPoint {
+    fn __coordinates(self) -> (x: Float, y: Float, frame_id: Int) Never!
+}
+impl ScreenPoint.GeometryPoint {
+    fn __coordinates(self) -> (x: Float, y: Float, frame_id: Int) Never! { (x: self.x, y: self.y, frame_id: self.frame_id) }
+}
+impl WorldPoint.GeometryPoint {
+    fn __coordinates(self) -> (x: Float, y: Float, frame_id: Int) Never! { (x: self.x, y: self.y, frame_id: self.frame_id) }
+}
+impl ViewPoint.GeometryPoint {
+    fn __coordinates(self) -> (x: Float, y: Float, frame_id: Int) Never! { (x: self.x, y: self.y, frame_id: self.frame_id) }
+}
+impl CameraPoint.GeometryPoint {
+    fn __coordinates(self) -> (x: Float, y: Float, frame_id: Int) Never! { (x: self.x, y: self.y, frame_id: self.frame_id) }
+}
+impl DevicePoint.GeometryPoint {
+    fn __coordinates(self) -> (x: Float, y: Float, frame_id: Int) Never! { (x: self.x, y: self.y, frame_id: self.frame_id) }
+}
+impl Point2.GeometryPoint {
+    fn __coordinates(self) -> (x: Float, y: Float, frame_id: Int) Never! { (x: self.x, y: self.y, frame_id: self.frame_id) }
+}
+struct Ray2<T, From, To> {
+    origin: Point2<T, To>
+    direction: Delta2<T, To>
+}
+struct Transform<From, To> {
+    m00: Float, m01: Float, m10: Float, m11: Float, tx: Float, ty: Float
+    from_frame: Int, to_frame: Int
+}
+impl Transform {
+    fn affine(m00: Float, m01: Float, m10: Float, m11: Float, tx: Float, ty: Float, from_frame: Int, to_frame: Int) -> Transform<From, To> Never! {
+        Transform<From, To>{m00: m00, m01: m01, m10: m10, m11: m11, tx: tx, ty: ty, from_frame: from_frame, to_frame: to_frame}
+    }
+    fn then<Next>(self, next: Transform<To, Next>) -> Transform<From, Next> TransformError! {
+        if self.to_frame != 0 && next.from_frame != 0 && self.to_frame != next.from_frame -> return Err(TransformError{message: "transform composition has mismatched frame identity"})
+        Ok(Transform<From, Next>{
+            m00: next.m00 * self.m00 + next.m01 * self.m10,
+            m01: next.m00 * self.m01 + next.m01 * self.m11,
+            m10: next.m10 * self.m00 + next.m11 * self.m10,
+            m11: next.m10 * self.m01 + next.m11 * self.m11,
+            tx: next.m00 * self.tx + next.m01 * self.ty + next.tx,
+            ty: next.m10 * self.tx + next.m11 * self.ty + next.ty,
+            from_frame: self.from_frame, to_frame: next.to_frame,
+        })
+    }
+    fn inverse(self) -> Transform<To, From> TransformError! {
+        det :: self.m00 * self.m11 - self.m01 * self.m10
+        if !is_finite(det) || fabs(det) <= 0.0000000000000002220446049250313 -> return Err(TransformError{message: "transform is singular and has no inverse"})
+        inv_det :: Float{1.0} / det
+        Ok(Transform<To, From>{
+            m00: self.m11 * inv_det, m01: -self.m01 * inv_det,
+            m10: -self.m10 * inv_det, m11: self.m00 * inv_det,
+            tx: (self.m01 * self.ty - self.m11 * self.tx) * inv_det,
+            ty: (self.m10 * self.tx - self.m00 * self.ty) * inv_det,
+            from_frame: self.to_frame, to_frame: self.from_frame,
+        })
+    }
+    fn point<P: GeometryPoint>(self, point: P) -> Point2<Float, To> TransformError! {
+        value :: point.__coordinates()
+        if value.frame_id != 0 && value.frame_id != self.from_frame -> return Err(TransformError{message: "coordinate point belongs to a stale frame"})
+        Ok(Point2<Float, To>{
+            x: self.m00 * value.x + self.m01 * value.y + self.tx,
+            y: self.m10 * value.x + self.m11 * value.y + self.ty,
+            frame_id: self.to_frame,
+        })
+    }
+    fn point_at_depth<P: GeometryPoint>(self, point: P, depth: Float) -> Point2<Float, To> TransformError! {
+        if !is_finite(depth) -> return Err(TransformError{message: "perspective depth must be finite"})
+        origin :: self.point(point) ?? return Err(TransformError{message: "coordinate point belongs to a stale frame"})
+        Ok(Point2<Float, To>{x: origin.x + self.m00 * depth, y: origin.y + self.m10 * depth, frame_id: origin.frame_id})
+    }
+    fn ray<P: GeometryPoint>(self, point: P) -> Ray2<Float, From, To> TransformError! {
+        origin :: self.point(point) ?? return Err(TransformError{message: "coordinate point belongs to a stale frame"})
+        Ok(Ray2<Float, From, To>{origin: origin, direction: Delta2<Float, To>{x: self.m00, y: self.m10, frame_id: self.to_frame}})
+    }
+}
+struct Transform2<T, From, To> {
+    m00: Float, m01: Float, m10: Float, m11: Float, tx: Float, ty: Float
+    from_frame: Int, to_frame: Int
+}
+impl Transform2 {
+    fn affine(m00: T, m01: T, m10: T, m11: T, tx: T, ty: T, from_frame: Int, to_frame: Int) -> Transform2<T, From, To> Never! {
+        Transform2<T, From, To>{m00: Float{m00}, m01: Float{m01}, m10: Float{m10}, m11: Float{m11}, tx: Float{tx}, ty: Float{ty}, from_frame: from_frame, to_frame: to_frame}
+    }
+    fn then<Next>(self, next: Transform2<T, To, Next>) -> Transform2<T, From, Next> TransformError! {
+        if self.to_frame != 0 && next.from_frame != 0 && self.to_frame != next.from_frame -> return Err(TransformError{message: "transform composition has mismatched frame identity"})
+        Ok(Transform2<T, From, Next>{
+            m00: next.m00 * self.m00 + next.m01 * self.m10,
+            m01: next.m00 * self.m01 + next.m01 * self.m11,
+            m10: next.m10 * self.m00 + next.m11 * self.m10,
+            m11: next.m10 * self.m01 + next.m11 * self.m11,
+            tx: next.m00 * self.tx + next.m01 * self.ty + next.tx,
+            ty: next.m10 * self.tx + next.m11 * self.ty + next.ty,
+            from_frame: self.from_frame, to_frame: next.to_frame,
+        })
+    }
+    fn inverse(self) -> Transform2<T, To, From> TransformError! {
+        det :: self.m00 * self.m11 - self.m01 * self.m10
+        if !is_finite(det) || fabs(det) <= 0.0000000000000002220446049250313 -> return Err(TransformError{message: "transform is singular and has no inverse"})
+        inv_det :: Float{1.0} / det
+        Ok(Transform2<T, To, From>{
+            m00: self.m11 * inv_det, m01: -self.m01 * inv_det,
+            m10: -self.m10 * inv_det, m11: self.m00 * inv_det,
+            tx: (self.m01 * self.ty - self.m11 * self.tx) * inv_det,
+            ty: (self.m10 * self.tx - self.m00 * self.ty) * inv_det,
+            from_frame: self.to_frame, to_frame: self.from_frame,
+        })
+    }
+    fn point<P: GeometryPoint>(self, point: P) -> Point2<T, To> TransformError! {
+        value :: point.__coordinates()
+        if value.frame_id != 0 && value.frame_id != self.from_frame -> return Err(TransformError{message: "coordinate point belongs to a stale frame"})
+        Ok(Point2<T, To>{
+            x: self.m00 * value.x + self.m01 * value.y + self.tx,
+            y: self.m10 * value.x + self.m11 * value.y + self.ty,
+            frame_id: self.to_frame,
+        })
+    }
+    fn point_at_depth<P: GeometryPoint>(self, point: P, depth: Float) -> Point2<T, To> TransformError! {
+        if !is_finite(depth) -> return Err(TransformError{message: "perspective depth must be finite"})
+        origin :: self.point(point) ?? return Err(TransformError{message: "coordinate point belongs to a stale frame"})
+        Ok(Point2<T, To>{x: origin.x + self.m00 * depth, y: origin.y + self.m10 * depth, frame_id: origin.frame_id})
+    }
+    fn ray<P: GeometryPoint>(self, point: P) -> Ray2<T, From, To> TransformError! {
+        origin :: self.point(point) ?? return Err(TransformError{message: "coordinate point belongs to a stale frame"})
+        Ok(Ray2<T, From, To>{origin: origin, direction: Delta2<T, To>{x: self.m00, y: self.m10, frame_id: self.to_frame}})
+    }
+}
+#Test("Source transforms preserve composition, inverse, frames, depth, and rays") {
+    first :: Transform<Screen, World>.affine(2.0, 0.0, 0.0, 3.0, 5.0, 7.0, 11, 12)
+    next :: Transform<World, View>.affine(1.0, 0.0, 0.0, 1.0, 10.0, 20.0, 12, 13)
+    chain :: first.then(next) ?? panic("then")
+    point :: first.point(ScreenPoint.new(1.0, 2.0)) ?? panic("point")
+    assert_eq(point.x, 7.0)
+    assert_eq(point.y, 13.0)
+    assert_eq(point.frame_id, 12)
+    assert_eq(chain.tx, 15.0)
+    assert_eq(chain.to_frame, 13)
+    back :: first.inverse() ?? panic("inverse")
+    restored :: back.point(point) ?? panic("inverse point")
+    assert_eq(restored.x, 1.0)
+    assert_eq(restored.y, 2.0)
+    assert_eq(restored.frame_id, 11)
+    deep :: first.point_at_depth(ScreenPoint.new(1.0, 2.0), 4.0) ?? panic("depth")
+    assert_eq(deep.x, 15.0)
+    assert_eq(deep.y, 13.0)
+    ray :: first.ray(ScreenPoint.new(1.0, 2.0)) ?? panic("ray")
+    assert_eq(ray.direction.x, 2.0)
+    assert_eq(ray.direction.frame_id, 12)
+    singular :: Transform<Screen, World>.affine(1.0, 2.0, 2.0, 4.0, 0.0, 0.0, 11, 12)
+    if singular.inverse() == {
+        .Ok(_) -> panic("singular accepted")
+        .Err(error) -> assert_eq(error.message, "transform is singular and has no inverse")
+    }
+    if first.point_at_depth(ScreenPoint.new(0.0, 0.0), nan()) == {
+        .Ok(_) -> panic("NaN depth accepted")
+        .Err(error) -> assert_eq(error.message, "perspective depth must be finite")
+    }
+    if first.point(Point2<Float, Screen>.new(0.0, 0.0, 99)) == {
+        .Ok(_) -> panic("stale frame accepted")
+        .Err(error) -> assert_eq(error.message, "coordinate point belongs to a stale frame")
+    }
+    narrow :: Transform2<F32, Screen, World>.affine(F32{1.0}, F32{0.0}, F32{0.0}, F32{1.0}, F32{2.0}, F32{3.0}, 11, 12)
+    assert_eq((narrow.point(ScreenPoint.new(1.0, 2.0)) ?? panic("F32 point")).y, 5.0)
+    assert_eq((narrow.inverse() ?? panic("F32 inverse")).tx, -2.0)
+    assert_eq((narrow.ray(ScreenPoint.new(1.0, 2.0)) ?? panic("F32 ray")).direction.x, 1.0)
+    assert_eq((narrow.point_at_depth(ScreenPoint.new(1.0, 2.0), 4.0) ?? panic("F32 depth")).x, 7.0)
+    assert_eq(Float{9007199254740993}, 9007199254740992.0)
+    assert_eq(Float{-9007199254740993}, -9007199254740992.0)
+    assert_eq(Float{F32{-0.0}}.to_bits(), (-0.0).to_bits())
+}
