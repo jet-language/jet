@@ -542,11 +542,9 @@ fn core_sig_encoding_backing(request: CoreCallSignatureRequest) -> CoreTypedCall
     if member == "__text_into_bytes" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, move)}, Val(bytes)))
     if member == "__string_byte" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read), core_sig_positional(core_sig_named("U64"), read)}, Val(byte)))
     if member == "__object_from_entries" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(entries, move)}, Val(tree)))
-    if member == "__object_into_entries" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(tree, move)}, Val(entries)))
     if member == "__object_entries_view" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(tree, read)}, Val(core_sig_apply("View", entry))))
     if member == "__bytes_view" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(tree, read)}, Val(core_sig_apply("View", byte))))
     if member == "__typed_text" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, move)}, Val(tree)))
-    if member == "__tree_tag" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(tree, read)}, Val(byte)))
     None
 }
 

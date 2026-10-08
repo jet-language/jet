@@ -1325,13 +1325,6 @@ fn core_fixed_sig_impl(
             ]))))],
             Some(Type::Named("DataTree".to_string())),
         )),
-        ("core.encoding", "__object_into_entries") => Some((
-            vec![(AccessConvention::Move, Type::Named("DataTree".to_string()))],
-            Some(Type::List(Box::new(Type::Tuple(vec![
-                ("key".to_string(), Box::new(Type::String)),
-                ("value".to_string(), Box::new(Type::Named("DataTree".to_string()))),
-            ])))),
-        )),
         ("core.encoding", "__write_text") => Some((
             vec![(AccessConvention::Write, Type::Named("FileWriter".to_string())), (read, Type::String)],
             Some(result_ty(unit.clone(), Type::Named("EncodingCause".to_string()))),
@@ -1343,10 +1336,6 @@ fn core_fixed_sig_impl(
         ("core.encoding", "__typed_text") => Some((
             vec![(AccessConvention::Move, Type::String)],
             Some(Type::Named("DataTree".to_string())),
-        )),
-        ("core.encoding", "__tree_tag") => Some((
-            vec![(read, Type::Named("DataTree".to_string()))],
-            Some(u8_ty()),
         )),
         ("core.encoding", "__object_entries_view") => Some((
             vec![(read, Type::Named("DataTree".to_string()))],
