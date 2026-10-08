@@ -427,6 +427,11 @@ Seed-only Rust sum aliases and lifetime-only borrowed carriers are classified
 from their actual emitted declarations, not admitted as Jet record TYPE
 specializations. The `JetOutcome<T,E> = Result<T,E>` alias uses the existing
 top-level result codec; nested tuple sums remain explicitly unsupported.
+Standard-library carriers resolve through the same explicit/glob use map,
+including unqualified `Arc`/`Box` imports. Their preserved qualified types
+and unsupported C record/callback-codec reasons appear in the inventory;
+crate-local names remain nominal and cannot gain this classification by
+spelling alone.
 These RUST-EXIT S5 seed compatibility rules disappear at cutover.
 The raw tagged-Int destructor `jet_rt_int_drop` receives metadata only once
 the Int layer owns that export in `exports.list`: one Word parameter, Unit

@@ -316,11 +316,11 @@ const cfgsBefore = (lineStart) => attributesBefore(lineStart).filter((line) => l
         }
       } else if (word === "use" && stack.every((frame) => frame.mod)) {
         const here = stack.map((frame) => frame.mod);
-        // A `use` path (relative to this module unless `crate::`), as a
-        // module path from the crate root.
+        // A `use` path from the crate root; Rust standard-library namespaces
+        // are absolute even inside a module.
         const resolve = (prefix) => {
           const target = prefix.split("::").filter(Boolean);
-          const base = target[0] === "crate" ? [] : [...here];
+          const base = /^(?:crate|std|core|alloc)$/.test(target[0] ?? "") ? [] : [...here];
           for (const segment of target[0] === "crate" ? target.slice(1) : target) {
             if (segment === "super") base.pop();
             else if (segment !== "self") base.push(segment);
@@ -352,20 +352,24 @@ const cfgsBefore = (lineStart) => attributesBefore(lineStart).filter((line) => l
 // The declaration a runtime type path names: `{ key, decls }` for the item at
 // that module path, one a renamed import names, or one a module's glob import
 // (`use super::*;`, `pub(crate) use jet_sync::*;`) brings in; null if none.
+// External std/core/alloc paths are marked, never inferred to be Jet records.
 const declarationOf = (rustPath, seen = new Set()) => {
   rustPath = rustPath.replace(/<[\s\S]*>$/, "");
   if (types.has(rustPath)) return { key: rustPath, decls: types.get(rustPath) };
   if (renames.has(rustPath)) return declarationOf(renames.get(rustPath), seen);
+  if (/^(?:std|core|alloc)::/.test(rustPath)) return { key: rustPath, decls: [], external: true };
   const segments = rustPath.split("::");
   const name = segments.pop();
   const module = segments.join("::");
   if (seen.has(module)) return null;
   seen.add(module);
+  let external = null;
   for (const target of globs.get(module) ?? []) {
     const found = declarationOf(target ? `${target}::${name}` : name, seen);
-    if (found) return found;
+    if (found && !found.external) return found;
+    if (found) external ??= found;
   }
-  return null;
+  return external;
 };
 const nominalOutcome = [...types].some(([key, decls]) => key.split("::").pop() === "JetOutcome" &&
   decls.some((decl) => decl.visible && !decl.gated && (decl.kind === "struct" || decl.kind === "enum")));
@@ -491,7 +495,7 @@ for (const match of text.matchAll(/^\s*impl (?:(?:super|crate)::)*(JetDisplay|Je
 
 // A Rust type written in module `path` as a type the adapter module names.
 const qualify = (ty, path) => {
-  if (ty.startsWith("crate::") || ty.startsWith("std::")) return ty;
+  if (/^(?:crate|std|core|alloc)::/.test(ty)) return ty;
   if (ty.startsWith("super::")) return `crate::${path.split("::").slice(0, -1).filter(Boolean).concat(ty.slice(7)).join("::")}`;
   return path ? `crate::${path}::${ty}` : `crate::${ty}`;
 };
@@ -523,9 +527,19 @@ const opaqueName = /^(?:[A-Za-z_][A-Za-z0-9_]*::)*([A-Z][A-Za-z0-9_]*|__jet_[A-Z
 const concreteHandles = new Map(); // specialization name -> resolved declaration application
 const borrowedHandles = new Map(); // seed-only Rust lifetime carriers, not Jet type instances
 const unsupportedSumCarriers = new Map(); // declaration-proved seed alias, no plain C codec
+const unsupportedRustCarriers = new Map(); // std/core/alloc provenance, no C record codec
 const genericArgumentKinds = new Map([["f64", "Float"], ["bool", "Bool"], ["String", "String"], ["crate::jet_foundation::Numeric::JetInt", "Int"]]);
 function runtimeHandle(ty, path) {
   const aliasPath = qualify(ty.replace(/<[\s\S]*>$/, ""), path);
+  // RUST-EXIT S5: resolve imports before nominal TYPE structural validation.
+  const resolved = declarationOf(aliasPath.replace(/^crate::/, ""));
+  if (resolved?.external && !/^crate::(?:std|core|alloc)::/.test(ty)) {
+    const qualified = resolved.key + ty.slice(ty.replace(/<[\s\S]*>$/, "").length);
+    unsupportedRustCarriers.set(qualified, { type: ty, qualified,
+      reason: /dynFn(?:Mut|Once)?\b/.test(ty) ? "Rust closure carrier, no C callback codec; seed-only"
+        : "Rust standard-library carrier, no C record codec; seed-only" });
+    return null;
+  }
   if (rustOutcomeAlias(aliasPath)) {
     unsupportedSumCarriers.set(`${aliasPath}:${ty}`, { type: ty, qualified: aliasPath,
       reason: "resolved pub type JetOutcome<T,E> = Result<T,E>; plain/tuple/list-element carrier has no sum C codec; seed-only" });
@@ -1573,6 +1587,7 @@ if (nativeListOnly) {
     seedHelperNames: [...seedHelperNames].sort(),
     jetRuntimeExports: [...jetRuntimeExports].sort(),
     unsupportedSumCarriers: [...unsupportedSumCarriers.values()],
+    unsupportedRustCarriers: [...unsupportedRustCarriers.values()],
     skipped,
   };
   // Wait for the pipe to drain; a direct process.exit can truncate large JSON.

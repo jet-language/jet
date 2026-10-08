@@ -130,6 +130,19 @@ pub fn jet_fixture_plain(value: JetFixture) -> JetFixture { value }
   const ambiguousSum = run();
   assert.notEqual(ambiguousSum.status, 0);
   assert.match(ambiguousSum.stderr, /JetOutcome.*ambiguous/);
+  put("crates/jet-foundation/src/Syntax/core_calls.rs", registry('CoreCallRecord::new("core.fixture", "arc", "jet_fixture_arc", true)\n'));
+  const callback = "dyn Fn()->Result<JetHTTPResponse,JetHTTPError>+Send+Sync+'static,";
+  for (const [imports, type] of [["", "std::sync::Arc"], ["use std::sync::Arc;\n", "Arc"], ["use std::sync::*;\n", "Arc"]]) {
+    put("runtime.rs", declarations + imports + `pub struct JetHTTPResponse;\npub struct JetHTTPError;\npub fn jet_fixture_arc(value: ${type}<${callback}>) -> f64 { 0.0 }\n`);
+    success(run());
+    const closureList = spawnSync(process.execPath, [join(fixture, "Tools/agent/gen-c-abi-routes.mjs"), join(fixture, "runtime.rs"), "--native-list-only"], { encoding: "utf8" });
+    success(closureList);
+    const closure = JSON.parse(closureList.stdout).unsupportedRustCarriers;
+    assert.ok(closure.some((row) => row.qualified.startsWith("std::sync::Arc<") && row.reason.includes("no C callback codec")));
+  }
+  put("runtime.rs", declarations + "#[derive(Clone,PartialEq)]\npub struct Arc<T> { pub value: T }\npub fn jet_fixture_arc(value: crate::Arc<f64>) -> f64 { 0.0 }\n");
+  success(run());
+  assert.ok(readFileSync(join(fixture, "crates/jet-codegen/src/Prelude/Core/CAbiRoutes.rs"), "utf8").includes("fn jet_fixture_arc("), "crate-local Arc must remain nominal");
   put("crates/jet-foundation/src/Syntax/core_calls.rs", registry(""));
   put("runtime.rs", declarations);
   success(run());
