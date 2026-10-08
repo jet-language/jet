@@ -1,0 +1,64 @@
+//! #4792: instantiated owned fields and List/Option payloads retain Close.
+//! Each id is closed once; replacing a moved field must not close its empty slot.
+struct Secret { id: Int }
+
+impl Secret.Close {
+    fn close(^self) {
+        print("close {self.id}")
+        if self.id == 8 {
+            nested :: Secret{id: 9}
+            print("nested {nested.id}")
+        }
+    }
+}
+
+struct Wrapper<T> { value: T }
+struct Pair<T> { first: T, second: T }
+
+fn direct() {
+    held :: Secret{id: 8}
+    print("direct {held.id}")
+}
+
+fn wrapped() {
+    held :: Wrapper<Secret>{value: Secret{id: 1}}
+    print("wrapper {held.value.id}")
+}
+
+fn listed() {
+    held :: [Secret]{Secret{id: 2}, Secret{id: 3}}
+    print("list {held.len()}")
+}
+
+fn optional(take_inner: Bool, id: Int) {
+    held := Val(Secret{id: id})
+    if take_inner {
+        taken :: ^held ?? return
+        print("take {taken.id}")
+    } else {
+        print("keep")
+    }
+}
+
+fn replaced() {
+    held := Wrapper<Secret>{value: Secret{id: 6}}
+    taken :: ^held.value
+    held.value = Secret{id: 7}
+    print("replace {taken.id} {held.value.id}")
+}
+
+fn remainder() {
+    held :: Pair<Secret>{first: Secret{id: 10}, second: Secret{id: 11}}
+    taken :: ^held.first
+    print("remainder {taken.id} {held.second.id}")
+}
+
+fn run() {
+    wrapped()
+    listed()
+    optional(true, 4)
+    optional(false, 5)
+    replaced()
+    direct()
+    remainder()
+}
