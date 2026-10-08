@@ -35,6 +35,9 @@ pub enum JetCLIPlan {
     // report as the `cli` status envelope under `--json`; the host renders it
     // as text.
     Refused(report: Diagnostic, color: Bool, exit_code: Int, notice: String)
+    // main.rs `emit_cli_diagnostics`: source-owned reports use the diagnostics
+    // channel, not the spanless CLI-usage envelope.
+    Diagnostics(file: String, source: String, report: Diagnostic, color: Bool, notice: String)
     // `jet check <file>`: the entry as the user typed it (or as project
     // resolution chose it), its bytes, the output policy, and the
     // `--threads` cap. `project` is the project scope of a bare or directory
@@ -220,6 +223,11 @@ pub fn jet_cli_report(code: String, what: String, why: String, fix: String, colo
 
 fn jet_cli_done(stdout: String, stderr: String, exit_code: Int) -> JetCLIPlan Never! {
     JetCLIPlan.Done{output: JetDriverVerbOutput{stdout: stdout, stderr: stderr, exit_code: exit_code}}
+}
+
+fn jet_cli_diagnostics_output(file: String, source: String, report: Diagnostic, color: Bool, json: Bool, notice: String) -[FS, Env]> JetDriverVerbOutput Never! {
+    if json -> return JetDriverVerbOutput{stdout: jet_cli_reports_status_json("diagnostics", false, jet_cli_report_cwd(), file, source, [Diagnostic]{report}), stderr: notice, exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    JetDriverVerbOutput{stdout: "", stderr: "{notice}{diagnostic_render_all(file, source, [Diagnostic]{report}, color)}", exit_code: JET_DRIVER_EXIT_USER_ERROR}
 }
 
 fn jet_cli_fail(code: String, what: String, why: String, fix: String, color: Bool, exit_code: Int) -> JetCLIPlan Never! {
@@ -1156,6 +1164,7 @@ pub fn jet_cli_front(raw: [String]) -[FS, Env, Time, Time.Wait]> JetCLIPlan Neve
         .Refused(report, _, exit_code, notice) -> {
             if jet_cli_wants_json(jet_cli_owned_flags(raw)) -> return jet_cli_done(jet_cli_report_status_json(report), notice, exit_code)
         }
+        .Diagnostics(file, source, report, color, notice) -> return JetCLIPlan.Done{output: jet_cli_diagnostics_output(file, source, report, color, jet_cli_wants_json(jet_cli_owned_flags(raw)), notice)}
         else -> {}
     }
     plan

@@ -1064,39 +1064,14 @@ fn jet_cli_looks_like_workspace_lock(raw: String) -> Bool Never! {
 // boundary stops the walk (its own `package.jet` is the root); the nearest
 // `package.jet` is the manifest root; an inline-Package stock entry wins.
 fn jet_cli_find_package_root(start: String, color: Bool) -[FS, Env]> JetCLIRootFound Never! {
-    first :: cli_files.realpath(start) ?? return JetCLIRootFound.Absent
-    manifest := String?{None}
-    dir := first
-    loop {
-        if jet_cli_workspace_source(dir, color) == {
-            .Failed(plan) -> return JetCLIRootFound.Refused{plan: plan}
-            .Index(_) | .Authority(_) -> {
-                if jet_cli_manifest_problem(dir, color) == .Val(problem) {
-                    return JetCLIRootFound.Refused{plan: problem}
-                }
-                if jet_cli_checked_file(dir, JET_CLI_PACKAGE_FILE) != None -> manifest = Val(dir)
-                break
-            }
-            .Absent -> {}
+    cache := WorkspaceDeclarationCache.new()
+    if jet_cli_find_package_root_checked(&cache, start) == {
+        .Ok(found) -> {
+            if found == .Val(root) -> return JetCLIRootFound.Root{path: root}
+            JetCLIRootFound.Absent
         }
-        if jet_cli_manifest_problem(dir, color) == .Val(problem) {
-            return JetCLIRootFound.Refused{plan: problem}
-        }
-        if jet_cli_checked_file(dir, JET_CLI_PACKAGE_FILE) != None {
-            manifest = Val(dir)
-            break
-        }
-        dir = jet_cli_walk_up(dir) ?? break
+        .Err(error) -> JetCLIRootFound.Refused{plan: JetCLIPlan.Diagnostics{file: JET_CLI_PACKAGE_FILE, source: "", report: error.diagnostic, color: color, notice: ""}}
     }
-    dir = first
-    loop {
-        workspace_boundary :: jet_cli_workspace_present(jet_cli_workspace_source(dir, color))
-        if jet_cli_inline_carrier(dir) != None -> return JetCLIRootFound.Root{path: dir}
-        if workspace_boundary || jet_cli_checked_file(dir, JET_CLI_PACKAGE_FILE) != None -> break
-        dir = jet_cli_walk_up(dir) ?? break
-    }
-    if manifest == .Val(root) -> return JetCLIRootFound.Root{path: root}
-    JetCLIRootFound.Absent
 }
 
 // main.rs `resolve_bare_entry` (D-CLI-BARE1=A): the entry a bare command, or
@@ -1178,28 +1153,45 @@ pub fn jet_cli_resolve_bare_entry(command: String, cwd: String, member_flag: Str
 // main.rs `missing_bare_entry`: a retired manifest name teaches E1226;
 // otherwise there is no file and no project (E2104).
 pub fn jet_cli_missing_bare_entry(command: String, cwd: String, color: Bool) -[FS, Env]> JetCLIPlan Never! {
-    if jet_cli_find_stale_manifest(cwd, color) == .Val(report) -> return JetCLIPlan.Refused{report: report, color: color, exit_code: JET_DRIVER_EXIT_USAGE, notice: ""}
+    cache := WorkspaceDeclarationCache.new()
+    if jet_cli_find_stale_manifest(&cache, cwd) == .Val(report) -> return JetCLIPlan.Refused{report: report, color: color, exit_code: JET_DRIVER_EXIT_USAGE, notice: ""}
     jet_cli_fail("E2104", "no file given and no `package.jet` found in this directory or above", jet_cli_why("E2104"), "run `jet {command} <file.jet>` or cd into a project", color, JET_DRIVER_EXIT_USAGE)
 }
 
 // Loader.rs `find_stale_manifest_name`: one authority/workspace-bounded walk
 // shared by the bare-entry and manifest-required diagnostic paths.
-fn jet_cli_find_stale_manifest(cwd: String, color: Bool) -[FS, Env]> Diagnostic? Never! {
-    dir := cli_files.realpath(cwd) ?? cwd
+fn jet_cli_find_stale_manifest(cache: &WorkspaceDeclarationCache, start: String) -[FS, Env]> Diagnostic? Never! {
+    dir := AuthorityResolver.authority_walk_root(start) ?? return None
     loop {
-        if jet_cli_checked_file(dir, JET_CLI_PACKAGE_FILE) != None -> break
-        if jet_cli_checked_file(dir, JET_CLI_PAYLOAD_FILE) != None {
-            return Val(jet_cli_stale_manifest(dir, JET_CLI_PAYLOAD_FILE))
-        }
-        loop stale in JET_CLI_STALE_MANIFEST_NAMES {
-            if jet_cli_checked_file(dir, stale) != None {
-                return Val(jet_cli_stale_manifest(dir, stale))
+        if AuthorityResolver.open_for_authority_walk(dir) == {
+            .Ok(found) -> {
+                if found == .Val(authority) {
+                    if authority.checked_manifest(".") == {
+                        .Ok(_) -> return None
+                        .Err(error) -> {
+                            if error == .RetiredManifest(_) -> return Val(jet_cli_stale_manifest(dir, JET_CLI_PAYLOAD_FILE))
+                            if !error.is_missing() -> return None
+                        }
+                    }
+                    loop name in JET_CLI_STALE_MANIFEST_NAMES {
+                        if authority.checked_file(name) == {
+                            .Ok(file) -> {
+                                authority.revalidate_file(file) ?? return None
+                                return Val(jet_cli_stale_manifest(dir, name))
+                            }
+                            .Err(error) -> { if !error.is_missing() -> return None }
+                        }
+                    }
+                    if authority.resolve_workspace_source(&cache) == {
+                        .Ok(source) -> { if source != None -> return None }
+                        .Err(_) -> return None
+                    }
+                }
             }
+            .Err(_) -> return None
         }
-        if jet_cli_workspace_present(jet_cli_workspace_source(dir, color)) -> break
-        dir = jet_cli_walk_up(dir) ?? break
+        dir = AuthorityResolver.authority_walk_parent(dir) ?? return None
     }
-    None
 }
 
 // Loader.rs `stale_manifest_name_diagnostic`.
@@ -1254,6 +1246,7 @@ fn jet_cli_with_notices(notices: [String], plan: JetCLIPlan) -> JetCLIPlan Never
     if plan == {
         .Done(output) -> return jet_cli_done(output.stdout, "{notices.join("")}{output.stderr}", output.exit_code)
         .Refused(report, color, exit_code, notice) -> return JetCLIPlan.Refused{report: ~report, color: color, exit_code: exit_code, notice: "{notices.join("")}{notice}"}
+        .Diagnostics(file, source, report, color, notice) -> return JetCLIPlan.Diagnostics{file: file, source: source, report: ~report, color: color, notice: "{notices.join("")}{notice}"}
         else -> {}
     }
     ~plan

@@ -1465,6 +1465,7 @@ fn jet_cli_execute(plan: JetCLIPlan) -> JetDriverVerbOutput {
     if plan == {
         .Done(done) -> output = ~done
         .Refused(report, color, exit_code, notice) -> output = JetDriverVerbOutput{stdout: "", stderr: "{notice}{diagnostic_render_all("", "", [Diagnostic]{report}, color)}", exit_code: exit_code}
+        .Diagnostics(file, source, report, color, notice) -> output = jet_cli_diagnostics_output(file, source, report, color, false, notice)
         .Check(file, source, color, quiet, threads, project, notice, json) -> {
             jet_cli_write_notice(notice)
             output = jet_cli_compile_check(file, source, color, quiet, threads, project, json)

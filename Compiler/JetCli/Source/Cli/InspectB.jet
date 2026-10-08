@@ -726,12 +726,14 @@ enum JetCLIInspectRoot {
 // compilation. A missing root keeps the command hint; stale-name teaching is
 // a direct, uncolored user error even in machine output mode.
 fn jet_cli_require_inspect_root(start: String, hint: String, color: Bool) -[FS, Env]> JetCLIInspectRoot Never! {
-    if jet_cli_find_package_root(start, color) == {
-        .Root(root) -> return JetCLIInspectRoot.Root{path: root}
-        .Refused(plan) -> return JetCLIInspectRoot.Refused{plan: plan}
-        .Absent -> {}
+    cache := WorkspaceDeclarationCache.new()
+    if jet_cli_find_package_root_checked(&cache, start) == {
+        .Ok(found) -> {
+            if found == .Val(root) -> return JetCLIInspectRoot.Root{path: root}
+        }
+        .Err(error) -> return JetCLIInspectRoot.Refused{plan: JetCLIPlan.Diagnostics{file: JET_CLI_PACKAGE_FILE, source: "", report: error.diagnostic, color: color, notice: ""}}
     }
-    if jet_cli_find_stale_manifest(start, false) == .Val(report) -> return JetCLIInspectRoot.Refused{plan: jet_cli_done("", diagnostic_render_all("", "", [Diagnostic]{report}, false), JET_DRIVER_EXIT_USER_ERROR)}
+    if jet_cli_find_stale_manifest(&cache, start) == .Val(report) -> return JetCLIInspectRoot.Refused{plan: jet_cli_done("", diagnostic_render_all("", "", [Diagnostic]{report}, false), JET_DRIVER_EXIT_USER_ERROR)}
     JetCLIInspectRoot.Refused{plan: jet_cli_done("", "{hint}\n", JET_DRIVER_EXIT_USER_ERROR)}
 }
 

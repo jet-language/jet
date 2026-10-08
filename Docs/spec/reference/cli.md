@@ -97,9 +97,11 @@ is absent).
 
 Inspection planes and schema actions resolve explicit and inline Packages through
 the same checked entry resolver as compilation. When a root is genuinely absent,
-the action retains its own hint; a stale manifest filename uses the shared E1226
-teaching diagnostic. Manifest-required hints and stale-name reports are direct,
-uncolored stderr user errors, including under `--json`.
+the action retains its own hint; a stale-name lookup uses the shared E1226
+teaching diagnostic. These absent-root hints and stale-name reports are direct,
+uncolored stderr user errors, including under `--json`. An authoritative resolver
+error, including a retired `pkg.jet` manifest, instead retains source diagnostic
+origins and spans, the requested color, and the `diagnostics` machine channel.
 
 ## Executable command metadata
 
