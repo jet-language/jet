@@ -549,14 +549,10 @@ pub fn apply_impure_core_call_with_type_args(
                 "remove_dir" => unit(files_kernel::fs_remove_dir(&path)),
                 "remove_all" => unit(files_kernel::fs_remove_all(&path)),
                 "copy" => unit(files_kernel::fs_copy(&path, &path_arg(one(1)?)?)),
-                "copy_dir" => unit(files_kernel::fs_copy_dir(&path, &path_arg(one(1)?)?)),
                 "symlink" => unit(files_kernel::fs_symlink(&path, &path_arg(one(1)?)?)),
                 "hard_link" => unit(files_kernel::fs_hard_link(&path, &path_arg(one(1)?)?)),
                 "read_link" => present(files_kernel::fs_read_link(&path).map(CtValue::Str)),
                 "canonicalize" => present(files_kernel::fs_canonicalize(&path).map(CtValue::Str)),
-                "glob" => present(files_kernel::fs_glob(&path).map(|paths| {
-                    CtValue::List(paths.into_iter().map(CtValue::Str).collect())
-                })),
                 "walk" | "walk_parallel" => {
                     let walk_entries = |entries: Vec<(String, String, bool, i64)>| {
                         CtValue::List(
