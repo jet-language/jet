@@ -800,7 +800,8 @@ codec_enum!(Expr {
         recv_type,
         resolved_ret,
         operator_rhs,
-        checked_widen
+        checked_widen,
+        checked_callee
     },
     26 => StructLit { type_name, type_args, import_ns, as_trait, fields, inferred, span },
     27 => TypedLit { head, body, span },

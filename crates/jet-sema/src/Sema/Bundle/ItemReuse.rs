@@ -44,7 +44,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 /// Schema of one item check record (an action record under the item key).
-const ITEM_CHECK_SCHEMA: &str = "jet.item-check/v1";
+const ITEM_CHECK_SCHEMA: &str = "jet.item-check/v2";
 const SECTION_ITEM: u64 = 1;
 
 /// A checked module whose bodies may be reused.

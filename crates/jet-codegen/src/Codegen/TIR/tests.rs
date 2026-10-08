@@ -319,7 +319,7 @@ fn generated_comparable_calls_keep_exact_owners_when_template_spans_overlap() {
         }).expect("checked used function");
         let mut checked_targets = Vec::new();
         for statement in &used.body {
-            statement.for_each_expr(&mut |expression| {
+            statement.for_each_expr(&mut |expression: &Expr| {
                 if let Expr::MethodCall { checked_callee: Some(identity), .. } = expression {
                     checked_targets.push(identity.clone());
                 }
