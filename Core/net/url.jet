@@ -353,9 +353,13 @@ fn normalize_recipe(parts: [URLPart]) -> [URLPart] Never! {
             if normalized.len() > 0 {
                 if !recipe_has_hole(normalized[normalized.len() - 1]) {
                     _ :: &normalized.pop()
-                } else -> &normalized.push(row)
+                } else {
+                    &normalized.push(row)
+                }
             }
-        } else -> &normalized.push(row)
+        } else {
+            &normalized.push(row)
+        }
     }
     out := [URLPart]{}
     if absolute -> &out.push(URLPart{text: "/", hole: false})
@@ -408,7 +412,9 @@ fn render_recipe(parts: [URLPart], path: Bool, data: Bool) -> String Never! {
                 if comma >= 0 {
                     out = "{out}{render_data_mime(slice(part.text.bytes(), 0, comma))},{slice(part.text.bytes(), comma + 1, part.text.bytes().len())}"
                     payload = true
-                } else -> out = "{out}{render_data_mime(part.text)}"
+                } else {
+                    out = "{out}{render_data_mime(part.text)}"
+                }
             }
         } else if part.hole && path && (part.text == "." || part.text == "..") {
             loop _ in part.text.bytes() -> out = "{out}%2E"
@@ -492,7 +498,9 @@ fn parse_recipe(text: String, normalize: Bool) -> URL URLError! {
                     port_explicit = true
                 } else if !normalize {
                     host = ascii_lower(hostport)
-                } else -> return Err(URLError.Syntax)
+                } else {
+                    return Err(URLError.Syntax)
+                }
             }
         } else {
             col := last_index(hp, 58)
