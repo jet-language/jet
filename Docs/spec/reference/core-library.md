@@ -3019,6 +3019,12 @@ fallible destination-owned conversions; do not confuse their `Result` return
 with the module's Option helpers. The implementation is in
 [`Core/text/parse.jet`](../../../Core/text/parse.jet).
 
+The builtin method `text.count(needle)` uses the shared `jet_unicode_count`
+kernel in compile-time evaluation and at runtime. It counts non-overlapping,
+exact UTF-8 matches without normalization; an empty needle returns zero,
+including for empty text. This is a separate operation from the module function
+`core.text.parse.count(text, needle)`, whose empty-needle contract differs.
+
 | Signature | Result | Description |
 |---|---|---|
 | `split(text: String, sep: String) -> [String]` | list | Split on a separator. |
