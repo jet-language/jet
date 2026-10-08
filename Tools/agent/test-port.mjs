@@ -461,7 +461,7 @@ class InputPath {
 
 function checkAst(node, blockers = null) {
   if (!node) return;
-  const allowedCalls = ['jet::compile', 'jet::compile_with_path', 'include_str!', 'assert!', 'assert_eq!', 'assert_ne!', 'matches!', 'panic!', 'format!', 'common::unique_tmp', 'fs::create_dir_all', 'fs::write', 'common::build_and_run', 'tir_support::assert_tiers_agree'];
+  const allowedCalls = ['jet::compile', 'jet::compile_with_path', 'include_str!', 'assert!', 'assert_eq!', 'assert_ne!', 'matches!', 'panic!', 'format!', 'common::unique_tmp', 'fs::create_dir_all', 'fs::write', 'common::build_and_run', 'tir_support::build_and_run', 'tir_support::assert_tiers_agree'];
   const allowedMethods = ['iter', 'any', 'all', 'find', 'filter', 'collect', 'count', 'len', 'is_empty', 'contains', 'starts_with', 'ends_with', 'as_str', 'expect', 'expect_err', 'unwrap', 'unwrap_err', 'unwrap_or_else', 'is_ok', 'is_err', 'is_some', 'is_none', 'trim', 'replace', 'to_string', 'to_owned', 'join', 'to_str'];
   const unsupported = message => blockers ? blockers.add(message) : refuse(message);
   if (node.type === 'call' && !allowedCalls.includes(node.name)) unsupported(`unmodeled call ${node.name}`);
@@ -583,6 +583,39 @@ function helperBinding(fn, name) {
   return null;
 }
 
+function canonicalRunCalls(fn, node) {
+  if (!node || typeof node !== 'object') return;
+  if (node.type === 'call') {
+    const binding = helperBinding(fn, node.name);
+    if (binding && ['common::build_and_run', 'tir_support::build_and_run', 'tir_support::assert_tiers_agree'].includes(binding.name)) {
+      const helper = binding.helper, raw = helper?.tokens.map(token => token.raw).join(' ');
+      const expected = {
+        'common::build_and_run': 'build_and_run_with_cwd ( prefix , name , src , false )',
+        'tir_support::build_and_run': 'let ( code , stdout , _stderr ) = build_and_run_full ( "jet_tir_test" , name , src ) ; ( code , stdout )',
+        'tir_support::assert_tiers_agree': 'assert_tiers_agree_with_package ( name , src , expected_stdout , None ) ;',
+      };
+      if (!helper || raw === expected[binding.name]) node.name = binding.name;
+      else refuse(`unmodeled call ${node.name}: helper body differs from ${binding.name}`);
+    } else if (binding?.helper?.name === 'build_and_run') {
+      // Local wrappers qualify by exact body, not by their familiar name.
+      const helper = binding.helper, raw = helper.tokens.map(token => token.raw).join(' ');
+      const direct = raw.match(/^common :: build_and_run \( ("(?:\\.|[^"\\])*") , name , src \)$/u);
+      const projection = raw.match(/^let \( code , stdout , _stderr \) = common :: build_and_run \( ("(?:\\.|[^"\\])*") , name , src \) ; \( code , stdout \)$/u);
+      const signature = helper.signature?.map(token => token.raw).join(' ');
+      const streams = direct ? 3 : projection ? 2 : 0;
+      if (streams && signature === `( name : & str , src : & str ) -> ( i32 , String${streams === 3 ? ' , String' : ''} )`) {
+        node.name = 'common::build_and_run';
+        node.args.unshift({ type: 'literal', value: decodeString((direct ?? projection)[1]) });
+        node.runStreams = streams;
+      }
+    }
+  }
+  for (const value of Object.values(node)) {
+    if (Array.isArray(value)) value.forEach(child => canonicalRunCalls(fn, child));
+    else if (value && typeof value === 'object') canonicalRunCalls(fn, value);
+  }
+}
+
 function availabilityGuards(fn, tokens) {
   const output = [];
   const rustc = name => ['common::have_rustc', 'tir_support::have_rustc'].includes(helperBinding(fn, name)?.name);
@@ -636,6 +669,7 @@ function availabilityGuards(fn, tokens) {
 export function assertionPlan(fn) {
   const retirement = retireRustAssertions(fn);
   const statements = new Parser(availabilityGuards(fn, retirement.tokens)).statements();
+  statements.forEach(node => canonicalRunCalls(fn, node));
   for (const statement of statements) checkAst(statement);
   Object.defineProperty(statements, 'retiredAssertions', { value: retirement.retired });
   return statements;
@@ -677,9 +711,9 @@ export function analyzeFunction(fn) {
       if (token.value === '{') { const end = closeAt(list, i); scanStatements(list.slice(i + 1, end)); i = end; continue; }
       if (token.kind === 'word' && !['::'].includes(list[i - 1]?.value)) {
         let endName = i, name = token.value;
-        while (list[endName + 1]?.value === '::' && list[endName + 2]?.kind === 'word') { name += `::${list[endName + 2].value}`; endName += 2; }
-        if (list[endName + 1]?.value === '!') { name += '!'; endName++; }
-        if (list[endName + 1]?.value === '(') {
+        while (list[endName + 1]?.kind === 'punct' && list[endName + 1]?.value === '::' && list[endName + 2]?.kind === 'word') { name += `::${list[endName + 2].value}`; endName += 2; }
+        if (list[endName + 1]?.kind === 'punct' && list[endName + 1]?.value === '!') { name += '!'; endName++; }
+        if (list[endName + 1]?.kind === 'punct' && list[endName + 1]?.value === '(') {
           const end = closeAt(list, endName + 1), method = list[i - 1]?.value === '.';
           checkAst({ type: method ? 'method' : 'call', name, args: [] }, blockers);
           let args = topLevelSplit(list.slice(endName + 2, end), ',');
@@ -701,6 +735,7 @@ export function analyzeFunction(fn) {
       const parser = new Parser(segment[0]?.value === 'for' && segment.at(-1)?.value === '}' ? segment : [...segment, semicolon]);
       try {
         const statements = parser.statements();
+        statements.forEach(node => canonicalRunCalls(fn, node));
         statements.forEach(node => checkAst(node, blockers));
         modelStatements(statements, bindings);
       }
@@ -793,10 +828,11 @@ async function evaluate(node, env, context) {
         context.observations.push(observed); context.assertions++;
         return observed.code === 0 ? { ok: true, value: { lints: observed.diagnostics } } : { ok: false, value: observed.diagnostics };
       }
-      if (node.name === 'common::build_and_run') {
-        if (args.length !== 3 || typeof args[2] !== 'string') refuse('unsupported run arguments');
-        const observed = await context.observe(args[2], 'run'); context.observations.push(observed);
-        return [observed.code, observed.stdout, observed.stderr];
+      if (['common::build_and_run', 'tir_support::build_and_run'].includes(node.name)) {
+        const tir = node.name === 'tir_support::build_and_run', sourceIndex = tir ? 1 : 2;
+        if (args.length !== sourceIndex + 1 || typeof args[sourceIndex] !== 'string') refuse('unsupported run arguments');
+        const observed = await context.observe(args[sourceIndex], 'run'); context.observations.push(observed);
+        return (tir || node.runStreams === 2) ? [observed.code, observed.stdout] : [observed.code, observed.stdout, observed.stderr];
       }
       if (node.name === 'tir_support::assert_tiers_agree') {
         if (args.length !== 3 || typeof args[1] !== 'string' || typeof args[2] !== 'string') refuse('unsupported all-tier helper arguments');
@@ -871,20 +907,21 @@ export async function checkOriginal(fn, reference, root = ROOT) {
     for (const statement of statements) {
       if (statement.statements) { trackStreams(statement.statements); continue; }
       if (!statement.names) continue;
-      if (statement.expr.type === 'call' && statement.expr.name === 'common::build_and_run') stderrVariables.add(statement.names.at(-1));
+      if (statement.expr.type === 'call' && statement.expr.name === 'common::build_and_run' && statement.expr.runStreams !== 2) stderrVariables.add(statement.names.at(-1));
       if (statement.expr.type === 'variable' && stderrVariables.has(statement.expr.name)) statement.names.forEach((name) => stderrVariables.add(name));
     }
   };
   trackStreams(plan);
   const containsRun = (node) => {
     if (!node || typeof node !== 'object') return false;
-    if (node.type === 'call' && node.name === 'common::build_and_run') return true;
+    if (node.type === 'call' && node.name === 'common::build_and_run' && node.runStreams !== 2) return true;
     return Object.values(node).some((value) => Array.isArray(value) ? value.some(containsRun) : containsRun(value));
   };
   const readsStderr = nodes.some((node) => (node.type === 'variable' && stderrVariables.has(node.name)) ||
     (node.type === 'call' && ['assert!', 'assert_eq!', 'assert_ne!'].includes(node.name) && node.args.slice(0, node.name === 'assert!' ? 1 : 2).some(containsRun)));
-  const agreement = fn.tokens.some((token) => token.kind === 'word' && /^(?:dev_run|run_interpreted|assert_tiers_agree)$/u.test(token.value));
-  const interpreterAgreement = fn.tokens.some((token) => token.kind === 'word' && /^(?:run_interpreted|assert_tiers_agree)$/u.test(token.value));
+  const allTier = nodes.some(node => node.type === 'call' && node.name === 'tir_support::assert_tiers_agree');
+  const agreement = allTier || fn.tokens.some((token) => token.kind === 'word' && /^(?:dev_run|run_interpreted)$/u.test(token.value));
+  const interpreterAgreement = allTier || fn.tokens.some((token) => token.kind === 'word' && token.value === 'run_interpreted');
   const suite = fn.file.replace(/^tests\//u, '').replace(/\.rs$/u, '').replaceAll('/', '_');
   let ordinal = 0;
   context.observe = async (source, mode, project = null) => {

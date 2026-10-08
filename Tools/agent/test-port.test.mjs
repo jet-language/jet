@@ -475,3 +475,52 @@ test('analyze CLI writes only the requested static TSV and never needs a referen
   assert.equal(existsSync(join(root, 'tests/ui')), false);
   assert.equal(existsSync(join(root, 'test-port-')), false);
 });
+
+test('E2 imported aliases preserve two/three streams and all-tier agreement flags', async () => {
+  for (const [module, args, outputs] of [
+    ['tir_support', '"name", "fn run() {}"', '(0, "ok")'],
+    ['common', '"prefix", "name", "fn run() {}"', '(0, "ok", "")'],
+  ]) {
+    const row = functionsIn(`use ${module}::build_and_run as execute;
+      #[test] fn example() { assert_eq!(execute(${args}), ${outputs}); }`, 'tests/sample.rs')[0];
+    const checked = await checkOriginal(row, async (source, mode) => ({ source, mode, code: 0, stdout: 'ok', stderr: '' }));
+    assert.equal(checked.assertions, 1);
+    await assert.rejects(checkOriginal(row, async (source, mode) => ({ source, mode, code: 0, stdout: 'wrong', stderr: '' })), /not satisfied/u);
+  }
+  const row = functionsIn('use tir_support::assert_tiers_agree as agree; #[test] fn example() { agree("name", "fn run() {}", "ok"); }', 'tests/sample.rs')[0];
+  let observed;
+  await checkOriginal(row, async (source, mode, metadata) => { observed = metadata; return { source, mode, code: 0, stdout: 'ok', stderr: '' }; });
+  assert.equal(observed.agreement, true);
+  assert.equal(observed.interpreterAgreement, true);
+  await assert.rejects(checkOriginal(row, async (source, mode) => ({ source, mode, code: 1, stdout: 'ok', stderr: '' })), /all-tier.*not satisfied/u);
+});
+
+test('E2 exact local run wrappers qualify, but same names with altered bodies stay hand-port', async () => {
+  for (const [helper, outputs] of [
+    ['fn build_and_run(name: &str, src: &str) -> (i32, String, String) { common::build_and_run("prefix", name, src) }', '(0, "ok", "")'],
+    ['fn build_and_run(name: &str, src: &str) -> (i32, String) { let (code, stdout, _stderr) = common::build_and_run("prefix", name, src); (code, stdout) }', '(0, "ok")'],
+  ]) {
+    const rows = functionsIn(`${helper} #[test] fn example() { assert_eq!(build_and_run("name", "fn run() {}"), ${outputs}); }`, 'tests/sample.rs');
+    const checked = await checkOriginal(classify(rows[1], [rows[0]]), async (source, mode) => ({ source, mode, code: 0, stdout: 'ok', stderr: '' }));
+    assert.equal(checked.assertions, 1);
+  }
+  for (const helper of [
+    'fn build_and_run(name: &str, src: &str) -> (i32, String) { (0, String::new()) }',
+    'fn assert_tiers_agree(name: &str, src: &str, out: &str) { assert_eq!(out, "ok"); }',
+    'fn build_and_run(name: &str, src: &str) -> (i32, String, String) { assert!(false); common::build_and_run("prefix", name, src) }',
+  ]) {
+    const leaf = helper.startsWith('fn assert') ? 'assert_tiers_agree' : 'build_and_run';
+    const rows = functionsIn(`${helper} #[test] fn example() { ${leaf}("name", "fn run() {}"); }`, 'tests/sample.rs');
+    await assert.rejects(checkOriginal(classify(rows[1], [rows[0]]), reference), /unmodeled call/u);
+  }
+  const row = functionsIn('use other::build_and_run; #[test] fn example() { build_and_run("name", "fn run() {}"); }', 'tests/sample.rs')[0];
+  await assert.rejects(checkOriginal(row, reference), /unmodeled call/u);
+});
+
+test('analyzer recovery never treats byte literal punctuation as a call delimiter', () => {
+  for (const text of ['(', '::', '!']) {
+    const row = fn(`unknown(&mut data, b"${text}"); later();`);
+    assert.doesNotThrow(() => analyzeFunction(row));
+    assert.ok(analyzeFunction(row).classes.includes('unmodeled call later'));
+  }
+});
