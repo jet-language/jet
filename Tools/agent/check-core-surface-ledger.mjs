@@ -2277,7 +2277,7 @@ function coreModuleInventory() {
 // a source declaration.
 function publicDispatcherRows() {
   const source = read(CORE_CALLS_PATH);
-  const start = source.indexOf("pub const CORE_CALLS");
+  const start = source.indexOf("pub static CORE_CALLS");
   const end = source.indexOf("\n];", start);
   if (start < 0 || end < 0) {
     throw new Error("CoreCall dispatcher table is missing its bounded source");
@@ -2705,9 +2705,9 @@ function generatedCoreCalls(source, declarations) {
   lines.push(
     "];",
     "",
-    "// The complete bootstrap registry exceeds rustc's const-eval step guard.",
+    "// Evaluate the immutable bootstrap registry once, not in every consuming crate.",
     "#[allow(long_running_const_eval)]",
-    "pub const CORE_CALLS: &[CoreCallRecord] = &[",
+    "pub static CORE_CALLS: &[CoreCallRecord] = &[",
   );
   for (const row of declarations.dispatcherRows) {
     lines.push("    " + coreDispatcherExpression(row, ambientKeys) + ",");

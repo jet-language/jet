@@ -605,7 +605,7 @@ fn sema_tir_and_comptime_route_plain_calls_through_the_record() {
 #[test]
 fn plain_row_guards_reject_second_tables_and_missing_projection_hooks() {
     let table = read("crates/jet-foundation/src/Syntax/core_calls.rs");
-    assert!(table.contains("pub const CORE_CALLS"));
+    assert!(table.contains("pub static CORE_CALLS"));
     assert!(table.contains("pub struct CoreCallSignature"));
     assert!(table.contains("pub struct CoreCallCoverage"));
     assert!(table.contains("pub fn core_call_projection"));

@@ -1925,9 +1925,9 @@ pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.web.browser", "__html_path"),
 ];
 
-// The complete bootstrap registry exceeds rustc's const-eval step guard.
+// Evaluate the immutable bootstrap registry once, not in every consuming crate.
 #[allow(long_running_const_eval)]
-pub const CORE_CALLS: &[CoreCallRecord] = &[
+pub static CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.data", "__host_path_is_file", "jet_data_host_path_is_file", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.encoding", "__edition", "", false, &[]).with_interpreter_route(CoreCallInterpreterRoute::TypedIntrinsic).without_direct_aot(),
     CoreCallRecord::new("core.http.server", "__serve", "jet_http_mux_serve", false, &[true, false, false, false]).without_direct_aot(),
