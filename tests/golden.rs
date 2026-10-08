@@ -997,8 +997,9 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
         .join("expected")
         .join(format!("{}.stderr.out", stem));
     if err_path.exists() {
-        let expected_err = fs::read_to_string(&err_path)
+        let expected_err_bytes = fs::read(&err_path)
             .unwrap_or_else(|_| panic!("missing Examples/features/expected/{stem}.err.out"));
+        let expected_err = String::from_utf8_lossy(&expected_err_bytes);
         let expected_code = expected_failure_exit(stem, &expected_err).unwrap_or_else(|| {
             panic!("ambiguous failure exit oracle for example {stem}: {expected_err:?}")
         });
@@ -1017,11 +1018,11 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
             };
             assert_failure_stdout(stem, &expected_stdout, &run.stdout);
         }
-        let actual_err = String::from_utf8_lossy(&run.stderr);
         if env.update_expected {
-            fs::write(&err_path, actual_err.as_bytes()).unwrap();
+            fs::write(&err_path, &run.stderr).unwrap();
         } else {
-            if run.stderr.as_slice() != expected_err.as_bytes() {
+            if run.stderr.as_slice() != expected_err_bytes.as_slice() {
+                let actual_err = String::from_utf8_lossy(&run.stderr);
                 panic!(
                     "stderr mismatch for example {stem}:\n{}",
                     unified_diff(

@@ -82,6 +82,11 @@ runner (`tests/golden.rs`), the native backend runner
 (`Compiler/JetRuntime/Tests/run-trap-goldens.mjs`). Native parity additionally
 requires an executed reference with the same exit and both output streams;
 an emit-only reference does not establish runtime parity.
+The native reference's `.ref` file records mode and exit status only. Its
+`mir/<slug>.stdout` and `mir/<slug>.stderr` sidecars are the mandatory raw-byte
+stream proofs. The native and runtime trap runners compare those bytes to
+their actual execution and golden streams; UTF-8 decoding is only for
+diagnostic display or report classification, never output equality.
 
 The relevant golden checker is the executable definition of each mapping. Keep
 source changes and their fixtures together; do not use this README as a second
