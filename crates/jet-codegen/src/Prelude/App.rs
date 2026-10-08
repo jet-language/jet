@@ -32,7 +32,10 @@ mod jet_app_impl {
 
     impl<E: super::__jet_Encode> JetAppFailure for E {
         fn into_app_failure(self) -> String {
-            super::jet_enc_json_to_string(&self)
+            match super::jet_enc_json_to_string(&self) {
+                Ok(text) => text,
+                Err(error) => super::jet_enc_json_error_text(&error),
+            }
         }
     }
 
@@ -72,7 +75,11 @@ mod jet_app_impl {
                 super::JetWebServerFnError::InvalidInput(format!("{errors:?}"))
             })?;
             match handler(input) {
-                Ok(output) => Ok(super::jet_enc_json_to_string(&output)),
+                Ok(output) => super::jet_enc_json_to_string(&output)
+                    .map_err(|error| super::JetWebServerFnError::Handler {
+                        code: "encoding_error".to_string(),
+                        message: super::jet_enc_json_error_text(&error),
+                    }),
                 Err(error) => Err(super::JetWebServerFnError::Handler {
                     code: "application_error".to_string(),
                     message: error.into_app_failure(),
@@ -105,7 +112,11 @@ mod jet_app_impl {
         let error_type = type_name::<E>().to_string();
         let dispatch: super::JetWebServerFnHandler = Arc::new(move |_context, _body| {
             match handler() {
-                Ok(output) => Ok(super::jet_enc_json_to_string(&output)),
+                Ok(output) => super::jet_enc_json_to_string(&output)
+                    .map_err(|error| super::JetWebServerFnError::Handler {
+                        code: "encoding_error".to_string(),
+                        message: super::jet_enc_json_error_text(&error),
+                    }),
                 Err(error) => Err(super::JetWebServerFnError::Handler {
                     code: "application_error".to_string(),
                     message: error.into_app_failure(),
@@ -842,7 +853,8 @@ mod jet_app_impl {
                 data: "",
             };
             match loader.call_route(&inputs)? {
-                Ok(value) => Ok(super::jet_enc_json_to_string(&value)),
+                Ok(value) => super::jet_enc_json_to_string(&value)
+                    .map_err(|error| super::jet_enc_json_error_text(&error)),
                 Err(error) => Err(error.into_app_failure()),
             }
         })

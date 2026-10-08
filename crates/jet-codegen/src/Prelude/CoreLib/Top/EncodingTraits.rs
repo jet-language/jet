@@ -664,11 +664,20 @@ fn jet_codec_decode<T: __jet_Decode>(
 ) -> Result<T, Vec<jet_std::FieldError>> {
     T::jet_decode(tree)
 }
-fn jet_enc_json_to_string<T: __jet_Encode>(v: &T) -> String {
-    jet_std::render_datatree_json(&v.jet_encode(), false, 0)
+
+fn jet_enc_json_error_text(error: &jet_std::EncodingError) -> String {
+    JetShow::jet_show(error)
 }
-fn jet_enc_json_to_string_pretty<T: __jet_Encode>(v: &T) -> String {
-    jet_std::render_datatree_json(&v.jet_encode(), true, 0)
+
+fn jet_enc_json_to_string<T: __jet_Encode>(v: &T) -> Result<String, jet_std::EncodingError> {
+    let tree = v.jet_encode();
+    jet_std::validate_datatree_json(&tree)?;
+    Ok(jet_std::render_datatree_json(&tree, false, 0))
+}
+fn jet_enc_json_to_string_pretty<T: __jet_Encode>(v: &T) -> Result<String, jet_std::EncodingError> {
+    let tree = v.jet_encode();
+    jet_std::validate_datatree_json(&tree)?;
+    Ok(jet_std::render_datatree_json(&tree, true, 0))
 }
 
 fn jet_enc_json_to_string_shape<T: __jet_Encode>(
