@@ -44,8 +44,6 @@ const JS_EXECUTION_PRELUDE: &str = concat!(
     "\n",
     include_str!("../Prelude/Core/NumericWeb.js"),
     "\n",
-    include_str!("../Prelude/Core/Measurement.js"),
-    "\n",
     include_str!("../Prelude/Core/Shared.js"),
     "\n",
     include_str!("../Prelude/Core/Host.js"),

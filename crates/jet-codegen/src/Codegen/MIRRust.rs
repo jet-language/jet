@@ -5966,13 +5966,6 @@ impl<'a> RustEmitter<'a> {
         if name.name == jet_foundation::Syntax::TYPE_HTML && args.is_empty() {
             return "String".to_string();
         }
-        if name.name == jet_foundation::Syntax::TYPE_MEASUREMENT && args.len() == 1 {
-            return format!(
-                "{}jet_std::JetMeasurement<{}>",
-                self.config.root_prefix,
-                self.rust_type(&args[0])
-            );
-        }
         if let Some(root_name) = crate::Codegen::root_prelude_rust_type_name(native_name) {
             return self.rust_root_prelude_type(root_name, args);
         }
@@ -26009,6 +26002,9 @@ impl<'a> RustEmitter<'a> {
                 location,
                 fallibility,
             } => {
+                if matches!(self.prelude_row(*call).member.as_str(), "conversion_exact" | "conversion_rounded") {
+                    return self.unit_conversion(function, value, parameters, target, *call);
+                }
                 if matches!(
                     self.prelude_row(*call).member.as_str(),
                     "checked_widen"
@@ -26045,6 +26041,68 @@ impl<'a> RustEmitter<'a> {
                 }
             }
         }
+    }
+
+    // Paired with Jet Emit/Operations.jet::jet_rust_emit_unit_conversion.
+    // Normalize the scalar conversion before source Measurement propagation.
+    fn unit_conversion(
+        &self,
+        function: &MirFunction,
+        value: MirValueId,
+        parameters: &[MirValueId],
+        target: &MirType,
+        call: MirPreludeCallId,
+    ) -> String {
+        let rounded = self.prelude_row(call).member == "conversion_rounded";
+        assert_eq!(parameters.len(), if rounded { 6 } else { 4 });
+        let wrap = |ty: &MirType, value: &str| {
+            if self.is_distinct_type(ty) { format!("{}({value})", self.rust_type(ty)) }
+            else { value.to_string() }
+        };
+        let mut input = self.value_owned(value);
+        if self.is_distinct_type(self.value_type(function, value)) {
+            input = format!("({input}).0");
+        }
+        let mut args = Vec::with_capacity(parameters.len() + 1);
+        args.push(input);
+        args.extend(parameters[..4].iter().map(|parameter| format!("&({})", self.value_owned(*parameter))));
+        let mut digit_setup = String::new();
+        if rounded {
+            let mode = self.value_owned(parameters[4]);
+            let root = &self.config.root_prefix;
+            args.push(format!("match {root}jet_std::jet_int_owned_to_i64(&({mode})).expect(\"checked unit rounding tag\") {{ 0 => {root}UnitRoundingMode::TowardZero, 1 => {root}UnitRoundingMode::Floor, 2 => {root}UnitRoundingMode::Ceiling, 3 => {root}UnitRoundingMode::NearestEven, _ => unreachable!(\"checked unit rounding tag\") }}"));
+            if matches!(self.value_type(function, parameters[5]).kind(), MirTypeKind::Int) {
+                let digits = self.value_slot_reference(parameters[5], false);
+                digit_setup = if target.result_parts().is_some() {
+                    format!("let __jet_unit_digits = {root}jet_std::jet_int_owned_to_i64(&({digits})).map_err(|error| error.to_string())?;")
+                } else {
+                    format!("let __jet_unit_digits = {root}jet_std::jet_int_owned_to_i64(&({digits})).unwrap_or_else(|error| panic!(\"unit conversion digits are out of range: {{}}\", error));")
+                };
+                args.push("__jet_unit_digits".to_string());
+            } else {
+                args.push(self.value_owned(parameters[5]));
+            }
+        }
+        let result = self.prelude_call_args(call, &args);
+        if let Some((ok, error)) = target.result_parts() {
+            assert!(matches!(error.kind(), MirTypeKind::String));
+            let converted = wrap(ok, "value");
+            if rounded {
+                return format!("(|| -> {} {{ {digit_setup} ({result}).map(|value| {converted}).map_err(|error| error.to_string()) }})()", self.rust_type(target));
+            }
+            return format!("(|| -> {} {{ let value = ({result}).ok_or_else(|| \"unit conversion is not exactly representable\".to_string())?; Ok({converted}) }})()", self.rust_type(target));
+        }
+        if let Some(inner) = target.option_inner() {
+            let converted = wrap(inner, "value");
+            let optional = if rounded { format!("({result}).ok()") } else { result };
+            return format!("{{ {digit_setup} jet_foundation::Outcome::jet_optional_from_native({optional}).map(|value| {converted}) }}");
+        }
+        let unwrapped = if rounded {
+            format!("({result}).unwrap_or_else(|error| panic!(\"unit conversion failed: {{}}\", error))")
+        } else {
+            format!("({result}).unwrap_or_else(|| panic!(\"unit conversion is not exactly representable\"))")
+        };
+        format!("{{ {digit_setup} {} }}", wrap(target, &unwrapped))
     }
 
     fn numeric_conversion(

@@ -4181,7 +4181,6 @@ impl THandleOp {
                 Some(Effect::DB),
                 carrier,
             ),
-            MeasurementMethod { method } => measurement_route(method, carrier)?,
             AppMethod { method, args_len } => app_route(method, *args_len, carrier),
             DevServerMethod { method } => devserver_route(method, carrier),
             LayoutMethod { method } => layout_method_route(method, carrier)?,
@@ -4583,32 +4582,6 @@ fn regex_route(
     ))
 }
 
-fn measurement_route(method: &str, carrier: &TFailureCarrier) -> Result<TRoutePlan, LowerError> {
-    let (symbol, borrow_mask): (&str, &[bool]) = match method {
-        "value" => ("jet_std::JetMeasurement::value", &[true][..]),
-        "uncertainty" => ("jet_std::JetMeasurement::uncertainty", &[true][..]),
-        "add" => ("jet_std::JetMeasurement::add", &[true, false][..]),
-        "sub" => ("jet_std::JetMeasurement::sub", &[true, false][..]),
-        "mul" => ("jet_std::JetMeasurement::mul", &[true, false][..]),
-        "div" => ("jet_std::JetMeasurement::div", &[true, false][..]),
-        "sqrt" => ("jet_std::JetMeasurement::sqrt", &[true][..]),
-        _ => {
-            return Err(route_error(format!(
-                "unknown checked measurement method `{method}`"
-            )));
-        }
-    };
-    let member = format!("Measurement.{method}");
-    Ok(h(
-        &member,
-        symbol,
-        borrow_mask.len(),
-        borrow_mask.len(),
-        borrow_mask,
-        None,
-        carrier,
-    ))
-}
 
 fn reactive_method_route(
     receiver: &Type,
@@ -8537,19 +8510,7 @@ pub(super) fn precise_builtin_route(
     carrier: &TFailureCarrier,
 ) -> Result<TPreludeRoute, LowerError> {
     let _ = result;
-    // Measurement is a typed Prelude carrier, not a decimal-like numeric
-    // implementation. Keep its existing AOT/JIT method symbol and use the
-    // shared PreciseBuiltin route shape for the source constructor.
-    let symbol = if type_name == "Measurement" && func == "new" {
-        "jet_std::JetMeasurement::new".to_string()
-    } else {
-        // The shared Prelude spells every precise-numeric entry point as
-        // `jet_<type>_<func>` (`Prelude/CoreLib/Top/MathRandomTime.rs`:
-        // `jet_decimal_from_str(&String)`, `jet_decimal_add(&a, &b)`,
-        // `jet_fraction_from_parts(i64, i64)`). Constructors take their
-        // parts by value, `from_str` and every method borrow.
-        format!("jet_{}_{func}", type_name.to_ascii_lowercase())
-    };
+    let symbol = format!("jet_{}_{func}", type_name.to_ascii_lowercase());
     let by_value =
         matches!(func, "new" | "from_parts") || (func.starts_with("from_") && func != "from_str");
     let borrow_mask = vec![!by_value; arity];
@@ -9250,23 +9211,6 @@ pub(super) fn distinct_conversion_route(
     }
 }
 
-fn is_measurement_type(ty: &Type) -> bool {
-    matches!(
-        ty.without_user_tags(),
-        Type::Apply { name, args }
-            if name == "Measurement"
-                && args.len() == 1
-                && matches!(args[0].without_user_tags(), Type::Float)
-    )
-}
-
-fn is_measured_conversion_result(ty: &Type) -> bool {
-    match ty.without_user_tags() {
-        Type::Option(inner) => is_measurement_type(inner),
-        Type::Result { ok, .. } => is_measurement_type(ok),
-        _ => false,
-    }
-}
 
 pub(super) fn unit_conversion_route(
     destination: &str,
@@ -9277,10 +9221,9 @@ pub(super) fn unit_conversion_route(
     result: &Type,
     carrier: &TFailureCarrier,
 ) -> Result<TPreludeRoute, LowerError> {
-    let _ = (destination, scale, offset);
-    let measured = relative_uncertainty.is_some() && is_measured_conversion_result(result);
-    match (rounding, measured) {
-        (None, false) => prelude_route_row(
+    let _ = (destination, scale, offset, relative_uncertainty, result);
+    match rounding {
+        None => prelude_route_row(
             MirPreludeFamily::StaticPrelude,
             "core.units",
             "conversion_exact",
@@ -9293,20 +9236,7 @@ pub(super) fn unit_conversion_route(
             MirPreludeAbi::Value,
             "exact unit conversion",
         ),
-        (None, true) => prelude_route_row(
-            MirPreludeFamily::StaticPrelude,
-            "core.units",
-            "conversion_exact_measurement",
-            "jet_std::jet_unit_conversion_exact_measurement",
-            6,
-            6,
-            &[false, true, true, true, true, false],
-            None,
-            carrier,
-            MirPreludeAbi::Value,
-            "exact measured unit conversion",
-        ),
-        (Some(_), false) => prelude_route_row(
+        Some(_) => prelude_route_row(
             MirPreludeFamily::StaticPrelude,
             "core.units",
             "conversion_rounded",
@@ -9318,19 +9248,6 @@ pub(super) fn unit_conversion_route(
             carrier,
             MirPreludeAbi::Value,
             "rounded unit conversion",
-        ),
-        (Some(_), true) => prelude_route_row(
-            MirPreludeFamily::StaticPrelude,
-            "core.units",
-            "conversion_rounded_measurement",
-            "jet_std::jet_unit_conversion_rounded_measurement",
-            8,
-            8,
-            &[false, true, true, true, true, false, false, false],
-            None,
-            carrier,
-            MirPreludeAbi::Value,
-            "rounded measured unit conversion",
         ),
     }
 }

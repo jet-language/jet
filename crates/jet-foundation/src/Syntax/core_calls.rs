@@ -902,7 +902,6 @@ pub enum CoreCallPureRoute {
     EncodingXml,
     Time,
     Math,
-    Measurement,
     Date,
     DateTime,
     SketchHll,
@@ -1451,7 +1450,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 1e7a7b5111661675fd48c0a2c8be0bc04d4b7111feb1ebfebcc9cafe6b290eda
+// Source SHA-256: cbcc88c593c7833cdbd52b916c6e257e432a823bd64fe22bac1189b864fecb54
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -3259,11 +3258,6 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::receiver(&["Period"], "total_in", &[true, true]),
     CoreCallRecord::receiver(&["Measurement"], "value", &[]),
     CoreCallRecord::receiver(&["Measurement"], "uncertainty", &[]),
-    CoreCallRecord::receiver(&["Measurement"], "add", &[false]),
-    CoreCallRecord::receiver(&["Measurement"], "sub", &[false]),
-    CoreCallRecord::receiver(&["Measurement"], "mul", &[false]),
-    CoreCallRecord::receiver(&["Measurement"], "div", &[false]),
-    CoreCallRecord::receiver(&["Measurement"], "sqrt", &[]),
     CoreCallRecord::receiver(&["Solver"], "new", &[false]),
     CoreCallRecord::receiver(&["Solver"], "require", &[false]),
     CoreCallRecord::receiver(&["Solver"], "failure_count", &[]),

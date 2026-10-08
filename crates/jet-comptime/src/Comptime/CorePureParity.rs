@@ -122,18 +122,6 @@ pub(super) fn evaluate(
                     big.wrapping_u64() as i64,
                 )))
             }),
-        // D-TYPE2-UNCERT1=A: `core.math.sqrt` keeps the measured grade. The
-        // existing Prelude-backed method adapter owns the uncertainty rule;
-        // ordinary Float sqrt remains on the core-call path below.
-        (CoreCallPureRoute::Math, "sqrt") => match args {
-            [value @ CtValue::Struct { type_name, .. }]
-                if type_name == crate::Syntax::TYPE_MEASUREMENT =>
-            {
-                measurement_sqrt(value, span)
-            }
-            _ => return None,
-        },
-        (CoreCallPureRoute::Measurement, "from") => measurement(args, span),
         (CoreCallPureRoute::Date, "new") => date_new_call(args, span),
         (CoreCallPureRoute::Date, "parse") => date_parse_call(args, span),
         (CoreCallPureRoute::DateTime, "from_timestamp") => datetime_from_timestamp(args, span),
@@ -915,13 +903,6 @@ pub(super) fn evaluate_method(
             Ok(CtValue::Float(CtFloat::f64(value)))
         }),
         ("Period", "to_string", 0) => period_string(recv, span).map(CtValue::Str),
-        ("Measurement", "value" | "uncertainty", 0) => {
-            value_field(recv, "Measurement", method, span)
-        }
-        ("Measurement", "add" | "sub" | "mul" | "div", 1) => {
-            measurement_arithmetic(recv, method, &args[0], span)
-        }
-        ("Measurement", "sqrt", 0) => measurement_sqrt(recv, span),
         // D-SOLVER-LIB1=A: finite solver queries (`.require` mutates in dispatch).
         ("Solver", "failure_count", 0) => solver_failure_count(recv, span),
         ("Solver", "status", 0) => solver_status(recv, span),
@@ -1435,15 +1416,7 @@ pub(super) fn display(value: &CtValue) -> Option<String> {
         }
         CtValue::Failed(CtReport::Clean(_)) => Some("null".to_string()),
         _ => {
-            if let (Some(CtValue::Float(measured)), Some(CtValue::Float(uncertainty))) = (
-                field(value, "Measurement", "value"),
-                field(value, "Measurement", "uncertainty"),
-            ) {
-                Some(super::measurement_kernel::jet_measurement_kernel_show((
-                    measured.as_f64(),
-                    uncertainty.as_f64(),
-                )))
-            } else if matches!(value, CtValue::Struct { .. } | CtValue::Enum { .. })
+            if matches!(value, CtValue::Struct { .. } | CtValue::Enum { .. })
                 && core_display.is_none()
             {
                 // A non-Core nominal needs the evaluator's declaration metadata
@@ -3447,73 +3420,6 @@ fn local_time_parse(args: &[CtValue], span: Span) -> EvalResult {
     })
 }
 
-fn measurement(args: &[CtValue], span: Span) -> EvalResult {
-    let (value, uncertainty) = super::measurement_kernel::jet_measurement_kernel_new(
-        float_arg(args, 0, span)?,
-        float_arg(args, 1, span)?,
-    );
-    Ok(structure(
-        "Measurement",
-        vec![
-            ("value", CtValue::Float(CtFloat::f64(value))),
-            ("uncertainty", CtValue::Float(CtFloat::f64(uncertainty))),
-        ],
-    ))
-}
-
-fn measurement_arithmetic(left: &CtValue, method: &str, right: &CtValue, span: Span) -> EvalResult {
-    let left_value = match field(left, "Measurement", "value") {
-        Some(CtValue::Float(value)) => value.as_f64(),
-        _ => return Err(unsupported("malformed Measurement.value value", span)),
-    };
-    let left_uncertainty = match field(left, "Measurement", "uncertainty") {
-        Some(CtValue::Float(value)) => value.as_f64(),
-        _ => return Err(unsupported("malformed Measurement.uncertainty value", span)),
-    };
-    let right_value = match field(right, "Measurement", "value") {
-        Some(CtValue::Float(value)) => value.as_f64(),
-        _ => return Err(unsupported("malformed Measurement.value value", span)),
-    };
-    let right_uncertainty = match field(right, "Measurement", "uncertainty") {
-        Some(CtValue::Float(value)) => value.as_f64(),
-        _ => return Err(unsupported("malformed Measurement.uncertainty value", span)),
-    };
-    let left = (left_value, left_uncertainty);
-    let right = (right_value, right_uncertainty);
-    let (value, uncertainty) = match method {
-        "add" => super::measurement_kernel::jet_measurement_kernel_add(left, right),
-        "sub" => super::measurement_kernel::jet_measurement_kernel_sub(left, right),
-        "mul" => super::measurement_kernel::jet_measurement_kernel_mul(left, right),
-        "div" => super::measurement_kernel::jet_measurement_kernel_div(left, right),
-        _ => unreachable!(),
-    };
-    Ok(structure(
-        "Measurement",
-        vec![
-            ("value", CtValue::Float(CtFloat::f64(value))),
-            ("uncertainty", CtValue::Float(CtFloat::f64(uncertainty))),
-        ],
-    ))
-}
-fn measurement_sqrt(value: &CtValue, span: Span) -> EvalResult {
-    let measured = match field(value, "Measurement", "value") {
-        Some(CtValue::Float(value)) => value.as_f64(),
-        _ => return Err(unsupported("malformed Measurement.value value", span)),
-    };
-    let uncertainty = match field(value, "Measurement", "uncertainty") {
-        Some(CtValue::Float(value)) => value.as_f64(),
-        _ => return Err(unsupported("malformed Measurement.uncertainty value", span)),
-    };
-    let (value, uncertainty) =
-        super::measurement_kernel::jet_measurement_kernel_sqrt((measured, uncertainty));
-    Ok(structure(
-        "Measurement",
-        vec![
-            ("value", CtValue::Float(CtFloat::f64(value))),
-            ("uncertainty", CtValue::Float(CtFloat::f64(uncertainty))),
-        ],
-    ))
-}
 
 // ── XML canonicalization ───────────────────────────────────────────────────
 

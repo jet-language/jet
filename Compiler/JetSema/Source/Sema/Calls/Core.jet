@@ -26,6 +26,7 @@ use jet_foundation.[
     StrPart,
     SymbolID,
     SymbolKind,
+    TCallArg,
     TExpr,
     TExprKind,
     TFailureCarrier,
@@ -318,7 +319,7 @@ pub fn sema_call_core_first_is_move(args: [CallArg]) -> Bool Never! {
 fn sema_call_core_native_resource_consumer(module_name: String, member: String, first_is_move: Bool) -> Bool Never! {
     // #4747: the fixed floating constraint preserves Float/F32 inference.
     // The checked TIR call below selects the reserved source wrapper.
-    (module_name == "core.math" && (member == "cmp" || member == "is_finite")) ||
+    (module_name == "core.math" && (member == "cmp" || member == "is_finite" || member == "sqrt")) ||
     ((module_name == "core.encoding.json" || module_name == "core.encoding.jsonl") && member == "reader" && first_is_move) ||
         (module_name == "core.net.tls" && member == "client" && first_is_move)
 }
@@ -435,6 +436,18 @@ pub fn sema_call_core_tir(record: CoreCallRecord, args: [TExpr], span: Span, typ
         range :: if maximum > record.signature.arity -> "between {record.signature.arity} and {maximum}" else -> "{record.signature.arity}"
         &diagnostics.push(sema_error("E0104", span, "`{record.module_name}.{record.member}` expects {range} argument(s), got {args.len()}", "the registered Core call arity is fixed", "provide the registered number of arguments"))
         return None
+    }
+    if record.module_name == "core.math" && record.member == "sqrt" && args.len() == 1 && args[0].ty == (Type.Apply{name: "Measurement", args: [Type]{Type.Float}}) {
+        value :: sema_expression_measurement_source_call("__measurement_sqrt", args, result_type, span, environment) ?? return None
+        return sema_expr_expected(value, expected, environment, &diagnostics)
+    }
+    if record.module_name == "core.math" && record.member == "sqrt" && args.len() == 1 && args[0].ty == Type.Float {
+        identity :: sema_call_core_module_identity(environment, "core.math") ?? return None
+        if sema_call_core_source_target(environment, identity, "sqrt", type_args, span, &diagnostics) == .Val(target) {
+            argument :: TCallArg{value: args[0], template_items: [SymbolID]{}, borrow: false, mut_borrow: false, clone: false, arc_clone: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
+            value :: sema_tir_expr(result_type, TExprKind.Call{callee: target.symbol.id, type_args: [Type]{}, args: [TCallArg]{argument}}, span)
+            return sema_expr_expected(value, expected, environment, &diagnostics)
+        }
     }
     if record.module_name == "core.math" && (record.member == "cmp" || record.member == "is_finite") {
         identity :: sema_call_core_module_identity(environment, record.module_name) ?? return None

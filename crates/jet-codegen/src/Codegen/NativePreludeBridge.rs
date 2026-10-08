@@ -347,9 +347,7 @@ fn is_native_route(symbol: &str) -> bool {
             | "jet_typed_path_literal"
             | "jet_typed_datetime_literal"
             | "jet_unit_conversion_exact"
-            | "jet_std::jet_unit_conversion_exact_measurement"
             | "jet_unit_conversion_rounded"
-            | "jet_std::jet_unit_conversion_rounded_measurement"
     ) || stdio_route(symbol).is_some()
 }
 
@@ -677,7 +675,7 @@ fn dispatch_route(
             )
             .map(|value| outcome(Ok(fixed(i128::from(value)))))
             .unwrap_or_else(|_| outcome(Err("inline range value is outside its checked bounds".to_string()))),
-            "jet_unit_conversion_exact" | "jet_std::jet_unit_conversion_exact_measurement" => {
+            "jet_unit_conversion_exact" => {
                 let value = jet_foundation::jet_unit_conversion_exact(
                     float(&args, 0, span)?,
                     text(&args, 1, span)?,
@@ -686,21 +684,13 @@ fn dispatch_route(
                     text(&args, 4, span)?,
                 );
                 match value {
-                    Some(value) if symbol == "jet_unit_conversion_exact" => {
+                    Some(value) => {
                         MirRuntimeValue::Present(Box::new(decimal(value)))
                     }
-                    Some(value) => MirRuntimeValue::Present(Box::new(MirRuntimeValue::Struct {
-                        type_name: "Measurement".to_string(),
-                        fields: vec![
-                            ("value".to_string(), decimal(value)),
-                            ("uncertainty".to_string(), decimal(float(&args, 5, span)?)),
-                        ],
-                    })),
                     None => exact_option_none(result_ty.as_ref(), span)?,
                 }
             }
-            "jet_unit_conversion_rounded"
-            | "jet_std::jet_unit_conversion_rounded_measurement" => {
+            "jet_unit_conversion_rounded" => {
                 let mode = match integer(&args, 5, span)? {
                     0 => jet_foundation::UnitRoundingMode::TowardZero,
                     1 => jet_foundation::UnitRoundingMode::Floor,
@@ -718,14 +708,7 @@ fn dispatch_route(
                     integer(&args, 6, span)?,
                 );
                 match value {
-                    Ok(value) if symbol == "jet_unit_conversion_rounded" => outcome(Ok(decimal(value))),
-                    Ok(value) => outcome(Ok(MirRuntimeValue::Struct {
-                        type_name: "Measurement".to_string(),
-                        fields: vec![
-                            ("value".to_string(), decimal(value)),
-                            ("uncertainty".to_string(), decimal(float(&args, 7, span)?)),
-                        ],
-                    })),
+                    Ok(value) => outcome(Ok(decimal(value))),
                     Err(error) => outcome(Err(error.to_string())),
                 }
             }

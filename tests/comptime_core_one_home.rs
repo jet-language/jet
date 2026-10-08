@@ -233,12 +233,16 @@ fn xml_has_one_semantic_home() {
 
 #[test]
 fn measurement_has_one_semantic_home() {
-    let kernel = "Core/Measurement.rs";
+    let source = read("Core/units/units.jet");
+    assert!(source.contains("struct Measurement<T>"));
+    for function in ["new", "from_relative", "add", "sub", "mul", "div", "sqrt", "show"] {
+        assert!(source.contains(&format!("fn __measurement_{function}(")));
+    }
     for path in [
         "crates/jet-codegen/src/Codegen/mod.rs",
         "crates/jet-comptime/src/Comptime/Methods/core_calls.rs",
     ] {
-        assert!(read(path).contains(kernel), "{path} must include {kernel}");
+        assert!(!read(path).contains("Core/Measurement.rs"), "{path} retained the native kernel");
     }
 
     let pure = read("crates/jet-comptime/src/Comptime/CorePureParity.rs");

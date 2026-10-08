@@ -14507,12 +14507,6 @@ pub enum THandleOp {
         method: String,
         callback_index: Option<usize>,
     },
-    /// D-HONESTNUM1=A: `Measurement<Float>` arithmetic / accessors.
-    /// `.add(m)/.sub(m)/.mul(m)/.div(m)` → `(recv).<method>(a0)` → `JetMeasurement<f64>`.
-    /// `.value()/.uncertainty()` → `(recv).<method>()` → `f64`.
-    MeasurementMethod {
-        method: String,
-    },
     /// D-LAYOUT1 / D-LAYOUT-GATES1: an instance method on `LayoutHandle`
     /// (`.h`/`.v`/`.value`/`.suggest`/`.is_feasible`/`.conflict`) or
     /// `Constraint` (`.required`/`.strong`/`.medium`/`.weak`). Every Jet
