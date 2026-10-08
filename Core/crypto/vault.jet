@@ -58,7 +58,7 @@ pub enum VaultError {
 }
 
 pub struct WrappedVaultKey {
-    bytes: [U8]
+    encoded: [U8]
     mode: Int
     key_type: Int
     origin_name: String
@@ -71,10 +71,10 @@ pub struct WrappedVaultKey {
 
 pub fn __wrapped_from_bytes(bytes: ^[U8]) -> WrappedVaultKey KeyWrapError! {
     meta :: wrapped_metadata(bytes) ?? return Err(err)
-    Ok(WrappedVaultKey{bytes: ^bytes, mode: meta.mode, key_type: meta.key_type,
+    Ok(WrappedVaultKey{encoded: ^bytes, mode: meta.mode, key_type: meta.key_type,
         origin_name: ^meta.name, origin_generation: meta.generation, header_len: meta.header_len})
 }
-pub fn __wrapped_bytes(wrapped: WrappedVaultKey) -> [U8] Never! { wrapped.bytes.copy() }
+pub fn __wrapped_bytes(wrapped: WrappedVaultKey) -> [U8] Never! { wrapped.encoded.copy() }
 
 impl WrappedVaultKey.Display {
     fn display(self) -> String Never! {
@@ -83,7 +83,7 @@ impl WrappedVaultKey.Display {
         "WrappedVaultKey(mode:{mode},type:{key_type},origin:{self.origin_name}@v{self.origin_generation})"
     }
 }
-impl WrappedVaultKey.Debug { fn debug(self) -> String Never! { self.display() } }
+impl WrappedVaultKey.Debug { fn debug(^self) -> String Never! { self.display() } }
 
 pub struct KeyUnlock {
     kind: Int
@@ -164,7 +164,7 @@ pub fn prepare_import_x25519(name: String, bytes: ^[U8]) -[Secret]> MutationPlan
 
 pub fn prepare_import_wrapped<T>(name: String, wrapped: WrappedVaultKey, unlock: KeyUnlock) -[Secret]> WrappedImportPlan<T> KeyWrapError! {
     validate_name(name) ?? return Err(KeyWrapError{reason: "invalid vault key name"})
-    if wrapped.bytes.len() < 16 || wrapped.bytes.len() > 8192 -> return Err(KeyWrapError{reason: "invalid wrapped key length"})
+    if wrapped.encoded.len() < 16 || wrapped.encoded.len() > 8192 -> return Err(KeyWrapError{reason: "invalid wrapped key length"})
     #Unsafe("vault wrapped import provider boundary") {
         return vault.prepare_import_wrapped<T>(name, wrapped, unlock)
     }
