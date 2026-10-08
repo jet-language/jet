@@ -35,7 +35,7 @@ for (const line of ledger.slice(1)) {
         const route = jetFunction(dispatch);
         const implementation = jetFunction(body);
         if (!route.includes(`"${symbol}"`)) failures.push(`${symbol}: dispatch does not select symbol`);
-        if (!implementation.includes("lower_emit(") && !implementation.includes("lower_call_helper(")) failures.push(`${symbol}: body has no LIR implementation`);
+        if (!implementation.includes("lower_emit(") && !implementation.includes("lower_call_helper(") && !implementation.includes("lower_exact_arithmetic(")) failures.push(`${symbol}: body has no LIR implementation`);
         if (implementation.includes(`lower_call_runtime(&m, &f, "${symbol}"`)) failures.push(`${symbol}: body still calls Rust provider`);
         const [, dispatchName] = dispatch.split(":");
         if (!entry.includes("lower_list_method(p, c,") || !jetFunction("Lists.jet:lower_list_method").includes(`${dispatchName}(`)) {
