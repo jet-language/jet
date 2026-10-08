@@ -18,7 +18,7 @@ impl JetDebug for JetPath {
         self.inner.to_string_lossy().to_string()
     }
 }
-fn jet_path_from(s: &String) -> JetPath {
+fn jet_path_from(s: &str) -> JetPath {
     JetPath {
         inner: std::path::PathBuf::from(s),
     }
@@ -39,7 +39,7 @@ fn jet_typed_path_literal(literals: &[&str], holes: Vec<String>) -> JetPath {
     jet_path_from(&text)
 }
 
-fn jet_path_join(p: &JetPath, other: &String) -> JetPath {
+fn jet_path_join(p: &JetPath, other: &str) -> JetPath {
     JetPath {
         inner: std::path::PathBuf::from(jet_std_path_join(
             &p.inner.to_string_lossy().to_string(),

@@ -17,11 +17,11 @@ fn jet_walk8_table() -> &'static std::sync::Mutex<std::collections::HashMap<i64,
 fn jet_walk8_context(key: i64) -> std::sync::Arc<std::sync::Mutex<JetWalk8Context>> {
     jet_walk8_table().lock().expect("walk context table poisoned").get(&key).expect("live walk context").clone()
 }
-fn jet_walk8_open(root: &String, ignore: &String, enabled: bool) -> i64 {
+fn jet_walk8_open(root: &str, ignore: &str, enabled: bool) -> i64 {
     static NEXT: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(1);
     let key = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let path = std::path::PathBuf::from(root);
-    let context = JetWalk8Context { root: path.clone(), ignore: enabled.then(|| ignore.clone()), slots: vec![JetWalk8Slot { path, matcher: None, directory: None }] };
+    let context = JetWalk8Context { root: path.to_owned(), ignore: enabled.then(|| ignore.to_owned()), slots: vec![JetWalk8Slot { path, matcher: None, directory: None }] };
     jet_walk8_table().lock().expect("walk context table poisoned").insert(key, std::sync::Arc::new(std::sync::Mutex::new(context)));
     key
 }
@@ -81,7 +81,7 @@ fn jet_walk8_matcher_new(key: i64) {
     let mut context = context.lock().expect("walk context poisoned");
     context.slots[0].matcher = Some(JetFsIgnoreMatcher::new(&context.root));
 }
-fn jet_walk8_rules(key: i64, slot: i64, filename: &String) -> (i64, Option<i64>, Option<String>) {
+fn jet_walk8_rules(key: i64, slot: i64, filename: &str) -> (i64, Option<i64>, Option<String>) {
     let context = jet_walk8_context(key);
     let mut context = context.lock().expect("walk context poisoned");
     let entry = &mut context.slots[slot as usize];
@@ -90,7 +90,7 @@ fn jet_walk8_rules(key: i64, slot: i64, filename: &String) -> (i64, Option<i64>,
         Err(error) => jet_walk8_error(error),
     }
 }
-fn jet_walk8_ignored(key: i64, slot: i64, relative: &String, directory: bool) -> bool {
+fn jet_walk8_ignored(key: i64, slot: i64, relative: &str, directory: bool) -> bool {
     let context = jet_walk8_context(key);
     let context = context.lock().expect("walk context poisoned");
     context.slots[slot as usize].matcher.as_ref().expect("inherited ignore matcher").is_ignored(relative, directory)
@@ -149,7 +149,7 @@ fn jet_entries8_table() -> &'static std::sync::Mutex<std::collections::HashMap<i
 fn jet_entries8_context(key: i64) -> std::sync::Arc<std::sync::Mutex<JetEntries8Context>> {
     jet_entries8_table().lock().expect("entries table poisoned").get(&key).expect("live entries context").clone()
 }
-pub(crate) fn jet_entries8_open(source: &String, destination: &String, copying: bool) -> i64 {
+pub(crate) fn jet_entries8_open(source: &str, destination: &str, copying: bool) -> i64 {
     static NEXT: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(1);
     let key = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let root = JetEntries8Slot {

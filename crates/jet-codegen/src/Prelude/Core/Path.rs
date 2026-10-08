@@ -1,15 +1,15 @@
 // Lexical path value rules shared by AOT, JIT, and comptime.
 
-fn jet_std_path_lexical_source(path: &String) -> std::borrow::Cow<'_, str> {
+fn jet_std_path_lexical_source(path: &str) -> std::borrow::Cow<'_, str> {
     if path.contains('\\') {
         std::borrow::Cow::Owned(path.replace('\\', "/"))
     } else {
-        std::borrow::Cow::Borrowed(path.as_str())
+        std::borrow::Cow::Borrowed(path)
     }
 }
 
 #[allow(dead_code)]
-pub(crate) fn jet_std_path_join(base: &String, part: &String) -> String {
+pub(crate) fn jet_std_path_join(base: &str, part: &str) -> String {
     let base = jet_std_path_lexical_source(base);
     let part = jet_std_path_lexical_source(part);
     std::path::Path::new(base.as_ref())
@@ -18,28 +18,28 @@ pub(crate) fn jet_std_path_join(base: &String, part: &String) -> String {
         .to_string()
 }
 
-pub(crate) fn jet_std_path_parent_opt(path: &String) -> Option<String> {
+pub(crate) fn jet_std_path_parent_opt(path: &str) -> Option<String> {
     let source = jet_std_path_lexical_source(path);
     std::path::Path::new(source.as_ref())
         .parent()
         .map(|value| value.to_string_lossy().to_string())
 }
 
-pub(crate) fn jet_std_path_extension_opt(path: &String) -> Option<String> {
+pub(crate) fn jet_std_path_extension_opt(path: &str) -> Option<String> {
     let source = jet_std_path_lexical_source(path);
     std::path::Path::new(source.as_ref())
         .extension()
         .map(|value| value.to_string_lossy().to_string())
 }
 
-pub(crate) fn jet_std_path_stem_opt(path: &String) -> Option<String> {
+pub(crate) fn jet_std_path_stem_opt(path: &str) -> Option<String> {
     let source = jet_std_path_lexical_source(path);
     std::path::Path::new(source.as_ref())
         .file_stem()
         .map(|value| value.to_string_lossy().to_string())
 }
 
-pub(crate) fn jet_std_path_normalize(path: &String) -> String {
+pub(crate) fn jet_std_path_normalize(path: &str) -> String {
     let source = jet_std_path_lexical_source(path);
     let source = std::path::Path::new(source.as_ref());
     let rooted = source.has_root();
@@ -68,7 +68,7 @@ pub(crate) fn jet_std_path_normalize(path: &String) -> String {
 /// Compare normalized lexical path components, not filesystem identity. Both
 /// slash spellings are separators on every host so the same Path relation is
 /// preserved across AOT, JIT, interpreter, and comptime.
-pub(crate) fn jet_std_path_is_within(path: &String, base: &String) -> bool {
+pub(crate) fn jet_std_path_is_within(path: &str, base: &str) -> bool {
     fn components(
         path: &std::path::Path,
     ) -> (
@@ -170,8 +170,8 @@ fn jet_std_path_validate_walk_root(path: &std::path::Path) -> std::io::Result<()
     Ok(())
 }
 
-pub(crate) fn jet_std_path_walk(path: &String) -> Vec<String> {
-    let root = std::path::Path::new(path.as_str());
+pub(crate) fn jet_std_path_walk(path: &str) -> Vec<String> {
+    let root = std::path::Path::new(path);
     if jet_std_path_validate_walk_root(root).is_err() {
         return Vec::new();
     }
