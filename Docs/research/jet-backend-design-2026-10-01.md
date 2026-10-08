@@ -2046,3 +2046,30 @@ the canonical variant and exact-Int range stops. Expected normal output is
 until the integrator composes the fresh green E2 FINAL runtime; light parser
 and strict C11 syntax receipts alone do not establish runtime parity.
 
+### Native exact-integer radix kernels
+
+`JetRuntime/Source/IntParse.jet` reuses the exact parse/from-radix/to-radix
+provider from `3b9fd0829`, rather than a second numeric implementation. Its
+C ABI is the existing status word plus distinct owned-success/error output
+slots (`CAbiRoutes.rs:21461-21482`). Only the selected slot is initialized.
+The radix first converts fallibly to native i64, then validates 2..36,
+matching `CommonTypes.rs:4947-4951` and `4139-4149`; out-of-i64 radix is an
+owned error string, not a native conversion trap. Digits use lower-case ASCII
+and sign/zero semantics from `CommonTypes.rs:3967-3992`. Inline values avoid
+limb copying; boxed values use one private magnitude workspace, not repeated
+exact-Int owner cloning. The existing text builder receives reversed digits.
+
+`Tests/int-parse-fixture.c` covers Unicode whitespace, all bases2..36, wide
+negative limb round trips, invalid text/radix and selected-slot ownership.
+The old residue fixture runner is not resurrected: its other fixture sources
+and U32 composition are no longer part of this runtime source base. Execute
+the C client only against the integrator's fresh composed object. Native
+execution remains unexercised.
+
+The checked IntToRadix operation returns String, while its raw kernel returns
+a Result(Text,Text). Its caller must convert Err into
+`jet_arithmetic_stop("<mir>",0,error)`, as `MIRRust.rs:31241-31250` and
+`JetCodegen/Emit/Operations.jet:4935-4940` do; a nullable/Result weakening of
+the checked String contract is not permitted. This caller repair belongs to
+the native lowering owner, not the runtime kernel.
+
