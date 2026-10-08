@@ -14,10 +14,6 @@ fn jet_cli_jobs_metadata_registry(projection: JetDriverCheckedProjectionResult) 
     // updates Struct.default_ct, never Func/Job metadata. No Program is forged.
     Val(JobRegistry.from_items(projection.compile.doc_modules[entry].items))
 }
-fn jet_cli_job_metadata_optional(value: String?) -> JetCLIStatusValue Never! {
-    if value == .Val(text) -> return jet_cli_status_text(text)
-    JetCLIStatusValue.Null
-}
 fn jet_cli_job_metadata_argument(argument: JobArgumentSchema) -> JetCLIStatusValue Never! {
     zone :: if argument.zone == {
         .PositionalOnly -> "PositionalOnly"
@@ -29,7 +25,7 @@ fn jet_cli_job_metadata_argument(argument: JobArgumentSchema) -> JetCLIStatusVal
         jet_cli_status_field("label", jet_cli_status_text(argument.label)),
         jet_cli_status_field("type", jet_cli_status_text(argument.ty)),
         jet_cli_status_field("required", jet_cli_status_bool(argument.required)),
-        jet_cli_status_field("default", jet_cli_job_metadata_optional(argument.default)),
+        jet_cli_status_field("default", jet_cli_status_optional_text(argument.default)),
         jet_cli_status_field("variadic", jet_cli_status_bool(argument.variadic)),
         jet_cli_status_field("zone", jet_cli_status_text(zone)),
     })
@@ -63,14 +59,14 @@ fn jet_cli_job_metadata_status(job: JobFact) -> JetCLIStatusValue Never! {
     jet_cli_status_object([JetCLIStatusField]{
         jet_cli_status_field("name", jet_cli_status_text(job.name)),
         jet_cli_status_field("scope", jet_cli_status_text(job.scope_name())),
-        jet_cli_status_field("doc", jet_cli_job_metadata_optional(job.doc)),
+        jet_cli_status_field("doc", jet_cli_status_optional_text(job.doc)),
         jet_cli_status_field("arguments", jet_cli_status_array(arguments)),
-        jet_cli_status_field("schedule", jet_cli_job_metadata_optional(job.schedule)),
+        jet_cli_status_field("schedule", jet_cli_status_optional_text(job.schedule)),
         jet_cli_status_field("after", jet_cli_status_texts(job.after)),
         jet_cli_status_field("inputs", jet_cli_status_texts(job.inputs)),
         jet_cli_status_field("outputs", jet_cli_status_texts(job.outputs)),
         jet_cli_status_field("packages", jet_cli_status_texts(job.packages)),
-        jet_cli_status_field("cwd", jet_cli_job_metadata_optional(job.cwd)),
+        jet_cli_status_field("cwd", jet_cli_status_optional_text(job.cwd)),
         jet_cli_status_field("skip", jet_cli_job_metadata_skip(job.skip)),
         jet_cli_status_field("cache", jet_cli_status_text(jet_cli_job_metadata_cache(job.cache))),
         jet_cli_status_field("limits", jet_cli_status_object(limits)),
