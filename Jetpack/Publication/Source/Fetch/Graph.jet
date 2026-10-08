@@ -89,9 +89,14 @@ fn pkg_fetch_registry_config(resolver: PackageFetchResolver, name: String) -[Env
     }
     publication_resolve_publish_registry()
 }
+fn pkg_fetch_check_version(name: String, previous: PackageFetchVersion, version: String, chain: [String]) PackageFetchError! {
+    if previous.version != version {
+        return Err(PackageFetchError{diagnostic: pkg_lock_e1201(name, previous.version, previous.chain, version, chain)})
+    }
+}
 fn pkg_fetch_record_version(resolver: &PackageFetchResolver, name: String, version: String, chain: [String]) PackageFetchError! {
     if resolver.versions.get(name) == .Val(previous) {
-        if previous.version != version -> return Err(pkg_fetch_error("E1201", "dependency `{name}` has conflicting versions `{previous.version}` and `{version}`", "{previous.chain.join(" -> ")} conflicts with {chain.join(" -> ")}", "align the dependency versions in the owning packages"))
+        pkg_fetch_check_version(name, previous, version, chain)
     } else {
         resolver.versions[name] = PackageFetchVersion{version: version, chain: chain}
     }
@@ -103,7 +108,7 @@ fn pkg_fetch_existing_provenance(resolver: PackageFetchResolver, name: String, v
 }
 fn pkg_fetch_resolve(verification: &StoreVerification, roots: HangarRoots, context: ProviderCtx, resolver: &PackageFetchResolver, name: String, spec: DepSpec, parent: String, chain: [String]) PackageFetchError! -[FS, Env, Exec, Net, Time, Time.Wait]> {
     if resolver.nodes.get(name) == .Val(existing) {
-        pkg_fetch_record_version(&resolver, name, existing.package.version, chain)
+        if resolver.versions.get(name) == .Val(previous) -> pkg_fetch_check_version(name, previous, existing.package.version, chain)
         return
     }
     if resolver.visiting.contains(name) -> return Err(pkg_fetch_error("E1207", "dependency graph contains a cycle at `{name}`", chain.join(" -> "), "remove the recursive package dependency"))
