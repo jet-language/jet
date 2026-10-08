@@ -284,7 +284,7 @@ fn sema_pattern_payload(subject_ty: Type, variant: String, env: SemaScopeEnviron
                 }
             }
         }
-        .ForeignHandle(_) -> {
+        .ForeignHandle(_) | .CompilerBuiltinTrait(_) -> {
             &diagnostics.push(sema_error("E0305", span, "pattern `{variant}` doesn't match `{type_name(normalized)}`", "variant patterns only work on enum values", "match an enum value or use its constructor"))
             return result
         }
