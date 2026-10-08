@@ -47,6 +47,8 @@ test('startup pair fails closed on equality, incomplete compile, output drift an
   fast[0].receipt.compiler_identity = 'compiler';
   fast[0].source_sha256 = 'd'.repeat(64);
   assert.throws(() => compareStartup(base, fast), /actual project inputs/);
+  const unavailable = Array.from({ length: 3 }, () => ({ ...row(9n), receipt: receipt('unavailable') }));
+  assert.throws(() => compareStartup(unavailable, unavailable), /identity unavailable/);
 });
 
 test('startup filesystem cell reads matching immutable trial evidence and rejects process failure', () => {
