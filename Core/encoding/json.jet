@@ -148,7 +148,7 @@ fn coerce_tree(value: DataTree, path: String, emit: fn(String)) -> DataTree Neve
     lines := [String]{}
     value :: parse("{{\"port\":\"8080\",\"enabled\":\"true\",\"x\":[\"false\",\"Infinity\",\"2\"]}}") ?? panic("JSON")
     actual :: coerce_tree(value, "", (line: String) -> { &lines.push(line) })
-    assert_eq(to_string(actual), "{{\"port\":8080.0,\"enabled\":true,\"x\":[false,\"Infinity\",2.0]}}")
+    assert_eq(to_string(actual) ?? panic("encode coerced tree"), "{{\"port\":8080.0,\"enabled\":true,\"x\":[false,\"Infinity\",2.0]}}")
     assert_eq(lines.len(), 4)
     assert(lines[0].contains("field \"port\" string → number"))
     assert(lines[1].contains("field \"enabled\" string → boolean"))
@@ -162,14 +162,14 @@ pub fn loads(text: String) -> DataTree EncodingError! { parse(text) }
 /// Python-compatible file-shaped spelling for JSON parsing.
 pub fn load(text: String) -> DataTree EncodingError! { parse(text) }
 /// Compact JSON text. Object keys keep insertion order.
-pub fn to_string<T: Encode>(value: T) -> String Never! { render_json(value.encode(), false) }
+pub fn to_string<T: Encode>(value: T) -> String EncodingError! { render_json(value.encode(), false) }
 /// Python-compatible spelling for compact JSON serialization.
-pub fn dumps(value: DataTree) -> String Never! { render_json(value, false) }
+pub fn dumps(value: DataTree) -> String EncodingError! { render_json(value, false) }
 /// Python-compatible file-shaped spelling for JSON serialization.
-pub fn dump(value: DataTree) -> String Never! { render_json(value, false) }
+pub fn dump(value: DataTree) -> String EncodingError! { render_json(value, false) }
 
 /// Two-space indented JSON text.
-pub fn to_string_pretty<T: Encode>(value: T) -> String Never! { render_json(value.encode(), true) }
+pub fn to_string_pretty<T: Encode>(value: T) -> String EncodingError! { render_json(value.encode(), true) }
 
 /// RFC 8785 JSON Canonicalization Scheme bytes (D-JSONCANON1=A): compact,
 /// object keys sorted by unsigned UTF-16 code units, ECMAScript `Number`
@@ -248,7 +248,8 @@ pub fn patch_with_limits(doc: DataTree, ops: DataTree, limits: EncodingLimits) -
     if limits.max_depth < 1 || limits.max_item_bytes < 1 || limits.max_expansion_bytes < 0 {
         return Err(value_error(EncodingErrorKind.Limit, "", "EncodingLimits.max_depth and max_item_bytes must be positive and max_expansion_bytes nonnegative"))
     }
-    if render_json(ops, false).bytes().len() > limits.max_item_bytes {
+    encoded_ops :: render_json(ops, false) ?? return Err(err)
+    if encoded_ops.bytes().len() > limits.max_item_bytes {
         return Err(value_error(EncodingErrorKind.Limit, "", "JSON Patch document exceeds max_item_bytes {limits.max_item_bytes}"))
     }
     operations :: patch_operations(ops, limits)
@@ -259,7 +260,8 @@ pub fn patch_with_limits(doc: DataTree, ops: DataTree, limits: EncodingLimits) -
         target :: pointer_text(op.path, op.path.len())
         if op.kind == PATCH_COPY {
             copied :: pointer_select(working, op.from, 0) ?? return Err(value_error(err.kind, "/{index}", "operation {index} `copy` from `{pointer_text(op.from, op.from.len())}`: {err.reason}"))
-            expansion += render_json(copied, false).bytes().len()
+            encoded_copy :: render_json(copied, false) ?? return Err(err)
+            expansion += encoded_copy.bytes().len()
             if expansion > limits.max_expansion_bytes {
                 return Err(value_error(EncodingErrorKind.Limit, "/{index}", "operation {index} `copy` duplicates more than max_expansion_bytes {limits.max_expansion_bytes}"))
             }
@@ -272,7 +274,8 @@ pub fn patch_with_limits(doc: DataTree, ops: DataTree, limits: EncodingLimits) -
     }
     if limits.max_total_bytes == {
         .Val(max) -> {
-            if render_json(working, false).bytes().len() > max -> return Err(value_error(EncodingErrorKind.Limit, "", "patched document exceeds max_total_bytes {max}"))
+            encoded_working :: render_json(working, false) ?? return Err(err)
+            if encoded_working.bytes().len() > max -> return Err(value_error(EncodingErrorKind.Limit, "", "patched document exceeds max_total_bytes {max}"))
         }
         .None -> { _ := 0 }
     }
@@ -769,11 +772,13 @@ fn utf8_bytes(cp: Int) -> [U8] Never! {
     out
 }
 
-fn render_json(value: DataTree, pretty: Bool) -> String Never! {
+fn render_json(value: DataTree, pretty: Bool) -> String EncodingError! {
     out := [U8]{}
-    write_json(&out, value, pretty, 0)
-    stream.text_from_bytes(^out) ?? ""
+    write_json(&out, value, pretty, 0) ?? return Err(err)
+    text :: stream.text_from_bytes(^out) ?? return Err(value_error(EncodingErrorKind.State, "", "JSON renderer produced invalid UTF-8"))
+    Ok(text)
 }
+
 
 fn value_error(kind: EncodingErrorKind, path: String, reason: String) -> EncodingError Never! {
     {
@@ -850,15 +855,15 @@ fn write_canonical(out: &[U8], value: DataTree, path: &[String], depth: Int) -> 
 }
 
 
-fn write_json(out: &[U8], value: DataTree, pretty: Bool, indent: Int) Never! {
+fn write_json(out: &[U8], value: DataTree, pretty: Bool, indent: Int) EncodingError! {
     #Unsafe("Core JSON rendering borrows native private payloads without exposing their constructors") {
         if value == .Number(text) {
             write_ascii(&out, text)
-            return
+            return Ok(())
         }
         if value == .TypedText(text) {
             write_json_string(&out, text)
-            return
+            return Ok(())
         }
         if value == .Bytes(bytes) {
             &out.push(U8{91})
@@ -867,7 +872,7 @@ fn write_json(out: &[U8], value: DataTree, pretty: Bool, indent: Int) Never! {
                 write_ascii(&out, "{bytes[index]}")
             }
             &out.push(U8{93})
-            return
+            return Ok(())
         }
     }
     if value == {
@@ -877,20 +882,20 @@ fn write_json(out: &[U8], value: DataTree, pretty: Bool, indent: Int) Never! {
             else -> write_ascii(&out, "false")
         }
         .Int(n) -> write_ascii(&out, "{n}")
-        .Float(n) -> write_json_float(&out, n)
+        .Float(n) -> write_json_float(&out, n) ?? return Err(err)
         .Text(s) -> write_json_string(&out, s)
         .Array(items) -> {
             &out.push(U8{91})
             if items.len() == 0 {
                 &out.push(U8{93})
-                return
+                return Ok(())
             }
             loop i in 0..<items.len() {
                 if pretty {
                     &out.push(U8{10})
                     write_indent(&out, indent + 1)
                 }
-                write_json(&out, items[i], pretty, indent + 1)
+                write_json(&out, items[i], pretty, indent + 1) ?? return Err(err)
                 if i + 1 < items.len() -> &out.push(U8{44})
             }
             if pretty {
@@ -904,7 +909,7 @@ fn write_json(out: &[U8], value: DataTree, pretty: Bool, indent: Int) Never! {
             &out.push(U8{123})
             if entries.len() == 0 {
                 &out.push(U8{125})
-                return
+                return Ok(())
             }
             i := 0
             loop pair in entries {
@@ -915,7 +920,7 @@ fn write_json(out: &[U8], value: DataTree, pretty: Bool, indent: Int) Never! {
                 write_json_string(&out, pair.key)
                 &out.push(U8{58})
                 if pretty -> &out.push(U8{32})
-                write_json(&out, pair.value, pretty, indent + 1)
+                write_json(&out, pair.value, pretty, indent + 1) ?? return Err(err)
                 i += 1
                 if i < entries.len() -> &out.push(U8{44})
             }
@@ -927,9 +932,12 @@ fn write_json(out: &[U8], value: DataTree, pretty: Bool, indent: Int) Never! {
             &out.push(U8{125})
         }
     }
+    Ok(())
 }
-fn write_json_float(out: &[U8], n: Float) Never! {
-    if math.is_finite(n) -> write_ascii(&out, "{n}") else -> write_ascii(&out, "null")
+fn write_json_float(out: &[U8], n: Float) EncodingError! {
+    if !math.is_finite(n) -> return Err(value_error(EncodingErrorKind.Unsupported, "$", "JSON cannot encode a non-finite Float"))
+    write_ascii(&out, "{n}")
+    Ok(())
 }
 
 fn write_ascii(out: &[U8], text: String) Never! {
@@ -1374,17 +1382,51 @@ fn patch_step(doc: DataTree, op: PatchOp) -> DataTree EncodingError! {
 
 #Test("JSON ordered Object backing survives compact and pretty rendering") {
     tree :: parse("{{\"z\":1,\"a\":2}}") ?? panic("JSON parse")
-    assert_eq(to_string(tree), "{{\"z\":1,\"a\":2}}")
-    assert_eq(to_string_pretty(tree), "{{\n  \"z\": 1,\n  \"a\": 2\n}}")
+    assert_eq(to_string(tree) ?? panic("encode ordered tree"), "{{\"z\":1,\"a\":2}}")
+    assert_eq(to_string_pretty(tree) ?? panic("encode pretty tree"), "{{\n  \"z\": 1,\n  \"a\": 2\n}}")
 }
 
 #Test("JSON duplicate replacement retains the first member position") {
     tree :: parse_allow_duplicates("{{\"z\":1,\"a\":2,\"z\":3}}") ?? panic("JSON parse")
-    assert_eq(to_string(tree), "{{\"z\":3,\"a\":2}}")
+    assert_eq(to_string(tree) ?? panic("encode replacement tree"), "{{\"z\":3,\"a\":2}}")
 }
 
 #Test("typed JSON retains number lexemes until Decode") {
     tree :: __parse_typed("[9007199254740993,1e2]") ?? panic("typed JSON parse")
     rows :: tree.decode<[Int]>() ?? panic("typed JSON decode")
     assert_eq(rows, [Int]{9007199254740993, 100})
+}
+
+#Test("JSON text serializers reject non-finite Float on the EncodingError rail") {
+    numbers :: [Float]{math.nan(), math.infinity(), -math.infinity()}
+    loop number in numbers {
+        tree :: DataTree.Array([DataTree]{DataTree.Float(number)})
+        if to_string(tree) == {
+            .Ok(_) -> panic("non-finite compact JSON accepted")
+            .Err(error) -> {
+                assert(error.format == .JSON)
+                assert(error.kind == .Unsupported)
+                assert_eq(error.reason, "JSON cannot encode a non-finite Float")
+                assert_eq(error.path, "$")
+                assert_eq(error.byte_offset, 0)
+                assert_eq(error.line, None)
+                assert_eq(error.column, None)
+            }
+        }
+        if dumps(tree) == .Ok(_) -> panic("non-finite dumps accepted")
+        if dump(tree) == .Ok(_) -> panic("non-finite dump accepted")
+        if to_string_pretty(tree) == .Ok(_) -> panic("non-finite pretty JSON accepted")
+    }
+    assert_eq(to_string(DataTree.Int(9007199254740993)) ?? panic("exact Int JSON"), "9007199254740993")
+}
+
+#Test("JSON text encodes Char and C0 with lowercase string escapes") {
+    assert_eq(to_string('\n') ?? panic("Char encode"), "\"\\n\"")
+    assert_eq(to_string('"') ?? panic("Char encode"), "\"\\\"\"")
+    bytes := [U8]{}
+    loop index in 0..<32 -> &bytes.push(U8{index})
+    controls :: String.from_bytes(bytes) ?? panic("C0 text")
+    wire :: to_string(controls) ?? panic("C0 encode")
+    assert(wire.contains("\\u001f"))
+    assert_eq(parse(wire) ?? panic("C0 decode"), DataTree.Text(controls))
 }

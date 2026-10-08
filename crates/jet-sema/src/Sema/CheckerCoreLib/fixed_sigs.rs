@@ -3163,8 +3163,8 @@ fn core_fixed_sig_raw(
             vec![(read, Type::String)],
             Some(result_ty(json.clone(), encoding_error_ty())),
         )),
-        ("core.encoding.json", "to_string" | "to_string_pretty" | "dumps") => {
-            Some((vec![(read, json)], Some(Type::String)))
+        ("core.encoding.json", "to_string" | "to_string_pretty" | "dumps" | "dump") => {
+            Some((vec![(read, json)], Some(result_ty(Type::String, encoding_error_ty()))))
         }
         // D-JSONCANON1=A: edition 2026 keeps the infallible prototype; 2027 is
         // fallible RFC 8785 JCS with optional EncodingLimits.
@@ -3212,7 +3212,7 @@ fn core_fixed_sig_raw(
         )),
         ("core.encoding.jsonl", "to_string") => Some((
             vec![(read, Type::List(Box::new(json.clone())))],
-            Some(Type::String),
+            Some(result_ty(Type::String, encoding_error_ty())),
         )),
         ("core.encoding.jsonl", "loads") => Some((
             vec![(read, Type::String)],
@@ -3223,14 +3223,14 @@ fn core_fixed_sig_raw(
         )),
         ("core.encoding.jsonl", "dumps") => Some((
             vec![(read, Type::List(Box::new(json.clone())))],
-            Some(Type::String),
+            Some(result_ty(Type::String, encoding_error_ty())),
         )),
         ("core.encoding.jsonl", "count_rows") => {
             Some((vec![(read, Type::String)], Some(Type::Int)))
         }
         ("core.encoding.jsonl", "append_line") => Some((
             vec![(read, Type::String), (read, json.clone())],
-            Some(Type::String),
+            Some(result_ty(Type::String, encoding_error_ty())),
         )),
         ("core.encoding.jsonl", "first") => Some((
             vec![(read, Type::String)],

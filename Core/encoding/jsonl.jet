@@ -46,14 +46,17 @@ pub fn parse(text: String) -> [DataTree] EncodingError! {
 }
 
 /// Compact JSONL text. Always ends with a newline when `rows` is non-empty.
-pub fn to_string(rows: [DataTree]) -> String Never! {
+pub fn to_string(rows: [DataTree]) -> String EncodingError! {
     out := [U8]{}
+    record_index := 0
     loop row in rows {
-        text :: json.to_string(row)
+        text :: json.to_string(row) ?? return Err(record_error(err, JSONLRecord{text: "", line: record_index + 1, offset: out.len()}, record_index))
         loop index in 0..<text.count_bytes() -> &out.push(stream.byte_at(text, index))
         &out.push(U8{10})
+        record_index += 1
     }
-    stream.text_from_bytes(^out) ?? ""
+    text :: stream.text_from_bytes(^out) ?? return Err(EncodingError.new(EncodingFormat.JSONL, .State, 0, None, None, "", "JSONL renderer produced invalid UTF-8"))
+    Ok(text)
 }
 
 pub struct JSONLReader {
@@ -102,7 +105,7 @@ pub fn reader(text: String) -> JSONLReader Never! {
 
 pub fn loads(text: String) -> [DataTree] EncodingError! { parse(text) }
 
-pub fn dumps(rows: [DataTree]) -> String Never! { to_string(rows) }
+pub fn dumps(rows: [DataTree]) -> String EncodingError! { to_string(rows) }
 
 pub fn count_rows(text: String) -> Int Never! {
     n := 0
@@ -121,11 +124,18 @@ pub fn count_rows(text: String) -> Int Never! {
     n
 }
 
-pub fn append_line(text: String, value: DataTree) -> String Never! {
-    if text.count_bytes() == 0 -> return "{json.to_string(value)}\n"
-    last :: stream.byte_at(text, text.count_bytes() - 1)
-    if last == (U8{10}) -> return "{text}{json.to_string(value)}\n"
-    "{text}\n{json.to_string(value)}\n"
+pub fn append_line(text: String, value: DataTree) -> String EncodingError! {
+    offset := text.count_bytes()
+    line := 1
+    loop index in 0..<text.count_bytes() {
+        if stream.byte_at(text, index) == (U8{10}) -> line += 1
+    }
+    needs_lf :: text.count_bytes() > 0 && stream.byte_at(text, text.count_bytes() - 1) != (U8{10})
+    if needs_lf { offset += 1; line += 1 }
+    encoded :: json.to_string(value) ?? return Err(record_error(err, JSONLRecord{text: "", line: line, offset: offset}, count_rows(text)))
+    if text.count_bytes() == 0 -> return Ok("{encoded}\n")
+    if !needs_lf -> return Ok("{text}{encoded}\n")
+    Ok("{text}\n{encoded}\n")
 }
 
 pub fn first(text: String) -> DataTree? EncodingError! {
@@ -149,7 +159,7 @@ fn parse_record(record: JSONLRecord, index: Int) -> DataTree EncodingError! {
 // Re-anchor a record-local JSON error to the stream.
 fn record_error(error: EncodingError, record: JSONLRecord, index: Int) -> EncodingError Never! {
     inner := error.path
-    if inner == "/" -> inner = ""
+    if inner == "/" || inner == "$" -> inner = ""
     {
         format: EncodingFormat.JSONL,
         kind: error.kind,
@@ -177,7 +187,7 @@ fn is_blank(text: String) -> Bool Never! {
     cr :: String.from_bytes([U8]{13}) ?? panic("CR text")
     cursor := reader("\t{cr}\n{{\"z\":1,\"a\":2}}{cr}\n \n3")
     first :: &cursor.next() ?? panic("first record")
-    if first == .Val(row) -> assert_eq(json.to_string(row), "{{\"z\":1,\"a\":2}}") else -> panic("missing row")
+    if first == .Val(row) -> assert_eq(json.to_string(row) ?? panic("encode first record"), "{{\"z\":1,\"a\":2}}") else -> panic("missing row")
     second :: &cursor.next() ?? panic("second record")
     assert_eq(second, Val(DataTree.Int(3)))
     assert_eq(&cursor.next() ?? panic("EOF"), None)
@@ -209,4 +219,35 @@ fn is_blank(text: String) -> Bool Never! {
         assert_eq(error.line, Val(1))
         assert_eq(error.path, "/0")
     } else { panic("bare CR was skipped as a blank record") }
+}
+
+#Test("JSONL text errors preserve record locations without a dollar suffix") {
+    bad :: DataTree.Float(Float.NAN)
+    if to_string([DataTree]{bad}) == {
+        .Ok(_) -> panic("first non-finite row accepted")
+        .Err(error) -> {
+            assert(error.format == .JSONL)
+            assert(error.kind == .Unsupported)
+            assert_eq(error.reason, "JSON cannot encode a non-finite Float")
+            assert_eq(error.path, "/0")
+            assert_eq(error.byte_offset, 0)
+            assert_eq(error.line, Val(1))
+        }
+    }
+    if dumps([DataTree]{DataTree.Int(12), bad}) == {
+        .Ok(_) -> panic("second non-finite row accepted")
+        .Err(error) -> {
+            assert_eq(error.path, "/1")
+            assert_eq(error.byte_offset, 3)
+            assert_eq(error.line, Val(2))
+        }
+    }
+    if append_line("\n12", bad) == {
+        .Ok(_) -> panic("non-finite appended row accepted")
+        .Err(error) -> {
+            assert_eq(error.path, "/1")
+            assert_eq(error.byte_offset, 4)
+            assert_eq(error.line, Val(3))
+        }
+    }
 }

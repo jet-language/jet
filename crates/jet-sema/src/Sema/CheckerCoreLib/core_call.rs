@@ -4066,7 +4066,11 @@ impl<'a> Checker<'a> {
                         self.check_encodable(&t, a.expr.span());
                     }
                 }
-                return Some(Type::String);
+                return Some(if module == "core.encoding.json" {
+                    result_ty(Type::String, encoding_error_ty())
+                } else {
+                    Type::String
+                });
             }
             // D-SHAPE-PROJECT1=A: `args.decode<T>()` decodes a `#CLI` struct from
             // the process arguments anywhere, through the same builder rows the
