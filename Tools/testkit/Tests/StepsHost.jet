@@ -141,3 +141,54 @@ use core.sys as sys
     }
     files.remove_all(root) ?? panic("remove canonical scratch")
 }
+
+#Test("jet-semver tokens expand in argv environment and unquoted normalizer sources from real cases") {
+    root :: cases_test_root("host-semver-token")
+    context := cases_test_context(root, files.join(root, "scratch"))
+    context.env.version = kit_steps_version("Jet 1.2.3-rc.4\n") ?? panic("version banner")
+    source :: "step: printf '%s' {{jet-semver}}\nstdout: = \"1.2.3-rc.4\"\nstep: jet -c 'printf %s \"$VERSION\"'\nenv: VERSION={{jet-semver}}\nstdout: = \"1.2.3-rc.4\"\nstep: printf '%s' {{jet-semver}}\nnormalize: replace {{jet-semver}} \"VERSION\"\nstdout: = \"VERSION\"\n"
+    cases_test_source(root, "version", source)
+    assert_eq(kit_cases_run(cases_test_entry("version"), context)[0].verdict.status, "PASS")
+    cases_test_source(root, "wrong", "{source}stdout: = \"wrong\"\n")
+    assert_eq(kit_cases_run(cases_test_entry("wrong"), context)[0].verdict.status, "FAIL")
+    files.remove_all(root) ?? panic("remove semver scratch")
+}
+
+#Test("env-set observes an empty host variable while env requires a nonempty value") {
+    root :: cases_test_root("host-env-set")
+    name :: "JET_TESTKIT_ENV_SET_{sys.getpid()}"
+    previous :: sys.get(name)
+    sys.set(name, "")
+    source :: "when env-set {name}: write: present = \"yes\"\nwhen env {name}: step: false\nfile: present = \"yes\"\n"
+    result :: cases_test_advanced(root, "empty", source)
+    if previous == {
+        .Val(value) -> sys.set(name, value)
+        .None -> { removed :: sys.unset(name) ?? panic("unset test environment") }
+    }
+    assert_eq(result.verdict.status, "PASS")
+    absent :: "JET_TESTKIT_ENV_SET_ABSENT_{sys.getpid()}"
+    sys.unset(absent) ?? panic("unset absent test environment")
+    negative :: "when !env-set {absent}: write: absent = \"yes\"\nwhen env-set {absent}: step: false\nfile: absent = \"yes\"\n"
+    assert_eq(cases_test_advanced(root, "absent", negative).verdict.status, "PASS")
+    assert_eq(cases_test_advanced(root, "wrong", "{negative}file: absent = \"wrong\"\n").verdict.status, "FAIL")
+    files.remove_all(root) ?? panic("remove env-set scratch")
+}
+
+#Test("jet-dir token expands the executable parent in argv and write paths") {
+    root :: cases_test_root("host-jet-dir")
+    context :: cases_test_context(root, files.join(root, "scratch"))
+    expected :: files.dirname(context.env.jet)
+    source :: "step: printf '%s' {{jet-dir}}\nstdout: = \"{expected}\"\nwrite: parent = \"{{jet-dir}}\"\nfile: parent = \"{expected}\"\n"
+    assert_eq(cases_test_advanced(root, "parent", source).verdict.status, "PASS")
+    assert_eq(cases_test_advanced(root, "wrong", "{source}file: parent = \"wrong\"\n").verdict.status, "FAIL")
+    files.remove_all(root) ?? panic("remove jet-dir scratch")
+}
+
+#Test("path-sep token joins environment paths using the host separator from real case text") {
+    root :: cases_test_root("host-path-sep")
+    separator :: if sys.family() == "windows" -> ";" else -> ":"
+    source :: "env: PARTS=left{{path-sep}}right\nstep: printf '%s' {{env:PARTS}}\nstdout: = \"left{separator}right\"\nwrite: separator = \"{{path-sep}}\"\nfile: separator = \"{separator}\"\n"
+    assert_eq(cases_test_advanced(root, "join", source).verdict.status, "PASS")
+    assert_eq(cases_test_advanced(root, "wrong", "{source}file: separator = \"wrong\"\n").verdict.status, "FAIL")
+    files.remove_all(root) ?? panic("remove path-sep scratch")
+}

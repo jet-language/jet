@@ -120,34 +120,49 @@ fn kit_steps_signal(pid: Int, name: String) -> Bool Err! {
 }
 
 fn kit_steps_parallel(steps: [KitStep], context: KitStepCtx, state: KitStepState) -> KitStepResult {
-    workers := [Task<String Never!>]{}
+    // #4790: keep task handles in joined call frames, not a typed Task list.
+    (sender, reports) :: channel<String>()
     errors := [String]{}
     task.group sends {
-        loop original in steps {
-            if original.action != "send" {
-                &errors.push("parallel contains a non-send action")
-                next
-            }
-            step :: kit_steps_resolve_step(original, context, state) ?? {
-                &errors.push("parallel send token unavailable")
-                next
-            }
-            &workers.push(task kit_steps_send_result(step, context, state))
-        }
-        loop worker in workers {
-            joined :: ^worker.join() ?? {
-                &errors.push("parallel task join failed")
-                next
-            }
-            message :: joined ?? panic("infallible parallel send")
-            if message != "" -> &errors.push(message)
-        }
+        kit_steps_parallel_start(sends, steps, 0, context, state, sender)
+    }
+    sender.close()
+    loop message in reports {
+        if message != "" -> &errors.push(message)
     }
     KitStepResult{state: state, verdict: if errors.len() == 0 -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("ERROR", errors.join("; "))}
 }
 
-// #4790: infallibility keeps task lowering at Task<String>, not Task<Result<...>>.
+// Keep the report infallible; transport failures remain ordinary ERROR details.
 fn kit_steps_send_result(step: KitStep, context: KitStepCtx, state: KitStepState) -> String Never! {
     result :: kit_steps_session_action(step, context, state)
     if result.verdict.status == "PASS" -> "" else -> result.verdict.detail
+}
+
+fn kit_steps_send_report(step: KitStep, context: KitStepCtx, state: KitStepState, sender: Sender<String>) Never! {
+    sender.send(kit_steps_send_result(step, context, state))
+}
+
+fn kit_steps_parallel_start(group: Group, steps: [KitStep], index: Int, context: KitStepCtx, state: KitStepState, sender: Sender<String>) Never! {
+    if index >= steps.len() -> return
+    original :: steps[index]
+    if original.action != "send" {
+        sender.send("parallel contains a non-send action")
+        kit_steps_parallel_start(group, steps, index + 1, context, state, sender)
+        return
+    }
+    step :: kit_steps_resolve_step(original, context, state) ?? {
+        sender.send("parallel send token unavailable")
+        kit_steps_parallel_start(group, steps, index + 1, context, state, sender)
+        return
+    }
+    reporter :: ~sender
+    worker :: task kit_steps_send_report(step, context, state, reporter)
+    // Start all remaining sends before joining this one, preserving concurrency.
+    kit_steps_parallel_start(group, steps, index + 1, context, state, sender)
+    joined :: ^worker.join() ?? {
+        sender.send("parallel task join failed")
+        return
+    }
+    joined ?? panic("infallible parallel report")
 }

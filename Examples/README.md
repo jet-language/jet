@@ -154,6 +154,15 @@ records an expected stop rather than an unexpected signal error. Framed
 validated before reporting `REFUSED read_bytes` when the raw-read seam is
 unavailable; buffered final output is never presented as a live frame.
 
+`parallel` … `end parallel` starts the contained session sends concurrently;
+the task group joins every send before the next case step. Send transport
+errors remain `ERROR` verdicts rather than successful sends.
+
+`{jet-semver}` expands the version banner's semantic-version field;
+`{jet-dir}` is the executable's parent directory, and `{path-sep}` is `:` on
+Unix hosts or `;` on Windows. `when env-set NAME:` checks presence even for
+an empty host value, unlike `when env NAME:`, which requires a nonempty value.
+
 Bounded `await: file|dir|entry` polls filesystem readiness. `poll NAME:`
 reruns its command until all `until` conditions match on the same attempt,
 or fails at its deadline. Conditions are not accumulated across attempts.
