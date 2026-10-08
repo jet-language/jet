@@ -60,6 +60,9 @@ directory inherits the existing ignore matcher. The private context preserves
 native path identities (including non-Unicode names) until its scope guard
 releases it. Failed directory batches are discarded while already queued work
 continues; the earliest error is selected by native directory-path ordering.
+Terminal reads and prompt/style/progress policy likewise use source-owned
+declarations. Their registered private facts call the single existing terminal
+and stdin kernels; the Rust seed entry points retain their fault preflight.
 
 Types and error enums use PascalCase (`String`, `IOError`, `JSON`); functions
 and module segments use snake_case (`read`, `core.files`) (S54). Acronyms keep
