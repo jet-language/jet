@@ -1476,11 +1476,10 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 89a1a2c8e3c4d8b9bbef3a3b3e86926279e374c2945cc5abe0315fd380fc1292
+// Source SHA-256: 30f9acc583205f64befcce307ee37500f5e852b421b1115ceaf7ee89dd9ebef4
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
-    ("core.encoding.json", "decode"),
     ("core.files", "read_at"),
     ("core.files", "read_bytes"),
     ("core.files", "map"),
@@ -1793,6 +1792,8 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.encoding", "__tree_tag", "jet_raw_tree_tag", true, &[true]),
     CoreCallRecord::new("core.encoding", "__object_entries_view", "jet_raw_object_entries_view", true, &[true]),
     CoreCallRecord::new("core.encoding", "__bytes_view", "jet_raw_bytes_view", true, &[true]),
+    CoreCallRecord::new("core.encoding", "__coerce_now", "jet_raw_json_coerce_now", true, &[]).with_native_int_result(),
+    CoreCallRecord::new("core.encoding", "__coerce_emit", "jet_raw_json_coerce_emit", true, &[true]),
     CoreCallRecord::new( "core.tasks", "interval", "jet_std::interval", true, &[false], ),
     CoreCallRecord::new("core.tasks", "after", "jet_std::after_value", true, &[false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.tasks", "yield_now", "jet_std::jet_task_yield", true, &[], ),
@@ -2183,7 +2184,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.time", "clock", "jet_std_clock_new", true, &[false]),
     CoreCallRecord::new( "core.encoding.json", "parse", "jet_std_json_parse", true, &[true], ),
     CoreCallRecord::new( "core.encoding.json", "loads", "jet_std_json_parse", true, &[true], ),
-    CoreCallRecord::new( "core.encoding.json", "decode", "jet_std_json_decode_lenient", true, &[true], ) .without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::source_owned("core.encoding.json", "decode", &[true]),
     CoreCallRecord::source_owned("core.encoding.json", "to_string", &[true]),
     CoreCallRecord::new( "core.encoding.json", "dumps", "jet_std_json_render", true, &[true], ),
     CoreCallRecord::source_owned("core.encoding.json", "to_string_pretty", &[true]),

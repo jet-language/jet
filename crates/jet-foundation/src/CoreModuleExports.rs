@@ -25,7 +25,7 @@ pub enum CoreLeafKind {
 
 // BEGIN GENERATED CORE DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 89a1a2c8e3c4d8b9bbef3a3b3e86926279e374c2945cc5abe0315fd380fc1292
+// Source SHA-256: 30f9acc583205f64befcce307ee37500f5e852b421b1115ceaf7ee89dd9ebef4
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreModuleDeclaration {
     pub module: &'static str,
@@ -792,9 +792,10 @@ pub const CORE_SOURCE_MODULES: &[CoreSourceModule] = &[
     CoreSourceModule { module: "core.encoding.csv", alias: "core_core_encoding_csv", path: "Core/encoding/csv.jet", owned_members: &["dict_get", "dict_get_or", "dict_rows", "fieldnames", "parse", "reader", "rows", "to_string", "write_dict", "writer"] },
     CoreSourceModule { module: "core.encoding.hex", alias: "core_core_encoding_hex", path: "Core/encoding/hex.jet", owned_members: &["a2b_base64", "a2b_hex", "a2b_qp", "a2b_uu", "b2a_base64", "b2a_hex", "b2a_qp", "b2a_uu", "crc32", "crc_hqx", "decode", "dump", "encode", "encode_prefixed", "encode_sep", "encode_upper", "hexlify", "is_hex", "unhexlify"] },
     CoreSourceModule { module: "core.encoding.ini", alias: "core_core_encoding_ini", path: "Core/encoding/ini.jet", owned_members: &["defaults", "empty", "get", "get_bool", "get_float", "get_int", "get_or", "has_option", "has_section", "items", "options", "parse", "remove_option", "remove_section", "sections", "set", "to_string"] },
-    CoreSourceModule { module: "core.encoding.json", alias: "core_core_encoding_json", path: "Core/encoding/json.jet", owned_members: &["canonical", "dump", "dumps", "events", "load", "loads", "parse", "parse_allow_duplicates", "patch", "patch_with_limits", "pointer", "reader", "reader_allow_duplicates", "to_string", "to_string_pretty"] },
+    CoreSourceModule { module: "core.encoding.json", alias: "core_core_encoding_json", path: "Core/encoding/json.jet", owned_members: &["canonical", "decode", "dump", "dumps", "events", "load", "loads", "parse", "parse_allow_duplicates", "patch", "patch_with_limits", "pointer", "reader", "reader_allow_duplicates", "to_string", "to_string_pretty"] },
     CoreSourceModule { module: "core.encoding.jsonl", alias: "core_core_encoding_jsonl", path: "Core/encoding/jsonl.jet", owned_members: &["append_line", "count_rows", "dumps", "first", "loads", "parse", "reader", "to_string"] },
     CoreSourceModule { module: "core.encoding.toml", alias: "core_core_encoding_toml", path: "Core/encoding/toml.jet", owned_members: &["load", "loads", "parse", "to_string"] },
+    CoreSourceModule { module: "core.encoding.xml", alias: "core_core_encoding_xml", path: "Core/encoding/xml.jet", owned_members: &[] },
     CoreSourceModule { module: "core.event", alias: "core_core_event", path: "Core/event/event.jet", owned_members: &["async_result", "decision_hook", "hook", "new", "policy_sync", "scope", "with_policy"] },
     CoreSourceModule { module: "core.files", alias: "core_core_files", path: "Core/files/files.jet", owned_members: &["basename", "is_absolute", "is_file", "scope", "stem", "suffix", "with_name", "with_suffix", "is_abs", "split_slash", "collapse", "join", "dirname", "glob_match", "relative", "is_symlink", "cwd", "home", "expanduser", "touch", "relocate", "replace", "relativeto", "chmod", "copy2", "copyfile", "mkdir", "rmdir", "unlink", "joinpath", "getcwd", "chdir", "scandir", "gettempdir", "getenv", "read_lines", "write_lines", "commonpath", "fnmatch", "which", "splitext", "split", "normpath", "getsize", "getmtime", "lexists", "samefile", "commonprefix", "expandvars", "move", "rmtree", "makedirs", "listdir", "glob_recursive", "fnmatch_filter", "is_mount", "ensure_parent", "readdir", "walkdir", "truncate", "createdirectory", "filesize", "delete", "cp", "rm", "realpath", "pwd", "tmpdir", "topath", "cd", "open", "create", "append", "stat", "lstat", "rename", "open_directory", "extended_attribute_names", "extended_attribute", "set_extended_attribute", "__link_held", "exists", "is_dir", "absolute", "mktemp", "__with_process_directory"] },
     CoreSourceModule { module: "core.encoding.yaml", alias: "core_core_encoding_yaml", path: "Core/encoding/yaml.jet", owned_members: &["parse", "to_string"] },
@@ -888,10 +889,23 @@ pub const CORE_SOURCE_OWNED_TYPES: &[CoreSourceOwnedType] = &[
     CoreSourceOwnedType { path: "Core/encoding/encoding.jet", name: "EncodingCause" },
     CoreSourceOwnedType { path: "Core/encoding/encoding.jet", name: "EncodingError" },
     CoreSourceOwnedType { path: "Core/encoding/encoding.jet", name: "EncodingLimits" },
+    CoreSourceOwnedType { path: "Core/encoding/cbor.jet", name: "CBOROptions" },
+    CoreSourceOwnedType { path: "Core/encoding/cbor.jet", name: "CBORErrorKind" },
+    CoreSourceOwnedType { path: "Core/encoding/cbor.jet", name: "CBORError" },
     CoreSourceOwnedType { path: "Core/encoding/csv.jet", name: "CSVReader" },
     CoreSourceOwnedType { path: "Core/encoding/csv.jet", name: "CSVWriter" },
     CoreSourceOwnedType { path: "Core/encoding/json.jet", name: "JSONReader" },
     CoreSourceOwnedType { path: "Core/encoding/jsonl.jet", name: "JSONLReader" },
+    CoreSourceOwnedType { path: "Core/encoding/xml.jet", name: "XMLError" },
+    CoreSourceOwnedType { path: "Core/encoding/xml.jet", name: "XMLReason" },
+    CoreSourceOwnedType { path: "Core/encoding/xml.jet", name: "XMLLimits" },
+    CoreSourceOwnedType { path: "Core/encoding/xml.jet", name: "XMLEntityPolicy" },
+    CoreSourceOwnedType { path: "Core/encoding/xml.jet", name: "XMLParseOptions" },
+    CoreSourceOwnedType { path: "Core/encoding/xml.jet", name: "XMLEncoding" },
+    CoreSourceOwnedType { path: "Core/encoding/xml.jet", name: "XMLLexicalPolicy" },
+    CoreSourceOwnedType { path: "Core/encoding/xml.jet", name: "XMLRenderOptions" },
+    CoreSourceOwnedType { path: "Core/encoding/xml.jet", name: "XMLCanonicalMode" },
+    CoreSourceOwnedType { path: "Core/encoding/xml.jet", name: "XMLCanonical" },
     CoreSourceOwnedType { path: "Core/game/raylib.jet", name: "RaylibSound" },
     CoreSourceOwnedType { path: "Core/http/http.jet", name: "Body" },
     CoreSourceOwnedType { path: "Core/http/http.jet", name: "Headers" },

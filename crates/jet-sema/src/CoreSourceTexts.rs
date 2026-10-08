@@ -43,6 +43,7 @@ const CORE_SOURCE_TEXTS: &[(&str, &str)] = &[
     ("core.encoding.json", include_str!("../../../Core/encoding/json.jet")),
     ("core.encoding.jsonl", include_str!("../../../Core/encoding/jsonl.jet")),
     ("core.encoding.toml", include_str!("../../../Core/encoding/toml.jet")),
+    ("core.encoding.xml", include_str!("../../../Core/encoding/xml.jet")),
     ("core.event", include_str!("../../../Core/event/event.jet")),
     ("core.files", include_str!("../../../Core/files/files.jet")),
     ("core.encoding.yaml", include_str!("../../../Core/encoding/yaml.jet")),

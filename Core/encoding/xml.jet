@@ -1,0 +1,124 @@
+// Shared XML value contracts. Fields/defaults match the shipped seed ABI.
+// Reuses JsonStreams6's XML source declarations; DataTree stays native.
+#[Error, Equatable]
+struct XMLError {
+    kind: XMLReason
+    byte_offset: Int?
+    line: Int?
+    column: Int?
+    path: String
+    reason: String
+    impl Display {
+        fn display(self) -> String Never! { self.display_text() }
+    }
+    impl Debug {
+        fn debug(self) -> String Never! { self.display_text() }
+    }
+}
+impl XMLError {
+    fn display_text(self) -> String Never! {
+        kind :: if self.kind == {
+            .InvalidEncoding -> "InvalidEncoding"
+            .Malformed -> "Malformed"
+            .MismatchedTag -> "MismatchedTag"
+            .InvalidName -> "InvalidName"
+            .Namespace -> "Namespace"
+            .DuplicateAttribute -> "DuplicateAttribute"
+            .Entity -> "Entity"
+            .EntityCycle -> "EntityCycle"
+            .Limit -> "Limit"
+            .Canonicalization -> "Canonicalization"
+            .Shape -> "Shape"
+            .Unsupported -> "Unsupported"
+        }
+        out := "XML {kind} at byte {self.byte_offset ?? 0}"
+        if self.line == .Val(line) -> out = "{out}, line {line}"
+        if self.column == .Val(column) -> out = "{out}, column {column}"
+        if self.path != "" -> out = "{out}, path {self.path}"
+        "{out}: {self.reason}"
+    }
+}
+#Equatable
+enum XMLReason {
+    InvalidEncoding
+    Malformed
+    MismatchedTag
+    InvalidName
+    Namespace
+    DuplicateAttribute
+    Entity
+    EntityCycle
+    Limit
+    Canonicalization
+    Shape
+    Unsupported
+}
+#Equatable
+struct XMLLimits {
+    max_depth: Int
+    max_nodes: Int
+    max_attributes_per_element: Int
+    max_name_bytes: Int
+    max_text_bytes: Int
+    max_entity_declarations: Int
+    max_entity_depth: Int
+    max_entity_replacement_bytes: Int
+    fn safe() -> XMLLimits Never! {
+        XMLLimits{max_depth: 256, max_nodes: 1000000, max_attributes_per_element: 1024,
+            max_name_bytes: 4096, max_text_bytes: 16777216, max_entity_declarations: 1024,
+            max_entity_depth: 32, max_entity_replacement_bytes: 8388608}
+    }
+}
+#Equatable
+enum XMLEntityPolicy {
+    Preserve
+    Reject
+    Resolve([String:String])
+}
+#Equatable
+struct XMLParseOptions {
+    entities: XMLEntityPolicy
+    limits: XMLLimits
+    fn safe() -> XMLParseOptions Never! {
+        XMLParseOptions{entities: .Preserve, limits: XMLLimits.safe()}
+    }
+}
+#Equatable
+enum XMLEncoding {
+    UTF8
+    UTF8BOM
+    UTF16LE
+    UTF16BE
+}
+#Equatable
+enum XMLLexicalPolicy {
+    PreserveValid
+    Deterministic
+}
+#Equatable
+struct XMLRenderOptions {
+    encoding: XMLEncoding
+    lexical: XMLLexicalPolicy
+    fn safe() -> XMLRenderOptions Never! {
+        XMLRenderOptions{encoding: .UTF8, lexical: .PreserveValid}
+    }
+}
+#Equatable
+enum XMLCanonicalMode {
+    Inclusive11
+    Exclusive10
+}
+#Equatable
+struct XMLCanonical {
+    mode: XMLCanonicalMode
+    comments: Bool
+    inclusive_prefixes: [String]
+}
+#Test("XML source carriers retain shipped safe defaults and rendering") {
+    assert_eq(XMLLimits.safe().max_name_bytes, 4096)
+    assert_eq(XMLLimits.safe().max_entity_declarations, 1024)
+    assert_eq(XMLParseOptions.safe().entities, XMLEntityPolicy.Preserve)
+    assert_eq(XMLRenderOptions.safe().encoding, XMLEncoding.UTF8)
+    error :: XMLError{kind: .Malformed, byte_offset: None, line: Val(2), column: None, path: "", reason: "bad"}
+    assert_eq("{error}", "XML Malformed at byte 0, line 2: bad")
+}
