@@ -25,15 +25,18 @@ fn lower_trait_impl(p: MIRProgram, ty: MIRType, bound: MIRTraitRef) -> MIRImplDe
     None
 }
 
-fn lower_close_receiver(ty: MIRType) -> MIRType Never! {
-    if ty.kind == .Tagged(_, inner) -> return lower_close_receiver(inner)
+fn lower_close_receiver(p: MIRProgram, ty: MIRType) -> MIRType Never! {
+    if ty.kind == .Tagged(_, inner) -> return lower_close_receiver(p, inner)
+    if lower_type_def(p, ty) == .Val(definition) {
+        if definition.kind == .Alias(target) -> return lower_close_receiver(p, target)
+    }
     ty
 }
 
 // Use the checked Close impl, not an inherent method with the same spelling.
 // Generic receiver matching is the same nominal-template rule used by render.
 fn lower_close_impl(p: MIRProgram, ty: MIRType) -> MIRImplDef? {
-    receiver :: lower_close_receiver(ty)
+    receiver :: lower_close_receiver(p, ty)
     bound :: MIRTraitRef{id: mir_trait_id("Close"), name: "Close"}
     direct :: lower_trait_impl(p, receiver, bound)
     selected := MIRImplDef?{None}
@@ -72,7 +75,7 @@ fn lower_close_call(p: MIRProgram, m: &LowerModule, f: &LowerFunction, implement
         lower_fail(&m, &f, "checked Close implementation has no close method")
         return
     }
-    receiver :: lower_close_receiver(ty)
+    receiver :: lower_close_receiver(p, ty)
     instance :: lower_instance_id(method.id, lower_call_bindings(Val(receiver), [MIRType]{}))
     row :: lower_function_index(m, instance)
     if row < 0 {
