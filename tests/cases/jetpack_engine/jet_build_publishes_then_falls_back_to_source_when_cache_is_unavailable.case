@@ -37,12 +37,12 @@ stderr: ~ "1 substituted" # original contains predicate
 step: jetpack explain hello@mine --json --no-color
 cwd: project
 exit: 0
-capture: out stdout doc $.explain.entry.output_path
-file: {cap:out}/bin/hello = jet_build_publishes_then_falls_back_to_source_when_cache_is_unavailable.expected
-when os unix: chmod: {cap:out} 755
-when os unix: chmod: {cap:out}/bin 755
-when os unix: chmod: {cap:out}/bin/hello 755
-write: {cap:out}/bin/hello tampered-again.template
+capture: repaired_out stdout doc $.explain.entry.output_path
+file: {cap:repaired_out}/bin/hello = jet_build_publishes_then_falls_back_to_source_when_cache_is_unavailable.expected
+when os unix: chmod: {cap:repaired_out} 755
+when os unix: chmod: {cap:repaired_out}/bin 755
+when os unix: chmod: {cap:repaired_out}/bin/hello 755
+write: {cap:repaired_out}/bin/hello tampered-again.template
 remove: mirror
 write: mirror unavailable.template
 step: jetpack build --no-color
