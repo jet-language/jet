@@ -392,7 +392,7 @@ fn run() {
     counts := [String:Int]{}
     counts[key] = 7
     counts[key] = 9
-    print(counts["key"] ?? 0)
+    print(counts["key"])
     print(key.is_empty())
     print(key.starts_with("k"))
     print(key.ends_with("y"))
