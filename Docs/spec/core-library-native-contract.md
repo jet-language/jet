@@ -506,3 +506,7 @@ dropping a null handle has no effect.
 HTTP Redirect Policy's sole Follow variant stores a raw signed maximum and
 a Bool word. Clone preserves the maximum without revalidating policy and
 normalizes only the low Bool byte. The new owner has no shared allocation.
+
+HTTP Compress Encoding owns a single ordinal word for Gzip. Clone and
+equality operate on that word; these helpers do not compress data or perform
+host I/O.
