@@ -85,8 +85,10 @@ entry in `pair.json` as `entry`; each actual launch records that same `entry`,
 The launcher also records the actual compiler `process_pid`, independently
 captured `process_started_unix_ms` and `process_finished_unix_ms`, and the
 SHA-256 of the final trace bytes as `trace_sha256`. Do not synthesize these
-process facts from the trace. The comparator binds `trace.start` and every
-event's process ID to that successful completed run.
+process facts from the trace. The canonical reader binds `trace.start`, every
+event's process ID and every timed event to the successful recorded process
+window. Unix anchors have millisecond precision; relative timestamps are
+microseconds. Producer metadata without timestamps remains valid.
 The comparator checks the source facts against the snapshot bytes, not a
 free-standing manifest hash. Do not include stores or outputs in the snapshot.
 The shared `pair.json` records schema `jet.native-host-shape-pair.v1`,
@@ -104,8 +106,10 @@ win: process wall time, compile trace duration and the interval from compile
 start to the selected source entry's parse span. Trace labels use the canonical
 loader's relative source path, not a literal `main` or `main.jet`. The canonical
 trace reader accepts the producer's open-array, object/comma-per-line format;
-completed evidence rejects malformed/truncated events, missing or ambiguous
-entry spans, unbalanced scopes and mismatched threads. The pre-parse interval
+completed evidence rejects malformed/truncated events, invalid schemas,
+out-of-window times, unbalanced scopes and mismatched threads. The startup
+comparator selects the pinned entry and rejects missing or ambiguous spans.
+The pre-parse interval
 includes startup/load work, not an off-CPU or lock-contention measurement.
 Losses, missing evidence or identity/output drift keep the cell open.
 This startup cell does not replace cold frontend acceptance on the same pinned

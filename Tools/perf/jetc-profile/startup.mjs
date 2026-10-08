@@ -35,34 +35,21 @@ export function startupInputHash(root) {
 }
 
 export function startupTiming(events, timeText, selectedEntry) {
-  const stacks = new Map();
-  const spans = [];
-  const lastTime = new Map();
-  for (const event of events) {
-    if (event.ph !== 'B' && event.ph !== 'E') continue;
-    if (!Number.isSafeInteger(event.pid) || !Number.isSafeInteger(event.tid) ||
-        !Number.isSafeInteger(event.ts) || typeof event.name !== 'string' ||
-        typeof event.cat !== 'string') throw new Error('invalid trace span identity');
-    const thread = `${event.pid}:${event.tid}`;
-    if (event.ts < (lastTime.get(thread) ?? 0)) throw new Error('invalid trace span time order');
-    lastTime.set(thread, event.ts);
-    const stack = stacks.get(thread) ?? [];
-    stacks.set(thread, stack);
-    if (event.ph === 'B') {
-      stack.push({ event, compile: stack.find(frame => frame.event.cat === 'compile' && frame.event.name === 'compile')?.event });
-    } else {
-      const frame = stack.pop();
-      if (!frame || frame.event.name !== event.name || frame.event.cat !== event.cat) throw new Error('unbalanced trace spans');
-      spans.push({ begin: frame.event, end: event, compile: frame.compile });
-    }
-  }
-  if ([...stacks.values()].some(stack => stack.length)) throw new Error('unbalanced trace spans');
-  const compiles = spans.filter(span => span.begin.cat === 'compile' && span.begin.name === 'compile');
-  const parses = spans.filter(span => span.begin.cat === 'parse' && span.begin.name === selectedEntry);
-  if (compiles.length !== 1 || parses.length !== 1) throw new Error('missing or ambiguous compile/selected-entry parse boundaries');
-  const { begin, end } = compiles[0];
-  const firstParse = parses[0].begin;
-  if (parses[0].compile !== begin || !(begin.ts < firstParse.ts && parses[0].end.ts <= end.ts)) throw new Error('invalid compile/selected-entry parse boundaries');
+  // Completed-stream schema, time order and scope pairing belong to readTrace.
+  // Here select only the one compile and the pinned source-entry parse span.
+  const boundaries = (cat, name, ph) => events.filter(event => event.cat === cat && event.name === name && event.ph === ph);
+  const compileBegins = boundaries('compile', 'compile', 'B');
+  const compileEnds = boundaries('compile', 'compile', 'E');
+  const parseBegins = boundaries('parse', selectedEntry, 'B');
+  const parseEnds = boundaries('parse', selectedEntry, 'E');
+  if ([compileBegins, compileEnds, parseBegins, parseEnds].some(rows => rows.length !== 1)) throw new Error('missing or ambiguous compile/selected-entry parse boundaries');
+  const begin = compileBegins[0];
+  const end = compileEnds[0];
+  const firstParse = parseBegins[0];
+  const parseEnd = parseEnds[0];
+  if ([end, firstParse, parseEnd].some(event => event.pid !== begin.pid || event.tid !== begin.tid) ||
+      ![begin.ts, end.ts, firstParse.ts, parseEnd.ts].every(Number.isSafeInteger) ||
+      !(begin.ts < firstParse.ts && firstParse.ts <= parseEnd.ts && parseEnd.ts <= end.ts)) throw new Error('invalid compile/selected-entry parse boundaries');
   const elapsed = /Elapsed \(wall clock\) time \(h:mm:ss or m:ss\):\s*(?:(\d+):)?(\d+):(\d+(?:\.\d+)?)/.exec(timeText);
   if (!elapsed) throw new Error('missing process wall time');
   const wallSeconds = Number(elapsed[1] ?? 0) * 3600 + Number(elapsed[2]) * 60 + Number(elapsed[3]);

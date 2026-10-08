@@ -28,7 +28,7 @@ test('startup timings use compile and first parse trace boundaries plus process 
   assert.deepEqual(startupTiming(events(101, 201), timing('0:03.33'), entry), { wall_ns: 3330000000n, compile_ns: 200000n, pre_parse_ns: 100000n });
   assert.equal(startupTiming(events(101, 201), timing('1:02:03.33'), entry).wall_ns, 3723330000000n);
   assert.throws(() => startupTiming(events(1, 201), timing('0:03.33'), entry), /boundaries/);
-  assert.throws(() => startupTiming(events(101, 101), timing('0:03.33'), entry), /time order/);
+  assert.throws(() => startupTiming(events(101, 101), timing('0:03.33'), entry), /boundaries/);
   assert.throws(() => startupTiming(events(101, 201), '', entry), /wall time/);
 });
 
@@ -52,6 +52,21 @@ test('completed trace consumes the actual open stream and rejects corrupt or unb
     for (const changed of [{ exitCode: 1 }, { pid: 43 }, { startedUnixMs: 1001, finishedUnixMs: 1002 }]) {
       assert.throws(() => readTrace(file, { completedProcess: { ...processIdentity, ...changed } }), /process identity/);
     }
+    const good = events(101, 201);
+    const invalidRows = [
+      good.slice(0, -1),
+      good.map(event => event.ph === 'E' && event.cat === 'parse' ? { ...event, tid: 2 } : event),
+      [...good.slice(0, 4), good.at(-1), good[4]],
+      good.map(event => event.cat ? { ...event, ts: event.ts + 10000 } : event),
+      good.map(event => event.cat === 'parse' ? { ...event, ts: -1 } : event),
+      good.map(event => event.ph === 'B' ? { ...event, ts: null } : event),
+      good.map(event => event.cat === 'parse' ? { ...event, ph: 'unknown' } : event),
+      good.map(event => event.ph === 'B' && event.cat === 'parse' ? { ...event, ts: 0 } : event),
+    ];
+    for (const rows of invalidRows) {
+      fs.writeFileSync(file, stream(rows));
+      assert.throws(() => readTrace(file, { completedProcess: processIdentity }), /unbalanced|process window|event schema|time order/);
+    }
     fs.writeFileSync(file, complete + '{"name":');
     assert.deepEqual(readTrace(file), events(101, 201), 'the live reader keeps its partial-tail behavior');
   } finally {
@@ -59,15 +74,14 @@ test('completed trace consumes the actual open stream and rejects corrupt or unb
   }
 });
 
-test('startup spans reject missing, ambiguous, unbalanced, wrong-thread and crossing entry scopes', () => {
+test('startup selected-entry boundaries reject missing, ambiguous and wrong-thread spans', () => {
   const wall = timing('0:03.33');
   const good = events(101, 201);
   assert.throws(() => startupTiming(good, wall, 'other.jet'), /missing or ambiguous/);
-  assert.throws(() => startupTiming(good.slice(0, -1), wall, entry), /unbalanced/);
-  assert.throws(() => startupTiming(good.map(event => event.ph === 'E' && event.cat === 'parse' ? { ...event, tid: 2 } : event), wall, entry), /unbalanced/);
+  assert.throws(() => startupTiming(good.slice(0, -1), wall, entry), /missing or ambiguous/);
+  assert.throws(() => startupTiming(good.map(event => event.ph === 'E' && event.cat === 'parse' ? { ...event, tid: 2 } : event), wall, entry), /boundaries/);
   assert.throws(() => startupTiming(good.map(event => event.cat === 'parse' ? { ...event, tid: 2 } : event), wall, entry), /boundaries/);
   assert.throws(() => startupTiming([...good.slice(0, -1), { ...good[3], ts: 151 }, { ...good[4], ts: 152 }, good.at(-1)], wall, entry), /missing or ambiguous/);
-  assert.throws(() => startupTiming([...good.slice(0, 4), good.at(-1), good[4]], wall, entry), /unbalanced/);
 });
 
 test('startup pair fails closed on equality, incomplete compile, output drift and identity changes', () => {
