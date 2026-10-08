@@ -816,44 +816,7 @@ fn jet_std_os_on_interrupt(handler: std::sync::Arc<dyn Fn() + Send + Sync + 'sta
 }
 
 
-fn jet_testing_record_evidence_failure(error: TestEvidenceError) {
-    let (message, detail) = error.report_parts();
-    jet_testing_record_failure(message, detail);
-}
 
-fn jet_testing_golden(path: &String, actual: &String) -> bool {
-    match jet_testing_golden_result(path, actual) {
-        Ok(value) => {
-            jet_testing_clear_failure();
-            value
-        }
-        Err(error) => {
-            jet_testing_record_evidence_failure(error);
-            false
-        }
-    }
-}
-
-fn jet_testing_fixture(path: &String) -> String {
-    match jet_testing_fixture_result(path) {
-        Ok(contents) => {
-            jet_testing_clear_failure();
-            contents
-        }
-        Err(error) => {
-            jet_testing_record_evidence_failure(error);
-            String::new()
-        }
-    }
-}
-
-
-fn jet_testing_temp_dir(prefix: &String) -> String {
-    match jet_testing_temp_dir_path(prefix) {
-        Ok(path) => path,
-        Err(error) => jet_panic("<core.testing>", 0, &error.to_string()),
-    }
-}
 
 
 

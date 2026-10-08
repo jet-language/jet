@@ -2403,6 +2403,11 @@ const COMPILER_OWNED_CORE_RECORDS: &[(&str, &[&str])] = &[
     ("__ResolveError", &["kind", "has_os_code", "os_code", "message"]),
     ("AsyncPolicy", &["capacity", "overflow"]),
     ("CSVRow", &["fields", "line"]),
+    ("__EvidenceRead", &["ok", "text", "missing"]),
+    ("__TempFacts", &["pid", "thread"]),
+    ("__TempPath", &["path", "text"]),
+    ("__TempRemove", &["ok", "missing", "cause"]),
+    ("__TempCreate", &["ok", "cause"]),
     (
         "DataLineOptions",
         &[

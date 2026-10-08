@@ -3004,10 +3004,10 @@ fn eval_core_call_binding(
             resolved_ret,
         );
     }
-    if module == "core.testing" && member == "histories" {
+    if module == "core.testing" && member == "__histories_with_provenance" {
         return crate::Comptime::apply_core_call_without_ambient_with_type_args_and_history_schema(
             module,
-            member,
+            "__histories_with_provenance",
             values,
             span,
             false,
@@ -23257,7 +23257,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             .map(crate::Comptime::MirBridge::mir_to_ast_type)
             .collect::<Vec<_>>();
         let resolved_ret = result_ty.map(crate::Comptime::MirBridge::mir_to_ast_type);
-        let history_schema = if row.module == "core.testing" && row.member == "histories" {
+        let history_schema = if row.module == "core.testing" && row.member == "__histories_with_provenance" {
             let provenance =
                 history_provenance_for_execution(self.program, self.execution.as_ref());
             type_args.first().and_then(|command_type| {

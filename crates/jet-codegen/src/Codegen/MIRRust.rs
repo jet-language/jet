@@ -5300,7 +5300,7 @@ impl<'a> RustEmitter<'a> {
                     else {
                         continue;
                     };
-                    if row.module != "core.testing" || row.member != "histories" {
+                    if row.module != "core.testing" || row.member != "__histories_with_provenance" {
                         continue;
                     }
                     let Some(target) = type_args.first() else {
@@ -5424,7 +5424,7 @@ impl<'a> RustEmitter<'a> {
     ) -> String {
         let row = self.core_row(id);
         self.validate_core_arity(row, args);
-        if row.module == "core.testing" && row.member == "histories" {
+        if row.module == "core.testing" && row.member == "__histories_with_provenance" {
             return self.history_call_expression(function, args, type_args, &row.borrow_mask);
         }
         self.call_symbol_for_function(
@@ -9664,7 +9664,7 @@ impl<'a> RustEmitter<'a> {
                 .program
                 .core_calls
                 .iter()
-                .filter(|row| row.module == "core.testing" && row.member == "histories")
+                .filter(|row| row.module == "core.testing" && row.member == "__histories_with_provenance")
                 .map(|row| row.id)
                 .collect::<BTreeSet<_>>();
             !histories.is_empty()
@@ -24888,7 +24888,7 @@ impl<'a> RustEmitter<'a> {
             .iter()
             .find(|row| row.id == call)
             .unwrap_or_else(|| panic!("MIR Core call {:?} has no canonical row", call));
-        if row.module == "core.testing" && row.member == "histories" {
+        if row.module == "core.testing" && row.member == "__histories_with_provenance" {
             return self.history_call_expression(
                 function,
                 args,

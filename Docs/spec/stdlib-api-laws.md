@@ -511,6 +511,36 @@ other hosts. Neither bridge writes the operating-system environment.
 `core.rt.__cancel(&self)`. The public method and its provider call both retain
 the explicit write-access marker; cancellation does not consume the stream.
 
+## Testing evidence source policy
+
+`core.testing.golden` and `fixture` own success/failure selection and exact
+evidence messages in `Core/testing/testing.jet`. Golden diffs compare at most
+64 KiB and 256 inclusive-newline lines per input; their delete-first LCS tie
+rule and UTF-8-safe 32 KiB output limit preserve the existing native policy.
+The host supplies only file-read facts, failure TLS transport, and selected
+string byte windows. These leaves do not add checkpoints to the old testing
+operations.
+
+`temp_dir` owns Unicode-scalar prefix sanitation, ASCII-only thread sanitation,
+the `jet_test_` name, remove-before-create ordering, NotFound handling, and
+error wording. Filesystem facts and actions remain raw host leaves returning
+private plain records, never tuples. `__TempPath.path` is opaque platform
+`OsString::into_encoded_bytes()` output: source must not construct, slice,
+edit, or decode it, and passes it unchanged to remove/create. The displayed
+lossy String is separate, so non-UTF-8 temporary roots retain their original
+filesystem spelling. The native borrow is same-platform and allocation-free.
+`Fake` owns its state, locale, tables, rendering, and deterministic choices,
+sharing the existing public source RNG's seeded draw helper rather than a
+second RNG identity.
+`test_suite` snapshots the existing native harness state. `histories` owns
+the three copy-before-callback wrappers; the existing engine still owns
+history execution and compiler-derived command provenance.
+
+I9 preserved gaps: the interpreter does not observe native testing-failure
+TLS, and the native-only suite snapshot remains on its existing tier support.
+Testing `world` is **native and uncredited**: exact interpreter diagnostic-error
+cleanup requires an unavailable capture/rethrow rail, so its existing
+callback/handle-unregister/wait/close/scope-restore order is unchanged.
 ## Source Fake clean cutover
 
 The private state and locale fields, seed-bit conversion, exact locale salt,

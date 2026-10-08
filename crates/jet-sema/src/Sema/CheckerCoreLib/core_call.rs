@@ -6040,7 +6040,7 @@ impl<'a> Checker<'a> {
             // D-TEST-STRATEGY1=A: one optional explicit strategy replaces the
             // compiler-derived strategy when present. The runner remains the
             // shared Foundation implementation and keeps typed callbacks.
-            ("core.testing", "histories") => {
+            ("core.testing", "histories" | "__histories_with_provenance") => {
                 if type_args.len() == 1 {
                     self.check_declared_type(&type_args[0], span);
                 } else {

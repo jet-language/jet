@@ -154,6 +154,10 @@ pub fn core_call_parameter_contract(module_name: String, member: String) -> [Cor
             core_param_optional("strategy", ParamZone.LabelOnly, absent),
             core_param_required_either("model"), core_param_required_either("actual"), core_param_required_either("observe"),
         })
+        module_name == "core.testing" && member == "__histories_with_provenance" -> Val([CoreCallParameterContract]{
+            core_param_required_either("seed"), core_param_required_either("cases"), core_param_required_either("strategy"),
+            core_param_required_either("model"), core_param_required_either("actual"), core_param_required_either("observe"),
+        })
         module_name == "core.devtools" && member == "publish" -> Val([CoreCallParameterContract]{
             core_param_required_label("field"), core_param_required_label("value"),
         })
@@ -486,22 +490,23 @@ fn core_sig_text_and_testing(request: CoreCallSignatureRequest) -> CoreTypedCall
         numeric :: Type.Union{members: [Type]{Type.Int, Type.Float}}
         return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(numeric, read), core_sig_positional(Type.Int, read)}, Val(Type.String)))
     }
-    if module_name == "core.testing" && member == "histories" {
+    if module_name == "core.testing" && core_sig_one_of(member, [String]{"histories", "__histories_with_provenance"}) {
         t :: core_sig_named("T")
         data_tree :: core_sig_named("DataTree")
         strategy :: core_sig_apply("HistoryStrategy", t)
         command_callback :: core_sig_fn([Type]{Type.List{element: t}}, data_tree)
         observe_callback :: core_sig_fn([Type]{data_tree}, data_tree)
+        strategy_parameter :: if member == "histories" -> core_sig_parameter("strategy", "strategy", ParamZone.LabelOnly, read, Type.Option{inner: strategy}, Val(CoreCallDefault.Absent)) else -> core_sig_parameter("strategy", "strategy", ParamZone.Either, read, Type.Option{inner: strategy}, None)
         parameters := [CoreCallTypedParameter]{
             core_sig_param_type("seed", "seed", ParamZone.Either, Type.Int),
             core_sig_param_type("cases", "cases", ParamZone.Either, Type.Int),
-            core_sig_parameter("strategy", "strategy", ParamZone.LabelOnly, read, Type.Option{inner: strategy}, Val(CoreCallDefault.Absent)),
+            strategy_parameter,
             core_sig_param_type("model", "model", ParamZone.Either, command_callback),
             core_sig_param_type("actual", "actual", ParamZone.Either, command_callback),
             core_sig_param_type("observe", "observe", ParamZone.Either, observe_callback),
         }
         signature := core_sig_generic(module_name, member, parameters, Val(core_sig_result(core_sig_named("TestComparison"), Type.String)), core_sig_type_parameter("T", CoreCallTypeConstraint.Any))
-        signature.min_arity = 5
+        signature.min_arity = if member == "histories" -> 5 else -> 6
         return Val(signature)
     }
     None

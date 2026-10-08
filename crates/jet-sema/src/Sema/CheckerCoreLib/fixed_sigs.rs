@@ -15,7 +15,7 @@ pub fn is_polymorphic_core_special(module: &str, name: &str) -> bool {
         ("core.prelude", "keep")
             // D-TEST-HISTORY1=A: the operation type is explicit while the
             // callback/result shape is resolved by the Core call arm.
-            | ("core.testing", "histories")
+            | ("core.testing", "histories" | "__histories_with_provenance")
             | ("core.math", "abs")
             | ("core.math", "min")
             | ("core.math", "max")
@@ -2250,13 +2250,6 @@ fn core_fixed_sig_impl(
                 io_error_ty(),
             )),
         )),
-        ("core.testing", "golden") => Some((
-            vec![(read, Type::String), (read, Type::String)],
-            Some(Type::Bool),
-        )),
-        ("core.testing", "fixture" | "temp_dir") => {
-            Some((vec![(read, Type::String)], Some(Type::String)))
-        }
         ("core.testing", "fake_clock") => Some((
             vec![(read, Type::Int)],
             Some(Type::Named("Clock".to_string())),
@@ -2265,9 +2258,6 @@ fn core_fixed_sig_impl(
             vec![(read, Type::Int)],
             Some(Type::Named("RNG".to_string())),
         )),
-        ("core.testing", "test_suite") => {
-            Some((vec![], Some(Type::Named("TestSuite".to_string()))))
-        }
         ("core.testing", "world") => Some((
             vec![(
                 read,
@@ -7618,6 +7608,14 @@ pub fn core_param_contract(module: &str, name: &str) -> Option<Vec<CoreParam>> {
             required_either("seed"),
             required_either("cases"),
             optional_label_only("strategy"),
+            required_either("model"),
+            required_either("actual"),
+            required_either("observe"),
+        ]),
+        ("core.testing", "__histories_with_provenance") => Some(vec![
+            required_either("seed"),
+            required_either("cases"),
+            required_either("strategy"),
             required_either("model"),
             required_either("actual"),
             required_either("observe"),
