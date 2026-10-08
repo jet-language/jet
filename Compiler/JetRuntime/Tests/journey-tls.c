@@ -109,6 +109,9 @@ static void live_environment(void) {
     jet_rt_string_drop(width); width=text("18446744073709551616");
     assert(!jet_rt_logical_env_set(columns,width));
     assert(fixture_journey_columns_raw(true)==80);
+    jet_rt_string_drop(width); width=text("184467440737095516150");
+    assert(!jet_rt_logical_env_set(columns,width));
+    assert(fixture_journey_columns_raw(true)==80);
     jet_rt_string_drop(width);
     jet_rt_string_drop(no); jet_rt_string_drop(force); jet_rt_string_drop(columns); jet_rt_string_drop(empty);
 }
