@@ -2229,6 +2229,29 @@ concurrent shared increments and last-owner release with `--wrap=jet_rt_free`.
 Its stdout is expected output only. Native method-rail admission and
 seed-route regeneration remain composed native-backend gates.
 
+`HyperLogLog.jet` uses the same shared ownership rule on Native272: references
+at 0, mutex at 8 and 256 packed U8 registers at 16 (stride exactly one).
+Its real producer and canonical `jet_rt_native_hll_add`/`jet_rt_native_hll_count`
+operate on this state; clone retains the same pointer. FNV hashing is outside
+the single mutation lock. The logical hash shift preserves the seed's eight
+high zero bits, including its rest-zero rank 57. Count scans in register order
+under one lock, then unlocks before exact-Int allocation or show rendering.
+The no-empty estimator preserves `Sketch.rs:55-57`'s sequential sum and alpha
+operation order, with exact powers of two from audited float bitcasts and
+positive round-half-away followed by saturating i64 conversion.
+For empty-register counts 1..256, `hll_linear` freezes the actual seed's finite
+domain instead of introducing a logarithm provider. The one offline oracle
+includes the actual `Sketch.rs`, SHA256
+`7d96fe7210b904876ac89a87a319f3cced6bf1758f937ef795262d83eb8851be`;
+its frozen output SHA256 is
+`b8c28826e186fb5c2acd43f821afaae7588893e09c3417b94a892d0c1f962fc7`.
+No entry is within 1e-9 of a half-integer; nearest is empty140, distance
+0.004965598786071723. Cargo is only an offline seed oracle, never a provider.
+`HyperLogLogWitness.c` checks all finite-domain counts, frozen full-register
+vectors, uniform ranks through 255, mixed ranks, exact show, shared concurrent
+mutation and last-owner free. Its stdout file is expected output, not proof;
+native method routing, execution and obsolete seed suppression remain gates.
+
 `EmailError.jet` provides the three retained Error clone/drop/equality exports
 on the registry-plain `EmailError` layout, not on a Rust enum or private facade.
 `Lower/Lower.jet:439,443` and `Lower/Values.jet:49-55,65-74,111-127,137-145`
