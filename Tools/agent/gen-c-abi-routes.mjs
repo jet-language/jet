@@ -500,6 +500,7 @@ const handleTake = (full, value) => handleBridge(full) ? `super::jet_c_abi_host:
 const handleOut = (full, value) => handleBridge(full) ? `super::jet_c_abi_host::${handleBridge(full).stem}_handle(${value})` : `Box::into_raw(Box::new(${value}))`;
 const opaqueName = /^(?:[A-Za-z_][A-Za-z0-9_]*::)*([A-Z][A-Za-z0-9_]*|__jet_[A-Za-z0-9_]+)(?:<[\s\S]*>)?$/;
 const concreteHandles = new Map(); // specialization name -> resolved declaration application
+const borrowedHandles = new Map(); // seed-only Rust lifetime carriers, not Jet type instances
 const genericArgumentKinds = new Map([["f64", "Float"], ["bool", "Bool"], ["String", "String"], ["crate::jet_foundation::Numeric::JetInt", "Int"]]);
 function runtimeHandle(ty, path) {
   const application = recordApplication(ty);
@@ -510,6 +511,22 @@ function runtimeHandle(ty, path) {
   if (!found || found.decls.length !== 1) throw new Error(`generic record ${ty}: unresolved or ambiguous declaration ${requested}`);
   const decl = found.decls[0];
   if (!decl.visible || decl.gated) throw new Error(`generic record ${ty}: inaccessible or gated declaration`);
+  // RUST-EXIT S5: retain the existing opaque seed codec's Rust lifetime
+  // spelling. Never turn a lifetime into a Jet TYPE argument or native owner.
+  if (application.args.some((arg) => arg.startsWith("'"))) {
+    const open = text.indexOf("{", decl.at);
+    const head = text.slice(decl.at, open);
+    const parameters = /^(?:struct|enum)\s+\w+\s*<([^<>]*)>/.exec(head)?.[1].split(",").map((arg) => arg.trim());
+    if (!application.args.every((arg) => /^'[A-Za-z_]\w*$/.test(arg)) ||
+        !parameters || parameters.length !== application.args.length ||
+        !parameters.every((arg) => /^'[A-Za-z_]\w*$/.test(arg))) {
+      throw new Error(`generic record ${ty}: mixed lifetime and TYPE arguments are unsupported`);
+    }
+    const handle = { name: application.base.split("::").pop(), full: qualify(ty, path) };
+    borrowedHandles.set(handle.name, { runtime: handle.name, qualified: handle.full,
+      reason: "actual Rust lifetime-only declaration; borrowed seed codec, not native-admissible Jet TYPE specialization" });
+    return handle;
+  }
   // Arguments name types in the caller's module, not the declaration's.
   const args = application.args.map((arg) => {
     if (genericArgumentKinds.has(arg)) return arg;
@@ -1244,6 +1261,7 @@ const recordDecl = (full) => {
   const head = text.slice(decl.at, open);
   if (open < 0 || /[;(]/.test(head) || /\bwhere\b/.test(head)) return null;
   const application = recordApplication(full);
+  if (application.args.some((arg) => arg.startsWith("'"))) return null;
   const bindings = recordBindings(head, application.args, full);
   let depth = 0;
   let close = open;
@@ -1519,6 +1537,7 @@ if (nativeListOnly) {
       generatorSha256: digest(readFileSync(fileURLToPath(import.meta.url))),
       providerManifestSha256: digest(readFileSync(`${repo}/Compiler/JetRuntime/exports.list`)),
       sourceDeclarations: declarations.map((path) => ({ path, sha256: digest(readFileSync(`${repo}/${path}`)) })),
+      borrowedCarriers: [...borrowedHandles.values()].sort((a, b) => a.runtime.localeCompare(b.runtime)),
     },
     nativeTypes, nativeExports, handleRows,
     seedHelperNames: [...seedHelperNames].sort(),
