@@ -178,8 +178,7 @@ fn jet_cli_walk_held_sources(root: String, relative: String, depth: Int, held: c
             opened :: child_held.stat() ?? return Val("cannot inspect `{path}`: {err}")
             if opened.id != stat.id -> return Val("`{path}` changed while it was held")
             if jet_cli_held_project_boundary(child_held) == {
-                .Ok(true) -> { next }
-                .Ok(false) -> {}
+                .Ok(boundary) -> { if boundary -> next }
                 .Err(problem) -> { return Val(problem) }
             }
             if depth >= JET_CLI_MAX_TREE_DEPTH -> return Val("the source walk exceeds the {JET_CLI_MAX_TREE_DEPTH}-level depth bound at `{path}`")
@@ -495,7 +494,9 @@ fn jet_cli_read_rooted_source(root: String, relative: String, limit: Int) -[FS.R
     loop part in relative.split("/") {
         if part == "" || part == "." -> next
         if part == ".." -> return Err("file authority path must be relative and normalized")
-        loop byte in part.bytes() -> if byte == (U8{0}) -> return Err("file authority path contains NUL")
+        loop byte in part.bytes() {
+            if byte == (U8{0}) -> return Err("file authority path contains NUL")
+        }
         &parts.push(part)
     }
     directories := [cli_files.Directory]{}
@@ -520,7 +521,9 @@ fn jet_cli_hold_root_chain(root: String, directories: &[cli_files.Directory], na
     loop part in root.split("/") {
         if part == "" || part == "." -> next
         if part == ".." -> return Err("file authority root must not contain parent components")
-        loop byte in part.bytes() -> if byte == (U8{0}) -> return Err("file authority path contains NUL")
+        loop byte in part.bytes() {
+            if byte == (U8{0}) -> return Err("file authority path contains NUL")
+        }
         opened :: directories[directories.len() - 1].open_directory(part) ?? return Err(jet_cli_build_rooted_open_error(err))
         &directories.push(opened)
         &names.push(part)

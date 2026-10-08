@@ -15,9 +15,7 @@ fn run() {
     cli_files.create_dir_all("{root}/nested") ?? panic("nested project")
     cli_files.create_dir_all("{root}/.jet/bindings/c") ?? panic("foreign cache")
     cli_files.create_dir_all("{root}/.jet/bindings/c/subdir") ?? panic("nonrecursive cache directory")
-    defer cli_files.remove_all(root).drop("source snapshot cleanup")
     cli_files.write("{root}/main.jet", "fn run() {{ 1 }}\n") ?? panic("entry")
-    defer cli_files.remove_all("{root}-held").drop("moved source snapshot cleanup")
     cli_files.write("{root}/sub/module.jet", "VALUE :: 7\n") ?? panic("module")
     cli_files.write("{root}/�.jet", "TEXT :: \"héllo\"\n") ?? panic("valid Unicode source name")
     cli_files.write("{root}/nested/package.jet", "package {{ name: \"nested\" version: \"0.0.0\" edition: \"2026\" outputs: {{}} }}\n") ?? panic("nested marker")
@@ -29,7 +27,6 @@ fn run() {
     cli_files.write("{root}/.jet/bindings/c/.hidden.jet", "HIDDEN_BINDING :: 2\n") ?? panic("hidden binding")
     cli_files.write("{root}/.jet/bindings/c/lib.provenance", "provenance\n") ?? panic("provenance")
     cli_files.write("{root}/.jet/bindings/c/subdir/ignored.jet", "IGNORED :: 4\n") ?? panic("nested cache")
-    defer cli_files.remove("{root}/alias").drop("directory link cleanup")
 
     files := [JetDriverAuthorizedSourceFile]{}
     directories := [AppAuthorizedDirectory]{}
@@ -65,8 +62,14 @@ fn run() {
     assert(jet_cli_identity_key("file", precise).contains("modified_ns={ns};"))
     root_info :: held.stat() ?? panic("root identity")
     assert(jet_cli_identity_key("directory", root_info) == "authority-file-v1;kind=directory;length=0;modified_ns=none;device={root_info.id.device};inode={root_info.id.inode}")
-    assert(jet_cli_read_held_source(held, "main.jet", 1) == .Err("file exceeds its read bound"))
-    assert(jet_cli_read_held_source(held, "main.jet", -1) == .Err("file read bound exceeds the tree hashing bound"))
+    if jet_cli_read_held_source(held, "main.jet", 1) == {
+        .Err(detail) -> assert(detail == "file exceeds its read bound")
+        .Ok(_) -> panic("oversized held read was accepted")
+    }
+    if jet_cli_read_held_source(held, "main.jet", -1) == {
+        .Err(detail) -> assert(detail == "file read bound exceeds the tree hashing bound")
+        .Ok(_) -> panic("negative held read bound was accepted")
+    }
 
     caches := [JetDriverAuthorizedSourceFile]{}
     assert(jet_cli_foreign_cache_files(root, &caches, &budget) == None)
@@ -112,10 +115,12 @@ fn run() {
     assert(jet_cli_source_read_limit(exhausted_bytes, selected.stat.size, "selected.other") == .Err(_))
     // Raw source budgets count UTF-8 bytes, not String.len characters.
     unicode_to_ascii := JetCLISourceBudget{entries: 0, bytes: JET_CLI_MAX_SOURCE_TOTAL, files: 2}
-    assert(jet_cli_replace_source_budget(&unicode_to_ascii, "é🙂", "abcdef", "replacement.jet") == .Ok(JET_CLI_MAX_SOURCE_TOTAL))
+    replacement_bytes :: jet_cli_replace_source_budget(&unicode_to_ascii, "é🙂", "abcdef", "replacement.jet") ?? panic("same-size UTF-8 replacement")
+    assert(replacement_bytes == JET_CLI_MAX_SOURCE_TOTAL)
     assert(unicode_to_ascii.bytes == JET_CLI_MAX_SOURCE_TOTAL && unicode_to_ascii.files == 2)
     ascii_to_unicode := JetCLISourceBudget{entries: 0, bytes: JET_CLI_MAX_SOURCE_TOTAL - 2, files: 2}
-    assert(jet_cli_replace_source_budget(&ascii_to_unicode, "abcd", "é🙂", "replacement.jet") == .Ok(JET_CLI_MAX_SOURCE_TOTAL))
+    grown_bytes :: jet_cli_replace_source_budget(&ascii_to_unicode, "abcd", "é🙂", "replacement.jet") ?? panic("UTF-8 replacement with exact headroom")
+    assert(grown_bytes == JET_CLI_MAX_SOURCE_TOTAL)
     assert(ascii_to_unicode.bytes == JET_CLI_MAX_SOURCE_TOTAL && ascii_to_unicode.files == 2)
     rejected_unicode := JetCLISourceBudget{entries: 0, bytes: JET_CLI_MAX_SOURCE_TOTAL, files: 2}
     assert(jet_cli_replace_source_budget(&rejected_unicode, "abcd", "é🙂", "replacement.jet") == .Err(_))
@@ -126,7 +131,8 @@ fn run() {
     chain := [cli_files.Directory]{}
     names := [String]{}
     initial :: jet_cli_hold_root_chain(root, &chain, &names) ?? panic("root chain")
-    assert(jet_cli_build_read_chain_current(&chain, &names, initial) == .Ok(true))
+    current :: jet_cli_build_read_chain_current(&chain, &names, initial) ?? panic("initial root chain changed")
+    assert(current)
     cli_files.rename(root, "{root}-held") ?? panic("move held source root")
     cli_files.create_dir_all(root) ?? panic("replacement root")
     cli_files.write("{root}/main.jet", "REPLACEMENT :: 99\n") ?? panic("replacement bytes")
@@ -135,4 +141,6 @@ fn run() {
     assert(jet_cli_build_read_chain_current(&chain, &names, initial) == .Err(_))
     cli_files.remove_all(root) ?? panic("remove replacement root")
     cli_files.rename("{root}-held", root) ?? panic("restore held source root")
+    cli_files.remove("{root}/alias") ?? panic("directory link cleanup")
+    cli_files.remove_all(root) ?? panic("source snapshot cleanup")
 }

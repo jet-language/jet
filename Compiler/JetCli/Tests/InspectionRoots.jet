@@ -6,7 +6,10 @@ fn inspection_root_fixture_require_root(start: String, expected: String) {
         .Refused(_) -> panic("checked inspection Package root")
     }
     if jet_cli_inspect_require_root(start, "missing package", true) == {
-        .File(root, notice) -> { assert(root == expected); assert(notice == "") }
+        .File(root, notice) -> {
+            assert(root == expected)
+            assert(notice == "")
+        }
         .Refused(_) -> panic("plane Package root")
     }
 }
@@ -77,7 +80,6 @@ fn run() {
     cli_files.create_dir_all("{root}/inline/sub") ?? panic("inline fixture")
     cli_files.create_dir_all("{root}/missing/sub") ?? panic("missing fixture")
     cli_files.create_dir_all("{root}/stale/sub") ?? panic("stale fixture")
-    defer cli_files.remove_all(root).drop("inspection roots cleanup")
     cli_files.write("{root}/manifest/package.jet", "package {{ name: \"manifest\" version: \"0.0.0\" edition: \"2026\" outputs: {{}} }}\n") ?? panic("manifest")
     inspection_root_fixture_require_root("{root}/manifest/sub", "{root}/manifest")
     cli_files.write("{root}/inline/run.jet", "package {{ name: \"inline\" version: \"0.0.0\" edition: \"2026\" outputs: {{ app: .Executable{{entry: run}} }} }}\nfn run() {{}}\n") ?? panic("inline Package")
@@ -89,7 +91,10 @@ fn run() {
         cli_files.write("{root}/stale/{name}", "retired name\n") ?? panic("stale manifest")
         inspection_root_fixture_missing("{root}/stale/sub", Val(name))
         if jet_cli_missing_bare_entry("check", "{root}/stale/sub", false) == {
-            .Refused(report, _, code, _) -> { assert(report.code == "E1226"); assert(code == JET_DRIVER_EXIT_USAGE) }
+            .Refused(report, _, code, _) -> {
+                assert(report.code == "E1226")
+                assert(code == JET_DRIVER_EXIT_USAGE)
+            }
             else -> panic("bare commands keep their original usage status")
         }
         cli_files.remove("{root}/stale/{name}") ?? panic("remove stale manifest")
@@ -98,4 +103,5 @@ fn run() {
     // filename teaching branch used above for pack/payload/jet.toml.
     cli_files.write("{root}/stale/{JET_CLI_PAYLOAD_FILE}", "package {{ name: \"retired\" version: \"0.0.0\" edition: \"2026\" outputs: {{}} }}\n") ?? panic("retired manifest")
     inspection_root_fixture_authority_error("{root}/stale/sub")
+    cli_files.remove_all(root) ?? panic("inspection roots cleanup")
 }
