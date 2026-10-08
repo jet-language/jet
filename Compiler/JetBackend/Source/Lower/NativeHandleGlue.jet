@@ -21,7 +21,6 @@ fn lower_native_handle_operation(helper: String) -> String? {
     None
 }
 
-
 fn lower_native_handle_operand(p: MIRProgram, f: &LowerFunction, ty: MIRType, shell: LIRValueID) -> LIRValueID? {
     if lower_repr(p, ty) == {
         .Absent -> None
@@ -50,7 +49,8 @@ fn lower_native_handle_glue(p: MIRProgram, m: &LowerModule, glue: LowerGlue, op:
     }
     if op == "drop" {
         // The C-ABI accepts null on drop, including payload-enum shells.
-        zero :: lower_const(&f, 0)
+        zero :: lower_pointer(&f)
+        lower_emit(&f, LIRInst.Const{dst: zero, value: 0})
         absent :: lower_flag(&f)
         lower_emit(&f, LIRInst.Compare{dst: absent, condition: LIRCondition.Eq, left: shell, right: zero})
         done :: lower_new_block(&f)
