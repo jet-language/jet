@@ -3725,6 +3725,45 @@ fn core_fixed_sig_impl(
                 ("version".into(), Box::new(Type::Int)), ("migration".into(), Box::new(Type::String)),
             ])))),
         )),
+        ("core.service", "__tree_state_adapter") => Some((
+            vec![(read, Type::Named("ServiceTree".into()))], Some(Type::Named("__TreeStateAdapter".into())),
+        )),
+        ("core.service", "__tree_chaos_count") => Some((
+            vec![(read, Type::Named("ServiceTree".into()))], Some(Type::Int),
+        )),
+        ("core.service", "__tree_write_chaos_count") => Some((
+            vec![(AccessConvention::Write, Type::Named("ServiceTree".into())), (read, Type::Int)], None,
+        )),
+        ("core.service", "__first_running_endpoint") => Some((
+            vec![(read, Type::Named("ServiceTree".into()))], Some(Type::Option(Box::new(Type::Named("ServiceEndpoint".into())))),
+        )),
+        ("core.service", "__group_parts") => Some((
+            vec![(read, Type::Named("ServiceTree".into()))], Some(Type::Tuple(vec![
+                ("workers".into(), Box::new(list_string.clone())),
+                ("groups".into(), Box::new(Type::List(Box::new(Type::Tuple(vec![
+                    ("name".into(), Box::new(Type::String)), ("workers".into(), Box::new(list_string.clone())),
+                ]))))),
+            ])),
+        )),
+        ("core.service", "__group_reparent") => Some((
+            vec![(AccessConvention::Write, Type::Named("ServiceTree".into())), (read, Type::String), (read, Type::String)],
+            Some(result_ty(unit_ty(), Type::Named("ServiceError".into()))),
+        )),
+        ("core.service", "__group_push") => Some((
+            vec![(AccessConvention::Write, Type::Named("ServiceTree".into())), (AccessConvention::Move, Type::String),
+                (AccessConvention::Move, list_string.clone())], None,
+        )),
+        ("core.service", "__event_store_append") => Some((
+            vec![(read, Type::Named("ServiceTree".into())), (read, Type::String)],
+            Some(result_ty(unit_ty(), Type::Named("ServiceError".into()))),
+        )),
+        ("core.service", "__tree_event_push") => Some((
+            vec![(AccessConvention::Write, Type::Named("ServiceTree".into())), (AccessConvention::Move, Type::String)], None,
+        )),
+        ("core.service", "__snapshot_store_write") => Some((
+            vec![(AccessConvention::Write, Type::Named("ServiceTree".into())), (AccessConvention::Move, Type::String)],
+            Some(result_ty(unit_ty(), Type::Named("ServiceError".into()))),
+        )),
         ("core.service", "__state_load") => Some((
             vec![(read, Type::Named("ServiceTree".into())), (read, Type::Bool)],
             Some(result_ty(list_string.clone(), Type::Named("ServiceError".into()))),

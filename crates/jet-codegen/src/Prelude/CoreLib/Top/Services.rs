@@ -3295,6 +3295,36 @@ fn jet_services_raw_state_load(tree: &JetServiceTree, event_log: bool) -> Result
     jet_services_state_store_load(authority, &adapter)
 }
 fn jet_services_raw_tree_event_records(tree: &JetServiceTree) -> Vec<String> { tree.event_log.clone() }
+
+fn jet_services_raw_tree_state_adapter(tree: &JetServiceTree) -> JetServiceStateAdapter { tree.state_adapter.clone() }
+fn jet_services_raw_tree_chaos_count(tree: &JetServiceTree) -> i64 { tree.chaos_fails }
+fn jet_services_raw_tree_write_chaos_count(tree: &mut JetServiceTree, count: i64) { tree.chaos_fails = count; }
+fn jet_services_raw_first_running_endpoint(tree: &JetServiceTree) -> Option<JetServiceEndpoint> {
+    tree.workers.iter().find(|worker| worker.running).map(|worker| worker.endpoint.clone())
+}
+fn jet_services_raw_group_parts(tree: &JetServiceTree) -> (Vec<String>, Vec<(String, Vec<String>)>) {
+    (tree.workers.iter().map(|worker| worker.name.clone()).collect(),
+        tree.groups.iter().map(|group| (group.name.clone(), group.workers.clone())).collect())
+}
+fn jet_services_raw_group_reparent(tree: &mut JetServiceTree, name: &String, worker_name: &String) -> Result<(), JetServiceError> {
+    let worker = tree.workers.iter().find(|worker| &worker.name == worker_name).expect("source checked group member");
+    jet_services_reparent_topology(&worker.task, Some(jet_services_topology_group_id(&tree.name, name)))
+}
+fn jet_services_raw_group_push(tree: &mut JetServiceTree, name: String, workers: Vec<String>) {
+    tree.groups.push(JetServiceGroup { name, workers, restart: tree.restart.clone(), budget: tree.restart_budget.clone() });
+}
+fn jet_services_raw_event_store_append(tree: &JetServiceTree, record: &String) -> Result<(), JetServiceError> {
+    jet_services_state_store_append(tree.state_authority.as_ref().expect("source checked event authority"), record)
+}
+fn jet_services_raw_tree_event_push(tree: &mut JetServiceTree, record: String) { tree.event_log.push(record); }
+fn jet_services_raw_snapshot_store_write(tree: &mut JetServiceTree, record: String) -> Result<(), JetServiceError> {
+    let authority = tree.state_authority.as_ref().expect("source checked snapshot authority");
+    let _guard = service_authority_lock().lock()
+        .map_err(|_| jet_services_state_error("service state lock is poisoned"))?;
+    jet_services_state_store_write(authority, &JetServiceStateAdapter::Snapshot, &[record.clone()])?;
+    tree.snapshot = Some(record);
+    Ok(())
+}
 fn jet_services_raw_tree_upgrade_receipt(tree: &JetServiceTree) -> Option<JetServiceUpgradeReceipt> { tree.last_upgrade.clone() }
 fn jet_services_raw_upgrade_receipt_parts(receipt: &JetServiceUpgradeReceipt)
     -> (jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt, String, bool, Vec<String>)
