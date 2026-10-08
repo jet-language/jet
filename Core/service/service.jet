@@ -1249,7 +1249,11 @@ pub fn chaos_fail(tree: ServiceTree) -> Int ServiceError! {
 pub fn append_event(tree: ServiceTree, event: String) ServiceError! {
     #Unsafe("Services4575: source owns adapter/authority/payload/count checks and record framing; store append before field push") {
         if !core.service.__tree_started(tree) -> return Err(ServiceError.NotStarted("service tree is not started"))
-        if core.service.__tree_state_adapter(tree) != __TreeStateAdapter.EventLog -> return Err(ServiceError.Policy("append_event requires EventLog state adapter"))
+        // CoreEnumRows registers Empty, Snapshot, EventLog; only EventLog permits append.
+        if core.service.__tree_state_adapter(tree) == {
+            .EventLog -> {}
+            .Empty | .Snapshot -> return Err(ServiceError.Policy("append_event requires EventLog state adapter"))
+        }
         authority :: core.service.__tree_state_authority(tree) ?? return Err(ServiceError.Policy("EventLog state has no injected authority"))
         if !valid_record_payload(event) -> return Err(ServiceError.Policy("event record exceeds the state record limit"))
         if core.service.__tree_event_count(tree) >= 100000 -> return Err(ServiceError.Policy("event-log record limit exceeded"))
@@ -1265,7 +1269,11 @@ pub fn append_event(tree: ServiceTree, event: String) ServiceError! {
 pub fn commit_snapshot(tree: ServiceTree, payload: String) ServiceError! {
     #Unsafe("Services4525: host record-write leaf retains existing mutex through store write and field assignment; no guard exposed") {
         if !core.service.__tree_started(tree) -> return Err(ServiceError.NotStarted("service tree is not started"))
-        if core.service.__tree_state_adapter(tree) != __TreeStateAdapter.Snapshot -> return Err(ServiceError.Policy("commit_snapshot requires Snapshot state adapter"))
+        // CoreEnumRows registers Empty, Snapshot, EventLog; only Snapshot permits commit.
+        if core.service.__tree_state_adapter(tree) == {
+            .Snapshot -> {}
+            .Empty | .EventLog -> return Err(ServiceError.Policy("commit_snapshot requires Snapshot state adapter"))
+        }
         authority :: core.service.__tree_state_authority(tree) ?? return Err(ServiceError.Policy("Snapshot state has no injected authority"))
         if !valid_record_payload(payload) -> return Err(ServiceError.Policy("snapshot record exceeds the state record limit"))
         record :: "v{authority.version}:{payload.bytes().len()}:{payload}"
