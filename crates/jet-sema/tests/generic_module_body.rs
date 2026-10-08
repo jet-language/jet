@@ -201,6 +201,18 @@ fn imported_core_primitive_left_operator_uses_source_result() {
     assert!(errors.is_empty(), "source result was shadowed by a seed row: {errors:?}");
 }
 
+#[test]
+fn core_rng_private_method_resolves_inside_own_impl() {
+    let (_, diagnostics) = check_modules(&[
+        ("<corelib>/Core/math/random.jet",
+         "pub struct RNG { state: Int }\nimpl RNG { fn float_open(self) -> Float Never! { 0.5 } pub fn sample(self) -> Float Never! { self.float_open() } }\n",
+         &[]),
+        ("pkg-a/src/main.jet", "fn run() {}\n", &[]),
+    ]);
+    let errors: Vec<_> = diagnostics.iter().filter(|d| d.severity == Severity::Error).collect();
+    assert!(errors.is_empty(), "private source RNG method errors: {errors:?}");
+}
+
 fn error_codes(diags: &[Diagnostic]) -> Vec<&str> {
     diags
         .iter()

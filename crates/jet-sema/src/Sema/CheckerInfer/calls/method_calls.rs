@@ -6105,10 +6105,7 @@ impl<'a> Checker<'a> {
             other => other,
         };
         if let Type::Named(handle_ty) = handle_receiver {
-            let (namespace, leaf) = self.struct_type_name_parts(handle_ty);
-            let source_owned = self.struct_owner_module(leaf, namespace)
-                .is_some_and(|owner| jet_foundation::CoreModuleExports::core_source_owns_type(
-                    &self.canonical_nominal_name(owner, leaf)));
+            let source_owned = self.source_owns_nominal(handle_ty);
             // D-AUTHORITY-NAME1=A / D-AUTHORITY-WORD2=E: the carried
             // Authority value is ordinary data. Its only instance family is
             // the Prelude `with`/`without` narrowing pair.
@@ -7888,6 +7885,8 @@ impl<'a> Checker<'a> {
         // materializer-specific E0102 recovery below.
         let builtin_methods = Collections::builtin_method_names(&recv_ty);
         if operator_signature.is_none() && !builtin_methods.is_empty()
+            && !matches!(&recv_ty, Type::Named(name) | Type::Apply { name, .. }
+                if self.source_owns_nominal(name))
             && !matches!(
                 &recv_ty,
                 Type::Apply { name, .. }
