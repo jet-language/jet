@@ -1837,7 +1837,7 @@ fn jet_std_fs_create_dir(path: &String) -> Result<(), jet_std::IOError> {
             "fault injected: FS.Write",
         ));
     }
-    std::fs::create_dir_all(path).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, path, e))
+    jet_std_fs_create_dir_all_raw(path)
 }
 fn jet_std_fs_create_dir_all(path: &String) -> Result<(), jet_std::IOError> {
     if jet_fault_should_fail("FS.Write") {
@@ -1847,7 +1847,11 @@ fn jet_std_fs_create_dir_all(path: &String) -> Result<(), jet_std::IOError> {
             "fault injected: FS.Write",
         ));
     }
-    std::fs::create_dir_all(path).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, path, e))
+    jet_std_fs_create_dir_all_raw(path)
+}
+pub(crate) fn jet_std_fs_create_dir_all_raw(path: &String) -> Result<(), jet_std::IOError> {
+    std::fs::create_dir_all(path)
+        .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, path, e))
 }
 fn jet_std_fs_remove_dir(path: &String) -> Result<(), jet_std::IOError> {
     if jet_fault_should_fail("FS.Write") {

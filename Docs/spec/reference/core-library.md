@@ -41,6 +41,8 @@ The private typed-payload leaf retains the existing validated event and global
 sink, including silent rejection of invalid events and no durable-delivery
 claim when no sink is installed. Volatile memory access retains the checked
 compiler intrinsic and its audited pointer obligations.
+Directory creation shares the existing `jet_std_fs_create_dir_all_raw` host
+operation; its callers keep their own fault preflight and error resource.
 
 Email address, attachment, and envelope construction validates in
 `Core/email/email.jet`: control-character refusal precedes address parsing,
