@@ -130,6 +130,9 @@ instance and field label, exactly like ordinary tuple field reads; they do not
 require a nominal declaration. Literal-field tests, bound fields (including
 read/write windows), capture tuples, and dispatch-subject projections share
 that field-identity path in both compiler implementations.
+The tuple-field regression fixture uses the canonical multi-arm pattern form
+for literal tests and field bindings, as well as dispatch, so all three
+exercise the same structural field-identity path.
 Structural Comparable/Equatable records may derive Rust `Eq`, `PartialOrd`,
 and `Ord` only when every field supports that native order. A custom capability
 implementation, floating field, unordered carrier, or native opaque carrier

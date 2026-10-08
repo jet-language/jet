@@ -1,13 +1,17 @@
 // Structural tuple patterns share the tuple field identities used by ordinary
 // projections. Both literal tests and bindings must bypass nominal lookup.
 fn tuple_test(row: (kind: String, title: String, retries: Int)) -> Bool {
-    if row == {kind: "page", ..} -> return true
-    false
+    if row == {
+        {kind: "page", ..} -> true
+        else -> false
+    }
 }
 
 fn tuple_bind(row: (kind: String, title: String, retries: Int)) -> String {
-    if row == {kind: "page", title, ..} -> return title
-    "other"
+    if row == {
+        {kind: "page", title, ..} -> title
+        else -> "other"
+    }
 }
 
 fn tuple_dispatch(row: (kind: String, title: String, retries: Int)) -> String {
