@@ -88,10 +88,6 @@ fn close_owned_fields_from(types: &[MirTypeDef], ty: &MirType) -> Vec<(MirFieldI
     }).collect()
 }
 
-pub(super) fn contains_owned_close(program: &MirProgram, ty: &MirType, seen: &mut Vec<String>) -> bool {
-    contains_owned_close_with(&program.types, ty, &|ty| nominal_close_function(program, ty).is_some(), seen)
-}
-
 pub(super) fn contains_owned_close_with(types: &[MirTypeDef], ty: &MirType, close: &impl Fn(&MirType) -> bool, seen: &mut Vec<String>) -> bool {
     if close(ty) { return true; }
     let key = ty.canonical_key();
