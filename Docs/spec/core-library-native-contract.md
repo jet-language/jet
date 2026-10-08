@@ -64,6 +64,12 @@ const-evaluator step guard. This does not change row order, lookup facts,
 runtime initialization, or the Jet-native contract; the generator owns the
 item-level attribute alongside the table.
 
+Shared bootstrap kernels embedded by comptime bind representation helpers
+locally, without copying their policy. Borrowed list indexing lives with the
+shared collection kernel so both embeddings use the same bounds check and
+E3010 stop. Recursive mkdir dispatch names the single no-fault-probe raw leaf;
+the source caller, not a second evaluator arm, owns the FS.Write preflight.
+
 The generated Rust tables are projections, not a second API catalog. Never
 hand-edit them. The main generated views are
 [`CoreModuleExports.rs`](../../crates/jet-foundation/src/CoreModuleExports.rs),

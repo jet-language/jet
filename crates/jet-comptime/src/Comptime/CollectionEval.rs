@@ -121,6 +121,11 @@ pub(crate) mod collection_semantics {
     // Values.rs is shared with the AOT Prelude; bind its unqualified Int
     // formatter to the comptime mirror before including that fragment.
     use crate::Comptime::SyncLite::jet_int_to_string;
+    // The borrowed index check is shared with the Prelude collection kernel.
+    include!("../../../jet-codegen/src/Prelude/Core/FixedList.rs");
+    fn jet_arithmetic_stop(file: &str, line: u32, message: &str) -> ! {
+        jet_panic_rich_code("E3010", file, line, "", "", 0, 0, message, "")
+    }
     include!("../../../jet-codegen/src/Prelude/Core/Loadable.rs");
     include!("../../../jet-codegen/src/Prelude/Core/RangeBounds.rs");
     include!("../../../jet-codegen/src/Prelude/Core/Values.rs");

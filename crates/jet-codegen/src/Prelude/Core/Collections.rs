@@ -377,6 +377,11 @@ fn jet_list_reverse<T>(xs: &mut [T]) {
     xs.reverse();
 }
 
+#[inline(always)]
+fn jet_index_vec_ref<'a, T>(xs: &'a [T], i: i64, file: &str, line: u32) -> &'a T {
+    jet_fixed_list_index(xs.len(), i, |index| &xs[index])
+        .unwrap_or_else(|error| jet_arithmetic_stop(file, line, &error.message()))
+}
 // Embedded Core-only port seam; dies at Rust cutover.
 #[inline(always)]
 fn jet_list_swap<T>(xs: &mut [T], first: i64, second: i64) {

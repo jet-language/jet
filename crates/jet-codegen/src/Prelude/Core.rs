@@ -2431,11 +2431,6 @@ fn jet_index_vec<T: Clone>(xs: &[T], i: i64, file: &str, line: u32) -> T {
     jet_index_vec_ref(xs, i, file, line).clone()
 }
 #[inline(always)]
-fn jet_index_vec_ref<'a, T>(xs: &'a [T], i: i64, file: &str, line: u32) -> &'a T {
-    jet_fixed_list_index(xs.len(), i, |index| &xs[index])
-        .unwrap_or_else(|error| jet_arithmetic_stop(file, line, &error.message()))
-}
-#[inline(always)]
 fn jet_index_vec_mut<'a, T>(
     xs: &'a mut [T],
     i: i64,

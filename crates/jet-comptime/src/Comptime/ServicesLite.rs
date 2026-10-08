@@ -6,6 +6,14 @@ use crate::Diagnostics::{Diagnostic, Span};
 use crate::AST::{CtFloat, CtReport, CtValue, Type};
 use crate::MIR::{MirNominalRef, MirRuntimeValue, MirType, MirTypeKind};
 
+// Representation-only binding for the shared Prelude service kernels.
+// This Rust-hosted transport dies at the Jet-runtime cutover.
+mod jet_std {
+    pub fn jet_int_owned_from_i64(value: i64) -> jet_foundation::Numeric::JetInt {
+        jet_foundation::Numeric::JetInt::from_i64(value)
+    }
+}
+
 trait JetShow {
     fn jet_show(&self) -> String;
 }
