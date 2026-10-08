@@ -562,3 +562,105 @@ fn vault_process_start(pid: I64, out: I64) -> Bool {
     jet_rt_free(scratch, I64{48}, I64{8})
     parsed
 }
+
+// SecretsCrypto.rs:2351-2413. All spans borrow the validated UTF-8 lock text.
+// No case normalization: only the nonce accepts uppercase ASCII hex.
+fn vault_valid_hex(bytes: I64, length: I64, count: I64) -> Bool {
+    if (length != count) -> return false
+    nonzero := false
+    at := I64{0}
+    loop at < length {
+        byte :: rt_text_byte(bytes + at)
+        if !((byte >= I64{48} && byte <= I64{57}) || (byte >= I64{65} && byte <= I64{70}) || (byte >= I64{97} && byte <= I64{102})) -> return false
+        if (byte != I64{48}) -> nonzero = true
+        at += I64{1}
+    }
+    nonzero
+}
+fn vault_lock_key(bytes: I64, length: I64, first: I64, second: I64, count: I64) -> Bool {
+    if (length != count) -> return false
+    at := I64{0}
+    loop at < count {
+        word :: if (at < I64{8}) -> first else -> second
+        if (rt_text_byte(bytes + at) != ((word >> ((at % I64{8}) * I64{8})) & I64{255})) -> return false
+        at += I64{1}
+    }
+    true
+}
+fn vault_lock_hex_equal(text: I64, length: I64, raw: I64, count: I64) -> Bool {
+    if (length != count * I64{2}) -> return false
+    at := I64{0}
+    loop at < length {
+        byte :: rt_text_byte(raw + at /% I64{2})
+        nibble :: if (at % I64{2} == I64{0}) -> byte >> I64{4} else -> byte & I64{15}
+        expected :: if (nibble < I64{10}) -> nibble + I64{48} else -> nibble + I64{87}
+        if (rt_text_byte(text + at) != expected) -> return false
+        at += I64{1}
+    }
+    true
+}
+// out exclusively borrows 32 bytes (pid/start/nonce span); scratch borrows8.
+// Failure leaves out untouched, including invalid UTF-8/missing/invalid fields.
+// Each occurrence replaces the previous value, EVEN when numeric parsing fails.
+fn vault_lock_fields(bytes: I64, length: I64, expected_repo: I64, expected_revision: I64, expected_hash: I64, out: I64, scratch: I64) -> Bool {
+    if !vault_utf8_valid(bytes, length) -> return false
+    repo := I64{0}
+    repo_length := I64{0}
+    hash := I64{0}
+    hash_length := I64{0}
+    nonce := I64{0}
+    nonce_length := I64{0}
+    pid := I64{0}
+    start := I64{0}
+    revision := I64{0}
+    pid_valid := false
+    start_valid := false
+    revision_valid := false
+    at := I64{0}
+    loop at < length {
+        at += vault_crypto_trim_start(bytes + at, length - at)
+        if (at == length) -> break
+        end := at
+        equals := length
+        loop end < length {
+            if unicode_is_white_space(rt_text_decode(bytes + end)) -> break
+            if (equals == length && rt_text_byte(bytes + end) == I64{61}) -> equals = end
+            end += rt_text_width(bytes + end)
+        }
+        if (equals != length) {
+            key :: bytes + at
+            key_length :: equals - at
+            value :: bytes + equals + I64{1}
+            value_length :: end - equals - I64{1}
+            if vault_lock_key(key, key_length, I64{1869636978}, I64{0}, I64{4}) {
+                repo = value
+                repo_length = value_length
+            } else if vault_lock_key(key, key_length, I64{7957695010998478194}, I64{0}, I64{8}) {
+                revision_valid = vault_parse_uint(value, value_length, false, scratch)
+                if revision_valid -> revision = rt_text_word(scratch)
+            } else if vault_lock_key(key, key_length, I64{6580592}, I64{0}, I64{3}) {
+                pid_valid = vault_parse_uint(value, value_length, true, scratch)
+                if pid_valid -> pid = rt_text_word(scratch)
+            } else if vault_lock_key(key, key_length, I64{3275088233325621872}, I64{500135195763}, I64{13}) {
+                start_valid = vault_parse_uint(value, value_length, false, scratch)
+                if start_valid -> start = rt_text_word(scratch)
+            } else if vault_lock_key(key, key_length, I64{435459878766}, I64{0}, I64{5}) {
+                nonce = value
+                nonce_length = value_length
+            } else if vault_lock_key(key, key_length, I64{1752392040}, I64{0}, I64{4}) {
+                hash = value
+                hash_length = value_length
+            }
+        }
+        at = end
+    }
+    if (!pid_valid || !start_valid || !revision_valid || revision != expected_revision) -> return false
+    if !vault_lock_hex_equal(repo, repo_length, expected_repo, I64{16}) -> return false
+    if !vault_lock_hex_equal(hash, hash_length, expected_hash, I64{32}) -> return false
+    if !vault_valid_hex(nonce, nonce_length, I64{32}) -> return false
+    rt_text_store(out, pid)
+    rt_text_store(out + I64{8}, start)
+    rt_text_store(out + I64{16}, nonce)
+    rt_text_store(out + I64{24}, nonce_length)
+    true
+}

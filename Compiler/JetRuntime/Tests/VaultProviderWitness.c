@@ -46,6 +46,7 @@ extern void jet_rt_vault_identity_stream_fixture(const Text *, const Text *);
 extern void jet_rt_vault_uint_fixture(const Text *, _Bool, _Bool, int64_t, const Text *);
 extern void jet_rt_vault_proc_parse_fixture(const Text *, _Bool, int64_t);
 extern void jet_rt_vault_proc_read_fixture(void);
+extern void jet_rt_vault_lock_fields_fixture(const Text *, int64_t, _Bool, int64_t, int64_t, const Text *);
 extern void imported_origin_round_trips_and_invalid_combinations_reject(const Text *, const Text *);
 extern void jet_rt_vault_crypto_fixture(const ByteList *);
 extern void jet_rt_vault_crypto_unavailable_fixture(int64_t (*)(void *, void *, int64_t));
@@ -348,6 +349,49 @@ static void process_start_fixtures(void) {
     jet_rt_vault_proc_parse_fixture(&invalid, 0, 0);
     jet_rt_vault_proc_read_fixture();
 }
+static void lock_fields_fixtures(void) {
+    static const char base[] =
+        "repo=00000000000000000000000000000000 revision=0 pid=0 process-start=0 "
+        "nonce=ABCDEF00000000000000000000000000 "
+        "hash=0000000000000000000000000000000000000000000000000000000000000000";
+    static const struct { const char *suffix; int valid; int64_t revision, pid, start; const char *nonce; } cases[] = {
+        {"", 1, 0, 0, 0, "ABCDEF00000000000000000000000000"},
+        {"\xc2\x85pid=+4294967295\xe2\x80\xa8process-start=+18446744073709551615 revision=+18446744073709551615", 1, -1, 4294967295LL, -1, "ABCDEF00000000000000000000000000"},
+        {" pid=17 pid=no", 0, 0, 0, 0, ""},
+        {" revision=1 revision=", 0, 0, 0, 0, ""},
+        {" process-start=1 process-start=18446744073709551616", 0, 0, 0, 0, ""},
+        {" pid=4294967296", 0, 0, 0, 0, ""},
+        {" revision=-0", 0, 0, 0, 0, ""},
+        {" repo=", 0, 0, 0, 0, ""},
+        {" hash=", 0, 0, 0, 0, ""},
+        {" hash=0000000000000000000000000000000000000000000000000000000000000000=extra", 0, 0, 0, 0, ""},
+        {" nonce=00000000000000000000000000000000", 0, 0, 0, 0, ""},
+        {" nonce=GBCDEF00000000000000000000000000", 0, 0, 0, 0, ""},
+        {" nonce=abcdef00000000000000000000000000", 1, 0, 0, 0, "abcdef00000000000000000000000000"},
+        {" pid=no pid=+0 revision=no revision=0 process-start=no process-start=0 ignored=a=b noequals", 1, 0, 0, 0, "ABCDEF00000000000000000000000000"},
+        {" nonce=x nonce=ABCDEF00000000000000000000000000", 1, 0, 0, 0, "ABCDEF00000000000000000000000000"},
+        {"\xff", 0, 0, 0, 0, ""}
+    };
+    char buffer[512];
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+        int n = snprintf(buffer, sizeof(buffer), "%s%s", base, cases[i].suffix);
+        assert(n >= 0 && (size_t)n < sizeof(buffer));
+        Text input = text(buffer), nonce = text(cases[i].nonce);
+        jet_rt_vault_lock_fields_fixture(&input, cases[i].revision, cases[i].valid, cases[i].pid, cases[i].start, &nonce);
+    }
+    // Missing fields independently: remove each entire token from the literal.
+    for (unsigned field = 0; field < 6; ++field) {
+        const char *begin = base;
+        for (unsigned i = 0; i < field; ++i) begin = strchr(begin, ' ') + 1;
+        const char *end = strchr(begin, ' ');
+        if (!end) end = base + strlen(base); else ++end;
+        size_t prefix = (size_t)(begin - base);
+        memcpy(buffer, base, prefix);
+        strcpy(buffer + prefix, end);
+        Text input = text(buffer), nonce = text("");
+        jet_rt_vault_lock_fields_fixture(&input, 0, 0, 0, 0, &nonce);
+    }
+}
 int main(void) {
     jet_rt_alloc_init();
     jet_rt_thread_init();
@@ -413,6 +457,7 @@ int main(void) {
     canonical_read_fixtures();
     stream_read_fixtures();
     process_start_fixtures();
+    lock_fields_fixtures();
     puts("vault witness OK (13 errors, legacy+JVLT2 codec, imported origin/default entropy, native Secret redaction/wipe, long-origin hash, duplicate priority)");
     jet_rt_thread_detach();
     return 0;

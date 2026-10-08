@@ -725,3 +725,30 @@ fn jet_rt_vault_proc_read_fixture() {
     vault_fixture_check(rt_text_word(scratch + I64{16}) == I64{91})
     jet_rt_free(scratch, I64{24}, I64{8})
 }
+
+// Borrowed stale-field parse only: actual recovery is tested by FS fixtures.
+fn jet_rt_vault_lock_fields_fixture(input: I64, revision: I64, valid: Bool, pid: I64, start: I64, nonce: I64) {
+    scratch :: jet_rt_alloc(I64{88}, I64{8})
+    thread_zero(scratch, I64{48})
+    at := I64{48}
+    loop at < (I64{80}) {
+        rt_text_store(scratch + at, I64{91})
+        at += I64{8}
+    }
+    parsed :: vault_lock_fields(rt_text_data(input), rt_text_len(input), scratch, revision, scratch + I64{16}, scratch + I64{48}, scratch + I64{80})
+    vault_fixture_check(parsed == valid)
+    if valid {
+        vault_fixture_check(rt_text_word(scratch + I64{48}) == pid)
+        vault_fixture_check(rt_text_word(scratch + I64{56}) == start)
+        vault_fixture_check(rt_text_word(scratch + I64{72}) == rt_text_len(nonce))
+        vault_fixture_check(rt_text_equal_bytes(rt_text_word(scratch + I64{64}), rt_text_data(nonce), rt_text_len(nonce)))
+    } else {
+        at = I64{48}
+        loop at < (I64{80}) {
+            vault_fixture_check(rt_text_word(scratch + at) == I64{91})
+            at += I64{8}
+        }
+    }
+    thread_zero(scratch, I64{88})
+    jet_rt_free(scratch, I64{88}, I64{8})
+}

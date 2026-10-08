@@ -208,6 +208,12 @@ Decimal path/lock-field rendering writes final bytes through the shared Display
 digit helpers without allocating temporary Text owners. Supplemental fixtures
 cover unsigned boundaries/overflow, Unicode separators, nested proc names,
 unchanged failed outputs and actual repeated self-proc reads.
+Stale lock fields borrow UTF-8 text and split Unicode whitespace followed by the
+first '=' only. The last duplicate wins, including a later failed numeric parse.
+PID is checked u32; revision/process-start are checked u64 with leading '+' allowed.
+Repository/hash compare byte-exact lowercase hex; nonce is exactly 32 ASCII hex
+bytes, uppercase allowed, with at least one nonzero digit. Parse failure leaves
+the successful-output slots untouched. This validator alone does not recover locks.
 Unrecovered reads stay explicit, allowing the recovered caller to perform its
 lock-aware recovery first. Supplemental transport fixtures carry independent
 starting/recipient hash vectors and exercise trim/case/duplicate/UTF-8 policy,
