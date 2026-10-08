@@ -1827,6 +1827,12 @@ Re-export is `pub use` (D-MOD4); a directory module's summary file is
 `module.jet`. Ambiguous module resolution E0606/E0607. `import` is not a
 keyword.
 
+Types declared in different modules retain distinct checked identities even
+when their leaf names are equal. Import aliases select the declaring module;
+lowering consumes that resolved identity, never a bundle-wide leaf-name search.
+The executable witness is
+[`same_type_names`](../../Examples/features/modules/same_type_names/run.jet).
+
 `.[ ]` has one prefix-member law. In expression position, entries remain
 members and produce their values (`point.[x, y]`); after `use`, entries produce
 aliases (`use math.[sin, cos as c]`). The expression grammar keeps member
