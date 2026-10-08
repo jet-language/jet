@@ -1,0 +1,11 @@
+# Port of build_entry.rs:814-850. PENDING-GRAMMAR: copy/remove/file equality.
+fixture: fixtures/image-restore
+env: JET_STORE_DIR={work}/run-cache
+env: NO_COLOR=1
+step: jet build main.jet
+copy: .jet/build/main first-image
+remove: .jet/build/main
+step: jet build main.jet
+file: .jet/build/main == first-image
+step: built
+stdout: = image-restore.out

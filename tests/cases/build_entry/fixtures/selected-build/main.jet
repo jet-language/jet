@@ -1,0 +1,16 @@
+
+fn build(b: BuildContext) -[Exec, FS]> BuildPlan {
+    #Impure("write CLI test output") {
+    action :: b.action(
+        "stamp",
+        [],
+        ["stamp.txt"],
+        ["sh", "-c", "printf cli-built > stamp.txt"],
+        ["Exec", "FS"]
+        )
+        app :: b.add_executable("app", ["main.jet"], [action])
+    return b.plan(app)
+    }
+    return b.plan()
+}
+fn run() { print("ok") }
