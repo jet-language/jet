@@ -1138,7 +1138,10 @@ default) or `tls`; the corresponding default ports are 587 and 465.
 optional `SMTP_DKIM_SIGNED_HEADERS`; partial configuration fails before
 connecting.
 
-The safe limits and environment-configuration policy live in `Core/email`.
+The safe limits, environment configuration, and private configuration predicates
+live in `Core/email`. Before creating a mailer, `smtp_from_env` checks limits,
+host, port/security pairing, authentication name, CA PEM, and DKIM header policy,
+in that order. The first invalid limit is reported in field declaration order.
 `Limits.safe()` supplies the same six bounds used by `smtp_from_env`; DKIM
 environment keys require canonical standard base64 independently of edition.
 The decoder borrows the encoded `Secret`, uses whole four-byte groups, and

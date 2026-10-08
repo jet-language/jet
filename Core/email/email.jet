@@ -155,7 +155,236 @@ pub fn smtp_from_env() -[Env, Net]> Mailer EmailError! {
         }
         else -> {}
     }
-    core.email.smtp(SMTPConfig{host: host, port: port, security: security, auth: auth, recipient_policy: recipient_policy, trust: trust, limits: limits_safe(), dkim: dkim})
+    config :: SMTPConfig{host: host, port: port, security: security, auth: auth, recipient_policy: recipient_policy, trust: trust, limits: limits_safe(), dkim: dkim}
+    validate_smtp_config(config) ? unit -> unit ! error -> return Err(error)
+    core.email.smtp(config)
+}
+
+// Seed oracle: Prelude/CoreLib/Email.rs:168-184. First invalid field wins.
+fn validate_limits(limits: Limits) EmailError! {
+    if limits.max_reply_line_bytes < 64 || limits.max_reply_line_bytes > 65536 ->
+        return Err(construction_error("smtp", "max_reply_line_bytes must be between 64 and 65536; got {limits.max_reply_line_bytes}"))
+    if limits.max_reply_lines < 1 || limits.max_reply_lines > 1000 ->
+        return Err(construction_error("smtp", "max_reply_lines must be between 1 and 1000; got {limits.max_reply_lines}"))
+    if limits.max_capabilities < 1 || limits.max_capabilities > 1000 ->
+        return Err(construction_error("smtp", "max_capabilities must be between 1 and 1000; got {limits.max_capabilities}"))
+    if limits.max_recipients < 1 || limits.max_recipients > 10000 ->
+        return Err(construction_error("smtp", "max_recipients must be between 1 and 10000; got {limits.max_recipients}"))
+    if limits.max_message_bytes < 1 || limits.max_message_bytes > 1073741824 ->
+        return Err(construction_error("smtp", "max_message_bytes must be between 1 and 1073741824; got {limits.max_message_bytes}"))
+    if limits.max_auth_challenge_bytes < 1 || limits.max_auth_challenge_bytes > 65536 ->
+        return Err(construction_error("smtp", "max_auth_challenge_bytes must be between 1 and 65536; got {limits.max_auth_challenge_bytes}"))
+    Ok()
+}
+
+// Seed oracle: Prelude/CoreLib/Email.rs:310-338; preserve validation order.
+// Key length/password UTF-8 checks belong to smtp_bytes, not this predicate.
+fn validate_smtp_config(config: SMTPConfig) EmailError! {
+    validate_limits(config.limits) ? unit -> unit ! error -> return Err(error)
+    host :: config.host.bytes()
+    if host.len() == 0 || host.len() > 253 ->
+        return Err(construction_error("smtp", "host must contain 1 to 253 non-whitespace ASCII bytes"))
+    loop byte in host {
+        n :: Int.from_u8(byte)
+        if n > 127 || n <= 32 || n == 127 ->
+            return Err(construction_error("smtp", "host must contain 1 to 253 non-whitespace ASCII bytes"))
+    }
+    if config.port < 1 || config.port > 65535 ->
+        return Err(construction_error("smtp", "port must be between 1 and 65535"))
+    if config.port == 587 && config.security != .StartTLS ->
+        return Err(construction_error("smtp", "port 587 requires verified STARTTLS"))
+    if config.port == 465 && config.security != .TLS ->
+        return Err(construction_error("smtp", "port 465 requires TLS from connect"))
+    if config.auth == .Password(username, _) {
+        bytes :: username.bytes()
+        if bytes.len() == 0 || bytes.len() > 512 ->
+            return Err(construction_error("smtp", "SMTP username must contain 1 to 512 bytes without controls"))
+        loop byte in bytes {
+            n :: Int.from_u8(byte)
+            if n < 32 || n == 127 ->
+                return Err(construction_error("smtp", "SMTP username must contain 1 to 512 bytes without controls"))
+        }
+    }
+    if config.trust == .SystemPlusCa(pem) {
+        validate_ca_pem(pem) ? unit -> unit ! error -> return Err(error)
+    }
+    if config.dkim == .Val(dkim) {
+        validate_dkim_config(dkim) ? unit -> unit ! error -> return Err(error)
+    }
+    Ok()
+}
+
+// Seed oracle: Prelude/CoreLib/Email.rs:341-346.
+fn valid_dkim_dns_name(value: String) -> Bool Never! {
+    if value.bytes().len() == 0 || value.bytes().len() > 253 -> return false
+    loop label in value.split(".") {
+        bytes :: label.bytes()
+        if bytes.len() == 0 || bytes.len() > 63 || bytes[0] == (U8{45}) || bytes[bytes.len() - 1] == (U8{45}) -> return false
+        loop byte in bytes {
+            if !ascii_alphanumeric(byte) && byte != (U8{45}) -> return false
+        }
+    }
+    true
+}
+
+// Seed oracle: Prelude/CoreLib/Email.rs:348-389. Never inspect the Secret.
+fn validate_dkim_config(dkim: DKIMConfig) EmailError! {
+    if !valid_dkim_dns_name(dkim.domain) ->
+        return Err(construction_error("dkim", "domain must be a valid ASCII DNS name"))
+    if dkim.selector.contains(".") || !valid_dkim_dns_name(dkim.selector) ->
+        return Err(construction_error("dkim", "selector must be one valid ASCII DNS label"))
+    if dkim.signed_headers.len() == 0 ->
+        return Err(construction_error("dkim", "signed_headers must not be empty"))
+    if dkim.signed_headers.len() > 64 ->
+        return Err(construction_error("dkim", "signed_headers must contain at most 64 names"))
+    normalized := [String]{}
+    list_bytes := 0
+    has_from := false
+    loop name in dkim.signed_headers {
+        bytes :: name.bytes()
+        if bytes.len() == 0 ->
+            return Err(construction_error("dkim", "signed_headers must contain valid header names"))
+        loop byte in bytes {
+            n :: Int.from_u8(byte)
+            if n < 33 || n > 126 || n == 58 ->
+                return Err(construction_error("dkim", "signed_headers must contain valid header names"))
+        }
+        lower :: ascii_lower(name)
+        if lower == "received" || lower == "return-path" || lower == "dkim-signature" ||
+            lower == "authentication-results" || lower == "arc-authentication-results" ||
+            lower == "arc-message-signature" || lower == "arc-seal" ->
+            return Err(construction_error("dkim", "signed_headers contains forbidden hop header `{lower}`"))
+        loop existing in normalized {
+            if existing == lower -> return Err(construction_error("dkim", "signed_headers contains duplicate `{lower}`"))
+        }
+        if lower == "from" -> has_from = true
+        list_bytes += lower.bytes().len()
+        &normalized.push(lower)
+    }
+    if !has_from -> return Err(construction_error("dkim", "signed_headers must include `from`"))
+    if list_bytes + normalized.len() - 1 + 6 > 998 ->
+        return Err(construction_error("dkim", "signed_headers exceeds the DKIM header line bound"))
+    Ok()
+}
+
+// Seed oracle: Prelude/CoreLib/Email.rs:391-420. Rust trim is Unicode-aware.
+fn validate_ca_pem(pem: [U8]) EmailError! {
+    if pem.len() == 0 -> return Err(construction_error("smtp", "custom CA PEM must not be empty"))
+    text :: String.from_bytes(pem) ?? return Err(construction_error("smtp", "custom CA PEM must be UTF-8 text"))
+    raw :: text.bytes()
+    begin :: "-----BEGIN CERTIFICATE-----".bytes()
+    end :: "-----END CERTIFICATE-----".bytes()
+    cursor := 0
+    certificates := 0
+    loop ca_marker(raw, cursor, begin) == .Val(start) {
+        if byte_text(raw[cursor..<start]).trim().bytes().len() != 0 ->
+            return Err(construction_error("smtp", "custom CA PEM contains data outside certificate blocks"))
+        cursor = start + begin.len()
+        stop :: ca_marker(raw, cursor, end) ?? return Err(construction_error("smtp", "custom CA PEM has an unterminated certificate"))
+        der :: decode_ca_base64(byte_text(raw[cursor..<stop])) ? value -> value ! error -> return Err(error)
+        if der.len() < 4 || der[0] != (U8{48}) ->
+            return Err(construction_error("smtp", "custom CA PEM does not contain an X.509 DER certificate"))
+        certificates += 1
+        cursor = stop + end.len()
+    }
+    if certificates == 0 || byte_text(raw[cursor..<raw.len()]).trim().bytes().len() != 0 ->
+        return Err(construction_error("smtp", "custom CA PEM must contain only certificate blocks"))
+    Ok()
+}
+
+fn ca_marker(raw: [U8], start: Int, marker: [U8]) -> Int? Never! {
+    cursor := start
+    loop cursor + marker.len() <= raw.len() {
+        matches := true
+        loop index in 0..<marker.len() {
+            if raw[cursor + index] != marker[index] {
+                matches = false
+                break
+            }
+        }
+        if matches -> return Val(cursor)
+        cursor += 1
+    }
+    None
+}
+
+// Seed oracle: Prelude/CoreLib/Email.rs:422-461. Unlike the DKIM decoder this
+// accepts noncanonical trailing bits, but rejects bytes after a padded quartet.
+fn decode_ca_base64(text: String) -> [U8] EmailError! {
+    out := [U8]{}
+    quartet := [U8]{0, 0, 0, 0}
+    used := 0
+    padded := false
+    loop byte in text.bytes() {
+        n :: Int.from_u8(byte)
+        if n == 32 || n == 9 || n == 10 || n == 12 || n == 13 -> next
+        if padded -> return Err(construction_error("smtp", "custom CA PEM has data after base64 padding"))
+        quartet[used] = byte
+        used += 1
+        if used == 4 {
+            values := [Int]{0, 0, 0, 0}
+            pads := 0
+            loop index in 0..<4 {
+                if quartet[index] == (U8{61}) {
+                    pads += 1
+                } else {
+                    if pads != 0 -> return Err(construction_error("smtp", "custom CA PEM has invalid base64 padding"))
+                    values[index] = base64_value(quartet[index]) ?? return Err(construction_error("smtp", "custom CA PEM contains invalid base64"))
+                }
+            }
+            if pads > 2 -> return Err(construction_error("smtp", "custom CA PEM has invalid base64 padding"))
+            &out.push(U8{((values[0] << 2) | (values[1] >> 4)) & 255})
+            if pads < 2 -> &out.push(U8{((values[1] << 4) | (values[2] >> 2)) & 255})
+            if pads == 0 -> &out.push(U8{((values[2] << 6) | values[3]) & 255})
+            padded = pads != 0
+            used = 0
+        }
+    }
+    if used != 0 || out.len() == 0 -> return Err(construction_error("smtp", "custom CA PEM contains incomplete base64"))
+    Ok(out)
+}
+
+// Port of tests/corelib_parts/email.rs:145-190 (core-email-policy row 437).
+// Exact errors observed from the current Rust seed, not inferred from a port.
+#Test("SMTP private limits config CA and DKIM preserve ratified law") {
+    safe :: limits_safe()
+    invalid := safe
+    invalid.max_reply_line_bytes = 63
+    invalid.max_reply_lines = 0
+    if validate_limits(invalid) == .Err(error) {
+        assert_eq(error, EmailError.Configuration{operation: "smtp", server: None, code: None, reason: "max_reply_line_bytes must be between 64 and 65536; got 63"})
+    } else { panic("invalid limits accepted") }
+    config := SMTPConfig{
+        host: "smtp.example.com", port: 587, security: .StartTLS,
+        auth: .None, recipient_policy: .RequireAll,
+        trust: .SystemPlusCa{pem: "-----BEGIN CERTIFICATE-----\nMAMCAQE=\n-----END CERTIFICATE-----\n".bytes()},
+        limits: safe, dkim: None,
+    }
+    assert(validate_smtp_config(config) == .Ok(_))
+    config.dkim = Val(DKIMConfig{domain: "example.com", selector: "login-2026",
+        private_key: Secret.from_bytes([U8]{}), signed_headers: [String]{"subject"}})
+    if validate_smtp_config(config) == .Err(error) {
+        assert_eq(error, EmailError.Configuration{operation: "dkim", server: None, code: None, reason: "signed_headers must include `from`"})
+    } else { panic("DKIM without from accepted") }
+    config.dkim = Val(DKIMConfig{domain: "example.com", selector: "login-2026",
+        private_key: Secret.from_bytes([U8]{}), signed_headers: [String]{"from", "FROM"}})
+    if validate_smtp_config(config) == .Err(error) {
+        assert_eq(error, EmailError.Configuration{operation: "dkim", server: None, code: None, reason: "signed_headers contains duplicate `from`"})
+    } else { panic("duplicate DKIM header accepted") }
+    config.dkim = Val(DKIMConfig{domain: "example.com", selector: "login-2026",
+        private_key: Secret.from_bytes([U8]{}), signed_headers: [String]{"from", "received"}})
+    if validate_smtp_config(config) == .Err(error) {
+        assert_eq(error, EmailError.Configuration{operation: "dkim", server: None, code: None, reason: "signed_headers contains forbidden hop header `received`"})
+    } else { panic("DKIM hop header accepted") }
+    malformed :: SMTPConfig{
+        host: "smtp.example.com", port: 465, security: .TLS,
+        auth: .None, recipient_policy: .DeliverAccepted,
+        trust: .SystemPlusCa{pem: "-----BEGIN PRIVATE KEY-----\nAA==\n-----END PRIVATE KEY-----".bytes()},
+        limits: safe, dkim: None,
+    }
+    if validate_smtp_config(malformed) == .Err(error) {
+        assert_eq(error, EmailError.Configuration{operation: "smtp", server: None, code: None, reason: "custom CA PEM must contain only certificate blocks"})
+    } else { panic("noncertificate CA accepted") }
 }
 
 #Test("safe SMTP limits preserve every bound") {
