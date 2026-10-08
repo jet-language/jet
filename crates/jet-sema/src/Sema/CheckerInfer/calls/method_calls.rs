@@ -7848,7 +7848,6 @@ impl<'a> Checker<'a> {
                     checker.check_call_argument_captures(&args[0].expr);
                     inferred
                 })?;
-                pre_inferred_operator = Some(vec![Some(rhs.clone())]);
                 let (rhs_type, _, _) = self.capability_type_context(&rhs);
                 let (owner_type, registry, traits) = self.capability_type_context(&recv_ty);
                 if let Some(row) = traits.operator_impl_for(&owner_type, trait_name, &rhs_type) {
@@ -7875,6 +7874,7 @@ impl<'a> Checker<'a> {
                     self.diags.push(diagnostic);
                     return None;
                 }
+                pre_inferred_operator = Some([Some(rhs)]);
             }
         }
         // Built-in value types have no user `struct`/`enum` registry entry,
@@ -8195,7 +8195,6 @@ impl<'a> Checker<'a> {
             span,
             &mut call_access,
         );
-        let pre_inferred_method = pre_inferred_operator.or(pre_inferred_method);
         self.record_method_reference(&type_name, method, span);
         self.record_edge(
             crate::Sema::effect_key(Some(dispatch_type_name), method),
@@ -8283,7 +8282,8 @@ impl<'a> Checker<'a> {
             Some(receiver),
             args,
             span,
-            pre_inferred_method.as_deref(),
+            pre_inferred_operator.as_ref().map(|types| types.as_slice())
+                .or(pre_inferred_method.as_deref()),
             Some(call_access),
         )?;
         let (resolved_ret, return_type) =
