@@ -11,6 +11,8 @@
 // all parser/model blockers, no reference execution or fixture writes. The
 // slice map has slice/file columns; classes escape literal semicolons as \;.
 // A clean model is still runtime-unknown, never a reference-run PASS.
+// --draft OUT [--attempt HAND.tsv] writes incomplete, assertion-annotated
+// historical drafts ONLY outside the checkout. DRAFTED is never CONVERTED.
 // Unsupported syntax/API facts and failed original assertions are HAND-PORT,
 // not permission to weaken a test. RETIRED rows name Rust-only subjects.
 // --report FILE records each decision; --exclusions FILE lists raw #[test]
@@ -113,7 +115,7 @@ export function functionsIn(text, file = '') {
     const end = closeAt(tokens, open);
     result.push({ file, name, test, line: tokens[test ? attributeStart : i].line, endLine: tokens[end].endLine,
       tokens: tokens.slice(open + 1, end), lexicalTokens: tokens, signature: tokens.slice(i + 2, open),
-      body: text.slice(tokens[open].end, tokens[end].start) });
+      bodyOffset: tokens[open].end, body: text.slice(tokens[open].end, tokens[end].start) });
     test = false; i = end;
   }
   return result;
@@ -281,6 +283,7 @@ export function collectFunctions(root = ROOT, inventory = null) {
       files.add(realpathSync(found)); modules.push({ file: shown, module: name, target: relative(root, found) }); explicit = null;
     }
   }
+  for (const fn of all) fn.moduleBindings = modules.filter(module => module.file === fn.file);
   const tests = all.filter((fn) => fn.test).sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
   const keys = new Set();
   for (const fn of tests) { const key = `${fn.file}:${fn.line}`; if (keys.has(key)) refuse(`duplicate physical function: ${key}`); keys.add(key); }
@@ -377,7 +380,7 @@ class Parser {
     this.need(close); return args;
   }
   expr(min = 0) {
-    let node;
+    const start = this.tokens[this.i]; let node;
     if (this.peek('!') || this.peek('&') || this.peek('*')) { const op = this.take().value; node = { type: 'unary', op, arg: this.expr(9) }; }
     else if (this.peek('|') || this.peek('||')) {
       const zero = this.take().value === '||';
@@ -402,13 +405,13 @@ class Parser {
         let name = token.value;
         while (this.peek('::')) { this.take(); name += `::${this.take().value}`; }
         if (this.peek('!')) { this.take(); name += '!'; }
-        node = this.peek('(') ? { type: 'call', name, args: this.group() } : { type: 'variable', name };
+        node = this.peek('(') ? { type: 'call', name, args: this.group(), line: token.line, offset: token.start } : { type: 'variable', name, line: token.line, offset: token.start };
       } else refuse(`unmodeled token ${token.raw} at line ${token.line}`);
     }
     while (this.i < this.tokens.length) {
       if (this.peek('.')) {
-        this.take(); const name = this.take().value;
-        node = this.peek('(') ? { type: 'method', object: node, name, args: this.group() } : { type: 'field', object: node, name };
+        this.take(); const member = this.take(), name = member.value;
+        node = this.peek('(') ? { type: 'method', object: node, name, args: this.group(), line: member.line, offset: member.start } : { type: 'field', object: node, name, line: member.line, offset: member.start };
       } else if (this.peek('[')) { const [index] = this.group('[', ']'); node = { type: 'index', object: node, index }; }
       else {
         const op = this.tokens[this.i]?.value;
@@ -417,6 +420,7 @@ class Parser {
         this.take(); node = { type: 'binary', op, left: node, right: this.expr(precedence + 1) };
       }
     }
+    node.line ??= start?.line; node.offset ??= start?.start;
     return node;
   }
   binding() {
@@ -463,8 +467,9 @@ function checkAst(node, blockers = null) {
   if (!node) return;
   const allowedCalls = ['jet::compile', 'jet::compile_with_path', 'include_str!', 'assert!', 'assert_eq!', 'assert_ne!', 'matches!', 'panic!', 'format!', 'common::unique_tmp', 'fs::create_dir_all', 'fs::write', 'common::build_and_run', 'tir_support::build_and_run', 'tir_support::assert_tiers_agree'];
   const allowedMethods = ['iter', 'any', 'all', 'find', 'filter', 'collect', 'count', 'len', 'is_empty', 'contains', 'starts_with', 'ends_with', 'as_str', 'expect', 'expect_err', 'unwrap', 'unwrap_err', 'unwrap_or_else', 'is_ok', 'is_err', 'is_some', 'is_none', 'trim', 'replace', 'to_string', 'to_owned', 'join', 'to_str'];
-  const unsupported = message => blockers ? blockers.add(message) : refuse(message);
-  if (node.type === 'call' && !allowedCalls.includes(node.name)) unsupported(`unmodeled call ${node.name}`);
+  const unsupported = message => blockers ? blockers.add(message, node) : refuse(message);
+  if (node.helperBlocker) unsupported(node.helperBlocker);
+  else if (node.type === 'call' && !allowedCalls.includes(node.name)) unsupported(`unmodeled call ${node.name}`);
   if (node.type === 'method' && !allowedMethods.includes(node.name)) unsupported(`unmodeled method ${node.name}`);
   if (node.type === 'field' && !['lints', 'code', 'what', 'why', 'fix', 'severity'].includes(node.name)) unsupported(`unmodeled field ${node.name}`);
   // Message operands are never assertions; panic's arguments are only failure text.
@@ -477,7 +482,7 @@ function checkAst(node, blockers = null) {
   }
 }
 
-function invoke(binary, args, cwd, timeout, stdin, receipts) {
+function invoke(binary, args, cwd, timeout, stdin, receipts, captureStreams = false) {
   const env = { ...process.env, NO_COLOR: '1', CLICOLOR: '0', TERM: 'dumb', JET_RECEIPT_BYPASS: '1', JET_REPL_HISTORY: 'off' };
   delete env.JET_COMPILER_EXTENSION;
   delete env.JET_SCHEMA_CACHE_DIR;
@@ -485,6 +490,7 @@ function invoke(binary, args, cwd, timeout, stdin, receipts) {
   const run = spawnSync(binary, args, { cwd, encoding: 'utf8', timeout, input: stdin, maxBuffer: 16 * 1024 * 1024, env });
   const elapsed_ms = Math.round(performance.now() - started);
   const receipt = { binary, args, cwd, elapsed_ms, code: run.status, signal: run.signal, error: run.error?.message ?? null };
+  if (captureStreams) { receipt.stdout = run.stdout; receipt.stderr = run.stderr; }
   if (run.status === 101) receipt.stderr = run.stderr ?? '';
   receipts.push(receipt);
   if (run.error || run.signal || run.status === null || run.status === 101) {
@@ -572,6 +578,14 @@ function helperBinding(fn, name) {
     while (end < imports.length && imports[end].value !== ';') end++;
     expand(imports.slice(i + 1, end)); i = end;
   }
+  if (path.length === 2) {
+    const module = fn.moduleBindings?.find(binding => binding.module === path[0]);
+    if (module) {
+      const canonical = ['common', 'tir_support'].find(name => module.target === `tests/${name}/mod.rs`);
+      if (canonical) path[0] = canonical;
+      else if (['common', 'tir_support'].includes(path[0])) return null;
+    }
+  }
   const leaf = path.at(-1);
   const local = helpers.filter(helper => helper.name === leaf && (helper.file === fn.file ||
     (dirname(fn.file) !== 'tests' && dirname(helper.file) === dirname(fn.file))));
@@ -595,7 +609,7 @@ function canonicalRunCalls(fn, node) {
         'tir_support::assert_tiers_agree': 'assert_tiers_agree_with_package ( name , src , expected_stdout , None ) ;',
       };
       if (!helper || raw === expected[binding.name]) node.name = binding.name;
-      else refuse(`unmodeled call ${node.name}: helper body differs from ${binding.name}`);
+      else node.helperBlocker = `unmodeled call ${node.name}: helper body differs from ${binding.name}`;
     } else if (binding?.helper?.name === 'build_and_run') {
       // Local wrappers qualify by exact body, not by their familiar name.
       const helper = binding.helper, raw = helper.tokens.map(token => token.raw).join(' ');
@@ -679,12 +693,18 @@ export function assertionPlan(fn) {
 // parser/model remains authoritative; balanced recovery inspects every failed
 // statement's nested bodies/operands instead of hiding its later blockers.
 export function analyzeFunction(fn) {
-  const blockers = new Set(), normalize = error => error.message.replace(/ at line \d+$/u, '');
+  const classes = new Set(), occurrences = [], seen = new Set(), normalize = error => error.message.replace(/ at line \d+$/u, '');
+  const blockers = { add(message, location = {}) {
+    classes.add(message);
+    const line = location.line ?? fn.line, offset = location.offset ?? location.start ?? line;
+    const key = `${offset}:${message}`;
+    if (!seen.has(key)) { seen.add(key); occurrences.push({ class: message, line, offset }); }
+  } };
   const retirement = retireRustAssertions(fn), tokens = availabilityGuards(fn, retirement.tokens);
   const bindings = new Set();
   const model = (node, scope) => {
     if (!node || typeof node !== 'object') return;
-    if (node.type === 'variable' && !scope.has(node.name)) blockers.add(`unbound value ${node.name}`);
+    if (node.type === 'variable' && !scope.has(node.name)) blockers.add(`unbound value ${node.name}`, node);
     if (node.type === 'closure') { model(node.body, new Set([...scope, node.param])); return; }
     for (const [key, value] of Object.entries(node)) {
       if (key === 'args' && node.type === 'call' && node.name === 'panic!') continue;
@@ -715,13 +735,13 @@ export function analyzeFunction(fn) {
         if (list[endName + 1]?.kind === 'punct' && list[endName + 1]?.value === '!') { name += '!'; endName++; }
         if (list[endName + 1]?.kind === 'punct' && list[endName + 1]?.value === '(') {
           const end = closeAt(list, endName + 1), method = list[i - 1]?.value === '.';
-          checkAst({ type: method ? 'method' : 'call', name, args: [] }, blockers);
+          checkAst({ type: method ? 'method' : 'call', name, args: [], line: token.line, offset: token.start }, blockers);
           let args = topLevelSplit(list.slice(endName + 2, end), ',');
           if (['assert!', 'assert_eq!', 'assert_ne!'].includes(name)) args = args.slice(0, name === 'assert!' ? 1 : 2);
           if (name !== 'panic!') args.forEach(scanOperands);
           i = end; continue;
         }
-        if (list[i - 1]?.value === '.') checkAst({ type: 'field', name }, blockers);
+        if (list[i - 1]?.value === '.') checkAst({ type: 'field', name, line: token.line, offset: token.start }, blockers);
       }
       if (['(', '['].includes(token.value)) { const end = closeAt(list, i); scanOperands(list.slice(i + 1, end)); i = end; }
     }
@@ -739,11 +759,11 @@ export function analyzeFunction(fn) {
         statements.forEach(node => checkAst(node, blockers));
         modelStatements(statements, bindings);
       }
-      catch (error) { blockers.add(normalize(error)); scanOperands(segment); }
+      catch (error) { blockers.add(normalize(error), parser.tokens[parser.i] ?? segment[0]); scanOperands(segment); }
     }
   };
   scanStatements(tokens);
-  return { file: fn.file, fn: fn.name, classes: [...blockers].sort(), reference: 'runtime-unknown' };
+  return { file: fn.file, fn: fn.name, classes: [...classes].sort(), occurrences: occurrences.sort((a, b) => a.offset - b.offset), reference: 'runtime-unknown' };
 }
 
 function rustEqual(a, b) {
@@ -888,6 +908,27 @@ async function evaluate(node, env, context) {
   }
 }
 
+async function executeStatements(statements, local, context) {
+  for (const statement of statements) {
+    if (statement.type === 'loop') {
+      const values = await evaluate(statement.iterable, local, context);
+      if (!Array.isArray(values)) refuse('loop iterable is not a finite extracted array');
+      for (const value of values) {
+        if (statement.names.length > 1 && (!Array.isArray(value) || value.length !== statement.names.length)) refuse('loop tuple arity mismatch');
+        const inner = { ...local };
+        statement.names.forEach((name, i) => { inner[name] = statement.names.length === 1 ? value : value[i]; });
+        await executeStatements(statement.statements, inner, context);
+      }
+    } else {
+      const value = await evaluate(statement.expr, local, context);
+      if (statement.names) {
+        if (statement.names.length > 1 && (!Array.isArray(value) || value.length !== statement.names.length)) refuse('tuple arity mismatch');
+        statement.names.forEach((name, i) => { local[name] = statement.names.length === 1 ? value : value[i]; });
+      }
+    }
+  }
+}
+
 export async function checkOriginal(fn, reference, root = ROOT) {
   const plan = assertionPlan(fn), env = {};
   const context = { fn, root, reference, observations: [], assertions: 0, retiredAssertions: plan.retiredAssertions };
@@ -940,39 +981,137 @@ export async function checkOriginal(fn, reference, root = ROOT) {
     const observation = await reference(source, mode, { path, ...(project ? { project } : {}), lint: mode === 'compile' && lint, agreement: mode === 'run' && agreement, interpreterAgreement: mode === 'run' && interpreterAgreement });
     return { ...observation, project, readsStderr };
   };
-  const execute = async (statements, local) => {
-    for (const statement of statements) {
-      if (statement.type === 'loop') {
-        const values = await evaluate(statement.iterable, local, context);
-        if (!Array.isArray(values)) refuse('loop iterable is not a finite extracted array');
-        for (const value of values) {
-          if (statement.names.length > 1 && (!Array.isArray(value) || value.length !== statement.names.length)) refuse('loop tuple arity mismatch');
-          const inner = { ...local };
-          statement.names.forEach((name, i) => { inner[name] = statement.names.length === 1 ? value : value[i]; });
-          await execute(statement.statements, inner);
-        }
-      } else {
-        const value = await evaluate(statement.expr, local, context);
-        if (statement.names) {
-          if (statement.names.length > 1 && (!Array.isArray(value) || value.length !== statement.names.length)) refuse('tuple arity mismatch');
-          statement.names.forEach((name, i) => { local[name] = statement.names.length === 1 ? value : value[i]; });
-        }
-      }
-    }
-  };
-  await execute(plan, env);
+  await executeStatements(plan, env, context);
   if (!context.observations.length) refuse('no supported Jet source invocation');
   return context;
+}
+
+function externalDraftRoot(path, root) {
+  const output = resolve(path), checkout = realpathSync(root);
+  let ancestor = output;
+  while (!existsSync(ancestor)) ancestor = dirname(ancestor);
+  const physical = resolve(realpathSync(ancestor), relative(ancestor, output));
+  const common = spawnSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], { cwd: checkout, encoding: 'utf8' });
+  const roots = [checkout];
+  if (common.status === 0 && basename(common.stdout.trim()) === '.git') roots.push(dirname(realpathSync(common.stdout.trim())));
+  if (roots.some(directory => physical === directory || physical.startsWith(`${directory}/`))) refuse('draft output must be outside the checkout');
+  return physical;
+}
+
+export async function draftFunction(fn, options) {
+  const root = options.root ?? ROOT, output = externalDraftRoot(options.draft, root);
+  if (!options.converterSha) refuse('draft requires the converter source sha');
+  const suite = fn.file.replace(/^tests\//u, '').replace(/\.rs$/u, '').replaceAll('/', '_');
+  const directory = join(output, options.slice ?? 'unassigned', suite), stem = fn.name;
+  mkdirSync(directory, { recursive: true });
+  const casePath = join(directory, `${stem}.case`), filesRoot = join(directory, `${stem}.files`);
+  mkdirSync(filesRoot, { recursive: true });
+  const analysis = analyzeFunction(fn), todos = [...analysis.occurrences], seen = new Set(todos.map(row => `${row.offset}:${row.class}`));
+  const note = (message, token) => {
+    const row = { class: message.split('\n')[0], line: token?.line ?? fn.line, offset: token?.offset ?? token?.start ?? fn.bodyOffset };
+    const key = `${row.offset}:${row.class}`;
+    if (!seen.has(key)) { seen.add(key); todos.push(row); }
+  };
+  const env = {}, reference = options.reference, captured = [], sources = [], mapped = [];
+  const firstInvocation = reference.invocations?.length ?? 0;
+  const context = { fn, root, reference, observations: [], assertions: 0, retiredAssertions: [] };
+  context.observe = async (source, mode, project = null) => {
+    const ordinal = sources.length + 1, entry = project?.entry ?? `${stem}.jet`;
+    const staged = `tests/${mode === 'run' ? 'run' : 'ui'}/${suite}/${stem}/${entry}`, scope = `source-${ordinal}`;
+    const files = project?.files ?? [{ path: entry, content: source }];
+    for (const input of files) {
+      const path = join(filesRoot, scope, dirname(staged), relative(dirname(entry), input.path));
+      if (!path.startsWith(`${filesRoot}/`)) refuse('draft fixture escapes output root');
+      mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, input.content);
+    }
+    sources.push({ source, mode, project, staged, scope });
+    const before = reference.invocations?.length ?? 0;
+    let observation;
+    try {
+      observation = await reference(source, mode, { path: staged, ...(project ? { project } : {}), agreement: context.allTier === true, interpreterAgreement: context.allTier === true });
+      return observation;
+    } finally {
+      for (const receipt of reference.invocations?.slice(before) ?? []) {
+        // A failed spawn has no observed exit. Never fabricate its expectations.
+        if (receipt.code === null) continue;
+        if (typeof receipt.stdout !== 'string' || typeof receipt.stderr !== 'string') refuse('draft reference did not retain captured streams');
+        const number = captured.length + 1, stdout = `${stem}.capture-${number}.stdout`, stderr = `${stem}.capture-${number}.stderr`;
+        const rebase = value => value.replaceAll(receipt.cwd, `{work}/${scope}`);
+        const program = receipt.binary === options.binary ? 'jet' : rebase(receipt.binary);
+        const command = [program, ...receipt.args.map(rebase)].map(arg => /\s/u.test(arg) ? JSON.stringify(arg) : arg).join(' ');
+        const caseLines = [`step: ${command}`, `cwd: {work}/${scope}`, `exit: ${receipt.code}`, `stdout: = ${stdout}`, `stderr: = ${stderr}`];
+        writeFileSync(join(directory, stdout), receipt.stdout);
+        writeFileSync(join(directory, stderr), receipt.stderr);
+        captured.push({ number, caseLines, receipt });
+      }
+      if (observation) context.observations.push(observation);
+    }
+  };
+  const tokens = availabilityGuards(fn, retireRustAssertions(fn).tokens);
+  for (const segment of topLevelSplit(tokens, ';')) {
+    if (!segment.length) continue;
+    const terminator = { kind: 'punct', value: ';', raw: ';', line: segment.at(-1).line };
+    let plan;
+    try {
+      plan = new Parser(segment[0].value === 'for' && segment.at(-1).value === '}' ? segment : [...segment, terminator]).statements();
+      plan.forEach(node => canonicalRunCalls(fn, node));
+      plan.forEach(node => checkAst(node));
+    } catch { continue; } // Full analysis records each unsupported construct.
+    const before = context.assertions;
+    context.allTier = JSON.stringify(plan).includes('"tir_support::assert_tiers_agree"');
+    try {
+      await executeStatements(plan, env, context);
+      if (context.assertions > before && captured.length) mapped.push({ start: segment[0].start, end: segment.at(-1).end, capture: captured.at(-1).number });
+    } catch (error) { note(error.message, segment[0]); }
+  }
+  // Preserve raw inputs even when their eventual invocation is unsupported.
+  for (const [name, value] of Object.entries(env)) {
+    if (value instanceof InputPath) for (const [path, content] of value.project.files) {
+      const target = join(filesRoot, 'inputs', name, path);
+      mkdirSync(dirname(target), { recursive: true }); writeFileSync(target, content);
+    }
+    else if (typeof value === 'string' && /(?:^|\n)\s*(?:fn |use |struct |#)/u.test(value)) {
+      const target = join(filesRoot, 'bindings', `${name}.jet`);
+      mkdirSync(dirname(target), { recursive: true }); writeFileSync(target, value);
+    }
+  }
+  const literals = fn.tokens.filter(token => token.kind === 'string');
+  for (const [index, token] of literals.entries()) if (/(?:^|\n)\s*(?:fn |use |struct |#)/u.test(token.value)) {
+    const path = join(filesRoot, 'literals', `${index + 1}.jet`);
+    mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, token.value);
+  }
+  writeFileSync(join(directory, `${stem}.literals.json`), JSON.stringify(literals.map(token => ({ line: token.line, raw: token.raw, value: token.value })), null, 2) + '\n');
+  const assertions = [], original = fn.tokens;
+  for (let i = 0, statementStart = 0; i < original.length; i++) {
+    const token = original[i];
+    if (token.kind === 'string') continue;
+    if (token.value === ';') statementStart = i + 1;
+    const macro = /^(?:(?:debug_)?assert(?:_[A-Za-z_0-9]+)?|panic|unreachable)$/u.test(token.value) && original[i + 1]?.kind === 'punct' && original[i + 1]?.value === '!';
+    const helper = /^assert_/u.test(token.value) && original[i + 1]?.kind === 'punct' && original[i + 1]?.value === '(';
+    const method = ['expect', 'expect_err', 'unwrap', 'unwrap_err', 'unwrap_or_else'].includes(token.value) && original[i - 1]?.value === '.' && original[i + 1]?.kind === 'punct' && original[i + 1]?.value === '(';
+    if (!macro && !helper && !method) continue;
+    const open = i + (macro ? 2 : 1), close = closeAt(original, open);
+    const start = method ? original[statementStart].start : token.start, end = original[close].end;
+    const source = fn.body.slice(start - fn.bodyOffset, end - fn.bodyOffset);
+    const match = mapped.find(range => token.start >= range.start && token.end <= range.end);
+    assertions.push(`# assertion ${match ? `mapped: captured step ${match.capture}` : 'NOT MAPPED'} at ${fn.file}:${token.line}\n` + source.split('\n').map(line => `# ${line}`).join('\n'));
+  }
+  const header = `# ${fn.file}::${fn.name} at ${fn.file}:${fn.line}; converter ${options.converterSha}\n# DRAFT — not a case; finish and move into tests/\n# HISTORICAL SMOKE; partial captures are not blessed expectations\n`;
+  writeFileSync(casePath, [header, `fixture: ${stem}.files`, ...captured.flatMap(row => row.caseLines), ...assertions,
+    ...todos.sort((a, b) => a.offset - b.offset).map(row => `# TODO(port): ${row.class} at ${fn.file}:${row.line}`)].join('\n') + '\n');
+  writeFileSync(join(directory, `${stem}.receipts.json`), JSON.stringify({ sources, invocations: reference.invocations?.slice(firstInvocation) ?? [] }, null, 2) + '\n');
+  return { status: 'DRAFTED', underlyingStatus: 'HAND-PORT', function: `${fn.file}::${fn.name}`, slice: options.slice ?? '-', draft: casePath,
+    todoCount: todos.length, capturedSteps: captured.length, assertionComments: assertions.length, runtimeUnknown: true };
 }
 
 function renderedOnly(text) {
   return text.replace(/\n\n(?:\d+ problems? found|ok: `[^\n]+` has no errors \(\d+ warnings?\))\nrun `jet explain [^\n]+` to learn more\n$/u, '\n');
 }
 
-export function makeReference(binary, root, scratch, timeout = 600000) {
+export function makeReference(binary, root, scratch, timeout = 600000, captureStreams = false) {
   let index = 0;
   const invocations = [];
-  const call = (program, args, cwd, stdin = '') => invoke(program, args, cwd, timeout, stdin, invocations);
+  const call = (program, args, cwd, stdin = '') => invoke(program, args, cwd, timeout, stdin, invocations, captureStreams);
   const reference = async (source, mode, metadata = {}) => {
     const dir = join(scratch, `source-${index++}`); mkdirSync(dir, { recursive: true });
     const shown = metadata.path ?? 'tests/ui/test_port/run.jet', file = join(dir, shown);
@@ -1080,12 +1219,13 @@ export async function main(argv) {
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--dry-run') options.dryRun = true;
-    else if (['--root', '--inventory', '--census', '--emit', '--attempt', '--analyze', '--slice-map', '--bless-from', '--scratch', '--report', '--exclusions', '--timeout'].includes(arg)) {
+    else if (['--root', '--inventory', '--census', '--emit', '--attempt', '--analyze', '--draft', '--converter-sha', '--slice-map', '--bless-from', '--scratch', '--report', '--exclusions', '--timeout'].includes(arg)) {
       if (!argv[i + 1]) refuse(`missing value for ${arg}`);
       options[arg.slice(2)] = argv[++i];
     } else refuse(`unknown option ${arg}`);
   }
   options.root = resolve(options.root);
+  if (options.draft) options.draft = externalDraftRoot(options.draft, options.root);
   const timeout = options.timeout === undefined ? 600000 : Number(options.timeout) * 1000;
   if (!Number.isSafeInteger(timeout) || timeout <= 0) refuse('--timeout must be positive seconds with millisecond precision');
   const census = collectFunctions(options.root, options.inventory);
@@ -1095,7 +1235,7 @@ export async function main(argv) {
     parts: census.functions.filter((fn) => dirname(fn.file) !== 'tests').length,
     topLevel: census.functions.filter((fn) => dirname(fn.file) === 'tests').length, dispositions: {} };
   for (const fn of census.functions) { const { disposition } = classify(fn, census.helpers); counts.dispositions[disposition] = (counts.dispositions[disposition] ?? 0) + 1; }
-  if (!options.emit && !options.attempt && !options.analyze) { console.log(JSON.stringify(counts)); return 0; }
+  if (!options.emit && !options.attempt && !options.analyze && !options.draft) { console.log(JSON.stringify(counts)); return 0; }
   if (!options.analyze && !options['bless-from']) refuse('--emit/--attempt requires --bless-from JET');
   const attempts = new Set(options.attempt ? readFileSync(options.attempt, 'utf8').split(/\r?\n/u)
     .map((line) => line.split('\t')[0].trim()).filter((id) => id && id !== 'function' && !id.startsWith('#')) : []);
@@ -1129,8 +1269,33 @@ export async function main(argv) {
   const scratchRoot = resolve(options.scratch ?? process.env.JET_SCRATCH_ROOT ?? join(process.env.HOME, '.cache/jet-dev/scratch/TestW4'));
   mkdirSync(scratchRoot, { recursive: true });
   const scratch = mkdtempSync(join(scratchRoot, 'test-port-'));
-  const reference = makeReference(resolve(options['bless-from']), options.root, scratch, timeout);
+  const reference = makeReference(resolve(options['bless-from']), options.root, scratch, timeout, !!options.draft);
   const results = [];
+  if (options.draft) {
+    const slices = new Map(options['slice-map'] ? readFileSync(options['slice-map'], 'utf8').trimEnd().split(/\r?\n/u).slice(1)
+      .map(line => { const [slice, file] = line.split('\t'); return [file, slice]; }) : []);
+    const sha = options['converter-sha'] ?? spawnSync('git', ['rev-parse', 'HEAD'], { cwd: options.root, encoding: 'utf8' }).stdout?.trim();
+    if (!sha) refuse('cannot determine converter sha for draft');
+    try {
+      for (const fn of selected) {
+        const owning = fn.file.match(/^tests\/([a-z0-9_]+?)(?:_parts)?\/.+\.rs$/u);
+        const slice = slices.get(fn.file) ?? (owning ? slices.get(`tests/${owning[1]}.rs`) : undefined) ?? 'unassigned';
+        if (options['slice-map'] && slice === 'unassigned') refuse(`draft slice missing: ${fn.file}`);
+        const result = await draftFunction(classify(fn, census.helpers), { ...options, reference, binary: resolve(options['bless-from']), converterSha: sha, slice });
+        results.push(result); console.log(JSON.stringify(result));
+        const rows = results.filter(row => row.slice === slice).sort((a, b) => a.todoCount - b.todoCount || b.capturedSteps - a.capturedSteps);
+        writeFileSync(join(options.draft, slice, 'index.tsv'), 'fn\tdraft\tTODO_count\tcaptured_step_count\n' +
+          rows.map(row => [row.function, row.draft, row.todoCount, row.capturedSteps].join('\t')).join('\n') + '\n');
+      }
+    } finally { rmSync(scratch, { recursive: true, force: true }); }
+    const summary = { selected: selected.length, drafted: results.length, converted: 0, underlyingStatus: 'HAND-PORT',
+      slices: Object.fromEntries([...new Set(results.map(row => row.slice))].map(slice => {
+        const rows = results.filter(row => row.slice === slice);
+        return [slice, { drafted: rows.length, TODOs: rows.reduce((sum, row) => sum + row.todoCount, 0), capturedSteps: rows.reduce((sum, row) => sum + row.capturedSteps, 0) }];
+      })) };
+    if (options.report) writeFileSync(options.report, JSON.stringify({ summary, results }, null, 2) + '\n');
+    console.log(JSON.stringify(summary)); return 0;
+  }
   try {
     for (const fn of selected) {
       const classified = classify(fn, census.helpers);

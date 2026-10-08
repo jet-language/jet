@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { functionsIn, collectFunctions, censusTsv, classify, checkOriginal, emitFunction, makeReference, machineDiagnostics, analyzeFunction, main } from './test-port.mjs';
+import { functionsIn, collectFunctions, censusTsv, classify, checkOriginal, emitFunction, draftFunction, makeReference, machineDiagnostics, analyzeFunction, main } from './test-port.mjs';
 
 function fixture(t) {
   const root = mkdtempSync(join(process.env.JET_SCRATCH_ROOT ?? tmpdir(), 'test-port-unit-'));
@@ -523,4 +523,62 @@ test('analyzer recovery never treats byte literal punctuation as a call delimite
     assert.doesNotThrow(() => analyzeFunction(row));
     assert.ok(analyzeFunction(row).classes.includes('unmodeled call later'));
   }
+});
+
+test('draft has one TODO per unsupported call and retains every assertion comment in order', async (t) => {
+  const root = fixture(t), out = fixture(t);
+  const row = fn('let source = "fn run() {}"; unknown_helper(); assert!(true); assert_eq!(source, "fn run() {}");');
+  const result = await draftFunction(row, { root, draft: out, converterSha: 'planted-sha', slice: 'S1', reference: async () => { throw new Error('must not run'); } });
+  const text = readFileSync(result.draft, 'utf8');
+  assert.equal(result.status, 'DRAFTED');
+  assert.equal(result.underlyingStatus, 'HAND-PORT');
+  assert.equal(result.todoCount, 1);
+  assert.equal(text.match(/# TODO\(port\):/gu).length, 1);
+  assert.match(text, /unmodeled call unknown_helper at tests\/sample.rs:/u);
+  assert.ok(text.indexOf('# assert!(true)') < text.indexOf('# assert_eq!(source'));
+  assert.equal(result.assertionComments, 2);
+  assert.match(text, /DRAFT — not a case; finish and move into tests\//u);
+  assert.equal(readFileSync(join(out, 'S1/sample/example.files/bindings/source.jet'), 'utf8'), 'fn run() {}');
+  assert.equal(existsSync(join(root, 'tests/ui')), false);
+});
+
+test('draft refuses checkout outputs and never invokes calls hidden by unknown control flow', async (t) => {
+  const root = fixture(t), out = fixture(t);
+  await assert.rejects(draftFunction(fn('assert!(true);'), { root, draft: join(root, 'drafts'), converterSha: 'planted-sha' }), /outside the checkout/u);
+  const row = fn('if true { jet::compile("fn run() {}").unwrap(); } assert!(true);');
+  let calls = 0;
+  const result = await draftFunction(row, { root, draft: out, converterSha: 'planted-sha', reference: async () => { calls++; throw new Error('must not run'); } });
+  assert.equal(calls, 0);
+  assert.equal(result.capturedSteps, 0);
+  assert.ok(result.assertionComments >= 2);
+});
+
+test('draft captures actual modeled CLI streams without conversion or blessing', async (t) => {
+  const root = fixture(t), out = fixture(t), scratch = join(out, 'scratch');
+  mkdirSync(scratch);
+  const binary = join(root, 'reference');
+  writeFileSync(binary, '#!/usr/bin/env node\nif(process.argv.includes("--json"))console.log(JSON.stringify({status:"passed",contract:"jet.check/v1",schema_version:1,provenance:{diagnostics:0},rows:[]}));', { mode: 0o755 });
+  const row = fn('let out = jet::compile("fn run() {}").unwrap(); unknown_helper(); assert!(out.lints.is_empty());');
+  const result = await draftFunction(row, { root, draft: out, converterSha: 'planted-sha', binary, reference: makeReference(binary, root, scratch, 600000, true) });
+  assert.equal(result.capturedSteps, 2);
+  assert.equal(result.todoCount, 1);
+  const text = readFileSync(result.draft, 'utf8');
+  assert.match(text, /step: jet check --json/u);
+  assert.match(text, /# assertion mapped: captured step 2/u);
+  const stdout = readFileSync(join(out, 'unassigned/sample/example.capture-1.stdout'), 'utf8');
+  assert.equal(JSON.parse(stdout).contract, 'jet.check/v1');
+  assert.equal(existsSync(join(root, 'tests/ui')), false);
+});
+
+test('draft CLI emits per-slice index and preserves inline sources in unsupported calls', async (t) => {
+  const root = fixture(t), out = fixture(t), report = join(out, 'report.json'), slices = join(out, 'slices.tsv');
+  writeFileSync(join(root, 'tests/sample.rs'), '#[test] fn partial() { unknown("fn run() {}"); debug_assert!(true); }');
+  writeFileSync(slices, 'slice\tfile\nS1\ttests/sample.rs\n');
+  assert.equal(await main(['--root', root, '--draft', out, '--bless-from', '/not-invoked', '--converter-sha', 'planted-sha', '--slice-map', slices, '--report', report]), 0);
+  const result = JSON.parse(readFileSync(report, 'utf8'));
+  assert.equal(result.summary.converted, 0);
+  assert.equal(result.summary.drafted, 1);
+  assert.match(readFileSync(join(out, 'S1/index.tsv'), 'utf8'), /tests\/sample.rs::partial\t/u);
+  assert.equal(readFileSync(join(out, 'S1/sample/partial.files/literals/1.jet'), 'utf8'), 'fn run() {}');
+  assert.match(readFileSync(join(out, 'S1/sample/partial.case'), 'utf8'), /# debug_assert!\(true\)/u);
 });
