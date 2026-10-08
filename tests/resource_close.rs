@@ -503,3 +503,41 @@ fn deferred_close_agrees_on_interpreter_and_native() {
         }
     }
 }
+
+const CLOSE_CONTAINERS: &str =
+    include_str!("../Examples/features/memory/resource_close_containers.jet");
+const CLOSE_CONTAINERS_EXPECTED: &str =
+    include_str!("../Examples/features/expected/memory/resource_close_containers.out");
+
+#[test]
+fn generic_container_close_runs_once_on_rust_aot() {
+    let ran = compile_and_run(CLOSE_CONTAINERS, "jet_close_containers_aot");
+    assert!(
+        ran.status.success(),
+        "{}",
+        String::from_utf8_lossy(&ran.stderr)
+    );
+    assert_eq!(String::from_utf8(ran.stdout).unwrap(), CLOSE_CONTAINERS_EXPECTED);
+}
+
+#[test]
+fn generic_container_close_runs_once_on_interpreter_mir() {
+    use jet::Interpreter::RunOutcome;
+
+    let root = common::unique_tmp("jet_close_containers_interpreter");
+    fs::create_dir_all(&root).unwrap();
+    let path = root.join("main.jet");
+    fs::write(&path, CLOSE_CONTAINERS).unwrap();
+    let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
+    let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+        .into_iter()
+        .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+        .collect();
+    assert!(errors.is_empty(), "{errors:?}");
+    match common::run_interpreted(&bundle, &common::development_policy()) {
+        RunOutcome::Ran { stdout, .. } => assert_eq!(stdout, CLOSE_CONTAINERS_EXPECTED),
+        RunOutcome::Problems(diags) => {
+            panic!("instantiated Close cleanup failed on the interpreter: {diags:?}");
+        }
+    }
+}

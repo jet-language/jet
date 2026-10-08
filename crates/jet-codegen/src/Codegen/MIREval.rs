@@ -6175,6 +6175,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         instruction: &MirInstruction,
     ) -> Result<Action, Diagnostic> {
         let span = instruction.span;
+        let function = program_function(self.program, self.frames[frame_index].function)?;
         let result = match &instruction.operation {
             MirOperation::Call {
                 callee: MirCallee::Prelude(call),
@@ -6291,6 +6292,28 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                         result: instruction.result,
                         wrap_ok,
                     });
+                }
+            }
+            MirOperation::MovePlace { place } if instruction.result.is_some_and(|value| {
+                function.blocks.iter().any(|block| block.instructions.iter().any(|row|
+                    matches!(row.operation, MirOperation::Drop { value: operand, kind: MirDropKind::Value } if operand == value)))
+                    && function.blocks.iter().all(|block| {
+                        !block.terminator.value_uses().contains(&value)
+                            && block.instructions.iter().all(|row|
+                                !row.operation.value_uses().contains(&value)
+                                    || matches!(row.operation, MirOperation::Drop { value: operand, .. } if operand == value))
+                    })
+            }) => {
+                let row = function.places.iter().find(|row| row.id == *place)
+                    .ok_or_else(|| mir_error_at("MIR cleanup place is unavailable", span))?;
+                if row.projections.is_empty() {
+                    let base = row.base.clone();
+                    let value = self.take_base_value(frame_index, &base, span)?;
+                    self.store_base_value(frame_index, &base, RuntimeValue::Moved, span)?;
+                    self.unregister_scope_guard(frame_index, *place);
+                    value
+                } else {
+                    self.move_place(frame_index, *place, span)?
                 }
             }
             operation => {
@@ -7930,10 +7953,15 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 Ok(RuntimeValue::Data(MirEvalValue::Unit))
             }
             MirOperation::Drop { value, kind } => {
-                let value_ty = self.value_type(frame_index, *value, span)?;
+                let value_ty = self.value_type(frame_index, *value, span)?.clone();
                 let is_scope_guard = value_ty.nominal_name() == Some("ScopeGuard");
-                let is_shared_guard = mir_is_shared_guard_type(value_ty);
+                let is_shared_guard = mir_is_shared_guard_type(&value_ty);
                 let is_db_lease = value_ty.nominal_name() == Some("DBLease");
+                let function = program_function(self.program, self.frames[frame_index].function)?;
+                let structural = super::MIRRust::nominal_close_function(self.program, &value_ty) == Some(function.id)
+                    && super::MIRRust::close_receiver_drop(function, *value);
+                let typed_close = matches!(kind, MirDropKind::Value)
+                    && super::MIRRust::contains_owned_close(self.program, &value_ty, &mut Vec::new());
                 let removed = self.frames[frame_index].values.remove(value);
                 if let Some(removed) = removed {
                     if let Some(state) = Self::realtime_state(&removed) {
@@ -7941,6 +7969,10 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     }
                     if let Some(generator) = Self::generator_stream(&removed) {
                         self.cancel_generator_stream(&generator, span)?;
+                    }
+                    if typed_close {
+                        self.drop_owned_close(&value_ty, removed, structural, span)?;
+                        return Ok(RuntimeValue::Data(MirEvalValue::Unit));
                     }
                     if runtime_contains_moved(&removed) {
                         return Ok(RuntimeValue::Data(MirEvalValue::Unit));
@@ -8026,6 +8058,61 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             }
         }
     }
+    /// Typed cleanup of source-owned aggregates. A partial move erases one
+    /// leaf, not the independent resources still stored beside it.
+    fn drop_owned_close(&mut self, ty: &MirType, value: RuntimeValue, structural: bool, span: Span) -> Result<(), Diagnostic> {
+        if matches!(&value, RuntimeValue::Moved | RuntimeValue::Data(MirEvalValue::Moved)) {
+            return Ok(());
+        }
+        if !structural {
+            if let Some(function) = super::MIRRust::nominal_close_function(self.program, ty) {
+                if !runtime_contains_moved(&value) {
+                    let _ = self.invoke_function(function, vec![value], Vec::new(), span)?;
+                    return Ok(());
+                }
+            }
+        }
+        match (ty.kind(), value) {
+            (MirTypeKind::List(inner) | MirTypeKind::FixedList { elem: inner, .. },
+                RuntimeValue::Data(MirEvalValue::List(values))) => {
+                for value in values {
+                    self.drop_owned_close(inner, RuntimeValue::Data(value), false, span)?;
+                }
+            }
+            (MirTypeKind::Option(inner), RuntimeValue::Data(MirEvalValue::Present(value))) =>
+                self.drop_owned_close(inner, RuntimeValue::Data(*value), false, span)?,
+            (MirTypeKind::Result { ok, err }, RuntimeValue::Result { ok: success, value }) =>
+                self.drop_owned_close(if success { ok } else { err }, *value, false, span)?,
+            (MirTypeKind::Result { ok, .. }, RuntimeValue::Data(MirEvalValue::Present(value))) =>
+                self.drop_owned_close(ok, RuntimeValue::Data(*value), false, span)?,
+            (MirTypeKind::Result { err, .. }, RuntimeValue::Data(MirEvalValue::FailedTold(value))) =>
+                self.drop_owned_close(err, RuntimeValue::Data(*value), false, span)?,
+            (MirTypeKind::Tuple(types), RuntimeValue::Data(MirEvalValue::Struct { fields, .. })) => {
+                for ((_, ty), (_, value)) in types.iter().zip(fields) {
+                    self.drop_owned_close(ty, RuntimeValue::Data(value), false, span)?;
+                }
+            }
+            (MirTypeKind::Apply { .. }, RuntimeValue::Data(MirEvalValue::Struct { mut fields, .. })) => {
+                for (_, name, ty) in super::MIRRust::close_owned_fields(self.program, ty) {
+                    if let Some(index) = fields.iter().position(|(field, _)| *field == name) {
+                        let value = std::mem::replace(&mut fields[index].1, MirEvalValue::Moved);
+                        self.drop_owned_close(&ty, RuntimeValue::Data(value), false, span)?;
+                    }
+                }
+            }
+            (MirTypeKind::Apply { .. }, RuntimeValue::Aggregate(mut fields)) => {
+                for (id, _, ty) in super::MIRRust::close_owned_fields(self.program, ty) {
+                    if let Some(index) = fields.iter().position(|(field, _)| *field == id) {
+                        let value = std::mem::replace(&mut fields[index].1, RuntimeValue::Moved);
+                        self.drop_owned_close(&ty, value, false, span)?;
+                    }
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
 
     fn install_hardware_setups(&mut self) -> Result<(), Diagnostic> {
         for setup in &self.program.facts.hardware_setups {
