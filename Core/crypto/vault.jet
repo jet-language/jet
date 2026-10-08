@@ -49,12 +49,12 @@ pub enum VaultError {
 }
 
 pub struct WrappedVaultKey {
-    priv bytes: [U8]
-    priv mode: Int
-    priv key_type: Int
-    priv origin_name: String
-    priv origin_generation: Int
-    priv header_len: Int
+    bytes: [U8]
+    mode: Int
+    key_type: Int
+    origin_name: String
+    origin_generation: Int
+    header_len: Int
 
     pub fn from_bytes(bytes: ^[U8]) -> WrappedVaultKey KeyWrapError! { __wrapped_from_bytes(^bytes) }
     pub fn bytes(self) -> [U8] Never! { __wrapped_bytes(self) }
@@ -77,8 +77,8 @@ impl WrappedVaultKey.Display {
 impl WrappedVaultKey.Debug { fn debug(self) -> String Never! { self.display() } }
 
 pub struct KeyUnlock {
-    priv kind: Int
-    priv secret: View<U8>
+    kind: Int
+    secret: View<U8>
 }
 // These retain a read borrow of the real owner's bytes, never a copied secret.
 pub fn __key_unlock_recipient(identity: X25519SecretKey) -> KeyUnlock Never! {
@@ -412,8 +412,14 @@ fn wrapped_metadata(bytes: [U8]) -> WrappedMetadata KeyWrapError! {
                 loop i in 0..<32 {
                     a :: Int.from_u8(bytes[previous + i])
                     b :: Int.from_u8(bytes[recipient + i])
-                    if a < b { order = -1; break }
-                    if a > b { order = 1; break }
+                    if a < b {
+                        order = -1
+                        break
+                    }
+                    if a > b {
+                        order = 1
+                        break
+                    }
                 }
                 if order >= 0 -> return Err(wrap_error("invalid wrapped vault key encoding"))
             }
@@ -437,10 +443,14 @@ fn wrapped_metadata(bytes: [U8]) -> WrappedMetadata KeyWrapError! {
     assert_eq(validate_name("release"), Val(true))
     assert_eq(validate_name("."), None)
     assert_eq(validate_name("a/b"), None)
-    assert_eq(validate_name("a\u{0085}b"), None)
-    assert_eq(validate_reason("a\u{009f}b"), None)
-    assert_eq(validate_reason("a\u{2028}b"), None)
-    assert_eq(validate_reason("e\u{0301}"), None)
+    c1_name :: String.from_bytes([U8]{97, 194, 133, 98}) ?? panic("C1 fixture UTF-8")
+    c1_reason :: String.from_bytes([U8]{97, 194, 159, 98}) ?? panic("C1 fixture UTF-8")
+    line_separator :: String.from_bytes([U8]{97, 226, 128, 168, 98}) ?? panic("line separator fixture UTF-8")
+    decomposed :: String.from_bytes([U8]{101, 204, 129}) ?? panic("decomposed fixture UTF-8")
+    assert_eq(validate_name(c1_name), None)
+    assert_eq(validate_reason(c1_reason), None)
+    assert_eq(validate_reason(line_separator), None)
+    assert_eq(validate_reason(decomposed), None)
 }
 
 #Test("JVKW passphrase header preserves public metadata without copying key material") {
@@ -458,7 +468,7 @@ fn wrapped_metadata(bytes: [U8]) -> WrappedMetadata KeyWrapError! {
     loop _ in 0..<16 -> &bytes.push(U8{1})
     loop _ in 0..<24 -> &bytes.push(U8{0})
     loop _ in 0..<16 -> &bytes.push(U8{0})
-    loop b in [U8]{0, 0, 1, 0, 3, 0, 0, 0, 1, 0, 0, 0} -> &bytes.push(b)
+    loop b in ([U8]{0, 0, 1, 0, 3, 0, 0, 0, 1, 0, 0, 0}) -> &bytes.push(b)
     loop _ in 0..<80 -> &bytes.push(U8{0})
     meta :: wrapped_metadata(bytes) ?? panic("valid JVKW fixture rejected")
     assert_eq(meta.mode, 2)
