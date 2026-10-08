@@ -94,6 +94,22 @@ values and fail-closed policy in Jet; the OS CSPRNG is a host cell. The raw
 algorithm controls in `core.crypto.expert` remain an explicit audited door, not
 a hidden provider policy.
 
+The internal entropy fill boundary borrows an exclusive writable span and
+returns zero only when every requested byte is filled. On Linux x86-64 it
+uses `getrandom` with flags zero: short reads continue on the remaining suffix,
+and interruption clears that suffix before retrying. Other provider failures
+clear the entire attempted span; there is no file, time, or deterministic
+fallback. Zero-byte requests do not invoke a provider. Core retains ownership
+of count validation and public error projection.
+
+The test/fault harness installs its Rand provider at this same adapter site,
+scoped to the current OS thread. Its callback and context stay live until
+reset; reset restores the real provider and releases the adapter state. Thread
+exit also wipes and releases that state. Private error rendering accepts only
+public operation metadata and never reads the password-policy reason or any
+secret material. Scripted provider and redaction results are compared with
+a once-frozen Rust seed receipt, separately from live-provider checks.
+
 The runtime SHA-256 byte boundary borrows its input and writes to a caller-owned
 32-byte digest. Its 576-byte, word-aligned scratch region is exclusive to the
 call and wiped before return. Domain-separated callers can hash two spans
