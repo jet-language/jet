@@ -1,0 +1,47 @@
+# Port of tests/fmt_wave_a.rs:61-133; exact public predicates; runtime PENDING-SAME-HEAD.
+# AST canonical_program semantic-identity comparisons50-59,105,118-122,127-131: compiler-lib ledger.
+# Public first-pass needles/newline + second-pass exact byte equality retained.
+fixture: preservation_matrix_survives_two_canonical_formatter_passes.fixture
+step: jet fmt whitespace.jet
+exit: 0
+file: whitespace.jet ~ "// tabbed comment: \"quotes\" {braces}" # original contains predicate
+file: whitespace.jet ~ "quoted \\\"text\\\" and {{braces}}; escapes: \\t \\n" # original contains predicate
+file: whitespace.jet ~ "/* nested */ still here */" # original contains predicate
+file: whitespace.jet ~ "print(\"{value}\")" # original contains predicate
+file: whitespace.jet $= "\n" # original canonical output newline115
+copy: whitespace.jet whitespace.once
+step: jet fmt whitespace.jet
+exit: 0
+file: whitespace.jet == whitespace.once
+step: jet fmt triple.jet
+exit: 0
+file: triple.jet ~ "banner :: \"\"\"\n" # original contains predicate
+file: triple.jet ~ "hello, {who}\n" # original contains predicate
+file: triple.jet ~ "        indented\n" # original contains predicate
+file: triple.jet ~ "print(\"{banner}\")" # original contains predicate
+file: triple.jet $= "\n" # original canonical output newline115
+copy: triple.jet triple.once
+step: jet fmt triple.jet
+exit: 0
+file: triple.jet == triple.once
+step: jet fmt selectors.jet
+exit: 0
+file: selectors.jet ~ "print(\"{price:Fixed(2)}\")" # original contains predicate
+file: selectors.jet ~ "print(\"{price:Grouped(2)}\")" # original contains predicate
+file: selectors.jet $= "\n" # original canonical output newline115
+copy: selectors.jet selectors.once
+step: jet fmt selectors.jet
+exit: 0
+file: selectors.jet == selectors.once
+step: jet fmt attached.jet
+exit: 0
+file: attached.jet ~ "// declaration boundary comment" # original contains predicate
+file: attached.jet ~ "// control boundary comment" # original contains predicate
+file: attached.jet ~ "if true" # original contains predicate
+file: attached.jet ~ "print(\"attached\")" # original contains predicate
+file: attached.jet $= "\n" # original canonical output newline115
+copy: attached.jet attached.once
+step: jet fmt attached.jet
+exit: 0
+file: attached.jet == attached.once
+

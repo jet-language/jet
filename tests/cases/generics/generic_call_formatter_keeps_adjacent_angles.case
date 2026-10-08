@@ -1,0 +1,12 @@
+# Port of tests/generics.rs:901-922; exact public predicates; runtime PENDING-SAME-HEAD.
+fixture: generic_call_formatter_keeps_adjacent_angles.fixture
+step: jet fmt main.jet
+exit: 0
+file: main.jet ~ "identity<Int>(1)" # original contains predicate905
+file: main.jet ~ "empty<Map<String, Wrap<Int>>>()" # original contains predicate907
+file: main.jet ~ "comparison :: 1 < 2" # original contains predicate911
+file: main.jet ~ "json.decode<Wrap<Int>>(text)" # original contains predicate915
+copy: main.jet once.jet
+step: jet fmt main.jet
+exit: 0
+file: main.jet == once.jet
