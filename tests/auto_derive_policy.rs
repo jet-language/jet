@@ -44,6 +44,54 @@ fn complex_unit_literals_use_registered_native_root_with_prefix() {
     assert!(!rust.contains("runtime::__jet_Complex"), "{rust}");
 }
 
+#[test]
+fn checked_shell_text_uses_argv_carrier_with_any_root_prefix() {
+    let bundle = checked_project(
+        "shell_carrier_projection",
+        "authority: { holds: { allow: [IO, Mem.Alloc] } }",
+        r#"
+fn consume(command: Sh) { print("ready") }
+fn run() {
+    word :: "two words"
+    command :: Sh{"printf {word}"}
+    consume(command)
+}
+"#,
+    );
+    for prefix in ["", "runtime::"] {
+        let rust = emit_native_aot_with_root_prefix(&bundle, prefix);
+        assert!(rust.contains("Vec<String>"), "{rust}");
+        assert!(!rust.contains("jet_std::Sh"), "{rust}");
+        assert!(!rust.contains("__jet_Sh"), "{rust}");
+    }
+    if let Some((exit, stdout)) = aot_output(&bundle, "shell_carrier_projection_aot") {
+        assert_eq!(exit, 0);
+        assert_eq!(stdout, "ready\n");
+    }
+}
+
+#[test]
+fn qualified_user_shell_name_keeps_its_declared_carrier() {
+    let bundle = checked_project(
+        "user_shell_projection",
+        "authority: { holds: { allow: [IO, Mem.Alloc] } }",
+        r#"
+module user {
+    pub struct Sh { pub value: Int }
+}
+fn consume(command: user.Sh) { print(command.value) }
+fn run() { consume(user.Sh{value: 7}) }
+"#,
+    );
+    let rust = emit_native_aot(&bundle);
+    assert!(rust.contains("_c_cSh"), "{rust}");
+    assert!(!rust.contains("jet_std::Sh"), "{rust}");
+    if let Some((exit, stdout)) = aot_output(&bundle, "user_shell_projection_aot") {
+        assert_eq!(exit, 0);
+        assert_eq!(stdout, "7\n");
+    }
+}
+
 /// Number of `impl <rust_trait> for <type>` headers in generated Rust for the
 /// program type `name`. Program types are emitted under their mangled
 /// module-qualified key, whose last path segment `::<name>` mangles to

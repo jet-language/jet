@@ -6122,10 +6122,13 @@ impl<'a> RustEmitter<'a> {
         if let Some(carrier) = crate::Codegen::core_ui_rust_type_name(native_name) {
             return self.rust_root_prelude_type(&carrier, args);
         }
-        // D-TEXTHEAD-TYPE1=A: checked HTML remains the canonical String-backed
-        // Prelude carrier used by interpolation and `.text()`.
+        // D-TEXTHEAD-TYPE1=A: checked text heads keep the interpolation
+        // kernels' carriers, not nominal types in `jet_std`.
         if name.name == jet_foundation::Syntax::TYPE_HTML && args.is_empty() {
             return "String".to_string();
+        }
+        if name.name == jet_foundation::Syntax::TYPE_SH && args.is_empty() {
+            return "Vec<String>".to_string();
         }
         if name.name == jet_foundation::Syntax::TYPE_MEASUREMENT && args.len() == 1 {
             return format!(
