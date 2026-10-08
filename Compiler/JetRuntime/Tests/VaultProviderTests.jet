@@ -148,6 +148,62 @@ fn vault_fixture_check(condition: Bool) {
     vault_linux_close(dirfd)
     jet_rt_free(scratch, I64{352}, I64{8})
 }
+// Supplementary real default-provider age persistence orchestration. No fixed
+// replay material or C crypto; transport borrows only the plaintext sequence.
+#Export(c) fn jet_rt_vault_crypto_fixture(plaintext: I64) {
+    slots :: jet_rt_alloc(I64{48}, I64{8})
+    vault_fixture_check(vault_crypto_keygen(slots, slots + I64{8}) == I64{0})
+    identity :: rt_text_word(slots)
+    recipient :: rt_text_word(slots + I64{8})
+    public :: jet_rt_alloc(I64{32}, I64{8})
+    vault_fixture_check(vault_crypto_decode_key(recipient, false, public))
+    vault_fixture_check(vault_crypto_encrypt(public, I64{1}, plaintext, slots + I64{16}) == I64{0})
+    ciphertext :: rt_text_word(slots + I64{16})
+    vault_fixture_check(vault_crypto_decrypt(identity, ciphertext, slots + I64{24}) == I64{0})
+    decoded :: rt_text_word(slots + I64{24})
+    count :: rt_text_word(plaintext + DATA_SEQUENCE_LENGTH)
+    vault_fixture_check(rt_text_word(decoded + DATA_SEQUENCE_LENGTH) == count)
+    vault_fixture_check(rt_text_equal_bytes(rt_text_word(decoded + DATA_SEQUENCE_DATA), rt_text_word(plaintext + DATA_SEQUENCE_DATA), count))
+    thread_zero(rt_text_word(decoded + DATA_SEQUENCE_DATA), rt_text_word(decoded + DATA_SEQUENCE_CAPACITY))
+    data_sequence_drop(decoded, DATA_TREE_BYTE_LIST)
+    vault_fixture_check(vault_crypto_keygen(slots + I64{32}, slots + I64{40}) == I64{0})
+    wrong_identity :: rt_text_word(slots + I64{32})
+    wrong_recipient :: rt_text_word(slots + I64{40})
+    rt_text_store(slots + I64{24}, I64{-471})
+    wrong :: vault_crypto_decrypt(wrong_identity, ciphertext, slots + I64{24})
+    vault_fixture_check(wrong != I64{0} && vault_error_tag(wrong) == I64{4})
+    vault_fixture_check(rt_text_word(slots + I64{24}) == I64{-471})
+    vault_error_drop(wrong)
+    data :: rt_text_word(ciphertext + DATA_SEQUENCE_DATA)
+    last :: rt_text_word(ciphertext + DATA_SEQUENCE_LENGTH) - I64{1}
+    rt_text_put(data + last, rt_text_byte(data + last) ~| I64{1})
+    corrupt :: vault_crypto_decrypt(identity, ciphertext, slots + I64{24})
+    vault_fixture_check(corrupt != I64{0} && vault_error_tag(corrupt) == I64{4})
+    vault_fixture_check(rt_text_word(slots + I64{24}) == I64{-471})
+    vault_error_drop(corrupt)
+    data_sequence_drop(ciphertext, DATA_TREE_BYTE_LIST)
+    vault_text_zero(identity)
+    vault_text_zero(wrong_identity)
+    jet_rt_string_drop(identity)
+    jet_rt_string_drop(wrong_identity)
+    jet_rt_string_drop(recipient)
+    jet_rt_string_drop(wrong_recipient)
+    jet_rt_free(public, I64{32}, I64{8})
+    jet_rt_free(slots, I64{48}, I64{8})
+}
+#Export(c) fn jet_rt_vault_crypto_unavailable_fixture(callback: I64) {
+    slots :: jet_rt_alloc(I64{16}, I64{8})
+    rt_text_store(slots, I64{-471})
+    rt_text_store(slots + I64{8}, I64{-472})
+    rt_crypto_entropy_set(callback, I64{0})
+    error :: vault_crypto_keygen(slots, slots + I64{8})
+    rt_crypto_entropy_clear()
+    vault_fixture_check(error != I64{0} && vault_error_tag(error) == I64{10})
+    vault_fixture_check(rt_text_word(error + VAULT_ERROR_FIRST) == VAULT_CRYPTO_UNAVAILABLE)
+    vault_fixture_check(rt_text_word(slots) == I64{-471} && rt_text_word(slots + I64{8}) == I64{-472})
+    vault_error_drop(error)
+    jet_rt_free(slots, I64{16}, I64{8})
+}
 // Supplementary historical codec checks: exact bytes, every truncation, garbage,
 // malformed UTF-8, preserved NUL/Unicode strings, and canonical domain hash.
 #Export(c) fn jet_rt_vault_legacy_fixture(bytes: I64, length: I64, expected_hash: I64) {

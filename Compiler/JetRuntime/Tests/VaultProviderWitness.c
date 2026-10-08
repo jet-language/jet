@@ -34,6 +34,15 @@ extern void jet_rt_vault_linux_dir_fixture(const Text *, int64_t);
 extern void jet_rt_vault_linux_inode_fixture(const Text *, const TextList *, const Text *, const Text *);
 extern void jet_rt_vault_linux_read_fixture(const Text *, const Text *, const Text *, const Text *);
 extern void imported_origin_round_trips_and_invalid_combinations_reject(const Text *, const Text *);
+extern void jet_rt_vault_crypto_fixture(const ByteList *);
+extern void jet_rt_vault_crypto_unavailable_fixture(int64_t (*)(void *, void *, int64_t));
+static unsigned unavailable_calls;
+static int64_t unavailable_entropy(void *context, void *out, int64_t count) {
+    assert(context == NULL && count == 32);
+    ++unavailable_calls;
+    memset(out, 0xa5, (size_t)count);
+    return 0;
+}
 static struct { void *data; int64_t capacity; unsigned frees; } observed[2];
 static size_t observed_count;
 void __wrap_jet_rt_free(void *data, int64_t size, int64_t align) {
@@ -180,6 +189,16 @@ int main(void) {
     imported_origin_round_trips_and_invalid_combinations_reject(&release, &source);
     zeroization_fixture();
     linux_dir_fixture();
+    jet_rt_vault_crypto_unavailable_fixture(unavailable_entropy);
+    assert(unavailable_calls == 1);
+    unsigned char crypto_raw[65537];
+    for (size_t i = 0; i < sizeof(crypto_raw); ++i) crypto_raw[i] = (unsigned char)(i % 256);
+    ByteList crypto_plain = {0, 0, crypto_raw};
+    jet_rt_vault_crypto_fixture(&crypto_plain);
+    crypto_plain.length = crypto_plain.capacity = 65536;
+    jet_rt_vault_crypto_fixture(&crypto_plain);
+    crypto_plain.length = crypto_plain.capacity = 65537;
+    jet_rt_vault_crypto_fixture(&crypto_plain);
     puts("vault witness OK (13 errors, legacy+JVLT2 codec, imported origin/default entropy, native Secret redaction/wipe, long-origin hash, duplicate priority)");
     jet_rt_thread_detach();
     return 0;

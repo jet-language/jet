@@ -164,6 +164,20 @@ distinct open failure mapping (ENOSYS/EINVAL/ELOOP to UnsupportedProvider, other
 non-ENOENT failures to Locked). Supplemental actual-file fixtures preserve NUL
 and all byte values, exercise growth and exact-capacity EOF, and observe clone's
 shared seek position plus error-output preservation.
+Vault persistence encryption/decryption orchestrates the shared accepted age v1
+primitives; it does not implement a second age engine. Keygen encodes directly
+into final native Text buffers from one default-provider seed. Its private leaf
+returns Crypto(Unavailable); the public infallible seed API must retain its
+canonical entropy panic when public producer glue is admitted.
+The shared entropy adapter supplies file key, recipient ephemerals, nonce and
+grease. Grease follows age-core 0.10.0 format.rs:97-129,340-376: graphic ASCII
+words, `-grease` tag suffix, 0..4 arguments, 0..99 random body bytes, unpadded
+base64 at 64 columns with a final short/empty line. Rejection sampling is
+uniform; the scratch byte pool is not another Rand adapter. All key material
+and exclusive workspaces wipe on every exit. Store open/seal failures map to
+Locked at the seed persistence boundary; no rich crypto prose is invented.
+Supplemental default-provider fixtures cover empty/full/next STREAM chunks,
+wrong identities, tampered last tags, output preservation and Rand failure.
 
 Typed vault records own native Secret buffers. Equality compares the key bytes,
 not just immutable hashes, while Debug always prints a redacted key marker.
