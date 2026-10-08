@@ -717,3 +717,53 @@ pub fn policy_inventory(manifest: PolicyManifest, root: String) -> PolicyInvento
     assert_eq(policy_manifest_failure("[未知]\n"), "manifest line 1: unknown section [未知]")
     assert_eq(policy_slice_bytes("é", 0, 0), "")
 }
+// Rust str::split_whitespace uses Unicode White_Space, not just ASCII space.
+// Scan byte spans directly; only the returned words allocate.
+fn policy_space_width(bytes: [U8], index: Int) -> Int {
+    first :: Int.from_u8(bytes[index])
+    if first == 32 || (first >= 9 && first <= 13) -> return 1
+    if index + 1 >= bytes.len() -> return 0
+    second :: Int.from_u8(bytes[index + 1])
+    if first == 194 && (second == 133 || second == 160) -> return 2
+    if index + 2 >= bytes.len() -> return 0
+    third :: Int.from_u8(bytes[index + 2])
+    if first == 225 && second == 154 && third == 128 -> return 3
+    if first == 226 && second == 128 && ((third >= 128 && third <= 138) || third == 168 || third == 169 || third == 175) -> return 3
+    if first == 226 && second == 129 && third == 159 -> return 3
+    if first == 227 && second == 128 && third == 128 -> return 3
+    0
+}
+pub fn policy_split_whitespace(text: String) -> [String] {
+    bytes :: text.bytes()
+    words := [String]{}
+    index := 0
+    start := -1
+    loop index < bytes.len() {
+        width :: policy_space_width(bytes, index)
+        if width > 0 {
+            if start >= 0 -> &words.push(policy_slice_bytes(text, start, index))
+            start = -1
+            index += width
+        } else {
+            if start < 0 -> start = index
+            index += 1
+        }
+    }
+    if start >= 0 -> &words.push(policy_slice_bytes(text, start, bytes.len()))
+    words
+}
+
+// Keep byte-exact control characters without unsupported lexer escapes.
+pub fn policy_byte_text(code: U8) -> String {
+    String.from_bytes([U8]{code}) ?? panic("guard control byte must be UTF-8")
+}
+
+#Test("corpus shared word splitting matches Unicode White_Space") {
+    nel :: String.from_bytes([U8]{194, 133}) ?? panic("NEL UTF-8")
+    nbsp :: String.from_bytes([U8]{194, 160}) ?? panic("NBSP UTF-8")
+    emspace :: String.from_bytes([U8]{226, 128, 131}) ?? panic("EM SPACE UTF-8")
+    assert_eq(policy_split_whitespace("jet{nel}run{nbsp}file{emspace}"), [String]{"jet", "run", "file"})
+    carriage_return :: policy_byte_text(U8{13})
+    assert_eq(policy_split_whitespace(" \t{carriage_return}\n"), [String]{})
+    assert_eq(policy_split_whitespace("例{emspace}子"), [String]{"例", "子"})
+}

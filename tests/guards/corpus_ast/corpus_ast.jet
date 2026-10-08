@@ -5,7 +5,7 @@ use jet_foundation.CORE_MODULE_EXPORTS
 use jet_parser.parse_source
 use jet_lexer.[lex, Token, TOKEN_IDENT, TOKEN_LINE_COMMENT, TOKEN_BLOCK_COMMENT, TOKEN_LBRACE, TOKEN_RBRACE]
 use core.files as policy_ast_files
-use corpus_manifest.[PolicyError, PolicyManifest, PolicySourceRow, PolicyOccurrence, policy_manifest, policy_source_row, policy_selector_matches, policy_violation, policy_inventory_error, policy_apply_exceptions, policy_inventory, policy_join, policy_validate_manifest, policy_slice_bytes]
+use corpus_manifest.[PolicyError, PolicyManifest, PolicySourceRow, PolicyOccurrence, policy_manifest, policy_source_row, policy_selector_matches, policy_violation, policy_inventory_error, policy_apply_exceptions, policy_inventory, policy_join, policy_validate_manifest, policy_slice_bytes, policy_split_whitespace]
 
 POLICY_TASK_INTERNAL_RECEIVER :: prep { (String.from_bytes([U8]{0}) ?? panic("UTF-8 task prefix")) + "jet.task" }
 POLICY_TASK_INTERNAL_ALL :: prep { POLICY_TASK_INTERNAL_RECEIVER + ".all" }
@@ -1756,41 +1756,6 @@ fn policy_check_shapes(cases: [PolicyShapeCase]) PolicyError! {
     assert(missing.is_empty(), "Docs/spec/reference/core-library.md must list every built Core module from KNOWN_CORE_MODULES: {missing}")
 }
 
-// Rust str::split_whitespace uses Unicode White_Space, not just ASCII space.
-// Scan byte spans directly; only the returned words allocate.
-fn policy_space_width(bytes: [U8], index: Int) -> Int {
-    first :: Int.from_u8(bytes[index])
-    if first == 32 || (first >= 9 && first <= 13) -> return 1
-    if index + 1 >= bytes.len() -> return 0
-    second :: Int.from_u8(bytes[index + 1])
-    if first == 194 && (second == 133 || second == 160) -> return 2
-    if index + 2 >= bytes.len() -> return 0
-    third :: Int.from_u8(bytes[index + 2])
-    if first == 225 && second == 154 && third == 128 -> return 3
-    if first == 226 && second == 128 && ((third >= 128 && third <= 138) || third == 168 || third == 169 || third == 175) -> return 3
-    if first == 226 && second == 129 && third == 159 -> return 3
-    if first == 227 && second == 128 && third == 128 -> return 3
-    0
-}
-fn policy_split_whitespace(text: String) -> [String] {
-    bytes :: text.bytes()
-    words := [String]{}
-    index := 0
-    start := -1
-    loop index < bytes.len() {
-        width :: policy_space_width(bytes, index)
-        if width > 0 {
-            if start >= 0 -> &words.push(policy_slice_bytes(text, start, index))
-            start = -1
-            index += width
-        } else {
-            if start < 0 -> start = index
-            index += 1
-        }
-    }
-    if start >= 0 -> &words.push(policy_slice_bytes(text, start, bytes.len()))
-    words
-}
 #Test("corpus document shell words use Rust Unicode whitespace") {
     nel :: String.from_bytes([U8]{194, 133}) ?? panic("NEL UTF-8")
     nbsp :: String.from_bytes([U8]{194, 160}) ?? panic("NBSP UTF-8")
