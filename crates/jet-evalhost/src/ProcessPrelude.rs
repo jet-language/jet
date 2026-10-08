@@ -24,8 +24,11 @@ pub(crate) mod process_prelude {
         pub use jet_codegen::process_pty::*;
     }
 
+    include!("../../jet-codegen/src/Prelude/Core/FileHandleOwners.rs");
+
     pub(crate) mod jet_std {
         use super::{JetAbsent, JetOutcome};
+        pub(crate) use super::JetProcessDirectory;
 
         #[derive(Clone, Copy, Debug, PartialEq)]
         pub enum IOOperation {
@@ -673,6 +676,17 @@ pub(crate) mod process_prelude {
         size: &TerminalSize,
     ) -> Result<(), IOError> {
         jet_terminal_session_resize(session, size)
+    }
+
+    #[cfg(test)]
+    mod carrier_tests {
+        #[test]
+        fn process_directory_carrier_has_one_owner_across_the_process_prelude() {
+            assert_eq!(
+                std::any::TypeId::of::<super::JetProcessDirectory>(),
+                std::any::TypeId::of::<super::jet_std::JetProcessDirectory>(),
+            );
+        }
     }
 
     #[cfg(all(test, target_os = "linux"))]

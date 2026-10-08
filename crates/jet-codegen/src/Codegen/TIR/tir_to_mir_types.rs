@@ -3952,6 +3952,17 @@ mod native_encoding_record_tests {
             .split("} }")
             .next()
             .expect("paired compiler-owned record entries");
+        let codegen = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../Compiler/JetCodegen/Source/Codegen/Types.jet"
+        ));
+        let codegen_records = codegen
+            .split("JET_CODEGEN_COMPILER_OWNED_CORE_RECORDS :: prep")
+            .nth(1)
+            .expect("Source Codegen compiler-owned record inventory")
+            .split("} }")
+            .next()
+            .expect("Source Codegen compiler-owned record entries");
         for (module, name) in [
             ("core.service", "__DeliveryFacts"),
             ("core.service", "__DeliveryRecord"),
@@ -3970,6 +3981,7 @@ mod native_encoding_record_tests {
             assert!(!is_compiler_owned_core_record(name), "{name}");
             assert!(!is_compiler_owned_type(name), "{name}");
             assert!(!emitter_records.contains(&format!("\"{name}\"")), "{name}");
+            assert!(!codegen_records.contains(&format!("\"{name}\"")), "{name}");
             if matches!(module, "core.testing" | "core.crypto") {
                 let rust = crate::Codegen::Context::root_prelude_rust_type_name(name)
                     .expect("raw transport retains its root carrier mapping");

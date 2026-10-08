@@ -39,3 +39,17 @@ impl Drop for JetTempFileOwner {
     }
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct JetProcessDirectory {
+    pub(crate) file: std::sync::Arc<std::fs::File>,
+    pub(crate) child_fd: i32,
+    pub(crate) as_cwd: bool,
+}
+
+impl PartialEq for JetProcessDirectory {
+    fn eq(&self, other: &Self) -> bool {
+        std::sync::Arc::ptr_eq(&self.file, &other.file)
+            && self.child_fd == other.child_fd && self.as_cwd == other.as_cwd
+    }
+}
+

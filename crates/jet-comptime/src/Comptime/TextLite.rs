@@ -2,6 +2,8 @@
 
 mod text_kernel {
     pub mod jet_std {
+        pub(crate) use super::JetProcessDirectory;
+
         #[derive(Clone, Copy, Debug, PartialEq)]
         pub enum IOOperation {
             Read,
@@ -1575,4 +1577,15 @@ pub(super) fn string_route(
     args: &[crate::AST::CtValue],
 ) -> Option<crate::AST::CtValue> {
     text_kernel::string_route(s, member, args)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn process_directory_carrier_has_one_owner_across_the_text_kernel() {
+        assert_eq!(
+            std::any::TypeId::of::<super::text_kernel::JetProcessDirectory>(),
+            std::any::TypeId::of::<super::text_kernel::jet_std::JetProcessDirectory>(),
+        );
+    }
 }

@@ -4895,10 +4895,17 @@ mod tests {
                 !emitted.contains(filesystem_source),
                 "a non-filesystem closure must not pull in FSRuntimeOps"
             );
+            assert!(
+                !emitted.contains("fn jet_fs_directory_fd_raw")
+                    && !emitted.contains("fn jet_process_attach_held_directories"),
+                "retained descriptor carriers must not select filesystem operations"
+            );
             for owner in [
                 "pub struct JetTempDirOwner",
                 "pub struct JetTempFileOwner",
                 "pub struct JetFileLockOwner",
+                "pub(crate) struct JetProcessDirectory",
+                "impl PartialEq for JetProcessDirectory",
             ] {
                 assert_eq!(
                     emitted.matches(owner).count(),

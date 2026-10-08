@@ -493,6 +493,10 @@ pub struct CBORWriter {
     pub(crate) allocation: super::JetEncodingAllocationBudget,
 }
 
+// ProcessSpec is unconditional; its retained descriptor carrier belongs to
+// the common owner closure, not the optional filesystem operation fragment.
+pub(crate) use super::JetProcessDirectory;
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct ProcessSpec {
     pub cmd: Vec<String>,
