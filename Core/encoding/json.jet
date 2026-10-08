@@ -119,13 +119,13 @@ fn coerce_tree(value: DataTree, path: String, emit: fn(String)) -> DataTree Neve
                 emit(coerce_line(path, "boolean"))
                 return DataTree.Bool(text == "true")
             }
-            if Float.parse(text) == .Val(number) {
+            if Float.parse(text) == .Ok(number) {
                 if math.is_finite(number) {
                     emit(coerce_line(path, "number"))
                     return DataTree.Float(number)
                 }
             }
-            return value
+            return ~value
         }
         .Array(items) -> {
             out := [DataTree]{}
@@ -136,11 +136,11 @@ fn coerce_tree(value: DataTree, path: String, emit: fn(String)) -> DataTree Neve
             out := [(key: String, value: DataTree)]{}
             loop entry in stream.object_entries(value) {
                 child_path :: if path == "" -> entry.key else -> "{path}.{entry.key}"
-                &out.push({key: ~entry.key, value: coerce_tree(entry.value, child_path, emit)})
+                &out.push((key: ~entry.key, value: coerce_tree(entry.value, child_path, emit)))
             }
             return stream.object_from_entries(^out)
         }
-        else -> return value
+        else -> return ~value
     }
 }
 

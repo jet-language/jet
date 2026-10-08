@@ -72,6 +72,7 @@ pub fn budget(limits: EncodingLimits) -> AllocationBudget Never! {
     AllocationBudget{state: shared AllocationState{used: 0, limit: heap_ceiling(limits)}}
 }
 
+#Error
 pub enum __ReserveFailure {
     Heap
     Allocation
@@ -896,7 +897,7 @@ pub struct JSONPush {
         }
     }
 
-    fn write_bytes(&self, bytes: [U8]) EncodingError! -[IO]> {
+    fn write_bytes(&self, bytes: View<U8>) EncodingError! -[IO]> {
         self.ensure_total(bytes.len())
         encoding.__write_bytes(&self.output, bytes) ?? return Err(io_error(self.total, 1, self.total + 1, err))
         self.total += bytes.len()
@@ -1106,7 +1107,7 @@ pub struct JSONPush {
         None
     }
 
-    fn canonical_emit(&self, bytes: [U8]) EncodingError! -[IO]> {
+    fn canonical_emit(&self, bytes: View<U8>) EncodingError! -[IO]> {
         if self.canonical_sink() == .Val(at) {
             needed :: self.canonical_frames[at].value.len() + bytes.len()
             if needed > self.limits.max_item_bytes -> return Err(self.error(.Limit, "max_item_bytes {self.limits.max_item_bytes} exceeded by canonical object"))
