@@ -139,7 +139,7 @@ fn core_sig_row_atom_at(bytes: [U8], start: Int) -> CoreSigRowType Never! {
             done = core_sig_row_code(bytes, field.next) != 44
             next = field.next + 1
         }
-        return CoreSigRowType{ty: Type.Tuple{fields: fields}, next: next}
+        return CoreSigRowType{ty: Type.Tuple{fields: type_tuple_fields_canonical(fields)}, next: next}
     }
     end := start
     loop core_sig_row_is_name_code(core_sig_row_code(bytes, end)) -> end += 1
