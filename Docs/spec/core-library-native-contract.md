@@ -214,6 +214,11 @@ Jet-hosted cutover; it does not define runtime behavior.
 Pinned Core image schema/getter identity is separate from the runtime library:
 Core getters resolve through the pinned map, never through runtime-library
 symbol lookup. The parked Source descriptor provider is not a library input.
+The raw-memory transport is shared with the child loader: `x64_load_image_bound`
+accepts one already-admitted address per import and performs the existing
+slot/relocation checks and writable-to-executable mapping. It performs no
+symbol lookup or startup. The parent supplies runtime addresses from its sealed
+library inventory and Core getter addresses from its pinned Core map.
 ## One meaning across execution tiers
 
 AOT, interpreter/comptime evaluation, and web execution are
