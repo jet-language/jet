@@ -60,6 +60,7 @@ pub const CORE_TEXT_SEGMENTATION_TABLES_SOURCE_PART: CorePrivateSourcePart = Cor
         alias: "__core_text_segmentation_tables",
         path: "Core/text/segmentation_tables.jet",
         owned_members: &[],
+        impl_types: &[],
     },
 };
 
@@ -134,6 +135,7 @@ pub const CORE_CRYPTO_JETC_SOURCE_PART: CorePrivateSourcePart = CorePrivateSourc
         alias: CORE_CRYPTO_JETC_ALIAS,
         path: "Core/crypto/jetc.jet",
         owned_members: &[],
+        impl_types: &[],
     },
 };
 
@@ -144,6 +146,7 @@ pub const CORE_CRYPTO_CT_SOURCE_PART: CorePrivateSourcePart = CorePrivateSourceP
         alias: "__core_crypto_ct",
         path: "Core/crypto/expert_ct.jet",
         owned_members: &[],
+        impl_types: &[],
     },
 };
 /// All compiler-private source parts. Keep this separate from
