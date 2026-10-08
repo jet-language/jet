@@ -1031,6 +1031,9 @@ For a scalar conversion, the head is the result type; a nonliteral body is
 checked in its own type before conversion. Thus `Int{I64{value}}` produces an
 `Int`, and `U8{value %% 256}` keeps the inner arithmetic in `Int` rather than
 forcing `256` into a byte operand.
+Literal bodies remain range-checked (`U8{256}` and `I8{-129}` are E1003).
+Machine-float heads contextualize bare or signed decimal literals, not compound
+arithmetic; a Float value passed to `F32{value}` explicitly converts to F32.
 
 **S30 — Enums**:
 
