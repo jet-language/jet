@@ -5095,6 +5095,14 @@ deps: {
 }
 ```
 
+**D-JPK-DISPATCH1=B — engine process boundary** *(ratified 2026-07-02,
+Tower decision D-JPK-DISPATCH1, card c03cwakt)*: engine verbs execute the
+`jetpack` binary by name instead of linking the package manager into the
+compiler. The seam forwards the original argument vector and preserves exit
+codes, JSON diagnostics, and version-skew handling. The engine's hidden
+protocol dispatcher is a raw process boundary, not a `#CLI` teaching entry;
+this does not change the typed CLI recipe for user-facing fixed-shape programs.
+
 **U30 / D-JPK-TOOLCHAIN1 — Toolchain pin**: `package.jet` carries a top-level
 `jet:` field pinning the toolchain (channel semantics per D-JPK-CHANNEL1;
 `.jet/lock` records the exact version). A jet whose version differs realizes

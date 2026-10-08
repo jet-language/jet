@@ -68,7 +68,6 @@ fn cli_recipe_inventory_is_manifest_owned_and_ast_checked() {
         "root:Tools/gauntlet/entries",
         "root:tests/agent_workloads/adapters",
         "root:tests/compiled_workloads/adapters/jet",
-        "file:Jetpack/CLI/Source/Entry/Main.jet",
     ] {
         assert!(
             matches!(source_profile(selector), "typed-cli" | "typed-cli-doc"),
@@ -104,6 +103,37 @@ fn cli_recipe_inventory_is_manifest_owned_and_ast_checked() {
 }
 
 #[test]
+fn jetpack_engine_entry_is_the_ratified_raw_process_protocol() {
+    let policy = CorpusPolicy::load().unwrap();
+    let entry = policy
+        .manifest()
+        .sources
+        .iter()
+        .find(|source| source.selector == "file:Jetpack/CLI/Source/Entry/Main.jet")
+        .expect("engine protocol source is inventoried");
+    assert_eq!(entry.role, SourceRole::RawProtocol);
+    assert_eq!(entry.profile, "protocol");
+    assert_eq!(entry.decision, "D-JPK-DISPATCH1=B");
+    let source = include_str!("../Jetpack/CLI/Source/Entry/Main.jet");
+    let (tokens, lex_errors) = jet::Lexer::lex(source);
+    assert!(lex_errors.is_empty(), "{lex_errors:?}");
+    let program = jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        jet::Parser::parse(&tokens).expect("engine protocol source parses")
+    });
+    assert!(jet_foundation::CLISchema::entry_schema(&program.items).is_none());
+    for symbol in [
+        "cli_jetpack_main",
+        "ENGINE_PROTOCOL_FLAG",
+        "COMPILER_VERSION",
+        "EXTENSION_HOST_SUBCOMMAND",
+        "BUILD_PLUGIN_HOST_SUBCOMMAND",
+        "cli_run",
+    ] {
+        assert!(source.contains(symbol), "engine protocol lost {symbol}");
+    }
+}
+
+#[test]
 fn fixture_roles_and_approved_builder_boundary_are_explicit() {
     let policy = CorpusPolicy::load().unwrap();
     policy
@@ -127,6 +157,22 @@ fn fixture_roles_and_approved_builder_boundary_are_explicit() {
     assert!(builder.iter().all(|violation| {
         violation.rule != "raw-cli-fixed-shape" && violation.rule != "raw-cli-builder-shape"
     }));
+}
+
+#[test]
+fn inline_package_keeps_the_reviewed_shield_group_site() {
+    let policy = CorpusPolicy::load().unwrap();
+    let path = "Examples/features/concurrency/shield_commit.jet";
+    let source = include_str!("../Examples/features/concurrency/shield_commit.jet");
+    let violations = policy
+        .evaluate_source(path, source)
+        .expect("inline package must preserve exact AST exception offsets");
+    assert!(violations.is_empty(), "{violations:?}");
+    let shifted = format!("\n{source}");
+    let error = policy
+        .evaluate_source(path, &shifted)
+        .expect_err("moving a reviewed site still requires a new exact review");
+    assert!(error.contains("stmt:task.group@699..827"), "{error}");
 }
 
 #[test]
