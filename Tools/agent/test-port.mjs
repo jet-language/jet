@@ -138,6 +138,31 @@ function topLevelSplit(tokens, separator) {
   parts.push(tokens.slice(start)); return parts;
 }
 
+// Blocks are statement boundaries even without semicolons. Keep if/else
+// chains together: a failed condition must not authorize either branch.
+function topLevelStatements(tokens) {
+  const parts = []; let start = 0;
+  for (let i = 0; i < tokens.length; i++) {
+    if (tokens[i].kind === 'string') continue;
+    if (['(', '[', '{'].includes(tokens[i].value)) {
+      let end = closeAt(tokens, i);
+      if (tokens[i].value === '{' && (i === start || ['if', 'for', 'while', 'loop', 'match', 'unsafe'].includes(tokens[start]?.value))) {
+        while (tokens[end + 1]?.value === 'else' && tokens[end + 1]?.kind !== 'string') {
+          let open = end + 2;
+          while (open < tokens.length && (tokens[open].value !== '{' || tokens[open].kind === 'string')) open++;
+          if (open >= tokens.length) break;
+          end = closeAt(tokens, open);
+        }
+        parts.push(tokens.slice(start, end + 1)); start = end + 1;
+      }
+      i = end; continue;
+    }
+    if (tokens[i].value === ';') { if (i > start) parts.push(tokens.slice(start, i)); start = i + 1; }
+  }
+  if (start < tokens.length) parts.push(tokens.slice(start));
+  return parts;
+}
+
 // Rust-emitter facts die at cutover, but their neighboring Jet facts do not.
 // Trace only explicit Rust provenance; unknown syntax still reaches the closed
 // parser and is refused. Never supply pretend generated Rust to the evaluator.
@@ -747,7 +772,7 @@ export function analyzeFunction(fn) {
     }
   };
   const scanStatements = list => {
-    for (const segment of topLevelSplit(list, ';')) {
+    for (const segment of topLevelStatements(list)) {
       if (!segment.length) continue;
       // Try the complete statement first, retaining parsed expressions even if
       // its final terminator or a later unsupported operator refuses.
@@ -1048,7 +1073,7 @@ export async function draftFunction(fn, options) {
     }
   };
   const tokens = availabilityGuards(fn, retireRustAssertions(fn).tokens);
-  for (const segment of topLevelSplit(tokens, ';')) {
+  for (const segment of topLevelStatements(tokens)) {
     if (!segment.length) continue;
     const terminator = { kind: 'punct', value: ';', raw: ';', line: segment.at(-1).line };
     let plan;
@@ -1056,9 +1081,16 @@ export async function draftFunction(fn, options) {
       plan = new Parser(segment[0].value === 'for' && segment.at(-1).value === '}' ? segment : [...segment, terminator]).statements();
       plan.forEach(node => canonicalRunCalls(fn, node));
       plan.forEach(node => checkAst(node));
-    } catch { continue; } // Full analysis records each unsupported construct.
+    } catch {
+      // Unknown statements may consume or mutate an earlier binding. Later
+      // statements are independent only if their inputs are still known.
+      for (const token of segment) if (token.kind === 'word' && Object.hasOwn(env, token.value)) delete env[token.value];
+      continue;
+    } // Full analysis records each unsupported construct.
     const before = context.assertions;
-    context.allTier = JSON.stringify(plan).includes('"tir_support::assert_tiers_agree"');
+    const allTier = node => node && typeof node === 'object' && ((node.type === 'call' && node.name === 'tir_support::assert_tiers_agree') ||
+      Object.values(node).some(value => Array.isArray(value) ? value.some(allTier) : allTier(value)));
+    context.allTier = plan.some(allTier);
     try {
       await executeStatements(plan, env, context);
       if (context.assertions > before && captured.length) mapped.push({ start: segment[0].start, end: segment.at(-1).end, capture: captured.at(-1).number });

@@ -582,3 +582,20 @@ test('draft CLI emits per-slice index and preserves inline sources in unsupporte
   assert.equal(readFileSync(join(out, 'S1/sample/partial.files/literals/1.jet'), 'utf8'), 'fn run() {}');
   assert.match(readFileSync(join(out, 'S1/sample/partial.case'), 'utf8'), /# debug_assert!\(true\)/u);
 });
+
+test('draft resumes independent statements after unknown blocks but never trusts consumed inputs', async (t) => {
+  const root = fixture(t), out = fixture(t), scratch = join(out, 'scratch');
+  mkdirSync(scratch);
+  const binary = join(root, 'reference');
+  writeFileSync(binary, '#!/usr/bin/env node\nif(process.argv.includes("--json"))console.log(JSON.stringify({status:"passed",contract:"jet.check/v1",schema_version:1,provenance:{diagnostics:0},rows:[]}));', { mode: 0o755 });
+  const reference = makeReference(binary, root, scratch, 600000, true);
+  const row = fn('if other() { jet::compile("fn nested() {}").unwrap(); } let src = "fn run() {}"; let d = jet::compile(src).unwrap(); assert!(d.lints.is_empty());');
+  const result = await draftFunction(row, { root, draft: out, converterSha: 'planted-sha', binary, reference });
+  assert.equal(result.capturedSteps, 2);
+  const receipts = JSON.parse(readFileSync(result.draft.replace(/\.case$/u, '.receipts.json'), 'utf8'));
+  assert.equal(receipts.sources.length, 1);
+  assert.equal(receipts.sources[0].source, 'fn run() {}');
+  const consumed = fn('let src = "fn run() {}"; unknown(src); jet::compile(src).unwrap();');
+  const second = await draftFunction({ ...consumed, name: 'consumed' }, { root, draft: out, converterSha: 'planted-sha', binary, reference });
+  assert.equal(second.capturedSteps, 0);
+});
