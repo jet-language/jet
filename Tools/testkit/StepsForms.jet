@@ -23,7 +23,7 @@ fn kit_steps_numeric(text: String) -> Int? {
 }
 
 fn kit_steps_batch_form(mode: String) -> Bool {
-    kit_expect_named(["lines", "count", "count-lines", "each-line", "sorted-lines", "numeric-lines", "len", "each", "unique-after", "$=", "is-i64", "is-u32", "word", "has-line", "in-order-of", "any-line", "machine-output"], mode)
+    kit_expect_named(["lines", "count", "count-lines", "each-line", "sorted-lines", "numeric-lines", "len", "each", "unique-after", "$=", "is-i64", "is-u32", "word", "has-line", "in-order-of", "any-line", "machine-output", "delta"], mode)
 }
 
 fn kit_steps_batch_assertion(stream: String, path: String, transform: String, original: String, offset: Int) -> KitAssertion? {
@@ -35,6 +35,12 @@ fn kit_steps_batch_assertion(stream: String, path: String, transform: String, or
     partial :: !kit_expect_named(["numeric-lines", "lines", "machine-output"], mode) || !(body.contains("[") && body.contains("="))
     if partial && !kit_steps_reason(original) -> return None
     if mode == "is-i64" || mode == "is-u32" -> return if words.len() == 1 -> Val(assertion) else -> None
+    if mode == "delta" {
+        if words.len() != 4 || words[2].text != "<=" || (Int.parse(words[3].text) ?? -1) < 0 -> return None
+        assertion.value = words[1].text
+        assertion.extra = words[3].text
+        return Val(assertion)
+    }
     if mode == "any-line" {
         if words.len() < 3 || words[1].text != "words-prefix" -> return None
         assertion.value = ~body.slice(words[2].start, body.len()).trim()
@@ -152,6 +158,13 @@ fn kit_steps_batch_test(actual: String, assertion: KitAssertion, value: String, 
     mode :: assertion.mode
     if !kit_steps_batch_form(mode) && mode != "lines-array" -> return None
     matches := false
+    if mode == "delta" {
+        left :: Int.parse(actual) ?? return Val(kit_expect_verdict("FAIL", "delta subject is not an integer"))
+        right :: Int.parse(value) ?? return Val(kit_expect_verdict("FAIL", "delta reference is not an integer"))
+        bound :: Int.parse(extra) ?? return Val(kit_expect_verdict("ERROR", "delta bound is not an integer"))
+        within :: if left < 0 && right >= 0 -> left >= -bound && right <= bound + left else if right < 0 && left >= 0 -> right >= -bound && left <= bound + right else if left >= right -> left - right <= bound else -> right - left <= bound
+        return Val(if within -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "integer absolute difference exceeds bound"))
+    }
     if mode == "machine-output" {
         failure :: kit_steps_machine_output(actual, assertion.alternatives)
         verdict :: if failure == {

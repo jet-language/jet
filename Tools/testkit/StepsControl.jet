@@ -1,0 +1,103 @@
+use core.files as files
+use core.time as time
+use core.sys as sys
+
+fn kit_steps_block_end(steps: [KitStep], start: Int) -> Int {
+    kind :: steps[start].action
+    depth := 1
+    cursor := start + 1
+    loop cursor < steps.len() {
+        if steps[cursor].action == kind -> depth += 1
+        if steps[cursor].action == ("end {kind}") -> depth -= 1
+        if depth == 0 -> return cursor
+        cursor += 1
+    }
+    steps.len()
+}
+
+fn kit_steps_loop_valid(words: [String]) -> Bool {
+    if words.len() < 5 || words[0] != "for" -> return false
+    if words[words.len() - 2] != "as" || !kit_steps_env_name(words[words.len() - 1]) -> return false
+    if words[1] == "file" {
+        end :: if words[words.len() - 3] == "sorted" -> words.len() - 3 else -> words.len() - 2
+        return end >= 3 && kit_steps_entries_valid(words.slice(2, end))
+    }
+    if words[1] != "line" || !kit_steps_subject_valid(words[2]) -> return false
+    words.len() == 5 || (words.len() == 7 && words[3] == "of")
+}
+
+fn kit_steps_repeat_valid(words: [String]) -> Bool {
+    if words.len() != 11 || words[0] != "repeat" || words[1] != "while" -> return false
+    if words[5] != "timeout" || words[7] != "every" || words[9] != "fail" -> return false
+    if kit_steps_duration_ns(words[6]) == None || kit_steps_duration_ns(words[8]) == None -> return false
+    if words[2] == "file:" -> return kit_steps_relative_path(words[3]) && kit_expect_named(["exists", "absent"], words[4])
+    words[2] == "process" && words[4] == "alive"
+}
+
+fn kit_steps_loop_values(step: KitStep, context: KitStepCtx, state: KitStepState) -> [String] Err! {
+    words :: step.argv
+    if words[1] == "file" {
+        directory :: kit_steps_work_path(words[2], context.env, context.work, context.scratch, state.built) ?? return Err("loop directory escapes work")
+        sorted :: words[words.len() - 3] == "sorted"
+        end :: if sorted -> words.len() - 3 else -> words.len() - 2
+        paths := kit_steps_entries(directory, words.slice(2, end)) ?? return Err(err)
+        if sorted -> &paths.sort_by(path -> files.basename(path))
+        return Ok(paths)
+    }
+    selector :: words[2]
+    source := state.last.stdout
+    if words.len() == 7 -> source = kit_steps_history_stream(words[4], kit_steps_subject(selector), state.history, true) ?? return Err("loop step label unavailable")
+    else -> source = kit_steps_select_stream(state.last.stdout, state.last.stderr, kit_steps_subject(selector))
+    transformed :: kit_steps_transform(source, kit_steps_subject_transform(selector)) ?? return Err("loop subject transform failed")
+    Ok(kit_steps_rust_lines(transformed))
+}
+
+fn kit_steps_loop_bind(frame: KitLoopFrame, state: KitStepState) -> KitStepState {
+    result := state
+    result.bindings = frame.bindings
+    value :: frame.values[frame.position]
+    &result.bindings.push(KitCapture{name: frame.name, value: KitCapturedValue.Text(value)})
+    if frame.kind == "file" {
+        &result.bindings.push(KitCapture{name: "{frame.name}.path", value: KitCapturedValue.Text(value)})
+        &result.bindings.push(KitCapture{name: "{frame.name}.name", value: KitCapturedValue.Text(files.basename(value))})
+        &result.bindings.push(KitCapture{name: "{frame.name}.stem", value: KitCapturedValue.Text(files.stem(value))})
+    }
+    result
+}
+
+fn kit_steps_loop_restore(frame: KitLoopFrame, state: KitStepState) -> KitStepState {
+    result := state
+    restored := frame.captures
+    loop capture in state.captures {
+        if !capture.aggregate -> next
+        found := false
+        loop index in 0..<restored.len() {
+            if restored[index].name == capture.name {
+                restored[index] = capture
+                found = true
+            }
+        }
+        if !found -> &restored.push(capture)
+    }
+    result.captures = restored
+    result.bindings = frame.bindings
+    result
+}
+
+fn kit_steps_repeat_active(step: KitStep, context: KitStepCtx, state: KitStepState) -> Bool Err! {
+    path :: kit_steps_runtime_expand(step.argv[3], context, state) ?? return Err("repeat token unavailable")
+    if step.argv[2] == "file:" {
+        location :: kit_steps_work_path(path, context.env, context.work, context.scratch, state.built) ?? return Err("repeat file escapes work")
+        return Ok(files.exists(location) == (step.argv[4] == "exists"))
+    }
+    pid :: Int.parse(path) ?? return Err("repeat pid is not an integer")
+    Ok(kit_steps_process_alive(pid))
+}
+
+fn kit_steps_process_alive(pid: Int) -> Bool {
+    if pid <= 0 -> return false
+    #Unsafe("kill(pid, 0) observes the case-owned child without sending a signal") {
+        sys.kill(pid, 0) ?? return false
+    }
+    true
+}

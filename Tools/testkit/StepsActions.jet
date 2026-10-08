@@ -43,12 +43,32 @@ fn kit_steps_inventory_equal(left: [KitInventoryItem], right: [KitInventoryItem]
 
 fn kit_steps_action(step: KitStep, context: KitStepCtx, previous: KitStepState) -> KitStepResult {
     state := previous
+    if step.action == "await" -> return kit_steps_await(step, context, state)
+    if kit_expect_named(["session", "send", "recv", "signal", "close", "wait"], step.action) -> return kit_steps_session_action(step, context, state)
     if kit_steps_setup_kind(step.action) {
         verdict :: kit_steps_setup_run(step, context.env, context.work, context.scratch, state.built)
         state.last = kit_steps_action_run()
         return KitStepResult{state: state, verdict: verdict}
     }
     if step.action == "capture" {
+        if step.argv[1] == "+=" {
+            words := step.argv
+            words[1] = "="
+            captured :: kit_steps_capture_value(words, context, state)
+            if captured.verdict.status != "PASS" -> return KitStepResult{state: state, verdict: captured.verdict}
+            suffix :: if captured.value == { .Text(text) -> text else -> "" }
+            found := false
+            loop index in 0..<state.captures.len() {
+                if state.captures[index].name == words[0] {
+                    prefix :: kit_steps_captured_subject(words[0], state.captures) ?? return kit_steps_action_error(state, "accumulating capture is not text")
+                    state.captures[index].value = KitCapturedValue.Text("{prefix}{suffix}")
+                    state.captures[index].aggregate = true
+                    found = true
+                }
+            }
+            if !found -> &state.captures.push(KitCapture{name: words[0], value: captured.value, aggregate: true})
+            return KitStepResult{state: state, verdict: kit_expect_verdict("PASS", "")}
+        }
         if step.argv[1] == "=" && step.argv[2] == "opt-bytes" {
             path :: kit_steps_work_path(step.argv[4], context.env, context.work, context.scratch, state.built) ?? return kit_steps_action_error(state, "capture bytes path escapes work")
             bytes :: if files.exists(path) -> Val(files.read_bytes(path) ?? return kit_steps_action_error(state, "capture bytes: {err}")) else -> None
@@ -104,16 +124,7 @@ fn kit_steps_action(step: KitStep, context: KitStepCtx, previous: KitStepState) 
         &state.children.push(KitPendingChild{label: step.label, child: child, started: started, step: step, joined: false, input_error: input_error})
         return KitStepResult{state: state, verdict: kit_expect_verdict("PASS", "")}
     }
-    loop i in 0..<state.children.len() {
-        if state.children[i].label == step.label && !state.children[i].joined {
-            pending :: state.children[i]
-            receipt :: pending.child.wait() ?? return kit_steps_action_error(state, "wait: {err}")
-            state.last = kit_exec_receipt(receipt, pending.started.elapsed().ns, pending.input_error)
-            state.children[i].joined = true
-            return KitStepResult{state: state, verdict: kit_expect_verdict("PASS", "")}
-        }
-    }
-    kit_steps_action_error(state, "wait label missing or already joined: {step.label}")
+    kit_steps_action_error(state, "unknown kit action: {step.action}")
 }
 
 fn kit_steps_finish(state: KitStepState, verdict: KitVerdict) -> KitOutcome {

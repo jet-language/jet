@@ -1,0 +1,30 @@
+use core.files as files
+
+#Test("sorted file loops bind paths names stems and append outer captures from real case text") {
+    root :: cases_test_root("control-files")
+    source :: "mkdir: entries\nwrite: entries/z.txt = \"z\"\nwrite: entries/a.txt = \"a\"\nfor file entries kind file sorted as f\nstep: printf '%s' {{f.name}}\ncapture: names += text stdout\nwrite: {{f.path}} = \"{{f.stem}}\"\nend for\ncap:names: = \"a.txtz.txt\"\nfile: entries/a.txt = \"a\"\n"
+    assert_eq(cases_test_advanced(root, "sorted", source).verdict.status, "PASS")
+    failed :: "write: value = \"x\"\nfor file . kind file sorted as f\nstep: printf wrong\nstdout: = \"right\"\nend for\n"
+    assert_eq(cases_test_advanced(root, "failure", failed).verdict.status, "FAIL")
+    assert_eq(cases_test_advanced(root, "invalid", "for file . as f\nstep: true\n").verdict.status, "REFUSED")
+    files.remove_all(root) ?? panic("remove file-loop scratch")
+}
+
+#Test("line loops keep iteration captures local while += starts empty and survives the loop") {
+    root :: cases_test_root("control-lines")
+    source :: "step original: printf 'a\\\\nb\\\\n'\nfor line stdout of original as row\nstep: printf '%s' {{row}}\ncapture: local = text stdout\ncapture: joined += text cap:local\nend for\ncap:joined: = \"ab\"\nwhen captured local: step: false\nfor line stdout.filter(= \"missing\") as empty\nstep: false\nend for\n"
+    assert_eq(cases_test_advanced(root, "local", source).verdict.status, "PASS")
+    assert_eq(cases_test_advanced(root, "outside", "step: printf a\ncapture: joined += text stdout\n").verdict.status, "REFUSED")
+    files.remove_all(root) ?? panic("remove line-loop scratch")
+}
+
+#Test("bounded repeat executes its body until the file condition ends and reports timeout failure") {
+    root :: cases_test_root("control-repeat")
+    source :: "write: pending = \"x\"\nrepeat while file: pending exists timeout 1s every 1ms fail \"never finished\"\nremove: pending\nend repeat\nstep: printf done\nstdout: = \"done\"\n"
+    assert_eq(cases_test_advanced(root, "done", source).verdict.status, "PASS")
+    timeout :: "repeat while file: missing absent timeout 2ms every 1ms fail \"deadline\"\nend repeat\n"
+    result :: cases_test_advanced(root, "timeout", timeout)
+    assert_eq(result.verdict.status, "FAIL")
+    assert_eq(result.verdict.detail, "deadline")
+    files.remove_all(root) ?? panic("remove repeat scratch")
+}

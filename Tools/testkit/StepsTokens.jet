@@ -33,6 +33,12 @@ fn kit_steps_host_triple() -> String {
 
 fn kit_steps_runtime_expand(text: String, context: KitStepCtx, state: KitStepState) -> String? {
     expanded := kit_steps_expand(text, context.env, context.work, context.scratch, state.built)
+    loop binding in state.bindings {
+        if binding.value == {
+            .Text(value) -> expanded = expanded.replace("{{{binding.name}}}", value)
+            else -> {}
+        }
+    }
     if expanded.contains("{{sys:dll-suffix}}") -> expanded = expanded.replace("{{sys:dll-suffix}}", kit_steps_dll_suffix())
     loop pending in state.children {
         expanded = expanded.replace("{{pid:{pending.label}}}", "{pending.child.id()}")
@@ -70,6 +76,8 @@ fn kit_steps_resolve_step(original: KitStep, context: KitStepCtx, state: KitStep
     step.argv = argv
     step.cwd = kit_steps_runtime_expand(original.cwd, context, state) ?? return None
     step.stdin = kit_steps_runtime_expand(original.stdin, context, state) ?? return None
+    step.stdout_target = kit_steps_runtime_expand(original.stdout_target, context, state) ?? return None
+    step.stderr_target = kit_steps_runtime_expand(original.stderr_target, context, state) ?? return None
     loop i in 0..<step.environment.len() {
         if step.environment[i].value == {
             .Val(value) -> step.environment[i].value = Val(kit_steps_runtime_expand(value, context, state) ?? return None)
@@ -82,7 +90,7 @@ fn kit_steps_resolve_step(original: KitStep, context: KitStepCtx, state: KitStep
         // Keep predicate values unexpanded: the checker chooses raw or normalized
         // matching based on the presence of path tokens in the original value.
     }
-    if step.action == "wait" {
+    if step.action == "wait" || step.action == "close" {
         loop pending in state.children {
             if pending.label == step.label {
                 if step.limit_time == 0 -> step.limit_time = pending.step.limit_time
@@ -90,6 +98,8 @@ fn kit_steps_resolve_step(original: KitStep, context: KitStepCtx, state: KitStep
                 step.isolate = pending.step.isolate
                 step.isolate_network = pending.step.isolate_network
                 step.env_clear = pending.step.env_clear
+                step.stdout_target = pending.step.stdout_target
+                step.stderr_target = pending.step.stderr_target
                 if original.replacements.len() == 0 -> step.replacements = pending.step.replacements
                 rules := pending.step.json_normalize
                 loop rule in step.json_normalize -> &rules.push(rule)

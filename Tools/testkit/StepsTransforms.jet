@@ -44,7 +44,7 @@ fn kit_steps_transform_valid(transform: String) -> Bool {
     loop part in parts {
         open :: part.index("(") ?? -1
         if open < 0 {
-            if !kit_expect_named(["trim", "trim_start", "trim_end", "trim_lines", "strip_ansi", "strip_sgr", "strip_whitespace", "strip_ascii_whitespace", "until_blank", "first_words", "final_frame", "cursor_up_counts", "visible_cols", "normalize_journey_paths"], part) -> return false
+            if !kit_expect_named(["trim", "trim_start", "trim_end", "trim_lines", "strip_ansi", "strip_sgr", "strip_whitespace", "strip_ascii_whitespace", "until_blank", "first_words", "final_frame", "cursor_up_counts", "visible_cols", "normalize_journey_paths", "normalize_failure_journey_paths", "normalize_contract_source_arrow"], part) -> return false
             next
         }
         if !part.ends_with(")") -> return false
@@ -63,7 +63,9 @@ fn kit_steps_transform_valid(transform: String) -> Bool {
             if args.len() != 2 -> return false
             if name == "split" && (Int.parse(args[1]) ?? -1) < 0 -> return false
             if name == "slice" && ((Int.parse(args[0]) ?? -1) < 0 || (Int.parse(args[1]) ?? -1) < 0) -> return false
-        } else if name == "line" {
+        } else if name == "bit_and" {
+            if args.len() != 1 || kit_steps_mask(args[0]) == None -> return false
+        } else if name == "line" || name == "skip_lines" {
             if args.len() != 1 || (Int.parse(args[0]) ?? -1) < 0 -> return false
         } else if name == "find_block" {
             if args.len() != 3 || args[1] != "~" -> return false
@@ -154,6 +156,8 @@ fn kit_steps_transform_one(text: String, part: String) -> String? {
     if part == "trim_end" -> return Val(strtext.trim_end(text))
     if part == "strip_sgr" -> return Val(kit_steps_strip_sgr(text))
     if part == "strip_ansi" -> return Val(kit_steps_strip_ansi(text))
+    if part == "normalize_failure_journey_paths" -> return kit_steps_failure_paths(text)
+    if part == "normalize_contract_source_arrow" -> return Val(kit_steps_contract_arrow(text))
     if part == "normalize_journey_paths" {
         lines := [String]{}
         loop line in kit_steps_rust_lines(text) {
@@ -219,6 +223,15 @@ fn kit_steps_transform_one(text: String, part: String) -> String? {
         return Val(lines.join("\n"))
     }
     args :: kit_steps_transform_args(body) ?? return None
+    if name == "bit_and" {
+        mask :: kit_steps_mask(args[0]) ?? return None
+        values := [String]{}
+        loop line in kit_steps_rust_lines(text) {
+            number :: Int.parse(line) ?? return None
+            &values.push("{kit_steps_bit_and(number, mask)}")
+        }
+        return Val(values.join("\n"))
+    }
     if name == "filter" {
         lines := [String]{}
         negative :: args[0] == "!~" || args[0] == "!^=" || args[0] == "!="
@@ -276,6 +289,13 @@ fn kit_steps_transform_one(text: String, part: String) -> String? {
         bytes :: text.bytes()
         if start < 0 || start > end || end > bytes.len() -> return None
         return Val(String.from_bytes(bytes.slice(start, end)) ?? return None)
+    }
+    if name == "skip_lines" {
+        lines :: kit_steps_rust_lines(text)
+        count :: Int.parse(args[0]) ?? return None
+        if count < 0 -> return None
+        if count >= lines.len() -> return Val("")
+        return Val(lines.slice(count, lines.len()).join("\n"))
     }
     if name == "line" {
         lines :: kit_steps_rust_lines(text)

@@ -1,0 +1,42 @@
+use core.files as files
+
+fn kit_steps_terminal_size(text: String) -> Bool {
+    pair :: text.split("x").to_list()
+    pair.len() == 2 && (Int.parse(pair[0]) ?? 0) > 0 && (Int.parse(pair[1]) ?? 0) > 0
+}
+
+fn kit_steps_wiring_valid(key: String, original: String) -> Bool {
+    tokens :: kit_steps_tokens(kit_steps_body(original)) ?? return false
+    words := [String]{}
+    loop token in tokens -> &words.push(token.text)
+    if key == "stderr-to-stdout" -> return words == ["true"]
+    if key == "pty" {
+        if words.len() == 0 -> return false
+        if words[0] != "true" {
+            loop fd in words[0].split(",") {
+                if !kit_expect_named(["stdin", "stdout", "stderr"], fd) -> return false
+            }
+        }
+        return words.len() == 1 || (words.len() == 3 && words[1] == "size" && kit_steps_terminal_size(words[2]))
+    }
+    if key == "pty-send" -> return words.len() == 3 && words[1] == "after" && original.starts_with("\"") && kit_steps_duration_ns(words[2]) != None
+    if key == "pty-close" -> return words.len() == 2 && words[0] == "after" && kit_steps_duration_ns(words[1]) != None
+    words.len() == 3 && kit_steps_terminal_size(words[0]) && words[1] == "at" && kit_steps_duration_ns(words[2]) != None
+}
+
+// Core Capture drains concurrently. Null discards at this boundary; its fd-type
+// and 64 MiB lifetime-budget differences require process-null-fd refusal where
+// the original observes either. File wiring is observable only after completion;
+// a live observation requires process-file-fd instead.
+fn kit_steps_wiring_finish(step: KitStep, context: KitStepCtx, state: KitStepState) -> KitStepResult {
+    result := state
+    loop pair in [[step.stdout_target, result.last.stdout], [step.stderr_target, result.last.stderr]] {
+        if pair[0] == "" || pair[0] == "null" -> next
+        path :: kit_steps_work_path(pair[0], context.env, context.work, context.scratch, state.built) ?? return kit_steps_action_error(state, "output file escapes work")
+        files.create_dir_all(files.dirname(path)) ?? return kit_steps_action_error(state, "output file parent: {err}")
+        files.write(path, pair[1]) ?? return kit_steps_action_error(state, "output file write: {err}")
+    }
+    if step.stdout_target == "null" -> result.last.stdout = ""
+    if step.stderr_target == "null" -> result.last.stderr = ""
+    KitStepResult{state: result, verdict: kit_expect_verdict("PASS", "")}
+}

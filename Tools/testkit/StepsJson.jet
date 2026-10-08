@@ -55,8 +55,13 @@ fn kit_steps_json_path(path: String) -> [String]? {
             if token.starts_with("?") {
                 if kit_steps_json_filter(kit_steps_json_preview(token)) == None -> return None
             } else if token != "*" {
-                number :: Int.parse(token) ?? return None
-                if number < 0 || token != "{number}" -> return None
+                if token.starts_with("\"") {
+                    key :: json.parse(token) ?? return None
+                    if kit_steps_json_type(key) != "string" -> return None
+                } else {
+                    number :: Int.parse(token) ?? return None
+                    if token != "{number}" -> return None
+                }
             }
             &parts.push(token)
             i += 1
@@ -145,6 +150,17 @@ fn kit_steps_json_type(value: DataTree) -> String Never! {
 }
 
 fn kit_steps_json_has(value: DataTree, expected: DataTree) -> String? {
+    if value == {
+        .Array(items) -> {
+            if kit_steps_json_type(expected) != "object" {
+                loop item in items {
+                    if kit_steps_json_equal(item, expected) -> return None
+                }
+                return Val("JSON array does not contain expected scalar")
+            }
+        }
+        else -> {}
+    }
     if expected == {
         .Text(key) -> {
             if value == {
@@ -207,6 +223,42 @@ fn kit_steps_json_leaf(value: DataTree, op: String, expected: DataTree, expected
         if kit_steps_json_has(value, expected) == None -> return Val("JSON array contains the forbidden object")
         return None
     }
+    if op == "!=" -> return if !kit_steps_json_equal(value, expected) -> None else -> Val("JSON value equals forbidden value")
+    if op == "in" {
+        if expected == {
+            .Array(choices) -> {
+                loop choice in choices {
+                    if kit_steps_json_equal(value, choice) -> return None
+                }
+            }
+            else -> return Val("JSON in needs an array")
+        }
+        return Val("JSON value is not in the expected alternatives")
+    }
+    if op == "keys" {
+        if value == {
+            .Object(fields) -> {
+                keys := [String]{}
+                loop pair in fields -> &keys.push(pair.key)
+                &keys.sort()
+                wanted :: if expected == { .Array(items) -> items else -> { return Val("JSON keys needs an array") } }
+                names := [String]{}
+                loop item in wanted {
+                    name :: if item == { .Text(text) -> text else -> { return Val("JSON keys needs strings") } }
+                    &names.push(name)
+                }
+                &names.sort()
+                return if keys == names -> None else -> Val("JSON key sets differ")
+            }
+            else -> return Val("JSON keys needs an object")
+        }
+    }
+    if kit_expect_named([">", ">=", "<", "<="], op) {
+        left :: kit_steps_json_number(value) ?? return Val("JSON comparison needs numbers")
+        right :: kit_steps_json_number(expected) ?? return Val("JSON comparison needs numbers")
+        matches :: if op == ">" -> left > right else if op == ">=" -> left >= right else if op == "<" -> left < right else -> left <= right
+        return if matches -> None else -> Val("JSON numeric comparison failed")
+    }
     if op == "=" {
         if kit_steps_json_equal(value, expected) -> return None
         return Val("JSON value differs: expected {json.to_string(expected)}, got {json.to_string(value)}")
@@ -216,11 +268,11 @@ fn kit_steps_json_leaf(value: DataTree, op: String, expected: DataTree, expected
         if actual == expected_type || (expected_type == "number" && actual == "int") -> return None
         return Val("JSON type differs: expected {expected_type}, got {actual}")
     }
-    if op == "~" || op == "^=" {
+    if op == "~" || op == "!~" || op == "^=" || op == "$=" {
         if value == {
             .Text(text) -> {
-                if (op == "~" && text.contains(expected_type)) || (op == "^=" && text.starts_with(expected_type)) -> return None
-                return Val("JSON string predicate {op} failed")
+                matches :: if op == "~" -> text.contains(expected_type) else if op == "!~" -> !text.contains(expected_type) else if op == "^=" -> text.starts_with(expected_type) else -> text.ends_with(expected_type)
+                if matches -> return None
             }
             else -> return Val("JSON string predicate needs a string")
         }
@@ -231,7 +283,17 @@ fn kit_steps_json_leaf(value: DataTree, op: String, expected: DataTree, expected
 }
 
 fn kit_steps_json_test(text: String, mode: String, path: String, op: String, literal: String) -> String? {
-    selected :: kit_steps_json_values(text, mode, path) ?? return Val("JSON parse or path failed: {path}")
+    if op == "canonical" -> return kit_steps_json_canonical(text)
+    if op == "==" && literal.starts_with("$") {
+        left :: kit_steps_json_values(text, mode, path) ?? return Val("JSON left path missing")
+        right :: kit_steps_json_values(text, mode, literal) ?? return Val("JSON right path missing")
+        if !kit_steps_json_equal(DataTree.Array(left), DataTree.Array(right)) -> return Val("JSON same-document values differ")
+        return None
+    }
+    selected :: kit_steps_json_values(text, mode, path) ?? {
+        if op == "!=" -> return kit_steps_json_leaf(DataTree.Null, op, json.parse(literal) ?? return Val("invalid expected JSON"), "", 0)
+        return Val("JSON parse or path failed: {path}")
+    }
     if selected.len() == 0 {
         if op == "#=" && literal == "0" -> return None
         return Val("JSON filter selected no values")
@@ -240,28 +302,32 @@ fn kit_steps_json_test(text: String, mode: String, path: String, op: String, lit
     expected := DataTree.Null
     expected_type := ""
     count := 0
-    if op == "=" || op == "has" || op == "!has" {
+    if kit_expect_named(["=", "!=", "has", "!has", "in", "keys", ">", ">=", "<", "<="], op) {
         expected = json.parse(literal) ?? return Val("expected JSON literal: {err}")
-        if op == "has" || op == "!has" {
-            if expected == {
-                .Text(_) -> {}
-                .Object(fields) -> {
-                    if fields.len() == 0 -> return Val("JSON has needs a nonempty object")
-                }
-                else -> return Val("JSON has needs a key string or nonempty object")
-            }
-        }
+        if op == "=" && path.contains("[*]") && kit_steps_json_type(expected) == "array" -> return if kit_steps_json_equal(DataTree.Array(selected), expected) -> None else -> Val("JSON ordered projection differs")
     } else if op == ":" {
         expected_type = literal
         if literal != "string" && literal != "number" && literal != "int" && literal != "bool" && literal != "null" && literal != "array" && literal != "object" -> return Val("unknown JSON type: {literal}")
-    } else if op == "~" || op == "^=" {
+    } else if kit_expect_named(["~", "!~", "^=", "$="], op) {
         expected_type = literal
-    } else if op == "#=" || op == "#>=" {
+    } else if op.starts_with("#") {
         count = Int.parse(literal) ?? return Val("JSON count must be a nonnegative integer")
         if count < 0 -> return Val("JSON count must be a nonnegative integer")
     } else -> return Val("unknown JSON operator: {op}")
+    if op == "#distinct=" {
+        values := [DataTree]{}
+        loop value in selected {
+            if value == { .Array(items) -> { loop item in items -> &values.push(item) } else -> &values.push(value) }
+        }
+        return if kit_steps_json_distinct(values) == count -> None else -> Val("JSON distinct count differs")
+    }
     loop value in selected {
         failure :: kit_steps_json_leaf(value, op, expected, expected_type, count)
+        if op.starts_with("#") && op != "#==" && op != "#distinct=" {
+            size :: kit_steps_json_size(value) ?? return Val("JSON count needs an array or object")
+            if !kit_steps_compare(size, op.slice(1, op.len()), count) -> return Val("JSON count comparison failed")
+            next
+        }
         if failure != None -> return failure
     }
     None
@@ -270,19 +336,37 @@ fn kit_steps_json_test(text: String, mode: String, path: String, op: String, lit
 fn kit_steps_json_assertion(value: String) -> KitAssertion? {
     body :: kit_steps_body(value)
     tokens :: kit_steps_tokens(body) ?? return None
+    if tokens.len() >= 2 && tokens[tokens.len() - 1].text == "canonical" {
+        subject :: kit_steps_subject(tokens[0].text)
+        offset :: if subject == "file" || subject == "files" -> 1 else -> 0
+        if tokens.len() != 2 + offset || (!kit_steps_subject_valid(tokens[0].text) && subject != "files") -> return None
+        return Val(KitAssertion{stream: subject, path: if offset == 1 -> tokens[1].text else -> "", mode: "json", value: "", json_mode: "doc", json_path: "$", json_op: "canonical"})
+    }
     if tokens.len() < 4 -> return None
     subject :: kit_steps_subject(tokens[0].text)
     if !kit_steps_subject_valid(tokens[0].text) -> return None
-    offset :: if subject == "file" || subject == "file?" -> 1 else -> 0
+    offset :: if subject == "file" || subject == "file?" || subject == "files" -> 1 else -> 0
     needed :: 4 + offset
     if tokens.len() < needed -> return None
-    stream :: if offset == 1 -> "file" else -> subject
+    stream :: if subject == "files" -> "files" else if offset == 1 -> "file" else -> subject
     transform :: kit_steps_subject_transform(tokens[0].text)
     if transform != "" && !kit_steps_reason(value) -> return None
     mode :: tokens[1 + offset].text
     path :: tokens[2 + offset].text
     op :: tokens[3 + offset].text
-    if mode != "doc" && mode != "ndjson" && mode != "toml" -> return None
+    if mode != "doc" && mode != "ndjson" && mode != "toml" && !(mode.starts_with("doc[zero ") && mode.ends_with("]")) -> return None
+    if path == "each" {
+        if tokens.len() < 9 + offset || tokens[4 + offset].text != "as" -> return None
+        rows :: tokens[3 + offset].text
+        bound :: tokens[5 + offset].text
+        if !bound.ends_with(":") || kit_steps_json_path(kit_steps_json_preview(rows)) == None -> return None
+        name :: bound.slice(0, bound.len() - 1)
+        if !kit_steps_env_name(name) -> return None
+        inner :: ~value.slice(tokens[6 + offset].start, value.len()).trim()
+        preview :: kit_steps_json_row_expand(inner.replace("{{{name}}}", "$"), name, None, true) ?? return None
+        _ :: kit_steps_json_assertion("stdout {mode} {preview}") ?? return None
+        return Val(KitAssertion{stream: stream, path: if offset == 1 -> tokens[1].text else -> "", mode: "json", value: inner, json_mode: mode, json_path: rows, json_op: "each", extra: name, transform: transform})
+    }
     if kit_steps_json_path(kit_steps_json_preview(path)) == None -> return None
     source :: if offset == 1 -> tokens[1].text else -> ""
     if stream == "file" && !kit_steps_relative_path(source) -> return None
@@ -292,23 +376,20 @@ fn kit_steps_json_assertion(value: String) -> KitAssertion? {
     }
     if tokens.len() == needed -> return None
     literal := ~body.slice(tokens[needed].start, body.len()).trim()
-    if op == "=" || op == "has" || op == "!has" {
-        expected :: json.parse(kit_steps_json_preview(literal)) ?? return None
-        if op != "=" {
-            if expected == {
-                .Text(_) -> {}
-                .Object(fields) -> { if fields.len() == 0 -> return None }
-                else -> return None
-            }
-        }
+    if kit_expect_named(["=", "!=", "has", "!has", "in", ">", ">=", "<", "<="], op) {
+        _ :: json.parse(kit_steps_json_preview(literal)) ?? return None
+    } else if op == "keys" {
+        if !literal.starts_with("= ") -> return None
+        literal = ~literal.slice(2, literal.len()).trim()
+        if kit_steps_string_array(literal) == None -> return None
     } else {
         if tokens.len() != needed + 1 -> return None
         literal = tokens[needed].text
         if op == ":" {
             if !kit_steps_reason(value) || !kit_expect_named(["string", "number", "int", "bool", "null", "array", "object"], literal) -> return None
-        } else if op == "~" || op == "^=" {
+        } else if kit_expect_named(["~", "!~", "^=", "$="], op) {
             if !kit_steps_reason(value) -> return None
-        } else if op == "#=" || op == "#>=" {
+        } else if kit_expect_named(["#=", "#>=", "#<=", "#>", "#<", "#distinct="], op) {
             if !kit_steps_count_target_valid(literal) -> return None
             if op == "#=" && kit_steps_count_label(literal) != "" -> return None
         } else if op == "#==" {

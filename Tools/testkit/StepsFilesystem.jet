@@ -17,6 +17,9 @@ fn kit_steps_duration_ns(text: String) -> Int? {
     if text.ends_with("ns") {
         scale = 1
         suffix = "ns"
+    } else if text.ends_with("µs") {
+        scale = 1000
+        suffix = "µs"
     } else if text.ends_with("us") {
         scale = 1000
         suffix = "us"
@@ -50,7 +53,7 @@ fn kit_steps_duration_ns(text: String) -> Int? {
     // Reject unrepresentable durations rather than wrapping the deadline.
     if whole > 9223372036854775807 /% scale -> return None
     base :: whole * scale
-    tail :: fraction * scale /% denominator
+    tail :: fraction * (scale /% denominator) + fraction * (scale % denominator) /% denominator
     if tail > 9223372036854775807 - base -> return None
     ns :: base + tail
     if ns <= 0 -> return None
@@ -70,15 +73,11 @@ fn kit_steps_octal(text: String) -> Int? {
 }
 
 fn kit_steps_setup_kind(key: String) -> Bool {
-    kit_expect_named(["mkdir", "truncate", "poke", "symlink", "hardlink", "chmod", "rename", "resize", "await", "append", "sleep"], key)
+    kit_expect_named(["mkdir", "truncate", "poke", "symlink", "hardlink", "chmod", "rename", "resize", "append", "sleep"], key)
 }
 
 fn kit_steps_setup_valid(key: String, words: [String]) -> Bool {
     if key == "sleep" -> return words.len() == 1 && kit_steps_duration_ns(words[0]) != None
-    if key == "await" {
-        if (words.len() != 2 && words.len() != 4) || words[0] != "file" || !kit_steps_relative_path(words[1]) -> return false
-        return words.len() == 2 || (words[2] == "timeout" && kit_steps_duration_ns(words[3]) != None)
-    }
     if words.len() == 0 -> return false
     if key == "symlink" -> return words.len() == 2 && kit_steps_relative_path(words[1])
     if !kit_steps_relative_path(words[0]) -> return false
@@ -103,19 +102,12 @@ fn kit_steps_setup_run(step: KitStep, env: KitEnv, work: String, scratch: String
         return kit_expect_verdict("PASS", "")
     }
     if step.action == "resize" -> return kit_expect_verdict("REFUSED", "sparse-set-len")
-    raw :: if step.action == "await" -> step.argv[2] else if step.action == "symlink" -> step.argv[2] else -> step.argv[1]
+    raw :: if step.action == "symlink" -> step.argv[2] else -> step.argv[1]
     path :: kit_steps_work_path(raw, env, work, scratch, built) ?? return kit_expect_verdict("REFUSED", "setup path escapes work directory")
     if step.action == "mkdir" {
         files.create_dir_all(path) ?? return kit_expect_verdict("ERROR", "mkdir: {err}")
     } else if step.action == "append" {
         files.append_all(path, step.argv[2]) ?? return kit_expect_verdict("ERROR", "append: {err}")
-    } else if step.action == "await" {
-        timeout :: if step.argv.len() == 5 -> kit_steps_duration_ns(step.argv[4]) ?? return kit_expect_verdict("REFUSED", "invalid await timeout") else -> env.timeout.ns
-        started :: time.instant()
-        loop !files.exists(path) {
-            if started.elapsed().ns >= timeout -> return kit_expect_verdict("FAIL", "await file deadline: {raw}")
-            time.sleep(10ms)
-        }
     } else if step.action == "symlink" {
         files.symlink(step.argv[1], path) ?? return kit_expect_verdict("ERROR", "symlink: {err}")
     } else if step.action == "hardlink" || step.action == "rename" {

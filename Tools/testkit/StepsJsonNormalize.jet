@@ -70,12 +70,18 @@ fn kit_steps_json_collect_spans(bytes: [U8], tree: DataTree, parts: [String], de
         .Object(fields) -> {
             if !part.starts_with(".") -> return Val("JSON normalization selected a non-array")
             position := kit_steps_json_space(bytes, start + 1)
-            loop pair in fields {
+            loop position < bytes.len() && bytes[position] != (U8{125}) {
                 key_end :: kit_steps_json_span_end(bytes, position)
+                key_text :: String.from_bytes(bytes.slice(position, key_end)) ?? return Val("JSON normalization key decode failed")
+                key_tree :: json.parse(key_text) ?? return Val("JSON normalization key parse failed")
+                key :: if key_tree == { .Text(name) -> name else -> { return Val("JSON normalization key is not text") } }
                 child :: kit_steps_json_space(bytes, kit_steps_json_space(bytes, key_end) + 1)
-                if part == ".{pair.key}" -> return kit_steps_json_collect_spans(bytes, pair.value, parts, depth + 1, child, kind, normalizer, &spans)
-                position = kit_steps_json_space(bytes, kit_steps_json_span_end(bytes, child)) + 1
-                position = kit_steps_json_space(bytes, position)
+                if part == (".{key}") {
+                    value :: fields.get(key) ?? return Val("JSON normalization member missing: {part}")
+                    return kit_steps_json_collect_spans(bytes, value, parts, depth + 1, child, kind, normalizer, &spans)
+                }
+                position = kit_steps_json_space(bytes, kit_steps_json_span_end(bytes, child))
+                if position < bytes.len() && bytes[position] == (U8{44}) -> position = kit_steps_json_space(bytes, position + 1)
             }
             return Val("JSON normalization member missing: {part}")
         }

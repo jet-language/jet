@@ -128,6 +128,14 @@ fn kit_steps_capture_value(words: [String], context: KitStepCtx, state: KitStepS
         }
         if kind == "text" || kind == "lines" {
             source :: kit_steps_capture_subject(words[3], if words.len() == 5 -> words[4] else -> "", context, state) ?? return kit_steps_capture_failure("ERROR", "{err}")
+            if kind == "text" {
+                transform :: kit_steps_subject_transform(words[3])
+                if transform.ends_with("cursor_up_counts") || transform.ends_with("visible_cols") {
+                    numbers := [Int]{}
+                    loop line in kit_steps_rust_lines(source) -> &numbers.push(Int.parse(line) ?? return kit_steps_capture_failure("FAIL", "list transform produced a non-integer"))
+                    return KitSubjectResult{value: KitCapturedValue.Numbers(numbers), verdict: kit_expect_verdict("PASS", "")}
+                }
+            }
             return kit_steps_capture_result(if kind == "text" -> source else -> "{kit_steps_lines(source)}")
         }
         raw :: if kind == "size" || kind == "sha256" || kind == "permissions" || kind == "replace-range" -> words[4] else -> words[3]

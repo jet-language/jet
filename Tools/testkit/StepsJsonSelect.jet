@@ -15,49 +15,79 @@ fn kit_steps_json_projection_valid(part: String) -> Bool {
 
 fn kit_steps_json_filter(part: String) -> KitJSONFilter? {
     if !part.starts_with("?") -> return None
-    cursor := 1
-    bytes :: part.bytes()
-    loop cursor < bytes.len() && bytes[cursor] != (U8{61}) && bytes[cursor] != (U8{33}) && bytes[cursor] != (U8{126}) -> cursor += 1
-    if cursor == 1 || cursor == bytes.len() -> return None
-    key :: part.slice(1, cursor)
-    if key.contains(" ") || key.contains(".") || key.contains("[") -> return None
-    rest :: part.slice(cursor, part.len())
-    op :: if rest.starts_with("!~=") -> "!~=" else if rest.starts_with("~=") -> "~=" else if rest.starts_with("!=") -> "!=" else if rest.starts_with("=") -> "=" else -> ""
-    if op == "" -> return None
-    expected :: json.parse(rest.slice(op.len(), rest.len())) ?? return None
-    if (op == "~=" || op == "!~=") && kit_steps_json_type(expected) != "string" -> return None
-    Val(KitJSONFilter{key: key, op: op, expected: expected})
+    quoted := false
+    escaped := false
+    depth := 0
+    loop (index, byte) in part.bytes() {
+        if index == 0 -> next
+        code :: Int.from_u8(byte)
+        if quoted {
+            if escaped -> escaped = false
+            else if code == 92 -> escaped = true
+            else if code == 34 -> quoted = false
+            next
+        }
+        if code == 34 {
+            quoted = true
+            next
+        }
+        if code == 91 -> depth += 1
+        if code == 93 -> depth -= 1
+        if depth != 0 -> next
+        rest :: part.slice(index, part.len())
+        operator := ""
+        width := 0
+        loop candidate in ["!~=", "~=", "!=", ">=", "<=", "^=", "$=", "!~", "~", ">", "<", "="] {
+            if operator == "" && rest.starts_with(candidate) {
+                operator = candidate
+                width = candidate.len()
+            }
+        }
+        if operator == "" && rest.starts_with(" in ") {
+            operator = "in"
+            width = 4
+        }
+        if operator == "" -> next
+        key :: ~part.slice(1, index).trim()
+        if kit_steps_json_path("$.{key}") == None -> return None
+        literal :: ~rest.slice(width, rest.len()).trim()
+        if literal.starts_with("@.") -> return Val(KitJSONFilter{key: key, op: operator, expected: DataTree.Null, reference: literal.slice(1, literal.len())})
+        expected :: json.parse(literal) ?? return None
+        if operator == "in" && kit_steps_json_type(expected) != "array" -> return None
+        return Val(KitJSONFilter{key: key, op: operator, expected: expected})
+    }
+    None
 }
 
 fn kit_steps_json_filter_matches(value: DataTree, filter: KitJSONFilter) -> Bool {
-    negative :: filter.op == "!=" || filter.op == "!~="
-    child :: if value == {
-        .Object(fields) -> fields.get(filter.key)
-        else -> None
+    parts :: kit_steps_json_path("$.{filter.key}") ?? return false
+    values :: kit_steps_json_select(value, parts, 0) ?? return filter.op == "!=" || filter.op == "!~" || filter.op == "!~="
+    expected := filter.expected
+    if filter.reference != "" {
+        other :: kit_steps_json_select(value, kit_steps_json_path("${filter.reference}") ?? return false, 0) ?? return false
+        if other.len() != 1 -> return false
+        expected = other[0]
     }
-    actual :: child ?? return negative
-    if filter.op == "=" || filter.op == "!=" {
-        equal :: kit_steps_json_equal(actual, filter.expected)
-        return if negative -> !equal else -> equal
+    op :: if filter.op == "~=" -> "~" else if filter.op == "!~=" -> "!~" else -> filter.op
+    text :: if expected == { .Text(needle) -> needle else -> "" }
+    loop actual in values {
+        if kit_steps_json_leaf(actual, op, expected, text, 0) == None -> return true
     }
-    needle :: if filter.expected == {
-        .Text(text) -> text
-        else -> { return false }
-    }
-    contains :: if actual == {
-        .Text(text) -> text.contains(needle)
-        else -> false
-    }
-    if negative -> !contains else -> contains
+    false
 }
 
 fn kit_steps_json_select(value: DataTree, parts: [String], depth: Int) -> [DataTree]? {
     if depth == parts.len() -> return Val([value])
     part :: parts[depth]
-    if part.starts_with(".") {
+    if part.starts_with(".") || part.starts_with("\"") {
+        key := if part.starts_with(".") -> part.slice(1, part.len()) else -> ""
+        if part.starts_with("\"") {
+            decoded :: json.parse(part) ?? return None
+            key = if decoded == { .Text(text) -> text else -> { return None } }
+        }
         if value == {
             .Object(fields) -> {
-                child :: fields.get(part.slice(1, part.len())) ?? return None
+                child :: fields.get(key) ?? return None
                 return kit_steps_json_select(child, parts, depth + 1)
             }
             else -> return None
@@ -89,7 +119,7 @@ fn kit_steps_json_select(value: DataTree, parts: [String], depth: Int) -> [DataT
                 return kit_steps_json_select(DataTree.Array(selected), parts, depth + 1)
             }
             if part == "*" {
-                if items.len() == 0 -> return None
+                if items.len() == 0 -> return Val([DataTree]{})
                 selected := [DataTree]{}
                 loop item in items {
                     values :: kit_steps_json_select(item, parts, depth + 1) ?? return None
@@ -97,7 +127,8 @@ fn kit_steps_json_select(value: DataTree, parts: [String], depth: Int) -> [DataT
                 }
                 return Val(selected)
             }
-            index :: Int.parse(part) ?? return None
+            raw :: Int.parse(part) ?? return None
+            index :: if raw < 0 -> items.len() + raw else -> raw
             if index < 0 || index >= items.len() -> return None
             return kit_steps_json_select(items[index], parts, depth + 1)
         }
@@ -108,7 +139,7 @@ fn kit_steps_json_select(value: DataTree, parts: [String], depth: Int) -> [DataT
 fn kit_steps_json_values(text: String, mode: String, path: String) -> [DataTree]? {
     parts :: kit_steps_json_path(path) ?? return None
     tree := DataTree.Null
-    if mode == "doc" -> tree = json.parse(text) ?? return None
+    if mode == "doc" || mode.starts_with("doc[zero ") -> tree = json.parse(text) ?? return None
     else if mode == "toml" -> tree = toml.parse(text) ?? return None
     else if mode == "ndjson" {
         records := [DataTree]{}
@@ -121,6 +152,10 @@ fn kit_steps_json_values(text: String, mode: String, path: String) -> [DataTree]
         }
         tree = DataTree.Array(records)
     } else -> return None
+    if mode.starts_with("doc[zero ") {
+        if !mode.ends_with("]") -> return None
+        tree = kit_steps_json_zero(tree, mode.slice(9, mode.len() - 1))
+    }
     kit_steps_json_select(tree, parts, 0)
 }
 

@@ -175,6 +175,12 @@ fn kit_exec_copy_tree(source: String, destination: String, fixture_state: Bool) 
 }
 
 fn kit_exec_requires(requirement: String, env: KitEnv, work: String, scratch: String) -> KitVerdict? {
+    if requirement.starts_with("first-existing ") -> return None
+    if requirement.starts_with("path-exists:") {
+        path :: kit_steps_expand(requirement.slice(12, requirement.len()), env, work, scratch, "")
+        if !files.exists(files.join(work, path)) -> return Val(kit_expect_verdict("SKIP-HOST", requirement))
+        return None
+    }
     if requirement.starts_with("env:") {
         assignment :: requirement.slice(4, requirement.len())
         equals :: assignment.index("=") ?? -1
