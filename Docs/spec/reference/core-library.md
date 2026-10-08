@@ -1429,6 +1429,10 @@ ports (D-WATCH-SCOPE1). Polling is explicit: a handle or set does not own a
 background thread or shell process, and the public module has no callback
 registration method.
 
+Watch constructors retain provider-owned resource state, not string-backed
+handle records. `files(path)` passes the path to the provider unchanged; its
+filesystem error is not replaced by a source-only empty-path error.
+
 | API | Result | Description |
 | --- | --- | --- |
 | `files(path)` / `recursive(path)` | `WatchHandle !IOError` | Watch a path; the recursive spelling uses the host's recursive file snapshot. |
@@ -3098,6 +3102,11 @@ bounded asynchronous delivery. It does not use a stringly named global event
 bus. The source contract is [`Core/event/event.jet`](../../../Core/event/event.jet),
 and the event conformance corpus covers listener lifetime, policy, and
 async-result behavior.
+
+`new<T>()` composes `with_policy<T>(policy_sync())` in Jet source.
+`async_result` rejects a nonpositive capacity with `InvalidCapacity` before
+allocating dispatch state. Listener cells, scope identities, and scheduler
+resources remain provider-owned.
 
 | Signature | Result | Description |
 |---|---|---|
