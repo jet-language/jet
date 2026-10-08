@@ -613,7 +613,7 @@ impl FunctionRegistry {
     }
 
     /// A bare built-in boundary spelling (`URL`) that the calling module does
-    /// not declare names its Core carrier record (`row_claims_bare_name`), so
+    /// not declare names its registered Core carrier record, so
     /// a method on it is that record's checked method. Any other bare Core
     /// export (`Digest256` returned by `sha256` into `core.email`) names the
     /// record of the one Core source module that exports it.
@@ -4684,26 +4684,6 @@ fn is_builtin_task_group(type_defs: &[MirTypeDef], name: &str) -> bool {
 /// the handle to that record's field layout (#3779).
 const BUILTIN_TASK_GROUP_IDENTITY_KEY: &str = "builtin:task-group";
 
-/// A bare built-in boundary spelling (`Path`, `URL`, `DateTime`) names only its
-/// carrier record (`core.net.url`'s `URL`); a loaded record that merely shares
-/// the leaf (`core.files.path`'s `Path`) is a different type and never claims
-/// the bare spelling. Every other name may match by leaf.
-fn row_claims_bare_name(row: &MirTypeDef, name: &str) -> bool {
-    if matches!(name, "Fraction" | "Decimal" | "Complex")
-        && jet_foundation::CoreModuleExports::core_source_owns_type(&row.key)
-    {
-        return jet_foundation::CoreModuleExports::core_source_module("core.math")
-            .is_some_and(|source| row.name == name
-                && row.key.ends_with(&format!("{}::{name}", source.path)));
-    }
-    let Some(kind) = crate::Syntax::typed_head_kind(name) else {
-        return true;
-    };
-    kind.carrier_record_module()
-        .and_then(jet_foundation::CoreModuleExports::core_source_module)
-        .is_some_and(|source| row.key.ends_with(&format!("{}::{name}", source.path)))
-}
-
 fn canonical_nominal_name(
     type_defs: &[MirTypeDef],
     name: &str,
@@ -4736,18 +4716,10 @@ fn canonical_nominal_name(
             return Ok(leaf.to_string());
         }
     }
-    let matches = type_defs
-        .iter()
-        .filter(|ty| ty.name == name && row_claims_bare_name(ty, name))
-        .collect::<Vec<_>>();
-    match matches.as_slice() {
-        [ty] => Ok(ty.key.clone()),
-        [] => Ok(name.to_string()),
-        _ => Err(LowerError::new(
-            span,
-            format!("ambiguous checked MIR type name `{name}`"),
-        )),
-    }
+    // Sema/TIR supplies module-qualified identities for source nominals.
+    // A bare name left here is a builtin or a generic parameter, never a
+    // request to search unrelated modules for a matching declaration leaf.
+    Ok(name.to_string())
 }
 
 fn canonicalize_type(type_defs: &[MirTypeDef], ty: &Type, span: Span) -> Result<Type, LowerError> {
@@ -4845,12 +4817,12 @@ fn canonical_type_instance(
         }
         Type::Named(name) => type_defs
             .iter()
-            .find(|row| row.key == *name || (row.name == *name && row_claims_bare_name(row, name)))
+            .find(|row| row.key == *name)
             .map(|row| row.id)
             .unwrap_or_else(|| MirTypeId(stable_id("mir-type", &key))),
         Type::Apply { name, args } if args.is_empty() => type_defs
             .iter()
-            .find(|row| row.key == *name || (row.name == *name && row_claims_bare_name(row, name)))
+            .find(|row| row.key == *name)
             .map(|row| row.id)
             .unwrap_or_else(|| MirTypeId(stable_id("mir-type", &key))),
         _ => MirTypeId(stable_id("mir-type", &key)),
@@ -6188,40 +6160,7 @@ impl<'a> LowerCtx<'a> {
     pub(super) fn mir_type(&mut self, ty: &Type) -> Result<MirType, LowerError> {
         let span = self.span();
         let normalized = self.normalize_contextual_type(ty);
-        let contextual_owner = match &normalized {
-            Type::Named(name) => {
-                let owner_name = match &self.function.kind {
-                    super::TFuncKind::Method { owner_type, .. }
-                    | super::TFuncKind::TraitMethod { owner_type, .. } => Some(owner_type.name()),
-                    super::TFuncKind::TopLevel => None,
-                };
-                owner_name.and_then(|owner_name| {
-                    let same_leaf = owner_name
-                        .rsplit("::")
-                        .next()
-                        .unwrap_or(owner_name.as_str())
-                        == name;
-                    let ambiguous = self
-                        .type_defs
-                        .iter()
-                        .filter(|definition| {
-                            definition.name == *name
-                                || definition
-                                    .key
-                                    .rsplit("::")
-                                    .next()
-                                    .unwrap_or(&definition.key)
-                                    == name.as_str()
-                        })
-                        .count()
-                        > 1;
-                    (same_leaf && ambiguous).then_some(Type::Named(owner_name))
-                })
-            }
-            _ => None,
-        };
-        let resolved_ty = contextual_owner.as_ref().unwrap_or(&normalized);
-        let instance = canonical_type_instance(self.type_defs, resolved_ty, span)?;
+        let instance = canonical_type_instance(self.type_defs, &normalized, span)?;
         merge_type_instance(&mut self.type_instances, instance.clone(), span)?;
         Ok(instance)
     }
