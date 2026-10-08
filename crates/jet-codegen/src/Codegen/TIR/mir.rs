@@ -51,7 +51,7 @@ use jet_foundation::MIR::{
     MirPatternPosition, MirPatternShape, MirPlace, MirPlaceBase, MirPlaceId, MirPreludeAbi,
     MirPreludeCall, MirPreludeCallId, MirPreludeFamily, MirProgram, MirProjection, MirRequireKind,
     MirRuntimePartId, MirScope, MirScopeId, MirScopeKind, MirSemanticOp, MirSerdeCodec, MirSiteId,
-    MirSourceFile, MirSourceFileId, MirSymbol, MirTargetApplicability, MirTerminator, MirTestCase, MirTestScopeMember,
+    MirSourceFile, MirSourceFileId, MirSymbol, MirTargetApplicability, MirTerminator, MirTestCase,
     MirTestId, MirTestKind, MirTextPatternPart, MirTraitDef, MirTraitId, MirTraitMethod,
     MirTraitMethodId, MirTraitRef, MirType, MirTypeDef, MirTypeDefKind, MirTypeId, MirTypeKind,
     MirUnsafeGate, MirValueId, MirVariant, MirVariantPayload, MirVectorAccess, MirVectorAccessRoot,
