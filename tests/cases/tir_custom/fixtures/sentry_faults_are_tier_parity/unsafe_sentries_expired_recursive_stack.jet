@@ -1,0 +1,15 @@
+use core.mem
+fn leak(depth: Int) -> Int {
+    cell :: depth
+    if depth == 0 {
+        return mem.address_of(cell)
+    }
+    return leak(depth - 1)
+}
+fn run() {
+    addr :: leak(2)
+    #Unsafe("the recursive address outlives its owning Jet frame") {
+        pointer :: mem.Ptr<Int>.from_addr(addr)
+        print(pointer.*)
+    }
+}

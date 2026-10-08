@@ -1,0 +1,22 @@
+
+use core.http as http
+use core.net.mime as mime
+use core.files as files
+
+fn run() {
+    print(http.Method.custom("PURGE") ?? panic("method"))
+    print(http.Status.new(299) ?? panic("status"))
+    print(http.Version.http_1_1())
+    print(http.HeaderName.new("X-Test") ?? panic("name"))
+    print(http.HeaderValue.new("ok") ?? panic("value"))
+    print(http.Body.empty().bytes(1) ?? panic("empty"))
+    print(http.Body.bytes([0, 255]).bytes(2) ?? panic("bytes"))
+    print(http.Body.text("hello").text(5) ?? panic("text"))
+    print(http.Body.text("hello", mime.parse("text/custom") ?? panic("mime")).text(5) ?? panic("custom"))
+    print(http.Body.form(["a": "b"]).text(16) ?? panic("form"))
+    print(http.Body.json(42).json<Int>(16) ?? panic("json"))
+    input :: files.open("{work}/input") ?? panic("open")
+    body :: http.Body.reader(^input, 6) ?? panic("reader")
+    output :: files.create("{work}/output") ?? panic("create")
+    print(body.copy_to(^output, 6) ?? panic("copy"))
+}

@@ -1,0 +1,12 @@
+use core.mem
+fn leak() -> Int {
+    cell :: 1337
+    return mem.address_of(cell)
+}
+fn run() {
+    addr :: leak()
+    #Unsafe("the returned address outlives its owning Jet frame") {
+        pointer :: mem.Ptr<Int>.from_addr(addr)
+        print(pointer.*)
+    }
+}
