@@ -1587,6 +1587,17 @@ The retirement predicate fails for these rows: the compiler still pins
 Counter/OrderedMap/Layer/Chain to native carriers (`Emit/Types.jet:2637-2640`),
 so the Jet runtime replaces the existing ABI rather than deleting live routes.
 
+Counter's fourteen routes and five owning/rendering rails use the same paired
+header with native signed-I64 counts. Zero deltas do not introduce keys; zero
+totals remove entries; negative counts survive but contribute no elements.
+Most-common keeps insertion order for ties and negative K means all entries.
+Merge/subtract update one fresh owner with reserved capacity, preserving the
+reference's checked arithmetic and ordering without repeated full copies.
+Decimal rendering handles I64::MIN through unsigned magnitude. Raw witnesses
+exercise all routes, three exact render strings, wide boxed return ownership,
+independent clones and per-class balance. Ambient dispatcher rows remain
+(`Core.jet:504-517`); these are live ABI replacements, not row retirements.
+
 Lazy cursor initialization and advancement may invoke user callbacks. Both
 are can-stop MIR operations: their results are usable only on the immediately
 following Propagate poll's resume edge. Prefetched HasNext/Value operations
