@@ -6629,29 +6629,6 @@ fn jet_codegen_lower_pattern_condition(builder: &JetCodegenBuilder, program: Jet
     jet_codegen_lower_pattern_shape_condition(&builder, program, pattern, subject, subject_value, pattern.shape, bind_success, false)
 }
 
-fn jet_codegen_task_result_type(ty: Type) -> Bool Never! {
-    if jet_codegen_unwrap_pattern_tags(ty) == {
-        .Apply(name, args) -> {
-            if name != "Task" || args.len() != 1 -> return false
-            if jet_codegen_unwrap_pattern_tags(args[0]) == {.Result(_, _) -> true else -> false}
-        }
-        else -> false
-    }
-}
-
-fn jet_codegen_task_group_result_tasks(ty: Type) -> Bool Never! {
-    if jet_codegen_unwrap_pattern_tags(ty) == {
-        .List(inner) | .FixedList(inner, _) -> jet_codegen_task_result_type(inner)
-        .Tuple(fields) -> {
-            loop field in fields {
-                if !jet_codegen_task_result_type(field.ty) -> return false
-            }
-            true
-        }
-        else -> false
-    }
-}
-
 // Rust `lower_consuming_value`: an owned handle moves from its own place row,
 // so its drop flag clears and scope exit does not move it a second time.
 fn jet_codegen_lower_consuming_value(builder: &JetCodegenBuilder, program: JetCodegenProgram, value: TExpr) -> MIRValueID {
@@ -6672,7 +6649,6 @@ fn jet_codegen_lower_task_group_value(builder: &JetCodegenBuilder, program: JetC
         .Race -> "race"
         .Any -> "any"
     }
-    if jet_codegen_task_group_result_tasks(tasks.ty) -> member = "{member}_result"
     call := jet_codegen_intern_route(&builder, program, MIRPreludeFamily.StaticPrelude, "core.tasks", member, "jet_std::jet_task_{member}", 1, [Bool]{false}, None, jet_codegen_failure_carrier_for_type(expression.ty), MIRPreludeABI.Value)
     value := jet_codegen_lower_consuming_value(&builder, program, tasks)
     jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.TaskGroup{call: call, kind: kind, tasks: [MIRValueID]{value}}})

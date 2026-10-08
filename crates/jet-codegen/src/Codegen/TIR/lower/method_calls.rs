@@ -5134,15 +5134,9 @@ fn lower_method_call_impl(
             }
         });
     }
-    // D-NURSERY1/A: from `[Task<T>]` list type extract `T` (the joined result
-    // type). A normalized fallible child is internally `Task<Result<T, E>>`,
-    // but the task-group surface still returns the successful `T`; the
-    // `TaskFailure` rail is the combinator's only visible error.
-
-    /// D-CONC-ALLNAMED1=A: `task.all` carries its named shape in the existing
-    /// tuple carrier. Each tuple field is a `Task<T>` at the input and becomes
-    /// the corresponding `T` in the fallible output tuple. Normalized
-    /// `Task<Result<T, E>>` fields expose only `T` at this boundary.
+    /// D-CONC-ALLNAMED1=A: each named `Task<T>` field yields the same checked
+    /// `T`, including any authored Result carrier. The combinator adds only
+    /// its own TaskFailure rail.
 
     /// Lower a named `task.all` carrier, then restore its authored field order.
     /// Ordinary tuple literals stay canonical in `lower_expr`; only this
@@ -5185,19 +5179,6 @@ fn lower_method_call_impl(
                     .or_else(|| lowered_by_name.remove(&name))
                     .map(|value| (name, value))
             }));
-        }
-        // D-CONC-ALLNAMED1=A / D-CONC-FAIL1=A: spawn lowering keeps a Result
-        // carrier on each branch. TupleLit's checked type stays Task<T>, so
-        // `task_group_result_tasks` would skip flatten and join would return
-        // Result handles. Rebuild the tuple type from the lowered fields so
-        // named `task.all` uses the same `all_result` path as the list form.
-        if let TExprKind::TupleLit { fields, .. } = &tasks.kind {
-            tasks.ty = crate::AST::Type::Tuple(
-                fields
-                    .iter()
-                    .map(|(name, value)| (name.clone(), Box::new(value.ty.clone())))
-                    .collect(),
-            );
         }
         tasks
     }
