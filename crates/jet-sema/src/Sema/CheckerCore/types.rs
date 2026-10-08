@@ -35,8 +35,8 @@ impl<'a> Checker<'a> {
             };
             if !self.source_owns_nominal(name) { continue; }
             let (namespace, leaf) = Self::split_type_name(name);
-            let owner = self.struct_owner_module(leaf, namespace)?;
-            let module = modules.get(owner)?;
+            let Some(owner) = self.struct_owner_module(leaf, namespace) else { continue; };
+            let Some(module) = modules.get(owner) else { continue; };
             for row in &module.trait_reg.operator_impls {
                 if row.trait_name != trait_name { continue; }
                 let row_left = crate::Sema::Diagnostics::builtin_type_from_ident(&row.left)
