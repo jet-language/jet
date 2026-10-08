@@ -1,0 +1,12 @@
+# Port of tests/release_gates.rs::small_profile_binary_is_smaller_than_default; all original predicates, runtime UNRUN.
+requires: tool:rustc
+file: {root}/Examples/features/collections/wordcount.jet is-file
+mkdir: .jet/build
+step: jet build {root}/Examples/features/collections/wordcount.jet
+exit: 0
+rename: .jet/build/wordcount .jet/build/wordcount_default
+step: jet build --small {root}/Examples/features/collections/wordcount.jet
+exit: 0
+rename: .jet/build/wordcount .jet/build/wordcount_small
+capture: default_size = size file .jet/build/wordcount_default
+file: .jet/build/wordcount_small size < {cap:default_size}
