@@ -539,3 +539,30 @@ fn generic_container_close_runs_once_on_interpreter_mir() {
         }
     }
 }
+
+#[test]
+fn projected_move_from_close_owner_is_explicitly_refused() {
+    let src = r#"
+struct ClosePair { first: String, second: String }
+impl ClosePair.Close {
+    fn close(^self) { print(self.second) }
+}
+fn run() {
+    held :: ClosePair{first: "first", second: "second"}
+    taken :: ^held.first
+    print(taken)
+}
+"#;
+    let diagnostics = match jet::compile(src) {
+        Err(diagnostics) => diagnostics,
+        Ok(_) => panic!("a non-receiver Close owner was partially moved"),
+    };
+    let rendered = jet::render_diagnostics("close_pair.jet", src, &diagnostics);
+    assert!(diagnostics.iter().any(|diagnostic| {
+        [&diagnostic.what, &diagnostic.why].into_iter().any(|message| {
+            message.contains("cannot lower projected move from")
+                && message.contains("ClosePair")
+                && message.contains("owner has its own Close implementation")
+        })
+    }), "{rendered}");
+}

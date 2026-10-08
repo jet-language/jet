@@ -89,6 +89,17 @@ The freeze example is a lowering rule, not an engine-side capture check. A
 self-host implementation must carry the same already-proved ownership facts to
 each lens.
 
+A projected owning `Move` selects its root for leaf cleanup before MIR emission.
+Only those roots split their stored struct/tuple ownership into live flags;
+ordinary roots retain their atomic cleanup, and containers, dynamic owners and
+nominal `Close` leaves remain indivisible. A move clears every covered leaf
+flag; reinitialization sets those same flags. Cleanup consumes only the live
+remainder, including on early returns. A root with its own `Close` cannot be
+split outside that implementation's consuming receiver: lowering refuses that
+checked shape with a type-named internal error. The consuming receiver inside
+its own `Close` body instead gets structural remainder cleanup, never another
+call to its own `Close`.
+
 Native reference carriers (`View`, `ViewMut`, `Pin`, and the internal
 allocator-view tag) do not own their referents. Their synthetic scope cleanup
 must not read or move the reference after its last checked use: doing so would
