@@ -414,6 +414,7 @@ fn jet_std_time_duration_to_millis(ns: i64) -> i64 {
     ns
 }
 
+include!("../crates/jet-codegen/src/Prelude/Core/NativeTaskBody.rs");
 include!("../crates/jet-codegen/src/Prelude/Scheduler.rs");
 
 mod http_server_tls_runtime {
