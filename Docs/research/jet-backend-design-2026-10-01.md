@@ -2110,3 +2110,10 @@ accessors. Its real allocation/free ledger checks size/alignment and exact-once
 release. The runner reuses canonical shared bounds/capacity and ordinal
 goldens, requiring their real composed Jet providers; no execution or
 native-caller layout admission is implied by syntax checks.
+
+`UiCarriersChoices.jet` reuses the canonical EncodingABI8 enum ownership
+helpers for UIAriaRole and FormValidationTiming. Role rendering preserves the
+seed's four spellings; a malformed native-private ordinal uses the shared
+record-variant stop rather than a provider-local panic. The real-provider
+choices witness checks all pairwise ordinal comparisons, render spellings,
+clone independence and exact-once frees, and reuses the shared stop golden.
