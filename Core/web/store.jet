@@ -292,5 +292,6 @@ fn control_escape(value: Int) -> String Never! {
 }
 
 #Test("store facts quoting preserves Unicode and escapes Rust control scalars") {
-    assert_eq(esc_json("λ\u{0085}\u{0000}\u{007f}\n"), "λ\\u0085\\u0000\\u007f\\n")
+    controls :: String.from_bytes([U8]{U8{206}, U8{187}, U8{194}, U8{133}, U8{0}, U8{127}, U8{10}}) ?? ""
+    assert_eq(esc_json(controls), "λ\\u0085\\u0000\\u007f\\n")
 }

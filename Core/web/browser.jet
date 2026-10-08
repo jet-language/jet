@@ -310,7 +310,20 @@ pub fn report_exit_code(report: BrowserReport) -> Int Never! {
 }
 
 pub fn write_report(report: BrowserTestReport, path: String) BrowserError! {
-    core.web.browser.__write_report(report, path)
+    // BrowserTest.rs:1136-1155: report choice precedes the first write; the
+    // HTML companion is written afterwards, including when target is HTML.
+    options :: core.web.browser.__report_options(report)
+    rendered :: if options.reporter == {
+        "json" -> core.web.browser.__report_json(report)
+        "html" -> core.web.browser.__report_html(report)
+        else -> core.web.browser.__report_text(report)
+    }
+    write_report_text(path, rendered)?
+    if options.ui || options.reporter == "html" {
+        viewer :: core.web.browser.__html_path(path)
+        write_report_text(viewer, core.web.browser.__report_html(report))?
+    }
+    Ok()
 }
 
 pub fn server_start(config: BrowserTestConfig) -[Net]> BrowserTestServer BrowserError! {
@@ -676,4 +689,9 @@ fn strip_quotes(raw: String) -> String Never! {
     assert_eq(entry.binary(), "last")
     assert_eq(entry.size, -1)
     assert(parse_locked("{raw}[[browser]]\nengine=chromium\nsize=overflow\n", "firefox") == Err(BrowserError{kind: "invalid lock"}))
+}
+
+fn write_report_text(path: String, rendered: String) BrowserError! {
+    if rendered.bytes().len() > 16777216 -> return Err(BrowserError{kind: "protocol"})
+    core.web.browser.__write_report_bytes(path, rendered.bytes())
 }
