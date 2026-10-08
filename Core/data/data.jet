@@ -2747,3 +2747,234 @@ fn data_track_reader<T, K>(owner: Shared<DataTrackedState<T, K>>) -> DataTracked
         .Err(error) -> assert(error.kind == .NonFinite)
     }
 }
+
+struct DataGroupMember<V> {
+    order: Int
+    value: V
+    key: String?
+}
+
+struct DataGroupBucket<K, V> {
+    key: K
+    rank_key: String?
+    rank_order: Int
+    members: [DataGroupMember<V>]
+}
+
+struct DataGroupWatchState<K, V> {
+    buckets: [DataGroupBucket<K, V>]
+    revision: Int
+    values: [Group<K, V>]
+}
+
+fn data_group_rank_order(left_key: String?, left_order: Int, right_key: String?, right_order: Int) -> Ordering Never! {
+    order :: data_watch_optional_key_order(left_key, right_key)
+    if order == Ordering.Equal -> left_order <=> right_order else -> order
+}
+
+fn data_group_watch_sort_limit<T>(reader: DataTrackedReader<T>, operations: [DataQueryOperation<T>], operation_name: String) DataError! {
+    loop operation in operations {
+        if operation == .SortBy(_) {
+            limit :: DataLimits.safe().max_sort_rows
+            if reader.retained_rows() > limit -> return Err(data_error(.Limit, "max_sort_rows {limit} exceeded", operation_name))
+            break
+        }
+    }
+    Ok(())
+}
+
+fn data_group_watch_add<T, K: Equatable, V>(state: &DataGroupWatchState<K, V>, order: Int, row: T, operations: [DataQueryOperation<T>], key: fn(T) -> K, value: fn(T) -> V DataError!, operation_name: String) DataError! {
+    accepted :: data_watch_accepts<T>(operations, row)
+    if !accepted.accepted -> return Ok(())
+    group_key :: key(row)
+    group_value :: value(row) ?? return Err(err)
+    loop index in 0..<state.buckets.len() {
+        if state.buckets[index].key != group_key -> next
+        position := 0
+        loop position < state.buckets[index].members.len() && state.buckets[index].members[position].order <= order { position = position + 1 }
+        &state.buckets[index].members.insert(position, DataGroupMember<V>{order: order, value: group_value, key: accepted.key})
+        if data_group_rank_order(accepted.key, order, state.buckets[index].rank_key, state.buckets[index].rank_order) == Ordering.Less {
+            state.buckets[index].rank_key = accepted.key
+            state.buckets[index].rank_order = order
+        }
+        return Ok(())
+    }
+    limit :: DataLimits.safe().max_groups
+    if state.buckets.len() >= limit -> return Err(data_error(.Limit, "max_groups {limit} exceeded", operation_name))
+    &state.buckets.push(DataGroupBucket<K, V>{key: group_key, rank_key: accepted.key, rank_order: order, members: [DataGroupMember<V>]{DataGroupMember<V>{order: order, value: group_value, key: accepted.key}}})
+    Ok(())
+}
+
+fn data_group_watch_remove<K, V>(state: &DataGroupWatchState<K, V>, order: Int) Never! {
+    loop index in 0..<state.buckets.len() {
+        position := Int?{None}
+        loop (member_index, member) in state.buckets[index].members {
+            if member.order == order {
+                position = Val(member_index)
+                break
+            }
+        }
+        if position == .Val(member_index) {
+            state.buckets[index].members.remove(member_index).drop("removed group membership")
+            if state.buckets[index].members.len() == 0 {
+                state.buckets.remove(index).drop("removed empty group")
+            } else {
+                first :: state.buckets[index].members[0]
+                rank_key := ~first.key
+                rank_order := first.order
+                loop member in state.buckets[index].members {
+                    if data_group_rank_order(member.key, member.order, rank_key, rank_order) == Ordering.Less {
+                        rank_key = member.key
+                        rank_order = member.order
+                    }
+                }
+                state.buckets[index].rank_key = rank_key
+                state.buckets[index].rank_order = rank_order
+            }
+            return
+        }
+    }
+}
+
+fn data_group_watch_materialize<K, V>(state: DataGroupWatchState<K, V>, aggregate: fn([V]) -> V DataError!, operation_name: String) -> [Group<K, V>] DataError! {
+    limit :: DataLimits.safe().max_output_rows
+    if state.buckets.len() > limit -> return Err(data_error(.Limit, "max_output_rows {limit} exceeded", operation_name))
+    indices := [Int]{}
+    loop index in 0..<state.buckets.len() -> &indices.push(index)
+    &indices.sort_by((left: Int, right: Int) -> data_group_rank_order(state.buckets[left].rank_key, state.buckets[left].rank_order, state.buckets[right].rank_key, state.buckets[right].rank_order))
+    groups := [Group<K, V>]{}
+    loop index in indices {
+        bucket :: state.buckets[index]
+        values := [V]{}
+        loop member in bucket.members -> &values.push(member.value)
+        total :: aggregate(values) ?? return Err(err)
+        &groups.push(Group<K, V>{key: bucket.key, value: total})
+    }
+    Ok(groups)
+}
+
+fn data_group_watch_entries<K, V>(values: [Group<K, V>]) -> [DataWatchEntry<Group<K, V>>] Never! {
+    entries := [DataWatchEntry<Group<K, V>>]{}
+    loop (order, value) in values -> &entries.push(DataWatchEntry<Group<K, V>>{order: order, key: None, value: value})
+    entries
+}
+
+fn data_group_watch_source<T, K: Equatable, V>(reader: DataTrackedReader<T>, operations: [DataQueryOperation<T>], key: fn(T) -> K, value: fn(T) -> V DataError!, aggregate: fn([V]) -> V DataError!, operation_name: String, mode: String, recomputed: Bool) -> DataWatchSource<Group<K, V>> Never! {
+    owner :: shared DataGroupWatchState<K, V>?{None}
+    DataWatchSource<Group<K, V>>{
+        initial: () -> {
+            data_group_watch_sort_limit<T>(reader, operations, operation_name) ?? return Err(err)
+            snapshot :: reader.entries()
+            state := DataGroupWatchState<K, V>{buckets: [DataGroupBucket<K, V>]{}, revision: snapshot.revision, values: [Group<K, V>]{}}
+            loop entry in snapshot.entries -> data_group_watch_add<T, K, V>(&state, entry.order, entry.value, operations, key, value, operation_name) ?? return Err(err)
+            state.values = data_group_watch_materialize<K, V>(state, aggregate, operation_name) ?? return Err(err)
+            entries :: data_group_watch_entries<K, V>(state.values)
+            revision :: state.revision
+            guard := owner.guard_edit()
+            guard.value = Val(state)
+            Ok(DataWatchMaterialized<Group<K, V>>{entries: entries, revision: revision, mode: mode, recomputed: false, changed: true, retained_rows: reader.retained_rows()})
+        },
+        refresh: (revision, _) -> {
+            data_group_watch_sort_limit<T>(reader, operations, operation_name) ?? return Err(err)
+            state :: owner.capture().value() ?? return Err(data_error(.State, "group watch was not initialized", operation_name))
+            if revision > state.revision -> return Err(data_error(.StaleRevision, "watch revision is newer than its maintained group state", operation_name))
+            if reader.revision() == state.revision -> return Ok(DataWatchMaterialized<Group<K, V>>{entries: data_group_watch_entries<K, V>(state.values), revision: state.revision, mode: mode, recomputed: false, changed: false, retained_rows: reader.retained_rows()})
+            changes :: reader.changes(state.revision) ?? return Err(err)
+            next_state := ~state
+            loop change in changes {
+                if change.kind == {
+                    .Insert(row) -> data_group_watch_add<T, K, V>(&next_state, change.order, row, operations, key, value, operation_name) ?? return Err(err)
+                    .Replace(_, after) -> {
+                        data_group_watch_remove<K, V>(&next_state, change.order)
+                        data_group_watch_add<T, K, V>(&next_state, change.order, after, operations, key, value, operation_name) ?? return Err(err)
+                    }
+                    .Remove(_) -> data_group_watch_remove<K, V>(&next_state, change.order)
+                }
+            }
+            next_state.revision = reader.revision()
+            next_state.values = data_group_watch_materialize<K, V>(next_state, aggregate, operation_name) ?? return Err(err)
+            entries :: data_group_watch_entries<K, V>(next_state.values)
+            next_revision :: next_state.revision
+            guard := owner.guard_edit()
+            guard.value = Val(next_state)
+            Ok(DataWatchMaterialized<Group<K, V>>{entries: entries, revision: next_revision, mode: mode, recomputed: recomputed, changed: true, retained_rows: reader.retained_rows()})
+        },
+    }
+}
+
+fn data_query_state_group_count<T, K: Equatable>(query: DataQueryState<T>, key: fn(T) -> K) -> DataQueryState<Group<K, Int>> Never! {
+    steps := ~query.steps
+    &steps.push("group_by")
+    &steps.push("count")
+    result := data_query_state_reducer<Group<K, Int>>(query.tracking, steps, () -> {
+        rows :: data_query_state_collect<T>(query) ?? return Err(err)
+        groups := [Group<K, Int>]{}
+        limit :: DataLimits.safe().max_groups
+        loop row in rows {
+            group_key :: key(row)
+            found := false
+            loop index in 0..<groups.len() {
+                if groups[index].key == group_key {
+                    groups[index].value = groups[index].value + 1
+                    found = true
+                    break
+                }
+            }
+            if !found {
+                if groups.len() >= limit -> return Err(data_error(.Limit, "max_groups {limit} exceeded", "query.group_by.count"))
+                &groups.push(Group<K, Int>{key: group_key, value: 1})
+            }
+        }
+        Ok(groups)
+    })
+    if query.source == .Tracked(reader) -> result.watch_source = Val(data_group_watch_source<T, K, Int>(reader, query.operations, key, _ -> Ok(1), values -> Ok(values.len()), "query.group_by.count", "incremental", false))
+    result
+}
+
+fn data_query_state_group_mean<T, K: Equatable>(query: DataQueryState<T>, key: fn(T) -> K, value: fn(T) -> Float DataError!) -> DataQueryState<Group<K, Float>> Never! {
+    steps := ~query.steps
+    &steps.push("group_by")
+    &steps.push("mean")
+    result := data_query_state_reducer<Group<K, Float>>(query.tracking, steps, () -> {
+        rows :: data_query_state_collect<T>(query) ?? return Err(err)
+        buckets := [DataGroupMeanBucket<K>]{}
+        limit :: DataLimits.safe().max_groups
+        loop row in rows {
+            group_key :: key(row)
+            group_value :: value(row) ?? return Err(err)
+            if nonfinite(group_value) -> return Err(data_error(.NonFinite, "group values must be finite", "query.group_by.mean"))
+            found := false
+            loop index in 0..<buckets.len() {
+                if buckets[index].key == group_key {
+                    buckets[index].total = buckets[index].total + group_value
+                    buckets[index].count = buckets[index].count + 1
+                    found = true
+                    break
+                }
+            }
+            if !found {
+                if buckets.len() >= limit -> return Err(data_error(.Limit, "max_groups {limit} exceeded", "query.group_by.mean"))
+                &buckets.push(DataGroupMeanBucket<K>{key: group_key, total: group_value, count: 1})
+            }
+        }
+        groups := [Group<K, Float>]{}
+        loop bucket in buckets -> &groups.push(Group<K, Float>{key: bucket.key, value: bucket.total / Float{bucket.count}})
+        Ok(groups)
+    })
+    if query.source == .Tracked(reader) -> result.watch_source = Val(data_group_watch_source<T, K, Float>(reader, query.operations, key, value, values -> {
+        loop amount in values {
+            if nonfinite(amount) -> return Err(data_error(.NonFinite, "group values must be finite", "query.group_by.mean"))
+        }
+        if values.len() == 0 -> return Err(data_error(.State, "empty group has no mean", "query.group_by.mean"))
+        total := Float{0.0}
+        loop amount in values -> total = total + amount
+        Ok(total / Float{values.len()})
+    }, "query.group_by.mean", "recomputed", true))
+    result
+}
+
+struct DataGroupMeanBucket<K> {
+    key: K
+    total: Float
+    count: Int
+}
