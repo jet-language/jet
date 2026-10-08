@@ -95,7 +95,7 @@ fn db_receipt_render(value: I64) -> I64 {
     rt_text_push_word(target, I64{61}, I64{1})
     rt_text_push_number(target, encoding_word(value + DB_RECEIPT_OPENING))
     rt_text_push_word(target, I64{17303445617078816}, I64{7}) // ready
-    receipt_push_bool(target, encoding_word(value + DB_RECEIPT_READY))
+    rt_text_push_scalar(target, if receipt_bool(encoding_word(value + DB_RECEIPT_READY)) -> I64{49} else -> I64{48})
     rt_text_push_word(target, I64{7310021098310164768}, I64{8}) // acquires
     rt_text_push_word(target, I64{15731}, I64{2})
     rt_text_push_number(target, encoding_word(value + DB_RECEIPT_ACQUIRES))

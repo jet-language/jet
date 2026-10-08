@@ -113,11 +113,12 @@ static void db_cases(void) {
             assert(jet_rt_handle_eq_JetDbPoolReceipt(p,q));
             Db *normalized=jet_rt_handle_clone_JetDbPoolReceipt(q); watch(normalized,104,8); assert(normalized->ready==(int64_t)ready); jet_rt_handle_drop_JetDbPoolReceipt(normalized);
             char render[512];
-            int n=snprintf(render,sizeof(render),"db.pool lifecycle=%s max=%" PRId64 " available=-2 leased=3 opening=4 ready=%s acquires=5 releases=6 timeouts=7 open_failures=8 unhealthy=9 replacements=10 replacement_failures=%" PRId64,lifecycle[tag],INT64_MAX,ready ? "true" : "false",INT64_MIN);
+            int n=snprintf(render,sizeof(render),"db.pool lifecycle=%s max=%" PRId64 " available=-2 leased=3 opening=4 ready=%u acquires=5 releases=6 timeouts=7 open_failures=8 unhealthy=9 replacements=10 replacement_failures=%" PRId64,lifecycle[tag],INT64_MAX,ready,INT64_MIN);
             assert(n>0 && (size_t)n<sizeof(render));
             own_text_is(jet_rt_handle_show_JetDbPoolReceipt(p),render);
             own_text_is(jet_rt_handle_debug_JetDbPoolReceipt(p),render);
             own_text_is(jet_rt_handle_display_JetDbPoolReceipt(p),render);
+            own_text_is(jet_rt_handle_show_JetDbPoolReceipt(q),render); /* q ready low byte is 2 or 0, upper byte 1. */
             jet_rt_handle_drop_JetDbPoolReceipt(p); int_is(jet_rt_record_get_JetDbPoolReceipt_max(q),INT64_MAX); jet_rt_handle_drop_JetDbPoolReceipt(q);
         }
     }

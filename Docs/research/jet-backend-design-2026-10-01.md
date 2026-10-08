@@ -2090,7 +2090,8 @@ use only the normalized low byte, not padding in the private word slot.
 
 The full 42-export family is implemented in `Receipts.jet`. DbPool's three
 renders share the exact `DbPool.rs:30-68` render, including lowercase lifecycle
-and Bool values. Delivery has only Show, matching `Services.rs:1198-1232`;
+and numeric `ready=1`/`ready=0`. Delivery duplicate remains `true`/`false` and
+has only Show, matching `Services.rs:1198-1232`;
 its raw Text fields are not quoted or redacted and no extra Display/Debug ABI
 is introduced. Clones independently own child Text; drops free children before
 the header, and null drop matches the seed.
