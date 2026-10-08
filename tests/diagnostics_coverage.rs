@@ -384,7 +384,7 @@ fn runtime_stop_renderer_accepts_only_active_runtime_rows() {
     let active_runtime = rows
         .iter()
         .filter(|row| {
-            row.stage == "runtime"
+            row.has_stage("runtime")
                 && row.status == jet_foundation::Registry::DiagnosticStatus::Active
         })
         .collect::<Vec<_>>();
@@ -414,7 +414,7 @@ fn runtime_stop_renderer_accepts_only_active_runtime_rows() {
     }
 
     for row in rows.iter().filter(|row| {
-        row.stage != "runtime" || row.status != jet_foundation::Registry::DiagnosticStatus::Active
+        !row.has_stage("runtime") || row.status != jet_foundation::Registry::DiagnosticStatus::Active
     }) {
         let report = jet_foundation::Outcome::jet_render_runtime_stop(
             row.code,
