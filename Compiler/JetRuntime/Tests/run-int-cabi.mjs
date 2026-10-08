@@ -106,6 +106,15 @@ if (mode !== "--corpus-only") {
   for (const name of ["values", "zero", "exponent", "shift-negative", "shift-wide", "fixed", "native"]) {
     if (JSON.stringify(outputs.get(`rust-${name}`)) !== JSON.stringify(outputs.get(`jet-${name}`)) || !outputs.has(`rust-${name}`)) failures.push(`parity: ${name}`);
   }
+  const atomicBinary = join(out, "atomic-int-cabi");
+  const atomicBuilt = spawnSync(process.env.CC ?? "cc", ["-std=c11", "-O1", "-Wall", "-Wextra", "-Werror", join(root, "Compiler/JetRuntime/Tests/AtomicIntTests.c"), resolve(jetObject), resolve(nativeLibrary), "-ldl", "-lpthread", "-lm", "-o", atomicBinary], { encoding: "utf8" });
+  writeFileSync(join(out, "atomic-int-build.log"), `${atomicBuilt.stdout ?? ""}${atomicBuilt.stderr ?? ""}`);
+  if (atomicBuilt.error || atomicBuilt.status !== 0) failures.push("Atomic Int: link");
+  else {
+    const result = spawnSync(atomicBinary, [], { encoding: "utf8", timeout: 300000 });
+    writeFileSync(join(out, "atomic-int.receipt.json"), JSON.stringify({ status: result.status, signal: result.signal, error: result.error?.message ?? null, stdout: result.stdout, stderr: result.stderr }, null, 2) + "\n");
+    if (result.error || result.status !== 0 || result.stdout !== "Atomic Int: exact owners, numeric CAS, refusal cleanup, four writers\n" || result.stderr !== "") failures.push("Atomic Int: exact output/status");
+  }
   const undefinedSymbols = spawnSync("nm", ["-u", resolve(jetObject)], { encoding: "utf8" });
   writeFileSync(join(out, "undefined-symbols.txt"), undefinedSymbols.stdout ?? "");
   const memorySeam = "jet_rt_int_retire_zero";
@@ -113,7 +122,7 @@ if (mode !== "--corpus-only") {
   if (undefinedSymbols.error || undefinedSymbols.status !== 0 || exactImports.length) failures.push("Jet object still imports an external exact Int numeric/retirement provider");
   const definedSymbols = spawnSync("nm", ["-g", "--defined-only", "--format=posix", resolve(jetObject)], { encoding: "utf8" });
   writeFileSync(join(out, "defined-symbols.txt"), definedSymbols.stdout ?? "");
-  for (const source of ["Int.jet", "IntHazard.jet"]) {
+  for (const source of ["Int.jet", "IntHazard.jet", "AtomicInt.jet"]) {
     for (const match of readFileSync(join(root, "Compiler/JetRuntime/Source", source), "utf8").matchAll(/^#Export\(c\)\s+fn\s+(\w+)\(/gm)) {
       if ((definedSymbols.stdout ?? "").split("\n").filter((line) => line.startsWith(`${match[1]} T `)).length !== 1) failures.push(`missing/nonunique Jet Int provider ${match[1]}`);
     }

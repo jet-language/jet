@@ -126,6 +126,15 @@ Retirement scans that same domain; an unpublished, unprotected final owner
 can be freed, while a protected node remains retired until a later scan.
 The thread's hazard clears after TLS destructors, but its registry record
 remains process-lifetime so scanners cannot race record deallocation.
+`Atomic<Int>.add` returns the independently owned previous exact value.
+Compare-exchange uses numeric equality while retaining the observed node
+through publication, not pointer equality. Fallible add leaves the cell
+unchanged on refusal and reports the physical failed native request in
+`AllocError.requested_bytes` with allocator `"exact-int"`; those byte counts
+reflect native node/limb layout, not Rust temporary-vector layout. An inline
+fast path allocates nothing and takes no allocation fault probe. A spilling
+operation probes once even if its CAS retries, then separately allocates a
+node and limbs; a limb-capacity refusal frees the already allocated node.
 
 
 ## Law 4 — Effects
