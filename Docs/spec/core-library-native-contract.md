@@ -358,6 +358,21 @@ repository usage, representative beginner tasks, and domain workloads.
 High-frequency APIs receive paired beginner and expert evidence for source size,
 diagnostics and recovery, preparation cost, and runtime cost.
 
+## Native Observe startup
+
+The native `jet_rt_main` starts Observe exactly once after host argument capture,
+logical Env seeding, and native TLS/registry initialization, before invoking the
+entry. Startup reads the logical Env cell; it does not reread the process's
+startup environment or run early in the backend object-main thunk.
+
+The `assemble-observe`, `lower`, `link-observe-startup`, and
+`run-observe-startup` fixture sequence requires the Jet main and writer exports
+in the checked native object. Separate enabled and unset child processes prove
+that enabled startup runs one real periodic writer even after repeated starts,
+whereas unset startup creates no writer, extra thread, or publication file.
+The writer is a detached process-lifetime daemon; child exit, not a fabricated
+join or writer free, is its teardown.
+
 ## Completion criteria
 
 A CoreLib area is complete only when:

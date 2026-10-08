@@ -2,13 +2,13 @@
 // L8a-4 actual-runtime slot witnesses and paired 1M-message benchmark.
 // Each mode is independently reportable by the one held keep-going exit job.
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { candidateJetc0, frontReceipt } from '../../JetBackend/Tests/jet-front.mjs';
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const [output, mode, source] = process.argv.slice(2);
-const modes = ['assemble', 'assemble-stm', 'assemble-sync', 'assemble-observe', 'lower', 'prepare-native', 'prepare-seed', 'link', 'link-seed', 'link-session', 'run-session', 'link-stm', 'run-stm', 'link-sync', 'run-sync', 'link-observe', 'run-observe', 'run', 'run-seed', 'cross', 'fatal', 'perf'];
+const modes = ['assemble', 'assemble-stm', 'assemble-sync', 'assemble-observe', 'lower', 'prepare-native', 'prepare-seed', 'link', 'link-seed', 'link-session', 'run-session', 'link-stm', 'run-stm', 'link-sync', 'run-sync', 'link-observe', 'run-observe', 'link-observe-startup', 'run-observe-startup', 'run', 'run-seed', 'cross', 'fatal', 'perf'];
 if (!output || !modes.includes(mode)) throw Error(`usage: run-channel-fixtures.mjs OUT ${modes.join('|')} [FRESH_RUNTIME_RS]`);
 const out = resolve(output), fixture = join(out, 'fixture');
 const read = p => readFileSync(join(repo, p), 'utf8');
@@ -103,6 +103,30 @@ if (mode === 'assemble' || mode.startsWith('assemble-')) {
   const flags=seed?['-DJET_SEED','-Djet_rt_handle_clone_Closed=jet_fixture_rust_closed_clone','-Djet_rt_handle_drop_Closed=jet_fixture_rust_closed_drop','-Djet_rt_handle_eq_Closed=jet_fixture_rust_closed_eq','-Djet_rt_handle_show_Closed=jet_fixture_rust_closed_show']:['-DJET_CHANNEL_INTERNAL','-DJET_CLOSED_CROSS'];
   const objects=seed?[]:[join(fixture,'fixture.o')];
   command(process.env.CC??'cc',['-O2',...flags,join(repo,'Compiler/JetRuntime/Tests/channel-fixture.c'),...objects,lib,'-lpthread','-ldl','-lm','-o',join(out,seed?'channel-seed':'channel-native')]);
+} else if (mode === 'link-observe-startup') {
+  const lib = process.env.JET_CHANNEL_NATIVE_C_LIB;
+  if (!lib || !existsSync(lib)) throw Error('missing freshly compiled native fixture library');
+  // Require the checked Jet body in this object, never a Rust main fallback.
+  const defined = command('nm', ['-g', '--defined-only', '--format=posix', join(fixture, 'fixture.o')]).stdout;
+  for (const symbol of ['jet_rt_main', 'jet_rt_observe_runtime_start_from_env', 'jet_rt_observe_writer']) {
+    if (!new RegExp(`^${symbol} T `, 'm').test(defined)) throw Error(`missing native Jet startup export ${symbol}`);
+  }
+  command(process.env.CC ?? 'cc', ['-std=c11', '-Wall', '-Wextra', '-Werror', join(repo, 'Compiler/JetRuntime/Tests/observe-startup-fixture.c'), join(fixture, 'fixture.o'), lib, '-lpthread', '-ldl', '-lm', '-o', join(out, 'observe-startup-native')]);
+} else if (mode === 'run-observe-startup') {
+  const env = {...process.env,
+    JET_DEVTOOLS_RELAY_SESSION_ID: 'startup-session', JET_DEVTOOLS_RELAY_SOURCE_ID: 'startup-source',
+    JET_DEVTOOLS_RELAY_BUILD_ID: 'startup-build', JET_DEVTOOLS_RELAY_REVISION: 'startup-revision',
+    JET_DEVTOOLS_RELAY_WORLD_ID: 'startup-world'};
+  // Every child receives a fresh directory; stale publication files cannot pass.
+  for (const state of ['enabled', 'unset']) {
+    const directory = mkdtempSync(join(out, `observe-startup-${state}-`));
+    const childEnv = {...env, TMPDIR: directory};
+    if (state === 'enabled') childEnv.JET_OBSERVE = '1';
+    else delete childEnv.JET_OBSERVE;
+    const result = command(join(out, 'observe-startup-native'), [state, directory], {env: childEnv, timeout: 15000});
+    writeFileSync(join(out, `observe-startup-${state}.txt`), result.stdout + result.stderr);
+    console.log(result.stdout.trim());
+  }
 } else if (['link-stm', 'link-sync', 'link-observe'].includes(mode)) {
   const lib = process.env.JET_CHANNEL_NATIVE_C_LIB;
   if (!lib || !existsSync(lib)) throw Error('missing freshly compiled native fixture library');
