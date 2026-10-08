@@ -1927,6 +1927,57 @@ fn testing_diag(message: impl Into<String>, span: Span) -> Diagnostic {
     )
 }
 
+// #4821: marshal only physical fd facts from the same private AOT seed.
+fn crypto_file_io_ambient_core_call(
+    module: &str,
+    method: &str,
+    args: Vec<CtValue>,
+    span: Span,
+    _resolved_ret: Option<Type>,
+    _sink: Option<&mut DevSink>,
+) -> Option<Result<CtValue, Diagnostic>> {
+    if module != "core.crypto" || !method.starts_with("__jetc_") { return None; }
+    use crate::enc_stream::crypto_file_io as raw;
+    let result = match (method, args.as_slice()) {
+        ("__jetc_open_directory", [CtValue::Str(path)]) => raw::jet_crypto_jetc_open_directory(path),
+        ("__jetc_open_child_directory", [CtValue::Int(fd), CtValue::Str(name)]) =>
+            raw::jet_crypto_jetc_open_child_directory(*fd, name),
+        ("__jetc_open_source", [CtValue::Str(path)]) => raw::jet_crypto_jetc_open_source(path),
+        ("__jetc_create_named", [CtValue::Str(path)]) => raw::jet_crypto_jetc_create_named(path),
+        ("__jetc_tmpfile", [CtValue::Int(fd)]) => raw::jet_crypto_jetc_tmpfile(*fd),
+        ("__jetc_read", [CtValue::Int(fd), CtValue::Int(count)]) => raw::jet_crypto_jetc_read(*fd, *count),
+        ("__jetc_write", [CtValue::Int(fd), bytes, CtValue::Int(offset), CtValue::Int(count)]) => {
+            let bytes = match jet_foundation::Prelude::jet_as_bytes(bytes, span) {
+                Ok(bytes) => bytes,
+                Err(error) => return Some(Err(error)),
+            };
+            raw::jet_crypto_jetc_write(*fd, &bytes, *offset, *count)
+        }
+        ("__jetc_seek", [CtValue::Int(fd), CtValue::Int(offset)]) => raw::jet_crypto_jetc_seek(*fd, *offset),
+        ("__jetc_fsync", [CtValue::Int(fd)]) => raw::jet_crypto_jetc_fsync(*fd),
+        ("__jetc_link", [CtValue::Int(fd), CtValue::Int(parent), CtValue::Str(name)]) =>
+            raw::jet_crypto_jetc_link(*fd, *parent, name),
+        ("__jetc_close", [CtValue::Int(fd)]) => raw::jet_crypto_jetc_close(*fd),
+        ("__jetc_stat", [CtValue::Int(fd)]) => {
+            let stat = raw::jet_crypto_jetc_stat(*fd);
+            return Some(Ok(CtValue::Struct { type_name: "__JetcStat".into(), fields: vec![
+                ("status".into(), CtValue::Int(stat.status)), ("errno".into(), CtValue::Int(stat.errno)),
+                ("dev".into(), CtValue::Int(stat.dev)), ("ino".into(), CtValue::Int(stat.ino)),
+                ("len".into(), CtValue::Int(stat.len)), ("mtime".into(), CtValue::Int(stat.mtime)),
+                ("mtime_ns".into(), CtValue::Int(stat.mtime_ns)), ("nlink".into(), CtValue::Int(stat.nlink)),
+                ("is_file".into(), CtValue::Bool(stat.is_file)), ("is_dir".into(), CtValue::Bool(stat.is_dir)),
+            ] }));
+        }
+        // The checked private signatures own validation; no alternate behavior
+        // or a second diagnostic is introduced for malformed internal calls.
+        _ => return None,
+    };
+    Some(Ok(CtValue::Struct { type_name: "__JetcRaw".into(), fields: vec![
+        ("value".into(), CtValue::Int(result.value)), ("errno".into(), CtValue::Int(result.errno)),
+        ("bytes".into(), CtValue::Bytes(result.bytes)), ("linux".into(), CtValue::Bool(result.linux)),
+    ] }))
+}
+
 fn testing_ambient_core_call(
     module: &str,
     method: &str,
@@ -2203,6 +2254,7 @@ pub fn with_interpreter_ambient<R>(
         context.register_core_call(sys_env_ambient_core_call);
         context.register_core_call(testing_ambient_core_call);
         context.register_core_call(files_fault_ambient_core_call);
+        context.register_core_call(crypto_file_io_ambient_core_call);
         context.register_core_call(crate::Time::ambient_core_call);
         context.register_core_call(crate::IO::ambient_core_call);
         context.register_core_call(crate::CoreHost::walk_ambient_core_call);

@@ -2403,6 +2403,8 @@ const COMPILER_OWNED_CORE_RECORDS: &[(&str, &[&str])] = &[
     ("__ResolveError", &["kind", "has_os_code", "os_code", "message"]),
     ("AsyncPolicy", &["capacity", "overflow"]),
     ("CSVRow", &["fields", "line"]),
+    ("__JetcRaw", &["value", "errno", "bytes", "linux"]),
+    ("__JetcStat", &["status", "errno", "dev", "ino", "len", "mtime", "mtime_ns", "nlink", "is_file", "is_dir"]),
     (
         "DataLineOptions",
         &[
