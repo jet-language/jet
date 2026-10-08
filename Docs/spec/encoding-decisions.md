@@ -1260,5 +1260,7 @@ unexercised native carrier or runtime receipt.
 
 The native Object carrier remains an explicitly gated bridge: these transfers
 do not claim that the public `Map` shape has become an ordered source list.
-The unused `__object_into_entries` and `__tree_tag` registry rows have no
-current Jet policy consumer and are not credited by this inventory.
+The unused `__object_into_entries` and `__tree_tag` registry rows were removed
+along with their seed functions, signatures, gates and native lowering handlers.
+A repository-wide reference search found declarations and handlers only, not
+any Jet codec, Rust TIR/MIR emitter, JS or comptime consumer.

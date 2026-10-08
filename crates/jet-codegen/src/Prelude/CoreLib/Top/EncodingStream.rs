@@ -4213,12 +4213,6 @@ fn jet_raw_object_from_entries(entries: Vec<(String, jet_std::DataTree)>) -> jet
     jet_std::DataTree::Object(entries)
 }
 
-fn jet_raw_object_into_entries(value: jet_std::DataTree) -> Vec<(String, jet_std::DataTree)> {
-    let jet_std::DataTree::Object(entries) = value else {
-        unreachable!("vetted Core caller must check the Object variant before transferring it")
-    };
-    entries
-}
 
 fn jet_raw_encoding_write_text(writer: &mut JetFileWriter, text: &str) -> Result<(), jet_std::EncodingCause> {
     jet_encoding_file_write_all(writer, text.as_bytes()).map_err(jet_raw_encoding_cause)
@@ -4257,17 +4251,3 @@ fn jet_raw_typed_text(text: String) -> jet_std::DataTree {
     jet_std::DataTree::TypedText(text)
 }
 
-fn jet_raw_tree_tag(value: &jet_std::DataTree) -> u8 {
-    match value {
-        jet_std::DataTree::Null => 0,
-        jet_std::DataTree::Bool(_) => 1,
-        jet_std::DataTree::Int(_) => 2,
-        jet_std::DataTree::Float(_) => 3,
-        jet_std::DataTree::Number(_) => 4,
-        jet_std::DataTree::TypedText(_) => 5,
-        jet_std::DataTree::Text(_) => 6,
-        jet_std::DataTree::Bytes(_) => 7,
-        jet_std::DataTree::Array(_) => 8,
-        jet_std::DataTree::Object(_) => 9,
-    }
-}

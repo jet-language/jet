@@ -2376,8 +2376,8 @@ impl<'a> Checker<'a> {
                 && matches!(name,
                     "__read_byte" | "__write_bytes" | "__write_text" | "__flush"
                     | "__utf8_validate" | "__bytes_into_text" | "__text_into_bytes"
-                    | "__string_byte" | "__object_from_entries" | "__object_into_entries"
-                    | "__typed_text" | "__tree_tag" | "__object_entries_view" | "__bytes_view"));
+                    | "__string_byte" | "__object_from_entries"
+                    | "__typed_text" | "__object_entries_view" | "__bytes_view"));
         let source_alias = self.name_ledger.module_alias(self.module_idx);
         let checked_csv = source_alias
             .and_then(jet_foundation::CoreModuleExports::core_source_module_by_alias)
@@ -2414,7 +2414,7 @@ impl<'a> Checker<'a> {
         }
         if module == "core.encoding"
             && matches!(name, "__bytes_into_text" | "__string_byte"
-                | "__object_from_entries" | "__object_into_entries" | "__typed_text" | "__tree_tag" | "__object_entries_view" | "__bytes_view")
+                | "__object_from_entries" | "__typed_text" | "__object_entries_view" | "__bytes_view")
             && !self.in_unsafe
         {
             self.diags.push(Diagnostic::error(

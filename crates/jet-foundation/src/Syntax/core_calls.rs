@@ -1584,7 +1584,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: f31ad7ca71406dde77506ad8893b503b948fcce16465111b9899bd24017f6664
+// Source SHA-256: 96980beb4200efe33b42a6af3efe700e8b4b9537a0e15f154011c142520d7b08
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -1982,11 +1982,9 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.encoding", "__bytes_into_text", "jet_raw_bytes_into_text", true, &[false]),
     CoreCallRecord::new("core.encoding", "__string_byte", "jet_raw_string_byte", true, &[true, false]),
     CoreCallRecord::new("core.encoding", "__object_from_entries", "jet_raw_object_from_entries", true, &[false]),
-    CoreCallRecord::new("core.encoding", "__object_into_entries", "jet_raw_object_into_entries", true, &[false]),
     CoreCallRecord::new("core.encoding", "__write_text", "jet_raw_encoding_write_text", true, &[true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.encoding", "__text_into_bytes", "jet_raw_text_into_bytes", true, &[false]),
     CoreCallRecord::new("core.encoding", "__typed_text", "jet_raw_typed_text", true, &[false]),
-    CoreCallRecord::new("core.encoding", "__tree_tag", "jet_raw_tree_tag", true, &[true]),
     CoreCallRecord::new("core.encoding", "__object_entries_view", "jet_raw_object_entries_view", true, &[true]),
     CoreCallRecord::new("core.encoding", "__bytes_view", "jet_raw_bytes_view", true, &[true]),
     CoreCallRecord::new("core.encoding", "__coerce_now", "jet_raw_json_coerce_now", true, &[]).with_native_int_result(),
