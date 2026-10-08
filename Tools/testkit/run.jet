@@ -663,8 +663,49 @@ struct KitSelected {
     run: fn(KitEntry, KitCtx) -[Env, Exec, FS, IO, Mem.Alloc, Panic, Time, Time.Wait]> [KitOutcome]
 }
 
+struct KitUIDirective {
+    name: String
+    argv: [String]
+    parent: Bool
+    exit: String
+    streams: String
+    capability: String
+}
+
+struct KitUICall {
+    argv: [String]
+    parent: Bool
+    exit: String
+    streams: String
+    stdin: String
+    extension: String
+    refused: String
+}
+
+struct KitUIRegistryRow {
+    code: String
+    plane: String
+    active: Bool
+    edit: Bool
+    reason: Bool
+}
+
+struct KitUIPlane {
+    name: String
+    edits: Int
+    reasons: Int
+    total: Int
+}
+
+struct KitUIAllowance {
+    code: String
+    side: String
+    card: String
+}
+
 fn kit_suites() -> [KitSuite] {
     [KitSuite{name: "golden", discover: (context: KitCtx) -> kit_golden_discover_suite(context), run: (entry: KitEntry, context: KitCtx) -> kit_golden_run_suite(entry, context)},
+     KitSuite{name: "ui", discover: (context: KitCtx) -> kit_ui_discover(context), run: (entry: KitEntry, context: KitCtx) -> kit_ui_run(entry, context)},
      KitSuite{name: "cases", discover: (context: KitCtx) -> kit_cases_discover(context), run: (entry: KitEntry, context: KitCtx) -> kit_cases_run(entry, context)}]
 }
 
