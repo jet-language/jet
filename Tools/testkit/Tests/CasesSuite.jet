@@ -64,7 +64,7 @@ fn cases_test_source(root: String, name: String, text: String) {
     root :: cases_test_root("tokens")
     directory :: files.join(root, "tests/cases/group")
     kit_exec_write(files.join(directory, "paths.out"), "{{work}}\n{{root}}\n{{scratch}}\n")
-    cases_test_source(root, "tokens", "env: LOCATION={{work}}\nstep: jet -c 'printf \"%s\\n\" \"$LOCATION\" \"$1\" \"$2\"' scenario {{root}} {{scratch}}\nstdout: = paths.out\nstderr: empty\n")
+    cases_test_source(root, "tokens", "env: LOCATION={{work}}\nstep: jet -c 'printf \"%s\\\\n\" \"$LOCATION\" \"$1\" \"$2\"' scenario {{root}} {{scratch}}\nstdout: = paths.out\nstderr: empty\n")
     context :: cases_test_context(root, files.join(root, "scratch"))
     result :: kit_cases_run(cases_test_entry("tokens"), context)[0]
     assert_eq(result.verdict.status, "PASS")

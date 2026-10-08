@@ -2,6 +2,7 @@
 use core.process as process
 use core.files as files
 use core.sys as sys
+use core.encoding.[DataTree]
 
 
 fn kit_parse_options(args: [String]) -> KitOptions {
@@ -177,23 +178,79 @@ struct KitAssertion {
     json_path: String{""}
     json_op: String{""}
     ratio: Float{0.0}
+    extra: String{""}
+    optional_file: Bool{false}
+    transform: String{""}
+    alternatives: [String]{[String]{}}
 }
 
-struct KitJsonNormalization {
+struct KitJSONNormalization {
     stream: String
     path: String
     kind: String
 }
 
-struct KitJsonSpan {
+struct KitJSONSpan {
     start: Int
     end: Int
     normalizer: Int
 }
 
-struct KitJsonResult {
+struct KitJSONResult {
     text: String
     error: String
+}
+
+struct KitWord {
+    text: String
+    start: Int
+    end: Int
+}
+
+struct KitPendingChild {
+    label: String
+    child: ProcessChild
+    started: Instant
+    step: KitStep
+    joined: Bool
+    input_error: String
+}
+
+struct KitCapture {
+    name: String
+    value: String
+}
+
+struct KitInventoryItem {
+    path: String
+    kind: String
+    size: Int
+    modified_ms: Int
+    digest: String
+}
+
+struct KitInventory {
+    label: String
+    items: [KitInventoryItem]
+}
+
+struct KitJSONFilter {
+    key: String
+    op: String
+    expected: DataTree
+}
+
+struct KitReplacement {
+    from: String
+    to: String
+}
+
+struct KitProcessInput {
+    argv: [String]
+    cwd: String
+    stdin: String
+    env: KitEnv
+    overlay: [KitEnvVar]
 }
 
 struct KitStep {
@@ -205,9 +262,11 @@ struct KitStep {
     unset: [String]{[String]{}}
     environment: [KitEnvVar]{[KitEnvVar]{}}
     label: String{""}
+    action: String{""}
     limit_time: Int{0}
     limit_memory: Int{0}
-    json_normalize: [KitJsonNormalization]{[KitJsonNormalization]{}}
+    json_normalize: [KitJSONNormalization]{[KitJSONNormalization]{}}
+    replacements: [KitReplacement]{[KitReplacement]{}}
 }
 
 struct KitPlan {
@@ -221,7 +280,8 @@ struct KitPlan {
     refused: String
     steps: [KitStep]
     error: String
-    json_normalize: [KitJsonNormalization]{[KitJsonNormalization]{}}
+    json_normalize: [KitJSONNormalization]{[KitJSONNormalization]{}}
+    replacements: [KitReplacement]{[KitReplacement]{}}
 }
 
 struct KitOutcome {
@@ -261,6 +321,8 @@ struct KitCapturedStep {
     stdout: String
     stderr: String
     elapsed_ns: Int
+    raw_stdout: String{""}
+    raw_stderr: String{""}
 }
 
 struct KitStepState {
@@ -270,6 +332,10 @@ struct KitStepState {
     history: [KitCapturedStep]{[KitCapturedStep]{}}
     json_stdout: String?{None}
     json_stderr: String?{None}
+    children: [KitPendingChild]{[KitPendingChild]{}}
+    captures: [KitCapture]{[KitCapture]{}}
+    inventories: [KitInventory]{[KitInventory]{}}
+    replacements: [KitReplacement]{[KitReplacement]{}}
 }
 
 struct KitStepResult {
@@ -318,37 +384,44 @@ fn kit_steps_execute(context: KitStepCtx, hooks: KitStepHooks) -> KitOutcome {
         .None -> {}
     }
     if plan.fixture != "" -> kit_exec_copy_tree(files.join(context.snapshots, plan.fixture), context.work, true)
-    loop (index, step) in plan.steps {
-        invoked :: hooks.invoke(step, index, context, state)
+    loop (index, original) in plan.steps {
+        step := kit_steps_resolve_step(original, context, state) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "undefined capture or unavailable tool token"))
+        invoked :: if step.action == "spawn" || step.action == "wait" || step.action == "capture" || step.action == "write" || step.action == "inventory" ->
+            kit_steps_action(step, context, state) else -> hooks.invoke(step, index, context, state)
         state = invoked.state
-        if invoked.verdict.status != "PASS" -> return KitOutcome{verdict: invoked.verdict, run: state.last}
+        if invoked.verdict.status != "PASS" -> return kit_steps_finish(state, invoked.verdict)
+        if step.action == "spawn" || step.action == "capture" -> next
+        step.replacements = kit_steps_replacements(step.replacements, context, state) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "replacement token unavailable"))
+        state.replacements = step.replacements
         state.json_stdout = None
         state.json_stderr = None
-        if (plan.json_normalize.len() > 0 || step.json_normalize.len() > 0) && kit_steps_failure(step, state.last) == None {
+        if (step.action == "" || step.action == "wait") && (plan.json_normalize.len() > 0 || step.json_normalize.len() > 0) && kit_steps_failure(step, state.last) == None {
             rules := plan.json_normalize
             loop rule in step.json_normalize -> &rules.push(rule)
             output :: kit_steps_json_normalize(state.last.stdout, "stdout", rules)
             errors :: kit_steps_json_normalize(state.last.stderr, "stderr", rules)
-            if output.error != "" -> return KitOutcome{verdict: kit_expect_verdict("FAIL", output.error), run: state.last}
-            if errors.error != "" -> return KitOutcome{verdict: kit_expect_verdict("FAIL", errors.error), run: state.last}
+            if output.error != "" -> return kit_steps_finish(state, kit_expect_verdict("FAIL", output.error))
+            if errors.error != "" -> return kit_steps_finish(state, kit_expect_verdict("FAIL", errors.error))
             state.json_stdout = Val(output.text)
             state.json_stderr = Val(errors.text)
         }
-        if step.label != "" {
+        if step.label != "" && (step.action == "" || step.action == "wait") {
             source_name :: if context.golden == {
                 .Val(golden) -> kit_golden_source_name(golden.entry)
                 .None -> ""
             }
             &state.history.push(KitCapturedStep{label: step.label,
-                stdout: kit_steps_normalize(state.json_stdout ?? state.last.stdout, context.env, context.work, context.scratch, plan.normalize, state.built, source_name),
-                stderr: kit_steps_normalize(state.json_stderr ?? state.last.stderr, context.env, context.work, context.scratch, plan.normalize, state.built, source_name),
-                elapsed_ns: state.last.elapsed_ns})
+                stdout: kit_steps_replace(kit_steps_normalize(state.json_stdout ?? state.last.stdout, context.env, context.work, context.scratch, plan.normalize, state.built, source_name), step.replacements, context, state, true, source_name),
+                stderr: kit_steps_replace(kit_steps_normalize(state.json_stderr ?? state.last.stderr, context.env, context.work, context.scratch, plan.normalize, state.built, source_name), step.replacements, context, state, true, source_name),
+                elapsed_ns: state.last.elapsed_ns,
+                raw_stdout: kit_steps_replace(state.json_stdout ?? state.last.stdout, step.replacements, context, state, false, source_name),
+                raw_stderr: kit_steps_replace(state.json_stderr ?? state.last.stderr, step.replacements, context, state, false, source_name)})
         }
         verdict :: hooks.check(step, index, context, state)
-        if verdict.status != "PASS" -> return KitOutcome{verdict: verdict, run: state.last}
+        if verdict.status != "PASS" -> return kit_steps_finish(state, verdict)
         if plan.compile_only -> break
     }
-    KitOutcome{verdict: kit_expect_verdict("PASS", ""), run: state.last}
+    kit_steps_finish(state, kit_expect_verdict("PASS", ""))
 }
 
 struct KitCaseResult {

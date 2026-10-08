@@ -1,56 +1,21 @@
 use core.files as files
 
 
-// Quotes preserve whitespace and empty argv. Backslash escapes inside and
-// outside quotes; the kit never delegates argument parsing to a shell.
+// The lexer decodes JSON-quoted tokens and retains raw spans for JSON literals.
 fn kit_steps_words(text: String) -> [String]? {
+    tokens :: kit_steps_tokens(text) ?? return None
     result := [String]{}
-    word := ""
-    quote := ""
-    escape := false
-    active := false
-    loop character in text.chars() {
-        c :: "{character}"
-        if escape {
-            word = "{word}{c}"
-            escape = false
-            active = true
-            next
-        }
-        if c == "\\" {
-            escape = true
-            active = true
-            next
-        }
-        if quote != "" {
-            if c == quote -> quote = ""
-            else -> word = "{word}{c}"
-            next
-        }
-        if c == "\"" || c == "'" {
-            quote = c
-            active = true
-            next
-        }
-        if c == " " || c == "\t" {
-            if active {
-                &result.push(word)
-                word = ""
-                active = false
-            }
-            next
-        }
-        word = "{word}{c}"
-        active = true
-    }
-    if quote != "" || escape -> return None
-    if active -> &result.push(word)
+    loop token in tokens -> &result.push(token.text)
     Val(result)
 }
 
 fn kit_steps_parse(source: String) -> KitPlan {
     plan := KitPlan{requires: [], fixture: "", environment: [], normalize: ["paths"], compile_only: false, ref_audit: "", artifact: "", refused: "", steps: [], error: ""}
     line_number := 0
+    pending := [String]{}
+    joined := [String]{}
+    captures := [String]{}
+    inventories := [String]{}
     loop raw in source.split("\n") {
         line_number += 1
         line :: ~raw.trim()
@@ -61,8 +26,13 @@ fn kit_steps_parse(source: String) -> KitPlan {
             return plan
         }
         key :: ~line.slice(0, colon).trim()
-        value :: ~line.slice(colon + 1, line.len()).trim()
-        if value.contains("{{env:") && key != "step" && !key.starts_with("step ") {
+        original :: ~line.slice(colon + 1, line.len()).trim()
+        value :: kit_steps_body(original)
+        if !kit_steps_capture_tokens(value, captures) {
+            plan.error = "line {line_number}: undefined capture token"
+            return plan
+        }
+        if value.contains("{{env:") && key != "step" && !key.starts_with("step ") && !key.starts_with("spawn ") {
             plan.error = "line {line_number}: environment tokens are argv-only"
             return plan
         }
@@ -71,7 +41,10 @@ fn kit_steps_parse(source: String) -> KitPlan {
             next
         }
         if key == "fixture" {
-            plan.fixture = value
+            plan.fixture = kit_steps_scalar_word(value) ?? {
+                plan.error = "line {line_number}: fixture needs one quoted or literal path"
+                return plan
+            }
             next
         }
         if key == "env" {
@@ -80,8 +53,14 @@ fn kit_steps_parse(source: String) -> KitPlan {
                 plan.error = "line {line_number}: env requires NAME=VALUE"
                 return plan
             }
-            if plan.steps.len() == 0 -> &plan.environment.push(value)
-            else -> &plan.steps[plan.steps.len() - 1].environment.push(KitEnvVar{name: value.slice(0, equals), value: Val(value.slice(equals + 1, value.len()))})
+            raw_value :: ~value.slice(equals + 1, value.len()).trim()
+            decoded :: if raw_value.starts_with("\"") || raw_value.starts_with("'") -> kit_steps_scalar_word(raw_value) ?? {
+                plan.error = "line {line_number}: invalid quoted environment value"
+                return plan
+            } else -> raw_value
+            assignment :: "{value.slice(0, equals)}={decoded}"
+            if plan.steps.len() == 0 -> &plan.environment.push(assignment)
+            else -> &plan.steps[plan.steps.len() - 1].environment.push(KitEnvVar{name: value.slice(0, equals), value: Val(decoded)})
             next
         }
         if key == "refused" {
@@ -101,8 +80,19 @@ fn kit_steps_parse(source: String) -> KitPlan {
             next
         }
         if key == "normalize" {
+            if value.starts_with("replace ") {
+                words :: kit_steps_words(value) ?? []
+                if words.len() != 3 || words[1] == "" {
+                    plan.error = "line {line_number}: replace needs a nonempty source and replacement"
+                    return plan
+                }
+                rule :: KitReplacement{from: words[1], to: words[2]}
+                if plan.steps.len() == 0 -> &plan.replacements.push(rule)
+                else -> &plan.steps[plan.steps.len() - 1].replacements.push(rule)
+                next
+            }
             if value.starts_with("json ") {
-                rule :: kit_steps_json_normalizer(value) ?? {
+                rule :: kit_steps_json_normalizer(original) ?? {
                     plan.error = "line {line_number}: invalid JSON normalizer (same-line reason required)"
                     return plan
                 }
@@ -125,31 +115,81 @@ fn kit_steps_parse(source: String) -> KitPlan {
             plan.compile_only = true
             next
         }
-        if key == "copy" || key == "remove" {
+        if key == "copy" || key == "remove" || key == "concat" || key == "write" {
             paths :: kit_steps_words(value) ?? {
                 plan.error = "line {line_number}: invalid file action paths"
                 return plan
             }
-            needed :: if key == "copy" -> 2 else -> 1
-            if paths.len() != needed {
-                plan.error = "line {line_number}: {key} needs {needed} paths"
+            if (key == "remove" && paths.len() != 1) || ((key == "copy" || key == "write") && paths.len() != 2) || (key == "concat" && paths.len() < 2) {
+                plan.error = "line {line_number}: invalid {key} path count"
                 return plan
             }
             argv := [String]{key}
-            loop path in paths {
-                if !kit_steps_relative_path(path) {
+            loop (position, path) in paths {
+                external_source :: key == "copy" && position == 0 && (path.contains("{{root}}") || path.contains("{{jet}}") || path.contains("{{jetpack}}"))
+                template :: key == "write" && position == 1
+                if !external_source && !template && !kit_steps_relative_path(path) {
                     plan.error = "line {line_number}: {key} path escapes work directory"
                     return plan
                 }
                 &argv.push(path)
             }
-            &plan.steps.push(KitStep{argv: argv, stdin: "", exit: "0", assertions: []})
+            &plan.steps.push(KitStep{argv: argv, stdin: "", exit: "0", assertions: [], action: key})
             next
         }
-        if key == "step" || key.starts_with("step ") {
-            label :: if key == "step" -> "" else -> ~key.slice(5, key.len()).trim()
-            if key != "step" && (label == "" || label.contains(" ") || label.contains("\t")) {
-                plan.error = "line {line_number}: step label must be one word"
+        if key == "capture" {
+            words :: kit_steps_words(value) ?? []
+            if words.len() != 4 && words.len() != 5 {
+                plan.error = "line {line_number}: capture needs name stream doc|ndjson path, or name stream line ^= prefix"
+                return plan
+            }
+            if plan.steps.len() == 0 || kit_expect_named(captures, words[0]) || (words[1] != "stdout" && words[1] != "stderr") || (words[2] != "doc" && words[2] != "ndjson" && words[2] != "line") {
+                plan.error = "line {line_number}: invalid or duplicate capture"
+                return plan
+            }
+            if (words[2] == "line" && (words.len() != 5 || words[3] != "^=" || !kit_steps_reason(original))) || (words[2] != "line" && (words.len() != 4 || kit_steps_json_path(words[3]) == None)) {
+                plan.error = "line {line_number}: invalid capture path or missing partial reason"
+                return plan
+            }
+            &captures.push(words[0])
+            &plan.steps.push(KitStep{argv: words, stdin: "", exit: "0", assertions: [], action: "capture"})
+            next
+        }
+        if key == "inventory" || key.starts_with("inventory ") {
+            words :: kit_steps_words(value) ?? []
+            label :: if key == "inventory" -> "" else -> ~key.slice(10, key.len()).trim()
+            if words.len() == 0 || !kit_steps_relative_path(words[0]) {
+                plan.error = "line {line_number}: inventory needs a work-relative directory"
+                return plan
+            }
+            if label != "" {
+                if words.len() != 1 || label.contains(" ") || label.contains("\t") || kit_expect_named(inventories, label) {
+                    plan.error = "line {line_number}: invalid duplicate inventory label"
+                    return plan
+                }
+                &inventories.push(label)
+            } else if words.len() != 3 || words[1] != "==" || !kit_expect_named(inventories, words[2]) {
+                plan.error = "line {line_number}: inventory comparison needs a known label"
+                return plan
+            }
+            &plan.steps.push(KitStep{argv: words, stdin: "", exit: "0", assertions: [], label: label, action: "inventory"})
+            next
+        }
+        if key == "wait" {
+            label :: kit_steps_scalar_word(value) ?? ""
+            if !kit_expect_named(pending, label) || kit_expect_named(joined, label) {
+                plan.error = "line {line_number}: wait needs an unjoined spawn label"
+                return plan
+            }
+            &joined.push(label)
+            &plan.steps.push(KitStep{argv: ["wait", label], stdin: "", exit: "0", assertions: [], label: label, action: "wait"})
+            next
+        }
+        if key == "step" || key.starts_with("step ") || key.starts_with("spawn ") {
+            spawning :: key.starts_with("spawn ")
+            label :: if key == "step" -> "" else -> ~key.slice(if spawning -> 6 else -> 5, key.len()).trim()
+            if key != "step" && (label == "" || label.contains(" ") || label.contains("\t") || kit_expect_named(pending, label)) {
+                plan.error = "line {line_number}: step label must be unique and one word"
                 return plan
             }
             loop previous in plan.steps {
@@ -172,7 +212,8 @@ fn kit_steps_parse(source: String) -> KitPlan {
                     return plan
                 }
             }
-            &plan.steps.push(KitStep{argv: argv, stdin: "", exit: "0", assertions: [], label: label})
+            if spawning -> &pending.push(label)
+            &plan.steps.push(KitStep{argv: argv, stdin: "", exit: "0", assertions: [], label: label, action: if spawning -> "spawn" else -> ""})
             next
         }
         if plan.steps.len() == 0 {
@@ -231,6 +272,10 @@ fn kit_steps_parse(source: String) -> KitPlan {
             }
             next
         }
+        if plan.steps[i].action == "spawn" && key != "stdin" {
+            plan.error = "line {line_number}: spawned child assertions belong after wait"
+            return plan
+        }
         if key == "elapsed" {
             relation :: kit_steps_words(value) ?? []
             if relation.len() != 5 || relation[1] != "<=" || relation[3] != "*" {
@@ -246,85 +291,65 @@ fn kit_steps_parse(source: String) -> KitPlan {
             next
         }
         if key == "json" {
-            assertion :: kit_steps_json_assertion(value) ?? {
-                plan.error = "line {line_number}: invalid JSON assertion (number type needs a reason; has needs a nonempty object)"
+            assertion :: kit_steps_json_assertion(original) ?? {
+                plan.error = "line {line_number}: invalid JSON assertion or missing partial reason"
+                return plan
+            }
+            target :: kit_steps_count_label(assertion.value)
+            relation :: if target == "" -> assertion.value else -> target
+            if (assertion.json_op == "==" || assertion.json_op == "#==" || (assertion.json_op == "#>=" && target != "")) && !kit_steps_known_relation(plan, relation, i) {
+                plan.error = "line {line_number}: JSON relation needs a known prior label"
                 return plan
             }
             &plan.steps[i].assertions.push(assertion)
             next
         }
         if key == "stdin" {
-            plan.steps[i].stdin = value
+            plan.steps[i].stdin = kit_steps_scalar_word(value) ?? {
+                plan.error = "line {line_number}: stdin needs one path"
+                return plan
+            }
             next
         }
         if key == "exit" {
-            if value != "nonzero" && (Int.parse(value) ?? -999999) == -999999 {
-                plan.error = "line {line_number}: invalid exit"
+            words :: kit_steps_words(value) ?? []
+            not_equal :: words.len() == 2 && words[0] == "!=" && Int.parse(words[1]) != None && kit_steps_reason(original)
+            ordinary :: value == "any" || value == "nonzero" || Int.parse(value) != None
+            if (!ordinary && !not_equal) || (value == "any" && !kit_steps_reason(original)) {
+                plan.error = "line {line_number}: invalid exit or missing partial reason"
                 return plan
             }
             plan.steps[i].exit = value
             next
         }
-        if key != "stdout" && key != "stderr" && key != "file" {
+        if !kit_steps_subject_valid(key) {
             plan.error = "line {line_number}: unknown key {key}"
             return plan
         }
-        parts :: kit_steps_words(value) ?? {
-            plan.error = "line {line_number}: invalid assertion quoting"
+        assertion :: kit_steps_stream_assertion(key, original) ?? {
+            plan.error = "line {line_number}: invalid stream assertion or missing partial reason"
             return plan
         }
-        offset :: if key == "file" -> 1 else -> 0
-        if parts.len() <= offset {
-            plan.error = "line {line_number}: missing assertion"
+        target :: kit_steps_count_label(assertion.value)
+        reference :: if assertion.mode == "lines" -> target else -> assertion.value
+        if ((assertion.mode == "==" && assertion.stream != "file") || assertion.mode == "first-line==" || (assertion.mode == "lines" && target != "")) && !kit_steps_known_relation(plan, reference, i) {
+            plan.error = "line {line_number}: relation needs a known prior step label"
             return plan
         }
-        mode :: parts[offset]
-        if mode != "=" && mode != "==" && mode != "!=" && mode != "one-of" && mode != "~" && mode != "!~" && mode != "empty" && mode != "exists" && mode != "absent" {
-            plan.error = "line {line_number}: unknown assertion {mode}"
+        &plan.steps[i].assertions.push(assertion)
+    }
+    loop label in pending {
+        if !kit_expect_named(joined, label) {
+            plan.error = "unjoined spawn label {label}"
             return plan
         }
-        data := ""
-        if mode == "=" || mode == "==" || mode == "!=" || mode == "one-of" || mode == "~" || mode == "!~" {
-            if parts.len() <= offset + 1 {
-                plan.error = "line {line_number}: missing assertion value"
-                return plan
-            }
-            if mode == "~" || mode == "one-of" {
-                reason_start :: value.index(" #") ?? value.len()
-                if reason_start == value.len() || value.slice(reason_start + 2, value.len()).trim() == "" {
-                    plan.error = "line {line_number}: nondeterministic assertion requires a reason comment"
-                    return plan
-                }
-            }
-            start :: (value.index(mode) ?? panic("parsed assertion mode missing")) + mode.len()
-            data = value.slice(start, value.len()).trim()
-            // Inline comments document nondeterministic substring assertions.
-            if mode == "~" || mode == "!~" || mode == "one-of" -> data = data.slice(0, data.index(" #") ?? data.len()).trim()
-            if mode != "one-of" && (data.starts_with("\"") || data.starts_with("'")) -> data = (kit_steps_words(data) ?? [data])[0]
-        }
-        path :: if key == "file" -> parts[0] else -> ""
-        if key == "file" && !kit_steps_relative_path(path) {
-            plan.error = "line {line_number}: file path escapes work directory"
-            return plan
-        }
-        if mode == "==" || mode == "!=" {
-            if parts.len() != offset + 2 || (key != "file" && (mode == "!=" || !kit_steps_known_label(plan, data, i))) {
-                plan.error = "line {line_number}: relation needs one known prior step label (or file path)"
-                return plan
-            }
-            if key == "file" && !kit_steps_relative_path(data) {
-                plan.error = "line {line_number}: file relation escapes work directory"
-                return plan
-            }
-        }
-        &plan.steps[i].assertions.push(KitAssertion{stream: key, path: path, mode: mode, value: data})
     }
     plan
 }
 
 fn kit_steps_known_label(plan: KitPlan, label: String, before: Int) -> Bool {
     loop index in 0..<before {
-        if label != "" && plan.steps[index].label == label -> return true
+        if label != "" && plan.steps[index].label == label && (plan.steps[index].action == "" || plan.steps[index].action == "wait") -> return true
     }
     false
 }
@@ -351,8 +376,10 @@ fn kit_steps_version(banner: String) -> String? {
 }
 
 fn kit_steps_expand(value: String, env: KitEnv, work: String, scratch: String, built: String) -> String {
-    value.replace("{{work}}", work).replace("{{root}}", env.root).replace("{{scratch}}", scratch)
+    expanded :: value.replace("{{work}}", work).replace("{{root}}", env.root).replace("{{scratch}}", scratch)
         .replace("{{jetpack}}", env.jetpack).replace("{{jet}}", env.jet).replace("{{built}}", built)
+    if expanded.contains("{{sys:dll-suffix}}") -> return expanded.replace("{{sys:dll-suffix}}", kit_steps_dll_suffix())
+    expanded
 }
 
 fn kit_steps_required(plan: KitPlan, env: KitEnv, work: String, scratch: String) -> KitVerdict? {
@@ -400,34 +427,41 @@ fn kit_steps_step_environment(step: KitStep, env: KitEnv, work: String, scratch:
 }
 
 fn kit_steps_invoke_step(step: KitStep, env: KitEnv, work: String, scratch: String, snapshots: String, built: String, overlay: [KitEnvVar]) -> KitRun {
-    if step.argv[0] == "copy" || step.argv[0] == "remove" -> return kit_steps_file_action(step, env, work, scratch, built)
+    if step.action == "copy" || step.action == "remove" || step.action == "concat" || step.action == "write" -> return kit_steps_file_action(step, env, work, scratch, built, snapshots)
+    prepared :: kit_steps_prepare(step, env, work, scratch, snapshots, built, overlay) ?? return kit_exec_failed("{err}")
+    kit_exec_invoke_with_env(prepared.env, prepared.argv, prepared.cwd, scratch, prepared.stdin, prepared.overlay)
+}
+
+fn kit_steps_prepare(step: KitStep, env: KitEnv, work: String, scratch: String, snapshots: String, built: String, overlay: [KitEnvVar]) -> KitProcessInput String! {
     environment :: kit_steps_step_environment(step, env, work, scratch, built, overlay)
     argv := [String]{}
     loop argument in step.argv -> &argv.push(kit_steps_argv_env(kit_steps_expand(argument, env, work, scratch, built), env, scratch, environment))
     if argv[0] == "jet" -> argv[0] = env.jet
     if argv[0] == "jetpack" {
-        if env.jetpack == "" -> return kit_exec_failed("jetpack binary required")
+        if env.jetpack == "" -> return Err("jetpack binary required")
         argv[0] = env.jetpack
     }
     if argv[0] == "built" {
-        if built == "" -> return kit_exec_failed("built step has no artifact")
+        if built == "" -> return Err("built step has no artifact")
         argv[0] = built
     }
-    stdin :: if step.stdin == "" -> "" else -> files.read(files.join(snapshots, step.stdin)) ?? return kit_exec_failed("stdin snapshot: {err}")
-    cwd :: if step.cwd == "" -> work else -> files.join(work, kit_steps_expand(step.cwd, env, work, scratch, built))
-    kit_exec_invoke_with_env(kit_steps_policy(step, env), argv, cwd, scratch, stdin, environment)
+    stdin :: if step.stdin == "" -> "" else -> files.read(files.join(snapshots, step.stdin)) ?? return Err("stdin snapshot: {err}")
+    cwd :: if step.cwd == "" -> work else -> kit_steps_work_path(step.cwd, env, work, scratch, built) ?? return Err("cwd escapes work directory")
+    policy :: kit_steps_policy(step, env) ?? return Err("time limit outside Duration range")
+    Ok(KitProcessInput{argv: argv, cwd: cwd, stdin: stdin, env: policy, overlay: environment})
 }
 
-fn kit_steps_policy(step: KitStep, env: KitEnv) -> KitEnv {
+fn kit_steps_policy(step: KitStep, env: KitEnv) -> KitEnv? {
     policy := env
-    if step.limit_time > 0 -> policy.timeout = Duration.seconds(step.limit_time)
+    if step.limit_time > 0 -> policy.timeout = Duration.seconds(step.limit_time) ?? return None
     if step.limit_memory > 0 -> policy.memory_limit = step.limit_memory
-    policy
+    Val(policy)
 }
 
 fn kit_steps_failure(step: KitStep, result: KitRun) -> KitVerdict? {
     if step.limit_time > 0 && (result.timed_out || result.limit_hit == "time") -> return Val(kit_expect_verdict("FAIL", "limit hit: time={step.limit_time}s"))
     if step.limit_memory > 0 && result.limit_hit == "memory" -> return Val(kit_expect_verdict("FAIL", "limit hit: memory={step.limit_memory}KiB"))
+    if result.code == 101 && (Int.parse(step.exit) ?? -1) == 101 && result.error == "" && !result.timed_out && result.signal == None -> return None
     kit_exec_process_failure(result)
 }
 
@@ -466,59 +500,9 @@ fn kit_steps_one_of(id: String, directory: String, snapshots: String, actual: St
     kit_expect_verdict("FAIL", "stdout matches none of the exact alternatives")
 }
 
-fn kit_steps_check_assertion(assertion: KitAssertion, id: String, result: KitRun, env: KitEnv, work: String, scratch: String, snapshots: String, bless: KitBless, normalize: [String], built: String, source_name: String, state: KitStepState) -> KitVerdict {
-    if assertion.stream == "elapsed" -> return kit_steps_elapsed(assertion, state.history)
-    actual := if {
-        assertion.json_mode != "" && assertion.stream == "stderr" -> result.stderr
-        assertion.json_mode != "" -> result.stdout
-        assertion.stream == "stderr" -> state.json_stderr ?? result.stderr
-        else -> state.json_stdout ?? result.stdout
-    }
-    if assertion.stream == "file" {
-        path :: kit_steps_work_path(assertion.path, env, work, scratch, built) ?? return kit_expect_verdict("REFUSED", "file assertion escapes work directory")
-        exists :: files.exists(path)
-        if assertion.mode == "exists" -> return if exists -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "missing file: {assertion.path}")
-        if assertion.mode == "absent" -> return if !exists -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "unexpected file: {assertion.path}")
-        if !exists -> return kit_expect_verdict("FAIL", "missing file: {assertion.path}")
-        if assertion.mode == "==" || assertion.mode == "!=" {
-            other :: kit_steps_work_path(assertion.value, env, work, scratch, built) ?? return kit_expect_verdict("REFUSED", "file relation escapes work directory")
-            if !files.exists(other) -> return kit_expect_verdict("FAIL", "missing file: {assertion.value}")
-            left :: files.read_bytes(path) ?? return kit_expect_verdict("ERROR", "read relation file: {err}")
-            right :: files.read_bytes(other) ?? return kit_expect_verdict("ERROR", "read relation file: {err}")
-            equal :: left == right
-            if equal != (assertion.mode == "==") -> return kit_expect_verdict("FAIL", "file relation failed: {assertion.path} {assertion.mode} {assertion.value}")
-            return kit_expect_verdict("PASS", "")
-        }
-        actual = files.read(path) ?? return kit_expect_verdict("ERROR", "read assertion file: {err}")
-    }
-    if kit_expect_named(normalize, "version") && (env.version == "" || env.version_error != "") -> return kit_expect_verdict("ERROR", "jet version: {env.version_error}")
-    actual = kit_steps_normalize(actual, env, work, scratch, normalize, built, source_name)
-    if assertion.json_mode != "" {
-        error :: kit_steps_json_test(actual, assertion.json_mode, assertion.json_path, assertion.json_op, assertion.value)
-        if error == {
-            .Val(message) -> return kit_expect_verdict("FAIL", message)
-            .None -> return kit_expect_verdict("PASS", "")
-        }
-    }
-    if assertion.mode == "==" {
-        loop capture in state.history {
-            if capture.label == assertion.value {
-                expected :: if assertion.stream == "stderr" -> capture.stderr else -> capture.stdout
-                if actual != expected -> return kit_expect_verdict("FAIL", "{assertion.stream} differs from step {assertion.value}")
-                return kit_expect_verdict("PASS", "")
-            }
-        }
-        return kit_expect_verdict("ERROR", "step label missing: {assertion.value}")
-    }
-    if assertion.mode == "=" -> return kit_expect_exact(id, files.join(snapshots, assertion.value), kit_exec_optional(files.join(snapshots, assertion.value)), actual, bless, false)
-    if assertion.mode == "one-of" -> return kit_steps_one_of(id, snapshots, assertion.value, actual, bless)
-    if assertion.mode == "empty" -> return if actual == "" -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "{assertion.stream} is not empty")
-    if assertion.mode == "~" -> return if actual.contains(assertion.value) -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "{assertion.stream} missing substring: {assertion.value}")
-    if assertion.mode == "!~" -> return if !actual.contains(assertion.value) -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "{assertion.stream} contains forbidden substring: {assertion.value}")
-    kit_expect_verdict("REFUSED", "unsupported assertion: {assertion.mode}")
-}
 
-fn kit_steps_check(step: KitStep, id: String, result: KitRun, env: KitEnv, work: String, scratch: String, snapshots: String, bless: KitBless, normalize: [String], built: String, source_name: String, state: KitStepState) -> KitVerdict {
+fn kit_steps_check(step: KitStep, context: KitStepCtx, state: KitStepState, source_name: String) -> KitVerdict {
+    result :: state.last
     failure :: kit_steps_failure(step, result)
     if failure == {
         .Val(value) -> return value
@@ -526,9 +510,12 @@ fn kit_steps_check(step: KitStep, id: String, result: KitRun, env: KitEnv, work:
     }
     if step.exit == "nonzero" {
         if result.code == 0 -> return kit_expect_verdict("FAIL", "exit 0; expected nonzero")
+    } else if step.exit == "any" {} else if step.exit.starts_with("!=") {
+        forbidden :: Int.parse(~step.exit.slice(2, step.exit.len()).trim()) ?? 0
+        if result.code == forbidden -> return kit_expect_verdict("FAIL", "exit equals forbidden status {forbidden}")
     } else if result.code != (Int.parse(step.exit) ?? 0) -> return kit_expect_verdict("FAIL", "exit {result.code}; expected {step.exit}")
     loop assertion in step.assertions {
-        verdict :: kit_steps_check_assertion(assertion, id, result, env, work, scratch, snapshots, bless, normalize, built, source_name, state)
+        verdict :: kit_steps_check_assertion(assertion, context, state, source_name, true)
         if verdict.status != "PASS" -> return verdict
     }
     kit_expect_verdict("PASS", "")
@@ -588,6 +575,6 @@ fn kit_steps_invoke(step: KitStep, index: Int, context: KitStepCtx, previous: Ki
 }
 
 fn kit_steps_check_state(step: KitStep, index: Int, context: KitStepCtx, state: KitStepState) -> KitVerdict {
-    kit_steps_check(step, context.id, state.last, context.env, context.work, context.scratch, context.snapshots, context.bless, context.plan.normalize, state.built, "", state)
+    kit_steps_check(step, context, state, "")
 }
 

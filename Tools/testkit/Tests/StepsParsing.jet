@@ -17,7 +17,7 @@ fn kit_test_steps_env() -> KitEnv {
 }
 
 #Test("step parser covers fixture env streams files input exit normalizers") {
-    plan :: kit_steps_parse("requires: tool:printf\nfixture: tree\nenv: NAME={{work}}\nnormalize: argv0\nstep: jet check \"two words.jet\"\nstdin: answers.stdin\nexit: nonzero\nstdout: = result.out\nstderr: !~ forbidden\nfile: result.txt exists\nfile: state.txt ~ ready # asynchronous state text\n")
+    plan :: kit_steps_parse("requires: tool:printf\nfixture: tree\nenv: NAME={{work}}\nnormalize: argv0\nstep: jet check \"two words.jet\"\nstdin: answers.stdin\nexit: nonzero\nstdout: = result.out\nstderr: !~ forbidden # original predicate\nfile: result.txt exists\nfile: state.txt ~ ready # asynchronous state text\n")
     assert_eq(plan.error, "")
     assert_eq(plan.fixture, "tree")
     assert_eq(plan.environment, ["NAME={{work}}"])
@@ -69,9 +69,10 @@ fn kit_test_steps_env() -> KitEnv {
     run :: KitRun{stdout: "two words", stderr: "", code: 0, signal: None, timed_out: false, error: ""}
     plan :: kit_steps_parse("step: printf '%s' 'two words'\nstdout: = message.out\nstderr: empty\n")
     directory :: files.join(env.root, "Tools/testkit/Fixtures/steps")
-    assert_eq(kit_steps_check(plan.steps[0], "case", run, env, env.root, env.scratch, directory, kit_test_steps_bless(), plan.normalize, "", "", KitStepState{last: run, built: "", built_once: false}).status, "PASS")
+    context :: kit_steps_context(plan, "case", env, env.root, env.scratch, directory, kit_test_steps_bless())
+    assert_eq(kit_steps_check(plan.steps[0], context, KitStepState{last: run, built: "", built_once: false}, "").status, "PASS")
     bad :: KitRun{stdout: "two words", stderr: "", code: 3, signal: None, timed_out: false, error: ""}
-    assert_eq(kit_steps_check(plan.steps[0], "case", bad, env, env.root, env.scratch, directory, kit_test_steps_bless(), plan.normalize, "", "", KitStepState{last: bad, built: "", built_once: false}).status, "FAIL")
+    assert_eq(kit_steps_check(plan.steps[0], context, KitStepState{last: bad, built: "", built_once: false}, "").status, "FAIL")
 }
 
 #Test("build artifacts use the nearest package root or standalone entry directory") {

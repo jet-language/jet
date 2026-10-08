@@ -79,7 +79,7 @@ fn kit_test_golden_env(root: String) -> KitEnv {
     assert(warning.verdict.detail.contains("L0507"))
     kit_exec_write(files.join(root, "{entry.expected}.case"), "env: JET_TESTKIT_ICE=1\n")
     ice :: kit_golden_run_entry(entry, tier, env, files.join(root, "ice"), kit_test_golden_bless())
-    assert_eq(ice.verdict.status, "FAIL")
+    assert_eq(ice.verdict.status, "ERROR")
     assert(ice.verdict.detail.contains("internal compiler error (exit 101)"))
     assert_eq(stdin.run.stdout, "fed\n")
     files.remove(files.join(root, "{entry.expected}.stdin")) ?? panic("remove input")

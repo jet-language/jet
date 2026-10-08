@@ -60,8 +60,7 @@ fn kit_exec_base_value(name: String, env: KitEnv, scratch: String) -> String? {
 
 // Inherit the caller's environment, removing only the compiler-extension hook.
 // Cache roots are run-wide; temporary, schema and jetpack roots are case-local.
-fn kit_exec_invoke_with_env(env: KitEnv, argv: [String], cwd: String, scratch: String, stdin: String, overlay: [KitEnvVar]) -> KitRun {
-    started :: time.instant()
+fn kit_exec_spec(env: KitEnv, argv: [String], cwd: String, scratch: String, overlay: [KitEnvVar]) -> ProcessSpec {
     spec := process.cmd(argv).cwd(cwd).stdout(.Capture).stderr(.Capture).stdin(.Stream)
         .timeout(env.timeout).env_remove("JET_COMPILER_EXTENSION")
         .env("NO_COLOR", kit_exec_base_value("NO_COLOR", env, scratch) ?? "")
@@ -83,14 +82,10 @@ fn kit_exec_invoke_with_env(env: KitEnv, argv: [String], cwd: String, scratch: S
             .None -> spec = spec.env_remove(variable.name)
         }
     }
-    child := spec.spawn() ?? return kit_exec_failed("spawn: {err}")
-    input_error := ""
-    &child.stdin.write(stdin) ?? {
-        input_error = "stdin: {err}"
-        ()
-    }
-    child.stdin.close()
-    receipt :: child.wait() ?? return kit_exec_failed("wait: {err}")
+    spec
+}
+
+fn kit_exec_receipt(receipt: ProcessReceipt, elapsed_ns: Int, input_error: String) -> KitRun {
     limit_hit :: if receipt.limit_hit == {
         .Val(limit) -> if limit == {
             .WallTime -> "time"
@@ -103,7 +98,20 @@ fn kit_exec_invoke_with_env(env: KitEnv, argv: [String], cwd: String, scratch: S
     }
     KitRun{stdout: receipt.output, stderr: receipt.errors, code: receipt.code,
         signal: receipt.signal, timed_out: receipt.timed_out, error: input_error,
-        elapsed_ns: started.elapsed().ns, limit_hit: limit_hit}
+        elapsed_ns: elapsed_ns, limit_hit: limit_hit}
+}
+
+fn kit_exec_invoke_with_env(env: KitEnv, argv: [String], cwd: String, scratch: String, stdin: String, overlay: [KitEnvVar]) -> KitRun {
+    started :: time.instant()
+    child := kit_exec_spec(env, argv, cwd, scratch, overlay).spawn() ?? return kit_exec_failed("spawn: {err}")
+    input_error := ""
+    &child.stdin.write(stdin) ?? {
+        input_error = "stdin: {err}"
+        ()
+    }
+    child.stdin.close()
+    receipt :: child.wait() ?? return kit_exec_failed("wait: {err}")
+    kit_exec_receipt(receipt, started.elapsed().ns, input_error)
 }
 
 fn kit_exec_invoke(env: KitEnv, argv: [String], cwd: String, scratch: String, stdin: String) -> KitRun {
@@ -114,7 +122,7 @@ fn kit_exec_process_failure(run: KitRun) -> KitVerdict? {
     if run.error != "" -> return Val(kit_expect_verdict("ERROR", run.error))
     if run.timed_out -> return Val(kit_expect_verdict("TIMEOUT", "wall-clock limit"))
     if run.signal != None -> return Val(kit_expect_verdict("ERROR", "child terminated by signal"))
-    if run.code == 101 -> return Val(kit_expect_verdict("FAIL", "internal compiler error (exit 101)"))
+    if run.code == 101 -> return Val(kit_expect_verdict("ERROR", "internal compiler error (exit 101)"))
     None
 }
 
@@ -177,8 +185,8 @@ fn kit_exec_requires(requirement: String, env: KitEnv, work: String, scratch: St
             requirement == "gtk4" -> argv = ["pkg-config", "--exists", "gtk4"]
             requirement.starts_with("tool:") -> {
                 name :: requirement.slice(5, requirement.len())
-                executable :: process.which(name) ?? return Val(kit_expect_verdict("SKIP-HOST", requirement))
-                argv = [executable, "--version"]
+                if kit_steps_tool(name) == None -> return Val(kit_expect_verdict("SKIP-HOST", requirement))
+                return None
             }
             else -> return Val(kit_expect_verdict("REFUSED", "unknown host requirement: {requirement}"))
         }

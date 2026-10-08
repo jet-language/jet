@@ -7,7 +7,7 @@ use core.files as files
     assert_eq(plan.steps[0].limit_memory, 1024)
     assert_eq(plan.steps[1].limit_time, 0)
     env :: KitEnv{root: "root", scratch: "scratch", jet: "jet", jetpack: "", timeout: 5s, memory_limit: 0}
-    policy :: kit_steps_policy(plan.steps[0], env)
+    policy :: kit_steps_policy(plan.steps[0], env) ?? panic("valid limits")
     assert_eq(policy.timeout.ns, 2000000000)
     assert_eq(policy.memory_limit, 1024)
     assert_eq(env.timeout.ns, 5000000000)

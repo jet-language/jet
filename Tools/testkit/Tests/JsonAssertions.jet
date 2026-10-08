@@ -60,24 +60,24 @@
 }
 
 #Test("typed JSON normalizer replaces exact spans without changing surrounding bytes") {
-    rule :: KitJsonNormalization{stream: "stdout", path: "$.time", kind: "number"}
+    rule :: KitJSONNormalization{stream: "stdout", path: "$.time", kind: "number"}
     source :: " \n{{ \"tim\\u0065\" : 1.25e2 , \"note\" : \"é }} [ \\\"quote\\\"\", \"other\" : [1, 2] }}\t\n"
     normalized :: kit_steps_json_normalize(source, "stdout", [rule])
     assert_eq(normalized.error, "")
     assert_eq(normalized.text, " \n{{ \"tim\\u0065\" : \"<<number>>\" , \"note\" : \"é }} [ \\\"quote\\\"\", \"other\" : [1, 2] }}\t\n")
     assert_eq(kit_steps_json_normalize("human text", "stderr", [rule]).text, "human text")
-    wildcard :: KitJsonNormalization{stream: "stdout", path: "$.items[*].time", kind: "number"}
+    wildcard :: KitJSONNormalization{stream: "stdout", path: "$.items[*].time", kind: "number"}
     values :: kit_steps_json_normalize("{{\"items\":[{{\"time\":1}}, {{ \"time\" : 2.5 }}]}}", "stdout", [wildcard])
     assert_eq(values.error, "")
     assert_eq(values.text, "{{\"items\":[{{\"time\":\"<<number>>\"}}, {{ \"time\" : \"<<number>>\" }}]}}")
 }
 
 #Test("typed JSON normalizer fails wrong types missing paths and empty wildcards") {
-    rule :: KitJsonNormalization{stream: "stdout", path: "$.time", kind: "number"}
+    rule :: KitJSONNormalization{stream: "stdout", path: "$.time", kind: "number"}
     assert(kit_steps_json_normalize("{{\"time\":\"not a number\"}}", "stdout", [rule]).error.contains("type differs"))
     assert(kit_steps_json_normalize("{{\"other\":1}}", "stdout", [rule]).error.contains("missing"))
     assert(kit_steps_json_normalize("not JSON", "stdout", [rule]).error.contains("parse"))
-    wildcard :: KitJsonNormalization{stream: "stdout", path: "$.items[*].time", kind: "number"}
+    wildcard :: KitJSONNormalization{stream: "stdout", path: "$.items[*].time", kind: "number"}
     assert(kit_steps_json_normalize("{{\"items\":[]}}", "stdout", [wildcard]).error.contains("empty"))
     assert(kit_steps_json_normalize("{{\"items\":[{{\"time\":1}},{{}}]}}", "stdout", [wildcard]).error.contains("missing"))
 }

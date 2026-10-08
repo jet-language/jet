@@ -1,0 +1,94 @@
+use core.process as process
+use core.sys as sys
+
+fn kit_steps_tool(alternatives: String) -> String? {
+    loop name in alternatives.split("|") {
+        if name == "" -> return None
+        found :: process.which(name)
+        if found != None -> return found
+    }
+    None
+}
+
+fn kit_steps_dll_suffix() -> String {
+    if sys.family() == "windows" -> return ".dll"
+    name :: sys.name()
+    if name == "macos" || name == "darwin" -> return ".dylib"
+    ".so"
+}
+
+fn kit_steps_runtime_expand(text: String, context: KitStepCtx, state: KitStepState) -> String? {
+    expanded := kit_steps_expand(text, context.env, context.work, context.scratch, state.built)
+    if expanded.contains("{{sys:dll-suffix}}") -> expanded = expanded.replace("{{sys:dll-suffix}}", kit_steps_dll_suffix())
+    loop capture in state.captures -> expanded = expanded.replace("{{cap:{capture.name}}}", capture.value)
+    if expanded.contains("{{cap:") -> return None
+    rest := expanded
+    result := ""
+    loop {
+        start :: rest.index("{{tool:") ?? break
+        after :: start + 6
+        end :: rest.slice(after, rest.len()).index("}}") ?? return None
+        tool :: kit_steps_tool(rest.slice(after, after + end)) ?? return None
+        result = "{result}{rest.slice(0, start)}{tool}"
+        rest = rest.slice(after + end + 1, rest.len())
+    }
+    Val("{result}{rest}")
+}
+
+fn kit_steps_resolve_step(original: KitStep, context: KitStepCtx, state: KitStepState) -> KitStep? {
+    step := original
+    step.replacements = context.plan.replacements
+    loop rule in original.replacements -> &step.replacements.push(rule)
+    argv := [String]{}
+    loop word in original.argv -> &argv.push(kit_steps_runtime_expand(word, context, state) ?? return None)
+    step.argv = argv
+    step.cwd = kit_steps_runtime_expand(original.cwd, context, state) ?? return None
+    step.stdin = kit_steps_runtime_expand(original.stdin, context, state) ?? return None
+    loop i in 0..<step.environment.len() {
+        if step.environment[i].value == {
+            .Val(value) -> step.environment[i].value = Val(kit_steps_runtime_expand(value, context, state) ?? return None)
+            .None -> {}
+        }
+    }
+    loop i in 0..<step.assertions.len() {
+        step.assertions[i].path = kit_steps_runtime_expand(step.assertions[i].path, context, state) ?? return None
+        step.assertions[i].json_path = kit_steps_runtime_expand(step.assertions[i].json_path, context, state) ?? return None
+        // Keep predicate values unexpanded: the checker chooses raw or normalized
+        // matching based on the presence of path tokens in the original value.
+    }
+    if step.action == "wait" {
+        loop pending in state.children {
+            if pending.label == step.label {
+                if step.limit_time == 0 -> step.limit_time = pending.step.limit_time
+                if step.limit_memory == 0 -> step.limit_memory = pending.step.limit_memory
+                if original.replacements.len() == 0 -> step.replacements = pending.step.replacements
+                rules := pending.step.json_normalize
+                loop rule in step.json_normalize -> &rules.push(rule)
+                step.json_normalize = rules
+            }
+        }
+    }
+    Val(step)
+}
+
+fn kit_steps_replacements(original: [KitReplacement], context: KitStepCtx, state: KitStepState) -> [KitReplacement]? {
+    rules := [KitReplacement]{}
+    loop rule in original {
+        from :: kit_steps_runtime_expand(rule.from, context, state) ?? return None
+        to :: kit_steps_runtime_expand(rule.to, context, state) ?? return None
+        if from == "" -> return None
+        &rules.push(KitReplacement{from: from, to: to})
+    }
+    Val(rules)
+}
+
+fn kit_steps_replace(text: String, rules: [KitReplacement], context: KitStepCtx, state: KitStepState, normalized: Bool, source_name: String) -> String {
+    result := text
+    loop rule in rules {
+        from := rule.from
+        to :: rule.to
+        if normalized -> from = kit_steps_normalize(from, context.env, context.work, context.scratch, context.plan.normalize, state.built, source_name)
+        result = result.replace(from, to)
+    }
+    result
+}

@@ -1,7 +1,7 @@
 use core.encoding.[DataTree]
 use core.encoding.json as json
 
-fn kit_steps_json_normalizer(value: String) -> KitJsonNormalization? {
+fn kit_steps_json_normalizer(value: String) -> KitJSONNormalization? {
     reason :: value.index(" #") ?? return None
     if value.slice(reason + 2, value.len()).trim() == "" -> return None
     header :: kit_steps_words(value.slice(0, reason)) ?? return None
@@ -9,7 +9,7 @@ fn kit_steps_json_normalizer(value: String) -> KitJsonNormalization? {
     if header[1] != "stdout" && header[1] != "stderr" -> return None
     if kit_steps_json_path(header[2]) == None -> return None
     if !kit_expect_named(["string", "number", "int", "bool", "null", "array", "object"], header[4]) -> return None
-    Val(KitJsonNormalization{stream: header[1], path: header[2], kind: header[4]})
+    Val(KitJSONNormalization{stream: header[1], path: header[2], kind: header[4]})
 }
 
 fn kit_steps_json_space(bytes: [U8], start: Int) -> Int {
@@ -58,11 +58,11 @@ fn kit_steps_json_span_end(bytes: [U8], start: Int) -> Int {
     i
 }
 
-fn kit_steps_json_collect_spans(bytes: [U8], tree: DataTree, parts: [String], depth: Int, start: Int, kind: String, normalizer: Int, spans: &[KitJsonSpan]) -> String? {
+fn kit_steps_json_collect_spans(bytes: [U8], tree: DataTree, parts: [String], depth: Int, start: Int, kind: String, normalizer: Int, spans: &[KitJSONSpan]) -> String? {
     if depth == parts.len() {
         actual :: kit_steps_json_type(tree)
         if actual != kind && !(kind == "number" && actual == "int") -> return Val("JSON normalization type differs: expected {kind}, got {actual}")
-        &spans.push(KitJsonSpan{start: start, end: kit_steps_json_span_end(bytes, start), normalizer: normalizer})
+        &spans.push(KitJSONSpan{start: start, end: kit_steps_json_span_end(bytes, start), normalizer: normalizer})
         return None
     }
     part :: parts[depth]
@@ -98,22 +98,22 @@ fn kit_steps_json_collect_spans(bytes: [U8], tree: DataTree, parts: [String], de
     }
 }
 
-fn kit_steps_json_normalize(text: String, stream: String, rules: [KitJsonNormalization]) -> KitJsonResult {
+fn kit_steps_json_normalize(text: String, stream: String, rules: [KitJSONNormalization]) -> KitJSONResult {
     applies := false
     loop rule in rules {
         if rule.stream == stream -> applies = true
     }
-    if !applies -> return KitJsonResult{text: text, error: ""}
-    tree :: json.parse(text) ?? return KitJsonResult{text: "", error: "JSON normalization parse: {err}"}
+    if !applies -> return KitJSONResult{text: text, error: ""}
+    tree :: json.parse(text) ?? return KitJSONResult{text: "", error: "JSON normalization parse: {err}"}
     bytes :: text.bytes()
-    spans := [KitJsonSpan]{}
+    spans := [KitJSONSpan]{}
     start :: kit_steps_json_space(bytes, 0)
     loop (index, rule) in rules {
         if rule.stream != stream -> next
-        parts :: kit_steps_json_path(rule.path) ?? return KitJsonResult{text: "", error: "invalid JSON normalization path"}
+        parts :: kit_steps_json_path(rule.path) ?? return KitJSONResult{text: "", error: "invalid JSON normalization path"}
         error :: kit_steps_json_collect_spans(bytes, tree, parts, 0, start, rule.kind, index, &spans)
         if error == {
-            .Val(message) -> return KitJsonResult{text: "", error: message}
+            .Val(message) -> return KitJSONResult{text: "", error: message}
             .None -> {}
         }
     }
@@ -129,5 +129,5 @@ fn kit_steps_json_normalize(text: String, stream: String, rules: [KitJsonNormali
         position = span.end
     }
     &pieces.push(text.slice(position, text.len()))
-    KitJsonResult{text: pieces.join(""), error: ""}
+    KitJSONResult{text: pieces.join(""), error: ""}
 }

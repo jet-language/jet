@@ -4,7 +4,15 @@ use core.files as files
 // work, but must not redirect a destructive operation into root or scratch.
 fn kit_steps_relative_path(path: String) -> Bool {
     if path == "" || path.contains("{{root}}") || path.contains("{{scratch}}") -> return false
-    relative :: path.replace("{{work}}", ".")
+    relative := path.replace("{{work}}", ".").replace("{{sys:dll-suffix}}", "suffix")
+    loop prefix in ["{{cap:", "{{tool:"] {
+        loop {
+            start :: relative.index(prefix) ?? break
+            after :: start + prefix.len()
+            end :: relative.slice(after, relative.len()).index("}}") ?? return false
+            relative = "{relative.slice(0, start)}token{relative.slice(after + end + 1, relative.len())}"
+        }
+    }
     if relative.starts_with("/") || relative.contains("\\") || relative.contains(":") -> return false
     collapsed :: files.collapse(relative)
     collapsed != ".." && !collapsed.starts_with("../")
@@ -17,10 +25,24 @@ fn kit_steps_work_path(path: String, env: KitEnv, work: String, scratch: String,
     Val(absolute)
 }
 
-fn kit_steps_file_action(step: KitStep, env: KitEnv, work: String, scratch: String, built: String) -> KitRun {
-    source :: kit_steps_work_path(step.argv[1], env, work, scratch, built) ?? return kit_exec_failed("file action escapes work directory")
+fn kit_steps_file_action(step: KitStep, env: KitEnv, work: String, scratch: String, built: String, snapshots: String) -> KitRun {
+    if step.action == "concat" {
+        destination :: kit_steps_work_path(step.argv[1], env, work, scratch, built) ?? return kit_exec_failed("concat destination escapes work directory")
+        combined := [U8]{}
+        loop raw in step.argv.slice(2, step.argv.len()) {
+            source :: kit_steps_work_path(raw, env, work, scratch, built) ?? return kit_exec_failed("concat source escapes work directory")
+            bytes :: files.read_bytes(source) ?? return kit_exec_failed("concat source {source}: {err}")
+            loop byte in bytes -> &combined.push(byte)
+        }
+        files.create_dir_all(files.dirname(destination)) ?? return kit_exec_failed("mkdir concat: {err}")
+        files.write_bytes(destination, combined) ?? return kit_exec_failed("write concat: {err}")
+        return kit_steps_action_run()
+    }
+    expanded :: kit_steps_expand(step.argv[1], env, work, scratch, built)
+    source :: if step.action == "copy" && files.is_absolute(expanded) -> expanded else ->
+        kit_steps_work_path(expanded, env, work, scratch, built) ?? return kit_exec_failed("file action escapes work directory")
     if !files.exists(source) -> return kit_exec_failed("file action source is missing: {source}")
-    if step.argv[0] == "remove" {
+    if step.action == "remove" {
         files.remove_all(source) ?? return kit_exec_failed("remove {source}: {err}")
     } else {
         destination :: kit_steps_work_path(step.argv[2], env, work, scratch, built) ?? return kit_exec_failed("copy destination escapes work directory")
@@ -30,5 +52,5 @@ fn kit_steps_file_action(step: KitStep, env: KitEnv, work: String, scratch: Stri
         files.write_bytes(destination, bytes) ?? return kit_exec_failed("write copy {destination}: {err}")
         files.chmod(destination, info.mode % 512) ?? return kit_exec_failed("copy mode {destination}: {err}")
     }
-    KitRun{stdout: "", stderr: "", code: 0, signal: None, timed_out: false, error: ""}
+    kit_steps_action_run()
 }
