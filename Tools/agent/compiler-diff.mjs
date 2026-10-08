@@ -172,6 +172,38 @@ function copyTopLevelFiles(source, destination) {
   }
 }
 
+// D-FAIL-EXIT1: program-side stops exit 70; unhandled/fatal entry reports exit 1.
+// Unknown report forms have no exit oracle and must remain explicit wrong rows.
+export function goldenFailureExit(stem, stderr) {
+  if (stderr.startsWith("Stop [") || stderr.startsWith("Error [E3003]:")) return 70;
+  if (stderr.startsWith("Runtime fault [R0801]:") || stderr.startsWith("Runtime fault [R0802]:")) {
+    const contradicted = stderr.split("\n").some((line) => {
+      const trimmed = line.trim();
+      return trimmed.startsWith("exit:") && trimmed.slice(5).trim() !== "70";
+    });
+    return contradicted ? null : 70;
+  }
+  // #1474: this source disables logging before log.fatal exits 1.
+  if (stderr === "") return stem === "io/log_fatal" ? 1 : null;
+  // Source-proved entry returns, matching tests/golden.rs; fatal_exit explicitly
+  // calls process.exit(1). An arbitrary Error prefix is not an exit oracle.
+  switch (stem) {
+    case "errors/propagation_journey":
+    case "errors/propagation_journey_direct":
+    case "errors/propagation_journey_one_hop":
+    case "errors/propagation_journey_core":
+    case "errors/error_context":
+    case "errors/default_error_conversion":
+    case "errors/default_err_edge":
+    case "errors/fatal_exit":
+    case "serde/decode_error_exit":
+    case "crypto/crypto_error_run":
+      return 1;
+    default:
+      return null;
+  }
+}
+
 // Port of `collect_feature_golden_entries` (tests/golden.rs).
 export function collectGoldenEntries(exDir = FEATURES) {
   const entries = [];

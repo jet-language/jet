@@ -20,8 +20,8 @@
 //               golden's stdin and is compared with Examples/features/expected/
 //               <stem>.out (exit 0; plus <stem>.stderr.out when present) or,
 //               for a <stem>.err.out golden, that stderr, stdout from its .out
-//               (empty when absent), and the exact executed reference exit.
-//               Emit-only references cannot establish a failure exit oracle.
+//               (empty when absent), and its ratified report-contract exit.
+//               An unrecognized report form is an explicit wrong result.
 //
 // Verdicts: pass, wrong (ran, output or exit differs), unsupported (lowering
 // or object issue, or a runtime symbol the C library does not export),
@@ -81,7 +81,7 @@ const safeJet = `${process.env.HOME}/.cache/jet-dev/safe-jet.sh`;
 const runtimeLib = process.env.JET_RUNTIME_C_LIB;
 const runtimePack = process.env.JET_RUNTIME_PACK;
 
-const { collectGoldenEntries, loadExampleStdin } = await import(pathToFileURL(join(repo, "Tools/agent/compiler-diff.mjs")));
+const { collectGoldenEntries, goldenFailureExit, loadExampleStdin } = await import(pathToFileURL(join(repo, "Tools/agent/compiler-diff.mjs")));
 const { copyFeatureProject, featureProjectRoot } = await import(pathToFileURL(join(repo, "Tools/agent/run-feature-examples.mjs")));
 // JET_GOLDEN_FEATURES=<checkout>/Examples/features runs another corpus laid
 // out like the repository's (Tools/agent/safety-fuzz.mjs writes one); cases
@@ -557,14 +557,7 @@ for (const c of until >= 3 ? open() : []) {
   writeFileSync(join(dirs.run, `${c.slug}.stderr`), run.stderr ?? "");
   writeFileSync(join(dirs.run, `${c.slug}.status.json`), JSON.stringify({ status: run.status, signal: run.signal, error: run.error ? { code: run.error.code, message: run.error.message } : null }) + "\n");
   const { expect } = c;
-  let expectedExit = expect.failure ? null : 0;
-  if (expect.failure) {
-    const referencePath = join(dirs.mir, `${c.slug}.ref`);
-    if (existsSync(referencePath)) {
-      const reference = JSON.parse(readFileSync(referencePath, "utf8"));
-      if (reference.mode === "run" && (reference.status === 70 || reference.status === 1)) expectedExit = reference.status;
-    }
-  }
+  const expectedExit = expect.failure ? goldenFailureExit(c.entry.stem, expect.stderr) : 0;
   const exitOk = expectedExit !== null && run.status === expectedExit;
   const stdoutOk = run.stdout === expect.stdout;
   const stderrOk = expect.stderr === null || run.stderr === expect.stderr;
@@ -572,7 +565,7 @@ for (const c of until >= 3 ? open() : []) {
   else {
     c.verdict = "wrong";
     c.detail = !exitOk
-      ? expectedExit === null ? "missing executed failure exit reference" : `exit ${run.status ?? run.signal} (expected ${expectedExit}): ${(run.stderr ?? "").split("\n")[0]}`
+      ? expectedExit === null ? "ambiguous failure exit report" : `exit ${run.status ?? run.signal} (expected ${expectedExit}): ${(run.stderr ?? "").split("\n")[0]}`
       : !stdoutOk ? "stdout differs" : "stderr differs";
   }
   c.detail = `${c.leg}${c.detail ? `: ${c.detail}` : ""}`;

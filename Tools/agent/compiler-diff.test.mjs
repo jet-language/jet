@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import {
   collectGoldenEntries,
   comparePhase,
+  goldenFailureExit,
   launcherFailure,
   loadExampleStdin,
   parseDiagnostics,
@@ -33,6 +34,113 @@ test("golden discovery matches the Rust loader's project-root rule", () => {
   for (const module of ["foundations/storage/cache", "foundations/tooling/load", "packages/sandbox_mathkit/sandbox_src"]) {
     assert.ok(!stems.has(module), `module/member fixture treated as an executable: ${module}`);
   }
+});
+
+test("golden failure exit follows the report contract without guessing unknown forms", () => {
+  assert.equal(goldenFailureExit("unknown/stem", "Stop [E3001]: panic\n"), 70);
+  assert.equal(goldenFailureExit("concurrency/deadline_context", "Error [E3003]: deadline\n"), 70);
+  assert.equal(goldenFailureExit("memory/unsafe_sentries", "Runtime fault [R0802]: bad pointer\nexit: 70\n"), 70);
+  assert.equal(goldenFailureExit("memory/unsafe_sentries_provenance", "Runtime fault [R0801]: bad pointer\n"), 70);
+  for (const report of ["Runtime fault [R0801]: bad pointer\nexit: 1\n", "Runtime fault [R0802]: bad pointer\nexit: 101\n"]) {
+    assert.equal(goldenFailureExit("memory/unsafe_sentries", report), null);
+  }
+  assert.equal(goldenFailureExit("io/log_fatal", ""), 1);
+  assert.equal(goldenFailureExit("unknown/stem", ""), null);
+  for (const stem of [
+    "errors/propagation_journey", "errors/propagation_journey_direct",
+    "errors/propagation_journey_one_hop", "errors/propagation_journey_core",
+    "errors/error_context", "errors/default_error_conversion", "errors/default_err_edge",
+    "errors/fatal_exit", "serde/decode_error_exit", "crypto/crypto_error_run",
+  ]) {
+    assert.equal(goldenFailureExit(stem, "source-proved entry report\n"), 1);
+  }
+  for (const report of ["unknown report\n", "Error: unproved return\n", "Error [CUSTOM]: unknown code\n", "[fatal] unproved exit\n", "Runtime fault [R0999]: unknown fault\n"]) {
+    assert.equal(goldenFailureExit("unknown/stem", report), null);
+  }
+});
+
+// Exercise the actual run-only harness with real ELF child fixtures. These
+// test stream/status comparisons, not the compiler or runtime implementation.
+function runGoldenFixture(stem, overrides = {}) {
+  const repo = fileURLToPath(new URL("../../", import.meta.url));
+  const expected = join(repo, "Examples/features/expected", stem);
+  const stdoutExpected = existsSync(`${expected}.out`) ? readFileSync(`${expected}.out`) : Buffer.alloc(0);
+  const failure = existsSync(`${expected}.err.out`);
+  const stderrExpected = failure ? readFileSync(`${expected}.err.out`) : Buffer.alloc(0);
+  const statusExpected = failure ? goldenFailureExit(stem, stderrExpected.toString("utf8")) : 0;
+  assert.notEqual(statusExpected, null, `ambiguous fixture exit: ${stem}`);
+  const stdout = Buffer.from(overrides.stdout ?? stdoutExpected);
+  const stderr = Buffer.from(overrides.stderr ?? stderrExpected);
+  const status = overrides.status ?? statusExpected;
+  const base = process.env.JET_TEST_SCRATCH_DIR || join(homedir(), ".cache/jet-dev/scratch");
+  mkdirSync(base, { recursive: true });
+  const dir = mkdtempSync(join(base, "golden-failure-test-"));
+  try {
+    const lower = join(dir, "lower");
+    mkdirSync(lower);
+    const slug = stem.replace(/[^A-Za-z0-9_-]+/gu, "_");
+    writeFileSync(join(dir, "stdout.data"), stdout);
+    writeFileSync(join(dir, "stderr.data"), stderr);
+    const assembly = [
+      ".text", ".globl _start", "_start:",
+      "mov $1, %eax", "mov $1, %edi", "lea stdout_data(%rip), %rsi", `mov $${stdout.length}, %edx`, "syscall",
+      "mov $1, %eax", "mov $2, %edi", "lea stderr_data(%rip), %rsi", `mov $${stderr.length}, %edx`, "syscall",
+      "mov $60, %eax", `mov $${status}, %edi`, "syscall",
+      ".section .rodata", "stdout_data:", '.incbin "stdout.data"', "stderr_data:", '.incbin "stderr.data"',
+      '.section .note.GNU-stack,"",@progbits', "",
+    ].join("\n");
+    writeFileSync(join(dir, "child.s"), assembly);
+    for (const [tool, args] of [
+      ["as", ["--64", "-o", join(lower, `${slug}.o`), "child.s"]],
+      ["ld", ["-o", join(lower, `${slug}.elf`), join(lower, `${slug}.o`)]],
+    ]) {
+      const built = spawnSync(tool, args, { cwd: dir, encoding: "utf8", timeout: 10000 });
+      assert.equal(built.status, 0, `${tool}: ${built.error?.message ?? built.stderr}`);
+    }
+    const list = join(dir, "cases");
+    writeFileSync(list, `${stem}\n`);
+    const checked = spawnSync(process.execPath, [
+      join(repo, "Compiler/JetBackend/Tests/run-goldens.mjs"), dir,
+      "--stage", "run", "--until", "run", "--case-list", list,
+    ], {
+      cwd: repo, encoding: "utf8", timeout: 30000,
+      env: { ...process.env, JET_RUNTIME_PACK: "", JET_RUNTIME_C_LIB: "", JET_GOLDEN_FEATURES: join(repo, "Examples/features") },
+    });
+    assert.equal(checked.status, 0, checked.stdout + checked.stderr);
+    assert.deepEqual(readFileSync(join(dir, "run", `${slug}.stdout`)), stdout);
+    assert.deepEqual(readFileSync(join(dir, "run", `${slug}.stderr`)), stderr);
+    assert.equal(JSON.parse(readFileSync(join(dir, "run", `${slug}.status.json`))).status, status);
+    return readFileSync(join(dir, "results.tsv"), "utf8").trim().split("\t").slice(1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+for (const stem of ["memory/release_defer_panic", "memory/scope_close_safety_net_panic"]) {
+  test(`golden failure preserves the existing Close stdout oracle: ${stem}`, () => {
+    assert.equal(runGoldenFixture(stem)[0], "pass");
+    const [verdict, detail] = runGoldenFixture(stem, { stdout: "" });
+    assert.equal(verdict, "wrong");
+    assert.match(detail, /stdout differs/u);
+  });
+}
+
+test("golden failure rejects unexpected stdout when the oracle is absent", () => {
+  const [verdict, detail] = runGoldenFixture("errors/panic", { stdout: "unexpected output\n" });
+  assert.equal(verdict, "wrong");
+  assert.match(detail, /stdout differs/u);
+});
+
+test("golden failure rejects the other former wildcard exit", () => {
+  const [verdict, detail] = runGoldenFixture("memory/release_defer_panic", { status: 1 });
+  assert.equal(verdict, "wrong");
+  assert.match(detail, /exit 1 \(expected 70\)/u);
+});
+
+test("golden failure rejects different stderr with correct stdout and exit", () => {
+  const [verdict, detail] = runGoldenFixture("memory/release_defer_panic", { stderr: "different report\n" });
+  assert.equal(verdict, "wrong");
+  assert.match(detail, /stderr differs/u);
 });
 
 test("interactive answers come from the example_stdin table", () => {

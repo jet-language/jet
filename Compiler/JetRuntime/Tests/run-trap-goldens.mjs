@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { collectGoldenEntries } from "../../../Tools/agent/compiler-diff.mjs";
+import { collectGoldenEntries, goldenFailureExit } from "../../../Tools/agent/compiler-diff.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const [output, baseline, mode] = process.argv.slice(2);
@@ -50,7 +50,8 @@ if (mode !== "--plan") {
     const stderrPath = join(out, "run", `${slug}.stderr`);
     const stdoutPath = join(out, "run", `${slug}.stdout`);
     const goldenStdoutPath = join(expected, `${stem}.out`);
-    const goldenPath = join(expected, `${stem}.${existsSync(join(expected, `${stem}.err.out`)) ? "err" : "stderr"}.out`);
+    const failure = existsSync(join(expected, `${stem}.err.out`));
+    const goldenPath = join(expected, `${stem}.${failure ? "err" : "stderr"}.out`);
     if (![refPath, statusPath, stdoutPath, stderrPath].every(existsSync)) {
       failures.push(`${stem}: missing reference/native result`);
       rows.push(`${stem}\tmissing`);
@@ -62,13 +63,15 @@ if (mode !== "--plan") {
     const stdout = readFileSync(stdoutPath);
     const stdoutBytesMatch = stdout.equals(existsSync(goldenStdoutPath) ? readFileSync(goldenStdoutPath) : Buffer.alloc(0));
     const stdoutReferenceMatch = typeof reference.stdout === "string" && stdout.equals(Buffer.from(reference.stdout));
-    const bytesMatch = stderr.equals(readFileSync(goldenPath));
+    const goldenStderr = readFileSync(goldenPath);
+    const expectedExit = failure ? goldenFailureExit(stem, goldenStderr.toString("utf8")) : 0;
+    const bytesMatch = stderr.equals(goldenStderr);
     const referenceMatch = typeof reference.stderr === "string" && stderr.equals(Buffer.from(reference.stderr));
-    const exitMatch = reference.mode === "run" && Number.isInteger(reference.status) &&
-      native.status === reference.status && native.signal === null && native.error === null;
+    const exitMatch = expectedExit !== null && reference.mode === "run" && Number.isInteger(reference.status) &&
+      reference.status === expectedExit && native.status === reference.status && native.signal === null && native.error === null;
     const ok = bytesMatch && referenceMatch && stdoutBytesMatch && stdoutReferenceMatch && exitMatch;
-    rows.push(`${stem}\t${ok ? "pass" : "wrong"}\tref=${reference.status}\tnative=${native.status ?? native.signal}\tgolden-stdout=${stdoutBytesMatch}\treference-stdout=${stdoutReferenceMatch}\tgolden-stderr=${bytesMatch}\treference-stderr=${referenceMatch}`);
-    if (!ok) failures.push(`${stem}: exact exit/stdout/stderr mismatch`);
+    rows.push(`${stem}\t${ok ? "pass" : "wrong"}\texpected=${expectedExit ?? "ambiguous"}\tref=${reference.status}\tnative=${native.status ?? native.signal}\tgolden-stdout=${stdoutBytesMatch}\treference-stdout=${stdoutReferenceMatch}\tgolden-stderr=${bytesMatch}\treference-stderr=${referenceMatch}`);
+    if (!ok) failures.push(`${stem}: ${expectedExit === null ? "ambiguous failure exit report" : "exact exit/stdout/stderr mismatch"}`);
   }
   writeFileSync(join(out, "trap-results.tsv"), rows.join("\n") + "\n");
   for (const failure of failures) console.error(failure);
