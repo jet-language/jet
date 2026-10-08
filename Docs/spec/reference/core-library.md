@@ -16,6 +16,13 @@ Application and `#Test` helper functions retain their canonical entry-module
 call identity in both single-file and multi-file packages; the absence of
 sibling modules does not change callable resolution.
 
+Whole-file filesystem checks, atomic-write sequencing, scoped path selection,
+logical environment policy, signal masks, and line decoding live in Jet source.
+Their reserved raw bindings preserve the existing host handles and shared read
+buffers until the Jet runtime replaces those leaves at cutover. File lines trim
+all trailing CR/LF bytes; process-pipe lines remove only one LF and its preceding
+CR, preserving an unterminated final CR.
+
 <!-- Stable IDs bind these public Core declarations to reviewed feature depth. -->
 <!-- FEATURE_CLAIMS:BEGIN -->
 <!-- FEATURE_CLAIM: claim.core-foundation | Core foundations are reachable Jet software. -->
