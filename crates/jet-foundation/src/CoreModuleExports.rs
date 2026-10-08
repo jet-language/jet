@@ -25,7 +25,7 @@ pub enum CoreLeafKind {
 
 // BEGIN GENERATED CORE DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: fe5b47146fac96dc4c82c94e426c1448bbaf24a80e8938c90677db2e6015f363
+// Source SHA-256: d12ab3d393be30c085ef7bd06b6049e69f8f1180076c841b04400e7d2e9c7c7a
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreModuleDeclaration {
     pub module: &'static str,
@@ -300,8 +300,8 @@ const CORE_MODULE_29_MEMBERS: &[&str] = &["new", "Centroid", "TDigest"];
 const CORE_MODULE_29_TYPES: &[(&str, CoreLeafKind)] = &[("Centroid", CoreLeafKind::Plain), ("TDigest", CoreLeafKind::Plain)];
 const CORE_MODULE_29_DEPENDENCIES: &[&str] = &["core.data"];
 
-const CORE_MODULE_30_MEMBERS: &[&str] = &["decode", "migrate", "open", "open_memory", "pool", "policy", "policy_audit", "row_bool", "row_float", "row_int", "row_text", "row_value", "transaction", "DBConnection", "DBScope", "DBPool", "DBLease", "DBPoolReceipt", "DBError", "DBValue", "SQL", "__open", "__open_memory", "__pool", "__policy", "__policy_audit", "__transaction", "__migrate", "__PoolLifecycle"];
-const CORE_MODULE_30_TYPES: &[(&str, CoreLeafKind)] = &[("DBConnection", CoreLeafKind::Plain), ("DBScope", CoreLeafKind::Plain), ("DBPool", CoreLeafKind::Plain), ("DBLease", CoreLeafKind::Plain), ("DBPoolReceipt", CoreLeafKind::Plain), ("DBError", CoreLeafKind::Plain), ("DBValue", CoreLeafKind::Enum(&["Null", "Int", "Float", "Text", "Bool", "Blob"])), ("SQL", CoreLeafKind::Plain), ("__PoolLifecycle", CoreLeafKind::Enum(&["Open", "Draining", "Drained"]))];
+const CORE_MODULE_30_MEMBERS: &[&str] = &["decode", "migrate", "open", "open_memory", "pool", "policy", "policy_audit", "row_bool", "row_float", "row_int", "row_text", "row_value", "transaction", "DBConnection", "DBScope", "DBPool", "DBLease", "DBPoolReceipt", "DBError", "DBValue", "SQL", "__open", "__open_memory", "__pool", "__policy", "__policy_audit", "__transaction", "__migrate", "__PoolLifecycle", "__QueueDb", "__queue_open", "__queue_begin", "__queue_commit", "__queue_rollback", "__queue_execute", "__queue_query", "__queue_raw_open", "__queue_raw_close", "__queue_raw_begin", "__queue_raw_commit", "__queue_raw_rollback", "__queue_raw_execute", "__queue_raw_query"];
+const CORE_MODULE_30_TYPES: &[(&str, CoreLeafKind)] = &[("DBConnection", CoreLeafKind::Plain), ("DBScope", CoreLeafKind::Plain), ("DBPool", CoreLeafKind::Plain), ("DBLease", CoreLeafKind::Plain), ("DBPoolReceipt", CoreLeafKind::Plain), ("DBError", CoreLeafKind::Plain), ("DBValue", CoreLeafKind::Enum(&["Null", "Int", "Float", "Text", "Bool", "Blob"])), ("SQL", CoreLeafKind::Plain), ("__PoolLifecycle", CoreLeafKind::Enum(&["Open", "Draining", "Drained"])), ("__QueueDb", CoreLeafKind::Plain)];
 const CORE_MODULE_30_DEPENDENCIES: &[&str] = &["core.encoding"];
 
 const CORE_MODULE_31_MEMBERS: &[&str] = &["Address", "Attachment", "DKIMConfig", "EmailError", "Envelope", "Limits", "Mailer", "Message", "RecipientPolicy", "RecipientReport", "SMTPAuth", "SMTPConfig", "SMTPSecurity", "SendReport", "TLSTrust", "address", "attachment", "envelope", "message", "serialize", "smtp", "smtp_from_env", "HTML", "dkim", "limits", "send_report", "smtp_auth"];
@@ -782,7 +782,7 @@ pub const CORE_SOURCE_MODULES: &[CoreSourceModule] = &[
     CoreSourceModule { module: "core.data.sketch.hll", alias: "core_core_data_sketch_hll", path: "Core/data/sketch/hll.jet", owned_members: &["new"] },
     CoreSourceModule { module: "core.data.sketch.reservoir", alias: "core_core_data_sketch_reservoir", path: "Core/data/sketch/reservoir.jet", owned_members: &["new"] },
     CoreSourceModule { module: "core.data.sketch.tdigest", alias: "core_core_data_sketch_tdigest", path: "Core/data/sketch/tdigest.jet", owned_members: &["new"] },
-    CoreSourceModule { module: "core.db", alias: "core_core_db", path: "Core/db/db.jet", owned_members: &["open", "open_memory", "pool", "policy", "policy_audit", "transaction", "migrate", "row_bool", "row_float", "row_int", "row_text", "row_value"] },
+    CoreSourceModule { module: "core.db", alias: "core_core_db", path: "Core/db/db.jet", owned_members: &["open", "open_memory", "pool", "policy", "policy_audit", "transaction", "migrate", "row_bool", "row_float", "row_int", "row_text", "row_value", "__queue_open", "__queue_begin", "__queue_commit", "__queue_rollback", "__queue_execute", "__queue_query"] },
     CoreSourceModule { module: "core.email", alias: "core_core_email", path: "Core/email/email.jet", owned_members: &["smtp_from_env"] },
     CoreSourceModule { module: "core.encoding", alias: "core_encoding", path: "Core/encoding/encoding.jet", owned_members: &["hex_nibble", "hex_value", "bytes_to_hex", "hex_to_bytes", "wrap32"] },
     CoreSourceModule { module: "core.encoding.base32", alias: "core_core_encoding_base32", path: "Core/encoding/base32.jet", owned_members: &["b32decode", "b32encode", "b32hexdecode", "b32hexencode", "decode", "encode", "is_base32"] },
@@ -887,6 +887,7 @@ pub const CORE_SOURCE_OWNED_TYPES: &[CoreSourceOwnedType] = &[
     CoreSourceOwnedType { path: "Core/db/db.jet", name: "DBError" },
     CoreSourceOwnedType { path: "Core/db/db.jet", name: "DBPoolReceipt" },
     CoreSourceOwnedType { path: "Core/db/db.jet", name: "__PoolLifecycle" },
+    CoreSourceOwnedType { path: "Core/db/db.jet", name: "__QueueDb" },
     CoreSourceOwnedType { path: "Core/encoding/encoding.jet", name: "DataEvent" },
     CoreSourceOwnedType { path: "Core/encoding/encoding.jet", name: "EncodingFormat" },
     CoreSourceOwnedType { path: "Core/encoding/encoding.jet", name: "EncodingErrorKind" },
