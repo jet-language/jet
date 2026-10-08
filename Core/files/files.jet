@@ -14,6 +14,7 @@ use core.text as unicode
 
 use core.sys as sys
 use core.process as process
+use __core_files_path_components as host_path
 // core.files — one filesystem surface.
 //
 // Whole-file helpers (`read`, `write`, `write_bytes`, `append_all`) and
@@ -149,6 +150,11 @@ pub struct WalkEntry {
 
 pub struct FileScope {
     pub authority: Authority
+
+    /// Read only through the authority's descriptor-relative no-follow roots.
+    pub fn read(self, path: String) -[FS.Read]> String IOError! {
+        scoped_read(self, path)
+    }
 }
 
 pub struct MappedFile {
@@ -650,7 +656,51 @@ pub fn append_all(path: String, text: String) IOError! -[FS.Write]> {
 
 
 pub fn write_atomic(path: String, bytes: [U8]) IOError! -[FS.Write]> {
-    core.files.write_atomic(path, bytes)
+    file_writer_refusal(path)
+    file_fault("FS.Write", .Write, path)
+    platform :: file_path_platform()
+    target :: host_path.from_text(path, platform)
+    parent_span :: host_path.parent_span(target)
+    parent :: if parent_span == {
+        .None -> host_path.from_text(".", platform)
+        .Val(extent) -> host_path.owned_span(target, extent)
+    }
+    parent_text :: String.from_bytes(parent.encoded) ?? panic("UTF-8 path span")
+    pid :: core.files.__atomic_pid()
+    loop sequence in 0..<128 {
+        candidate := parent
+        host_path.push(&candidate, host_path.from_text(".jet_tmp_{pid}_{sequence}", platform))
+        candidate_text :: String.from_bytes(candidate.encoded) ?? panic("UTF-8 temporary path")
+        reservation :: core.files.__atomic_reserve(path, candidate_text)
+        if reservation == {
+            .Err(error) -> {
+                if error != .AlreadyExists(_) -> return Err(error)
+            }
+            .Ok(handle) -> {
+                if core.files.__atomic_finish(handle, bytes, path, candidate_text) == {
+                    .Err(error) -> {
+                        _ :: core.files.__atomic_remove(candidate_text)
+                        core.files.__atomic_close(handle)
+                        return Err(error)
+                    }
+                    .Ok(_) -> {}
+                }
+                core.files.__atomic_close(handle)
+                if core.files.__atomic_rename(candidate_text, path) == {
+                    .Err(error) -> {
+                        _ :: core.files.__atomic_remove(candidate_text)
+                        return Err(error)
+                    }
+                    .Ok(_) -> {}
+                }
+                return core.files.__atomic_sync_parent(parent_text, path)
+            }
+        }
+    }
+    Err(IOError.Other(IOContext{
+        operation: .Write, resource: Val(path), os_code: None,
+        cause: Val("could not reserve an atomic-write temporary file"),
+    }))
 }
 
 
@@ -1790,4 +1840,107 @@ pub fn cd(path: String) IOError! -[FS, Env]> { sys.set_current_dir(path) }
     create_dir(join(root, "one/two")) ?? panic("recursive create_dir parity")
     create_dir_all(join(root, "one/two")) ?? panic("existing directory")
     remove_all(root) ?? panic("cleanup whole-file source policy")
+}
+
+fn file_path_platform() -> host_path.PathPlatform Never! {
+    if core.files.__path_windows() -> .Windows else -> .Unix
+}
+
+fn scope_denied(path: String) -> IOError Never! {
+    IOError.PermissionDenied(IOContext{
+        operation: .Read, resource: Val(path), os_code: None,
+        cause: Val("path is outside the granted FS.Read root"),
+    })
+}
+
+fn scope_relative(path: host_path.OSPath, requested: String) -> String IOError! {
+    cursor := host_path.components(path)
+    normalized := [U8]{}
+    loop {
+        part :: host_path.next(path, &cursor) ?? break
+        if part.kind != .CurDir {
+            if part.kind != .Normal -> return Err(scope_denied(requested))
+            if normalized.len() > 0 -> &normalized.push(host_path.main_separator(path.platform))
+            loop i in part.span.start..<part.span.end -> &normalized.push(path.encoded[i])
+        }
+    }
+    if normalized.len() == 0 -> return Err(scope_denied(requested))
+    Ok(String.from_bytes(normalized) ?? panic("UTF-8 relative path components"))
+}
+
+fn scoped_read(scope: FileScope, path: String) -[FS.Read]> String IOError! {
+    file_fault("FS.Read", .Read, path)
+    platform :: file_path_platform()
+    requested :: host_path.from_text(path, platform)
+    absolute :: host_path.is_absolute(requested)
+    roots :: core.files.__scope_roots(scope)
+    last := scope_denied(path)
+    loop index in 0..<roots.len() {
+        relative := Val(requested)
+        if absolute {
+            relative = None
+            if roots[index].absolute {
+                root :: host_path.OSPath{encoded: roots[index].encoded, platform: platform}
+                if host_path.strip_prefix_span(requested, root) == .Val(extent) {
+                    relative = Val(host_path.owned_span(requested, extent))
+                }
+            }
+        }
+        if relative == .Val(selected) {
+            relative_text :: scope_relative(selected, path)
+            if core.files.__scope_read_at(scope, index, relative_text, path) == {
+                .Err(error) -> last = error
+                .Ok(bytes) -> {
+                    text :: String.from_bytes(bytes) ?? return Err(io_err("read", path, file_utf8_error(bytes)))
+                    return Ok(text)
+                }
+            }
+        }
+    }
+    Err(last)
+}
+
+// std::str::Utf8Error's exact Display text; scoped reads used from_utf8,
+// unlike whole-file reads, whose read_to_string error has a fixed cause.
+fn file_utf8_error(bytes: [U8]) -> String Never! {
+    at := 0
+    loop at < bytes.len() {
+        lead :: Int.from_u8(bytes[at])
+        width := if lead < 128 -> 1 else -> 0
+        low := 128
+        high := 191
+        if lead >= 194 && lead <= 223 -> width = 2
+        if lead >= 224 && lead <= 239 {
+            width = 3
+            if lead == 224 -> low = 160
+            if lead == 237 -> high = 159
+        }
+        if lead >= 240 && lead <= 244 {
+            width = 4
+            if lead == 240 -> low = 144
+            if lead == 244 -> high = 143
+        }
+        if width == 0 -> return "invalid utf-8 sequence of 1 bytes from index {at}"
+        loop part in 1..<width {
+            if at + part >= bytes.len() -> return "incomplete utf-8 byte sequence from index {at}"
+            byte :: Int.from_u8(bytes[at + part])
+            valid :: if part == 1 -> byte >= low && byte <= high else -> byte >= 128 && byte <= 191
+            if !valid -> return "invalid utf-8 sequence of {part} bytes from index {at}"
+        }
+        at += width
+    }
+    panic("UTF-8 error requested for valid bytes")
+}
+
+#Test("scoped read UTF-8 causes retain Rust offset and invalid-length text") {
+    assert_eq(file_utf8_error([U8]{65, 255}), "invalid utf-8 sequence of 1 bytes from index 1")
+    assert_eq(file_utf8_error([U8]{226, 130, 65}), "invalid utf-8 sequence of 2 bytes from index 0")
+    assert_eq(file_utf8_error([U8]{240, 144, 128}), "incomplete utf-8 byte sequence from index 0")
+}
+
+#Test("scoped lexical policy rejects parents and empty names before OS work") {
+    unix :: host_path.PathPlatform.Unix
+    assert_eq(scope_relative(host_path.from_text("./a//./b", unix), "x") ?? panic("normal path"), "a/b")
+    if scope_relative(host_path.from_text("a/../b", unix), "x") == { .Err(_) -> {} .Ok(_) -> assert(false) }
+    if scope_relative(host_path.from_text(".", unix), "x") == { .Err(_) -> {} .Ok(_) -> assert(false) }
 }
