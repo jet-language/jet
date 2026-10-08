@@ -95,6 +95,10 @@ mod io_line_stream {
                 let (text, cause) = jet_terminal8_read_until(delimiter);
                 tuple(vec![("text", CtValue::Str(text)), ("cause", optional(cause))])
             }
+            ("__terminal8_take", [CtValue::Int(n)]) => {
+                let (bytes, cause) = jet_terminal8_take(*n);
+                tuple(vec![("bytes", CtValue::Bytes(bytes)), ("cause", optional(cause))])
+            }
             ("__terminal8_env", [CtValue::Str(name)]) => optional(jet_terminal8_env(name)),
             ("__terminal8_env_has", [CtValue::Str(name)]) => CtValue::Bool(jet_terminal8_env_has(name)),
             ("__terminal8_color_mode", []) => CtValue::Int(jet_terminal8_color_mode()),

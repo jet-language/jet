@@ -144,6 +144,14 @@ pub fn read_until(delimiter: String) -[IO, Time.Wait]> String IOError! {
     Ok(result.text)
 }
 
+fn __take_bytes(n: Int) -[IO, Time.Wait]> [U8] IOError! {
+    if n < 0 -> return Err(terminal_other(.Read, Val("stdin"), "negative take"))
+    terminal_read_preflight()
+    result :: core.term.__terminal8_take(n)
+    if result.cause != None -> return Err(terminal_other(.Read, Val("stdin"), result.cause ?? ""))
+    Ok(result.bytes)
+}
+
 
 pub fn binread(path: String) -[FS, IO, Time.Wait]> [U8] IOError! {
     core.files.read_bytes(path)

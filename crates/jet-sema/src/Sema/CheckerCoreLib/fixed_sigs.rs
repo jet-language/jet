@@ -1411,6 +1411,7 @@ fn core_fixed_sig_impl(
         ("core.term", "__terminal8_stty") => Some((vec![], Some(Type::Option(Box::new(Type::Tuple(vec![("w".into(), Box::new(Type::Int)), ("h".into(), Box::new(Type::Int))])))))),
         ("core.term", "__terminal8_line") => Some((vec![], Some(Type::Tuple(vec![("eof".into(), Box::new(Type::Bool)), ("line".into(), Box::new(Type::String)), ("cause".into(), Box::new(Type::Option(Box::new(Type::String))))])))),
         ("core.term", "__terminal8_read_all" | "__terminal8_read_until") => Some((if name == "__terminal8_read_until" { vec![(read, Type::String)] } else { vec![] }, Some(Type::Tuple(vec![("text".into(), Box::new(Type::String)), ("cause".into(), Box::new(Type::Option(Box::new(Type::String))))])))),
+        ("core.term", "__terminal8_take") => Some((vec![(read, Type::Int)], Some(Type::Tuple(vec![("bytes".into(), Box::new(Type::List(Box::new(u8_ty())))), ("cause".into(), Box::new(Type::Option(Box::new(Type::String))))])))),
         ("core.term", "__terminal8_key_bytes") => Some((vec![], Some(Type::Tuple(vec![("bytes".into(), Box::new(Type::List(Box::new(u8_ty())))), ("platform".into(), Box::new(Type::Int))])))),
         ("core.files", "__walk_context") => Some((vec![(read, Type::String), (read, Type::String), (read, Type::Bool)], Some(Type::Int))),
         ("core.files", "__walk_close" | "__walk_matcher_new") => Some((vec![(read, Type::Int)], Some(unit_ty()))),
