@@ -844,6 +844,14 @@ fn run() {
     if !fx_report("implicit-ok", fx_implicit_ok()) -> clean = false
     if !fx_report("closures", fx_closures()) -> clean = false
     if !fx_report_runtime("shared-guards", fx_shared_guards()) -> clean = false
+    if !fx_report_runtime("stm-scope", fx_stm_normal()) -> clean = false
+    if !fx_report_runtime("stm-return", fx_stm_return()) -> clean = false
+    if !fx_report_runtime("stm-callbacks", fx_stm_callbacks()) -> clean = false
+    if !fx_report_runtime("stm-callback-poll", fx_stm_callback_poll()) -> clean = false
+    if !fx_stm_scope_checks() {
+        print("issue stm-scope: normal commit / early rollback ownership checks failed")
+        clean = false
+    }
     if !fx_report("sets", fx_sets()) -> clean = false
     if !fx_report("queues", fx_queues()) -> clean = false
     if !fx_report("priority-queues", fx_priority_queues()) -> clean = false

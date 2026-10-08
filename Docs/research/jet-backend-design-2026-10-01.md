@@ -1658,5 +1658,23 @@ borrowed payload as a second owner.
 list mutation through an addressable dereference, moving an edit token out of
 its local, and dropping a Shared owner while a read guard still retains it.
 Its runtime image requires the Jet-authored Shared guard exports; generated
-Rust route metadata alone does not provide them. This does not establish
-Shared transaction or Condition-wait support.
+Rust route metadata alone does not provide them.
+
+### Shared transaction scope ownership
+
+`Stm` is a non-clonable opaque state owned by the Jet runtime.
+`Global("stm")` calls `jet_rt_native_stm_begin`; an ordinary owned Drop calls
+`jet_rt_native_stm_rollback`. A named Transaction `ScopeExit` resolves exactly
+one generated Stm local, calls `jet_rt_native_stm_commit`, then clears its
+slot without another Drop. Unnamed `#Transact` scopes retain their native hook
+box behavior. Early return keeps the checked MIR's existing `MovePlace` and
+Drop rollback path. Liveness accounts for the named scope exit's implicit
+use, so a body branch cannot lose the owner.
+
+Shared read/edit `_txn` calls reuse the synchronous callback adapter over the
+provider's staged payload: `(shared, state, env, invoke, out) -> Unit`.
+The callback executes once and is not retained or replayed by commit.
+`Tests/Fixtures/SharedTransactions.jet` covers multi-block normal exit, early
+return, missing/ambiguous scope locals, and edit-then-read of an immediate
+stage. These images require the Jet-authored STM provider; source fixtures do
+not establish runtime admission. Condition-wait support is independent.
