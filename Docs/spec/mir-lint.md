@@ -75,6 +75,19 @@ their own registrations. Propagation cleanup does not introduce another poll:
 a second panic after any delivered stop is fatal in the runtime. Legality
 rejects a stop edge that reuses a consuming call's moved input or deferred thunk.
 
+Every compiler-generated propagation cleanup action has an explicit
+`MIRScopeKind.StopCleanup` owner. It is not a user `Shield`: native entry reads
+the actual raw `jet_rt_session_status`, passes that delivered kind to
+`jet_rt_session_cleanup_enter`, and holds the returned opaque flags token.
+`jet_rt_session_cleanup_leave` always restores that exact token, including
+zero, without clearing or taking a stop record. Only the genuine old kind is
+masked; entry with zero masks nothing, so the first new stop remains visible.
+Each action enters separately, allowing a later action to capture the current
+delivered kind. Runtime task/root provenance is never inferred by the compiler.
+Legality requires one static entry, matched LIFO leaves on all live exits, and
+no recursive poll within that owner. Both interpreters and Rust emission reject
+this native-only scope rather than treating it as an inert lexical scope.
+
 ## Type compatibility
 
 The lint compares types with one relation, *compatible*. Each side is first

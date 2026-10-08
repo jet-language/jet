@@ -3564,6 +3564,8 @@ pub enum MirScopeKind {
     Impure,
     Reactive,
     Shield,
+    /// Compiler-owned cleanup of an already delivered stop; not a user Shield.
+    StopCleanup,
     Region,
     Policy,
     TaskGroup,
@@ -8910,6 +8912,83 @@ fn validate_stop_points(
     }
     if stopped {
         validate_stop_shields(function, blocks, value_types, place_rows, prelude_rows)?;
+    }
+    validate_stop_cleanup_scopes(function, blocks)?;
+    Ok(())
+}
+
+/// StopCleanup is a typed, LIFO owner on a stop edge, not a cancellation
+/// mask. Every path restores its token before leaving the cleanup graph.
+fn validate_stop_cleanup_scopes(
+    function: &MirFunction,
+    blocks: &HashMap<MirBlockId, usize>,
+) -> Result<(), MirValidationError> {
+    let invalid = |message: &str| MirValidationError::InvalidOperation {
+        function: function.id, message: message.to_string(),
+    };
+    let mut entries: HashMap<MirScopeId, usize> = function.scopes.iter()
+        .filter(|scope| scope.kind == MirScopeKind::StopCleanup)
+        .map(|scope| (scope.id, 0)).collect();
+    if entries.is_empty() { return Ok(()); }
+    for block in &function.blocks {
+        for instruction in &block.instructions {
+            if let MirOperation::ScopeEnter { scope, test_member } = &instruction.operation {
+                if let Some(count) = entries.get_mut(scope) {
+                    *count += 1;
+                    if *count != 1 || test_member.is_some() {
+                        return Err(invalid("MIR StopCleanup must have one compiler-owned entry"));
+                    }
+                }
+            }
+        }
+    }
+    if entries.values().any(|count| *count != 1) {
+        return Err(invalid("MIR StopCleanup must have one compiler-owned entry"));
+    }
+    let mut state_at = HashMap::from([(function.entry, (false, Vec::<MirScopeId>::new()))]);
+    let mut pending = vec![function.entry];
+    while let Some(id) = pending.pop() {
+        let Some(&index) = blocks.get(&id) else { continue };
+        let block = &function.blocks[index];
+        let (unwinding, mut scopes) = state_at[&id].clone();
+        for instruction in &block.instructions {
+            match &instruction.operation {
+                MirOperation::ScopeEnter { scope, .. } if entries.contains_key(scope) => {
+                    if !unwinding {
+                        return Err(invalid("MIR StopCleanup appears outside a stop edge"));
+                    }
+                    scopes.push(*scope);
+                }
+                MirOperation::ScopeExit { scope } if entries.contains_key(scope) => {
+                    if scopes.pop() != Some(*scope) {
+                        return Err(invalid("MIR StopCleanup leave does not match its active token"));
+                    }
+                }
+                _ => {}
+            }
+        }
+        if !scopes.is_empty() {
+            match block.terminator {
+                MirTerminator::Poll { .. } =>
+                    return Err(invalid("MIR StopCleanup recursively polls")),
+                MirTerminator::Stopped | MirTerminator::Return { .. } | MirTerminator::Yield { .. } =>
+                    return Err(invalid("MIR exit leaves a StopCleanup token open")),
+                _ => {}
+            }
+        }
+        for target in block.terminator.targets() {
+            let stopped = unwinding || matches!(&block.terminator,
+                MirTerminator::Poll { stop, .. } if *stop == target);
+            match state_at.get(&target) {
+                Some((old_stopped, old_scopes)) if *old_stopped != stopped || old_scopes != &scopes =>
+                    return Err(invalid("MIR StopCleanup state differs between paths into a block")),
+                Some(_) => {}
+                None => {
+                    state_at.insert(target, (stopped, scopes.clone()));
+                    pending.push(target);
+                }
+            }
+        }
     }
     Ok(())
 }

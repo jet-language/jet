@@ -372,7 +372,76 @@ fn mir_pass_validate_stop_points(function: MIRFunction, definitions: MIRPassDefi
             else -> {}
         }
     }
-    if stopped -> return mir_pass_validate_stop_shields(function, definitions, tables)
+    if stopped {
+        failure :: mir_pass_validate_stop_shields(function, definitions, tables)
+        if failure != None -> return failure
+    }
+    mir_pass_validate_stop_cleanup_scopes(function, dominance)
+}
+
+struct MIRPassStopCleanupState {
+    pub unwinding: Bool
+    pub scopes: [U64]
+}
+
+// StopCleanup restores a genuine runtime token, independently of Shield depth.
+// Rust: MIR.rs::validate_stop_cleanup_scopes.
+fn mir_pass_validate_stop_cleanup_scopes(function: MIRFunction, dominance: MIRPassDominance) -> String? {
+    entries := [U64:Int]{}
+    loop scope in function.scopes {
+        if scope.kind == MIRScopeKind.StopCleanup -> &entries.add(scope.id.value, 0).drop("scope identities are unique")
+    }
+    if entries.len() == 0 -> return None
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            if instruction.operation == .ScopeEnter(scope, member) && entries.get(scope.value) == .Val(count) {
+                if count != 0 || member != None -> return Val("MIR StopCleanup must have one compiler-owned entry")
+                _ := &entries.add(scope.value, 1)
+            }
+        }
+    }
+    loop scope in function.scopes {
+        if scope.kind == MIRScopeKind.StopCleanup && entries.get(scope.id.value) != Val(1) -> return Val("MIR StopCleanup must have one compiler-owned entry")
+    }
+    state_at := [U64:MIRPassStopCleanupState]{}
+    &state_at.add(function.entry.value, MIRPassStopCleanupState{unwinding: false, scopes: [U64]{}}).drop("the entry block is seeded once")
+    pending := [MIRBlockID]{function.entry}
+    loop pending.len() > 0 {
+        id :: &pending.pop() ?? function.entry
+        position :: dominance.positions.get(id.value) ?? next
+        block :: function.blocks[position]
+        state :: state_at.get(id.value) ?? MIRPassStopCleanupState{unwinding: false, scopes: [U64]{}}
+        scopes := ~state.scopes
+        loop instruction in block.instructions {
+            if instruction.operation == {
+                .ScopeEnter(scope, _) -> {
+                    if entries.get(scope.value) != None {
+                        if !state.unwinding -> return Val("MIR StopCleanup appears outside a stop edge")
+                        &scopes.push(scope.value)
+                    }
+                }
+                .ScopeExit(scope) -> {
+                    if entries.get(scope.value) != None && &scopes.pop() != Val(scope.value) -> return Val("MIR StopCleanup leave does not match its active token")
+                }
+                else -> {}
+            }
+        }
+        if scopes.len() > 0 && block.terminator == {
+            .Poll(_, _, _) -> return Val("MIR StopCleanup recursively polls")
+            .Stopped | .Return(_) | .Yield(_, _) -> return Val("MIR exit leaves a StopCleanup token open")
+            else -> {}
+        }
+        loop target in mir_terminator_targets(block.terminator) {
+            unwinding := state.unwinding
+            if block.terminator == .Poll(_, _, stop) && target == stop -> unwinding = true
+            if state_at.get(target.value) == .Val(seen) {
+                if seen.unwinding != unwinding || seen.scopes != scopes -> return Val("MIR StopCleanup state differs between paths into a block")
+            } else {
+                &state_at.add(target.value, MIRPassStopCleanupState{unwinding: unwinding, scopes: ~scopes}).drop("checked absent above")
+                &pending.push(target)
+            }
+        }
+    }
     None
 }
 

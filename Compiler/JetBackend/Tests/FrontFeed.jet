@@ -4,7 +4,7 @@
 use core.files as ff_files
 use jet_driver.[JetDriverCompileMode, jet_driver_present_diagnostics]
 use jet_cli.[jet_cli_compile_file]
-use jet_foundation.[DIAGNOSTIC_ERROR, Effect, Span, MIRAccess, MIRBinaryDispatch, MIRBinaryOp, MIRBinaryOverflow, MIRCallArg, MIRCallFallibility, MIRCallSignature, MIRCallee, MIRConversion, MIRCoreCallID, MIRDimension, MIRDimensionAxis, MIRIndexKind, MIRPanicContext, MIRPanicLoc, MIRPanicLocal, MIRPlace, MIRPlaceBase, MIRPreludeABI, MIRPreludeCall, MIRPreludeCallID, MIRPreludeFamily, MIRProgram, MIRFunctionID, MIRPlaceID, MIRBlockID, MIRInstruction, MIROperation, MIROpID, MIRProjection, MIRRequireKind, MIRScopeID, MIRSemanticOp, MIRSourceFileID, MIRSymbol, MIRTagMarker, MIRType, MIRTypeKind, MIRUnaryOp, MIRValueID, MIRValueFact, mir_operation_can_stop, mir_operation_can_panic, mir_type_from_kind, mir_terminator_targets]
+use jet_foundation.[DIAGNOSTIC_ERROR, Effect, Span, MIRAccess, MIRBinaryDispatch, MIRBinaryOp, MIRBinaryOverflow, MIRCallArg, MIRCallFallibility, MIRCallSignature, MIRCallee, MIRConversion, MIRCoreCallID, MIRDimension, MIRDimensionAxis, MIRIndexKind, MIRPanicContext, MIRPanicLoc, MIRPanicLocal, MIRPlace, MIRPlaceBase, MIRPreludeABI, MIRPreludeCall, MIRPreludeCallID, MIRPreludeFamily, MIRProgram, MIRFunctionID, MIRPlaceID, MIRBlockID, MIRInstruction, MIROperation, MIROpID, MIRProjection, MIRRequireKind, MIRScopeID, MIRScopeKind, MIRSemanticOp, MIRSourceFileID, MIRSymbol, MIRTagMarker, MIRType, MIRTypeKind, MIRUnaryOp, MIRValueID, MIRValueFact, mir_operation_can_stop, mir_operation_can_panic, mir_type_from_kind, mir_terminator_targets]
 
 fn ff_native(name: String, program: MIRProgram, entry_id: MIRFunctionID, pack: GLPack) -> String {
     lowered :: lir_lower_entry(program, entry_id)
@@ -186,6 +186,13 @@ fn ff_cleanup_program(program: MIRProgram) {
                 pending := [MIRBlockID]{stop}
                 seen := [U64:Bool]{}
                 calls := 0
+                cleanup_scopes := [U64:Bool]{}
+                loop scope in function.scopes {
+                    if scope.kind == MIRScopeKind.StopCleanup -> cleanup_scopes[scope.id.value] = true
+                }
+                entries := 0
+                leaves := 0
+                cleanup_exit := MIROpID?{None}
                 loop pending.len() > 0 {
                     id :: &pending.pop() ?? panic("cleanup witness worklist underflow")
                     if seen.get(id.value) != None -> next
@@ -195,6 +202,18 @@ fn ff_cleanup_program(program: MIRProgram) {
                         if successor.id != id -> next
                         found = true
                         loop instruction in successor.instructions {
+                            if instruction.operation == {
+                                .ScopeEnter(scope, _) -> {
+                                    if cleanup_scopes.get(scope.value) != None -> entries += 1
+                                }
+                                .ScopeExit(scope) -> {
+                                    if cleanup_scopes.get(scope.value) != None {
+                                        leaves += 1
+                                        cleanup_exit = Val(instruction.id)
+                                    }
+                                }
+                                else -> {}
+                            }
                             place :: ff_cleanup_place(instruction.operation, moved)
                             if place == first -> panic("first cleanup was replayed")
                             if place == remaining -> calls += 1
@@ -205,9 +224,21 @@ fn ff_cleanup_program(program: MIRProgram) {
                     if !found -> panic("cleanup witness stop edge names a missing block")
                 }
                 if calls != 1 -> panic("remaining cleanup must run exactly once, found {calls}")
+                if entries == 0 || entries != leaves -> panic("propagation cleanup lacks balanced typed StopCleanup owners")
                 definitions :: mir_pass_definitions(function)
                 dominance :: mir_pass_legality_dominators(function)
                 if mir_pass_validate_stop_points(function, definitions, dominance, tables) != None -> panic("clean cleanup witness failed native Legality")
+                missing_leave := ~function
+                exit_id :: cleanup_exit ?? panic("cleanup witness has no typed leave")
+                loop index in 0..<missing_leave.blocks.len() {
+                    kept := [MIRInstruction]{}
+                    loop instruction in missing_leave.blocks[index].instructions {
+                        if instruction.id != exit_id -> &kept.push(instruction)
+                    }
+                    missing_leave.blocks[index].instructions = kept
+                }
+                open_failure :: mir_pass_validate_stop_points(missing_leave, mir_pass_definitions(missing_leave), mir_pass_legality_dominators(missing_leave), tables)
+                if open_failure != Val("MIR exit leaves a StopCleanup token open") -> panic("native Legality accepted missing StopCleanup leave: {open_failure}")
                 duplicate := last
                 duplicate.id = MIROpID{value: maximum + U64{1}}
                 if last.result == .Val(old) {

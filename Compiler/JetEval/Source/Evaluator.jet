@@ -9947,7 +9947,7 @@ fn jet_eval_operation(machine: &JetEvalMachine, frame_index: Int, operation: MIR
                 jet_eval_compiler_fail(&machine, span, "MIR scope enter references an unavailable scope")
                 return None
             }
-            if test_member != None || scope_row.deadline != None || scope_row.kind == MIRScopeKind.Shield {
+            if test_member != None || scope_row.deadline != None || scope_row.kind == MIRScopeKind.Shield || scope_row.kind == MIRScopeKind.StopCleanup {
                 jet_eval_unsupported(&machine, span, "MIR scope control requires runtime scheduler or test state")
                 return None
             }
@@ -9966,7 +9966,7 @@ fn jet_eval_operation(machine: &JetEvalMachine, frame_index: Int, operation: MIR
                 jet_eval_compiler_fail(&machine, span, "MIR scope exit references an unavailable scope")
                 return None
             }
-            if scope_row.deadline != None || scope_row.kind == MIRScopeKind.Shield {
+            if scope_row.deadline != None || scope_row.kind == MIRScopeKind.Shield || scope_row.kind == MIRScopeKind.StopCleanup {
                 jet_eval_unsupported(&machine, span, "MIR scope control requires runtime scheduler or test state")
                 return None
             }

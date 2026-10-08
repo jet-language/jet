@@ -1461,14 +1461,29 @@ fn jet_codegen_emit_drop_cleanup(builder: &JetCodegenBuilder, program: JetCodege
     jet_codegen_switch_block(&builder, program, next_block)
 }
 
+// This owner is deliberately not a lexical cleanup frame: the consumed action
+// and its arguments must not be registered again on a sibling stop path.
+fn jet_codegen_begin_stop_cleanup(builder: &JetCodegenBuilder, program: JetCodegenProgram) -> MIRScopeID Never! {
+    span :: builder.current_span
+    identity :: jet_codegen_identity(&builder, program, "scope", span, "StopCleanup", "")
+    scope :: MIRScopeID{value: stable_id("mir-scope", identity)}
+    &builder.scopes.push(MIRScope{id: scope, kind: MIRScopeKind.StopCleanup, span: span, name: None, deadline: None, facts: [MIRScopeFact]{}})
+    _ := jet_codegen_emit(&builder, program, span, None, MIROperation.ScopeEnter{scope: scope, test_member: None})
+    scope
+}
+
 fn jet_codegen_emit_cleanup_action(builder: &JetCodegenBuilder, program: JetCodegenProgram, action: JetCodegenCleanupAction) Never! {
     if !jet_codegen_current_is_open(builder, program) -> return
+    cleanup_scope :: if builder.stop_cleanup_active -> Val(jet_codegen_begin_stop_cleanup(&builder, program)) else -> MIRScopeID?{None}
     if action == {
         .DeferredCall(thunk) -> {
             current_span := builder.current_span
             _ := jet_codegen_emit(&builder, program, current_span, None, MIROperation.IndirectCall{callee: thunk, args: [MIRCallArg]{}, type_args: [MIRType]{}})
         }
         .DropPlace(record) -> jet_codegen_emit_drop_cleanup(&builder, program, record)
+    }
+    if cleanup_scope == .Val(scope) && jet_codegen_current_is_open(builder, program) {
+        _ := jet_codegen_emit(&builder, program, builder.current_span, None, MIROperation.ScopeExit{scope: scope})
     }
 }
 
@@ -1827,6 +1842,7 @@ fn jet_codegen_enter_scope(builder: &JetCodegenBuilder, program: JetCodegenProgr
         .Impure -> "Impure"
         .Reactive -> "Reactive"
         .Shield -> "Shield"
+        .StopCleanup -> "StopCleanup"
         .Region -> "Region"
         .Policy -> "Policy"
         .TaskGroup -> "TaskGroup"

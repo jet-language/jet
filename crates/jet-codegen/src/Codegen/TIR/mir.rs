@@ -7203,6 +7203,26 @@ impl<'a> LowerCtx<'a> {
         result
     }
 
+    /// A typed owner without a new lexical frame: the current action has
+    /// already been consumed from the frame's pending cleanup suffix.
+    fn begin_stop_cleanup(&mut self) -> Result<MirScopeId, LowerError> {
+        let span = self.span();
+        let identity = self.reserve_identity("scope", span, "StopCleanup", "")?;
+        let scope = MirScopeId(stable_id("mir-scope", &identity));
+        self.scopes.push(MirScope {
+            id: scope,
+            kind: MirScopeKind::StopCleanup,
+            span,
+            name: None,
+            deadline: None,
+            facts: Default::default(),
+        });
+        self.emit("stop.cleanup.enter", None, MirOperation::ScopeEnter {
+            scope, test_member: None,
+        })?;
+        Ok(scope)
+    }
+
     /// Lower one cleanup action into the current block. On a stop path a
     /// plain release is skipped: the process is ending anyway.
     fn emit_cleanup_action(
@@ -7212,6 +7232,17 @@ impl<'a> LowerCtx<'a> {
     ) -> Result<(), LowerError> {
         let masked = self.stop_cleanup_active;
         self.stop_cleanup_active = masked || stop_path;
+        let cleanup_scope = if self.stop_cleanup_active {
+            match self.begin_stop_cleanup() {
+                Ok(scope) => Some(scope),
+                Err(error) => {
+                    self.stop_cleanup_active = masked;
+                    return Err(error);
+                }
+            }
+        } else {
+            None
+        };
         let result = (|| {
         match action {
             DeferredCleanup::Close(index) => self.emit_deferred_close(index)?,
@@ -7252,6 +7283,12 @@ impl<'a> LowerCtx<'a> {
         }
             Ok(())
         })();
+        let result = result.and_then(|()| {
+            if let Some(scope) = cleanup_scope.filter(|_| !self.is_terminated()) {
+                self.emit("stop.cleanup.exit", None, MirOperation::ScopeExit { scope })?;
+            }
+            Ok(())
+        });
         self.stop_cleanup_active = masked;
         result
     }

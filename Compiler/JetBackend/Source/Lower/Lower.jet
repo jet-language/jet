@@ -230,6 +230,12 @@ struct LowerContext {
     pub live: [[Int]]
 }
 
+// A real cleanup entry, not a Shield or an inferred task/root role. The saved
+// flags are opaque; zero is valid and leave always restores the exact token.
+struct LowerStopCleanupScope {
+    pub saved_flags: LIRValueID
+}
+
 // The function being built.
 struct LowerFunction {
     pub name: String
@@ -240,6 +246,7 @@ struct LowerFunction {
     pub params: [LIRValueID?]
     pub current: [LIRValueID?]
     pub mir_block: MIRBlockID
+    pub cleanup_scopes: [U64:LowerStopCleanupScope]
     pub open: LIRBlockID
     pub open_params: [LIRValueID]
     pub failed: Bool
@@ -882,6 +889,18 @@ fn lower_noreturn_call(m: &LowerModule, f: &LowerFunction, symbol: String, args:
     lower_seal(&f, LIRTerminator.Unreachable)
 }
 
+fn lower_stop_cleanup_enter(m: &LowerModule, f: &LowerFunction) -> LowerStopCleanupScope Never! {
+    delivered :: lower_word(&f)
+    lower_call_runtime(&m, &f, "jet_rt_session_status", [LIRValueID]{}, Val(delivered))
+    saved :: lower_word(&f)
+    lower_call_runtime(&m, &f, "jet_rt_session_cleanup_enter", [LIRValueID]{delivered}, Val(saved))
+    LowerStopCleanupScope{saved_flags: saved}
+}
+
+fn lower_stop_cleanup_leave(m: &LowerModule, f: &LowerFunction, scope: LowerStopCleanupScope) Never! {
+    lower_call_runtime(&m, &f, "jet_rt_session_cleanup_leave", [LIRValueID]{scope.saved_flags}, None)
+}
+
 // Branch to a panic when `failed` holds; lowering continues on the other edge.
 fn lower_check(m: &LowerModule, f: &LowerFunction, failed: LIRValueID, symbol: String) Never! {
     panic_block :: lower_new_block(&f)
@@ -904,6 +923,7 @@ fn lower_new_function(id: LIRFunctionID, name: String, signature: LIRSignatureID
         params: [LIRValueID?]{},
         current: [LIRValueID?]{},
         mir_block: entry,
+        cleanup_scopes: [U64:LowerStopCleanupScope]{},
         open: LIRBlockID{value: 0},
         open_params: [LIRValueID]{},
         failed: false,
@@ -1828,6 +1848,17 @@ fn lower_scope(c: LowerContext, m: &LowerModule, f: &LowerFunction, scope: MIRSc
             if row.kind == {
                 .Unsafe | .Impure | .AssumeDeterministic | .Layout | .DebugOnly | .Live | .Region | .Authority | .Reactive | .TaskGroup | .Transaction -> return
                 .Shield -> return lower_call_runtime(&m, &f, if enter -> "jet_rt_session_shield_enter" else -> "jet_rt_session_shield_leave", [LIRValueID]{}, None)
+                .StopCleanup -> {
+                    if enter {
+                        if f.cleanup_scopes.get(scope.value) != None -> return lower_fail(&m, &f, "StopCleanup scope {scope.value} has more than one entry")
+                        token :: lower_stop_cleanup_enter(&m, &f)
+                        _ := &f.cleanup_scopes.add(scope.value, token)
+                    } else {
+                        token :: f.cleanup_scopes.get(scope.value) ?? return lower_fail(&m, &f, "StopCleanup scope {scope.value} has no entry")
+                        lower_stop_cleanup_leave(&m, &f, token)
+                    }
+                    return
+                }
                 else -> return lower_fail(&m, &f, "scope {label} needs runtime support that O0 does not lower yet")
             }
         }

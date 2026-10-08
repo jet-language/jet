@@ -176,7 +176,7 @@ fn run() { trap(I64{9223372036854775807}) }
 
 #[test]
 fn normal_cleanup_stop_consumes_first_and_runs_remaining_once() {
-    use jet_foundation::MIR::{MirAccess, MirOpId, MirValueId};
+    use jet_foundation::MIR::{MirAccess, MirOpId, MirScopeKind, MirValueId};
     use std::collections::{HashMap, HashSet};
     jet::run_compiler_work(|| {
         let scratch = common::Scratch::new("mir_cleanup_stop");
@@ -219,10 +219,20 @@ fn normal_cleanup_stop_consumes_first_and_runs_remaining_once() {
         let mut pending = vec![stop];
         let mut seen = HashSet::new();
         let mut remaining_calls = 0;
+        let cleanup_scopes: HashSet<_> = function.scopes.iter()
+            .filter(|scope| scope.kind == MirScopeKind::StopCleanup)
+            .map(|scope| scope.id).collect();
+        let mut cleanup_entries = 0;
+        let mut cleanup_leaves = 0;
         while let Some(id) = pending.pop() {
             if !seen.insert(id) { continue; }
             let block = function.blocks.iter().find(|block| block.id == id).unwrap();
             for instruction in &block.instructions {
+                match instruction.operation {
+                    MirOperation::ScopeEnter { scope, .. } if cleanup_scopes.contains(&scope) => cleanup_entries += 1,
+                    MirOperation::ScopeExit { scope } if cleanup_scopes.contains(&scope) => cleanup_leaves += 1,
+                    _ => {}
+                }
                 match cleanup_place(&instruction.operation) {
                     Some(place) if place == first => panic!("first cleanup was replayed"),
                     Some(place) if place == remaining => remaining_calls += 1,
@@ -234,6 +244,16 @@ fn normal_cleanup_stop_consumes_first_and_runs_remaining_once() {
             pending.extend(block.terminator.targets());
         }
         assert_eq!(remaining_calls, 1, "stop edge must run remaining cleanup exactly once");
+        assert!(cleanup_entries > 0, "stop cleanup lacks its typed runtime owner");
+        assert_eq!(cleanup_entries, cleanup_leaves, "stop cleanup must restore every token");
+        let cleanup_exit = function.blocks.iter().find_map(|block|
+            block.instructions.iter().position(|instruction| matches!(instruction.operation,
+                MirOperation::ScopeExit { scope } if cleanup_scopes.contains(&scope)))
+                .map(|index| (block.id, index))).unwrap();
+        let function_id = function.id;
+        let mut missing_leave_function = function.clone();
+        missing_leave_function.blocks.iter_mut().find(|row| row.id == cleanup_exit.0).unwrap()
+            .instructions.remove(cleanup_exit.1);
         duplicate.id = MirOpId(function.blocks.iter().flat_map(|block| &block.instructions)
             .map(|instruction| instruction.id.0).max().unwrap() + 1);
         if let Some(old) = duplicate.result {
@@ -247,6 +267,10 @@ fn normal_cleanup_stop_consumes_first_and_runs_remaining_once() {
             .instructions.insert(0, duplicate);
         let error = mir.validate().expect_err("verifier accepted replay of first cleanup");
         assert!(format!("{error:?}").contains("already-consumed cleanup input"), "{error:?}");
+        let mut missing_leave = mir.clone();
+        *missing_leave.functions.iter_mut().find(|row| row.id == function_id).unwrap() = missing_leave_function;
+        let error = missing_leave.validate().expect_err("verifier accepted an open StopCleanup token");
+        assert!(format!("{error:?}").contains("StopCleanup"), "{error:?}");
     });
 }
 
