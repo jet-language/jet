@@ -513,6 +513,10 @@ pub(crate) struct Cx {
     /// The evaluated value behind each comptime const, so lowering can hand a
     /// structured literal to every engine instead of the rendered Rust text.
     pub(crate) const_values: HashMap<String, CtValue>,
+    /// Direct nominal fact intrinsics bound by the comptime fragment caller.
+    /// Values use its selected target, not a runtime local or the compiler host.
+    pub(crate) comptime_type_facts: HashMap<String, HashMap<String, CtValue>>,
+    pub(crate) comptime_type_fact_target: Option<jet_foundation::Layout::TargetLayout>,
     pub(crate) type_names: HashSet<String>,
     /// D-SERDE2: source-level names of locally declared imported nominals map to
     /// their canonical bundle identities while lowering the declaring module.
@@ -5821,6 +5825,8 @@ pub(crate) fn build_cx_items(
         const_types: HashMap::new(),
         persist_types: HashMap::new(),
         const_values: HashMap::new(),
+        comptime_type_facts: HashMap::new(),
+        comptime_type_fact_target: None,
         const_ref_keys: HashMap::new(),
         type_names: HashSet::new(),
         const_ref_types: HashMap::new(),
