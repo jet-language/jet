@@ -11,6 +11,9 @@
 // expect-exit inline-asm-import: 70
 // expect-stderr inline-asm-import: "error[E3010]: arithmetic overflow\n"
 // expect-stdout inline-asm-forms: "11\n19\n123\n"
+// expect-stdout inline-asm-exit: ""
+// expect-stderr inline-asm-exit: ""
+// expect-exit inline-asm-exit: 23
 use jet_foundation.[MIRForeignID, MIRForeignABI, MIRForeignLanguage]
 
 fn fx_asm_type(name: String) -> MIRType Never! {
@@ -165,6 +168,20 @@ fn fx_inline_asm_refusals() -> Bool Never! {
 
 fn fx_asm_i64_const(b: &FxBuilder, value: Int) -> MIRValueID Never! {
     fx_copy(&b, fx_asm_type("os_syscall_i64"), MIROperation.Constant{value: MIRConstant.Int{value: value, width: None, spelling: None}})
+}
+
+// exit_group never returns: an epilogue or host-side callback cannot supply the
+// expected exit status. This reaches the exact seven-operand raw syscall leaf.
+fn fx_inline_asm_exit() -> MIRProgram Never! {
+    b := fx_builder()
+    zero :: fx_asm_i64_const(&b, 0)
+    fx_asm_call(&b, "os_syscall_i64", [MIRValueID]{
+        fx_asm_i64_const(&b, 231), fx_asm_i64_const(&b, 23),
+        zero, zero, zero, zero, zero,
+    }, true).drop("exit_group result")
+    fx_block(&b, U64{0}, MIRTerminator.Return{value: None})
+    fx_asm_program([MIRFunction]{fx_function("run", b, fx_unit()),
+        fx_asm_leaf("os_syscall_i64", [String]{"number", "a1", "a2", "a3", "a4", "a5", "a6"}, true)})
 }
 
 fn fx_inline_asm_fixed() -> MIRProgram Never! {
