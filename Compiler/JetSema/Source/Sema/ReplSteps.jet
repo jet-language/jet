@@ -37,7 +37,7 @@ pub fn sema_repl_session_new(graph: SemaRegistrationGraph, modules: ^[SemaGraphM
     loop module_row in modules {
         loop definition in module_row.declarations.type_defs -> &checked_types.push(definition)
     }
-    environment := sema_check_pass_environment(graph, checked_types)
+    environment := sema_check_pass_environment(~graph, checked_types)
     if !sema_scope_environment_enter_probe_module(&environment, root.module_identity, [SemaComptimeBodyValue]{}) {
         return Err(ReplSetupError{message: "REPL root is not in the canonical registration graph"})
     }
