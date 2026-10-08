@@ -1420,6 +1420,9 @@ representation. An unknown root is a language error, not a new effect.
 cannot be granted by an authority, positive effect ceiling, or package budget.
 Memory events such as `Mem.Alloc` and `Mem.Rc` remain visible to diagnostics
 and denial facts; they do not have to be listed in a positive effect ceiling.
+The same exclusion applies to inferred purity: an explicit empty effect row
+`-[]>` admits allocation, heap copies, and panic facts without requesting a
+positive right. Ambient effects such as `IO` still violate that empty ceiling.
 `Mem.Alloc(above: N)` is the parameterized memory-denial spelling. An explicit
 memory or panic denial still rejects a reachable operation (D-EFFTREE1,
 D-PANICROOT1, D-AUTHORITY-MEM1).

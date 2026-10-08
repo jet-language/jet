@@ -63,6 +63,69 @@ fn pure_fn_inferred_interpolation_compiles() {
     );
 }
 
+#[test]
+fn pure_fn_inferred_owned_string_copy_compiles() {
+    let source = r#"
+fn copy(value: String) -> String { return value }
+fn compute(value: String) -[]> String { return copy(value) }
+fn run() { print(compute("text")) }
+"#;
+    let result = jet::compile(source);
+    assert!(
+        result.is_ok(),
+        "deny-only heap copies must be pure: {:?}",
+        result.err()
+    );
+}
+
+#[test]
+fn pure_fn_inferred_panic_compiles() {
+    let source = r#"
+fn stop() -> Int { return panic("stop") }
+fn compute() -[]> Int { return stop() }
+fn run() {}
+"#;
+    let result = jet::compile(source);
+    assert!(
+        result.is_ok(),
+        "deny-only panic facts must be pure: {:?}",
+        result.err()
+    );
+}
+
+#[test]
+fn pure_fn_inferred_interpolation_and_io_is_e3401() {
+    let source = r#"
+fn format(value: Int) -> String {
+    print(value)
+    return "{value}"
+}
+fn compute(value: Int) -[]> String { return format(value) }
+fn run() { print(compute(42)) }
+"#;
+    let diagnostics = jet::compile(source).expect_err("ambient IO must still violate purity");
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert_eq!(diagnostics[0].code, "E3401", "{diagnostics:?}");
+}
+
+#[test]
+fn pure_fn_inferred_interpolation_explicit_memory_denial_is_e0921() {
+    let source = r#"
+fn format(value: Int) -> String { return "{value}" }
+fn compute(value: Int) -[!Mem.Alloc]> String { return format(value) }
+fn run() { print(compute(42)) }
+"#;
+    let diagnostics = jet::compile(source).expect_err("explicit allocation denial must still hold");
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0921"),
+        "expected E0921, got {diagnostics:?}"
+    );
+    assert!(
+        diagnostics.iter().all(|diagnostic| diagnostic.code != "E3401"),
+        "deny-only allocation must not produce an impurity diagnostic: {diagnostics:?}"
+    );
+}
+
 /// Impure call inside `pure fn` fires E3401.
 #[test]
 fn pure_fn_impure_call_is_e3401() {
