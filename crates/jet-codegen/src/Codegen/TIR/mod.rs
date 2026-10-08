@@ -10820,6 +10820,7 @@ fn precise_source_helper(owner: &str, operation: &str) -> Option<&'static str> {
         ("Fraction", "from_owned_parts") => "__fraction_from_owned_parts",
         ("Fraction", "from_int") => "__fraction_from_int",
         ("Fraction", "from_float") => "__fraction_from_float",
+        ("Fraction", "from_decimal") => "__decimal_to_fraction",
         ("Fraction", "add") => "__fraction_add",
         ("Fraction", "sub") => "__fraction_sub",
         ("Fraction", "mul") => "__fraction_mul",
