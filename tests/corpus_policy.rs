@@ -1021,3 +1021,42 @@ fn generated_protocol_override_requires_a_distinct_envelope_shape() {
         .iter()
         .any(|violation| violation.rule == "generated-protocol-override"));
 }
+
+#[test]
+fn package_manifest_snapshots_preserve_canonical_authority_meaning() {
+    let policy = CorpusPolicy::load().unwrap();
+    for (snapshot, expected) in [("base", vec!["FS".to_string()]), ("head", vec!["FS".to_string(), "Net".to_string()])] {
+        let path = format!("Examples/learn/semantic_review/02_authority/{snapshot}.package.jet");
+        let source = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(&path)).unwrap();
+        assert!(policy.evaluate_source(&path, &source).unwrap().is_empty());
+        let facts = jet::Package::PackageFacts::parse(&source, &path).unwrap();
+        assert_eq!(facts.name, "review_authority");
+        assert_eq!(facts.version.as_deref(), Some("0.1.0"));
+        assert_eq!(facts.edition.as_deref(), Some("2026"));
+        assert_eq!(facts.authority.holds.allow, Some(expected));
+    }
+}
+
+#[test]
+fn package_manifest_snapshot_registry_does_not_skip_ordinary_jet_filenames() {
+    let policy = CorpusPolicy::load().unwrap();
+    let path = "Examples/learn/semantic_review/02_authority/ordinary.package.jet";
+    assert!(policy.evaluate_source(path, "fn run() { value :: 1 }").unwrap().is_empty());
+    let error = policy.evaluate_source(path, "fn run() { value: Int = 1 }").unwrap_err();
+    assert!(error.contains("Jet parser rejected corpus source"), "{error}");
+    assert!(error.contains("E0003"), "{error}");
+}
+
+#[test]
+fn package_manifest_snapshots_reject_invalid_manifest_meaning() {
+    let policy = CorpusPolicy::load().unwrap();
+    let path = "Examples/learn/semantic_review/02_authority/base.package.jet";
+    for source in [
+        "name: \"review_authority\"\nunknown_field: true\n",
+        "name: \"review_authority\"\nauthority: { holds: { allow: 42 } }\n",
+        "fn run() { value :: 1 }\n",
+    ] {
+        let error = policy.evaluate_source(path, source).unwrap_err();
+        assert!(error.contains("Package parser rejected corpus snapshot"), "{error}");
+    }
+}

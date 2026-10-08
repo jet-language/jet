@@ -534,7 +534,7 @@ impl CorpusPolicy {
             };
             if row.role == SourceRole::GeneratedOutput
                 || !proof_matches(&row.proof, gate)
-                || !semantic_role(row.role)
+                || (!semantic_role(row.role) && row.profile != "package-manifest")
             {
                 continue;
             }
@@ -592,6 +592,16 @@ impl CorpusPolicy {
                 "inventory:source",
             ));
         };
+        // Named manifest snapshots are explicit registry entries, never a
+        // filename-suffix exception for ordinary Jet programs.
+        if row.profile == "package-manifest" {
+            if row.role != SourceRole::RawProtocol || row.selector.strip_prefix("file:") != Some(path) {
+                return Err(format!("Package snapshot requires an exact raw-protocol source row: {path}"));
+            }
+            jet::Package::PackageFacts::parse(source, path)
+                .map_err(|error| format!("Package parser rejected corpus snapshot `{path}`: {error:?}"))?;
+            return Ok(Vec::new());
+        }
         if !semantic_role(row.role) {
             return Ok(Vec::new());
         }
