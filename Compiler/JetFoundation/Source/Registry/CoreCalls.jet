@@ -175,6 +175,9 @@ fn core_call_effect_for(module_name: String, member: String) -> Effect? {
         module_name == "core.sys" -> Val(Effect.Env)
         module_name == "core.process" && member == "status_ok" -> None
         module_name == "core.process" -> Val(Effect.Exec)
+        module_name == "core.term" && core_call_one_of(member, [String]{
+            "__stdio_fault", "__stdout_terminal", "__stderr_terminal"
+        }) -> None
         module_name == "core.term" -> Val(Effect.IO)
         module_name == "core.db" || module_name == "core.jobs" -> Val(Effect.DB)
         module_name == "core.auth" && core_call_one_of(member, [String]{
