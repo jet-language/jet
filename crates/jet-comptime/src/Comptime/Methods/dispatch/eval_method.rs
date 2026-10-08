@@ -513,6 +513,9 @@ impl<'a> Interp<'a> {
                 // Plot construction/rendering also needs the sema-resolved
                 // row type and declaration metadata. Keep this route beside
                 // the typed table path, before generic Core dispatch.
+                if module == "core.data.plot" && method == "__plot_aggregate_none" {
+                    return Ok(super::super::super::DataPipeline::plot_aggregate_none_value());
+                }
                 if matches!(
                     (module.as_str(), method),
                     (

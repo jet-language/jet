@@ -2795,6 +2795,11 @@ values explicit as zero. The module contract is defined in
 [`Core/data/plot.jet`](../../../Core/data/plot.jet) and exercised by the plot
 corpus under [`tests/conformance/corpus/core/data/plot/`](../../../tests/conformance/corpus/core/data/plot/).
 
+The aggregate selector retains the native absence value, distinct from
+`Count`, `Sum`, `Mean`, `Min`, and `Max`. Core internals obtain that value
+through the registered `__plot_aggregate_none()` raw enum constructor;
+there is no renamed source variant or alternate aggregate representation.
+
 
 A plot aligns values by position with `labels`. If there are fewer values than
 labels, the missing positions render as zero; values beyond the label count are
