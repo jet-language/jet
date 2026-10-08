@@ -3011,7 +3011,6 @@ pub(crate) fn is_compiler_owned_type(name: &str) -> bool {
                 crate::Codegen::file_handle_rust_type(source_name),
                 Some("JetFileReader" | "JetFileWriter" | "JetFileScope")
             ))
-        || name == crate::Syntax::TYPE_MEASUREMENT
         || name == crate::Syntax::TYPE_ERR
         // Core/compute declares its own `VJPRun` record (source-owned shape);
         // only the autodiff transform's bare `VJPRun` is the native carrier.
@@ -3848,21 +3847,6 @@ fn compiler_owned_type_defs<'a>(
                             .expect("canonical Rotation field"),
                     )
                 }),
-            );
-            row.generic_params = vec![super::TGenericParam {
-                name: "T".to_string(),
-                bounds: Vec::new(),
-            }];
-            row
-        }))
-        .chain(std::iter::once({
-            let mut row = compiler_owned_record(
-                module,
-                crate::Syntax::TYPE_MEASUREMENT,
-                [
-                    ("value", Type::Named("T".to_string())),
-                    ("uncertainty", Type::Named("T".to_string())),
-                ],
             );
             row.generic_params = vec![super::TGenericParam {
                 name: "T".to_string(),

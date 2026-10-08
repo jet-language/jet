@@ -2394,9 +2394,6 @@ pub(crate) fn core_generic_struct_field(
             _ => None,
         };
     }
-    if type_name == "Measurement" && args.len() == 1 {
-        return matches!(field, "value" | "uncertainty").then_some(args[0].clone());
-    }
     if type_name == "FfiCallbackEvent" && args.len() == 1 {
         return (field == "value").then_some(args[0].clone());
     }

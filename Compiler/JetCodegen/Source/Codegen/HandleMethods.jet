@@ -399,15 +399,6 @@ fn jet_codegen_handle_math_route(type_name: String, method: String, reduce_op: S
     Val(jet_codegen_handle_h("{type_name}.{suffix}", "jet_math_{type_name}_{suffix}", mask, None))
 }
 
-fn jet_codegen_handle_measurement_route(method: String) -> JetCodegenHandleRoute? {
-    if method == {
-        "value" -> return Val(jet_codegen_handle_h("Measurement.value", "jet_std::JetMeasurement::value", [Bool]{true}, None))
-        "uncertainty" -> return Val(jet_codegen_handle_h("Measurement.uncertainty", "jet_std::JetMeasurement::uncertainty", [Bool]{true}, None))
-        "add" | "sub" | "mul" | "div" -> return Val(jet_codegen_handle_h("Measurement.{method}", "jet_std::JetMeasurement::{method}", [Bool]{true, false}, None))
-        "sqrt" -> return Val(jet_codegen_handle_h("Measurement.sqrt", "jet_std::JetMeasurement::sqrt", [Bool]{true}, None))
-        else -> return None
-    }
-}
 
 fn jet_codegen_handle_layout_route(method: String) -> JetCodegenHandleRoute? {
     if method == {
@@ -865,7 +856,6 @@ fn jet_codegen_handle_dynamic_route(operation: THandleOp, receiver: Type, argume
         .MathMethod(type_name, method, reduce_op) -> return jet_codegen_handle_math_route(type_name, method, reduce_op)
         .EventMethod(method) -> return jet_codegen_handle_event_route(receiver, method, carrier)
         .WatchMethod(method, _) -> return jet_codegen_handle_watch_route(receiver, method)
-        .MeasurementMethod(method) -> return jet_codegen_handle_measurement_route(method)
         .LayoutMethod(method) -> return jet_codegen_handle_layout_route(method)
         .LoadableMethod(method) -> return jet_codegen_handle_loadable_route(method)
         .UIBackendMethod(method) -> return jet_codegen_handle_ui_route(receiver, method)

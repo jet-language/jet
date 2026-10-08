@@ -589,9 +589,6 @@ pub(super) mod duration_kernel {
     include!("../../../../jet-codegen/src/Prelude/Core/Duration.rs");
 }
 
-mod measurement_kernel {
-    include!("../../../../jet-codegen/src/Prelude/Core/Measurement.rs");
-}
 
 // #1657 / I9: the one `core.data` statistics, bar-plot and bridge-status
 // kernel. This is the exact source AOT embeds and the Cranelift JIT host

@@ -1905,6 +1905,58 @@ fn lower_core_string_source_call(
     })
 }
 
+// Measurement's checked surface is unchanged; its implementation is an
+// ordinary concrete-Float source function, not a second native carrier.
+pub(super) fn lower_measurement_source_call(
+    function: &str,
+    values: impl IntoIterator<Item = TExpr>,
+    result: Type,
+    span: Span,
+    cx: &Cx,
+) -> TExpr {
+    let Some(signature) = cx
+        .core_source_sigs
+        .get(&("core.units".to_string(), function.to_string()))
+    else {
+        return invariant_method_expr(span, "checked Measurement call has no loaded source signature");
+    };
+    let target_return = match module_call_target_return(cx, Some(&result)) {
+        Ok(returned) => Some(returned),
+        Err(error) => return invariant_method_expr(span, error),
+    };
+    let values = values.into_iter();
+    if values.size_hint() != (signature.params.len(), Some(signature.params.len())) {
+        return invariant_method_expr(span, "checked Measurement source signature has incompatible arity");
+    }
+    let args = values
+        .zip(&signature.params)
+        .map(|(value, (access, _))| {
+            let borrow = *access == AccessConvention::Read && !value.ty.is_scalar();
+            TCallArg {
+                value,
+                template_items: None,
+                borrow,
+                mut_borrow: *access == AccessConvention::Write,
+                clone: false,
+                arc_clone: false,
+                fn_coerce: None,
+                widen_to_vec: false,
+                widen_to_union: None,
+                box_as_trait: None,
+            }
+        })
+        .collect();
+    TExpr {
+        ty: result,
+        kind: TExprKind::ModuleCall {
+            form: core_source_module_target(signature, function),
+            target_return,
+            type_args: Vec::new(),
+            args,
+        },
+    }
+}
+
 /// A prelude/host static-call owner whose path is prefixed by the generated
 /// crate root (`{root}jet_std::…`).
 fn reduce_op_name(expr: &Expr) -> Option<String> {
@@ -6358,16 +6410,10 @@ fn lower_method_call_impl(
                     {
                         return in_own_frame(|| {
                             let recv = lower_expr(&args[0].expr, cx, env);
-                            return TExpr {
-                                ty: recv.ty.clone(),
-                                kind: TExprKind::HandleMethod {
-                                    recv: Box::new(recv),
-                                    op: THandleOp::MeasurementMethod {
-                                        method: "sqrt".to_string(),
-                                    },
-                                    args: Vec::new(),
-                                },
-                            };
+                            let result = recv.ty.clone();
+                            return lower_measurement_source_call(
+                                "__measurement_sqrt", [recv], result, method_span, cx,
+                            );
                         });
                     }
                     // D-PIN1=A: `mem.pin(&place)` IS the exclusive borrow of
@@ -7908,17 +7954,18 @@ fn lower_method_call_impl(
                 "value" | "uncertainty" => Type::Float,
                 _ => recv_t.ty.clone(),
             };
-            let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
-            let lowered = TExpr {
-                ty: result_ty,
-                kind: TExprKind::HandleMethod {
-                    recv: Box::new(recv_t),
-                    op: THandleOp::MeasurementMethod {
-                        method: method.to_string(),
-                    },
-                    args: targs,
-                },
+            let source = match method {
+                "value" => "__measurement_value",
+                "uncertainty" => "__measurement_uncertainty",
+                "add" => "__measurement_add",
+                "sub" => "__measurement_sub",
+                "mul" => "__measurement_mul",
+                "div" => "__measurement_div",
+                "sqrt" => "__measurement_sqrt",
+                _ => unreachable!("checked Measurement method"),
             };
+            let values = std::iter::once(recv_t).chain(args.iter().map(|a| lower_expr(&a.expr, cx, env)));
+            let lowered = lower_measurement_source_call(source, values, result_ty, method_span, cx);
             return match source_arg_order(args) {
                 Some(order) => {
                     preserve_source_arg_order(lowered, &order, args.len(), method_span.start as u32)
@@ -11531,8 +11578,19 @@ fn lower_method_call_impl(
                                 let rounding = rounding.map(|mode| {
                                     (mode, Box::new(lower_expr(&args[2].expr, cx, env)))
                                 });
-                                return TExpr {
-                                    ty: result_ty,
+                                let measured = relative_uncertainty.is_some()
+                                    && matches!(&result_ty, Type::Option(inner) if matches!(inner.as_ref(), Type::Apply { name, .. } if name == "Measurement"))
+                                    || relative_uncertainty.is_some()
+                                    && matches!(&result_ty, Type::Result { ok, .. } if matches!(ok.as_ref(), Type::Apply { name, .. } if name == "Measurement"));
+                                let scalar_ty = if measured {
+                                    match &result_ty {
+                                        Type::Option(_) => Type::Option(Box::new(Type::Float)),
+                                        Type::Result { err, .. } => Type::Result { ok: Box::new(Type::Float), err: err.clone() },
+                                        _ => unreachable!("measured conversion carrier"),
+                                    }
+                                } else { result_ty.clone() };
+                                let converted = TExpr {
+                                    ty: scalar_ty,
                                     kind: TExprKind::UnitConvert {
                                         destination: type_name,
                                         arg: Box::new(lowered),
@@ -11540,11 +11598,19 @@ fn lower_method_call_impl(
                                         offset,
                                         rounding,
                                         fallible,
-                                        relative_uncertainty,
+                                        relative_uncertainty: None,
                                         file: cx.file.clone(),
                                         line: cx.src_line_col(method_span.start).0 as u32,
                                     },
                                 };
+                                if measured {
+                                    let relative = TExpr { ty: Type::Float, kind: TExprKind::FloatLit(relative_uncertainty.unwrap()) };
+                                    return lower_measurement_source_call(
+                                        if fallible { "__measurement_result" } else { "__measurement_optional" },
+                                        [converted, relative], result_ty, method_span, cx,
+                                    );
+                                }
+                                return converted;
                             });
                         }
                     }

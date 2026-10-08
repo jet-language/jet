@@ -10,6 +10,72 @@ package {
 }
 use core as core
 use core.math as math
+
+// C: the observations are private. All Float arithmetic below keeps the
+// existing measured-value constructor, operator and observation surface.
+pub struct Measurement<T> {
+    value: T
+    uncertainty: T
+
+    impl Display {
+        fn display(self) -> String Never! { "{self.value:Debug} ± {self.uncertainty:Debug}" }
+    }
+}
+
+pub fn __measurement_new(value: Float, uncertainty: Float) -> Measurement<Float> Never! {
+    Measurement<Float>{value: value, uncertainty: math.abs_float(uncertainty)}
+}
+
+pub fn __measurement_from_relative(value: Float, relative: Float) -> Measurement<Float> Never! {
+    __measurement_new(value, math.abs_float(value) * math.abs_float(relative))
+}
+
+pub fn __measurement_value(value: Measurement<Float>) -> Float Never! { value.value }
+
+pub fn __measurement_uncertainty(value: Measurement<Float>) -> Float Never! { value.uncertainty }
+
+pub fn __measurement_add(left: Measurement<Float>, right: Measurement<Float>) -> Measurement<Float> Never! {
+    __measurement_new(left.value + right.value, math.sqrt(left.uncertainty * left.uncertainty + right.uncertainty * right.uncertainty))
+}
+
+pub fn __measurement_sub(left: Measurement<Float>, right: Measurement<Float>) -> Measurement<Float> Never! {
+    __measurement_new(left.value - right.value, math.sqrt(left.uncertainty * left.uncertainty + right.uncertainty * right.uncertainty))
+}
+
+pub fn __measurement_mul(left: Measurement<Float>, right: Measurement<Float>) -> Measurement<Float> Never! {
+    first :: right.value * left.uncertainty
+    second :: left.value * right.uncertainty
+    __measurement_new(left.value * right.value, math.sqrt(first * first + second * second))
+}
+
+pub fn __measurement_div(left: Measurement<Float>, right: Measurement<Float>) -> Measurement<Float> Never! {
+    first :: left.uncertainty / right.value
+    second :: left.value * right.uncertainty / (right.value * right.value)
+    __measurement_new(left.value / right.value, math.sqrt(first * first + second * second))
+}
+
+pub fn __measurement_sqrt(value: Measurement<Float>) -> Measurement<Float> Never! {
+    root :: math.sqrt(value.value)
+    uncertainty :: if root == 0.0 && value.uncertainty == 0.0 -> 0.0 else -> value.uncertainty / (2.0 * root)
+    __measurement_new(root, uncertainty)
+}
+
+pub fn __measurement_show(value: Measurement<Float>) -> String Never! {
+    "{value.value:Debug} ± {value.uncertainty:Debug}"
+}
+
+// Preserve the scalar conversion's checked failure before adding uncertainty.
+pub fn __measurement_optional(value: Float?, relative: Float) -> Measurement<Float>? Never! {
+    scalar :: value ?? return None
+    Val(__measurement_from_relative(scalar, relative))
+}
+
+pub fn __measurement_result(value: Float String!, relative: Float) -> Measurement<Float> String! {
+    if value == {
+        .Ok(scalar) -> Ok(__measurement_from_relative(scalar, relative))
+        .Err(error) -> Err(error)
+    }
+}
 pub fn from(magnitude: Float, unit: Float) -> Measurement<Float> Never! {
     // Measurements carry an SI value and uncertainty; the unit scale is
     // applied at construction because the carrier has no unit field.
@@ -33,8 +99,8 @@ MEGA :: 1000000.0
 GIGA :: 1000000000.0
 
 pub fn scale(m: Measurement<Float>, factor: Float) -> Measurement<Float> Never! {
-    uncertainty := m.uncertainty * math.abs_float(factor)
-    measurement(m.value * factor, uncertainty: uncertainty)
+    uncertainty := m.uncertainty() * math.abs_float(factor)
+    measurement(m.value() * factor, uncertainty: uncertainty)
 }
 
 pub fn add(a: Measurement<Float>, b: Measurement<Float>) -> Measurement<Float> Never! { a + b }
@@ -57,18 +123,18 @@ pub fn convert(m: Measurement<Float>, new_unit: Float) -> Measurement<Float> Nev
     factor :: Float{1.0} / new_unit
     if !math.is_finite(factor) -> return ~m
     converted := scale(m, factor)
-    if !math.is_finite(converted.value) || !math.is_finite(converted.uncertainty) -> return ~m
+    if !math.is_finite(converted.value()) || !math.is_finite(converted.uncertainty()) -> return ~m
     converted
 }
 
-pub fn to_si(m: Measurement<Float>) -> Float Never! { m.value }
+pub fn to_si(m: Measurement<Float>) -> Float Never! { m.value() }
 
 pub fn abs(m: Measurement<Float>) -> Measurement<Float> Never! {
-    if m.value < (Float{0.0}) -> return measurement(Float{0.0} - m.value, uncertainty: m.uncertainty)
+    if m.value() < (Float{0.0}) -> return measurement(Float{0.0} - m.value(), uncertainty: m.uncertainty())
     ~m
 }
 
-pub fn show(m: Measurement<Float>) -> String Never! { "{m.value} ± {m.uncertainty}" }
+pub fn show(m: Measurement<Float>) -> String Never! { "{m.value()} ± {m.uncertainty()}" }
 
 METER :: 1.0
 // British spellings remain source-compatible with the original Core surface.
@@ -123,4 +189,74 @@ pub fn is_zero(m: Measurement<Float>) -> Bool Never! {
     v :: to_si(m)
     if v < 0.0 -> return v > -0.000000001
     v < 0.000000001
+}
+
+#Test("Measurement Float kernels preserve retained arithmetic bits") {
+    left :: __measurement_new(12.0, -0.3)
+    right :: __measurement_new(2.0, -0.4)
+    relative :: __measurement_from_relative(-12.0, -0.025)
+    sum :: __measurement_add(left, right)
+    difference :: __measurement_sub(left, right)
+    product :: __measurement_mul(left, right)
+    quotient :: __measurement_div(left, right)
+    root :: __measurement_sqrt(left)
+    assert_eq(math.to_bits(__measurement_value(left)), 4622945017495814144)
+    assert_eq(math.to_bits(__measurement_uncertainty(left)), 4599075939470750515)
+    assert_eq(math.to_bits(__measurement_value(relative)), 13846317054350589952)
+    assert_eq(math.to_bits(__measurement_uncertainty(relative)), 4599075939470750516)
+    assert_eq(math.to_bits(__measurement_value(sum)), 4624070917402656768)
+    assert_eq(math.to_bits(__measurement_uncertainty(sum)), 4602678819172646912)
+    assert_eq(math.to_bits(__measurement_value(difference)), 4621819117588971520)
+    assert_eq(math.to_bits(__measurement_uncertainty(difference)), 4602678819172646912)
+    assert_eq(math.to_bits(__measurement_value(product)), 4627448617123184640)
+    assert_eq(math.to_bits(__measurement_uncertainty(product)), 4617132395576038241)
+    assert_eq(math.to_bits(__measurement_value(quotient)), 4618441417868443648)
+    assert_eq(math.to_bits(__measurement_uncertainty(quotient)), 4608125196321297249)
+    assert_eq(math.to_bits(__measurement_value(root)), 4614982882171571370)
+    assert_eq(math.to_bits(__measurement_uncertainty(root)), 4586401191733037602)
+    exact_zero :: __measurement_sqrt(__measurement_new(0.0, -0.0))
+    assert_eq(math.to_bits(__measurement_value(exact_zero)), 0)
+    assert_eq(math.to_bits(__measurement_uncertainty(exact_zero)), 0)
+}
+
+#Test("Measurement Show preserves retained Float Debug text") {
+    assert_eq(__measurement_show(__measurement_new(12.0, -0.3)), "12.0 ± 0.3")
+    assert_eq(__measurement_show(__measurement_from_relative(-12.0, -0.025)), "-12.0 ± 0.30000000000000004")
+    assert_eq(__measurement_show(__measurement_new(math.nan(), 0.0)), "NaN ± 0.0")
+    assert_eq(__measurement_show(__measurement_new(math.infinity(), 0.0)), "inf ± 0.0")
+    assert_eq(__measurement_show(__measurement_new(-math.infinity(), 0.0)), "-inf ± 0.0")
+    assert_eq(__measurement_show(__measurement_new(-0.0, 0.0)), "-0.0 ± 0.0")
+    assert_eq(__measurement_show(__measurement_new(1.0, 0.0)), "1.0 ± 0.0")
+    assert_eq(__measurement_show(__measurement_new(0.00000001, 0.0)), "1e-8 ± 0.0")
+    assert_eq(__measurement_show(__measurement_new(100000000000000000000.0, 0.0)), "1e20 ± 0.0")
+}
+
+#Test("Measurement source surface keeps observations and formatting") {
+    measured :: measurement(12.0, uncertainty: -0.3)
+    other :: measurement(2.0, uncertainty: 0.4)
+    assert_eq(measured.value(), 12.0)
+    assert_eq(measured.uncertainty(), 0.3)
+    assert_eq((measured + other).value(), 14.0)
+    assert_eq((measured - other).value(), 10.0)
+    assert_eq((measured * other).value(), 24.0)
+    assert_eq((measured / other).value(), 6.0)
+    assert_eq(math.to_bits(math.sqrt(measured).value()), 4614982882171571370)
+    tiny :: measurement(0.00000001, uncertainty: 0.0)
+    assert_eq("{tiny}", "1e-8 ± 0.0")
+    assert_eq(show(tiny), "0.00000001 ± 0")
+}
+
+#Test("Measured conversion propagates the scalar failure before uncertainty") {
+    assert(__measurement_optional(None, 0.025) == None)
+    optional :: __measurement_optional(Val(-12.0), -0.025) ?? panic("conversion")
+    assert_eq(optional.value(), -12.0)
+    assert_eq(math.to_bits(optional.uncertainty()), 4599075939470750516)
+    if __measurement_result(Err("unit conversion is not exactly representable"), 0.025) == {
+        .Ok(_) -> panic("lost scalar conversion error")
+        .Err(error) -> assert_eq(error, "unit conversion is not exactly representable")
+    }
+    if __measurement_result(Ok(-12.0), -0.025) == {
+        .Ok(value) -> assert_eq(math.to_bits(value.uncertainty()), 4599075939470750516)
+        .Err(_) -> panic("successful conversion failed")
+    }
 }

@@ -3656,7 +3656,7 @@ fn jet_rust_emit_unit_conversion(ctx: &JetRustEmitContext, function: MIRFunction
         jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "unit conversion route is missing", "each checked unit conversion must retain its exact StaticPrelude kernel", Val(function.span))
         return "unreachable!(\"missing unit conversion route\")"
     }
-    rounded :: route_row.member == "conversion_rounded" || route_row.member == "conversion_rounded_measurement"
+    rounded :: route_row.member == "conversion_rounded"
     args := [String]{jet_rust_emit_value_owned(ctx, function, value)}
     digits_index :: if rounded -> 5 else -> -1
     loop index in 0..<parameters.len() {
@@ -3679,6 +3679,11 @@ fn jet_rust_emit_unit_conversion(ctx: &JetRustEmitContext, function: MIRFunction
             }
         }
         if {
+            index == 4 && rounded -> {
+                mode :: jet_rust_emit_value_owned(ctx, function, parameter)
+                root :: ctx.config.root_prefix
+                &args.push("match {root}jet_std::jet_int_owned_to_i64(&({mode})).expect(\"checked unit rounding tag\") {{ 0 => {root}UnitRoundingMode::TowardZero, 1 => {root}UnitRoundingMode::Floor, 2 => {root}UnitRoundingMode::Ceiling, 3 => {root}UnitRoundingMode::NearestEven, _ => unreachable!(\"checked unit rounding tag\") }}")
+            }
             index == digits_index && jet_rust_emit_value_type(ctx, function, parameter).kind == MIRTypeKind.Int -> {
             &args.push("__jet_unit_digits")
             }
@@ -3694,7 +3699,7 @@ fn jet_rust_emit_unit_conversion(ctx: &JetRustEmitContext, function: MIRFunction
         &args.push("{location.line}u32")
         }
         args.len() != expected -> {
-        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "unit conversion ABI has an unexpected parameter count", "exact, measured, rounded, and measured-rounded routes use 5/6/7/8 arguments without source-location suffixes", Val(function.span))
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "unit conversion ABI has an unexpected parameter count", "exact and rounded scalar routes use 5/7 arguments without source-location suffixes", Val(function.span))
         return "unreachable!(\"unit conversion ABI\")"
         }
     }
@@ -3726,8 +3731,8 @@ fn jet_rust_emit_unit_conversion(ctx: &JetRustEmitContext, function: MIRFunction
         }
         .Option(inner) -> {
             converted := jet_rust_emit_unit_wrap(&ctx, inner, "value")
-            if rounded -> return "({result}).ok().map(|value| {converted})"
-            return "({result}).map(|value| {converted})"
+            optional :: if rounded -> "({result}).ok()" else -> result
+            return "jet_foundation::Outcome::jet_optional_from_native({optional}).map(|value| {converted})"
         }
         else -> {}
     }

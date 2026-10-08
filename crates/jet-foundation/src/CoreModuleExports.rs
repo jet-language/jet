@@ -25,7 +25,7 @@ pub enum CoreLeafKind {
 
 // BEGIN GENERATED CORE DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 350622a3895f7af8f3b7a4d7a75ea07c84f8b86101f2d02acff65c9209dae7b2
+// Source SHA-256: 169f4437fc277ec63d512b285567c3ad23e506fcc8cca61a5c5ff1621c518f34
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreModuleDeclaration {
     pub module: &'static str,
@@ -580,7 +580,7 @@ const CORE_MODULE_99_MEMBERS: &[&str] = &["__attach", "__project", "attach", "pr
 const CORE_MODULE_99_TYPES: &[(&str, CoreLeafKind)] = &[];
 const CORE_MODULE_99_DEPENDENCIES: &[&str] = &["core.ui.host"];
 
-const CORE_MODULE_100_MEMBERS: &[&str] = &["Measurement", "abs", "add", "centi", "convert", "div", "from", "giga", "kilo", "mega", "micro", "milli", "mul", "nano", "scale", "show", "si", "sub", "to_si", "meters", "kilometers", "grams", "kilograms", "seconds", "milliseconds", "bytes_of", "kibibytes", "equals", "ratio", "is_zero", "meter", "gram", "second", "byte_unit", "kibibyte", "mebibyte", "gibibyte", "metres", "kilometres"];
+const CORE_MODULE_100_MEMBERS: &[&str] = &["Measurement", "abs", "add", "centi", "convert", "div", "from", "giga", "kilo", "mega", "micro", "milli", "mul", "nano", "scale", "show", "si", "sub", "to_si", "meters", "kilometers", "grams", "kilograms", "seconds", "milliseconds", "bytes_of", "kibibytes", "equals", "ratio", "is_zero", "meter", "gram", "second", "byte_unit", "kibibyte", "mebibyte", "gibibyte", "metres", "kilometres", "__measurement_new", "__measurement_from_relative", "__measurement_value", "__measurement_uncertainty", "__measurement_add", "__measurement_sub", "__measurement_mul", "__measurement_div", "__measurement_sqrt", "__measurement_show", "__measurement_optional", "__measurement_result"];
 const CORE_MODULE_100_TYPES: &[(&str, CoreLeafKind)] = &[("Measurement", CoreLeafKind::Generic(1))];
 const CORE_MODULE_100_DEPENDENCIES: &[&str] = &["core.math"];
 
@@ -852,7 +852,7 @@ pub const CORE_SOURCE_MODULES: &[CoreSourceModule] = &[
     CoreSourceModule { module: "core.ui.host.drag_drop", alias: "core_core_ui_host_drag_drop", path: "Core/ui/host/drag_drop.jet", owned_members: &["poll"] },
     CoreSourceModule { module: "core.ui.host.shortcuts", alias: "core_core_ui_host_shortcuts", path: "Core/ui/host/shortcuts.jet", owned_members: &["binding", "dispatch", "register"] },
     CoreSourceModule { module: "core.ui.host.accessibility", alias: "core_core_ui_host_accessibility", path: "Core/ui/host/accessibility.jet", owned_members: &["attach", "project"] },
-    CoreSourceModule { module: "core.units", alias: "core_units", path: "Core/units/units.jet", owned_members: &["from", "abs", "add", "bytes_of", "convert", "div", "equals", "grams", "is_zero", "kibibytes", "kilograms", "kilometers", "meters", "milliseconds", "mul", "ratio", "scale", "seconds", "show", "si", "sub", "to_si", "metres", "kilometres"] },
+    CoreSourceModule { module: "core.units", alias: "core_units", path: "Core/units/units.jet", owned_members: &["from", "abs", "add", "bytes_of", "convert", "div", "equals", "grams", "is_zero", "kibibytes", "kilograms", "kilometers", "meters", "milliseconds", "mul", "ratio", "scale", "seconds", "show", "si", "sub", "to_si", "metres", "kilometres", "__measurement_new", "__measurement_from_relative", "__measurement_value", "__measurement_uncertainty", "__measurement_add", "__measurement_sub", "__measurement_mul", "__measurement_div", "__measurement_sqrt", "__measurement_show", "__measurement_optional", "__measurement_result"] },
     CoreSourceModule { module: "core.watcher", alias: "core_core_watcher", path: "Core/watcher/watcher.jet", owned_members: &["add", "contains", "files", "kind", "len", "port", "process_pid", "remove", "set", "target", "recursive", "debounce", "poll", "events", "cancel", "is_active", "summary", "drain"] },
     CoreSourceModule { module: "core.web", alias: "core_core_web", path: "Core/web/web.jet", owned_members: &["app", "auth", "auth_oauth", "auth_routes", "auth_show", "form", "invalidate", "live", "live_get", "live_show", "live_stats", "on", "openapi", "page", "signal_push", "storage", "subscribe", "sync", "transact_invalidate", "value"] },
     CoreSourceModule { module: "core.web.browser", alias: "core_core_web_browser", path: "Core/web/browser.jet", owned_members: &["begin_named", "config", "config_from_env", "connect", "connect_browser_profile", "fixture_context", "fixture_page", "fixture_source", "generate_source", "locked", "make_profile", "report_add_case", "report_exit_code", "report_html", "report_json", "report_new", "report_text", "selected", "server_logs", "server_start", "server_stop", "server_url", "timeout", "watch_changed", "write_report"] },
@@ -993,6 +993,7 @@ pub const CORE_SOURCE_OWNED_TYPES: &[CoreSourceOwnedType] = &[
     CoreSourceOwnedType { path: "Core/tui/tui.jet", name: "TUIEvent" },
     CoreSourceOwnedType { path: "Core/tui/tui.jet", name: "TUIListState" },
     CoreSourceOwnedType { path: "Core/tui/tui.jet", name: "TUIStyle" },
+    CoreSourceOwnedType { path: "Core/units/units.jet", name: "Measurement" },
     CoreSourceOwnedType { path: "Core/web/query.jet", name: "WebQuery" },
     CoreSourceOwnedType { path: "Core/web/query.jet", name: "WebQueryState" },
     CoreSourceOwnedType { path: "Core/web/query.jet", name: "WebMutationState" },

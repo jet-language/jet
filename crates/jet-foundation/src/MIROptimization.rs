@@ -13435,7 +13435,6 @@ fn encode_core_pure_route(writer: &mut CanonicalWriter, route: crate::Syntax::Co
         crate::Syntax::CoreCallPureRoute::EncodingXml => 3,
         crate::Syntax::CoreCallPureRoute::Time => 4,
         crate::Syntax::CoreCallPureRoute::Math => 5,
-        crate::Syntax::CoreCallPureRoute::Measurement => 6,
         crate::Syntax::CoreCallPureRoute::Date => 7,
         crate::Syntax::CoreCallPureRoute::DateTime => 8,
         crate::Syntax::CoreCallPureRoute::SketchHll => 9,

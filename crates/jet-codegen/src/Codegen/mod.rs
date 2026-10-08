@@ -352,7 +352,6 @@ const PRELUDE_PARTS: &[&str] = &[
     include_str!("../Prelude/Core/ExpiringSecret.rs"),
     include_str!("../Prelude/Core/SetAlgebra.rs"),
     include_str!("../Prelude/Core/Duration.rs"),
-    include_str!("../Prelude/Core/Measurement.rs"),
     include_str!("../Prelude/Core/TimeMonotonic.rs"),
     include_str!("../Prelude/Core/TimeFacts.rs"),
     include_str!("../Prelude/Core/Time.rs"),

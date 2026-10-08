@@ -10,16 +10,13 @@ use jet_foundation.[
     FunctionDefaultRef,
     ParamZone,
     Span,
-    Symbol,
     SymbolID,
-    SymbolKind,
+    TCallArg,
     TExpr,
     TExprKind,
     TFailureCarrier,
-    TFieldRef,
     THandleOp,
     Type,
-    symbol_id,
     type_identity_equal,
     type_name,
 ]
@@ -38,12 +35,6 @@ pub struct SemaExpressionLayoutBinaryResult {
 pub struct SemaExpressionLayoutBinaryCheck {
     pub handled: Bool
     pub value: TExpr?
-}
-
-pub struct SemaExpressionCoreFieldFact {
-    pub owner: SymbolID
-    pub field: Symbol
-    pub ty: Type
 }
 
 pub fn sema_expression_layout_is_axis_type(name: String) -> Bool Never! {
@@ -251,6 +242,15 @@ fn sema_expression_measurement_inner(ty: Type, environment: SemaScopeEnvironment
     None
 }
 
+pub fn sema_expression_measurement_source_call(function: String, values: [TExpr], result_type: Type, span: Span, environment: SemaScopeEnvironment) -> TExpr? {
+    source_identity :: sema_call_core_module_identity(environment, "core.units") ?? return None
+    graph :: environment.registration_graph ?? return None
+    source_index :: sema_registration_module_index(graph, source_identity) ?? return None
+    callee :: sema_registration_direct_symbol(graph.modules[source_index], function) ?? return None
+    arguments :: loop value in values -> TCallArg{value: value, template_items: [SymbolID]{}, borrow: !sema_call_is_scalar(value.ty), mut_borrow: false, clone: false, arc_clone: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
+    Val(sema_tir_expr(result_type, TExprKind.Call{callee: callee.id, type_args: [Type]{}, args: arguments}, span))
+}
+
 pub fn sema_call_try_measurement_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if method != "value" && method != "uncertainty" -> return SemaMethodSpecialCheck{handled: false, value: None}
     _ := sema_expression_measurement_inner(receiver_value.ty, environment) ?? return SemaMethodSpecialCheck{handled: false, value: None}
@@ -262,26 +262,10 @@ pub fn sema_call_try_measurement_method(receiver: Expr, receiver_value: TExpr, m
     }
     if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     result_type := Type.Float
-    value :: sema_tir_expr(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.MeasurementMethod{method: method}, args: [TExpr]{}}, span)
+    value :: sema_expression_measurement_source_call("__measurement_{method}", [TExpr]{receiver_value}, result_type, span, environment) ?? {
+        &context.incomplete_reasons.push("checked Measurement accessor has no source declaration")
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
     if !sema_effect_record_intrinsic_fact(environment, &scopes, &context, "Measurement.{method}", span, sema_expression_layout_call_facts(result_type), &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, &diagnostics)}
-}
-
-pub fn sema_expression_core_field_fact(ty: Type, member: String, environment: SemaScopeEnvironment) -> SemaExpressionCoreFieldFact? {
-    inner :: sema_expression_measurement_inner(ty, environment) ?? return None
-    if member != "value" && member != "uncertainty" -> return None
-    owner_id :: symbol_id(SymbolKind.Type, "core.units", "", "Measurement")
-    field_id :: symbol_id(SymbolKind.Field, "core.units", owner_id.key, member)
-    field_symbol :: Symbol{id: field_id, kind: SymbolKind.Field, name: member, module_name: "core.units", owner: Val(owner_id.key), span: Span{start: 0, end: 0}, ty: Val(inner), visibility: 2}
-    Val(SemaExpressionCoreFieldFact{owner: owner_id, field: field_symbol, ty: inner})
-}
-
-pub fn sema_expression_core_field_projection(base: TExpr, member: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    fact :: sema_expression_core_field_fact(base.ty, member, environment) ?? return None
-    symbol := fact.field
-    symbol.span = span
-    &context.name_references.push(SemaNameReferenceFact{span: span, symbol: symbol, kind: "field"})
-    reference :: TFieldRef{owner: Val(fact.owner), field: symbol.id, name: member, ty: fact.ty, boxed: false}
-    value :: sema_tir_expr(fact.ty, TExprKind.Field{receiver: base, field: reference}, span)
-    sema_expr_expected(value, expected, environment, &diagnostics)
 }

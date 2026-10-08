@@ -875,7 +875,6 @@ fn jet_codegen_precise_type_key(type_name: String) -> String Never! {
 fn jet_codegen_precise_builtin_route(builder: &JetCodegenBuilder, program: JetCodegenProgram, type_name: String, function: String, arity: Int, carrier: TFailureCarrier) -> MIRPreludeCallID Never! {
     type_key := jet_codegen_precise_type_key(type_name)
     symbol := "jet_{type_key}_{function}"
-    if type_name == "Measurement" && function == "new" -> symbol = "jet_std::JetMeasurement::new"
     by_value := function == "new" || function == "from_parts" || (function.starts_with("from_") && function != "from_str")
     borrow_mask := [Bool]{}
     index := 0
@@ -3656,15 +3655,6 @@ fn jet_codegen_unit_rounding_code(mode: TUnitRoundingMode) -> Int Never! {
     }
 }
 
-fn jet_codegen_unit_measurement_type(ty: Type) -> Bool Never! {
-    if ty == {
-        .Apply(name, args) -> name == "Measurement" && args.len() == 1 && args[0] == Type.Float
-        .Option(inner) -> jet_codegen_unit_measurement_type(inner)
-        .Result(ok, _) -> jet_codegen_unit_measurement_type(ok)
-        .Tagged(_, inner) -> jet_codegen_unit_measurement_type(inner)
-        else -> false
-    }
-}
 
 fn jet_codegen_unit_distinct_base(builder: JetCodegenBuilder, program: JetCodegenProgram, ty: Type) -> Type? {
     name := ""
@@ -4157,26 +4147,15 @@ fn jet_codegen_lower_unit_convert(builder: &JetCodegenBuilder, program: JetCodeg
         base_type := jet_codegen_lower_type_for_function(base, builder, program)
         raw_value = jet_codegen_emit_value(&builder, program, argument.span, base, MIROperation.Convert{value: raw_value, parameters: [MIRValueID]{}, target: base_type, conversion: MIRConversion.Transparent})
     }
-    measured := relative_uncertainty != None && jet_codegen_unit_measurement_type(expression.ty)
     rounded := rounding != None
     member := ""
     symbol := ""
     borrow_mask := [Bool]{}
     if {
-        rounded && measured -> {
-            member = "conversion_rounded_measurement"
-            symbol = "jet_std::jet_unit_conversion_rounded_measurement"
-            borrow_mask = [Bool]{false, true, true, true, true, false, false, false}
-        }
         rounded -> {
             member = "conversion_rounded"
             symbol = "jet_unit_conversion_rounded"
             borrow_mask = [Bool]{false, true, true, true, true, false, false}
-        }
-        measured -> {
-            member = "conversion_exact_measurement"
-            symbol = "jet_std::jet_unit_conversion_exact_measurement"
-            borrow_mask = [Bool]{false, true, true, true, true, false}
         }
         else -> {
             member = "conversion_exact"
@@ -4193,9 +4172,6 @@ fn jet_codegen_lower_unit_convert(builder: &JetCodegenBuilder, program: JetCodeg
         rounding_value :: rounding
         &parameters.push(jet_codegen_numeric_constant_int(&builder, program, expression.span, jet_codegen_unit_rounding_code(rounding_value.mode)))
         &parameters.push(jet_codegen_lower_expr(&builder, program, rounding_value.digits))
-    }
-    if measured {
-        &parameters.push(jet_codegen_emit_value(&builder, program, expression.span, Type.Float, MIROperation.Constant{value: MIRConstant.Float{value: relative_uncertainty ?? 0.0, f32: false, spelling: None}}))
     }
     route := jet_codegen_intern_route(&builder, program, MIRPreludeFamily.StaticPrelude, "core.units", member, symbol, borrow_mask.len(), borrow_mask, None, jet_codegen_failure_carrier_for_type(expression.ty), MIRPreludeABI.Value)
     if line < 0 -> panic("checked unit conversion line is negative")

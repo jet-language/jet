@@ -3,6 +3,7 @@ use crate::AST::{
     OrFallback, Pattern, Stmt, StrPart, TryConvert, Type, TypedLitBody, UnOp,
 };
 use crate::Codegen::Cx;
+use super::method_calls::lower_measurement_source_call;
 use crate::Codegen::TIR::ListSpreadPart;
 use crate::Codegen::TIR::LowerEnv;
 use crate::Codegen::TIR::TAddressLifetime;
@@ -3880,6 +3881,9 @@ fn lower_display_value(value: TExpr, cx: &Cx) -> TExpr {
             },
         };
     }
+    if matches!(&value.ty, Type::Apply { name, args } if name == "Measurement" && args == &[Type::Float]) {
+        return lower_measurement_source_call("__measurement_show", [value], Type::String, Span::new(0, 0), cx);
+    }
     let Type::Named(name) = &value.ty else {
         return value;
     };
@@ -3923,7 +3927,8 @@ fn lower_display_value(value: TExpr, cx: &Cx) -> TExpr {
 /// backend sees the erased numeric carrier.
 fn lower_print_value(value: TExpr, cx: &Cx) -> TExpr {
     let printable_unit = value.ty.quantity_parts().is_some() || cx.unit_label(&value.ty).is_some();
-    let explicit_display = matches!(&value.ty, Type::Named(name) if cx.has_display_type(name));
+    let explicit_display = matches!(&value.ty, Type::Named(name) if cx.has_display_type(name))
+        || matches!(&value.ty, Type::Apply { name, args } if name == "Measurement" && args == &[Type::Float]);
     if printable_unit || explicit_display {
         lower_display_value(value, cx)
     } else {
@@ -5107,10 +5112,8 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         }
                     }
                 }
-                // D-TYPE2-UNCERT1=A: sema has made exact operands explicit
-                // zero-uncertainty measurements. Reuse the resident measurement
-                // handle op so AOT, JIT, interpreter, comptime, REPL and web call
-                // the same Prelude kernel.
+                // Sema has made exact operands explicit zero-uncertainty
+                // measurements; the implementation is an ordinary source call.
                 if matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div)
                     && matches!((&lhs.ty, &rhs.ty), (
                         Type::Apply { name: left, .. },
@@ -5118,23 +5121,15 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     ) if left == Syntax::TYPE_MEASUREMENT && right == Syntax::TYPE_MEASUREMENT)
                 {
                     return in_own_frame(|| {
-                        return TExpr {
-                            ty: lhs.ty.clone(),
-                            kind: TExprKind::HandleMethod {
-                                recv: Box::new(lhs),
-                                op: THandleOp::MeasurementMethod {
-                                    method: match op {
-                                        BinOp::Add => "add",
-                                        BinOp::Sub => "sub",
-                                        BinOp::Mul => "mul",
-                                        BinOp::Div => "div",
-                                        _ => unreachable!(),
-                                    }
-                                    .to_string(),
-                                },
-                                args: vec![rhs],
-                            },
+                        let result = lhs.ty.clone();
+                        let function = match op {
+                            BinOp::Add => "__measurement_add",
+                            BinOp::Sub => "__measurement_sub",
+                            BinOp::Mul => "__measurement_mul",
+                            BinOp::Div => "__measurement_div",
+                            _ => unreachable!(),
                         };
+                        return lower_measurement_source_call(function, [lhs, rhs], result, *span, cx);
                     });
                 }
                 // D-SHAPE-QUANTITY1=A: sema has already validated compatibility.
@@ -5967,30 +5962,20 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     });
                 }
                 // D-TYPE2-UNCERT1=A: the canonical source constructor uses the
-                // existing typed Prelude route directly. `core.units.from` is
-                // source-owned and is not a second CoreCall dispatcher entry.
+                // ordinary source function. The checked constructor spelling
+                // remains distinct from `core.units.from`.
                 if call.name == "measurement"
                     && !cx.sigs.contains_key(&call.name)
                     && !env.locals.contains_key(&call.name)
                     && call.args.len() == 2
                 {
                     return in_own_frame(|| {
-                        let args = call
-                            .args
-                            .iter()
-                            .map(|argument| lower_expr(&argument.expr, cx, env))
-                            .collect::<Vec<_>>();
-                        TExpr {
-                            ty: Type::Apply {
-                                name: Syntax::TYPE_MEASUREMENT.to_string(),
-                                args: vec![Type::Float],
-                            },
-                            kind: TExprKind::PreciseBuiltin {
-                                type_name: Syntax::TYPE_MEASUREMENT.to_string(),
-                                func: "new".to_string(),
-                                args,
-                            },
-                        }
+                        let args = call.args.iter().map(|argument| lower_expr(&argument.expr, cx, env));
+                        let result = Type::Apply {
+                            name: Syntax::TYPE_MEASUREMENT.to_string(),
+                            args: vec![Type::Float],
+                        };
+                        lower_measurement_source_call("__measurement_new", args, result, call.name_span, cx)
                     });
                 }
                 // c109 Phase 13: `f(args)` where `f` is a LOCAL (a fn-typed binding/param)

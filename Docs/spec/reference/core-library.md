@@ -2095,6 +2095,17 @@ uncertainty, and multiplication, division, and square root use the
 corresponding first-order derivatives. Exact inputs have zero uncertainty.
 **Correlated errors are out of scope** (D-TYPE2-UNCERT1).
 
+`Measurement<T>` is a source-owned generic record with private observations.
+Construct Float measurements with `measurement(value, uncertainty: sigma)`;
+read them through `value()` and `uncertainty()`, not record fields or literals.
+Arithmetic uses `+`, `-`, `*`, `/`, and `math.sqrt`; named arithmetic and
+`sqrt()` methods are not alternate spellings. Exact scalar operands enter
+these operations with zero uncertainty. Measured unit conversion first keeps
+the scalar exact/rounded conversion's failure, then constructs uncertainty
+from the converted value and the relative scale uncertainty. Ordinary
+measurement Display uses Float Debug text (`1e-8`), while `units.show` retains
+Float Display text.
+
 #### Linear algebra
 
 Fixed-size vectors and matrices use `Float` components. `Vec2`, `Vec3`, and
@@ -2187,7 +2198,7 @@ fn run() {
 
 | Function | Returns | Description |
 | --- | --- | --- |
-| `units.from(magnitude, unit)` | `Measurement<Float>` | Jet-owned construction of SI value `magnitude * unit` with zero uncertainty; the host only represents the measurement. |
+| `units.from(magnitude, unit)` | `Measurement<Float>` | Jet-owned construction of SI value `magnitude * unit` with zero uncertainty. |
 | `units.si(value)` | `Measurement<Float>` | Construct a value in the SI base scale. |
 | `units.scale(value, factor)` | `Measurement<Float>` | Scale a measured value. |
 | `units.add(a, b)` / `units.sub(a, b)` | `Measurement<Float>` | Add or subtract measured values with propagated uncertainty. |
