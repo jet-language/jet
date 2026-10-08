@@ -1365,7 +1365,7 @@ fn jet_codegen_lower_expression_place(builder: &JetCodegenBuilder, program: JetC
             if field == {
                 None -> return Val(base)
                 Val(name) -> {
-                    resolved := jet_codegen_resolve_field_by_name(program.modules, builder.function.module_identity, builder.generic_type_names, element_ty, name)
+                    resolved := jet_codegen_resolve_field_by_name(program.modules, builder.function.module_identity, builder.generic_type_names, element_ty, name, builder.function.key)
                     return Val(jet_codegen_project_field_place(&builder, program, base, expression.span, expression.ty, jet_codegen_mir_field_id(resolved)))
                 }
             }
@@ -1589,7 +1589,7 @@ fn jet_codegen_lower_optional_field(builder: &JetCodegenBuilder, program: JetCod
         .Option(inner) -> inner
         else -> panic("checked optional field base is not optional")
     }
-    resolved := jet_codegen_resolve_field_by_name(program.modules, builder.function.module_identity, builder.generic_type_names, inner_type, member)
+    resolved := jet_codegen_resolve_field_by_name(program.modules, builder.function.module_identity, builder.generic_type_names, inner_type, member, builder.function.key)
     field_id := jet_codegen_mir_field_id(resolved)
     selected_type := if {
         flatten -> expression.ty
@@ -4149,7 +4149,7 @@ fn jet_codegen_lower_pool_slot_value(builder: &JetCodegenBuilder, program: JetCo
             slot
         }
         Val(name) -> {
-            resolved := jet_codegen_resolve_field_by_name(program.modules, builder.function.module_identity, builder.generic_type_names, element_type, name)
+            resolved := jet_codegen_resolve_field_by_name(program.modules, builder.function.module_identity, builder.generic_type_names, element_type, name, builder.function.key)
             jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Field{base: slot, field: jet_codegen_mir_field_id(resolved)})
         }
     }
@@ -4438,7 +4438,7 @@ fn jet_codegen_lower_carrier_fact(builder: &JetCodegenBuilder, program: JetCodeg
         .Result(_, error) -> error
         else -> unwrapped_type
     }
-    resolved := jet_codegen_resolve_field_by_name(program.modules, builder.function.module_identity, builder.generic_type_names, report_type, field)
+    resolved := jet_codegen_resolve_field_by_name(program.modules, builder.function.module_identity, builder.generic_type_names, report_type, field, builder.function.key)
     value := jet_codegen_lower_expr(&builder, program, receiver)
     carrier := jet_codegen_failure_carrier_for_type(receiver.ty)
     member := if notes -> "notes" else -> "partial"
@@ -4542,20 +4542,7 @@ fn jet_codegen_field_owner_type(ty: Type) -> Type Never! {
 }
 
 fn jet_codegen_host_field_id(builder: JetCodegenBuilder, program: JetCodegenProgram, owner_type: Type, field_name: String) -> MIRFieldID Never! {
-    owner := jet_codegen_field_owner_type(owner_type)
-    if owner == {
-        .Tuple(fields) -> {
-            loop field in fields {
-                if field.name == field_name {
-                    mir_type := jet_codegen_lower_type_for_function(owner, builder, program)
-                    return mir_field_id("{mir_type_identity_key(mir_type)}::{field_name}")
-                }
-            }
-            panic("checked tuple projection field is missing")
-        }
-        else -> {}
-    }
-    resolved := jet_codegen_resolve_field_by_name(program.modules, builder.function.module_identity, builder.generic_type_names, owner, field_name)
+    resolved := jet_codegen_resolve_field_by_name(program.modules, builder.function.module_identity, builder.generic_type_names, owner_type, field_name, builder.function.key)
     jet_codegen_mir_field_id(resolved)
 }
 
@@ -6668,14 +6655,14 @@ fn jet_codegen_lower_index_hook(builder: &JetCodegenBuilder, program: JetCodegen
 
 fn jet_codegen_lower_layout_field_index(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, base: TExpr, field_name: String, line: Int) -> MIRValueID {
     field_type := Type.Named{name: "LayoutField"}
-    fields_ref :: jet_codegen_field_ref_by_name(program.modules, builder.function.module_identity, builder.generic_type_names, base.ty, "fields", Type.List{element: field_type})
+    fields_ref :: jet_codegen_field_ref_by_name(program.modules, builder.function.module_identity, builder.generic_type_names, base.ty, "fields", Type.List{element: field_type}, builder.function.key)
     fields := TExpr{ty: Type.List{element: field_type}, kind: TExprKind.Field{receiver: base, field: fields_ref}, span: expression.span, integer_bounds: None, cost: None}
     owner_key := "{builder.function.key}::layout-field-select@{expression.span.start}..{expression.span.end}"
     parameter_symbol := symbol_id(SymbolKind.Parameter, builder.function.module_identity, owner_key, "layout_field")
     parameter := tir_symbol_local("layout_field", expression.span, parameter_symbol)
     parameter.deref = true
     parameter_value := TExpr{ty: field_type, kind: TExprKind.Local{local: parameter}, span: expression.span, integer_bounds: None, cost: None}
-    name_ref :: jet_codegen_field_ref_by_name(program.modules, builder.function.module_identity, builder.generic_type_names, field_type, "name", Type.String)
+    name_ref :: jet_codegen_field_ref_by_name(program.modules, builder.function.module_identity, builder.generic_type_names, field_type, "name", Type.String, builder.function.key)
     name := TExpr{ty: Type.String, kind: TExprKind.Field{receiver: parameter_value, field: name_ref}, span: expression.span, integer_bounds: None, cost: None}
     expected_name := TExpr{ty: Type.String, kind: TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: field_name}}}, span: expression.span, integer_bounds: None, cost: None}
     predicate := TExpr{ty: Type.Bool, kind: TExprKind.Binary{op: TBinaryOp.Eq, overflow: false, line: line, lhs: name, rhs: expected_name}, span: expression.span, integer_bounds: None, cost: None}

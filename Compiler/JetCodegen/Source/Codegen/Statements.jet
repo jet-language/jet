@@ -981,7 +981,7 @@ fn jet_codegen_for_in_tuple_field_id(builder: JetCodegenBuilder, program: JetCod
             return mir_field_id("{mir_type_identity_key(tuple_type)}::{member}")
         }
         else -> {
-            resolved := jet_codegen_resolve_field_by_name(program.modules, builder.function.module_identity, builder.generic_type_names, untagged, member)
+            resolved := jet_codegen_resolve_field_by_name(program.modules, builder.function.module_identity, builder.generic_type_names, untagged, member, builder.function.key)
             return jet_codegen_mir_field_id(resolved)
         }
     }
@@ -1298,7 +1298,7 @@ fn jet_codegen_lower_index_field_assign(builder: &JetCodegenBuilder, program: Je
     element_type := jet_codegen_index_element_type(assign.base.ty, kind)
     location := jet_codegen_assignment_panic_location(&builder, program, span, assign.is_map)
     base_place := jet_codegen_index_place(&builder, program, assign.base, assign.index, tir_kind, element_type, MIRAccess.Write, location, span)
-    resolved := jet_codegen_resolve_field_by_name(program.modules, builder.function.module_identity, builder.generic_type_names, element_type, assign.field)
+    resolved := jet_codegen_resolve_field_by_name(program.modules, builder.function.module_identity, builder.generic_type_names, element_type, assign.field, builder.function.key)
     place := jet_codegen_project_field_place(&builder, program, base_place, span, assign.field_ty, jet_codegen_mir_field_id(resolved))
     assigned := if assign.op == {
         None -> right

@@ -1,0 +1,51 @@
+// Production field-owner contracts, assembled with the canonical L4 sources.
+// These exercise checked metadata directly, including internal guard/tag shapes
+// that source syntax cannot name and Pin without invoking an unrelated emitter.
+fn fc_require(ok: Bool, name: String) {
+    if !ok -> panic("field owner contract failed: {name}")
+}
+
+fn fc_field(owner: Type, member: String) -> JetCodegenResolvedField Never! {
+    jet_codegen_resolve_field_by_name([SemaGraphModuleResult]{}, "", [String]{}, owner, member, "field-owner-contract")
+}
+
+fn fc_tuple_owners() {
+    tuple :: Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "left", ty: Type.Int}, TypeTupleField{name: "right", ty: Type.String}}}
+    expected :: jet_codegen_mir_field_id(fc_field(tuple, "left"))
+    fc_require(jet_codegen_mir_field_id(fc_field(tuple, "0")).value == expected.value, "tuple numeric position")
+    fc_require(jet_codegen_mir_field_id(fc_field(tuple, "+0")).value == expected.value, "unsigned decimal plus sign")
+    fc_require(fc_field(tuple, "01").field_name == "right", "tuple leading zero")
+    tagged :: Type.Tagged{marker: TagMarker.Internal{internal_tag: InternalTag.SharedGuardRead}, inner: tuple}
+    fc_require(jet_codegen_mir_field_id(fc_field(tagged, "left")).value == expected.value, "tagged tuple")
+    loop wrapper in [String]{"SharedGuard", "CellReadGuard", "CellEditGuard", "Pin"} {
+        guarded :: Type.Apply{name: wrapper, args: [Type]{tagged}}
+        fc_require(jet_codegen_mir_field_id(fc_field(guarded, "left")).value == expected.value, "{wrapper} tuple")
+    }
+    fc_require(jet_codegen_field_position("-1") == None, "negative position is not unsigned")
+    fc_require(jet_codegen_field_position(" 1") == None, "position whitespace is not accepted")
+    fc_require(jet_codegen_field_position("1_0") == None, "position separators are not accepted")
+    fc_require(jet_codegen_field_position("18446744073709551616") == None, "usize overflow is not a position")
+    fc_require(jet_codegen_field_owner_type(Type.Option{inner: tuple}) == Type.Option{inner: tuple}, "Option remains a payload boundary")
+    fc_require(jet_codegen_field_owner_type(Type.Shared{inner: tuple}) == Type.Shared{inner: tuple}, "Shared remains a handle boundary")
+}
+
+fn fc_nominal_owners() {
+    range :: fc_field(Type.Named{name: "Range"}, "lo")
+    fc_require(range.owner_key == "Range" && range.field_name == "lo", "compiler-owned record")
+    measurement :: fc_field(Type.Apply{name: "Measurement", args: [Type]{Type.Int}}, "value")
+    fc_require(measurement.owner_key == "Measurement", "generic fields belong to the declaration")
+    payload :: fc_field(Type.Named{name: "WsError"}, "limit")
+    fc_require(payload.owner_key == "WsError::MessageTooLarge", "compiler-owned named enum payload")
+    loop name in [String]{"F32x4", "F64x2", "Vec2", "Vec3", "Vec4"} {
+        owner :: Type.Named{name: name}
+        fc_require(jet_codegen_mir_field_id(fc_field(owner, "1")).value == jet_codegen_mir_field_id(fc_field(owner, "y")).value, "{name} numeric lane")
+    }
+    diagnostic :: jet_codegen_field_resolution_ice("fixture-function", Type.Option{inner: Type.Int}, Type.Int, "left", "missing row")
+    fc_require(diagnostic.contains("fixture-function") && diagnostic.contains("left") && diagnostic.contains("kind Option") && diagnostic.contains("kind Int"), "diagnostic retains original and normalized kinds and function")
+}
+
+fn run() {
+    fc_tuple_owners()
+    fc_nominal_owners()
+    print("field owner contracts passed")
+}

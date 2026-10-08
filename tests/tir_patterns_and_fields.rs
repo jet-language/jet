@@ -980,6 +980,22 @@ fn tuple_field_pattern_tests_bindings_and_dispatch_run() {
     );
 }
 
+/// Indexed/optional tuple projections and guard-backed record fields resolve
+/// through the same declaration/tuple field identity as direct projections.
+#[test]
+fn field_owner_indexed_optional_and_guard_projections_run() {
+    if !have_rustc() {
+        return;
+    }
+    let source = include_str!("../Examples/features/patterns/field_owner_shapes.jet");
+    let (code, stdout) = build_and_run("tir_field_owner_shapes", source);
+    assert_eq!(code, 0);
+    assert_eq!(
+        stdout,
+        include_str!("../Examples/features/expected/patterns/field_owner_shapes.out")
+    );
+}
+
 /// c109 (B4): a user-enum variant if-let condition `if m == .Ping(n) { } else { }`
 /// routes through the TIR and binds the payload, matching the old if-let baseline.
 #[test]
