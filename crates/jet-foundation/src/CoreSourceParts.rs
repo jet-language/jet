@@ -49,6 +49,7 @@ pub const CORE_TEXT_STRING_SOURCE_PART: CorePrivateSourcePart = CorePrivateSourc
         alias: CORE_TEXT_STRING_ALIAS,
         path: "Core/text/string.jet",
         owned_members: &[],
+        impl_types: &[],
     },
 };
 
@@ -69,6 +70,7 @@ pub const CORE_ENCODING_STREAM_SOURCE_PART: CorePrivateSourcePart = CorePrivateS
         alias: CORE_ENCODING_STREAM_ALIAS,
         path: "Core/encoding/stream.jet",
         owned_members: &["json_reader", "json_writer", "jsonl_reader", "jsonl_writer", "object_entries", "object_from_entries", "bytes_payload", "typed_number", "typed_string", "text_from_bytes", "budget", "reserve", "__reserve_checked", "validate_limits", "byte_at", "int_is_binary64", "jcs_number", "utf16_units", "compare_units", "sort_by_units"],
+        impl_types: &[],
     },
 };
 
@@ -79,6 +81,7 @@ pub const CORE_ENCODING_CBOR_PARSE_SOURCE_PART: CorePrivateSourcePart = CorePriv
         alias: CORE_ENCODING_CBOR_PARSE_ALIAS,
         path: "Core/encoding/cbor_parse.jet",
         owned_members: &["parse", "narrow_bits", "widen_float"],
+        impl_types: &[],
     },
 };
 
@@ -89,6 +92,7 @@ pub const CORE_ENCODING_CBOR_STREAM_SOURCE_PART: CorePrivateSourcePart = CorePri
         alias: CORE_ENCODING_CBOR_STREAM_ALIAS,
         path: "Core/encoding/cbor_stream.jet",
         owned_members: &["reader", "writer"],
+        impl_types: &[],
     },
 };
 pub const CORE_FILES_PATH_COMPONENTS_SOURCE_PART: CorePrivateSourcePart = CorePrivateSourcePart {
@@ -98,6 +102,7 @@ pub const CORE_FILES_PATH_COMPONENTS_SOURCE_PART: CorePrivateSourcePart = CorePr
         alias: "__core_files_path_components",
         path: "Core/files/runtime/kernel_path_components.jet",
         owned_members: &["from_text", "is_absolute", "components", "components_span", "next", "next_back", "parent_span", "strip_prefix_span", "owned_span", "push", "main_separator"],
+        impl_types: &[],
     },
 };
 
@@ -108,6 +113,7 @@ pub const CORE_ENCODING_XML_ENGINE_SOURCE_PART: CorePrivateSourcePart = CorePriv
         alias: CORE_ENCODING_XML_ENGINE_ALIAS,
         path: "Core/encoding/xml_engine.jet",
         owned_members: &["clean", "parse_document", "parse_document_with", "parse_document_bytes_with", "render_document", "render_document_bytes", "canonical_document", "document_root", "expanded_name_parts", "lookup_attribute", "element_content", "project_document_for_decode", "stream_event_value"],
+        impl_types: &[],
     },
 };
 
@@ -118,6 +124,7 @@ pub const CORE_ENCODING_XML_KERNEL_SOURCE_PART: CorePrivateSourcePart = CorePriv
         alias: CORE_ENCODING_XML_KERNEL_ALIAS,
         path: "Core/encoding/xml_kernel.jet",
         owned_members: &["parse_document", "parse_document_with", "parse_document_bytes_with", "render_document", "render_document_bytes", "canonical_document", "document_root", "expanded_name_parts", "lookup_attribute", "element_content", "project_document_for_decode", "public_error", "parse_options", "render_encoding", "lexical_policy", "canonical_options", "field_error"],
+        impl_types: &[],
     },
 };
 pub const CORE_CRYPTO_JETC_SOURCE_PART: CorePrivateSourcePart = CorePrivateSourcePart {

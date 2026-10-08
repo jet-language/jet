@@ -1979,7 +1979,7 @@ function parseCoreSource(source) {
       continue;
     }
     const sourceModule = line.match(
-      /^source_module\s+([A-Za-z_][A-Za-z0-9_.]*)\s+path\s+([^\s]+)\s+alias\s+([A-Za-z_][A-Za-z0-9_]*)\s+owns\s+\{([^}]*)\}(?:\s+types\s+\{([^}]*)\})?$/,
+      /^source_module\s+([A-Za-z_][A-Za-z0-9_.]*)\s+path\s+([^\s]+)\s+alias\s+([A-Za-z_][A-Za-z0-9_]*)\s+owns\s+\{([^}]*)\}(?:\s+types\s+\{([^}]*)\})?(?:\s+impls\s+\{([^}]*)\})?$/,
     );
     if (sourceModule) {
       const module = sourceModule[1];
@@ -1997,6 +1997,10 @@ function parseCoreSource(source) {
       const ownedTypes = sourceModule[5] === undefined
         ? []
         : coreList(sourceModule[5], "Core.jet line " + sourceLine);
+      // Owner-only impl admission never exports a type or changes its carrier.
+      const implTypes = sourceModule[6] === undefined
+        ? []
+        : coreList(sourceModule[6], "Core.jet line " + sourceLine);
       // Type-only Core sources may own nominals and static methods without free functions.
       if (!existsSync(join(ROOT, path))) {
         throw new Error("Core source module path does not exist at line " + sourceLine + ": " + path);
@@ -2009,6 +2013,7 @@ function parseCoreSource(source) {
         alias: alias,
         ownedMembers: ownedMembers,
         ownedTypes: ownedTypes,
+        implTypes: implTypes,
         sourceLine: sourceLine,
       });
       continue;
@@ -2494,6 +2499,7 @@ function generatedCoreExports(source, declarations) {
     "    pub alias: &'static str,",
     "    pub path: &'static str,",
     "    pub owned_members: &'static [&'static str],",
+    "    pub impl_types: &'static [&'static str],",
     "}",
     "",
     "/// One source-owned Core nominal: `name` is declared by the Core source at",
@@ -2557,7 +2563,7 @@ function generatedCoreExports(source, declarations) {
       "\", path: \"" + entry.path +
       "\", owned_members: &[" +
       entry.ownedMembers.map(function (member) { return "\"" + member + "\""; }).join(", ") +
-      "] },");
+      "], impl_types: &[" + entry.implTypes.map(type => "\"" + type + "\"").join(", ") + "] },");
   }
   lines.push("];", "");
   lines.push("pub const CORE_SOURCE_OWNED_TYPES: &[CoreSourceOwnedType] = &[");

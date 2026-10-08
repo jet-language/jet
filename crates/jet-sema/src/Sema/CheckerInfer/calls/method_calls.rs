@@ -5893,7 +5893,7 @@ impl<'a> Checker<'a> {
             }
             // D-FOUND-REALTIME1=A: callback streams own a typed, bounded
             // lifecycle surface; receipt/deadline reads do not block.
-            if handle_ty == "RealtimeStream" {
+            if handle_ty == "RealtimeStream" && self.resolve_opaque_method_sig(handle_ty, method).is_none() {
                 if let Some(ret) = crate::Sema::realtime_stream_method_return(method, args.len()) {
                     for arg in args.iter_mut() {
                         self.infer(&mut arg.expr);
@@ -7654,7 +7654,9 @@ impl<'a> Checker<'a> {
                 return result;
             }
         }
-        if let Some(ret) = Collections::builtin_method_return(&recv_ty, method, args.len(), false) {
+        if let Some(ret) = Collections::builtin_method_return(&recv_ty, method, args.len(), false)
+            .filter(|_| !matches!(&recv_ty, Type::Named(name) | Type::Apply { name, .. }
+                if self.resolve_opaque_method_sig(name, method).is_some())) {
             let nominal_recv = match &recv_ty {
                 Type::Named(name) => Some(name.as_str()),
                 Type::Apply { name, args } if name == "Atomic" && args.len() == 1 => {
@@ -7886,7 +7888,7 @@ impl<'a> Checker<'a> {
         let builtin_methods = Collections::builtin_method_names(&recv_ty);
         if operator_signature.is_none() && !builtin_methods.is_empty()
             && !matches!(&recv_ty, Type::Named(name) | Type::Apply { name, .. }
-                if self.source_owns_nominal(name))
+                if self.source_owns_nominal(name) || self.resolve_opaque_method_sig(name, method).is_some())
             && !matches!(
                 &recv_ty,
                 Type::Apply { name, .. }
