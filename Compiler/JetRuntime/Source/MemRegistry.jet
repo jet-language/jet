@@ -10,10 +10,10 @@ mem_registry_root := I64{0}
 
 // runtime-init: 1
 #Export(c) fn jet_rt_mem_registry_init() {
-    if mem_registry_root != I64{0} -> return
+    if (mem_registry_root != I64{0}) -> return
     root :: jet_rt_alloc(I64{56}, I64{8})
     at := I64{0}
-    loop at < I64{56} {
+    loop at < (I64{56}) {
         sync_store(root + at, I64{0})
         at += I64{8}
     }
