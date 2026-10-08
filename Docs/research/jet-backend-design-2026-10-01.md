@@ -2229,6 +2229,24 @@ concurrent shared increments and last-owner release with `--wrap=jet_rt_free`.
 Its stdout is expected output only. Native method-rail admission and
 seed-route regeneration remain composed native-backend gates.
 
+`EmailError.jet` provides the three retained Error clone/drop/equality exports
+on the registry-plain `EmailError` layout, not on a Rust enum or private facade.
+`Lower/Lower.jet:439,443` and `Lower/Values.jet:49-55,65-74,111-127,137-145`
+give a 40-byte enum box: tag at 0; owned operation Text at 8; nullable server
+Option-box pointer at 16; nullable code Option-box pointer at 24; owned reason
+Text at 32. Both Option boxes are eight bytes, with their payload at zero.
+Clone deep-copies Text and Option boxes and retains the exact Int code without
+narrowing; drop releases owned contents before their boxes. Equality checks tag
+first, then operation, server, code and reason in declaration order. Producers
+are checked source literals and native SMTP, so no constructor facade is exported.
+`EmailErrorWitness.c` uses real allocator/Text/Int providers to build that native
+layout and checks all eleven tags, nullable fields, raw text, arbitrary-precision
+codes, clone independence and exactly-once release. Its stdout fixture is an
+expectation, not an execution receipt. Post-freeze native cutover must retire the
+opaque `EmailError`→`Error` rows in `RuntimeRoutes.jet`, admit the canonical plain
+enum at the Core-definition override and permit real source literals in
+`Places.jet`; native execution and obsolete seed-export suppression remain gates.
+
 ### Native UI scalar and record carriers
 
 `UiCarriersABI.jet` in JetBackend/Source defines opaque native-private
