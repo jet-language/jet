@@ -74,6 +74,7 @@ const names = new Set(readFileSync(join(root, "Compiler/JetRuntime/exports.list"
 validateRuntimeOwnership(names, runtimeExportSignatures(root));
 const routeNames = new Set([...readFileSync(join(root, "Compiler/JetBackend/Source/Lower/RuntimeRoutes.jet"), "utf8")
   .matchAll(/LowerRoute\{symbol: "[^"]+", export: "([^"]+)"/g)].map((match) => match[1]));
+assert.equal(routeNames.has("jet_rt_int_drop"), names.has("jet_rt_int_drop"), "Int destructor route must follow Jet ownership");
 const rustText = readFileSync(join(root, "crates/jet-codegen/src/Prelude/Core/CAbiRoutes.rs"), "utf8");
 const rustNames = new Set([...rustText.matchAll(/pub extern "C" fn ([A-Za-z_]\w*)\(/g)].map((match) => match[1]));
 const ported = [...names].filter((name) => routeNames.has(name));
