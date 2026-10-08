@@ -1,6 +1,7 @@
 // Compiler-AST policy guards are isolated from the filesystem/manifest package.
 // This package requires compiler packages with their Tests/ trees excluded.
 use jet_foundation.[Program, Expr, Item, Stmt, Type, Func, StructDef, Binding, BinOp, UnOp, StrPart, StrFormat, AccessConvention, OrFallback, ForKind, LValue, OutputKind, TypedLitBody, Marker, Span, Pattern, CallArg, expr_span, DIAGNOSTIC_ERROR]
+use jet_foundation.CORE_MODULE_EXPORTS
 use jet_parser.parse_source
 use jet_lexer.[lex, Token, TOKEN_IDENT, TOKEN_LINE_COMMENT, TOKEN_BLOCK_COMMENT, TOKEN_LBRACE, TOKEN_RBRACE]
 use core.files as policy_ast_files
@@ -1257,12 +1258,14 @@ fn policy_evaluate_program(manifest: PolicyManifest, path: String, row: PolicySo
         })
         if first_build == .Val(span) -> &violations.push(policy_occurrence(path, "first-hour-doc-recipe", "literal:jet-build", span))
     }
+    enabled := [Bool]{}
+    loop rule in rules -> &enabled.push(policy_applies(manifest, path, row, rule))
     policy_visit_program(program, (expression) -> {
         span :: expr_span(expression)
         if policy_is_process_input(expression, aliases) -> &argv_sites.push(span)
         loop index in 0..<rules.len() {
             rule :: rules[index]
-            if !policy_applies(manifest, path, row, rule) -> next
+            if !enabled[index] -> next
             matches :: if rule == {
                 "raw-cli-fixed-shape" -> policy_is_process_input(expression, aliases)
                 "raw-cli-builder-shape" -> policy_is_process_argv_view(expression, aliases)
@@ -1371,7 +1374,7 @@ fn policy_has_jet_run_command(source: String) -> Bool {
             loop raw in fence.lines() {
                 line :: raw.trim()
                 if line.is_empty() || line.starts_with("#") -> next
-                words :: line.split_whitespace().to_list()
+                words :: policy_split_whitespace(line)
                 index := 0
                 loop index < words.len() && words[index] != "#" {
                     word :: words[index]
@@ -1677,8 +1680,8 @@ fn policy_check_shapes(cases: [PolicyShapeCase]) PolicyError! {
     })
     lower := "\"text\""
     loop index in 0..<26 {
-        from :: String.from_bytes([U8]{U8.from_int(65 + index)}) ?? panic("ASCII")
-        to :: String.from_bytes([U8]{U8.from_int(97 + index)}) ?? panic("ASCII")
+        from :: String.from_bytes([U8]{U8.from_int(65 + index) ?? panic("ASCII uppercase byte")}) ?? panic("ASCII")
+        to :: String.from_bytes([U8]{U8.from_int(97 + index) ?? panic("ASCII lowercase byte")}) ?? panic("ASCII")
         lower += ".replace(\"{from}\", \"{to}\")"
     }
     violations :: policy_evaluate_source(policy_manifest(), "Jetpack/PackageModel/Source/Envelope/PathLaw.jet", "fn run() {{ value :: {lower} }}")
@@ -1744,4 +1747,61 @@ fn policy_check_shapes(cases: [PolicyShapeCase]) PolicyError! {
         loop producer in manifest.producers { if producer.selector == selector -> found = true }
         assert(found, "missing CLI starter producer row: {selector}")
     }
+}
+
+// corelib_parts/system.rs:1027-1041. Use the compiler's built module registry,
+// not Core/ directory names: unregistered files are not necessarily modules.
+#Test("core_reference_lists_every_built_core_module") {
+    docs :: policy_ast_files.read("Docs/spec/reference/core-library.md") ?? panic("core library reference must exist")
+    missing := [String]{}
+    loop module_entry in CORE_MODULE_EXPORTS {
+        if module_entry.module_name == "core" -> next
+        if !docs.contains("`{module_entry.module_name}`") -> &missing.push(module_entry.module_name)
+    }
+    assert(missing.is_empty(), "Docs/spec/reference/core-library.md must list every built Core module from KNOWN_CORE_MODULES: {missing}")
+}
+
+// Rust str::split_whitespace uses Unicode White_Space, not just ASCII space.
+// Scan byte spans directly; only the returned words allocate.
+fn policy_space_width(bytes: [U8], index: Int) -> Int {
+    first :: Int.from_u8(bytes[index])
+    if first == 32 || (first >= 9 && first <= 13) -> return 1
+    if index + 1 >= bytes.len() -> return 0
+    second :: Int.from_u8(bytes[index + 1])
+    if first == 194 && (second == 133 || second == 160) -> return 2
+    if index + 2 >= bytes.len() -> return 0
+    third :: Int.from_u8(bytes[index + 2])
+    if first == 225 && second == 154 && third == 128 -> return 3
+    if first == 226 && second == 128 && ((third >= 128 && third <= 138) || third == 168 || third == 169 || third == 175) -> return 3
+    if first == 226 && second == 129 && third == 159 -> return 3
+    if first == 227 && second == 128 && third == 128 -> return 3
+    0
+}
+fn policy_split_whitespace(text: String) -> [String] {
+    bytes :: text.bytes()
+    words := [String]{}
+    index := 0
+    start := -1
+    loop index < bytes.len() {
+        width :: policy_space_width(bytes, index)
+        if width > 0 {
+            if start >= 0 -> &words.push(policy_slice_bytes(text, start, index))
+            start = -1
+            index += width
+        } else {
+            if start < 0 -> start = index
+            index += 1
+        }
+    }
+    if start >= 0 -> &words.push(policy_slice_bytes(text, start, bytes.len()))
+    words
+}
+#Test("corpus document shell words use Rust Unicode whitespace") {
+    nel :: String.from_bytes([U8]{194, 133}) ?? panic("NEL UTF-8")
+    nbsp :: String.from_bytes([U8]{194, 160}) ?? panic("NBSP UTF-8")
+    emspace :: String.from_bytes([U8]{226, 128, 131}) ?? panic("EM SPACE UTF-8")
+    assert_eq(policy_split_whitespace("jet{nel}run{nbsp}file"), [String]{"jet", "run", "file"})
+    assert(policy_has_jet_run_command("```bash\njet{emspace}run example.jet\n```"))
+    assert(!policy_has_jet_run_command("```bash\n# jet run\n```"))
+    assert(!policy_has_jet_run_command("```bash\njet # run\n```"))
 }
