@@ -4459,7 +4459,54 @@ fn jet_codegen_list_read_view(expression: TExpr, value: TExpr, access: AccessCon
     None
 }
 
+// Read P / Next from checked operand types; do not unify source method binders.
+fn jet_codegen_checked_geometry_transform_type_args(owner: Type, operation: String, args: [TExpr]) -> [Type]? Never! {
+    if owner == {
+        .Apply(name, owner_args) -> {
+            stock :: name == "Transform" || name.ends_with("::Transform")
+            generic :: name == "Transform2" || name.ends_with("::Transform2")
+            if !stock && !generic -> return None
+            if generic && owner_args.len() > 0 && owner_args[0] == Type.Float && (operation == "then" || operation == "inverse") -> return None
+            if operation == "inverse" -> return Val([Type]{})
+            if args.len() == 0 -> return None
+            if operation == "point" || operation == "point_at_depth" || operation == "ray" -> return Val([Type]{args[0].ty})
+            if operation == "then" && args[0].ty == .Apply(next_name, next_args) {
+                next_stock :: next_name == "Transform" || next_name.ends_with("::Transform")
+                next_generic :: next_name == "Transform2" || next_name.ends_with("::Transform2")
+                if stock != next_stock || generic != next_generic || next_args.len() == 0 -> return None
+                return Val([Type]{next_args[next_args.len() - 1]})
+            }
+        }
+        else -> {}
+    }
+    None
+}
+
 fn jet_codegen_lower_handle_method(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, receiver: TExpr, operation: THandleOp, args: [TExpr]) -> MIRValueID {
+    if operation == .MathMethod(_, method, _) {
+        type_args := jet_codegen_checked_geometry_transform_type_args(receiver.ty, method, args)
+        if type_args == .Val(checked_args) {
+            target := jet_codegen_geometry_source_target(builder, program, receiver.ty, method)
+            if target == .Val(source) {
+                returned :: jet_codegen_checked_method_return_type(builder, program, source, receiver.ty, checked_args)
+                owner :: jet_codegen_lower_type_for_function(receiver.ty, builder, program)
+                access := MIRAccess.Read
+                if source.kind == {
+                    .Method(convention, _) -> access = jet_codegen_lower_access(convention ?? panic("checked geometry source method has no receiver convention"))
+                    else -> panic("checked geometry source method is not an instance function")
+                }
+                call_args := [MIRCallArg]{jet_codegen_method_receiver_arg(&builder, program, receiver, access)}
+                loop argument in args {
+                    value :: jet_codegen_lower_expr(&builder, program, argument)
+                    &call_args.push(jet_codegen_numeric_call_arg(value, argument.span))
+                }
+                lowered_types := [MIRType]{}
+                loop ty in checked_args -> &lowered_types.push(jet_codegen_lower_type_for_function(ty, builder, program))
+                jet_codegen_note_core_module(&builder, program, source.module_name)
+                return jet_codegen_emit_value(&builder, program, expression.span, returned, MIROperation.Call{callee: MIRCallee.Method{function: jet_codegen_function_id(source), owner: owner}, args: call_args, type_args: lowered_types})
+            }
+        }
+    }
     if operation == {
         .SerdeEncode -> {
             if args.len() != 0 -> panic("checked Serde encode has unexpected arguments")
@@ -6917,4 +6964,25 @@ fn jet_codegen_lower_take_pattern(builder: &JetCodegenBuilder, program: JetCodeg
 #Test("Int.abs extends the existing source helper gate by one exact key") {
     assert_eq(jet_codegen_precise_source_helper("Int", "abs"), Val("abs"))
     assert_eq(jet_codegen_precise_source_helper("Int", "add"), None)
+}
+
+#Test("Geometry P and Next binders read checked operand facts") {
+    stock :: Type.Apply{name: "Transform", args: [Type]{Type.Named{name: "Screen"}, Type.Named{name: "World"}}}
+    next_type :: Type.Apply{name: "Transform", args: [Type]{Type.Named{name: "World"}, Type.Named{name: "Device"}}}
+    next :: TExpr{ty: next_type, kind: TExprKind.Unit, span: Span{start: 0, end: 0}, integer_bounds: None, cost: None}
+    assert_eq(jet_codegen_checked_geometry_transform_type_args(stock, "then", [TExpr]{next}), Val([Type]{Type.Named{name: "Device"}}))
+    point_type :: Type.Apply{name: "Point2", args: [Type]{Type.Float, Type.Named{name: "Screen"}}}
+    point :: TExpr{ty: point_type, kind: TExprKind.Unit, span: Span{start: 0, end: 0}, integer_bounds: None, cost: None}
+    operations :: [String]{"point", "point_at_depth", "ray"}
+    loop operation in operations {
+        assert_eq(jet_codegen_checked_geometry_transform_type_args(stock, operation, [TExpr]{point}), Val([Type]{point_type}))
+    }
+    narrow :: Type.Apply{name: "Transform2", args: [Type]{Type.Float32, Type.Named{name: "Screen"}, Type.Named{name: "World"}}}
+    narrow_next :: Type.Apply{name: "Transform2", args: [Type]{Type.Float32, Type.Named{name: "World"}, Type.Named{name: "View"}}}
+    checked_next :: TExpr{ty: narrow_next, kind: TExprKind.Unit, span: Span{start: 0, end: 0}, integer_bounds: None, cost: None}
+    assert_eq(jet_codegen_checked_geometry_transform_type_args(narrow, "then", [TExpr]{checked_next}), Val([Type]{Type.Named{name: "View"}}))
+    held :: Type.Apply{name: "Transform2", args: [Type]{Type.Float, Type.Named{name: "Screen"}, Type.Named{name: "World"}}}
+    assert_eq(jet_codegen_checked_geometry_transform_type_args(held, "inverse", [TExpr]{}), None)
+    cross :: TExpr{ty: held, kind: TExprKind.Unit, span: Span{start: 0, end: 0}, integer_bounds: None, cost: None}
+    assert_eq(jet_codegen_checked_geometry_transform_type_args(stock, "then", [TExpr]{cross}), None)
 }

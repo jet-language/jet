@@ -2010,6 +2010,10 @@ source-owned declarations. Bare, `math.Type` (when imported), and
 The fourteen coordinate and transform constructors dispatch to their
 source-owned declarations through normal associated MIR calls, with checked
 owner type arguments preserved.
+Same-nominal transform methods dispatch to source methods using the checker's
+point type (`P`) and next transform's output space (`Next`). Stock/generic
+nominal changes remain owner-gated by D-TRANSFORM-IDENTITY1; their accepted
+set and native dispatch are unchanged and those audit rows remain uncredited.
 `Transform` and `Transform2` keep the seed's f64 payload representation;
 scalar and space parameters are phantom identities. Composition checks
 nonzero middle-frame identity, inverse rejects nonfinite determinants and
