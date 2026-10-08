@@ -126,13 +126,46 @@ export function cpuAt(samples, tNs) {
   return samples[samples.length - 1].cpuNs;
 }
 
-// JET_TRACE_FILE events: one JSON object per line, array maybe unterminated.
-export function readTrace(file) {
+// JET_TRACE_FILE is an open array of newline-terminated object/comma rows.
+// Live readers may see a partial last row; completed proofs must bind the
+// producer's process identity to a successful, independently recorded run.
+export function readTrace(file, { completedProcess } = {}) {
+  const text = fs.readFileSync(file, 'utf8');
+  const strict = completedProcess !== undefined;
+  if (strict && (completedProcess.exitCode !== 0 ||
+      !Number.isSafeInteger(completedProcess.pid) || completedProcess.pid <= 0 ||
+      !Number.isSafeInteger(completedProcess.startedUnixMs) ||
+      !Number.isSafeInteger(completedProcess.finishedUnixMs) ||
+      completedProcess.startedUnixMs > completedProcess.finishedUnixMs)) {
+    throw new Error('completed trace requires successful recorded process identity');
+  }
+  if (strict && (!text.startsWith('[\n') || !text.endsWith('\n'))) {
+    throw new Error('invalid or truncated completed trace stream');
+  }
   const events = [];
-  for (const raw of fs.readFileSync(file, 'utf8').split('\n')) {
+  const lines = text.split('\n');
+  for (const [index, raw] of lines.entries()) {
+    if (strict && (index === 0 || index === lines.length - 1)) continue;
+    if (strict && (!raw.startsWith('{') || !raw.endsWith('},'))) {
+      throw new Error('invalid or truncated completed trace event');
+    }
     const line = raw.trim().replace(/,$/, '');
     if (!line.startsWith('{')) continue;
-    try { events.push(JSON.parse(line)); } catch { /* a half-written last line */ }
+    try {
+      events.push(JSON.parse(line));
+    } catch (error) {
+      if (strict) throw new Error('malformed completed trace event', { cause: error });
+      // A live producer may still be writing the last event.
+    }
+  }
+  if (strict) {
+    const starts = events.filter(event => event.name === 'trace.start' && event.ph === 'i');
+    if (starts.length !== 1 || !Number.isSafeInteger(starts[0].args?.unix_ms) ||
+        starts[0].args.unix_ms < completedProcess.startedUnixMs ||
+        starts[0].args.unix_ms > completedProcess.finishedUnixMs ||
+        events.some(event => event.pid !== completedProcess.pid)) {
+      throw new Error('completed trace does not match the recorded process identity');
+    }
   }
   return events;
 }
