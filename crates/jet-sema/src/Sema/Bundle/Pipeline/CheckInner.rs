@@ -2407,7 +2407,7 @@ fn drop_core_source_lints(
 /// Reports pushed while one module is processed belong to that module. A
 /// non-entry module's located reports carry it as their origin, so they render
 /// against its own file instead of at a byte offset of the entry file.
-fn attach_module_origin(
+pub(super) fn attach_module_origin(
     module: &crate::AST::LoadedModule,
     is_entry: bool,
     diags: &mut [Diagnostic],

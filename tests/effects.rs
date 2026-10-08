@@ -126,6 +126,41 @@ fn run() {}
 }
 
 #[test]
+fn imported_effect_boundary_diagnostic_keeps_its_source_origin() {
+    let root = common::unique_tmp("jet_imported_effect_origin");
+    fs::create_dir_all(&root).unwrap();
+    let imported = root.join("worker.jet");
+    let imported_source = "\n\n\npub fn work() -[Net]> { print(\"work\") }\n";
+    fs::write(&imported, imported_source).unwrap();
+    let entry = root.join("main.jet");
+    let entry_source = "use \"./worker\" as worker\nfn run() { worker.work() }\n";
+    fs::write(&entry, entry_source).unwrap();
+
+    let (diagnostics, _, _) =
+        jet::Driver::check_file_with_effect_facts(entry.to_str().unwrap(), None, false);
+    let diagnostic = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "E0740" && diagnostic.what.contains("work"))
+        .expect("the imported function exceeds its declared effect bound");
+    let origin = diagnostic
+        .origin()
+        .expect("imported effect report needs an origin");
+    assert_eq!(std::path::Path::new(&origin.path), imported.as_path());
+    assert_eq!(origin.source.as_str(), imported_source);
+    let span = diagnostic
+        .span
+        .expect("effect report needs its declared-row span");
+    assert_eq!(&origin.source[span.start..span.end], "Net");
+    let rendered = jet::render_diagnostics(
+        entry.to_str().unwrap(),
+        entry_source,
+        std::slice::from_ref(diagnostic),
+    );
+    assert!(rendered.contains("worker.jet:4:"), "{rendered}");
+    assert!(!rendered.contains("main.jet:"), "{rendered}");
+}
+
+#[test]
 fn cross_module_same_name_effects_keep_qualified_rows() {
     let root = common::unique_tmp("jet_effect_collision");
     fs::create_dir_all(&root).unwrap();

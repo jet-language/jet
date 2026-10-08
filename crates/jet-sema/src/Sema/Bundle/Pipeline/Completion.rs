@@ -440,6 +440,11 @@ pub(super) fn complete_bundle_check(
                 }
             }
         }
+        super::CheckInner::attach_module_origin(
+            module,
+            module_index == bundle.entry,
+            &mut diags[phase_diagnostic_start..],
+        );
         mark_failed_pending_functions(
             &diags[phase_diagnostic_start..],
             &module_pending_diagnostics[module_index],
@@ -451,6 +456,11 @@ pub(super) fn complete_bundle_check(
     for (module_index, module) in bundle.modules.iter().enumerate() {
         let phase_diagnostic_start = diags.len();
         apply_effect_via(&module.items, &mut effect_summaries, &mut diags);
+        super::CheckInner::attach_module_origin(
+            module,
+            module_index == bundle.entry,
+            &mut diags[phase_diagnostic_start..],
+        );
         mark_failed_pending_functions(
             &diags[phase_diagnostic_start..],
             &module_pending_diagnostics[module_index],
@@ -624,6 +634,11 @@ pub(super) fn complete_bundle_check(
             module_alias,
             &public_reachability.nodes_with("secret", Effect::Secret.name()),
             &mut diags,
+        );
+        super::CheckInner::attach_module_origin(
+            module,
+            module_index == bundle.entry,
+            &mut diags[phase_diagnostic_start..],
         );
         mark_failed_pending_functions(
             &diags[phase_diagnostic_start..],
