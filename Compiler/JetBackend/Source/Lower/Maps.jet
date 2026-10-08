@@ -131,7 +131,7 @@ fn lower_map_key_order(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MI
 fn lower_map_drop_value(p: MIRProgram, m: &LowerModule, f: &LowerFunction, value: LIRValueID, ty: MIRType) Never! {
     repr :: lower_repr(p, ty)
     if repr == .Inline(_) -> return lower_inline_drop(p, &m, &f, value, ty)
-    if !lower_needs_drop(p, ty) -> return
+    if !lower_needs_drop(p, m, ty) -> return
     cell :: lower_pointer(&f)
     lower_emit(&f, LIRInst.StackSlot{dst: cell, size: 8, align: 8})
     lower_emit(&f, LIRInst.Store{base: cell, offset: 0, value: value})
@@ -985,7 +985,7 @@ fn lower_helper_map_take(p: MIRProgram, m: &LowerModule, glue: LowerGlue, shape:
         lower_list_move(p, &f, boxed, slot, shape.value)
         taken = Val(boxed)
         if !removes {
-            if lower_needs_drop(p, shape.value) -> lower_glue_clone_fields(p, &m, &f, slot, boxed, [LowerGlueField]{LowerGlueField{offset: 0, ty: shape.value}})
+            if lower_needs_drop(p, m, shape.value) -> lower_glue_clone_fields(p, &m, &f, slot, boxed, [LowerGlueField]{LowerGlueField{offset: 0, ty: shape.value}})
             lower_seal(&f, LIRTerminator.Return{value: taken})
             return lir_builder_finish(f.builder)
         }

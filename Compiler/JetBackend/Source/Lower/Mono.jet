@@ -79,6 +79,7 @@ pub struct LowerPrepared {
     pub roots: [U64:MIRFunctionID]
     pub runtime_intrinsics: [U64:LowerRuntimeIntrinsic]{[U64:LowerRuntimeIntrinsic]{}}
     pub shared_sites_dynamic: Bool{true}
+    pub close_methods: [U64:[LowerCloseImpl]]
     // Preparation failed when non-empty; `functions` is then empty.
     pub issues: [LIRLoweringIssue]
     // Instance key -> descriptor row while the queue runs.
@@ -814,6 +815,7 @@ fn lower_mono_empty() -> LowerPrepared Never! {
         functions: [LowerPreparedFunction]{}, instances: [MIRFunction]{},
         source_rows: [U64:Int]{}, mir_rows: [U64:Int]{}, entry: None, issues: [LIRLoweringIssue]{},
         roots: [U64:MIRFunctionID]{},
+        close_methods: [U64:[LowerCloseImpl]]{},
         instance_rows: [String:Int]{}, original_descriptors: [U64:Int]{}, reserved_ids: [U64:String]{},
         declaration_rows: [U64:Int]{}, checked_types: LowerTypeIndex{rows: [U64:Int]{}, types: [MIRType]{}},
         type_rows: [String:Int]{}, type_work: [LowerMonoType]{}, render_seen: [String:Bool]{}, free_binders: [String:Bool]{},
@@ -842,6 +844,7 @@ fn lower_mono_index(p: MIRProgram, q: &LowerPrepared) Never! {
             if q.free_binders.get(parameter.name) == None -> &q.free_binders.add(parameter.name, true).drop("checked absent above")
         }
     }
+    q.close_methods = lower_close_index(p, q.source_rows)
     loop (row, definition) in p.types {
         if q.declaration_rows.get(definition.id.value) != None {
             lower_mono_issue(&q, "type declaration identity collision {definition.id.value}")

@@ -279,7 +279,7 @@ fn lower_static_global(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
         cell :: lower_static_storage(p, &m, &f, definition) ?? return
         dst :: lower_result(p, c, &m, &f, instruction) ?? return
         owned :: lower_value_owned(c, instruction.result ?? MIRValueID{value: U64.MAX})
-        if owned && lower_needs_drop(p, definition.ty) {
+        if owned && lower_needs_drop(p, m, definition.ty) {
             held :: lower_read_at(p, &f, cell, 0, definition.ty) ?? return
             return lower_clone_into(p, &m, &f, held, dst, definition.ty)
         }

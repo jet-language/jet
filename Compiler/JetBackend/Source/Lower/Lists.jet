@@ -308,7 +308,7 @@ fn lower_list_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
         lower_call_helper(&m, &f, "list.pop", ty, [LIRValueID]{list}, Val(dst))
     } else if clear_route {
         elem :: lower_list_element(ty) ?? return true
-        if lower_needs_drop(p, elem) {
+        if lower_needs_drop(p, m, elem) {
             data :: lower_list_data(&f, list)
             cap :: lower_list_word(&f, list, 8)
             done :: lower_new_block(&f)
@@ -500,7 +500,7 @@ fn lower_list_drop_glue(p: MIRProgram, m: &LowerModule, glue: LowerGlue, elem: M
 // Vec::clear and List drop visit the same owned elements in index order.
 // Clear leaves capacity and the allocation intact, so later push reuses it.
 fn lower_list_drop_elements(p: MIRProgram, m: &LowerModule, f: &LowerFunction, list: LIRValueID, data: LIRValueID, elem: MIRType) Never! {
-    if !lower_needs_drop(p, elem) -> return
+    if !lower_needs_drop(p, m, elem) -> return
     length :: lower_list_word(&f, list, 0)
     zero :: lower_const(&f, 0)
     head :: lower_new_block(&f)
@@ -548,7 +548,7 @@ fn lower_list_clone_glue(p: MIRProgram, m: &LowerModule, glue: LowerGlue, elem: 
     from :: lower_list_address(&f, source_data, at, stride)
     to :: lower_list_address(&f, target_data, at, stride)
     lower_list_move(p, &f, to, from, elem)
-    if lower_needs_drop(p, elem) -> lower_glue_clone_fields(p, &m, &f, from, to, [LowerGlueField]{LowerGlueField{offset: 0, ty: elem}})
+    if lower_needs_drop(p, m, elem) -> lower_glue_clone_fields(p, &m, &f, from, to, [LowerGlueField]{LowerGlueField{offset: 0, ty: elem}})
     next_at :: lower_word(&f)
     one :: lower_const(&f, 1)
     lower_emit(&f, LIRInst.Binary{dst: next_at, op: LIRBinaryOp.Add, left: at, right: one})
@@ -1135,7 +1135,7 @@ fn lower_new_like(f: &LowerFunction, value: LIRValueID) -> LIRValueID Never! {
 // copy: the clone glue's byte copy, then its member clones.
 fn lower_list_clone_element(p: MIRProgram, m: &LowerModule, f: &LowerFunction, from: LIRValueID, to: LIRValueID, elem: MIRType) Never! {
     lower_list_move(p, &f, to, from, elem)
-    if lower_needs_drop(p, elem) -> lower_glue_clone_fields(p, &m, &f, from, to, [LowerGlueField]{LowerGlueField{offset: 0, ty: elem}})
+    if lower_needs_drop(p, m, elem) -> lower_glue_clone_fields(p, &m, &f, from, to, [LowerGlueField]{LowerGlueField{offset: 0, ty: elem}})
 }
 
 // `xs.slice(start, end)` (Collections.rs jet_list_slice: both bounds clamp
@@ -1227,7 +1227,7 @@ fn lower_list_method_window(p: MIRProgram, c: LowerContext, m: &LowerModule, f: 
     lower_start(&f, some, [LIRValueID]{})
     chosen_address :: lower_list_address(&f, data, chosen, stride)
     value := lower_read_at(p, &f, chosen_address, 0, elem) ?? return true
-    if lower_needs_drop(p, elem) {
+    if lower_needs_drop(p, m, elem) {
         copied :: lower_new_like(&f, value)
         lower_clone_into(p, &m, &f, value, copied, elem)
         value = copied
