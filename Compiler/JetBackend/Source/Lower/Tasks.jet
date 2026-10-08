@@ -451,6 +451,7 @@ fn lower_helper_task_debug(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> L
 fn lower_task_stored_operands(p: MIRProgram, operation: MIROperation) -> [MIRValueID] Never! {
     stored := [MIRValueID]{}
     if operation == .Semantic(semantic) {
+        if semantic == .SharedGuardWait(_, _, _, predicate) -> &stored.push(predicate)
         if semantic == .TaskGroup(_, _, tasks) {
             loop value in tasks -> &stored.push(value)
         }

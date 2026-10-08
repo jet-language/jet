@@ -1678,3 +1678,27 @@ The callback executes once and is not retained or replayed by commit.
 return, missing/ambiguous scope locals, and edit-then-read of an immediate
 stage. These images require the Jet-authored STM provider; source fixtures do
 not establish runtime admission. Condition-wait support is independent.
+
+### Condition wait token ownership
+
+`Condition` is the Jet runtime's owned, clonable opaque handle. Its builtin
+constructor and both notification semantics call only
+`jet_rt_native_condition_{new,notify_one,notify_all}`; obsolete Rust notification
+routes are removed. `SharedGuardWait` borrows its payload through the existing
+Bool-byte callback adapter and calls
+`jet_rt_native_shared_guard_wait(guard_slot, editable, condition, env, invoke, failure_out)`.
+The eight-byte guard token is lent through ordinary native Write-back storage.
+After wait, the updated held/unheld token replaces both its place and the MIR
+receiver value before any stop-cleanup edge; unnamed temporaries are rebound
+the same way. A stopped call owns no initialized error output or Result box.
+On a running return, only verdict 1 transfers the error String; verdict 0
+becomes `Ok(Unit)`, without interpreting the successful Bool scratch as a String.
+
+`Tests/Fixtures/Conditions.jet` covers immediate predicates, Condition clone
+ownership, one/all notifications, temporary/local token refresh, read-guard
+provider refusal, Bool-byte output, and token refresh before Propagate cleanup.
+Its read-guard case is a hand-MIR provider-ABI witness, not a source-language
+admission: the source checker requires an edit guard for wait. Native images
+require the admitted unit-1 Condition provider after E2 FINAL composition;
+grammar checks and source fixtures do not establish native execution.
+

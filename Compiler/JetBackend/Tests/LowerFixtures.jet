@@ -852,6 +852,14 @@ fn run() {
         print("issue stm-scope: normal commit / early rollback ownership checks failed")
         clean = false
     }
+    if !fx_report_runtime("condition-immediate", fx_condition_immediate()) -> clean = false
+    if !fx_report_runtime("condition-temporary", fx_condition_temporary()) -> clean = false
+    if !fx_report_runtime("condition-read-error", fx_condition_read_error()) -> clean = false
+    if !fx_report_runtime("condition-poll", fx_condition_poll()) -> clean = false
+    if !fx_condition_checks() {
+        print("issue conditions: mutable token / Bool-byte / stop-gate checks failed")
+        clean = false
+    }
     if !fx_report("sets", fx_sets()) -> clean = false
     if !fx_report("queues", fx_queues()) -> clean = false
     if !fx_report("priority-queues", fx_priority_queues()) -> clean = false

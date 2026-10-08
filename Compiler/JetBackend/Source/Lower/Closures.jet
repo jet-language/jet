@@ -313,7 +313,7 @@ fn lower_indirect_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
     result :: if dst == .Val(value) -> Val(lower_value_layout(f, value)) else -> None
     signature :: lower_signature(&m, params, result)
     lower_emit(&f, LIRInst.Call{dst: dst, signature: signature, callee: LIRCallee.Value{value: code}, args: call_args})
-    loop writeback in writebacks -> lower_write_back(p, c, &m, &f, writeback)
+    loop writeback in writebacks -> lower_write_back(p, c, &m, &f, writeback, None)
 }
 
 // ---------------------------------------------------------------------------
