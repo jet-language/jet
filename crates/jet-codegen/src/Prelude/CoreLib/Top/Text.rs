@@ -1811,7 +1811,7 @@ fn jet_std_fs_list_dir(path: &String) -> Result<Vec<jet_std::DirEntry>, jet_std:
 
 pub(crate) fn jet_std_fs_list_dir_raw(path: &String) -> Result<Vec<jet_std::DirEntry>, jet_std::IOError> {
     let mut out = Vec::new();
-    let rd = std::fs::read_dir(path).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, path, e))?;
+    let rd = jet_fs_read_directory_raw(std::path::Path::new(path)).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, path, e))?;
     for entry in rd {
         let entry = entry.map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, path, e))?;
         let name = entry.file_name().to_string_lossy().to_string();
@@ -1819,7 +1819,7 @@ pub(crate) fn jet_std_fs_list_dir_raw(path: &String) -> Result<Vec<jet_std::DirE
             .join(&name)
             .to_string_lossy()
             .to_string();
-        let is_dir = entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
+        let is_dir = jet_fs_entry_type_raw(&entry).map(|ft| ft.is_dir()).unwrap_or(false);
         out.push(jet_std::DirEntry {
             name,
             path: full_path,
@@ -1837,7 +1837,7 @@ fn jet_std_fs_create_dir(path: &String) -> Result<(), jet_std::IOError> {
             "fault injected: FS.Write",
         ));
     }
-    std::fs::create_dir_all(path).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, path, e))
+    jet_std_fs_create_dir_all_raw(path)
 }
 fn jet_std_fs_create_dir_all(path: &String) -> Result<(), jet_std::IOError> {
     if jet_fault_should_fail("FS.Write") {
@@ -1847,7 +1847,11 @@ fn jet_std_fs_create_dir_all(path: &String) -> Result<(), jet_std::IOError> {
             "fault injected: FS.Write",
         ));
     }
-    std::fs::create_dir_all(path).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, path, e))
+    jet_std_fs_create_dir_all_raw(path)
+}
+pub(crate) fn jet_std_fs_create_dir_all_raw(path: &String) -> Result<(), jet_std::IOError> {
+    jet_fs_create_directory_tree_raw(std::path::Path::new(path))
+        .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, path, e))
 }
 fn jet_std_fs_remove_dir(path: &String) -> Result<(), jet_std::IOError> {
     if jet_fault_should_fail("FS.Write") {
@@ -1900,7 +1904,7 @@ fn jet_std_fs_copy(from: &String, to: &String) -> Result<(), jet_std::IOError> {
 }
 
 pub(crate) fn jet_std_fs_copy_raw(from: &String, to: &String) -> Result<(), jet_std::IOError> {
-    std::fs::copy(from, to)
+    jet_fs_copy_native_raw(std::path::Path::new(from), std::path::Path::new(to))
         .map(|_| ())
         .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, from, e))
 }
@@ -1928,22 +1932,21 @@ pub(crate) fn jet_std_fs_copy_dir_raw(from: &String, to: &String) -> Result<(), 
         dst: &std::path::Path,
         shown: &str,
     ) -> Result<(), jet_std::IOError> {
-        std::fs::create_dir_all(dst)
+        jet_fs_create_directory_tree_raw(dst)
             .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, shown, e))?;
-        for entry in std::fs::read_dir(src)
+        for entry in jet_fs_read_directory_raw(src)
             .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, shown, e))?
         {
             let entry = entry
                 .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, shown, e))?;
             let src_path = entry.path();
             let dst_path = dst.join(entry.file_name());
-            let ft = entry
-                .file_type()
+            let ft = jet_fs_entry_type_raw(&entry)
                 .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, shown, e))?;
             if ft.is_dir() {
                 copy_tree(&src_path, &dst_path, shown)?;
             } else if ft.is_file() {
-                std::fs::copy(&src_path, &dst_path)
+                jet_fs_copy_native_raw(&src_path, &dst_path)
                     .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, shown, e))?;
             }
         }
