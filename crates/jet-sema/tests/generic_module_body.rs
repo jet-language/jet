@@ -104,7 +104,10 @@ fn check_modules(sources: &[(&str, &str, &[(&str, usize)])]) -> (ProgramBundle, 
         modules.push(LoadedModule {
             path: PathBuf::from(path),
             display: (*path).into(),
-            alias: path.trim_end_matches(".jet").into(),
+            alias: path.strip_prefix("<corelib>/")
+                .and_then(|path| jet_foundation::CoreModuleExports::core_source_modules()
+                    .iter().find(|source| source.path == path))
+                .map_or_else(|| path.trim_end_matches(".jet").into(), |source| source.alias.into()),
             imports: std::mem::take(&mut program.imports),
             items: std::mem::take(&mut program.items),
             script_body: std::mem::take(&mut program.script_body),
@@ -145,6 +148,27 @@ fn check_modules(sources: &[(&str, &str, &[(&str, usize)])]) -> (ProgramBundle, 
     };
     let diagnostics = check_bundle(&mut bundle, CompileMode::Eval);
     (bundle, diagnostics)
+}
+
+#[test]
+fn core_source_decimal_decl_and_display_impl_replace_builtin_name() {
+    let (_, diagnostics) = check_modules(&[
+        ("<corelib>/Core/math/math.jet",
+         "struct Decimal { value: Int }\nimpl Decimal.Display { fn display(self) -> String Never! { \"decimal\" } }\n",
+         &[]),
+        ("pkg-a/src/main.jet", "fn run() {}\n", &[]),
+    ]);
+    let errors: Vec<_> = diagnostics.iter().filter(|d| d.severity == Severity::Error).collect();
+    assert!(errors.is_empty(), "Core Decimal errors: {errors:?}");
+}
+
+#[test]
+fn unrelated_core_module_cannot_redefine_decimal() {
+    let (_, diagnostics) = check_modules(&[
+        ("<corelib>/Core/time/time.jet", "struct Decimal { value: Int }\n", &[]),
+        ("pkg-a/src/main.jet", "fn run() {}\n", &[]),
+    ]);
+    assert!(diagnostics.iter().any(|d| d.code == "E0106"), "{diagnostics:?}");
 }
 
 fn error_codes(diags: &[Diagnostic]) -> Vec<&str> {
