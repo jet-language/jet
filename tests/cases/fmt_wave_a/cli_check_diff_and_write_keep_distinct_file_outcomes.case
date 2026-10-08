@@ -1,0 +1,20 @@
+# Port of tests/fmt_wave_a.rs:156-210; format_source -> jet fmt - (same formatter, public).
+# PENDING-GRAMMAR cross-stream file equality; runtime PENDING-SAME-HEAD.
+fixture: cli-format.fixture
+step canonical: jet fmt -
+stdin: cli-format.stdin
+exit: 0
+copy: main.jet original.txt
+step: jet fmt --check main.jet
+exit: 1
+file: main.jet == original.txt
+step: jet fmt --check --diff main.jet
+exit: 1
+stdout: ~ "--- main.jet" # original predicate
+stdout: ~ "+++ main.jet" # original predicate
+file: main.jet == original.txt
+step: jet fmt main.jet
+exit: 0
+file: main.jet == canonical.stdout # original predicate
+step: jet fmt --check main.jet
+exit: 0

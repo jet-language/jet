@@ -1,0 +1,9 @@
+# Port of tests/image.rs:1285-1304. Rejected unqualified registry must not build images.
+# Runtime verification PENDING-SAME-HEAD.
+fixture: built-app.fixture
+env: NO_COLOR=1
+step: jetpack image server --push ghcr.io/acme/server:1.0
+exit: 2
+stderr: ~ E1268 # original predicate
+stderr: ~ TLS # original predicate
+file: .jet/images absent
