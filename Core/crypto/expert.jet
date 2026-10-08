@@ -395,11 +395,11 @@ fn aes_gcm_seal(key: [U8], nonce: [U8], aad: [U8], plain: [U8]) -> [U8] Never! {
     out := aes_ctr(rk, j0, plain, plain.len(), &state, &work)
     auth_tag := gcm_tag(h, mask, aad, out, out.len())
     loop b in auth_tag -> &out.push(b)
-    crypto.__zeroize(^rk)
-    crypto.__zeroize(^state)
-    crypto.__zeroize(^h)
-    crypto.__zeroize(^mask)
-    crypto.__zeroize(^auth_tag)
+    crypto.__zeroize(&rk)
+    crypto.__zeroize(&state)
+    crypto.__zeroize(&h)
+    crypto.__zeroize(&mask)
+    crypto.__zeroize(&auth_tag)
     aes_workspace_clear(&work)
     out
 }
@@ -421,20 +421,20 @@ fn aes_gcm_open(key: [U8], nonce: [U8], aad: [U8], cipher: [U8]) -> [U8]? {
     expect := gcm_tag(h, mask, aad, cipher, body_len)
     different := U8{0}
     loop i in 0..<16 -> different = different | (expect[i] ~| cipher[body_len + i])
-    crypto.__zeroize(^h)
-    crypto.__zeroize(^mask)
-    crypto.__zeroize(^expect)
+    crypto.__zeroize(&h)
+    crypto.__zeroize(&mask)
+    crypto.__zeroize(&expect)
     // The only secret-result branch is after the complete tag comparison.
     // No plaintext is allocated or written before authentication succeeds.
     if different != (U8{0}) {
-        crypto.__zeroize(^rk)
-        crypto.__zeroize(^state)
+        crypto.__zeroize(&rk)
+        crypto.__zeroize(&state)
         aes_workspace_clear(&work)
         return None
     }
     out :: aes_ctr(rk, j0, cipher, body_len, &state, &work)
-    crypto.__zeroize(^rk)
-    crypto.__zeroize(^state)
+    crypto.__zeroize(&rk)
+    crypto.__zeroize(&state)
     aes_workspace_clear(&work)
     Val(out)
 }
@@ -731,8 +731,8 @@ fn xtime(a: U8) -> U8 Never! {
         aes256_encrypt_block(rk, plain[i], &state, &work)
         assert_eq(state, cipher[i])
     }
-    crypto.__zeroize(^rk)
-    crypto.__zeroize(^state)
+    crypto.__zeroize(&rk)
+    crypto.__zeroize(&state)
     aes_workspace_clear(&work)
 }
 

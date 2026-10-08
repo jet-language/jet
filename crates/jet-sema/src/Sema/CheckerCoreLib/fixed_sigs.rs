@@ -2887,8 +2887,8 @@ fn core_fixed_sig_impl(
             Some(Type::Option(Box::new(list_u8.clone()))),
         )),
         // D-SHAPE-RESOURCE1=A: the Core-internal wipe that each secret-bearing
-        // crypto type's `Close` hands its owned bytes to.
-        ("core.crypto", "__zeroize") => Some((vec![(moved, list_u8.clone())], None)),
+        // crypto type's `Close` lends its resident bytes to exclusively.
+        ("core.crypto", "__zeroize") => Some((vec![(AccessConvention::Write, list_u8.clone())], None)),
         // D-DET1: deterministic injected RNG capability. `random.rng(seed)` builds a
         // reproducible `Rng` from a caller-supplied seed (a pure value); a `#Pure fn`
         // may draw randomness through it (`rng.int(lo, hi)` / `rng.float()`) while the
