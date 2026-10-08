@@ -73,6 +73,44 @@ fn fx_require_native_pass() -> MIRProgram Never! {
     fx_require_program(b)
 }
 
+// Native callback object: checked task panic publishes; the identical plain
+// panic inside a task stays process-fatal. Each compiled cleanup prints once.
+// The test host enters a real Task; it never simulates Poll or TLS.
+// expect-stdout panic-task-checked: "defer once\ntask published; process continued\n"
+// expect-native-only panic-task-checked
+// expect-native-task panic-task-checked
+// expect-stderr panic-task-checked: ""
+// expect-stdout panic-task-plain: "defer once\n"
+// expect-native-only panic-task-plain
+// expect-native-task panic-task-plain
+// expect-exit panic-task-plain: 70
+// expect-stdout panic-root-checked: ""
+// expect-native-only panic-root-checked
+// expect-exit panic-root-checked: 70
+// Static coverage held until native image cutover: no task-control stubs.
+fn fx_panic_capability(checked: Bool) -> MIRProgram Never! {
+    b := fx_builder()
+    fx_block(&b, 0, MIRTerminator.Poll{kind: MIRPollKind.Check, resume: MIRBlockID{value: 1}, stop: MIRBlockID{value: 3}})
+    if !checked {
+        cleanup :: fx_require_text(&b, "defer once")
+        fx_print(&b, cleanup)
+        fx_do(&b, MIROperation.Drop{value: cleanup, kind: MIRDropKind.Value})
+    }
+    message :: fx_require_text(&b, "boom")
+    fx_require_do(&b, MIRRequireKind.Panic, None, [MIRValueID]{message}, fx_require_context("    #panic(\"boom\")"), true)
+    if checked {
+        fx_block(&b, 1, MIRTerminator.Poll{kind: MIRPollKind.Propagate, resume: MIRBlockID{value: 2}, stop: MIRBlockID{value: 3}})
+        fx_block(&b, 2, MIRTerminator.Stopped)
+        cleanup :: fx_require_text(&b, "defer once")
+        fx_print(&b, cleanup)
+        fx_do(&b, MIROperation.Drop{value: cleanup, kind: MIRDropKind.Value})
+    } else {
+        fx_block(&b, 1, MIRTerminator.Unreachable{reason: "plain task panic"})
+    }
+    fx_block(&b, 3, MIRTerminator.Stopped)
+    fx_require_program(b)
+}
+
 // Jet: #require(false, "broken")
 // expect-stdout require-fail: ""
 // expect-exit require-fail: 70
