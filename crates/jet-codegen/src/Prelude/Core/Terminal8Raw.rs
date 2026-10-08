@@ -26,6 +26,12 @@ fn jet_terminal8_read_until(delimiter: &String) -> (String, Option<String>) {
         Err(error) => (String::new(), Some(error.to_string())),
     }
 }
+fn jet_terminal8_take(n: i64) -> (Vec<u8>, Option<String>) {
+    match jet_std_io_take_raw(n) {
+        Ok(bytes) => (bytes, None),
+        Err(error) => (Vec::new(), Some(error.to_string())),
+    }
+}
 fn jet_terminal8_env(name: &String) -> Option<String> { jet_std_env_get(name) }
 fn jet_terminal8_env_has(name: &String) -> bool { jet_env_value_raw(name).is_some() }
 fn jet_terminal8_stty() -> Option<(i64, i64)> { jet_term_size_from_stty() }

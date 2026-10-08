@@ -68,6 +68,9 @@ process-ID, clock-fallback, and host-path policy.
 Terminal reads and prompt/style/progress policy likewise use source-owned
 declarations. Their registered private facts call the single existing terminal
 and stdin kernels; the Rust seed entry points retain their fault preflight.
+`take` forwards through the registered source target `__take_bytes`, preserving
+the keyword spelling without a parser exception. Jet rejects a negative count
+before the read fault probe; the existing stdin kernel performs the one raw read.
 Raylib's display/input/texture operations keep the existing registered host
 bindings, with source-owned argument policy. Font shaping returns the existing
 host result through a private leaf; the Jet entry owns the exact failure panic

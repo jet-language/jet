@@ -604,7 +604,7 @@ const fn effect_leaf_for(module: &str, method: &str) -> Option<&'static str> {
                 "read_key",
                 "__terminal8_line", "__terminal8_write_stdout", "__terminal8_write_stderr",
                 "__terminal8_mode_enter", "__terminal8_mode_leave", "__terminal8_read_all",
-                "__terminal8_read_until", "__terminal8_key_bytes",
+                "__terminal8_read_until", "__terminal8_take", "__terminal8_key_bytes",
             ],
         )
     {
@@ -1514,7 +1514,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: a5db6b6a6583405fdcdda1f7c9ed2d20b034876ca791008f63d0b64661aae622
+// Source SHA-256: 73bb2bb115689acbd7e797bfcbc273e020eb0a6de75707ad87eb39ea49bff3bc
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -1972,7 +1972,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::source_owned("core.term", "read_all_input", &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::source_owned("core.term", "readline", &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::source_owned("core.term", "read_until", &[true]),
-    CoreCallRecord::new("core.term", "take", "jet_std_io_take", true, &[false]),
+    CoreCallRecord::source_owned("core.term", "take", &[false]).with_source_target("__take_bytes"),
     CoreCallRecord::new("core.term", "stdin", "jet_std_io_stdin", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.term", "stdout", "jet_std_io_stdout", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.term", "stderr", "jet_std_io_stderr", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
@@ -2940,6 +2940,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.term", "__terminal8_mode_leave", "jet_term_mode_leave", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.term", "__terminal8_read_all", "jet_terminal8_read_all", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.term", "__terminal8_read_until", "jet_terminal8_read_until", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.term", "__terminal8_take", "jet_terminal8_take", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.term", "__terminal8_key_bytes", "jet_terminal8_key_bytes", true, &[]).with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.perf", "__read_bits", "jet_perf_read_bits", false, &[]) .with_native_int_result() .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.perf", "__write_bits", "jet_perf_write_bits", false, &[false]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
