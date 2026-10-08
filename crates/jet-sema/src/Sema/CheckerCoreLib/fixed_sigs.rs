@@ -1601,7 +1601,7 @@ fn core_fixed_sig_impl(
             (read, Type::Bool), (read, Type::Bool), (read, Type::Named("TerminalPolicy".into())),
             (read, Type::Bool), (read, Type::String),
         ], Some(Type::Named("ProcessSpec".into())))),
-        ("core.files", "__link_reader_at") => Some((vec![
+        ("core.files", "jet_files_link_reader_at_raw") => Some((vec![
             (read, Type::Named("FileReader".into())), (read, Type::Int), (read, Type::String),
         ], Some(Type::Tuple(vec![
             ("available".into(), Box::new(Type::Bool)), ("held".into(), Box::new(Type::Bool)),
@@ -3824,11 +3824,11 @@ fn core_fixed_sig_impl(
             vec![(read, Type::Int), (read, Type::String), (read, Type::Bool)],
             Some(result_ty(Type::List(Box::new(Type::Int)), io.clone())),
         )),
-        ("core.http.client", "__build_resolve") => Some((
+        ("core.http.client", "jet_http_build_resolve") => Some((
             vec![(read, Type::String), (read, Type::Int)],
             Some(result_ty(Type::List(Box::new(Type::List(Box::new(u8_ty())))), Type::String)),
         )),
-        ("core.http.client", "__build_get") => Some((
+        ("core.http.client", "jet_http_build_get") => Some((
             vec![
                 (read, Type::String), (read, Type::String), (read, Type::String), (read, Type::Bool),
                 (read, Type::List(Box::new(Type::List(Box::new(u8_ty()))))),

@@ -1146,7 +1146,7 @@ pub(crate) fn apply_files_leaf(
                 Ok(value) => CtValue::Present(Box::new(CtValue::Bool(value))),
                 Err(cause) => CtValue::failed(Box::new(CtValue::Str(cause))),
             },
-            "__link_reader_at" => {
+            "jet_files_link_reader_at_raw" => {
                 let handle = args.first().and_then(file_reader_handle).ok_or_else(|| {
                     format!("core.files.{method} argument 0 must be a FileReader")
                 })?;

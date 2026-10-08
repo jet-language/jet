@@ -121,6 +121,15 @@ and `FileReader`/`IOError` carriers. The terminal-context and waited-child facts
 likewise retain the existing `jet_term_is_terminal_raw` and
 `jet_process_exit_status_raw` runtime spellings, rather than reserved
 double-underscore member aliases or alternate host APIs.
+Checked-build DNS and pinned byte transport likewise use the existing
+`jet_http_build_resolve` and `jet_http_build_get` raw spellings. Driver retains
+address authorization, bounds, digest verification, and error classification;
+these leaves do not supply a second public HTTP or generic host policy.
+Held store linking keeps a distinct `compiler_link_held` source bridge: it
+extracts the private held-directory handle inside Core and calls the existing
+`jet_files_link_reader_at_raw` leaf. Compiler callers cannot substitute a path
+or bypass the directory authority, and the bridge does not change link/copy
+fallback policy.
 
 Remote builder records accept LF or CRLF line endings, removing only the single
 carriage return immediately before a newline. Extra or interior control bytes
