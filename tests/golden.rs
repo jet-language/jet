@@ -1021,7 +1021,7 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
         if env.update_expected {
             fs::write(&err_path, actual_err.as_bytes()).unwrap();
         } else {
-            if actual_err != expected_err {
+            if run.stderr.as_slice() != expected_err.as_bytes() {
                 panic!(
                     "stderr mismatch for example {stem}:\n{}",
                     unified_diff(
