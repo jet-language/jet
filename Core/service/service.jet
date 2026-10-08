@@ -813,3 +813,337 @@ fn state_prefix(raw: [U8], windows: Bool) -> StatePathPrefix Never! {
     assert(state_parent_lex("\\\\?\\C:\\dir\\.\\file", true) == (Val("\\\\?\\C:\\dir\\.")))
     assert(state_parent_lex("\\\\.\\COM42\\file", true) == (Val("\\\\.\\COM42\\")))
 }
+
+// Workflow tree operations preserve the Rust exclusive borrow over every
+// decision and cursor write. Handle-only wait points retain their mutex leaf.
+pub fn workflow_start(tree: &ServiceTree, id: String, version: Int) -> ServiceWorkflow ServiceError! {
+    #Unsafe("Services5439-5507: synchronize before validation; exact version replay precedes active-version rejection") {
+        if workflow_prepare(&tree) == {
+            .Err(error) -> return Err(error)
+            .Ok(_) -> {}
+        }
+        if id.trim() == "" || !workflow_visible(id, 256) -> return Err(ServiceError.Policy("workflow id must be non-empty and visible"))
+        if version < 1 -> return Err(ServiceError.Policy("workflow version must be >= 1"))
+        count :: core.service.__workflow_count(tree)
+        loop index in 0..<count {
+            if core.service.__workflow_id_at(tree, index) == id && core.service.__workflow_version_at(tree, index) == version {
+                run_id :: core.service.__workflow_run_at(tree, index)
+                core.service.__workflow_set_cursor(&tree, index, 1)
+                return core.service.__workflow_handle(tree, run_id)
+            }
+        }
+        maximum := 0
+        loop index in 0..<count {
+            if core.service.__workflow_id_at(tree, index) == id && core.service.__workflow_version_at(tree, index) != version && core.service.__workflow_outcome_at(tree, index) == None {
+                return Err(ServiceError.Policy("workflow `{id}` already has a different active version"))
+            }
+            run_id :: core.service.__workflow_run_at(tree, index)
+            if run_id > maximum -> maximum = run_id
+        }
+        if maximum == 9223372036854775807 -> return Err(ServiceError.Policy("workflow run id exhausted"))
+        run_id :: maximum + 1
+        if core.service.__workflow_append(&tree, "workflow-start:{run_id}:{version}:{workflow_frame(id)}") == {
+            .Err(error) -> return Err(error)
+            .Ok(_) -> {}
+        }
+        loop index in 0..<core.service.__workflow_count(tree) {
+            if core.service.__workflow_run_at(tree, index) == run_id -> core.service.__workflow_set_cursor(&tree, index, 1)
+        }
+        return core.service.__workflow_handle(tree, run_id)
+    }
+}
+
+pub fn workflow_step(tree: &ServiceTree, run_id: Int, step: String) ServiceError! {
+    #Unsafe("Services5656-5705: exclusive tree borrow keeps replay and append cursor decisions indivisible") {
+        if workflow_prepare(&tree) == {
+            .Err(error) -> return Err(error)
+            .Ok(_) -> {}
+        }
+        if step.trim() == "" || !workflow_visible(step, 1048576) -> return Err(ServiceError.Policy("workflow step must be non-empty and visible"))
+        markers :: [String]{"time.", "random", "rand.", "io.", "channel", "spawn", "service.connect"}
+        loop marker in markers {
+            if step.contains(marker) -> return Err(ServiceError.Policy("workflow step reaches a non-deterministic effect; use a recorded activity"))
+        }
+        index :: workflow_find(tree, run_id) ?? return Err(ServiceError.Unknown("workflow run {run_id} not found"))
+        replaying :: core.service.__workflow_cursor_at(tree, index) != 0
+        if replaying {
+            if workflow_replay_decision(&tree, index, "step:{step}") == {
+                .Err(error) -> return Err(error)
+                .Ok(consumed) -> { if consumed -> return Ok() }
+            }
+        } else {
+            core.service.__workflow_set_cursor(&tree, index, core.service.__workflow_history_len(tree, index))
+        }
+        if core.service.__workflow_outcome_at(tree, index) != None -> return Err(ServiceError.Policy("workflow step follows a terminal workflow outcome"))
+        if core.service.__workflow_steps_len(tree, index) >= 100000 -> return Err(ServiceError.Policy("workflow step history limit exceeded"))
+        if core.service.__workflow_append(&tree, "workflow-step:{run_id}:{workflow_frame(step)}") == {
+            .Err(error) -> return Err(error)
+            .Ok(_) -> {}
+        }
+        workflow_advance(&tree, index, replaying, 1)
+    }
+}
+
+pub fn workflow_activity(tree: &ServiceTree, run_id: Int, activity: String, key: String, max_attempts: Int) -> TaskStatus ServiceError! {
+    #Unsafe("Services5708-5789: first recorded definition wins; replay precedes terminal checks") {
+        if workflow_prepare(&tree) == {
+            .Err(error) -> return Err(error)
+            .Ok(_) -> {}
+        }
+        if workflow_token(activity, "activity") == {
+            .Err(error) -> return Err(error)
+            .Ok(_) -> {}
+        }
+        if workflow_token(key, "idempotency key") == {
+            .Err(error) -> return Err(error)
+            .Ok(_) -> {}
+        }
+        if max_attempts < 1 || max_attempts > 1000 -> return Err(ServiceError.Policy("workflow activity retry limit is outside the bounded range"))
+        index :: workflow_find(tree, run_id) ?? return Err(ServiceError.Unknown("workflow run {run_id} not found"))
+        replaying :: core.service.__workflow_cursor_at(tree, index) != 0
+        expected :: "activity:{activity}:{key}@1/{max_attempts}"
+        if workflow_activity_definition(tree, index, key) == {
+            .Val(existing) -> {
+                if existing.activity != activity || existing.max_attempts != max_attempts -> return Err(ServiceError.Policy("workflow activity `{key}` does not match its recorded definition"))
+                if replaying {
+                    if workflow_replay_decision(&tree, index, expected) == {
+                        .Err(error) -> return Err(error)
+                        .Ok(consumed) -> { if consumed -> return Ok(TaskStatus.Running) }
+                    }
+                }
+                return Ok(core.service.__workflow_status_at(tree, index))
+            }
+            .None -> {}
+        }
+        if !replaying {
+            core.service.__workflow_set_cursor(&tree, index, core.service.__workflow_history_len(tree, index))
+        } else {
+            if core.service.__workflow_event_at(tree, index, core.service.__workflow_cursor_at(tree, index)) == {
+                .Val(actual) -> {
+                    if actual == expected -> return Err(ServiceError.Policy("workflow replay activity is missing its durable state"))
+                    return Err(ServiceError.Policy("workflow replay diverged: expected `{actual}`, got `{expected}`"))
+                }
+                .None -> {}
+            }
+        }
+        if core.service.__workflow_outcome_at(tree, index) != None -> return Err(ServiceError.Policy("workflow activity follows a terminal workflow outcome"))
+        payload :: "workflow-activity:{run_id}:1:{max_attempts}:{workflow_frame(activity)}{workflow_frame(key)}"
+        if core.service.__workflow_append(&tree, payload) == {
+            .Err(error) -> return Err(error)
+            .Ok(_) -> {}
+        }
+        core.service.__workflow_set_cursor(&tree, index, core.service.__workflow_history_len(tree, index))
+        return Ok(TaskStatus.Running)
+    }
+}
+
+pub fn workflow_activity_retry(tree: &ServiceTree, run_id: Int, key: String, outcome: TaskOutcome) -> TaskStatus ServiceError! {
+    #Unsafe("Services5792-5867: replay consumes recorded attempts, never derives another attempt from replayed state") {
+        if workflow_prepare(&tree) == {
+            .Err(error) -> return Err(error)
+            .Ok(_) -> {}
+        }
+        if workflow_token(key, "idempotency key") == {
+            .Err(error) -> return Err(error)
+            .Ok(_) -> {}
+        }
+        index :: workflow_find(tree, run_id) ?? return Err(ServiceError.Unknown("workflow run {run_id} not found"))
+        replaying :: core.service.__workflow_cursor_at(tree, index) != 0
+        activity :: workflow_activity_definition(tree, index, key) ?? return Err(ServiceError.Unknown("activity key `{key}` not found"))
+        if outcome == TaskOutcome.Finished -> return Err(ServiceError.Policy("a finished activity cannot be retried"))
+        if !workflow_valid_outcome(outcome) -> return Err(ServiceError.Policy("workflow activity outcome is invalid"))
+        if replaying {
+            if workflow_replay_retry(&tree, index, key, activity.max_attempts, outcome) == {
+                .Err(error) -> return Err(error)
+                .Ok(consumed) -> { if consumed -> return Ok(TaskStatus.Paused) }
+            }
+        }
+        if core.service.__workflow_outcome_at(tree, index) != None || workflow_activity_result(tree, index, key) != None -> return Err(ServiceError.Policy("workflow activity retry follows a terminal activity"))
+        if activity.attempt >= activity.max_attempts -> return Err(ServiceError.Policy("workflow activity retry limit exhausted"))
+        if !replaying -> core.service.__workflow_set_cursor(&tree, index, core.service.__workflow_history_len(tree, index))
+        next_attempt :: activity.attempt + 1
+        payload :: "workflow-activity-retry:{run_id}:{next_attempt}:{workflow_frame(key)}{workflow_frame(workflow_outcome_wire(outcome))}"
+        if core.service.__workflow_append(&tree, payload) == {
+            .Err(error) -> return Err(error)
+            .Ok(_) -> {}
+        }
+        workflow_advance(&tree, index, replaying, 1)
+        return Ok(TaskStatus.Paused)
+    }
+}
+
+pub fn workflow_activity_complete(tree: &ServiceTree, run_id: Int, key: String, outcome: TaskOutcome) -> TaskOutcome ServiceError! {
+    #Unsafe("Services5870-5950: two replay entries advance together; identical terminal completions are idempotent") {
+        if workflow_prepare(&tree) == {
+            .Err(error) -> return Err(error)
+            .Ok(_) -> {}
+        }
+        if workflow_token(key, "idempotency key") == {
+            .Err(error) -> return Err(error)
+            .Ok(_) -> {}
+        }
+        if !workflow_valid_outcome(outcome) -> return Err(ServiceError.Policy("workflow activity outcome is invalid"))
+        index :: workflow_find(tree, run_id) ?? return Err(ServiceError.Unknown("workflow run {run_id} not found"))
+        if workflow_activity_definition(tree, index, key) == None -> return Err(ServiceError.Unknown("activity key `{key}` not found"))
+        replaying :: core.service.__workflow_cursor_at(tree, index) != 0
+        if replaying {
+            cursor :: core.service.__workflow_cursor_at(tree, index)
+            actual_done :: core.service.__workflow_event_at(tree, index, cursor)
+            actual_result :: core.service.__workflow_event_at(tree, index, cursor + 1)
+            if actual_done == (Val("activity-done:{key}")) && actual_result == (Val("activity-result:{task_outcome_show(outcome)}")) {
+                core.service.__workflow_set_cursor(&tree, index, cursor + 2)
+                return Ok(outcome)
+            }
+            if actual_done == {
+                .Val(actual) -> return Err(ServiceError.Policy("workflow replay diverged: expected completion for `{key}`, got `{actual}`"))
+                .None -> {}
+            }
+        }
+        if workflow_activity_result(tree, index, key) == {
+            .Val(existing) -> {
+                if existing == outcome -> return Ok(outcome)
+                return Err(ServiceError.Policy("workflow activity completion conflicts with its recorded outcome"))
+            }
+            .None -> {}
+        }
+        if !replaying -> core.service.__workflow_set_cursor(&tree, index, core.service.__workflow_history_len(tree, index))
+        payload :: "workflow-activity-done:{run_id}:{workflow_frame(key)}{workflow_frame(workflow_outcome_wire(outcome))}"
+        if core.service.__workflow_append(&tree, payload) == {
+            .Err(error) -> return Err(error)
+            .Ok(_) -> {}
+        }
+        workflow_advance(&tree, index, replaying, 2)
+        return Ok(outcome)
+    }
+}
+
+fn workflow_prepare(tree: &ServiceTree) ServiceError! {
+    if !core.service.__tree_started(tree) -> return Err(ServiceError.NotStarted("service tree is not started"))
+    core.service.__workflow_sync_tree(&tree)
+}
+
+fn workflow_find(tree: ServiceTree, run_id: Int) -> Int? Never! {
+    loop index in 0..<core.service.__workflow_count(tree) {
+        if core.service.__workflow_run_at(tree, index) == run_id -> return Val(index)
+    }
+    None
+}
+
+fn workflow_visible(text: String, limit: Int) -> Bool Never! {
+    // Empty payloads are valid; Rust char::is_control includes C0, DEL and C1.
+    if text == "" -> return true
+    valid_service_text(text, limit)
+}
+
+fn workflow_token(text: String, label: String) ServiceError! {
+    if text.trim() == "" || !workflow_visible(text, 256) || text.contains(":") -> return Err(ServiceError.Policy("workflow {label} must be non-empty, visible, bounded, and contain no `:`"))
+}
+
+fn workflow_frame(text: String) -> String Never! { "{text.bytes().len()}:{text}" }
+
+fn workflow_valid_outcome(outcome: TaskOutcome) -> Bool Never! {
+    if outcome == {
+        .Panicked(reason) -> reason.trim() != "" && workflow_visible(reason, 1048576)
+        else -> true
+    }
+}
+
+fn workflow_outcome_wire(outcome: TaskOutcome) -> String Never! {
+    if outcome == {
+        .Panicked(reason) -> "Panicked:{workflow_frame(reason)}"
+        else -> task_outcome_show(outcome)
+    }
+}
+
+fn workflow_replay_decision(tree: &ServiceTree, index: Int, expected: String) -> Bool ServiceError! {
+    cursor :: core.service.__workflow_cursor_at(tree, index)
+    if cursor == 0 -> return Ok(false)
+    actual :: core.service.__workflow_event_at(tree, index, cursor) ?? return Ok(false)
+    if actual != expected -> return Err(ServiceError.Policy("workflow replay diverged: expected `{actual}`, got `{expected}`"))
+    core.service.__workflow_set_cursor(&tree, index, cursor + 1)
+    Ok(true)
+}
+
+fn workflow_advance(tree: &ServiceTree, index: Int, replaying: Bool, amount: Int) Never! {
+    next :: if replaying -> core.service.__workflow_cursor_at(tree, index) + amount else -> core.service.__workflow_history_len(tree, index)
+    core.service.__workflow_set_cursor(&tree, index, next)
+}
+
+struct WorkflowActivityDefinition {
+    activity: String
+    attempt: Int
+    max_attempts: Int
+}
+
+fn workflow_activity_definition(tree: ServiceTree, index: Int, key: String) -> WorkflowActivityDefinition? Never! {
+    loop step_index in 0..<core.service.__workflow_steps_len(tree, index) {
+        fields :: core.service.__workflow_step_at(tree, index, step_index).split(":")
+        if fields.len() == 5 && fields[0] == "activity" && fields[2] == key {
+            attempt :: workflow_i64(fields[3]) ?? continue
+            maximum :: workflow_i64(fields[4]) ?? continue
+            return Val(WorkflowActivityDefinition{activity: fields[1], attempt: attempt, max_attempts: maximum})
+        }
+    }
+    None
+}
+
+fn workflow_activity_result(tree: ServiceTree, index: Int, key: String) -> TaskOutcome? Never! {
+    loop pair_index in 0..<core.service.__workflow_activity_count(tree, index) {
+        if core.service.__workflow_activity_key_at(tree, index, pair_index) == key -> return Val(core.service.__workflow_activity_outcome_at(tree, index, pair_index))
+    }
+    None
+}
+
+fn workflow_i64(text: String) -> Int? Never! {
+    raw :: text.bytes()
+    if raw.len() == 0 -> return None
+    start := 0
+    negative := false
+    if raw[0] == (U8{43}) -> start = 1
+    if raw[0] == (U8{45}) {
+        start = 1
+        negative = true
+    }
+    if start == raw.len() -> return None
+    limit :: if negative -> 9223372036854775808 else -> 9223372036854775807
+    value := 0
+    loop i in start..<raw.len() {
+        digit :: Int.from_u8(raw[i]) - 48
+        if digit < 0 || digit > 9 || value > (limit - digit) /% 10 -> return None
+        value = value * 10 + digit
+    }
+    Val(if negative -> -value else -> value)
+}
+
+fn workflow_replay_retry(tree: &ServiceTree, index: Int, key: String, maximum: Int, outcome: TaskOutcome) -> Bool ServiceError! {
+    cursor :: core.service.__workflow_cursor_at(tree, index)
+    if cursor == 0 -> return Ok(false)
+    actual :: core.service.__workflow_event_at(tree, index, cursor) ?? return Ok(false)
+    prefix :: "activity-retry:{key}@"
+    suffix :: ":{task_outcome_show(outcome)}"
+    if !actual.starts_with(prefix) || !actual.ends_with(suffix) -> return Err(ServiceError.Policy("workflow replay diverged: expected retry for `{key}`, got `{actual}`"))
+    raw :: actual.bytes()
+    range :: String.from_bytes(raw.slice(prefix.bytes().len(), raw.len() - suffix.bytes().len())) ?? return Err(ServiceError.Policy("workflow replay has an invalid retry decision for `{key}`"))
+    parts :: range.split("/")
+    if parts.len() < 2 -> return Err(ServiceError.Policy("workflow replay has an invalid retry decision for `{key}`"))
+    attempt :: workflow_i64(parts[0]) ?? return Err(ServiceError.Policy("workflow replay has an invalid retry attempt for `{key}`"))
+    recorded_limit_text := parts[1]
+    if parts.len() > 2 -> recorded_limit_text = "{parts[1]}/{parts.slice(2, parts.len()).join("/")}"
+    recorded_limit :: workflow_i64(recorded_limit_text) ?? return Err(ServiceError.Policy("workflow replay has an invalid retry limit for `{key}`"))
+    if attempt < 2 || attempt > maximum || recorded_limit != maximum -> return Err(ServiceError.Policy("workflow replay retry definition for `{key}` changed"))
+    core.service.__workflow_set_cursor(&tree, index, cursor + 1)
+    Ok(true)
+}
+
+#Test("workflow framing, token bounds, signed replay counters and panic validation") {
+    assert(workflow_frame("λ") == "2:λ")
+    assert(workflow_i64("+0002") == (Val(2)))
+    assert(workflow_i64("-9223372036854775808") == (Val(-9223372036854775808)))
+    assert(workflow_i64("9223372036854775808") == None)
+    assert(workflow_i64(" 2") == None)
+    assert(workflow_i64("2/3") == None)
+    assert(workflow_visible("", 1048576))
+    assert(!workflow_visible("\n", 1048576))
+    assert(!workflow_valid_outcome(TaskOutcome.Panicked("   ")))
+    assert(workflow_outcome_wire(TaskOutcome.Panicked("λ")) == "Panicked:2:λ")
+}
