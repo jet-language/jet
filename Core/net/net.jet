@@ -411,15 +411,25 @@ pub fn udp_packet_truncated(packet: UDPPacket) -> Bool Never! { packet.truncated
 
 pub fn unix_listen(path: String) -[Net, FS, Time.Wait]> UnixListener NetError! {
     if !valid_text(path) -> return Err(net_err("unix_listen", path, "socket path is empty or contains control bytes"))
-    core.net.unix_listen(path)
+    core.net.__unix_listen(path)
 }
 
 pub fn unix_accept(listener: UnixListener) -[Net, Time.Wait]> UnixStream NetError! {
-    core.net.unix_accept(listener)
+    core.net.__unix_accept(listener)
+}
+
+// Existing Core arity rows retain the public `deadline:` label and target
+// these ordinary source entry points without changing user call syntax.
+pub fn __unix_connect_entry(path: String) -[Net, Time.Wait]> UnixStream NetError! {
+    core.net.__unix_connect_host(path)
+}
+
+pub fn __unix_connect_deadline_entry(path: String, deadline: Duration) -[Net, Time.Wait]> UnixStream NetError! {
+    core.net.__unix_connect_deadline_host(path, deadline)
 }
 
 pub fn unix_read(&stream: UnixStream) -[Net, Time.Wait]> String NetError! {
-    core.net.unix_read(&stream)
+    core.net.__unix_read(&stream)
 }
 
 pub fn unix_write(&stream: UnixStream, text: String) NetError! -[Net, Time.Wait]> {
@@ -432,15 +442,15 @@ pub fn unix_read_bytes(&stream: UnixStream, n: Int) -[Net, Time.Wait]> [U8] NetE
 }
 
 pub fn unix_write_all_bytes(&stream: UnixStream, bytes: [U8]) NetError! -[Net, Time.Wait]> {
-    core.net.unix_write_all_bytes(&stream, bytes)
+    core.net.__unix_write_all_bytes(&stream, bytes)
 }
 
 pub fn unix_shutdown(&stream: UnixStream, how: NetShutdown) NetError! -[Net, Time.Wait]> {
-    core.net.unix_shutdown(&stream, how)
+    core.net.__unix_shutdown(&stream, how)
 }
 
 pub fn unix_close(&stream: UnixStream) NetError! -[Net, Time.Wait]> {
-    core.net.unix_close(&stream)
+    core.net.__unix_close(&stream)
 }
 
 pub fn dns_a(name: String, ms: Int) -[Net, Time.Wait]> [IPAddr] NetError! {
