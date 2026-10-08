@@ -363,13 +363,6 @@ pub(crate) fn register_imported_struct_shapes(
     let mut shape_owner = None;
     let mut shape_types = HashSet::new();
     for (target, definition_name) in imported {
-        // A local declaration shadows an imported leaf for bare struct
-        // literals. Do not let the imported shape overwrite the local
-        // identity in `local_type_identities`; qualified `alias.Type`
-        // literals still resolve through `foreign_types`.
-        if own_type_names.contains(&definition_name) {
-            continue;
-        }
         let Some(definition) = bundle.modules[target]
             .items
             .iter()
@@ -384,7 +377,16 @@ pub(crate) fn register_imported_struct_shapes(
             shape_types = module_owned_type_names(&bundle.modules[target].items);
             shape_owner = Some(target);
         }
-        register_struct_shape(cx, bundle, target, definition, &shape_types);
+        // A local leaf shadows an import, not the imported canonical owner.
+        // Keep its qualified fields available for `alias.Type` consumers.
+        register_struct_shape(
+            cx,
+            bundle,
+            target,
+            definition,
+            &shape_types,
+            !own_type_names.contains(&definition_name),
+        );
     }
 }
 
@@ -402,7 +404,7 @@ pub(crate) fn register_own_struct_shapes(cx: &mut Cx, bundle: &ProgramBundle, mo
     for item in &bundle.modules[module_idx].items {
         match item {
             Item::Struct(definition) => {
-                register_struct_shape(cx, bundle, module_idx, definition, &target_type_names);
+                register_struct_shape(cx, bundle, module_idx, definition, &target_type_names, true);
             }
             Item::Enum(definition) => {
                 register_enum_shape(cx, bundle, module_idx, definition, &target_type_names);
@@ -497,6 +499,7 @@ fn register_struct_shape(
     target: usize,
     definition: &crate::AST::StructDef,
     target_type_names: &HashSet<String>,
+    register_leaf_identity: bool,
 ) {
     let owner = bundle
         .name_ledger
@@ -508,8 +511,10 @@ fn register_struct_shape(
         .iter()
         .map(|param| param.name.clone())
         .collect::<Vec<_>>();
-    cx.local_type_identities
-        .insert(definition.name.clone(), qualified.clone());
+    if register_leaf_identity {
+        cx.local_type_identities
+            .insert(definition.name.clone(), qualified.clone());
+    }
     let rust_mod = crate::Codegen::mangle(&bundle.modules[target].alias);
     let fields = definition
         .reflection_fields()
@@ -553,16 +558,13 @@ fn register_struct_shape(
     if crate::Codegen::type_is_cloneable_struct(definition, target_type_names) {
         cx.cloneable.insert(qualified.clone());
     }
-    if !definition.type_params.is_empty() {
-        let params = definition
-            .type_params
-            .iter()
-            .map(|param| param.name.clone())
-            .collect::<Vec<_>>();
+    if !binders.is_empty() {
         cx.struct_type_params
-            .insert(qualified.clone(), params.iter().cloned().collect());
-        cx.struct_type_param_order.insert(qualified, params);
+            .insert(qualified.clone(), binders.iter().cloned().collect());
     }
+    // The parsed declaration owns this order. Empty is a known nongeneric
+    // declaration; a missing entry remains an unknown shape.
+    cx.struct_type_param_order.insert(qualified, binders);
 }
 
 /// Replay codegen's `operand_is_integer` (Codegen/Expression.rs) on an AST
@@ -681,29 +683,19 @@ fn declared_struct_field_type(cx: &Cx, recv_ty: &Type, field: &str) -> Option<Ty
         if cx.fact_struct_fields(name).is_some() {
             return Some(name.to_string());
         }
-        let core_source_leaf = name
-            .strip_prefix("<corelib>/")
-            .and_then(|identity| identity.rsplit("::").next())
-            .or_else(|| {
-                name.rsplit_once("::")
-                    .filter(|(module, _)| {
-                        cx.core_source_modules.values().any(|alias| alias == module)
-                    })
-                    .map(|(_, leaf)| leaf)
-            });
-        if let Some(leaf) = core_source_leaf.filter(|leaf| cx.fact_struct_fields(*leaf).is_some()) {
-            return Some(leaf.to_string());
-        }
         cx.imported_type_metadata_name(name)
     };
     if let Type::Apply { name, args } = recv_ty {
         if let Some(key) = shape_key(name) {
+            let params = cx.fact_struct_type_param_order(&key)?;
+            if params.len() != args.len() {
+                return None;
+            }
             let fields = cx.fact_struct_fields(&key)?;
             let field_ty = fields
                 .iter()
                 .find(|(f, _)| f == field)
                 .map(|(_, t)| t.clone())?;
-            let params = cx.fact_struct_type_param_order(&key)?;
             let subst = params
                 .iter()
                 .zip(args)
@@ -721,12 +713,13 @@ fn declared_struct_field_type(cx: &Cx, recv_ty: &Type, field: &str) -> Option<Ty
     let Type::Named(name) = recv_ty else {
         return None;
     };
-    if let Some(field_ty) = shape_key(name)
-        .and_then(|key| cx.fact_struct_fields(&key))
-        .and_then(|fields| fields.iter().find(|(f, _)| f == field))
-        .map(|(_, t)| t.clone())
-    {
-        return Some(field_ty);
+    if let Some(key) = shape_key(name) {
+        let params = cx.fact_struct_type_param_order(&key)?;
+        if !params.is_empty() {
+            return None;
+        }
+        let fields = cx.fact_struct_fields(&key)?;
+        return fields.iter().find(|(f, _)| f == field).map(|(_, ty)| ty.clone());
     }
     crate::Sema::core_struct_field_type(name, field, &[])
 }
@@ -1018,4 +1011,167 @@ fn substitute_call_type(
         }
     }
     crate::Generics::substitute_type(&declared, &subst)
+}
+
+#[cfg(test)]
+mod parsed_core_record_tests {
+    use super::*;
+    use crate::AST::{LoadedModule, NameLedger};
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+
+    fn parsed_module(source: &str, alias: &str, display: &str, path: PathBuf) -> LoadedModule {
+        let masked = jet_pkg_model::Package::mask_inline_package_source(source)
+            .expect("source package header").0;
+        let (tokens, diagnostics) = crate::Lexer::lex_generated(&masked);
+        assert!(diagnostics.is_empty(), "lex diagnostics: {diagnostics:?}");
+        let (program, parse_diagnostics) = crate::Parser::parse_for_check_with_source(&tokens, &masked)
+            .expect("original declaration source parses");
+        assert!(parse_diagnostics.iter().all(|diagnostic|
+            diagnostic.severity != crate::Diagnostics::Severity::Error),
+            "parse diagnostics: {parse_diagnostics:?}");
+        LoadedModule {
+            path, display: display.to_string(), source: source.to_string(),
+            core_identifier_demand: crate::Lexer::core_identifier_demand(&tokens),
+            alias: alias.to_string(), imports: program.imports, items: program.items,
+            script_body: program.script_body, block_spans: program.block_spans,
+            web_target_ceiling: program.web_target_ceiling, pub_file: program.pub_file,
+            no_prelude: program.no_prelude, default_target: program.default_target,
+            html_path: program.html_path, policy_declarations: program.policy_declarations,
+            user_policy_declarations: program.user_policy_declarations, rule_facts: program.rule_facts,
+        }
+    }
+
+    // Original embedded Core declarations, not native field-oracle fixtures.
+    fn parsed_bundle(module: &str, caller: &str) -> ProgramBundle {
+        let row = jet_foundation::CoreModuleExports::core_source_module(module)
+            .expect("canonical Core source module");
+        let source = jet_sema::CoreSources::core_source_text(row.module)
+            .expect("canonical Core body");
+        let modules = vec![
+            parsed_module(caller, "caller", "caller.jet", PathBuf::from("caller.jet")),
+            parsed_module(source, row.alias, row.path, PathBuf::from(format!("<corelib>/{}", row.path))),
+        ];
+        let mut ledger = NameLedger::default();
+        for (index, loaded) in modules.iter().enumerate() {
+            ledger.set_module(index, loaded.alias.clone(), loaded.display.clone(),
+                jet_foundation::Names::package_scope_for(&loaded.path, &PathBuf::from(".")));
+            for item in &loaded.items {
+                if let Item::Struct(definition) = item {
+                    ledger.declare(index, definition.name.clone(),
+                        format!("{}.{}", loaded.alias, definition.name), "type".to_string(),
+                        definition.name_span, if definition.is_pub {
+                            jet_foundation::Names::NameVisibility::Public
+                        } else { jet_foundation::Names::NameVisibility::Private });
+                }
+            }
+        }
+        ProgramBundle {
+            entry: 0, project_root: PathBuf::from("."), modules,
+            devtools_registry: Default::default(), parse_teaching: Vec::new(),
+            used_core: HashSet::new(), ffi_callback_fns: HashSet::new(), cffi: Default::default(),
+            comptime_inputs: Vec::new(), name_ledger: ledger, layer_ceiling: None,
+            inferred_layer: crate::Syntax::RuntimeLayer::Core, web_partitions: HashMap::new(),
+            web_partition_enforced: false, web_partition_report: None, dep_roots: HashMap::new(),
+            package_guarantees: Default::default(), program_allocator: Default::default(),
+            active_os: crate::Syntax::OSTarget::host(), build_facts: Default::default(),
+            edition: "2027".to_string(),
+        }
+    }
+
+    fn context(bundle: &ProgramBundle) -> Cx {
+        let caller = &bundle.modules[0];
+        let mut cx = crate::Codegen::build_cx_items(&caller.items, &caller.source,
+            &caller.display, None, &HashMap::new(), &bundle.edition);
+        register_imported_struct_shapes(&mut cx, bundle, 0);
+        register_own_struct_shapes(&mut cx, bundle, 0);
+        cx
+    }
+
+    fn qualified(bundle: &ProgramBundle, module: usize, name: &str) -> String {
+        imported_type_name(&bundle.name_ledger.module_identity(module).expect("module owner"), name)
+    }
+
+    #[test]
+    fn parsed_core_record_table_page_keeps_nested_declared_rows() {
+        let bundle = parsed_bundle("core.web.table", "use core.web.table as table\nfn run() {}\n");
+        let cx = context(&bundle);
+        let page = qualified(&bundle, 1, "WebTablePage");
+        let row = qualified(&bundle, 1, "WebTableRow");
+        assert_eq!(cx.struct_type_param_order.get(&page).unwrap(), &["T"]);
+        for actual in [Type::String, Type::Bool] {
+            let receiver = Type::Apply { name: page.clone(), args: vec![actual.clone()] };
+            assert_eq!(struct_field_type(&cx, &receiver, "rows"), Some(Type::List(Box::new(
+                Type::Apply { name: row.clone(), args: vec![actual] }))));
+            for field in ["index", "size", "total"] {
+                assert_eq!(struct_field_type(&cx, &receiver, field), Some(Type::Int));
+            }
+            assert_eq!(struct_field_type(&cx, &receiver, "row_keys"), None);
+            assert_eq!(struct_field_type(&cx, &receiver, "page_count"), None);
+        }
+        for args in [Vec::new(), vec![Type::String, Type::Bool]] {
+            assert_eq!(struct_field_type(&cx, &Type::Apply { name: page.clone(), args }, "rows"), None);
+        }
+        assert_eq!(struct_field_type(&cx, &Type::Named(page), "rows"), None);
+    }
+
+    #[test]
+    fn parsed_core_record_stream_keeps_all_public_fields() {
+        let bundle = parsed_bundle("core.data", "use core.data as data\nfn run() {}\n");
+        let cx = context(&bundle);
+        let stream = qualified(&bundle, 1, "DataStream");
+        for actual in [Type::String, Type::Tuple(vec![("x".to_string(), Box::new(Type::Bool))])] {
+            let receiver = Type::Apply { name: stream.clone(), args: vec![actual.clone()] };
+            assert_eq!(struct_field_type(&cx, &receiver, "items"), Some(Type::List(Box::new(actual))));
+            assert_eq!(struct_field_type(&cx, &receiver, "index"), Some(Type::Int));
+            assert_eq!(struct_field_type(&cx, &receiver, "cancelled"), Some(Type::Bool));
+            assert_eq!(struct_field_type(&cx, &receiver, "missing"), None);
+        }
+        let Item::Struct(definition) = bundle.modules[1].items.iter().find(|item|
+            matches!(item, Item::Struct(definition) if definition.name == "DataStream")).unwrap() else {
+                unreachable!()
+            };
+        assert_eq!(definition.fields.len(), 3);
+        assert!(definition.fields.iter().all(|field| field.is_pub && field.computed.is_none()));
+    }
+
+    #[test]
+    fn parsed_core_record_known_empty_is_not_unknown_or_native_generic() {
+        let bundle = parsed_bundle("core.compute", "use core.compute as compute\nfn run() {}\n");
+        let mut cx = context(&bundle);
+        let owner = qualified(&bundle, 1, "VJPRun");
+        let tensor = qualified(&bundle, 1, "Tensor");
+        assert_eq!(cx.struct_type_param_order.get(&owner), Some(&Vec::<String>::new()));
+        for field in ["value", "gradient"] {
+            assert_eq!(struct_field_type(&cx, &Type::Named(owner.clone()), field), Some(Type::Named(tensor.clone())));
+        }
+        assert_eq!(struct_field_type(&cx, &Type::Named(owner.clone()), "grads"), None);
+        let applied = Type::Apply { name: owner.clone(), args: vec![Type::String] };
+        assert_eq!(struct_field_type(&cx, &applied, "value"), None);
+        assert_eq!(struct_field_type(&cx, &applied, "grads"), None);
+        cx.struct_type_param_order.remove(&owner);
+        assert_eq!(struct_field_type(&cx, &Type::Named(owner), "value"), None);
+    }
+
+    #[test]
+    fn parsed_core_record_same_leaf_keeps_exact_import_and_local_owners() {
+        let bundle = parsed_bundle("core.web.table", "use core.web.table as table\npub struct WebTablePage<T> { pub rows: [T]\n pub label: String }\nfn run() {}\n");
+        let caller = &bundle.modules[0];
+        let mut cx = crate::Codegen::build_cx_items(&caller.items, &caller.source,
+            &caller.display, None, &HashMap::new(), &bundle.edition);
+        register_imported_struct_shapes(&mut cx, &bundle, 0);
+        assert!(!cx.local_type_identities.contains_key("WebTablePage"),
+            "a shadowed imported leaf must not acquire the caller's identity");
+        register_own_struct_shapes(&mut cx, &bundle, 0);
+        let imported = qualified(&bundle, 1, "WebTablePage");
+        let local = qualified(&bundle, 0, "WebTablePage");
+        let row = qualified(&bundle, 1, "WebTableRow");
+        assert_eq!(cx.local_type_identities.get("WebTablePage"), Some(&local));
+        assert_eq!(struct_field_type(&cx, &Type::Apply { name: imported, args: vec![Type::String] }, "rows"),
+            Some(Type::List(Box::new(Type::Apply { name: row, args: vec![Type::String] }))));
+        assert_eq!(struct_field_type(&cx, &Type::Apply { name: "WebTablePage".to_string(), args: vec![Type::String] }, "rows"),
+            Some(Type::List(Box::new(Type::String))));
+        let unrelated = Type::Apply { name: "<corelib>/unrelated::WebTablePage".to_string(), args: vec![Type::String] };
+        assert_eq!(struct_field_type(&cx, &unrelated, "rows"), None);
+    }
 }
