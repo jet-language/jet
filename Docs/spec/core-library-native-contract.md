@@ -114,6 +114,12 @@ byte span, disjoint 64-byte digest, and 704-byte aligned scratch. Signed machine
 words carry hash bit patterns with wrapping additions and explicitly logical
 right shifts; scalar multiplication uses mask swaps and complete additions.
 
+The internal ChaCha20/XChaCha20 engines use borrowed key/nonce/input/output
+spans and caller-owned word-aligned scratch (320/368 bytes). Exact in-place XOR
+is supported; partial overlap is not. Counter exhaustion is rejected before
+output writes. HChaCha20 derives the XChaCha key without feed-forward, then
+uses four zero nonce bytes followed by the final eight extended-nonce bytes.
+
 A high-level native implementation must not be retained as an invisible runtime
 fallback for a Jet implementation. If an API changes identity or semantics,
 make the change at the contract boundary and migrate its users in one cutover.
