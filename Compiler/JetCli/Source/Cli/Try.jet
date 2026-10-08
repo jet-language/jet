@@ -133,7 +133,8 @@ fn jet_cli_try_edits_action(object: &JetCLITryObject, path: String) -> JetCLITry
 }
 
 fn jet_cli_try_read_plan(path: String) -> JetCLITryPlan JetCLIReadError! {
-    source :: cli_files.read(path) ?? return Err(jet_cli_read_error("could not read try plan `{path}`: {jet_cli_io_error_text(err)}"))
+    bytes :: cli_files.read_bytes(path) ?? return Err(jet_cli_read_error("could not read try plan `{path}`: {jet_cli_io_error_text(err)}"))
+    source :: String.from_bytes(bytes) ?? return Err(jet_cli_read_error("could not read try plan `{path}`: stream did not contain valid UTF-8"))
     value :: jet_cli_status_value_parse(source) ?? return Err(jet_cli_read_error("invalid try plan JSON: {err.message}"))
     object := jet_cli_try_object(value, "try plan must be a JSON object")
     if jet_cli_try_take(&object, "version") == .Val(version) {
