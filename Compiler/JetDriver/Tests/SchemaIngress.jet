@@ -41,7 +41,7 @@ fn run() -[FS, Env]> {
     if encoding.outcome == {
         .IO(error, actual) -> {
             assert(actual == Val(bytes))
-            assert(error == IOError.InvalidInput(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("file is not valid UTF-8")}))
+            assert(error == IOError.InvalidInput(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("stream did not contain valid UTF-8")}))
         }
         else -> panic("schema UTF-8 failure lost actual bytes or read classification")
     }
