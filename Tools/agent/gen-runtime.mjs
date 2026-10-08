@@ -19,6 +19,7 @@ const check = args.includes("--check") ? ["--check"] : [];
 const steps = [
   ["gen-runtime-trap-messages.mjs", check],
   ["gen-runtime-exports.mjs", check],
+  ["gen-runtime-stop-exports.mjs", check],
   ["gen-c-abi-routes.mjs", [runtime, ...check]],
 ];
 let failed = false;
