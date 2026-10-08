@@ -3241,6 +3241,68 @@ fn jet_services_raw_endpoint_parts(endpoint: &JetServiceEndpoint) -> (String, St
     (endpoint.tree.clone(), endpoint.worker.clone(), jet_std::jet_int_owned_from_i64(endpoint.generation))
 }
 
+fn jet_services_raw_tree_write_state_adapter(tree: &mut JetServiceTree, event_log: bool) {
+    tree.state_adapter = if event_log { JetServiceStateAdapter::EventLog } else { JetServiceStateAdapter::Snapshot };
+}
+fn jet_services_raw_tree_write_state_authority(
+    tree: &mut JetServiceTree, store: String, schema: String, version: i64, migration: String, event_log: bool,
+) {
+    tree.state_authority = Some(JetServiceStateAuthority { store, schema, version, migration,
+        adapter: if event_log { JetServiceStateAdapter::EventLog } else { JetServiceStateAdapter::Snapshot } });
+}
+fn jet_services_raw_tree_state_authority(tree: &JetServiceTree)
+    -> Option<(String, String, jet_foundation::Numeric::JetInt, String)>
+{
+    tree.state_authority.as_ref().map(|authority| (authority.store.clone(), authority.schema.clone(),
+        jet_std::jet_int_owned_from_i64(authority.version), authority.migration.clone()))
+}
+fn jet_services_raw_state_load(tree: &JetServiceTree, event_log: bool) -> Result<Vec<String>, JetServiceError> {
+    let authority = tree.state_authority.as_ref().expect("checked source state authority");
+    let adapter = if event_log { JetServiceStateAdapter::EventLog } else { JetServiceStateAdapter::Snapshot };
+    jet_services_state_store_load(authority, &adapter)
+}
+fn jet_services_raw_tree_event_records(tree: &JetServiceTree) -> Vec<String> { tree.event_log.clone() }
+fn jet_services_raw_tree_upgrade_receipt(tree: &JetServiceTree) -> Option<JetServiceUpgradeReceipt> { tree.last_upgrade.clone() }
+fn jet_services_raw_upgrade_receipt_parts(receipt: &JetServiceUpgradeReceipt)
+    -> (jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt, String, bool, Vec<String>)
+{
+    (jet_std::jet_int_owned_from_i64(receipt.from_generation), jet_std::jet_int_owned_from_i64(receipt.to_generation),
+        receipt.migration.clone(), receipt.rollback_available, receipt.pinned_shards.clone())
+}
+fn jet_services_raw_tree_display_parts(tree: &JetServiceTree)
+    -> (String, jet_foundation::Numeric::JetInt, Vec<(String, String)>, bool, JetServiceRestart,
+        jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt, JetServiceDelivery)
+{
+    (tree.name.clone(), jet_std::jet_int_owned_from_i64(tree.workers.len() as i64),
+        tree.workers.iter().map(|worker| (worker.name.clone(), worker.handler_name.clone())).collect(),
+        tree.started, tree.restart.clone(), jet_std::jet_int_owned_from_i64(tree.restart_budget.max),
+        jet_std::jet_int_owned_from_i64(tree.restart_budget.per_ms), tree.delivery.clone())
+}
+fn jet_services_raw_workflow_replay_parts(tree: &JetServiceTree)
+    -> Result<Vec<(jet_foundation::Numeric::JetInt, Vec<String>, Option<JetTaskOutcome>)>, JetServiceError>
+{
+    Ok(jet_services_workflow_replay(&jet_services_workflow_authority(tree)?)?.into_iter()
+        .map(|workflow| (jet_std::jet_int_owned_from_i64(workflow.run_id), workflow.history, workflow.outcome)).collect())
+}
+fn jet_services_raw_tree_observation_parts(tree: &JetServiceTree)
+    -> (jet_foundation::Numeric::JetInt, bool, jet_foundation::Numeric::JetInt,
+        jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt,
+        jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt, bool,
+        Vec<(jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt)>)
+{
+    let workflows = tree.workflows.iter().map(|workflow| {
+        let status = match workflow.status { JetTaskStatus::Running => 0, JetTaskStatus::Paused => 1, JetTaskStatus::CancelRequested => 2 };
+        let outcome = match &workflow.outcome { None => -1, Some(JetTaskOutcome::Finished) => 0,
+            Some(JetTaskOutcome::Panicked(_)) => 1, Some(JetTaskOutcome::Cancelled) => 2, Some(JetTaskOutcome::DeadlineBlown) => 3 };
+        (jet_std::jet_int_owned_from_i64(status), jet_std::jet_int_owned_from_i64(outcome))
+    }).collect();
+    (jet_std::jet_int_owned_from_i64(tree.workers.len() as i64), tree.started, jet_std::jet_int_owned_from_i64(tree.generation),
+        jet_std::jet_int_owned_from_i64(tree.dead_letters.len() as i64), jet_std::jet_int_owned_from_i64(tree.event_log.len() as i64),
+        jet_std::jet_int_owned_from_i64(tree.chaos_fails), jet_std::jet_int_owned_from_i64(tree.draining.len() as i64),
+        jet_std::jet_int_owned_from_i64(tree.partitioned.len() as i64),
+        tree.last_upgrade.as_ref().is_some_and(|receipt| receipt.rollback_available), workflows)
+}
+
 fn jet_services_drain_dead_letters(tree: &mut JetServiceTree) -> Result<i64, JetServiceError> {
     if !tree.started {
         return Err(JetServiceError::NotStarted(

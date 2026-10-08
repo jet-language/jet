@@ -8,15 +8,13 @@ fn run() Never! {
     core_source_owned_require(row.symbol == CoreCallSymbol.SourceOwned, "explicit implementation owner")
     core_source_owned_require(row.signature.arity == original.signature.arity && row.signature.max_arity == original.signature.max_arity && row.signature.borrow_mask == original.signature.borrow_mask && row.effect_kind == original.effect_kind && row.capability.kind == original.capability.kind && row.capability.provider == original.capability.provider && row.capability.fallback == original.capability.fallback && row.capability.failure == original.capability.failure && row.ui_capabilities == original.ui_capabilities, "signature, effects and authority preserved")
     core_source_owned_require(!core_call_has_direct_symbol(row) && row.interpreter_route == CoreCallInterpreterRoute.NoRoute, "no executable host route")
-    core_source_owned_require(core_call_source_member(row) == Val("shortcut"), "default source export")
-    selected :: core_call_with_source_target(~row, "__shortcut_entry")
-    core_source_owned_require(core_call_source_member(selected) == Val("__shortcut_entry"), "normalized source export")
+    core_source_owned_require(core_call_source_member(row) == (Val("shortcut")), "default source export")
     host_selected :: core_call_with_source_target(~original, "__not_a_host_route")
     core_source_owned_require(core_call_source_member(host_selected) == None, "non-source-owned row unchanged")
     rows :: [CoreCallRecord]{row}
     sema :: core_call_projection_in(rows, "core.ui.host", "shortcut", 1, 2)
     core_source_owned_require(if sema == {.Row(_) -> true else -> false}, "sema projection retained")
-    loop projection in [Int]{2, 4, 8, 16, 32} {
+    loop projection in ([Int]{2, 4, 8, 16, 32}) {
         projected :: core_call_projection_in(rows, "core.ui.host", "shortcut", projection, 2)
         rejected :: if projected == {
             .Error(error) -> if error == {.Uncovered(_) -> true else -> false}
@@ -24,4 +22,6 @@ fn run() Never! {
         }
         core_source_owned_require(rejected, "executable projection rejected")
     }
+    selected :: core_call_with_source_target(~row, "__shortcut_entry")
+    core_source_owned_require(core_call_source_member(selected) == (Val("__shortcut_entry")), "normalized source export")
 }
