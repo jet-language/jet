@@ -3,14 +3,8 @@ use core.encoding as encoding
 use core.archive as archive
 use core.encoding.base64 as base64
 
-#Error
-pub struct HexError {
-    pub reason: String
-}
-
-impl HexError {
-    pub fn new(reason: String) -> HexError Never! { HexError{reason: reason} }
-}
+// D-VIS-REEXPORT1 / D-ALIAS-BIND2: both public spellings name one error type.
+pub alias HexError :: encoding.HexError
 
 // core.encoding.hex — RFC 4648 §8 hexadecimal alphabet.
 //
@@ -29,12 +23,7 @@ pub fn encode(data: [U8]) -> String Never! { encoding.bytes_to_hex(data) }
 
 /// Decode hexadecimal text into bytes. Fails when the length is odd or a digit
 /// is outside `0-9A-Fa-f`.
-pub fn decode(text: String) -> [U8] HexError! {
-    if encoding.hex_to_bytes(text) == {
-        .Ok(value) -> return Ok(value)
-        .Err(error) -> return Err(HexError{reason: error.reason})
-    }
-}
+pub fn decode(text: String) -> [U8] HexError! { encoding.hex_to_bytes(text) }
 
 fn digit(b: U8) -> Int? {
     n :: u8_int(b)

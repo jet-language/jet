@@ -2609,6 +2609,10 @@ malformed input returns a typed `EncodingError`. The whole-value codecs are
 pure; readers and writers expose the same boundaries incrementally. The
 shared codec shape and value tree follow D-ENC1, D-JSONVERB1, and D-SERDE13.
 
+The reason-only `HexError`, `base32.Base32Error`, `base64.Base64Error`, and
+`core.crypto.uuid.UUIDError` render only their `reason` in Display and Debug
+formatting. `encoding.HexError` and `encoding.hex.HexError` name the same type.
+
 | Function or type | Returns | Description |
 | --- | --- | --- |
 | `encoding.DataTree` | type | Dynamic tree of null, Boolean, integer, float, lexical number, typed text, string, bytes, array, and ordered-object values. |

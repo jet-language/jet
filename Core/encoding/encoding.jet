@@ -182,6 +182,15 @@ impl EncodingLimits {
 #Error
 pub struct HexError {
     pub reason: String
+    impl Display {
+        fn display(self) -> String Never! { self.reason }
+    }
+    impl Debug {
+        fn debug(self) -> String Never! { self.reason }
+    }
+}
+impl HexError {
+    pub fn new(reason: String) -> HexError Never! { HexError{reason: reason} }
 }
 /// Convert one nibble to lowercase ASCII. Callers must pass `0..15`.
 pub fn hex_nibble(n: Int) -> U8 Never! {
