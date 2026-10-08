@@ -48,6 +48,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { generatedRecordPath, recordApplication, recordApplicationsIn, recordBindings, recordInstanceName, substituteRecordType, runtimeExportSignatures, validateLoweringRuntimeAbi, validateRuntimeOwnership, validateRuntimeRoute } from "./runtime-route-abi.mjs";
+import { nativeHandleExports } from "./native-route-handles.mjs";
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const runtimePath = process.argv[2];
 const check = process.argv.includes("--check");
@@ -1700,6 +1701,28 @@ rs.push(`
         })
     }
 `);
+
+// Source declarations are candidates, not a layout claim. Lower resolves the
+// exact declaration + arguments in the actual MIR and refuses opaque runtime
+// handles; this table merely supplies stable C names for that typed lookup.
+const nativeTypes = [];
+for (const [runtime] of handleRows) {
+  const names = [...jetNames].filter(([, target]) => target === runtime).map(([name]) => name).sort();
+  for (const key of names) {
+    const match = /^<corelib>\/[^:]+::(Core\/[^:]+\.jet)::([A-Za-z_]\w*)(?:<(.*)>)?$/.exec(key);
+    if (!match) continue;
+    const [, path, name, argumentsText] = match;
+    const source = readFileSync(`${repo}/${path}`, "utf8");
+    if (!new RegExp(`\\b(?:struct|enum)\\s+${name}\\b`).test(source)) continue;
+    const base = key.slice(0, key.indexOf(`::${name}`) + name.length + 2);
+    const render = rendered(runtime, handles.get(runtime));
+    nativeTypes.push({ runtime, jetNames: names, jetName: key, source: { path, key: base },
+      arguments: argumentsText ?? "", clone: cloneable.has(runtime), eq: comparable.has(runtime), ...render });
+    break;
+  }
+}
+const nativeExports = nativeHandleExports(nativeTypes)
+  .filter((descriptor) => !jetRuntimeExports.has(descriptor.name));
 for (const adapter of adapters) {
   if (adapter.external || jetRuntimeExports.has(adapter.name)) continue;
   const params = [];
@@ -1804,6 +1827,25 @@ jet.push("pub fn lower_handle_field(runtime: String, field: String) -> LowerHand
 jet.push("    loop row in LOWER_HANDLE_FIELDS {");
 jet.push("        if row.runtime == runtime && row.field == field -> return Val(~row)");
 jet.push("    }");
+jet.push("    None");
+jet.push("}");
+
+jet.push("");
+jet.push("// Candidate source identities; Lower validates against actual MIR/native layout.");
+jet.push("pub struct LowerNativeType { pub jet_name: String, pub declaration: String, pub arguments: String }");
+jet.push("LOWER_NATIVE_TYPES :: prep { [LowerNativeType]{");
+for (const type of nativeTypes) jet.push(`    LowerNativeType{jet_name: "${type.jetName}", declaration: "${type.source.key}", arguments: "${type.arguments}"},`);
+jet.push("} }");
+jet.push("pub fn lower_native_type(name: String) -> LowerNativeType? {");
+jet.push("    loop row in LOWER_NATIVE_TYPES { if row.jet_name == name -> return Val(~row) }");
+jet.push("    None");
+jet.push("}");
+jet.push("pub struct LowerNativeExport { pub symbol: String, pub jet_name: String, pub op: String, pub member: String }");
+jet.push("LOWER_NATIVE_EXPORTS :: prep { [LowerNativeExport]{");
+for (const row of nativeExports) jet.push(`    LowerNativeExport{symbol: "${row.name}", jet_name: "${row.jetName}", op: "handle.${row.op}", member: ""},`);
+jet.push("} }");
+jet.push("pub fn lower_native_export(symbol: String) -> LowerNativeExport? {");
+jet.push("    loop row in LOWER_NATIVE_EXPORTS { if row.symbol == symbol -> return Val(~row) }");
 jet.push("    None");
 jet.push("}");
 jet.push("// END GENERATED C-ABI ROUTES");
