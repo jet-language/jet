@@ -982,12 +982,18 @@ pub fn mktemp(prefix: String) -[FS, Env, Time]> String Never! {
 }
 
 
-pub fn canonicalize(path: String) -[FS, Env]> String IOError! {
-    core.files.canonicalize(path)
+pub fn canonicalize(path: String | Path) -[FS.Read]> String IOError! {
+    text :: path_text(path)
+    files8_preflight("FS.Read", .Read, text)
+    core.files.__canonicalize_raw(text)
 }
 
 
-pub fn list_dir(path: String) -[FS.Read]> [DirEntry] IOError! { core.files.list_dir(path) }
+pub fn list_dir(path: String | Path) -[FS.Read]> [DirEntry] IOError! {
+    text :: path_text(path)
+    files8_preflight("FS.Read", .Read, text)
+    core.files.__list_dir_raw(text)
+}
 
 
 pub fn create_dir(path: String) IOError! -[FS.Write]> {
@@ -1036,7 +1042,11 @@ pub fn remove(path: String | Path) IOError! -[FS.Write]> {
 }
 
 
-pub fn remove_dir(path: String) IOError! -[FS.Write]> { core.files.remove_dir(path) }
+pub fn remove_dir(path: String | Path) IOError! -[FS.Write]> {
+    text :: path_text(path)
+    files8_preflight("FS.Write", .Write, text)
+    core.files.__remove_dir_raw(text)
+}
 
 
 pub fn remove_all(path: String | Path) IOError! -[FS]> {
@@ -1104,7 +1114,19 @@ pub fn symlink(original: String | Path, link: String | Path) IOError! -[FS.Write
 }
 
 
-pub fn hard_link(original: String, link: String) IOError! -[FS.Write]> { core.files.hard_link(original, link) }
+pub fn hard_link(original: String | Path, link: String | Path) IOError! -[FS.Write]> {
+    source :: path_text(original)
+    target :: path_text(link)
+    files8_preflight("FS.Write", .Write, target)
+    core.files.__hard_link_raw(source, target)
+}
+ 
+pub fn is_socket(path: String | Path) -[FS.Read]> Bool IOError! {
+    text :: path_text(path)
+    files8_preflight("FS.Read", .Read, text)
+    mode :: core.files.__stat_mode_raw(text)
+    Ok((mode & 61440) == 49152)
+}
 
 
 pub fn read_link(path: String) -[FS.Read]> String IOError! {
@@ -1401,15 +1423,16 @@ pub fn walk(root: String | Path, ignore: String?) -[FS]> [WalkEntry] IOError! {
 }
 
 
-pub fn walk_parallel(root: String, ignore: String?) -[FS]> [WalkEntry] IOError! {
-    // Cooperative Jet has no thread pool yet; the walk is the same walk.
-    walk_impl(root, ignore, false)
+pub fn walk_parallel(root: String | Path, ignore: String?) -[FS]> [WalkEntry] IOError! {
+    walk_impl(path_text(root), ignore, false)
 }
 
 
 pub fn walk_files(root: String | Path, ignore: String?) -[FS]> [WalkEntry] IOError! {
     walk_impl(path_text(root), ignore, true)
 }
+
+
 
 
 fn has_meta(seg: String) -> Bool Never! {
@@ -1472,15 +1495,29 @@ pub fn glob(pattern: String) -[FS]> [String] IOError! {
 }
 
 
-pub fn temp_dir(prefix: String) -[FS]> TempDir IOError! { core.files.temp_dir(prefix) }
+pub fn temp_dir(prefix: String) -[FS]> TempDir IOError! {
+    path :: files_temp_path(prefix)
+    files8_preflight("FS.Write", .Write, path)
+    core.files.__temp_dir_raw(^path)
+}
 
+pub fn mkdtemp(prefix: String) -[FS]> String IOError! {
+    path :: files_temp_path(prefix)
+    files8_preflight("FS.Write", .Write, path)
+    core.files.__mkdtemp_raw(^path)
+}
 
-pub fn temp_file(prefix: String) -[FS]> TempFile IOError! {
+fn files_temp_path(prefix: String) -[FS]> String Never! {
     clean :: temp_prefix(prefix)
     clock :: core.files.__temp_clock_raw()
     nanos :: if clock.clock_available -> clock.nanos else -> "0"
     pid :: core.files.__process_id_raw()
-    path :: core.files.__host_path_join(core.files.__temp_directory_raw(), "{clean}_{pid}_{nanos}")
+    core.files.__host_path_join(core.files.__temp_directory_raw(), "{clean}_{pid}_{nanos}")
+}
+
+
+pub fn temp_file(prefix: String) -[FS]> TempFile IOError! {
+    path :: files_temp_path(prefix)
     files8_preflight("FS.Write", .Write, path)
     core.files.__temp_file_raw(^path)
 }
@@ -1489,7 +1526,11 @@ pub fn temp_file(prefix: String) -[FS]> TempFile IOError! {
 /// Take an exclusive lock by creating `path` (create-new). A second `lock` on
 /// a held path fails with an `IOError`; the lock file is removed when the
 /// returned `FileLock` leaves scope, which makes the path available again.
-pub fn lock(path: String) -[FS]> FileLock IOError! { core.files.lock(path) }
+pub fn lock(path: String | Path) -[FS]> FileLock IOError! {
+    text :: path_text(path)
+    files8_preflight("FS.Write", .Write, text)
+    core.files.__lock_raw(text)
+}
 
 
 pub fn basename(path: String) -> String Never! {
