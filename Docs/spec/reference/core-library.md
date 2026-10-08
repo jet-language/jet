@@ -2100,6 +2100,11 @@ tree (each lane seeded with positive zero); average divides the sum by four.
 Product, minimum, and maximum fold in lane order from one, positive infinity,
 and negative infinity respectively. Min/max use scalar IEEE `min`/`max`,
 including their NaN behavior; `sqrt` applies the existing scalar root leaf.
+Stock coordinate constructors (`ScreenPoint`/`ScreenDelta` and the World,
+View, Camera, and Device counterparts) set `frame_id` to zero. Their
+arithmetic keeps the left operand's frame; point-minus-point yields a delta.
+Dynamic `Point2`/`Delta2` arithmetic rejects unequal nonzero frame identities,
+otherwise keeps the nonzero identity. These policies are authored in Jet.
 
 ```jet
 fn rotate(v: Vec3, transform: Mat3) -> Vec3 {
