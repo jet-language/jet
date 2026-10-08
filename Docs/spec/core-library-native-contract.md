@@ -191,7 +191,6 @@ An epoch-dependent `expect-requires-route` marker records a named refusal only
 when the generated route manifest lacks the required provider; its lowering
 unit witness must assert the exact refusal. Presence of the route makes the
 runtime output comparison mandatory, not optional.
-
 ## One meaning across execution tiers
 
 AOT, interpreter/comptime evaluation, and web execution are

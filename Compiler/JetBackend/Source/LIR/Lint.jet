@@ -209,6 +209,26 @@ fn lir_lint_inst(program: LIRModule, function: LIRFunction, inst: LIRInst) -> [S
         if !lir_lint_value_valid(function, value) -> return messages
     }
     if inst == {
+        .InlineAsm(dst, args, regs, result, _) -> {
+            if args.len() != regs.len() -> &messages.push("inline asm register and argument counts differ")
+            if (dst != None) != (result >= 0) -> &messages.push("inline asm result register and destination disagree")
+            if result < -1 -> &messages.push("inline asm absent result register must be -1")
+            if result >= 0 && !lir_asm_register(result) -> &messages.push("inline asm result is not caller-saved")
+            if regs.len() > LIR_ASM_INPUTS.len() -> &messages.push("inline asm has more than seven inputs")
+            loop (i, reg) in regs {
+                if i >= LIR_ASM_INPUTS.len() || reg != LIR_ASM_INPUTS[i] -> &messages.push("inline asm input register does not match its fixed binding")
+            }
+            loop arg in args {
+                layout :: function.values[arg.value].layout
+                if layout != lir_layout_word() && layout != lir_layout_pointer() -> &messages.push("inline asm input v{arg.value} is not a machine word")
+                if function.values[arg.value].drop != .Trivial -> &messages.push("inline asm input v{arg.value} has drop glue")
+            }
+            if dst == .Val(output) {
+                layout :: function.values[output.value].layout
+                if layout != lir_layout_word() && layout != lir_layout_pointer() -> &messages.push("inline asm result is not a machine word")
+                if function.values[output.value].drop != .Trivial -> &messages.push("inline asm result has drop glue")
+            }
+        }
         .Const(dst, value) -> {
             layout :: function.values[dst.value].layout
             if layout.class == .Pointer {
@@ -243,6 +263,13 @@ fn lir_lint_inst(program: LIRModule, function: LIRFunction, inst: LIRInst) -> [S
         .Copy(dst, src) -> {
             if function.values[src.value].drop != .Trivial -> &messages.push("copy of v{src.value}, which has drop glue; move it instead")
             if function.values[dst.value].layout != function.values[src.value].layout || function.values[dst.value].drop != .Trivial -> &messages.push("copy v{src.value} -> v{dst.value} changes layout or drop glue")
+        }
+        .Bitcast(dst, src) -> {
+            loop value in ([LIRValueID]{dst, src}) {
+                layout :: function.values[value.value].layout
+                if layout != lir_layout_word() && layout != lir_layout_float() && layout != lir_layout_pointer() -> &messages.push("bitcast v{src.value} -> v{dst.value} requires two 64-bit scalar layouts")
+                if function.values[value.value].drop != .Trivial -> &messages.push("bitcast v{src.value} -> v{dst.value} requires two trivial values")
+            }
         }
         .Call(dst, signature_id, callee, args) -> {
             signature :: lir_signature(program, signature_id) ?? return [String]{"call names missing signature {signature_id.value}"}

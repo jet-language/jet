@@ -201,7 +201,7 @@ pub(crate) mod jet_c_abi_iter {
             let show: unsafe extern "C" fn(*const u8) -> JetCString = unsafe { std::mem::transmute(self.meta.show) };
             let result = unsafe { show(self.slot.data()) };
             if jet_scheduler_native_propagate() != 0 { jet_scheduler_resume_native_stop(); }
-            *unsafe { Box::from_raw(result) }
+            super::jet_c_abi::take(result)
         }
     }
 
@@ -353,7 +353,7 @@ pub(crate) mod jet_c_abi_iter {
     }
     #[no_mangle]
     pub unsafe extern "C" fn jet_rt_native_iter_join(iter: *mut NativeIter, separator: JetCString, meta: *const NativeMeta) -> JetCString {
-        guard(|| Box::into_raw(Box::new(jet_iter_join(enrich(take(iter), Meta::copy(meta)), &*separator))))
+        guard(|| super::jet_c_abi::handle(jet_iter_join(enrich(take(iter), Meta::copy(meta)), view(separator))))
     }
     #[no_mangle]
     pub unsafe extern "C" fn jet_rt_native_iter_compare(iter: *mut NativeIter, other: *mut Header, meta: *const NativeMeta, by_value: u8) -> i64 {
@@ -422,7 +422,7 @@ pub(crate) mod jet_c_abi_iter {
                 guard(|| {
                     let meta = Meta::copy(meta);
                     let source = $kernel(view(text), view(separator));
-                    handle(JetIter(Box::new(source.0.map(move |text| NativeValue::scalar(meta.clone(), Box::into_raw(Box::new(text)) as u64)))))
+                    handle(JetIter(Box::new(source.0.map(move |text| NativeValue::scalar(meta.clone(), super::jet_c_abi::handle(text) as u64)))))
                 })
             }
         )*};
@@ -442,7 +442,7 @@ pub(crate) mod jet_c_abi_iter {
     }
     #[no_mangle]
     pub unsafe extern "C" fn jet_rt_native_iter_progress(iter: *mut NativeIter, description: JetCString, format: JetCString) -> *mut NativeIter {
-        guard(|| handle(jet_std_io_progress_iter(take(iter), &*description, &*format)))
+        guard(|| handle(jet_std_io_progress_iter(take(iter), view(description), view(format))))
     }
     #[no_mangle]
     pub unsafe extern "C" fn jet_rt_native_iter_split_at(iter: *mut NativeIter, count: i64, target: *mut u8, left: usize, right: usize) {
@@ -635,13 +635,6 @@ pub(crate) mod jet_c_abi_iter {
         jet_rt_native_iter_map => jet_iter_map,
         jet_rt_native_iter_map_mut => jet_iter_map_mut,
         jet_rt_native_iter_dedup_by => jet_iter_dedup_by,
-    }
-    #[no_mangle]
-    pub unsafe extern "C" fn jet_rt_native_iter_is_sorted_by(iter: *mut NativeIter, env: *mut u8, invoke: usize, release: usize, meta: *const NativeMeta) -> u8 {
-        guard(|| {
-            let mut callback = Callback::new(env, invoke, release, meta);
-            u8::from(jet_iter_is_sorted_by(take(iter), |value| callback.unary(value)))
-        })
     }
     macro_rules! predicate {
         ($($name:ident => $kernel:ident),* $(,)?) => {$(

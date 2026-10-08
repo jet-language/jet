@@ -866,7 +866,7 @@ fn jet_deque_is_empty<T>(queue: &std::collections::VecDeque<T>) -> bool {
 }
 
 #[inline(always)]
-fn jet_string_is_empty(text: &String) -> bool {
+fn jet_string_is_empty(text: &str) -> bool {
     text.is_empty()
 }
 
@@ -2907,7 +2907,7 @@ fn jet_iter_average_int<T: 'static + JetIntAverage>(it: JetIter<T>) -> f64 {
 
 /// `Iter.join(sep)` streams each shown item into one String without first
 /// collecting the source into a list.
-fn jet_iter_join<T: 'static + JetShow>(it: JetIter<T>, separator: &String) -> String {
+fn jet_iter_join<T: 'static + JetShow>(it: JetIter<T>, separator: &str) -> String {
     let mut out = String::new();
     for (index, item) in it.0.enumerate() {
         if index > 0 {

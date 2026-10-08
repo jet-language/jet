@@ -1831,6 +1831,19 @@ fn jet_rust_emit_impl_carrier_trait(ctx: &JetRustEmitContext, implementation: MI
     Val("__jet_ext{jet_rust_emit_generated_path(implementation.key)}")
 }
 
+// MIRRust emit_impl: the impl's owner is a type row this artifact declares
+// (implementation_owner_def + declares_type_def).
+fn jet_rust_emit_impl_owner_declared(ctx: &JetRustEmitContext, implementation: MIRImplDef) -> Bool Never! {
+    owner_id :: if implementation.self_type.kind == {
+        .Apply(name, _) -> Val(implementation.self_type.identity ?? name.id)
+        else -> MIRTypeID?{None}
+    }
+    identity :: owner_id ?? return false
+    position :: jet_rust_emit_type_index(ctx, identity) ?? return false
+    definition :: ~ctx.program.types[position]
+    definition.id == identity && jet_rust_emit_module_selected(ctx, definition.module_id) && jet_rust_emit_declares_type_definition(&ctx, definition)
+}
+
 // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::emit_impl
 fn jet_rust_emit_impl_definition(ctx: &JetRustEmitContext, implementation: MIRImplDef, lines: &[String]) Never! {
     previous_generic_params := ctx.current_generic_params
@@ -1972,6 +1985,20 @@ fn jet_rust_emit_impl_definition(ctx: &JetRustEmitContext, implementation: MIRIm
         &lines.push("{{")
         &lines.push("    fn jet_loop_source(self, source_kind: JetLoopSourceKind, by_value: bool) -> Box<dyn Iterator<Item = JetLoopAny>> {{")
         &lines.push("        jet_iterable_loop_source(self, source_kind, by_value)")
+        &lines.push("    }}")
+        &lines.push("}}")
+    }
+    // MIRRust emit_impl: a source-written `Debug` impl suppresses the type's
+    // Rust `derive(Debug)`, yet the derive capability counts it as Debug, so a
+    // row holding the type still derives `Debug`. The hosted Prelude's
+    // `JetDebug` is no Rust `Debug`; the owning crate bridges the two through
+    // the written impl (its redaction included).
+    if !implementation.compiler_generated && !jet_rust_emit_is_no_os(&ctx) && implementation.trait_ref == .Val(debug_ref) && debug_ref.name == "Debug" && jet_rust_emit_impl_owner_declared(&ctx, implementation) {
+        owner :: jet_rust_emit_type(&ctx, implementation.self_type)
+        &lines.push("")
+        &lines.push("impl{impl_generics} ::core::fmt::Debug for {owner} {{")
+        &lines.push("    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {{")
+        &lines.push("        f.write_str(&<Self as JetDebug>::jet_debug(self))")
         &lines.push("    }}")
         &lines.push("}}")
     }

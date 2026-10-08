@@ -51,6 +51,30 @@ read-only data; each table's ID equals its index.
   `Branch`, `Return`, `Unreachable`.
 - Calls name a signature by ID, so the generator never re-derives an ABI from
   Jet types.
+- `InlineAsm(dst?, args, regs, result, code)` is effectful, including when
+  it has no result. The strict x86-64 assembler recovers audited asm bodies
+  from their checked UTF-8 source spans. Inputs bind simultaneously to
+  `rdi,rsi,rdx,rcx,r8,r9,r10`; selection snapshots all inputs with push/pop
+  before emitting the template bytes. Allocation treats asm as a call.
+  Supported templates contain word-register push/pop, mov (register,
+  immediate, qword memory), movzx byte loads, syscall, indirect register
+  calls, lock cmpxchg, xchg, and pause. Memory addresses admit a base register
+  or named input with an optional signed-32-bit `+ displacement`.
+  Callee-saved/frame registers, unsupported syntax, unbalanced stacks,
+  misaligned calls, missing/duplicate return anchors, and named input reads
+  after their bound register was written are registered native refusals:
+  `LIRLoweringIssue` with the `inline asm:` prefix and the offending line.
+  No bytes from a refused template enter the LIR. The OS-template witnesses
+  in `Tests/Fixtures/InlineAsm.jet` use the actual `OS/Linux.jet` source.
+  The one read-only frame-register form, `mov r64, rsp`, may expose storage
+  owned by balanced template pushes; it is refused with an empty template stack.
+  Byte stores use explicit low-byte register names (including sil/dil and
+  r8b-r11b), with a REX prefix. Exact `Int` inputs/results must have matching
+  high two bits; non-inline carriers stop through `jet_rt_panic_overflow`
+  before any template memory access. Fixed-width I64/U64 leaves bypass this
+  carrier check. Direct raw-word `#Import(c)` calls name the imported symbol
+  in LIR; non-word carriers, callbacks, handles, and link-unit bridges remain
+  refused rather than acquiring an implicit adapter.
 
 `LIR/Lint.jet` checks a module before any generator reads it: table IDs,
 valid layouts, signature agreement of entry parameters, calls, returns and
@@ -166,7 +190,7 @@ IR with these choices, which the Jet lowering keeps or replaces as noted:
 | `Char`, `IntN(_, 64)` | word | `i64` | none |
 | `Bool` | flag | `i8` (Integer 1, 0 or 1) | none |
 | `Unit`, `Never` | no LIR value | — | — |
-| `String` | runtime handle | `ptr` | `jet_rt_string_drop` |
+| `String` | runtime handle to a C-layout `{ptr, len, cap}` UTF-8 header (byte counts, words at offsets 0/8/16 on x64) | `ptr` | `jet_rt_string_drop` |
 | `RangeCursor`, `IterCursor` | runtime handle | `ptr` | `jet_loop_cursor_drop` |
 | struct, tuple | inline aggregate: pointer to storage holding the stored fields at natural offsets (`Lower/Values.jet`) | `ptr` | generated glue on the storage (frees nothing) |
 | enum, every variant without payload | discriminant word | `i64` | none |
@@ -418,6 +442,36 @@ printed); `jet_loop_cursor_drop` frees a range cursor. A runtime stop renders
 its report and exits the process; nothing unwinds into generated frames.
 Prelude and Core routes go through adapters that `Tools/agent/gen-c-abi-routes.mjs`
 generates (`CAbiRoutes.rs`, with the carrier table `Lower/RuntimeRoutes.jet`).
+When a route is ported to `Compiler/JetRuntime`, its direct `#Export(c)`
+function is the adapter: it takes raw fixed-width carriers and uses the
+canonical route C symbol. `gen-runtime-exports.mjs` records that definition in
+the single `exports.list`; `gen-c-abi-routes.mjs` keeps the shared lowering
+metadata but omits its Rust adapter body. Both tools read the runtime-only
+`sources.list`. The route generator checks the Jet declaration against the
+derived C ABI, including every flattened list argument and result out-slot,
+and fails rather than silently skipping a Jet-owned route whose ABI cannot
+be derived. Exact `Int`, typed `String`, write borrows, failures, and mismatched
+parameter/result widths are not raw route signatures. `--check` validates
+ownership and signatures as well as generated-file freshness.
+`node Tools/agent/gen-runtime.mjs <allparts.rs> --check` checks trap literals,
+the export list, and routes in one keep-going invocation. Without `--check`
+it regenerates them in dependency order. Narrow worker and held-job checks
+can use `Tools/agent/lane-check.sh --runtime-generators <allparts.rs>` through
+the cheap-check lane; this mode does not invoke Cargo.
+Text has one C-ABI carrier, `JetCText`, not Rust's unspecified `String` layout.
+Owning headers and buffers are allocated/freed by `jet_rt_alloc`/`jet_rt_free`;
+empty buffers have capacity zero and a non-null dangling pointer. The Rust
+boundary copies a returned Rust String into this domain, and copies text out
+before consuming a carrier as a Rust-owned String. Read-only `&str` kernels
+borrow its UTF-8 bytes; remaining `&String` signatures receive a Rust-owned
+temporary copy. Builders grow with the runtime allocator and finish by
+transferring the unchanged header. Runtime-handle String field projections
+write a borrowed header into caller stack storage; that header and its bytes
+are never freed or grown, and owning reads clone it. Native compiler text
+marshaling continues to use `jet_rt_string_data`/`jet_rt_string_byte_len`,
+never Rust layout. This contract applies to the linked runtime pack; the
+standalone freestanding image runtime is separate and retires with L3.
+
 A Jet type that generated Rust holds as a native runtime type crosses as an owned
 `Box<T>` handle. The generator reads Context.rs and predicates.rs name tables and the
 explicit names in MIRRust `rust_apply_type`, using the same canonical-Core probe as
@@ -1365,12 +1419,14 @@ agreed before and no longer does. It writes `differential.tsv` and
 
 Sanitizer mode (#4619): `Tests/run-sanitized.mjs <outdir> --runtime
 <runtime.rs>` builds the prepared runtime text (the one the corpus's runtime
-pack came from) as a staticlib with `-Zsanitizer=address -Zub-checks=yes`,
-links every native object against it with `clang -fsanitize=address`, and
-runs each golden with every ASan/LSan report written under
-`sanitize/reports/`. The mode checks every runtime and libc call the native
-code makes, turns a native crash into a report with a symbolized stack, and
-finds unreachable heap blocks at exit. Native code itself is checked when
+pack came from) as a staticlib with `--cfg jet_native_pack
+-Zsanitizer=address -Zub-checks=yes`. `JET_RUNTIME_JET_OBJECT` must name the
+same Jet object used in that pack; the strong-definition guard rejects
+replaced Rust exports. Every native object links the Jet provider first, then
+the sanitized remaining Rust archive, with `clang -fsanitize=address`.
+Each golden retains every ASan/LSan report under `sanitize/reports/`. This
+checks the remaining Rust runtime and libc, but rustc does not instrument
+the Jet runtime object's internals. Native code itself is checked when
 run-goldens ran with `JET_LOWER_SANITIZE=1`: GoldenLower then also writes
 `lower/<case>.asan.o`, lowered through `LIR/Sanitize.jet`, which precedes
 every Load and Store whose base is not a stack slot of its own function with
@@ -1525,3 +1581,45 @@ ambiguous pairing is reported, never treated as equality. `--bootstrap JETC0`
 provides a front-end diagnostic census before the probe can be built.
 Preparation and a receipt-only census never establish differential parity;
 only `summary.json` with `differential_verified: true` does.
+
+### Jet-authored runtime object
+
+`Compiler/JetRuntime` is a separate package, assembled from its own
+`sources.list`; it is never part of the compiler bootstrap inventory.
+`JetBackend/Tests/run-runtime.mjs` sends that checked library directly through
+the Jet frontend's library-object hook. The explicit `exports.list` is checked
+against adjacent `#Export(c)` declarations and scalar C signatures. I64/U64,
+U8, Bool and Float/F64 are admitted (F64 arguments/results use the System V
+xmm ABI); the annotated exact-Int bounds-index seam is the sole exception.
+The runtime's private allocator root uses the shared MIR `.Global` lowering.
+`jet_rt_alloc_init` is a void/no-argument constructor in `.init_array.00000`.
+
+`prebuild-runtime.sh` keeps the Rust-tier seed/verification rlib separate from
+`libjet_runtime_native.rlib`, built from fresh all-parts source with
+`--cfg jet_native_pack`. The latter imports the Jet allocator and is packed
+after `jet_runtime_jet.o`; the strong-definition check rejects any replaced
+Rust export. Rust-tier allocator bodies are seed/verification inputs only,
+recorded for deletion at cutover, not a second native-pack implementation.
+
+`JetRuntime/Tests/check-object.mjs` checks exact exports and the audited
+`imports.list`, including the allocator constructor relocation.
+`run-object-fixtures.mjs` prepares actual checked-source I64 global store/load
+exports, an F64 ABI identity, and the allocator tests. A foreign caller tests
+the globals; executable startup and an entryless `dlopen` library inspect the
+allocator root before any explicit init call, then check repeated init leaves
+it unchanged. The pack-linked `run-cabi-driver.mjs` preserves all C-ABI trap
+cases, while the Rust-tier cargo driver only calls remaining Rust-tier routes.
+`run-alloc-parity.mjs` separately checks invalid-layout exit 70 and allocation
+failure `SIGABRT`, including byte-identical stderr against the Rust seed.
+Process-edge stdout flushing uses a dedicated lock and error word in the
+allocator's initialized root page, never a new allocation on the stop path.
+The all-parts adapter refreshes the compiler-call process boundary using its
+stable `JET_NATIVE_COMPTIME_ACTIVE` declaration, not an explanatory comment.
+
+
+The allocator suite has a named `alloc_tests` entry; its library unit never
+declares a program `run` entry. C exports have no failure-row annotation.
+
+The C ABI route generator reads every canonical `CAbi*.rs` except generated
+`CAbiRoutes.rs`, including unsafe C exports. Hand-owned exports do not get
+generated adapter bodies; canonical signatures still supply ownership checks.

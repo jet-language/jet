@@ -10,9 +10,9 @@
 // - `Int` is the exact-Int carrier word (inline, or a tagged big-integer
 //   owner). Kernels that take native `i64` are adapted the way generated
 //   Rust adapts them (`native_int_input` / `native_int_result`).
-// - `String` is an owned `Box<String>` handle. `jet_rt_string_drop` and
-//   `jet_rt_string_builder_finish` consume their argument; every other
-//   String parameter is borrowed and stays owned by the caller.
+// - `String` is a pointer to `JetCText`, the C-layout {ptr, len, cap}
+//   UTF-8 carrier. Drop and builder finish consume it; other parameters borrow
+//   it. Its header and buffer use the runtime's shared allocation domain.
 // - `Bool` parameters are a word holding 0 or 1; `Bool` results are returned
 //   in the low byte.
 // - A cursor handle is an owned `Box<JetLoopRangeCursor>`.
@@ -25,7 +25,19 @@ mod jet_c_abi {
     #![allow(non_snake_case)]
     use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
 
-    pub(crate) type JetCString = *mut String;
+    /// Stable text header shared with Jet runtime layers. `ptr` is non-null,
+    /// `len <= cap`, and the first `len` bytes are initialized valid UTF-8.
+    /// Owning headers/buffers belong to jet_rt_alloc/jet_rt_free, not Rust's
+    /// heap. When cap is 0, ptr is 1 and is never freed. Field projections may
+    /// lend a stack header over Rust bytes; that header is read/clone-only.
+    #[repr(C)]
+    pub(crate) struct JetCText {
+        pub(crate) ptr: *mut u8,
+        pub(crate) len: usize,
+        pub(crate) cap: usize,
+    }
+
+    pub(crate) type JetCString = *mut JetCText;
 
     /// The word is unused after a typed transfer: MIR requires a Poll before
     /// any read or drop of a can-stop call result. This is not a constructed
@@ -99,25 +111,77 @@ mod jet_c_abi {
         String::from_utf8_lossy(bytes(ptr, len))
     }
 
+    fn text_handle(value: &str) -> JetCString {
+        let len = value.len();
+        // SAFETY: a nonempty UTF-8 byte buffer has the valid (len, 1) layout;
+        // the runtime pack's init array initializes the shared Jet heap first.
+        let ptr = if len == 0 { std::ptr::NonNull::<u8>::dangling().as_ptr() } else { unsafe { jet_rt_alloc(len, 1) } };
+        // SAFETY: the header has its exact nonzero C-layout size/alignment.
+        let carrier = unsafe { jet_rt_alloc(std::mem::size_of::<JetCText>(), std::mem::align_of::<JetCText>()) } as JetCString;
+        // SAFETY: both fresh allocations have exactly the requested sizes;
+        // the input is valid UTF-8 and disjoint from the new buffer.
+        unsafe {
+            std::ptr::copy_nonoverlapping(value.as_ptr(), ptr, len);
+            carrier.write(JetCText { ptr, len, cap: len });
+        }
+        carrier
+    }
+
     pub(crate) fn handle(value: String) -> JetCString {
-        Box::into_raw(Box::new(value))
+        text_handle(&value)
     }
 
     pub(crate) fn view<'a>(value: JetCString) -> &'a str {
-        // SAFETY: `value` is a live handle from `handle` that the caller owns
-        // for the duration of this call.
-        unsafe { (*value).as_str() }
+        // SAFETY: the caller lends a live carrier and its valid UTF-8 buffer
+        // for this call; neither is mutated while the view is borrowed.
+        unsafe {
+            let value = &*value;
+            std::str::from_utf8_unchecked(std::slice::from_raw_parts(value.ptr, value.len))
+        }
     }
 
-    fn builder<'a>(value: JetCString) -> &'a mut String {
-        // SAFETY: `value` is a live builder from `jet_rt_string_builder_new`;
-        // the caller owns it exclusively for the duration of this call.
-        unsafe { &mut *value }
+    /// Kernels whose signature requires `&String` get a Rust-owned copy.
+    /// A carrier buffer must never be reallocated or freed by Rust String.
+    pub(crate) fn borrowed(value: JetCString) -> String {
+        view(value).to_owned()
     }
 
-    fn take(value: JetCString) -> String {
-        // SAFETY: the caller transfers its owned handle from `handle`.
-        *unsafe { Box::from_raw(value) }
+    fn builder(value: JetCString, mut source: *const u8, count: usize) {
+        // SAFETY: the caller lends the builder exclusively and source spans
+        // count valid UTF-8 bytes. It may be a window into this same buffer.
+        unsafe {
+            let value = &mut *value;
+            let len = value.len.checked_add(count)
+                .unwrap_or_else(|| super::jet_panic("<core.prelude>", 0, "String capacity overflow"));
+            let offset = (source as usize).wrapping_sub(value.ptr as usize);
+            let aliases = offset < value.len;
+            if len > value.cap {
+                let cap = len.max(value.cap.saturating_mul(2)).max(16);
+                let ptr = jet_rt_alloc(cap, 1);
+                std::ptr::copy_nonoverlapping(value.ptr, ptr, value.len);
+                if aliases { source = ptr.add(offset); }
+                if value.cap != 0 { jet_rt_free(value.ptr, value.cap, 1); }
+                value.ptr = ptr;
+                value.cap = cap;
+            }
+            std::ptr::copy(source, value.ptr.add(value.len), count);
+            value.len = len;
+        }
+    }
+
+    fn release(value: JetCString) {
+        // SAFETY: the caller transfers one live carrier and its buffer, both
+        // allocated by jet_rt_alloc with the sizes recorded in the header.
+        unsafe {
+            if (*value).cap != 0 { jet_rt_free((*value).ptr, (*value).cap, 1); }
+            jet_rt_free(value.cast(), std::mem::size_of::<JetCText>(), std::mem::align_of::<JetCText>());
+        }
+    }
+
+    pub(crate) fn take(value: JetCString) -> String {
+        let text = view(value).to_owned();
+        release(value);
+        text
     }
 
     fn line_of(line: i64) -> u32 {
@@ -518,8 +582,9 @@ mod jet_c_abi {
         guard(|| record(super::JetTaskFailure::Panicked(view(reason).to_owned())))
     }
 
-    // Memory for boxes owned by generated code.
-
+    // Rust-tier seed/verification path only; dies when that tier is cut over.
+    // Native packs have one allocator definition, in the Jet runtime object.
+    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_rt_alloc(size: usize, align: usize) -> *mut u8 {
         guard(|| {
@@ -534,6 +599,7 @@ mod jet_c_abi {
         })
     }
 
+    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_rt_free(ptr: *mut u8, size: usize, align: usize) {
         guard(|| {
@@ -547,11 +613,17 @@ mod jet_c_abi {
         })
     }
 
+    #[cfg(jet_native_pack)]
+    unsafe extern "C" {
+        fn jet_rt_alloc(size: usize, align: usize) -> *mut u8;
+        fn jet_rt_free(ptr: *mut u8, size: usize, align: usize);
+    }
+
     // Strings.
 
     #[no_mangle]
     pub extern "C" fn jet_rt_string_from_static(ptr: *const u8, len: usize) -> JetCString {
-        guard(|| handle(text(ptr, len).into_owned()))
+        guard(|| text_handle(&text(ptr, len)))
     }
 
     /// Borrow UTF-8 bytes for compiler/host marshaling. The pointer remains
@@ -569,14 +641,14 @@ mod jet_c_abi {
 
     #[no_mangle]
     pub extern "C" fn jet_rt_string_clone(value: JetCString) -> JetCString {
-        guard(|| handle(view(value).to_owned()))
+        guard(|| text_handle(view(value)))
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_string_drop(value: JetCString) {
         guard(|| {
             if !value.is_null() {
-                drop(take(value));
+                release(value);
             }
         })
     }
@@ -597,12 +669,12 @@ mod jet_c_abi {
 
     #[no_mangle]
     pub extern "C" fn jet_char_len(value: JetCString) -> i64 {
-        guard(|| crate::jet_std::jet_int_from_i64(super::jet_char_len(unsafe { &*value })))
+        guard(|| crate::jet_std::jet_int_from_i64(super::jet_char_len(view(value))))
     }
 
     #[no_mangle]
     pub extern "C" fn jet_string_is_empty(value: JetCString) -> bool {
-        guard(|| super::jet_string_is_empty(unsafe { &*value }))
+        guard(|| super::jet_string_is_empty(view(value)))
     }
 
     #[no_mangle]
@@ -612,30 +684,35 @@ mod jet_c_abi {
 
     #[no_mangle]
     pub extern "C" fn jet_string_starts_with(value: JetCString, needle: JetCString) -> bool {
-        guard(|| super::jet_string_starts_with(unsafe { &*value }, unsafe { &*needle }))
+        guard(|| super::jet_string_starts_with(view(value), view(needle)))
     }
 
     #[no_mangle]
     pub extern "C" fn jet_string_ends_with(value: JetCString, needle: JetCString) -> bool {
-        guard(|| super::jet_string_ends_with(unsafe { &*value }, unsafe { &*needle }))
+        guard(|| super::jet_string_ends_with(view(value), view(needle)))
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_string_builder_new() -> JetCString {
-        guard(|| handle(String::new()))
+        guard(|| text_handle(""))
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_string_builder_push_static(target: JetCString, ptr: *const u8, len: usize) {
-        guard(|| builder(target).push_str(&text(ptr, len)))
+        guard(|| {
+            let suffix = text(ptr, len);
+            builder(target, suffix.as_ptr(), suffix.len())
+        })
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_string_builder_push(target: JetCString, value: JetCString) {
-        guard(|| builder(target).push_str(view(value)))
+        // SAFETY: value is a live carrier, possibly the builder itself. Read
+        // its raw buffer coordinates before builder can grow or free it.
+        guard(|| unsafe { builder(target, (*value).ptr, (*value).len) })
     }
 
-    /// The builder box becomes the String handle; no bytes are copied.
+    /// The builder carrier becomes the String handle; no bytes are copied.
     #[no_mangle]
     pub extern "C" fn jet_rt_string_builder_finish(target: JetCString) -> JetCString {
         target
@@ -703,108 +780,6 @@ mod jet_c_abi {
         guard(|| handle(super::JetDebug::jet_debug(&value)))
     }
 
-    // Stops raised by generated code itself.
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_panic_overflow() {
-        guard(|| {
-            super::jet_arithmetic_stop(
-                "<core.prelude>",
-                0,
-                "This arithmetic overflows the value's type (the result is outside its range)",
-            )
-        })
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_panic_division_by_zero() {
-        guard(|| super::jet_fixed_error_stop(super::JetFixedArithmeticError::DivideZero, "<core.prelude>", 0))
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_panic_list_bounds(len: i64, index: i64) {
-        guard(|| super::jet_arithmetic_stop("<core.prelude>", 0, &super::jet_list_bounds_message(len, native(index))))
-    }
-
-    /// The exclusive end of a List slice window (Core.rs
-    /// jet_checked_range_bounds, action "slice"), stopping at the source
-    /// location when the native bounds fall outside `len`.
-    #[no_mangle]
-    pub extern "C" fn jet_rt_slice_end(start: i64, end: i64, exclusive: u8, len: i64, file_ptr: *const u8, file_len: usize, line: i64) -> i64 {
-        guard(|| {
-            let range = super::JetRange { start, end, exclusive: exclusive != 0 };
-            super::jet_checked_range_bounds(len, &range, "slice", &text(file_ptr, file_len), line_of(line)).end as i64
-        })
-    }
-
-    /// The exclusive end of a View window (Core.rs jet_checked_view_window),
-    /// stopping at the source location when the native bounds fall outside `len`.
-    #[no_mangle]
-    pub extern "C" fn jet_rt_view_end(start: i64, end: i64, exclusive: u8, len: i64, file_ptr: *const u8, file_len: usize, line: i64) -> i64 {
-        guard(|| super::jet_checked_view_window(start, end, exclusive != 0, len, &text(file_ptr, file_len), line_of(line)).1)
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_unreachable(ptr: *const u8, len: usize) {
-        let reason = text(ptr, len).into_owned();
-        // Generated Rust spells MIR `Never` as `unreachable!(reason)`.
-        guard(move || -> () { unreachable!("{}", reason) })
-    }
-
-    /// A Prelude `jet_panic("<core.prelude>", 0, message)` stop that generated
-    /// code checks inline (e.g. an iterator loop stride, Collections.rs:1518).
-    #[no_mangle]
-    pub extern "C" fn jet_rt_panic_message(ptr: *const u8, len: usize) {
-        let message = text(ptr, len).into_owned();
-        guard(move || -> () { super::jet_panic("<core.prelude>", 0, &message) })
-    }
-
-    /// `#require_eq` String operand: Rust Debug quoting (`JetDebug for str`).
-    #[no_mangle]
-    pub extern "C" fn jet_rt_require_debug_string(value: JetCString) -> JetCString {
-        guard(|| handle(super::JetDebug::jet_debug(view(value))))
-    }
-
-    /// `#require` / `#require_eq` / `#panic` stop (kind 0/1/2) over the Prelude
-    /// functions generated Rust calls. `descriptor` is eleven read-only words:
-    /// file ptr/len, line, function ptr/len, source line ptr/len, column,
-    /// caret, then the pre-rendered context ptr/len that only the freestanding
-    /// image reads. Kind 0 and 2 read `message`, kind 1 reads `left` and
-    /// `right` (Debug text); `locals` may be null.
-    #[no_mangle]
-    pub extern "C" fn jet_rt_require_stop(
-        kind: i64,
-        descriptor: *const usize,
-        message: JetCString,
-        left: JetCString,
-        right: JetCString,
-        locals: JetCString,
-    ) {
-        guard(|| {
-            // SAFETY: the caller passes eleven initialized read-only words that
-            // outlive this call (static data emitted by the backend).
-            let d = unsafe { std::slice::from_raw_parts(descriptor, 11) };
-            let file = text(d[0] as *const u8, d[1]);
-            let line = line_of(d[2] as i64);
-            let function = text(d[3] as *const u8, d[4]);
-            let source = text(d[5] as *const u8, d[6]);
-            let column = line_of(d[7] as i64);
-            let caret = line_of(d[8] as i64);
-            let locals = if locals.is_null() { "" } else { view(locals) };
-            match kind {
-                0 => super::jet_require(false, view(message), &file, line, &function, &source, column, caret, locals),
-                1 => super::jet_require_eq(false, view(left), view(right), &file, line, &function, &source, column, caret, locals),
-                _ => super::jet_panic_rich(&file, line, &function, &source, column, caret, view(message), locals),
-            }
-        })
-    }
-
-    /// A fixed-width arithmetic stop (E3010) that generated code checks inline,
-    /// at its Jet source location.
-    #[no_mangle]
-    pub extern "C" fn jet_rt_numeric_stop(file_ptr: *const u8, file_len: usize, line: i64, message_ptr: *const u8, message_len: usize) {
-        guard(|| super::jet_arithmetic_stop(&text(file_ptr, file_len), line_of(line), &text(message_ptr, message_len)))
-    }
 
     // Prelude routes: the C name is the last `::` segment of the MIR symbol.
 

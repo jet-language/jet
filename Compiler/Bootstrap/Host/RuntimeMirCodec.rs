@@ -2310,12 +2310,35 @@ fn parse_fields(input: &str) -> Result<Vec<Field>, String> {
         let ty = split_top_level(&field[cursor..], ',')
             .into_iter()
             .next()
-            .unwrap_or_default()
-            .trim()
-            .to_string();
+            .unwrap_or_default();
+        let ty = strip_field_default(ty.trim())?.to_string();
         fields.push(Field { name, ty });
     }
     Ok(fields)
+}
+
+/// A Jet field may declare its default as a typed literal after the type
+/// (`display_paths: [MIRNameDisplayPath]{[MIRNameDisplayPath]{}}`,
+/// `namespace: String?{None}`); the field's type is the text before it.
+fn strip_field_default(ty: &str) -> Result<&str, String> {
+    if !ty.ends_with('}') {
+        return Ok(ty);
+    }
+    let mut depth = 0usize;
+    for (index, character) in ty.char_indices() {
+        match character {
+            '[' | '(' | '<' => depth += 1,
+            ']' | ')' | '>' => depth = depth.saturating_sub(1),
+            '{' if depth == 0 => {
+                if matching_delimiter(ty, index, b'{', b'}')? + 1 == ty.len() {
+                    return Ok(ty[..index].trim_end());
+                }
+                return Ok(ty);
+            }
+            _ => {}
+        }
+    }
+    Ok(ty)
 }
 
 fn parse_named_fields(input: &str) -> Result<Vec<Field>, String> {

@@ -1,0 +1,25 @@
+// Native O1 cell byte_scan (text.kernel): classify every byte of a 1 MB text
+// (letters, digits, spaces) 40 times.
+fn run() {
+    pieces := [String]{}
+    loop i in 0..<100000 -> &pieces.push("ab{i % 97} ")
+    text :: pieces.join("")
+    bytes :: text.bytes()
+    letters := 0
+    digits := 0
+    spaces := 0
+    loop _ in 0..<40 {
+        loop b in bytes {
+            if b >= 97 && b <= 122 {
+                letters += 1
+            } else {
+                if b >= 48 && b <= 57 {
+                    digits += 1
+                } else {
+                    if b == 32 -> spaces += 1
+                }
+            }
+        }
+    }
+    print("letters {letters} digits {digits} spaces {spaces}")
+}

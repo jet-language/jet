@@ -34,7 +34,8 @@
 // compiled runtime"): Int is the exact-Int carrier word (kernels taking a
 // fixed-width integer get `native` + a checked narrowing, the way generated
 // Rust adapts them); Bool is a 0/1 word; Float is xmm; String is a borrowed
-// `Box<String>` handle (a result is a new owned handle); a Jet type generated
+// pointer to the C-layout `JetCText {ptr,len,cap}` header (a result owns a new
+// header and buffer in the shared runtime allocation domain); a Jet type generated
 // Rust holds as a native runtime type (its Context.rs / predicates.rs name
 // tables) is an owned `Box<T>` handle (`jet_rt_handle_drop_<T>` frees it), a
 // borrowed one as a parameter and a lent mutable one (`HandleMut`) for
@@ -46,6 +47,7 @@ import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { runtimeExportSignatures, validateRuntimeOwnership, validateRuntimeRoute } from "./runtime-route-abi.mjs";
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const runtimePath = process.argv[2];
 const check = process.argv.includes("--check");
@@ -490,14 +492,23 @@ for (const key of fns.keys()) {
 // ---------------------------------------------------------------------------
 // 3. Carriers.
 
-const handTable = readFileSync(`${repo}/crates/jet-codegen/src/Prelude/Core/CAbi.rs`, "utf8");
-const handExports = new Set([...handTable.matchAll(/pub extern "C" fn ([A-Za-z0-9_]+)/g)].map((m) => m[1]));
+const handDir = `${repo}/crates/jet-codegen/src/Prelude/Core`;
+const handTable = readdirSync(handDir).filter((name) => /^CAbi.*\.rs$/.test(name) && name !== "CAbiRoutes.rs")
+  .sort().map((name) => readFileSync(`${handDir}/${name}`, "utf8")).join("\n");
+const handExports = new Set([...handTable.matchAll(/pub(?:\(crate\))? (?:unsafe )?extern "C" fn ([A-Za-z0-9_]+)/g)].map((m) => m[1]));
 for (const m of handTable.matchAll(/exact_int_(?:binary|located)!\s*\{?\(?([^)}]*)/g)) {
   for (const name of m[1].split(",").map((s) => s.trim()).filter(Boolean)) handExports.add(name);
 }
 for (const match of handTable.matchAll(/\bfixed_int_located!\(\s*[iu](?:8|16|32|64)\s*;([^)]*)\)/g)) {
   for (const name of match[1].split(",").map((item) => item.trim()).filter(Boolean)) handExports.add(name);
 }
+// The audited runtime cutover list owns these C definitions in the Jet object.
+// Keep route carrier metadata below: only Rust adapter bodies disappear.
+const jetRuntimeExports = new Set(readFileSync(`${repo}/Compiler/JetRuntime/exports.list`, "utf8")
+  .split("\n").map((line) => line.trim()).filter((line) => line && !line.startsWith("#"))
+  .map((line) => line.split(/\s+/u)[0]));
+const jetRuntimeSignatures = runtimeExportSignatures(repo);
+validateRuntimeOwnership(jetRuntimeExports, jetRuntimeSignatures);
 const fixedInts = new Set(["u8", "u16", "u32", "u64", "usize", "i8", "i16", "i32", "isize"]);
 
 // A handle type whose runtime declaration derives `Clone` also gets a clone
@@ -610,8 +621,8 @@ function paramCarrier(ty, path) {
   ty = ty.replace(/\s+/g, "");
   const one = (jet, cty, expr) => ({ jet, ctys: [cty], expr: ([a]) => expr(a) });
   if (ty === "&str") return one("Text", "JetCString", (a) => `view(${a})`);
-  if (ty === "&String") return one("Text", "JetCString", (a) => `unsafe { &*${a} }`);
-  if (ty === "Option<&String>") return one("Text", "JetCString", (a) => `(!${a}.is_null()).then(|| unsafe { &*${a} })`);
+  if (ty === "&String") return one("Text", "JetCString", (a) => `&borrowed(${a})`);
+  if (ty === "Option<&String>") return one("Text", "JetCString", (a) => `(!${a}.is_null()).then(|| borrowed(${a})).as_ref()`);
   if (ty === "String") return one("Text", "JetCString", (a) => `view(${a}).to_owned()`);
   if (ty === "&i64") return one("Word", "i64", (a) => `&${a}`);
   // The prelude Ordering (by value or borrowed): the Jet enum's variant index.
@@ -843,6 +854,15 @@ const adapters = [];
 const skipped = [];
 const exported = new Set(handExports);
 const handles = new Map();
+const handAbi = new Map();
+for (const match of handTable.matchAll(/pub(?:\(crate\))? (?:unsafe )?extern "C" fn ([A-Za-z_]\w*)\s*([^{}]*?)\{/g)) {
+  handAbi.set(match[1], parseSignature(`fn ${match[1]}${match[2]}`));
+}
+for (const match of handTable.matchAll(/exact_int_(binary|located)!\s*\{?\(?([^)}]*)/g)) {
+  const macro = new RegExp(`macro_rules! exact_int_${match[1]}[\\s\\S]*?pub extern "C" fn \\$name([^{}]*?)\\{`).exec(handTable);
+  if (!macro) throw new Error(`gen-c-abi-routes: no exact_int_${match[1]} ABI`);
+  for (const name of match[2].split(",").map((part) => part.trim()).filter(Boolean)) handAbi.set(name, parseSignature(`fn ${name}${macro[1]}`));
+}
 for (const [symbol, route] of [...routes].sort((a, b) => a[0].localeCompare(b[0]))) {
   // An exact-Int adapted symbol calls its owned kernel (MIRRust.rs
   // call_symbol_for_function); the route keeps the symbol.
@@ -851,34 +871,50 @@ for (const [symbol, route] of [...routes].sort((a, b) => a[0].localeCompare(b[0]
   // A method's export names its type too (`JetDateTime::date` -> `JetDateTime_date`).
   const name = segments.length > 1 && /^[A-Z]/.test(segments[segments.length - 2]) ? segments.slice(-2).join("_") : segments[segments.length - 1];
   const label = route.rows[0];
-  if (handExports.has(name)) continue;
-  if (exported.has(name)) { skipped.push(`${symbol} (${label}): export name taken`); continue; }
+  if (handExports.has(name)) {
+    if (jetRuntimeExports.has(name)) {
+      const sig = handAbi.get(name);
+      if (!sig || sig.generics) throw new Error(`Jet runtime route ${symbol}: no canonical hand C ABI for ${name}`);
+      const params = splitTop(sig.params).map((param) => ({ ctys: [param.slice(param.indexOf(":") + 1).trim()] }));
+      const result = { ret: sig.result === "()" ? null : sig.result, outs: [] };
+      validateRuntimeRoute({ symbol, name, params, result }, jetRuntimeSignatures.get(name));
+    }
+    continue;
+  }
+  const skip = (reason) => {
+    if (jetRuntimeExports.has(name)) throw new Error(`Jet runtime route ${symbol}: cannot validate canonical C ABI: ${reason}`);
+    skipped.push(`${symbol} (${label}): ${reason}`);
+  };
+  if (exported.has(name)) { skip("export name taken"); continue; }
   const all = (fns.get(target) ?? []).filter((def) => !def.wasmOnly);
-  if (all.length === 0) { skipped.push(`${symbol} (${label}): no runtime function`); continue; }
+  if (all.length === 0) { skip("no runtime function"); continue; }
   const defs = all.filter((def) => !def.gated);
-  if (defs.length === 0) { skipped.push(`${symbol} (${label}): platform-gated`); continue; }
-  if (new Set(defs.map((def) => def.sig)).size !== 1) { skipped.push(`${symbol} (${label}): cfg-dependent signature`); continue; }
+  if (defs.length === 0) { skip("platform-gated"); continue; }
+  if (new Set(defs.map((def) => def.sig)).size !== 1) { skip("cfg-dependent signature"); continue; }
   const def = defs[0];
   const path = def.path;
-  if (path && !def.pub) { skipped.push(`${symbol} (${label}): not public in ${path}`); continue; }
+  if (path && !def.pub) { skip(`not public in ${path}`); continue; }
   // A method's receiver is its first parameter; `Self` is the impl's type.
   const selfSig = def.selfType
     ? def.sig.replace(/\((\s*)(&\s*mut\s+|&\s*|mut\s+)?self\b/, (_, space, ref) => `(${space}self: ${(ref ?? "").replace(/^mut\s+$/, "")}Self`).replace(/\bSelf\b/g, def.selfType)
     : def.sig;
   const sig = parseSignature(selfSig);
-  if (!sig) { skipped.push(`${symbol} (${label}): unparsed signature ${def.sig}`); continue; }
-  if (sig.generics) { skipped.push(`${symbol} (${label}): generic`); continue; }
+  if (!sig) { skip(`unparsed signature ${def.sig}`); continue; }
+  if (sig.generics) { skip("generic"); continue; }
   const params = splitTop(sig.params).map((param) => {
     const colon = param.indexOf(":");
     return colon < 0 ? null : paramCarrier(param.slice(colon + 1), path);
   });
-  if (params.some((param) => param === null)) { skipped.push(`${symbol} (${label}): parameter types ${sig.params}`); continue; }
+  if (params.some((param) => param === null)) { skip(`parameter types ${sig.params}`); continue; }
   const result = resultShape(sig.result, path, route.nativeInt);
-  if (!result) { skipped.push(`${symbol} (${label}): result type ${sig.result}`); continue; }
+  if (!result) { skip(`result type ${sig.result}`); continue; }
+  // A direct #Export(c) is the Jet adapter. Check the entire flattened ABI,
+  // including Option/Result/Tuple/List out slots, before dropping its Rust body.
+  if (jetRuntimeExports.has(name)) validateRuntimeRoute({ symbol, name, params, result }, jetRuntimeSignatures.get(name));
   exported.add(name);
   for (const handle of [...params.map((param) => param.handle).filter(Boolean), ...result.handles]) {
     const known = handles.get(handle.name);
-    if (known && known !== handle.full) { skipped.push(`${symbol} (${label}): handle ${handle.name} names two types`); exported.delete(name); }
+    if (known && known !== handle.full) { skip(`handle ${handle.name} names two types`); exported.delete(name); }
     else handles.set(handle.name, handle.full);
   }
   if (!exported.has(name)) continue;
@@ -1094,12 +1130,13 @@ const handleRows = [...handles].sort((a, b) => a[0].localeCompare(b[0]));
 
 const rs = [];
 rs.push("// BEGIN GENERATED C-ABI ROUTES (Tools/agent/gen-c-abi-routes.mjs; do not hand-edit)");
-rs.push("// One adapter per Core call registry route whose kernel signature has a C");
-rs.push("// carrier (CAbi.rs carrier rules). Skipped routes are listed at the end.");
+rs.push("// Rust adapters for Core routes with a C carrier (CAbi.rs carrier rules).");
+rs.push("// JetRuntime/exports.list owns the replaced definitions; carrier metadata");
+rs.push("// remains shared. Routes without a C carrier are listed at the end.");
 rs.push("#[cfg(not(target_arch = \"wasm32\"))]");
 rs.push("#[allow(non_snake_case, clippy::all)]");
 rs.push("mod jet_c_abi_routes {");
-rs.push("    use super::jet_c_abi::{guard, handle, native, view, JetCString};");
+rs.push("    use super::jet_c_abi::{borrowed, guard, handle, native, view, JetCString};");
 rs.push("");
 rs.push("    #[cold]");
 rs.push("    fn range_stop() -> ! {");
@@ -1367,11 +1404,10 @@ for (const [name, members] of [...recordMembers].sort((a, b) => a[0].localeCompa
     rs.push("    }");
   }
 }
-// Field places of a handle struct (one the lowering keeps as a runtime handle,
-// e.g. TempDir's `path`): jet_rt_handle_field_<R>_<field>(h) is the address of
-// the field inside the runtime value, lent while `h` lives. A String or a
-// nested handle is that address as a borrowed handle; a Float or a Bool is
-// its storage. The lowering reads (never writes or moves) through it.
+// Field places of runtime handle structs: scalar and nested-handle exports
+// lend the field address. String exports write a borrowed canonical text
+// header into caller storage, valid while the runtime handle lives and is not
+// mutated. The lowering clones it when an owning String value is read.
 const handleFields = [];
 for (const [name, full] of handleRows) {
   if (recordMembers.has(name)) continue;
@@ -1383,7 +1419,7 @@ for (const [name, full] of handleRows) {
     const ty = field[3].replace(/\s+/g, "");
     let kind = null;
     let pointee = null;
-    if (ty === "String") { kind = "Text"; pointee = "String"; }
+    if (ty === "String") { kind = "Text"; pointee = "super::jet_c_abi::JetCText"; }
     else if (ty === "f64") { kind = "Float"; pointee = "f64"; }
     else if (ty === "bool") { kind = "Flag"; pointee = "bool"; }
     else if (opaqueName.test(ty) && !tagCarrier(ty, decl.path)) {
@@ -1395,9 +1431,15 @@ for (const [name, full] of handleRows) {
     handleFields.push({ name, field: field[2], kind });
     rs.push("");
     rs.push("    #[no_mangle]");
-    rs.push(`    pub extern "C" fn jet_rt_handle_field_${name}_${field[2]}(value: *mut ${full}) -> *const ${pointee} {`);
-    rs.push("        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.");
-    rs.push(`        unsafe { std::ptr::addr_of!((*value).${field[2]}) }`);
+    if (kind === "Text") {
+      rs.push(`    pub extern "C" fn jet_rt_handle_field_${name}_${field[2]}(value: *mut ${full}, out: *mut ${pointee}) {`);
+      rs.push("        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.");
+      rs.push(`        unsafe { let text = &(*value).${field[2]}; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }`);
+    } else {
+      rs.push(`    pub extern "C" fn jet_rt_handle_field_${name}_${field[2]}(value: *mut ${full}) -> *const ${pointee} {`);
+      rs.push("        // SAFETY: value is a live handle the caller lends; the field outlives this read.");
+      rs.push(`        unsafe { std::ptr::addr_of!((*value).${field[2]}) }`);
+    }
     rs.push("    }");
   }
 }
@@ -1477,7 +1519,7 @@ rs.push(`
     }
 `);
 for (const adapter of adapters) {
-  if (adapter.external) continue;
+  if (adapter.external || jetRuntimeExports.has(adapter.name)) continue;
   const params = [];
   const names = adapter.params.map((param, index) => param.ctys.map((cty, k) => {
     const name = param.ctys.length === 1 ? `a${index}` : `a${index}_${k}`;
@@ -1501,8 +1543,8 @@ rs.push("// END GENERATED C-ABI ROUTES");
 
 const jet = [];
 jet.push("// BEGIN GENERATED C-ABI ROUTES (Tools/agent/gen-c-abi-routes.mjs; do not hand-edit)");
-jet.push("// The carriers of every runtime C-ABI route adapter");
-jet.push("// (crates/jet-codegen/src/Prelude/Core/CAbiRoutes.rs), keyed by the route's");
+jet.push("// Shared carriers of runtime C-ABI routes, whether their definition lives");
+jet.push("// in CAbiRoutes.rs or JetRuntime/exports.list, keyed by the route's");
 jet.push("// Prelude symbol; `export` is the adapter's C name (its last segment).");
 jet.push("");
 jet.push("// `HandleMut` lends the handle of the caller's Write place: the runtime");

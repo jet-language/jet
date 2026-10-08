@@ -5,7 +5,8 @@
 use jet_foundation.[MIRProgram, MIRFunctionID, MIROutputCheck, MIRType, MIRTypeKind, MIRPanicLoc, MIRPanicContext, MIRPanicLocal, mir_nominal_ref, mir_type_from_kind]
 
 pub fn lir_lower_tests(program: MIRProgram, roots: [MIRFunctionID], checks: [MIROutputCheck], serial: Bool) -> LIRLowering Never! {
-    lower_selected(program, roots, false, Val(serial), checks)
+    intrinsics := [U64:LowerRuntimeIntrinsic]{}
+    lower_selected(program, roots, false, Val(serial), checks, ^intrinsics)
 }
 
 fn lower_test_unit_type() -> MIRType Never! {
