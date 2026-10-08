@@ -10,7 +10,7 @@ fn rt_test_suite_state_drop_address() -> I64 {
 
 // runtime-init: 3
 #Export(c) fn jet_rt_test_suite_init() {
-    if (test_suite_key != I64{0}) { return }
+    if (test_suite_key != I64{0}) -> return
     closure :: jet_rt_alloc(I64{24}, I64{8})
     trap_store(closure, I64{1})
     trap_store(closure + I64{8}, rt_test_suite_state_drop_address())
@@ -58,11 +58,11 @@ fn test_suite_state_ensure() -> I64 {
 }
 
 #Export(c) fn jet_rt_handle_clone_JetTestSuite(suite: I64) -> I64 {
-    copy :: jet_rt_alloc(I64{24}, I64{8})
-    trap_store(copy, trap_word(suite))
-    trap_store(copy + I64{8}, trap_word(suite + I64{8}))
-    trap_store(copy + I64{16}, trap_word(suite + I64{16}))
-    copy
+    cloned :: jet_rt_alloc(I64{24}, I64{8})
+    trap_store(cloned, trap_word(suite))
+    trap_store(cloned + I64{8}, trap_word(suite + I64{8}))
+    trap_store(cloned + I64{16}, trap_word(suite + I64{16}))
+    cloned
 }
 
 #Export(c) fn jet_rt_handle_drop_JetTestSuite(suite: I64) {
