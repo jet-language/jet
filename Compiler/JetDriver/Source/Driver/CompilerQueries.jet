@@ -43,7 +43,7 @@ fn jet_driver_compiler_check_failure(load: JetDriverLoadResult, stage: JetDriver
     JetDriverCompilerCheckResult{checked: None, diagnostics: load.diagnostics, failed_stage: Val(stage), complete: false, internal_problem: problem}
 }
 
-fn jet_driver_compiler_check_registration_inputs(load: JetDriverLoadResult, providers: [SemaForeignProviderInput], diagnostics: &[Diagnostic]) -> [SemaRegistrationModuleInput]? {
+fn jet_driver_compiler_check_registration_inputs(load: JetDriverLoadResult, core_sources: [JetDriverCoreSource], providers: [SemaForeignProviderInput], diagnostics: &[Diagnostic]) -> [SemaRegistrationModuleInput]? {
     inputs := [SemaRegistrationModuleInput]{ }
     source_positions :: jet_driver_source_file_positions(load.source_files)
     loop module_index in 0..<load.modules.len() {
@@ -53,11 +53,17 @@ fn jet_driver_compiler_check_registration_inputs(load: JetDriverLoadResult, prov
             return None
         }
         unit := load.source_units[loaded_module.source_unit_index]
+        core_source_alias := ""
+        if jet_driver_unit_is_core(unit) && unit.file_index >= 0 && unit.file_index < core_sources.len() {
+            owner :: core_sources[unit.file_index]
+            if owner.path == unit.relative_path && owner.module_name == loaded_module.module_name -> core_source_alias = owner.alias
+        }
         handles :: jet_driver_registration_foreign_handle_facts(loaded_module.module_identity, providers, &diagnostics) ?? return None
         &inputs.push(SemaRegistrationModuleInput{
             package_identity: loaded_module.package_identity,
             module_identity: loaded_module.module_identity,
             module_name: loaded_module.module_name,
+            core_source_alias: core_source_alias,
             module_path: jet_driver_module_display(unit.relative_path),
             source_file: unit.path,
             source_segments: unit.source_segments,
@@ -193,7 +199,7 @@ pub fn jet_driver_compiler_check(input: JetDriverCompilerCheckInput) -> JetDrive
     // diagnostics list travels beside it and is put back after each stage.
     stage_diagnostics := load.diagnostics
     load.diagnostics = [Diagnostic]{}
-    registration_inputs_option := jet_driver_compiler_check_registration_inputs(load, providers, &stage_diagnostics)
+    registration_inputs_option := jet_driver_compiler_check_registration_inputs(load, input.request.core_sources, providers, &stage_diagnostics)
     load.diagnostics = stage_diagnostics
     registration_inputs := registration_inputs_option ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Load, None)
     canonical_identity := canonical.module_identity

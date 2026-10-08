@@ -2189,6 +2189,21 @@ fn sema_expr_registration_method_candidates(graph: SemaRegistrationGraph, receiv
     trait_candidates := sema_call_trait_method_candidates(graph, receiver_type, method, type_args, caller_module, caller_package, environment.generic_params, span, &diagnostics)
     if trait_candidates.len() > 0 -> return trait_candidates
     receiver_name :: sema_expr_type_base_name(receiver_type) ?? return candidates
+    // Native carrier methods live on registered impls, never fake nominals.
+    loop owner_row in graph.modules {
+        if !sema_registration_source_owns_impl(owner_row, receiver_name) -> next
+        loop implementation in owner_row.impls {
+            if implementation.target_type_name != receiver_name -> next
+            loop function in implementation.methods {
+                if function.symbol.name != method || function.parameters.len() == 0 -> next
+                if !sema_registration_visible(function.symbol.visibility, caller_module, caller_package, owner_row.module_identity, owner_row.package_identity) -> next
+                method_ref :: TMethodRef{symbol: function.symbol.id, name: function.symbol.name, mangled: true, trait_owner: None, operator_identity: None}
+                candidate :: sema_call_method_candidate_from_registration(function.signature, function.generic_params, environment.registration_graph, caller_module, caller_package, environment.generic_params, Val(receiver_type), function.parameters[0].convention, 1, method_ref, type_args, span, &diagnostics) ?? next
+                &candidates.push(candidate)
+            }
+        }
+    }
+    if candidates.len() > 0 -> return candidates
     // The rows are keyed by the declared spelling (`Rect`); a resolved
     // receiver carries its canonical identity (`module::Rect`), so the row key
     // is the canonical leaf, and such a receiver is inferred against the
@@ -2252,6 +2267,15 @@ fn sema_expr_declares_nominal_method(environment: SemaScopeEnvironment, receiver
     graph :: graph_option ?? return false
     // A resolved receiver carries its canonical identity (`module::URL`).
     base_name :: sema_expr_type_base_name(receiver_type) ?? return false
+    loop owner_row in graph.modules {
+        if !sema_registration_source_owns_impl(owner_row, base_name) -> next
+        loop implementation in owner_row.impls {
+            if implementation.target_type_name != base_name -> next
+            loop function in implementation.methods {
+                if function.symbol.name == method && function.parameters.len() > 0 -> return true
+            }
+        }
+    }
     receiver_name :: sema_expr_operator_row_name(base_name)
     if !sema_type_source_owns_nominal(graph, base_name, environment.module_identity) && !sema_text_handle_known_method(receiver_name, method) && !sema_network_handle_known_method(receiver_name, method) -> return false
     loop nominal_row in sema_registration_nominal_rows_named(graph, receiver_name) {
