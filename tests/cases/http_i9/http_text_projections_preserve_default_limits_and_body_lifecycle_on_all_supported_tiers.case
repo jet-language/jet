@@ -1,0 +1,28 @@
+# HAND-PORT tests/http_i9.rs:881-965 http_text_projections_preserve_default_limits_and_body_lifecycle_on_all_supported_tiers
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# All three original supported tiers,21 accepted connections,7 response path predicates/body/error/lifecycle outputs each; original read_http_request5s/512 and EOF-break/no cap preserved, no stronger helper reused blindly.
+fixture: http_text_projections_preserve_default_limits_and_body_lifecycle_on_all_supported_tiers.fixture
+env: NO_COLOR=1
+write: peer/main.jet peer/source.template
+step: jet build peer/main.jet
+exit: 0
+spawn peer: built
+await: file addr.txt timeout 30s
+capture: addr = text file addr.txt
+write: main.jet main.template
+step default: jet run main.jet
+exit: 0
+stdout: = http_text_projections_preserve_default_limits_and_body_lifecycle_on_all_supported_tiers.stdout.expected
+stderr: empty
+step interpret: jet run --interpret main.jet
+exit: 0
+stdout: = http_text_projections_preserve_default_limits_and_body_lifecycle_on_all_supported_tiers.stdout.expected
+stderr: empty
+step: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = http_text_projections_preserve_default_limits_and_body_lifecycle_on_all_supported_tiers.stdout.expected
+stderr: empty
+wait: peer
+exit: 0
