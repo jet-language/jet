@@ -176,9 +176,9 @@ fn jet_driver_native_comptime_stop(program: MIRProgram, graph: SemaRegistrationG
     if jet_driver_native_stop_int(response.body, "owner") == .Val(owner) {
         if owner >= 0 && owner < program.functions.len() {
             function :: program.functions[owner]
-            loop module in graph.modules {
-                if mir_module_id(module.module_identity).value == function.module_id.value {
-                    location = jet_driver_source_location_for_registration_module(graph, module.module_identity, span)
+            loop registration_module in graph.modules {
+                if mir_module_id(registration_module.module_identity).value == function.module_id.value {
+                    location = jet_driver_source_location_for_registration_module(graph, registration_module.module_identity, span)
                     break
                 }
             }
