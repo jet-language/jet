@@ -150,6 +150,10 @@ owned native list header and packed byte buffer allocated at alignment eight;
 the empty header has all three words zero. Native list destruction releases
 `capacity` bytes at that same alignment. Neither conversion transfers or frees
 its borrowed input.
+Generated List result adapters allocate on that same runtime heap, with the
+physical slot width (`sizeof(S)`) and alignment eight. In particular packed
+byte results allocate `length` bytes, not `length * 8`, and no Rust-heap
+buffer is handed to the native runtime's deallocator.
 
 Unit conversions retain the checked canonical Option/Result carrier and call
 the shared conversion kernel through its declared native route. Absence and
