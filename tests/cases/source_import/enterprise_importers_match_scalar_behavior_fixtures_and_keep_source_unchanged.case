@@ -1,0 +1,134 @@
+# Port of tests/source_import.rs:413-520; original sources and every predicate retained.
+# PENDING-GRAMMAR(batch-four); runtime PENDING-SAME-HEAD.
+fixture: enterprise_importers_match_scalar_behavior_fixtures_and_keep_source_unchanged.fixture
+mkdir: python/app
+mkdir: java/python/app
+# Original independent workspace for java.
+step: jet import java java/app
+cwd: java
+exit: 0
+file: java/jet/app/program.jet ~ "fn add(left: Int, right: Int) -> Int {" # original predicate
+file: java/jet/app/program.jet ~ "// Source span:" # original predicate
+file: java/jet/app/program.jet ~ "D-MIGRATE-SRC1" # original predicate
+file: java/jet/app/program.jet !~ "fn unsupported" # original predicate
+file: java/java/app/program.java = ../../../tests/fixtures/source_import/enterprise/java/Math.java
+file: java/jet/app/import-report.json ~ "\"law\":\"D-MIGRATE-SRC1\"" # original predicate
+file: java/jet/app/import-report.json ~ "\"source_span\":" # original predicate
+file: java/jet/app/import-report.json ~ "\"generated_target\":" # original predicate
+file: java/jet/app/import-report.json ~ "\"code\":\"JT0101\"" # original predicate
+step: jet check jet/app/program.jet
+cwd: java
+exit: 0
+step: jet run jet/app/program.jet
+cwd: java
+exit: 0
+stdout: = java.out
+copy: java/jet/app/program.jet java/original.bytes
+step: jet import java java/app
+cwd: java
+exit: 0
+file: java/jet/app/program.jet == java/original.bytes
+mkdir: csharp/python/app
+# Original independent workspace for csharp.
+step: jet import csharp csharp/app
+cwd: csharp
+exit: 0
+file: csharp/jet/app/program.jet ~ "fn add(left: Int, right: Int) -> Int {" # original predicate
+file: csharp/jet/app/program.jet ~ "// Source span:" # original predicate
+file: csharp/jet/app/program.jet ~ "D-MIGRATE-SRC1" # original predicate
+file: csharp/jet/app/program.jet !~ "fn unsupported" # original predicate
+file: csharp/csharp/app/program.cs = ../../../tests/fixtures/source_import/enterprise/csharp/Math.cs
+file: csharp/jet/app/import-report.json ~ "\"law\":\"D-MIGRATE-SRC1\"" # original predicate
+file: csharp/jet/app/import-report.json ~ "\"source_span\":" # original predicate
+file: csharp/jet/app/import-report.json ~ "\"generated_target\":" # original predicate
+file: csharp/jet/app/import-report.json ~ "\"code\":\"JT0101\"" # original predicate
+step: jet check jet/app/program.jet
+cwd: csharp
+exit: 0
+step: jet run jet/app/program.jet
+cwd: csharp
+exit: 0
+stdout: = csharp.out
+copy: csharp/jet/app/program.jet csharp/original.bytes
+step: jet import csharp csharp/app
+cwd: csharp
+exit: 0
+file: csharp/jet/app/program.jet == csharp/original.bytes
+mkdir: ts/python/app
+# Original independent workspace for ts.
+step: jet import ts ts/app
+cwd: ts
+exit: 0
+file: ts/jet/app/program.jet ~ "fn add(left: Float, right: Float) -> Float {" # original predicate
+file: ts/jet/app/program.jet ~ "// Source span:" # original predicate
+file: ts/jet/app/program.jet ~ "D-MIGRATE-SRC1" # original predicate
+file: ts/jet/app/program.jet !~ "fn unsupported" # original predicate
+file: ts/ts/app/program.ts = ../../../tests/fixtures/source_import/enterprise/ts/math.ts
+file: ts/jet/app/import-report.json ~ "\"law\":\"D-MIGRATE-SRC1\"" # original predicate
+file: ts/jet/app/import-report.json ~ "\"source_span\":" # original predicate
+file: ts/jet/app/import-report.json ~ "\"generated_target\":" # original predicate
+file: ts/jet/app/import-report.json ~ "\"code\":\"JT0101\"" # original predicate
+step: jet check jet/app/program.jet
+cwd: ts
+exit: 0
+step: jet run jet/app/program.jet
+cwd: ts
+exit: 0
+stdout: = ts.out
+copy: ts/jet/app/program.jet ts/original.bytes
+step: jet import ts ts/app
+cwd: ts
+exit: 0
+file: ts/jet/app/program.jet == ts/original.bytes
+mkdir: js/python/app
+# Original independent workspace for js.
+step: jet import js js/app
+cwd: js
+exit: 0
+file: js/jet/app/program.jet ~ "fn add(left: Float, right: Float) -> Float {" # original predicate
+file: js/jet/app/program.jet ~ "// Source span:" # original predicate
+file: js/jet/app/program.jet ~ "D-MIGRATE-SRC1" # original predicate
+file: js/jet/app/program.jet !~ "fn unsupported" # original predicate
+file: js/js/app/program.js = ../../../tests/fixtures/source_import/enterprise/js/math.js
+file: js/jet/app/import-report.json ~ "\"law\":\"D-MIGRATE-SRC1\"" # original predicate
+file: js/jet/app/import-report.json ~ "\"source_span\":" # original predicate
+file: js/jet/app/import-report.json ~ "\"generated_target\":" # original predicate
+file: js/jet/app/import-report.json ~ "\"code\":\"JT0101\"" # original predicate
+step: jet check jet/app/program.jet
+cwd: js
+exit: 0
+step: jet run jet/app/program.jet
+cwd: js
+exit: 0
+stdout: = js.out
+copy: js/jet/app/program.jet js/original.bytes
+step: jet import js js/app
+cwd: js
+exit: 0
+file: js/jet/app/program.jet == js/original.bytes
+mkdir: go/python/app
+# Original independent workspace for go.
+step: jet import go go/app
+cwd: go
+exit: 0
+file: go/jet/app/program.jet ~ "fn add(left: Int, right: Int) -> Int {" # original predicate
+file: go/jet/app/program.jet ~ "// Source span:" # original predicate
+file: go/jet/app/program.jet ~ "D-MIGRATE-SRC1" # original predicate
+file: go/jet/app/program.jet !~ "fn unsupported" # original predicate
+file: go/go/app/program.go = ../../../tests/fixtures/source_import/enterprise/go/math.go
+file: go/jet/app/import-report.json ~ "\"law\":\"D-MIGRATE-SRC1\"" # original predicate
+file: go/jet/app/import-report.json ~ "\"source_span\":" # original predicate
+file: go/jet/app/import-report.json ~ "\"generated_target\":" # original predicate
+file: go/jet/app/import-report.json ~ "\"code\":\"JT0101\"" # original predicate
+step: jet check jet/app/program.jet
+cwd: go
+exit: 0
+step: jet run jet/app/program.jet
+cwd: go
+exit: 0
+stdout: = go.out
+copy: go/jet/app/program.jet go/original.bytes
+step: jet import go go/app
+cwd: go
+exit: 0
+file: go/jet/app/program.jet == go/original.bytes

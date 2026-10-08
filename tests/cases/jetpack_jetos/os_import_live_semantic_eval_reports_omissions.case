@@ -1,0 +1,15 @@
+# Port of tests/jetpack_jetos.rs:358-401; fixtures and predicates copied verbatim.
+# Runtime PENDING-SAME-HEAD.
+opt-in: epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored
+# Native shell fixture is the original write_live_import_fixture790-811, not a test driver.
+fixture: os_import_live_semantic_eval_reports_omissions.fixture
+mkdir: out
+step: jet os import {work}/src --host halcyon --write --out {work}/out --no-color
+env: PATH={work}/tools
+exit: 0
+file: out/jetos-import-audit.json ~ "\"mode\":\"semantic-eval\"" # original predicate
+file: out/jetos-import-audit.json ~ "jetbrains.idea-ultimate" # original predicate
+file: out/jetos-import-audit.json ~ "no `nix-cachyos-kernel` pin" # original predicate
+file: out/jetos-import-audit.json ~ "stylix theming is enabled upstream" # original predicate
+file: out/jetos-import-audit.json !~ "virtualisation.docker.enable has no jetos option" # original predicate
+file: out/jetos-import-audit.json !~ "Home Manager program `starship`" # original predicate

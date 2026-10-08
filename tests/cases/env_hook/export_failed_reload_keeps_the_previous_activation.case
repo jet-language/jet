@@ -3,7 +3,6 @@
 # The captured CLI-emitted assignment is sourced unchanged; no hash computation/helper.
 # PENDING-GRAMMAR: capture/write, tool token and step unset.
 requires: tool:bash
-requires: tool:cp
 fixture: activation-reload.fixture
 env: PATH=/usr/bin:/bin
 step: jetpack env export bash
@@ -16,8 +15,7 @@ unset: JETPACK_REF
 exit: 0
 capture: hash stdout line ^= "export JETPACK_ENV_HASH=" # original activation_hash field
 write: hash.env hash.template
-step: {tool:cp} broken.env env.jet
-exit: 0
+copy: broken.env env.jet
 step: {tool:bash} --noprofile --norc -c 'source hash.env && exec "$1" env export bash' reexport {jetpack}
 env: JETPACK_ENV_DIR={work}
 unset: JET_ENV_DISABLE

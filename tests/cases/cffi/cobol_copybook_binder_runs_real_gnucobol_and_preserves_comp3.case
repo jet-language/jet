@@ -2,17 +2,12 @@
 # Do not rename to run.jet, bless the failure, or omit the later original predicates.
 # PENDING-GRAMMAR: file !~ and quoted newline escape must preserve byte predicates.
 requires: tool:cobc
-requires: tool:cp
 step: cobc --version
 exit: 0
-step: cp {root}/Examples/interop/cobol/payroll.cob payroll.cob
-exit: 0
-step: cp {root}/Examples/interop/cobol/payroll.cpy payroll.cpy
-exit: 0
-step: cp {root}/Examples/interop/cobol/main.jet main.jet
-exit: 0
-step: cp {root}/Examples/interop/cobol/expected.out expected.out
-exit: 0
+copy: {root}/Examples/interop/cobol/payroll.cob payroll.cob
+copy: {root}/Examples/interop/cobol/payroll.cpy payroll.cpy
+copy: {root}/Examples/interop/cobol/main.jet main.jet
+copy: {root}/Examples/interop/cobol/expected.out expected.out
 step: jet inspect bind cobol payroll.cob --copybook payroll.cpy --pkg payroll
 exit: 0
 file: .jet/bindings/cobol/payroll.jet ~ "jet-ffi-descriptor=" # original predicate

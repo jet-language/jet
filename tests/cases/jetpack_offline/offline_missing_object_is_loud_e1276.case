@@ -1,0 +1,11 @@
+# Port of tests/jetpack_offline.rs:264-280; runtime PENDING-SAME-HEAD.
+mkdir: project
+mkdir: package-root
+env: JETPACK_ROOT={work}/package-root
+step: jetpack build greet@nixpkgs --no-color --offline
+cwd: project
+env: JETPACK_DENY_NETWORK=1
+unset: JETPACK_FIXTURES
+exit: 1
+stderr: ~ "E1276" # original predicate
+stderr: ~ "greet@nixpkgs" # original predicate

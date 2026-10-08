@@ -1,0 +1,20 @@
+# Port of tests/source_import.rs:768-827; original sources and every predicate retained.
+# PENDING-GRAMMAR(batch-four); runtime PENDING-SAME-HEAD.
+fixture: enterprise_import_preserves_source_for_partial_failure.fixture
+mkdir: python/app
+step: jet import ts ts/app
+exit: 0
+file: jet/app/partial.jet ~ "fn keep(value: Float) -> Float {" # original predicate
+file: jet/app/partial.jet ~ "increment := value + 1.0" # original predicate
+file: jet/app/partial.jet !~ "fn unsupported" # original predicate
+file: jet/app/partial.jet !~ "fn broken" # original predicate
+file: jet/app/partial.jet !~ "fn duplicate" # original predicate
+file: jet/app/partial.jet !~ "fn readFile" # original predicate
+file: ts/app/partial.ts = ../../../tests/fixtures/source_import/enterprise/failures/partial.ts
+file: jet/app/import-report.json ~ "unsupported ts dependency declaration" # original predicate
+file: jet/app/import-report.json ~ "foreign type `number[]` is outside the scalar importer subset" # original predicate
+file: jet/app/import-report.json ~ "ts body `broken` was not translated" # original predicate
+file: jet/app/import-report.json ~ "ambiguous overloaded ts function `duplicate`" # original predicate
+file: jet/app/import-report.json count "\"migration_status\":\"omitted-reported\"" >= 4 # original predicate
+step: jet check jet/app/partial.jet
+exit: 0
