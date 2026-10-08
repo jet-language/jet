@@ -291,7 +291,7 @@ pub fn cancel(session: Session) { abi.cancel(session.value) }
         let call = format!("abi.{}", function.jet);
         out.push_str(&format!(
             r#"pub fn {}(session: Session, input: DataTree, deadline_ms: Int) -> DataTree PowerShellError! {{
-    raw :: {}(session.value, json.to_string(input), deadline_ms)
+    raw :: {}(session.value, json.to_string(input) ?? return Err(PowerShellError.Protocol), deadline_ms)
     code :: abi.take_error()
     return decode_response(raw, code)
 }}
