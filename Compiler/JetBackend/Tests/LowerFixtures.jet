@@ -757,6 +757,10 @@ fn run() {
         print("issue closure-atomic-refs: generated clone/drop seam failed")
         clean = false
     }
+    if !fx_scope_guard_reown_checks() {
+        print("issue scope-guard-reown: ownership/lint/optimizer checks failed")
+        clean = false
+    }
     if !fx_report_lir("runtime-bitcast", fx_runtime_bitcast_module()) -> clean = false
     if !fx_report("hello", fx_hello()) -> clean = false
     if !fx_report("arithmetic", fx_arithmetic()) -> clean = false
@@ -847,6 +851,7 @@ fn run() {
     if !fx_report("closures", fx_closures()) -> clean = false
     if !fx_report("closures-owned-borrow", fx_closures_owned_borrow()) -> clean = false
     if !fx_report("closures-owned-write", fx_closures_owned_write()) -> clean = false
+    if !fx_report("scope-guard-reown", fx_scope_guard_reown()) -> clean = false
     if !fx_report("sets", fx_sets()) -> clean = false
     if !fx_report("queues", fx_queues()) -> clean = false
     if !fx_report("priority-queues", fx_priority_queues()) -> clean = false

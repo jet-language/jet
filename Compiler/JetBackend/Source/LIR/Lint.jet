@@ -260,6 +260,10 @@ fn lir_lint_inst(program: LIRModule, function: LIRFunction, inst: LIRInst) -> [S
         .Move(dst, src) -> {
             if function.values[dst.value].layout != function.values[src.value].layout || function.values[dst.value].drop != function.values[src.value].drop -> &messages.push("move v{src.value} -> v{dst.value} changes layout or drop glue")
         }
+        .Reown(dst, src) -> {
+            if function.values[dst.value].layout != lir_layout_pointer() || function.values[src.value].layout != lir_layout_pointer() -> &messages.push("reown v{src.value} -> v{dst.value} requires matching pointer layouts")
+            if function.values[dst.value].drop == .Trivial -> &messages.push("reown v{src.value} -> v{dst.value} requires an owning destination")
+        }
         .Copy(dst, src) -> {
             if function.values[src.value].drop != .Trivial -> &messages.push("copy of v{src.value}, which has drop glue; move it instead")
             if function.values[dst.value].layout != function.values[src.value].layout || function.values[dst.value].drop != .Trivial -> &messages.push("copy v{src.value} -> v{dst.value} changes layout or drop glue")
