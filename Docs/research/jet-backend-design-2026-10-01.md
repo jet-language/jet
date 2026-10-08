@@ -2230,3 +2230,24 @@ It covers both policies, distinct clones, independent owner lifetime,
 exact-once size/alignment-correct frees, repeated clones and null drops.
 Its stdout fixture is expected output, not an execution receipt; parsing and
 strict C11 syntax alone do not establish native linkage or runtime behavior.
+
+### Email TLS trust ownership
+
+`EmailTrustABI.jet` defines the native email TLSTrust carrier: a variant word
+and owned byte-list pointer. It is distinct from network JetTLSTrust and its
+three variants. `EmailTrust.jet` preserves `Email.rs:213-216`'s two variants
+in declaration order, System then SystemPlusCa. Clone owns an independent PEM
+list; drop releases its buffer, list shell and carrier exactly once. System
+never reads its inactive payload. Equality checks variant then ordered bytes,
+including length, and ignores capacity and inactive payload.
+
+The byte-list geometry and destruction use the shared DataSequences helpers
+from composition dependency `6d4fa9ba6`; byte access uses `host_u8_get` and
+the sole `RT_HOST_U8_STRIDE` constant, packed one byte at native cutover.
+No second byte-list owner or stride constant is introduced.
+
+`EmailTrustWitness.c` links real Jet exports with free interception and
+covers both variants, clone independence, empty lists with zero/nonzero
+capacity, all 256 byte values, ordered equality, differing lengths, inactive
+payload and null drops. Its expected stdout is not an execution receipt.
+Native linkage, packed composition and runtime behavior remain unexercised.
