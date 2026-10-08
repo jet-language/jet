@@ -1,0 +1,29 @@
+# Port of tests/cli_parts/bindings.rs:1092-1259; sources copied verbatim.
+# PENDING-SAME-HEAD: authored original predicates/oracles; runtime proof not run.
+# PENDING-GRAMMAR: is-file, file negative substring. Original C stale/capacity probes retained verbatim.
+fixture: fixtures/pascal_lifecycle
+step: jet inspect bind pascal {work}/inventory.pas --pkg inventory
+exit: 0
+file: .jet/bindings/pascal/libjet_pascal_inventory.a is-file
+file: .jet/bindings/pascal/libjet_pascal_inventory_runtime.so is-file
+file: .jet/bindings/pascal/inventory.provenance is-file
+file: .jet/bindings/pascal/inventory.jet ~ "pub fn counter_new(" # original predicate
+file: .jet/bindings/pascal/inventory.jet ~ "!PascalError ->" # original predicate
+file: .jet/bindings/pascal/inventory.jet !~ "=>" # original predicate
+file: .jet/bindings/pascal/inventory.jet !~ ".{" # original predicate
+file: .jet/bindings/pascal/inventory.provenance ~ "schema=jet-pascal-bind-v1\n" # original predicate
+file: .jet/bindings/pascal/inventory.provenance ~ "source=" # original predicate
+file: .jet/bindings/pascal/inventory.provenance ~ "compiler=" # original predicate
+file: .jet/bindings/pascal/inventory.provenance ~ "abi=cdecl\n" # original predicate
+file: .jet/bindings/pascal/inventory.provenance ~ "handles=opaque-int64-generation\n" # original predicate
+step: jet run --profile=debug main.jet
+exit: 0
+stdout: = pascal_bind_runs_scalar_and_owned_class_lifecycle.out
+step: cc stale.c -L.jet/bindings/pascal -Wl,-rpath,.jet/bindings/pascal -l:libjet_pascal_inventory.a -ljet_pascal_inventory_runtime -lpthread -ldl -o stale
+exit: 0
+step: {work}/stale
+exit: 0
+step: cc capacity.c -L.jet/bindings/pascal -Wl,-rpath,.jet/bindings/pascal -l:libjet_pascal_inventory.a -ljet_pascal_inventory_runtime -lpthread -ldl -o capacity
+exit: 0
+step: {work}/capacity
+exit: 0
