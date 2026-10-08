@@ -1,0 +1,22 @@
+# Port of tests/lsp.rs:1883-1927; source bytes copied verbatim.
+# PENDING-GRAMMAR: generic framed sessions in TestW3b batch three; no reference snapshot needed for original predicates.
+# PENDING-SEAM(read_bytes): D-CHILD-READ-BYTES1 + CoreState2 + kit batch three.
+session lsp content-length: jet self lsp
+send lsp: messages/lsp_execute_command_impact_returns_report/0.json
+recv lsp
+stdout: ~ "executeCommandProvider" # original predicate; other response fields contain variable metadata/paths
+send lsp: messages/lsp_execute_command_impact_returns_report/1.json
+send lsp: messages/lsp_execute_command_impact_returns_report/2.json
+recv lsp
+stdout: ~ "publishDiagnostics" # original predicate; other response fields contain variable metadata/paths
+send lsp: messages/lsp_execute_command_impact_returns_report/3.json
+recv lsp
+stdout: ~ "\"symbol\":\"add\"" # original predicate; other response fields contain variable metadata/paths
+stdout: ~ "\"found\":true" # original predicate; other response fields contain variable metadata/paths
+stdout: ~ "\"upstream_callers\"" # original predicate; other response fields contain variable metadata/paths
+send lsp: messages/lsp_execute_command_impact_returns_report/4.json
+recv lsp
+stdout: ~ "result" # original predicate; other response fields contain variable metadata/paths
+close lsp
+# Original transcript only waited; it did not assert process status.
+exit: any

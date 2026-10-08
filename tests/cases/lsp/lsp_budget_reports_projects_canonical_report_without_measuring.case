@@ -1,0 +1,24 @@
+# Port of tests/lsp.rs:1929-2038; original package/program bytes unchanged.
+# PENDING-SEAM(read_bytes): persistent LSP session; inventory equality awaits kit batch two.
+fixture: fixtures/lsp_budget_reports_projects_canonical_report_without_measuring
+step: jet budget check --json
+exit: 0
+inventory reports: .jet/perf/reports
+session lsp content-length: jet self lsp
+send lsp: messages/lsp_budget_reports_projects_canonical_report_without_measuring/0.json
+recv lsp
+stdout: ~ "jet.budgetReports" # original predicate; other response metadata varies
+send lsp: messages/lsp_budget_reports_projects_canonical_report_without_measuring/1.json
+send lsp: messages/lsp_budget_reports_projects_canonical_report_without_measuring/2.json
+recv lsp
+stdout: ~ "publishDiagnostics" # original predicate; other response metadata varies
+send lsp: messages/lsp_budget_reports_projects_canonical_report_without_measuring/3.json
+recv lsp
+stdout: ~ "\"mode\":\"read_only\"" # original predicate; other response metadata varies
+stdout: ~ "\"budget_id\":\"package:api\"" # original predicate; other response metadata varies
+send lsp: messages/lsp_budget_reports_projects_canonical_report_without_measuring/4.json
+recv lsp
+close lsp
+# Original child.wait only; exit was not asserted.
+exit: any
+inventory: .jet/perf/reports == reports

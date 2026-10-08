@@ -1,0 +1,25 @@
+# Port of tests/lsp.rs:2234-2294; fixture/source bytes verbatim.
+# PENDING-GRAMMAR: framed session + raw token-bearing predicates.
+fixture: fixtures/lsp_completion_returns_snippets_and_auto_imports
+# PENDING-SEAM(read_bytes): D-CHILD-READ-BYTES1 + CoreState2 + kit batch three.
+session lsp content-length: jet self lsp
+send lsp: messages/lsp_completion_returns_snippets_and_auto_imports/0.json
+recv lsp
+stdout: ~ "completionProvider" # original predicate; response has absolute scratch paths/metadata
+send lsp: messages/lsp_completion_returns_snippets_and_auto_imports/1.json
+send lsp: messages/lsp_completion_returns_snippets_and_auto_imports/2.json
+recv lsp
+stdout: ~ "publishDiagnostics" # original predicate; response has absolute scratch paths/metadata
+send lsp: messages/lsp_completion_returns_snippets_and_auto_imports/3.json
+recv lsp
+stdout: ~ "\"label\":\"bind immut (inferred)\"" # original predicate; response has absolute scratch paths/metadata
+stdout: ~ "\"insertTextFormat\":2" # original predicate; response has absolute scratch paths/metadata
+stdout: ~ "\"label\":\"ImportedHelper\"" # original predicate; response has absolute scratch paths/metadata
+stdout: ~ "\"additionalTextEdits\"" # original predicate; response has absolute scratch paths/metadata
+stdout: ~ "use app.store\\n" # original predicate; response has absolute scratch paths/metadata
+send lsp: messages/lsp_completion_returns_snippets_and_auto_imports/4.json
+recv lsp
+stdout: ~ "result" # original predicate; response has absolute scratch paths/metadata
+close lsp
+# Original child.wait ignored status.
+exit: any
