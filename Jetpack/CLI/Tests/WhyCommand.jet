@@ -45,7 +45,7 @@ fn cli_why_test_text(tree: DataTree) -> String {
     loop fact in facts_1 {
         assert(text.contains(fact), "human report misses {fact}")
     }
-    rendered :: report.to_json()
+    rendered :: report.to_json() ?? panic("valid typed why report JSON")
     tree :: json.parse(rendered) ?? panic("the why report is JSON")
     facts_2 :: [String]{"\"env_file\"", "\"lock_file\"", "\"catalog\"", "\"endpoint\"", "\"signature_chain\"", "\"source_digest\"", "\"grade\"", "\"bytes\"", "\"dependents\"", "\"receipt\""}
     loop fact in facts_2 {

@@ -28,7 +28,8 @@ pub fn cli_cmd_explain(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net
             fields = fields.with("why", cli_optional_text(explanation.why))
             fields = fields.with("fix", cli_optional_text(explanation.fix))
             fields = fields.with("example", cli_optional_text(explanation.example))
-            print(StatusEnvelope.new("explain", true).with_field("explain", report_status_object(fields)).json())
+            text :: StatusEnvelope.new("explain", true).with_field("explain", report_status_object(fields)).json() ?? return cli_status_encoding_error(err)
+            print(text)
         } else {
             term.stdout().write(explain_render(explanation, theme.color)).drop("explain output is best-effort")
         }
@@ -53,7 +54,7 @@ pub fn cli_cmd_explain(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net
         .Ok(found) -> {
             explanation :: found ?? return cli_explain_error(theme, parsed, "E1274", "no package record or build attempt for `{package}`", "`jet explain` reads the Hangar Store and persisted Jetpack realization attempts; neither contains this package.", "run `jet build {package}` first, or use `jet explain E1234` for diagnostic-code help.")
             if parsed.flags.json {
-                print(explanation.to_json())
+                print(explanation.to_json() ?? return cli_status_encoding_error(err))
             } else {
                 term.stdout().write(explanation.text()).drop("explain output is best-effort")
             }
@@ -112,7 +113,8 @@ fn cli_cmd_explain_overlay(cache: &WorkspaceDeclarationCache, theme: Theme, pars
         fields = fields.with("policy", DataTree.Text(fact.policy_fingerprint))
         fields = fields.with("update", DataTree.Text(fact.update_command))
         fields = fields.with("offline", DataTree.Bool(fact.offline_satisfied))
-        print(StatusEnvelope.new("explain", true).with_fields(fields).json())
+        text :: StatusEnvelope.new("explain", true).with_fields(fields).json() ?? return cli_status_encoding_error(err)
+        print(text)
         return EXIT_OK
     }
     print(fact.semantic_key)
@@ -136,7 +138,8 @@ fn cli_cmd_explain_overlay(cache: &WorkspaceDeclarationCache, theme: Theme, pars
 fn cli_explain_workspace_failure(parsed: CLIParsed, diagnostic: Diagnostic) -[IO, FS, Env, Time.Wait]> Int Never! {
     if parsed.flags.json {
         report :: cli_diagnostic_to_report(diagnostic, ReportPath.from_process(WORKSPACE_FILE))
-        term.stdout().write(StatusEnvelope.new("explain", false).with_reports([ReportEnvelope]{report}).json_line()).drop("status output is best-effort")
+        line :: StatusEnvelope.new("explain", false).with_reports([ReportEnvelope]{report}).json_line() ?? return cli_status_encoding_error(err)
+        term.stdout().write(line).drop("status output is best-effort")
     } else {
         terminal_write_output(diagnostics_render_all(WORKSPACE_FILE, "", [Diagnostic]{diagnostic}))
     }

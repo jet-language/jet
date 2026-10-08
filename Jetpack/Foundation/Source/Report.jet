@@ -38,9 +38,10 @@ fn foundation_text_has_control(value: String) -> Bool Never! {
     false
 }
 
-// Compact JSON of one tree. Rendering a finite tree cannot fail.
-fn report_json(value: DataTree) -> String Never! {
-    json.to_string(value)
+// Compact JSON text uses Core's fallible wire projection.
+fn report_json(value: DataTree) -> String ReportError! {
+    text :: json.to_string(value) ?? return Err(ReportError.new(err.reason))
+    Ok(text)
 }
 
 fn report_optional_text(value: String?) -> DataTree Never! {
@@ -237,24 +238,25 @@ pub struct StatusEnvelope {
         DataTree.Object(object)
     }
 
-    fn json(self) -> String Never! {
+    fn json(self) -> String ReportError! {
         report_json(self.to_tree())
     }
 
-    fn json_line(self) -> String Never! {
-        "{self.json()}\n"
+    fn json_line(self) -> String ReportError! {
+        text :: self.json() ?? return Err(err)
+        Ok("{text}\n")
     }
 }
 
 // Render a typed status envelope; reserved keys fail through the one
 // validator every producer shares.
-pub fn report_render_status(action: String, ok: Bool, fields: StatusFields) -> String Never! {
+pub fn report_render_status(action: String, ok: Bool, fields: StatusFields) -> String ReportError! {
     envelope :: StatusEnvelope.new(action, ok).try_with_fields(fields) ?? panic("status fields must not duplicate envelope fields")
     envelope.json()
 }
 
 // Render one status object with typed report children.
-pub fn report_render_status_with_reports(action: String, ok: Bool, reports: [ReportEnvelope], fields: StatusFields) -> String Never! {
+pub fn report_render_status_with_reports(action: String, ok: Bool, reports: [ReportEnvelope], fields: StatusFields) -> String ReportError! {
     envelope :: StatusEnvelope.new(action, ok).with_reports(reports).try_with_fields(fields) ?? panic("status fields must not duplicate envelope fields")
     envelope.json()
 }
@@ -586,12 +588,13 @@ pub struct ReportEnvelope {
         DataTree.Object(object)
     }
 
-    fn json(self) -> String Never! {
+    fn json(self) -> String ReportError! {
         report_json(self.to_tree())
     }
 
-    fn json_line(self) -> String Never! {
-        "{self.json()}\n"
+    fn json_line(self) -> String ReportError! {
+        text :: self.json() ?? return Err(err)
+        Ok("{text}\n")
     }
 }
 
