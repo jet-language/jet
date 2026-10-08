@@ -26,9 +26,10 @@ fn env_overlay_error_new(kind: I64) -> I64 {
 
 // One logical native environment cell, distinct from the immutable boot index.
 // Root40: mutex, seeded, rows, length, capacity. Row40: key bytes/length,
-// value bytes/length, owned byte count (zero means borrowed startup storage).
-// All row access is under the same mutex. A snapshot owns independent bytes;
-// mutation never writes libc environ or the startup rows.
+// value bytes/length, owned allocation capacity (zero means borrowed startup
+// storage). All row access is under the same mutex. Readers copy rather than
+// lend cell bytes, so replacement inputs cannot alias a cell's owned buffer.
+// Mutation never writes libc environ or the immutable startup rows.
 env_overlay_root := I64{0}
 
 // runtime-init: 4
@@ -70,16 +71,21 @@ fn env_overlay_row_release(row: I64) {
     if (owned != I64{0}) -> jet_rt_free(encoding_word(row), owned, I64{1})
 }
 
-fn env_overlay_remove_at(index: I64) {
+fn env_overlay_compact_at(index: I64) {
     rows :: encoding_word(env_overlay_root + I64{16})
     count :: encoding_word(env_overlay_root + I64{24})
-    env_overlay_row_release(rows + index * I64{40})
     cursor := index
     loop cursor < (count - I64{1}) {
         rt_text_bytes_copy(rows + cursor * I64{40}, rows + (cursor + I64{1}) * I64{40}, I64{40})
         cursor += I64{1}
     }
     encoding_store(env_overlay_root + I64{24}, count - I64{1})
+}
+
+fn env_overlay_remove_at(index: I64) {
+    rows :: encoding_word(env_overlay_root + I64{16})
+    env_overlay_row_release(rows + index * I64{40})
+    env_overlay_compact_at(index)
 }
 
 // Failure unlocks BEFORE the canonical layout fault. The native caller must
@@ -189,13 +195,32 @@ fn env_overlay_try_set(name: I64, value: I64, error_out: I64) -> I64 {
     wanted :: if (previous >= I64{0}) -> length else -> length + I64{1}
     if !env_overlay_reserve(wanted) -> return I64{0}
     bytes :: key_length + value_length
-    storage :: jet_rt_alloc(bytes, I64{1})
-    rt_text_bytes_copy(storage, rt_text_data(name), key_length)
+    storage := I64{0}
+    owned := bytes
+    if (previous >= I64{0}) {
+        old_row :: encoding_word(env_overlay_root + I64{16}) + previous * I64{40}
+        capacity :: encoding_word(old_row + I64{32})
+        if (capacity != I64{0} && capacity >= bytes) {
+            storage = encoding_word(old_row)
+            owned = capacity
+        }
+    }
+    if {
+        storage == (I64{0}) -> {
+            storage = jet_rt_alloc(bytes, I64{1})
+            rt_text_bytes_copy(storage, rt_text_data(name), key_length)
+            if (previous >= I64{0}) -> env_overlay_remove_at(previous)
+        }
+        else -> {
+            // Keep the owned key and allocation capacity; only the new value
+            // needs copying. Rotate the updated row LAST without freeing it.
+            env_overlay_compact_at(previous)
+        }
+    }
     rt_text_bytes_copy(storage + key_length, rt_text_data(value), value_length)
-    if (previous >= I64{0}) -> env_overlay_remove_at(previous)
     appended :: encoding_word(env_overlay_root + I64{24})
     row :: encoding_word(env_overlay_root + I64{16}) + appended * I64{40}
-    env_overlay_row_store(row, storage, key_length, storage + key_length, value_length, bytes)
+    env_overlay_row_store(row, storage, key_length, storage + key_length, value_length, owned)
     encoding_store(env_overlay_root + I64{24}, appended + I64{1})
     sync_mutex_unlock(env_overlay_root)
     I64{1}
