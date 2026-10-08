@@ -17,14 +17,20 @@ fn run() {
     if files.lock(path, timeout: Val(time.duration_ms(2))) == {
         .Err(.TimedOut(context)) -> print(context.resource == Val(path))
         .Err(_) -> panic("wrong timeout kind")
-        .Ok(owner) -> { close(^owner); panic("contended lock acquired") }
+        .Ok(owner) -> {
+            close(^owner)
+            panic("contended lock acquired")
+        }
     }
     close(^held)
     print(files.exists(path))
     print((files.stat(path) ?? panic("released identity")).id == identity)
     claimed :: files.try_lock(path) ?? panic("try released")
     if claimed == {
-        .Val(owner) -> { print(owner.path == path); close(^owner) }
+        .Val(owner) -> {
+            print(owner.path == path)
+            close(^owner)
+        }
         .None -> panic("release did not unlock")
     }
     scope_claim(path)

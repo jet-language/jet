@@ -63,7 +63,7 @@ pub mod ServicesLite;
 pub mod SyncLite;
 mod TextLite;
 pub use TextLite::file_reader_next_line;
-pub use TextLite::{mir_fs_lock, mir_fs_temp_dir, mir_fs_temp_file, mir_fs_lock_raw, mir_fs_temp_dir_raw, mir_fs_temp_file_raw, MirFileOwner};
+pub use TextLite::{mir_fs_lock_owner_raw, mir_fs_temp_dir, mir_fs_temp_file, mir_fs_temp_dir_raw, mir_fs_temp_file_raw, MirFileOwner};
 pub mod MirBridge;
 pub mod Template;
 mod TypedDecode;
