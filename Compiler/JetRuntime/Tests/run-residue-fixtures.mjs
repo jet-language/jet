@@ -23,6 +23,7 @@ const cases = [
   ['comptime', 'Compiler/JetRuntime/Tests/comptime-fixture.c'],
   ['numeric', 'Compiler/JetRuntime/Tests/numeric-fixture.c'],
   ['int-parse', 'Compiler/JetRuntime/Tests/int-parse-fixture.c'],
+  ['float-parse', 'Compiler/JetRuntime/Tests/float-parse-fixture.c'],
   ['u32', 'Compiler/JetBackend/Tests/u32-import.c'],
 ];
 if (mode === 'assemble') {
@@ -53,7 +54,8 @@ if (mode === 'assemble') {
   }
 } else {
   for (const [name] of cases) {
-    const result=command(join(out,name),[]);
+    const args=name==='float-parse'?[join(repo,'Compiler/JetRuntime/Tests/float-parse.seed.golden')]:[];
+    const result=command(join(out,name),args);
     writeFileSync(join(out,`${name}.stdout`),result.stdout);
     writeFileSync(join(out,`${name}.stderr`),result.stderr);
     if (!result.stdout.startsWith('CHECK OK — native ') || result.stderr !== '') throw Error(`${name}: unexpected witness output`);
