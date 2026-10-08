@@ -44,12 +44,10 @@ fn diagnostic_bytes_text(bytes: [U8], start: Int, end: Int) -> String Never! {
 
 fn diagnostic_codepoint_at(bytes: [U8], index: Int, width: Int) -> Int Never! {
     first :: diagnostic_byte_at(bytes, index)
-    if {
-        width == 2 -> (first - 192) * 64 + diagnostic_byte_at(bytes, index + 1) - 128
-        width == 3 -> (first - 224) * 4096 + (diagnostic_byte_at(bytes, index + 1) - 128) * 64 + diagnostic_byte_at(bytes, index + 2) - 128
-        width == 4 -> (first - 240) * 262144 + (diagnostic_byte_at(bytes, index + 1) - 128) * 4096 + (diagnostic_byte_at(bytes, index + 2) - 128) * 64 + diagnostic_byte_at(bytes, index + 3) - 128
-        else -> first
-    }
+    second :: if width == 2 || width == 3 || width == 4 -> diagnostic_byte_at(bytes, index + 1) else -> 0
+    third :: if width == 3 || width == 4 -> diagnostic_byte_at(bytes, index + 2) else -> 0
+    fourth :: if width == 4 -> diagnostic_byte_at(bytes, index + 3) else -> 0
+    foundation_utf8_codepoint(first, second, third, fourth, width)
 }
 
 // Rust `char::is_control` (general category Cc) plus the Unicode line and

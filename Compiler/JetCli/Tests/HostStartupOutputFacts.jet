@@ -1,0 +1,21 @@
+// Ordinary Source construction, ownership and field fidelity; not host facts.
+fn run() {
+    absent :: jet_cli_make_host_startup_output_facts(false, true, None, true, false, None, true)
+    assert_eq(absent.stdout_tty, false)
+    assert_eq(absent.stderr_tty, true)
+    assert_eq(absent.term, None)
+    assert_eq(absent.no_color, true)
+    assert_eq(absent.force_color, false)
+    assert_eq(absent.columns, None)
+    assert_eq(absent.unicode, true)
+    term := [U8]?{Val([U8]{U8{120}, U8{116}, U8{101}, U8{114}, U8{109}})}
+    captured :: jet_cli_make_host_startup_output_facts(true, false, ^term, false, true, Val(U64{18446744073709551615}), false)
+    assert_eq(captured.stdout_tty, true)
+    assert_eq(captured.stderr_tty, false)
+    actual_term :: captured.term ?? panic("owned startup TERM was lost")
+    assert_eq(actual_term, [U8]{U8{120}, U8{116}, U8{101}, U8{114}, U8{109}})
+    assert_eq(captured.no_color, false)
+    assert_eq(captured.force_color, true)
+    assert_eq(captured.columns, Val(U64{18446744073709551615}))
+    assert_eq(captured.unicode, false)
+}
