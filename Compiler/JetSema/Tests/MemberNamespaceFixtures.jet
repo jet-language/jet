@@ -2,26 +2,26 @@
 struct Generic<T> {
     value: T
     step: fn(Int) Int
-    fn step<U>(self, amount: U) Int !Never -> 20
+    fn step<U>(self, amount: U) Int Never! -> 20
 }
 trait Step {
-    fn step(self, amount: Int) Int !Never -> amount + 5
+    fn step(self, amount: Int) Int Never! -> amount + 5
 }
 struct DefaultWorker { step: fn(Int) Int }
 impl DefaultWorker.Step {}
 struct Hook { mul: fn(Int) Int }
 impl Hook.Mul(Int) {
-    fn mul(self, rhs: Int) Int !Never -> rhs + 10
+    fn mul(self, rhs: Int) Int Never! -> rhs + 10
 }
 struct MutableWorker {
     value: Int
     step: fn(Int) Int
-    fn step(&self, amount: Int) Int !Never -> {
+    fn step(&self, amount: Int) Int Never! -> {
         self.value += amount
         self.value
     }
 }
-fn via_bound<T: Step>(value: T) Int !Never -> value.step(1)
+fn via_bound<T: Step>(value: T) Int Never! -> value.step(1)
 fn run() {
     generic :: Generic<Int>{value: 1, step: n -> n}
     print(generic.step<Int>(1))
