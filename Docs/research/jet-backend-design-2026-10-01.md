@@ -1583,6 +1583,6 @@ those fixtures require the composed native providers, not a Rust-layout bridge.
 `jet_observe_record_live_value` and `jet_observe_event` take one borrowed
 canonical record address and return Unit; the synchronous call copies owned
 text before the producer may release its record. Process-start identity is
-independent of optional CPU sampling. Observe remains outside the runtime
-source/export manifests until the logical Env cell and producer bindings
-are admitted; its source and export-list cutover must land together.
+independent of optional CPU sampling. The admitted runtime source/export
+manifests include these providers together; startup runs once after the
+logical Env seed and native registry initialization, before entry invocation.
