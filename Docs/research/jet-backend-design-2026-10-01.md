@@ -2075,3 +2075,31 @@ a Result(Text,Text). Its caller must convert Err into
 the checked String contract is not permitted. This caller repair belongs to
 the native lowering owner, not the runtime kernel.
 
+
+### Native DbPool and Delivery receipt families
+
+`ReceiptABI.jet` defines private 104-byte DbPool and 80-byte Delivery receipt
+storage. Standalone lifecycle/state owners use the shared 8-byte enum storage.
+All numeric fields are Rust `i64` in `DbPool.rs:13-28` and
+`ServiceAuthority.rs:131-141`, independent of the pool engine's `usize` counters.
+Constructors borrow exact Int and Text arguments; every numeric getter rebuilds
+a fresh exact Int and every Text getter clones its child. Lifecycle/state C
+tags are checked with the canonical native-index stop before integer conversion.
+Ready/duplicate bytes are normalized from nonzero; cloning, equality and rendering
+use only the normalized low byte, not padding in the private word slot.
+
+The full 42-export family is implemented in `Receipts.jet`. DbPool's three
+renders share the exact `DbPool.rs:30-68` render, including lowercase lifecycle
+and Bool values. Delivery has only Show, matching `Services.rs:1198-1232`;
+its raw Text fields are not quoted or redacted and no extra Display/Debug ABI
+is introduced. Clones independently own child Text; drops free children before
+the header, and null drop matches the seed.
+
+`ReceiptsWitness.c` links the real composed object with `--wrap=jet_rt_free`.
+It asserts actual interception and exact-once frees for every watched header
+and child buffer, all tags/getters, per-field inequality, low-byte normalization,
+signed i64 extrema, raw punctuation/UTF-8, empty Text, and owner/getter
+independence. Normal output is `Receipts ownership/equality/render OK`.
+`bad-db-lifecycle`, `bad-delivery-state` and `native-overflow` are separate stop
+modes. Light parser and strict C11 checks are not native execution evidence;
+runtime admission and execution remain unexercised pending the fresh composition.
