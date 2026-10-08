@@ -50,9 +50,9 @@ fn kit_ui_arg(source: String, name: String) -> String? {
     found := ""
     present := false
     loop raw in source.split("\n") {
-        line :: raw.trim()
+        line :: ~raw.trim()
         if !line.starts_with("//") -> next
-        directive :: line.slice(2, line.len()).trim()
+        directive :: ~line.slice(2, line.len()).trim()
         prefix :: "@{name}"
         if {
             directive == prefix -> {
@@ -73,9 +73,9 @@ fn kit_ui_invocation(source: String, file: String, lint: Bool) -> KitUiCall {
     call := KitUiCall{argv: if lint -> ["check", "--verbose", file] else -> ["check", file], parent: false, exit: "any", streams: if lint -> "lint" else -> "rendered", stdin: "", extension: kit_ui_arg(source, "compiler_extension") ?? "", refused: ""}
     rows :: kit_ui_directives()
     loop raw in source.split("\n") {
-        line :: raw.trim()
+        line :: ~raw.trim()
         if !line.starts_with("//") -> next
-        body :: line.slice(2, line.len()).trim()
+        body :: ~line.slice(2, line.len()).trim()
         if !body.starts_with("@") -> next
         name :: body.slice(1, body.len()).replace("\t", " ").split(" ").to_list()[0]
         known := false
@@ -102,7 +102,8 @@ fn kit_ui_invocation(source: String, file: String, lint: Bool) -> KitUiCall {
         call.streams = if lint -> "lint" else -> row.streams
         if row.name == "repl_deny" {
             loop line in source.split("\n") {
-                if line.trim() != "" && !line.trim().starts_with("//") -> call.stdin = "{call.stdin}{line}\n"
+                trimmed :: ~line.trim()
+                if trimmed != "" && !trimmed.starts_with("//") -> call.stdin = "{call.stdin}{line}\n"
             }
             call.stdin = "{call.stdin}:quit"
         }
@@ -189,7 +190,7 @@ fn kit_ui_snapshot(entry: KitEntry, call: KitUiCall, result: KitRun, actual: Str
     if call.streams == "lint" && (result.code != 0 || !actual.split("\n").any(line -> line.starts_with("Warning ["))) -> return kit_expect_verdict("FAIL", "lint fixture must compile and emit a lint")
     if (call.streams == "rendered" || call.streams == "rendered-both") && result.code != 0 && kit_expect_diagnostics(actual) == 0 -> return kit_expect_verdict("ERROR", "compiler failed without a rendered diagnostic")
     expected :: files.join(ctx.root, entry.expected)
-    kit_expect_exact_with_count(entry.path, expected, kit_exec_optional(expected), actual, ctx.bless, kit_expect_diagnostics)
+    kit_expect_exact_with_count(entry.path, expected, kit_exec_optional(expected), actual, ctx.bless, (text: String) -[]> kit_expect_diagnostics(text))
 }
 
 fn kit_ui_fixed(entry: KitEntry, ctx: KitCtx, source: String, overlay: [KitEnvVar]) -> [KitOutcome] {
@@ -281,7 +282,7 @@ struct KitUiAllowance {
 
 fn kit_ui_field(body: String, key: String) -> String {
     loop raw in body.split("\n") {
-        line :: raw.trim()
+        line :: ~raw.trim()
         if line.starts_with("{key}: ") -> return line.slice(key.len() + 2, line.len())
     }
     ""
@@ -396,7 +397,7 @@ fn kit_ui_set_coverage(rows: [KitUiRegistryRow], emitted: [String], rendered: [S
     seen := [String]{}
     errors := [String]{}
     loop raw in allowance_text.split("\n") {
-        line :: raw.trim()
+        line :: ~raw.trim()
         if line == "" || line.starts_with("#") -> next
         fields :: line.split("\t").to_list()
         if fields.len() != 3 {
@@ -446,7 +447,7 @@ fn kit_ui_plane_coverage(rows: [KitUiRegistryRow], baseline: String) -> KitVerdi
     expected := [String]{}
     names := [String]{}
     loop raw in baseline.split("\n") {
-        line :: raw.trim()
+        line :: ~raw.trim()
         if line == "" || line.starts_with("#") -> next
         fields :: line.replace("\t", " ").split(" ").filter(word -> word != "").to_list()
         if fields.len() != 4 -> return kit_expect_verdict("FAIL", "invalid coverage baseline row: {line}")
