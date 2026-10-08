@@ -1,0 +1,47 @@
+use jet_foundation.[
+    MIRAccess, MIRCallArg, MIRCallee, MIRConstant, MIRCopyFact, MIRDropKind,
+    MIRFunction, MIRImplDef, MIROperation, MIRProgram, MIRTerminator,
+    MIRTraitDef, MIRTraitMethod, MIRTraitMethodID, MIRTraitRef, MIRType,
+    MIRTypeDef, MIRTypeKind, mir_function_id, mir_owned_ownership,
+    mir_trait_id, mir_type_from_kind, mir_type_id, mir_type_with_identity,
+]
+
+// expect-stdout trait-values: "payload\npayload\n42\n"
+// expect-runtime-only trait-values: native closed trait dispatch and text/Int ownership exports
+fn fx_trait_values() -> MIRProgram Never! {
+    bound :: MIRTraitRef{id: mir_trait_id("Echo"), name: "Echo"}
+    method :: MIRTraitMethodID{value: 777}
+    ty :: mir_type_with_identity(mir_type_from_kind(MIRTypeKind.TraitObject{bounds: [MIRTraitRef]{bound}}), mir_type_id("EchoObject"))
+    b := fx_builder()
+    text :: fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "payload"}})
+    boxed :: fx_owned(&b, ty, MIROperation.TraitBox{value: text, target: mir_type_id("EchoObject")})
+    backup :: fx_owned(&b, ty, MIROperation.Copy{value: boxed, fact: MIRCopyFact.Explicit})
+    result :: fx_owned(&b, fx_string(), MIROperation.Call{callee: MIRCallee.TraitMethod{method: method, trait_ref: bound, receiver: ty}, args: [MIRCallArg]{fx_arg(boxed, MIRAccess.Read)}, type_args: []})
+    fx_print(&b, result)
+    fx_do(&b, MIROperation.Drop{value: result, kind: MIRDropKind.Value})
+    fx_do(&b, MIROperation.Drop{value: boxed, kind: MIRDropKind.Value})
+    copied :: fx_owned(&b, fx_string(), MIROperation.Call{callee: MIRCallee.TraitMethod{method: method, trait_ref: bound, receiver: ty}, args: [MIRCallArg]{fx_arg(backup, MIRAccess.Read)}, type_args: []})
+    fx_print(&b, copied)
+    fx_do(&b, MIROperation.Drop{value: copied, kind: MIRDropKind.Value})
+    fx_do(&b, MIROperation.Drop{value: backup, kind: MIRDropKind.Value})
+    renderable :: MIRTraitRef{id: mir_trait_id("Renderable"), name: "Renderable"}
+    rendered_ty :: mir_type_with_identity(mir_type_from_kind(MIRTypeKind.TraitObject{bounds: [MIRTraitRef]{renderable}}), mir_type_id("RenderableObject"))
+    number :: fx_int_const(&b, 42)
+    rendered :: fx_owned(&b, rendered_ty, MIROperation.TraitBox{value: number, target: mir_type_id("RenderableObject")})
+    fx_print(&b, rendered)
+    fx_do(&b, MIROperation.Drop{value: rendered, kind: MIRDropKind.Value})
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    run :: fx_function("run", b, fx_unit())
+    e := fx_builder()
+    receiver :: fx_param(&e, "self", fx_string(), fx_borrow())
+    returned :: fx_owned(&e, fx_string(), MIROperation.Copy{value: receiver, fact: MIRCopyFact.Explicit})
+    fx_block(&e, 0, MIRTerminator.Return{value: Val(returned)})
+    implementation :: fx_function("echo", e, fx_string())
+    p := fx_program([MIRFunction]{run, implementation}, [MIRTypeDef]{})
+    p.traits = [MIRTraitDef]{
+        MIRTraitDef{id: bound.id, module_id: run.module_id, key: bound.name, name: bound.name, span: fx_span(), visibility: .Private, associated_types: [], methods: [MIRTraitMethod]{MIRTraitMethod{id: method, name: "echo", span: fx_span(), self_access: Val(MIRAccess.Read), params: [], declared_return: Val(fx_string()), return_type: fx_string(), failure: .Infallible, effects: run.effects, is_pure: false, return_view_provenance: None, declared_return_view_provenance: None, default: None}}},
+        MIRTraitDef{id: renderable.id, module_id: run.module_id, key: renderable.name, name: renderable.name, span: fx_span(), visibility: .Private, associated_types: [], methods: []},
+    }
+    p.impls = [MIRImplDef]{fx_display_impl("String.Echo", "Echo", fx_string(), mir_function_id("echo"), 778)}
+    p
+}

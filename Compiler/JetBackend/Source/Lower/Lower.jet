@@ -155,6 +155,7 @@ enum LowerRuntimeIntrinsic {
 
 struct LowerModule {
     pub signatures: [LIRSignature]
+    pub checked_types: LowerTypeIndex
     pub test_harness: Bool
     pub test_rows: [Int]
     pub test_indices: [U64:Int]
@@ -337,6 +338,7 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
         asm_foreign: ~prepared.asm_foreign,
         foreign_rows: ~prepared.foreign_rows,
         mir_rows: [U64:Int]{},
+        checked_types: ~prepared.checked_types,
         mir_sources: [Int]{},
         mir_signatures: [LIRSignatureID]{},
         mir_results: [Int]{},
@@ -467,6 +469,7 @@ fn lower_enum_is_tag(variants: [MIRVariant]) -> Bool Never! {
 }
 
 fn lower_repr(p: MIRProgram, ty: MIRType) -> LowerRepr Never! {
+    if lower_trait_ref(p, ty) != None -> return LowerRepr.Boxed{ty: ty}
     if ty.kind == {
         .Int -> LowerRepr.Word
         .Char -> LowerRepr.Word
@@ -1728,6 +1731,7 @@ fn lower_instruction(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
         .Move(value) -> lower_forward(c, &m, &f, instruction, value)
         .AttachTag(value, _) -> lower_forward(c, &m, &f, instruction, value)
         .Convert(value, parameters, target, conversion) -> lower_convert(p, c, &m, &f, instruction, value, parameters, target, conversion)
+        .TraitBox(value, _) -> lower_trait_box(p, c, &m, &f, instruction, value)
         .ReadPlace(place) -> lower_read_place(p, c, &m, &f, instruction, place, false)
         .MovePlace(place) -> lower_read_place(p, c, &m, &f, instruction, place, true)
         .WritePlace(place, value) -> lower_write_place(p, c, &m, &f, place, value, false)
@@ -3123,6 +3127,7 @@ fn lower_prelude_render(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
 }
 
 fn lower_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, callee: MIRCallee, args: [MIRCallArg], type_args: [MIRType]) Never! {
+    if callee == .TraitMethod(method, bound, receiver) -> return lower_trait_call(p, c, &m, &f, instruction, method, bound, receiver, args, type_args)
     if callee == .Foreign(foreign) && m.asm_foreign.get(foreign.value) == None {
         lower_asm_import_call(p, c, &m, &f, instruction, foreign.value, args, type_args)
         return
@@ -3174,7 +3179,8 @@ fn lower_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction
     if index < 0 -> return lower_fail(&m, &f, "call to missing function {target.value}")
     lowered := [LIRValueID]{}
     writebacks := [LowerWriteBack]{}
-    if !lower_call_args(p, c, &m, &f, args, &lowered, &writebacks) -> return
+    temporaries := [LIRValueID]{}
+    if !lower_call_args(p, c, &m, &f, args, &lowered, &writebacks, &temporaries) -> return
     signature :: ~m.mir_signatures[index]
     result_bytes :: ~m.mir_results[index]
     if result_bytes > 0 {
@@ -3185,6 +3191,7 @@ fn lower_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction
         loop value in lowered -> &call_args.push(value)
         lower_emit(&f, LIRInst.Call{dst: None, signature: signature, callee: LIRCallee.Function{id: LIRFunctionID{value: index}}, args: call_args})
         loop writeback in writebacks -> lower_write_back(p, c, &m, &f, writeback)
+        loop temporary in temporaries -> lower_emit(&f, LIRInst.Drop{value: temporary})
         return
     }
     dst := lower_result(p, c, &m, &f, instruction)
@@ -3194,12 +3201,22 @@ fn lower_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction
     }
     lower_emit(&f, LIRInst.Call{dst: dst, signature: signature, callee: LIRCallee.Function{id: LIRFunctionID{value: index}}, args: lowered})
     loop writeback in writebacks -> lower_write_back(p, c, &m, &f, writeback)
+    loop temporary in temporaries -> lower_emit(&f, LIRInst.Drop{value: temporary})
 }
 
 // A call's argument values in order: a Write argument lends its place's
 // cell, an absent (Unit) argument passes nothing. False when lowering failed.
-fn lower_call_args(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, args: [MIRCallArg], lowered: &[LIRValueID], writebacks: &[LowerWriteBack]) -> Bool Never! {
+fn lower_call_args(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, args: [MIRCallArg], lowered: &[LIRValueID], writebacks: &[LowerWriteBack], temporaries: &[LIRValueID]) -> Bool Never! {
     loop arg in args {
+        if arg.access != .Write && arg.box_as_trait == .Val(target) {
+            ty :: lower_value_type(c, arg.value) ?? return false
+            if lower_trait_ref(p, ty) == None {
+                boxed :: lower_trait_arg(p, c, &m, &f, arg, target) ?? return false
+                &lowered.push(boxed)
+                if arg.access == .Read -> &temporaries.push(boxed)
+                next
+            }
+        }
         if arg.access == .Write {
             writeback :: lower_write_arg(p, c, &m, &f, arg) ?? next
             &lowered.push(writeback.cell)
@@ -3370,6 +3387,7 @@ struct LowerGlueShape {
 }
 
 fn lower_glue_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    if lower_trait_ref(p, glue.ty) != None -> return lower_trait_glue(p, &m, glue)
     if lower_is_transaction(glue.ty) -> return lower_transaction_drop_glue(&m, glue)
     if lower_is_iter_cursor(glue.ty) -> return lower_iter_drop_glue(p, &m, glue)
     if glue.ty.kind == .List(elem) -> return lower_list_drop_glue(p, &m, glue, elem)
@@ -3444,6 +3462,7 @@ fn lower_call_clone_glue(m: &LowerModule, f: &LowerFunction, ty: MIRType, source
 // the owned contents of the active shape replaced by their own copies
 // (runtime clone for handles, clone glue for nested boxes and inline members).
 fn lower_clone_glue_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    if lower_trait_ref(p, glue.ty) != None -> return lower_trait_glue(p, &m, glue)
     if lower_is_transaction(glue.ty) -> return lower_transaction_clone_glue(&m, glue)
     if lower_is_iter_cursor(glue.ty) -> return lower_iter_clone_glue(p, &m, glue)
     if glue.ty.kind == .List(elem) -> return lower_list_clone_glue(p, &m, glue, elem)
@@ -3566,6 +3585,7 @@ fn lower_helper_start(m: &LowerModule, glue: LowerGlue, params: [LIRLayout], res
 }
 
 fn lower_helper_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    if glue.helper == "trait.drop" || glue.helper == "trait.clone" -> return lower_trait_payload_glue(p, &m, glue)
     if glue.helper.starts_with("lazy.") -> return lower_lazy_helper(p, &m, glue)
     if glue.helper == "codec.csv.decode" -> return lower_helper_codec_csv_decode(p, &m, glue)
     if glue.helper == "closure.thunk" -> return lower_closure_thunk(&m, glue)
