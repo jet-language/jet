@@ -331,7 +331,7 @@ struct JetPlugin {
 macro_rules! jet_plugin_bridge {
     ($bridge:ident) => {
         fn jet_plugin_load(path: &String, authority_wire: &String) -> JetPlugin {
-            let wire = $bridge::jet_plugin_load(path, authority_wire);
+            let wire = jet_plugin_load_wire_raw(path, authority_wire);
             match wire
                 .strip_prefix("O:")
                 .and_then(|value| value.parse::<u64>().ok())
@@ -343,11 +343,17 @@ macro_rules! jet_plugin_bridge {
                 }
             }
         }
+        fn jet_plugin_load_wire_raw(path: &String, authority_wire: &String) -> String {
+            $bridge::jet_plugin_load(path, authority_wire)
+        }
         fn jet_plugin_call(handle: u64, name: &str, params: &str) -> String {
             $bridge::jet_plugin_call(handle, name, params)
         }
     };
 }
+
+fn jet_plugin_from_handle_raw(handle: u64) -> JetPlugin { JetPlugin { handle } }
+fn jet_plugin_stop_raw(message: &String) -> ! { jet_runtime_stop("E3001", "", 0, message) }
 
 // The typed vault carriers live in the hidden FFI bridge.  Display remains a
 // generated-program concern so user interpolation can render opaque handles

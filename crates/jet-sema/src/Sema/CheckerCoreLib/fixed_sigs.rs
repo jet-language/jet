@@ -479,6 +479,9 @@ fn web_fixed_sig(
             Some(result_ty(unit_ty(), string.clone())))),
         ("core.mod", "__close_context") => Some((vec![(read, int.clone())], None)),
         ("core.mod", "__finish_context") => Some((vec![(read, int.clone())], Some(web_named("Mod")))),
+        ("core.plugin", "__load_wire") => Some((vec![(read, string.clone()), (read, string.clone())], Some(string.clone()))),
+        ("core.plugin", "__from_handle") => Some((vec![(read, Type::IntN { signed: false, bits: 64 })], Some(web_named("Plugin")))),
+        ("core.plugin", "__stop") => Some((vec![(read, string.clone())], Some(web_named("Never")))),
 
         ("core.data.sketch", "empty") => Some((vec![], Some(string.clone()))),
         ("core.data.sketch", "merge") => Some((

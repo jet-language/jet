@@ -1492,7 +1492,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 1469cbc5ffa1630468574f1677f8a2377724a7429b53989493d2d91559601f49
+// Source SHA-256: 5368c9e2c38f855536499d7bde25f47f113077a19fd1dbef5be3248fc8d0b11e
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -1949,7 +1949,10 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.process", "pipeline", "jet_std_process_pipeline", true, &[true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.process", "argv", "jet_std_io_args", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.process", "on_signal", "jet_process_on_signal", true, &[true], ),
-    CoreCallRecord::new("core.plugin", "load", "jet_plugin_load", true, &[true, true]) .without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::source_owned("core.plugin", "load", &[true, true]).with_source_target("__load_checked_wire").with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.plugin", "__load_wire", "jet_plugin_load_wire_raw", true, &[true, true]).without_direct_aot(),
+    CoreCallRecord::new("core.plugin", "__from_handle", "jet_plugin_from_handle_raw", true, &[false]),
+    CoreCallRecord::new("core.plugin", "__stop", "jet_plugin_stop_raw", true, &[true]),
     CoreCallRecord::new("core.mod", "load", "jet_mod_load", true, &[true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.mod", "__supported", "jet_mod_supported_raw", true, &[]),
     CoreCallRecord::new("core.mod", "__os", "jet_mod_os_raw", true, &[]),

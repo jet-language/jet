@@ -25,7 +25,7 @@ pub enum CoreLeafKind {
 
 // BEGIN GENERATED CORE DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 1469cbc5ffa1630468574f1677f8a2377724a7429b53989493d2d91559601f49
+// Source SHA-256: 5368c9e2c38f855536499d7bde25f47f113077a19fd1dbef5be3248fc8d0b11e
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreModuleDeclaration {
     pub module: &'static str,
@@ -428,7 +428,7 @@ const CORE_MODULE_61_MEMBERS: &[&str] = &["guard"];
 const CORE_MODULE_61_TYPES: &[(&str, CoreLeafKind)] = &[];
 const CORE_MODULE_61_DEPENDENCIES: &[&str] = &[];
 
-const CORE_MODULE_62_MEMBERS: &[&str] = &["is_loaded", "load", "path", "unload", "CompiledModule", "ModError"];
+const CORE_MODULE_62_MEMBERS: &[&str] = &["is_loaded", "load", "path", "unload", "CompiledModule"];
 const CORE_MODULE_62_TYPES: &[(&str, CoreLeafKind)] = &[("CompiledModule", CoreLeafKind::Plain), ("ModError", CoreLeafKind::Enum(&["Denied", "NotFound", "Invalid", "Unsupported"])), ("__LoadContext", CoreLeafKind::Plain)];
 const CORE_MODULE_62_DEPENDENCIES: &[&str] = &["core.compiler", "core.files"];
 
@@ -822,7 +822,7 @@ pub const CORE_SOURCE_MODULES: &[CoreSourceModule] = &[
     CoreSourceModule { module: "core.net.ws", alias: "core_core_net_ws", path: "Core/net/ws.jet", owned_members: &["connect", "upgrade"] },
     CoreSourceModule { module: "core.net.ip", alias: "core_core_net_ip", path: "Core/net/ip.jet", owned_members: &["ipv4", "ipv4_from_int", "ipv4_int", "ipv4_to_string", "ipv6_is_link_local", "ipv6_is_loopback", "ipv6_is_unspecified", "ipv6_to_string", "is_global", "is_link_local", "is_loopback", "is_multicast", "is_private", "is_reserved", "is_unspecified", "network", "network_broadcast", "network_contains", "network_hosts", "parse_ipv4", "parse_ipv6", "packed_ipv4", "from_packed_ipv4", "reverse_pointer", "with_prefixlen", "with_netmask", "with_hostmask", "num_addresses", "network_first", "network_last", "network_overlaps", "subnet_of", "supernet_of", "supernet", "subnets", "hosts", "interface", "is_carrier_grade_nat", "is_benchmarking", "is_documentation", "is_shared", "ipv6_is_multicast", "ipv6_is_private", "ipv6_is_global", "ipv6_packed", "ipv6_compressed", "compare_ipv4", "ipv4_equals"] },
     CoreSourceModule { module: "core.perf", alias: "core_core_perf", path: "Core/perf/perf.jet", owned_members: &["default_fidelity", "fidelity", "is_full", "is_low", "of", "override_fidelity", "reset_fidelity", "scale"] },
-    CoreSourceModule { module: "core.plugin", alias: "core_core_plugin", path: "Core/plugin/plugin.jet", owned_members: &[] },
+    CoreSourceModule { module: "core.plugin", alias: "core_core_plugin", path: "Core/plugin/plugin.jet", owned_members: &["load"] },
     CoreSourceModule { module: "core.prelude", alias: "core_core_prelude", path: "Core/prelude/prelude.jet", owned_members: &["always", "const_bool", "const_int", "identity", "identity_bool", "identity_float", "identity_int", "keep", "max_int", "min_int", "not_bool", "option_or_err"] },
     CoreSourceModule { module: "core.process", alias: "core_process", path: "Core/process/process.jet", owned_members: &["status_ok", "arg", "args", "args_extend", "argv", "call", "capture", "check", "check_call", "check_output", "cmd", "combined_output", "current_pid", "cwd", "env", "env_get", "env_get_or", "env_keys", "env_set", "env_truthy", "exit", "exited", "failed", "getoutput", "getstatusoutput", "list2cmdline", "on_signal", "pipeline", "run_spec", "shell", "signal_number", "stderr_lines", "stdin_text", "stdout_lines", "which"] },
     CoreSourceModule { module: "core.reactive", alias: "core_core_reactive", path: "Core/reactive/reactive.jet", owned_members: &["computed_get", "computed_set", "effect_last", "effect_run", "get", "set", "update", "version", "set_if_changed", "changed", "computed_update", "computed_version", "effect_run_if", "effect_changed"] },

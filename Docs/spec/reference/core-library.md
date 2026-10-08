@@ -59,6 +59,12 @@ never escapes a raw operation. Ordinary Close first unloads any opened native
 library, then removes its staged payload, matching the verification provider's
 error path. Successful finish transfers those resources into the existing Mod.
 
+Plugin loading retains literal-artifact checking, frozen Component interfaces,
+and tightened-authority wire conversion at the compiler boundary. Its private
+checked source target validates the existing unsigned `O:<handle>` wire and
+preserves `E:` refusal bytes (including an empty reason); malformed or zero
+handles stop with E3001 and `plugin load failed`.
+
 Email address, attachment, and envelope construction validates in
 `Core/email/email.jet`: control-character refusal precedes address parsing,
 mailbox grammar is ASCII dot-atom or quoted local, MIME and physical-header
