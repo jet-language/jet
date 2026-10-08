@@ -76,6 +76,8 @@ const CASES: &[&str] = &[
     "[\"b\": 2, \"a\": 1, \"c\": 3].values().to_list()",
     "\"a,b,c\".split(\",\").skip(1).first()",
     "[2: \"two\", 1: \"one\"].keys().to_list()",
+    "[18446744073709551615: \"large\", -9223372036854775809: \"negative\", 0: \"zero\"].keys().to_list()",
+    "[18446744073709551615: \"large\"].get(9223372036854775807 + 9223372036854775808)",
     "Rank.from([1, 2, 3]).intersection(Rank.from([2, 3, 4])).to_list()",
     "Rank.from([1, 2, 3]).difference(Rank.from([2, 3, 4])).to_list()",
     "Rank.from([1, 2, 3]).symmetric_difference(Rank.from([2, 3, 4])).to_list()",

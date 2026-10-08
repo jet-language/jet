@@ -2094,6 +2094,24 @@ mod tests {
     use crate::AST::{BinOp, Type};
 
     #[test]
+    fn comptime_map_keys_accept_every_int() {
+        use super::CtKey;
+        use crate::Numeric::CtBigInt;
+        use std::collections::BTreeMap;
+        let mut map = BTreeMap::new();
+        for decimal in ["18446744073709551615", "-9223372036854775809", "0"] {
+            let value = CtValue::BigInt(CtBigInt::from_str(decimal).unwrap());
+            let key = CtKey::from_value(value.clone()).expect("every Int is a map key");
+            assert_eq!(key.to_value().jet_show(), value.jet_show());
+            map.insert(key, decimal);
+        }
+        assert_eq!(map.values().copied().collect::<Vec<_>>(),
+            ["-9223372036854775809", "0", "18446744073709551615"]);
+        assert!(matches!(CtKey::from_value(CtValue::BigInt(CtBigInt::from_int(0))),
+            Some(CtKey::Int(0))));
+    }
+
+    #[test]
     fn ct_float_preserves_width_native_equality_and_rounding() {
         let rounded = CtFloat::f32(16_777_217.0);
         let wide = CtFloat::f64(16_777_217.0);
