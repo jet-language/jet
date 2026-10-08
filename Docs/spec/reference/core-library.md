@@ -54,12 +54,17 @@ The same direct-boundary rule applies to the held reader, directory, xattr,
 writer-stat and lock operations: canonical private names select the existing
 host kernels without source pass-through facades. Path permission and ownership
 policy uses the compile-target OS family, not a duplicate platform detector.
-`walk` and `walk_files` own traversal in Jet: depth starts at zero for root
+`walk`, `walk_parallel`, and `walk_files` own traversal in Jet: depth starts at zero for root
 entries, results sort by shown path, ancestor symlinks are refused, and each
 directory inherits the existing ignore matcher. The private context preserves
 native path identities (including non-Unicode names) until its scope guard
 releases it. Failed directory batches are discarded while already queued work
 continues; the earliest error is selected by native directory-path ordering.
+Directory removal/listing/copy, hard links, socket mode checks, canonicalization,
+globbing, and temporary directory/lock creation also perform their fault policy
+in Jet. Directory copy probes read before write, exactly once before its existing
+raw tree operation. Temporary directory and file names share the same Jet prefix,
+process-ID, clock-fallback, and host-path policy.
 Terminal reads and prompt/style/progress policy likewise use source-owned
 declarations. Their registered private facts call the single existing terminal
 and stdin kernels; the Rust seed entry points retain their fault preflight.

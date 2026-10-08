@@ -1465,8 +1465,6 @@ fn core_fixed_sig_impl(
             Some(result_ty(Type::String, io_error_ty())))),
         ("core.files", "__glob_raw") => Some((vec![(read, Type::String)],
             Some(result_ty(Type::List(Box::new(Type::String)), io_error_ty())))),
-        ("core.files", "__walk_parallel_raw") => Some((vec![(read, Type::String), (moved, Type::Option(Box::new(Type::String)))],
-            Some(result_ty(Type::List(Box::new(Type::Named("WalkEntry".to_string()))), io_error_ty())))),
         ("core.files", "exists" | "is_dir") => Some((vec![(read, path)], Some(bool_))),
         (
             "core.files",

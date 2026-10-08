@@ -894,12 +894,18 @@ pub fn mktemp(prefix: String) -[FS, Env, Time]> String Never! {
 }
 
 
-pub fn canonicalize(path: String) -[FS, Env]> String IOError! {
-    core.files.canonicalize(path)
+pub fn canonicalize(path: String | Path) -[FS.Read]> String IOError! {
+    text :: path_text(path)
+    files8_preflight("FS.Read", .Read, text)
+    core.files.__canonicalize_raw(text)
 }
 
 
-pub fn list_dir(path: String) -[FS.Read]> [DirEntry] IOError! { core.files.list_dir(path) }
+pub fn list_dir(path: String | Path) -[FS.Read]> [DirEntry] IOError! {
+    text :: path_text(path)
+    files8_preflight("FS.Read", .Read, text)
+    core.files.__list_dir_raw(text)
+}
 
 
 pub fn create_dir(path: String) IOError! -[FS.Write]> { core.files.create_dir(path) }
@@ -953,7 +959,11 @@ pub fn remove(path: String | Path) IOError! -[FS.Write]> {
 }
 
 
-pub fn remove_dir(path: String) IOError! -[FS.Write]> { core.files.remove_dir(path) }
+pub fn remove_dir(path: String | Path) IOError! -[FS.Write]> {
+    text :: path_text(path)
+    files8_preflight("FS.Write", .Write, text)
+    core.files.__remove_dir_raw(text)
+}
 
 
 pub fn remove_all(path: String | Path) IOError! -[FS]> {
@@ -980,19 +990,12 @@ fn copy_file_impl(from: String, to: String) IOError! -[FS]> {
 }
 
 
-pub fn copy_dir(from: String, to: String) IOError! -[FS]> {
-    create_dir_all(to)
-    entries :: list_dir(from)
-    loop e in entries {
-        dest :: join_impl(to, e.name)
-        if e.is_dir {
-            copy_dir(e.path, dest)
-        } else {
-            info :: stat(e.path)
-            if info.is_file && !info.is_symlink -> copy_file_impl(e.path, dest)
-        }
-    }
-    return Ok()
+pub fn copy_dir(from: String | Path, to: String | Path) IOError! -[FS]> {
+    source :: path_text(from)
+    target :: path_text(to)
+    files8_preflight("FS.Read", .Read, source)
+    files8_preflight("FS.Write", .Write, target)
+    core.files.__copy_dir_raw(source, target)
 }
 
 
@@ -1021,7 +1024,19 @@ pub fn symlink(original: String | Path, link: String | Path) IOError! -[FS.Write
 }
 
 
-pub fn hard_link(original: String, link: String) IOError! -[FS.Write]> { core.files.hard_link(original, link) }
+pub fn hard_link(original: String | Path, link: String | Path) IOError! -[FS.Write]> {
+    source :: path_text(original)
+    target :: path_text(link)
+    files8_preflight("FS.Write", .Write, target)
+    core.files.__hard_link_raw(source, target)
+}
+ 
+pub fn is_socket(path: String | Path) -[FS.Read]> Bool IOError! {
+    text :: path_text(path)
+    files8_preflight("FS.Read", .Read, text)
+    mode :: core.files.__stat_mode_raw(text)
+    Ok((mode & 61440) == 49152)
+}
 
 
 pub fn read_link(path: String) -[FS.Read]> String IOError! { core.files.read_link(path) }
@@ -1315,9 +1330,8 @@ pub fn walk(root: String | Path, ignore: String?) -[FS]> [WalkEntry] IOError! {
 }
 
 
-pub fn walk_parallel(root: String, ignore: String?) -[FS]> [WalkEntry] IOError! {
-    // Cooperative Jet has no thread pool yet; the walk is the same walk.
-    walk_impl(root, ignore, false)
+pub fn walk_parallel(root: String | Path, ignore: String?) -[FS]> [WalkEntry] IOError! {
+    walk_impl(path_text(root), ignore, false)
 }
 
 
@@ -1326,75 +1340,37 @@ pub fn walk_files(root: String | Path, ignore: String?) -[FS]> [WalkEntry] IOErr
 }
 
 
-fn has_meta(seg: String) -> Bool Never! {
-    loop b in seg.bytes() {
-        n :: b
-        if n == 42 || n == 63 || n == 91 -> return true
-    }
-    false
-}
-
-
-fn glob_root(pattern: String) -> String Never! {
-    parts :: split_slash_impl(pattern)
-    static := [String]{}
-    i := 0
-    loop i < parts.len() {
-        if has_meta(parts[i]) -> break
-        &static.push(parts[i])
-        i = i + 1
-    }
-    if !is_abs_impl(pattern) {
-        root :: join_parts(static)
-        if root.bytes().len() == 0 -> return "."
-        return root
-    }
-    drive := ""
-    raw :: pattern.bytes()
-    if raw.len() >= 2 && is_letter(raw[0]) && raw[1] == (U8{58}) -> drive = slice(raw, 0, 2)
-    body := [String]{}
-    j := 0
-    if drive.bytes().len() > 0 && static.len() > 0 && static[0] == drive -> j = 1
-    loop j < static.len() {
-        &body.push(static[j])
-        j = j + 1
-    }
-    compose(anchor_for_parts(drive, true), body)
-}
 
 
 pub fn glob(pattern: String) -[FS]> [String] IOError! {
-    if !has_meta(pattern) {
-        if exists_impl(pattern) -> return Ok([String]{~pattern})
-        return Ok([String]{})
-    }
-    root :: glob_root(pattern)
-    entries :: core.files.walk(~root)
-    out := [String]{}
-    loop e in entries {
-        candidate := e.path
-        relative_candidate := ~candidate
-        cbytes :: candidate.bytes()
-        if cbytes.len() >= 2 && cbytes[0] == (U8{46}) && is_separator(cbytes[1]) {
-            relative_candidate = slice(cbytes, 2, cbytes.len())
-        }
-        if glob_match_impl(pattern, candidate) || glob_match_impl(pattern, relative_candidate) {
-            &out.push(candidate)
-        }
-    }
-    Ok(out)
+    files8_preflight("FS.Read", .Read, pattern)
+    core.files.__glob_raw(pattern)
 }
 
 
-pub fn temp_dir(prefix: String) -[FS]> TempDir IOError! { core.files.temp_dir(prefix) }
+pub fn temp_dir(prefix: String) -[FS]> TempDir IOError! {
+    path :: files_temp_path(prefix)
+    files8_preflight("FS.Write", .Write, path)
+    core.files.__temp_dir_raw(^path)
+}
 
+pub fn mkdtemp(prefix: String) -[FS]> String IOError! {
+    path :: files_temp_path(prefix)
+    files8_preflight("FS.Write", .Write, path)
+    core.files.__mkdtemp_raw(^path)
+}
 
-pub fn temp_file(prefix: String) -[FS]> TempFile IOError! {
+fn files_temp_path(prefix: String) -[FS]> String Never! {
     clean :: temp_prefix(prefix)
     clock :: core.files.__temp_clock_raw()
     nanos :: if clock.clock_available -> clock.nanos else -> "0"
     pid :: core.files.__process_id_raw()
-    path :: core.files.__host_path_join(core.files.__temp_directory_raw(), "{clean}_{pid}_{nanos}")
+    core.files.__host_path_join(core.files.__temp_directory_raw(), "{clean}_{pid}_{nanos}")
+}
+
+
+pub fn temp_file(prefix: String) -[FS]> TempFile IOError! {
+    path :: files_temp_path(prefix)
     files8_preflight("FS.Write", .Write, path)
     core.files.__temp_file_raw(^path)
 }
@@ -1403,7 +1379,11 @@ pub fn temp_file(prefix: String) -[FS]> TempFile IOError! {
 /// Take an exclusive lock by creating `path` (create-new). A second `lock` on
 /// a held path fails with an `IOError`; the lock file is removed when the
 /// returned `FileLock` leaves scope, which makes the path available again.
-pub fn lock(path: String) -[FS]> FileLock IOError! { core.files.lock(path) }
+pub fn lock(path: String | Path) -[FS]> FileLock IOError! {
+    text :: path_text(path)
+    files8_preflight("FS.Write", .Write, text)
+    core.files.__lock_raw(text)
+}
 
 
 pub fn basename(path: String) -> String Never! {
