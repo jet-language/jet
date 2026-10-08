@@ -16,6 +16,11 @@
 typedef intptr_t Word;
 typedef struct { Word stride, clone, drop, show, equal, compare, kind, child0, child1; } Meta;
 typedef struct { Word payload, next, release, clone; } Adapter;
+typedef struct { Word lock, fd, closed, path, buffer, capacity, filled, position, refs; } FD;
+extern Word jet_fd_retain_raw(Word);
+extern void jet_fd_drop_raw(Word);
+extern Word jet_fd_write_raw(Word, const void *, Word, Word *, bool *);
+extern Word jet_fd_seek_raw(Word, Word, Word, Word *, bool *);
 extern Word jet_fd_adopt_raw(Word, Word, bool);
 extern Word jet_process_pipe_take_raw(Word);
 extern void jet_process_pipe_close_raw(Word);
@@ -117,7 +122,40 @@ static void borrow_stop(void) {
     assert(WIFEXITED(status) && WEXITSTATUS(status) == 70);
     assert(strstr(report, "RefCell already borrowed"));
 }
+static void writer_take(void) {
+    FILE *file=tmpfile(); assert(file);
+    int number=dup(fileno(file)); assert(number>=0);
+    Word fd=jet_fd_adopt_raw(number,0,true);
+    Word alias=jet_fd_retain_raw(fd), facts[4]; bool zero=false;
+    assert(jet_fd_write_raw(fd,"a\nb\n",4,facts,&zero)==4 && !facts[0]);
+    assert(((FD *)fd)->filled==4);
+    Word holder=jet_process_pipe_take_raw(fd);
+    line(holder,NULL,0); // flush then kernel EOF; never expose write bytes
+    assert(((FD *)alias)->capacity==8192 && ((FD *)alias)->filled==0);
+    assert(lseek(number,0,SEEK_CUR)==4);
+    assert(jet_fd_seek_raw(alias,0,SEEK_SET,facts,&zero)==0 && !facts[0]);
+    line(holder,(const unsigned char *)"a\n",2);
+    // The other line is now in shared refill storage. Writing through a
+    // retained alias must hit the kernel, not append to/alter that storage.
+    Word filled=((FD *)alias)->filled, position=((FD *)alias)->position;
+    assert(jet_fd_write_raw(alias,"c\n",2,facts,&zero)==2 && !facts[0]);
+    assert(((FD *)alias)->filled==filled && ((FD *)alias)->position==position);
+    assert(lseek(number,0,SEEK_CUR)==6);
+    line(holder,(const unsigned char *)"b\n",2);
+    line(holder,NULL,0);
+    jet_fd_drop_raw(alias); jet_rt_handle_drop_ProcessStdoutStream(holder);
+    closed(number); assert(!fclose(file));
+    int ends[2]; assert(!pipe(ends));
+    fd=jet_fd_adopt_raw(ends[0],0,false); alias=jet_fd_retain_raw(fd);
+    assert(write(ends[1],"x\ny\n",4)==4 && !close(ends[1]));
+    holder=jet_process_pipe_take_raw(fd);
+    line(holder,(const unsigned char *)"x\n",2);
+    assert(jet_fd_write_raw(alias,"z",1,facts,&zero)==-1 && facts[0]==1 && facts[1]==EBADF);
+    line(holder,(const unsigned char *)"y\n",2);
+    jet_fd_drop_raw(alias); jet_rt_handle_drop_ProcessStdoutStream(holder);
+}
 int main(void) {
+    writer_take();
     Word (*clones[])(Word) = {jet_rt_handle_clone_ProcessStdoutStream, jet_rt_handle_clone_ProcessStderrStream};
     void (*drops[])(Word) = {jet_rt_handle_drop_ProcessStdoutStream, jet_rt_handle_drop_ProcessStderrStream};
     for (size_t family = 0; family < 2; ++family) {

@@ -92,6 +92,37 @@ static void closed(FD *fd) {
     jet_fd_rename_at_raw(fd,&name,fd,&name,0,error); assert(posix(error, EBADF));
     jet_fd_close_raw(fd,error,&z); assert(success(error) && !z); // idempotent
 }
+static void writer_reads(Text *path) {
+    W error[4], facts[16]; bool zero; char byte=0x5a;
+    FD *fd=jet_fd_open_raw(path,PF_READ|PF_WRITE|PF_CREATE|PF_TRUNCATE,0600,error);
+    assert(fd && success(error) && fd->cap<0); // actual O_RDWR
+    assert((fcntl((int)jet_fd_number_raw(fd),F_GETFL)&O_ACCMODE)==O_RDWR);
+    assert(jet_fd_write_raw(fd,"a\n",2,error,&zero)==2 && success(error) && fd->filled==2);
+    // Pending writes advance the shared kernel offset before read: EOF, not
+    // "a" from the private writer buffer; the caller byte stays untouched.
+    assert(jet_fd_read_raw(fd,&byte,1,error)==0 && success(error) && byte==0x5a);
+    assert(fd->filled==0 && fd->cap<0);
+    jet_fd_stat_raw(fd,facts,error); assert(success(error) && facts[7]==2);
+    assert(jet_fd_seek_raw(fd,0,SEEK_SET,error,&zero)==0 && success(error));
+    assert(jet_fd_read_raw(fd,&byte,1,error)==1 && success(error) && byte=='a');
+    assert(jet_fd_seek_raw(fd,0,SEEK_END,error,&zero)==2 && success(error));
+    assert(jet_fd_write_raw(fd,"b",1,error,&zero)==1 && success(error) && fd->filled==1);
+    FD *duplicate=jet_fd_dup_raw(fd,error);
+    assert(duplicate && success(error) && fd->filled==0 && duplicate->filled==0);
+    struct stat native; assert(!fstat((int)jet_fd_number_raw(duplicate),&native) && native.st_size==3);
+    assert(lseek((int)jet_fd_number_raw(duplicate),0,SEEK_CUR)==3);
+    jet_fd_drop_raw(duplicate); jet_fd_drop_raw(fd);
+    fd=jet_fd_open_raw(path,PF_WRITE|PF_TRUNCATE,0600,error);
+    assert(fd && success(error));
+    assert((fcntl((int)jet_fd_number_raw(fd),F_GETFL)&O_ACCMODE)==O_WRONLY);
+    assert(jet_fd_write_raw(fd,"x",1,error,&zero)==1 && success(error) && fd->filled==1);
+    byte=0x5a;
+    assert(jet_fd_read_raw(fd,&byte,1,error)==-1 && posix(error,EBADF) && byte==0x5a);
+    assert(fd->filled==0); // flush succeeded before the kernel rejected read
+    assert(!fstat((int)jet_fd_number_raw(fd),&native) && native.st_size==1);
+    jet_fd_drop_raw(fd);
+    assert(!unlink((char *)path->data));
+}
 int main(void) {
     jet_rt_host_program_start();
     char root[]="/tmp/jet-files-XXXXXX"; assert(mkdtemp(root));
@@ -102,6 +133,7 @@ int main(void) {
     snprintf(sub,sizeof sub,"%s/sub",root);
     Text p=text(path), q=text(second), l=text(link), d=text(root), s=text(sub);
     W error[4]={-1,-1,-1,-1}, facts[16]; bool z=true; char bytes[16384];
+    writer_reads(&q);
     FD *writer=jet_fd_open_raw(&p,PF_WRITE|PF_CREATE|PF_TRUNCATE,0600,error);
     assert(writer && success(error) && writer->refs==1 && writer->cap==-8192);
     assert(fcntl((int)jet_fd_number_raw(writer),F_GETFD)&FD_CLOEXEC);
@@ -143,10 +175,16 @@ int main(void) {
     jet_fd_stat_at_raw(directory,&empty,facts,error); assert(success(error) && (facts[2]&S_IFMT)==S_IFDIR);
     jet_fd_stat_at_raw(directory,&absent,facts,error); assert(posix(error,ENOENT));
     assert(jet_fd_directory_raw(directory,bytes,sizeof bytes,error)>0 && success(error));
+    // Compare the exact held-inode syscall, not a broad allowed-error set.
+    // link(2): no CAP_DAC_READ_SEARCH => ENOENT. FileHandles.rs does not try
+    // /proc/self/fd + AT_SYMLINK_FOLLOW, so the native leaf must not either.
+    int reference_link=linkat((int)jet_fd_number_raw(reader),"",
+                             (int)jet_fd_number_raw(directory),"hard",AT_EMPTY_PATH);
+    int link_errno=errno;
+    if (!reference_link) assert(!unlinkat((int)jet_fd_number_raw(directory),"hard",0));
     jet_fd_link_at_raw(reader,directory,&hard,error);
-    // FileHandles.rs's AT_EMPTY_PATH has the same privilege error on both tiers.
-    assert(success(error) || posix(error, EPERM) || posix(error, ENOENT));
-    if (!error[1]) { jet_fd_unlink_at_raw(directory,&hard,false,error); assert(success(error)); }
+    assert(reference_link ? posix(error,link_errno) : success(error));
+    if (!reference_link) { jet_fd_unlink_at_raw(directory,&hard,false,error); assert(success(error)); }
     jet_fd_mkdir_at_raw(directory,&dir,0700,error); assert(success(error));
     jet_fd_rename_at_raw(directory,&dir,directory,&renamed,1,error); assert(success(error));
     jet_fd_unlink_at_raw(directory,&renamed,true,error); assert(success(error));

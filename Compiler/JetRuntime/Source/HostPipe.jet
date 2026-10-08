@@ -94,6 +94,16 @@ fn pipe_output_name() -> I64 {
             failure = I64{-9}
             break
         }
+        if (fd_word(fd, I64{40}) < I64{0}) {
+            // TAKE hands this state to a BufReader. Convert only after its
+            // private pending output reaches the kernel; failures retain the
+            // writer mode/suffix for the next attempt.
+            // TAKE has no error ABI; first read is its fallible conversion edge.
+            failure = fd_flush_locked(fd)
+            if (failure != I64{0}) { break }
+            fd_put(fd, I64{48}, I64{0})
+            fd_put(fd, I64{56}, I64{0})
+        }
         buffer :: fd_buffer(fd)
         fd_put(fd, I64{40}, I64{8192})
         pos := fd_word(fd, I64{56})
@@ -134,7 +144,8 @@ fn pipe_output_name() -> I64 {
     pipe_unborrow(pipe)
     if (failure != I64{0}) {
         jet_rt_string_drop(line)
-        return host_io_other_take(HOST_IO_OP_READ, pipe_output_name(), host_errno_cause(wrapping(-failure)), error_out)
+        cause :: if (failure == HOST_WRITE_ZERO) -> host_write_zero_text() else -> host_errno_cause(wrapping(-failure))
+        return host_io_other_take(HOST_IO_OP_READ, pipe_output_name(), cause, error_out)
     }
     if (line != I64{0}) {
         length :: rt_text_len(line)
