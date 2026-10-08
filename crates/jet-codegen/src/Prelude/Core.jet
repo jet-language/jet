@@ -1284,6 +1284,7 @@ dispatcher_row adapter core.db __queue_raw_execute | CoreCallRecord::new("core.d
 dispatcher_row adapter core.db __queue_raw_query | CoreCallRecord::new("core.db", "__queue_raw_query", "jet_db_queue_raw_query", true, &[false, true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
 dispatcher_row plain core.jobs queue | CoreCallRecord::new( "core.jobs", "queue", "jet_job_queue_default", true, &[], )
 dispatcher_row adapter core.jobs __publish_parts | CoreCallRecord::new("core.jobs", "__publish_parts", "jet_job_queue_publish_parts", true, &[false, true, true, false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+dispatcher_row adapter core.jobs __sleep_ms | CoreCallRecord::new("core.jobs", "__sleep_ms", "jet_job_queue_sleep_ms", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
 dispatcher_row receiver - enqueue | CoreCallRecord::receiver_with_symbol( &["JobQueue"], "enqueue", "jet_job_queue_enqueue", true, &[true, true, true], ) .with_max_arity(4)
 dispatcher_row receiver - delay | CoreCallRecord::receiver_with_symbol( &["JobQueue"], "delay", "jet_job_queue_delay", true, &[true, false, false, false], )
 dispatcher_row receiver - receipt | CoreCallRecord::receiver_with_symbol( &["JobQueue"], "receipt", "jet_job_queue_receipt", true, &[true, true], )
