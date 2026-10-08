@@ -1355,8 +1355,15 @@ native producer can lower an image. Factory accessors use the same checked
 Source callables to recompute that schema from the retained recipe.
 The parent runtime admission record is private, build-time embedded metadata
 from the same producer as the host binary and runtime library, not a user flag,
-environment lookup or receipt self-hash. Parent admission, getter dispatch and
-native physical Shared interop remain required integration work.
+environment lookup or receipt self-hash. `JetDriverCoreSourceParentHost` retains
+the canonical recipe and parent without a factory context. Jet's
+`CoreParentSeed.jet`/`CoreParentIngress.jet` generator binds the seed transport
+from checked emit metadata; the seed has one static resident host and invokes
+the fresh factory's Source preparation before admission or getters.
+The Rust splice accepts only the generator's build-time definition marker;
+a runtime-producing build without it refuses with `CoreSharedSeedIngressMissing`.
+Stage zero without a runtime retains its existing bootstrap path. Native
+physical Shared interop and composed runtime execution still require integration.
 
 `x64_memory_core_shared_image` consumes the explicit pinned-Core lowering
 inventory, rather than guessing exports from MIR function numbers. Getter names
