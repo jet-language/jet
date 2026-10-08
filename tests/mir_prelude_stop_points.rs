@@ -83,3 +83,17 @@ fn prelude_stop_classification_uses_checked_effect_not_call_spelling() {
         assert_eq!(prelude_route_effect("core.shared_guard", member), Some(Effect::Panic));
     }
 }
+
+#[test]
+fn string_slice_routes_publish_panic_stop_facts() {
+    use jet_foundation::Effects::{prelude_route_effect, Effect};
+    for (module, member) in [
+        ("core.collections", "slice_string"),
+        ("core.collections", "slice_string_range"),
+        ("core.builtin", "string_slice"),
+    ] {
+        assert_eq!(prelude_route_effect(module, member), Some(Effect::Panic));
+    }
+    // List slices remain governed by their own route contract, not string facts.
+    assert_eq!(prelude_route_effect("core.collections", "slice_list"), None);
+}

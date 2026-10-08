@@ -31,6 +31,10 @@ Prelude route effects. A route marked `Panic` in
 before its result is bound or consumed; returning a `Result` is not a stop.
 Semantic Prelude operations gain polls only from checked stop facts; existing
 user, indirect, Core, callback and general-call stop classification is retained.
+Checked string-slice routes carry `Panic` because bounds may fail dynamically.
+Payload access selected by an enum's own discriminant remains an invariant:
+record-import glue selects the matching tag before invoking a payload getter,
+so those getters do not introduce an independent user-visible stop point.
 
 ## Type compatibility
 
