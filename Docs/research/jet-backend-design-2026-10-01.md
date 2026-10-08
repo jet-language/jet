@@ -1555,8 +1555,18 @@ kernel. `check-lists-native.mjs` checks source/dispatch/helper consistency;
 its receipt is not native execution or unrestricted type-coverage proof.
 The second batch records 22 more List bodies in `Combinators.jet`,
 `Parallel.jet` and `Lists.jet`, including eager callback ordering, first-error
-cleanup and explicit unsupported callback/type shapes. The parallel map still
-uses the separately owned `jet_rt_native_para_walk` scheduler seam.
+cleanup and explicit unsupported callback/type shapes. The joined
+`jet_rt_native_para_walk` provider is Jet-authored in runtime `Parallel.jet`.
+It uses the existing Thread and Scheduler control primitives: fixed 64-item
+chunks are assigned cyclically, all workers join before any failure is
+published, and the lowest failing chunk start selects the original stop record
+(`CAbiParallel.rs:9-33`, `Core.rs:360-420`, `ParallelKernel.rs:60-90`).
+Zero worker limit means one worker; negative or outside-I64 exact limits
+mean unrestricted capacity. The shared affinity probe uses fallback one,
+without the scheduler pool's environment override. `ParallelTests.jet` and
+`run-parallel-fixtures.mjs` exercise empty/serial/tail walks, joined multiple
+failures, stop-form preservation and allocator-class balance when run against
+the freshly composed runtime; source parsing alone is not behavioral proof.
 The last census List route, `jet_list_para_fold_add_fixed_f64`, is implemented
 in `IterNumeric.jet` with the existing `(Float slots, length, seed)` C ABI.
 It preserves 64-element indexed chunks, the seed in lane zero of every chunk,

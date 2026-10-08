@@ -5,6 +5,8 @@
 mod jet_c_abi_parallel {
     use super::jet_c_abi::guard;
 
+    // Seed/verification path only; Jet Parallel owns the native-pack symbol.
+    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub unsafe extern "C" fn jet_rt_native_para_walk(
         len: i64,
