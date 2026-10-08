@@ -124,7 +124,7 @@ pub fn core_shared_runtime_call(runtime: CoreSharedParentRuntime, symbol: String
     word := x64_native_call(runtime.symbols.get(symbol) ?? panic("validated runtime symbol disappeared"), arity, first, second, third)
     if row.result == .Val(output) {
         if output.size < 8 -> word &= (1 << (output.size * 8)) - 1
-    } else -> word = 0
+    } else { word = 0 }
     CoreSharedRuntimeCallResult{word: word, refusal_key: ""}
 }
 pub fn core_shared_runtime_allocate(runtime: CoreSharedParentRuntime, size: Int, align: Int) -> X64NativeAllocation {
@@ -336,7 +336,8 @@ pub fn core_shared_parent_callable(parent: &CoreSharedParent, attachment: CoreSh
 }
 
 #Test("native slot validators reject unsupported widths and out of range writes before touching memory") {
-    loop size in [Int]{1, 2, 4, 8} {
+    widths :: [Int]{1, 2, 4, 8}
+    loop size in widths {
         assert_eq(x64_native_slot_error(8, size), "")
         assert_eq(x64_native_slot_write_error(8, size, 255), "")
     }
