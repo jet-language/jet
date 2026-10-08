@@ -143,6 +143,12 @@ pub struct SemaOwnershipReference {
     pub use_span: Span
     pub kind: SemaOwnershipReferenceKind
 }
+// A typed place whose own Close implementation needs the complete value.
+pub struct SemaOwnershipCloseOwner {
+    pub place: SemaOwnershipPlace
+    pub ty: Type
+}
+
 
 pub struct SemaOwnershipState {
     pub scope_depth: Int
@@ -166,6 +172,9 @@ pub struct SemaOwnershipState {
     // Rust `is_static_move_root`: keys of this module's `#Persist`, mutable,
     // and `#Static` bindings, which own one shared storage cell (E0222/E0223).
     pub static_roots: [String]
+    pub close_owners: [SemaOwnershipCloseOwner]
+    // Only the parameter symbol of this exact consuming Close body is exempt.
+    pub close_receiver_key: String
 }
 
 // D-UNINIT1: one `Type{ uninit }` binding that is not yet definitely written.
@@ -223,6 +232,8 @@ pub fn sema_ownership_state_init() -> SemaOwnershipState Never! {
         fixed_length_write_params: [String]{},
         uninit: [SemaOwnershipUninitFact]{},
         static_roots: [String]{},
+        close_owners: [SemaOwnershipCloseOwner]{},
+        close_receiver_key: "",
     }
 }
 
@@ -288,6 +299,8 @@ pub fn sema_ownership_state_snapshot(source: SemaOwnershipState) -> SemaOwnershi
     snapshot.fixed_length_write_params = source.fixed_length_write_params
     snapshot.uninit = source.uninit
     snapshot.static_roots = source.static_roots
+    loop owner in source.close_owners -> &snapshot.close_owners.push(SemaOwnershipCloseOwner{place: sema_ownership_place_snapshot(owner.place), ty: owner.ty})
+    snapshot.close_receiver_key = source.close_receiver_key
     snapshot
 }
 
@@ -307,6 +320,8 @@ pub fn sema_ownership_state_restore(state: &SemaOwnershipState, saved: SemaOwner
     state.fixed_length_write_params = ~saved.fixed_length_write_params
     state.uninit = ~saved.uninit
     state.static_roots = ~saved.static_roots
+    state.close_owners = ~saved.close_owners
+    state.close_receiver_key = saved.close_receiver_key
 }
 
 fn sema_ownership_next_sequence(state: &SemaOwnershipState) -> Int Never! {
@@ -1853,6 +1868,42 @@ fn sema_ownership_clear_moved(state: &SemaOwnershipState, place: SemaOwnershipPl
     state.moved = remaining
 }
 
+// Field typing supplies prefix facts; never copy the registration graph into
+// per-function ownership state.
+pub fn sema_ownership_note_close_owner(state: &SemaOwnershipState, expr: Expr, ty: Type, environment: SemaScopeEnvironment, scopes: SemaScopeTable) Never! {
+    own_close := false
+    if environment.registration_graph == .Val(graph) {
+        if sema_type_resolve_nominal_row(graph, ty, environment.module_identity) == .Val(row) {
+            nominal :: graph.modules[row.module_index].nominals[row.row]
+            own_close = sema_copy_nominal_has_impl(environment.registration_graph, nominal, "Close").value
+        }
+    }
+    if ty == .Named(name) {
+        loop param in environment.generic_params {
+            if param.name == name && sema_copy_generic_bound(param, "Close") -> own_close = true
+        }
+    }
+    if !own_close -> return
+    loop place in sema_ownership_places_from_expr_in_state(expr, scopes, &state) {
+        known := false
+        loop owner in state.close_owners {
+            if sema_ownership_place_exact(owner.place, place) -> known = true
+        }
+        if !known -> &state.close_owners.push(SemaOwnershipCloseOwner{place: place, ty: ty})
+    }
+}
+
+fn sema_ownership_reject_partial_close_move(state: SemaOwnershipState, place: SemaOwnershipPlace, span: Span, diagnostics: &[Diagnostic]) -> Bool {
+    loop owner in state.close_owners {
+        if owner.place.projections.len() >= place.projections.len() || !sema_ownership_place_extends(owner.place, place) -> next
+        if owner.place.projections.len() == 0 && owner.place.root_key == state.close_receiver_key -> next
+        name :: sema_ownership_place_name(place)
+        &diagnostics.push(sema_error("E0222", span, "A part of `{name}` cannot be moved independently", "`{type_name(owner.ty)}` has its own Close implementation, which needs the complete owner; this move would leave it with an empty field", "Move the Close owner as a whole, or copy the field if its type supports copying"))
+        return true
+    }
+    false
+}
+
 // An exact move: a `^` mark, a consuming call or receiver, or a capture.
 // A later use stays E0121.
 pub fn sema_ownership_mark_move(state: &SemaOwnershipState, expr: Expr, scopes: SemaScopeTable, consumer: String, diagnostics: &[Diagnostic]) -> Bool {
@@ -1912,6 +1963,7 @@ fn sema_ownership_mark_move_as(state: &SemaOwnershipState, expr: Expr, scopes: S
             &diagnostics.push(sema_error("E0201", expr_span(expr), "`{sema_ownership_place_name(place)}` cannot be moved from borrowed storage", "read and write parameters and named windows keep ownership with their source", "copy the value, or accept it with the move marker `^`"))
             return false
         }
+        if !unmarked && sema_ownership_reject_partial_close_move(state, place, expr_span(expr), &diagnostics) -> return false
         if sema_ownership_conflicting_view_for_expr(&state, place, AccessConvention.Move, expr, scopes) == .Val(fact) {
             &diagnostics.push(sema_ownership_diag_view_change(fact, place, "be moved", expr_span(expr), scopes))
             return false
@@ -1949,9 +2001,8 @@ pub fn sema_ownership_consume_expression(state: &SemaOwnershipState, expr: Expr,
                 }
             }
             if !sema_ownership_check_expression(&state, value, scopes, &diagnostics) -> return false
-            // Rust `note_exact_move` / `mark_moved_by` record a move of a
-            // whole name only: `^state.items` leaves no moved fact behind.
-            if sema_ownership_unmarked_moves_name(value) && sema_ownership_places_from_expr_in_state(value, scopes, &state).len() > 0 -> return sema_ownership_mark_move(&state, value, scopes, consumer, &diagnostics)
+            // Exact projected takes enter the same recorder as whole roots.
+            if sema_ownership_places_from_expr_in_state(value, scopes, &state).len() > 0 -> return sema_ownership_mark_move(&state, value, scopes, consumer, &diagnostics)
             return true
         }
     }
