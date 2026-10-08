@@ -21,7 +21,7 @@ fn lower_codec_method(p: MIRProgram, ty: MIRType, encode: Bool) -> LowerCodecMet
             }
             if name != p.facts.active_os -> next
         }
-        if !mir_type_same_checked_type(implementation.self_type, ty) && !lower_render_template(p, implementation.self_type, ty) -> next
+        if !mir_type_same_checked_type(implementation.self_type, ty) && !lower_nominal_impl_template(p, implementation.self_type, ty) -> next
         loop id in implementation.methods {
             loop function in p.functions {
                 if function.id != id || function.name != (if encode -> "encode" else -> "decode") -> next

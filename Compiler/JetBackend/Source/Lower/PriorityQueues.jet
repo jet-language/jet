@@ -33,7 +33,7 @@ fn lower_priority_queue_custom_order(p: MIRProgram, ty: MIRType) -> Bool Never! 
     loop implementation in p.impls {
         bound :: implementation.trait_ref ?? next
         if bound.name != "Comparable" -> next
-        if mir_type_same_checked_type(implementation.self_type, ty) || lower_render_template(p, implementation.self_type, ty) -> return true
+        if mir_type_same_checked_type(implementation.self_type, ty) || lower_nominal_impl_template(p, implementation.self_type, ty) -> return true
     }
     if ty.kind == .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> return lower_priority_queue_custom_order(p, inner)
     if lower_type_def(p, ty) == .Val(definition) {

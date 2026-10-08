@@ -293,7 +293,7 @@ fn lower_drop_stored(p: MIRProgram, m: &LowerModule, f: &LowerFunction, base: LI
         return lower_inline_drop(p, &m, &f, address, ty)
     }
     layout :: lower_repr_layout(repr) ?? return
-    drop :: lower_drop(&m, f, repr, true)
+    drop :: lower_drop(&m, repr, true)
     if drop == .Trivial -> return
     value :: lower_new_value(&f, layout, drop, ty.identity)
     lower_emit(&f, LIRInst.Load{dst: value, base: base, offset: offset})
