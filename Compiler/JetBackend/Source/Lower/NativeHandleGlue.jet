@@ -3,6 +3,24 @@
 // Only a surviving boundary caller registers these helpers. Ordinary Jet
 // clone/drop/compare/render operations continue using their existing glue.
 use jet_foundation.[MIRProgram, MIRType]
+// The shared native-export resolver supplies the concrete checked MIR type.
+// Helper interning uses the existing nominal fingerprint (declaration+args).
+fn lower_native_handle_id(m: &LowerModule, ty: MIRType, op: String) -> LIRFunctionID? {
+    helper :: "native.handle.{op}"
+    if lower_native_handle_operation(helper) == None -> return None
+    Val(lower_helper_id(&m, helper, ty))
+}
+
+fn lower_native_handle_operation(helper: String) -> String? {
+    if helper == "native.handle.clone" -> return Val("clone")
+    if helper == "native.handle.drop" -> return Val("drop")
+    if helper == "native.handle.eq" -> return Val("eq")
+    if helper == "native.handle.display" -> return Val("display")
+    if helper == "native.handle.show" -> return Val("show")
+    if helper == "native.handle.debug" -> return Val("debug")
+    None
+}
+
 
 fn lower_native_handle_operand(p: MIRProgram, f: &LowerFunction, ty: MIRType, shell: LIRValueID) -> LIRValueID? {
     if lower_repr(p, ty) == {
