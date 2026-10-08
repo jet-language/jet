@@ -573,6 +573,18 @@ const EMBEDDED_PRELUDE_PARTS: &[EmbeddedPreludePart] = &[
             "\n}\n// JET_VETTED_UNSAFE_END: jet_arrow_file_reader\n",
         )),
     },
+    // JetStd fragments share this dependency rule with crate-root fragments.
+    // CommonTypes' fields must keep their owners even without a direct Core call.
+    EmbeddedPreludePart {
+        name: "jet_std_common_types",
+        dependencies: &["jet_std_file_handles"],
+        source: EmbeddedPreludePartSource::Static(JETSTD_COMMON_TYPES_PRELUDE),
+    },
+    EmbeddedPreludePart {
+        name: "jet_std_file_handles",
+        dependencies: &[],
+        source: EmbeddedPreludePartSource::Static(FILE_HANDLES_PRELUDE),
+    },
 ];
 
 /// Where a Foundation module lands in the generated crate.
@@ -1928,7 +1940,6 @@ const CORELIB_KERNEL_PARTS: &[&str] = &[
     include_str!("../Prelude/CoreLib/JetStd/EncodingTypes.rs"),
     JETSTD_COMMON_TYPES_PRELUDE,
     MAPPED_FILE_PRELUDE,
-    FILE_HANDLES_PRELUDE,
     JETSTD_XML_OPTIONS_PRELUDE,
     include_str!("../Prelude/CommandSuite.rs"),
     // D-DBPOLICY1=A: the closed row-policy language, compiled once. `DBPluginWire`
@@ -3604,9 +3615,13 @@ fn push_corelib_prelude_body(
     out.push_str(include_str!("../Prelude/Core/FileHandleOwners.rs"));
 
     for part in CORELIB_KERNEL_PARTS {
-        if (!needs_mapped_file && (*part == MAPPED_FILE_PRELUDE || *part == FILE_HANDLES_PRELUDE))
+        if (!needs_mapped_file && *part == MAPPED_FILE_PRELUDE)
             || (!needs_shared && *part == SHARED_ROUTES_PRELUDE)
         {
+            continue;
+        }
+        if *part == JETSTD_COMMON_TYPES_PRELUDE {
+            push_prelude_dependency_closure(out, &["jet_std_common_types"]);
             continue;
         }
         // The Source Shared interop region names the resident JIT's
@@ -4983,6 +4998,25 @@ mod tests {
             "the crate-root suite adapters must ship with the kernel part that \
              defines their callees; the handle-op call site names them with no \
              `used_core` guard"
+        );
+    }
+
+    #[test]
+    fn common_types_keep_field_dependencies_without_filesystem_calls() {
+        let text_only = HashSet::from(["core.text::len".to_string()]);
+        let mut out = String::new();
+        push_corelib_prelude_with_policy(
+            &mut out,
+            &text_only,
+            false,
+            &ReleaseDevtoolsPolicy::development(),
+        );
+        assert!(out.contains(JETSTD_COMMON_TYPES_PRELUDE));
+        assert!(out.contains(FILE_HANDLES_PRELUDE));
+        assert_eq!(out.matches(FILE_HANDLES_PRELUDE).count(), 1);
+        assert!(
+            !out.contains(MAPPED_FILE_PRELUDE),
+            "unreferenced optional mapping must remain outside the text closure"
         );
     }
 

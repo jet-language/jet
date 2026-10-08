@@ -18,6 +18,29 @@ fn trivial_aot_without_scheduler_compiles() {
 }
 
 #[test]
+fn text_only_core_runtime_keeps_struct_field_dependencies() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_corelib_text_field_dependencies_{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&dir).unwrap();
+    // No process/files calls select FileHandles. ProcessSpec still lives in
+    // the emitted CommonTypes fragment, so its field owners must compile.
+    let source = r#"
+fn run() {
+    text := "key"
+    print(text.len())
+}
+"#;
+    let (code, stdout, stderr) =
+        build_and_run(&dir, "text_field_dependencies", source, &[], None);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert_eq!(stdout, "3\n");
+    assert_eq!(stderr, "");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn range_interval_proves_fixed_array_index() {
     let src = r#"
 tag Checked { deny: [Net] }
