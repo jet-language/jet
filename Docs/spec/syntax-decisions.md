@@ -1019,6 +1019,10 @@ is the three-element list; `[[Int]]{xs}` is a one-element list when
 `xs: [Int]` and the whole value when `xs: [[Int]]`; `[String:Int]{m}` is the
 map `m`. Spreads (`...xs`) and inferred-head bodies (`{ … }`, `.{ … }`) always
 use element notation.
+For a scalar conversion, the head is the result type; a nonliteral body is
+checked in its own type before conversion. Thus `Int{I64{value}}` produces an
+`Int`, and `U8{value %% 256}` keeps the inner arithmetic in `Int` rather than
+forcing `256` into a byte operand.
 
 **S30 — Enums**:
 

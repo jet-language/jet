@@ -189,3 +189,9 @@ fn duplicate_operator_pair_is_coherence_error_not_method_name_collision() {
     let codes = err_codes(include_str!("../../../tests/ui/operator_duplicate_hook.jet"));
     assert_eq!(codes, ["E0908"], "unexpected errors: {codes:?}");
 }
+
+#[test]
+fn scalar_conversion_heads_do_not_contextualize_arithmetic_operands() {
+    let codes = err_codes(include_str!("../../../Compiler/JetSema/Tests/ScalarConversionFixtures.jet"));
+    assert!(codes.is_empty(), "unexpected errors: {codes:?}");
+}
