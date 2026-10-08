@@ -1,0 +1,14 @@
+# Original tests/semindex.rs:818-925; source bytes and predicates retained.
+# PENDING-GRAMMAR(batch-four); PENDING-SAME-HEAD; not a runtime PASS.
+fixture: semindex_identity_stable_across_reorder.fixture
+# Approved ORIGINAL-ALGORITHM helper: compare SORTED arrays; never assert JSON emission order.
+copy: before.source identity_reorder.jet
+step: jet inspect semindex identity_reorder.jet --json
+stdout: file before.json
+exit: 0
+copy: after.source identity_reorder.jet
+step: jet inspect semindex identity_reorder.jet --json
+stdout: file after.json
+exit: 0
+step: jet test IdentityClaims.jet
+exit: 0

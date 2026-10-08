@@ -1,0 +1,8 @@
+# Original tests/semindex.rs:649-691; source bytes and predicates retained.
+# PENDING-GRAMMAR(batch-four); PENDING-SAME-HEAD; not a runtime PASS.
+fixture: tracked_float_symbol_exposes_its_binding_site.fixture
+step: jet inspect semindex tracked_float_binding.jet --json
+json: stdout doc $.semindex.references[?name="origin"][?fact!=null][0].fact.name = "origin"
+json: stdout doc $.semindex.references[?name="origin"][?fact!=null][0].fact.kind = "Origin"
+json: stdout doc $.semindex.references[?name="origin"][?fact!=null][0].fact.type = "OriginInfo?"
+stdout: ~ "\"fact\":{\"name\":\"origin\",\"kind\":\"Origin\",\"type\":\"OriginInfo?\"}" # original predicate
