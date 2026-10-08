@@ -22,6 +22,74 @@ fn source_owned_hostname_effects_are_environment_and_file_read() {
         assert_eq!(core_effect_leaf(module, method), Some("FS.Read"));
     }
 }
+
+#[test]
+fn civil_zone_rows_keep_truthful_precise_effects() {
+    use jet_foundation::Effects::{core_effect, core_effect_leaf, Effect};
+    use jet_foundation::Syntax::{core_call, CoreCapabilityKind};
+
+    for (method, effect, leaf) in [
+        ("__zone_env", Some(Effect::Env), None),
+        ("__zone_file_bytes", Some(Effect::FS), Some("FS.Read")),
+        ("__embedded_zone_bytes", None, None),
+        ("zone", Some(Effect::FS), Some("FS.Read")),
+        ("parse_zoned", Some(Effect::FS), Some("FS.Read")),
+        ("utc", None, None),
+        ("parse_rfc3339", None, None),
+        ("now", Some(Effect::Time), None),
+        ("sleep_until", Some(Effect::Time), Some("Time.Wait")),
+    ] {
+        let row = core_call("core.time", method)
+            .unwrap_or_else(|| panic!("missing core.time.{method} row"));
+        assert_eq!(row.effect(), effect, "core.time.{method}");
+        assert_eq!(row.effect_leaf(), leaf, "core.time.{method}");
+        assert_eq!(core_effect("core.time", method), effect, "core.time.{method}");
+        assert_eq!(core_effect_leaf("core.time", method), leaf, "core.time.{method}");
+        assert_eq!(
+            row.capability().kind,
+            if effect.is_some() {
+                CoreCapabilityKind::NativeRequired
+            } else {
+                CoreCapabilityKind::Pure
+            },
+            "core.time.{method}",
+        );
+        assert!(row.capability().is_well_formed(), "core.time.{method}");
+    }
+    let process = core_call("core.process", "__with_directory_raw")
+        .expect("held process directory row");
+    assert_eq!(process.effect(), Some(Effect::FS));
+    assert_eq!(process.effect_leaf(), Some("FS.Read"));
+}
+
+#[test]
+fn named_zone_lookup_requires_environment_and_read_effects() {
+    let source = include_str!("ui/time_zone_effects.jet");
+    let diagnostics = jet::compile(source).expect_err("zone lookup must not hide either effect");
+    for function in ["pure", "env_only", "read_only"] {
+        assert!(
+            diagnostics.iter().any(|diagnostic|
+                matches!(diagnostic.code.as_str(), "E0740" | "E3403")
+                    && diagnostic.what.contains(function)),
+            "{function} must report its effect ceiling: {diagnostics:#?}",
+        );
+    }
+    assert!(
+        diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error)
+            .all(|diagnostic| {
+                matches!(diagnostic.code.as_str(), "E0740" | "E3403")
+                    && ["pure", "env_only", "read_only"]
+                        .iter()
+                        .any(|function| diagnostic.what.contains(function))
+            }),
+        "only the named user effect ceilings may fail: {diagnostics:#?}",
+    );
+    let source = include_str!("fixtures/time_zone_effects_truthful.jet");
+    jet::compile(source).expect("truthful zone bounds and pure numeric-offset parsing must compile");
+}
+
 #[test]
 fn callbacks_entry_effects_are_only_io() {
     let entry = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

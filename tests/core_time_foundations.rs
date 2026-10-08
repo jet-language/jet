@@ -160,31 +160,3 @@ fn run() {
     );
 }
 
-#[test]
-fn named_zone_lookup_requires_environment_and_read_effects() {
-    let source = r#"
-use core.time as time
-fn pure(name: String) -[]> Zone TimeError! { time.zone(name) }
-fn env_only(name: String) -[Env]> Zone TimeError! { time.zone(name) }
-fn read_only(name: String) -[FS.Read]> ZonedDateTime TimeError! { time.parse_zoned(name) }
-fn run() {}
-"#;
-    let diagnostics = jet::compile(source).expect_err("zone lookup must not hide either effect");
-    for function in ["pure", "env_only", "read_only"] {
-        assert!(
-            diagnostics.iter().any(|diagnostic|
-                matches!(diagnostic.code.as_str(), "E0740" | "E3403")
-                    && diagnostic.what.contains(function)),
-            "{function} must report its effect ceiling: {diagnostics:#?}",
-        );
-    }
-    let source = r#"
-use core.time as time
-fn configured(name: String) -[Env, FS.Read]> Zone TimeError! { time.zone(name) }
-fn parsed(name: String) -[Env, FS.Read]> ZonedDateTime TimeError! { time.parse_zoned(name) }
-fn fixed() -[]> Zone Never! { time.utc() }
-fn timestamp(text: String) -[]> DateTime TimeError! { time.parse_rfc3339(text) }
-fn run() {}
-"#;
-    jet::compile(source).expect("truthful zone bounds and pure numeric-offset parsing must compile");
-}

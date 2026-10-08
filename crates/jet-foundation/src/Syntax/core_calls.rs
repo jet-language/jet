@@ -90,6 +90,16 @@ const fn effect_for(module: &str, method: &str) -> Option<Effect> {
     if same_text(module, "core.data") && same_text(method, "__host_path_is_file") {
         return Some(Effect::FS);
     }
+    // Civil zone lookup reads environment/files, not the clock. Keep these
+    // facts aligned with the Jet registry and their precise FS.Read leaves.
+    if same_text(module, "core.time") {
+        if same_text(method, "__zone_env") {
+            return Some(Effect::Env);
+        }
+        if one_of(method, &["zone", "parse_zoned", "__zone_file_bytes"]) {
+            return Some(Effect::FS);
+        }
+    }
     if (same_text(module, "core.time")
         && one_of(
             method,
@@ -112,14 +122,13 @@ const fn effect_for(module: &str, method: &str) -> Option<Effect> {
                 "from_unix_nanoseconds",
                 "parse_iso_week_date",
                 "from_iso_week",
-                "parse_zoned",
                 "datetime",
-                "zone",
                 "utc",
                 "zoned",
                 "zoned_local",
                 "days_in_month",
                 "is_leap_year",
+                "__embedded_zone_bytes",
             ],
         ))
         || (same_text(module, "core.math.random") && same_text(method, "rng"))
@@ -491,6 +500,11 @@ const fn default_capability(
 /// by this module, so a call cannot acquire a second sema-only key.
 const fn effect_leaf_for(module: &str, method: &str) -> Option<&'static str> {
     if same_text(module, "core.process") && same_text(method, "__with_directory_raw") {
+        return Some("FS.Read");
+    }
+    if same_text(module, "core.time")
+        && one_of(method, &["zone", "parse_zoned", "__zone_file_bytes"])
+    {
         return Some("FS.Read");
     }
     if same_text(module, "core.time") && one_of(method, &["sleep", "sleep_until"]) {
