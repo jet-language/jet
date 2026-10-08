@@ -236,7 +236,7 @@ fn kit_steps_file_predicate(bytes: [U8], mode: String, value: String, extra: Str
         end := start
         loop end < bytes.len() && bytes[end] != (U8{10}) -> end += 1
         content_end :: if end < bytes.len() && end > start && bytes[end - 1] == (U8{13}) -> end - 1 else -> end
-        if kit_steps_byte_index(bytes, needle, start, content_end, false) == Val(start) && kit_steps_byte_index(bytes, tail, start, content_end, false) != None -> return true
+        if (kit_steps_byte_index(bytes, needle, start, content_end, false) ?? -1) == start && kit_steps_byte_index(bytes, tail, start, content_end, false) != None -> return true
         start = end + 1
     }
     false
