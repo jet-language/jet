@@ -2199,6 +2199,19 @@ retention, NUL/Unicode Text, ownership and canonical narrowing stop modes
 against actual providers. Its stdout is an expectation; execution, native
 admission and old-body suppression remain composition checks.
 
+`ConditionHandles.jet` provides named handle clone/drop on the existing
+runtime-native Condition48 returned by `jet_rt_native_condition_new`.
+Cloning retains the same protocol, and dropping the last reference frees it;
+it never copies FIFO waiters, pending notifications, epoch or mutex state.
+This matches `MathTaskMem.rs:3081-3099`'s shared protocol semantics without
+reinterpreting its Rust Arc/Box representation. The named null drop is inert.
+`ConditionHandlesWitness.c` uses the real native factory and notify kernels
+to observe clone identity, shared pending notifications after partial drops
+and exact-once final release under `--wrap=jet_rt_free`. Its stdout fixture
+is an expectation, not execution evidence. Named CAbi nominal route
+admission and seed-route regeneration must happen in the composed native
+unit; these providers do not introduce a second factory or protocol.
+
 ### Native UI scalar and record carriers
 
 `UiCarriersABI.jet` in JetBackend/Source defines opaque native-private
