@@ -1047,6 +1047,17 @@ pub(crate) fn ambient_core_call(
     _resolved_ret: Option<Type>,
     _sink: Option<&mut jet_codegen::Comptime::DevSink>,
 ) -> Option<Result<CtValue, Diagnostic>> {
+    // Reserved Core source leaves retain this one SQLite host implementation.
+    let method = match (module, method) {
+        ("core.db", "__open") => "open",
+        ("core.db", "__open_memory") => "open_memory",
+        ("core.db", "__pool") => "pool",
+        ("core.db", "__policy") => "policy",
+        ("core.db", "__policy_audit") => "policy_audit",
+        ("core.db", "__transaction") => "transaction",
+        ("core.db", "__migrate") => "migrate",
+        _ => method,
+    };
     if module == "core.db" && (method == "migrate" || method == "transaction") {
         let [scope, CtValue::Str(label), steps] = args.as_slice() else {
             return Some(Err(db_diag(

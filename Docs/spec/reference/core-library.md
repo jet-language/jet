@@ -3590,6 +3590,13 @@ Pool receipts remain opaque values produced by a pool. Their equality and
 Show/Display/Debug projection are source-owned: each projection preserves the
 `db.pool lifecycle=...` text and the complete ordered set of pool counters.
 
+`open`, `open_memory`, `pool`, `policy`, `policy_audit`, `transaction`, and
+`migrate` enter through ordinary Core source functions. Their reserved
+Core-internal provider leaves retain the existing SQLite host bridge during
+native-driver admission; this changes neither public signatures nor engine
+identity. Pool `max` remains a required labeled argument. Transaction and
+migration retain both `DB` and `Time.Wait`, including at the provider boundary.
+
 The existing registered Rust SQLite bridge remains the raw host boundary under
 the Jet source policy until runtime cutover. The separate CFFI `__Driver`
 adapter is held; it is not part of this source-owned Core integration.

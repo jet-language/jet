@@ -250,7 +250,7 @@ fn core_call_effect_leaf_for(module_name: String, member: String) -> String? {
         (core_call_one_of(module_name, [String]{
             "core.encoding.json", "core.encoding.jsonl", "core.encoding.csv", "core.encoding.xml", "core.encoding.cbor"
         }) && core_call_one_of(member, [String]{"reader", "writer"})) || (module_name == "core.encoding.csv" && member == "query") -> Val("Time.Wait")
-        module_name == "core.db" && core_call_one_of(member, [String]{"transaction", "migrate"}) -> Val("Time.Wait")
+        module_name == "core.db" && core_call_one_of(member, [String]{"transaction", "__transaction", "migrate", "__migrate"}) -> Val("Time.Wait")
         module_name == "core.jobs" && core_call_one_of(member, [String]{"wait", "poll"}) -> Val("Time.Wait")
         module_name == "core.service" && core_call_one_of(member, [String]{
             "send", "send_durable", "receive", "endpoint_send", "endpoint_receive", "workflow_sleep",

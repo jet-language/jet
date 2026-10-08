@@ -44,7 +44,7 @@ const PRELUDE_DEPENDENCY_EDGES: &[(&str, &[&str])] = &[
     ("core.data.sketch.hll", &["core.data", "core.math", "core.data.sketch"]),
     ("core.data.sketch.reservoir", &["core.data"]),
     ("core.data.sketch.tdigest", &["core.data"]),
-    ("core.db", &["core.encoding"]),
+    ("core.db", &["core.encoding", "core.mem"]),
     ("core.email", &["core.crypto", "core.crypto.expert", "core.encoding.base64", "core.encoding.hex", "core.net", "core.sys", "core.text"]),
     ("core.encoding", &["core"]),
     ("core.encoding.base32", &["core.encoding"]),
