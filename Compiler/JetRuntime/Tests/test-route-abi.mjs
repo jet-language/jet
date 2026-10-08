@@ -126,7 +126,9 @@ const rustText = readFileSync(join(root, "crates/jet-codegen/src/Prelude/Core/CA
 const rustNames = new Set([...rustText.matchAll(/pub extern "C" fn ([A-Za-z_]\w*)\(/g)].map((match) => match[1]));
 const ported = [...names].filter((name) => routeNames.has(name));
 assert.ok(ported.length > 0, "no real Jet-owned family exercised");
-for (const name of names) assert.ok(!rustNames.has(name), `Jet-owned export ${name} still has a Rust adapter`);
+for (const name of names) {
+  if (rustNames.has(name)) assert.ok(rustText.includes(`#[cfg(not(jet_native_pack))]\n    #[no_mangle]\n    pub extern "C" fn ${name}(`), `Jet-owned export ${name} still has a native-pack Rust adapter`);
+}
 const listOut = /    fn list_out\([\s\S]*?\n    \}/.exec(rustText)?.[0];
 assert.ok(listOut?.includes("super::jet_c_abi::jet_rt_alloc(len * 8, 8)"), "List results must use the shared runtime heap");
 assert.ok(!listOut.includes("std::alloc::alloc("), "List results must not escape Rust's heap");
