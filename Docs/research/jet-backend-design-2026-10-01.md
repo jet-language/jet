@@ -1598,14 +1598,24 @@ combinators and four view constructors. Slice/view bounds use the Jet-owned
 called by these paths. Two LoopIter adapter metadata rows still exist, so this
 is path provenance, not proof that every generated adapter has been retired.
 
-Eight providers remain live: the RangeCursor destructor and four legacy
-numeric LoopRange operations call handwritten runtime ABIs; the two range
-contains operations and Regex.count use generated Rust adapters. The direct
-Range-value iterator in `Lower/Iter.jet` is a different path and does not close
-the legacy LoopRange instructions in `Lower/Lower.jet:1750-1771`. Nor does a
-zero literal-call census prove closure: those instructions select their runtime
-symbols dynamically and the destructor carries a Runtime drop descriptor.
-The consistency checker records those dynamic/drop call paths explicitly.
+Six formerly live providers now have Jet exports: the RangeCursor destructor,
+four numeric LoopRange operations and inline range_contains. The LoopRange
+boundary retains borrowed exact-Int inputs and fresh exact-Int value results;
+the private cursor keeps native current/end/step plus exclusive/done words.
+Both stride directions and inclusive extrema are preserved. Checked step
+overflow ends iteration without replacing current or raising an overflow stop.
+The Rust seed's five handwritten cursor C exports are excluded from native
+packs in the same ownership cutover as their Jet definitions.
+
+Named Range.contains and Regex.count remain live generated adapters until a
+canonical native handle input contract is available. The true Regex count
+kernel is `CoreLib/JetStd/Regex.rs:486`, not the older inventory's accidental
+match of Bits::count at `Core/Collections.rs:147`. No Rust Arc<RegexProgram>
+layout or guessed source Range offsets are interpreted by a Jet provider.
+The direct Range-value iterator in `Lower/Iter.jet` is a different path from
+legacy LoopRange instructions in `Lower/Lower.jet:1750-1771`. Zero literal calls
+alone cannot prove closure: dynamic symbols and Runtime drop descriptors are
+tracked explicitly by the consistency checker.
 
 Lazy cursor initialization and advancement may invoke user callbacks. Both
 are can-stop MIR operations: their results are usable only on the immediately
