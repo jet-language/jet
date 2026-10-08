@@ -31,12 +31,22 @@ export function parseRuntimeExports(source, path) {
   // Read the complete declaration so a generic, write parameter, or failure
   // suffix cannot be silently erased before validation.
   for (const match of source.matchAll(/^#Export\(c\)\s+(?:pub\s+)?fn\s+([A-Za-z_]\w*)\s*([^{}]*?)\{/gm)) {
-    const [, name, signature] = match;
-    const parsed = /^\(([\s\S]*)\)\s*([\s\S]*)$/.exec(signature.trim());
-    if (!parsed) throw new Error(`unparsed runtime #Export(c) ${name} signature in ${path}`);
+    const [, name, raw] = match;
+    const signature = raw.trim();
+    let depth = 0;
+    let close = -1;
+    if (signature.startsWith("(")) {
+      for (let index = 0; index < signature.length; index++) {
+        if (signature[index] === "(") depth++;
+        else if (signature[index] === ")" && --depth === 0) { close = index; break; }
+      }
+    }
+    if (close < 0) throw new Error(`unparsed runtime #Export(c) ${name} signature in ${path}`);
     if (exports.has(name)) throw new Error(`duplicate runtime #Export(c) ${name}`);
-    const [, params, suffix] = parsed;
-    exports.set(name, { params: params.trim() ? params.split(",").map((param) => param.trim()).filter(Boolean) : [], suffix: suffix.trim(), path });
+    const params = signature.slice(1, close).trim();
+    const items = params ? params.split(",").map((param) => param.trim()) : [];
+    if (items.at(-1) === "") items.pop(); // A single trailing comma is valid.
+    exports.set(name, { params: items, suffix: signature.slice(close + 1).trim(), path });
   }
   return exports;
 }
@@ -56,7 +66,8 @@ export function validateRuntimeRoute(adapter, definition) {
   const actual = definition.params.map((param) => /^[A-Za-z_]\w*\s*:\s*(I64|U64|F64|Bool|U8)$/.exec(param)?.[1]);
   const suffix = definition.suffix;
   const result = suffix === "" ? null : /^->\s*(I64|U64|F64|Bool|U8)$/.exec(suffix)?.[1];
-  const valid = actual.length === expected.length && actual.every((type, index) => accepts(expected[index], type)) && (adapter.result.ret ? accepts(adapter.result.ret, result) : suffix === "");
+  const unit = suffix === "" || /^->\s*\(\s*\)$/.test(suffix);
+  const valid = actual.length === expected.length && actual.every((type, index) => accepts(expected[index], type)) && (adapter.result.ret ? accepts(adapter.result.ret, result) : unit);
   if (!valid) {
     const wanted = `(${expected.join(", ")})${adapter.result.ret ? ` -> ${adapter.result.ret}` : ""}`;
     const found = `(${definition.params.join(", ")})${suffix ? ` ${suffix}` : ""}`;
