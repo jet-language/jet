@@ -766,6 +766,18 @@ the complete source/configuration/profile/target/implementation/artifact/run
 identity and checked derivation references for live snapshots and replay;
 readers reject altered identities, row IDs, derivations, and noncanonical bytes.
 
+Live inspection consumes only the runtime's private `jet.live.v1` snapshot.
+Its no-follow read retains one file descriptor, checks its identity, owner and
+private permissions, and bounds the bytes to 1 MiB. Linux process start identity
+and the two-second publication age bind it to the requested process. The closed
+snapshot schema bounds values, tasks and channels to 4096 rows; event observations
+retain exactly fifteen payload-free fields, at most 256 records, strictly
+increasing sequences, and the runtime's closed enums and unavailable-count sentinel.
+Text and JSON share this validated snapshot, including published rendered values
+and sorted shape identities. Optional decision ledgers use the optimizer's existing
+authenticated codec with a 512 KiB transport bound; absence is explicitly
+`unavailable`, not evidence of a compiler decision. No process memory is read.
+
 The CLI's `inspect.accel` status projects typed authenticated runtime receipt
 rows separately from static vector and gate facts. Missing measurements stay
 null; a source proof alone never marks an acceleration selected. The shared
