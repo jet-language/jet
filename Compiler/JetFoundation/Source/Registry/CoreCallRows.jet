@@ -1,6 +1,6 @@
 // BEGIN GENERATED CORE CALL ROWS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 8bb854e8ba3d1e3bf804931ba515c4504577a616dec3e662ab9f8d4c50154592
+// Source SHA-256: 8f7ffba5f0e22c28478f433ef15f0958b050f4779bc8d6e2003a2f1fa0d18ac4
 // Source: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs (TIR_CORE_CALL_RECORDS, appended in declaration order)
 // Source SHA-256: 2f64da0be95263cd190b708d590146678116640045017be65fe911450c23e7c1
 // Core ABI rows keep Core.jet order followed by the TIR extension order.
@@ -73,6 +73,8 @@ pub CORE_CALLS :: prep { [CoreCallRecord]{
     core_call_new("core.encoding", "__bytes_view", "jet_raw_bytes_view", true, [Bool]{true}),
     core_call_with_interpreter_route(core_call_with_native_int_result(core_call_new("core.encoding", "__coerce_now", "jet_raw_json_coerce_now", true, [Bool]{})), CoreCallInterpreterRoute.Ambient),
     core_call_with_interpreter_route(core_call_new("core.encoding", "__coerce_emit", "jet_raw_json_coerce_emit", true, [Bool]{true}), CoreCallInterpreterRoute.Ambient),
+    core_call_with_interpreter_route(core_call_new("core.encoding", "__query_read_bounded", "jet_data_query_read_bounded", true, [Bool]{true, false}), CoreCallInterpreterRoute.Ambient),
+    core_call_with_interpreter_route(core_call_new("core.encoding", "__query_validate_fields", "jet_data_query_validate_fields_raw", true, [Bool]{true, true}), CoreCallInterpreterRoute.Ambient),
     core_call_source_owned("core.tasks", "interval", [Bool]{false}),
     core_call_with_interpreter_route(core_call_new("core.tasks", "__interval_ms", "jet_std::interval", true, [Bool]{false}), CoreCallInterpreterRoute.Ambient),
     core_call_with_interpreter_route(core_call_new("core.tasks", "after", "jet_std::after_value", true, [Bool]{false, false}), CoreCallInterpreterRoute.Ambient),
@@ -562,7 +564,7 @@ pub CORE_CALLS :: prep { [CoreCallRecord]{
     core_call_new("core.encoding.jsonl", "first", "jet_std_jsonl_first", true, [Bool]{true}),
     core_call_new("core.encoding.csv", "parse", "jet_ring_csv_parse", true, [Bool]{true, true, false, false}),
     core_call_without_direct_aot(core_call_new("core.encoding.csv", "rows", "jet_ring_csv_rows", true, [Bool]{true, true, false, false})),
-    core_call_with_interpreter_route(core_call_new("core.encoding.csv", "query", "jet_enc_csv_query", true, [Bool]{true, true}), CoreCallInterpreterRoute.Ambient),
+    core_call_with_interpreter_route(core_call_source_owned("core.encoding.csv", "query", [Bool]{true, true}), CoreCallInterpreterRoute.Ambient),
     core_call_new("core.encoding.json", "reader", "jet_enc_json_reader", true, [Bool]{false, true}),
     core_call_new("core.encoding.json", "writer", "jet_enc_json_writer", true, [Bool]{false, true, true}),
     core_call_new("core.encoding.jsonl", "reader", "jet_enc_jsonl_reader", true, [Bool]{false, true}),
@@ -2040,7 +2042,7 @@ pub CORE_MODULE_EXPORTS :: [CoreModuleExportNames]{
     CoreModuleExportNames{module_name: "core.encoding.base64", members: [String]{"decode", "decode_url", "encode", "encode_url", "encode_url_padded", "decode_padded", "pad", "unpad", "is_base64", "b64encode", "standard_b64encode", "urlsafe_b64encode", "b64decode", "standard_b64decode", "urlsafe_b64decode", "b16encode", "b16decode", "b32encode", "b32decode", "b32hexencode", "b32hexdecode", "a85encode", "a85decode", "b85encode", "b85decode", "z85encode", "z85decode", "encodebytes", "decodebytes", "b2a_base64", "a2b_base64", "Base64Error"}, type_exports: [String]{"Base64Error"}},
     CoreModuleExportNames{module_name: "core.encoding.binary", members: [String]{"pack_u8", "pack_i8", "pack_u16le", "pack_u16be", "pack_u32le", "pack_u32be", "pack_u64le", "pack_u64be", "unpack_u8", "unpack_u16le", "unpack_u16be", "unpack_u32le", "unpack_u32be", "unpack_u64le", "unpack_u64be", "sign_extend", "pack_f64le", "pack_f64be", "unpack_f64le", "unpack_f64be", "calcsize", "pack", "unpack", "iter_unpack", "BinaryError"}, type_exports: [String]{"BinaryError"}},
     CoreModuleExportNames{module_name: "core.encoding.cbor", members: [String]{"CBORError", "CBORErrorKind", "CBOROptions", "CBORReader", "CBORWriter", "decode", "parse", "reader", "to_bytes", "to_bytes_canonical", "writer"}, type_exports: [String]{"CBORReader", "CBORWriter", "CBOROptions", "CBORError", "CBORErrorKind"}},
-    CoreModuleExportNames{module_name: "core.encoding.csv", members: [String]{"CSVReader", "CSVRow", "CSVWriter", "decode", "parse", "query", "reader", "rows", "to_string", "writer", "dict_rows", "dict_get", "dict_get_or", "write_dict", "fieldnames", "DictRow"}, type_exports: [String]{"CSVReader", "CSVWriter", "CSVRow", "DictRow"}},
+    CoreModuleExportNames{module_name: "core.encoding.csv", members: [String]{"CSVReader", "CSVRow", "CSVWriter", "decode", "parse", "query", "reader", "rows", "to_string", "writer", "dict_rows", "dict_get", "dict_get_or", "write_dict", "fieldnames", "DictRow"}, type_exports: [String]{"CSVReader", "CSVWriter", "CSVRow", "DictRow", "__QueryRead"}},
     CoreModuleExportNames{module_name: "core.encoding.hex", members: [String]{"HexError", "decode", "encode", "encode_prefixed", "encode_upper", "is_hex", "hexlify", "unhexlify", "b2a_hex", "a2b_hex", "crc_hqx", "crc32", "b2a_base64", "a2b_base64", "b2a_qp", "a2b_qp", "b2a_uu", "a2b_uu", "encode_sep", "dump"}, type_exports: [String]{"HexError"}},
     CoreModuleExportNames{module_name: "core.encoding.ini", members: [String]{"Pair", "Section", "Ini", "empty", "parse", "to_string", "sections", "has_section", "has_option", "get", "get_or", "get_int", "get_bool", "get_float", "items", "options", "set", "remove_option", "remove_section", "defaults", "INIError"}, type_exports: [String]{"Pair", "Section", "Ini", "INIError"}},
     CoreModuleExportNames{module_name: "core.encoding.json", members: [String]{"JSONReader", "JSONWriter", "canonical", "decode", "dump", "dumps", "events", "load", "loads", "parse", "parse_allow_duplicates", "patch", "patch_with_limits", "pointer", "reader", "reader_allow_duplicates", "to_string", "to_string_pretty", "writer"}, type_exports: [String]{"JSONReader", "JSONWriter"}},

@@ -2422,6 +2422,11 @@ impl<'a> Checker<'a> {
         let checked_csv = source_alias
             .and_then(jet_foundation::CoreModuleExports::core_source_module_by_alias)
             .is_some_and(|source| source.module == "core.encoding.csv");
+        if module == "core.encoding" && matches!(name, "__query_read_bounded" | "__query_validate_fields") && !checked_csv {
+            self.diags.push(Diagnostic::error("E0510", "CSV query leaves are compiler-private",
+                "raw CSV query mechanics are restricted to Core CSV source", "use csv.query<T>", Some(span)));
+            return None;
+        }
         let checked_backing_source = source_alias
             == Some(jet_foundation::CoreSourceParts::CORE_ENCODING_STREAM_ALIAS)
             || checked_csv

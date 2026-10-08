@@ -1319,3 +1319,13 @@ Known-answer source tests cover definite/indefinite nesting, chunked text,
 all float widths, item/total bounds, map order, and flush/finish behavior.
 The checked shared allocation helper distinguishes heap-ceiling failure
 from allocator refusal; existing Bool callers still map either to false.
+
+Typed `csv.query<T>` owns the bounded-input and validation policy in source.
+Its raw read leaf receives the caller's bound, opens once, reports the open
+file's metadata size, and reads at most bound+1 bytes (without touching an
+already oversized file). Source checks the 512 MiB metadata bound before the
+growth bound, validates UTF-8 once, then transfers the allocation without a
+copy. CSV syntax and header/SQL-field validation precede typed decode errors;
+successful typed rows reuse `rows.query(SQL)`, never a second SQL engine.
+The private plain `__QueryRead` carrier keeps the path-based Ambient route,
+so the input policy does not introduce an interpreter-only file-handle gap.

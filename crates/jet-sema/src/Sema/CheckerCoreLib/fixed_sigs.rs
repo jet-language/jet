@@ -1490,6 +1490,14 @@ fn core_fixed_sig_impl(
         ("core.data.plot", "__plot_aggregate_none") => Some((vec![], Some(Type::Named("JetDataPlotAggregate".to_string())))),
         ("core.encoding", "__coerce_now") => Some((vec![], Some(Type::Int))),
         ("core.encoding", "__coerce_emit") => Some((vec![(read, Type::String)], Some(unit.clone()))),
+        ("core.encoding", "__query_read_bounded") => Some((
+            vec![(read, Type::String), (read, Type::Int)],
+            Some(result_ty(Type::Named("__QueryRead".to_string()), Type::String)),
+        )),
+        ("core.encoding", "__query_validate_fields") => Some((
+            vec![(read, Type::List(Box::new(Type::String))), (read, Type::Named("SQL".to_string()))],
+            Some(result_ty(unit.clone(), Type::String)),
+        )),
         ("core.encoding", "__read_byte") => Some((
             vec![(AccessConvention::Write, Type::Named("FileReader".to_string()))],
             Some(result_ty(Type::Option(Box::new(u8_ty())), Type::Named("EncodingCause".to_string()))),

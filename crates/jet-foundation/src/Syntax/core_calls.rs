@@ -231,6 +231,9 @@ const fn effect_for(module: &str, method: &str) -> Option<Effect> {
             Some(Effect::Net)
         };
     }
+    if same_text(module, "core.encoding") && same_text(method, "__query_read_bounded") {
+        return Some(Effect::FS);
+    }
     if ((same_text(module, "core.encoding.json")
         || same_text(module, "core.encoding.jsonl")
         || same_text(module, "core.encoding.csv")
@@ -736,6 +739,9 @@ const fn effect_leaf_for(module: &str, method: &str) -> Option<&'static str> {
         || (same_text(module, "core.http.server")
             && one_of(method, &["serve", "serve_once", "serve_once_listener", "__serve_once", "__serve_once_listener", "__serve"]))
     {
+        return Some("Time.Wait");
+    }
+    if same_text(module, "core.encoding") && same_text(method, "__query_read_bounded") {
         return Some("Time.Wait");
     }
     if ((same_text(module, "core.encoding.json")
@@ -1583,7 +1589,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 8bb854e8ba3d1e3bf804931ba515c4504577a616dec3e662ab9f8d4c50154592
+// Source SHA-256: 8f7ffba5f0e22c28478f433ef15f0958b050f4779bc8d6e2003a2f1fa0d18ac4
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -1991,6 +1997,8 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.encoding", "__bytes_view", "jet_raw_bytes_view", true, &[true]),
     CoreCallRecord::new("core.encoding", "__coerce_now", "jet_raw_json_coerce_now", true, &[]).with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.encoding", "__coerce_emit", "jet_raw_json_coerce_emit", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.encoding", "__query_read_bounded", "jet_data_query_read_bounded", true, &[true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.encoding", "__query_validate_fields", "jet_data_query_validate_fields_raw", true, &[true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::source_owned("core.tasks", "interval", &[false]),
     CoreCallRecord::new("core.tasks", "__interval_ms", "jet_std::interval", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.tasks", "after", "jet_std::after_value", true, &[false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
@@ -2480,7 +2488,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.encoding.jsonl", "first", "jet_std_jsonl_first", true, &[true], ),
     CoreCallRecord::new( "core.encoding.csv", "parse", "jet_ring_csv_parse", true, &[true, true, false, false], ),
     CoreCallRecord::new( "core.encoding.csv", "rows", "jet_ring_csv_rows", true, &[true, true, false, false], ) .without_direct_aot(),
-    CoreCallRecord::new( "core.encoding.csv", "query", "jet_enc_csv_query", true, &[true, true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::source_owned("core.encoding.csv", "query", &[true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.encoding.json", "reader", "jet_enc_json_reader", true, &[false, true]),
     CoreCallRecord::new("core.encoding.json", "writer", "jet_enc_json_writer", true, &[false, true, true]),
     CoreCallRecord::new("core.encoding.jsonl", "reader", "jet_enc_jsonl_reader", true, &[false, true]),

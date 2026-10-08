@@ -5,6 +5,7 @@ use __core_encoding_stream as stream
 use core.encoding as encoding
 use core.files.[FileReader, FileWriter]
 use core.mem as mem
+use core.data.[Query]
 
 fn syntax_error(format: EncodingFormat, offset: Int, line: Int, column: Int, path: String, reason: String) -> EncodingError Never! {
     {
@@ -42,8 +43,8 @@ fn unsupported_error(format: EncodingFormat, offset: Int, reason: String) -> Enc
 // Typed `decode<T>` owns native header-to-record and row-error policy here.
 // The streaming reader and writer use bounded source state machines over
 // existing registered file leaves (D-ENCSTREAM-SURFACE1).
-// `query` is a deliberately small SQL-shaped selector over caller-provided
-// filesystem input; it does not add a second query engine.
+// `query<T>` reads a bounded UTF-8 table, validates its header, decodes all
+// typed rows and reuses the same SQL query door as an in-memory list.
 pub struct CSVRow {
     pub line: Int
     pub fields: [String]
@@ -288,61 +289,37 @@ fn csv_cell(value: DataTree) -> String Never! {
 }
 
 
-/// Tiny SQL: `SELECT *` (all rows as arrays) or `SELECT COUNT(*)`.
-pub fn query(path: String, sql: String) -[FS]> DataTree EncodingError! {
-    text :: host_read_text(path) ?? return Err(syntax_error(EncodingFormat.CSV, 0, 1, 1, "", "missing csv"))
-    physical :: parse_rows(text, true)
-    q := trim_ascii(ascii_fold(sql))
-    if q == "select count(*)" || q == "select count(*) from csv" -> return Ok(DataTree.Int(physical.len()))
-    if q != "select *" && q != "select * from csv" {
-        return Err(unsupported_error(EncodingFormat.CSV, 0, "CSV query supports only SELECT * and SELECT COUNT(*)"))
-    }
-    items := [DataTree]{}
-    loop row in physical {
-        fields := [DataTree]{}
-        loop field in row.fields -> &fields.push(DataTree.Text(field))
-        &items.push(DataTree.Array(fields))
-    }
-    Ok(DataTree.Array(items))
+/// Typed CSV query with the same SQL grammar and result carrier as rows.query.
+pub fn query<T: [Decode, Encode]>(path: String, sql: SQL) -[FS]> Query<T> [FieldError]! {
+    text :: query_text(path) ?? return Err(err)
+    physical :: typed_records(text) ?? return Err([FieldError]{FieldError{path: "", reason: err}})
+    header :: if physical.len() == 0 -> [String]{} else -> physical[0]
+    encoding.__query_validate_fields(header, sql) ?? return Err([FieldError]{FieldError{path: "", reason: err}})
+    values :: decode<T>(text) ?? return Err(err)
+    values.query(sql)
 }
 
-fn trim_ascii(text: String) -> String Never! {
-    raw :: text.bytes()
-    start := 0
-    end := raw.len()
-    loop start < end {
-        n :: raw[start]
-        if n == 32 || n == 9 || n == 10 || n == 13 {
-            start += 1
-            next
-        }
-        break
-    }
-    loop end > start {
-        n :: raw[end - 1]
-        if n == 32 || n == 9 || n == 10 || n == 13 {
-            end -= 1
-            next
-        }
-        break
-    }
-    if end <= start -> return ""
-    String.from_bytes(raw[start..end - 1]) ?? ""
+// A private plain record on the existing raw record rails, not a file handle.
+struct __QueryRead {
+    size: U64
+    bytes: [U8]
 }
 
-fn ascii_fold(text: String) -> String Never! {
-    out := [U8]{}
-    loop b in text.bytes() {
-        n :: b
-        if n >= 65 && n <= 90 -> &out.push(U8{n + 32}) else -> &out.push(b)
+fn query_read_error(path: String, reason: String) -> [FieldError] Never! {
+    [FieldError]{FieldError{path: "", reason: "could not read `{path}`: {reason}"}}
+}
+
+fn query_text(path: String) -[FS]> String [FieldError]! {
+    max :: 536870912
+    sample := encoding.__query_read_bounded(path, max) ?? return Err(query_read_error(path, err))
+    if sample.size > (U64{max}) -> return Err(query_read_error(path, "input exceeds the {max}-byte query bound"))
+    if sample.bytes.len() > max -> return Err(query_read_error(path, "input grew beyond the {max}-byte query bound"))
+    encoding.__utf8_validate(sample.bytes) ?? return Err(query_read_error(path, err))
+    #Unsafe("the exact owned query bytes passed the shared strict UTF-8 validator") {
+        return Ok(encoding.__bytes_into_text(^sample.bytes))
     }
-    String.from_bytes(out) ?? text
 }
 
-
-fn host_read_text(path: String) -[FS]> String? {
-    Val(core.files.read(path) ?? return None)
-}
 
 fn parse_rows(text: String, skip_blank: Bool) -> [CSVRow] EncodingError! {
     parse_rows_with(text, [U8]{44}, skip_blank)

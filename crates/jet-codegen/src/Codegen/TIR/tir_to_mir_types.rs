@@ -2406,6 +2406,7 @@ const COMPILER_OWNED_CORE_RECORDS: &[(&str, &[&str])] = &[
     ("__DeliveryFacts", &["id", "key", "tree", "worker", "message", "authority", "generation", "state", "attempts", "retention_until", "deadline", "event_sequence", "duplicate", "records"]),
     ("__DeliveryRecord", &["op", "fields"]),
     ("__MailboxRead", &["status", "message"]),
+    ("__QueryRead", &["size", "bytes"]),
     (
         "DataLineOptions",
         &[
