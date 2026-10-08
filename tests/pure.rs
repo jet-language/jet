@@ -66,8 +66,8 @@ fn pure_fn_inferred_interpolation_compiles() {
 #[test]
 fn pure_fn_inferred_owned_string_copy_compiles() {
     let source = r#"
-fn copy(value: String) -> String { return value }
-fn compute(value: String) -[]> String { return copy(value) }
+fn copy_value(value: String) -> String { return value }
+fn compute(value: String) -[]> String { return copy_value(value) }
 fn run() { print(compute("text")) }
 "#;
     let result = jet::compile(source);

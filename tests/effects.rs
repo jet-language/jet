@@ -192,7 +192,7 @@ fn transitive_unbounded_dispatch_keeps_the_foreign_call_origin() {
     fs::create_dir_all(&root).unwrap();
     let imported = root.join("worker.jet");
     let imported_source =
-        "\n\npub trait Shape { fn area(self) Int }\n\npub fn inspect(shape: Shape) -> Int { shape.area() }\n";
+        "\n\npub trait Shape { fn area(self) -> Int }\n\npub fn inspect(shape: Shape) -> Int { shape.area() }\n";
     fs::write(&imported, imported_source).unwrap();
     let entry = root.join("main.jet");
     let entry_source =
