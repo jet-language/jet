@@ -130,6 +130,7 @@ mod jet_c_abi_test {
 
     #[cfg(not(jet_native_pack))]
     #[no_mangle]
+    // The caller retains the E4 wire carrier; parsing only borrows its UTF-8.
     pub unsafe extern "C" fn jet_rt_test_finish_wire(wire: JetCString) -> u8 {
         guard(|| {
             let mut wire = view(wire);
