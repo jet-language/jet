@@ -1227,7 +1227,7 @@ fn jet_write_journey_block<'a>(
         jet_write_journey_line(out, style, depth, |out| {
             match layout {
                 Some(layout) => jet_write_journey_hop_line(out, label, site, layout, error_report),
-                None => jet_write_journey_hop_text(out, label, site, site.file, site.note, error_report),
+                None => jet_write_journey_hop_text(out, label, site, site.file, site.note, false, error_report),
             }
         });
     }
@@ -1304,22 +1304,21 @@ fn jet_write_journey_hop_line(
     error_report: bool,
 ) -> std::fmt::Result {
     let file = jet_report_elide_path(site.file, path_budget);
-    let note = if jet_journey_text_columns(label, site, &file, site.note, error_report) <= width {
-        std::borrow::Cow::Borrowed(site.note)
+    let (note, ellipsis) = if jet_journey_text_columns(label, site, &file, site.note, error_report) <= width {
+        (site.note, false)
     } else {
         let fixed = jet_journey_text_columns(label, site, &file, "", error_report);
         // The em dash and ellipsis cost four columns; omit a note that cannot
         // show one character instead of leaving only ` — …`.
         let room = width.saturating_sub(fixed + 4);
         if room == 0 {
-            std::borrow::Cow::Borrowed("")
+            ("", false)
         } else {
-            let mut note: String = site.note.chars().take(room).collect();
-            note.push('…');
-            std::borrow::Cow::Owned(note)
+            let end = site.note.char_indices().nth(room).map_or(site.note.len(), |(index, _)| index);
+            (&site.note[..end], true)
         }
     };
-    jet_write_journey_hop_text(out, label, site, &file, &note, error_report)
+    jet_write_journey_hop_text(out, label, site, &file, note, ellipsis, error_report)
 }
 
 fn jet_write_journey_hop_text(
@@ -1328,6 +1327,7 @@ fn jet_write_journey_hop_text(
     site: JetJourneySite<'_>,
     file: &str,
     note: &str,
+    ellipsis: bool,
     error_report: bool,
 ) -> std::fmt::Result {
     write!(out, "  {label} ")?;
@@ -1342,9 +1342,12 @@ fn jet_write_journey_hop_text(
     if site.hops > 1 {
         write!(out, " ×{}", site.hops)?;
     }
-    if !note.is_empty() {
+    if !note.is_empty() || ellipsis {
         out.write_str(" — ")?;
         jet_write_journey_source_text(out, note, error_report)?;
+        if ellipsis {
+            out.write_char('…')?;
+        }
     }
     Ok(())
 }
@@ -1379,7 +1382,7 @@ fn jet_journey_text_columns(
     error_report: bool,
 ) -> usize {
     let mut count = JetJourneyColumnCount(0);
-    jet_write_journey_hop_text(&mut count, label, site, file, note, error_report)
+    jet_write_journey_hop_text(&mut count, label, site, file, note, false, error_report)
         .expect("Column counting cannot fail");
     count.0
 }
@@ -2185,6 +2188,27 @@ mod journey_tests {
              \x20Trail [E3002] (1 hop via ?, origin first):\n\
              \x20 1. run (app.jet:8) — raw\n\x1bnote\n"
         );
+    }
+
+    #[test]
+    fn journey_note_elision_preserves_raw_character_room() {
+        for (note, error_report, suffix) in [
+            ("abéΩtail", false, "abé…"),
+            ("abéΩtail", true, "abé…"),
+            ("a\nétail", false, "a\né…"),
+            ("a\nétail", true, "a\\né…"),
+        ] {
+            let site = JetJourneySite {
+                function: "run", file: "app.jet", line: 3, column: 0,
+                note, hops: 1,
+            };
+            let label = JetJourneyLabel::Hop(1);
+            let fixed = jet_journey_text_columns(label, site, site.file, "", error_report);
+            let mut rendered = String::new();
+            jet_write_journey_hop_line(&mut rendered, label, site, (fixed + 7, 64), error_report)
+                .unwrap();
+            assert_eq!(rendered, format!("  1. run (app.jet:3) — {suffix}"));
+        }
     }
 
     /// `error_context.jet`: `read_raw` returns `Err("file not found")` on line
