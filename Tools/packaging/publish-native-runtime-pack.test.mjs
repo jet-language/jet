@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { captureStep, captureTerminal, fileObject, main, observeStep, parseProofqMetadata, publication } from './publish-native-runtime-pack.mjs';
+import { captureStep, captureTerminal, fileObject, lifecycleSection, main, observeStep, parseProofqMetadata, publication } from './publish-native-runtime-pack.mjs';
 
 function fixture(fn) {
   const root = mkdtempSync(join(tmpdir(), 'native-runtime-publication-'));
@@ -97,3 +97,11 @@ test('terminal envelope binds original script/status/metadata bytes (schema fixt
   writeFileSync(metadata, `name=${name}\nrc=0\nstart=10\nend=11\nkind=test\nrc=0\n`);
   assert.throws(() => captureTerminal(manifest, contract, subject, fileObject, root), /duplicate/);
 }));
+
+test('lifecycle section is exact five-digit canonical priority, never a padding alias', () => {
+  assert.equal(lifecycleSection('init', '0'), '.init_array.00000');
+  assert.equal(lifecycleSection('fini', '1'), '.fini_array.00001');
+  assert.equal(lifecycleSection('init', '65535'), '.init_array.65535');
+  for (const priority of ['00', '00001', '65536', '-1', '1.0', '1.extra', ' 1', '', 1]) assert.throws(() => lifecycleSection('init', priority));
+  assert.throws(() => lifecycleSection('unknown', '0'));
+});

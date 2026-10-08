@@ -691,8 +691,15 @@ fn native_pack_check_lifecycle(store: ArtifactStore, subject: NativeRuntimePackS
         native_pack_unique(&symbols, symbol)
         phase :: native_pack_text_field(values, "phase")
         priority :: native_pack_text_field(values, "priority")
-        if (phase != "init" && phase != "fini") || native_pack_decimal(priority) > 65535 || !native_pack_text_field(values, "section").starts_with(".{phase}_array.") {
-            return Err(NativeRuntimePackError.Invalid("invalid lifecycle entry phase, priority or section"))
+        if (phase != "init" && phase != "fini") || native_pack_decimal(priority) > 65535 {
+            return Err(NativeRuntimePackError.Invalid("invalid lifecycle entry phase or priority"))
+        }
+        expected_section := ".{phase}_array.".bytes()
+        digits :: priority.bytes()
+        loop _ in digits.len()..<5 -> &expected_section.push(U8{48})
+        loop byte in digits -> &expected_section.push(byte)
+        if native_pack_text_field(values, "section").bytes() != expected_section {
+            return Err(NativeRuntimePackError.Invalid("lifecycle section is not the exact admitted priority spelling"))
         }
         provider :: native_pack_handle_field(values, "provider")
         admitted := false

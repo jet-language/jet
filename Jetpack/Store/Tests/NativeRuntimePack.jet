@@ -243,3 +243,25 @@ fn native_pack_test_authorize(store: ArtifactStore, subject: ObjectHandle, evide
     }
     store_artifact_test_cleanup(root)
 }
+
+#Test("native runtime lifecycle section refuses padding priority and suffix aliases") {
+    root :: store_artifact_test_root("native-pack-lifecycle")
+    store :: store_artifact_test_store(root, 1024 * 1024)
+    fixture :: native_pack_test_fixture(store, "small codec fixture bytes")
+    tree :: native_pack_input_tree(native_pack_blob(store, fixture.subject.lifecycle) ?? panic("lifecycle bytes")) ?? panic("lifecycle tree")
+    loop spelling in ([String]{".init_array.0", ".init_array.00001", ".init_array.00000.extra", ".init_array.000000", ".init_array. 00000"}) {
+        fields := native_pack_fields(tree, [String]{"schema", "pack", "jet_object", "entries", "sections", "relocations"}) ?? panic("lifecycle fields")
+        entries := native_pack_array_field(fields, "entries") ?? panic("entries")
+        entry := native_pack_fields(entries[0], [String]{"symbol", "phase", "priority", "provider", "section"}) ?? panic("entry")
+        entry["section"] = DataTree.Text(spelling)
+        entries[0] = DataTree.Object(entry)
+        fields["entries"] = DataTree.Array(entries)
+        changed := fixture.subject
+        changed.lifecycle = store.publish_blob(native_pack_encode(DataTree.Object(fields)) ?? panic("alias codec")) ?? panic("alias fixture")
+        if native_runtime_pack_prepare(store, changed, fixture.evidence) == {
+            .Ok(_) -> panic("noncanonical lifecycle section accepted")
+            .Err(_) -> {}
+        }
+    }
+    store_artifact_test_cleanup(root)
+}

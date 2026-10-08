@@ -136,6 +136,11 @@ function runReadelf(path, args) {
   insist(!result.error && result.status === 0, `readelf failed: ${result.error?.message ?? result.stderr}`);
   return result.stdout;
 }
+export function lifecycleSection(phase, priority) {
+  insist(['init', 'fini'].includes(phase) && typeof priority === 'string' && /^(0|[1-9][0-9]*)$/.test(priority) && BigInt(priority) <= 65535n, 'invalid lifecycle phase or canonical priority');
+  return `.${phase}_array.${priority.padStart(5, '0')}`;
+}
+
 function lifecycle(wt, manifest, subject, blob, directory) {
   const sectionText = runReadelf(manifest.artifacts.pack_object, ['-SW']);
   const relocText = runReadelf(manifest.artifacts.pack_object, ['-rW']);
@@ -161,7 +166,7 @@ function lifecycle(wt, manifest, subject, blob, directory) {
     const [symbol, phase, priority] = fields;
     const actual = declarations.get(symbol);
     insist(actual && actual.phase === phase && actual.priority === priority, `lifecycle annotation differs for ${symbol}`);
-    const section = `.${phase}_array.${priority.padStart(5, '0')}`;
+    const section = lifecycleSection(phase, priority);
     insist(sectionText.includes(section), `pack lost lifecycle section ${section}`);
     const relocationSection = `.rela${section}`;
     const block = relocText.split(/(?=Relocation section ')/).find(part => part.startsWith(`Relocation section '${relocationSection}'`));
