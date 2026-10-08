@@ -1728,7 +1728,24 @@ new-origin resets old handled state, only consecutive equal function/file/line
 sites collapse, the first site's column/note remain, clone copies all children,
 take drains once, and adopt transfers carried children. The real
 `jet_rt_journey_destructor(header,value)` has the Closure24 callback signature.
-Its address and dynamic TLS slot adapter require the published E2 FINAL checked
-named-FunctionAddress mechanism; no guessed address or placeholder TLS export
-substitutes for that prerequisite.
+`JourneyTLS.jet` uses one dynamic key registered after thread initialization
+with that real Closure24 destructor. E2 FINAL `d52672e62` supplies the reviewed
+checked named-FunctionAddress mechanism; `7c69104b7` adds its Journey row and
+`05bc3fac3` tests missing-export/wrong-arity refusal and the actual target.
+Origin/frame/reset routes and report/entry exports join this same source unit.
+There are no Journey-private TCB offsets. Taking a journey clears the dynamic
+slot once; adopting a carried origin discards handled state.
+
+The report edge resolves live process wire mode and stderr facts once:
+NO_COLOR presence overrides FORCE_COLOR presence (including non-UTF8 values),
+columns are positive trimmed COLUMNS on a terminal only, otherwise 80 for a
+terminal or no budget for a stream. Root leads trail, trailing root newlines
+collapse to one, and typed JSON retains the original Err88 metadata. Every
+entry-error exit writes that report and uses the shared `jet_rt_process_exit`
+boundary with status 1. `journey-tls.c` witnesses real thread isolation,
+registered teardown, take/adopt/reset, ledger balance, and process status/bytes.
+N=1000 owned getter/drop cycles also preserve Err88 LIVE BYTES; Lower's separate
+borrowed hand-MIR witness requires no getter, clone, or allocation Call.
+These behavioral/ledger/object witnesses require the composed proof; light
+parse/C-syntax receipts alone do not establish them.
 

@@ -316,6 +316,7 @@ mod jet_c_abi {
 
     /// Ends the process with the report of `error` (taken, from
     /// jet_rt_record_new_JetErr).
+    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_rt_entry_error_exit_err(error: *mut super::JetErr) {
         let error = take_record(error);
@@ -323,6 +324,7 @@ mod jet_c_abi {
     }
 
     /// Ends the process with the entry report of an error's Printable text.
+    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_rt_entry_error_exit(text: JetCString) {
         let text = view(text).to_owned();

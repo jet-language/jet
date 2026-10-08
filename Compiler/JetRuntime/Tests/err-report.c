@@ -194,6 +194,16 @@ int main(void) {
     equal(jet_rt_handle_debug_JetErr(clone),"outer");
     equal(jet_render_err(clone),"Error [E42]: outer (type: Source)\n  cause: inner\n  context (main.jet:7): note\n\t\"\\\177\302\200\n  conversion: Source -> Target");
     equal(jet_error_report_json(clone,NULL),"{\"schema\":\"jet.err/v1\",\"message\":\"outer\",\"code\":\"E42\",\"cause\":{\"schema\":\"jet.err/v1\",\"message\":\"inner\",\"code\":null,\"cause\":null},\"typed_identity\":\"Source\",\"context_frames\":[{\"text\":\"note\\n\\t\\\"\\\\\\u007f\\u0080\",\"file\":\"main.jet\",\"line\":7}],\"conversion_history\":[{\"source\":\"Source\",\"target\":\"Target\"}],\"details\":{\"variant\":\"Variant\",\"fields\":{\"n\":[1,{\"x\":true}]},\"source_span\":{\"start\":10,\"end\":20}}}");
+    W getter_live=jet_rt_program_allocator_fact(2);
+    for (unsigned i=0;i<1000;i++) {
+        Text *m=jet_rt_record_get_JetErr_message(clone), *c=NULL;
+        Err *cause_copy=NULL;
+        assert(jet_rt_record_get_JetErr_code(clone,&c)==1);
+        assert(jet_rt_record_get_JetErr_cause(clone,&cause_copy)==1);
+        jet_rt_string_drop(m); jet_rt_string_drop(c);
+        jet_rt_handle_drop_JetErr(cause_copy);
+        assert(jet_rt_program_allocator_fact(2)==getter_live);
+    }
     jet_rt_handle_drop_JetErr(clone);
     // Empty code differs from None; absent projections never initialize slots.
     message=text(""); code=text(""); value=jet_rt_record_new_JetErr(message,&code,NULL);
