@@ -1,0 +1,12 @@
+module env.dev { services: { api: { enable: true } } }
+module perf.release {
+    budgets: [Budget{
+        name: "hostile",
+        
+        metric: .BinarySize,
+        
+        comparison: .Absolute,
+        limit: .AtMost(2MiB, 2MiB),
+        enforcement: .Fail,
+    }]
+}
