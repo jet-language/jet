@@ -357,6 +357,7 @@ dispatcher_row plain core.files remove_all | CoreCallRecord::source_owned("core.
 dispatcher_row plain core.files list_dir | CoreCallRecord::source_owned("core.files", "list_dir", &[true])
 dispatcher_row plain core.files create_dir | CoreCallRecord::new( "core.files", "create_dir", "jet_std_fs_create_dir", true, &[true], )
 dispatcher_row plain core.files create_dir_all | CoreCallRecord::new( "core.files", "create_dir_all", "jet_std_fs_create_dir_all", true, &[true], )
+dispatcher_row adapter core.files __create_dir_all_raw | CoreCallRecord::new("core.files", "__create_dir_all_raw", "jet_std_fs_create_dir_all", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
 dispatcher_row plain core.files copy | CoreCallRecord::source_owned("core.files", "copy", &[true, true])
 dispatcher_row plain core.files copy_dir | CoreCallRecord::new( "core.files", "copy_dir", "jet_std_fs_copy_dir", true, &[true, true], )
 dispatcher_row plain core.files symlink | CoreCallRecord::source_owned("core.files", "symlink", &[true, true])
@@ -1472,6 +1473,7 @@ dispatcher_row adapter core.db __queue_raw_rollback | CoreCallRecord::new("core.
 dispatcher_row adapter core.db __queue_raw_execute | CoreCallRecord::new("core.db", "__queue_raw_execute", "jet_db_queue_raw_execute", true, &[false, true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).with_native_int_result()
 dispatcher_row adapter core.db __queue_raw_query | CoreCallRecord::new("core.db", "__queue_raw_query", "jet_db_queue_raw_query", true, &[false, true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
 dispatcher_row plain core.jobs queue | CoreCallRecord::new( "core.jobs", "queue", "jet_job_queue_default", true, &[], )
+dispatcher_row adapter core.jobs __publish_parts | CoreCallRecord::new("core.jobs", "__publish_parts", "jet_job_queue_publish_parts", true, &[false, true, true, false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
 dispatcher_row receiver - enqueue | CoreCallRecord::receiver_with_symbol( &["JobQueue"], "enqueue", "jet_job_queue_enqueue", true, &[true, true, true], ) .with_max_arity(4)
 dispatcher_row receiver - delay | CoreCallRecord::receiver_with_symbol( &["JobQueue"], "delay", "jet_job_queue_delay", true, &[true, false, false, false], )
 dispatcher_row receiver - receipt | CoreCallRecord::receiver_with_symbol( &["JobQueue"], "receipt", "jet_job_queue_receipt", true, &[true, true], )
@@ -2164,6 +2166,7 @@ ambient_route core.files __host_path_join
 ambient_route core.files __temp_path_sample
 ambient_route core.files __temp_directory
 ambient_route core.files __path_kind
+ambient_route core.files __create_dir_all_raw
 ambient_route core.files set_mode
 ambient_route core.files __open_reader
 ambient_route core.files __open_writer

@@ -3690,6 +3690,26 @@ fn jet_job_queue_event_time(timestamp_ms: i64) -> u64 {
     timestamp_ms.max(0) as u64
 }
 
+// Raw marshaling only: Core/jobs/jobs.jet owns the timestamp, event fields,
+// and post-commit ordering; retain the existing validated event and sink.
+fn jet_job_queue_publish_parts(
+    timestamp_ms: i64,
+    source: &String,
+    kind: &String,
+    entity: String,
+    fields: String,
+) {
+    if let Ok(event) = JetDevtoolsEvent::from_parts(
+        timestamp_ms as u64,
+        source.as_str(),
+        kind.as_str(),
+        entity,
+        fields,
+    ) {
+        jet_devtools_publish_event(event);
+    }
+}
+
 fn jet_job_queue_publish_transition(observation: &JetJobQueueDevtoolsTransition) {
     let duration = observation
         .duration_ms
