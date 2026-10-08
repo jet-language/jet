@@ -59,13 +59,24 @@ fn fc_embedded_integer_constants() {
         expected :: TExprKind.CtLit{value: TComptimeValue.BigInt{decimal: decimal}}
         fc_require(checked.ty == Type.Int && checked.kind == expected, "embedded exact integer uses BigInt")
         fc_require(checked.integer_bounds == Val(integer_bounds_exact(number)), "embedded exact bounds")
-        prepared :: sema_fact_prepared_expr(TComptimeValue.Int{value: number}, Type.Int, span)
+        prepared :: sema_fact_prepared_expr(TComptimeValue.Int{value: number}, Type.Int, span, environment) ?? panic("prepared integer was not checked")
         fc_require(prepared.kind == expected && prepared.integer_bounds == checked.integer_bounds, "prepared exact integer uses BigInt")
         if checked.kind == .CtLit(value) {
             lowered :: jet_codegen_lower_comptime_value(value, [SemaGraphModuleResult]{}, "", [String]{}) ?? panic("exact integer was not lowered")
             fc_require(lowered == (MIRConstant.BigInt{decimal: decimal}), "native MIR keeps exact decimal")
         }
     }
+    maximum :: Int.parse("18446744073709551615") ?? panic("fixture maximum")
+    fixed_ty :: Type.IntN{signed: false, bits: 64}
+    fixed :: sema_fact_prepared_expr(TComptimeValue.Int{value: maximum}, fixed_ty, span, environment) ?? panic("fixed prepared integer was not checked")
+    fc_require(fixed.ty == fixed_ty, "prepared fixed destination type")
+    converted := false
+    if fixed.kind == .NumericMethod(receiver, operation) {
+        if operation == .CheckedIntToFixed(host_kind, _, _, _) {
+            converted = host_kind == 7 && receiver.ty == Type.Int && receiver.kind == (TExprKind.CtLit{value: TComptimeValue.BigInt{decimal: "18446744073709551615"}})
+        }
+    }
+    fc_require(converted, "prepared U64 maximum keeps checked Int-to-fixed conversion")
     loop number in [Int]{-9223372036854775807 - 1, 0, 9223372036854775807} {
         checked :: sema_expr_check_comptime_name("NATIVE", span, Val(CtValue.Int{value: number}), None, environment, &scopes, &state, &context, &diagnostics) ?? panic("native integer was not checked")
         fc_require(checked.kind == (TExprKind.IntLit{value: number, width: None}), "native integer keeps IntLit")

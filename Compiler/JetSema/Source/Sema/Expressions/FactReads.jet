@@ -28,6 +28,7 @@ use jet_foundation.[
     TExpr,
     TExprKind,
     TFieldRef,
+    TIntegerWidth,
     TPatternBinding,
     TPatternBindingFact,
     TPatternShape,
@@ -711,16 +712,17 @@ pub fn sema_fact_build_read(base: Expr, member: String, span: Span, expected: Ty
     }
     graph :: environment.registration_graph ?? return sema_fact_read_unhandled()
     resolved :: sema_fact_build_value(path, graph.build_facts) ?? return sema_fact_read_unhandled()
-    SemaFactReadCheck{handled: true, value: sema_expr_expected(sema_fact_prepared_expr(resolved.value, resolved.ty, span), expected, environment, &diagnostics)}
+    prepared :: sema_fact_prepared_expr(resolved.value, resolved.ty, span, environment) ?? return sema_fact_read_failed()
+    SemaFactReadCheck{handled: true, value: sema_expr_expected(prepared, expected, environment, &diagnostics)}
 }
 
 // A prepared value as a checked expression: scalars keep their literal forms,
 // records and lists stay one compile-time literal.
-pub fn sema_fact_prepared_expr(value: TComptimeValue, ty: Type, span: Span) -> TExpr Never! {
+pub fn sema_fact_prepared_expr(value: TComptimeValue, ty: Type, span: Span, environment: SemaScopeEnvironment) -> TExpr? {
     if value == .Int(number) {
-        literal := sema_expr_unbounded_integer_literal(number, span)
-        literal.ty = ty
-        return literal
+        width := TIntegerWidth?{None}
+        if sema_expr_numeric_base(ty) == .IntN(signed, bits) -> width = Val(TIntegerWidth{signed: signed, bits: bits})
+        return sema_expr_int_literal_tir(number, ty, width, span, environment)
     }
     kind :: if value == {
         .Bool(flag) -> TExprKind.BoolLit{value: flag}

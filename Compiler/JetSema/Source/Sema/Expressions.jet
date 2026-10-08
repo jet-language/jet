@@ -2901,7 +2901,8 @@ fn sema_expr_check_identifier(name: String, span: Span, expected: Type?, environ
         if prepared_binding.prepared == .Val(known) {
             prepared_ty :: prepared_binding.symbol.ty ?? return None
             &context.name_references.push(SemaNameReferenceFact{span: span, symbol: prepared_binding.symbol, kind: "local"})
-            return sema_expr_expected(sema_fact_prepared_expr(known, prepared_ty, span), expected, environment, &diagnostics)
+            prepared :: sema_fact_prepared_expr(known, prepared_ty, span, environment) ?? return None
+            return sema_expr_expected(prepared, expected, environment, &diagnostics)
         }
     }
     // D-UNINIT-SENTINEL2 (E0420): a `Type{ uninit }` binding read before
