@@ -7471,20 +7471,15 @@ pub(crate) fn run_test_opts(path: &str, opts: TestRunOpts, mode: OutputMode) {
     });
 }
 
-/// Bare `jet test` inside a package (spec S43): every source file the package
-/// compiles is a test target, not only the resolved entry file. The member set
-/// comes from the driver's project scan — the same authority-checked
-/// enumeration `jet project parts` reports — so discovery covers exactly what
-/// the package compiles instead of walking the filesystem a second time.
-/// Members with neither `#Test` blocks nor doctests are skipped instead of
-/// failing; a member that fails to parse still reports its real compile error.
-/// When nothing in the package was testable, the resolved entry runs on the
-/// ordinary file path so its own report (E0601, or E2105 for a missing entry)
-/// is the one the user sees, exactly once.
+/// Run the package's aggregated test harness once (spec S43), using the first
+/// test-bearing member as its entry. The driver's checked project scan supplies
+/// the member set, including modules the resolved command entry does not import.
+/// Doctests remain file-local and run once for each member. An empty package
+/// falls through to the entry's ordinary E0601 (or missing-entry E2105) report.
 pub(crate) fn run_test_package(root: &Path, opts: TestRunOpts, mode: OutputMode) {
     require_project_environment("test", root, mode);
     let entry = crate::find_project_entry(root);
-    let mut ran = 0usize;
+    let mut ran = false;
     let mut any_fail = false;
     // D-CMDOVERRIDE1=A: one package-scoped `fn test` owns the whole command.
     // The package authority reports duplicate command functions before this
@@ -7504,35 +7499,49 @@ pub(crate) fn run_test_package(root: &Path, opts: TestRunOpts, mode: OutputMode)
             });
         }
     }
-    if entry.is_file() {
-        match run_test_target(&entry, &opts, mode, true) {
-            TestTargetOutcome::Override(ok) => exit(if ok {
-                ExitCodes::OK
-            } else {
-                ExitCodes::USER_ERROR
-            }),
-            TestTargetOutcome::Ran(ok) => {
-                ran += 1;
+    let members = jet::ProjectParts::source_files(root);
+    let harness_target = if opts.docs {
+        None
+    } else {
+        std::iter::once(&entry).chain(members.iter()).find(|target| {
+            target.is_file()
+                && !is_reserved_target_file(target)
+                && (jet::has_test_blocks(&target.to_string_lossy())
+                    || jet::has_test_contracts(&target.to_string_lossy()))
+        })
+    };
+    if let Some(target) = harness_target {
+        match run_test_target(target, &opts, mode, true) {
+            TestTargetOutcome::Ran(ok) | TestTargetOutcome::Override(ok) => {
+                ran = true;
                 any_fail = !ok;
             }
             TestTargetOutcome::NoTests => {}
         }
     }
-    for target in jet::ProjectParts::source_files(root) {
-        if target == entry || is_reserved_target_file(&target) {
+    // The harness already includes every package member's #Test/contract
+    // claims. Only file-local doctests remain; re-running a member's harness
+    // would repeat the whole package's test set (#4838).
+    let mut docs_opts = opts.clone();
+    docs_opts.docs = true;
+    for target in std::iter::once(&entry)
+        .chain(members.iter().filter(|target| *target != &entry))
+    {
+        if Some(target) == harness_target
+            || !target.is_file()
+            || is_reserved_target_file(target)
+        {
             continue;
         }
-        match run_test_target(&target, &opts, mode, true) {
-            // A member's own `fn test` override is that file's harness choice;
-            // only the entry's override speaks for the whole package.
+        match run_test_target(target, &docs_opts, mode, true) {
             TestTargetOutcome::Ran(ok) | TestTargetOutcome::Override(ok) => {
-                ran += 1;
+                ran = true;
                 any_fail |= !ok;
             }
             TestTargetOutcome::NoTests => {}
         }
     }
-    if ran == 0 {
+    if !ran {
         run_test_opts(&entry.to_string_lossy(), opts, mode);
     }
     exit(if any_fail {
@@ -7600,8 +7609,8 @@ fn run_test_file(path: &Path, opts: &TestRunOpts, mode: OutputMode) -> bool {
     )
 }
 
-/// Run one test target. `package` marks bare-`jet test` package members, whose
-/// empty files are skipped rather than reported.
+/// Run one test target. `package` skips an empty package member instead of
+/// reporting E0601; the package runner invokes its aggregate harness only once.
 fn run_test_target(
     path: &Path,
     opts: &TestRunOpts,
@@ -7775,11 +7784,9 @@ fn run_test_target(
 
     if !override_entry {
         if package {
-            // Package mode walks every member: one with no `#Test` blocks or
-            // contract-bearing callables contributes nothing to the run,
-            // which is not the error an empty named target is. A member that
-            // fails to load answers `true` here, so its real compile error still
-            // surfaces below instead of being silently skipped.
+            // A package with no #Test blocks or contract-bearing callables
+            // contributes only doctests. Load failures answer true here, so
+            // normal compilation still reports the real diagnostic.
             if !jet::has_test_blocks(&shown) && !jet::has_test_contracts(&shown) {
                 return if has_doctests {
                     TestTargetOutcome::Ran(finish_doctest_report())
