@@ -1377,7 +1377,7 @@ fn run() {
 | `x25519(secret, public)` / `x25519_shared(secret, public)` | `SharedSecret !CryptoError` | Perform typed X25519 agreement and reject invalid keys. |
 | `x25519_public(secret)` | `X25519PublicKey !CryptoError` | Derive the public key. |
 | `seal(recipients, bytes, aad)` / `open(identity, box, aad)` | `Sealed !CryptoError` / `[U8] !CryptoError` | Use the recipient envelope with internal key and nonce handling. |
-| `file_seal(recipients, source, destination)` / `file_open(identity, source, destination)` | `Bool !FileCryptoError` | Seal or open bounded authenticated files with atomic publication. |
+| `file_seal(recipients, source, destination)` / `file_open(identity, source, destination)` | `Bool !FileCryptoError` | Stream authenticated JETC v2 files in bounded 1 MiB chunks, with atomic no-overwrite publication. |
 | `sign(signing_key, bytes)` / `verify(verify_key, bytes, signature)` | `Signature !CryptoError` / `Bool !CryptoError` | Use nominal Ed25519 signing and verification. |
 | `wrap(secret, recipient)` / `unwrap(identity, wrapped)` | `WrappedKey !CryptoError` / `Secret !CryptoError` | Wrap a nominal Secret for an X25519 recipient. |
 | `password_hash(password)` / `password_verify(password, stored)` | `PasswordHash !CryptoError` / `Bool !CryptoError` | Hash and verify a nominal Secret with the Core password policy. |
@@ -1386,6 +1386,23 @@ fn run() {
 methods where the declared API permits it; secret-bearing types must not be
 logged. `file_seal` and `file_open` take typed `Path` values at their checked
 boundary and use `FS` plus `Rand` where indicated.
+
+An existing destination is never replaced: publication returns
+`FileCryptoError.DestinationExists` and preserves its bytes. The closed error
+family is `OpenFailed`, `SealFailed(CryptoError)`, `SourceIO`,
+`DestinationExists`, and `DestinationIO`; only `SealFailed` carries a payload.
+Wrong identities, malformed envelopes, authentication failures, and missing
+final records all return `OpenFailed`, without publishing partial plaintext.
+Observed task cancellation returns `SourceIO` and destroys the unpublished
+stage; it does not add a wait or cancellation-delivery boundary.
+
+Linux staging uses anonymous 0600 files and held no-follow directory
+descriptors, then installs with `linkat(AT_EMPTY_PATH)` after final
+authentication and synchronization. Failure of anonymous staging does not
+fall back to a named file. On other platforms sealing fails closed with
+`SourceIO`; opening and expert migration use exclusive 0600 named staging
+and a no-replacement hard link. The expert v1 reader alone retains its
+bounded whole-buffer limit of 1 GiB plaintext plus 34 bytes of framing.
 
 Key wrapping authenticates the `JETW` header as AAD prefixed with the
 `JETW1 wrap` domain label. `wrap` and `unwrap` use the same label and header

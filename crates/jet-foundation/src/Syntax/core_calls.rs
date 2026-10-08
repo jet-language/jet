@@ -1589,9 +1589,21 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: f72115893038f8c380ec668327f4fbc55d2d35cd96570f92bd6978bde12b3162
+// Source SHA-256: 153214c5bc20b71c9f25478d428d5976a5e0d0affbba9df91ac985315d1960f6
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
+    ("core.crypto", "__jetc_open_directory"),
+    ("core.crypto", "__jetc_open_child_directory"),
+    ("core.crypto", "__jetc_open_source"),
+    ("core.crypto", "__jetc_create_named"),
+    ("core.crypto", "__jetc_tmpfile"),
+    ("core.crypto", "__jetc_read"),
+    ("core.crypto", "__jetc_write"),
+    ("core.crypto", "__jetc_seek"),
+    ("core.crypto", "__jetc_stat"),
+    ("core.crypto", "__jetc_fsync"),
+    ("core.crypto", "__jetc_link"),
+    ("core.crypto", "__jetc_close"),
     ("core.data", "left_join"),
     ("core.files", "read_at"),
     ("core.files", "read_bytes"),
@@ -1933,6 +1945,19 @@ pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
 // Evaluate the immutable bootstrap registry once, not in every consuming crate.
 #[allow(long_running_const_eval)]
 pub static CORE_CALLS: &[CoreCallRecord] = &[
+    CoreCallRecord::new("core.crypto", "__jetc_open_directory", "jet_crypto_jetc_open_directory", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.crypto", "__jetc_open_child_directory", "jet_crypto_jetc_open_child_directory", true, &[false, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.crypto", "__jetc_open_source", "jet_crypto_jetc_open_source", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.crypto", "__jetc_create_named", "jet_crypto_jetc_create_named", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.crypto", "__jetc_tmpfile", "jet_crypto_jetc_tmpfile", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.crypto", "__jetc_read", "jet_crypto_jetc_read", true, &[false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.crypto", "__jetc_write", "jet_crypto_jetc_write", true, &[false, true, false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.crypto", "__jetc_seek", "jet_crypto_jetc_seek", true, &[false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.crypto", "__jetc_stat", "jet_crypto_jetc_stat", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.crypto", "__jetc_fsync", "jet_crypto_jetc_fsync", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.crypto", "__jetc_link", "jet_crypto_jetc_link", true, &[false, false, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.crypto", "__jetc_close", "jet_crypto_jetc_close", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::source_owned("core.crypto", "__migrate_v1", &[true, true, true, true]),
     CoreCallRecord::new("core.data", "__host_path_is_file", "jet_data_host_path_is_file", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.encoding", "__edition", "", false, &[]).with_interpreter_route(CoreCallInterpreterRoute::TypedIntrinsic).without_direct_aot(),
     CoreCallRecord::new("core.http.server", "__serve", "jet_http_mux_serve", false, &[true, false, false, false]).without_direct_aot(),
