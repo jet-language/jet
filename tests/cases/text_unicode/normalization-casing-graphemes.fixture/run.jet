@@ -24,10 +24,28 @@ fn s3_unicode_scalar(cp: Int) -> String Never! {
     String.from_bytes(bytes) ?? panic("valid Unicode scalar encoding")
 }
 
+// Reuses Core.text.wrap's Unicode splitter and the public Core.text primitives.
+fn s3_unicode_split_ws(text: String) -> [String] Never! {
+    out := [String]{}
+    current := ""
+    loop scalar in s3_unicode_text.scalars(text) {
+        if s3_unicode_text.is_whitespace(scalar) {
+            if current.bytes().len() > 0 {
+                &out.push(current)
+                current = ""
+            }
+        } else {
+            current = "{current}{scalar}"
+        }
+    }
+    if current.bytes().len() > 0 -> &out.push(current)
+    out
+}
+
 // Original cps(): invalid hex/scalars are filtered out.
 fn s3_unicode_cps(field: String) -> String Never! {
     out := ""
-    loop token in field.split_whitespace() {
+    loop token in s3_unicode_split_ws(field) {
         cp :: s3_unicode_parse.parse_int_base(token, 16) ?? next
         scalar :: s3_unicode_scalar(cp)
         out = "{out}{scalar}"
@@ -46,7 +64,7 @@ fn s3_unicode_break(line: String) -> S3UnicodeBreak? Never! {
     current := ""
     segments := [String]{}
     any := false
-    loop token in line.split_whitespace() {
+    loop token in s3_unicode_split_ws(line) {
         if token == "÷" {
             if current != "" {
                 &segments.push(~current)
