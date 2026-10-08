@@ -66,7 +66,7 @@ fn vault_linux_dir_io(stat: Bool, repository: Bool, scratch: I64) -> I64 {
 fn vault_linux_dir_at_root(root: I64, out: I64) -> I64 {
     scratch :: jet_rt_alloc(VAULT_STAT_BYTES + I64{24}, I64{8})
     root_path :: vault_linux_path(root)
-    root_fd :: if (root_path == I64{0}) -> I64{-22} else -> trap_syscall(I64{257}, I64{-100}, root_path, VAULT_O_CLOEXEC, I64{0}, I64{0}, I64{0})
+    root_fd :: if (root_path == I64{0}) -> I64{-22} else -> vault_linux_plain_open(root_path)
     if (root_path != I64{0}) -> jet_rt_free(root_path, rt_text_len(root) + I64{1}, I64{1})
     if (root_fd < I64{0}) {
         error :: vault_linux_dir_io(false, true, scratch)
@@ -460,10 +460,7 @@ fn vault_identity_path(root: I64) -> I64 {
 fn vault_identity_read_at_root(root: I64, out: I64) -> I64 {
     path :: vault_identity_path(root)
     if (path == I64{0}) -> return vault_error_new(I64{4}, I64{0}, I64{0})
-    file := I64{-4}
-    loop file == (I64{-4}) {
-        file = trap_syscall(I64{257}, I64{-100}, rt_text_data(path), VAULT_O_CLOEXEC, I64{0}, I64{0}, I64{0})
-    }
+    file :: vault_linux_plain_open(rt_text_data(path))
     jet_rt_string_drop(path)
     if (file < I64{0}) -> return vault_error_new(I64{4}, I64{0}, I64{0})
     scratch :: jet_rt_alloc(I64{8}, I64{8})
@@ -471,4 +468,97 @@ fn vault_identity_read_at_root(root: I64, out: I64) -> I64 {
     vault_linux_close(file)
     jet_rt_free(scratch, I64{8}, I64{8})
     error
+}
+
+// Every seed std File::open/fs::read* site uses cvt_r; raw openat2/pidfd sites
+// do NOT. This single plain reader follows symlinks and retries only EINTR.
+fn vault_linux_plain_open(path: I64) -> I64 {
+    file := I64{-4}
+    loop file == (I64{-4}) {
+        file = trap_syscall(I64{257}, I64{-100}, path, VAULT_O_CLOEXEC, I64{0}, I64{0}, I64{0})
+    }
+    file
+}
+// Reuse Display.jet's unsigned split and final integer-digit writer directly,
+// avoiding a temporary Text owner/copy for decimal path and lock fields.
+fn vault_decimal_put(out: I64, value: I64) -> I64 {
+    half :: (value >> I64{1}) & I64{9223372036854775807}
+    quotient :: half /% I64{5}
+    remainder :: (half % I64{5}) * I64{2} + (value & I64{1})
+    if (quotient == I64{0}) {
+        rt_text_put(out, I64{48} + remainder)
+        return I64{1}
+    }
+    digits :: display_integer_length(quotient)
+    display_integer_digits(out, digits, quotient, digits)
+    rt_text_put(out + digits, I64{48} + remainder)
+    digits + I64{1}
+}
+// Scheduler.jet:454-472's checked unsigned accumulation, without zero->one
+// thread-count policy. Uint::from_str accepts '+' but neither '-' nor spaces.
+fn vault_parse_uint(bytes: I64, length: I64, narrow: Bool, out: I64) -> Bool {
+    if (length == I64{0}) -> return false
+    start :: if (rt_text_byte(bytes) == I64{43}) -> I64{1} else -> I64{0}
+    if (start == length) -> return false
+    limit :: if narrow -> I64{429496729} else -> I64{1844674407370955161}
+    value := I64{0}
+    at := start
+    loop at < length {
+        byte :: rt_text_byte(bytes + at)
+        if (byte < I64{48} || byte > I64{57}) -> return false
+        digit :: byte - I64{48}
+        if (value < I64{0} || value > limit || (value == limit && digit > I64{5})) -> return false
+        value = wrapping(value * I64{10} + digit)
+        at += I64{1}
+    }
+    rt_text_store(out, value)
+    true
+}
+// SecretsCrypto.rs:2345-2348: LAST ')' then the TWENTIETH whitespace token.
+// Successful zero and all 64-bit values remain distinct from parse failure.
+fn vault_process_start_parse(bytes: I64, length: I64, out: I64) -> Bool {
+    if (length == I64{0} || !vault_utf8_valid(bytes, length)) -> return false
+    close := length
+    loop {
+        if (close == I64{0}) -> return false
+        close -= I64{1}
+        if (rt_text_byte(bytes + close) == I64{41}) -> break
+    }
+    at := close + I64{1}
+    token := I64{0}
+    loop {
+        at += vault_crypto_trim_start(bytes + at, length - at)
+        if (at == length) -> return false
+        end := at
+        loop end < length {
+            if unicode_is_white_space(rt_text_decode(bytes + end)) -> break
+            end += rt_text_width(bytes + end)
+        }
+        if (token == I64{19}) -> return vault_parse_uint(bytes + at, end - at, false, out)
+        token += I64{1}
+        at = end
+    }
+}
+fn vault_process_start(pid: I64, out: I64) -> Bool {
+    scratch :: jet_rt_alloc(I64{48}, I64{8})
+    rt_text_store(scratch, I64{52104118038575}) // "/proc/"
+    digits :: vault_decimal_put(scratch + I64{6}, pid)
+    rt_text_store(scratch + I64{6} + digits, I64{499851227951}) // "/stat\0"
+    file :: vault_linux_plain_open(scratch)
+    if (file < I64{0}) {
+        jet_rt_free(scratch, I64{48}, I64{8})
+        return false
+    }
+    error :: vault_linux_read_to_end(file, scratch + I64{32}, scratch + I64{40})
+    vault_linux_close(file)
+    if (error != I64{0}) {
+        vault_error_drop(error)
+        jet_rt_free(scratch, I64{48}, I64{8})
+        return false
+    }
+    bytes :: rt_text_word(scratch + I64{32})
+    parsed :: vault_process_start_parse(rt_text_word(bytes + DATA_SEQUENCE_DATA), rt_text_word(bytes + DATA_SEQUENCE_LENGTH), out)
+    data_sequence_drop(bytes, DATA_TREE_BYTE_LIST)
+    jet_rt_free(scratch, I64{48}, I64{8})
+    parsed
 }

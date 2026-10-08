@@ -690,3 +690,38 @@ fn jet_rt_vault_identity_stream_fixture(root: I64, expected: I64) {
     data_sequence_drop(bytes, DATA_TREE_BYTE_LIST)
     jet_rt_free(scratch, I64{8}, I64{8})
 }
+
+fn jet_rt_vault_uint_fixture(input: I64, narrow: Bool, valid: Bool, value: I64, decimal: I64) {
+    scratch :: jet_rt_alloc(I64{40}, I64{8})
+    rt_text_store(scratch, I64{91})
+    parsed :: vault_parse_uint(rt_text_data(input), rt_text_len(input), narrow, scratch)
+    vault_fixture_check(parsed == valid)
+    if valid {
+        vault_fixture_check(rt_text_word(scratch) == value)
+        length :: vault_decimal_put(scratch + I64{8}, value)
+        vault_fixture_check(length == rt_text_len(decimal))
+        vault_fixture_check(rt_text_equal_bytes(scratch + I64{8}, rt_text_data(decimal), length))
+    } else {
+        vault_fixture_check(rt_text_word(scratch) == I64{91})
+    }
+    jet_rt_free(scratch, I64{40}, I64{8})
+}
+fn jet_rt_vault_proc_parse_fixture(input: I64, valid: Bool, value: I64) {
+    scratch :: jet_rt_alloc(I64{8}, I64{8})
+    rt_text_store(scratch, I64{91})
+    parsed :: vault_process_start_parse(rt_text_data(input), rt_text_len(input), scratch)
+    vault_fixture_check(parsed == valid)
+    vault_fixture_check(rt_text_word(scratch) == (if valid -> value else -> I64{91}))
+    jet_rt_free(scratch, I64{8}, I64{8})
+}
+fn jet_rt_vault_proc_read_fixture() {
+    scratch :: jet_rt_alloc(I64{24}, I64{8})
+    pid :: trap_syscall(I64{39}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+    vault_fixture_check(vault_process_start(pid, scratch))
+    vault_fixture_check(vault_process_start(pid, scratch + I64{8}))
+    vault_fixture_check(rt_text_word(scratch) == rt_text_word(scratch + I64{8}))
+    rt_text_store(scratch + I64{16}, I64{91})
+    vault_fixture_check(!vault_process_start(I64{4294967295}, scratch + I64{16}))
+    vault_fixture_check(rt_text_word(scratch + I64{16}) == I64{91})
+    jet_rt_free(scratch, I64{24}, I64{8})
+}

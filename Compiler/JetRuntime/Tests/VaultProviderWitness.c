@@ -43,6 +43,9 @@ extern void jet_rt_vault_recipients_fixture(const Text *, int64_t, int64_t, cons
 extern void jet_rt_vault_plaintext_fixture(const ByteList *, int64_t, int64_t, int64_t, const void *);
 extern void jet_rt_vault_linux_stream_fixture(int64_t, const Text *);
 extern void jet_rt_vault_identity_stream_fixture(const Text *, const Text *);
+extern void jet_rt_vault_uint_fixture(const Text *, _Bool, _Bool, int64_t, const Text *);
+extern void jet_rt_vault_proc_parse_fixture(const Text *, _Bool, int64_t);
+extern void jet_rt_vault_proc_read_fixture(void);
 extern void imported_origin_round_trips_and_invalid_combinations_reject(const Text *, const Text *);
 extern void jet_rt_vault_crypto_fixture(const ByteList *);
 extern void jet_rt_vault_crypto_unavailable_fixture(int64_t (*)(void *, void *, int64_t));
@@ -303,6 +306,48 @@ static void canonical_read_fixtures(void) {
     typed[75] ^= 1;
     jet_rt_vault_plaintext_fixture(&plain, 0, 0, 8, NULL);
 }
+static void process_start_fixtures(void) {
+    static const struct { const char *input, *decimal; int narrow, valid; int64_t value; } numbers[] = {
+        {"0", "0", 0, 1, 0}, {"+0", "0", 1, 1, 0}, {"000000000000001", "1", 0, 1, 1},
+        {"4294967295", "4294967295", 1, 1, 4294967295},
+        {"4294967296", NULL, 1, 0, 0}, {"+4294967295", "4294967295", 1, 1, 4294967295},
+        {"9223372036854775807", "9223372036854775807", 0, 1, INT64_MAX},
+        {"9223372036854775808", "9223372036854775808", 0, 1, INT64_MIN},
+        {"+18446744073709551615", "18446744073709551615", 0, 1, -1},
+        {"00018446744073709551615", "18446744073709551615", 0, 1, -1},
+        {"18446744073709551616", NULL, 0, 0, 0}, {"184467440737095516150", NULL, 0, 0, 0},
+        {"", NULL, 0, 0, 0}, {"+", NULL, 0, 0, 0}, {"-0", NULL, 0, 0, 0},
+        {" 1", NULL, 0, 0, 0}, {"1 ", NULL, 0, 0, 0}, {"0x10", NULL, 0, 0, 0},
+        {"\xef\xbc\x91", NULL, 0, 0, 0}
+    };
+    for (size_t i = 0; i < sizeof(numbers) / sizeof(numbers[0]); ++i) {
+        Text input = text(numbers[i].input), decimal = text(numbers[i].decimal ? numbers[i].decimal : "");
+        jet_rt_vault_uint_fixture(&input, numbers[i].narrow, numbers[i].valid, numbers[i].value, &decimal);
+    }
+    char stat[256];
+    const char *values[] = {"+18446744073709551615", "0", "18446744073709551616", "-1", "+"};
+    for (size_t i = 0; i < sizeof(values) / sizeof(values[0]); ++i) {
+        int written = snprintf(stat, sizeof(stat), "9 (has ) ) nested) ");
+        assert(written > 0);
+        size_t at = (size_t)written;
+        for (unsigned field = 0; field < 19; ++field) {
+            written = snprintf(stat + at, sizeof(stat) - at, "%s", field == 7 ? "\xc2\x85x\xe2\x80\xa8" : "x ");
+            assert(written > 0 && (size_t)written < sizeof(stat) - at);
+            at += (size_t)written;
+        }
+        written = snprintf(stat + at, sizeof(stat) - at, "%s tail", values[i]);
+        assert(written > 0 && (size_t)written < sizeof(stat) - at);
+        Text input = text(stat);
+        jet_rt_vault_proc_parse_fixture(&input, i < 2, i == 0 ? -1 : 0);
+    }
+    Text no_close = text("no closing parenthesis"), too_short = text("1 (name) 0 0");
+    jet_rt_vault_proc_parse_fixture(&no_close, 0, 0);
+    jet_rt_vault_proc_parse_fixture(&too_short, 0, 0);
+    unsigned char invalid_bytes[] = {'1',' ','(',0xff,')'};
+    Text invalid = {invalid_bytes, (int64_t)sizeof(invalid_bytes), 0};
+    jet_rt_vault_proc_parse_fixture(&invalid, 0, 0);
+    jet_rt_vault_proc_read_fixture();
+}
 int main(void) {
     jet_rt_alloc_init();
     jet_rt_thread_init();
@@ -367,6 +412,7 @@ int main(void) {
     jet_rt_vault_crypto_fixture(&crypto_plain);
     canonical_read_fixtures();
     stream_read_fixtures();
+    process_start_fixtures();
     puts("vault witness OK (13 errors, legacy+JVLT2 codec, imported origin/default entropy, native Secret redaction/wipe, long-origin hash, duplicate priority)");
     jet_rt_thread_detach();
     return 0;

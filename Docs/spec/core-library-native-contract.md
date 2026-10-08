@@ -199,6 +199,15 @@ and seek. Failed reads wipe the entire partial allocation before release.
 Supplemental transport fixtures supply actual 8192/8193-byte pipes, /dev/null,
 a FIFO identity after non-SA_RESTART signals, and observe the real error-buffer
 free for full-capacity zeroization; execution remains owned by composition.
+One plain-open EINTR helper serves the seed's std-file root, identity and proc
+read sites; raw openat2 and pidfd syscall sites gain no extra retry policy.
+Proc start time uses the last ')' and the twentieth Unicode-whitespace token,
+returning absence on read/UTF-8/parse failure. Checked unsigned parsing accepts
+one leading '+' and preserves zero/all 64 bits, with a distinct u32 PID bound.
+Decimal path/lock-field rendering writes final bytes through the shared Display
+digit helpers without allocating temporary Text owners. Supplemental fixtures
+cover unsigned boundaries/overflow, Unicode separators, nested proc names,
+unchanged failed outputs and actual repeated self-proc reads.
 Unrecovered reads stay explicit, allowing the recovered caller to perform its
 lock-aware recovery first. Supplemental transport fixtures carry independent
 starting/recipient hash vectors and exercise trim/case/duplicate/UTF-8 policy,
