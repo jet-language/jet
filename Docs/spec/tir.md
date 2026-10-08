@@ -26,6 +26,13 @@ those fields and formats output; it does not re-run semantic decisions such as
 expression typing or overflow classification. `tir_covers` is the coverage
 proof for reachable functions.
 
+Checked statement rows transfer into their completed function after the
+fallthrough check; contract wrapping must not copy the checked body or change
+which rows that check observes. MIR metadata collectors borrow top-level and
+nested function rows separately, sharing their identity sets rather than
+constructing a second owning concatenation. Canonical row ordering uses stable
+in-place sorting, preserving the same identity keys and tie order.
+
 ## Read-only fact channel
 
 The frozen TIR exposes one typed, borrowed `TFactChannel` view. It projects facts
