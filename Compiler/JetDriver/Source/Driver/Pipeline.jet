@@ -3365,6 +3365,7 @@ fn jet_driver_canonical_effect_module(source: String) -> SemaRegistrationModuleI
         package_identity: package_identity,
         module_identity: module_identity,
         module_name: "Effects",
+        core_source_alias: "",
         module_path: module_path,
         source_file: source_file,
         source_segments: jet_driver_canonical_effect_segments(source_file, source),
@@ -3931,6 +3932,11 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
             return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Load), false, trace)
         }
         unit := load.source_units[loaded_module.source_unit_index]
+        core_source_alias := ""
+        if jet_driver_unit_is_core(unit) && unit.file_index >= 0 && unit.file_index < request.core_sources.len() {
+            owner :: request.core_sources[unit.file_index]
+            if owner.path == unit.relative_path && owner.module_name == loaded_module.module_name -> core_source_alias = owner.alias
+        }
         registration_foreign_handles_option := jet_driver_registration_foreign_handle_facts(loaded_module.module_identity, foreign_provider_inputs, &load.diagnostics)
         if registration_foreign_handles_option == None {
             return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Load), false, trace)
@@ -3940,6 +3946,7 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
             package_identity: loaded_module.package_identity,
             module_identity: loaded_module.module_identity,
             module_name: loaded_module.module_name,
+            core_source_alias: core_source_alias,
             module_path: jet_driver_module_display(unit.relative_path),
             source_file: unit.path,
             source_segments: unit.source_segments,

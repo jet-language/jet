@@ -57,10 +57,10 @@ const tableStart = exportsSource.indexOf("pub const CORE_SOURCE_MODULES: &[CoreS
 if (tableStart < 0) fail(`${exportsPath} has no CORE_SOURCE_MODULES table`);
 const tableEnd = exportsSource.indexOf("\n];", tableStart);
 if (tableEnd < 0) fail(`${exportsPath}: CORE_SOURCE_MODULES is not closed`);
-const rowPattern = /CoreSourceModule \{ module: "([^"]*)", alias: "([^"]*)", path: "([^"]*)", owned_members: &\[([^\]]*)\] \}/g;
+const rowPattern = /CoreSourceModule \{ module: "([^"]*)", alias: "([^"]*)", path: "([^"]*)", owned_members: &\[([^\]]*)\], impl_types: &\[([^\]]*)\] \}/g;
 const rows = [];
 for (const match of exportsSource.slice(tableStart, tableEnd).matchAll(rowPattern)) {
-  rows.push({ module: match[1], alias: match[2], path: match[3], owner: "", members: members(match[4]) });
+  rows.push({ module: match[1], alias: match[2], path: match[3], owner: "", members: members(match[4]), implTypes: members(match[5]) });
 }
 const tableRowCount = (exportsSource.slice(tableStart, tableEnd).match(/CoreSourceModule \{/g) ?? []).length;
 if (rows.length === 0 || rows.length !== tableRowCount) fail(`${exportsPath}: parsed ${rows.length} of ${tableRowCount} CORE_SOURCE_MODULES rows`);
@@ -107,7 +107,7 @@ const list = (values) => `[String]{${values.map((value) => jetStringLiteral(valu
 const declarations = coreSourceFacts();
 const typeNames = row => declarations.modules.find(module => module.module === row.module)?.types.map(type => type.name) ?? [];
 const renderRow = row =>
-  `    CoreSourceOwnedRow{module_name: ${jetStringLiteral(row.module, exportsPath)}, alias: ${jetStringLiteral(row.alias, exportsPath)}, path: ${jetStringLiteral(row.path, exportsPath)}, owner: ${jetStringLiteral(row.owner, partsPath)}, owned_members: ${list(row.members)}, type_exports: ${list(typeNames(row))}},`;
+  `    CoreSourceOwnedRow{module_name: ${jetStringLiteral(row.module, exportsPath)}, alias: ${jetStringLiteral(row.alias, exportsPath)}, path: ${jetStringLiteral(row.path, exportsPath)}, owner: ${jetStringLiteral(row.owner, partsPath)}, owned_members: ${list(row.members)}, type_exports: ${list(typeNames(row))}, impl_types: ${list(row.implTypes ?? [])}},`;
 const header = [
   `// Sources: ${exportsPath} (CORE_SOURCE_MODULES), ${partsPath} (CORE_PRIVATE_SOURCE_PARTS), ${effectSourceDisplay} (Effects::EFFECT_SOURCE)`,
   `// Source SHA-256: ${sourceHash}`,
@@ -122,6 +122,7 @@ const ownership = [
   "    pub owner: String",
   "    pub owned_members: [String]",
   "    pub type_exports: [String]",
+  "    pub impl_types: [String]",
   "}",
   "",
   "// A nominal is source-owned only when this registration row and a loaded",

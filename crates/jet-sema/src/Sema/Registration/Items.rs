@@ -2513,17 +2513,21 @@ pub(crate) fn register_impl_methods(
             }
             continue;
         }
-        if !registry.contains(&i.type_name) {
+        if !registry.contains(&i.type_name) && !registry.source_owns_impl(&i.type_name) {
             continue;
         }
         let field_names = registry.field_names(&i.type_name);
         let hook_signatures = &registry.operator_signatures;
-        let Some(type_def) = registry.types.get_mut(&i.type_name) else {
-            continue;
-        };
-        let methods_map = match type_def {
-            TypeDef::Struct { methods, .. } | TypeDef::Enum { methods, .. } => methods,
-            TypeDef::Distinct { .. } | TypeDef::Alias { .. } => continue,
+        let methods_map = if registry.source_owns_impl(&i.type_name) {
+            registry.opaque_methods.entry(i.type_name.clone()).or_default()
+        } else {
+            let Some(type_def) = registry.types.get_mut(&i.type_name) else {
+                continue;
+            };
+            match type_def {
+                TypeDef::Struct { methods, .. } | TypeDef::Enum { methods, .. } => methods,
+                TypeDef::Distinct { .. } | TypeDef::Alias { .. } => continue,
+            }
         };
         for m in &i.methods {
             if field_names.iter().any(|f| f == &m.name) {
