@@ -136,9 +136,12 @@ fn jet_cli_try_read_plan(path: String) -> JetCLITryPlan JetCLIReadError! {
     name :: jet_cli_try_text(&object, "name") ?? "Try"
     entry :: jet_cli_try_resolve(path, jet_cli_try_required_text(&object, "entry"))
     operation :: jet_cli_try_text(&object, "operation")
-    action :: if operation == .Val(selected) -> jet_cli_try_named_action(&object, selected, path) else -> {
-        if jet_cli_status_get(value, "edits") == None -> return Err(jet_cli_read_error("try plan needs `operation: \"rename\"` or `edits`"))
-        jet_cli_try_edits_action(&object, path)
+    action :: if {
+        operation == .Val(selected) -> jet_cli_try_named_action(&object, selected, path)
+        else -> {
+            if jet_cli_status_get(value, "edits") == None -> return Err(jet_cli_read_error("try plan needs `operation: \"rename\"` or `edits`"))
+            jet_cli_try_edits_action(&object, path)
+        }
     }
     jet_cli_try_unknown(object, "plan")
     Ok(JetCLITryPlan{name: name, entry: entry, action: action})
