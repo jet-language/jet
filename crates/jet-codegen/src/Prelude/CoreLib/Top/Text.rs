@@ -1790,6 +1790,10 @@ fn jet_std_fs_remove(path: &String) -> Result<(), jet_std::IOError> {
             "fault injected: FS.Write",
         ));
     }
+    jet_std_fs_remove_raw(path)
+}
+
+pub(crate) fn jet_std_fs_remove_raw(path: &String) -> Result<(), jet_std::IOError> {
     jet_fs_remove_entry(path)
         .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Write, path, error))
 }
@@ -1802,6 +1806,10 @@ fn jet_std_fs_list_dir(path: &String) -> Result<Vec<jet_std::DirEntry>, jet_std:
             "fault injected: FS.Read",
         ));
     }
+    jet_std_fs_list_dir_raw(path)
+}
+
+pub(crate) fn jet_std_fs_list_dir_raw(path: &String) -> Result<Vec<jet_std::DirEntry>, jet_std::IOError> {
     let mut out = Vec::new();
     let rd = std::fs::read_dir(path).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, path, e))?;
     for entry in rd {
@@ -1849,6 +1857,10 @@ fn jet_std_fs_remove_dir(path: &String) -> Result<(), jet_std::IOError> {
             "fault injected: FS.Write",
         ));
     }
+    jet_std_fs_remove_dir_raw(path)
+}
+
+pub(crate) fn jet_std_fs_remove_dir_raw(path: &String) -> Result<(), jet_std::IOError> {
     std::fs::remove_dir(path).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, path, e))
 }
 fn jet_std_fs_remove_all(path: &String) -> Result<(), jet_std::IOError> {
@@ -1859,8 +1871,11 @@ fn jet_std_fs_remove_all(path: &String) -> Result<(), jet_std::IOError> {
             "fault injected: FS.Write",
         ));
     }
-    let p = std::path::Path::new(path);
-    if p.is_dir() {
+    jet_std_fs_remove_all_raw(path, std::path::Path::new(path).is_dir())
+}
+
+pub(crate) fn jet_std_fs_remove_all_raw(path: &String, directory: bool) -> Result<(), jet_std::IOError> {
+    if directory {
         std::fs::remove_dir_all(path).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, path, e))
     } else {
         std::fs::remove_file(path).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, path, e))
@@ -1881,6 +1896,10 @@ fn jet_std_fs_copy(from: &String, to: &String) -> Result<(), jet_std::IOError> {
             "fault injected: FS.Write",
         ));
     }
+    jet_std_fs_copy_raw(from, to)
+}
+
+pub(crate) fn jet_std_fs_copy_raw(from: &String, to: &String) -> Result<(), jet_std::IOError> {
     std::fs::copy(from, to)
         .map(|_| ())
         .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, from, e))
@@ -1900,6 +1919,10 @@ fn jet_std_fs_copy_dir(from: &String, to: &String) -> Result<(), jet_std::IOErro
             "fault injected: FS.Write",
         ));
     }
+    jet_std_fs_copy_dir_raw(from, to)
+}
+
+pub(crate) fn jet_std_fs_copy_dir_raw(from: &String, to: &String) -> Result<(), jet_std::IOError> {
     fn copy_tree(
         src: &std::path::Path,
         dst: &std::path::Path,
