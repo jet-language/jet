@@ -149,7 +149,7 @@ fn jet_entries8_table() -> &'static std::sync::Mutex<std::collections::HashMap<i
 fn jet_entries8_context(key: i64) -> std::sync::Arc<std::sync::Mutex<JetEntries8Context>> {
     jet_entries8_table().lock().expect("entries table poisoned").get(&key).expect("live entries context").clone()
 }
-fn jet_entries8_open(source: &String, destination: &String, copying: bool) -> i64 {
+pub(crate) fn jet_entries8_open(source: &String, destination: &String, copying: bool) -> i64 {
     static NEXT: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(1);
     let key = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let root = JetEntries8Slot {
@@ -161,7 +161,7 @@ fn jet_entries8_open(source: &String, destination: &String, copying: bool) -> i6
         std::sync::Arc::new(std::sync::Mutex::new(JetEntries8Context { slots: vec![Some(root)], free: Vec::new() })));
     key
 }
-fn jet_entries8_close(key: i64) {
+pub(crate) fn jet_entries8_close(key: i64) {
     let context = jet_entries8_table().lock().expect("entries table poisoned").remove(&key);
     drop(context);
 }
@@ -179,7 +179,7 @@ fn jet_entries8_error(error: std::io::Error) -> (i64, Option<i64>, Option<String
     let (kind, code, cause) = jet_walk8_error(error);
     (special.unwrap_or(kind), code, cause)
 }
-fn jet_entries8_release(key: i64, slot: i64) {
+pub(crate) fn jet_entries8_release(key: i64, slot: i64) {
     let context = jet_entries8_context(key);
     let mut context = context.lock().expect("entries context poisoned");
     let slot = slot as usize;
@@ -188,7 +188,7 @@ fn jet_entries8_release(key: i64, slot: i64) {
     drop(context);
     drop(entry);
 }
-fn jet_entries8_read_dir(key: i64, slot: i64) -> (i64, Option<i64>, Option<String>) {
+pub(crate) fn jet_entries8_read_dir(key: i64, slot: i64) -> (i64, Option<i64>, Option<String>) {
     let context = jet_entries8_context(key);
     let mut context = context.lock().expect("entries context poisoned");
     let slot = context.slots[slot as usize].as_mut().expect("live entry slot");
@@ -197,7 +197,7 @@ fn jet_entries8_read_dir(key: i64, slot: i64) -> (i64, Option<i64>, Option<Strin
         Err(error) => jet_entries8_error(error),
     }
 }
-fn jet_entries8_next(key: i64, slot: i64) -> (bool, i64, i64, Option<i64>, Option<String>) {
+pub(crate) fn jet_entries8_next(key: i64, slot: i64) -> (bool, i64, i64, Option<i64>, Option<String>) {
     let context = jet_entries8_context(key);
     let mut context = context.lock().expect("entries context poisoned");
     let parent = context.slots[slot as usize].as_mut().expect("live entry slot");
@@ -218,7 +218,7 @@ fn jet_entries8_next(key: i64, slot: i64) -> (bool, i64, i64, Option<i64>, Optio
     };
     (false, index as i64, 0, None, None)
 }
-fn jet_entries8_file_type(key: i64, slot: i64) -> (bool, bool, i64, Option<i64>, Option<String>) {
+pub(crate) fn jet_entries8_file_type(key: i64, slot: i64) -> (bool, bool, i64, Option<i64>, Option<String>) {
     let context = jet_entries8_context(key);
     let context = context.lock().expect("entries context poisoned");
     let slot = context.slots[slot as usize].as_ref().expect("live entry slot");
@@ -227,7 +227,7 @@ fn jet_entries8_file_type(key: i64, slot: i64) -> (bool, bool, i64, Option<i64>,
         Err(error) => { let (kind, code, cause) = jet_entries8_error(error); (false, false, kind, code, cause) },
     }
 }
-fn jet_entries8_mkdir(key: i64, slot: i64) -> (i64, Option<i64>, Option<String>) {
+pub(crate) fn jet_entries8_mkdir(key: i64, slot: i64) -> (i64, Option<i64>, Option<String>) {
     let context = jet_entries8_context(key);
     let context = context.lock().expect("entries context poisoned");
     let slot = context.slots[slot as usize].as_ref().expect("live entry slot");
@@ -235,7 +235,7 @@ fn jet_entries8_mkdir(key: i64, slot: i64) -> (i64, Option<i64>, Option<String>)
         Ok(()) => (0, None, None), Err(error) => jet_entries8_error(error),
     }
 }
-fn jet_entries8_copy(key: i64, slot: i64) -> (i64, Option<i64>, Option<String>) {
+pub(crate) fn jet_entries8_copy(key: i64, slot: i64) -> (i64, Option<i64>, Option<String>) {
     let context = jet_entries8_context(key);
     let context = context.lock().expect("entries context poisoned");
     let slot = context.slots[slot as usize].as_ref().expect("live entry slot");
@@ -243,13 +243,13 @@ fn jet_entries8_copy(key: i64, slot: i64) -> (i64, Option<i64>, Option<String>) 
         Ok(_) => (0, None, None), Err(error) => jet_entries8_error(error),
     }
 }
-fn jet_entries8_before(key: i64, left: i64, right: i64) -> bool {
+pub(crate) fn jet_entries8_before(key: i64, left: i64, right: i64) -> bool {
     let context = jet_entries8_context(key);
     let context = context.lock().expect("entries context poisoned");
     let name = |slot: i64| context.slots[slot as usize].as_ref().expect("live entry slot").name.as_ref().expect("native child name");
     name(left) < name(right)
 }
-fn jet_entries8_shown(key: i64, slot: i64) -> String {
+pub(crate) fn jet_entries8_shown(key: i64, slot: i64) -> String {
     let context = jet_entries8_context(key);
     let context = context.lock().expect("entries context poisoned");
     context.slots[slot as usize].as_ref().expect("live entry slot").path.to_string_lossy().into_owned()

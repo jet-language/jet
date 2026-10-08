@@ -815,6 +815,8 @@ UTF-8 names. Directory copy processes unsorted `ReadDir` order, copies only
 regular files, and releases each entry after use. All host failures report the
 top-level source path, even for destination writes. Read then write fault
 preflights occur once, before traversal.
+Comptime and the resident interpreter marshal those same registered native
+entry facts; neither routes public glob or directory copy to a Rust traversal.
 
 Glob first collects each directory's children, orders native basenames, then
 visits depth-first without following directory symlinks. `*` matches any bytes

@@ -198,6 +198,7 @@ mod text_kernel {
     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/Text.rs");
     include!("../../../jet-codegen/src/Prelude/Core/FSIgnore.rs");
     include!("../../../jet-codegen/src/Prelude/Core/FSWalk.rs");
+    include!("../../../jet-codegen/src/Prelude/Core/FSWalk8Raw.rs");
     include!("../../../jet-codegen/src/Prelude/Core/FSOps.rs");
     include!("../../../jet-codegen/src/Prelude/Core/FileHandleOwners.rs");
     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/FSRuntimeOps.rs");
@@ -471,9 +472,6 @@ mod text_kernel {
     }
     pub(super) fn fs_copy(from: &str, to: &str) -> Result<(), jet_std::IOError> {
         jet_std_fs_copy(&from.to_string(), &to.to_string())
-    }
-    pub(super) fn fs_copy_dir(from: &str, to: &str) -> Result<(), jet_std::IOError> {
-        jet_std_fs_copy_dir(&from.to_string(), &to.to_string())
     }
     pub(super) fn fs_list_dir(path: &str) -> Result<Vec<jet_std::DirEntry>, jet_std::IOError> {
         jet_std_fs_list_dir(&path.to_string())
@@ -1093,9 +1091,6 @@ pub(super) fn fs_remove_all(path: &str) -> FsResult<()> {
 pub(super) fn fs_copy(from: &str, to: &str) -> FsResult<()> {
     text_kernel::fs_copy(from, to).map_err(io_error_ct)
 }
-pub(super) fn fs_copy_dir(from: &str, to: &str) -> FsResult<()> {
-    text_kernel::fs_copy_dir(from, to).map_err(io_error_ct)
-}
 pub(super) fn fs_rename(from: &str, to: &str) -> FsResult<()> {
     text_kernel::jet_fs_rename(from, to).map_err(|error| {
         io_error_ct(text_kernel::jet_std::io_error_at(
@@ -1155,9 +1150,47 @@ pub(crate) fn apply_files_leaf(
             Err(error) => CtValue::failed(Box::new(io_error_ct(error))),
         }
     }
+    fn facts(fields: Vec<(&str, CtValue)>) -> CtValue {
+        CtValue::Struct {
+            type_name: format!("({})", fields.iter().map(|(name, _)| *name).collect::<Vec<_>>().join(",")),
+            fields: fields.into_iter().map(|(name, value)| (name.into(), value)).collect(),
+        }
+    }
+    fn error_facts(kind: i64, code: Option<i64>, cause: Option<String>) -> Vec<(&'static str, CtValue)> {
+        vec![
+            ("kind", CtValue::Int(kind)),
+            ("code", code.map_or_else(|| CtValue::absent(crate::AST::Type::Int), |value| CtValue::Present(Box::new(CtValue::Int(value))))),
+            ("cause", cause.map_or_else(|| CtValue::absent(crate::AST::Type::String), |value| CtValue::Present(Box::new(CtValue::Str(value))))),
+        ]
+    }
     let unit = |_: ()| CtValue::Unit;
     let run = || -> Result<CtValue, String> {
         Ok(match method {
+            "__entries_context" => CtValue::Int(text_kernel::jet_entries8_open(&text(0)?, &text(1)?, boolean(2)?)),
+            "__entries_close" => { text_kernel::jet_entries8_close(int(0)?); CtValue::Unit },
+            "__entries_release" => { text_kernel::jet_entries8_release(int(0)?, int(1)?); CtValue::Unit },
+            "__entries_shown" => CtValue::Str(text_kernel::jet_entries8_shown(int(0)?, int(1)?)),
+            "__entries_before" => CtValue::Bool(text_kernel::jet_entries8_before(int(0)?, int(1)?, int(2)?)),
+            "__entries_read_dir" | "__entries_mkdir" | "__entries_copy" => {
+                let (kind, code, cause) = match method {
+                    "__entries_read_dir" => text_kernel::jet_entries8_read_dir(int(0)?, int(1)?),
+                    "__entries_mkdir" => text_kernel::jet_entries8_mkdir(int(0)?, int(1)?),
+                    _ => text_kernel::jet_entries8_copy(int(0)?, int(1)?),
+                };
+                facts(error_facts(kind, code, cause))
+            }
+            "__entries_next" => {
+                let (end, child, kind, code, cause) = text_kernel::jet_entries8_next(int(0)?, int(1)?);
+                let mut fields = vec![("end", CtValue::Bool(end)), ("child", CtValue::Int(child))];
+                fields.extend(error_facts(kind, code, cause));
+                facts(fields)
+            }
+            "__entries_file_type" => {
+                let (directory, file, kind, code, cause) = text_kernel::jet_entries8_file_type(int(0)?, int(1)?);
+                let mut fields = vec![("directory", CtValue::Bool(directory)), ("file", CtValue::Bool(file))];
+                fields.extend(error_facts(kind, code, cause));
+                facts(fields)
+            }
             "__os_family" => CtValue::Str(text_kernel::jet_std_os_family()),
             "__process_id_raw" => CtValue::Int(std::process::id() as i64),
             "__map_raw" => done(text_kernel::jet_std::jet_std_files_map(&text(0)?), opaque_file),
@@ -1310,15 +1343,6 @@ pub(crate) fn apply_files_leaf(
         return None;
     }
     Some(run())
-}
-pub(super) fn fs_glob(pattern: &str) -> FsResult<Vec<String>> {
-    text_kernel::jet_fs_glob(pattern).map_err(|error| {
-        io_error_ct(text_kernel::jet_std::io_error_at(
-            text_kernel::jet_std::IOOperation::Read,
-            pattern,
-            error,
-        ))
-    })
 }
 /// `(name, full path, is_dir)` rows in the kernel's own sorted order (D-LSDIR1).
 pub(super) fn fs_list_dir(path: &str) -> FsResult<Vec<(String, String, bool)>> {
