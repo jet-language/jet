@@ -1,0 +1,120 @@
+use jet_foundation.[
+    MIRAccess, MIRConstant, MIRCopyFact, MIRDropKind, MIRFunction, MIROperation,
+    MIRPreludeABI, MIRPreludeFamily, MIRProgram, MIRStringPart, MIRStringPartKind,
+    MIRTerminator, MIRType, MIRTypeDef, MIRTypeKind, MIRValueID,
+    mir_function_id, mir_nominal_ref, mir_owned_ownership,
+    mir_ownership_from_access, mir_type_from_kind,
+]
+
+fn fx_rank_type(elem: MIRType) -> MIRType Never! {
+    mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref("Rank"), args: [MIRType]{elem}})
+}
+
+fn fx_rank_program(b: FxBuilder) -> MIRProgram Never! {
+    p := fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, [MIRTypeDef]{})
+    members :: [String]{"rank_from", "rank_to_list", "rank_insert", "rank_remove", "rank_has", "rank_first", "rank_last", "rank_len", "rank_is_empty", "rank_clear", "rank_union", "rank_intersection", "rank_difference"}
+    symbols :: [String]{"jet_sorted_set_from", "jet_sorted_set_to_list", "jet_sorted_set_insert", "jet_sorted_set_remove", "std::collections::BTreeSet::contains", "jet_sorted_set_first", "jet_sorted_set_last", "jet_sorted_set_len", "jet_sorted_set_is_empty", "std::collections::BTreeSet::clear", "jet_sorted_set_union", "jet_sorted_set_intersection", "jet_sorted_set_difference"}
+    loop (index, member) in members {
+        unary :: index == 2 || index == 3 || index == 4 || index >= 10
+        row := fx_prelude(MIRPreludeFamily.BuiltinMethod, "core.builtin", member, symbols[index], if unary -> 2 else -> 1, MIRPreludeABI.Value)
+        row.signature.borrow_mask[0] = index != 0
+        if unary -> row.signature.borrow_mask[1] = index == 4 || index >= 10
+        &p.prelude_calls.push(row)
+    }
+    p
+}
+
+// Numeric order differs from both insertion order and lexical display order.
+// First/last, lists, unions and intersections own their cloned keys; clear
+// and drop retire only the receiver. Mutators return Unit, unlike Set.insert.
+// expect-stdout ranks: "[-3, 1, 2, 10]\n[-3, 1, 2, 10]\n[-7, -3, 1, 10]\n-7\n10\nfalse\n4\nfalse\n[-7, -3, 1, 2, 10]\n[-3, 1, 10]\nnull\nnull\n0\ntrue\n[-3, 1, 2, 10]\n[-3, 1, 2, 10]\nblue\nred\n[blue, red]\n"
+// expect-runtime-only ranks: exact Int ordering and native key ownership
+fn fx_ranks() -> MIRProgram Never! {
+    b := fx_builder()
+    ty :: fx_rank_type(fx_int())
+    list_ty :: fx_list_type(fx_int())
+    option :: mir_type_from_kind(MIRTypeKind.Option{inner: fx_int()})
+    root :: fx_local(&b, "rank", ty, mir_owned_ownership())
+    ten :: fx_int_const(&b, 10)
+    two :: fx_int_const(&b, 2)
+    negative :: fx_int_const(&b, -3)
+    one :: fx_int_const(&b, 1)
+    source :: fx_owned(&b, list_ty, MIROperation.BuildList{values: [MIRValueID]{ten, two, negative, ten, one}, trait_coercion: None})
+    rank :: fx_set_method(&b, "rank_from", source, None, [MIRValueID]{}, ty, true)
+    fx_do(&b, MIROperation.WritePlace{place: root, value: rank})
+    fx_print(&b, rank)
+    debug :: fx_owned(&b, fx_string(), MIROperation.BuildString{parts: [MIRStringPart]{MIRStringPart{kind: MIRStringPartKind.Interpolation{value: rank, format: .Debug}}}})
+    fx_print(&b, debug)
+    original :: fx_owned(&b, ty, MIROperation.Copy{value: rank, fact: MIRCopyFact.Explicit})
+    items :: fx_set_method(&b, "rank_to_list", rank, None, [MIRValueID]{}, list_ty, true)
+    lent :: fx_value(&b, ty, mir_ownership_from_access(MIRAccess.Write), MIROperation.AddressOf{place: root, access: MIRAccess.Write})
+    less :: fx_int_const(&b, -7)
+    _ := fx_set_method(&b, "rank_insert", lent, Val(root), [MIRValueID]{less}, fx_unit(), false)
+    _ := fx_set_method(&b, "rank_insert", lent, Val(root), [MIRValueID]{ten}, fx_unit(), false)
+    _ := fx_set_method(&b, "rank_remove", lent, Val(root), [MIRValueID]{two}, fx_unit(), false)
+    missing :: fx_int_const(&b, 100)
+    _ := fx_set_method(&b, "rank_remove", lent, Val(root), [MIRValueID]{missing}, fx_unit(), false)
+    fx_print(&b, rank)
+    first :: fx_set_method(&b, "rank_first", rank, None, [MIRValueID]{}, option, true)
+    last :: fx_set_method(&b, "rank_last", rank, None, [MIRValueID]{}, option, true)
+    fx_print(&b, first)
+    fx_print(&b, last)
+    has :: fx_set_method(&b, "rank_has", rank, None, [MIRValueID]{two}, fx_bool(), false)
+    fx_print(&b, has)
+    length :: fx_set_method(&b, "rank_len", rank, None, [MIRValueID]{}, fx_int(), false)
+    fx_print(&b, length)
+    empty :: fx_set_method(&b, "rank_is_empty", rank, None, [MIRValueID]{}, fx_bool(), false)
+    fx_print(&b, empty)
+    union :: fx_set_method(&b, "rank_union", rank, None, [MIRValueID]{original}, ty, true)
+    intersection :: fx_set_method(&b, "rank_intersection", rank, None, [MIRValueID]{original}, ty, true)
+    fx_print(&b, union)
+    fx_print(&b, intersection)
+    _ := fx_set_method(&b, "rank_clear", lent, Val(root), [MIRValueID]{}, fx_unit(), false)
+    empty_first :: fx_set_method(&b, "rank_first", rank, None, [MIRValueID]{}, option, true)
+    empty_last :: fx_set_method(&b, "rank_last", rank, None, [MIRValueID]{}, option, true)
+    fx_print(&b, empty_first)
+    fx_print(&b, empty_last)
+    zero :: fx_set_method(&b, "rank_len", rank, None, [MIRValueID]{}, fx_int(), false)
+    vacant :: fx_set_method(&b, "rank_is_empty", rank, None, [MIRValueID]{}, fx_bool(), false)
+    fx_print(&b, zero)
+    fx_print(&b, vacant)
+    lost :: fx_owned(&b, ty, MIROperation.MovePlace{place: root})
+    fx_do(&b, MIROperation.Drop{value: lost, kind: MIRDropKind.Value})
+    fx_print(&b, original)
+    fx_print(&b, items)
+
+    texts :: fx_list_type(fx_string())
+    strings_ty :: fx_rank_type(fx_string())
+    strings_root :: fx_local(&b, "strings", strings_ty, mir_owned_ownership())
+    red :: fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "red"}})
+    blue :: fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "blue"}})
+    blue_again :: fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "blue"}})
+    text_input :: fx_owned(&b, texts, MIROperation.BuildList{values: [MIRValueID]{red, blue, blue_again}, trait_coercion: None})
+    strings :: fx_set_method(&b, "rank_from", text_input, None, [MIRValueID]{}, strings_ty, true)
+    fx_do(&b, MIROperation.WritePlace{place: strings_root, value: strings})
+    string_option :: mir_type_from_kind(MIRTypeKind.Option{inner: fx_string()})
+    head :: fx_set_method(&b, "rank_first", strings, None, [MIRValueID]{}, string_option, true)
+    tail :: fx_set_method(&b, "rank_last", strings, None, [MIRValueID]{}, string_option, true)
+    snapshot :: fx_set_method(&b, "rank_to_list", strings, None, [MIRValueID]{}, texts, true)
+    gone :: fx_owned(&b, strings_ty, MIROperation.MovePlace{place: strings_root})
+    fx_do(&b, MIROperation.Drop{value: gone, kind: MIRDropKind.Value})
+    fx_print(&b, head)
+    fx_print(&b, tail)
+    fx_print(&b, snapshot)
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_rank_program(b)
+}
+
+fn fx_rank_refusals() -> Bool Never! {
+    b := fx_builder()
+    ty :: fx_rank_type(fx_int())
+    source :: fx_owned(&b, fx_list_type(fx_int()), MIROperation.BuildList{values: [MIRValueID]{}, trait_coercion: None})
+    rank :: fx_set_method(&b, "rank_from", source, None, [MIRValueID]{}, ty, true)
+    _ := fx_set_method(&b, "rank_difference", rank, None, [MIRValueID]{rank}, ty, true)
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    lowered :: lir_lower_entry(fx_rank_program(b), mir_function_id("run"))
+    loop issue in lowered.issues {
+        if issue.message.contains("builtin method rank_difference is not lowered") -> return true
+    }
+    false
+}
