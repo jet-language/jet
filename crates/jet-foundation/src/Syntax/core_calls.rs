@@ -1584,7 +1584,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 6daf847987010042f71353464ba95702cd6c2a6ef80f2e3197e8a19210b22d95
+// Source SHA-256: 8bac448cf6835fece057e7621c489ffb4d947c68bf49f2859e708194eecc2ffe
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -3458,7 +3458,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.web", "auth_show", "jet_app_auth_show", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.web.devserver", "for_app", "jet_devserver_for_app", true, &[true], ),
     CoreCallRecord::new("core.web.devserver", "app", "jet_devserver_app", true, &[]),
-    CoreCallRecord::new( "core.web.browser", "profile", "jet_browser_profile", false, &[true], ),
+    CoreCallRecord::source_owned("core.web.browser", "profile", &[true]),
     CoreCallRecord::new( "core.web.browser", "timeout", "jet_browser_timeout", false, &[false], ),
     CoreCallRecord::new( "core.web.browser", "locked", "jet_browser_locked", false, &[true], ),
     CoreCallRecord::new( "core.web.browser", "connect", "jet_browser_connect", false, &[true], ),
