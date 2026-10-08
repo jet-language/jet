@@ -125,13 +125,13 @@ fn capability_inputs() -> TUICapabilityInputs Never! {
     ascii :: capability_env_flag("JET_TUI_ASCII")
     forced :: capability_env_flag("FORCE_COLOR")
     no_color :: capability_env_bytes("NO_COLOR") != None
-    terminal :: #Unsafe("Core TUI samples the same stdout terminal fact consumed by terminal style/progress") {
-        core.term.__stdout_terminal()
-    }
-    TUICapabilityInputs{
-        columns: columns, lines: lines, term: term, color_term: color_term,
-        ascii: ascii, forced: forced, no_color: no_color, terminal: terminal,
-        usize_max: core.sys.usize_max()
+    #Unsafe("Core TUI samples the same stdout terminal fact consumed by terminal style/progress") {
+        terminal :: core.term.__stdout_terminal()
+        return TUICapabilityInputs{
+            columns: columns, lines: lines, term: term, color_term: color_term,
+            ascii: ascii, forced: forced, no_color: no_color, terminal: terminal,
+            usize_max: core.sys.usize_max()
+        }
     }
 }
 
@@ -139,18 +139,18 @@ fn capability_dimension(text: String?, fallback: Int, maximum: U64) -> Int Never
     value :: text ?? return fallback
     raw :: value.bytes()
     at := 0
-    if raw.len() > 0 && raw[0] == U8{43} -> at = 1
+    if raw.len() > 0 && raw[0] == (U8{43}) -> at = 1
     if at == raw.len() -> return fallback
     parsed := U64{0}
     loop at < raw.len() {
         byte :: raw[at]
-        if byte < U8{48} || byte > U8{57} -> return fallback
+        if byte < (U8{48}) || byte > (U8{57}) -> return fallback
         digit :: U64{Int.from_u8(byte) - 48}
-        if parsed > (maximum - digit) / U64{10} -> return fallback
+        if parsed > (maximum - digit) / (U64{10}) -> return fallback
         parsed = parsed * U64{10} + digit
         at += 1
     }
-    if parsed == U64{0} -> return fallback
+    if parsed == (U64{0}) -> return fallback
     Int.from_u64(parsed)
 }
 
@@ -158,7 +158,7 @@ fn capability_ascii_lower(text: String) -> String Never! {
     raw :: text.bytes()
     out := [U8]{}
     loop byte in raw {
-        if byte >= U8{65} && byte <= U8{90} -> &out.push(U8{Int.from_u8(byte) + 32})
+        if byte >= (U8{65}) && byte <= (U8{90}) -> &out.push(U8{Int.from_u8(byte) + 32})
         else -> &out.push(byte)
     }
     String.from_bytes(out) ?? panic("ASCII case conversion preserves UTF-8")
@@ -641,14 +641,14 @@ fn scalar_display_width(n: Int) -> Int Never! {
     words :: style_words(styled)
     assert(words.foreground.kind == 3 && words.foreground.word == 795192)
     assert(words.background.kind == 1 && words.background.word == 2 && words.flags == 1)
-    node :: #Unsafe("Core TUI test: normalized style words and explicit absent UI slots") {
-        ui.__node_transfer("jet", 3.0, 1.0, 2, 1, [UINode]{}, false, "", 63, true,
+    #Unsafe("Core TUI test: normalized style words and explicit absent UI slots") {
+        node :: ui.__node_transfer("jet", 3.0, 1.0, 2, 1, [UINode]{}, false, "", 63, true,
             words.foreground.kind, words.foreground.word, words.background.kind, words.background.word, words.flags)
+        backend :: ui.tui_backend()
+        ui.mount(backend, node)
+        lines :: backend.frame_lines()
+        assert(lines.len() > 0 && lines[0] == style_text("jet", styled, capabilities()))
     }
-    backend :: ui.tui_backend()
-    ui.mount(backend, node)
-    lines :: backend.frame_lines()
-    assert(lines.len() > 0 && lines[0] == style_text("jet", styled, capabilities()))
 }
 
 #Test("TUI list/table formatting keeps scalar widths and empty cells") {
