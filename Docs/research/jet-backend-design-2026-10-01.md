@@ -581,6 +581,10 @@ checking supplied arity. Seed types missing a Jet argument identity remain
 explicit unsupported rows with the actual declaration and reason; source
 nominals never receive this exception. Inventory consumers must preserve
 these seed-only rows and assign their runtime port owner.
+Native-only Shared downgrade/weak-upgrade/weak-drop use the existing external
+provider table: Word→Word, Word/Word→Flag, and Word→Unit respectively. Their
+actual Jet declarations are ABI-validated before enrollment, no Rust provider
+body is synthesized, and absent providers cannot acquire dangling routes.
 Every generated handle helper shares one provider-ownership gate: a name in
 `JetRuntime/exports.list` must have its exact drop, clone, Bool equality, or
 text-render C ABI validated against the Jet declaration before its Rust

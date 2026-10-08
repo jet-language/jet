@@ -1272,14 +1272,19 @@ if (jetRuntimeExports.has("jet_rt_int_drop") && !adapters.some((adapter) => adap
   adapters.push(adapter);
 }
 
-// Native-only BitSet operations have no seed kernel to wrap. Their dispatch
-// is typed in Routes.jet; the physical providers still use this ABI table.
-for (const [name, params, result] of [
-  ["jet_rt_native_bits_new", [], { jet: 'Plain{carrier: LowerRouteCarrier.Handle{name: "JetBitSet"}}', ret: "i64", outs: [] }],
-  ["jet_rt_native_bits_clear", [{ jet: 'HandleMut{name: "JetBitSet"}', ctys: ["i64"] }], { jet: "Plain{carrier: LowerRouteCarrier.Unit}", ret: null, outs: [] }],
+// Native-only operations have no seed kernel to wrap. Their dispatch is typed
+// in Routes.jet; their real Jet providers still validate against this ABI table.
+// Weak signatures: Shared.jet@4f9428a3a, Word -> Word, Word/Word -> Flag,
+// Word -> Unit. Enrollment does not admit a Rust Box carrier or seed body.
+for (const [name, params, result, row] of [
+  ["jet_rt_native_bits_new", [], { jet: 'Plain{carrier: LowerRouteCarrier.Handle{name: "JetBitSet"}}', ret: "i64", outs: [] }, "JetRuntime.BitSet.new"],
+  ["jet_rt_native_bits_clear", [{ jet: 'HandleMut{name: "JetBitSet"}', ctys: ["i64"] }], { jet: "Plain{carrier: LowerRouteCarrier.Unit}", ret: null, outs: [] }, "JetRuntime.BitSet.clear"],
+  ["jet_rt_native_shared_downgrade", [{ jet: "Word", ctys: ["i64"] }], { jet: "Plain{carrier: LowerRouteCarrier.Word}", ret: "i64", outs: [] }, "JetRuntime.Shared.downgrade"],
+  ["jet_rt_native_shared_weak_upgrade", [{ jet: "Word", ctys: ["i64"] }, { jet: "Word", ctys: ["i64"] }], { jet: "Plain{carrier: LowerRouteCarrier.Flag}", ret: "bool", outs: [] }, "JetRuntime.Shared.weak_upgrade"],
+  ["jet_rt_native_shared_weak_drop", [{ jet: "Word", ctys: ["i64"] }], { jet: "Plain{carrier: LowerRouteCarrier.Unit}", ret: null, outs: [] }, "JetRuntime.Shared.weak_drop"],
 ]) {
   if (!jetRuntimeExports.has(name)) continue;
-  const adapter = { symbol: name, name, external: true, params, result, rows: [`JetRuntime.BitSet.${name.endsWith("_new") ? "new" : "clear"}`] };
+  const adapter = { symbol: name, name, external: true, params, result, rows: [row] };
   validateRuntimeRoute(adapter, jetRuntimeSignatures.get(name));
   adapters.push(adapter);
 }
