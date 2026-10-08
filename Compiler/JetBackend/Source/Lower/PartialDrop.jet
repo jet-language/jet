@@ -110,13 +110,14 @@ fn lower_partial_field_path(p: MIRProgram, ty: MIRType, projections: [MIRProject
     path := [LowerGlueField]{}
     current := ty
     loop projection in projections {
-        if projection != .Field(_, _) -> return None
         if projection == .Field(id, _) {
             field :: lower_struct_field(p, current, id) ?? return None
             storage :: if field.boxed -> lower_option_type(field.ty) else -> field.ty
             &path.push(LowerGlueField{offset: field.offset, ty: storage})
             if field.boxed -> &path.push(LowerGlueField{offset: 0, ty: field.ty})
             current = field.ty
+        } else {
+            return None
         }
     }
     Val(path)
@@ -177,7 +178,7 @@ fn lower_partial_frame(p: MIRProgram, c: LowerContext, m: LowerModule, f: &Lower
                 else -> next
             }
             loop (index, slot) in c.slots {
-                if owner == "slot.{index}" -> root_ty = slot.ty
+                if owner == ("slot.{index}") -> root_ty = slot.ty
             }
             &f.partial_drops.push(LowerPartialDrop{result: result.value, owner: owner, path: path, root_ty: root_ty, live: LIRValueID{value: -1}})
         }
@@ -271,7 +272,7 @@ fn lower_partial_drop_node(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ba
             lower_inline_drop(p, &m, &f, base, ty)
         } else {
             layout :: lower_repr_layout(lower_repr(p, ty)) ?? return lower_fail(&m, &f, "partial drop leaf has no carrier")
-            owned :: lower_new_value(&f, layout, lower_drop(&m, f, lower_repr(p, ty), true), ty.identity)
+            owned :: lower_new_value(&f, layout, lower_drop(&m, lower_repr(p, ty), true), ty.identity)
             lower_emit(&f, LIRInst.Copy{dst: owned, src: base})
             lower_emit(&f, LIRInst.Drop{value: owned})
         }
@@ -328,7 +329,8 @@ fn lower_partial_drop_node(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ba
 }
 
 fn lower_partial_drop_value(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, value: MIRValueID, lowered: LIRValueID, ty: MIRType) -> Bool Never! {
-    lower_partial_drop_owned(p, &m, &f, lower_partial_owner(c, value), [LowerGlueField]{}, lowered, ty, true, lower_close_receiver_value(c, f, value))
+    receiver :: lower_close_receiver_value(c, f, value)
+    lower_partial_drop_owned(p, &m, &f, lower_partial_owner(c, value), [LowerGlueField]{}, lowered, ty, true, receiver)
 }
 
 fn lower_partial_drop_owned(p: MIRProgram, m: &LowerModule, f: &LowerFunction, owner: String, prefix: [LowerGlueField], lowered: LIRValueID, ty: MIRType, consume: Bool, receiver: Bool) -> Bool Never! {
@@ -359,6 +361,7 @@ fn lower_partial_drop_owned(p: MIRProgram, m: &LowerModule, f: &LowerFunction, o
     }
     lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
     lower_start(&f, partial, [LIRValueID]{})
+    if receiver -> lower_close_forget(&f)
     lower_partial_drop_node(p, &m, &f, lowered, ty, rows, prefix.len())
     if consume && lower_value_drop(f, lowered) != .Trivial {
         // The inlined drop-rest already released this box. Consume its LIR
@@ -371,8 +374,7 @@ fn lower_partial_drop_owned(p: MIRProgram, m: &LowerModule, f: &LowerFunction, o
     true
 }
 
-fn lower_partial_drop_stored(p: MIRProgram, m: &LowerModule, f: &LowerFunction, owner: String, prefix: [LowerGlueField], base: LIRValueID, offset: Int, ty: MIRType) Never! {
-    receiver :: lower_close_storage_type(f, ty)
+fn lower_partial_drop_stored(p: MIRProgram, m: &LowerModule, f: &LowerFunction, owner: String, prefix: [LowerGlueField], base: LIRValueID, offset: Int, ty: MIRType, receiver: Bool) Never! {
     guarded := receiver
     loop row in f.partial_drops {
         if row.owner == owner && lower_partial_prefix(row.path, prefix) -> guarded = true

@@ -373,49 +373,72 @@ fn lower_close_receiver(p: MIRProgram, m: LowerModule, function: MIRFunction) ->
 }
 
 fn lower_close_receiver_value(c: LowerContext, f: LowerFunction, value: MIRValueID) -> Bool Never! {
-    if f.closing == None -> return false
+    parameter :: f.close_parameter ?? return false
     root :: lower_move_root(c, value)
-    loop block in c.mir.blocks {
-        loop instruction in block.instructions {
-            if instruction.operation != .Parameter(0, _) -> next
-            parameter :: instruction.result ?? return false
-            if root == parameter -> return true
-            slot :: lower_slot_of_value(c, parameter) ?? return false
-            return lower_slot_of_value(c, root) == Val(slot)
-        }
-    }
-    false
+    if root == parameter -> return true
+    slot :: lower_slot_of_value(c, parameter) ?? return false
+    lower_slot_of_value(c, root) == Val(slot)
 }
 
-fn lower_close_storage_type(f: LowerFunction, ty: MIRType) -> Bool Never! {
-    if f.closing == .Val(receiver) -> return mir_type_same_checked_type(receiver, ty)
-    false
+fn lower_close_receiver_slot(c: LowerContext, f: LowerFunction, slot: Int) -> Bool Never! {
+    parameter :: f.close_parameter ?? return false
+    lower_slot_of_value(c, parameter) == Val(slot)
 }
+
+fn lower_close_frame(m: &LowerModule, f: &LowerFunction) Never! {
+    if f.closing == None -> return
+    receiver :: (~f.params[0]) ?? return lower_fail(&m, &f, "Close receiver has no value")
+    cell :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.StackSlot{dst: cell, size: 8, align: 8})
+    lower_emit(&f, LIRInst.Store{base: cell, offset: 0, value: receiver})
+    f.close_identity = Val(cell)
+}
+
+fn lower_close_forget(f: &LowerFunction) Never! {
+    cell :: f.close_identity ?? return
+    zero :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Const{dst: zero, value: 0})
+    lower_emit(&f, LIRInst.Store{base: cell, offset: 0, value: zero})
+}
+
+fn lower_close_transfer(c: LowerContext, f: &LowerFunction, value: MIRValueID) Never! {
+    receiver :: lower_close_receiver_value(c, f, value)
+    if receiver -> lower_close_forget(&f)
+}
+
 
 // The structural role belongs to the original receiver's storage, not its
 // type. A rebind of that slot and every other value of T retain ordinary Close.
 fn lower_close_value_drop(p: MIRProgram, m: &LowerModule, f: &LowerFunction, value: LIRValueID, ty: MIRType, consume: Bool) Never! {
-    receiver :: (~f.params[0]) ?? return lower_fail(&m, &f, "Close receiver has no value")
+    cell :: f.close_identity ?? return lower_fail(&m, &f, "Close receiver has no identity cell")
+    receiver :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Load{dst: receiver, base: cell, offset: 0})
+    zero :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Const{dst: zero, value: 0})
+    same := lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: same, condition: .Ne, left: receiver, right: zero})
+    if !lower_is_inline(p, ty) {
+        address :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Compare{dst: address, condition: .Eq, left: value, right: receiver})
+        both :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Binary{dst: both, op: .And, left: same, right: address})
+        same = both
+    }
     signature :: lower_signature(&m, [LIRLayout]{lir_layout_pointer()}, None)
     structural :: lower_helper_id(&m, "drop.structural", ty)
     ordinary :: lower_glue_id(&m, ty)
-    if value == receiver {
-        lower_emit(&f, LIRInst.Call{dst: None, signature: signature, callee: LIRCallee.Function{id: structural}, args: [LIRValueID]{value}})
-    } else {
-        same :: lower_flag(&f)
-        lower_emit(&f, LIRInst.Compare{dst: same, condition: .Eq, left: value, right: receiver})
-        original :: lower_new_block(&f)
-        rebound :: lower_new_block(&f)
-        done :: lower_new_block(&f)
-        lower_seal(&f, LIRTerminator.Branch{condition: same, then_target: lower_target(original, [LIRValueID]{}), else_target: lower_target(rebound, [LIRValueID]{})})
-        lower_start(&f, original, [LIRValueID]{})
-        lower_emit(&f, LIRInst.Call{dst: None, signature: signature, callee: LIRCallee.Function{id: structural}, args: [LIRValueID]{value}})
-        lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
-        lower_start(&f, rebound, [LIRValueID]{})
-        lower_emit(&f, LIRInst.Call{dst: None, signature: signature, callee: LIRCallee.Function{id: ordinary}, args: [LIRValueID]{value}})
-        lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
-        lower_start(&f, done, [LIRValueID]{})
-    }
+    original :: lower_new_block(&f)
+    rebound :: lower_new_block(&f)
+    done :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: same, then_target: lower_target(original, [LIRValueID]{}), else_target: lower_target(rebound, [LIRValueID]{})})
+    lower_start(&f, original, [LIRValueID]{})
+    lower_close_forget(&f)
+    lower_emit(&f, LIRInst.Call{dst: None, signature: signature, callee: LIRCallee.Function{id: structural}, args: [LIRValueID]{value}})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, rebound, [LIRValueID]{})
+    lower_emit(&f, LIRInst.Call{dst: None, signature: signature, callee: LIRCallee.Function{id: ordinary}, args: [LIRValueID]{value}})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, done, [LIRValueID]{})
     if consume && lower_value_drop(f, value) != .Trivial {
         released :: lower_new_value(&f, lir_layout_pointer(), LIRDrop.Trivial, ty.identity)
         lower_emit(&f, LIRInst.Reown{dst: released, src: value})
