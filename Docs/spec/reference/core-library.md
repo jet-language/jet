@@ -42,6 +42,10 @@ operations beneath that source may remain registered raw leaves while their
 runtime layer is ported; this does not create a second implementation of the
 public declaration's policy.
 
+Filesystem internal host calls use their canonical `core.files.__*` names
+directly. There is no second `__files7_*` alias layer: the Prelude's existing
+registry entries provide the raw host boundary until Jet runtime L7 replaces
+them at Rust cutover.
 Types and error enums use PascalCase (`String`, `IOError`, `JSON`); functions
 and module segments use snake_case (`read`, `core.files`) (S54). Acronyms keep
 their declared spelling; see S66.
