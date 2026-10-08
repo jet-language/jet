@@ -1527,7 +1527,7 @@ for (const adapter of adapters) {
   const ret = adapter.result.ret ? ` -> ${adapter.result.ret}` : "";
   const call = `crate::${adapter.target}(${adapter.params.map((param, index) => param.expr(names[index])).join(", ")})`;
   rs.push("");
-  rs.push(`    /// ${adapter.rows.join(", ")}`);
+  rs.push(`    /// ${adapter.rows.join(", ")}`.trimEnd());
   rs.push("    #[no_mangle]");
   rs.push(`    pub extern "C" fn ${adapter.name}(${params.join(", ")})${ret} {`);
   rs.push(`        guard(|| ${adapter.result.body(call)})`);
