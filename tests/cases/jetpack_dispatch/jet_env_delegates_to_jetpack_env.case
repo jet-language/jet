@@ -1,0 +1,12 @@
+# Port of tests/jetpack_dispatch.rs:197-223. PENDING-SAME-HEAD and batch-four grammar.
+# Sources/literal predicates copied verbatim, helper templates expanded exactly.
+fixture: fixtures/jet_env_delegates_to_jetpack_env
+when os unix: chmod: jet-pkgs/pkgs/hello/bin/hello 0755
+write: proj/env.jet proj/env.template
+env: JETPACK_ROOT={work}/root
+env: HOME={work}/home
+env: PATH=
+step: jet env --no-color --trust --offline -- hello
+cwd: proj
+exit: 0
+stdout.trim: = jet_env_delegates_to_jetpack_env.out

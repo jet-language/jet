@@ -1,0 +1,50 @@
+# Port of tests/onboarding_recovery.rs:140-278. PENDING-SAME-HEAD / batch-four grammar.
+# Exact original source, algorithmic setup and literal stdout predicates.
+fixture: fixtures/entry_recovery_covers_missing_ambiguous_legacy_and_stale_layouts
+env: NO_COLOR=1
+step: jet run
+cwd: missing
+exit: nonzero
+stderr: ~ "run.jet" # original contains predicate
+stderr: ~ "Fix:" # original contains predicate
+copy: restored.jet missing/run.jet
+step: jet run
+cwd: missing
+exit: 0
+stdout: = entry_recovery_covers_missing_ambiguous_legacy_and_stale_layouts.restored.out
+step: jet run
+cwd: workspace
+exit: nonzero
+stderr: ~ "ambiguous" # original contains predicate
+stderr: ~ "-p" # original contains predicate
+step: jet run -p one
+cwd: workspace
+exit: 0
+stdout: = entry_recovery_covers_missing_ambiguous_legacy_and_stale_layouts.one.out
+step: jet run
+cwd: legacy
+exit: 0
+stdout: = entry_recovery_covers_missing_ambiguous_legacy_and_stale_layouts.legacy.out
+file: legacy/run.jet is-file
+file: legacy/main.jet absent
+stderr: ~ "migrated" # original contains predicate
+step: jet run
+cwd: conflict
+exit: nonzero
+stderr: ~ "E2105" # original contains predicate
+stderr: ~ "ambiguous project entry" # original contains predicate
+remove: conflict/main.jet
+step: jet run
+cwd: conflict
+exit: 0
+stdout: = entry_recovery_covers_missing_ambiguous_legacy_and_stale_layouts.current.out
+step: jet run
+cwd: stale
+exit: nonzero
+stderr: ~ "E1226" # original contains predicate
+stderr: ~ "package.jet" # original contains predicate
+rename: stale/pkg.jet stale/package.jet
+step: jet run
+cwd: stale
+exit: 0
+stdout: = entry_recovery_covers_missing_ambiguous_legacy_and_stale_layouts.stale.out

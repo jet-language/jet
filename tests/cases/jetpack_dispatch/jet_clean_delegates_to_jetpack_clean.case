@@ -1,0 +1,17 @@
+# Port of tests/jetpack_dispatch.rs:39-57; PENDING-SEAM(hangar-fixture-backdate).
+# Exact setup is write_hangar_meta(root, "old-top", "oldtop", "1.0", Some(1)):
+# support/jetpack_fixtures.rs623-664 creates payload "fixture payload: old-top",
+# calls Store::ingest_tree with reference fixture:old-top, cache identities
+# sha256-fixture-source-old-top / sha256-fixture-recipe-old-top / policy=fixture,
+# host platform, output out, empty references/signature/artifact-kind, provenance fixture;
+# removes staging source and calls test_backdate_last_used_at(entry.id,1).
+# The required provider must perform canonical ingestion and backdating before these steps.
+# No hand-authored hangar envelope or fabricated stale identity substitutes for ingestion.
+refused: hangar-fixture-backdate
+mkdir: root
+env: JETPACK_ROOT={work}/root
+capture: stale = sole-entry root/hangar kind dir
+step: jet clean --no-color --yes
+exit: 0
+file: {cap:stale} absent
+stderr: ~ "cleaned hangar" # original contains predicate

@@ -1,0 +1,17 @@
+use core.files as files
+#CLI
+struct Args { path: String saved: String phase: Int }
+fn run(args: Args) {
+    if args.phase == 0 {
+        source :: files.read(args.path) ?? panic("read scaffold")
+        edited :: source.replace("print(greeting(\"world\"))", "print(\"hello from Jet\")")
+        files.write(args.path, edited) ?? panic("write edited")
+        files.write(args.saved, edited) ?? panic("save edited")
+    } else if args.phase == 1 {
+        edited :: files.read(args.saved) ?? panic("read edited")
+        files.write(args.path, edited.replace("print", "pirnt")) ?? panic("write invalid")
+    } else {
+        edited :: files.read(args.saved) ?? panic("read edited")
+        files.write(args.path, edited) ?? panic("restore edited")
+    }
+}
