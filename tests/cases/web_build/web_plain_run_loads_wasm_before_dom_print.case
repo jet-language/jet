@@ -1,0 +1,24 @@
+# HAND-PORT tests/web_build.rs:3987-4037 web_plain_run_loads_wasm_before_dom_print
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# All original public predicates retained; generated-Rust-only structure assertions retire.
+requires: tool:node
+fixture: web_plain_run_loads_wasm_before_dom_print.fixture
+env: NO_COLOR=1
+step: jet build --target web main.jet
+exit: 0
+file: .jet/build/web.manifest.json ~ "\"status\": \"m2\"" # original build_web_fixture M2 predicate
+file: .jet/build/web.manifest.json ~ "\"partitions\"" # original build_web_fixture partitions predicate
+file: .jet/build/app.wasm is-file
+file: .jet/build/app.js !~ "jet_data_web_imports" # original JavaScript/runtime predicate
+file: .jet/build/app.js !~ "jet_testing_history_web_imports" # original JavaScript/runtime predicate
+file: .jet/build/app.js !~ "function jet_compute_web" # original JavaScript/runtime predicate
+file: .jet/build/app.js !~ "function jet_game_" # original JavaScript/runtime predicate
+file: .jet/build/app.js !~ "exact repository TZif inputs" # original JavaScript/runtime predicate
+file: .jet/build/app.js ~ "async function loadWasm()" # original JavaScript/runtime predicate
+file: .jet/build/app.js ~ "raw = wasm.jet_export_run();" # original JavaScript/runtime predicate
+file: .jet/build/app.js ~ "jetDom.print(\"hello, web\")" # original JavaScript/runtime predicate
+copy: harness.mjs .jet/build/harness.mjs
+step: node harness.mjs
+cwd: .jet/build
+exit: 0
+stdout: = web_plain_run_loads_wasm_before_dom_print.stdout.expected

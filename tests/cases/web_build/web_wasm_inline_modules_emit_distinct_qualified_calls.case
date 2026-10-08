@@ -1,0 +1,15 @@
+# HAND-PORT tests/web_build.rs:3525-3563 web_wasm_inline_modules_emit_distinct_qualified_calls
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# All original public predicates retained; generated-Rust-only structure assertions retire.
+requires: tool:node
+fixture: web_wasm_inline_modules_emit_distinct_qualified_calls.fixture
+env: NO_COLOR=1
+step: jet build --target web main.jet
+exit: 0
+file: .jet/build/web.manifest.json ~ "\"status\": \"m2\"" # original build_web_fixture M2 predicate
+file: .jet/build/web.manifest.json ~ "\"partitions\"" # original build_web_fixture partitions predicate
+file: .jet/build/app.wasm is-file
+step: node app.js
+cwd: .jet/build
+exit: 0
+stdout: = web_wasm_inline_modules_emit_distinct_qualified_calls.stdout.expected

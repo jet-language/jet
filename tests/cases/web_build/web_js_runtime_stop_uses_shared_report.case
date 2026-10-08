@@ -1,0 +1,19 @@
+# HAND-PORT tests/web_build.rs:2232-2278 web_js_runtime_stop_uses_shared_report
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# All original public predicates retained; generated-Rust-only structure assertions retire.
+requires: tool:node
+fixture: web_js_runtime_stop_uses_shared_report.fixture
+env: NO_COLOR=1
+step: jet build --target web tests/fixtures/web_js_runtime_stop.jet
+exit: 0
+file: tests/fixtures/.jet/build/web.manifest.json ~ "\"status\": \"m2\"" # original build_web_fixture M2 predicate
+file: tests/fixtures/.jet/build/web.manifest.json ~ "\"partitions\"" # original build_web_fixture partitions predicate
+file: tests/fixtures/.jet/build/app.wasm is-file
+step: node app.js
+cwd: tests/fixtures/.jet/build
+exit: nonzero
+stderr: ~ "Stop [E3010]: `the list has 1 items, so position 9 doesn't exist`" # original contains predicate
+stderr: ~ "--> tests/fixtures/web_js_runtime_stop.jet:5" # original contains predicate
+stderr: ~ "Why: the operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data." # original contains predicate
+stderr: ~ "Fix: check the operands or bounds before the operation, or use a checked operation that returns an outcome." # original contains predicate
+stderr: !~ "thread 'main' panicked" # original host-panic absence predicate

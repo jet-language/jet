@@ -1,0 +1,22 @@
+# HAND-PORT tests/web_build.rs:3020-3089 web_js_try_reaches_typed_edge
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# All original public predicates retained; generated-Rust-only structure assertions retire.
+requires: tool:node
+fixture: web_js_try_reaches_typed_edge.fixture
+env: NO_COLOR=1
+step: jet build --target web main.jet
+exit: 0
+file: .jet/build/web.manifest.json ~ "\"status\": \"m2\"" # original build_web_fixture M2 predicate
+file: .jet/build/web.manifest.json ~ "\"partitions\"" # original build_web_fixture partitions predicate
+file: .jet/build/app.wasm is-file
+file: .jet/build/app.js ~ "jet_web_try(" # original JavaScript/runtime predicate
+copy: harness.mjs .jet/build/harness.mjs
+step: node harness.mjs
+cwd: .jet/build
+exit: 0
+stdout: ~ "kind=JetError" # original contains predicate
+stdout: ~ "code=TRYFAIL" # original contains predicate
+stdout: ~ "read" # original contains predicate
+stdout: ~ "run" # original contains predicate
+stdout: ~ "Error [TRYFAIL]: try failed" # original contains predicate
+stderr: ~ "Error [TRYFAIL]: try failed" # original contains predicate

@@ -1,0 +1,17 @@
+# HAND-PORT tests/web_build.rs:3728-3756 module_local_run_cannot_hijack_web_entrypoint
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# All original public predicates retained; generated-Rust-only structure assertions retire.
+requires: tool:node
+fixture: module_local_run_cannot_hijack_web_entrypoint.fixture
+env: NO_COLOR=1
+step: jet build --target web main.jet
+exit: 0
+file: .jet/build/web.manifest.json ~ "\"status\": \"m2\"" # original build_web_fixture M2 predicate
+file: .jet/build/web.manifest.json ~ "\"partitions\"" # original build_web_fixture partitions predicate
+file: .jet/build/app.wasm is-file
+file: .jet/build/web.manifest.json ~ "\"entry\": \"JS\"" # original JavaScript/runtime predicate
+file: .jet/build/app.js !~ "wasm.jet_export_run()" # original JavaScript/runtime predicate
+step: node app.js
+cwd: .jet/build
+exit: 0
+stdout: = module_local_run_cannot_hijack_web_entrypoint.stdout.expected

@@ -1,0 +1,24 @@
+# HAND-PORT tests/web_build.rs:1244-1294 web_decimal_and_grouped_formatters_use_shared_helpers
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# All original public predicates retained; generated-Rust-only structure assertions retire.
+requires: tool:node
+fixture: web_decimal_and_grouped_formatters_use_shared_helpers.fixture
+env: NO_COLOR=1
+step: jet build --target web main.jet
+exit: 0
+file: .jet/build/web.manifest.json ~ "\"status\": \"m2\"" # original build_web_fixture M2 predicate
+file: .jet/build/web.manifest.json ~ "\"partitions\"" # original build_web_fixture partitions predicate
+file: .jet/build/app.wasm is-file
+file: .jet/build/app.js ~ "function jet_fmt_decimal(" # original JavaScript/runtime predicate
+file: .jet/build/app.js ~ "function jet_fmt_grouped(" # original JavaScript/runtime predicate
+file: .jet/build/app.js ~ "function jet_fmt_decimal_int(" # original JavaScript/runtime predicate
+file: .jet/build/app.js ~ "function jet_fmt_grouped_int(" # original JavaScript/runtime predicate
+step: node app.js
+cwd: .jet/build
+exit: 0
+stdout: = web_decimal_and_grouped_formatters_use_shared_helpers.stdout.expected
+copy: harness.mjs .jet/build/harness.mjs
+step: node harness.mjs
+cwd: .jet/build
+exit: 0
+stdout: = web_decimal_and_grouped_formatters_use_shared_helpers.stdout.expected

@@ -1,0 +1,17 @@
+# HAND-PORT tests/web_build.rs:3489-3523 web_inline_modules_keep_qualified_function_identity
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# All original public predicates retained; generated-Rust-only structure assertions retire.
+requires: tool:node
+fixture: web_inline_modules_keep_qualified_function_identity.fixture
+env: NO_COLOR=1
+step: jet build --target web main.jet
+exit: 0
+file: .jet/build/web.manifest.json ~ "\"status\": \"m2\"" # original build_web_fixture M2 predicate
+file: .jet/build/web.manifest.json ~ "\"partitions\"" # original build_web_fixture partitions predicate
+file: .jet/build/app.wasm is-file
+file: .jet/build/app.js ~ "function __jet_left__value()" # original JavaScript/runtime predicate
+file: .jet/build/app.js ~ "function __jet_right__value()" # original JavaScript/runtime predicate
+step: node app.js
+cwd: .jet/build
+exit: 0
+stdout: = web_inline_modules_keep_qualified_function_identity.stdout.expected
