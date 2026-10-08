@@ -3631,6 +3631,102 @@ fn core_fixed_sig_impl(
                 Type::Named("ServiceError".to_string()),
             )),
         )),
+        // Mechanical worker-policy transports; native Services shapes, no policy.
+        ("core.service", "__authority_issue") => Some((vec![],
+            Some(result_ty(Type::String, Type::Named("ServiceError".into()))))),
+        ("core.service", "__tree_write_authority") => Some((
+            vec![(AccessConvention::Write, Type::Named("ServiceTree".into())), (moved, Type::String)], None,
+        )),
+        ("core.service", "__endpoint_unchecked") => Some((
+            vec![(moved, Type::String), (moved, Type::String), (read, Type::Int), (moved, Type::String)],
+            Some(result_ty(Type::Named("ServiceEndpoint".into()), Type::Named("ServiceError".into()))),
+        )),
+        ("core.service", "__worker_mailbox_new") => Some((
+            vec![(moved, Type::Named("ServiceEndpoint".into())),
+                (read, Type::IntN { signed: true, bits: 64 }), (moved, list_string.clone())],
+            Some(result_ty(Type::Named("__WorkerMailbox".into()), Type::Named("ServiceError".into()))),
+        )),
+        ("core.service", "__worker_task_new") => Some((
+            vec![(read, Type::Named("__WorkerStatus".into()))], Some(Type::Named("__TreeSupervisorState".into())),
+        )),
+        ("core.service", "__topology_worker_id") => Some((
+            vec![(read, Type::String), (read, Type::String)], Some(Type::String),
+        )),
+        ("core.service", "__topology_root_id") => Some((vec![(read, Type::String)], Some(Type::String))),
+        ("core.service", "__task_bind_topology") => Some((
+            vec![(read, Type::Named("__TreeSupervisorState".into())), (read, Type::Named("__WorkerTopologyKind".into())),
+                (moved, Type::String), (moved, Type::Option(Box::new(Type::String)))],
+            Some(result_ty(unit.clone(), Type::Named("ServiceError".into()))),
+        )),
+        ("core.service", "__worker_push") => Some((
+            vec![(AccessConvention::Write, Type::Named("ServiceTree".into())), (moved, Type::String),
+                (read, Type::Named("__WorkerHandler".into())), (moved, Type::String),
+                (moved, Type::Named("ServiceEndpoint".into())), (moved, Type::Named("__WorkerMailbox".into())),
+                (moved, Type::List(Box::new(Type::IntN { signed: true, bits: 64 }))), (read, Type::Bool),
+                (read, Type::IntN { signed: false, bits: 64 }), (read, Type::IntN { signed: false, bits: 64 }),
+                (moved, Type::Named("__TreeSupervisorState".into()))], None,
+        )),
+        ("core.service", "__worker_tree_parts") => Some((
+            vec![(read, Type::Named("ServiceTree".into()))], Some(Type::Tuple(vec![
+                ("workers".into(), Box::new(Type::List(Box::new(Type::Tuple(vec![
+                    ("endpoint".into(), Box::new(Type::Named("ServiceEndpoint".into()))),
+                    ("restarts".into(), Box::new(Type::List(Box::new(Type::IntN { signed: true, bits: 64 })))),
+                    ("task".into(), Box::new(Type::Named("__TreeSupervisorState".into()))),
+                ]))))),
+                ("groups".into(), Box::new(Type::List(Box::new(Type::Tuple(vec![
+                    ("restart".into(), Box::new(Type::Named("ServiceRestart".into()))),
+                    ("max".into(), Box::new(Type::Int)), ("per_ms".into(), Box::new(Type::Int)),
+                ]))))),
+                ("supervisors".into(), Box::new(Type::List(Box::new(Type::Named("__TreeSupervisorState".into()))))),
+                ("partitioned".into(), Box::new(list_string.clone())),
+            ])),
+        )),
+        ("core.service", "__authority_now") => Some((vec![], Some(Type::IntN { signed: true, bits: 64 }))),
+        ("core.service", "__task_escalate" | "__task_fail") => Some((
+            vec![(read, Type::Named("__TreeSupervisorState".into())), (moved, Type::String)],
+            Some(result_ty(unit.clone(), Type::Named("ServiceError".into()))),
+        )),
+        ("core.service", "__task_restart") => Some((
+            vec![(read, Type::Named("__TreeSupervisorState".into()))],
+            Some(result_ty(unit.clone(), Type::Named("ServiceError".into()))),
+        )),
+        ("core.service", "__authority_update" | "__authority_register") => Some((
+            vec![(read, Type::Named("ServiceEndpoint".into())), (read, Type::Bool)],
+            Some(result_ty(unit.clone(), Type::Named("ServiceError".into()))),
+        )),
+        ("core.service", "__close_runtime_groups") => Some((vec![(AccessConvention::Write, Type::Named("ServiceTree".into()))], None)),
+        ("core.service", "__tree_write_started") => Some((
+            vec![(AccessConvention::Write, Type::Named("ServiceTree".into())), (read, Type::Bool)], None,
+        )),
+        ("core.service", "__publish_tree_topology") => Some((
+            vec![(read, Type::Named("ServiceTree".into())), (read, Type::Named("__WorkerTopologyState".into()))], None,
+        )),
+        ("core.service", "__worker_write_restarts") => Some((
+            vec![(AccessConvention::Write, Type::Named("ServiceTree".into())), (read, Type::Int),
+                (moved, Type::List(Box::new(Type::IntN { signed: true, bits: 64 })))], None,
+        )),
+        ("core.service", "__worker_write_running") => Some((
+            vec![(AccessConvention::Write, Type::Named("ServiceTree".into())), (read, Type::Int), (read, Type::Bool)], None,
+        )),
+        ("core.service", "__mailbox_close") => Some((
+            vec![(read, Type::Named("ServiceTree".into())), (read, Type::Int)], None,
+        )),
+        ("core.service", "__worker_mailbox_depth") => Some((
+            vec![(read, Type::Named("ServiceTree".into())), (read, Type::Int)], Some(Type::Int),
+        )),
+        ("core.service", "__worker_write_mailbox") => Some((
+            vec![(AccessConvention::Write, Type::Named("ServiceTree".into())), (read, Type::Int),
+                (moved, Type::Named("__WorkerMailbox".into()))], None,
+        )),
+        ("core.service", "__record_topology_restart") => Some((
+            vec![(read, Type::Named("__TreeSupervisorState".into())), (read, Type::IntN { signed: false, bits: 64 }),
+                (read, Type::Named("__WorkerRestartReason".into()))],
+            Some(result_ty(unit.clone(), Type::Named("ServiceError".into()))),
+        )),
+        ("core.service", "__task_write_partition") => Some((
+            vec![(read, Type::Named("__TreeSupervisorState".into())), (read, Type::Named("__WorkerStatus".into())),
+                (moved, Type::Named("TaskFailure".into()))], None,
+        )),
         ("core.service", "worker") => Some((
             vec![
                 (

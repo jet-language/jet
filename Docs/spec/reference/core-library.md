@@ -3992,6 +3992,31 @@ and materialize those supplied fields. Seven private type-name bindings expose
 the existing field types without introducing a new carrier; both compiler
 mappers bind the same names and retire at the Jet-runtime cutover.
 
+Worker registration, failure/restart selection, restart-window counting and
+mailbox-depth selection are Jet policy. Registration retains the checked
+top-level function item, validates before entropy/allocation/publication, and
+supplies every worker seed. Failure retains declaration-order group scope,
+strict `at > saturating_sub(now, per_ms)` windows, reverse authority rollback,
+escalation, durable-mailbox preservation and partition reassertion in native
+write order (`Services.rs:2917–3078`, restart helper `1983–2012`). The depth and
+count readers deliberately retain native's weaker name/tree match after
+endpoint validation; they do not substitute the stricter routing predicate.
+
+Worker mechanical transports **die at the Jet-runtime cutover**: one aggregate
+parts leaf supplies only absent worker/group supervision facts; setters write
+the existing fields, and partition status/failure share the original single
+mutex acquisition (`3070–3073`). Seven paired private aliases preserve exact
+native shapes: `__WorkerMailbox` (`JetServiceMailbox`, `758–762`, fields
+endpoint/capacity/channel), `__WorkerChannel` (the Arc channel at `761`),
+`__WorkerHandler` (`JetServiceWorkerHandler = fn()`, `821`), `__WorkerStatus`
+(`JetServiceSupervisorStatus`, `123–130`), `__WorkerTopologyKind`
+(`JetServiceTopologyKind`, `134–137`), `__WorkerTopologyState` and
+`__WorkerRestartReason` (the existing DevtoolsTopologyPanel enums at `62–70`
+and `282–288`). Only the existing checked worker parameter forwards a function
+pointer. Mailboxes move: native `Mailbox::clone` forks its channel and is not
+a valid source transfer. Alias, checked-slot and no-clone fixtures cover these
+seams; they introduce no state, policy cache or replacement runtime carrier.
+
 Snapshot/event-log selection, replay framing, topology/observation text, and
 workflow history/outcome selection are Jet policies. Durable reads retain the
 existing host storage/replay operation during the Rust-seed tier; field
@@ -4021,7 +4046,7 @@ lock-lifetime seam; this source port does not claim those rows are complete.
 | Signature | Result | Description |
 |---|---|---|
 | `tree(name: String) -> ServiceTree` | tree | Create a named service topology. |
-| `tree.worker<T>(name: String, handler, capacity: Int) -> ServiceWorker<T>` | worker | Add a bounded-mailbox worker. |
+| `tree.worker(name: String, handler, capacity: Int) -> ServiceEndpoint !ServiceError` | endpoint | Register a checked top-level handler with a bounded mailbox. |
 | `tree.start()` / `tree.stop()` | — | Start or stop the service tree. |
 | `tree.show() -> DataTree` | tree | Inspect topology and delivery state. |
 | `tree.set_restart(strategy: ServiceRestart)` | — | Select one-for-one, all-for-one, or rest-for-one restart. |

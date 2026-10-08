@@ -2430,6 +2430,38 @@ fn jet_rust_emit_prelude_call_borrow_mask(ctx: &JetRustEmitContext, function: MI
     mask
 }
 
+// MIRRust service_worker_handler: only the existing worker slot uses fn().
+// Source forwarding does not introduce a general callback conversion.
+fn jet_rust_emit_service_worker_handler(ctx: &JetRustEmitContext, function: MIRFunction, handler: MIRValueID) -> String Never! {
+    producer :: jet_rust_emit_find_value_instruction(ctx, function, handler) ?? {
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidOwnership, "E0003", "MIR service worker handler is not a checked function value", "the worker slot must retain its checked function item", Val(function.span))
+        return ""
+    }
+    if producer.operation == {
+        .Closure(target_id, captures, _) -> {
+            if captures.len() != 0 {
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidOwnership, "E0003", "MIR service worker handler captures its environment", "service workers accept checked function items, not closures", Val(function.span))
+                return ""
+            }
+            target_index :: jet_rust_emit_function_index(ctx, target_id) ?? {
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR service worker target is missing", "checked worker identity must resolve to its source function", Val(function.span))
+                return ""
+            }
+            if ctx.program.functions[target_index].params.len() != 0 {
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR service worker handler takes parameters", "the checked worker slot has the existing fn() shape", Val(function.span))
+                return ""
+            }
+            target :: jet_rust_emit_function_name(&ctx, target_id)
+            root :: ~ctx.config.root_prefix
+            return "|| {{ if let Err(__jet_error) = <_ as {root}jet_std::JetIntoDispatchResult<String>>::into_dispatch_result({target}()) {{ panic!(\"service worker failed: {{}}\", __jet_error) }} }}"
+        }
+        else -> {
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidOwnership, "E0003", "MIR service worker handler is not a checked function value", "the worker slot must retain its checked function item", Val(function.span))
+            return ""
+        }
+    }
+}
+
 fn jet_rust_emit_call(ctx: &JetRustEmitContext, function: MIRFunction, callee: MIRCallee, args: [MIRCallArg], type_args: [MIRType], result: MIRValueID?) -> String Never! {
     mask := jet_rust_emit_call_borrow_mask(&ctx, callee, function, args)
     rendered_args :: if callee == {
@@ -2447,6 +2479,31 @@ fn jet_rust_emit_call(ctx: &JetRustEmitContext, function: MIRFunction, callee: M
             jet_rust_emit_call_arguments(&ctx, function, args, mask)
         }
         .Foreign(id) -> jet_rust_emit_foreign_arguments(&ctx, function, id, args)
+        .User(id) -> {
+            index :: jet_rust_emit_function_index(ctx, id) ?? return ""
+            target :: ctx.program.functions[index]
+            rendered := ""
+            if target.module_name == "core_core_service" && target.name == "worker" {
+                if args.len() != 5 {
+                    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "checked source worker ABI", "the existing worker normalization supplies exactly five arguments", Val(function.span))
+                    return ""
+                }
+                values := [String]{}
+                loop (position, arg) in args {
+                    if position == 2 {
+                        adapter :: jet_rust_emit_service_worker_handler(&ctx, function, arg.value)
+                        handler :: "({adapter} as {ctx.config.root_prefix}JetServiceWorkerHandler)"
+                        &values.push(if mask[position] -> "&{handler}" else -> handler)
+                    } else {
+                        &values.push(jet_rust_emit_call_arg_with_borrow(&ctx, function, arg, mask[position]))
+                    }
+                }
+                rendered = values.join(", ")
+            } else {
+                rendered = jet_rust_emit_call_arguments(&ctx, function, args, mask)
+            }
+            rendered
+        }
         else -> jet_rust_emit_call_arguments(&ctx, function, args, mask)
     }
     generic :: jet_rust_emit_generic_call_args(&ctx, type_args)
@@ -2624,6 +2681,9 @@ fn jet_rust_emit_exact_int_argument(ctx: &JetRustEmitContext, ty: MIRType, value
 // narrows at the call with a checked range stop. `core.reactive.signal`
 // constructs `JetSignal<JetInt>` and keeps the exact carrier.
 fn jet_rust_emit_core_call_argument(ctx: &JetRustEmitContext, function: MIRFunction, module_name: String, member: String, symbol: String, index: Int, arg: MIRCallArg, borrowed: Bool, declared: Type?, location: MIRPanicLoc?) -> String Never! {
+    if module_name == "core.service" && member == "worker" && index == 2 {
+        return jet_rust_emit_service_worker_handler(&ctx, function, arg.value)
+    }
     value_type :: jet_rust_emit_value_type(ctx, function, arg.value)
     value_is_int :: value_type.kind == MIRTypeKind.Int
     exact_int_carrier :: module_name == "core.reactive" && member == "signal"

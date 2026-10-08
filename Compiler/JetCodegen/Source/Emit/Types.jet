@@ -2823,6 +2823,14 @@ fn jet_rust_emit_service_handle_type_name(name: String) -> String? {
         "__DeliveryRecord" -> Val("JetServiceDeliveryRecord")
         "__EndpointMailbox" -> Val("JetServiceEndpointMailbox")
         "__MailboxRead" -> Val("JetServiceMailboxRead")
+        // Worker policy transports; exact native shapes, mechanical, dies at cutover.
+        "__WorkerMailbox" -> Val("JetServiceMailbox") // Services.rs:758-762
+        "__WorkerChannel" -> Val("JetServiceWorkerChannel") // Services.rs:761, exact Arc type alias
+        "__WorkerHandler" -> Val("JetServiceWorkerHandler") // Services.rs:821
+        "__WorkerStatus" -> Val("JetServiceSupervisorStatus") // Services.rs:123-130
+        "__WorkerTopologyKind" -> Val("JetServiceTopologyKind") // Services.rs:134-137
+        "__WorkerTopologyState" -> Val("JetDevtoolsTopologySupervisorState") // DevtoolsTopologyPanel.rs:62-70
+        "__WorkerRestartReason" -> Val("JetDevtoolsTopologyRestartReason") // DevtoolsTopologyPanel.rs:282-288
         else -> None
     }
 }
@@ -3052,4 +3060,20 @@ fn jet_rust_emit_native_apply_type(ctx: &JetRustEmitContext, name: MIRNominalRef
     if name.name == "KeyStatus" -> return Val("{jet_rust_emit_ffi_crate()}::JetVaultKeyStatus")
     if name.name == "VaultError" -> return Val("{jet_rust_emit_ffi_crate()}::JetVaultError")
     None
+}
+
+#Test("worker policy private transports match the existing native shapes") {
+    pairs :: [(name: String, rust: String)]{
+        (name: "__WorkerMailbox", rust: "JetServiceMailbox"),
+        (name: "__WorkerChannel", rust: "JetServiceWorkerChannel"),
+        (name: "__WorkerHandler", rust: "JetServiceWorkerHandler"),
+        (name: "__WorkerStatus", rust: "JetServiceSupervisorStatus"),
+        (name: "__WorkerTopologyKind", rust: "JetServiceTopologyKind"),
+        (name: "__WorkerTopologyState", rust: "JetDevtoolsTopologySupervisorState"),
+        (name: "__WorkerRestartReason", rust: "JetDevtoolsTopologyRestartReason")
+    }
+    loop pair in pairs -> assert(if jet_rust_emit_service_handle_type_name(pair.name) == {
+        .Val(value) -> value == pair.rust
+        else -> false
+    })
 }

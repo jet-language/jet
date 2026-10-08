@@ -2627,6 +2627,9 @@ impl<'a> Checker<'a> {
                 // #4747: retain width-polymorphic checking; lowering selects
                 // the reserved Jet marshalling wrapper for F32 arguments.
                 && !(module == "core.math" && matches!(name, "cmp" | "is_finite"))
+                // Keep the existing checked fn() signature at the worker-only
+                // source-forward boundary; its source slot is an opaque fn pointer.
+                && !(module == "core.service" && name == "worker")
             {
                 let source_idx = self.modules.and_then(|modules| {
                     modules

@@ -2479,3 +2479,53 @@ fn run() {
 "#.replace("__ROOT__", &root);
     tir_support::assert_tiers_agree("state_store_lexical_link", &source, "true\n");
 }
+
+#[test]
+fn source_worker_slot_keeps_checked_function_item_and_moves_the_mailbox() {
+    let scratch = common::Scratch::new("service_worker_source_slot");
+    fs::write(scratch.path.join("package.jet"), "name: \"worker-slot\"\nversion: \"0.1.0\"\n").unwrap();
+    let source = r#"
+use core.service as service
+fn named_worker() {}
+fn run() {
+    tree := service.tree("slot")
+    endpoint :: tree.worker("worker", named_worker, capacity: 2) ?? panic("worker")
+    tree.group("group", ["worker"]) ?? panic("group")
+    tree.start() ?? panic("start")
+    tree.send(endpoint, "message") ?? panic("send")
+    assert((tree.mailbox_depth(endpoint) ?? panic("depth")) == 1)
+    tree.fail_worker(endpoint) ?? panic("failure")
+    assert((tree.restarts(endpoint) ?? panic("restarts")) == 1)
+    tree.stop() ?? panic("stop")
+}
+"#;
+    let entry = scratch.path.join("main.jet");
+    fs::write(&entry, source).unwrap();
+    let shown = entry.to_string_lossy();
+    let output = jet::compile_with_path(source, &shown).unwrap_or_else(|diagnostics| {
+        panic!("{}", jet::render_diagnostics(&shown, source, &diagnostics))
+    });
+    assert!(output.rust.contains("JetServiceWorkerHandler)"), "missing checked fn() forward");
+    assert!(output.rust.contains("service worker failed: {{}}") || output.rust.contains("service worker failed: {}"));
+    assert!(output.rust.contains("jet_services_raw_group_push("), "existing source-owned group hop changed");
+    let mut pushed = false;
+    let mut replaced = false;
+    for line in output.rust.lines() {
+        for (symbol, position, seen) in [
+            ("jet_services_raw_worker_push(", 5, &mut pushed),
+            ("jet_services_raw_worker_write_mailbox(", 2, &mut replaced),
+        ] {
+            if line.contains(&format!("fn {}", symbol)) { continue; }
+            if let Some((_, arguments)) = line.split_once(symbol) {
+                let mailbox = arguments.split(',').nth(position).expect("checked mailbox argument");
+                assert!(!mailbox.contains(".clone()"), "Mailbox::clone forks the channel: {line}");
+                *seen = true;
+            }
+        }
+    }
+    assert!(pushed && replaced, "source worker and restart must move their mailboxes");
+    if have_rustc() {
+        let (status, _, stderr) = build_and_run("worker_mailbox_move", "main", source);
+        assert_eq!(status, 0, "{stderr}");
+    }
+}
