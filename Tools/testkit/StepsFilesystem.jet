@@ -269,7 +269,7 @@ fn kit_steps_tree_check(assertion: KitAssertion, context: KitStepCtx, state: Kit
     words := [String]{}
     loop word in assertion.alternatives -> &words.push(kit_steps_runtime_expand(word, context, state) ?? return kit_expect_verdict("ERROR", "tree filter token unavailable"))
     if !kit_expect_named(words, "recursive") -> &words.push("recursive")
-    paths :: kit_steps_entries(directory, words) ?? return kit_expect_verdict("ERROR", err)
+    paths :: kit_steps_entries(directory, words) ?? return kit_expect_verdict("ERROR", "{err}")
     value :: kit_steps_runtime_expand(assertion.value, context, state) ?? return kit_expect_verdict("ERROR", "tree value token unavailable")
     total := 0
     readable := [String]{}

@@ -35,7 +35,7 @@ fn kit_steps_check_assertion(assertion: KitAssertion, context: KitStepCtx, state
         path :: kit_steps_work_path(assertion.path, context.env, context.work, context.scratch, state.built) ?? return kit_expect_verdict("REFUSED", "entries directory escapes work")
         words := [String]{}
         loop word in assertion.alternatives -> &words.push(kit_steps_runtime_expand(word, context, state) ?? return kit_expect_verdict("ERROR", "entries filter token unavailable"))
-        paths :: kit_steps_entries(path, words) ?? return kit_expect_verdict("ERROR", err)
+        paths :: kit_steps_entries(path, words) ?? return kit_expect_verdict("ERROR", "{err}")
         expected :: kit_steps_runtime_expand(assertion.value, context, state) ?? return kit_expect_verdict("ERROR", "entries count token unavailable")
         matches :: kit_steps_compare(paths.len(), assertion.mode, Int.parse(expected) ?? -1)
         return if matches -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "entries count comparison failed")
@@ -91,11 +91,11 @@ fn kit_steps_check_assertion(assertion: KitAssertion, context: KitStepCtx, state
             return kit_expect_verdict("ERROR", "same-as needs an opt-bytes capture")
         }
         if assertion.mode == "names" {
-            names :: kit_steps_directory_names(path) ?? return kit_expect_verdict("ERROR", err)
+            names :: kit_steps_directory_names(path) ?? return kit_expect_verdict("ERROR", "{err}")
             expected := [String]{}
             if extra == "==" {
                 other :: kit_steps_work_path(value, context.env, context.work, context.scratch, state.built) ?? return kit_expect_verdict("REFUSED", "names relation escapes work")
-                expected = kit_steps_directory_names(other) ?? return kit_expect_verdict("ERROR", err)
+                expected = kit_steps_directory_names(other) ?? return kit_expect_verdict("ERROR", "{err}")
             } else {
                 expected = kit_steps_string_array(value) ?? return kit_expect_verdict("ERROR", "invalid expected names")
             }
