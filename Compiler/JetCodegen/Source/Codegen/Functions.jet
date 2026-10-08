@@ -166,6 +166,7 @@ use jet_foundation.[
     compiler_threads_partition,
     core_call_key,
     core_call_symbol_name,
+    compiler_apply_order,
     mir_empty_optimization_facts,
     mir_field_id,
     mir_module_id,
@@ -1525,12 +1526,12 @@ fn jet_codegen_lower_web_reconstructions(builder: JetCodegenBuilder, program: Je
 }
 
 
+// Sort scalar index keys, then move whole rows through empty slots into their
+// canonical positions. The original receiver allocation is retained.
 fn jet_codegen_sort_blocks(blocks: &[MIRBasicBlock]) Never! {
     keys := [U64]{}
-    loop block in blocks -> &keys.push(block.id.value)
-    sorted := [MIRBasicBlock]{}
-    loop position in jet_codegen_sorted_order(keys, [String]{}) -> &sorted.push(blocks[position])
-    loop (index, block) in sorted -> blocks[index] = block
+    loop index in 0..<blocks.len() -> &keys.push(blocks[index].id.value)
+    compiler_apply_order<MIRBasicBlock>(&blocks, jet_codegen_sorted_order(keys, [String]{}))
 }
 fn jet_codegen_lower_receiver(builder: &JetCodegenBuilder, program: JetCodegenProgram, owner_type: Type, convention: AccessConvention?, span: Span, index: Int) Never! {
     access := if convention == {
@@ -2574,29 +2575,23 @@ fn jet_codegen_order_before(keys: [U64], ties: [String], left: Int, right: Int) 
 fn jet_codegen_sort_functions(rows: &[MIRFunction]) Never! {
     keys := [U64]{}
     ties := [String]{}
-    loop row in rows {
-        &keys.push(row.id.value)
-        &ties.push(row.key)
+    loop index in 0..<rows.len() {
+        &keys.push(rows[index].id.value)
+        &ties.push(rows[index].key)
     }
-    sorted := [MIRFunction]{}
-    loop position in jet_codegen_sorted_order(keys, ties) -> &sorted.push(rows[position])
-    loop (index, row) in sorted -> rows[index] = row
+    compiler_apply_order<MIRFunction>(&rows, jet_codegen_sorted_order(keys, ties))
 }
 
 fn jet_codegen_sort_callback_adapters(rows: &[MIRCallbackAdapter]) Never! {
     keys := [U64]{}
-    loop row in rows -> &keys.push(row.id.value)
-    sorted := [MIRCallbackAdapter]{}
-    loop position in jet_codegen_sorted_order(keys, [String]{}) -> &sorted.push(rows[position])
-    loop (index, row) in sorted -> rows[index] = row
+    loop index in 0..<rows.len() -> &keys.push(rows[index].id.value)
+    compiler_apply_order<MIRCallbackAdapter>(&rows, jet_codegen_sorted_order(keys, [String]{}))
 }
 
 fn jet_codegen_sort_type_definitions(rows: &[MIRTypeDef]) Never! {
     keys := [U64]{}
-    loop row in rows -> &keys.push(row.id.value)
-    sorted := [MIRTypeDef]{}
-    loop position in jet_codegen_sorted_order(keys, [String]{}) -> &sorted.push(rows[position])
-    loop (index, row) in sorted -> rows[index] = row
+    loop index in 0..<rows.len() -> &keys.push(rows[index].id.value)
+    compiler_apply_order<MIRTypeDef>(&rows, jet_codegen_sorted_order(keys, [String]{}))
 }
 struct JetCodegenUnionIndex {
     pub rows: [MIRType]
@@ -2884,60 +2879,47 @@ fn jet_codegen_register_synthetic_unions(types: &[MIRTypeDef], functions: [MIRFu
 
 fn jet_codegen_sort_trait_definitions(rows: &[MIRTraitDef]) Never! {
     keys := [U64]{}
-    loop row in rows -> &keys.push(row.id.value)
-    sorted := [MIRTraitDef]{}
-    loop position in jet_codegen_sorted_order(keys, [String]{}) -> &sorted.push(rows[position])
-    loop (index, row) in sorted -> rows[index] = row
+    loop index in 0..<rows.len() -> &keys.push(rows[index].id.value)
+    compiler_apply_order<MIRTraitDef>(&rows, jet_codegen_sorted_order(keys, [String]{}))
 }
 
 fn jet_codegen_sort_impl_definitions(rows: &[MIRImplDef]) Never! {
     keys := [U64]{}
-    loop row in rows -> &keys.push(row.id.value)
-    sorted := [MIRImplDef]{}
-    loop position in jet_codegen_sorted_order(keys, [String]{}) -> &sorted.push(rows[position])
-    loop (index, row) in sorted -> rows[index] = row
+    loop index in 0..<rows.len() -> &keys.push(rows[index].id.value)
+    compiler_apply_order<MIRImplDef>(&rows, jet_codegen_sorted_order(keys, [String]{}))
 }
 
 fn jet_codegen_sort_constant_definitions(rows: &[MIRConstantDef]) Never! {
     keys := [U64]{}
-    loop row in rows -> &keys.push(row.id.value)
-    sorted := [MIRConstantDef]{}
-    loop position in jet_codegen_sorted_order(keys, [String]{}) -> &sorted.push(rows[position])
-    loop (index, row) in sorted -> rows[index] = row
+    loop index in 0..<rows.len() -> &keys.push(rows[index].id.value)
+    compiler_apply_order<MIRConstantDef>(&rows, jet_codegen_sorted_order(keys, [String]{}))
 }
 
 fn jet_codegen_sort_field_rows(rows: &[MIRFieldRow]) Never! {
     keys := [U64]{}
-    loop row in rows -> &keys.push(row.id.value)
-    sorted := [MIRFieldRow]{}
-    loop position in jet_codegen_sorted_order(keys, [String]{}) -> &sorted.push(rows[position])
-    loop (index, row) in sorted -> rows[index] = row
+    loop index in 0..<rows.len() -> &keys.push(rows[index].id.value)
+    compiler_apply_order<MIRFieldRow>(&rows, jet_codegen_sorted_order(keys, [String]{}))
 }
 
 fn jet_codegen_sort_core_calls(rows: &[MIRCoreCall]) Never! {
     keys := [U64]{}
     ties := [String]{}
-    loop row in rows {
-        &keys.push(row.id.value)
-        &ties.push(row.key)
+    loop index in 0..<rows.len() {
+        &keys.push(rows[index].id.value)
+        &ties.push(rows[index].key)
     }
-    sorted := [MIRCoreCall]{}
-    loop position in jet_codegen_sorted_order(keys, ties) -> &sorted.push(rows[position])
-    loop (index, row) in sorted -> rows[index] = row
+    compiler_apply_order<MIRCoreCall>(&rows, jet_codegen_sorted_order(keys, ties))
 }
 
 fn jet_codegen_sort_prelude_calls(rows: &[MIRPreludeCall]) Never! {
     keys := [U64]{}
-    loop row in rows -> &keys.push(row.id.value)
-    sorted := [MIRPreludeCall]{}
-    loop position in jet_codegen_sorted_order(keys, [String]{}) -> &sorted.push(rows[position])
-    loop (index, row) in sorted -> rows[index] = row
+    loop index in 0..<rows.len() -> &keys.push(rows[index].id.value)
+    compiler_apply_order<MIRPreludeCall>(&rows, jet_codegen_sorted_order(keys, [String]{}))
 }
 
 fn jet_codegen_sort_used_core(rows: &[String]) Never! {
-    sorted := [String]{}
-    loop position in jet_codegen_sorted_order([U64]{}, rows) -> &sorted.push(rows[position])
-    loop (index, row) in sorted -> rows[index] = row
+    order :: jet_codegen_sorted_order([U64]{}, rows)
+    compiler_apply_order<String>(&rows, order)
 }
 
 fn jet_codegen_add_needed_trait(reference: MIRTraitRef, known: [MIRTraitID], needed: &[MIRTraitRef]) Never! {
