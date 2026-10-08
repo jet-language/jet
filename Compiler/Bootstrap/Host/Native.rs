@@ -2687,7 +2687,7 @@ fn emit_bootstrap_task_roots_fixture(
     let config = symbols.type_symbol("JetEvalConfig")?;
     let span = symbols.type_symbol("Span")?;
     let carrier = symbols.type_symbol("JetEvalSharedHostCarrier")?;
-    let fixture = checked_task_roots_callable(bindings, "jet_eval_task_roots_fixture", 6, true)?;
+    let fixture = checked_task_roots_callable(bindings, "jet_eval_task_roots_fixture", 7, true)?;
     let produce =
         checked_task_roots_callable(bindings, "jet_eval_task_roots_fixture_shared_produce", 3, false)?;
     let consume =
@@ -2703,6 +2703,7 @@ fn emit_bootstrap_task_roots_fixture(
         &fixture.parameter_types,
         &[
             program_place,
+            ("__jet_shape_program", "__jet_shape_program"),
             config_place,
             ("__jet_callback", "__jet_callback"),
             ("__jet_resource_handle", "__jet_resource_handle"),
@@ -2730,6 +2731,7 @@ fn emit_bootstrap_task_roots_fixture(
          #[allow(unused_mut)]\n\
          pub(crate) fn __jet_bootstrap_task_roots_fixture(\n\
          \x20   __jet_program: &mut {program},\n\
+         \x20   __jet_checked_program: &::jet_foundation::MIR::MirProgram,\n\
          \x20   __jet_config: &mut {config},\n\
          \x20   __jet_callback: &::jet_foundation::MIR::MirFunctionId,\n\
          \x20   __jet_resource_handle: &::jet_foundation::MIR::MirHandleId,\n\
@@ -2739,6 +2741,7 @@ fn emit_bootstrap_task_roots_fixture(
          \x20   let mut __jet_resource_handle = __jet_bootstrap_mir_MIRHandleID_from_host(__jet_resource_handle)?;\n\
          \x20   let mut __jet_resource_raw = jet_foundation::Numeric::JetInt::from_i64(__jet_resource_raw);\n\
          \x20   let mut __jet_span = __jet_bootstrap_task_roots_span()?;\n\
+         \x20   let mut __jet_shape_program = __jet_bootstrap_mir_host_shape_program_from_host(__jet_checked_program)?;\n\
          \x20   Ok({fixture_symbol}({fixture_arguments}))\n\
          }}\n\
          #[doc(hidden)]\n\
