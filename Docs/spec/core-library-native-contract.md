@@ -139,6 +139,14 @@ the lock. An edit guard commits one revision on drop even without a write or
 on an already-delivered stop rail. Generation exhaustion also releases both
 permit and owner before delivering its stop.
 
+Scheduler observation records task/channel identity, wait and resource facts,
+not their payloads. A registered native task retains its real cancellation
+control until registry removal; final control cleanup happens outside the
+registry mutex. Labels and wait targets are bounded by Unicode scalar count,
+not byte count. Diagnostic escaping preserves non-control Unicode scalars,
+escapes quotes and backslashes, and replaces Unicode control scalars with
+spaces. It does not create a second task identity or cancellation mechanism.
+
 At native C byte boundaries, `List<U8>` retains its word-stride layout.
 `jet_rt_bytes_pack` borrows that header and returns an independently owned
 packed byte buffer; `jet_rt_bytes_free` releases it with its original length
