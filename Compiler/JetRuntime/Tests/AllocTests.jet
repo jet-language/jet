@@ -3,11 +3,15 @@
 // witness exits 1 without requiring text, containers or any other runtime layer.
 // Tests are single-threaded; raw metadata inspection owns the entire heap here.
 fn alloc_test_require(ok: Bool) {
-    if ok -> return
+    if ok {
+        return
+    }
     #Unsafe("a failed allocator witness terminates this isolated test process") {
         _ := os_syscall_i64(I64{231}, I64{1}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     }
-    loop {}
+    loop {
+
+    }
 }
 
 fn alloc_test_payload(size: I64, align: I64) {
@@ -91,9 +95,10 @@ fn alloc_test_full_slabs() {
         pointer :: jet_rt_alloc(I64{2048}, I64{16})
         #Unsafe("the test owns the full payload and can read its allocator header") {
             slab :: os_load_i64(wrapping(pointer - I64{16}))
-            if (count == I64{0}) -> first_slab = slab
-            if (count < I64{15}) -> alloc_test_require(slab == first_slab)
-            else -> alloc_test_require(slab != first_slab)
+            if (count == I64{0}) { first_slab = slab }
+            if (count < I64{15}) { alloc_test_require(slab == first_slab) } else {
+                alloc_test_require(slab != first_slab)
+            }
             os_store_i64(pointer, chain)
         }
         chain = pointer
