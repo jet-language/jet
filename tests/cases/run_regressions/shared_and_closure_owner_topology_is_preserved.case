@@ -3,13 +3,16 @@
 # PENDING-GRAMMAR: step-scoped env (fresh store and jetpack root for each tier).
 env: JETPACK_ENV=1
 env: NO_COLOR=1
+# Original run_tier creates a Scratch root, not its cache/jetpack children.
+mkdir: cache/default
 step: jet run {root}/tests/fixtures/shared_owner_topology.jet
-env: JET_STORE_DIR={work}/store-default
-env: JETPACK_ROOT={work}/jetpack-default
+env: JET_STORE_DIR={work}/cache/default/cache
+env: JETPACK_ROOT={work}/cache/default/jetpack
 stdout: = shared_owner_topology.out
 stderr: empty
+mkdir: cache/interpreter
 step: jet run --interpret {root}/tests/fixtures/shared_owner_topology.jet
-env: JET_STORE_DIR={work}/store-interpreter
-env: JETPACK_ROOT={work}/jetpack-interpreter
+env: JET_STORE_DIR={work}/cache/interpreter/cache
+env: JETPACK_ROOT={work}/cache/interpreter/jetpack
 stdout: = shared_owner_topology.out
 stderr: empty

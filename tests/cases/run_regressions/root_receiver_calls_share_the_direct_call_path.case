@@ -4,13 +4,16 @@
 fixture: fixtures/root_calls
 env: JETPACK_ENV=1
 env: NO_COLOR=1
+# Original run_tier creates a Scratch root, not its cache/jetpack children.
+mkdir: cache/default
 step: jet run main.jet
-env: JET_STORE_DIR={work}/store-default
-env: JETPACK_ROOT={work}/jetpack-default
+env: JET_STORE_DIR={work}/cache/default/cache
+env: JETPACK_ROOT={work}/cache/default/jetpack
 stdout: = root_calls.out
 stderr: empty
+mkdir: cache/interpreter
 step: jet run --interpret main.jet
-env: JET_STORE_DIR={work}/store-interpreter
-env: JETPACK_ROOT={work}/jetpack-interpreter
+env: JET_STORE_DIR={work}/cache/interpreter/cache
+env: JETPACK_ROOT={work}/cache/interpreter/jetpack
 stdout: = root_calls.out
 stderr: empty
