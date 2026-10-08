@@ -1,0 +1,34 @@
+# HAND-PORT tests/jetpack_engine.rs:583-679 cache_cli_json_uses_shared_report_schema
+# PENDING-GRAMMAR / PENDING-SAME-HEAD: authored, not runtime-proven.
+env: NO_COLOR=1
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+mkdir: mirror
+step: jetpack hangar cache bind public {work}/mirror --yes --json --no-color
+exit: 0
+stderr: empty
+json: stdout doc $.schema = "jet.report/v1"
+json: stdout doc $.moment = "tool"
+json: stdout doc $.action = "cache-bind"
+json: stdout doc $.role = "public"
+step list: jetpack hangar cache list --json --no-color
+exit: 0
+stderr: empty
+json: stdout doc $.schema = "jet.report/v1"
+json: stdout doc $.action = "cache-list"
+stdout: ~ "\"bindings\":[" # original contains predicate
+step repeat: jetpack hangar cache list --json --no-color
+exit: any
+# Original repeated call asserted stdout only, not exit.
+stdout: == list
+step: jetpack hangar cache verify missing --json --no-color
+exit: 2
+stderr: empty
+json: stdout doc $.schema = "jet.report/v1"
+json: stdout doc $.code = "E1340"
+step: jetpack hangar cache remove public --yes --json --no-color
+exit: 0
+json: stdout doc $.schema = "jet.report/v1"
+json: stdout doc $.action = "cache-remove"
+
