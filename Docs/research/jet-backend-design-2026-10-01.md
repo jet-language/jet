@@ -45,8 +45,10 @@ read-only data; each table's ID equals its index.
   are the function parameters, and no jump targets the entry.
 - Instructions: `Const`, `Binary` (`Add Sub Mul Div Rem And Or Xor Shl Shr`,
   signed, `Shr` arithmetic), `Compare` (signed `Eq Ne Lt Le Gt Ge`), `Move`
-  (ownership transfer; the source dies), `Copy` (trivially destructible values
-  only), `Call` (signature ID; callee a module function or a runtime symbol),
+  (ownership transfer preserving layout and drop glue; the source dies),
+  `Reown` (consuming pointer-owner conversion preserving layout but selecting a
+  new drop obligation), `Copy` (trivially destructible values only),
+  `Call` (signature ID; callee a module function or a runtime symbol),
   `Drop`, `Overflows`, `Load`, `Store`, `DataAddress`. Terminators: `Jump`,
   `Branch`, `Return`, `Unreachable`.
 - Calls name a signature by ID, so the generator never re-derives an ABI from
@@ -83,7 +85,7 @@ read-only data; each table's ID equals its index.
 `LIR/Lint.jet` checks a module before any generator reads it: table IDs,
 valid layouts, signature agreement of entry parameters, calls, returns and
 jump arguments, single definition, dominance of every use, no use after a
-`Move` or `Drop`, no `Copy` of a value with drop glue, Bool conditions, and
+`Move`, `Reown` or `Drop`, no `Copy` of a value with drop glue, Bool conditions, and
 the shape of drop glue. `LIR/Print.jet` prints the text form used in tests.
 
 ## MIR -> LIR lowering
@@ -383,13 +385,26 @@ address, release helper, captures...]` (Lower/Closures.jet). The code takes
 the box as a hidden first parameter. A closure body (a function with capture
 parameters) is the code; any other function used as a value runs through a
 generated thunk that ignores the box. Clone glue counts a reference; drop
-glue runs the release helper on the last one, which drops the by-value
-captures and frees the box. A capture parameter that borrows (ReadBorrow,
-WriteBorrow or Write access) is stored as its place's address. Captured
-places are memory cells: in the body the box field or referenced storage, in
-the creating function frame storage every read and write goes through, so
-both see one value. On x86-64 `FunctionAddress` is `lea [rip + disp32]` and an
-indirect call is `call r10`.
+glue runs the release helper on the last one, which drops owned captures and
+frees the box. A capture parameter that borrows (ReadBorrow, WriteBorrow or
+Write access) keeps a pointer field in the body ABI. A `Place` operand stores
+the outer place's address and never transfers its owner. A `Value` operand
+owns its captured cell even when the body borrows or writes it: its bytes are
+appended inside the same box and the pointer field names that internal cell.
+Release helpers are specialized by operand shape, so they drop exactly the
+owned cells and free the corresponding allocation, without extra allocations
+or a per-invocation ownership test. Captured places are memory cells: in the
+body the box field or referenced storage, in the creating function frame
+storage every read and write goes through, so both see one value. On x86-64
+`FunctionAddress` is `lea [rip + disp32]` and an indirect call is `call r10`.
+
+`scope.guard` consumes a closure box without changing its bits. Its drop
+obligation changes from releasing a closure to invoking its callback once and
+then releasing it. Lowering expresses this as pointer-only `Reown`, not
+`Move`: ordinary `Move` must preserve drop glue. `Reown` ends the source's
+lifetime and requires an owning destination; optimizers retain its ownership
+boundary rather than aliasing the differently typed owner away. The x86-64
+allocator can share the dead source's home, avoiding an extra move.
 
 Closure-taking methods (MIR `ClosureMethod`, Lower/Combinators.jet) are
 loops over the borrowed receiver that call the box with each element
