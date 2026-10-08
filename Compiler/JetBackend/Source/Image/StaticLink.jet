@@ -1792,6 +1792,50 @@ fn link_has_startup(c: LinkContext) -> Bool Never! {
     false
 }
 
+// Descriptive canonical linker facts only. The verified held-output producer
+// must bind them to the SAME approved runtime pack before issuing a lease.
+pub struct X64ResidentLinkRequest {
+    pub runtime_input: Int
+    pub callable_exports: [String]
+}
+pub struct X64ResidentSymbol {
+    pub symbol: String
+    pub defining_symbol: String
+    pub input: Int
+    pub object_offset: Int
+    pub address: Int
+    // Zero is preserved when the ELF producer does not give a symbol size.
+    pub size: Int
+    pub section_end: Int
+}
+pub struct X64ResidentSegment {
+    pub address: Int
+    pub file_size: Int
+    pub memory_size: Int
+    pub align: Int
+    pub flags: Int
+}
+pub struct X64ResidentLinkFacts {
+    pub base: Int
+    pub entry: Int
+    pub segments: [X64ResidentSegment]
+    pub tls: X64ResidentSegment?
+    pub preinit_start: Int
+    pub preinit_end: Int
+    pub init_start: Int
+    pub init_end: Int
+    pub fini_start: Int
+    pub fini_end: Int
+    pub symbols: [X64ResidentSymbol]
+}
+pub struct X64ResidentLinkResult {
+    pub image: X64ExecutableResult
+    pub facts: X64ResidentLinkFacts?
+}
+fn link_resident_failure(errors: ^[String]) -> X64ResidentLinkResult Never! {
+    X64ResidentLinkResult{image: X64ExecutableResult{bytes: [U8]{}, errors: ^errors}, facts: None}
+}
+
 // Link `bufs` into a static executable. Each buffer is a relocatable object
 // (the program's, or a runtime pack) or a static archive; names[i] names
 // bufs[i] in reports. Every object is loaded; archive members are pulled
@@ -1799,21 +1843,92 @@ fn link_has_startup(c: LinkContext) -> Bool Never! {
 // startup object when the archives provide musl's `__libc_start_main` and
 // no object defines `_start`, else the objects' `_start`.
 pub fn x64_link_executable(names: [String], bufs: ^[[U8]]) -> X64ExecutableResult Never! {
+    linked := link_executable_image(names, ^bufs, None)
+    ^linked.image
+}
+
+// The single canonical executable engine. No request means no export census,
+// extra roots, descriptor arrays or image copy for ordinary executable links.
+fn link_executable_image(names: [String], bufs: ^[[U8]], request: ^X64ResidentLinkRequest?) -> X64ResidentLinkResult Never! {
     c := link_context(^bufs)
+    if request == .Val(wanted) {
+        if names.len() != c.bufs.len() || wanted.runtime_input < 0 || wanted.runtime_input >= names.len() -> return link_resident_failure(^[String]{"resident runtime input is outside the actual link inputs"})
+    }
     link_load_inputs(&c, names)
-    if c.errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: c.errors}
+    if c.errors.len() > 0 -> return link_resident_failure(^c.errors)
+    if request == .Val(wanted) {
+        seen := [String:Bool]{}
+        loop symbol in wanted.callable_exports {
+            if symbol == "" || seen.get(symbol) != None -> return link_resident_failure(^[String]{"empty or duplicate resident runtime export `{symbol}`"})
+            &seen.add(symbol, true).drop("checked absent above")
+            global :: link_intern(&c, symbol)
+            link_reference(&c, global, false)
+        }
+    }
     entry_g :: link_resolve_program(&c)
     entry_section :: link_entry_section(&c, entry_g)
-    if entry_section < 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: c.errors}
+    if entry_section < 0 || c.errors.len() > 0 -> return link_resident_failure(^c.errors)
+    entries := [Int]{entry_section}
+    if request == .Val(wanted) {
+        loop symbol in wanted.callable_exports {
+            global :: c.g_index.get(symbol) ?? return link_resident_failure(^[String]{"unresolved resident runtime export `{symbol}`"})
+            final :: link_final(c, global)
+            if c.g_kind[final] != LINK_G_FILE || c.g_section[final] < 0 -> return link_resident_failure(^[String]{"resident export `{symbol}` is not a concrete file definition"})
+            object :: c.g_obj[final]
+            section :: c.g_section[final]
+            if c.obj_buffer[object] != wanted.runtime_input -> return link_resident_failure(^[String]{"resident export `{symbol}` is not defined by the designated runtime input"})
+            if (link_sec_flags(c, object, section) & 4) == 0 -> return link_resident_failure(^[String]{"resident export `{symbol}` is not executable code"})
+            section_size :: link_sec_size(c, object, section)
+            offset :: c.g_value[final]
+            size :: c.g_size[final]
+            if offset < 0 || offset >= section_size || size < 0 || size > section_size - offset -> return link_resident_failure(^[String]{"resident export `{symbol}` has an out-of-section extent"})
+            &entries.push(section)
+        }
+    }
     linker_names := [String:Bool]{}
     loop name in link_linker_names() -> &linker_names.add(name, true).drop("names are unique")
-    link_collect(&c, [Int]{entry_section}, linker_names)
-    if c.errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: c.errors}
+    link_collect(&c, entries, linker_names)
+    if c.errors.len() > 0 -> return link_resident_failure(^c.errors)
     layout :: link_layout(&c)
+    if request != .None {
+        if layout.text_start <= 0 || layout.text_end < layout.text_start || layout.mem_end > 9223372036854775807 -> return link_resident_failure(^[String]{"resident executable layout is outside the native address range"})
+    }
     startup :: link_has_startup(c)
     link_define_names(&c, layout, startup)
     entry :: link_global_addr(c, entry_g)
-    image :: link_write(&c, layout, entry)
-    if c.errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: c.errors}
-    X64ExecutableResult{bytes: image, errors: [String]{}}
+    image := link_write(&c, layout, entry)
+    if c.errors.len() > 0 -> return link_resident_failure(^c.errors)
+    facts := X64ResidentLinkFacts?{None}
+    if request == .Val(wanted) {
+        symbols := [X64ResidentSymbol]{}
+        loop symbol in wanted.callable_exports {
+            global :: c.g_index.get(symbol) ?? return link_resident_failure(^[String]{"resident runtime export disappeared after resolution"})
+            final :: link_final(c, global)
+            section :: c.g_section[final]
+            row :: link_live_row(c, section)
+            if row < 0 || c.live_class[row] != LINK_TEXT -> return link_resident_failure(^[String]{"resident export `{symbol}` is not in the final executable mapping"})
+            object :: c.g_obj[final]
+            address :: link_global_addr(c, global)
+            section_address :: c.live_addr[row]
+            section_size :: link_sec_size(c, object, section)
+            if address <= 0 || address < section_address || address < layout.text_start || address >= layout.text_end || section_address < layout.text_start || section_size <= 0 || section_size > layout.text_end - section_address -> return link_resident_failure(^[String]{"resident export `{symbol}` has an invalid linked code address"})
+            section_end :: section_address + section_size
+            &symbols.push(X64ResidentSymbol{symbol: symbol, defining_symbol: c.g_name[final], input: c.obj_buffer[object], object_offset: c.obj_base[object], address: address, size: c.g_size[final], section_end: section_end})
+        }
+        segments := [X64ResidentSegment]{
+            X64ResidentSegment{address: LINK_BASE, file_size: layout.r_end - LINK_BASE, memory_size: layout.r_end - LINK_BASE, align: LINK_PAGE, flags: 4},
+            X64ResidentSegment{address: layout.text_start, file_size: layout.text_end - layout.text_start, memory_size: layout.text_end - layout.text_start, align: LINK_PAGE, flags: 5},
+        }
+        if layout.has_rw -> &segments.push(X64ResidentSegment{address: layout.rw_start, file_size: layout.file_end - layout.rw_start, memory_size: layout.mem_end - layout.rw_start, align: LINK_PAGE, flags: 6})
+        tls := X64ResidentSegment?{None}
+        if layout.has_tls -> tls = Val(X64ResidentSegment{address: c.tls_start, file_size: layout.tdata_end - c.tls_start, memory_size: c.tls_end - c.tls_start, align: c.tls_align, flags: 4})
+        facts = Val(X64ResidentLinkFacts{base: LINK_BASE, entry: entry, segments: ^segments, tls: tls, preinit_start: layout.preinit_start, preinit_end: layout.preinit_end, init_start: layout.init_start, init_end: layout.init_end, fini_start: layout.fini_start, fini_end: layout.fini_end, symbols: ^symbols})
+    }
+    X64ResidentLinkResult{image: X64ExecutableResult{bytes: ^image, errors: [String]{}}, facts: ^facts}
+}
+
+// This result is NOT runtime authority. Only the actual held-output admission
+// producer may bind these facts to verified pack/provider/lifecycle artifacts.
+pub fn x64_link_resident_child(names: [String], bufs: ^[[U8]], request: ^X64ResidentLinkRequest) -> X64ResidentLinkResult Never! {
+    link_executable_image(names, ^bufs, Val(^request))
 }
