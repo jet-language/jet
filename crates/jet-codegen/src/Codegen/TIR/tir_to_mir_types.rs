@@ -2393,6 +2393,14 @@ const COMPILER_OWNED_ENUMS: &[(&str, &[&str])] = &[
         ],
     ),
 ];
+
+// Reflection values have checked nominal rows even without source declarations.
+// Unlike the runtime-owned enums above, these declarations belong to the
+// artifact, not to the cached runtime or Prelude.
+const COMPILER_OWNED_REFLECTION_ENUMS: &[(&str, &[&str])] = &[(
+    "UnitScaleProvenanceKind",
+    &["Rational", "SymbolicPi", "Conventional", "Measured"],
+)];
 // Compiler-owned Core records are checked values, not user declarations. Keep
 // their owner rows in the checked declaration table so a field projection can
 // use the same nominal identity in every engine. The field list is only the
@@ -3064,6 +3072,7 @@ pub(crate) fn is_compiler_owned_core_record(name: &str) -> bool {
 pub(crate) fn compiler_owned_enum_variants(name: &str) -> Option<&'static [&'static str]> {
     COMPILER_OWNED_ENUMS
         .iter()
+        .chain(COMPILER_OWNED_REFLECTION_ENUMS.iter())
         .find(|(owned, _)| *owned == name)
         .map(|(_, variants)| *variants)
 }
@@ -3455,6 +3464,7 @@ fn compiler_owned_type_defs<'a>(
     }
     COMPILER_OWNED_ENUMS
         .iter()
+        .chain(COMPILER_OWNED_REFLECTION_ENUMS.iter())
         .map(move |(name, variants)| TirTypeDef {
             module: module.to_string(),
             key: name.to_string(),
