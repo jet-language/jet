@@ -444,6 +444,14 @@ fn sema_incremental_query(memo: SemaModuleMemo, key: String, input: String, elig
     SemaBodyMemoQuery{module_memo: memo, key: key, input: ^input, eligible: eligible, replay: replay}
 }
 
+fn sema_incremental_retarget(query: ^SemaBodyMemoQuery?, memo: SemaModuleMemo?) -> SemaBodyMemoQuery? {
+    current := ^query ?? return None
+    if memo == .Val(module_memo) -> current.module_memo = module_memo
+    current.replay = false
+    Val(^current)
+}
+
+
 fn sema_incremental_replay(query: SemaBodyMemoQuery) -> SemaBodyMemoValue? {
     permit :: query.module_memo.cache.state.guard_edit()
     if permit.value.generation != query.module_memo.generation || (permit.value.scope_epochs.get(query.module_memo.module_identity) ?? -1) != query.module_memo.epoch -> return None
@@ -2240,10 +2248,7 @@ fn sema_check_registration_method(source_module: SemaRegistrationModule, memory_
         if query == None {
             checked_result = Val(sema_function_check(owned_input.func, registered.symbol.id, owned_input.function_kind, registered.raw_protocol_return, &environment, &scopes, host_hooks, &diagnostics, &function_call_facts, &function_comptime_requests, &function_name_references))
         } else {
-            if memo == .Val(current) {
-                query.module_memo = current
-                query.replay = false
-            }
+            query = sema_incremental_retarget(^query, memo)
             prefix := ^owned_input.diagnostics
             owned_input.diagnostics = [Diagnostic]{}
             packet := sema_check_inline_memo_body(ordinal, owned_input.func, registered.symbol.id, owned_input.function_kind, registered.raw_protocol_return, &environment, &scopes, host_hooks, prior_reach, ^prefix)
@@ -2561,10 +2566,7 @@ fn sema_check_module_function(ready: &[SemaPreparedBody], queries: &[Int:SemaBod
         // temporary cache product arrays.
         return sema_function_check(func, owner_id, function_kind, raw_protocol_return, &environment, &scopes, host_hooks, &diagnostics, &call_facts, &comptime_requests, &name_references)
     }
-    if memo == .Val(current) {
-        query.module_memo = current
-        query.replay = false
-    }
+    query = sema_incremental_retarget(^query, memo)
     body := sema_check_inline_memo_body(job_index, func, owner_id, function_kind, raw_protocol_return, &environment, &scopes, host_hooks, prior_reach, [Diagnostic]{})
     sema_incremental_accept_packet(query, body)
     sema_check_drain_body(^body, &diagnostics, &call_facts, &comptime_requests, &name_references)
