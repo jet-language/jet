@@ -316,3 +316,13 @@ an owner ruling before it counts as a port.
 - Must `jet fmt` (P3) and the dev-loop analyses (SD7) move before the freeze?
 - Should the 49 retired-status teaching rows the Rust parser still lists be
   ported or dropped (P2)?
+
+## Core-port checker seams (owner directive #29)
+
+Compiler-owned `TextError{message: String}` and `RangeError{reason: String}`
+use the same record shape for construction and field access. Their literal
+rows are authored in `core_constructable_fields` and generated into Jet's
+`CORE_RECORD_LITERAL_ROWS`; source declarations are not fabricated for them.
+`core_failure_record_literal_ok.jet` and `CoreFailureRecordFixtures.jet` cover
+the public construction and the shared table shape. The Rust checker bridge
+exists only while the seed compiles Core and dies at cutover.
