@@ -1,10 +1,21 @@
 # tests/ws_law.rs::public_aot_ws_connect_rejects_url_controls_before_connecting
 # Exact original guest source and code/stdout predicates; PENDING-SAME-HEAD.
-# Original no accepted TCP connection within1s subclaim PENDING-SEAM(nonblocking-listener), retained scratch/TestSlice1d/ws-original.rs.
+# Original one-second nonblocking observer is executable through D-NET-NONBLOCKING1: Timeout keeps polling; other errors return false exactly as original.
 fixture: public_aot_ws_connect_rejects_url_controls_before_connecting.fixture
+step: jet build observer/run.jet
+exit: 0
+copy: observer/.jet/build/run observer-bin
+spawn observer: {work}/observer-bin
+stdout: file observer.stdout
+stderr: file observer.stderr
+await: file observer.stdout ~ "ADDRESS=" timeout 30s every 10ms
+capture: addr = text file.after_first("ADDRESS=").line(0) observer.stdout
 write: main.jet = source.template
 step: jet build main.jet
 exit: 0
 step: built
 exit: 0
 stdout: = public_aot_ws_connect_rejects_url_controls_before_connecting.out
+wait: observer
+exit: 0
+file.line(1): observer.stdout = "false"

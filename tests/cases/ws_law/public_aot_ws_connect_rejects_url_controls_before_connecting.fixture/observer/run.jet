@@ -1,0 +1,27 @@
+// Exact ws_law.rs:885-899 observer: any accepted connection fails;
+// WouldBlock keeps polling to 1s and yields; any other error returns false.
+// D-NET-NONBLOCKING1 maps WouldBlock to typed Timeout from accept(deadline:0s).
+use core.net as net
+use core.time as time
+use core.tasks as tasks
+fn observed_connection(listener: TCPListener) -> Bool {
+    deadline :: time.instant() + 1s
+    loop {
+        if listener.accept(deadline: 0s) == {
+            .Ok(_) -> return true
+            .Err(error) -> if error == {
+                .Timeout(_) -> {
+                    if time.instant() >= deadline -> return false
+                    tasks.yield_now()
+                }
+                else -> return false
+            }
+        }
+    }
+}
+fn run() {
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind observer")
+    addr :: listener.local_addr() ?? panic("observer address")
+    print("ADDRESS={addr}")
+    print(observed_connection(listener))
+}
