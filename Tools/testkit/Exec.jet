@@ -2,71 +2,11 @@ use core.process as process
 use core.files as files
 use core.sys as sys
 
-struct KitEnv {
-    root: String
-    scratch: String
-    jet: String
-    jetpack: String
-    timeout: Duration
-    memory_limit: Int
-}
-
-struct KitEnvVar {
-    name: String
-    value: String?
-}
-
-struct KitEntry {
-    path: String
-    expected: String
-    project: String
-    suite: String
-    mode: String
-}
-
-struct KitRun {
-    stdout: String
-    stderr: String
-    code: Int
-    signal: Int?
-    timed_out: Bool
-    error: String
-}
-struct KitOptions {
-    suite: String
-    jet: String
-    jetpack: String
-    tiers: [String]
-    filter: String
-    cases: String
-    shard_index: Int
-    shard_count: Int
-    sharded: Bool
-    timeout: Int
-    scratch: String
-    results: String
-    list: Bool
-    coverage: Bool
-    bless: KitBless
-    error: String
-}
-
-struct KitCtx {
-    options: KitOptions
-    env: KitEnv
-    root: String
-    scratch: String
-    bless: KitBless
-}
 
 fn kit_exec_defaults() -> KitOptions {
     KitOptions{suite: "golden", jet: "", jetpack: "", tiers: ["ref"], filter: "", cases: "", shard_index: 1, shard_count: 1, sharded: false, timeout: 600, scratch: "", results: "", list: false, coverage: false, bless: KitBless{ids: [], all: false, reason: "", allow_shrink: [], first_tier: true}, error: ""}
 }
 
-struct KitSelection {
-    ids: [String]
-    error: String
-}
 
 fn kit_exec_select_ids(all_ids: [String], options: KitOptions) -> KitSelection {
     requested := [String]{}

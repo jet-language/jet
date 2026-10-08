@@ -1,30 +1,5 @@
 use core.files as files
 
-struct KitAssertion {
-    stream: String
-    path: String
-    mode: String
-    value: String
-}
-
-struct KitStep {
-    argv: [String]
-    stdin: String
-    exit: String
-    assertions: [KitAssertion]
-}
-
-struct KitPlan {
-    requires: [String]
-    fixture: String
-    environment: [String]
-    normalize: [String]
-    compile_only: Bool
-    ref_audit: String
-    refused: String
-    steps: [KitStep]
-    error: String
-}
 
 // Quotes preserve whitespace and empty argv. Backslash escapes inside and
 // outside quotes; the kit never delegates argument parsing to a shell.
@@ -222,11 +197,6 @@ fn kit_steps_bless_plan(plan: KitPlan, id: String, bless: KitBless) -> KitVerdic
     None
 }
 
-struct KitOutcome {
-    verdict: KitVerdict
-    run: KitRun
-    tier: String{"-"}
-}
 
 fn kit_steps_environment(plan: KitPlan, env: KitEnv, work: String, scratch: String, built: String) -> [KitEnvVar] {
     overlay := [KitEnvVar]{}

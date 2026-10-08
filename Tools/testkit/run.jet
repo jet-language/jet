@@ -87,6 +87,132 @@ fn kit_parse_options(args: [String]) -> KitOptions {
     options
 }
 
+// Keep the shared nominal types and suite callbacks in one file: #4780 gives
+// sibling-file types different identities when checking function values.
+struct KitEnv {
+    root: String
+    scratch: String
+    jet: String
+    jetpack: String
+    timeout: Duration
+    memory_limit: Int
+}
+
+struct KitEnvVar {
+    name: String
+    value: String?
+}
+
+struct KitEntry {
+    path: String
+    expected: String
+    project: String
+    suite: String
+    mode: String
+}
+
+struct KitRun {
+    stdout: String
+    stderr: String
+    code: Int
+    signal: Int?
+    timed_out: Bool
+    error: String
+}
+struct KitOptions {
+    suite: String
+    jet: String
+    jetpack: String
+    tiers: [String]
+    filter: String
+    cases: String
+    shard_index: Int
+    shard_count: Int
+    sharded: Bool
+    timeout: Int
+    scratch: String
+    results: String
+    list: Bool
+    coverage: Bool
+    bless: KitBless
+    error: String
+}
+
+struct KitCtx {
+    options: KitOptions
+    env: KitEnv
+    root: String
+    scratch: String
+    bless: KitBless
+}
+
+struct KitSelection {
+    ids: [String]
+    error: String
+}
+
+struct KitVerdict {
+    status: String
+    detail: String
+    diff: String
+}
+
+struct KitBless {
+    ids: [String]
+    all: Bool
+    reason: String
+    allow_shrink: [String]
+    first_tier: Bool
+}
+
+struct KitAssertion {
+    stream: String
+    path: String
+    mode: String
+    value: String
+}
+
+struct KitStep {
+    argv: [String]
+    stdin: String
+    exit: String
+    assertions: [KitAssertion]
+}
+
+struct KitPlan {
+    requires: [String]
+    fixture: String
+    environment: [String]
+    normalize: [String]
+    compile_only: Bool
+    ref_audit: String
+    refused: String
+    steps: [KitStep]
+    error: String
+}
+
+struct KitOutcome {
+    verdict: KitVerdict
+    run: KitRun
+    tier: String{"-"}
+}
+
+struct KitTier {
+    name: String
+    flags: [String]
+    direct: Bool
+    audit: Bool
+}
+
+struct KitCaseResult {
+    suite: String
+    case: String
+    tier: String
+    status: String
+    detail: String
+    exit: Int
+}
+
 struct KitSuite {
     name: String
     discover: fn(KitCtx) -[FS, Mem.Alloc, Panic]> [KitEntry]
