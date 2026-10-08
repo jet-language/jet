@@ -1,0 +1,68 @@
+package {
+    name: "functions_never_return"
+    version: "0.1.0"
+    authority: { holds: { allow: [Exec, IO, Mem.Alloc] } }
+}
+
+// D-NEVER2=B: declared Never belongs in the return slot, while ordinary
+// functions still infer the same bottom fact without an annotation.
+use core.process as process
+
+#Error
+enum StopError {
+    Closed
+}
+
+fn usage() -> Never {
+    print("usage: tool <count>")
+    process.exit(2)
+}
+
+fn count(arg: String) -> Int { return Int.parse(arg) ?? usage() }
+
+fn serve(addr: String) -> Never NetError! {
+    loop { panic("serve stopped") }
+}
+
+fn propagate(error: NetError) -> Never NetError! { return Err(error) }
+
+fn stop() -> Never { panic("stop") }
+
+fn run_then_stop(stop: fn() -> Never) -> Never { stop() }
+
+fn fail() -> Never StopError! { return Err(StopError.Closed) }
+
+// `Never Never!` has neither a success value nor a failure route, so a call
+// to it stops like any `Never` call, here in tail position.
+fn halt(code: Int) -> Never Never! { process.exit(code) }
+
+fn halt_usage() -> Never { halt(3) }
+
+fn unbounded() -> Never {
+    loop {
+
+    }
+}
+
+fn inferred() {
+    loop {
+
+    }
+}
+
+trait Terminator {
+    fn stop(self) -> Never
+}
+
+struct Worker {
+
+}
+
+impl Worker.Terminator {
+    fn stop(self) -> Never { panic("worker stopped") }
+}
+
+fn run() {
+    print(count("41"))
+    print(fail() ?? 42)
+}

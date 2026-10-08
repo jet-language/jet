@@ -1,0 +1,53 @@
+# Port of tests/bind.rs:1160-1269; all input/program bytes are verbatim.
+# PENDING-REFERENCE: no snapshots blessed until all original assertions hold.
+fixture: fixtures/public_cli_covers_each_data_format_parse_hash_and_idempotence
+step: jet inspect bind json "{work}/json_repo.json" --type "Repo" -o "{work}/bindings/json_repo.jet"
+file: "{work}/bindings/json_repo.jet" = public_cli_covers_each_data_format_parse_hash_and_idempotence.0.generated.jet.out
+copy: bindings/json_repo.jet before-0.jet
+step: jet inspect bind json "{work}/json_repo.json" --type "Repo" -o "{work}/bindings/json_repo.jet"
+file: "{work}/bindings/json_repo.jet" = public_cli_covers_each_data_format_parse_hash_and_idempotence.0.generated.jet.out
+file: bindings/json_repo.jet == before-0.jet
+step: jet fmt bindings/json_repo.jet
+step: jet inspect bind csv "{work}/csv_people.csv" --type "Person" -o "{work}/bindings/csv_people.jet"
+file: "{work}/bindings/csv_people.jet" = public_cli_covers_each_data_format_parse_hash_and_idempotence.1.generated.jet.out
+copy: bindings/csv_people.jet before-1.jet
+step: jet inspect bind csv "{work}/csv_people.csv" --type "Person" -o "{work}/bindings/csv_people.jet"
+file: "{work}/bindings/csv_people.jet" = public_cli_covers_each_data_format_parse_hash_and_idempotence.1.generated.jet.out
+file: bindings/csv_people.jet == before-1.jet
+step: jet fmt bindings/csv_people.jet
+step: jet inspect bind sql "{work}/sql_schema.sql" --type "Users" -o "{work}/bindings/sql_schema.jet"
+file: "{work}/bindings/sql_schema.jet" = public_cli_covers_each_data_format_parse_hash_and_idempotence.2.generated.jet.out
+copy: bindings/sql_schema.jet before-2.jet
+step: jet inspect bind sql "{work}/sql_schema.sql" --type "Users" -o "{work}/bindings/sql_schema.jet"
+file: "{work}/bindings/sql_schema.jet" = public_cli_covers_each_data_format_parse_hash_and_idempotence.2.generated.jet.out
+file: bindings/sql_schema.jet == before-2.jet
+step: jet fmt bindings/sql_schema.jet
+step: jet inspect bind xml "{work}/xml_catalog.xml" --type "Catalog" -o "{work}/bindings/xml_catalog.jet"
+file: "{work}/bindings/xml_catalog.jet" = public_cli_covers_each_data_format_parse_hash_and_idempotence.3.generated.jet.out
+copy: bindings/xml_catalog.jet before-3.jet
+step: jet inspect bind xml "{work}/xml_catalog.xml" --type "Catalog" -o "{work}/bindings/xml_catalog.jet"
+file: "{work}/bindings/xml_catalog.jet" = public_cli_covers_each_data_format_parse_hash_and_idempotence.3.generated.jet.out
+file: bindings/xml_catalog.jet == before-3.jet
+step: jet fmt bindings/xml_catalog.jet
+step: jet inspect bind proto "{work}/proto_repo.proto" --type "Repo" -o "{work}/bindings/proto_repo.jet"
+file: "{work}/bindings/proto_repo.jet" = public_cli_covers_each_data_format_parse_hash_and_idempotence.4.generated.jet.out
+copy: bindings/proto_repo.jet before-4.jet
+step: jet inspect bind proto "{work}/proto_repo.proto" --type "Repo" -o "{work}/bindings/proto_repo.jet"
+file: "{work}/bindings/proto_repo.jet" = public_cli_covers_each_data_format_parse_hash_and_idempotence.4.generated.jet.out
+file: bindings/proto_repo.jet == before-4.jet
+step: jet fmt bindings/proto_repo.jet
+step: jet inspect bind json "{work}/bad.json" --type Bad
+exit: 1
+stderr: = public_cli_covers_each_data_format_parse_hash_and_idempotence.bad-0.stderr
+step: jet inspect bind csv "{work}/bad.csv" --type Bad
+exit: 1
+stderr: = public_cli_covers_each_data_format_parse_hash_and_idempotence.bad-1.stderr
+step: jet inspect bind sql "{work}/bad.sql" --type Bad
+exit: 1
+stderr: = public_cli_covers_each_data_format_parse_hash_and_idempotence.bad-2.stderr
+step: jet inspect bind xml "{work}/bad.xml" --type Bad
+exit: 1
+stderr: = public_cli_covers_each_data_format_parse_hash_and_idempotence.bad-3.stderr
+step: jet inspect bind proto "{work}/bad.proto" --type Bad
+exit: 1
+stderr: = public_cli_covers_each_data_format_parse_hash_and_idempotence.bad-4.stderr

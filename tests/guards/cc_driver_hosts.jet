@@ -1,0 +1,60 @@
+use core.files as files
+
+// Static contracts from tests/cc_driver_hosts.rs; executable host matrix remains separate.
+#Test("make_driver_fixture_requires_explicit_tool_aliases_and_scopes_paths") {
+    root :: "tests/fixtures/foreign_build_hosts/make-cc"
+    makefile :: files.read("{root}/Makefile") ?? panic("read Make fixture")
+    declarations :: [String]{
+        "ifeq ($(origin CC),command line)", "ifeq ($(origin CXX),command line)",
+        "--project-root=\"$(PROJECT_ROOT)\"", "--build-root=\"$(BUILD_ROOT)\"",
+        "@flags.rsp", "-MMD", "-MP", "-MF \"$(C_DEPFILE)\"", "-MT \"$(C_OBJECT)\"",
+        "-MF \"$(CXX_DEPFILE)\"", "-MT \"$(CXX_OBJECT)\"",
+    }
+    loop declaration in declarations {
+        assert(makefile.contains(declaration), "Make fixture omits {declaration}")
+    }
+    fallbacks :: [String]{"CC ?=", "CXX ?=", "CC := cc", "CXX := c++"}
+    loop fallback in fallbacks {
+        assert(!makefile.contains(fallback), "Make fixture retains {fallback}")
+    }
+    fixtures :: [String]{"main.c", "main.cpp", "flags.rsp", "include/config.h"}
+    loop fixture in fixtures {
+        assert(files.is_file("{root}/{fixture}"), "Make fixture omits {fixture}")
+    }
+}
+
+#Test("cmake_driver_fixture_builds_both_languages_through_standard_compiler_slots") {
+    root :: "tests/fixtures/foreign_build_hosts/cmake-cc"
+    cmake :: files.read("{root}/CMakeLists.txt") ?? panic("read CMake fixture")
+    declarations :: [String]{
+        "project(jet_cc_cmake_fixture LANGUAGES C CXX)", "add_executable(cc-driver main.c)",
+        "add_executable(cxx-driver main.cpp)", "target_include_directories",
+        "@${{CMAKE_CURRENT_SOURCE_DIR}}/flags.rsp", "C_STANDARD 11", "CXX_STANDARD 17",
+    }
+    loop declaration in declarations {
+        assert(cmake.contains(declaration), "CMake fixture omits {declaration}")
+    }
+    assert(!cmake.contains("find_program"))
+    assert(!cmake.contains("/usr/bin/cc"))
+    fixtures :: [String]{"main.c", "main.cpp", "flags.rsp", "include/config.h"}
+    loop fixture in fixtures {
+        assert(files.is_file("{root}/{fixture}"), "CMake fixture omits {fixture}")
+    }
+}
+
+#Test("aliases_are_real_installed_bins_and_docs_cover_the_driver_matrix") {
+    cargo :: files.read("Cargo.toml") ?? panic("read Cargo manifest")
+    bins :: [String]{"name = \"jet-cc\"", "name = \"jet-cxx\""}
+    loop bin in bins {
+        assert(cargo.contains(bin), "Cargo does not build {bin}")
+    }
+    main :: files.read("Source/main.rs") ?? panic("read CLI alias dispatch")
+    assert(main.contains("\"jet-cc\" => Some(\"cc\")"))
+    assert(main.contains("\"jet-cxx\" | \"jet-c++\" => Some(\"c++\")"))
+    docs :: files.read("Docs/spec/reference/cc-driver.md") ?? panic("read driver documentation")
+    terms :: [String]{"signed Nix index", "offline", "Make", "CMake", "no PATH fallback", "cross-target", "clean", "no-op", "edit", "error"}
+    lower :: docs.to_lower()
+    loop term in terms {
+        assert(lower.contains(term.to_lower()), "driver docs omit {term}")
+    }
+}

@@ -2,9 +2,9 @@
 # PENDING-REFERENCE: snapshots are written only after the original assertion check.
 fixture: fixtures/csv_bind_generated_project_executes_typed_fields
 step: jet inspect bind csv "fixtures/people.csv" --type "Person"
-file: .jet/bindings/people.jet = csv_bind_generated_project_executes_typed_fields.0.generated.jet.out
+file: fixtures/.jet/bindings/people.jet = csv_bind_generated_project_executes_typed_fields.0.generated.jet.out
 # PENDING-GRAMMAR: concat preserves generated + newline + verbatim program.
-concat: main.jet .jet/bindings/people.jet separator program-1.jet
+concat: main.jet fixtures/.jet/bindings/people.jet separator program-1.jet
 step: jet check main.jet
 step: jet build --profile=debug main.jet
 step: built

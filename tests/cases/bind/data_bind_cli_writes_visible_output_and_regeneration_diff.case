@@ -1,0 +1,16 @@
+# Port of tests/bind.rs:1271-1329; all input/program bytes are verbatim.
+# PENDING-REFERENCE: no snapshots blessed until all original assertions hold.
+fixture: fixtures/data_bind_cli_writes_visible_output_and_regeneration_diff
+step: jet inspect bind json "{work}/records.json" --type "Record"
+file: "bindings/records.jet" = data_bind_cli_writes_visible_output_and_regeneration_diff.0.generated.jet.out
+file: bindings/records.jet exists
+copy: bindings/records.jet before.jet
+copy: changed.json records.json
+file: bindings/records.jet == before.jet
+step: jet inspect bind json "{work}/records.json" --type "Record"
+file: "bindings/records.jet" = data_bind_cli_writes_visible_output_and_regeneration_diff.1.generated.jet.out
+file: bindings/records.jet != before.jet
+step: jet inspect bind json "{work}/records.json" --type "Record" -o "{work}/generated/record.jet"
+file: "{work}/generated/record.jet" = data_bind_cli_writes_visible_output_and_regeneration_diff.2.generated.jet.out
+file: generated/record.jet exists
+file: generated/record.jet != before.jet
