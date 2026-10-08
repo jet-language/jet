@@ -10063,14 +10063,11 @@ impl<'a> LowerCtx<'a> {
     /// Whether `field` is a stored (not computed) field of the nominal struct
     /// `ty`. Only a stored field can be read through a projected place.
     pub(super) fn is_stored_struct_field(&mut self, ty: &Type, field: &str) -> bool {
-        let Ok(mir_ty) = self.mir_type(ty) else {
-            return false;
-        };
-        let Some(identity) = mir_ty.identity else {
+        let Ok(owner) = self.field_owner_id_for_type(ty) else {
             return false;
         };
         self.type_defs.iter().any(|definition| {
-            definition.id == identity
+            definition.id == owner
                 && matches!(&definition.kind, MirTypeDefKind::Struct { fields, .. }
                     if fields.iter().any(|row| row.name == field && !row.computed))
         })
