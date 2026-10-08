@@ -1401,3 +1401,218 @@ fn full_tree_mailbox(worker: String, capacity: Int) -> ServiceError Never! {
     assert(if full_tree_mailbox("worker", 3) == {.Full(message) -> message == "mailbox for `worker` is full (capacity 3)" else -> false})
     assert(if stale_tree_endpoint("tree", "worker", 1, 2) == {.Stale(message) -> message == "service endpoint tree/worker@g1 is stale (current generation 2)" else -> false})
 }
+
+// Private, owned copies of the existing durable reader result. They carry no
+// authority registry or second delivery state; the locked read is unchanged.
+struct __DeliveryRecord {
+    op: Int
+    fields: [String]
+}
+
+struct __DeliveryFacts {
+    id: String
+    key: String
+    tree: String
+    worker: String
+    message: String
+    authority: String
+    generation: Int
+    state: DeliveryState
+    attempts: Int
+    retention_until: Int
+    deadline: Int
+    event_sequence: Int
+    duplicate: Bool
+    records: [__DeliveryRecord]
+}
+
+struct __MailboxRead {
+    status: Int
+    message: String
+}
+
+pub struct DeliveryEvent {
+    pub sequence: Int
+    pub state: DeliveryState
+    pub attempts: Int
+    pub timestamp: Int
+    pub signature: String
+}
+
+pub fn delivery_status(delivery: Delivery) -> DeliveryState ServiceError! {
+    #Unsafe("ServiceAuthority2504: one existing locked durable read, then the owned entry's state") {
+        facts :: if core.service.__delivery_read(delivery, false) == {
+            .Ok(value) -> value
+            .Err(error) -> { return Err(error) }
+        }
+        return Ok(facts.state)
+    }
+}
+
+pub fn delivery_wait(delivery: Delivery) -> DeliveryState ServiceError! {
+    // Native wait is a single status sample, not polling or a scheduler wait.
+    delivery_status(delivery)
+}
+
+pub fn delivery_receipt(delivery: Delivery) -> DeliveryReceipt ServiceError! {
+    #Unsafe("ServiceAuthority2517: same locked read; receipt fields and signature are source policy") {
+        facts :: if core.service.__delivery_read(delivery, false) == {
+            .Ok(value) -> value
+            .Err(error) -> { return Err(error) }
+        }
+        signature :: if delivery_receipt_signature(facts) == {
+            .Ok(value) -> value
+            .Err(error) -> { return Err(error) }
+        }
+        return Ok(DeliveryReceipt{id: facts.id, state: facts.state, attempts: facts.attempts, retention_until: facts.retention_until, deadline: facts.deadline, idempotency_key: facts.key, duplicate: facts.duplicate, authority: facts.authority, generation: facts.generation, signature: signature})
+    }
+}
+
+pub fn delivery_events(delivery: Delivery) -> [DeliveryEvent] ServiceError! {
+    #Unsafe("ServiceAuthority2535-2647: one locked read, then exact record filtering, error order and signature validation") {
+        facts :: if core.service.__delivery_read(delivery, true) == {
+            .Ok(value) -> value
+            .Err(error) -> { return Err(error) }
+        }
+        events := [DeliveryEvent]{}
+        loop record in facts.records {
+            fields :: record.fields
+            if record.op == 83 && fields.len() == 10 && fields[0] == facts.id {
+                generation :: workflow_i64(fields[5]) ?? return Err(ServiceError.Unavailable("delivery event generation is malformed"))
+                timestamp :: workflow_i64(fields[7]) ?? return Err(ServiceError.Unavailable("delivery event timestamp is malformed"))
+                if events.len() != 0 -> return Err(ServiceError.Unavailable("delivery event sequence is not monotonic"))
+                &events.push(DeliveryEvent{sequence: 1, state: DeliveryState.Accepted, attempts: 0, timestamp: timestamp, signature: fields[9]})
+                expires :: workflow_i64(fields[8]) ?? return Err(ServiceError.Unavailable("delivery acceptance expiry is malformed"))
+                key :: if delivery_generation_key(fields[2], generation) == {
+                    .Ok(value) -> value
+                    .Err(error) -> { return Err(error) }
+                }
+                signed_fields :: [String]{"jet-service-delivery-acceptance-v2", fields[0], fields[1], fields[2], fields[3], fields[4], "{generation}", fields[6], "{timestamp}", "{expires}"}
+                expected :: core.crypto.hmac_sha256(key, delivery_signature_payload(signed_fields))
+                supplied :: core.encoding.hex_to_bytes(fields[9]) ?? return Err(ServiceError.Unavailable("delivery acceptance signature is malformed"))
+                if !core.crypto.constant_time_equal_bytes(expected, supplied) -> return Err(ServiceError.Unavailable("delivery acceptance history signature does not validate"))
+            } else if record.op == 69 && fields.len() == 6 && fields[0] == facts.id {
+                sequence :: workflow_i64(fields[1]) ?? return Err(ServiceError.Unavailable("delivery event sequence is malformed"))
+                state :: delivery_parse_state(fields[2]) ?? return Err(ServiceError.Unavailable("service delivery lifecycle state is malformed"))
+                attempts :: workflow_i64(fields[3]) ?? return Err(ServiceError.Unavailable("delivery event attempts are malformed"))
+                timestamp :: workflow_i64(fields[4]) ?? return Err(ServiceError.Unavailable("delivery event timestamp is malformed"))
+                expected_sequence := 1
+                if events.len() != 0 {
+                    previous :: events[events.len() - 1].sequence
+                    expected_sequence = if previous == 9223372036854775807 -> previous else -> previous + 1
+                }
+                if sequence != expected_sequence -> return Err(ServiceError.Unavailable("delivery event sequence is not monotonic"))
+                expected :: if delivery_event_signature(facts.authority, facts.generation, fields[0], sequence, state, attempts, timestamp) == {
+                    .Ok(value) -> value
+                    .Err(error) -> { return Err(error) }
+                }
+                supplied :: core.encoding.hex_to_bytes(fields[5]) ?? return Err(ServiceError.Unavailable("delivery event signature is malformed"))
+                if !core.crypto.constant_time_equal_bytes(expected, supplied) -> return Err(ServiceError.Unavailable("delivery event signature does not validate"))
+                &events.push(DeliveryEvent{sequence: sequence, state: state, attempts: attempts, timestamp: timestamp, signature: fields[5]})
+            }
+        }
+        if events.len() != facts.event_sequence || events.len() == 0 -> return Err(ServiceError.Unavailable("delivery event history is incomplete"))
+        if events[0].sequence != 1 -> return Err(ServiceError.Unavailable("delivery event history is incomplete"))
+        return Ok(events)
+    }
+}
+
+pub fn delivery_retry(delivery: Delivery) -> Delivery ServiceError! {
+    #Unsafe("ServiceAuthority2650: validate/read first, then an exact zero-retention runtime and existing retry operation") {
+        if core.service.__delivery_probe(delivery) == {
+            .Err(error) -> return Err(error)
+            .Ok(_) -> {}
+        }
+        runtime :: ServiceRuntime{store: core.service.__delivery_store(delivery), retention_ms: 0}
+        return core.service.__runtime_retry(runtime, delivery)
+    }
+}
+
+pub fn endpoint_receive(endpoint: ServiceEndpoint) -> String ServiceError! {
+    #Unsafe("ServiceAuthority1297: identity checks, existing two registry reads/captured Arc, conditional depth check, one receive") {
+        identity :: core.service.__endpoint_identity_parts(endpoint)
+        if validate_endpoint_identity(identity.authority, identity.tree, identity.worker, identity.generation) == {
+            .Err(error) -> return Err(error)
+            .Ok(_) -> {}
+        }
+        mailbox :: if core.service.__endpoint_mailbox(endpoint) == {
+            .Ok(value) -> value
+            .Err(error) -> { return Err(error) }
+        }
+        if !core.service.__mailbox_started(mailbox) && (!core.service.__mailbox_draining(mailbox) || core.service.__mailbox_depth(mailbox) == 0) -> return Err(ServiceError.NotStarted("service worker is not running"))
+        result :: core.service.__mailbox_receive(mailbox)
+        if result.status == 0 -> return Ok(result.message)
+        if result.status == 1 -> return Err(ServiceError.Ambiguous("service endpoint mailbox is empty"))
+        if result.status == 2 -> return Err(ServiceError.NotStarted("service endpoint mailbox is closed"))
+        return Err(ServiceError.Policy("service channel returned an invalid receive result"))
+    }
+}
+
+fn delivery_receipt_signature(facts: __DeliveryFacts) -> String ServiceError! {
+    key :: if delivery_generation_key(facts.authority, facts.generation) == {
+        .Ok(value) -> value
+        .Err(error) -> { return Err(error) }
+    }
+    fields :: [String]{"jet-service-delivery-receipt-v1", facts.id, facts.key, "{facts.duplicate}", facts.tree, facts.worker, facts.message, delivery_state_show(facts.state), "{facts.attempts}", "{facts.deadline}", "{facts.retention_until}", "{facts.generation}"}
+    Ok(core.encoding.bytes_to_hex(core.crypto.hmac_sha256(key, delivery_signature_payload(fields))))
+}
+
+fn delivery_event_signature(authority: String, generation: Int, id: String, sequence: Int, state: DeliveryState, attempts: Int, timestamp: Int) -> [U8] ServiceError! {
+    key :: if delivery_generation_key(authority, generation) == {
+        .Ok(value) -> value
+        .Err(error) -> { return Err(error) }
+    }
+    fields :: [String]{"jet-service-delivery-event-v1", id, "{sequence}", delivery_state_show(state), "{attempts}", "{timestamp}"}
+    Ok(core.crypto.hmac_sha256(key, delivery_signature_payload(fields)))
+}
+
+fn delivery_generation_key(authority: String, generation: Int) -> [U8] ServiceError! {
+    key :: if __authority_signing_key(authority) == {
+        .Ok(value) -> value
+        .Err(error) -> { return Err(error) }
+    }
+    fields :: [String]{"jet-service-delivery-generation-v1", "{generation}"}
+    Ok(core.crypto.hmac_sha256(key, delivery_signature_payload(fields)))
+}
+
+fn delivery_signature_payload(fields: [String]) -> [U8] Never! {
+    payload := [U8]{}
+    loop field in fields {
+        bytes :: field.bytes()
+        length :: bytes.len()
+        loop byte in 0..<8 -> &payload.push(U8{(length >> ((7 - byte) * 8)) & 255})
+        loop value in bytes -> &payload.push(value)
+    }
+    payload
+}
+
+fn delivery_parse_state(text: String) -> DeliveryState? Never! {
+    if text == "Pending" -> return Val(DeliveryState.Pending)
+    if text == "Accepted" -> return Val(DeliveryState.Accepted)
+    if text == "Delivering" -> return Val(DeliveryState.Delivering)
+    if text == "Delivered" -> return Val(DeliveryState.Delivered)
+    if text == "DeadLettered" -> return Val(DeliveryState.DeadLettered)
+    if text == "Cancelled" -> return Val(DeliveryState.Cancelled)
+    None
+}
+
+#Test("delivery signature fields retain big-endian byte counts and state spellings") {
+    fields :: [String]{"λ", ""}
+    assert(core.encoding.bytes_to_hex(delivery_signature_payload(fields)) == "0000000000000002cebb0000000000000000")
+    assert(delivery_parse_state("Delivered") == (Val(DeliveryState.Delivered)))
+    assert(delivery_parse_state("delivered") == None)
+}
+
+// Independent node:crypto oracle, captured in JsonStreams8/service-signature-
+// oracle.json. Native framing: ServiceAuthority.rs2252-2266 (generation),
+// 2269-2295 (event), 2350-2379 (receipt); each length is u64 BE UTF8 bytes.
+#Test("delivery receipt and event signatures match observed fixed-key framing vectors") {
+    authority :: "sa-000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    generation_key :: delivery_generation_key(authority, 7) ?? panic("fixed key")
+    assert(core.encoding.bytes_to_hex(generation_key) == "0efa1cbc75008d741cc1cdfb5a9b4512112201437413147ff3a5bdaabc65699e")
+    facts :: __DeliveryFacts{id: "d1", key: "k1", tree: "tree", worker: "worker", message: "λ", authority: authority, generation: 7, state: DeliveryState.Delivered, attempts: 3, retention_until: 1700000010000, deadline: 1700000000999, event_sequence: 4, duplicate: true, records: [__DeliveryRecord]{}}
+    receipt :: delivery_receipt_signature(facts) ?? panic("receipt vector")
+    assert(receipt == "df0bd21f6f2307c792cfb3b56258a633200241a964aca0c5f669853f11883601")
+    event :: delivery_event_signature(authority, 7, "d1", 4, DeliveryState.Delivered, 3, 1700000000123) ?? panic("event vector")
+    assert(core.encoding.bytes_to_hex(event) == "b26b530c1223a26a44476d6d44df66905c6cf02eaf51f440790b5ee153140aa6")
+}

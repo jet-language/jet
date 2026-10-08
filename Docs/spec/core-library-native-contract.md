@@ -58,6 +58,12 @@ The generator must verify that:
 - effect, authority, capability, fallback, signature, and tier metadata remain
   consistent.
 
+The generated Rust-bootstrap `CORE_CALLS` item alone permits long-running
+constant evaluation: the complete declaration registry exceeds rustc's
+const-evaluator step guard. This does not change row order, lookup facts,
+runtime initialization, or the Jet-native contract; the generator owns the
+item-level attribute alongside the table.
+
 The generated Rust tables are projections, not a second API catalog. Never
 hand-edit them. The main generated views are
 [`CoreModuleExports.rs`](../../crates/jet-foundation/src/CoreModuleExports.rs),
@@ -393,6 +399,19 @@ field leaves only project or assign the existing carrier and die at cutover.
 Handle-only `activity_wait`, `all` and `sleep` remain native and uncredited:
 their decisions inspect cursor/history/status under the handle's existing mutex,
 so independently locked getters/setters would change the atomic region.
+
+Delivery status and wait sample the existing durable read once. Receipt and
+event history framing, state spelling, error ordering and HMAC domains live in
+Jet; the read/cleanup provider keeps its original file-operation and authority
+mutex critical sections. Retry validates first, constructs the native
+zero-retention runtime in source, then invokes the existing runtime retry
+operation without changing its locks. Endpoint receive retains the original
+captured channel Arc and two registry acquisitions, rather than re-looking up
+the mailbox after the gate check. Its conditional queue-depth read and receive
+retain the native queue acquisitions. Private plain transport records are
+bootstrap marshalling only, not new authority or delivery state.
+Endpoint send and delivery cancel remain native and uncredited: their locks
+cover source-dependent policy and the enqueue or durable mutation, respectively.
 
 ## Dependency order
 

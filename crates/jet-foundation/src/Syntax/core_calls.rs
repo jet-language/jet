@@ -1584,7 +1584,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: d34fa148556364583f7c1627e49d9dddc89498f2443669bc51006cee1345e5aa
+// Source SHA-256: 6f9f1f45982999600d9e8f00bf6f91b21864d6c764366cbf09f02c956494f10c
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -1922,6 +1922,8 @@ pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.web.browser", "__html_path"),
 ];
 
+// The complete bootstrap registry exceeds rustc's const-eval step guard.
+#[allow(long_running_const_eval)]
 pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.data", "__host_path_is_file", "jet_data_host_path_is_file", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.encoding", "__edition", "", false, &[]).with_interpreter_route(CoreCallInterpreterRoute::TypedIntrinsic).without_direct_aot(),
@@ -2576,18 +2578,18 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.service", "start", "jet_services_start", true, &[true]) .without_direct_aot() .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.service", "stop", "jet_services_stop", true, &[true]) .without_direct_aot() .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.service", "endpoint_send", "jet_services_endpoint_send", true, &[true, false]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.service", "endpoint_receive", "jet_services_endpoint_receive", true, &[true]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::source_owned("core.service", "endpoint_receive", &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::source_owned("core.service", "endpoint_show", &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::source_owned("core.service", "delivery_state_show", &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.service", "delivery_status", "jet_services_delivery_status", true, &[true]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::source_owned("core.service", "delivery_status", &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::source_owned("core.service", "append_event", &[true, false]),
     CoreCallRecord::source_owned("core.service", "chaos_fail", &[true]),
     CoreCallRecord::source_owned("core.service", "commit_snapshot", &[true, false]),
     CoreCallRecord::new("core.service", "delivery_cancel", "jet_services_delivery_cancel", true, &[true]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.service", "delivery_events", "jet_services_delivery_events", true, &[true]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.service", "delivery_receipt", "jet_services_delivery_receipt", true, &[true]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.service", "delivery_retry", "jet_services_delivery_retry", true, &[true]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.service", "delivery_wait", "jet_services_delivery_wait", true, &[true]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::source_owned("core.service", "delivery_events", &[true]),
+    CoreCallRecord::source_owned("core.service", "delivery_receipt", &[true]),
+    CoreCallRecord::source_owned("core.service", "delivery_retry", &[true]),
+    CoreCallRecord::source_owned("core.service", "delivery_wait", &[true]),
     CoreCallRecord::new("core.service", "directory_register", "jet_services_directory_register", true, &[true, false, false]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::source_owned("core.service", "directory_resolve", &[true, true]),
     CoreCallRecord::source_owned("core.service", "drain_dead_letters", &[true]),
@@ -3836,6 +3838,15 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.service", "__worker_sent_account", "jet_services_raw_worker_sent_account", true, &[true, false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.service", "__authority_try_send", "service_authority_try_send", true, &[true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.service", "__validate_directory_proof", "service_authority_validate_directory", true, &[true, true, true, true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__delivery_read", "jet_services_raw_delivery_read", true, &[true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__delivery_probe", "jet_services_raw_delivery_probe", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__delivery_store", "jet_services_raw_delivery_store", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__runtime_retry", "jet_services_runtime_retry", true, &[true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__endpoint_mailbox", "jet_services_raw_endpoint_mailbox", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__mailbox_started", "jet_services_raw_mailbox_started", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__mailbox_draining", "jet_services_raw_mailbox_draining", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__mailbox_depth", "jet_services_raw_mailbox_depth", true, &[true]).with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__mailbox_receive", "jet_services_raw_mailbox_receive", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
 ];
 // END GENERATED CORE CALLS
 

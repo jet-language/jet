@@ -2705,6 +2705,8 @@ function generatedCoreCalls(source, declarations) {
   lines.push(
     "];",
     "",
+    "// The complete bootstrap registry exceeds rustc's const-eval step guard.",
+    "#[allow(long_running_const_eval)]",
     "pub const CORE_CALLS: &[CoreCallRecord] = &[",
   );
   for (const row of declarations.dispatcherRows) {

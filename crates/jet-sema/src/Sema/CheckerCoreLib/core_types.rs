@@ -349,6 +349,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "ServiceDelivery" | "ServiceRuntime" | "ServiceStateStore" | "Delivery"
         | "DeliveryState" | "DeliveryReceipt" | "DeliveryEvent"
         | "ServiceUpgradeReceipt" | "TaskOutcome" | "TaskStatus"
+        | "__DeliveryFacts" | "__DeliveryRecord" | "__EndpointMailbox" | "__MailboxRead"
         | "HTTPRequest" | "HTTPResponse" | "HTTPRouter" | "HTTPClient" | "HTTPClientType"
         // D-CRYPTO-API1=A: purpose-bound crypto values. Secret-bearing values
         // are opaque and receive no structural/collection capabilities.
