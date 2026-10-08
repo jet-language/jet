@@ -3460,6 +3460,11 @@ UDP address, timeout, send, and receive operations and Unix listen, accept,
 read, byte-write, shutdown, and close also enter Jet source first. Their
 reserved raw leaves preserve exactly the public operation's existing effect
 row and supported interpreter/native tiers.
+HTTP client `get`, `post`, and `request`, and server `mux`, `serve_once`,
+`serve_once_listener`, `static_file`, `static_file_range`, `cors`, and
+`request_id` likewise enter their Jet source functions before the reserved
+raw leaves. Existing specialized public admission remains unchanged;
+callback-bearing host leaves retain their original unsupported AOT tiers.
 
 DNS error classification is Jet source policy. Reserved Core-only
 `__dns_*_lookup` leaves call the existing resolver and return its raw string

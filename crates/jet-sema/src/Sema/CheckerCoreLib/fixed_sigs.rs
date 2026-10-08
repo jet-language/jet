@@ -1280,6 +1280,16 @@ fn core_fixed_sig_impl(
     }
 
     match (module, name) {
+        ("core.http.client", "__get") => Some((vec![(read, Type::String)], Some(result_ty(Type::Named("HTTPResponse".to_string()), Type::Named("HTTPError".to_string()))))),
+        ("core.http.client", "__post") => Some((vec![(read, Type::String), (read, Type::String)], Some(result_ty(Type::Named("HTTPResponse".to_string()), Type::Named("HTTPError".to_string()))))),
+        ("core.http.client", "__request") => Some((vec![(read, Type::String), (read, Type::String)], Some(Type::Named("HTTPRequest".to_string())))),
+        ("core.http.server", "__mux") => Some((vec![], Some(Type::Named("HTTPMux".to_string())))),
+        ("core.http.server", "__serve_once") => Some((vec![(read, Type::String), (read, Type::Named("HTTPMux".to_string()))], Some(result_ty(unit_ty(), Type::Named("HTTPError".to_string()))))),
+        ("core.http.server", "__serve_once_listener") => Some((vec![(read, Type::Named("TCPListener".to_string())), (read, Type::Named("HTTPMux".to_string()))], Some(result_ty(unit_ty(), Type::Named("HTTPError".to_string()))))),
+        ("core.http.server", "__static_file") => Some((vec![(read, Type::String), (read, Type::String)], Some(result_ty(Type::Named("HTTPResponse".to_string()), Type::Named("HTTPError".to_string()))))),
+        ("core.http.server", "__static_file_range") => Some((vec![(read, Type::Named("HTTPRequest".to_string())), (read, Type::String), (read, Type::String)], Some(result_ty(Type::Named("HTTPResponse".to_string()), Type::Named("HTTPError".to_string()))))),
+        ("core.http.server", "__cors") => Some((vec![(read, Type::Named("HTTPMux".to_string())), (read, Type::Named("HTTPCorsPolicy".to_string()))], Some(unit_ty()))),
+        ("core.http.server", "__request_id") => Some((vec![(read, Type::Named("HTTPMux".to_string()))], Some(unit_ty()))),
         // Core DNS source classifies native resolver String failures once.
         ("core.net", "__dns_a_lookup" | "__dns_aaaa_lookup") => Some((
             vec![(read, Type::String), (read, Type::Int)],
