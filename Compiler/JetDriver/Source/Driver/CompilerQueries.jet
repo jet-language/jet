@@ -107,7 +107,6 @@ use jet_sema.[
     SemaCompilerModuleSource,
     SemaComptimeFunctionResult,
     SemaComptimeItemValue,
-    SemaForeignProviderInput,
     SemaGraphResult,
     SemaIncrementalCache,
     sema_incremental_cache_new,
@@ -230,32 +229,6 @@ fn jet_driver_compiler_check_failure(load: JetDriverLoadResult, stage: JetDriver
     JetDriverCompilerCheckResult{product: .Failed, diagnostics: load.diagnostics, failed_stage: Val(stage), complete: false, internal_problem: problem}
 }
 
-fn jet_driver_compiler_check_registration_inputs(load: JetDriverLoadResult, providers: [SemaForeignProviderInput], diagnostics: &[Diagnostic]) -> [SemaRegistrationModuleInput]? {
-    inputs := [SemaRegistrationModuleInput]{ }
-    source_positions :: jet_driver_source_file_positions(load.source_files)
-    loop module_index in 0..<load.modules.len() {
-        loaded_module :: load.modules[module_index]
-        if loaded_module.source_unit_index < 0 || loaded_module.source_unit_index >= load.source_units.len() {
-            &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a loaded module has no exact source-unit owner", "semantic registration preserves the loader's canonical source-unit identity", "retain the source-unit index returned by JetDriver"))
-            return None
-        }
-        unit := load.source_units[loaded_module.source_unit_index]
-        handles :: jet_driver_registration_foreign_handle_facts(loaded_module.module_identity, providers, &diagnostics) ?? return None
-        &inputs.push(SemaRegistrationModuleInput{
-            package_identity: loaded_module.package_identity,
-            module_identity: loaded_module.module_identity,
-            module_name: loaded_module.module_name,
-            module_path: jet_driver_module_display(unit.relative_path),
-            source_file: unit.path,
-            source_segments: unit.source_segments,
-            source_origin: unit.source_origin,
-            program: loaded_module.program,
-            foreign_handles: handles,
-            source: jet_driver_source_text_at(load.source_files, source_positions, unit.path),
-        })
-    }
-    Val(inputs)
-}
 
 fn jet_driver_compiler_check_package_policies(load: JetDriverLoadResult) -> [SemaRegistrationPackagePolicy] Never! {
     policies := [SemaRegistrationPackagePolicy]{ }
@@ -393,12 +366,7 @@ pub fn jet_driver_compiler_check(input: JetDriverCompilerCheckInput) -> JetDrive
     target_option := jet_driver_selected_target_machine(input.request, &load.diagnostics)
     if target_option == None -> return jet_driver_compiler_check_failure(load, JetDriverStage.Check, None)
     target :: target_option ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Check, None)
-    // The stage callees read `load` while they append diagnostics, so the
-    // diagnostics list travels beside it and is put back after each stage.
-    stage_diagnostics := load.diagnostics
-    load.diagnostics = [Diagnostic]{}
-    registration_inputs_option := jet_driver_compiler_check_registration_inputs(load, providers, &stage_diagnostics)
-    load.diagnostics = stage_diagnostics
+    registration_inputs_option := jet_driver_registration_module_inputs(load.modules, load.source_units, load.source_files, providers, &load.diagnostics)
     registration_inputs := registration_inputs_option ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Load, None)
     canonical_identity := canonical.module_identity
     &registration_inputs.push(^canonical)
@@ -436,7 +404,9 @@ pub fn jet_driver_compiler_check(input: JetDriverCompilerCheckInput) -> JetDrive
         return jet_driver_compiler_check_failure(load, JetDriverStage.Check, None)
     }
     initial_values := [SemaComptimeItemValue]{ }
-    stage_diagnostics = load.diagnostics
+    // Body/comptime stage callees read the complete load while appending
+    // diagnostics, so this existing stage boundary travels beside the load.
+    stage_diagnostics := load.diagnostics
     load.diagnostics = [Diagnostic]{}
     // The declaration pass's graph copy becomes the run's environment graph.
     staged_graph := ^stage.graph

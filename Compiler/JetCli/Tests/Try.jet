@@ -1,6 +1,55 @@
 // Assemble with the real Driver/Sema hook. Wire projections below use declared
 // fixture counter inputs; they are not claimed measurements of a checked program.
+// The snapshot is fixture input to the real loader, not a fabricated Sema
+// module or graph. These are CLISeams' ABI/empty-source ownership cases.
+fn try_service_request(core_sources: [JetDriverCoreSource]) -> JetDriverCompileRequest {
+    source :: "use core.devtools as tools\nfn serve() -> Int {{ 7 }}"
+    snapshot :: JetDriverAuthorizedSourceSnapshot{
+        roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{
+            canonical_path: "/try-service-fixture",
+            identity: "try-service-root",
+            allow_hardlinks: false,
+            files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: "/try-service-fixture/main.jet", relative_path: "main.jet", identity: "try-service-file", source: source}},
+            foreign_cache_files: [JetDriverAuthorizedSourceFile]{},
+        }},
+        entry_root_identity: "try-service-root",
+        entry_path: "/try-service-fixture/main.jet",
+    }
+    request := jet_cli_driver_request(snapshot, core_sources, Val(1), JetDriverCompileMode.Check)
+    request.schema_snapshots = Val([String:SchemaSnapshot]{})
+    request
+}
+fn try_service_ownership(request: JetDriverCompileRequest, expected_source_rows: Int) {
+    session := jet_driver_compiler_queries_new()
+    source :: request.authorized_sources.roots[0].files[0].source
+    parsed :: jet_cli_try_parse(source) ?? panic("actual service input")
+    checked :: jet_driver_compiler_queries_check_disk(&session, parsed, request)
+    assert(checked.complete && checked.internal_problem == None && jet_cli_errors(checked.diagnostics).len() == 0)
+    if checked.product == {
+        .CheckedCompilerValue(_) -> panic("retained mode must not construct the opaque compiler value")
+        .Failed -> panic("actual catalog ownership must survive registration")
+        .RetainedCheckedProjection(projection) -> {
+            assert(projection.source_modules.len() == expected_source_rows)
+            assert(projection.compile.doc_modules.len() >= expected_source_rows)
+            assert(projection.schema_ingress != None && projection.entry_module != None)
+            index :: jet_cli_checked_semindex(projection.compile)
+            baseline := JetCLITryChecked{checked: checked, index: Val(index), sources: [String:String]{"/try-service-fixture/main.jet": source}, entry_source: source}
+            plan :: JetCLITryPlan{name: "Ownership", entry: "/try-service-fixture/main.jet", action: .Rename("serve", "renamed")}
+            changes :: jet_cli_try_stage(plan, &baseline) ?? panic("actual catalog rename")
+            operations :: jet_cli_try_semantic_ops(plan, &baseline) ?? panic("actual catalog semantic operation")
+            assert(changes.len() == 1 && changes[0].before == source.bytes())
+            assert(changes[0].after == source.replace("serve", "renamed").bytes())
+            assert(operations.len() == 1 && operations[0].kind == "rename" && operations[0].targets.len() == 1)
+            assert(operations[0].targets[0].module_path == "/try-service-fixture/main.jet")
+        }
+    }
+}
 fn run() {
+    try_service_ownership(try_service_request([JetDriverCoreSource]{}), 1)
+    try_service_ownership(try_service_request([JetDriverCoreSource]{
+        JetDriverCoreSource{module_name: "core.devtools", alias: "core_devtools_fixture", path: "Core/devtools-fixture.jet", owner: "", owned_members: [String]{}, source: ""},
+        JetDriverCoreSource{module_name: "core.devtools.fixture_private", alias: "core_devtools_fixture_private", path: "Core/devtools-fixture-private.jet", owner: "core.devtools", owned_members: [String]{}, source: ""},
+    }), 3)
     path :: "/project/main.jet"
     changes :: [JetCLISourceChange]{JetCLISourceChange{path: path, before: "fn run() {{ 1 }}\n".bytes(), after: "fn run() {{ 2 }}\n".bytes()}}
     plan :: JetCLITryPlan{name: "Sample", entry: path, action: JetCLITryAction.Edits{edits: [JetCLITryEdit]{JetCLITryEdit{path: path, edit: TextEdit{span: Span{start: 11, end: 12}, new_text: "2"}}}}}
