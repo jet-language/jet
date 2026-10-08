@@ -2727,21 +2727,22 @@ pub(crate) fn run_types(args: &[String], json: bool) {
         .unwrap_or_else(|diagnostics| render_check_failure(path, &diagnostics, json, false));
     let mut grouped: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut registered = Vec::new();
+    let source_owned_types: std::collections::HashSet<_> =
+        jet_foundation::CoreModuleExports::CORE_SOURCE_OWNED_TYPES.iter().filter(|row|
+            projection.bundle.modules.iter().any(|module|
+                module.path.strip_prefix(jet_foundation::Diagnostics::CORE_SOURCE_ROOT)
+                    .is_ok_and(|path| path == Path::new(row.path))
+                && module.items.iter().any(|item| match item {
+                    jet_foundation::AST::Item::Struct(definition) => definition.name == row.name,
+                    jet_foundation::AST::Item::Enum(definition) => definition.name == row.name,
+                    jet_foundation::AST::Item::Distinct(definition) => definition.name == row.name,
+                    jet_foundation::AST::Item::TypeAlias(definition) => definition.name == row.name,
+                    _ => false,
+                }))).map(|row| row.name).collect();
     for module in &projection.bundle.modules {
         let mut registry =
             jet_foundation::Traits::TraitRegistry::auto_derives_for_items(&module.items);
-        registry.register_synthetic_operators(|name| {
-            module.path.strip_prefix(jet_foundation::Diagnostics::CORE_SOURCE_ROOT).is_ok_and(|path|
-                jet_foundation::CoreModuleExports::CORE_SOURCE_OWNED_TYPES.iter().any(|row|
-                    row.name == name && path == Path::new(row.path)
-                    && module.items.iter().any(|item| match item {
-                        jet_foundation::AST::Item::Struct(definition) => definition.name == name,
-                        jet_foundation::AST::Item::Enum(definition) => definition.name == name,
-                        jet_foundation::AST::Item::Distinct(definition) => definition.name == name,
-                        jet_foundation::AST::Item::TypeAlias(definition) => definition.name == name,
-                        _ => false,
-                    })))
-        });
+        registry.register_synthetic_operators(|name| source_owned_types.contains(name));
         registered.extend(registry.operator_impls);
     }
     for implementation in &registered {

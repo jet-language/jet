@@ -187,6 +187,20 @@ fn core_source_mixed_operator_displaces_seed_but_duplicate_source_impl_still_fai
     assert!(diagnostics.iter().any(|d| d.code == "E0908"), "{diagnostics:?}");
 }
 
+#[test]
+fn imported_core_primitive_left_operator_uses_source_result() {
+    let (_, diagnostics) = check_modules(&[
+        ("<corelib>/Core/math/math.jet",
+         "pub struct Vec3 { x: Float }\nimpl Float.Div(Vec3) { fn div(self, rhs: Vec3) -> Int Never! { 17 } }\n",
+         &[]),
+        ("pkg-a/src/main.jet",
+         "use core.math.[Vec3]\nfn answer(left: Float, right: Vec3) -> Int Never! { left / right }\nfn dot(left: Float, right: Vec3) -> Int Never! { left.div(right) }\nfn run() {}\n",
+         &[]),
+    ]);
+    let errors: Vec<_> = diagnostics.iter().filter(|d| d.severity == Severity::Error).collect();
+    assert!(errors.is_empty(), "source result was shadowed by a seed row: {errors:?}");
+}
+
 fn error_codes(diags: &[Diagnostic]) -> Vec<&str> {
     diags
         .iter()

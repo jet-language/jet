@@ -1079,10 +1079,13 @@ impl<'a> Checker<'a> {
         }
 
         let mut receiver_is_left = true;
-        let mut row = self
-            .trait_reg
-            .operator_impl_for(lt, trait_name, rt)
-            .cloned();
+        let source_row = self.source_operator_row(lt, trait_name, rt);
+        let mut row = source_row.map(|(owner, row)| {
+            let mut row = row.clone();
+            row.result = self.qualify_method_type(owner, &row.result, &std::collections::HashSet::new());
+            row.rhs = self.qualify_method_type(owner, &row.rhs, &std::collections::HashSet::new());
+            row
+        }).or_else(|| self.trait_reg.operator_impl_for(lt, trait_name, rt).cloned());
         if row.is_none() {
             if let Some(candidate) = self.trait_reg.operator_impl_for(rt, trait_name, lt) {
                 if candidate.operator_marker == Some(crate::AST::OperatorMarker::Commutative) {
