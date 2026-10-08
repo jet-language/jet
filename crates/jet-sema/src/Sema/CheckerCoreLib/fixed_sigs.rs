@@ -1608,6 +1608,18 @@ fn core_fixed_sig_impl(
             ("value".into(), Box::new(Type::Int)), ("errno".into(), Box::new(Type::Int)),
         ])))),
         ("core.files", "__metadata_directory") => Some((vec![(read, Type::String)], Some(result_ty(Type::Bool, Type::String)))),
+        ("core.files", "__directory_fd") => Some((vec![(read, Type::Int)], Some(Type::Tuple(vec![
+            ("available".into(), Box::new(Type::Bool)), ("held".into(), Box::new(Type::Bool)),
+            ("fd".into(), Box::new(Type::Int)),
+        ])))),
+        ("core.process", "__with_directory_raw") => Some((vec![
+            (read, Type::Named("ProcessSpec".into())), (read, Type::Int),
+            (read, Type::Int), (read, Type::Bool),
+        ], Some(Type::Tuple(vec![
+            ("spec".into(), Box::new(Type::Named("ProcessSpec".into()))),
+            ("available".into(), Box::new(Type::Bool)),
+            ("assigned_fd".into(), Box::new(Type::Int)), ("errno".into(), Box::new(Type::Int)),
+        ])))),
         ("core.sys", "__current_dir") => Some((vec![], Some(result_ty(Type::String, Type::String)))),
         ("core.sys", "__set_current_dir") => Some((vec![(read, Type::String)], Some(result_ty(unit_ty(), Type::String)))),
         ("core.sys", "umask" | "exitcode") => Some((vec![(read, Type::Int)], Some(Type::Int))),
@@ -6934,5 +6946,34 @@ mod tests {
             let (_, ret) = core_fixed_sig(module, name).expect("UI host row must have a signature");
             assert_eq!(ret, Some(result_ty(ok, ui_error.clone())), "{module}::{name}");
         }
+    }
+
+    #[test]
+    fn held_directory_kernel_rows_have_exact_typed_abi_projections() {
+        let read = super::AccessConvention::Read;
+        let directory = super::Syntax::core_call("core.files", "__directory_fd")
+            .expect("held-directory descriptor row");
+        assert_eq!(directory.arity(), 1);
+        assert_eq!(super::core_fixed_sig_for_row(directory), Some((
+            vec![(read, Type::Int)],
+            Some(Type::Tuple(vec![
+                ("available".into(), Box::new(Type::Bool)),
+                ("held".into(), Box::new(Type::Bool)),
+                ("fd".into(), Box::new(Type::Int)),
+            ])),
+        )));
+        let process = super::Syntax::core_call("core.process", "__with_directory_raw")
+            .expect("existing held-directory ProcessSpec attachment row");
+        assert_eq!(process.arity(), 4);
+        assert_eq!(super::core_fixed_sig_for_row(process), Some((
+            vec![(read, Type::Named("ProcessSpec".into())), (read, Type::Int),
+                (read, Type::Int), (read, Type::Bool)],
+            Some(Type::Tuple(vec![
+                ("spec".into(), Box::new(Type::Named("ProcessSpec".into()))),
+                ("available".into(), Box::new(Type::Bool)),
+                ("assigned_fd".into(), Box::new(Type::Int)),
+                ("errno".into(), Box::new(Type::Int)),
+            ])),
+        )));
     }
 }
