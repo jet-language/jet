@@ -260,6 +260,30 @@ fn trap_native_index_range_stop() {
     trap_exit(I64{101})
 }
 
+// CAbiRoutes Vec[index as usize] -> CAbi guard plain Rust panic -> exit(101).
+// Like jet_rt_unreachable, the Rust hook's host/source/backtrace prefix is not
+// Jet semantics. Preserve the body and status; do not publish a task panic,
+// render a language diagnostic, or run atexit handlers on this foreign stop.
+fn rt_seq_index_oob_stop(len: I64, index: I64) {
+    message :: jet_rt_string_builder_new()
+    rt_text_push_word(message, I64{8462017926321696361}, I64{8})
+    rt_text_push_word(message, I64{8462090116149485684}, I64{8})
+    rt_text_push_word(message, I64{7307218077177046126}, I64{8})
+    rt_text_push_word(message, I64{2338328219547429920}, I64{8}) // "index out of bounds: the len is "
+    rt_text_push_number(message, len)
+    rt_text_push_word(message, I64{7307218078150255136}, I64{8})
+    rt_text_push_word(message, I64{7575186950109161760}, I64{8})
+    rt_text_push_word(message, I64{8307}, I64{2}) // " but the index is "
+    unsigned :: jet_rt_u64_to_string(index)
+    jet_rt_string_builder_push(message, unsigned)
+    jet_rt_string_drop(unsigned)
+    trap_flush_stdout()
+    trap_write_handle(message)
+    jet_rt_string_drop(message)
+    trap_msg_newline()
+    trap_exit(I64{101})
+}
+
 #Export(c) fn jet_panic(file: I64, line: I64, message: I64) {
     trap_simple(I64{0}, trap_word(file), trap_word(file + I64{8}), trap_line(line), trap_word(message), trap_word(message + I64{8}))
 }

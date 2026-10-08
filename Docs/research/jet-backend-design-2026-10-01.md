@@ -2136,3 +2136,44 @@ and civil/duration render goldens at raw integer boundaries.
 existing native-range boundary. Native execution and MIR/caller/layout
 admission remain unexercised; parse/C11 syntax receipts are not parity proof.
 
+### Native scalar and reflection ownership boundary
+
+`ScalarReflectABI.jet` defines Range24, Solver24, ReflectValue32 and
+ReflectField16 carriers. Range/Solver record constructors check borrowed
+exact Int arguments before allocation and store raw i64; getters return
+fresh exact owners (`CAbiRoutes.rs:11022-11042,11973-11993`).
+Range's bool slot is normalized from its low byte for clone/get/eq/render.
+All Range modes emit the structural form in
+`StructuralDebug.rs:91-120,310-319`; Solver has only Show, following
+`CommonTypes.rs:6822-6828`. Existing numeric emitters/builders are reused.
+
+Reflection clones recursively according to `Reflect.rs:6-18`, which derives
+Clone but not equality. Value owns three E4 texts and a List24 pointer;
+Field owns its name and a nested Value pointer. Constructors clone borrowed
+text but consume nested owners. Value.fields and sequence.get lend their
+owners; Field.value clones (`CAbiRoutes.rs:11144-11187,8417-8427`).
+Show is `Value(type_name)` or `Field(name: value.display)`; Value display
+clones its stored display (`Reflect.rs:56-69`).
+
+The List24 allocator/reserve primitives are reused from DataTree, with
+reflection-specific recursive element clone/drop. The existing typed
+ReflectOf Lower calls from `8ea460c24`/`1bd5abce0` remain unchanged.
+No invented equality export, generated alias or Rust layout is used.
+
+Sequence OOB uses the shared `rt_seq_index_oob_stop` in Trap. The seed's
+`index as usize` means a negative raw index renders unsigned. This is a
+plain foreign panic, not the explicit language `jet_panic` path:
+`CAbi.rs:74-98` and `Scheduler.rs:988-1001` do not recognize its payload as
+a task/cancellation/deadline carrier; `Core.rs:1182-1234` resumes it and the
+C boundary exits 101. Like `jet_rt_unreachable`, the Rust hook's host,
+source and backtrace prefix is non-semantic: the native path flushes runtime
+stdout, emits the exact body plus newline, and exits 101 without task
+publication, diagnostic rendering or atexit handlers.
+
+`ScalarReflectWitness.c` asserts real-object clone/getter independence,
+recursive exact-once shell/list/text frees with interception, scalar
+equality and byte-exact render goldens. `run-scalar-reflect-stops.mjs` checks
+index-equals-length and negative-index fatal bodies/status/stdout flush.
+Native execution and MIR/caller/layout admission remain unexercised;
+parser and strict C11 receipts alone do not establish parity.
+
