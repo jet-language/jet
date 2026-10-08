@@ -95,10 +95,10 @@ fn rt_crypto_entropy_fill(out: I64, count: I64) -> I64 {
         return I64{1}
     }
     capacity :: count * RT_HOST_U8_STRIDE
-    bytes :: jet_rt_alloc(capacity, RT_HOST_U8_STRIDE)
+    bytes :: jet_rt_alloc(capacity, I64{8})
     if (rt_crypto_entropy_fill(bytes, count) != I64{0}) {
         rt_crypto_wipe(bytes, capacity)
-        jet_rt_free(bytes, capacity, RT_HOST_U8_STRIDE)
+        jet_rt_free(bytes, capacity, I64{8})
         return I64{0}
     }
     // The provider filled packed bytes in the FINAL allocation. Widen from the
