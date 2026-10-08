@@ -1944,3 +1944,28 @@ memory/provenance/TLS contracts remain separate target rows, not native-pointer
 casts. Date/time formatting and Pool construction are Core source-owner rows,
 not String/allocator runtime aliases. The private image-runtime stop/String
 allocator and L1/L3 canonical allocator/split providers are existing Jet bodies.
+
+### Native DataTree ownership boundary
+
+`JetBackend/Source/DataABI.jet` single-sources the native DataTree variant
+words and payload offsets; these are never the layout of a Rust DataTree.
+`JetRuntime/Source/DataTree.jet` provides the recursive ownership boundary
+using the existing native List `[length, capacity, data]` header. Constructors
+clone borrowed text and exact Int, consume sequence holders, and preserve
+ordered Object entries, including duplicate keys. Sequence getters lend
+children and clone keys; scalar-owner getters return a new owner.
+
+Equality follows `jet-foundation/src/DataTree.rs:8-22`: compare variant first,
+then ordered payloads, with IEEE Float equality (NaN unequal even to itself,
+signed zeros equal). Drop frees children before their storage, exactly once.
+Show/display/debug share the compact JSON behavior of
+`JetStd/JSONDataTree.rs:27-94`, including quoted text/control escapes, lexical
+Number preservation, byte arrays, decimal Float debug spelling and the
+non-finite Float stop. Delimiters stream into one existing text builder.
+
+`JetRuntime/Tests/DataTreeWitness.c` requires the real Jet object and
+`--wrap=jet_rt_free`; it asserts that interception actually ran, child/key/text
+clone independence, ordered equality and exact-once frees. Its non-finite
+mode exercises the JSON stop separately. Parse and C syntax receipts do not
+admit native caller layouts or prove execution: source-root/MIR ownership and
+the generator's provider ABI validation remain required before pack cutover.
