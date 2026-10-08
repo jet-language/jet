@@ -366,6 +366,14 @@ directly with valid Rust behavior. A redesigned surface maps valid Rust inputs
 to the new Jet contract and compares semantic values and errors. Do not keep a
 runtime compatibility layer merely to make that comparison.
 
+TLS root-certificate and trust data use native carriers independently of the
+TLS transport engine. `TLSCarriers.jet` transfers consumed list/root headers
+without copying their buffers; cloning creates independent byte storage using
+the canonical host U8 stride. The root PEM field is a borrowed list header,
+whereas a trust-variant projection returns an owned root clone. System trust
+has no active root buffer. These ownership operations do not perform certificate
+validation or a TLS handshake. `TLSRootsWitness.c` pins their ownership and
+wrong-variant contracts against the composed Jet object.
 ## Dependency order
 
 Core work follows the dependency graph. These categories describe dependency
