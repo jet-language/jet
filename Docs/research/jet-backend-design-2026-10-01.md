@@ -1721,3 +1721,51 @@ returning their neutral stopped result. Zip checks the stop rail before padding
 or reporting unequal lengths. A partially consumed step-by hint counts only
 remaining complete steps, and Float averaging preserves the reference sum's
 negative-zero identity.
+
+### Native compiler-owned memory storage
+
+`MemStorage.jet` supplies 23 compiler-owned Arena, Bump, Pool, and Fixed leaves.
+The five existing constructor symbols (`JetArena_new/with_capacity`,
+`JetBump_new/with_capacity`, and `JetPool_with_slots`) take/return physical
+machine words; capacity arguments are exact decoded Int values. The four
+`jet_rt_handle_drop_Jet{Arena,Bump,Pool,Fixed}` leaves destroy native handles.
+For each lowercase kind, `jet_rt_mem_<kind>_storage_alloc` and `_try_alloc`
+take `(handle, size, alignment, drop_fn)` and return a reserved pointer.
+`_storage_reset(handle)` resets without closing the arena or freeing retained
+blocks. `jet_rt_mem_fixed_storage_over(data,length)` borrows its caller's
+backing; `jet_rt_mem_pool_storage_new()` supplies the 64-slot default.
+There are no legacy aliases or parallel Core constructors.
+
+`drop_fn` is zero for trivial destruction, otherwise an address-based,
+one-machine-word SysV `lazy.drop` thunk: it loads the initialized typed slot,
+then calls ordinary value-taking drop glue. Lower immediately initializes each
+successful reservation, without any stop/fault gap. Runtime owns the records,
+runs them once in reverse allocation order, then quarantines their Sentry
+spans. Metrics change after callbacks, retain actual block capacity, and count
+actual typed bytes (ZST allocations count one and zero bytes). All six existing
+MemRegistry arena-metric names are unchanged.
+
+Arena searches current/later retained blocks before geometric growth; Bump
+never falls back to the heap; Pool prefers compatible free, empty, then any
+vacant slot, allocating replacements before freeing old blocks. Reset preserves
+retained capacity and high-water marks. Fixed places 32-byte drop headers inside
+its backing, with aligned payloads growing upward and metadata downward. Fixed
+ZST results are the type-alignment dangling pointer, but consume a cursor byte
+and a header. Fixed never frees its borrowed backing: provenance and lifetime
+are Lower obligations, not hidden ownership in this provider.
+
+Every try entry probes FaultAllocation once before reservation or mutation.
+Heap growth then calls the checked, unprobed `alloc_try_reserved`, preserving
+world memory-budget tracking without a second fault probe. Failure returns zero
+before storing a drop record or payload; Lower constructs canonical AllocError
+and drops the moved input exactly once. Infallible exhaustion retains the
+allocator-specific panic, rather than heap fallback or swallowed failure.
+
+`MemStorageWitness.c` is a real-provider C witness with a deterministic stdout
+golden. It checks alignment, retained-block reuse, reverse destruction and metric
+callback ordering, Fixed headers and borrowed guards, ZST conventions, Pool
+class priorities/replacement/zero slots, defaults, growth/reuse single probes,
+injected failure, and real huge-mmap OOM rollback. It requires composed
+MemRegistry, Alloc, FaultAllocation, Sentry, and native TCB init-array providers;
+it has no Rust body or substitute provider. Source parsing and strict C syntax
+checks are not native execution, value parity, or lifecycle admission credit.
