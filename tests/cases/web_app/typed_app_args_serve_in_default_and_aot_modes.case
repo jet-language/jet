@@ -1,0 +1,32 @@
+# PORT tests/web_app.rs::typed_app_args_serve_in_default_and_aot_modes; request helper63-95 ported verbatim algorithm.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no run/reference proof.
+mkdir: client
+copy: {root}/tests/cases/web_app/fixtures/request.jet client/request.jet
+spawn server: jet run {root}/Examples/features/web/app_typed_args.jet -- --port=9000
+env: JET_APP_PORT={free-port:default}
+step: jet run client/request.jet
+env: S6_WEB_PORT={free-port:default}
+env: S6_WEB_METHOD=GET
+env: S6_WEB_PATH=/
+env: S6_WEB_RESPONSE={work}/default.http
+exit: 0
+file: default.http ^= "HTTP/1.1 404" # Original default typed App response.
+signal server: KILL
+wait: server
+exit: any # Original ServerChild drop kill/wait ignores status.
+mkdir: app
+copy: {root}/Examples/features/web app
+step: jet build app/app_typed_args.jet
+exit: 0
+spawn server-aot: built --port=9000
+env: JET_APP_PORT={free-port:aot}
+step: jet run client/request.jet
+env: S6_WEB_PORT={free-port:aot}
+env: S6_WEB_METHOD=GET
+env: S6_WEB_PATH=/
+env: S6_WEB_RESPONSE={work}/aot.http
+exit: 0
+file: aot.http ^= "HTTP/1.1 404" # Original AOT typed App response.
+signal server-aot: KILL
+wait: server-aot
+exit: any # Original ServerChild drop kill/wait ignores status.

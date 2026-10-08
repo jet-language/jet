@@ -4,42 +4,42 @@ fixture: git_driver_repairs_exact_keys_and_supports_gitdir_indirection.fixture
 requires: tool:git
 mkdir: repo
 step: git init
-exit: 0
 cwd: {work}/repo
+exit: 0
 step: git config user.email jet-test@example.invalid
-exit: 0
 cwd: {work}/repo
+exit: 0
 step: git config user.name "Jet Test"
-exit: 0
 cwd: {work}/repo
+exit: 0
 step: git config merge.jetstruct.name stale
-exit: 0
 cwd: {work}/repo
+exit: 0
 step: git config merge.other.driver keep-me
-exit: 0
 cwd: {work}/repo
+exit: 0
 copy: seed.txt repo/seed
 step: git add seed
-exit: 0
 cwd: {work}/repo
+exit: 0
 step: git commit -m seed
-exit: 0
 cwd: {work}/repo
+exit: 0
 step: git worktree add -b linked-test {work}/linked
-exit: 0
 cwd: {work}/repo
+exit: 0
 step: jet merge install-driver --repo {work}/linked
 exit: 0
 step: git config --local --get merge.jetstruct.name
-exit: 0
 cwd: {work}/linked
+exit: 0
 stdout.trim: = merge.jetstruct.name.out
 step: git config --local --get merge.jetstruct.driver
-exit: 0
 cwd: {work}/linked
+exit: 0
 stdout.trim: = merge.jetstruct.driver.out
 step: git config --local --get merge.other.driver
-exit: 0
 cwd: {work}/linked
+exit: 0
 stdout.trim: = merge.other.driver.out
 file: linked/.git is-file
