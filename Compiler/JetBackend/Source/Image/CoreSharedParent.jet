@@ -305,19 +305,31 @@ pub struct CoreSharedParentCallableResult {
     pub address: Int
     pub refusal_key: String
 }
-pub fn core_shared_parent_callable(parent: &CoreSharedParent, attachment: CoreSharedParentAttachment, identity: String) -> CoreSharedParentCallableResult Never! {
+struct CoreSharedParentCallableLookup {
+    pub row: CoreSharedCallableBinding?
+    pub base: Int
+    pub refusal_key: String
+}
+fn core_shared_parent_callable_lookup(parent: &CoreSharedParent, attachment: CoreSharedParentAttachment, identity: String) -> CoreSharedParentCallableLookup Never! {
     guard :: parent.state.guard_read()
-    manifest :: guard.value.manifest ?? return CoreSharedParentCallableResult{address: 0, refusal_key: "CoreSharedNotAdmitted"}
-    if !guard.value.ready || guard.value.poisoned || attachment.manifest_digest != manifest.digest -> return CoreSharedParentCallableResult{address: 0, refusal_key: "CoreSharedSchemaMismatch"}
-    binding :: guard.value.binding ?? return CoreSharedParentCallableResult{address: 0, refusal_key: "CoreSharedNotAdmitted"}
+    manifest :: guard.value.manifest ?? return CoreSharedParentCallableLookup{row: None, base: 0, refusal_key: "CoreSharedNotAdmitted"}
+    if !guard.value.ready || guard.value.poisoned || attachment.manifest_digest != manifest.digest -> return CoreSharedParentCallableLookup{row: None, base: 0, refusal_key: "CoreSharedSchemaMismatch"}
+    binding :: guard.value.binding ?? return CoreSharedParentCallableLookup{row: None, base: 0, refusal_key: "CoreSharedNotAdmitted"}
     error :: core_shared_callable_inventory_error(binding)
-    if error != "" -> return CoreSharedParentCallableResult{address: 0, refusal_key: error}
-    row :: core_shared_callable_binding(binding, identity) ?? return CoreSharedParentCallableResult{address: 0, refusal_key: "CoreSharedCallableBindingMissing: {identity}"}
-    loaded :: guard.value.loaded ?? return CoreSharedParentCallableResult{address: 0, refusal_key: "CoreSharedNotAdmitted"}
-    CoreSharedParentCallableResult{address: loaded.base + row.linked_offset, refusal_key: ""}
+    if error != "" -> return CoreSharedParentCallableLookup{row: None, base: 0, refusal_key: error}
+    row :: core_shared_callable_binding(binding, identity) ?? return CoreSharedParentCallableLookup{row: None, base: 0, refusal_key: "CoreSharedCallableBindingMissing: {identity}"}
+    loaded :: guard.value.loaded ?? return CoreSharedParentCallableLookup{row: None, base: 0, refusal_key: "CoreSharedNotAdmitted"}
+    CoreSharedParentCallableLookup{row: Val(row), base: loaded.base, refusal_key: ""}
+}
+pub fn core_shared_parent_callable(parent: &CoreSharedParent, attachment: CoreSharedParentAttachment, identity: String) -> CoreSharedParentCallableResult Never! {
+    lookup :: core_shared_parent_callable_lookup(&parent, attachment, identity)
+    row :: lookup.row ?? return CoreSharedParentCallableResult{address: 0, refusal_key: lookup.refusal_key}
+    CoreSharedParentCallableResult{address: lookup.base + row.linked_offset, refusal_key: ""}
 }
 
 // Return the admitted canonical inventory, not a factory-derived layout table.
+// Fetch once per admitted attachment and retain that immutable inventory in
+// the factory codec context; this returns a manifest value, not a live view.
 pub fn core_shared_parent_payload_manifest(parent: CoreSharedParent, attachment: CoreSharedParentAttachment) -> CoreSharedManifest? Never! {
     guard :: parent.state.guard_read()
     manifest :: guard.value.manifest ?? return None
@@ -335,18 +347,11 @@ pub fn core_shared_payload_callable_error(row: CoreSharedCallableBinding, type_k
 }
 pub fn core_shared_parent_payload_callable(parent: CoreSharedParent, attachment: CoreSharedParentAttachment, type_key: String, clone: Bool) -> CoreSharedParentCallableResult Never! {
     role :: if clone -> "lazy.clone" else -> "lazy.drop"
-    identity :: "{role}:{type_key}"
-    guard :: parent.state.guard_read()
-    manifest :: guard.value.manifest ?? return CoreSharedParentCallableResult{address: 0, refusal_key: "CoreSharedNotAdmitted"}
-    if !guard.value.ready || guard.value.poisoned || attachment.manifest_digest != manifest.digest -> return CoreSharedParentCallableResult{address: 0, refusal_key: "CoreSharedSchemaMismatch"}
-    binding :: guard.value.binding ?? return CoreSharedParentCallableResult{address: 0, refusal_key: "CoreSharedNotAdmitted"}
-    error :: core_shared_callable_inventory_error(binding)
-    if error != "" -> return CoreSharedParentCallableResult{address: 0, refusal_key: error}
-    row :: core_shared_callable_binding(binding, identity) ?? return CoreSharedParentCallableResult{address: 0, refusal_key: "CoreSharedCallableBindingMissing: {identity}"}
+    lookup :: core_shared_parent_callable_lookup(&parent, attachment, "{role}:{type_key}")
+    row :: lookup.row ?? return CoreSharedParentCallableResult{address: 0, refusal_key: lookup.refusal_key}
     signature_error :: core_shared_payload_callable_error(row, type_key, clone)
     if signature_error != "" -> return CoreSharedParentCallableResult{address: 0, refusal_key: signature_error}
-    loaded :: guard.value.loaded ?? return CoreSharedParentCallableResult{address: 0, refusal_key: "CoreSharedNotAdmitted"}
-    CoreSharedParentCallableResult{address: loaded.base + row.linked_offset, refusal_key: ""}
+    CoreSharedParentCallableResult{address: lookup.base + row.linked_offset, refusal_key: ""}
 }
 
 #Test("payload clone and drop roles bind only exact pinned pointer signatures") {

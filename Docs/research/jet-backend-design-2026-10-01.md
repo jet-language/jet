@@ -1392,6 +1392,9 @@ role and type key, a SystemV void signature, and two/one Pointer8 parameters.
 It returns only the actual parent-pinned address; missing or mismatched typed
 roles refuse before touching a slot. The Driver accesses the same admitted
 canonical inventory through its digest-checked parent attachment.
+Generic and payload-role callers share one admission/inventory/image lookup.
+The factory fetches the immutable canonical manifest once per admitted
+attachment and reuses it for its per-type payload codecs, not once per payload.
 
 The canonical ordinary-layout inventory records `Float32Bits` explicitly.
 A Map's third child is its ordinary entry-tuple layout; that row's stride,
