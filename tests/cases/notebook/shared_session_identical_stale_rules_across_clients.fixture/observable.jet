@@ -1,0 +1,5 @@
+fn run() {
+    reply :: process.argv().get(1) ?? panic("missing protocol body")
+    text :: (reply.split_once("; text=") ?? panic("missing text field")).after
+    assert(!(reply.starts_with("status=ok;") && text.contains("fx")))
+}
