@@ -216,6 +216,19 @@ fn coll_test_bits() {
     jet_rt_free(snapshot, I64{64}, I64{8})
 }
 
+// The checked seed profile keeps overflow checks on even in release builds.
+// A maximum index is valid membership; only its unrepresentable extent stops.
+fn coll_test_bits_extent_stop() {
+    jet_rt_alloc_init()
+    bits :: jet_rt_native_bits_new()
+    maximum :: jet_int_owned_from_i64(I64{9223372036854775807})
+    coll_test_require(jet_bitset_add(bits, maximum) && jet_bit_set_has(bits, maximum))
+    jet_rt_int_drop(maximum)
+    _ := jet_bit_set_len(bits)
+    // Reaching here is a failed witness, never a successful neutral length.
+    trap_exit(I64{1})
+}
+
 fn collections_tests() {
     jet_rt_alloc_init()
     coll_test_bytes()
