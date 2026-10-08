@@ -1,0 +1,28 @@
+# tests/floor_division.rs::dividing_by_zero_traps_on_the_jit_tier
+# Original fixtures and exact assertions; PENDING-SAME-HEAD, runtime UNRUN.
+fixture: dividing_by_zero_traps_on_the_jit_tier.fixture
+env: NO_COLOR=1
+step: jet run probe0/run.jet
+stdin: null
+env: JET_TRAP_DIVISOR=0
+exit: 70
+stderr: ~ "Stop [E3010]" # original contains
+stderr: !~ "E0953" # original contains negation
+stderr: !~ "comptime" # original contains negation
+stderr: ~ "divided by zero" # original contains
+step: jet run probe1/run.jet
+stdin: null
+env: JET_TRAP_DIVISOR=0
+exit: 70
+stderr: ~ "Stop [E3010]" # original contains
+stderr: !~ "E0953" # original contains negation
+stderr: !~ "comptime" # original contains negation
+stderr: ~ "divided by zero" # original contains
+step: jet run probe2/run.jet
+stdin: null
+env: JET_TRAP_DIVISOR=0
+exit: 70
+stderr: ~ "Stop [E3010]" # original contains
+stderr: !~ "E0953" # original contains negation
+stderr: !~ "comptime" # original contains negation
+stderr: ~ "divided by zero" # original contains

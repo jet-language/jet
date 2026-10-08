@@ -1,0 +1,19 @@
+#Error
+pub struct WorkerError {
+    pub message: String
+}
+pub struct Value {
+    pub id: String
+}
+fn inner() -> Bool WorkerError! {
+    return Err(WorkerError{message: "inner"})
+}
+fn fail_after(error: WorkerError) -> Value WorkerError! {
+    return Err(error)
+}
+pub fn checked() -> Value WorkerError! {
+    inner() ?? {
+        return fail_after(err)
+    }
+    return Ok(Value{id: "unreachable"})
+}
