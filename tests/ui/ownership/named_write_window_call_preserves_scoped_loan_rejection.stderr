@@ -1,0 +1,17 @@
+Error [E0111]: `edit` was made with `::`, so it can't be changed
+  --> named_write_window_call_preserves_scoped_loan_rejection.jet:11:15
+    |
+ 11 |         bump(&edit)
+    |               ^^^^
+ Why: `bump` will change this value, so it must be mutable (`:=`)
+ Fix: Declare it with `edit := ...`
+More: jet-lang.dev/e/E0111
+
+Error [E1101]: `values[…]` cannot be passed with write access while `edit` is lent to a task in `g`
+  --> named_write_window_call_preserves_scoped_loan_rejection.jet:11:15
+    |
+ 11 |         bump(&edit)
+    |               ^^^^
+ Why: A task.group joins its children at the end of the block, so `edit` stays borrowed until `g` joins — changing `values[…]` now would race a running task or free memory it still reads
+ Fix: Do this after the `g` block ends, give it with `^`, freeze it with `freeze`, or share it with `shared`
+More: jet-lang.dev/e/E1101
