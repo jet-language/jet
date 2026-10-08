@@ -435,7 +435,11 @@ spelling alone.
 Unit TYPE arguments retain their real generic arity. Legacy seed records
 without a unit-payload schema remain explicitly unadmitted; source `__jet_`
 record specializations require a typed Unit codec and fail rather than
-inventing a zero-sized payload layout.
+inventing a zero-sized payload layout. Raw machine TYPE arguments likewise
+remain distinct from tagged Int and require their own typed identity/codec.
+List-only collects classification failures with runtime/caller/declaration
+sites in one error packet, exits 1, and emits no admission tables. Normal
+generation and `--check` keep their immediate hard-error policy.
 These RUST-EXIT S5 seed compatibility rules disappear at cutover.
 The raw tagged-Int destructor `jet_rt_int_drop` receives metadata only once
 the Int layer owns that export in `exports.list`: one Word parameter, Unit
