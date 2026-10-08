@@ -5022,6 +5022,7 @@ mod tests {
                 path: PathBuf::from(root).join("main.jet"),
                 display: "main.jet".into(),
                 source: src.into(),
+                core_identifier_demand: crate::Lexer::core_identifier_demand(&tokens),
                 alias: "main".into(),
                 imports: std::mem::take(&mut program.imports),
                 items: std::mem::take(&mut program.items),
