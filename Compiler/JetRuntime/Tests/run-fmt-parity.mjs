@@ -2,8 +2,9 @@
 // Verification-only Rust oracle: include the existing policy bodies, never
 // duplicate them. Source-body comparison is Rust-seed execution, NOT proof of
 // native selector lowering or native runtime-pack admission.
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
@@ -84,6 +85,8 @@ if (mode === 'prepare') {
   // weakening the saved Rust oracle bytes.
   writeFileSync(join(out, 'fmt_source.jet'), readFileSync(join(root, 'Core/text/fmt.jet')));
   writeFileSync(join(out, 'source.jet'), jet);
+  const checkerPath = realpathSync(resolve(checker));
+  const checkerSha256 = createHash('sha256').update(readFileSync(checkerPath)).digest('hex');
   const actual = run(resolve(checker), ['run', '--release', join(out, 'source.jet')], 'source-run');
   const expected = readFileSync(join(out, 'expected.out'), 'utf8');
   function blocks(text) {
@@ -99,10 +102,10 @@ if (mode === 'prepare') {
   const wanted = blocks(expected), got = blocks(actual);
   const sourceLines = readFileSync(join(out, 'fmt_source.jet'), 'utf8').split('\n');
   const rows = cases.map(row => ({ id: row.id, kernel: row.kernel, input: row.args,
-    source: `Core/text/fmt.jet:${sourceLines.findIndex(line => new RegExp(`^pub fn ${members[row.kernel] ?? row.kernel}\\(`).test(line)) + 1}`,
+    source: `Core/text/fmt.jet:${sourceLines.findIndex(line => new RegExp(`^(?:pub )?fn ${members[row.kernel] ?? row.kernel}\\(`).test(line)) + 1}`,
     byte_equal: wanted.get(row.id) === got.get(row.id), expected: wanted.get(row.id), actual: got.get(row.id) }));
   const failures = rows.filter(row => !row.byte_equal);
-  writeFileSync(join(out, 'parity.json'), JSON.stringify({ label: 'Rust-seed source-body byte parity; NOT native selector migration parity', kernels: kernels.length, cases: cases.length, failures: failures.length, stdout_equal: actual === expected, rows }, null, 2) + '\n');
+  writeFileSync(join(out, 'parity.json'), JSON.stringify({ label: 'Rust-seed source-body byte parity; NOT native selector migration parity', checker: { path: checkerPath, sha256: checkerSha256 }, expected_sha256: createHash('sha256').update(expected).digest('hex'), kernels: kernels.length, cases: cases.length, failures: failures.length, stdout_equal: actual === expected, rows }, null, 2) + '\n');
   console.log(`fmt source-body parity: kernels=${kernels.length} cases=${cases.length} failures=${failures.length} stdout_equal=${actual === expected}; native parity UNPROVEN`);
   process.exitCode = failures.length === 0 && actual === expected ? 0 : 1;
 }

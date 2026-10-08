@@ -1503,7 +1503,10 @@ release overflow profile; its inputs never pass a decimal integer as a tagged
 machine-word Int.
 `compare OUT CHECKER` executes the local Core source bodies with that release
 profile and writes per-case input, expected bytes, actual bytes and source
-location to `parity.json`. This is source-body seed parity, not native selector
+location to `parity.json`, together with the checker's resolved path, SHA-256,
+and the immutable expected-output SHA-256. Borrowed trim results used as owned
+String inputs use Core's explicit owned-copy pattern (`~value.trim()`); compare
+refreshes that source fix without regenerating the oracle. This is source-body seed parity, not native selector
 or runtime-pack proof. A mismatching kernel cannot retire until its parity
 cases pass; native generic Display/Debug/Show remain checked-type renderers.
 
