@@ -68,17 +68,6 @@ such as [`Core.rs`](../../crates/jet-codegen/src/Prelude/Core.rs),
 [`CoreLib/`](../../crates/jet-codegen/src/Prelude/CoreLib/) provide registered
 leaves and adapters; they do not become an independent public API registry.
 
-The logical environment has one runtime-owned cell. Native `core.sys.__env*`
-bindings are derived from the registered Core symbols by
-`gen-c-abi-routes.mjs`, with every physical provider signature checked against
-the actual runtime source and export manifest. The caller preserves absent
-versus present-empty OS values, converts raw align-1 bytes once into canonical
-compact align-8 List storage, and uses checked `EnvError` variant identities
-for signed mutation statuses. Snapshot providers write the canonical nested
-List header through caller-owned aggregate storage; key comparison lends byte
-List headers and widens the signed result into exact `Int`. Strict Unicode
-configuration reads remain distinct from raw OS-value reads.
-
 ## Jet semantics and native leaves
 
 Jet owns the parts that give an operation its meaning:
