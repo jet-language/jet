@@ -1463,3 +1463,205 @@ fn vault_authorize_write(plan: I64, key_type: I64, reason: I64, out: I64) -> I64
     jet_rt_free(scratch, I64{1632}, I64{8})
     I64{0}
 }
+
+// SecretsCrypto.rs:814-828. The active reason is empty/zero; all inactive
+// reasons use one domain-separated algorithm, including the literal rotation.
+fn vault_reason_hash_bytes(status: I64, data: I64, length: I64, out: I64, scratch: I64) {
+    prefix :: scratch + I64{4096}
+    rt_text_store(prefix, I64{8391085931256108618})
+    rt_text_store(prefix + I64{8}, I64{7018141078028383329})
+    rt_text_store(prefix + I64{16}, I64{7237491})
+    rt_text_put(prefix + I64{19}, status)
+    vault_put_u16(prefix + I64{20}, length)
+    rt_sha256_parts(prefix, I64{22}, data, length, out, scratch)
+    thread_zero(prefix, I64{24})
+}
+fn vault_reason_hash(status: I64, reason: I64, out: I64, scratch: I64) -> I64 {
+    if (status == I64{1}) {
+        if (rt_text_len(reason) != I64{0}) -> return vault_error_new(I64{8}, I64{0}, I64{0})
+        thread_zero(out, I64{32})
+        return I64{0}
+    }
+    if !vault_validate_text(reason, true) -> return vault_error_new(I64{0}, I64{0}, I64{0})
+    vault_reason_hash_bytes(status, rt_text_data(reason), rt_text_len(reason), out, scratch)
+    I64{0}
+}
+// Seed2550-2719. The final 208 bytes of scratch hold owners/output slots;
+// the first8192 are exclusively crypto scratch and can be wiped by hashing.
+fn vault_commit_inner(root: I64, plan: I64, write: I64, expected: I64, key_type: I64, scratch: I64) -> I64 {
+    now :: vault_host_monotonic_ns()
+    user :: trap_syscall(I64{107}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+    session :: trap_syscall(I64{124}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+    if (session < I64{0}) -> return vault_error_new(I64{7}, I64{0}, I64{0})
+    issued :: rt_text_word(plan + VAULT_PLAN_ISSUED)
+    if (rt_text_word(plan + VAULT_PLAN_ACTION) != expected
+        || now > rt_text_word(plan + VAULT_PLAN_DEADLINE)
+        || (now > issued && now - issued > I64{300000000000})
+        || now > rt_text_word(write + VAULT_WRITE_DEADLINE)
+        || !rt_text_equal_bytes(write + VAULT_WRITE_OPERATION, plan + VAULT_PLAN_OPERATION, I64{32})
+        || vault_bytes_zero(write + VAULT_WRITE_PREVIEW, I64{32})
+        || rt_text_word(write + VAULT_WRITE_USER) != user
+        || rt_text_word(write + VAULT_WRITE_SESSION) != session) -> return vault_error_new(I64{6}, I64{0}, I64{0})
+    lock_slot :: scratch + I64{8200}
+    lock_error :: vault_acquire_lock(root, plan + VAULT_PLAN_UUID, rt_text_word(plan + VAULT_PLAN_REVISION), plan + VAULT_PLAN_START_HASH, lock_slot)
+    if (lock_error != I64{0}) -> return lock_error
+    read_error :: vault_read_at_root(root, scratch + I64{8192}, scratch + I64{8232}, scratch + I64{8264}, scratch + I64{8296})
+    if (read_error != I64{0}) -> return read_error
+    store :: rt_text_word(scratch + I64{8192})
+    kind :: rt_text_word(scratch + I64{8296})
+    if (kind != rt_text_word(plan + VAULT_PLAN_KIND)
+        || !rt_text_equal_bytes(scratch + I64{8232}, plan + VAULT_PLAN_START_HASH, I64{32})
+        || !rt_text_equal_bytes(scratch + I64{8264}, plan + VAULT_PLAN_PROVIDER, I64{32})) -> return vault_error_new(I64{6}, I64{0}, I64{0})
+    if (kind == VAULT_START_V2) {
+        if (!rt_text_equal_bytes(store + VAULT_STORE_UUID, plan + VAULT_PLAN_UUID, I64{16})
+            || rt_text_word(store + VAULT_STORE_REVISION) != rt_text_word(plan + VAULT_PLAN_REVISION)) -> return vault_error_new(I64{6}, I64{0}, I64{0})
+    } else {
+        if (!vault_bytes_zero(store + VAULT_STORE_UUID, I64{16})
+            || rt_text_word(store + VAULT_STORE_REVISION) != I64{0}
+            || rt_text_word(plan + VAULT_PLAN_REVISION) != I64{0}) -> return vault_error_new(I64{6}, I64{0}, I64{0})
+        rt_text_bytes_copy(store + VAULT_STORE_UUID, plan + VAULT_PLAN_UUID, I64{16})
+    }
+    records :: rt_text_word(store + VAULT_STORE_RECORDS)
+    length :: rt_text_word(records + DATA_SEQUENCE_LENGTH)
+    data :: rt_text_word(records + DATA_SEQUENCE_DATA)
+    name :: rt_text_word(plan + VAULT_PLAN_NAME)
+    at := I64{0}
+    loop at < length {
+        record :: rt_text_word(data + at * DATA_TREE_ELEMENT_BYTES)
+        if (jet_rt_string_eq(rt_text_word(record + VAULT_RECORD_NAME), name)
+            && rt_text_word(record + VAULT_RECORD_TYPE) == key_type
+            && rt_text_word(record + VAULT_RECORD_STATUS) == I64{1}) {
+            rt_text_store(scratch + I64{8208}, vault_ref(store, record))
+            break
+        }
+        at += I64{1}
+    }
+    time_error :: vault_lifecycle_unix_ms(store, scratch + I64{8368})
+    if (time_error != I64{0}) -> return time_error
+    unix_ms :: rt_text_word(scratch + I64{8368})
+    action :: rt_text_word(plan + VAULT_PLAN_ACTION)
+    if (action == I64{1} || action == I64{2} || action == I64{3} || action == I64{6}) {
+        if (action == I64{3}) {
+            at = I64{0}
+            loop at < length {
+                record :: rt_text_word(data + at * DATA_TREE_ELEMENT_BYTES)
+                if (jet_rt_string_eq(rt_text_word(record + VAULT_RECORD_NAME), name)
+                    && rt_text_word(record + VAULT_RECORD_TYPE) == key_type
+                    && rt_text_word(record + VAULT_RECORD_STATUS) == I64{1}) {
+                    rt_text_store(record + VAULT_RECORD_STATUS, I64{2})
+                    rt_text_store(record + VAULT_RECORD_STATUS_MS, unix_ms)
+                    rt_text_store(scratch + I64{4232}, I64{28259048196697970})
+                    vault_reason_hash_bytes(I64{2}, scratch + I64{4232}, I64{7}, record + VAULT_RECORD_REASON_HASH, scratch)
+                }
+                at += I64{1}
+            }
+        }
+        bytes := rt_text_word(plan + VAULT_PLAN_IMPORTED)
+        if (bytes != I64{0}) {
+            rt_text_store(plan + VAULT_PLAN_IMPORTED, I64{0})
+            if (rt_text_word(bytes + DATA_SEQUENCE_LENGTH) != I64{32}) {
+                vault_imported_drop(bytes)
+                return vault_error_new(I64{8}, I64{0}, I64{0})
+            }
+        } else {
+            bytes = data_sequence_new(I64{32}, RT_HOST_U8_STRIDE)
+            rt_text_store(bytes + DATA_SEQUENCE_LENGTH, I64{32})
+            if (rt_crypto_entropy_fill(rt_text_word(bytes + DATA_SEQUENCE_DATA), I64{32}) != I64{0}) {
+                vault_imported_drop(bytes)
+                return vault_error_new(I64{10}, VAULT_CRYPTO_UNAVAILABLE, I64{0})
+            }
+        }
+        secret :: vault_secret_adopt(bytes)
+        jet_rt_free(bytes, DATA_SEQUENCE_BYTES, I64{8})
+        rt_text_store(scratch + I64{8224}, secret)
+        if !vault_public_hash(key_type, secret, scratch + I64{8304}, scratch) -> return vault_error_new(I64{8}, I64{0}, I64{0})
+        key :: vault_secret_bytes(secret)
+        vault_key_digest_bytes(key_type, rt_text_word(key + DATA_SEQUENCE_DATA), I64{32}, scratch + I64{8336}, scratch)
+        if (action != I64{1} && action != I64{3}
+            && (!rt_text_equal_bytes(scratch + I64{8304}, plan + VAULT_PLAN_PUBLIC_HASH, I64{32})
+                || !rt_text_equal_bytes(scratch + I64{8336}, plan + VAULT_PLAN_KEY_DIGEST, I64{32}))) -> return vault_error_new(I64{6}, I64{0}, I64{0})
+        maximum := I64{0}
+        at = I64{0}
+        loop at < length {
+            record :: rt_text_word(data + at * DATA_TREE_ELEMENT_BYTES)
+            if (jet_rt_string_eq(rt_text_word(record + VAULT_RECORD_NAME), name) && rt_text_word(record + VAULT_RECORD_TYPE) == key_type) {
+                generation :: rt_text_word(record + VAULT_RECORD_GENERATION)
+                if vault_unsigned_less(maximum, generation) -> maximum = generation
+            }
+            at += I64{1}
+        }
+        if (maximum == I64{-1}) -> return vault_incident(I64{7306858898491007350}, I64{7957695015158965614}, I64{16}, scratch)
+        generation :: wrapping(maximum + I64{1})
+        if (generation != rt_text_word(plan + VAULT_PLAN_TO)) -> return vault_error_new(I64{6}, I64{0}, I64{0})
+        opaque :: scratch + I64{8376}
+        if (rt_crypto_entropy_fill(opaque, I64{16}) != I64{0}) -> return vault_error_new(I64{10}, VAULT_CRYPTO_UNAVAILABLE, I64{0})
+        if vault_bytes_zero(opaque, I64{16}) -> return vault_incident(I64{7312206923048509814}, I64{431261314930}, I64{13}, scratch)
+        provenance :: if (action == I64{1} || action == I64{3}) -> I64{1} else -> I64{2}
+        record :: vault_record_allocate(name, key_type, generation, I64{1}, provenance, secret)
+        rt_text_store(scratch + I64{8224}, I64{0})
+        rt_text_store(scratch + I64{8392}, record)
+        rt_text_bytes_copy(record + VAULT_RECORD_OPAQUE, opaque, I64{16})
+        rt_text_store(record + VAULT_RECORD_CREATED, unix_ms)
+        rt_text_store(record + VAULT_RECORD_STATUS_MS, unix_ms)
+        rt_text_bytes_copy(record + VAULT_RECORD_PUBLIC_HASH, scratch + I64{8304}, I64{32})
+        vault_record_hash(record, record + VAULT_RECORD_HASH, scratch)
+        rt_text_store(scratch + I64{8216}, vault_ref(store, record))
+        slot :: data_sequence_reserve(records, DATA_TREE_ELEMENT_BYTES)
+        rt_text_store(slot, record)
+        rt_text_store(records + DATA_SEQUENCE_LENGTH, length + I64{1})
+        rt_text_store(scratch + I64{8392}, I64{0})
+    } else {
+        target :: rt_text_word(plan + VAULT_PLAN_TARGET)
+        if (target == I64{0}) -> return vault_error_new(I64{1}, I64{0}, I64{0})
+        found := I64{0}
+        at = I64{0}
+        loop at < length {
+            record :: rt_text_word(data + at * DATA_TREE_ELEMENT_BYTES)
+            if vault_ref_matches(record, target) {
+                found = record
+                break
+            }
+            at += I64{1}
+        }
+        if (found == I64{0}) -> return vault_error_new(I64{1}, I64{0}, I64{0})
+        if (rt_text_word(found + VAULT_RECORD_TYPE) != key_type) -> return vault_error_new(I64{2}, I64{0}, I64{0})
+        if (rt_text_word(found + VAULT_RECORD_STATUS) == I64{3}) -> return vault_error_new(I64{3}, I64{0}, I64{0})
+        status :: if (action == I64{4}) -> I64{2} else -> I64{3}
+        rt_text_store(found + VAULT_RECORD_STATUS, status)
+        rt_text_store(found + VAULT_RECORD_STATUS_MS, unix_ms)
+        reason_error :: vault_reason_hash(status, rt_text_word(plan + VAULT_PLAN_REASON), found + VAULT_RECORD_REASON_HASH, scratch)
+        if (reason_error != I64{0}) -> return reason_error
+    }
+    revision :: rt_text_word(store + VAULT_STORE_REVISION)
+    if (revision == I64{-1}) -> return vault_incident(I64{7309955123234824566}, I64{121424789596534}, I64{14}, scratch)
+    rt_text_store(store + VAULT_STORE_REVISION, wrapping(revision + I64{1}))
+    lock :: rt_text_word(lock_slot)
+    rt_text_store(lock_slot, I64{0})
+    vault_write_at_root(root, store, plan + VAULT_PLAN_START_HASH, plan + VAULT_PLAN_PROVIDER, rt_text_word(plan + VAULT_PLAN_KIND), rt_text_word(plan + VAULT_PLAN_REVISION), lock)
+}
+// Consume both authority objects, including on pre-filesystem conflict.
+// Only success transfers the independently owned previous/current references.
+fn vault_commit_at_root(root: I64, plan: I64, write: I64, expected: I64, key_type: I64, previous_out: I64, current_out: I64) -> I64 {
+    scratch :: jet_rt_alloc(I64{8400}, I64{8})
+    thread_zero(scratch, I64{8400})
+    error :: vault_commit_inner(root, plan, write, expected, key_type, scratch)
+    previous :: rt_text_word(scratch + I64{8208})
+    current :: rt_text_word(scratch + I64{8216})
+    if (error == I64{0}) {
+        rt_text_store(previous_out, previous)
+        rt_text_store(current_out, current)
+    } else {
+        vault_ref_drop(current)
+        vault_ref_drop(previous)
+    }
+    vault_record_drop(rt_text_word(scratch + I64{8392}))
+    secret :: rt_text_word(scratch + I64{8224})
+    if (secret != I64{0}) -> vault_secret_drop(secret)
+    vault_store_drop(rt_text_word(scratch + I64{8192}))
+    vault_lock_drop(rt_text_word(scratch + I64{8200}))
+    vault_write_drop(write)
+    vault_plan_drop(plan)
+    thread_zero(scratch, I64{8400})
+    jet_rt_free(scratch, I64{8400}, I64{8})
+    error
+}

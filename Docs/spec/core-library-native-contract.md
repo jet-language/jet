@@ -279,6 +279,18 @@ empty, trailing-slash and invalid-UTF-8 paths; identity still uses the UTF-8
 rt_env_get accessor. Trust files must be valid UTF-8 and have an exact trimmed
 user/repo vault.write grant for the repository UUID. The actual HostStartup and
 host monotonic producers must be composed, not replaced with test stubs.
+Commit consumes both plan and write authority on every return, including a
+pre-filesystem conflict. It checks action, shared monotonic deadlines, operation
+binding, nonzero preview, effective user and session before acquiring the lock.
+The held store must match the prepared kind, provider and snapshot; provisional
+UUID adoption is limited to absent/historical stores with zero UUID/revision.
+Rotation retires every matching active key using the same domain-separated
+status-reason hash as retirement/revocation. Imported buffers transfer directly
+into Secret; generation uses the shared default entropy provider. Public/digest
+checks precede generation/ID checks, and immutable record identity is captured
+before insertion. Previous/current references transfer only after durable write
+succeeds; failure drops them and consumes the lock. Both held-file and tty
+duplication use F_DUPFD_CLOEXEC with Rust's minimum descriptor 3.
 
 Typed vault records own native Secret buffers. Equality compares the key bytes,
 not just immutable hashes, while Debug always prints a redacted key marker.

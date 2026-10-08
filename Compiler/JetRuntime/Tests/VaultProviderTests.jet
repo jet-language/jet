@@ -584,6 +584,7 @@ fn vault_fixture_opaque(record: I64, byte: I64, scratch: I64) {
     jet_rt_free(slots, I64{16}, I64{8})
 }
 
+#Export(c)
 fn jet_rt_vault_identity_path_fixture(root: I64, current: Bool, expected: I64) {
     vault_fixture_check(vault_root_is_current(root) == current)
     if (expected == I64{0}) -> return
@@ -592,6 +593,7 @@ fn jet_rt_vault_identity_path_fixture(root: I64, current: Bool, expected: I64) {
     vault_fixture_check(rt_text_byte(rt_text_data(path) + rt_text_len(path)) == I64{0})
     jet_rt_string_drop(path)
 }
+#Export(c)
 fn jet_rt_vault_recipients_fixture(input: I64, count: I64, expected_error: I64, expected_hash: I64, expected_first: I64) {
     scratch :: jet_rt_alloc(I64{40}, I64{8})
     rt_text_store(scratch, I64{91})
@@ -621,6 +623,7 @@ fn jet_rt_vault_recipients_fixture(input: I64, count: I64, expected_error: I64, 
     }
     jet_rt_free(scratch, I64{40}, I64{8})
 }
+#Export(c)
 fn jet_rt_vault_plaintext_fixture(input: I64, kind: I64, count: I64, expected_error: I64, expected_hash: I64) {
     scratch :: jet_rt_alloc(I64{48}, I64{8})
     rt_text_store(scratch, I64{91})
@@ -666,6 +669,7 @@ fn jet_rt_vault_plaintext_fixture(input: I64, kind: I64, count: I64, expected_er
 }
 
 // The native helper borrows actual pipe/device descriptors; no seek model.
+#Export(c)
 fn jet_rt_vault_linux_stream_fixture(file: I64, expected: I64) {
     scratch :: jet_rt_alloc(I64{16}, I64{8})
     rt_text_store(scratch, I64{91})
@@ -684,6 +688,7 @@ fn jet_rt_vault_linux_stream_fixture(file: I64, expected: I64) {
     }
     jet_rt_free(scratch, I64{16}, I64{8})
 }
+#Export(c)
 fn jet_rt_vault_identity_stream_fixture(root: I64, expected: I64) {
     scratch :: jet_rt_alloc(I64{8}, I64{8})
     error :: vault_identity_read_at_root(root, scratch)
@@ -696,6 +701,7 @@ fn jet_rt_vault_identity_stream_fixture(root: I64, expected: I64) {
     jet_rt_free(scratch, I64{8}, I64{8})
 }
 
+#Export(c)
 fn jet_rt_vault_uint_fixture(input: I64, narrow: Bool, valid: Bool, value: I64, decimal: I64) {
     scratch :: jet_rt_alloc(I64{40}, I64{8})
     rt_text_store(scratch, I64{91})
@@ -711,6 +717,7 @@ fn jet_rt_vault_uint_fixture(input: I64, narrow: Bool, valid: Bool, value: I64, 
     }
     jet_rt_free(scratch, I64{40}, I64{8})
 }
+#Export(c)
 fn jet_rt_vault_proc_parse_fixture(input: I64, valid: Bool, value: I64) {
     scratch :: jet_rt_alloc(I64{8}, I64{8})
     rt_text_store(scratch, I64{91})
@@ -719,6 +726,7 @@ fn jet_rt_vault_proc_parse_fixture(input: I64, valid: Bool, value: I64) {
     vault_fixture_check(rt_text_word(scratch) == (if valid -> value else -> I64{91}))
     jet_rt_free(scratch, I64{8}, I64{8})
 }
+#Export(c)
 fn jet_rt_vault_proc_read_fixture() {
     scratch :: jet_rt_alloc(I64{24}, I64{8})
     pid :: trap_syscall(I64{39}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
@@ -732,6 +740,7 @@ fn jet_rt_vault_proc_read_fixture() {
 }
 
 // Borrowed stale-field parse only: actual recovery is tested by FS fixtures.
+#Export(c)
 fn jet_rt_vault_lock_fields_fixture(input: I64, revision: I64, valid: Bool, pid: I64, start: I64, nonce: I64) {
     scratch :: jet_rt_alloc(I64{88}, I64{8})
     thread_zero(scratch, I64{48})
@@ -758,6 +767,7 @@ fn jet_rt_vault_lock_fields_fixture(input: I64, revision: I64, valid: Bool, pid:
     jet_rt_free(scratch, I64{88}, I64{8})
 }
 
+#Export(c)
 fn jet_rt_vault_lock_guard_fixture(root: I64, fault: I64) {
     scratch :: jet_rt_alloc(I64{368}, I64{8})
     name :: scratch + I64{336}
@@ -785,6 +795,7 @@ fn jet_rt_vault_lock_guard_fixture(root: I64, fault: I64) {
     jet_rt_free(scratch, I64{368}, I64{8})
 }
 
+#Export(c)
 fn jet_rt_vault_lock_acquire_fixture(root: I64) {
     scratch :: jet_rt_alloc(I64{464}, I64{8})
     thread_zero(scratch, I64{464})
@@ -821,6 +832,7 @@ fn jet_rt_vault_lock_acquire_fixture(root: I64) {
     jet_rt_free(scratch, I64{464}, I64{8})
 }
 
+#Export(c)
 fn jet_rt_vault_lifecycle_strings_fixture(name: I64, rollback: I64, missing_root: I64) {
     scratch :: jet_rt_alloc(I64{32}, I64{8})
     thread_zero(scratch, I64{32})
@@ -863,6 +875,7 @@ fn jet_rt_vault_lifecycle_strings_fixture(name: I64, rollback: I64, missing_root
     jet_rt_free(scratch, I64{32}, I64{8})
 }
 
+#Export(c)
 fn jet_rt_vault_reference_fixture(original: I64, display: I64, debug: I64) {
     scratch :: jet_rt_alloc(I64{8240}, I64{8})
     thread_zero(scratch, I64{16})
@@ -921,6 +934,7 @@ fn jet_rt_vault_reference_fixture(original: I64, display: I64, debug: I64) {
     jet_rt_free(scratch, I64{8240}, I64{8})
 }
 
+#Export(c)
 fn jet_rt_vault_plan_auth_fixture(name: I64, empty: I64, reason: I64, expected: I64, operation_hash: I64, preview_hash: I64, granted: Bool, entropy: I64) {
     scratch :: jet_rt_alloc(I64{1632}, I64{8})
     plan :: jet_rt_alloc(VAULT_PLAN_BYTES, I64{8})
@@ -976,6 +990,7 @@ fn jet_rt_vault_plan_auth_fixture(name: I64, empty: I64, reason: I64, expected: 
     thread_zero(scratch, I64{1632})
     jet_rt_free(scratch, I64{1632}, I64{8})
 }
+#Export(c)
 fn jet_rt_vault_trust_path_fixture(home: I64, expected: I64) {
     path :: vault_trust_home_path(rt_text_data(home))
     vault_fixture_check(path != I64{0})
@@ -985,9 +1000,73 @@ fn jet_rt_vault_trust_path_fixture(home: I64, expected: I64) {
     vault_fixture_check(rt_text_byte(path + length) == I64{0})
     jet_rt_free(path, length + I64{1}, I64{1})
 }
+#Export(c)
 fn jet_rt_vault_headless_fixture() {
     repo :: jet_rt_alloc(I64{16}, I64{8})
     thread_zero(repo, I64{16})
     vault_fixture_check(vault_headless_granted(repo))
     jet_rt_free(repo, I64{16}, I64{8})
+}
+
+// Supplemental commit boundary witness: every reject consumes both inputs,
+// leaves outputs untouched and rejects before any filesystem/entropy access.
+#Export(c)
+fn jet_rt_vault_commit_boundary_fixture(name: I64, empty: I64, retired: I64, revoked: I64, rotation_hash: I64, retired_hash: I64, revoked_hash: I64, entropy: I64) {
+    scratch :: jet_rt_alloc(I64{8256}, I64{8})
+    out :: scratch + I64{8192}
+    rt_text_store(scratch + I64{4232}, I64{28259048196697970})
+    vault_reason_hash_bytes(I64{2}, scratch + I64{4232}, I64{7}, out, scratch)
+    vault_fixture_check(rt_text_equal_bytes(out, rotation_hash, I64{32}))
+    vault_fixture_check(vault_reason_hash(I64{2}, retired, out, scratch) == I64{0})
+    vault_fixture_check(rt_text_equal_bytes(out, retired_hash, I64{32}))
+    vault_fixture_check(vault_reason_hash(I64{3}, revoked, out, scratch) == I64{0})
+    vault_fixture_check(rt_text_equal_bytes(out, revoked_hash, I64{32}))
+    vault_fixture_check(vault_reason_hash(I64{1}, empty, out, scratch) == I64{0} && vault_bytes_zero(out, I64{32}))
+    active_error :: vault_reason_hash(I64{1}, retired, out, scratch)
+    vault_fixture_check(active_error != I64{0} && vault_error_tag(active_error) == I64{8})
+    vault_error_drop(active_error)
+    trial := I64{0}
+    loop trial < (I64{7}) {
+        plan :: jet_rt_alloc(VAULT_PLAN_BYTES, I64{8})
+        write :: jet_rt_alloc(VAULT_WRITE_BYTES, I64{8})
+        thread_zero(plan, VAULT_PLAN_BYTES)
+        thread_zero(write, VAULT_WRITE_BYTES)
+        rt_text_store(plan + VAULT_PLAN_ACTION, I64{2})
+        rt_text_store(plan + VAULT_PLAN_NAME, jet_rt_string_clone(name))
+        rt_text_store(plan + VAULT_PLAN_REASON, jet_rt_string_clone(empty))
+        imported :: data_sequence_new(I64{32}, RT_HOST_U8_STRIDE)
+        rt_text_store(imported + DATA_SEQUENCE_LENGTH, I64{32})
+        thread_zero(rt_text_word(imported + DATA_SEQUENCE_DATA), I64{32})
+        rt_text_store(plan + VAULT_PLAN_IMPORTED, imported)
+        now :: vault_host_monotonic_ns()
+        rt_text_store(plan + VAULT_PLAN_ISSUED, now)
+        rt_text_store(plan + VAULT_PLAN_DEADLINE, now + I64{300000000000})
+        rt_text_store(write + VAULT_WRITE_DEADLINE, now + I64{300000000000})
+        rt_text_put(write + VAULT_WRITE_PREVIEW, I64{1})
+        rt_text_store(write + VAULT_WRITE_USER, trap_syscall(I64{107}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}))
+        rt_text_store(write + VAULT_WRITE_SESSION, trap_syscall(I64{124}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}))
+        expected := I64{2}
+        if {
+            (trial == I64{0}) -> expected = I64{1}
+            (trial == I64{1}) -> rt_text_store(plan + VAULT_PLAN_DEADLINE, I64{0})
+            (trial == I64{2}) -> rt_text_store(write + VAULT_WRITE_DEADLINE, I64{0})
+            (trial == I64{3}) -> rt_text_put(write + VAULT_WRITE_OPERATION, I64{1})
+            (trial == I64{4}) -> thread_zero(write + VAULT_WRITE_PREVIEW, I64{32})
+            (trial == I64{5}) -> rt_text_store(write + VAULT_WRITE_USER, I64{-1})
+            else -> rt_text_store(write + VAULT_WRITE_SESSION, I64{-1})
+        }
+        previous :: scratch + I64{8224}
+        current :: scratch + I64{8232}
+        rt_text_store(previous, I64{91})
+        rt_text_store(current, I64{92})
+        rt_crypto_entropy_set(entropy, I64{0})
+        error :: vault_commit_at_root(empty, plan, write, expected, I64{1}, previous, current)
+        rt_crypto_entropy_clear()
+        vault_fixture_check(error != I64{0} && vault_error_tag(error) == I64{6})
+        vault_fixture_check(rt_text_word(previous) == I64{91} && rt_text_word(current) == I64{92})
+        vault_error_drop(error)
+        trial += I64{1}
+    }
+    thread_zero(scratch, I64{8256})
+    jet_rt_free(scratch, I64{8256}, I64{8})
 }

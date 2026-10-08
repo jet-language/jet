@@ -54,6 +54,7 @@ extern void jet_rt_vault_reference_fixture(void *, const Text *, const Text *);
 extern void jet_rt_vault_plan_auth_fixture(const Text *, const Text *, const Text *, const Text *, const void *, const void *, _Bool, int64_t (*)(void *, void *, int64_t));
 extern void jet_rt_vault_trust_path_fixture(const Text *, const Text *);
 extern void jet_rt_vault_headless_fixture(void);
+extern void jet_rt_vault_commit_boundary_fixture(const Text *, const Text *, const Text *, const Text *, const void *, const void *, const void *, int64_t (*)(void *, void *, int64_t));
 extern void jet_rt_host_arguments(int64_t, char **, char **);
 extern char **environ;
 extern void jet_rt_free(void *, int64_t, int64_t);
@@ -457,6 +458,12 @@ static void plan_auth_fixtures(void) {
         jet_rt_vault_plan_auth_fixture(&name, &empty, &reason, &expected, op, preview, granted, unavailable_entropy);
         jet_rt_vault_clear_test_authorizer();
     }
+    unsigned char rotation_hash[32], retired_hash[32], revoked_hash[32];
+    fixture_hash(rotation_hash, "541781f99f753e38913a068b209eff23d965787264efa4f086ea20008cb98911");
+    fixture_hash(retired_hash, "0399f46cba25ec76bfe7f6b04d45c3ed5b580307280548f7bb3a8680a71afded");
+    fixture_hash(revoked_hash, "9e47845eef7978b4b6e3211a60f7679faec87ad1b9f9c966c29acf4da1d3223e");
+    Text retired = text("retired"), revoked = text("revoked");
+    jet_rt_vault_commit_boundary_fixture(&name, &empty, &retired, &revoked, rotation_hash, retired_hash, revoked_hash, unavailable_entropy);
     assert(authorizer_calls == 2 && unavailable_calls == 1);
 }
 static void trust_home_fixtures(void) {

@@ -277,7 +277,7 @@ fn vault_linux_install_exact(dirfd: I64, next: I64, final_name: I64, temp: I64, 
 // scratch borrows one exclusive byte for EOF probing; a full buffer does not
 // allocate or copy merely to discover EOF.
 fn vault_linux_read_file(file: I64, out: I64, scratch: I64) -> I64 {
-    cloned :: trap_syscall(I64{72}, file, I64{1030}, I64{0}, I64{0}, I64{0}, I64{0})
+    cloned :: trap_syscall(I64{72}, file, I64{1030}, I64{3}, I64{0}, I64{0}, I64{0})
     if (cloned < I64{0}) -> return vault_error_new(I64{4}, I64{0}, I64{0})
     if (trap_syscall(I64{8}, cloned, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}) < I64{0}) {
         vault_linux_close(cloned)
@@ -1452,7 +1452,7 @@ fn vault_native_authorize(preview: I64, repo: I64) -> Bool {
     jet_rt_string_drop(request)
     accepted := false
     if written {
-        cloned :: trap_syscall(I64{72}, tty, I64{1030}, I64{0}, I64{0}, I64{0}, I64{0})
+        cloned :: trap_syscall(I64{72}, tty, I64{1030}, I64{3}, I64{0}, I64{0}, I64{0})
         if (cloned >= I64{0}) {
             accepted = vault_tty_answer(cloned)
             vault_linux_close(cloned)
