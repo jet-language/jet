@@ -139,15 +139,22 @@ fn sentry_test_leave(save: I64) {
     jet_rt_free(save, I64{80}, I64{8})
     I64{0}
 }
-#Export(c) fn jet_rt_sentry_fixture_ledger() -> I64 {
+#Export(c) fn jet_rt_sentry_fixture_ledger(stop: I64) -> I64 {
     save :: jet_rt_alloc(I64{80}, I64{8})
     sentry_test_gate(save)
-    gate :: sentry_gate_name()
-    detail :: sentry_detail(I64{4}, I64{0}, I64{8})
-    sentry_ledger(I64{4}, gate, detail)
-    jet_rt_string_drop(gate)
-    jet_rt_string_drop(detail)
+    // Use real classification, not a directly manufactured ledger observation.
+    value :: jet_rt_alloc(I64{8}, I64{8})
+    frame :: jet_rt_sentry_frame_enter()
+    jet_rt_sentry_register_stack_allocation(value, I64{8})
+    jet_rt_sentry_frame_leave(frame)
+    if (stop != I64{0}) {
+        _ := jet_rt_sentry_read(value, I64{8}, I64{8})
+        sentry_test_require(false)
+    } else {
+        sentry_test_require(jet_rt_sentry_check(value, I64{8}, I64{8}, I64{1}) == I64{4})
+    }
     sentry_test_leave(save)
+    jet_rt_free(value, I64{8}, I64{8})
     jet_rt_free(save, I64{80}, I64{8})
     I64{0}
 }

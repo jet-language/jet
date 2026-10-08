@@ -2324,3 +2324,21 @@ this successor to the runtime line. C11/Node syntax checks do not establish
 native linking, runtime execution or stop-byte parity; those require a
 composed real runtime link group and actual runner receipts.
 
+### Sentry fault-detection ledger parity
+
+The shared checker observes a nonzero fault immediately after classification
+releases its lock, before returning the fault tag. This matches
+`MemSentry.rs:607-617,704-717`; a successful or disabled check writes nothing.
+The stop/report path no longer records the same fault a second time
+(`Mem.rs:78-88` and `Core.rs:1482-1517` likewise only report after detection).
+The existing gate/release/hardened/fence rules and observational ledger writer
+are unchanged. `JET_MEMORY_LEDGER` selects a nonempty explicit path; otherwise
+the normal default remains `.jet/memory/ledger-v1.jsonl`.
+
+The world/sentry runner supplies fresh, per-run ledger paths for every raw
+check fixture so tests never write the checkout's default ledger. Its return
+and stop modes both use an actual expired-frame pointer classification,
+require exactly one JSONL row, and compare their complete bytes with each
+other and the existing canonical reference writer. Syntax receipts do not
+establish executed fault-detection parity.
+
