@@ -1,0 +1,16 @@
+# Port of tests/help_pty.rs:473-494. PENDING-GRAMMAR(batch-four); exact original inputs/delays/predicates.
+requires: os:unix
+refused: pty
+normalize: replace "\r" ""
+step: jet ? --color=never
+pty: true size 8x60
+unset: NO_COLOR
+unset: FORCE_COLOR
+pty-send: "\u001bOP\u001b[B\u001b[B\u001b[B\u001b[B\u001b[B\u001b[B\u001b[B\u001b\u001b" after 150ms
+pty-close: after 150ms
+exit: 0
+# Helper port: help_pty.rs90-105 final_frame_before_cleanup,including>=3sentinels check.
+stdout.final_frame: lines = 8 # original predicate: finalframe Rust .lines() row bound
+# Helper port: help_pty.rs71-88 visible_cols counts Unicode chars, ignores ESC through m.
+stdout.final_frame.visible_cols: each <= 60 # original predicate: every finalframe line fits visible columns
+stdout.final_frame: ~ ">   run" # original predicate: final selected row is run and remains visible
