@@ -126,13 +126,21 @@ fn jet_testing_compare(
             "jet",
             "embedded-prelude",
         );
-        samples.push(
-            crate::jet_testing_comparison_foundation::ComparisonSample::new(
-                identity,
-                jet_testing_observation(&reference_value),
-                jet_testing_observation(&candidate_value),
-            ),
+        let mut sample = crate::jet_testing_comparison_foundation::ComparisonSample::new(
+            identity,
+            jet_testing_observation(&reference_value),
+            jet_testing_observation(&candidate_value),
         );
+        if matches!(
+            &relation,
+            crate::jet_testing_comparison_foundation::ObservationRelation::TypedEquality
+        ) {
+            sample = sample.with_declared_equal(jet_std::JetDataTreeAccess::equal_unordered(
+                &reference_value,
+                &candidate_value,
+            ));
+        }
+        samples.push(sample);
         reference_values.push(reference_value);
         candidate_values.push(candidate_value);
     }

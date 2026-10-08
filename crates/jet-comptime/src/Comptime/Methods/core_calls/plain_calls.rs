@@ -1314,7 +1314,15 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
                     unavailable = Some(format!("unknown observation relation `{relation}`"));
                     break;
                 }
-                if reference_value != candidate_value && first_difference < 0 {
+                let equal = if relation == "typed_equality" {
+                    crate::Comptime::SyncLite::datatree_equal_unordered(
+                        &reference_value,
+                        &candidate_value,
+                    )
+                } else {
+                    reference_value == candidate_value
+                };
+                if !equal && first_difference < 0 {
                     first_difference = index as i64;
                 }
                 case_ids.push(CtValue::Str(format!("case-{index}")));

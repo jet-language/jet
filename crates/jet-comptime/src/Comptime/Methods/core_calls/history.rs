@@ -1477,13 +1477,7 @@ pub(crate) fn apply_testing_histories_explicit(
                     .map(|command| command.value.clone())
                     .collect(),
             );
-            let observe_value = |value: CtValue| {
-                invoke(&observe, value, "observe").and_then(|value| {
-                    crate::Comptime::JSONInterp::render_ordered_datatree(&value, false, 0)
-                        .map(jet_foundation::TestingComparison::ComparisonObservation::value)
-                        .map_err(|error| jet_foundation::EncodingJson::encoding_error_show(&error))
-                })
-            };
+            let observe_value = |value: CtValue| invoke(&observe, value, "observe");
             let reference_value = match invoke(&model, input.clone(), "model") {
                 Ok(value) => value,
                 Err(reason) => return unavailable(reason),
@@ -1524,12 +1518,34 @@ pub(crate) fn apply_testing_histories_explicit(
                 provenance.target.clone(),
             );
             identity.seed = Some(typed.case.seed);
-            let sample = jet_foundation::TestingComparison::ComparisonSample::new(
+            let mut sample = jet_foundation::TestingComparison::ComparisonSample::new(
                 identity,
-                reference_observed,
-                candidate_observed,
-            )
-            .with_replays(reference_replay, candidate_replay);
+                jet_foundation::TestingComparison::ComparisonObservation::value(
+                    crate::Comptime::JSONInterp::display_datatree(&reference_observed),
+                ),
+                jet_foundation::TestingComparison::ComparisonObservation::value(
+                    crate::Comptime::JSONInterp::display_datatree(&candidate_observed),
+                ),
+            );
+            if matches!(
+                &relation,
+                jet_foundation::TestingComparison::ObservationRelation::TypedEquality
+            ) {
+                sample = sample.with_declared_equal(
+                    crate::Comptime::SyncLite::datatree_equal_unordered(
+                        &reference_observed,
+                        &candidate_observed,
+                    ),
+                );
+            }
+            let sample = sample.with_replays(
+                jet_foundation::TestingComparison::ComparisonObservation::value(
+                    crate::Comptime::JSONInterp::display_datatree(&reference_replay),
+                ),
+                jet_foundation::TestingComparison::ComparisonObservation::value(
+                    crate::Comptime::JSONInterp::display_datatree(&candidate_replay),
+                ),
+            );
             inputs.push(input.clone());
             reference_values.push(reference_value);
             candidate_values.push(candidate_value);
@@ -1828,13 +1844,7 @@ pub(crate) fn apply_testing_histories(
                     Err(reason) => return unavailable(reason),
                 };
                 let input = CtValue::List(command_values);
-                let observe_value = |value: CtValue| {
-                    invoke(&observe, value, "observe").and_then(|value| {
-                        crate::Comptime::JSONInterp::render_ordered_datatree(&value, false, 0)
-                            .map(jet_foundation::TestingComparison::ComparisonObservation::value)
-                            .map_err(|error| jet_foundation::EncodingJson::encoding_error_show(&error))
-                    })
-                };
+                let observe_value = |value: CtValue| invoke(&observe, value, "observe");
                 let reference_value = match invoke(&model, input.clone(), "model") {
                     Ok(value) => value,
                     Err(reason) => return unavailable(reason),
@@ -1875,12 +1885,34 @@ pub(crate) fn apply_testing_histories(
                     provenance.target.clone(),
                 );
                 identity.seed = Some(typed.case.seed);
-                let sample = jet_foundation::TestingComparison::ComparisonSample::new(
+                let mut sample = jet_foundation::TestingComparison::ComparisonSample::new(
                     identity,
-                    reference_observed,
-                    candidate_observed,
-                )
-                .with_replays(reference_replay, candidate_replay);
+                    jet_foundation::TestingComparison::ComparisonObservation::value(
+                        crate::Comptime::JSONInterp::display_datatree(&reference_observed),
+                    ),
+                    jet_foundation::TestingComparison::ComparisonObservation::value(
+                        crate::Comptime::JSONInterp::display_datatree(&candidate_observed),
+                    ),
+                );
+                if matches!(
+                    &relation,
+                    jet_foundation::TestingComparison::ObservationRelation::TypedEquality
+                ) {
+                    sample = sample.with_declared_equal(
+                        crate::Comptime::SyncLite::datatree_equal_unordered(
+                            &reference_observed,
+                            &candidate_observed,
+                        ),
+                    );
+                }
+                let sample = sample.with_replays(
+                    jet_foundation::TestingComparison::ComparisonObservation::value(
+                        crate::Comptime::JSONInterp::display_datatree(&reference_replay),
+                    ),
+                    jet_foundation::TestingComparison::ComparisonObservation::value(
+                        crate::Comptime::JSONInterp::display_datatree(&candidate_replay),
+                    ),
+                );
                 inputs.push(input.clone());
                 reference_values.push(reference_value);
                 candidate_values.push(candidate_value);
