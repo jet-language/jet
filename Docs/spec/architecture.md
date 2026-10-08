@@ -29,6 +29,15 @@ every program, `jet build`, `jet run` and `jet dev` compile through the Rust
 path and execute its result; the evaluator serves comptime only until native
 O0 comptime lands. Both are removed with the rest of Rust (owner directive 19).
 
+Native runtime cutover packaging checks the pinned compiler with the stage0
+front end before declaring the cutover READY, in addition to the narrow trusted
+syntax parse and manifest checks. Record the frontend command's own exit and
+diagnostic summary; syntax-only receipts do not establish borrow correctness.
+A held stage0-only job being READY means it is prepared for scheduling, not
+that its semantic check passed. In Codegen poll and comptime-budget emission,
+`span := builder.current_span` snapshots the source span before write-access to
+`&builder`; `span ::` would retain a builder view across those mutations.
+
 The front end owns language checks and user-facing compiler diagnostics.
 Backends consume checked facts; a back end that rejects checked MIR has hit an
 internal compiler error, not another language checker.
