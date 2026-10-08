@@ -506,7 +506,7 @@ fn sentry_stop(fault: I64, start: I64, alignment: I64, component: I64, fenced: B
     obligation :: services_msg_sentry_valid_ptr()
     gate :: sentry_gate_name()
     detail :: sentry_detail(fault, start, alignment)
-    publish :: scheduler_control_current() != I64{0} && (sync_load(thread_base() + I64{64}) & I64{1}) != I64{0} && !scheduler_cleanup_panic_fatal()
+    publish :: trap_can_publish()
     if publish {
         if {
             (sentry_code(fault) == I64{2}) -> test_scope_record_r0802(trap_word(detail), trap_word(detail + I64{8}))

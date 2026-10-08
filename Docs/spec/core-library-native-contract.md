@@ -27,6 +27,8 @@ process-fatal. Runtime-internal traps (overflow, division by zero, and list
 bounds) in task bodies are not publishable unless compiler-armed.
 The native raw-pointer Deref sentry read uses that same immediate-Propagate
 predicate; it cannot lend publication merely because another block polls.
+Sentry and ordinary traps share `trap_can_publish`; a task body alone is
+not publication authority for an unarmed raw memory fault.
 `jet_rt_poll_call_leave` restores the saved TCB64 word on a returning call.
 If a compiled callback leaves through its `Stopped` exit instead, the task
 runner restores the body word through `scheduler_body_leave(body)` after
