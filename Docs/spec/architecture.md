@@ -46,6 +46,17 @@ that its semantic check passed. In Codegen poll and comptime-budget emission,
 `span := builder.current_span` snapshots the source span before write-access to
 `&builder`; `span ::` would retain a builder view across those mutations.
 
+The compiler frontend receipt must retain the full foreign Cargo diagnostics,
+including cached bridge fingerprint output when an inline-FFI error hides
+Cargo's stderr. `os_syscall_stack4_i64` saves and restores the six argument
+registers just like the loader's `os_syscall` and runtime's `os_syscall_i64`;
+its seven generic inputs then need only the return register and two syscall
+clobbers, rather than sixteen simultaneous general-purpose register slots.
+Before scheduling a cutover job, syntax-check its shell script and check every
+referenced input script/path exists. Outputs created by earlier steps are
+identified separately; the runtime assembly driver is
+`Compiler/JetBackend/Tests/run-runtime.mjs`, not a JetRuntime test script.
+
 The all-parts runtime includes `CAbiTest.rs` once through Codegen's canonical
 prelude; the compiler-call preparation step must not append a second copy.
 Test callbacks transfer owned E4 text errors through the shared carrier `take`

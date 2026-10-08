@@ -366,9 +366,17 @@ fn os_write_word_i64(fd: I64, word: I64, count: I64) -> I64 {
 // order [w0, w1, w2, w3], whose third argument is null, and whose fourth is a4.
 // This permits allocation-free rt_sigprocmask/rt_sigaction even before heap
 // initialization; none of the pointers may escape this synchronous syscall.
+// Preserve the six argument registers, as os_syscall_i64 does, so seven
+// generic inputs do not compete with nine fixed output/clobber registers.
 #[Unsafe("the syscall may read at most four initialized stack words and retains no pointer; all pushes are balanced before return"), FFI(asm)]
 fn os_syscall_stack4_i64(number: I64, a1: I64, w0: I64, w1: I64, w2: I64, w3: I64, a4: I64) -> I64 {
     """
+    push rdi
+    push rsi
+    push rdx
+    push r10
+    push r8
+    push r9
     push {number}
     push {a1}
     push {w0}
@@ -394,7 +402,13 @@ fn os_syscall_stack4_i64(number: I64, a1: I64, w0: I64, w1: I64, w2: I64, w3: I6
     pop r10
     pop r10
     pop r10
+    pop r9
+    pop r8
+    pop r10
+    pop rdx
+    pop rsi
+    pop rdi
     mov rax, rax ; -> return
-    ; clobbers rcx, r11, rdi, rsi, rdx, r8, r9, r10
+    ; clobbers rcx, r11
     """
 }
