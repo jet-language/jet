@@ -142,6 +142,9 @@ field order. Alias, distinct, and unit-family rows do not acquire stored fields.
 An unsupported checked owner reports the member, function, original owner
 kind/rendering, and normalized owner kind/rendering rather than hiding the
 missing semantic row.
+The field-position scanner parenthesizes typed byte literals in conditions
+(`digit < (U8{48})`), so both bootstrap parsers distinguish the literal braces
+from a conditional body without changing unsigned-position semantics.
 Structural Comparable/Equatable records may derive Rust `Eq`, `PartialOrd`,
 and `Ord` only when every field supports that native order. A custom capability
 implementation, floating field, unordered carrier, or native opaque carrier
