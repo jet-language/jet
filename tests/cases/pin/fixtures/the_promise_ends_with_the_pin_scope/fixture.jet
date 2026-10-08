@@ -1,0 +1,19 @@
+
+use core.mem
+
+struct Node {
+    payload: Int
+    hops: Int
+}
+
+fn consume(n: ^Node) -> Int { return n.payload }
+
+fn run() {
+    node := Node{payload: 7, hops: 0}
+    if true {
+        pinned :: mem.pin(&node)
+        pinned.hops += 1
+    }
+    taken :: consume(^node)
+    print("{taken}")
+}
