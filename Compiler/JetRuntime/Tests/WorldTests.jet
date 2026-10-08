@@ -26,7 +26,7 @@
 #Export(c) fn jet_rt_world_fixture_worker(args: I64) -> I64 {
     world :: sync_load(args)
     save :: jet_rt_alloc(I64{32}, I64{8})
-    world_scope_enter(world, save, true)
+    _ := world_scope_enter(world, save, true)
     slot :: sync_park_new()
     world_park(world, sync_load(args + I64{8}), slot)
     sync_park(slot, I64{-1})
@@ -72,7 +72,7 @@
     // A cancelled sleeper removes both retained slots without advancing time.
     save :: jet_rt_alloc(I64{32}, I64{8})
     world_task_spawned(world)
-    world_scope_enter(world, save, true)
+    _ := world_scope_enter(world, save, true)
     slot :: sync_park_new()
     world_park(world, I64{2000000}, slot)
     world_task_finished(world)
@@ -85,5 +85,87 @@
     jet_rt_free(arguments, I64{96}, I64{8})
     jet_rt_free(handles, I64{24}, I64{8})
     jet_rt_free(log, I64{8}, I64{8})
+    I64{0}
+}
+
+fn world_raw_require(value: Bool) {
+    if !value -> jet_rt_unreachable(I64{0}, I64{0})
+}
+
+fn world_raw_expect_stop(control: I64, expected: I64) {
+    stop :: scheduler_control_take_stop(control)
+    world_raw_require(stop != I64{0})
+    world_raw_require(sync_load(stop) == I64{5} && jet_rt_string_eq(sync_load(stop + I64{40}), expected))
+    scheduler_stop_drop(stop)
+    jet_rt_string_drop(expected)
+}
+
+// Physical raw-helper lifecycle, including allocation ownership and stop rails.
+// The C caller provides a real monotonic callback returning controlled 777.
+#Export(c) fn jet_rt_world_raw_fixture(provider: I64) -> I64 {
+    base :: thread_base()
+    world_raw_require(world_current() == I64{0})
+    previous_provider :: rt_time_monotonic_provider_set(provider)
+    previous_flags :: sync_load(base + I64{112})
+    previous_slot :: sync_load(base + I64{120})
+    slot :: sync_park_new()
+    sync_store(base + I64{112}, I64{7})
+    sync_store(base + I64{120}, slot)
+    world :: jet_testing_world_new_raw()
+    world_raw_require(sync_load(world) == I64{1} && jet_world_now(world) == I64{0} && jet_rt_world_monotonic_ns(world) == I64{0})
+    control :: scheduler_control_new()
+    control_save :: jet_rt_alloc(I64{32}, I64{8})
+    scheduler_control_enter(control, control_save)
+    body :: scheduler_body_enter()
+    // Provider TLS registration is warm before measuring scope allocations.
+    jet_rt_program_allocator_configure(I64{1}, I64{0})
+    token := jet_testing_world_enter_raw(world)
+    world_raw_require(token != I64{0} && world_current() == world)
+    world_raw_require(sync_load(token) == I64{0} && sync_load(token + I64{8}) == provider && sync_load(token + I64{16}) == I64{7} && sync_load(token + I64{24}) == slot)
+    world_raw_require(jet_rt_program_allocator_fact(I64{0}) == I64{1} && jet_rt_program_allocator_fact(I64{1}) == I64{32} && jet_rt_program_allocator_fact(I64{2}) == I64{32})
+    world_raw_require(sync_load(base + I64{112}) == I64{0} && sync_load(base + I64{120}) == I64{0})
+    world_raw_require(controlled_monotonic_ns(base + I64{248}) && sync_load(base + I64{248}) == I64{0})
+    installed :: rt_time_monotonic_provider_get()
+    // Nested same-World failure yields NO scope owner; providers stay intact.
+    world_raw_require(jet_testing_world_enter_raw(world) == I64{0})
+    world_raw_require(world_current() == world && rt_time_monotonic_provider_get() == installed)
+    world_raw_expect_stop(control, services_msg_world_nested())
+    world_raw_require(jet_rt_program_allocator_fact(I64{2}) == I64{32})
+    jet_world_wait_idle(world)
+    jet_testing_world_ensure_closed_raw(world)
+    world_raw_require(scheduler_control_status(control) == I64{0})
+    owned :: token
+    token = I64{0}
+    jet_testing_world_exit_raw(owned)
+    world_raw_require(token == I64{0} && world_current() == I64{0} && rt_time_monotonic_provider_get() == provider)
+    world_raw_require(sync_load(base + I64{112}) == I64{7} && sync_load(base + I64{120}) == slot)
+    world_raw_require(jet_rt_program_allocator_fact(I64{2}) == I64{0})
+    jet_rt_program_allocator_restore(I64{0}, I64{0})
+    // A previously pending stop is NOT an enter failure: its token stays valid.
+    _ := scheduler_control_publish(control, scheduler_stop_new(I64{1}, scheduler_text_new(I64{0})))
+    token = jet_testing_world_enter_raw(world)
+    world_raw_require(token != I64{0} && scheduler_control_status(control) == I64{1} && world_current() == world)
+    pending_owned :: token
+    token = I64{0}
+    jet_testing_world_exit_raw(pending_owned)
+    world_raw_require(world_current() == I64{0} && rt_time_monotonic_provider_get() == provider && scheduler_control_status(control) == I64{1})
+    scheduler_control_discard_stop(control)
+    // Closed validation delegates the existing live-task stop, with its bytes.
+    sync_store(world + I64{56}, I64{1})
+    jet_testing_world_ensure_closed_raw(world)
+    world_raw_expect_stop(control, services_msg_world_live())
+    sync_store(world + I64{56}, I64{0})
+    jet_testing_world_ensure_closed_raw(world)
+    world_raw_require(scheduler_control_status(control) == I64{0})
+    world_raw_require(controlled_monotonic_ns(base + I64{248}) && sync_load(base + I64{248}) == I64{777})
+    scheduler_body_leave(body)
+    scheduler_control_leave(control_save)
+    scheduler_control_drop(control)
+    jet_rt_free(control_save, I64{32}, I64{8})
+    sync_store(base + I64{112}, previous_flags)
+    sync_store(base + I64{120}, previous_slot)
+    _ := rt_time_monotonic_provider_set(previous_provider)
+    sync_park_drop(slot)
+    jet_rt_world_drop(world)
     I64{0}
 }

@@ -164,13 +164,14 @@ fn world_increment(address: I64) {
 }
 // Save32: previous World, previous provider, flags, owned parked slot.
 // Enter borrows world from a live caller/worker lease for the whole scope.
-fn world_scope_enter(world: I64, save: I64, task_scope: Bool) {
+// False means a nested-world stop occurred before any save field was written.
+fn world_scope_enter(world: I64, save: I64, task_scope: Bool) -> Bool {
     world_require(world)
     base :: thread_base()
     previous :: sync_load(base + I64{104})
     if (!task_scope && previous != I64{0}) {
         scheduler_fatal(services_msg_world_nested())
-        return
+        return false
     }
     sync_store(save, previous)
     sync_store(save + I64{16}, sync_load(base + I64{112}))
@@ -179,6 +180,7 @@ fn world_scope_enter(world: I64, save: I64, task_scope: Bool) {
     sync_store(save + I64{8}, rt_time_monotonic_provider_set(rt_world_monotonic_provider_address()))
     sync_store(base + I64{112}, if task_scope -> I64{1} else -> I64{0})
     sync_store(base + I64{120}, I64{0})
+    true
 }
 fn world_scope_leave(save: I64) {
     _ := rt_time_monotonic_provider_set(sync_load(save + I64{8}))
@@ -187,8 +189,35 @@ fn world_scope_leave(save: I64) {
     sync_store(base + I64{112}, sync_load(save + I64{16}))
     sync_store(base + I64{120}, sync_load(save + I64{24}))
 }
-#Export(c) fn jet_rt_world_enter(world: I64, save: I64) { world_scope_enter(world, save, false) }
+#Export(c) fn jet_rt_world_enter(world: I64, save: I64) { _ := world_scope_enter(world, save, false) }
 #Export(c) fn jet_rt_world_leave(save: I64) { world_scope_leave(save) }
+
+// Core testing's source Close guard transports the existing World and Save32
+// scope (Scheduler.rs:1203-1218), never a Rust JetWorldScope memory layout.
+// The World stays borrowed until Close; only the scope token owns allocation.
+#Export(c) fn jet_testing_world_new_raw() -> I64 { jet_rt_world_new() }
+
+#Export(c) fn jet_testing_world_enter_raw(world: I64) -> I64 {
+    token :: jet_rt_alloc(I64{32}, I64{8})
+    if !world_scope_enter(world, token, false) {
+        jet_rt_free(token, I64{32}, I64{8})
+        return I64{0}
+    }
+    // A pre-existing stop does not invalidate a successfully saved scope.
+    token
+}
+
+// Source TestingWorldScope.Close clears its token BEFORE transferring it here.
+// Restore the monotonic provider before the previous World, then free once.
+#Export(c) fn jet_testing_world_exit_raw(token: I64) {
+    world_scope_leave(token)
+    jet_rt_free(token, I64{32}, I64{8})
+}
+
+#Export(c) fn jet_testing_world_ensure_closed_raw(world: I64) {
+    jet_rt_world_ensure_closed(world)
+}
+
 fn world_task_spawned(world: I64) {
     if (world == I64{0}) -> return
     sync_mutex_lock(world + I64{8})

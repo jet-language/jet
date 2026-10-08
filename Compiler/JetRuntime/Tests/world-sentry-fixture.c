@@ -1,10 +1,16 @@
 #include <stdint.h>
 #include <string.h>
 #include <stdbool.h>
+#include <stdio.h>
 extern void jet_rt_host_arguments(int64_t, int64_t, int64_t);
 extern int64_t jet_rt_world_getter_fixture(void);
 extern int64_t jet_rt_world_timer_fixture(int64_t);
 extern int64_t jet_rt_world_fixture_worker(int64_t);
+extern int64_t jet_rt_world_raw_fixture(int64_t);
+static int64_t raw_monotonic_provider(int64_t output) {
+    *(int64_t *)(uintptr_t)output = 777;
+    return 1;
+}
 extern int64_t jet_rt_sentry_fixture_run(int64_t);
 extern int64_t jet_rt_sentry_fixture_worker(int64_t);
 extern int64_t jet_rt_sentry_fixture_ledger(void);
@@ -39,6 +45,11 @@ int main(int argc, char **argv, char **envp) {
     }
     if (argc == 2 && strcmp(argv[1], "ledger") == 0)
         return (int)jet_rt_sentry_fixture_ledger();
+    if (argc == 2 && strcmp(argv[1], "world-raw") == 0) {
+        if (jet_rt_world_raw_fixture((int64_t)(uintptr_t)raw_monotonic_provider)) return 6;
+        puts("World raw: scope restored, token freed, nested rejected, pending stop preserved");
+        return 0;
+    }
     if (jet_rt_world_getter_fixture()) return 1;
     if (jet_rt_world_timer_fixture((int64_t)(uintptr_t)jet_rt_world_fixture_worker)) return 2;
     if (jet_rt_sentry_fixture_run((int64_t)(uintptr_t)jet_rt_sentry_fixture_worker)) return 3;

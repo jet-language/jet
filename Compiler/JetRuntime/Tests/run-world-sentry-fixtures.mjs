@@ -43,6 +43,10 @@ if (mode === 'assemble') {
   const imports = command('imports', 'nm', ['-u', '--format=posix', object]).stdout;
   const allowed = new Set(readFileSync(join(root, 'Compiler/JetRuntime/imports.list'), 'utf8').split('\n').map(x => x.trim()).filter(x => x && !x.startsWith('#')));
   for (const line of imports.trim().split('\n').filter(Boolean)) if (!allowed.has(line.split(/\s+/)[0])) throw Error(`unledgered import ${line}`);
+  const symbols = command('exports', 'nm', ['-g', '--defined-only', '--format=posix', object]).stdout;
+  for (const name of ['jet_testing_world_new_raw', 'jet_testing_world_enter_raw', 'jet_testing_world_exit_raw', 'jet_testing_world_ensure_closed_raw']) {
+    if (symbols.split('\n').filter(line => line.startsWith(`${name} T `)).length !== 1) throw Error(`World raw provider ${name} must have one strong Jet definition`);
+  }
   command('disassembly', 'objdump', ['-dr', object]);
 } else if (mode === 'link') {
   const library = process.env.JET_RUNTIME_C_LIB, rlib = process.env.JET_RUNTIME_NATIVE_RLIB;
@@ -54,6 +58,10 @@ if (mode === 'assemble') {
   try {
     const result = command('runtime-witnesses', join(out, 'world-sentry-fixture'), [], { timeout: 300000 });
     if (result.stdout !== '' || result.stderr !== '') throw Error('runtime witnesses changed empty output');
+  } catch (error) { failures.push(error.message); }
+  try {
+    const result = command('world-raw-witnesses', join(out, 'world-sentry-fixture'), ['world-raw'], { timeout: 30000 });
+    if (result.stdout !== 'World raw: scope restored, token freed, nested rejected, pending stop preserved\n' || result.stderr !== '') throw Error('World raw witnesses changed exact output');
   } catch (error) { failures.push(error.message); }
   // Exercise both sides of the real stop boundary. Nonzero 70 is expected,
   // so retain both raw results rather than treating the first stop as failure.

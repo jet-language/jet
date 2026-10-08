@@ -99,6 +99,17 @@ Make mutation visible: a mutating function takes `&T`, while ownership
 transfer takes `^T`. Document the invariant enforced by every `#SingleUse`
 type.
 
+`core.testing.world` owns the existing deterministic World through callback,
+idle wait, and final closed-world validation. Its source `Close` guard owns
+the enter token and clears that token before exit, including a stopped
+callback path. The native helpers in `Compiler/JetRuntime/Source/World.jet`
+box only the existing scope save: previous World, monotonic provider, task
+flags, and parked slot. Exit restores the provider before the previous World
+and frees that save exactly once; it does not drop the borrowed active World
+or create a second World registry. Final validation reuses the scheduler's
+existing live-task check.
+
+
 ## Law 4 — Effects
 
 Declare I/O with the corresponding effect row, such as `-[FS]>`, `-[Net]>`, or
