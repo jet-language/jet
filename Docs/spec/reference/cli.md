@@ -440,6 +440,16 @@ by `node Compiler/Bootstrap/generate-core-sources.mjs`, which
 `node Tools/agent/check-core-surface-ledger.mjs --write` runs and `--check`
 holds current.
 
+Source snapshots enumerate held no-follow directories and read each source or
+foreign cache through one bounded opened file. File identities include the
+opened object's device, inode, length, and exact modification timestamp;
+directory identities use the stable object, not its changing contents. The
+source walk rejects multiply linked files and changed parent/file identities,
+and enforces the same entry, file, depth, and byte bounds as the bootstrap
+authority. Retained convention listings preserve the provider's Unicode-name
+fact, including a literal U+FFFD in a valid UTF-8 name. Load-only queries and
+checked overlay compilation share this snapshot path.
+
 The native bootstrap host also authorizes loose source roots without creating
 a manifest. A missing `package.jet` preserves the compiler's source-root
 namespace semantics; retired manifests, symlinks, and other authority errors

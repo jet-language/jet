@@ -42,6 +42,9 @@ pub JET_CLI_COMPILER_IDENTITY_ENV :: "JET_COMPILER_IDENTITY"
 
 // crates/jet-foundation/src/SHA256.rs `MAX_TREE_DEPTH`.
 JET_CLI_MAX_TREE_DEPTH :: 256
+JET_CLI_MAX_SOURCE_BYTES :: 536870912
+JET_CLI_MAX_SOURCE_TOTAL :: 4294967296
+JET_CLI_MAX_SOURCE_FILES :: 1000000
 
 // A directory holding one of these is its own project, outside the walk
 // (Authority.rs `has_nested_project_boundary`).
@@ -50,11 +53,6 @@ JET_CLI_PROJECT_MARKERS :: [String]{"package.jet", "pkg.jet", "workspace.jet", "
 // Names the source walk never enters or reads (Authority.rs
 // `discover_source_files_from`), besides every name that starts with `.`.
 JET_CLI_SKIPPED_NAMES :: [String]{"target", "build", "node_modules", "bin"}
-
-// What the host's lossy name decoding puts in place of bytes that are not
-// UTF-8 (Rust `to_string_lossy`). Until Core lists raw names (CoreFiles3's
-// `Directory.list`), a retained name holding it counts as non-Unicode.
-JET_CLI_LOSSY_REPLACEMENT :: "�"
 
 // Generated foreign-binding caches and the sidecars each binding may carry
 // (Native.rs `collect_authorized_foreign_cache_files`).
@@ -84,11 +82,14 @@ fn jet_cli_authority_path(root: String, relative: String) -> String Never! {
 }
 
 // Native.rs `identity_key` over Authority.rs `FileIdentity::from_metadata`.
-// Core reports no device or inode number, so every object takes the form Rust
-// gives an object without them: kind, length, and modification time. Core
-// reports the modification time in milliseconds.
+// Directory identity is pinned to the opened object, not its mutable listing.
 fn jet_cli_identity_key(kind: String, stat: cli_files.Stat) -> String Never! {
-    "authority-file-v1;kind={kind};length={stat.size};modified_ns={stat.modified.to_unix_ms() * 1000000};device=none;inode=none"
+    if kind == "directory" -> return "authority-file-v1;kind=directory;length=0;modified_ns=none;device={stat.id.device};inode={stat.id.inode}"
+    modified :: if stat.modified.to_unix_ns() == {
+        .Ok(value) -> if value >= 0 -> "{value}" else -> "none"
+        .Err(_) -> "none"
+    }
+    "authority-file-v1;kind={kind};length={stat.size};modified_ns={modified};device={stat.id.device};inode={stat.id.inode}"
 }
 
 fn jet_cli_is_project_boundary(directory: String) -[FS]> Bool Never! {
@@ -106,10 +107,28 @@ fn jet_cli_is_project_boundary(directory: String) -[FS]> Bool Never! {
 // listing (taken before those filters, empty directories included) goes to
 // `directories` for App convention routing. Returns the problem that stopped
 // the walk.
+struct JetCLISourceBudget {
+    entries: Int
+    bytes: Int
+}
+
 fn jet_cli_walk_sources(root: String, relative: String, depth: Int, files: &[JetDriverAuthorizedSourceFile], directories: &[AppAuthorizedDirectory], retain_directories: Bool) -[FS]> String? Never! {
     directory :: if relative == "" -> root else -> jet_cli_authority_path(root, relative)
-    // Core lists a directory's entries already sorted by name (D-LSDIR1).
-    listing :: cli_files.list_dir(directory) ?? return Val("cannot list `{directory}`: {err}")
+    chain := [cli_files.Directory]{}
+    names := [String]{}
+    initial :: jet_cli_hold_root_chain(directory, &chain, &names) ?? return Val(err)
+    if jet_cli_build_read_chain_current(&chain, &names, initial) == .Err(problem) -> return Val(problem)
+    budget := JetCLISourceBudget{entries: 0, bytes: 0}
+    if jet_cli_walk_held_sources(root, relative, depth, chain[chain.len() - 1], &files, &directories, retain_directories, &budget) == .Val(problem) -> return Val(problem)
+    if jet_cli_build_read_chain_current(&chain, &names, initial) == .Err(problem) -> return Val(problem)
+    None
+}
+
+fn jet_cli_walk_held_sources(root: String, relative: String, depth: Int, held: cli_files.Directory, files: &[JetDriverAuthorizedSourceFile], directories: &[AppAuthorizedDirectory], retain_directories: Bool, budget: &JetCLISourceBudget) -[FS]> String? Never! {
+    directory :: if relative == "" -> root else -> jet_cli_authority_path(root, relative)
+    listing :: held.list() ?? return Val("cannot list `{directory}`: {err}")
+    if listing.len() > JET_CLI_MAX_SOURCE_FILES - budget.entries -> return Val("the source walk exceeds the {JET_CLI_MAX_SOURCE_FILES}-entry bound at `{directory}`")
+    budget.entries += listing.len()
     if retain_directories {
         entries := [AppAuthorizedDirectoryEntry]{}
         loop entry in listing {
@@ -117,7 +136,7 @@ fn jet_cli_walk_sources(root: String, relative: String, depth: Int, files: &[Jet
                 name: entry.name,
                 path: jet_cli_authority_path(directory, entry.name),
                 is_directory: entry.is_dir,
-                name_is_unicode: !entry.name.contains(JET_CLI_LOSSY_REPLACEMENT),
+                name_is_unicode: entry.name_is_unicode,
             })
         }
         &directories.push(AppAuthorizedDirectory{path: directory, entries: entries})
@@ -126,24 +145,70 @@ fn jet_cli_walk_sources(root: String, relative: String, depth: Int, files: &[Jet
         name :: entry.name
         child :: if relative == "" -> name else -> "{relative}/{name}"
         path :: jet_cli_authority_path(root, child)
-        if cli_files.is_symlink(path) {
+        if !entry.name_is_unicode {
+            if name.ends_with(".jet") -> return Val("`{path}` has a non-Unicode source name")
+            next
+        }
+        stat :: held.entry_stat(name) ?? return Val("cannot inspect `{path}`: {err}")
+        if stat.is_symlink {
+            // Reference source discovery skips directory links without reading
+            // them; all other links are refused before name filtering.
             if cli_files.is_dir(path) -> next
             return Val("`{path}` is a symbolic link")
         }
         if name.starts_with(".") || JET_CLI_SKIPPED_NAMES.contains(name) -> next
-        if cli_files.is_dir(path) {
-            if jet_cli_is_project_boundary(path) -> next
+        if stat.is_dir {
+            child_held :: held.open_directory(name) ?? return Val("cannot open `{path}`: {err}")
+            opened :: child_held.stat() ?? return Val("cannot inspect `{path}`: {err}")
+            if opened.id != stat.id -> return Val("`{path}` changed while it was held")
+            if jet_cli_held_project_boundary(child_held) == {
+                .Ok(true) -> { next }
+                .Ok(false) -> {}
+                .Err(problem) -> { return Val(problem) }
+            }
             if depth >= JET_CLI_MAX_TREE_DEPTH -> return Val("the source walk exceeds the {JET_CLI_MAX_TREE_DEPTH}-level depth bound at `{path}`")
-            if jet_cli_walk_sources(root, child, depth + 1, &files, &directories, retain_directories) == .Val(problem) -> return Val(problem)
+            if jet_cli_walk_held_sources(root, child, depth + 1, child_held, &files, &directories, retain_directories, &budget) == .Val(problem) -> return Val(problem)
+            current :: held.entry_stat(name) ?? return Val("cannot inspect `{path}`: {err}")
+            if !current.is_dir || current.is_symlink || current.id != stat.id -> return Val("`{path}` changed while it was held")
             next
         }
         if !name.ends_with(".jet") -> next
-        stat :: cli_files.stat(path) ?? return Val("cannot inspect `{path}`: {err}")
         if !stat.is_file -> return Val("`{path}` is not a regular file")
-        source :: cli_files.read(path) ?? return Val("cannot read `{path}`: {err}")
-        &files.push(JetDriverAuthorizedSourceFile{path: path, relative_path: child, identity: jet_cli_identity_key("file", stat), source: source})
+        if files.len() >= JET_CLI_MAX_SOURCE_FILES -> return Val("the source walk exceeds the {JET_CLI_MAX_SOURCE_FILES}-file bound at `{path}`")
+        if stat.size > JET_CLI_MAX_SOURCE_TOTAL - budget.bytes -> return Val("the source walk exceeds the {JET_CLI_MAX_SOURCE_TOTAL}-byte total bound at `{path}`")
+        read :: jet_cli_read_held_source(held, name, JET_CLI_MAX_SOURCE_BYTES) ?? return Val("cannot read `{path}`: {err}")
+        budget.bytes += read.stat.size
+        if !jet_cli_build_read_same_file(stat, read.stat) -> return Val("`{path}` changed while it was held")
+        source :: String.from_bytes(^read.bytes) ?? return Val("cannot read `{path}`: file is not valid UTF-8")
+        &files.push(JetDriverAuthorizedSourceFile{path: path, relative_path: child, identity: jet_cli_identity_key("file", read.stat), source: source})
     }
     None
+}
+
+fn jet_cli_held_project_boundary(directory: cli_files.Directory) -[FS]> Bool String! {
+    loop marker in JET_CLI_PROJECT_MARKERS {
+        if marker == ".jet/lock" {
+            info :: directory.entry_stat(".jet") ?? {
+                if err == .NotFound(_) -> next
+                return Err(jet_cli_io_error_text(err))
+            }
+            if info.is_symlink -> return Ok(true)
+            if !info.is_dir -> next
+            nested :: directory.open_directory(".jet") ?? return Err(jet_cli_io_error_text(err))
+            lock :: nested.entry_stat("lock") ?? {
+                if err == .NotFound(_) -> next
+                return Err(jet_cli_io_error_text(err))
+            }
+            if lock.is_file || lock.is_symlink -> return Ok(true)
+        } else {
+            info :: directory.entry_stat(marker) ?? {
+                if err == .NotFound(_) -> next
+                return Err(jet_cli_io_error_text(err))
+            }
+            if info.is_file || info.is_symlink -> return Ok(true)
+        }
+    }
+    Ok(false)
 }
 
 // One checked foreign-cache record under `root` (a binding or its sidecar).
@@ -152,8 +217,10 @@ fn jet_cli_cache_file(root: String, relative: String, caches: &[JetDriverAuthori
     stat :: cli_files.stat(path) ?? return Val("cannot inspect `{path}`: {err}")
     if stat.is_symlink -> return Val("`{path}` is a symbolic link")
     if !stat.is_file -> return Val("`{path}` is not a regular file")
-    source :: cli_files.read(path) ?? return Val("cannot read `{path}`: {err}")
-    &caches.push(JetDriverAuthorizedSourceFile{path: path, relative_path: relative, identity: jet_cli_identity_key("file", stat), source: source})
+    read :: jet_cli_read_rooted_source(root, relative, JET_CLI_MAX_SOURCE_BYTES) ?? return Val("cannot read `{path}`: {err}")
+    if !jet_cli_build_read_same_file(stat, read.stat) -> return Val("`{path}` changed while it was held")
+    source :: String.from_bytes(^read.bytes) ?? return Val("cannot read `{path}`: file is not valid UTF-8")
+    &caches.push(JetDriverAuthorizedSourceFile{path: path, relative_path: relative, identity: jet_cli_identity_key("file", read.stat), source: source})
     None
 }
 
@@ -165,16 +232,25 @@ fn jet_cli_foreign_cache_files(root: String, caches: &[JetDriverAuthorizedSource
     loop cache_directory in JET_CLI_FOREIGN_CACHE_DIRECTORIES {
         directory :: jet_cli_authority_path(root, cache_directory)
         if !cli_files.is_dir(directory) -> next
-        names :: cli_files.listdir(directory) ?? return Val("cannot list `{directory}`: {err}")
-        loop name in names {
+        held :: jet_cli_rooted_open_root(directory) ?? return Val(err.message)
+        entries :: held.list() ?? return Val("cannot list `{directory}`: {err}")
+        loop entry in entries {
+            if !entry.name_is_unicode -> next
+            name :: entry.name
             relative :: "{cache_directory}/{name}"
-            if cli_files.is_symlink(jet_cli_authority_path(root, relative)) -> return Val("`{jet_cli_authority_path(root, relative)}` is a symbolic link")
+            stat :: held.entry_stat(name) ?? return Val("cannot inspect `{jet_cli_authority_path(root, relative)}`: {err}")
+            if stat.is_symlink -> return Val("`{jet_cli_authority_path(root, relative)}` is a symbolic link")
             if name.starts_with(".") || !name.ends_with(".jet") || name.ends_with(".adapted.jet") -> next
             &relatives.push(relative)
             stem :: name.slice(0..<(name.len() - 4))
             loop extension in JET_CLI_FOREIGN_CACHE_SIDECARS {
-                sidecar :: "{cache_directory}/{stem}.{extension}"
-                if cli_files.exists(jet_cli_authority_path(root, sidecar)) -> &relatives.push(sidecar)
+                sidecar_name :: "{stem}.{extension}"
+                sidecar :: "{cache_directory}/{sidecar_name}"
+                _ :: held.entry_stat(sidecar_name) ?? {
+                    if err == .NotFound(_) -> next
+                    return Val("cannot inspect `{jet_cli_authority_path(root, sidecar)}`: {err}")
+                }
+                &relatives.push(sidecar)
             }
         }
     }
@@ -345,7 +421,17 @@ impl JetCLIBuildInputs.JetDriverBuildInputs {
 // pinned and recheck its parent entry; no canonicalize-then-read window can
 // follow a replaced intermediate component outside the authorized build root.
 fn jet_cli_build_read_rooted(root: String, relative: String, limit: Int) -[FS.Read]> [U8] String! {
-    if limit < 0 || limit > 536870912 -> return Err("file read bound exceeds the tree hashing bound")
+    read :: jet_cli_read_rooted_source(root, relative, limit)
+    Ok(^read.bytes)
+}
+
+struct JetCLIHeldSource {
+    bytes: [U8]
+    stat: cli_files.Stat
+}
+
+fn jet_cli_read_rooted_source(root: String, relative: String, limit: Int) -[FS.Read]> JetCLIHeldSource String! {
+    if limit < 0 || limit > JET_CLI_MAX_SOURCE_BYTES -> return Err("file read bound exceeds the tree hashing bound")
     if relative.starts_with("/") -> return Err("file authority path must be relative and normalized")
     parts := [String]{}
     loop part in relative.split("/") {
@@ -354,9 +440,25 @@ fn jet_cli_build_read_rooted(root: String, relative: String, limit: Int) -[FS.Re
         loop byte in part.bytes() -> if byte == (U8{0}) -> return Err("file authority path contains NUL")
         &parts.push(part)
     }
-    initial :: if root.starts_with("/") -> "/" else -> "."
-    directories := [cli_files.Directory]{cli_files.open_directory(initial) ?? return Err(jet_cli_io_error_text(err))}
+    directories := [cli_files.Directory]{}
     names := [String]{}
+    initial :: jet_cli_hold_root_chain(root, &directories, &names)
+    if parts.len() == 0 -> return Err("file authority path is empty")
+    loop index in 0..<(parts.len() - 1) {
+        opened :: directories[directories.len() - 1].open_directory(parts[index]) ?? return Err(jet_cli_build_rooted_open_error(err))
+        &directories.push(opened)
+        &names.push(parts[index])
+    }
+    name :: parts[parts.len() - 1]
+    if jet_cli_build_read_chain_current(&directories, &names, initial) == .Err(error) -> return Err(error)
+    read :: jet_cli_read_held_source(directories[directories.len() - 1], name, limit)
+    if jet_cli_build_read_chain_current(&directories, &names, initial) == .Err(_) -> return Err("file changed while it was being read")
+    Ok(read)
+}
+
+fn jet_cli_hold_root_chain(root: String, directories: &[cli_files.Directory], names: &[String]) -[FS.Read]> String String! {
+    initial :: if root.starts_with("/") -> "/" else -> "."
+    &directories.push(cli_files.open_directory(initial) ?? return Err(jet_cli_io_error_text(err)))
     loop part in root.split("/") {
         if part == "" || part == "." -> next
         if part == ".." -> return Err("file authority root must not contain parent components")
@@ -365,19 +467,18 @@ fn jet_cli_build_read_rooted(root: String, relative: String, limit: Int) -[FS.Re
         &directories.push(opened)
         &names.push(part)
     }
-    if parts.len() == 0 -> return Err("file authority path is empty")
-    loop index in 0..<(parts.len() - 1) {
-        opened :: directories[directories.len() - 1].open_directory(parts[index]) ?? return Err(jet_cli_build_rooted_open_error(err))
-        &directories.push(opened)
-        &names.push(parts[index])
-    }
-    name :: parts[parts.len() - 1]
-    reader :: directories[directories.len() - 1].open(name) ?? return Err(jet_cli_build_rooted_open_error(err))
+    Ok(initial)
+}
+
+// Both source snapshots and build input reads consume this same opened file.
+// The stat in the snapshot therefore describes exactly the bytes read.
+fn jet_cli_read_held_source(directory: cli_files.Directory, name: String, limit: Int) -[FS.Read]> JetCLIHeldSource String! {
+    if limit < 0 || limit > JET_CLI_MAX_SOURCE_BYTES -> return Err("file read bound exceeds the tree hashing bound")
+    reader :: directory.open(name) ?? return Err(jet_cli_build_rooted_open_error(err))
     expected :: reader.stat() ?? return Err(jet_cli_io_error_text(err))
     if !expected.is_file -> return Err("file authority input is not a regular file")
     if expected.links != 1 -> return Err("file authority input has multiple hard links")
-    if jet_cli_build_read_chain_current(&directories, &names, initial) == .Err(error) -> return Err(error)
-    current :: directories[directories.len() - 1].entry_stat(name) ?? return Err(jet_cli_io_error_text(err))
+    current :: directory.entry_stat(name) ?? return Err(jet_cli_io_error_text(err))
     if !current.is_file -> return Err("file authority input is not a regular file")
     if current.links != 1 -> return Err("file authority input has multiple hard links")
     if !jet_cli_build_read_same_file(expected, current) -> return Err("file authority input moved while it was held")
@@ -391,12 +492,11 @@ fn jet_cli_build_read_rooted(root: String, relative: String, limit: Int) -[FS.Re
         if bytes.len() > limit -> return Err("file exceeds its read bound")
     }
     after :: reader.stat() ?? return Err(jet_cli_io_error_text(err))
-    path_after :: directories[directories.len() - 1].entry_stat(name) ?? return Err("file changed while it was being read")
-    if jet_cli_build_read_chain_current(&directories, &names, initial) == .Err(_) -> return Err("file changed while it was being read")
+    path_after :: directory.entry_stat(name) ?? return Err("file changed while it was being read")
     if !jet_cli_build_read_same_file(expected, after) || !jet_cli_build_read_same_file(expected, path_after) || after.size != bytes.len() {
         return Err("file changed while it was being read")
     }
-    Ok(bytes)
+    Ok(JetCLIHeldSource{bytes: bytes, stat: expected})
 }
 
 fn jet_cli_build_read_same_file(left: cli_files.Stat, right: cli_files.Stat) -> Bool Never! {
@@ -596,8 +696,10 @@ pub fn jet_cli_prepare_overlays(anchor: String, entry: String, overlays: [JetCLI
             stat :: cli_files.stat(entry_path) ?? return jet_cli_prepare_refused("can't securely read the sources under `{root}`: cannot inspect `{entry_path}`: {err}", "remove the symbolic link or unreadable file, or check a file outside this tree", color)
             if stat.is_symlink -> return jet_cli_prepare_refused("can't securely read the sources under `{root}`: `{entry_path}` is a symbolic link", "remove the symbolic link or unreadable file, or check a file outside this tree", color)
             if stat.is_file {
-                source :: cli_files.read(entry_path) ?? return jet_cli_prepare_refused("can't securely read the sources under `{root}`: cannot read `{entry_path}`: {err}", "remove the symbolic link or unreadable file, or check a file outside this tree", color)
-                files = jet_cli_insert_source(^files, JetDriverAuthorizedSourceFile{path: entry_path, relative_path: relative, identity: jet_cli_identity_key("file", stat), source: source})
+                read :: jet_cli_read_rooted_source(root, relative, JET_CLI_MAX_SOURCE_BYTES) ?? return jet_cli_prepare_refused("can't securely read the sources under `{root}`: cannot read `{entry_path}`: {err}", "remove the symbolic link or unreadable file, or check a file outside this tree", color)
+                if !jet_cli_build_read_same_file(stat, read.stat) -> return jet_cli_prepare_refused("`{entry_path}` changed while it was held", "retry with a stable source tree", color)
+                source :: String.from_bytes(^read.bytes) ?? return jet_cli_prepare_refused("cannot read `{entry_path}`: file is not valid UTF-8", "save the source as UTF-8", color)
+                files = jet_cli_insert_source(^files, JetDriverAuthorizedSourceFile{path: entry_path, relative_path: relative, identity: jet_cli_identity_key("file", read.stat), source: source})
             }
         }
     }
@@ -628,10 +730,22 @@ pub fn jet_cli_prepare_overlays(anchor: String, entry: String, overlays: [JetCLI
     if jet_cli_foreign_cache_files(root, &caches) == .Val(problem) {
         return jet_cli_prepare_refused("can't securely read the foreign bindings under `{root}`: {problem}", "remove the symbolic link or unreadable file, or regenerate the bindings with `jet bind`", color)
     }
+    if caches.len() > JET_CLI_MAX_SOURCE_FILES || files.len() > JET_CLI_MAX_SOURCE_FILES - caches.len() -> return jet_cli_prepare_refused("authorized sources and foreign caches exceed the {JET_CLI_MAX_SOURCE_FILES}-file bound", "reduce the source tree size", color)
+    total_bytes := 0
+    loop file in files {
+        if file.source.len() > JET_CLI_MAX_SOURCE_BYTES || file.source.len() > JET_CLI_MAX_SOURCE_TOTAL - total_bytes -> return jet_cli_prepare_refused("authorized sources exceed the source byte bound", "reduce the source tree size", color)
+        total_bytes += file.source.len()
+    }
+    loop file in caches {
+        if file.source.len() > JET_CLI_MAX_SOURCE_TOTAL - total_bytes -> return jet_cli_prepare_refused("authorized sources and foreign caches exceed the {JET_CLI_MAX_SOURCE_TOTAL}-byte total bound", "reduce the source tree size", color)
+        total_bytes += file.source.len()
+    }
     core_sources :: if jet_cli_core_sources() == {
         .Loaded(sources) -> sources
         .Missing(what, fix) -> { return jet_cli_prepare_refused(what, fix, color) }
     }
+    current_root :: cli_files.stat(root) ?? return jet_cli_prepare_refused("cannot revalidate source root `{root}`: {err}", "retry with a stable source tree", color)
+    if !current_root.is_dir || current_root.is_symlink || current_root.id != root_stat.id -> return jet_cli_prepare_refused("source root `{root}` changed while it was held", "retry with a stable source tree", color)
     root_identity :: jet_cli_identity_key("directory", root_stat)
     snapshot :: JetDriverAuthorizedSourceSnapshot{
         roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{canonical_path: root, identity: root_identity, allow_hardlinks: false, files: files, foreign_cache_files: caches, directories: directories}},
