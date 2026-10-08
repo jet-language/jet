@@ -2040,8 +2040,10 @@ projection. Existing text helpers and allocation are reused.
 recursive original/clone/getter owners. It exercises all 54 exports, all 15 C
 tags, both DNS payloads, optional absence versus present empty/zero, ordered
 equality field mutations, min/max OS codes, clone/getter independence and
-all render branches. `wrong-variant` and `native-overflow` separately require
-the canonical variant and exact-Int range stops. Expected normal output is
+all render branches. `wrong-variant`, `wrong-dns-variant` and `native-overflow`
+separately require canonical variant panic and exact-Int range stops. Both
+wrong-variant accessors call the shared `rt_record_variant_panic` provider from
+`2442d5d80`; compose that dependency before linking this slice. Expected normal output is
 `NetErrors ownership/equality/render OK`. Native execution remains unexercised
 until the integrator composes the fresh green E2 FINAL runtime; light parser
 and strict C11 syntax receipts alone do not establish runtime parity.

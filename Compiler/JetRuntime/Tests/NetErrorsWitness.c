@@ -149,6 +149,9 @@ int main(int argc,char **argv) {
         if(!strcmp(argv[1],"wrong-variant")) {
             int64_t zero=jet_int_owned_from_i64(0); Error *e=jet_rt_record_new_JetNetError_InvalidInput(detail(NULL,NULL,&zero));
             (void)jet_rt_record_get_JetNetError_Other(e);
+        } else if(!strcmp(argv[1],"wrong-dns-variant")) {
+            Text *name=text("example"); DNS *dns=jet_rt_record_new_JetNetDnsError_NotFound(name);
+            (void)jet_rt_record_get_JetNetDnsError_Failure(dns);
         } else if(!strcmp(argv[1],"native-overflow")) {
             int64_t max=jet_int_owned_from_i64(INT64_MAX), one=jet_int_owned_from_i64(1), wide=jet_int_add(max,one);
             (void)detail(NULL,NULL,&wide);

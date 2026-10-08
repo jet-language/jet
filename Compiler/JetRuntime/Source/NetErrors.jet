@@ -66,7 +66,7 @@ fn net_dns_new(ordinal: I64, text: I64) -> I64 {
     result
 }
 fn net_dns_get(value: I64, ordinal: I64) -> I64 {
-    if encoding_word(value + NET_DNS_TAG) != ordinal -> panic("record variant index out of range")
+    if encoding_word(value + NET_DNS_TAG) != ordinal -> rt_record_variant_panic()
     jet_rt_string_clone(encoding_word(value + NET_DNS_TEXT))
 }
 #Export(c) fn jet_rt_record_tag_JetNetDnsError(value: I64) -> I64 { encoding_word(value + NET_DNS_TAG) }
@@ -92,7 +92,7 @@ fn net_error_new(ordinal: I64, payload: I64) -> I64 {
     result
 }
 fn net_error_get(value: I64, ordinal: I64) -> I64 {
-    if encoding_word(value + NET_ERROR_TAG) != ordinal -> panic("record variant index out of range")
+    if encoding_word(value + NET_ERROR_TAG) != ordinal -> rt_record_variant_panic()
     payload :: encoding_word(value + NET_ERROR_PAYLOAD)
     if ordinal == NET_ERROR_DNS -> jet_rt_handle_clone_JetNetDnsError(payload) else -> jet_rt_handle_clone_JetNetErrorDetail(payload)
 }
