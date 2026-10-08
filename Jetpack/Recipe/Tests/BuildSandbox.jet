@@ -1,0 +1,286 @@
+// Ported from tests/build_sandbox.rs. These tests invoke the public recipe API,
+// not an adapter: the caller owns the explicit source/output/tools boundary.
+// PENDING-SEAM(package-tests): Jetpack/Recipe has no package.jet.
+
+fn recipe_sandbox_test_restore_env(name: String, previous: String?) -[Env]> {
+    if previous == {
+        .Val(value) -> sys.set(name, value)
+        .None -> { sys.unset(name) ?? panic("restore environment") }
+    }
+}
+
+fn recipe_sandbox_test_tool(name: String) -[FS, Env]> String {
+    if process.which(name) == {
+        .Val(path) -> files.canonicalize(path) ?? "/bin/{name}"
+        .None -> "/bin/{name}"
+    }
+}
+
+fn recipe_sandbox_test_cmd() -[Env]> String {
+    sys.get("ComSpec") ?? sys.get("COMSPEC") ?? "C:\\Windows\\System32\\cmd.exe"
+}
+
+fn recipe_sandbox_test_ctx(base: String, tool: String, executable: String) -[FS]> RecipeBuildContext {
+    src :: files.join(base, "src")
+    files.create_dir_all(src) ?? panic("source directory")
+    RecipeBuildContext{source_dir: src, output_root: files.join(base, "out"), tools: [String: String]{tool: executable}, fetch_cache: files.join(base, "cache"), offline: false}
+}
+
+fn recipe_sandbox_test_exec(tool: String, args: [String]) -> BuildRecipe {
+    BuildRecipe{steps: [BuildStep]{BuildStep.Exec{tool, args}}}
+}
+
+// Ported from build_sandbox.rs:209-249. No unavailable-backend success alternative.
+#Test("build hook does not inherit host credentials") {
+    if sys.is_windows() -> return
+    base :: recipe_test_scratch("clean-env")
+    ctx :: recipe_sandbox_test_ctx(base, "sh", recipe_sandbox_test_tool("sh"))
+    secret_name :: "JET_TEST_SECRET_DO_NOT_LEAK"
+    previous :: sys.get(secret_name)
+    sys.set(secret_name, "sentinel")
+    recipe :: recipe_sandbox_test_exec("sh", [String]{"-c", "test \"${{JET_TEST_SECRET_DO_NOT_LEAK:-}}\" = \"\" && printf clean > \"$JET_BUILD_OUTPUT/clean\""})
+    result :: recipe_run(recipe, ctx, None)
+    recipe_sandbox_test_restore_env(secret_name, previous)
+    result ?? panic("build hook must run")
+    assert_eq(files.read(files.join(ctx.output_root, "clean")) ?? panic("clean output"), "clean")
+    files.remove_all(base).drop("test cleanup")
+}
+
+// Ported from build_sandbox.rs:252-307. Every original backend receipt predicate retained.
+#Test("native Linux recipe blocks host escape and records backend receipt") {
+    if !sys.is_linux() -> return
+    base :: recipe_test_scratch("native-linux")
+    ctx :: recipe_sandbox_test_ctx(base, "sh", recipe_sandbox_test_tool("sh"))
+    host_marker :: "{base}-host-escape"
+    files.write(files.join(ctx.source_dir, "input"), "source") ?? panic("input")
+    command :: "test ! -e /etc/passwd && if printf hostile > '{host_marker}'; then exit 41; fi && if printf hostile > input; then exit 42; fi && printf ok > \"$JET_BUILD_OUTPUT/ok\""
+    report :: recipe_run(recipe_sandbox_test_exec("sh", [String]{"-c", command}), ctx, None) ?? panic("native Linux sandbox should run recipe")
+    assert_eq(report.sandbox_class, "linux-bwrap")
+    assert(report.sandbox_policy.contains("filesystem=source-readonly,output-private-copy"))
+    assert(report.sandbox_policy.contains("process=private-pid,parent-death"))
+    assert(report.sandbox_policy.contains("network=isolated"))
+    assert_eq(files.read(files.join(ctx.output_root, "ok")) ?? panic("ok output"), "ok")
+    assert(!files.exists(host_marker))
+    assert_eq(files.read(files.join(ctx.source_dir, "input")) ?? panic("source input"), "source")
+    files.remove_all(base).drop("test cleanup")
+}
+
+// Ported from build_sandbox.rs:310-365. This is the logged production executor.
+#Test("logged recipe sandbox blocks host escape") {
+    if !sys.is_linux() -> return
+    base :: recipe_test_scratch("logged-native-linux")
+    ctx :: recipe_sandbox_test_ctx(base, "sh", recipe_sandbox_test_tool("sh"))
+    marker :: "{base}-logged-host-escape"
+    command :: "if printf hostile > '{marker}'; then exit 41; fi && printf ok > \"$JET_BUILD_OUTPUT/ok\""
+    attempt := BuildAttempt.new("logged-sandbox", "logged-sandbox", "test", "recipe", "source")
+    result :: recipe_run_logged(recipe_sandbox_test_exec("sh", [String]{"-c", command}), ctx, None, &attempt)
+    status :: foundation_native_sandbox_status()
+    if status.available {
+        report :: result ?? panic("logged recipe sandbox should run")
+        assert_eq(report.sandbox_class, "linux-bwrap")
+        assert_eq(files.read(files.join(ctx.output_root, "ok")) ?? panic("ok output"), "ok")
+    } else {
+        if result == {
+            .Ok(_) -> panic("unavailable sandbox must refuse")
+            .Err(error) -> assert_eq(error.code, "E1275")
+        }
+    }
+    assert(!files.exists(marker))
+    files.remove_all(base).drop("test cleanup")
+}
+
+// Ported from build_sandbox.rs:376-433. Windows availability is not a skip predicate.
+#Test("Windows AppContainer permits declared output and records receipt") {
+    if !sys.is_windows() -> return
+    base :: recipe_test_scratch("native-windows-output")
+    ctx :: recipe_sandbox_test_ctx(base, "cmd", recipe_sandbox_test_cmd())
+    files.write(files.join(ctx.source_dir, "input"), "source") ?? panic("source input")
+    previous :: sys.get("JET_WINDOWS_HOST_SECRET")
+    sys.set("JET_WINDOWS_HOST_SECRET", "must-not-enter-appcontainer")
+    recipe :: recipe_sandbox_test_exec("cmd", [String]{"/C", "if defined JET_WINDOWS_HOST_SECRET (exit /b 13) else type \"%CD%\\input\" > \"%JET_BUILD_OUTPUT%\\ok\""})
+    result :: recipe_run(recipe, ctx, None)
+    recipe_sandbox_test_restore_env("JET_WINDOWS_HOST_SECRET", previous)
+    report :: result ?? panic("AppContainer build should run")
+    assert_eq(report.sandbox_class, "windows-appcontainer")
+    policies :: [String]{"source-readonly,output-readwrite", "process=appcontainer+job-kill-on-close+active-process=256", "network=denied", "environment=clear+declared", "devices=appcontainer-default-deny", "resources=memory-2GiB+active-process-256"}
+    loop policy in policies {
+        assert(report.sandbox_policy.contains(policy))
+    }
+    assert_eq((files.read(files.join(ctx.output_root, "ok")) ?? panic("ok output")).trim(), "source")
+    files.remove_all(base).drop("test cleanup")
+}
+
+// Ported from build_sandbox.rs:526-569. Reject the directory link before launch.
+#Test("Windows AppContainer rejects a reparse parent before launch") {
+    if !sys.is_windows() -> return
+    assert_eq(env_detect_sandbox().level, SandboxLevel.Strong)
+    base :: recipe_test_scratch("windows-reparse-parent")
+    real :: files.join(base, "real")
+    linked :: files.join(base, "linked")
+    marker :: files.join(base, "launched")
+    files.create_dir_all(files.join(real, "source")) ?? panic("source")
+    files.create_dir_all(files.join(real, "output")) ?? panic("output")
+    files.symlink(real, linked) ?? panic("directory link")
+    command :: "echo launched>\"{marker}\" & if exist \"{marker}\" (exit /b 70) else exit /b 0"
+    result :: foundation_run_native_sandboxed(recipe_sandbox_test_cmd(), [String]{"/C", command}, files.join(linked, "source"), Val(files.join(linked, "output")), [String: String]{}, false)
+    if result == {
+        .Ok(_) -> panic("a reparse-point parent must be rejected before launch")
+        .Err(_) -> {}
+    }
+    assert(!files.exists(marker))
+    files.remove_all(base).drop("test cleanup")
+}
+
+// Ported from build_sandbox.rs:572-612.
+#Test("Windows AppContainer blocks sibling write before publication") {
+    if !sys.is_windows() -> return
+    base :: recipe_test_scratch("native-windows-escape")
+    ctx :: recipe_sandbox_test_ctx(base, "cmd", recipe_sandbox_test_cmd())
+    sibling :: files.join(base, "sibling-escape")
+    recipe :: recipe_sandbox_test_exec("cmd", [String]{"/C", "echo escaped>{sibling}"})
+    assert_eq(recipe_test_run_error(recipe, ctx).code, "E1238")
+    assert(!files.exists(sibling))
+    assert(!files.exists(files.join(ctx.output_root, "ok")))
+    files.remove_all(base).drop("test cleanup")
+}
+
+fn recipe_sandbox_test_unavailable(base: String, ctx: RecipeBuildContext, args: [String], tool: String, marker: String) -[FS, Env, Exec, Net, Rand, Time.Wait]> {
+    previous :: sys.get("JETPACK_FAKE_SANDBOX")
+    sys.set("JETPACK_FAKE_SANDBOX", "unavailable")
+    result :: recipe_run(recipe_sandbox_test_exec(tool, args), ctx, None)
+    recipe_sandbox_test_restore_env("JETPACK_FAKE_SANDBOX", previous)
+    if result == {
+        .Ok(_) -> panic("an unavailable native backend must fail closed")
+        .Err(error) -> assert_eq(error.code, "E1275")
+    }
+    assert(!files.exists(marker))
+    assert(!files.exists(files.join(ctx.output_root, "marker")))
+    files.remove_all(base).drop("test cleanup")
+}
+
+// Ported from build_sandbox.rs:615-661.
+#Test("unavailable Windows AppContainer refuses before recipe tool launch") {
+    if !sys.is_windows() -> return
+    base :: recipe_test_scratch("windows-unavailable")
+    marker :: files.join(base, "host-marker")
+    ctx :: recipe_sandbox_test_ctx(base, "cmd", recipe_sandbox_test_cmd())
+    recipe_sandbox_test_unavailable(base, ctx, [String]{"/C", "echo launched>\"{marker}\" & echo launched>\"%JET_BUILD_OUTPUT%\\marker\""}, "cmd", marker)
+}
+
+// Ported from build_sandbox.rs:855-901.
+#Test("unavailable native backend refuses before recipe tool launch") {
+    if !sys.is_linux() -> return
+    base :: recipe_test_scratch("unavailable")
+    marker :: files.join(base, "host-marker")
+    ctx :: recipe_sandbox_test_ctx(base, "sh", recipe_sandbox_test_tool("sh"))
+    recipe_sandbox_test_unavailable(base, ctx, [String]{"-c", "printf launched > '{marker}'; printf launched > \"$JET_BUILD_OUTPUT/marker\""}, "sh", marker)
+}
+
+// Ported from build_sandbox.rs:904-958. Keep the executor failure, not validation failure.
+#Test("failed recipe preserves previous output and removes partial stage") {
+    if sys.is_windows() -> return
+    base :: recipe_test_scratch("rollback")
+    ctx :: recipe_sandbox_test_ctx(base, "sh", recipe_sandbox_test_tool("sh"))
+    files.create_dir_all(ctx.output_root) ?? panic("output")
+    files.write(files.join(ctx.output_root, "old"), "previous") ?? panic("previous output")
+    recipe :: BuildRecipe{steps: [BuildStep]{
+        BuildStep.Exec{tool: "sh", args: [String]{"-c", "printf replacement > \"$JET_BUILD_OUTPUT/new\""}},
+        BuildStep.Exec{tool: "sh", args: [String]{"-c", "false"}}
+    }}
+    assert_eq(recipe_test_run_error(recipe, ctx).code, "E1238")
+    assert_eq(files.read(files.join(ctx.output_root, "old")) ?? panic("old output"), "previous")
+    assert(!files.exists(files.join(ctx.output_root, "new")))
+    loop entry in files.list_dir(base) ?? panic("list stage parent") {
+        assert(!entry.name.starts_with(".out.jet-stage-"))
+    }
+    files.remove_all(base).drop("test cleanup")
+}
+
+// Ported from build_sandbox.rs:999-1039.
+#Test("macOS native sandbox records Seatbelt policy") {
+    if !sys.is_macos() -> return
+    base :: recipe_test_scratch("macos-receipt")
+    ctx :: recipe_sandbox_test_ctx(base, "bash", "/bin/bash")
+    report :: recipe_run(recipe_sandbox_test_exec("bash", [String]{"-c", "printf ok > \"$JET_BUILD_OUTPUT/ok\""}), ctx, None) ?? panic("native macOS sandbox should run")
+    assert_eq(report.sandbox_class, "macos-seatbelt")
+    policies :: [String]{"filesystem=source-readonly,output-readwrite", "process=declared-tool-and-fork", "network=denied", "environment=clear", "devices=denied", "resources="}
+    loop policy in policies {
+        assert(report.sandbox_policy.contains(policy))
+    }
+    assert_eq(files.read(files.join(ctx.output_root, "ok")) ?? panic("ok output"), "ok")
+    files.remove_all(base).drop("test cleanup")
+}
+
+// Ported from build_sandbox.rs:1042-1082.
+#Test("unavailable macOS backend refuses before recipe tool launch") {
+    if !sys.is_macos() -> return
+    base :: recipe_test_scratch("macos-unavailable")
+    marker :: files.join(base, "host-marker")
+    ctx :: recipe_sandbox_test_ctx(base, "bash", "/bin/bash")
+    recipe_sandbox_test_unavailable(base, ctx, [String]{"-c", "printf launched > '{marker}'"}, "bash", marker)
+}
+
+// Ported from build_sandbox.rs:961-996 (shared attack helper).
+fn recipe_sandbox_test_macos_attack(label: String, template: String) -[FS, Env, Exec, Net, Rand, Time.Wait]> {
+    base :: recipe_test_scratch(label)
+    ctx :: recipe_sandbox_test_ctx(base, "bash", "/bin/bash")
+    host :: files.join(base, "host-secret")
+    outside :: files.join(base, "escape")
+    files.write(host, "host-only") ?? panic("host secret")
+    command :: template.replace("{{HOST}}", host).replace("{{OUTSIDE}}", outside)
+    error :: recipe_test_run_error(recipe_sandbox_test_exec("bash", [String]{"-c", command}), ctx)
+    assert(error.code == "E1237" || error.code == "E1238")
+    assert(!files.exists(outside))
+    files.remove_all(base).drop("test cleanup")
+}
+
+// Ported from build_sandbox.rs:1084-1091.
+#Test("macOS native sandbox blocks host read") {
+    if !sys.is_macos() -> return
+    recipe_sandbox_test_macos_attack("macos-host-read", "if IFS= read -r value < \"{{HOST}}\"; then printf '%s' \"$value\" > \"{{OUTSIDE}}\"; exit 0; else exit 77; fi")
+}
+
+// Ported from build_sandbox.rs:1093-1100.
+#Test("macOS native sandbox blocks sibling write") {
+    if !sys.is_macos() -> return
+    recipe_sandbox_test_macos_attack("macos-sibling-write", "if printf escape > \"{{OUTSIDE}}\"; then exit 0; else exit 77; fi")
+}
+
+// Ported from build_sandbox.rs:1102-1139.
+#Test("macOS native sandbox blocks source symlink escape") {
+    if !sys.is_macos() -> return
+    base :: recipe_test_scratch("macos-symlink")
+    ctx :: recipe_sandbox_test_ctx(base, "bash", "/bin/bash")
+    host :: files.join(base, "host-secret")
+    outside :: files.join(base, "symlink-result")
+    files.write(host, "host-only") ?? panic("host secret")
+    files.symlink(host, files.join(ctx.source_dir, "link")) ?? panic("source symlink")
+    command :: "if IFS= read -r value < \"{ctx.source_dir}/link\"; then printf '%s' \"$value\" > \"{outside}\"; exit 0; else exit 77; fi"
+    error :: recipe_test_run_error(recipe_sandbox_test_exec("bash", [String]{"-c", command}), ctx)
+    assert(error.code == "E1237" || error.code == "E1238")
+    assert(!files.exists(outside))
+    files.remove_all(base).drop("test cleanup")
+}
+
+// Ported from build_sandbox.rs:1142-1160; each attack is a separate recipe invocation.
+#Test("macOS native sandbox blocks undeclared process network and device") {
+    if !sys.is_macos() -> return
+    recipe_sandbox_test_macos_attack("macos-process", "if /bin/echo escaped >/dev/null; then exit 0; else exit 77; fi")
+    recipe_sandbox_test_macos_attack("macos-network", "if exec 3<>/dev/tcp/127.0.0.1/9; then exit 0; else exit 77; fi")
+    recipe_sandbox_test_macos_attack("macos-device", "if test -r /dev/zero; then exit 0; else exit 77; fi")
+}
+
+// Ported from build_sandbox.rs:33-52; retain the original manifest bytes and rewrite count.
+#Test("sandbox target manifest runs") {
+    source :: "\nname: \"mathkit\"\nversion: \"0.1.0\"\npackages: {{\n    mathkit: sandbox {{ export: \"mathkit\" }},\n}}\n"
+    facts :: PackageFacts.parse(source, "package.jet") ?? panic("sandbox target manifest should parse")
+    assert(facts.packages.len() >= 1)
+    assert_eq(facts.packages[0].targets.len(), 1)
+    if facts.packages[0].targets[0] == {
+        .Plugin(export) -> assert_eq(export, Val("mathkit"))
+        else -> panic("sandbox target must be Plugin with mathkit export")
+    }
+    rewritten :: pkg_rewrite_retired_targets(source.replace("sandbox", "plugin"))
+    assert_eq(rewritten.count, 1)
+    assert(rewritten.text.contains("mathkit: sandbox"))
+}
