@@ -152,10 +152,7 @@ pub use Methods::{
     set_trace_id, with_world_rng_provider, HistoryCommandSchema,
 };
 pub use Methods::{apply_seeded_rng_method, apply_seeded_rng_method_with_type};
-// I9: the TIR evaluator in jet-codegen calls this same fake-data kernel, so it
-// must be reachable from outside this crate. One kernel, every tier.
 pub use DataPipeline::DataPipelineState;
-pub use Methods::apply_fake_method;
 #[doc(hidden)]
 pub use Methods::{
     eval_build_time_io, eval_net_fetch, is_tier2_core_call, project_rejection,

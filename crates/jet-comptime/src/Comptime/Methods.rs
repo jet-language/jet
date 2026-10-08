@@ -27,9 +27,6 @@ pub use core_calls::{
 };
 pub(crate) use core_calls::eval_data_describe;
 pub(super) use core_calls::{apply_regex_method, as_float};
-// I9: the MIR evaluator calls this fake-data kernel too, so it
-// must be reachable from outside this crate. One kernel, every tier.
-pub use core_calls::apply_fake_method;
 /// Public host entry for the MIR evaluator (#777).
 pub use core_calls::{
     display_core_pure_value, eval_regex_replace_all_with, jet_crypto_zeroize,
