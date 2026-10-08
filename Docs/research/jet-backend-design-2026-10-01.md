@@ -1584,6 +1584,14 @@ An instrumented raw read skips its native load after a delivered fault and
 leaves its payload unwritten for the MIR Propagate cleanup edge.
 Shield defers cancellation/deadline/interrupt-class stops but never suppresses
 a panic or runtime fault; both Check and Propagate expose those immediately.
+Simple/rich panic and require stops keep their heap-free process-edge writes
+when there is no native body control. With a control, the same generated
+message words build an owned exact report, including source/caret/locals and
+the diagnostic footer, and publish it without a second report copy. Raw
+E3001 message bytes are recorded separately for test expectation matching;
+rendered prose is never searched as the stop message. The composed fixture
+compares process-edge stderr/status with the transported owned report for
+simple/rich/require/equality stops; execution receipts are required for parity.
 Only raw `Ptr<T>` Deref is a can-stop MIR operation: Builder supplies its
 checked operand type to the predicate; Shared/ref Deref emits no Propagate.
 Its Propagate is emitted before the result is bound into a lexical cleanup

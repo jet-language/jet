@@ -935,12 +935,21 @@ fn scheduler_fatal(message: I64) {
 
 fn rt_task_panic_publish(message: I64, length: I64, form: I64) -> Bool {
     if (sync_load(thread_base() + I64{64}) == I64{0} || scheduler_control_current() == I64{0}) -> return false
+    if (form == I64{0}) -> test_scope_record_e3001(message, length)
     text :: scheduler_text_new(length)
     coll_copy(message, sync_load(text), length)
     record :: scheduler_stop_new(I64{5}, text)
     sync_store(record + I64{48}, form)
     _ := scheduler_native_publish(record)
     true
+}
+
+// Takes an owned diagnostic builder. Same publication rail as the borrowed
+// rt_task_panic_publish path, without a second allocation/copy of a report.
+fn rt_task_panic_publish_owned(message: I64, form: I64) {
+    record :: scheduler_stop_new(I64{5}, message)
+    sync_store(record + I64{48}, form)
+    _ := scheduler_native_publish(record)
 }
 
 fn scheduler_thread_detach() {
