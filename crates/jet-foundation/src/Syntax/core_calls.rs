@@ -1591,7 +1591,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 7dc1119363ba140a58f98f0feed53dd43cb5d2ca96a704a8cfc30c9e959ad11c
+// Source SHA-256: 42846784b2f74308804e52b5bc661d01c21687822a89e03df965efef2b7b1cb3
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.crypto", "__jetc_open_directory"),
@@ -3839,6 +3839,7 @@ pub static CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.time", "__controlled_monotonic_ns", "jet_time_raw_controlled_monotonic_ns", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.time", "__world_monotonic_ns", "jet_time_raw_world_monotonic_ns", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.time", "__host_monotonic_ns", "jet_time_raw_host_monotonic_ns", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.time", "__sleep_ns", "jet_std_time_sleep_duration_ns", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.time", "__reject_uncontrolled", "jet_scheduler_world_reject_uncontrolled", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.time", "__zone_env", "jet_time_raw_zone_env", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.time", "__zone_file_bytes", "jet_time_raw_zone_file_bytes", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
