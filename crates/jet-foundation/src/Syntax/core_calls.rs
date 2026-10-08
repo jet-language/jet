@@ -1476,7 +1476,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 5357fbe72d7e95fee13b555c884141456c31c79bacb35143aa7a4d50eb6cd50b
+// Source SHA-256: 39b2925b5907a0b06b3e91ec6d92d9d5dcf52b5587960b22f9f3824077068464
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -1790,8 +1790,8 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.encoding", "__typed_text", "jet_raw_typed_text", true, &[false]),
     CoreCallRecord::new("core.encoding", "__object_entries_view", "jet_raw_object_entries_view", true, &[true]),
     CoreCallRecord::new("core.encoding", "__bytes_view", "jet_raw_bytes_view", true, &[true]),
-    CoreCallRecord::new("core.encoding", "__coerce_now", "jet_raw_json_coerce_now", true, &[]).with_native_int_result(),
-    CoreCallRecord::new("core.encoding", "__coerce_emit", "jet_raw_json_coerce_emit", true, &[true]),
+    CoreCallRecord::new("core.encoding", "__coerce_now", "jet_raw_json_coerce_now", true, &[]).with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.encoding", "__coerce_emit", "jet_raw_json_coerce_emit", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.tasks", "interval", "jet_std::interval", true, &[false], ),
     CoreCallRecord::new("core.tasks", "after", "jet_std::after_value", true, &[false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.tasks", "yield_now", "jet_std::jet_task_yield", true, &[], ),

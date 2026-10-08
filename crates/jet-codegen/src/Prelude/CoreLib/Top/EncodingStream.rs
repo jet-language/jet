@@ -4162,14 +4162,14 @@ fn jet_enc_json_canonical(
 // Compiler-private representation/OS leaves; codec policy is authored in Jet.
 // Existing D-JSON3 host operations only; the walk and audit format are Jet.
 // These preserve the seed's pre-existing hidden Time/IO effects.
-fn jet_raw_json_coerce_now() -> i64 {
+pub(crate) fn jet_raw_json_coerce_now() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as i64
 }
 
-fn jet_raw_json_coerce_emit(line: &String) {
+pub(crate) fn jet_raw_json_coerce_emit(line: &String) {
     eprintln!("{}", line);
 }
 
