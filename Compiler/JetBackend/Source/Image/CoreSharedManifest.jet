@@ -1,7 +1,7 @@
 // Canonical Core source schema. Physical facts come only from ordinary lowering;
 // linked code addresses belong to the separate binding, never to this digest.
 use core.crypto as core_shared_crypto
-use jet_foundation.[MIRFunctionID, MIRProgram, MIRSharedLifetime, MIRType, MIRTypeKind, foundation_json_quote, mir_program_digest, mir_shared_site_getter_symbol]
+use jet_foundation.[MIRFunctionID, MIRProgram, MIRSharedLifetime, MIRType, MIRTypeKind, foundation_json_quote, mir_program_digest, mir_shared_site_getter_symbol, mir_type_display_name, mir_type_from_kind]
 
 pub struct CoreSharedSource {
     pub module_owner_key: String
@@ -33,6 +33,7 @@ pub struct CoreSharedLayoutVariant {
 pub struct CoreSharedNativeLayout {
     pub type_key: String
     pub nominal_key: String
+    pub display_name: String
     pub representation: String
     pub kind: Int
     pub stride: Int
@@ -94,7 +95,7 @@ fn core_shared_layout_visit(program: MIRProgram, state: &CoreSharedLayoutBuilder
     size :: lower_size(program, ty)
     clone :: if lower_lazy_can_clone(program, ty, [String]{}) -> "lazy.clone:{key}" else -> ""
     drop :: if lower_needs_drop(program, ty) -> "lazy.drop:{key}" else -> ""
-    row := CoreSharedNativeLayout{type_key: key, nominal_key: "", representation: "", kind: lower_lazy_kind(program, ty), stride: lower_list_stride(program, ty), payload_size: size.size, align: size.align, box_size: lower_box_size(program, ty), clone_identity: clone, drop_identity: drop, child_keys: [String]{}, members: [CoreSharedLayoutMember]{}, variants: [CoreSharedLayoutVariant]{}}
+    row := CoreSharedNativeLayout{type_key: key, nominal_key: "", display_name: mir_type_display_name(ty), representation: "", kind: lower_lazy_kind(program, ty), stride: lower_list_stride(program, ty), payload_size: size.size, align: size.align, box_size: lower_box_size(program, ty), clone_identity: clone, drop_identity: drop, child_keys: [String]{}, members: [CoreSharedLayoutMember]{}, variants: [CoreSharedLayoutVariant]{}}
     // Reserve before visiting owning/recursive nominal edges.
     &state.layouts.push(row)
     if lower_repr(program, ty) == {
@@ -174,7 +175,7 @@ fn core_shared_layout_json(row: CoreSharedNativeLayout) -> String Never! {
         fields :: loop member in variant.members -> core_shared_member_json(member)
         &variants.push("[{foundation_json_quote(variant.name)},{variant.selector},{variant.box_size},{variant.named},[{fields.join(",")}]]")
     }
-    "[{foundation_json_quote(row.type_key)},{foundation_json_quote(row.nominal_key)},{foundation_json_quote(row.representation)},{row.kind},{row.stride},{row.payload_size},{row.align},{row.box_size},{foundation_json_quote(row.clone_identity)},{foundation_json_quote(row.drop_identity)},[{children.join(",")}],[{members.join(",")}],[{variants.join(",")}]]"
+    "[{foundation_json_quote(row.type_key)},{foundation_json_quote(row.nominal_key)},{foundation_json_quote(row.display_name)},{foundation_json_quote(row.representation)},{row.kind},{row.stride},{row.payload_size},{row.align},{row.box_size},{foundation_json_quote(row.clone_identity)},{foundation_json_quote(row.drop_identity)},[{children.join(",")}],[{members.join(",")}],[{variants.join(",")}]]"
 }
 pub fn core_shared_manifest_body(manifest: CoreSharedManifest) -> String Never! {
     sites := [String]{}
@@ -426,4 +427,13 @@ pub fn core_shared_binding(program: MIRProgram, lowered: LIRLowering, manifest: 
     changed := ~member
     changed.storage_type_key = member.type_key
     assert(core_shared_member_json(changed) != encoded)
+}
+
+#Test("canonical absent-payload display name participates in the sealed row") {
+    ty :: mir_type_from_kind(MIRTypeKind.IntN{signed: false, bits: 8})
+    row :: CoreSharedNativeLayout{type_key: lower_mono_fingerprint(ty), nominal_key: "", display_name: mir_type_display_name(ty), representation: "Word", kind: 3 | (8 << 32), stride: 1, payload_size: 1, align: 1, box_size: 0, clone_identity: "", drop_identity: "", child_keys: [String]{}, members: [CoreSharedLayoutMember]{}, variants: [CoreSharedLayoutVariant]{}}
+    encoded :: core_shared_layout_json(row)
+    changed := ~row
+    changed.display_name = "another display name"
+    assert(core_shared_layout_json(changed) != encoded)
 }

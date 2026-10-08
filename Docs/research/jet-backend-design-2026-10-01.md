@@ -1394,6 +1394,9 @@ not the Map header's stride or a member-offset calculation, spaces entries.
 Each member records both its logical type key and ordinary storage type key.
 A boxed member uses the latter's canonical Option box size, which differs
 from packed element stride (for example U8 stride 1 versus Option<U8> box 8).
+The same row seals its ordinary `mir_type_display_name` once for naming absent
+payloads; codecs must not reconstruct that name from erased List shapes or
+physical fingerprints. This name carries no physical layout facts.
 These facts are sealed in manifest body version 2. They do not change the
 runtime's 72-byte NativeMeta layout or its two child pointers at 56 and 64.
 
