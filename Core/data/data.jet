@@ -2508,3 +2508,144 @@ fn data_query_state_map<T, U>(query: DataQueryState<T>, map: fn(T) -> U DataErro
     assert_eq(data_query_state_collect<Int>(query) ?? panic("rows collect"), rows)
     assert_eq(data_query_state_collect<Int>(query) ?? panic("rows replay"), rows)
 }
+
+struct DataWatchLifecycle {
+    generation: Int
+    active: Bool
+    dirty: Bool
+    error: String
+    fresh_at_ms: Int
+    invalidation_cause: String
+    refreshing: Bool
+    cancelled: Bool
+}
+
+struct DataWatchState<T> {
+    entries: [DataWatchEntry<T>]
+    source_revision: Int
+    mode: String
+    retained_rows: Int
+    recomputations: Int
+    lifecycle: DataWatchLifecycle
+}
+
+struct DataWatchCore<T> {
+    query: DataQueryState<T>
+    source: DataWatchSource<T>
+    state: Shared<DataWatchState<T>>
+}
+
+fn data_watch_lifecycle_active() -> DataWatchLifecycle Never! {
+    DataWatchLifecycle{generation: 1, active: true, dirty: false, error: "", fresh_at_ms: core.mem.__watch_clock(), invalidation_cause: "", refreshing: false, cancelled: false}
+}
+
+fn data_watch_lifecycle_current(lifecycle: DataWatchLifecycle, generation: Int) -> Bool Never! {
+    lifecycle.active && !lifecycle.cancelled && lifecycle.generation == generation
+}
+
+fn data_watch_lifecycle_begin(lifecycle: &DataWatchLifecycle, generation: Int) -> Bool Never! {
+    if !data_watch_lifecycle_current(lifecycle, generation) || lifecycle.refreshing -> return false
+    lifecycle.refreshing = true
+    true
+}
+
+fn data_watch_lifecycle_fail(lifecycle: &DataWatchLifecycle, generation: Int, error: String) Never! {
+    current :: data_watch_lifecycle_current(lifecycle, generation)
+    lifecycle.refreshing = false
+    if !current -> return
+    lifecycle.error = error
+    lifecycle.dirty = true
+}
+
+fn data_watch_lifecycle_publish(lifecycle: &DataWatchLifecycle, generation: Int) Never! {
+    current :: data_watch_lifecycle_current(lifecycle, generation)
+    lifecycle.refreshing = false
+    if !current -> return
+    lifecycle.dirty = false
+    lifecycle.error = ""
+    lifecycle.fresh_at_ms = core.mem.__watch_clock()
+}
+
+fn data_query_state_watch<T>(query: DataQueryState<T>) -> DataWatchCore<T> DataError! {
+    source :: data_query_maintained_source<T>(query) ?? return Err(data_error(.Unsupported, "E2476: watch requires a maintained data.track source", "data.query.watch"))
+    initial :: source.initial() ?? return Err(err)
+    if initial.entries.len() > DataLimits.safe().max_output_rows -> return Err(data_error(.Limit, "maintained result exceeds max_output_rows", "data.query.watch"))
+    recomputations :: if initial.recomputed -> 1 else -> 0
+    Ok(DataWatchCore<T>{query: query, source: source, state: shared DataWatchState<T>{entries: initial.entries, source_revision: initial.revision, mode: initial.mode, retained_rows: initial.retained_rows, recomputations: recomputations, lifecycle: data_watch_lifecycle_active()}})
+}
+
+fn data_watch_core_cancel<T>(watch: DataWatchCore<T>) Never! {
+    state := watch.state.guard_edit()
+    if !state.value.lifecycle.active -> return
+    if state.value.lifecycle.generation < 18446744073709551615 -> state.value.lifecycle.generation = state.value.lifecycle.generation + 1
+    state.value.lifecycle.dirty = true
+    state.value.lifecycle.refreshing = false
+    state.value.lifecycle.cancelled = true
+    state.value.lifecycle.invalidation_cause = "cancelled"
+}
+
+fn data_watch_core_get<T>(watch: DataWatchCore<T>) -> [T] DataError! {
+    if !watch.state.capture().value().lifecycle.active -> return Err(data_error(.State, "watch is cancelled", "data.watch.get"))
+    ticket :: watch.state.capture()
+    current := ticket.value()
+    generation :: current.lifecycle.generation
+    if !data_watch_lifecycle_begin(&current.lifecycle, generation) -> return Err(data_error(.State, "watch is cancelled", "data.watch.get"))
+    update := DataWatchMaterialized<T>?{None}
+    failure := DataError?{None}
+    if watch.source.refresh(current.source_revision, current.entries) == {
+        .Ok(value) -> {
+            if value.entries.len() > DataLimits.safe().max_output_rows -> failure = Val(data_error(.Limit, "maintained result exceeds max_output_rows", "data.watch.get"))
+            else -> update = Val(value)
+        }
+        .Err(error) -> failure = Val(error)
+    }
+    if failure == .Val(error) {
+        data_watch_lifecycle_fail(&current.lifecycle, generation, "{error}")
+        // Failure is best-effort publication, exactly as the native watch.
+        if watch.state.try_replace(^ticket, current) == {
+            .Ok(_) -> {}
+            .Err(_) -> {}
+        }
+        return Err(error)
+    }
+    materialized :: update ?? panic("successful watch refresh has a materialization")
+    data_watch_lifecycle_publish(&current.lifecycle, generation)
+    recomputations := current.recomputations
+    if materialized.recomputed && recomputations < 18446744073709551615 -> recomputations = recomputations + 1
+    next_state :: DataWatchState<T>{entries: materialized.entries, source_revision: materialized.revision, mode: materialized.mode, retained_rows: materialized.retained_rows, recomputations: recomputations, lifecycle: current.lifecycle}
+    if !watch.state.capture().value().lifecycle.active -> return Err(data_error(.State, "watch was cancelled before publication", "data.watch.get"))
+    if watch.state.try_replace(^ticket, next_state) == {
+        .Ok(published) -> {
+            if !published -> return Err(data_error(.StaleRevision, "watch state changed before publication", "data.watch.get"))
+            state :: watch.state.capture().value()
+            rows := [T]{}
+            loop entry in state.entries -> &rows.push(entry.value)
+            Ok(rows)
+        }
+        .Err(.WrongOwner) -> Err(data_error(.WrongOwner, "watch snapshot belongs to another owner", "data.watch.get"))
+        .Err(.GenerationExhausted) -> Err(data_error(.Overflow, "watch publication revision exhausted", "data.watch.get"))
+    }
+}
+
+fn data_watch_status_int(value: Int) -> Int Never! {
+    if value > 9223372036854775807 -> 9223372036854775807 else -> value
+}
+
+fn data_watch_core_status<T>(watch: DataWatchCore<T>) -> DataWatchStatus Never! {
+    state :: watch.state.capture().value()
+    now :: core.mem.__watch_clock()
+    age :: if now < state.lifecycle.fresh_at_ms -> 0 else -> now - state.lifecycle.fresh_at_ms
+    DataWatchStatus{mode: state.mode, revision: data_watch_status_int(state.source_revision), retained_rows: data_watch_status_int(state.retained_rows), recomputations: data_watch_status_int(state.recomputations), active: state.lifecycle.active, generation: data_watch_status_int(state.lifecycle.generation), dirty: state.lifecycle.dirty, error: state.lifecycle.error, freshness_ms: data_watch_status_int(age), invalidation_cause: state.lifecycle.invalidation_cause, refreshing: state.lifecycle.refreshing, cancelled: state.lifecycle.cancelled}
+}
+
+#Test("Watch cancellation retains native lifecycle generation and active status") {
+    lifecycle := DataWatchLifecycle{generation: 1, active: true, dirty: false, error: "", fresh_at_ms: 0, invalidation_cause: "", refreshing: false, cancelled: false}
+    assert(data_watch_lifecycle_begin(&lifecycle, 1))
+    data_watch_lifecycle_fail(&lifecycle, 1, "failed")
+    assert(lifecycle.dirty)
+    assert(!lifecycle.refreshing)
+    assert_eq(lifecycle.error, "failed")
+    lifecycle.cancelled = true
+    assert(!data_watch_lifecycle_begin(&lifecycle, 1))
+    assert_eq(data_watch_status_int(18446744073709551615), 9223372036854775807)
+}
