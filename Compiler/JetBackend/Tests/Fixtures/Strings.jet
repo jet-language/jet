@@ -181,7 +181,7 @@ fn fx_strings_concat() -> MIRProgram Never! {
     empty :: fx_strings_literal(&b, "")
     prefixed :: fx_strings_concat_value(&b, empty, joined)
     suffixed :: fx_strings_concat_value(&b, joined, empty)
-    nul :: fx_strings_literal(&b, "x\x00")
+    nul :: fx_strings_literal(&b, String.from_bytes([U8]{U8{120}, U8{0}}) ?? panic("invalid fixture UTF-8"))
     tail :: fx_strings_literal(&b, "β")
     binary :: fx_strings_concat_value(&b, nul, tail)
     doubled :: fx_strings_concat_value(&b, joined, joined)
