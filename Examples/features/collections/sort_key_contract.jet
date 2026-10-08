@@ -44,6 +44,15 @@ struct NamedKey {
     label: String
 }
 
+struct OwnedNamedKey {
+    team: Int
+    label: String
+}
+
+impl OwnedNamedKey.Close {
+    fn close(^self) { print("close named key: {self.label}") }
+}
+
 fn tuple_key(j: Job) -> (team: Int, cost: Int) KeyError! {
     Ok((team: j.team, cost: j.cost))
 }
@@ -52,10 +61,10 @@ fn named_key(j: Job) -> NamedKey KeyError! {
     Ok(NamedKey{team: j.team, label: j.name})
 }
 
-fn named_key_failure(j: Job, calls: &Int) -> NamedKey KeyError! {
+fn named_key_failure(j: Job, calls: &Int) -> OwnedNamedKey KeyError! {
     calls += 1
     if j.name == "c" -> return Err(KeyError{message: "named key refused c"})
-    Ok(NamedKey{team: j.team, label: "label-{j.name}"})
+    Ok(OwnedNamedKey{team: j.team, label: "label-{j.name}"})
 }
 
 fn large_rows(count: Int, equal: Bool) -> [Job] {
@@ -150,14 +159,19 @@ fn run() {
     &tuples.sort_by((j: Job) -> (team: j.team, cost: j.cost))
     print("tuple key: {show(tuples)}")
     try_tuples := jobs.copy()
-    &try_tuples.sort_by((j: Job) -> tuple_key(j)) ?? panic("tuple key")
+    &try_tuples.sort_by((j: Job) -> tuple_key(j)) ?? assert(false, "tuple key")
     print("fallible tuple key: {show(try_tuples)}")
     named := jobs.copy()
     &named.sort_by((j: Job) -> NamedKey{team: j.team, label: j.name})
     print("named key: {show(named)}")
     try_named := jobs.copy()
-    &try_named.sort_by((j: Job) -> named_key(j)) ?? panic("named key")
+    &try_named.sort_by((j: Job) -> named_key(j)) ?? assert(false, "named key")
     print("fallible named key: {show(try_named)}")
+    // Normal key retirement follows sorted key order; an Err retires only
+    // the initialized prefix in input order.
+    closed := jobs.copy()
+    &closed.sort_by((j: Job) -> OwnedNamedKey{team: j.team, label: "label-{j.name}"})
+    print("owning key close order: {show(closed)}")
     partial := jobs.copy()
     partial_calls := 0
     &partial.sort_by((j: Job) -> named_key_failure(j, &partial_calls)) ?? {

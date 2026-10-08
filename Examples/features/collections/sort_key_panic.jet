@@ -1,0 +1,33 @@
+// #4884: a key Stop drops exactly the initialized prefix of owning inline
+// keys. Later key callbacks do not run and the receiver is not reordered.
+struct Rows {
+    values: [Int]
+}
+
+impl Rows.Close {
+    fn close(^self) { print("receiver: {self.values}") }
+}
+
+struct OwnedKey {
+    rank: Int
+    label: String
+}
+
+impl OwnedKey.Close {
+    fn close(^self) { print("close {self.label}") }
+}
+
+fn key(value: Int, label: String) -> OwnedKey {
+    print("key {value} {label}")
+    if value == 30 {
+        panic("sort key")
+    }
+    OwnedKey{rank: value, label: "key-{value}"}
+}
+
+fn run() {
+    rows := Rows{values: [50, 40, 30, 20, 10]}
+    label :: "owned key capture {rows.values.len()}"
+    &rows.values.sort_by((value: Int) -> key(value, label))
+    print("unreachable")
+}
