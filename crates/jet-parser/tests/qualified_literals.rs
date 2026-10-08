@@ -9,7 +9,7 @@ fn run() {
     nested :: Outer.Record<List<Int>>{value: 2}
     plain :: testing.TypedHistoryCase{value: 3}
     call :: testing.decode<Int>(raw)
-    comparison :: a < B < (c)
+    comparison :: a < b < (c)
 }
 "#;
     let (tokens, diagnostics) = Lexer::lex(source);
