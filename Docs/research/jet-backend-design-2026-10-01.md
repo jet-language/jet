@@ -1540,6 +1540,10 @@ budget rail; they are absent from the production runtime. Raw witnesses check
 fresh and partially consumed step-by hints and the Float average sign bit.
 The shared native goldens require strict-zip task cancellation and the exact
 `-0.0` average output, not merely numeric equality with zero.
+Bits extent at the maximum I64 index stops on overflow: the checked seed
+profile explicitly retains overflow checks (`Compiler/Bootstrap/Tests.rs:68-83`);
+the unchecked `opt-level=1` pack build (`Tools/packaging/prebuild-runtime.sh:70-71`)
+is not the semantic oracle for the plain `v + 1` in `JetBitSet::len`.
 
 Lazy cursor initialization and advancement may invoke user callbacks. Both
 are can-stop MIR operations: their results are usable only on the immediately
