@@ -2016,3 +2016,36 @@ is `EncodingErrors ownership/equality/render OK`. Native execution remains
 unexercised until the integrator composes the fresh green E2 FINAL runtime;
 parser and strict C11 syntax receipts alone do not establish runtime parity.
 
+### Native XML diagnostic ownership boundary
+
+`JetBackend/Source/XMLABI.jet` defines private native Error72, RenderOptions16
+and enum8 carriers. XMLReason, XMLEncoding and XMLLexicalPolicy follow Rust
+declaration-order tags (`CommonTypes.rs:222-236`, `XmlOptions.rs:52-64`).
+They never accept a Rust allocation or rely on Rust field offsets.
+
+`CAbiRoutes.rs:12198-12237` governs XMLError ownership: nullable optional Int
+inputs borrow a word; the constructor checks the kind ordinal and converts
+present exact Ints to raw i64 before allocation. Getters return fresh exact
+owners only when present and leave absent output slots untouched. Both Text
+inputs and getters clone E4 owners; clone duplicates them, and drop releases
+each text and shell once. Equality follows `CommonTypes.rs:238-246`, ignoring
+unused raw words in absent location fields. XMLRenderOptions follows
+`CAbiRoutes.rs:12292-12307`, checking both ordinals before allocation.
+
+All three XMLError render exports follow `CommonTypes.rs:248-279`, which
+delegates to `Core/EncodingError.rs:8-28`. EncodingError and XMLError share
+`encoding_error_render_tail`: callers stream their format/kind labels into
+one existing text builder, then the shared ladder emits byte offset,
+independent optional line/column, nonempty path and reason. Absent XML byte
+offset renders zero, but remains distinct from present zero in equality.
+No temporary label owners or alternate formatter are needed.
+
+`JetRuntime/Tests/XMLGlueWitness.c` is a real-object client requiring
+`--wrap=jet_rt_free`. It asserts interception and exact-once frees of shells,
+text headers and buffers, clone/getter independence, every equality field,
+absent versus present zero, both i64 edges and every kind/location render
+combination. Its `kind-range`, `encoding-range`, `lexical-range` and
+`native-overflow` modes require the canonical native range diagnostic.
+Native execution and caller/MIR/layout admission remain unexercised; parser
+and strict C11 syntax checks alone do not establish runtime parity.
+

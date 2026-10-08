@@ -163,32 +163,40 @@ fn encoding_kind_label(target: I64, ordinal: I64) {
         else -> rt_text_push_word(target, I64{435744240723}, I64{5}) // State; ctor checked tag
     }
 }
+// One ladder for encoding-family diagnostics. The caller streams format/kind
+// labels into target first, avoiding temporary text owners for static labels.
+// Core/EncodingError.rs:8-28; optional fields are independent; cause is omitted.
+fn encoding_error_render_tail(target: I64, offset: I64, line_present: I64, line: I64, column_present: I64, column: I64, path: I64, reason: I64) -> I64 {
+    rt_text_push_word(target, I64{7310601557487411488}, I64{8}) // " at byte"
+    rt_text_push_word(target, I64{32}, I64{1})
+    rt_text_push_number(target, offset)
+    if (line_present != I64{0}) {
+        rt_text_push_word(target, I64{9118724144242732}, I64{7}) // ", line "
+        rt_text_push_number(target, line)
+    }
+    if (column_present != I64{0}) {
+        rt_text_push_word(target, I64{7957145225219219500}, I64{8}) // ", column"
+        rt_text_push_word(target, I64{32}, I64{1})
+        rt_text_push_number(target, column)
+    }
+    if (rt_text_len(path) != I64{0}) {
+        rt_text_push_word(target, I64{9122048314974252}, I64{7}) // ", path "
+        jet_rt_string_builder_push(target, path)
+    }
+    rt_text_push_word(target, I64{8250}, I64{2}) // ": "
+    jet_rt_string_builder_push(target, reason)
+    jet_rt_string_builder_finish(target)
+}
 #Export(c) fn jet_rt_handle_show_EncodingError(value: I64) -> I64 {
     // EncodingError.rs8-28: no cause text, independent line/column, omit empty path.
     target :: jet_rt_string_builder_new()
     encoding_format_label(target, encoding_word(value + ENCODING_ERROR_FORMAT))
     rt_text_push_word(target, I64{32}, I64{1})
     encoding_kind_label(target, encoding_word(value + ENCODING_ERROR_KIND))
-    rt_text_push_word(target, I64{7310601557487411488}, I64{8}) // " at byte"
-    rt_text_push_word(target, I64{32}, I64{1})
-    rt_text_push_number(target, encoding_word(value + ENCODING_ERROR_OFFSET))
-    if (encoding_word(value + ENCODING_ERROR_LINE_PRESENT) != I64{0}) {
-        rt_text_push_word(target, I64{9118724144242732}, I64{7}) // ", line "
-        rt_text_push_number(target, encoding_word(value + ENCODING_ERROR_LINE))
-    }
-    if (encoding_word(value + ENCODING_ERROR_COLUMN_PRESENT) != I64{0}) {
-        rt_text_push_word(target, I64{7957145225219219500}, I64{8}) // ", column"
-        rt_text_push_word(target, I64{32}, I64{1})
-        rt_text_push_number(target, encoding_word(value + ENCODING_ERROR_COLUMN))
-    }
-    path :: encoding_word(value + ENCODING_ERROR_PATH)
-    if (rt_text_len(path) != I64{0}) {
-        rt_text_push_word(target, I64{9122048314974252}, I64{7}) // ", path "
-        jet_rt_string_builder_push(target, path)
-    }
-    rt_text_push_word(target, I64{8250}, I64{2}) // ": "
-    jet_rt_string_builder_push(target, encoding_word(value + ENCODING_ERROR_REASON))
-    jet_rt_string_builder_finish(target)
+    encoding_error_render_tail(target, encoding_word(value + ENCODING_ERROR_OFFSET),
+        encoding_word(value + ENCODING_ERROR_LINE_PRESENT), encoding_word(value + ENCODING_ERROR_LINE),
+        encoding_word(value + ENCODING_ERROR_COLUMN_PRESENT), encoding_word(value + ENCODING_ERROR_COLUMN),
+        encoding_word(value + ENCODING_ERROR_PATH), encoding_word(value + ENCODING_ERROR_REASON))
 }
 #Export(c) fn jet_rt_handle_display_EncodingError(value: I64) -> I64 { jet_rt_handle_show_EncodingError(value) }
 #Export(c) fn jet_rt_handle_debug_EncodingError(value: I64) -> I64 { jet_rt_handle_show_EncodingError(value) }
