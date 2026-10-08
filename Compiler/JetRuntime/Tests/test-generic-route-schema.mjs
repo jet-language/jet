@@ -404,6 +404,7 @@ pub mod shadow {
   }
   put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: F64) -> F64 { value }\n" + weakDefinitions + physicalDefinitions.replace("a1: I64", "a1: F64"));
   assert.match(run().stderr, /owner_pin.*does not match C ABI/);
+  put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: F64) -> F64 { value }\n" + weakDefinitions);
   put("Compiler/JetRuntime/exports.list", ["jet_fixture_scalar", ...weakNames].join("\n") + "\n");
   success(run());
   assert.ok(!readFileSync(join(fixture, "Compiler/JetBackend/Source/Lower/RuntimeRoutes.jet"), "utf8").includes('export: "jet_rt_shared_owner_pin"'));
