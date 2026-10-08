@@ -110,11 +110,118 @@ runtime's ABI, error behavior, or observable output. Report an unsupported
 construct before producing an executable; do not marshal an unproved carrier
 or run a backend-local approximation. A focused same-program regression must
 exercise either the shared meaning or that explicit refusal.
+
+Pattern adapters preserve typed captures, binary bit widths and byte order, and
+advance a cursor or reader only according to the canonical scan's success and
+failure contract. A sequence of scalar reader calls is not a replacement for a
+pattern scan. When that scan/capture boundary is unavailable, lowering refuses
+the semantic operation rather than emitting a partial parser.
+
 Module scalar storage has one local data cell per checked declaration. Global
 reads and writes through static-rooted places address that same cell, including
 when the shared object writer packages a runtime library. Atomic values still
 require their typed allocation, ordering and ownership contract; a raw machine
 compare-and-swap primitive does not establish that contract.
+
+Duration arithmetic marshals the canonical nanosecond carrier into the shared
+saturated fixed-width arithmetic and duration constructors. It must preserve
+the I64 endpoints; negating the right operand and subtracting is not a valid
+addition adapter at the negative endpoint. Intermediate exact-Int owners are
+released after conversion, and the resulting duration keeps its canonical
+runtime ownership.
+The route is explicitly refused until the canonical `jet_rt_int_drop` lifetime
+ABI is advertised in the generated route manifest (E2 after L4a). The E1/E4
+fixture asserts that named refusal rather than accepting a leaked exact-Int
+temporary. Once the provider is present, the same fixture requires its unchanged
+exact runtime output. No Rust seed release body may be introduced as a substitute.
+
+Moving an owned inline payload out of an Option, Result, or enum transfers
+its bytes into the receiver's storage before the wrapper is released. A
+loop-carried receiver must never retain an address into that released wrapper.
+The transferred member is cleared in the wrapper so its drop releases only
+members that remain owned there; borrowed projections continue to borrow.
+
+At native C byte boundaries, `List<U8>` uses packed one-byte elements.
+`jet_rt_bytes_pack` borrows that header and returns an independently owned
+packed byte buffer; `jet_rt_bytes_free` releases it with its original length
+and alignment one. Empty packed bytes use the non-null dangling pointer `1`
+and require no deallocation. `jet_rt_bytes_unpack` copies C bytes into a fresh
+owned native list header and packed byte buffer allocated at alignment eight;
+the empty header has all three words zero. Native list destruction releases
+`capacity` bytes at that same alignment. Neither conversion transfers or frees
+its borrowed input.
+
+Unit conversions retain the checked canonical Option/Result carrier and call
+the shared conversion kernel through its declared native route. Absence and
+rounding failure are not replaced with a machine Float approximation; a
+missing conversion route is an explicit refusal.
+
+A checked literal hook is an ordinary reachable Jet function. Float hooks
+receive the source spelling as text, preserving digits, trailing zeros and
+exponents rather than passing a rounded Float to the hook.
+
+`Option.or_err` calls the ordinary canonical Jet optional-to-failure body.
+The receiver and reason expression are evaluated once, in that order, even
+when the payload is present. The method retains its Read ownership contract:
+the existing CopySEM materializes the receiver before the reason, and the
+source body owns those evaluated values without moving the user's place or
+adding a Clone bound. Presence moves that materialized payload into `Ok`;
+absence constructs the default error from the reason. The body returns the
+joined carrier without recording a new Core error origin; the first user
+propagation site retains its ordinary journey behavior. There is no separate
+native runtime route or backend-local error policy.
+
+The absent-trigger golden also asserts the loaded source inventory: the Rust
+feed checks all artifact source files before reachability pruning, and the Jet
+feed checks the loader's exact generated Core source closure. An unnecessary
+`core.prelude` load is a test failure even if its functions would be pruned.
+The front-feed differential includes failing goldens using the same suffix
+rules as the native golden harness: `.err.out` pins stderr and requires exit
+70 or 1; successful `.out` cases require exit 0 and may additionally pin
+`.stderr.out`. Both feeds must still match each other's exit status, stdout,
+and stderr byte for byte, including on failure.
+
+Native sentry scopes and unsafe function gates save the canonical per-thread
+gate/fence state in caller-owned frame storage. Normal and stopped cleanup
+edges restore that state exactly once, including nested policy scopes; file
+and reason strings remain borrowed module literals at the ABI boundary. The
+temporary Rust sentry marshal seam retires with the Jet sentry/TLS layer.
+
+Native List clear drops only the owned live elements in index order and resets
+length without releasing capacity or the buffer. Repeated empty clear and a
+subsequent push retain normal value semantics, and frozen borrowed trees are
+not released as owned elements.
+
+Native List `try_collect` adapts checked List storage through the same typed
+iterator source boundary as `.lazy()`: moved input transfers ownership and
+borrowed input snapshots before collection. An eager `flat_map` callback
+borrows each element; checked MIR materializes any owned aggregate return
+with its typed clone glue. Dropping that temporary must not retire the source.
+The `flat-map-owned` and `list-try-collect` lowering fixtures require exact
+output plus linker-observed Jet allocator balance after source/result cleanup.
+
+Lowering witnesses that call canonical kernels absent from the minimal
+freestanding runtime emit relocatable objects and memory images, not a partial
+static executable. Their runtime-only marker requires a real compiled runtime
+library and the unchanged exact stdout/exit comparison; a missing library is
+a failed witness, never a successful skip.
+An epoch-dependent `expect-requires-route` marker records a named refusal only
+when the generated route manifest lacks the required provider; its lowering
+unit witness must assert the exact refusal. Presence of the route makes the
+runtime output comparison mandatory, not optional.
+
+Lowered function boxes use one canonical header: an aligned reference-count
+word at offset 0, an entry pointer at 8, and a release-helper pointer at 16.
+Concurrent `Shared` read guards may clone the same function payload; a read
+guard does not make a plain load/add/store reference count safe. Clone glue
+calls the Jet-owned `jet_rt_native_closure_retain`, and every retirement calls
+`jet_rt_native_closure_unref`. These helpers use the audited locked
+compare-exchange leaf; retain rejects count overflow, and only a successful
+last retirement returns true. Its full barrier acquires prior owners' writes
+before the lowering invokes the existing release helper exactly once.
+There is no Rust helper seed or second closure carrier. Admission requires a
+fresh pack containing these exports together with their lowering callers,
+and an N-thread Shared-held closure witness with allocator balance.
 ## One meaning across execution tiers
 
 AOT, interpreter/comptime evaluation, and web execution are

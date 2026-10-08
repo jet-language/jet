@@ -21,21 +21,24 @@ export function frontReceipt(text, run) {
   return null;
 }
 
-export function runJetFront({ candidate, file, root, cwd, prefix, receipt, pack, store }) {
-  if (!pack || !existsSync(pack)) throw new Error('--front jet requires JET_RUNTIME_PACK from the candidate tree');
+function runJetFactory({ candidate, file, root, cwd, prefix, receipt, store, native, mir, pack }) {
   if (!existsSync(candidate)) throw new Error(`candidate jetc0 missing: ${candidate}`);
   const packageFile = join(root, 'package.jet');
   if (!existsSync(packageFile)) writeFileSync(packageFile, 'name: "native_front_case"\nversion: "0.0.1"\nedition: "2028"\n');
-  for (const suffix of ['.o', '.exe', '.lir', '.issues', '.pack-issues']) rmSync(prefix + suffix, { force: true });
+  // An inherited observation/output hook must never change the requested feed.
+  const env = { ...process.env };
+  delete env.JET_FRONT_NATIVE_OUTPUT;
+  delete env.JET_FRONT_MIR_OUTPUT;
+  if (native) { env.JET_FRONT_NATIVE_OUTPUT = resolve(prefix); env.JET_RUNTIME_PACK = resolve(pack); }
+  if (mir) env.JET_FRONT_MIR_OUTPUT = resolve(mir);
   rmSync(receipt, { force: true });
   const run = spawnSync(candidate, [], {
     cwd,
     env: {
-      ...process.env,
+      ...env,
       JET_BOOTSTRAP_MODE: 'factory', JET_BOOTSTRAP_FACTORY_TIER: 'aot',
       JET_BOOTSTRAP_SOURCE_ROOT: resolve(root), JET_BOOTSTRAP_ENTRY: relative(root, file),
       JET_BOOTSTRAP_OUTPUT: `${prefix}.unused.output`, JET_BOOTSTRAP_RECEIPT: resolve(receipt),
-      JET_FRONT_NATIVE_OUTPUT: resolve(prefix), JET_RUNTIME_PACK: resolve(pack),
       JET_STORE_DIR: resolve(store), RUST_MIN_STACK: '8388608',
     },
     encoding: 'utf8', timeout: Number(process.env.JET_FRONT_TIMEOUT_MS ?? 120000), maxBuffer: 1 << 27,
@@ -44,8 +47,24 @@ export function runJetFront({ candidate, file, root, cwd, prefix, receipt, pack,
   const text = existsSync(receipt) ? readFileSync(receipt, 'utf8') : '';
   const problem = frontReceipt(text, run);
   if (problem) return problem;
+  return null;
+}
+
+export function runJetFront(options) {
+  if (!options.pack || !existsSync(options.pack)) throw new Error('--front jet requires JET_RUNTIME_PACK from the candidate tree');
+  for (const suffix of ['.o', '.exe', '.lir', '.issues', '.pack-issues']) rmSync(options.prefix + suffix, { force: true });
+  const problem = runJetFactory({ ...options, native: true });
+  if (problem) return problem;
+  const { prefix } = options;
   if (!existsSync(`${prefix}.exe`) && !existsSync(`${prefix}.issues`) && !existsSync(`${prefix}.pack-issues`)) {
     return { verdict: 'no-mir', detail: 'candidate has no JET_FRONT_NATIVE_OUTPUT entry (rebuild it from this tree)' };
   }
   return null;
+}
+
+export function runJetMir(options) {
+  rmSync(options.mir, { force: true });
+  const problem = runJetFactory(options);
+  if (problem) return problem;
+  return existsSync(options.mir) ? null : { verdict: 'no-mir', detail: 'candidate has no JET_FRONT_MIR_OUTPUT observer (rebuild it from this tree)' };
 }

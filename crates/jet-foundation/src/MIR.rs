@@ -8783,7 +8783,8 @@ pub fn mir_operation_can_stop(
         return true;
     }
     match operation {
-        MirOperation::Call { .. } | MirOperation::IndirectCall { .. } | MirOperation::CoreCall { .. } => true,
+        MirOperation::Call { .. } | MirOperation::IndirectCall { .. } | MirOperation::CoreCall { .. }
+            | MirOperation::ScopeExit { .. } => true,
         MirOperation::Semantic(semantic) => matches!(
             semantic,
             MirSemanticOp::ClosureMethod { .. }
@@ -8794,6 +8795,7 @@ pub fn mir_operation_can_stop(
                 | MirSemanticOp::PolicyFunction { .. }
                 | MirSemanticOp::InterruptFunction { .. }
                 | MirSemanticOp::HostCall { .. }
+                | MirSemanticOp::RequireStop { .. }
         ),
         _ => false,
     }

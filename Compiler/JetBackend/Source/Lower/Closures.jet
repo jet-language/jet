@@ -123,7 +123,7 @@ fn lower_capture(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunct
     address :: lower_capture_address(p, c, &m, &f, slot) ?? return
     if lower_is_inline(p, ty) -> return lower_alias(c, &f, instruction, address)
     dst :: lower_result(p, c, &m, &f, instruction) ?? return
-    lower_emit(&f, LIRInst.Load{dst: dst, base: address, offset: 0})
+    lower_read_into(p, &f, dst, address, 0, ty)
 }
 
 // The memory cell of every cell slot, made at function entry so it
@@ -183,7 +183,7 @@ fn lower_slot_root(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFun
     if lower_is_inline(p, c.slots[slot].ty) -> return Val(cell)
     layout :: lower_repr_layout(lower_repr(p, c.slots[slot].ty)) ?? return None
     value :: lower_new_value(&f, layout, LIRDrop.Trivial, c.slots[slot].ty.identity)
-    lower_emit(&f, LIRInst.Load{dst: value, base: cell, offset: 0})
+    lower_read_into(p, &f, value, cell, 0, c.slots[slot].ty)
     Val(value)
 }
 
@@ -402,25 +402,16 @@ fn lower_closure_drop_glue(m: &LowerModule, glue: LowerGlue, run: Bool) -> LIRFu
     lir_builder_finish(f.builder)
 }
 
-// One reference fewer to the non-null closure box `boxed`; the last runs its
-// release helper. Continues in a new open block.
+// Atomically retire one reference to the non-null closure box `boxed`.
+// Only the last owner runs its release helper, after the runtime CAS acquire.
+// Shared read guards can clone the same function payload concurrently.
 fn lower_closure_box_unref(m: &LowerModule, f: &LowerFunction, boxed: LIRValueID) Never! {
     signature :: lower_signature(&m, [LIRLayout]{lir_layout_pointer()}, None)
-    count :: lower_word(&f)
-    lower_emit(&f, LIRInst.Load{dst: count, base: boxed, offset: 0})
-    rest :: lower_word(&f)
-    one :: lower_const(&f, 1)
-    lower_emit(&f, LIRInst.Binary{dst: rest, op: LIRBinaryOp.Sub, left: count, right: one})
     last :: lower_flag(&f)
-    zero :: lower_const(&f, 0)
-    lower_emit(&f, LIRInst.Compare{dst: last, condition: LIRCondition.Eq, left: rest, right: zero})
+    lower_call_runtime(&m, &f, "jet_rt_native_closure_unref", [LIRValueID]{boxed}, Val(last))
     release :: lower_new_block(&f)
-    keep :: lower_new_block(&f)
     after :: lower_new_block(&f)
-    lower_seal(&f, LIRTerminator.Branch{condition: last, then_target: lower_target(release, [LIRValueID]{}), else_target: lower_target(keep, [LIRValueID]{})})
-    lower_start(&f, keep, [LIRValueID]{})
-    lower_emit(&f, LIRInst.Store{base: boxed, offset: 0, value: rest})
-    lower_seal(&f, LIRTerminator.Jump{target: lower_target(after, [LIRValueID]{})})
+    lower_seal(&f, LIRTerminator.Branch{condition: last, then_target: lower_target(release, [LIRValueID]{}), else_target: lower_target(after, [LIRValueID]{})})
     lower_start(&f, release, [LIRValueID]{})
     helper :: lower_pointer(&f)
     lower_emit(&f, LIRInst.Load{dst: helper, base: boxed, offset: 16})
@@ -429,19 +420,14 @@ fn lower_closure_box_unref(m: &LowerModule, f: &LowerFunction, boxed: LIRValueID
     lower_start(&f, after, [LIRValueID]{})
 }
 
-// Clone glue of a function value: one reference more to the same box.
+// Clone glue: atomically publish one more reference to the same live box.
 fn lower_closure_clone_glue(m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     signature :: lower_signature(&m, [LIRLayout]{lir_layout_pointer()}, Val(lir_layout_pointer()))
     f := lower_new_function(glue.id, "clone.{glue.key}", signature, MIRBlockID{value: U64.MAX})
     boxed :: lower_pointer(&f)
     entry :: lower_new_block(&f)
     lower_start(&f, entry, [LIRValueID]{boxed})
-    count :: lower_word(&f)
-    lower_emit(&f, LIRInst.Load{dst: count, base: boxed, offset: 0})
-    more :: lower_word(&f)
-    one :: lower_const(&f, 1)
-    lower_emit(&f, LIRInst.Binary{dst: more, op: LIRBinaryOp.Add, left: count, right: one})
-    lower_emit(&f, LIRInst.Store{base: boxed, offset: 0, value: more})
+    lower_call_runtime(&m, &f, "jet_rt_native_closure_retain", [LIRValueID]{boxed}, None)
     lower_seal(&f, LIRTerminator.Return{value: Val(boxed)})
     lir_builder_finish(f.builder)
 }

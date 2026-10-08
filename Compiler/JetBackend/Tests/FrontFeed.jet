@@ -45,6 +45,13 @@ fn ff_case(file: String, name: String, pack: GLPack) -> String {
             }
             if result.internal_problem == .Val(problem) -> &reports.push("ICE\t{problem}")
             if !result.complete -> &reports.push("INCOMPLETE\tJet front end did not finish")
+            // Assert the loader's actual Core closure, not just reachable MIR:
+            // source pruning could otherwise hide an unnecessary ambient load.
+            if file.ends_with("/prelude_load_absent.jet") || file == "prelude_load_absent.jet" {
+                loop source in result.generated_source_files {
+                    if source.path == "Core/prelude/prelude.jet" || source.path.ends_with("/Core/prelude/prelude.jet") -> &reports.push("INVENTORY\tunmentioned optional-to-failure body loaded core.prelude")
+                }
+            }
             if reports.len() > 0 {
                 ff_files.write("{name}.front-issues", reports.join("\n")) ?? panic("cannot write front-end issues")
                 return "front-error"

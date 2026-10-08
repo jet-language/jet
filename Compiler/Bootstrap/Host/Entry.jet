@@ -27,10 +27,24 @@ use jet_driver.[
 ]
 use jet_backend.[lir_lower_entry, lir_print_module, x64_relocatable_object, x64_link_executable, x64_runtime_library]
 
+// Self-host inventories observe Jet's checked MIR without entering Rust emit.
+fn jet_bootstrap_mir(request: ^JetDriverCompileRequest) -> JetDriverCompileResult Never! {
+    result := jet_driver_compile_mir(^request) ?? return jet_driver_compile_escaped_failure("the native front end failed outside every compile stage")
+    if cli_sys.get("JET_FRONT_MIR_OUTPUT") == .Val(path) {
+        if !result.complete || result.internal_problem != None -> return result
+        program :: result.mir ?? return jet_driver_compile_escaped_failure("the native front end finished without MIR")
+        entry :: result.entry_function ?? return jet_driver_compile_escaped_failure("the native front end finished without an entry")
+        stream := [String]{"{entry.value}"}
+        mirw_mir_program(program, &stream)
+        cli_files.write(path, stream.join("\n")) ?? return jet_driver_compile_escaped_failure("cannot write checked Jet MIR observation")
+    }
+    result
+}
+
 // Native-feed probes use the same checked driver and linker as the Jet host.
 // Neither an emitted Rust program nor a Rust MIR conversion enters this path.
 fn jet_bootstrap_native(request: ^JetDriverCompileRequest, prefix: String) -> JetDriverCompileResult Never! {
-    result := jet_driver_compile_mir(^request) ?? return jet_driver_compile_escaped_failure("the native front end failed outside every compile stage")
+    result := jet_bootstrap_mir(^request) ?? return jet_driver_compile_escaped_failure("the native front end failed outside every compile stage")
     if !result.complete || result.internal_problem != None -> return result
     program :: result.mir ?? return jet_driver_compile_escaped_failure("the native front end finished without MIR")
     if cli_sys.get("JET_FRONT_LIBRARY_OBJECT_OUTPUT") != None {
@@ -80,6 +94,7 @@ fn jet_bootstrap_native(request: ^JetDriverCompileRequest, prefix: String) -> Je
 fn jet_bootstrap_compile(request: ^JetDriverCompileRequest) -> JetDriverCompileResult Never! {
     if cli_sys.get("JET_FRONT_LIBRARY_OBJECT_OUTPUT") == .Val(prefix) -> return jet_bootstrap_native(^request, prefix)
     if cli_sys.get("JET_FRONT_NATIVE_OUTPUT") == .Val(prefix) -> return jet_bootstrap_native(^request, prefix)
+    if cli_sys.get("JET_FRONT_MIR_OUTPUT") != None -> return jet_bootstrap_mir(^request)
     if cli_sys.get("JET_KEEP_GOING") != Val("1") {
         return jet_driver_compile(^request) ?? jet_driver_compile_escaped_failure("the compiler driver failed outside every compile stage")
     }

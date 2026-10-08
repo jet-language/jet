@@ -47,6 +47,7 @@ pub(crate) mod jet_c_abi_iter {
             })
         }
         pub(crate) fn tag(&self) -> u32 { self.kind as u32 }
+        pub(crate) fn stride(&self) -> usize { self.stride }
         pub(crate) fn payload_size(&self) -> usize { match self.tag() { 11 => 0, 9 => 1, _ => self.stride } }
         pub(crate) fn first(&self) -> Arc<Meta> { self.child0.as_ref().expect("native child descriptor").clone() }
         pub(crate) fn second(&self) -> Arc<Meta> { self.child1.as_ref().expect("native error descriptor").clone() }
@@ -92,6 +93,20 @@ pub(crate) mod jet_c_abi_iter {
         pub(crate) fn word(&self) -> u64 {
             match self.meta.tag() {
                 11 => 0,
+                2 | 3 => {
+                    let bits = self.meta.kind >> 32;
+                    let word = match bits {
+                        1..=8 => unsafe { ptr::read_unaligned(self.slot.data()) as u64 },
+                        9..=16 => unsafe { ptr::read_unaligned(self.slot.data().cast::<u16>()) as u64 },
+                        17..=32 => unsafe { ptr::read_unaligned(self.slot.data().cast::<u32>()) as u64 },
+                        _ => unsafe { ptr::read_unaligned(self.slot.data().cast::<u64>()) },
+                    };
+                    if self.meta.tag() == 2 && bits < 64 {
+                        ((word << (64 - bits)) as i64 >> (64 - bits)) as u64
+                    } else {
+                        word
+                    }
+                }
                 9 => unsafe { ptr::read_unaligned(self.slot.data()) as u64 },
                 _ => unsafe { ptr::read_unaligned(self.slot.data().cast()) },
             }

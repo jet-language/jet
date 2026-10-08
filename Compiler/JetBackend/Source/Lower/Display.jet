@@ -168,6 +168,7 @@ fn lower_render_value(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIR
         }
         .Flag -> "jet_rt_bool_to_string"
         .FloatBits -> if mode == .Debug -> "jet_rt_float_debug" else -> "jet_rt_float_to_string"
+        .Float32Bits -> if mode == .Debug -> "jet_rt_float32_debug" else -> "jet_rt_float32_to_string"
         .Boxed(_) | .Inline(_) | .Discriminant -> ""
         else -> {
             lower_fail(&m, &f, "displaying {mir_type_display_name(ty)} is not lowered at O0 yet")
@@ -261,10 +262,28 @@ fn lower_render_payload_info(p: MIRProgram, definition: MIRTypeDef, variant_name
 }
 
 fn lower_helper_display(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    if lower_set_element(glue.ty) != None -> return lower_helper_set_render(p, &m, glue)
+    if lower_queue_element(glue.ty) != None -> return lower_helper_queue(p, &m, glue)
+    if lower_priority_queue_element(glue.ty) != None -> return lower_helper_priority_queue_render(p, &m, glue)
     layout :: lower_repr_layout(lower_repr(p, glue.ty)) ?? lir_layout_pointer()
     f := lower_helper_start(&m, glue, [LIRLayout]{layout}, Val(lir_layout_pointer()))
     operand :: ~f.open_params[0]
     mode :: if glue.helper == "show" -> LowerRenderMode.Show else if glue.helper == "debug" -> LowerRenderMode.Debug else -> LowerRenderMode.Display
+    // List.join requests show<String>, independently of the lazy iterator's
+    // scalar callback. Both use the ordinary renderer and return an owner.
+    if lower_text_type(glue.ty) {
+        rendered :: lower_render_value(p, &m, &f, glue.ty, Val(operand), mode) ?? {
+            lower_seal(&f, LIRTerminator.Unreachable)
+            return lir_builder_finish(f.builder)
+        }
+        result := rendered.value
+        if !rendered.owned {
+            result = lower_render_string(&f)
+            lower_call_runtime(&m, &f, "jet_rt_string_clone", [LIRValueID]{rendered.value}, Val(result))
+        }
+        lower_seal(&f, LIRTerminator.Return{value: Val(result)})
+        return lir_builder_finish(f.builder)
+    }
     builder :: lower_pointer(&f)
     lower_call_runtime(&m, &f, "jet_rt_string_builder_new", [LIRValueID]{}, Val(builder))
     done :: lower_new_block(&f)

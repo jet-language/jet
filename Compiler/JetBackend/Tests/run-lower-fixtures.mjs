@@ -126,6 +126,7 @@ const parts = [
   ...(!small ? [
     body("Compiler/JetBackend/Source/LIR/Print.jet"),
     ...sorted("Compiler/JetBackend/Source/Lower").map(body),
+    ...sorted("Compiler/JetBackend/Source/Opt").map(body),
   ] : []),
   ...(!small ? [asmWitnessSource] : []),
   body("Compiler/JetBackend/Source/X64/Encoder.jet"),

@@ -66,6 +66,10 @@ read-only data; each table's ID equals its index.
   `LIRLoweringIssue` with the `inline asm:` prefix and the offending line.
   No bytes from a refused template enter the LIR. The OS-template witnesses
   in `Tests/Fixtures/InlineAsm.jet` use the actual `OS/Linux.jet` source.
+  `inline-asm-exit` calls the raw seven-argument syscall leaf with Linux
+  `exit_group(23)` and expects process exit 23 without stdout or stderr;
+  together with the write/memory and call-address fixtures it covers the
+  compiler's kernel and indirect-call leaf shapes.
   The one read-only frame-register form, `mov r64, rsp`, may expose storage
   owned by balanced template pushes; it is refused with an empty template stack.
   Byte stores use explicit low-byte register names (including sil/dil and
@@ -127,6 +131,18 @@ glue. Render edges select the Printable/Display implementation whose receiver
 matches the rendered type exactly or is the generic template of its
 declaration, and reach that method's instance for the receiver.
 
+Primitive checked `String + String` calls `jet_rt_string_concat` with two
+borrowed handles and receives a fresh owned String. The canonical runtime
+sizes the output once; lowering does not concatenate bytes or allocate an
+intermediate builder. `Fixtures/Strings.jet`'s `strings-concat` witness drops
+the input owners before reading results, including empty, same-input,
+Unicode and embedded-NUL cases.
+The native `List.join` helper's owning `show<String>` callback also delegates
+to the ordinary renderer. A borrowed rendering is cloned before returning
+it, so releasing the callback output cannot consume the List's element.
+`strings-join` covers multi-element Unicode, singleton and empty Lists,
+dropping the Lists before reading the joined text.
+
 The structural renderer carries an explicit Display/Show/Debug mode through
 members. Debug does not select a user Display/Printable implementation: it
 quotes text, renders optional values as `Val(...)` / `None`, and uses
@@ -177,6 +193,7 @@ IR with these choices, which the Jet lowering keeps or replaces as noted:
 | `Int`, ranges/tags/quantities over Int | exact-Int word | `i64` (Integer 8) | none (big integers are runtime-managed) |
 | `Char`, `IntN(_, 64)` | word | `i64` | none |
 | `Bool` | flag | `i8` (Integer 1, 0 or 1) | none |
+| `F32` (reader materialization/text only) | `Float32Bits`: zero-extended raw binary32 word in registers | four stored bytes, align 4 | none |
 | `Unit`, `Never` | no LIR value | — | — |
 | `String` | runtime handle to a C-layout `{ptr, len, cap}` UTF-8 header (byte counts, words at offsets 0/8/16 on x64) | `ptr` | `jet_rt_string_drop` |
 | `RangeCursor`, `IterCursor` | runtime handle | `ptr` | `jet_loop_cursor_drop` |
@@ -187,9 +204,33 @@ IR with these choices, which the Jet lowering keeps or replaces as noted:
 | `Result<T, E>` | box: 1 (Ok) or 0 (Err) at 0, payload at 8 | `ptr` | generated glue |
 | `[T]` | box: `[len, cap, data]`, elements `max(8, size(T))` bytes apart | `ptr` | generated glue |
 | `[K:V]` | the `[T]` header over `(key, value)` entry tuples in ascending key order (BTreeMap's); lookups are a binary search (`Lower/Maps.jet`); keys are exact Int, String or word-sized scalars | `ptr` | `[T]` glue over the entries |
+| `Set<T>` | the ordered `Map<T, Unit>` entry header (`Lower/Sets.jet`); exact builtin nominal identity, binary-search membership, duplicate keys released, and copies have independent buffers. Set-to-List converts entry stride to packed element stride; values snapshots use the canonical native Iter boundary. Show/Display/Debug sort rendered strings lexically, matching HashSet's canonical deterministic rendering, not numeric key order. | `ptr` | `[T]` glue over `(key, Unit)` entries |
+| `Queue<T>` | owned ring `[len, cap, data, head]` (`Lower/Queues.jet`), packed List stride, constant-time end pushes/pops; growth linearizes live slots. Owned List construction transfers its buffer; borrowed construction snapshots it. Split moves the suffix; delete preserves logical order and moves the shorter side. | `ptr` | live ring elements only; clear keeps the buffer, drop frees it; clone produces an independent linear ring |
+| `PriorityQueue<T>` | binary max-heap in an owned List header/buffer (`Lower/PriorityQueues.jet`), using the same exact/byte/derived member ordering as native Maps. Peek clones the maximum; pop transfers it and repairs the heap. Canonical remove slots and sorted views are highest-first, not physical heap positions. | `ptr` | ordinary List clone/drop; sorted rendering owns and retires its independent snapshot |
 | `View<T>`, `ViewMut<T>` | the `[T]` header `[len, 0, data]` in its holder's storage, `data` at the window's first element of the owner's buffer (`Lower/Lists.jet` lower_view_element); capacity 0 marks a buffer it does not own; List reads read it unchanged; a materializing `Copy` into `[T]` clones the elements | `ptr` | none |
 | `View<str>` | an owned String handle holding the window's text: the `_view` kernels run their owned twins (`jet_string_after`, `jet_string_before`, `jet_unicode_trim`); costs one allocation the zero-copy `&str` avoids, otherwise unobservable (a window is only read) | `ptr` | `jet_rt_string_drop` |
 | `Distinct`/`Alias` types | as their base | — | — |
+
+The `F32` carrier is deliberately not a numeric Integer despite its word
+register layout. Reader routes return binary32 in the low 32 of their
+zero-extended out word. Native storage writes four bytes; reads load U32 and
+zero-extend, with no FP conversion. Display and Debug borrow that raw word
+for `jet_rt_float32_to_string` and `jet_rt_float32_debug` respectively, using
+binary32 shortest text rather than widening to binary64 text. Numeric,
+comparison and cast operations remain explicit refusals in this minimal
+reader/text scope. Future FP-register operations must use the canonical LIR
+`Bitcast`, not introduce another reinterpretation mechanism.
+F32 runtime result admission is a named allow-list: only
+`jet_reader_read_f32_le` and `jet_reader_read_f32_be`, producing
+`Result<F32, String>`. All F32 route parameters, F32-containing list/tuple
+results and other producers receive explicit refusals until their canonical
+Jet provider is approved; a generic Word carrier never grants admission.
+Only `Reader.take`, `Reader.skip` and `Reader.seek` narrow their exact-Int
+count/position operand through the existing checked `jet_int_owned_to_i64`
+adapter. A count outside I64 stops before the method, matching reference
+`int_value`; an in-range negative or out-of-bounds count still reaches Reader
+and retains its ordinary Err text. The conversion borrows the operand and
+does not broaden the Word ABI for other routes.
 
 Result boxes reserve at least one eight-byte payload word after the tag,
 including zero-sized payloads. Runtime marshaling uses the same minimum,
@@ -206,6 +247,14 @@ size function per box kind serves construction and glue). A variant's
 discriminant is its index. Unions and trait objects are not lowered yet and
 are reported; generic instances lower as their concrete instances
 (above). Function values are closure boxes ("Closures" below).
+
+Fixed-width integer storage uses the declared one-, two-, four- or eight-byte
+ABI width through raw tags, aliases and distinct types. Arithmetic retains
+normalized word registers: reads zero-extend the storage and sign-extend a
+signed value; writes truncate to its physical width. Fixed-integer List slots
+are packed at that width, and generated C adapters use typed slot pointers
+and the matching allocation size rather than treating packed bytes as words.
+
 
 Inline aggregates. A `Struct`/`Tuple` builds into a fresh `StackSlot`. The
 storage's holder owns it: the value never frees it, and MIR `Drop`/`Copy` of an
@@ -282,7 +331,7 @@ function parameters and jumps to it (LIR forbids jumps to the entry).
 | exact-Int other ops (division family, pow, shifts, bit ops) | call of the route's runtime symbol with `(left, right)`, plus `(file_ptr, file_len, line)` for routes of arity 4 |
 | exact-Int comparison (Primitive) | native `Compare` when both are inline, else `jet_int_compare(l, r)` compared with 0 |
 | word `+ - *` (Primitive) | `Binary`; with `overflow: Trap`, an `Overflows` test branches to `jet_rt_panic_overflow` first |
-| word `/ %` (Primitive) | zero check to `jet_rt_panic_division_by_zero`, then a minimum-divided-by-minus-one check to `jet_rt_panic_overflow` (x86-64 `idiv` faults on it), then `Div`/`Rem` |
+| word `/ %` (Primitive) | zero check to `jet_rt_panic_division_by_zero`, then a minimum-divided-by-minus-one check to `jet_rt_panic_overflow` (x86-64 `idiv` faults on it), then `Div`/`Rem`; signed I64 division truncates toward zero and remainder keeps the dividend's sign (`numeric-i64-truncation` fixture distinguishes this from floor division) |
 | word bit ops and shifts | `Binary And/Or/Xor/Shl/Shr` |
 | Bool, tag and word comparisons | `Compare` |
 | String `==`/`!=` | `jet_rt_string_eq(l, r) -> Bool` |
@@ -347,6 +396,28 @@ existing parallel chunk scheduler joins every worker. Inputs and captures
 are borrowed, each worker writes disjoint output slots, and result order
 is the source order. Callbacks with a checked stop across native frames
 remain refused until the task stop-record protocol supports that edge.
+
+Parallel predicates evaluate through the same joined range walk, then move
+source items to their source-ordered filter/partition destinations.
+`para_fold` lends seed, step and merge closures to the canonical chunk
+scheduler and merge tree: each chunk invokes a fresh seed and accumulates
+locally, and merge helpers consume both partials. An empty input invokes
+the seed once. The raw runtime bridge only schedules and transports owned
+accumulator slots; typed reads, writes and releases stay in generated helpers.
+
+`CarrierFact` borrows a Result's error report and deep-copies the checked
+stored field into the returned partial or notes. A successful Result
+produces an absent partial or an empty notes List without reading the error
+payload. Host-borrow callback adapters preserve the native callable box;
+the consuming host adapter still owns its checked argument ABI.
+
+`ReflectOf` builds the canonical runtime Value/Field records from checked
+type names, paths, display and field rows. Field displays use universal Show;
+they retain a typed Value with no nested field rows, as the canonical
+`from_field` constructor does. The result crosses back to native record
+storage when MIR supplies the registered record shape. Reachability roots
+the selected Show implementation of every reflected field.
+
 
 ### Calls into the compiled runtime
 
@@ -451,6 +522,54 @@ in source order, so the last duplicate wins without changing the original
 DataTree. Record getters lend collection and nested-element storage while
 rebuilding native values; constructors consume the freshly built holders.
 
+The route generator discovers declarations produced by invoked non-repeating
+runtime macros, retaining their invocation's module and platform guards.
+The all-parts seed includes HTTP and database route-demand bodies so importing
+their modules cannot silently omit the host bridge instantiations. A source
+registry ownership change regenerates both adapter and carrier tables together;
+for example, `core.time.now` uses the DateTime-bearing `jet_time_now_utc` route,
+not the former millisecond integer route.
+
+`Lower/Codecs.jet` reaches the checked Encode/Decode implementation for the
+concrete receiver and invokes its ordinary monomorphic Jet method. Finite
+scalar specializations marshal into the existing canonical runtime traits;
+they do not duplicate codec acceptance or diagnostics. Typed JSON/TOML/YAML
+parse-to-tree specializations use the existing typed intrinsic's DataTree
+instantiation before native Decode dispatch, preserving its error envelope.
+`DecodeUnder` prefixes failures through the canonical FieldError helper and
+leaves successful payloads intact. Unsupported container/callback carrier
+edges remain explicit refusals rather than a second codec policy.
+
+Typed CSV supplies a checked native Decode callback to the existing canonical
+`jet_enc_csv_decode_rows` kernel. The private generated `jet_rt_codec_csv`
+boundary lends each runtime DataTree, uses the existing NativeMeta/NativeValue
+container slots, and transfers owned decoded rows or owned FieldError handles.
+The borrowed callback's OCB1 consumed mask is zero. A native delivered-stop gate
+leaves all outs unwritten; `jet_native_callback_body` resumes the canonical stop
+only after the native callback has returned, before inspecting its tag or
+initializing a NativeValue. Header projection, row order, error accumulation
+and row-path framing remain in the canonical kernel, not native lowering.
+This generated Rust adapter is a tracked temporary directive-19 leaf, removed
+when the checked Jet-owned CSV intrinsic and native DataTree/FieldError path
+replace the canonical Rust row kernel. It is not a permanent provider exemption.
+The callback marshals the borrowed tree through `record.in` without allocating
+a Rust tree clone. Native-freed row and handle-array buffers use `jet_rt_alloc`
+and `jet_rt_free` with the same byte count and eight-byte alignment as lowering.
+Opaque runtime FieldError boxes retain their matching runtime handle-drop
+provider; they are converted to native records, never freed as native records.
+For every supported row type, `lower_lazy_meta` stores exactly
+`lower_list_stride(p, target)` in descriptor word zero. CSV checks its success
+List's element is that same checked `target`; `lower_helper_list_drop` uses the
+same `lower_list_stride` for all elements (including records), and frees
+`cap * stride` at alignment eight. Empty callback error arrays are null:
+`list.record_handles` calls `lower_list_buffer(length, 8)`, whose zero-length
+branch returns null; the runtime bridge asserts that invariant before accepting
+an empty failure vector.
+
+
+
+
+
 
 Lazy collection routes use the existing `Collections.rs` and `LoopCursor.rs`
 kernels through `CAbiIter.rs`; lowering does not recreate their iteration or
@@ -540,12 +659,12 @@ zero-extended words, so a branch tests the whole register.
 | `Shl Shr` | `mov rax, l; mov r11, r; push rcx; mov rcx, r11; shl/sar rax, cl; pop rcx` |
 | `Compare` | `cmp l, r; setcc r8; movzx r, r8`, or fused into the block's `cmp` + `jcc` when the branch is its only use |
 | `Overflows` | `mov rax, l; add/sub/imul rax, r; seto r8; movzx` |
-| `Load` / `Store` | `mov r, [base + off]` / `mov [base + off], r`; one-byte layouts use `movzx` / byte `mov` |
+| `Load` / `Store` | `mov r, [base + off]` / `mov [base + off], r`; 1/2/4-byte layouts use zero-extending byte/word/dword loads and matching stores |
 | `DataAddress` | `lea r, [rip + disp32]`, a data relocation |
 | `Call` | stack arguments pushed last to first (8 bytes of padding first for an odd count), Float arguments `movq xmm_i, r`, then parallel moves into rdi, rsi, rdx, rcx, r8, r9; `call rel32` with a function or runtime relocation; `add rsp` for the stack arguments; a Bool result is `movzx rax, al` first (System V defines only al), a Float result `movq rax, xmm0` |
 | Float `Add Sub Mul Div` | `movq xmm0, l; movq xmm1, r; addsd/subsd/mulsd/divsd xmm0, xmm1; movq dst, xmm0` (Float `Xor` is the bit operation, used for negation) |
 | Float `Compare` | `ucomisd` with the operands ordered so `a`/`ae` answer `< <= > >=` (false on NaN); Eq is `sete` and `setnp`, Ne `setne` or `setp`; never fused into the branch |
-| `Convert` | `cvtsi2sd` (word to Float) or `cvttsd2si` (Float to word, truncating) through xmm0 |
+| `Convert` | `cvtsi2sd` (word to Float) or `cvttsd2si` (Float to word, truncating) through xmm0; integer width changes keep the low bits with `movzx` or a dword move |
 | `Drop` | a call to the value's runtime or module drop glue |
 | `Move` / `Copy` | a register or slot move |
 | `Jump` / `Branch` | parallel moves for the block parameters; `jcc`/`jmp rel32`; a taken edge that needs moves gets a stub after the fall-through path |
@@ -1376,10 +1495,67 @@ JET_FRONT_JETC0=CANDIDATE/jetc0 JET_RUNTIME_PACK=RUNTIME/jet_runtime.pack.o \
   --case-list FULL.cases
 ```
 
+For compiler-package inventories, `Tests/run-self-front.mjs OUT --front jet
+--unit SELFHOST.jet --map compiler.map.json --candidate CANDIDATE/jetc0`
+selects the observe-only `JET_FRONT_MIR_OUTPUT` entry. The bootstrap aggregate
+includes a schema-generated Jet writer; the backend's native path still consumes
+live MIR, never that observation stream. `self.mird` is one entry ID followed by
+the checked program in schema order. `self.functions.tsv`, `self.sources.tsv`,
+`self.inventory.json` and package slice ID tables describe that same program;
+they do not admit native execution or independently compiled package programs.
+Original-source segments map aggregate spans to compiler packages; generated
+writer spans are separate `mir_observer` provenance, and unmapped functions are
+retained rather than silently omitted. Decoded enum discriminators use
+`$variant`, preserving checked payload fields named `variant`. The codec checks
+every current operation variant independently of the observed compiler corpus.
+
+The native unit-test producer is `lir_lower_tests(program, roots, checks, serial)`.
+It shares one monomorphization inventory across selected checked tests and output
+checks, and emits an AOT entry plus task callbacks. Each test callback runs the canonical
+test rail through `CAbiTest`; panic classification, expected failures, skip,
+captured print, and the final report are not reimplemented by the parent.
+Property generation/shrinking is explicitly refused until its Jet implementation
+exists.
+
+`Cli/NativeTests.jet` owns selection in canonical module/source/name order,
+filtering, the identical SplitMix64 shuffle, and the native child runner. A
+child appends lossless, byte-counted records to the process-private file named
+by `JET_NATIVE_TEST_RECORDS_PATH`, never stdout. `JET_NATIVE_TEST_ID` selects
+one original checked MIR function; absent that selector the child spawns all
+selected test tasks before joining, or joins each immediately in serial mode.
+After a fatal child, only tests lacking complete records are run individually,
+in parallel unless serial was requested. A non-reproducing fatal batch remains
+an error, never a fabricated successful run or an attribution to another test.
+The parent preserves ordinary child stdout/stderr separately, orders canonical
+outcomes by the selected identities, and invokes the same executable with
+`JET_NATIVE_TEST_REPORT_PATH` for the canonical finish and exit status. Protocol
+I/O failure exits 103 and is an infrastructure error, not a failed test.
+`Host.jet` dispatches non-release tests through the NativeTests module API;
+release tests retain the existing emitted harness path. Output checks run once
+in the same successful batch process after body joins, with static initialization
+and checked result ownership; Bool checks assert, other results are discarded
+as in the canonical runner. After a fatal batch each unrun output check is an
+explicit failed canonical outcome carrying E3015 (what/why/fix); the fresh
+reporter never executes checks against recreated process state. Custom TestSuite
+overrides remain explicitly refused on the native path. Full native/CLI proof
+must precede admission.
+
 Build the candidate and runtime pack from the same composed tree. Matching
 goldens do not prove full frontend equivalence; compare the two modes on the
 same complete case list, retaining both `results.tsv` files and every
 failure, before admitting parity.
+
+The consolidated proof consumers are `Tests/check-front-feed-results.mjs`
+(exact full398 selection, no lost native passes, zero wrong outcomes; reports
+both pass counts, every differing verdict/detail and ranked diagnostic roots),
+`Tests/test-native-test-host.mjs` (three Examples and canonical capture,
+filter, serial and shuffle policies), and `Tests/test-native-test-contract.mjs`
+(output checks observe joined batch state; a fatal child preserves completed
+outcomes and reruns only unreported bodies, never output checks). The registered
+E3015 what/why/fix snapshot is exercised by
+`Tests/test-native-output-diagnostic.mjs`. These consumers require the real
+composed candidate, host and matching runtime pack; metadata-only checks do
+not admit execution parity.
 
 
 `Tests/run-front-feed.mjs` selects **every** `pass` row in an explicit native
@@ -1390,6 +1566,9 @@ independent Rust feed uses Debug conversion. Both feeds link the same runtime
 pack and run in separate, identically staged working directories with the
 golden's stdin. The gate requires matching stdout, stderr, and status between
 feeds, and successful stdout agreement with the golden for each feed.
+The Debug comparator maps Rust `PtrFromAddr.addr` to checked Jet
+`PtrFromAddr.address`; it still rejects an absent address instead of inventing
+one. The Jet observer writes the checked field directly.
 
 ```sh
 node Compiler/JetBackend/Tests/run-front-feed.mjs OUT \
@@ -1460,3 +1639,24 @@ declares a program `run` entry. C exports have no failure-row annotation.
 The C ABI route generator reads every canonical `CAbi*.rs` except generated
 `CAbiRoutes.rs`, including unsafe C exports. Hand-owned exports do not get
 generated adapter bodies; canonical signatures still supply ownership checks.
+
+### Expert Shared guard lowering
+
+`Lower/Transaction.jet` lowers the checked `SharedGuard<T>` read/edit tags
+before transparent-tag erasure. A guard is an opaque, non-clonable runtime
+handle, with `jet_rt_native_shared_read_guard_drop` or
+`jet_rt_native_shared_edit_guard_drop` selected by that provenance.
+Acquisition calls the Jet runtime's `jet_rt_native_shared_guard_read/edit`,
+retaining the canonical cell owner and its permit without copying the payload.
+Operation and place-projection dereferences ask the matching guard provider
+for the borrowed payload slot. Inline fields and list mutation address those
+same bytes; a read guard cannot supply a writable projected place. Escaping
+owned copies use the existing typed clone path, rather than dropping the
+borrowed payload as a second owner.
+
+`Tests/Fixtures/SharedGuards.jet` exercises read acquisition, edit field writes,
+list mutation through an addressable dereference, moving an edit token out of
+its local, and dropping a Shared owner while a read guard still retains it.
+Its runtime image requires the Jet-authored Shared guard exports; generated
+Rust route metadata alone does not provide them. This does not establish
+Shared transaction or Condition-wait support.

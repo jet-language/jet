@@ -1,0 +1,28 @@
+// Native O1 cell mandelbrot (numerics.float-kernel): points of a 640x480 grid
+// that stay bounded for 300 iterations.
+fn bounded(cr: Float, ci: Float) -> Bool {
+    zr := Float{0.0}
+    zi := Float{0.0}
+    loop _ in 0..<300 {
+        zr2 :: zr * zr
+        zi2 :: zi * zi
+        if zr2 + zi2 > 4.0 -> return false
+        zi = Float{2.0} * zr * zi + ci
+        zr = zr2 - zi2 + cr
+    }
+    true
+}
+
+fn run() {
+    width :: 640
+    height :: 480
+    inside := 0
+    loop y in 0..<height {
+        ci :: Float.from_int(y) * 2.4 / Float.from_int(height) - 1.2
+        loop x in 0..<width {
+            cr :: Float.from_int(x) * 3.2 / Float.from_int(width) - 2.2
+            if bounded(cr, ci) -> inside += 1
+        }
+    }
+    print(inside)
+}

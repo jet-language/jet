@@ -281,10 +281,16 @@ answers as a non-interactive run.
 `#Test` body is checked and lowered as a synthetic function (a property
 test's ungeneratable parameter types are E0613, a file with no named test is
 E0601), and the artifact is a TestExecutable whose harness owns `main`. The
-harness is built through rustc as `.jet/build/.test_<stem>.<pid>` (the
-Jet-native backend has no harness entry yet) and run with `JET_TEST_CAPTURE`,
-`JET_TEST_FILTER`, `JET_TEST_SHUFFLE_SEED`, `JET_TEST_SERIAL`,
-`JET_TEST_TRACE_TIERS`, `JET_UPDATE_SNAPSHOTS`, and `JET_PROJECT_ROOT`. Its
+non-release harness is lowered by the Jet-native backend and linked with the
+matching packaged test runtime as `.jet/build/.test_<stem>.<pid>`; release
+keeps the emitted harness path. Native property generation is refused. Both
+paths preserve `JET_TEST_CAPTURE`, `JET_TEST_FILTER`, `JET_TEST_SHUFFLE_SEED`,
+`JET_TEST_SERIAL`, `JET_TEST_TRACE_TIERS`, `JET_UPDATE_SNAPSHOTS`, and
+`JET_PROJECT_ROOT`. Native outcomes use process-private framed record files,
+never stdout; after a fatal trap only unreported tests rerun individually.
+Output checks run after joins in the same batch process. If that process
+traps, each unrun check fails with E3015 rather than running against fresh
+state in the final reporter. Its
 captured output is shown under `--capture=all`, or for a failed run under the
 default `--capture=failed`; the exit is 0 when the harness passed, else 1. It
 honors `--capture`, `--filter`, `--shuffle=<seed>`, `--serial`,

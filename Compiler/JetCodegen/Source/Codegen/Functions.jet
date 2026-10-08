@@ -3376,7 +3376,7 @@ fn jet_codegen_lower_core_builtin_owner(owner: TCoreBuiltinOwner, module_info: S
 // keeps them and the checked program is never resident twice. With more than
 // one admitted thread (jet_codegen_lower_threads) the program moves into the
 // threads' shared slot for the lowering and back out after it.
-pub fn lower_functions(functions: &[TFunc], modules: &[SemaGraphModuleResult], source_files: [MIRSourceFile], threads: CompilerThreads, trace_sink: CompilerTraceSink?) -> JetCodegenFunctions {
+pub fn lower_functions(functions: &[TFunc], modules: &[SemaGraphModuleResult], source_files: [MIRSourceFile], threads: CompilerThreads, trace_sink: CompilerTraceSink?, stop_points: Bool) -> JetCodegenFunctions {
     if functions.len() == 0 {
         constants := jet_codegen_lower_constant_rows(modules)
         empty_index := jet_codegen_function_index([TFunc]{})
@@ -3391,6 +3391,7 @@ pub fn lower_functions(functions: &[TFunc], modules: &[SemaGraphModuleResult], s
     field_symbols := jet_codegen_field_symbol_index(program_modules)
     source_index := jet_codegen_source_index(source_files)
     program := jet_codegen_new_program(^function_index, ^program_modules, ^field_symbols, source_files, ^source_index)
+    program.stop_points = stop_points
     lowered_rows := [JetCodegenLoweredFunction]{}
     weights :: jet_codegen_lower_weights(program)
     workers :: jet_codegen_lower_threads(weights, threads, trace_sink)

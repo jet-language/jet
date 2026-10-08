@@ -2219,9 +2219,6 @@ pub trait JetOptionalView<T>: Sized {
     fn filter(self, keep: impl FnOnce(&T) -> bool) -> Self;
     /// Is the payload present and does it answer the question?
     fn is_some_and(self, ask: impl FnOnce(T) -> bool) -> bool;
-    /// D-FAIL-CARRIER1: lift a clean absence into a failure with a report.
-    /// The payload rides through untouched; only the verdict changes.
-    fn or_err(self, why: String) -> JetOutcome<T, JetErr>;
     /// Read the payload without taking it; the clean report stays clean.
     fn map_ref<U>(&self, f: impl FnOnce(&T) -> U) -> JetOutcome<U, JetAbsent>;
     /// Pair two payloads; absent on either side is absent for the pair.
@@ -2252,9 +2249,6 @@ impl<T> JetOptionalView<T> for JetOutcome<T, JetAbsent> {
             Ok(value) => ask(value),
             Err(JetAbsent) => false,
         }
-    }
-    fn or_err(self, why: String) -> JetOutcome<T, JetErr> {
-        self.map_err(|JetAbsent| jet_err_from_message(why))
     }
     fn map_ref<U>(&self, f: impl FnOnce(&T) -> U) -> JetOutcome<U, JetAbsent> {
         match self {

@@ -6,7 +6,7 @@ use jet_foundation.[
     MIRPlaceBase, MIRPlaceID, MIRProgram, MIRProjection, MIRTerminator,
     MIRType, MIRTypeDef, MIRTypeDefKind, MIRTypeKind, MIRValueID, MIRVariant,
     MIRVariantPayload, mir_field_id, mir_function_id, mir_owned_ownership,
-    mir_type_from_kind, mir_type_id,
+    mir_ownership_from_access, mir_type_from_kind, mir_type_id,
 ]
 
 fn fx_payload_place(b: &FxBuilder, root: MIRPlaceID, kind: MIRPayloadKind, ty: MIRType, access: MIRAccess) -> MIRPlaceID Never! {
@@ -195,6 +195,57 @@ fn fx_payload_move() -> MIRProgram Never! {
     fx_do(&b, MIROperation.Drop{value: gone, kind: MIRDropKind.Value})
     fx_block(&b, 0, MIRTerminator.Return{value: None})
     fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, ^types)
+}
+
+// A moved inline payload must stop borrowing its wrapper before the wrapper
+// drops. The loop edge reads the header after that Drop, just as walk's
+// `rest = ^e ?? []` in last_use_moves. Exercise all native payload wrappers.
+// expect-stdout payload-move-backedge: "3\n3\n3\n"
+fn fx_payload_move_backedge() -> MIRProgram Never! {
+    list :: mir_type_from_kind(MIRTypeKind.List{inner: fx_string()})
+    option :: mir_type_from_kind(MIRTypeKind.Option{inner: list})
+    result :: mir_type_from_kind(MIRTypeKind.Result{ok: list, err: list})
+    envelope :: fx_named("ListEnvelope")
+    types :: [MIRTypeDef]{fx_type_def("ListEnvelope", MIRTypeDefKind.Enum{variants: [MIRVariant]{
+        fx_variant("Items", MIRVariantPayload.Single{value: list}),
+    }, methods: [MIRFunctionID]{}})}
+    r := fx_builder()
+    loop kind in 0..<3 {
+        items :: fx_local(&r, "items{kind}", list, mir_owned_ownership())
+        count :: fx_local(&r, "count{kind}", fx_int(), mir_copy_ownership())
+        initial :: fx_owned(&r, list, MIROperation.BuildList{values: [MIRValueID]{}, trait_coercion: None})
+        zero :: fx_int_const(&r, 0)
+        fx_do(&r, MIROperation.WritePlace{place: items, value: initial})
+        fx_do(&r, MIROperation.WritePlace{place: count, value: zero})
+        header :: kind * 3 + 1
+        body :: header + 1
+        done :: header + 2
+        fx_block(&r, kind * 3, MIRTerminator.Jump{target: MIRBlockID{value: fx_word(U64{0}, header)}})
+        now :: fx_copy(&r, fx_int(), MIROperation.ReadPlace{place: count})
+        three :: fx_int_const(&r, 3)
+        more :: fx_compare(&r, MIRBinaryOp.Lt, now, three)
+        fx_block(&r, header, MIRTerminator.Branch{condition: more, then_target: MIRBlockID{value: fx_word(U64{0}, body)}, else_target: MIRBlockID{value: fx_word(U64{0}, done)}})
+        // Nontrivial elements detect freeing contents as well as header UAF.
+        text :: fx_owned(&r, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "still-owned"}})
+        next :: fx_owned(&r, list, MIROperation.BuildList{values: [MIRValueID]{text}, trait_coercion: None})
+        wrapper_ty :: if kind == 0 -> option else -> if kind == 1 -> result else -> envelope
+        operation :: if kind == 0 -> MIROperation.Present{value: next} else -> if kind == 1 -> MIROperation.ResultOk{value: next} else -> MIROperation.Enum{type_id: mir_type_id("ListEnvelope"), variant: "Items", args: [MIREnumArg]{MIREnumArg{field: None, value: next, boxed: false}}}
+        wrapper :: fx_value(&r, wrapper_ty, mir_ownership_from_access(MIRAccess.Move), operation)
+        extraction :: if kind == 0 -> MIROperation.OptionValue{subject: wrapper} else -> if kind == 1 -> MIROperation.ResultValue{subject: wrapper, ok: true} else -> MIROperation.EnumPayload{subject: wrapper, owner: mir_type_id("ListEnvelope"), variant: "Items", index: 0}
+        payload :: fx_owned(&r, list, extraction)
+        fx_do(&r, MIROperation.ReplacePlace{place: items, value: payload})
+        fx_do(&r, MIROperation.Drop{value: wrapper, kind: MIRDropKind.Value})
+        one :: fx_int_const(&r, 1)
+        incremented :: fx_int_op(&r, MIRBinaryOp.Add, "add", now, one)
+        fx_do(&r, MIROperation.WritePlace{place: count, value: incremented})
+        fx_block(&r, body, MIRTerminator.Jump{target: MIRBlockID{value: fx_word(U64{0}, header)}})
+        final_count :: fx_copy(&r, fx_int(), MIROperation.ReadPlace{place: count})
+        fx_print(&r, final_count)
+        gone :: fx_owned(&r, list, MIROperation.MovePlace{place: items})
+        fx_do(&r, MIROperation.Drop{value: gone, kind: MIRDropKind.Value})
+    }
+    fx_block(&r, 9, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{fx_function("run", r, fx_unit())}, ^types)
 }
 
 // Rust's Closed is a fieldless, zero-sized enum. Box<Closed>::into_raw may

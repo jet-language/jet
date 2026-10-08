@@ -32,4 +32,44 @@ mod jet_c_abi_parallel {
             });
         });
     }
+
+    #[no_mangle]
+    pub unsafe extern "C" fn jet_rt_native_para_fold(
+        len: i64,
+        env: *mut u8,
+        chunk: usize,
+        merge: usize,
+    ) -> *mut u8 {
+        guard(|| {
+            // SAFETY: checked helpers lend env through the joined scheduler;
+            // each chunk returns owned accumulator storage. The merge helper
+            // consumes both inputs and returns fresh owned storage.
+            let chunk: unsafe extern "C" fn(*mut u8, i64, i64) -> *mut u8 =
+                unsafe { std::mem::transmute(chunk) };
+            let merge: unsafe extern "C" fn(*mut u8, *mut u8, *mut u8) -> *mut u8 =
+                unsafe { std::mem::transmute(merge) };
+            let env = env as usize;
+            let len = usize::try_from(len).expect("checked native List length");
+            let partials = super::jet_list_para_chunks(len, usize::MAX, |range| {
+                let start = range.start;
+                super::jet_para_call(start, || {
+                    (start, unsafe {
+                        chunk(env as *mut u8, start as i64, range.end as i64)
+                    } as usize)
+                })
+            });
+            if partials.is_empty() {
+                return unsafe { chunk(env as *mut u8, 0, 0) };
+            }
+            super::jet_list_para_merge_tree(partials, |(index, left), (_, right)| {
+                super::jet_para_call(index, || {
+                    (index, unsafe {
+                        merge(env as *mut u8, left as *mut u8, right as *mut u8)
+                    } as usize)
+                })
+            })
+            .unwrap_or_else(|failure| super::jet_para_raise_failure(failure))
+            .1 as *mut u8
+        })
+    }
 }

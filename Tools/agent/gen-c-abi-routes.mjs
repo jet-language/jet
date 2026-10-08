@@ -149,7 +149,119 @@ for (const match of tirRoutes.matchAll(/prelude\(\s*MirPreludeFamily::HandleMeth
 // ---------------------------------------------------------------------------
 // 2. The runtime's functions: module path, visibility, signature, cfg.
 
-const text = readFileSync(runtimePath, "utf8");
+// Discover declarations emitted by invoked, non-repeating macro rules before
+// scanning signatures. Declarations keep the invocation's module and cfg:
+// no API/arithmetic signature table is duplicated in the generator.
+const macroTokens = (source) => source.match(/"(?:\\.|[^"\\])*"|[A-Za-z_][A-Za-z0-9_]*|[0-9]+|::|=>|[^\s]/g) ?? [];
+const rustGroup = (source, start) => {
+  const closes = { "(": ")", "{": "}", "[": "]" };
+  const stack = [closes[source[start]]];
+  if (!stack[0]) return null;
+  for (let end = start + 1; end < source.length; end++) {
+    if (source.startsWith("//", end)) { end = source.indexOf("\n", end); if (end < 0) break; continue; }
+    if (source.startsWith("/*", end)) {
+      let depth = 1; end += 2;
+      while (end < source.length && depth) {
+        if (source.startsWith("/*", end)) { depth++; end += 2; }
+        else if (source.startsWith("*/", end)) { depth--; end += 2; }
+        else end++;
+      }
+      end--;
+      continue;
+    }
+    const raw = /^(?:b)?r(#+)?"/.exec(source.slice(end, end + 32));
+    if (raw) {
+      const close = `"${raw[1] ?? ""}`;
+      const last = source.indexOf(close, end + raw[0].length);
+      if (last < 0) throw new Error("gen-c-abi-routes: unterminated macro raw string");
+      end = last + close.length - 1;
+      continue;
+    }
+    if (source[end] === '"') {
+      end++;
+      while (end < source.length && source[end] !== '"') end += source[end] === "\\" ? 2 : 1;
+      continue;
+    }
+    if (source[end] === "'") {
+      const character = /^'(?:\\(?:u\{[0-9a-fA-F]+\}|x[0-9a-fA-F]{2}|.)|[^\\'])'/.exec(source.slice(end, end + 16));
+      if (character) { end += character[0].length - 1; continue; }
+    }
+    if (closes[source[end]]) stack.push(closes[source[end]]);
+    else if (source[end] === stack[stack.length - 1]) {
+      stack.pop();
+      if (!stack.length) return { body: source.slice(start + 1, end), end };
+    }
+  }
+  throw new Error("gen-c-abi-routes: unterminated macro token group");
+};
+const expandDeclarations = (source) => {
+  const macros = new Map(), definitions = [];
+  for (const declaration of source.matchAll(/\bmacro_rules!\s*([A-Za-z_]\w*)\s*\{/g)) {
+    const group = rustGroup(source, declaration.index + declaration[0].length - 1);
+    definitions.push([declaration.index, group.end + 1]);
+    const rules = [];
+    for (let at = 0; at < group.body.length;) {
+      const next = /\S/.exec(group.body.slice(at));
+      if (!next) break;
+      at += next.index;
+      if (group.body[at] === ";") { at++; continue; }
+      const pattern = rustGroup(group.body, at);
+      if (!pattern) break;
+      const arrow = /^\s*=>\s*/.exec(group.body.slice(pattern.end + 1));
+      if (!arrow) break;
+      const body = rustGroup(group.body, pattern.end + 1 + arrow[0].length);
+      if (!body) break;
+      if (!/\$\s*\(/.test(pattern.body))
+        rules.push({ pattern: macroTokens(pattern.body), body: body.body });
+      at = body.end + 1;
+    }
+    macros.set(declaration[1], rules);
+  }
+  const match = (pattern, input) => {
+    const bindings = new Map();
+    let i = 0;
+    for (let p = 0; p < pattern.length; p++) {
+      if (pattern[p] === "$" && pattern[p + 2] === ":") {
+        const name = pattern[p + 1], kind = pattern[p + 3], token = input[i];
+        if (!token || !["ident", "ty", "expr", "literal", "path"].includes(kind)) return null;
+        if (kind === "ident" && !/^[A-Za-z_]\w*$/.test(token)) return null;
+        const value = [token];
+        i++;
+        if (kind === "path" || kind === "ty")
+          while (input[i] === "::" && /^[A-Za-z_]\w*$/.test(input[i + 1] ?? "")) value.push(input[i++], input[i++]);
+        if (bindings.has(name) && bindings.get(name) !== value.join("")) return null;
+        bindings.set(name, value.join(""));
+        p += 3;
+      } else if (pattern[p] !== input[i++]) return null;
+    }
+    return i === input.length ? bindings : null;
+  };
+  const expand = (input, depth = 0) => {
+    if (depth > 32) throw new Error("gen-c-abi-routes: macro declaration expansion depth exceeded");
+    const edits = [];
+    for (const invocation of input.matchAll(/\b([A-Za-z_]\w*)!\s*([({[])/g)) {
+      if (edits.some((edit) => invocation.index < edit.end)) continue;
+      const rules = macros.get(invocation[1]);
+      if (!rules?.length) continue;
+      const group = rustGroup(input, invocation.index + invocation[0].length - 1);
+      for (const rule of rules) {
+        const bindings = match(rule.pattern, macroTokens(group.body));
+        if (!bindings) continue;
+        const body = rule.body.replace(/\$([A-Za-z_]\w*)/g, (whole, name) => bindings.get(name) ?? whole);
+        edits.push({ start: invocation.index, end: group.end + 1, body: expand(body, depth + 1) });
+        break;
+      }
+    }
+    let result = input;
+    for (const edit of edits.reverse()) result = result.slice(0, edit.start) + edit.body + result.slice(edit.end);
+    return result;
+  };
+  // Definition bodies aren't declarations and cannot be invocation sites.
+  let declarations = source;
+  for (const [start, end] of definitions.reverse()) declarations = declarations.slice(0, start) + declarations.slice(end);
+  return expand(declarations);
+};
+const text = expandDeclarations(readFileSync(runtimePath, "utf8"));
 const fns = new Map(); // "path::name" -> [{ pub, sig, wasmOnly, gated, path }]
 const types = new Map(); // "path::Name" -> [{ visible, generic, gated, derives }] (module-level struct / enum)
 const globs = new Map(); // module path -> [module paths it glob-imports (`use <module>::*;`)]
@@ -387,6 +499,9 @@ const handExports = new Set([...handTable.matchAll(/pub(?:\(crate\))? (?:unsafe 
 for (const m of handTable.matchAll(/exact_int_(?:binary|located)!\s*\{?\(?([^)}]*)/g)) {
   for (const name of m[1].split(",").map((s) => s.trim()).filter(Boolean)) handExports.add(name);
 }
+for (const match of handTable.matchAll(/\bfixed_int_located!\(\s*[iu](?:8|16|32|64)\s*;([^)]*)\)/g)) {
+  for (const name of match[1].split(",").map((item) => item.trim()).filter(Boolean)) handExports.add(name);
+}
 // The audited runtime cutover list owns these C definitions in the Jet object.
 // Keep route carrier metadata below: only Rust adapter bodies disappear.
 const jetRuntimeExports = new Set(readFileSync(`${repo}/Compiler/JetRuntime/exports.list`, "utf8")
@@ -482,7 +597,7 @@ function tagCarrier(ty, path) {
 function elementCarrier(ty) {
   if (ty === "String") return { jet: "Text", read: "view(w as JetCString).to_owned()", write: "handle(e) as u64" };
   if (ty === "i64") return { jet: "Word", read: "w as i64", write: "e as u64" };
-  if (fixedInts.has(ty)) return { jet: "Word", read: `w as ${ty}`, write: "e as u64" };
+  if (fixedInts.has(ty)) return { jet: "Word", slot: ty, read: `w as ${ty}`, write: "e" };
   if (ty === "bool") return { jet: "Flag", read: "w != 0", write: "e as u64" };
   if (ty === "f64") return { jet: "Float", read: "f64::from_bits(w)", write: "e.to_bits()" };
   if (ty === "char") return { jet: "Word", read: "scalar(w as i64)", write: "e as u64" };
@@ -507,6 +622,7 @@ function paramCarrier(ty, path) {
   const one = (jet, cty, expr) => ({ jet, ctys: [cty], expr: ([a]) => expr(a) });
   if (ty === "&str") return one("Text", "JetCString", (a) => `view(${a})`);
   if (ty === "&String") return one("Text", "JetCString", (a) => `&borrowed(${a})`);
+  if (ty === "Option<&String>") return one("Text", "JetCString", (a) => `(!${a}.is_null()).then(|| borrowed(${a})).as_ref()`);
   if (ty === "String") return one("Text", "JetCString", (a) => `view(${a}).to_owned()`);
   if (ty === "&i64") return one("Word", "i64", (a) => `&${a}`);
   // The prelude Ordering (by value or borrowed): the Jet enum's variant index.
@@ -531,7 +647,7 @@ function paramCarrier(ty, path) {
     const element = elementCarrier(list[2] ?? list[3]) ?? handleElement(list[2] ?? list[3], path);
     if (!element) return null;
     const items = (d, n) => `list_in(${d}, ${n}, |w| ${element.read})`;
-    return { jet: `List{elem: LowerRouteCarrier.${element.jet}}`, ctys: ["*const u64", "i64"], expr: ([d, n]) => (list[1] === "&" ? `&${items(d, n)}` : items(d, n)), handle: element.handle };
+    return { jet: `List{elem: LowerRouteCarrier.${element.jet}}`, ctys: [`*const ${element.slot ?? "u64"}`, "i64"], expr: ([d, n]) => (list[1] === "&" ? `&${items(d, n)}` : items(d, n)), handle: element.handle };
   }
   // A mutably borrowed handle: the adapter mutates the runtime value in the
   // caller's own box (the lowering lends the handle of its Write place).
@@ -568,7 +684,7 @@ function valueCarrier(ty, path, nativeInt) {
   if (ty === "()") return { jet: "Unit", cty: null, wrap: () => "()" };
   if (ty === "String") return { jet: "Text", cty: "JetCString", wrap: (v) => `handle(${v})` };
   if (ty === "i64") return { jet: "Word", cty: "i64", wrap: (v) => (nativeInt ? `crate::jet_std::jet_int_from_i64(${v})` : v) };
-  if (fixedInts.has(ty)) return { jet: "Word", cty: "i64", wrap: (v) => `crate::jet_std::jet_int_from_i64(i64::try_from(${v}).unwrap_or_else(|_| range_stop()))` };
+  if (fixedInts.has(ty)) return { jet: "Word", cty: "i64", wrap: (v) => nativeInt ? `crate::jet_std::jet_int_from_i64(i64::try_from(${v}).unwrap_or_else(|_| range_stop()))` : `(${v}) as i64` };
   if (ty === "bool") return { jet: "Flag", cty: "bool", wrap: (v) => v };
   if (ty === "f64") return { jet: "Float", cty: "f64", wrap: (v) => v };
   if (ty === "char") return { jet: "Word", cty: "i64", wrap: (v) => `(${v}) as i64` };
@@ -666,7 +782,7 @@ function resultShape(ty, path, nativeInt) {
     const element = resultElement(list[1]);
     if (!element) return null;
     return {
-      jet: `Plain{carrier: LowerRouteCarrier.List{elem: LowerRouteCarrier.${element.jet}}}`, ret: "i64", outs: [{ name: "data", cty: "*mut u64" }], handles: element.handle ? [element.handle] : [],
+      jet: `Plain{carrier: LowerRouteCarrier.List{elem: LowerRouteCarrier.${element.jet}}}`, ret: "i64", outs: [{ name: "data", cty: `*mut ${element.slot ?? "u64"}` }], handles: element.handle ? [element.handle] : [],
       body: (call) => `list_out(${call}.into_iter().map(|e| ${element.write}).collect(), data)`,
     };
   }
@@ -695,7 +811,7 @@ function resultShape(ty, path, nativeInt) {
     const element = listOf(args[0]);
     if (element) {
       return {
-        jet: `Option{some: LowerRouteCarrier.List{elem: LowerRouteCarrier.${element.jet}}}`, ret: "i64", outs: [{ name: "some", cty: "*mut u64" }, { name: "some_len", cty: "i64" }], handles: element.handle ? [element.handle] : [],
+        jet: `Option{some: LowerRouteCarrier.List{elem: LowerRouteCarrier.${element.jet}}}`, ret: "i64", outs: [{ name: "some", cty: `*mut ${element.slot ?? "u64"}` }, { name: "some_len", cty: "i64" }], handles: element.handle ? [element.handle] : [],
         body: (call) => `match ${call} {\n            ${listArm("some", element, somePattern, 1)}\n            ${nonePattern} => 0,\n        }`,
       };
     }
@@ -713,9 +829,9 @@ function resultShape(ty, path, nativeInt) {
   const err = errList ? null : valueCarrier(args[1], path, false);
   if ((!ok && !okList) || (!errList && (!err || !err.cty))) return null;
   const outs = [];
-  if (okList) outs.push({ name: "ok", cty: "*mut u64" }, { name: "ok_len", cty: "i64" });
+  if (okList) outs.push({ name: "ok", cty: `*mut ${okList.slot ?? "u64"}` }, { name: "ok_len", cty: "i64" });
   else if (ok.cty) outs.push({ name: "ok", cty: ok.cty });
-  if (errList) outs.push({ name: "err", cty: "*mut u64" }, { name: "err_len", cty: "i64" });
+  if (errList) outs.push({ name: "err", cty: `*mut ${errList.slot ?? "u64"}` }, { name: "err_len", cty: "i64" });
   else outs.push({ name: "err", cty: err.cty });
   const okArm = okList
     ? listArm("ok", okList, "Ok", 1)
@@ -805,6 +921,78 @@ for (const [symbol, route] of [...routes].sort((a, b) => a[0].localeCompare(b[0]
   adapters.push({ symbol, target, name, label, params, result, rows: route.rows });
 }
 
+// Finite scalar specializations of the existing canonical codec intrinsics.
+// These adapters marshal native storage only; Encode/Decode implementations
+// (including exact-number acceptance and diagnostics) remain the sole policy.
+const codecScalars = [
+  ["Int", "crate::jet_foundation::Numeric::JetInt", "Word", "i64", (a) => `unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(${a}) }`, (v) => `${v}.into_raw()`],
+  ["Bool", "bool", "Flag", "u8", (a) => `${a} != 0`, (v) => `${v} as u8`],
+  ["Float", "f64", "Float", "f64", (a) => a, (v) => v],
+  ["String", "String", "Text", "JetCString", (a) => `view(${a}).to_owned()`, (v) => `handle(${v})`],
+  ["Char", "char", "Word", "i64", (a) => `scalar(${a})`, (v) => `${v} as i64`],
+  ...[...fixedInts, "i64"].filter((ty) => ty !== "usize" && ty !== "isize").map((ty) => [ty.toUpperCase(), ty, "Word", "i64", (a) => `${a} as ${ty}`, (v) => `${v} as i64`]),
+];
+for (const [name, rust, jet, cty, read, write] of codecScalars) {
+  const tree = { name: "DataTree", full: "crate::jet_std::DataTree" };
+  const error = { name: "FieldError", full: "crate::jet_std::FieldError" };
+  handles.set(tree.name, tree.full);
+  handles.set(error.name, error.full);
+  const encode = `jet_rt_codec_encode_${name}`;
+  const decode = `jet_rt_codec_decode_${name}`;
+  adapters.push({
+    symbol: encode, target: "jet_codec_encode", name: encode, label: "canonical scalar Encode", rows: [],
+    params: [{ jet, ctys: [cty], expr: ([a]) => name === "String" ? `0, ${paramCarrier("&String", "").expr([a])}` : `0, &(${read(a)})` }],
+    result: { jet: 'Plain{carrier: LowerRouteCarrier.Handle{name: "DataTree"}}', ret: "*mut crate::jet_std::DataTree", outs: [], handles: [tree],
+      body: (call) => `Box::into_raw(Box::new(${call}))` },
+  });
+  adapters.push({
+    symbol: decode, target: `jet_codec_decode::<${rust}>`, name: decode, label: "canonical scalar Decode", rows: [],
+    params: [{ jet: 'Handle{name: "DataTree"}', ctys: ["*mut crate::jet_std::DataTree"], expr: ([a]) => `0, unsafe { &*${a} }`, handle: tree }],
+    result: { jet: `Result{ok: LowerRouteCarrier.${jet}, err: LowerRouteCarrier.List{elem: LowerRouteCarrier.Handle{name: "FieldError"}}}`, ret: "i64",
+      outs: [{ name: "ok", cty }, { name: "err", cty: "*mut u64" }, { name: "err_len", cty: "i64" }], handles: [error],
+      body: (call) => `match ${call} {\n            Ok(value) => { unsafe { ok.write(${write("value")}) }; 1 }\n            Err(errors) => { let n = list_out(errors.into_iter().map(|e| Box::into_raw(Box::new(e)) as u64).collect(), err); unsafe { err_len.write(n) }; 0 }\n        }` },
+  });
+}
+
+// Parse-to-tree specialization retains the typed intrinsic's exact parser and
+// FieldError envelope, then the native backend invokes the checked Decode impl.
+for (const format of ["json", "toml", "yaml"]) {
+  const symbol = `jet_rt_codec_parse_${format}`;
+  const result = resultShape("Result<jet_std::DataTree,Vec<jet_std::FieldError>>", "", false);
+  if (!result) throw new Error(`gen-c-abi-routes: missing ${format} typed tree carriers`);
+  adapters.push({ symbol, target: `jet_enc_${format}_decode::<crate::jet_std::DataTree>`, name: symbol,
+    label: `canonical typed ${format.toUpperCase()} parse`, rows: [],
+    params: [paramCarrier("&String", "")], result });
+}
+{
+  const symbol = "jet_rt_codec_under";
+  const params = [paramCarrier("&str", ""), paramCarrier("Vec<jet_std::FieldError>", "")];
+  const result = resultShape("Vec<jet_std::FieldError>", "", false);
+  if (params.some((param) => !param) || !result) throw new Error("gen-c-abi-routes: missing FieldError prefix carriers");
+  adapters.push({ symbol, target: "jet_std::FieldError::under_errors", name: symbol,
+    label: "canonical FieldError path prefix", rows: [], params, result });
+}
+
+// Numeric lowering has a raw, source-owned CAbi export: the fixed-width value
+// stays raw, while the operation/width exact-Int words are decoded by that ABI.
+// Enumerate it without generating a second wrapper under its exported name.
+adapters.push({
+  symbol: "jet_numeric_bit_count", name: "jet_numeric_bit_count", external: true,
+  rows: ["source numeric bit count"], params: Array.from({ length: 3 }, () => ({ jet: "Word" })),
+  result: { jet: "Plain{carrier: LowerRouteCarrier.Word}" },
+});
+// Duration uses the existing saturating i64 kernel on raw nanoseconds, not
+// exact-Int owner words. Its scalar ABI must not insert tag conversion.
+{
+  const symbol = "jet_i64_saturating_add";
+  const row = { symbol, target: symbol, name: symbol, label: "raw duration nanoseconds", rows: ["source duration addition"],
+    params: Array.from({ length: 2 }, () => ({ jet: "Word", ctys: ["i64"], expr: ([value]) => value })),
+    result: { jet: "Plain{carrier: LowerRouteCarrier.Word}", ret: "i64", outs: [], handles: [], body: (call) => call },
+  };
+  const index = adapters.findIndex((adapter) => adapter.symbol === symbol);
+  if (index < 0) adapters.push(row); else adapters[index] = row;
+}
+
 // Core types the runtime holds natively: the Jet name -> native Rust type
 // tables generated Rust spells its types with (Codegen/Context.rs and
 // Syntax/predicates.rs, applied in MIRRust.rs `rust_type` order, with its
@@ -822,10 +1010,11 @@ const syntaxConstants = new Map();
 // arms of one name table (`Some(name)` maps a name to itself).
 const nameTable = (source, name) => {
   const table = new Map();
-  for (const m of fnBody(source, name).matchAll(/((?:"[^"]+"\s*\|\s*)*"[^"]+"|n if [^=>{}]*==[^>{}]*?)\s*=>\s*Some\((?:"([^"]+)"|name)\)/g)) {
+  for (const m of fnBody(source, name).matchAll(/((?:"[^"]+"\s*\|\s*)*"[^"]+"|(?:Syntax::)?[A-Z][A-Z0-9_]*|n if [^=>{}]*==[^>{}]*?)\s*=>\s*Some\((?:"([^"]+)"|name)\)/g)) {
     const names = m[1].startsWith("n if")
       ? [...m[1].matchAll(/Syntax::([A-Z][A-Z0-9_]*)|"([^"]+)"/g)].map((k) => k[2] ?? syntaxConstants.get(k[1]))
-      : [...m[1].matchAll(/"([^"]+)"/g)].map((k) => k[1]);
+      : m[1].startsWith('"') ? [...m[1].matchAll(/"([^"]+)"/g)].map((k) => k[1])
+      : [syntaxConstants.get(m[1].replace(/^Syntax::/, ""))];
     for (const jetName of names) {
       if (!jetName) throw new Error(`gen-c-abi-routes: unresolved Syntax constant in ${name}: ${m[1]}`);
       if (!table.has(jetName)) table.set(jetName, m[2] ?? jetName);
@@ -964,8 +1153,8 @@ rs.push("    fn scalar(value: i64) -> char {");
 rs.push("        u32::try_from(value).ok().and_then(char::from_u32).unwrap_or(char::REPLACEMENT_CHARACTER)");
 rs.push("    }");
 rs.push("");
-rs.push("    /// A List argument's `len` eight-byte slots at `data`, as Rust values.");
-rs.push("    fn list_in<T>(data: *const u64, len: i64, item: impl Fn(u64) -> T) -> Vec<T> {");
+rs.push("    /// A List argument uses its declared fixed-integer width or word carrier.");
+rs.push("    fn list_in<S: Copy, T>(data: *const S, len: i64, item: impl Fn(S) -> T) -> Vec<T> {");
 rs.push("        if len <= 0 || data.is_null() {");
 rs.push("            return Vec::new();");
 rs.push("        }");
@@ -975,7 +1164,7 @@ rs.push("    }");
 rs.push("");
 rs.push("    /// A List result: a slot buffer from the allocator `jet_rt_free` returns");
 rs.push("    /// to (null when empty), written to `data`; returns the length.");
-rs.push("    fn list_out(words: Vec<u64>, data: *mut *mut u64) -> i64 {");
+rs.push("    fn list_out<S: Copy>(words: Vec<S>, data: *mut *mut S) -> i64 {");
 rs.push("        let len = words.len();");
 rs.push("        let buffer = if len == 0 {");
 rs.push("            std::ptr::null_mut()");
@@ -1254,6 +1443,81 @@ for (const [name, full] of handleRows) {
     rs.push("    }");
   }
 }
+// Temporary representation seam (#19): removed when the checked Jet-owned CSV
+// intrinsic/native DataTree+FieldError path replaces this canonical row kernel.
+// No CSV, user-shape or row-error policy is reproduced here.
+rs.push(`
+    extern "C" {
+        #[link_name = "jet_rt_alloc"]
+        fn codec_alloc(size: usize, align: usize) -> *mut u8;
+        #[link_name = "jet_rt_free"]
+        fn codec_free(value: *mut u8, size: usize, align: usize);
+    }
+    /// Canonical CSV rows with a checked native Decode callback.
+    /// invoke(borrowed_tree, value_out, tag_out, errors_out, length_out) -> OCB1
+    /// consumed mask zero. Outs remain unwritten on delivered native Stop.
+    #[no_mangle]
+    pub unsafe extern "C" fn jet_rt_codec_csv(
+        text: JetCString, invoke: usize,
+        meta: *const crate::jet_c_abi_iter::NativeMeta,
+        values: *mut crate::jet_c_abi_iter::Header,
+        errors: *mut *mut u64, errors_len: *mut i64,
+    ) -> i64 {
+        guard(|| {
+            use crate::jet_c_abi_iter::{Meta, NativeValue, Header};
+            let meta = Meta::copy(meta);
+            let invoke: unsafe extern "C" fn(*mut crate::jet_std::DataTree, *mut u8, *mut u64, *mut *mut u64, *mut i64) -> u64 = std::mem::transmute(invoke);
+            let rows = crate::jet_ring_csv_parse(${paramCarrier("&String", "").expr(["text"])}, &",".to_string(), false, false)
+                .map_err(crate::jet_std::FieldError::one);
+            let decoded = rows.and_then(|rows| crate::jet_std::jet_enc_csv_decode_rows(
+                rows,
+                |mut tree| {
+                    let mut value = NativeValue::uninitialized(meta.clone());
+                    let mut tag = std::mem::MaybeUninit::<u64>::uninit();
+                    let mut errors = std::ptr::null_mut();
+                    let mut count = 0i64;
+                    let consumed = crate::jet_native_callback_body(|| invoke(&mut tree, value.slot_mut(), tag.as_mut_ptr(), &mut errors, &mut count));
+                    assert_eq!(consumed, 0, "typed CSV lends its DataTree input");
+                    if tag.assume_init() != 0 {
+                        Ok(value.initialized())
+                    } else {
+                        let failures = if count == 0 {
+                            assert!(errors.is_null(), "empty native FieldError handle array is null");
+                            Vec::new()
+                        } else {
+                            let failures = std::slice::from_raw_parts(errors.cast::<*mut crate::jet_std::FieldError>(), count as usize)
+                                .iter().map(|error| *Box::from_raw(*error)).collect();
+                            codec_free(errors.cast(), count as usize * std::mem::size_of::<u64>(), 8);
+                            failures
+                        };
+                        Err(failures)
+                    }
+                },
+                crate::jet_std::FieldError::under_errors,
+                crate::jet_std::DataTree::Text,
+                crate::jet_std::DataTree::Object,
+            ));
+            match decoded {
+                Ok(rows) => {
+                    let length = rows.len();
+                    let stride = meta.stride();
+                    let data = if length == 0 { std::ptr::null_mut() } else { codec_alloc(length * stride, 8) };
+                    for (index, row) in rows.into_iter().enumerate() { row.put(data.add(index * stride)); }
+                    values.write(Header { len: length, cap: length, data });
+                    1
+                }
+                Err(failures) => {
+                    let length = failures.len();
+                    let data = if length == 0 { std::ptr::null_mut() } else { codec_alloc(length * std::mem::size_of::<u64>(), 8).cast::<u64>() };
+                    for (index, failure) in failures.into_iter().enumerate() { data.add(index).write(Box::into_raw(Box::new(failure)) as u64); }
+                    errors.write(data);
+                    errors_len.write(length as i64);
+                    0
+                }
+            }
+        })
+    }
+`);
 for (const adapter of adapters) {
   if (adapter.external || jetRuntimeExports.has(adapter.name)) continue;
   const params = [];
@@ -1266,7 +1530,7 @@ for (const adapter of adapters) {
   const ret = adapter.result.ret ? ` -> ${adapter.result.ret}` : "";
   const call = `crate::${adapter.target}(${adapter.params.map((param, index) => param.expr(names[index])).join(", ")})`;
   rs.push("");
-  rs.push(`    /// ${adapter.rows.join(", ")}`);
+  rs.push(`    /// ${adapter.rows.join(", ")}`.trimEnd());
   rs.push("    #[no_mangle]");
   rs.push(`    pub extern "C" fn ${adapter.name}(${params.join(", ")})${ret} {`);
   rs.push(`        guard(|| ${adapter.result.body(call)})`);

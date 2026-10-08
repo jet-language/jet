@@ -24,6 +24,7 @@ if (!outDir) {
 }
 const runtimeLib = process.env.JET_RUNTIME_C_LIB;
 const jetRun = process.env.JET_RUN;
+const routeSource = readFileSync(`${dirname(fileURLToPath(import.meta.url))}/../Source/Lower/RuntimeRoutes.jet`, "utf8");
 // Match run-lower-fixtures.mjs's focused assembly selection.
 const only = new Set((process.env.FX_ONLY ?? "").split(",").filter(Boolean));
 
@@ -50,6 +51,12 @@ if (existsSync(fixtureDir)) {
       // hand-linked static executable with no object or in-memory image.
       const only = /^\/\/ expect-static-only ([\w-]+)\s*$/.exec(line);
       if (only) expected.find((fixture) => fixture.name === only[1]).staticOnly = true;
+      // Compiled-runtime kernels have no freestanding implementation. Never
+      // treat a missing native runtime as a successful skipped witness.
+      const runtimeOnly = /^\/\/ expect-runtime-only ([\w-]+)\s*$/.exec(line);
+      if (runtimeOnly) expected.find((fixture) => fixture.name === runtimeOnly[1]).runtimeOnly = true;
+      const requiresRoute = /^\/\/ expect-requires-route ([\w-]+) ([A-Za-z0-9_]+)\s*$/.exec(line);
+      if (requiresRoute) expected.find((fixture) => fixture.name === requiresRoute[1]).requiresRoute = requiresRoute[2];
       // `// expect-stderr <name>: <JSON string>` (after its expect-stdout
       // line): the exact stderr, e.g. a stop report; unchecked when absent.
       const stderr = /^\/\/ expect-stderr ([\w-]+): (".*")\s*$/.exec(line);
@@ -137,14 +144,27 @@ if (runtimeLib && jetRun) {
 }
 
 for (const fixture of process.argv.includes("--abi") ? [] : expected.filter(({ name }) => only.size === 0 || only.has(name))) {
-  const path = `${outDir}/${fixture.name}.elf`;
-  if (!existsSync(path)) {
-    console.log(`${fixture.name}: MISSING ${path}`);
-    failures += 1;
+  if (fixture.requiresRoute && !routeSource.includes(`symbol: "${fixture.requiresRoute}"`)) {
+    console.log(`${fixture.name}: REFUSED (requires canonical route ${fixture.requiresRoute}; lowering refusal witness runs in unit.jet)`);
     continue;
   }
-  check(`${fixture.name} (static image)`, path, fixture);
-  if (!runtimeLib || fixture.staticOnly) continue;
+  if (!fixture.runtimeOnly) {
+    const path = `${outDir}/${fixture.name}.elf`;
+    if (!existsSync(path)) {
+      console.log(`${fixture.name}: MISSING ${path}`);
+      failures += 1;
+      continue;
+    }
+    check(`${fixture.name} (static image)`, path, fixture);
+  }
+  if (!runtimeLib) {
+    if (fixture.runtimeOnly) {
+      console.log(`${fixture.name}: MISSING required compiled runtime library`);
+      failures += 1;
+    }
+    continue;
+  }
+  if (fixture.staticOnly) continue;
   checkMemoryImage(fixture);
   if (sharedRuntime) {
     check(`${fixture.name} (in-process Jet loader)`, jetRun, fixture, ["run", "load/load.jet", fixture.name, sharedRuntime], { cwd: outDir, timeout: 600000 }, false);
@@ -157,6 +177,17 @@ for (const fixture of process.argv.includes("--abi") ? [] : expected.filter(({ n
     continue;
   }
   check(`${fixture.name} (compiled runtime)`, program, fixture);
+  if (fixture.name === "flat-map-owned" || fixture.name === "list-try-collect") {
+    const rail = `${dirname(fileURLToPath(import.meta.url))}/check-collector-alloc.c`;
+    const balanced = `${outDir}/${fixture.name}.balanced`;
+    const balanceLink = spawnSync(process.env.CC ?? "cc", [`${outDir}/${fixture.name}.o`, rail, runtimeLib, "-Wl,--wrap=main,--wrap=jet_rt_alloc,--wrap=jet_rt_free", "-lpthread", "-ldl", "-lm", "-o", balanced], { encoding: "utf8" });
+    if (balanceLink.status !== 0) {
+      console.log(`${fixture.name} (allocator balance): LINK FAILED\n${balanceLink.stderr}`);
+      failures += 1;
+    } else {
+      check(`${fixture.name} (allocator balance)`, balanced, { ...fixture, stderr: "collector-alloc: balanced live=0\n" });
+    }
+  }
 }
 
 // Stop points (#4720): stop-points.o linked with the compiled runtime and a
@@ -186,14 +217,19 @@ if (runtimeLib && !process.argv.includes("--abi") && existsSync(`${outDir}/stop-
   }
 }
 if (runtimeLib && !process.argv.includes("--abi")) {
-  const source = `${dirname(fileURLToPath(import.meta.url))}/check-record-sequences.c`;
-  const program = `${outDir}/record-sequences.hosted`;
-  const link = spawnSync(process.env.CC ?? "cc", [source, runtimeLib, "-lpthread", "-ldl", "-lm", "-o", program], { encoding: "utf8" });
-  if (link.status !== 0) {
-    console.log(`record-sequences: LINK FAILED\n${link.stderr}`);
-    failures += 1;
-  } else {
-    check("record-sequences (borrowed storage, duplicate order)", program, { stdout: "", status: 0 });
+  for (const [name, description] of [
+    ["record-sequences", "borrowed storage, duplicate order, byte boundaries"],
+    ["codecs", "canonical scalar policy, typed parse, error ownership"],
+  ]) {
+    const source = `${dirname(fileURLToPath(import.meta.url))}/check-${name}.c`;
+    const program = `${outDir}/${name}.hosted`;
+    const link = spawnSync(process.env.CC ?? "cc", [source, runtimeLib, "-lpthread", "-ldl", "-lm", "-o", program], { encoding: "utf8" });
+    if (link.status !== 0) {
+      console.log(`${name}: LINK FAILED\n${link.stderr}`);
+      failures += 1;
+    } else {
+      check(`${name} (${description})`, program, { stdout: "", status: 0 });
+    }
   }
 }
 console.log(failures === 0 ? "all native fixtures match" : `${failures} native fixture check(s) failed`);

@@ -63,6 +63,7 @@ if (from <= 0 && until >= 0) {
     "Compiler/JetFoundation/Source/Text/RustDebug.jet",
     "Compiler/JetBackend/Source/LIR/LIR.jet", "Compiler/JetBackend/Source/LIR/Lint.jet",
     ...sorted("Compiler/JetBackend/Source/Lower"),
+    ...sorted("Compiler/JetBackend/Source/Opt"),
     "Compiler/JetBackend/Source/X64/Encoder.jet",
     ...(existsSync(join(repo, "Compiler/JetBackend/Source/X64/InlineAsm.jet")) ? ["Compiler/JetBackend/Source/X64/InlineAsm.jet"] : []),
     "Compiler/JetBackend/Source/X64/RegAlloc.jet", "Compiler/JetBackend/Source/X64/Select.jet",
