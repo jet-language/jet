@@ -2606,11 +2606,10 @@ impl<'a> Checker<'a> {
         }
         // Source-owned Core members are ordinary checked Jet functions: the
         // caller sees the wrapper's declared contract (`-> T Never!`,
-        // `-> T E!`), the same row every backend calls. Only the source module
-        // itself keeps the fixed signature, so its `core.<same module>`
-        // provider calls do not recurse back into the wrapper. The module is
-        // identified by its registered alias, never by file name: a user
-        // `uuid.jet` is not `Core/crypto/uuid.jet`.
+        // `-> T E!`), the same row every backend calls.
+        // A same-module native provider row remains a host call. Without a host
+        // row, a qualified source function is still an ordinary declaration,
+        // including calls from its own module.
         if let Some(source) =
             jet_foundation::CoreModuleExports::core_source_module(module)
         {
@@ -2618,7 +2617,9 @@ impl<'a> Checker<'a> {
                 module, name, args.len(),
                 args.first().is_some_and(|arg| arg.convention == AccessConvention::Move),
             ) || (module == "core.encoding.json" && name == "__parse_typed"))
-                && self.name_ledger.module_alias(self.module_idx) != Some(source.alias)
+                && (self.name_ledger.module_alias(self.module_idx) != Some(source.alias)
+                    || crate::Syntax::core_call(module, name)
+                        .is_none_or(|row| row.source_member().is_some()))
                 // Explicit target rows keep the old specialized argument
                 // checker; TIR forwards only its normalized operands.
                 && !crate::Syntax::core_call(module, name)
@@ -2634,7 +2635,8 @@ impl<'a> Checker<'a> {
                 let source_idx = self.modules.and_then(|modules| {
                     modules
                         .iter()
-                        .position(|candidate| candidate.module_alias == source.alias)
+                        .position(|candidate| candidate.registry.core_source_module
+                            .is_some_and(|loaded| loaded.alias == source.alias && loaded.path == source.path))
                 });
                 if let (Some(alias), Some(source_idx)) = (alias, source_idx) {
                     return self.infer_import_call(

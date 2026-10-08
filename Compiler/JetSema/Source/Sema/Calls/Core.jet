@@ -6,6 +6,7 @@
 use jet_foundation.[
     AccessConvention,
     CORE_CALL_COVERAGE_SEMA,
+    CORE_SOURCE_OWNED_ROWS,
     Call,
     CallArg,
     CoreCallDefault,
@@ -173,13 +174,17 @@ fn sema_call_core_source_target(environment: SemaScopeEnvironment, module_identi
     module_index :: sema_registration_module_index(graph, module_identity) ?? return None
     // Module rows are read in place; binding one would copy its whole program.
     source_name :: graph.modules[module_index].module_name
+    if sema_call_core_module_identity(environment, source_name) != Val(module_identity) -> return None
     if source_name == "core.http.client" && member == "request" -> return None
     if source_name == "core.encoding.json" && member == "decode" && type_args.len() != 0 -> return None
     caller_index :: sema_registration_module_index(graph, environment.module_identity) ?? return None
-    // Only the source module itself keeps the host row for its own members
-    // (Rust core_call.rs: by registered identity, never by file name, so a
-    // user `perf.jet` is not `Core/perf/perf.jet`).
-    if !registered_source_target && graph.modules[module_index].module_identity == graph.modules[caller_index].module_identity -> return None
+    // Same-owner native providers keep their host row. A source-only function
+    // has no such row and still resolves to its declaration from this module.
+    if !registered_source_target && graph.modules[module_index].module_identity == graph.modules[caller_index].module_identity {
+        if core_call(source_name, member) == .Val(record) {
+            if record.symbol != CoreCallSymbol.SourceOwned -> return None
+        }
+    }
     private_typed_json_seam :: member == "__parse_typed" && source_name == "core.encoding.json" && graph.modules[module_index].module_identity.starts_with("<corelib>/") && graph.modules[caller_index].module_name == "core.data" && graph.modules[caller_index].module_identity.starts_with("<corelib>/")
     export :: (if registered_source_target || private_typed_json_seam -> sema_registration_resolve_export(graph, module_index, member, module_identity, graph.modules[module_index].package_identity, [String]{}) else -> sema_registration_resolve_export(graph, module_index, member, environment.module_identity, environment.package_identity, [String]{})) ?? return None
     row :: sema_call_export_function_row(environment, export) ?? {
@@ -258,7 +263,10 @@ fn sema_call_core_module_identity(environment: SemaScopeEnvironment, module_name
     graph_option :: environment.registration_graph
     graph :: graph_option ?? return None
     loop module_row in graph.modules {
-        if module_row.module_name == module_name -> return Val(module_row.module_identity)
+        if module_row.module_name != module_name || !sema_module_is_core_source(module_row.module_identity) -> next
+        loop owner in CORE_SOURCE_OWNED_ROWS {
+            if owner.module_name == module_name && owner.alias == module_row.core_source_alias && module_row.source_file == "<corelib>/{owner.path}" -> return Val(module_row.module_identity)
+        }
     }
     None
 }

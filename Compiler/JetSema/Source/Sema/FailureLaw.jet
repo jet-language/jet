@@ -24,6 +24,7 @@ use jet_foundation.[
     TStmt,
     Type,
     ast_func,
+    core_module_has_type,
     expr_span,
     symbol_id,
     tir_expr_children,
@@ -448,6 +449,25 @@ pub fn sema_check_failure_contract_type(ty: Type, span: Span, in_return: Bool, g
         .Named(name) -> {
             if name == "Any" -> &diagnostics.push(sema_no_any_type(span))
             if name == "Never" && !in_return -> &diagnostics.push(sema_error("E2422", span, "`Never` cannot be used in a value position.", "`Never` has no values; only a function return slot or function-type return slot may promise it (D-NEVER2=B).", "Move `Never` to a function return type, or use `()`/another value type."))
+            // IOOperation has compiler enum rows, but no public annotation origin.
+            // Reuse the Core-only literal origin gate; user declarations stay E0119.
+            unresolved := name == "IOOperation" && !sema_module_is_core_source(environment.module_identity)
+            // Owner-only impl metadata cannot manufacture a qualified export.
+            if name.ends_with(".IOOperation") || name.ends_with(".Condition") {
+                parts :: name.split(".").to_list()
+                if sema_call_core_import_module(environment, parts[0]) == .Val(imported_module) {
+                    module_name := imported_module
+                    loop index in 1..<(parts.len() - 1) -> module_name = "{module_name}.{parts[index]}"
+                    unresolved = !core_module_has_type(module_name, parts[parts.len() - 1])
+                }
+            }
+            if unresolved && !generic_names.contains(name) {
+                declared := false
+                if environment.registration_graph == .Val(graph) {
+                    declared = sema_type_resolve_nominal_row(graph, ty, environment.module_identity) != None
+                }
+                if !declared -> &diagnostics.push(sema_error("E0119", span, "there's no type called `{name}`", "the types are `Int`, `Float`, `Bool`, and `String` (plus types you define)", "check the spelling, or define the struct or enum first"))
+            }
         }
         .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> sema_check_failure_contract_type(inner, span, false, generic_names, environment, &diagnostics)
         .Map(key, _, value) -> {
