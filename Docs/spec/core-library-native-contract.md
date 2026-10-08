@@ -395,6 +395,16 @@ E4 descriptors, which must not be freed, grown, or consumed. Signed validity
 timestamps remain raw i64 facts. `TLSCertificateWitness.c` exercises deep clones,
 parent lifetimes, list growth, and these borrowed projections.
 
+The native database value carrier owns only its active variant's children.
+Integer payloads remain signed i64 facts; floating equality follows IEEE rules
+(NaN is unequal even to itself, while signed zeros compare equal). Blob
+construction consumes its list holder and transfers the buffer; its getter
+borrows the inline list header. Text getters instead return independent owners.
+`DBValues.jet` reuses the shared plain Rust f64 Display mode for SQL value
+rendering, not Jet's Float Debug mode. `DBError` Show, Display, and Debug all
+return the raw message, without adding record syntax or quotes. The real-object
+`DBValuesWitness.c` pins these contracts and active-child ownership.
+
 ## Dependency order
 
 Core work follows the dependency graph. These categories describe dependency
