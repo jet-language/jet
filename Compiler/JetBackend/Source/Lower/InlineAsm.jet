@@ -106,7 +106,8 @@ fn lower_asm_import_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
     }
     lowered := [LIRValueID]{}
     writebacks := [LowerWriteBack]{}
-    if !lower_call_args(p, c, &m, &f, args, &lowered, &writebacks) {
+    temporaries := [LIRValueID]{}
+    if !lower_call_args(p, c, &m, &f, args, &lowered, &writebacks, &temporaries) {
         return
     }
     dst := lower_result(p, c, &m, &f, instruction)
@@ -116,4 +117,5 @@ fn lower_asm_import_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
         }
     }
     lower_call_runtime_typed(c, &m, &f, instruction, row.symbol, lowered, dst)
+    loop temporary in temporaries -> lower_emit(&f, LIRInst.Drop{value: temporary})
 }
