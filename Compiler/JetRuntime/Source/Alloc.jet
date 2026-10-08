@@ -18,13 +18,13 @@
 // The runtime object puts jet_rt_alloc_init in .init_array, so initialization
 // precedes all user code in both programs and entryless libraries. There is no
 // lazy initialization or separate jet_rt_main initialization mechanism.
-alloc_root := I64{0}
+alloc_root :: I64{0}
 
 // Layout::from_size_align(size.max(1), align): alignment must be a nonzero
 // power of two, and rounding the size to alignment must fit isize::MAX.
 fn alloc_layout_valid(size: I64, align: I64) -> Bool Never! {
-    if (size < I64{0} || align <= I64{0}) -> return false
-    if ((align & wrapping(align - I64{1})) != I64{0}) -> return false
+    if (size < I64{0} || align <= I64{0}) { return false }
+    if ((align & wrapping(align - I64{1})) != I64{0}) { return false }
     effective :: if (size == I64{0}) -> I64{1} else -> size
     effective <= wrapping(I64{9223372036854775807} - wrapping(align - I64{1}))
 }
@@ -34,7 +34,7 @@ fn alloc_layout_valid(size: I64, align: I64) -> Bool Never! {
 // consumes a byte belonging to a neighbouring block.
 fn alloc_class(size: I64, align: I64) -> I64 Never! {
     effective :: if (size == I64{0}) -> I64{1} else -> size
-    if (effective > I64{4096} || align > I64{4096}) -> return I64{0}
+    if (effective > I64{4096} || align > I64{4096}) { return I64{0} }
     needed :: wrapping(effective + I64{16} + align - I64{1})
     slot := I64{32}
     loop slot < needed && slot < (I64{4096}) -> slot = wrapping(slot * I64{2})
@@ -59,14 +59,14 @@ fn alloc_align(address: I64, align: I64) -> I64 Never! {
 fn alloc_map_try(bytes: I64) -> I64 {
     #Unsafe("anonymous private mmap owns fresh writable bytes and cannot alias a live heap block; a failed syscall produces no allocation") {
         address :: os_syscall_i64(I64{9}, I64{0}, bytes, I64{3}, I64{34}, I64{-1}, I64{0})
-        if (address < I64{0}) -> return I64{0}
+        if (address < I64{0}) { return I64{0} }
         return address
     }
 }
 
 fn alloc_map(bytes: I64, failed_size: I64) -> I64 {
     address :: alloc_map_try(bytes)
-    if (address == I64{0}) -> alloc_stop(false, failed_size)
+    if (address == I64{0}) { alloc_stop(false, failed_size) }
     address
 }
 
@@ -76,9 +76,10 @@ fn alloc_unmap(address: I64, bytes: I64) {
     }
 }
 
-#Export(c)
-fn jet_rt_alloc_init() {
-    if (alloc_root != I64{0}) -> return
+#Export(c) fn jet_rt_alloc_init() {
+    if (alloc_root != I64{0}) {
+        return
+    }
     // mmap is zero-filled: the lock and every free-list head start at zero.
     alloc_root = alloc_map(I64{4096}, I64{4096})
 }
@@ -107,7 +108,7 @@ fn alloc_unlink(slab: I64) {
             }
             else -> os_store_i64(previous, next_slab)
         }
-        if (next_slab != I64{0}) -> os_store_i64(wrapping(next_slab + I64{8}), previous)
+        if (next_slab != I64{0}) { os_store_i64(wrapping(next_slab + I64{8}), previous) }
         os_store_i64(slab, I64{0})
         os_store_i64(wrapping(slab + I64{8}), I64{0})
     }
@@ -119,14 +120,14 @@ fn alloc_link(slab: I64, head: I64) {
         first :: os_load_i64(head)
         os_store_i64(slab, first)
         os_store_i64(wrapping(slab + I64{8}), I64{0})
-        if (first != I64{0}) -> os_store_i64(wrapping(first + I64{8}), slab)
+        if (first != I64{0}) { os_store_i64(wrapping(first + I64{8}), slab) }
         os_store_i64(head, slab)
     }
 }
 
 fn alloc_new_slab(head: I64, slot: I64) -> I64 {
     slab :: alloc_map_try(I64{65536})
-    if (slab == I64{0}) -> return I64{0}
+    if (slab == I64{0}) { return I64{0} }
     first :: wrapping(slab + (if (slot > I64{64}) -> slot else -> I64{64}))
     end :: wrapping(slab + I64{65536})
     block := first
@@ -150,7 +151,7 @@ fn alloc_small(root: I64, size: I64, align: I64, slot: I64) -> I64 {
     pointer := I64{0}
     #Unsafe("the held heap lock protects the class list, block links and slab live count; the chosen block has at least size+16+align-1 bytes") {
         slab := os_load_i64(head)
-        if (slab == I64{0}) -> slab = alloc_new_slab(head, slot)
+        if (slab == I64{0}) { slab = alloc_new_slab(head, slot) }
         if (slab == I64{0}) {
             alloc_unlock(root)
             return I64{0}
@@ -159,9 +160,9 @@ fn alloc_small(root: I64, size: I64, align: I64, slot: I64) -> I64 {
         remaining :: os_load_i64(block)
         os_store_i64(wrapping(slab + I64{16}), remaining)
         live :: os_load_i64(wrapping(slab + I64{24}))
-        if (live == I64{0}) -> os_store_i64(wrapping(head + I64{64}), I64{0})
+        if (live == I64{0}) { os_store_i64(wrapping(head + I64{64}), I64{0}) }
         os_store_i64(wrapping(slab + I64{24}), wrapping(live + I64{1}))
-        if (remaining == I64{0}) -> alloc_unlink(slab)
+        if (remaining == I64{0}) { alloc_unlink(slab) }
         pointer = alloc_align(wrapping(block + I64{16}), align)
         os_store_i64(wrapping(pointer - I64{16}), slab)
         os_store_i64(wrapping(pointer - I64{8}), block)
@@ -179,7 +180,7 @@ fn alloc_large(size: I64, align: I64) -> I64 {
     if overhead > limit || effective > wrapping(limit - overhead) -> return I64{0}
     bytes :: alloc_align(wrapping(effective + I64{16} + overhead), I64{4096})
     mapping :: alloc_map_try(bytes)
-    if (mapping == I64{0}) -> return I64{0}
+    if (mapping == I64{0}) { return I64{0} }
     pointer :: alloc_align(wrapping(mapping + I64{16}), align)
     #Unsafe("pointer's two header words and the aligned payload are wholly within this fresh page-rounded mapping") {
         os_store_i64(wrapping(pointer - I64{16}), mapping)
@@ -192,8 +193,9 @@ fn alloc_large(size: I64, align: I64) -> I64 {
 // still uses the same heap and exact-layout free as ordinary native storage.
 fn alloc_try_validated(size: I64, align: I64) -> I64 {
     slot :: alloc_class(size, align)
-    if (slot == I64{0}) -> alloc_large(size, align)
-    else -> alloc_small(alloc_root, size, align, slot)
+    if (slot == I64{0}) { alloc_large(size, align) } else {
+        alloc_small(alloc_root, size, align, slot)
+    }
 }
 
 fn alloc_try(size: I64, align: I64) -> I64 {
@@ -201,18 +203,18 @@ fn alloc_try(size: I64, align: I64) -> I64 {
     alloc_try_validated(size, align)
 }
 
-#Export(c)
-fn jet_rt_alloc(size: I64, align: I64) -> I64 {
+#Export(c) fn jet_rt_alloc(size: I64, align: I64) -> I64 {
     if !alloc_layout_valid(size, align) -> alloc_stop(true, size)
     pointer :: alloc_try_validated(size, align)
-    if (pointer == I64{0}) -> alloc_stop(false, if (size == I64{0}) -> I64{1} else -> size)
+    if (pointer == I64{0}) { alloc_stop(false, if (size == I64{0}) -> I64{1} else -> size) }
     pointer
 }
 
-#Export(c)
-fn jet_rt_free(pointer: I64, size: I64, align: I64) {
+#Export(c) fn jet_rt_free(pointer: I64, size: I64, align: I64) {
     // Match the original C ABI's null no-op before validating its layout.
-    if (pointer == I64{0}) -> return
+    if (pointer == I64{0}) {
+        return
+    }
     if !alloc_layout_valid(size, align) -> alloc_stop(true, size)
     if (alloc_class(size, align) == I64{0}) {
         #Unsafe("the lowering returns this still-live direct allocation with exactly its original size and alignment") {
@@ -233,11 +235,10 @@ fn jet_rt_free(pointer: I64, size: I64, align: I64) {
         os_store_i64(wrapping(slab + I64{16}), block)
         os_store_i64(wrapping(slab + I64{24}), live)
         head :: os_load_i64(wrapping(slab + I64{32}))
-        if (free == I64{0}) -> alloc_link(slab, head)
+        if (free == I64{0}) { alloc_link(slab, head) }
         if (live == I64{0}) {
             empty_cell :: wrapping(head + I64{64})
-            if (os_load_i64(empty_cell) == I64{0}) -> os_store_i64(empty_cell, slab)
-            else {
+            if (os_load_i64(empty_cell) == I64{0}) { os_store_i64(empty_cell, slab) } else {
                 alloc_unlink(slab)
                 alloc_unmap(slab, I64{65536})
             }
@@ -249,16 +250,20 @@ fn jet_rt_free(pointer: I64, size: I64, align: I64) {
 // Write a little-endian packed literal without a String/list carrier or a
 // mapping. The checked count bounds the stack word borrowed by the OS leaf.
 fn alloc_write_word(word: I64, count: I64) {
-    if (count < I64{0} || count > I64{8}) -> return
+    if (count < I64{0} || count > I64{8}) {
+        return
+    }
     remaining := count
     bytes := word
     #Unsafe("remaining is in 1..=8, so write borrows only the initialized stack word; a short write advances within it") {
         loop remaining > (I64{0}) {
             written :: os_write_word_i64(I64{2}, bytes, remaining)
-            if (written == I64{-4}) -> next
-            if (written <= I64{0}) -> return
+            if (written == I64{-4}) { next }
+            if (written <= I64{0}) {
+                return
+            }
             remaining = wrapping(remaining - written)
-            if (remaining > I64{0}) -> bytes = bytes >> wrapping(written * I64{8})
+            if (remaining > I64{0}) { bytes = bytes >> wrapping(written * I64{8}) }
         }
     }
 }
@@ -294,5 +299,7 @@ fn alloc_stop(invalid_layout: Bool, size: I64) {
         _ := os_syscall_i64(I64{62}, pid, I64{6}, I64{0}, I64{0}, I64{0}, I64{0})
         _ := os_syscall_i64(I64{231}, I64{127}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     }
-    loop {}
+    loop {
+
+    }
 }

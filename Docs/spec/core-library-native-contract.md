@@ -129,6 +129,16 @@ descriptor at construction, before any output slot is allocated. A blocking
 pull writes directly into that slot; closed and stopped pulls leave it
 unwritten. Dropping the iterator releases the receiver exactly once.
 
+Native root Shared guards retain the existing cell and hold its canonical
+reader/writer permit for the entire consumer scope. Guard payload addresses
+borrow that cell's descriptor-owned storage; acquisition does not copy it or
+allocate a guard token. Concurrent readers coexist, writers exclude readers,
+and waiting writers precede new readers. Scope cleanup releases the permit
+before dropping its retained cell owner, so final payload cleanup runs outside
+the lock. An edit guard commits one revision on drop even without a write or
+on an already-delivered stop rail. Generation exhaustion also releases both
+permit and owner before delivering its stop.
+
 At native C byte boundaries, `List<U8>` retains its word-stride layout.
 `jet_rt_bytes_pack` borrows that header and returns an independently owned
 packed byte buffer; `jet_rt_bytes_free` releases it with its original length

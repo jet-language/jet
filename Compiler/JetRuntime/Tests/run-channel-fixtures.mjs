@@ -134,7 +134,7 @@ if (mode === 'assemble') {
   writeFileSync(join(out,`${mode}.txt`),result.stdout+result.stderr);
   if(result.stderr!=='')throw Error('fixture wrote stderr');
   for(const text of ['queue/close/owners ok','select source-order/probe/timers ok','shared concurrent edits/drop ok','select wake handoff parity ok'])if(!result.stdout.includes(text+'\n'))throw Error(`missing ${text}`);
-  if(!seed)for(const text of ['reservations/stopped output/permit cleanup ok','shared concurrent readers/writer priority ok'])if(!result.stdout.includes(text+'\n'))throw Error(`missing ${text}`);
+  if(!seed)for(const text of ['reservations/stopped output/permit cleanup ok','shared concurrent readers/writer priority ok','shared guards concurrent readers/writer exclusion/priority ok','shared guard retain/drop/read-only commit/overflow stop ok'])if(!result.stdout.includes(text+'\n'))throw Error(`missing ${text}`);
   if(mode==='cross'&&!result.stdout.includes('Closed Rust/Jet ownership cross ok\n'))throw Error('cross ownership fixture did not execute');
 }
 console.log(`channel fixtures ${mode}: ok`);
