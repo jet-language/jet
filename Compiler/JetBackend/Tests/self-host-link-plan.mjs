@@ -18,31 +18,7 @@ for (const match of registry.matchAll(/core_call_receiver_with_symbol\(\[String\
   if (!receiverCandidates.has(match[2])) receiverCandidates.set(match[2], []);
   receiverCandidates.get(match[2]).push({ receiver: match[1].replace(/"/g, ""), symbol: match[3] });
 }
-// Remove comments and string bodies from call-site scanning while preserving
-// offsets/newlines. FFI metadata and emitted symbol strings use raw source below.
-function codeOnly(text) {
-  let result = "", at = 0, blockDepth = 0;
-  while (at < text.length) {
-    if (blockDepth) {
-      if (text.startsWith("/*", at)) { blockDepth++; result += "  "; at += 2; }
-      else if (text.startsWith("*/", at)) { blockDepth--; result += "  "; at += 2; }
-      else { result += text[at] === "\n" ? "\n" : " "; at++; }
-    } else if (text.startsWith("//", at)) {
-      while (at < text.length && text[at] !== "\n") { result += " "; at++; }
-    } else if (text.startsWith("/*", at)) { blockDepth = 1; result += "  "; at += 2; }
-    else if (text[at] === '"') {
-      const triple = text.startsWith('"""', at);
-      const delimiter = triple ? '"""' : '"';
-      result += " ".repeat(delimiter.length); at += delimiter.length;
-      while (at < text.length && !text.startsWith(delimiter, at)) {
-        if (!triple && text[at] === "\\") { result += "  "; at += 2; }
-        else { result += text[at] === "\n" ? "\n" : " "; at++; }
-      }
-      if (at < text.length) { result += " ".repeat(delimiter.length); at += delimiter.length; }
-    } else { result += text[at]; at++; }
-  }
-  return result;
-}
+import { codeOnly } from "./self-host-source.mjs";
 const rows = new Map();
 function add(kind, route, symbol, path, offset, refusal = "") {
   const key = `${kind}\t${route}\t${symbol}`;
