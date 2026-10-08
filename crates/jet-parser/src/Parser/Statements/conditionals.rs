@@ -1329,7 +1329,7 @@ impl<'a> Parser<'a> {
         };
         let op_span = self.bump().span;
         if op == BinOp::Eq {
-            if let Some(pattern) = self.try_pattern_rhs(true)? {
+            if let Some(pattern) = self.try_comparison_pattern_rhs(true)? {
                 let span = Span::new(lhs.span().start, pat_span(&pattern).end.max(op_span.end));
                 return Ok(Expr::PatternTest {
                     subject: Box::new(lhs),

@@ -783,6 +783,12 @@ stay E0309, and `Val(x)` stays where nothing expects an optional
 a `-> T?` return when the payload is a name, field path, or `Bool`/`Char`
 literal.
 
+In an equality RHS, `Val(v)` with a bare name introduces the S31 binding even
+if that name is already in scope (ordinary no-shadowing checks still apply).
+`Val(true)`, `Val(object.field)`, and `Val(compute(value))` are constructor
+values instead. `!=` introduces no binding. Dispatch-arm and nested
+leading-dot patterns retain their own pattern grammar.
+
 **D-ENUMDOT1 / D-ENUMDOT2 — Leading-dot variants**: match-arm patterns require a
 leading dot (`.Circle(r)`, `.Empty`); bare `Circle(r)` / `Empty` is E0367.
 Value position too when the expected type is known (`.Red`; E0330 fallback).
