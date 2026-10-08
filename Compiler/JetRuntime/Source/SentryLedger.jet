@@ -28,12 +28,15 @@ fn sentry_ledger_parent(path: I64, scratch: I64) -> Bool {
             // create_dir_all's mkdir succeeds over existing parents; inspect
             // the final directory nofollow before granting its 0700 mode.
             loop at <= parent_len {
-                if at == parent_len || trap_byte(parent + at) == I64{47} {
+                if (at == parent_len || trap_byte(parent + at) == I64{47}) {
                     saved :: trap_byte(parent + at)
                     trap_put(parent + at, I64{0})
                     created :: trap_syscall(I64{83}, parent, I64{511}, I64{0}, I64{0}, I64{0}, I64{0})
                     trap_put(parent + at, saved)
-                    if (created != I64{0} && created != I64{-17}) { valid = false; break }
+                    if (created != I64{0} && created != I64{-17}) {
+                        valid = false
+                        break
+                    }
                 }
                 at += I64{1}
             }
@@ -110,7 +113,12 @@ fn sentry_ledger(fault: I64, gate: I64, detail: I64) {
     sentry_append_owned(row, services_msg_ledger_provenance())
     sentry_quote(row, detail, true)
     sentry_append_owned(row, services_msg_ledger_repairs())
-    sentry_append_owned(row, if { (code == I64{2}) -> services_msg_ledger_repairs2(); (code == I64{3}) -> services_msg_ledger_repairs3(); else -> services_msg_ledger_repairs1() })
+    repairs :: if {
+        (code == I64{2}) -> services_msg_ledger_repairs2()
+        (code == I64{3}) -> services_msg_ledger_repairs3()
+        else -> services_msg_ledger_repairs1()
+    }
+    sentry_append_owned(row, repairs)
     sentry_ledger_write(path, row)
     jet_rt_string_drop(path)
     jet_rt_string_drop(row)

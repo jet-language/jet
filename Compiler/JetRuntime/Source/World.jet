@@ -88,7 +88,7 @@ fn rt_world_monotonic_provider_address() -> I64 {
 }
 
 fn world_unsigned_before(a: I64, b: I64) -> Bool {
-    (a < I64{0}) != (b < I64{0}) && a >= I64{0} || (a < I64{0}) == (b < I64{0}) && a < b
+    ((a < I64{0}) != (b < I64{0}) && a >= I64{0}) || ((a < I64{0}) == (b < I64{0}) && a < b)
 }
 fn world_decimal(data: I64, value: I64) -> I64 {
     // Divide unsigned bits by ten without exact-Int allocation.
@@ -288,7 +288,7 @@ fn world_wait(world: I64, accept_timer: Bool) {
     budget :: sync_load(world + I64{72})
     at := I64{0}
     loop at < budget {
-        if (sync_load(world + I64{64}) == I64{0} || accept_timer && sync_load(world + I64{80}) != I64{0}) {
+        if (sync_load(world + I64{64}) == I64{0} || (accept_timer && sync_load(world + I64{80}) != I64{0})) {
             sync_mutex_unlock(world + I64{8})
             return
         }
@@ -331,7 +331,7 @@ fn world_wait(world: I64, accept_timer: Bool) {
             if (deadline <= target) {
                 if (best < I64{0}) -> best = at else {
                     old :: sync_load(data + best * I64{8})
-                    if (deadline < old || deadline == old && world_unsigned_before(sync_load(data + (at + I64{1}) * I64{8}), sync_load(data + (best + I64{1}) * I64{8}))) -> best = at
+                    if (deadline < old || (deadline == old && world_unsigned_before(sync_load(data + (at + I64{1}) * I64{8}), sync_load(data + (best + I64{1}) * I64{8})))) -> best = at
                 }
             }
             at += I64{3}
@@ -374,7 +374,10 @@ fn world_wait(world: I64, accept_timer: Bool) {
     used := I64{0}
     at = I64{0}
     loop at < count {
-        if (at != I64{0}) { trap_put(target + used, I64{10}); used += I64{1} }
+        if (at != I64{0}) {
+            trap_put(target + used, I64{10})
+            used += I64{1}
+        }
         row :: sync_load(data + at * I64{8})
         size :: sync_load(row + I64{8})
         coll_copy(sync_load(row), target + used, size)
@@ -407,13 +410,13 @@ fn world_wait(world: I64, accept_timer: Bool) {
     sync_mutex_unlock(world + I64{8})
     true
 }
-#Export(c) fn jet_rt_world_reject_uncontrolled(effect: I64) {
+#Export(c) fn jet_rt_world_reject_uncontrolled(effect_kind: I64) {
     if (world_current() == I64{0}) -> return
     message :: if {
-        (effect == I64{1}) -> services_msg_world_network()
-        (effect == I64{2}) -> services_msg_world_foreign()
-        (effect == I64{3}) -> services_msg_world_entropy()
-        (effect == I64{4}) -> services_msg_world_clock()
+        (effect_kind == I64{1}) -> services_msg_world_network()
+        (effect_kind == I64{2}) -> services_msg_world_foreign()
+        (effect_kind == I64{3}) -> services_msg_world_entropy()
+        (effect_kind == I64{4}) -> services_msg_world_clock()
         else -> services_msg_world_external()
     }
     scheduler_fatal(message)

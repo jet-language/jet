@@ -24,9 +24,8 @@ if (mode === 'assemble') {
   writeFileSync(join(unit, 'Source/Fixture.jet'), source);
   writeFileSync(join(unit, 'package.jet'), readFileSync(join(root, 'Compiler/JetRuntime/package.jet')));
   const entries = readFileSync(join(root, 'Compiler/JetRuntime/exports.list'), 'utf8').split('\n').filter(x => x && !x.startsWith('#'));
-  // Source permits attributes between Export and fn; fixture names are not
-  // inferred from a second runtime inventory.
-  for (const path of fixturePaths) for (const match of readFileSync(join(root, path), 'utf8').matchAll(/#Export\(c\)(?:\s*#Unsafe\([^\n]*\))?\s+fn\s+(\w+)\(/g)) entries.push(match[1]);
+  // Adjacent Source markers use the canonical bracket list.
+  for (const path of fixturePaths) for (const match of readFileSync(join(root, path), 'utf8').matchAll(/#(?:Export\(c\)|\[Export\(c\),\s*Unsafe\([^\n]*\)\])\s+fn\s+(\w+)\(/g)) entries.push(match[1]);
   writeFileSync(join(unit, 'exports.list'), entries.sort().join('\n') + '\n');
   writeFileSync(join(out, 'sources.receipt.json'), JSON.stringify({ paths }, null, 2) + '\n');
 } else if (mode === 'lower') {

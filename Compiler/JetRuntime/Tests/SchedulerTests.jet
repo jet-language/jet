@@ -139,7 +139,7 @@ fn scheduler_test_spawn(callbacks: I64, meta: I64, log: I64, mode: I64, value: I
     // Panics and R08 faults cross shields immediately; cancellation waits
     // for the outer shield exit, and is then visible on the same rail.
     kind := I64{3}
-    loop kind <= I64{5} {
+    loop kind <= (I64{5}) {
         jet_scheduler_shield_enter()
         _ := scheduler_control_publish(root, scheduler_stop_new(kind, scheduler_text_new(I64{0})))
         scheduler_test_require(jet_rt_session_poll() == kind)
