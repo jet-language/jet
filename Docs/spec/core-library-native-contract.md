@@ -515,3 +515,7 @@ Core signature checking uses the same canonical Unit type constructor for raw
 receipt, realtime cancellation, and condition-notification leaves as other Core
 rows. Alias resolution reads the owning module's import maps without changing
 their borrow depth or weakening the canonical source-identity check.
+
+Bootstrap codegen uses the canonical TIR plain-call return classifier for Core
+source calls and matches raw TCP route members through borrowed string slices;
+these bindings do not change return-rail or host-route behavior.

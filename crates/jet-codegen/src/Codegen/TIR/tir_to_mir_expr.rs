@@ -1745,7 +1745,7 @@ pub(super) fn lower_expr(
                     let value = ctx.emit("geometry-source-constructor", Some(returned.clone()), MirOperation::Call {
                         callee: MirCallee::Associated { function, owner }, args, type_args: Vec::new(),
                     })?;
-                    return if super::is_plain_call_return(&returned, &expr.ty) {
+                    return if super::mir::is_plain_call_return(&returned, &expr.ty) {
                         ctx.reconcile_plain_call_return(expr, value, &returned)
                     } else { Ok(value) };
                 }
@@ -1759,7 +1759,7 @@ pub(super) fn lower_expr(
                         callee: MirCallee::User(function), args, type_args: Vec::new(),
                     })?;
                     if let Some(returned) = returned {
-                        if super::is_plain_call_return(&returned, &expr.ty) {
+                        if super::mir::is_plain_call_return(&returned, &expr.ty) {
                             return ctx.reconcile_plain_call_return(expr, value, &returned);
                         }
                     }
@@ -1806,7 +1806,7 @@ pub(super) fn lower_expr(
                     },
                 )?;
                 if let Some(returned) = returned {
-                    if super::is_plain_call_return(&returned, &expr.ty) {
+                    if super::mir::is_plain_call_return(&returned, &expr.ty) {
                         return ctx.reconcile_plain_call_return(expr, value, &returned);
                     }
                 }
