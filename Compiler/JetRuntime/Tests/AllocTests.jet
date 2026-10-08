@@ -116,6 +116,22 @@ fn alloc_test_full_slabs() {
     }
 }
 
+fn alloc_test_nullable() {
+    alloc_test_require(alloc_try(I64{1}, I64{0}) == I64{0})
+    alloc_test_require(alloc_try(I64{1}, I64{3}) == I64{0})
+    alloc_test_require(alloc_try(I64{-1}, I64{8}) == I64{0})
+    // Valid Layout, but the allocator's mapping overhead cannot fit.
+    alloc_test_require(alloc_try(I64{9223372036854775807}, I64{1}) == I64{0})
+    // The actual kernel refuses an address-space-sized mapping.
+    alloc_test_require(alloc_map_try(I64{-1}) == I64{0})
+    small :: alloc_try(I64{8}, I64{8})
+    alloc_test_require(small != I64{0})
+    jet_rt_free(small, I64{8}, I64{8})
+    aligned :: alloc_try(I64{0}, I64{8192})
+    alloc_test_require(aligned != I64{0} && (aligned & I64{8191}) == I64{0})
+    jet_rt_free(aligned, I64{0}, I64{8192})
+}
+
 fn run() {
     jet_rt_alloc_init()
     jet_rt_alloc_init()
@@ -126,6 +142,7 @@ fn run() {
     alloc_test_require(!alloc_layout_valid(I64{9223372036854775807}, I64{8}))
     // Null must remain a no-op even with an otherwise-invalid layout.
     jet_rt_free(I64{0}, I64{-1}, I64{0})
+    alloc_test_nullable()
     alloc_test_boundaries(I64{1})
     alloc_test_boundaries(I64{8})
     alloc_test_boundaries(I64{16})

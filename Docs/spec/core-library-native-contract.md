@@ -137,6 +137,14 @@ and require no deallocation. `jet_rt_bytes_unpack` copies C bytes into a fresh
 owned native list header and word-stride buffer; the empty header has all three
 words zero. Neither conversion transfers or frees its borrowed input.
 
+Native resident-session reservations use the same heap as ordinary native
+storage, but return a null place for an invalid layout or allocation failure.
+A failed slab mapping releases the heap lock without publishing slab metadata;
+a failed direct mapping never publishes a payload or its allocation header.
+The ordinary allocation door still delivers its existing fatal layout/OOM
+diagnostic. Successful reservations retain their original size and alignment
+for the shared exact-layout free operation, including aligned zero-size places.
+
 
 ### Exact integer carrier
 
