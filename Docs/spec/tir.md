@@ -50,6 +50,10 @@ optional MIR result is consumed as a whole local before its payload is projected
 Post-effect compute validation borrows the existing globally solved module
 functions and returns only scalar row coordinates from lookups, rather than
 constructing a second owning function list or returning owning function snapshots.
+Restoring a codegen function snapshot consumes its already-owned non-Copy
+fields into the builder; only scalar Copy facts are read. Saving an enclosing
+function's independent snapshot remains a distinct operation, not a borrowed
+view that could be invalidated when the builder begins a nested function.
 
 ## Read-only fact channel
 
