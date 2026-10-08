@@ -135,8 +135,11 @@ monomorphized payload-drop function)` to `jet_rt_native_shared_new`. Its 96-byte
 cell stores the function pointer at byte 80; the thunk borrows the owned slot
 address and returns `Unit`. The packed reference word at byte 0 holds logical
 owners in its low 32 bits and physical pins in its high 32 bits; each half is
-bounded by `2^31 - 1`. Payload retirement requires zero logical owners and zero
-lifetime physical borrows at byte 72, including suspended physical guards.
+bounded by `2^31 - 1`, a deliberately tighter native limit than Rust Arc's
+`isize::MAX` refcount-abort bound. Exhausting either packed half stops through
+the existing overflow door rather than spilling into the other half. Payload
+retirement requires zero logical owners and zero lifetime physical borrows at
+byte 72, including suspended physical guards.
 Retirement clears the payload and descriptor under the cell mutex, then invokes
 the thunk exactly once outside all Shared locks. The glue performs complete
 typed destruction, including `T.Close` and owned fields. The provider must not
