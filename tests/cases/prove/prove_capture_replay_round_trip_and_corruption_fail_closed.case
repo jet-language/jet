@@ -1,0 +1,34 @@
+# Port of tests/prove.rs:204-316; every original predicate, original fixture bytes.
+# PENDING-GRAMMAR(batch-four); runtime PENDING-SAME-HEAD.
+fixture: prove_capture_replay_round_trip_and_corruption_fail_closed.fixture
+env: JET_STORE_DIR={work}/store
+# store intentionally absent initially in the original.
+step: jet prove main.jet --capture=capture.jetproof-replay --json
+exit: 0
+file: capture.jetproof-replay is-file
+stderr: empty
+stdout: ~ "\"inputSha256\":\"" # original predicate
+stdout: ~ "\"targetTriple\":\"" # original predicate
+file: capture.jetproof-replay ^= "JREPLAY\u0000" # original binary prefix
+file: capture.jetproof-replay ~ "\"roots\":[\"Time\"]" # original predicate
+capture: replay_id = text file.split("\"artifact_id\":\"", 1).split("\"", 0) capture.jetproof-replay
+file: capture.jetproof-replay ~ "\"time_site_id\":" # original predicate
+capture: build_digest = text file.split("\"build_digest\":\"", 1).split("\"", 0) capture.jetproof-replay
+file: .jet/replays/{cap:replay_id}.jetproof-replay == capture.jetproof-replay
+cap:build_digest: len = 64 # original digest byte length
+cap:build_digest: each-line hex # original ASCII hexdigit predicate (length 64, no whitespace)
+cap:build_digest: !~ "\n" # original bytes().all(is_ascii_hexdigit): exclude line separators
+cap:build_digest: !~ "\r" # original bytes().all(is_ascii_hexdigit): exclude CRLF
+file: capture.jetproof-replay ~ "\"source_digest\":\"" # original predicate
+file: capture.jetproof-replay ~ "\"semantic_mir_hash\":\"" # original predicate
+file: capture.jetproof-replay ~ "\"optimized_mir_hash\":\"" # original predicate
+file: capture.jetproof-replay ~ "\"mir_schema\":\"mir-v1\"" # original predicate
+step: jet prove main.jet --replay capture.jetproof-replay --json
+exit: 0
+stderr: empty
+stdout: ~ "\"facet\":\"replay\"" # original predicate
+stdout: ~ "\"reason\":\"parity_not_available\"" # original predicate
+poke: capture.jetproof-replay at mid xor "01"
+step: jet prove main.jet --replay capture.jetproof-replay
+exit: 1
+stderr: ~ "Error [E3622]" # original predicate

@@ -1,0 +1,13 @@
+# Port of tests/prove.rs:765-826. Every original predicate retained; original fixture bytes copied from Rust literals.
+# Runtime verification PENDING-SAME-HEAD.
+fixture: prove_uses_structured_test_evidence_and_continues_after_failure.fixture
+step: jet prove . --json
+exit: 1
+stdout: ~ "\"unit\":{\"failed\":1,\"passed\":1,\"selected\":2" # original predicate
+stdout: ~ "\"schema\":\"jet.report/v1\"" # original predicate
+stdout: ~ "\"outcome\":\"failed\",\"producer\":\"jet-test\"" # original predicate
+stdout: ~ "\"outcome\":\"passed\",\"producer\":\"jet-test\"" # original predicate
+step: jet prove .
+exit: 1
+stdout: ~ "TESTS    unit: 1 passed, 1 failed, 0 skipped" # original predicate
+stderr: ~ "Stop [E3001]" # original predicate

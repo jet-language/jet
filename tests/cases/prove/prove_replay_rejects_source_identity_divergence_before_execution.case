@@ -1,0 +1,11 @@
+# Port of tests/prove.rs:389-429. Every original predicate retained; original fixture bytes copied from Rust literals.
+# PENDING-GRAMMAR(batch4 poke/cross-run equality/file-copy); runtime PENDING-SAME-HEAD.
+fixture: prove_replay_rejects_source_identity_divergence_before_execution.fixture
+step: jet prove main.jet --capture=capture.jetproof-replay
+exit: 0
+file: capture.jetproof-replay is-file # original predicate
+copy: replacement.bytes main.jet
+step: jet prove main.jet --replay=capture.jetproof-replay --json
+exit: 1
+stdout: ~ "\"code\":\"E3621\"" # original predicate
+stderr: empty # original predicate
