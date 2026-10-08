@@ -2647,6 +2647,18 @@ pub(crate) fn lower_method_call_with_sig(
     lowered_receiver: Option<TExpr>,
     instantiated_sig: Option<&[(AccessConvention, Type)]>,
 ) -> TExpr {
+    // Receiver lowering still resolves method metadata by name (below); use
+    // exactly the sema-owned source route table, never re-infer an overload.
+    let source_identity = if method == "bool" && args.len() == 1 {
+        recv_type.as_deref().and_then(|name|
+            cx.local_type_identities.get(name).cloned()
+                .or_else(|| cx.imported_type_metadata_name(name)))
+    } else {
+        None
+    };
+    let method = jet_foundation::CoreModuleExports::core_source_receiver_method(
+        source_identity.as_deref().or(recv_type.as_deref()).unwrap_or(""), method, args.len(),
+    );
     // D-MEMO1=A: sema has already proved `name.cache()` is the memoized
     // function's statistics projection. Keep it as a named TIR call so AOT,
     // JIT, and interpreter adapters all enter the same Prelude-backed store.

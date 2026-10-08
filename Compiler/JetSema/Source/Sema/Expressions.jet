@@ -57,6 +57,7 @@ use jet_foundation.[
     core_call_typed_signature,
     core_module_export,
     core_source_owns_type,
+    core_source_receiver_method,
     dimension_display_name,
     dimension_identity,
     expr_span,
@@ -2212,6 +2213,27 @@ fn sema_expr_registration_method_candidates(graph: SemaRegistrationGraph, receiv
     candidates
 }
 
+// Resolve the method owner's home through the declaration index, without
+// changing the annotation's public spelling or inventing a Core alias table.
+fn sema_expr_receiver_nominal_identity(environment: SemaScopeEnvironment, receiver_type: Type) -> String Never! {
+    base_name :: sema_expr_type_base_name(receiver_type) ?? return type_name(receiver_type)
+    graph :: environment.registration_graph ?? return base_name
+    if sema_type_resolve_nominal_row(graph, receiver_type, environment.module_identity) == .Val(row) {
+        nominal :: graph.modules[row.module_index].nominals[row.row]
+        return "{nominal.symbol.module_name}::{nominal.symbol.name}"
+    }
+    found := String?{None}
+    loop row in sema_registration_nominal_rows_named(graph, sema_expr_operator_row_name(base_name)) {
+        nominal :: graph.modules[row.module_index].nominals[row.row]
+        if nominal.kind == SemaRegistrationNominalKind.TypeAlias -> next
+        identity :: "{nominal.symbol.module_name}::{nominal.symbol.name}"
+        if base_name.contains("::") && base_name != identity -> next
+        if found != None -> return base_name
+        found = Val(identity)
+    }
+    found ?? base_name
+}
+
 // True only when a declared nominal method collides with a builtin handle
 // method of the same owner leaf and name (Core's `URL`/`MIME`, or a user type
 // spelled like a handle carrier); every other declared method keeps the
@@ -2222,7 +2244,7 @@ fn sema_expr_declares_nominal_method(environment: SemaScopeEnvironment, receiver
     // A resolved receiver carries its canonical identity (`module::URL`).
     base_name :: sema_expr_type_base_name(receiver_type) ?? return false
     receiver_name :: sema_expr_operator_row_name(base_name)
-    if !sema_text_handle_known_method(receiver_name, method) && !sema_network_handle_known_method(receiver_name, method) -> return false
+    if !core_source_owns_type(sema_expr_receiver_nominal_identity(environment, receiver_type)) && !sema_text_handle_known_method(receiver_name, method) && !sema_network_handle_known_method(receiver_name, method) -> return false
     loop nominal_row in sema_registration_nominal_rows_named(graph, receiver_name) {
         methods :: graph.modules[nominal_row.module_index].nominals[nominal_row.row].methods
         loop method_index in 0..<methods.len() {
@@ -2821,13 +2843,14 @@ fn sema_expr_check_method_call(receiver: Expr, method: String, method_span: Span
     // A declared nominal owns the methods it declares, even when its leaf
     // spells a builtin carrier such as Core's `URL` or `MIME`; builtin handle
     // routes apply only when no declared method matches.
-    if !sema_expr_declares_nominal_method(environment, receiver_value.ty, method) {
+    routed_method :: core_source_receiver_method(if method == "bool" && args.len() == 1 -> sema_expr_receiver_nominal_identity(environment, receiver_value.ty) else -> type_name(receiver_value.ty), method, args.len())
+    if !sema_expr_declares_nominal_method(environment, receiver_value.ty, routed_method) {
         special := sema_expr_try_method_special_routes(receiver, receiver_value, method, owner_type_args, type_args, args, method_span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         if special.handled -> return special.value
     }
     candidates :: if environment.registration_graph == {
-        .Val(graph) -> sema_expr_registration_method_candidates(graph, receiver_value.ty, method, owner_type_args, type_args, method_span, environment, &scopes, &diagnostics)
-        .None -> sema_call_local_method_candidates(environment, method, owner_type_args, type_args)
+        .Val(graph) -> sema_expr_registration_method_candidates(graph, receiver_value.ty, routed_method, owner_type_args, type_args, method_span, environment, &scopes, &diagnostics)
+        .None -> sema_call_local_method_candidates(environment, routed_method, owner_type_args, type_args)
     }
     argument_types := [Type?]{}
     argument_index := 0
@@ -2854,7 +2877,7 @@ fn sema_expr_check_method_call(receiver: Expr, method: String, method_span: Span
         }
         argument_index += 1
     }
-    candidate :: sema_call_resolve_method_with_inference(receiver_value.ty, method, args, argument_types, expected, candidates, environment, &scopes, method_span, &diagnostics) ?? return None
+    candidate :: sema_call_resolve_method_with_inference(receiver_value.ty, routed_method, args, argument_types, expected, candidates, environment, &scopes, method_span, &diagnostics) ?? return None
     scopes.ownership_call_depth += 1
     checked := sema_call_check_method_candidate_from_value_owned(&state, receiver, receiver_value, candidate, args, [SemaCallDefaultValue]{}, method_span, expected, environment, &scopes, &tail_store, &context, &diagnostics)
     scopes.ownership_call_depth -= 1

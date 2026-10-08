@@ -25,7 +25,7 @@ pub enum CoreLeafKind {
 
 // BEGIN GENERATED CORE DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: d679e8ef721e46b21e39c3372597a4d1857069bf3aa9f8129053b589a8a64f9d
+// Source SHA-256: 5e3b23bf144506db7c2d79741b31f7225e14e9a142d52da36ca6fd374046bea2
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreModuleDeclaration {
     pub module: &'static str,
@@ -408,8 +408,8 @@ const CORE_MODULE_56_MEMBERS: &[&str] = &["abs", "acos", "acosh", "asin", "asinh
 const CORE_MODULE_56_TYPES: &[(&str, CoreLeafKind)] = &[("Fraction", CoreLeafKind::Plain)];
 const CORE_MODULE_56_DEPENDENCIES: &[&str] = &[];
 
-const CORE_MODULE_57_MEMBERS: &[&str] = &["bool", "bytes", "exponential", "float", "float_range", "int", "normal", "pick", "rng", "sample", "seed", "shuffle", "split", "weighted_pick", "random", "randint", "uniform", "normalvariate", "gauss", "expovariate", "randbytes", "getrandbits", "randrange", "choice", "choices", "triangular", "gammavariate", "betavariate", "lognormvariate", "paretovariate", "weibullvariate", "vonmisesvariate", "binomialvariate", "__rng_state", "__rng_try_update", "__word"];
-const CORE_MODULE_57_TYPES: &[(&str, CoreLeafKind)] = &[];
+const CORE_MODULE_57_MEMBERS: &[&str] = &["RNG", "bool", "bytes", "exponential", "float", "float_range", "int", "normal", "pick", "rng", "sample", "seed", "shuffle", "split", "weighted_pick", "random", "randint", "uniform", "normalvariate", "gauss", "expovariate", "randbytes", "getrandbits", "randrange", "choice", "choices", "triangular", "gammavariate", "betavariate", "lognormvariate", "paretovariate", "weibullvariate", "vonmisesvariate", "binomialvariate", "__rng_state", "__rng_try_update", "__word", "__seeded_int"];
+const CORE_MODULE_57_TYPES: &[(&str, CoreLeafKind)] = &[("RNG", CoreLeafKind::Plain)];
 const CORE_MODULE_57_DEPENDENCIES: &[&str] = &["core.math"];
 
 const CORE_MODULE_58_MEMBERS: &[&str] = &["binomial", "cartesian", "combinations", "combinations_count", "combinations_with_replacement", "factorial", "permutations", "permutations_count", "product", "accumulate", "batched", "chain", "chain_from", "compress", "count_from", "count", "cycle", "drop", "dropwhile", "filterfalse", "groupby", "islice", "starmap", "tee", "falling_factorial", "flatten", "multinomial", "ncr", "npr", "pairwise", "powerset", "repeat", "reverse", "rising_factorial", "takewhile", "unique", "windows", "zip_longest", "take_n"];
@@ -809,7 +809,7 @@ pub const CORE_SOURCE_MODULES: &[CoreSourceModule] = &[
     CoreSourceModule { module: "core.jobs", alias: "core_core_jobs", path: "Core/jobs/jobs.jet", owned_members: &["queue", "is_terminal", "is_cancelled"] },
     CoreSourceModule { module: "core.log", alias: "core_core_log", path: "Core/log/log.jet", owned_members: &["bool", "close", "counter", "critical", "debug", "debug_fields", "disable", "enabled", "enter", "error", "error_fields", "fatal", "field", "float", "flush", "format", "formatter", "handle", "handler", "handler_format", "info", "info_fields", "int", "log", "otlp_file", "record", "redact", "sample_every", "set_level", "set_sink", "set_trace_id", "setup", "span", "warn", "warn_fields", "warning", "add", "group", "time", "clear"] },
     CoreSourceModule { module: "core.math", alias: "core_math", path: "Core/math/math.jet", owned_members: &["abs", "abs_float", "min", "max", "clamp", "is_even", "is_odd", "sign", "isqrt", "gcd", "lcm", "acos", "acosh", "asin", "asinh", "atan", "atan2", "atanh", "cbrt", "ceil", "checked_abs", "checked_add", "checked_div", "checked_mul", "checked_neg", "checked_pow", "checked_rem", "checked_sub", "conj", "copysign", "cos", "cosh", "cot", "degrees", "e", "erf", "erfc", "exp", "exp2", "exp_m1", "expm1", "fabs", "factorial", "float32", "float64", "floor", "fma", "fract", "frexp", "from_bits", "gamma", "hypot", "ilogb", "imag", "infinity", "int_pow", "inv", "is_canonical", "is_inf", "is_integer", "is_nan", "is_normal", "is_signed", "is_subnormal", "is_zero", "isfinite", "isinf", "isnan", "ldexp", "lerp", "lgamma", "ln", "ln_1p", "log", "log10", "log1p", "log2", "logb", "modf", "muladd", "nan", "next_after", "nextafter", "next_down", "next_up", "pi", "pow", "radians", "radix", "real", "round", "saturating_add", "saturating_mul", "saturating_sub", "scaleb", "sign_bit", "significand", "signum", "sin", "sin_cos", "sinh", "sqrt", "tan", "tanh", "tau", "tau_const", "to_bits", "trunc", "truncate", "ulp", "zero", "binomial", "comb", "perm", "gcd_many", "lcm_many", "powmod", "div_mod", "div_rem", "digits", "leading_ones", "trailing_ones", "abs_diff", "even", "odd", "xor", "in_range", "sum_int", "prod_int", "prod", "fmod", "remainder", "isclose", "dist", "hypot3", "clamp_float", "min_float", "max_float", "midpoint", "fsum", "sumprod", "random", "fraction", "decimal", "copy", "cmp", "is_finite", "__cmp_f32", "__is_finite_f32"] },
-    CoreSourceModule { module: "core.math.random", alias: "core_core_math_random", path: "Core/math/random.jet", owned_members: &["betavariate", "binomialvariate", "bool", "bytes", "choice", "choices", "exponential", "expovariate", "float", "float_range", "gammavariate", "gauss", "getrandbits", "int", "lognormvariate", "normal", "normalvariate", "paretovariate", "pick", "randbytes", "randint", "random", "randrange", "rng", "sample", "seed", "shuffle", "split", "triangular", "uniform", "vonmisesvariate", "weibullvariate", "weighted_pick", "__word"] },
+    CoreSourceModule { module: "core.math.random", alias: "core_core_math_random", path: "Core/math/random.jet", owned_members: &["betavariate", "binomialvariate", "bool", "bytes", "choice", "choices", "exponential", "expovariate", "float", "float_range", "gammavariate", "gauss", "getrandbits", "int", "lognormvariate", "normal", "normalvariate", "paretovariate", "pick", "randbytes", "randint", "random", "randrange", "rng", "sample", "seed", "shuffle", "split", "triangular", "uniform", "vonmisesvariate", "weibullvariate", "weighted_pick", "__word", "__seeded_int"] },
     CoreSourceModule { module: "core.math.combinatorics", alias: "core_core_math_combinatorics", path: "Core/math/combinatorics.jet", owned_members: &["batched", "binomial", "cartesian", "chain", "chain_from", "combinations", "combinations_count", "combinations_with_replacement", "compress", "count_from", "drop", "dropwhile", "factorial", "falling_factorial", "multinomial", "ncr", "npr", "pairwise", "permutations", "permutations_count", "product", "repeat", "rising_factorial", "takewhile", "unique", "take_n", "count", "filterfalse", "islice", "groupby", "starmap", "tee", "cycle", "zip_longest", "accumulate", "powerset", "windows", "reverse", "flatten"] },
     CoreSourceModule { module: "core.math.stats", alias: "core_core_math_stats", path: "Core/math/stats.jet", owned_members: &["correlation", "covariance", "cumsum", "fmean", "geometric_mean", "harmonic_mean", "kde", "kde_random", "linear_regression", "max", "mean", "median", "median_grouped", "median_high", "median_low", "min", "mode", "multimode", "percentile", "prod", "pstdev", "pvariance", "quantile", "range", "stdev", "sum", "variance", "zscore", "normal_dist", "count", "sumprod", "weighted_mean", "quantiles", "iqr", "mad", "mean_abs_deviation", "skew", "kurtosis", "moving_average", "ewma", "cumprod", "diff", "rank", "spearman", "r_squared", "residuals", "histogram", "describe", "clip", "winsorize", "pearson", "covariance_population"] },
     CoreSourceModule { module: "core.mem", alias: "core_core_mem", path: "Core/mem/mem.jet", owned_members: &["address_of", "from_addr", "volatile_read", "volatile_write"] },
@@ -915,6 +915,7 @@ pub const CORE_SOURCE_OWNED_TYPES: &[CoreSourceOwnedType] = &[
     CoreSourceOwnedType { path: "Core/http/http.jet", name: "Headers" },
     CoreSourceOwnedType { path: "Core/http/http.jet", name: "Header" },
     CoreSourceOwnedType { path: "Core/http/http.jet", name: "Query" },
+    CoreSourceOwnedType { path: "Core/math/random.jet", name: "RNG" },
     CoreSourceOwnedType { path: "Core/net/net.jet", name: "SRVRecord" },
     CoreSourceOwnedType { path: "Core/net/mime.jet", name: "MIME" },
     CoreSourceOwnedType { path: "Core/net/url.jet", name: "URL" },
@@ -1103,6 +1104,10 @@ pub fn core_source_owns_call(module: &str, member: &str, argc: usize, first_is_m
 /// Jet declaration on every tier: no tier projects it onto a native carrier
 /// or routes its methods to a compiler adapter.
 pub fn core_source_owns_type(name: &str) -> bool {
+    core_source_owns_type_in(CORE_SOURCE_OWNED_TYPES, name)
+}
+
+fn core_source_owns_type_in(rows: &[CoreSourceOwnedType], name: &str) -> bool {
     let Some(identity) = name.strip_prefix(crate::Diagnostics::CORE_SOURCE_ROOT) else {
         return false;
     };
@@ -1113,9 +1118,40 @@ pub fn core_source_owns_type(name: &str) -> bool {
     let Some((_, file)) = owner.rsplit_once("::") else {
         return false;
     };
-    CORE_SOURCE_OWNED_TYPES
-        .iter()
-        .any(|owned| owned.name == leaf && owned.path == file)
+    rows.iter().any(|owned| owned.name == leaf && owned.path == file)
+}
+
+// D-CAP10: the existing bool(p) arity maps to the reserved source method.
+const CORE_SOURCE_BOOL_P_OWNER: &[CoreSourceOwnedType] = &[
+    CoreSourceOwnedType { path: "Core/math/random.jet", name: "RNG" },
+];
+
+pub fn core_source_receiver_method<'a>(identity: &str, method: &'a str, nargs: usize) -> &'a str {
+    if method == "bool" && nargs == 1
+        && core_source_owns_type(identity)
+        && core_source_owns_type_in(CORE_SOURCE_BOOL_P_OWNER, identity)
+    {
+        "__bool_p"
+    } else {
+        method
+    }
+}
+
+/// Established no-import source owners, not a general alias re-export table.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CoreBareSourceModule {
+    pub name: &'static str,
+    pub module_name: &'static str,
+}
+
+pub const CORE_BARE_SOURCE_MODULES: &[CoreBareSourceModule] = &[
+    CoreBareSourceModule { name: "URL", module_name: "core.net.url" },
+    CoreBareSourceModule { name: "Perf", module_name: "core.perf" },
+    CoreBareSourceModule { name: "RNG", module_name: "core.testing" },
+];
+
+pub fn core_bare_source_module(name: &str) -> Option<&'static str> {
+    CORE_BARE_SOURCE_MODULES.iter().find(|row| row.name == name).map(|row| row.module_name)
 }
 
 /// The canonical bootstrap ordering consumed by sema and future MIR.
@@ -1140,6 +1176,23 @@ fn lookup(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bare_source_visibility_matches_the_jet_foundation() {
+        let jet = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../Compiler/JetFoundation/Source/Registry/CoreModules.jet"
+        ));
+        let rows = jet.split("CORE_BARE_SOURCE_MODULES :: [CoreBareSourceModule]{")
+            .nth(1).expect("Jet bare-source table")
+            .split("\n}").next().unwrap();
+        let expected = CORE_BARE_SOURCE_MODULES.iter().map(|row|
+            format!("    CoreBareSourceModule{{name: \"{}\", module_name: \"{}\"}},", row.name, row.module_name))
+            .collect::<Vec<_>>().join("\n");
+        assert_eq!(rows.trim_matches('\n'), expected);
+        assert_eq!(core_bare_source_module("Date"), None);
+        assert_eq!(core_bare_source_module("UnlistedPublicAlias"), None);
+    }
 
     #[test]
     fn known_modules_resolve_without_a_bespoke_arm() {
