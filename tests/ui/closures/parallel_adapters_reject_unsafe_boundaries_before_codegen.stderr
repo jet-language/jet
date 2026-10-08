@@ -1,0 +1,8 @@
+Error [E1101]: `seen` cannot cross the `parallel worker` boundary: the value writes shared state
+  --> parallel_adapters_reject_unsafe_boundaries_before_codegen.jet:4:35
+    |
+  4 |     ignored :: [1, 2, 3].para_map((n: Int) -> { &seen.push(n) })
+    |                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ Why: The `parallel worker` boundary can run concurrently with its owner; the write would race with the owner or require a hidden merge rule
+ Fix: Give it with `^`, freeze it with `freeze`, or share it with `shared`
+More: jet-lang.dev/e/E1101

@@ -1,0 +1,8 @@
+Error [E1102]: `parallel item` can't cross a parallel worker boundary because `CallbackPayload` isn't sendable
+  --> parallel_adapters_reject_unsafe_boundaries_before_codegen_7.jet:6:25
+    |
+  6 |     ignored :: payloads.para_map((payload: CallbackPayload) -> 1)
+    |                         ^^^^^^^^
+ Why: A function value carries executable state, not a worker data value; this concurrent boundary moves owned values between workers
+ Fix: Copy plain owned data into the worker, or keep this operation sequential
+More: jet-lang.dev/e/E1102
