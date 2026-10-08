@@ -1473,6 +1473,19 @@ Display and Debug retain native type-directed rendering rather than an
 erased formatter. This compiler-output migration lands after the gate;
 generated native route tables are regenerated with the unified native stack.
 
+`Tests/run-fmt-parity.mjs prepare OUT` builds a verification-only oracle by
+including the existing Rust formatting bodies, then saves framed raw output
+for all 23 former C formatter kernels. The corpus covers signed limits, zero,
+precision and padding widths, Unicode, malformed decimal spellings, and
+nested/quoted pretty values. The optimized oracle matches the packaged seed's
+release overflow profile; its inputs never pass a decimal integer as a tagged
+machine-word Int.
+`compare OUT CHECKER` executes the local Core source bodies with that release
+profile and writes per-case input, expected bytes, actual bytes and source
+location to `parity.json`. This is source-body seed parity, not native selector
+or runtime-pack proof. A mismatching kernel cannot retire until its parity
+cases pass; native generic Display/Debug/Show remain checked-type renderers.
+
 `FloatBits.jet` contains ordinary Core-backed reference functions. Only the
 runtime-object driver may replace their validated checked IDs with internal
 LIR `Bitcast` operations; normal program lowering executes their bodies.
