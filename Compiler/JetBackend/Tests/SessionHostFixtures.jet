@@ -273,12 +273,40 @@ fn session_test_pinned_core(host: X64ExecutionHost) {
     assert(refused.errors.len() == 1 && !refused.invalidated && !refused.stopped)
     assert(x64_execution_request(host, request).body == first.body)
 }
+fn session_test_bound_mapper() {
+    lir := LIRModule{signatures: [LIRSignature]{LIRSignature{id: LIRSignatureID{value: 0}, convention: LIRCallConv.SystemV, params: [LIRLayout]{}, result: Val(lir_layout_word())}}, functions: [LIRFunction]{}, data: [LIRData]{}}
+    builder := lir_builder(LIRFunctionID{value: 0}, "parent.bound.mapper.fixture", LIRSignatureID{value: 0})
+    block :: lir_builder_block_id(&builder)
+    value :: lir_builder_value(&builder, lir_layout_word(), LIRDrop.Trivial, None)
+    lir_builder_push(&builder, LIRInst.Const{dst: value, value: 7})
+    lir_builder_seal(&builder, block, [LIRValueID]{}, LIRTerminator.Return{value: Val(value)})
+    &lir.functions.push(lir_builder_finish(builder))
+    image :: x64_memory_image(lir, LIRFunctionID{value: 0})
+    assert(image.errors.len() == 0 && image.imports.len() == 0)
+    extra :: x64_load_image_bound(image, [Int]{1})
+    assert(extra.base == 0 && extra.errors.len() == 1)
+    loaded :: x64_load_image_bound(image, [Int]{})
+    assert(loaded.errors.len() == 0 && loaded.base != 0)
+    actual := 0
+    #Unsafe("the checked fixture is a no-argument System V function returning the word 7; its mapping is retained through the call") {
+        actual = os_call_address(loaded.entry, 0)
+    }
+    assert(actual == 7)
+    assert(x64_unload_image(loaded))
+    unbound := image
+    unbound.imports = [String]{"jet_rt_fixture_not_resolved"}
+    unbound.slots = [Int]{0}
+    refused :: x64_load_image_bound(unbound, [Int]{0})
+    assert(refused.base == 0 && refused.errors.len() == 1)
+}
+
 fn run() {
     args :: session_test_process.args()
     if args.len() == 3 && args[0] == "--native-session-host" {
         code :: x64_execution_service(args[1], args[2])
         session_test_process.exit(code)
     }
+    session_test_bound_mapper()
     runtime :: args[0]
     host :: x64_execution_open(session_test_sys.executable(), runtime)
     session_test_first_frame(host, "x\n".bytes(), false)
