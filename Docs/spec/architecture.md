@@ -179,6 +179,14 @@ execution lens. The Rust host is a bootstrap seed: it is frozen once the Jet
 compiler ships with parity and removed once the native back end is complete
 (D-EXEC2, owner directive 19).
 
+The bootstrap host initializes every `JetDriverCompileRequest` field, including
+declared defaults, through checked field-symbol metadata. Ordinary bootstrap
+compilation keeps `comptime_stop_points` false; only native comptime selection
+enables it. The focused
+[`bootstrap host field guard`](../../Tools/agent/bootstrap-host-fields.test.mjs)
+checks that new request fields have both an emitted initializer row and its
+metadata binding before the generated producer is built.
+
 The table describes crossing responsibilities, not a list of completed ports.
 Its source links own the executable contracts. The proof-home references are
 Tower acceptance boundaries, not evidence supplied by this inventory.

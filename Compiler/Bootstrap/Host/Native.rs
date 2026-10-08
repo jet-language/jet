@@ -2385,6 +2385,8 @@ fn emit_bootstrap_host_factory(
         symbols.field_symbol("JetDriverCompileRequest", "mir_lint_every_pass")?;
     let request_native_stop_points =
         symbols.field_symbol("JetDriverCompileRequest", "native_stop_points")?;
+    let request_comptime_stop_points =
+        symbols.field_symbol("JetDriverCompileRequest", "comptime_stop_points")?;
     let request_compiler_threads =
         symbols.field_symbol("JetDriverCompileRequest", "compiler_threads")?;
     // #4643: the request's compile mode; the bootstrap host always compiles a program.
@@ -2507,6 +2509,7 @@ fn emit_bootstrap_host_factory(
             "        // explicit host opt-in for tests and verification runs.\n",
             "        {request_mir_lint_every_pass}: ::std::env::var_os(\"JET_BOOTSTRAP_MIR_LINT_EVERY_PASS\").is_some_and(|value| value == \"1\"),\n",
             "        {request_mode}: {mode_program},\n",
+            "        {request_comptime_stop_points}: false,\n",
             "        // D-JOBS1=A: the bootstrap host takes no `--threads` cap, so the\n",
             "        // compiler admits threads automatically up to the reported cores\n",
             "        // and within the memory Linux reports available, lowered to the\n",
@@ -2551,6 +2554,7 @@ fn emit_bootstrap_host_factory(
         request_trace_sink = request_trace_sink,
         request_mir_lint_every_pass = request_mir_lint_every_pass,
         request_native_stop_points = request_native_stop_points,
+        request_comptime_stop_points = request_comptime_stop_points,
         request_compiler_threads = request_compiler_threads,
         request_mode = request_mode,
         mode_program = mode_program,
