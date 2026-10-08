@@ -182,6 +182,30 @@ fn sema_expression_contextual_result_call(call: Call, expected: Type?, scopes: S
     Val(call.name == "Ok")
 }
 
+// Classify before expression checking turns an uncontextual Err call into
+// the default-error record. A user declaration still owns its spelling.
+fn sema_expression_uncontextual_err_arm(value: Expr, scopes: SemaScopeTable) -> Bool Never! {
+    if value == {
+        .Paren(inner, _) -> sema_expression_uncontextual_err_arm(inner, scopes)
+        .Err(_, _) -> true
+        .Call(call) -> {
+            carrier :: Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "Err"}}
+            sema_expression_contextual_result_call(call, Val(carrier), scopes) == (Val(false))
+        }
+        else -> false
+    }
+}
+
+// Only a fallible sibling supplies the missing carrier. Plain success
+// values do not establish a failure domain.
+fn sema_expression_err_sibling(sibling: TExpr?) -> Type? Never! {
+    checked :: sibling ?? return None
+    if sema_expr_unwrap_tag(checked.ty) == {
+        .Result(_, _) -> Val(checked.ty)
+        else -> None
+    }
+}
+
 fn sema_expression_default_err_struct(value: Expr) -> Bool Never! {
     if value == {
         .Paren(inner, _) -> sema_expression_default_err_struct(inner)
@@ -1576,8 +1600,8 @@ fn sema_expression_if(condition: Expr, then_body: [Stmt], then_value: Expr, else
     before := sema_ownership_state_snapshot(state)
     then_state := sema_ownership_state_snapshot(before)
     // Each arm runs in its own frame on the live scope table and is rolled
-    // back. Only a deferred bare `None` then-value, checked after the else arm,
-    // keeps a copy of the then-arm table.
+    // back. A deferred None or Err then-value keeps its branch table and
+    // ownership state until the sibling has supplied its missing type.
     then_mark :: sema_scope_mark(&scopes)
     sema_scope_enter(&scopes, &then_state, "if.then@{span.start}")
     sema_expression_declare_condition_bindings(checked.bindings, &scopes, &then_state, true, &diagnostics)
@@ -1592,13 +1616,16 @@ fn sema_expression_if(condition: Expr, then_body: [Stmt], then_value: Expr, else
     // `None` arm takes its optional type from the sibling arm of the same
     // value-if or match. A leading `None` arm waits for the else arm's type.
     sibling_rule :: !sema_expression_expects_optional(expected)
-    defer_then :: sibling_rule && sema_expression_bare_absent_arm(then_value, false)
+    defer_then_err :: expected == None && sema_expression_uncontextual_err_arm(then_value, scopes)
+    defer_then :: defer_then_err || (sibling_rule && sema_expression_bare_absent_arm(then_value, false))
     then_first := TExpr?{None}
     deferred_then_scopes := sema_scope_init("")
     if defer_then {
         deferred_then_scopes = sema_scope_snapshot(scopes)
     } else {
-        first :: sema_check_expression(then_value, expected, environment, &scopes, &then_state, &tail_store, &context, &diagnostics) ?? {
+        carrier_sibling :: expected == None && sema_expression_uncontextual_err_arm(else_value, scopes)
+        first_value :: if carrier_sibling -> sema_check_expression_carrier(then_value, expected, environment, &scopes, &then_state, &tail_store, &context, &diagnostics) else -> sema_check_expression(then_value, expected, environment, &scopes, &then_state, &tail_store, &context, &diagnostics)
+        first :: first_value ?? {
             sema_scope_leave(&scopes, &then_state)
             sema_scope_rollback(&scopes, then_mark)
             sema_ownership_keep_share_found(&state, then_state)
@@ -1619,8 +1646,13 @@ fn sema_expression_if(condition: Expr, then_body: [Stmt], then_value: Expr, else
         sema_ownership_keep_share_found(&state, else_state)
         return None
     }
-    else_expected :: if sibling_rule && sema_expression_bare_absent_arm(else_value, true) -> sema_expression_absent_sibling(then_first) else -> expected
-    else_checked :: sema_check_expression(else_value, else_expected, environment, &scopes, &else_state, &tail_store, &context, &diagnostics) ?? {
+    else_expected :: if {
+        sibling_rule && sema_expression_bare_absent_arm(else_value, true) -> sema_expression_absent_sibling(then_first)
+        expected == None && sema_expression_uncontextual_err_arm(else_value, scopes) -> sema_expression_err_sibling(then_first)
+        else -> expected
+    }
+    else_value_checked :: if defer_then_err -> sema_check_expression_carrier(else_value, else_expected, environment, &scopes, &else_state, &tail_store, &context, &diagnostics) else -> sema_check_expression(else_value, else_expected, environment, &scopes, &else_state, &tail_store, &context, &diagnostics)
+    else_checked :: else_value_checked ?? {
         sema_scope_leave(&scopes, &else_state)
         sema_scope_rollback(&scopes, else_mark)
         sema_ownership_keep_share_found(&state, then_state)
@@ -1632,7 +1664,8 @@ fn sema_expression_if(condition: Expr, then_body: [Stmt], then_value: Expr, else
     sema_scope_rollback(&scopes, else_mark)
 
     then_checked :: then_first ?? {
-        sema_check_expression(then_value, sema_expression_absent_sibling(Val(else_checked)), environment, &deferred_then_scopes, &then_state, &tail_store, &context, &diagnostics) ?? {
+        deferred_expected :: if defer_then_err -> sema_expression_err_sibling(Val(else_checked)) else -> sema_expression_absent_sibling(Val(else_checked))
+        sema_check_expression(then_value, deferred_expected, environment, &deferred_then_scopes, &then_state, &tail_store, &context, &diagnostics) ?? {
             sema_scope_leave(&deferred_then_scopes, &then_state)
             sema_ownership_keep_share_found(&state, then_state)
             sema_ownership_keep_share_found(&state, else_state)

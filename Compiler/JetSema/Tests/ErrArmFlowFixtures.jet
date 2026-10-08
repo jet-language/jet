@@ -1,0 +1,36 @@
+// The deferred payload must consume its real branch state before the join
+// and before scope-end obligations: every Ticket is used on both paths.
+#SingleUse struct Ticket { message: String }
+fn ticket_message(ticket: ^Ticket) -> String { return ~ticket.message }
+fn ticket_payload(ticket: ^Ticket) -> (value: Int, tag: Int) Err! {
+    message :: ticket_message(^ticket)
+    return Ok((value: message.len(), tag: 0))
+}
+fn outer_ticket(flag: Bool, ticket: ^Ticket) -> Int {
+    result :: if flag -> Err(ticket_message(^ticket)) else -> ticket_payload(^ticket)
+    if result == {
+        .Ok(payload) -> payload.value
+        .Err(error) -> 0
+    }
+}
+fn local_ticket(flag: Bool) -> Int {
+    result :: if flag {
+        ticket :: Ticket{message: "bad"}
+        Err(ticket_message(^ticket))
+    } else {
+        ticket :: Ticket{message: "good"}
+        ticket_payload(^ticket)
+    }
+    if result == {
+        .Ok(payload) -> payload.value
+        .Err(error) -> 0
+    }
+}
+fn run() {
+    first :: Ticket{message: "bad"}
+    second :: Ticket{message: "good"}
+    print(outer_ticket(true, ^first))
+    print(outer_ticket(false, ^second))
+    print(local_ticket(true))
+    print(local_ticket(false))
+}
