@@ -2273,3 +2273,17 @@ every IPv4 octet value and IPv6 zero spans, ties, single zeros, lowercase hex,
 mapped and compatible addresses. Its expected stdout is not an execution
 receipt. Source approval is not native runtime or packed-list admission;
 native link and behavior remain unexercised.
+
+### UI dispatch result ownership
+
+`EventEnumHandles.jet` owns EventResult clone/drop/equality through the
+shared Encoding ordinal owner. `Ui.rs:1361-1364,2459-2465` defines Handled=0
+and Ignored=1 and the corresponding exact Show strings. Show uses the shared
+exact-size E4 literal allocator without a temporary builder; invalid ordinals
+call the shared record-variant panic from composition dependency `2442d5d80`.
+EventResult is not a second UiNode or UI-event carrier.
+
+`EventResultWitness.c` covers every equality pair, independent enum/text
+owners, exact render bytes and frees, null drop, and a separate invalid-tag
+process mode. Its stdout fixture is expected, not an execution receipt;
+native linkage and both normal/invalid-tag execution remain unexercised.
