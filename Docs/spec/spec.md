@@ -1587,8 +1587,10 @@ an all-zero shared secret. HKDF output is at most 8160 bytes. Argon2id accepts
 bytes. Invalid expert parameters use the `CryptoError` family.
 
 `crypto.file_seal(recipients, source, destination)` and
-`crypto.file_open(identity, source, destination)` use the recipient-based JETC
-v2 envelope. The fixed prefix is `JETC`, version 2, kind 1, suite 1, flags 0,
+`crypto.file_open(identity, source, destination)` have unit success and the
+explicit `FileCryptoError!` contract. The identity is read-borrowed rather than
+moved. Both use the recipient-based JETC v2 envelope. The fixed prefix is `JETC`,
+version 2, kind 1, suite 1, flags 0,
 followed by little-endian header and body lengths. The authenticated header
 contains a 16-byte file id, an ephemeral X25519 public key, a 16-byte nonce
 prefix, a fixed 1 MiB chunk size, 1–256 canonical recipient stanzas, no
