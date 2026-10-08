@@ -10,7 +10,7 @@ exit: 0
 stdout: = production_process_limits_authority_and_descendant_cleanup.stdout.expected
 capture: child = text file.trim child.pid
 cap:child: is-u32
-repeat while process {cap:child} alive-nonzombie timeout 2s every 10ms fail "timed-out process left descendant"
+repeat while process {cap:child} proc-readable-nonzombie timeout 2s every 10ms fail "timed-out process left descendant"
 end repeat
 remove: child.pid
 step release: jet run --release process_policy.jet
@@ -19,6 +19,6 @@ exit: 0
 stdout: = production_process_limits_authority_and_descendant_cleanup.stdout.expected
 capture: release_child = text file.trim child.pid
 cap:release_child: is-u32
-repeat while process {cap:release_child} alive-nonzombie timeout 2s every 10ms fail "timed-out process left descendant"
+repeat while process {cap:release_child} proc-readable-nonzombie timeout 2s every 10ms fail "timed-out process left descendant"
 end repeat
 remove: child.pid
