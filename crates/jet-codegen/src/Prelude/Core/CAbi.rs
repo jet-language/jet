@@ -582,38 +582,8 @@ mod jet_c_abi {
         guard(|| record(super::JetTaskFailure::Panicked(view(reason).to_owned())))
     }
 
-    // Rust-tier seed/verification path only; dies when that tier is cut over.
-    // Native packs have one allocator definition, in the Jet runtime object.
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_alloc(size: usize, align: usize) -> *mut u8 {
-        guard(|| {
-            let layout = std::alloc::Layout::from_size_align(size.max(1), align)
-                .unwrap_or_else(|_| super::jet_panic("<core.prelude>", 0, "invalid box layout"));
-            // SAFETY: the layout has a non-zero size.
-            let ptr = unsafe { std::alloc::alloc(layout) };
-            if ptr.is_null() {
-                std::alloc::handle_alloc_error(layout);
-            }
-            ptr
-        })
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_free(ptr: *mut u8, size: usize, align: usize) {
-        guard(|| {
-            if ptr.is_null() {
-                return;
-            }
-            let layout = std::alloc::Layout::from_size_align(size.max(1), align)
-                .unwrap_or_else(|_| super::jet_panic("<core.prelude>", 0, "invalid box layout"));
-            // SAFETY: `ptr` came from `jet_rt_alloc` with this size and align.
-            unsafe { std::alloc::dealloc(ptr, layout) }
-        })
-    }
-
-    #[cfg(jet_native_pack)]
+    // Allocator ownership is the Jet runtime object's ABI on every consumer.
+    // Its init-array entry initializes the heap; no Rust allocator export exists.
     unsafe extern "C" {
         fn jet_rt_alloc(size: usize, align: usize) -> *mut u8;
         fn jet_rt_free(ptr: *mut u8, size: usize, align: usize);

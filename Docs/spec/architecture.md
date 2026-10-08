@@ -29,6 +29,11 @@ every program, `jet build`, `jet run` and `jet dev` compile through the Rust
 path and execute its result; the evaluator serves comptime only until native
 O0 comptime lands. Both are removed with the rest of Rust (owner directive 19).
 
+The runtime object's `jet_rt_alloc` and `jet_rt_free` own C-carrier allocation,
+including calls from retained Rust bootstrap adapters. Those adapters import
+the Jet definitions; they do not export a second Rust allocator. Consumers
+link the Jet runtime object and retain its allocator `.init_array` entry.
+
 The front end owns language checks and user-facing compiler diagnostics.
 Backends consume checked facts; a back end that rejects checked MIR has hit an
 internal compiler error, not another language checker.
