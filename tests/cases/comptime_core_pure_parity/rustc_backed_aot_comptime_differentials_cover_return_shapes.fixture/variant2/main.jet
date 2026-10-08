@@ -1,0 +1,12 @@
+use core.encoding.xml as xml
+fn xml_canonical() -> String {
+    tree :: xml.parse("<r b=\"2\" a=\"1\"><x/></r>") ?? panic("xml")
+    return xml.canonical(tree, xml.XMLCanonical{ mode: .Inclusive11, comments: false, inclusive_prefixes: [] }) ?? panic("canonical")
+}
+EXPECTED :: prep { xml_canonical() }
+
+fn run() {
+    actual :: xml_canonical()
+    print("{EXPECTED}")
+    print("{actual}")
+}
