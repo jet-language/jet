@@ -1073,17 +1073,30 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
         .join("expected")
         .join(format!("{}.stderr.out", stem));
     if err_path.exists() {
+        let expected_err = fs::read_to_string(&err_path)
+            .unwrap_or_else(|_| panic!("missing Examples/features/expected/{stem}.err.out"));
+        let expected_code = expected_failure_exit(stem, &expected_err).unwrap_or_else(|| {
+            panic!("ambiguous failure exit oracle for example {stem}: {expected_err:?}")
+        });
         let code = run.status.code();
-        assert!(
-            code == Some(70) || code == Some(1),
-            "exit code mismatch for example {stem}: expected 70 (panic) or 1 (uncaught Err), got {code:?}"
-        );
+        assert_eq!(code, Some(expected_code), "exit code mismatch for example {stem}");
+        let out_path = env.ex_dir.join("expected").join(format!("{stem}.out"));
+        if env.update_expected {
+            if out_path.exists() || !run.stdout.is_empty() {
+                fs::write(&out_path, &run.stdout).unwrap();
+            }
+        } else {
+            let expected_stdout = match fs::read(&out_path) {
+                Ok(bytes) => bytes,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+                Err(error) => panic!("could not read {}: {error}", out_path.display()),
+            };
+            assert_failure_stdout(stem, &expected_stdout, &run.stdout);
+        }
         let actual_err = String::from_utf8_lossy(&run.stderr);
         if env.update_expected {
             fs::write(&err_path, actual_err.as_bytes()).unwrap();
         } else {
-            let expected_err = fs::read_to_string(&err_path)
-                .unwrap_or_else(|_| panic!("missing Examples/features/expected/{}.err.out", stem));
             if actual_err != expected_err {
                 panic!(
                     "stderr mismatch for example {stem}:\n{}",
@@ -1204,14 +1217,17 @@ fn record_golden_receipt(
         .ex_dir
         .join("expected")
         .join(format!("{}.stderr.out", entry.stem));
-    let expected = if err_path.is_file() {
-        err_path
+    let mut expected_paths = if err_path.is_file() {
+        let mut paths = vec![err_path];
+        if stdout_path.is_file() {
+            paths.push(stdout_path);
+        }
+        paths
     } else if stdout_path.is_file() {
-        stdout_path
+        vec![stdout_path]
     } else {
         return;
     };
-    let mut expected_paths = vec![expected];
     if stderr_path.is_file() {
         expected_paths.push(stderr_path);
     }
@@ -1664,4 +1680,81 @@ fn audit_region_source_scan_uses_jet_strings_and_markers() {
     assert_eq!(regions[0].line, 4);
     assert_eq!(regions[1].reason, "function reason");
     assert_eq!(regions[1].line, 6);
+}
+
+fn expected_failure_exit(stem: &str, stderr: &str) -> Option<i32> {
+    // D-FAIL-EXIT1 / S36: runtime faults are not unhandled entry returns.
+    // D-DEADLINE1 explicitly gives an expired join (E3003) exit 70.
+    if stderr.starts_with("Stop [") || stderr.starts_with("Error [E3003]:") {
+        return Some(70);
+    }
+    if stderr.starts_with("Runtime fault [R0801]:")
+        || stderr.starts_with("Runtime fault [R0802]:")
+    {
+        // D-MEM-SENTRY1 is a runtime fault. Reject an oracle which itself
+        // claims another exit rather than silently accepting its contradiction.
+        if stderr.lines().any(|line| {
+            line.trim().strip_prefix("exit:").is_some_and(|exit| exit.trim() != "70")
+        }) {
+            return None;
+        }
+        return Some(70);
+    }
+    // io/log_fatal.jet:10-11 suppresses emission before log.fatal exits 1
+    // (ledger #1474). Empty stderr alone is not an exit oracle.
+    if stderr.is_empty() {
+        return (stem == "io/log_fatal").then_some(1);
+    }
+    // Source-proved entry returns (D-FAIL-EXIT1), not a generic Error-prefix
+    // inference. Each source leaves the named Err unhandled at run's edge;
+    // fatal_exit instead explicitly calls process.exit(1).
+    match stem {
+        "errors/propagation_journey"
+        | "errors/propagation_journey_direct"
+        | "errors/propagation_journey_one_hop"
+        | "errors/propagation_journey_core"
+        | "errors/error_context"
+        | "errors/default_error_conversion"
+        | "errors/default_err_edge"
+        | "errors/fatal_exit"
+        | "serde/decode_error_exit"
+        | "crypto/crypto_error_run" => Some(1),
+        _ => None,
+    }
+}
+
+fn assert_failure_stdout(stem: &str, expected: &[u8], actual: &[u8]) {
+    if actual != expected {
+        panic!(
+            "output mismatch for failing example {stem}:\n{}",
+            unified_diff(
+                &format!("Examples/features/expected/{stem}.out"),
+                &format!("Examples/features/{stem} stdout (actual)"),
+                &String::from_utf8_lossy(expected),
+                &String::from_utf8_lossy(actual),
+            )
+        );
+    }
+}
+
+#[test]
+fn failure_oracle_requires_exact_exit_and_stdout() {
+    assert_eq!(expected_failure_exit("test", "Stop [E3001]: panic\n"), Some(70));
+    assert_eq!(expected_failure_exit("test", "Stop [E3012]: Stack overflow\n"), Some(70));
+    assert_eq!(expected_failure_exit("test", "Error [E3003]: Deadline exceeded\n"), Some(70));
+    assert_eq!(expected_failure_exit("errors/default_err_edge", "Error [RUNFAIL]: bad input\n"), Some(1));
+    assert_eq!(expected_failure_exit("errors/fatal_exit", "[fatal] bad input\n"), Some(1));
+    assert_eq!(expected_failure_exit("test", "Error [E3999]: unknown fault\n"), None);
+    assert_eq!(expected_failure_exit("test", "Error: unknown entry\n"), None);
+    assert_eq!(expected_failure_exit("test", "Runtime fault [R0802]: bad storage\nexit: 70\n"), Some(70));
+    assert_eq!(expected_failure_exit("test", "Runtime fault [R0802]: bad storage\nexit: 1\n"), None);
+    assert_eq!(expected_failure_exit("test", "Runtime fault [R0802]: bad storage\n"), Some(70));
+    assert_eq!(expected_failure_exit("serde/decode_error_exit", "[at `name`: expected Text]\n  failed here: run (a.jet:1)\n"), Some(1));
+    assert_eq!(expected_failure_exit("io/log_fatal", ""), Some(1));
+    assert_eq!(expected_failure_exit("unknown", ""), None);
+    assert_eq!(expected_failure_exit("test", "unknown report\n"), None);
+    assert_failure_stdout("empty", b"", b"");
+    assert_failure_stdout("close", b"closed\n", b"closed\n");
+    assert!(std::panic::catch_unwind(|| assert_failure_stdout("close", b"closed\n", b"")).is_err());
+    assert!(std::panic::catch_unwind(|| assert_failure_stdout("empty", b"", b"unexpected\n")).is_err());
 }
