@@ -15,6 +15,7 @@ use jet_foundation.[
     THandleOp,
     Type,
     type_identity_equal,
+    core_source_owns_type,
     type_name,
 ]
 
@@ -25,16 +26,47 @@ pub struct SemaCallGeometryTransformParts {
     pub name: String
 }
 
+// Same declaration-identity predicate as Rust's geometry_nominal_leaf.
+pub fn sema_geometry_nominal_leaf(name: String) -> String Never! {
+    if !core_source_owns_type(name) -> return ~name
+    parts :: name.split("::").to_list()
+    if parts.len() >= 2 && parts[parts.len() - 2] == "Core/math/math.jet" -> return ~parts[parts.len() - 1]
+    ~name
+}
+
+pub fn sema_geometry_restore_owner(ty: Type, source: Type) -> Type Never! {
+    name :: if source == { .Named(owner) | .Apply(owner, _) -> owner else -> { return ~ty } }
+    leaf :: sema_geometry_nominal_leaf(name)
+    if leaf == name -> return ~ty
+    parts := name.split("::").to_list()
+    if ty == {
+        .Result(ok, error) -> return Type.Result{ok: sema_geometry_restore_owner(ok, source), err: sema_geometry_restore_owner(error, source)}
+        .Named(result) -> {
+            if result.contains("::") -> return ~ty
+            parts[parts.len() - 1] = ~result
+            return Type.Named{name: parts.join("::")}
+        }
+        .Apply(result, args) -> {
+            if result.contains("::") -> return ~ty
+            parts[parts.len() - 1] = ~result
+            return Type.Apply{name: parts.join("::"), args: ~args}
+        }
+        else -> return ~ty
+    }
+}
+
 fn sema_call_geometry_intrinsic_type(ty: Type, environment: SemaScopeEnvironment) -> Bool Never! {
     graph_option :: environment.registration_graph
     graph :: graph_option ?? return false
+    name :: if ty == { .Named(owner) | .Apply(owner, _) -> owner else -> "" }
+    if sema_geometry_nominal_leaf(name) != name -> return true
     sema_type_resolve_nominal_row(graph, ty, environment.module_identity) == None
 }
 
 pub fn sema_call_geometry_transform_parts(ty: Type, environment: SemaScopeEnvironment) -> SemaCallGeometryTransformParts? {
     resolved :: sema_call_resolved_type(ty, environment)
     matches := if resolved == {
-        .Apply(name, args) -> (name == "Transform" && args.len() == 2) || (name == "Transform2" && args.len() == 3)
+        .Apply(name, args) -> (sema_geometry_nominal_leaf(name) == "Transform" && args.len() == 2) || (sema_geometry_nominal_leaf(name) == "Transform2" && args.len() == 3)
         else -> false
     }
     if !matches {
@@ -43,10 +75,10 @@ pub fn sema_call_geometry_transform_parts(ty: Type, environment: SemaScopeEnviro
     if !sema_call_geometry_intrinsic_type(resolved, environment) -> return None
     if resolved == {
         .Apply(name, args) -> {
-            if name == "Transform" {
+            if sema_geometry_nominal_leaf(name) == "Transform" {
                 return Val(SemaCallGeometryTransformParts{scalar: Type.Float, from: args[0], to: args[1], name: "Transform"})
             }
-            if name == "Transform2" {
+            if sema_geometry_nominal_leaf(name) == "Transform2" {
                 return Val(SemaCallGeometryTransformParts{scalar: args[0], from: args[1], to: args[2], name: "Transform2"})
             }
             return None
@@ -57,8 +89,8 @@ pub fn sema_call_geometry_transform_parts(ty: Type, environment: SemaScopeEnviro
 
 fn sema_call_geometry_is_point(ty: Type) -> Bool Never! {
     if ty == {
-        .Named(name) -> name == "ScreenPoint" || name == "WorldPoint" || name == "ViewPoint" || name == "CameraPoint" || name == "DevicePoint"
-        .Apply(name, args) -> name == "Point2" && args.len() == 2
+        .Named(name) -> sema_geometry_nominal_leaf(name) == "ScreenPoint" || sema_geometry_nominal_leaf(name) == "WorldPoint" || sema_geometry_nominal_leaf(name) == "ViewPoint" || sema_geometry_nominal_leaf(name) == "CameraPoint" || sema_geometry_nominal_leaf(name) == "DevicePoint"
+        .Apply(name, args) -> sema_geometry_nominal_leaf(name) == "Point2" && args.len() == 2
         else -> false
     }
 }
@@ -66,6 +98,7 @@ fn sema_call_geometry_is_point(ty: Type) -> Bool Never! {
 fn sema_call_geometry_space(ty: Type) -> Type? {
     if ty == {
         .Named(name) -> {
+            name :: sema_geometry_nominal_leaf(name)
             if name == "ScreenPoint" || name == "ScreenDelta" {
                 return Val(Type.Named{name: "Screen"})
             }
@@ -84,7 +117,7 @@ fn sema_call_geometry_space(ty: Type) -> Type? {
             None
         }
         .Apply(name, args) -> {
-            if (name == "Point2" || name == "Delta2") && args.len() == 2 {
+            if (sema_geometry_nominal_leaf(name) == "Point2" || sema_geometry_nominal_leaf(name) == "Delta2") && args.len() == 2 {
                 return Val(args[1])
             }
             None
@@ -105,6 +138,11 @@ fn sema_call_geometry_transform_type(parts: SemaCallGeometryTransformParts, from
 }
 
 pub fn sema_call_geometry_transform_method_return(receiver_type: Type, method: String, args: [Type], environment: SemaScopeEnvironment) -> Type? {
+    result :: sema_call_geometry_transform_method_return_inner(receiver_type, method, args, environment) ?? return None
+    Val(sema_geometry_restore_owner(result, sema_call_resolved_type(receiver_type, environment)))
+}
+
+fn sema_call_geometry_transform_method_return_inner(receiver_type: Type, method: String, args: [Type], environment: SemaScopeEnvironment) -> Type? {
     parts :: sema_call_geometry_transform_parts(receiver_type, environment) ?? return None
     if method == "then" && args.len() == 1 {
         next :: sema_call_geometry_transform_parts(args[0], environment) ?? return None
@@ -135,6 +173,14 @@ pub fn sema_call_geometry_transform_method_return(receiver_type: Type, method: S
     None
 }
 
+fn sema_geometry_diagnostic_type(ty: Type) -> Type Never! {
+    if ty == {
+        .Named(name) -> Type.Named{name: sema_geometry_nominal_leaf(name)}
+        .Apply(name, args) -> Type.Apply{name: sema_geometry_nominal_leaf(name), args: ~args}
+        else -> ~ty
+    }
+}
+
 fn sema_call_geometry_report_transform_chain_mismatch(receiver: Type, method: String, args: [Type], span: Span, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> Bool {
     if method != "then" || args.len() != 1 -> return false
     first_type := sema_call_resolved_type(receiver, environment)
@@ -145,7 +191,7 @@ fn sema_call_geometry_report_transform_chain_mismatch(receiver: Type, method: St
     &diagnostics.push(sema_error(
         "E2521",
         span,
-        "Cannot compose `{type_name(first_type)}` with `{type_name(second_type)}`: `{type_name(first.to)}` does not match `{type_name(second.from)}`.",
+        "Cannot compose `{type_name(sema_geometry_diagnostic_type(first_type))}` with `{type_name(sema_geometry_diagnostic_type(second_type))}`: `{type_name(first.to)}` does not match `{type_name(second.from)}`.",
         "A transform chain is valid only when the destination of the first transform is the source of the next one.",
         "Reverse or replace one transform so both middle spaces are the same.",
     ))
@@ -241,3 +287,11 @@ pub fn sema_call_try_geometry(receiver: Expr, receiver_value: TExpr, method: Str
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, &diagnostics)}
 }
 
+
+#Test("Geometry declaration identity matches only source-owned Core nominals") {
+    owner :: "<corelib>/Core/math::Core/math/math.jet::ScreenPoint"
+    assert_eq(sema_geometry_nominal_leaf(owner), "ScreenPoint")
+    assert_eq(sema_geometry_nominal_leaf("user::ScreenPoint"), "user::ScreenPoint")
+    restored :: sema_geometry_restore_owner(Type.Result{ok: Type.Apply{name: "Transform", args: [Type]{Type.Named{name: "World"}, Type.Named{name: "Screen"}}}, err: Type.Named{name: "TransformError"}}, Type.Named{name: owner})
+    assert_eq(restored, Type.Result{ok: Type.Apply{name: "<corelib>/Core/math::Core/math/math.jet::Transform", args: [Type]{Type.Named{name: "World"}, Type.Named{name: "Screen"}}}, err: Type.Named{name: "<corelib>/Core/math::Core/math/math.jet::TransformError"}})
+}

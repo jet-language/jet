@@ -486,12 +486,47 @@ pub fn precise_mix_error(lt: &Type, rt: &Type) -> Option<(&'static str, String, 
     }
     None
 }
+/// Match only the registered declaration identity, never a user leaf lookalike.
+pub fn geometry_nominal_leaf(name: &str) -> &str {
+    if jet_foundation::CoreModuleExports::core_source_owns_type(name) {
+        if let Some((owner, leaf)) = name.rsplit_once("::") {
+            if owner.ends_with("::Core/math/math.jet") {
+                return leaf;
+            }
+        }
+    }
+    name
+}
+
+fn geometry_restore_owner(mut ty: Type, source: &Type) -> Type {
+    let Some(name) = source.base_name() else { return ty };
+    if geometry_nominal_leaf(name) == name { return ty }
+    let Some((owner, _)) = name.rsplit_once("::") else { return ty };
+    fn restore(ty: &mut Type, owner: &str) {
+        match ty {
+            Type::Named(name) | Type::Apply { name, .. }
+                if is_geometry_type(name) || name == "TransformError" => {
+                    if !name.contains("::") {
+                        *name = format!("{owner}::{name}");
+                    }
+                }
+            Type::Result { ok, err } => {
+                restore(ok, owner);
+                restore(err, owner);
+            }
+            _ => {}
+        }
+    }
+    restore(&mut ty, owner);
+    ty
+}
+
 /// D-SPACE-GEOMETRY1=A: coordinate-space geometry stays in the ordinary type
 /// algebra.  The scalar payload is still the existing `Float`; only the point
 /// or displacement carrier and its nominal space are checked here.
 pub fn is_geometry_type(name: &str) -> bool {
     matches!(
-        name,
+        geometry_nominal_leaf(name),
         "Point2"
             | "Delta2"
             | "Transform"
@@ -511,7 +546,7 @@ pub fn is_geometry_type(name: &str) -> bool {
 }
 
 pub fn geometry_point_space(name: &str) -> Option<&'static str> {
-    match name {
+    match geometry_nominal_leaf(name) {
         "ScreenPoint" | "ScreenDelta" => Some("Screen"),
         "WorldPoint" | "WorldDelta" => Some("World"),
         "ViewPoint" | "ViewDelta" => Some("View"),
@@ -524,10 +559,10 @@ pub fn geometry_point_space(name: &str) -> Option<&'static str> {
 pub fn geometry_is_point(ty: &Type) -> bool {
     match ty {
         Type::Named(name) => matches!(
-            name.as_str(),
+            geometry_nominal_leaf(name),
             "ScreenPoint" | "WorldPoint" | "ViewPoint" | "CameraPoint" | "DevicePoint"
         ),
-        Type::Apply { name, args } => name == "Point2" && args.len() == 2,
+        Type::Apply { name, args } => geometry_nominal_leaf(name) == "Point2" && args.len() == 2,
         _ => false,
     }
 }
@@ -535,10 +570,10 @@ pub fn geometry_is_point(ty: &Type) -> bool {
 pub fn geometry_is_delta(ty: &Type) -> bool {
     match ty {
         Type::Named(name) => matches!(
-            name.as_str(),
+            geometry_nominal_leaf(name),
             "ScreenDelta" | "WorldDelta" | "ViewDelta" | "CameraDelta" | "DeviceDelta"
         ),
-        Type::Apply { name, args } => name == "Delta2" && args.len() == 2,
+        Type::Apply { name, args } => geometry_nominal_leaf(name) == "Delta2" && args.len() == 2,
         _ => false,
     }
 }
@@ -554,7 +589,7 @@ pub fn geometry_space(ty: &Type) -> Option<Type> {
                     .to_string(),
             )
         }),
-        Type::Apply { name, args } if matches!(name.as_str(), "Point2" | "Delta2") => {
+        Type::Apply { name, args } if matches!(geometry_nominal_leaf(name), "Point2" | "Delta2") => {
             args.get(1).cloned()
         }
         _ => None,
@@ -591,7 +626,7 @@ fn geometry_delta_type(ty: &Type, dynamic: bool) -> Type {
     }
     match ty {
         Type::Named(name) => {
-            let stock = match name.as_str() {
+            let stock = match geometry_nominal_leaf(name) {
                 "ScreenPoint" => Some("ScreenDelta"),
                 "WorldPoint" => Some("WorldDelta"),
                 "ViewPoint" => Some("ViewDelta"),
@@ -613,7 +648,7 @@ fn geometry_delta_type(ty: &Type, dynamic: bool) -> Type {
 fn geometry_dynamic(ty: &Type) -> bool {
     matches!(
         ty,
-        Type::Apply { name, .. } if matches!(name.as_str(), "Point2" | "Delta2")
+        Type::Apply { name, .. } if matches!(geometry_nominal_leaf(name), "Point2" | "Delta2")
     )
 }
 
@@ -624,7 +659,14 @@ fn geometry_result(ok: Type) -> Type {
     }
 }
 
-pub fn geometry_binop_result(
+pub fn geometry_binop_result(op: crate::AST::BinOp, left: &Type, right: &Type) -> Option<Result<Type, ()>> {
+    geometry_binop_result_inner(op, left, right).map(|result| result.map(|ty| {
+        let source = if left.base_name().is_some_and(|name| geometry_nominal_leaf(name) != name) { left } else { right };
+        geometry_restore_owner(ty, source)
+    }))
+}
+
+fn geometry_binop_result_inner(
     op: crate::AST::BinOp,
     left: &Type,
     right: &Type,
@@ -698,14 +740,18 @@ fn geometry_transform_parts(ty: &Type) -> Option<(Type, Type, Type)> {
     let Type::Apply { name, args } = ty else {
         return None;
     };
-    match (name.as_str(), args.as_slice()) {
+    match (geometry_nominal_leaf(name), args.as_slice()) {
         ("Transform", [from, to]) => Some((Type::Float, from.clone(), to.clone())),
         ("Transform2", [scalar, from, to]) => Some((scalar.clone(), from.clone(), to.clone())),
         _ => None,
     }
 }
 
-pub fn geometry_method_return(
+pub fn geometry_method_return(recv: &Type, method: &str, args: &[Type]) -> Option<Result<Type, ()>> {
+    geometry_method_return_inner(recv, method, args).map(|result| result.map(|ty| geometry_restore_owner(ty, recv)))
+}
+
+fn geometry_method_return_inner(
     recv: &Type,
     method: &str,
     args: &[Type],
@@ -886,12 +932,12 @@ pub fn geometry_transform_diagnostic(
     else {
         return None;
     };
-    let (_, middle_a) = match (name.as_str(), recv_args.as_slice()) {
+    let (_, middle_a) = match (geometry_nominal_leaf(name), recv_args.as_slice()) {
         ("Transform", [_, to]) => ((), to),
         ("Transform2", [_, _, to]) => ((), to),
         _ => return None,
     };
-    let middle_b = match (next_name.as_str(), next_args.as_slice()) {
+    let middle_b = match (geometry_nominal_leaf(next_name), next_args.as_slice()) {
         ("Transform", [next_from, _]) => next_from,
         ("Transform2", [_, next_from, _]) => next_from,
         _ => return None,
@@ -900,8 +946,8 @@ pub fn geometry_transform_diagnostic(
         return None;
     }
     Some((
-        recv.show(),
-        args[0].show(),
+        match recv { Type::Apply { name, args } => Type::Apply { name: geometry_nominal_leaf(name).to_string(), args: args.clone() }.show(), _ => recv.show() },
+        match &args[0] { Type::Apply { name, args } => Type::Apply { name: geometry_nominal_leaf(name).to_string(), args: args.clone() }.show(), ty => ty.show() },
         middle_a.show(),
         middle_b.show(),
     ))
@@ -915,7 +961,7 @@ pub fn geometry_static_arg_types(
     method: &str,
     owner_args: &[Type],
 ) -> Option<Vec<Type>> {
-    match (name, method) {
+    match (geometry_nominal_leaf(name), method) {
         (
             "ScreenPoint"
             | "WorldPoint"
@@ -983,7 +1029,7 @@ pub fn geometry_static_return_with_owner(
     n_args: usize,
     owner_args: &[Type],
 ) -> Option<Type> {
-    if matches!(name, "Point2" | "Delta2")
+    if matches!(geometry_nominal_leaf(name), "Point2" | "Delta2")
         && method == "new"
         && n_args == 3
         && owner_args.len() == 2
@@ -993,11 +1039,11 @@ pub fn geometry_static_return_with_owner(
             args: owner_args.to_vec(),
         });
     }
-    if matches!(name, "Transform" | "Transform2")
+    if matches!(geometry_nominal_leaf(name), "Transform" | "Transform2")
         && method == "affine"
         && n_args == 8
-        && ((name == "Transform" && owner_args.len() == 2)
-            || (name == "Transform2" && owner_args.len() == 3))
+        && ((geometry_nominal_leaf(name) == "Transform" && owner_args.len() == 2)
+            || (geometry_nominal_leaf(name) == "Transform2" && owner_args.len() == 3))
     {
         return Some(Type::Apply {
             name: name.to_string(),
@@ -1005,4 +1051,39 @@ pub fn geometry_static_return_with_owner(
         });
     }
     geometry_static_return(name, method, n_args)
+}
+
+#[cfg(test)]
+mod geometry_source_identity_tests {
+    use super::*;
+
+    fn owned(leaf: &str) -> String {
+        format!("<corelib>/Core/math::Core/math/math.jet::{leaf}")
+    }
+
+    #[test]
+    fn source_coordinates_keep_the_same_space_contract() {
+        let screen = Type::Named(owned("ScreenPoint"));
+        let delta = Type::Named(owned("ScreenDelta"));
+        let world = Type::Named(owned("WorldDelta"));
+        assert!(geometry_is_point(&screen));
+        assert_eq!(geometry_space(&screen), Some(Type::Named("Screen".into())));
+        assert_eq!(geometry_binop_result(crate::AST::BinOp::Add, &screen, &delta), Some(Ok(screen.clone())));
+        assert_eq!(geometry_binop_result(crate::AST::BinOp::Add, &screen, &world), Some(Err(())));
+        assert!(!geometry_is_point(&Type::Named("user::ScreenPoint".into())));
+    }
+
+    #[test]
+    fn source_transforms_keep_float_return_selection_and_rejections() {
+        let transform = Type::Apply { name: owned("Transform2"), args: vec![Type::Float, Type::Named("Screen".into()), Type::Named("World".into())] };
+        let inverse = geometry_method_return(&transform, "inverse", &[]).unwrap().unwrap();
+        assert_eq!(inverse, Type::Result {
+            ok: Box::new(Type::Apply { name: owned("Transform"), args: vec![Type::Named("World".into()), Type::Named("Screen".into())] }),
+            err: Box::new(Type::Named(owned("TransformError"))),
+        });
+        let screen = Type::Named(owned("ScreenPoint"));
+        let world = Type::Named(owned("WorldPoint"));
+        assert!(geometry_method_return(&transform, "point", &[screen]).unwrap().is_ok());
+        assert_eq!(geometry_method_return(&transform, "point", &[world]), Some(Err(())));
+    }
 }
