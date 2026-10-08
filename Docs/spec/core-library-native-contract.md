@@ -516,3 +516,8 @@ exact Int inputs and converts them in field order before allocation; an
 unrepresentable count takes the native-index-range stop. Each getter creates
 a fresh exact Int owner from the stored count. Clone copies all four raw
 words and does not retain the constructor's Int owners.
+
+HTTP Server TLS owns certificate and key PEM text independently. Construction
+clones borrowed text; cloning and both getters produce independent owners.
+These ownership helpers preserve the input bytes and do not parse credentials,
+establish a connection, or choose TLS trust policy.
