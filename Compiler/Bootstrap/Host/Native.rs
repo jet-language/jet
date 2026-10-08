@@ -2387,6 +2387,16 @@ fn emit_bootstrap_host_factory(
         symbols.field_symbol("JetDriverCompileRequest", "native_stop_points")?;
     let request_comptime_stop_points =
         symbols.field_symbol("JetDriverCompileRequest", "comptime_stop_points")?;
+    let request_gate_set = symbols.field_symbol("JetDriverCompileRequest", "gate_set")?;
+    let request_gate_policies = symbols.field_symbol("JetDriverCompileRequest", "gate_policies")?;
+    let request_external_gate_entries =
+        symbols.field_symbol("JetDriverCompileRequest", "external_gate_entries")?;
+    let request_evaluation_entry =
+        symbols.field_symbol("JetDriverCompileRequest", "evaluation_entry")?;
+    let gate_set_type = symbols.type_symbol("GateSet")?;
+    let gate_set_allowed = symbols.field_symbol("GateSet", "allowed")?;
+    let gate_set_build_flag = symbols.field_symbol("GateSet", "build_flag")?;
+    let gate_set_session_flag = symbols.field_symbol("GateSet", "session_flag")?;
     let request_compiler_threads =
         symbols.field_symbol("JetDriverCompileRequest", "compiler_threads")?;
     // #4643: the request's compile mode; the bootstrap host always compiles a program.
@@ -2510,6 +2520,12 @@ fn emit_bootstrap_host_factory(
             "        {request_mir_lint_every_pass}: ::std::env::var_os(\"JET_BOOTSTRAP_MIR_LINT_EVERY_PASS\").is_some_and(|value| value == \"1\"),\n",
             "        {request_mode}: {mode_program},\n",
             "        {request_comptime_stop_points}: false,\n",
+            "        // No invocation/package gates or evaluation entry are supplied\n",
+            "        // by the bootstrap host; preserve the declared request defaults.\n",
+            "        {request_gate_set}: {gate_set_type} {{ {gate_set_allowed}: Vec::new(), {gate_set_build_flag}: false, {gate_set_session_flag}: false }},\n",
+            "        {request_gate_policies}: Vec::new(),\n",
+            "        {request_external_gate_entries}: Vec::new(),\n",
+            "        {request_evaluation_entry}: Err(Default::default()),\n",
             "        // D-JOBS1=A: the bootstrap host takes no `--threads` cap, so the\n",
             "        // compiler admits threads automatically up to the reported cores\n",
             "        // and within the memory Linux reports available, lowered to the\n",
@@ -2555,6 +2571,14 @@ fn emit_bootstrap_host_factory(
         request_mir_lint_every_pass = request_mir_lint_every_pass,
         request_native_stop_points = request_native_stop_points,
         request_comptime_stop_points = request_comptime_stop_points,
+        request_gate_set = request_gate_set,
+        request_gate_policies = request_gate_policies,
+        request_external_gate_entries = request_external_gate_entries,
+        request_evaluation_entry = request_evaluation_entry,
+        gate_set_type = gate_set_type,
+        gate_set_allowed = gate_set_allowed,
+        gate_set_build_flag = gate_set_build_flag,
+        gate_set_session_flag = gate_set_session_flag,
         request_compiler_threads = request_compiler_threads,
         request_mode = request_mode,
         mode_program = mode_program,
