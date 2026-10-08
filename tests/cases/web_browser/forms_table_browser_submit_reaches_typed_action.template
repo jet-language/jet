@@ -1,0 +1,41 @@
+
+const { CdpDriver } = await import(`file://{root}/Tools/canvas-test/driver.mjs`);
+
+const driver = await new CdpDriver().launch();
+try {
+  await driver.navigate("http://127.0.0.1:{free-port:forms}/");
+  const markup = await driver.evaluate(
+    "document.querySelector('form')?.outerHTML || ''",
+  );
+  const expectedMarkup = [
+    'method="post" action="/actions/save"',
+    '<input name="name" id="Person-name" type="text" aria-label="name" aria-invalid="false" required',
+    'value="Ada">',
+    '<button type="submit">Submit</button>',
+  ];
+  for (const fragment of expectedMarkup) {
+    if (!markup.includes(fragment)) {
+      throw new Error(`typed form lost generated ${fragment}: ${markup}`);
+    }
+  }
+  await driver.evaluate(`(() => {
+    const form = document.querySelector("form");
+    form.elements.namedItem("id").value = "7";
+    form.elements.namedItem("name").value = "Ada";
+    form.elements.namedItem("active").checked = true;
+    form.requestSubmit();
+  })()`);
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  let body = "";
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    body = await driver.evaluate("document.body?.textContent || ''");
+    if (body.includes("saved Ada")) break;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  if (!body.includes("saved Ada")) {
+    throw new Error(`typed form action did not return the observable result: ${body}`);
+  }
+  console.log("PASS forms table typed action browser fixture");
+} finally {
+  await driver.close();
+}

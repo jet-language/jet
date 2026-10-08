@@ -1,0 +1,59 @@
+use core.crypto as crypto
+use core.crypto.expert as expert
+use core.files as files
+
+// tests/fixtures/crypto_bridge_entropy.rs:661-760. KNOWN-FAILING #4821.
+// source-1.jetc is ORACLE-DERIVED, not a snapshot: Node crypto.createCipheriv
+// ('chacha20-poly1305', key, nonce, {authTagLength:16}), OpenSSL 3.6.2.
+// Generator FIRST matched RFC8439 section2.8.2 exact ciphertext and tag (PASS).
+// Fixed inputs: key bytes0..31, nonce bytes0..11, empty AAD,
+// UTF8 plaintext "historical migration payload"; JETC + [1,1] + nonce + ct+tag.
+// Ciphertext+tag: e1927b744665cc23d6ef1f9ef17a7c02bd19dd897104ccc08af84ea19b8f6c1e9565693b5bc3bc32e7207954.
+// Original ChaCha20Poly1305 dependency operation is fixture data, not guest policy.
+#Test("jetc_v1_migration_reseals_to_verified_v2_without_touching_source") {
+    key := [U8]{}
+    nonce := [U8]{}
+    loop i in 0..<32 -> &key.push((U8{i}))
+    loop i in 0..<12 -> &nonce.push((U8{i}))
+    plaintext :: "historical migration payload".bytes()
+    recipient :: crypto.X25519SecretKey.new_random() ?? panic("recipient")
+    recipients :: [recipient.public_key()]
+    ciphertext :: expert.aes256gcm_seal(key, nonce, plaintext, [U8]{}) ?? panic("AES v1")
+    v1 := "JETC".bytes()
+    &v1.push(U8{1})
+    &v1.push(U8{2})
+    loop b in nonce -> &v1.push(b)
+    loop b in ciphertext -> &v1.push(b)
+    files.write_bytes("source-2.jetc", v1) ?? panic("source2")
+    loop algorithm in [1, 2] {
+        source :: "source-{algorithm}.jetc"
+        migrated :: "migrated-{algorithm}.jetc"
+        restored :: "restored-{algorithm}.bin"
+        original :: files.read_bytes(source) ?? panic("v1 bytes")
+        expert.migrate_v1(key, Path.from(source), recipients, Path.from(migrated)) ?? panic("migrate")
+        assert_eq(files.read_bytes(source) ?? panic("source"), original)
+        encoded :: files.read_bytes(migrated) ?? panic("migrated")
+        assert_eq(encoded[0..<8], [U8]{74, 69, 84, 67, 2, 1, 1, 0})
+        crypto.file_open(recipient, Path.from(migrated), Path.from(restored)) ?? panic("open")
+        assert_eq(files.read_bytes(restored) ?? panic("restored"), plaintext)
+    }
+    original :: files.read_bytes("source-1.jetc") ?? panic("original")
+    files.write_bytes("existing.jetc", "keep".bytes()) ?? panic("existing")
+    assert_eq(expert.migrate_v1(key, Path.from("source-1.jetc"), recipients, Path.from("existing.jetc")), Err(crypto.FileCryptoError.DestinationExists))
+    assert_eq(files.read_bytes("existing.jetc") ?? panic("existing"), "keep".bytes())
+    assert_eq(files.read_bytes("source-1.jetc") ?? panic("source"), original)
+    assert_eq(expert.migrate_v1(key, Path.from("source-1.jetc"), recipients, Path.from("source-1.jetc")), Err(crypto.FileCryptoError.DestinationExists))
+    assert_eq(files.read_bytes("source-1.jetc") ?? panic("source"), original)
+    wrong := [U8]{}
+    loop _ in 0..<32 -> &wrong.push(U8{9})
+    assert_eq(expert.migrate_v1(wrong, Path.from("source-1.jetc"), recipients, Path.from("wrong-key.jetc")), Err(crypto.FileCryptoError.OpenFailed))
+    assert(!files.exists("wrong-key.jetc"))
+    hostile := "JETC".bytes()
+    &hostile.push(U8{1})
+    &hostile.push(U8{1})
+    loop b in "bad".bytes() -> &hostile.push(b)
+    files.write_bytes("hostile.jetc", hostile) ?? panic("hostile")
+    assert_eq(expert.migrate_v1(key, Path.from("hostile.jetc"), recipients, Path.from("absent.jetc")), Err(crypto.FileCryptoError.OpenFailed))
+    assert(!files.exists("absent.jetc"))
+    loop entry in files.read_dir(".") ?? panic("root") -> assert(!entry.name.starts_with(".jetc-"))
+}

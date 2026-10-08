@@ -1,0 +1,23 @@
+# tests/debug.rs::dap_cli_rejects_a_cross_executable_attach_through_the_production_wire
+# Original real target/DAP wire; PENDING-GRAMMAR(batch-four process state/executable), PENDING-SAME-HEAD.
+requires: os-name:linux
+requires: tool:sleep
+fixture: dap_cli_rejects_a_cross_executable_attach_through_the_production_wire.fixture
+env: NO_COLOR=1
+session dap content-length: jet debug --dap {work}/main.jet
+send dap: "{\"seq\":1,\"type\":\"request\",\"command\":\"initialize\",\"arguments\":{\"adapterID\":\"jet\",\"pathFormat\":\"path\"}}"
+await: file {work}/build/main_dbg is-file timeout 30s every 20ms
+await: file {work}/build/main_dbg.jetmap is-file timeout 30s every 20ms
+spawn target: sleep 30
+send dap: "{\"seq\":2,\"type\":\"request\",\"command\":\"attach\",\"arguments\":{\"processId\":{pid:target},\"program\":\"{work}/build/main_dbg\",\"map\":\"{work}/build/main_dbg.jetmap\"}}"
+close dap
+exit: 0
+stdout: ~ "\"command\":\"attach\"" # original transcript predicate
+stdout: ~ "\"request_seq\":2,\"success\":false,\"command\":\"attach\"" # original transcript predicate
+stdout: ~ "\"id\":22037" # original transcript predicate
+stdout: ~ "\"code\":\"E2231\"" # original transcript predicate
+stdout: !~ "\"event\":\"stopped\"" # original transcript predicate
+process {pid:target}: alive-nonzombie
+signal target: KILL
+wait: target
+exit: any # original target kill status unasserted

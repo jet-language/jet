@@ -1,0 +1,30 @@
+# tests/debug.rs::dap_cli_attaches_and_disconnects_through_the_production_wire
+# Original real target/DAP wire; PENDING-GRAMMAR(batch-four process state/executable), PENDING-SAME-HEAD.
+requires: os-name:linux
+requires: tool:lldb
+requires: tool:cc
+fixture: dap_cli_attaches_and_disconnects_through_the_production_wire.fixture
+env: NO_COLOR=1
+step: cc authorizer.c -o authorizer
+exit: 0
+session dap content-length: jet debug --dap {work}/main.jet
+send dap: "{\"seq\":1,\"type\":\"request\",\"command\":\"initialize\",\"arguments\":{\"adapterID\":\"jet\",\"pathFormat\":\"path\"}}"
+await: file {work}/build/main_dbg is-file timeout 30s every 20ms
+await: file {work}/build/main_dbg.jetmap is-file timeout 30s every 20ms
+spawn target: {work}/authorizer {work}/build/main_dbg
+await: process {pid:target} executable = {work}/build/main_dbg timeout 5s every 10ms
+send dap: "{\"seq\":2,\"type\":\"request\",\"command\":\"attach\",\"arguments\":{\"processId\":{pid:target},\"program\":\"{work}/build/main_dbg\",\"map\":\"{work}/build/main_dbg.jetmap\"}}"
+await: process {pid:target} state in ["T","t"] timeout 30s every 20ms
+send dap: "{\"seq\":3,\"type\":\"request\",\"command\":\"disconnect\",\"arguments\":{}}"
+close dap
+exit: 0
+stdout: ~ "\"command\":\"attach\"" # original transcript predicate
+stdout: ~ "\"request_seq\":2,\"success\":true,\"command\":\"attach\"" # original transcript predicate
+stdout: ~ "\"command\":\"disconnect\"" # original transcript predicate
+stdout: ~ "\"request_seq\":3,\"success\":true,\"command\":\"disconnect\"" # original transcript predicate
+stdout: !~ "\"success\":false" # original transcript predicate
+process {pid:target}: alive-nonzombie
+await: process {pid:target} state not-in ["T","t"] timeout 2s every 20ms
+signal target: KILL
+wait: target
+exit: any # original target kill status unasserted
