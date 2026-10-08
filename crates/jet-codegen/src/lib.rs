@@ -20,6 +20,8 @@ pub(crate) mod jet_encoding_json {
 }
 mod BrowserHost;
 pub mod Codegen;
+// The native runtime and child cell transport share one descriptor ABI/module.
+include!("Prelude/Core/NativeMeta.rs");
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 pub mod NativeSession;
 /// D-FAIL-BREACH1=A: the same task-local runtime stack kernel used by emitted
