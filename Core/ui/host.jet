@@ -206,15 +206,15 @@ pub fn accessibility(name: String, description: String) -[IO]> UIAccessibility U
     if file_filter("", [String]{}, [String]{}) == .Err(error) {
         if error == .InvalidRequest(message) -> assert(message == "file filter must name an extension, media type, or label")
         else -> panic("wrong file-filter error")
-    } else -> panic("empty filter accepted")
+    } else { panic("empty filter accepted") }
     if file_filter("Jet", [String]{""}, [String]{}) == .Err(error) {
         if error == .InvalidRequest(message) -> assert(message == "file filter extensions must not be empty")
         else -> panic("wrong extension error")
-    } else -> panic("empty extension accepted")
+    } else { panic("empty extension accepted") }
     if file_filter("Jet", [String]{}, [String]{""}) == .Err(error) {
         if error == .InvalidRequest(message) -> assert(message == "file filter media types must not be empty")
         else -> panic("wrong media-type error")
-    } else -> panic("empty media type accepted")
+    } else { panic("empty media type accepted") }
 }
 
 #Test("UI dialog request defaults occupy explicit carrier slots") {
@@ -261,5 +261,5 @@ pub fn accessibility(name: String, description: String) -[IO]> UIAccessibility U
     if shortcut(" \t\n", modifiers) == .Err(error) {
         if error == .InvalidRequest(message) -> assert(message == "shortcut key must not be empty")
         else -> panic("wrong shortcut error")
-    } else -> panic("empty shortcut accepted")
+    } else { panic("empty shortcut accepted") }
 }
