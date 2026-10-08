@@ -227,19 +227,22 @@ fn trust_store_add_line(store: String, line: String) -[FS]> Bool {
     true
 }
 
-// Persist a hash grant (the interactive "yes"); false when already stored.
-pub fn trust_grant_hash(store: String, hash: String) -[FS]> Bool {
-    trust_store_add_line(store, "{TRUST_HASH_PREFIX}{hash}")
+// crates/jetpack/src/Trust.rs:680: gate before even reading the store.
+pub fn trust_grant_hash(store: String, project_dir: String, hash: String) -[FS, Env]> Bool PackageGateError! {
+    pkg_check_project_gate(project_dir, PolicyKey.TrustGrant, "hash:{hash} -> {store}")
+    Ok(trust_store_add_line(store, "{TRUST_HASH_PREFIX}{hash}"))
 }
 
-// `jetpack config trust add <pattern>`; false when already present.
-pub fn trust_add_pattern(store: String, pattern: String) -[FS]> Bool {
-    trust_store_add_line(store, "{TRUST_PATTERN_PREFIX}{pattern}")
+// crates/jetpack/src/Trust.rs:691; false only when already present.
+pub fn trust_add_pattern(store: String, project_dir: String, pattern: String) -[FS, Env]> Bool PackageGateError! {
+    pkg_check_project_gate(project_dir, PolicyKey.TrustGrant, "pattern:{pattern} -> {store}")
+    Ok(trust_store_add_line(store, "{TRUST_PATTERN_PREFIX}{pattern}"))
 }
 
-// `jet trust grant`; false when the exact grant already exists.
-pub fn trust_add_grant(store: String, grant: TrustGrant) -[FS]> Bool {
-    trust_store_add_line(store, grant.line())
+// crates/jetpack/src/Trust.rs:703; keep the complete gate diagnostics.
+pub fn trust_add_grant(store: String, project_dir: String, grant: TrustGrant) -[FS, Env]> Bool PackageGateError! {
+    pkg_check_project_gate(project_dir, PolicyKey.TrustGrant, "{grant.key()} -> {store}")
+    Ok(trust_store_add_line(store, grant.line()))
 }
 
 // `jetpack config trust list`: every stored line.

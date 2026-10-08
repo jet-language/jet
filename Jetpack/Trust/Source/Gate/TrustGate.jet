@@ -33,7 +33,10 @@ pub fn trust_gate_with_environment_and_snapshot(theme: Theme, store: String, pro
 // recipe, platform, and declared capabilities). A package or environment
 // grant cannot authorize a different build graph; CI accepts only an exact
 // repository-scoped build grant and cannot bypass.
-pub fn trust_gate_build_identity(theme: Theme, store: String, identity: String, bypass: Bool) -[IO, FS, Env, Time.Wait]> Int? {
+pub fn trust_gate_build_identity(theme: Theme, store: String, project_dir: String, identity: String, bypass: Bool) -[IO, FS, Env, Time.Wait]> Int? {
+    if bypass {
+        pkg_check_project_gate(project_dir, PolicyKey.SessionFlag, "--trust") ?? return Val(trust_report_gate_failure(theme, err))
+    }
     ci :: sys.get("CI") != None
     if ci && bypass {
         theme.error_coded("E1255", "CI cannot bypass build-hook approval", "a build hook must use its exact package, provider/source, staged source, platform, recipe, and ability identity", "add the exact repository grant: `jet trust grant build:{identity} --scope repo`.")
@@ -61,11 +64,15 @@ pub fn trust_gate_build_identity(theme: Theme, store: String, identity: String, 
         theme.status("not trusted — exiting.")
         return Val(TRUST_GATE_REFUSED)
     }
-    trust_add_grant(store, TrustGrant{authority: TrustAuthority.Build.label(), subject: identity, scope: TRUST_SCOPE_USER})
+    trust_add_grant(store, project_dir, TrustGrant{authority: TrustAuthority.Build.label(), subject: identity, scope: TRUST_SCOPE_USER}) ?? return Val(trust_report_gate_failure(theme, err))
     None
 }
 
 fn trust_gate_with_hash(theme: Theme, store: String, project_dir: String, refs: [RefSpec], secrets: [SecretSpec], bypass: Bool, hash: String, typed: Bool, lifecycle_hooks: Bool) -[IO, FS, Env, Time.Wait]> Int? {
+    // Trust.rs:1039: the session gate precedes the non-sensitive fast path.
+    if bypass {
+        pkg_check_project_gate(project_dir, PolicyKey.SessionFlag, "--trust") ?? return Val(trust_report_gate_failure(theme, err))
+    }
     if !typed && !trust_is_trust_sensitive_ext(refs, secrets.len() > 0) && !lifecycle_hooks -> return None
     trusted :: if typed -> trust_is_typed_environment_trusted(store, project_dir, hash) else -> trust_is_env_trusted(store, project_dir, hash, refs, secrets)
     if bypass || trusted -> return None
@@ -101,7 +108,7 @@ fn trust_gate_with_hash(theme: Theme, store: String, project_dir: String, refs: 
         theme.status("not trusted — exiting.")
         return Val(TRUST_GATE_REFUSED)
     }
-    trust_grant_hash(store, hash)
+    trust_grant_hash(store, project_dir, hash) ?? return Val(trust_report_gate_failure(theme, err))
     None
 }
 
@@ -119,6 +126,10 @@ fn trust_project_policy_decision(project_dir: String) -[FS, Env]> TrustDecision?
 // The trust gate for a foreign flake/devenv file (U16), keyed on the file's
 // content. Ad-hoc `-p` packages are ordinary refs in the normal gate.
 pub fn trust_gate_flake(theme: Theme, store: String, project_dir: String, flake_path: String, bypass: Bool) -[IO, FS, Env, Time.Wait]> Int? {
+    // Trust.rs:1174: refuse the bypass before reading foreign source.
+    if bypass {
+        pkg_check_project_gate(project_dir, PolicyKey.SessionFlag, "--trust") ?? return Val(trust_report_gate_failure(theme, err))
+    }
     content :: files.read(flake_path) ?? ""
     hash :: trust_flake_definition_hash(content)
     if bypass || trust_is_trusted(store, project_dir, hash) -> return None
@@ -133,8 +144,16 @@ pub fn trust_gate_flake(theme: Theme, store: String, project_dir: String, flake_
         theme.status("not trusted — exiting.")
         return Val(TRUST_GATE_REFUSED)
     }
-    trust_grant_hash(store, hash)
+    trust_grant_hash(store, project_dir, hash) ?? return Val(trust_report_gate_failure(theme, err))
     None
+}
+
+// Trust.rs `report_gate_failure`: preserve each diagnostic's coded card.
+fn trust_report_gate_failure(theme: Theme, error: PackageGateError) -[IO, Time.Wait]> Int Never! {
+    loop diagnostic in error.diagnostics {
+        theme.error_coded(diagnostic.code, diagnostic.what, diagnostic.why, diagnostic.fix)
+    }
+    TRUST_GATE_REFUSED
 }
 
 // Prompt text on stderr without a newline.

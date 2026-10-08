@@ -60,7 +60,7 @@ fn trust_test_secret(name: String) -> SecretSpec {
     store :: files.join(dir, "trust")
     hash :: trust_env_definition_hash([RefSpec]{trust_test_ref("fastfetch@nixpkgs")}, SourceTable.empty(), [SecretSpec]{})
     assert(!trust_is_trusted(store, dir, hash))
-    trust_grant_hash(store, hash)
+    trust_grant_hash(store, dir, hash) ?? panic("hash grant")
     assert(trust_is_trusted(store, dir, hash))
 }
 
@@ -71,16 +71,16 @@ fn trust_test_secret(name: String) -> SecretSpec {
     secrets :: [SecretSpec]{trust_test_secret("db_password")}
 
     store :: files.join(dir, "trust")
-    trust_add_grant(store, TrustGrant{authority: TrustAuthority.Package.label(), subject: "fastfetch", scope: TRUST_SCOPE_USER})
+    trust_add_grant(store, dir, TrustGrant{authority: TrustAuthority.Package.label(), subject: "fastfetch", scope: TRUST_SCOPE_USER}) ?? panic("package grant")
     assert(trust_is_env_trusted(store, dir, hash, refs, [SecretSpec]{}))
     assert(!trust_is_env_trusted(store, dir, hash, refs, secrets))
 
     build_store :: files.join(dir, "trust-build")
-    trust_add_grant(build_store, TrustGrant{authority: TrustAuthority.Build.label(), subject: hash, scope: TRUST_SCOPE_USER})
+    trust_add_grant(build_store, dir, TrustGrant{authority: TrustAuthority.Build.label(), subject: hash, scope: TRUST_SCOPE_USER}) ?? panic("build grant")
     assert(trust_is_env_trusted(build_store, dir, hash, refs, secrets))
 
     env_store :: files.join(dir, "trust-env")
-    trust_add_grant(env_store, TrustGrant{authority: TrustAuthority.Env.label(), subject: "{dir}*", scope: TRUST_SCOPE_REPO})
+    trust_add_grant(env_store, dir, TrustGrant{authority: TrustAuthority.Env.label(), subject: "{dir}*", scope: TRUST_SCOPE_REPO}) ?? panic("env grant")
     assert(trust_is_env_trusted(env_store, dir, hash, refs, secrets))
 }
 
@@ -109,8 +109,8 @@ fn trust_test_secret(name: String) -> SecretSpec {
 #Test("pattern add list remove") {
     dir :: trust_test_gate_dir("pattern")
     store :: files.join(dir, "trust")
-    assert(trust_add_pattern(store, "/home/dev/*"))
-    assert(!trust_add_pattern(store, "/home/dev/*"), "idempotent")
+    assert(trust_add_pattern(store, dir, "/home/dev/*") ?? panic("pattern grant"))
+    assert(!(trust_add_pattern(store, dir, "/home/dev/*") ?? panic("pattern idempotent")), "idempotent")
     assert_eq(trust_list_entries(store), [String]{"pattern:/home/dev/*"})
     assert(trust_is_trusted(store, "/home/dev/myproj", "irrelevant-hash"))
     assert(trust_remove_pattern(store, "/home/dev/*"))
@@ -120,7 +120,7 @@ fn trust_test_secret(name: String) -> SecretSpec {
 #Test("prefix pattern without wildcard matches prefix") {
     dir :: trust_test_gate_dir("prefix")
     store :: files.join(dir, "trust")
-    trust_add_pattern(store, "/home/dev/")
+    trust_add_pattern(store, dir, "/home/dev/") ?? panic("prefix grant")
     assert(trust_is_trusted(store, "/home/dev/anything", "h"))
     assert(!trust_is_trusted(store, "/home/other", "h"))
 }
@@ -128,7 +128,7 @@ fn trust_test_secret(name: String) -> SecretSpec {
 #Test("prefix pattern does not match sibling name") {
     dir :: trust_test_gate_dir("prefix_sibling")
     store :: files.join(dir, "trust")
-    trust_add_pattern(store, "/home/dev/app")
+    trust_add_pattern(store, dir, "/home/dev/app") ?? panic("prefix grant")
     assert(trust_is_trusted(store, "/home/dev/app/src", "h"))
     assert(!trust_is_trusted(store, "/home/dev/application", "h"))
 }
@@ -136,7 +136,7 @@ fn trust_test_secret(name: String) -> SecretSpec {
 #Test("pattern matching tolerates canonical path aliases") {
     dir :: trust_test_gate_dir("canonical_alias")
     store :: files.join(dir, "trust")
-    trust_add_pattern(store, "{dir}*")
+    trust_add_pattern(store, dir, "{dir}*") ?? panic("canonical grant")
     canonical :: files.canonicalize(dir) ?? panic("canonical scratch path")
     assert(trust_is_trusted(store, canonical, "h"))
 }
@@ -164,6 +164,6 @@ fn trust_test_secret(name: String) -> SecretSpec {
     store :: files.join(dir, "trust")
     hash :: trust_flake_definition_hash("{{ devShells.default = {{}}; }}")
     assert(!trust_is_trusted(store, dir, hash))
-    trust_grant_hash(store, hash)
+    trust_grant_hash(store, dir, hash) ?? panic("flake grant")
     assert(trust_is_trusted(store, dir, hash))
 }
