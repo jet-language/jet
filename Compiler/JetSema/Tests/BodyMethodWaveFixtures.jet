@@ -352,6 +352,28 @@ fn method_wave_cache_foreign_body_case() {
     method_wave_require(changed_bind_checks == 1, "worker foreign-raw reads count one accepted route recompute, independently of handler hits")
 }
 
+fn method_wave_cache_utf8_bytes_case() {
+    source :: "struct TextOwner {{ fn text(&self) -> String Never! {{ \"é\" }} }}\n"
+    graph :: method_wave_registration(source, false, "effect IO\n")
+    cache :: sema_incremental_cache_new()
+    checked :: method_wave_cached_checked(graph, compiler_threads_single(), cache)
+    baseline :: method_wave_checked(graph, compiler_threads_single(), [SemaComptimeFunctionResult]{})
+    method_wave_require(checked.complete && "{checked:Debug}" == "{baseline:Debug}", "the UTF-8 cache case uses real identical checker products")
+    stats :: sema_incremental_cache_stats(cache)
+    expected := 0
+    permit :: cache.state.guard_read()
+    expected += permit.value.frozen.bytes().len()
+    loop key in permit.value.scope_inputs.keys() {
+        expected += key.bytes().len() + permit.value.scope_inputs[key].bytes().len()
+    }
+    loop key in permit.value.rows.keys() {
+        row :: permit.value.rows[key]
+        expected += key.bytes().len() + row.input.bytes().len() + "{row.value:Debug}".bytes().len()
+    }
+    method_wave_require("é".len() == 1 && "é".count_bytes() == 2, "Unicode scalar length is not retained UTF-8 byte volume")
+    method_wave_require(stats.live_items > 0 && stats.live_item_bytes == expected, "live_item_bytes matches the actual retained UTF-8 strings, not character counts or allocator RSS")
+}
+
 
 
 
@@ -367,6 +389,7 @@ fn run() {
     method_wave_cache_line_case()
     method_wave_cache_binding_case()
     method_wave_cache_foreign_body_case()
+    method_wave_cache_utf8_bytes_case()
     unit_source :: "{positive}\n#UnitFamily(WaveLength, base: meter) {{ meter\nfoot(scale: 381/1250) }}\nstruct UnitOwner {{ value: Int\nfn unit_value(&self) -> Meter Never! {{ converted :: Meter{{Foot.from_float(Float{{8.0}})}}\nconverted }}\nfn after_unit(&self) -> Int Never! {{ self.value }} }}\n"
     method_wave_case(unit_source, true, true, false, true)
     method_wave_cache_host_case(unit_source)

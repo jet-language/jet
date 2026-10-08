@@ -292,7 +292,7 @@ pub struct SemaIncrementalStats {
     pub hits: Int
     pub recomputes: Int
     pub live_items: Int
-    // Retained key/input and exhaustive Debug product bytes, not allocator RSS.
+    // Retained key/input and exhaustive Debug product UTF-8 bytes, not allocator RSS.
     pub live_item_bytes: Int
     pub recomputed_items: [String]
 }
@@ -399,9 +399,9 @@ fn sema_incremental_freeze_scope(cache: SemaIncrementalCache, module_identity: S
     previous :: permit.value.scope_inputs.get(module_identity)
     if previous != Val(input) {
         sema_incremental_evict_module(&permit.value, module_identity)
-        if previous == .Val(old) -> permit.value.frozen_bytes -= old.len()
-        else -> permit.value.frozen_bytes += module_identity.len()
-        permit.value.frozen_bytes += input.len()
+        if previous == .Val(old) -> permit.value.frozen_bytes -= old.count_bytes()
+        else -> permit.value.frozen_bytes += module_identity.count_bytes()
+        permit.value.frozen_bytes += input.count_bytes()
         permit.value.scope_inputs[module_identity] = ^input
         permit.value.next_epoch += 1
         permit.value.scope_epochs[module_identity] = permit.value.next_epoch
@@ -414,7 +414,7 @@ fn sema_incremental_advance_scope(memo: &SemaModuleMemo) {
     if permit.value.generation != memo.generation -> return
     sema_incremental_evict_module(&permit.value, memo.module_identity)
     old :: permit.value.scope_inputs.get(memo.module_identity) ?? ""
-    permit.value.frozen_bytes -= old.len()
+    permit.value.frozen_bytes -= old.count_bytes()
     // The changed scope is a new epoch of this compile, not the next request's
     // unchanged initial scope. Force an exact freeze before future reuse.
     permit.value.scope_inputs[memo.module_identity] = ""
@@ -486,7 +486,7 @@ fn sema_incremental_accept(query: SemaBodyMemoQuery, body: SemaParallelBody) {
         call_facts: body.call_facts, comptime_requests: body.comptime_requests,
         name_references: body.name_references, method_input: body.method_input,
     }
-    bytes :: query.key.len() + query.input.len() + "{value:Debug}".len()
+    bytes :: query.key.count_bytes() + query.input.count_bytes() + "{value:Debug}".count_bytes()
     previous_bytes :: if permit.value.rows.has_key(query.key) -> permit.value.rows[query.key].bytes else -> 0
     permit.value.row_bytes -= previous_bytes
     permit.value.rows[query.key] = SemaCachedBody{module_identity: query.module_memo.module_identity, generation: query.module_memo.generation, epoch: query.module_memo.epoch, input: query.input, value: value, bytes: bytes}
@@ -743,7 +743,7 @@ fn sema_incremental_begin(cache: SemaIncrementalCache, graph: SemaRegistrationGr
     permit.value.scope_inputs = [String:String]{}
     permit.value.scope_epochs = [String:Int]{}
     permit.value.rows = [String:SemaCachedBody]{}
-    permit.value.frozen_bytes = permit.value.frozen.len()
+    permit.value.frozen_bytes = permit.value.frozen.count_bytes()
     permit.value.row_bytes = 0
 }
 
