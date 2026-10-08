@@ -70,17 +70,8 @@ fn jet_codegen_handle_task_route(receiver: Type, carrier: TFailureCarrier) -> Je
                 .Result(value, _) -> value
                 else -> panic("checked task join has no result carrier")
             }
-            symbol := "jet_std::JetTask::join"
-            if success != args[0] {
-                if args[0] == {
-                    .Result(value, _) -> {
-                        if value != success -> panic("checked task join result disagrees with its task element")
-                        symbol = "jet_std::jet_task_join_result"
-                    }
-                    else -> panic("checked task join result disagrees with its task element")
-                }
-            }
-            return jet_codegen_handle_core("core.tasks", "join", symbol, [Bool]{false}, None)
+            if success != args[0] -> panic("checked task join result disagrees with its task element")
+            return jet_codegen_handle_core("core.tasks", "join", "jet_std::JetTask::join", [Bool]{false}, None)
         }
         else -> panic("checked task join has an unsupported receiver type")
     }

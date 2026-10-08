@@ -1201,22 +1201,17 @@ fn task_route(receiver: &Type, carrier: &TFailureCarrier) -> Result<TRoutePlan, 
     let TFailureCarrier::Result { success, .. } = carrier else {
         return Err(route_error("checked task join has no result carrier"));
     };
-    // The checked join success decides whether the worker result is retained
-    // or flattened. A Result element alone does not authorize flattening.
-    let symbol = if success == task_value {
-        "jet_std::JetTask::join"
-    } else if matches!(task_value, Type::Result { ok, .. } if ok.as_ref() == success) {
-        "jet_std::jet_task_join_result"
-    } else {
+    // A join retains the checked Task element, including any worker outcome.
+    if success != task_value {
         return Err(route_error(
             "checked task join result disagrees with its task element",
         ));
-    };
+    }
     Ok(prelude(
         MirPreludeFamily::HandleMethod,
         "core.tasks",
         "join",
-        symbol,
+        "jet_std::JetTask::join",
         1,
         1,
         &[false],
