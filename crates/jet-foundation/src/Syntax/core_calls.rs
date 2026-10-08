@@ -1584,7 +1584,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 8bac448cf6835fece057e7621c489ffb4d947c68bf49f2859e708194eecc2ffe
+// Source SHA-256: 00769d4187ddfa19f00006836cb065a045214cbeb3e6b96a6c2935bceb49ff93
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -3262,7 +3262,11 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.web.browser", "__file_size", "jet_browser_file_size_raw", true, &[true]).with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.web.browser", "__modified_ms", "jet_browser_modified_ms_raw", true, &[true]).with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.web.browser", "__html_path", "jet_browser_html_path_raw", false, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.web.browser", "__connect_session", "jet_browser_connect_profile", false, &[true, true, false]).with_interpreter_route(CoreCallInterpreterRoute::TypedIntrinsic),
+    CoreCallRecord::new("core.web.browser", "__ws_set_timeout", "JetWsConn::set_timeout", false, &[true, false]).with_interpreter_route(CoreCallInterpreterRoute::TypedIntrinsic),
+    CoreCallRecord::new("core.web.browser", "__from_connection", "jet_browser_from_connection_raw", true, &[false, true, false]).with_interpreter_route(CoreCallInterpreterRoute::TypedIntrinsic),
+    CoreCallRecord::new("core.web.browser", "__command", "jet_browser_command", false, &[true, true, false]).with_interpreter_route(CoreCallInterpreterRoute::TypedIntrinsic),
+    CoreCallRecord::new("core.web.browser", "__session_started", "jet_browser_session_started_raw", false, &[true]).with_interpreter_route(CoreCallInterpreterRoute::TypedIntrinsic),
+    CoreCallRecord::new("core.web.browser", "__cdp", "jet_browser_cdp_raw", false, &[true, false]).with_interpreter_route(CoreCallInterpreterRoute::TypedIntrinsic),
     sema_web_call("core.web.browser", "__begin_fixture", "jet_browser_test_begin_named", &[true, true, true, false, true, false, false]),
     sema_web_call("core.web.browser", "__report_options", "jet_browser_report_options_raw", &[true]),
     sema_web_call("core.web.browser", "__report_json", "jet_browser_test_report_json", &[true]),
@@ -3462,7 +3466,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.web.browser", "timeout", "jet_browser_timeout", false, &[false], ),
     CoreCallRecord::new( "core.web.browser", "locked", "jet_browser_locked", false, &[true], ),
     CoreCallRecord::new( "core.web.browser", "connect", "jet_browser_connect", false, &[true], ),
-    CoreCallRecord::new( "core.web.browser", "connect_profile", "jet_browser_connect_profile", false, &[true, true, false], ),
+    CoreCallRecord::source_owned("core.web.browser", "connect_profile", &[true, true, false]),
     CoreCallRecord::new( "core.http.server", "serve", "jet_http_mux_serve", false, &[true, false, false, false], ) .with_max_arity(4) .without_direct_aot() .with_source_owned() .with_source_target("__serve_entry"),
     CoreCallRecord::source_owned("core.http.server", "serve_once", &[true, false]),
     CoreCallRecord::new("core.http.server", "__serve_once", "jet_http_mux_serve_once", false, &[true, false]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),

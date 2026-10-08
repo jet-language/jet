@@ -1,6 +1,9 @@
 use core as core
 use core.text as text
 use core.text.parse as parse
+use core.net.ws.[WsError]
+use core.encoding.[DataTree]
+use core.encoding.stream as tree
 
 // core.web.browser — headed/headless browser control for tests.
 //
@@ -215,7 +218,63 @@ pub fn connect(endpoint: String) -[Net]> Browser BrowserError! {
 }
 
 pub fn connect_profile(endpoint: String, p: BrowserProfile, t: BrowserTimeout) -[Net]> Browser BrowserError! {
-    core.web.browser.__connect_session(endpoint, p, t)
+    conn :: core.net.ws.__connect(endpoint) ? value -> value ! error -> return Err(browser_ws_error(error))
+    core.web.browser.__ws_set_timeout(conn, t.milliseconds) ? unit -> unit ! error -> return Err(browser_ws_error(error))
+    browser :: core.web.browser.__from_connection(^conn, p, t)
+    empty :: tree.object_from_entries(^[(key: String, value: DataTree)]{})
+    status :: core.web.browser.__command(browser, "session.status", ^empty) ? value -> value ! error -> return Err(error)
+    if !browser_true_field(status, "ready") || !browser_text_field(status, "message") ->
+        return Err(BrowserError{kind: "protocol"})
+    params :: tree.object_from_entries(^[(key: String, value: DataTree)]{
+        (key: "capabilities", value: tree.object_from_entries(^[(key: String, value: DataTree)]{
+            (key: "alwaysMatch", value: tree.object_from_entries(^[(key: String, value: DataTree)]{}))
+        }))
+    })
+    session :: core.web.browser.__command(browser, "session.new", ^params) ? value -> value ! error -> return Err(error)
+    // This mutation precedes reply validation in the native truth: failed
+    // sessionId/capability validation must still clean up a started session.
+    core.web.browser.__session_started(browser)
+    cdp :: browser_session_cdp(session) ? value -> value ! error -> return Err(error)
+    core.web.browser.__cdp(browser, cdp)
+    Ok(browser)
+}
+
+fn browser_ws_error(error: WsError) -> BrowserError Never! {
+    if error == {
+        .Timeout -> BrowserError{kind: "timeout"}
+        .Closed -> BrowserError{kind: "closed"}
+        else -> BrowserError{kind: "transport"}
+    }
+}
+
+fn browser_true_field(value: DataTree, key: String) -> Bool Never! {
+    if value != .Object(_) -> return false
+    loop entry in tree.object_entries(value) {
+        if entry.key == key {
+            if entry.value == .Bool(flag) -> return flag
+            return false
+        }
+    }
+    false
+}
+
+fn browser_text_field(value: DataTree, key: String) -> Bool Never! {
+    if value != .Object(_) -> return false
+    loop entry in tree.object_entries(value) {
+        if entry.key == key -> return entry.value == .Text(_) || entry.value == .TypedText(_)
+    }
+    false
+}
+
+fn browser_session_cdp(session: DataTree) -> Bool BrowserError! {
+    if !browser_text_field(session, "sessionId") -> return Err(BrowserError{kind: "protocol"})
+    loop entry in tree.object_entries(session) {
+        if entry.key == "capabilities" {
+            if entry.value != .Object(_) -> return Err(BrowserError{kind: "protocol"})
+            return Ok(browser_true_field(entry.value, "goog:cdp"))
+        }
+    }
+    Err(BrowserError{kind: "protocol"})
 }
 
 pub fn connect_browser_profile(p: BrowserProfile, t: BrowserTimeout) -[Net]> Browser BrowserError! {
@@ -694,4 +753,39 @@ fn strip_quotes(raw: String) -> String Never! {
 fn write_report_text(path: String, rendered: String) BrowserError! {
     if rendered.bytes().len() > 16777216 -> return Err(BrowserError{kind: "protocol"})
     core.web.browser.__write_report_bytes(path, rendered.bytes())
+}
+
+#Test("browser handshake checks preserve native first-match and protocol rules") {
+    ready :: tree.object_from_entries(^[(key: String, value: DataTree)]{
+        (key: "ready", value: DataTree.Bool(true)),
+        (key: "message", value: DataTree.Text("ready"))
+    })
+    assert(browser_true_field(ready, "ready"))
+    assert(browser_text_field(ready, "message"))
+    assert(!browser_true_field(DataTree.Null, "ready"))
+    assert(!browser_text_field(DataTree.Null, "message"))
+    duplicate_ready :: tree.object_from_entries(^[(key: String, value: DataTree)]{
+        (key: "ready", value: DataTree.Bool(false)),
+        (key: "ready", value: DataTree.Bool(true))
+    })
+    assert(!browser_true_field(duplicate_ready, "ready"))
+    caps :: tree.object_from_entries(^[(key: String, value: DataTree)]{
+        (key: "goog:cdp", value: DataTree.Bool(false)),
+        (key: "goog:cdp", value: DataTree.Bool(true))
+    })
+    session :: tree.object_from_entries(^[(key: String, value: DataTree)]{
+        (key: "sessionId", value: DataTree.Text("")),
+        (key: "capabilities", value: ^caps)
+    })
+    assert_eq(browser_session_cdp(session), Ok(false))
+    typed_text :: tree.typed_string(^"typed")
+    typed_session :: tree.object_from_entries(^[(key: String, value: DataTree)]{
+        (key: "sessionId", value: ^typed_text),
+        (key: "capabilities", value: tree.object_from_entries(^[(key: String, value: DataTree)]{}))
+    })
+    assert_eq(browser_session_cdp(typed_session), Ok(false))
+    if browser_session_cdp(DataTree.Null) == {
+        .Ok(_) -> panic("non-object session accepted")
+        .Err(error) -> assert_eq(error.kind, "protocol")
+    }
 }
