@@ -167,7 +167,8 @@ fn x64_asm_line(s: &X64AsmState, line: String) -> String? Never! {
         if dst >= 0 {
             if mnemonic == "mov" && first == "rax" && second == "qword ptr gs:[0]" {
                 // The sole admitted segment operand: TCB self pointer at GS:0.
-                loop byte in [U8]{0x65, 0x48, 0x8b, 0x04, 0x25, 0, 0, 0, 0} -> &s.code.push(byte)
+                gs_bytes :: [U8]{0x65, 0x48, 0x8b, 0x04, 0x25, 0, 0, 0, 0}
+                loop byte in gs_bytes -> &s.code.push(byte)
             } else if mnemonic == "mov" && src >= 0 -> x64_mov_rr(&s.code, dst, src) else if x64_asm_memory(s, second, if mnemonic == "mov" -> "qword" else -> "byte") == .Val(mem) {
                 if mnemonic == "mov" -> x64_load(&s.code, dst, mem.base, mem.disp) else {
                     x64_load_u8(&s.code, dst, mem.base, mem.disp)
@@ -247,7 +248,8 @@ pub fn x64_assemble_template(template: String, names: [String], returns: Bool) -
                     return X64AsmResult{code: [U8]{}, regs: regs, result: -1, error: Val("inline asm: unsupported clone child rail")}
                 }
             }
-            loop byte in [U8]{0x48, 0x85, 0xc0, 0x75, 0x11, 0x58, 0x5f, 0x48, 0x83, 0xe4, 0xf0, 0xff, 0xd0, 0x31, 0xff, 0xb8, 0x3c, 0, 0, 0, 0x0f, 0x05} -> &s.code.push(byte)
+            child_bytes :: [U8]{0x48, 0x85, 0xc0, 0x75, 0x11, 0x58, 0x5f, 0x48, 0x83, 0xe4, 0xf0, 0xff, 0xd0, 0x31, 0xff, 0xb8, 0x3c, 0, 0, 0, 0x0f, 0x05}
+            loop byte in child_bytes -> &s.code.push(byte)
             i += child.len()
             next
         }
