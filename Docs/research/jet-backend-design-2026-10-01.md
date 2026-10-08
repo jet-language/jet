@@ -2215,3 +2215,18 @@ the canonical native arithmetic range diagnostic. The expected normal output
 is `EncodingErrors ownership/equality/render OK`. Native execution remains
 unexercised until the integrator composes the fresh green E2 FINAL runtime;
 parser and strict C11 syntax receipts alone do not establish runtime parity.
+
+### Synchronous event and hook policy ownership
+
+`EventEnumHandles.jet` also delegates HookPolicy and EventPolicy clone/drop
+to the same `encoding_enum_*` owner supplied by `e1306aee0`. HookPolicy's
+only variant is `FirstCancelElseTransform`; EventPolicy wraps the sole
+`AllowDepthFirst` reentrancy variant (`ReactiveEventWatch.rs:499-507,1720-1723`).
+Both use an owned native ordinal word, not a copied Rust struct layout.
+No equality, constructors or additional policy variants are invented.
+
+`EventPolicyWitness.c` links the real Jet exports with `--wrap=jet_rt_free`.
+It covers both policies, distinct clones, independent owner lifetime,
+exact-once size/alignment-correct frees, repeated clones and null drops.
+Its stdout fixture is expected output, not an execution receipt; parsing and
+strict C11 syntax alone do not establish native linkage or runtime behavior.
