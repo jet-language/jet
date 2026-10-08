@@ -1963,6 +1963,9 @@ denominators. Decimal rounding uses ties away from zero.
 The policies and rendering live in `Core/math/math.jet`. Checked precise TIR
 operations resolve their reserved helpers by the loaded math module identity;
 they do not resolve a user function with the same helper spelling.
+The bare and `core.math`-qualified `Fraction`, `Decimal`, and `Complex`
+spellings name the same declarations; local user types retain their own
+declaration identity.
 
 #### Measurement propagation
 
