@@ -1,0 +1,10 @@
+Error [E3401]: `print` is not allowed in comptime code
+  --> pure_fn_comptime_block_is_excluded_from_runtime_check.jet:4:9
+    |
+  4 |         print("build-time only")
+    |         ^^^^^
+ Why: `print` touches the outside world, so it can't run while compiling
+ Fix: Compute this at runtime instead; the exceptions are `embed_file("path")`, `embed_bytes("path")`, and `find("glob")`
+ Denial: comptime
+ Call chain: print
+More: jet-lang.dev/e/E3401
