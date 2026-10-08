@@ -245,8 +245,10 @@ does not broaden the Word ABI for other routes.
 the kernel's raw `Result<Text, Text>` ABI, and Lower supplies the canonical
 caller adapter: success retains the owned String directly, with no Result
 box; failure borrows the selected error text for `jet_rt_numeric_stop` at
-`<mir>`, line 0, matching MIRRust and JetEmit. The valid/invalid radix Lower
-fixtures cover both edges without making runtime execution claims.
+the canonical MIR file and line from `lower_numeric_location`. The selected
+payload matches MIRRust and JetEmit without weakening the checked result.
+The valid/invalid radix Lower fixtures cover both edges without making
+runtime execution claims.
 
 Scan capture classification reuses the canonical `lower_packed_storage_type`
 alias/tag resolver for fixed integers, then requires an `IntN` storage kind.
