@@ -3333,7 +3333,7 @@ pub fn apply_jobs_runtime(
     }
     if method == "__publish_parts" {
         let text = |index| match queue_one(args, index, method, span)? {
-            MirRuntimeValue::Str(value) => Ok(value),
+            MirRuntimeValue::String(value) => Ok(value),
             _ => Err(unsupported("core.jobs.__publish_parts expects String parts", span)),
         };
         jet_job_queue_publish_parts(

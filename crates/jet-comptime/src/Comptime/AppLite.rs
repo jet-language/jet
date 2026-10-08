@@ -2273,6 +2273,7 @@ fn web_table_state(value: web_kernel::JetWebTableState) -> CtValue {
                 CtValue::List(value.selected_keys.into_iter().map(CtValue::Str).collect()),
             ),
             ("selection_anchor".to_string(), selection_anchor),
+            ("focus_key".to_string(), web_optional_string(value.focus_key)),
             ("page_mode".to_string(), web_table_page_mode(value.page_mode)),
         ],
     }
@@ -2285,7 +2286,7 @@ fn web_table_state_value(value: &CtValue, span: Span) -> Result<web_kernel::JetW
             column: web_string(web_record_field(value, "column", span)?, "sort column", span)?,
             direction: web_table_direction_value(web_record_field(value, "direction", span)?, span)?,
         }),
-        CtValue::Absent(_) => None,
+        CtValue::Failed(crate::AST::CtReport::Clean(_)) => None,
         _ => return Err(unsupported("WebTableState sort", span)),
     };
     let filter = match field("filter")? {
@@ -2293,7 +2294,7 @@ fn web_table_state_value(value: &CtValue, span: Span) -> Result<web_kernel::JetW
             column: web_string(web_record_field(value, "column", span)?, "filter column", span)?,
             value: web_string(web_record_field(value, "value", span)?, "filter value", span)?,
         }),
-        CtValue::Absent(_) => None,
+        CtValue::Failed(crate::AST::CtReport::Clean(_)) => None,
         _ => return Err(unsupported("WebTableState filter", span)),
     };
     Ok(web_kernel::JetWebTableState {
@@ -2302,6 +2303,7 @@ fn web_table_state_value(value: &CtValue, span: Span) -> Result<web_kernel::JetW
         page_size: web_int(field("page_size")?, "page size", span)?,
         selected_keys: web_strings(field("selected_keys")?, "selected keys", span)?,
         selection_anchor: web_optional_string_value(field("selection_anchor")?, span)?,
+        focus_key: web_optional_string_value(field("focus_key")?, span)?,
         page_mode: match web_enum_variant(field("page_mode")?, "WebTablePageMode", span)? {
             "Client" => web_kernel::JetWebTablePageMode::Client,
             "Server" => web_kernel::JetWebTablePageMode::Server,
@@ -2565,8 +2567,11 @@ pub fn apply_suite(
         ("core.web", "__live_stats_snapshot") => {
             let value = web_kernel::jet_live_stats_snapshot_raw().map(
                 |(queries, active, refreshing, evictions, invalidations, pushes)|
-                    CtValue::Tuple(vec![CtValue::Int(queries), CtValue::Int(active),
-                        CtValue::Int(refreshing), web_counter(evictions), web_counter(invalidations), web_counter(pushes)]));
+                    CtValue::Struct { type_name: "tuple".to_string(), fields: vec![
+                        ("queries".into(), CtValue::Int(queries)), ("active".into(), CtValue::Int(active)),
+                        ("refreshing".into(), CtValue::Int(refreshing)), ("evictions".into(), web_counter(evictions)),
+                        ("invalidations".into(), web_counter(invalidations)), ("ws_pushes".into(), web_counter(pushes)),
+                    ] });
             web_optional_value(value, result_type, span)
         }
         ("core.web", "__contract_stop") => {
@@ -2575,8 +2580,11 @@ pub fn apply_suite(
         ("core.web.store", "__facts_snapshot") => {
             let (generation, cursor, history, limit, events, enabled) =
                 web_kernel::jet_store_facts_snapshot_raw(web_store(one(0)?, span)?);
-            Ok(CtValue::Tuple(vec![web_counter(generation), web_counter(cursor),
-                CtValue::Int(history), CtValue::Int(limit), CtValue::Int(events), CtValue::Bool(enabled)]))
+            Ok(CtValue::Struct { type_name: "tuple".to_string(), fields: vec![
+                ("generation".into(), web_counter(generation)), ("cursor".into(), web_counter(cursor)),
+                ("history_length".into(), CtValue::Int(history)), ("history_limit".into(), CtValue::Int(limit)),
+                ("event_length".into(), CtValue::Int(events)), ("history_enabled".into(), CtValue::Bool(enabled)),
+            ] })
         }
         ("core.web.store", "__transact") => {
             let store = web_store(one(0)?, span)?;
@@ -2621,15 +2629,24 @@ pub fn apply_suite(
         ("core.web.table", "__query_facts") => {
             let (index, size, server, sort, filter) = web_kernel::jet_table_query_facts_raw(
                 &web_table_state_value(one(0)?, span)?);
-            let sort = sort.map(|(column, descending)| CtValue::Present(Box::new(CtValue::Tuple(
-                vec![CtValue::Str(column), CtValue::Bool(descending)]))))
+            let sort = sort.map(|(column, descending)| CtValue::Present(Box::new(CtValue::Struct {
+                type_name: "tuple".to_string(), fields: vec![
+                    ("column".into(), CtValue::Str(column)), ("descending".into(), CtValue::Bool(descending)),
+                ],
+            })))
                 .unwrap_or_else(|| CtValue::absent(Type::Tuple(vec![
                     ("column".into(), Box::new(Type::String)), ("descending".into(), Box::new(Type::Bool))])));
-            let filter = filter.map(|(column, value)| CtValue::Present(Box::new(CtValue::Tuple(
-                vec![CtValue::Str(column), CtValue::Str(value)]))))
+            let filter = filter.map(|(column, value)| CtValue::Present(Box::new(CtValue::Struct {
+                type_name: "tuple".to_string(), fields: vec![
+                    ("column".into(), CtValue::Str(column)), ("value".into(), CtValue::Str(value)),
+                ],
+            })))
                 .unwrap_or_else(|| CtValue::absent(Type::Tuple(vec![
                     ("column".into(), Box::new(Type::String)), ("value".into(), Box::new(Type::String))])));
-            Ok(CtValue::Tuple(vec![CtValue::Int(index), CtValue::Int(size), CtValue::Bool(server), sort, filter]))
+            Ok(CtValue::Struct { type_name: "tuple".to_string(), fields: vec![
+                ("index".into(), CtValue::Int(index)), ("size".into(), CtValue::Int(size)),
+                ("server".into(), CtValue::Bool(server)), ("sort".into(), sort), ("filter".into(), filter),
+            ] })
         }
         ("core.web.table", "__state_equal") => Ok(CtValue::Bool(
             web_kernel::jet_table_state_equal_raw(&web_table_state_value(one(0)?, span)?,
@@ -2637,7 +2654,11 @@ pub fn apply_suite(
         ("core.web.table", "__page_facts") => {
             let (total, index, size, count, rows, keys) = web_kernel::jet_table_page_facts_raw(
                 &web_table_page_value(one(0)?, span)?);
-            Ok(CtValue::Tuple(vec![total, index, size, count, rows, keys].into_iter().map(CtValue::Int).collect()))
+            Ok(CtValue::Struct { type_name: "tuple".to_string(), fields:
+                ["total", "index", "size", "count", "rows", "keys"].into_iter()
+                    .zip([total, index, size, count, rows, keys])
+                    .map(|(name, value)| (name.into(), CtValue::Int(value))).collect()
+            })
         }
         ("core.web.table", "__commit_keys") => {
             let callback = one(2)?.clone();
@@ -2662,7 +2683,7 @@ pub fn apply_suite(
         ("core.web.table", "__page_store") => {
             let page = match one(1)? {
                 CtValue::Present(page) => Some(web_table_page_value(page, span)?),
-                CtValue::Absent(_) => None,
+                CtValue::Failed(crate::AST::CtReport::Clean(_)) => None,
                 _ => return Err(unsupported("optional table page", span)),
             };
             web_kernel::jet_table_page_store_raw(web_table(one(0)?, span)?, page);
@@ -2686,7 +2707,9 @@ pub fn apply_suite(
                 web_strings(one(1)?, "table page keys", span)?))),
         ("core.web.table", "__column_info") => {
             let (name, cell_type) = web_kernel::jet_table_column_info_raw(web_table_column(one(0)?, span)?);
-            Ok(CtValue::Tuple(vec![CtValue::Str(name), CtValue::Str(cell_type)]))
+            Ok(CtValue::Struct { type_name: "tuple".to_string(), fields: vec![
+                ("name".into(), CtValue::Str(name)), ("cell_type".into(), CtValue::Str(cell_type)),
+            ] })
         }
         ("core.web.table", "__cell") => Ok(CtValue::Str(
             web_kernel::jet_table_cell_raw(web_table_column(one(0)?, span)?, one(1)?))),

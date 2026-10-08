@@ -186,6 +186,13 @@ struct JetMappedStorage {
     mapping: std::os::windows::io::RawHandle,
 }
 
+// SAFETY: this private storage owns a PROT_READ/PAGE_READONLY native mapping,
+// exposes only immutable byte slices, and has no remap or mutable-byte access.
+// Each view pins the owner with an Arc; only its final Drop unmaps, exactly
+// once. Mapping reads and final teardown are not thread-affine.
+unsafe impl Send for JetMappedStorage {}
+unsafe impl Sync for JetMappedStorage {}
+
 impl JetMappedStorage {
     fn open(path: &str) -> std::io::Result<Self> {
         #[cfg(not(any(unix, windows)))]

@@ -45,7 +45,7 @@ pub(crate) fn jet_table_loading_store_raw<T>(table: &JetWebTable<T>, value: bool
 pub(crate) fn jet_table_error_store_raw<T>(table: &JetWebTable<T>, value: String) {
     table.error.set(value);
 }
-pub(crate) fn jet_table_page_store_raw<T: Clone>(table: &JetWebTable<T>, page: Option<JetWebTablePage<T>>) {
+pub(crate) fn jet_table_page_store_raw<T: Clone + Send + Sync + 'static>(table: &JetWebTable<T>, page: Option<JetWebTablePage<T>>) {
     table.loaded_page.set(page);
 }
 pub(crate) fn jet_table_state_store_raw<T>(table: &JetWebTable<T>, state: JetWebTableState) {

@@ -499,3 +499,14 @@ therefore precede constructor validation. The existing native constructor
 retains its private source-locator metadata; source policy sets only the
 already-public payload field. `snapshot`, `csv_reader`, and `json_reader`
 retain their native boundary and existing laziness.
+
+## Comptime transport identities
+
+Comptime adapters use the canonical `CtValue::Struct` tuple representation with
+the field names from the checked Core signature. Optional stops use a clean
+`CtReport`, not a separate absence carrier. Web table state marshalling preserves
+both the selection anchor and focus key in each direction.
+
+Read-only mapped file storage is shared through the same private `Arc` owner in
+native and comptime paths. Its thread-safety boundary permits immutable reads
+only, keeps each view alive until the final owner drops, and unmaps exactly once.
