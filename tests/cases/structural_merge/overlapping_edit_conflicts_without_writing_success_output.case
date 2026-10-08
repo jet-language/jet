@@ -1,0 +1,8 @@
+# PORT tests/structural_merge.rs::overlapping_edit_conflicts_without_writing_success_output
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four). No runtime/reference snapshot claim.
+fixture: overlapping_edit_conflicts_without_writing_success_output.fixture
+step: jet merge --structural {work}/base.jet {work}/ours.jet {work}/theirs.jet --out {work}/must-not-exist.jet --json
+exit: 1
+file: must-not-exist.jet absent
+stderr: ~ "\"status\":\"conflict\"" # Original contains predicate.
+stderr: ~ "\"kind\":\"overlapping_edit\"" # Original contains predicate.

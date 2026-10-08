@@ -1,0 +1,10 @@
+# PORT tests/structural_merge.rs::structural_diff_classifies_body_and_rename_with_stable_ids
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four). No runtime/reference snapshot claim.
+fixture: structural_diff_classifies_body_and_rename_with_stable_ids.fixture
+mkdir: .jet/codemods
+write: .jet/codemods/recorded-rename.log.json receipt.txt
+step: jet diff --structural {work}/before.jet {work}/after.jet --json
+exit: 0
+stdout: ~ "\"kind\":\"renamed\"" # Original contains predicate.
+stdout: ~ "\"kind\":\"body_changed\"" # Original contains predicate.
+stdout: ~ "\"stable_id\":\"def:" # Original contains predicate.
