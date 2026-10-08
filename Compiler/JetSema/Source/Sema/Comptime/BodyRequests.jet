@@ -15,66 +15,22 @@ pub fn sema_comptime_body_source_key(module_identity: String, function_key: Stri
     "{module_identity}::{sema_comptime_body_destination_key(function_key, source_span, site_span)}"
 }
 
-// Module slots keep both identity components separate. Map reads return only
-// Int rows; no lookup materializes an owning map, expression, or staged value.
-fn sema_comptime_body_module_slot(modules: &[String:Int], rows: &[[String:Int]], module_identity: String) -> Int Never! {
-    if modules.get(module_identity) == .Val(slot) -> return slot
-    slot :: rows.len()
-    modules[module_identity] = slot
-    &rows.push([String:Int]{})
-    slot
-}
-
-fn sema_comptime_body_source_index(context: &SemaCheckContext, row: Int) Never! {
-    slot :: sema_comptime_body_module_slot(&context.comptime_body_source_modules, &context.comptime_body_source_rows, context.comptime_body_sources[row].module_identity)
-    if context.comptime_body_source_rows[slot].get(context.comptime_body_sources[row].key) == None -> context.comptime_body_source_rows[slot][context.comptime_body_sources[row].key] = row
-}
-
-fn sema_comptime_body_sources_index(context: &SemaCheckContext) Never! {
-    context.comptime_body_source_modules = [String:Int]{}
-    context.comptime_body_source_rows = [[String:Int]]{}
-    loop row in 0..<context.comptime_body_sources.len() -> sema_comptime_body_source_index(&context, row)
-}
-
 // Lambda merges append every canonical row, including duplicates, in order.
-// Only capture deduplicates; its index always names the first existing row.
+// Only capture deduplicates, returning the first existing row.
 fn sema_comptime_body_source_append(context: &SemaCheckContext, source: SemaComptimeBodySource) Never! {
-    row :: context.comptime_body_sources.len()
     &context.comptime_body_sources.push(source)
-    sema_comptime_body_source_index(&context, row)
 }
 
 fn sema_comptime_body_sources_truncate(context: &SemaCheckContext, length: Int) Never! {
-    loop context.comptime_body_sources.len() > length {
-        row :: context.comptime_body_sources.len() - 1
-        slot :: context.comptime_body_source_modules.get(context.comptime_body_sources[row].module_identity) ?? panic("a body source has no module index")
-        if context.comptime_body_source_rows[slot].get(context.comptime_body_sources[row].key) == Val(row) -> _ := &context.comptime_body_source_rows[slot].remove(context.comptime_body_sources[row].key)
-        _ := &context.comptime_body_sources.pop()
-    }
-}
-
-fn sema_comptime_body_value_index(context: &SemaCheckContext, row: Int) Never! {
-    slot :: sema_comptime_body_module_slot(&context.comptime_body_value_modules, &context.comptime_body_value_rows, context.comptime_body_values[row].module_identity)
-    if context.comptime_body_value_rows[slot].get(context.comptime_body_values[row].key) == None -> context.comptime_body_value_rows[slot][context.comptime_body_values[row].key] = row
-    else -> context.comptime_body_value_rows[slot][context.comptime_body_values[row].key] = -1
-}
-
-fn sema_comptime_body_values_index(context: &SemaCheckContext) Never! {
-    context.comptime_body_value_modules = [String:Int]{}
-    context.comptime_body_value_rows = [[String:Int]]{}
-    loop row in 0..<context.comptime_body_values.len() -> sema_comptime_body_value_index(&context, row)
+    loop context.comptime_body_sources.len() > length -> _ := &context.comptime_body_sources.pop()
 }
 
 fn sema_comptime_body_values_replace(context: &SemaCheckContext, values: ^[SemaComptimeBodyValue]) Never! {
     context.comptime_body_values = ^values
-    sema_comptime_body_values_index(&context)
 }
 
 fn sema_comptime_body_values_truncate(context: &SemaCheckContext, length: Int) Never! {
-    if context.comptime_body_values.len() <= length -> return
     loop context.comptime_body_values.len() > length -> _ := &context.comptime_body_values.pop()
-    // Removing a second match can make an ambiguous key unique again.
-    sema_comptime_body_values_index(&context)
 }
 
 pub fn sema_comptime_body_capture(
@@ -89,21 +45,20 @@ pub fn sema_comptime_body_capture(
 ) -> SemaComptimeBodySource Never! {
     function_key := sema_scope_function_owner_key(scopes)
     destination_key := sema_comptime_body_destination_key(function_key, source_span, site_span)
-    key :: "{environment.module_identity}::{destination_key}"
-    if context.comptime_body_source_modules.get(environment.module_identity) == .Val(slot) {
-        if context.comptime_body_source_rows[slot].get(key) == .Val(row) -> return context.comptime_body_sources[row]
-    }
     source := SemaComptimeBodySource{
         module_identity: environment.module_identity,
         function_key: function_key,
         source_file: sema_source_file_at(environment.source_segments, environment.source_file, environment.source_origin, source_span),
-        key: key,
+        key: "{environment.module_identity}::{destination_key}",
         destination_key: destination_key,
         name: name,
         expression: expression,
         expected_type: expected_type,
         span: source_span,
         site_span: site_span,
+    }
+    loop previous in context.comptime_body_sources {
+        if previous.module_identity == source.module_identity && previous.key == source.key -> return previous
     }
     sema_comptime_body_source_append(&context, source)
     source
@@ -117,10 +72,14 @@ pub fn sema_comptime_body_value_find(
     site_span: Span,
 ) -> SemaComptimeBodyValue? {
     key := sema_comptime_body_source_key(module_identity, function_key, source_span, site_span)
-    slot :: context.comptime_body_value_modules.get(module_identity) ?? return None
-    row :: context.comptime_body_value_rows[slot].get(key) ?? return None
-    if row < 0 -> return None
-    Val(context.comptime_body_values[row])
+    found := SemaComptimeBodyValue?{None}
+    loop value in context.comptime_body_values {
+        if value.module_identity == module_identity && value.key == key {
+            if found != None -> return None
+            found = Val(value)
+        }
+    }
+    found
 }
 
 pub fn sema_comptime_body_item_source(source: SemaComptimeBodySource) -> SemaComptimeItemSource Never! {

@@ -427,11 +427,6 @@ pub struct SemaCheckContext {
     pub comptime_requests: [SemaComptimeRequest]
     pub comptime_body_sources: [SemaComptimeBodySource]
     pub comptime_body_values: [SemaComptimeBodyValue]
-    // Derived module/key indexes into the canonical ordered body rows.
-    pub comptime_body_source_modules: [String:Int]
-    pub comptime_body_source_rows: [[String:Int]]
-    pub comptime_body_value_modules: [String:Int]
-    pub comptime_body_value_rows: [[String:Int]]
     pub compute_calls: [SemaComputeCallFact]
     pub autodiff_obligations: [SemaAutodiffObligation]
     pub autodiff_safe_panic: Bool
@@ -740,10 +735,6 @@ pub fn sema_check_context_init() -> SemaCheckContext Never! {
         comptime_requests: [SemaComptimeRequest]{},
         comptime_body_sources: [SemaComptimeBodySource]{},
         comptime_body_values: [SemaComptimeBodyValue]{},
-        comptime_body_source_modules: [String:Int]{},
-        comptime_body_source_rows: [[String:Int]]{},
-        comptime_body_value_modules: [String:Int]{},
-        comptime_body_value_rows: [[String:Int]]{},
         compute_calls: [SemaComputeCallFact]{},
         autodiff_obligations: [SemaAutodiffObligation]{},
         autodiff_safe_panic: false,
@@ -799,10 +790,6 @@ pub fn sema_check_context_snapshot(source: SemaCheckContext) -> SemaCheckContext
         comptime_requests: ~source.comptime_requests,
         comptime_body_sources: ~source.comptime_body_sources,
         comptime_body_values: ~source.comptime_body_values,
-        comptime_body_source_modules: [String:Int]{},
-        comptime_body_source_rows: [[String:Int]]{},
-        comptime_body_value_modules: [String:Int]{},
-        comptime_body_value_rows: [[String:Int]]{},
         compute_calls: ~source.compute_calls,
         autodiff_obligations: ~source.autodiff_obligations,
         autodiff_safe_panic: source.autodiff_safe_panic,
@@ -841,8 +828,6 @@ pub fn sema_check_context_snapshot(source: SemaCheckContext) -> SemaCheckContext
         subject_shorthand_depth: source.subject_shorthand_depth,
         host_hooks: source.host_hooks,
     }
-    sema_comptime_body_sources_index(&snapshot)
-    sema_comptime_body_values_index(&snapshot)
     snapshot
 }
 
@@ -923,10 +908,6 @@ pub fn sema_check_context_save(context: SemaCheckContext) -> SemaCheckContextMar
             comptime_requests: [SemaComptimeRequest]{},
             comptime_body_sources: [SemaComptimeBodySource]{},
             comptime_body_values: [SemaComptimeBodyValue]{},
-            comptime_body_source_modules: [String:Int]{},
-            comptime_body_source_rows: [[String:Int]]{},
-            comptime_body_value_modules: [String:Int]{},
-            comptime_body_value_rows: [[String:Int]]{},
             compute_calls: [SemaComputeCallFact]{},
             autodiff_obligations: [SemaAutodiffObligation]{},
             autodiff_safe_panic: context.autodiff_safe_panic,
