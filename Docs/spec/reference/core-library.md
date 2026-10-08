@@ -1707,6 +1707,14 @@ whether the call goes through the module alias or a direct import:
 
 The `core.sys` module does not export `on_interrupt`; use the process signal
 and task APIs for interrupt handling.
+
+Typed `sys.decode<T>()` keeps the existing `Dotenv` annotation and `Decode`
+protocol. Its source policy requires a project-relative file with no parent
+components, treats a missing dotenv file as empty, folds environment names in
+ASCII, and overlays logical process values over dotenv values. Empty values
+remain values; `__` separates lowercase field segments. Decoder failures retain
+their field paths and `E2416` provenance; secret/password/token/key path segments
+redact the rejected value.
 ---
 
 ### `core.process` — process execution
