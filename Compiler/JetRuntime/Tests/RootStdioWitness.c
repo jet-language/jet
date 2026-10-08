@@ -3,6 +3,7 @@
 // A shared pipe observes the required buffered-stdout-before-report ordering.
 #include <assert.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -11,6 +12,14 @@
 
 typedef struct { const unsigned char *ptr; int64_t len, cap; } Text;
 _Static_assert(sizeof(Text) == 24, "E4 text header");
+typedef struct {
+    int64_t refs;
+    int64_t (*body)(int64_t);
+    int64_t (*release)(int64_t);
+} ExitClosure;
+_Static_assert(sizeof(ExitClosure) == 24, "canonical three-word native closure");
+_Static_assert(offsetof(ExitClosure, body) == 8 && offsetof(ExitClosure, release) == 16,
+               "canonical closure callback slots");
 extern void jet_rt_host_init(void);
 extern int32_t jet_rt_main(void (*entry)(void));
 extern void jet_term_write_stdout_line(const Text *, uint8_t);
@@ -36,16 +45,15 @@ static int64_t cleanup_body(int64_t closure) {
 }
 
 static int64_t cleanup_release(int64_t closure) {
-    jet_rt_free((void *)(uintptr_t)closure, 32, 8);
+    jet_rt_free((void *)(uintptr_t)closure, sizeof(ExitClosure), _Alignof(ExitClosure));
     return 0;
 }
 
 static void register_cleanup(void) {
-    int64_t *closure = jet_rt_alloc(32, 8);
-    closure[0] = 1;
-    closure[1] = (int64_t)(uintptr_t)cleanup_body;
-    closure[2] = (int64_t)(uintptr_t)cleanup_release;
-    closure[3] = 0;
+    ExitClosure *closure = jet_rt_alloc(sizeof(ExitClosure), _Alignof(ExitClosure));
+    closure->refs = 1;
+    closure->body = cleanup_body;
+    closure->release = cleanup_release;
     jet_rt_native_atexit((int64_t)(uintptr_t)closure);
 }
 
