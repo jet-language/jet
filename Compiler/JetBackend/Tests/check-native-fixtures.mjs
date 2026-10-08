@@ -186,6 +186,19 @@ if (runtimeLib && !process.argv.includes("--abi") && existsSync(`${outDir}/stop-
     }
   }
 }
+if (runtimeLib && !process.argv.includes("--abi") && existsSync(`${outDir}/record-int-ownership.o`)) {
+  const source = `${dirname(fileURLToPath(import.meta.url))}/check-record-int-ownership.c`;
+  const program = `${outDir}/record-int-ownership.hosted`;
+  const link = spawnSync(process.env.CC ?? "cc", [`${outDir}/record-int-ownership.o`, source, runtimeLib,
+    "-Wl,--wrap=jet_rt_alloc,--wrap=jet_rt_free,--wrap=jet_rt_int_clone,--wrap=jet_rt_int_drop",
+    "-lpthread", "-ldl", "-lm", "-o", program], { encoding: "utf8" });
+  if (link.status !== 0) {
+    console.log(`record-int-ownership (counting allocator): LINK FAILED\n${link.stderr}`);
+    failures += 1;
+  } else {
+    check("record-int-ownership (2 retains, 3 drops, zero leaked allocations)", program, { stdout: "", stderr: "", status: 0 });
+  }
+}
 if (runtimeLib && !process.argv.includes("--abi")) {
   const source = `${dirname(fileURLToPath(import.meta.url))}/check-record-sequences.c`;
   const program = `${outDir}/record-sequences.hosted`;

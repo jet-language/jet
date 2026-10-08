@@ -84,3 +84,74 @@ fn fx_native_mode_checks() -> Bool Never! {
     if seed.native_exports.len() != 0 || packed.native_exports.len() != 0 || explicit.native_exports.len() != 0 -> return false
     seed.lir.functions.len() == packed.lir.functions.len() && packed.lir.functions.len() == explicit.lir.functions.len()
 }
+
+// Real machine-code witness, linked against the actual Jet runtime and a
+// counting allocator rail by check-native-fixtures. It deliberately uses an
+// Int beyond 2^62, not an inline word that could hide missing retains.
+fn fx_record_int_ownership() -> Bool {
+    p := fx_values_payload()
+    ty :: fx_named("BigIntHolder")
+    &p.types.push(fx_type_def("BigIntHolder", MIRTypeDefKind.Struct{fields: [MIRField]{fx_field("BigIntHolder", "value", fx_int())}, methods: [MIRFunctionID]{}}))
+    if !lower_needs_drop(p, ty) || lower_needs_drop(p, fx_int()) -> return false
+    if lower_repr(p, fx_int()) != .Word || lower_repr(p, fx_bool()) != .Flag || lower_repr(p, mir_type_from_kind(MIRTypeKind.Float)) != .FloatBits || lower_repr(p, mir_type_from_kind(MIRTypeKind.Char)) != .Word -> return false
+    m := LowerModule{
+        signatures: [LIRSignature]{}, test_harness: false, native_pack: true,
+        native_exports: [String:LIRFunctionID]{}, signature_rows: [String:Int]{},
+        data: [LIRData]{}, data_rows: [String:Int]{}, static_rows: [String:Int]{},
+        static_fixups: [LowerStaticFixup]{}, line_starts: [U64:[Int]]{}, source_rows: [U64:Int]{},
+        asm_foreign: [U64:MIRFunctionID]{}, foreign_rows: [U64:Int]{},
+        mir_rows: [U64:Int]{}, mir_sources: [Int]{}, mir_signatures: [LIRSignatureID]{},
+        mir_results: [Int]{}, glue_base: 1, glue: [LowerGlue]{}, glue_rows: [String:Int]{},
+        issues: [LIRLoweringIssue]{}, stop_points: false, task_stop_points: false,
+    }
+    clone_id :: lower_native_handle_id(&m, ty, "clone") ?? return false
+    drop_id :: lower_native_handle_id(&m, ty, "drop") ?? return false
+    get_id :: lower_native_record_id(&m, ty, "record.get", "value")
+    entry_signature :: lower_signature(&m, [LIRLayout]{}, None)
+    f := lower_new_function(LIRFunctionID{value: 0}, "run", entry_signature, MIRBlockID{value: U64.MAX})
+    lower_start(&f, lower_new_block(&f), [LIRValueID]{})
+    literal :: lower_static_text(&m, &f, "4611686018427387905")
+    // Warm the one hazard/allocation domain before beginning the live-object
+    // interval; persistent runtime domain roots are not leaked record nodes.
+    warm :: lower_word(&f)
+    lower_call_runtime(&m, &f, "jet_rt_int_from_static", literal, Val(warm))
+    lower_call_runtime(&m, &f, "jet_rt_int_drop", [LIRValueID]{warm}, None)
+    lower_call_runtime(&m, &f, "jet_test_record_int_count_begin", [LIRValueID]{}, None)
+    value :: lower_word(&f)
+    lower_call_runtime(&m, &f, "jet_rt_int_from_static", literal, Val(value))
+    lower_call_runtime(&m, &f, "jet_test_record_int_count_node", [LIRValueID]{value}, None)
+    original :: lower_pointer(&f)
+    lower_alloc(&m, &f, original, lower_native_handle_shell_size(p, ty))
+    lower_emit(&f, LIRInst.Store{base: original, offset: 0, value: value})
+    copied :: lower_pointer(&f)
+    clone_signature :: lower_signature(&m, [LIRLayout]{lir_layout_pointer()}, Val(lir_layout_pointer()))
+    lower_emit(&f, LIRInst.Call{dst: Val(copied), signature: clone_signature, callee: LIRCallee.Function{id: clone_id}, args: [LIRValueID]{original}})
+    owned_field :: lower_word(&f)
+    get_signature :: lower_signature(&m, [LIRLayout]{lir_layout_pointer()}, Val(lir_layout_word()))
+    lower_emit(&f, LIRInst.Call{dst: Val(owned_field), signature: get_signature, callee: LIRCallee.Function{id: get_id}, args: [LIRValueID]{copied}})
+    changed :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: changed, condition: LIRCondition.Ne, left: value, right: owned_field})
+    lower_check(&m, &f, changed, "jet_rt_panic_int_range")
+    drop_signature :: lower_signature(&m, [LIRLayout]{lir_layout_pointer()}, None)
+    lower_emit(&f, LIRInst.Call{dst: None, signature: drop_signature, callee: LIRCallee.Function{id: drop_id}, args: [LIRValueID]{original}})
+    lower_emit(&f, LIRInst.Call{dst: None, signature: drop_signature, callee: LIRCallee.Function{id: drop_id}, args: [LIRValueID]{copied}})
+    lower_call_runtime(&m, &f, "jet_rt_int_drop", [LIRValueID]{owned_field}, None)
+    lower_call_runtime(&m, &f, "jet_test_record_int_count_end", [LIRValueID]{}, None)
+    lower_seal(&f, LIRTerminator.Return{value: None})
+    functions := [LIRFunction]{lir_builder_finish(f.builder)}
+    cursor := 0
+    loop cursor < m.glue.len() {
+        glue :: ~m.glue[cursor]
+        if glue.helper != "" -> &functions.push(lower_helper_function(p, &m, glue))
+        else if glue.clone -> &functions.push(lower_clone_glue_function(p, &m, glue))
+        else -> &functions.push(lower_glue_function(p, &m, glue))
+        cursor += 1
+    }
+    if m.issues.len() != 0 -> return false
+    program :: LIRModule{signatures: ~m.signatures, functions: functions, data: ~m.data}
+    if lir_lint_module(program).len() != 0 -> return false
+    object :: x64_relocatable_object(program, LIRFunctionID{value: 0})
+    if object.errors.len() != 0 -> return false
+    files.write_bytes("record-int-ownership.o", object.bytes) ?? panic("cannot write counted record ownership object")
+    true
+}
