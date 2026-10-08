@@ -1549,43 +1549,171 @@ fn write_tree(writer: &JSONPush, value: DataTree) EncodingError! -[IO]> {
     }
 }
 
-struct JSONLinesPush {
+fn jsonl_under(error: EncodingError, segment: String) -> EncodingError Never! {
+    out := error
+    suffix :: if out.path.starts_with("$") -> out.path.slice(1, out.path.len()) else -> out.path
+    out.path = "{segment}{suffix}"
+    out
+}
+
+fn jsonl_tree_size(value: DataTree, depth: Int, limits: EncodingLimits) -> Int EncodingError! {
+    if (value == .Array(_) || value == .Object(_)) && depth >= limits.max_depth {
+        out := stream_error(.Limit, 0, 1, 1, "max_depth {limits.max_depth} exceeded")
+        out.path = "$"
+        return Err(out)
+    }
+    size := 0
+    if value == {
+        .Null | .Bool(_) -> size = 1
+        .Int(_) -> size = 8
+        .Float(number) -> {
+            if !math.is_finite(number) {
+                out := stream_error(.Unsupported, 0, 1, 1, "JSON cannot encode a non-finite Float")
+                out.path = "$"
+                return Err(out)
+            }
+            size = 8
+        }
+        .Text(text) -> size = text.count_bytes()
+        .Array(items) -> {
+            size = 1
+            loop index in 0..<items.len() {
+                child :: jsonl_tree_size(items[index], depth + 1, limits) ?? return Err(jsonl_under(err, "$[{index}]"))
+                size += child
+            }
+        }
+        .Object(_) -> {
+            size = 1
+            loop entry in object_entries(value) {
+                child :: jsonl_tree_size(entry.value, depth + 1, limits) ?? return Err(jsonl_under(err, "$[{quote_path(entry.key)}]"))
+                size += entry.key.count_bytes() + child
+            }
+        }
+        else -> {
+            reason :: if value == .Bytes(_) -> "JSON cannot encode Bytes; encode bytes as Text explicitly" else -> "internal JSON carrier escaped typed decode"
+            kind :: if value == .Bytes(_) -> EncodingErrorKind.Unsupported else -> EncodingErrorKind.State
+            out := stream_error(kind, 0, 1, 1, reason)
+            out.path = "$"
+            return Err(out)
+        }
+    }
+    if size > limits.max_item_bytes {
+        out := stream_error(.Limit, 0, 1, 1, "max_item_bytes {limits.max_item_bytes} exceeded")
+        out.path = "$"
+        return Err(out)
+    }
+    Ok(size)
+}
+
+fn jsonl_wire_add(writer: JSONPush, left: Int, right: Int) -> Int EncodingError! {
+    if left > 18446744073709551615 - right -> return Err(writer.error(.Limit, "JSONL record wire size overflow"))
+    Ok(left + right)
+}
+
+fn jsonl_wire_size(writer: JSONPush, value: DataTree) -> Int EncodingError! {
+    if value == {
+        .Null -> Ok(4)
+        .Bool(flag) -> Ok(if flag -> 4 else -> 5)
+        .Int(number) -> Ok("{number}".count_bytes())
+        .Float(number) -> Ok(wire_float(number).count_bytes())
+        .Text(text) -> jsonl_wire_add(writer, writer.quoted_len(text) ?? return Err(err), 2)
+        .Array(items) -> {
+            size := 2
+            loop index in 0..<items.len() {
+                size = jsonl_wire_add(writer, size, if index > 0 -> 1 else -> 0) ?? return Err(err)
+                child :: jsonl_wire_size(writer, items[index]) ?? return Err(err)
+                size = jsonl_wire_add(writer, size, child) ?? return Err(err)
+            }
+            Ok(size)
+        }
+        .Object(_) -> {
+            size := 2
+            first := true
+            loop entry in object_entries(value) {
+                size = jsonl_wire_add(writer, size, if first -> 0 else -> 1) ?? return Err(err)
+                key :: writer.quoted_len(entry.key) ?? return Err(err)
+                size = jsonl_wire_add(writer, size, key) ?? return Err(err)
+                size = jsonl_wire_add(writer, size, 3) ?? return Err(err)
+                child :: jsonl_wire_size(writer, entry.value) ?? return Err(err)
+                size = jsonl_wire_add(writer, size, child) ?? return Err(err)
+                first = false
+            }
+            Ok(size)
+        }
+        else -> Err(writer.error(.State, "internal JSON carrier escaped typed decode"))
+    }
+}
+
+// Native JSONL policy: close the prior LF before validating the next record,
+// reserve this record plus LF, and leave its LF pending across flush/drop.
+pub struct JSONLinesPush {
     writer: JSONPush
     finished: Bool
     terminal: EncodingError?
+    record_index: Int
+    pending_lf: Bool
 
-    fn write(&self, value: DataTree) EncodingError! -[IO]> {
+    pub fn write(&self, value: ^DataTree) EncodingError! -[IO]> {
         if self.terminal == .Val(error) -> return Err(error)
-        if self.finished -> return Err(stream_error(.State, self.writer.total, 1, 1, "JSONL writer is finished"))
+        if self.finished -> return &self.fail(self.writer.state_error("write called after finish"))
+        if self.pending_lf {
+            self.writer.ensure_total(1) ?? return &self.fail(err)
+            &self.writer.write_byte(U8{10}) ?? return &self.fail(err)
+            self.pending_lf = false
+        }
+        _ :: jsonl_tree_size(value, 0, self.writer.limits) ?? {
+            out := err
+            out.byte_offset = self.writer.total
+            out.line = Val(self.record_index + 1)
+            out.column = Val(1)
+            return &self.fail(out)
+        }
+        wire :: jsonl_wire_size(self.writer, value) ?? return &self.fail(err)
+        if wire == 18446744073709551615 {
+            return &self.fail(stream_error(.Limit, self.writer.total, self.record_index + 1, 1, "JSONL record wire size overflow"))
+        }
+        self.writer.ensure_total(wire + 1) ?? return &self.fail(err)
         write_tree(&self.writer, value) ?? return &self.fail(err)
-        &self.writer.write_byte(U8{10}) ?? return &self.fail(err)
+        if self.writer.frames.len() != 0 -> return &self.fail(self.writer.state_error("JSONL record writer left an open container"))
         self.writer.root_written = false
+        self.pending_lf = true
+        self.record_index += 1
     }
 
     fn fail(&self, error: EncodingError) EncodingError! {
-        first := error
+        first := jsonl_under(error, "$[{self.record_index}]")
         first.format = .JSONL
+        if self.terminal == None -> &self.writer.discard()
+        if self.terminal == .Val(prior) -> return Err(prior)
         self.terminal = Val(first)
-        &self.writer.discard()
         return Err(first)
     }
 
-    fn flush(&self) EncodingError! -[IO]> {
+    pub fn flush(&self) EncodingError! -[IO]> {
         if self.terminal == .Val(error) -> return Err(error)
         &self.writer.flush() ?? return &self.fail(err)
     }
 
-    fn finish(&self) EncodingError! -[IO]> {
+    pub fn finish(&self) EncodingError! -[IO]> {
         if self.terminal == .Val(error) -> return Err(error)
         if self.finished -> return
+        if self.pending_lf {
+            self.writer.ensure_total(1) ?? return &self.fail(err)
+            &self.writer.write_byte(U8{10}) ?? return &self.fail(err)
+            self.pending_lf = false
+        }
         &self.flush()
         self.finished = true
     }
 }
 
-fn jsonl_writer(output: ^FileWriter, limits: EncodingLimits) -> JSONLinesPush EncodingError! {
-    writer :: json_writer(^output, limits, false) ?? return Err(err)
-    Ok(JSONLinesPush{writer: writer, finished: false, terminal: None})
+pub fn jsonl_writer(output: ^FileWriter, limits: EncodingLimits) -> JSONLinesPush EncodingError! {
+    writer :: json_writer(^output, limits, false) ?? {
+        error := err
+        error.format = .JSONL
+        return Err(error)
+    }
+    Ok(JSONLinesPush{writer: ^writer, finished: false, terminal: None, record_index: 0, pending_lf: false})
 }
 
 #Test("borrowed Object entries preserve insertion order") {
@@ -1619,4 +1747,20 @@ fn jsonl_writer(output: ^FileWriter, limits: EncodingLimits) -> JSONLinesPush En
         .Err(error) -> assert_eq(error.kind, EncodingErrorKind.Limit)
         .Ok(_) -> panic("invalid expansion limit accepted")
     }
+}
+
+#Test("JSONL preflight counts decoded tree bytes and retains nested error paths") {
+    limits := EncodingLimits.safe()
+    assert_eq(jsonl_tree_size(DataTree.Int(4), 0, limits) ?? panic("size"), 8)
+    limits.max_item_bytes = 4
+    value :: object_from_entries([(key: "a", value: DataTree.Text("longer"))])
+    if jsonl_tree_size(value, 0, limits) == {
+        .Err(error) -> {
+            assert_eq(error.kind, EncodingErrorKind.Limit)
+            assert_eq(error.path, "$[\"a\"]")
+        }
+        else -> panic("oversized nested text must fail before any output")
+    }
+    projected :: jsonl_under(stream_error(.State, 0, 1, 1, "state"), "$[2]")
+    assert_eq(projected.path, "$[2]")
 }

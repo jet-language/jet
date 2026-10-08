@@ -15,9 +15,23 @@
 // `to_string` writes one compact JSON value per record and a trailing newline so
 // concatenation of documents stays a valid JSONL stream. There is no pretty
 // form; pretty JSON contains newlines and would break the line protocol.
-use core.encoding.[DataTree, EncodingError, EncodingFormat]
+use core.encoding.[DataTree, EncodingError, EncodingFormat, EncodingLimits]
 use core.encoding.json as json
 use __core_encoding_stream as stream
+use core.files.[FileWriter]
+
+/// Bounded JSONL output uses the native-shipped delayed-LF policy in Jet.
+pub struct JSONLWriter {
+    output: stream.JSONLinesPush
+    pub fn write(&self, value: ^DataTree) EncodingError! -[IO]> { &self.output.write(^value) }
+    pub fn flush(&self) EncodingError! -[IO]> { &self.output.flush() }
+    pub fn finish(&self) EncodingError! -[IO]> { &self.output.finish() }
+}
+
+pub fn writer(target: ^FileWriter, limits: EncodingLimits{EncodingLimits.safe()}) -[FS]> JSONLWriter EncodingError! {
+    output :: stream.jsonl_writer(^target, limits) ?? return Err(err)
+    Ok(JSONLWriter{output: ^output})
+}
 
 /// Parse every non-empty record as JSON. Allocates one `DataTree` per record.
 pub fn parse(text: String) -> [DataTree] EncodingError! {
