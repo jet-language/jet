@@ -150,6 +150,7 @@ mod text_kernel {
 
         include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/MappedFile.rs");
         include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/FileHandles.rs");
+        include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/FileLockRaw.rs");
     }
 
     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/SHA256Raw.rs");
@@ -566,13 +567,6 @@ pub fn mir_fs_temp_file(prefix: &str) -> Result<MirFileOwner, crate::AST::CtValu
         .map_err(io_error_ct)
 }
 
-pub fn mir_fs_lock(path: &str) -> Result<MirFileOwner, crate::AST::CtValue> {
-    text_kernel::jet_std_fs_lock(&path.to_string())
-        .map(|owner| MirFileOwner {
-            inner: MirFileOwnerKind::FileLock(owner),
-        })
-        .map_err(io_error_ct)
-}
 
 pub fn mir_fs_temp_dir_raw(path: String) -> Result<MirFileOwner, crate::AST::CtValue> {
     text_kernel::jet_std_fs_temp_dir_raw(path)
@@ -586,10 +580,8 @@ pub fn mir_fs_temp_file_raw(path: String) -> Result<MirFileOwner, crate::AST::Ct
         .map_err(io_error_ct)
 }
 
-pub fn mir_fs_lock_raw(path: &str) -> Result<MirFileOwner, crate::AST::CtValue> {
-    text_kernel::jet_std_fs_lock_raw(&path.to_string())
-        .map(|owner| MirFileOwner { inner: MirFileOwnerKind::FileLock(owner) })
-        .map_err(io_error_ct)
+pub fn mir_fs_lock_owner_raw(path: String, fd: i64) -> MirFileOwner {
+    MirFileOwner { inner: MirFileOwnerKind::FileLock(text_kernel::jet_std::jet_fs_lock_owner_raw(path, fd)) }
 }
 
 #[derive(Clone, Copy)]
@@ -1166,6 +1158,41 @@ pub(crate) fn apply_files_leaf(
     let unit = |_: ()| CtValue::Unit;
     let run = || -> Result<CtValue, String> {
         Ok(match method {
+            "__lock_open" | "__lock_try" => {
+                let raw = if method == "__lock_open" {
+                    text_kernel::jet_std::jet_fs_lock_open_raw(&text(0)?)
+                } else { text_kernel::jet_std::jet_fs_lock_try_raw(int(0)?) };
+                CtValue::Struct { type_name: "__LockCall".into(), fields: vec![
+                    ("value".into(), CtValue::Int(raw.value)),
+                    ("errno".into(), CtValue::Int(raw.errno)),
+                    ("platform".into(), CtValue::Int(raw.platform)),
+                ] }
+            }
+            "__lock_fd_identity" | "__lock_path_identity" => {
+                let raw = if method == "__lock_fd_identity" {
+                    text_kernel::jet_std::jet_fs_lock_fd_identity_raw(int(0)?)
+                } else { text_kernel::jet_std::jet_fs_lock_path_identity_raw(&text(0)?) };
+                CtValue::Struct { type_name: "__LockIdentity".into(), fields: vec![
+                    ("device".into(), CtValue::Int(raw.device)),
+                    ("low".into(), CtValue::Int(raw.low)),
+                    ("high".into(), CtValue::Int(raw.high)),
+                    ("regular".into(), CtValue::Bool(raw.regular)),
+                    ("reparse".into(), CtValue::Bool(raw.reparse)),
+                    ("errno".into(), CtValue::Int(raw.errno)),
+                    ("platform".into(), CtValue::Int(raw.platform)),
+                ] }
+            }
+            "__lock_wait" => {
+                let raw = text_kernel::jet_std::jet_fs_lock_wait_raw(int(0)?, int(1)?, boolean(2)?, int(3)?);
+                CtValue::Struct { type_name: "__LockWait".into(), fields: vec![
+                    ("acquired".into(), CtValue::Bool(raw.acquired)),
+                    ("timed_out".into(), CtValue::Bool(raw.timed_out)),
+                    ("errno".into(), CtValue::Int(raw.errno)),
+                    ("platform".into(), CtValue::Int(raw.platform)),
+                    ("deadline_ns".into(), CtValue::Int(raw.deadline_ns)),
+                ] }
+            }
+            "__lock_close" => CtValue::Int(text_kernel::jet_std::jet_fs_lock_close_raw(int(0)?)),
             "__entries_context" => CtValue::Int(text_kernel::jet_entries8_open(&text(0)?, &text(1)?, boolean(2)?)),
             "__entries_close" => { text_kernel::jet_entries8_close(int(0)?); CtValue::Unit },
             "__entries_release" => { text_kernel::jet_entries8_release(int(0)?, int(1)?); CtValue::Unit },

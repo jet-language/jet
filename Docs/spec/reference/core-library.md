@@ -842,7 +842,7 @@ Whole-file and metadata functions:
 | `walk_files(root, ignore)` | `[WalkEntry] !IOError` | Traverse regular files only. |
 | `glob(pattern)` | `[String] !IOError` | Return sorted shown paths matching the native byte glob grammar. |
 | `temp_dir(prefix)` / `temp_file(prefix)` | `TempDir` / `TempFile !IOError` | Create temporary resources whose handles retain `.path`. |
-| `lock(path)` | `FileLock !IOError` | Create an advisory lock whose handle owns its cleanup. |
+| `lock(path, timeout: Duration?{None})` / `try_lock(path)` | `FileLock !IOError` / `FileLock? !IOError` | Acquire an exclusive system lock; `try_lock` returns None only for contention. |
 
 `exists` and `is_dir` follow a final symbolic link; a broken link returns
 false. Their false-on-host-error policy is Jet-owned; the host boundary
@@ -887,13 +887,24 @@ birth time). `WalkEntry` exposes `path`,
 `relative`, `is_dir`, and `depth` through the checked type projection.
 
 Store-grade contracts (D-CORE-FILEERROR1, D-CORE-FILEOPEN1, D-CORE-FILESTAT1,
-D-CORE-FILEDIR1, D-CORE-HANDLEFD1, D-CORE-FILERENAME1, D-CORE-FILEXATTR1):
+D-CORE-FILEDIR1, D-CORE-HANDLEFD1, D-CORE-FILERENAME1, D-CORE-FILEXATTR1,
+D-CORE-FILELOCK1):
 
 - `IOError.AlreadyExists` reports an existing target a call was asked not to
   replace (`EEXIST`, `ERROR_FILE_EXISTS`, `ERROR_ALREADY_EXISTS`).
   `IOError.Unsupported` reports a request this system or file system cannot
   perform (`ENOTSUP`, `EOPNOTSUPP`, `ENOSYS`, `ERROR_NOT_SUPPORTED`). Both
   carry the shared `IOContext`; match the kind, never `os_code`.
+- `files.lock(path)` creates a missing regular lock file with mode `0o600`
+  before umask, opens it close-on-exec without following a final link, and
+  waits for an exclusive advisory system lock. `timeout:` bounds the wait
+  and reports `IOError.TimedOut`; `files.try_lock(path)` returns None only
+  for contention. After acquisition, Core revalidates the opened identity
+  against the path and retries a replaced binding. `FileLock.path` remains
+  read-only. Consuming `close(^lock)`, scope exit, or process exit releases
+  the kernel lock; release never removes the lock file. Unix uses `flock`;
+  Windows uses `LockFileEx` and denies delete sharing. A directory is not a
+  lock file; holding a directory and locking a regular file are distinct.
 - A `Directory` keeps working after its path is renamed or removed. Its
   methods (`open`, `create`, `open_directory`, `create_directory`, `list`,
   `stat`, `entry_stat`, `read_link`, `rename(from, to, into:, if_exists:)`,
@@ -910,8 +921,8 @@ D-CORE-FILEDIR1, D-CORE-HANDLEFD1, D-CORE-FILERENAME1, D-CORE-FILEXATTR1):
   descriptor, so renaming the directory or closing the original `Directory`
   does not release the lock. A contended lock is an `IOError`; explicit
   `close(^lock)` or scope exit releases it, without deleting a name. Systems
-  without directory flock report `Unsupported`. This differs from the
-  sentinel-file ownership protocol of `files.lock(path)`.
+  without directory flock report `Unsupported`. This differs from locking
+  the regular file named by `files.lock(path)`.
 - Publish through a held directory by exclusively creating a temporary sibling,
   writing and setting mode through its handle, calling `writer.fsync()`, then
   `directory.rename(temp, destination)` and `directory.fsync()`. Rename replaces
