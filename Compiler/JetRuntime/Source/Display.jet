@@ -231,7 +231,7 @@ fn display_float_exponential(raw: I64, digits: I64, count: I64, exponent: I64) -
     text
 }
 
-fn display_float(value: Float) -> I64 {
+fn display_float(value: Float, debug: Bool) -> I64 {
     raw :: rt_f64_bits(value)
     magnitude :: raw & I64{9223372036854775807}
     if ((magnitude >> I64{52}) == I64{2047}) {
@@ -242,8 +242,12 @@ fn display_float(value: Float) -> I64 {
         return display_literal(I64{6712937}, I64{3})
     }
     if (magnitude == I64{0}) {
-        if (raw < I64{0}) { return display_literal(I64{808333357}, I64{4}) }
-        return display_literal(I64{3157552}, I64{3})
+        if debug {
+            if (raw < I64{0}) { return display_literal(I64{808333357}, I64{4}) }
+            return display_literal(I64{3157552}, I64{3})
+        }
+        if (raw < I64{0}) { return display_literal(I64{12333}, I64{2}) }
+        return display_literal(I64{48}, I64{1})
     }
     // Eight bounded Big32x40 slots, 24 digit bytes, and two result words.
     // This sole temporary allocation is released on both rendering paths.
@@ -253,16 +257,16 @@ fn display_float(value: Float) -> I64 {
     exponent :: display_word(scratch + I64{2664})
     digits :: scratch + I64{2624}
     text :: if {
-        (magnitude < I64{4547007122018943789} || magnitude >= I64{4846369599423283200}) -> display_float_exponential(raw, digits, count, exponent)
-        else -> display_float_decimal(raw, digits, count, exponent, true)
+        (debug && (magnitude < I64{4547007122018943789} || magnitude >= I64{4846369599423283200})) -> display_float_exponential(raw, digits, count, exponent)
+        else -> display_float_decimal(raw, digits, count, exponent, debug)
     }
     jet_rt_free(scratch, I64{2688}, I64{8})
     text
 }
 
-#Export(c) fn jet_rt_float_to_string(value: Float) -> I64 { display_float(value) }
+#Export(c) fn jet_rt_float_to_string(value: Float) -> I64 { display_float(value, true) }
 
-#Export(c) fn jet_rt_float_debug(value: Float) -> I64 { display_float(value) }
+#Export(c) fn jet_rt_float_debug(value: Float) -> I64 { display_float(value, true) }
 
 // Raw binary32 ABI: upper bits are ignored; both exports return owned E4 text.
 // Rust f32 Display is fixed decimal without a mandatory .0; Debug preserves

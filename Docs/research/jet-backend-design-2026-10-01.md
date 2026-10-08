@@ -2177,3 +2177,36 @@ index-equals-length and negative-index fatal bodies/status/stdout flush.
 Native execution and MIR/caller/layout admission remain unexercised;
 parser and strict C11 receipts alone do not establish parity.
 
+
+### Native complex, constraint and RNG ownership boundary
+
+`MathGlueABI.jet` defines align8 Complex16 (real/imaginary f64 bits),
+SizeConstraint32 (min_width/min_height/max_width/max_height f64 bits) and
+Rng8 (raw u64 state). These are private native carriers, not Rust layouts
+or Core-generated aliases. Geometry's shell clone/drop and field-ordered
+IEEE comparison are reused. NaN rejects self-equality and signed zeros
+compare equal (`MathLibPure.rs:7-11`, `Ui.rs:26-32`); RNG compares all state
+bits (`CommonTypes.rs:2816-2819`). Float constructors/getters preserve bits
+and impose no additional constraint validation (`CAbiRoutes.rs:9659-9674,
+11351-11378`). The census has no RNG constructor/getter.
+
+All three Complex render modes follow `MathLibPure.rs:45-47` and
+`MathComplexTraits.rs:4-18`: `real sign abs(imaginary)i`, with Rust f64
+Display, not Debug. The existing shortest-digit core now has one private
+mode argument: plain mode always emits fixed decimal, integral values
+without `.0`, and signed zero as `0`/`-0`; existing Float C exports retain
+the same Debug mode, exponent thresholds and zero suffixes. Nonfinite
+labels are `NaN`, `inf`, `-inf`. Imaginary sign comes from the original
+sign bit, including negative zero and negative NaN. RNG Show is exactly
+`RNG { .. }` (`CommonTypes.rs:6809-6811`).
+
+`MathGlueWitness.c` links real Jet objects with `--wrap=jet_rt_free` and
+asserts interception/exact-once shell and output-text frees, clone/getter
+bit preservation, every equality lane, NaN and signed-zero behavior,
+RNG high-bit states, all Complex modes and unchanged Float Debug modes.
+Render goldens were obtained from seed-only rustc 1.97.1
+`8bab26f4f` (2026-07-14), including 1e16, 1e21, minimum subnormal,
+maximum finite, signed zeros, signed NaNs and infinities. The oracle is
+not a runtime provider or shipping toolchain component.
+Native execution and MIR/caller/layout admission remain unexercised;
+parser and C11 syntax receipts alone do not establish parity.
