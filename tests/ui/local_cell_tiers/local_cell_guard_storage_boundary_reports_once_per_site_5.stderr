@@ -1,0 +1,8 @@
+Error [E0217]: Cell guard `guard` cannot be captured by a lambda
+  --> local_cell_guard_storage_boundary_reports_once_per_site_5.jet:5:14
+    |
+  5 |     read :: (() -> guard.get()).call()
+    |              ^^^^^^^^^^^^^^^
+ Why: A Cell guard is a temporary loan handle; storing it inside another value could keep the loan after its local scope ends
+ Fix: Keep the guard in a local name or a tuple, and use `.map(...)` or `.split(...)` for projections
+More: jet-lang.dev/e/E0217
