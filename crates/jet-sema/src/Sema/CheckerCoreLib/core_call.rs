@@ -2397,6 +2397,14 @@ impl<'a> Checker<'a> {
             ));
             return None;
         }
+        if module == "core.plugin" && name == "__authority_to_wire" {
+            self.diags.push(Diagnostic::error(
+                "E0510", "Authority wire conversion is compiler-private",
+                "only the checked plugin boundary inserts this conversion",
+                "use core.plugin.load with tightened Authority", Some(span),
+            ));
+            return None;
+        }
         if module == "core.encoding"
             && matches!(name, "__coerce_now" | "__coerce_emit")
         {

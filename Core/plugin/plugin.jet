@@ -53,8 +53,8 @@ fn wire_result(wire: String) -> (handle: Int?, reason: String) Never! {
     (handle: None, reason: reason)
 }
 
-// Hidden checked ABI, NOT the public literal-artifact spelling. MIR already
-// converts Authority to this String before entering this source target.
+// Hidden checked ABI, NOT the public literal-artifact spelling. The compiler
+// materializes the existing Authority wire operand before source forwarding.
 fn __load_checked_wire(path: String, authority_wire: String) -[Exec]> Plugin Never! {
     result :: wire_result(core.plugin.__load_wire(path, authority_wire))
     if result.handle == .Val(handle) -> return core.plugin.__from_handle(U64{handle})

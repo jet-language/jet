@@ -59,6 +59,9 @@ const fn one_of(method: &str, names: &[&str]) -> bool {
 /// `Effects::core_effect`'s legacy resolver; a row never consults that second
 /// key table.
 const fn effect_for(module: &str, method: &str) -> Option<Effect> {
+    if same_text(module, "core.plugin") && same_text(method, "__authority_to_wire") {
+        return None;
+    }
     if same_text(module, "core.files") {
         if same_text(method, "__temp_path_sample") {
             return Some(Effect::Time);
@@ -1225,6 +1228,11 @@ impl CoreCallRecord {
         }
     }
 
+    /// The existing checked plugin Authority-to-wire boundary, before forwarding.
+    pub const fn authority_boundary_at(self, index: usize) -> bool {
+        same_text(self.module, "core.plugin") && same_text(self.member, "load") && index == 1
+    }
+
     /// Admit an implementation's checked signature without publishing another
     /// public Core member or changing ordinary import visibility.
     pub fn targets_source_function(self, module: &str, member: &str) -> bool {
@@ -1512,7 +1520,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 8ad337fb327616b606a306d2c24e3970f09c0cb8aeac4bc8ef631bcfea292428
+// Source SHA-256: 8750315699cb82e46220560d9a95162afc1df5ab26d0b8c8cbd510da7e816d99
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -1974,6 +1982,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.plugin", "__load_wire", "jet_plugin_load_wire_raw", true, &[true, true]).without_direct_aot(),
     CoreCallRecord::new("core.plugin", "__from_handle", "jet_plugin_from_handle_raw", true, &[false]),
     CoreCallRecord::new("core.plugin", "__stop", "jet_plugin_stop_raw", true, &[true]),
+    CoreCallRecord::new("core.plugin", "__authority_to_wire", "jet_authority_to_wire", true, &[true]),
     CoreCallRecord::new("core.mod", "load", "jet_mod_load", true, &[true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.mod", "__supported", "jet_mod_supported_raw", true, &[]),
     CoreCallRecord::new("core.mod", "__os", "jet_mod_os_raw", true, &[]),

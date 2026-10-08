@@ -1685,6 +1685,26 @@ fn lower_core_source_call(
         },
     })
 }
+fn materialize_core_authority_boundary(record: CoreCallRecord, index: usize, value: TExpr, span: Span) -> TExpr {
+    if !record.authority_boundary_at(index) {
+        return value;
+    }
+    let wire = crate::Syntax::core_call("core.plugin", "__authority_to_wire")
+        .expect("checked Authority wire row is missing");
+    TExpr {
+        ty: Type::String,
+        kind: TExprKind::CoreCall {
+            record: wire,
+            args: vec![value],
+            source_span: span,
+            type_args: Vec::new(),
+            widen_to_vec: vec![false],
+            data_plan: None,
+            fallibility: TFailureCarrier::Infallible,
+        },
+    }
+}
+
 /// Forward already-checked Core operands, after each legacy admission and
 /// normalization step. Receiver normalization has already supplied argument 0.
 fn lower_checked_core_source_call(
@@ -1732,13 +1752,14 @@ fn lower_checked_core_source_call(
         Ok(value) => Some(value),
         Err(error) => return Some(invariant_method_expr(span, error)),
     };
-    let lowered_args = std::mem::take(args).into_iter().zip(params).map(|(value, (convention, expected))| {
+    let lowered_args = std::mem::take(args).into_iter().zip(params).enumerate().map(|(index, (value, (convention, expected)))| {
         // Core handle paths materialize receiver borrows. Ordinary module
         // calls carry that convention in TCallArg, never in two wrappers.
         let value = match value.kind {
             TExprKind::Borrow { place, .. } => *place,
             kind => TExpr { ty: value.ty, kind },
         };
+        let value = materialize_core_authority_boundary(record, index, value, span);
         let widen_to_vec = matches!((&value.ty, &expected),
             (Type::FixedList { elem, .. }, Type::List(want)) if elem == want);
         let widen_to_union = match &expected {
@@ -13271,6 +13292,33 @@ fn name_plain_callback_return(callback: &mut TExpr) {
 #[cfg(test)]
 mod checked_core_source_target_tests {
     use super::*;
+
+    #[test]
+    fn checked_authority_operand_is_materialized_once_before_source_forwarding() {
+        let record = *crate::Syntax::core_call("core.plugin", "load").expect("plugin load row");
+        assert!(!record.authority_boundary_at(0));
+        assert!(record.authority_boundary_at(1));
+        assert!(!record.authority_boundary_at(2));
+        let span = Span::new(0, 0);
+        let authority = || TExpr {
+            ty: Type::Named("Authority".to_string()),
+            kind: TExprKind::ConstRef("authority".to_string()),
+        };
+        let unchanged = materialize_core_authority_boundary(record, 0, authority(), span);
+        assert!(matches!(unchanged.kind, TExprKind::ConstRef(ref name) if name == "authority"));
+        let wired = materialize_core_authority_boundary(record, 1, authority(), span);
+        assert_eq!(wired.ty, Type::String);
+        let TExprKind::CoreCall { record: wire, args, fallibility, .. } = wired.kind else {
+            panic!("expected checked wire operand before ordinary source forwarding");
+        };
+        assert_eq!(wire.member, "__authority_to_wire");
+        assert_eq!(wire.prelude_symbol(), "jet_authority_to_wire");
+        assert_eq!(wire.effect, None);
+        assert!(!wire.authority_boundary_at(1));
+        assert!(matches!(fallibility, TFailureCarrier::Infallible));
+        assert_eq!(args.len(), 1, "the normalized authority is evaluated once");
+        assert!(matches!(args[0].kind, TExprKind::ConstRef(ref name) if name == "authority"));
+    }
 
     #[test]
     fn imported_core_source_call_uses_checked_module_member_identity() {

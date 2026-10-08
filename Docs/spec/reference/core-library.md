@@ -68,6 +68,14 @@ and tightened-authority wire conversion at the compiler boundary. Its private
 checked source target validates the existing unsigned `O:<handle>` wire and
 preserves `E:` refusal bytes (including an empty reason); malformed or zero
 handles stop with E3001 and `plugin load failed`.
+When a checked plugin call forwards to source, the compiler materializes its
+existing Authority wire conversion as a private pure kernel operand before the
+ordinary function call. It evaluates the normalized authority exactly once;
+the original Core MIR argument path uses the same boundary predicate. No user
+source, including Core source, may name `core.plugin.__authority_to_wire`.
+Emission-fixture parity (Rust/Jet output diff = 0) and rejection-fixture execution
+are UNOBSERVED in the light-lane port; plugin behavior credit remains held until
+the cycle's emission lane observes them.
 
 Email address, attachment, and envelope construction validates in
 `Core/email/email.jet`: control-character refusal precedes address parsing,
