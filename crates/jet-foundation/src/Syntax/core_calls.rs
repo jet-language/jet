@@ -1469,7 +1469,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: fd27317a56a19cad0e7c8ed21202ac98f4ca80945148daec9639b83a5aa68369
+// Source SHA-256: 2b3f2088d3455550036a317334da449adce11667f937a135b9f3a1bc3ef39e51
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -3327,6 +3327,16 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.service", "__tree_generation", "jet_services_raw_tree_generation", true, &[true]).with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.service", "__tree_event_count", "jet_services_raw_tree_event_count", true, &[true]).with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.service", "__tree_dead_letter_count", "jet_services_raw_tree_dead_letter_count", true, &[true]).with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__tree_started", "jet_services_raw_tree_started", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__tree_has_snapshot", "jet_services_raw_tree_has_snapshot", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__tree_group_count", "jet_services_raw_tree_group_count", true, &[true]).with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__tree_write_delivery", "jet_services_raw_tree_write_delivery", true, &[true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__tree_write_restart", "jet_services_raw_tree_write_restart", true, &[true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__group_write_restart", "jet_services_raw_group_write_restart", true, &[true, false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__tree_clear_dead_letters", "jet_services_raw_tree_clear_dead_letters", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__tree_write_empty_adapter", "jet_services_raw_tree_write_empty_adapter", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__tree_clear_state_authority", "jet_services_raw_tree_clear_state_authority", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__endpoint_parts", "jet_services_raw_endpoint_parts", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
 ];
 // END GENERATED CORE CALLS
 
