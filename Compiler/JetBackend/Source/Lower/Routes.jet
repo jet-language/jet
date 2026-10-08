@@ -8,9 +8,58 @@
 // Option or Result result comes back as the adapter's tag word plus one out
 // slot. The lowering builds its own List, Option or Result box from them.
 use jet_foundation.[
-    MIRCallArg, MIRInstruction, MIRPreludeCallID, MIRProgram, MIRType, MIRValueID,
+    MIRCallArg, MIRInstruction, MIRPreludeCall, MIRPreludeCallID, MIRProgram, MIRType, MIRValueID,
     mir_symbol_name, mir_type_display_name,
 ]
+
+// The checked frontend uses JetBitSet::new and the generic builtin clear
+// identity. Only the actual BitSet holder may dispatch to these providers;
+// List.clear and unrelated nominals keep their ordinary lowering.
+fn lower_bits_new(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, args: [MIRCallArg]) -> Bool Never! {
+    row :: lower_prelude_row(p, call) ?? return false
+    if row.family != .StaticPrelude || mir_symbol_name(row.symbol) != "JetBitSet::new" -> return false
+    ty :: lower_checked_type(c, instruction) ?? return false
+    holder :: lower_runtime_handle_type(p, ty) ?? return false
+    if holder.runtime != "JetBitSet" -> return false
+    if lower_repr(p, ty) != .Handle(_, _) -> return false
+    if args.len() != 0 {
+        lower_fail(&m, &f, "BitSet.new requires no arguments")
+        return true
+    }
+    if lower_runtime_route("jet_rt_native_bits_new") == None {
+        lower_fail(&m, &f, "BitSet.new requires the native BitSet constructor provider")
+        return true
+    }
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return true
+    lower_call_runtime(&m, &f, "jet_rt_native_bits_new", [LIRValueID]{}, Val(dst))
+    true
+}
+
+fn lower_bits_clear(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, row: MIRPreludeCall, receiver: MIRValueID, args: [MIRValueID]) -> Bool Never! {
+    if row.family != .BuiltinMethod || row.module_name != "core.builtin" || row.member != "list_clear" || mir_symbol_name(row.symbol) != "jet_list_clear" -> return false
+    ty :: lower_value_type(c, receiver) ?? return false
+    holder :: lower_runtime_handle_type(p, ty) ?? return false
+    if holder.runtime != "JetBitSet" -> return false
+    if lower_repr(p, ty) != .Handle(_, _) -> return false
+    if args.len() != 0 {
+        lower_fail(&m, &f, "BitSet.clear requires no arguments")
+        return true
+    }
+    if lower_checked_type(c, instruction) == .Val(result_ty) {
+        if lower_repr(p, result_ty) != .Absent {
+            lower_fail(&m, &f, "BitSet.clear requires a Unit result")
+            return true
+        }
+    }
+    if lower_runtime_route("jet_rt_native_bits_clear") == None {
+        lower_fail(&m, &f, "BitSet.clear requires the native BitSet clear provider")
+        return true
+    }
+    value :: lower_use(&m, &f, receiver) ?? return true
+    lower_call_runtime(&m, &f, "jet_rt_native_bits_clear", [LIRValueID]{value}, None)
+    lower_alias_absent(&f, instruction)
+    true
+}
 
 // The carrier a value of `ty` crosses the runtime boundary as, if any. An
 // alias crosses as its target (the seeded `ParseError` is a String).

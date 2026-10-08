@@ -35,6 +35,7 @@ const expected = [
   { name: "arithmetic", stdout: "18\n" },
   { name: "control-flow", stdout: "0\n1\n2\nsum = 15\ntrue\n" },
   { name: "aggregates", stdout: "7\n5\n12\ntrue\np.x = 3\n" },
+  { name: "bits", stdout: "0\n2\n0\n0\n1\n" },
 ];
 const fixtureDir = `${dirname(fileURLToPath(import.meta.url))}/Fixtures`;
 if (existsSync(fixtureDir)) {
