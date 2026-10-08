@@ -525,3 +525,102 @@ fn lower_helper_set_render(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> L
     lower_seal(&f, LIRTerminator.Return{value: Val(finished)})
     lir_builder_finish(f.builder)
 }
+
+// Tally<T> reuses the ordered Map<T,U64> entry carrier. Counts are nonzero;
+// its public length is the sum, not the header's distinct-key length.
+fn lower_tally_element(ty: MIRType) -> MIRType? {
+    if ty.kind == {
+        .Apply(name, args) -> {
+            if name.id == mir_nominal_ref("Tally").id && args.len() == 1 -> Val(args[0]) else -> None
+        }
+        .Tagged(_, inner) -> lower_tally_element(inner)
+        else -> None
+    }
+}
+
+fn lower_tally_count_type() -> MIRType Never! {
+    mir_type_from_kind(MIRTypeKind.IntN{signed: false, bits: 64})
+}
+
+fn lower_tally_map(ty: MIRType) -> MIRType Never! {
+    elem :: lower_tally_element(ty) ?? panic("native Tally carrier has no checked element")
+    mir_type_from_kind(MIRTypeKind.Map{key: elem, value: lower_tally_count_type()})
+}
+
+fn lower_tally_new(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, args: [MIRCallArg]) -> Bool Never! {
+    ty :: lower_checked_type(c, instruction) ?? return false
+    if lower_tally_element(ty) == None -> return false
+    row :: lower_prelude_row(p, call) ?? return false
+    if lower_runtime_symbol(row) != "std::collections::HashMap::new" || args.len() != 0 -> return false
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return true
+    lower_set_empty(p, &f, dst, ty)
+    true
+}
+
+fn lower_tally_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, row: MIRPreludeCall, receiver: MIRValueID, receiver_place: MIRPlaceID?, args: [MIRValueID]) -> Bool Never! {
+    ty :: lower_value_type(c, receiver) ?? return false
+    elem :: lower_tally_element(ty) ?? return false
+    if row.family != .BuiltinMethod || row.module_name != "core.builtin" -> return false
+    symbol :: lower_runtime_symbol(row)
+    adding :: symbol == "jet_bag_add"
+    removing :: symbol == "jet_bag_remove"
+    querying :: symbol == "jet_bag_count" || symbol == "jet_bag_has"
+    counted :: symbol == "jet_bag_len" || symbol == "jet_bag_is_empty"
+    clearing :: symbol == "std::collections::HashMap::clear"
+    if !adding && !removing && !querying && !counted && !clearing -> return false
+    if args.len() != (if counted || clearing -> 0 else -> 1) {
+        lower_fail(&m, &f, "Tally {row.member} has no checked arguments")
+        return true
+    }
+    carrier :: lower_tally_map(ty)
+    shape :: lower_map_shape(p, carrier) ?? return false
+    tally :: if adding || removing || clearing -> lower_receiver_header(p, c, &m, &f, receiver_place, "Tally") ?? return true else -> lower_use(&m, &f, receiver) ?? return true
+    if clearing {
+        data :: lower_list_data(&f, tally)
+        lower_list_drop_elements(p, &m, &f, tally, data, shape.entry)
+        lower_store_word(&f, tally, 0, 0)
+        lower_alias_absent(&f, instruction)
+        return true
+    }
+    if counted {
+        dst :: lower_result(p, c, &m, &f, instruction) ?? return true
+        zero :: lower_const(&f, 0)
+        if symbol == "jet_bag_is_empty" {
+            length :: lower_list_word(&f, tally, 0)
+            lower_emit(&f, LIRInst.Compare{dst: dst, condition: LIRCondition.Eq, left: length, right: zero})
+        } else {
+            each :: lower_each_begin(p, &f, tally, shape.entry, [LIRValueID]{zero})
+            count :: lower_list_word(&f, each.address, shape.value_offset)
+            sum :: lower_word(&f)
+            lower_emit(&f, LIRInst.Binary{dst: sum, op: LIRBinaryOp.Add, left: each.state[0], right: count})
+            lower_each_end(&f, each, [LIRValueID]{sum})
+            lower_emit(&f, LIRInst.Move{dst: dst, src: each.exit[0]})
+        }
+        return true
+    }
+    key :: lower_use(&m, &f, args[0]) ?? return true
+    if adding {
+        offered := key
+        if !lower_value_owned(c, args[0]) {
+            offered = lower_new_like(&f, key)
+            lower_clone_into(p, &m, &f, key, offered, elem)
+        }
+        one :: lower_const(&f, 1)
+        lower_call_helper(&m, &f, "map.increment", carrier, [LIRValueID]{tally, offered, one}, None)
+        lower_alias_absent(&f, instruction)
+    } else if removing {
+        lower_call_helper(&m, &f, "map.decrement", carrier, [LIRValueID]{tally, key}, None)
+        if lower_value_owned(c, args[0]) -> lower_map_drop_value(p, &m, &f, key, elem)
+        lower_alias_absent(&f, instruction)
+    } else {
+        dst :: lower_result(p, c, &m, &f, instruction) ?? return true
+        count :: lower_word(&f)
+        lower_call_helper(&m, &f, "map.count", carrier, [LIRValueID]{tally, key}, Val(count))
+        if symbol == "jet_bag_count" -> lower_emit(&f, LIRInst.Move{dst: dst, src: count})
+        else {
+            zero :: lower_const(&f, 0)
+            lower_emit(&f, LIRInst.Compare{dst: dst, condition: LIRCondition.Ne, left: count, right: zero})
+        }
+    }
+    true
+}

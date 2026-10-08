@@ -513,6 +513,7 @@ fn lower_repr(p: MIRProgram, ty: MIRType) -> LowerRepr Never! {
             if lower_string_nominal(ty) -> return LowerRepr.Handle{drop: "jet_rt_string_drop", clone: "jet_rt_string_clone"}
             if lower_view_element(ty) == .Val(elem) -> return lower_list_repr(p, ty, elem)
             if lower_set_element(ty) == .Val(elem) -> return lower_set_repr(p, ty, elem)
+            if lower_tally_element(ty) == .Val(elem) -> return lower_map_repr(p, ty, elem, lower_tally_count_type())
             if lower_queue_element(ty) == .Val(elem) -> return lower_queue_repr(p, ty, elem)
             if lower_priority_queue_element(ty) == .Val(elem) -> return lower_priority_queue_repr(p, ty, elem)
             // The canonical runtime name table excludes source-owned Core
@@ -2877,6 +2878,7 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
         if lower_lazy_method(p, c, &m, &f, instruction, row, receiver, receiver_place, args) -> return
         if lower_string_method(p, c, &m, &f, instruction, row, receiver, receiver_place, args, aggregate_fields) -> return
         if lower_set_method(p, c, &m, &f, instruction, row, receiver, receiver_place, args) -> return
+        if lower_tally_method(p, c, &m, &f, instruction, row, receiver, receiver_place, args) -> return
         if lower_queue_method(p, c, &m, &f, instruction, row, receiver, receiver_place, args) -> return
         if lower_priority_queue_method(p, c, &m, &f, instruction, row, receiver, receiver_place, args) -> return
         if lower_list_method(p, c, &m, &f, instruction, row, receiver, receiver_place, args) -> return
@@ -2918,6 +2920,7 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
         row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "static call names missing Prelude row")
         if row.module_name == "::JetAtomic" -> return lower_fail(&m, &f, "generic Atomic construction requires the canonical typed native allocation, ordering and ownership ABI; a word CAS is not an Atomic<T> carrier")
         if lower_set_new(p, c, &m, &f, instruction, call, args) -> return
+        if lower_tally_new(p, c, &m, &f, instruction, call, args) -> return
         if lower_queue_new(p, c, &m, &f, instruction, call, args) -> return
         if lower_priority_queue_new(p, c, &m, &f, instruction, call, args) -> return
         if lower_lazy_call(p, c, &m, &f, instruction, call, args) -> return
@@ -3389,6 +3392,10 @@ fn lower_glue_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFu
         shape :: lower_map_shape(p, lower_set_map(glue.ty)) ?? panic("Set drop has no entry layout")
         return lower_list_drop_glue(p, &m, glue, shape.entry)
     }
+    if lower_tally_element(glue.ty) != None {
+        shape :: lower_map_shape(p, lower_tally_map(glue.ty)) ?? panic("Tally drop has no entry layout")
+        return lower_list_drop_glue(p, &m, glue, shape.entry)
+    }
     if lower_queue_element(glue.ty) != None -> return lower_helper_queue(p, &m, glue)
     if lower_priority_queue_element(glue.ty) == .Val(elem) -> return lower_list_drop_glue(p, &m, glue, elem)
     if glue.ty.kind == .Fn(_) | .SendFn(_, _, _) -> return lower_closure_drop_glue(&m, glue, false)
@@ -3461,6 +3468,10 @@ fn lower_clone_glue_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) ->
     if lower_map_entry(glue.ty) == .Val(entry) -> return lower_list_clone_glue(p, &m, glue, entry)
     if lower_set_element(glue.ty) != None {
         shape :: lower_map_shape(p, lower_set_map(glue.ty)) ?? panic("Set clone has no entry layout")
+        return lower_list_clone_glue(p, &m, glue, shape.entry)
+    }
+    if lower_tally_element(glue.ty) != None {
+        shape :: lower_map_shape(p, lower_tally_map(glue.ty)) ?? panic("Tally clone has no entry layout")
         return lower_list_clone_glue(p, &m, glue, shape.entry)
     }
     if lower_queue_element(glue.ty) != None -> return lower_helper_queue(p, &m, glue)
