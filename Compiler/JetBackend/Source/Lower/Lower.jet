@@ -508,6 +508,7 @@ fn lower_repr(p: MIRProgram, ty: MIRType) -> LowerRepr Never! {
             if lower_view_element(ty) == .Val(elem) -> return lower_list_repr(p, ty, elem)
             if lower_set_element(ty) == .Val(elem) -> return lower_set_repr(p, ty, elem)
             if lower_queue_element(ty) == .Val(elem) -> return lower_queue_repr(p, ty, elem)
+            if lower_priority_queue_element(ty) == .Val(elem) -> return lower_priority_queue_repr(p, ty, elem)
             // The canonical runtime name table excludes source-owned Core
             // shapes. Only exact Core paths may override their MIR definition,
             // and a record schema keeps its MIR layout (Records.jet): its
@@ -2867,6 +2868,7 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
         if lower_string_method(p, c, &m, &f, instruction, row, receiver, receiver_place, args, aggregate_fields) -> return
         if lower_set_method(p, c, &m, &f, instruction, row, receiver, receiver_place, args) -> return
         if lower_queue_method(p, c, &m, &f, instruction, row, receiver, receiver_place, args) -> return
+        if lower_priority_queue_method(p, c, &m, &f, instruction, row, receiver, receiver_place, args) -> return
         if lower_list_method(p, c, &m, &f, instruction, row, receiver, receiver_place, args) -> return
         if lower_map_method(p, c, &m, &f, instruction, row, receiver, receiver_place, args) -> return
         if lower_ordering_method(p, c, &m, &f, instruction, row, receiver, args) -> return
@@ -2907,6 +2909,7 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
         if row.module_name == "::JetAtomic" -> return lower_fail(&m, &f, "generic Atomic construction requires the canonical typed native allocation, ordering and ownership ABI; a word CAS is not an Atomic<T> carrier")
         if lower_set_new(p, c, &m, &f, instruction, call, args) -> return
         if lower_queue_new(p, c, &m, &f, instruction, call, args) -> return
+        if lower_priority_queue_new(p, c, &m, &f, instruction, call, args) -> return
         if lower_lazy_call(p, c, &m, &f, instruction, call, args) -> return
         if lower_shared_new(p, c, &m, &f, instruction, call, args) -> return
         if lower_task_group_new(p, c, &m, &f, instruction, call, args) -> return
@@ -3377,6 +3380,7 @@ fn lower_glue_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFu
         return lower_list_drop_glue(p, &m, glue, shape.entry)
     }
     if lower_queue_element(glue.ty) != None -> return lower_helper_queue(p, &m, glue)
+    if lower_priority_queue_element(glue.ty) == .Val(elem) -> return lower_list_drop_glue(p, &m, glue, elem)
     if glue.ty.kind == .Fn(_) | .SendFn(_, _, _) -> return lower_closure_drop_glue(&m, glue, false)
     if lower_is_scope_guard(glue.ty) -> return lower_closure_drop_glue(&m, glue, true)
     if lower_is_inline(p, glue.ty) -> return lower_inline_drop_glue(p, &m, glue)
@@ -3450,6 +3454,7 @@ fn lower_clone_glue_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) ->
         return lower_list_clone_glue(p, &m, glue, shape.entry)
     }
     if lower_queue_element(glue.ty) != None -> return lower_helper_queue(p, &m, glue)
+    if lower_priority_queue_element(glue.ty) == .Val(elem) -> return lower_list_clone_glue(p, &m, glue, elem)
     if glue.ty.kind == .Fn(_) | .SendFn(_, _, _) -> return lower_closure_clone_glue(&m, glue)
     if lower_is_inline(p, glue.ty) -> return lower_inline_clone_glue(p, &m, glue)
     signature :: lower_signature(&m, [LIRLayout]{lir_layout_pointer()}, Val(lir_layout_pointer()))
@@ -3595,6 +3600,7 @@ fn lower_helper_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIR
     if glue.helper.starts_with("map.") -> return lower_helper_map(p, &m, glue)
     if glue.helper == "set.take" -> return lower_helper_set_take(p, &m, glue)
     if glue.helper.starts_with("queue.") -> return lower_helper_queue(p, &m, glue)
+    if glue.helper.starts_with("priority_queue.") -> return lower_helper_priority_queue(p, &m, glue)
     if glue.helper == "set.equal" -> return lower_helper_set_equal(p, &m, glue)
     if glue.helper == "numeric.pow.checked" || glue.helper == "numeric.pow.checked_policy" || glue.helper == "numeric.pow.wrapping" || glue.helper == "numeric.pow.saturating" -> return lower_helper_numeric_pow(p, &m, glue)
     if glue.helper == "text.html_escape" || glue.helper == "text.path_component" -> return lower_helper_typed_text_escape(&m, glue)
