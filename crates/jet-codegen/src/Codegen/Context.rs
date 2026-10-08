@@ -958,6 +958,8 @@ pub(crate) fn root_prelude_rust_type_name(name: &str) -> Option<&str> {
         "__TempPath" => Some("JetTestingTempPath"),
         "__TempRemove" => Some("JetTestingTempRemove"),
         "__TempCreate" => Some("JetTestingTempCreate"),
+        "__JetcRaw" => Some("JetCryptoJetcRaw"),
+        "__JetcStat" => Some("JetCryptoJetcStat"),
         "Transaction" => Some("JetTransaction"),
         "Counter" => Some("JetCounter"),
         "OrderedMap" => Some("JetOrderedMap"),
