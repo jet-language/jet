@@ -220,9 +220,7 @@ fn lower_scan_take(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFun
     if payload.kind != .Tuple(_) && lower_repr(p, payload) != .Absent -> return lower_fail(&m, &f, "take_pattern success payload is not a tuple or Unit")
     value :: lower_use(&m, &f, receiver) ?? return
     if binary == None && text == None -> return lower_fail(&m, &f, "take_pattern has no descriptors")
-    parts :: (if binary == .Val(pattern) -> lower_scan_binary_parts(p, &m, &f, payload, pattern, true)
-        else if text == .Val(pattern) -> lower_scan_text_parts(p, &m, &f, payload, pattern, true)
-        else -> None) ?? return
+    parts :: (if binary == .Val(pattern) -> lower_scan_binary_parts(p, &m, &f, payload, pattern, true) else if text == .Val(pattern) -> lower_scan_text_parts(p, &m, &f, payload, pattern, true) else -> None) ?? return
     rows :: lower_scan_rows(&f, parts)
     error :: lower_scan_slot(&f, 8)
     hit :: lower_word(&f)
