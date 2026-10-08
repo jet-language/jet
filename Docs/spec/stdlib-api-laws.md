@@ -109,6 +109,17 @@ and frees that save exactly once; it does not drop the borrowed active World
 or create a second World registry. Final validation reuses the scheduler's
 existing live-task check.
 
+`Atomic<T>` is a non-Clone inline scalar place, not a heap handle: copying it
+would create a different synchronization location. Sharing is supplied by
+the containing value. `Compiler/JetRuntime/Source/Atomic.jet` borrows the
+aligned eight-byte field address for fixed scalar operations, matching the
+seed's `AtomicU64` representation. Every operation is sequentially
+consistent; private initialization is the only plain store. The 32-bit
+lanes always publish zero-extended low bits, including after wrapping add,
+so subsequent compare-exchange uses scalar equality rather than stale carry
+bits. Exact `Int` requires its own canonical owner/hazard protocol and must
+never be routed to a fixed-width atomic operation.
+
 
 ## Law 4 — Effects
 

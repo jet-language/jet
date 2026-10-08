@@ -47,11 +47,16 @@ if (mode === 'assemble') {
   for (const name of ['jet_testing_world_new_raw', 'jet_testing_world_enter_raw', 'jet_testing_world_exit_raw', 'jet_testing_world_ensure_closed_raw']) {
     if (symbols.split('\n').filter(line => line.startsWith(`${name} T `)).length !== 1) throw Error(`World raw provider ${name} must have one strong Jet definition`);
   }
+  const atomicSource = readFileSync(join(root, 'Compiler/JetRuntime/Source/Atomic.jet'), 'utf8');
+  for (const match of atomicSource.matchAll(/^#Export\(c\)\s+fn\s+(\w+)\(/gm)) {
+    if (symbols.split('\n').filter(line => line.startsWith(`${match[1]} T `)).length !== 1) throw Error(`Atomic provider ${match[1]} must have one strong Jet definition`);
+  }
   command('disassembly', 'objdump', ['-dr', object]);
 } else if (mode === 'link') {
   const library = process.env.JET_RUNTIME_C_LIB, rlib = process.env.JET_RUNTIME_NATIVE_RLIB;
   if (!library || !existsSync(library) || !rlib || !existsSync(rlib)) throw Error('fresh composed JET_RUNTIME_C_LIB and JET_RUNTIME_NATIVE_RLIB required');
   command('link', process.env.CC ?? 'cc', [join(root, 'Compiler/JetRuntime/Tests/world-sentry-fixture.c'), join(unit, 'fixture.o'), library, '-lpthread', '-ldl', '-lm', '-o', join(out, 'world-sentry-fixture')]);
+  command('atomic-word-link', process.env.CC ?? 'cc', [join(root, 'Compiler/JetRuntime/Tests/AtomicTests.c'), join(unit, 'fixture.o'), library, '-lpthread', '-ldl', '-lm', '-o', join(out, 'atomic-word-fixture')]);
   command('reference-link', 'rustc', ['--edition', '2021', join(root, 'Compiler/JetRuntime/Tests/sentry-ledger-reference.rs'), '--extern', `jet_runtime=${rlib}`, '-C', `link-arg=${join(unit, 'fixture.o')}`, '-o', join(out, 'ledger-reference')]);
 } else {
   const failures = [];
@@ -62,6 +67,10 @@ if (mode === 'assemble') {
   try {
     const result = command('world-raw-witnesses', join(out, 'world-sentry-fixture'), ['world-raw'], { timeout: 30000 });
     if (result.stdout !== 'World raw: scope restored, token freed, nested rejected, pending stop preserved\n' || result.stderr !== '') throw Error('World raw witnesses changed exact output');
+  } catch (error) { failures.push(error.message); }
+  try {
+    const result = command('atomic-word-witnesses', join(out, 'atomic-word-fixture'), [], { timeout: 300000 });
+    if (result.stdout !== 'Atomic word: five kinds, wrap/CAS, four writers, SeqCst store-buffering\n' || result.stderr !== '') throw Error('Atomic word witnesses changed exact output');
   } catch (error) { failures.push(error.message); }
   // Exercise both sides of the real stop boundary. Nonzero 70 is expected,
   // so retain both raw results rather than treating the first stop as failure.
