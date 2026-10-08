@@ -83,7 +83,7 @@ fn s4_agent_relative_fixture_path(relative: String) {
 }
 
 // Port of tests/agent_workloads.rs:2280-2313 plus read_native_os_matrix.
-#Test("native_os_matrix_is_frozen_and_names_current_host") {
+fn s4_agent_native_os_matrix_is_frozen_and_names_current_host() {
     rows :: s4_agent_tsv_rows("tests/agent_workloads/native_os_matrix.tsv", "version\tos\tarch_policy\trequirement\tadapters\treason", 6)
     expected :: [String]{
         "1\tlinux\tx86_64\trequired\tjet,bash,python,node\tnative",
@@ -104,8 +104,12 @@ fn s4_agent_relative_fixture_path(relative: String) {
     assert(found, "current host {host} is absent from the frozen native OS matrix")
 }
 
+#Test("native_os_matrix_is_frozen_and_names_current_host") {
+    s4_agent_native_os_matrix_is_frozen_and_names_current_host()
+}
+
 // Port of tests/agent_workloads.rs:2315-2339, including both reader contracts.
-#Test("jet_baseline_is_frozen_and_each_loss_has_an_owner") {
+fn s4_agent_jet_baseline_is_frozen_and_each_loss_has_an_owner() {
     tasks :: s4_agent_tsv_rows("tests/agent_workloads/manifest.tsv", "version\ttask_id\tdomain\tcase\tdeclared_outcome\tinput\texpected\tauthority\tadapters\tplatforms\tevidence\ttower_card\tloss_cards", 13)
     baseline :: s4_agent_tsv_rows("tests/agent_workloads/jet_baseline.tsv", "version\ttask_id\tjet_status\tloss_owner", 4)
     assert(baseline.len() == tasks.len(), "Jet baseline must contain one row per corpus task")
@@ -124,4 +128,8 @@ fn s4_agent_relative_fixture_path(relative: String) {
             assert(pair.found && (pair.tail.starts_with("#") || pair.tail.starts_with("non-goal:")), "Jet loss owner must name a card or ratified non-goal: {owner}")
         }
     }
+}
+
+#Test("jet_baseline_is_frozen_and_each_loss_has_an_owner") {
+    s4_agent_jet_baseline_is_frozen_and_each_loss_has_an_owner()
 }
