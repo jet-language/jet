@@ -407,3 +407,45 @@ pub fn core_identifier_demand(tokens: &[Token]) -> jet_foundation::AST::CoreIden
     demand.prelude_modules.sort_unstable();
     demand
 }
+
+#[cfg(test)]
+mod core_identifier_demand_tests {
+    use crate::Lexer;
+
+    #[test]
+    fn core_identifier_demand_ignores_literal_and_comment_payloads() {
+        for source in [
+            "\"URL Perf RNG Vec2 url or_err Clock Path read_file\"",
+            "`URL Perf RNG Vec2 url or_err Clock Path read_file`",
+            "\"\"\"\nURL Perf RNG Vec2 url or_err Clock Path read_file\n\"\"\"",
+            "\"{{URL}} {{RNG}} {{or_err}}\"",
+            "// URL RNG url or_err\n/* Perf /* Vec2 */ Clock Path read_file */\n",
+            "#FFI(c) fn f() { \"\"\"URL RNG {Vec2} url or_err\"\"\" }",
+            "URLExtra prefixURL _URL 变量URL URL变量",
+        ] {
+            let (tokens, diagnostics) = Lexer::lex(source);
+            assert!(diagnostics.is_empty(), "{source:?}: {diagnostics:?}");
+            let demand = Lexer::core_identifier_demand(&tokens);
+            assert!(demand.bare_modules.is_empty(), "{source:?}: {demand:?}");
+            assert!(!demand.option_or_err, "{source:?}: {demand:?}");
+            assert!(demand.prelude_modules.is_empty(), "{source:?}: {demand:?}");
+        }
+    }
+
+    #[test]
+    fn core_identifier_demand_keeps_real_and_nested_interpolation_identifiers() {
+        let source = "\"literal URL {RNG} {\"Perf {Vec2}\"} {value.or_err(\"url\")}\"";
+        let (tokens, diagnostics) = Lexer::lex(source);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        let demand = Lexer::core_identifier_demand(&tokens);
+        assert_eq!(demand.bare_modules, ["core.testing", "core.math"]);
+        assert!(demand.option_or_err);
+
+        let (tokens, diagnostics) = Lexer::lex("Vec2 RNG Perf URL url value.or_err()");
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        let demand = Lexer::core_identifier_demand(&tokens);
+        assert_eq!(demand.bare_modules, ["core.net.url", "core.perf", "core.testing", "core.math"]);
+        assert!(demand.option_or_err);
+        assert!(demand.prelude_modules.windows(2).all(|pair| pair[0] < pair[1]));
+    }
+}
