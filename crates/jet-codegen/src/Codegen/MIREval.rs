@@ -32852,7 +32852,15 @@ fn run() {
 ";
 
     fn checked_run_bundle(src: &str) -> crate::AST::ProgramBundle {
-        let (toks, lex_diags) = crate::Lexer::lex(src);
+        checked_bundle(src, false)
+    }
+
+    fn checked_bundle(src: &str, embedded_core: bool) -> crate::AST::ProgramBundle {
+        let (toks, lex_diags) = if embedded_core {
+            crate::Lexer::lex_generated(src)
+        } else {
+            crate::Lexer::lex(src)
+        };
         assert!(lex_diags.is_empty(), "lex errors: {lex_diags:?}");
         let mut prog = crate::Parser::parse(&toks).expect("parse failed");
         let mut bundle = crate::AST::ProgramBundle {
@@ -32950,5 +32958,54 @@ fn run() {
             interpret_stdout(EDIT_WAIT_PEER_CYCLE),
             "seen=2 ticket=3\n"
         );
+    }
+
+    #[test]
+    fn mir_zeroize_writes_the_original_caller_allocation() {
+        jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+            // Lower the real primitive to obtain its canonical Core/Prelude IDs.
+            // Supply a Write address directly so this tests the interception,
+            // independently of the old consuming signature being corrected.
+            let bundle = checked_bundle(
+                "fn run() {\n    bytes := [U8]{1, 2, 3}\n    core.crypto.__zeroize(^bytes)\n}",
+                true,
+            );
+            let request = jet_foundation::MIR::MirArtifactRequest::new(
+                MirArtifactTarget::Interpreter,
+                jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+                jet_foundation::MIR::MirArtifactBuildMode::Dev,
+            );
+            let (program, _) = crate::Codegen::TIR::lower_checked_mir_program_for(&bundle, request)
+                .expect("zeroize witness MIR");
+            let row = program.core_calls.iter()
+                .find(|row| row.module == "core.crypto" && row.member == "__zeroize")
+                .expect("canonical zeroize row");
+            let route = program.prelude_calls.iter()
+                .find(|route| route.module == "core.crypto" && route.member == "__zeroize")
+                .expect("canonical zeroize route");
+            let function = program.functions.iter().find(|function| {
+                function.locals.iter().any(|local| local.name == "bytes")
+            }).expect("caller function");
+            let local = function.locals.iter().find(|local| local.name == "bytes").unwrap();
+            let place = function.places.iter().find(|place| {
+                place.base == MirPlaceBase::Local(local.id) && place.projections.is_empty()
+            }).expect("caller byte storage place");
+            let bytes = vec![0x53u8, 0x45, 0x43, 0x52, 0x45, 0x54];
+            let original = bytes.as_ptr();
+            let mut frame = Frame::new(function, Vec::new(), Vec::new()).unwrap();
+            frame.locals.insert(local.id, RuntimeValue::Data(MirEvalValue::Bytes(bytes)));
+            let config = MirEvalConfig::default();
+            let mut machine = Machine::new(&program, &config, vec![frame], None, None);
+            machine.eval_core_call(
+                row.id, route.id,
+                vec![RuntimeValue::Address(Address { frame: 0, place: place.id, access: MirAccess::Write })],
+                &[], None, None, place.span,
+            ).expect("zeroize must accept the caller's writable place");
+            let RuntimeValue::Data(MirEvalValue::Bytes(bytes)) =
+                machine.frames[0].locals.get(&local.id).expect("caller storage remains live")
+            else { panic!("zeroize replaced the caller's buffer carrier") };
+            assert_eq!(bytes.as_ptr(), original, "zeroize replaced rather than wiped the allocation");
+            assert_eq!(bytes, &[0; 6], "the original allocation retained secret bytes");
+        });
     }
 }
