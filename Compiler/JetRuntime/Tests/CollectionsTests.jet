@@ -270,11 +270,84 @@ fn coll_test_para_fold() {
     jet_rt_free(snapshot, I64{64}, I64{8})
 }
 
+fn coll_test_i64_lists() {
+    snapshot :: jet_rt_alloc(I64{64}, I64{8})
+    width := I64{32}
+    at := I64{0}
+    loop at < I64{8} {
+        trap_store(snapshot + at * I64{8}, coll_test_live(width))
+        width *= I64{2}
+        at += I64{1}
+    }
+    input :: jet_rt_alloc(I64{40}, I64{8})
+    output :: jet_rt_alloc(I64{8}, I64{8})
+    trap_store(input, I64{0})
+    trap_store(input + I64{8}, I64{2})
+    trap_store(input + I64{16}, I64{2})
+    trap_store(input + I64{24}, I64{5})
+    coll_test_require(jet_coll_bisect_left(input, I64{4}, I64{2}) == I64{1})
+    coll_test_require(jet_coll_bisect_right(input, I64{4}, I64{2}) == I64{3})
+    coll_test_require(jet_coll_bisect_left(I64{0}, I64{0}, I64{-1}) == I64{0})
+    coll_test_require(jet_coll_insort_left(input, I64{4}, I64{-1}, output) == I64{5})
+    data :: trap_word(output)
+    coll_test_require(data != input && trap_word(data) == I64{-1} && trap_word(data + I64{32}) == I64{5})
+    jet_rt_free(data, I64{40}, I64{8})
+    coll_test_require(jet_coll_insort_right(input, I64{4}, I64{2}, output) == I64{5})
+    inserted :: trap_word(output)
+    coll_test_require(trap_word(inserted + I64{8}) == I64{2} && trap_word(inserted + I64{24}) == I64{2})
+    jet_rt_free(inserted, I64{40}, I64{8})
+    coll_test_require(jet_coll_merge_sorted(input, I64{2}, input + I64{16}, I64{2}, output) == I64{4})
+    merged :: trap_word(output)
+    coll_test_require(trap_word(merged) == I64{0} && trap_word(merged + I64{8}) == I64{2} && trap_word(merged + I64{16}) == I64{2} && trap_word(merged + I64{24}) == I64{5})
+    jet_rt_free(merged, I64{32}, I64{8})
+    trap_store(input, I64{4})
+    trap_store(input + I64{8}, I64{1})
+    trap_store(input + I64{16}, I64{3})
+    trap_store(input + I64{24}, I64{2})
+    trap_store(input + I64{32}, I64{5})
+    coll_test_require(jet_coll_heapify(input, I64{5}, output) == I64{5})
+    heap :: trap_word(output)
+    coll_test_require(trap_word(heap) == I64{1} && trap_word(heap + I64{8}) == I64{2})
+    coll_test_require(jet_coll_heappush(heap, I64{5}, I64{0}, output) == I64{6})
+    grown :: trap_word(output)
+    coll_test_require(trap_word(grown) == I64{0} && trap_word(heap) == I64{1} && trap_word(input) == I64{4})
+    at = I64{1}
+    loop at < I64{6} {
+        coll_test_require(trap_word(grown + at * I64{8}) >= trap_word(grown + ((at - I64{1}) / I64{2}) * I64{8}))
+        at += I64{1}
+    }
+    jet_rt_free(heap, I64{40}, I64{8})
+    jet_rt_free(grown, I64{48}, I64{8})
+    trap_store(input, I64{-9223372036854775808})
+    trap_store(input + I64{32}, I64{9223372036854775807})
+    coll_test_require(jet_coll_nsmallest(I64{2}, input, I64{5}, output) == I64{2})
+    small :: trap_word(output)
+    coll_test_require(trap_word(small) == I64{-9223372036854775808} && trap_word(small + I64{8}) == I64{1})
+    jet_rt_free(small, I64{16}, I64{8})
+    coll_test_require(jet_coll_nlargest(I64{8}, input, I64{5}, output) == I64{5})
+    large :: trap_word(output)
+    coll_test_require(trap_word(large) == I64{9223372036854775807} && trap_word(large + I64{32}) == I64{-9223372036854775808})
+    jet_rt_free(large, I64{40}, I64{8})
+    coll_test_require(jet_coll_nsmallest(I64{-1}, input, I64{5}, output) == I64{0} && trap_word(output) == I64{0})
+    coll_test_require(jet_coll_heapify(I64{0}, I64{0}, output) == I64{0} && trap_word(output) == I64{0})
+    jet_rt_free(input, I64{40}, I64{8})
+    jet_rt_free(output, I64{8}, I64{8})
+    width = I64{32}
+    at = I64{0}
+    loop at < I64{8} {
+        coll_test_require(coll_test_live(width) == trap_word(snapshot + at * I64{8}))
+        width *= I64{2}
+        at += I64{1}
+    }
+    jet_rt_free(snapshot, I64{64}, I64{8})
+}
+
 fn collections_tests() {
     jet_rt_alloc_init()
     coll_test_bytes()
     coll_test_bits()
     coll_test_para_fold()
+    coll_test_i64_lists()
     // Fresh ceil(5/2) differs from the remaining floor(4/2) after one pull.
     stepped :: jet_rt_native_iter_step_by(coll_test_source(), I64{2})
     coll_test_require(iter_exact_length(stepped) == I64{3})
