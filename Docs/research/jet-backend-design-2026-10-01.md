@@ -2139,3 +2139,10 @@ not live viewport signals. Preview custom-device text is owned; u32 dimensions
 and u16 scale ignore padding without applying constructor policy. Virtual
 plans preserve twelve raw i64 fields and sparse ordered `(index, size)` pairs,
 including duplicate indices; clone owns independent pair storage.
+
+`UiRaylibMetadata.jet` owns window titles and atlas metadata, including ordered
+regions and optional texture-path text. Window exact-Int boundaries retain the
+seed's constructor/getter behavior; atlas native texture is a copied optional
+plain C record, not a shared resource owner. Drop frees only metadata because
+the seed defines no close/unload destructor. Atlas show/debug append the name
+verbatim inside `RaylibTextureAtlas(...)`, without Rust Debug string quoting.
