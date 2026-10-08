@@ -1472,7 +1472,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 5a4d88ee4c30be0a53ed2a0484b0b0b3683df9a5efe436718487fc4485bd3f92
+// Source SHA-256: 473bed2e3cc06b1bd640fa5905175d7811806a2709d6c06ab7399be276ca6454
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -1950,7 +1950,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.testing", "golden", "jet_testing_golden", true, &[true, true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.testing", "fixture", "jet_testing_fixture", true, &[true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.testing", "temp_dir", "jet_testing_temp_dir", true, &[true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new( "core.testing", "fake_clock", "jet_std_clock_new", true, &[false], ),
+    CoreCallRecord::source_owned("core.testing", "fake_clock", &[false]),
     CoreCallRecord::new( "core.testing", "fake_rng", "jet_std_rng_new", true, &[false], ),
     CoreCallRecord::new( "core.testing", "fake_data", "jet_testing_fake_new", true, &[false], ),
     CoreCallRecord::new( "core.testing", "test_suite", "jet_test_suite_new", true, &[], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),

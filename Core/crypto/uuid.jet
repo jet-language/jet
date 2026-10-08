@@ -134,3 +134,12 @@ fn to_u8(n: Int) -> U8 Never! {
     v :: n & 255
     (U8{v})
 }
+
+#Test("UUID v7 keeps the manual Clock timestamp and RFC version and variant") {
+    clock :: Clock.new(1250999896491)
+    value :: v7(clock) ?? panic("UUID v7")
+    assert(value.starts_with("01234567-89ab-7"))
+    bytes :: parse_uuid(value) ?? panic("UUID encoding")
+    assert_eq(Int.from_u8(bytes[6]) >> 4, 7)
+    assert_eq(Int.from_u8(bytes[8]) & 192, 128)
+}

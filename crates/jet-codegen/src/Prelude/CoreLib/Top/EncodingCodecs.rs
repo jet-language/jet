@@ -535,6 +535,3 @@ fn jet_std_uuid_v4() -> String {
     jet_crypto_uuid_v4()
 }
 
-fn jet_std_uuid_v7(clock: &jet_std::Clock) -> String {
-    jet_crypto_uuid_v7(clock.now())
-}

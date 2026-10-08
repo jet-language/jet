@@ -938,6 +938,9 @@ sniffing.
 UUIDs remain plain `String` values. `v4` and `v7` require the fail-closed
 random provider; `parse` validates and lowercases the canonical form; `v5`
 and `uuid5` derive a deterministic name-based value.
+`v7(clock)` reads the caller's clock in milliseconds. A manual `Clock.new`
+therefore fixes the 48-bit timestamp prefix while the tail still comes from
+the same random provider; the version and variant bits are set in Jet.
 
 ```jet
 use core.crypto.uuid as uuid
