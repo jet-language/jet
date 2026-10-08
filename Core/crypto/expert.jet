@@ -621,22 +621,9 @@ pub fn open_v1(key: [U8], envelope: [U8]) -> [U8] CryptoError! {
 }
 
 pub fn migrate_v1(key: [U8], source: Path, recipients: [X25519PublicKey], destination: Path) -[FS, Rand]> Bool FileCryptoError! {
-    data :: host_read_file(source.to_string()) ?? return Err(.SourceMissing)
-    plain :: open_v1(key, data) ?? return Err(.OpenFailed)
-    sealed :: crypto.seal(recipients, plain, [U8]{}) ?? return Err(.PublishFailed)
-    sealed_bytes :: crypto.sealed_bytes(sealed)
-    host_write_file(destination.to_string(), sealed_bytes) ?? return Err(.PublishFailed)
-    Ok(true)
+    crypto.__migrate_v1(key, source, recipients, destination)
 }
 
-fn host_read_file(path: String) -[FS]> [U8] FileCryptoError! {
-    core.files.read_bytes(path) ?? return Err(.SourceMissing)
-}
-
-fn host_write_file(path: String, bytes: [U8]) -[FS]> Bool FileCryptoError! {
-    core.files.write_bytes(path, bytes) ?? return Err(.PublishFailed)
-    Ok(true)
-}
 
 fn aes_gcm_seal(key: [U8], nonce: [U8], aad: [U8], plain: [U8]) -> [U8] Never! {
     rk :: aes256_expand(key)
