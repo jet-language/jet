@@ -1,8 +1,8 @@
 # Port of tests/jetpack_env_use_offline.rs:172-412. Helper20-33 reuses byte-identical durable-hangar fixtures.
-# Whole-case REFUSED: later seal/journal assertions depend on exact mtime restore; no stat/touch substitute.
+# Independent public prefix executable; dependent 296-375 and scenario suffix stay LEDGER-ONLY core-files-set-mtime.
 # PENDING-GRAMMAR(batch-four), runtime PENDING-SAME-HEAD.
 requires: os-name:linux
-refused: mtime_ns
+# PENDING-SEAM(core-files-set-mtime) #4832: getter in Core3ec4f6b0c, missing exact setter/restore; no touch substitute.
 fixture: fully_materialized_env_and_use_enter_without_network_or_prompt.fixture
 mkdir: package-root
 mkdir: home
@@ -55,7 +55,24 @@ stderr: !~ "continue?" # original predicate
 file: project/.jet/receipts/env-entry == before-receipt
 file: project/.jet/lock same-as {cap:lock} # original fs::read(...).ok equality
 tree: package-root bytes = {cap:root_bytes} # original tree_bytes equality
-# Exact original dependent assertions and setup, retained until mtime_ns exists:
+# Original 268-294: change only the env file bytes, then restore exact original bytes.
+copy: project/env.jet before-env.jet
+append: project/env.jet "\n"
+step: jetpack env --trust --offline --no-color -- omp
+cwd: project
+env: JETPACK_DENY_NETWORK=1
+env: JETPACK_TIMING=1
+unset: JETPACK_FIXTURES
+exit: 0
+stdout.trim: = cached.out
+stderr: ~ "TIMING step omp" # original changed environment input invalidates warm reuse
+copy: before-env.jet project/env.jet
+step: jetpack env --trust --offline --no-color -- omp
+cwd: project
+env: JETPACK_DENY_NETWORK=1
+unset: JETPACK_FIXTURES
+exit: 0
+# Original dependent assertions/setup retained verbatim until core-files-set-mtime exists (getter-only is not enough):
 # #[test]
 # fn fully_materialized_env_and_use_enter_without_network_or_prompt() {
 #     let project = Scratch::new("env-use-offline-project");
