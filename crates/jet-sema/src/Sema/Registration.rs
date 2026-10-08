@@ -1377,6 +1377,7 @@ pub(crate) fn check_effect_boundaries(
     solved: &HashMap<String, EffectSet>,
     summaries: &HashMap<String, EffectSummary>,
     modules: &[crate::AST::LoadedModule],
+    entry_module: Option<usize>,
     diags: &mut Vec<Diagnostic>,
 ) {
     fn unbounded_dispatch<'a>(
@@ -1437,6 +1438,7 @@ pub(crate) fn check_effect_boundaries(
         solved: &HashMap<String, EffectSet>,
         summaries: &HashMap<String, EffectSummary>,
         modules: &[crate::AST::LoadedModule],
+        entry_module: Option<usize>,
         diags: &mut Vec<Diagnostic>,
     ) {
         let Some(declared_list) = &f.declared_effects else {
@@ -1448,11 +1450,14 @@ pub(crate) fn check_effect_boundaries(
         if let Some((trait_method, call)) = unbounded_dispatch(&key, summaries, &mut HashSet::new())
         {
             let owner = call.and_then(|call| {
-                modules.iter().find(|module| module.display == call.source)
-                    .map(|module| (module, call.span))
+                modules.iter().enumerate()
+                    .find(|(_, module)| module.display == call.source)
+                    .map(|(index, module)| (index, module, call.span))
             });
-            let mut diagnostic = e0743(trait_method, owner.map(|(_, span)| span));
-            if let Some((module, _)) = owner {
+            let mut diagnostic = e0743(trait_method, owner.map(|(_, _, span)| span));
+            // Preserve the supplied rendering context only when BOTH the
+            // ceiling and its actual dispatch witness belong to the entry.
+            if let Some((_, module, _)) = owner.filter(|(index, _, _)| entry_module != Some(*index)) {
                 diagnostic.set_origin(std::sync::Arc::new(
                     jet_foundation::Diagnostics::DiagnosticOrigin::new(
                         module.display.clone(),
@@ -1551,25 +1556,25 @@ pub(crate) fn check_effect_boundaries(
     }
     for item in items {
         match item {
-            Item::Func(f) => check_one(f, None, None, solved, summaries, modules, diags),
+            Item::Func(f) => check_one(f, None, None, solved, summaries, modules, entry_module, diags),
             Item::Impl(i) => {
                 for m in &i.methods {
-                    check_one(m, Some(&i.type_name), None, solved, summaries, modules, diags);
+                    check_one(m, Some(&i.type_name), None, solved, summaries, modules, entry_module, diags);
                 }
             }
             Item::Struct(s) => {
                 for m in &s.methods {
-                    check_one(m, Some(&s.name), None, solved, summaries, modules, diags);
+                    check_one(m, Some(&s.name), None, solved, summaries, modules, entry_module, diags);
                 }
                 for block in &s.trait_impls {
                     for m in &block.methods {
-                        check_one(m, Some(&s.name), None, solved, summaries, modules, diags);
+                        check_one(m, Some(&s.name), None, solved, summaries, modules, entry_module, diags);
                     }
                 }
             }
             Item::Enum(e) => {
                 for m in &e.methods {
-                    check_one(m, Some(&e.name), None, solved, summaries, modules, diags);
+                    check_one(m, Some(&e.name), None, solved, summaries, modules, entry_module, diags);
                 }
             }
             Item::CodeModule(module) => {
@@ -1577,7 +1582,7 @@ pub(crate) fn check_effect_boundaries(
                     for item in body {
                         if let Item::Func(f) = item {
                             let identity = super::inline_effect_key(&module.name, &f.name);
-                            check_one(f, None, Some(&identity), solved, summaries, modules, diags);
+                            check_one(f, None, Some(&identity), solved, summaries, modules, entry_module, diags);
                         }
                     }
                 }

@@ -89,6 +89,8 @@ For a transitive unbounded trait dispatch (E0743), the witness is the actual
 dispatch call in the callee's module, even when the effect ceiling belongs to
 a caller elsewhere. If that witness has no identifiable source module, the
 report remains unlocated instead of borrowing the caller's position.
+When both the ceiling and its dispatch witness belong to the entry module,
+the entry's existing supplied rendering context is retained unchanged.
 
 ## No-OS E3301 contract
 

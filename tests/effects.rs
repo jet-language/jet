@@ -161,6 +161,32 @@ fn imported_effect_boundary_diagnostic_keeps_its_source_origin() {
 }
 
 #[test]
+fn entry_unbounded_dispatch_preserves_caller_render_context() {
+    let root = common::unique_tmp("jet_entry_dispatch_origin");
+    fs::create_dir_all(&root).unwrap();
+    let entry = root.join("main.jet");
+    let source = include_str!("ui/effect_trait_dispatch_unbounded.jet");
+    fs::write(&entry, source).unwrap();
+    let (diagnostics, _, _) =
+        jet::Driver::check_file_with_effect_facts(entry.to_str().unwrap(), None, false);
+    let diagnostic = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "E0743")
+        .expect("the entry's unbounded dispatch must be rejected");
+    assert!(diagnostic.origin().is_none(), "{diagnostic:#?}");
+    let rendered = jet::render_diagnostics(
+        "tests/ui/effect_trait_dispatch_unbounded.jet",
+        source,
+        std::slice::from_ref(diagnostic),
+    );
+    assert_eq!(
+        rendered,
+        include_str!("ui/effect_trait_dispatch_unbounded.stderr"),
+        "the existing entry-owned UI contract must stay byte-identical",
+    );
+}
+
+#[test]
 fn transitive_unbounded_dispatch_keeps_the_foreign_call_origin() {
     let root = common::unique_tmp("jet_foreign_dispatch_origin");
     fs::create_dir_all(&root).unwrap();

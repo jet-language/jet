@@ -46,6 +46,10 @@ fn run() {
     modules := [SemaEffectModuleResult]{SemaEffectModuleResult{module_identity: "main", functions: [TFunc]{}, diagnostics: [Diagnostic]{}, complete: false}}
     sema_effect_publish_diagnostics(&all, &modules, 0, inputs[0].source_segments, batch)
     if all.len() != 1 || all[0].code != "E0743" || all[0].source_path != Val("worker.jet") -> panic("publication rebound the foreign dispatch to main")
+    entry_site :: SemaEffectDispatchSite{dispatch: site.dispatch, module_index: 0}
+    entry_located :: sema_effect_locate_dispatch(entry_site, inputs)
+    entry_original :: sema_diagnostic_with_source_location(sema_effect_unbounded_dispatch_diagnostic(entry_site.dispatch), inputs[0].source_segments)
+    if entry_located.source_path != entry_original.source_path || entry_located.source_offset != entry_original.source_offset || entry_located.source_start != entry_original.source_start || entry_located.span != entry_original.span -> panic("entry dispatch mapping changed its existing rendering context")
     inputs[1].source_segments = [SemaSourceSegment]{}
     unknown :: sema_effect_locate_dispatch(site, inputs)
     if unknown.span != None || unknown.source_path != None -> panic("unknown dispatch origin invented a position")

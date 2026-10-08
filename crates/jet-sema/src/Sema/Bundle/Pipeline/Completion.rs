@@ -621,6 +621,7 @@ pub(super) fn complete_bundle_check(
             &local_solved,
             &local_summaries,
             &bundle.modules,
+            (module_index == bundle.entry).then_some(bundle.entry),
             &mut diags,
         );
         let module_alias = name_ledger
