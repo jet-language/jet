@@ -23,7 +23,7 @@ fn kit_steps_history_stream(reference: String, subject: String, history: [KitCap
 fn kit_steps_line_count_target(target: String, assertion: KitAssertion, history: [KitCapturedStep]) -> Int? {
     reference :: kit_steps_count_label(target)
     if reference == "" -> return kit_steps_numeric(target)
-    factor :: Int.parse(target.slice(0, target.index("*") ?? 0)) ?? return None
+    factor :: Int.parse(kit_steps_byte_slice(target, 0, kit_steps_byte_index(target, "*") ?? 0)) ?? return None
     previous :: kit_steps_history_stream(reference, assertion.stream, history, false) ?? return None
     transformed :: kit_steps_transform(previous, assertion.transform) ?? return None
     Val(factor * kit_steps_lines(transformed))
@@ -72,11 +72,11 @@ fn kit_steps_check_assertion(assertion: KitAssertion, context: KitStepCtx, state
     actual := kit_steps_select_stream(stdout, stderr, assertion.stream)
     if assertion.stream.starts_with("cap:") {
         if (assertion.mode == "=" || assertion.mode == "!=") && assertion.value.starts_with("{{cap:") && assertion.value.ends_with("}}") {
-            left :: kit_steps_capture_named(assertion.stream.slice(4, assertion.stream.len()), state.captures) ?? return kit_expect_verdict("ERROR", "captured subject unavailable")
-            right :: kit_steps_capture_named(assertion.value.slice(5, assertion.value.len() - 1), state.captures) ?? return kit_expect_verdict("ERROR", "captured relation unavailable")
+            left :: kit_steps_capture_named(kit_steps_byte_slice(assertion.stream, 4, assertion.stream.count_bytes()), state.captures) ?? return kit_expect_verdict("ERROR", "captured subject unavailable")
+            right :: kit_steps_capture_named(kit_steps_byte_slice(assertion.value, 5, assertion.value.count_bytes() - 1), state.captures) ?? return kit_expect_verdict("ERROR", "captured relation unavailable")
             return if (left == right) == (assertion.mode == "=") -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "captured values differ")
         }
-        actual = kit_steps_captured_subject(assertion.stream.slice(4, assertion.stream.len()), state.captures) ?? return kit_expect_verdict("ERROR", "captured subject unavailable")
+        actual = kit_steps_captured_subject(kit_steps_byte_slice(assertion.stream, 4, assertion.stream.count_bytes()), state.captures) ?? return kit_expect_verdict("ERROR", "captured subject unavailable")
     }
     value := if assertion.mode == "same-as" -> assertion.value else -> kit_steps_runtime_expand(assertion.value, context, state) ?? return kit_expect_verdict("ERROR", "assertion token unavailable")
     extra := kit_steps_runtime_expand(assertion.extra, context, state) ?? return kit_expect_verdict("ERROR", "assertion token unavailable")
@@ -108,7 +108,7 @@ fn kit_steps_check_assertion(assertion: KitAssertion, context: KitStepCtx, state
             return if matches -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "wrong file kind: {assertion.path}")
         }
         if assertion.mode == "same-as" {
-            name :: assertion.value.slice(5, assertion.value.len() - 1)
+            name :: kit_steps_byte_slice(assertion.value, 5, assertion.value.count_bytes() - 1)
             loop capture in state.captures {
                 if capture.name == name {
                     if capture.value == {
@@ -231,8 +231,8 @@ fn kit_steps_check_assertion(assertion: KitAssertion, context: KitStepCtx, state
     }
     if assertion.mode == "one-of" -> return kit_steps_one_of(context.id, context.snapshots, value, actual, bless)
     if assertion.mode == "from" {
-        start :: actual.index(value) ?? return kit_expect_verdict("FAIL", "missing suffix marker")
-        return kit_expect_exact(context.id, files.join(context.snapshots, extra), kit_exec_optional(files.join(context.snapshots, extra)), actual.slice(start, actual.len()), bless, false)
+        start :: kit_steps_byte_index(actual, value) ?? return kit_expect_verdict("FAIL", "missing suffix marker")
+        return kit_expect_exact(context.id, files.join(context.snapshots, extra), kit_exec_optional(files.join(context.snapshots, extra)), kit_steps_byte_slice(actual, start, actual.count_bytes()), bless, false)
     }
     if assertion.mode == "first-line=" || assertion.mode == "first-line==" {
         selected :: kit_steps_first_line(actual, extra) ?? return kit_expect_verdict("FAIL", "no first line contains selector")
@@ -263,8 +263,8 @@ fn kit_steps_check_assertion(assertion: KitAssertion, context: KitStepCtx, state
         expected :: kit_steps_line_count_target(value, assertion, state.history) ?? return kit_expect_verdict("ERROR", "line-count label missing")
         matches = kit_steps_lines(actual) == expected
     } else if assertion.mode == "before" {
-        left :: actual.index(value) ?? -1
-        right :: actual.index(extra) ?? -1
+        left :: kit_steps_byte_index(actual, value) ?? -1
+        right :: kit_steps_byte_index(actual, extra) ?? -1
         matches = left >= 0 && right >= 0 && left < right
     } else if assertion.mode == "~any" {
         loop alternative in assertion.alternatives {

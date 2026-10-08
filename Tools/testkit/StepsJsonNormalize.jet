@@ -2,9 +2,9 @@ use core.encoding.[DataTree]
 use core.encoding.json as json
 
 fn kit_steps_json_normalizer(value: String) -> KitJSONNormalization? {
-    reason :: value.index(" #") ?? return None
-    if value.slice(reason + 2, value.len()).trim() == "" -> return None
-    header :: kit_steps_words(value.slice(0, reason)) ?? return None
+    reason :: kit_steps_byte_index(value, " #") ?? return None
+    if kit_steps_byte_slice(value, reason + 2, value.count_bytes()).trim() == "" -> return None
+    header :: kit_steps_words(kit_steps_byte_slice(value, 0, reason)) ?? return None
     if header.len() != 5 || header[0] != "json" || header[3] != ":" -> return None
     if header[1] != "stdout" && header[1] != "stderr" -> return None
     if kit_steps_json_path(header[2]) == None -> return None
@@ -129,11 +129,11 @@ fn kit_steps_json_normalize(text: String, stream: String, rules: [KitJSONNormali
     loop span in spans {
         // An outer selected container already replaces any selected child.
         if span.start < position -> next
-        &pieces.push(text.slice(position, span.start))
+        &pieces.push(String.from_bytes(bytes.slice(position, span.start)) ?? panic("JSON span is not UTF-8"))
         kind :: rules[span.normalizer].kind
         &pieces.push("\"<<{kind}>>\"")
         position = span.end
     }
-    &pieces.push(text.slice(position, text.len()))
+    &pieces.push(String.from_bytes(bytes.slice(position, bytes.len())) ?? panic("JSON span is not UTF-8"))
     KitJSONResult{text: pieces.join(""), error: ""}
 }

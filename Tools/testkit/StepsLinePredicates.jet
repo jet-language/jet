@@ -8,7 +8,7 @@ fn kit_steps_rust_lines(text: String) -> [String] {
         end := start
         loop end < bytes.len() && bytes[end] != (U8{10}) -> end += 1
         stop :: if end < bytes.len() && end > start && bytes[end - 1] == (U8{13}) -> end - 1 else -> end
-        &result.push(text.slice(start, stop))
+        &result.push(String.from_bytes(bytes.slice(start, stop)) ?? panic("line span is not UTF-8"))
         start = end + 1
     }
     result

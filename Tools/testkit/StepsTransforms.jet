@@ -1,4 +1,5 @@
 use core.text as strtext
+use core.text.parse as textparse
 
 fn kit_steps_ascii_scalar(code: Int) -> String {
     String.from_bytes([U8{code}]) ?? panic("ASCII scalar")
@@ -22,15 +23,15 @@ fn kit_steps_transform_parts(text: String) -> [String]? {
         else if c == 41 -> depth -= 1
         else if c == 46 && depth == 0 {
             if index == start -> return None
-            &parts.push(text.slice(start, index))
+            &parts.push(kit_steps_byte_slice(text, start, index))
             start = index + 1
         }
         if depth < 0 -> return None
     }
     if depth != 0 || quote != 0 -> return None
     if text != "" {
-        if start == text.len() -> return None
-        &parts.push(text.slice(start, text.len()))
+        if start == text.count_bytes() -> return None
+        &parts.push(kit_steps_byte_slice(text, start, text.count_bytes()))
     }
     Val(parts)
 }
@@ -42,16 +43,16 @@ fn kit_steps_transform_args(text: String) -> [String]? {
 fn kit_steps_transform_valid(transform: String) -> Bool {
     parts :: kit_steps_transform_parts(transform) ?? return false
     loop part in parts {
-        open :: part.index("(") ?? -1
+        open :: kit_steps_byte_index(part, "(") ?? -1
         if open < 0 {
             if !kit_expect_named(["trim", "trim_start", "trim_end", "trim_lines", "strip_ansi", "strip_sgr", "strip_whitespace", "strip_ascii_whitespace", "until_blank", "first_words", "final_frame", "cursor_up_counts", "visible_cols", "normalize_journey_paths", "normalize_failure_journey_paths", "normalize_contract_source_arrow"], part) -> return false
             next
         }
         if !part.ends_with(")") -> return false
-        name :: part.slice(0, open)
-        body :: part.slice(open + 1, part.len() - 1)
+        name :: kit_steps_byte_slice(part, 0, open)
+        body :: kit_steps_byte_slice(part, open + 1, part.count_bytes() - 1)
         if name == "filter" && body.starts_with("where ") {
-            if kit_steps_expression(body.slice(6, body.len()), "") == None -> return false
+            if kit_steps_expression(kit_steps_byte_slice(body, 6, body.count_bytes()), "") == None -> return false
             next
         }
         args :: kit_steps_transform_args(body) ?? return false
@@ -125,7 +126,7 @@ fn kit_steps_terminal_transform(text: String, name: String) -> String? {
                 end := i + 2
                 loop end < bytes.len() && bytes[end] >= (U8{48}) && bytes[end] <= (U8{57}) -> end += 1
                 if end < bytes.len() && bytes[end] == (U8{65}) {
-                    &result.push("{Int.parse(text.slice(i + 2, end)) ?? return None}")
+                    &result.push("{Int.parse(String.from_bytes(bytes.slice(i + 2, end)) ?? return None) ?? return None}")
                     i = end
                 }
             }
@@ -138,15 +139,15 @@ fn kit_steps_terminal_transform(text: String, name: String) -> String? {
     parts :: normalized.split("{esc}[J").to_list()
     if parts.len() < 3 -> return None
     frame := parts[parts.len() - 2]
-    frame = frame.slice(0, frame.index("{esc}[?1049l") ?? frame.len())
+    frame = kit_steps_byte_slice(frame, 0, kit_steps_byte_index(frame, "{esc}[?1049l") ?? frame.count_bytes())
     last := -1
     at := 0
     loop {
-        found :: frame.slice(at, frame.len()).index("{esc}[") ?? break
+        found :: kit_steps_byte_index(kit_steps_byte_slice(frame, at, frame.count_bytes()), "{esc}[") ?? break
         last = at + found
         at = last + 2
     }
-    if last >= 0 -> frame = frame.slice(0, last)
+    if last >= 0 -> frame = kit_steps_byte_slice(frame, 0, last)
     Val(frame)
 }
 
@@ -161,7 +162,7 @@ fn kit_steps_transform_one(text: String, part: String) -> String? {
     if part == "normalize_journey_paths" {
         lines := [String]{}
         loop line in kit_steps_rust_lines(text) {
-            open :: line.index(" (")
+            open :: kit_steps_byte_index(line, " (")
             colon := Int?{None}
             loop (index, byte) in line.bytes() {
                 if byte == (U8{58}) -> colon = Val(index)
@@ -171,8 +172,8 @@ fn kit_steps_transform_one(text: String, part: String) -> String? {
                     if colon == {
                         .Val(end) -> {
                             if end < start + 2 -> return None
-                            if line.slice(start + 2, end).contains(".jet") {
-                                &lines.push("{line.slice(0, start + 2)}<source>:{line.slice(end + 1, line.len())}")
+                            if kit_steps_byte_slice(line, start + 2, end).contains(".jet") {
+                                &lines.push("{kit_steps_byte_slice(line, 0, start + 2)}<source>:{kit_steps_byte_slice(line, end + 1, line.count_bytes())}")
                                 next
                             }
                         }
@@ -212,13 +213,13 @@ fn kit_steps_transform_one(text: String, part: String) -> String? {
         }
         return Val(lines.join("\n"))
     }
-    open :: part.index("(") ?? return None
-    name :: part.slice(0, open)
-    body :: part.slice(open + 1, part.len() - 1)
+    open :: kit_steps_byte_index(part, "(") ?? return None
+    name :: kit_steps_byte_slice(part, 0, open)
+    body :: kit_steps_byte_slice(part, open + 1, part.count_bytes() - 1)
     if name == "filter" && body.starts_with("where ") {
         lines := [String]{}
         loop line in kit_steps_rust_lines(text) {
-            if kit_steps_expression(body.slice(6, body.len()), line) ?? return None -> &lines.push(line)
+            if kit_steps_expression(kit_steps_byte_slice(body, 6, body.count_bytes()), line) ?? return None -> &lines.push(line)
         }
         return Val(lines.join("\n"))
     }
@@ -250,38 +251,32 @@ fn kit_steps_transform_one(text: String, part: String) -> String? {
     if name == "append" -> return Val("{text}{args[0]}")
     if name == "replace" -> return Val(text.replace(args[0], args[1]))
     if name == "replace_first" {
-        at :: text.index(args[0]) ?? return Val(text)
-        return Val("{text.slice(0, at)}{args[1]}{text.slice(at + args[0].len(), text.len())}")
+        at :: kit_steps_byte_index(text, args[0]) ?? return Val(text)
+        return Val("{kit_steps_byte_slice(text, 0, at)}{args[1]}{kit_steps_byte_slice(text, at + args[0].count_bytes(), text.count_bytes())}")
     }
     if name == "strip_prefix" {
         if !text.starts_with(args[0]) -> return None
-        return Val(text.slice(args[0].len(), text.len()))
+        return Val(kit_steps_byte_slice(text, args[0].count_bytes(), text.count_bytes()))
     }
     if name == "strip_prefix_lines" {
         lines := [String]{}
         loop line in kit_steps_rust_lines(text) {
-            if line.starts_with(args[0]) -> &lines.push(line.slice(args[0].len(), line.len()))
+            if line.starts_with(args[0]) -> &lines.push(kit_steps_byte_slice(line, args[0].count_bytes(), line.count_bytes()))
         }
         return Val(lines.join("\n"))
     }
     if name == "after_first" || name == "from_or_all" || name == "cut" {
-        at :: text.index(args[0]) ?? return if name == "after_first" -> None else -> Val(text)
-        if name == "after_first" -> return Val(text.slice(at + args[0].len(), text.len()))
-        if name == "from_or_all" -> return Val(text.slice(at, text.len()))
-        result := text.slice(0, at)
-        loop result.ends_with("\n\n") -> result = result.slice(0, result.len() - 1)
+        at :: kit_steps_byte_index(text, args[0]) ?? return if name == "after_first" -> None else -> Val(text)
+        if name == "after_first" -> return Val(kit_steps_byte_slice(text, at + args[0].count_bytes(), text.count_bytes()))
+        if name == "from_or_all" -> return Val(kit_steps_byte_slice(text, at, text.count_bytes()))
+        result := kit_steps_byte_slice(text, 0, at)
+        loop result.ends_with("\n\n") -> result = kit_steps_byte_slice(result, 0, result.count_bytes() - 1)
         if !result.ends_with("\n") -> result = "{result}\n"
         return Val(result)
     }
     if name == "after_last" {
-        at := -1
-        cursor := 0
-        loop cursor <= text.len() {
-            found :: text.slice(cursor, text.len()).index(args[0]) ?? break
-            at = cursor + found
-            cursor = at + if args[0] == "" -> 1 else -> args[0].len()
-        }
-        return Val(if at < 0 -> text else -> text.slice(at + args[0].len(), text.len()))
+        at :: textparse.rfind(text, args[0])
+        return Val(if at < 0 -> text else -> kit_steps_byte_slice(text, at + args[0].count_bytes(), text.count_bytes()))
     }
     if name == "slice" {
         start :: Int.parse(args[0]) ?? return None

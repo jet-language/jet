@@ -34,7 +34,7 @@ fn kit_steps_duration_ns(text: String) -> Int? {
         suffix = "m"
     }
     if scale == 0 -> return None
-    number :: text.slice(0, text.len() - suffix.len())
+    number :: kit_steps_byte_slice(text, 0, text.count_bytes() - suffix.count_bytes())
     parts :: number.split(".").to_list()
     if parts.len() > 2 -> return None
     whole :: Int.parse(parts[0]) ?? return None
@@ -174,7 +174,7 @@ fn kit_steps_extension(name: String) -> String? {
         if byte == (U8{46}) -> dot = i
     }
     if dot <= 0 || name == ".." -> return None
-    Val(name.slice(dot + 1, name.len()))
+    Val(kit_steps_byte_slice(name, dot + 1, name.count_bytes()))
 }
 
 fn kit_steps_entry_matches(path: String, name: String, is_dir: Bool, is_file: Bool, depth: Int, words: [String]) -> Bool {

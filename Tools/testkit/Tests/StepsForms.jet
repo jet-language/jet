@@ -130,3 +130,15 @@ use core.encoding.hex as hex
     assert_eq(cases_test_advanced(root, "bad-range", malformed).verdict.status, "FAIL")
     files.remove_all(root) ?? panic("remove journey path scratch")
 }
+
+#Test("Unicode stream assertions captures and transforms retain Rust-compatible byte offsets") {
+    root :: cases_test_root("forms-unicode-spans")
+    directory :: files.join(root, "tests/cases/group")
+    cr :: kit_steps_ascii_scalar(13)
+    kit_exec_write(files.join(directory, "input"), "é·→—😀{cr}\nβ·tail\n")
+    source :: "step: cat\nstdin: input\nstdout: = \"é·→—😀\\r\\nβ·tail\\n\"\nstdout: count \"·\" = 2 # original predicate\nstdout: count-lines ^= \"é\" = 1 # original predicate\nstdout.line(0).after_first(\"·\").strip_prefix(\"→\").after_last(\"—\"): = \"😀\" # original predicate\nstdout.line(0).slice(2,4): = \"·\" # original byte slice\nstdout: each-line where ~ \"·\" && chars >= 2 # Unicode scalar count\ncapture: tail stdout after \"β·\" # original predicate\ncap:tail: = \"tail\"\nstdout.replace_first(\"·\",\"—\"): = \"é—→—😀\\r\\nβ·tail\\n\" # original predicate\n"
+    assert_eq(cases_test_advanced(root, "unicode", source).verdict.status, "PASS")
+    assert_eq(cases_test_advanced(root, "wrong", "{source}cap:tail: = \"wrong\"\n").verdict.status, "FAIL")
+    assert_eq(cases_test_advanced(root, "bad-boundary", "{source}stdout.line(0).slice(1,2): = \"é\" # not a UTF-8 boundary\n").verdict.status, "FAIL")
+    files.remove_all(root) ?? panic("remove Unicode span scratch")
+}

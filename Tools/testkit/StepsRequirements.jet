@@ -17,7 +17,7 @@ fn kit_steps_host_arch() -> String {
 
 fn kit_steps_host_matches(actual: String, choices: String) -> Bool {
     negative :: choices.starts_with("!")
-    names :: if negative -> choices.slice(1, choices.len()) else -> choices
+    names :: if negative -> kit_steps_byte_slice(choices, 1, choices.count_bytes()) else -> choices
     matched := false
     loop name in names.split("|") {
         if name == actual -> matched = true
@@ -54,10 +54,10 @@ fn kit_steps_probe(text: String, env: KitEnv, work: String, scratch: String) -> 
     if boundary == tokens.len() -> return true
     if tokens[boundary].text == "json" {
         if tokens.len() < boundary + 4 || tokens[boundary + 2].text != "=" -> return false
-        literal :: ~text.slice(tokens[boundary + 3].start, text.len()).trim()
+        literal :: ~kit_steps_byte_slice(text, tokens[boundary + 3].start, text.count_bytes()).trim()
         return kit_steps_json_test(result.stdout, "doc", tokens[boundary + 1].text, "=", literal) == None
     }
-    assertion :: kit_steps_stream_assertion("stdout", text.slice(tokens[boundary].end, text.len())) ?? return false
+    assertion :: kit_steps_stream_assertion("stdout", kit_steps_byte_slice(text, tokens[boundary].end, text.count_bytes())) ?? return false
     state :: KitStepState{last: result, built: "", built_once: false}
     plan :: kit_steps_parse("")
     bless :: KitBless{ids: [], all: false, reason: "", allow_shrink: [], first_tier: true}
@@ -71,25 +71,25 @@ fn kit_steps_probes_all(text: String, env: KitEnv, work: String, scratch: String
     tokens :: kit_steps_tokens(text) ?? return false
     start := 0
     loop token in tokens {
-        if token.text == "+" && text.slice(token.start, token.end) == "+" {
-            if !kit_steps_probe(~text.slice(start, token.start).trim(), env, work, scratch) -> return false
+        if token.text == "+" && kit_steps_byte_slice(text, token.start, token.end) == "+" {
+            if !kit_steps_probe(~kit_steps_byte_slice(text, start, token.start).trim(), env, work, scratch) -> return false
             start = token.end
         }
     }
-    kit_steps_probe(~text.slice(start, text.len()).trim(), env, work, scratch)
+    kit_steps_probe(~kit_steps_byte_slice(text, start, text.count_bytes()).trim(), env, work, scratch)
 }
 
 fn kit_steps_capability_any(text: String, probes: Bool, env: KitEnv, work: String, scratch: String) -> Bool {
     tokens :: kit_steps_tokens(text) ?? return false
     start := 0
     loop token in tokens {
-        if token.text == "|" && text.slice(token.start, token.end) == "|" {
-            alternative :: ~text.slice(start, token.start).trim()
+        if token.text == "|" && kit_steps_byte_slice(text, token.start, token.end) == "|" {
+            alternative :: ~kit_steps_byte_slice(text, start, token.start).trim()
             passed :: if probes -> kit_steps_probes_all(alternative, env, work, scratch) else -> kit_steps_tools_all(alternative)
             if passed -> return true
             start = token.end
         }
     }
-    alternative :: ~text.slice(start, text.len()).trim()
+    alternative :: ~kit_steps_byte_slice(text, start, text.count_bytes()).trim()
     if probes -> kit_steps_probes_all(alternative, env, work, scratch) else -> kit_steps_tools_all(alternative)
 }

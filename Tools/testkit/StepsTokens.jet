@@ -57,12 +57,12 @@ fn kit_steps_runtime_expand(text: String, context: KitStepCtx, state: KitStepSta
     rest := expanded
     result := ""
     loop {
-        start :: rest.index("{{tool:") ?? break
+        start :: kit_steps_byte_index(rest, "{{tool:") ?? break
         after :: start + 6
-        end :: rest.slice(after, rest.len()).index("}}") ?? return None
-        tool :: kit_steps_tool(rest.slice(after, after + end)) ?? return None
-        result = "{result}{rest.slice(0, start)}{tool}"
-        rest = rest.slice(after + end + 1, rest.len())
+        end :: kit_steps_byte_index(kit_steps_byte_slice(rest, after, rest.count_bytes()), "}}") ?? return None
+        tool :: kit_steps_tool(kit_steps_byte_slice(rest, after, after + end)) ?? return None
+        result = "{result}{kit_steps_byte_slice(rest, 0, start)}{tool}"
+        rest = kit_steps_byte_slice(rest, after + end + 1, rest.count_bytes())
     }
     Val("{result}{rest}")
 }
@@ -135,13 +135,13 @@ fn kit_steps_free_port_names(text: String) -> [String]? {
     names := [String]{}
     rest := text
     loop {
-        start :: rest.index("{{free-port:") ?? break
+        start :: kit_steps_byte_index(rest, "{{free-port:") ?? break
         after :: start + 11
-        end :: rest.slice(after, rest.len()).index("}}") ?? return None
-        name :: rest.slice(after, after + end)
+        end :: kit_steps_byte_index(kit_steps_byte_slice(rest, after, rest.count_bytes()), "}}") ?? return None
+        name :: kit_steps_byte_slice(rest, after, after + end)
         if name == "" || name.contains(" ") || name.contains("{{") || name.contains(":") -> return None
         &names.push(name)
-        rest = rest.slice(after + end + 1, rest.len())
+        rest = kit_steps_byte_slice(rest, after + end + 1, rest.count_bytes())
     }
     Val(names)
 }

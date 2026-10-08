@@ -30,16 +30,16 @@ fn kit_steps_env_name(name: String) -> Bool {
 fn kit_steps_argv_env_valid(argument: String) -> Bool {
     rest := argument
     loop {
-        start :: rest.index("{{env:") ?? return true
+        start :: kit_steps_byte_index(rest, "{{env:") ?? return true
         end :: kit_steps_env_token_end(rest, start) ?? return false
-        body :: rest.slice(start + 5, end - 1)
+        body :: kit_steps_byte_slice(rest, start + 5, end - 1)
         if body == "" || body.starts_with("|") -> return false
         choices :: body.split("|").to_list()
         if !kit_steps_env_name(choices[0]) -> return false
         loop choice in choices.slice(1, choices.len()) {
-            if choice.starts_with("env:") && !kit_steps_env_name(choice.slice(4, choice.len())) -> return false
+            if choice.starts_with("env:") && !kit_steps_env_name(kit_steps_byte_slice(choice, 4, choice.count_bytes())) -> return false
         }
-        rest = rest.slice(end, rest.len())
+        rest = kit_steps_byte_slice(rest, end, rest.count_bytes())
     }
 }
 
@@ -55,7 +55,7 @@ fn kit_steps_env_fallback(body: String, env: KitEnv, scratch: String, overlay: [
     choices :: body.split("|").to_list()
     loop (index, choice) in choices {
         if index > 0 && !choice.starts_with("env:") -> return ~choice
-        name :: if index == 0 -> choice else -> choice.slice(4, choice.len())
+        name :: if index == 0 -> choice else -> kit_steps_byte_slice(choice, 4, choice.count_bytes())
         value :: kit_steps_env_value(name, env, scratch, overlay) ?? ""
         if value != "" -> return value
     }
@@ -66,12 +66,12 @@ fn kit_steps_argv_env(argument: String, env: KitEnv, scratch: String, overlay: [
     rest := argument
     result := ""
     loop {
-        start :: rest.index("{{env:") ?? break
+        start :: kit_steps_byte_index(rest, "{{env:") ?? break
         end :: kit_steps_env_token_end(rest, start) ?? panic("validated environment token")
-        body :: rest.slice(start + 5, end - 1)
+        body :: kit_steps_byte_slice(rest, start + 5, end - 1)
         expanded :: kit_steps_env_fallback(body, env, scratch, overlay)
-        result = "{result}{rest.slice(0, start)}{expanded}"
-        rest = rest.slice(end, rest.len())
+        result = "{result}{kit_steps_byte_slice(rest, 0, start)}{expanded}"
+        rest = kit_steps_byte_slice(rest, end, rest.count_bytes())
     }
     "{result}{rest}"
 }
@@ -84,17 +84,17 @@ fn kit_steps_whitespace_words(text: String) -> [String] {
     loop index < bytes.len() {
         scalar :: kit_steps_scalar(bytes, index)
         if kit_steps_unicode_space(scalar.value) {
-            if index > start -> &words.push(text.slice(start, index))
+            if index > start -> &words.push(String.from_bytes(bytes.slice(start, index)) ?? panic("word span is not UTF-8"))
             start = scalar.next
         }
         index = scalar.next
     }
-    if index > start -> &words.push(text.slice(start, index))
+    if index > start -> &words.push(String.from_bytes(bytes.slice(start, index)) ?? panic("word span is not UTF-8"))
     words
 }
 
 fn kit_steps_env_words(argument: String, env: KitEnv, scratch: String, overlay: [KitEnvVar]) -> [String]? {
     if !argument.starts_with("{{env-words:") || !argument.ends_with("}}") -> return None
-    value :: kit_steps_env_fallback(argument.slice(11, argument.len() - 1), env, scratch, overlay)
+    value :: kit_steps_env_fallback(kit_steps_byte_slice(argument, 11, argument.count_bytes() - 1), env, scratch, overlay)
     Val(kit_steps_whitespace_words(value))
 }

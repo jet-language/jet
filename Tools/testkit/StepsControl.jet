@@ -15,7 +15,7 @@ fn kit_steps_loop_words(text: String) -> [String]? {
         label = tokens[binding - 1].text
     }
     if end <= 2 -> return None
-    selector :: ~text.slice(tokens[2].start, tokens[end - 1].end).trim()
+    selector :: ~kit_steps_byte_slice(text, tokens[2].start, tokens[end - 1].end).trim()
     if label == "" -> return Val(["for", "line", selector, "as", tokens[binding + 1].text])
     Val(["for", "line", selector, "of", label, "as", tokens[binding + 1].text])
 }
@@ -66,7 +66,7 @@ fn kit_steps_loop_values(step: KitStep, context: KitStepCtx, state: KitStepState
     selector :: words[2]
     source := state.last.stdout
     subject :: kit_steps_subject(selector)
-    if subject.starts_with("cap:") -> source = kit_steps_captured_subject(subject.slice(4, subject.len()), state.captures) ?? return Err("loop capture unavailable")
+    if subject.starts_with("cap:") -> source = kit_steps_captured_subject(kit_steps_byte_slice(subject, 4, subject.count_bytes()), state.captures) ?? return Err("loop capture unavailable")
     else if words.len() == 7 -> source = kit_steps_history_stream(words[4], subject, state.history, true) ?? return Err("loop step label unavailable")
     else -> source = kit_steps_select_stream(state.last.stdout, state.last.stderr, subject)
     transformed :: kit_steps_transform(source, kit_steps_subject_transform(selector)) ?? return Err("loop subject transform failed")

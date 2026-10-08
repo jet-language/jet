@@ -3,7 +3,7 @@ use core.encoding.[DataTree]
 use core.encoding.json as json
 
 fn kit_steps_relation_label(reference: String) -> String {
-    if reference.ends_with(".stdout") || reference.ends_with(".stderr") -> return reference.slice(0, reference.len() - 7)
+    if reference.ends_with(".stdout") || reference.ends_with(".stderr") -> return kit_steps_byte_slice(reference, 0, reference.count_bytes() - 7)
     ~reference
 }
 
@@ -18,12 +18,12 @@ fn kit_steps_known_relation(plan: KitPlan, reference: String, before: Int) -> Bo
 }
 
 fn kit_steps_subject(selector: String) -> String {
-    selector.slice(0, selector.index(".") ?? selector.len())
+    kit_steps_byte_slice(selector, 0, kit_steps_byte_index(selector, ".") ?? selector.count_bytes())
 }
 
 fn kit_steps_subject_transform(selector: String) -> String {
-    dot :: selector.index(".") ?? return ""
-    selector.slice(dot + 1, selector.len())
+    dot :: kit_steps_byte_index(selector, ".") ?? return ""
+    kit_steps_byte_slice(selector, dot + 1, selector.count_bytes())
 }
 
 fn kit_steps_subject_valid(selector: String) -> Bool {
@@ -45,7 +45,7 @@ fn kit_steps_stream_assertion(key: String, original: String) -> KitAssertion? {
     if offset == 1 && !kit_steps_relative_path(path) -> return None
     mode := tokens[offset].text
     if stream == "file" && mode == "first" {
-        inner :: "{original.slice(0, tokens[offset].start)}{original.slice(tokens[offset].end, original.len())}"
+        inner :: "{kit_steps_byte_slice(original, 0, tokens[offset].start)}{kit_steps_byte_slice(original, tokens[offset].end, original.count_bytes())}"
         assertion := kit_steps_stream_assertion(key, inner) ?? return None
         if assertion.file_first -> return None
         assertion.file_first = true
@@ -68,7 +68,7 @@ fn kit_steps_stream_assertion(key: String, original: String) -> KitAssertion? {
     if stream == "file" && mode == "names" {
         if arity < 3 || (tokens[offset + 1].text != "=" && tokens[offset + 1].text != "==") -> return None
         extra = tokens[offset + 1].text
-        data = if extra == "==" -> tokens[offset + 2].text else -> ~value.slice(tokens[offset + 2].start, value.len()).trim()
+        data = if extra == "==" -> tokens[offset + 2].text else -> ~kit_steps_byte_slice(value, tokens[offset + 2].start, value.count_bytes()).trim()
         if extra == "==" {
             if arity != 3 || !kit_steps_relative_path(data) -> return None
         } else if kit_steps_string_array(data) == None -> return None
@@ -93,7 +93,7 @@ fn kit_steps_stream_assertion(key: String, original: String) -> KitAssertion? {
         if arity < 2 || !kit_steps_reason(original) -> return None
         if arity == 2 -> data = tokens[offset + 1].text
         else {
-            raw :: ~value.slice(tokens[offset + 1].start, value.len()).trim()
+            raw :: ~kit_steps_byte_slice(value, tokens[offset + 1].start, value.count_bytes()).trim()
             if raw.starts_with("\"") || raw.starts_with("'") -> return None
             data = raw
         }
@@ -102,7 +102,7 @@ fn kit_steps_stream_assertion(key: String, original: String) -> KitAssertion? {
         loop token in tokens.slice(offset + 1, tokens.len()) -> &alternatives.push(token.text)
     } else if mode == "one-of" {
         if arity < 3 || !kit_steps_reason(original) -> return None
-        data = ~value.slice(tokens[offset + 1].start, value.len()).trim()
+        data = ~kit_steps_byte_slice(value, tokens[offset + 1].start, value.count_bytes()).trim()
     } else if mode == "line" {
         if (arity != 3 && arity != 5) || tokens[offset + 1].text != "^=" || !kit_steps_reason(original) -> return None
         data = tokens[offset + 2].text
@@ -140,7 +140,7 @@ fn kit_steps_stream_assertion(key: String, original: String) -> KitAssertion? {
         if explicit_path && mode != "=" && mode != "!=" -> return None
         if !literal && mode == "=" && data.ends_with(".trim") {
             rhs_transform = "trim"
-            data = data.slice(0, data.len() - 5)
+            data = kit_steps_byte_slice(data, 0, data.count_bytes() - 5)
         }
         if kit_expect_named(["~", "!~", "^=", "~i", "!~i"], mode) && !kit_steps_reason(original) -> return None
         if (mode == "~i" || mode == "!~i") && kit_steps_ascii_lower(data) != data -> return None
@@ -165,10 +165,10 @@ fn kit_steps_occurrences(text: String, needle: String) -> Int {
     if needle == "" -> return 0
     count := 0
     cursor := 0
-    loop cursor <= text.len() {
-        found :: text.slice(cursor, text.len()).index(needle) ?? break
+    loop cursor <= text.count_bytes() {
+        found :: kit_steps_byte_index(kit_steps_byte_slice(text, cursor, text.count_bytes()), needle) ?? break
         count += 1
-        cursor += found + needle.len()
+        cursor += found + needle.count_bytes()
     }
     count
 }
@@ -185,8 +185,8 @@ fn kit_steps_line_value(text: String, prefix: String, substring: String, tail: B
         end := start
         loop end < bytes.len() && bytes[end] != (U8{10}) -> end += 1
         content_end :: if end < bytes.len() && end > start && bytes[end - 1] == (U8{13}) -> end - 1 else -> end
-        line :: text.slice(start, content_end)
-        if line.starts_with(prefix) && line.contains(substring) -> return Val(if tail -> line.slice(prefix.len(), line.len()) else -> ~line)
+        line :: String.from_bytes(bytes.slice(start, content_end)) ?? panic("line span is not UTF-8")
+        if line.starts_with(prefix) && line.contains(substring) -> return Val(if tail -> kit_steps_byte_slice(line, prefix.count_bytes(), line.count_bytes()) else -> ~line)
         start = end + 1
     }
     None
@@ -195,14 +195,14 @@ fn kit_steps_line_value(text: String, prefix: String, substring: String, tail: B
 
 fn kit_steps_count_target_valid(target: String) -> Bool {
     if kit_steps_numeric(kit_steps_json_preview(target)) != None -> return true
-    star :: target.index("*") ?? return false
-    (Int.parse(target.slice(0, star)) ?? -1) >= 0 && target.slice(star + 1, target.len()) != ""
+    star :: kit_steps_byte_index(target, "*") ?? return false
+    (Int.parse(kit_steps_byte_slice(target, 0, star)) ?? -1) >= 0 && kit_steps_byte_slice(target, star + 1, target.count_bytes()) != ""
 }
 
 fn kit_steps_count_label(target: String) -> String {
-    star :: target.index("*") ?? return ""
+    star :: kit_steps_byte_index(target, "*") ?? return ""
     if kit_steps_numeric(kit_steps_json_preview(target)) != None -> return ""
-    target.slice(star + 1, target.len())
+    kit_steps_byte_slice(target, star + 1, target.count_bytes())
 }
 
 fn kit_steps_lines(text: String) -> Int {
@@ -219,7 +219,7 @@ fn kit_steps_select_stream(stdout: String, stderr: String, subject: String) -> S
     ~stdout
 }
 
-fn kit_steps_byte_index(bytes: [U8], needle: [U8], start: Int, end: Int, insensitive: Bool) -> Int? {
+fn kit_steps_bytes_search(bytes: [U8], needle: [U8], start: Int, end: Int, insensitive: Bool) -> Int? {
     cursor := start
     loop cursor + needle.len() <= end {
         matches := true
@@ -245,14 +245,14 @@ fn kit_steps_byte_index(bytes: [U8], needle: [U8], start: Int, end: Int, insensi
 fn kit_steps_file_predicate(bytes: [U8], mode: String, value: String, extra: String, alternatives: [String]) -> Bool {
     if mode == "empty" || mode == "nonempty" -> return (bytes.len() == 0) == (mode == "empty")
     needle :: value.bytes()
-    if mode == "^=" -> return needle.len() <= bytes.len() && (kit_steps_byte_index(bytes, needle, 0, needle.len(), false) ?? -1) == 0
+    if mode == "^=" -> return needle.len() <= bytes.len() && (kit_steps_bytes_search(bytes, needle, 0, needle.len(), false) ?? -1) == 0
     if mode == "~" || mode == "~i" || mode == "!~" || mode == "!~i" {
-        found :: kit_steps_byte_index(bytes, needle, 0, bytes.len(), mode == "~i" || mode == "!~i")
+        found :: kit_steps_bytes_search(bytes, needle, 0, bytes.len(), mode == "~i" || mode == "!~i")
         return (found != None) == (mode == "~" || mode == "~i")
     }
     if mode == "~any" {
         loop alternative in alternatives {
-            if kit_steps_byte_index(bytes, alternative.bytes(), 0, bytes.len(), false) != None -> return true
+            if kit_steps_bytes_search(bytes, alternative.bytes(), 0, bytes.len(), false) != None -> return true
         }
         return false
     }
@@ -261,15 +261,15 @@ fn kit_steps_file_predicate(bytes: [U8], mode: String, value: String, extra: Str
         count := 0
         cursor := 0
         loop cursor <= bytes.len() {
-            at :: kit_steps_byte_index(bytes, needle, cursor, bytes.len(), false) ?? break
+            at :: kit_steps_bytes_search(bytes, needle, cursor, bytes.len(), false) ?? break
             count += 1
             cursor = at + needle.len()
         }
         return count == (Int.parse(extra) ?? -1)
     }
     if mode == "before" {
-        left :: kit_steps_byte_index(bytes, needle, 0, bytes.len(), false) ?? return false
-        right :: kit_steps_byte_index(bytes, extra.bytes(), 0, bytes.len(), false) ?? return false
+        left :: kit_steps_bytes_search(bytes, needle, 0, bytes.len(), false) ?? return false
+        right :: kit_steps_bytes_search(bytes, extra.bytes(), 0, bytes.len(), false) ?? return false
         return left < right
     }
     tail :: extra.bytes()
@@ -278,7 +278,7 @@ fn kit_steps_file_predicate(bytes: [U8], mode: String, value: String, extra: Str
         end := start
         loop end < bytes.len() && bytes[end] != (U8{10}) -> end += 1
         content_end :: if end < bytes.len() && end > start && bytes[end - 1] == (U8{13}) -> end - 1 else -> end
-        if (kit_steps_byte_index(bytes, needle, start, content_end, false) ?? -1) == start && kit_steps_byte_index(bytes, tail, start, content_end, false) != None -> return true
+        if (kit_steps_bytes_search(bytes, needle, start, content_end, false) ?? -1) == start && kit_steps_bytes_search(bytes, tail, start, content_end, false) != None -> return true
         start = end + 1
     }
     false

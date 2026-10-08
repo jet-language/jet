@@ -3,17 +3,17 @@ use core.encoding.[DataTree]
 use core.encoding.json as json
 
 fn kit_steps_numeric(text: String) -> Int? {
-    plus :: text.index("+") ?? -1
+    plus :: kit_steps_byte_index(text, "+") ?? -1
     if plus > 0 {
-        left :: kit_steps_numeric(text.slice(0, plus)) ?? return None
-        right :: Int.parse(text.slice(plus + 1, text.len())) ?? return None
+        left :: kit_steps_numeric(kit_steps_byte_slice(text, 0, plus)) ?? return None
+        right :: Int.parse(kit_steps_byte_slice(text, plus + 1, text.count_bytes())) ?? return None
         if right < 0 || left > 9223372036854775807 - right -> return None
         return Val(left + right)
     }
-    star :: text.index("*") ?? -1
+    star :: kit_steps_byte_index(text, "*") ?? -1
     if star > 0 {
-        left :: Int.parse(text.slice(0, star)) ?? return None
-        right :: kit_steps_numeric(text.slice(star + 1, text.len())) ?? return None
+        left :: Int.parse(kit_steps_byte_slice(text, 0, star)) ?? return None
+        right :: kit_steps_numeric(kit_steps_byte_slice(text, star + 1, text.count_bytes())) ?? return None
         if left < 0 || right < 0 || (right > 0 && left > 9223372036854775807 /% right) -> return None
         return Val(left * right)
     }
@@ -43,7 +43,7 @@ fn kit_steps_batch_assertion(stream: String, path: String, transform: String, or
     }
     if mode == "any-line" {
         if words.len() < 3 || words[1].text != "words-prefix" -> return None
-        assertion.value = ~body.slice(words[2].start, body.len()).trim()
+        assertion.value = ~kit_steps_byte_slice(body, words[2].start, body.count_bytes()).trim()
         if kit_steps_string_array(assertion.value) == None -> return None
         return Val(assertion)
     }
@@ -55,7 +55,7 @@ fn kit_steps_batch_assertion(stream: String, path: String, transform: String, or
         if words.len() < 3 -> return None
         assertion.extra = words[1].text
         if assertion.extra == "where" {
-            assertion.value = body.slice(words[2].start, body.len())
+            assertion.value = kit_steps_byte_slice(body, words[2].start, body.count_bytes())
             if kit_steps_expression(assertion.value, "") == None -> return None
         } else {
             if words.len() != 3 || !kit_expect_named(["~", "^=", "!~"], assertion.extra) -> return None
@@ -96,10 +96,10 @@ fn kit_steps_batch_assertion(stream: String, path: String, transform: String, or
     }
     if words.len() < 3 -> return None
     assertion.extra = words[1].text
-    assertion.value = ~body.slice(words[2].start, body.len()).trim()
+    assertion.value = ~kit_steps_byte_slice(body, words[2].start, body.count_bytes()).trim()
     if mode == "machine-output" {
         if assertion.extra != "=" || !assertion.value.starts_with("[") || !assertion.value.ends_with("]") -> return None
-        loop raw in assertion.value.slice(1, assertion.value.len() - 1).split(",") {
+        loop raw in kit_steps_byte_slice(assertion.value, 1, assertion.value.count_bytes() - 1).split(",") {
             name :: ~raw.trim()
             if !kit_expect_named(["status", "report", "browser-relay"], name) -> return None
             &assertion.alternatives.push(name)
@@ -245,8 +245,8 @@ fn kit_steps_batch_test(actual: String, assertion: KitAssertion, value: String, 
         seen := [String]{}
         matches = true
         loop line in kit_steps_rust_lines(actual) {
-            at :: line.index(value) ?? return Val(kit_expect_verdict("FAIL", "line lacks unique-after marker"))
-            suffix :: line.slice(at + value.len(), line.len())
+            at :: kit_steps_byte_index(line, value) ?? return Val(kit_expect_verdict("FAIL", "line lacks unique-after marker"))
+            suffix :: kit_steps_byte_slice(line, at + value.count_bytes(), line.count_bytes())
             if kit_expect_named(seen, suffix) -> matches = false
             &seen.push(suffix)
         }
@@ -263,7 +263,7 @@ fn kit_steps_batch_test(actual: String, assertion: KitAssertion, value: String, 
         previous := -1
         matches = true
         loop line in kit_steps_rust_lines(value) {
-            at :: actual.index(line) ?? return Val(kit_expect_verdict("FAIL", "ordered line missing"))
+            at :: kit_steps_byte_index(actual, line) ?? return Val(kit_expect_verdict("FAIL", "ordered line missing"))
             if at <= previous -> matches = false
             previous = at
         }

@@ -7,13 +7,13 @@ fn kit_steps_predicates(text: String) -> [String]? {
     result := [String]{}
     start := 0
     loop token in tokens {
-        if token.text != "&&" || body.slice(token.start, token.end) != "&&" -> next
-        part :: ~body.slice(start, token.start).trim()
+        if token.text != "&&" || kit_steps_byte_slice(body, token.start, token.end) != "&&" -> next
+        part :: ~kit_steps_byte_slice(body, start, token.start).trim()
         if part == "" -> return None
         &result.push(part)
         start = token.end
     }
-    last :: ~body.slice(start, body.len()).trim()
+    last :: ~kit_steps_byte_slice(body, start, body.count_bytes()).trim()
     if last == "" -> return None
     &result.push(last)
     Val(result)
@@ -26,7 +26,7 @@ fn kit_steps_poll_step(label: String, original: String) -> KitStep? {
     until := -1
     boundary := tokens.len()
     loop (index, token) in tokens {
-        raw :: body.slice(token.start, token.end)
+        raw :: kit_steps_byte_slice(body, token.start, token.end)
         if raw == "until" && until < 0 -> until = index
         if until >= 0 && raw == "timeout" {
             boundary = index
@@ -37,13 +37,13 @@ fn kit_steps_poll_step(label: String, original: String) -> KitStep? {
     if tokens[boundary + 2].text != "every" -> return None
     timeout :: kit_steps_duration_ns(tokens[boundary + 1].text) ?? return None
     interval :: kit_steps_duration_ns(tokens[boundary + 3].text) ?? return None
-    predicates :: kit_steps_predicates(body.slice(tokens[until + 1].start, tokens[boundary - 1].end)) ?? return None
+    predicates :: kit_steps_predicates(kit_steps_byte_slice(body, tokens[until + 1].start, tokens[boundary - 1].end)) ?? return None
     assertions := [KitAssertion]{}
-    reason :: original.slice(kit_steps_comment(original), original.len())
+    reason :: kit_steps_byte_slice(original, kit_steps_comment(original), original.count_bytes())
     loop predicate in predicates {
         colon :: kit_steps_condition_colon(predicate) ?? return None
-        subject :: ~predicate.slice(0, colon).trim()
-        form :: ~predicate.slice(colon + 1, predicate.len()).trim()
+        subject :: ~kit_steps_byte_slice(predicate, 0, colon).trim()
+        form :: ~kit_steps_byte_slice(predicate, colon + 1, predicate.count_bytes()).trim()
         assertion :: if subject == "json" -> kit_steps_json_assertion("{form} {reason}") ?? return None else -> kit_steps_stream_assertion(subject, "{form} {reason}") ?? return None
         &assertions.push(assertion)
     }

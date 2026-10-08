@@ -167,6 +167,14 @@ Bounded `await: file|dir|entry` polls filesystem readiness. `poll NAME:`
 reruns its command until all `until` conditions match on the same attempt,
 or fails at its deadline. Conditions are not accumulated across attempts.
 
+Kit grammar spans and Rust-compatible stream operations use UTF-8 **byte**
+offsets. In kit code, use `kit_steps_byte_index`, `kit_steps_byte_slice`, and
+`String.count_bytes()` together. Jet's `String.index` (`jet_unicode_index_of`),
+`String.slice`, and `String.len` use Unicode **scalar** positions; mixing those
+with byte-scanning lexer offsets corrupts non-ASCII diagnostics and paths.
+The `chars` predicate deliberately counts scalars, while `.slice(a,b)` and
+`len` assertions retain the original Rust byte semantics.
+
 ## Find an example
 
 Start with the smallest source in [`features/basics/`](features/basics/), then

@@ -5,7 +5,7 @@ use core.encoding.toml as toml
 fn kit_steps_json_projection_valid(part: String) -> Bool {
     if !part.starts_with("{{") || !part.ends_with("}}") -> return false
     names := [String]{}
-    loop raw in part.slice(1, part.len() - 1).split(",") {
+    loop raw in kit_steps_byte_slice(part, 1, part.count_bytes() - 1).split(",") {
         name :: ~raw.trim()
         if name == "" || name.contains(".") || name.contains("[") || name.contains(" ") || kit_expect_named(names, name) -> return false
         &names.push(name)
@@ -34,7 +34,7 @@ fn kit_steps_json_filter(part: String) -> KitJSONFilter? {
         if code == 91 -> depth += 1
         if code == 93 -> depth -= 1
         if depth != 0 -> next
-        rest :: part.slice(index, part.len())
+        rest :: kit_steps_byte_slice(part, index, part.count_bytes())
         operator := ""
         width := 0
         loop candidate in ["!~=", "~=", "!=", ">=", "<=", "^=", "$=", "!~", "~", ">", "<", "="] {
@@ -48,10 +48,10 @@ fn kit_steps_json_filter(part: String) -> KitJSONFilter? {
             width = 4
         }
         if operator == "" -> next
-        key :: ~part.slice(1, index).trim()
+        key :: ~kit_steps_byte_slice(part, 1, index).trim()
         if kit_steps_json_path("$.{key}") == None -> return None
-        literal :: ~rest.slice(width, rest.len()).trim()
-        if literal.starts_with("@.") -> return Val(KitJSONFilter{key: key, op: operator, expected: DataTree.Null, reference: literal.slice(1, literal.len())})
+        literal :: ~kit_steps_byte_slice(rest, width, rest.count_bytes()).trim()
+        if literal.starts_with("@.") -> return Val(KitJSONFilter{key: key, op: operator, expected: DataTree.Null, reference: kit_steps_byte_slice(literal, 1, literal.count_bytes())})
         expected :: json.parse(literal) ?? return None
         if operator == "in" && kit_steps_json_type(expected) != "array" -> return None
         return Val(KitJSONFilter{key: key, op: operator, expected: expected})
@@ -80,7 +80,7 @@ fn kit_steps_json_select(value: DataTree, parts: [String], depth: Int) -> [DataT
     if depth == parts.len() -> return Val([value])
     part :: parts[depth]
     if part.starts_with(".") || part.starts_with("\"") {
-        key := if part.starts_with(".") -> part.slice(1, part.len()) else -> ""
+        key := if part.starts_with(".") -> kit_steps_byte_slice(part, 1, part.count_bytes()) else -> ""
         if part.starts_with("\"") {
             decoded :: json.parse(part) ?? return None
             key = if decoded == { .Text(text) -> text else -> { return None } }
@@ -97,7 +97,7 @@ fn kit_steps_json_select(value: DataTree, parts: [String], depth: Int) -> [DataT
         if value == {
             .Object(fields) -> {
                 projected := [String: DataTree]{}
-                loop raw in part.slice(1, part.len() - 1).split(",") {
+                loop raw in kit_steps_byte_slice(part, 1, part.count_bytes() - 1).split(",") {
                     name :: ~raw.trim()
                     child :: fields.get(name) ?? return None
                     _ :: &projected.add(name, child)
@@ -154,7 +154,7 @@ fn kit_steps_json_values(text: String, mode: String, path: String) -> [DataTree]
     } else -> return None
     if mode.starts_with("doc[zero ") {
         if !mode.ends_with("]") -> return None
-        tree = kit_steps_json_zero(tree, mode.slice(9, mode.len() - 1))
+        tree = kit_steps_json_zero(tree, kit_steps_byte_slice(mode, 9, mode.count_bytes() - 1))
     }
     kit_steps_json_select(tree, parts, 0)
 }
@@ -172,7 +172,7 @@ fn kit_steps_json_relation(actual: String, assertion: KitAssertion, history: [Ki
     reference :: if target == "" -> assertion.value else -> target
     label :: kit_steps_relation_label(reference)
     stream :: kit_steps_relation_stream(reference, assertion.stream)
-    factor :: if target == "" -> 1 else -> Int.parse(assertion.value.slice(0, assertion.value.index("*") ?? 0)) ?? 0
+    factor :: if target == "" -> 1 else -> Int.parse(kit_steps_byte_slice(assertion.value, 0, kit_steps_byte_index(assertion.value, "*") ?? 0)) ?? 0
     previous := String?{None}
     index := history.len()
     loop index > 0 {

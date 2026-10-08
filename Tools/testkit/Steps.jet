@@ -34,7 +34,7 @@ fn kit_steps_parse(source: String) -> KitPlan {
         line := ~raw.trim()
         if line == "" || line.starts_with("#") -> next
         if line == "end for" || line == "end repeat" || line == "end parallel" {
-            kind :: line.slice(4, line.len())
+            kind :: kit_steps_byte_slice(line, 4, line.count_bytes())
             if blocks.len() == 0 || blocks[blocks.len() - 1] != kind {
                 plan.error = "line {line_number}: unmatched {line}"
                 return plan
@@ -87,8 +87,8 @@ fn kit_steps_parse(source: String) -> KitPlan {
         }
         loop line.starts_with("when ") {
             delimiter :: kit_steps_condition_colon(line)
-            end :: delimiter ?? line.len()
-            condition :: ~line.slice(5, end).trim()
+            end :: delimiter ?? line.count_bytes()
+            condition :: ~kit_steps_byte_slice(line, 5, end).trim()
             if !kit_steps_condition_valid(condition) {
                 plan.error = "line {line_number}: invalid when condition"
                 return plan
@@ -101,7 +101,7 @@ fn kit_steps_parse(source: String) -> KitPlan {
                 break
             }
             &conditions.push(condition)
-            line = ~line.slice(end + 1, line.len()).trim()
+            line = ~kit_steps_byte_slice(line, end + 1, line.count_bytes()).trim()
         }
         if line == "" -> next
         if line.starts_with("recv ") {
@@ -121,17 +121,17 @@ fn kit_steps_parse(source: String) -> KitPlan {
             next
         }
         closing :: line.starts_with("close ")
-        if closing -> line = "close: {line.slice(6, line.len())}"
-        if line.starts_with("wait ") && !line.contains(":") -> line = "wait: {line.slice(5, line.len())}"
+        if closing -> line = "close: {kit_steps_byte_slice(line, 6, line.count_bytes())}"
+        if line.starts_with("wait ") && !line.contains(":") -> line = "wait: {kit_steps_byte_slice(line, 5, line.count_bytes())}"
         prefix :: if line.starts_with("cap:") -> 4 else -> 0
-        delimiter :: kit_steps_condition_colon(line.slice(prefix, line.len())) ?? -1
+        delimiter :: kit_steps_condition_colon(kit_steps_byte_slice(line, prefix, line.count_bytes())) ?? -1
         colon :: if delimiter < 0 -> -1 else -> delimiter + prefix
         if colon < 0 {
             plan.error = "line {line_number}: missing ':'"
             return plan
         }
-        key :: ~line.slice(0, colon).trim()
-        original :: ~line.slice(colon + 1, line.len()).trim()
+        key :: ~kit_steps_byte_slice(line, 0, colon).trim()
+        original :: ~kit_steps_byte_slice(line, colon + 1, line.count_bytes()).trim()
         value :: kit_steps_body(original)
         port_names :: kit_steps_free_port_names(value) ?? {
             plan.error = "line {line_number}: malformed free-port token"
@@ -161,7 +161,7 @@ fn kit_steps_parse(source: String) -> KitPlan {
             return plan
         }
         if key.starts_with("poll ") {
-            label :: ~key.slice(5, key.len()).trim()
+            label :: ~kit_steps_byte_slice(key, 5, key.count_bytes()).trim()
             loop previous in plan.steps {
                 if previous.label == label {
                     plan.error = "line {line_number}: duplicate poll label"
@@ -211,19 +211,19 @@ fn kit_steps_parse(source: String) -> KitPlan {
             next
         }
         if key == "env" {
-            equals :: value.index("=") ?? -1
+            equals :: kit_steps_byte_index(value, "=") ?? -1
             if equals <= 0 {
                 plan.error = "line {line_number}: env requires NAME=VALUE"
                 return plan
             }
-            raw_value :: ~value.slice(equals + 1, value.len()).trim()
+            raw_value :: ~kit_steps_byte_slice(value, equals + 1, value.count_bytes()).trim()
             decoded :: if raw_value.starts_with("\"") || raw_value.starts_with("'") -> kit_steps_scalar_word(raw_value) ?? {
                 plan.error = "line {line_number}: invalid quoted environment value"
                 return plan
             } else -> raw_value
-            assignment :: "{value.slice(0, equals)}={decoded}"
+            assignment :: "{kit_steps_byte_slice(value, 0, equals)}={decoded}"
             if plan.steps.len() == 0 -> &plan.environment.push(assignment)
-            else -> &plan.steps[plan.steps.len() - 1].environment.push(KitEnvVar{name: value.slice(0, equals), value: Val(decoded)})
+            else -> &plan.steps[plan.steps.len() - 1].environment.push(KitEnvVar{name: kit_steps_byte_slice(value, 0, equals), value: Val(decoded)})
             next
         }
         if key == "refused" {
@@ -235,7 +235,7 @@ fn kit_steps_parse(source: String) -> KitPlan {
             next
         }
         if key == "ref-audit" {
-            if value.slice(0, value.index(" #") ?? value.len()).trim() != "bridge" {
+            if kit_steps_byte_slice(value, 0, kit_steps_byte_index(value, " #") ?? value.count_bytes()).trim() != "bridge" {
                 plan.error = "line {line_number}: unknown ref-audit"
                 return plan
             }
@@ -414,7 +414,7 @@ fn kit_steps_parse(source: String) -> KitPlan {
         }
         if key == "inventory" || key.starts_with("inventory ") {
             words :: kit_steps_words(value) ?? []
-            label :: if key == "inventory" -> "" else -> ~key.slice(10, key.len()).trim()
+            label :: if key == "inventory" -> "" else -> ~kit_steps_byte_slice(key, 10, key.count_bytes()).trim()
             if words.len() == 0 || !kit_steps_relative_path(words[0]) {
                 plan.error = "line {line_number}: inventory needs a work-relative directory"
                 return plan
@@ -457,7 +457,7 @@ fn kit_steps_parse(source: String) -> KitPlan {
         }
         if key.starts_with("send ") || key.starts_with("signal ") {
             sending :: key.starts_with("send ")
-            label :: ~key.slice(if sending -> 5 else -> 7, key.len()).trim()
+            label :: ~kit_steps_byte_slice(key, if sending -> 5 else -> 7, key.count_bytes()).trim()
             tokens :: kit_steps_tokens(value) ?? []
             if tokens.len() != 1 || !kit_expect_named(pending, label) || kit_expect_named(joined, label) {
                 plan.error = "line {line_number}: send/signal needs one value and a live child"
@@ -497,7 +497,7 @@ fn kit_steps_parse(source: String) -> KitPlan {
         }
         if key == "step" || key.starts_with("step ") || key.starts_with("spawn ") {
             spawning :: key.starts_with("spawn ")
-            label :: if key == "step" -> "" else -> ~key.slice(if spawning -> 6 else -> 5, key.len()).trim()
+            label :: if key == "step" -> "" else -> ~kit_steps_byte_slice(key, if spawning -> 6 else -> 5, key.count_bytes()).trim()
             if key != "step" && (label == "" || label.contains(" ") || label.contains("\t") || kit_expect_named(pending, label)) {
                 plan.error = "line {line_number}: step label must be unique and one word"
                 return plan
@@ -610,13 +610,13 @@ fn kit_steps_parse(source: String) -> KitPlan {
                 return plan
             }
             loop bound in bounds {
-                equals :: bound.index("=") ?? -1
+                equals :: kit_steps_byte_index(bound, "=") ?? -1
                 if equals <= 0 {
                     plan.error = "line {line_number}: invalid limit"
                     return plan
                 }
-                name :: bound.slice(0, equals)
-                amount :: Int.parse(bound.slice(equals + 1, bound.len())) ?? 0
+                name :: kit_steps_byte_slice(bound, 0, equals)
+                amount :: Int.parse(kit_steps_byte_slice(bound, equals + 1, bound.count_bytes())) ?? 0
                 if amount <= 0 || (name != "time" && name != "memory") {
                     plan.error = "line {line_number}: invalid positive time/memory limit"
                     return plan
@@ -692,7 +692,7 @@ fn kit_steps_parse(source: String) -> KitPlan {
                 plan.error = "line {line_number}: invalid process predicate"
                 return plan
             }
-            assertion.path = ~key.slice(8, key.len()).trim()
+            assertion.path = ~kit_steps_byte_slice(key, 8, key.count_bytes()).trim()
             &plan.steps[i].assertions.push(assertion)
             next
         }
@@ -786,7 +786,7 @@ fn kit_steps_parse_case(source: String) -> KitPlan {
 }
 
 fn kit_steps_version(banner: String) -> String? {
-    first :: ~banner.slice(0, banner.index("\n") ?? banner.len()).trim()
+    first :: ~kit_steps_byte_slice(banner, 0, kit_steps_byte_index(banner, "\n") ?? banner.count_bytes()).trim()
     words :: kit_steps_words(first) ?? return None
     if words.len() != 2 || words[0] != "Jet" || words[1] == "" -> return None
     Val(words[1])
@@ -836,10 +836,10 @@ fn kit_steps_bless_plan(plan: KitPlan, id: String, bless: KitBless) -> KitVerdic
 fn kit_steps_environment(plan: KitPlan, env: KitEnv, work: String, scratch: String, built: String) -> [KitEnvVar] {
     overlay := [KitEnvVar]{}
     loop assignment in plan.environment {
-        equals :: assignment.index("=") ?? -1
+        equals :: kit_steps_byte_index(assignment, "=") ?? -1
         if equals <= 0 -> panic("env requires NAME=VALUE")
-        name :: assignment.slice(0, equals)
-        value :: kit_steps_argv_env(kit_steps_expand(assignment.slice(equals + 1, assignment.len()), env, work, scratch, built), env, scratch, overlay)
+        name :: kit_steps_byte_slice(assignment, 0, equals)
+        value :: kit_steps_argv_env(kit_steps_expand(kit_steps_byte_slice(assignment, equals + 1, assignment.count_bytes()), env, work, scratch, built), env, scratch, overlay)
         &overlay.push(KitEnvVar{name: name, value: Val(value)})
     }
     overlay
@@ -961,7 +961,7 @@ fn kit_steps_check(step: KitStep, context: KitStepCtx, state: KitStepState, sour
     if step.exit == "nonzero" {
         if result.code == 0 -> return kit_expect_verdict("FAIL", "exit 0; expected nonzero")
     } else if step.exit == "any" {} else if step.exit.starts_with("!=") {
-        forbidden :: Int.parse(~step.exit.slice(2, step.exit.len()).trim()) ?? 0
+        forbidden :: Int.parse(~kit_steps_byte_slice(step.exit, 2, step.exit.count_bytes()).trim()) ?? 0
         if result.code == forbidden -> return kit_expect_verdict("FAIL", "exit equals forbidden status {forbidden}")
     } else if result.code != (Int.parse(step.exit) ?? 0) -> return kit_expect_verdict("FAIL", "exit {result.code}; expected {step.exit}")
     loop assertion in step.assertions {
@@ -988,7 +988,7 @@ fn kit_steps_artifact(entry: String, source: String, artifact: String) -> String
         ancestor = parent
     }
     name :: files.basename(entry)
-    stem :: if name.ends_with(".jet") -> name.slice(0, name.len() - 4) else -> name
+    stem :: if name.ends_with(".jet") -> kit_steps_byte_slice(name, 0, name.count_bytes() - 4) else -> name
     files.join(files.join(root, ".jet/build"), if artifact == "" -> stem.replace(".", "_") else -> artifact)
 }
 

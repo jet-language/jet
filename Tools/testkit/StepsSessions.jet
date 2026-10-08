@@ -18,13 +18,13 @@ fn kit_steps_recv_valid(text: String) -> Bool {
         cursor += 1
         start :: cursor
         loop cursor < words.len() {
-            raw :: text.slice(words[cursor].start, words[cursor].end)
+            raw :: kit_steps_byte_slice(text, words[cursor].start, words[cursor].end)
             if kit_expect_named(["timeout", "within", "every", "optional"], raw) -> break
             cursor += 1
         }
         if cursor == start -> return false
-        predicates :: kit_steps_predicates(text.slice(words[start].start, words[cursor - 1].end)) ?? return false
-        reason :: text.slice(kit_steps_comment(text), text.len())
+        predicates :: kit_steps_predicates(kit_steps_byte_slice(text, words[start].start, words[cursor - 1].end)) ?? return false
+        reason :: kit_steps_byte_slice(text, kit_steps_comment(text), text.count_bytes())
         loop predicate in predicates {
             tokens :: kit_steps_tokens(predicate) ?? return false
             if predicate.starts_with("$") {

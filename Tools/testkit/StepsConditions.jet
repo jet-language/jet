@@ -15,7 +15,7 @@ fn kit_steps_condition_colon(text: String) -> Int? {
         else if c == 123 || c == 91 || c == 40 -> depth += 1
         else if c == 125 || c == 93 || c == 41 -> depth -= 1
         else if c == 58 && depth == 0 {
-            if text.starts_with("when ") && text.slice(0, index).ends_with("cap") -> next
+            if text.starts_with("when ") && kit_steps_byte_slice(text, 0, index).ends_with("cap") -> next
             return Val(index)
         }
     }
@@ -35,7 +35,7 @@ fn kit_steps_condition_atom_valid(text: String) -> Bool {
         if kit_expect_named(["=", "!=", "~", "^="], words[1]) -> return words.len() == 3
         if words[1] != "in" -> return false
         tokens :: kit_steps_tokens(text) ?? return false
-        return kit_steps_string_array(text.slice(tokens[2].start, text.len())) != None
+        return kit_steps_string_array(kit_steps_byte_slice(text, tokens[2].start, text.count_bytes())) != None
     }
     if kit_expect_named(["stdout", "stderr", "stdout+stderr"], kind) || kind.ends_with(".stdout") || kind.ends_with(".stderr") || kind.ends_with(".stdout+stderr") -> return (words.len() == 3 && kit_expect_named(["=", "!=", "~", "!~"], words[1])) || (words.len() >= 3 && words[1] == "~any")
     false
@@ -62,7 +62,7 @@ fn kit_steps_condition_atom(text: String, context: KitStepCtx, state: KitStepSta
     if kind == "arch" -> return kit_steps_host_matches(kit_steps_host_arch(), words[1])
     if kind == "env" || kind == "env-set" {
         negative :: words[1].starts_with("!")
-        name :: if negative -> words[1].slice(1, words[1].len()) else -> words[1]
+        name :: if negative -> kit_steps_byte_slice(words[1], 1, words[1].count_bytes()) else -> words[1]
         value :: sys.get(name)
         present :: if kind == "env-set" -> value != None else -> (value ?? "") != ""
         return present != negative
@@ -86,13 +86,13 @@ fn kit_steps_condition_atom(text: String, context: KitStepCtx, state: KitStepSta
         return true
     }
     if kind == "tool" -> return kit_steps_tools_all(words[1])
-    if kind == "probe" -> return kit_steps_probes_all(text.slice(6, text.len()), context.env, context.work, context.scratch)
+    if kind == "probe" -> return kit_steps_probes_all(kit_steps_byte_slice(text, 6, text.count_bytes()), context.env, context.work, context.scratch)
     if kind == "exit" -> return (state.last.code == (Int.parse(words[2]) ?? -1)) == (words[1] == "==")
     if kind.starts_with("cap:") {
-        actual :: kit_steps_captured_subject(kind.slice(4, kind.len()), state.captures) ?? return false
+        actual :: kit_steps_captured_subject(kit_steps_byte_slice(kind, 4, kind.count_bytes()), state.captures) ?? return false
         if words[1] == "in" {
             tokens :: kit_steps_tokens(text) ?? return false
-            choices :: kit_steps_string_array(text.slice(tokens[2].start, text.len())) ?? return false
+            choices :: kit_steps_string_array(kit_steps_byte_slice(text, tokens[2].start, text.count_bytes())) ?? return false
             loop choice in choices {
                 expanded :: kit_steps_runtime_expand(choice, context, state) ?? return false
                 if actual == expanded -> return true
@@ -107,7 +107,7 @@ fn kit_steps_condition_atom(text: String, context: KitStepCtx, state: KitStepSta
     reference := kind
     subject := "stdout"
     if kind.ends_with(".stdout+stderr") {
-        reference = kind.slice(0, kind.len() - 14)
+        reference = kit_steps_byte_slice(kind, 0, kind.count_bytes() - 14)
         subject = "stdout+stderr"
     }
     actual :: if kit_expect_named(["stdout", "stderr", "stdout+stderr"], kind) -> kit_steps_select_stream(state.last.stdout, state.last.stderr, kind) else -> kit_steps_history_stream(reference, subject, state.history, false) ?? return false
@@ -120,7 +120,7 @@ fn kit_steps_condition_atom(text: String, context: KitStepCtx, state: KitStepSta
     }
     tokens :: kit_steps_tokens(text) ?? return false
     value := kit_steps_runtime_expand(words[2], context, state) ?? return false
-    raw :: text.slice(tokens[2].start, tokens[2].end)
+    raw :: kit_steps_byte_slice(text, tokens[2].start, tokens[2].end)
     if !raw.starts_with("\"") && !raw.starts_with("'") -> value = files.read(files.join(context.snapshots, value)) ?? return false
     if words[1] == "~" -> return actual.contains(value)
     if words[1] == "!~" -> return !actual.contains(value)
@@ -147,9 +147,9 @@ fn kit_steps_condition_tree_atom(text: String, tokens: [KitWord], start: Int, co
         return KitLinePredicate{valid: true, value: inner.value, next: inner.next + 1}
     }
     end := start
-    loop end < tokens.len() && !kit_expect_named(["&&", "||", ")"], text.slice(tokens[end].start, tokens[end].end)) -> end += 1
+    loop end < tokens.len() && !kit_expect_named(["&&", "||", ")"], kit_steps_byte_slice(text, tokens[end].start, tokens[end].end)) -> end += 1
     if end == start -> return KitLinePredicate{valid: false, value: false, next: end}
-    atom :: text.slice(tokens[start].start, tokens[end - 1].end)
+    atom :: kit_steps_byte_slice(text, tokens[start].start, tokens[end - 1].end)
     if !kit_steps_condition_atom_valid(atom) -> return KitLinePredicate{valid: false, value: false, next: end}
     value := false
     if context == {

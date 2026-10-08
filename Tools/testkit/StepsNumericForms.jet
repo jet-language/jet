@@ -11,7 +11,7 @@ fn kit_steps_f64_assertion(stream: String, path: String, transform: String, orig
     op :: words[offset + 1]
     rhs :: words[offset + 2]
     if !kit_expect_named([">", ">=", "<", "<=", "==", "!="], op) || !rhs.starts_with("{{cap:") || !rhs.ends_with("}}") -> return None
-    if !kit_steps_env_name(rhs.slice(5, rhs.len() - 1)) -> return None
+    if !kit_steps_env_name(kit_steps_byte_slice(rhs, 5, rhs.count_bytes() - 1)) -> return None
     Val(KitAssertion{stream: stream, path: path, transform: transform, mode: mode, value: rhs, extra: op})
 }
 
@@ -28,7 +28,7 @@ fn kit_steps_f64_test(actual: String, mode: String, value: String, op: String) -
 fn kit_steps_median_labels(text: String, plan: KitPlan, before: Int) -> [String]? {
     if !text.starts_with("[") || !text.ends_with("]") -> return None
     labels := [String]{}
-    loop raw in text.slice(1, text.len() - 1).split(",") {
+    loop raw in kit_steps_byte_slice(text, 1, text.count_bytes() - 1).split(",") {
         label :: ~raw.trim()
         if !kit_steps_known_label(plan, label, before) -> return None
         &labels.push(label)

@@ -16,7 +16,7 @@ fn kit_steps_json_path(path: String) -> [String]? {
                 projection_start :: i
                 loop i < bytes.len() && bytes[i] != (U8{125}) -> i += 1
                 if i == bytes.len() -> return None
-                part :: path.slice(projection_start, i + 1)
+                part :: String.from_bytes(bytes.slice(projection_start, i + 1)) ?? return None
                 if !kit_steps_json_projection_valid(part) -> return None
                 &parts.push(part)
                 i += 1
@@ -29,7 +29,7 @@ fn kit_steps_json_path(path: String) -> [String]? {
                 i += 1
             }
             if i == key_start -> return None
-            &parts.push(path.slice(start, i))
+            &parts.push(String.from_bytes(bytes.slice(start, i)) ?? return None)
         } else if bytes[i] == (U8{91}) {
             i += 1
             start :: i
@@ -51,7 +51,7 @@ fn kit_steps_json_path(path: String) -> [String]? {
                 i += 1
             }
             if i == bytes.len() || quoted -> return None
-            token :: path.slice(start, i)
+            token :: String.from_bytes(bytes.slice(start, i)) ?? return None
             if token.starts_with("?") {
                 if kit_steps_json_filter(kit_steps_json_preview(token)) == None -> return None
             } else if token != "*" {
@@ -321,7 +321,7 @@ fn kit_steps_json_test(text: String, mode: String, path: String, op: String, lit
         failure :: kit_steps_json_leaf(value, op, expected, expected_type, count)
         if op.starts_with("#") && op != "#==" && op != "#distinct=" {
             size :: kit_steps_json_size(value) ?? return Val("JSON count needs an array or object")
-            if !kit_steps_compare(size, op.slice(1, op.len()), count) -> return Val("JSON count comparison failed")
+            if !kit_steps_compare(size, kit_steps_byte_slice(op, 1, op.count_bytes()), count) -> return Val("JSON count comparison failed")
             next
         }
         if failure != None -> return failure
@@ -356,9 +356,9 @@ fn kit_steps_json_assertion(value: String) -> KitAssertion? {
         rows :: tokens[3 + offset].text
         bound :: tokens[5 + offset].text
         if !bound.ends_with(":") || kit_steps_json_path(kit_steps_json_preview(rows)) == None -> return None
-        name :: bound.slice(0, bound.len() - 1)
+        name :: kit_steps_byte_slice(bound, 0, bound.count_bytes() - 1)
         if !kit_steps_env_name(name) -> return None
-        inner :: ~value.slice(tokens[6 + offset].start, value.len()).trim()
+        inner :: ~kit_steps_byte_slice(value, tokens[6 + offset].start, value.count_bytes()).trim()
         preview :: kit_steps_json_row_expand(inner.replace("{{{name}}}", "$"), name, None, true) ?? return None
         _ :: kit_steps_json_assertion("stdout {mode} {preview}") ?? return None
         return Val(KitAssertion{stream: stream, path: if offset == 1 -> tokens[1].text else -> "", mode: "json", value: inner, json_mode: mode, json_path: rows, json_op: "each", extra: name, transform: transform})
@@ -371,7 +371,7 @@ fn kit_steps_json_assertion(value: String) -> KitAssertion? {
         return Val(KitAssertion{stream: stream, path: source, mode: "json", value: "", json_mode: mode, json_path: path, json_op: op, optional_file: subject == "file?", transform: transform})
     }
     if tokens.len() == needed -> return None
-    literal := ~body.slice(tokens[needed].start, body.len()).trim()
+    literal := ~kit_steps_byte_slice(body, tokens[needed].start, body.count_bytes()).trim()
     if op == "any" {
         if tokens.len() != needed + 2 || tokens[needed].text != "~" || !kit_steps_reason(value) -> return None
         return Val(KitAssertion{stream: stream, path: source, mode: "json", value: tokens[needed + 1].text, json_mode: mode, json_path: path, json_op: "any~", optional_file: subject == "file?", transform: transform})
@@ -384,7 +384,7 @@ fn kit_steps_json_assertion(value: String) -> KitAssertion? {
         _ :: json.parse(kit_steps_json_preview(literal)) ?? return None
     } else if op == "keys" {
         if !literal.starts_with("= ") -> return None
-        literal = ~literal.slice(2, literal.len()).trim()
+        literal = ~kit_steps_byte_slice(literal, 2, literal.count_bytes()).trim()
         if kit_steps_string_array(literal) == None -> return None
     } else {
         if tokens.len() != needed + 1 -> return None

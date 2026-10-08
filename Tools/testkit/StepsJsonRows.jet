@@ -6,9 +6,9 @@ fn kit_steps_json_row_expand(text: String, name: String, row: DataTree?, preview
     rest := text
     result := ""
     loop {
-        start :: rest.index(prefix) ?? break
-        end :: rest.slice(start, rest.len()).index("}}") ?? return None
-        path :: "$.{rest.slice(start + prefix.len(), start + end)}"
+        start :: kit_steps_byte_index(rest, prefix) ?? break
+        end :: kit_steps_byte_index(kit_steps_byte_slice(rest, start, rest.count_bytes()), "}}") ?? return None
+        path :: "$.{kit_steps_byte_slice(rest, start + prefix.count_bytes(), start + end)}"
         replacement := "0"
         if !preview {
             source :: row ?? return None
@@ -16,8 +16,8 @@ fn kit_steps_json_row_expand(text: String, name: String, row: DataTree?, preview
             if selected.len() != 1 -> return None
             replacement = json.to_string(selected[0])
         }
-        result = "{result}{rest.slice(0, start)}{replacement}"
-        rest = rest.slice(start + end + 1, rest.len())
+        result = "{result}{kit_steps_byte_slice(rest, 0, start)}{replacement}"
+        rest = kit_steps_byte_slice(rest, start + end + 1, rest.count_bytes())
     }
     Val("{result}{rest}")
 }
@@ -33,7 +33,7 @@ fn kit_steps_json_rows(text: String, assertion: KitAssertion) -> String? {
         root :: "{{{assertion.extra}}}"
         source := text
         if body.starts_with(root) {
-            body = "${body.slice(root.len(), body.len())}"
+            body = "${kit_steps_byte_slice(body, root.count_bytes(), body.count_bytes())}"
             source = json.to_string(row)
         }
         expanded :: kit_steps_json_row_expand(body, assertion.extra, Val(row), false) ?? return Val("JSON bound row path missing")

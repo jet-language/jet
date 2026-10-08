@@ -4,7 +4,7 @@ use core.sys as sys
 
 fn kit_steps_await_boundary(text: String, tokens: [KitWord]) -> Int {
     loop index in 2..<tokens.len() {
-        if kit_expect_named(["timeout", "every", "capture", "optional"], text.slice(tokens[index].start, tokens[index].end)) -> return index
+        if kit_expect_named(["timeout", "every", "capture", "optional"], kit_steps_byte_slice(text, tokens[index].start, tokens[index].end)) -> return index
     }
     tokens.len()
 }
@@ -23,10 +23,10 @@ fn kit_steps_await_valid(text: String) -> Bool {
         }
     } else if kind == "process" {
         if boundary == 2 -> return false
-        _ :: kit_steps_process_form(text.slice(tokens[2].start, tokens[boundary - 1].end)) ?? return false
+        _ :: kit_steps_process_form(kit_steps_byte_slice(text, tokens[2].start, tokens[boundary - 1].end)) ?? return false
     } else if boundary > 2 {
         if kind != "file" -> return false
-        _ :: kit_steps_stream_assertion("file", "{text.slice(tokens[1].start, tokens[boundary - 1].end)} {text.slice(kit_steps_comment(text), text.len())}") ?? return false
+        _ :: kit_steps_stream_assertion("file", "{kit_steps_byte_slice(text, tokens[1].start, tokens[boundary - 1].end)} {kit_steps_byte_slice(text, kit_steps_comment(text), text.count_bytes())}") ?? return false
     }
     options := [String]{}
     cursor := boundary
@@ -49,7 +49,7 @@ fn kit_steps_process_form(text: String) -> KitAssertion? {
     if tokens.len() == 1 && kit_expect_named(["alive", "alive-nonzombie"], tokens[0].text) -> return Val(KitAssertion{stream: "process", path: "", mode: tokens[0].text, value: ""})
     if tokens.len() < 3 -> return None
     if tokens[0].text == "state" && kit_expect_named(["in", "not-in"], tokens[1].text) {
-        values :: kit_steps_string_array(text.slice(tokens[2].start, tokens[tokens.len() - 1].end)) ?? return None
+        values :: kit_steps_string_array(kit_steps_byte_slice(text, tokens[2].start, tokens[tokens.len() - 1].end)) ?? return None
         return Val(KitAssertion{stream: "process", path: "", mode: "state", value: values.join("|"), extra: tokens[1].text})
     }
     if tokens.len() == 3 && tokens[0].text == "executable" && tokens[1].text == "=" -> return Val(KitAssertion{stream: "process", path: "", mode: "executable", value: tokens[2].text})
@@ -73,7 +73,7 @@ fn kit_steps_process_check(assertion: KitAssertion, context: KitStepCtx, state: 
         if byte == (U8{41}) -> end = index
     }
     if end < 0 -> return kit_expect_verdict("FAIL", "process stat malformed")
-    words :: kit_steps_whitespace_words(stat.slice(end + 1, stat.len()))
+    words :: kit_steps_whitespace_words(kit_steps_byte_slice(stat, end + 1, stat.count_bytes()))
     if words.len() == 0 -> return kit_expect_verdict("FAIL", "process stat malformed")
     matches :: if assertion.mode == "alive-nonzombie" -> words[0] != "Z" && kit_steps_process_alive(pid) else -> kit_steps_host_matches(words[0], assertion.value) == (assertion.extra == "in")
     if matches -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "process state predicate failed")
@@ -138,7 +138,7 @@ fn kit_steps_await(step: KitStep, context: KitStepCtx, previous: KitStepState) -
         } else if kind == "dir" -> success = files.is_dir(path)
         else if boundary == 2 -> success = files.exists(path)
         else {
-            assertion := if kind == "process" -> kit_steps_process_form(text.slice(tokens[2].start, tokens[boundary - 1].end)) ?? return kit_steps_action_error(state, "invalid process await") else -> kit_steps_stream_assertion("file", "{text.slice(tokens[1].start, tokens[boundary - 1].end)} {text.slice(kit_steps_comment(text), text.len())}") ?? return kit_steps_action_error(state, "invalid file await")
+            assertion := if kind == "process" -> kit_steps_process_form(kit_steps_byte_slice(text, tokens[2].start, tokens[boundary - 1].end)) ?? return kit_steps_action_error(state, "invalid process await") else -> kit_steps_stream_assertion("file", "{kit_steps_byte_slice(text, tokens[1].start, tokens[boundary - 1].end)} {kit_steps_byte_slice(text, kit_steps_comment(text), text.count_bytes())}") ?? return kit_steps_action_error(state, "invalid file await")
             assertion.path = path
             verdict :: if kind == "process" -> kit_steps_process_check(assertion, context, state) else -> kit_steps_check_assertion(assertion, context, state, "", false)
             if verdict.status == "ERROR" || verdict.status == "REFUSED" -> return KitStepResult{state: state, verdict: verdict}

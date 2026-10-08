@@ -15,7 +15,7 @@ fn kit_steps_tokens(text: String) -> [KitWord]? {
         start :: i
         first :: Int.from_u8(bytes[i])
         if (first == 40 || first == 41) && (i + 1 == bytes.len() || bytes[i + 1] == (U8{32}) || bytes[i + 1] == (U8{9})) {
-            &result.push(KitWord{text: text.slice(i, i + 1), start: i, end: i + 1})
+            &result.push(KitWord{text: kit_steps_byte_slice(text, i, i + 1), start: i, end: i + 1})
             i += 1
             next
         }
@@ -54,7 +54,7 @@ fn kit_steps_tokens(text: String) -> [KitWord]? {
         }
         if quote != 0 || escape -> return None
         if quoted && i < bytes.len() && bytes[i] != (U8{32}) && bytes[i] != (U8{9}) -> return None
-        raw :: text.slice(start, i)
+        raw :: kit_steps_byte_slice(text, start, i)
         decoded := raw
         if first == 34 {
             tree :: json.parse(raw) ?? return None
@@ -63,7 +63,7 @@ fn kit_steps_tokens(text: String) -> [KitWord]? {
                 else -> return None
             }
         } else if first == 39 {
-            interior :: text.slice(start + 1, i - 1)
+            interior :: kit_steps_byte_slice(text, start + 1, i - 1)
             decoded = interior
             if interior.contains("\\") {
                 buffer := [U8]{}
@@ -122,20 +122,20 @@ fn kit_steps_comment(text: String) -> Int {
         } else if c == 34 || c == 39 -> quote = c
         else if c == 35 && i > 0 && (bytes[i - 1] == (U8{32}) || bytes[i - 1] == (U8{9})) {
             // Cardinality operators are not comments.
-            if i + 1 < bytes.len() && (bytes[i + 1] == (U8{61}) || bytes[i + 1] == (U8{62}) || bytes[i + 1] == (U8{60}) || text.slice(i, text.len()).starts_with("#distinct=")) -> next
+            if i + 1 < bytes.len() && (bytes[i + 1] == (U8{61}) || bytes[i + 1] == (U8{62}) || bytes[i + 1] == (U8{60}) || kit_steps_byte_slice(text, i, text.count_bytes()).starts_with("#distinct=")) -> next
             return i
         }
     }
-    text.len()
+    bytes.len()
 }
 
 fn kit_steps_reason(text: String) -> Bool {
     at :: kit_steps_comment(text)
-    at < text.len() && text.slice(at + 1, text.len()).trim() != ""
+    at < text.count_bytes() && kit_steps_byte_slice(text, at + 1, text.count_bytes()).trim() != ""
 }
 
 fn kit_steps_body(text: String) -> String {
-    ~text.slice(0, kit_steps_comment(text)).trim()
+    ~kit_steps_byte_slice(text, 0, kit_steps_comment(text)).trim()
 }
 
 fn kit_steps_scalar_word(text: String) -> String? {
@@ -147,12 +147,12 @@ fn kit_steps_scalar_word(text: String) -> String? {
 fn kit_steps_capture_tokens(text: String, defined: [String]) -> Bool {
     rest := text
     loop {
-        start :: rest.index("{{cap:") ?? return true
+        start :: kit_steps_byte_index(rest, "{{cap:") ?? return true
         after :: start + 5
-        end :: rest.slice(after, rest.len()).index("}}") ?? return false
-        name :: rest.slice(after, after + end)
+        end :: kit_steps_byte_index(kit_steps_byte_slice(rest, after, rest.count_bytes()), "}}") ?? return false
+        name :: kit_steps_byte_slice(rest, after, after + end)
         if !kit_expect_named(defined, name) -> return false
-        rest = rest.slice(after + end + 1, rest.len())
+        rest = kit_steps_byte_slice(rest, after + end + 1, rest.count_bytes())
     }
 }
 
@@ -163,10 +163,10 @@ fn kit_steps_json_preview(text: String) -> String {
         .replace("{{jet}}", "0").replace("{{jetpack}}", "0").replace("{{built}}", "0").replace("{{sys:dll-suffix}}", "0")
     loop prefix in ["{{cap:", "{{tool:"] {
         loop {
-            start :: preview.index(prefix) ?? break
-            after :: start + prefix.len()
-            end :: preview.slice(after, preview.len()).index("}}") ?? break
-            preview = "{preview.slice(0, start)}0{preview.slice(after + end + 1, preview.len())}"
+            start :: kit_steps_byte_index(preview, prefix) ?? break
+            after :: start + prefix.count_bytes()
+            end :: kit_steps_byte_index(kit_steps_byte_slice(preview, after, preview.count_bytes()), "}}") ?? break
+            preview = "{kit_steps_byte_slice(preview, 0, start)}0{kit_steps_byte_slice(preview, after + end + 1, preview.count_bytes())}"
         }
     }
     preview

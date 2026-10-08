@@ -113,3 +113,15 @@ fn kit_test_steps_env() -> KitEnv {
     assert_eq(outcome.run.stdout, "{root}/nested|step|unset")
     files.remove_all(root) ?? panic("remove step-env scratch")
 }
+
+#Test("case parser preserves UTF-8 byte spans through quoted tokens JSON paths and reasons") {
+    source :: "env: LABEL=\"é·→—😀\"\nstep first: printf '%s' 'é·→—😀'\nstdout: ~ \"é·→—😀\" # diagnostics · → — 😀\nstdout.filter(~ \"😀\").trim: = \"é·→—😀\" # original predicate\njson: stdout doc $[\"é·😀\"] = \"→—\" # Unicode object member\n"
+    plan :: kit_steps_parse_case(source)
+    assert_eq(plan.error, "")
+    assert_eq(plan.environment, ["LABEL=é·→—😀"])
+    assert_eq(plan.steps[0].argv, ["printf", "%s", "é·→—😀"])
+    assert_eq(plan.steps[0].assertions[0].value, "é·→—😀")
+    assert_eq(plan.steps[0].assertions[1].transform, "filter(~ \"😀\").trim")
+    assert_eq(plan.steps[0].assertions[2].json_path, "$[\"é·😀\"]")
+    assert(kit_steps_parse_case("step: printf x\nstdout: ~ \"é·😀\"\n").error != "")
+}

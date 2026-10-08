@@ -5,8 +5,8 @@ fn kit_steps_failure_paths(text: String) -> String? {
     loop line in kit_steps_rust_lines(first) {
         start := -1
         cursor := 0
-        loop cursor < line.len() {
-            offset :: line.slice(cursor, line.len()).index("jet_") ?? break
+        loop cursor < line.count_bytes() {
+            offset :: kit_steps_byte_index(kit_steps_byte_slice(line, cursor, line.count_bytes()), "jet_") ?? break
             found :: cursor + offset
             if found == 0 || line.bytes()[found - 1] == (U8{47}) {
                 start = found
@@ -15,11 +15,11 @@ fn kit_steps_failure_paths(text: String) -> String? {
             cursor = found + 4
         }
         if start >= 0 {
-            suffix :: line.slice(start, line.len())
-            end :: suffix.index(".jet")
+            suffix :: kit_steps_byte_slice(line, start, line.count_bytes())
+            end :: kit_steps_byte_index(suffix, ".jet")
             if end == {
                 .Val(offset) -> {
-                    &lines.push("{line.slice(0, start)}<source>{line.slice(start + offset + 4, line.len())}")
+                    &lines.push("{kit_steps_byte_slice(line, 0, start)}<source>{kit_steps_byte_slice(line, start + offset + 4, line.count_bytes())}")
                     next
                 }
                 .None -> {}
@@ -34,16 +34,16 @@ fn kit_steps_failure_paths(text: String) -> String? {
 fn kit_steps_contract_arrow(text: String) -> String {
     lines := [String]{}
     loop line in kit_steps_rust_lines(text) {
-        index :: line.index("  --> ")
+        index :: kit_steps_byte_index(line, "  --> ")
         if index == {
             .Val(start) -> {
-                location :: line.slice(start + 6, line.len())
+                location :: kit_steps_byte_slice(line, start + 6, line.count_bytes())
                 colon := -1
                 loop (offset, byte) in location.bytes() {
                     if byte == (U8{58}) -> colon = offset
                 }
-                number :: if colon < 0 -> "?" else -> location.slice(colon + 1, location.len())
-                &lines.push("{line.slice(0, start)}  --> <source>:{number}")
+                number :: if colon < 0 -> "?" else -> kit_steps_byte_slice(location, colon + 1, location.count_bytes())
+                &lines.push("{kit_steps_byte_slice(line, 0, start)}  --> <source>:{number}")
             }
             .None -> &lines.push(line)
         }
@@ -55,7 +55,7 @@ fn kit_steps_mask(text: String) -> Int? {
     if !text.starts_with("0o") -> return Val(Int.parse(text) ?? return None)
     if text.len() == 2 -> return None
     value := 0
-    loop byte in text.slice(2, text.len()).bytes() {
+    loop byte in kit_steps_byte_slice(text, 2, text.count_bytes()).bytes() {
         digit :: Int.from_u8(byte) - 48
         if digit < 0 || digit > 7 || value > (9223372036854775807 - digit) /% 8 -> return None
         value = value * 8 + digit

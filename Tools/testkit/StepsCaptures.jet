@@ -48,7 +48,7 @@ fn kit_steps_capture_valid(words: [String], original: String) -> Bool {
 fn kit_steps_capture_subject(selector: String, path: String, context: KitStepCtx, state: KitStepState) -> String Err! {
     subject :: kit_steps_subject(selector)
     text := kit_steps_select_stream(state.last.stdout, state.last.stderr, subject)
-    if subject.starts_with("cap:") -> text = kit_steps_captured_subject(subject.slice(4, subject.len()), state.captures) ?? return Err("captured subject unavailable")
+    if subject.starts_with("cap:") -> text = kit_steps_captured_subject(kit_steps_byte_slice(subject, 4, subject.count_bytes()), state.captures) ?? return Err("captured subject unavailable")
     if subject == "file" || subject == "file?" {
         location :: kit_steps_work_path(path, context.env, context.work, context.scratch, state.built) ?? return Err("capture file escapes work")
         if subject == "file?" && !files.exists(location) -> text = ""
@@ -121,7 +121,7 @@ fn kit_steps_capture_value(words: [String], context: KitStepCtx, state: KitStepS
                 if words[index] == "|" -> next
                 prefix :: words[index]
                 loop line in source.lines() {
-                    if line.starts_with(prefix) -> return kit_steps_capture_result(line.slice(prefix.len(), line.len()))
+                    if line.starts_with(prefix) -> return kit_steps_capture_result(kit_steps_byte_slice(line, prefix.count_bytes(), line.count_bytes()))
                 }
             }
             return kit_steps_capture_failure("FAIL", "capture prefix markers missing")
@@ -159,7 +159,7 @@ fn kit_steps_capture_value(words: [String], context: KitStepCtx, state: KitStepS
             if start < 0 || end < start || end > text.len() -> return kit_steps_capture_failure("FAIL", "replace-range invalid span")
             bytes :: text.bytes()
             if (start < bytes.len() && Int.from_u8(bytes[start]) >= 128 && Int.from_u8(bytes[start]) < 192) || (end < bytes.len() && Int.from_u8(bytes[end]) >= 128 && Int.from_u8(bytes[end]) < 192) -> return kit_steps_capture_failure("FAIL", "replace-range not on UTF-8 boundaries")
-            return kit_steps_capture_result("{text.slice(0, start)}{words[7]}{text.slice(end, text.len())}")
+            return kit_steps_capture_result("{kit_steps_byte_slice(text, 0, start)}{words[7]}{kit_steps_byte_slice(text, end, text.count_bytes())}")
         }
         if kind == "tree-contents" {
             items :: kit_steps_tree_contents(directory, directory, words.len() == 5) ?? return kit_steps_capture_failure("ERROR", "{err}")
@@ -200,8 +200,8 @@ fn kit_steps_capture_value(words: [String], context: KitStepCtx, state: KitStepS
     if kind == "after" {
         marker :: words[3 + offset]
         line :: kit_steps_first_line(source, marker) ?? return kit_steps_capture_failure("FAIL", "capture marker line missing")
-        at :: line.index(marker) ?? return kit_steps_capture_failure("FAIL", "capture marker missing")
-        value :: line.slice(at + marker.len(), line.len())
+        at :: kit_steps_byte_index(line, marker) ?? return kit_steps_capture_failure("FAIL", "capture marker missing")
+        value :: kit_steps_byte_slice(line, at + marker.count_bytes(), line.count_bytes())
         return kit_steps_capture_result(if words.len() == 5 + offset -> ~value.trim() else -> value)
     }
     kit_steps_capture_result(kit_steps_json_scalar(source, kind, words[3 + offset]) ?? return kit_steps_capture_failure("FAIL", "capture JSON path missing or not scalar"))

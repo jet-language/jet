@@ -1,3 +1,16 @@
+use core.text.parse as textparse
+
+// Kit grammar spans and Rust-compatible predicates use UTF-8 byte offsets.
+// String.len/index/slice use Unicode scalar positions, so do not mix them here.
+fn kit_steps_byte_slice(text: String, start: Int, end: Int) -> String {
+    String.from_bytes(text.bytes().slice(start, end)) ?? panic("kit byte span is not a UTF-8 boundary")
+}
+
+fn kit_steps_byte_index(text: String, needle: String) -> Int? {
+    offset :: textparse.find(text, needle)
+    if offset < 0 -> None else -> Val(offset)
+}
+
 // UTF-8 subjects are already validated Strings. Scan scalars without allocating
 // an intermediate Char list or a one-character String for each predicate.
 fn kit_steps_scalar(bytes: [U8], start: Int) -> KitScalar {
