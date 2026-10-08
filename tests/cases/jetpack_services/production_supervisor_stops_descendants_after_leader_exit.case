@@ -1,0 +1,23 @@
+# Port of tests/jetpack_services.rs:1372-1430. PENDING-GRAMMAR(batch-four).
+requires: os-name:linux
+fixture: production_supervisor_stops_descendants_after_leader_exit.fixture
+env: JETPACK_ROOT={work}/root
+env: HOME={work}/home
+env: PATH={work}/bin:{env:PATH}
+env: JETPACK_FAKE_SYSTEMD_STATE={work}/state
+mkdir: root
+mkdir: home
+copy: {root}/tests/cases/jetpack_services/services_up_health_logs_down_roundtrip.fixture/bin bin
+mkdir: state
+chmod: bin/systemd-run 755
+chmod: bin/systemctl 755
+step: jetpack services up --no-color
+await: file .jet/services/fixture/data/child.pid lines >= 1 timeout 5s every 50ms
+capture: child = text file .jet/services/fixture/data/child.pid.trim
+cap:child: is-u32
+process {cap:child}: alive-nonzombie
+append: .jet/services/fixture/data/exit.flag "exit\n"
+await: file .jet/services/fixture/lifecycle ~ "phase=failed" timeout 5s every 50ms
+repeat while process {cap:child} alive-nonzombie timeout 3s every 25ms fail "supervisor left a descendant alive after leader exit"
+end repeat
+await: file .jet/services/fixture/pid absent timeout 5s every 50ms

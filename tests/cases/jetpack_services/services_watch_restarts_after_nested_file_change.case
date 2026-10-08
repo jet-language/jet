@@ -1,0 +1,25 @@
+# Port of tests/jetpack_services.rs:492-551; sources verbatim (write_project format decoded).
+# PENDING-GRAMMAR(batch-four); original minimum-line waits: 5s, polling50ms.
+fixture: services_watch_restarts_after_nested_file_change.fixture
+env: JETPACK_ROOT={work}/root
+env: HOME={work}/home
+mkdir: root
+mkdir: home
+when os-name linux: copy: {root}/tests/cases/jetpack_services/services_up_health_logs_down_roundtrip.fixture/bin bin
+when os-name linux: mkdir: state
+when os-name linux: chmod: bin/systemd-run 755
+when os-name linux: chmod: bin/systemctl 755
+mkdir: src/nested
+append: src/nested/input "one\n"
+step: jetpack services up --no-color
+when os-name linux: env: PATH={work}/bin:{env:PATH}
+when os-name linux: env: JETPACK_FAKE_SYSTEMD_STATE={work}/state
+await: file .jet/services/fixture/data/restart-count lines >= 1 timeout 5s every 50ms
+write: src/nested/input services_watch_restarts_after_nested_file_change.changed
+await: file .jet/services/fixture/data/restart-count lines >= 2 timeout 5s every 50ms
+step: jetpack services health --no-color
+when os-name linux: env: PATH={work}/bin:{env:PATH}
+when os-name linux: env: JETPACK_FAKE_SYSTEMD_STATE={work}/state
+step: jetpack services down --no-color
+when os-name linux: env: PATH={work}/bin:{env:PATH}
+when os-name linux: env: JETPACK_FAKE_SYSTEMD_STATE={work}/state

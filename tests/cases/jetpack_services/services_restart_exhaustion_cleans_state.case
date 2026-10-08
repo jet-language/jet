@@ -1,0 +1,28 @@
+# Port of tests/jetpack_services.rs:555-608; verbatim source and all original predicates.
+# PENDING-GRAMMAR(batch-four).
+fixture: services_restart_exhaustion_cleans_state.fixture
+env: JETPACK_ROOT={work}/root
+env: HOME={work}/home
+env: JETPACK_SERVICE_HEALTH_TIMEOUT_MS=500
+mkdir: root
+mkdir: home
+when os-name linux: copy: {root}/tests/cases/jetpack_services/services_up_health_logs_down_roundtrip.fixture/bin bin
+when os-name linux: mkdir: state
+when os-name linux: chmod: bin/systemd-run 755
+when os-name linux: chmod: bin/systemctl 755
+step: jetpack services up --no-color
+when os-name linux: env: PATH={work}/bin:{env:PATH}
+when os-name linux: env: JETPACK_FAKE_SYSTEMD_STATE={work}/state
+exit: nonzero
+stderr: ~ "E1261"
+await: file .jet/services/fixture/pid absent timeout 5s every 50ms
+file: .jet/services/fixture/supervisor.error is-file
+step: jetpack services health --no-color
+when os-name linux: env: PATH={work}/bin:{env:PATH}
+when os-name linux: env: JETPACK_FAKE_SYSTEMD_STATE={work}/state
+exit: nonzero
+step: jetpack services down --no-color
+when os-name linux: env: PATH={work}/bin:{env:PATH}
+when os-name linux: env: JETPACK_FAKE_SYSTEMD_STATE={work}/state
+exit: any # original ignored cleanup output/status
+file: .jet/services/fixture/.stopping absent

@@ -1,0 +1,25 @@
+# Port of tests/jetpack_services.rs:1299-1369. PENDING-GRAMMAR(batch-four).
+# alive-nonzombie preserves process_is_alive: Linux state Z is dead, else kill0.
+requires: os-name:linux
+fixture: production_path_kills_descendants_in_the_supervisor_process_group.fixture
+env: JETPACK_ROOT={work}/root
+env: HOME={work}/home
+env: PATH={work}/bin:{env:PATH}
+env: JETPACK_FAKE_SYSTEMD_STATE={work}/state
+mkdir: root
+mkdir: home
+copy: {root}/tests/cases/jetpack_services/services_up_health_logs_down_roundtrip.fixture/bin bin
+mkdir: state
+chmod: bin/systemd-run 755
+chmod: bin/systemctl 755
+step: jetpack services up --no-color
+await: file .jet/services/fixture/data/child.pid lines >= 1 timeout 5s every 50ms
+capture: child = text file .jet/services/fixture/data/child.pid.trim
+cap:child: is-u32
+capture: leader = text file .jet/services/fixture/pid.strip_prefix_lines("pid=").line(0)
+cap:leader: is-u32
+cap:child: != "{cap:leader}"
+process {cap:child}: alive-nonzombie
+step: jetpack services down --no-color
+repeat while process {cap:child} alive-nonzombie timeout 3s every 25ms fail "descendant survived systemd scope shutdown"
+end repeat
