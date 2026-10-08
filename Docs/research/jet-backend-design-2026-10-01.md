@@ -1735,3 +1735,17 @@ free drain; the Host flush is a no-op until startup publishes a buffer, avoiding
 recursive initialization on the allocation-failure path. The paired process/
 captured report fixture sends both streams to one descriptor and requires the
 buffered stdout line to precede the panic header, proving write order.
+
+`LogicalEnvironment.jet` replaces the executable-local Rust environment cell
+with one owned native reader/writer cell using the existing Shared protocol.
+Host argument registration seeds it from owned startup bytes before publishing
+argc; reads and writes never mutate libc's environment or the immutable startup
+index. Unix byte equality, startup duplicate replacement, and remove-then-append
+updates follow `EnvInit.rs:6-35` and `FSIoEnvOsTesting.rs:688-715`.
+The strict getter deliberately collapses absent and non-Unicode to zero because
+the reference `jet_std_env_get` signature is `Option<String>` (569-570).
+The OS getter preserves arbitrary startup bytes and returns presence separately:
+absent is `(0,0,0)`, present empty `(1,0,0)`, nonempty `(1,owned data,length)`;
+callers free nonempty data with exactly length bytes and alignment 1.
+Set returns 0 / -1 InvalidName / -2 InvalidValue; unset returns 0 absent /
+1 removed / -1 InvalidName. These are raw leaf statuses, not guessed enum tags.
