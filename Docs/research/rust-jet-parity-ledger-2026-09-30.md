@@ -334,3 +334,10 @@ Atomic field runner: it checks the same source with supplied Rust and Jet
 compiler CLIs and records each actual exit and diagnostic code set. The
 `assemble` mode retains the whole-production fixture assembler and selects
 the fixture entry and arguments from the manifest, not a shadow checker.
+
+Loaded Core nominal declarations keep their canonical owner identity through
+member imports, qualified imports and generic heads. `Rect` in a signature,
+a `[Rect]` list and a constructor result therefore names one declaration;
+the `imported-rect-identity` row in `core-ownership-cases.json` checks the same
+UI source in both compiler tiers. Jet's registration graph already preserves
+the nominal symbol; the seed import resolver no longer collapses it to a leaf.
