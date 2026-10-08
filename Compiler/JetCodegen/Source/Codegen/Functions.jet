@@ -1530,9 +1530,9 @@ fn jet_codegen_lower_web_reconstructions(builder: JetCodegenBuilder, program: Je
 }
 
 
-// The canonical row sorts below are stable `sort_by`s in place: the
-// comparator reads rows where they lie and the sort moves them, so no row is
-// copied into a scratch list and back.
+// Delegate canonical ordering to the stable mutating List sort. Comparators
+// borrow rows; these helpers no longer construct owning copies of every row.
+// The sort kernel may allocate scratch storage or move rows to a new buffer.
 fn jet_codegen_sort_blocks(blocks: &[MIRBasicBlock]) Never! {
     &blocks.sort_by((left: MIRBasicBlock, right: MIRBasicBlock) -> left.id.value <=> right.id.value)
 }

@@ -123,11 +123,10 @@ fn mir_pass_canonicalize_program_order(program: &MIRProgram) Never! {
     }
 }
 
-// Every canonical order below is one stable `sort_by` over the rows in place:
-// the comparator reads both rows where they lie and the sort moves each row,
-// so no row is copied (the former insertion and position sorts copied every
-// row into a scratch list and back). Equal keys keep their input order, the
-// order those sorts gave.
+// Canonical orders delegate to the stable mutating List sort. Comparators
+// borrow rows instead of constructing owning row snapshots in these helpers.
+// The sort kernel may allocate scratch storage or move rows to a new buffer.
+// Equal keys retain the same input order as the former position sorts.
 fn mir_pass_sort_modules(rows: &[MIRModule]) Never! {
     &rows.sort_by((left: MIRModule, right: MIRModule) -> if left.id.value != right.id.value -> left.id.value <=> right.id.value else -> left.key <=> right.key)
 }
