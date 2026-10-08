@@ -195,3 +195,9 @@ fn scalar_conversion_heads_do_not_contextualize_arithmetic_operands() {
     let codes = err_codes(include_str!("../../../Compiler/JetSema/Tests/ScalarConversionFixtures.jet"));
     assert!(codes.is_empty(), "unexpected errors: {codes:?}");
 }
+
+#[test]
+fn embedded_generic_methods_keep_owner_and_method_scopes() {
+    let codes = err_codes(include_str!("../../../tests/ui/embedded_generic_method_scope.jet"));
+    assert!(codes.is_empty(), "unexpected errors: {codes:?}");
+}
