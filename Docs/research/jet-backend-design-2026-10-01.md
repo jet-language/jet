@@ -2090,3 +2090,23 @@ allocation/free observers for exact-once nested ownership, optional presence,
 borrowed lifetimes, bit-width masking and ordered child growth. Its process
 modes require the shared sequence-stop dependencies; syntax or ABI receipts
 do not prove native layout, linking, process parity or pack admission.
+
+`UiCarriersTable.jet` owns FileFilter's ordered E4 lists and TableState's
+optional Sort/Filter, selected keys and optional anchor/focus; it reuses
+`data_plot_texts_*` rather than introducing another text-list codec.
+Node/FileFilter pointer-list strides are UI-named constants in `UiABI.jet`.
+`UiCarriersSnapshots.jet` preserves all declaration-order fields of Web
+Lifecycle, MutationState, QueryState and StoreEvent, including raw u64/usize
+counters. These are immutable owned snapshots, not live resource state,
+signal storage, callback dispatch or a native admission of those mechanisms.
+Text field outputs lend E4 headers, byte bool outputs lend existing addresses,
+and TableSort's record getter returns a fresh text owner. The pure carriers
+cannot be used to reinterpret Rust or source-nominal allocations.
+
+`UiCarriersSlice3Witness.c` exercises each snapshot field independently,
+ordered list growth and borrowed get, every optional TableState combination,
+deep text/list clone independence, high-bit counters and byte-wide bool
+accessors. Its real allocation/free ledger checks size/alignment and exact-once
+release. The runner reuses canonical shared bounds/capacity and ordinal
+goldens, requiring their real composed Jet providers; no execution or
+native-caller layout admission is implied by syntax checks.
