@@ -11,7 +11,7 @@ fn emit_text_regressions() {
     identifiers :: jet_rust_emit_fold_identifiers("__jet_a .__jet_field x__jet_joined __jet_a __jet_a__jet_b \"__jet_quoted\"")
     assert(identifiers.names.len() == 3)
     assert(identifiers.names[0] == "__jet_a")
-    assert(identifiers.counts.get("__jet_a") == .Val(2))
+    assert((identifiers.counts.get("__jet_a") ?? 0) == 2)
     assert(identifiers.names[1] == "__jet_a__jet_b")
     assert(identifiers.names[2] == "__jet_quoted")
     assert(jet_rust_emit_fold_find("abcabc".bytes(), "bc".bytes(), 2) == 4)
@@ -103,5 +103,6 @@ fn run() {
         }
     }
     loop line in output -> print(line)
-    loop (index, name) in [String]{"fold", "unwrap", "compact"} -> print("@@time {name} {spent[index]}")
+    names :: [String]{"fold", "unwrap", "compact"}
+    loop (index, name) in names -> print("@@time {name} {spent[index]}")
 }
