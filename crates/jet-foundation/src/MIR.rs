@@ -8770,7 +8770,7 @@ fn validate_function(
 /// `mir_operation_can_stop`.
 pub fn mir_operation_can_stop(operation: &MirOperation) -> bool {
     match operation {
-        MirOperation::Call { .. } | MirOperation::IndirectCall { .. } | MirOperation::CoreCall { .. } => true,
+        MirOperation::Call { .. } | MirOperation::IndirectCall { .. } | MirOperation::CoreCall { .. } | MirOperation::Deref { .. } => true,
         MirOperation::Semantic(semantic) => matches!(
             semantic,
             MirSemanticOp::ClosureMethod { .. }

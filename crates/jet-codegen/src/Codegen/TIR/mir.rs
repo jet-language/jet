@@ -6710,13 +6710,14 @@ impl<'a> LowerCtx<'a> {
 
     /// Never read a can-stop result on the stop edge. Only the resume edge
     /// binds it into a lexical frame; Stopped exits through that frame's
-    /// ordinary drop chain. Cleanup, Shield and transaction bodies are masked.
+    /// ordinary drop chain. Cleanup and transaction bodies are masked; Shield
+    /// suppresses Check only, since Propagate must carry panic/runtime faults.
     pub(super) fn emit_poll(&mut self, kind: MirPollKind) -> Result<(), LowerError> {
         if !self.function_registry.stop_points || self.stop_cleanup_active
             || !self.transaction_restores.is_empty() || self.is_terminated()
-            || self.defer_stack.iter().filter_map(|frame| frame.owner).any(|owner| {
+            || (kind == MirPollKind::Check && self.defer_stack.iter().filter_map(|frame| frame.owner).any(|owner| {
                 self.scopes.iter().any(|scope| scope.id == owner && scope.kind == MirScopeKind::Shield)
-            })
+            }))
         {
             return Ok(());
         }

@@ -1584,6 +1584,10 @@ An instrumented raw read skips its native load after a delivered fault and
 leaves its payload unwritten for the MIR Propagate cleanup edge.
 Shield defers cancellation/deadline/interrupt-class stops but never suppresses
 a panic or runtime fault; both Check and Propagate expose those immediately.
+Raw Deref is a can-stop MIR operation. Its Propagate is emitted before the
+result is bound into a lexical cleanup frame, including inside Shield; MIR
+legality requires all result reads, projections and drops to be dominated by
+the resume edge. Cleanup never reads or drops an unwritten raw-read result.
 
 `JetRuntime/Tests/check-object.mjs` checks exact exports and the audited
 `imports.list`, including the allocator constructor relocation.

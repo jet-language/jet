@@ -1141,11 +1141,13 @@ fn jet_codegen_switch_block(builder: &JetCodegenBuilder, program: JetCodegenProg
 // each loop continue target, where every live value is owned by a cleanup
 // frame; `Propagate` directly follows each can-stop operation, before its
 // result is bound, so the stop path never drops a result the operation may
-// have left uninitialized. Cleanup, Shield and transaction regions are
-// masked: they carry no stop points.
+// have left uninitialized. Cleanup and transaction regions carry no polls.
+// Shield suppresses Check, but Propagate must carry panics/runtime faults;
+// the runtime masks only cancellation/deadline/interrupt-class stops.
 fn jet_codegen_emit_poll(builder: &JetCodegenBuilder, program: JetCodegenProgram, kind: MIRPollKind) Never! {
     if !program.stop_points || builder.stop_cleanup_active || builder.transactions.len() > 0 -> return
-    if !jet_codegen_current_is_open(builder, program) || jet_codegen_in_shield(builder) -> return
+    if !jet_codegen_current_is_open(builder, program) -> return
+    if kind == MIRPollKind.Check && jet_codegen_in_shield(builder) -> return
     span :: builder.current_span
     resume :: jet_codegen_new_block(&builder, program, span, "poll-resume")
     stop :: jet_codegen_new_block(&builder, program, span, "poll-stop")
