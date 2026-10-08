@@ -2739,6 +2739,7 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
         row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "builtin method names missing Prelude call {call.value}")
         if lower_lazy_method(p, c, &m, &f, instruction, row, receiver, receiver_place, args) -> return
         if lower_string_method(p, c, &m, &f, instruction, row, receiver, receiver_place, args, aggregate_fields) -> return
+        if lower_bits_clear(p, c, &m, &f, instruction, row, receiver, args) -> return
         if lower_list_method(p, c, &m, &f, instruction, row, receiver, receiver_place, args) -> return
         if lower_map_method(p, c, &m, &f, instruction, row, receiver, receiver_place, args) -> return
         if lower_ordering_method(p, c, &m, &f, instruction, row, receiver, args) -> return
@@ -2774,6 +2775,7 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
     }
     if semantic == .StaticPreludeCall(call, args, owner_type_args, type_args) {
         if lower_lazy_call(p, c, &m, &f, instruction, call, args) -> return
+        if lower_bits_new(p, c, &m, &f, instruction, call, args) -> return
         if lower_shared_new(p, c, &m, &f, instruction, call, args) -> return
         if lower_task_group_new(p, c, &m, &f, instruction, call, args) -> return
         if lower_list_concat(p, c, &m, &f, instruction, call, args) -> return

@@ -907,6 +907,18 @@ if (jetRuntimeExports.has("jet_rt_int_drop") && !adapters.some((adapter) => adap
   adapters.push(adapter);
 }
 
+// Native-only BitSet operations have no seed kernel to wrap. Their dispatch
+// is typed in Routes.jet; the physical providers still use this ABI table.
+for (const [name, params, result] of [
+  ["jet_rt_native_bits_new", [], { jet: 'Plain{carrier: LowerRouteCarrier.Handle{name: "JetBitSet"}}', ret: "i64", outs: [] }],
+  ["jet_rt_native_bits_clear", [{ jet: 'HandleMut{name: "JetBitSet"}', ctys: ["i64"] }], { jet: "Plain{carrier: LowerRouteCarrier.Unit}", ret: null, outs: [] }],
+]) {
+  if (!jetRuntimeExports.has(name)) continue;
+  const adapter = { symbol: name, name, external: true, params, result, rows: [`JetRuntime.BitSet.${name.endsWith("_new") ? "new" : "clear"}`] };
+  validateRuntimeRoute(adapter, jetRuntimeSignatures.get(name));
+  adapters.push(adapter);
+}
+
 // Core types the runtime holds natively: the Jet name -> native Rust type
 // tables generated Rust spells its types with (Codegen/Context.rs and
 // Syntax/predicates.rs, applied in MIRRust.rs `rust_type` order, with its
