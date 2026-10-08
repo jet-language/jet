@@ -5689,11 +5689,6 @@ fn jet_codegen_pattern_variant_slot_type(builder: JetCodegenBuilder, program: Je
     jet_codegen_pattern_variant_payload_type(builder, program, subject_ty, owner, variant, index)
 }
 
-fn jet_codegen_pattern_field_id(builder: JetCodegenBuilder, program: JetCodegenProgram, subject_ty: Type, field: String) -> MIRFieldID Never! {
-    resolved := jet_codegen_resolve_field_by_name(program.modules, builder.function.module_identity, builder.generic_type_names, jet_codegen_unwrap_pattern_tags(subject_ty), field)
-    jet_codegen_mir_field_id(resolved)
-}
-
 fn jet_codegen_pattern_binding_fact(pattern: TPattern, name: String) -> TPatternBindingFact Never! {
     loop fact in pattern.bindings {
         if fact.name == name -> return fact
@@ -6199,7 +6194,7 @@ fn jet_codegen_lower_pattern_shape_test(builder: &JetCodegenBuilder, program: Je
                 if field == {
                     .Bind(_, _, _) -> {}
                     .Value(name, value, field_span) -> {
-                        field_id := jet_codegen_pattern_field_id(builder, program, subject.ty, name)
+                        field_id := jet_codegen_host_field_id(builder, program, subject.ty, name)
                         projected := jet_codegen_emit_value(&builder, program, field_span, value.ty, MIROperation.Field{base: subject_value, field: field_id})
                         expected := jet_codegen_lower_expr(&builder, program, value)
                         dispatch := jet_codegen_binary_dispatch(&builder, program, TBinaryOp.Eq, false, value.ty, field_span, 0)
@@ -6329,7 +6324,7 @@ fn jet_codegen_bind_pattern_shape(builder: &JetCodegenBuilder, program: JetCodeg
                     .Bind(field_name, name, _) -> {
                         if name != "" && name != "_" {
                             fact := jet_codegen_pattern_binding_fact(pattern, name)
-                            field_id := jet_codegen_pattern_field_id(builder, program, subject.ty, field_name)
+                            field_id := jet_codegen_host_field_id(builder, program, subject.ty, field_name)
                             if window == .Val(base) {
                                 window_place := jet_codegen_project_window_place(&builder, program, base, MIRProjection.Field{field: field_id, span: fact.span}, fact.ty, fact.span)
                                 jet_codegen_bind_window_binding(&builder, program, fact, window_place)
