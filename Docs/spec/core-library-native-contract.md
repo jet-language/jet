@@ -452,3 +452,17 @@ A stronger comparative claim additionally requires the strict performance and
 frequency-weighted learnability evidence above. Execution order, active work
 records, blockers, and evidence logs belong in Tower rather than in this
 specification.
+
+### HTTP primitive ownership
+
+The native HTTP Method, HeaderName and HeaderValue handles own the ordinary
+E4 UTF-8 text carrier directly. Clone and show return independent text owners;
+equality compares bytes, without case folding or revalidation. Drop accepts
+null and otherwise releases the text owner. Validation remains at the public
+HTTP constructor boundary, not the ownership helpers.
+
+HTTP Status owns a single raw signed 64-bit word; show renders its decimal
+code. HTTP Version owns a single ordinal word: 0, 1 and 2 render HTTP/1.0,
+HTTP/1.1 and HTTP/2 respectively. An unknown version is unreachable and
+terminates with the runtime's status-101 stop. These carriers use Jet's
+one-word allocation contract, never a Rust enum or struct layout.
