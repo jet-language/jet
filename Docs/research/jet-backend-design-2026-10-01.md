@@ -2363,3 +2363,56 @@ This Node runner is development-test debt: at native cutover, replace
 its launch and all six ledger predicates with the Jet test kit runner, then
 remove the Node implementation after identical exercised results.
 
+### Native data metadata mirrors
+
+`DataMetadata.jet` supplies the 36 native-mapped exports for DataFormat,
+DataLoaderKind, DataAuthority, DataSourceIdentity, DataProvenance and
+DataSnapshotIdentity. These mirror `Core/data/data.jet:29,164-187`, not registered
+source-owned nominals. A future source-module registration must retire the
+corresponding hand carrier and seed glue in one composition.
+
+`DataABI.jet` defines the private carriers: shared enum8, Authority16,
+SourceIdentity32, Provenance24, Snapshot40. Nested text/list/record pointers own
+deep independent values. Equality follows Rust field order. Record text getters
+return fresh owners, source text field helpers copy read/clone-only 24-byte stack
+headers, and provenance field helpers lend its nested records. Existing Authority
+and Snapshot constructors clone borrowed texts; snapshot format is checked before
+allocation. No SourceIdentity or Provenance constructor export is invented; real
+native producers and the ABI witness construct these carriers.
+
+`DataPublicText.jet` is the single private rendering policy port from
+`PreludeDataFlow.rs:167-230,265-307,738-739`: Unicode whitespace trim, ASCII-only
+case folding, first `=` split, SHA-256 digest for empty/keyless parameters,
+substring-sensitive keys, prefix-sensitive values, raw member bounding at a
+4096-byte UTF-8 boundary, fragment removal and first userinfo `@` removal after
+`://`. Locator base text is not bounded. Query entries preserve empty segments,
+order and duplicates. Source list parameters are rendered separately with `?`,
+even when the locator already has a query. Authority bounds/redacts each part;
+Snapshot text remains unbounded and unredacted. Shared `Sha256.jet` owns the hash
+algorithm; the public renderer borrows input bytes and frees its one scratch
+block after appending lowercase hexadecimal.
+
+`Tests/DataPublicGoldens.h` was frozen by the actual Rust Foundation functions,
+not a reimplementation: rustc 1.97.1 (8bab26f4f 2026-07-14), oracle tool exit 0,
+5.14 seconds. Generator command (one-time development oracle, light lane):
+`Tools/agent/jet-env rustc --edition=2021 ~/.cache/jet-dev/scratch/RtBurn1b/data-public-oracle.rs -o ~/.cache/jet-dev/scratch/RtBurn1b/data-public-oracle`,
+then that binary with `Compiler/JetRuntime/Tests/DataPublicGoldens.h`.
+Both invocations ran through `CHEAP_LANE=light ~/.cache/jet-dev/cheap.sh`.
+SHA-256 receipts:
+
+- fixture: `b084a2de95e5a4154f4c016ccbff708b01a4f89a39884baa0be418df49f99f4a`
+- Foundation policy: `badd03a1f45f2c80a844245c1bb7459207b2a28ec4c42154bccb2e02831ebbd7`
+- Foundation SHA: `45f0dd77827f9d6dfd5eb8ae86571b8f2807b5419a30f4270092c7e1682a6e9b`
+- generator: `b18c9b1d2f152e9bed86fb8da54dfbe1bc2b61c8ba63078f413da6c3aab5f5bb`
+
+`DataMetadataWitness.c` links only actual native providers and frozen vectors,
+with `--wrap=jet_rt_free` for exact-once deep-owner release. It covers all 36
+families, constructor borrows, fresh getters, field lifetimes, every equality
+field, enum labels, redaction, first-`=` handling, SHA digests including empty
+input, URL/userinfo/query boundaries, Unicode trimming and multibyte truncation.
+Its `negative` and `range` modes require the canonical native-index-range stop,
+exit 70 and empty stdout. The stdout fixture is expected output, not a native
+execution receipt. Composition must admit fresh layout/MIR/imports and suppress
+obsolete seed exports before linking/running; syntax checks do not establish
+runtime parity or Rust/toolchain retirement.
+
