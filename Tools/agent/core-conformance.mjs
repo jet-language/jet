@@ -357,6 +357,8 @@ fn run() {
 // prove several rows, and each row may require several deterministic witnesses.
 // Paths are relative to the conformance corpus root.
 const FIXTURE_BINDINGS = new Map([
+  ["core.crypto.vault.status", ["core/crypto/vault/error_identity.jet"]],
+  ["core.crypto.vault.prepare_import_signing", ["core/crypto/vault/guard_errors.jet"]],
   ["collection.Condition.notify_one", [
     "core/sync/condition_deadline.jet",
     "core/sync/condition_notify_all.jet",

@@ -3,7 +3,7 @@
 // The registered raw leaves own authenticated repository state, persistence,
 // and key-material lifetimes. Jet validates names and authorization reasons;
 // opaque plan/write handles must never be treated as caller-authored JSON or paths.
-use core.crypto.[Secret, SigningKey, X25519PublicKey, X25519SecretKey]
+use core.crypto.[CryptoError, Secret, SigningKey, X25519PublicKey, X25519SecretKey]
 use core.crypto.vault as vault
 use core.text as unicode
 
@@ -13,7 +13,7 @@ pub struct KeyRef<T> {
 }
 
 pub enum KeyStatus {
-    Current
+    Active
     Retired
     Revoked
 }
@@ -42,10 +42,19 @@ pub struct WrappedImportPlan<T> {
 
 #Error
 pub enum VaultError {
+    InvalidName
     NotFound
+    WrongType
     Revoked
-    Unauthorized
-    Corrupt
+    Locked
+    AuthorityDenied
+    Conflict
+    UnsupportedProvider
+    InvalidEncoding
+    DurabilityUnknown
+    Crypto(CryptoError)
+    IO(operation: String, redacted_path: String)
+    Internal(incident_id: String)
 }
 
 pub struct WrappedVaultKey {
@@ -104,7 +113,7 @@ pub fn load<T>(key: &KeyRef<T>) -[Secret]> T VaultError! {
 }
 
 pub fn current<T>(name: String) -[Secret]> KeyRef<T>? VaultError! {
-    validate_name(name) ?? return Err(VaultError.Unauthorized)
+    validate_name(name) ?? return Err(VaultError.InvalidName)
     #Unsafe("vault typed current provider boundary") {
         return vault.current<T>(name)
     }
@@ -117,37 +126,37 @@ pub fn status<T>(key: &KeyRef<T>) -[Secret]> KeyStatus VaultError! {
 }
 
 pub fn versions<T>(name: String) -[Secret]> [KeyRef<T>] VaultError! {
-    validate_name(name) ?? return Err(VaultError.Unauthorized)
+    validate_name(name) ?? return Err(VaultError.InvalidName)
     #Unsafe("vault typed versions provider boundary") {
         return vault.versions<T>(name)
     }
 }
 
 pub fn prepare_generate<T>(name: String) -[Secret]> MutationPlan<T> VaultError! {
-    validate_name(name) ?? return Err(VaultError.Unauthorized)
+    validate_name(name) ?? return Err(VaultError.InvalidName)
     #Unsafe("vault typed generation provider boundary") {
         return vault.prepare_generate<T>(name)
     }
 }
 
 pub fn prepare_store<T>(name: String, key: ^T) -[Secret]> MutationPlan<T> VaultError! {
-    validate_name(name) ?? return Err(VaultError.Unauthorized)
+    validate_name(name) ?? return Err(VaultError.InvalidName)
     #Unsafe("vault typed store provider boundary") {
         return vault.prepare_store<T>(name, ^key)
     }
 }
 
 pub fn prepare_import_signing(name: String, bytes: ^[U8]) -[Secret]> MutationPlan<SigningKey> VaultError! {
-    validate_name(name) ?? return Err(VaultError.Unauthorized)
-    if bytes.len() != 32 -> return Err(VaultError.Corrupt)
+    validate_name(name) ?? return Err(VaultError.InvalidName)
+    if bytes.len() != 32 -> return Err(VaultError.InvalidEncoding)
     #Unsafe("vault key import: signing key material") {
         return vault.prepare_import_signing(name, ^bytes)
     }
 }
 
 pub fn prepare_import_x25519(name: String, bytes: ^[U8]) -[Secret]> MutationPlan<X25519SecretKey> VaultError! {
-    validate_name(name) ?? return Err(VaultError.Unauthorized)
-    if bytes.len() != 32 -> return Err(VaultError.Corrupt)
+    validate_name(name) ?? return Err(VaultError.InvalidName)
+    if bytes.len() != 32 -> return Err(VaultError.InvalidEncoding)
     #Unsafe("vault key import: X25519 secret material") {
         return vault.prepare_import_x25519(name, ^bytes)
     }
@@ -162,28 +171,28 @@ pub fn prepare_import_wrapped<T>(name: String, wrapped: WrappedVaultKey, unlock:
 }
 
 pub fn prepare_rotate<T>(name: String) -[Secret]> MutationPlan<T> VaultError! {
-    validate_name(name) ?? return Err(VaultError.Unauthorized)
+    validate_name(name) ?? return Err(VaultError.InvalidName)
     #Unsafe("vault typed rotation provider boundary") {
         return vault.prepare_rotate<T>(name)
     }
 }
 
 pub fn prepare_retire<T>(key: &KeyRef<T>, reason: String) -[Secret]> MutationPlan<T> VaultError! {
-    validate_reason(reason) ?? return Err(VaultError.Unauthorized)
+    validate_reason(reason) ?? return Err(VaultError.InvalidName)
     #Unsafe("vault typed retirement provider boundary") {
         return vault.prepare_retire<T>(key, reason)
     }
 }
 
 pub fn prepare_revoke<T>(key: &KeyRef<T>, reason: String) -[Secret]> MutationPlan<T> VaultError! {
-    validate_reason(reason) ?? return Err(VaultError.Unauthorized)
+    validate_reason(reason) ?? return Err(VaultError.InvalidName)
     #Unsafe("vault typed revocation provider boundary") {
         return vault.prepare_revoke<T>(key, reason)
     }
 }
 
 pub fn authorize_write<T>(plan: &MutationPlan<T>, reason: String) -[Secret]> VaultWrite<T> VaultError! {
-    validate_reason(reason) ?? return Err(VaultError.Unauthorized)
+    validate_reason(reason) ?? return Err(VaultError.InvalidName)
     #Unsafe("vault write authorization provider boundary") {
         return vault.authorize_write<T>(plan, reason)
     }
