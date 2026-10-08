@@ -787,6 +787,10 @@ fn run() {
     // Tests/Fixtures/*.jet
     if !fx_report("close-generic", fx_close_generic()) -> clean = false
     if !fx_report_runtime("close-cell-rebind", fx_close_cell_rebind()) -> clean = false
+    if !fx_close_pair_remainder_checks(true) || !fx_close_pair_remainder_checks(false) {
+        print("issue close: generic/concrete owned Pair remainder passes the moved first field to Close")
+        clean = false
+    }
     if !fx_close_escape_checks() {
         print("issue close: partially moved owner escaped into an aggregate")
         clean = false

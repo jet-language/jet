@@ -1,11 +1,12 @@
 // #4792: instantiated ordinary drop must select Close, while the consuming
 // Close receiver's cleanup is structural-only. Moved fields are not live zeros.
 use jet_foundation.[MIRAccess, MIRBinaryOp, MIRBlockID, MIRConstant, MIRField, MIRFieldValue, MIRFunction, MIRFunctionID, MIRFunctionForm, MIRImplDef, MIROperation, MIROwnershipMode, MIRPlace, MIRPlaceBase, MIRPlaceID, MIRProjection, MIRProgram, MIRTerminator, MIRType, MIRTypeDef, MIRTypeDefKind, MIRTypeKind, MIRValueID, mir_field_id, mir_function_id, mir_type_from_kind, mir_type_id, mir_owned_ownership, mir_ownership_from_access]
-use jet_backend.[lir_lower_entry, lir_print_module, x64_relocatable_object]
+use jet_backend.[LIRCallee, LIRInst, LIRTerminator, lir_lower_entry, lir_print_module, x64_relocatable_object]
 
 fn fx_close_secret(b: &FxBuilder, id: Int) -> MIRValueID Never! {
     number :: fx_int_const(&b, id)
-    fx_owned(&b, fx_named("Secret"), MIROperation.Struct{type_id: mir_type_id("Secret"), fields: [MIRFieldValue]{MIRFieldValue{field: mir_field_id("Secret.id"), value: number}}})
+    token :: fx_mono_text(&b, "owned")
+    fx_owned(&b, fx_named("Secret"), MIROperation.Struct{type_id: mir_type_id("Secret"), fields: [MIRFieldValue]{MIRFieldValue{field: mir_field_id("Secret.id"), value: number}, MIRFieldValue{field: mir_field_id("Secret.token"), value: token}}})
 }
 
 fn fx_close_wrapper(b: &FxBuilder, ty: MIRType, value: MIRValueID) -> MIRValueID Never! {
@@ -49,7 +50,7 @@ fn fx_close_generic() -> MIRProgram Never! {
     pair_def := fx_type_def("ClosePair", MIRTypeDefKind.Struct{fields: [MIRField]{fx_field("ClosePair", "first", fx_mono_parameter("T")), fx_field("ClosePair", "second", fx_mono_parameter("T"))}, methods: [MIRFunctionID]{}})
     pair_def.generic_params = fx_mono_binders("T")
     types :: [MIRTypeDef]{
-        fx_type_def("Secret", MIRTypeDefKind.Struct{fields: [MIRField]{fx_field("Secret", "id", fx_int())}, methods: [MIRFunctionID]{}}),
+        fx_type_def("Secret", MIRTypeDefKind.Struct{fields: [MIRField]{fx_field("Secret", "id", fx_int()), fx_field("Secret", "token", fx_string())}, methods: [MIRFunctionID]{}}),
         wrapper_def,
         pair_def,
     }
@@ -222,4 +223,183 @@ fn fx_close_cell_rebind() -> MIRProgram Never! {
     fx_block(&b, 0, MIRTerminator.Return{value: None})
     p.functions = [MIRFunction]{method, fx_function("run", b, fx_unit())}
     p
+}
+
+// Match both producer shapes: a generic instantiated field and a concrete one.
+// expect-stdout close-pair-remainder: "27\n28\n"
+fn fx_close_pair_remainder(generic: Bool) -> MIRProgram Never! {
+    p := fx_close_generic()
+    secret :: fx_named("Secret")
+    owner :: if generic -> "ClosePair" else -> "CloseDirectPair"
+    ty :: if generic -> fx_mono_apply(owner, [MIRType]{secret}) else -> fx_named(owner)
+    if !generic -> &p.types.push(fx_type_def(owner, MIRTypeDefKind.Struct{fields: [MIRField]{fx_field(owner, "first", secret), fx_field(owner, "second", secret)}, methods: [MIRFunctionID]{}}))
+    b := fx_builder()
+    slot :: fx_local(&b, "pair", ty, mir_owned_ownership())
+    first :: fx_field_place(&b, slot, "{owner}.first", secret)
+    left :: fx_close_secret(&b, 27)
+    right :: fx_close_secret(&b, 28)
+    pair :: fx_owned(&b, ty, MIROperation.Struct{type_id: mir_type_id(owner), fields: [MIRFieldValue]{MIRFieldValue{field: mir_field_id("{owner}.first"), value: left}, MIRFieldValue{field: mir_field_id("{owner}.second"), value: right}}})
+    fx_do(&b, MIROperation.WritePlace{place: slot, value: pair})
+    taken :: fx_owned(&b, secret, MIROperation.MovePlace{place: first})
+    fx_mono_drop(&b, taken)
+    remainder :: fx_owned(&b, ty, MIROperation.MovePlace{place: slot})
+    fx_mono_drop(&b, remainder)
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    p.functions = [MIRFunction]{fx_close_method(), fx_function("run", b, fx_unit())}
+    p
+}
+
+// Assert the actual O0 LIR guard, not just a stdout expectation: the owner's
+// first-field Close call is dominated by its cleared private live-bit branch.
+// The sibling has one live ordinary Close call and the taken value one of its own.
+struct FxCloseDropCall { pub block: Int, pub offset: Int? }
+
+fn fx_close_pair_remainder_checks(generic: Bool) -> Bool Never! {
+    lowered :: lir_lower_entry(fx_close_pair_remainder(generic), mir_function_id("run"))
+    if lowered.issues.len() != 0 -> return false
+    entry :: lowered.entry ?? return false
+    root :: lowered.lir.functions[entry.value]
+    close := -1
+    loop function in lowered.lir.functions {
+        if function.name.ends_with("secret_close") -> close = function.id.value
+    }
+    if close < 0 -> return false
+    glue := [Int:Bool]{}
+    loop function in lowered.lir.functions {
+        loop block in function.blocks {
+            loop inst in block.insts {
+                if inst == .Call(_, _, callee, _) {
+                    if callee == .Function(target) && target.value == close -> &glue.add(function.id.value, true).drop("records the ordinary Close role")
+                }
+            }
+        }
+    }
+    owner := -1
+    loop block in root.blocks {
+        loop inst in block.insts {
+            // Secret is Int + String (16 bytes); Pair<Secret> is 32 bytes.
+            if inst == .StackSlot(dst, size, _) {
+                if size == 32 -> owner = dst.value
+            }
+        }
+    }
+    if owner < 0 || glue.len() == 0 -> return false
+    constants := [Int:Int]{}
+    memory := [Int:Int?]{}
+    origins := [Int:Int]{}
+    memory_origins := [Int:Int]{}
+    offsets := [Int:Int]{owner: 0}
+    reset := [Int:Bool]{}
+    cleared := [Int:Bool]{}
+    indices := [Int:Int]{}
+    calls := [FxCloseDropCall]{}
+    has_cleared_guard := false
+    loop (index, block) in root.blocks -> &indices.add(block.id.value, index).drop("indexes CFG blocks")
+    loop block in root.blocks {
+        loop inst in block.insts {
+            if inst == {
+                .Const(dst, value) -> &constants.add(dst.value, value).drop("records an SSA constant")
+                .Copy(dst, src) | .Move(dst, src) -> {
+                    if (~constants.get(src.value)) == .Val(value) -> &constants.add(dst.value, value).drop("copies a constant")
+                    if (~origins.get(src.value)) == .Val(origin) -> &origins.add(dst.value, origin).drop("copies live-bit provenance")
+                    if (~offsets.get(src.value)) == .Val(offset) -> &offsets.add(dst.value, offset).drop("copies owner-relative address")
+                }
+                .Binary(dst, op, left, right) -> {
+                    if op == .And {
+                        a :: (~constants.get(left.value)) ?? next
+                        b :: (~constants.get(right.value)) ?? next
+                        &constants.add(dst.value, a & b).drop("tracks live-bit conjunction")
+                        if (~origins.get(right.value)) == .Val(origin) -> &origins.add(dst.value, origin).drop("tracks transferred live-bit provenance")
+                    }
+                }
+                .PointerAdd(dst, base, offset) -> {
+                    start :: (~offsets.get(base.value)) ?? next
+                    amount :: (~constants.get(offset.value)) ?? next
+                    &offsets.add(dst.value, start + amount).drop("records owner-relative field address")
+                }
+                .Compare(dst, condition, left, right) -> {
+                    // Every owner-relative address is a non-null StackSlot address.
+                    if (offsets.get(left.value) != None && (constants.get(right.value) ?? -1) == 0) || (offsets.get(right.value) != None && (constants.get(left.value) ?? -1) == 0) {
+                        if condition == .Eq -> &constants.add(dst.value, 0).drop("the owner storage is not null")
+                        else if condition == .Ne -> &constants.add(dst.value, 1).drop("the owner storage is non-null")
+                    }
+                }
+                .Store(base, offset, value) -> {
+                    if offset != 0 -> next
+                    number :: ~constants.get(value.value)
+                    &memory.add(base.value, number).drop("records the last private flag store")
+                    if number == .Val(bit) {
+                        if bit == 1 -> &reset.add(base.value, true).drop("records the flag becoming live")
+                        if bit == 0 && reset.get(base.value) != None -> &cleared.add(base.value, true).drop("records the move clearing a live flag")
+                    }
+                    origin :: (~origins.get(value.value)) ?? base.value
+                    &memory_origins.add(base.value, origin).drop("records flag transfer provenance")
+                }
+                .Load(dst, base, offset) -> {
+                    if offset != 0 -> next
+                    stored :: (~memory.get(base.value)) ?? next
+                    number :: stored ?? next
+                    &constants.add(dst.value, number).drop("reads the private live bit")
+                    origin :: (~memory_origins.get(base.value)) ?? base.value
+                    &origins.add(dst.value, origin).drop("records live-bit source")
+                }
+                .Call(_, _, callee, args) -> {
+                    if callee == .Function(target) {
+                        if glue.get(target.value) == None || args.len() != 1 -> next
+                        offset :: ~offsets.get(args[0].value)
+                        &calls.push(FxCloseDropCall{block: block.id.value, offset: offset})
+                    }
+                }
+                else -> {}
+            }
+        }
+        if block.terminator == .Branch(condition, _, _) {
+            if (constants.get(condition.value) ?? -1) == 0 && origins.get(condition.value) != None {
+                origin :: (~origins.get(condition.value)) ?? return false
+                if cleared.get(origin) != None -> has_cleared_guard = true
+            }
+        }
+    }
+    if !has_cleared_guard -> return false
+    // Follow the real CFG, including the jump from the all-live arm into the
+    // ordinary owner drop. A zero flag makes that whole arm unreachable.
+    reachable := [Int:Bool]{}
+    queue := [Int]{root.blocks[0].id.value}
+    cursor := 0
+    loop cursor < queue.len() {
+        id :: queue[cursor]
+        cursor += 1
+        if reachable.get(id) != None -> next
+        &reachable.add(id, true).drop("visits a CFG block once")
+        index :: (~indices.get(id)) ?? return false
+        terminator :: root.blocks[index].terminator
+        if terminator == {
+            .Jump(target) -> &queue.push(target.block.value)
+            .Branch(condition, yes, no) -> {
+                bit :: (~constants.get(condition.value)) ?? -1
+                if bit != 0 -> &queue.push(yes.block.value)
+                if bit != 1 -> &queue.push(no.block.value)
+            }
+            else -> {}
+        }
+    }
+    first_calls := 0
+    second_calls := 0
+    taken_calls := 0
+    loop call in calls {
+        live :: reachable.get(call.block) != None
+        if call.offset == {
+            .Val(offset) -> {
+                if offset == 0 {
+                    if live -> return false
+                    first_calls += 1
+                } else if offset == 16 {
+                    if live -> second_calls += 1
+                } else -> return false
+            }
+            .None -> if live -> taken_calls += 1
+            else -> return false
+        }
+    }
+    first_calls >= 1 && second_calls == 1 && taken_calls == 1
 }
