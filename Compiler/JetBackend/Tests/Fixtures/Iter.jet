@@ -158,3 +158,20 @@ fn fx_iter_big_step_overflow() -> MIRProgram Never! {
     fx_block(&b, at, MIRTerminator.Return{value: None})
     fx_iter_program(b)
 }
+
+// No stream storage is manufactured here: absent native carrier metadata must
+// produce a named lowering issue, not reinterpret an opaque seed pointer.
+fn fx_pipe_missing_carrier_checks() -> Bool Never! {
+    names :: [String]{"Unvetted::ProcessStdoutStream", "Unvetted::ProcessStderrStream"}
+    loop name in names {
+        b := fx_builder()
+        source :: fx_param(&b, "stream", fx_named(name), fx_borrow())
+        _ := fx_owned(&b, fx_named("IterCursor"), MIROperation.LoopIterInit{
+            call: fx_prelude_id("core.loop", "loop_iter_init"), collection: source,
+            step: None, by_value: false, source_kind: MIRLoopSourceKind.LinesProcessStream,
+        })
+        fx_block(&b, 0, MIRTerminator.Return{value: None})
+        if !fx_mono_has_issue(fx_iter_program(b), name, false) -> return false
+    }
+    true
+}

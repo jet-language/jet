@@ -10,7 +10,8 @@
 // advance/release helpers (keyed by the iterator type) call the user's
 // `next` directly.
 use jet_foundation.[
-    MIRFunction, MIRInstruction, MIRPreludeCallID, MIRProgram, MIRType, MIRValueID,
+    MIRFunction, MIRInstruction, MIRPanicContext, MIRPanicLocal, MIRPanicLoc,
+    MIRPreludeCallID, MIRProgram, MIRType, MIRValueID,
     mir_type_display_name, mir_type_identity_key,
 ]
 
@@ -21,9 +22,44 @@ fn lower_function_with_key(p: MIRProgram, key: String) -> MIRFunction? {
     None
 }
 
+// Source-owned process helpers are selected from checked MIR, never by a
+// guessed function id or by interpreting the seed's Rc/BufReader storage.
+fn lower_pipe_next_name(ty: MIRType) -> String Never! {
+    if ty.kind == .Apply(name, args) {
+        if args.len() != 0 -> return ""
+        if name.name == "ProcessStdoutStream" || name.name.ends_with("::ProcessStdoutStream") -> return "__stdout_next_line"
+        if name.name == "ProcessStderrStream" || name.name.ends_with("::ProcessStderrStream") -> return "__stderr_next_line"
+    }
+    ""
+}
+
+fn lower_pipe_next(p: MIRProgram, ty: MIRType) -> MIRFunction? {
+    name :: lower_pipe_next_name(ty)
+    if name == "" -> return None
+    selected := MIRFunction?{None}
+    loop function in p.functions {
+        if function.name != name || function.params.len() != 1 -> next
+        if mir_type_identity_key(function.params[0].ty) != mir_type_identity_key(ty) -> next
+        authored := false
+        loop source in p.source_files {
+            if source.id == function.source_file && (source.path == "Core/process/process.jet" || source.path.ends_with("/Core/process/process.jet")) -> authored = true
+        }
+        if !authored -> next
+        if selected != None -> return None
+        selected = Val(function)
+    }
+    selected
+}
+
+fn lower_iterable_item_type(next: MIRFunction) -> MIRType Never! {
+    if next.return_type.kind == .Result(ok, _) -> return ok
+    next.return_type
+}
+
 // The user `Iterator.next` of iterator type `ty`, None when `ty` implements no
 // Iterator.
 fn lower_iterable_next(p: MIRProgram, ty: MIRType) -> MIRFunction? {
+    if lower_pipe_next_name(ty) != "" -> return lower_pipe_next(p, ty)
     identity :: mir_type_identity_key(ty)
     loop implementation in p.impls {
         trait_ref :: implementation.trait_ref ?? next
@@ -50,9 +86,22 @@ fn lower_iterable_state_size(p: MIRProgram, iter_ty: MIRType) -> Int Never! {
 // (an inline value is its storage's address), returning an `Option` box.
 fn lower_iterable_next_problem(p: MIRProgram, m: LowerModule, next: MIRFunction, iter_ty: MIRType) -> String? {
     if next.generic_params.len() > 0 || next.capture_params.len() > 0 || next.params.len() != 1 -> return Val("Iterator.next {next.key} has no plain receiver-only signature")
-    if next.params[0].access != .Write && !(next.params[0].access == .Read && lower_is_inline(p, iter_ty)) -> return Val("Iterator.next {next.key} receiver convention")
-    optional :: if next.return_type.kind == .Option(_) -> true else -> false
-    if !optional -> return Val("Iterator.next {next.key} result {mir_type_display_name(next.return_type)}")
+    if lower_pipe_next_name(iter_ty) != "" {
+        if next.params[0].access != .Read -> return Val("process next helper {next.key} does not borrow its stream")
+        if next.return_type.kind == .Result(ok, _) {
+            if ok.kind == .Option(inner) {
+                if inner.kind != .String -> return Val("process next helper {next.key} does not return Result<Option<String>, IOError>")
+            } else {
+                return Val("process next helper {next.key} does not return Result<Option<String>, IOError>")
+            }
+        } else {
+            return Val("process next helper {next.key} does not return Result<Option<String>, IOError>")
+        }
+    } else {
+        if next.params[0].access != .Write && !(next.params[0].access == .Read && lower_is_inline(p, iter_ty)) -> return Val("Iterator.next {next.key} receiver convention")
+        optional :: if next.return_type.kind == .Option(_) -> true else -> false
+        if !optional -> return Val("Iterator.next {next.key} result {mir_type_display_name(next.return_type)}")
+    }
     index :: lower_function_index(m, next.id)
     if index < 0 -> return Val("Iterator.next {next.key} is not lowered")
     if m.mir_results[index] != 0 -> return Val("Iterator.next {next.key} returns through memory")
@@ -61,11 +110,52 @@ fn lower_iterable_next_problem(p: MIRProgram, m: LowerModule, next: MIRFunction,
 
 // One `next` call on the iterator at `cell`: the Option box it returns (null
 // for None), owned by the caller.
-fn lower_iterable_pull(m: &LowerModule, f: &LowerFunction, next: MIRFunction, cell: LIRValueID) -> LIRValueID Never! {
+fn lower_iterable_pull(p: MIRProgram, m: &LowerModule, f: &LowerFunction, next: MIRFunction, cell: LIRValueID) -> LIRValueID Never! {
     index :: lower_function_index(m, next.id)
     signature :: ~m.mir_signatures[index]
+    receiver := cell
+    if lower_pipe_next_name(next.params[0].ty) != "" {
+        receiver = lower_read_at(p, &f, cell, 0, next.params[0].ty) ?? {
+            lower_fail(&m, &f, "process line source has no native stream carrier")
+            return cell
+        }
+    }
     item :: lower_pointer(&f)
-    lower_emit(&f, LIRInst.Call{dst: Val(item), signature: signature, callee: LIRCallee.Function{id: LIRFunctionID{value: index}}, args: [LIRValueID]{cell}})
+    lower_emit(&f, LIRInst.Call{dst: Val(item), signature: signature, callee: LIRCallee.Function{id: LIRFunctionID{value: index}}, args: [LIRValueID]{receiver}})
+    if next.return_type.kind == .Result(ok, err) {
+        outcome_tag :: lower_list_word(&f, item, 0)
+        zero :: lower_const(&f, 0)
+        failed :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Compare{dst: failed, condition: LIRCondition.Eq, left: outcome_tag, right: zero})
+        stop :: lower_new_block(&f)
+        valid :: lower_new_block(&f)
+        lower_seal(&f, LIRTerminator.Branch{condition: failed, then_target: lower_target(stop, [LIRValueID]{}), else_target: lower_target(valid, [LIRValueID]{})})
+        lower_start(&f, stop, [LIRValueID]{})
+        failure :: lower_read_at(p, &f, item, 8, err) ?? {
+            lower_fail(&m, &f, "process line source IOError has no native representation")
+            return item
+        }
+        text :: lower_render_value(p, &m, &f, err, Val(failure), LowerRenderMode.Display) ?? {
+            lower_fail(&m, &f, "process line source IOError Display is not lowered")
+            return item
+        }
+        // The same native panic route as a checked source panic. Preserve the
+        // Prelude location; the helper's returned diagnostic is not replaced.
+        context :: MIRPanicContext{function: "", source_line: "", caret: 0, locals: [MIRPanicLocal]{}}
+        location :: MIRPanicLoc{file: next.source_file, line: 0, column: 0}
+        data :: lower_require_descriptor(&m, "<core.prelude>", location, context)
+        descriptor :: lower_pointer(&f)
+        lower_emit(&f, LIRInst.DataAddress{dst: descriptor, data: data})
+        null :: lower_require_null(&f)
+        lower_noreturn_call(&m, &f, "jet_rt_require_stop", [LIRValueID]{lower_const(&f, 2), descriptor, text.value, null, null, null})
+        lower_start(&f, valid, [LIRValueID]{})
+        optional :: lower_read_at(p, &f, item, 8, ok) ?? {
+            lower_fail(&m, &f, "process line source Option has no native representation")
+            return item
+        }
+        lower_free_shell(&m, &f, item, lower_result_box_size(p, ok, err))
+        return optional
+    }
     item
 }
 
@@ -125,7 +215,7 @@ fn lower_iterable_cursor_init(p: MIRProgram, c: LowerContext, m: &LowerModule, f
     }
     // A read-only `iter` borrows the source; the loop still consumes it.
     if iter.params[0].access != .Move -> lower_map_drop_value(p, &m, &f, source, collection_ty)
-    first :: lower_iterable_pull(&m, &f, next, cell)
+    first :: lower_iterable_pull(p, &m, &f, next, cell)
     lower_emit(&f, LIRInst.Store{base: state, offset: 0, value: first})
     lower_emit(&f, LIRInst.Store{base: state, offset: 8, value: stride})
     null :: lower_pointer(&f)
@@ -134,6 +224,67 @@ fn lower_iterable_cursor_init(p: MIRProgram, c: LowerContext, m: &LowerModule, f
     lower_emit(&f, LIRInst.Compare{dst: exhausted, condition: LIRCondition.Eq, left: first, right: null})
     lower_emit(&f, LIRInst.Store{base: state, offset: 16, value: exhausted})
     release :: lower_helper_id(&m, "iter.release", iter_ty)
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return
+    lower_alloc(&m, &f, dst, 48)
+    lower_emit(&f, LIRInst.Store{base: dst, offset: 0, value: state})
+    lower_store_word(&f, dst, 8, -1)
+    lower_store_word(&f, dst, 16, 1)
+    lower_store_word(&f, dst, 24, release.value)
+    lower_store_word(&f, dst, 32, 0)
+    lower_store_word(&f, dst, 40, 0)
+}
+
+fn lower_pipe_carrier_problem(ty: MIRType) -> String? {
+    if ty.kind == .Apply(name, args) {
+        if args.len() == 0 {
+            if lower_runtime_handle(name.name) == .Val(handle) {
+                if handle.clone -> return None
+            }
+        }
+    }
+    Val("process line source {mir_type_display_name(ty)} has no vetted native clone/drop carrier")
+}
+
+// Process streams clone only the native holder; every cursor sees the same
+// checked Core buffer/position. They do not use an Iterable.iter shim.
+fn lower_pipe_cursor_init(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, collection: MIRValueID, step: MIRValueID?, by_value: Bool) Never! {
+    if !lower_iter_route(p, &m, &f, call, "jet_loop_iter_init", 5) -> return
+    ty :: lower_value_type(c, collection) ?? return lower_fail(&m, &f, "process line source has no checked stream type")
+    next :: lower_pipe_next(p, ty) ?? return lower_fail(&m, &f, "process line source {mir_type_display_name(ty)} has no checked Core next helper")
+    if lower_pipe_carrier_problem(ty) == .Val(problem) -> return lower_fail(&m, &f, problem)
+    if lower_iterable_next_problem(p, m, next, ty) == .Val(problem) -> return lower_fail(&m, &f, problem)
+    cursor_ty :: lower_checked_type(c, instruction) ?? return lower_fail(&m, &f, "process line cursor has no checked type")
+    if !lower_is_iter_cursor(cursor_ty) -> return lower_fail(&m, &f, "process line cursor type is not lowered")
+    stride := lower_const(&f, 1)
+    if step == .Val(value) {
+        stride = lower_use(&m, &f, value) ?? return
+        step_ty :: lower_value_type(c, value) ?? return lower_fail(&m, &f, "process line stride has no checked type")
+        if lower_is_exact_int(step_ty) {
+            native :: lower_word(&f)
+            lower_convert_exact(&m, &f, native, stride, "jet_int_owned_to_i64", false)
+            stride = native
+        }
+        if lower_value_layout(f, stride) != lir_layout_word() -> return lower_fail(&m, &f, "process line stride has no native word carrier")
+    }
+    invalid :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: invalid, condition: LIRCondition.Le, left: stride, right: lower_const(&f, 0)})
+    lower_iter_check(&m, &f, invalid, "iterator loop stride must be positive")
+    source :: lower_use(&m, &f, collection) ?? return
+    held :: lower_pointer(&f)
+    lower_clone_into(p, &m, &f, source, held, ty)
+    state :: lower_pointer(&f)
+    lower_alloc(&m, &f, state, lower_iterable_state_size(p, ty))
+    lower_emit(&f, LIRInst.Store{base: state, offset: lower_iterable_state_head(), value: held})
+    if by_value && lower_value_owned(c, collection) -> lower_map_drop_value(p, &m, &f, source, ty)
+    cell :: lower_address(&f, state, lower_iterable_state_head())
+    first :: lower_iterable_pull(p, &m, &f, next, cell)
+    lower_emit(&f, LIRInst.Store{base: state, offset: 0, value: first})
+    lower_emit(&f, LIRInst.Store{base: state, offset: 8, value: stride})
+    exhausted :: lower_flag(&f)
+    null :: lower_require_null(&f)
+    lower_emit(&f, LIRInst.Compare{dst: exhausted, condition: LIRCondition.Eq, left: first, right: null})
+    lower_emit(&f, LIRInst.Store{base: state, offset: 16, value: exhausted})
+    release :: lower_helper_id(&m, "iter.release", ty)
     dst :: lower_result(p, c, &m, &f, instruction) ?? return
     lower_alloc(&m, &f, dst, 48)
     lower_emit(&f, LIRInst.Store{base: dst, offset: 0, value: state})
@@ -200,7 +351,7 @@ fn lower_iterable_cursor_helper(p: MIRProgram, m: &LowerModule, glue: LowerGlue,
         lower_seal(&f, LIRTerminator.Unreachable)
         return lir_builder_finish(f.builder)
     }
-    item_ty :: next.return_type
+    item_ty :: lower_iterable_item_type(next)
     head :: lower_iterable_state_head()
     state :: lower_pointer(&f)
     lower_emit(&f, LIRInst.Load{dst: state, base: cursor, offset: 0})
@@ -239,7 +390,7 @@ fn lower_iterable_cursor_helper(p: MIRProgram, m: &LowerModule, glue: LowerGlue,
     lower_emit(&f, LIRInst.Compare{dst: more, condition: LIRCondition.Lt, left: at, right: skips})
     lower_seal(&f, LIRTerminator.Branch{condition: more, then_target: lower_target(skip_body, [LIRValueID]{}), else_target: lower_target(last, [LIRValueID]{})})
     lower_start(&f, skip_body, [LIRValueID]{})
-    skipped :: lower_iterable_pull(&m, &f, next, cell)
+    skipped :: lower_iterable_pull(p, &m, &f, next, cell)
     none :: lower_flag(&f)
     lower_emit(&f, LIRInst.Compare{dst: none, condition: LIRCondition.Eq, left: skipped, right: null})
     lower_seal(&f, LIRTerminator.Branch{condition: none, then_target: lower_target(ended, [LIRValueID]{}), else_target: lower_target(skip_keep, [LIRValueID]{})})
@@ -253,7 +404,7 @@ fn lower_iterable_cursor_helper(p: MIRProgram, m: &LowerModule, glue: LowerGlue,
     lower_emit(&f, LIRInst.Store{base: state, offset: 16, value: yes})
     lower_seal(&f, LIRTerminator.Jump{target: lower_target(finish, [LIRValueID]{})})
     lower_start(&f, last, [LIRValueID]{})
-    pulled :: lower_iterable_pull(&m, &f, next, cell)
+    pulled :: lower_iterable_pull(p, &m, &f, next, cell)
     lower_emit(&f, LIRInst.Store{base: state, offset: 0, value: pulled})
     done :: lower_flag(&f)
     lower_emit(&f, LIRInst.Compare{dst: done, condition: LIRCondition.Eq, left: pulled, right: null})

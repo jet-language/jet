@@ -176,12 +176,21 @@ fn lower_reach_operation(p: MIRProgram, q: &LowerPrepared, function: MIRFunction
             }
         }
         // A user Iterable source's iter/next run from its cursor (Iterable.jet).
-        .LoopIterInit(_, _, _, _, source_kind) -> {
+        .LoopIterInit(_, collection, _, _, source_kind) -> {
             if source_kind == .Iterable(_, _, iter_symbol, next_symbol) {
                 hooks :: [String]{iter_symbol, next_symbol}
                 loop key in hooks {
                     hook :: lower_function_with_key(p, key) ?? next
                     lower_mono_request(p, &q, hook.id, None, [MIRType]{}, parent, site).drop("Iterable loop hook")
+                }
+            }
+            if source_kind == .LinesProcessStream {
+                if facts.get(collection.value) == .Val(index) {
+                    ty :: lower_subst_type(function.values[index].ty, bindings)
+                    if lower_pipe_next(p, ty) == .Val(hook) {
+                        lower_mono_request(p, &q, hook.id, None, [MIRType]{}, parent, site).drop("process line source hook")
+                        if hook.return_type.kind == .Result(_, err) -> lower_reach_render_child(&q, err, false, parent)
+                    }
                 }
             }
         }
