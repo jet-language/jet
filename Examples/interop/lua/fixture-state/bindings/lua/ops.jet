@@ -86,15 +86,15 @@ pub fn view_set_int(view: TableView, key: String, value: Int) -> Bool LuaError! 
 }
 
 pub fn counters(session: Session, input: DataTree, deadline_ms: Int) -> DataTree LuaError! {
-    raw :: abi.counters(session.value, json.to_string(input), deadline_ms)
+    raw :: abi.counters(session.value, json.to_string(input) ?? return Err(LuaError.Protocol), deadline_ms)
     code :: abi.take_error()
     return decode_response(raw, code)
 }
 
 pub fn counters_typed<T: [Encode, Decode]>(session: Session, input: T, deadline_ms: Int) -> T LuaError! {
-    tree := json.parse(json.to_string(input)) ?? return Err(LuaError.Protocol)
+    tree := json.parse(json.to_string(input) ?? return Err(LuaError.Protocol)) ?? return Err(LuaError.Protocol)
     value := counters(session, tree, deadline_ms)
-    decoded := json.decode<T>(json.to_string(value)) ?? return Err(LuaError.Protocol)
+    decoded := json.decode<T>(json.to_string(value) ?? return Err(LuaError.Protocol)) ?? return Err(LuaError.Protocol)
     return Ok(decoded)
 }
 
@@ -105,15 +105,15 @@ pub fn counters_view(session: Session, deadline_ms: Int) -> TableView LuaError! 
 }
 
 pub fn transform(session: Session, input: DataTree, deadline_ms: Int) -> DataTree LuaError! {
-    raw :: abi.transform(session.value, json.to_string(input), deadline_ms)
+    raw :: abi.transform(session.value, json.to_string(input) ?? return Err(LuaError.Protocol), deadline_ms)
     code :: abi.take_error()
     return decode_response(raw, code)
 }
 
 pub fn transform_typed<T: [Encode, Decode]>(session: Session, input: T, deadline_ms: Int) -> T LuaError! {
-    tree := json.parse(json.to_string(input)) ?? return Err(LuaError.Protocol)
+    tree := json.parse(json.to_string(input) ?? return Err(LuaError.Protocol)) ?? return Err(LuaError.Protocol)
     value := transform(session, tree, deadline_ms)
-    decoded := json.decode<T>(json.to_string(value)) ?? return Err(LuaError.Protocol)
+    decoded := json.decode<T>(json.to_string(value) ?? return Err(LuaError.Protocol)) ?? return Err(LuaError.Protocol)
     return Ok(decoded)
 }
 
@@ -124,15 +124,15 @@ pub fn transform_view(session: Session, deadline_ms: Int) -> TableView LuaError!
 }
 
 pub fn echo(session: Session, input: DataTree, deadline_ms: Int) -> DataTree LuaError! {
-    raw :: abi.echo(session.value, json.to_string(input), deadline_ms)
+    raw :: abi.echo(session.value, json.to_string(input) ?? return Err(LuaError.Protocol), deadline_ms)
     code :: abi.take_error()
     return decode_response(raw, code)
 }
 
 pub fn echo_typed<T: [Encode, Decode]>(session: Session, input: T, deadline_ms: Int) -> T LuaError! {
-    tree := json.parse(json.to_string(input)) ?? return Err(LuaError.Protocol)
+    tree := json.parse(json.to_string(input) ?? return Err(LuaError.Protocol)) ?? return Err(LuaError.Protocol)
     value := echo(session, tree, deadline_ms)
-    decoded := json.decode<T>(json.to_string(value)) ?? return Err(LuaError.Protocol)
+    decoded := json.decode<T>(json.to_string(value) ?? return Err(LuaError.Protocol)) ?? return Err(LuaError.Protocol)
     return Ok(decoded)
 }
 
@@ -143,15 +143,15 @@ pub fn echo_view(session: Session, deadline_ms: Int) -> TableView LuaError! {
 }
 
 pub fn fail_call(session: Session, input: DataTree, deadline_ms: Int) -> DataTree LuaError! {
-    raw :: abi.fail_call(session.value, json.to_string(input), deadline_ms)
+    raw :: abi.fail_call(session.value, json.to_string(input) ?? return Err(LuaError.Protocol), deadline_ms)
     code :: abi.take_error()
     return decode_response(raw, code)
 }
 
 pub fn fail_call_typed<T: [Encode, Decode]>(session: Session, input: T, deadline_ms: Int) -> T LuaError! {
-    tree := json.parse(json.to_string(input)) ?? return Err(LuaError.Protocol)
+    tree := json.parse(json.to_string(input) ?? return Err(LuaError.Protocol)) ?? return Err(LuaError.Protocol)
     value := fail_call(session, tree, deadline_ms)
-    decoded := json.decode<T>(json.to_string(value)) ?? return Err(LuaError.Protocol)
+    decoded := json.decode<T>(json.to_string(value) ?? return Err(LuaError.Protocol)) ?? return Err(LuaError.Protocol)
     return Ok(decoded)
 }
 
@@ -162,15 +162,15 @@ pub fn fail_call_view(session: Session, deadline_ms: Int) -> TableView LuaError!
 }
 
 pub fn spin(session: Session, input: DataTree, deadline_ms: Int) -> DataTree LuaError! {
-    raw :: abi.spin(session.value, json.to_string(input), deadline_ms)
+    raw :: abi.spin(session.value, json.to_string(input) ?? return Err(LuaError.Protocol), deadline_ms)
     code :: abi.take_error()
     return decode_response(raw, code)
 }
 
 pub fn spin_typed<T: [Encode, Decode]>(session: Session, input: T, deadline_ms: Int) -> T LuaError! {
-    tree := json.parse(json.to_string(input)) ?? return Err(LuaError.Protocol)
+    tree := json.parse(json.to_string(input) ?? return Err(LuaError.Protocol)) ?? return Err(LuaError.Protocol)
     value := spin(session, tree, deadline_ms)
-    decoded := json.decode<T>(json.to_string(value)) ?? return Err(LuaError.Protocol)
+    decoded := json.decode<T>(json.to_string(value) ?? return Err(LuaError.Protocol)) ?? return Err(LuaError.Protocol)
     return Ok(decoded)
 }
 

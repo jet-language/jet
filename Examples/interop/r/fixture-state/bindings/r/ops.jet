@@ -68,100 +68,100 @@ fn decode_response(raw: String, code: Int) -> DataTree RError! {
 }
 
 pub fn transform(session: Session, input: DataTree, deadline_ms: Int) -> DataTree RError! {
-    raw :: abi.transform(session.value, json.to_string(input), deadline_ms)
+    raw :: abi.transform(session.value, json.to_string(input) ?? return Err(RError.Protocol), deadline_ms)
     code :: abi.take_error()
     return decode_response(raw, code)
 }
 
 pub fn transform_table<T: [Encode, Decode]>(session: Session, rows: [T], deadline_ms: Int) -> [T] RError! {
-    raw :: abi.transform_table(session.value, json.to_string(~rows), deadline_ms)
+    raw :: abi.transform_table(session.value, json.to_string(~rows) ?? return Err(RError.Protocol), deadline_ms)
     code :: abi.take_error()
     value := decode_response(raw, code)
-    return Ok(json.decode<[T]>(json.to_string(value)) ?? return Err(RError.Protocol))
+    return Ok(json.decode<[T]>(json.to_string(value) ?? return Err(RError.Protocol)) ?? return Err(RError.Protocol))
 }
 
 pub fn transform_plot(session: Session, input: DataTree, deadline_ms: Int) -> String RError! {
-    raw :: abi.transform_plot(session.value, json.to_string(input), deadline_ms)
+    raw :: abi.transform_plot(session.value, json.to_string(input) ?? return Err(RError.Protocol), deadline_ms)
     code :: abi.take_error()
     value := decode_response(raw, code)
     return Ok(value.text() ?? return Err(RError.Protocol))
 }
 
 pub fn double_values(session: Session, input: DataTree, deadline_ms: Int) -> DataTree RError! {
-    raw :: abi.double_values(session.value, json.to_string(input), deadline_ms)
+    raw :: abi.double_values(session.value, json.to_string(input) ?? return Err(RError.Protocol), deadline_ms)
     code :: abi.take_error()
     return decode_response(raw, code)
 }
 
 pub fn double_values_table<T: [Encode, Decode]>(session: Session, rows: [T], deadline_ms: Int) -> [T] RError! {
-    raw :: abi.double_values_table(session.value, json.to_string(~rows), deadline_ms)
+    raw :: abi.double_values_table(session.value, json.to_string(~rows) ?? return Err(RError.Protocol), deadline_ms)
     code :: abi.take_error()
     value := decode_response(raw, code)
-    return Ok(json.decode<[T]>(json.to_string(value)) ?? return Err(RError.Protocol))
+    return Ok(json.decode<[T]>(json.to_string(value) ?? return Err(RError.Protocol)) ?? return Err(RError.Protocol))
 }
 
 pub fn double_values_plot(session: Session, input: DataTree, deadline_ms: Int) -> String RError! {
-    raw :: abi.double_values_plot(session.value, json.to_string(input), deadline_ms)
+    raw :: abi.double_values_plot(session.value, json.to_string(input) ?? return Err(RError.Protocol), deadline_ms)
     code :: abi.take_error()
     value := decode_response(raw, code)
     return Ok(value.text() ?? return Err(RError.Protocol))
 }
 
 pub fn scale_table(session: Session, input: DataTree, deadline_ms: Int) -> DataTree RError! {
-    raw :: abi.scale_table(session.value, json.to_string(input), deadline_ms)
+    raw :: abi.scale_table(session.value, json.to_string(input) ?? return Err(RError.Protocol), deadline_ms)
     code :: abi.take_error()
     return decode_response(raw, code)
 }
 
 pub fn scale_table_table<T: [Encode, Decode]>(session: Session, rows: [T], deadline_ms: Int) -> [T] RError! {
-    raw :: abi.scale_table_table(session.value, json.to_string(~rows), deadline_ms)
+    raw :: abi.scale_table_table(session.value, json.to_string(~rows) ?? return Err(RError.Protocol), deadline_ms)
     code :: abi.take_error()
     value := decode_response(raw, code)
-    return Ok(json.decode<[T]>(json.to_string(value)) ?? return Err(RError.Protocol))
+    return Ok(json.decode<[T]>(json.to_string(value) ?? return Err(RError.Protocol)) ?? return Err(RError.Protocol))
 }
 
 pub fn scale_table_plot(session: Session, input: DataTree, deadline_ms: Int) -> String RError! {
-    raw :: abi.scale_table_plot(session.value, json.to_string(input), deadline_ms)
+    raw :: abi.scale_table_plot(session.value, json.to_string(input) ?? return Err(RError.Protocol), deadline_ms)
     code :: abi.take_error()
     value := decode_response(raw, code)
     return Ok(value.text() ?? return Err(RError.Protocol))
 }
 
 pub fn plot_scores(session: Session, input: DataTree, deadline_ms: Int) -> DataTree RError! {
-    raw :: abi.plot_scores(session.value, json.to_string(input), deadline_ms)
+    raw :: abi.plot_scores(session.value, json.to_string(input) ?? return Err(RError.Protocol), deadline_ms)
     code :: abi.take_error()
     return decode_response(raw, code)
 }
 
 pub fn plot_scores_table<T: [Encode, Decode]>(session: Session, rows: [T], deadline_ms: Int) -> [T] RError! {
-    raw :: abi.plot_scores_table(session.value, json.to_string(~rows), deadline_ms)
+    raw :: abi.plot_scores_table(session.value, json.to_string(~rows) ?? return Err(RError.Protocol), deadline_ms)
     code :: abi.take_error()
     value := decode_response(raw, code)
-    return Ok(json.decode<[T]>(json.to_string(value)) ?? return Err(RError.Protocol))
+    return Ok(json.decode<[T]>(json.to_string(value) ?? return Err(RError.Protocol)) ?? return Err(RError.Protocol))
 }
 
 pub fn plot_scores_plot(session: Session, input: DataTree, deadline_ms: Int) -> String RError! {
-    raw :: abi.plot_scores_plot(session.value, json.to_string(input), deadline_ms)
+    raw :: abi.plot_scores_plot(session.value, json.to_string(input) ?? return Err(RError.Protocol), deadline_ms)
     code :: abi.take_error()
     value := decode_response(raw, code)
     return Ok(value.text() ?? return Err(RError.Protocol))
 }
 
 pub fn fail_call(session: Session, input: DataTree, deadline_ms: Int) -> DataTree RError! {
-    raw :: abi.fail_call(session.value, json.to_string(input), deadline_ms)
+    raw :: abi.fail_call(session.value, json.to_string(input) ?? return Err(RError.Protocol), deadline_ms)
     code :: abi.take_error()
     return decode_response(raw, code)
 }
 
 pub fn fail_call_table<T: [Encode, Decode]>(session: Session, rows: [T], deadline_ms: Int) -> [T] RError! {
-    raw :: abi.fail_call_table(session.value, json.to_string(~rows), deadline_ms)
+    raw :: abi.fail_call_table(session.value, json.to_string(~rows) ?? return Err(RError.Protocol), deadline_ms)
     code :: abi.take_error()
     value := decode_response(raw, code)
-    return Ok(json.decode<[T]>(json.to_string(value)) ?? return Err(RError.Protocol))
+    return Ok(json.decode<[T]>(json.to_string(value) ?? return Err(RError.Protocol)) ?? return Err(RError.Protocol))
 }
 
 pub fn fail_call_plot(session: Session, input: DataTree, deadline_ms: Int) -> String RError! {
-    raw :: abi.fail_call_plot(session.value, json.to_string(input), deadline_ms)
+    raw :: abi.fail_call_plot(session.value, json.to_string(input) ?? return Err(RError.Protocol), deadline_ms)
     code :: abi.take_error()
     value := decode_response(raw, code)
     return Ok(value.text() ?? return Err(RError.Protocol))

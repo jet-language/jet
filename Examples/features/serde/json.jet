@@ -4,8 +4,8 @@ use core.encoding.json as json
 fn run() EncodingError! {
     raw :: "{{\"name\":\"jet\",\"ok\":true,\"items\":[1,2]}}"
     data :: json.parse(raw)
-    print(json.to_string(data))
-    print(json.to_string_pretty(data).contains("\n"))
+    print(json.to_string(data) ?? return Err(err))
+    print((json.to_string_pretty(data) ?? return Err(err)).contains("\n"))
     // Key count without `if data == .Object(entries)` — that shape still deopts
     // resident JIT on the Map payload Let (kept in serde/json_coerce).
     keys :: ["items", "name", "ok"]
@@ -18,6 +18,6 @@ fn run() EncodingError! {
         "ok": DataTree.Bool(true),
     ],
     ),
-    ),
+    ) ?? return Err(err),
     )
 }

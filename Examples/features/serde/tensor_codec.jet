@@ -66,10 +66,10 @@ fn run() {
     describe("f32 deserialize", compute.deserialize(compute.serialize(single) ?? panic("serialize f32")) ?? panic("deserialize f32"))
 
     // JSON through an explicit tree.
-    wire :: json.to_string(to_tree(matrix))
+    wire :: json.to_string(to_tree(matrix)) ?? panic("JSON encode")
     print("json: {wire}")
     describe("json back", from_tree(json.parse(wire) ?? panic("json parse")))
-    describe("json f32 back", from_tree(json.parse(json.to_string(to_tree(single))) ?? panic("json f32 parse")))
+    describe("json f32 back", from_tree(json.parse(json.to_string(to_tree(single)) ?? panic("JSON encode")) ?? panic("json f32 parse")))
 
     // CBOR through the same tree.
     bytes :: cbor.to_bytes(to_tree(matrix))

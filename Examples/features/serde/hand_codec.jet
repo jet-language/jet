@@ -27,7 +27,7 @@ struct Signup {
 
 fn run() [FieldError]! {
     signup :: Signup{name: "Ada", email: Email{address: "ada@lovelace.org"}}
-    wire :: json.to_string(signup)
+    wire :: json.to_string(signup) ?? panic("JSON encode")
     print(wire)
     decoded :: json.decode<Signup>(wire)
     print(decoded.email.address)

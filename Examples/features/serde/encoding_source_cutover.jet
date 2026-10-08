@@ -18,8 +18,8 @@ struct Row { value: Int }
 #Test("typed JSON source cutover retains exact numbers and render parity") {
     row :: json.decode<Row>("{{\"value\":9007199254740993}}") ?? panic("typed JSON")
     assert_eq(row.value, 9007199254740993)
-    assert_eq(json.to_string(Row{value: 7}), "{{\"value\":7}}")
-    assert_eq(json.to_string_pretty(Row{value: 7}), "{{\n  \"value\": 7\n}}")
+    assert_eq(json.to_string(Row{value: 7}) ?? panic("JSON encode"), "{{\"value\":7}}")
+    assert_eq(json.to_string_pretty(Row{value: 7}) ?? panic("JSON encode"), "{{\n  \"value\": 7\n}}")
     if json.decode<Row>("{{") == {
         .Err(errors) -> assert_eq(errors[0].path, "")
         .Ok(_) -> panic("malformed JSON accepted")

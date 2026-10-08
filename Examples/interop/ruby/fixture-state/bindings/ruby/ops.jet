@@ -52,19 +52,19 @@ fn decode_response(raw: String, code: Int) -> DataTree RubyError! {
 }
 
 pub fn transform(session: Session, input: DataTree, deadline_ms: Int) -> DataTree RubyError! {
-    raw :: abi.transform(session.value, json.to_string(input), deadline_ms)
+    raw :: abi.transform(session.value, json.to_string(input) ?? return Err(RubyError.Protocol), deadline_ms)
     code :: abi.take_error()
     return decode_response(raw, code)
 }
 
 pub fn fail_call(session: Session, input: DataTree, deadline_ms: Int) -> DataTree RubyError! {
-    raw :: abi.fail_call(session.value, json.to_string(input), deadline_ms)
+    raw :: abi.fail_call(session.value, json.to_string(input) ?? return Err(RubyError.Protocol), deadline_ms)
     code :: abi.take_error()
     return decode_response(raw, code)
 }
 
 pub fn sleep_call(session: Session, input: DataTree, deadline_ms: Int) -> DataTree RubyError! {
-    raw :: abi.sleep_call(session.value, json.to_string(input), deadline_ms)
+    raw :: abi.sleep_call(session.value, json.to_string(input) ?? return Err(RubyError.Protocol), deadline_ms)
     code :: abi.take_error()
     return decode_response(raw, code)
 }
