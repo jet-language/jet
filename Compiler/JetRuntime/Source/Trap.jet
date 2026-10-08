@@ -177,6 +177,9 @@ fn trap_footer(code: I64) {
 }
 
 fn trap_simple(code: I64, file: I64, file_len: I64, line: I64, message: I64, message_len: I64) {
+    // Core.rs jet_runtime_stop_unwind carries the raw message into the task
+    // runner, not this process report (Scheduler.rs jet_scheduler_panic_message).
+    if rt_task_panic_publish(message, message_len, I64{0}) -> return
     trap_header(code)
     trap_write(message, message_len)
     trap_msg_message_end()
@@ -259,19 +262,19 @@ fn rt_seq_capacity_overflow_stop() {
     trap_simple(I64{0}, trap_word(file), trap_word(file + I64{8}), trap_line(line), trap_word(message), trap_word(message + I64{8}))
 }
 
-// Zero-allocation specialization of jet_panic("<core.prelude>", 0, message).
-// trap_simple above does not task-publish; retain that same fatal path.
-// These 33 message bytes + prelude_end equal message_end + trap_context
-// with that 14-byte file, line 0, and empty function/source.
+// Core/CAbi.rs record_index_stop publishes this exact seed reason:
+// "record variant index out of range". jet_rt_panic_message owns the one
+// task-publication path. At root its header + message + prelude_end + footer
+// is byte-identical to jet_panic("<core.prelude>", 0, message).
 fn rt_record_variant_panic() {
-    trap_header(I64{0})
-    trap_write_word(I64{8511913738388071794}, I64{8})
-    trap_write_word(I64{7575182590666699361}, I64{8})
-    trap_write_word(I64{8391735665924334702}, I64{8})
-    trap_write_word(I64{7453001576142499616}, I64{8})
-    trap_write_word(I64{101}, I64{1})
-    trap_msg_prelude_end()
-    trap_footer(I64{0})
+    message :: jet_rt_alloc(I64{33}, I64{8})
+    trap_store(message, I64{8511913738388071794})
+    trap_store(message + I64{8}, I64{7575182590666699361})
+    trap_store(message + I64{16}, I64{8391735665924334702})
+    trap_store(message + I64{24}, I64{7453001576142499616})
+    trap_put(message + I64{32}, I64{101})
+    jet_rt_panic_message(message, I64{33})
+    jet_rt_free(message, I64{33}, I64{8})
 }
 
 fn trap_rich(file: I64, line: I64, function: I64, source: I64, column: I64, caret: I64, message: I64, locals: I64) {

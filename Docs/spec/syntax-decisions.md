@@ -2718,7 +2718,11 @@ positional branches is one parse error (E1117), with no successful lowering.
 `.Cancelled`, `.DeadlineBlown`, and `.Panicked(reason)`. `task.all` uses the
 same rail: positional form returns its ordered list and named form its
 anonymous tuple/record. A joined child panic becomes `.Panicked(reason)`;
-it does not kill the process. `trace()`, `exception()`, `TaskOutcome`, and
+it does not kill the process. The reason uses the canonical task identity and
+child stop message, not its rendered diagnostic or source-location report;
+wrong-variant getters and
+numeric stops follow this same task-publication boundary. `trace()`,
+`exception()`, `TaskOutcome`, and
 `TaskStatus` are deleted from the task-handle surface. D-SERVICE1 retains
 `TaskOutcome` and `TaskStatus` as typed service-workflow facts; that domain API
 is not `TaskHandle.outcome()` or `TaskHandle.status()` and does not restore

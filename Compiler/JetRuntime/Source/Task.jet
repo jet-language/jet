@@ -12,7 +12,10 @@ fn task_failure_new(kind: I64, owned_reason: I64) -> I64 {
 }
 #Export(c) fn jet_rt_record_tag_JetTaskFailure(failure: I64) -> I64 { sync_load(failure + TASK_FAILURE_TAG) }
 #Export(c) fn jet_rt_record_get_JetTaskFailure_Panicked(failure: I64) -> I64 {
-    if sync_load(failure + TASK_FAILURE_TAG) != TASK_FAILURE_PANICKED -> rt_record_variant_panic()
+    if sync_load(failure + TASK_FAILURE_TAG) != TASK_FAILURE_PANICKED {
+        rt_record_variant_panic()
+        if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    }
     jet_rt_string_clone(sync_load(failure + TASK_FAILURE_REASON))
 }
 #Export(c) fn jet_rt_record_new_JetTaskFailure_Cancelled() -> I64 { task_failure_new(TASK_FAILURE_CANCELLED, I64{0}) }

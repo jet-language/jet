@@ -14,7 +14,10 @@ fn data_event_new(kind: I64, payload: I64) -> I64 {
     event
 }
 fn data_event_payload(event: I64, kind: I64) -> I64 {
-    if data_event_word(event + DATA_EVENT_TAG) != kind -> rt_record_variant_panic()
+    if data_event_word(event + DATA_EVENT_TAG) != kind {
+        rt_record_variant_panic()
+        if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    }
     data_event_word(event + DATA_EVENT_PAYLOAD)
 }
 fn data_event_text(kind: I64) -> Bool {
@@ -70,9 +73,29 @@ fn data_event_text(kind: I64) -> Bool {
 #Export(c) fn jet_rt_record_new_DataEvent_Key(value: I64) -> I64 { data_event_new(DATA_EVENT_KEY, jet_rt_string_clone(value)) }
 #Export(c) fn jet_rt_record_new_DataEvent_ObjectEnd() -> I64 { data_event_new(DATA_EVENT_OBJECT_END, I64{0}) }
 #Export(c) fn jet_rt_record_get_DataEvent_Bool(event: I64) -> Bool { data_event_payload(event, DATA_EVENT_BOOL) != I64{0} }
-#Export(c) fn jet_rt_record_get_DataEvent_Int(event: I64) -> I64 { jet_int_owned_from_i64(data_event_payload(event, DATA_EVENT_INT)) }
-#Export(c) fn jet_rt_record_get_DataEvent_Float(event: I64) -> Float { rt_f64_from_bits(data_event_payload(event, DATA_EVENT_FLOAT)) }
-#Export(c) fn jet_rt_record_get_DataEvent_Number(event: I64) -> I64 { jet_rt_string_clone(data_event_payload(event, DATA_EVENT_NUMBER)) }
-#Export(c) fn jet_rt_record_get_DataEvent_Text(event: I64) -> I64 { jet_rt_string_clone(data_event_payload(event, DATA_EVENT_TEXT)) }
+#Export(c) fn jet_rt_record_get_DataEvent_Int(event: I64) -> I64 {
+    payload :: data_event_payload(event, DATA_EVENT_INT)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    jet_int_owned_from_i64(payload)
+}
+#Export(c) fn jet_rt_record_get_DataEvent_Float(event: I64) -> Float {
+    payload :: data_event_payload(event, DATA_EVENT_FLOAT)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return Float{0.0}
+    rt_f64_from_bits(payload)
+}
+#Export(c) fn jet_rt_record_get_DataEvent_Number(event: I64) -> I64 {
+    payload :: data_event_payload(event, DATA_EVENT_NUMBER)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    jet_rt_string_clone(payload)
+}
+#Export(c) fn jet_rt_record_get_DataEvent_Text(event: I64) -> I64 {
+    payload :: data_event_payload(event, DATA_EVENT_TEXT)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    jet_rt_string_clone(payload)
+}
 #Export(c) fn jet_rt_record_get_DataEvent_Bytes(event: I64) -> I64 { data_event_payload(event, DATA_EVENT_BYTE_LIST) }
-#Export(c) fn jet_rt_record_get_DataEvent_Key(event: I64) -> I64 { jet_rt_string_clone(data_event_payload(event, DATA_EVENT_KEY)) }
+#Export(c) fn jet_rt_record_get_DataEvent_Key(event: I64) -> I64 {
+    payload :: data_event_payload(event, DATA_EVENT_KEY)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    jet_rt_string_clone(payload)
+}

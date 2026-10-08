@@ -2243,21 +2243,26 @@ required before pack cutover.
 
 ### Shared record-variant panic parity
 
-DataTree and TLS wrong-variant payload getters call the single internal
-`rt_record_variant_panic()` in `JetRuntime/Source/Trap.jet`. It specializes the
-existing `jet_panic("<core.prelude>", 0, "record variant index out of range")`
-path without allocating file/message text: the same `trap_header(0)`,
-33 message bytes, `trap_msg_prelude_end()`, and `trap_footer(0)`.
+DataTree, DataEvent, TLS, TaskFailure, and ProcessResourceLimit variant checks
+call the single internal `rt_record_variant_panic()` in
+`JetRuntime/Source/Trap.jet`. It materializes the seed's 33-byte reason in one
+owned buffer and calls the existing `jet_rt_panic_message`; after task
+publication it frees that temporary buffer. At root, header + message +
+`trap_msg_prelude_end()` + footer remain byte-identical to
+`jet_panic("<core.prelude>", 0, "record variant index out of range")`.
 `trap_msg_prelude_end()` is the message terminator plus
 `trap_context("<core.prelude>", 0, empty function/source)` bytes.
 
-The reference is `PortableCore.rs:109-110` and
-`Trap.jet:195-200,263-265` before this insertion. The existing native
-`jet_panic`/`trap_simple` path does not publish to task state; this specialization
-preserves that fatal behavior rather than inventing a separate transport.
-Rust task-unwind versus native fatal-stop parity is a pre-existing shared
-Trap issue, not a task-parity claim for these data providers. Any shared Trap
-task/publication change must cover this specialization as well.
+The seed reason is `Core/CAbi.rs`'s `record_index_stop` message. `Core.rs`'s
+`jet_panic` and `jet_arithmetic_stop` both enter `jet_runtime_stop`;
+`jet_runtime_stop_unwind` carries the raw message into the task runner.
+`Scheduler.rs`'s `jet_scheduler_panic_message` strips the rendered report and
+source location; `Observe.rs`'s `jet_observe_task_failure_message` prefixes the
+canonical task identity to produce the joined child `.Panicked(reason)`.
+The native `trap_simple` and record-variant specialization use the same
+`rt_task_panic_publish` transport. Runtime-private callers return neutral
+stopped values before reading or cloning a mismatched payload; compiled
+consumers must propagate the checked Panic fact before using those values.
 
 ### DataTree sequence foreign-stop parity
 
@@ -2588,12 +2593,15 @@ suppression are still required before pack cutover.
 
 Both C witnesses have `panic-reference` (real `jet_panic` with heap text,
 line 0) and `wrong-variant` modes.
-`Tests/run-record-variant-panic.mjs OUT DATA_TREE_WITNESS DATA_EVENT_WITNESS`
+`Tests/run-record-variant-panic.mjs OUT DATA_TREE_WITNESS DATA_EVENT_WITNESS TASK_VARIANT_PANIC_WITNESS`
 runs the real linked clients serially, requires exact exit 70 and empty
-stdout, saves the direct reference's stderr as the process-mode golden,
-asserts message/location, and byte-compares the wrong-variant output.
-This runner has not been executed; parser/C syntax receipts alone do not
-prove native panic-byte parity or native execution.
+stdout for root stops, saves the direct reference's stderr as the
+process-mode golden, asserts message/location, and byte-compares the
+wrong-variant output. `TaskVariantPanicWitness.c` additionally spawns and joins
+real children calling a nested DataTree text getter on Null, `jet_panic`,
+and `jet_rt_numeric_stop`; it checks exact `.Panicked(reason)`, completed
+release callbacks, and surviving parent control with no stderr.
+Parser/C syntax receipts alone do not prove these execution assertions.
 
 DataTree/DataEvent runtime byte paths use `RT_HOST_U8_STRIDE` and host U8
 accessors; their C witnesses default to canonical packed stride1 and keep all
