@@ -12,7 +12,7 @@
 // effect projections; it must not grow a second Core parser or renderer.
 
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
@@ -36,6 +36,9 @@ const OPERATIONS_DOC_PATH = "Docs/spec/reference/core-library.md";
 const OPERATIONS_BEGIN = "<!-- BEGIN GENERATED COLLECTION OPERATIONS -->";
 const OPERATIONS_END = "<!-- END GENERATED COLLECTION OPERATIONS -->";
 
+const RESERVED_SOURCE_PATH = "crates/jet-foundation/src/Collections.rs";
+const RESERVED_BEGIN = "// BEGIN GENERATED RESERVED TYPES";
+const RESERVED_END = "// END GENERATED RESERVED TYPES";
 const EFFECT_BEGIN = "// BEGIN GENERATED EFFECT DECLARATIONS";
 const EFFECT_END = "// END GENERATED EFFECT DECLARATIONS";
 const BUILD_EFFECT_BEGIN = "// BEGIN GENERATED BUILD EFFECT DECLARATIONS";
@@ -420,6 +423,40 @@ function checkCoreRecordRows() {
 function writeCoreRecordRows() {
   writeFileSync(file(CORE_RECORD_ROWS_PATH), generatedCoreRecordRows(ROOT));
 }
+// E0106 shares the seed's reserved vocabulary; Core ownership remains a
+// registration fact, not an exception in either table.
+function generatedReservedTypes() {
+  const constants = new Map();
+  const syntax = file("crates/jet-foundation/src/Syntax");
+  for (const name of readdirSync(syntax).filter(name => name.endsWith(".rs"))) {
+    for (const match of readFileSync(path.join(syntax, name), "utf8").matchAll(/pub const (\w+): &str = "([^"]+)";/g)) {
+      constants.set(match[1], match[2]);
+    }
+  }
+  const source = read(RESERVED_SOURCE_PATH);
+  const body = source.match(/pub const RESERVED_TYPES: &\[&str\] = &\[([\s\S]*?)\];/)?.[1];
+  if (!body) fail(`${RESERVED_SOURCE_PATH}: missing RESERVED_TYPES`);
+  const names = body.replace(/\/\/[^\n]*/g, "").split(",").map(value => value.trim()).filter(Boolean).map(value => {
+    if (/^"[^"]+"$/.test(value)) return JSON.parse(value);
+    const key = value.match(/^Syntax::(\w+)$/)?.[1];
+    if (!key || !constants.has(key)) fail(`${RESERVED_SOURCE_PATH}: unresolved reserved type ${value}`);
+    return constants.get(key);
+  });
+  return [RESERVED_BEGIN, `// Source: ${RESERVED_SOURCE_PATH}; regenerate with gen-core-tables.mjs --write`,
+    `SEMA_RESERVED_TYPES :: [String]{${names.map(name => JSON.stringify(name)).join(", ")}}`, RESERVED_END].join("\n");
+}
+
+function checkReservedTypes() {
+  if (readSection(read(OPERATIONS_SOURCE_PATH), RESERVED_BEGIN, RESERVED_END, OPERATIONS_SOURCE_PATH) !== generatedReservedTypes()) {
+    fail(`${OPERATIONS_SOURCE_PATH}: reserved types are stale; run gen-core-tables.mjs --write`);
+  }
+}
+
+function writeReservedTypes() {
+  writeFileSync(file(OPERATIONS_SOURCE_PATH), replaceSection(read(OPERATIONS_SOURCE_PATH),
+    RESERVED_BEGIN, RESERVED_END, generatedReservedTypes(), OPERATIONS_SOURCE_PATH));
+}
+
 
 function check() {
   const source = read(EFFECT_SOURCE_PATH);
@@ -428,6 +465,7 @@ function check() {
   validatePublicDispatcher(core, publicDispatcherRows());
   checkEffects(source, facts);
   checkOperationContract();
+  checkReservedTypes();
   const coreSource = read(CORE_SOURCE_PATH);
   validateGeneratedViews(coreSource, core);
   checkCoreRecordRows();
@@ -440,6 +478,7 @@ function write() {
   const core = ensureCoreNames();
   writeEffects(source, facts);
   writeOperationContract();
+  writeReservedTypes();
   // CoreModuleExports.rs and RingLayer.rs use the existing Core generator;
   // this coordinator never reimplements that schema.
   writeCoreViews();
