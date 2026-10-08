@@ -651,6 +651,8 @@ pub(crate) struct TypeRegistry {
     /// Exact ledger authority intersected with declarations loaded from that Core file.
     source_owned_types: HashSet<&'static str>,
     core_source_module: Option<&'static jet_foundation::CoreModuleExports::CoreSourceModule>,
+    /// Validated operator-hook signatures, never ordinary name-only members.
+    operator_signatures: HashMap<String, MethodSig>,
     /// D-FAILURE-FOUNDATION1=A: user-named types carrying `#Error` may be
     /// used as explicit callable failure domains.
     error_types: HashSet<String>,
