@@ -2555,6 +2555,11 @@ instant, while `later` chooses the later instant. For a spring-forward gap,
 the post-transition offset. `reject` reports ambiguous, nonexistent, or
 otherwise unresolved local times instead of choosing one.
 
+`ZonedDateTime` equality compares the complete instant and the zone name, not
+the zone's transition-table identity or contents. The name is immutable
+metadata outside the shared transition table, so this comparison does not
+acquire a shared guard or widen the `Equatable` effect contract.
+
 Duration literals use the supported `ns`, `us`, `ms`, `s`, `min`, `h`, and `d`
 suffixes. A runtime `Duration` carries checked nanoseconds; a deterministic
 function should receive a `Clock` explicitly rather than reading `time.now()`
