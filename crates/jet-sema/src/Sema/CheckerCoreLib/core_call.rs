@@ -2428,7 +2428,7 @@ impl<'a> Checker<'a> {
             && matches!(name, "__list_capacity" | "__list_reserve_exact" | "__type_size"))
             || (module == "core.encoding"
                 && matches!(name,
-                    "__read_byte" | "__write_bytes" | "__write_text" | "__flush"
+                    "__read_byte" | "__read_into" | "__write_bytes" | "__write_text" | "__flush"
                     | "__utf8_validate" | "__bytes_into_text" | "__text_into_bytes"
                     | "__string_byte" | "__object_from_entries"
                     | "__typed_text" | "__object_entries_view" | "__bytes_view"));
@@ -2441,10 +2441,15 @@ impl<'a> Checker<'a> {
                 "raw CSV query mechanics are restricted to Core CSV source", "use csv.query<T>", Some(span)));
             return None;
         }
+        let checked_xml = source_alias
+            .and_then(jet_foundation::CoreModuleExports::core_source_module_by_alias)
+            .is_some_and(|source| source.module == "core.encoding.xml");
         let checked_backing_source = source_alias
             == Some(jet_foundation::CoreSourceParts::CORE_ENCODING_STREAM_ALIAS)
             || checked_csv
+            || checked_xml
             || source_alias == Some(jet_foundation::CoreSourceParts::CORE_ENCODING_CBOR_STREAM_ALIAS)
+            || source_alias == Some("__core_encoding_xml_engine")
             || ((module == "core.mem" || (module == "core.encoding" && name == "__utf8_validate"))
                 && source_alias == Some(jet_foundation::CoreSourceParts::CORE_ENCODING_CBOR_PARSE_ALIAS));
         if encoding_backing_leaf && !checked_backing_source {

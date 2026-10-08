@@ -362,7 +362,7 @@ fn core_effect_legacy(module: &str, method: &str) -> Option<Effect> {
     // I/O through an already-owned encoding handle retains the native
     // possession-method effect; it does not acquire ambient FS authority.
     if module == "core.encoding"
-        && matches!(method, "__read_byte" | "__write_bytes" | "__write_text" | "__flush")
+        && matches!(method, "__read_byte" | "__read_into" | "__write_bytes" | "__write_text" | "__flush")
     {
         return Some(Effect::IO);
     }

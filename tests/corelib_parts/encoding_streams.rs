@@ -1,4 +1,44 @@
 #[test]
+fn xml_reader_latches_byte_offset_after_non_ascii_scalar() {
+    let dir = std::env::temp_dir().join(format!("jet_xml_utf8_reader_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let input = dir.join("input.xml");
+    fs::write(&input, "<r>é<a></b></r>").unwrap();
+    let source = format!(r#"
+use core.encoding.xml as xml
+use core.encoding as encoding
+use core.files as files
+fn run() {{
+    input :: files.open("{path}") ?? panic("open")
+    reader := xml.reader(^input, encoding.EncodingLimits.safe()) ?? panic("reader")
+    loop {{
+        if &reader.next() == {{
+            .Ok(value) -> {{
+                if value == None -> panic("mismatched XML accepted")
+            }}
+            .Err(error) -> {{
+                print(error.byte_offset)
+                print(error.line ?? 0)
+                print(error.column ?? 0)
+                print(error.path)
+                if &reader.next() == {{
+                    .Err(again) -> print(again == error)
+                    else -> panic("terminal XML error not latched")
+                }}
+                break
+            }}
+        }}
+    }}
+}}
+"#, path = input.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\""));
+    let (code, stdout, stderr) = build_and_run(&dir, "xml_utf8_reader", &source, &[], None);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert_eq!(stdout, "8\n1\n8\n$/r/a\ntrue\n");
+    assert_eq!(stderr, "");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn json_private_typed_parser_is_not_a_public_core_api() {
     let source = "use core.encoding.json as json\nfn run() {\n    value :: json.__parse_typed(\"[1]\") ?? panic(\"parse\")\n    print(value)\n}\n";
     // Bypass only the reserved-name lexical gate, so this test exercises the

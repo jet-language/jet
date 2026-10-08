@@ -1589,7 +1589,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: dc79d39dd8184cc96287351c8ed97adb0c9dfbbb85adde3748196bd43354739b
+// Source SHA-256: 5393359679e0131ec4f20a417d2c45377f5470331302d44fe47105028eb4b1e3
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -1984,6 +1984,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.mem", "__list_reserve_exact", "jet_raw_list_reserve_exact", true, &[true, false]),
     CoreCallRecord::new("core.mem", "__type_size", "jet_raw_type_size", true, &[]).with_native_int_result(),
     CoreCallRecord::new("core.encoding", "__read_byte", "jet_raw_encoding_read_byte", true, &[true]),
+    CoreCallRecord::new("core.encoding", "__read_into", "jet_raw_encoding_read_into", true, &[true, true, false]).with_native_int_result(),
     CoreCallRecord::new("core.encoding", "__write_bytes", "jet_raw_encoding_write_bytes", true, &[true, true]),
     CoreCallRecord::new("core.encoding", "__flush", "jet_raw_encoding_flush", true, &[true]),
     CoreCallRecord::new("core.encoding", "__utf8_validate", "jet_string_validate_utf8", true, &[true]),

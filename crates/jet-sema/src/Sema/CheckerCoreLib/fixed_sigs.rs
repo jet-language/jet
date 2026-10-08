@@ -1514,6 +1514,14 @@ fn core_fixed_sig_impl(
             vec![(AccessConvention::Write, Type::Named("FileReader".to_string()))],
             Some(result_ty(Type::Option(Box::new(u8_ty())), Type::Named("EncodingCause".to_string()))),
         )),
+        ("core.encoding", "__read_into") => Some((
+            vec![
+                (AccessConvention::Write, Type::Named("FileReader".to_string())),
+                (AccessConvention::Write, list_u8.clone()),
+                (read, Type::Int),
+            ],
+            Some(result_ty(Type::Int, Type::Named("EncodingCause".to_string()))),
+        )),
         ("core.encoding", "__write_bytes") => Some((
             vec![(AccessConvention::Write, Type::Named("FileWriter".to_string())), (read, Type::Apply { name: "View".to_string(), args: vec![u8_ty()] })],
             Some(result_ty(unit.clone(), Type::Named("EncodingCause".to_string()))),
