@@ -2270,6 +2270,27 @@ The separately authorized NaN-only offline seed output SHA256 is
 This is reference data, not a shipping Rust dependency or native-execution
 proof. Composed native routing, execution and seed suppression remain gates.
 
+`ReservoirSampler.jet` retains the seed's shared Native64 state:
+references0, mutex8, clamped raw-i64 limit16, unsigned count24, RNG32 and
+embedded canonical List24 at40. The list's owned E4 Text elements have
+stride8; sample returns a separately owned holder and deep-cloned elements
+using the existing ProcessSpec list helper and the native List layout from
+`Lower/Lists.jet:1-7`. Lower consumers own the returned inline header; a C
+client releases its allocated holder after dropping elements and buffer.
+The seed xorshift13/7/17 starts at deadbeefcafebabe, advances only after the
+reservoir fills and uses unsigned modulo over the full count. Do not replace
+it with Core's divergent SplitMix64 ordinary record. Storage grows lazily,
+even when the configured limit is I64.MAX. Each operation holds one mutex;
+show snapshots the count and unlocks before rendering its full U64 decimal.
+The U64.MAX increment invokes the existing canonical integer-overflow panic
+before mutating the state, rather than creating a new trap or wrapping to zero.
+The real-producer witness checks every frozen slot and RNG state after
+128 samples at five clamped capacities, clone sharing, sample independence,
+raw NUL/UTF8, concurrent adds, both unsigned endpoints and exact-once
+Text/data/buffer/shell release. Its overflow mode expects the canonical
+overflow stop; stdout expectations are not execution evidence. Canonical
+method routing, execution and obsolete seed suppression remain composed gates.
+
 `EmailError.jet` provides the three retained Error clone/drop/equality exports
 on the registry-plain `EmailError` layout, not on a Rust enum or private facade.
 `Lower/Lower.jet:439,443` and `Lower/Values.jet:49-55,65-74,111-127,137-145`
