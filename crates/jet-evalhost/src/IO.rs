@@ -64,3 +64,59 @@ mod io_line_stream {
 
 }
 
+
+/// Reserved source leaves share the Prelude's physical stream operations.
+/// Checkpoints, line trimming, and the selected flush flag belong to Core.
+pub(crate) fn ambient_core_call(
+    module: &str,
+    method: &str,
+    args: Vec<jet_foundation::AST::CtValue>,
+    span: jet_foundation::Diagnostics::Span,
+    _resolved_ret: Option<jet_foundation::AST::Type>,
+    _sink: Option<&mut jet_codegen::Comptime::DevSink>,
+) -> Option<Result<jet_foundation::AST::CtValue, jet_foundation::Diagnostics::Diagnostic>> {
+    use jet_foundation::AST::{CtValue, Type};
+    use jet_foundation::MIR::MirRuntimeValue;
+    if module != "core.term" {
+        return None;
+    }
+    let cause = match (method, args.as_slice()) {
+        ("__stdio_write", [CtValue::Str(text), CtValue::Bool(newline), CtValue::Bool(stderr), CtValue::Bool(flush)]) =>
+            term_prelude::jet_term_stdio_write_raw(text, *newline, *stderr, *flush),
+        ("__stdio_bytes", [CtValue::Bytes(bytes), CtValue::Bool(stderr), CtValue::Bool(flush)]) =>
+            term_prelude::jet_term_stdio_bytes_raw(bytes, *stderr, *flush),
+        ("__stdio_bytes", [CtValue::List(values), CtValue::Bool(stderr), CtValue::Bool(flush)]) => {
+            let bytes = values.iter().map(|value| match value {
+                CtValue::Int(byte) => u8::try_from(*byte).ok(),
+                _ => None,
+            }).collect::<Option<Vec<_>>>()?;
+            term_prelude::jet_term_stdio_bytes_raw(&bytes, *stderr, *flush)
+        }
+        ("__stdio_flush", [CtValue::Bool(stderr)]) =>
+            term_prelude::jet_term_stdio_flush_raw(*stderr),
+        ("__stdio_fault", [CtValue::Str(selector)]) =>
+            return Some(Ok(CtValue::Bool(crate::fault_injection::jet_fault_should_fail(selector)))),
+        ("__stdout_terminal", []) =>
+            return Some(Ok(CtValue::Bool(term_prelude::jet_term_stdout_is_terminal()))),
+        ("__stderr_terminal", []) =>
+            return Some(Ok(CtValue::Bool(term_prelude::jet_term_stderr_is_terminal()))),
+        ("__stdin_line", []) => {
+            let value = match crate::enc_stream::jet_stdin_line_raw() {
+                Ok(line) => {
+                    let value = line.map_or_else(
+                        || MirRuntimeValue::Absent { element: jet_foundation::MIR::MirType::from_kind(jet_foundation::MIR::MirTypeKind::String) },
+                        |line| MirRuntimeValue::Present(Box::new(MirRuntimeValue::String(line))),
+                    );
+                    MirRuntimeValue::Present(Box::new(value))
+                }
+                Err(error) => MirRuntimeValue::FailedTold(Box::new(crate::Process::mir_io_error(error))),
+            };
+            return Some(jet_codegen::Comptime::MirBridge::mir_to_ct_value(value, span));
+        }
+        _ => return None,
+    };
+    Some(Ok(cause.map_or_else(
+        || CtValue::absent(Type::String),
+        |cause| CtValue::Present(Box::new(CtValue::Str(cause))),
+    )))
+}
