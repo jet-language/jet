@@ -2610,6 +2610,64 @@ pub fn apply_suite(
         }
         ("core.web.table", "__alias") => Ok(opaque_web(WebTableHandle(
             web_kernel::jet_table_alias_raw(web_table(one(0)?, span)?)))),
+        ("core.web.table", "__has_loader") => Ok(CtValue::Bool(
+            web_kernel::jet_table_has_loader_raw(web_table(one(0)?, span)?))),
+        ("core.web.table", "__invoke_loader") => web_result(
+            web_kernel::jet_table_invoke_loader_raw(web_table(one(0)?, span)?,
+                web_table_state_value(one(1)?, span)?).map(web_table_page)),
+        ("core.web.table", "__generation") => Ok(web_counter(
+            web_kernel::jet_table_generation_raw(web_table(one(0)?, span)?,
+                web_bool(one(1)?, "advance generation", span)?))),
+        ("core.web.table", "__query_facts") => {
+            let (index, size, server, sort, filter) = web_kernel::jet_table_query_facts_raw(
+                &web_table_state_value(one(0)?, span)?);
+            let sort = sort.map(|(column, descending)| CtValue::Present(Box::new(CtValue::Tuple(
+                vec![CtValue::Str(column), CtValue::Bool(descending)]))))
+                .unwrap_or_else(|| CtValue::absent(Type::Tuple(vec![
+                    ("column".into(), Box::new(Type::String)), ("descending".into(), Box::new(Type::Bool))])));
+            let filter = filter.map(|(column, value)| CtValue::Present(Box::new(CtValue::Tuple(
+                vec![CtValue::Str(column), CtValue::Str(value)]))))
+                .unwrap_or_else(|| CtValue::absent(Type::Tuple(vec![
+                    ("column".into(), Box::new(Type::String)), ("value".into(), Box::new(Type::String))])));
+            Ok(CtValue::Tuple(vec![CtValue::Int(index), CtValue::Int(size), CtValue::Bool(server), sort, filter]))
+        }
+        ("core.web.table", "__state_equal") => Ok(CtValue::Bool(
+            web_kernel::jet_table_state_equal_raw(&web_table_state_value(one(0)?, span)?,
+                &web_table_state_value(one(1)?, span)?))),
+        ("core.web.table", "__page_facts") => {
+            let (total, index, size, count, rows, keys) = web_kernel::jet_table_page_facts_raw(
+                &web_table_page_value(one(0)?, span)?);
+            Ok(CtValue::Tuple(vec![total, index, size, count, rows, keys].into_iter().map(CtValue::Int).collect()))
+        }
+        ("core.web.table", "__commit_keys") => {
+            let callback = one(2)?.clone();
+            web_result(web_kernel::jet_table_commit_keys_raw(web_table(one(0)?, span)?,
+                &web_table_page_value(one(1)?, span)?, move |index, keys| {
+                    let value = super::Methods::invoke_standalone_closure(&callback,
+                        vec![CtValue::Int(index), CtValue::List(keys.iter().cloned().map(CtValue::Str).collect())], span)
+                        .unwrap_or_else(|error| std::panic::panic_any(error));
+                    callback_result_unit(value, span)
+                }).map(|()| CtValue::Unit))
+        }
+        ("core.web.table", "__loading_store") => {
+            web_kernel::jet_table_loading_store_raw(web_table(one(0)?, span)?,
+                web_bool(one(1)?, "table loading", span)?);
+            Ok(CtValue::Unit)
+        }
+        ("core.web.table", "__error_store") => {
+            web_kernel::jet_table_error_store_raw(web_table(one(0)?, span)?,
+                web_string(one(1)?, "table error", span)?);
+            Ok(CtValue::Unit)
+        }
+        ("core.web.table", "__page_store") => {
+            let page = match one(1)? {
+                CtValue::Present(page) => Some(web_table_page_value(page, span)?),
+                CtValue::Absent(_) => None,
+                _ => return Err(unsupported("optional table page", span)),
+            };
+            web_kernel::jet_table_page_store_raw(web_table(one(0)?, span)?, page);
+            Ok(CtValue::Unit)
+        }
         ("core.reactive", "effect") => {
             let callback = one(0)?.clone();
             Ok(opaque_web(web_kernel::jet_reactive_effect(move || {

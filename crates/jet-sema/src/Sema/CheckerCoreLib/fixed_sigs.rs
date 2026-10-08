@@ -492,6 +492,33 @@ fn web_fixed_sig(
         ("core.web.table", "__state") => Some((vec![(read, table.clone())], Some(table_state.clone()))),
         ("core.web.table", "__set_state") => Some((vec![(read, table.clone()), (moved, table_state.clone())], None)),
         ("core.web.table", "__alias") => Some((vec![(read, table.clone())], Some(table.clone()))),
+        ("core.web.table", "__has_loader") => Some((vec![(read, table.clone())], Some(bool_.clone()))),
+        ("core.web.table", "__invoke_loader") => Some((vec![(read, table.clone()), (moved, table_state.clone())],
+            Some(result_ty(table_page.clone(), string.clone())))),
+        ("core.web.table", "__generation") => Some((vec![(read, table.clone()), (moved, bool_.clone())],
+            Some(Type::IntN { signed: false, bits: 64 }))),
+        ("core.web.table", "__query_facts") => Some((vec![(read, table_state.clone())], Some(Type::Tuple(vec![
+            ("index".into(), Box::new(int.clone())), ("size".into(), Box::new(int.clone())),
+            ("server".into(), Box::new(bool_.clone())),
+            ("sort".into(), Box::new(Type::Option(Box::new(Type::Tuple(vec![
+                ("column".into(), Box::new(string.clone())), ("descending".into(), Box::new(bool_.clone()))]))))),
+            ("filter".into(), Box::new(Type::Option(Box::new(Type::Tuple(vec![
+                ("column".into(), Box::new(string.clone())), ("value".into(), Box::new(string.clone()))]))))),
+        ])))),
+        ("core.web.table", "__state_equal") => Some((vec![(read, table_state.clone()), (read, table_state.clone())], Some(bool_.clone()))),
+        ("core.web.table", "__page_facts") => Some((vec![(read, table_page.clone())], Some(Type::Tuple(
+            ["total", "index", "size", "count", "rows", "keys"].into_iter()
+                .map(|name| (name.into(), Box::new(int.clone()))).collect())))),
+        ("core.web.table", "__commit_keys") => Some((vec![(read, table.clone()), (read, table_page.clone()),
+            (moved, Type::Fn {
+                params: vec![int.clone(), web_list(string.clone())],
+                ret: Some(Box::new(result_ty(unit_ty(), string.clone()))),
+                effect_bound: None, return_view_provenance: None, param_contract: None, call_metadata: None,
+            })], Some(result_ty(unit_ty(), string.clone())))),
+        ("core.web.table", "__loading_store") => Some((vec![(read, table.clone()), (moved, bool_.clone())], None)),
+        ("core.web.table", "__error_store") => Some((vec![(read, table.clone()), (moved, string.clone())], None)),
+        ("core.web.table", "__page_store") => Some((vec![(read, table.clone()),
+            (moved, Type::Option(Box::new(table_page.clone())))], None)),
         ("core.data.sketch", "empty") => Some((vec![], Some(string.clone()))),
         ("core.data.sketch", "merge") => Some((
             vec![(read, string.clone()), (read, string.clone())],

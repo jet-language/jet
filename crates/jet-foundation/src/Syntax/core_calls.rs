@@ -76,7 +76,9 @@ const fn effect_for(module: &str, method: &str) -> Option<Effect> {
     if (same_text(module, "core.devtools") && same_text(method, "__publish_checked"))
         || (same_text(module, "core.web") && one_of(method, &["__openapi_inputs", "__openapi_render", "__contract_stop", "__live_stats_snapshot"]))
         || (same_text(module, "core.web.store") && one_of(method, &["__transact", "__facts_snapshot"]))
-        || (same_text(module, "core.web.table") && one_of(method, &["__columns", "__replace_columns", "__state", "__set_state", "__alias"]))
+        || (same_text(module, "core.web.table") && one_of(method, &["__columns", "__replace_columns", "__state", "__set_state", "__alias",
+            "__has_loader", "__invoke_loader", "__generation", "__query_facts", "__state_equal", "__page_facts",
+            "__commit_keys", "__loading_store", "__error_store", "__page_store"]))
     {
         return None;
     }
@@ -1577,7 +1579,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 5baaec7da1b15457ca02df88a0829fc306ed72c7fa2bbd01177e1f8a5ddd4ec4
+// Source SHA-256: 0670aea1622749600f81112fa54eed2b6f6fe31e6aaf922965843231f9163578
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -3217,14 +3219,24 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     sema_web_call("core.web", "__openapi_inputs", "jet_openapi_router_inputs", &[true]),
     sema_web_call("core.web", "__openapi_render", "jet_web_openapi_from_routes", &[false, false, false, false]),
     CoreCallRecord::new("core.web", "__contract_stop", "jet_openapi_contract_stop_raw", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::TypedIntrinsic),
-    sema_web_call("core.web", "__live_stats_snapshot", "jet_live_stats_snapshot_raw", &[]),
+    sema_web_call("core.web", "__live_stats_snapshot", "jet_live_stats_snapshot_raw", &[]).with_native_int_result(),
     sema_web_call("core.web.store", "__transact", "jet_web_store_transaction", &[true, false, false, false]),
-    sema_web_call("core.web.store", "__facts_snapshot", "jet_store_facts_snapshot_raw", &[true]),
+    sema_web_call("core.web.store", "__facts_snapshot", "jet_store_facts_snapshot_raw", &[true]).with_native_int_result(),
     sema_web_call("core.web.table", "__columns", "jet_table_columns_raw", &[true]),
     sema_web_call("core.web.table", "__replace_columns", "jet_table_replace_columns_raw", &[true, false]),
     sema_web_call("core.web.table", "__state", "jet_web_table_state", &[true]),
     sema_web_call("core.web.table", "__set_state", "jet_table_set_state_raw", &[true, false]),
     sema_web_call("core.web.table", "__alias", "jet_table_alias_raw", &[true]),
+    sema_web_call("core.web.table", "__has_loader", "jet_table_has_loader_raw", &[true]),
+    sema_web_call("core.web.table", "__invoke_loader", "jet_table_invoke_loader_raw", &[true, false]),
+    sema_web_call("core.web.table", "__generation", "jet_table_generation_raw", &[true, false]),
+    sema_web_call("core.web.table", "__query_facts", "jet_table_query_facts_raw", &[true]).with_native_int_result(),
+    sema_web_call("core.web.table", "__state_equal", "jet_table_state_equal_raw", &[true, true]),
+    sema_web_call("core.web.table", "__page_facts", "jet_table_page_facts_raw", &[true]).with_native_int_result(),
+    sema_web_call("core.web.table", "__commit_keys", "jet_table_commit_keys_raw", &[true, true, false]),
+    sema_web_call("core.web.table", "__loading_store", "jet_table_loading_store_raw", &[true, false]),
+    sema_web_call("core.web.table", "__error_store", "jet_table_error_store_raw", &[true, false]),
+    sema_web_call("core.web.table", "__page_store", "jet_table_page_store_raw", &[true, false]),
     sema_web_call("core.web.forms", "new", "jet_web_forms_new", &[false]),
     sema_web_call( "core.web.forms", "field", "jet_web_forms_field", &[true, false, false, false], ),
     sema_web_call("core.web.forms", "set", "jet_web_forms_set", &[true, false, false]),
