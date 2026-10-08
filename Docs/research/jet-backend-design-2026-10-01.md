@@ -2073,3 +2073,32 @@ fresh getters and Ray recursive ownership. `coord-overflow` and
 Native execution and MIR/caller/layout admission remain unexercised; source
 parse and strict C11 syntax receipts are not execution evidence.
 
+### Native text diagnostic ownership boundary
+
+`TextGlueABI.jet` defines private FieldError16, single-text-error8 and
+RegexFlags24 carriers. These are diagnostics, not a second Text ABI:
+all stored text pointers own the existing E4 carrier. Ctors/getters clone
+borrowed text, clone duplicates every owner, and drop releases each once
+(`CAbiRoutes.rs:9527-9542,11800-11809,12089-12098,12117-12126`).
+Equality follows declaration order in `DataTree.rs:11-15`,
+`CommonTypes.rs:2889-2892` and `Open.rs:79-82,103-106`.
+
+TextError, UTF8Error and RangeError render their message verbatim in all
+three modes (`CommonTypes.rs:6647-6696`). FieldError delegates all modes
+to `Core/FieldError.rs:10-16`: an empty path emits reason alone; otherwise
+the exact form is `at ` followed by a backtick, path, backtick and `: reason`.
+Path bytes are not escaped or reformatted.
+
+RegexFlags preserves its three declaration-order bools (`Regex.rs:1-6`),
+normalizing every nonzero ctor byte to true (`CAbiRoutes.rs:11909-11930`).
+Clone/getters/equality read the low byte, not upper padding in the native
+word slots. Its only render export is Show, emitting `RegexFlags(ims)`
+with only enabled flags, in i/m/s order (`Regex.rs:294-307`).
+
+`TextGlueWitness.c` is a real-object client that asserts
+`--wrap=jet_rt_free` interception and exact-once shell/header/buffer frees,
+constructor/getter/clone independence, each equality field, empty/unicode
+message goldens, exact FieldError backticks and all eight flag combinations.
+Native execution and MIR/caller/layout admission remain unexercised;
+source parsing and strict C11 syntax checks do not prove runtime parity.
+
