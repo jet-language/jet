@@ -82,19 +82,16 @@ fn clock_state_now(state: __ClockState) -> Int Never! {
 }
 
 impl Clock {
-    pub fn __new(seed: Int) -> Clock Never! {
+    pub fn new(seed: Int) -> Clock Never! {
         Clock{state: shared __ClockState.Manual(seed)}
     }
-    pub fn new(seed: Int) -> Clock Never! { Clock.__new(seed) }
-    pub fn __system() -[Time]> Clock Never! {
+    pub fn system() -[Time]> Clock Never! {
         Clock{state: shared __ClockState.System(core.time.__clock_mono_ns(), 0)}
     }
-    pub fn system() -[Time]> Clock Never! { Clock.__system() }
-    pub fn __now(self) -> Int Never! {
+    pub fn now(self) -> Int Never! {
         guard :: self.state.guard_read()
         clock_state_now(guard.value)
     }
-    pub fn now(self) -> Int Never! { self.__now() }
     fn set(&self, value: Int) Never! {
         guard := self.state.guard_edit()
         if guard.value == {
@@ -107,23 +104,20 @@ impl Clock {
             }
         }
     }
-    pub fn __tick(&self, millis: Int) -> Int Never! {
-        next :: saturating_add_ns(self.__now(), millis)
+    pub fn tick(&self, millis: Int) -> Int Never! {
+        next :: saturating_add_ns(self.now(), millis)
         &self.set(next)
-        self.__now()
+        self.now()
     }
-    pub fn tick(&self, millis: Int) -> Int Never! { &self.__tick(millis) }
-    pub fn __advance(&self, to_ms: Int) -> Int Never! {
+    pub fn advance(&self, to_ms: Int) -> Int Never! {
         &self.set(to_ms)
-        self.__now()
+        self.now()
     }
-    pub fn advance(&self, to_ms: Int) -> Int Never! { &self.__advance(to_ms) }
-    pub fn __wait(&self, duration: Duration) -> Int Never! {
-        next :: saturating_add_ns(self.__now(), duration.ns /% 1000000)
+    pub fn wait(&self, duration: Duration) -> Int Never! {
+        next :: saturating_add_ns(self.now(), duration.ns /% 1000000)
         &self.set(next)
-        self.__now()
+        self.now()
     }
-    pub fn wait(&self, duration: Duration) -> Int Never! { &self.__wait(duration) }
     pub fn __observer(self) -> __ClockObserver Never! {
         __ClockObserver{state: ~self.state}
     }
@@ -132,7 +126,7 @@ impl Clock {
     pub fn __fork(self) -> Clock Never! {
         guard :: self.state.guard_read()
         if guard.value == {
-            .Manual(now) -> Clock.__new(now)
+            .Manual(now) -> Clock.new(now)
             .System(_, _) -> {
                 started :: core.time.__clock_mono_ns()
                 offset :: clock_state_now(guard.value)
@@ -140,7 +134,7 @@ impl Clock {
             }
         }
     }
-    pub fn __show(self) -> String Never! { "Clock {{ now: {self.__now()} }}" }
+    pub fn __show(self) -> String Never! { "Clock {{ now: {self.now()} }}" }
 }
 impl __ClockObserver {
     pub fn now(self) -> Int Never! {
@@ -149,7 +143,7 @@ impl __ClockObserver {
     }
 }
 impl Clock.Equatable {
-    fn equal(self, other: Clock) -> Bool Never! { self.__now() == other.__now() }
+    fn equal(self, other: Clock) -> Bool Never! { self.now() == other.now() }
 }
 
 #Test("Clock manual forks are independent while observers retain identity") {
