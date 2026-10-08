@@ -598,6 +598,13 @@ Opaque/special runtime handles are not admitted by declaration presence alone;
 existing handwritten Jet C providers are excluded from generated descriptors.
 Only surviving boundary callers need synthesized native glue. Direct native
 reads/writes require no replacement C symbol.
+Candidate admission also requires the actual emitted source nominal identity,
+not a legacy Rust carrier with a similarly named Core marker. Nongeneric
+nominals require a source-owned rule or an actual typed source reference;
+unused marker declarations do not qualify. Inventory classification reports
+source record/opaque candidates separately and labels native layout as
+unexercised until the MIR predicate runs. Collection-holder symbols have no
+invented declaration owner.
 Recursive record collection members use generated `jet_rt_record_seq_*`
 holders while crossing the boundary. Byte lists, record lists and `(key:
 String, value: Record)` entry lists retain their native List layouts; the

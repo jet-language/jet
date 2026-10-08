@@ -100,13 +100,21 @@ pub fn jet_fixture_plain(value: JetFixture) -> JetFixture { value }
   // mangled fields, not a historical native carrier name or a C route.
   const sampleKey = "<corelib>/Core/fixture::Core/fixture/fixture.jet::Sample";
   const pairKey = "<corelib>/Core/fixture::Core/fixture/fixture.jet::Pair";
+  const scalarKey = "<corelib>/Core/fixture::Core/fixture/fixture.jet::Scalar";
+  const markerKey = "<corelib>/Core/fixture::Core/fixture/fixture.jet::Marker";
+  const scalarSource = generatedRecordPath(scalarKey), markerSource = generatedRecordPath(markerKey);
   const sampleSource = generatedRecordPath(sampleKey), pairSource = generatedRecordPath(pairKey);
-  put("Core/fixture/fixture.jet", "pub struct Sample<T> { value: T, uncertainty: T }\npub struct Pair<A,B> { first: A, second: B }\n");
+  put("Core/fixture/fixture.jet", "pub struct Sample<T> { value: T, uncertainty: T }\npub struct Pair<A,B> { first: A, second: B }\npub struct Scalar { value: Float }\npub struct Marker {}\n");
   put("runtime.rs", declarations + `
 #[derive(Clone)]
 pub struct ${sampleSource}<T> { __jet_value: T, __jet_uncertainty: T }
 #[derive(Clone)]
 pub struct ${pairSource}<A,B> { __jet_first: A, __jet_second: B }
+#[derive(Clone)]
+pub struct ${scalarSource} { __jet_value: f64 }
+#[derive(Clone)]
+pub struct ${markerSource} {}
+pub fn source_scalar(value: f64) -> ${scalarSource} { ${scalarSource} { __jet_value: value } }
 pub fn source_sample(value: f64) -> ${sampleSource}<f64> { ${sampleSource} { __jet_value: value, __jet_uncertainty: value } }
 pub fn source_pair(first: f64, second: bool) -> ${pairSource}<f64,bool> { ${pairSource} { __jet_first: first, __jet_second: second } }
 `);
@@ -122,6 +130,10 @@ pub fn source_pair(first: f64, second: bool) -> ${pairSource}<f64,bool> { ${pair
   assert.ok(sourceJet.includes(`LowerNativeType{jet_name: "${sampleKey}<Float>", declaration: "${sampleKey}", arguments: "Float"}`));
   assert.ok(sourceJet.includes(`LowerNativeExport{symbol: "jet_rt_handle_clone_${sampleInstance}", jet_name: "${sampleKey}<Float>", op: "handle.clone", member: ""}`));
   assert.ok(sourceRust.includes(`${sampleSource}::<f64> { __jet_value: m0, __jet_uncertainty: m1 }`));
+  assert.ok(sourceJet.includes(`LowerNativeType{jet_name: "${scalarKey}", declaration: "${scalarKey}", arguments: ""}`));
+  assert.ok(sourceJet.includes(`LowerRecordSchema{jet_name: "${scalarSource}", variants: "", fields: "value=Float"}`));
+  assert.ok(!sourceJet.includes(markerSource), "an unused marker declaration is not an ownership proof");
+  assert.ok(sourceRust.includes(`${scalarSource} { __jet_value: m0 }`));
   put("runtime.rs", declarations + "pub fn jet_fixture_measurement(value: JetMeasurement<Unbound>) -> JetMeasurement<f64> { value }\n");
   const unresolved = run();
   assert.notEqual(unresolved.status, 0);

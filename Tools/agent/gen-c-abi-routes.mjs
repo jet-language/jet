@@ -975,16 +975,23 @@ for (const fn of ["core_native_probe_name", "is_source_owned_core_compute_shape"
 }
 const coreLeaf = (name) => name.slice("<corelib>/".length).split("::").pop();
 const isSourceOwned = (name) => sourceOwned.some((rule) => name.startsWith(rule.prefix) && (!rule.suffix || name.endsWith(rule.suffix)) && (!rule.leaves || rule.leaves.includes(coreLeaf(name))));
+const sourceNominalReferences = new Set();
+for (const definitions of fns.values()) {
+  for (const definition of definitions) {
+    for (const name of definition.sig.match(/\b__jet_[A-Za-z0-9_]+\b/g) ?? []) sourceNominalReferences.add(name);
+    if (definition.selfType?.startsWith("__jet_")) sourceNominalReferences.add(definition.selfType);
+  }
+}
 // The native Rust type path (from the crate root) of a Jet type name, as
 // MIRRust.rs `rust_type` resolves an argument-free nominal; null if none.
 const nativeType = (name) => {
   const canonical = name.startsWith("<corelib>/");
-  // Source-owned generic declarations use the emitters' canonical path
-  // encoding. Accept it only when this actual runtime declares that generic;
-  // never infer a retired native carrier or alter argument-free schemas.
+  // Actual source nominal declarations, not marker structs or retired Rust
+  // carriers. Nongeneric ownership also needs the source rule or a typed
+  // source use; generic concrete uses are discovered from signatures below.
   const generated = canonical ? generatedRecordPath(name) : null;
   const declaration = generated ? declarationOf(generated) : null;
-  if (declaration?.decls.length === 1 && declaration.decls[0].generic) return declaration.key;
+  if (declaration?.decls.length === 1 && (declaration.decls[0].generic || isSourceOwned(name) || sourceNominalReferences.has(generated))) return declaration.key;
   const native = canonical && !isSourceOwned(name) ? coreLeaf(name) : name;
   if (explicitTable.has(name)) return explicitTable.get(name);
   const fileName = /^<corelib>\/Core\/(files|term)::Core\/\1\/\1\.jet::/.test(name) ? coreLeaf(name) : name;
@@ -1228,7 +1235,7 @@ for (const [name, full] of handleRows) {
   }
   // Source nominal members use the emitters' plain __jet_ prefix; the schema
   // uses Jet declaration names, while Rust projections keep emitted names.
-  const memberName = (rust) => full.startsWith("crate::__jet_") && concreteHandles.has(name) ? rust.replace(/^__jet_/, "") : rust;
+  const memberName = (rust) => full.startsWith("crate::__jet_") ? rust.replace(/^__jet_/, "") : rust;
   const members = [];
   let ok = true;
   for (const item of decl.items) {
@@ -1444,6 +1451,7 @@ for (const [name, full] of handleRows) {
 // handles; this table merely supplies stable C names for that typed lookup.
 const nativeTypes = [];
 for (const [runtime] of handleRows) {
+  if (!handles.get(runtime).startsWith("crate::__jet_")) continue;
   const names = [...jetNames].filter(([, target]) => target === runtime).map(([name]) => name).sort();
   for (const key of names) {
     const match = /^<corelib>\/[^:]+::(Core\/[^:]+\.jet)::([A-Za-z_]\w*)(?:<(.*)>)?$/.exec(key);
@@ -1451,7 +1459,7 @@ for (const [runtime] of handleRows) {
     const [, path, name, argumentsText] = match;
     const source = readFileSync(`${repo}/${path}`, "utf8");
     if (!new RegExp(`\\b(?:struct|enum)\\s+${name}\\b`).test(source)) continue;
-    const base = key.slice(0, key.indexOf(`::${name}`) + name.length + 2);
+    const base = argumentsText === undefined ? key : key.slice(0, key.length - argumentsText.length - 2);
     const render = rendered(runtime, handles.get(runtime));
     nativeTypes.push({ runtime, jetNames: names, jetName: key, source: { path, key: base },
       arguments: argumentsText ?? "", clone: cloneable.has(runtime), eq: comparable.has(runtime), ...render });
