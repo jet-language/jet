@@ -1150,6 +1150,7 @@ impl<'a> Checker<'a> {
         args: &mut Vec<crate::AST::CallArg>,
         recv_type_out: &mut Option<String>,
         resolved_ret_out: &mut Option<Type>,
+        operator_rhs_out: &mut Option<Type>,
     ) -> Option<Type> {
         if let Some(path) = checker_hardware_path(receiver, &self.core_imports) {
             let is_board = self
@@ -8020,6 +8021,42 @@ impl<'a> Checker<'a> {
             self.diags.push(Diagnostic::from_row("E0340", &[], Some(span)));
             return None;
         }
+        // Operator hooks use operand-pair identity even with explicit dot syntax.
+        // Their signatures are not ordinary name-only method candidates.
+        let operator_trait = match method {
+            "add" => Some(Syntax::TRAIT_ADD),
+            "sub" => Some(Syntax::TRAIT_SUB),
+            "mul" => Some(Syntax::TRAIT_MUL),
+            "div" => Some(Syntax::TRAIT_DIV),
+            "equal" => Some(Syntax::TRAIT_EQUATABLE),
+            "compare" => Some(Syntax::TRAIT_COMPARABLE),
+            _ => None,
+        };
+        let mut operator_signature = None;
+        if let Some(trait_name) = operator_trait.filter(|_| args.len() == 1) {
+            let (owner_type, _, traits) = self.capability_type_context(&recv_ty);
+            if traits.operator_impls.iter().any(|row| row.left == owner_type.name() && row.trait_name == trait_name) {
+                let rhs = self.infer(&mut args[0].expr)?;
+                let (rhs_type, _, _) = self.capability_type_context(&rhs);
+                let (owner_type, registry, traits) = self.capability_type_context(&recv_ty);
+                if let Some(row) = traits.operator_impl_for(&owner_type, trait_name, &rhs_type) {
+                    let key = jet_foundation::Traits::operator_method_identity(&row.left, trait_name, method, &row.rhs);
+                    let owner = match &recv_ty {
+                        Type::Named(name) | Type::Apply { name, .. } => {
+                            let (namespace, leaf) = self.struct_type_name_parts(name);
+                            self.struct_owner_module(leaf, namespace).unwrap_or(self.module_idx)
+                        }
+                        _ => self.module_idx,
+                    };
+                    let signature = registry.operator_signatures.get(&key).cloned();
+                    if let Some(mut signature) = signature {
+                        self.qualify_method_signature(owner, &row.left, &mut signature);
+                        *operator_rhs_out = Some(row.rhs.clone());
+                        operator_signature = Some((owner, signature));
+                    }
+                }
+            }
+        }
         // Built-in value types have no user `struct`/`enum` registry entry,
         // but their method names still come from the canonical collection
         // table. Keep their ordinary missing-method errors on E0311 so the
@@ -8027,7 +8064,7 @@ impl<'a> Checker<'a> {
         // that only nominal values can have methods. `Iter` retains its
         // materializer-specific E0102 recovery below.
         let builtin_methods = Collections::builtin_method_names(&recv_ty);
-        if !builtin_methods.is_empty()
+        if operator_signature.is_none() && !builtin_methods.is_empty()
             && !matches!(
                 &recv_ty,
                 Type::Apply { name, .. }
@@ -8066,6 +8103,7 @@ impl<'a> Checker<'a> {
                     return None;
                 }
             },
+            _ if operator_signature.is_some() => recv_ty.name(),
             _ => {
                 let diagnostic = self.missing_instance_method_diagnostic(
                     method,
@@ -8114,7 +8152,7 @@ impl<'a> Checker<'a> {
                 }
             }
         }
-        let Some((owner_mod, mut msig)) = self.resolve_method_sig(&type_name, method) else {
+        let Some((owner_mod, mut msig)) = operator_signature.or_else(|| self.resolve_method_sig(&type_name, method)) else {
             let iter_elem = match &recv_ty {
                 Type::Apply { name, args }
                     if name == Syntax::TYPE_ITER || name == Syntax::TYPE_VIEW_ITER =>

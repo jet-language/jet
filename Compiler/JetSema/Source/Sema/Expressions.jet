@@ -2835,9 +2835,14 @@ fn sema_expr_check_method_call(receiver: Expr, method: String, method_span: Span
         special := sema_expr_try_method_special_routes(receiver, receiver_value, method, owner_type_args, type_args, args, method_span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         if special.handled -> return special.value
     }
-    candidates :: if environment.registration_graph == {
-        .Val(graph) -> sema_expr_registration_method_candidates(graph, receiver_value.ty, method, owner_type_args, type_args, method_span, environment, &scopes, &diagnostics)
-        .None -> sema_call_local_method_candidates(environment, method, owner_type_args, type_args)
+    operator_trait :: if {
+        method == "add" -> Val("Add")
+        method == "sub" -> Val("Sub")
+        method == "mul" -> Val("Mul")
+        method == "div" -> Val("Div")
+        method == "equal" -> Val("Equatable")
+        method == "compare" -> Val("Comparable")
+        else -> None
     }
     argument_types := [Type?]{}
     argument_index := 0
@@ -2845,7 +2850,7 @@ fn sema_expr_check_method_call(receiver: Expr, method: String, method_span: Span
         argument := args[argument_index]
         if {
             // A decimal literal's carrier comes from the parameter it meets.
-            sema_call_inference_needs_context(argument.expr) || sema_expr_decimal_literal_operand(argument.expr, true) -> {
+            sema_call_inference_needs_context(argument.expr) || (operator_trait == None && sema_expr_decimal_literal_operand(argument.expr, true)) -> {
                 &argument_types.push(None)
             }
             else -> {
@@ -2863,6 +2868,16 @@ fn sema_expr_check_method_call(receiver: Expr, method: String, method_span: Span
             }
         }
         argument_index += 1
+    }
+    candidates := [SemaCallMethodCandidate]{}
+    if args.len() == 1 && operator_trait == .Val(trait_name) && argument_types[0] == .Val(rhs) && environment.registration_graph == .Val(graph) {
+        loop resolution in sema_expr_registration_operator_candidates(graph, receiver_value.ty, rhs, trait_name, method, false, method_span, environment, &scopes, &diagnostics) -> &candidates.push(resolution.candidate)
+    }
+    if candidates.len() == 0 {
+        candidates = if environment.registration_graph == {
+            .Val(graph) -> sema_expr_registration_method_candidates(graph, receiver_value.ty, method, owner_type_args, type_args, method_span, environment, &scopes, &diagnostics)
+            .None -> sema_call_local_method_candidates(environment, method, owner_type_args, type_args)
+        }
     }
     candidate :: sema_call_resolve_method_with_inference(receiver_value.ty, method, args, argument_types, expected, candidates, environment, &scopes, method_span, &diagnostics) ?? return None
     scopes.ownership_call_depth += 1

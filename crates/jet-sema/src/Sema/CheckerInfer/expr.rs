@@ -5234,7 +5234,7 @@ impl<'a> Checker<'a> {
                 args,
                 recv_type,
                 resolved_ret,
-                operator_rhs: _,
+                operator_rhs,
                 checked_widen: _,
             } => {
                 // D-SHAPE3a=A: the parser's empty identifier is the unspellable
@@ -5384,6 +5384,7 @@ impl<'a> Checker<'a> {
                     args,
                     recv_type,
                     resolved_ret,
+                    operator_rhs,
                 );
                 self.finish_receiver_mark(receiver);
                 for (name, state) in fixed_uninit {

@@ -24,6 +24,33 @@ pub(crate) use Serde::{
     expand_builtin_serde_items, expand_builtin_serde_items_with_auto, inject_anonymous_union_items,
 };
 
+pub(crate) fn is_operator_trait(name: &str) -> bool {
+    matches!(name, Syntax::TRAIT_ADD | Syntax::TRAIT_SUB | Syntax::TRAIT_MUL
+        | Syntax::TRAIT_DIV | Syntax::TRAIT_EQUATABLE | Syntax::TRAIT_COMPARABLE)
+}
+
+/// Operator signatures share the coherence registry's unspellable pair identity.
+pub(crate) fn operator_signature_key(
+    owner: &str,
+    trait_name: Option<&str>,
+    method: &str,
+    rhs: Option<&Type>,
+) -> Option<String> {
+    let trait_name = trait_name?;
+    if !is_operator_trait(trait_name) {
+        return None;
+    }
+    let implied;
+    let rhs = match rhs {
+        Some(rhs) => rhs,
+        None => {
+            implied = Type::Named(owner.to_string());
+            &implied
+        }
+    };
+    Some(jet_foundation::Traits::operator_method_identity(owner, trait_name, method, rhs))
+}
+
 /// Seed a checker-only declaration view before top-level comptime values run.
 /// The production registration pass remains authoritative; this view only
 /// gives initializer inference the same nominal and callable context.
@@ -202,17 +229,6 @@ pub(crate) fn normalize_operator_rhs(items: &mut Vec<Item>) {
         }
     }
 
-    fn is_operator_trait(name: &str) -> bool {
-        matches!(
-            name,
-            Syntax::TRAIT_ADD
-                | Syntax::TRAIT_SUB
-                | Syntax::TRAIT_MUL
-                | Syntax::TRAIT_DIV
-                | Syntax::TRAIT_EQUATABLE
-                | Syntax::TRAIT_COMPARABLE
-        )
-    }
 
     fn normalize_nested(items: &mut [Item]) {
         let owners: HashMap<String, Type> = items

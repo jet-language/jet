@@ -1230,6 +1230,7 @@ fn builtin_type_registry() -> TypeRegistry {
     );
     TypeRegistry {
         types,
+        operator_signatures: HashMap::new(),
         error_types: HashSet::new(),
         unit_types,
         unit_facts,

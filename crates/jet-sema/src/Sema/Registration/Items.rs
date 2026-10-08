@@ -2405,22 +2405,27 @@ fn register_type_methods_inner(
         let (type_name, methods, field_names) = match item {
             Item::Struct(s) => (
                 s.name.as_str(),
-                s.methods
-                    .iter()
-                    .chain(s.trait_impls.iter().flat_map(|block| block.methods.iter()))
+                s.methods.iter().map(|method| (method, None, None))
+                    .chain(s.trait_impls.iter().flat_map(|block| block.methods.iter()
+                        .map(move |method| (method, Some(block.trait_name.as_str()), block.operator_rhs.as_ref()))))
                     .collect::<Vec<_>>(),
                 registry.field_names(&s.name),
             ),
             Item::Enum(e) => (
                 e.name.as_str(),
-                e.methods
-                    .iter()
-                    .chain(e.trait_impls.iter().flat_map(|block| block.methods.iter()))
+                e.methods.iter().map(|method| (method, None, None))
+                    .chain(e.trait_impls.iter().flat_map(|block| block.methods.iter()
+                        .map(move |method| (method, Some(block.trait_name.as_str()), block.operator_rhs.as_ref()))))
                     .collect::<Vec<_>>(),
                 Vec::new(),
             ),
             _ => continue,
         };
+        for (method, trait_name, rhs) in &methods {
+            if let Some(key) = operator_signature_key(type_name, *trait_name, &method.name, *rhs) {
+                registry.operator_signatures.entry(key).or_insert_with(|| func_to_method_sig(method));
+            }
+        }
         let Some(type_def) = registry.types.get_mut(type_name) else {
             continue;
         };
@@ -2428,7 +2433,10 @@ fn register_type_methods_inner(
             TypeDef::Struct { methods, .. } | TypeDef::Enum { methods, .. } => methods,
             TypeDef::Distinct { .. } | TypeDef::Alias { .. } => continue,
         };
-        for m in methods {
+        for (m, trait_name, _) in methods {
+            if trait_name.is_some_and(is_operator_trait) {
+                continue;
+            }
             if field_names.iter().any(|f| f == &m.name) {
                 diags.push(method_field_clash(&m.name, type_name, m.name_span));
             }
@@ -2486,6 +2494,13 @@ pub(crate) fn register_impl_methods(
 ) {
     for item in items {
         let Item::Impl(i) = item else { continue };
+        if i.trait_name.as_deref().is_some_and(is_operator_trait) {
+            for method in &i.methods {
+                let key = operator_signature_key(&i.type_name, i.trait_name.as_deref(), &method.name, i.operator_rhs.as_ref()).unwrap();
+                registry.operator_signatures.entry(key).or_insert_with(|| func_to_method_sig(method));
+            }
+            continue;
+        }
         if !registry.contains(&i.type_name) {
             continue;
         }
