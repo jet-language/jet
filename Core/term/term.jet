@@ -643,3 +643,11 @@ fn stdio_flush(stderr: Bool) IOError! -[IO]> {
     assert(!confirm_answer("no"))
     assert(!confirm_answer("yés"))
 }
+
+#Test("negative byte take fails before reading stdin") {
+    result :: __take_bytes(-1)
+    if result == {
+        .Err(_) -> {}
+        .Ok(_) -> assert(false)
+    }
+}
