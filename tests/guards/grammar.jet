@@ -15,6 +15,22 @@ fn s5_grammar_find(text: String, needle: String, start: Int) -> Int {
     }
 }
 
+// The finder returns UTF-8 byte offsets, matching the Rust original's string indices.
+fn s5_grammar_slice_bytes(text: String, start: Int, end: Int) -> String {
+    raw :: text.bytes()
+    assert(start >= 0 && end >= start && end <= raw.len(), "valid grammar byte span")
+    if start == end -> return ""
+    String.from_bytes(raw[start..(end - 1)]) ?? panic("grammar byte span must end on UTF-8 boundaries")
+}
+
+#Test("grammar byte spans remain byte-indexed after Unicode") {
+    text :: "é🙂 result_handler_expr: λ body paren_expr:"
+    start :: s5_grammar_find(text, "result_handler_expr:", 0)
+    end :: s5_grammar_find(text, "paren_expr:", start)
+    assert(s5_grammar_slice_bytes(text, start, end) == "result_handler_expr: λ body ")
+    assert(s5_grammar_slice_bytes(text, start, start) == "")
+}
+
 #Test("editor_grammars_have_generated_sections") {
     paths :: [String]{"Tools/editors/vscode/syntaxes/jet.tmLanguage.json", "Tools/editors/jet.tmGrammar", "Tools/editors/tree-sitter/grammar.js", "Tools/editors/zed/languages/jet/highlights.scm"}
     loop path in paths {
@@ -38,7 +54,7 @@ fn s5_grammar_find(text: String, needle: String, start: Int) -> Int {
     assert(start >= 0, "result handler rule missing")
     end :: s5_grammar_find(grammar, "paren_expr:", start)
     assert(end >= start, "paren expression rule missing after result handler")
-    rule :: grammar.slice(start, end)
+    rule :: s5_grammar_slice_bytes(grammar, start, end)
     assert(rule.contains("field(\"ok\", $.identifier)") && rule.contains("field(\"error\", $.identifier)") && rule.contains("field(\"success\"") && rule.contains("field(\"failure\""))
     assert(!rule.contains("\":>\""))
     assert(!rule.contains("\"=>\""))
@@ -65,7 +81,7 @@ fn s5_grammar_first_quoted(text: String, start: Int) -> String? {
     if first < 0 -> return None
     last :: s5_grammar_find(text, "\"", first + 1)
     if last < 0 -> return None
-    Val(text.slice(first + 1, last))
+    Val(s5_grammar_slice_bytes(text, first + 1, last))
 }
 
 #Test("zed_highlight_query_mentions_only_grammar_literals") {
@@ -105,7 +121,7 @@ fn s5_grammar_first_quoted(text: String, start: Int) -> String? {
             if first < 0 -> break
             last :: s5_grammar_find(trimmed, "\"", first + 1)
             if last < 0 -> break
-            token :: trimmed.slice(first + 1, last)
+            token :: s5_grammar_slice_bytes(trimmed, first + 1, last)
             assert(anonymous.contains(token), "Zed query mentions non-anonymous grammar literal: {token}")
             at = last + 1
         }

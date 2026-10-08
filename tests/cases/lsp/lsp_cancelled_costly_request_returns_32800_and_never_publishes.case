@@ -14,12 +14,12 @@ send lsp: messages/lsp_cancelled_costly_request_returns_32800_and_never_publishe
 recv lsp collect until $.id = 50
 json: stdout ndjson $[?id=50].error.code = -32800
 stdout: !~ "\"result\":" # original cancelled response has no result; preceding frames are notifications
-json: stdout ndjson $[?method="textDocument/publishDiagnostics"].params[?uri="file:///tmp/lsp_cancelled_costly_request.jet"][?version!=2] #= 0
+json: stdout ndjson $[?method="textDocument/publishDiagnostics"].params[?uri="file:///tmp/lsp_cancelled_costly_request.jet"][?version!=2] #= 0 # original predicate
 send lsp: messages/lsp_cancelled_costly_request_returns_32800_and_never_publishes/5.json
 recv lsp collect until $.id = 51
-json: stdout ndjson $[?id=50] #= 0
-json: stdout ndjson $[?id=51].result[?name="marker_new"] #>= 1
-json: stdout ndjson $[?id=51].result[?name~="marker_old"] #= 0
+json: stdout ndjson $[?id=50] #= 0 # original predicate
+json: stdout ndjson $[?id=51].result[?name="marker_new"] #>= 1 # original predicate
+json: stdout ndjson $[?id=51].result[?name~="marker_old"] #= 0 # original predicate
 send lsp: messages/lsp_cancelled_costly_request_returns_32800_and_never_publishes/6.json
 recv lsp until $.id = 99
 close lsp
