@@ -1212,6 +1212,7 @@ fn jet_eval_task_roots_fixture_shape_index(machine: JetEvalMachine, shape_progra
     if shape_program.types.len() != machine.program.types.len() || shape_program.core_owners.len() != machine.program.core_owners.len() || shape_program.modules.len() != machine.program.modules.len() || shape_program.handles.len() != machine.program.handles.len() -> return false
     shape_rows := jet_eval_program_shape_rows(shape_program)
     if shape_rows.functions.len() != 0 || shape_rows.fields.len() != 0 || shape_rows.type_instances.len() != 0 || shape_rows.function_rows.len() != 0 -> return false
+    if shape_rows.source_clone_hooks.len() != 0 || shape_rows.source_show_hooks.len() != 0 || shape_rows.source_debug_hooks.len() != 0 -> return false
     loop row in machine.program.types {
         if shape_rows.types.get(row.id.value) != machine.rows.types.get(row.id.value) -> return false
     }
