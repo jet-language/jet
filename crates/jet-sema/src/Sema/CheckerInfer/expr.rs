@@ -6148,7 +6148,14 @@ impl<'a> Checker<'a> {
             }
         }
 
-        let saved = self.expected_type.replace(head.clone());
+        // A conversion head describes the result, not an arithmetic operand
+        // expectation. Only a bare numeric literal takes its carrier from it.
+        let scalar_expression = head.is_numeric() && !Self::is_exact_numeric_literal(e);
+        let saved = if scalar_expression {
+            self.expected_type.take()
+        } else {
+            self.expected_type.replace(head.clone())
+        };
         let ty = self.infer(e);
         self.expected_type = saved;
         if keep_head {
@@ -6177,9 +6184,9 @@ impl<'a> Checker<'a> {
                     // Preserve the checked conversion when a scalar head
                     // changes an integer's runtime representation. A type
                     // annotation alone cannot turn integer bits into a float.
-                    if (got == Type::Int && matches!(head, Type::IntN { .. }))
-                        || (matches!(got, Type::Int | Type::IntN { .. })
-                            && matches!(head, Type::Float | Type::Float32))
+                    if (matches!(got, Type::Int | Type::IntN { .. })
+                        && matches!(head, Type::Int | Type::IntN { .. } | Type::Float | Type::Float32))
+                        || (got == Type::Float && head == Type::Float32)
                     {
                         let source_span = e.span();
                         let source = std::mem::replace(e, Expr::Absent(source_span));

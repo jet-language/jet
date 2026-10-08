@@ -980,7 +980,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn is_exact_numeric_literal(expr: &Expr) -> bool {
+    pub(crate) fn is_exact_numeric_literal(expr: &Expr) -> bool {
         match expr {
             Expr::Int(..) | Expr::Float(..) => true,
             Expr::Paren(inner, _) | Expr::Unary(crate::AST::UnOp::Neg, inner, _) => {
