@@ -100,6 +100,12 @@ call and wiped before return. Domain-separated callers can hash two spans
 without allocating a concatenated message; the digest must not alias either
 input span. The algorithm is shared by vault and other runtime crypto callers.
 
+Vault provider errors are private to the persistence boundary and are distinct
+from the public `core.crypto.vault.VaultError` variants. Their diagnostics
+contain redacted provider descriptions only. The historical pair codec preserves
+UTF-8 values byte-for-byte, including embedded NUL; it rejects truncation,
+invalid UTF-8, and trailing bytes. Owned value buffers are wiped before release.
+
 A high-level native implementation must not be retained as an invisible runtime
 fallback for a Jet implementation. If an API changes identity or semantics,
 make the change at the contract boundary and migrate its users in one cutover.

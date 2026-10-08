@@ -1,0 +1,68 @@
+// Exact private-error predicates from tests/fixtures/vault_key_runtime.rs:503-556.
+// The C transport supplies the literal expected Display/Debug text and forbidden
+// sentinels; it does not format errors or implement a vault provider.
+fn vault_fixture_check(condition: Bool) {
+    if !condition -> jet_rt_unreachable(I64{0}, I64{0})
+}
+#Export(c) fn errors_and_handles_are_redacted(kind: I64, first: I64, second: I64, expected_display: I64, expected_debug: I64, forbidden: I64) {
+    error :: vault_error_new(kind, first, second)
+    clone :: vault_error_clone(error)
+    vault_fixture_check(vault_error_equal(error, clone))
+    vault_fixture_check(vault_error_tag(error) == kind)
+    shown :: vault_error_display(error)
+    debug :: vault_error_debug(error)
+    vault_fixture_check(jet_rt_string_eq(shown, expected_display))
+    vault_fixture_check(jet_rt_string_eq(debug, expected_debug))
+    count :: rt_text_word(forbidden + DATA_SEQUENCE_LENGTH)
+    data :: rt_text_word(forbidden + DATA_SEQUENCE_DATA)
+    at := I64{0}
+    loop at < count {
+        needle :: rt_text_word(data + at * DATA_TREE_ELEMENT_BYTES)
+        vault_fixture_check(rt_text_find(shown, needle, I64{0}, false) < I64{0})
+        vault_fixture_check(rt_text_find(debug, needle, I64{0}, false) < I64{0})
+        at += I64{1}
+    }
+    jet_rt_string_drop(shown)
+    jet_rt_string_drop(debug)
+    vault_error_drop(error)
+    vault_error_drop(clone)
+}
+// Supplementary historical codec checks: exact bytes, every truncation, garbage,
+// malformed UTF-8, preserved NUL/Unicode strings, and canonical domain hash.
+#Export(c) fn jet_rt_vault_legacy_fixture(bytes: I64, length: I64, expected_hash: I64) {
+    pairs :: vault_decode_pairs(bytes, length)
+    vault_fixture_check(pairs != I64{0})
+    encoded :: vault_encode_pairs(pairs)
+    vault_fixture_check(rt_text_len(encoded) == length)
+    at := I64{0}
+    loop at < length {
+        vault_fixture_check(rt_text_byte(rt_text_data(encoded) + at) == rt_text_byte(bytes + at))
+        at += I64{1}
+    }
+    at = I64{0}
+    loop at < length {
+        vault_fixture_check(vault_decode_pairs(bytes, at) == I64{0})
+        at += I64{1}
+    }
+    scratch :: jet_rt_alloc(I64{624}, I64{8})
+    digest :: scratch + I64{592}
+    vault_payload_hash(bytes, length, digest, scratch)
+    at = I64{0}
+    loop {
+        if (at == I64{32}) -> break
+        vault_fixture_check(rt_text_byte(digest + at) == rt_text_byte(expected_hash + at))
+        at += I64{1}
+    }
+    garbage :: jet_rt_alloc(length + I64{1}, I64{1})
+    rt_text_bytes_copy(garbage, bytes, length)
+    rt_text_put(garbage + length, I64{0})
+    vault_fixture_check(vault_decode_pairs(garbage, length + I64{1}) == I64{0})
+    jet_rt_free(garbage, length + I64{1}, I64{1})
+    jet_rt_free(scratch, I64{624}, I64{8})
+    vault_pairs_drop(pairs)
+    vault_text_zero(encoded)
+    jet_rt_string_drop(encoded)
+}
+#Export(c) fn jet_rt_vault_invalid_legacy_fixture(bytes: I64, length: I64) {
+    vault_fixture_check(vault_decode_pairs(bytes, length) == I64{0})
+}

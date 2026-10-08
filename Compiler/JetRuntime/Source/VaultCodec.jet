@@ -1,0 +1,338 @@
+// Private provider errors preserve SecretsCrypto.rs:347-391's 13 variants.
+// This is NOT Core's public VaultError (D-VAULT-ERRORS1). Text payloads contain
+// provider-selected redacted descriptions, never repository paths or key bytes.
+// Searches of all refs for vault_record_hash found no reusable Jet codec;
+// 5933a61b2/d587c4035 contain only the public facade and vault_02 state/Linux.
+VAULT_ERROR_BYTES :: prep { I64{24} }
+VAULT_ERROR_TAG :: prep { I64{0} }
+VAULT_ERROR_FIRST :: prep { I64{8} }
+VAULT_ERROR_SECOND :: prep { I64{16} }
+fn vault_error_tag(error: I64) -> I64 {
+    kind :: rt_text_word(error + VAULT_ERROR_TAG)
+    if (kind < I64{0} || kind > I64{12}) -> panic("record variant index out of range")
+    kind
+}
+// Unit variants ignore both payloads; Crypto takes display/debug descriptions,
+// IO takes operation/redacted-path, Internal takes its incident identifier.
+fn vault_error_new(kind: I64, first: I64, second: I64) -> I64 {
+    if (kind < I64{0} || kind > I64{12}) -> panic("record variant index out of range")
+    result :: jet_rt_alloc(VAULT_ERROR_BYTES, I64{8})
+    rt_text_store(result + VAULT_ERROR_TAG, kind)
+    rt_text_store(result + VAULT_ERROR_FIRST, if (kind >= I64{10}) -> jet_rt_string_clone(first) else -> I64{0})
+    rt_text_store(result + VAULT_ERROR_SECOND, if (kind == I64{10} || kind == I64{11}) -> jet_rt_string_clone(second) else -> I64{0})
+    result
+}
+fn vault_error_clone(error: I64) -> I64 {
+    vault_error_new(vault_error_tag(error), rt_text_word(error + VAULT_ERROR_FIRST), rt_text_word(error + VAULT_ERROR_SECOND))
+}
+fn vault_error_drop(error: I64) {
+    if (error == I64{0}) -> return
+    kind :: vault_error_tag(error)
+    if (kind >= I64{10}) -> jet_rt_string_drop(rt_text_word(error + VAULT_ERROR_FIRST))
+    if (kind == I64{10} || kind == I64{11}) -> jet_rt_string_drop(rt_text_word(error + VAULT_ERROR_SECOND))
+    jet_rt_free(error, VAULT_ERROR_BYTES, I64{8})
+}
+fn vault_error_equal(left: I64, right: I64) -> Bool {
+    kind :: vault_error_tag(left)
+    if kind != vault_error_tag(right) -> return false
+    if (kind >= I64{10} && !jet_rt_string_eq(rt_text_word(left + VAULT_ERROR_FIRST), rt_text_word(right + VAULT_ERROR_FIRST))) -> return false
+    if (kind == I64{10} || kind == I64{11}) -> return jet_rt_string_eq(rt_text_word(left + VAULT_ERROR_SECOND), rt_text_word(right + VAULT_ERROR_SECOND))
+    true
+}
+fn vault_error_name(target: I64, kind: I64) {
+    if {
+        (kind == I64{0}) -> {
+            rt_text_push_word(target, I64{5648755746841980489}, I64{8})
+            rt_text_push_word(target, I64{6647137}, I64{3})
+        }
+        (kind == I64{1}) -> rt_text_push_word(target, I64{7236850772014821198}, I64{8})
+        (kind == I64{2}) -> {
+            rt_text_push_word(target, I64{8104601807641080407}, I64{8})
+            rt_text_push_word(target, I64{101}, I64{1})
+        }
+        (kind == I64{3}) -> rt_text_push_word(target, I64{28259009777001810}, I64{7})
+        (kind == I64{4}) -> rt_text_push_word(target, I64{110386756153164}, I64{6})
+        (kind == I64{5}) -> {
+            rt_text_push_word(target, I64{8388361603773658433}, I64{8})
+            rt_text_push_word(target, I64{28259001169167481}, I64{7})
+        }
+        (kind == I64{6}) -> rt_text_push_word(target, I64{8386662845389893443}, I64{8})
+        (kind == I64{7}) -> {
+            rt_text_push_word(target, I64{8245933071047814741}, I64{8})
+            rt_text_push_word(target, I64{7599383958000002420}, I64{8})
+            rt_text_push_word(target, I64{7497060}, I64{3})
+        }
+        (kind == I64{8}) -> {
+            rt_text_push_word(target, I64{5000237400500629065}, I64{8})
+            rt_text_push_word(target, I64{29113321536840558}, I64{7})
+        }
+        (kind == I64{9}) -> {
+            rt_text_push_word(target, I64{7596562542729786692}, I64{8})
+            rt_text_push_word(target, I64{8606218820619958644}, I64{8})
+            rt_text_push_word(target, I64{110}, I64{1})
+        }
+        (kind == I64{10}) -> rt_text_push_word(target, I64{122545893896771}, I64{6})
+        (kind == I64{11}) -> rt_text_push_word(target, I64{20297}, I64{2})
+        else -> rt_text_push_word(target, I64{7809644666444607049}, I64{8})
+    }
+}
+fn vault_error_display(error: I64) -> I64 {
+    kind :: vault_error_tag(error)
+    target :: jet_rt_string_builder_new()
+    if {
+        (kind == I64{0}) -> {
+            rt_text_push_word(target, I64{2334106421097295465}, I64{8})
+            rt_text_push_word(target, I64{7307970504746688886}, I64{8})
+            rt_text_push_word(target, I64{111520460447865}, I64{6})
+        }
+        (kind == I64{1}) -> {
+            rt_text_push_word(target, I64{7307970504746688886}, I64{8})
+            rt_text_push_word(target, I64{8027139070292271225}, I64{8})
+            rt_text_push_word(target, I64{6581877}, I64{3})
+        }
+        (kind == I64{2}) -> {
+            rt_text_push_word(target, I64{7307970504746688886}, I64{8})
+            rt_text_push_word(target, I64{2333181761882169465}, I64{8})
+            rt_text_push_word(target, I64{7954890096655100260}, I64{8})
+            rt_text_push_word(target, I64{111533748396148}, I64{6})
+        }
+        (kind == I64{3}) -> {
+            rt_text_push_word(target, I64{7307970504746688886}, I64{8})
+            rt_text_push_word(target, I64{8531350552824062073}, I64{8})
+            rt_text_push_word(target, I64{1684368239}, I64{4})
+        }
+        (kind == I64{4}) -> {
+            rt_text_push_word(target, I64{8316213871324258678}, I64{8})
+            rt_text_push_word(target, I64{28259009575218208}, I64{7})
+        }
+        (kind == I64{5}) -> {
+            rt_text_push_word(target, I64{8248096926960279926}, I64{8})
+            rt_text_push_word(target, I64{7526769937258738793}, I64{8})
+            rt_text_push_word(target, I64{7306000201517986415}, I64{8})
+            rt_text_push_word(target, I64{1684367726}, I64{4})
+        }
+        (kind == I64{6}) -> {
+            rt_text_push_word(target, I64{7521891487046787446}, I64{8})
+            rt_text_push_word(target, I64{7598452611874254433}, I64{8})
+            rt_text_push_word(target, I64{8316293034885342062}, I64{8})
+            rt_text_push_word(target, I64{8583972440427886368}, I64{8})
+            rt_text_push_word(target, I64{7021223361252455265}, I64{8})
+            rt_text_push_word(target, I64{6579570}, I64{3})
+        }
+        (kind == I64{7}) -> {
+            rt_text_push_word(target, I64{8246126602123305334}, I64{8})
+            rt_text_push_word(target, I64{7575180353039070831}, I64{8})
+            rt_text_push_word(target, I64{8102104868274380915}, I64{8})
+            rt_text_push_word(target, I64{7957614682157904495}, I64{8})
+            rt_text_push_word(target, I64{7813781033549591584}, I64{8})
+            rt_text_push_word(target, I64{120338262684769}, I64{6})
+        }
+        (kind == I64{8}) -> {
+            rt_text_push_word(target, I64{8391086215129293174}, I64{8})
+            rt_text_push_word(target, I64{2338319731383431791}, I64{8})
+            rt_text_push_word(target, I64{2334106421097295465}, I64{8})
+            rt_text_push_word(target, I64{7453010313431182949}, I64{8})
+        }
+        (kind == I64{9}) -> {
+            rt_text_push_word(target, I64{8248096926960279926}, I64{8})
+            rt_text_push_word(target, I64{7598532952374735977}, I64{8})
+            rt_text_push_word(target, I64{7575188114129054050}, I64{8})
+            rt_text_push_word(target, I64{2336936577129455731}, I64{8})
+            rt_text_push_word(target, I64{7021803841925707106}, I64{8})
+            rt_text_push_word(target, I64{7575188114129054050}, I64{8})
+            rt_text_push_word(target, I64{8390880533473992819}, I64{8})
+            rt_text_push_word(target, I64{7235937}, I64{3})
+        }
+        (kind == I64{10}) -> {
+            rt_text_push_word(target, I64{8242467427426066806}, I64{8})
+            rt_text_push_word(target, I64{8097879393565962361}, I64{8})
+            rt_text_push_word(target, I64{7308332162361620840}, I64{8})
+            rt_text_push_word(target, I64{2112100}, I64{3})
+            jet_rt_string_builder_push(target, rt_text_word(error + VAULT_ERROR_FIRST))
+        }
+        (kind == I64{11}) -> {
+            rt_text_push_word(target, I64{35684407927158}, I64{6})
+            jet_rt_string_builder_push(target, rt_text_word(error + VAULT_ERROR_FIRST))
+            rt_text_push_word(target, I64{2334102023183623712}, I64{8})
+            rt_text_push_word(target, I64{2126945}, I64{3})
+            jet_rt_string_builder_push(target, rt_text_word(error + VAULT_ERROR_SECOND))
+        }
+        else -> {
+            rt_text_push_word(target, I64{7809644666444607081}, I64{8})
+            rt_text_push_word(target, I64{7359009800298001952}, I64{8})
+            rt_text_push_word(target, I64{2322561575110338913}, I64{8})
+            rt_text_push_word(target, I64{8389754637777071721}, I64{8})
+            rt_text_push_word(target, I64{32}, I64{1})
+            jet_rt_string_builder_push(target, rt_text_word(error + VAULT_ERROR_FIRST))
+        }
+    }
+    jet_rt_string_builder_finish(target)
+}
+fn vault_error_debug(error: I64) -> I64 {
+    kind :: vault_error_tag(error)
+    target :: jet_rt_string_builder_new()
+    vault_error_name(target, kind)
+    if (kind == I64{10}) {
+        rt_text_push_word(target, I64{40}, I64{1})
+        jet_rt_string_builder_push(target, rt_text_word(error + VAULT_ERROR_SECOND))
+        rt_text_push_word(target, I64{41}, I64{1})
+    } else if (kind == I64{11}) {
+        rt_text_push_word(target, I64{7021786302599166752}, I64{8})
+        rt_text_push_word(target, I64{35435332987252}, I64{6})
+        rt_text_push_rust_debug_str(target, rt_text_word(error + VAULT_ERROR_FIRST))
+        rt_text_push_word(target, I64{8386654014920597548}, I64{8})
+        rt_text_push_word(target, I64{4208741813623678053}, I64{8})
+        rt_text_push_word(target, I64{32}, I64{1})
+        rt_text_push_rust_debug_str(target, rt_text_word(error + VAULT_ERROR_SECOND))
+        rt_text_push_word(target, I64{32032}, I64{2})
+    } else if (kind == I64{12}) {
+        rt_text_push_word(target, I64{7235423602208701216}, I64{8})
+        rt_text_push_word(target, I64{2322278961598721637}, I64{8})
+        rt_text_push_rust_debug_str(target, rt_text_word(error + VAULT_ERROR_FIRST))
+        rt_text_push_word(target, I64{32032}, I64{2})
+    }
+    jet_rt_string_builder_finish(target)
+}
+// The JVLT2 payload domain is synthesized in borrowed scratch, not copied
+// together with the payload. Caller owns 592-byte scratch (aligned8).
+fn vault_payload_hash(payload: I64, length: I64, digest: I64, scratch: I64) {
+    domain :: scratch + I64{576}
+    rt_text_store(domain, I64{7021147219605345866})
+    rt_text_store(domain + I64{8}, I64{431131421817})
+    rt_sha256_parts(domain, I64{13}, payload, length, digest, scratch)
+    rt_text_store(domain, I64{0})
+    rt_text_store(domain + I64{8}, I64{0})
+}
+
+// Historical pair codec: SecretsCrypto.rs:88-131. Wire buffers use the E4
+// raw-byte header privately (not exposed as UTF-8 Text). Pairs own a native
+// List<(Text,Text)> with the canonical 16-byte pair stride.
+VAULT_PAIR_BYTES :: prep { I64{16} }
+fn vault_utf8_valid(data: I64, length: I64) -> Bool {
+    at := I64{0}
+    loop at < length {
+        width :: rt_text_valid_width(data + at, length - at)
+        if (width <= I64{0}) -> return false
+        at += width
+    }
+    true
+}
+fn vault_u32(data: I64) -> I64 {
+    rt_text_byte(data) | (rt_text_byte(data + I64{1}) << I64{8}) |
+        (rt_text_byte(data + I64{2}) << I64{16}) | (rt_text_byte(data + I64{3}) << I64{24})
+}
+fn vault_put_u32(target: I64, value: I64) {
+    rt_text_put(target, value & I64{255})
+    rt_text_put(target + I64{1}, (value >> I64{8}) & I64{255})
+    rt_text_put(target + I64{2}, (value >> I64{16}) & I64{255})
+    rt_text_put(target + I64{3}, (value >> I64{24}) & I64{255})
+}
+fn vault_encode_pairs(pairs: I64) -> I64 {
+    count :: rt_text_word(pairs + DATA_SEQUENCE_LENGTH)
+    data :: rt_text_word(pairs + DATA_SEQUENCE_DATA)
+    length := I64{4}
+    at := I64{0}
+    loop at < count {
+        pair :: data + at * VAULT_PAIR_BYTES
+        key :: rt_text_word(pair)
+        value :: rt_text_word(pair + I64{8})
+        key_len :: rt_text_len(key)
+        value_len :: rt_text_len(value)
+        if (key_len > I64{9223372036854775799} - length || value_len > I64{9223372036854775799} - length - key_len) -> rt_text_capacity_stop()
+        length += I64{8} + key_len + value_len
+        at += I64{1}
+    }
+    result :: rt_text_builder_with_capacity(length)
+    output :: rt_text_data(result)
+    vault_put_u32(output, count)
+    cursor := I64{4}
+    at = I64{0}
+    loop at < count {
+        pair :: data + at * VAULT_PAIR_BYTES
+        key :: rt_text_word(pair)
+        value :: rt_text_word(pair + I64{8})
+        key_len :: rt_text_len(key)
+        value_len :: rt_text_len(value)
+        vault_put_u32(output + cursor, key_len)
+        cursor += I64{4}
+        rt_text_bytes_copy(output + cursor, rt_text_data(key), key_len)
+        cursor += key_len
+        vault_put_u32(output + cursor, value_len)
+        cursor += I64{4}
+        rt_text_bytes_copy(output + cursor, rt_text_data(value), value_len)
+        cursor += value_len
+        at += I64{1}
+    }
+    rt_text_store(result + I64{8}, length)
+    jet_rt_string_builder_finish(result)
+}
+fn vault_text_zero(value: I64) {
+    data :: rt_text_data(value)
+    capacity :: rt_text_word(value + I64{16})
+    at := I64{0}
+    loop at < capacity {
+        rt_text_put(data + at, I64{0})
+        at += I64{1}
+    }
+}
+fn vault_pairs_drop(pairs: I64) {
+    if (pairs == I64{0}) -> return
+    count :: rt_text_word(pairs + DATA_SEQUENCE_LENGTH)
+    data :: rt_text_word(pairs + DATA_SEQUENCE_DATA)
+    at := I64{0}
+    loop at < count {
+        pair :: data + at * VAULT_PAIR_BYTES
+        key :: rt_text_word(pair)
+        value :: rt_text_word(pair + I64{8})
+        vault_text_zero(value)
+        jet_rt_string_drop(key)
+        jet_rt_string_drop(value)
+        at += I64{1}
+    }
+    capacity :: rt_text_word(pairs + DATA_SEQUENCE_CAPACITY)
+    if (capacity != I64{0}) -> jet_rt_free(data, capacity * VAULT_PAIR_BYTES, I64{8})
+    jet_rt_free(pairs, DATA_SEQUENCE_BYTES, I64{8})
+}
+// Complete structural/UTF-8 preflight precedes any owner allocation. Rejecting
+// an impossible count is equivalent to the reference's subsequent truncation,
+// but avoids reserving an attacker-selected multi-gigabyte pair array.
+fn vault_decode_pairs(bytes: I64, length: I64) -> I64 {
+    if (length < I64{4}) -> return I64{0}
+    count :: vault_u32(bytes)
+    if (count > (length - I64{4}) / I64{8}) -> return I64{0}
+    at := I64{4}
+    index := I64{0}
+    loop index < count {
+        field := I64{0}
+        loop {
+            if (field == I64{2}) -> break
+            if (length - at < I64{4}) -> return I64{0}
+            size :: vault_u32(bytes + at)
+            at += I64{4}
+            if size > length - at -> return I64{0}
+            if !vault_utf8_valid(bytes + at, size) -> return I64{0}
+            at += size
+            field += I64{1}
+        }
+        index += I64{1}
+    }
+    if at != length -> return I64{0}
+    result :: data_sequence_new(count, VAULT_PAIR_BYTES)
+    data :: rt_text_word(result + DATA_SEQUENCE_DATA)
+    at = I64{4}
+    index = I64{0}
+    loop index < count {
+        pair :: data + index * VAULT_PAIR_BYTES
+        size :: vault_u32(bytes + at)
+        at += I64{4}
+        rt_text_store(pair, rt_text_copy(bytes + at, size))
+        at += size
+        value_size :: vault_u32(bytes + at)
+        at += I64{4}
+        rt_text_store(pair + I64{8}, rt_text_copy(bytes + at, value_size))
+        at += value_size
+        index += I64{1}
+    }
+    rt_text_store(result + DATA_SEQUENCE_LENGTH, count)
+    result
+}
