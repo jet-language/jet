@@ -1,0 +1,16 @@
+fn use_float(value: Float) -> Float {
+    return value + approx(1) / Float{4.0}
+}
+fn run() {
+    print(use_float([1, 2].fold(approx(1) / Float{2.0}, (a: Float, n: Int) -> a + approx(1) / Float{2.0})))
+    print(use_float([1, 2].reduce(approx(1) / Float{2.0}, (a: Float, n: Int) -> a + approx(1) / Float{2.0})))
+    print(use_float([1, 2].para_fold(() -> approx(1) / Float{2.0}, (a: Float, n: Int) -> a + approx(1) / Float{2.0}, (left: Float, right: Float) -> left + right)))
+    print(use_float([1, 2].scan(approx(1) / Float{2.0}, (a: Float, n: Int) -> a + approx(1) / Float{2.0}).sum()))
+    print(use_float([1, 2].map((n: Int) -> approx(3) / Float{2.0}).sum()))
+    print(use_float(["1.5", "bad", "2.5"].filter_map((s: String) -> Float.parse(s)).sum()))
+    print(use_float([1, 2].flat_map((n: Int) -> [approx(3) / Float{2.0}]).sum()))
+    print([1, 2, 3].group_by((n: Int) -> n % 2 == 0).has_key(true))
+    print([1, 2, 3].count_by((n: Int) -> n % 2).has_key(1))
+    print([1, 2, 3].group_by((n: Int) -> "x").get("x"))
+    print([1, 2, 3].count_by((n: Int) -> "x").get("x"))
+}
