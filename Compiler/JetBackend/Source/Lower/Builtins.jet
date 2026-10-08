@@ -305,7 +305,7 @@ fn lower_helper_try_capacity(p: MIRProgram, m: &LowerModule, glue: LowerGlue) ->
     lower_start(&f, normalized, [LIRValueID]{cap})
     unit_element :: lower_repr(p, elem) == .Absent
     stride :: if unit_element -> 1 else -> lower_list_stride(p, elem)
-    product_limit :: lower_const(&f, 9223372036854775807 / stride)
+    product_limit :: lower_const(&f, 9223372036854775807 /% stride)
     too_large :: lower_flag(&f)
     lower_emit(&f, LIRInst.Compare{dst: too_large, condition: .Gt, left: cap, right: product_limit})
     saturated :: lower_new_block(&f)

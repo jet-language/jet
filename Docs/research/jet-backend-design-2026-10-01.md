@@ -248,6 +248,10 @@ injected-fault rail; policy caps still apply.
 `jet_rt_alloc_try` consumes exactly one injected-fault probe before its buffer
 reservation (provider change `9b79e3ae6`); lowering does not add a second probe
 on that path.
+The positive-stride product limit is computed with Jet integer division `/%`
+(I64.MAX divided by the element stride), so it remains an Int word rather
+than the Fraction produced by `/`. This preserves the overflow-before-product
+check and the I64.MAX byte clamp.
 
 Sizes: a word, handle or box pointer is 8 bytes (align 8), a Bool 1 byte, Unit
 0. An inline aggregate is 8-aligned and padded to whole words, so copies move
