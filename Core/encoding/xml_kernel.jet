@@ -127,11 +127,17 @@ fn render_encoding(value: XMLEncoding) -> xml.RenderEncoding Never! {
 }
 
 fn lexical_policy(value: XMLLexicalPolicy) -> xml.LexicalPolicy Never! {
-    if value == { .PreserveValid -> xml.LexicalPolicy.PreserveValid .Deterministic -> xml.LexicalPolicy.Deterministic }
+    if value == {
+        .PreserveValid -> xml.LexicalPolicy.PreserveValid
+        .Deterministic -> xml.LexicalPolicy.Deterministic
+    }
 }
 
 fn canonical_options(value: XMLCanonical) -> xml.CanonicalOptions Never! {
-    mode :: if value.mode == { .Inclusive11 -> xml.CanonicalMode.Inclusive11 .Exclusive10 -> xml.CanonicalMode.Exclusive10 }
+    mode :: if value.mode == {
+        .Inclusive11 -> xml.CanonicalMode.Inclusive11
+        .Exclusive10 -> xml.CanonicalMode.Exclusive10
+    }
     xml.CanonicalOptions{mode: mode, comments: value.comments, inclusive_prefixes: ~value.inclusive_prefixes}
 }
 
