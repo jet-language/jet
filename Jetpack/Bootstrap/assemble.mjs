@@ -9,6 +9,8 @@
 //   aot    the same unit, for `jet test`
 //   run    implementation + the same test bodies as functions, driven by one
 //          generated `fn run()` for the default `jet run` tier (I9)
+//   publication  INTERNAL Store implementation closure + the one registered
+//                native runtime-pack publisher entry; no test driver
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readdir, readFile, realpath, stat, writeFile, mkdir, rm, copyFile } from "node:fs/promises";
@@ -17,7 +19,7 @@ import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const mode = process.argv[2] ?? "check";
-if (!["check", "aot", "run"].includes(mode)) fail(`unknown mode ${mode}; expected check, aot, or run`);
+if (!["check", "aot", "run", "publication"].includes(mode)) fail(`unknown mode ${mode}; expected check, aot, run, or internal publication`);
 
 const bootstrapDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(bootstrapDir, "../..");
@@ -25,9 +27,15 @@ const sourceRootDir = resolve(process.env.JETPACK_BOOTSTRAP_SOURCE_ROOT ?? repoR
 // Several writers may share one checkout. JETPACK_BOOTSTRAP_AREAS selects the
 // `# == Area ==` sections to assemble (unset: all), and each worker's unit lives
 // in its own scratch directory keyed by source root, selection and worker name.
-const selectedAreas = process.env.JETPACK_BOOTSTRAP_AREAS
-  ? new Set(process.env.JETPACK_BOOTSTRAP_AREAS.split(",").map((area) => area.trim()).filter(Boolean))
-  : null;
+const selectedAreas = mode === "publication"
+  ? new Set(execFileSync(process.execPath, [resolve(bootstrapDir, "areas.mjs"), "closure", "Store"], {
+    cwd: sourceRootDir,
+    env: { ...process.env, JETPACK_BOOTSTRAP_SOURCE_ROOT: sourceRootDir },
+    encoding: "utf8",
+  }).trim().split(","))
+  : process.env.JETPACK_BOOTSTRAP_AREAS
+    ? new Set(process.env.JETPACK_BOOTSTRAP_AREAS.split(",").map((area) => area.trim()).filter(Boolean))
+    : null;
 const workerName = process.env.JETPACK_WORKER ?? "lead";
 if (!/^[A-Za-z0-9_-]+$/.test(workerName)) fail("JETPACK_WORKER must be a plain name");
 const rootTag = createHash("sha256")
@@ -58,6 +66,7 @@ const packageSource = [
 ].join("\n");
 // Shared dependencies reference canonical Compiler/ sources in this checkout.
 const allowedPrefixes = ["Jetpack/", "Compiler/"];
+const PUBLICATION_ENTRY = "Tools/packaging/native-runtime-pack-publisher.jet";
 
 function fail(message) {
   console.error(`jetpack-bootstrap: ${message}`);
@@ -157,7 +166,8 @@ async function readManifest(name) {
       fail(`${where}: expected a repository-relative .jet source path`);
     }
     if (sourcePath !== normalized) fail(`${where}: use the canonical path ${normalized}`);
-    if (!allowedPrefixes.some((prefix) => sourcePath.startsWith(prefix))) {
+    const publicationEntry = sourcePath === PUBLICATION_ENTRY && name === "sources.list" && section === "Store";
+    if (!publicationEntry && !allowedPrefixes.some((prefix) => sourcePath.startsWith(prefix))) {
       fail(`${where}: sources must live under ${allowedPrefixes.join(" or ")}`);
     }
     // Dependency references have the same live/HEAD rule, never a per-file
@@ -188,7 +198,13 @@ async function readManifest(name) {
   return entries;
 }
 
-const sources = await readManifest("sources.list");
+// Registration/inventory still sees the fixed entry in ordinary modes, but
+// only the internal publication artifact emits it.
+const registeredSources = await readManifest("sources.list");
+const sources = registeredSources.filter((entry) => mode === "publication" || entry.sourcePath !== PUBLICATION_ENTRY);
+if (mode === "publication" && registeredSources.filter((entry) => entry.sourcePath === PUBLICATION_ENTRY).length !== 1) {
+  fail(`internal publication requires exactly one Store registration of ${PUBLICATION_ENTRY}`);
+}
 const tests = await readManifest("tests.list");
 if (selectedAreas !== null) {
   const known = new Set((await readFile(resolve(sourceRootDir, "Jetpack/Bootstrap/sources.list"), "utf8"))
@@ -198,11 +214,11 @@ if (selectedAreas !== null) {
   for (const area of selectedAreas) if (!known.has(area)) fail(`JETPACK_BOOTSTRAP_AREAS names unknown section ${area}`);
 }
 const seen = new Set();
-for (const entry of [...sources, ...tests]) {
+for (const entry of [...registeredSources, ...tests]) {
   if (seen.has(entry.sourcePath)) fail(`${entry.where}: duplicate source ${entry.sourcePath}`);
   seen.add(entry.sourcePath);
 }
-for (const entry of sources) {
+for (const entry of registeredSources) {
   if (/\/Tests\//.test(entry.sourcePath)) fail(`${entry.where}: test sources belong in tests.list`);
 }
 for (const entry of tests) {
@@ -214,7 +230,7 @@ for (const entry of tests) {
 // proved (JETPACK_BOOTSTRAP_OWN_AREA), only that area must be complete: its
 // dependency areas may hold another writer's unlisted work in progress, which
 // is left out of the unit and noted, never a reason to fail this proof.
-const ownArea = process.env.JETPACK_BOOTSTRAP_OWN_AREA ?? null;
+const ownArea = mode === "publication" ? null : process.env.JETPACK_BOOTSTRAP_OWN_AREA ?? null;
 const inventoried = [];
 const areas = await readdir(resolve(sourceRootDir, "Jetpack"), { withFileTypes: true }).catch(() => []);
 for (const area of areas) {
@@ -270,7 +286,7 @@ function renderTests(text, sourcePath) {
 
 // Proving one area runs only that area's tests; each dependency area proves its
 // own tests in its own unit.
-const unitTests = ownArea === null ? tests : tests.filter((entry) => entry.section === ownArea);
+const unitTests = mode === "publication" ? [] : ownArea === null ? tests : tests.filter((entry) => entry.section === ownArea);
 const units = [...sources, ...unitTests];
 if (units.length === 0) fail("Jetpack/Bootstrap/sources.list contains no sources");
 const testPaths = new Set(unitTests.map((entry) => entry.sourcePath));
@@ -336,6 +352,9 @@ if (mode === "run") {
   append("// [jetpack-bootstrap generated: default-tier test driver]\nfn run() {\n");
   for (const { name, fnName } of testNames) append(`    ${fnName}()\n    print("pass ${name}")\n`);
   append(`    print("jetpack-bootstrap: ${testNames.length} claims passed")\n}\n`);
+}
+if (mode === "publication") {
+  append("// [jetpack-bootstrap generated: internal native runtime-pack publisher]\nfn run() {\n    native_runtime_pack_publisher()\n}\n");
 }
 
 await rm(projectDir, { recursive: true, force: true });
