@@ -107,7 +107,7 @@ use core.data as core_data
         }
         nf :: Float.from_int(n)
         denominator :: nf * sum_xx - sum_x * sum_x
-        if denominator == Float{0.0} -> panic("OLS requires varying x values")
+        if denominator == (Float{0.0}) -> panic("OLS requires varying x values")
         slope :: (nf * sum_xy - sum_x * sum_y) / denominator
         intercept :: (sum_y - slope * sum_x) / nf
         mean_y :: sum_y / nf
@@ -118,7 +118,7 @@ use core.data as core_data
             total += (row.y - mean_y) * (row.y - mean_y)
             residual += (row.y - predicted) * (row.y - predicted)
         }
-        if total == Float{0.0} -> panic("OLS requires varying y values")
+        if total == (Float{0.0}) -> panic("OLS requires varying y values")
         return Regression{
             slope: slope,
             intercept: intercept,
@@ -222,6 +222,6 @@ use core.data as core_data
         return core_data.status()
     }
 
-    pub fn require_python_bridge() -[FS, Env]> DataError! {
+    pub fn require_python_bridge() DataError! -[FS, Env]> {
         return core_data.require_bridge("py")
     }
