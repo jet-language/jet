@@ -254,6 +254,14 @@ JVLT2, locks and rechecks the provider and exact starting state, wipes old value
 (not their names), preserves typed records, and uses the shared durable writer
 with a checked revision increment. Plaintext string extraction takes decoded
 typed string owners or canonicalizes historical pairs, without cloning secrets.
+The existing name-mapped KeyRef provider state mirrors its seed fields exactly:
+provider, repository UUID, owned name, u64 generation, opaque ID and record hash;
+the type parameter remains phantom. Current/versions reject another key type
+before selecting rows; versions use the shared stable index sort followed by
+reverse unsigned generation order. Find matches exact identity before checking
+type and immutable hash. Load rejects revoked rows before cloning their secret
+bytes and validating the 32-byte key. Status projects wire Active1/Retired2/
+Revoked3 by name to the unchanged Core-source Active0/Retired1/Revoked2.
 
 Typed vault records own native Secret buffers. Equality compares the key bytes,
 not just immutable hashes, while Debug always prints a redacted key marker.

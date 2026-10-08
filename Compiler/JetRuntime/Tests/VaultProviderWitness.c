@@ -50,6 +50,7 @@ extern void jet_rt_vault_lock_fields_fixture(const Text *, int64_t, _Bool, int64
 extern void jet_rt_vault_lock_guard_fixture(const Text *, const Text *);
 extern void jet_rt_vault_lock_acquire_fixture(const Text *);
 extern void jet_rt_vault_lifecycle_strings_fixture(const Text *, const Text *, const Text *);
+extern void jet_rt_vault_reference_fixture(void *, const Text *, const Text *);
 extern void imported_origin_round_trips_and_invalid_combinations_reject(const Text *, const Text *);
 extern void jet_rt_vault_crypto_fixture(const ByteList *);
 extern void jet_rt_vault_crypto_unavailable_fixture(int64_t (*)(void *, void *, int64_t));
@@ -114,6 +115,9 @@ static void zeroization_fixture(void) {
     jet_rt_vault_origin_hash_bound_fixture(parts[0], &origin_name, origin_hash);
     Text invalid_origin = text(".");
     jet_rt_vault_codec_duplicate_fixture(parts[0], &invalid_origin);
+    Text ref_display = text("repo:transport@v18446744073709551615");
+    Text ref_debug = text("repo:transport@v18446744073709551615#02020202");
+    jet_rt_vault_reference_fixture(parts[0], &ref_display, &ref_debug);
     observed[0].data = data; observed[0].capacity = 40;
     observed[1].data = clone_key->data; observed[1].capacity = 32; observed_count = 2;
     jet_rt_string_drop(parts[2]);

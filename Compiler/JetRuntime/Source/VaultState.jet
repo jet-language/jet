@@ -884,3 +884,231 @@ fn vault_replace_strings_at_root(root: I64, pairs: I64) -> I64 {
     jet_rt_free(scratch, I64{192}, I64{8})
     error
 }
+
+// Existing name-mapped JetVaultKeyRef<T>, SecretsCrypto.rs:453-460.
+// T is phantom: the provider receives its checked key tag as a parameter.
+VAULT_REF_BYTES :: prep { I64{88} }
+VAULT_REF_PROVIDER :: prep { I64{0} }
+VAULT_REF_UUID :: prep { I64{8} }
+VAULT_REF_NAME :: prep { I64{24} }
+VAULT_REF_GENERATION :: prep { I64{32} }
+VAULT_REF_OPAQUE :: prep { I64{40} }
+VAULT_REF_HASH :: prep { I64{56} }
+fn vault_ref(store: I64, record: I64) -> I64 {
+    reference :: jet_rt_alloc(VAULT_REF_BYTES, I64{8})
+    rt_text_store(reference + VAULT_REF_PROVIDER, I64{0})
+    rt_text_bytes_copy(reference + VAULT_REF_UUID, store + VAULT_STORE_UUID, I64{16})
+    rt_text_store(reference + VAULT_REF_NAME, jet_rt_string_clone(rt_text_word(record + VAULT_RECORD_NAME)))
+    rt_text_store(reference + VAULT_REF_GENERATION, rt_text_word(record + VAULT_RECORD_GENERATION))
+    rt_text_bytes_copy(reference + VAULT_REF_OPAQUE, record + VAULT_RECORD_OPAQUE, I64{16})
+    rt_text_bytes_copy(reference + VAULT_REF_HASH, record + VAULT_RECORD_HASH, I64{32})
+    reference
+}
+fn vault_ref_clone(reference: I64) -> I64 {
+    result :: jet_rt_alloc(VAULT_REF_BYTES, I64{8})
+    rt_text_bytes_copy(result, reference, VAULT_REF_BYTES)
+    rt_text_store(result + VAULT_REF_NAME, jet_rt_string_clone(rt_text_word(reference + VAULT_REF_NAME)))
+    result
+}
+fn vault_ref_drop(reference: I64) {
+    if (reference == I64{0}) -> return
+    jet_rt_string_drop(rt_text_word(reference + VAULT_REF_NAME))
+    jet_rt_free(reference, VAULT_REF_BYTES, I64{8})
+}
+fn vault_ref_equal(left: I64, right: I64) -> Bool {
+    rt_text_word(left + VAULT_REF_PROVIDER) == rt_text_word(right + VAULT_REF_PROVIDER) &&
+        rt_text_equal_bytes(left + VAULT_REF_UUID, right + VAULT_REF_UUID, I64{16}) &&
+        jet_rt_string_eq(rt_text_word(left + VAULT_REF_NAME), rt_text_word(right + VAULT_REF_NAME)) &&
+        rt_text_word(left + VAULT_REF_GENERATION) == rt_text_word(right + VAULT_REF_GENERATION) &&
+        rt_text_equal_bytes(left + VAULT_REF_OPAQUE, right + VAULT_REF_OPAQUE, I64{16}) &&
+        rt_text_equal_bytes(left + VAULT_REF_HASH, right + VAULT_REF_HASH, I64{32})
+}
+// Display/Debug never reveal repository hashes or key material.
+fn vault_ref_display(reference: I64, debug: Bool) -> I64 {
+    target :: jet_rt_string_builder_new()
+    rt_text_push_word(target, I64{250977740146}, I64{5}) // repo:
+    jet_rt_string_builder_push(target, rt_text_word(reference + VAULT_REF_NAME))
+    rt_text_push_word(target, I64{30272}, I64{2}) // @v
+    vault_push_u64(target, rt_text_word(reference + VAULT_REF_GENERATION))
+    if debug {
+        rt_text_push_word(target, I64{35}, I64{1})
+        at := I64{0}
+        loop at < (I64{8}) {
+            byte :: rt_text_byte(reference + VAULT_REF_OPAQUE + at /% I64{2})
+            nibble :: if (at % I64{2} == I64{0}) -> byte >> I64{4} else -> byte & I64{15}
+            rt_text_push_word(target, if (nibble < I64{10}) -> nibble + I64{48} else -> nibble + I64{87}, I64{1})
+            at += I64{1}
+        }
+    }
+    jet_rt_string_builder_finish(target)
+}
+fn vault_ref_matches(record: I64, reference: I64) -> Bool {
+    jet_rt_string_eq(rt_text_word(record + VAULT_RECORD_NAME), rt_text_word(reference + VAULT_REF_NAME)) &&
+        rt_text_word(record + VAULT_RECORD_GENERATION) == rt_text_word(reference + VAULT_REF_GENERATION) &&
+        rt_text_equal_bytes(record + VAULT_RECORD_OPAQUE, reference + VAULT_REF_OPAQUE, I64{16}) &&
+        rt_text_equal_bytes(record + VAULT_RECORD_HASH, reference + VAULT_REF_HASH, I64{32})
+}
+// Seed1691-1715: identity first, then key type, then immutable hash validation.
+// Success lends the store's record; caller retains the store for the whole use.
+fn vault_find(store: I64, reference: I64, key_type: I64, out: I64) -> I64 {
+    if (rt_text_word(reference + VAULT_REF_PROVIDER) != I64{0} ||
+        !rt_text_equal_bytes(store + VAULT_STORE_UUID, reference + VAULT_REF_UUID, I64{16})) -> return vault_error_new(I64{1}, I64{0}, I64{0})
+    records :: rt_text_word(store + VAULT_STORE_RECORDS)
+    count :: rt_text_word(records + DATA_SEQUENCE_LENGTH)
+    data :: rt_text_word(records + DATA_SEQUENCE_DATA)
+    at := I64{0}
+    loop at < count {
+        record :: rt_text_word(data + at * DATA_TREE_ELEMENT_BYTES)
+        if vault_ref_matches(record, reference) {
+            if (rt_text_word(record + VAULT_RECORD_TYPE) != key_type) -> return vault_error_new(I64{2}, I64{0}, I64{0})
+            scratch :: jet_rt_alloc(I64{8224}, I64{8})
+            vault_record_hash(record, scratch + I64{8192}, scratch)
+            same :: rt_text_equal_bytes(scratch + I64{8192}, record + VAULT_RECORD_HASH, I64{32})
+            thread_zero(scratch, I64{8224})
+            jet_rt_free(scratch, I64{8224}, I64{8})
+            if !same -> return vault_error_new(I64{8}, I64{0}, I64{0})
+            rt_text_store(out, record)
+            return I64{0}
+        }
+        at += I64{1}
+    }
+    vault_error_new(I64{1}, I64{0}, I64{0})
+}
+fn vault_refs_drop(references: I64) {
+    count :: rt_text_word(references + DATA_SEQUENCE_LENGTH)
+    data :: rt_text_word(references + DATA_SEQUENCE_DATA)
+    at := I64{0}
+    loop at < count {
+        vault_ref_drop(rt_text_word(data + at * DATA_TREE_ELEMENT_BYTES))
+        at += I64{1}
+    }
+    capacity :: rt_text_word(references + DATA_SEQUENCE_CAPACITY)
+    if (capacity != I64{0}) -> jet_rt_free(data, capacity * DATA_TREE_ELEMENT_BYTES, I64{8})
+    jet_rt_free(references, DATA_SEQUENCE_BYTES, I64{8})
+}
+// current and versions share seed1717-1755's validation and wrong-type FIRST.
+fn vault_key_query_inner(store: I64, name: I64, key_type: I64, versions: Bool, out: I64) -> I64 {
+    records :: rt_text_word(store + VAULT_STORE_RECORDS)
+    count :: rt_text_word(records + DATA_SEQUENCE_LENGTH)
+    data :: rt_text_word(records + DATA_SEQUENCE_DATA)
+    at := I64{0}
+    matches := I64{0}
+    active := I64{0}
+    loop at < count {
+        record :: rt_text_word(data + at * DATA_TREE_ELEMENT_BYTES)
+        if jet_rt_string_eq(rt_text_word(record + VAULT_RECORD_NAME), name) {
+            if (rt_text_word(record + VAULT_RECORD_TYPE) != key_type) -> return vault_error_new(I64{2}, I64{0}, I64{0})
+            matches += I64{1}
+            if (active == I64{0} && rt_text_word(record + VAULT_RECORD_STATUS) == I64{1}) -> active = record
+        }
+        at += I64{1}
+    }
+    if !versions {
+        rt_text_store(out, if (active == I64{0}) -> I64{0} else -> vault_ref(store, active))
+        return I64{0}
+    }
+    result :: data_sequence_new(matches, DATA_TREE_ELEMENT_BYTES)
+    if (matches != I64{0}) {
+        // Only matching records are sorted: type/name are constant, so the
+        // existing comparator sorts unsigned generation ascending. Valid
+        // decoded rows have unique generations; reverse yields seed order.
+        index_bytes :: matches * I64{24}
+        indices :: jet_rt_alloc(index_bytes, I64{8})
+        cursor := I64{0}
+        at = I64{0}
+        loop at < count {
+            record :: rt_text_word(data + at * DATA_TREE_ELEMENT_BYTES)
+            if jet_rt_string_eq(rt_text_word(record + VAULT_RECORD_NAME), name) {
+                rt_text_store(indices + cursor * DATA_TREE_ELEMENT_BYTES, record)
+                cursor += I64{1}
+            }
+            at += I64{1}
+        }
+        sorted :: vault_sorted_indices(indices, matches, true, indices + matches * I64{8}, indices + matches * I64{16})
+        output :: rt_text_word(result + DATA_SEQUENCE_DATA)
+        at = I64{0}
+        loop at < matches {
+            record :: rt_text_word(sorted + (matches - at - I64{1}) * DATA_TREE_ELEMENT_BYTES)
+            rt_text_store(output + at * DATA_TREE_ELEMENT_BYTES, vault_ref(store, record))
+            at += I64{1}
+        }
+        jet_rt_free(indices, index_bytes, I64{8})
+    }
+    rt_text_store(result + DATA_SEQUENCE_LENGTH, matches)
+    rt_text_store(out, result)
+    I64{0}
+}
+fn vault_key_query_at_root(root: I64, name: I64, key_type: I64, versions: Bool, out: I64) -> I64 {
+    if !vault_validate_text(name, false) -> return vault_error_new(I64{0}, I64{0}, I64{0})
+    scratch :: jet_rt_alloc(I64{48}, I64{8})
+    error :: vault_read_contents_at_root(root, scratch, scratch + I64{8}, scratch + I64{40})
+    if (error != I64{0}) {
+        jet_rt_free(scratch, I64{48}, I64{8})
+        return error
+    }
+    store :: rt_text_word(scratch)
+    result :: vault_key_query_inner(store, name, key_type, versions, out)
+    vault_store_drop(store)
+    thread_zero(scratch, I64{48})
+    jet_rt_free(scratch, I64{48}, I64{8})
+    result
+}
+fn vault_current_at_root(root: I64, name: I64, key_type: I64, out: I64) -> I64 {
+    vault_key_query_at_root(root, name, key_type, false, out)
+}
+fn vault_versions_at_root(root: I64, name: I64, key_type: I64, out: I64) -> I64 {
+    vault_key_query_at_root(root, name, key_type, true, out)
+}
+// Status uses wire1/2/3 internally. Only this boundary projects by variant name
+// into Core KeyStatus Active0/Retired1/Revoked2; no runtime enum carrier.
+fn vault_status_core(wire: I64) -> I64 {
+    if (wire == I64{1}) -> return I64{0}
+    if (wire == I64{2}) -> return I64{1}
+    if (wire == I64{3}) -> return I64{2}
+    panic("record variant index out of range")
+}
+fn vault_key_access_at_root(root: I64, reference: I64, key_type: I64, load: Bool, out: I64) -> I64 {
+    scratch :: jet_rt_alloc(I64{56}, I64{8})
+    error :: vault_read_contents_at_root(root, scratch, scratch + I64{8}, scratch + I64{40})
+    if (error != I64{0}) {
+        jet_rt_free(scratch, I64{56}, I64{8})
+        return error
+    }
+    store :: rt_text_word(scratch)
+    found :: vault_find(store, reference, key_type, scratch + I64{48})
+    if (found != I64{0}) {
+        vault_store_drop(store)
+        thread_zero(scratch, I64{56})
+        jet_rt_free(scratch, I64{56}, I64{8})
+        return found
+    }
+    record :: rt_text_word(scratch + I64{48})
+    status :: rt_text_word(record + VAULT_RECORD_STATUS)
+    result := I64{0}
+    if !load {
+        rt_text_store(out, vault_status_core(status))
+    } else if (status == I64{3}) {
+        result = vault_error_new(I64{3}, I64{0}, I64{0})
+    } else {
+        bytes :: data_sequence_clone(vault_secret_bytes(rt_text_word(record + VAULT_RECORD_SECRET)), DATA_TREE_BYTE_LIST)
+        if (rt_text_word(bytes + DATA_SEQUENCE_LENGTH) != I64{32}) {
+            thread_zero(rt_text_word(bytes + DATA_SEQUENCE_DATA), rt_text_word(bytes + DATA_SEQUENCE_CAPACITY))
+            data_sequence_drop(bytes, DATA_TREE_BYTE_LIST)
+            result = vault_error_new(I64{8}, I64{0}, I64{0})
+        } else {
+            secret :: vault_secret_adopt(bytes)
+            jet_rt_free(bytes, DATA_SEQUENCE_BYTES, I64{8})
+            rt_text_store(out, secret)
+        }
+    }
+    vault_store_drop(store)
+    thread_zero(scratch, I64{56})
+    jet_rt_free(scratch, I64{56}, I64{8})
+    result
+}
+fn vault_load_at_root(root: I64, reference: I64, key_type: I64, out: I64) -> I64 {
+    vault_key_access_at_root(root, reference, key_type, true, out)
+}
+fn vault_status_at_root(root: I64, reference: I64, key_type: I64, out: I64) -> I64 {
+    vault_key_access_at_root(root, reference, key_type, false, out)
+}
