@@ -1733,7 +1733,7 @@ for (const [runtime] of handleRows) {
 const nativeExports = nativeHandleExports(nativeTypes)
   .filter((descriptor) => !jetRuntimeExports.has(descriptor.name));
 for (const adapter of adapters) {
-  if (adapter.external || jetRuntimeExports.has(adapter.name)) continue;
+  if (adapter.external) continue;
   const params = [];
   const names = adapter.params.map((param, index) => param.ctys.map((cty, k) => {
     const name = param.ctys.length === 1 ? `a${index}` : `a${index}_${k}`;
@@ -1869,7 +1869,8 @@ jet.push("}");
 jet.push("// END GENERATED C-ABI ROUTES");
 
 // Lifecycle and record/field helpers obey the same ownership partition as
-// routes. Validate every replaced C signature before removing its definition.
+// routes. Validate every replaced C signature before excluding its seed body
+// from the native pack. exports.list is the single provider ownership input.
 const rustBody = rs.join("\n") + "\n";
 const rustParts = [];
 let copied = 0;
@@ -1880,10 +1881,9 @@ for (const match of rustBody.matchAll(/^    #\[no_mangle\]\n    pub extern "C" f
   if (!signature || signature.generics) throw new Error(`Jet-owned generated export ${name}: unparsed C ABI`);
   const params = splitTop(signature.params).map((param) => ({ ctys: [param.slice(param.indexOf(":") + 1).trim()] }));
   validateRuntimeRoute({ symbol: name, name, params, result: { outs: [], ret: signature.result === "()" ? null : signature.result } }, jetRuntimeSignatures.get(name));
-  const open = rustBody.indexOf("{", match.index);
-  const end = open + fnBody(rustBody, name).length + 2;
   rustParts.push(rustBody.slice(copied, match.index));
-  copied = end;
+  rustParts.push("    #[cfg(not(jet_native_pack))]\n");
+  copied = match.index;
 }
 rustParts.push(rustBody.slice(copied));
 const outputs = [[rsOut, rustParts.join("")], [jetOut, jet.join("\n") + "\n"]];
