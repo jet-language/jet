@@ -1,0 +1,21 @@
+// Original tests/web_dev.rs:3243-3259; four concurrent processes replace four load threads.
+use core.files as files
+
+fn run() {
+    port :: s5_web_port()
+    root :: sys.get("S5_ROOT") ?? panic("root")
+    worker :: sys.get("S5_WORKER") ?? panic("worker")
+    leaked := false
+    served := 0
+    loop request in 0..<512 {
+        if s5_web_get(port, "/race.js", None) == .Val(response) {
+            if response.status == 200 -> served = served + 1
+            if s5_web_find(response.body, "outside-secret".bytes()) != None || (response.status == 200 && response.body != "inside".bytes()) {
+                leaked = true
+                break
+            }
+        }
+    }
+    files.write(files.join(root, "served-{worker}"), "{served}") ?? panic("served report")
+    print(leaked)
+}
