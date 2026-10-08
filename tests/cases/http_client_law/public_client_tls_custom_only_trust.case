@@ -1,0 +1,32 @@
+# HAND-PORT tests/http_client_law.rs:2244-2338 public_client_tls_custom_only_trust
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# Original OpenSSL server argv,250ms readiness sleep,3 client sources/exit0/exact stdout, literal original PEM fixtures, original ignored kill/wait results. No Core TLS-server seam; TestLead1 approved original setup tool.
+requires: tool:openssl
+fixture: public_client_tls_custom_only_trust.fixture
+env: NO_COLOR=1
+step: jet run --interpreter port/main.jet
+exit: 0
+capture: port = text stdout.trim
+session tls raw: openssl s_server -quiet -www -accept {cap:port} -cert tls/smtp.server.cert.pem -key tls/smtp.server.key.pem -CAfile tls/smtp.ca.cert.pem
+sleep: 250ms
+write: empty/main.jet empty/main.template
+step: jet build empty/main.jet
+exit: 0
+step empty: built
+exit: 0
+stdout: = public_client_tls_custom_only_trust.empty.expected
+write: wrong/main.jet wrong/main.template
+step: jet build wrong/main.jet
+exit: 0
+step wrong: built
+exit: 0
+stdout: = public_client_tls_custom_only_trust.wrong.expected
+write: pass/main.jet pass/main.template
+step: jet build pass/main.jet
+exit: 0
+step pass: built
+exit: 0
+stdout: = public_client_tls_custom_only_trust.pass.expected
+signal tls: KILL
+close tls
+exit: any # original ignores BOTH kill() and wait() Results; expected case-requested termination per DESIGN360

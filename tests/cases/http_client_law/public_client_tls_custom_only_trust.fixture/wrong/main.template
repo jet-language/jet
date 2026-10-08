@@ -1,0 +1,14 @@
+
+use core.http.client as http
+use core.net.tls as tls
+use core.files as fs
+fn run() {
+    pem :: fs.read_bytes("{work}/tls/localhost.cert.pem") ?? panic("wrong ca")
+    roots :: tls.RootCertificates.from_pem(pem) ?? panic("roots")
+    cfg :: tls.ClientConfig.default().with_trust(.CustomOnly(roots)) ?? panic("cfg")
+    client :: http.Client.new().tls(cfg).protocols(false, true, false)
+    if client.send(http.request("GET", "https://localhost:{cap:port}/")) == {
+        .Ok(_) -> print("ok")
+        .Err(_) -> print("tls-fail")
+    }
+}

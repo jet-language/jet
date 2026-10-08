@@ -1,0 +1,21 @@
+
+use core.http.client as http
+use core.net.tls as tls
+use core.files as fs
+fn run() {
+    ca :: fs.read_bytes("{work}/tls/ca.cert.pem") ?? panic("ca")
+    cert :: fs.read_bytes("{work}/tls/jet-client.cert.pem") ?? panic("cert")
+    key :: fs.read_bytes("{work}/tls/jet-client.key.pem") ?? panic("key")
+    roots :: tls.RootCertificates.from_pem(ca) ?? panic("roots")
+    identity :: tls.ClientIdentity.from_pem(cert_chain: cert, private_key: key) ?? panic("identity")
+    bare :: tls.ClientConfig.default().with_trust(.CustomOnly(roots)) ?? panic("bare")
+    client_bare :: http.Client.new().tls(bare).protocols(false, true, false)
+    if client_bare.send(http.request("GET", "https://localhost:{cap:mtls_port}/")) == {
+        .Ok(_) -> print("bare-ok")
+        .Err(_) -> print("bare-fail")
+    }
+    cfg :: bare.with_client_identity(identity) ?? panic("with identity")
+    client :: http.Client.new().tls(cfg).protocols(false, true, false)
+    resp :: client.send(http.request("GET", "https://localhost:{cap:mtls_port}/")) ?? panic("mtls send")
+    print(resp.status())
+}

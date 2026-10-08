@@ -1,0 +1,7 @@
+// SETUP-PORT original TcpListener::bind(localhost:0), local_addr.port(), drop(probe); process exits and closes listener before OpenSSL bind.
+use core.net as net
+fn run() {
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("probe bind")
+    address :: net.listener_local_socket_addr(listener) ?? panic("probe address")
+    print(net.socket_port(address))
+}
