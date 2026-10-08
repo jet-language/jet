@@ -577,3 +577,12 @@ along with its orphan-only `profile_value`, `profile_ct`, `timeout_ct`, and
 macro searches found no callers. Unrelated compiler/MIR `eval_core_call`
 functions are not that binding. The resident method adapter, handle table,
 live timeout/locked conversions, and included AOT providers are unchanged.
+
+### Realtime receipt presentation
+
+`Core/rt/rt.jet::RealtimeReceipt` owns `render_json`, `render`, and
+`frames_per_buffer`. The first two preserve the eight native receipt fields'
+fixed labels, order, punctuation and whitespace (`Realtime.rs:119-144`
+before removal); the last returns `requested_frames` (`Realtime.rs:147-149`).
+All three read the existing receipt without effects or new host leaves.
+The provider still owns bounded receipt observations and stream lifetime.

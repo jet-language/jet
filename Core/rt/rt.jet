@@ -21,6 +21,20 @@ struct RealtimeReceipt {
     max_lateness_ns: Int
     start_identity: Int
     end_identity: Int
+
+    // Realtime.rs:119-130: fixed JSON key order, no whitespace.
+    pub fn render_json(self) -> String Never! {
+        "{{\"requested_rate_hz\":{self.requested_rate_hz},\"requested_frames\":{self.requested_frames},\"completed_callbacks\":{self.completed_callbacks},\"completed_frames\":{self.completed_frames},\"missed\":{self.missed},\"max_lateness_ns\":{self.max_lateness_ns},\"start_identity\":{self.start_identity},\"end_identity\":{self.end_identity}}}"
+    }
+
+    // Realtime.rs:133-144: preserve every label, comma and space.
+    pub fn render(self) -> String Never! {
+        "RealtimeReceipt(rate_hz={self.requested_rate_hz}, frames={self.requested_frames}, callbacks={self.completed_callbacks}, completed_frames={self.completed_frames}, missed={self.missed}, max_lateness_ns={self.max_lateness_ns}, start_identity={self.start_identity}, end_identity={self.end_identity})"
+    }
+
+    pub fn frames_per_buffer(self) -> Int Never! {
+        self.requested_frames
+    }
 }
 
 #Test("realtime receipts preserve all eight bounded callback facts") {
@@ -35,6 +49,15 @@ struct RealtimeReceipt {
     assert(receipt.max_lateness_ns == 6)
     assert(receipt.start_identity == 7)
     assert(receipt.end_identity == 8)
+}
+
+#Test("realtime receipt renderers retain the native byte spelling") {
+    receipt :: RealtimeReceipt{requested_rate_hz: 48000, requested_frames: 128,
+        completed_callbacks: 3, completed_frames: 384, missed: 1,
+        max_lateness_ns: 25, start_identity: 7, end_identity: 8}
+    assert_eq(receipt.render_json(), "{{\"requested_rate_hz\":48000,\"requested_frames\":128,\"completed_callbacks\":3,\"completed_frames\":384,\"missed\":1,\"max_lateness_ns\":25,\"start_identity\":7,\"end_identity\":8}}")
+    assert_eq(receipt.render(), "RealtimeReceipt(rate_hz=48000, frames=128, callbacks=3, completed_frames=384, missed=1, max_lateness_ns=25, start_identity=7, end_identity=8)")
+    assert_eq(receipt.frames_per_buffer(), 128)
 }
 
 /// Start a fixed-rate callback stream. The callback receives one reusable
