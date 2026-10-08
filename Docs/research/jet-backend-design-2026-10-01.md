@@ -1243,6 +1243,16 @@ current comptime failure boundary exits the process; it cannot implement that
 contract. No `longjmp` may skip owners' drops. Panic/trap terminates the worker
 and invalidates its session. The host/slot substrate alone does not activate a
 REPL cutover or claim interruptible native lowering.
+
+The Driver's `CoreLibrary` graph roots the complete installed catalog, including
+private parts, independently of any user import closure. Its registration anchor
+is the first canonical module-owner/path row, not a synthetic `run`; every
+checked Core body passes through the ordinary TIR/MIR pipeline. The retained
+recipe is normalized by `jet_driver_core_library_sources`, and
+`jet_driver_prepare_core_library` computes its expected manifest before the
+native producer can lower an image. Factory accessors use the same checked
+Source callables to recompute that schema from the retained recipe.
+
 ## Tiered recompilation
 
 The tier model (D-TIER-FORM1, D-TIER-ONEIR1) recompiles a hot function at a

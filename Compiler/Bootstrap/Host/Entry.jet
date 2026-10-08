@@ -16,6 +16,7 @@
 // assembler keeps once.
 use core.sys as cli_sys
 use core.files as cli_files
+use jet_backend.[CoreSharedCanonicalProducer, CoreSharedManifest, CoreSharedParent, CoreSharedParentAdmission, CoreSharedParentAttachment, CoreSharedParentGetterResult, CoreSharedParentRuntime, core_shared_parent_admit, core_shared_parent_getter]
 use jet_driver.[
     JetDriverCompileRequest,
     JetDriverCompileResult,
@@ -24,6 +25,10 @@ use jet_driver.[
     jet_driver_compile_mir,
     jet_driver_compile_escaped_failure,
     jet_driver_compile_keep_going,
+    JetDriverCoreLibraryPreparation,
+    jet_driver_prepare_core_library,
+    JetDriverCoreSource,
+    jet_driver_core_library_request,
 ]
 use jet_backend.[lir_lower_entry, lir_print_module, x64_relocatable_object, x64_link_executable, x64_runtime_library]
 
@@ -109,4 +114,33 @@ fn jet_bootstrap_compile(request: ^JetDriverCompileRequest) -> JetDriverCompileR
     &lines.push("")
     cli_files.write(report, lines.join("\n")) ?? return result
     result
+}
+
+// Checked private accessor, invoked by the outer static host using this
+// factory's callable metadata. A factory may not reuse the base's schema walk.
+fn jet_bootstrap_core_prepare(request: ^JetDriverCompileRequest) -> JetDriverCoreLibraryPreparation Never! {
+    jet_driver_prepare_core_library(^request) ?? JetDriverCoreLibraryPreparation.CompileRefused{compilation: jet_driver_compile_escaped_failure("the canonical Core library producer failed outside every compile stage")}
+}
+
+fn jet_bootstrap_core_preparation_refusal(preparation: JetDriverCoreLibraryPreparation) -> String Never! {
+    if preparation == {
+        .Prepared(_, _) -> ""
+        .CompileRefused(compilation) -> {
+            reports :: loop diagnostic in compilation.diagnostics -> "{diagnostic.code}: {diagnostic.what}"
+            "CoreSharedCompileFailed: {compilation.internal_problem ?? reports.join("; ")}"
+        }
+        .SchemaRefused(errors) -> "CoreSharedManifestInvalid: {errors.join("; ")}"
+    }
+}
+
+fn jet_bootstrap_core_request(template: JetDriverCompileRequest, rows: [JetDriverCoreSource]) -> JetDriverCompileRequest Never! {
+    jet_driver_core_library_request(template, rows)
+}
+
+fn jet_bootstrap_core_admit(parent: &CoreSharedParent, expected: CoreSharedManifest, runtime: CoreSharedParentRuntime, producer: CoreSharedCanonicalProducer) -> CoreSharedParentAdmission Never! {
+    core_shared_parent_admit(&parent, expected, runtime, producer)
+}
+
+fn jet_bootstrap_core_getter(parent: &CoreSharedParent, manifest_digest: String, site_key: String) -> CoreSharedParentGetterResult Never! {
+    core_shared_parent_getter(&parent, CoreSharedParentAttachment{manifest_digest: manifest_digest}, site_key)
 }

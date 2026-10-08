@@ -2068,9 +2068,13 @@ fn jet_driver_unit_is_core(unit: JetDriverSourceUnit) -> Bool Never! {
 fn jet_driver_unit_module_identity(unit: JetDriverSourceUnit) -> String Never! {
     if !jet_driver_unit_is_core(unit) -> return jet_driver_module_identity(unit.package_identity, unit.path)
     if unit.file_index < 0 -> return unit.path
-    parts := unit.relative_path.split("/").to_list()
+    jet_driver_core_source_owner_key(unit.relative_path)
+}
+
+pub fn jet_driver_core_source_owner_key(relative_path: String) -> String Never! {
+    parts := relative_path.split("/").to_list()
     _ := &parts.pop()
-    "{JET_DRIVER_CORE_SOURCE_ROOT}/{parts.join("/")}::{unit.relative_path}"
+    "{JET_DRIVER_CORE_SOURCE_ROOT}/{parts.join("/")}::{relative_path}"
 }
 
 // Rust `core_source_import_module`: the Core module an import names, including
