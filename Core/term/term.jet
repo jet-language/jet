@@ -101,13 +101,6 @@ pub fn read_until(delimiter: String) -[IO, Time.Wait]> String IOError! {
     Ok(result.text)
 }
 
-pub fn take(n: Int) -[IO, Time.Wait]> [U8] IOError! {
-    if n < 0 -> return Err(terminal_other(.Read, Val("stdin"), "negative take"))
-    terminal_read_preflight()
-    result :: core.term.__terminal8_take(n)
-    if result.cause != None -> return Err(terminal_other(.Read, Val("stdin"), result.cause ?? ""))
-    Ok(result.bytes)
-}
 
 pub fn binread(path: String) -[FS, IO, Time.Wait]> [U8] IOError! {
     core.files.read_bytes(path)
@@ -191,7 +184,8 @@ pub struct WinSize {
 pub fn progress(label: String) IOError! -[IO, Time.Wait]> {
     if !core.term.__terminal8_stderr_tty() || core.term.__terminal8_machine_output() -> return Ok(())
     terminal_write_preflight("stderr")
-    cause :: core.term.__terminal8_write_stderr("\r{label}", true)
+    carriage_return :: String.from_bytes([U8]{13}) ?? ""
+    cause :: core.term.__terminal8_write_stderr("{carriage_return}{label}", true)
     if cause != None -> return Err(terminal_other(.Flush, Val("stderr"), cause ?? ""))
     Ok(())
 }
@@ -259,7 +253,8 @@ fn decode_key(raw: [U8], platform: Int) -> Key Never! {
     assert_eq(decode_key([U8]{3}, 1), Key.Ctrl('c'))
     assert_eq(decode_key([U8]{195, 169}, 1), Key.Char('é'))
     assert_eq(decode_key([U8]{195}, 1), Key.Unknown)
-    assert_eq(chomp("a\r\r\n"), "a")
+    carriage_return :: String.from_bytes([U8]{13}) ?? ""
+    assert_eq(chomp("a{carriage_return}{carriage_return}\n"), "a")
 }
 
 
