@@ -2210,3 +2210,24 @@ maximum finite, signed zeros, signed NaNs and infinities. The oracle is
 not a runtime provider or shipping toolchain component.
 Native execution and MIR/caller/layout admission remain unexercised;
 parser and C11 syntax receipts alone do not establish parity.
+
+### Native CSV row ownership boundary
+
+`CSVGlueABI.jet` defines a private align8 CSVRow16 with an owned List24
+pointer followed by raw i64 line, in `CommonTypes.rs:423-427` declaration
+order. The list owns E4 text pointers at stride8; it is not a byte list or
+the Core CSVRow's different field-order layout. There is no extra CSVRow
+constructor or field getter in this family.
+
+Clone deep-copies the field list and each text, reusing the canonical
+List24 allocator; drop frees each initialized field, capacity-sized list
+storage, list header and row shell. Empty lists keep the canonical dangling
+sentinel and never free it. Equality follows the derive: list length,
+ordered field bytes, then line. Capacity/padding are not value fields.
+
+`CSVGlueWitness.c` is a real-object client requiring `--wrap=jet_rt_free`
+with asserted interception and exact-once frees. It exercises empty and
+reserved lists, empty/duplicate/unicode/embedded-NUL fields, each equality
+field, line boundaries and surviving deep clones after original drop.
+Native execution and MIR/caller/layout admission remain unexercised;
+parser and strict C11 receipts alone do not establish parity.
