@@ -2340,7 +2340,7 @@ const COMPILER_OWNED_ENUMS: &[(&str, &[&str])] = &[
     ("TLSTrust", &["System", "SystemPlusCa"]),
     ("TLSVersion", &["TLS12", "TLS13"]),
     ("TLSClientTrust", &["System", "SystemPlus", "CustomOnly"]),
-    ("NetDnsError", &["NotFound", "Failure"]),
+    ("NetDNSError", &["NotFound", "Failure"]),
     (
         "NetError",
         &[
@@ -3401,7 +3401,7 @@ fn compiler_owned_type_defs<'a>(
     checked_nominals: Option<&crate::Comptime::MirBridge::MirFragmentNominalFacts>,
 ) -> impl Iterator<Item = TirTypeDef> + 'a {
     let span = Span::new(0, 0);
-    let net_error_variants = ["NetDnsError", "NetError"]
+    let net_error_variants = ["NetDNSError", "NetError"]
         .into_iter()
         .map(|enum_name| {
             (
@@ -3411,7 +3411,7 @@ fn compiler_owned_type_defs<'a>(
             )
         })
         .collect::<HashMap<_, _>>();
-    for enum_name in ["NetDnsError", "NetError"] {
+    for enum_name in ["NetDNSError", "NetError"] {
         let canonical_names = compiler_owned_enum_variants(enum_name)
             .unwrap_or_else(|| panic!("missing canonical MIR enum {enum_name}"));
         let variants = net_error_variants
@@ -3702,7 +3702,7 @@ fn compiler_owned_type_defs<'a>(
                                 ))),
                                 _ => TirVariantPayload::Unit,
                             }
-                        } else if matches!(*name, "NetError" | "NetDnsError") {
+                        } else if matches!(*name, "NetError" | "NetDNSError") {
                             let (_, payload) = net_error_variants
                                 .get(*name)
                                 .and_then(|variants| variants.get(*variant))

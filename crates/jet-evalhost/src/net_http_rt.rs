@@ -284,7 +284,7 @@ pub(crate) fn jet_net_io_error_mir_value(
             ]
         },
         JetNetErrorSurfacePayload::DNS { variant, value, .. } => Value::Enum {
-            type_name: "NetDnsError".to_string(),
+            type_name: "NetDNSError".to_string(),
             variant: variant.to_string(),
             args: vec![(None, Value::String(value))]
         }

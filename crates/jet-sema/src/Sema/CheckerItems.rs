@@ -2704,7 +2704,7 @@ impl<'a> Checker<'a> {
         if matches!(enum_name, "NetShutdown" | "NetReadyInterest") {
             return true;
         }
-        if matches!(enum_name, "NetError" | "NetDnsError") {
+        if matches!(enum_name, "NetError" | "NetDNSError") {
             return true;
         }
         if matches!(enum_name, "PluginError" | "PluginLimit") {

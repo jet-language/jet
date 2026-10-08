@@ -1071,7 +1071,7 @@ JET_CODEGEN_COMPILER_OWNED_ENUMS :: prep { [JetCodegenCompilerOwnedEnum]{
     JetCodegenCompilerOwnedEnum{name: "TLSTrust", variants: [String]{"System", "SystemPlusCa"}},
     JetCodegenCompilerOwnedEnum{name: "TLSVersion", variants: [String]{"TLS12", "TLS13"}},
     JetCodegenCompilerOwnedEnum{name: "TLSClientTrust", variants: [String]{"System", "SystemPlus", "CustomOnly"}},
-    JetCodegenCompilerOwnedEnum{name: "NetDnsError", variants: [String]{"NotFound", "Failure"}},
+    JetCodegenCompilerOwnedEnum{name: "NetDNSError", variants: [String]{"NotFound", "Failure"}},
     JetCodegenCompilerOwnedEnum{name: "NetError", variants: [String]{"InvalidInput", "PermissionDenied", "AddressInUse", "AddressUnavailable", "ConnectionRefused", "ConnectionReset", "NotConnected", "Closed", "Timeout", "Cancelled", "Unsupported", "TLS", "Protocol", "Other", "DNS"}},
     JetCodegenCompilerOwnedEnum{name: "NetShutdown", variants: [String]{"Read", "Write", "Both"}},
     JetCodegenCompilerOwnedEnum{name: "WatchDomain", variants: [String]{"File", "Process", "Port"}},
@@ -1098,7 +1098,7 @@ fn jet_codegen_compiler_owned_named(fields: [TypeTupleField]) -> JetCodegenCompi
 // The payload of `name.variant` on a COMPILER_OWNED_ENUMS row, written over
 // the row's type parameters; a plain Core enum row's variants are all unit.
 // Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs::compiler_owned_type_defs
-// (and jet-sema core_net_error_variants for NetError/NetDnsError).
+// (and jet-sema core_net_error_variants for NetError/NetDNSError).
 fn jet_codegen_compiler_owned_enum_payload(name: String, variant: String) -> JetCodegenCompilerOwnedPayload Never! {
     bytes :: Type.List{element: Type.IntN{signed: false, bits: 8}}
     if name == "TaskFailure" || name == "TaskOutcome" {
@@ -1166,9 +1166,9 @@ fn jet_codegen_compiler_owned_enum_payload(name: String, variant: String) -> Jet
         if variant == "Object" -> return jet_codegen_compiler_owned_single(Type.List{element: Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "key", ty: Type.String}, TypeTupleField{name: "value", ty: tree}}}})
         return JetCodegenCompilerOwnedPayload.Unit
     }
-    if name == "NetDnsError" -> return jet_codegen_compiler_owned_single(Type.String)
+    if name == "NetDNSError" -> return jet_codegen_compiler_owned_single(Type.String)
     if name == "NetError" {
-        if variant == "DNS" -> return jet_codegen_compiler_owned_single(Type.Named{name: "NetDnsError"})
+        if variant == "DNS" -> return jet_codegen_compiler_owned_single(Type.Named{name: "NetDNSError"})
         return jet_codegen_compiler_owned_single(Type.Named{name: "NetErrorDetail"})
     }
     JetCodegenCompilerOwnedPayload.Unit
