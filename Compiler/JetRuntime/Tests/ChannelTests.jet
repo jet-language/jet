@@ -85,6 +85,44 @@ fn channel_fixture_check(ok: Bool) {
     jet_rt_free(save, I64{32}, I64{8})
 }
 
+#Export(c) fn jet_rt_channel_fixture_shared_guard_stops(meta: I64) {
+    storage :: jet_rt_alloc(I64{40}, I64{8})
+    sync_store(storage, I64{17})
+    shared :: jet_rt_native_shared_new(storage, meta)
+    control :: scheduler_control_new()
+    scheduler_control_enter(control, storage + I64{8})
+    guard :: jet_rt_native_shared_guard_edit(shared)
+    channel_fixture_check(guard == shared)
+    channel_fixture_check(sync_load(jet_rt_native_shared_edit_guard_read(guard)) == I64{17})
+    jet_rt_native_shared_edit_guard_drop(guard)
+    channel_fixture_check(sync_load(shared + I64{48}) == I64{1})
+    stopped :: jet_rt_native_shared_guard_edit(shared)
+    _ := jet_rt_channel_fixture_stop(I64{0}, I64{0}, I64{0})
+    jet_rt_native_shared_edit_guard_drop(stopped)
+    channel_fixture_check(sync_load(shared + I64{48}) == I64{2})
+    channel_fixture_check(jet_scheduler_native_status() == I64{5})
+    scheduler_control_discard_stop(control)
+    sync_store(shared + I64{48}, I64{-1})
+    exhausted :: jet_rt_native_shared_guard_edit(shared)
+    channel_fixture_check(jet_rt_native_shared_guard_revision(exhausted) == I64{-1})
+    channel_fixture_check(jet_rt_native_shared_edit_guard_edit(exhausted) == jet_rt_native_shared_edit_guard_read(exhausted))
+    jet_rt_native_shared_edit_guard_drop(exhausted)
+    channel_fixture_check(sync_load(shared + I64{32}) == I64{0})
+    channel_fixture_check(sync_load(shared + I64{24}) == I64{0})
+    channel_fixture_check(sync_load(shared + I64{72}) == I64{0})
+    channel_fixture_check(sync_load(shared) == I64{1})
+    channel_fixture_check(sync_load(shared + I64{48}) == I64{-1})
+    channel_fixture_check(jet_scheduler_native_status() == I64{5})
+    scheduler_control_discard_stop(control)
+    final_read :: jet_rt_native_shared_guard_read(shared)
+    channel_fixture_check(sync_load(jet_rt_native_shared_read_guard_deref(final_read)) == I64{17})
+    jet_rt_native_shared_read_guard_drop(final_read)
+    jet_rt_native_shared_drop(shared)
+    scheduler_control_leave(storage + I64{8})
+    scheduler_control_drop(control)
+    jet_rt_free(storage, I64{40}, I64{8})
+}
+
 // Read-only fixture observation of the canonical permit state. The policy
 // remains in shared_acquire; there is no fixture lock implementation.
 #Export(c) fn jet_rt_channel_fixture_writers_waiting(shared: I64) -> I64 {

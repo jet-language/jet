@@ -119,6 +119,16 @@ compare-and-swap primitive does not establish that contract.
 `Collections.jet` owns the single runtime-wide `RT_HOST_U8_STRIDE` fact and
 `host_u8_get`/`host_u8_put` accessors. Later host layers reuse them; changing
 the compiler's U8 storage epoch flips this one fact with its byte-list fixtures.
+
+Native root Shared guards retain the existing cell and hold its canonical
+reader/writer permit for the entire consumer scope. Guard payload addresses
+borrow that cell's descriptor-owned storage; acquisition does not copy it or
+allocate a guard token. Concurrent readers coexist, writers exclude readers,
+and waiting writers precede new readers. Scope cleanup releases the permit
+before dropping its retained cell owner, so final payload cleanup runs outside
+the lock. An edit guard commits one revision on drop even without a write or
+on an already-delivered stop rail. Generation exhaustion also releases both
+permit and owner before delivering its stop.
 ### Exact integer carrier
 
 An exact `Int` crosses the scalar ABI in one 64-bit word. Values whose two

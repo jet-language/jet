@@ -7,6 +7,7 @@
 #include <pthread.h>
 #include <stdatomic.h>
 #include <sched.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -79,6 +80,16 @@ extern W jet_rt_channel_fixture_stop(W,W,W);
 extern void jet_rt_channel_fixture_stops(const Meta *,W,const Meta *,W);
 extern W jet_rt_channel_fixture_writers_waiting(W);
 extern W jet_rt_channel_fixture_select_wake_handoff(const Meta *);
+extern void jet_rt_channel_fixture_shared_guard_stops(const Meta *);
+extern W jet_rt_native_shared_guard_read(W);
+extern W jet_rt_native_shared_guard_edit(W);
+extern W jet_rt_native_shared_read_guard_read(W);
+extern W jet_rt_native_shared_read_guard_deref(W);
+extern W jet_rt_native_shared_edit_guard_read(W);
+extern W jet_rt_native_shared_edit_guard_edit(W);
+extern W jet_rt_native_shared_guard_revision(W);
+extern void jet_rt_native_shared_read_guard_drop(W);
+extern void jet_rt_native_shared_edit_guard_drop(W);
 #endif
 #if defined(JET_SEED) || defined(JET_CLOSED_CROSS)
 extern uint8_t jet_fixture_rust_select_wake_handoff(void);
@@ -149,6 +160,43 @@ static void *editor(void *p){jet_rt_thread_attach();Edits *e=p;W out;for(W i=0;i
 static void shared_tests(void){W value=0;W shared=jet_rt_native_shared_new((W)&value,&word_meta);pthread_t threads[4];Edits args[4];for(size_t i=0;i<4;i++){args[i]=(Edits){jet_rt_native_shared_clone(shared),25000};assert(!pthread_create(&threads[i],NULL,editor,&args[i]));}for(size_t i=0;i<4;i++)assert(!pthread_join(threads[i],NULL));W out=0;jet_rt_native_shared_read(shared,0,(W)inspect,(W)&out);assert(out==100000);jet_rt_native_shared_drop(shared);unsigned before=atomic_load(&drops);shared=jet_rt_native_shared_new((W)&value,&owned_meta);W alias=jet_rt_native_shared_clone(shared);jet_rt_native_shared_drop(shared);assert(atomic_load(&drops)==before);jet_rt_native_shared_drop(alias);assert(atomic_load(&drops)==before+1);puts("shared concurrent edits/drop ok");}
 
 #ifdef JET_CHANNEL_INTERNAL
+static W guard_drop_probe;
+static void guard_payload_drop(W payload) {
+    (void)payload;
+    assert(guard_drop_probe);
+    W *cell = (W *)guard_drop_probe;
+    assert(cell[1] == 0 && cell[3] == 0 && cell[4] == 0 && cell[9] == 0);
+    atomic_fetch_add_explicit(&drops, 1, memory_order_relaxed);
+}
+static const Meta guard_meta = {8,0,(W)guard_payload_drop,0,0,0,2,0,0};
+static void shared_guard_lifetime(void) {
+    W value = 19;
+    unsigned before = atomic_load(&drops);
+    W shared = jet_rt_native_shared_new((W)&value, &guard_meta);
+    W first = jet_rt_native_shared_guard_read(shared);
+    W second = jet_rt_native_shared_guard_read(shared);
+    assert(first == shared && second == shared);
+    assert(jet_rt_native_shared_read_guard_read(first) == jet_rt_native_shared_read_guard_deref(second));
+    assert(*(W *)jet_rt_native_shared_read_guard_deref(first) == 19);
+    jet_rt_native_shared_drop(shared);
+    jet_rt_native_shared_read_guard_drop(first);
+    assert(atomic_load(&drops) == before);
+    guard_drop_probe = shared;
+    jet_rt_native_shared_read_guard_drop(second);
+    guard_drop_probe = 0;
+    assert(atomic_load(&drops) == before + 1);
+    shared = jet_rt_native_shared_new((W)&value, &guard_meta);
+    W edit = jet_rt_native_shared_guard_edit(shared);
+    assert(edit == shared && jet_rt_native_shared_guard_revision(edit) == 0);
+    assert(jet_rt_native_shared_edit_guard_read(edit) == jet_rt_native_shared_edit_guard_edit(edit));
+    jet_rt_native_shared_drop(shared);
+    guard_drop_probe = shared;
+    jet_rt_native_shared_edit_guard_drop(edit);
+    guard_drop_probe = 0;
+    assert(atomic_load(&drops) == before + 2);
+    jet_rt_channel_fixture_shared_guard_stops(&word_meta);
+    puts("shared guard retain/drop/read-only commit/overflow stop ok");
+}
 typedef struct {
     W shared;
     atomic_uint *arrived;
@@ -167,6 +215,7 @@ static uint64_t read_gate(W env, W input, W output) {
 
 static uint64_t ordered_writer(W env, W input, W output) {
     Reader *r = (Reader *)env;
+    assert(atomic_load(r->release));
     assert(atomic_load(r->stage) == 0);
     *(W *)input += 1;
     atomic_store(r->stage, 1);
@@ -197,7 +246,29 @@ static void *reader(void *arg) {
     return NULL;
 }
 
-static void shared_readers(void) {
+static void *guard_reader(void *arg) {
+    jet_rt_thread_attach();
+    Reader *r = arg;
+    W out = 0;
+    if (r->kind == 1) {
+        W guard = jet_rt_native_shared_guard_edit(r->shared);
+        assert(jet_rt_native_shared_edit_guard_read(guard) == jet_rt_native_shared_edit_guard_edit(guard));
+        ordered_writer((W)r, jet_rt_native_shared_edit_guard_edit(guard), (W)&out);
+        jet_rt_native_shared_edit_guard_drop(guard);
+    } else {
+        W guard = jet_rt_native_shared_guard_read(r->shared);
+        assert(jet_rt_native_shared_read_guard_read(guard) == jet_rt_native_shared_read_guard_deref(guard));
+        if (r->kind == 2) ordered_reader((W)r, jet_rt_native_shared_read_guard_deref(guard), (W)&out);
+        else read_gate((W)r, jet_rt_native_shared_read_guard_deref(guard), (W)&out);
+        jet_rt_native_shared_read_guard_drop(guard);
+    }
+    jet_rt_native_shared_drop(r->shared);
+    jet_rt_thread_detach();
+    return NULL;
+}
+
+static void shared_readers(bool guards) {
+    void *(*start)(void *) = guards ? guard_reader : reader;
     W value = 9, shared = jet_rt_native_shared_new((W)&value, &word_meta);
     atomic_uint arrived = 0, release = 0, stage = 0;
     Reader args[4];
@@ -205,7 +276,7 @@ static void shared_readers(void) {
     for (size_t i = 0; i < 2; ++i) {
         args[i] = (Reader){jet_rt_native_shared_clone(shared),
                           &arrived, &release, &stage, 0};
-        assert(!pthread_create(&threads[i], NULL, reader, &args[i]));
+        assert(!pthread_create(&threads[i], NULL, start, &args[i]));
     }
     uint64_t deadline = now_ns() + 5000000000ULL;
     while (atomic_load(&arrived) != 2) {
@@ -215,24 +286,26 @@ static void shared_readers(void) {
     // Both callbacks are inside canonical read permits at this barrier.
     args[2] = (Reader){jet_rt_native_shared_clone(shared),
                       &arrived, &release, &stage, 1};
-    assert(!pthread_create(&threads[2], NULL, reader, &args[2]));
+    assert(!pthread_create(&threads[2], NULL, start, &args[2]));
     while (!jet_rt_channel_fixture_writers_waiting(shared)) {
         assert(now_ns() < deadline);
         sched_yield();
     }
     args[3] = (Reader){jet_rt_native_shared_clone(shared),
                       &arrived, &release, &stage, 2};
-    assert(!pthread_create(&threads[3], NULL, reader, &args[3]));
+    assert(!pthread_create(&threads[3], NULL, start, &args[3]));
     atomic_store(&release, 1);
     for (size_t i = 0; i < 4; ++i) assert(!pthread_join(threads[i], NULL));
     assert(atomic_load(&stage) == 2);
     jet_rt_native_shared_drop(shared);
-    puts("shared concurrent readers/writer priority ok");
+    puts(guards ? "shared guards concurrent readers/writer exclusion/priority ok" : "shared concurrent readers/writer priority ok");
 }
 #endif
 
 int main(int argc,char **argv){jet_rt_thread_attach();if(argc>1&&!strcmp(argv[1],"perf")){ping(1000000);return 0;}if(argc>1&&!strcmp(argv[1],"select-closed")){W tx,rx;jet_rt_native_channel(0,0,&tx,&rx);jet_rt_native_sender_drop(tx);Header rs=words(&rx,1),ts=words(NULL,0);int64_t arm;W value;jet_rt_native_select_wait(&rs,&ts,0,&arm,&value);return 99;}if(argc>1&&!strcmp(argv[1],"select-empty")){Header rs=words(NULL,0),ts=words(NULL,0);int64_t arm;W value;jet_rt_native_select_wait(&rs,&ts,0,&arm,&value);return 99;}queue_tests();select_tests();shared_tests();
 #ifdef JET_CHANNEL_INTERNAL
-    shared_readers();
+    shared_readers(false);
+    shared_readers(true);
+    shared_guard_lifetime();
 #endif
     ping(10000);jet_rt_thread_detach();return 0;}

@@ -43,6 +43,15 @@ fn shared_release(shared: I64, editable: Bool) {
     sync_mutex_unlock(shared + I64{8})
 }
 
+fn shared_revision_stop() {
+    message :: channel_text(I64{3})
+    if !rt_task_panic_publish(sync_load(message), sync_load(message + I64{8}), I64{0}) {
+        scheduler_fatal(message)
+        return
+    }
+    jet_rt_string_drop(message)
+}
+
 #Export(c) fn jet_rt_native_shared_new(slot: I64, meta: I64) -> I64 {
     shared :: jet_rt_alloc(I64{80}, I64{8})
     thread_zero(shared, I64{80})
@@ -71,12 +80,7 @@ fn shared_release(shared: I64, editable: Bool) {
     if (revision == I64{-1}) {
         shared_release(shared, true)
         jet_rt_native_shared_drop(shared)
-        message :: channel_text(I64{3})
-        if !rt_task_panic_publish(sync_load(message), sync_load(message + I64{8}), I64{0}) {
-            scheduler_fatal(message)
-            return
-        }
-        jet_rt_string_drop(message)
+        shared_revision_stop()
         return
     }
     _ := coll_call3(invoke, env, sync_load(shared + I64{64}), out)
@@ -85,6 +89,51 @@ fn shared_release(shared: I64, editable: Bool) {
     }
     shared_release(shared, true)
     jet_rt_native_shared_drop(shared)
+}
+
+// A root guard is the same cell plus one retained owner and a held canonical
+// permit. Env reaches no projection/split/wait operation: no extra heap token
+// or payload copy is needed, and each consumer scope drops its permit once.
+#Export(c) fn jet_rt_native_shared_guard_read(shared: I64) -> I64 {
+    shared_retain(shared)
+    shared_acquire(shared, false)
+    shared
+}
+
+#Export(c) fn jet_rt_native_shared_guard_edit(shared: I64) -> I64 {
+    shared_retain(shared)
+    shared_acquire(shared, true)
+    shared
+}
+
+#Export(c) fn jet_rt_native_shared_read_guard_read(guard: I64) -> I64 { sync_load(guard + I64{64}) }
+
+#Export(c) fn jet_rt_native_shared_read_guard_deref(guard: I64) -> I64 {
+    sync_load(guard + I64{64})
+}
+
+#Export(c) fn jet_rt_native_shared_edit_guard_read(guard: I64) -> I64 { sync_load(guard + I64{64}) }
+
+#Export(c) fn jet_rt_native_shared_edit_guard_edit(guard: I64) -> I64 { sync_load(guard + I64{64}) }
+
+#Export(c) fn jet_rt_native_shared_guard_revision(guard: I64) -> I64 { sync_load(guard + I64{48}) }
+
+#Export(c) fn jet_rt_native_shared_read_guard_drop(guard: I64) {
+    shared_release(guard, false)
+    jet_rt_native_shared_drop(guard)
+}
+
+#Export(c) fn jet_rt_native_shared_edit_guard_drop(guard: I64) {
+    revision :: sync_load(guard + I64{48})
+    exhausted :: revision == I64{-1}
+    // Rust JetSharedGuard::edit sets dirty=true on acquisition: even a
+    // read-only edit guard, or a drop on a delivered stop rail, commits once.
+    if !exhausted -> sync_store(guard + I64{48}, wrapping(revision + I64{1}))
+    shared_release(guard, true)
+    jet_rt_native_shared_drop(guard)
+    // The payload's final drop glue may reenter Shared. The permit and guard
+    // owner must already be released before generation exhaustion is delivered.
+    if exhausted -> shared_revision_stop()
 }
 
 #Export(c) fn jet_rt_native_shared_clone(shared: I64) -> I64 {
