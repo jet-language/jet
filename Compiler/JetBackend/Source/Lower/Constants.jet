@@ -140,7 +140,7 @@ fn lower_constant_tree_value(p: MIRProgram, c: LowerContext, m: &LowerModule, f:
     layout :: lower_repr_layout(repr) ?? return None
     // Reuse an instruction's ownership-typed destination when supplied. Nested
     // values transfer to the parent's slots and are dropped only by its glue.
-    dst :: result ?? lower_new_value(&f, layout, lower_drop(&m, f, repr, true), ty.identity)
+    dst :: result ?? lower_new_value(&f, layout, lower_drop(&m, repr, true), ty.identity)
     if constant == {
         .Int(value, _, _) -> {
             if lower_is_exact_int(ty) -> lower_exact_int_constant(&m, &f, dst, value)

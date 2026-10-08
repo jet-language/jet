@@ -330,7 +330,10 @@ that method even when no explicit call names it. Close implementations are index
 once by nominal declaration during preparation and reused by layout/drop queries.
 The consuming receiver parameter's own cleanup uses a separate structural role;
 all other values of that type, including recursive children and locals in close(),
-keep ordinary Close. Receiver-slot rebinding checks the original storage identity.
+keep ordinary Close. A function-local identity cell is invalidated before the
+original receiver's structural release or whole transfer, preventing allocator
+address reuse from inheriting its role. Inline receiver rebinding uses the live
+flag (not byte-storage pointer equality); the receiver MIR parameter is cached.
 No cleanup mask is invented by either role: checked MIR owns the cleanup bracket.
 
 For a moved Close-bearing field or payload, clearing bytes is not sufficient:
