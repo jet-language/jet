@@ -3740,6 +3740,7 @@ fn lower_helper_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIR
     if glue.helper == "drop.structural" -> return lower_glue_function(p, &m, glue)
     if glue.helper == "trait.drop" || glue.helper == "trait.clone" -> return lower_trait_payload_glue(p, &m, glue)
     if glue.helper.starts_with("builtin.") -> return lower_helper_value_builtin(p, &m, glue)
+    if lower_native_handle_operation(glue.helper) == .Val(op) -> return lower_native_handle_glue(p, &m, glue, op)
     if glue.helper.starts_with("lazy.") -> return lower_lazy_helper(p, &m, glue)
     if glue.helper == "codec.csv.decode" -> return lower_helper_codec_csv_decode(p, &m, glue)
     if glue.helper == "closure.thunk" -> return lower_closure_thunk(&m, glue)
