@@ -42,6 +42,7 @@ use jet_foundation.[
     ViewProvenanceMap,
     core_enum_variants,
     core_record_field,
+    core_type_modules,
     mir_boundary_head_carrier_module,
     mir_field_id,
     mir_nominal_ref,
@@ -316,7 +317,26 @@ fn jet_codegen_find_source_nominal_identity(modules: [SemaGraphModuleResult], cu
     // Source nominals outside the current module arrive with their checked
     // module-qualified key. Never resolve them by a leaf from another module.
     found := JetCodegenNominalIdentity?{None}
+    core_owner := String?{None}
+    if !name.contains("::") && !name.contains(".") {
+        carrier :: mir_boundary_head_carrier_module(name)
+        if carrier != None -> core_owner = carrier
+        else if name != "Path" {
+            owners :: core_type_modules(name)
+            if owners.len() == 1 -> core_owner = Val(owners[0])
+        }
+    }
+    core_owner_name :: core_owner ?? ""
     loop semantic_module in modules {
+        // This bare spelling is selected by the Core registry, not by all
+        // declarations that happen to share its leaf.
+        if semantic_module.module_identity.starts_with("<corelib>/") && core_owner_name == semantic_module.module_name {
+            if semantic_module.nominal_positions.get(name) == .Val(position) {
+                nominal_name :: semantic_module.nominals[position].symbol.name
+                key :: jet_codegen_nominal_type_key(semantic_module.module_identity, semantic_module.nominals[position])
+                found = jet_codegen_merge_nominal_identity(found, JetCodegenNominalIdentity{module_identity: semantic_module.module_identity, name: nominal_name, key: key, qualified_name: key})
+            }
+        }
         if semantic_module.module_identity != "" {
             prefix :: "{semantic_module.module_identity}::"
             if name.starts_with(prefix) {
