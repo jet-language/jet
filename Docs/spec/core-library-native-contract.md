@@ -148,6 +148,12 @@ strengthening encoding. Every partial owner is released on failure; native
 Secret capacity is wiped on release. The private binary output's storage owner
 must likewise be wiped by the persistence caller before release.
 
+The imported-origin native fixture draws its signing seed once, directly into
+the adopted packed NativeSecret buffer through the shared default entropy
+provider. It exercises Ed25519 public hashing, origin/hash round-trip and the
+encoder's rejection of Generated provenance with a retained imported origin.
+Native execution remains a composition obligation, not a parser receipt.
+
 Vault test hooks are explicitly initialized test transport, never an authority
 mechanism for production callers. Authorizer, trust-path, and fault overrides
 are thread-local and released at thread exit. Backup barriers are shared,

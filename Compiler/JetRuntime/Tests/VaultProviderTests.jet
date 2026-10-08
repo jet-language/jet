@@ -196,6 +196,47 @@ fn vault_fixture_opaque(record: I64, byte: I64, scratch: I64) {
     }
     vault_record_hash(record, record + VAULT_RECORD_HASH, scratch)
 }
+// Exact Rust fixture464-500: the default provider fills the final Secret buffer
+// once. No replay seed or independent entropy provider participates.
+#Export(c) fn imported_origin_round_trips_and_invalid_combinations_reject(name: I64, source: I64) {
+    bytes :: data_sequence_new(I64{32}, RT_HOST_U8_STRIDE)
+    data :: rt_text_word(bytes + DATA_SEQUENCE_DATA)
+    vault_fixture_check(rt_crypto_entropy_fill(data, I64{32}) == I64{0})
+    rt_text_store(bytes + DATA_SEQUENCE_LENGTH, I64{32})
+    secret :: vault_secret_adopt(bytes)
+    jet_rt_free(bytes, DATA_SEQUENCE_BYTES, I64{8})
+    record :: vault_record_allocate(name, I64{1}, I64{1}, I64{1}, I64{2}, secret)
+    origin :: vault_fixture_origin(source)
+    rt_text_store(record + VAULT_RECORD_ORIGIN, origin)
+    rt_text_store(record + VAULT_RECORD_CREATED, I64{10})
+    rt_text_store(record + VAULT_RECORD_STATUS_MS, I64{10})
+    scratch :: jet_rt_alloc(I64{8256}, I64{8})
+    vault_fixture_check(vault_public_hash(I64{1}, secret, record + VAULT_RECORD_PUBLIC_HASH, scratch))
+    vault_fixture_opaque(record, I64{2}, scratch)
+    store :: vault_fixture_store(I64{1})
+    vault_fixture_push_record(store, record)
+    slots :: jet_rt_alloc(I64{16}, I64{8})
+    vault_fixture_check(vault_encode_v2(store, slots) == I64{-1})
+    encoded :: rt_text_word(slots)
+    vault_fixture_check(vault_decode_v2(rt_text_data(encoded), rt_text_len(encoded), slots + I64{8}) == I64{-1})
+    decoded :: rt_text_word(slots + I64{8})
+    records :: rt_text_word(decoded + VAULT_STORE_RECORDS)
+    vault_fixture_check(rt_text_word(records + DATA_SEQUENCE_LENGTH) == I64{1})
+    decoded_record :: rt_text_word(rt_text_word(records + DATA_SEQUENCE_DATA))
+    vault_fixture_check(vault_origin_equal(rt_text_word(decoded_record + VAULT_RECORD_ORIGIN), origin))
+    vault_fixture_check(rt_text_equal_bytes(decoded_record + VAULT_RECORD_HASH, record + VAULT_RECORD_HASH, I64{32}))
+    rt_text_store(record + VAULT_RECORD_PROVENANCE, I64{1})
+    vault_record_hash(record, record + VAULT_RECORD_HASH, scratch)
+    vault_fixture_check(vault_encode_v2(store, slots) == I64{8})
+    vault_store_drop(decoded)
+    vault_store_drop(store)
+    vault_text_zero(encoded)
+    jet_rt_string_drop(encoded)
+    thread_zero(scratch, I64{8256})
+    jet_rt_free(scratch, I64{8256}, I64{8})
+    jet_rt_free(slots, I64{16}, I64{8})
+}
+
 // Exact original codec fixture, plus checking its InvalidName ordinal through
 // the actual encoder for each rejected name (rather than fabricating an error).
 #Export(c) fn jvlt2_codec_is_canonical_bounded_and_preserves_legacy_strings(name: I64, value: I64, bad: I64, non_nfc: I64, nfc: I64) {

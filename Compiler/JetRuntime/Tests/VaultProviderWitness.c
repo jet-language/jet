@@ -7,6 +7,9 @@
 typedef struct { const unsigned char *data; int64_t length, capacity; } Text;
 typedef struct { int64_t length, capacity; Text **data; } TextList;
 extern void jet_rt_alloc_init(void);
+extern void jet_rt_thread_init(void);
+extern void jet_rt_thread_detach(void);
+extern void jet_rt_crypto_entropy_init(void);
 extern void errors_and_handles_are_redacted(int64_t, const Text *, const Text *, const Text *, const Text *, const TextList *);
 extern void jet_rt_vault_legacy_fixture(const void *, int64_t, const void *);
 extern void jet_rt_vault_invalid_legacy_fixture(const void *, int64_t);
@@ -20,6 +23,7 @@ extern Text *jet_rt_vault_record_fixture_debug(void *);
 extern void jet_rt_vault_origin_hash_bound_fixture(void *, const Text *, const unsigned char *);
 extern void jvlt2_codec_is_canonical_bounded_and_preserves_legacy_strings(const Text *, const Text *, const Text *, const Text *, const Text *);
 extern void jet_rt_vault_codec_duplicate_fixture(void *, const Text *);
+extern void imported_origin_round_trips_and_invalid_combinations_reject(const Text *, const Text *);
 static struct { void *data; int64_t capacity; unsigned frees; } observed[2];
 static size_t observed_count;
 void __wrap_jet_rt_free(void *data, int64_t size, int64_t align) {
@@ -88,6 +92,8 @@ static void zeroization_fixture(void) {
 }
 int main(void) {
     jet_rt_alloc_init();
+    jet_rt_thread_init();
+    jet_rt_crypto_entropy_init();
     Text forbidden[] = {text("secrets.age"), text("AGE-SECRET"), text("/home/"), text("hunter2"), text("ciphertext sentinel")};
     Text *needles[] = {&forbidden[0], &forbidden[1], &forbidden[2], &forbidden[3], &forbidden[4]};
     TextList list = {5, 5, needles};
@@ -118,7 +124,10 @@ int main(void) {
     Text codec_name = text("db_password"), codec_value = text("hunter2");
     Text bad_name = text(" ../secret "), non_nfc = text("e\xcc\x81"), nfc = text("\xc3\xa9");
     jvlt2_codec_is_canonical_bounded_and_preserves_legacy_strings(&codec_name, &codec_value, &bad_name, &non_nfc, &nfc);
+    Text release = text("release"), source = text("source");
+    imported_origin_round_trips_and_invalid_combinations_reject(&release, &source);
     zeroization_fixture();
-    puts("vault witness OK (13 errors, legacy+JVLT2 codec, native Secret redaction/wipe, long-origin hash, duplicate priority)");
+    puts("vault witness OK (13 errors, legacy+JVLT2 codec, imported origin/default entropy, native Secret redaction/wipe, long-origin hash, duplicate priority)");
+    jet_rt_thread_detach();
     return 0;
 }
