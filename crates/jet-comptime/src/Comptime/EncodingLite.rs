@@ -2336,7 +2336,7 @@ mod xml_tests {
 
     #[test]
     fn xml_render_failure_preserves_native_error_carrier() {
-        let invalid = json_variant("Float", Some(CtValue::Float(1.5)));
+        let invalid = json_variant("Float", Some(CtValue::Float(CtFloat::f64(1.5))));
         let actual = xml_render(&invalid).expect_err("invalid XML tree must not render empty text");
         let expected = CtValue::Struct {
             type_name: "XMLError".to_string(),
