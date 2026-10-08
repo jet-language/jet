@@ -498,3 +498,7 @@ projections fill caller stack headers over borrowed bytes. These headers
 must not be dropped or grown, and the policy must stay live while they are
 read or cloned. Cloning normalizes the low Bool byte without treating padding
 as part of the Bool value.
+
+HTTP Retry Policy owns one ordinal word (None, Safe or Idempotent). Its
+ownership helpers copy the value without executing retry policy or I/O;
+dropping a null handle has no effect.
