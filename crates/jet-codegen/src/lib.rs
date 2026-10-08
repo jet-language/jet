@@ -20,12 +20,8 @@ pub(crate) mod jet_encoding_json {
 }
 mod BrowserHost;
 pub mod Codegen;
-/// The native runtime and child cell transport share one descriptor ABI.
-#[doc(hidden)]
-#[allow(dead_code)] // callback fields are consumed by the emitted native runtime
-pub mod native_meta {
-    include!("Prelude/Core/NativeMeta.rs");
-}
+// The native runtime and child cell transport share one descriptor ABI/module.
+include!("Prelude/Core/NativeMeta.rs");
 /// D-FAIL-BREACH1=A: the same task-local runtime stack kernel used by emitted
 /// AOT code. Resident engines marshal source locations into their own report
 /// carrier, but depth policy stays in this Prelude part.

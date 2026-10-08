@@ -31,18 +31,18 @@ if (mode === '--allparts') {
     ['jet_c_abi_task', 'CAbiTask.rs'],
   ]) {
     const rows = prepared.split('\n');
-    const begin = rows.findIndex(line => line === `mod ${module} {` || line === `pub(crate) mod ${module} {`);
+    const begin = rows.findIndex(line => line === `mod ${module} {` || line === `pub(crate) mod ${module} {` || line === `pub mod ${module} {`);
     if (begin >= 0) {
       const close = rows.findIndex((line, index) => index > begin && line === '}');
       if (close < 0) throw new Error(`input ${module} module is unterminated`);
       // The canonical text carries its own cfg; remove the old one with it.
-      const first = begin > 0 && rows[begin - 1] === '#[cfg(not(target_arch = "wasm32"))]' ? begin - 1 : begin;
+      const first = module === 'jet_native_meta' && begin > 1 && rows[begin - 2] === '#[doc(hidden)]' && rows[begin - 1] === '#[allow(dead_code)]'
+        ? begin - 2
+        : begin > 0 && rows[begin - 1] === '#[cfg(not(target_arch = "wasm32"))]' ? begin - 1 : begin;
       prepared = [...rows.slice(0, first), ...rows.slice(close + 1)].join('\n');
     }
     const source = readFileSync(resolve(repo, `crates/jet-codegen/src/Prelude/Core/${file}`), 'utf8');
-    prepared += module === 'jet_native_meta'
-      ? '\npub(crate) mod jet_native_meta {\n' + source.split('\n').map(line => `    ${line}`).join('\n') + '\n}\n'
-      : '\n' + source;
+    prepared += '\n' + source;
   }
 }
 const core = readFileSync(resolve(repo, 'crates/jet-codegen/src/Prelude/Core.rs'), 'utf8');
