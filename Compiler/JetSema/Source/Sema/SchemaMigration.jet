@@ -5,7 +5,7 @@ use jet_foundation.[Diagnostic, Item, MigrationOp, Span, StructDef, Type, type_n
 
 pub fn sema_schema_published(definition: StructDef) -> Bool Never! {
     if definition.is_published_schema -> return true
-    loop derive in definition.derives { if derive.name == "PublishedSchema" -> return true }
+    loop derivation in definition.derives { if derivation.name == "PublishedSchema" -> return true }
     false
 }
 
@@ -15,7 +15,7 @@ fn sema_schema_codec(definition: StructDef, codec: String, environment: SemaScop
         direction :: if codec == "Decode" -> SemaSerdeDirection.Decode else -> SemaSerdeDirection.Encode
         return sema_serde_implementation(scope, checked, direction)
     }
-    loop derive in definition.derives { if derive.name == codec -> return true }
+    loop derivation in definition.derives { if derivation.name == codec -> return true }
     false
 }
 
@@ -39,7 +39,7 @@ fn sema_schema_decodable(ty: Type, environment: SemaScopeEnvironment?) -> Bool N
 pub fn check_schema_migrations(items: [Item], snapshots: [String:SchemaSnapshot], environment: SemaScopeEnvironment?) -> [Diagnostic] Never! {
     diagnostics := [Diagnostic]{}
     migrations := [String:[MigrationOp]]{}
-    conversions := [(String, String)]{}
+    conversions := [(from_ty: String, to_ty: String)]{}
     loop item in items {
         if item == {
             .Migration(migration) -> {
@@ -47,7 +47,7 @@ pub fn check_schema_migrations(items: [Item], snapshots: [String:SchemaSnapshot]
                 loop operation in migration.ops -> &operations.push(operation)
                 migrations[migration.type_name] = ^operations
             }
-            .ErrorConv(conversion) -> &conversions.push((conversion.from_ty, conversion.to_ty))
+            .ErrorConv(conversion) -> &conversions.push((from_ty: conversion.from_ty, to_ty: conversion.to_ty))
             else -> {}
         }
     }
@@ -78,17 +78,18 @@ pub fn check_schema_migrations(items: [Item], snapshots: [String:SchemaSnapshot]
                                     if added.name == field && !sema_schema_decodable(added.ty, environment) -> &diagnostics.push(sema_schema_add_decode(name, field, actual, span))
                                 }
                             }
-                        } else -> &diagnostics.push(sema_schema_unknown(name, field, "add", span))
+                        } else { &diagnostics.push(sema_schema_unknown(name, field, "add", span)) }
                     }
                     .Change(field, _, from, _, to, _, _, _, _) -> {
-                        if (old.get(field), current.get(field)) == {
-                            (.Val(old_ty), .Val(new_ty)) -> {
+                        old_type :: old.get(field)
+                        new_type :: current.get(field)
+                        if old_type == .Val(old_ty) {
+                            if new_type == .Val(new_ty) {
                                 declared_from :: type_name(from)
                                 declared_to :: type_name(to)
                                 if old_ty != declared_from || new_ty != declared_to -> &diagnostics.push(sema_schema_change_mismatch(name, field, declared_from, declared_to, old_ty, new_ty, span))
-                            }
-                            else -> &diagnostics.push(sema_schema_unknown(name, field, "change", span))
-                        }
+                            } else { &diagnostics.push(sema_schema_unknown(name, field, "change", span)) }
+                        } else { &diagnostics.push(sema_schema_unknown(name, field, "change", span)) }
                     }
                     .Rename(_, _, _, _) -> {}
                 }
@@ -98,8 +99,8 @@ pub fn check_schema_migrations(items: [Item], snapshots: [String:SchemaSnapshot]
                 bridged := false
                 loop operation in operations {
                     if operation == {
-                        .Rename(from, _, to, _) -> if from == field.name && current.get(to) == Val(field.ty) -> bridged = true
-                        .Remove(removed, _) -> if removed == field.name -> bridged = true
+                        .Rename(from, _, to, _) -> { if from == field.name && current.get(to) == (Val(field.ty)) -> bridged = true }
+                        .Remove(removed, _) -> { if removed == field.name -> bridged = true }
                         else -> {}
                     }
                 }
@@ -116,11 +117,12 @@ pub fn check_schema_migrations(items: [Item], snapshots: [String:SchemaSnapshot]
                     }
                 }
                 if converter == {
-                    .Val(true) -> {}
-                    .Val(false) -> {
-                        has_impl := false
-                        loop conversion in conversions { if conversion.0 == old_ty && conversion.1 == new_ty -> has_impl = true }
-                        if !has_impl -> &diagnostics.push(sema_schema_no_converter(name, field.name, old_ty, new_ty, span))
+                    .Val(has_converter) -> {
+                        if !has_converter {
+                            has_impl := false
+                            loop conversion in conversions { if conversion.from_ty == old_ty && conversion.to_ty == new_ty -> has_impl = true }
+                            if !has_impl -> &diagnostics.push(sema_schema_no_converter(name, field.name, old_ty, new_ty, span))
+                        }
                     }
                     .None -> &diagnostics.push(sema_schema_changed(name, field.name, old_ty, new_ty, span))
                 }
@@ -130,8 +132,8 @@ pub fn check_schema_migrations(items: [Item], snapshots: [String:SchemaSnapshot]
                 supplied := false
                 loop operation in operations {
                     if operation == {
-                        .Rename(_, _, to, _) -> if to == field.name -> supplied = true
-                        .Add(added, _, _, _, _, _, _) -> if added == field.name -> supplied = true
+                        .Rename(_, _, to, _) -> { if to == field.name -> supplied = true }
+                        .Add(added, _, _, _, _, _, _) -> { if added == field.name -> supplied = true }
                         else -> {}
                     }
                 }

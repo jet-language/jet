@@ -160,7 +160,7 @@ pub fn jet_cli_cache(args: [String], json: Bool) -[FS, Env, Exec, Time, Rand]> J
         }
         .Limit(bytes) -> {
             store.set_host_limit(Val(bytes)) ?? return jet_cli_cache_store_error("set the host store limit", err, json)
-            out :: if json {
+            out :: if json -> {
                 cache :: jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("host_limit_bytes", jet_cli_status_int(bytes)), jet_cli_status_field("root", jet_cli_status_text(store.root()))})
                 "{jet_cli_status_render("cache.limit", true, [JetCLIStatusField]{jet_cli_status_field("cache", cache)})}\n"
             } else -> "host limit {jet_cli_cache_format_size(bytes)} (persisted)\nstore      {store.root()}\n"

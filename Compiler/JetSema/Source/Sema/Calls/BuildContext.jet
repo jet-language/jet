@@ -115,7 +115,7 @@ pub fn sema_call_try_build_context_method(receiver: Expr, receiver_value: TExpr,
         if argument.flags.template_items != None -> template_count += 1
     }
     if method == "generate" && template_count != 1 {
-        &diagnostics.push(sema_error("E3502", span, "`b.generate` requires a name followed by a typed item block", "generated bodies are Jet items checked by the ordinary semantic path", "write `b.generate(\"name\") { ... }?`; source strings are retired"))
+        &diagnostics.push(sema_error("E3502", span, "`b.generate` requires a name followed by a typed item block", "generated bodies are Jet items checked by the ordinary semantic path", "write `b.generate(\"name\") {{ ... }}?`; source strings are retired"))
         return failed
     }
     if method != "generate" && template_count > 0 -> return failed

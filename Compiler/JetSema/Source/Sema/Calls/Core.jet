@@ -724,7 +724,7 @@ pub fn sema_call_core_check_fixed(environment: SemaScopeEnvironment, module_name
 }
 
 pub fn sema_call_core_check_source_owned(target: SemaCallDirectTarget, qualified_name: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    if target.symbol.name == "graph" && sema_call_core_module_identity(environment, "core.build") == Val(target.symbol.module_name) {
+    if target.symbol.name == "graph" && sema_call_core_module_identity(environment, "core.build") == (Val(target.symbol.module_name)) {
         if !sema_call_core_check_type_args("core.build", "graph", 0, false, type_args, span, &diagnostics) -> return None
         check :: sema_compiler_services_check_call("core.build", "graph", args, span, environment.function_name == "build", environment, &scopes, &state, &tail_store, &context, &diagnostics)
         return sema_compiler_services_lower_core_call(check, span, expected, environment, &scopes, &context, &diagnostics)

@@ -16,11 +16,11 @@ pub fn jet_driver_cost_query(request: JetDriverCompileRequest) -> JetDriverCostQ
 }
 fn jet_driver_checked_cost_report(checked: SemaGraphResult) -> TCostReport {
     report := TCostReport{}
-    loop module in checked.modules {
+    loop module_row in checked.modules {
         // Only canonical user source modules contribute warning sites. Core
         // bodies still participate in sema's callable coverage proof.
-        if module.module_identity.starts_with("<corelib>/") -> next
-        collected :: jet_codegen_cost_report(module.functions)
+        if module_row.module_identity.starts_with("<corelib>/") -> next
+        collected :: jet_codegen_cost_report(module_row.functions)
         loop site in collected.sites -> &report.sites.push(site)
     }
     report

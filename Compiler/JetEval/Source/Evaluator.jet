@@ -6224,9 +6224,9 @@ fn jet_eval_host_target_exchange(machine: &JetEvalMachine, target: JetEvalHostCa
     reply :: if target == .Prelude(row)
         && row.module_name == "core.host"
         && (row.member.starts_with("BuildContext.") || row.member == "BuildPlan.graph")
-        && machine.config.build_host_adapter == .Val(build_adapter) {
+        && machine.config.build_host_adapter == .Val(build_adapter) -> {
         build_adapter.build_call(&machine, target, ^host_args, span)
-    } else {
+    } else -> {
         adapter.host_call(&machine, target, static_operand, ^host_args, result_shape, arg_shapes, span)
     } ?? {
         jet_eval_unsupported(&machine, span, "MIR ambient route is unavailable to the canonical host adapter")

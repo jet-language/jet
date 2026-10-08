@@ -1,17 +1,17 @@
 // One checked plan graph for queries and compiler-generated declarations.
 // No graph query executes an action, inspects a cache, or writes generated text.
-priv struct BuildSessionGraphResult { graph: BuildGraph? diagnostic: BuildSessionDiagnostic? }
-priv struct BuildSessionPlan { storage: Shared<BuildSessionState> default: Int }
-priv struct BuildSessionFinish { plan: BuildSessionPlan? diagnostics: [BuildSessionDiagnostic] }
+struct BuildSessionGraphResult { graph: BuildGraph? diagnostic: BuildSessionDiagnostic? }
+struct BuildSessionPlan { storage: Shared<BuildSessionState> default: Int }
+struct BuildSessionFinish { plan: BuildSessionPlan? diagnostics: [BuildSessionDiagnostic] }
 
-priv fn build_session_contains_int(values: [Int], value: Int) -> Bool Never! {
+fn build_session_contains_int(values: [Int], value: Int) -> Bool Never! {
     loop item in values { if item == value -> return true }
     false
 }
-priv fn build_session_append_int(values: &[Int], value: Int) Never! {
+fn build_session_append_int(values: &[Int], value: Int) Never! {
     if !build_session_contains_int(values, value) -> &values.push(value)
 }
-priv fn build_session_cycle(edges: [[Int]], names: [String]) -> [String]? Never! {
+fn build_session_cycle(edges: [[Int]], names: [String]) -> [String]? Never! {
     colors := [Int]{}
     loop _ in edges -> &colors.push(0)
     loop root in 0..<edges.len() {
@@ -48,7 +48,7 @@ priv fn build_session_cycle(edges: [[Int]], names: [String]) -> [String]? Never!
     }
     None
 }
-priv fn build_session_target_actions(state: BuildSessionState, id: Int, selected: &[Int]) Never! {
+fn build_session_target_actions(state: BuildSessionState, id: Int, selected: &[Int]) Never! {
     pending := [Int]{id}
     seen := [Int]{}
     loop pending.len() > 0 {
@@ -59,7 +59,7 @@ priv fn build_session_target_actions(state: BuildSessionState, id: Int, selected
         loop dependency in state.targets[current].deps -> &pending.push(dependency)
     }
 }
-priv fn build_session_prerequisites(state: BuildSessionState) -> [[Int]] Never! {
+fn build_session_prerequisites(state: BuildSessionState) -> [[Int]] Never! {
     edges := [[Int]]{}
     loop _ in state.actions -> &edges.push([Int]{})
     loop target in state.targets {
@@ -77,7 +77,7 @@ priv fn build_session_prerequisites(state: BuildSessionState) -> [[Int]] Never! 
     }
     edges
 }
-priv fn build_session_validate(state: BuildSessionState, default: Int) -> BuildSessionDiagnostic? Never! {
+fn build_session_validate(state: BuildSessionState, default: Int) -> BuildSessionDiagnostic? Never! {
     if default < -1 || default >= state.targets.len() -> return Val(build_session_error_diag(state, .UnknownTarget(default)))
     target_edges := [[Int]]{}
     target_names := [String]{}
@@ -100,7 +100,7 @@ priv fn build_session_validate(state: BuildSessionState, default: Int) -> BuildS
     if build_session_cycle(build_session_prerequisites(state), action_names) == .Val(nodes) -> return Val(build_session_error_diag(state, .ActionDependencyCycle(nodes)))
     None
 }
-priv fn build_session_project(state: BuildSessionState) -> BuildGraph Never! {
+fn build_session_project(state: BuildSessionState) -> BuildGraph Never! {
     targets := [BuildGraphTarget]{}
     actions := [BuildGraphAction]{}
     keys := [BuildGraphActionKey]{}
@@ -155,7 +155,7 @@ priv fn build_session_project(state: BuildSessionState) -> BuildGraph Never! {
     loop path in paths -> &files.push(file_rows.get(path) ?? panic("checked file index lost a path"))
     BuildGraph{targets: ^targets, actions: ^actions, action_keys: ^keys, cache_hits: [BuildGraphAction]{}, files: ^files, affected_files: [BuildGraphFile]{}, nodes: state.nodes}
 }
-priv fn build_session_graph(session: BuildSession, returned: BuildSessionValue) -> BuildSessionGraphResult Never! {
+fn build_session_graph(session: BuildSession, returned: BuildSessionValue) -> BuildSessionGraphResult Never! {
     permit :: session.storage.guard_read()
     state :: permit.value
     if !state.active -> return {graph: None, diagnostic: Val(build_session_diag(state, "build context expired"))}
@@ -163,7 +163,7 @@ priv fn build_session_graph(session: BuildSession, returned: BuildSessionValue) 
     if build_session_validate(state, default) == .Val(error) -> return {graph: None, diagnostic: Val(error)}
     {graph: Val(build_session_project(state)), diagnostic: None}
 }
-priv fn build_session_finish(session: &BuildSession, returned: BuildSessionValue) -> BuildSessionFinish Never! {
+fn build_session_finish(session: &BuildSession, returned: BuildSessionValue) -> BuildSessionFinish Never! {
     permit := session.storage.guard_edit()
     state := &permit.value
     if !state.active -> return {plan: None, diagnostics: [BuildSessionDiagnostic]{build_session_diag(state, "build context expired")}}
@@ -172,11 +172,11 @@ priv fn build_session_finish(session: &BuildSession, returned: BuildSessionValue
     if build_session_validate(state, default) == .Val(error) -> return {plan: None, diagnostics: [BuildSessionDiagnostic]{error}}
     {plan: Val(BuildSessionPlan{storage: session.storage, default: default}), diagnostics: state.diagnostics}
 }
-priv fn build_plan_graph(plan: BuildSessionPlan) -> BuildGraph Never! {
+fn build_plan_graph(plan: BuildSessionPlan) -> BuildGraph Never! {
     permit :: plan.storage.guard_read()
     build_session_project(permit.value)
 }
-priv fn build_plan_selected_generated(plan: BuildSessionPlan) -> [BuildSessionGeneratedModule] Never! {
+fn build_plan_selected_generated(plan: BuildSessionPlan) -> [BuildSessionGeneratedModule] Never! {
     permit :: plan.storage.guard_read()
     state :: permit.value
     selected_targets := [Int]{}

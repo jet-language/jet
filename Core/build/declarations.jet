@@ -1,6 +1,6 @@
 // Rust runtime_bridge positional contract. Optional trailing controls are
 // decoded once here, before mutating the session. No command is executed.
-priv fn build_session_add_action(state: &BuildSessionState, method: String, args: [BuildSessionValue]) -> BuildSessionReply {
+fn build_session_add_action(state: &BuildSessionState, method: String, args: [BuildSessionValue]) -> BuildSessionReply {
     legacy :: method == "legacy"
     shift :: if legacy -> 1 else -> 0
     if (!legacy && args.len() != 5 && (args.len() < 7 || args.len() > 15)) || (legacy && (args.len() < 6 || args.len() > 17)) -> return build_session_fail(state, "invalid `b.{method}` argument count")
@@ -73,7 +73,7 @@ priv fn build_session_add_action(state: &BuildSessionState, method: String, args
     build_session_insert_action(state, action)
 }
 
-priv fn build_session_insert_action(state: &BuildSessionState, action: BuildSessionAction) -> BuildSessionReply {
+fn build_session_insert_action(state: &BuildSessionState, action: BuildSessionAction) -> BuildSessionReply {
     if action.name.trim() == "" -> return build_session_error_fail(state, .EmptyActionName)
     if state.actions.len() >= 100000 -> return build_session_fail(state, "action graph exceeds 100000 actions")
     loop old in state.actions { if old.name == action.name -> return build_session_error_fail(state, .DuplicateActionName(action.name)) }
@@ -106,7 +106,7 @@ priv fn build_session_insert_action(state: &BuildSessionState, action: BuildSess
     .Value(.Handle("BuildAction", state.id, id))
 }
 
-priv fn build_session_add_target(state: &BuildSessionState, method: String, args: [BuildSessionValue]) -> BuildSessionReply {
+fn build_session_add_target(state: &BuildSessionState, method: String, args: [BuildSessionValue]) -> BuildSessionReply {
     if args.len() < 3 || args.len() > 7 -> return build_session_fail(state, "`b.{method}` accepts three through seven arguments")
     kind :: if method == {
         "add_executable" -> "executable"
@@ -132,7 +132,7 @@ priv fn build_session_add_target(state: &BuildSessionState, method: String, args
     build_session_insert_target(state, BuildSessionTarget{name: name, kind: kind, sources: sources, inputs: [String]{}, outputs: [String]{}, actions: actions, deps: deps, probes: probes, toolchain: toolchain, signing: signing, metadata: [String:String]{}, plugin: None})
 }
 
-priv fn build_session_insert_target(state: &BuildSessionState, target: BuildSessionTarget) -> BuildSessionReply {
+fn build_session_insert_target(state: &BuildSessionState, target: BuildSessionTarget) -> BuildSessionReply {
     if target.name.trim() == "" -> return build_session_error_fail(state, .EmptyTargetName)
     loop old in state.targets { if old.name == target.name -> return build_session_error_fail(state, .DuplicateTargetName(target.name)) }
     loop path in target.sources { if build_session_path_error(path) == .Val(error) -> return build_session_error_fail(state, error) }
@@ -151,7 +151,7 @@ priv fn build_session_insert_target(state: &BuildSessionState, target: BuildSess
     .Value(.Handle("BuildTarget", state.id, id))
 }
 
-priv fn build_session_legacy_file(kind: String) -> String {
+fn build_session_legacy_file(kind: String) -> String {
     if kind == {
         "cmake" -> "CMakeLists.txt"
         "make" -> "Makefile"
@@ -165,7 +165,7 @@ priv fn build_session_legacy_file(kind: String) -> String {
 // The native importer returns only canonical facts from the captured root.
 // Matching and graph mutation remain source semantics; host cannot fabricate a
 // successful action by returning only a handle.
-priv fn build_session_legacy_resume(session: &BuildSession, args: [BuildSessionValue], imported: BuildSessionAction) -> BuildSessionReply Never! {
+fn build_session_legacy_resume(session: &BuildSession, args: [BuildSessionValue], imported: BuildSessionAction) -> BuildSessionReply Never! {
     permit := session.storage.guard_edit()
     state := &permit.value
     if !state.active -> return build_session_fail(state, "build context expired")

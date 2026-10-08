@@ -8,16 +8,37 @@ pub struct SemaResolvedOutputRow {
     pub fact: ResolvedOutput
 }
 pub fn sema_output_metadata_constant(value: ConstDef) -> Bool Never! {
-    value.ty == Val(Type.Named{name: "Output"}) || value.ty == Val(Type.Named{name: "__OutputDefaults"})
+    value.ty == (Val(Type.Named{name: "Output"})) || value.ty == (Val(Type.Named{name: "__OutputDefaults"}))
 }
 fn sema_output_error(span: Span?, what: String, why: String, fix: String) -> Diagnostic Never! {
     sema_error_optional("E1321", span, what, why, fix)
 }
 fn sema_output_kind(name: String) -> OutputKind? Never! {
-    if name == { "Library" -> Val(.Library) "Executable" -> Val(.Executable) "Service" -> Val(.Service) "Check" -> Val(.Check) "Environment" -> Val(.Environment) "Image" -> Val(.Image) "Bundle" -> Val(.Bundle) "System" -> Val(.System) "Fleet" -> Val(.Fleet) else -> None }
+    if name == {
+        "Library" -> Val(.Library)
+        "Executable" -> Val(.Executable)
+        "Service" -> Val(.Service)
+        "Check" -> Val(.Check)
+        "Environment" -> Val(.Environment)
+        "Image" -> Val(.Image)
+        "Bundle" -> Val(.Bundle)
+        "System" -> Val(.System)
+        "Fleet" -> Val(.Fleet)
+        else -> None
+    }
 }
 fn sema_output_kind_text(kind: OutputKind) -> String Never! {
-    if kind == { .Library -> "Library" .Executable -> "Executable" .Service -> "Service" .Check -> "Check" .Environment -> "Environment" .Image -> "Image" .Bundle -> "Bundle" .System -> "System" .Fleet -> "Fleet" }
+    if kind == {
+        .Library -> "Library"
+        .Executable -> "Executable"
+        .Service -> "Service"
+        .Check -> "Check"
+        .Environment -> "Environment"
+        .Image -> "Image"
+        .Bundle -> "Bundle"
+        .System -> "System"
+        .Fleet -> "Fleet"
+    }
 }
 fn sema_output_runnable(kind: OutputKind) -> Bool Never! { kind == .Executable || kind == .Service || kind == .Check }
 fn sema_output_fields(args: [EnumLitArg], span: Span, diagnostics: &[Diagnostic]) -> [String:Expr]? {
@@ -48,16 +69,16 @@ fn sema_output_path(expression: Expr) -> [String]? Never! {
     }
 }
 fn sema_output_callable_symbol(graph: SemaRegistrationGraph, owner: Int, path: [String]) -> Symbol? {
-    module :: graph.modules[owner]
+    module_row :: graph.modules[owner]
     if path.len() == 1 {
-        found :: sema_registration_lookup_name(graph, module.module_identity, path[0]) ?? return None
+        found :: sema_registration_lookup_name(graph, module_row.module_identity, path[0]) ?? return None
         if found.symbol.kind != SymbolKind.Function -> return None
         return Val(found.symbol)
     }
     // Inline modules use registration's existing generated-member identity.
     inline_name := path[0]
     loop index in 1..<path.len() -> inline_name = sema_inline_member_name(inline_name, path[index])
-    if sema_registration_lookup_name(graph, module.module_identity, inline_name) == .Val(found) {
+    if sema_registration_lookup_name(graph, module_row.module_identity, inline_name) == .Val(found) {
         if found.symbol.kind == SymbolKind.Function -> return Val(found.symbol)
     }
     current := owner
@@ -65,18 +86,22 @@ fn sema_output_callable_symbol(graph: SemaRegistrationGraph, owner: Int, path: [
         target := Int?{None}
         loop imported in graph.modules[current].imports {
             if imported.declaration.alias != path[index] || !sema_output_module_import(imported.declaration.kind) -> next
-            if current != owner && !sema_registration_visible(imported.visibility, module.module_identity, module.package_identity, graph.modules[current].module_identity, graph.modules[current].package_identity) -> next
+            if current != owner && !sema_registration_visible(imported.visibility, module_row.module_identity, module_row.package_identity, graph.modules[current].module_identity, graph.modules[current].package_identity) -> next
             target = sema_registration_module_index(graph, imported.target_module_identity)
             break
         }
         current = target ?? return None
     }
-    found :: sema_registration_resolve_export(graph, current, path[path.len() - 1], module.module_identity, module.package_identity, []) ?? return None
+    found :: sema_registration_resolve_export(graph, current, path[path.len() - 1], module_row.module_identity, module_row.package_identity, []) ?? return None
     if found.symbol.kind != SymbolKind.Function -> return None
     Val(found.symbol)
 }
 fn sema_output_module_import(kind: ImportKind) -> Bool Never! {
-    if kind == { .File(_, _) -> true .Module(_, _) -> true .Unqualified(_, _, _, _, _) -> false }
+    if kind == {
+        .File(_, _) -> true
+        .Module(_, _) -> true
+        .Unqualified(_, _, _, _, _) -> false
+    }
 }
 fn sema_output_validate_contract(graph: SemaRegistrationGraph, target: Int, function: SemaRegistrationFunction, kind: OutputKind) -> Bool {
     parameters :: function.declaration.params
@@ -93,7 +118,11 @@ fn sema_output_validate_contract(graph: SemaRegistrationGraph, target: Int, func
     }
     contract :: failure_contract_of_function(function.declaration.return_type, function.declaration.return_type_span)
     effective :: failure_contract_effective_type(contract)
-    success :: if effective == { .Result(ok, _) -> ok .Option(ok) -> ok else -> effective }
+    success :: if effective == {
+        .Result(ok, _) -> ok
+        .Option(ok) -> ok
+        else -> effective
+    }
     parameter_ok && success == (Type.Named{name: "Unit"})
 }
 fn sema_output_resolve_callable(graph: SemaRegistrationGraph, owner: Int, binding: ConstDef, kind: OutputKind, output_name: String, expression: Expr, diagnostics: &[Diagnostic]) -> ResolvedOutput? {
@@ -121,15 +150,15 @@ fn sema_output_resolve_callable(graph: SemaRegistrationGraph, owner: Int, bindin
         return None
     }
     params :: declaration.declaration.params.map(parameter -> OutputParam{access: parameter.convention, ty: parameter.ty})
-    module :: graph.modules[target]
-    lowered :: if module.module_identity == graph.entry_module_identity -> name_mangle(symbol.name) else -> "{name_mangle(module.module_name)}::{name_mangle(source_name)}"
-    Val(ResolvedOutput{address: binding.name, kind: kind, output_name: output_name, module_id: target, source_path: module.module_path, source_name: source_name, semantic_name: symbol.name, lowered_name: lowered, params: params, return_type: declaration.declaration.return_type, failure_contract: failure_contract_of_function(declaration.declaration.return_type, declaration.declaration.return_type_span), reference: site, definition: symbol.span, authority: .SafeJet, effects: [], selected: false, selection_reason: "not selected"})
+    module_row :: graph.modules[target]
+    lowered :: if module_row.module_identity == graph.entry_module_identity -> name_mangle(symbol.name) else -> "{name_mangle(module_row.module_name)}::{name_mangle(source_name)}"
+    Val(ResolvedOutput{address: binding.name, kind: kind, output_name: output_name, module_id: target, source_path: module_row.module_path, source_name: source_name, semantic_name: symbol.name, lowered_name: lowered, params: params, return_type: declaration.declaration.return_type, failure_contract: failure_contract_of_function(declaration.declaration.return_type, declaration.declaration.return_type_span), reference: site, definition: symbol.span, authority: .SafeJet, effects: [], selected: false, selection_reason: "not selected"})
 }
 fn sema_output_default(program: Program, diagnostics: &[Diagnostic]) -> String? {
     loop item in program.items {
         if item != .Const(_) -> next
         constant :: if item == .Const(value) -> value else -> panic("output defaults item")
-        if constant.ty != Val(Type.Named{name: "__OutputDefaults"}) -> next
+        if constant.ty != (Val(Type.Named{name: "__OutputDefaults"})) -> next
         if constant.value == .StructLit(_, _, _, _, fields, _, _) {
             loop field in fields {
                 if field.name != "run" -> next
@@ -147,10 +176,10 @@ fn sema_output_default(program: Program, diagnostics: &[Diagnostic]) -> String? 
 pub fn sema_output_resolve(graph: &SemaRegistrationGraph, intent: SemaOutputIntent, explicit: String?) -> [Diagnostic] {
     diagnostics := [Diagnostic]{}
     resolved := [SemaResolvedOutputRow]{}
-    loop (owner, module) in graph.modules {
-        loop (index, item) in module.program.items {
+    loop (owner, module_row) in graph.modules {
+        loop (index, item) in module_row.program.items {
             if item == .Const(binding) {
-                if binding.ty != Val(Type.Named{name: "Output"}) -> next
+                if binding.ty != (Val(Type.Named{name: "Output"})) -> next
                 if binding.value != .EnumLit(_, _, _, _, _, _) {
                     &diagnostics.push(sema_output_error(Val(expr_span(binding.value)), "Output needs one closed kind", "Output is the closed sum of the nine ratified kinds", "write `.Executable.{{ ... }}`, `.Service.{{ ... }}`, or another Output kind"))
                     next
@@ -198,7 +227,7 @@ pub fn sema_output_resolve(graph: &SemaRegistrationGraph, intent: SemaOutputInte
     loop (index, row) in resolved {
         if row.fact.kind == .Executable {
             &executable.push(index)
-            if default == Val(row.fact.address) -> default_index = Val(index)
+            if default == (Val(row.fact.address)) -> default_index = Val(index)
         }
     }
     if default != None && default_index == None -> &diagnostics.push(sema_output_error(Val(Span{start: 0, end: 0}), "default `run` names incompatible Output `{default ?? ""}`", "the run default must name an Executable Output in this Package", "point `defaults.run` at one checked Executable address"))
@@ -214,8 +243,7 @@ pub fn sema_output_resolve(graph: &SemaRegistrationGraph, intent: SemaOutputInte
                 &diagnostics.push(sema_output_error(Val(Span{start: 0, end: 0}), "`{address}` is not an Output compatible with `jet run`", "an explicit run address must name one checked Executable or Service Output", "choose one of: {choices.join(", ")}"))
             }
         } else if !legacy {
-            if executable.len() == 1 { selected = Val(executable[0]); reason = "sole compatible Output" }
-            else if executable.len() > 1 {
+            if executable.len() == 1 { selected = Val(executable[0]); reason = "sole compatible Output" } else if executable.len() > 1 {
                 selected = default_index
                 reason = "checked defaults.run"
                 if default == None {
@@ -223,8 +251,7 @@ pub fn sema_output_resolve(graph: &SemaRegistrationGraph, intent: SemaOutputInte
                     &choices.sort()
                     &diagnostics.push(sema_output_error(None, "this Package has more than one runnable Executable", "without `fn run`, a singular run selects only a sole compatible Output or a checked default", "choose an explicit Output or add `defaults: {{ run: {choices[0]} }}`; candidates: {choices.join(", ")}"))
                 }
-            }
-            else -> &diagnostics.push(sema_error_optional("E0101", None, "this program has no `run` function", "running a program starts at `fn run`, and the entry file doesn't define one", "add `fn run() {{ ... }}` to the entry file"))
+            } else { &diagnostics.push(sema_error_optional("E0101", None, "this program has no `run` function", "running a program starts at `fn run`, and the entry file doesn't define one", "add `fn run() {{ ... }}` to the entry file")) }
         }
         if selected == .Val(index) { resolved[index].fact.selected = true; resolved[index].fact.selection_reason = reason }
     } else if intent == .Test {
@@ -248,14 +275,14 @@ pub fn sema_output_resolve(graph: &SemaRegistrationGraph, intent: SemaOutputInte
 }
 pub fn sema_output_finalize(registration: SemaRegistrationGraph, checked: &SemaGraphResult) Never! {
     functions := [String:TFunc]{}
-    loop module in checked.modules { loop function in module.functions -> functions[function.key] = function }
+    loop module_row in checked.modules { loop function in module_row.functions -> functions[function.key] = function }
     loop row in registration.output_rows {
         fact := row.fact
-        module :: registration.modules[fact.module_id]
-        key :: symbol_id(SymbolKind.Function, module.module_identity, "", fact.semantic_name).key
+        module_row :: registration.modules[fact.module_id]
+        key :: symbol_id(SymbolKind.Function, module_row.module_identity, "", fact.semantic_name).key
         function :: functions.get(key) ?? next
         declaration := Span?{None}
-        loop registered in module.functions { if registered.symbol.id.key == key -> declaration = registered.declaration.return_type_span }
+        loop registered in module_row.functions { if registered.symbol.id.key == key -> declaration = registered.declaration.return_type_span }
         fact.return_type = function.ret
         fact.failure_contract = failure_contract_of_function(function.ret, declaration)
         fact.effects = function.effects.solved

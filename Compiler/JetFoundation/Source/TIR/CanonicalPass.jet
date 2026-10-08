@@ -7,7 +7,11 @@ pub fn canonical_pass_tir_snapshot(package: String, source_file: String, edition
     loop (index, function) in functions {
         parameters := [String]{}
         loop parameter in function.params {
-            convention :: if parameter.convention == { .Read -> "Read" .Write -> "Write" .Move -> "Move" }
+            convention :: if parameter.convention == {
+                .Read -> "Read"
+                .Write -> "Write"
+                .Move -> "Move"
+            }
             &parameters.push("{{\"name\":{foundation_json_quote(parameter.name)},\"type\":{foundation_json_quote(type_name(parameter.ty))},\"convention\":{foundation_json_quote(convention)}}}")
         }
         ret := "null"

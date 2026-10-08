@@ -695,13 +695,13 @@ pub fn jet_eval_compiler_services_program_info(registration: SemaRegistrationGra
     types := [TComptimeValue]{}
     functions := [TComptimeValue]{}
     packages := [TComptimeValue]{}
-    loop module in registration.modules {
+    loop module_row in registration.modules {
         checked := SemaGraphModuleResult?{None}
-        loop candidate in graph.modules { if candidate.module_identity == module.module_identity -> checked = Val(candidate) }
+        loop candidate in graph.modules { if candidate.module_identity == module_row.module_identity -> checked = Val(candidate) }
         if checked == None -> return None
         package_types := [TComptimeValue]{}
         package_functions := [TComptimeValue]{}
-        loop item in module.program.items {
+        loop item in module_row.program.items {
             name := String?{None}
             if item == {
                 .Struct(definition) -> name = Val(definition.name)
@@ -709,22 +709,22 @@ pub fn jet_eval_compiler_services_program_info(registration: SemaRegistrationGra
                 .Distinct(definition) -> name = Val(definition.name)
                 .Func(function) -> {
                     if function.name == "build" -> next
-                    key :: jet_eval_compiler_services_function_key(function, module) ?? return None
-                    value :: jet_eval_compiler_services_function_info(function, module, checked, Val(key))
+                    key :: jet_eval_compiler_services_function_key(function, module_row) ?? return None
+                    value :: jet_eval_compiler_services_function_info(function, module_row, checked, Val(key))
                     &functions.push(value)
                     &package_functions.push(value)
                 }
                 else -> {}
             }
             if name == .Val(type_name) {
-                value :: sema_comptime_reflection_type_info(registration, module.module_identity, type_name, catalog) ?? return None
+                value :: sema_comptime_reflection_type_info(registration, module_row.module_identity, type_name, catalog) ?? return None
                 &types.push(value)
                 &package_types.push(value)
             }
         }
         &packages.push(TComptimeValue.Struct{type_name: "PackageInfo", fields: [TComptimeField]{
-            {name: "name", value: jet_eval_compiler_services_string(module.module_name)},
-            {name: "identity", value: jet_eval_compiler_services_string(module.module_name)},
+            {name: "name", value: jet_eval_compiler_services_string(module_row.module_name)},
+            {name: "identity", value: jet_eval_compiler_services_string(module_row.module_name)},
             {name: "types", value: TComptimeValue.List{values: package_types}},
             {name: "functions", value: TComptimeValue.List{values: package_functions}},
         }})
@@ -735,12 +735,12 @@ pub fn jet_eval_compiler_services_program_info(registration: SemaRegistrationGra
         {name: "packages", value: TComptimeValue.List{values: packages}},
     }
     if index.value == .Struct(_, index_fields) {
-        loop name in [String]{"definitions", "references", "calls", "structural_nodes"} {
+        loop name in ([String]{"definitions", "references", "calls", "structural_nodes"}) {
             value := TComptimeValue?{None}
             loop field in index_fields { if field.name == name -> value = Val(field.value) }
             &fields.push(TComptimeField{name: if name == "calls" -> "call_edges" else -> name, value: value ?? return None})
         }
-    } else -> return None
+    } else { return None }
     Val(TComptimeValue.Struct{type_name: "ProgramInfo", fields: fields})
 }
 // Package and build call sites must consume Jetpack's typed host query result;
