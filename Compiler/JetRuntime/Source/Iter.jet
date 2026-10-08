@@ -262,8 +262,9 @@ fn iter_pull_kernel(node: I64, output: I64) -> Bool {
         }
         return true
     }
+    trap_defect_prepare()
     trap_msg_unreachable()
-    trap_exit(I64{101})
+    trap_defect_exit(I64{101})
     return false
 }
 
@@ -394,7 +395,7 @@ fn iter_pull_nested(node: I64, output: I64) -> Bool {
     release :: trap_word(node + I64{64})
     if (release != I64{0}) {
         jet_rt_session_shield_enter()
-        _ := coll_call1(release, trap_word(node + I64{48}))
+        coll_call1_unit(release, trap_word(node + I64{48}))
         jet_rt_session_shield_leave()
     }
     coll_meta_drop(callback_meta)
@@ -453,22 +454,43 @@ fn iter_pull_nested(node: I64, output: I64) -> Bool {
     node
 }
 
+// Owning constructors discard their adopted source on a returned Root stop.
+// Its release callbacks execute in the actual stopped cleanup, not the
+// constructor's normal body or a constructor-static Task context.
+fn iter_discard_stopped_source(source: I64) {
+    saved :: jet_rt_session_cleanup_enter(jet_rt_session_status())
+    jet_rt_native_iter_drop(source)
+    jet_rt_session_cleanup_leave(saved)
+}
+
 #Export(c) fn jet_rt_native_iter_take(source: I64, count: I64) -> I64 {
-    if (count < I64{0}) { iter_argument_stop(I64{0}) }
+    if (count < I64{0}) {
+        iter_argument_stop(I64{0})
+        iter_discard_stopped_source(source)
+        return I64{0}
+    }
     node :: iter_wrap(I64{3}, source, iter_meta(source))
     trap_store(node + I64{32}, count)
     node
 }
 
 #Export(c) fn jet_rt_native_iter_skip(source: I64, count: I64) -> I64 {
-    if (count < I64{0}) { iter_argument_stop(I64{0}) }
+    if (count < I64{0}) {
+        iter_argument_stop(I64{0})
+        iter_discard_stopped_source(source)
+        return I64{0}
+    }
     node :: iter_wrap(I64{4}, source, iter_meta(source))
     trap_store(node + I64{32}, count)
     node
 }
 
 #Export(c) fn jet_rt_native_iter_step_by(source: I64, count: I64) -> I64 {
-    if (count <= I64{0}) { iter_argument_stop(I64{1}) }
+    if (count <= I64{0}) {
+        iter_argument_stop(I64{1})
+        iter_discard_stopped_source(source)
+        return I64{0}
+    }
     node :: iter_wrap(I64{5}, source, iter_meta(source))
     trap_store(node + I64{32}, count)
     node
@@ -510,7 +532,11 @@ fn iter_pull_nested(node: I64, output: I64) -> Bool {
 }
 
 fn iter_nested(kind: I64, source: I64, count: I64, meta: I64) -> I64 {
-    if (count <= I64{0}) { iter_argument_stop(if (kind == I64{12}) -> I64{2} else -> I64{3}) }
+    if (count <= I64{0}) {
+        iter_argument_stop(if (kind == I64{12}) -> I64{2} else -> I64{3})
+        iter_discard_stopped_source(source)
+        return I64{0}
+    }
     node :: iter_wrap(kind, source, meta)
     trap_store(node + I64{32}, count)
     trap_store(node + I64{112}, coll_list_new())
@@ -754,7 +780,7 @@ fn iter_eager_callback(source: I64, env: I64, invoke: I64, release: I64, meta: I
     if (node == I64{0}) {
         if (release != I64{0}) {
             jet_rt_session_shield_enter()
-            _ := coll_call1(release, env)
+            coll_call1_unit(release, env)
             jet_rt_session_shield_leave()
         }
         return I64{0}
@@ -850,7 +876,7 @@ fn iter_release_callback(node: I64) {
     release :: trap_word(node + I64{64})
     if (release != I64{0}) {
         jet_rt_session_shield_enter()
-        _ := coll_call1(release, trap_word(node + I64{48}))
+        coll_call1_unit(release, trap_word(node + I64{48}))
         jet_rt_session_shield_leave()
         trap_store(node + I64{64}, I64{0})
     }
@@ -935,7 +961,14 @@ fn iter_pull_zip(node: I64, output: I64) -> Bool {
         if b_present -> coll_slot_drop(y, iter_meta(b))
         return false
     }
-    if (kind == I64{19} && a_present != b_present) { iter_zip_stop(trap_word(node + I64{152})) }
+    if (kind == I64{19} && a_present != b_present) {
+        iter_zip_stop(trap_word(node + I64{152}))
+        saved :: jet_rt_session_cleanup_enter(jet_rt_session_status())
+        if a_present -> coll_slot_drop(x, iter_meta(a))
+        if b_present -> coll_slot_drop(y, iter_meta(b))
+        jet_rt_session_cleanup_leave(saved)
+        return false
+    }
     if (!a_present && !b_present) { return false }
     if (kind == I64{17} && !b_present) {
         coll_slot_drop(x, iter_meta(a))
@@ -1143,7 +1176,11 @@ fn iter_try_callback(source: I64, env: I64, invoke: I64, release: I64, carrier: 
 // stride-1 elements and pulls the next item, exactly like LoopCursor.rs.
 #Export(c) fn jet_rt_native_iter_cursor_init(source: I64, step: I64, has_step: I64) -> I64 {
     stride :: if (has_step == I64{0}) -> I64{1} else -> step
-    if (stride <= I64{0}) { iter_argument_stop(I64{4}) }
+    if (stride <= I64{0}) {
+        iter_argument_stop(I64{4})
+        iter_discard_stopped_source(source)
+        return I64{0}
+    }
     cursor :: jet_rt_alloc(I64{40}, I64{8})
     slot :: coll_slot_new(iter_meta(source))
     trap_store(cursor, source)
@@ -1162,7 +1199,10 @@ fn iter_try_callback(source: I64, env: I64, invoke: I64, release: I64, carrier: 
 #Export(c) fn jet_rt_native_iter_cursor_test(cursor: I64) -> I64 { trap_word(cursor + I64{24}) }
 
 #Export(c) fn jet_rt_native_iter_cursor_value(cursor: I64, target: I64, by_value: I64) {
-    if (trap_word(cursor + I64{24}) == I64{0}) { iter_argument_stop(I64{5}) }
+    if (trap_word(cursor + I64{24}) == I64{0}) {
+        iter_argument_stop(I64{5})
+        return
+    }
     source :: trap_word(cursor)
     coll_copy(trap_word(cursor + I64{8}), target, coll_payload(iter_meta(source)))
     if (by_value != I64{0}) { trap_store(cursor + I64{24}, I64{0}) }
@@ -1219,6 +1259,7 @@ fn iter_argument_stop(kind: I64) {
 }
 
 fn iter_zip_stop(context: I64) {
+    trap_root_prepare()
     trap_msg_header_zip()
     trap_write_handle(trap_word(context))
     trap_msg_zip_end()

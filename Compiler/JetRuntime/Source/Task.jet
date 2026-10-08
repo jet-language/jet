@@ -74,15 +74,16 @@ fn task_drop(child: I64) {
     sync_park_drop(sync_load(child + I64{104}))
     jet_rt_string_drop(sync_load(child + I64{128}))
     jet_rt_world_drop(sync_load(child + I64{192}))
-    jet_rt_free(child, I64{200}, I64{8})
+    alloc_release_valid(child, I64{200}, I64{8})
 }
 
 fn task_spawn_state(site: I64, label: I64, env: I64, invoke: I64, release: I64, meta: I64, group: I64, permit: I64) -> I64 {
     if (site < I64{0}) -> jet_rt_unreachable(I64{0}, I64{0})
-    child :: jet_rt_alloc(I64{200}, I64{8})
+    child :: alloc_required_valid(I64{200}, I64{8})
     thread_zero(child, I64{200})
     sync_store(child, I64{2})
     control :: scheduler_control_new()
+    sync_store(control + I64{104}, SCHEDULER_SCOPE_TASK)
     sync_store(child + I64{8}, control)
     copied :: coll_meta_copy(meta)
     sync_store(child + I64{40}, copied)
@@ -116,10 +117,12 @@ fn task_spawn_state(site: I64, label: I64, env: I64, invoke: I64, release: I64, 
     state :: sync_load(group)
     permit :: task_group_admit(state)
     if (jet_scheduler_native_propagate() != I64{0}) {
+        saved :: jet_rt_session_cleanup_enter(jet_scheduler_native_status())
         jet_scheduler_shield_enter()
         if (permit != I64{0}) -> task_group_release(state)
-        _ := coll_call1(release, env)
+        coll_call1_unit(release, env)
         jet_scheduler_shield_leave()
+        jet_rt_session_cleanup_leave(saved)
         return I64{0}
     }
     task_spawn_state(site, label, env, invoke, release, meta, state, permit)
@@ -162,26 +165,33 @@ fn task_run(child: I64) {
     aborted :: sync_load(control + I64{8}) != I64{0} && sync_load(control + I64{16}) != I64{0}
     if aborted -> scheduler_deliver_cancel()
     frame :: scheduler_task_completion_begin()
+    body :: scheduler_body_enter()
     if (!aborted && jet_scheduler_native_propagate() == I64{0}) {
-        body :: scheduler_body_enter()
         _ := coll_call2(sync_load(child + I64{72}), sync_load(child + I64{64}), sync_load(child + I64{48}))
         if (jet_scheduler_native_propagate() == I64{0}) -> sync_store(child + I64{56}, I64{1})
-        scheduler_body_leave(body)
     }
+    // Mint cleanup provenance while the actual Task frame is still active.
+    cleanup :: jet_rt_session_cleanup_enter(jet_scheduler_native_status())
+    scheduler_body_leave(body)
     jet_scheduler_shield_enter()
-    _ := coll_call1(sync_load(child + I64{80}), sync_load(child + I64{64}))
+    release_cleanup :: jet_rt_session_cleanup_enter(jet_scheduler_native_status())
+    coll_call1_unit(sync_load(child + I64{80}), sync_load(child + I64{64}))
     jet_scheduler_shield_leave()
+    jet_rt_session_cleanup_leave(release_cleanup)
     scheduler_task_completion_end(frame)
     if (sync_load(child + I64{144}) != I64{0}) -> task_group_release(sync_load(child + I64{136}))
     status :: jet_scheduler_native_status()
     sync_store(child + I64{32}, status)
     if (status != I64{0} && sync_load(child + I64{56}) != I64{0}) {
         jet_scheduler_shield_enter()
+        result_cleanup :: jet_rt_session_cleanup_enter(jet_scheduler_native_status())
         coll_slot_drop(sync_load(child + I64{48}), sync_load(child + I64{40}))
         sync_store(child + I64{56}, I64{0})
         jet_scheduler_shield_leave()
+        jet_rt_session_cleanup_leave(result_cleanup)
     }
     sync_store(child + I64{32}, jet_scheduler_native_status())
+    jet_rt_session_cleanup_leave(cleanup)
     scheduler_observe_finish(sync_load(control + I64{56}))
     if (world != I64{0}) {
         world_task_finished(world)
@@ -352,11 +362,11 @@ fn task_take_outcome(child: I64, flatten: Bool, out: I64) -> I64 {
 fn scheduler_task_completion_begin() -> I64 {
     stack := sync_load(thread_base() + I64{80})
     if (stack == I64{0}) {
-        stack = jet_rt_alloc(I64{24}, I64{8})
+        stack = alloc_required_valid(I64{24}, I64{8})
         thread_zero(stack, I64{24})
         sync_store(thread_base() + I64{80}, stack)
     }
-    frame :: jet_rt_alloc(I64{24}, I64{8})
+    frame :: alloc_required_valid(I64{24}, I64{8})
     thread_zero(frame, I64{24})
     scheduler_words_push(stack, frame)
     frame
@@ -364,16 +374,31 @@ fn scheduler_task_completion_begin() -> I64 {
 fn scheduler_closure_drop(closure: I64) {
     count :: sync_load(closure) - I64{1}
     sync_store(closure, count)
-    if (count == I64{0}) -> _ := coll_call1(sync_load(closure + I64{16}), closure)
+    if (count == I64{0}) -> coll_call1_unit(sync_load(closure + I64{16}), closure)
 }
 fn scheduler_task_completion_register(closure: I64) {
     stack :: sync_load(thread_base() + I64{80})
     if (stack == I64{0} || sync_load(stack) == I64{0}) {
-        scheduler_closure_drop(closure)
+        scheduler_cleanup_closure_drop(closure)
         return
     }
     frame :: sync_load(sync_load(stack + I64{16}) + (sync_load(stack) - I64{1}) * I64{8})
     scheduler_words_push(frame, closure)
+}
+
+fn scheduler_cleanup_closure_drop(closure: I64) {
+    saved :: jet_rt_session_cleanup_enter(jet_scheduler_native_status())
+    jet_scheduler_shield_enter()
+    scheduler_closure_drop(closure)
+    jet_scheduler_shield_leave()
+    jet_rt_session_cleanup_leave(saved)
+}
+fn scheduler_cleanup_closure_run(closure: I64) {
+    saved :: jet_rt_session_cleanup_enter(jet_scheduler_native_status())
+    coll_call1_unit(sync_load(closure + I64{8}), closure)
+    jet_rt_session_cleanup_leave(saved)
+    // A first stop from a normal callback now owns its capture-drop scope.
+    scheduler_cleanup_closure_drop(closure)
 }
 fn scheduler_task_completion_end(frame: I64) {
     stack :: sync_load(thread_base() + I64{80})
@@ -387,10 +412,7 @@ fn scheduler_task_completion_end(frame: I64) {
         loop count > (I64{0}) {
             count -= I64{1}
             closure :: sync_load(data + count * I64{8})
-            _ := coll_call1(sync_load(closure + I64{8}), closure)
-            jet_scheduler_shield_enter()
-            scheduler_closure_drop(closure)
-            jet_scheduler_shield_leave()
+            scheduler_cleanup_closure_run(closure)
         }
         jet_rt_free(data, capacity * I64{8}, I64{8})
     }
@@ -398,13 +420,13 @@ fn scheduler_task_completion_end(frame: I64) {
     scheduler_words_drop(frame)
 }
 
-// Rust Core.rs:1122 and Outcome.rs:2333-2342: thread-confined exit queue,
-// drained exactly once in reverse registration order at the common exit edge.
+// One thread-confined queue, drained in registration order after scope
+// cleanup. Pre-stop late registrations are owed in subsequent FIFO batches.
 task_exit_key := I64{0}
 // runtime-init: 3
 #Export(c) fn jet_rt_task_exit_init() {
     if (task_exit_key != I64{0}) -> return
-    destructor :: jet_rt_alloc(I64{24}, I64{8})
+    destructor :: alloc_required_valid(I64{24}, I64{8})
     sync_store(destructor, I64{1})
     sync_store(destructor + I64{8}, rt_task_exit_destructor_address())
     sync_store(destructor + I64{16}, I64{0})
@@ -415,13 +437,13 @@ fn rt_task_exit_destructor_address() -> I64 {
     loop { jet_rt_unreachable(I64{0}, I64{0}) }
 }
 #Export(c) fn jet_rt_task_exit_destructor(_header: I64, queue: I64) -> I64 {
-    // Rust's TLS Vec drops unrun exit closures, never invokes their bodies.
+    // Unrun TLS exit closures release captures without invoking their bodies.
     jet_scheduler_shield_enter()
     count := sync_load(queue)
     data :: sync_load(queue + I64{16})
     loop count > (I64{0}) {
         count -= I64{1}
-        scheduler_closure_drop(sync_load(data + count * I64{8}))
+        scheduler_cleanup_closure_drop(sync_load(data + count * I64{8}))
     }
     scheduler_words_drop(queue)
     jet_scheduler_shield_leave()
@@ -430,29 +452,32 @@ fn rt_task_exit_destructor_address() -> I64 {
 fn task_exit_queue() -> I64 {
     queue := jet_rt_tls_get(task_exit_key)
     if (queue == I64{0}) {
-        queue = jet_rt_alloc(I64{24}, I64{8})
+        queue = alloc_required_valid(I64{24}, I64{8})
         thread_zero(queue, I64{24})
         jet_rt_tls_set(task_exit_key, queue)
     }
     queue
 }
 #Export(c) fn jet_rt_native_atexit(closure: I64) {
+    if (scheduler_control_status(scheduler_control_current()) != I64{0}) {
+        scheduler_cleanup_closure_drop(closure)
+        return
+    }
     scheduler_words_push(task_exit_queue(), closure)
 }
 #Export(c) fn jet_rt_task_exit_handlers() {
     queue :: jet_rt_tls_get(task_exit_key)
     if (queue == I64{0}) -> return
-    count := sync_load(queue)
-    capacity :: sync_load(queue + I64{8})
-    data :: sync_load(queue + I64{16})
-    thread_zero(queue, I64{24})
-    loop count > (I64{0}) {
-        count -= I64{1}
-        closure :: sync_load(data + count * I64{8})
-        _ := coll_call1(sync_load(closure + I64{8}), closure)
-        jet_scheduler_shield_enter()
-        scheduler_closure_drop(closure)
-        jet_scheduler_shield_leave()
+    loop sync_load(queue) != (I64{0}) {
+        count :: sync_load(queue)
+        capacity :: sync_load(queue + I64{8})
+        data :: sync_load(queue + I64{16})
+        thread_zero(queue, I64{24})
+        at := I64{0}
+        loop at < count {
+            scheduler_cleanup_closure_run(sync_load(data + at * I64{8}))
+            at += I64{1}
+        }
+        if (capacity != I64{0}) -> jet_rt_free(data, capacity * I64{8}, I64{8})
     }
-    if (capacity != I64{0}) -> jet_rt_free(data, capacity * I64{8}, I64{8})
 }
