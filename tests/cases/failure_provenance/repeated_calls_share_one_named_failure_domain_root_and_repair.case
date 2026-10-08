@@ -1,0 +1,21 @@
+# HAND-PORT tests/failure_provenance.rs:27-73 repeated_calls_share_one_named_failure_domain_root_and_repair
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# Public projection equivalent to original full primary-first fixes: Diagnostics.rs497 all_edits; Diagnostics1123 to_report; LSP/Check170 fixes_from_diagnostics also uses all_edits. Applicability report-level applies to both, safety asserted universally for both. Apply ONLY original primary edit; untouched source bytes otherwise.
+fixture: repeated_calls_share_one_named_failure_domain_root_and_repair.fixture
+env: NO_COLOR=1
+step: jet check --json input.jet
+exit: nonzero
+json: stdout doc $.reports[?code="E2404"] #= 1
+json: stdout doc $.reports[?code="E2404"][0].what ~ "wrong_helper" # original predicate rs38
+json: stdout doc $.reports[?code="E2404"][0].why ~ "wrong_helper" # original predicate rs39
+json: stdout doc $.reports[?code="E2404"][0].why ~ "input.jet:" # original predicate rs40
+json: stdout doc $.reports[?code="E2404"][0].why ~ "explicit !WrongDomain" # original predicate rs42
+json: stdout doc $.reports[?code="E2404"][0].detail ^= "failure-domain:wrong_helper|WrongDomain|CallerDomain" # original prefix predicate rs49; missing/null fails
+json: stdout doc $.reports[?code="E2404"][0].fix_edits #= 2
+json: stdout doc $.reports[?code="E2404"][0].fix_edits[0].new_text = "Int !WrongDomain"
+json: stdout doc $.reports[?code="E2404"][0].applicability = "suggested"
+json: stdout doc $.reports[?code="E2404"][0].fix_edits[*].safety = "needs-review"
+json: stdout doc $.reports[?code="E2404"][0].fix_edits[1].new_text ~ "impl WrongDomain -> CallerDomain" # original existential rs70, with primary fixed and exactly2 this is the second edit
+apply-edits: stdout doc $.reports[?code="E2404"][0].fix_edits[0]
+step: jet check input.jet
+exit: 0

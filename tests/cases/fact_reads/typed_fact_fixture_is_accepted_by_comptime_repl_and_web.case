@@ -1,0 +1,14 @@
+# HAND-PORT tests/fact_reads.rs:303-326 typed_fact_fixture_is_accepted_by_comptime_repl_and_web
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# Two original REPL inputs verbatim, isolated cooked CLI floor. Unconditional original web compile/artifact success; generated-wasm-Rust-only dispatch scan RETIRE. Companion .node.case reproduces optional original generated-JS run and exact existing golden; original rustc availability guard erased, node subject/guard retained. No package manifest: original script package identity fact_reads/version0.0.0.
+fixture: typed_fact_fixture_is_accepted_by_comptime_repl_and_web.fixture
+env: NO_COLOR=1
+env: XDG_STATE_HOME={work}/state
+step: jet repl
+unset: JET_REPL_HISTORY
+stdin: typed_fact_fixture_is_accepted_by_comptime_repl_and_web.fixture/input.in
+exit: any # original run_transcript returned text, not a process exit status
+stdout+stderr: ~ "report" # original transcript.contains predicate rs310; same cooked floor jet-repl/lib.rs2469
+step: jet build --target=web Examples/features/reflection/fact_reads.jet
+exit: 0
+file: .jet/build/app.wasm is-file
