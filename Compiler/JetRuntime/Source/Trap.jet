@@ -83,10 +83,11 @@ fn trap_write_word(word: I64, count: I64) {
 }
 
 fn rt_trap_invalid_box_layout() {
+    jet_rt_process_exit_begin(I64{70})
     trap_flush_stdout()
     trap_invalid_layout_head()
     trap_footer_e3001()
-    trap_exit(I64{70})
+    jet_rt_process_exit_finish()
 }
 
 fn trap_write_handle(handle: I64) {
@@ -123,6 +124,7 @@ fn trap_line(line: I64) -> I64 Never! {
 }
 
 fn trap_header(code: I64) {
+    jet_rt_process_exit_begin(I64{70})
     trap_flush_stdout()
     if {
         (code == I64{0}) -> trap_msg_header_panic()
@@ -189,7 +191,7 @@ fn trap_footer(code: I64) {
         (code == I64{1}) -> trap_footer_e3010()
         else -> trap_footer_e3011()
     }
-    trap_exit(I64{70})
+    jet_rt_process_exit_finish()
 }
 
 fn trap_simple(code: I64, file: I64, file_len: I64, line: I64, message: I64, message_len: I64) {
