@@ -1573,7 +1573,15 @@ not hide preceding writes from either operation. Its `jet_fs_link_fd_at_raw`
 calls AT_EMPTY_PATH once with no pathname or `/proc/self/fd` fallback.
 Linux [link(2)](https://man7.org/linux/man-pages/man2/link.2.html) requires
 CAP_DAC_READ_SEARCH for that flag and reports ENOENT without it; the transport
-returns that fact unchanged. The six-argument process launch
+returns that fact unchanged.
+
+Explicit `jet_std_process_exit` keeps the canonical exact-Int-to-signed-i32
+conversion and calls `jet_rt_process_exit`; it no longer independently flushes
+stdout and invokes `exit_group`. The common runtime process boundary owns the
+process-wide winner claim, atexit handling and final output flush. This caller
+requires the separately linked Jet Main provider of `jet_rt_process_exit`.
+
+The six-argument process launch
 borrows ExecCandidates32 (count, NUL candidate column, script-fallback bit,
 searched bit) and Core-prepared argv and effective environment bytes. This
 preserves non-Unicode PATH entries without an independent environment. Source

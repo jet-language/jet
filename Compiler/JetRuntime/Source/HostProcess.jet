@@ -1,6 +1,7 @@
 // Linux host facts have no policy/default layer. PID/UID/GID values are at
 // most 32 bits and therefore already have the inline exact-Int carrier form.
-// Shared output is drained before every child/blocking/exit syscall here.
+// Shared output is drained before child/blocking syscalls. Exit uses the
+// process-wide runtime claim/atexit/flush boundary, never a competing syscall.
 fn host_call(number: I64, a1: I64, a2: I64, a3: I64) -> I64 {
     #Unsafe("the audited caller supplies the Linux syscall's valid word arguments") {
         return os_syscall_i64(number, a1, a2, a3, I64{0}, I64{0}, I64{0})
@@ -39,9 +40,10 @@ fn host_i32(value: I64) -> I64 Never! {
     _ := host_call(I64{162}, I64{0}, I64{0}, I64{0})
 }
 
+#Import(c) fn host_process_exit(code: I64) = "jet_rt_process_exit"
+
 #Export(c) fn jet_std_process_exit(code: I64) {
-    jet_rt_stdout_flush()
-    _ := host_call(I64{231}, host_i32(code), I64{0}, I64{0})
+    host_process_exit(host_i32(code))
 }
 
 // Raw tuples marshal into the generator's separate out slots, never a boxed
