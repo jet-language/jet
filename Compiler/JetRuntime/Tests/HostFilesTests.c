@@ -14,6 +14,7 @@
 #include <string.h>
 #include <sys/file.h>
 #include <sys/stat.h>
+#include <sys/xattr.h>
 #include <time.h>
 #include <unistd.h>
 enum { PF_READ=1, PF_WRITE=2, PF_CREATE=4, PF_TRUNCATE=8, PF_APPEND=16,
@@ -35,6 +36,7 @@ extern void jet_fd_flush_raw(FD *, W *, bool *);
 extern void jet_fd_sync_raw(FD *, bool, W *);
 extern W jet_fd_seek_raw(FD *, W, W, W *, bool *);
 extern void jet_fd_stat_raw(FD *, W *, W *);
+extern void jet_fd_stat_at_raw(FD *, Text *, W *, W *);
 extern void jet_fd_created_raw(FD *, W *, W *);
 extern void jet_fd_chmod_raw(FD *, W, W *);
 extern void jet_fd_lock_raw(FD *, W, W *);
@@ -56,6 +58,7 @@ extern void jet_fs_unlink_raw(Text *, bool, W *);
 extern void jet_fs_link_raw(Text *, Text *, bool, W *);
 extern void jet_fs_rename_raw(Text *, Text *, W *);
 extern W jet_fs_readlink_raw(Text *, void *, W, W *);
+extern W jet_fs_xattr_get_raw(Text *, Text *, void *, W, W *);
 extern void jet_rt_string_drop(Text *);
 extern void jet_rt_host_program_start(void);
 static bool success(W *error) { return !error[0] && !error[1] && !error[2] && !error[3]; }
@@ -134,6 +137,11 @@ int main(void) {
     FD *directory=jet_fd_open_raw(&d,PF_READ|PF_DIRECTORY,0,error); assert(directory && success(error));
     Text member=text("file"), hard=text("hard"), dir=text("dir"), renamed=text("renamed");
     FD *at=jet_fd_open_at_raw(directory,&member,PF_READ|PF_NOFOLLOW,0,error); assert(at && success(error)); jet_fd_drop_raw(at);
+    jet_fd_stat_at_raw(directory,&member,facts,error); assert(success(error));
+    assert((uint64_t)facts[1]==expected.st_ino && facts[7]==5);
+    Text empty=text(""), absent=text("absent");
+    jet_fd_stat_at_raw(directory,&empty,facts,error); assert(success(error) && (facts[2]&S_IFMT)==S_IFDIR);
+    jet_fd_stat_at_raw(directory,&absent,facts,error); assert(posix(error,ENOENT));
     assert(jet_fd_directory_raw(directory,bytes,sizeof bytes,error)>0 && success(error));
     jet_fd_link_at_raw(reader,directory,&hard,error);
     // FileHandles.rs's AT_EMPTY_PATH has the same privilege error on both tiers.
@@ -146,6 +154,27 @@ int main(void) {
     assert(jet_fs_readlink_raw(&l,bytes,sizeof bytes,error)==p.len && success(error) && !memcmp(bytes,p.data,p.len));
     Text link_member=text("link"); assert(jet_fd_readlink_at_raw(directory,&link_member,bytes,sizeof bytes,error)==p.len && success(error));
     jet_fs_stat_raw(&l,false,facts,error); assert(success(error) && (facts[2]&S_IFMT)==S_IFLNK);
+    assert(!lstat(link,&expected));
+    jet_fd_stat_at_raw(directory,&link_member,facts,error); assert(success(error));
+    assert((facts[2]&S_IFMT)==S_IFLNK && (uint64_t)facts[1]==expected.st_ino && facts[7]==expected.st_size);
+    // Real lgetxattr is also the Rust FileHandles reference primitive.
+    Text attribute=text("user.jet-host-fixture");
+    ssize_t reference=lgetxattr(path,"user.jet-host-fixture",NULL,0);
+    int reference_errno=errno;
+    W actual=jet_fs_xattr_get_raw(&p,&attribute,NULL,0,error);
+    assert(reference<0 && actual==-1 && posix(error,reference_errno));
+    int set_result=lsetxattr(path,"user.jet-host-fixture","x\0y",3,0);
+    if (!set_result) {
+        assert(jet_fs_xattr_get_raw(&p,&attribute,NULL,0,error)==3 && success(error));
+        assert(jet_fs_xattr_get_raw(&p,&attribute,bytes,2,error)==-1 && posix(error,ERANGE));
+        assert(jet_fs_xattr_get_raw(&p,&attribute,bytes,sizeof bytes,error)==3 && success(error) && !memcmp(bytes,"x\0y",3));
+        assert(jet_fs_xattr_get_raw(&l,&attribute,bytes,sizeof bytes,error)==-1 && posix(error,ENODATA));
+        assert(!lsetxattr(path,"user.jet-host-fixture","",0,0));
+        assert(jet_fs_xattr_get_raw(&p,&attribute,NULL,0,error)==0 && success(error));
+    } else {
+        assert(errno==ENOTSUP);
+        assert(jet_fs_xattr_get_raw(&p,&attribute,NULL,0,error)==-1 && (posix(error,ENOTSUP) || posix(error,ENODATA)));
+    }
     jet_fs_created_raw(&p,true,facts,error); assert(success(error) || posix(error, ENOSYS) || posix(error, EOPNOTSUPP));
     jet_fs_unlink_raw(&l,false,error); assert(success(error));
     jet_fs_link_raw(&p,&q,false,error); assert(success(error));
@@ -153,7 +182,10 @@ int main(void) {
     jet_fs_unlink_raw(&l,false,error); assert(success(error));
     jet_fs_mkdir_raw(&s,0700,error); assert(success(error));
     jet_fs_unlink_raw(&s,true,error); assert(success(error));
-    jet_fd_drop_raw(reader); jet_fd_drop_raw(directory);
+    jet_fd_drop_raw(reader);
+    jet_fd_close_raw(directory,error,&z); assert(success(error) && !z);
+    jet_fd_stat_at_raw(directory,&member,facts,error); assert(posix(error,EBADF));
+    jet_fd_drop_raw(directory);
     FD *bulk=jet_fd_open_raw(&q,PF_WRITE|PF_CREATE|PF_TRUNCATE,0600,error);assert(bulk&&success(error));
     assert(jet_fd_write_raw(bulk,NULL,0,error,&z)==0 && success(error) && !z && !bulk->buffer);
     memset(bytes,'z',sizeof bytes);assert(jet_fd_write_raw(bulk,bytes,sizeof bytes,error,&z)==(W)sizeof bytes&&success(error)&&!bulk->buffer);jet_fd_drop_raw(bulk);

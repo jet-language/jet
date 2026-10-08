@@ -374,6 +374,34 @@ fn fd_zero(result: I64, zero: I64) {
     if (result < I64{0}) -> I64{0} else -> fd_new(result, path, (bits & I64{3}) != I64{0})
 }
 
+// FileHandles.rs:711-758: a held-directory entry is statted without following
+// its final symlink and without requiring read access. Source resolves/validates
+// the plain final name; the empty name means stat the directory itself.
+#Export(c) fn jet_fd_stat_at_raw(directory: I64, path: I64, stat: I64, error: I64) {
+    if (rt_text_len(path) == I64{0}) {
+        jet_fd_stat_raw(directory, stat, error)
+        return
+    }
+    name :: fd_c_path(path)
+    fd_lock(directory)
+    opened := I64{-9}
+    if (fd_word(directory, I64{16}) == I64{0}) {
+        #Unsafe("the held directory and terminated final name live through O_PATH|O_NOFOLLOW|O_CLOEXEC openat; no read access or link traversal") {
+            opened = os_syscall_i64(I64{257}, fd_word(directory, I64{8}), name, I64{2752512}, I64{0}, I64{0}, I64{0})
+        }
+    }
+    fd_unlock(directory)
+    fd_c_path_drop(name, path)
+    result := opened
+    if (opened >= I64{0}) {
+        #Unsafe("openat returned an exclusively owned descriptor and the caller lends StatFacts128; fstat copies initialized scalar facts") {
+            result = os_stat_facts_i64(I64{5}, opened, stat)
+        }
+        _ := host_call(I64{3}, opened, I64{0}, I64{0})
+    }
+    _ := fd_error(result, error)
+}
+
 // Duplicate both descriptors before the two-resource syscall, so close through
 // any source alias cannot race descriptor-number reuse or invert two locks.
 fn fd_dup_number(state: I64) -> I64 {
@@ -466,6 +494,21 @@ fn fd_created_finish(result: I64, output: I64, errno: I64) {
     result :: host_call(I64{89}, name, bytes, host_native_int(length))
     fd_c_path_drop(name, path)
     fd_error(result, errno)
+}
+
+// FileHandles.rs:988-1031: lgetxattr queries the path itself. Size query is
+// bytes=0,length=0. Source owns absence/Unsupported mapping, allocation and
+// ERANGE retry; this leaf reports exactly one syscall's count or POSIX error.
+#Export(c) fn jet_fs_xattr_get_raw(path: I64, attribute: I64, bytes: I64, length: I64, error: I64) -> I64 {
+    name :: fd_c_path(path)
+    key :: fd_c_path(attribute)
+    result := I64{0}
+    #Unsafe("both terminated borrowed names and the caller's optional compact byte output remain live only through lgetxattr") {
+        result = os_syscall_i64(I64{192}, name, key, bytes, host_native_int(length), I64{0}, I64{0})
+    }
+    fd_c_path_drop(key, attribute)
+    fd_c_path_drop(name, path)
+    fd_error(result, error)
 }
 
 #Export(c) fn jet_fd_mkdir_at_raw(directory: I64, path: I64, mode: I64, errno: I64) {

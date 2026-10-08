@@ -1590,3 +1590,31 @@ execve attempt. This is the intentional I9 delta from glibc's oversized-PATH
 case that otherwise returns whichever stale errno happened to be present.
 Child setup retains its reference error precedence: an invalid cwd or descriptor
 still fails at its own stage before the empty candidate set reports exec ENOENT.
+
+The remaining held-file calls reuse this boundary, without exporting a second
+set of public-policy adapters:
+
+| Core seed route | Jet raw transport |
+| --- | --- |
+| `jet_std_files_open_writer` | `jet_fd_open_raw` / `jet_fd_open_at_raw` |
+| `jet_fs_directory_close` | `jet_fd_close_raw` |
+| `jet_fs_directory_create` | `jet_fd_mkdir_at_raw` |
+| `jet_fs_rename_at` | `jet_fd_rename_at_raw` |
+| `jet_fs_read_link_at` | `jet_fd_readlink_at_raw` |
+| `jet_std_file_reader_stat` | `jet_fd_stat_raw` |
+| `jet_std_file_writer_set_mode` | `jet_fd_chmod_raw` |
+| `jet_fs_directory_fd_raw` | `jet_fd_number_raw` |
+| `jet_fs_stat_at` | `jet_fd_stat_at_raw` |
+| `jet_fs_xattr_get` | `jet_fs_xattr_get_raw` |
+
+`jet_fd_stat_at_raw(directory, name, StatFacts128*, ErrorOut32*)` follows
+FileHandles.rs:711–758: an empty name stats the held directory; a final entry
+opens with `O_PATH|O_NOFOLLOW|O_CLOEXEC`, stats the owned descriptor, and closes
+it, including stat failure. The source resolves/validates intermediate names.
+Ambient path stat continues to use `jet_fs_stat_raw`, not a fake directory.
+`jet_fs_xattr_get_raw(path, attribute, compact_bytes, length, ErrorOut32*)`
+performs one `lgetxattr` syscall, returning the byte count or -1. A null buffer
+with zero length queries size. FileHandles.rs:988–1031's absent/unsupported
+mapping, allocation and ERANGE retry remain source policy. Descriptor numbers
+are borrowed facts: source retains the directory until the consuming leaf
+duplicates it; they are not independent owned handles.
