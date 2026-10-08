@@ -1,6 +1,93 @@
 // Source-owned compiler query orchestration.
 // The check query follows the Driver's normal load, declaration-comptime,
 // body-comptime, and semantic-finalization phases before serialization.
+//
+// Incremental service packet design (review contract; no service is installed
+// by this comment). Source of truth: Rust QueryService::CompilerQueries and
+// CmdTry::verdict. NativeLead selects their invocation-memory mechanism, not
+// DriverRecordStore serialization or a second persistent cache.
+//
+// Ownership and lifetime:
+// - One Driver session belongs to one try invocation and survives its edits.
+//   It owns document inputs, checked-root memos, the exact external-input
+//   closure, volatile-root marks, and one opaque Sema session per root.
+// - Checked results are immutable owned packets shared by memo and caller;
+//   a hit must not copy the checked graph or execute its body checker again.
+// - Sema owns all typed body products and their replay. Driver never opens
+//   Sema-private fields. Closing the invocation releases inputs, root memos
+//   and every Sema session; no state leaks into a later try invocation.
+//
+// Authorized input adapter:
+// - The CLI retains Request.prepare_overlays as the one filesystem/authority
+//   resolver. check_disk prepares the entry without edits; set_document updates
+//   the session's exact canonical-path text; check_text prepares the complete
+//   overlay set through the same adapter and enters this existing check flow.
+// - Driver receives the actual prepared snapshot and parsed entry packet;
+//   it does not reopen display paths, infer a project root, or forward to Rust.
+// - Roots/modes are distinct query keys. Root text, loaded dependency text,
+//   package/lock files, actual external/comptime inputs and every semantic
+//   request input participate in freshness. Stamps only avoid re-reading when
+//   the authorized adapter proves identity; a stamp never decides freshness.
+// - A missing read invalidates the root query and uses the ordinary diagnostic
+//   path. Comptime/volatile roots force a root recompute before each verdict.
+//   Dependencies discovered by the real check replace the root's closure;
+//   failed checks preserve prior dependencies instead of losing invalidation.
+//
+// Root query flow:
+// - Refresh inputs before lookup. An unchanged nonvolatile root returns its
+//   immutable checked memo without registration, body checking or fake item
+//   hits. Otherwise run the normal load/declaration-comptime/body-comptime/
+//   semantic-finalization flow below with the root's opaque Sema session.
+// - Keep registration, policies, plugin interfaces, resolved imports and
+//   target/profile facts canonical. This is not a BuildGraph/receipt facade,
+//   a second frontend, or two complete checks with inferred reuse counters.
+//
+// Opaque Sema contract (sole implementation editor: SpeedPareto2):
+// - Begin-bundle compares the canonical global environment (excluding only
+//   BuildStamp.At), span-stripped module interfaces with callable bodies
+//   removed, and resolved-import dependencies. Invalidate the changed module
+//   interface and its reverse-import closure; a private body edit does not
+//   dirty unrelated interfaces. Deleted modules and changed import resolution
+//   invalidate their owned entries too.
+// - Body inputs include the complete raw function AST, all source spans,
+//   raw-protocol-return mode and every checking input. Text-only or span-free
+//   fingerprints cannot stand in for this input. Sema supplies this contract;
+//   Driver cannot invent a partial serialization of its private state.
+// - An entry owns the accepted final typed body and ALL ordered diagnostics,
+//   calls, comptime requests, name facts, wanted hooks and checked function
+//   facts: completion, exact-Int reachability, copies, hardware use, body
+//   sources, compute/failure facts and every pending/publication/summary row.
+// - Commit only after the main callback retry accepts the final owned packet
+//   with wanted_hooks=false. Never cache a provisional/withheld packet or a
+//   partially borrowed parallel worker result. Comptime/embed inputs and a
+//   missing/incomplete owned body follow the real recompute path.
+// - Replay through the SAME ordered append path used by fresh bodies
+//   (currently sema_append_function plus its explicit facts loops), preserving
+//   parallel result order. Factoring that path belongs to the checker owner;
+//   planned helper names are not existing APIs. Re-run all global failure,
+//   effect, borrow and other bundle obligations after all body products join.
+//
+// Counters and command cutover:
+// - Root hits/recomputes and body hits/recomputes are distinct cumulative
+//   observations. Increment a body hit only for an actual accepted replay;
+//   increment a body recompute only when its real checker executes, including
+//   bypassed bodies. No result-derived counts or synthetic cached claims.
+// - CmdTry takes stats after its baseline check_disk, installs each staged
+//   document, calls check_text, and reports saturating deltas of the actual
+//   item counters, exactly as Rust CmdTry313-330.
+// - Keep uses the existing SourceTransaction/SemanticOps writer after the
+//   checked verdict and current-byte comparison. Default speculation writes
+//   no source. Failed checks publish the normal diagnostics, not clean claims.
+//
+// Acceptance packet:
+// - Unchanged root memo executes no body checker; changed private body, moved
+//   spans, changed signature/import/interface, deleted module, manifest/lock,
+//   volatile comptime and dependency edits exercise their exact invalidation.
+// - Fresh and replayed packets agree on diagnostics, names, effects, failure,
+//   copies, publications and borrow obligations on serial and parallel paths.
+// - Exact try human/JSON output, receipt identity and keep/no-keep transaction
+//   behavior use real item-counter deltas. Source approval requires the full
+//   typed input/replay/caller packet; parser success is not semantic proof.
 use jet_sema.sema_output_resolve
 use jet_foundation.[
     Diagnostic,
