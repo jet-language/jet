@@ -1634,11 +1634,18 @@ an environment value is not UTF-8.
 `TestCapture.jet` owns per-thread capture over the scheduler's generic TLS
 key mechanism. Its idempotent `.init_array` initializer runs at priority 3,
 after thread initialization at priority 2. A private module global holds the
-process-lifetime key; each thread's value owns a builder and a tagged native
-word-list scope stack. Nested begin/take operations preserve outer captures.
-The TLS destructor frees abandoned captures on thread detach. Compiler print
-syntax appends bytes and one LF while capturing; raw `stdout.write` bypasses
-capture, as it does in the Rust test prelude.
+process-lifetime key. Its one 136-byte per-thread state owns the capture
+builder/tagged frame list and the `Core.rs:678-860` test cells:
+expectations at 32, completed expectations at 56, unmet at 80, timeouts at 88,
+whole-skip at 112, and failure message/detail at 120/128. No second TLS key
+or reserved TCB test slot is introduced. `TestScope.jet` implements the
+matching expectation, timeout, skip and failure APIs; all stored text is E4
+owned, borrowed inputs are cloned, and take transfers ownership. Timeout
+samples use host `CLOCK_MONOTONIC`, like Rust's `Instant`, even inside World.
+Nested begin/take operations preserve outer captures. The TLS destructor
+reclaims abandoned captures and every test cell on thread detach. Compiler
+print syntax appends bytes and one LF while capturing; raw `stdout.write`
+bypasses capture, as it does in the Rust test prelude.
 
 Invocation still depends on L8a-2's task-control/stop-record helpers.
 Replacing `jet_rt_test_unit`'s remaining Rust `jet_test_run` boundary requires
