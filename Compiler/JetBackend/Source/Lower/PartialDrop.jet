@@ -1,0 +1,264 @@
+// Owner-local drop elaboration for moved Close-bearing fields. A cleared
+// inline value is not an absent value: its Close body may observe zero fields.
+// These flags live in the current function, never in a value's ABI layout.
+use jet_foundation.[MIRInstruction, MIROwnershipMode, MIRProgram, MIRProjection, MIRType, MIRTypeKind, MIRValueID, mir_type_from_kind, mir_type_identity_key]
+
+struct LowerPartialDrop {
+    pub result: U64
+    pub owner: String
+    pub path: [LowerGlueField]
+    pub live: LIRValueID
+}
+
+fn lower_option_type(inner: MIRType) -> MIRType Never! {
+    mir_type_from_kind(MIRTypeKind.Option{inner: inner})
+}
+
+fn lower_contains_close(p: MIRProgram, ty: MIRType, seen: &[String:Bool]) -> Bool Never! {
+    key :: mir_type_identity_key(ty)
+    if seen.get(key) != None -> return false
+    &seen.add(key, true).drop("first visit")
+    if lower_close_method(p, ty) != None -> return true
+    if ty.kind == {
+        .Tagged(_, inner) | .Option(inner) | .List(inner) | .FixedList(inner, _) -> {
+            if lower_contains_close(p, inner, &seen) -> return true
+        }
+        .Result(ok, err) | .Map(ok, err) -> {
+            if lower_contains_close(p, ok, &seen) || lower_contains_close(p, err, &seen) -> return true
+        }
+        else -> {}
+    }
+    if lower_is_inline(p, ty) {
+        loop member in lower_inline_members(p, ty) {
+            if lower_contains_close(p, member.ty, &seen) -> return true
+        }
+    } else if lower_type_def(p, ty) == .Val(definition) {
+        if definition.kind == .Enum(variants, _) {
+            loop variant in variants {
+                loop member in lower_variant_members(p, definition, variant) {
+                    if lower_contains_close(p, member.ty, &seen) -> return true
+                }
+            }
+        }
+    }
+    false
+}
+
+fn lower_partial_owner(c: LowerContext, value: MIRValueID) -> String Never! {
+    root :: lower_move_root(c, value)
+    if lower_slot_of_value(c, root) == .Val(slot) -> return "slot.{slot}"
+    "value.{root.value}"
+}
+
+fn lower_partial_field_path(p: MIRProgram, ty: MIRType, projections: [MIRProjection]) -> [LowerGlueField]? {
+    path := [LowerGlueField]{}
+    current := ty
+    loop projection in projections {
+        if projection != .Field(_, _) -> return None
+        if projection == .Field(id, _) {
+            field :: lower_struct_field(p, current, id) ?? return None
+            storage :: if field.boxed -> lower_option_type(field.ty) else -> field.ty
+            &path.push(LowerGlueField{offset: field.offset, ty: storage})
+            if field.boxed -> &path.push(LowerGlueField{offset: 0, ty: field.ty})
+            current = field.ty
+        }
+    }
+    Val(path)
+}
+
+fn lower_partial_frame(p: MIRProgram, c: LowerContext, f: &LowerFunction) Never! {
+    loop block in c.mir.blocks {
+        loop instruction in block.instructions {
+            result :: instruction.result ?? next
+            ty :: lower_checked_type(c, instruction) ?? next
+            if !lower_value_owned(c, result) -> next
+            seen := [String:Bool]{}
+            if !lower_contains_close(p, ty, &seen) -> next
+            owner := ""
+            path := [LowerGlueField]{}
+            if instruction.operation == {
+                .MovePlace(place) -> {
+                    row :: lower_place_row(c.mir, place) ?? next
+                    if row.projections.len() == 0 -> next
+                    slot :: c.place_slots.get(place.value) ?? next
+                    path = lower_partial_field_path(p, c.slots[slot].ty, row.projections) ?? next
+                    owner = "slot.{slot}"
+                }
+                .Field(value, field) -> {
+                    source :: lower_value_type(c, value) ?? next
+                    found :: lower_struct_field(p, source, field) ?? next
+                    &path.push(LowerGlueField{offset: found.offset, ty: if found.boxed -> lower_option_type(found.ty) else -> found.ty})
+                    if found.boxed -> &path.push(LowerGlueField{offset: 0, ty: found.ty})
+                    owner = lower_partial_owner(c, value)
+                    fact :: c.fact_index.get(lower_move_root(c, value).value) ?? next
+                    if c.mir.values[fact].ownership.mode != MIROwnershipMode.Move -> next
+                }
+                .OptionValue(value) | .ResultValue(value, _) -> {
+                    offset :: if instruction.operation == .OptionValue(_) -> 0 else -> 8
+                    &path.push(LowerGlueField{offset: offset, ty: ty})
+                    owner = lower_partial_owner(c, value)
+                    fact :: c.fact_index.get(lower_move_root(c, value).value) ?? next
+                    if c.mir.values[fact].ownership.mode != MIROwnershipMode.Move -> next
+                }
+                .EnumPayload(value, type_id, variant, index) -> {
+                    source :: lower_value_type(c, value) ?? next
+                    definition :: lower_owned_def(p, type_id, Val(source)) ?? next
+                    found :: lower_variant(definition, variant) ?? next
+                    member :: lower_enum_payload_info(p, definition, found.variant, index) ?? next
+                    &path.push(LowerGlueField{offset: member.offset, ty: if member.boxed -> lower_option_type(member.ty) else -> member.ty})
+                    if member.boxed -> &path.push(LowerGlueField{offset: 0, ty: member.ty})
+                    owner = lower_partial_owner(c, value)
+                    fact :: c.fact_index.get(lower_move_root(c, value).value) ?? next
+                    if c.mir.values[fact].ownership.mode != MIROwnershipMode.Move -> next
+                }
+                else -> next
+            }
+            live :: lower_pointer(&f)
+            lower_emit(&f, LIRInst.StackSlot{dst: live, size: 1, align: 1})
+            one :: lower_flag(&f)
+            lower_emit(&f, LIRInst.Const{dst: one, value: 1})
+            lower_emit(&f, LIRInst.Store{base: live, offset: 0, value: one})
+            &f.partial_drops.push(LowerPartialDrop{result: result.value, owner: owner, path: path, live: live})
+        }
+    }
+}
+
+fn lower_partial_transfer(f: &LowerFunction, instruction: MIRInstruction) Never! {
+    result :: instruction.result ?? return
+    loop row in f.partial_drops {
+        if row.result != result.value -> next
+        zero :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Const{dst: zero, value: 0})
+        lower_emit(&f, LIRInst.Store{base: row.live, offset: 0, value: zero})
+    }
+}
+
+fn lower_partial_prefix(path: [LowerGlueField], prefix: [LowerGlueField]) -> Bool Never! {
+    if path.len() < prefix.len() -> return false
+    loop (index, field) in prefix {
+        if field.offset != path[index].offset || mir_type_identity_key(field.ty) != mir_type_identity_key(path[index].ty) -> return false
+    }
+    true
+}
+
+fn lower_partial_reset(f: &LowerFunction, owner: String, prefix: [LowerGlueField]) Never! {
+    loop row in f.partial_drops {
+        if row.owner != owner || !lower_partial_prefix(row.path, prefix) -> next
+        one :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Const{dst: one, value: 1})
+        lower_emit(&f, LIRInst.Store{base: row.live, offset: 0, value: one})
+    }
+}
+
+// Expands only ancestors of a moved field; siblings retain ordinary glue.
+fn lower_partial_drop_node(p: MIRProgram, m: &LowerModule, f: &LowerFunction, base: LIRValueID, ty: MIRType, rows: [LowerPartialDrop], depth: Int) Never! {
+    done :: lower_new_block(&f)
+    if depth > 0 {
+        loop row in rows {
+            if row.path.len() != depth -> next
+            live :: lower_flag(&f)
+            lower_emit(&f, LIRInst.Load{dst: live, base: row.live, offset: 0})
+            body :: lower_new_block(&f)
+            lower_seal(&f, LIRTerminator.Branch{condition: live, then_target: lower_target(body, [LIRValueID]{}), else_target: lower_target(done, [LIRValueID]{})})
+            lower_start(&f, body, [LIRValueID]{})
+        }
+    }
+    deeper := false
+    loop row in rows {
+        if row.path.len() > depth -> deeper = true
+    }
+    if !deeper {
+        if lower_is_inline(p, ty) {
+            lower_inline_drop(p, &m, &f, base, ty)
+        } else {
+            layout :: lower_repr_layout(lower_repr(p, ty)) ?? return lower_fail(&m, &f, "partial drop leaf has no carrier")
+            owned :: lower_new_value(&f, layout, lower_drop(&m, f, lower_repr(p, ty), true), ty.identity)
+            lower_emit(&f, LIRInst.Copy{dst: owned, src: base})
+            lower_emit(&f, LIRInst.Drop{value: owned})
+        }
+    } else {
+        zero :: lower_const(&f, 0)
+        absent :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Compare{dst: absent, condition: .Eq, left: base, right: zero})
+        body :: lower_new_block(&f)
+        lower_seal(&f, LIRTerminator.Branch{condition: absent, then_target: lower_target(done, [LIRValueID]{}), else_target: lower_target(body, [LIRValueID]{})})
+        lower_start(&f, body, [LIRValueID]{})
+        shapes :: if lower_is_inline(p, ty) -> [LowerGlueShape]{LowerGlueShape{selector: -1, fields: lower_inline_glue_fields(p, ty)}} else -> lower_glue_shapes(p, &m, &f, ty)
+        released :: lower_new_block(&f)
+        loop shape in shapes {
+            next_shape :: lower_new_block(&f)
+            if shape.selector >= 0 {
+                discriminant :: lower_word(&f)
+                lower_emit(&f, LIRInst.Load{dst: discriminant, base: base, offset: 0})
+                expected :: lower_const(&f, shape.selector)
+                selected :: lower_flag(&f)
+                lower_emit(&f, LIRInst.Compare{dst: selected, condition: .Eq, left: discriminant, right: expected})
+                selected_body :: lower_new_block(&f)
+                lower_seal(&f, LIRTerminator.Branch{condition: selected, then_target: lower_target(selected_body, [LIRValueID]{}), else_target: lower_target(next_shape, [LIRValueID]{})})
+                lower_start(&f, selected_body, [LIRValueID]{})
+            }
+            loop field in shape.fields {
+                children := [LowerPartialDrop]{}
+                loop row in rows {
+                    if row.path.len() > depth {
+                        candidate :: row.path[depth]
+                        if candidate.offset == field.offset && mir_type_identity_key(candidate.ty) == mir_type_identity_key(field.ty) -> &children.push(row)
+                    }
+                }
+                if children.len() == 0 {
+                    lower_drop_stored(p, &m, &f, base, field.offset, field.ty)
+                } else {
+                    // Inline values name their bytes; boxed values name their box.
+                    child :: lower_read_at(p, &f, base, field.offset, field.ty) ?? next
+                    if lower_is_inline(p, field.ty) || lower_repr(p, field.ty) == .Boxed(_) {
+                        lower_partial_drop_node(p, &m, &f, child, field.ty, children, depth + 1)
+                    } else {
+                        lower_drop_stored(p, &m, &f, base, field.offset, field.ty)
+                    }
+                }
+            }
+            lower_seal(&f, LIRTerminator.Jump{target: lower_target(released, [LIRValueID]{})})
+            lower_start(&f, next_shape, [LIRValueID]{})
+        }
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(released, [LIRValueID]{})})
+        lower_start(&f, released, [LIRValueID]{})
+        if lower_repr(p, ty) == .Boxed(_) -> lower_free_shell(&m, &f, base, lower_box_size(p, ty))
+    }
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, done, [LIRValueID]{})
+}
+
+fn lower_partial_drop_value(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, value: MIRValueID, lowered: LIRValueID, ty: MIRType) -> Bool Never! {
+    owner :: lower_partial_owner(c, value)
+    rows := [LowerPartialDrop]{}
+    loop row in f.partial_drops {
+        if row.owner == owner -> &rows.push(row)
+    }
+    if rows.len() == 0 -> return false
+    partial :: lower_new_block(&f)
+    ordinary :: lower_new_block(&f)
+    done :: lower_new_block(&f)
+    loop row in rows {
+        live :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Load{dst: live, base: row.live, offset: 0})
+        next_row :: lower_new_block(&f)
+        lower_seal(&f, LIRTerminator.Branch{condition: live, then_target: lower_target(next_row, [LIRValueID]{}), else_target: lower_target(partial, [LIRValueID]{})})
+        lower_start(&f, next_row, [LIRValueID]{})
+    }
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(ordinary, [LIRValueID]{})})
+    lower_start(&f, ordinary, [LIRValueID]{})
+    if lower_is_inline(p, ty) -> lower_inline_drop(p, &m, &f, lowered, ty)
+    else -> lower_emit(&f, LIRInst.Drop{value: lowered})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, partial, [LIRValueID]{})
+    lower_partial_drop_node(p, &m, &f, lowered, ty, rows, 0)
+    if lower_value_drop(f, lowered) != .Trivial {
+        // The inlined drop-rest already released this box. Consume its LIR
+        // ownership without running the ordinary glue a second time.
+        released :: lower_new_value(&f, lir_layout_pointer(), LIRDrop.Trivial, ty.identity)
+        lower_emit(&f, LIRInst.Reown{dst: released, src: lowered})
+    }
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, done, [LIRValueID]{})
+    true
+}
