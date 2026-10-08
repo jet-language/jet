@@ -48,6 +48,111 @@ fn copy_ints(xs: [Int]) -> [Int] {
     out
 }
 
+// #4884 compiler-internal sort kernel. These are ordinary private Source
+// functions, not exports or runtime-name routes. Comparisons borrow the
+// original storage; payloads move only after the full stable order is known.
+fn collection_sort_order<T>(values: View<T>, compare: fn(T, T) -> Ordering, descending: Bool) -> [Int] {
+    count :: values.len()
+    order := [Int]{}
+    loop index in 0..<count -> &order.push(index)
+    if count < 2 -> return ^order
+    spare := [Int]{}
+    loop index in 0..<count -> &spare.push(0)
+    width := 1
+    loop width < count {
+        start := 0
+        loop start < count {
+            left_count := width
+            if left_count > count - start -> left_count = count - start
+            middle :: start + left_count
+            right_count := width
+            if right_count > count - middle -> right_count = count - middle
+            finish :: middle + right_count
+            left := start
+            right := middle
+            target := start
+            loop left < middle && right < finish {
+                verdict :: compare(values[order[left]], values[order[right]])
+                take_right :: if descending -> verdict == Ordering.Less else -> verdict == Ordering.Greater
+                if take_right {
+                    spare[target] = order[right]
+                    right += 1
+                } else {
+                    // Equal keys always select the original left run.
+                    spare[target] = order[left]
+                    left += 1
+                }
+                target += 1
+            }
+            loop left < middle {
+                spare[target] = order[left]
+                left += 1
+                target += 1
+            }
+            loop right < finish {
+                spare[target] = order[right]
+                right += 1
+                target += 1
+            }
+            start = finish
+        }
+        previous := ^order
+        order = ^spare
+        spare = ^previous
+        if width >= count - width -> width = count else -> width += width
+    }
+    ^order
+}
+
+// order[new] = old. Pop retains the receiver's allocation, and each payload
+// enters exactly one empty optional slot before returning in sorted order.
+// No indexed payload read, owning copy, or default T is needed.
+fn collection_sort_apply_order<T>(rows: &[T], order: [Int]) {
+    count :: rows.len()
+    if count < 2 -> return
+    changed := false
+    loop index in 0..<count {
+        if order[index] != index -> changed = true
+    }
+    if !changed -> return
+    destinations := [Int]{}
+    slots := [T?]{}
+    loop index in 0..<count {
+        &destinations.push(0)
+        &slots.push(None)
+    }
+    loop index in 0..<count -> destinations[order[index]] = index
+    loop rows.len() > 0 {
+        original :: rows.len() - 1
+        row := &rows.pop() ?? panic("a nonempty sort receiver failed to pop")
+        slots[count - 1 - destinations[original]] = Val(^row)
+    }
+    loop slots.len() > 0 {
+        slot := &slots.pop() ?? panic("a nonempty sort slot list failed to pop")
+        row := ^slot ?? panic("a sort permutation left an empty slot")
+        &rows.push(^row)
+    }
+}
+
+fn collection_sort_by_compare<T>(rows: &[T], ^compare: fn(T, T) -> Ordering) {
+    order := collection_sort_order<T>(rows[0..<rows.len()], compare, false)
+    collection_sort_apply_order<T>(&rows, order)
+}
+
+fn collection_sort_by_key<T, K: Comparable, E>(rows: &[T], ^key: fn(T) -> K E!, descending: Bool) E! {
+    keys := [K]{}
+    loop index in 0..<rows.len() {
+        value := key(rows[index])
+        &keys.push(^value)
+    }
+    order := collection_sort_order<K>(keys[0..<keys.len()], (a: K, b: K) -> a <=> b, descending)
+    // Normal key Close observes sorted order, whereas an earlier Err/Stop
+    // closes only the initialized input prefix. The receiver is still intact
+    // throughout key evaluation and every comparison.
+    collection_sort_apply_order<K>(&keys, order)
+    collection_sort_apply_order<T>(&rows, order)
+}
+
 fn counter_entries(c: Counter) -> Int {
     n := c.keys.len()
     if c.counts.len() < n -> n = c.counts.len()
