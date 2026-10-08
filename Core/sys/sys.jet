@@ -152,13 +152,13 @@ fn entry_index(entries: [(name: [U8], value: [U8])], key: [U8]) -> Int Never! {
 fn read_entry(entries: [(name: [U8], value: [U8])], key: [U8]) -> String? Never! {
     index :: entry_index(entries, key)
     if index < 0 -> return None
-    String.from_bytes(entries[index].value)
+    Val(String.from_bytes(entries[index].value) ?? return None)
 }
 
 fn remove_entry(entries: &[(name: [U8], value: [U8])], key: [U8]) -> Bool Never! {
     index :: entry_index(entries, key)
     if index < 0 -> return false
-    _ :: &entries.remove(index)
+    _ :: &entries.remove(index, .Slot)
     true
 }
 
@@ -177,9 +177,7 @@ fn entry_names(entries: [(name: [U8], value: [U8])]) -> [String] EnvError! {
     loop index in 1..<ordered.len() {
         position := index
         loop position > 0 && env_key_compare(ordered[position - 1].raw, ordered[position].raw) > 0 {
-            previous :: ordered[position - 1]
-            ordered[position - 1] = ordered[position]
-            ordered[position] = previous
+            &ordered.__swap(position - 1, position)
             position -= 1
         }
     }
@@ -194,7 +192,7 @@ fn entry_names(entries: [(name: [U8], value: [U8])]) -> [String] EnvError! {
     replace_entry(&entries, "JET_ENV_B".bytes(), "other".bytes())
     replace_entry(&entries, "JET_ENV_A".bytes(), "".bytes())
     assert_eq(entries.len(), 2)
-    assert_eq(String.from_bytes(entries[0].name), Val("JET_ENV_B"))
+    assert_eq(String.from_bytes(entries[0].name), Ok("JET_ENV_B"))
     assert_eq(read_entry(entries, "JET_ENV_A".bytes()), Val(""))
     assert(remove_entry(&entries, "JET_ENV_A".bytes()))
     assert(!remove_entry(&entries, "JET_ENV_A".bytes()))
@@ -737,7 +735,7 @@ pub fn __decode_tree(prefix: String, file: String, allow: [String], names: [(env
         part :: host_path.next(path, &cursor) ?? break
         if part.kind == .ParentDir -> return Err(config_error("E2416: Dotenv.file must be project-relative"))
     }
-    dotenv := None
+    dotenv := String?{None}
     if file.len() > 0 {
         if core.sys.__dotenv_read(file) == {
             .Ok(value) -> dotenv = Val(value)
@@ -748,11 +746,9 @@ pub fn __decode_tree(prefix: String, file: String, allow: [String], names: [(env
     }
     process := [(name: String, value: String)]{}
     loop entry in __env_snapshot() {
-        name :: String.from_bytes(entry.name)
-        value :: String.from_bytes(entry.value)
-        if name == .Val(unicode_name) && value == .Val(unicode_value) {
-            &process.push((name: unicode_name, value: unicode_value))
-        }
+        name :: String.from_bytes(entry.name) ?? next
+        value :: String.from_bytes(entry.value) ?? next
+        &process.push((name: name, value: value))
     }
     values :: if config_entries(prefix, dotenv, allow, process) == {
         .Ok(entries) -> entries
@@ -790,7 +786,7 @@ pub fn __decode_errors(errors: [FieldError], origins: [(name: String, path: Stri
                 start = at + 1
             }
         }
-        origin := None
+        origin := String?{None}
         loop entry in origins {
             if ascii_lower(entry.path) == ascii_lower(error.path) {
                 origin = Val(entry.name)
@@ -897,9 +893,7 @@ fn config_entries(prefix: String, dotenv: String?, allow: [String], process: [(n
     loop index in 1..<values.len() {
         at := index
         loop at > 0 && values[at].folded < values[at - 1].folded {
-            held :: values[at - 1]
-            values[at - 1] = values[at]
-            values[at] = held
+            &values.__swap(at - 1, at)
             at -= 1
         }
     }
@@ -934,18 +928,18 @@ fn config_insert(^tree: ConfigTree, segments: [String], at: Int, value: String) 
             out := ^pairs
             segment :: segments[at]
             loop index in 0..<out.len() {
-                pair := ^out[index]
-                matches :: ascii_lower(pair.key) == ascii_lower(segment)
+                matches :: ascii_lower(out[index].key) == ascii_lower(segment)
                 if matches && at + 1 == segments.len() {
-                    out[index] = (key: pair.key, value: ConfigTree.Text(value))
+                    pair := &out.remove(index, .Slot) ?? panic("checked config entry")
+                    &out.insert(index, (key: ^pair.key, value: ConfigTree.Text(value)))
                     return ConfigTree.Object(^out)
                 }
-                if matches && pair.value == .Object(_) {
+                if matches && out[index].value == .Object(_) {
+                    pair := &out.remove(index, .Slot) ?? panic("checked config entry")
                     child :: config_insert(^pair.value, segments, at + 1, value)
-                    out[index] = (key: pair.key, value: ^child)
+                    &out.insert(index, (key: ^pair.key, value: ^child))
                     return ConfigTree.Object(^out)
                 }
-                out[index] = ^pair
             }
             child :: if at + 1 == segments.len() -> ConfigTree.Text(value) else -> config_insert(ConfigTree.Object([(key: String, value: ConfigTree)]{}), segments, at + 1, value)
             &out.push((key: segment, value: ^child))
@@ -986,4 +980,36 @@ fn config_tree(^tree: ConfigTree) -> DataTree Never! {
     }
     errors :: __decode_errors([FieldError]{FieldError{path: "db.password", reason: "rejected supersecret"}}, [(name: String, path: String)]{(name: "APP_DB__PASSWORD", path: "db.password")})
     assert_eq(errors[0].reason, "E2416: env var APP_DB__PASSWORD -> db.password: secret value rejected")
+}
+
+#Test("Dotenv tree replacement preserves sibling order and nested values") {
+    tree := ConfigTree.Object([(key: String, value: ConfigTree)]{})
+    tree = config_insert(^tree, [String]{"first"}, 0, "one")
+    tree = config_insert(^tree, [String]{"db", "host"}, 0, "local")
+    tree = config_insert(^tree, [String]{"last"}, 0, "three")
+    tree = config_insert(^tree, [String]{"DB", "host"}, 0, "remote")
+    tree = config_insert(^tree, [String]{"FIRST"}, 0, "updated")
+    if tree == {
+        .Object(pairs) -> {
+            assert_eq(pairs.len(), 3)
+            assert_eq(pairs[0].key, "first")
+            assert_eq(pairs[1].key, "db")
+            assert_eq(pairs[2].key, "last")
+            if pairs[1].value == {
+                .Object(children) -> {
+                    assert_eq(children.len(), 1)
+                    if children[0].value == {
+                        .Text(text) -> assert_eq(text, "remote")
+                        else -> assert(false)
+                    }
+                }
+                else -> assert(false)
+            }
+            if pairs[0].value == {
+                .Text(text) -> assert_eq(text, "updated")
+                else -> assert(false)
+            }
+        }
+        else -> assert(false)
+    }
 }
