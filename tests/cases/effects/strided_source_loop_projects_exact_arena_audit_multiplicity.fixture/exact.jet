@@ -1,0 +1,13 @@
+use core.mem as mem
+
+fn reserve() {
+    arena :: mem.Arena.new(capacity: 4)
+    close(^arena)
+}
+
+fn run() -[!Mem.Alloc(above: 12)]> {
+    loop item in [1, 2, 3, 4, 5], 2 {
+        print(item)
+        reserve()
+    }
+}
