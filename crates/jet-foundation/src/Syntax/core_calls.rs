@@ -579,6 +579,7 @@ const fn effect_leaf_for(module: &str, method: &str) -> Option<&'static str> {
                 "temp_dir",
                 "temp_file",
                 "lock",
+                "try_lock",
                 "__open_writer",
                 "__create_directory",
                 "__fsync_directory",
@@ -599,7 +600,8 @@ const fn effect_leaf_for(module: &str, method: &str) -> Option<&'static str> {
                 "__mkdtemp_raw",
                 "__temp_dir_raw",
                 "__temp_file_raw",
-                "__lock_raw",
+                "__lock_open", "__lock_try", "__lock_wait", "__lock_close",
+                "__lock_fd_identity", "__lock_path_identity", "__lock_owner",
             ],
         )
     {
@@ -1589,7 +1591,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: f72115893038f8c380ec668327f4fbc55d2d35cd96570f92bd6978bde12b3162
+// Source SHA-256: 75233f26fb523b954e1067e464409274e3e59c1862a584a0a05ff5b1487d6ba2
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -1715,7 +1717,13 @@ pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.files", "__mkdtemp_raw"),
     ("core.files", "__temp_dir_raw"),
     ("core.files", "__temp_file_raw"),
-    ("core.files", "__lock_raw"),
+    ("core.files", "__lock_open"),
+    ("core.files", "__lock_try"),
+    ("core.files", "__lock_wait"),
+    ("core.files", "__lock_close"),
+    ("core.files", "__lock_fd_identity"),
+    ("core.files", "__lock_path_identity"),
+    ("core.files", "__lock_owner"),
     ("core.files", "__canonicalize_raw"),
     ("core.files", "__temp_clock_raw"),
     ("core.files", "__process_id_raw"),
@@ -2122,7 +2130,13 @@ pub static CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.files", "__mkdtemp_raw", "jet_std_fs_temp_dir_path_raw", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "__temp_dir_raw", "jet_std_fs_temp_dir_raw", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "__temp_file_raw", "jet_std_fs_temp_file_raw", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.files", "__lock_raw", "jet_std_fs_lock_raw", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.files", "__lock_open", "jet_std::jet_fs_lock_open_raw", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.files", "__lock_try", "jet_std::jet_fs_lock_try_raw", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.files", "__lock_wait", "jet_std::jet_fs_lock_wait_raw", true, &[false, false, false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.files", "__lock_close", "jet_std::jet_fs_lock_close_raw", true, &[false]).with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.files", "__lock_fd_identity", "jet_std::jet_fs_lock_fd_identity_raw", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.files", "__lock_path_identity", "jet_std::jet_fs_lock_path_identity_raw", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.files", "__lock_owner", "jet_std::jet_fs_lock_owner_raw", true, &[false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "__canonicalize_raw", "jet_std_fs_canonicalize_raw", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "__temp_clock_raw", "jet_std::jet_fs_temp_path_sample_raw", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "__process_id_raw", "jet_std_os_pid", true, &[]).with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),

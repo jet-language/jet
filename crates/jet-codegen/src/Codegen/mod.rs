@@ -1914,6 +1914,8 @@ const FILE_HANDLES_PRELUDE: &str = concat!(
     include_str!("../Prelude/CoreLib/JetStd/FileHandles.rs"),
     "\n",
     include_str!("../Prelude/CoreLib/JetStd/Files1Raw.rs"),
+    "\n",
+    include_str!("../Prelude/CoreLib/JetStd/FileLockRaw.rs"),
 );
 const SHARED_ROUTES_PRELUDE: &str =
     include_str!("../Prelude/CoreLib/Top/SharedRoutes.rs");

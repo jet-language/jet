@@ -22328,10 +22328,21 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             return Err(self.located_runtime_stop("E3010", "", 0, &message, span));
         }
         if row.module == "core.files" {
+            if row.member == "__lock_owner" {
+                let [path, fd] = args.as_slice() else {
+                    return Err(mir_error_at("MIR lock owner expects a path and descriptor", span));
+                };
+                let MirEvalValue::String(path) = runtime_to_data(path.clone(), span)? else {
+                    return Err(mir_error_at("MIR lock owner path is not a String", span));
+                };
+                let MirEvalValue::Int(fd) = runtime_to_data(fd.clone(), span)? else {
+                    return Err(mir_error_at("MIR lock owner descriptor is not an Int", span));
+                };
+                return Ok(RuntimeValue::FileOwner(crate::Comptime::mir_fs_lock_owner_raw(path, fd)));
+            }
             let result_name = match row.member.as_str() {
                 "temp_dir" | "__temp_dir_raw" => Some("TempDir"),
                 "temp_file" | "__temp_file_raw" => Some("TempFile"),
-                "lock" | "__lock_raw" => Some("FileLock"),
                 _ => None,
             };
             if result_name.is_some_and(|name| {
@@ -22359,10 +22370,8 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 let result = match row.member.as_str() {
                     "temp_dir" => crate::Comptime::mir_fs_temp_dir(&path),
                     "temp_file" => crate::Comptime::mir_fs_temp_file(&path),
-                    "lock" => crate::Comptime::mir_fs_lock(&path),
                     "__temp_dir_raw" => crate::Comptime::mir_fs_temp_dir_raw(path),
                     "__temp_file_raw" => crate::Comptime::mir_fs_temp_file_raw(path),
-                    "__lock_raw" => crate::Comptime::mir_fs_lock_raw(&path),
                     _ => unreachable!("owner constructor was selected above"),
                 };
                 return Ok(match result {

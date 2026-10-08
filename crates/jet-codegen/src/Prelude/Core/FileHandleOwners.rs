@@ -13,8 +13,9 @@ pub struct JetTempFileOwner {
 #[derive(Clone, Debug)]
 pub struct JetFileLockOwner {
     pub(crate) path: String,
-    cleanup: std::rc::Rc<()>,
+    file: std::rc::Rc<std::fs::File>,
 }
+
 
 fn jet_fs_drop_owned_path(path: &str, cleanup: &std::rc::Rc<()>, is_dir: bool) {
     if std::rc::Rc::strong_count(cleanup) == 1 {
@@ -38,8 +39,3 @@ impl Drop for JetTempFileOwner {
     }
 }
 
-impl Drop for JetFileLockOwner {
-    fn drop(&mut self) {
-        jet_fs_drop_owned_path(&self.path, &self.cleanup, false);
-    }
-}
