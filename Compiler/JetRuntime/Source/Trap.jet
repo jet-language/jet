@@ -305,14 +305,22 @@ fn trap_native_index_range_stop() {
     trap_footer(I64{1})
 }
 
+// CAbi.rs:91-98: an uncaught host payload is a defect, not an E3001 stop.
+// Rust's thread/source/backtrace panic-hook framing is host implementation
+// detail; retain the payload bytes and the host-fault exit class.
+fn trap_host_fault(message: I64, length: I64) {
+    trap_flush_stdout()
+    trap_write(message, length)
+    trap_msg_newline()
+    trap_exit(I64{101})
+}
+
 // MIR Never is not a program-side stop. The Rust host's thread/source/backtrace
 // prefix is not Jet semantics; preserve the unreachable! body and status 101.
 #Export(c) fn jet_rt_unreachable(reason: I64, length: I64) {
     trap_flush_stdout()
     trap_msg_unreachable()
-    trap_write(reason, length)
-    trap_msg_newline()
-    trap_exit(I64{101})
+    trap_host_fault(reason, length)
 }
 
 #Export(c) fn jet_panic(file: I64, line: I64, message: I64) {

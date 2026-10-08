@@ -10,7 +10,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const [output, mode] = process.argv.slice(2);
 if (!output || !['assemble', 'lower', 'audit', 'link', 'run'].includes(mode)) throw Error('usage: run-world-sentry-fixtures.mjs OUT assemble|lower|audit|link|run');
 const out = resolve(output), unit = join(out, 'unit');
-const fixturePaths = ['WorldTests.jet', 'SentryTests.jet', 'SentryInlineTests.jet', 'TestScopeTests.jet', 'TrapReportTests.jet'].map(name => 'Compiler/JetRuntime/Tests/' + name);
+const fixturePaths = ['WorldTests.jet', 'SentryTests.jet', 'SentryInlineTests.jet', 'TestScopeTests.jet', 'TrapReportTests.jet', 'HostFaultTests.jet'].map(name => 'Compiler/JetRuntime/Tests/' + name);
 function command(name, binary, args, options = {}) {
   const result = spawnSync(binary, args, { cwd: root, encoding: 'utf8', maxBuffer: 1 << 27, ...options });
   writeFileSync(join(out, name + '.receipt.json'), JSON.stringify({ status: result.status, signal: result.signal, error: result.error?.message ?? null, stdout: result.stdout, stderr: result.stderr }, null, 2) + '\n');
@@ -61,6 +61,14 @@ if (mode === 'assemble') {
     const pair = [mode, mode + 4].map(number => spawnSync(join(out, 'world-sentry-fixture'), ['trap-report', String(number)], { cwd: root, encoding: 'utf8', timeout: 30000 }));
     writeFileSync(join(out, `trap-report-${mode}.receipt.json`), JSON.stringify(pair, null, 2) + '\n');
     if (pair.some(result => result.error || result.signal || result.status !== 70 || result.stdout !== '') || pair[0].stderr !== pair[1].stderr || !pair[0].stderr.startsWith('Stop [E3001]: ')) failures.push(`trap report ${mode}: process/owned bytes or status differ`);
+  }
+  for (const [name, bytes] of [
+    ['host-fault', 'A\n'],
+    ['unreachable', 'internal error: entered unreachable code: A\n'],
+  ]) {
+    const result = spawnSync(join(out, 'world-sentry-fixture'), [name], { cwd: root, encoding: 'utf8', timeout: 30000 });
+    writeFileSync(join(out, `${name}.receipt.json`), JSON.stringify(result, null, 2) + '\n');
+    if (result.error || result.signal || result.status !== 101 || result.stdout || result.stderr !== bytes) failures.push(`${name}: host-fault class or canonical unreachable bytes changed`);
   }
   const referencePath = join(out, 'reference-ledger/ledger.jsonl'), nativePath = join(out, 'native-ledger/ledger.jsonl');
   for (const [name, binary, args, path] of [['reference', join(out, 'ledger-reference'), [], referencePath], ['native', join(out, 'world-sentry-fixture'), ['ledger'], nativePath]]) {

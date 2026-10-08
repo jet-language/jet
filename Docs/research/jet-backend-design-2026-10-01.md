@@ -1721,3 +1721,10 @@ returning their neutral stopped result. Zip checks the stop rail before padding
 or reporting unequal lengths. A partially consumed step-by hint counts only
 remaining complete steps, and Float averaging preserves the reference sum's
 negative-zero identity.
+
+The native host-fault writer keeps uncaught host payloads separate from
+program-side stops: `trap_host_fault` flushes stdout, writes the borrowed
+payload with its terminating newline and exits 101 (`Core/CAbi.rs:91-98`).
+The unreachable path adds its existing defect prefix before this writer,
+preserving its bytes. `HostFaultTests.jet` registers both exact-output
+subprocess witnesses in the composed World/Sentry fixture lane.
