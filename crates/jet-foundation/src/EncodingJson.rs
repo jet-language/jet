@@ -1,5 +1,67 @@
 use crate::DataTree::DataTree;
 
+// Share the handle-free EncodingError ABI with the emitted Prelude.
+#[allow(dead_code)]
+mod encoding_types {
+    use crate::Outcome::{JetAbsent, JetOutcome};
+    include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/EncodingTypes.rs");
+    include!("../../jet-codegen/src/Prelude/Core/EncodingError.rs");
+}
+pub use encoding_types::{EncodingCause, EncodingError, EncodingErrorKind, EncodingFormat};
+
+pub fn json_unsupported(reason: impl Into<String>) -> EncodingError {
+    EncodingError::new(
+        EncodingFormat::JSON,
+        EncodingErrorKind::Unsupported,
+        0,
+        Err(crate::Outcome::JetAbsent),
+        Err(crate::Outcome::JetAbsent),
+        "$",
+        reason,
+    )
+}
+
+pub fn encoding_error_show(error: &EncodingError) -> String {
+    let kind = match error.kind {
+        EncodingErrorKind::Syntax => "Syntax",
+        EncodingErrorKind::Truncated => "Truncated",
+        EncodingErrorKind::Unsupported => "Unsupported",
+        EncodingErrorKind::Limit => "Limit",
+        EncodingErrorKind::IO => "IO",
+        EncodingErrorKind::State => "State",
+    };
+    encoding_types::jet_encoding_error_kernel_show(
+        error.format.as_str(),
+        kind,
+        error.byte_offset,
+        error.line.as_ref().ok().copied(),
+        error.column.as_ref().ok().copied(),
+        &error.path,
+        &error.reason,
+    )
+}
+
+/// JSON's exclusions only; exact Ints and ordered object members remain intact.
+pub fn validate_json(tree: &DataTree) -> Result<(), EncodingError> {
+    match tree {
+        DataTree::Float(number) if !number.is_finite() => {
+            return Err(json_unsupported("JSON cannot encode a non-finite Float"));
+        }
+        DataTree::Array(items) => {
+            for item in items {
+                validate_json(item)?;
+            }
+        }
+        DataTree::Object(entries) => {
+            for (_, item) in entries {
+                validate_json(item)?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
 // One JSON parser for the embedded Prelude and comptime adapters.
 
 pub const MAX_JSON_DEPTH: usize = 64;
@@ -454,20 +516,26 @@ impl Parser {
     }
 
     pub fn quote_json(s: &str) -> String {
-        let mut out = String::from("\"");
-        for c in s.chars() {
-            match c {
-                '"' => out.push_str("\\\""),
-                '\\' => out.push_str("\\\\"),
-                '\u{0008}' => out.push_str("\\b"),
-                '\u{000c}' => out.push_str("\\f"),
-                '\n' => out.push_str("\\n"),
-                '\r' => out.push_str("\\r"),
-                '\t' => out.push_str("\\t"),
-                c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
-                _ => out.push(c),
-            }
-        }
-        out.push('"');
+        let mut out = String::with_capacity(s.len() + 2);
+        append_quote_json(&mut out, s);
         out
     }
+
+pub fn append_quote_json(out: &mut String, s: &str) {
+    use std::fmt::Write as _;
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\u{0008}' => out.push_str("\\b"),
+            '\u{000c}' => out.push_str("\\f"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => write!(out, "\\u{:04x}", c as u32).unwrap(),
+            _ => out.push(c),
+        }
+    }
+    out.push('"');
+}

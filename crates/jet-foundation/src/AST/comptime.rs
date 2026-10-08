@@ -1,8 +1,10 @@
 use super::{AccessConvention, BinOp, Expr, Lambda, ParamZone, Type};
+use crate::EncodingJson::{json_unsupported, EncodingError};
 use crate::Names::{mangle, mangle_path};
 use std::any::Any;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use std::fmt::Write as _;
 
 #[allow(dead_code)]
 mod map_key_semantics {
@@ -420,13 +422,18 @@ impl CtFloat {
         format!("{self:?}")
     }
 
-    pub fn to_json(self) -> String {
-        let rendered = self.render();
-        if rendered.contains('.') || rendered.contains('e') || rendered.contains('E') {
-            rendered
-        } else {
-            format!("{rendered}.0")
+    pub fn to_json(self) -> Result<String, EncodingError> {
+        let mut out = String::new();
+        self.append_json(&mut out)?;
+        Ok(out)
+    }
+
+    fn append_json(self, out: &mut String) -> Result<(), EncodingError> {
+        if !self.as_f64().is_finite() {
+            return Err(json_unsupported("JSON cannot encode a non-finite Float"));
         }
+        write!(out, "{self:?}").unwrap();
+        Ok(())
     }
 
     pub fn serialize(self) -> String {
@@ -1818,86 +1825,109 @@ impl CtValue {
         }
     }
 
-    pub fn to_json(&self) -> String {
+    pub fn to_json(&self) -> Result<String, EncodingError> {
+        let mut out = String::new();
+        self.append_json(&mut out)?;
+        Ok(out)
+    }
+
+    pub fn append_json(&self, out: &mut String) -> Result<(), EncodingError> {
         match self {
-            CtValue::Int(n) => n.to_string(),
-            CtValue::Float(value) => value.to_json(),
-            CtValue::Bool(b) => b.to_string(),
-            CtValue::Char(c) => format!("\"{}\"", c),
-            CtValue::Str(s) => {
-                let mut out = String::from('"');
-                for ch in s.chars() {
-                    match ch {
-                        '"' => out.push_str("\\\""),
-                        '\\' => out.push_str("\\\\"),
-                        '\n' => out.push_str("\\n"),
-                        '\r' => out.push_str("\\r"),
-                        '\t' => out.push_str("\\t"),
-                        c => out.push(c),
-                    }
-                }
-                out.push('"');
-                out
+            CtValue::Int(n) => write!(out, "{n}").unwrap(),
+            CtValue::Float(value) => value.append_json(out)?,
+            CtValue::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
+            CtValue::Char(c) => {
+                let mut bytes = [0; 4];
+                crate::EncodingJson::append_quote_json(out, c.encode_utf8(&mut bytes));
             }
-            // A `BigInt` doesn't fit in a JSON number without losing
-            // precision in most readers, so it round-trips as a string —
-            // matching how AOT's `#[Codable]` handles arbitrary precision.
-            CtValue::BigInt(b) => format!("\"{}\"", b.to_string_rep()),
+            CtValue::Str(s) => crate::EncodingJson::append_quote_json(out, s),
+            CtValue::BigInt(b) => crate::EncodingJson::append_quote_json(out, &b.to_string_rep()),
             CtValue::Bytes(bs) => {
-                let parts: Vec<String> = bs.iter().map(|b| b.to_string()).collect();
-                format!("[{}]", parts.join(","))
+                out.push('[');
+                for (index, byte) in bs.iter().enumerate() {
+                    if index != 0 {
+                        out.push(',');
+                    }
+                    write!(out, "{byte}").unwrap();
+                }
+                out.push(']');
             }
             CtValue::List(xs) => {
-                let parts: Vec<String> = xs.iter().map(|x| x.to_json()).collect();
-                format!("[{}]", parts.join(","))
+                out.push('[');
+                for (index, value) in xs.iter().enumerate() {
+                    if index != 0 {
+                        out.push(',');
+                    }
+                    value.append_json(out)?;
+                }
+                out.push(']');
             }
-            CtValue::Map(m) => {
-                let parts: Vec<String> = m
-                    .iter()
-                    .map(|(k, v)| format!("{}:{}", k.to_value().to_json(), v.to_json()))
-                    .collect();
-                format!("{{{}}}", parts.join(","))
+            CtValue::Map(entries) => {
+                out.push('{');
+                for (index, (key, value)) in entries.iter().enumerate() {
+                    let CtKey::Str(key) = key else {
+                        return Err(json_unsupported("JSON cannot encode non-text map keys"));
+                    };
+                    if index != 0 {
+                        out.push(',');
+                    }
+                    crate::EncodingJson::append_quote_json(out, key);
+                    out.push(':');
+                    value.append_json(out)?;
+                }
+                out.push('}');
             }
             CtValue::Struct { fields, .. } => {
-                let parts: Vec<String> = fields
-                    .iter()
-                    .filter(|(name, _)| !crate::Syntax::is_memo_storage_name(name))
-                    .map(|(n, v)| format!("\"{}\":{}", n, v.to_json()))
-                    .collect();
-                format!("{{{}}}", parts.join(","))
+                out.push('{');
+                let mut first = true;
+                for (name, value) in fields {
+                    if crate::Syntax::is_memo_storage_name(name) {
+                        continue;
+                    }
+                    if !first {
+                        out.push(',');
+                    }
+                    first = false;
+                    crate::EncodingJson::append_quote_json(out, name);
+                    out.push(':');
+                    value.append_json(out)?;
+                }
+                out.push('}');
             }
             CtValue::Enum { variant, args, .. } => {
                 if args.is_empty() {
-                    format!("\"{}\"", variant)
+                    crate::EncodingJson::append_quote_json(out, variant);
                 } else {
-                    let parts: Vec<String> = args
-                        .iter()
-                        .map(|(label, v)| {
-                            if let Some(lbl) = label {
-                                format!("\"{}\":{}", lbl, v.to_json())
-                            } else {
-                                v.to_json()
-                            }
-                        })
-                        .collect();
-                    if args.iter().all(|(label, _)| label.is_some()) {
-                        format!("{{\"{}\":{{{}}}}}", variant, parts.join(","))
-                    } else {
-                        format!("{{\"{}\":[{}]}}", variant, parts.join(","))
+                    let labeled = args.iter().all(|(label, _)| label.is_some());
+                    out.push('{');
+                    crate::EncodingJson::append_quote_json(out, variant);
+                    out.push(':');
+                    out.push(if labeled { '{' } else { '[' });
+                    for (index, (label, value)) in args.iter().enumerate() {
+                        if index != 0 {
+                            out.push(',');
+                        }
+                        if labeled {
+                            crate::EncodingJson::append_quote_json(out, label.as_deref().unwrap());
+                            out.push(':');
+                        }
+                        value.append_json(out)?;
                     }
+                    out.push(if labeled { '}' } else { ']' });
+                    out.push('}');
                 }
             }
-            // D-FAIL-CARRIER1=A: one carrier, so a payload encodes as itself and
-            // a clean stop as null; only a told report needs a tag.
-            CtValue::Present(v) => v.to_json(),
-            CtValue::Failed(CtReport::Clean(_)) => "null".to_string(),
-            CtValue::Failed(CtReport::Told(e)) => format!("{{\"err\":{}}}", e.to_json()),
-            CtValue::Unit => "null".to_string(),
-            // c139: a closure has no JSON representation — unreachable in
-            // practice (a value routed through the encoder never contains
-            // one; codable derives never target a `fn`-typed field).
-            CtValue::Closure(_) => "null".to_string(),
+            CtValue::Present(value) => value.append_json(out)?,
+            CtValue::Failed(CtReport::Told(error)) => {
+                out.push_str("{\"err\":");
+                error.append_json(out)?;
+                out.push('}');
+            }
+            CtValue::Failed(CtReport::Clean(_)) | CtValue::Unit | CtValue::Closure(_) => {
+                out.push_str("null");
+            }
         }
+        Ok(())
     }
 
     pub fn serialize(&self) -> String {
@@ -2090,7 +2120,7 @@ fn ct_mangle(name: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{CtFloat, CtValue, FailureContract, FuncSig};
+    use super::{CtFloat, CtKey, CtValue, FailureContract, FuncSig};
     use crate::AST::{BinOp, Type};
 
     #[test]
@@ -2115,14 +2145,62 @@ mod tests {
         ]);
 
         assert_eq!(format!("{:?}", CtFloat::f32(-0.0)), "-0.0");
-        assert_eq!(CtValue::Float(CtFloat::f32(1.0)).to_json(), "1.0");
-        assert_eq!(nested.to_json(), "[16777216.0,16777217.0]");
+        assert_eq!(CtValue::Float(CtFloat::f32(1.0)).to_json().unwrap(), "1.0");
+        assert_eq!(nested.to_json().unwrap(), "[16777216.0,16777217.0]");
         assert_eq!(nested.serialize(), "vec![16777216.0f32, 16777217.0f64]");
         assert_eq!(CtFloat::f32(f32::NAN).serialize(), "f32::NAN");
         assert_eq!(
             CtFloat::f64(f64::NEG_INFINITY).serialize(),
             "f64::NEG_INFINITY"
         );
+    }
+
+    #[test]
+    fn ct_json_rejects_non_finite_floats_and_non_text_map_keys() {
+        use crate::EncodingJson::{EncodingErrorKind, EncodingFormat};
+        for float in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for value in [
+                CtValue::Float(CtFloat::f64(float)),
+                CtValue::List(vec![CtValue::Float(CtFloat::f64(float))]),
+            ] {
+                let error = value.to_json().unwrap_err();
+                assert_eq!(error.format, EncodingFormat::JSON);
+                assert_eq!(error.kind, EncodingErrorKind::Unsupported);
+                assert_eq!(error.reason, "JSON cannot encode a non-finite Float");
+                assert_eq!(error.path, "$");
+                assert_eq!(error.byte_offset, 0);
+                assert!(error.line.is_err() && error.column.is_err() && error.cause.is_err());
+            }
+        }
+        let map = CtValue::Map([(CtKey::Int(1), CtValue::Int(2))].into_iter().collect());
+        let error = map.to_json().unwrap_err();
+        assert_eq!(error.kind, EncodingErrorKind::Unsupported);
+        assert_eq!(error.reason, "JSON cannot encode non-text map keys");
+    }
+
+    #[test]
+    fn ct_json_quotes_char_c0_and_field_names() {
+        for character in ['"', '\\', '\0', '\u{001f}', '\n', '\r', '\t'] {
+            let text = character.to_string();
+            let encoded = CtValue::Char(character).to_json().unwrap();
+            assert_eq!(encoded, crate::EncodingJson::quote_json(&text));
+            assert_eq!(
+                crate::JSON::parse(&encoded).unwrap(),
+                crate::DataTree::DataTree::Text(text)
+            );
+        }
+        let controls: String = (0..32).map(|byte| char::from(byte)).collect();
+        let encoded = CtValue::Str(controls.clone()).to_json().unwrap();
+        assert!(encoded.contains("\\u001f"));
+        assert_eq!(
+            crate::JSON::parse(&encoded).unwrap(),
+            crate::DataTree::DataTree::Text(controls)
+        );
+        let value = CtValue::Struct {
+            type_name: "Quoted".into(),
+            fields: vec![("a\"\\\0".into(), CtValue::Int(1))],
+        };
+        assert_eq!(value.to_json().unwrap(), "{\"a\\\"\\\\\\u0000\":1}");
     }
 
     #[test]
