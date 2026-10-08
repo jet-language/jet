@@ -714,14 +714,14 @@ Whole-file and metadata functions:
 
 | API | Result | Description |
 | --- | --- | --- |
-| `read(path)` | `String !IOError` | Read a UTF-8 text file. Invalid UTF-8 is an `IOError`. |
+| `read(path)` | `String !IOError` | Read a UTF-8 text file. Invalid UTF-8 is `IOError.InvalidInput` with cause `stream did not contain valid UTF-8`. |
 | `read_bytes(path)` | `[U8] !IOError` | Read raw bytes. |
 | `write(path, text)` | `!IOError` | Create or replace a text file. |
 | `write_bytes(path, bytes)` | `!IOError` | Create or replace raw bytes. |
 | `append_all(path, text)` | `!IOError` | Append text in one whole-file call. |
 | `map(path)` | `MappedFile !IOError` | Map a file into the checked byte-view carrier. |
-| `read_at(path, offset, count)` | `[U8] !IOError` | Read a bounded byte range. |
-| `write_at(path, offset, bytes)` | `!IOError` | Write bytes at an offset. |
+| `read_at(path, offset, count)` | `[U8] !IOError` | Read one bounded byte range; negative offset or count is clamped to zero. |
+| `write_at(path, offset, bytes)` | `!IOError` | Write bytes at an offset; negative offset is clamped to zero. |
 | `write_atomic(path, bytes)` | `!IOError` | Publish bytes through a temporary file and rename. |
 | `fsync(path)` | `!IOError` | Flush a file, or a folder so earlier renames inside it are durable. |
 | `open(path, links:)` / `create(path, if_exists:, mode:, links:)` / `append(path, mode:, links:)` | `FileReader` / `FileWriter !IOError` | Open a close-on-exec stream handle. `if_exists: .Refuse` creates exclusively, `mode` sets a new file's bits before the umask, and `links: .Refuse` refuses a final symbolic link. |
@@ -732,7 +732,7 @@ Whole-file and metadata functions:
 | `stat(path)` / `lstat(path)` | `Stat !IOError` | Describe the entry itself, never a final link's target. |
 | `set_mode(path, mode)` | `!IOError` | Set Unix mode bits; non-Unix providers use their documented readonly mapping. |
 | `list_dir(path)` | `[DirEntry] !IOError` | List entries in name order. |
-| `create_dir(path)` / `create_dir_all(path)` | `!IOError` | Create one directory or its missing parents. |
+| `create_dir(path)` / `create_dir_all(path)` | `!IOError` | Both preserve the existing recursive directory-creation behavior, including missing parents. |
 | `remove(path)` / `remove_dir(path)` / `remove_all(path)` | `!IOError` | Remove a file, empty directory, or tree. |
 | `copy(from, to)` / `copy_dir(from, to)` | `!IOError` | Copy one regular file or a directory tree. Directory copy does not dereference symlinks or special entries. |
 | `rename(from, to, if_exists:)` | `!IOError` | Rename or move a path; `.Replace` (default), `.Refuse`, or `.Swap`. |

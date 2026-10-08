@@ -597,25 +597,56 @@ fn io_err(operation: String, path: String, message: String) -> IOError Never! {
 }
 
 
-pub fn read_bytes(path: String) -[FS.Read]> [U8] IOError! { core.files.read_bytes(path) }
+// Public checkpoints precede OS work exactly once, not once per raw leaf.
+fn file_fault(effect: String, operation: IOOperation, path: String) IOError! {
+    if core.testing.__fault_should_fail(effect) {
+        return Err(IOError.Other(IOContext{
+            operation: operation, resource: Val(path), os_code: None,
+            cause: Val("fault injected: {effect}"),
+        }))
+    }
+    Ok()
+}
+
+fn file_writer_refusal(path: String) IOError! -[FS.Write]> {
+    if core.files.__writer_refusal(path) == {
+        .None -> Ok()
+        .Val(error) -> Err(error)
+    }
+}
+
+pub fn read_bytes(path: String) -[FS.Read]> [U8] IOError! {
+    file_fault("FS.Read", .Read, path)
+    core.files.__read_bytes_os(path)
+}
 
 
 pub fn read(path: String) -[FS.Read]> String IOError! {
     bytes :: read_bytes(path)
-    Ok(String.from_bytes(bytes) ?? return Err(io_err("read", path, "file is not valid UTF-8")))
+    Ok(String.from_bytes(bytes) ?? return Err(io_err("read", path, "stream did not contain valid UTF-8")))
 }
 
 
 pub fn map(path: String) -[FS.Read]> MappedFile IOError! { core.files.map(path) }
 
 
-pub fn write(path: String, text: String) IOError! -[FS.Write]> { core.files.write(path, text) }
+pub fn write(path: String, text: String) IOError! -[FS.Write]> {
+    file_fault("FS.Write", .Write, path)
+    core.files.__write_bytes_os(path, text.bytes())
+}
 
 
-pub fn write_bytes(path: String, bytes: [U8]) IOError! -[FS.Write]> { core.files.write_bytes(path, bytes) }
+pub fn write_bytes(path: String, bytes: [U8]) IOError! -[FS.Write]> {
+    file_writer_refusal(path)
+    file_fault("FS.Write", .Write, path)
+    core.files.__write_bytes_os(path, bytes)
+}
 
 
-pub fn append_all(path: String, text: String) IOError! -[FS.Write]> { core.files.append_all(path, text) }
+pub fn append_all(path: String, text: String) IOError! -[FS.Write]> {
+    file_fault("FS.Write", .Write, path)
+    core.files.__append_bytes_os(path, text.bytes())
+}
 
 
 pub fn write_atomic(path: String, bytes: [U8]) IOError! -[FS.Write]> {
@@ -624,12 +655,15 @@ pub fn write_atomic(path: String, bytes: [U8]) IOError! -[FS.Write]> {
 
 
 pub fn read_at(path: String, offset: Int, count: Int) -[FS.Read]> [U8] IOError! {
-    core.files.read_at(path, offset, count)
+    file_fault("FS.Read", .Read, path)
+    core.files.__read_at_os(path, if offset < 0 -> 0 else -> offset, if count < 0 -> 0 else -> count)
 }
 
 
 pub fn write_at(path: String, offset: Int, bytes: [U8]) IOError! -[FS.Write]> {
-    core.files.write_at(path, offset, bytes)
+    file_writer_refusal(path)
+    file_fault("FS.Write", .Write, path)
+    core.files.__write_at_os(path, if offset < 0 -> 0 else -> offset, bytes)
 }
 
 
@@ -856,7 +890,10 @@ pub fn canonicalize(path: String) -[FS, Env]> String IOError! {
 pub fn list_dir(path: String) -[FS.Read]> [DirEntry] IOError! { core.files.list_dir(path) }
 
 
-pub fn create_dir(path: String) IOError! -[FS.Write]> { core.files.create_dir(path) }
+pub fn create_dir(path: String) IOError! -[FS.Write]> {
+    file_fault("FS.Write", .Write, path)
+    core.files.__create_dirs_os(path)
+}
 
 
 fn dirname_impl(path: String) -> String Never! {
@@ -887,16 +924,8 @@ pub fn dirname(path: String) -> String Never! { dirname_impl(path) }
 
 
 pub fn create_dir_all(path: String) IOError! -[FS]> {
-    if path.bytes().len() == 0 -> return Ok()
-    if exists(path) ?? panic("exists failed") {
-        info :: stat(path)
-        if info.is_dir -> return Ok()
-        return Err(io_err("mkdir", path, "path exists and is not a directory"))
-    }
-    parent :: dirname_impl(path)
-    if parent.bytes().len() > 0 && parent != path -> create_dir_all(parent)
-    if !(exists(path) ?? panic("exists failed")) -> core.files.create_dir(path)
-    return Ok()
+    file_fault("FS.Write", .Write, path)
+    core.files.__create_dirs_os(path)
 }
 
 
@@ -959,7 +988,10 @@ pub fn symlink(original: String, link: String) IOError! -[FS.Write]> { core.file
 pub fn hard_link(original: String, link: String) IOError! -[FS.Write]> { core.files.hard_link(original, link) }
 
 
-pub fn read_link(path: String) -[FS.Read]> String IOError! { core.files.read_link(path) }
+pub fn read_link(path: String) -[FS.Read]> String IOError! {
+    file_fault("FS.Read", .Read, path)
+    core.files.__read_link_os(path)
+}
 
 
 fn split_lines(text: String) -> [String] Never! {
@@ -1735,3 +1767,27 @@ pub fn topath(path: String) -[FS, Env]> String IOError! { core.files.canonicaliz
 
 pub fn cd(path: String) IOError! -[FS, Env]> { sys.set_current_dir(path) }
 
+
+#Test("whole-file policy preserves UTF-8 error text and negative range clamping") {
+    root :: mktemp("whole-file-source-policy")
+    defer { remove_all(root) ?? panic("cleanup whole-file source policy") }
+    path :: join(root, "data")
+    write_bytes(path, [U8]{255}) ?? panic("write invalid UTF-8")
+    if read(path) == {
+        .Err(.InvalidInput(context)) -> {
+            assert_eq(context.operation, .Read)
+            assert_eq(context.resource, Val(path))
+            assert_eq(context.os_code, None)
+            assert_eq(context.cause, Val("stream did not contain valid UTF-8"))
+        }
+        else -> assert(false)
+    }
+    write(path, "abc") ?? panic("write text")
+    assert_eq(read_at(path, -1, -1) ?? panic("empty range"), [U8]{})
+    assert_eq(read_at(path, -1, 1) ?? panic("clamped offset"), [U8]{97})
+    write_at(path, -1, [U8]{120}) ?? panic("clamped write")
+    append_all(path, "d") ?? panic("append text")
+    assert_eq(read(path) ?? panic("read text"), "xbcd")
+    create_dir(join(root, "one/two")) ?? panic("recursive create_dir parity")
+    create_dir_all(join(root, "one/two")) ?? panic("existing directory")
+}

@@ -140,3 +140,53 @@ pub(crate) fn jet_std_fs_write_atomic(
     Ok(())
 }
 
+
+// Temporary host leaves for source whole-file policy. These perform only the
+// existing Rust I/O operations and typed OS-error projection; no fault rail,
+// clamping, UTF-8 policy, mapped-writer refusal, or filesystem composition.
+// Replaced by Jet runtime layer L7, dies at cutover (CoreFiles1-2 ledger).
+pub(crate) fn jet_files_read_bytes_os(path: &String) -> Result<Vec<u8>, jet_std::IOError> {
+    std::fs::read(path).map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Read, path, error))
+}
+
+pub(crate) fn jet_files_write_bytes_os(path: &String, bytes: &Vec<u8>) -> Result<(), jet_std::IOError> {
+    std::fs::write(path, bytes).map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Write, path, error))
+}
+
+pub(crate) fn jet_files_append_bytes_os(path: &String, bytes: &Vec<u8>) -> Result<(), jet_std::IOError> {
+    use std::io::Write;
+    let mut file = std::fs::OpenOptions::new().create(true).append(true).open(path)
+        .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Write, path, error))?;
+    file.write_all(bytes).map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Write, path, error))
+}
+
+pub(crate) fn jet_files_create_dirs_os(path: &String) -> Result<(), jet_std::IOError> {
+    std::fs::create_dir_all(path).map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Write, path, error))
+}
+
+pub(crate) fn jet_files_read_at_os(path: &String, offset: i64, count: i64) -> Result<Vec<u8>, jet_std::IOError> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut file = std::fs::File::open(path)
+        .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Read, path, error))?;
+    file.seek(SeekFrom::Start(offset as u64))
+        .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Read, path, error))?;
+    let mut bytes = vec![0u8; count as usize];
+    let count = file.read(&mut bytes)
+        .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Read, path, error))?;
+    bytes.truncate(count);
+    Ok(bytes)
+}
+
+pub(crate) fn jet_files_write_at_os(path: &String, offset: i64, bytes: &Vec<u8>) -> Result<(), jet_std::IOError> {
+    use std::io::{Seek, SeekFrom, Write};
+    let mut file = std::fs::OpenOptions::new().create(true).write(true).open(path)
+        .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Write, path, error))?;
+    file.seek(SeekFrom::Start(offset as u64))
+        .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Write, path, error))?;
+    file.write_all(bytes).map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Write, path, error))
+}
+
+pub(crate) fn jet_files_read_link_os(path: &String) -> Result<String, jet_std::IOError> {
+    std::fs::read_link(path).map(|target| target.to_string_lossy().into_owned())
+        .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Read, path, error))
+}

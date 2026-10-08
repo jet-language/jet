@@ -24,7 +24,7 @@ use core.time as time
 // `v4.public` over the strict Ed25519 primitive. JSON goes through Jet's one
 // RFC 8259 parser and no token-controlled algorithm or purpose is dispatched.
 // Password hashes are opaque caller-supplied values compared in constant time.
-// Every session rule and the world-lifetime Shared byte store are Jet.
+// Every session rule is Jet; the temporary host cell dies at cutover.
 
 /// Verification failure. Every variant and payload is part of the contract.
 #Error
@@ -314,44 +314,16 @@ fn b64url_value(b: U8) -> Int Never! {
 
 // ── Session store ───────────────────────────────────────────────────────────
 //
-// Users, sessions, magic-link tokens and OAuth states share one world store.
-// The one-shot evaluator/world reset clears this site at its existing
-// quiescent boundary; no provider owns a parallel byte cell.
-struct AuthState { bytes: [U8] }
-
-fn init_auth_state() -> Shared<AuthState> Never! {
-    shared AuthState{bytes: [U8]{}}
-}
-
-fn auth_state() -> Shared<AuthState> Never! {
-    core.mem.__world_shared(init_auth_state)
-}
-
+// All validation, expiry, comparison and retry policy is source below.
+// Until the world Shared root/reset seam lands, only the byte-cell operation
+// remains in the existing host. The source CAS replacement is preserved in
+// commit 82149c775 and must land with that seam, never as a parallel store.
 pub fn __store_load() -[DB]> [U8] Never! {
-    state :: auth_state()
-    guard :: state.guard_read()
-    ~guard.value.bytes
+    core.auth.__state_load()
 }
 
 pub fn __store_replace(expected: [U8], next: [U8]) -[DB]> Bool Never! {
-    state :: auth_state()
-    replace_auth_bytes(state, expected, next)
-}
-
-fn replace_auth_bytes(state: Shared<AuthState>, expected: [U8], next: [U8]) -> Bool Never! {
-    guard := state.guard_edit()
-    if guard.value.bytes != expected -> return false
-    guard.value.bytes = next
-    true
-}
-
-#Test("auth byte replacement compares the complete snapshot atomically") {
-    state :: init_auth_state()
-    assert(replace_auth_bytes(state, [U8]{}, [U8]{1, 2}))
-    assert(!replace_auth_bytes(state, [U8]{}, [U8]{3}))
-    assert(replace_auth_bytes(state, [U8]{1, 2}, [U8]{}))
-    guard :: state.guard_read()
-    assert_eq(guard.value.bytes.len(), 0)
+    core.auth.__state_replace(expected, next)
 }
 
 /// Register an identity with an already-computed password hash.
