@@ -1,6 +1,6 @@
 // #4792: instantiated ordinary drop must select Close, while the consuming
 // Close receiver's cleanup is structural-only. Moved fields are not live zeros.
-use jet_foundation.[MIRAccess, MIRBinaryOp, MIRBlockID, MIRConstant, MIRField, MIRFieldValue, MIRFunction, MIRFunctionID, MIRFunctionForm, MIRImplDef, MIROperation, MIROwnershipMode, MIRPlace, MIRPlaceBase, MIRPlaceID, MIRProjection, MIRProgram, MIRTerminator, MIRType, MIRTypeDef, MIRTypeDefKind, MIRTypeKind, MIRValueID, mir_field_id, mir_function_id, mir_type_from_kind, mir_type_id, mir_owned_ownership, mir_ownership_from_access]
+use jet_foundation.[MIRAccess, MIRBinaryOp, MIRBlockID, MIRCallArg, MIRConstant, MIRField, MIRFieldValue, MIRFunction, MIRFunctionID, MIRFunctionForm, MIRImplDef, MIROperation, MIROwnershipMode, MIRPlace, MIRPlaceBase, MIRPlaceID, MIRPreludeABI, MIRPreludeFamily, MIRPreludeTypeArg, MIRProgram, MIRProjection, MIRSemanticOp, MIRTerminator, MIRType, MIRTypeDef, MIRTypeDefKind, MIRTypeKind, MIRValueID, mir_field_id, mir_function_id, mir_type_from_kind, mir_type_id, mir_owned_ownership, mir_ownership_from_access]
 use jet_backend.[lir_lower_entry, lir_print_module, x64_relocatable_object]
 
 fn fx_close_secret(b: &FxBuilder, id: Int) -> MIRValueID Never! {
@@ -221,5 +221,46 @@ fn fx_close_cell_rebind() -> MIRProgram Never! {
     fx_mono_drop(&b, value)
     fx_block(&b, 0, MIRTerminator.Return{value: None})
     p.functions = [MIRFunction]{method, fx_function("run", b, fx_unit())}
+    p
+}
+
+fn fx_close_shared_new(b: &FxBuilder, value: MIRValueID, inner: MIRType) -> MIRValueID Never! {
+    ty :: mir_type_from_kind(MIRTypeKind.Shared{inner: inner})
+    fx_owned(&b, ty, MIROperation.Semantic{operation: MIRSemanticOp.StaticPreludeCall{call: fx_prelude_id("core.mem.Shared", "new"), args: [MIRCallArg]{fx_arg(value, MIRAccess.Move)}, owner_type_args: [MIRPreludeTypeArg]{}, type_args: [MIRType]{}}})
+}
+
+fn fx_close_shared_release(b: &FxBuilder, value: MIRValueID, inner: MIRType, marker: Int) Never! {
+    shared :: fx_close_shared_new(&b, value, inner)
+    duplicate :: fx_mono_copy(&b, mir_type_from_kind(MIRTypeKind.Shared{inner: inner}), shared)
+    fx_mono_drop(&b, shared)
+    before_last :: fx_int_const(&b, marker)
+    fx_print(&b, before_last)
+    fx_mono_drop(&b, duplicate)
+}
+
+// Every marker precedes the final clone's Close. Shared<Bool> has no thunk.
+// expect-stdout close-shared: "100\n31\n101\n32\n102\n33\n103\n104\n"
+// expect-runtime-only close-shared
+fn fx_close_shared() -> MIRProgram Never! {
+    p := fx_close_generic()
+    secret :: fx_named("Secret")
+    option :: mir_type_from_kind(MIRTypeKind.Option{inner: secret})
+    wrapper :: fx_mono_apply("CloseWrapper", [MIRType]{secret})
+    b := fx_builder()
+    direct :: fx_close_secret(&b, 31)
+    fx_close_shared_release(&b, direct, secret, 100)
+    option_value :: fx_close_secret(&b, 32)
+    present :: fx_owned(&b, option, MIROperation.Present{value: option_value})
+    fx_close_shared_release(&b, present, option, 101)
+    wrapped_value :: fx_close_secret(&b, 33)
+    wrapped :: fx_close_wrapper(&b, wrapper, wrapped_value)
+    fx_close_shared_release(&b, wrapped, wrapper, 102)
+    flag :: fx_copy(&b, fx_bool(), MIROperation.Constant{value: MIRConstant.Bool{value: true}})
+    fx_close_shared_release(&b, flag, fx_bool(), 103)
+    after :: fx_int_const(&b, 104)
+    fx_print(&b, after)
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    p.functions = [MIRFunction]{fx_close_method(), fx_function("run", b, fx_unit())}
+    &p.prelude_calls.push(fx_prelude(MIRPreludeFamily.StaticPrelude, "core.mem.Shared", "new", "jet_std::JetShared::new", 1, MIRPreludeABI.Value))
     p
 }

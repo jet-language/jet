@@ -488,7 +488,7 @@ fn lower_task_stored_operands(p: MIRProgram, operation: MIROperation) -> [MIRVal
 }
 
 // ---------------------------------------------------------------------------
-// Shared<T>: JetShared<NativeValue> (CAbiTask.rs). `shared x` builds the cell
+// Shared<T>: Jet-native cell. `shared x` builds the cell
 // from the native slot of `x`; a field read or write is `Shared.read` /
 // `Shared.edit` with a callback run under the shared lock on the cell's slot.
 
@@ -530,8 +530,12 @@ fn lower_shared_new(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
     }
     slot :: lower_shared_taken_slot(p, c, &m, &f, args[0], inner_ty) ?? return true
     meta :: lower_lazy_meta(p, &m, &f, inner_ty)
+    // The descriptor already holds the mono address-based ordinary drop role
+    // (zero for trivial T). Last release owns invoking it, not Meta16 fallback.
+    drop_code :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Load{dst: drop_code, base: meta, offset: 16})
     dst :: lower_result(p, c, &m, &f, instruction) ?? return true
-    lower_call_runtime(&m, &f, "jet_rt_native_shared_new", [LIRValueID]{slot, meta}, Val(dst))
+    lower_call_runtime(&m, &f, "jet_rt_native_shared_new", [LIRValueID]{slot, meta, drop_code}, Val(dst))
     true
 }
 
