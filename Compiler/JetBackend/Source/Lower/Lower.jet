@@ -1841,8 +1841,8 @@ fn lower_return_implicit_ok(p: MIRProgram, c: LowerContext, m: &LowerModule, f: 
         if lower_repr(p, success) == .Absent {
             boxed :: lower_pointer(&f)
             lower_alloc(&m, &f, boxed, lower_box_size(p, c.mir.return_type))
-            lower_store_word(&f, boxed, 0, 1)
-            lower_store_word(&f, boxed, 8, 0)
+            lower_store_word(&f, boxed, 0, lower_result_selector(true))
+            lower_store_word(&f, boxed, lower_result_payload_offset(), 0)
             return lower_seal(&f, LIRTerminator.Return{value: Val(boxed)})
         }
     }
@@ -1923,8 +1923,8 @@ fn lower_instruction(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
             dst :: lower_result(p, c, &m, &f, instruction) ?? return
             ok_word :: lower_word(&f)
             lower_emit(&f, LIRInst.Load{dst: ok_word, base: boxed, offset: 0})
-            zero :: lower_const(&f, 0)
-            lower_emit(&f, LIRInst.Compare{dst: dst, condition: LIRCondition.Ne, left: ok_word, right: zero})
+            expected :: lower_const(&f, lower_result_selector(true))
+            lower_emit(&f, LIRInst.Compare{dst: dst, condition: LIRCondition.Eq, left: ok_word, right: expected})
         }
         .ResultValue(subject, _) -> lower_load_payload(p, c, &m, &f, instruction, subject, lower_result_payload_offset())
         .PatternCapture(matched, index) -> lower_pattern_capture(p, c, &m, &f, instruction, matched, index)
@@ -3685,8 +3685,8 @@ fn lower_glue_shapes(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRT
     if ty.kind == {
         .Option(inner) -> &shapes.push(LowerGlueShape{selector: -1, fields: [LowerGlueField]{LowerGlueField{offset: 0, ty: inner}}})
         .Result(ok, err) -> {
-            &shapes.push(LowerGlueShape{selector: 1, fields: [LowerGlueField]{LowerGlueField{offset: 8, ty: ok}}})
-            &shapes.push(LowerGlueShape{selector: 0, fields: [LowerGlueField]{LowerGlueField{offset: 8, ty: err}}})
+            &shapes.push(LowerGlueShape{selector: lower_result_selector(true), fields: [LowerGlueField]{LowerGlueField{offset: lower_result_payload_offset(), ty: ok}}})
+            &shapes.push(LowerGlueShape{selector: lower_result_selector(false), fields: [LowerGlueField]{LowerGlueField{offset: lower_result_payload_offset(), ty: err}}})
         }
         else -> {
             definition :: lower_type_def(p, ty) ?? {

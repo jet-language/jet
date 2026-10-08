@@ -794,12 +794,13 @@ fn lower_closure_sort(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
         computed :: lower_call_closure_box(p, &m, &f, closure, [LIRValueID]{item}, ret) ?? return lower_fail(&m, &f, "sort_by key closure has no result")
         key := computed
         if key_err == .Val(err_ty) {
-            // A Result box: tag 1 Ok / 0 Err at 0, payload at 8.
+            // The callback and method result use the ordinary Result layout.
             shell_size :: lower_result_box_size(p, key_ty, err_ty)
             outcome_tag :: lower_word(&f)
             lower_emit(&f, LIRInst.Load{dst: outcome_tag, base: computed, offset: 0})
             failed :: lower_flag(&f)
-            lower_emit(&f, LIRInst.Compare{dst: failed, condition: LIRCondition.Eq, left: outcome_tag, right: zero})
+            err_selector :: lower_const(&f, lower_result_selector(false))
+            lower_emit(&f, LIRInst.Compare{dst: failed, condition: LIRCondition.Eq, left: outcome_tag, right: err_selector})
             stop :: lower_new_block(&f)
             keep :: lower_new_block(&f)
             lower_seal(&f, LIRTerminator.Branch{condition: failed, then_target: lower_target(stop, [LIRValueID]{}), else_target: lower_target(keep, [LIRValueID]{})})
@@ -815,15 +816,15 @@ fn lower_closure_sort(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
             lower_list_free_buffer(&m, &f, keys, length, 8)
             failure :: lower_pointer(&f)
             lower_alloc(&m, &f, failure, outcome_size)
-            lower_emit(&f, LIRInst.Store{base: failure, offset: 0, value: zero})
-            moved_from :: lower_address(&f, computed, 8)
-            moved_to :: lower_address(&f, failure, 8)
+            lower_store_word(&f, failure, 0, lower_result_selector(false))
+            moved_from :: lower_address(&f, computed, lower_result_payload_offset())
+            moved_to :: lower_address(&f, failure, lower_result_payload_offset())
             lower_list_move(p, &f, moved_to, moved_from, err_ty)
             lower_free_shell(&m, &f, computed, shell_size)
             if closure_arg.access == .Move -> lower_map_drop_value(p, &m, &f, closure, closure_ty)
             lower_seal(&f, LIRTerminator.Jump{target: lower_target(finish, [LIRValueID]{failure})})
             lower_start(&f, keep, [LIRValueID]{})
-            key = lower_read_at(p, &f, computed, 8, key_ty) ?? return
+            key = lower_read_at(p, &f, computed, lower_result_payload_offset(), key_ty) ?? return
             lower_free_shell(&m, &f, computed, shell_size)
         }
         key_slot :: lower_sort_slot(&f, keys, fill.at)
@@ -914,7 +915,7 @@ fn lower_closure_sort(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
     }
     success :: lower_pointer(&f)
     lower_alloc(&m, &f, success, outcome_size)
-    lower_emit(&f, LIRInst.Store{base: success, offset: 0, value: one})
+    lower_store_word(&f, success, 0, lower_result_selector(true))
     // The join parameter is the result itself (its drop glue included); a
     // plain pointer moved into it would change its drop glue.
     dst :: lower_result(p, c, &m, &f, instruction) ?? return

@@ -115,21 +115,21 @@ fn lower_helper_equal(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFun
         lower_start(&f, present, [LIRValueID]{})
         lower_equal_member(p, &m, &f, inner, left, right, 0, false, differ)
     } else if ty.kind == .Result(ok_ty, err_ty) {
-        // [verdict word, payload]: verdict 0 is Err.
+        // Ordinary Result verdict and payload share the construction layout.
         left_verdict :: lower_list_word(&f, left, 0)
         right_verdict :: lower_list_word(&f, right, 0)
         lower_equal_words(&f, left_verdict, right_verdict, differ)
-        zero :: lower_const(&f, 0)
+        zero :: lower_const(&f, lower_result_selector(false))
         failed :: lower_flag(&f)
         lower_emit(&f, LIRInst.Compare{dst: failed, condition: LIRCondition.Eq, left: left_verdict, right: zero})
         err_block :: lower_new_block(&f)
         ok_block :: lower_new_block(&f)
         lower_seal(&f, LIRTerminator.Branch{condition: failed, then_target: lower_target(err_block, [LIRValueID]{}), else_target: lower_target(ok_block, [LIRValueID]{})})
         lower_start(&f, err_block, [LIRValueID]{})
-        lower_equal_member(p, &m, &f, err_ty, left, right, 8, false, differ)
+        lower_equal_member(p, &m, &f, err_ty, left, right, lower_result_payload_offset(), false, differ)
         lower_seal(&f, LIRTerminator.Jump{target: lower_target(equal, [LIRValueID]{})})
         lower_start(&f, ok_block, [LIRValueID]{})
-        lower_equal_member(p, &m, &f, ok_ty, left, right, 8, false, differ)
+        lower_equal_member(p, &m, &f, ok_ty, left, right, lower_result_payload_offset(), false, differ)
     } else if lower_list_element(ty) == .Val(elem) {
         lower_equal_sequence(p, &m, &f, left, right, lower_list_stride(p, elem), [LowerMember]{LowerMember{id: mir_field_id("element"), name: "element", offset: 0, ty: elem, boxed: false}}, differ)
     } else if lower_map_shape(p, ty) == .Val(shape) {

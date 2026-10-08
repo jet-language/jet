@@ -124,14 +124,14 @@ fn lower_iterable_pull(p: MIRProgram, m: &LowerModule, f: &LowerFunction, next: 
     lower_emit(&f, LIRInst.Call{dst: Val(item), signature: signature, callee: LIRCallee.Function{id: LIRFunctionID{value: index}}, args: [LIRValueID]{receiver}})
     if next.return_type.kind == .Result(ok, err) {
         outcome_tag :: lower_list_word(&f, item, 0)
-        zero :: lower_const(&f, 0)
+        zero :: lower_const(&f, lower_result_selector(false))
         failed :: lower_flag(&f)
         lower_emit(&f, LIRInst.Compare{dst: failed, condition: LIRCondition.Eq, left: outcome_tag, right: zero})
         stop :: lower_new_block(&f)
         valid :: lower_new_block(&f)
         lower_seal(&f, LIRTerminator.Branch{condition: failed, then_target: lower_target(stop, [LIRValueID]{}), else_target: lower_target(valid, [LIRValueID]{})})
         lower_start(&f, stop, [LIRValueID]{})
-        failure :: lower_read_at(p, &f, item, 8, err) ?? {
+        failure :: lower_read_at(p, &f, item, lower_result_payload_offset(), err) ?? {
             lower_fail(&m, &f, "process line source IOError has no native representation")
             return item
         }
@@ -150,7 +150,7 @@ fn lower_iterable_pull(p: MIRProgram, m: &LowerModule, f: &LowerFunction, next: 
         panic_kind :: lower_const(&f, 2)
         lower_noreturn_call(&m, &f, "jet_rt_require_stop", [LIRValueID]{panic_kind, descriptor, text.value, null, null, null})
         lower_start(&f, valid, [LIRValueID]{})
-        optional :: lower_read_at(p, &f, item, 8, ok) ?? {
+        optional :: lower_read_at(p, &f, item, lower_result_payload_offset(), ok) ?? {
             lower_fail(&m, &f, "process line source Option has no native representation")
             return item
         }

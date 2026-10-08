@@ -308,7 +308,7 @@ fn lower_helper_display(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRF
     } else if glue.ty.kind == .Result(ok_ty, err_ty) {
         verdict :: lower_word(&f)
         lower_emit(&f, LIRInst.Load{dst: verdict, base: operand, offset: 0})
-        zero :: lower_const(&f, 0)
+        zero :: lower_const(&f, lower_result_selector(false))
         failed :: lower_flag(&f)
         lower_emit(&f, LIRInst.Compare{dst: failed, condition: LIRCondition.Eq, left: verdict, right: zero})
         err_block :: lower_new_block(&f)
@@ -319,14 +319,14 @@ fn lower_helper_display(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRF
         if clean -> lower_render_static(&m, &f, builder, if mode == .Debug -> "None" else -> "null")
         else {
             lower_render_static(&m, &f, builder, "Err(")
-            error_value :: lower_render_load(p, &f, operand, 8, err_ty, false)
+            error_value :: lower_render_load(p, &f, operand, lower_result_payload_offset(), err_ty, false)
             lower_render_push(p, &m, &f, builder, err_ty, error_value, mode)
             lower_render_static(&m, &f, builder, ")")
         }
         lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
         lower_start(&f, ok_block, [LIRValueID]{})
         if !clean || mode == .Debug -> lower_render_static(&m, &f, builder, if clean -> "Val(" else -> "Ok(")
-        ok_value :: lower_render_load(p, &f, operand, 8, ok_ty, false)
+        ok_value :: lower_render_load(p, &f, operand, lower_result_payload_offset(), ok_ty, false)
         lower_render_push(p, &m, &f, builder, ok_ty, ok_value, mode)
         if !clean || mode == .Debug -> lower_render_static(&m, &f, builder, ")")
     } else if glue.ty.kind == .List(elem) {

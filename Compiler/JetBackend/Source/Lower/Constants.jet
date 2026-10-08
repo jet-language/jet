@@ -223,8 +223,8 @@ fn lower_constant_tree_value(p: MIRProgram, c: LowerContext, m: &LowerModule, f:
                 }
                 .Result(ok, err) -> {
                     lower_alloc(&m, &f, dst, lower_result_box_size(p, ok, err))
-                    lower_store_word(&f, dst, 0, 1)
-                    lower_constant_store(p, c, &m, &f, dst, 8, ok, value)
+                    lower_store_word(&f, dst, 0, lower_result_selector(true))
+                    lower_constant_store(p, c, &m, &f, dst, lower_result_payload_offset(), ok, value)
                 }
                 else -> {
                     lower_fail(&m, &f, "Present constant without an Option or Result type is not lowered at O0 yet")
@@ -258,8 +258,8 @@ fn lower_constant_tree_value(p: MIRProgram, c: LowerContext, m: &LowerModule, f:
         .Failed(report) -> {
             if ty.kind == .Result(ok, err) && report == .Told(value) {
                 lower_alloc(&m, &f, dst, lower_result_box_size(p, ok, err))
-                lower_store_word(&f, dst, 0, 0)
-                lower_constant_store(p, c, &m, &f, dst, 8, err, value)
+                lower_store_word(&f, dst, 0, lower_result_selector(false))
+                lower_constant_store(p, c, &m, &f, dst, lower_result_payload_offset(), err, value)
             } else if lower_option_inner(ty) != None && report == .Clean(_) {
                 // A clean failure of an Option is None (MIRRust.rs constant_for_type).
                 lower_emit(&f, LIRInst.Const{dst: dst, value: 0})

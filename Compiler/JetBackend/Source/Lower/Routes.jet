@@ -372,16 +372,16 @@ fn lower_route_result(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
                 merge :: lower_new_block(&f)
                 lower_seal(&f, LIRTerminator.Branch{condition: succeeded, then_target: lower_target(success, [LIRValueID]{}), else_target: lower_target(failure, [LIRValueID]{})})
                 lower_start(&f, success, [LIRValueID]{})
-                lower_route_store_payload(p, &m, &f, box, 8, ok_ty, ok, out.slot)
+                lower_route_store_payload(p, &m, &f, box, lower_result_payload_offset(), ok_ty, ok, out.slot)
                 lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge, [LIRValueID]{})})
                 lower_start(&f, failure, [LIRValueID]{})
-                lower_route_store_payload(p, &m, &f, box, 8, err_ty, err, out.slot)
+                lower_route_store_payload(p, &m, &f, box, lower_result_payload_offset(), err_ty, err, out.slot)
                 lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge, [LIRValueID]{})})
                 lower_start(&f, merge, [LIRValueID]{})
             } else {
                 payload :: lower_word(&f)
                 lower_emit(&f, LIRInst.Load{dst: payload, base: out.slot, offset: 0})
-                lower_emit(&f, LIRInst.Store{base: box, offset: 8, value: payload})
+                lower_emit(&f, LIRInst.Store{base: box, offset: lower_result_payload_offset(), value: payload})
             }
         }
         .Tuple(items) -> {

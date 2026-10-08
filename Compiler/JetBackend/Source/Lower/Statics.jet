@@ -215,8 +215,8 @@ fn lower_static_tree(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRT
                 }
                 .Result(ok, err) -> {
                     id :: lower_static_object(&m, lower_result_box_size(p, ok, err))
-                    lower_static_store(&m, id, 0, lower_static_word(1))
-                    lower_static_child(p, &m, &f, id, 8, ok, value)
+                    lower_static_store(&m, id, 0, lower_static_word(lower_result_selector(true)))
+                    lower_static_child(p, &m, &f, id, lower_result_payload_offset(), ok, value)
                     if f.failed -> return None
                     return Val(lower_static_pointer(id))
                 }
@@ -229,7 +229,8 @@ fn lower_static_tree(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRT
         .Failed(report) -> {
             if ty.kind == .Result(ok, err) && report == .Told(value) {
                 id :: lower_static_object(&m, lower_result_box_size(p, ok, err))
-                lower_static_child(p, &m, &f, id, 8, err, value)
+                lower_static_store(&m, id, 0, lower_static_word(lower_result_selector(false)))
+                lower_static_child(p, &m, &f, id, lower_result_payload_offset(), err, value)
                 if f.failed -> return None
                 return Val(lower_static_pointer(id))
             }

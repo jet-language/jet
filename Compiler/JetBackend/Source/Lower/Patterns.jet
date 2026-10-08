@@ -282,7 +282,7 @@ fn lower_pattern_capture(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
     dst :: lower_result(p, c, &m, &f, instruction) ?? return
     // PatternCapture always clones the borrowed match tuple (the seed emitter's
     // as_ref().unwrap().index.clone()), including owning String/List members.
-    source :: lower_read_at(p, &f, box, (if ty.kind == .Result(_, _) -> 8 else -> 0) + members[index].offset, result_ty) ?? return
+    source :: lower_read_at(p, &f, box, (if ty.kind == .Result(_, _) -> lower_result_payload_offset() else -> 0) + members[index].offset, result_ty) ?? return
     lower_clone_into(p, &m, &f, source, dst, result_ty)
 }
 
@@ -298,6 +298,6 @@ fn lower_pattern_matched(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
         optional :: if ty.kind == .Option(_) -> true else -> false
         if !optional -> return lower_fail(&m, &f, "pattern test producer is not a scan carrier")
     }
-    zero :: lower_const(&f, 0)
+    zero :: lower_const(&f, if ty.kind == .Result(_, _) -> lower_result_selector(false) else -> 0)
     lower_emit(&f, LIRInst.Compare{dst: dst, condition: LIRCondition.Ne, left: tested, right: zero})
 }
