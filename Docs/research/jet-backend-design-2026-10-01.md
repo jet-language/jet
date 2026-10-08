@@ -2283,3 +2283,39 @@ capacity-1, and capacity `i64::MAX / stride + 1`. The three
 exact stderr and exact exit101 for each mode. These native process cases
 have not been executed. The composed source unit must include the index helper
 from c39d89b6b as well as the capacity helper before caller/import admission.
+
+### Native encoding error ownership boundary
+
+`JetBackend/Source/EncodingABI.jet` single-sources the private enum8, Cause32
+and Error80 carriers. `JetRuntime/Source/EncodingErrors.jet` supplies each
+complete HAND family for EncodingFormat, EncodingErrorKind, EncodingCause
+and EncodingError; it does not supply generator-owned DERIVABLE routes or
+EncodingLimits. Enum handle operations use pointers; record enum fields use
+raw declaration-order tags, checked against EncodingTypes.rs:29-61.
+
+The C ABI follows `CAbiRoutes.rs:9394-9466`: constructors clone borrowed
+texts and range-convert borrowed exact-Int inputs to raw i64 before allocation
+or consuming any payload. Option Int inputs lend a nullable pointer-to-word;
+getters publish fresh exact owners only when present. Error construction
+consumes the optional Cause handle, unlike its borrowed Text arguments.
+Clone recursively duplicates text and cause owners; drop releases each once.
+Equality follows EncodingTypes.rs:63-80 field order, ignoring absent payload
+words but including the cause snapshot.
+
+Show/display/debug share the exact `Core/EncodingError.rs:8-28` projection,
+as delegated by `JetStd/CommonTypes.rs:182-217`: format, kind and byte offset,
+independent optional line/column, nonempty path, then reason; cause is omitted
+from render but not equality. The existing text builder and signed i64
+formatter are reused, including negative offsets and i64::MIN. Invalid enum
+ordinals use the same native-range stop as CAbiRoutes.rs:11-13.
+
+`JetRuntime/Tests/EncodingErrorsWitness.c` is a real-object client, requiring
+`--wrap=jet_rt_free` with asserted interception and exact-once recursive frees.
+It exercises all exported families, constructor transfer/borrow ownership,
+fresh getters, deep-clone independence, every equality field, absent versus
+present-zero options, both i64 edges and all format/kind render combinations.
+The separate `format-range`, `kind-range` and `native-overflow` modes require
+the canonical native arithmetic range diagnostic. The expected normal output
+is `EncodingErrors ownership/equality/render OK`. Native execution remains
+unexercised until the integrator composes the fresh green E2 FINAL runtime;
+parser and strict C11 syntax receipts alone do not establish runtime parity.
