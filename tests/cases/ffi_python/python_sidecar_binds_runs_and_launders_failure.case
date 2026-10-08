@@ -1,0 +1,53 @@
+# Port of tests/ffi_python.rs:30-166; sources copied verbatim, every public oracle.
+# PENDING-SAME-HEAD: no runtime/reference proof.
+requires: os:unix
+requires: tool:python3
+requires: tool:cc
+requires: tool:ar
+fixture: fixtures/python_sidecar_binds_runs_and_launders_failure
+step: jet inspect bind py ops.py --pkg ops
+env: NO_COLOR=1
+exit: 0
+file: .jet/bindings/py/ops.jet ~ "jet-ffi-descriptor="
+file: .jet/bindings/py/ops.jet ~ "-[FFI.Py]>"
+file: .jet/bindings/py/ops.jet !~ "=>"
+file: .jet/bindings/py/libjet_py_ops.a is-file
+file: .jet/bindings/py/ops.provenance ~ "descriptor="
+file: .jet/bindings/py/ops.provenance ~ "layout=AdapterTyped"
+file: .jet/bindings/py/ops.provenance ~ "ownership=AdapterOwned"
+file: .jet/bindings/py/ops.provenance ~ "errors=AdapterResult"
+file: .jet/bindings/py/ops.provenance ~ "callbacks=AdapterMarshalled"
+file: .jet/bindings/py/ops.provenance ~ "async=AdapterMarshalled"
+file: .jet/bindings/py/ops.provenance ~ "tasks=AdapterMarshalled"
+file: .jet/bindings/py/ops.provenance ~ "safety=GeneratedWrapper"
+file: .jet/bindings/py/ops.provenance ~ "provider=PyPi"
+file: .jet/bindings/py/ops.provenance ~ "artifact.libjet_py_ops.a="
+file: .jet/bindings/py/ops.provenance ~ "runtime-toolchain="
+file: .jet/bindings/py/ops.provenance ~ "source-sha256="
+capture: first_identity = prefixed file .jet/bindings/py/ops.provenance "identity="
+file: .jet/bindings/py/.bridges/{cap:first_identity}/libjet_py_ops.a is-file
+remove: .jet/bindings/py/libjet_py_ops.a
+step: jet inspect bind py ops.py --pkg ops
+env: NO_COLOR=1
+exit: 0
+capture: cached_identity = prefixed file .jet/bindings/py/ops.provenance "identity="
+cap:cached_identity: = "{cap:first_identity}"
+file: .jet/bindings/py/libjet_py_ops.a is-file
+step: jet run main.jet
+env: NO_COLOR=1
+exit: 0
+stdout: = "5\nfalse\n99\n123\n"
+copy: changed.py ops.py
+step: jet inspect bind py ops.py --pkg ops
+env: NO_COLOR=1
+exit: 0
+capture: changed_identity = prefixed file .jet/bindings/py/ops.provenance "identity="
+cap:changed_identity: != "{cap:first_identity}"
+file: .jet/bindings/py/.bridges/{cap:changed_identity}/libjet_py_ops.a is-file
+step: jet inspect bind py bad.py --pkg bad
+env: NO_COLOR=1
+exit: nonzero
+stderr: ~ "Error [E3208]:"
+stderr: ~ " Why:"
+stderr: ~ " Fix:"
+file: .jet/bindings/py/bad.jet absent
