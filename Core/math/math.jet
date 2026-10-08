@@ -1371,3 +1371,88 @@ impl Mat4.Mul(Vec4) {
     assert_eq((matrix * Vec4.new(1.0, 0.0, 0.0, 0.0)).lane(3), 4.0)
     assert_eq(Mat4.from_array(matrix.to_array()).to_array()[14], 15.0)
 }
+
+impl F64x4 {
+    fn sum(self) -> F64 Never! {
+        // Rust D-FRED1: four occupied lanes of the eight-lane reduction tree.
+        a :: F64{0.0} + self.lanes[0]
+        b :: F64{0.0} + self.lanes[1]
+        c :: F64{0.0} + self.lanes[2]
+        d :: F64{0.0} + self.lanes[3]
+        ((a + b) + (c + d)) + F64{0.0}
+    }
+    fn product(self) -> F64 Never! {
+        value := F64{1.0}
+        loop i in 0..<4 -> value = value * self.lanes[i]
+        value
+    }
+    fn min(self) -> F64 Never! {
+        value := F64{1.0} / F64{0.0}
+        loop i in 0..<4 -> value = min_float(value, self.lanes[i])
+        value
+    }
+    fn max(self) -> F64 Never! {
+        value := -F64{1.0} / F64{0.0}
+        loop i in 0..<4 -> value = max_float(value, self.lanes[i])
+        value
+    }
+    fn sqrt(self) -> F64x4 Never! {
+        F64x4.new(sqrt(self.lanes[0]), sqrt(self.lanes[1]), sqrt(self.lanes[2]), sqrt(self.lanes[3]))
+    }
+    fn reduce_add(self) -> F64 Never! { self.sum() }
+    fn reduce_mul(self) -> F64 Never! { self.product() }
+    fn reduce_min(self) -> F64 Never! { self.min() }
+    fn reduce_max(self) -> F64 Never! { self.max() }
+    fn reduce_avg(self) -> F64 Never! { self.sum() / F64{4.0} }
+    fn reduce(self, op: ReduceOp) -> F64 Never! {
+        if op == .Add -> return self.reduce_add()
+        if op == .Mul -> return self.reduce_mul()
+        if op == .Min -> return self.reduce_min()
+        if op == .Max -> return self.reduce_max()
+        self.reduce_avg()
+    }
+}
+impl F64x4.Add {
+    fn add(self, rhs: F64x4) -> F64x4 Never! {
+        F64x4.new(self.lanes[0] + rhs.lanes[0], self.lanes[1] + rhs.lanes[1], self.lanes[2] + rhs.lanes[2], self.lanes[3] + rhs.lanes[3])
+    }
+}
+impl F64x4.Sub {
+    fn sub(self, rhs: F64x4) -> F64x4 Never! {
+        F64x4.new(self.lanes[0] - rhs.lanes[0], self.lanes[1] - rhs.lanes[1], self.lanes[2] - rhs.lanes[2], self.lanes[3] - rhs.lanes[3])
+    }
+}
+impl F64x4.Mul {
+    fn mul(self, rhs: F64x4) -> F64x4 Never! {
+        F64x4.new(self.lanes[0] * rhs.lanes[0], self.lanes[1] * rhs.lanes[1], self.lanes[2] * rhs.lanes[2], self.lanes[3] * rhs.lanes[3])
+    }
+}
+impl F64x4.Div {
+    fn div(self, rhs: F64x4) -> F64x4 Never! {
+        F64x4.new(self.lanes[0] / rhs.lanes[0], self.lanes[1] / rhs.lanes[1], self.lanes[2] / rhs.lanes[2], self.lanes[3] / rhs.lanes[3])
+    }
+}
+#Test("F64x4 source reduction identities and eight-lane tree") {
+    value :: F64x4.new(F64{1.0}, F64{2.0}, F64{3.0}, F64{4.0})
+    assert_eq(value.sum(), F64{10.0})
+    assert_eq(value.product(), F64{24.0})
+    assert_eq(value.min(), F64{1.0})
+    assert_eq(value.max(), F64{4.0})
+    assert_eq(value.reduce(.Add), value.sum())
+    assert_eq(value.reduce(.Mul), value.product())
+    assert_eq(value.reduce(.Min), value.min())
+    assert_eq(value.reduce(.Max), value.max())
+    assert_eq(value.reduce(.Avg), F64{2.5})
+    cancellation :: F64x4.new(F64{10000000000000000.0}, F64{1.0}, F64{-10000000000000000.0}, F64{2.0})
+    assert_eq(cancellation.sum(), F64{2.0})
+    assert_eq(F64x4.splat(-F64{0.0}).sum().to_bits(), F64{0.0}.to_bits())
+    assert_eq(F64x4.splat(nan()).min(), infinity())
+    assert_eq(F64x4.splat(nan()).max(), -infinity())
+    assert_eq(F64x4.new(F64{nan()}, F64{3.0}, F64{2.0}, F64{1.0}).min(), F64{1.0})
+    assert_eq(F64x4.splat(F64{-0.0}).sqrt().lane(0).to_bits(), F64{-0.0}.to_bits())
+    assert_eq(F64x4.splat(F64{4.0}).sqrt().lane(3), F64{2.0})
+    assert_eq((value + value).lane(2), F64{6.0})
+    assert_eq((value - value).lane(2), F64{0.0})
+    assert_eq((value * value).lane(2), F64{9.0})
+    assert_eq((value / value).lane(2), F64{1.0})
+}
