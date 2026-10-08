@@ -74,3 +74,11 @@ fn rt_crypto_entropy_fill(out: I64, count: I64) -> I64 {
     }
     return I64{0}
 }
+
+// Core.__zeroize consumes the bytes; this C ABI borrows the marshaller's live
+// initialized payload. Wipe that payload itself, not a staging copy. The
+// marshaller retains ownership and is solely responsible for later release.
+// Capacity slack is not represented by (ptr,len) and belongs to its owner.
+#Export(c) fn jet_crypto_zeroize(bytes: I64, length: I64) {
+    rt_crypto_wipe(bytes, wrapping(length * RT_HOST_U8_STRIDE))
+}

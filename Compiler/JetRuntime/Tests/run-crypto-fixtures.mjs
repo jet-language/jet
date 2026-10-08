@@ -12,7 +12,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const [output, mode] = process.argv.slice(2);
 if (!output || !['assemble', 'lower', 'audit', 'link', 'run'].includes(mode)) throw Error('usage: run-crypto-fixtures.mjs OUT assemble|lower|audit|link|run');
 const out = resolve(output), unit = join(out, 'unit');
-const fixtures = ['Sha256', 'CryptoX25519', 'CryptoEd25519', 'CryptoChaCha', 'CryptoAead', 'CryptoHkdf', 'CryptoArgon', 'AgeCodec', 'AgeV1', 'CryptoEntropy', 'CryptoHash', 'CryptoPbkdf2', 'CryptoSha3', 'CryptoBlake3', 'CryptoEd25519Signature'];
+const fixtures = ['Sha256', 'CryptoX25519', 'CryptoEd25519', 'CryptoChaCha', 'CryptoAead', 'CryptoHkdf', 'CryptoArgon', 'AgeCodec', 'AgeV1', 'CryptoEntropy', 'CryptoHash', 'CryptoPbkdf2', 'CryptoSha3', 'CryptoBlake3', 'CryptoEd25519Signature', 'CryptoZeroize'];
 function command(name, binary, args, options = {}) {
     const result = spawnSync(binary, args, {cwd: root, encoding: 'utf8', maxBuffer: 1 << 27, ...options});
     writeFileSync(join(out, `${name}.receipt.json`), JSON.stringify({status: result.status, signal: result.signal, error: result.error?.message ?? null, stdout: result.stdout, stderr: result.stderr}, null, 2) + '\n');
@@ -76,7 +76,7 @@ if (mode === 'assemble') {
     mkdirSync(captures, {recursive: true});
     for (const name of fixtures.filter(name => name !== 'AgeV1')) {
         const result = command(`run-${name}`, join(out, name), [], {timeout: name === 'CryptoArgon' || name === 'CryptoPbkdf2' || name === 'CryptoEd25519Signature' ? 300000 : 60000});
-        if (name === 'CryptoEntropy' || name === 'CryptoHash' || name === 'CryptoPbkdf2' || name === 'CryptoSha3' || name === 'CryptoBlake3' || name === 'CryptoEd25519Signature') {
+        if (name === 'CryptoEntropy' || name === 'CryptoHash' || name === 'CryptoPbkdf2' || name === 'CryptoSha3' || name === 'CryptoBlake3' || name === 'CryptoEd25519Signature' || name === 'CryptoZeroize') {
             const expected = readFileSync(join(root, `Compiler/JetRuntime/Tests/${name}Witness.stdout`), 'utf8');
             const metadata = JSON.parse(readFileSync(join(root, `Compiler/JetRuntime/Tests/${name}Fixtures.json`), 'utf8'));
             if (digest(expected) !== metadata.stdoutSha256) throw Error(`damaged frozen ${name} reference`);

@@ -110,6 +110,21 @@ public operation metadata and never reads the password-policy reason or any
 secret material. Scripted provider and redaction results are compared with
 a once-frozen Rust seed receipt, separately from live-provider checks.
 
+The `core.crypto.__zeroize` native ABI borrows the initialized `(pointer, length)`
+payload from a moved byte list. It clears the actual storage through the shared
+effectful wipe, using the canonical host U8 element stride, without allocation,
+copying, changing a header, or releasing storage. Zero length, including a null
+pointer with zero length, does not dereference the pointer. The marshaller owns
+the list lifetime and its later release.
+
+**Known seed divergence:** the old generated `CAbiRoutes.rs` zeroize adapter
+first copies the borrowed words with `list_in`, then wipes only that temporary
+Rust vector. The Jet native adapter instead wipes the actual moved payload;
+the consuming Core API has no returned bytes whose value could differ. No
+copy-wiping compatibility mode is retained. Capacity slack is unreachable through
+this two-argument ABI; clearing that slack before release is a marshaller-side
+obligation, separate from this initialized-span leaf.
+
 The runtime SHA-256 byte boundary borrows its input and writes to a caller-owned
 32-byte digest. Its 576-byte, word-aligned scratch region is exclusive to the
 call and wiped before return. Domain-separated callers can hash two spans
