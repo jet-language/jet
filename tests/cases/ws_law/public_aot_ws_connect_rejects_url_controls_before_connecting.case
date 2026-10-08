@@ -8,7 +8,7 @@ copy: observer/.jet/build/run observer-bin
 spawn observer: {work}/observer-bin
 stdout: file observer.stdout
 stderr: file observer.stderr
-await: file observer.stdout ~ "ADDRESS=" timeout 30s every 10ms
+await: file observer.stdout ~ "ADDRESS=" timeout 30s every 10ms # transport readiness bridge: fixture observer/run.jet:23-25 publishes the bound ADDRESS; retain the ported 30s/10ms gate
 capture: addr = text file.after_first("ADDRESS=").line(0) observer.stdout
 write: main.jet = source.template
 step: jet build main.jet
