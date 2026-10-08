@@ -1,0 +1,35 @@
+// Exact reviewed tests/pkg.rs:5515-5524,6572-6612 predicates.
+// PENDING-SEAM(package-tests); historical manifest syntax stays unchanged.
+#Test("pkg integration unsupported_authority_reports_a_host_recovery") {
+    diagnostic :: AuthorityError.Unsupported("descriptor-relative no-follow authority is unavailable on this platform").diagnostic()
+    assert_eq(diagnostic.code, "E1334")
+    assert(diagnostic.what.contains("unavailable on this platform"))
+    assert(diagnostic.why.contains("descriptor-relative no-follow"))
+    assert(diagnostic.fix.contains("use a platform"))
+}
+#Test("pkg integration e1217_missing_locked_revision") {
+    root :: files.join(sys.temp_dir(), "jet-pkg-integration-e1217-{process.current_pid()}")
+    files.remove_all(root) ?? panic("clear fixture")
+    files.create_dir_all(root) ?? panic("mkdir fixture")
+    // Original min_manifest/manifest_with_deps byte expansion, pkg.rs:279-293.
+    raw :: pkg_integration_manifest_with_deps("app", "0.1.0", "    greeter: ./greeter,")
+    path :: files.join(root, "package.jet")
+    files.write(path, raw) ?? panic("write manifest")
+    manifest :: Manifest.parse(path, raw) ?? panic("original manifest must parse")
+    if pkg_lock_verify_all_manifest_deps_locked(manifest, LockFile.empty()) == {
+        .Err(error) -> {
+            diagnostic :: error.diagnostic()
+            assert_eq(diagnostic.code, "E1217")
+            assert(diagnostic.what.contains("greeter"))
+            assert(diagnostic.why.contains("missing `package`"))
+            assert(diagnostic.fix.contains("fetch"))
+            assert(diagnostic.fix.contains(".jet/lock"))
+        }
+        .Ok(_) -> panic("missing locked revision must fail")
+    }
+    good := LockFile.empty()
+    good.packages = [LockedPackage]{LockedPackage{name: "greeter", version: "0.1.0", source: .Path("/tmp/placeholder"), fingerprint: "sha256-aabb"}}
+    good.root_dependencies = [String]{"greeter"}
+    pkg_lock_verify_all_manifest_deps_locked(manifest, good) ?? panic("pinned greeter must pass")
+    files.remove_all(root) ?? panic("cleanup")
+}

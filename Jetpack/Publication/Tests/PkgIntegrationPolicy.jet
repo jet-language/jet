@@ -1,0 +1,171 @@
+// Assertion-for-assertion ports of reviewed tests/pkg.rs library rows.
+// Original fixture strings and predicates are retained; no reference snapshots.
+// PENDING-SEAM(package-tests): parse receipts do not claim runtime parity.
+fn publication_pkg_integration_version(raw: String) -> PublicationSemVer Never! {
+    publication_parse_semver(raw) ?? panic("invalid original version")
+}
+fn publication_pkg_integration_constraint(package: String, requirement: String, from: String) -> PublicationVersionConstraint Never! {
+    PublicationVersionConstraint{package: package, req: publication_parse_version_req(requirement) ?? panic("invalid original requirement"), from: from}
+}
+fn publication_pkg_integration_item(name: String, signature: String) -> PublicAPIItem Never! {
+    PublicAPIItem{kind: "fn", name: name, signature: signature}
+}
+// Original make_test_lock, pkg.rs:6436-6475; all non-default fields retained.
+fn publication_pkg_integration_lock(name: String, version: String, fingerprint: String) -> LockFile Never! {
+    lock := LockFile.empty()
+    lock.packages = [LockedPackage]{LockedPackage{name: name, version: version, source: .Path("/tmp/placeholder"), fingerprint: fingerprint}}
+    lock.root_dependencies = [String]{name}
+    lock
+}
+// pkg.rs:5841-5867.
+#Test("pkg integration semver_break_e2601") {
+    changes :: publication_diff_public_api([PublicAPIItem]{publication_pkg_integration_item("parse", "fn parse(raw: String) -> Int")}, [PublicAPIItem]{})
+    assert(changes.len() != 0)
+    diagnostic :: publication_e2601("1.2.0", .Minor, changes[0], 2)
+    assert_eq(diagnostic.code, "E2601")
+    assert(diagnostic.what.contains("1.2.0"))
+    assert(diagnostic.why.contains("minor"))
+    assert(diagnostic.fix.contains("2.0.0"))
+    assert(diagnostic.why.contains("parse") || diagnostic.why.contains("removed"))
+}
+// pkg.rs:5870-5900.
+#Test("pkg integration returned_view_source_union_change_feeds_e1218_and_e2601") {
+    old :: publication_pkg_integration_item("pick", "fn pick(left: [Int], right: [Int]) -> View<Int> ; view_source = parameter:0;access:read;path:range")
+    new :: publication_pkg_integration_item("pick", "fn pick(left: [Int], right: [Int]) -> View<Int> ; view_source = one_of(parameter:0;path:range,parameter:1;path:range);access:read")
+    changes :: publication_diff_public_api([PublicAPIItem]{old}, [PublicAPIItem]{new})
+    assert_eq(changes.len(), 1)
+    assert(changes[0].description.contains("parameter:0"))
+    assert(changes[0].description.contains("parameter:1"))
+    bump :: publication_classify_bump(publication_pkg_integration_version("1.0.0"), publication_pkg_integration_version("1.1.0"))
+    assert_eq(bump, PublicationBumpKind.Minor)
+    assert_eq(publication_e1218("1.0.0", "1.1.0", bump, changes[0], 2).code, "E1218")
+    assert_eq(publication_e2601("1.1.0", bump, changes[0], 2).code, "E2601")
+}
+// pkg.rs:6271-6300.
+#Test("pkg integration resolver_conflict_e2602") {
+    constraints :: [PublicationVersionConstraint]{publication_pkg_integration_constraint("log", "^1.0", "web-server 2.1.0"), publication_pkg_integration_constraint("log", "^2.0", "db-client 3.0.0")}
+    diagnostics :: publication_check_conflicts(constraints, [String: [PublicationSemVer]]{})
+    assert(diagnostics.len() != 0)
+    assert_eq(diagnostics[0].code, "E2602")
+    assert(diagnostics[0].why.contains("log"))
+    assert(diagnostics[0].why.contains("web-server") || diagnostics[0].why.contains("db-client"))
+}
+// pkg.rs:6479-6497. Do not substitute the existing SBOM test's source/root.
+#Test("pkg integration sbom_spdx_golden") {
+    lock :: publication_pkg_integration_lock("logger", "1.2.3", "sha256-deadbeef00112233445566778899aabbccddeeff00112233445566778899aabb")
+    sbom :: publication_emit_spdx(lock, "myapp", "0.5.0")
+    assert(sbom.starts_with("SPDXVersion: SPDX-2.3\n"))
+    assert(sbom.contains("DataLicense: CC0-1.0\n"))
+    assert(sbom.contains("DocumentNamespace: https://jet-lang.dev/spdx/myapp-0.5.0-"))
+    assert(sbom.contains("PackageName: logger\n"))
+    assert(sbom.contains("PackageVersion: 1.2.3\n"))
+    assert(sbom.contains("PackageChecksum: SHA256: deadbeef00112233445566778899aabbccddeeff00112233445566778899aabb\n"))
+    assert(sbom.contains("Relationship: SPDXRef-root DEPENDS_ON SPDXRef-pkg-0\n"))
+}
+// pkg.rs:6500-6515.
+#Test("pkg integration sbom_cyclonedx_golden") {
+    lock :: publication_pkg_integration_lock("logger", "1.2.3", "sha256-deadbeef00112233445566778899aabbccddeeff00112233445566778899aabb")
+    sbom :: publication_emit_cyclonedx(lock, "myapp", "0.5.0")
+    assert(sbom.contains("\"bomFormat\": \"CycloneDX\""))
+    assert(sbom.contains("\"specVersion\": \"1.5\""))
+    assert(sbom.contains("\"name\": \"logger\""))
+    assert(sbom.contains("\"version\": \"1.2.3\""))
+    assert(sbom.contains("\"alg\": \"SHA-256\""))
+    assert(sbom.contains("deadbeef00112233445566778899aabbccddeeff00112233445566778899aabb"))
+}
+// pkg.rs:6518-6546.
+#Test("pkg integration audit_e2603_on_vulnerable_dep") {
+    lock :: publication_pkg_integration_lock("crypto-lib", "0.9.0", "sha256-aabb")
+    advisory :: PublicationAdvisory{id: "JET-2026-SEC-001", package: "crypto-lib", affected: publication_parse_version_req("^0") ?? panic("affected"), fixed: Val(publication_pkg_integration_version("0.9.5")), title: "Timing side-channel in AES-GCM", severity: .Critical}
+    matches :: publication_audit_lockfile(lock, [PublicationAdvisory]{advisory}) ?? panic("audit")
+    assert_eq(matches.len(), 1)
+    diagnostic :: matches[0].diagnostic
+    assert_eq(diagnostic.code, "E2603")
+    assert(diagnostic.what.contains("JET-2026-SEC-001"))
+    assert(diagnostic.what.contains("crypto-lib"))
+    assert(diagnostic.what.contains("Timing side-channel"))
+    assert(diagnostic.what.contains("[critical]"))
+    assert_eq(matches[0].severity, PublicationSeverity.Critical)
+}
+// pkg.rs:6549-6569.
+#Test("pkg integration audit_non_critical_is_advisory") {
+    lock :: publication_pkg_integration_lock("util-lib", "1.0.0", "sha256-ccdd")
+    advisory :: PublicationAdvisory{id: "JET-2026-INFO-1", package: "util-lib", affected: publication_parse_version_req("^1") ?? panic("affected"), fixed: Val(publication_pkg_integration_version("1.0.2")), title: "Minor info leak in debug logs", severity: .Low}
+    matches :: publication_audit_lockfile(lock, [PublicationAdvisory]{advisory}) ?? panic("audit")
+    assert_eq(matches.len(), 1)
+    assert_eq(matches[0].severity, PublicationSeverity.Low)
+    loop matched in matches -> assert(matched.severity != PublicationSeverity.Critical)
+}
+// pkg.rs:6615-6639.
+#Test("pkg integration e1218_breaking_change_under_minor_bump") {
+    breaking :: publication_diff_public_api([PublicAPIItem]{publication_pkg_integration_item("parse", "fn parse(raw: String) -> Int")}, [PublicAPIItem]{})
+    assert(breaking.len() != 0)
+    bump :: publication_classify_bump(publication_pkg_integration_version("1.0.0"), publication_pkg_integration_version("1.1.0"))
+    assert_eq(bump, PublicationBumpKind.Minor)
+    diagnostic :: publication_e1218("1.0.0", "1.1.0", bump, breaking[0], 2)
+    assert_eq(diagnostic.code, "E1218")
+    assert(diagnostic.what.contains("1.1.0"))
+    assert(diagnostic.fix.contains("2.0.0"))
+}
+// pkg.rs:6642-6651.
+#Test("pkg integration integrity_e2604_on_tampered_store") {
+    diagnostic :: publication_e2604("mylib", "1.0.0", "sha256-expected", "sha256-actual")
+    assert_eq(diagnostic.code, "E2604")
+    assert(diagnostic.what.contains("mylib"))
+    assert(diagnostic.what.contains("1.0.0"))
+    assert(diagnostic.why.contains("sha256-expected"))
+    assert(diagnostic.why.contains("sha256-actual"))
+}
+// pkg.rs:6669-6680.
+#Test("pkg integration pre_publish_gate_blocks_on_build_failure") {
+    gate :: PublicationPrePublishGate{build_ok: false, tests_ok: true, breaking: [PublicationBreakingChange]{}, version: "1.1.0", bump_kind: .Minor, next_major: 2}
+    assert(gate.is_blocked())
+}
+// pkg.rs:6683-6695.
+#Test("pkg integration pre_publish_gate_passes_with_no_breaks_and_minor_bump") {
+    gate :: PublicationPrePublishGate{build_ok: true, tests_ok: true, breaking: [PublicationBreakingChange]{}, version: "1.1.0", bump_kind: .Minor, next_major: 2}
+    assert(!gate.is_blocked())
+    assert_eq(gate.semver_errors().len(), 0)
+}
+// pkg.rs:8281-8330.
+#Test("pkg integration resolver_selects_highest_compatible") {
+    candidates :: [PublicationSemVer]{publication_pkg_integration_version("1.0.0"), publication_pkg_integration_version("1.2.0"), publication_pkg_integration_version("1.5.0"), publication_pkg_integration_version("2.0.0")}
+    c1 :: publication_pkg_integration_constraint("log", "^1.0", "app")
+    c2 :: publication_pkg_integration_constraint("log", "^1.2", "lib")
+    winner :: publication_select_highest_compatible("log", [PublicationVersionConstraint]{c1, c2}, candidates) ?? panic("compatible constraints")
+    assert_eq(publication_semver_display(winner), "1.5.0")
+    c3 :: publication_pkg_integration_constraint("log", "^2.0", "other")
+    winner2 :: publication_select_highest_compatible("log", [PublicationVersionConstraint]{c3}, candidates) ?? panic("second major")
+    assert_eq(publication_semver_display(winner2), "2.0.0")
+    if publication_select_highest_compatible("log", [PublicationVersionConstraint]{c1, c3}, candidates) == {
+        .Err(error) -> {
+            assert_eq(error.diagnostic.code, "E2602")
+            detail :: error.diagnostic.detail ?? ""
+            assert(detail.contains("PubGrub proof tree:"))
+            assert(detail.contains("Smallest fixes:"))
+            assert(detail.contains("app") && detail.contains("other"))
+        }
+        .Ok(_) -> panic("incompatible constraints must fail")
+    }
+}
+// pkg.rs:8333-8350.
+#Test("pkg integration resolver_no_candidates_returns_e2602") {
+    constraint :: publication_pkg_integration_constraint("missing", "^1.0", "app")
+    if publication_select_highest_compatible("missing", [PublicationVersionConstraint]{constraint}, [PublicationSemVer]{}) == {
+        .Err(error) -> {
+            assert_eq(error.diagnostic.code, "E2602")
+            assert((error.diagnostic.detail ?? "").contains("PubGrub proof tree:"))
+        }
+        .Ok(_) -> panic("no candidates must be an error")
+    }
+}
+// pkg.rs:9067-9079, preserving the corp registry on both calls.
+#Test("pkg integration require_signed_unsigned_entry_e1247") {
+    unsigned :: PublicationIndexEntry{name: "corpkit", version: "1.0.0", content_hash: "sha256-abc", fingerprint: "sha256-fp", yanked: false, tier: .Core, gate_status: publication_core_reviewed(), public_key: "", signature: ""}
+    all :: [PublicationIndexEntry]{unsigned}
+    if publication_verify_index_entry(all, unsigned, true, "corp") == {
+        .Err(error) -> assert_eq(error.diagnostic.code, "E1247")
+        .Ok(_) -> panic("require_signed must refuse unsigned entry")
+    }
+    publication_verify_index_entry(all, unsigned, false, "corp") ?? panic("optional unsigned")
+}
