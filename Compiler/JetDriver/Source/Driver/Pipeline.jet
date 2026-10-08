@@ -3932,11 +3932,7 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
             return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Load), false, trace)
         }
         unit := load.source_units[loaded_module.source_unit_index]
-        core_source_alias := ""
-        if jet_driver_unit_is_core(unit) && unit.file_index >= 0 && unit.file_index < request.core_sources.len() {
-            owner :: request.core_sources[unit.file_index]
-            if owner.path == unit.relative_path && owner.module_name == loaded_module.module_name -> core_source_alias = owner.alias
-        }
+        core_source_alias :: jet_driver_core_source_alias(unit, loaded_module, request.core_sources)
         registration_foreign_handles_option := jet_driver_registration_foreign_handle_facts(loaded_module.module_identity, foreign_provider_inputs, &load.diagnostics)
         if registration_foreign_handles_option == None {
             return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Load), false, trace)
@@ -4564,4 +4560,11 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
     }
     if !emission_complete -> return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Emit), false, trace)
     jet_driver_compile_result(load, load.diagnostics, entry_function, Val(^optimized_program), emitted_source, emit_manifest, None, true, trace)
+}
+
+fn jet_driver_core_source_alias(unit: JetDriverSourceUnit, loaded_module: JetDriverLoadedModule, core_sources: [JetDriverCoreSource]) -> String Never! {
+    if !jet_driver_unit_is_core(unit) || unit.file_index < 0 || unit.file_index >= core_sources.len() -> return ""
+    owner :: core_sources[unit.file_index]
+    if owner.path != unit.relative_path || owner.module_name != loaded_module.module_name -> return ""
+    owner.alias
 }
