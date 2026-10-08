@@ -245,7 +245,8 @@ fn lower_scan_match(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
     symbol := "jet_rt_text_pattern_match"
     if binary == .Val(pattern) {
         elem :: lower_list_element(ty) ?? return lower_fail(&m, &f, "binary scan subject is not List<U8>")
-        if elem.kind != .IntN{signed: false, bits: 8} -> return lower_fail(&m, &f, "binary scan subject is not List<U8>")
+        byte :: if elem.kind == .IntN(signed, bits) -> !signed && bits == 8 else -> false
+        if !byte -> return lower_fail(&m, &f, "binary scan subject is not List<U8>")
         data = lower_list_data(&f, value)
         length = lower_list_word(&f, value, 0)
         stride = lower_list_stride(p, elem)

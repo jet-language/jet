@@ -86,6 +86,28 @@ fn fx_numeric_print_fixed(b: &FxBuilder, unsigned: Bool, mode: String, op: Strin
     fx_print(&b, value)
 }
 
+// Raw I64 `/` truncates toward zero and `%` keeps the dividend's sign.
+// Negative non-integral cases distinguish these operators from floor division.
+// expect-stdout numeric-i64-truncation: "-2\n-1\n-2\n1\n2\n-1\n2\n1\n0\n-1\n0\n1\n"
+fn fx_numeric_i64_truncation() -> MIRProgram Never! {
+    b := fx_builder()
+    cases :: [(left: Int, right: Int)]{
+        (left: -7, right: 3), (left: 7, right: -3),
+        (left: -7, right: -3), (left: 7, right: 3),
+        (left: -1, right: 3), (left: 1, right: -3),
+    }
+    loop pair in cases {
+        left :: fx_i64_const(&b, pair.left)
+        right :: fx_i64_const(&b, pair.right)
+        quotient :: fx_copy(&b, fx_i64(), MIROperation.Binary{op: MIRBinaryOp.Div, dispatch: MIRBinaryDispatch.Primitive, overflow: MIRBinaryOverflow.Unchecked, left: left, right: right})
+        remainder :: fx_copy(&b, fx_i64(), MIROperation.Binary{op: MIRBinaryOp.Rem, dispatch: MIRBinaryDispatch.Primitive, overflow: MIRBinaryOverflow.Unchecked, left: left, right: right})
+        fx_print(&b, quotient)
+        fx_print(&b, remainder)
+    }
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_numeric_program(b)
+}
+
 // fn run() {
 //   for x in [0.0, -0.0, 1.0, 1.0/0.0, -1.0/0.0, 0.0/0.0] {
 //     print(x.is_nan()); print(x.is_infinite()); print(x.is_finite())
