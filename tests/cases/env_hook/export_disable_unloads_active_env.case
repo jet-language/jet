@@ -1,0 +1,16 @@
+# Port of tests/env_hook.rs::export_disable_unloads_active_env.
+# PENDING-GRAMMAR: step unset and escaped newline predicates.
+fixture: activation-reload.fixture
+env: PATH=/usr/bin:/bin
+step: jetpack env export bash
+env: JET_ENV_DISABLE=1
+env: JETPACK_ENV_DIR={work}
+env: JETPACK_ENV_OLD_PATH=/usr/bin:/bin
+unset: JETPACK_ENV
+unset: JETPACK_ENV_HASH
+unset: JETPACK_REF
+exit: 0
+stdout: ~ "export PATH='/usr/bin:/bin'" # original predicate
+stdout: ~ "unset JETPACK_ENV_DIR" # original predicate
+stdout: ~ "unset JETPACK_ENV\n" # original byte predicate
+stdout: ~ "unset GIT_CONFIG_COUNT" # original predicate

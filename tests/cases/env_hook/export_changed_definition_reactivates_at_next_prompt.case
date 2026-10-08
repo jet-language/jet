@@ -1,0 +1,28 @@
+# Port of tests/env_hook.rs::export_changed_definition_reactivates_at_next_prompt.
+# The shell helper extracts exactly the original activation_hash prefix/suffix.
+# PENDING-GRAMMAR: tool token and step unset.
+requires: tool:bash
+requires: tool:cp
+fixture: activation-reload.fixture
+env: PATH=/usr/bin:/bin
+step: {tool:bash} --noprofile --norc -c 'exec "$1" env export bash > activation.sh' export-first {jetpack}
+unset: JET_ENV_DISABLE
+unset: JETPACK_ENV
+unset: JETPACK_ENV_DIR
+unset: JETPACK_ENV_HASH
+unset: JETPACK_ENV_OLD_PATH
+unset: JETPACK_REF
+exit: 0
+step: {tool:cp} changed.env env.jet
+exit: 0
+step: {tool:bash} --noprofile --norc reuse-hash.sh {jetpack} {work}
+unset: JET_ENV_DISABLE
+unset: JETPACK_ENV
+unset: JETPACK_ENV_DIR
+unset: JETPACK_ENV_HASH
+unset: JETPACK_ENV_OLD_PATH
+unset: JETPACK_REF
+exit: 0
+stdout: ~ "changed" # original predicate; entails nonempty output
+stdout: !~ "smoke" # original predicate
+stdout: ~ "export JETPACK_ENV_HASH='" # original predicate
