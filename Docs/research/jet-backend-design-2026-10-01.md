@@ -2153,3 +2153,12 @@ with extension/MIME lists. Inline grant cloning reuses the same field-copy
 helper as standalone grants without allocating a temporary grant. Field
 accessors lend live title/grant/bool storage; optional absence is distinct
 from a present empty path. Equality observes every nested field and list order.
+
+The native-private `UiHostError.jet` helpers follow the payload-bearing seed
+declaration, not Core's unit-error enum (identity ruling and divergence #4825).
+Capability/service `&'static str` fields lend immutable static E4 views;
+cloning never allocates for them and dropping never frees them. Producers
+must supply true rodata-backed static views, not borrowed owners. Owned
+message/resource/shortcut text clones and drops transitively; the inline
+shortcut uses the same field helper as its standalone carrier. These helpers
+do not introduce C exports or thirteen named Result-alias carriers.
