@@ -1096,6 +1096,13 @@ pub fn core_source_value_hook(name: &str, operation: &str) -> Option<&'static st
     if !name.strip_prefix(crate::Diagnostics::CORE_SOURCE_ROOT).is_some_and(|rest| rest.starts_with('/')) {
         return None;
     }
+    if name.ends_with("::Core/time/time.jet::Clock") {
+        return match operation {
+            "clone" => Some("__fork"),
+            "show" | "debug" => Some("__show"),
+            _ => None,
+        };
+    }
     if !name.ends_with("::Core/compute/solve.jet::Solver") {
         return None;
     }

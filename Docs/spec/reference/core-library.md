@@ -2302,10 +2302,18 @@ fn run() {
 | `time.Clock.system()` | `Clock -[Time]>` | Construct a clock backed by the host time source. |
 | `clock.now()` | `Int` | Read clock milliseconds. |
 | `clock.tick(milliseconds)` / `clock.advance(to_ms)` | `Int` | Advance a manual clock and return its new millisecond value. |
-| `clock.wait(duration)` | `Int -[Time]>` | Advance or wait according to the clock policy and return the new value. |
+| `clock.wait(duration)` | `Int` | Advance by whole duration milliseconds and return the new value; this does not park a task. |
 | `Duration.nanoseconds(n)` / `microseconds(n)` / `milliseconds(n)` / `seconds(n)` / `minutes(n)` / `hours(n)` | `Duration !RangeError` | Construct a checked duration from the named unit. |
 | `duration.in(unit)` / `total_in(unit)` | `Int !RangeError` / `Float` | Convert a duration to a named unit. |
 | `duration.is_zero()` / `total_seconds()` / `difference(other)` / `round(unit)` / `abs()` / `negated()` / `sign()` | varies | Inspect or transform a duration. |
+
+Ordinary `Clock` copies fork independent timelines, including copies inside
+lists and other aggregates. A system-clock copy rebases its own monotonic
+start at the original clock's current value. Internal expiry observers are
+different: they retain the caller's original clock, so later ticks on that
+clock affect its attached secret's lifetime. Clock Show and Debug retain the
+`Clock { now: N }` rendering. Manual tick/wait arithmetic saturates at `Int`'s
+millisecond bounds.
 
 #### Named zones and local-time resolution
 

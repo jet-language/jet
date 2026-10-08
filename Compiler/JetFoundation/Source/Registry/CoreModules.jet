@@ -208,6 +208,13 @@ fn core_source_owns_type_in(rows: [CoreSourceOwnedType], name: String) -> Bool N
 // short nominal spelling. They do not add public trait implementations.
 pub fn core_source_value_hook(name: String, operation: String) -> String? Never! {
     if !name.starts_with("<corelib>/") -> return None
+    if name.ends_with("::Core/time/time.jet::Clock") {
+        return if operation == {
+            "clone" -> Val("__fork")
+            "show" | "debug" -> Val("__show")
+            else -> None
+        }
+    }
     if !name.ends_with("::Core/compute/solve.jet::Solver") -> return None
     if operation == {
         "show" -> Val("__show")
