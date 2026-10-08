@@ -474,6 +474,13 @@ impl<'a> Checker<'a> {
         type_name: &str,
         method: &str,
     ) -> Option<(usize, MethodSig)> {
+        // Native carrier impls have a source owner, but no nominal declaration.
+        // Only a bare compiler type may select these exact loaded-owner rows.
+        if let Some((owner, signature)) = self.resolve_opaque_method_sig(type_name, method) {
+            let mut signature = signature.clone();
+            self.qualify_method_signature(owner, type_name, &mut signature);
+            return Some((owner, signature));
+        }
         let (import_ns, leaf) = self.struct_type_name_parts(type_name);
         let owner = self.struct_owner_module(leaf, import_ns)?;
         let mut sig = if owner == self.module_idx {
@@ -485,6 +492,20 @@ impl<'a> Checker<'a> {
         };
         self.qualify_method_signature(owner, leaf, &mut sig);
         Some((owner, sig))
+    }
+
+    pub(crate) fn resolve_opaque_method_sig(
+        &self, type_name: &str, method: &str,
+    ) -> Option<(usize, &MethodSig)> {
+        if self.registry.source_owns_impl(type_name) {
+            return self.registry.opaque_methods.get(type_name)?.get(method)
+                .map(|signature| (self.module_idx, signature));
+        }
+        self.modules?.iter().enumerate().find_map(|(owner, module)| {
+            if !module.registry.source_owns_impl(type_name) { return None; }
+            module.registry.opaque_methods.get(type_name)?.get(method)
+                .map(|signature| (owner, signature))
+        })
     }
 
     pub(crate) fn method_names_for_type_name(&self, type_name: &str) -> Vec<String> {

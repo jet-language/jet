@@ -726,6 +726,7 @@ pub(super) fn check_bundle_opts_for_output_inner(
                 Item::Impl(i) => {
                     if !i.type_name.contains('.')
                         && !st.registry.contains(&i.type_name)
+                        && !st.registry.source_owns_impl(&i.type_name)
                         && sibling_type_owner(&name_ledger, idx, &i.type_name).is_none()
                         && !super::opmix_allows_builtin_impl(i, &module.items)
                     {
@@ -825,6 +826,7 @@ pub(super) fn check_bundle_opts_for_output_inner(
                             types,
                             source_owned_types: st.registry.source_owned_types.clone(),
                             core_source_module: st.registry.core_source_module,
+                            opaque_methods: st.registry.opaque_methods.clone(),
                             operator_signatures: st.registry.operator_signatures.clone(),
                             error_types: st.registry.error_types.clone(),
                             unit_types: st.registry.unit_types.clone(),
