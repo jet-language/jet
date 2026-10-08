@@ -22213,9 +22213,9 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         }
         if row.module == "core.files" {
             let result_name = match row.member.as_str() {
-                "temp_dir" => Some("TempDir"),
-                "temp_file" => Some("TempFile"),
-                "lock" => Some("FileLock"),
+                "temp_dir" | "__temp_dir_raw" => Some("TempDir"),
+                "temp_file" | "__temp_file_raw" => Some("TempFile"),
+                "lock" | "__lock_raw" => Some("FileLock"),
                 _ => None,
             };
             if result_name.is_some_and(|name| {
@@ -22244,6 +22244,9 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     "temp_dir" => crate::Comptime::mir_fs_temp_dir(&path),
                     "temp_file" => crate::Comptime::mir_fs_temp_file(&path),
                     "lock" => crate::Comptime::mir_fs_lock(&path),
+                    "__temp_dir_raw" => crate::Comptime::mir_fs_temp_dir_raw(path),
+                    "__temp_file_raw" => crate::Comptime::mir_fs_temp_file_raw(path),
+                    "__lock_raw" => crate::Comptime::mir_fs_lock_raw(&path),
                     _ => unreachable!("owner constructor was selected above"),
                 };
                 return Ok(match result {

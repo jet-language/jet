@@ -114,7 +114,7 @@ fn core_call_effect_for(module_name: String, member: String) -> Effect? {
     if {
         module_name == "core.files" && member == "__temp_path_sample" -> Val(Effect.Time)
         module_name == "core.files" && member == "__temp_directory" -> Val(Effect.Env)
-        module_name == "core.files" && core_call_one_of(member, [String]{"__host_path_is_absolute", "__host_path_join"}) -> None
+        module_name == "core.files" && core_call_one_of(member, [String]{"__host_path_is_absolute", "__host_path_join", "__fault_should_fail", "__os_family"}) -> None
         module_name == "core.process" && member == "__with_directory_raw" -> Val(Effect.FS)
         module_name == "core.time" && member == "__zone_env" -> Val(Effect.Env)
         module_name == "core.time" && core_call_one_of(member, [String]{"zone", "parse_zoned", "__zone_file_bytes"}) -> Val(Effect.FS)
@@ -213,13 +213,16 @@ fn core_call_effect_leaf_for(module_name: String, member: String) -> String? {
             "stat", "lstat", "list_dir", "walk", "walk_parallel", "walk_files", "glob", "canonicalize", "absolute",
             // #3593 provider leaves behind Core/files/files.jet.
             "__open_reader", "__open_directory", "__close_directory", "__list_directory", "__stat_at", "__path_kind", "__read_link_at",
-            "__xattr_names", "__xattr_get", "__reader_stat", "__writer_stat", "__metadata_directory", "__directory_fd"
+            "__xattr_names", "__xattr_get", "__reader_stat", "__writer_stat", "__metadata_directory", "__directory_fd",
+            "__map_raw", "__list_dir_raw", "__stat_mode_raw", "__canonicalize_raw", "__glob_raw", "__walk_parallel_raw"
         }) -> Val("FS.Read")
         module_name == "core.files" && core_call_one_of(member, [String]{
             "write", "write_bytes", "write_at", "write_atomic", "append_all", "create", "append", "fsync", "remove",
             "remove_dir", "remove_all", "create_dir", "create_dir_all", "rename", "symlink", "hard_link", "chown",
             "set_mode", "mkdtemp", "mktemp", "temp_dir", "temp_file", "lock", "__open_writer", "__create_directory",
-            "__fsync_directory", "__rename_at", "__remove_at", "__xattr_set", "__writer_set_mode", "__flock"
+            "__fsync_directory", "__rename_at", "__remove_at", "__xattr_set", "__writer_set_mode", "__flock",
+            "__remove_raw", "__remove_dir_raw", "__remove_all_raw", "__hard_link_raw", "__fsync_raw", "__chown_raw",
+            "__set_mode_raw", "__symlink_directory_raw", "__symlink_raw", "__mkdtemp_raw", "__temp_dir_raw", "__temp_file_raw", "__lock_raw"
         }) -> Val("FS.Write")
         // D-AUTH-AMBIENT1=A: reading the program's own arguments is a leaf of
         // `Exec`; spawning a process keeps the ungranted `Exec` root.
