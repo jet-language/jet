@@ -1,6 +1,7 @@
 // tests/build_entry.rs:2095-2169, exact original concurrent builds and duplicate env override.
 // PENDING-SEAM(package-tests): canonical Jetpack package test staging after gate 2.
 // The two builders use their own run-cache, NOT the holder store (original lines 2129-2131).
+// #4838: target the single holder source FILE, never its directory (per-file package replay).
 use core.process as concurrent_process
 
 fn store_concurrent_await(path: String) {
@@ -38,7 +39,7 @@ fn store_concurrent_build_spec(jet: String, scratch: String, store: String) -> P
 fn store_concurrent_original() {
     if sys.get("JET_TEST_STORE_HOLDER") != None -> return
     jet :: sys.get("JET_BIN") ?? panic("JET_BIN must name the admitted test jet")
-    tests :: sys.get("JET_TEST_STORE_TESTS") ?? "Jetpack/Store/Tests"
+    tests :: sys.get("JET_TEST_STORE_FILE") ?? "Jetpack/Store/Tests/PkgIntegrationConcurrent.jet"
     left :: files.tmpdir("concurrent-build-left-") ?? panic("left scratch")
     right :: files.tmpdir("concurrent-build-right-") ?? panic("right scratch")
     scratches :: [String]{left, right}
