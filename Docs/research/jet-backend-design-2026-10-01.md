@@ -1653,6 +1653,18 @@ legacy LoopRange instructions in `Lower/Lower.jet:1750-1771`. Zero literal calls
 alone cannot prove closure: dynamic symbols and Runtime drop descriptors are
 tracked explicitly by the consistency checker.
 
+The non-exported Rust-function census is reconciled separately in
+`JetRuntime/Tests/collections-census.tsv`: every original symbol names its
+checked dispatcher and concrete Jet implementation, not an inferred alias.
+Existing native iterator providers are reused alongside direct List/Map,
+LoopIter, Option and slice/view lowering; no second generic runtime is added.
+`collections-hand-abi.tsv` records removal of the obsolete handwritten Iter
+exports and native-pack exclusion of the seed's cursor exports. The
+`check-collections-census.mjs` check follows dispatcher reachability, native
+export declarations, literal provider calls and the actual Rust cfg guards.
+It also preserves the two named carrier prerequisites above. This source
+receipt does not replace the composed native behavioral/symbol-ownership run.
+
 Lazy cursor initialization and advancement may invoke user callbacks. Both
 are can-stop MIR operations: their results are usable only on the immediately
 following Propagate poll's resume edge. Prefetched HasNext/Value operations
