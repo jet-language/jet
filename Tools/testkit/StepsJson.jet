@@ -191,7 +191,12 @@ fn kit_steps_json_leaf(value: DataTree, op: String, expected: DataTree, expected
         if expected == {
             .Text(key) -> {
                 if value == {
-                    .Object(fields) -> { if fields.get(key) != None -> return Val("JSON object contains forbidden key: {key}") }
+                    .Object(fields) -> {
+                        if fields.get(key) == {
+                            .Val(_) -> return Val("JSON object contains forbidden key: {key}")
+                            .None -> {}
+                        }
+                    }
                     else -> return Val("JSON key absence needs an object")
                 }
                 return None
@@ -304,6 +309,7 @@ fn kit_steps_json_assertion(value: String) -> KitAssertion? {
             if literal.contains("*") && !kit_steps_count_target_valid(literal) -> return None
         } else if op != "==" -> return None
     }
+    // #4814: jet fmt adds a trailing comma inside Val(...) here; keep this layout
     Val(KitAssertion{stream: stream, path: source, mode: "json", value: literal,
         json_mode: mode, json_path: path, json_op: op, optional_file: subject == "file?", transform: transform})
 }

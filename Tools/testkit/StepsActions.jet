@@ -10,7 +10,7 @@ fn kit_steps_action_error(state: KitStepState, message: String) -> KitStepResult
     KitStepResult{state: state, verdict: kit_expect_verdict("ERROR", message)}
 }
 
-fn kit_steps_inventory(directory: String, root: String) -> [KitInventoryItem] String! {
+fn kit_steps_inventory(directory: String, root: String) -> [KitInventoryItem] Err! {
     result := [KitInventoryItem]{}
     entries :: files.list_dir(directory) ?? return Err("inventory directory: {err}")
     loop entry in entries {
@@ -55,8 +55,9 @@ fn kit_steps_action(step: KitStep, context: KitStepCtx, previous: KitStepState) 
             &state.captures.push(KitCapture{name: step.argv[0], value: "", kind: "bytes", bytes: bytes})
             state.last = kit_steps_action_run()
         } else {
-            value :: kit_steps_capture_value(step.argv, context, state) ?? return KitStepResult{state: state, verdict: err}
-            &state.captures.push(KitCapture{name: step.argv[0], value: value})
+            captured :: kit_steps_capture_value(step.argv, context, state)
+            if captured.verdict.status != "PASS" -> return KitStepResult{state: state, verdict: captured.verdict}
+            &state.captures.push(KitCapture{name: step.argv[0], value: captured.value})
             selector :: if step.argv[1] == "=" && (step.argv[2] == "text" || step.argv[2] == "lines") -> kit_steps_subject(step.argv[3]) else -> kit_steps_subject(step.argv[1])
             if selector == "file" || selector == "file?" || (step.argv[1] == "=" && step.argv[2] != "text" && step.argv[2] != "lines") -> state.last = kit_steps_action_run()
         }
@@ -106,8 +107,8 @@ fn kit_steps_action(step: KitStep, context: KitStepCtx, previous: KitStepState) 
         if state.children[i].label == step.label && !state.children[i].joined {
             pending :: state.children[i]
             receipt :: pending.child.wait() ?? return kit_steps_action_error(state, "wait: {err}")
-            state.children[i].joined = true
             state.last = kit_exec_receipt(receipt, pending.started.elapsed().ns, pending.input_error)
+            state.children[i].joined = true
             return KitStepResult{state: state, verdict: kit_expect_verdict("PASS", "")}
         }
     }

@@ -214,7 +214,7 @@ fn kit_steps_entry_matches(path: String, name: String, is_dir: Bool, is_file: Bo
     true
 }
 
-fn kit_steps_entries_walk(directory: String, depth: Int, words: [String], recursive: Bool, output: &[String]) String! {
+fn kit_steps_entries_walk(directory: String, depth: Int, words: [String], recursive: Bool, output: &[String]) Err! {
     entries :: files.list_dir(directory) ?? return Err("entries directory: {err}")
     loop entry in entries {
         info :: files.stat(entry.path) ?? return Err("entries stat: {err}")
@@ -226,7 +226,7 @@ fn kit_steps_entries_walk(directory: String, depth: Int, words: [String], recurs
     Ok(())
 }
 
-fn kit_steps_entries(directory: String, words: [String]) -> [String] String! {
+fn kit_steps_entries(directory: String, words: [String]) -> [String] Err! {
     result := [String]{}
     kit_steps_entries_walk(directory, 1, words, kit_expect_named(words, "recursive"), &result) ?? return Err(err)
     Ok(result)
@@ -242,7 +242,7 @@ fn kit_steps_entries_assertion(original: String) -> KitAssertion? {
     Val(KitAssertion{stream: "entries", path: words[0], mode: words[split], value: words[split + 1], alternatives: words.slice(0, split)})
 }
 
-fn kit_steps_directory_names(path: String) -> [String] String! {
+fn kit_steps_directory_names(path: String) -> [String] Err! {
     entries :: files.list_dir(path) ?? return Err("directory names: {err}")
     names := [String]{}
     loop entry in entries -> &names.push(entry.name)

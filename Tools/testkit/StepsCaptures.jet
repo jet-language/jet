@@ -31,7 +31,7 @@ fn kit_steps_capture_valid(words: [String], original: String) -> Bool {
     false
 }
 
-fn kit_steps_capture_subject(selector: String, path: String, context: KitStepCtx, state: KitStepState) -> String String! {
+fn kit_steps_capture_subject(selector: String, path: String, context: KitStepCtx, state: KitStepState) -> String Err! {
     subject :: kit_steps_subject(selector)
     text := kit_steps_select_stream(state.last.stdout, state.last.stderr, subject)
     if subject == "file" || subject == "file?" {
@@ -42,7 +42,7 @@ fn kit_steps_capture_subject(selector: String, path: String, context: KitStepCtx
     Ok(kit_steps_transform(text, kit_steps_subject_transform(selector)))
 }
 
-fn kit_steps_tree_bytes(directory: String) -> Int String! {
+fn kit_steps_tree_bytes(directory: String) -> Int Err! {
     total := 0
     entries :: files.list_dir(directory) ?? return Err("tree bytes directory: {err}")
     loop entry in entries {
@@ -54,44 +54,52 @@ fn kit_steps_tree_bytes(directory: String) -> Int String! {
     Ok(total)
 }
 
-fn kit_steps_capture_value(words: [String], context: KitStepCtx, state: KitStepState) -> String KitVerdict! {
+fn kit_steps_capture_result(value: String) -> KitCaptureResult {
+    KitCaptureResult{value: value, verdict: kit_expect_verdict("PASS", "")}
+}
+
+fn kit_steps_capture_failure(status: String, detail: String) -> KitCaptureResult {
+    KitCaptureResult{verdict: kit_expect_verdict(status, detail)}
+}
+
+fn kit_steps_capture_value(words: [String], context: KitStepCtx, state: KitStepState) -> KitCaptureResult {
     if words[1] == "=" {
         kind :: words[2]
         if kind == "text" || kind == "lines" {
-            source :: kit_steps_capture_subject(words[3], if words.len() == 5 -> words[4] else -> "", context, state) ?? return Err(kit_expect_verdict("ERROR", err))
-            return Ok(if kind == "text" -> source else -> "{kit_steps_lines(source)}")
+            source :: kit_steps_capture_subject(words[3], if words.len() == 5 -> words[4] else -> "", context, state) ?? return kit_steps_capture_failure("ERROR", "{err}")
+            return kit_steps_capture_result(if kind == "text" -> source else -> "{kit_steps_lines(source)}")
         }
         raw :: if kind == "size" -> words[4] else -> words[3]
-        directory :: kit_steps_work_path(raw, context.env, context.work, context.scratch, state.built) ?? return Err(kit_expect_verdict("REFUSED", "capture path escapes work"))
+        directory :: kit_steps_work_path(raw, context.env, context.work, context.scratch, state.built) ?? return kit_steps_capture_failure("REFUSED", "capture path escapes work")
         if kind == "size" {
-            info :: files.stat(directory) ?? return Err(kit_expect_verdict("ERROR", "capture size: {err}"))
-            return Ok("{info.size}")
+            info :: files.stat(directory) ?? return kit_steps_capture_failure("ERROR", "capture size: {err}")
+            return kit_steps_capture_result("{info.size}")
         }
         if kind == "tree-bytes" {
-            size :: kit_steps_tree_bytes(directory) ?? return Err(kit_expect_verdict("ERROR", err))
-            return Ok("{size}")
+            size :: kit_steps_tree_bytes(directory) ?? return kit_steps_capture_failure("ERROR", "{err}")
+            return kit_steps_capture_result("{size}")
         }
         if kind == "first-entry" {
-            entries :: files.list_dir(directory) ?? return Err(kit_expect_verdict("ERROR", "first-entry: {err}"))
-            if entries.len() == 0 -> return Err(kit_expect_verdict("FAIL", "first-entry directory is empty"))
-            return Ok(entries[0].path)
+            entries :: files.list_dir(directory) ?? return kit_steps_capture_failure("ERROR", "first-entry: {err}")
+            if entries.len() == 0 -> return kit_steps_capture_failure("FAIL", "first-entry directory is empty")
+            return kit_steps_capture_result(entries[0].path)
         }
-        paths :: kit_steps_entries(directory, words.slice(3, words.len())) ?? return Err(kit_expect_verdict("ERROR", err))
-        if kind == "entries" -> return Ok("{paths.len()}")
-        if paths.len() != 1 -> return Err(kit_expect_verdict("FAIL", "sole-entry needs exactly one match, found {paths.len()}"))
-        return Ok(paths[0])
+        paths :: kit_steps_entries(directory, words.slice(3, words.len())) ?? return kit_steps_capture_failure("ERROR", "{err}")
+        if kind == "entries" -> return kit_steps_capture_result("{paths.len()}")
+        if paths.len() != 1 -> return kit_steps_capture_failure("FAIL", "sole-entry needs exactly one match, found {paths.len()}")
+        return kit_steps_capture_result(paths[0])
     }
     subject :: kit_steps_subject(words[1])
     offset :: if subject == "file" || subject == "file?" -> 1 else -> 0
-    source :: kit_steps_capture_subject(words[1], if offset == 1 -> words[2] else -> "", context, state) ?? return Err(kit_expect_verdict("ERROR", err))
+    source :: kit_steps_capture_subject(words[1], if offset == 1 -> words[2] else -> "", context, state) ?? return kit_steps_capture_failure("ERROR", "{err}")
     kind :: words[2 + offset]
-    if kind == "line" -> return Ok(kit_steps_line(source, words[4 + offset], "") ?? return Err(kit_expect_verdict("FAIL", "capture prefix line missing")))
+    if kind == "line" -> return kit_steps_capture_result(kit_steps_line(source, words[4 + offset], "") ?? return kit_steps_capture_failure("FAIL", "capture prefix line missing"))
     if kind == "after" {
         marker :: words[3 + offset]
-        line :: kit_steps_first_line(source, marker) ?? return Err(kit_expect_verdict("FAIL", "capture marker line missing"))
-        at :: line.index(marker) ?? return Err(kit_expect_verdict("FAIL", "capture marker missing"))
+        line :: kit_steps_first_line(source, marker) ?? return kit_steps_capture_failure("FAIL", "capture marker line missing")
+        at :: line.index(marker) ?? return kit_steps_capture_failure("FAIL", "capture marker missing")
         value :: line.slice(at + marker.len(), line.len())
-        return Ok(if words.len() == 5 + offset -> ~value.trim() else -> value)
+        return kit_steps_capture_result(if words.len() == 5 + offset -> ~value.trim() else -> value)
     }
-    Ok(kit_steps_json_scalar(source, kind, words[3 + offset]) ?? return Err(kit_expect_verdict("FAIL", "capture JSON path missing or not scalar")))
+    kit_steps_capture_result(kit_steps_json_scalar(source, kind, words[3 + offset]) ?? return kit_steps_capture_failure("FAIL", "capture JSON path missing or not scalar"))
 }

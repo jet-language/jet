@@ -365,8 +365,8 @@ fn kit_steps_parse(source: String) -> KitPlan {
         }
         if key == "exit" {
             words :: kit_steps_words(value) ?? []
-            not_equal :: words.len() == 2 && words[0] == "!=" && Int.parse(words[1]) != None && kit_steps_reason(original)
-            ordinary :: value == "any" || value == "nonzero" || Int.parse(value) != None
+            not_equal :: words.len() == 2 && words[0] == "!=" && kit_steps_integer(words[1]) != None && kit_steps_reason(original)
+            ordinary :: value == "any" || value == "nonzero" || kit_steps_integer(value) != None
             if (!ordinary && !not_equal) || (value == "any" && !kit_steps_reason(original)) {
                 plan.error = "line {line_number}: invalid exit or missing partial reason"
                 return plan
@@ -490,7 +490,7 @@ fn kit_steps_invoke_step(step: KitStep, env: KitEnv, work: String, scratch: Stri
     kit_exec_invoke_with_env(prepared.env, prepared.argv, prepared.cwd, scratch, prepared.stdin, prepared.overlay)
 }
 
-fn kit_steps_prepare(step: KitStep, env: KitEnv, work: String, scratch: String, snapshots: String, built: String, overlay: [KitEnvVar]) -> KitProcessInput String! {
+fn kit_steps_prepare(step: KitStep, env: KitEnv, work: String, scratch: String, snapshots: String, built: String, overlay: [KitEnvVar]) -> KitProcessInput Err! {
     policy :: kit_steps_policy(step, env) ?? return Err("time limit outside Duration range")
     environment :: kit_steps_step_environment(step, env, work, scratch, built, overlay)
     argv := [String]{}

@@ -1,3 +1,4 @@
+use core.files as files
 use core.crypto as crypto
 
 fn kit_steps_path_tokens(value: String) -> Bool {
@@ -18,7 +19,7 @@ fn kit_steps_history_stream(reference: String, subject: String, history: [KitCap
 
 fn kit_steps_line_count_target(target: String, assertion: KitAssertion, history: [KitCapturedStep]) -> Int? {
     reference :: kit_steps_count_label(target)
-    if reference == "" -> return Int.parse(target)
+    if reference == "" -> return kit_steps_integer(target)
     factor :: Int.parse(target.slice(0, target.index("*") ?? 0)) ?? return None
     previous :: kit_steps_history_stream(reference, assertion.stream, history, false) ?? return None
     Val(factor * kit_steps_lines(kit_steps_transform(previous, assertion.transform)))

@@ -144,6 +144,7 @@ fn kit_steps_stream_assertion(key: String, original: String) -> KitAssertion? {
         if mode == "!=" && stream != "file" -> return None
         if (mode == "==" || mode == "!=") && stream == "file" && !kit_steps_relative_path(data) -> return None
     }
+    // #4814: jet fmt adds a trailing comma inside Val(...) here; keep this layout
     Val(KitAssertion{stream: stream, path: path, mode: mode, value: data, extra: extra,
         optional_file: subject == "file?", transform: transform, alternatives: alternatives})
 }
@@ -237,12 +238,13 @@ fn kit_steps_byte_index(bytes: [U8], needle: [U8], start: Int, end: Int, insensi
 
 // Raw file predicates operate on bytes, not on a lossy or fallible UTF-8 view.
 fn kit_steps_file_predicate(bytes: [U8], mode: String, value: String, extra: String, alternatives: [String]) -> Bool {
-    needle :: value.bytes()
-    found :: kit_steps_byte_index(bytes, needle, 0, bytes.len(), mode == "~i" || mode == "!~i")
-    if mode == "~" || mode == "~i" -> return found != None
-    if mode == "!~" || mode == "!~i" -> return found == None
-    if mode == "^=" -> return (found ?? -1) == 0
     if mode == "empty" || mode == "nonempty" -> return (bytes.len() == 0) == (mode == "empty")
+    needle :: value.bytes()
+    if mode == "^=" -> return needle.len() <= bytes.len() && (kit_steps_byte_index(bytes, needle, 0, needle.len(), false) ?? -1) == 0
+    if mode == "~" || mode == "~i" || mode == "!~" || mode == "!~i" {
+        found :: kit_steps_byte_index(bytes, needle, 0, bytes.len(), mode == "~i" || mode == "!~i")
+        return (found != None) == (mode == "~" || mode == "~i")
+    }
     if mode == "~any" {
         loop alternative in alternatives {
             if kit_steps_byte_index(bytes, alternative.bytes(), 0, bytes.len(), false) != None -> return true
@@ -261,7 +263,7 @@ fn kit_steps_file_predicate(bytes: [U8], mode: String, value: String, extra: Str
         return count == (Int.parse(extra) ?? -1)
     }
     if mode == "before" {
-        left :: found ?? return false
+        left :: kit_steps_byte_index(bytes, needle, 0, bytes.len(), false) ?? return false
         right :: kit_steps_byte_index(bytes, extra.bytes(), 0, bytes.len(), false) ?? return false
         return left < right
     }
