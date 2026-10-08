@@ -52,6 +52,10 @@ fn jet_codegen_core_reach_expr_keys(expression: TExpr, keys: &[String], precise_
             helper :: jet_codegen_precise_source_helper(owner, operation) ?? return
             if precise_helpers.get(helper) == .Val(key) -> jet_codegen_core_reach_add(&keys, key)
         }
+        .MathBuiltin(owner, operation, _) -> {
+            if owner != "Int" || operation != "abs" -> return
+            if precise_helpers.get("abs") == .Val(key) -> jet_codegen_core_reach_add(&keys, key)
+        }
         .Index(_, _, _, _, checked_call, _) -> {
             if checked_call == Val(symbol) -> jet_codegen_core_reach_add(&keys, symbol.key)
         }
@@ -111,7 +115,7 @@ pub fn jet_codegen_reachable_core_rows(functions: [TFunc], candidates: ^[Bool], 
             next
         }
         _ := &by_key.add(function.key, index)
-        if function.source_file == "Core/math/math.jet" && core_module_identities.contains(function.module_identity) && function.name.starts_with("__") {
+        if function.source_file == "Core/math/math.jet" && core_module_identities.contains(function.module_identity) && (function.name.starts_with("__") || function.name == "abs") {
             if precise_helpers.get(function.name) != None -> panic("ambiguous checked precise source helper")
             _ := &precise_helpers.add(function.name, function.key)
         }

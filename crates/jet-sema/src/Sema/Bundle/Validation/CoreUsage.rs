@@ -1315,6 +1315,9 @@ pub(crate) fn collect_core_expr(
             if let Some(recv_type) = recv_type {
                 note_builtin_math_type(recv_type, registry, used, spans, Some(*method_span));
             }
+            if recv_type.as_deref() == Some("Int") && method == "abs" {
+                note_core_usage(used, spans, "core.math::abs", Some(*method_span));
+            }
             if matches!(recv_type.as_deref(), Some("Float" | "F32"))
                 && matches!(
                     method.as_str(),
