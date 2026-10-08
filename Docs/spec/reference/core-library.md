@@ -845,7 +845,7 @@ fn count_lines(path: String) -> Int IOError! {
 | `open(path)` | `FileReader !IOError` | Open a buffered reader. |
 | `create(path)` | `FileWriter !IOError` | Create or replace a buffered writer. |
 | `append(path)` | `FileWriter !IOError` | Open a buffered appending writer. |
-| `reader.read_line()` | `?String !IOError` | Read one line without its newline; return `None` at EOF. |
+| `reader.read_line()` | `?String !IOError` | Read from the shared buffered position, remove all trailing CR/LF bytes, and return `None` only at EOF. A final unterminated line is returned; invalid UTF-8 is `IOError.InvalidInput`. |
 | `reader.read(max)` | `[U8] !IOError` | Read up to `max` bytes from the shared position; an empty list is EOF. |
 | `reader.stat()` / `writer.stat()` | `Stat !IOError` | Describe the open file itself (fstat); a writer's buffered bytes count only after a flush. |
 | `reader.lines()` in a loop source | stream of `String` | Pull lines without loading the complete file. |
@@ -1889,7 +1889,7 @@ child to the parent's corresponding stream.
 | `child.exited()` | `Bool !IOError` | Poll without waiting. |
 | `child.kill()` / `.terminate()` / `.interrupt()` | `Unit !IOError` | Send the corresponding termination request. |
 | `child.stdin.write(text)` / `.close()` | `Unit !IOError` | Write to or close a streamed child input. |
-| `child.stdout.lines()` / `child.stderr.lines()` | line stream | Read lines from a streamed output pipe; the parent remains responsible for draining it. |
+| `child.stdout.lines()` / `child.stderr.lines()` | line stream | Read from the shared buffered pipe position, removing one LF and its preceding CR only. A final bare CR remains; invalid UTF-8 is `IOError.Other` on `process output`. The parent remains responsible for draining it. |
 
 A terminal session is an opt-in process mode. It supplies terminal-sized input
 and output through the terminal policy and fails with a typed error when the

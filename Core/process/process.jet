@@ -438,3 +438,42 @@ fn default_fields(argv: [String]) -> ProcessFields Never! {
     assert(fields.cpu_time_limit_ms == None && fields.memory_limit_bytes == None && fields.open_file_limit == None)
     assert(!fields.detached && fields.terminal == None && fields.policy_wire == None)
 }
+
+// Process.rs:3299-3328: shared stdout/stderr BufReader leaves retain their
+// shared position and refill buffer. There is no FS fault checkpoint here.
+pub fn __stdout_next_line(stream: ProcessStdoutStream) -[Time.Wait]> String? IOError! {
+    pipe_line(core.process.__stdout_line_bytes(stream))
+}
+
+pub fn __stderr_next_line(stream: ProcessStderrStream) -[Time.Wait]> String? IOError! {
+    pipe_line(core.process.__stderr_line_bytes(stream))
+}
+
+fn pipe_line(^input: [U8]) -> String? IOError! {
+    bytes := ^input
+    if bytes.len() == 0 -> return Ok(None)
+    trim_pipe_line(&bytes)
+    text :: String.from_bytes(^bytes) ?? return Err(IOError.Other(IOContext{
+        operation: .Read, resource: Val("process output"), os_code: None,
+        cause: Val("stream did not contain valid UTF-8"),
+    }))
+    Ok(Val(text))
+}
+
+fn trim_pipe_line(bytes: &[U8]) Never! {
+    if bytes.len() > 0 && bytes[bytes.len() - 1] == (U8{10}) {
+        _ :: &bytes.pop()
+        if bytes.len() > 0 && bytes[bytes.len() - 1] == (U8{13}) -> _ :: &bytes.pop()
+    }
+}
+
+#Test("pipe next_line preserves final bare CR and removes only one CR before LF") {
+    final := [U8]{120, 13}
+    trim_pipe_line(&final)
+    assert_eq(final, [U8]{120, 13})
+    crlf := [U8]{120, 13, 13, 10}
+    trim_pipe_line(&crlf)
+    assert_eq(crlf, [U8]{120, 13})
+    assert_eq(pipe_line([U8]{10}) ?? panic("empty line"), Val(""))
+    assert_eq(pipe_line([U8]{}) ?? panic("EOF"), None)
+}
