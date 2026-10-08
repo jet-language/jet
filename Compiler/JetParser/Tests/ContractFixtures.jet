@@ -110,6 +110,61 @@ fn pc_formatter_edit_boundaries() {
     pc_require(jfmt_apply_source_edits("éx", [TextEdit]{TextEdit{span: Span{start: 2, end: 0}, new_text: "a"}}) == None, "reversed edit")
 }
 
+// Kind-only queries are checked against the existing whole-token accessor.
+// This semantic oracle is not a production allocation or timing measurement.
+fn pc_current_kind_equivalence() {
+    sources :: [String]{">> /* after split */ name", "/* block */ // line\n name", "/* block */ // line\n"}
+    loop source in sources {
+        bytes := source.bytes()
+        lexed := lex(bytes)
+        pc_require(lexed.diagnostics.len() == 0, "current-kind fixture lexes real tokens")
+        prepared := parser_prepare_tokens(^lexed.tokens)
+        pc_require(prepared.diagnostics.len() == 0, "current-kind fixture uses canonical prepared tokens")
+        end :: bytes.len()
+        state := JetParserState{tokens: ^prepared.tokens, position: 0, diagnostics: ^lexed.diagnostics, source_end: end, block_spans: [Span]{}, pending_type_gt: false, pending_type_gt_span: Span{start: end, end: end}, result_handler_depth: 0, statement_start: -1, line_starts: parser_line_starts(bytes), source: ^bytes, allow_environment_reads: false}
+        pc_require(state.tokens.len() > 0 && state.tokens[state.tokens.len() - 1].kind == TOKEN_EOF, "fixture retains the actual lexical EOF token")
+        split :: source.starts_with(">>")
+        if split {
+            pc_require(state.tokens[0].kind == TOKEN_SHR, "real lexer produces the combined type-close token")
+            _ := parser_take_type_close(&state)
+            pc_require(state.pending_type_gt, "real type-close consumer leaves the pending second GT")
+        }
+        before :: state.position
+        oracle := ~state
+        expected :: parser_current(&oracle).kind
+        actual :: parser_current_kind(&state)
+        pc_require(actual == expected && "{state:Debug}" == "{oracle:Debug}", "kind-only query preserves full parser state and the token-accessor verdict")
+        if split -> pc_require(actual == TOKEN_GT && state.position == before, "pending GT precedes trivia and does not advance the cursor")
+        if !split -> pc_require(state.position > before, "mixed and trivia-only comments advance to the same real token or EOF")
+        stable :: state.position
+        pc_require(parser_current_kind(&state) == actual && state.position == stable, "repeated current-kind query is idempotent")
+        if split {
+            cursors :: [Int]{-1, state.tokens.len(), state.tokens.len() + 1}
+            loop cursor in cursors {
+                state.position = cursor
+                oracle = ~state
+                expected_pending :: parser_current(&oracle).kind
+                pc_require(parser_current_kind(&state) == expected_pending && expected_pending == TOKEN_GT, "pending split token precedes negative and out-of-range bounds")
+                pc_require(state.position == cursor && "{state:Debug}" == "{oracle:Debug}", "pending GT preserves even an out-of-range cursor and all state")
+                pc_require(parser_current_kind(&state) == TOKEN_GT && state.position == cursor, "pending GT remains idempotent")
+            }
+        }
+        state.pending_type_gt = false
+        cursors :: [Int]{-1, 0, state.tokens.len() - 1, state.tokens.len(), state.tokens.len() + 1}
+        loop cursor in cursors {
+            state.position = cursor
+            oracle = ~state
+            expected_at :: parser_current(&oracle).kind
+            actual_at :: parser_current_kind(&state)
+            pc_require(actual_at == expected_at && "{state:Debug}" == "{oracle:Debug}", "valid, comment, actual EOF, and invalid cursors match the canonical token accessor")
+            if cursor < 0 || cursor >= state.tokens.len() -> pc_require(actual_at == TOKEN_EOF && state.position == cursor, "negative, end, and beyond-end cursors return EOF without advancing")
+            if cursor == state.tokens.len() - 1 -> pc_require(actual_at == TOKEN_EOF && state.position == cursor, "the real EOF token is read without advancing")
+            after :: state.position
+            pc_require(parser_current_kind(&state) == actual_at && state.position == after, "all non-pending cursor cases remain idempotent")
+        }
+    }
+}
+
 fn run() {
     canonical :: parse_source("fn run() {{\n values :: [JSON]{{JSON.Null}}\n print(values.len())\n}}\n".bytes())
     pc_require(canonical.diagnostics.len() == 0, "canonical newline collection consumer")
@@ -119,6 +174,7 @@ fn run() {
     pc_marker_metadata()
     pc_formatter_edit_boundaries()
     pc_trait_effect_slots()
+    pc_current_kind_equivalence()
     print("V48 semicolon edits/recovery: passed")
     print("marker registry/parser status: passed")
     print("trait effect-arrow slots: passed")
