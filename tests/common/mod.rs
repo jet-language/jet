@@ -1942,6 +1942,7 @@ pub fn strip_vetted_prelude_modules(rust_code: &str) -> String {
     s = strip_vetted_module(&s, "jet_std_common_types");
     s = strip_vetted_module(&s, "jet_fs_chown");
     s = strip_vetted_module(&s, "jet_fs_handles");
+    s = strip_vetted_module(&s, "jetc_fd_seed");
     s = strip_vetted_module(&s, "jet_std_math_task_mem");
     s = strip_vetted_module(&s, "jet_std_reactive_event_watch");
     s = strip_vetted_module(&s, "jet_std_ffi_callbacks");
@@ -2245,6 +2246,7 @@ fn audited_source_markers_strip_only_registered_regions() {
         "jet_testing_history_top",
         "jet_data_flow",
         "jet_native_comptime_channel",
+        "jetc_fd_seed",
     ];
     let mut generated = String::new();
     for name in names {
