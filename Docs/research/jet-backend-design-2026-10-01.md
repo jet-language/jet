@@ -423,6 +423,11 @@ This inventory is not a layout declaration: Lower still requires the actual
 checked MIR declaration and surviving import before exporting a typed helper.
 Combining an emitted seed with held source/provider changes must be labelled
 as an uncomposed inventory, not native execution or retirement evidence.
+Seed-only Rust sum aliases and lifetime-only borrowed carriers are classified
+from their actual emitted declarations, not admitted as Jet record TYPE
+specializations. The `JetOutcome<T,E> = Result<T,E>` alias uses the existing
+top-level result codec; nested tuple sums remain explicitly unsupported.
+These RUST-EXIT S5 seed compatibility rules disappear at cutover.
 The raw tagged-Int destructor `jet_rt_int_drop` receives metadata only once
 the Int layer owns that export in `exports.list`: one Word parameter, Unit
 result, and no generated Rust body. Earlier runtime epochs have no such row.
