@@ -12,7 +12,6 @@
 typedef struct { const unsigned char *ptr; int64_t len, cap; } Text;
 _Static_assert(sizeof(Text) == 24, "E4 text header");
 extern void jet_rt_host_init(void);
-extern void jet_rt_stdout_flush(void);
 extern int32_t jet_rt_main(void (*entry)(void));
 extern void jet_term_write_stdout_line(const Text *, uint8_t);
 extern void jet_rt_panic_message(const unsigned char *, int64_t);
@@ -21,9 +20,38 @@ extern bool jet_rt_root_publish_rendered(const unsigned char *, int64_t, int64_t
 extern int64_t jet_scheduler_native_propagate(void);
 extern int64_t jet_int_owned_from_i64(int64_t);
 extern void jet_std_process_exit(int64_t);
+extern void *jet_rt_alloc(size_t, size_t);
+extern void jet_rt_free(void *, size_t, size_t);
+extern void jet_rt_native_atexit(int64_t);
+extern bool jet_stdio_stdout_tty_raw(void);
+
+// A real closure in the canonical Jet exit queue; no manually invoked cleanup
+// and no Rust unwind across this C callback. The production queue owns release.
+static int64_t cleanup_body(int64_t closure) {
+    (void)closure;
+    static const unsigned char bytes[] = "cleanup";
+    Text text = { bytes, 7, 0 };
+    jet_term_write_stdout_line(&text, 0);
+    return 0;
+}
+
+static int64_t cleanup_release(int64_t closure) {
+    jet_rt_free((void *)(uintptr_t)closure, 32, 8);
+    return 0;
+}
+
+static void register_cleanup(void) {
+    int64_t *closure = jet_rt_alloc(32, 8);
+    closure[0] = 1;
+    closure[1] = (int64_t)(uintptr_t)cleanup_body;
+    closure[2] = (int64_t)(uintptr_t)cleanup_release;
+    closure[3] = 0;
+    jet_rt_native_atexit((int64_t)(uintptr_t)closure);
+}
 
 static int mode;
 static void entry(void) {
+    if (mode != 4) register_cleanup();
     static const unsigned char body[] = "body";
     Text text = { body, 4, 0 };
     jet_term_write_stdout_line(&text, 0); // Below the pipe's 8192-byte buffer.
@@ -59,8 +87,9 @@ static void check(int selected, int expected_status, const char *report) {
         assert(dup2(stream[1], STDOUT_FILENO) == STDOUT_FILENO);
         assert(dup2(stream[1], STDERR_FILENO) == STDERR_FILENO);
         assert(close(stream[1]) == 0);
-        // Entryless hosts may call terminal flushing before their init array.
-        jet_rt_stdout_flush();
+        // The fixture runner pipes stdout before loader init arrays, so the
+        // canonical cached TTY fact is false. Duplication alone cannot prove it.
+        assert(!jet_stdio_stdout_tty_raw());
         jet_rt_host_init();
         mode = selected;
         if (selected == 4) {
@@ -87,12 +116,14 @@ static void check(int selected, int expected_status, const char *report) {
     int status = 0;
     assert(waitpid(child, &status, 0) == child);
     assert(WIFEXITED(status) && WEXITSTATUS(status) == expected_status);
-    assert(strncmp(output, "body\n", 5) == 0);
+    const char *prefix = selected == 4 ? "body\n" : "body\ncleanup\n";
+    size_t prefix_length = strlen(prefix);
+    assert(strncmp(output, prefix, prefix_length) == 0);
     if (report == NULL) {
-        assert(strcmp(output, "body\n") == 0);
+        assert(strcmp(output, prefix) == 0);
     } else {
-        assert(strncmp(output + 5, report, strlen(report)) == 0);
-        assert(strstr(output + 5 + strlen(report), report) == NULL);
+        assert(strncmp(output + prefix_length, report, strlen(report)) == 0);
+        assert(strstr(output + prefix_length + strlen(report), report) == NULL);
         assert(strstr(output, "panicked at") == NULL);
     }
 }
