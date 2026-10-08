@@ -17,7 +17,7 @@ stdout.trim: = fixtures/native_omp_recipe_admits_hangar_projects_and_rolls_back/
 file: home/.jet/tools/manifest.json ~ "\"provider\":\"jetpackage\"" # original contains predicate
 file: home/.jet/tools/manifest.json ~ "github:can1357/oh-my-pi" | ~ "can1357/oh-my-pi" # original disjunction
 file: home/.jet/tools/manifest.json ~ "\"tier\":\"#auto\"" # original contains predicate
-capture: store = text file home/.jet/tools/generations/1/meta.json.after_first("\"store_root\": \"").split("\"", 0)
+capture: store = text file.after_first("\"store_root\": \"").split("\"", 0) home/.jet/tools/generations/1/meta.json
 cap:store: ^= "{work}/root" # original prefix
 file: home/.jet/tools/generations/1/meta.json !~ "/nix/store/" # original contains negation
 step: jet test native-metadata.jet

@@ -87,7 +87,7 @@ file: run.jet sha256 = "{cap:source_sha}"
 capture: pre_library_exe = opt-bytes file .jet/build/run{sys:exe-suffix}
 capture: pre_library_exe_sha = sha256 file .jet/build/run{sys:exe-suffix}
 capture: package_before_library = text file package.jet
-capture: package_with_library = text file package.jet.replace("    api: .Service{ name: \"pulse-api\", entry: serve },\n}\n", "    api: .Service{ name: \"pulse-api\", entry: serve },\n    core: .Library{\n        name: \"pulse\",\n        native: true,\n        loadable: true,\n        bindings: [c],\n    },\n}\n")
+capture: package_with_library = text file.replace("    api: .Service{ name: \"pulse-api\", entry: serve },\n}\n", "    api: .Service{ name: \"pulse-api\", entry: serve },\n    core: .Library{\n        name: \"pulse\",\n        native: true,\n        loadable: true,\n        bindings: [c],\n    },\n}\n") package.jet
 cap:package_with_library: != "{cap:package_before_library}"
 write: package.jet = "{cap:package_with_library}"
 file: .jet/lock same-as {cap:initial_lock}

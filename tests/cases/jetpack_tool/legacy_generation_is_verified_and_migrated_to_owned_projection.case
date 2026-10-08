@@ -15,8 +15,8 @@ write: fx/nixpkgs-greet.json greet.json
 step: jetpack tool install greet@nixpkgs --no-color --offline --fixtures {work}/fx 
 cwd: project
 exit: 0
-capture: hash = text file home/.jet/tools/generations/1/meta.json.after_first("\"output_hash\": \"").split("\"", 0)
-capture: store = text file home/.jet/tools/generations/1/meta.json.after_first("\"store_root\": \"").split("\"", 0)
+capture: hash = text file.after_first("\"output_hash\": \"").split("\"", 0) home/.jet/tools/generations/1/meta.json
+capture: store = text file.after_first("\"store_root\": \"").split("\"", 0) home/.jet/tools/generations/1/meta.json
 step: jet run legacy-setup.jet -- {cap:store} {cap:hash} {work}/home
 exit: 0
 remove: home/.jet/tools/current
