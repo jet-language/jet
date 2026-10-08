@@ -1233,3 +1233,32 @@ diagnostic registry, snapshots in
 [`tests/ui/cbor_encode_removed`](../../tests/ui/cbor_encode_removed/), and
 [`tests/encoding_edition.rs`](../../tests/encoding_edition.rs). Runtime
 parse/decode failures remain typed Core values, not compiler diagnostics.
+
+## Encoding provider ownership
+
+The source codec policy calls these existing registered seed leaves directly;
+they are not additional public wrappers. Their exact temporary registrations
+are journaled in the integration leaf ledger under `JsonStreams7` and die at
+native cutover. This inventory distinguishes a source policy receipt from an
+unexercised native carrier or runtime receipt.
+
+| Registered provider | Source policy consumer | Provider boundary |
+| --- | --- | --- |
+| `core.encoding.__edition` | `base32.jet` and `base64.jet` decode entry points | Resolved package edition intrinsic; source selects strict/legacy rules |
+| `core.encoding.__read_byte` | `stream.jet` JSON pull and `csv.jet` reader | Existing file read; source handles parsing, limits and lifecycle |
+| `core.encoding.__write_bytes` | `stream.jet` JSON push and `csv.jet` writer | Existing file write-all; source owns encoding and limits |
+| `core.encoding.__flush` | `stream.jet` JSON push and `csv.jet` writer | Existing file flush; source owns sticky terminal failure |
+| `core.encoding.__utf8_validate` | `cbor_parse.jet` text chunks and `stream.jet` text conversion | Existing strict validator; source chooses validation point and maps errors |
+| `core.encoding.__bytes_into_text` | `stream.jet` and `csv.jet` validated text transfer | Consume exact validated UTF-8 allocation without copying |
+| `core.encoding.__string_byte` | `stream.jet` checked string-byte accessor | Borrow byte only after source bounds proof |
+| `core.encoding.__object_from_entries` | `stream.jet` owned object construction | Move ordered entries into the existing native carrier |
+| `core.encoding.__write_text` | `csv.jet` field output and `stream.jet` JSON push | Borrow UTF-8 storage for existing file write-all |
+| `core.encoding.__text_into_bytes` | `stream.jet` record accounting and canonical numbers | Consume text allocation without copying |
+| `core.encoding.__typed_text` | `stream.jet` typed-text retention | Move text into the existing private Decode carrier |
+| `core.encoding.__object_entries_view` | `stream.jet` checked Object view | Borrow ordered entries, preserving the owner |
+| `core.encoding.__bytes_view` | `stream.jet` checked Bytes view | Borrow payload, preserving the owner |
+
+The native Object carrier remains an explicitly gated bridge: these transfers
+do not claim that the public `Map` shape has become an ordered source list.
+The unused `__object_into_entries` and `__tree_tag` registry rows have no
+current Jet policy consumer and are not credited by this inventory.
