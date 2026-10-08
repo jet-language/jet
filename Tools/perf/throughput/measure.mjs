@@ -166,6 +166,34 @@ export function readTrace(file, { completedProcess } = {}) {
         events.some(event => event.pid !== completedProcess.pid)) {
       throw new Error('completed trace does not match the recorded process identity');
     }
+    const stacks = new Map();
+    const lastTime = new Map();
+    for (const event of events) {
+      if (!Number.isSafeInteger(event.tid) || event.tid < 0 ||
+          typeof event.name !== 'string' || !event.name ||
+          !['M', 'i', 'C', 'B', 'E'].includes(event.ph)) throw new Error('invalid completed trace event schema');
+      // Producer metadata has no timestamp. Its unix_ms anchor and the
+      // independently recorded process window have millisecond precision.
+      if (event.ph === 'M' && event.ts === undefined) continue;
+      if (!Number.isSafeInteger(event.ts) || event.ts < 0 ||
+          Math.floor(starts[0].args.unix_ms + event.ts / 1000) > completedProcess.finishedUnixMs) {
+        throw new Error('completed trace event is outside the recorded process window');
+      }
+      const thread = `${event.pid}:${event.tid}`;
+      if (event.ts < (lastTime.get(thread) ?? 0)) throw new Error('invalid completed trace time order');
+      lastTime.set(thread, event.ts);
+      if (event.ph !== 'B' && event.ph !== 'E') continue;
+      if (typeof event.cat !== 'string' || !event.cat) throw new Error('invalid completed trace span category');
+      const stack = stacks.get(thread) ?? [];
+      stacks.set(thread, stack);
+      if (event.ph === 'B') {
+        stack.push(event);
+      } else {
+        const begin = stack.pop();
+        if (!begin || begin.name !== event.name || begin.cat !== event.cat) throw new Error('unbalanced completed trace spans');
+      }
+    }
+    if ([...stacks.values()].some(stack => stack.length)) throw new Error('unbalanced completed trace spans');
   }
   return events;
 }
