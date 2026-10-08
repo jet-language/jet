@@ -84,6 +84,8 @@ pub struct LIRLowering {
     pub entry: LIRFunctionID?
     // Every requested callable's concrete native entry; empty on any issue.
     pub callables: [U64:LIRFunctionID]
+    // Native-pack C bindings generated for the actual runtime import closure.
+    pub native_exports: [String:LIRFunctionID]
 }
 
 // How one checked MIR type is carried in LIR.
@@ -168,6 +170,8 @@ struct LowerModule {
     pub test_checks: [MIROutputCheck]
     // Empty for ordinary program and callback lowering.
     pub runtime_intrinsics: [U64:LowerRuntimeIntrinsic]{[U64:LowerRuntimeIntrinsic]{}}
+    pub native_pack: Bool
+    pub native_exports: [String:LIRFunctionID]
     // Signature shape key -> its id (lower_signature_key).
     pub signature_rows: [String:Int]
     pub data: [LIRData]
@@ -277,28 +281,40 @@ struct LowerFunction {
 // methods of generic types once per concrete instance) plus their glue.
 pub fn lir_lower_entry(program: MIRProgram, entry: MIRFunctionID) -> LIRLowering Never! {
     intrinsics := [U64:LowerRuntimeIntrinsic]{}
-    lower_selected(program, [MIRFunctionID]{entry}, true, None, [MIROutputCheck]{}, ^intrinsics)
+    lower_selected(program, [MIRFunctionID]{entry}, true, None, [MIROutputCheck]{}, ^intrinsics, false, [String]{})
 }
 
 // Compiler and test callbacks retain return carriers; only program entries
 // consume Option/Result success and turn failure into a process exit.
 pub fn lir_lower_callables(program: MIRProgram, roots: [MIRFunctionID]) -> LIRLowering Never! {
     intrinsics := [U64:LowerRuntimeIntrinsic]{}
-    lower_selected(program, roots, false, None, [MIROutputCheck]{}, ^intrinsics)
+    lower_selected(program, roots, false, None, [MIROutputCheck]{}, ^intrinsics, false, [String]{})
 }
 
 // RuntimeLibrary validates each exact function ID and its signature.
 // No ordinary program/callback lowering enables runtime-only substitution.
 fn lir_lower_runtime_callables(program: MIRProgram, roots: [MIRFunctionID], intrinsics: ^[U64:LowerRuntimeIntrinsic]) -> LIRLowering Never! {
-    lower_selected(program, roots, false, None, [MIROutputCheck]{}, ^intrinsics)
+    lower_selected(program, roots, false, None, [MIROutputCheck]{}, ^intrinsics, false, [String]{})
 }
 
-fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool, test_serial: Bool?, checks: [MIROutputCheck], runtime_intrinsics: ^[U64:LowerRuntimeIntrinsic]) -> LIRLowering Never! {
+// A native pack keeps Runtime(symbol) calls and binds typed glue under the
+// existing C names in its object export table. The seed APIs retain their ABI.
+pub fn lir_lower_native_callables(program: MIRProgram, roots: [MIRFunctionID]) -> LIRLowering Never! {
+    lir_lower_native_imports(program, roots, [String]{})
+}
+
+// `imports` is a mechanically derived external consumer set, never dummy MIR.
+pub fn lir_lower_native_imports(program: MIRProgram, roots: [MIRFunctionID], imports: [String]) -> LIRLowering Never! {
+    intrinsics := [U64:LowerRuntimeIntrinsic]{}
+    lower_selected(program, roots, false, None, [MIROutputCheck]{}, ^intrinsics, true, imports)
+}
+
+fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool, test_serial: Bool?, checks: [MIROutputCheck], runtime_intrinsics: ^[U64:LowerRuntimeIntrinsic], native_pack: Bool, imports: [String]) -> LIRLowering Never! {
     // The frontend may erase browser init functions before native MIR is
     // serialized. Their host requirement survives in the runtime-part facts.
     loop part in program.facts.runtime_parts {
         if part == .Browser {
-            return LIRLowering{lir: LIRModule{signatures: [LIRSignature]{}, functions: [LIRFunction]{}, data: [LIRData]{}}, issues: [LIRLoweringIssue]{LIRLoweringIssue{function: "entry preparation", message: "browser-hosted initialization and callbacks are not lowered for native O0 yet"}}, entry: None, callables: [U64:LIRFunctionID]{}}
+            return LIRLowering{lir: LIRModule{signatures: [LIRSignature]{}, functions: [LIRFunction]{}, data: [LIRData]{}}, issues: [LIRLoweringIssue]{LIRLoweringIssue{function: "entry preparation", message: "browser-hosted initialization and callbacks are not lowered for native O0 yet"}}, entry: None, callables: [U64:LIRFunctionID]{}, native_exports: [String:LIRFunctionID]{}}
         }
     }
     test_indices := [U64:Int]{}
@@ -319,13 +335,13 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
         }
     }
     if test_issues.len() > 0 {
-        return LIRLowering{lir: LIRModule{signatures: [LIRSignature]{}, functions: [LIRFunction]{}, data: [LIRData]{}}, issues: ^test_issues, entry: None, callables: [U64:LIRFunctionID]{}}
+        return LIRLowering{lir: LIRModule{signatures: [LIRSignature]{}, functions: [LIRFunction]{}, data: [LIRData]{}}, issues: ^test_issues, entry: None, callables: [U64:LIRFunctionID]{}, native_exports: [String:LIRFunctionID]{}}
     }
     all_roots := ~roots
     loop check in checks -> &all_roots.push(check.function)
-    prepared := lower_prepare_callables(program, all_roots, ^runtime_intrinsics)
+    prepared := lower_prepare_mode(program, all_roots, ^runtime_intrinsics, native_pack, imports)
     if prepared.issues.len() > 0 {
-        return LIRLowering{lir: LIRModule{signatures: [LIRSignature]{}, functions: [LIRFunction]{}, data: [LIRData]{}}, issues: ~prepared.issues, entry: None, callables: [U64:LIRFunctionID]{}}
+        return LIRLowering{lir: LIRModule{signatures: [LIRSignature]{}, functions: [LIRFunction]{}, data: [LIRData]{}}, issues: ~prepared.issues, entry: None, callables: [U64:LIRFunctionID]{}, native_exports: [String:LIRFunctionID]{}}
     }
     test_harness := false
     loop artifact in program.artifacts {
@@ -339,6 +355,8 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
         test_serial: test_serial ?? false,
         test_checks: checks,
         runtime_intrinsics: ^prepared.runtime_intrinsics,
+        native_pack: native_pack,
+        native_exports: [String:LIRFunctionID]{},
         signature_rows: [String:Int]{},
         data: [LIRData]{},
         data_rows: [String:Int]{},
@@ -405,6 +423,11 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
     // Concrete trait keys are registered while lowering MIR bodies. Helpers
     // only refer to those keys. Drain ordinary glue before emitting each
     // deferred dispatcher once, including newly registered nested helpers.
+    if native_pack {
+        loop symbol in imports -> lower_native_glue_import(program, &m, "external C consumer", symbol)
+        loop function in functions -> lower_native_glue_rewrite(program, &m, function)
+    }
+    // Glue and helpers may register more, so the list grows while it is walked.
     cursor := 0
     dispatchers := [Int]{}
     glue_functions := [LIRFunction?]{}
@@ -423,11 +446,15 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
             } else {
                 &glue_functions.push(Val(lower_glue_function(program, &m, glue)))
             }
+            if native_pack {
+                if glue_functions[cursor] == .Val(function) -> lower_native_glue_rewrite(program, &m, function)
+            }
             cursor += 1
         }
         if emitted == dispatchers.len() -> break
         glue :: ~m.glue[dispatchers[emitted]]
         function :: if glue.helper != "" -> lower_helper_function(program, &m, glue) else if glue.clone -> lower_clone_glue_function(program, &m, glue) else -> lower_glue_function(program, &m, glue)
+        if native_pack -> lower_native_glue_rewrite(program, &m, function)
         glue_functions[dispatchers[emitted]] = Val(function)
         emitted += 1
     }
@@ -447,8 +474,9 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
     if issues.len() > 0 {
         lowered_entry = None
         callables = [U64:LIRFunctionID]{}
+        m.native_exports = [String:LIRFunctionID]{}
     }
-    LIRLowering{lir: lowered, issues: issues, entry: lowered_entry, callables: callables}
+    LIRLowering{lir: lowered, issues: issues, entry: lowered_entry, callables: callables, native_exports: ~m.native_exports}
 }
 
 // ---------------------------------------------------------------------------
