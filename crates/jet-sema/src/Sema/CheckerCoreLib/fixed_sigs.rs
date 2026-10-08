@@ -5844,6 +5844,33 @@ fn core_fixed_sig_impl(
         // below), not a second module-call surface. There is no raw-string
         // `execute(sql)` escape (D-DBDRIVER1's build plan: "must not expose a
         // generic `execute_raw(sql)` escape").
+        // Core-private mechanical SQLite queue leaves; source owns SQL policy.
+        ("core.db", "__queue_raw_open") => Some((
+            vec![(read, Type::String)],
+            Some(Type::IntN { signed: false, bits: 64 }),
+        )),
+        ("core.db", "__queue_raw_close" | "__queue_raw_begin" | "__queue_raw_commit" | "__queue_raw_rollback") => Some((
+            vec![(read, Type::IntN { signed: false, bits: 64 })],
+            Some(Type::Bool),
+        )),
+        ("core.db", "__queue_raw_execute" | "__queue_raw_query") => {
+            let row = Type::Map {
+                key: Box::new(Type::String),
+                key_span: None,
+                value: Box::new(Type::Named("DBValue".to_string())),
+            };
+            Some((
+                vec![
+                    (read, Type::IntN { signed: false, bits: 64 }),
+                    (read, Type::String),
+                    (read, Type::List(Box::new(Type::Named("DBValue".to_string())))),
+                ],
+                Some(result_ty(
+                    if name == "__queue_raw_execute" { Type::Int } else { Type::List(Box::new(row)) },
+                    db_error_ty(),
+                )),
+            ))
+        },
         ("core.db", "open" | "__open") => Some((
             vec![(read, Type::String)],
             Some(Type::Named("DBConnection".to_string())),

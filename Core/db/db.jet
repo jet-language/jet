@@ -38,6 +38,54 @@ pub fn migrate(scope: DBScope, name: String, steps: [SQL]) -[DB, Time.Wait]> Int
     core.db.__migrate(scope, name, steps)
 }
 
+// Core-private queue storage carrier. The existing SQLite bridge remains the
+// raw host leaf until cutover; no public connection gains raw-SQL authority.
+pub struct __QueueDb { raw: U64 }
+impl __QueueDb.Close {
+    fn close(^self) {
+        #Unsafe("consume the unique SQLite queue handle through its existing host close leaf") {
+            _ :: core.db.__queue_raw_close(self.raw)
+        }
+    }
+}
+pub fn __queue_open(path: String) -[DB]> __QueueDb? Never! {
+    #Unsafe("open the existing SQLite bridge and immediately adopt its handle into a consuming Core resource") {
+        raw :: core.db.__queue_raw_open(path)
+        if raw == (U64{0}) -> return None
+        return Val(__QueueDb{raw: raw})
+    }
+}
+pub fn __queue_begin(driver: __QueueDb) -[DB]> Bool Never! {
+    #Unsafe("borrow the live unique queue handle for BEGIN") { core.db.__queue_raw_begin(driver.raw) }
+}
+pub fn __queue_commit(driver: __QueueDb) -[DB]> Bool Never! {
+    #Unsafe("borrow the live unique queue handle for COMMIT") { core.db.__queue_raw_commit(driver.raw) }
+}
+pub fn __queue_rollback(driver: __QueueDb) -[DB]> Bool Never! {
+    #Unsafe("borrow the live unique queue handle for ROLLBACK") { core.db.__queue_raw_rollback(driver.raw) }
+}
+pub fn __queue_execute(driver: &__QueueDb, sql: String, params: [DBValue]) -[DB]> Int DBError! {
+    #Unsafe("execute bound queue SQL on the exclusively borrowed SQLite handle; host only marshals its existing wire") {
+        core.db.__queue_raw_execute(driver.raw, sql, params)
+    }
+}
+pub fn __queue_query(driver: &__QueueDb, sql: String, params: [DBValue]) -[DB]> [[String: DBValue]] DBError! {
+    #Unsafe("query bound queue SQL on the exclusively borrowed SQLite handle; host only marshals its existing wire") {
+        core.db.__queue_raw_query(driver.raw, sql, params)
+    }
+}
+
+#Test("queue raw SQLite leaves preserve transaction rows and ordinary consuming Close") {
+    driver := __queue_open(":memory:") ?? panic("queue SQLite open failed")
+    assert(__queue_begin(driver))
+    _ :: __queue_execute(&driver, "CREATE TABLE queue_leaf_fixture (value INTEGER)", [DBValue]{}) ?? panic("queue schema failed")
+    assert_eq(__queue_execute(&driver, "INSERT INTO queue_leaf_fixture VALUES (?)", [DBValue]{.Int(17)}) ?? -1, 1)
+    assert(__queue_commit(driver))
+    rows :: __queue_query(&driver, "SELECT value FROM queue_leaf_fixture", [DBValue]{}) ?? panic("queue query failed")
+    assert_eq(row_int(rows[0], "value") ?? -1, 17)
+    close(^driver)
+}
+
 // core.db owns its SQL values, typed row selection and conversion. The private
 // SQLite adapter alone holds engine pointers; fallible row reads use DBError.
 
