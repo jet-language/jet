@@ -445,6 +445,13 @@ Read/Write/Both respectively). They do not own socket resources. Null drops
 release nothing. `NetReadinessWitness.c` covers all boolean/ordinal combinations,
 low-byte normalization, independent clones and exact-sized shell deallocation.
 
+The native DB connection handle is a move-only 8-byte backend ID wrapper.
+As in the seed's `HandlesRaylib.rs` definition, it has no implicit close action;
+connection close remains explicit. `DbConnectionHandle.jet` releases only the
+wrapper allocation and ignores null handles. `DbConnectionHandleWitness.c`
+pins that shell-only deallocation for zero, ordinary and maximal u64 IDs;
+it does not claim admission of a database transport engine.
+
 ## Dependency order
 
 Core work follows the dependency graph. These categories describe dependency
