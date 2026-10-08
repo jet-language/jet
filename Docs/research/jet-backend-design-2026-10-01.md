@@ -1776,3 +1776,11 @@ exact-name research across the post-gate Codegen, Core registry, Core sources
 and crates finds no producer or body. Compiler cutover `e5e850ac2` removes their
 legacy Records recognizer and both Lower hooks from current canonical
 `39590da01`, without changing the separate typed rendering paths.
+
+The remaining three formatting names are type-directed native LIR, not absent
+erased C providers. Lower selects checked Display/Debug/Show glue, with scalar
+leaves or structural helpers. Their Rust seed templates are intentionally kept,
+separate from the 23 scalar formatter retirements owned by the display stream.
+`run-world-sentry-fixtures.mjs OUT render` registers candidate-Jet-front byte
+goldens for user Display/Debug, redaction, and eager/lazy Show joining. Every
+selected result must be `pass`; no prepared selection is called execution proof.

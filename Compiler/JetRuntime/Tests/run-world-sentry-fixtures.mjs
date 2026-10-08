@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { candidateJetc0, frontReceipt } from '../../JetBackend/Tests/jet-front.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const [output, mode] = process.argv.slice(2);
-if (!output || !['assemble', 'lower', 'audit', 'link', 'run'].includes(mode)) throw Error('usage: run-world-sentry-fixtures.mjs OUT assemble|lower|audit|link|run');
+if (!output || !['assemble', 'lower', 'audit', 'link', 'run', 'render'].includes(mode)) throw Error('usage: run-world-sentry-fixtures.mjs OUT assemble|lower|audit|link|run|render');
 const out = resolve(output), unit = join(out, 'unit');
 const fixturePaths = ['WorldTests.jet', 'SentryTests.jet', 'SentryInlineTests.jet', 'TestScopeTests.jet', 'TrapReportTests.jet', 'HostFaultTests.jet'].map(name => 'Compiler/JetRuntime/Tests/' + name);
 function command(name, binary, args, options = {}) {
@@ -44,6 +44,15 @@ if (mode === 'assemble') {
   const allowed = new Set(readFileSync(join(root, 'Compiler/JetRuntime/imports.list'), 'utf8').split('\n').map(x => x.trim()).filter(x => x && !x.startsWith('#')));
   for (const line of imports.trim().split('\n').filter(Boolean)) if (!allowed.has(line.split(/\s+/)[0])) throw Error(`unledgered import ${line}`);
   command('disassembly', 'objdump', ['-dr', object]);
+} else if (mode === 'render') {
+  mkdirSync(out, { recursive: true });
+  const selected = 'Compiler/JetRuntime/Tests/link-render-cases.list';
+  const destination = join(out, 'render-goldens');
+  command('typed-render-goldens', process.execPath, [join(root, 'Compiler/JetBackend/Tests/run-goldens.mjs'), destination, '--front', 'jet', '--case-list', join(root, selected)], { timeout: 0 });
+  const results = new Map(readFileSync(join(destination, 'results.tsv'), 'utf8').trim().split('\n').map(row => row.split('\t')).map(([stem, verdict]) => [stem, verdict]));
+  for (const stem of readFileSync(join(root, selected), 'utf8').trim().split('\n')) {
+    if (results.get(stem) !== 'pass') throw Error(`typed render ${stem}: ${results.get(stem) ?? 'missing result'}`);
+  }
 } else if (mode === 'link') {
   const library = process.env.JET_RUNTIME_C_LIB, rlib = process.env.JET_RUNTIME_NATIVE_RLIB;
   if (!library || !existsSync(library) || !rlib || !existsSync(rlib)) throw Error('fresh composed JET_RUNTIME_C_LIB and JET_RUNTIME_NATIVE_RLIB required');
