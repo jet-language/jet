@@ -41,7 +41,18 @@ fn publish(listener: TCPListener, path: String) {
 fn run() {
     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("proxy listen")
     publish(listener, "{work}/proxy.txt")
-    // Only original bound-listener SETUP lifetime; no substituted acceptance oracle.
-    // Exact WouldBlock/other-error observation remains nonblocking-listener ledger.
-    time.sleep(400)
+    // Original 400ms observer; bounded accepts preserve Timeout (WouldBlock)
+    // vs EVERY other distinct NetError variant, as ruled D-NET-NONBLOCKING1.
+    end :: time.instant() + 400ms
+    loop {
+        if &listener.accept(deadline: 1ms) == {
+            .Ok(_) -> panic("environment proxy should not receive traffic")
+            .Err(error) -> {
+                if error == {
+                    .Timeout -> { if time.instant() >= end -> break }
+                    else -> panic("proxy accept failed")
+                }
+            }
+        }
+    }
 }
