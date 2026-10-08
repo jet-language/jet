@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
-import { parseRuntimeExports, validateRuntimeOwnership, validateRuntimeRoute } from "../../../Tools/agent/runtime-route-abi.mjs";
+import { readFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { parseRuntimeExports, runtimeExportSignatures, validateRuntimeOwnership, validateRuntimeRoute } from "../../../Tools/agent/runtime-route-abi.mjs";
 
 function definition(params, suffix = "") {
   return { params, suffix, path: "Source/Test.jet" };
@@ -36,6 +39,7 @@ reject(composite, compositeParams, "-> I64 Never!");
 reject(composite, compositeParams.map((p) => p === "text: I64" ? "text: &I64" : p), "-> I64");
 const tuple = route([["i64"]], null, ["i64", "JetCString"]);
 check(tuple, ["value: I64", "item0: I64", "item1: I64"]);
+check(tuple, ["value: I64", "item0: I64", "item1: I64"], "-> ()");
 reject(tuple, ["value: I64", "item0: I64", "item1: I64"], "-> I64");
 check(route([], null), []);
 check(route([], "f64"), [], "-> F64");
@@ -50,7 +54,25 @@ assert.throws(() => parseRuntimeExports(source + "#Export(c) fn jet_a() {}", "So
 assert.throws(() => parseRuntimeExports("#Export(c) fn generic<T>(value: T) {}", "Source/Test.jet"), /unparsed/);
 const failing = parseRuntimeExports("#Export(c) fn failing(value: I64) -> I64 Never! {}", "Source/Test.jet").get("failing");
 assert.throws(() => validateRuntimeRoute(route([["i64"]], "i64"), failing), /does not match C ABI/);
+const unit = parseRuntimeExports("#Export(c) fn unit(value: I64) -> () {}", "Source/Test.jet").get("unit");
+validateRuntimeRoute(route([["i64"]], null), unit);
+const nested = parseRuntimeExports("#Export(c) fn nested(value: (I64, I64)) {}", "Source/Test.jet").get("nested");
+assert.throws(() => validateRuntimeRoute(route([["i64"], ["i64"]], null), nested), /does not match C ABI/);
 validateRuntimeOwnership(new Set(parsed.keys()), parsed);
 assert.throws(() => validateRuntimeOwnership(new Set(["jet_a"]), parsed), /jet_b is missing from exports.list/);
 assert.throws(() => validateRuntimeOwnership(new Set([...parsed.keys(), "jet_missing"]), parsed), /jet_missing has no #Export\(c\) declaration/);
+
+// Exercise the composed runtime's real ownership partition, not just synthetic
+// signatures. Ported routes keep lowering metadata and have no Rust adapter.
+const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+const names = new Set(readFileSync(join(root, "Compiler/JetRuntime/exports.list"), "utf8").split("\n")
+  .map((line) => line.trim()).filter((line) => line && !line.startsWith("#")).map((line) => line.split(/\s+/u)[0]));
+validateRuntimeOwnership(names, runtimeExportSignatures(root));
+const routeNames = new Set([...readFileSync(join(root, "Compiler/JetBackend/Source/Lower/RuntimeRoutes.jet"), "utf8")
+  .matchAll(/LowerRoute\{symbol: "[^"]+", export: "([^"]+)"/g)].map((match) => match[1]));
+const rustNames = new Set([...readFileSync(join(root, "crates/jet-codegen/src/Prelude/Core/CAbiRoutes.rs"), "utf8")
+  .matchAll(/pub extern "C" fn ([A-Za-z_]\w*)\(/g)].map((match) => match[1]));
+const ported = [...names].filter((name) => routeNames.has(name));
+assert.ok(ported.length > 0, "no real Jet-owned family exercised");
+for (const name of ported) assert.ok(!rustNames.has(name), `Jet-owned route ${name} still has a Rust adapter`);
 console.log("runtime route ABI: CHECK OK");
