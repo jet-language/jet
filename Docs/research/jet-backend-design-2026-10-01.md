@@ -1922,3 +1922,10 @@ into that storage, including tagged payloads. Unused result owners are dropped.
 Mutable borrows, enums, generic records and List element encodings are not
 broadened. Static carrier metadata is not native layout/import/ABI admission;
 the composed native runtime still requires its actual-LIR sealed ABI receipt.
+
+The native-only external provider table also enrolls the 17 physical Shared
+owner/pin/alias/guard operations from the reviewed Shared/Condition sources.
+Rows appear only when both the real source and export manifest own the symbol;
+source signature validation preserves Word/Flag/Unit ABI and refuses drift.
+No seed kernel body or Guard/Alias layout is synthesized. Physical ABI
+admission still comes from the composed actual-LIR `export_abis` receipt.

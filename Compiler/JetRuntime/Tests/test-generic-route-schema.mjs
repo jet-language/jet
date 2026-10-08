@@ -367,6 +367,37 @@ pub mod shadow {
   assert.ok(weakJet.includes('export: "jet_rt_native_shared_downgrade", native_lists: true, params: [LowerRouteCarrier]{LowerRouteCarrier.Word}, result: LowerRouteResult.Plain{carrier: LowerRouteCarrier.Word}'));
   assert.ok(weakJet.includes('export: "jet_rt_native_shared_weak_upgrade", native_lists: true, params: [LowerRouteCarrier]{LowerRouteCarrier.Word, LowerRouteCarrier.Word}, result: LowerRouteResult.Plain{carrier: LowerRouteCarrier.Flag}'));
   assert.ok(weakJet.includes('export: "jet_rt_native_shared_weak_drop", native_lists: true, params: [LowerRouteCarrier]{LowerRouteCarrier.Word}, result: LowerRouteResult.Plain{carrier: LowerRouteCarrier.Unit}'));
+  // Source-signature fixtures for the accepted physical owner family. These
+  // exercise schema validation only, not the provider's ownership behavior.
+  const physicalShared = [
+    ["owner_strong_count", 1, "I64"], ["owner_pin", 2, "Bool"],
+    ["pin_drop", 1, ""], ["owner_alias", 2, "Bool"],
+    ["alias_token", 1, "I64"], ["alias_drop", 1, ""],
+    ["guard_acquire", 2, "I64"], ["guard_clone", 1, "I64"],
+    ["guard_held", 1, "Bool"], ["guard_root_ptr", 1, "I64"],
+    ["guard_revision", 1, "I64"], ["guard_mark_dirty", 1, ""],
+    ["guard_publish_and_release", 1, ""], ["guard_abort_release", 1, ""],
+    ["guard_reacquire_and_refresh", 2, "Bool"], ["guard_drop", 1, ""],
+    ["guard_wait_once", 2, "I64"],
+  ];
+  const physicalNames = physicalShared.map(([op]) => `jet_rt_shared_${op}`);
+  const physicalDefinitions = physicalShared.map(([op, arity, result]) =>
+    `#Export(c) fn jet_rt_shared_${op}(${Array.from({length: arity}, (_, i) => `a${i}: I64`).join(", ")})${result ? ` -> ${result}` : ""} {${result === "I64" ? " a0 " : result === "Bool" ? " a0 != I64{0} " : ""}}`).join("\n");
+  put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: F64) -> F64 { value }\n" + weakDefinitions + physicalDefinitions);
+  put("Compiler/JetRuntime/exports.list", ["jet_fixture_scalar", ...weakNames, ...physicalNames].join("\n") + "\n");
+  success(run());
+  const physicalJet = readFileSync(join(fixture, "Compiler/JetBackend/Source/Lower/RuntimeRoutes.jet"), "utf8");
+  const physicalRust = readFileSync(join(fixture, "crates/jet-codegen/src/Prelude/Core/CAbiRoutes.rs"), "utf8");
+  for (const [op, arity, result] of physicalShared) {
+    const name = `jet_rt_shared_${op}`;
+    assert.ok(!physicalRust.includes(`fn ${name}(`));
+    assert.ok(physicalJet.includes(`export: "${name}", native_lists: true, params: [LowerRouteCarrier]{${Array.from({length: arity}, () => "LowerRouteCarrier.Word").join(", ")}}, result: LowerRouteResult.Plain{carrier: LowerRouteCarrier.${result === "I64" ? "Word" : result === "Bool" ? "Flag" : "Unit"}}`));
+  }
+  put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: F64) -> F64 { value }\n" + weakDefinitions + physicalDefinitions.replace("a1: I64", "a1: F64"));
+  assert.match(run().stderr, /owner_pin.*does not match C ABI/);
+  put("Compiler/JetRuntime/exports.list", ["jet_fixture_scalar", ...weakNames].join("\n") + "\n");
+  success(run());
+  assert.ok(!readFileSync(join(fixture, "Compiler/JetBackend/Source/Lower/RuntimeRoutes.jet"), "utf8").includes('export: "jet_rt_shared_owner_pin"'));
   put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: F64) -> F64 { value }\n" + weakDefinitions.replace("out: I64", "out: F64"));
   assert.match(run().stderr, /weak_upgrade.*does not match C ABI/);
   put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: F64) -> F64 { value }\n");

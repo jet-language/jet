@@ -1344,6 +1344,25 @@ for (const [name, params, result, row] of [
   ["jet_rt_native_shared_downgrade", [{ jet: "Word", ctys: ["i64"] }], { jet: "Plain{carrier: LowerRouteCarrier.Word}", ret: "i64", outs: [] }, "JetRuntime.Shared.downgrade"],
   ["jet_rt_native_shared_weak_upgrade", [{ jet: "Word", ctys: ["i64"] }, { jet: "Word", ctys: ["i64"] }], { jet: "Plain{carrier: LowerRouteCarrier.Flag}", ret: "bool", outs: [] }, "JetRuntime.Shared.weak_upgrade"],
   ["jet_rt_native_shared_weak_drop", [{ jet: "Word", ctys: ["i64"] }], { jet: "Plain{carrier: LowerRouteCarrier.Unit}", ret: null, outs: [] }, "JetRuntime.Shared.weak_drop"],
+  // Physical Shared owner/alias/guard exports: accepted f4da51359+20314fd26.
+  // Words are provider-owned addresses/status, not exact-Int conversions.
+  ...[
+    ["owner_strong_count", 1, "Word"], ["owner_pin", 2, "Flag"],
+    ["pin_drop", 1, "Unit"], ["owner_alias", 2, "Flag"],
+    ["alias_token", 1, "Word"], ["alias_drop", 1, "Unit"],
+    ["guard_acquire", 2, "Word"], ["guard_clone", 1, "Word"],
+    ["guard_held", 1, "Flag"], ["guard_root_ptr", 1, "Word"],
+    ["guard_revision", 1, "Word"], ["guard_mark_dirty", 1, "Unit"],
+    ["guard_publish_and_release", 1, "Unit"], ["guard_abort_release", 1, "Unit"],
+    ["guard_reacquire_and_refresh", 2, "Flag"], ["guard_drop", 1, "Unit"],
+    ["guard_wait_once", 2, "Word"],
+  ].map(([operation, arity, carrier]) => [
+    `jet_rt_shared_${operation}`,
+    Array.from({ length: arity }, () => ({ jet: "Word", ctys: ["i64"] })),
+    { jet: `Plain{carrier: LowerRouteCarrier.${carrier}}`,
+      ret: carrier === "Unit" ? null : carrier === "Flag" ? "bool" : "i64", outs: [] },
+    `JetRuntime.Shared.${operation}`,
+  ]),
 ]) {
   if (!jetRuntimeExports.has(name)) continue;
   const adapter = { symbol: name, name, external: true, params, result, rows: [row] };
