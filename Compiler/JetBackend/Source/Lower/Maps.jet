@@ -126,16 +126,39 @@ fn lower_map_key_order(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MI
     LowerMapOrder{less: less, same: equal}
 }
 
-// Drops an owned LIR value through its consuming Close, when selected, or
-// physical cleanup. A helper parameter carries no LIR drop glue of its own.
+// Consumes an already-taken typed value through the canonical Close index
+// and call emitter. No temporary stack slot is needed for scalar carriers.
 fn lower_map_drop_value(p: MIRProgram, m: &LowerModule, f: &LowerFunction, value: LIRValueID, ty: MIRType) Never! {
     repr :: lower_repr(p, ty)
+    if lower_close_method(p, m.close_methods, ty) == .Val(method) {
+        if repr == .Boxed(_) | .Handle(_, _) {
+            done :: lower_new_block(&f)
+            zero :: lower_pointer(&f)
+            lower_emit(&f, LIRInst.Const{dst: zero, value: 0})
+            absent :: lower_flag(&f)
+            lower_emit(&f, LIRInst.Compare{dst: absent, condition: .Eq, left: value, right: zero})
+            live :: lower_new_block(&f)
+            lower_seal(&f, LIRTerminator.Branch{condition: absent, then_target: lower_target(done, [LIRValueID]{}), else_target: lower_target(live, [LIRValueID]{})})
+            lower_start(&f, live, [LIRValueID]{})
+            lower_close_emit(p, &m, &f, value, ty, method)
+            lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+            lower_start(&f, done, [LIRValueID]{})
+        } else {
+            lower_close_emit(p, &m, &f, value, ty, method)
+        }
+        if lower_value_drop(f, value) != .Trivial {
+            consumed :: lower_new_value(&f, lower_value_layout(f, value), LIRDrop.Trivial, ty.identity)
+            lower_emit(&f, LIRInst.Reown{dst: consumed, src: value})
+        }
+        return
+    }
     if repr == .Inline(_) -> return lower_inline_drop(p, &m, &f, value, ty)
-    if !lower_needs_drop(p, m, ty) -> return
-    cell :: lower_pointer(&f)
-    lower_emit(&f, LIRInst.StackSlot{dst: cell, size: 8, align: 8})
-    lower_emit(&f, LIRInst.Store{base: cell, offset: 0, value: value})
-    lower_drop_stored(p, &m, &f, cell, 0, ty)
+    drop :: lower_drop(&m, repr, true)
+    if drop == .Trivial -> return
+    if lower_value_drop(f, value) != .Trivial -> return lower_emit(&f, LIRInst.Drop{value: value})
+    owned :: lower_new_value(&f, lower_value_layout(f, value), drop, ty.identity)
+    lower_emit(&f, LIRInst.Reown{dst: owned, src: value})
+    lower_emit(&f, LIRInst.Drop{value: owned})
 }
 
 fn lower_map_key_layout(p: MIRProgram, shape: LowerMapShape) -> LIRLayout Never! {

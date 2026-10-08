@@ -1,7 +1,7 @@
 // Reused from db0a9182a: an owned trait value is
 // [concrete drop-helper ID, concrete payload @8]. Closed-module dispatch
 // rejects unknown keys; payloads use ordinary stored-value layout/glue.
-use jet_foundation.[MIRAccess, MIRCallArg, MIRFunction, MIRFunctionID, MIRImplDef, MIRInstruction, MIRProgram, MIRTraitMethod, MIRTraitMethodID, MIRTraitRef, MIRType, MIRTypeID, MIRTypeKind, MIRValueID, mir_trait_id, mir_type_display_name, mir_type_identity_key]
+use jet_foundation.[MIRAccess, MIRCallArg, MIRImplDef, MIRInstruction, MIRProgram, MIRTraitMethod, MIRTraitMethodID, MIRTraitRef, MIRType, MIRTypeID, MIRTypeKind, MIRValueID, mir_type_display_name, mir_type_identity_key]
 
 fn lower_trait_ref(p: MIRProgram, ty: MIRType) -> MIRTraitRef? {
     if ty.kind == .TraitObject(bounds) {
@@ -24,7 +24,6 @@ fn lower_trait_impl(p: MIRProgram, ty: MIRType, bound: MIRTraitRef) -> MIRImplDe
     }
     None
 }
-
 
 fn lower_trait_size(p: MIRProgram, ty: MIRType) -> Int Never! {
     8 + lower_align_up(if lower_size(p, ty).size < 8 -> 8 else -> lower_size(p, ty).size, 8)

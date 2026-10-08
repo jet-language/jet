@@ -58,6 +58,7 @@ struct CoreSharedLayoutBuilder {
     pub rows: [String:Int]
     pub layouts: [CoreSharedNativeLayout]
     pub errors: [String]
+    pub close_methods: [U64:[LowerCloseImpl]]
 }
 
 // Sort a local receipt copy; neither installed source order nor the caller's
@@ -94,7 +95,7 @@ fn core_shared_layout_visit(program: MIRProgram, state: &CoreSharedLayoutBuilder
     &state.rows.add(key, at).drop("checked absent above")
     size :: lower_size(program, ty)
     clone :: if lower_lazy_can_clone(program, ty, [String]{}) -> "lazy.clone:{key}" else -> ""
-    drop :: if lower_needs_drop(program, ty) -> "lazy.drop:{key}" else -> ""
+    drop :: if lower_needs_drop_index(program, state.close_methods, ty) -> "lazy.drop:{key}" else -> ""
     row := CoreSharedNativeLayout{type_key: key, nominal_key: "", display_name: mir_type_display_name(ty), representation: "", kind: lower_lazy_kind(program, ty), stride: lower_list_stride(program, ty), payload_size: size.size, align: size.align, box_size: lower_box_size(program, ty), clone_identity: clone, drop_identity: drop, child_keys: [String]{}, members: [CoreSharedLayoutMember]{}, variants: [CoreSharedLayoutVariant]{}}
     // Reserve before visiting owning/recursive nominal edges.
     &state.layouts.push(row)
@@ -220,7 +221,9 @@ fn core_shared_source_inventory_errors(program: MIRProgram, sources: [CoreShared
 // This schema walk never lowers an image, maps code, or calls a getter. A new
 // compiler factory can compare checked semantic/physical facts before admission.
 pub fn core_shared_expected_manifest(program: MIRProgram, sources: [CoreSharedSource]) -> CoreSharedManifest Never! {
-    state := CoreSharedLayoutBuilder{rows: [String:Int]{}, layouts: [CoreSharedNativeLayout]{}, errors: [String]{}}
+    functions := [U64:Int]{}
+    loop (row, function) in program.functions -> &functions.add(function.id.value, row).drop("checked function identity")
+    state := CoreSharedLayoutBuilder{rows: [String:Int]{}, layouts: [CoreSharedNativeLayout]{}, errors: [String]{}, close_methods: lower_close_index(program, functions)}
     manifest := CoreSharedManifest{namespace_owner_key: "<corelib>", seal: core_shared_source_seal(sources), sorted_sites: [CoreSharedSiteSchema]{}, keyed_native_layout_inventory: [CoreSharedNativeLayout]{}, digest: "", errors: core_shared_source_inventory_errors(program, sources)}
     seen := [String:Int]{}
     loop definition in program.constants {

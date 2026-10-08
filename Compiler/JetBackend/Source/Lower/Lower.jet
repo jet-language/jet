@@ -1497,7 +1497,7 @@ fn lower_function_body(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
         lower_frame_cells(p, c, &m, &f)
         lower_sentry_frame(c, &m, &f)
         lower_partial_frame(p, c, m, &f)
-        lower_close_frame(&m, &f)
+        lower_close_frame(p, &m, &f)
         f.mir_block = MIRBlockID{value: U64.MAX}
         edge :: lower_edge(p, c, &m, &f, c.mir.entry) ?? return
         lower_seal(&f, LIRTerminator.Jump{target: edge})
@@ -1595,7 +1595,7 @@ fn lower_block(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunctio
         lower_frame_cells(p, c, &m, &f)
         lower_sentry_frame(c, &m, &f)
         lower_partial_frame(p, c, m, &f)
-        lower_close_frame(&m, &f)
+        lower_close_frame(p, &m, &f)
     }
     loop instruction in block.instructions {
         if f.failed -> return
@@ -2186,11 +2186,9 @@ fn lower_drop_value(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
             if cell_slot >= 0 -> lower_cell_dropped(p, c, &f, cell_slot, lowered)
             return
         }
-        if lower_is_inline(p, ty) {
-            if lower_value_owned(c, value) {
-                lower_inline_drop(p, &m, &f, lowered, ty)
-                if cell_slot >= 0 -> lower_cell_dropped(p, c, &f, cell_slot, lowered)
-            }
+        if lower_value_owned(c, value) {
+            lower_map_drop_value(p, &m, &f, lowered, ty)
+            if cell_slot >= 0 -> lower_cell_dropped(p, c, &f, cell_slot, lowered)
             return
         }
     }

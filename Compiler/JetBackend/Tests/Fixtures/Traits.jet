@@ -166,7 +166,10 @@ fn fx_close_shared_owners() -> MIRProgram Never! {
 // scalar-zero workaround, wrong destructor provenance, or signature weakening.
 fn fx_close_owned_shape_checks() -> Bool {
     p :: fx_close_shared_owners()
-    if !lower_needs_drop(p, fx_named("CloseEmpty")) || lower_needs_drop(p, fx_int()) -> return false
+    checked_functions := [U64:Int]{}
+    loop (row, function) in p.functions -> &checked_functions.add(function.id.value, row).drop("fixture function identity")
+    close_methods :: lower_close_index(p, checked_functions)
+    if !lower_needs_drop_index(p, close_methods, fx_named("CloseEmpty")) || lower_needs_drop_index(p, close_methods, fx_int()) -> return false
     lowered :: lir_lower_entry(p, mir_function_id("run"))
     if lowered.issues.len() != 0 -> return false
     constructors := 0
@@ -190,13 +193,15 @@ fn fx_close_owned_shape_checks() -> Bool {
     // An inherent `close` spelling is not a checked Close implementation.
     plain := fx_close_stored_owners(false)
     plain.impls = [MIRImplDef]{}
-    if lower_close_impl(plain, fx_named("CloseResource")) != None -> return false
+    functions := [U64:Int]{}
+    loop (row, function) in plain.functions -> &functions.add(function.id.value, row).drop("fixture function identity")
+    if lower_close_method(plain, lower_close_index(plain, functions), fx_named("CloseResource")) != None -> return false
     invalid := fx_close_stored_owners(false)
     invalid.functions[1].params[0].access = .Read
     refused :: lir_lower_entry(invalid, mir_function_id("run"))
     if refused.issues.len() == 0 -> return false
     loop issue in refused.issues {
-        if issue.message.contains("one consuming receiver") -> return true
+        if issue.message.contains("invalid consuming signature") -> return true
     }
     false
 }

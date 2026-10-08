@@ -268,7 +268,10 @@ fn lower_partial_drop_node(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ba
         if row.path.len() > depth -> deeper = true
     }
     if !deeper {
-        if lower_is_inline(p, ty) {
+        if lower_close_method(p, m.close_methods, ty) == .Val(method) {
+            // The enclosing partial cleanup consumes its LIR owner afterward.
+            lower_close_emit(p, &m, &f, base, ty, method)
+        } else if lower_is_inline(p, ty) {
             lower_inline_drop(p, &m, &f, base, ty)
         } else {
             layout :: lower_repr_layout(lower_repr(p, ty)) ?? return lower_fail(&m, &f, "partial drop leaf has no carrier")
@@ -354,8 +357,7 @@ fn lower_partial_drop_owned(p: MIRProgram, m: &LowerModule, f: &LowerFunction, o
     if receiver {
         lower_close_value_drop(p, &m, &f, lowered, ty, consume)
     } else if consume {
-        if lower_is_inline(p, ty) -> lower_inline_drop(p, &m, &f, lowered, ty)
-        else -> lower_emit(&f, LIRInst.Drop{value: lowered})
+        lower_map_drop_value(p, &m, &f, lowered, ty)
     } else {
         lower_partial_drop_node(p, &m, &f, lowered, ty, [LowerPartialDrop]{}, 0)
     }

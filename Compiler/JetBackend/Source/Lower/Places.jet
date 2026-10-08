@@ -292,6 +292,10 @@ fn lower_drop_stored(p: MIRProgram, m: &LowerModule, f: &LowerFunction, base: LI
         address :: lower_address(&f, base, offset)
         return lower_inline_drop(p, &m, &f, address, ty)
     }
+    if lower_close_method(p, m.close_methods, ty) != None {
+        value :: lower_read_at(p, &f, base, offset, ty) ?? return
+        return lower_map_drop_value(p, &m, &f, value, ty)
+    }
     layout :: lower_repr_layout(repr) ?? return
     drop :: lower_drop(&m, repr, true)
     if drop == .Trivial -> return
@@ -320,7 +324,7 @@ fn lower_detach_stored(p: MIRProgram, f: &LowerFunction, base: LIRValueID, offse
 }
 
 fn lower_replace_stored(p: MIRProgram, m: &LowerModule, f: &LowerFunction, base: LIRValueID, offset: Int, value: LIRValueID, ty: MIRType) Never! {
-    if !lower_needs_drop(p, ty) -> return lower_write_at(p, &f, base, offset, value, ty)
+    if !lower_needs_drop(p, m, ty) -> return lower_write_at(p, &f, base, offset, value, ty)
     detached :: lower_detach_stored(p, &f, base, offset, ty)
     lower_write_at(p, &f, base, offset, value, ty)
     lower_drop_stored(p, &m, &f, detached, 0, ty)
