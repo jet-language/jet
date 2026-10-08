@@ -34,16 +34,43 @@ fn emit_text_regressions() {
     quoted :: jet_rust_emit_compact_function_text([String]{"fn text() {{", "    let s = \"one", "        __jet_v_7\";", "    __jet_v_8 = 0;", "}}"}, 1)
     assert(quoted[2] == "        __jet_v_7\";")
     assert(quoted[3] == " _v0 = 0;")
+    folded :: jet_rust_emit_fold_value_slots([String]{
+        "fn folded() {{",
+        "    let mut __jet_v_0: Option<jet_foundation::Numeric::JetInt> = None;",
+        "    __jet_v_0 = Some(jet_foundation::Numeric::JetInt::from_i64(7));",
+        "    consume(__jet_v_0.take().expect(\"MIR value\"));",
+        "}}",
+    }, 1, 2)
+    assert(folded.len() == 3)
+    assert(folded[1] == "    consume((jet_foundation::Numeric::JetInt::from_i64(7)));")
+    unwrapped :: jet_rust_emit_unwrap_value_slots([String]{
+        "fn unwrapped() {{",
+        "    let mut __jet_v_8: Option<i64> = Some(7);",
+        "    consume((*__jet_v_8.as_ref().expect(\"MIR value\")));",
+        "    consume((*__jet_v_8.as_ref().expect(\"MIR value\")));",
+        "}}",
+    }, 1)
+    assert(unwrapped[1] == "    let __jet_v_8: i64 = 7;")
+    assert(unwrapped[2] == "    consume(__jet_v_8);")
+    assert(unwrapped[3] == "    consume(__jet_v_8);")
     print("emit-text regressions ok")
 }
 
 fn emit_text_workload() -> [String] Never! {
     lines := [String]{"fn sample() {{"}
-    loop id in 0..<64 -> &lines.push("    let mut __jet_v_{id}: Option<i64> = None;")
+    loop id in 0..<64 -> &lines.push("    let mut __jet_v_{id}: Option<jet_foundation::Numeric::JetInt> = None;")
     loop id in 0..<64 {
-        &lines.push("    __jet_v_{id} = Some({id});")
+        &lines.push("    __jet_v_{id} = Some(jet_foundation::Numeric::JetInt::from_i64({id}));")
         &lines.push("    consume(__jet_v_{id}.take().expect(\"MIR value\"));")
         &lines.push("    // repeated inert ASCII text and \"__jet_v_quoted\" stay unchanged")
+    }
+    // Separate scalar definitions have two shared reads: they cannot fold,
+    // but unwrap must remove their Option carrier and both dereference reads.
+    loop id in 0..<64 {
+        slot :: id + 64
+        &lines.push("    let mut __jet_v_{slot}: Option<i64> = Some({id});")
+        &lines.push("    consume((*__jet_v_{slot}.as_ref().expect(\"MIR value\")));")
+        &lines.push("    consume((*__jet_v_{slot}.as_ref().expect(\"MIR value\")));")
     }
     &lines.push("}}")
     lines
@@ -54,17 +81,26 @@ fn run() {
     body :: emit_text_workload()
     spent := [Int]{0, 0, 0}
     output := [String]{}
-    loop _ in 0..<32 {
-        begin :: time.unix_ns()
+    loop trial in 0..<32 {
+        begin :: time.instant()
         folded :: jet_rust_emit_fold_value_slots(body, 1, 65)
-        after_fold :: time.unix_ns()
+        after_fold :: time.instant()
         unwrapped :: jet_rust_emit_unwrap_value_slots(folded, 1)
-        after_unwrap :: time.unix_ns()
+        after_unwrap :: time.instant()
         output = jet_rust_emit_compact_function_text(unwrapped, 1)
-        after_compact :: time.unix_ns()
-        spent[0] += after_fold - begin
-        spent[1] += after_unwrap - after_fold
-        spent[2] += after_compact - after_unwrap
+        after_compact :: time.instant()
+        spent[0] += (after_fold - begin).ns
+        spent[1] += (after_unwrap - after_fold).ns
+        spent[2] += (after_compact - after_unwrap).ns
+        if trial == 0 {
+            assert(folded.len() == body.len() - 128)
+            assert(unwrapped.len() == folded.len())
+            assert(unwrapped.join("\n").contains("    let __jet_v_64: i64 = 0;"))
+            assert(unwrapped.join("\n").contains("    consume(__jet_v_64);"))
+            assert(!unwrapped.join("\n").contains(".as_ref().expect(\"MIR value\")"))
+            assert(output.join("\n").contains(" let _v0: i64 = 0;"))
+            assert(!output.join("\n").contains("__jet_v_64"))
+        }
     }
     loop line in output -> print(line)
     loop (index, name) in [String]{"fold", "unwrap", "compact"} -> print("@@time {name} {spent[index]}")

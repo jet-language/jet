@@ -83,7 +83,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     const pairDir = path.resolve(input);
     const pair = JSON.parse(fs.readFileSync(path.join(pairDir, 'pair.json'), 'utf8'));
     if (pair.schema !== 'jet.emit-text-pair.v1') throw new Error('unsupported pair schema');
-    const trialNames = arm => fs.readdirSync(path.join(pairDir, arm)).filter(name => /^trial-[0-9]+\\.out$/.test(name)).sort();
+    const trialNames = arm => fs.readdirSync(path.join(pairDir, arm)).filter(name => /^trial-[0-9]+\.out$/.test(name)).sort();
     const names = trialNames('plain');
     if (JSON.stringify(names) !== JSON.stringify(trialNames('optimized'))) throw new Error('unmatched trial files');
     for (const arm of ['plain', 'optimized']) {
@@ -91,7 +91,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     }
     const outputs = arm => names.map(name => fs.readFileSync(path.join(pairDir, arm, name), 'utf8'));
     const receipt = { ...compare(outputs('plain'), outputs('optimized')), pair, trial_files: names };
-    fs.writeFileSync(out, JSON.stringify(receipt, null, 2) + '\\n', { flag: 'wx' });
+    fs.writeFileSync(out, JSON.stringify(receipt, null, 2) + '\n', { flag: 'wx' });
     console.log(JSON.stringify(receipt, null, 2));
     if (receipt.verdict !== 'win') process.exitCode = 1;
   } else {
