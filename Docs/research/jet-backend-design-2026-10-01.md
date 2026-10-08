@@ -1027,6 +1027,10 @@ the canonical recipe and parent without a factory context. Jet's
 `CoreParentSeed.jet`/`CoreParentIngress.jet` generator binds the seed transport
 from checked emit metadata; the seed has one static resident host and invokes
 the fresh factory's Source preparation before admission or getters.
+Factory provenance is the canonical private Entry path or the aggregate
+assembler's exact first-line private-host header; comments elsewhere never
+grant ingress. The header shifts generated offsets only, with all original
+source-map byte ranges and diagnostic line/column locations preserved.
 The Rust splice accepts only the generator's build-time definition marker;
 a runtime-producing build without it refuses with `CoreSharedSeedIngressMissing`.
 Stage zero without a runtime retains its existing bootstrap path. Native
