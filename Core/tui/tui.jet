@@ -96,9 +96,11 @@ struct TUICapabilityInputs {
 }
 
 fn capability_env_bytes(name: String) -> [U8]? Never! {
+    result := [U8]?{None}
     #Unsafe("Core TUI reads owned encoded OS environment bytes from the current host; no UTF-8 assumption") {
-        core.tui.__cap_env_bytes(name)
+        result = core.tui.__cap_env_bytes(name)
     }
+    result
 }
 
 fn capability_env_text(name: String) -> String? Never! {
@@ -120,9 +122,11 @@ fn capability_raw_flag(value: [U8]?) -> Bool Never! {
 }
 
 fn capability_stdout_terminal() -> Bool Never! {
+    result := false
     #Unsafe("Core TUI samples the same stdout terminal fact consumed by terminal style/progress") {
-        core.term.__stdout_terminal()
+        result = core.term.__stdout_terminal()
     }
+    result
 }
 
 fn capability_inputs() -> TUICapabilityInputs Never! {
@@ -646,7 +650,7 @@ fn scalar_display_width(n: Int) -> Int Never! {
 
 fn normalized_style_test_node(words: StyleWords) -> UINode Never! {
     #Unsafe("Core TUI test: normalized style words and explicit absent UI slots") {
-        ui.__node_transfer("jet", 3.0, 1.0, 2, 1, [UINode]{}, false, "", 63, true,
+        return ui.__node_transfer("jet", 3.0, 1.0, 2, 1, [UINode]{}, false, "", 63, true,
             words.foreground.kind, words.foreground.word, words.background.kind, words.background.word, words.flags)
     }
 }

@@ -1434,6 +1434,14 @@ fn core_fixed_sig_impl(
             Some(Type::Option(Box::new(Type::List(Box::new(u8_ty()))))),
         )),
         ("core.font", "__shape_text") => Some((vec![(read, Type::String), (read, Type::Named("FontFace".into()))], Some(result_ty(Type::Named("GlyphRun".into()), Type::String)))),
+        // Existing stdio seed contracts: Prelude/Term.rs:954,993,1018,74,79;
+        // Core/StdinReader.rs:54 and Prelude/FaultInjection.rs:78.
+        ("core.term", "__stdio_write") => Some((vec![(read, Type::String), (read, Type::Bool), (read, Type::Bool), (read, Type::Bool)], Some(Type::Option(Box::new(Type::String))))),
+        ("core.term", "__stdio_bytes") => Some((vec![(read, list_u8.clone()), (read, Type::Bool), (read, Type::Bool)], Some(Type::Option(Box::new(Type::String))))),
+        ("core.term", "__stdio_flush") => Some((vec![(read, Type::Bool)], Some(Type::Option(Box::new(Type::String))))),
+        ("core.term", "__stdio_fault") => Some((vec![(read, Type::String)], Some(Type::Bool))),
+        ("core.term", "__stdout_terminal" | "__stderr_terminal") => Some((vec![], Some(Type::Bool))),
+        ("core.term", "__stdin_line") => Some((vec![], Some(result_ty(Type::Option(Box::new(Type::String)), io.clone())))),
         ("core.term", "__terminal8_fault" | "__terminal8_env_has") => Some((vec![(read, Type::String)], Some(Type::Bool))),
         ("core.term", "__terminal8_env") => Some((vec![(read, Type::String)], Some(Type::Option(Box::new(Type::String))))),
         ("core.term", "__terminal8_write_stdout" | "__terminal8_write_stderr") => Some((vec![(read, Type::String), (read, Type::Bool)], Some(Type::Option(Box::new(Type::String))))),

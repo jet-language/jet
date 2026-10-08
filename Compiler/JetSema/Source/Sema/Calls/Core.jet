@@ -758,6 +758,12 @@ fn sema_call_core_posix_control(member: String) -> Bool Never! {
 
 fn sema_call_core_check_fixed_record(record: CoreCallRecord, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if !sema_pin_check_call(record.module_name, record.member, args, &diagnostics) -> return None
+    if record.module_name == "core.term" && (record.member == "__stdio_write" || record.member == "__stdio_bytes" || record.member == "__stdio_flush" || record.member == "__stdio_fault" || record.member == "__stdout_terminal" || record.member == "__stderr_terminal" || record.member == "__stdin_line") {
+        if !environment.source_file.starts_with("<corelib>/") || !environment.module_name.starts_with("core.") {
+            &diagnostics.push(sema_error("E0510", span, "stdio raw leaves are compiler-private", "raw stdio operations are restricted to checked Core source", "use the public core.term API"))
+            return None
+        }
+    }
     if record.module_name == "core.mem" && record.member == "__loader_new" {
         if !environment.source_file.starts_with("<corelib>/") || environment.module_name != "core.data" {
             &diagnostics.push(sema_error("E0510", span, "data loader construction is compiler-private", "the native loader constructor is restricted to checked Core data source", "use core.data.value"))

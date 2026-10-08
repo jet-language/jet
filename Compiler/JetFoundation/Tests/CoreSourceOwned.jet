@@ -25,4 +25,26 @@ fn run() Never! {
         }
         core_source_owned_require(rejected, "executable projection rejected")
     }
+    members :: [String]{"__stdio_write", "__stdio_bytes", "__stdio_flush", "__stdio_fault", "__stdout_terminal", "__stderr_terminal", "__stdin_line"}
+    string :: Type.String
+    boolean :: Type.Bool
+    bytes :: Type.List{element: Type.IntN{signed: false, bits: 8}}
+    optional_text :: Type.Option{inner: string}
+    parameters :: [[Type]]{
+        [Type]{string, boolean, boolean, boolean}, [Type]{bytes, boolean, boolean},
+        [Type]{boolean}, [Type]{string}, [Type]{}, [Type]{}, [Type]{},
+    }
+    returns :: [Type]{optional_text, optional_text, optional_text, boolean, boolean, boolean,
+        Type.Result{ok: optional_text, err: Type.Named{name: "IOError"}}}
+    loop index in 0..<members.len() {
+        member :: members[index]
+        signature :: core_call_typed_signature("core.term", member, parameters[index].len()) ?? panic("missing stdio signature: {member}")
+        core_source_owned_require((signature.return_type ?? panic("missing stdio return type")) == returns[index], "stdio return contract")
+        core_source_owned_require(signature.parameters.len() == parameters[index].len(), "stdio arity")
+        loop parameter in 0..<signature.parameters.len() {
+            core_source_owned_require(signature.parameters[parameter].ty == parameters[index][parameter], "stdio parameter type")
+            core_source_owned_require(signature.parameters[parameter].access == AccessConvention.Read, "stdio borrowed parameter")
+        }
+        core_source_owned_require(core_call_typed_signature("core.term", member, parameters[index].len() + 1) == None, "stdio excess arguments rejected")
+    }
 }

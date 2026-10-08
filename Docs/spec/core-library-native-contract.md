@@ -354,6 +354,9 @@ padding excludes the final cell, and an empty list retains one empty text node.
 Environment text used for TUI capabilities treats invalid UTF-8 as absent,
 while environment flag presence continues to use the original encoded bytes.
 Source event constructors supply the declared labeled payload fields.
+The terminal stdio raw leaves retain their native optional-cause and
+fallible-read contracts in both compiler signature tables. They are restricted
+to checked Core source; user code uses the public terminal API.
 
 `core.ui` owns geometry, input-event construction, node defaults, container
 measurement, and text widths in Jet. Its retained renderer handle crosses the

@@ -112,7 +112,7 @@ pub fn input(prompt: String{""}) -[IO, Time.Wait]> String IOError! {
 pub fn input_secret(prompt: String) -[IO, Time.Wait]> String IOError! {
     if !core.term.__terminal8_stdin_tty() || !core.term.__terminal8_stdout_tty() -> return Err(terminal_invalid("secret input needs a terminal"))
     cause :: terminal_secret_write(prompt)
-    if cause != None -> return Err(terminal_other(.Flush, Val("stdout"), cause ?? ""))
+    if cause != None -> return Err(terminal_other(.Flush, Val("stdout"), cause))
     if !core.term.__terminal8_mode_enter(false) {
         _ :: terminal_secret_write("\n")
         return Err(terminal_other(.Read, Val("stdin"), "could not disable terminal echo"))
@@ -175,7 +175,7 @@ pub fn choose(prompt: String, options: [String]) -[IO, Time.Wait]> String IOErro
         answer :: read ?? return Err(terminal_invalid("the input stream closed before a choice arrived"))
         index :: choose_index(answer)
         if index != None {
-            n :: index ?? 0
+            n :: index
             if n > 0 && n <= options.len() -> return Ok(options[n - 1])
         }
         terminal_prompt("Enter a number from 1 to {options.len()}.\n", true)
@@ -193,17 +193,17 @@ pub fn buffered() -> StdinHandle Never! { stdin() }
 
 pub fn terminal_width() -[IO]> Int Never! {
     from_env :: positive_dimension(core.term.__terminal8_env("COLUMNS"))
-    if from_env != None -> return from_env ?? 80
+    if from_env != None -> return from_env
     size :: core.term.__terminal8_stty()
-    if size != None -> return (size ?? (w: 80, h: 24)).w
+    if size != None -> return size.w
     80
 }
 
 pub fn terminal_height() -[IO]> Int Never! {
     from_env :: positive_dimension(core.term.__terminal8_env("LINES"))
-    if from_env != None -> return from_env ?? 24
+    if from_env != None -> return from_env
     size :: core.term.__terminal8_stty()
-    if size != None -> return (size ?? (w: 80, h: 24)).h
+    if size != None -> return size.h
     24
 }
 
@@ -233,12 +233,12 @@ pub struct WinSize {
     pub h: Int
 }
 pub fn progress(label: String) IOError! -[IO, Time.Wait]> {
-    if !core.term.__terminal8_stderr_tty() || core.term.__terminal8_machine_output() -> return Ok(())
+    if !core.term.__terminal8_stderr_tty() || core.term.__terminal8_machine_output() -> return Ok()
     terminal_write_preflight("stderr")
     carriage_return :: String.from_bytes([U8]{13}) ?? panic("CR is valid UTF-8")
     cause :: core.term.__terminal8_write_stderr("{carriage_return}{label}", true)
-    if cause != None -> return Err(terminal_other(.Flush, Val("stderr"), cause ?? ""))
-    Ok(())
+    if cause != None -> return Err(terminal_other(.Flush, Val("stderr"), cause))
+    Ok()
 }
 
 fn decode_key(raw: [U8], platform: Int) -> Key Never! {
@@ -293,7 +293,9 @@ fn decode_key(raw: [U8], platform: Int) -> Key Never! {
     if platform == 2 -> return .Unknown
     text :: String.from_bytes(raw) ?? return .Unknown
     chars :: text.chars()
-    if chars.len() == 0 -> return .Unknown
+    if chars.len() == 0 {
+        return .Unknown
+    }
     .Char(chars[0])
 }
 
@@ -322,22 +324,22 @@ fn terminal_invalid(cause: String) -> IOError Never! {
 fn terminal_write_preflight(resource: String) IOError! -[IO, Time.Wait]> {
     if core.term.__terminal8_fault("IO.Write") -> return Err(terminal_other(.Write, Val(resource), "fault injected: IO.Write"))
     if core.term.__terminal8_fault("IO.Flush") -> return Err(terminal_other(.Flush, Val(resource), "fault injected: IO.Flush"))
-    Ok(())
+    Ok()
 }
 
 fn terminal_prompt(text: String, choose: Bool) IOError! -[IO, Time.Wait]> {
     terminal_write_preflight("stdout")
     cause :: core.term.__terminal8_write_stdout(text, true)
     if cause != None {
-        if choose -> return Err(terminal_other(.Write, Val("stdout"), cause ?? ""))
-        return Err(terminal_other(.Flush, None, cause ?? ""))
+        if choose -> return Err(terminal_other(.Write, Val("stdout"), cause))
+        return Err(terminal_other(.Flush, None, cause))
     }
-    Ok(())
+    Ok()
 }
 
 fn terminal_read_preflight() IOError! -[IO, Time.Wait]> {
     if core.term.__terminal8_fault("IO.Read") -> return Err(terminal_other(.Read, Val("stdin"), "fault injected: IO.Read"))
-    Ok(())
+    Ok()
 }
 fn terminal_line() -[IO, Time.Wait]> String? IOError! {
     if core.term.__terminal8_fault("IO.Read") -> return Err(terminal_other(.Read, Val("stdin"), "fault injected: IO.Read"))

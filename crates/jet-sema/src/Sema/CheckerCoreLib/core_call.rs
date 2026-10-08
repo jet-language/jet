@@ -2409,6 +2409,24 @@ impl<'a> Checker<'a> {
         args: &mut Vec<crate::AST::CallArg>,
         resolved_ret_out: &mut Option<Type>,
     ) -> Option<Type> {
+        if module == "core.term"
+            && matches!(name, "__stdio_write" | "__stdio_bytes" | "__stdio_flush"
+                | "__stdio_fault" | "__stdout_terminal" | "__stderr_terminal" | "__stdin_line")
+        {
+            let vetted = self.name_ledger.module_alias(self.module_idx)
+                .and_then(jet_foundation::CoreModuleExports::core_source_module_by_alias)
+                .is_some();
+            if !vetted {
+                self.diags.push(Diagnostic::error(
+                    "E0510",
+                    "stdio raw leaves are compiler-private".to_string(),
+                    "raw stdio operations are restricted to checked Core source".to_string(),
+                    "use the public core.term API".to_string(),
+                    Some(span),
+                ));
+                return None;
+            }
+        }
         if module == "core.mem" && name == "__loader_new" {
             let vetted = self.name_ledger.module_alias(self.module_idx)
                 .and_then(jet_foundation::CoreModuleExports::core_source_module_by_alias)
