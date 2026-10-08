@@ -88,10 +88,39 @@ static void fatal(const char *mode) {
     (void)jet_rt_layout_compare(x,ten,1); (void)jet_rt_layout_compare(x,five,0);
     (void)jet_rt_layout_value(h,x); exit(9);
 }
+static void multi_edit(void) {
+    // Seed HashMap traversal is unspecified. Reversing the edit insertion
+    // order must still agree for these unique optima (not an arbitrary tie).
+    double solved[2][4];
+    for(int reversed=0;reversed<2;++reversed) {
+        Text *name=text("two-edits"); Handle *h=jet_rt_layout_new(name);
+        jet_rt_string_drop(name); watch(h);
+        Expr *x=variable(h,0),*y=variable(h,1);
+        jet_rt_layout_suggest(h,reversed?y:x,reversed?7:3);
+        jet_rt_layout_suggest(h,reversed?x:y,reversed?3:7);
+        assert(fabs(jet_rt_layout_value(h,x)-3)<1e-7);
+        assert(fabs(jet_rt_layout_value(h,y)-7)<1e-7);
+        Expr *sum=jet_rt_layout_add(x,y),*ten=jet_rt_layout_constant(10);
+        Handle *constraint=jet_rt_layout_compare(sum,ten,2);
+        solved[reversed][0]=jet_rt_layout_value(h,x);
+        solved[reversed][1]=jet_rt_layout_value(h,y);
+        jet_rt_layout_suggest(h,reversed?y:x,reversed?6:4);
+        jet_rt_layout_suggest(h,reversed?x:y,reversed?4:6);
+        solved[reversed][2]=jet_rt_layout_value(h,x);
+        solved[reversed][3]=jet_rt_layout_value(h,y);
+        assert(fabs(solved[reversed][2]-4)<1e-7);
+        assert(fabs(solved[reversed][3]-6)<1e-7);
+        assert(jet_rt_layout_is_feasible(h));
+        jet_rt_handle_drop_Constraint(constraint); jet_rt_handle_drop_Handle(h);
+        jet_rt_handle_drop_LinExpr(x); jet_rt_handle_drop_LinExpr(y);
+        jet_rt_handle_drop_LinExpr(sum); jet_rt_handle_drop_LinExpr(ten);
+    }
+    for(unsigned i=0;i<4;++i) assert(fabs(solved[0][i]-solved[1][i])<1e-7);
+}
 int main(int argc,char **argv) {
     jet_rt_alloc_init(); jet_rt_thread_init(); jet_rt_layout_init();
     if(argc==3 && !strcmp(argv[1],"--fatal")) { fatal(argv[2]); return 9; }
-    assert(argc==2); ownership();
+    assert(argc==2); ownership(); multi_edit();
     FILE *in=fopen(argv[1],"r"); assert(in);
     Expr *e[64]={0}; Handle *c[64]={0},*h=NULL; char name[64]={0},line[256];
     while(fgets(line,sizeof line,in)) {

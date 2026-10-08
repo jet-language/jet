@@ -9,7 +9,7 @@ import {fileURLToPath} from 'node:url';
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'../../..');
 const here=join(root,'Compiler/JetRuntime/Tests');
 const [mode,outArg,object]=process.argv.slice(2);
-if(!['--freeze','--native','--light'].includes(mode)||!outArg||(mode==='--native'&&!object)) throw Error('usage: run-native-layout.mjs --freeze OUT | --native OUT fresh-runtime.o | --light OUT');
+if(!['--freeze','--native'].includes(mode)||!outArg||(mode==='--native'&&!object)) throw Error('usage: run-native-layout.mjs --freeze OUT | --native OUT fresh-runtime.o');
 const out=resolve(outArg); mkdirSync(out,{recursive:true});
 const hash=b=>createHash('sha256').update(b).digest('hex');
 const vectors=readFileSync(join(here,'LayoutVectors.txt'),'utf8');
@@ -34,11 +34,8 @@ function literals(){
   }
   console.log('Layout reused draft literals: all 12 exact');
 }
-if(mode==='--light') {
-  literals();
-  run('/home/nate/.cache/jet-dev/scratch/JsonStreams3/parse_sources',['NativeLayoutABI','NativeLayoutText','NativeLayout','NativeLayoutSolve'].map(s=>join(root,'Compiler/JetRuntime/Source',s+'.jet')),'parse');
-  run('cc',['-std=c11','-Wall','-Wextra','-Werror','-pedantic','-fsyntax-only',join(here,'NativeLayoutWitness.c')],'c11');
-} else if(mode==='--freeze') {
+literals();
+if(mode==='--freeze') {
   const fixture=join(here,'LayoutSeed.json');
   if(existsSync(fixture)||existsSync(join(out,'oracle-execute.log'))) throw Error('ONE-TIME oracle already captured; do not rerun');
   const seed=readFileSync(join(root,'crates/jet-codegen/src/Prelude/Layout.rs'),'utf8');

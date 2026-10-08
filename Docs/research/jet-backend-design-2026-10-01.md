@@ -2405,3 +2405,13 @@ across same-thread detach/attach. `--freeze OUT` is the authorized offline
 seed-only cargo recipe and refuses a second capture. Native execution,
 composed MIR/caller admission and solver parity must run in the proof lane;
 parser/C11 checks do not establish them.
+
+Seed edit storage uses HashMap/RandomState and does not specify iteration
+order; native insertion order is a deterministic refinement. Degenerate
+equally weighted goals may select different equally optimal bases, so no
+universal basis/order equivalence is claimed. The native witness separately
+checks two distinct edits with unique solutions and reversed insertion order,
+both unconstrained and with a required sum row, including edit replacement.
+The frozen seed capture is not rerun; its recipe checksum names the version
+in `eedb17937`. The proof runner contains only freeze/native modes, with no
+dependency on temporary scratch parser binaries.
