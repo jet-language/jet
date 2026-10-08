@@ -57,24 +57,34 @@ artifacts. Persist every process's stdout/stderr and exit status through the
 proof lane; retain `/usr/bin/time -v` output, the canonical compile receipt,
 emitted `out.rs` and `JET_TRACE_FILE` trace. After one warmup per arm, interleave
 at least three matched trials under `plain/trial-001/` and
-`optimized/trial-001/`, and so on. Each trial has `rc`, `receipt`, `out.rs`,
-`trace.json` and `time.txt`.
+`optimized/trial-001/`, and so on. Each trial has `rc`, the canonical
+line-oriented `receipt` (factory tier `Aot`), `out.rs`, `trace.json`,
+`time.txt` and `invocation.json`.
 
+Keep the actual immutable project snapshot in the pair's `inputs/` directory
+and use that same absolute `JET_BOOTSTRAP_SOURCE_ROOT` for every process.
+Calculate its hash with the exported `startupInputHash` function, which hashes
+sorted relative paths and file-byte hashes. Record each actual launch's
+`source_root` and freshly calculated `source_sha256` in `invocation.json`.
+The comparator checks those against the snapshot bytes, not a free-standing
+manifest hash. Do not include stores or outputs inside the input snapshot.
 The shared `pair.json` records schema `jet.native-host-shape-pair.v1`,
-`source_sha256` (the actual common project-input hash), `machine` and
-`build_profile`; retain the exact immutable compiler paths and build receipts
-with that evidence. Publish the comparison with:
+`source_sha256`, `machine` and `build_profile`; retain exact immutable compiler
+paths and build receipts with that evidence. Publish the comparison with:
 
 ```sh
 node Tools/perf/jetc-profile/startup.mjs /path/to/pair /path/to/new/receipt.json
 ```
 
-The comparator requires complete AOT receipts with no reports and byte-identical
-emitted artifacts. Every median must strictly win: process wall time, compile
+The comparator requires complete AOT receipts with no reports, identical actual
+project inputs and byte-identical emitted artifacts. Receipt `source_bytes`
+counts emitted Rust bytes, not the input closure. Every median must strictly
+win: process wall time, compile
 trace duration and the interval from compile start to the first `main` parse
 span. The latter includes startup/load work before user-source parsing; it is
 not an off-CPU or lock-contention measurement. Losses, missing evidence or
 identity/output drift keep the cell open. Unit tests are in
 `Tools/perf/jetc-profile/startup.test.mjs`; the actual Source `TaskRoots.jet`
-fixture separately compares all registered handle shapes with the evaluator's
-full index and retains negative module/duplicate-ID checks.
+fixture separately receives the canonical codec's actual projected program,
+compares all registered handle shapes with the evaluator's full program/index,
+and retains negative module/duplicate-ID checks.

@@ -7,6 +7,32 @@ import { fileURLToPath } from 'node:url';
 const sha256 = value => crypto.createHash('sha256').update(value).digest('hex');
 const median = values => [...values].sort((a, b) => a < b ? -1 : a > b ? 1 : 0)[Math.floor(values.length / 2)];
 
+// The runner's canonical receipt is line-oriented key=value, not JSON.
+export function startupReceipt(text) {
+  const fields = Object.fromEntries(text.split('\n').filter(Boolean).map(line => {
+    const at = line.indexOf('=');
+    if (at < 1) throw new Error('invalid canonical startup receipt');
+    return [line.slice(0, at), line.slice(at + 1)];
+  }));
+  return { ...fields, complete: fields.complete === 'true', report_count: Number(fields.report_count), source_bytes: Number(fields.source_bytes) };
+}
+
+export function startupInputHash(root) {
+  const entries = [];
+  const walk = relative => {
+    const dir = path.join(root, relative);
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0)) {
+      const name = path.join(relative, entry.name);
+      if (entry.isDirectory()) walk(name);
+      else if (entry.isFile()) entries.push([name, sha256(fs.readFileSync(path.join(root, name)))]);
+      else throw new Error('startup inputs must be an immutable regular-file snapshot');
+    }
+  };
+  walk('');
+  if (!entries.length) throw new Error('startup input snapshot is empty');
+  return sha256(JSON.stringify(entries));
+}
+
 export function startupTiming(events, timeText) {
   const begin = events.find(event => event.name === 'compile' && event.ph === 'B');
   const end = events.find(event => event.name === 'compile' && event.ph === 'E');
@@ -23,8 +49,9 @@ export function compareStartup(plain, optimized) {
   if (plain.length < 3 || plain.length !== optimized.length) throw new Error('require at least three matched startup trials');
   const oracle = plain[0];
   for (const row of [...plain, ...optimized]) {
-    if (row.receipt.complete !== true || row.receipt.report_count !== 0 || !Number.isSafeInteger(row.receipt.source_bytes) || row.receipt.source_bytes <= 0 || row.receipt.selected_factory_tier !== 'aot' || row.receipt.actual_factory_tier !== 'aot') throw new Error('startup compile did not complete through the canonical AOT factory');
-    if (!/^[0-9a-f]{64}$/.test(row.artifact_sha256 ?? '') || row.artifact_sha256 !== oracle.artifact_sha256 || row.receipt.source_bytes !== oracle.receipt.source_bytes) throw new Error('paired compiler output or source closure differs');
+    if (row.receipt.complete !== true || row.receipt.report_count !== 0 || !Number.isSafeInteger(row.receipt.source_bytes) || row.receipt.source_bytes <= 0 || row.receipt.selected_factory_tier !== 'Aot' || row.receipt.actual_factory_tier !== 'Aot') throw new Error('startup compile did not complete through the canonical AOT factory');
+    if (!/^[0-9a-f]{64}$/.test(row.artifact_sha256 ?? '') || row.artifact_sha256 !== oracle.artifact_sha256 || row.receipt.source_bytes !== oracle.receipt.source_bytes) throw new Error('paired emitted artifact differs');
+    if (!/^[0-9a-f]{64}$/.test(row.source_sha256 ?? '') || row.source_sha256 !== oracle.source_sha256) throw new Error('paired actual project inputs differ');
     for (const name of ['wall_ns', 'compile_ns', 'pre_parse_ns']) {
       if (typeof row.timing[name] !== 'bigint' || row.timing[name] <= 0n) throw new Error('missing or invalid startup timing');
     }
@@ -44,14 +71,19 @@ export function compareStartup(plain, optimized) {
 export function compareStartupDirectory(root) {
   const pair = JSON.parse(fs.readFileSync(path.join(root, 'pair.json'), 'utf8'));
   if (pair.schema !== 'jet.native-host-shape-pair.v1' || !/^[0-9a-f]{64}$/.test(pair.source_sha256 ?? '') || !pair.machine || !pair.build_profile) throw new Error('startup pair must record shared source hash, machine, and build profile');
+  const inputRoot = fs.realpathSync(path.join(root, 'inputs'));
+  if (startupInputHash(inputRoot) !== pair.source_sha256) throw new Error('startup input snapshot differs from the paired source hash');
   const names = arm => fs.readdirSync(path.join(root, arm)).filter(name => /^trial-[0-9]+$/.test(name)).sort();
   const trials = names('plain');
   if (JSON.stringify(trials) !== JSON.stringify(names('optimized'))) throw new Error('unmatched startup trial directories');
   const readArm = arm => trials.map(name => {
     const dir = path.join(root, arm, name);
     if (fs.readFileSync(path.join(dir, 'rc'), 'utf8').trim() !== '0') throw new Error('startup process failed');
+    const invocation = JSON.parse(fs.readFileSync(path.join(dir, 'invocation.json'), 'utf8'));
+    if (fs.realpathSync(invocation.source_root) !== inputRoot || invocation.source_sha256 !== pair.source_sha256) throw new Error('startup trial did not use the actual matched input snapshot');
     return {
-      receipt: JSON.parse(fs.readFileSync(path.join(dir, 'receipt'), 'utf8')),
+      receipt: startupReceipt(fs.readFileSync(path.join(dir, 'receipt'), 'utf8')),
+      source_sha256: invocation.source_sha256,
       artifact_sha256: sha256(fs.readFileSync(path.join(dir, 'out.rs'))),
       timing: startupTiming(JSON.parse(fs.readFileSync(path.join(dir, 'trace.json'), 'utf8')), fs.readFileSync(path.join(dir, 'time.txt'), 'utf8')),
     };
