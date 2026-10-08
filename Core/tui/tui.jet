@@ -103,7 +103,11 @@ fn capability_env_bytes(name: String) -> [U8]? Never! {
 
 fn capability_env_text(name: String) -> String? Never! {
     raw :: capability_env_bytes(name) ?? return None
-    String.from_bytes(raw)
+    capability_text(raw)
+}
+
+fn capability_text(raw: [U8]) -> String? Never! {
+    Val(String.from_bytes(raw) ?? return None)
 }
 
 fn capability_env_flag(name: String) -> Bool Never! {
@@ -368,7 +372,7 @@ pub fn key_event_modifiers(code: String, modifiers: Int) -> TUIEvent Never! {
     TUIEvent.Key{code: code, modifiers: modifiers & 255}
 }
 pub fn resize_event(width: Float, height: Float) -> TUIEvent Never! {
-    TUIEvent.Resize(ui.Size{width: width, height: height})
+    TUIEvent.Resize{size: ui.Size{width: width, height: height}}
 }
 pub fn timer_event(id: String, elapsed_ms: Int) -> TUIEvent Never! {
     TUIEvent.Timer{id: id, elapsed_ms: elapsed_ms}
@@ -376,7 +380,7 @@ pub fn timer_event(id: String, elapsed_ms: Int) -> TUIEvent Never! {
 pub fn io_event(channel: String, payload: [U8]) -> TUIEvent Never! {
     TUIEvent.IO{channel: channel, payload: payload}
 }
-pub fn focus_event(focused: Bool) -> TUIEvent Never! { TUIEvent.Focus(focused) }
+pub fn focus_event(focused: Bool) -> TUIEvent Never! { TUIEvent.Focus{focused: focused} }
 pub fn interrupt_event() -> TUIEvent Never! { TUIEvent.Interrupt }
 pub fn close_event() -> TUIEvent Never! { TUIEvent.Close }
 
@@ -688,8 +692,9 @@ fn normalized_style_test_node(words: StyleWords) -> UINode Never! {
     assert(capability_dimension(Val("18446744073709551616"), 80, core.sys.usize_max()) == 80)
     assert(capability_dimension(Val(" 120"), 80, U64{4294967295}) == 80)
     assert(capability_dimension(Val("-1"), 80, U64{4294967295}) == 80)
-    invalid :: String.from_bytes([U8]{255})
+    invalid :: capability_text([U8]{255})
     assert(invalid == None && capability_dimension(invalid, 80, U64{4294967295}) == 80)
+    assert((capability_text([U8]{104, 195, 169}) ?? "") == "hé")
     // Raw var_os checks distinguish an absent flag, an empty flag, and "0".
     assert(!capability_raw_flag(None))
     assert(capability_raw_flag(Val([U8]{})))

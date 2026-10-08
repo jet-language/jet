@@ -351,6 +351,9 @@ the ANSI code order bold, dim, underline, foreground, background and projects
 text to ASCII only when Unicode presentation is unavailable. List and table
 formatting also lives in Jet: clipping counts terminal-cell widths, table
 padding excludes the final cell, and an empty list retains one empty text node.
+Environment text used for TUI capabilities treats invalid UTF-8 as absent,
+while environment flag presence continues to use the original encoded bytes.
+Source event constructors supply the declared labeled payload fields.
 
 `core.ui` owns geometry, input-event construction, node defaults, container
 measurement, and text widths in Jet. Its retained renderer handle crosses the

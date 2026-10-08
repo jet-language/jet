@@ -208,9 +208,9 @@ pub fn terminal_height() -[IO]> Int Never! {
 }
 
 pub fn style(style: String, text: String) -[IO]> String Never! {
-    if !terminal_style_enabled() -> return text
+    if !terminal_style_enabled() -> return ~text
     code :: legacy_style_code(style)
-    if code.is_empty() -> return text
+    if code.is_empty() -> return ~text
     esc :: String.from_bytes([U8]{27}) ?? ""
     "{esc}[{code}m{text}{esc}[0m"
 }
@@ -547,9 +547,9 @@ fn stdin_chomp(text: String) -> String Never! {
     loop raw.len() > 0 {
         last :: raw[raw.len() - 1]
         if last != (U8{10}) && last != (U8{13}) -> break
-        &raw.pop()
+        &raw.pop().drop("discard a trailing line ending")
     }
-    if raw.len() == original_len -> return text
+    if raw.len() == original_len -> return ~text
     String.from_bytes(raw) ?? panic("ASCII line endings preserve UTF-8")
 }
 
