@@ -9,9 +9,117 @@ package {
     }
 }
 
-// core.db owns typed row selection and conversion over the provider's
-// DBValue rows. Connections, pools, policies and the DBValue/DBError carriers
-// stay with the native provider; every fallible row read reports DBError.
+// core.db owns its SQL values, typed row selection and conversion. The private
+// SQLite adapter alone holds engine pointers; fallible row reads use DBError.
+
+#Equatable
+pub enum DBValue {
+    Null
+    Int(Int)
+    Float(Float)
+    Text(String)
+    Bool(Bool)
+    Blob([U8])
+}
+
+#Equatable
+pub enum __PoolLifecycle {
+    Open
+    Draining
+    Drained
+}
+
+// Receipts have always been opaque public values: the pool produces them;
+// source owns their exact counters, equality and textual projection.
+#Equatable
+pub struct DBPoolReceipt {
+    lifecycle: __PoolLifecycle
+    max: Int
+    available: Int
+    leased: Int
+    opening: Int
+    ready: Bool
+    acquires: Int
+    releases: Int
+    timeouts: Int
+    open_failures: Int
+    unhealthy: Int
+    replacements: Int
+    replacement_failures: Int
+}
+impl DBPoolReceipt.Show { fn show(self) -> String { pool_receipt_text(self) } }
+impl DBPoolReceipt.Display { fn display(self) -> String { pool_receipt_text(self) } }
+impl DBPoolReceipt.Debug { fn debug(self) -> String { pool_receipt_text(self) } }
+
+fn pool_receipt_text(receipt: DBPoolReceipt) -> String Never! {
+    lifecycle :: if receipt.lifecycle == {
+        .Open -> "open"
+        .Draining -> "draining"
+        .Drained -> "drained"
+    }
+    ready :: if receipt.ready -> 1 else -> 0
+    "db.pool lifecycle={lifecycle} max={receipt.max} available={receipt.available} leased={receipt.leased} opening={receipt.opening} ready={ready} acquires={receipt.acquires} releases={receipt.releases} timeouts={receipt.timeouts} open_failures={receipt.open_failures} unhealthy={receipt.unhealthy} replacements={receipt.replacements} replacement_failures={receipt.replacement_failures}"
+}
+
+#Test("pool receipt text keeps every counter and lifecycle spelling") {
+    receipt := DBPoolReceipt{
+        lifecycle: .Open, max: 2, available: 1, leased: 0, opening: 1,
+        ready: true, acquires: 3, releases: 4, timeouts: 5, open_failures: 6,
+        unhealthy: 7, replacements: 8, replacement_failures: 9,
+    }
+    assert_eq(pool_receipt_text(receipt), "db.pool lifecycle=open max=2 available=1 leased=0 opening=1 ready=1 acquires=3 releases=4 timeouts=5 open_failures=6 unhealthy=7 replacements=8 replacement_failures=9")
+    receipt.lifecycle = .Draining
+    receipt.ready = false
+    assert_eq(pool_receipt_text(receipt), "db.pool lifecycle=draining max=2 available=1 leased=0 opening=1 ready=0 acquires=3 releases=4 timeouts=5 open_failures=6 unhealthy=7 replacements=8 replacement_failures=9")
+    receipt.lifecycle = .Drained
+    assert_eq(pool_receipt_text(receipt), "db.pool lifecycle=drained max=2 available=1 leased=0 opening=1 ready=0 acquires=3 releases=4 timeouts=5 open_failures=6 unhealthy=7 replacements=8 replacement_failures=9")
+}
+
+#[Error, Equatable]
+pub struct DBError { pub message: String }
+
+impl DBError.Display { fn display(self) -> String { ~self.message } }
+impl DBError.Debug { fn debug(^self) -> String { self.message } }
+impl DBError -> Err { Err(self.message) }
+impl DBValue.Display { fn display(self) -> String { render_value(self) } }
+impl DBValue.Show { fn show(self) -> String { render_value(self) } }
+
+impl DBValue {
+    pub fn is_null(self) -> Bool Never! {
+        if self == .Null -> return true
+        false
+    }
+    pub fn int(self) -> Int Err! {
+        if self == .Int(number) -> return Ok(number)
+        Err("expected an int, got {render_value(self)}")
+    }
+    pub fn float(self) -> Float Err! {
+        if self == {
+            .Float(number) -> Ok(number)
+            .Int(number) -> Ok(Float{number})
+            else -> Err("expected a float, got {render_value(self)}")
+        }
+    }
+    pub fn text(self) -> String Err! {
+        if self == .Text(text) -> return Ok(~text)
+        Err("expected text, got {render_value(self)}")
+    }
+    pub fn bool(self) -> Bool Err! {
+        if self == {
+            .Bool(value) -> Ok(value)
+            .Int(number) -> {
+                if number == 0 -> return Ok(false)
+                if number == 1 -> return Ok(true)
+                Err("expected a bool, got {render_value(self)}")
+            }
+            else -> Err("expected a bool, got {render_value(self)}")
+        }
+    }
+    pub fn blob(self) -> [U8] Err! {
+        if self == .Blob(bytes) -> return Ok(~bytes)
+        Err("expected a blob, got {render_value(self)}")
+    }
+}
 
 pub fn row_value(row: [String: DBValue], column: String) -> DBValue DBError! {
     value :: row.get(column) ?? return Err(DBError{message: "missing column `{column}`"})

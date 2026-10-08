@@ -3580,6 +3580,19 @@ control belong to the migration/control path, not to arbitrary interpolated
 application values. Migrations record their name and checksum so a changed
 migration cannot silently replace an applied one.
 
+Rows are inspectable `[String: DBValue]` maps. The closed value carrier has
+`Null`, `Int`, `Float`, `Text`, `Bool`, and `Blob([U8])` variants; SQLite Boolean
+affinity returns integer `0`/`1`, which the Boolean reader accepts. Blob reads
+preserve every byte, including empty blobs, without text conversion. `DBError`
+retains the driver's message rather than exposing a raw engine pointer.
+
+Pool receipts remain opaque values produced by a pool. Their equality and
+Show/Display/Debug projection are source-owned: each projection preserves the
+`db.pool lifecycle=...` text and the complete ordered set of pool counters.
+
+The existing registered Rust SQLite bridge remains the raw host boundary under
+the Jet source policy until runtime cutover. The separate CFFI `__Driver`
+adapter is held; it is not part of this source-owned Core integration.
 ### `core.compute` — checked tensors and explicit devices
 
 `core.compute` provides dense tensors, shape-checked operations, sparse CSR
