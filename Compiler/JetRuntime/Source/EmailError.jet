@@ -2,6 +2,14 @@
 // Lower/Values.jet:49-55,65-74,111-127,137-145: tag then four pointer words.
 // Options are nullable pointers to one-word boxes (Text handle / exact Int).
 // Producers are checked Core literals and native SMTP; no constructor facade.
+// ProcessSpec.jet:4-7 allocates ENCODING_ENUM_BYTES with alignment 8;
+// EncodingErrors.jet:16-17 frees that same ENCODING_ENUM_BYTES/alignment 8.
+// Both implement the canonical eight-byte Option payload box contract.
+fn email_error_tag(value: I64) -> I64 {
+    ordinal :: encoding_word(value + EMAIL_ERROR_TAG)
+    if (ordinal < I64{0} || ordinal > I64{10}) -> rt_record_variant_panic()
+    ordinal
+}
 fn email_error_option_clone(value: I64, text: Bool) -> I64 {
     if (value == I64{0}) -> return I64{0}
     payload :: encoding_word(value)
@@ -21,8 +29,9 @@ fn email_error_option_eq(left: I64, right: I64, text: Bool) -> Bool {
     if text -> jet_rt_string_eq(a, b) else -> jet_int_compare(a, b) == I64{0}
 }
 #Export(c) fn jet_rt_handle_clone_Error(value: I64) -> I64 {
+    ordinal :: email_error_tag(value)
     result :: jet_rt_alloc(EMAIL_ERROR_BYTES, I64{8})
-    encoding_store(result + EMAIL_ERROR_TAG, encoding_word(value + EMAIL_ERROR_TAG))
+    encoding_store(result + EMAIL_ERROR_TAG, ordinal)
     encoding_store(result + EMAIL_ERROR_OPERATION, jet_rt_string_clone(encoding_word(value + EMAIL_ERROR_OPERATION)))
     encoding_store(result + EMAIL_ERROR_SERVER, email_error_option_clone(encoding_word(value + EMAIL_ERROR_SERVER), true))
     encoding_store(result + EMAIL_ERROR_CODE, email_error_option_clone(encoding_word(value + EMAIL_ERROR_CODE), false))
@@ -31,6 +40,7 @@ fn email_error_option_eq(left: I64, right: I64, text: Bool) -> Bool {
 }
 #Export(c) fn jet_rt_handle_drop_Error(value: I64) {
     if (value == I64{0}) -> return
+    email_error_tag(value)
     jet_rt_string_drop(encoding_word(value + EMAIL_ERROR_OPERATION))
     email_error_option_drop(encoding_word(value + EMAIL_ERROR_SERVER), true)
     email_error_option_drop(encoding_word(value + EMAIL_ERROR_CODE), false)
@@ -38,7 +48,9 @@ fn email_error_option_eq(left: I64, right: I64, text: Bool) -> Bool {
     jet_rt_free(value, EMAIL_ERROR_BYTES, I64{8})
 }
 #Export(c) fn jet_rt_handle_eq_Error(left: I64, right: I64) -> Bool {
-    if (encoding_word(left + EMAIL_ERROR_TAG) != encoding_word(right + EMAIL_ERROR_TAG)) -> return false
+    a :: email_error_tag(left)
+    b :: email_error_tag(right)
+    if (a != b) -> return false
     if !jet_rt_string_eq(encoding_word(left + EMAIL_ERROR_OPERATION), encoding_word(right + EMAIL_ERROR_OPERATION)) -> return false
     if !email_error_option_eq(encoding_word(left + EMAIL_ERROR_SERVER), encoding_word(right + EMAIL_ERROR_SERVER), true) -> return false
     if !email_error_option_eq(encoding_word(left + EMAIL_ERROR_CODE), encoding_word(right + EMAIL_ERROR_CODE), false) -> return false

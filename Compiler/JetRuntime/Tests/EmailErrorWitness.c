@@ -89,10 +89,20 @@ static void different_fields(Error *a, Error *b, int64_t zero, int64_t one) {
     assert(!jet_rt_handle_eq_Error(a, b)); jet_rt_string_drop(b->reason); b->reason = saved_text;
     assert(jet_rt_handle_eq_Error(a, b));
 }
-int main(void) {
+int main(int argc, char **argv) {
     jet_rt_alloc_init();
     Text raw = {"send\0\xc3\xa9", 7, 0}, reason = {"raw\0reason\xe2\x98\x83", 13, 0};
     Text empty = {"", 0, 0}, server = {"mx.\xc3\xa9.test", 10, 0};
+    if (argc > 1) {
+        Error *bad = literal(strstr(argv[1], "-negative") ? -1 : 11, &empty, NULL, false, 0, &empty);
+        Error *good = literal(0, &empty, NULL, false, 0, &empty);
+        if (strncmp(argv[1], "bad-clone", 9) == 0) (void)jet_rt_handle_clone_Error(bad);
+        else if (strncmp(argv[1], "bad-drop", 8) == 0) jet_rt_handle_drop_Error(bad);
+        else if (strncmp(argv[1], "bad-eq-left", 11) == 0) (void)jet_rt_handle_eq_Error(bad, good);
+        else if (strncmp(argv[1], "bad-eq-right", 12) == 0) (void)jet_rt_handle_eq_Error(good, bad);
+        else return 2;
+        assert(!"bad variant must stop"); return 1;
+    }
     int64_t zero = jet_int_owned_from_i64(0), one = jet_int_owned_from_i64(1);
     int64_t max = jet_int_owned_from_i64(INT64_MAX), big = jet_int_add(max, max);
     int64_t negative = jet_int_sub(zero, big);

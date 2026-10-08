@@ -2239,6 +2239,12 @@ Clone deep-copies Text and Option boxes and retains the exact Int code without
 narrowing; drop releases owned contents before their boxes. Equality checks tag
 first, then operation, server, code and reason in declaration order. Producers
 are checked source literals and native SMTP, so no constructor facade is exported.
+All three operations validate the tag in 0..10 through the shared record-variant
+stop. Option allocation (`ProcessSpec.jet:4-7`) and release
+(`EncodingErrors.jet:16-17`) use the identical `ENCODING_ENUM_BYTES`/alignment-8
+payload-box contract. Witness modes `bad-clone`, `bad-drop`, `bad-eq-left`,
+`bad-eq-right` (also with `-negative`) require the canonical record-variant stop,
+exit 70 and empty stdout; they cover invalid tags 11 and -1.
 `EmailErrorWitness.c` uses real allocator/Text/Int providers to build that native
 layout and checks all eleven tags, nullable fields, raw text, arbitrary-precision
 codes, clone independence and exactly-once release. Its stdout fixture is an
