@@ -1885,9 +1885,19 @@ fn run() { print(scale_kind() == .Rational) }
                 execution,
             },
         );
-        assert!(rust.contains("enum UnitScaleProvenanceKind {"), "{rust}");
+        // Declarations use canonical path mangling; flat tags use name mangling.
+        assert!(
+            rust.contains(&format!(
+                "pub enum {} {{",
+                crate::Codegen::mangle_path("UnitScaleProvenanceKind")
+            )),
+            "{rust}"
+        );
         for variant in expected {
-            assert!(rust.contains(&format!("    {variant},")), "{rust}");
+            assert!(
+                rust.contains(&format!("    {},", crate::Codegen::mangle(variant))),
+                "{rust}"
+            );
         }
     });
 }
