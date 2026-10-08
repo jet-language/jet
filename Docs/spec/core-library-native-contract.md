@@ -421,6 +421,12 @@ it is not an alternate admission mechanism or a runtime symbol probe. These
 components alone are not evidence that composed native-runtime admission has
 executed successfully.
 
+Private factory provenance requires the canonical Entry source path or the
+assembler's exact first-line private-host header, emitted only when Entry is
+in the manifest. A same-named user function plus an incidental comment does
+not receive ingress. The assembler accounts for this header in its source map
+without changing original diagnostic locations.
+
 ## One meaning across execution tiers
 
 AOT, interpreter/comptime evaluation, and web execution are
