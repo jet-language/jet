@@ -9372,6 +9372,9 @@ impl<'a> RustEmitter<'a> {
                 }
             }
         }
+        if self.source_value_hook_symbol(def, "clone").is_some() {
+            derives.retain(|name| !matches!(*name, "Clone" | "Copy"));
+        }
         if self.source_value_hook_symbol(def, "debug").is_some() {
             derives.retain(|name| *name != "Debug");
         }
@@ -9485,6 +9488,11 @@ impl<'a> RustEmitter<'a> {
                     panic!("MIR columnar layout requires a struct type definition");
                 }
             }
+        }
+        if let Some(hook) = self.source_value_hook_symbol(def, "clone") {
+            let _ = writeln!(out,
+                "impl Clone for {name} {{ fn clone(&self) -> Self {{ self.{hook}() }} }}"
+            );
         }
         self.pop_generic_scope();
     }

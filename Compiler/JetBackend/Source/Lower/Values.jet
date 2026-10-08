@@ -10,6 +10,7 @@
 use jet_foundation.[
     MIRBlockID, MIRFieldID, MIRProgram, MIRType, MIRTypeDef, MIRTypeKind,
     MIRVariant, mir_field_id, mir_type_from_kind, mir_type_identity_key,
+    mir_source_value_hook,
 ]
 
 struct LowerSize {
@@ -329,6 +330,18 @@ fn lower_inline_clone_glue(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> L
     target :: lower_pointer(&f)
     entry :: lower_new_block(&f)
     lower_start(&f, entry, [LIRValueID]{source, target})
+    if mir_source_value_hook(p, glue.ty, "clone") == .Val(hook) {
+        row :: lower_function_index(m, hook)
+        if row < 0 {
+            lower_fail(&m, &f, "source clone hook is not reachable")
+            lower_seal(&f, LIRTerminator.Unreachable)
+            return lir_builder_finish(f.builder)
+        }
+        // Inline return storage is first, then the read-borrowed receiver.
+        lower_emit(&f, LIRInst.Call{dst: None, signature: m.mir_signatures[row], callee: LIRCallee.Function{id: LIRFunctionID{value: row}}, args: [LIRValueID]{target, source}})
+        lower_seal(&f, LIRTerminator.Return{value: None})
+        return lir_builder_finish(f.builder)
+    }
     lower_copy_bytes(&f, target, 0, source, 0, lower_inline_size(p, glue.ty))
     lower_glue_clone_fields(p, &m, &f, source, target, lower_inline_glue_fields(p, glue.ty))
     lower_seal(&f, LIRTerminator.Return{value: None})
