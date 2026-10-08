@@ -543,12 +543,12 @@ fn store_archive_import_staged(roots: HangarRoots, archive: HangarArchive, allow
     store_sync_store_directory(objects_dir)
     store_register_entries_unlocked(roots, package_records)
     Ok(package_records.len())
-fn store_archive_rollback_import_moves(verification: &StoreVerification, moved: [HangarArchiveMove], hangar: String) StoreError! {
+}
 
 // Rebuild a local StoreEntry for an archived package record: its identity
 // must match its metadata, and its paths are remapped under the local
 // content-addressed object.
-            store_remove_seal(&verification, entry.destination, hangar)
+fn store_archive_portable_entry(roots: HangarRoots, object: HangarArchiveObject, meta: ParsedMeta) -> StoreEntry StoreError! {
     store_archive_validate_id(object.id)
     source_id :: store_entry_id(meta.name, meta.version, meta.reference, meta.out)
     if source_id != object.id {
