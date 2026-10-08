@@ -118,7 +118,7 @@ fn task_spawn_state(site: I64, label: I64, env: I64, invoke: I64, release: I64, 
     if (jet_scheduler_native_propagate() != I64{0}) {
         jet_scheduler_shield_enter()
         if (permit != I64{0}) -> task_group_release(state)
-        _ := coll_call1(release, env)
+        coll_call1_unit(release, env)
         jet_scheduler_shield_leave()
         return I64{0}
     }
@@ -169,7 +169,7 @@ fn task_run(child: I64) {
         scheduler_body_leave(body)
     }
     jet_scheduler_shield_enter()
-    _ := coll_call1(sync_load(child + I64{80}), sync_load(child + I64{64}))
+    coll_call1_unit(sync_load(child + I64{80}), sync_load(child + I64{64}))
     jet_scheduler_shield_leave()
     scheduler_task_completion_end(frame)
     if (sync_load(child + I64{144}) != I64{0}) -> task_group_release(sync_load(child + I64{136}))
@@ -364,7 +364,7 @@ fn scheduler_task_completion_begin() -> I64 {
 fn scheduler_closure_drop(closure: I64) {
     count :: sync_load(closure) - I64{1}
     sync_store(closure, count)
-    if (count == I64{0}) -> _ := coll_call1(sync_load(closure + I64{16}), closure)
+    if (count == I64{0}) -> coll_call1_unit(sync_load(closure + I64{16}), closure)
 }
 fn scheduler_task_completion_register(closure: I64) {
     stack :: sync_load(thread_base() + I64{80})
@@ -387,7 +387,7 @@ fn scheduler_task_completion_end(frame: I64) {
         loop count > (I64{0}) {
             count -= I64{1}
             closure :: sync_load(data + count * I64{8})
-            _ := coll_call1(sync_load(closure + I64{8}), closure)
+            coll_call1_unit(sync_load(closure + I64{8}), closure)
             jet_scheduler_shield_enter()
             scheduler_closure_drop(closure)
             jet_scheduler_shield_leave()
@@ -449,7 +449,7 @@ fn task_exit_queue() -> I64 {
     loop count > (I64{0}) {
         count -= I64{1}
         closure :: sync_load(data + count * I64{8})
-        _ := coll_call1(sync_load(closure + I64{8}), closure)
+        coll_call1_unit(sync_load(closure + I64{8}), closure)
         jet_scheduler_shield_enter()
         scheduler_closure_drop(closure)
         jet_scheduler_shield_leave()
