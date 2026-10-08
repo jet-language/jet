@@ -3733,6 +3733,8 @@ original validation order in Jet. Private single-field host leaves only read
 or write the existing service tree storage, under the caller's exclusive borrow.
 The signing key remains the exact 32 bytes decoded from the current `sa-`
 authority token; this port adds no key cache or security-policy change.
+The Core-internal `__authority_signing_key` shares that one decoder with jobs;
+it is source policy, not a second host signer or an additional authority store.
 
 Snapshot/event-log selection, replay framing, topology/observation text, and
 workflow history/outcome selection are Jet policies. Durable reads retain the

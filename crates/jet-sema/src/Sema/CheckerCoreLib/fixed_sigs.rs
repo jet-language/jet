@@ -3496,6 +3496,10 @@ fn core_fixed_sig_impl(
                 ("worker".into(), Box::new(Type::String)), ("generation".into(), Box::new(Type::Int)),
                 ("started".into(), Box::new(Type::Bool)), ("draining".into(), Box::new(Type::Bool)),
                 ("partitioned".into(), Box::new(Type::Bool))]), Type::Named("ServiceError".into()))))),
+        ("core.service", "__authority_signing_key") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(list_u8.clone(), Type::Named("ServiceError".into()))),
+        )),
         ("core.service", "drain_dead_letters") => Some((
             vec![(
                 AccessConvention::Write,
