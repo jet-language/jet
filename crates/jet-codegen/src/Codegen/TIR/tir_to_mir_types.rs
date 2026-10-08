@@ -2403,10 +2403,6 @@ const COMPILER_OWNED_CORE_RECORDS: &[(&str, &[&str])] = &[
     ("__ResolveError", &["kind", "has_os_code", "os_code", "message"]),
     ("AsyncPolicy", &["capacity", "overflow"]),
     ("CSVRow", &["fields", "line"]),
-    ("__DeliveryFacts", &["id", "key", "tree", "worker", "message", "authority", "generation", "state", "attempts", "retention_until", "deadline", "event_sequence", "duplicate", "records"]),
-    ("__DeliveryRecord", &["op", "fields"]),
-    ("__MailboxRead", &["status", "message"]),
-    ("__QueryRead", &["size", "bytes"]),
     (
         "DataLineOptions",
         &[
@@ -3942,6 +3938,33 @@ pub(crate) fn is_compiler_owned_trait(name: &str) -> bool {
 #[cfg(test)]
 mod native_encoding_record_tests {
     use super::*;
+
+    #[test]
+    fn private_source_records_do_not_get_synthetic_compiler_owned_rows() {
+        let emitter = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../Compiler/JetCodegen/Source/Emit/Types.jet"
+        ));
+        let emitter_records = emitter
+            .split("JET_RUST_EMIT_COMPILER_OWNED_CORE_RECORDS :: prep")
+            .nth(1)
+            .expect("paired compiler-owned record inventory")
+            .split("} }")
+            .next()
+            .expect("paired compiler-owned record entries");
+        for (module, name) in [
+            ("core.service", "__DeliveryFacts"),
+            ("core.service", "__DeliveryRecord"),
+            ("core.service", "__MailboxRead"),
+            ("core.encoding.csv", "__QueryRead"),
+        ] {
+            let source = jet_sema::CoreSources::core_source_text(module).expect(module);
+            assert!(source.contains(&format!("struct {name} {{")), "{module}::{name}");
+            assert!(!is_compiler_owned_core_record(name), "{name}");
+            assert!(!is_compiler_owned_type(name), "{name}");
+            assert!(!emitter_records.contains(&format!("\"{name}\"")), "{name}");
+        }
+    }
 
     #[test]
     fn native_encoding_records_keep_checked_mir_owners_without_source_modules() {
