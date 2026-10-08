@@ -1,0 +1,49 @@
+# tests/project_check.rs::frozen_dogfood_and_each_project_proof_witness_are_snapshotted at tests/project_check.rs:345; converter c4189f521f54bea78e49f62cb127d50ad22ac3e0
+# Original snapshots/predicates; PENDING-SAME-HEAD; no captures blessed.
+fixture: frozen_dogfood_and_each_project_proof_witness_are_snapshotted.fixture
+env: NO_COLOR=1
+env: TERM=dumb
+step: jet check --verbose .
+cwd: {work}/frozen_dogfood
+exit: 0
+stdout.filter(^= "proof: "): lines = 4
+stdout.filter(^= "proof: ").filter(~ "entry resolution").filter(~ "E2389"): ~ "[proven]" # original predicate: one proof row contains label, code and proven
+stdout.filter(^= "proof: ").filter(~ "module graph").filter(~ "E2390"): ~ "[proven]" # original predicate: one proof row contains label, code and proven
+stdout.filter(^= "proof: ").filter(~ "Core closure").filter(~ "E2391"): ~ "[proven]" # original predicate: one proof row contains label, code and proven
+stdout.filter(^= "proof: ").filter(~ "tier lowering").filter(~ "E2392"): ~ "[proven]" # original predicate: one proof row contains label, code and proven
+stdout.filter(^= "proof: "): !~ "absent from the checked module graph" # original predicate
+normalize: replace "{work}/frozen_dogfood" "<fixture>"
+stdout.filter(^= "proof: ").append("\n"): = frozen_dogfood_and_each_project_proof_witness_are_snapshotted.frozen_dogfood.expected
+step: jet check --verbose .
+cwd: {work}/entry_resolution
+exit: 0
+stdout.filter(^= "proof: "): lines = 4
+stdout.filter(^= "proof: ").filter(~ "entry resolution").filter(~ "E2389"): ~ "[proven]" # original predicate: one proof row contains label, code and proven
+stdout.filter(^= "proof: ").filter(~ "module graph").filter(~ "E2390"): ~ "[proven]" # original predicate: one proof row contains label, code and proven
+stdout.filter(^= "proof: ").filter(~ "Core closure").filter(~ "E2391"): ~ "[proven]" # original predicate: one proof row contains label, code and proven
+stdout.filter(^= "proof: ").filter(~ "tier lowering").filter(~ "E2392"): ~ "[proven]" # original predicate: one proof row contains label, code and proven
+stdout.filter(^= "proof: "): !~ "absent from the checked module graph" # original predicate
+normalize: replace "{work}/entry_resolution" "<fixture>"
+stdout.filter(^= "proof: ").append("\n"): = frozen_dogfood_and_each_project_proof_witness_are_snapshotted.entry_resolution.expected
+step: jet check --verbose .
+cwd: {work}/module_graph
+exit: 0
+stdout.filter(^= "proof: "): lines = 4
+stdout.filter(^= "proof: ").filter(~ "entry resolution").filter(~ "E2389"): ~ "[proven]" # original predicate: one proof row contains label, code and proven
+stdout.filter(^= "proof: ").filter(~ "module graph").filter(~ "E2390"): ~ "[proven]" # original predicate: one proof row contains label, code and proven
+stdout.filter(^= "proof: ").filter(~ "Core closure").filter(~ "E2391"): ~ "[proven]" # original predicate: one proof row contains label, code and proven
+stdout.filter(^= "proof: ").filter(~ "tier lowering").filter(~ "E2392"): ~ "[proven]" # original predicate: one proof row contains label, code and proven
+stdout.filter(^= "proof: "): !~ "absent from the checked module graph" # original predicate
+normalize: replace "{work}/module_graph" "<fixture>"
+stdout.filter(^= "proof: ").append("\n"): = frozen_dogfood_and_each_project_proof_witness_are_snapshotted.module_graph.expected
+step: jet check --verbose .
+cwd: {work}/core_closure
+exit: 0
+stdout.filter(^= "proof: "): lines = 4
+stdout.filter(^= "proof: ").filter(~ "entry resolution").filter(~ "E2389"): ~ "[proven]" # original predicate: one proof row contains label, code and proven
+stdout.filter(^= "proof: ").filter(~ "module graph").filter(~ "E2390"): ~ "[proven]" # original predicate: one proof row contains label, code and proven
+stdout.filter(^= "proof: ").filter(~ "Core closure").filter(~ "E2391"): ~ "[proven]" # original predicate: one proof row contains label, code and proven
+stdout.filter(^= "proof: ").filter(~ "tier lowering").filter(~ "E2392"): ~ "[proven]" # original predicate: one proof row contains label, code and proven
+stdout.filter(^= "proof: "): !~ "absent from the checked module graph" # original predicate
+normalize: replace "{work}/core_closure" "<fixture>"
+stdout.filter(^= "proof: ").append("\n"): = frozen_dogfood_and_each_project_proof_witness_are_snapshotted.core_closure.expected

@@ -1,0 +1,115 @@
+# tests/project_check.rs::project_check_receipt_tracks_entry_and_authority_changes at tests/project_check.rs:553; converter c4189f521f54bea78e49f62cb127d50ad22ac3e0
+# Original snapshots/predicates; PENDING-SAME-HEAD; no captures blessed.
+fixture: project_check_receipt_tracks_entry_and_authority_changes.fixture
+env: NO_COLOR=1
+env: TERM=dumb
+copy: .setup/source-0.txt receipt_invalidation/.jet/lock
+copy: .setup/source-1.txt receipt_invalidation/packages/app/.jet/lock
+copy: .setup/source-2.txt receipt_invalidation/packages/app/.jet/generated/input.jet
+step first: jet check --verbose
+cwd: {work}/receipt_invalidation/packages/app
+env: JET_RECEIPT_DIR={work}/receipts
+unset: JET_RECEIPT_BYPASS
+exit: 0
+step replay: jet check --verbose
+cwd: {work}/receipt_invalidation/packages/app
+env: JET_RECEIPT_DIR={work}/receipts
+unset: JET_RECEIPT_BYPASS
+exit: 0
+stderr: ~ "ok: check current" # original predicate
+write: receipt_invalidation/packages/app/run.jet project_check_receipt_tracks_entry_and_authority_changes.candidate.txt
+step candidate: jet check --verbose
+cwd: {work}/receipt_invalidation/packages/app
+env: JET_RECEIPT_DIR={work}/receipts
+unset: JET_RECEIPT_BYPASS
+exit: 0
+stderr: !~ "ok: check current" # original predicate
+remove: receipt_invalidation/packages/app/run.jet
+copy: receipt_invalidation/workspace.jet workspace.original
+when dir-readable {work}/receipts: remove: receipts
+step baseline-workspace: jet check --verbose
+cwd: {work}/receipt_invalidation/packages/app
+env: JET_RECEIPT_DIR={work}/receipts
+unset: JET_RECEIPT_BYPASS
+exit: 0
+step replay-workspace: jet check --verbose
+cwd: {work}/receipt_invalidation/packages/app
+env: JET_RECEIPT_DIR={work}/receipts
+unset: JET_RECEIPT_BYPASS
+exit: 0
+stderr: ~ "ok: check current" # original predicate
+write: receipt_invalidation/workspace.jet project_check_receipt_tracks_entry_and_authority_changes.workspace.txt
+step changed-workspace: jet check --verbose
+cwd: {work}/receipt_invalidation/packages/app
+env: JET_RECEIPT_DIR={work}/receipts
+unset: JET_RECEIPT_BYPASS
+exit: 0
+stderr: !~ "ok: check current" # original predicate
+copy: workspace.original receipt_invalidation/workspace.jet
+when dir-readable {work}/receipts: remove: receipts
+copy: receipt_invalidation/packages/app/package.jet output.original
+when dir-readable {work}/receipts: remove: receipts
+step baseline-output: jet check --verbose
+cwd: {work}/receipt_invalidation/packages/app
+env: JET_RECEIPT_DIR={work}/receipts
+unset: JET_RECEIPT_BYPASS
+exit: 0
+step replay-output: jet check --verbose
+cwd: {work}/receipt_invalidation/packages/app
+env: JET_RECEIPT_DIR={work}/receipts
+unset: JET_RECEIPT_BYPASS
+exit: 0
+stderr: ~ "ok: check current" # original predicate
+write: receipt_invalidation/packages/app/package.jet project_check_receipt_tracks_entry_and_authority_changes.output.txt
+step changed-output: jet check --verbose
+cwd: {work}/receipt_invalidation/packages/app
+env: JET_RECEIPT_DIR={work}/receipts
+unset: JET_RECEIPT_BYPASS
+exit: 0
+stderr: !~ "ok: check current" # original predicate
+copy: output.original receipt_invalidation/packages/app/package.jet
+when dir-readable {work}/receipts: remove: receipts
+copy: receipt_invalidation/.jet/lock lock.original
+when dir-readable {work}/receipts: remove: receipts
+step baseline-lock: jet check --verbose
+cwd: {work}/receipt_invalidation/packages/app
+env: JET_RECEIPT_DIR={work}/receipts
+unset: JET_RECEIPT_BYPASS
+exit: 0
+step replay-lock: jet check --verbose
+cwd: {work}/receipt_invalidation/packages/app
+env: JET_RECEIPT_DIR={work}/receipts
+unset: JET_RECEIPT_BYPASS
+exit: 0
+stderr: ~ "ok: check current" # original predicate
+write: receipt_invalidation/.jet/lock project_check_receipt_tracks_entry_and_authority_changes.lock.txt
+step changed-lock: jet check --verbose
+cwd: {work}/receipt_invalidation/packages/app
+env: JET_RECEIPT_DIR={work}/receipts
+unset: JET_RECEIPT_BYPASS
+exit: 0
+stderr: !~ "ok: check current" # original predicate
+copy: lock.original receipt_invalidation/.jet/lock
+when dir-readable {work}/receipts: remove: receipts
+copy: receipt_invalidation/packages/app/.jet/generated/input.jet generated.original
+when dir-readable {work}/receipts: remove: receipts
+step baseline-generated: jet check --verbose
+cwd: {work}/receipt_invalidation/packages/app
+env: JET_RECEIPT_DIR={work}/receipts
+unset: JET_RECEIPT_BYPASS
+exit: 0
+step replay-generated: jet check --verbose
+cwd: {work}/receipt_invalidation/packages/app
+env: JET_RECEIPT_DIR={work}/receipts
+unset: JET_RECEIPT_BYPASS
+exit: 0
+stderr: ~ "ok: check current" # original predicate
+write: receipt_invalidation/packages/app/.jet/generated/input.jet project_check_receipt_tracks_entry_and_authority_changes.generated.txt
+step changed-generated: jet check --verbose
+cwd: {work}/receipt_invalidation/packages/app
+env: JET_RECEIPT_DIR={work}/receipts
+unset: JET_RECEIPT_BYPASS
+exit: 0
+stderr: !~ "ok: check current" # original predicate
+copy: generated.original receipt_invalidation/packages/app/.jet/generated/input.jet
+when dir-readable {work}/receipts: remove: receipts
