@@ -2525,7 +2525,7 @@ fn run() {
     }
     assert!(pushed && replaced, "source worker and restart must move their mailboxes");
     if have_rustc() {
-        let (status, _, stderr) = build_and_run("worker_mailbox_move", "main", source);
+        let (status, _, stderr) = build_and_run_full("worker_mailbox_move", "main", source);
         assert_eq!(status, 0, "{stderr}");
     }
 }
