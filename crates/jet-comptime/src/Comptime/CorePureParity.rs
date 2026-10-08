@@ -64,6 +64,9 @@ pub(super) fn evaluate(
         (CoreCallPureRoute::Email, "serialize") => {
             return EmailAdapter::evaluate("serialize", args, span)
         }
+        (CoreCallPureRoute::Email, "__address_parts" | "__attachment_parts" | "__envelope_parts") => {
+            return EmailAdapter::evaluate(row.member, args, span)
+        }
         (CoreCallPureRoute::EncodingXml, "canonical") => xml_canonical(args, span),
         (CoreCallPureRoute::Time, "period") => period(args, span),
         (CoreCallPureRoute::Time, "period_days") => period_unit(args, span, 2),
