@@ -383,6 +383,7 @@ fn helper_layer(module: &str, helper: &str) -> Option<RuntimeLayer> {
         )
         .then_some(RuntimeLayer::Alloc),
         "core.crypto" => match helper {
+            n if n.starts_with("__jetc_") => Some(RuntimeLayer::Std),
             "__nominal__"
             | "Secret"
             | "SigningKey"
