@@ -2361,8 +2361,27 @@ fn sema_checked_impl_key(module_row: SemaRegistrationModule, type_name: String, 
     if trait_name == .Val(trait_name_value) -> "{module_row.module_identity}::{type_name}::{trait_name_value}" else -> "{module_row.module_identity}::{type_name}"
 }
 
+fn sema_checked_operator_hook(trait_name: String) -> String? Never! {
+    if trait_name == {
+        "Add" -> Val("add")
+        "Sub" -> Val("sub")
+        "Mul" -> Val("mul")
+        "Div" -> Val("div")
+        "Equatable" -> Val("equal")
+        "Comparable" -> Val("compare")
+        else -> None
+    }
+}
+
+fn sema_checked_operator_hook_trait(method: String) -> String? Never! {
+    loop trait_name in [String]{"Add", "Sub", "Mul", "Div", "Equatable", "Comparable"} {
+        if sema_checked_operator_hook(trait_name) == Val(method) -> return Val(trait_name)
+    }
+    None
+}
+
 fn sema_checked_operator_trait(trait_name: String) -> Bool Never! {
-    trait_name == "Add" || trait_name == "Sub" || trait_name == "Mul" || trait_name == "Div" || trait_name == "Equatable" || trait_name == "Comparable"
+    sema_checked_operator_hook(trait_name) != None
 }
 
 fn sema_checked_impl_method_key(module_row: SemaRegistrationModule, definition: ImplDef, method: Func) -> String Never! {
@@ -2592,14 +2611,7 @@ fn sema_checked_coherence_operator_marker(marker: OperatorMarker?, trait_name: S
 // the signature is valid).
 fn sema_checked_coherence_operator_valid(trait_name: String, owner_type: Type, rhs: Type, methods: [Func]) -> Bool Never! {
     if methods.len() != 1 -> return false
-    expected :: if trait_name == {
-        "Add" -> "add"
-        "Sub" -> "sub"
-        "Mul" -> "mul"
-        "Div" -> "div"
-        "Equatable" -> "equal"
-        else -> "compare"
-    }
+    expected :: sema_checked_operator_hook(trait_name) ?? return false
     method :: methods[0]
     if method.name != expected || method.type_params.len() != 0 || method.params.len() < 2 -> return false
     receiver :: method.params[0]
@@ -2744,7 +2756,43 @@ fn sema_checked_validate_delegation(graph: SemaRegistrationGraph, module_row: Se
     }
 }
 
+// D-MEMBER-NAMESPACE1: fields and ordinary methods share the hook namespace.
+// Only operator hooks may repeat a method name (pair coherence checks the RHS).
+fn sema_checked_member_names(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, diagnostics: &[Diagnostic]) {
+    names := [String:Bool]{}
+    loop nominal in module_row.nominals {
+        owner :: nominal.symbol.id.key
+        loop field in nominal.fields {
+            key :: "{owner}::{field.symbol.name}"
+            if names.get(key) == None -> &names.add(key, false).drop("new field name")
+        }
+        loop method in nominal.methods {
+            key :: "{owner}::{method.symbol.name}"
+            hook :: method.symbol.owner != Val(owner)
+            previous :: names.get(key)
+            if previous != None && !(hook && previous == Val(true)) {
+                &diagnostics.push(sema_defined_twice(method.symbol.name, "fields, ordinary methods, and operator hooks share one member namespace", method.symbol.span))
+            }
+            if previous == None -> &names.add(key, hook).drop("new member name")
+        }
+    }
+    loop implementation in module_row.impls {
+        row :: sema_type_resolve_nominal_row(graph, implementation.target_type, module_row.module_identity)
+        owner :: if row == .Val(value) -> graph.modules[value.module_index].nominals[value.row].symbol.id.key else -> type_name(implementation.target_type)
+        hook :: sema_checked_operator_trait(implementation.trait_name ?? "")
+        loop method in implementation.methods {
+            key :: "{owner}::{method.symbol.name}"
+            previous :: names.get(key)
+            if previous != None && !(hook && previous == Val(true)) {
+                &diagnostics.push(sema_defined_twice(method.symbol.name, "fields, ordinary methods, and operator hooks share one member namespace", method.symbol.span))
+            }
+            if previous == None -> &names.add(key, hook).drop("new member name")
+        }
+    }
+}
+
 fn sema_checked_impl_coherence(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, diagnostics: &[Diagnostic]) {
+    sema_checked_member_names(graph, module_row, &diagnostics)
     state := sema_checked_coherence_state(module_row)
     loop implementation in module_row.impls -> sema_checked_coherence_impl(graph, module_row, implementation, &state, &diagnostics)
     // The struct and enum sources are read in place (derives first, then

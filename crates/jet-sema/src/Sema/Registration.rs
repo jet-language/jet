@@ -25,8 +25,7 @@ pub(crate) use Serde::{
 };
 
 pub(crate) fn is_operator_trait(name: &str) -> bool {
-    matches!(name, Syntax::TRAIT_ADD | Syntax::TRAIT_SUB | Syntax::TRAIT_MUL
-        | Syntax::TRAIT_DIV | Syntax::TRAIT_EQUATABLE | Syntax::TRAIT_COMPARABLE)
+    jet_foundation::Traits::operator_hook_name(name).is_some()
 }
 
 /// Operator signatures share the coherence registry's unspellable pair identity.
