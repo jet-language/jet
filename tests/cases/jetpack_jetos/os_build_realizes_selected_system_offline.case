@@ -1,0 +1,45 @@
+# Port of tests/jetpack_jetos.rs:488-630; runtime PENDING-SAME-HEAD.
+opt-in: epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored
+fixture: os_build_realizes_selected_system_offline.fixture
+mkdir: package-root
+copy: {root}/tests/fixtures/jetpack-config project
+step first: jet os build halcyon --name fixture-source-built --no-color --offline
+cwd: project
+env: JETPACK_ROOT={work}/package-root
+env: PATH=/usr/bin:/bin
+exit: 0
+stderr.filter(where ~ "building system" && ~ " -> hello · resolving" && !~ "\u001b"): nonempty # original same-line no ANSI
+stderr: ~ "hello" # original package
+stderr: ~ "btop" # original package
+stderr: ~ "halcyon" # original host
+stderr: ~ "generation" # original generation
+inventory before: package-root/hangar/lifecycle-db/journal
+step cached: jet os build halcyon --name fixture-source-built --no-color --offline
+cwd: project
+env: JETPACK_ROOT={work}/package-root
+env: PATH=/usr/bin:/bin
+exit: 0
+stderr: ~ "cached" # original cached retry
+inventory: package-root/hangar/lifecycle-db/journal == before
+file: package-root/systems is-dir
+file: package-root/systems/generations/fixture-source-built/generation-root.json ~ "\"kind\":\"jetos.generation-root.v1\"" # original root proof substring
+file: package-root/systems/generations/fixture-source-built/generation-root.json ~ "\"source_proof_sha256\":\"" # original root proof substring
+file: package-root/systems/generations/fixture-source-built/generation-root.json ~ "\"files_proof_sha256\":\"" # original root proof substring
+file: package-root/systems/generations/fixture-source-built/generation-root.json ~ "\"output_digests\":[\"sha256-" # original root proof substring
+file: package-root/systems/generations/fixture-source-built/generation-files.proof nonempty
+file: package-root/systems/generations.log count-lines ~ "\tfixture-source-built\t" = 1
+capture: witness file package-root/systems/generations/fixture-source-built/generation-root.json doc $.witness
+file.trim_end.split("\t", 4): package-root/systems/generations.log = "{cap:witness}"
+file.trim_end: package-root/systems/generations.log count "\t" = 4
+step expected: jet run lifecycle-expected.jet {work}/package-root/systems/generations/fixture-source-built/generation-root.json external-consumer:jetos-generation:6469c44e94fc44d3d95215983c22ae71b36e76b67d2b68600091c9e12cbdbf84
+exit: 0
+step: jet run lifecycle.jet {work}/package-root
+exit: 0
+json: stdout doc $ == expected
+file: package-root/systems/generations/fixture-source-built/boot/kernel ~ "fixture-built cachyos kernel" # original source build kernel
+file: package-root/systems/generations/fixture-source-built/boot/initrd ~ "fixture-built cachyos initrd" # original source build initrd
+step: jet run links.jet {work}/package-root/systems/generations/fixture-source-built
+exit: 0
+step: {work}/package-root/systems/generations/fixture-source-built/sw/bin/hello
+exit: 0
+stdout: ~ "hello" # original generation executable survives leases

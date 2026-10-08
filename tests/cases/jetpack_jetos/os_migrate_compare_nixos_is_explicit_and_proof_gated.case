@@ -1,0 +1,24 @@
+# Port of tests/jetpack_jetos.rs:3240-3282; runtime PENDING-SAME-HEAD.
+opt-in: epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored
+fixture: os_migrate_compare_nixos_is_explicit_and_proof_gated.fixture
+requires: os-name:linux
+requires: tool:cc
+mkdir: package-root
+mkdir: tools
+mkdir: tool-outputs
+copy: {root}/tests/fixtures/jetpack-config-real project
+step: cc -std=c11 -O0 migration-tool.c -o tools/migration-tool
+exit: 0
+hardlink: tools/migration-tool tools/nix
+hardlink: tools/migration-tool tools/qemu-system-x86_64
+hardlink: tools/migration-tool tools/qemu-img
+step: jet os migrate compare-nixos halcyon-gnome --out {work}/package-root/published --no-color --offline
+cwd: project
+env: JETPACK_ROOT={work}/package-root
+env: JET_TEST_TOOL_ROOT={work}/tool-outputs
+env: JET_TEST_MISSING_LOCKED_INPUT=github:NixOS/nixpkgs/fef9403a3e4d31b0a23f0bacebbec52c248fbb51
+env: JET_TEST_REQUIRE_COMPOSED_METADATA=1
+env: PATH={work}/tools:{env:PATH|}
+exit: 2
+stderr: ~ "migration comparison unavailable offline: github:NixOS/nixpkgs/fef9403a3e4d31b0a23f0bacebbec52c248fbb51" # original fail-closed missing input
+file: package-root/published absent
