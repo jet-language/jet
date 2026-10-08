@@ -2656,32 +2656,24 @@ fn load_entry_with_overlays_mode_on_stack(
         build_facts,
         edition: package_edition,
     };
-    // URL values and lowercase typed heads load their source owner even
-    // without an explicit import.
-    let url_carrier = jet_foundation::Syntax::TypedHeadKind::URL.carrier_record_module();
-    let names_url_carrier = bundle
-        .modules
-        .iter()
-        .any(|module| source_names_identifier(&module.source, "URL")
-            || source_names_identifier(&module.source, "url"));
-    // Prelude static APIs load their source owner just like explicit imports.
-    let names_perf = bundle
-        .modules
-        .iter()
-        .any(|module| source_names_identifier(&module.source, "Perf"));
-    // Ambient Option.or_err reaches the ordinary Core source body without an
-    // explicit import, just as the URL carrier reaches its source record.
-    let names_option_or_err = bundle
-        .modules
-        .iter()
+    // Existing bare spellings load their declaring owner. Lowercase URL
+    // remains the typed-head spelling; it does not add a bare nominal alias.
+    let names_lowercase_url = bundle.modules.iter()
+        .any(|module| source_names_identifier(&module.source, "url"));
+    // Keep the existing no-import Option.or_err source loading trigger.
+    let names_option_or_err = bundle.modules.iter()
         .any(|module| source_names_identifier(&module.source, "or_err"));
     let mut core_source_modules = jet_foundation::CoreModuleExports::core_source_modules()
         .iter()
         .copied()
         .filter(|source_module| {
-            (names_url_carrier && Some(source_module.module) == url_carrier)
-                || (names_perf && source_module.module == "core.perf")
-                || (names_option_or_err && source_module.module == "core.prelude")
+    (names_lowercase_url
+        && jet_foundation::CoreModuleExports::core_bare_source_module("URL") == Some(source_module.module))
+        || jet_foundation::CoreModuleExports::CORE_BARE_SOURCE_MODULES.iter().any(|bare|
+            bare.module_name == source_module.module
+                && bundle.modules.iter().any(|module|
+                    source_names_identifier(&module.source, bare.name)))
+        || (names_option_or_err && source_module.module == "core.prelude")
                 || bundle.modules.iter().any(|module| {
                     module.imports.iter().any(|import| {
                         core_source_import_module(import).as_deref() == Some(source_module.module)

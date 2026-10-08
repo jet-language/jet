@@ -11,6 +11,10 @@ package {
 use core as core
 use core.files as files
 use core.sys as sys
+use core.math.random as random
+
+// D-VIS-REEXPORT1 / D-ALIAS-BIND2: a second spelling, never a second owner.
+pub alias RNG :: random.RNG
 
 // core.testing — deterministic tests and comparison records.
 //
@@ -132,8 +136,8 @@ pub fn corpus(glob: String) -[FS]> [String] Never! {
 /// The test-facing spelling of the deterministic Prelude `Clock` built by `Clock.new`.
 pub fn fake_clock(unix_ms: Int) -> Clock Never! { Clock.new(unix_ms) }
 
-/// A deterministic Prelude `Rng` seeded by the provider constructor.
-pub fn fake_rng(seed: Int) -> RNG Never! { core.testing.fake_rng(seed) }
+/// A caller-owned deterministic RNG seeded by the ordinary source constructor.
+pub fn fake_rng(seed: Int) -> random.RNG Never! { random.rng(seed) }
 
 /// The deterministic Prelude `Fake` data capability built by the provider constructor.
 pub fn fake_data(seed: Int) -> Fake Never! { core.testing.fake_data(seed) }

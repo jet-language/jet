@@ -67,10 +67,82 @@ impl<'a> Checker<'a> {
         if let Some((params, target)) = registry.type_alias(name) {
             return Some((self.module_idx, params, target));
         }
+        if registry.contains(name) {
+            return None;
+        }
         let (namespace, leaf) = Self::split_type_name(name);
         let owner = self.struct_owner_module(leaf, namespace)?;
-        let (params, target) = self.modules?.get(owner)?.registry.type_alias(leaf)?;
-        Some((owner, params, target))
+        let modules = self.modules?;
+        if let Some((params, target)) = modules.get(owner)?.registry.type_alias(leaf) {
+            return Some((owner, params, target));
+        }
+        if namespace.is_none()
+            && jet_foundation::CoreModuleExports::core_bare_source_module(leaf).is_some()
+        {
+            for declaration in self.name_ledger.declarations_named(leaf) {
+                let alias_owner = declaration.module;
+                let Some((params, target)) = modules[alias_owner].registry.type_alias(leaf) else { continue };
+                if !params.is_empty() || !self.type_is_pub_in(alias_owner, leaf) {
+                    continue;
+                }
+                if let Type::Named(target_identity) = self.bare_alias_target(alias_owner, target) {
+                    let (namespace, target_leaf) = Self::split_type_name(&target_identity);
+                    if target_leaf == leaf
+                        && namespace.and_then(|namespace|
+                            self.name_ledger.nominal_module(&format!("{namespace}::{target_leaf}"))) == Some(owner)
+                    {
+                        return Some((alias_owner, params, target));
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    pub(crate) fn bare_alias_target(&self, owner: usize, target: &Type) -> Type {
+        if let Type::Named(name) = target {
+            let (namespace, leaf) = Self::split_type_name(name);
+            if let Some(namespace) = namespace.filter(|namespace| !namespace.contains("::")) {
+                let module = self.modules.and_then(|modules| modules.get(owner));
+                let (core_imports, imports) = if owner == self.module_idx {
+                    (&self.core_imports, &self.imports)
+                } else if let Some(module) = module {
+                    (&module.core_imports, &module.imports)
+                } else {
+                    return target.clone();
+                };
+                let target_owner = core_imports.get(namespace)
+                    .and_then(|module| self.core_source_owner_module(module, leaf))
+                    .or_else(|| imports.get(namespace).copied());
+                if let Some(target_owner) = target_owner {
+                    return Type::Named(self.canonical_nominal_name(target_owner, leaf));
+                }
+            }
+        }
+        self.qualify_method_type(owner, target, &HashSet::new())
+    }
+
+    fn core_annotation_nominal_name(&self, module: &str, leaf: &str) -> String {
+        self.core_nominal_shadowing_builtin(module, leaf)
+            .unwrap_or_else(|| leaf.to_string())
+    }
+
+    fn bare_alias_core_annotation(&self, owner: usize, target: &Type) -> Option<Type> {
+        let Type::Named(name) = target else { return None };
+        let (namespace, leaf) = Self::split_type_name(name);
+        let namespace = namespace?;
+        let core_imports = if owner == self.module_idx {
+            &self.core_imports
+        } else {
+            &self.modules?.get(owner)?.core_imports
+        };
+        let module = core_imports.get(namespace)?;
+        if module == "core.crypto"
+            || jet_foundation::CoreModuleExports::core_leaf_kind(module, leaf).is_none()
+        {
+            return None;
+        }
+        Some(Type::Named(self.core_annotation_nominal_name(module, leaf)))
     }
 
     fn imported_nominal_type(&self, name: &str) -> Option<Type> {
@@ -193,6 +265,19 @@ impl<'a> Checker<'a> {
 
     pub(crate) fn resolve_type(&mut self, ty: Type) -> Type {
         self.record_type_import_use(&ty);
+        if let Type::Named(name) = &ty {
+            if !self.type_param_scope.iter().any(|param| &param.name == name) {
+                if let Some((owner, params, target)) = self.type_alias_binding(name) {
+                    if params.is_empty() {
+                        if let Some(target) = self.bare_alias_core_annotation(owner, target) {
+                            return target;
+                        }
+                        let target = self.bare_alias_target(owner, target);
+                        return self.resolve_type(target);
+                    }
+                }
+            }
+        }
         match ty {
             Type::Named(name) if self.type_param_scope.iter().any(|param| param.name == name) => {
                 Type::Named(name)
@@ -248,10 +333,7 @@ impl<'a> Checker<'a> {
                     })
                 } else {
                     let item = self.core_item_imports.get(&n).map_or(n.as_str(), String::as_str);
-                    match self.core_nominal_shadowing_builtin(module, item) {
-                        Some(canonical) => Type::Named(canonical),
-                        None => Type::Named(item.to_string()),
-                    }
+                    Type::Named(self.core_annotation_nominal_name(module, item))
                 }
             }
             Type::Named(n)
@@ -288,8 +370,7 @@ impl<'a> Checker<'a> {
                         | Some(jet_foundation::CoreModuleExports::CoreLeafKind::Enum(_))
                         | Some(jet_foundation::CoreModuleExports::CoreLeafKind::CryptoNominal)
                         | None => Type::Named(
-                            self.core_nominal_shadowing_builtin(module, leaf)
-                                .unwrap_or_else(|| leaf.to_string()),
+                            self.core_annotation_nominal_name(module, leaf),
                         ),
                     }
                 }

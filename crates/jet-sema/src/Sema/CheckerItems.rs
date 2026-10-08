@@ -2143,7 +2143,27 @@ impl<'a> Checker<'a> {
         }
         let mut found = None;
         for declaration in self.name_ledger.declarations_named(type_name) {
-            let idx = declaration.module;
+            let mut idx = declaration.module;
+            if let Some((params, target)) = mods[idx].registry.type_alias(type_name) {
+                if params.is_empty() {
+                    if mods[idx].module_path.starts_with(crate::Diagnostics::CORE_SOURCE_ROOT)
+                        && jet_foundation::CoreModuleExports::core_bare_source_module(type_name).is_none()
+                        && !jet_foundation::CoreModuleExports::CORE_ROOT_TYPES.contains(&type_name)
+                    {
+                        continue;
+                    }
+                    if let Type::Named(target) = self.bare_alias_target(idx, target) {
+                        let (namespace, leaf) = Self::split_type_name(&target);
+                        if leaf == type_name {
+                            if let Some(home) = namespace.and_then(|namespace|
+                                self.name_ledger.nominal_module(&format!("{namespace}::{leaf}")))
+                            {
+                                idx = home;
+                            }
+                        }
+                    }
+                }
+            }
             if declaration.name == type_name
                 && mods[idx].registry.contains(type_name)
                 && self.type_is_pub_in(idx, type_name)

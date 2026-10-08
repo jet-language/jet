@@ -16,6 +16,13 @@ Application and `#Test` helper functions retain their canonical entry-module
 call identity in both single-file and multi-file packages; the absence of
 sibling modules does not change callable resolution.
 
+Caller-owned `RNG`, `testing.RNG`, and `math.random.RNG` name one Jet nominal:
+`RNG { state: U64 }`. It is not implicitly copyable; an explicit clone creates an
+independent stream. Display is `RNG { .. }`. SplitMix64 transitions, bounded
+rejection sampling, distributions, and collection draws are source behavior;
+`bool(p)` retains its existing arity-specific receiver row. Bare source-loading
+triggers remain limited to URL/url, Perf, and RNG; unrelated Core aliases do not
+become bare names, and Date retains its existing annotation identity.
 <!-- Stable IDs bind these public Core declarations to reviewed feature depth. -->
 <!-- FEATURE_CLAIMS:BEGIN -->
 <!-- FEATURE_CLAIM: claim.core-foundation | Core foundations are reachable Jet software. -->
