@@ -123,7 +123,8 @@ impl<'a> Checker<'a> {
     }
 
     fn core_annotation_nominal_name(&self, module: &str, leaf: &str) -> String {
-        self.core_nominal_shadowing_builtin(module, leaf)
+        self.core_source_owner_module(module, leaf)
+            .map(|owner| self.canonical_nominal_name(owner, leaf))
             .unwrap_or_else(|| leaf.to_string())
     }
 
@@ -212,15 +213,16 @@ impl<'a> Checker<'a> {
         }
         if let Some((item, module)) = self.core_item_imports.get(name).zip(self.core_imports.get(name)) {
             if jet_foundation::CoreModuleExports::core_leaf_kind(module, item).is_some() {
-                return self.core_nominal_shadowing_builtin(module, item)
+                return self.core_source_owner_module(module, item)
+                    .map(|owner| self.canonical_nominal_name(owner, item))
                     .unwrap_or_else(|| item.clone());
             }
         }
         let (import_ns, leaf) = Self::split_type_name(name);
         if let Some(module) = import_ns.and_then(|alias| self.core_imports.get(alias)) {
             if jet_foundation::CoreModuleExports::core_leaf_kind(module, leaf).is_some() {
-                return self
-                    .core_nominal_shadowing_builtin(module, leaf)
+                return self.core_source_owner_module(module, leaf)
+                    .map(|owner| self.canonical_nominal_name(owner, leaf))
                     .unwrap_or_else(|| leaf.to_string());
             }
         }
