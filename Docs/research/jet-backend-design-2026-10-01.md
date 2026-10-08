@@ -2029,3 +2029,39 @@ clone independence, exact-once destruction, ordered field/sequence equality,
 i64 edges, all unit enum values and invalid-ordinal/index stop modes. Its
 stdout fixture is an expected result, not an execution receipt. Native
 execution remains unexercised pending pack composition and ownership admission.
+
+### Exact borrowed String debug rendering
+
+`TextDebug.jet` appends the Rust reference's `str` debug representation into
+the existing native text builder, borrowing a distinct E4 UTF-8 input. It
+quotes the result, escapes NUL/tab/CR/LF/backslash/double quote, leaves single
+quotes unchanged, and emits lowercase minimal `\u{hex}` for Grapheme_Extend
+or non-printable scalars. Combining marks are escaped at any position.
+Plain runs append without temporary allocations; this is not JSON escaping.
+The shared core also serves `jet_rt_require_debug_string`, retaining Jet's
+D-STR-ESCAPE1 NUL spelling `\u{0}`; Rust-derived debug uses `\0`. Both modes
+reuse the existing `trap_scalar`, `trap_debug_short` and `trap_debug_escaped`
+helpers and canonical `TRAP_DEBUG_RANGES`, rather than a second decoder/table.
+
+The reference is rustc 1.97.1, commit
+`8bab26f4f68e0e26f0bb7960be334d5b520ea452`, with Unicode 17.0.0:
+`library/core/src/fmt/mod.rs:2916-2960`,
+`library/core/src/char/methods.rs:474-487`,
+`library/core/src/unicode/printable.rs` and
+`library/core/src/unicode/unicode_data.rs::grapheme_extend`.
+The source tarball SHA-256 is
+`622c2b429c53cbfdc0dd3a51d03554e91cd63ebec1912c1f5709640cdfef1a9d`.
+`Tools/agent/gen-text-debug-tables.mjs` checks both Unicode input checksums
+and compares their exact classification with the existing Trap table;
+it emits only C witness goldens, never a second runtime table. Generation is
+offline and normal builds need neither Rust nor network access.
+
+`TextDebugGoldens.h` contains 36 expected vectors produced by that exact
+rustc's `{:?}` for `str`, including embedded controls, combining marks at
+start/mid, ZWJ, soft hyphen, BOM, astral printable/unassigned characters,
+variation selectors and printability range edges. An exhaustive reference
+comparison found zero classification differences on 1,111,936 valid
+non-ASCII scalars. `TextDebugWitness.c` links real Jet exports, exercises
+borrowed input preservation and repeated builder appends, and requires
+free interception and exact-once destruction. Its stdout fixture is expected,
+not a native execution receipt; native execution remains unexercised.
