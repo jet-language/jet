@@ -1367,6 +1367,36 @@ mod s61_tests {
     }
 
     #[test]
+    fn optional_present_comparison_rhs_classification() {
+        for (rhs, binds) in [
+            ("Val(value)", true),
+            ("Val(_)", true),
+            ("Val(true)", false),
+            ("Val(integer_bounds_exact(number))", false),
+            ("Val(checked.value)", false),
+            ("Val(number + 1)", false),
+        ] {
+            let source = format!("fn run() {{ result :: checked.integer_bounds == {rhs} }}");
+            let parsed = program(&source);
+            let Item::Func(function) = &parsed.items[0] else { panic!("function") };
+            let Stmt::Val(binding) = &function.body[0] else { panic!("binding") };
+            if binds {
+                assert!(matches!(binding.init, Expr::PatternTest { .. }), "{rhs}");
+            } else {
+                let Expr::Binary(BinOp::Eq, _, value, _) = &binding.init else { panic!("{rhs}: value equality") };
+                assert!(matches!(value.as_ref(), Expr::Call(call) if call.name == Syntax::LIT_VALUE), "{rhs}");
+            }
+        }
+        let parsed = program("fn run() { result :: optional != Val(value) }");
+        let Item::Func(function) = &parsed.items[0] else { panic!("function") };
+        let Stmt::Val(binding) = &function.body[0] else { panic!("binding") };
+        assert!(matches!(binding.init, Expr::Binary(BinOp::Ne, ..)));
+        let (tokens, errors) = lex("fn run() { if shape == { Circle(r) -> print(r) } }");
+        assert!(errors.is_empty());
+        assert!(parse(&tokens).unwrap_err().iter().any(|diagnostic| diagnostic.code == "E0367"));
+    }
+
+    #[test]
     fn clean_preparation_reuses_byte_identical_tokens() {
         let (tokens, errors) = lex("fn run() { value :: 1 }\n");
         assert!(errors.is_empty(), "lex errors: {errors:?}");

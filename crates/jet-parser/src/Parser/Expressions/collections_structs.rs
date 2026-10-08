@@ -671,6 +671,23 @@ impl<'a> Parser<'a> {
         Ok((args, end))
     }
 
+    /// S31/D-OPT-LIFT1: only `== Val(name)` binds. Other present-value
+    /// constructors compare their values; dispatch pattern heads keep their
+    /// separate grammar in `try_pattern_rhs`.
+    pub(in crate::Parser) fn try_comparison_pattern_rhs(
+        &mut self,
+        allow_named_fields: bool,
+    ) -> Result<Option<Pattern>, Diagnostic> {
+        if matches!(&self.peek().kind, TokKind::Ident(name) if name == Syntax::LIT_VALUE)
+            && !(matches!(self.toks.get(self.pos + 1).map(|token| &token.kind), Some(TokKind::LParen))
+                && matches!(self.toks.get(self.pos + 2).map(|token| &token.kind), Some(TokKind::Ident(_)))
+                && matches!(self.toks.get(self.pos + 3).map(|token| &token.kind), Some(TokKind::RParen)))
+        {
+            return Ok(None);
+        }
+        self.try_pattern_rhs(allow_named_fields)
+    }
+
     /// S31 / D-ENUMDOT1: try to parse a pattern on the right of `==`.
     ///
     /// Leading-dot `.Variant` / `.Variant(...)`, optional `None` / `Val(n)`,
