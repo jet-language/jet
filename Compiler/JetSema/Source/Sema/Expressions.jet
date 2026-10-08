@@ -3685,8 +3685,10 @@ pub fn sema_check_expression(expr: Expr, expected: Type?, environment: SemaScope
     sema_leave_source_nesting(&context)
     context.failure_success_view = previous_success_view
     if propagates && checked != None {
-        call_value :: checked ?? return None
-        checked = sema_expression_auto_propagate(expr, call_value, expected, environment, &scopes, &context, &diagnostics)
+        taken_checked := ^checked
+        checked = None
+        call_value := ^taken_checked ?? return None
+        checked = sema_expression_auto_propagate(expr, ^call_value, expected, environment, &scopes, &context, &diagnostics)
     }
     if checked != None {
         value :: checked ?? return None
