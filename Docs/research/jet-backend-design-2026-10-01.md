@@ -2287,3 +2287,40 @@ The expected `.stdout` is not an execution receipt. Native layout/import
 admission and whole-unit seed suppression are required before pack cutover;
 this does not supply Plan/Receipt spawning or public Child lifecycle providers.
 
+### Rust-free C ABI conformance clients
+
+`JetRuntime/Tests/CAbiDriver.c` replaces the native test runner's Rust driver.
+It calls only real runtime exports: `jet_rt_main`, text and terminal output,
+Euclidean Int division/remainder, numeric stop and require stop. Missing
+exports are link failures, not substitutes or skipped tests. The same client
+has allocator-only process modes for comparison with a supplied seed oracle.
+
+Run `node Compiler/JetRuntime/Tests/run-cabi-driver.mjs OUT OBJECT_OR_ARCHIVE...
+[LINK_ARG...]` with the complete real native link group. The runner builds
+with `CC` (default `cc`), not rustc or a Rust rlib, captures compiler exit/signal
+and each process status and bytes, then checks all seven original modes:
+values, text-carriers, euclid-by-zero, numeric-stop, require, require-eq, panic.
+Values match `CAbiDriver.stdout`; normal stderr is empty. Stops retain the
+original required diagnostic prefixes, locations, descriptor source/function
+context, locals and Why heading; stdout must be empty and exit must be 70.
+The eleven-word descriptor and mode behavior follow the seed driver
+`tests/fixtures/runtime_c_abi_driver.rs:60-156`. Text24 coverage includes
+embedded NUL/UTF-8, deep clone after input drop, empty sentinel, aliased
+builder appends with and without growth, and same-header finish.
+
+Run `node Compiler/JetRuntime/Tests/run-alloc-parity.mjs OUT SEED_LINK_INPUT...
+--native NATIVE_LINK_INPUT...`. It builds the same C client with
+`C_ABI_ALLOC_ONLY`, once for each explicitly separate real link group. The
+native group must contain no seed Rust artifact. Invalid layout requires the
+original panic prefix and exit 70; exhaustion requires SIGABRT and exact
+`memory allocation of 9223372036854775800 bytes failed\n`. Both modes compare
+the complete seed/native stderr, with empty stdout and no spawn error.
+The seed group is an external comparison oracle, not a shipping dependency.
+
+These runners no longer consume `runtime_c_abi_driver.rs`. The Rust reference
+integration test's fixture remains seed-only until that test tier is removed;
+TestLead1 retired its native contract from the Jet test kit and assigned
+this successor to the runtime line. C11/Node syntax checks do not establish
+native linking, runtime execution or stop-byte parity; those require a
+composed real runtime link group and actual runner receipts.
+
