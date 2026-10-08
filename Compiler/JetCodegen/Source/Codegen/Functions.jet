@@ -1693,6 +1693,11 @@ fn jet_codegen_bind_lambda_captures(builder: &JetCodegenBuilder, program: JetCod
     }
 }
 
+// Keep local byte spans attached to the checked function that owns them.
+fn jet_codegen_lowering_error_message(function: TFunc, span: Span, message: String) -> String Never! {
+    "checked TIR cannot lower to MIR at {span.start}..{span.end}: {function.source_file} (module {function.module_identity}), {function.name}: {message}"
+}
+
 
 // Lowers `function` on `builder`, which holds the program-wide inputs; the
 // builder's per-function state is reset first (jet_codegen_begin_function).
@@ -1748,13 +1753,13 @@ fn jet_codegen_lower_function(builder: &JetCodegenBuilder, program: JetCodegenPr
         if {
             unit_ok != None -> _ := jet_codegen_terminate_with_owned_cleanup(&builder, program, MIRTerminator.Return{value: unit_ok}, -1)
             jet_codegen_bare_return_completes(builder.function) -> _ := jet_codegen_terminate_with_owned_cleanup(&builder, program, MIRTerminator.Return{value: None}, -1)
-            else -> panic("checked non-Unit TFunc falls through during MIR lowering")
+            else -> panic(jet_codegen_lowering_error_message(builder.function, function.source_span, "checked non-Unit TFunc falls through during MIR lowering"))
         }
     }
     jet_codegen_seal_all_exit_chains(&builder, program)
     loop block in builder.blocks {
         if jet_codegen_is_open_terminator(block.terminator) {
-            panic("Jet codegen left an unterminated MIR block")
+            panic(jet_codegen_lowering_error_message(builder.function, function.source_span, "Jet codegen left an unterminated MIR block"))
         }
     }
     jet_codegen_move_last_uses(&builder, program)

@@ -1892,6 +1892,41 @@ fn single_module_entry_qualified_calls_resolve() {
 }
 
 #[test]
+fn mir_lowering_invariant_reports_file_module_and_original_span() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let bundle = checked_bundle("fn run() {}\n");
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        );
+        for expression_failure in [false, true] {
+            let mut program = super::lower_checked_tir_program_for(&bundle, request.clone())
+                .expect("lower checked fixture");
+            let function = program.funcs.iter_mut().find(|function| function.name == "run")
+                .expect("fixture run");
+            let origin = format!("{} (module {}), run", function.source_file, function.module);
+            // A provider-template offset need not lie inside the owning source.
+            let span = crate::Diagnostics::Span::new(2117, 2120);
+            let construct = "distinct raw without its checked base type".to_string();
+            function.body = vec![if expression_failure {
+                TStmt::ExprStmt(TExpr {
+                    ty: Type::Named(crate::Syntax::TYPE_NEVER.to_string()),
+                    kind: TExprKind::InvariantViolation { construct, span },
+                })
+            } else {
+                TStmt::InvariantViolation { construct, span }
+            }];
+            let error = super::mir::lower_tir_to_mir(program).expect_err("mutated TIR must fail");
+            assert_eq!(error.span, span);
+            assert_eq!(error.to_string(), format!(
+                "checked TIR cannot lower to MIR at 2117..2120: {origin}: distinct raw without its checked base type"
+            ));
+        }
+    });
+}
+
+#[test]
 fn mir_walks_stable_loop_sources_in_place() {
     // #4318 §4: a loop whose body leaves its source unchanged walks the list
     // in place (no cursor, no snapshot copy), whether the body never mentions
