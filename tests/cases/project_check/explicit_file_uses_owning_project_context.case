@@ -5,9 +5,9 @@ env: NO_COLOR=1
 env: TERM=dumb
 step: jet check --verbose src/main.jet
 cwd: {work}/owning_context
-exit: 0
 env: JET_RECEIPT_BYPASS=1
+normalize: replace "{work}/owning_context" "<fixture>"
+exit: 0
 stdout: ~ "scope=explicit-file" # original predicate
 stderr: !~ "E2393" # original predicate
-normalize: replace "{work}/owning_context" "<fixture>"
 stdout.filter(^= "proof: ").append("\n"): = explicit_file_uses_owning_project_context.owning_context.expected

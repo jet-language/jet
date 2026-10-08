@@ -4,9 +4,9 @@ fixture: bridge_flake_projects_fetchers_cross_packages_and_external_flakes_witho
 env: NO_COLOR=1
 mkdir: project
 step: jetpack bridge flake --no-color
-exit: 0
 cwd: project
 env: PATH=
+exit: 0
 stdout: ~ "packages: [fd, fetched]" # original contains predicate
 stderr: ~ "cross-package:aarch64-linux/foo" # original contains predicate
 stderr: !~ "nix eval" # original negative contains predicate
@@ -16,17 +16,17 @@ file: project/.jet/lock ~ "flake-derivation:packages:x86_64-linux:fetched" # ori
 copy: project/.jet/lock before.lock
 copy: tampered.txt project/source.txt
 step: jetpack bridge flake --no-color
-exit: 1
 cwd: project
 env: PATH=
+exit: 1
 stderr: ~ "E1256" # original contains predicate
 stderr: ~ "verified fetch hash mismatch" # original contains predicate
 file: project/.jet/lock == before.lock
 copy: no-authority.nix project/flake.nix
 step: jetpack bridge flake --no-color
-exit: 1
 cwd: project
 env: PATH=
+exit: 1
 stderr: ~ "E1256" # original contains predicate
 stderr: ~ "provider authority" # original contains predicate
 stderr: !~ "nix eval" # original negative contains predicate

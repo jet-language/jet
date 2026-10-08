@@ -6,9 +6,9 @@ env: JETPACK_ROOT={work}/root
 mkdir: root
 mkdir: project
 step: jetpack bridge flake --no-color
-exit: 0
 cwd: project
 env: PATH=
+exit: 0
 stdout: ~ "packages: [fd]" # original contains predicate
 json: file project/.jet/lock toml $.semantic_record[?key ^= "flake-evaluator-inventory:"] #= 17
 json: file project/.jet/lock toml $.semantic_record[?key ^= "flake-evaluator-inventory:"][?exact ~= "class=evaluable"] #= 10
@@ -23,9 +23,9 @@ json: file project/.jet/lock toml $.semantic_record[?key="flake-evaluator"][?exa
 copy: project/.jet/lock before.lock
 write: project/flake.nix oversized.template
 step: jetpack bridge flake --no-color
-exit: 1
 cwd: project
 env: PATH=
+exit: 1
 stderr: ~ "E1256" # original contains predicate
 stderr: !~ "nix eval" # original negative contains predicate
 file: project/.jet/lock == before.lock

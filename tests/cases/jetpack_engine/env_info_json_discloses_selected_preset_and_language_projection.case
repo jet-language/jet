@@ -8,8 +8,8 @@ mkdir: project
 env: HOSTNAME=epoch5-host
 env: USER=epoch5-user
 step: jetpack env info --json --no-color
-exit: 0
 cwd: project
+exit: 0
 stdout: ~ "\"preset\":\"host+user\"" # original contains predicate
 stdout: ~ "\"selected_presets\":[\"host\",\"user\"]" # original contains predicate
 stdout: ~ "\"active_environment\":\"dev\"" # original contains predicate
@@ -30,15 +30,15 @@ stdout: ~ "\"checks\":[],\"jobs\":[\"lint\"]" # original contains predicate
 stdout: !~ "\"tasks\":[\"lint\"]" # original negative contains predicate
 stdout: ~ "\"variables\":[{\"name\":\"MODE\"" # original contains predicate
 step: jetpack env info --json --no-color --env full
-exit: 0
 cwd: project
+exit: 0
 stdout: ~ "\"active_environment\":\"full\"" # original contains predicate
 stdout: ~ "\"active_environment_provenance\":[\"env.full\"]" # original contains predicate
 stdout: ~ "\"fd@nixpkgs\"" # original contains predicate
 stdout: !~ "\"ripgrep@nixpkgs\"" # original negative contains predicate
 step: jetpack env info --no-color --env missing
-exit: nonzero
 cwd: project
+exit: nonzero
 stderr: ~ "E1337" # original contains predicate
 stderr: ~ "environment module `missing` is not declared" # original contains predicate
 
