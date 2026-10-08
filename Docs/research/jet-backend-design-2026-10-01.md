@@ -425,6 +425,9 @@ are never freed or grown, and owning reads clone it. Native compiler text
 marshaling continues to use `jet_rt_string_data`/`jet_rt_string_byte_len`,
 never Rust layout. This contract applies to the linked runtime pack; the
 standalone freestanding image runtime is separate and retires with L3.
+An owned result from a Rust `&'static str` kernel copies directly into the
+same E4 header and byte buffer via `text_handle`, without an intermediate
+Rust `String`, including when that text is an Option/Result payload.
 List result slot buffers use the same `jet_rt_alloc`/`jet_rt_free` domain,
 including lists returned inside an Option or Result. Rust `Vec` storage is
 only temporary marshaling storage: adapters copy its words into the shared
