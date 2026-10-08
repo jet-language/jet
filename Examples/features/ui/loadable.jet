@@ -15,7 +15,9 @@ fn run() {
         print(loadable.reason(loaded_state) ?? name)
     }
     if fetch_user(0) == .Err(msg) {
-        failed_state :: loadable.failed<String, String>(msg)
+        // The callable's default Err owns the report; this UI state stores its message.
+        failed_state :: loadable.failed<String, String>(msg.message)
+        assert((loadable.reason(failed_state) ?? "") == msg.message)
         print(loadable.is_failed(failed_state))
     }
 }
