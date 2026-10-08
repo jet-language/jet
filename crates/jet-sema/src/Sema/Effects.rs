@@ -4,8 +4,8 @@
 //! ambient power its body exercises (network, filesystem, clock, …). The set is
 //! inferred per-function, propagated along the call graph (Koka-style rows), and
 //! **fully erased in codegen** (I3): effects are a compile-time proof with no
-//! runtime value, handler, or monad. A function whose inferred set is empty is
-//! pure (the ⊥ of the lattice).
+//! runtime value, handler, or monad. A function whose inferred grantable effect
+//! set is empty is pure; deny-only memory and panic facts remain in the row.
 //!
 //! This module owns the effect vocabulary, the per-function summary the checker
 //! accumulates during its walk, the shared fact-row traversal that turns those
@@ -317,11 +317,7 @@ pub fn package_policy_path_covers(rule: &str, path: &str) -> bool {
             .is_some_and(|suffix| suffix.starts_with('/'))
 }
 
-/// The subset of `inferred` NOT covered by any entry of `bound_set` — the
-/// tree-aware replacement for a flat `BTreeSet::difference` now that ancestor
-/// entries subsume their whole subtree (D-EFFTREE1). Used at every "is the
-/// inferred set within its declared bound" check (E0740/E0712/E0747/E0742).
-pub fn effects_uncovered(inferred: &EffectSet, bound_set: &EffectSet) -> EffectSet {
+fn effect_is_deny_only(effect: &str) -> bool {
     // D-PANICROOT1=A: Panic is deny-only. It remains in the inferred row for
     // diagnostics, reachability, and `-[!Panic]>`, but never requires a
     // positive function bound or a `#FX` authority.
@@ -331,13 +327,18 @@ pub fn effects_uncovered(inferred: &EffectSet, bound_set: &EffectSet) -> EffectS
     // has to enumerate them: allocation is not a right you request, it is one
     // you can be refused. Without this, every `-[IO]>` function that formats a
     // string reported E0740 for `Mem.Alloc`.
-    let deny_only = |effect: &str| {
-        let root = effect_root(effect);
-        root == Effect::Panic.name() || root == "Mem"
-    };
+    let root = effect_root(effect);
+    root == Effect::Panic.name() || root == "Mem"
+}
+
+/// The subset of `inferred` NOT covered by any entry of `bound_set` — the
+/// tree-aware replacement for a flat `BTreeSet::difference` now that ancestor
+/// entries subsume their whole subtree (D-EFFTREE1). Used at every "is the
+/// inferred set within its declared bound" check (E0740/E0712/E0747/E0742).
+pub fn effects_uncovered(inferred: &EffectSet, bound_set: &EffectSet) -> EffectSet {
     let grantable = inferred
         .iter()
-        .filter(|effect| !deny_only(effect))
+        .filter(|effect| !effect_is_deny_only(effect))
         .cloned()
         .collect::<EffectSet>();
     let row = RightsRow::invocation(
@@ -1645,6 +1646,36 @@ mod inferred_purity_display_tests {
 }
 
 #[cfg(test)]
+mod deny_only_effect_tests {
+    use super::{effect_is_deny_only, effects_uncovered, EffectSet};
+
+    #[test]
+    fn deny_only_matching_uses_exact_roots() {
+        for effect in ["Mem", "Mem.Alloc", "Mem.Rc", "Panic", "Panic.Stop"] {
+            assert!(effect_is_deny_only(effect), "{effect}");
+        }
+        for effect in ["IO", "FS.Read", "Membrane", "PanicOther"] {
+            assert!(!effect_is_deny_only(effect), "{effect}");
+        }
+    }
+
+    #[test]
+    fn empty_ceiling_excludes_deny_only_facts_without_erasing_them() {
+        let inferred = EffectSet::from([
+            "Mem.Alloc".to_string(),
+            "Mem.Rc".to_string(),
+            "Panic".to_string(),
+            "IO".to_string(),
+        ]);
+        assert_eq!(
+            effects_uncovered(&inferred, &EffectSet::new()),
+            EffectSet::from(["IO".to_string()])
+        );
+        assert_eq!(inferred.len(), 4);
+    }
+}
+
+#[cfg(test)]
 mod authority_root_tests {
     use super::parse_effect_name;
 
@@ -1742,8 +1773,8 @@ mod reachability_tests {
     }
 }
 
-/// D-EFFECT-OMIT1: an explicit empty row proves the *inferred* body row is
-/// empty. Callees need not repeat `-[]>`; their solved row is the authority.
+/// D-EFFECT-OMIT1: an explicit empty row proves the *inferred* grantable body
+/// row is empty. Callees need not repeat `-[]>`; their solved row is the authority.
 /// D-CRYPTO-DIAG1 defers E2702 facts until this solved-effect phase completes.
 pub fn check_inferred_purity(
     items: &[crate::AST::Item],
@@ -1786,16 +1817,19 @@ pub fn check_inferred_purity(
             ))
         };
         let Some(denial) = solved.get(&key).and_then(|effects| {
-            effects.iter().find_map(|effect| {
-                let path = reachability.path("effects", &key, effect)?;
-                (path.len() > 1).then(|| {
-                    let effects = Holds::from([effect.clone()]);
-                    row.walk(&effects, path, &[])
-                        .denials
-                        .into_iter()
-                        .next()
-                })?
-            })
+            effects
+                .iter()
+                .filter(|effect| !effect_is_deny_only(effect))
+                .find_map(|effect| {
+                    let path = reachability.path("effects", &key, effect)?;
+                    (path.len() > 1).then(|| {
+                        let effects = Holds::from([effect.clone()]);
+                        row.walk(&effects, path, &[])
+                            .denials
+                            .into_iter()
+                            .next()
+                    })?
+                })
         }) else {
             // Direct ambient operations are diagnosed while checking the body,
             // where their precise call span and API spelling are available.
