@@ -1,0 +1,21 @@
+# HAND-PORT tests/agent_executor.rs:177-212 agent_executor_windows_appcontainer_denies_host_read
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# Original Windows AppContainer expected bytes and all tier relations; host-secret remains OUTSIDE workspace under kit-owned tmp, exact original format expansion and actual denial preserved.
+requires: os:windows
+fixture: agent_executor_windows_appcontainer_denies_host_read.fixture
+env: NO_COLOR=1
+copy: host-secret {tmp}/jet-agent-executor-windows-host-secret-{pid}.txt
+write: main.jet source.template
+step default: jet run main.jet
+exit: 0
+stdout: = agent_executor_windows_appcontainer_denies_host_read.stdout.expected
+step interpret: jet run --interpret main.jet
+exit: 0
+stdout: = agent_executor_windows_appcontainer_denies_host_read.stdout.expected
+stderr: == default
+step: jet build --profile=debug main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = agent_executor_windows_appcontainer_denies_host_read.stdout.expected
+stderr: == default

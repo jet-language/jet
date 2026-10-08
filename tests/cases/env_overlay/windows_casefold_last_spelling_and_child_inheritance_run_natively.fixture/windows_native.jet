@@ -1,0 +1,15 @@
+
+use core.sys as env
+use core.process as process
+
+fn run() {
+    env.set("Jet_Win_Case", "first")
+    print(env.get("jET_wIN_cASE") ?? "missing")
+    env.set("JET_WIN_CASE", "last-✓")
+    print(env.get("jet_win_case") ?? "missing")
+    names :: env.vars() ?? panic("vars failed")
+    print(names.join(",").contains("JET_WIN_CASE"))
+    child :: process.run(["cmd.exe", "/C", "echo %jet_win_case%"])
+        ?? panic("child failed")
+    print(child.output.contains("last-✓"))
+}
