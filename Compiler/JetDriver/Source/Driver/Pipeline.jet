@@ -3853,12 +3853,18 @@ pub fn jet_driver_compile_keep_going(request: ^JetDriverCompileRequest, options:
 }
 
 fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKeepGoingLog, emit_rust: Bool) -> JetDriverCompileResult {
-    trace := jet_driver_empty_compile_trace()
     // Phase spans for the host trace (JET_TRACE_FILE). A phase an early
     // return abandons is closed by the next enclosing end the host records.
     if request.trace_sink == .Val(sink) -> sink.begin("load", "", -1, -1)
     load := jet_driver_load(request)
     if request.trace_sink == .Val(sink) -> sink.end("load", load.modules.len())
+    jet_driver_compile_loaded_stages(request, &kg, emit_rust, ^load)
+}
+
+// Loading is shared by executable requests and compiler-owned library graphs;
+// both consume the identical checked front-end, TIR and MIR stages below.
+fn jet_driver_compile_loaded_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKeepGoingLog, emit_rust: Bool, load: ^JetDriverLoadResult) -> JetDriverCompileResult {
+    trace := jet_driver_empty_compile_trace()
     if !load.complete {
         failure :: load.failed_stage ?? JetDriverStage.Load
         return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(failure), false, trace)
