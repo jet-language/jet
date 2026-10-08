@@ -413,6 +413,19 @@ const cfgsBefore = (lineStart) => attributesBefore(lineStart).filter((line) => l
           });
           types.set(key, list);
         }
+      } else if (word === "type" && stack.every((frame) => frame.mod)) {
+        // RUST-EXIT S5: identify PortableCore's actual emitted sum alias,
+        // not an arbitrary record or a spelling-only JetOutcome exception.
+        const alias = /^\s+JetOutcome\s*<\s*T\s*,\s*E\s*>\s*=\s*Result\s*<\s*T\s*,\s*E\s*>\s*;/.exec(text.slice(j, j + 200));
+        const lineStart = text.lastIndexOf("\n", i) + 1;
+        if (alias && /\bpub\b/.test(text.slice(lineStart, i))) {
+          const path = stack.map((frame) => frame.mod).join("::");
+          const key = path ? `${path}::JetOutcome` : "JetOutcome";
+          const list = types.get(key) ?? [];
+          list.push({ visible: true, generic: true, kind: "rust-sum-alias", at: i, path, derives: [],
+            gated: cfgsBefore(lineStart).some((cfg) => cfg !== '#[cfg(not(target_arch = "wasm32"))]') || stack.some((frame) => frame.gated) });
+          types.set(key, list);
+        }
       } else if (word === "use" && stack.every((frame) => frame.mod)) {
         const here = stack.map((frame) => frame.mod);
         // A `use` path (relative to this module unless `crate::`), as a
@@ -465,6 +478,14 @@ const declarationOf = (rustPath, seen = new Set()) => {
     if (found) return found;
   }
   return null;
+};
+const nominalOutcome = [...types].some(([key, decls]) => key.split("::").pop() === "JetOutcome" &&
+  decls.some((decl) => decl.visible && !decl.gated && (decl.kind === "struct" || decl.kind === "enum")));
+const rustOutcomeAlias = (rustPath) => {
+  const found = declarationOf(rustPath.replace(/^crate::/, ""));
+  if (!found?.decls.some((decl) => decl.kind === "rust-sum-alias")) return false;
+  if (found.decls.length !== 1 || nominalOutcome) throw new Error("JetOutcome sum alias: visible nominal declaration is ambiguous");
+  return found.decls[0].visible && !found.decls[0].gated;
 };
 
 // Computed route families (TIR routes.rs): precise_builtin_route spells every
@@ -616,8 +637,15 @@ const handleOut = (full, value) => handleBridge(full) ? `super::jet_c_abi_host::
 const opaqueName = /^(?:[A-Za-z_][A-Za-z0-9_]*::)*([A-Z][A-Za-z0-9_]*|__jet_[A-Za-z0-9_]+)(?:<[\s\S]*>)?$/;
 const concreteHandles = new Map(); // specialization name -> resolved declaration application
 const borrowedHandles = new Map(); // seed-only Rust lifetime carriers, not Jet type instances
+const unsupportedSumCarriers = new Map(); // declaration-proved seed alias, no plain C codec
 const genericArgumentKinds = new Map([["f64", "Float"], ["bool", "Bool"], ["String", "String"], ["crate::jet_foundation::Numeric::JetInt", "Int"]]);
 function runtimeHandle(ty, path) {
+  const aliasPath = qualify(ty.replace(/<[\s\S]*>$/, ""), path);
+  if (rustOutcomeAlias(aliasPath)) {
+    unsupportedSumCarriers.set(`${aliasPath}:${ty}`, { type: ty, qualified: aliasPath,
+      reason: "resolved pub type JetOutcome<T,E> = Result<T,E>; plain/tuple/list-element carrier has no sum C codec; seed-only" });
+    return null;
+  }
   const application = recordApplication(ty);
   if (!application) return null;
   if (application.args.length === 0) return { name: application.base.split("::").pop(), full: qualify(ty, path) };
@@ -868,7 +896,9 @@ function resultShape(ty, path, nativeInt, rawFixed = false) {
   if (ty === "!") ty = "()";
   // `JetOutcome<T, JetAbsent>` (= `Result<T, JetAbsent>`) is generated Rust's
   // `T?`: it crosses as an Option.
-  const outcome = /^(?:(?:[a-z_][a-z0-9_]*::)*JetOutcome|Result)<(.*),JetAbsent>$/.exec(ty);
+  const outcomeCandidate = /^(?:(?:[a-z_][a-z0-9_]*::)*JetOutcome|Result)<(.*),JetAbsent>$/.exec(ty);
+  const outcome = outcomeCandidate && (ty.startsWith("Result<") || rustOutcomeAlias(qualify(ty.slice(0, ty.indexOf("<")), path)))
+    ? outcomeCandidate : null;
   const generic = outcome ? [ty, "Option", outcome[1]] : /^(Option|Result)<(.*)>$/.exec(ty);
   const [somePattern, nonePattern] = outcome ? ["Ok", "Err(_)"] : ["Some", "None"];
   // A List result element: a plain slot word, or a new owned handle of a
@@ -1805,6 +1835,8 @@ if (nativeListOnly) {
     nativeTypes, nativeExports, handleRows,
     seedHelperNames: [...seedHelperNames].sort(),
     jetRuntimeExports: [...jetRuntimeExports].sort(),
+    unsupportedSumCarriers: [...unsupportedSumCarriers.values()],
+    skipped,
   };
   // Wait for the pipe to drain; a direct process.exit can truncate large JSON.
   await new Promise((done) => process.stdout.write(JSON.stringify(inventory) + "\n", done));
