@@ -231,6 +231,16 @@ and per-user reached-module subsets are excluded from the schema digest.
 an image. The producing LIR must export exactly that schema. The separate binding
 retains the producing MIR/source recipe, its digest and producer identity, the
 compiled image hash, and actual linked getter offsets.
+Clone/drop callable transport is a separate binding inventory, not a second
+native value schema. Its rows originate in helpers ordinary lowering actually
+emitted, and retain their checked System V signatures, function IDs and linked
+text offsets. Concrete closure metadata similarly supplies code/release rows;
+an ambiguous generic closure provenance is refused rather than guessed.
+The callable digest covers these rows, including signatures and offsets.
+Admission validates exact getter and callable export inventories separately.
+An absent required callable refuses as `CoreSharedCallableBindingMissing`;
+an altered linked row refuses as `CoreSharedCallableBindingIdentityMismatch`.
+
 
 `CoreSharedParent` is the Source admission/cache component. The outer static host
 must construct it once, not in a compiler factory or metadata/projector context.

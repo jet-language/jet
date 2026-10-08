@@ -61,13 +61,21 @@ fn x64_core_getter_symbol(symbol: String) -> Bool Never! {
     true
 }
 
+fn x64_core_callable_symbol(symbol: String, image: X64MemoryImage, offset: Int) -> Bool Never! {
+    if !symbol.starts_with("jet_core_callable_") -> return false
+    loop (index, linked) in image.functions {
+        if linked == offset && symbol == "jet_core_callable_{index}" -> return true
+    }
+    false
+}
+
 // Validate the complete inventory BEFORE mapping or publishing any address.
 // An offset must name an actual emitted function, not merely an executable byte.
 fn x64_core_export_errors(image: X64MemoryImage) -> [String] Never! {
     errors := [String]{}
     offsets := [Int:String]{}
     loop (symbol, offset) in image.exports {
-        if !x64_core_getter_symbol(symbol) -> &errors.push("invalid pinned Core Shared getter export {symbol}")
+        if !x64_core_getter_symbol(symbol) && !x64_core_callable_symbol(symbol, image, offset) -> &errors.push("invalid pinned Core export {symbol}")
         if offset < 0 || offset >= image.data_offset || !image.functions.contains(offset) {
             &errors.push("pinned Core getter {symbol} does not name an emitted function at offset {offset}")
         }

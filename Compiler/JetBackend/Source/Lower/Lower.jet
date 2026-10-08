@@ -86,6 +86,15 @@ pub struct LIRSharedSiteExport {
     pub ty: MIRType
 }
 
+// Transport inventory captured from helpers that ordinary lowering emitted.
+// Semantic keys identify checked types; function IDs remain image-local.
+pub struct LIRCoreCallableExport {
+    pub semantic_identity: String
+    pub role: String
+    pub type_key: String
+    pub function: LIRFunctionID
+}
+
 // `finalizer` is the zero-argument Unit function a compiler callable's image
 // runs before it is unloaded (Callable.jet lower_callable_fini), when the
 // callable fills runtime-owned statics.
@@ -102,6 +111,7 @@ pub struct LIRLowering {
     pub value_releases: [U64:LIRFunctionID]{[U64:LIRFunctionID]{}}
     pub closures: [LIRClosureValueLayout]{[LIRClosureValueLayout]{}}
     pub shared_sites: [LIRSharedSiteExport]{[LIRSharedSiteExport]{}}
+    pub core_callables: [LIRCoreCallableExport]{[LIRCoreCallableExport]{}}
 }
 
 // How one checked MIR type is carried in LIR.
@@ -392,7 +402,22 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
         &functions.push(lower_helper_function(program, &m, m.glue[startup.value - m.glue_base]))
         lowered_entry = Val(startup)
     }
-    closures :: if shared_sites_dynamic && !wrap_entry && m.issues.len() == 0 -> lower_closure_value_layouts(program, prepared, m) else -> [LIRClosureValueLayout]{}
+    closures :: if !wrap_entry && m.issues.len() == 0 -> lower_closure_value_layouts(program, prepared, m) else -> [LIRClosureValueLayout]{}
+    core_callables := [LIRCoreCallableExport]{}
+    if !shared_sites_dynamic {
+        loop glue in m.glue {
+            if glue.helper != "lazy.clone" && glue.helper != "lazy.drop" -> next
+            key :: lower_mono_fingerprint(glue.ty)
+            &core_callables.push(LIRCoreCallableExport{semantic_identity: "{glue.helper}:{key}", role: glue.helper, type_key: key, function: glue.id})
+        }
+        loop closure in closures {
+            key :: "closure:{closure.function.value}"
+            &core_callables.push(LIRCoreCallableExport{semantic_identity: "closure.code:{key}", role: "closure.code", type_key: key, function: closure.code})
+            if closure.release == .Val(release) {
+                &core_callables.push(LIRCoreCallableExport{semantic_identity: "closure.release:{key}", role: "closure.release", type_key: key, function: release})
+            }
+        }
+    }
     lowered :: LIRModule{signatures: ~m.signatures, functions: functions, data: ~m.data}
     issues := ~m.issues
     if issues.len() == 0 {
@@ -405,7 +430,7 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
         value_callables = [U64:LIRFunctionID]{}
         value_releases = [U64:LIRFunctionID]{}
     }
-    LIRLowering{lir: lowered, issues: issues, entry: lowered_entry, finalizer: finalizer, callables: callables, value_callables: value_callables, value_releases: value_releases, closures: if issues.len() == 0 -> closures else -> [LIRClosureValueLayout]{}, shared_sites: m.shared_sites}
+    LIRLowering{lir: lowered, issues: issues, entry: lowered_entry, finalizer: finalizer, callables: callables, value_callables: value_callables, value_releases: value_releases, closures: if issues.len() == 0 -> closures else -> [LIRClosureValueLayout]{}, shared_sites: m.shared_sites, core_callables: if issues.len() == 0 -> core_callables else -> [LIRCoreCallableExport]{}}
 }
 
 // ---------------------------------------------------------------------------

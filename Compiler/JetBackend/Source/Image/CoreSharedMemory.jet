@@ -36,6 +36,26 @@ pub fn x64_memory_core_shared_image(lowered: LIRLowering) -> X64MemoryImage Neve
         if at < 0 || at >= image.data_offset -> return x64_memory_image_failure([String]{"pinned Core SiteKey {row.site_key} getter was not compiled into executable code"})
         &image.exports.add(row.symbol, at).drop("checked absent above")
     }
+    seen := [String:Bool]{}
+    loop row in lowered.core_callables {
+        if seen.get(row.semantic_identity) != None -> return x64_memory_image_failure([String]{"CoreSharedClosureConcreteProvenanceGap: {row.semantic_identity}"})
+        seen[row.semantic_identity] = true
+        if row.function.value < 0 || row.function.value >= lowered.lir.functions.len() || row.function.value >= image.functions.len() -> return x64_memory_image_failure([String]{"CoreSharedCallableBindingMissing: {row.semantic_identity}"})
+        function :: lowered.lir.functions[row.function.value]
+        if function.id != row.function -> return x64_memory_image_failure([String]{"CoreSharedCallableBindingInvalid: {row.semantic_identity}"})
+        signature :: lir_signature(lowered.lir, function.signature) ?? return x64_memory_image_failure([String]{"CoreSharedCallableBindingMissing: {row.semantic_identity}"})
+        if row.role != "closure.code" {
+            count :: if row.role == "lazy.clone" -> 2 else -> 1
+            if signature.convention != .SystemV || signature.params.len() != count || signature.result != None -> return x64_memory_image_failure([String]{"CoreSharedCallableSignatureMismatch: {row.semantic_identity}"})
+            loop parameter in signature.params {
+                if parameter != lir_layout_pointer() -> return x64_memory_image_failure([String]{"CoreSharedCallableSignatureMismatch: {row.semantic_identity}"})
+            }
+        }
+        offset :: image.functions[row.function.value]
+        if offset < 0 || offset >= image.data_offset -> return x64_memory_image_failure([String]{"CoreSharedCallableBindingMissing: {row.semantic_identity}"})
+        symbol :: "jet_core_callable_{row.function.value}"
+        if image.exports.get(symbol) == None -> &image.exports.add(symbol, offset).drop("checked absent above")
+    }
     image
 }
 
