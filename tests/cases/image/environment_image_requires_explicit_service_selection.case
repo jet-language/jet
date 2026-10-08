@@ -1,0 +1,8 @@
+# Port of tests/image.rs:1116-1158. Committed diagnostic bytes copied verbatim; never re-blessed.
+# PENDING-GRAMMAR(batch4 find_block/filter/trim_lines/RHS trim); runtime PENDING-SAME-HEAD.
+fixture: environment_image_requires_explicit_service_selection.fixture
+env: NO_COLOR=1
+step: jetpack image server
+exit: 2
+stderr.find_block("\n\n", ~ "Error [E1336]").filter(!= "").trim_lines: = image_service_projection_e1336.txt.trim # original predicate
+file: .jet/images/server/projection.json ~ "\"rejected\":[\"services\"]" # original predicate

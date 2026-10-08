@@ -1,0 +1,113 @@
+# Port of tests/image.rs:566-615; PENDING-SEAM(store-ingest), approved by TestLead1.
+# Store is not a consumable library; native hangar ingest has no CacheIdentity/platform/provenance options.
+# Exact original setup and ALL assertions follow. No fake records or substitute references.
+refused: store-ingest
+fixture: environment_image_projects_explicit_extra_file_reproducibly.fixture
+# Intended command (AFTER original Store::ingest_tree setup):
+# step: jetpack image server
+# env: NO_COLOR=1
+# env: JETPACK_ROOT={work}/hangar-root (project path for supervised services)
+# Do not execute against an unpopulated Hangar or treat REFUSED as PASS.
+# fn ingest_executable(root: &Path, name: &str, reference: &str, binary: &str) {
+#     ingest_executable_for_platform(
+#         root,
+#         name,
+#         reference,
+#         binary,
+#         &jetpack::Envelope::host_platform(),
+#     );
+# }
+# 
+# fn ingest_executable_for_platform(
+#     root: &Path,
+#     name: &str,
+#     reference: &str,
+#     binary: &str,
+#     platform: &str,
+# ) {
+#     let source = root.join(format!("source-{name}"));
+#     fs::create_dir_all(source.join("bin")).unwrap();
+#     fs::write(source.join("bin").join(binary), b"#!/bin/sh\necho image\n").unwrap();
+#     #[cfg(unix)]
+#     {
+#         use std::os::unix::fs::PermissionsExt;
+#         let path = source.join("bin").join(binary);
+#         let mut permissions = fs::metadata(&path).unwrap().permissions();
+#         permissions.set_mode(0o755);
+#         fs::set_permissions(path, permissions).unwrap();
+#     }
+#     let roots = Store::Roots {
+#         root: root.to_path_buf(),
+#         dev_mode: false,
+#     };
+#     Store::ingest_tree(
+#         &roots,
+#         &Store::IngestRequest {
+#             name: name.to_string(),
+#             version: "1.0.0".to_string(),
+#             reference: reference.to_string(),
+#             cache_identity: Store::CacheIdentity {
+#                 source_fingerprint: format!("sha256-source-{name}"),
+#                 recipe_fingerprint: format!("sha256-recipe-{name}"),
+#                 policy_fingerprint: "policy=image-test".to_string(),
+#                 platform: platform.to_string(),
+#             },
+#             references: Vec::new(),
+#             outputs: std::collections::BTreeMap::from([("out".to_string(), source)]),
+#             signature: String::new(),
+#             provenance: "image-test".to_string(),
+#             platform_artifact_kind: String::new(),
+#         },
+#     )
+#     .unwrap();
+# }
+# #[test]
+# fn environment_image_projects_explicit_extra_file_reproducibly() {
+#     let project = Scratch::new("environment-extra-file");
+#     let root = Scratch::new("environment-extra-file-root");
+#     fs::create_dir_all(project.path.join("config")).unwrap();
+#     fs::write(
+#         project.path.join("env.jet"),
+#         "module env.dev { packages: [\"bash@nixpkgs\"] }\nmodule image.server { from: env.dev, files: [\"config/app.toml\"] }\n",
+#     )
+#     .unwrap();
+#     fs::write(project.path.join("config/app.toml"), b"port = 8080\n").unwrap();
+#     ingest_executable(&root.path, "bash", "bash@nixpkgs", "bash");
+# 
+#     let build = || {
+#         let out = jetpack()
+#             .args(["image", "server"])
+#             .current_dir(&project.path)
+#             .env("JETPACK_ROOT", &root.path)
+#             .env("NO_COLOR", "1")
+#             .output()
+#             .unwrap();
+#         assert_eq!(
+#             out.status.code(),
+#             Some(0),
+#             "{}",
+#             String::from_utf8_lossy(&out.stderr)
+#         );
+#         fs::read_to_string(project.path.join(".jet/images/server/index.json")).unwrap()
+#     };
+# 
+#     let first = build();
+#     let image = project.path.join(".jet/images/server");
+#     let report = fs::read_to_string(image.join("projection.json")).unwrap();
+#     assert!(
+#         report.contains("file:config/app.toml"),
+#         "projection: {report}"
+#     );
+#     let plan = fs::read_to_string(image.join("plan.json")).unwrap();
+#     assert!(plan.contains("config/app.toml"), "plan: {plan}");
+#     assert!(image_layer(&image)
+#         .windows(b"port = 8080\n".len())
+#         .any(|window| window == b"port = 8080\n"));
+# 
+#     fs::remove_dir_all(project.path.join(".jet/images")).unwrap();
+#     let second = build();
+#     assert_eq!(
+#         first, second,
+#         "extra-file projection must preserve image identity"
+#     );
+# }
