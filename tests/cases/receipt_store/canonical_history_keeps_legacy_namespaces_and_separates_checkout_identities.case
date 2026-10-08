@@ -2,8 +2,6 @@
 # PENDING-SEAM(receipt-store): exact assertions; no runtime parity claim.
 fixture: canonical_history_keeps_legacy_namespaces_and_separates_checkout_identities.fixture
 requires: os:unix
-requires: tool:chmod
-requires: tool:ln
 requires: tool:realpath
 refused: receipt-store
 # #[test]
@@ -155,8 +153,7 @@ refused: receipt-store
 #     let _ = std::fs::remove_dir_all(outside);
 #     let _ = std::fs::remove_dir_all(escaped);
 # }
-step: chmod 444 project/main.jet
-exit: 0
+chmod: project/main.jet 0444
 step: jet check main.jet
 exit: 0
 cwd: project
@@ -176,8 +173,7 @@ file: moved/.jet/receipts is-dir
 step movedcanonical: realpath moved/.jet/receipts
 exit: 0
 stdout: != canonical
-step: ln -s {work}/project alias
-exit: 0
+symlink: {work}/project alias
 step: jet check main.jet
 exit: 0
 cwd: alias
@@ -187,8 +183,7 @@ stdout: == canonical
 remove: alias
 mkdir: outside
 mkdir: escaped/.jet
-step: ln -s {work}/outside escaped/.jet/receipts
-exit: 0
+symlink: {work}/outside escaped/.jet/receipts
 step: jet check main.jet
 exit: 0
 cwd: escaped

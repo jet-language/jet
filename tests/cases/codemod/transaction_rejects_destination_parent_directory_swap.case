@@ -3,16 +3,12 @@
 fixture: transaction_rejects_destination_parent_directory_swap.fixture
 env: NO_COLOR=1
 requires: os:unix
-requires: tool:mv
-requires: tool:mkdir
 copy: Examples/a.jet before.bytes
 step: jet inspect codemod apply rename.codemod.json --yes
 exit: 87
 env: JET_CODEMOD_CRASH_AFTER_JOURNAL=1
-step: mv Examples examples-held
-exit: 0
-step: mkdir Examples
-exit: 0
+rename: Examples examples-held
+mkdir: Examples
 copy: hostile.bytes Examples/a.jet
 step: jet inspect codemod rename.codemod.json --dry-run
 exit: nonzero

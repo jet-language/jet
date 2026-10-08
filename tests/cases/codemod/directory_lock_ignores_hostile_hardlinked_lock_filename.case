@@ -3,10 +3,8 @@
 fixture: directory_lock_ignores_hostile_hardlinked_lock_filename.fixture
 env: NO_COLOR=1
 requires: os:unix
-requires: tool:ln
 mkdir: .jet/codemods
-step: ln sentinel .jet/codemods/codemod.lock
-exit: 0
+hardlink: sentinel .jet/codemods/codemod.lock
 step: jet inspect codemod apply rename.codemod.json --yes
 exit: 0
 file: sentinel = directory_lock_ignores_hostile_hardlinked_lock_filename.sentinel.expected
