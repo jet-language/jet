@@ -3036,6 +3036,11 @@ supplies a platform-native callback API.
 The native GTK `present` call runs its application loop until a window
 close request quits that loop. GTK's default close handler still owns window
 teardown; a signal-owned loop reference keeps its callback data live.
+UI backend allocation and host capability/dialog/clipboard/IME/drag polling
+enter Jet source before reserved Core-only provider leaves. Public UI
+capability admission and the existing per-function Core effect rows remain
+unchanged. Lexical filesystem grants and accessibility metadata construction
+are Jet policy, not host facade calls.
 
 ### `core.reactive` — explicit signals and dependency tracking
 

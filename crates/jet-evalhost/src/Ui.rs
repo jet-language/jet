@@ -1862,7 +1862,7 @@ fn jet_ui_host_ambient_core_call(
             let ime = ambient_ime_mode(&args[1], span)?;
             Ok(ambient_node_value(ui_rt::jet_ui_text_input(&state, ime)))
         })()),
-        ("core.ui.host", "capabilities") => Some((|| {
+        ("core.ui.host", "__capabilities") => Some((|| {
             ambient_expect_arity(&args, 0, "core.ui.host.capabilities", span)?;
             let facts = ui_rt::jet_ui_host_capabilities();
             Ok(ambient_capability_facts_value(facts))
@@ -1877,16 +1877,7 @@ fn jet_ui_host_ambient_core_call(
                 ambient_file_filter_value,
             ))
         })()),
-        ("core.ui.host", "fs_grant") => Some((|| {
-            ambient_expect_arity(&args, 2, "core.ui.host.fs_grant", span)?;
-            let root = ambient_string(&args[0], "core.ui.host.fs_grant", span)?;
-            let rights = ambient_fs_rights(&args[1], span)?;
-            Ok(ambient_service_result(
-                ui_rt::jet_ui_host_fs_grant(&root, rights),
-                ambient_fs_grant_value,
-            ))
-        })()),
-        ("core.ui.host", "open_file") => Some((|| {
+        ("core.ui.host", "__open_file") => Some((|| {
             ambient_expect_arity(&args, 1, "core.ui.host.open_file", span)?;
             let request = ambient_file_request(&args[0], span)?;
             Ok(ambient_service_result(
@@ -1894,7 +1885,7 @@ fn jet_ui_host_ambient_core_call(
                 ambient_file_selection_value,
             ))
         })()),
-        ("core.ui.host", "save_file") => Some((|| {
+        ("core.ui.host", "__save_file") => Some((|| {
             ambient_expect_arity(&args, 1, "core.ui.host.save_file", span)?;
             let request = ambient_file_request(&args[0], span)?;
             Ok(ambient_service_result(
@@ -1911,23 +1902,14 @@ fn jet_ui_host_ambient_core_call(
                 ambient_shortcut_value,
             ))
         })()),
-        ("core.ui.host", "accessibility") => Some((|| {
-            ambient_expect_arity(&args, 2, "core.ui.host.accessibility", span)?;
-            let name = ambient_string(&args[0], "core.ui.host.accessibility", span)?;
-            let description = ambient_string(&args[1], "core.ui.host.accessibility", span)?;
-            Ok(ambient_service_result(
-                ui_rt::jet_ui_host_accessibility(&name, &description),
-                ambient_accessibility_value,
-            ))
-        })()),
-        ("core.ui.host.clipboard", "read_text") => Some((|| {
+        ("core.ui.host.clipboard", "__read_text") => Some((|| {
             ambient_expect_arity(&args, 0, "core.ui.host.clipboard.read_text", span)?;
             Ok(ambient_service_result(
                 ui_rt::jet_ui_host_clipboard_read_text(),
                 ambient_clipboard_text_value,
             ))
         })()),
-        ("core.ui.host.clipboard", "write_text") => Some((|| {
+        ("core.ui.host.clipboard", "__write_text") => Some((|| {
             ambient_expect_arity(&args, 1, "core.ui.host.clipboard.write_text", span)?;
             let text = ambient_string(&args[0], "core.ui.host.clipboard.write_text", span)?;
             Ok(ambient_service_result(
@@ -1935,7 +1917,7 @@ fn jet_ui_host_ambient_core_call(
                 ambient_clipboard_write_value,
             ))
         })()),
-        ("core.ui.host.ime", "poll") => Some((|| {
+        ("core.ui.host.ime", "__poll") => Some((|| {
             ambient_expect_arity(&args, 0, "core.ui.host.ime.poll", span)?;
             Ok(ambient_option_result(
                 ui_rt::jet_ui_host_ime_poll(),
@@ -1943,7 +1925,7 @@ fn jet_ui_host_ambient_core_call(
                 ambient_ime_event_value,
             ))
         })()),
-        ("core.ui.host.drag_drop", "poll") => Some((|| {
+        ("core.ui.host.drag_drop", "__poll") => Some((|| {
             ambient_expect_arity(&args, 0, "core.ui.host.drag_drop.poll", span)?;
             Ok(ambient_option_result(
                 ui_rt::jet_ui_host_drag_poll(),
