@@ -1,0 +1,9 @@
+
+use core.reactive as reactive
+fn run() {
+    #Local pending := reactive.signal(0)
+    worker :: task {
+        &pending.set(1)
+    }
+    worker.join() ?? panic("task failed")
+}

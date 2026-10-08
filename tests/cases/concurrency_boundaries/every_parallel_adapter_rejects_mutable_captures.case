@@ -1,0 +1,16 @@
+# tests/concurrency_boundaries.rs::every_parallel_adapter_rejects_mutable_captures at tests/concurrency_boundaries.rs:409; converter c4189f521f54bea78e49f62cb127d50ad22ac3e0
+# Sources copied verbatim; original predicates; PENDING-SAME-HEAD (heavy lane paused).
+fixture: every_parallel_adapter_rejects_mutable_captures.fixture
+env: NO_COLOR=1
+step check1: jet check source-1.jet --json
+exit: nonzero
+json: stdout doc $.reports[?code="E1101"] #>= 1 # original predicate: code membership
+step check2: jet check source-2.jet --json
+exit: nonzero
+json: stdout doc $.reports[?code="E1101"] #>= 1 # original predicate: code membership
+step check3: jet check source-3.jet --json
+exit: nonzero
+json: stdout doc $.reports[?code="E1101"] #>= 1 # original predicate: code membership
+step check4: jet check source-4.jet --json
+exit: nonzero
+json: stdout doc $.reports[?code="E1101"] #>= 1 # original predicate: code membership

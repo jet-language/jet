@@ -1,0 +1,9 @@
+# tests/concurrency_boundaries.rs::shared_constructor_rejects_local_cell_at_the_constructor at tests/concurrency_boundaries.rs:108; converter c4189f521f54bea78e49f62cb127d50ad22ac3e0
+# Sources copied verbatim; original predicates; PENDING-SAME-HEAD (heavy lane paused).
+fixture: shared_constructor_rejects_local_cell_at_the_constructor.fixture
+env: NO_COLOR=1
+step check1: jet check source-1.jet --json
+exit: nonzero
+json: stdout doc $.reports[?code="E1102"] #>= 1 # original predicate: code membership
+json: stdout doc $.reports[?code="E1102"][?what~="cannot be stored in `Shared<T>`"] #>= 1 # original predicate: matching diagnostic exists
+json: stdout doc $.reports[?code="E1102"][?what~="cannot be stored in `Shared<T>`"][0].span.start in [10,45] # ORACLE-DERIVED: every byte offset whose unchanged source suffix begins with cell
