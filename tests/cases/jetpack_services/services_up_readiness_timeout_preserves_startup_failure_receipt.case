@@ -13,8 +13,8 @@ when os-name linux: chmod: bin/systemctl 755
 step: jetpack services up timeout --no-color
 when os-name linux: env: PATH={work}/bin:{env:PATH}
 when os-name linux: env: JETPACK_FAKE_SYSTEMD_STATE={work}/state
-exit: nonzero
 env: JETPACK_SERVICE_HEALTH_TIMEOUT_MS=500
+exit: nonzero
 stdout+stderr: ~ "E1261" # original predicate
 file: .jet/services/timeout/lifecycle ~ "phase=failed" # original predicate
 file: .jet/services/timeout/lifecycle ~ "recovery=startup-failed" # original predicate

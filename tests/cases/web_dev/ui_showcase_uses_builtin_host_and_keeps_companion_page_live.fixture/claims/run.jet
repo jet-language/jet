@@ -1,0 +1,14 @@
+#Test("original showcase companion stays live") {
+    port :: s5_web_port()
+    s5_web_wait_up(port, 30000)
+    loop request in 0..<3 {
+        response :: s5_web_get(port, "/", None) ?? panic("GET showcase companion page")
+        assert_eq(response.status, 200)
+        html :: String.from_bytes_lossy(response.body)
+        assert(html.contains("<h1>Reactive counter, rendered live</h1>"))
+        assert(html.contains("id=\"jet-app\"") && html.contains("jet_main"))
+    }
+    response :: s5_web_get(port, "/app.js", None) ?? panic("GET showcase app.js")
+    assert_eq(response.status, 200)
+    assert(String.from_bytes_lossy(response.body).contains("function jet_main()"))
+}
