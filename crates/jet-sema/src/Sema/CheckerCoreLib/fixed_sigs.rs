@@ -1495,7 +1495,7 @@ fn core_fixed_sig_impl(
         ("core.term", "stdout") => Some((vec![], Some(Type::Named("Stdout".to_string())))),
         ("core.term", "stderr") => Some((vec![], Some(Type::Named("Stderr".to_string())))),
         ("core.term", "terminal_width" | "terminal_height") => Some((vec![], Some(Type::Int))),
-        ("core.term", "__is_terminal") => Some((vec![(read, Type::Int)], Some(Type::Bool))),
+        ("core.term", "jet_term_is_terminal_raw") => Some((vec![(read, Type::Int)], Some(Type::Bool))),
         ("core.term", "style" | "style_force") => Some((
             vec![(read, Type::String), (read, Type::String)],
             Some(Type::String),
@@ -1836,7 +1836,7 @@ fn core_fixed_sig_impl(
             Some(Type::Named("ProcessSpec".to_string())),
         )),
         // Compiler-private raw leaf: the waited child's exact exit display.
-        ("core.process", "__exit_status") => Some((
+        ("core.process", "jet_process_exit_status_raw") => Some((
             vec![(read, int)],
             Some(Type::Option(Box::new(Type::String))),
         )),
@@ -3781,7 +3781,7 @@ fn core_fixed_sig_impl(
         )),
         // Compiler-private raw leaf for `jet self completions --for`: open
         // without waiting on a FIFO or device peer.
-        ("core.files", "__open_nonblocking") => Some((
+        ("core.files", "jet_std_files_open_reader_nonblocking") => Some((
             vec![(read, Type::String)],
             Some(result_ty(Type::Named("FileReader".to_string()), io.clone())),
         )),

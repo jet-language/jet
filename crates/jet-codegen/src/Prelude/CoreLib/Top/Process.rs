@@ -403,7 +403,7 @@ fn jet_process_sandbox_env(
 
 /// The exact wait statuses of the most recently waited children, newest last,
 /// keyed by the receipt's process id. Bounded: the compiler-private
-/// `core.process.__exit_status` leaf reads a receipt's status right after the
+/// `core.process.jet_process_exit_status_raw` leaf reads a receipt's status right after the
 /// run that produced it, so only recent children are kept.
 static JET_PROCESS_EXIT_STATUSES: std::sync::Mutex<
     std::collections::VecDeque<(i64, std::process::ExitStatus)>,
@@ -420,7 +420,7 @@ fn jet_process_record_exit_status(pid: i64, status: std::process::ExitStatus) {
     recent.push_back((pid, status));
 }
 
-/// `core.process.__exit_status`: compiler-private raw leaf (one host fact, no
+/// `core.process.jet_process_exit_status_raw`: compiler-private raw leaf (one host fact, no
 /// policy). The Rust `ExitStatus` display of the most recently waited child
 /// with process id `pid` (`exit status: N`, or `signal: N (SIGNAME)` with a
 /// ` (core dumped)` suffix), or None when no child with that id was waited.

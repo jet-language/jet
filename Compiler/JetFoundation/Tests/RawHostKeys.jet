@@ -1,0 +1,35 @@
+// The compiler-private source keys are the existing runtime spellings.
+// No reserved-name parser exemption or compatibility alias is involved.
+fn raw_host_key_fixture(module_name: String, key: String, retired: String, parameter: Type, result: Type, borrowed: Bool, effect_kind: Effect, effect_leaf: String?) {
+    row :: core_call(module_name, key) ?? panic("raw host route is registered")
+    assert(row.module_name == module_name && row.member == key)
+    assert(row.signature.arity == 1 && row.signature.max_arity == 1)
+    assert(row.signature.borrow_mask == [Bool]{borrowed})
+    assert(row.interpreter_route == CoreCallInterpreterRoute.Ambient && row.aot_direct)
+    if row.symbol == {
+        .Prelude(symbol) -> assert(symbol == key)
+        else -> panic("raw host route retains its Prelude symbol")
+    }
+    actual_effect :: row.effect_kind ?? panic("raw host authority is registered")
+    assert(actual_effect == effect_kind)
+    if effect_leaf == {
+        .Val(expected) -> {
+            actual_leaf :: row.effect_leaf ?? panic("raw host authority leaf is registered")
+            assert(actual_leaf == expected)
+        }
+        None -> assert(row.effect_leaf == None)
+    }
+    signature :: core_host_fixed_signature(module_name, key) ?? panic("raw host typed signature is registered")
+    assert(signature.min_arity == 1 && signature.max_arity == 1 && signature.parameters.len() == 1)
+    assert(type_identity_equal(signature.parameters[0].ty, parameter))
+    returned :: signature.return_type ?? panic("raw host typed result")
+    assert(type_identity_equal(returned, result))
+    assert(core_call(module_name, retired) == None)
+    assert(core_host_fixed_signature(module_name, retired) == None)
+}
+
+fn run() {
+    raw_host_key_fixture("core.term", "jet_term_is_terminal_raw", "__is_terminal", Type.Int, Type.Bool, false, Effect.IO, None)
+    raw_host_key_fixture("core.process", "jet_process_exit_status_raw", "__exit_status", Type.Int, Type.Option{inner: Type.String}, false, Effect.Exec, None)
+    raw_host_key_fixture("core.files", "jet_std_files_open_reader_nonblocking", "__open_nonblocking", Type.String, Type.Result{ok: Type.Named{name: "FileReader"}, err: Type.Named{name: "IOError"}}, true, Effect.FS, Val("FS.Read"))
+}

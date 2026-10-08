@@ -114,6 +114,14 @@ duplicate, unsupported-format, and malformed records remain distinct errors.
 PE permits zero alignment padding but not another record or nonzero trailing
 bytes. Every universal Mach-O slice must contain the same single record.
 
+The compiler's completion reader performs one nonblocking open and then inspects
+and reads that same handle; it never executes the application. Its private Core
+member `jet_std_files_open_reader_nonblocking` uses the existing runtime symbol
+and `FileReader`/`IOError` carriers. The terminal-context and waited-child facts
+likewise retain the existing `jet_term_is_terminal_raw` and
+`jet_process_exit_status_raw` runtime spellings, rather than reserved
+double-underscore member aliases or alternate host APIs.
+
 File-size arithmetic is bounded by `JET_COMPILER_TARGET_USIZE_MAX`, a
 compiler-private constant folded from the selected build target's pointer
 layout. It is not inferred from the inspected executable's ISA and requires

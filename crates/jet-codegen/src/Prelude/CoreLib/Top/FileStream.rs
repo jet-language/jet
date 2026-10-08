@@ -53,7 +53,7 @@ pub(crate) fn jet_std_files_open_reader(
     })
 }
 
-/// `core.files.__open_nonblocking`: compiler-private raw leaf (one host step,
+/// `core.files.jet_std_files_open_reader_nonblocking`: compiler-private raw leaf (one host step,
 /// no policy). Opens the path for reading without waiting on a FIFO or device
 /// peer; the caller stats the opened reader and reads it with `read(max)`.
 pub(crate) fn jet_std_files_open_reader_nonblocking(
