@@ -2,7 +2,7 @@
 // captures startup before threads, then seeds this one logical cell. The
 // immutable startup byte index is not changed by logical writes.
 // Shared's existing reader/writer protocol occupies bytes 0..79; once is @80.
-// The cell uses @56=head and @64=tail. Each owned entry is
+// The cell uses @56=head, @64=tail, @88=count. Each owned entry is
 // [next, compact key bytes, key length, compact value bytes, value length].
 logical_env_root := I64{0}
 
@@ -13,26 +13,28 @@ fn logical_environment_copy(bytes: I64, length: I64) -> I64 {
     owned
 }
 
+// Return the link that owns the match, or the final null link. Removal then
+// updates that link directly instead of traversing the list a second time.
 fn logical_environment_find(bytes: I64, length: I64) -> I64 {
-    entry := rt_text_word(logical_env_root + I64{56})
+    link := logical_env_root + I64{56}
+    entry := rt_text_word(link)
     loop entry != (I64{0}) {
-        if (rt_text_word(entry + I64{16}) == length && rt_text_equal_bytes(rt_text_word(entry + I64{8}), bytes, length)) { return entry }
-        entry = rt_text_word(entry)
+        if (rt_text_word(entry + I64{16}) == length && rt_text_equal_bytes(rt_text_word(entry + I64{8}), bytes, length)) { return link }
+        link = entry
+        entry = rt_text_word(link)
     }
-    I64{0}
+    link
 }
 
-fn logical_environment_remove(entry: I64) {
-    previous := I64{0}
-    current := rt_text_word(logical_env_root + I64{56})
-    loop current != entry {
-        previous = current
-        current = rt_text_word(current)
-    }
+fn logical_environment_remove(link: I64) {
+    entry :: rt_text_word(link)
     next_entry :: rt_text_word(entry)
-    if (previous == I64{0}) -> rt_text_store(logical_env_root + I64{56}, next_entry)
-    else -> rt_text_store(previous, next_entry)
-    if (rt_text_word(logical_env_root + I64{64}) == entry) -> rt_text_store(logical_env_root + I64{64}, previous)
+    rt_text_store(link, next_entry)
+    if (rt_text_word(logical_env_root + I64{64}) == entry) {
+        previous :: if (link == logical_env_root + I64{56}) -> I64{0} else -> link
+        rt_text_store(logical_env_root + I64{64}, previous)
+    }
+    rt_text_store(logical_env_root + I64{88}, rt_text_word(logical_env_root + I64{88}) - I64{1})
     jet_rt_free(rt_text_word(entry + I64{8}), rt_text_word(entry + I64{16}), I64{1})
     jet_rt_free(rt_text_word(entry + I64{24}), rt_text_word(entry + I64{32}), I64{1})
     jet_rt_free(entry, I64{40}, I64{8})
@@ -41,7 +43,7 @@ fn logical_environment_remove(entry: I64) {
 fn logical_environment_append(key: I64, key_length: I64, value: I64, value_length: I64) {
     // Rust removes an existing match, then pushes the new pair at the end.
     old :: logical_environment_find(key, key_length)
-    if (old != I64{0}) -> logical_environment_remove(old)
+    if (rt_text_word(old) != I64{0}) -> logical_environment_remove(old)
     entry :: jet_rt_alloc(I64{40}, I64{8})
     rt_text_store(entry, I64{0})
     rt_text_store(entry + I64{8}, logical_environment_copy(key, key_length))
@@ -52,6 +54,7 @@ fn logical_environment_append(key: I64, key_length: I64, value: I64, value_lengt
     if (tail == I64{0}) -> rt_text_store(logical_env_root + I64{56}, entry)
     else -> rt_text_store(tail, entry)
     rt_text_store(logical_env_root + I64{64}, entry)
+    rt_text_store(logical_env_root + I64{88}, rt_text_word(logical_env_root + I64{88}) + I64{1})
 }
 
 fn logical_environment_seed() {
@@ -72,8 +75,8 @@ fn logical_environment_seed() {
 // Called only by the single-threaded host argument registration, before its
 // published argc lets user code enter. No global-address intrinsic is needed.
 fn logical_environment_startup() {
-    logical_env_root = jet_rt_alloc(I64{88}, I64{8})
-    thread_zero(logical_env_root, I64{88})
+    logical_env_root = jet_rt_alloc(I64{96}, I64{8})
+    thread_zero(logical_env_root, I64{96})
     logical_environment_seed()
 }
 
@@ -87,7 +90,7 @@ fn logical_environment_startup() {
 #Export(c) fn jet_rt_logical_env_get(key: I64) -> I64 {
     jet_rt_logical_env_seed()
     shared_acquire(logical_env_root, false)
-    entry :: logical_environment_find(rt_text_data(key), rt_text_len(key))
+    entry :: rt_text_word(logical_environment_find(rt_text_data(key), rt_text_len(key)))
     result := I64{0}
     if (entry != I64{0}) {
         bytes :: rt_text_word(entry + I64{24})
@@ -115,7 +118,7 @@ fn logical_environment_startup() {
     rt_text_store(data_out, I64{0})
     rt_text_store(len_out, I64{0})
     shared_acquire(logical_env_root, false)
-    entry :: logical_environment_find(rt_text_data(key), rt_text_len(key))
+    entry :: rt_text_word(logical_environment_find(rt_text_data(key), rt_text_len(key)))
     present := I64{0}
     if (entry != I64{0}) {
         length :: rt_text_word(entry + I64{32})
@@ -159,12 +162,83 @@ fn logical_environment_valid_name(name: I64) -> Bool {
     if !(logical_environment_valid_name(key)) { return I64{-1} }
     jet_rt_logical_env_seed()
     shared_acquire(logical_env_root, true)
-    entry :: logical_environment_find(rt_text_data(key), rt_text_len(key))
+    link :: logical_environment_find(rt_text_data(key), rt_text_len(key))
     removed := I64{0}
-    if (entry != I64{0}) {
-        logical_environment_remove(entry)
+    if (rt_text_word(link) != I64{0}) {
+        logical_environment_remove(link)
         removed = I64{1}
     }
     shared_release(logical_env_root, true)
     removed
+}
+
+// Canonical packed-byte epoch: Values.jet lower_packed_storage_layout and
+// lower_list_stride select byte stride 1; Lists.jet frees buffers at align 8.
+// Headers remain inline [len, cap, data], never word-per-byte startup adapters.
+fn logical_environment_byte_list(bytes: I64, length: I64, output: I64) {
+    data :: if (length == I64{0}) -> I64{0} else -> jet_rt_alloc(length, I64{8})
+    rt_text_bytes_copy(data, bytes, length)
+    rt_text_store(output, length)
+    rt_text_store(output + I64{8}, length)
+    rt_text_store(output + I64{16}, data)
+}
+
+fn logical_environment_columns_buffer(output: I64, pairs: I64) -> I64 {
+    columns :: pairs * I64{2}
+    data :: if (columns == I64{0}) -> I64{0} else -> jet_rt_alloc(columns * I64{24}, I64{8})
+    rt_text_store(output, columns)
+    rt_text_store(output + I64{8}, columns)
+    rt_text_store(output + I64{16}, data)
+    data
+}
+
+// One read lock covers the whole snapshot, including count and every byte.
+#Export(c) fn jet_rt_logical_env_columns(output: I64) {
+    jet_rt_logical_env_seed()
+    shared_acquire(logical_env_root, false)
+    target := logical_environment_columns_buffer(output, rt_text_word(logical_env_root + I64{88}))
+    entry := rt_text_word(logical_env_root + I64{56})
+    loop entry != (I64{0}) {
+        logical_environment_byte_list(rt_text_word(entry + I64{8}), rt_text_word(entry + I64{16}), target)
+        logical_environment_byte_list(rt_text_word(entry + I64{24}), rt_text_word(entry + I64{32}), target + I64{24})
+        target = wrapping(target + I64{48})
+        entry = rt_text_word(entry)
+    }
+    shared_release(logical_env_root, false)
+}
+
+// Startup order and duplicates are intentionally retained, unlike the logical
+// table's de-duplicating seed. These bytes are immutable for process lifetime.
+#Export(c) fn jet_rt_startup_env_columns(output: I64) {
+    host_arguments_require()
+    target := logical_environment_columns_buffer(output, host_env_length)
+    index := I64{0}
+    loop index < host_env_length {
+        row :: wrapping(host_env_rows + index * I64{24})
+        key :: rt_text_word(row)
+        value :: wrapping(key + rt_text_word(row + I64{16}))
+        logical_environment_byte_list(key, rt_text_word(row + I64{8}), target)
+        logical_environment_byte_list(value, host_startup_byte_length(value), target + I64{24})
+        target = wrapping(target + I64{48})
+        index = wrapping(index + I64{1})
+    }
+}
+
+#Export(c) fn jet_rt_env_key_compare(left: I64, right: I64) -> I64 {
+    left_length :: rt_text_word(left)
+    right_length :: rt_text_word(right)
+    left_bytes :: rt_text_word(left + I64{16})
+    right_bytes :: rt_text_word(right + I64{16})
+    length :: if (left_length < right_length) -> left_length else -> right_length
+    at := I64{0}
+    loop at < length {
+        a :: rt_text_byte(left_bytes + at)
+        b :: rt_text_byte(right_bytes + at)
+        if (a < b) { return I64{-1} }
+        if (a > b) { return I64{1} }
+        at = wrapping(at + I64{1})
+    }
+    if (left_length < right_length) { return I64{-1} }
+    if (left_length > right_length) { return I64{1} }
+    I64{0}
 }

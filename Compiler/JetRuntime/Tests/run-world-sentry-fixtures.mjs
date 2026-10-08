@@ -56,10 +56,12 @@ if (mode === 'assemble') {
     const result = command('runtime-witnesses', join(out, 'world-sentry-fixture'), [], { timeout: 300000 });
     if (result.stdout !== '' || result.stderr !== '') throw Error('runtime witnesses changed empty output');
   } catch (error) { failures.push(error.message); }
-  try {
-    const result = command('logical-env-witnesses', join(out, 'logical-env-fixture'), [], { timeout: 30000 });
-    if (result.stdout !== '' || result.stderr !== '') throw Error('logical environment witnesses changed empty output');
-  } catch (error) { failures.push(error.message); }
+  for (const mode of ['normal', 'empty']) {
+    try {
+      const result = command(`logical-env-witnesses-${mode}`, join(out, 'logical-env-fixture'), mode === 'empty' ? ['empty'] : [], { timeout: 30000 });
+      if (result.stdout !== '' || result.stderr !== '') throw Error(`logical environment ${mode} witnesses changed empty output`);
+    } catch (error) { failures.push(error.message); }
+  }
   // Exercise both sides of the real stop boundary. Nonzero 70 is expected,
   // so retain both raw results rather than treating the first stop as failure.
   for (let mode = 0; mode < 4; mode++) {

@@ -1749,3 +1749,14 @@ absent is `(0,0,0)`, present empty `(1,0,0)`, nonempty `(1,owned data,length)`;
 callers free nonempty data with exactly length bytes and alignment 1.
 Set returns 0 / -1 InvalidName / -2 InvalidValue; unset returns 0 absent /
 1 removed / -1 InvalidName. These are raw leaf statuses, not guessed enum tags.
+
+Logical and startup column providers return canonical `List<List<U8>>`: a
+24-byte `[len,cap,data]` header, outer inline 24-byte inner headers, interleaved
+names/values, and compact byte payloads (stride 1, allocation/free alignment 8).
+This is the packed-byte epoch (`ae57c77e1`, `Lower/Values.jet:64-67,189-191`),
+not the historical word-per-byte startup adapters. One reader lock covers the
+entire logical snapshot. Startup columns retain raw order and duplicate keys;
+Unix key comparison uses raw byte lexicographic order and returns -1/0/1.
+The composed World/Sentry lane registers empty/startup-duplicate/invalid-UTF8
+ordering goldens and a writer racing two snapshot readers; source registration
+is not a claim of native execution.
