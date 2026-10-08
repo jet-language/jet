@@ -15,7 +15,7 @@ pub enum WsError {
 
 // The provider owns socket I/O, entropy, and frame codec. Jet validates the
 // URL and handshake shape before crossing the typed boundary.
-pub fn connect(url_text: String) -[Net]> WsConn WsError! {
+pub fn connect(url_text: String) -> WsConn WsError! {
     parsed :: url.parse(url_text) ?? return Err(WsError.InvalidURL)
     if parsed.scheme() != "ws" -> return Err(WsError.UnsupportedTarget)
     if parsed.host() == None || parsed.userinfo().bytes().len() > 0 {
@@ -26,7 +26,7 @@ pub fn connect(url_text: String) -[Net]> WsConn WsError! {
     core.net.ws.__connect(url.unparse(parsed))
 }
 
-pub fn upgrade(request: HTTPRequest) -[Net]> WsConn WsError! {
+pub fn upgrade(request: HTTPRequest) -> WsConn WsError! {
     if request.method() != "GET" -> return Err(WsError.InvalidHandshake)
     upgrade_header :: &request.header("upgrade") ?? return Err(WsError.InvalidHandshake)
     if !header_has_token(upgrade_header, "websocket") -> return Err(WsError.InvalidHandshake)

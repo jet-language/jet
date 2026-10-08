@@ -124,14 +124,14 @@ pub struct SRVRecord {
     pub weight: Int
 }
 
-pub fn gethostname() -[Env, FS]> String Never! {
+pub fn gethostname() -[Env]> String Never! {
     environment :: core.sys.get("HOSTNAME") ?? ""
     if environment.len() > 0 -> return environment
     contents :: core.files.read("/etc/hostname") ?? return "localhost"
     core.text.trim(contents)
 }
 
-pub fn ip_addr(text: String) -[Net, Time.Wait]> IPAddr NetError! {
+pub fn ip_addr(text: String) -> IPAddr NetError! {
     if !valid_text(text) -> return Err(net_err("ip_addr", text, "IP address is empty or contains control bytes"))
     bytes :: parse_ip_bytes(text) ?? return Err(net_err("parse IP address", text, "invalid IP address `{text}`: invalid IP address syntax"))
     #Unsafe("checked IPv4/IPv6 octets transferred into the native address carrier") {
@@ -149,7 +149,7 @@ pub fn ip_is_ipv4(addr: IPAddr) -> Bool Never! {
     #Unsafe("read the native IP address discriminant") { core.net.__ip_is_v4(addr) }
 }
 
-pub fn socket_addr(host: String, port: Int) -[Net, Time.Wait]> SocketAddr NetError! {
+pub fn socket_addr(host: String, port: Int) -[Net]> SocketAddr NetError! {
     if !valid_host_text(host) -> return Err(net_err("socket_addr", host, "socket host is empty or contains invalid bytes"))
     if !valid_port(port) -> return Err(net_err("socket_addr", host, "port must be in 0..=65535"))
     host_text := host
@@ -162,7 +162,7 @@ pub fn socket_addr(host: String, port: Int) -[Net, Time.Wait]> SocketAddr NetErr
     }
 }
 
-pub fn socket_addr_parse(text: String) -[Net, Time.Wait]> SocketAddr NetError! {
+pub fn socket_addr_parse(text: String) -> SocketAddr NetError! {
     if !valid_text(text) -> return Err(net_err("socket_addr_parse", text, "socket address is empty or contains control bytes"))
     raw :: text.bytes()
     host := ""
@@ -216,12 +216,12 @@ fn socket_scope(addr: SocketAddr) -> Int Never! {
 }
 pub fn socket_type(stream: TCPStream) -> String Never! { "stream" }
 
-pub fn tcp_listen(addr: String) -[Net, Time.Wait]> TCPListener NetError! {
+pub fn tcp_listen(addr: String) -[Net]> TCPListener NetError! {
     if !valid_text(addr) -> return Err(net_err("tcp_listen", addr, "listen address is empty or contains control bytes"))
     core.net.__tcp_listen(addr)
 }
 
-pub fn tcp_listen_addr(addr: SocketAddr) -[Net, Time.Wait]> TCPListener NetError! {
+pub fn tcp_listen_addr(addr: SocketAddr) -[Net]> TCPListener NetError! {
     core.net.__tcp_listen_addr(addr)
 }
 
@@ -256,7 +256,7 @@ pub fn create_connection(host: String, port: Int) -[Net, Time.Wait]> TCPStream N
     tcp_connect(format_host_port(host, port))
 }
 
-pub fn create_server(host: String, port: Int) -[Net, Time.Wait]> TCPListener NetError! {
+pub fn create_server(host: String, port: Int) -[Net]> TCPListener NetError! {
     if !valid_host_text(host) -> return Err(net_err("create_server", host, "listen host is empty or contains invalid bytes"))
     if !valid_port(port) -> return Err(net_err("create_server", host, "port must be in 0..=65535"))
     tcp_listen(format_host_port(host, port))
@@ -294,11 +294,11 @@ pub fn tcp_write_text(&stream: TCPStream, text: String) NetError! -[Net, Time.Wa
     return &stream.write_text(text)
 }
 
-pub fn tcp_shutdown(&stream: TCPStream, how: NetShutdown) NetError! -[Net, Time.Wait]> {
+pub fn tcp_shutdown(&stream: TCPStream, how: NetShutdown) NetError! -[Net]> {
     return &stream.shutdown(how)
 }
 
-pub fn tcp_close(&stream: TCPStream) NetError! -[Net, Time.Wait]> {
+pub fn tcp_close(&stream: TCPStream) NetError! -[Net]> {
     return &stream.close()
 }
 pub fn tcp_ready(&stream: TCPStream, interest: NetReadyInterest, deadline_ms: Int) -[Net, Time.Wait]> NetReady NetError! {
@@ -310,23 +310,23 @@ pub fn tcp_ready(&stream: TCPStream, interest: NetReadyInterest, deadline_ms: In
 pub fn ready_readable(ready: NetReady) -> Bool Never! { ready.readable }
 pub fn ready_writable(ready: NetReady) -> Bool Never! { ready.writable }
 
-pub fn tcp_local_addr(stream: TCPStream) -[Net, Time.Wait]> String NetError! {
+pub fn tcp_local_addr(stream: TCPStream) -[Net]> String NetError! {
     stream.local_addr()
 }
 
-pub fn tcp_peer_addr(stream: TCPStream) -[Net, Time.Wait]> String NetError! {
+pub fn tcp_peer_addr(stream: TCPStream) -[Net]> String NetError! {
     stream.peer_addr()
 }
 
-pub fn tcp_local_socket_addr(stream: TCPStream) -[Net, Time.Wait]> SocketAddr NetError! {
+pub fn tcp_local_socket_addr(stream: TCPStream) -[Net]> SocketAddr NetError! {
     core.net.__tcp_local_socket_addr(stream)
 }
 
-pub fn tcp_peer_socket_addr(stream: TCPStream) -[Net, Time.Wait]> SocketAddr NetError! {
+pub fn tcp_peer_socket_addr(stream: TCPStream) -[Net]> SocketAddr NetError! {
     core.net.__tcp_peer_socket_addr(stream)
 }
 
-pub fn listener_local_socket_addr(listener: TCPListener) -[Net, Time.Wait]> SocketAddr NetError! {
+pub fn listener_local_socket_addr(listener: TCPListener) -[Net]> SocketAddr NetError! {
     core.net.__listener_local_socket_addr(listener)
 }
 
@@ -335,56 +335,56 @@ pub fn tcp_reply(stream: ^TCPStream, status: String, body: String) NetError! -[N
     core.net.__tcp_reply(^stream, status, body)
 }
 
-pub fn set_timeout(&stream: TCPStream, timeout_ms: Int) NetError! -[Net, Time.Wait]> {
+pub fn set_timeout(&stream: TCPStream, timeout_ms: Int) NetError! -[Net]> {
     if !valid_timeout(timeout_ms) -> return Err(net_err("set_timeout", "", "timeout must be non-negative"))
     core.net.__set_timeout(&stream, timeout_ms)
 }
 
-pub fn set_read_timeout(&stream: TCPStream, timeout_ms: Int) NetError! -[Net, Time.Wait]> {
+pub fn set_read_timeout(&stream: TCPStream, timeout_ms: Int) NetError! -[Net]> {
     if !valid_timeout(timeout_ms) -> return Err(net_err("set_read_timeout", "", "timeout must be non-negative"))
     core.net.__set_read_timeout(&stream, timeout_ms)
 }
 
-pub fn set_write_timeout(&stream: TCPStream, timeout_ms: Int) NetError! -[Net, Time.Wait]> {
+pub fn set_write_timeout(&stream: TCPStream, timeout_ms: Int) NetError! -[Net]> {
     if !valid_timeout(timeout_ms) -> return Err(net_err("set_write_timeout", "", "timeout must be non-negative"))
     core.net.__set_write_timeout(&stream, timeout_ms)
 }
 
-pub fn nodelay(stream: TCPStream) -[Net, Time.Wait]> Bool NetError! {
+pub fn nodelay(stream: TCPStream) -[Net]> Bool NetError! {
     core.net.__nodelay(stream)
 }
 
-pub fn set_nodelay(&stream: TCPStream, on: Bool) NetError! -[Net, Time.Wait]> {
+pub fn set_nodelay(&stream: TCPStream, on: Bool) NetError! -[Net]> {
     core.net.__set_nodelay(&stream, on)
 }
 
-pub fn ttl(stream: TCPStream) -[Net, Time.Wait]> Int NetError! {
+pub fn ttl(stream: TCPStream) -[Net]> Int NetError! {
     core.net.__ttl(stream)
 }
-pub fn set_ttl(&stream: TCPStream, hops: Int) NetError! -[Net, Time.Wait]> {
+pub fn set_ttl(&stream: TCPStream, hops: Int) NetError! -[Net]> {
     if hops < 0 || hops > 4294967295 -> return Err(net_err("set_ttl", "", "ttl must fit u32"))
     core.net.__set_ttl(&stream, hops)
 }
 
-pub fn sendfile(&stream: TCPStream, path: String) -[Net, FS, Time.Wait]> Int NetError! {
+pub fn sendfile(&stream: TCPStream, path: String) -[Net, Time.Wait]> Int NetError! {
     if !valid_text(path) -> return Err(net_err("sendfile", path, "path is empty or contains control bytes"))
     core.net.sendfile(&stream, path)
 }
 
-pub fn udp_bind(addr: String) -[Net, Time.Wait]> UDPSocket NetError! {
+pub fn udp_bind(addr: String) -[Net]> UDPSocket NetError! {
     if !valid_text(addr) -> return Err(net_err("udp_bind", addr, "bind address is empty or contains control bytes"))
     core.net.__udp_bind(addr)
 }
 
-pub fn udp_bind_addr(addr: SocketAddr) -[Net, Time.Wait]> UDPSocket NetError! {
+pub fn udp_bind_addr(addr: SocketAddr) -[Net]> UDPSocket NetError! {
     core.net.__udp_bind_addr(addr)
 }
 
-pub fn udp_local_addr(socket: UDPSocket) -[Net, Time.Wait]> SocketAddr NetError! {
+pub fn udp_local_addr(socket: UDPSocket) -[Net]> SocketAddr NetError! {
     core.net.__udp_local_addr(socket)
 }
 
-pub fn udp_set_timeout(socket: UDPSocket, timeout_ms: Int) NetError! -[Net, Time.Wait]> {
+pub fn udp_set_timeout(socket: UDPSocket, timeout_ms: Int) NetError! -[Net]> {
     if !valid_timeout(timeout_ms) -> return Err(net_err("udp_set_timeout", "", "timeout must be non-negative"))
     core.net.__udp_set_timeout(socket, timeout_ms)
 }
@@ -415,7 +415,7 @@ pub fn udp_packet_bytes(packet: UDPPacket) -> [U8] Never! { packet.data }
 pub fn udp_packet_original_len(packet: UDPPacket) -> Int Never! { packet.original_len }
 pub fn udp_packet_truncated(packet: UDPPacket) -> Bool Never! { packet.truncated }
 
-pub fn unix_listen(path: String) -[Net, FS, Time.Wait]> UnixListener NetError! {
+pub fn unix_listen(path: String) -[Net]> UnixListener NetError! {
     if !valid_text(path) -> return Err(net_err("unix_listen", path, "socket path is empty or contains control bytes"))
     core.net.__unix_listen(path)
 }
@@ -451,11 +451,11 @@ pub fn unix_write_all_bytes(&stream: UnixStream, bytes: [U8]) NetError! -[Net, T
     core.net.__unix_write_all_bytes(&stream, bytes)
 }
 
-pub fn unix_shutdown(&stream: UnixStream, how: NetShutdown) NetError! -[Net, Time.Wait]> {
+pub fn unix_shutdown(&stream: UnixStream, how: NetShutdown) NetError! -[Net]> {
     core.net.__unix_shutdown(&stream, how)
 }
 
-pub fn unix_close(&stream: UnixStream) NetError! -[Net, Time.Wait]> {
+pub fn unix_close(&stream: UnixStream) NetError! -[Net]> {
     core.net.__unix_close(&stream)
 }
 

@@ -30,15 +30,15 @@ pub struct HTTPServerTLS {
     pub key_pem: String
 }
 
-pub fn mux() -> HTTPMux Never! {
+pub fn mux() -[Net]> HTTPMux Never! {
     provider.__mux()
 }
 
-pub fn serve_once(addr: String, mux: HTTPMux) HTTPError! {
+pub fn serve_once(addr: String, mux: HTTPMux) HTTPError! -[Net, Time.Wait]> {
     provider.__serve_once(addr, mux) ?? return
 }
 
-pub fn serve_once_listener(listener: TCPListener, mux: HTTPMux) HTTPError! {
+pub fn serve_once_listener(listener: TCPListener, mux: HTTPMux) HTTPError! -[Net, Time.Wait]> {
     provider.__serve_once_listener(listener, mux) ?? return
 }
 
@@ -50,7 +50,7 @@ pub fn __bind_entry(addr: String, mux: HTTPMux, tls: HTTPServerTLS?, deadline: D
     provider.__bind(addr, mux, tls, deadline)
 }
 
-pub fn __static_files_entry(mux: HTTPMux, prefix: String, root: String, index: Bool?, dotfiles: Bool?, follow_links: Bool?) Never! {
+pub fn __static_files_entry(mux: HTTPMux, prefix: String, root: String, index: Bool?, dotfiles: Bool?, follow_links: Bool?) Never! -[Net]> {
     provider.__static_files(mux, prefix, root, index, dotfiles, follow_links)
 }
 
@@ -87,15 +87,15 @@ pub fn json<T: Encode>(status: Int, body: T) -> HTTPResponse Never! {
     response_body(status, Body.Text(text), fields)
 }
 
-pub fn static_file(path: String, content_type: String) -[FS, Net, Time.Wait]> HTTPResponse HTTPError! {
+pub fn static_file(path: String, content_type: String) -[Net]> HTTPResponse HTTPError! {
     provider.__static_file(path, content_type)
 }
 
-pub fn static_file_range(request: HTTPRequest, path: String, content_type: String) -[FS, Net, Time.Wait]> HTTPResponse HTTPError! {
+pub fn static_file_range(request: HTTPRequest, path: String, content_type: String) -[Net]> HTTPResponse HTTPError! {
     provider.__static_file_range(request, path, content_type)
 }
 
-pub fn static_files(mux: HTTPMux, prefix: String, root: String) Never! {
+pub fn static_files(mux: HTTPMux, prefix: String, root: String) Never! -[Net]> {
     provider.__static_files(mux, prefix, root, None, None, None)
 }
 
@@ -126,11 +126,11 @@ pub fn cors_policy(origins: [String] | HTTPCorsOrigins, methods: [String]{[Strin
     }
 }
 
-pub fn cors(mux: HTTPMux, policy: HTTPCorsPolicy) Never! {
+pub fn cors(mux: HTTPMux, policy: HTTPCorsPolicy) Never! -[Net]> {
     provider.__cors(mux, policy)
 }
 
-pub fn access_log(request: HTTPRequest, status: Int) -> String Never! {
+pub fn access_log(request: HTTPRequest, status: Int) -[Net]> String Never! {
     template :: access_log_template(request)
     access_log_parts(request.method, request.path, template, status)
 }
@@ -154,7 +154,7 @@ fn access_log_path(path: String) -> String Never! {
     String.from_bytes(raw.slice(0, end)) ?? panic("query separator is not a UTF-8 boundary")
 }
 
-pub fn request_id(mux: HTTPMux) Never! {
+pub fn request_id(mux: HTTPMux) Never! -[Net]> {
     provider.__request_id(mux)
 }
 

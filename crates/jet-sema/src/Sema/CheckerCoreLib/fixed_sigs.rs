@@ -5090,7 +5090,7 @@ fn core_fixed_sig_impl(
             Some(Type::Named("SocketAddr".to_string())),
         )),
         ("core.net", "gethostname") => Some((vec![], Some(Type::String))),
-        ("core.net", "tcp_listen") => Some((
+        ("core.net", "tcp_listen" | "__tcp_listen") => Some((
             vec![(read, Type::String)],
             Some(result_ty(
                 Type::Named("TCPListener".to_string()),
@@ -5127,14 +5127,14 @@ fn core_fixed_sig_impl(
             vec![(read, Type::Named("SocketAddr".to_string()))],
             Some(Type::Int),
         )),
-        ("core.net", "tcp_listen_addr") => Some((
+        ("core.net", "tcp_listen_addr" | "__tcp_listen_addr") => Some((
             vec![(read, Type::Named("SocketAddr".to_string()))],
             Some(result_ty(
                 Type::Named("TCPListener".to_string()),
                 Type::Named("NetError".to_string()),
             )),
         )),
-        ("core.net", "tcp_accept") => Some((
+        ("core.net", "tcp_accept" | "__tcp_accept") => Some((
             vec![(
                 AccessConvention::Read,
                 Type::Named("TCPListener".to_string()),
@@ -5144,21 +5144,21 @@ fn core_fixed_sig_impl(
                 Type::Named("NetError".to_string()),
             )),
         )),
-        ("core.net", "tcp_connect") => Some((
+        ("core.net", "tcp_connect" | "__tcp_connect") => Some((
             vec![(read, Type::String)],
             Some(result_ty(
                 Type::Named("TCPStream".to_string()),
                 Type::Named("NetError".to_string()),
             )),
         )),
-        ("core.net", "tcp_connect_addr") => Some((
+        ("core.net", "tcp_connect_addr" | "__tcp_connect_addr") => Some((
             vec![(read, Type::Named("SocketAddr".to_string()))],
             Some(result_ty(
                 Type::Named("TCPStream".to_string()),
                 Type::Named("NetError".to_string()),
             )),
         )),
-        ("core.net", "tcp_connect_timeout") => Some((
+        ("core.net", "tcp_connect_timeout" | "__tcp_connect_timeout") => Some((
             vec![
                 (read, Type::Named("SocketAddr".to_string())),
                 (read, Type::Int),
@@ -5168,7 +5168,7 @@ fn core_fixed_sig_impl(
                 Type::Named("NetError".to_string()),
             )),
         )),
-        ("core.net", "tcp_connect_happy") => Some((
+        ("core.net", "tcp_connect_happy" | "__tcp_connect_happy") => Some((
             vec![(read, Type::String), (read, Type::Int), (read, Type::Int)],
             Some(result_ty(
                 Type::Named("TCPStream".to_string()),
@@ -5296,14 +5296,14 @@ fn core_fixed_sig_impl(
             vec![(read, Type::Named("TCPStream".to_string()))],
             Some(result_ty(Type::String, Type::Named("NetError".to_string()))),
         )),
-        ("core.net", "tcp_local_socket_addr" | "tcp_peer_socket_addr") => Some((
+        ("core.net", "tcp_local_socket_addr" | "tcp_peer_socket_addr" | "__tcp_local_socket_addr" | "__tcp_peer_socket_addr") => Some((
             vec![(read, Type::Named("TCPStream".to_string()))],
             Some(result_ty(
                 Type::Named("SocketAddr".to_string()),
                 Type::Named("NetError".to_string()),
             )),
         )),
-        ("core.net", "listener_local_socket_addr") => Some((
+        ("core.net", "listener_local_socket_addr" | "__listener_local_socket_addr") => Some((
             vec![(read, Type::Named("TCPListener".to_string()))],
             Some(result_ty(
                 Type::Named("SocketAddr".to_string()),
