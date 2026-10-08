@@ -1628,3 +1628,24 @@ declares a program `run` entry. C exports have no failure-row annotation.
 The C ABI route generator reads every canonical `CAbi*.rs` except generated
 `CAbiRoutes.rs`, including unsafe C exports. Hand-owned exports do not get
 generated adapter bodies; canonical signatures still supply ownership checks.
+
+### Expert Shared guard lowering
+
+`Lower/Transaction.jet` lowers the checked `SharedGuard<T>` read/edit tags
+before transparent-tag erasure. A guard is an opaque, non-clonable runtime
+handle, with `jet_rt_native_shared_read_guard_drop` or
+`jet_rt_native_shared_edit_guard_drop` selected by that provenance.
+Acquisition calls the Jet runtime's `jet_rt_native_shared_guard_read/edit`,
+retaining the canonical cell owner and its permit without copying the payload.
+Operation and place-projection dereferences ask the matching guard provider
+for the borrowed payload slot. Inline fields and list mutation address those
+same bytes; a read guard cannot supply a writable projected place. Escaping
+owned copies use the existing typed clone path, rather than dropping the
+borrowed payload as a second owner.
+
+`Tests/Fixtures/SharedGuards.jet` exercises read acquisition, edit field writes,
+list mutation through an addressable dereference, moving an edit token out of
+its local, and dropping a Shared owner while a read guard still retains it.
+Its runtime image requires the Jet-authored Shared guard exports; generated
+Rust route metadata alone does not provide them. This does not establish
+Shared transaction or Condition-wait support.
