@@ -1,0 +1,17 @@
+Error [E1321]: Output entry `run` has the wrong callable contract
+  --> tests/ui/error_conversions/missing_typed_conversion_reports_e2404.jet:11:1
+    |
+ 11 | fn run() -> Int TargetErr! {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ Why: An Executable takes zero or one typed CLI parameter and returns `()` or `() ?`
+ Fix: Declare the entry as `fn run()` or `fn run() ()?`
+More: jet-lang.dev/e/E1321
+
+Error [E2404]: `read` fails with `SourceErr`, which can't propagate into `TargetErr` here
+  --> missing_typed_conversion_reports_e2404.jet:12:14
+    |
+ 12 |     value :: read()
+    |              ^^^^
+ Why: `read` is defined at `missing_typed_conversion_reports_e2404.jet:7:4` with effective failure contract `explicit !SourceErr`; the caller's `explicit !TargetErr` contract has no route from `SourceErr` to `TargetErr`
+ Fix: Declare the caller with `SourceErr` as its failure domain, or add `impl SourceErr -> TargetErr { … }`; otherwise handle `read` locally with `??`
+More: jet-lang.dev/e/E2404
