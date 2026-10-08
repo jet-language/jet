@@ -1979,3 +1979,37 @@ conversion's `native Int argument exceeds host range` message at
 syntax receipts do not admit native caller layouts or prove execution:
 source-root/MIR ownership and the generator's provider ABI validation remain
 required before pack cutover.
+
+### Native DataLimits and EncodingLimits ownership boundary
+
+`JetRuntime/Source/DataLimits.jet` ports the 19 existing clone/drop/eq,
+constructor and field-getter exports. The unchanged C boundary follows
+`CAbiRoutes.rs:8838-8869,9470-9507`: borrowed exact Int arguments are checked
+through `jet_int_owned_to_i64`, while getters return a fresh exact Int owner
+through `jet_int_owned_from_i64`. Overflow uses the shared native conversion's
+`native Int argument exceeds host range` stop at `<core.prelude>:0`.
+
+The private native layouts in `JetBackend/Source/DataABI.jet` do not describe
+Rust allocations or nominal Core/MIR layouts. EncodingLimits occupies 56 bytes:
+raw i64 buffer/depth/item at 0/8/16, optional-total presence/value at 24/32,
+and expansion depth/bytes at 40/48. It has no child or Int owners. DataLimits
+occupies 40 bytes: an owned EncodingLimits pointer at 0 followed by raw i64
+groups/sort/join/output at 8/16/24/32. Its constructor consumes the encoding
+handle; clone and the encoding getter deep-clone it; drop frees the child and
+then the shell. Equality follows the Rust declaration order in
+`EncodingTypes.rs:4-11` and `CommonTypes.rs:797-803`, including optional-total
+presence and comparing its payload only when present.
+
+The optional total constructor accepts a null pointer for absent, or a
+borrowed pointer to an exact Int word. Its getter returns raw presence 0/1 and
+writes a newly owned Int into the caller's out slot only when present.
+`JetRuntime/Tests/DataLimitsWitness.c` requires the real Jet object and
+`--wrap=jet_rt_free`. It checks every getter, both i64 edges, absent/present-zero
+totals, fresh boxed owners, nested clone/getter independence, equality field
+participation and exact-once carrier frees. `encoding-overflow`,
+`encoding-field-overflow`, and `data-overflow` independently exercise native
+conversion stops. The `.stdout` file is expected output, not an execution
+receipt. This provider is held: native caller-layout/import admission and
+execution, plus whole-unit suppression of its Rust seed bodies, remain
+required before pack cutover.
+
