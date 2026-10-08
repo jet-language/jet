@@ -84,7 +84,7 @@ fn jet_cli_inspect_compiler_check(file: String, source: String) -> JetDriverVerb
         entry_root_identity: identity,
         entry_path: path,
     }
-    result :: jet_driver_compiler_check(JetDriverCompilerCheckInput{parsed: parsed, request: jet_cli_driver_request(snapshot, core_sources, None, JetDriverCompileMode.Doc), retain_projection: false}) ?? return jet_cli_ice("the compiler check query failed before returning its diagnostics")
+    result :: jet_driver_compiler_check(JetDriverCompilerCheckInput{parsed: parsed, request: jet_cli_driver_request(snapshot, core_sources, None, JetDriverCompileMode.Doc), sema_session: None, retain_projection: false}) ?? return jet_cli_ice("the compiler check query failed before returning its diagnostics")
     if result.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
     value := JetCLIStatusValue.Null
     if result.product == {
