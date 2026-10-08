@@ -345,6 +345,22 @@ pub fn mir_trait_ref(name: String) -> MIRTraitRef Never! {
     MIRTraitRef{id: mir_trait_id(name), name: name}
 }
 
+// The registered native Codec definitions, shared by checking and lowering.
+pub fn mir_builtin_codec_trait_name(codec: MIRSerdeCodec) -> String Never! {
+    if codec == {
+        .Encode -> "Encode"
+        .Decode -> "Decode"
+    }
+}
+
+pub fn mir_builtin_codec_trait_id(codec: MIRSerdeCodec) -> MIRTraitID Never! {
+    mir_trait_id(mir_builtin_codec_trait_name(codec))
+}
+
+pub fn mir_builtin_codec_trait_ref(codec: MIRSerdeCodec) -> MIRTraitRef Never! {
+    mir_trait_ref(mir_builtin_codec_trait_name(codec))
+}
+
 pub struct MIRFunctionSignature {
     pub params: [MIRType]
     pub ret: MIRType?
