@@ -820,20 +820,24 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     const slug = stem.replace(/[^A-Za-z0-9_-]+/gu, "_");
     const refPath = join(goldens, "mir", `${slug}.ref`);
     const ref = existsSync(refPath) ? JSON.parse(readFileSync(refPath, "utf8")) : null;
-    const want = readFileSync(join(features, "expected", `${stem}.out`), "utf8");
+    const refStdoutPath = join(goldens, "mir", `${slug}.stdout`);
+    const refStderrPath = join(goldens, "mir", `${slug}.stderr`);
+    const want = readFileSync(join(features, "expected", `${stem}.out`));
     let reference = "rust-absent";
     let detail = "";
-    if (ref && (ref.mode ?? "run") === "run") {
+    if (ref && ref.mode === "run" && existsSync(refStdoutPath) && existsSync(refStderrPath)) {
+      const refStdout = readFileSync(refStdoutPath);
       if (ref.status !== 0) {
         reference = "rust-error";
-        detail = `exit ${ref.status}: ${(ref.stderr ?? "").split("\n").find((line) => line.trim()) ?? ""}`.slice(0, 200);
-      } else if (ref.stdout !== want) {
+        detail = `exit ${ref.status}: ${readFileSync(refStderrPath, "utf8").split("\n").find((line) => line.trim()) ?? ""}`.slice(0, 200);
+      } else if (!refStdout.equals(want)) {
         reference = "model-differs";
-        const got = ref.stdout.split("\n");
-        const line = want.split("\n").findIndex((text, i) => text !== got[i]);
-        detail = `line ${line + 1}: model ${JSON.stringify(want.split("\n")[line])} rust ${JSON.stringify(got[line])}`;
+        const got = refStdout.toString("utf8").split("\n");
+        const model = want.toString("utf8").split("\n");
+        const line = model.findIndex((text, i) => text !== got[i]);
+        detail = line < 0 ? "stdout bytes differ" : `line ${line + 1}: model ${JSON.stringify(model[line])} rust ${JSON.stringify(got[line])}`;
       } else reference = "model-agree";
-    }
+    } else if (ref && ref.mode === "run") detail = "missing raw reference streams";
     const native = differential.get(stem)?.verdict ?? harness.get(stem)?.verdict ?? "-";
     const sanitized = sanitize.get(stem)?.verdict ?? "-";
     const linted = lint.get(stem)?.verdict ?? "-";

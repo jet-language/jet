@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Native-vs-Rust differential over a run-goldens.mjs output directory
 // (#4619 criterion 3). run-goldens.mjs keeps both runs of every golden: the
-// Rust path's `jet run` reference (<out>/mir/<slug>.ref) and the native
-// program's run (<out>/run/<slug>.stdout, .status.json). This compares them
+// Rust path's reference (<out>/mir/<slug>.ref mode/status plus raw .stdout and
+// .stderr) and the native run (<out>/run/<slug>.stdout, .status.json). It compares them
 // with each other, not only with the expected stdout, so a native result that
 // differs from the Rust path is its own verdict even when the golden is stale.
 //
@@ -66,24 +66,15 @@ if (caseList) {
 const slugOf = (stem) => stem.replace(/[^A-Za-z0-9_-]+/gu, "_");
 const readJson = (path) => (existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : null);
 
-// The native exit status: <slug>.status.json when the harness wrote one,
-// else the `exit N` run-goldens puts in a `wrong` detail (a pass, or a
-// `stdout differs`, exited 0).
-function nativeStatus(row, slug) {
-  const recorded = readJson(join(outDir, "run", `${slug}.status.json`));
-  if (recorded) return recorded.status ?? `signal ${recorded.signal}`;
-  const exit = row.detail.match(/exit (\S+?):/);
-  return exit ? (/^-?\d+$/.test(exit[1]) ? Number(exit[1]) : `signal ${exit[1]}`) : 0;
-}
 
 // The first line where two outputs differ, for the detail column.
 function firstDifference(leftName, left, rightName, right) {
-  const a = left.split("\n");
-  const b = right.split("\n");
+  const a = left.toString("utf8").split("\n");
+  const b = right.toString("utf8").split("\n");
   for (let i = 0; i < Math.max(a.length, b.length); i++) {
     if (a[i] !== b[i]) return `line ${i + 1}: ${leftName} ${JSON.stringify((a[i] ?? "<eof>").slice(0, 80))} ${rightName} ${JSON.stringify((b[i] ?? "<eof>").slice(0, 80))}`;
   }
-  return "identical";
+  return left.equals(right) ? "identical" : "stdout bytes differ (identical UTF-8 display)";
 }
 
 const cases = [];
@@ -97,22 +88,26 @@ for (const row of rows) {
     continue;
   }
   const ref = readJson(join(outDir, "mir", `${slug}.ref`));
-  if (!ref || (ref.mode ?? "run") !== "run") {
+  const refStdoutPath = join(outDir, "mir", `${slug}.stdout`);
+  const refStderrPath = join(outDir, "mir", `${slug}.stderr`);
+  if (!ref || ref.mode !== "run" || !existsSync(refStdoutPath) || !existsSync(refStderrPath)) {
     c.verdict = "rust-absent";
-    c.detail = ref ? `reference mode ${ref.mode}` : "no reference run";
+    c.detail = !ref ? "no reference run" : ref.mode !== "run" ? `reference mode ${ref.mode}` : "missing raw reference streams";
     continue;
   }
-  const expected = readFileSync(join(features, "expected", `${row.stem}.out`), "utf8");
-  c.rustPass = ref.status === 0 && ref.stdout === expected;
+  const expected = readFileSync(join(features, "expected", `${row.stem}.out`));
+  const refStdout = readFileSync(refStdoutPath);
+  c.rustPass = ref.status === 0 && refStdout.equals(expected);
   const stdoutPath = join(outDir, "run", `${slug}.stdout`);
-  if ((row.verdict !== "pass" && row.verdict !== "wrong") || !existsSync(stdoutPath)) {
+  const native = readJson(join(outDir, "run", `${slug}.status.json`));
+  if ((row.verdict !== "pass" && row.verdict !== "wrong") || !existsSync(stdoutPath) || !native) {
     c.verdict = "native-absent";
     c.detail = `${row.verdict}${row.detail ? `: ${row.detail}` : ""}`;
     continue;
   }
-  const stdout = readFileSync(stdoutPath, "utf8");
-  const status = nativeStatus(row, slug);
-  if (stdout === ref.stdout && status === ref.status) {
+  const stdout = readFileSync(stdoutPath);
+  const status = native.status ?? `signal ${native.signal}`;
+  if (stdout.equals(refStdout) && status === ref.status) {
     c.verdict = c.rustPass ? "agree" : "agree-off-golden";
     if (!c.rustPass) c.detail = ref.status !== 0 ? `both exit ${ref.status}` : firstDifference("golden", expected, "both", stdout);
     continue;
@@ -124,7 +119,7 @@ for (const row of rows) {
     const stderr = existsSync(stderrPath) ? readFileSync(stderrPath, "utf8") : "";
     parts.push(`exit rust ${ref.status} native ${status}${stderr ? ` (${stderr.split("\n")[0].slice(0, 100)})` : ""}`);
   }
-  if (stdout !== ref.stdout) parts.push(firstDifference("rust", ref.stdout, "native", stdout));
+  if (!stdout.equals(refStdout)) parts.push(firstDifference("rust", refStdout, "native", stdout));
   c.detail = parts.join("; ");
 }
 

@@ -46,13 +46,15 @@ if (mode !== "--plan") {
   for (const stem of stems) {
     const slug = stem.replace(/[^A-Za-z0-9_-]+/gu, "_");
     const refPath = join(out, "mir", `${slug}.ref`);
+    const refStdoutPath = join(out, "mir", `${slug}.stdout`);
+    const refStderrPath = join(out, "mir", `${slug}.stderr`);
     const statusPath = join(out, "run", `${slug}.status.json`);
     const stderrPath = join(out, "run", `${slug}.stderr`);
     const stdoutPath = join(out, "run", `${slug}.stdout`);
     const goldenStdoutPath = join(expected, `${stem}.out`);
     const failure = existsSync(join(expected, `${stem}.err.out`));
     const goldenPath = join(expected, `${stem}.${failure ? "err" : "stderr"}.out`);
-    if (![refPath, statusPath, stdoutPath, stderrPath].every(existsSync)) {
+    if (![refPath, refStdoutPath, refStderrPath, statusPath, stdoutPath, stderrPath].every(existsSync)) {
       failures.push(`${stem}: missing reference/native result`);
       rows.push(`${stem}\tmissing`);
       continue;
@@ -62,11 +64,11 @@ if (mode !== "--plan") {
     const stderr = readFileSync(stderrPath);
     const stdout = readFileSync(stdoutPath);
     const stdoutBytesMatch = stdout.equals(existsSync(goldenStdoutPath) ? readFileSync(goldenStdoutPath) : Buffer.alloc(0));
-    const stdoutReferenceMatch = typeof reference.stdout === "string" && stdout.equals(Buffer.from(reference.stdout));
+    const stdoutReferenceMatch = stdout.equals(readFileSync(refStdoutPath));
     const goldenStderr = readFileSync(goldenPath);
     const expectedExit = failure ? goldenFailureExit(stem, goldenStderr.toString("utf8")) : 0;
     const bytesMatch = stderr.equals(goldenStderr);
-    const referenceMatch = typeof reference.stderr === "string" && stderr.equals(Buffer.from(reference.stderr));
+    const referenceMatch = stderr.equals(readFileSync(refStderrPath));
     const exitMatch = expectedExit !== null && reference.mode === "run" && Number.isInteger(reference.status) &&
       reference.status === expectedExit && native.status === reference.status && native.signal === null && native.error === null;
     const ok = bytesMatch && referenceMatch && stdoutBytesMatch && stdoutReferenceMatch && exitMatch;

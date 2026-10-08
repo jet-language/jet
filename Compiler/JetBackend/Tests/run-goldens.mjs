@@ -112,8 +112,8 @@ for (const entry of entries) {
   // non-zero exit (70 panic, 1 uncaught Err); `.stderr.out` pins the stderr of
   // a successful run beside its `.out`.
   const expect = existsSync(expectedErr)
-    ? { failure: true, stdout: existsSync(expectedOut) ? readFileSync(expectedOut, "utf8") : "", stderr: readFileSync(expectedErr, "utf8") }
-    : { failure: false, stdout: readFileSync(expectedOut, "utf8"), stderr: existsSync(expectedStderr) ? readFileSync(expectedStderr, "utf8") : null };
+    ? { failure: true, stdout: existsSync(expectedOut) ? readFileSync(expectedOut) : Buffer.alloc(0), stderr: readFileSync(expectedErr) }
+    : { failure: false, stdout: readFileSync(expectedOut), stderr: existsSync(expectedStderr) ? readFileSync(expectedStderr) : null };
   cases.push({ entry, slug, expect, stdin: stdinTable.get(entry.stem) ?? null, verdict: null, detail: "" });
 }
 const open = () => cases.filter((c) => c.verdict === null);
@@ -157,12 +157,14 @@ if (from <= 0 && until >= 0) {
     const run = spawnSync(safeJet, command, {
       cwd,
       input: c.stdin ?? "",
-      encoding: "utf8",
+      encoding: null,
       stdio: ["pipe", emit ? "ignore" : "pipe", "pipe"],
       env: { ...process.env, [process.env.JET_NATIVE_STOP_POINTS === "1" ? "JET_DUMP_NATIVE_MIR" : "JET_DUMP_MIR"]: resolve(dump), SAFE_JET_TIMEOUT: process.env.SAFE_JET_TIMEOUT ?? "120" },
       maxBuffer: 1 << 28,
     });
-    writeFileSync(join(dirs.mir, `${c.slug}.ref`), JSON.stringify({ mode: emit ? "emit" : "run", status: run.status, stdout: run.stdout ?? "", stderr: run.stderr ?? "" }));
+    writeFileSync(join(dirs.mir, `${c.slug}.stdout`), run.stdout ?? Buffer.alloc(0));
+    writeFileSync(join(dirs.mir, `${c.slug}.stderr`), run.stderr ?? Buffer.alloc(0));
+    writeFileSync(join(dirs.mir, `${c.slug}.ref`), JSON.stringify({ mode: emit ? "emit" : "run", status: run.status }));
     console.log(`mir ${c.slug}: ${existsSync(dump) ? "dumped" : "no dump"} (jet ${emit ? "emit" : "run"} exit ${run.status})`);
   }
 }
@@ -297,7 +299,7 @@ for (const c of front === "rust" ? open() : []) {
     const ref = join(dirs.mir, `${c.slug}.ref`);
     if (existsSync(ref)) {
       const reference = JSON.parse(readFileSync(ref, "utf8"));
-      c.detail = `jet ${reference.mode ?? "run"} exit ${reference.status}`;
+      c.detail = `jet ${reference.mode} exit ${reference.status}`;
     }
   } else if (existsSync(join(dirs.lower, `${c.slug}.convert-error`))) {
     c.verdict = "convert-error";
@@ -552,20 +554,20 @@ for (const c of until >= 3 ? open() : []) {
   // The golden runs where its `jet run` reference ran (staged again when the
   // mir stage ran in another output directory).
   const cwd = existsSync(join(dirs.work, c.slug)) ? join(dirs.work, c.slug) : stage(c);
-  const run = spawnSync(program, [], { input: c.stdin ?? "", encoding: "utf8", timeout: 20000, cwd, maxBuffer: 1 << 26 });
+  const run = spawnSync(program, [], { input: c.stdin ?? "", encoding: null, timeout: 20000, cwd, maxBuffer: 1 << 26 });
   writeFileSync(join(dirs.run, `${c.slug}.stdout`), run.stdout ?? "");
   writeFileSync(join(dirs.run, `${c.slug}.stderr`), run.stderr ?? "");
   writeFileSync(join(dirs.run, `${c.slug}.status.json`), JSON.stringify({ status: run.status, signal: run.signal, error: run.error ? { code: run.error.code, message: run.error.message } : null }) + "\n");
   const { expect } = c;
-  const expectedExit = expect.failure ? goldenFailureExit(c.entry.stem, expect.stderr) : 0;
+  const expectedExit = expect.failure ? goldenFailureExit(c.entry.stem, expect.stderr.toString("utf8")) : 0;
   const exitOk = expectedExit !== null && run.status === expectedExit;
-  const stdoutOk = run.stdout === expect.stdout;
-  const stderrOk = expect.stderr === null || run.stderr === expect.stderr;
+  const stdoutOk = run.stdout?.equals(expect.stdout) ?? false;
+  const stderrOk = expect.stderr === null || (run.stderr?.equals(expect.stderr) ?? false);
   if (exitOk && stdoutOk && stderrOk) c.verdict = "pass";
   else {
     c.verdict = "wrong";
     c.detail = !exitOk
-      ? expectedExit === null ? "ambiguous failure exit report" : `exit ${run.status ?? run.signal} (expected ${expectedExit}): ${(run.stderr ?? "").split("\n")[0]}`
+      ? expectedExit === null ? "ambiguous failure exit report" : `exit ${run.status ?? run.signal} (expected ${expectedExit}): ${(run.stderr?.toString("utf8") ?? "").split("\n")[0]}`
       : !stdoutOk ? "stdout differs" : "stderr differs";
   }
   c.detail = `${c.leg}${c.detail ? `: ${c.detail}` : ""}`;
