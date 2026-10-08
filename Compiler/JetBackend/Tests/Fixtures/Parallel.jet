@@ -194,7 +194,7 @@ fn fx_owned_map_program(parallel: Bool, failing: Bool, empty: Bool) -> MIRProgra
     values := [MIRValueID]{}
     if !empty { loop text in ([String]{"alpha", "beta", "omega"}) -> &values.push(fx_strings_literal(&b, text)) }
     source :: fx_owned(&b, list_ty, MIROperation.BuildList{values: values, trait_coercion: None})
-    callback :: fx_owned(&b, fn_ty, MIROperation.Closure{function: mir_function_id("copy_owned_item"), captures: [], facts: fx_capture_facts()})
+    callback :: fx_owned(&b, fn_ty, MIROperation.Closure{function: mir_function_id("copy_owned_item"), captures: [MIRCaptureOperand]{}, facts: fx_capture_facts()})
     args := [MIRCallArg]{fx_arg(callback, MIRAccess.Move)}
     if parallel -> &args.push(fx_arg(fx_int_const(&b, 2), MIRAccess.Read))
     member :: if parallel -> "para_map" else -> "try_map"
@@ -206,11 +206,12 @@ fn fx_owned_map_program(parallel: Bool, failing: Bool, empty: Bool) -> MIRProgra
     } else {
         mapped :: if parallel -> outcome else -> fx_owned(&b, list_ty, MIROperation.ResultValue{subject: outcome, ok: true})
         if empty {
-            length :: fx_list_method(&b, "len", mapped, None, [], fx_int(), false)
+            length :: fx_list_method(&b, "len", mapped, None, [MIRValueID]{}, fx_int(), false)
             fx_print(&b, length)
         } else {
             loop index in 0..3 {
-                value :: fx_list_index(&b, mapped, fx_int_const(&b, index), fx_string(), false)
+                at :: fx_int_const(&b, index)
+                value :: fx_list_index(&b, mapped, at, fx_string(), false)
                 fx_print(&b, value)
             }
         }

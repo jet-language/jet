@@ -4,6 +4,7 @@ use jet_foundation.[
     MIRTraitDef, MIRTraitMethod, MIRTraitMethodID, MIRTraitRef, MIRType,
     MIRTypeDef, MIRTypeDefKind, MIRTypeKind, mir_function_id, mir_owned_ownership,
     mir_trait_id, mir_type_from_kind, mir_type_id, mir_type_with_identity,
+    MIRField, MIRFieldID, MIRFieldValue, MIRFunctionID,
 ]
 
 // expect-stdout trait-values: "payload\npayload\npayload\npayload\n42\n"
@@ -21,17 +22,17 @@ fn fx_trait_values() -> MIRProgram Never! {
     // witnesses preservation of glue_base+row function-table identities.
     cloned_arg := fx_arg(backup, MIRAccess.Move)
     cloned_arg.implicit_clone = true
-    temporary :: fx_owned(&b, fx_string(), MIROperation.Call{callee: MIRCallee.TraitMethod{method: method, trait_ref: bound, receiver: ty}, args: [MIRCallArg]{cloned_arg}, type_args: []})
+    temporary :: fx_owned(&b, fx_string(), MIROperation.Call{callee: MIRCallee.TraitMethod{method: method, trait_ref: bound, receiver: ty}, args: [MIRCallArg]{cloned_arg}, type_args: [MIRType]{}})
     fx_print(&b, temporary)
     fx_do(&b, MIROperation.Drop{value: temporary, kind: MIRDropKind.Value})
-    result :: fx_owned(&b, fx_string(), MIROperation.Call{callee: MIRCallee.TraitMethod{method: method, trait_ref: bound, receiver: ty}, args: [MIRCallArg]{fx_arg(boxed, MIRAccess.Read)}, type_args: []})
+    result :: fx_owned(&b, fx_string(), MIROperation.Call{callee: MIRCallee.TraitMethod{method: method, trait_ref: bound, receiver: ty}, args: [MIRCallArg]{fx_arg(boxed, MIRAccess.Read)}, type_args: [MIRType]{}})
     fx_print(&b, result)
     fx_do(&b, MIROperation.Drop{value: result, kind: MIRDropKind.Value})
     fx_do(&b, MIROperation.Drop{value: boxed, kind: MIRDropKind.Value})
-    copied :: fx_owned(&b, fx_string(), MIROperation.Call{callee: MIRCallee.TraitMethod{method: method, trait_ref: bound, receiver: ty}, args: [MIRCallArg]{fx_arg(backup, MIRAccess.Read)}, type_args: []})
+    copied :: fx_owned(&b, fx_string(), MIROperation.Call{callee: MIRCallee.TraitMethod{method: method, trait_ref: bound, receiver: ty}, args: [MIRCallArg]{fx_arg(backup, MIRAccess.Read)}, type_args: [MIRType]{}})
     fx_print(&b, copied)
     fx_do(&b, MIROperation.Drop{value: copied, kind: MIRDropKind.Value})
-    consumed :: fx_owned(&b, fx_string(), MIROperation.Call{callee: MIRCallee.TraitMethod{method: MIRTraitMethodID{value: 779}, trait_ref: bound, receiver: ty}, args: [MIRCallArg]{fx_arg(backup, MIRAccess.Move)}, type_args: []})
+    consumed :: fx_owned(&b, fx_string(), MIROperation.Call{callee: MIRCallee.TraitMethod{method: MIRTraitMethodID{value: 779}, trait_ref: bound, receiver: ty}, args: [MIRCallArg]{fx_arg(backup, MIRAccess.Move)}, type_args: [MIRType]{}})
     fx_print(&b, consumed)
     fx_do(&b, MIROperation.Drop{value: consumed, kind: MIRDropKind.Value})
     renderable :: MIRTraitRef{id: mir_trait_id("Renderable"), name: "Renderable"}
@@ -42,7 +43,7 @@ fn fx_trait_values() -> MIRProgram Never! {
     fx_do(&b, MIROperation.Drop{value: rendered, kind: MIRDropKind.Value})
     nested_text :: fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "nested"}})
     nested :: fx_owned(&b, ty, MIROperation.TraitBox{value: nested_text, target: mir_type_id("EchoObject")})
-    wrapper :: fx_struct_literal_value(&b, "NestedTrait", [jet_foundation.MIRFieldValue]{fx_struct_literal_field("NestedTrait.inner", nested)}, [])
+    wrapper :: fx_struct_literal_value(&b, "NestedTrait", [MIRFieldValue]{fx_struct_literal_field("NestedTrait.inner", nested)}, [MIRFieldID]{})
     outer :: fx_owned(&b, rendered_ty, MIROperation.TraitBox{value: wrapper, target: mir_type_id("RenderableObject")})
     outer_clone :: fx_owned(&b, rendered_ty, MIROperation.Copy{value: outer, fact: MIRCopyFact.Explicit})
     fx_do(&b, MIROperation.Drop{value: outer, kind: MIRDropKind.Value})
@@ -58,7 +59,7 @@ fn fx_trait_values() -> MIRProgram Never! {
     taken :: fx_param(&move_body, "self", fx_string(), mir_owned_ownership())
     fx_block(&move_body, 0, MIRTerminator.Return{value: Val(taken)})
     consuming :: fx_function("consume", move_body, fx_string())
-    p := fx_program([MIRFunction]{run, implementation, consuming}, [MIRTypeDef]{fx_type_def("NestedTrait", MIRTypeDefKind.Struct{fields: [jet_foundation.MIRField]{fx_field("NestedTrait", "inner", ty)}})})
+    p := fx_program([MIRFunction]{run, implementation, consuming}, [MIRTypeDef]{fx_type_def("NestedTrait", MIRTypeDefKind.Struct{fields: [MIRField]{fx_field("NestedTrait", "inner", ty)}, methods: [MIRFunctionID]{}})})
     p.traits = [MIRTraitDef]{
         MIRTraitDef{id: bound.id, module_id: run.module_id, key: bound.name, name: bound.name, span: fx_span(), visibility: .Private, associated_types: [], methods: [MIRTraitMethod]{
             MIRTraitMethod{id: method, name: "echo", span: fx_span(), self_access: Val(MIRAccess.Read), params: [], declared_return: Val(fx_string()), return_type: fx_string(), failure: .Infallible, effects: run.effects, is_pure: false, return_view_provenance: None, declared_return_view_provenance: None, default: None},

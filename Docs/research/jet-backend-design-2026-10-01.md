@@ -250,8 +250,14 @@ promise). Float extrema follow collection sort order: NaN is greatest, ties
 retain the last maximum and first minimum. Float64 sum accumulates source
 item `i` into lane `i & 7` and combines the eight lanes with the fixed
 adjacent-pair tree; no host reduction or reassociation is used. Fallible List
-capacity construction remains a named refusal until the native fallible
-allocation provider honors program-allocator policy and fault injection.
+capacity construction uses `jet_rt_alloc_try` for stored-element buffers.
+Negative capacity reports zero requested bytes without consuming a fault
+probe; request products saturate and reported bytes clamp at I64.MAX,
+matching PortableAlloc.rs:537-539. Errors use the canonical AllocError record
+constructor. Zero capacity and zero-sized elements consume the fault check
+once without allocating a buffer; a zero-sized List carries capacity I64.MAX.
+Metadata allocations use the ordinary fatal door, which does not consume the
+injected-fault rail; policy caps still apply.
 
 Sizes: a word, handle or box pointer is 8 bytes (align 8), a Bool 1 byte, Unit
 0. An inline aggregate is 8-aligned and padded to whole words, so copies move
