@@ -1012,6 +1012,14 @@ inventory before invoking a getter. A mismatch is a registered named E0956
 refusal: old Process state stays intact and incompatible new code cannot attach.
 World resets at the mapped one-shot/reload boundary; Thread persists until OS
 thread retirement, and Attempt resets only at the selected-unit attempt boundary.
+The Driver's `CoreLibrary` graph roots the complete installed catalog, including
+private parts, independently of any user import closure. Its registration anchor
+is the first canonical module-owner/path row, not a synthetic `run`; every
+checked Core body passes through the ordinary TIR/MIR pipeline. The retained
+recipe is normalized by `jet_driver_core_library_sources`, and
+`jet_driver_prepare_core_library` computes its expected manifest before the
+native producer can lower an image. Factory accessors use the same checked
+Source callables to recompute that schema from the retained recipe.
 The parent runtime admission record is private, build-time embedded metadata
 from the same producer as the host binary and runtime library, not a user flag,
 environment lookup or receipt self-hash. Parent admission, getter dispatch and
