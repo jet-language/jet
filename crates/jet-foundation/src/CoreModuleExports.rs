@@ -25,7 +25,7 @@ pub enum CoreLeafKind {
 
 // BEGIN GENERATED CORE DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 00b29901c3c3d44f13c5df5f16bfb73720e88de051397c5bee28e17e1cba3c8e
+// Source SHA-256: 157e780cfe0a84160591893bac2163de35351aef8c0a5a40254db8120d9f239c
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreModuleDeclaration {
     pub module: &'static str,
@@ -793,7 +793,7 @@ pub const CORE_SOURCE_MODULES: &[CoreSourceModule] = &[
     CoreSourceModule { module: "core.encoding.csv", alias: "core_core_encoding_csv", path: "Core/encoding/csv.jet", owned_members: &["dict_get", "dict_get_or", "dict_rows", "fieldnames", "parse", "reader", "rows", "to_string", "write_dict", "writer"] },
     CoreSourceModule { module: "core.encoding.hex", alias: "core_core_encoding_hex", path: "Core/encoding/hex.jet", owned_members: &["a2b_base64", "a2b_hex", "a2b_qp", "a2b_uu", "b2a_base64", "b2a_hex", "b2a_qp", "b2a_uu", "crc32", "crc_hqx", "decode", "dump", "encode", "encode_prefixed", "encode_sep", "encode_upper", "hexlify", "is_hex", "unhexlify"] },
     CoreSourceModule { module: "core.encoding.ini", alias: "core_core_encoding_ini", path: "Core/encoding/ini.jet", owned_members: &["defaults", "empty", "get", "get_bool", "get_float", "get_int", "get_or", "has_option", "has_section", "items", "options", "parse", "remove_option", "remove_section", "sections", "set", "to_string"] },
-    CoreSourceModule { module: "core.encoding.json", alias: "core_core_encoding_json", path: "Core/encoding/json.jet", owned_members: &["canonical", "decode", "dump", "dumps", "events", "load", "loads", "parse", "parse_allow_duplicates", "patch", "patch_with_limits", "pointer", "reader", "reader_allow_duplicates", "to_string", "to_string_pretty"] },
+    CoreSourceModule { module: "core.encoding.json", alias: "core_core_encoding_json", path: "Core/encoding/json.jet", owned_members: &["canonical", "decode", "dump", "dumps", "events", "load", "loads", "parse", "parse_allow_duplicates", "patch", "patch_with_limits", "pointer", "reader_allow_duplicates", "to_string", "to_string_pretty", "writer"] },
     CoreSourceModule { module: "core.encoding.jsonl", alias: "core_core_encoding_jsonl", path: "Core/encoding/jsonl.jet", owned_members: &["append_line", "count_rows", "dumps", "first", "loads", "parse", "reader", "to_string"] },
     CoreSourceModule { module: "core.encoding.toml", alias: "core_core_encoding_toml", path: "Core/encoding/toml.jet", owned_members: &["load", "loads", "parse", "to_string"] },
     CoreSourceModule { module: "core.encoding.xml", alias: "core_core_encoding_xml", path: "Core/encoding/xml.jet", owned_members: &[] },
@@ -902,6 +902,7 @@ pub const CORE_SOURCE_OWNED_TYPES: &[CoreSourceOwnedType] = &[
     CoreSourceOwnedType { path: "Core/encoding/csv.jet", name: "CSVReader" },
     CoreSourceOwnedType { path: "Core/encoding/csv.jet", name: "CSVWriter" },
     CoreSourceOwnedType { path: "Core/encoding/json.jet", name: "JSONReader" },
+    CoreSourceOwnedType { path: "Core/encoding/json.jet", name: "JSONWriter" },
     CoreSourceOwnedType { path: "Core/encoding/jsonl.jet", name: "JSONLReader" },
     CoreSourceOwnedType { path: "Core/encoding/xml.jet", name: "XMLError" },
     CoreSourceOwnedType { path: "Core/encoding/xml.jet", name: "XMLReason" },

@@ -30,6 +30,7 @@
 
 use core as core
 use core.encoding.[DataEvent, DataTree, EncodingError, EncodingErrorKind, EncodingFormat, EncodingLimits]
+use core.files.[FileWriter]
 use core.math as math
 use __core_encoding_stream as stream
 
@@ -195,6 +196,24 @@ pub struct JSONReader {
     pub fn next(&self) -> DataEvent EncodingError! { &self.parser.next_event() }
 }
 
+/// Bounded event output. The source push engine owns framing, canonicalization,
+/// limits and sticky errors; its registered leaves perform only file operations.
+pub struct JSONWriter {
+    output: stream.JSONPush
+
+    pub fn write(&self, event: ^DataEvent) EncodingError! -[IO]> {
+        &self.output.write(^event)
+    }
+
+    pub fn flush(&self) EncodingError! -[IO]> { &self.output.flush() }
+
+    pub fn finish(&self) EncodingError! -[IO]> { &self.output.finish() }
+}
+
+pub fn writer(target: ^FileWriter, limits: EncodingLimits{EncodingLimits.safe()}, canonical: Bool{false}) -[FS]> JSONWriter EncodingError! {
+    output :: stream.json_writer(^target, limits, canonical) ?? return Err(err)
+    Ok(JSONWriter{output: ^output})
+}
 
 /// RFC 6901 JSON Pointer selection (D-CORE-JSON-POINTER1=A). `""` is the whole
 /// value and `/` the empty-named member; `~0` and `~1` escape `~` and `/`;
