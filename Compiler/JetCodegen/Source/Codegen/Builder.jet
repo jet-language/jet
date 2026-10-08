@@ -1594,8 +1594,20 @@ fn jet_codegen_set_drop_live(builder: &JetCodegenBuilder, program: JetCodegenPro
         }
         index += 1
     }
-    if builder.split_drop_roots.len() == 0 -> return
     root :: jet_codegen_find_place(builder, program, place) ?? return
+    if !live && root.projections.len() != 0 {
+        loop owner in builder.places {
+            if owner.base != root.base || owner.projections.len() != 0 -> next
+            loop record in builder.drop_live_places {
+                if record.place != owner.id -> next
+                if jet_codegen_nominal_close_function(builder, program, record.ty) != None && !jet_codegen_is_consuming_close_receiver(builder, program, owner.id, record.ty) {
+                    owner_type :: type_mir_identity_key(record.ty)
+                    panic("cannot lower projected move from `{owner_type}`: owner has its own Close implementation")
+                }
+            }
+        }
+    }
+    if builder.split_drop_roots.len() == 0 -> return
     split := false
     loop owner in builder.places {
         if builder.split_drop_roots.get(owner.id.value) != None && owner.base == root.base {
@@ -1605,14 +1617,17 @@ fn jet_codegen_set_drop_live(builder: &JetCodegenBuilder, program: JetCodegenPro
     }
     if !split -> return
     index = 0
+    covered := false
     loop index < builder.drop_live_places.len() {
         record :: builder.drop_live_places[index]
         index += 1
         leaf :: jet_codegen_find_place(builder, program, record.place) ?? panic("drop-live leaf has no MIR place")
         if !jet_codegen_place_covers_fields(root, leaf) -> next
+        covered = true
         value := jet_codegen_emit_value(&builder, program, record.span, Type.Bool, MIROperation.Constant{value: MIRConstant.Bool{value: live}})
         _ := jet_codegen_emit(&builder, program, record.span, None, MIROperation.WritePlace{place: record.live, value: value})
     }
+    if !live && !covered -> panic("cannot lower projected move under split owner: move covers no registered ownership leaf")
 }
 
 fn jet_codegen_drop_field_names(builder: JetCodegenBuilder, program: JetCodegenProgram, ty: Type) -> [String] Never! {
@@ -1710,11 +1725,9 @@ fn jet_codegen_register_drop_live(builder: &JetCodegenBuilder, program: JetCodeg
             }
         }
     }
-    if split {
-        if jet_codegen_nominal_close_function(builder, program, ty) != None && !jet_codegen_is_consuming_close_receiver(builder, program, place, ty) {
-            owner_type :: type_mir_identity_key(ty)
-            panic("cannot lower projected move from `{owner_type}`: owner has its own Close implementation")
-        }
+    // The name pre-scan may select a shadowed Close binding. Keep it atomic;
+    // an actual projected move is refused by jet_codegen_set_drop_live.
+    if split && (jet_codegen_nominal_close_function(builder, program, ty) == None || jet_codegen_is_consuming_close_receiver(builder, program, place, ty)) {
         if jet_codegen_drop_field_names(builder, program, ty).len() != 0 {
             builder.split_drop_roots[place.value] = true
             jet_codegen_register_drop_leaves(&builder, program, place, ty, initialized, true, [String]{})

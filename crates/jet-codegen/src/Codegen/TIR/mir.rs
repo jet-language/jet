@@ -7732,27 +7732,25 @@ impl<'a> LowerCtx<'a> {
             });
         if split {
             let checked = self.mir_type(ty)?;
-            if self.scope_end_close_for_place(place, &checked).is_some() {
-                return Err(self.error(self.span(), format!(
-                    "cannot lower projected move from `{}`: owner has its own Close implementation",
-                    type_identity_key(ty)
-                )));
-            }
-            let mut paths = Vec::new();
-            self.owned_leaf_paths(&checked, true, &mut Vec::new(), &mut Vec::new(), &mut paths)?;
-            // A container, enum or opaque owner remains indivisible.
-            if !paths.iter().any(Vec::is_empty) {
-                self.split_drop_roots.insert(place);
-                for path in paths.into_iter().rev() {
-                    let mut leaf = place;
-                    let mut leaf_ty = ty.clone();
-                    for (name, field_ty) in path {
-                        leaf = self.project_field_place(leaf, &name, field_ty.clone(), self.span())?;
-                        leaf_ty = field_ty;
+            // The pre-scan is a name hint, not binding identity. A shadowed
+            // Close owner stays atomic; only an actual projected move refuses.
+            if self.scope_end_close_for_place(place, &checked).is_none() {
+                let mut paths = Vec::new();
+                self.owned_leaf_paths(&checked, true, &mut Vec::new(), &mut Vec::new(), &mut paths)?;
+                // A container, enum or opaque owner remains indivisible.
+                if !paths.iter().any(Vec::is_empty) {
+                    self.split_drop_roots.insert(place);
+                    for path in paths.into_iter().rev() {
+                        let mut leaf = place;
+                        let mut leaf_ty = ty.clone();
+                        for (name, field_ty) in path {
+                            leaf = self.project_field_place(leaf, &name, field_ty.clone(), self.span())?;
+                            leaf_ty = field_ty;
+                        }
+                        self.register_owned_drop(leaf, &leaf_ty, self.ownership_for(&leaf_ty), initialized)?;
                     }
-                    self.register_owned_drop(leaf, &leaf_ty, self.ownership_for(&leaf_ty), initialized)?;
+                    return Ok(());
                 }
-                return Ok(());
             }
         }
         let live_local = TLocal::generated(format!("owned_live_{}", place.0)).as_mutable();
@@ -7783,20 +7781,20 @@ impl<'a> LowerCtx<'a> {
         Ok(())
     }
 
-    fn drop_live_flags(&self, place: MirPlaceId) -> Vec<MirPlaceId> {
+    fn drop_live_flags(&self, place: MirPlaceId, moving: bool) -> Result<Vec<MirPlaceId>, LowerError> {
         if self.drop_live_places.contains_key(&place) {
-            return Vec::new();
+            return Ok(Vec::new());
         }
         if self.split_drop_roots.is_empty() {
-            return Vec::new();
+            return Ok(Vec::new());
         }
         let Some(root) = self.places.iter().find(|row| row.id == place) else {
-            return Vec::new();
+            return Ok(Vec::new());
         };
         if !self.split_drop_roots.iter().any(|id| self.places.iter().any(|row| {
             row.id == *id && row.base == root.base
         })) {
-            return Vec::new();
+            return Ok(Vec::new());
         }
         let mut flags: Vec<_> = self.drop_live_places.iter().filter_map(|(id, flag)| {
             let leaf = self.places.iter().find(|row| row.id == *id)?;
@@ -7808,8 +7806,33 @@ impl<'a> LowerCtx<'a> {
                 )))
                 .then_some(*flag)
         }).collect();
+        if moving && flags.is_empty() {
+            return Err(self.error(self.span(),
+                "cannot lower projected move under split owner: move covers no registered ownership leaf"));
+        }
         flags.sort_unstable_by_key(|flag| flag.0);
-        flags
+        Ok(flags)
+    }
+
+    fn check_projected_close_move(&self, place: MirPlaceId) -> Result<(), LowerError> {
+        let Some(moved) = self.places.iter().find(|row| row.id == place) else {
+            return Ok(());
+        };
+        if moved.projections.is_empty() {
+            return Ok(());
+        }
+        for owner in &self.places {
+            if owner.base == moved.base && owner.projections.is_empty()
+                && self.drop_live_places.contains_key(&owner.id)
+                && self.scope_end_close_for_place(owner.id, &owner.ty).is_some()
+            {
+                return Err(self.error(self.span(), format!(
+                    "cannot lower projected move from `{}`: owner has its own Close implementation",
+                    type_identity_key(&mir_type_as_ast(&owner.ty))
+                )));
+            }
+        }
+        Ok(())
     }
 
     pub(super) fn emit_file_owner_replacement(&mut self, place: MirPlaceId) -> Result<(), LowerError> {
@@ -8014,11 +8037,17 @@ impl<'a> LowerCtx<'a> {
             | MirOperation::ReplacePlace { place, .. } => (Some(*place), true),
             _ => (None, false),
         };
+        if let MirOperation::MovePlace { place } = &operation {
+            self.check_projected_close_move(*place)?;
+        }
         let drop_live_place = drop_place.and_then(|place| self.drop_live_places.get(&place).copied());
         let split_drop_flags = if drop_live_place.is_some() || self.split_drop_roots.is_empty() {
             Vec::new()
         } else {
-            drop_place.map_or_else(Vec::new, |place| self.drop_live_flags(place))
+            match drop_place {
+                Some(place) => self.drop_live_flags(place, !drop_live)?,
+                None => Vec::new(),
+            }
         };
         let span = self.span();
         let source_line = self.current_line;

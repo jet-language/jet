@@ -565,4 +565,33 @@ fn run() {
                 && message.contains("owner has its own Close implementation")
         })
     }), "{rendered}");
+    assert!(diagnostics.iter().any(|diagnostic| diagnostic.span.is_some_and(|span| {
+        src[span.start..span.end].contains("held.first")
+    })), "refusal must point at the projected move, not the binding: {rendered}");
+}
+
+#[test]
+fn projected_move_below_atomic_close_leaf_is_explicitly_refused() {
+    let src = r#"
+struct ClosePair { first: String, second: String }
+impl ClosePair.Close {
+    fn close(^self) { print(self.second) }
+}
+struct Holder { value: ClosePair, spare: String }
+fn run() {
+    held :: Holder{value: ClosePair{first: "first", second: "second"}, spare: "kept"}
+    taken :: ^held.value.first
+    print(taken)
+}
+"#;
+    let diagnostics = match jet::compile(src) {
+        Err(diagnostics) => diagnostics,
+        Ok(_) => panic!("a move below an atomic Close leaf was silently lowered"),
+    };
+    let rendered = jet::render_diagnostics("close_leaf.jet", src, &diagnostics);
+    assert!(diagnostics.iter().any(|diagnostic| {
+        [&diagnostic.what, &diagnostic.why].into_iter().any(|message| {
+            message.contains("move covers no registered ownership leaf")
+        })
+    }), "{rendered}");
 }
