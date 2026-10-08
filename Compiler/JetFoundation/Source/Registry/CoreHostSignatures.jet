@@ -341,7 +341,7 @@ core.time zone String Result<Zone,TimeError>
 core.time utc - Zone
 core.time zoned DateTime,Zone ZonedDateTime
 core.time zoned_local LocalDate,LocalTime,Zone,String Result<ZonedDateTime,TimeError>
-core.rt callback Int,Int,callback RealtimeStream
+core.rt callback|__callback Int,Int,callback RealtimeStream
 core.tasks timeout Duration Unit
 core.tasks interval Duration Receiver<Int>
 core.tasks yield_now|__yield_now - Unit
@@ -353,6 +353,15 @@ core.event __event_with_policy EventPolicy Event<T> T
 core.event __hook_new R Hook<T,R> T|R
 core.event __decision_hook_new HookPolicy DecisionHook<T,E> T|E
 core.event __async_new AsyncPolicy,FailurePolicy Result<AsyncEvent<T,E>,EventConfigError> T|E
+core.rt __next_deadline RealtimeStream Instant
+core.rt __receipt RealtimeStream RealtimeReceipt
+core.rt __cancel &RealtimeStream Unit
+core.rt __is_cancelled RealtimeStream Bool
+core.tasks __interval_ms Int Receiver<Int>
+core.tasks __channel_new - (sender:Sender<T>,receiver:Receiver<T>) T
+core.tasks __channel_bounded Int (sender:Sender<T>,receiver:Receiver<T>) T
+core.tasks __condition_notify_one|__condition_notify_all Condition Unit
+core.prelude __receipt_attach T,String,String,String Unit T
 core.encoding.json parse|loads|decode String Result<DataTree,EncodingError>
 core.encoding.json to_string|to_string_pretty|dumps|canonical|events DataTree String
 core.encoding.json reader ^FileReader,EncodingLimits Result<JSONReader,EncodingError>

@@ -3103,6 +3103,12 @@ returning `TaskState`. Bounded scheduler channels clamp capacities below one
 to one. Interval periods truncate to whole milliseconds and clamp to at least
 one millisecond; their first delivered tick is one.
 
+The source `Condition` extension delegates notification to the existing shared
+condition protocol, preserving parked waiters rather than fabricating state.
+The realtime stream extension likewise observes and cancels the same provider
+worker; its source callback constructor rejects nonpositive rates before
+crossing the provider boundary.
+
 ### `core.prelude` — small compiler-owned helpers
 
 `core.prelude` is available without a separate package import. Its functions

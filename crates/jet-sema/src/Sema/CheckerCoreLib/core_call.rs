@@ -923,6 +923,46 @@ fn resolved_core_fixed_sig(
             result,
         ));
     }
+    if (module == "core.tasks" && matches!(name, "__channel_new" | "__channel_bounded"))
+        || (module == "core.prelude" && name == "__receipt_attach")
+    {
+        let [element] = type_args else {
+            diags.push(Diagnostic::error(
+                "E0119",
+                format!("`{name}` expects one type argument"),
+                "the compiler-private leaf needs its checked payload type".to_string(),
+                format!("write `{name}<T>(...)`"),
+                Some(span),
+            ));
+            return None;
+        };
+        if name == "__receipt_attach" {
+            return Some((
+                vec![
+                    (AccessConvention::Read, element.clone()),
+                    (AccessConvention::Read, Type::String),
+                    (AccessConvention::Read, Type::String),
+                    (AccessConvention::Read, Type::String),
+                ],
+                Some(Type::Unit),
+            ));
+        }
+        let parameters = if name == "__channel_bounded" {
+            vec![(AccessConvention::Read, Type::Int)]
+        } else {
+            Vec::new()
+        };
+        return Some((parameters, Some(Type::Tuple(vec![
+            ("sender".to_string(), Box::new(Type::Apply {
+                name: Syntax::TYPE_SENDER.to_string(),
+                args: vec![element.clone()],
+            })),
+            ("receiver".to_string(), Box::new(Type::Apply {
+                name: Syntax::TYPE_RECEIVER.to_string(),
+                args: vec![element.clone()],
+            })),
+        ]))));
+    }
     let (params, ret) = match Syntax::core_call(module, name) {
         Some(row) => {
             let row = Syntax::core_call_projection(
