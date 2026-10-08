@@ -57,6 +57,7 @@ fn kit_steps_stream_assertion(key: String, original: String) -> KitAssertion? {
     literal := false
     rhs_transform := ""
     arity :: tokens.len() - offset
+    if mode == "is-f64" || mode == "f64" -> return kit_steps_f64_assertion(stream, path, transform, original, offset)
     if kit_steps_batch_form(mode) -> return kit_steps_batch_assertion(stream, path, transform, original, offset)
     if stream == "file" && mode == "same-as" {
         if arity != 2 -> return None

@@ -1,0 +1,70 @@
+use core.files as files
+
+#Test("ported journey failure and contract normalizers preserve Rust lines and final LF") {
+    root :: cases_test_root("ported-path-normalizers")
+    directory :: files.join(root, "tests/cases/group")
+    cr :: kit_steps_ascii_scalar(13)
+    rows :: [
+        ["normalize_journey_paths", "error (/tmp/a.jet:12){cr}\nnote (other.txt:1)\n", "error (<source>:12)\nnote (other.txt:1)\n"],
+        ["normalize_journey_paths", "error (a.jet:2)", "error (<source>:2)"],
+        ["normalize_failure_journey_paths", "error (/tmp/a.jet:12){cr}\n/tmp/jet_trial.jet:3\njet_plain.jet:7\nnotjet_keep.jet\n", "error (<source>:12)\n/tmp/<source>:3\n<source>:7\nnotjet_keep.jet\n"],
+        ["normalize_failure_journey_paths", "jet_trial.jet", "<source>"],
+        ["normalize_contract_source_arrow", "  --> C:/path/a.jet:8:2{cr}\nnote\n", "  --> <source>:2\nnote\n"],
+        ["normalize_contract_source_arrow", "pre  --> no-colon", "pre  --> <source>:?"],
+        ["normalize_contract_source_arrow", "plain{cr}", "plain{cr}"]
+    ]
+    loop (index, row) in rows {
+        kit_exec_write(files.join(directory, "input"), row[1])
+        kit_exec_write(files.join(directory, "expected"), row[2])
+        kit_exec_write(files.join(directory, "wrong"), "wrong")
+        prefix :: "step: cat\nstdin: input\n"
+        assert_eq(cases_test_advanced(root, "normal-{index}", "{prefix}stdout.{row[0]}: = expected # original predicate\n").verdict.status, "PASS")
+        assert_eq(cases_test_advanced(root, "wrong-{index}", "{prefix}stdout.{row[0]}: = wrong # original predicate\n").verdict.status, "FAIL")
+    }
+    loop transform in ["normalize_journey_paths", "normalize_failure_journey_paths", "normalize_contract_source_arrow"] {
+        assert_eq(cases_test_advanced(root, "empty", "step: printf ''\nstdout.{transform}: empty # original predicate\n").verdict.status, "PASS")
+        assert_eq(cases_test_advanced(root, "no-reason", "step: printf a\nstdout.{transform}: = \"a\"\n").verdict.status, "REFUSED")
+    }
+    files.remove_all(root) ?? panic("remove path normalizer scratch")
+}
+
+#Test("bit_and masks each integer line including signed values decimal and octal") {
+    root :: cases_test_root("ported-bit-and")
+    directory :: files.join(root, "tests/cases/group")
+    cr :: kit_steps_ascii_scalar(13)
+    rows :: [
+        ["0o7", "15{cr}\n8\n-1\n", "7\n0\n7"],
+        ["3", "5\n6\n", "1\n2"],
+        ["-1", "-1\n0\n7", "-1\n0\n7"],
+        ["0", "123", "0"], ["0o777", "", ""]
+    ]
+    loop (index, row) in rows {
+        kit_exec_write(files.join(directory, "input"), row[1])
+        kit_exec_write(files.join(directory, "expected"), row[2])
+        prefix :: "step: cat\nstdin: input\n"
+        assert_eq(cases_test_advanced(root, "mask-{index}", "{prefix}stdout.bit_and({row[0]}): = expected # original predicate\n").verdict.status, "PASS")
+        assert_eq(cases_test_advanced(root, "wrong-{index}", "{prefix}stdout.bit_and({row[0]}): = \"wrong\" # original predicate\n").verdict.status, "FAIL")
+    }
+    loop value in ["word", "1.5", "1\nword\n"] {
+        kit_exec_write(files.join(directory, "input"), value)
+        assert_eq(cases_test_advanced(root, "non-int", "step: cat\nstdin: input\nstdout.bit_and(7): empty # original predicate\n").verdict.status, "FAIL")
+    }
+    assert_eq(cases_test_advanced(root, "octal-invalid", "step: printf 1\nstdout.bit_and(0o8): empty # original predicate\n").verdict.status, "REFUSED")
+    files.remove_all(root) ?? panic("remove bit mask scratch")
+}
+
+#Test("skip_lines strips CRLF and joins without LF including short empty input") {
+    root :: cases_test_root("ported-skip-lines")
+    directory :: files.join(root, "tests/cases/group")
+    cr :: kit_steps_ascii_scalar(13)
+    rows :: [["0", "a{cr}\nb\n", "a\nb"], ["1", "a{cr}\nb\n", "b"], ["2", "a\nb\n", ""], ["9", "a\n", ""], ["0", "", ""]]
+    loop (index, row) in rows {
+        kit_exec_write(files.join(directory, "input"), row[1])
+        kit_exec_write(files.join(directory, "expected"), row[2])
+        prefix :: "step: cat\nstdin: input\n"
+        assert_eq(cases_test_advanced(root, "skip-{index}", "{prefix}stdout.skip_lines({row[0]}): = expected # original predicate\n").verdict.status, "PASS")
+        assert_eq(cases_test_advanced(root, "wrong-{index}", "{prefix}stdout.skip_lines({row[0]}): = \"wrong\" # original predicate\n").verdict.status, "FAIL")
+    }
+    assert_eq(cases_test_advanced(root, "negative", "step: printf a\nstdout.skip_lines(-1): empty # original predicate\n").verdict.status, "REFUSED")
+    files.remove_all(root) ?? panic("remove skip lines scratch")
+}

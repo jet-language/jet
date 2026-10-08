@@ -79,12 +79,35 @@ reported as `FAIL`. `elapsed: B <= FACTOR * A` compares captured monotonic
 durations for labelled steps. `normalize: version` replaces the exact
 version reported by the supplied compiler with `VERSION`; an unreadable
 version banner reports `ERROR`, not a guessed version.
+`elapsed: median [A,B,C] <= K * median [D,E,F]` compares the middle
+nanosecond receipt from each three-step list using saturating integer
+multiplication; `<` is strict and `elapsed: median [A,B,C] > 0ns` requires
+a positive median. Labels must already exist.
+
+Captured text supports `cap:X: is-f64 # original predicate` and
+`cap:A: f64 < {cap:B} # original predicate` (also `>`, `<=`, `>=`, `==`,
+`!=`). Parsing failures fail, and comparisons preserve IEEE floating-point
+semantics, including NaN. `capture: N = size file PATH` captures byte length;
+`cap:A: delta {cap:B} <= K # original predicate` bounds absolute integer
+difference. `.bit_and(0o777)` masks each integer line; `.skip_lines(N)` uses
+Rust line splitting and joins the remainder with LF, without a final LF.
+The journey and source-arrow normalizers strip CRLF carriage returns while
+preserving whether the original text ended in LF.
+
+`requires: path-exists:PATH` skips absent host paths. A header such as
+`requires: first-existing TOOL = "A" | "B"` captures the first present path
+as `{cap:TOOL}`, or reports `SKIP-HOST` when no alternative exists.
+
 
 Structured assertions use `json: stdout|stderr doc|ndjson PATH OP VALUE`, or
 `json: file FILE doc|ndjson PATH OP VALUE`. Paths support `$`, `.key`, `[i]`,
 and `[*]` (every selected record must match, and an empty selection fails).
 Operators are `=` for typed JSON equality, `:` for a type, `#=` for a count,
-and `has` for an array element containing all keys in a nonempty JSON object.
+and `has` for an array element containing all keys in a nonempty JSON object,
+or exactly equal to a scalar. `any ~ "TEXT" # original predicate` instead
+looks for a string array element containing the substring; nonstrings do not
+match. Same-document `!= $.OTHER` compares deeply, and `#== $.OTHER`
+compares array/object counts with the other path in the same document.
 Object key order is not significant; array order is significant for `=`.
 Every partial predicate needs a nonempty same-line `#` reason, including
 every `: TYPE` assertion. Use `# original predicate` for an original
@@ -98,6 +121,30 @@ All other bytes remain unchanged; malformed JSON, a missing path, or a wrong
 type fails. Before the first step this applies case-wide; after a step it
 attaches only to that step. Typed `json:` assertions still inspect the
 original values. No stream is silently skipped merely because it is not JSON.
+
+`json: SELECTOR doc $ valid # original predicate` checks only that the
+subject is one valid JSON document. Every JSON type is accepted; empty or
+invalid text fails, without requiring an object or canonical formatting.
+
+For `normalize: replace FROM "TO"`, an unquoted FROM expands runtime
+tokens; a quoted FROM stays literal and matches the token-normalized stream.
+TO is always literal, including braces that resemble capture or path tokens.
+Text captures may contain an empty string. Optional byte captures retain
+their byte identity (including absent versus empty) and cannot be expanded
+as scalar argv or environment text.
+
+Persistent `session NAME raw|line|content-length:` steps keep stdin open;
+`stdin: null` closes it immediately. `close NAME` closes stdin and joins the
+child, while `wait NAME` joins without closing stdin. Both publish the final
+unread stdout/stderr remainder and the labelled receipt. `signal NAME: KILL`
+records an expected stop rather than an unexpected signal error. Framed
+`recv` predicates, including accumulated `collect until` conjunctions, are
+validated before reporting `REFUSED read_bytes` when the raw-read seam is
+unavailable; buffered final output is never presented as a live frame.
+
+Bounded `await: file|dir|entry` polls filesystem readiness. `poll NAME:`
+reruns its command until all `until` conditions match on the same attempt,
+or fails at its deadline. Conditions are not accumulated across attempts.
 
 ## Find an example
 

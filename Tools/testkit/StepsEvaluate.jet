@@ -33,7 +33,7 @@ fn kit_steps_first_line(text: String, needle: String) -> String? {
 fn kit_steps_check_assertion(assertion: KitAssertion, context: KitStepCtx, state: KitStepState, source_name: String, allow_bless: Bool) -> KitVerdict {
     if !kit_steps_conditions(assertion.conditions, context, state) -> return kit_expect_verdict("PASS", "")
     if assertion.stream == "process" -> return kit_steps_process_check(assertion, context, state)
-    if assertion.stream == "elapsed" -> return kit_steps_elapsed(assertion, state.history)
+    if assertion.stream == "elapsed" -> return if assertion.mode.starts_with("median-") -> kit_steps_median_test(assertion, state.history) else -> kit_steps_elapsed(assertion, state.history)
     if assertion.stream == "tree" -> return kit_steps_tree_check(assertion, context, state)
     if assertion.stream == "entries" {
         path :: kit_steps_work_path(assertion.path, context.env, context.work, context.scratch, state.built) ?? return kit_expect_verdict("REFUSED", "entries directory escapes work")
@@ -185,6 +185,11 @@ fn kit_steps_check_assertion(assertion: KitAssertion, context: KitStepCtx, state
     actual = kit_steps_replace(actual, state.replacements, context, state, !raw_match, source_name)
     transformation :: kit_steps_runtime_expand(assertion.transform, context, state) ?? return kit_expect_verdict("ERROR", "transform token unavailable")
     actual = kit_steps_transform(actual, transformation) ?? return kit_expect_verdict("FAIL", "subject transform failed: {assertion.transform}")
+    numeric :: kit_steps_f64_test(actual, assertion.mode, value, extra)
+    if numeric == {
+        .Val(verdict) -> return verdict
+        .None -> {}
+    }
     if assertion.json_mode != "" {
         evaluated := assertion
         evaluated.value = value
@@ -195,7 +200,7 @@ fn kit_steps_check_assertion(assertion: KitAssertion, context: KitStepCtx, state
                 .None -> kit_expect_verdict("PASS", "")
             }
         }
-        error :: if (assertion.json_op == "==" && !value.starts_with("$")) || assertion.json_op == "#==" || (assertion.json_op == "#>=" && kit_steps_count_label(value) != "") ->
+        error :: if (assertion.json_op == "==" && !value.starts_with("$")) || (assertion.json_op == "#==" && !value.starts_with("$")) || (assertion.json_op == "#>=" && kit_steps_count_label(value) != "") ->
             kit_steps_json_relation(actual, evaluated, state.history) else -> kit_steps_json_test(actual, assertion.json_mode, assertion.json_path, assertion.json_op, value)
         return if error == {
             .Val(message) -> kit_expect_verdict("FAIL", message)
