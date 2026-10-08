@@ -6,19 +6,32 @@ fn fx_native_handle_checks() -> Bool Never! {
     aggregates :: fx_aggregates()
     &p.types.push(~aggregates.types[2])
     m := LowerModule{
-        signatures: [LIRSignature]{}, test_harness: false,
-        signature_rows: [String:Int]{}, data: [LIRData]{},
-        data_rows: [String:Int]{}, static_rows: [String:Int]{},
-        static_fixups: [LowerStaticFixup]{}, line_starts: [U64:[Int]]{},
-        source_rows: [U64:Int]{}, asm_foreign: [U64:MIRFunctionID]{},
-        foreign_rows: [U64:Int]{}, mir_rows: [U64:Int]{}, mir_sources: [Int]{},
-        mir_signatures: [LIRSignatureID]{}, mir_results: [Int]{},
-        glue_base: 0, glue: [LowerGlue]{}, glue_rows: [String:Int]{},
-        issues: [LIRLoweringIssue]{}, stop_points: false, task_stop_points: false,
+        signatures: [LIRSignature]{},
+        test_harness: false,
+        signature_rows: [String:Int]{},
+        data: [LIRData]{},
+        data_rows: [String:Int]{},
+        static_rows: [String:Int]{},
+        static_fixups: [LowerStaticFixup]{},
+        line_starts: [U64:[Int]]{},
+        source_rows: [U64:Int]{},
+        asm_foreign: [U64:MIRFunctionID]{},
+        foreign_rows: [U64:Int]{},
+        mir_rows: [U64:Int]{},
+        mir_sources: [Int]{},
+        mir_signatures: [LIRSignatureID]{},
+        mir_results: [Int]{},
+        glue_base: 0,
+        glue: [LowerGlue]{},
+        glue_rows: [String:Int]{},
+        issues: [LIRLoweringIssue]{},
+        stop_points: false,
+        task_stop_points: false,
     }
     types :: [MIRType]{fx_named("Pt"), fx_named("Holder"), fx_named("Color"), fx_unit()}
+    operations :: [String]{"clone", "drop", "eq", "display", "show", "debug"}
     loop ty in types {
-        loop op in [String]{"clone", "drop", "eq", "display", "show", "debug"} {
+        loop op in operations {
             first :: lower_native_handle_id(&m, ty, op) ?? return false
             second :: lower_native_handle_id(&m, ty, op) ?? return false
             if first != second -> return false
@@ -32,12 +45,14 @@ fn fx_native_handle_checks() -> Bool Never! {
     cursor := 0
     loop cursor < m.glue.len() {
         glue :: ~m.glue[cursor]
-        if glue.helper != "" -> &functions.push(lower_helper_function(p, &m, glue))
-        else if glue.clone -> &functions.push(lower_clone_glue_function(p, &m, glue))
-        else -> &functions.push(lower_glue_function(p, &m, glue))
+        if {
+            glue.helper != "" -> &functions.push(lower_helper_function(p, &m, glue))
+            glue.clone -> &functions.push(lower_clone_glue_function(p, &m, glue))
+            else -> &functions.push(lower_glue_function(p, &m, glue))
+        }
         cursor += 1
     }
     if m.issues.len() > 0 -> return false
-    module :: LIRModule{signatures: ~m.signatures, functions: functions, data: ~m.data}
-    lir_lint_module(module).len() == 0
+    lowered :: LIRModule{signatures: ~m.signatures, functions: functions, data: ~m.data}
+    lir_lint_module(lowered).len() == 0
 }
