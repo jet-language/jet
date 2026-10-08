@@ -60,6 +60,7 @@ use jet_foundation.[
     core_enum_variant_payload,
     core_module_export,
     core_module_has_type,
+    core_source_owns_type,
     expr_span,
     sema_reserved_type_name,
     symbol_id,
@@ -1558,7 +1559,7 @@ fn sema_registration_add_root(module_row: &SemaRegistrationModule, item: Item, s
     }
     name :: sema_registration_root_name(item)
     if name == "" -> return true
-    if !sema_registration_reserved_type_rule(item, name, &diagnostics) -> return false
+    if !sema_registration_reserved_type_rule(module_row, item, name, &diagnostics) -> return false
     if sema_registration_module_has_name(module_row, name) {
         &diagnostics.push(sema_defined_twice(name, "module declarations share one namespace", sema_registration_root_span(item)))
         return false
@@ -1599,7 +1600,7 @@ fn sema_registration_push_declaration(module_row: &SemaRegistrationModule, item:
 // E0106: the Rust reference's `register_struct`/`register_enum`/
 // `register_distinct`/`register_type_alias` reject a built-in type name
 // before the declaration registers.
-fn sema_registration_reserved_type_rule(item: Item, name: String, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_registration_reserved_type_rule(module_row: SemaRegistrationModule, item: Item, name: String, diagnostics: &[Diagnostic]) -> Bool {
     kind :: if item == {
         .Struct(_) -> "struct"
         .Enum(_) -> "enum"
@@ -1608,6 +1609,9 @@ fn sema_registration_reserved_type_rule(item: Item, name: String, diagnostics: &
         else -> ""
     }
     if kind == "" || !sema_reserved_type_name(name) -> return true
+    // `item` is the loaded declaration; canonical identity supplies the exact
+    // source path and name from CORE_SOURCE_OWNED_TYPES, never the export superset.
+    if core_source_owns_type("{module_row.module_identity}::{name}") -> return true
     &diagnostics.push(sema_error("E0106", sema_registration_root_span(item), "the name `{name}` is built in and can't be redefined", "`{name}` is provided by the language itself", "choose a different name for this {kind}"))
     false
 }

@@ -13,11 +13,14 @@ if (!outArg || !["assemble", "rust", "jet"].includes(mode) || (mode !== "assembl
 const out = resolve(outArg);
 mkdirSync(out, { recursive: true });
 const manifest = JSON.parse(readFileSync(resolve(repo, manifestArg), "utf8"));
-const cases = (Array.isArray(manifest) ? manifest : manifest.cases).map(row => ({
-    ...row,
-    source: row.sourcePath ? readFileSync(resolve(repo, row.sourcePath), "utf8") : row.source,
-    accepted: row.accepted ?? row.errors.length === 0,
-}));
+const cases = (Array.isArray(manifest) ? manifest : manifest.cases).map(row => {
+    if (typeof row.accepted !== "boolean" && !Array.isArray(row.errors)) throw Error(`${row.name}: requires accepted or errors`);
+    return {
+        ...row,
+        source: row.sourcePath ? readFileSync(resolve(repo, row.sourcePath), "utf8") : row.source,
+        accepted: row.accepted ?? row.errors.length === 0,
+    };
+});
 if (mode === "assemble") {
     if (!manifest.fixtureFile || !manifest.fixtureFunction || !manifest.fixtureArguments) throw Error("assembly requires the manifest's production fixtureFile, fixtureFunction and fixtureArguments");
     const result = spawnSync(process.execPath, [join(repo, "Compiler/JetSema/Tests/run-gate-fixtures.mjs"), out], { encoding: "utf8" });
