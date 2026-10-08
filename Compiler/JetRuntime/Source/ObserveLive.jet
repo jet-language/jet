@@ -1,7 +1,7 @@
 // Observe.rs:285-320,344-380,387-541. Native records contain only the
 // canonical identity/decision/event metadata, never payloads or Rust layouts.
-// Writer128: mutex0, exited8, sequence16, started24, CPU-present32/CPU40,
-// start-id48, identity56..88, directory96, path104, periodic-slot112.
+// Writer120: mutex0, exited8, sequence16, started24, CPU-present32/CPU40,
+// start-id48, identity56..88, directory96, path104, periodic-started112.
 // Value48: next0, canonical five E4 fields8..40 (rendered0 means None).
 // Event128: next0, canonical fifteen fields8..120, five owned E4 strings.
 #Import(c) fn observe_mem_resources(out: I64) = "jet_rt_mem_resources"
@@ -45,7 +45,7 @@ fn observe_value_drop(node: I64) {
 // The source carrier has exactly Foundation's JetLiveValueDecision fields:
 // value_id/type_identity/disposition/reason/rendered_value. Retain by copying
 // E4 text; the producer continues owning its source and optional text owner.
-fn observe_record_value(source: I64) {
+#Export(c) fn jet_observe_record_live_value(source: I64) {
     sync_mutex_lock(observe_root)
     link := observe_root + I64{112}
     id :: sync_load(source)
@@ -88,7 +88,7 @@ fn observe_event_drop(node: I64) {
 }
 // Source has canonical Event fields in Observe.rs:49-65 order; sequence is
 // assigned under the same lock as append, as the Rust VecDeque producer does.
-fn observe_record_event(source: I64) {
+#Export(c) fn jet_observe_event(source: I64) {
     node :: jet_rt_alloc(I64{128}, I64{8})
     sync_store(node, I64{0})
     at := I64{8}
@@ -212,15 +212,20 @@ fn observe_process_facts(out: I64) {
     field := I64{0}
     user := I64{0}
     system := I64{0}
-    valid := tail >= I64{0}
+    if tail < (I64{0}) {
+        jet_rt_string_drop(stat)
+        return
+    }
+    valid := true
     at = tail
-    loop valid && at < length {
+    loop at < length {
         loop at < length && trap_byte(data + at) <= (I64{32}) -> at += I64{1}
         begin :: at
         loop at < length && trap_byte(data + at) > (I64{32}) -> at += I64{1}
         if at == begin -> break
         if field == (I64{11}) || field == (I64{12}) {
-            valid = observe_parse_unsigned(data + begin, at - begin, out + I64{24})
+            parsed :: observe_parse_unsigned(data + begin, at - begin, out + I64{24})
+            valid = valid && parsed
             if field == (I64{11}) -> user = sync_load(out + I64{24}) else -> system = sync_load(out + I64{24})
         }
         if field == (I64{19}) {
@@ -587,8 +592,8 @@ fn observe_live_start(identity: I64, directory: I64) -> I64 {
     writer := sync_load(observe_root + I64{72})
     fresh :: writer == I64{0}
     if fresh {
-        writer = jet_rt_alloc(I64{128}, I64{8})
-        thread_zero(writer, I64{128})
+        writer = jet_rt_alloc(I64{120}, I64{8})
+        thread_zero(writer, I64{120})
         at = I64{0}
         loop at < (I64{40}) {
             sync_store(writer + I64{56} + at, observe_text_clone(sync_load(identity + at)))
@@ -699,7 +704,7 @@ fn observe_env_key(index: I64) -> I64 {
                 data :: sync_load(inputs + I64{40})
                 length :: sync_load(inputs + I64{48})
                 directory = rt_text_copy(data, length)
-                jet_rt_free(data, length, I64{1})
+                if length != (I64{0}) -> jet_rt_free(data, length, I64{1})
             }
         }
         writer :: observe_live_start(inputs, directory)
