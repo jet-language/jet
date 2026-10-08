@@ -80,6 +80,10 @@ and never inherit the root diagnostic's location. If a source snapshot is
 unavailable, the projection must not invent a path, line, column, or `0:0`
 position. An explicitly supplied byte span remains unchanged.
 
+An attached origin owns the human display path as well as the checked source.
+Standalone entries display paths relative to their containing project root;
+a renderer's caller-supplied label does not override that provenance.
+
 ## No-OS E3301 contract
 
 E3301 is the registered rule for an OS-dependent API selected for a no-OS

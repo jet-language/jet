@@ -91,14 +91,14 @@ fn close_remainder() {
     print("close remainder")
 }
 
-// The name-only move pre-scan also sees this inner `held`. Its own Close
-// must remain atomic; only the outer PlainPair actually loses a field.
-fn shadowed_remainder() {
+// A nested scope can own a separate Close value without affecting the outer
+// PlainPair's projected move. Jet keeps names distinct within one function.
+fn scoped_remainder() {
     held :: PlainPair{first: "outer", second: "kept"}
     taken :: ^held.first
     if true {
-        held :: Secret{id: 20, token: "owned"}
-        print("shadow {held.id}")
+        inner :: Secret{id: 20, token: "owned"}
+        print("shadow {inner.id}")
     }
     print("outer {taken} {held.second}")
 }
@@ -116,5 +116,5 @@ fn run() {
     early_remainder(true, 14)
     early_remainder(false, 16)
     close_remainder()
-    shadowed_remainder()
+    scoped_remainder()
 }

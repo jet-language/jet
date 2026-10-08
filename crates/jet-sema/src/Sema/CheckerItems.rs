@@ -2231,7 +2231,7 @@ impl<'a> Checker<'a> {
         };
         registry.implements_trait(leaf, trait_name)
             || (trait_name == crate::Syntax::TRAIT_CLOSE
-                && state.is_some_and(|state| state.module_path.starts_with("<corelib>/"))
+                && state.is_some_and(|state| state.is_core_source)
                 && registry.synthetic_close_types.contains(leaf))
     }
 

@@ -194,6 +194,7 @@ pub(super) fn check_bundle_opts_for_output_inner(
             count_program_copy(m.items.len());
             ModuleState {
                 module_path: m.display.clone(),
+                is_core_source: m.is_core_source(),
                 source: m.source.clone(),
                 package_scope: jet_foundation::Names::package_scope_for(
                     &m.path,
