@@ -12,6 +12,8 @@ mod jet_sql_query {
 }
 
 type JetAnalyticsQuery = jet_sql_query::JetSqlQuery;
+include!("../../Core/CsvQueryRead.rs");
+use jet_sql_query::jet_data_query_validate_fields_raw;
 
 fn jet_analytics_query_error(message: impl Into<String>) -> Vec<jet_std::FieldError> {
     jet_std::FieldError::one(message.into())
@@ -22,31 +24,21 @@ fn jet_analytics_query_error(message: impl Into<String>) -> Vec<jet_std::FieldEr
 const JET_DATA_QUERY_MAX_BYTES: u64 = 512 * 1024 * 1024;
 
 pub fn jet_data_query_read(path: &String) -> Result<String, Vec<jet_std::FieldError>> {
-    use std::io::Read;
-
-    let file = std::fs::File::open(path)
+    let sample = jet_data_query_read_bounded(path, JET_DATA_QUERY_MAX_BYTES as i64)
         .map_err(|error| jet_analytics_query_error(format!("could not read `{path}`: {error}")))?;
-    let size = file
-        .metadata()
-        .map_err(|error| jet_analytics_query_error(format!("could not read `{path}`: {error}")))?
-        .len();
-    if size > JET_DATA_QUERY_MAX_BYTES {
+    if sample.size > JET_DATA_QUERY_MAX_BYTES {
         return Err(jet_analytics_query_error(format!(
             "could not read `{path}`: input exceeds the {}-byte query bound",
             JET_DATA_QUERY_MAX_BYTES
         )));
     }
-    let mut bytes = Vec::new();
-    file.take(JET_DATA_QUERY_MAX_BYTES.saturating_add(1))
-        .read_to_end(&mut bytes)
-        .map_err(|error| jet_analytics_query_error(format!("could not read `{path}`: {error}")))?;
-    if bytes.len() as u64 > JET_DATA_QUERY_MAX_BYTES {
+    if sample.bytes.len() as u64 > JET_DATA_QUERY_MAX_BYTES {
         return Err(jet_analytics_query_error(format!(
             "could not read `{path}`: input grew beyond the {}-byte query bound",
             JET_DATA_QUERY_MAX_BYTES
         )));
     }
-    String::from_utf8(bytes)
+    String::from_utf8(sample.bytes)
         .map_err(|error| jet_analytics_query_error(format!("could not read `{path}`: {error}")))
 }
 
@@ -55,14 +47,9 @@ pub fn jet_data_query_validate_fields(
     fields: &[String],
     sql: &String,
 ) -> Result<(), Vec<jet_std::FieldError>> {
-    let query = jet_analytics_query_spec(sql).map_err(jet_analytics_query_error)?;
-    jet_sql_query::validate_sql_query_schema(
-        &query,
-        |field| fields.iter().any(|known| known == field),
-        "analytics query",
-    )
-    .map_err(jet_analytics_query_error)
+    jet_data_query_validate_fields_raw(fields, sql).map_err(jet_analytics_query_error)
 }
+
 
 
 fn jet_analytics_query_spec(sql: &str) -> Result<JetAnalyticsQuery, String> {

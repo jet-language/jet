@@ -1291,6 +1291,7 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         "EncodingLimits" => Some("EncodingLimits"),
         "EncodingError" => Some("EncodingError"),
         "EncodingCause" => Some("EncodingCause"),
+        "__QueryRead" => Some("__QueryRead"),
         "EncodingFormat" => Some("EncodingFormat"),
         "EncodingErrorKind" => Some("EncodingErrorKind"),
         // D-VALIDATE1: the accumulated validation error lives in jet_std too.
@@ -2485,6 +2486,7 @@ impl Cx {
             (Some("core.encoding.jsonl"), "JSONLWriter") => Some("JSONLWriter"),
             (Some("core.encoding.csv"), "CSVReader") => Some("CSVReader"),
             (Some("core.encoding.csv"), "CSVRow") => Some("CSVRow"),
+            (Some("core.encoding.csv"), "__QueryRead") => Some("__QueryRead"),
             (Some("core.encoding.xml"), "XMLReader") => Some("XMLReader"),
             (Some("core.encoding.xml"), "XMLWriter") => Some("XMLWriter"),
             (Some("core.encoding.xml"), "XMLLimits") => Some("XMLLimits"),

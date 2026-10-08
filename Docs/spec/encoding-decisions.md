@@ -1298,3 +1298,13 @@ does not impose streaming `EncodingLimits` on the shipped unbounded whole-value
 operation. Each header names a text cell (missing cells are empty; extra cells
 are ignored), and all typed errors are accumulated in data-record order with
 the native `row N` path prefix.
+
+Typed `csv.query<T>` owns the bounded-input and validation policy in source.
+Its raw read leaf receives the caller's bound, opens once, reports the open
+file's metadata size, and reads at most bound+1 bytes (without touching an
+already oversized file). Source checks the 512 MiB metadata bound before the
+growth bound, validates UTF-8 once, then transfers the allocation without a
+copy. CSV syntax and header/SQL-field validation precede typed decode errors;
+successful typed rows reuse `rows.query(SQL)`, never a second SQL engine.
+The private plain `__QueryRead` carrier keeps the path-based Ambient route,
+so the input policy does not introduce an interpreter-only file-handle gap.
