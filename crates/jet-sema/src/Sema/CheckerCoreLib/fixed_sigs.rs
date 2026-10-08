@@ -1726,8 +1726,15 @@ fn core_fixed_sig_impl(
             Some(result_ty(Type::Named("TempDir".to_string()), io_error_ty())))),
         ("core.files", "__temp_file_raw") => Some((vec![(moved, Type::String)],
             Some(result_ty(Type::Named("TempFile".to_string()), io_error_ty())))),
-        ("core.files", "__lock_raw") => Some((vec![(read, Type::String)],
-            Some(result_ty(Type::Named("FileLock".to_string()), io_error_ty())))),
+        ("core.files", "__lock_open" | "__lock_path_identity") => Some((vec![(read, Type::String)],
+            Some(Type::Named(if name == "__lock_open" { "__LockCall" } else { "__LockIdentity" }.to_string())))),
+        ("core.files", "__lock_try" | "__lock_fd_identity") => Some((vec![(read, Type::Int)],
+            Some(Type::Named(if name == "__lock_try" { "__LockCall" } else { "__LockIdentity" }.to_string())))),
+        ("core.files", "__lock_wait") => Some((vec![(read, Type::Int), (read, Type::Int), (read, Type::Bool), (read, Type::Int)],
+            Some(Type::Named("__LockWait".to_string())))),
+        ("core.files", "__lock_close") => Some((vec![(read, Type::Int)], Some(Type::Int))),
+        ("core.files", "__lock_owner") => Some((vec![(moved, Type::String), (read, Type::Int)],
+            Some(Type::Named("FileLock".to_string())))),
         ("core.files", "__canonicalize_raw") => Some((vec![(read, Type::String)],
             Some(result_ty(Type::String, io_error_ty())))),
         ("core.files", "exists" | "is_dir") => Some((vec![(read, path)], Some(bool_))),
@@ -1831,14 +1838,12 @@ fn core_fixed_sig_impl(
             )),
         )),
         ("core.files", "lock") => Some((
-            vec![(
-                read,
-                Type::Union(vec![Type::String, Type::Named("Path".to_string())]),
-            )],
-            Some(result_ty(
-                Type::Named("FileLock".to_string()),
-                io_error_ty(),
-            )),
+            vec![(read, path), (read, Type::Option { inner: Box::new(Type::Named("Duration".to_string())) })],
+            Some(result_ty(Type::Named("FileLock".to_string()), io_error_ty())),
+        )),
+        ("core.files", "try_lock") => Some((
+            vec![(read, path)],
+            Some(result_ty(Type::Option { inner: Box::new(Type::Named("FileLock".to_string())) }, io_error_ty())),
         )),
         ("core.watcher", "files" | "__files") => Some((
             vec![(

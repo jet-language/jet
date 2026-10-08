@@ -156,25 +156,6 @@ pub(crate) fn jet_std_fs_temp_file_path_raw(path: String) -> Result<String, jet_
     Ok(path)
 }
 
-pub(crate) fn jet_std_fs_lock_path(path: &String) -> Result<String, jet_std::IOError> {
-    if jet_fault_should_fail("FS.Write") {
-        return Err(jet_std::IOError::other(
-            jet_std::IOOperation::Write,
-            Some(path.clone()),
-            "fault injected: FS.Write",
-        ));
-    }
-    jet_std_fs_lock_path_raw(path)
-}
-
-pub(crate) fn jet_std_fs_lock_path_raw(path: &String) -> Result<String, jet_std::IOError> {
-    std::fs::OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(path)
-        .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Write, path, error))?;
-    Ok(path.clone())
-}
 
 pub(crate) fn jet_std_fs_temp_dir(prefix: &String) -> Result<JetTempDirOwner, jet_std::IOError> {
     let path = jet_std_fs_temp_dir_path(prefix)?;
@@ -208,21 +189,6 @@ pub(crate) fn jet_std_fs_temp_file_raw(path: String) -> Result<JetTempFileOwner,
     jet_std_fs_temp_file_owner_raw(jet_std_fs_temp_file_path_raw(path)?)
 }
 
-pub(crate) fn jet_std_fs_lock(path: &String) -> Result<JetFileLockOwner, jet_std::IOError> {
-    let path = jet_std_fs_lock_path(path)?;
-    jet_std_fs_lock_owner_raw(path)
-}
-
-fn jet_std_fs_lock_owner_raw(path: String) -> Result<JetFileLockOwner, jet_std::IOError> {
-    Ok(JetFileLockOwner {
-        path,
-        cleanup: std::rc::Rc::new(()),
-    })
-}
-
-pub(crate) fn jet_std_fs_lock_raw(path: &String) -> Result<JetFileLockOwner, jet_std::IOError> {
-    jet_std_fs_lock_owner_raw(jet_std_fs_lock_path_raw(path)?)
-}
 
 pub(crate) fn jet_std_fs_fsync(path: &String) -> Result<(), jet_std::IOError> {
     if jet_fault_should_fail("FS.Write") {
