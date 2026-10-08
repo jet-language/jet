@@ -157,7 +157,8 @@ fn s2_syntax_ratified_unshipped_spellings_are_listed_and_triaged() {
         ids :: s2_syntax_parse.split_once(suffix.tail, ")")
         if !ids.found -> next
         loop raw in ids.head.split("/") {
-            id :: raw.trim()
+            // #4819: map[key] = v with a trimmed view key ICEs; owned key here.
+            id :: ~raw.trim()
             if id != "<id>" -> expected[id] = 1
         }
     }
