@@ -41,6 +41,15 @@ owning Jet source function, not a separate Core dispatcher implementation. Host
 operations beneath that source may remain registered raw leaves while their
 runtime layer is ported; this does not create a second implementation of the
 public declaration's policy.
+Filesystem internal host calls use their canonical `core.files.__*` names
+directly. There is no second `__files7_*` alias layer: the Prelude's existing
+registry entries provide the raw host boundary until Jet runtime L7 replaces
+them at Rust cutover.
+The Rust verification tier single-homes filesystem syscall tails in
+`jet_std_fs_*_raw` functions. Native seed entry points retain their original
+fault probes and call those tails; Jet entry points can perform the same
+preflight once before the raw call. Temporary and lock results still own the
+native cleanup resource, rather than substituting a path-only record.
 
 Types and error enums use PascalCase (`String`, `IOError`, `JSON`); functions
 and module segments use snake_case (`read`, `core.files`) (S54). Acronyms keep
