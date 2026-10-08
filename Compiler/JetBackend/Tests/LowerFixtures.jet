@@ -125,12 +125,13 @@ use jet_foundation.[
     mir_nominal_ref,
     mir_owned_ownership,
     mir_ownership_from_access,
+    mir_type_display_name,
     mir_type_from_kind,
     mir_type_id,
     mir_type_with_identity,
     stable_id,
 ]
-use jet_backend.[LIRFunctionID, LIRModule, lir_lint_module, lir_lower_entry, lir_print_module, x64_relocatable_object, x64_static_executable]
+use jet_backend.[LIRFunctionID, LIRModule, LowerRuntimeHandle, lir_lint_module, lir_lower_entry, lir_print_module, x64_relocatable_object, x64_static_executable]
 use core.files as files
 
 fn fx_span() -> Span Never! { Span{start: 0, end: 0} }
@@ -145,6 +146,29 @@ fn fx_unit() -> MIRType Never! { mir_type_from_kind(MIRTypeKind.Apply{name: mir_
 
 fn fx_named(name: String) -> MIRType Never! {
     mir_type_with_identity(mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref(name), args: [MIRType]{}}), mir_type_id(name))
+}
+
+fn fx_generic_runtime_rejection_checks() -> Bool Never! {
+    rows :: [LowerRuntimeHandle]{
+        LowerRuntimeHandle{jet_name: "FixtureGeneric<Float>", runtime: "FixtureGenericFloat", clone: true, display: false, show: false, debug: false, eq: false},
+    }
+    arguments :: [MIRType]{
+        mir_type_from_kind(MIRTypeKind.IntN{signed: false, bits: 8}),
+        mir_type_from_kind(MIRTypeKind.IntN{signed: true, bits: 64}),
+        mir_type_from_kind(MIRTypeKind.IntN{signed: false, bits: 64}),
+        fx_named("F32"),
+        fx_bool(), // Admitted key spelling, but this concrete row is absent.
+        mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref("Nested"), args: [MIRType]{fx_int()}}),
+    }
+    loop argument in arguments {
+        ty :: mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref("FixtureGeneric"), args: [MIRType]{argument}})
+        failure :: lower_runtime_missing_application(ty, rows) ?? return false
+        if failure == .Unsupported(reason) {
+            if !reason.contains(mir_type_display_name(ty)) -> return false
+        } else -> return false
+    }
+    ordinary :: mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref("OrdinaryGeneric"), args: [MIRType]{fx_int()}})
+    lower_runtime_missing_application(ordinary, rows) == None && lower_runtime_missing_application(fx_named("FixtureGeneric"), rows) == None
 }
 
 fn fx_borrow() -> MIROwnership Never! { mir_ownership_from_access(MIRAccess.Read) }
@@ -842,6 +866,10 @@ fn run() {
     if !fx_report("convert-char-negative", fx_convert_char_negative()) -> clean = false
     if !fx_convert_rejection_checks() {
         print("issue convert: rejection checks failed")
+        clean = false
+    }
+    if !fx_generic_runtime_rejection_checks() {
+        print("issue generic-runtime: unsupported/missing concrete application fell through")
         clean = false
     }
     print(if clean -> "all fixtures lowered lint-clean and compiled" else -> "FIXTURE ISSUES")

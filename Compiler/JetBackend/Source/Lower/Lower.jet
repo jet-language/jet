@@ -443,22 +443,25 @@ fn lower_repr(p: MIRProgram, ty: MIRType) -> LowerRepr Never! {
             if lower_is_iter_cursor(ty) -> return LowerRepr.Boxed{ty: ty}
             if lower_string_nominal(ty) -> return LowerRepr.Handle{drop: "jet_rt_string_drop", clone: "jet_rt_string_clone"}
             if lower_view_element(ty) == .Val(elem) -> return lower_list_repr(p, ty, elem)
+            runtime :: lower_runtime_handle_type(p, ty)
+            if runtime == None && lower_runtime_missing_application(ty, LOWER_RUNTIME_HANDLES) == .Val(failure) -> return failure
+            schema :: lower_record_schema_with_handle(p, ty, runtime)
             // The canonical runtime name table excludes source-owned Core
             // shapes. Only exact Core paths may override their MIR definition,
             // and a record schema keeps its MIR layout (Records.jet): its
             // fields read natively and it converts only at a route boundary.
-            if name.name.starts_with("<corelib>/") && lower_record_schema(p, ty) == None {
-                if lower_runtime_handle_type(p, ty) == .Val(runtime) {
-                    clone :: if runtime.clone -> "jet_rt_handle_clone_{runtime.runtime}" else -> ""
-                    return LowerRepr.Handle{drop: "jet_rt_handle_drop_{runtime.runtime}", clone: clone}
+            if name.name.starts_with("<corelib>/") && schema == None {
+                if runtime == .Val(handle) {
+                    clone :: if handle.clone -> "jet_rt_handle_clone_{handle.runtime}" else -> ""
+                    return LowerRepr.Handle{drop: "jet_rt_handle_drop_{handle.runtime}", clone: clone}
                 }
             }
             definition :: lower_type_def(p, ty) ?? {
                 // A Core type with no Jet definition is the runtime's own
                 // value behind an owned handle (RuntimeRoutes.jet).
-                runtime :: lower_runtime_handle_type(p, ty) ?? return LowerRepr.Unsupported{reason: "type {name.name} without a definition"}
-                clone :: if runtime.clone -> "jet_rt_handle_clone_{runtime.runtime}" else -> ""
-                return LowerRepr.Handle{drop: "jet_rt_handle_drop_{runtime.runtime}", clone: clone}
+                handle :: runtime ?? return LowerRepr.Unsupported{reason: "type {name.name} without a definition"}
+                clone :: if handle.clone -> "jet_rt_handle_clone_{handle.runtime}" else -> ""
+                return LowerRepr.Handle{drop: "jet_rt_handle_drop_{handle.runtime}", clone: clone}
             }
             if definition.kind == {
                 .Struct(_, _) -> LowerRepr.Inline{ty: ty}
@@ -467,10 +470,10 @@ fn lower_repr(p: MIRProgram, ty: MIRType) -> LowerRepr Never! {
                     // even when its Jet declaration supplies the variants.
                     // Only record schemas with explicit ABI adapters retain
                     // their native layout at runtime boundaries.
-                    if definition.key.starts_with("<corelib>/") && lower_record_schema(p, ty) == None {
-                        if lower_runtime_handle(definition.name) == .Val(runtime) {
-                            clone :: if runtime.clone -> "jet_rt_handle_clone_{runtime.runtime}" else -> ""
-                            return LowerRepr.Handle{drop: "jet_rt_handle_drop_{runtime.runtime}", clone: clone}
+                    if definition.key.starts_with("<corelib>/") && schema == None {
+                        if runtime == .Val(handle) {
+                            clone :: if handle.clone -> "jet_rt_handle_clone_{handle.runtime}" else -> ""
+                            return LowerRepr.Handle{drop: "jet_rt_handle_drop_{handle.runtime}", clone: clone}
                         }
                     }
                     if lower_enum_is_tag(variants) -> LowerRepr.Discriminant else -> LowerRepr.Boxed{ty: ty}

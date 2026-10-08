@@ -586,6 +586,10 @@ Schemas keep source member names; Rust projections retain the emitted
 `__jet_` member names. Root-private fields remain private in Jet and in
 emitted Rust: the internal adapter child module already reaches its parent
 record without adding an accessor or widening user-field visibility.
+If a runtime declaration already has concrete generic rows, an unsupported or
+unregistered application is a named `LowerRepr.Unsupported`, never a silent
+native-struct fallback. Generic Core enums use the same concrete handle key.
+Ordinary Jet generics with no runtime declaration rows remain native.
 Recursive record collection members use generated `jet_rt_record_seq_*`
 holders while crossing the boundary. Byte lists, record lists and `(key:
 String, value: Record)` entry lists retain their native List layouts; the
