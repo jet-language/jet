@@ -268,3 +268,70 @@ fn vault_linux_install_exact(dirfd: I64, next: I64, final_name: I64, temp: I64, 
     }
     I64{0}
 }
+
+// SecretsCrypto.rs:2268-2277. The duplicate shares the seek offset as Rust
+// File::try_clone does. It is closed on all paths; the borrowed original stays
+// live. Binary result adopts a packed DataSequence, not a Rust Vec carrier.
+// scratch borrows one exclusive byte for EOF probing; a full buffer does not
+// allocate or copy merely to discover EOF.
+fn vault_linux_read_file(file: I64, out: I64, scratch: I64) -> I64 {
+    cloned :: trap_syscall(I64{72}, file, I64{1030}, I64{0}, I64{0}, I64{0}, I64{0})
+    if (cloned < I64{0}) -> return vault_error_new(I64{4}, I64{0}, I64{0})
+    if (trap_syscall(I64{8}, cloned, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}) < I64{0}) {
+        vault_linux_close(cloned)
+        return vault_error_new(I64{4}, I64{0}, I64{0})
+    }
+    bytes :: data_sequence_new(I64{8192}, RT_HOST_U8_STRIDE)
+    loop {
+        length :: rt_text_word(bytes + DATA_SEQUENCE_LENGTH)
+        capacity :: rt_text_word(bytes + DATA_SEQUENCE_CAPACITY)
+        full :: length == capacity
+        target :: if full -> scratch else -> rt_text_word(bytes + DATA_SEQUENCE_DATA) + length
+        available :: if full -> I64{1} else -> capacity - length
+        count :: trap_syscall(I64{0}, cloned, target, available, I64{0}, I64{0}, I64{0})
+        if (count > I64{0}) {
+            if full {
+                slot :: data_sequence_reserve(bytes, RT_HOST_U8_STRIDE)
+                rt_text_put(slot, rt_text_byte(scratch))
+            }
+            rt_text_store(bytes + DATA_SEQUENCE_LENGTH, length + count)
+        } else if (count == I64{0}) {
+            vault_linux_close(cloned)
+            rt_text_store(out, bytes)
+            return I64{0}
+        } else if (count != I64{-4}) {
+            vault_linux_close(cloned)
+            data_sequence_drop(bytes, DATA_TREE_BYTE_LIST)
+            return vault_error_new(I64{4}, I64{0}, I64{0})
+        }
+    }
+}
+// SecretsCrypto.rs:1428-1445. Successful absence writes null; present data
+// transfers one owned packed sequence. Every error leaves out unchanged.
+fn vault_linux_read_at_root(root: I64, name: I64, out: I64) -> I64 {
+    slots :: jet_rt_alloc(I64{32}, I64{8})
+    error :: vault_linux_dir_at_root(root, slots)
+    if (error != I64{0}) {
+        jet_rt_free(slots, I64{32}, I64{8})
+        return error
+    }
+    dirfd :: rt_text_word(slots)
+    path :: vault_linux_path(name)
+    file :: if (path == I64{0}) -> I64{-22} else -> vault_linux_openat(dirfd, path, I64{0}, I64{0}, slots + I64{8})
+    if (path != I64{0}) -> jet_rt_free(path, rt_text_len(name) + I64{1}, I64{1})
+    vault_linux_close(dirfd)
+    if (file == I64{-2}) {
+        jet_rt_free(slots, I64{32}, I64{8})
+        rt_text_store(out, I64{0})
+        return I64{0}
+    }
+    if (file < I64{0}) {
+        jet_rt_free(slots, I64{32}, I64{8})
+        kind :: if (file == I64{-38} || file == I64{-22} || file == I64{-40}) -> I64{7} else -> I64{4}
+        return vault_error_new(kind, I64{0}, I64{0})
+    }
+    result :: vault_linux_read_file(file, out, slots + I64{8})
+    vault_linux_close(file)
+    jet_rt_free(slots, I64{32}, I64{8})
+    result
+}

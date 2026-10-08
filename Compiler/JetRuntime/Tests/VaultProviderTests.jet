@@ -112,6 +112,42 @@ fn vault_fixture_check(condition: Bool) {
     vault_linux_close(dirfd)
     jet_rt_free(scratch, I64{352}, I64{8})
 }
+// Supplementary real binary read proof, including exact-capacity EOF without
+// growth, growth with one probe byte, and clone's shared seek position.
+#Export(c) fn jet_rt_vault_linux_read_fixture(root: I64, name: I64, quarantine: I64, payload: I64) {
+    scratch :: jet_rt_alloc(I64{352}, I64{8})
+    out :: scratch + I64{344}
+    rt_text_store(out, I64{-471})
+    invalid :: vault_linux_read_file(I64{-1}, out, scratch)
+    vault_fixture_check(invalid != I64{0} && vault_error_tag(invalid) == I64{4})
+    vault_fixture_check(rt_text_word(out) == I64{-471})
+    vault_error_drop(invalid)
+    vault_fixture_check(vault_linux_read_at_root(root, name, out) == I64{0})
+    vault_fixture_check(rt_text_word(out) == I64{0})
+    vault_fixture_check(vault_linux_dir_at_root(root, out) == I64{0})
+    dirfd :: rt_text_word(out)
+    file :: vault_linux_openat(dirfd, rt_text_data(name), I64{194}, I64{384}, scratch)
+    vault_fixture_check(file >= I64{0})
+    vault_fixture_check(vault_linux_write_all(file, rt_text_data(payload), rt_text_len(payload)))
+    vault_fixture_check(vault_linux_read_file(file, out, scratch) == I64{0})
+    bytes :: rt_text_word(out)
+    count :: rt_text_word(bytes + DATA_SEQUENCE_LENGTH)
+    vault_fixture_check(count == rt_text_len(payload))
+    vault_fixture_check(rt_text_equal_bytes(rt_text_word(bytes + DATA_SEQUENCE_DATA), rt_text_data(payload), count))
+    if (count == I64{8192}) -> vault_fixture_check(rt_text_word(bytes + DATA_SEQUENCE_CAPACITY) == I64{8192})
+    vault_fixture_check(trap_syscall(I64{8}, file, I64{0}, I64{1}, I64{0}, I64{0}, I64{0}) == count)
+    data_sequence_drop(bytes, DATA_TREE_BYTE_LIST)
+    vault_fixture_check(vault_linux_read_at_root(root, name, out) == I64{0})
+    reopened :: rt_text_word(out)
+    vault_fixture_check(rt_text_word(reopened + DATA_SEQUENCE_LENGTH) == count)
+    vault_fixture_check(rt_text_equal_bytes(rt_text_word(reopened + DATA_SEQUENCE_DATA), rt_text_data(payload), count))
+    data_sequence_drop(reopened, DATA_TREE_BYTE_LIST)
+    vault_fixture_check(vault_linux_remove_exact(dirfd, rt_text_data(name), file, rt_text_data(quarantine), out, scratch) == I64{0})
+    vault_fixture_check(rt_text_word(out) == I64{1})
+    vault_linux_close(file)
+    vault_linux_close(dirfd)
+    jet_rt_free(scratch, I64{352}, I64{8})
+}
 // Supplementary historical codec checks: exact bytes, every truncation, garbage,
 // malformed UTF-8, preserved NUL/Unicode strings, and canonical domain hash.
 #Export(c) fn jet_rt_vault_legacy_fixture(bytes: I64, length: I64, expected_hash: I64) {

@@ -155,6 +155,15 @@ than deleting it. `O_TMPFILE` staging and proc-fd linking have no named-temp
 fallback. Supplemental native fixtures use actual descriptors/files and the
 shared hook, not a C implementation of this policy. The full writer's crypto,
 state rechecks, lock ownership and durability protocol are separate callers.
+Held-file reads duplicate via F_DUPFD_CLOEXEC, seek the shared open-file position
+to zero, and read into an owned packed byte sequence, retrying interrupted reads.
+An exclusive caller byte probes EOF before growing a full sequence, so an
+exact-capacity EOF neither reallocates nor copies. There is no new read bound.
+Descriptor-relative reads preserve successful absence as None, with the seed's
+distinct open failure mapping (ENOSYS/EINVAL/ELOOP to UnsupportedProvider, other
+non-ENOENT failures to Locked). Supplemental actual-file fixtures preserve NUL
+and all byte values, exercise growth and exact-capacity EOF, and observe clone's
+shared seek position plus error-output preservation.
 
 Typed vault records own native Secret buffers. Equality compares the key bytes,
 not just immutable hashes, while Debug always prints a redacted key marker.

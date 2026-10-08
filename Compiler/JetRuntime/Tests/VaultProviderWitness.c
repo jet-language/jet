@@ -32,6 +32,7 @@ extern void jvlt2_codec_is_canonical_bounded_and_preserves_legacy_strings(const 
 extern void jet_rt_vault_codec_duplicate_fixture(void *, const Text *);
 extern void jet_rt_vault_linux_dir_fixture(const Text *, int64_t);
 extern void jet_rt_vault_linux_inode_fixture(const Text *, const TextList *, const Text *, const Text *);
+extern void jet_rt_vault_linux_read_fixture(const Text *, const Text *, const Text *, const Text *);
 extern void imported_origin_round_trips_and_invalid_combinations_reject(const Text *, const Text *);
 static struct { void *data; int64_t capacity; unsigned frees; } observed[2];
 static size_t observed_count;
@@ -114,6 +115,12 @@ static void linux_dir_fixture(void) {
     TextList list = {6, 6, paths};
     Text payload = text("real anonymous file bytes"), fault = text("substitute-lock-after-check");
     jet_rt_vault_linux_inode_fixture(&path, &list, &payload, &fault);
+    unsigned char raw[8193];
+    for (size_t i = 0; i < sizeof(raw); ++i) raw[i] = (unsigned char)(i % 256);
+    Text binary = {raw, 8192, 0};
+    jet_rt_vault_linux_read_fixture(&path, &names[2], &names[1], &binary);
+    binary.length = 8193;
+    jet_rt_vault_linux_read_fixture(&path, &names[2], &names[1], &binary);
     assert(chmod(child, 0777) == 0);
     jet_rt_vault_linux_dir_fixture(&path, 7);
     assert(chmod(child, 0700) == 0);
