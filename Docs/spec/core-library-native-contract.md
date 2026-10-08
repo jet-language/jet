@@ -214,6 +214,10 @@ PID is checked u32; revision/process-start are checked u64 with leading '+' allo
 Repository/hash compare byte-exact lowercase hex; nonce is exactly 32 ASCII hex
 bytes, uppercase allowed, with at least one nonzero digit. Parse failure leaves
 the successful-output slots untouched. This validator alone does not recover locks.
+The private lock guard owns a directory fd, a file fd and 16 inline nonce bytes.
+Drop uses `.secrets.age.lock.done.<lowercase-nonce>` with the exact inode gate,
+ignores cleanup errors as the seed does, closes both descriptors, and wipes its
+owned memory. Substituted entries are restored rather than unlinked.
 Unrecovered reads stay explicit, allowing the recovered caller to perform its
 lock-aware recovery first. Supplemental transport fixtures carry independent
 starting/recipient hash vectors and exercise trim/case/duplicate/UTF-8 policy,

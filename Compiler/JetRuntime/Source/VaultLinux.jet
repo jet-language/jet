@@ -664,3 +664,49 @@ fn vault_lock_fields(bytes: I64, length: I64, expected_repo: I64, expected_revis
     rt_text_store(out + I64{24}, nonce_length)
     true
 }
+
+// SecretsCrypto.rs:2170,2338-2342. Private fd ownership only; no Core FD carrier.
+VAULT_LOCK_BYTES :: prep { I64{32} }
+VAULT_LOCK_DIR :: prep { I64{0} }
+VAULT_LOCK_FILE :: prep { I64{8} }
+VAULT_LOCK_NONCE :: prep { I64{16} }
+fn vault_hex_put(out: I64, raw: I64, count: I64) {
+    at := I64{0}
+    loop at < count * (I64{2}) {
+        byte :: rt_text_byte(raw + at /% I64{2})
+        nibble :: if (at % I64{2} == I64{0}) -> byte >> I64{4} else -> byte & I64{15}
+        rt_text_put(out + at, if (nibble < I64{10}) -> nibble + I64{48} else -> nibble + I64{87})
+        at += I64{1}
+    }
+}
+// Adopts both descriptors only after acquire has completed writing+fsync.
+fn vault_lock_adopt(dir: I64, file: I64, nonce: I64) -> I64 {
+    guard :: jet_rt_alloc(VAULT_LOCK_BYTES, I64{8})
+    rt_text_store(guard + VAULT_LOCK_DIR, dir)
+    rt_text_store(guard + VAULT_LOCK_FILE, file)
+    rt_text_bytes_copy(guard + VAULT_LOCK_NONCE, nonce, I64{16})
+    guard
+}
+fn vault_lock_drop(guard: I64) {
+    if (guard == I64{0}) -> return
+    scratch :: jet_rt_alloc(I64{424}, I64{8})
+    name :: scratch + I64{336}
+    quarantine :: scratch + I64{360}
+    rt_text_store(name, I64{8319385953628418862})
+    rt_text_store(name + I64{8}, I64{7165064478695317806})
+    rt_text_store(name + I64{16}, I64{107})
+    rt_text_bytes_copy(quarantine, name, I64{16})
+    rt_text_store(quarantine + I64{16}, I64{13059373918334571})
+    vault_hex_put(quarantine + I64{23}, guard + VAULT_LOCK_NONCE, I64{16})
+    rt_text_put(quarantine + I64{55}, I64{0})
+    dir :: rt_text_word(guard + VAULT_LOCK_DIR)
+    file :: rt_text_word(guard + VAULT_LOCK_FILE)
+    ignored :: vault_linux_remove_exact(dir, name, file, quarantine, scratch + I64{416}, scratch)
+    vault_error_drop(ignored)
+    vault_linux_close(dir)
+    vault_linux_close(file)
+    thread_zero(scratch, I64{424})
+    jet_rt_free(scratch, I64{424}, I64{8})
+    thread_zero(guard, VAULT_LOCK_BYTES)
+    jet_rt_free(guard, VAULT_LOCK_BYTES, I64{8})
+}

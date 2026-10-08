@@ -47,6 +47,7 @@ extern void jet_rt_vault_uint_fixture(const Text *, _Bool, _Bool, int64_t, const
 extern void jet_rt_vault_proc_parse_fixture(const Text *, _Bool, int64_t);
 extern void jet_rt_vault_proc_read_fixture(void);
 extern void jet_rt_vault_lock_fields_fixture(const Text *, int64_t, _Bool, int64_t, int64_t, const Text *);
+extern void jet_rt_vault_lock_guard_fixture(const Text *, const Text *);
 extern void imported_origin_round_trips_and_invalid_combinations_reject(const Text *, const Text *);
 extern void jet_rt_vault_crypto_fixture(const ByteList *);
 extern void jet_rt_vault_crypto_unavailable_fixture(int64_t (*)(void *, void *, int64_t));
@@ -349,6 +350,28 @@ static void process_start_fixtures(void) {
     jet_rt_vault_proc_parse_fixture(&invalid, 0, 0);
     jet_rt_vault_proc_read_fixture();
 }
+static void lock_guard_fixtures(void) {
+    char root[] = "/tmp/jet-vault-guard-XXXXXX", dir[128], lock[160], acquired[160], done[192];
+    assert(mkdtemp(root) != NULL);
+    assert(snprintf(dir, sizeof(dir), "%s/.jet", root) > 0 && mkdir(dir, 0700) == 0);
+    assert(snprintf(lock, sizeof(lock), "%s/.secrets.age.lock", dir) > 0);
+    assert(snprintf(acquired, sizeof(acquired), "%s/.secrets.age.lock.acquired", dir) > 0);
+    assert(snprintf(done, sizeof(done), "%s/.secrets.age.lock.done.ab000000000000000000000000000000", dir) > 0);
+    Text path = text(root), fault = text("substitute-lock-after-check");
+    jet_rt_vault_lock_guard_fixture(&path, NULL);
+    assert(access(lock, F_OK) == -1 && errno == ENOENT);
+    assert(access(done, F_OK) == -1 && errno == ENOENT);
+    jet_rt_vault_lock_guard_fixture(&path, &fault);
+    struct stat before, after;
+    assert(stat(lock, &before) == 0);
+    char bytes[12] = {0};
+    int fd = open(lock, O_RDONLY);
+    assert(fd >= 0 && read(fd, bytes, sizeof(bytes)) == 11 && close(fd) == 0);
+    assert(memcmp(bytes, "replacement", 11) == 0);
+    assert(stat(lock, &after) == 0 && before.st_dev == after.st_dev && before.st_ino == after.st_ino);
+    assert(access(done, F_OK) == -1 && errno == ENOENT);
+    assert(unlink(lock) == 0 && unlink(acquired) == 0 && rmdir(dir) == 0 && rmdir(root) == 0);
+}
 static void lock_fields_fixtures(void) {
     static const char base[] =
         "repo=00000000000000000000000000000000 revision=0 pid=0 process-start=0 "
@@ -458,6 +481,7 @@ int main(void) {
     stream_read_fixtures();
     process_start_fixtures();
     lock_fields_fixtures();
+    lock_guard_fixtures();
     puts("vault witness OK (13 errors, legacy+JVLT2 codec, imported origin/default entropy, native Secret redaction/wipe, long-origin hash, duplicate priority)");
     jet_rt_thread_detach();
     return 0;

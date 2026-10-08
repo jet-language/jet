@@ -752,3 +752,30 @@ fn jet_rt_vault_lock_fields_fixture(input: I64, revision: I64, valid: Bool, pid:
     thread_zero(scratch, I64{88})
     jet_rt_free(scratch, I64{88}, I64{8})
 }
+
+fn jet_rt_vault_lock_guard_fixture(root: I64, fault: I64) {
+    scratch :: jet_rt_alloc(I64{368}, I64{8})
+    name :: scratch + I64{336}
+    out :: scratch + I64{360}
+    vault_fixture_check(vault_linux_dir_at_root(root, out) == I64{0})
+    dir :: rt_text_word(out)
+    rt_text_store(name, I64{8319385953628418862})
+    rt_text_store(name + I64{8}, I64{7165064478695317806})
+    rt_text_store(name + I64{16}, I64{107})
+    file :: vault_linux_openat(dir, name, I64{193}, I64{384}, scratch)
+    vault_fixture_check(file >= I64{0})
+    thread_zero(scratch, I64{16})
+    rt_text_put(scratch, I64{171})
+    guard :: vault_lock_adopt(dir, file, scratch)
+    vault_fixture_check(rt_text_word(guard + VAULT_LOCK_DIR) == dir)
+    vault_fixture_check(rt_text_word(guard + VAULT_LOCK_FILE) == file)
+    vault_fixture_check(rt_text_byte(guard + VAULT_LOCK_NONCE) == I64{171})
+    jet_rt_vault_set_test_fault(fault)
+    vault_lock_drop(guard)
+    jet_rt_vault_set_test_fault(I64{0})
+    // F_GETFD proves ownership closed both real descriptors on either path.
+    vault_fixture_check(trap_syscall(I64{72}, dir, I64{1}, I64{0}, I64{0}, I64{0}, I64{0}) == I64{-9})
+    vault_fixture_check(trap_syscall(I64{72}, file, I64{1}, I64{0}, I64{0}, I64{0}, I64{0}) == I64{-9})
+    thread_zero(scratch, I64{368})
+    jet_rt_free(scratch, I64{368}, I64{8})
+}
