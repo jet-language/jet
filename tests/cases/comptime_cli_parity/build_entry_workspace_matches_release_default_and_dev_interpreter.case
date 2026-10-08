@@ -1,0 +1,16 @@
+# Port of comptime_cli_parity.rs:178-259. PENDING-GRAMMAR: step env, is-file.
+fixture: fixtures/build_entry_workspace_matches_release_default_and_dev_interpreter
+step: jet build foundation
+env: JET_STORE_DIR={work}/cache/named
+file: packages/foundation/.jet/generated/foundation/foundation_marker.jet is-file
+step: jet build
+env: JET_STORE_DIR={work}/cache/workspace
+step: jet run --release run.jet
+env: JET_STORE_DIR={work}/cache/release
+stdout: = ../../../Examples/features/expected/tooling/build_entry_discovery.out
+step: jet run run.jet
+env: JET_STORE_DIR={work}/cache/default
+stdout: = ../../../Examples/features/expected/tooling/build_entry_discovery.out
+step: jet dev run.jet --interpret --watch=off
+env: JET_STORE_DIR={work}/cache/interpreted
+stdout: = ../../../Examples/features/expected/tooling/build_entry_discovery.out
