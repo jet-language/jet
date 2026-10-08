@@ -75,7 +75,7 @@ mod text_kernel {
                 Some(error.to_string()),
             );
             let not_supported = matches!(
-                error.raw_os_error(),
+                context.os_code,
                 Some(code) if (cfg!(target_os = "linux") && code == 95)
                     || (cfg!(target_os = "macos") && (code == 45 || code == 102))
             );

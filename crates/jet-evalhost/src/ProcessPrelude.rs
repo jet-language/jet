@@ -110,8 +110,8 @@ pub(crate) mod process_prelude {
                 Some(error.to_string()),
             );
             let not_supported = matches!(
-                error.raw_os_error(),
-                Some(code) if (cfg!(target_os = "linux") && code == 95)
+                context.os_code,
+                Ok(code) if (cfg!(target_os = "linux") && code == 95)
                     || (cfg!(target_os = "macos") && (code == 45 || code == 102))
             );
             if not_supported {
