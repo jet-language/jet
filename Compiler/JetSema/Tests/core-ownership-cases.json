@@ -28,5 +28,23 @@
     "root": 8,
     "source": "use core.math.[Point2]\nfn retain<T, Space>(value: Point2<T, Space>) -> Point2<T, Space> Never! { value }\n",
     "errors": []
+  },
+  {
+    "name": "user-geometry-wrong-arity",
+    "root": 8,
+    "source": "struct Point2<T> { value: T }\nfn wrong(value: Point2<Int, Bool, Int>) {}\n",
+    "errors": ["E0119"]
+  },
+  {
+    "name": "source-mixed-vector-operator",
+    "root": 3,
+    "source": "use core.math.[Vec3]\nfn divide(value: Float, vector: Vec3) -> Vec3 Never! { value / vector }\n",
+    "errors": []
+  },
+  {
+    "name": "duplicate-user-mixed-operator",
+    "root": 3,
+    "source": "struct Price { value: Int }\nimpl Float.Div(Price) { fn div(self, rhs: Price) -> Price Never! { rhs } }\nimpl Float.Div(Price) { fn div(self, rhs: Price) -> Price Never! { rhs } }\n",
+    "errors": ["E0908"]
   }
 ]

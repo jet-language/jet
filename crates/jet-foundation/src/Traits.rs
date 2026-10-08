@@ -2874,7 +2874,7 @@ impl TraitRegistry {
     }
 
     /// D-OPDEF1=A: operator symbols are sugar over ordinary hook traits.
-    pub fn register_synthetic_operators(&mut self) {
+    pub fn register_synthetic_operators(&mut self, source_owns_type: impl Fn(&str) -> bool) {
         for (trait_name, method, ret) in [
             (Syntax::TRAIT_ADD, "add", Type::Named(String::new())),
             (Syntax::TRAIT_SUB, "sub", Type::Named(String::new())),
@@ -2913,6 +2913,13 @@ impl TraitRegistry {
                 Type::Named("Vec3".to_string()),
             ),
         ] {
+            // The source declaration owns the complete instantiated row.
+            // Never seed a second operator beside either source-owned operand.
+            if source_owns_type(left)
+                || matches!(&rhs, Type::Named(name) | Type::Apply { name, .. } if source_owns_type(name))
+            {
+                continue;
+            }
             if !self.operator_impls.iter().any(|implementation| {
                 implementation.left == left
                     && implementation.trait_name == trait_name

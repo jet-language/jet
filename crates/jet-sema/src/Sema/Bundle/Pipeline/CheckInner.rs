@@ -1463,7 +1463,7 @@ pub(super) fn check_bundle_opts_for_output_inner(
         st.trait_reg.register_synthetic_rollback();
         st.trait_reg.register_synthetic_display_debug();
         st.trait_reg.register_synthetic_close();
-        st.trait_reg.register_synthetic_operators();
+        st.trait_reg.register_synthetic_operators(|name| st.registry.source_owns_type(name));
         st.trait_reg.register_synthetic_iter_index();
         st.trait_reg.register_synthetic_io();
         st.trait_reg.register_synthetic_driver();
