@@ -5,6 +5,7 @@
 //! The manifest owns classification and provenance; the AST pass owns the
 //! recurrence rules; the domain tests decide when to call this adapter.
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -2280,7 +2281,7 @@ fn parse_program(source_label: &str, source: &str) -> Result<Program, String> {
             ));
         }
         let parse_source = strip_inline_package(source, &tokens);
-        let (parse_tokens, parse_diagnostics) = jet::Lexer::lex(parse_source);
+        let (parse_tokens, parse_diagnostics) = jet::Lexer::lex(&parse_source);
         if !parse_diagnostics.is_empty() {
             return Err(format!(
                 "Jet lexer rejected corpus source `{source_label}`: {parse_diagnostics:?}"
@@ -2292,17 +2293,17 @@ fn parse_program(source_label: &str, source: &str) -> Result<Program, String> {
     })
 }
 
-fn strip_inline_package<'a>(source: &'a str, tokens: &[Token]) -> &'a str {
+fn strip_inline_package<'a>(source: &'a str, tokens: &[Token]) -> Cow<'a, str> {
     let Some((package_index, package_token)) = tokens.iter().enumerate().find(|(_, token)| {
         !matches!(
             &token.kind,
             TokKind::LineComment(_) | TokKind::BlockComment(_)
         )
     }) else {
-        return source;
+        return Cow::Borrowed(source);
     };
     if !matches!(&package_token.kind, TokKind::Ident(name) if name == "package") {
-        return source;
+        return Cow::Borrowed(source);
     }
     let Some(open_index) = tokens
         .iter()
@@ -2310,7 +2311,7 @@ fn strip_inline_package<'a>(source: &'a str, tokens: &[Token]) -> &'a str {
         .skip(package_index + 1)
         .find_map(|(index, token)| matches!(&token.kind, TokKind::LBrace).then_some(index))
     else {
-        return source;
+        return Cow::Borrowed(source);
     };
     let mut depth = 0usize;
     for token in tokens.iter().skip(open_index) {
@@ -2319,13 +2320,22 @@ fn strip_inline_package<'a>(source: &'a str, tokens: &[Token]) -> &'a str {
             TokKind::RBrace => {
                 depth = depth.saturating_sub(1);
                 if depth == 0 {
-                    return &source[token.span.end..];
+                    // Reviewed sites are offsets in the original source. Removing
+                    // the package prefix shifts every AST span and invalidates
+                    // exact-site exceptions even when the program is unchanged.
+                    let mut masked = source.as_bytes().to_vec();
+                    for byte in &mut masked[..token.span.end] {
+                        if !matches!(*byte, b'\n' | b'\r') {
+                            *byte = b' ';
+                        }
+                    }
+                    return Cow::Owned(String::from_utf8(masked).expect("masked Jet source is UTF-8"));
                 }
             }
             _ => {}
         }
     }
-    source
+    Cow::Borrowed(source)
 }
 
 fn evaluate_program(
