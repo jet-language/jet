@@ -998,6 +998,40 @@ pub struct MIRCaptureParam { pub slot: Int, pub name: String, pub span: Span, pu
 
 pub enum MIRCaptureOperand { Value(value: MIRValueID) Place(place: MIRPlaceID) }
 
+// Retained native roots borrow storage, not the source value's ownership.
+// The producer records the exact checked operation granting access to that
+// owned place; a caller cannot turn a borrowed address into a Move permission.
+pub enum MIRRetainedRootCellAction { Read Write Move Initialize Replace Cleanup }
+
+pub struct MIRRetainedRootCellGrant {
+    pub function: MIRFunctionID
+    pub operation: MIROpID
+    pub place: MIRPlaceID
+    pub action: MIRRetainedRootCellAction
+}
+
+pub struct MIRRetainedRootLivePlace {
+    pub place: MIRPlaceID
+    pub live: MIRPlaceID
+    pub value_type: MIRType
+    pub drop_kind: MIRDropKind
+}
+
+pub struct MIRRetainedRootCellBinding {
+    pub declaration: SymbolID
+    pub ty: MIRType
+    pub place: MIRPlaceID
+    pub capture_value: MIRValueID
+    pub capture_slot: Int
+    pub access: MIRAccess
+    pub ownership: MIROwnership
+    // Root and required projection flags are the original MIR Bool places.
+    // Copy/NoDrop values still have a presence flag, but no destructor action.
+    pub live_places: [MIRRetainedRootLivePlace]
+    pub grants: [MIRRetainedRootCellGrant]
+    pub cleanup_identity: String
+}
+
 pub struct MIRLocal {
     pub id: MIRLocalID
     pub name: String

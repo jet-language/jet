@@ -3626,6 +3626,49 @@ pub enum MirCaptureOperand {
     Place(MirPlaceId),
 }
 
+/// Native roots borrow the storage cell, not the source-owned value.
+/// Each permission names its checked MIR operation rather than a host selector.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MirRetainedRootCellAction {
+    Read,
+    Write,
+    Move,
+    Initialize,
+    Replace,
+    Cleanup,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MirRetainedRootCellGrant {
+    pub function: MirFunctionId,
+    pub operation: MirOpId,
+    pub place: MirPlaceId,
+    pub action: MirRetainedRootCellAction,
+}
+
+#[derive(Debug, Clone)]
+pub struct MirRetainedRootLivePlace {
+    pub place: MirPlaceId,
+    pub live: MirPlaceId,
+    pub value_type: MirType,
+    pub drop_kind: MirDropKind,
+}
+
+#[derive(Debug, Clone)]
+pub struct MirRetainedRootCellBinding {
+    /// The checked SymbolID key, not the binding's spelling.
+    pub declaration: String,
+    pub ty: MirType,
+    pub place: MirPlaceId,
+    pub capture_value: MirValueId,
+    pub capture_slot: usize,
+    pub access: MirAccess,
+    pub ownership: MirOwnership,
+    pub live_places: Vec<MirRetainedRootLivePlace>,
+    pub grants: Vec<MirRetainedRootCellGrant>,
+    pub cleanup_identity: String,
+}
+
 
 
 #[derive(Debug, Clone)]
