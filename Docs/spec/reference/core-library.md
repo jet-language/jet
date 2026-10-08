@@ -3335,8 +3335,8 @@ The IME capability is spelled `UI.IME`, alongside `UI.Keyboard` and
 | `preview(name: String, viewport: ?UIPreviewViewport, body: fn() -> UINode) -> UIPreview` | preview | Describe a named preview. |
 | `playground(name: String, viewport: ?UIPreviewViewport, body: fn() -> UINode) -> UIPreview` | preview | Describe a named interactive playground. |
 | `desktop() -> UIPreviewViewport`, `phone() -> UIPreviewViewport`, `tablet() -> UIPreviewViewport` | viewport | Select standard preview dimensions. |
-| `key_event(code: String) -> InputEvent` | event | Create a key event. |
-| `resize_event(width: Float, height: Float) -> InputEvent` | event | Create a resize event. |
+| `key_event(code: String) -> InputEvent` | event | Create `InputEvent.Key{code: code}`. |
+| `resize_event(width: Float, height: Float) -> InputEvent` | event | Create `InputEvent.Resize{size: Size{width: width, height: height}}`. |
 | `reactive_render(body: fn())` | — | Ask the provider to render a reactive body. |
 | `gtk_backend() -> GtkBackend`, `tui_backend() -> TUIBackend`, `null_backend() -> NullBackend` | backend | Select a backend handle. |
 | `aria_role_button() -> UIAriaRole`, `aria_role_container() -> UIAriaRole` | role | Construct standard accessibility roles. |

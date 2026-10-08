@@ -116,25 +116,25 @@ pub fn desktop() -> UIPreviewViewport Never! { transfer_viewport(2, 1280, 800, 1
 pub fn phone() -> UIPreviewViewport Never! { transfer_viewport(0, 390, 844, 2) }
 pub fn tablet() -> UIPreviewViewport Never! { transfer_viewport(1, 834, 1119, 2) }
 
-pub fn key_event(code: String) -> InputEvent Never! { InputEvent.Key(code) }
+pub fn key_event(code: String) -> InputEvent Never! { InputEvent.Key{code: code} }
 pub fn resize_event(width: Float, height: Float) -> InputEvent Never! {
-    InputEvent.Resize(size(width, height))
+    InputEvent.Resize{size: size(width, height)}
 }
 
 
 pub fn gtk_backend() -[Browser]> GtkBackend Never! {
     #Unsafe("Core creates the real retained GTK renderer through the registered host allocation boundary") {
-        core.ui.__gtk_backend()
+        return core.ui.__gtk_backend()
     }
 }
 pub fn tui_backend() -[Browser]> TUIBackend Never! {
     #Unsafe("Core creates the real retained terminal renderer through the registered host allocation boundary") {
-        core.ui.__tui_backend()
+        return core.ui.__tui_backend()
     }
 }
 pub fn null_backend() -[Browser]> NullBackend Never! {
     #Unsafe("Core creates the real retained null renderer through the registered host allocation boundary") {
-        core.ui.__null_backend()
+        return core.ui.__null_backend()
     }
 }
 
@@ -145,7 +145,7 @@ pub fn aria_role_text_input() -> UIAriaRole Never! { UIAriaRole.TextInput }
 
 pub fn node_accessibility(n: UINode, metadata: UIAccessibility) -> UINode Never! {
     #Unsafe("Core UI accessibility slot transfer: explicitly present validated metadata") {
-        core.ui.__accessibility_transfer(n, metadata, true)
+        return core.ui.__accessibility_transfer(n, metadata, true)
     }
 }
 
@@ -162,7 +162,7 @@ pub fn node_role(label: String, width: Float, height: Float, role: UIAriaRole) -
 
 pub fn node_shortcut(n: UINode, shortcut: UIShortcut) -> UINode Never! {
     #Unsafe("Core UI shortcut slot transfer: explicitly present validated shortcut") {
-        core.ui.__shortcut_transfer(n, shortcut, true)
+        return core.ui.__shortcut_transfer(n, shortcut, true)
     }
 }
 
@@ -189,13 +189,13 @@ fn transfer_node(label: String, width: Float, height: Float, role: UIAriaRole?, 
         color_word = value
     }
     #Unsafe("Core UI host slot transfer: audited kind, role, explicit absent slots, and normalized style words") {
-        core.ui.__node_transfer(label, width, height, role_tag, kind_tag, children, color_present, color_word, 63, false, 0, 0, 0, 0, 0)
+        return core.ui.__node_transfer(label, width, height, role_tag, kind_tag, children, color_present, color_word, 63, false, 0, 0, 0, 0, 0)
     }
 }
 
 fn transfer_viewport(device: Int, width: Int, height: Int, scale: Int) -> UIPreviewViewport Never! {
     #Unsafe("Core UI viewport transfer: source supplies a valid device and bounded positive dimensions") {
-        core.ui.__viewport_transfer(device, width, height, scale)
+        return core.ui.__viewport_transfer(device, width, height, scale)
     }
 }
 
@@ -204,4 +204,9 @@ fn transfer_viewport(device: Int, width: Int, height: Int, scale: Int) -> UIPrev
     assert(aria_role_container() == UIAriaRole.Container)
     assert(aria_role_label() == UIAriaRole.Label)
     assert(aria_role_text_input() == UIAriaRole.TextInput)
+}
+
+#Test("UI event constructors preserve named payloads") {
+    assert(key_event("Enter") == InputEvent.Key{code: "Enter"})
+    assert(resize_event(640.0, 480.0) == InputEvent.Resize{size: Size{width: 640.0, height: 480.0}})
 }
