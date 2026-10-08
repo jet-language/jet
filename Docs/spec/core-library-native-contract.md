@@ -480,3 +480,9 @@ Clone and equality follow the active variant; drop releases only its owned
 text child. Display, show and debug all use the same user-facing rendering,
 including unescaped payload text. Invalid Error tags or rendered Operation
 ordinals take the canonical `<core.prelude>` record-variant panic.
+
+HTTP Proxy owns a tag and a nullable text payload. FromEnvironment and None
+have no text child; Url owns E4. Its Url constructor clones borrowed text and
+its getter returns a fresh clone. Requesting Url from another variant takes
+the canonical record-variant panic. Proxy ownership performs no URL parsing
+or network access.
