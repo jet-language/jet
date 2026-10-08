@@ -47,3 +47,44 @@ fn numeric_widen_stop(file: I64, line: I64) {
     half :: (raw >> I64{1}) & I64{9223372036854775807}
     return Float{half} * Float{2} + Float{raw & I64{1}}
 }
+
+// CommonTypes.rs:3586-3603/5074-5080: exact Int checked widening.
+// The native carrier is borrowed, never cloned into the hazard domain. One
+// private limb workspace computes width, trailing zeros and the float's top
+// 53 bits in the same pass; no second conversion workspace is allocated.
+#Export(c) fn jet_int_checked_widen(value: I64, target_f32: Bool, file: I64, line: I64) -> Float {
+    if int_inline(value) -> return jet_numeric_checked_widen_at(value, true, target_f32, file, line)
+    negative :: int_negative(value)
+    node :: int_copy(value, I64{0})
+    bits := I64{0}
+    trailing := I64{0}
+    significant := false
+    top := I64{0}
+    maximum :: if target_f32 -> I64{128} else -> I64{1024}
+    loop !(int_load(node + I64{32}) == I64{1} && int_get(node, I64{0}) == I64{0}) {
+        bit :: int_div_small(node, I64{2})
+        if !significant {
+            if (bit == I64{0}) -> trailing += I64{1} else -> significant = true
+        }
+        if (bits < I64{53}) -> top |= bit << bits else -> top = (top >> I64{1}) | (bit << I64{52})
+        bits += I64{1}
+        // Any wider magnitude is outside the target's finite range. Stop
+        // scanning after that proof rather than divide an unbounded integer.
+        if (bits > maximum) -> break
+    }
+    int_free_node(node)
+    precision :: if target_f32 -> I64{24} else -> I64{53}
+    if (bits > maximum || (bits > precision && trailing < bits - precision)) {
+        numeric_widen_stop(file, line)
+        loop { jet_rt_unreachable(I64{0}, I64{0}) }
+    }
+    result := Float{top}
+    shift := bits - I64{53}
+    scale := Float{2.0}
+    loop shift > (I64{0}) {
+        if ((shift & I64{1}) != I64{0}) -> result *= scale
+        shift >>= I64{1}
+        if (shift != I64{0}) -> scale *= scale
+    }
+    return if negative -> -result else -> result
+}
