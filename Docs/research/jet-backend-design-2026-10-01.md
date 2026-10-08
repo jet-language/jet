@@ -2211,9 +2211,12 @@ allocator and L1/L3 canonical allocator/split providers are existing Jet bodies.
 words and payload offsets; these are never the layout of a Rust DataTree.
 `JetRuntime/Source/DataTree.jet` provides the recursive ownership boundary
 using the existing native List `[length, capacity, data]` header. Constructors
-clone borrowed text and exact Int, consume sequence holders, and preserve
-ordered Object entries, including duplicate keys. Sequence getters lend
-children and clone keys; scalar-owner getters return a new owner.
+clone borrowed text, consume sequence holders, and preserve ordered Object
+entries, including duplicate keys. Int constructors borrow an exact Int,
+range-check through `jet_int_owned_to_i64`, and store raw i64, matching
+`CAbiRoutes.rs:9118-9126`. Int getters rebuild a fresh exact owner through
+`jet_int_owned_from_i64`; clone/drop have no Int owner to retain/release.
+Sequence getters lend children and clone keys; text getters clone their owner.
 
 Equality follows `jet-foundation/src/DataTree.rs:8-22`: compare variant first,
 then ordered payloads, with IEEE Float equality (NaN unequal even to itself,
@@ -2221,11 +2224,18 @@ signed zeros equal). Drop frees children before their storage, exactly once.
 Show/display/debug share the compact JSON behavior of
 `JetStd/JSONDataTree.rs:27-94`, including quoted text/control escapes, lexical
 Number preservation, byte arrays, decimal Float debug spelling and the
-non-finite Float stop. Delimiters stream into one existing text builder.
+non-finite Float stop. Raw i64 Int uses `jet_rt_i64_to_string`'s signed decimal
+formatter, including both i64 edges (the decimal intent of
+`JSONDataTree.rs:31`). Delimiters stream into one existing text builder.
 
 `JetRuntime/Tests/DataTreeWitness.c` requires the real Jet object and
 `--wrap=jet_rt_free`; it asserts that interception actually ran, child/key/text
-clone independence, ordered equality and exact-once frees. Its non-finite
-mode exercises the JSON stop separately. Parse and C syntax receipts do not
-admit native caller layouts or prove execution: source-root/MIR ownership and
-the generator's provider ABI validation remain required before pack cutover.
+clone independence, ordered equality and exact-once frees. The Int edge cases
+check raw storage and independently owned getters after the borrowed argument
+is dropped. `nonfinite` exercises the JSON stop separately; `native-overflow`
+supplies `i64::MAX + 1` as an exact Int and must stop with the existing native
+conversion's `native Int argument exceeds host range` message at
+`<core.prelude>:0`. These new cases have not been executed. Earlier parse and C
+syntax receipts do not admit native caller layouts or prove execution:
+source-root/MIR ownership and the generator's provider ABI validation remain
+required before pack cutover.

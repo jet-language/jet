@@ -2,7 +2,8 @@
 // Rust behavior: foundation/DataTree.rs:8-22 (ordered derive PartialEq),
 // JetStd/JSONDataTree.rs:27-94 and JetStd/DataTree.rs:49-64 (compact JSON).
 // C ownership: gen-c-abi-routes.mjs:1399-1546. Sequence getters lend;
-// scalar owners clone, sequence constructors consume, text constructors clone.
+// text constructors clone; Int borrows exact input and stores checked raw i64.
+// CAbiRoutes.rs:9118-9126 converts at the Int constructor/getter boundary.
 fn data_tree_word(address: I64) -> I64 {
     #Unsafe("address borrows an initialized word in a live native DataTree or List") { return os_load_i64(address) }
 }
@@ -94,14 +95,14 @@ fn data_sequence_drop(sequence: I64, kind: I64) {
 #Export(c) fn jet_rt_handle_clone_DataTree(tree: I64) -> I64 {
     kind :: data_tree_word(tree + DATA_TREE_TAG)
     payload := data_tree_word(tree + DATA_TREE_PAYLOAD)
-    if kind == DATA_TREE_INT { payload = jet_rt_int_clone(payload) } else if kind >= DATA_TREE_NUMBER && kind <= DATA_TREE_TEXT { payload = jet_rt_string_clone(payload) } else if kind >= DATA_TREE_BYTE_LIST { payload = data_sequence_clone(payload, kind) }
+    if kind >= DATA_TREE_NUMBER && kind <= DATA_TREE_TEXT { payload = jet_rt_string_clone(payload) } else if kind >= DATA_TREE_BYTE_LIST { payload = data_sequence_clone(payload, kind) }
     data_tree_new(kind, payload)
 }
 #Export(c) fn jet_rt_handle_drop_DataTree(tree: I64) {
     if (tree == I64{0}) -> return
     kind :: data_tree_word(tree + DATA_TREE_TAG)
     payload :: data_tree_word(tree + DATA_TREE_PAYLOAD)
-    if kind == DATA_TREE_INT { jet_rt_int_drop(payload) } else if kind >= DATA_TREE_NUMBER && kind <= DATA_TREE_TEXT { jet_rt_string_drop(payload) } else if kind >= DATA_TREE_BYTE_LIST { data_sequence_drop(payload, kind) }
+    if kind >= DATA_TREE_NUMBER && kind <= DATA_TREE_TEXT { jet_rt_string_drop(payload) } else if kind >= DATA_TREE_BYTE_LIST { data_sequence_drop(payload, kind) }
     jet_rt_free(tree, DATA_TREE_BYTES, I64{8})
 }
 #Export(c) fn jet_rt_handle_eq_DataTree(left: I64, right: I64) -> Bool {
@@ -110,7 +111,7 @@ fn data_sequence_drop(sequence: I64, kind: I64) {
     a :: data_tree_word(left + DATA_TREE_PAYLOAD)
     b :: data_tree_word(right + DATA_TREE_PAYLOAD)
     if kind == DATA_TREE_NULL -> return true
-    if kind == DATA_TREE_INT -> return jet_int_compare(a, b) == I64{0}
+    if kind == DATA_TREE_INT -> return a == b
     // Do not shortcut pointer identity: derived f64 equality rejects NaN even
     // in a tree compared with itself, and treats -0 and +0 as equal.
     if kind == DATA_TREE_FLOAT -> return rt_f64_from_bits(a) == rt_f64_from_bits(b)
@@ -168,7 +169,8 @@ fn data_tree_render(target: I64, tree: I64) {
     }
     if kind == DATA_TREE_INT || kind == DATA_TREE_FLOAT {
         if (kind == DATA_TREE_FLOAT && ((value & I64{9223372036854775807}) >> I64{52}) == I64{2047}) -> panic("JSON cannot encode a non-finite Float")
-        text :: if kind == DATA_TREE_INT -> jet_rt_int_to_string(value) else -> jet_rt_float_debug(rt_f64_from_bits(value))
+        // JSONDataTree.rs:31 uses decimal Int text; raw i64 has no exact owner.
+        text :: if kind == DATA_TREE_INT -> jet_rt_i64_to_string(value) else -> jet_rt_float_debug(rt_f64_from_bits(value))
         jet_rt_string_builder_push(target, text)
         jet_rt_string_drop(text)
         return
@@ -211,7 +213,7 @@ fn data_tree_render(target: I64, tree: I64) {
 #Export(c) fn jet_rt_record_tag_DataTree(tree: I64) -> I64 { data_tree_word(tree + DATA_TREE_TAG) }
 #Export(c) fn jet_rt_record_new_DataTree_Null() -> I64 { data_tree_new(DATA_TREE_NULL, I64{0}) }
 #Export(c) fn jet_rt_record_new_DataTree_Bool(value: U8) -> I64 { data_tree_new(DATA_TREE_BOOL, if (value == U8{0}) -> I64{0} else -> I64{1}) }
-#Export(c) fn jet_rt_record_new_DataTree_Int(value: I64) -> I64 { data_tree_new(DATA_TREE_INT, jet_rt_int_clone(value)) }
+#Export(c) fn jet_rt_record_new_DataTree_Int(value: I64) -> I64 { data_tree_new(DATA_TREE_INT, jet_int_owned_to_i64(value)) }
 #Export(c) fn jet_rt_record_new_DataTree_Float(value: Float) -> I64 { data_tree_new(DATA_TREE_FLOAT, rt_f64_bits(value)) }
 #Export(c) fn jet_rt_record_new_DataTree_Number(value: I64) -> I64 { data_tree_new(DATA_TREE_NUMBER, jet_rt_string_clone(value)) }
 #Export(c) fn jet_rt_record_new_DataTree_TypedText(value: I64) -> I64 { data_tree_new(DATA_TREE_TYPED_TEXT, jet_rt_string_clone(value)) }
@@ -220,7 +222,7 @@ fn data_tree_render(target: I64, tree: I64) {
 #Export(c) fn jet_rt_record_new_DataTree_Array(value: I64) -> I64 { data_tree_new(DATA_TREE_ARRAY, value) }
 #Export(c) fn jet_rt_record_new_DataTree_Object(value: I64) -> I64 { data_tree_new(DATA_TREE_OBJECT, value) }
 #Export(c) fn jet_rt_record_get_DataTree_Bool(tree: I64) -> Bool { data_tree_payload(tree, DATA_TREE_BOOL) != I64{0} }
-#Export(c) fn jet_rt_record_get_DataTree_Int(tree: I64) -> I64 { jet_rt_int_clone(data_tree_payload(tree, DATA_TREE_INT)) }
+#Export(c) fn jet_rt_record_get_DataTree_Int(tree: I64) -> I64 { jet_int_owned_from_i64(data_tree_payload(tree, DATA_TREE_INT)) }
 #Export(c) fn jet_rt_record_get_DataTree_Float(tree: I64) -> Float { rt_f64_from_bits(data_tree_payload(tree, DATA_TREE_FLOAT)) }
 #Export(c) fn jet_rt_record_get_DataTree_Number(tree: I64) -> I64 { jet_rt_string_clone(data_tree_payload(tree, DATA_TREE_NUMBER)) }
 #Export(c) fn jet_rt_record_get_DataTree_TypedText(tree: I64) -> I64 { jet_rt_string_clone(data_tree_payload(tree, DATA_TREE_TYPED_TEXT)) }

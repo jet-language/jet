@@ -24,6 +24,8 @@ extern void __real_jet_rt_free(void *, int64_t, int64_t);
 extern Text *jet_rt_string_from_static(const void *, int64_t);
 extern void jet_rt_string_drop(Text *);
 extern int64_t jet_int_owned_from_i64(int64_t);
+extern int64_t jet_int_owned_to_i64(int64_t);
+extern int64_t jet_int_add(int64_t, int64_t);
 extern void jet_rt_int_drop(int64_t);
 extern Tree *jet_rt_handle_clone_DataTree(Tree *);
 extern void jet_rt_handle_drop_DataTree(Tree *);
@@ -121,12 +123,22 @@ static void scalar_cases(void) {
     a = jet_rt_record_new_DataTree_Int(42); b = jet_rt_handle_clone_DataTree(a);
     int64_t integer = jet_rt_record_get_DataTree_Int(a); assert(integer == 42); jet_rt_int_drop(integer);
     assert(jet_rt_handle_eq_DataTree(a,b)); expect(jet_rt_handle_show_DataTree(a), "42"); drop_pair(a,b);
-    // Canonical boxed Int is retained independently (private fixture's final
-    // owner goes through the real native retirement provider, not a C stub).
-    integer = jet_int_owned_from_i64(INT64_MAX);
-    a = jet_rt_record_new_DataTree_Int(integer); b = jet_rt_handle_clone_DataTree(a);
-    jet_rt_int_drop(integer); jet_rt_handle_drop_DataTree(a);
-    expect(jet_rt_handle_show_DataTree(b), "9223372036854775807"); jet_rt_handle_drop_DataTree(b);
+    // The borrowed boxed argument is converted to raw i64, not retained.
+    // Each getter rebuilds a fresh exact Int owner, including both i64 edges.
+    const int64_t edges[] = {INT64_MAX, INT64_MIN};
+    const char *decimal[] = {"9223372036854775807", "-9223372036854775808"};
+    for (size_t i = 0; i < 2; ++i) {
+        integer = jet_int_owned_from_i64(edges[i]);
+        a = jet_rt_record_new_DataTree_Int(integer); b = jet_rt_handle_clone_DataTree(a);
+        assert((int64_t)a->payload == edges[i] && a->payload == b->payload);
+        int64_t first = jet_rt_record_get_DataTree_Int(a);
+        int64_t second = jet_rt_record_get_DataTree_Int(a);
+        assert(first != integer && second != integer && first != second);
+        assert(jet_int_owned_to_i64(first) == edges[i] && jet_int_owned_to_i64(second) == edges[i]);
+        jet_rt_int_drop(integer); jet_rt_int_drop(first); jet_rt_int_drop(second);
+        assert(jet_rt_handle_eq_DataTree(a,b));
+        expect(jet_rt_handle_show_DataTree(b), decimal[i]); drop_pair(a,b);
+    }
     a = jet_rt_record_new_DataTree_Float(-0.0); b = jet_rt_record_new_DataTree_Float(0.0);
     assert(jet_rt_handle_eq_DataTree(a,b)); expect(jet_rt_handle_show_DataTree(a), "-0.0"); drop_pair(a,b);
     union { uint64_t bits; double value; } nan = { UINT64_C(0x7ff8000000000001) };
@@ -198,6 +210,13 @@ int main(int argc, char **argv) {
         Tree *tree = jet_rt_record_new_DataTree_Float(infinity.value);
         (void)jet_rt_handle_show_DataTree(tree);
         assert(!"non-finite JSON render must stop");
+    }
+    if (argc > 1 && strcmp(argv[1], "native-overflow") == 0) {
+        int64_t edge = jet_int_owned_from_i64(INT64_MAX);
+        int64_t too_big = jet_int_add(edge, 1);
+        jet_rt_int_drop(edge);
+        (void)jet_rt_record_new_DataTree_Int(too_big);
+        assert(!"native Int argument exceeds host range must stop");
     }
     scalar_cases(); text_cases(); sequence_cases();
     assert(intercepted > 0);
