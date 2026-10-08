@@ -133,7 +133,13 @@ pub fn on_signal(signal: ProcessSignal) Never! -[Exec]> {
 }
 
 pub fn pipeline(steps: [ProcessSpec]) -[Exec, Time.Wait]> ProcessReceipt IOError! {
-    core.process.pipeline(steps)
+    if steps.len() == 0 {
+        return Err(IOError.InvalidInput(IOContext{
+            operation: .Resolve, resource: None, os_code: None,
+            cause: Val("process.pipeline needs at least one command"),
+        }))
+    }
+    core.process.__pipeline_run(steps)
 }
 
 pub fn run_spec(spec: ProcessSpec) -[Exec, Time.Wait]> ProcessReceipt IOError! {
@@ -427,7 +433,8 @@ fn default_fields(argv: [String]) -> ProcessFields Never! {
     assert(fields.cwd == None && !fields.env_clear)
     assert(fields.env_names.len() == 0 && fields.env_values.len() == 0 && fields.env_remove.len() == 0)
     assert(fields.stdin == None && fields.stdout == .Capture && fields.stderr == .Capture)
-    assert(fields.timeout_ms == None && fields.output_limit == Val(67108864))
+    assert(fields.timeout_ms == None)
+    assert_eq(fields.output_limit, Val(67108864))
     assert(fields.cpu_time_limit_ms == None && fields.memory_limit_bytes == None && fields.open_file_limit == None)
     assert(!fields.detached && fields.terminal == None && fields.policy_wire == None)
 }
