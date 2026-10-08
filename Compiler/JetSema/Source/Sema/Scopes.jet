@@ -427,6 +427,11 @@ pub struct SemaCheckContext {
     pub comptime_requests: [SemaComptimeRequest]
     pub comptime_body_sources: [SemaComptimeBodySource]
     pub comptime_body_values: [SemaComptimeBodyValue]
+    // Derived module/key indexes into the canonical ordered body rows.
+    pub comptime_body_source_modules: [String:Int]
+    pub comptime_body_source_rows: [[String:Int]]
+    pub comptime_body_value_modules: [String:Int]
+    pub comptime_body_value_rows: [[String:Int]]
     pub compute_calls: [SemaComputeCallFact]
     pub autodiff_obligations: [SemaAutodiffObligation]
     pub autodiff_safe_panic: Bool
@@ -728,6 +733,10 @@ pub fn sema_check_context_init() -> SemaCheckContext Never! {
         comptime_requests: [SemaComptimeRequest]{},
         comptime_body_sources: [SemaComptimeBodySource]{},
         comptime_body_values: [SemaComptimeBodyValue]{},
+        comptime_body_source_modules: [String:Int]{},
+        comptime_body_source_rows: [[String:Int]]{},
+        comptime_body_value_modules: [String:Int]{},
+        comptime_body_value_rows: [[String:Int]]{},
         compute_calls: [SemaComputeCallFact]{},
         autodiff_obligations: [SemaAutodiffObligation]{},
         autodiff_safe_panic: false,
@@ -762,7 +771,7 @@ pub fn sema_check_context_init() -> SemaCheckContext Never! {
  
 
 pub fn sema_check_context_snapshot(source: SemaCheckContext) -> SemaCheckContext Never! {
-    SemaCheckContext{
+    snapshot := SemaCheckContext{
         exact_int_reachable: source.exact_int_reachable,
         unsafe_depth: source.unsafe_depth,
         borrow_ctx: source.borrow_ctx,
@@ -783,6 +792,10 @@ pub fn sema_check_context_snapshot(source: SemaCheckContext) -> SemaCheckContext
         comptime_requests: ~source.comptime_requests,
         comptime_body_sources: ~source.comptime_body_sources,
         comptime_body_values: ~source.comptime_body_values,
+        comptime_body_source_modules: [String:Int]{},
+        comptime_body_source_rows: [[String:Int]]{},
+        comptime_body_value_modules: [String:Int]{},
+        comptime_body_value_rows: [[String:Int]]{},
         compute_calls: ~source.compute_calls,
         autodiff_obligations: ~source.autodiff_obligations,
         autodiff_safe_panic: source.autodiff_safe_panic,
@@ -821,6 +834,9 @@ pub fn sema_check_context_snapshot(source: SemaCheckContext) -> SemaCheckContext
         subject_shorthand_depth: source.subject_shorthand_depth,
         host_hooks: source.host_hooks,
     }
+    sema_comptime_body_sources_index(&snapshot)
+    sema_comptime_body_values_index(&snapshot)
+    snapshot
 }
 
 // A rollback point for a probe check run on the live context (instead of a
@@ -900,6 +916,10 @@ pub fn sema_check_context_save(context: SemaCheckContext) -> SemaCheckContextMar
             comptime_requests: [SemaComptimeRequest]{},
             comptime_body_sources: [SemaComptimeBodySource]{},
             comptime_body_values: [SemaComptimeBodyValue]{},
+            comptime_body_source_modules: [String:Int]{},
+            comptime_body_source_rows: [[String:Int]]{},
+            comptime_body_value_modules: [String:Int]{},
+            comptime_body_value_rows: [[String:Int]]{},
             compute_calls: [SemaComputeCallFact]{},
             autodiff_obligations: [SemaAutodiffObligation]{},
             autodiff_safe_panic: context.autodiff_safe_panic,
@@ -957,8 +977,8 @@ pub fn sema_check_context_rollback(context: &SemaCheckContext, mark: SemaCheckCo
     loop context.local_view_provenance.len() > mark.local_view_provenance -> _ := &context.local_view_provenance.pop()
     loop context.name_references.len() > mark.name_references -> _ := &context.name_references.pop()
     loop context.comptime_requests.len() > mark.comptime_requests -> _ := &context.comptime_requests.pop()
-    loop context.comptime_body_sources.len() > mark.comptime_body_sources -> _ := &context.comptime_body_sources.pop()
-    loop context.comptime_body_values.len() > mark.comptime_body_values -> _ := &context.comptime_body_values.pop()
+    sema_comptime_body_sources_truncate(&context, mark.comptime_body_sources)
+    sema_comptime_body_values_truncate(&context, mark.comptime_body_values)
     loop context.compute_calls.len() > mark.compute_calls -> _ := &context.compute_calls.pop()
     loop context.autodiff_obligations.len() > mark.autodiff_obligations -> _ := &context.autodiff_obligations.pop()
     loop context.copy_events.len() > mark.copy_events -> _ := &context.copy_events.pop()
