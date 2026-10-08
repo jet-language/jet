@@ -1272,3 +1272,10 @@ leaf; when a capture sink is present, they marshal through the existing
 terminal newline frame. Coercion traversal and audit formatting remain in
 `json.jet`. The shipped hidden Time/IO effects remain unchanged pending the
 separately recorded effect-truthfulness ruling.
+
+`core.encoding.json.writer` now constructs a source `JSONWriter` around the
+existing Jet `stream.JSONPush` policy. `write`, `flush`, and `finish` delegate
+within Jet, retaining the event state machine, canonical mode, bounded
+allocation checks and sticky errors. File writes and flushes alone cross the
+registered provider boundary above. The target remains consumed, default
+limits remain safe, and canonical mode defaults to false.
