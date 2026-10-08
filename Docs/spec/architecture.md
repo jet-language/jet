@@ -57,6 +57,13 @@ referenced input script/path exists. Outputs created by earlier steps are
 identified separately; the runtime assembly driver is
 `Compiler/JetBackend/Tests/run-runtime.mjs`, not a JetRuntime test script.
 
+The seed/native C-ABI fixture declares each allocator export once in its shared
+extern block. Its ABI metadata checks must pass in both configurations before a
+runtime pack is admitted. The transitional Rust producer build retains debug
+information and receives a scoped `RUST_MIN_STACK=67108864` environment setting
+for the large generated compiler units; tool crashes remain failed evidence,
+not a native-runtime semantic verdict.
+
 The all-parts runtime includes `CAbiTest.rs` once through Codegen's canonical
 prelude; the compiler-call preparation step must not append a second copy.
 Test callbacks transfer owned E4 text errors through the shared carrier `take`
