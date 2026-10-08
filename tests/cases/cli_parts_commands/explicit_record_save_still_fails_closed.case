@@ -1,16 +1,12 @@
 # Port of tests/cli_parts/commands.rs:282-292; sources copied verbatim.
 # PENDING-SAME-HEAD: original predicates/oracles authored; runtime not run.
-# PENDING-GRAMMAR(batch-four): history filtered line predicates; source rustc availability guard preserved.
+# PENDING-GRAMMAR(batch-four): history filtered line predicates; pure source rustc availability guard erased for Jet-native execution.
 fixture: fixtures/explicit_record_save_still_fails_closed
 requires: os:unix
-requires: tool:rustc
-step: mkdir -p .jet/records
-exit: 0
-step: chmod 555 .jet/records
-exit: 0
+mkdir: .jet/records
+chmod: .jet/records 555
 step: jet test --record=keep
 unset: JET_RECEIPT_BYPASS
 exit: != 0 # original predicate
 stderr: ~ "E2105" # original predicate
-step: chmod 755 .jet/records
-exit: 0
+chmod: .jet/records 755

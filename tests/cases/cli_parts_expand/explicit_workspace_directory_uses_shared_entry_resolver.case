@@ -1,0 +1,16 @@
+# Port of tests/cli_parts/expand.rs:1363-1396; exact original sources and assertions.
+# PENDING-SAME-HEAD: runtime not run.
+# PENDING-GRAMMAR(batch-four): setup actions and prepend/append line transforms.
+copy: {root}/Examples/features/packages/monorepo workspace
+step: jet run .
+cwd: workspace
+env: NO_COLOR=1
+exit: 2
+stderr: ~ "ambiguous" # original predicate
+stderr: ~ "hello" # original predicate
+stderr: ~ "ranker" # original predicate
+step: jet run . -p hello
+cwd: workspace
+env: NO_COLOR=1
+exit: 0
+stdout: ~ "hello from the monorepo" # original predicate
