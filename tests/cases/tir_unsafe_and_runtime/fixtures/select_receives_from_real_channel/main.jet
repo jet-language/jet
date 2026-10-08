@@ -1,0 +1,11 @@
+
+fn run() {
+    (sender, receiver) :: channel<Int>()
+    worker :: task {
+        sender.send(42)
+    }
+    if {
+        value, receiver -> { print(value) }
+    }
+    worker.join() ?? panic("task failed")
+}

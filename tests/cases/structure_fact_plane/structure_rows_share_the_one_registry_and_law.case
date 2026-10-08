@@ -1,0 +1,11 @@
+# Port of tests/structure_fact_plane.rs::structure_rows_share_the_one_registry_and_law (46-75); sources copied verbatim from original Rust literals/templates.
+# PENDING-SAME-HEAD; no runtime or snapshot receipt claimed.
+# Split: CLI observable ordered rows/gates/safe direction retained; private lookup/law_violations claim remains compiler-lib.
+fixture: fixtures/structure_rows_share_the_one_registry_and_law
+step: jet inspect structure --json Examples/features/tooling/structure_plane.jet
+json: stdout doc $.structure.rows[*].name = ["Structure.Liveness","Structure.Lifecycle","Structure.ImportEdge"]
+json: stdout doc $.structure.rows[0].gates = ["_name"]
+json: stdout doc $.structure.rows[1].gates = ["policy allow"]
+json: stdout doc $.structure.rows[2].gates = ["manifest rule edit"]
+json: stdout doc $.structure.rows[*].safe_direction != "none"
+json: stdout doc $.structure.rows[*].gates #>= 1 # original predicate: all gates nonempty
