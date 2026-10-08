@@ -1170,9 +1170,15 @@ fn decode_utf8_lossy(bytes: [U8]) -> String Never! {
         consumed := 1
         valid := width > 0
         loop valid && consumed < width {
-            if i + consumed >= bytes.len() { valid = false; break }
+            if i + consumed >= bytes.len() {
+                valid = false
+                break
+            }
             byte :: Int.from_u8(bytes[i + consumed])
-            if byte < 128 || byte > 191 { valid = false; break }
+            if byte < 128 || byte > 191 {
+                valid = false
+                break
+            }
             if consumed == 1 && ((lead == 224 && byte < 160) || (lead == 237 && byte > 159) || (lead == 240 && byte < 144) || (lead == 244 && byte > 143)) {
                 valid = false
                 break
