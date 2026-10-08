@@ -1,7 +1,7 @@
 // Shared payload materialization is a move boundary, not a second value ABI.
 // All physical facts come from the parent's admitted ordinary-layout inventory.
 use core.math as shared_payload_math
-use jet_backend.[CoreSharedManifest, CoreSharedNativeLayout, CoreSharedLayoutMember, CoreSharedParentCallableResult, X64NativeAllocation, core_shared_runtime_call, core_shared_runtime_allocate, x64_execution_free, x64_native_call, x64_native_slot_write, x64_value_word, x64_value_byte, x64_value_unsigned_bytes, lower_mono_fingerprint]
+use jet_backend.[CoreSharedManifest, CoreSharedNativeLayout, CoreSharedLayoutMember, CoreSharedLayoutVariant, CoreSharedParentCallableResult, X64NativeAllocation, core_shared_runtime_call, core_shared_runtime_allocate, x64_execution_free, x64_native_call, x64_native_slot_write, x64_value_word, x64_value_byte, x64_value_unsigned_bytes, lower_mono_fingerprint, lower_result_selector, lower_result_payload_offset]
 use jet_eval.[JetEvalHostTypeShape, JetEvalHostTypeNode]
 use jet_foundation.[MIRType, TComptimeValue, TComptimeKey, TComptimeKeyField, TComptimeMapEntry, TComptimeField, TComptimeEnumArg, TComptimeReport, Type]
 
@@ -38,9 +38,12 @@ pub fn jet_driver_native_payload_codec(host: JetDriverCoreSourceParentHost, mani
     }
     None
 }
-fn jet_driver_payload_layout(codec: JetDriverNativePayloadCodec, key: String) -> CoreSharedNativeLayout? Never! {
-    loop row in codec.manifest.keyed_native_layout_inventory { if row.type_key == key -> return Val(row) }
+fn jet_driver_payload_layout_in(layouts: [CoreSharedNativeLayout], key: String) -> CoreSharedNativeLayout? Never! {
+    loop row in layouts { if row.type_key == key -> return Val(row) }
     None
+}
+fn jet_driver_payload_layout(codec: JetDriverNativePayloadCodec, key: String) -> CoreSharedNativeLayout? Never! {
+    jet_driver_payload_layout_in(codec.manifest.keyed_native_layout_inventory, key)
 }
 fn jet_driver_payload_allocate(codec: JetDriverNativePayloadCodec, stage: &JetDriverNativePayloadStage, size: Int, align: Int) -> Int {
     receipt :: core_shared_runtime_allocate(codec.host.runtime, if size == 0 -> 1 else -> size, align)
@@ -116,20 +119,25 @@ fn jet_driver_payload_key_field(fields: [TComptimeKeyField], name: String) -> TC
     loop field in fields { if field.name == name -> return Val(field.key) }
     None
 }
+struct JetDriverNativePayloadKeyOrder {
+    order: Int
+    refusal_key: String
+}
 // Map keys use their checked physical ordering, including declaration-order
 // enum discriminants and declaration-order struct fields, not display strings.
-fn jet_driver_payload_key_order(codec: JetDriverNativePayloadCodec, key: String, left: TComptimeKey, right: TComptimeKey) -> Int Never! {
-    row :: jet_driver_payload_layout(codec, key) ?? panic("checked Map key layout is missing")
-    if row.child_keys.len() == 1 && row.members.len() == 0 && row.variants.len() == 0 && row.representation != "Inline" -> return jet_driver_payload_key_order(codec, row.child_keys[0], left, right)
+fn jet_driver_payload_key_order(layouts: [CoreSharedNativeLayout], key: String, left: TComptimeKey, right: TComptimeKey) -> JetDriverNativePayloadKeyOrder Never! {
+    row :: jet_driver_payload_layout_in(layouts, key) ?? return JetDriverNativePayloadKeyOrder{order: 0, refusal_key: "CoreSharedPayloadLayoutMissing: {key}"}
+    if row.child_keys.len() == 1 && row.members.len() == 0 && row.variants.len() == 0 && row.representation != "Inline" -> return jet_driver_payload_key_order(layouts, row.child_keys[0], left, right)
+    order := Int?{None}
     if left == {
-        .Int(a) -> if right == .Int(b) -> return if a < b -> -1 else if a > b -> 1 else -> 0
-        .String(a) -> if right == .String(b) -> return if a < b -> -1 else if a > b -> 1 else -> 0
-        .Char(a) -> if right == .Char(b) -> return if a < b -> -1 else if a > b -> 1 else -> 0
-        .Bool(a) -> if right == .Bool(b) -> return if a == b -> 0 else if a -> 1 else -> -1
+        .Int(a) -> if right == .Int(b) -> order = Val(if a < b -> -1 else if a > b -> 1 else -> 0)
+        .String(a) -> if right == .String(b) -> order = Val(if a < b -> -1 else if a > b -> 1 else -> 0)
+        .Char(a) -> if right == .Char(b) -> order = Val(if a < b -> -1 else if a > b -> 1 else -> 0)
+        .Bool(a) -> if right == .Bool(b) -> order = Val(if a == b -> 0 else if a -> 1 else -> -1)
         .Enum(_, a) -> if right == .Enum(_, b) {
-            first :: jet_driver_payload_variant_selector(row, a) ?? panic("checked Map key variant is missing")
-            second :: jet_driver_payload_variant_selector(row, b) ?? panic("checked Map key variant is missing")
-            return if first < second -> -1 else if first > second -> 1 else -> 0
+            first :: jet_driver_payload_variant_selector(row, a) ?? return JetDriverNativePayloadKeyOrder{order: 0, refusal_key: "CoreSharedPayloadShapeMismatch: {key}"}
+            second :: jet_driver_payload_variant_selector(row, b) ?? return JetDriverNativePayloadKeyOrder{order: 0, refusal_key: "CoreSharedPayloadShapeMismatch: {key}"}
+            order = Val(if first < second -> -1 else if first > second -> 1 else -> 0)
         }
         .Tuple(a) | .Struct(_, a) -> {
             second := [TComptimeKeyField]?{None}
@@ -137,17 +145,58 @@ fn jet_driver_payload_key_order(codec: JetDriverNativePayloadCodec, key: String,
                 .Tuple(b) | .Struct(_, b) -> second = Val(b)
                 else -> {}
             }
-            fields :: second ?? panic("checked Map keys do not match their native layout")
+            fields :: second ?? return JetDriverNativePayloadKeyOrder{order: 0, refusal_key: "CoreSharedPayloadShapeMismatch: {key}"}
+            if a.len() != row.members.len() || fields.len() != row.members.len() -> return JetDriverNativePayloadKeyOrder{order: 0, refusal_key: "CoreSharedPayloadShapeMismatch: {key}"}
             loop member in row.members {
-                first :: jet_driver_payload_key_field(a, member.name) ?? panic("checked Map key field is missing")
-                other :: jet_driver_payload_key_field(fields, member.name) ?? panic("checked Map key field is missing")
-                order :: jet_driver_payload_key_order(codec, member.type_key, first, other)
-                if order != 0 -> return order
+                first :: jet_driver_payload_key_field(a, member.name) ?? return JetDriverNativePayloadKeyOrder{order: 0, refusal_key: "CoreSharedPayloadShapeMismatch: {key}"}
+                other :: jet_driver_payload_key_field(fields, member.name) ?? return JetDriverNativePayloadKeyOrder{order: 0, refusal_key: "CoreSharedPayloadShapeMismatch: {key}"}
+                compared :: jet_driver_payload_key_order(layouts, member.type_key, first, other)
+                if compared.refusal_key != "" || compared.order != 0 -> return compared
             }
-            return 0
+            order = Val(0)
         }
     }
-    panic("checked Map keys do not match their native layout")
+    value :: order ?? return JetDriverNativePayloadKeyOrder{order: 0, refusal_key: "CoreSharedPayloadShapeMismatch: {key}"}
+    JetDriverNativePayloadKeyOrder{order: value, refusal_key: ""}
+}
+// A fallible stable merge of indices keeps errors out of an infallible sort
+// callback and never materializes TData or native allocations while ordering.
+fn jet_driver_payload_order_keys(layouts: [CoreSharedNativeLayout], key: String, entries: [TComptimeMapEntry], ordered: &[Int]) -> String Never! {
+    loop (index, entry) in entries {
+        checked :: jet_driver_payload_key_order(layouts, key, entry.key, entry.key)
+        if checked.refusal_key != "" -> return checked.refusal_key
+        &ordered.push(index)
+    }
+    scratch := ~ordered
+    width := 1
+    loop width < ordered.len() {
+        start := 0
+        loop start < ordered.len() {
+            middle :: if start + width < ordered.len() -> start + width else -> ordered.len()
+            end :: if middle + width < ordered.len() -> middle + width else -> ordered.len()
+            left := start
+            right := middle
+            loop output in start..<end {
+                take_left := right == end
+                if left < middle && right < end {
+                    compared :: jet_driver_payload_key_order(layouts, key, entries[ordered[left]].key, entries[ordered[right]].key)
+                    if compared.refusal_key != "" -> return compared.refusal_key
+                    take_left = compared.order <= 0
+                }
+                if take_left {
+                    scratch[output] = ordered[left]
+                    left += 1
+                } else {
+                    scratch[output] = ordered[right]
+                    right += 1
+                }
+            }
+            start = end
+        }
+        loop index in 0..<ordered.len() -> ordered[index] = scratch[index]
+        width *= 2
+    }
+    ""
 }
 fn jet_driver_payload_text(codec: JetDriverNativePayloadCodec, text: String, symbol: String) -> Int? {
     bytes :: text.bytes()
@@ -289,8 +338,8 @@ fn jet_driver_payload_encode_node(codec: JetDriverNativePayloadCodec, stage: &Je
             }
             box :: jet_driver_payload_allocate(codec, &stage, row.box_size, 8)
             if box == 0 -> return stage.refusal_key
-            error = x64_native_slot_write(box, 8, if selected == 0 -> 1 else -> 0)
-            if error == "" -> error = jet_driver_payload_encode_node(codec, &stage, row.child_keys[selected], if selected == 0 -> ok else -> failure, child, box + 8)
+            error = x64_native_slot_write(box, 8, lower_result_selector(selected == 0))
+            if error == "" -> error = jet_driver_payload_encode_node(codec, &stage, row.child_keys[selected], if selected == 0 -> ok else -> failure, child, box + lower_result_payload_offset())
             if error == "" -> error = x64_native_slot_write(target, 8, box)
         }
         .List(inner) -> {
@@ -331,15 +380,19 @@ fn jet_driver_payload_encode_node(codec: JetDriverNativePayloadCodec, stage: &Je
             entry_layout :: jet_driver_payload_layout(codec, row.child_keys[2]) ?? return "CoreSharedPayloadLayoutMissing: {row.child_keys[2]}"
             if value == .Map(entries) {
                 ordered := [Int]{}
-                loop index in 0..<entries.len() -> &ordered.push(index)
-                &ordered.sort_by((a: Int, b: Int) -> jet_driver_payload_key_order(codec, row.child_keys[0], entries[a].key, entries[b].key) <=> 0)
+                error = jet_driver_payload_order_keys(codec.manifest.keyed_native_layout_inventory, row.child_keys[0], entries, &ordered)
+                if error != "" -> return error
                 buffer := 0
                 if ordered.len() > 0 {
                     buffer = jet_driver_payload_allocate(codec, &stage, ordered.len() * entry_layout.stride, 8)
                     if buffer == 0 -> return stage.refusal_key
                     loop (index, original) in ordered {
                         entry :: entries[original]
-                        if index > 0 && jet_driver_payload_key_order(codec, row.child_keys[0], entries[ordered[index - 1]].key, entry.key) == 0 -> return "CoreSharedPayloadMapDuplicateKey: {key}"
+                        if index > 0 {
+                            compared :: jet_driver_payload_key_order(codec.manifest.keyed_native_layout_inventory, row.child_keys[0], entries[ordered[index - 1]].key, entry.key)
+                            if compared.refusal_key != "" -> return compared.refusal_key
+                            if compared.order == 0 -> return "CoreSharedPayloadMapDuplicateKey: {key}"
+                        }
                         base :: buffer + index * entry_layout.stride
                         error = jet_driver_payload_member(codec, &stage, row.members[0], key_node, jet_driver_payload_key_value(entry.key), base)
                         if error == "" -> error = jet_driver_payload_member(codec, &stage, row.members[1], value_node, entry.value, base)
@@ -533,10 +586,11 @@ fn jet_driver_payload_decode_node(codec: JetDriverNativePayloadCodec, key: Strin
             box :: x64_value_word(source)
             if box <= 0 -> return JetDriverNativePayloadDecoded{value: None, refusal_key: "CoreSharedPayloadBoxMissing: {key}"}
             selector :: x64_value_word(box)
-            if selector != 0 && selector != 1 -> return JetDriverNativePayloadDecoded{value: None, refusal_key: "CoreSharedPayloadResultSelectorInvalid: {key}"}
-            decoded :: jet_driver_payload_decode_node(codec, row.child_keys[if selector == 1 -> 0 else -> 1], if selector == 1 -> ok else -> failure, box + 8)
+            if selector != lower_result_selector(false) && selector != lower_result_selector(true) -> return JetDriverNativePayloadDecoded{value: None, refusal_key: "CoreSharedPayloadResultSelectorInvalid: {key}"}
+            success :: selector == lower_result_selector(true)
+            decoded :: jet_driver_payload_decode_node(codec, row.child_keys[if success -> 0 else -> 1], if success -> ok else -> failure, box + lower_result_payload_offset())
             value :: decoded.value ?? return decoded
-            result :: if selector == 1 -> TComptimeValue.Present{value: value} else -> TComptimeValue.Failed{report: TComptimeReport.Told{value: value}}
+            result :: if success -> TComptimeValue.Present{value: value} else -> TComptimeValue.Failed{report: TComptimeReport.Told{value: value}}
             return JetDriverNativePayloadDecoded{value: Val(result), refusal_key: ""}
         }
         .List(inner) -> {
@@ -700,4 +754,32 @@ pub fn jet_driver_native_payload_swap(codec: JetDriverNativePayloadCodec, stage:
     assert_eq(jet_driver_payload_field(fields, "missing"), None)
     key :: TComptimeKey.Struct{type_name: "Key", fields: [TComptimeKeyField]{TComptimeKeyField{name: "item", key: TComptimeKey.Int{value: 7}}}}
     assert_eq(jet_driver_payload_value_key(jet_driver_payload_key_value(key)), Val(key))
+}
+
+#Test("Map ordering refuses missing child layouts and mismatched fields without panicking") {
+    row := CoreSharedNativeLayout{type_key: "key", nominal_key: "", display_name: "Key", representation: "Inline", kind: 0, stride: 8, payload_size: 8, align: 8, box_size: 0, clone_identity: "", drop_identity: "", child_keys: [String]{}, members: [CoreSharedLayoutMember]{CoreSharedLayoutMember{name: "item", offset: 0, boxed: false, type_key: "missing", storage_type_key: "missing"}}, variants: [CoreSharedLayoutVariant]{}}
+    good :: TComptimeKey.Struct{type_name: "Key", fields: [TComptimeKeyField]{TComptimeKeyField{name: "item", key: TComptimeKey.Int{value: 7}}}}
+    bad :: TComptimeKey.Struct{type_name: "Key", fields: [TComptimeKeyField]{TComptimeKeyField{name: "wrong", key: TComptimeKey.Int{value: 7}}}}
+    layouts :: [CoreSharedNativeLayout]{row}
+    assert_eq(jet_driver_payload_key_order(layouts, "key", good, good).refusal_key, "CoreSharedPayloadLayoutMissing: missing")
+    assert_eq(jet_driver_payload_key_order(layouts, "key", good, bad).refusal_key, "CoreSharedPayloadShapeMismatch: key")
+    ordered := [Int]{}
+    entries :: [TComptimeMapEntry]{TComptimeMapEntry{key: good, value: TComptimeValue.Unit}}
+    assert_eq(jet_driver_payload_order_keys(layouts, "key", entries, &ordered), "CoreSharedPayloadLayoutMissing: missing")
+    row.members = [CoreSharedLayoutMember]{}
+    row.representation = "Word"
+    row.kind = 12
+    enum_key :: TComptimeKey.Enum{type_name: "Key", variant: "missing"}
+    assert_eq(jet_driver_payload_key_order([CoreSharedNativeLayout]{row}, "key", enum_key, enum_key).refusal_key, "CoreSharedPayloadShapeMismatch: key")
+}
+
+#Test("Map fallible index merge is stable across partial runs and mixed key shapes refuse") {
+    row :: CoreSharedNativeLayout{type_key: "integer", nominal_key: "", display_name: "Int", representation: "TaggedInteger", kind: 1, stride: 8, payload_size: 8, align: 8, box_size: 0, clone_identity: "", drop_identity: "", child_keys: [String]{}, members: [CoreSharedLayoutMember]{}, variants: [CoreSharedLayoutVariant]{}}
+    entries := [TComptimeMapEntry]{}
+    loop value in ([Int]{3, 1, 2, 1, 4}) -> &entries.push(TComptimeMapEntry{key: TComptimeKey.Int{value: value}, value: TComptimeValue.Unit})
+    ordered := [Int]{}
+    assert_eq(jet_driver_payload_order_keys([CoreSharedNativeLayout]{row}, "integer", entries, &ordered), "")
+    assert_eq(ordered, [Int]{1, 3, 2, 0, 4})
+    mismatch :: jet_driver_payload_key_order([CoreSharedNativeLayout]{row}, "integer", TComptimeKey.Int{value: 1}, TComptimeKey.Bool{value: true})
+    assert_eq(mismatch.refusal_key, "CoreSharedPayloadShapeMismatch: integer")
 }

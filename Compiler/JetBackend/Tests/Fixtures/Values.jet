@@ -186,6 +186,33 @@ fn fx_values_phi() -> MIRProgram Never! {
     fx_program([MIRFunction]{fx_function("run", r, fx_unit())}, ^types)
 }
 
+// Ordinary Result encode -> decode for both arms, with unlike payload layouts.
+// The codec shares the selector/offset definitions used by these operations.
+// expect-stdout values-result-roundtrip: "true\n7\nok\nfalse\nfault\n"
+fn fx_values_result_roundtrip() -> MIRProgram Never! {
+    pt :: fx_named("Pt")
+    result_ty :: mir_type_from_kind(MIRTypeKind.Result{ok: pt, err: fx_string()})
+    types :: [MIRTypeDef]{fx_type_def("Pt", MIRTypeDefKind.Struct{fields: [MIRField]{fx_field("Pt", "x", fx_int()), fx_field("Pt", "on", fx_bool()), fx_field("Pt", "name", fx_string())}, methods: [MIRFunctionID]{}})}
+    b := fx_builder()
+    payload :: fx_values_pt(&b, 7, true, "ok")
+    success :: fx_owned(&b, result_ty, MIROperation.ResultOk{value: payload})
+    success_tag :: fx_copy(&b, fx_bool(), MIROperation.ResultIsOk{subject: success})
+    fx_print(&b, success_tag)
+    decoded_success :: fx_value(&b, pt, fx_borrow(), MIROperation.ResultValue{subject: success, ok: true})
+    fx_values_show(&b, decoded_success, "Pt", "x", fx_int())
+    fx_values_show(&b, decoded_success, "Pt", "name", fx_string())
+    fx_do(&b, MIROperation.Drop{value: success, kind: MIRDropKind.Value})
+    error :: fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "fault"}})
+    failure :: fx_owned(&b, result_ty, MIROperation.ResultErr{value: error})
+    failure_tag :: fx_copy(&b, fx_bool(), MIROperation.ResultIsOk{subject: failure})
+    fx_print(&b, failure_tag)
+    decoded_failure :: fx_value(&b, fx_string(), fx_borrow(), MIROperation.ResultValue{subject: failure, ok: false})
+    fx_print(&b, decoded_failure)
+    fx_do(&b, MIROperation.Drop{value: failure, kind: MIRDropKind.Value})
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, ^types)
+}
+
 // struct Pt { x: Int, on: Bool, name: String }
 // enum Holder { Empty, Has(Pt) }
 // fn run() {
