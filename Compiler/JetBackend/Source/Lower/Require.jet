@@ -106,6 +106,18 @@ fn lower_require_context_text(path: String, location: MIRPanicLoc, context: MIRP
     String.from_bytes(out) ?? ""
 }
 
+fn lower_require_descriptor(m: &LowerModule, path: String, location: MIRPanicLoc, context: MIRPanicContext) -> LIRDataID Never! {
+    data :: lower_static_object(&m, 88)
+    lower_require_static_text(&m, data, 0, path)
+    lower_static_store(&m, data, 16, lower_static_word(location.line))
+    lower_require_static_text(&m, data, 24, context.function)
+    lower_require_static_text(&m, data, 40, context.source_line)
+    lower_static_store(&m, data, 56, lower_static_word(location.column))
+    lower_static_store(&m, data, 64, lower_static_word(context.caret))
+    lower_require_static_text(&m, data, 72, lower_require_context_text(path, location, context))
+    data
+}
+
 fn lower_require_stop(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, kind: MIRRequireKind, condition: MIRValueID?, location: MIRPanicLoc, context: MIRPanicContext, values: [MIRValueID], always_stops: Bool) Never! {
     _ := lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "require stop names missing Prelude call {call.value}")
     if kind == .Panic {
@@ -143,14 +155,7 @@ fn lower_require_stop(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
     }
     locals :: lower_require_locals(p, c, &m, &f, context) ?? return
     path :: lower_source_path(p, m, location.file)
-    data :: lower_static_object(&m, 88)
-    lower_require_static_text(&m, data, 0, path)
-    lower_static_store(&m, data, 16, lower_static_word(location.line))
-    lower_require_static_text(&m, data, 24, context.function)
-    lower_require_static_text(&m, data, 40, context.source_line)
-    lower_static_store(&m, data, 56, lower_static_word(location.column))
-    lower_static_store(&m, data, 64, lower_static_word(context.caret))
-    lower_require_static_text(&m, data, 72, lower_require_context_text(path, location, context))
+    data :: lower_require_descriptor(&m, path, location, context)
     descriptor :: lower_pointer(&f)
     lower_emit(&f, LIRInst.DataAddress{dst: descriptor, data: data})
     ordinal :: lower_const(&f, if kind == .Require -> 0 else -> if kind == .RequireEq -> 1 else -> 2)

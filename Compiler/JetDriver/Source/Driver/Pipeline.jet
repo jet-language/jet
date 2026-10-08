@@ -4257,7 +4257,7 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
         jet_driver_keep_going_flush(&kg, request.trace_sink)
     }
 
-    lowered := lower_functions(&sema_functions, &runtime_semantic_modules, load.source_files, request.compiler_threads, request.trace_sink)
+    lowered := lower_functions(&sema_functions, &runtime_semantic_modules, load.source_files, request.compiler_threads, request.trace_sink, !emit_rust && request.target == JetDriverCompileTarget.Native)
     if request.trace_sink == .Val(sink) -> sink.end("lower", lowered.functions.len())
     if lowered.functions.len() != sema_functions.len() {
         &load.diagnostics.push(jet_driver_diagnostic_without_span("E0003", "MIR lowering did not return every checked function", "a successful lowering preserves the complete checked function set", "report this incomplete codegen result as a compiler defect"))

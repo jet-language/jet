@@ -49,10 +49,8 @@ pub enum JetCLIPlan {
     // does, then run it with `program_args`. `verbose` (`--verbose`/`-v`
     // before `--`) shows advisory lints (D-LINT-VISIBILITY2=A).
     Run(file: String, source: String, color: Bool, release: Bool, verbose: Bool, threads: Int?, program_args: [String], invocation: JetCLIInvocationAuthority?, notice: String)
-    // `jet test <file>`: compile the entry's test harness, build it through
-    // the rustc path (under either accepted profile; the Jet-native backend
-    // has no harness entry), and run it under `options`
-    // (Source/CmdCompile.rs `run_test_target`).
+    // `jet test <file>`: compile the checked test harness and run it under
+    // `options`; native O0 unless the release profile was selected.
     Test(file: String, source: String, color: Bool, verbose: Bool, threads: Int?, options: JetCLITestOptions)
     // `jet new <name>`: write the project folder (Source/CmdCompile.rs
     // `run_new`); `template` is "" for the print-only starter.
@@ -121,6 +119,7 @@ pub struct JetCLIFmtRequest {
 // `TestRunOpts`). `capture` is `failed`, `all`, or `none`; `status` is the
 // stderr status text the Rust host writes before the compile.
 pub struct JetCLITestOptions {
+    pub release: Bool
     pub capture: String
     pub filter: String?
     pub shuffle_seed: String?
@@ -720,7 +719,7 @@ fn jet_cli_declares_test_override(source: String) -> Bool Never! {
 // targets, doctests, the `fn test` override, the result cache, and the flags
 // above are not ported yet.
 fn jet_cli_test(jet_argv: [String], color: Bool, quiet: Bool, verbose: Bool, threads: Int?) -[FS, Env]> JetCLIPlan Never! {
-    options := JetCLITestOptions{capture: "failed", filter: None, shuffle_seed: None, serial: false, trace_tiers: false, update_snapshots: false, project_root: None, status: ""}
+    options := JetCLITestOptions{release: false, capture: "failed", filter: None, shuffle_seed: None, serial: false, trace_tiers: false, update_snapshots: false, project_root: None, status: ""}
     fresh := false
     show_default := false
     positionals := [String]{}
@@ -792,7 +791,10 @@ fn jet_cli_test(jet_argv: [String], color: Bool, quiet: Bool, verbose: Bool, thr
         }
     }
     // `--profile` accepts debug and release, as `run` does.
-    if jet_cli_profile(jet_argv, "test", color) == .Refused(refusal) -> return refusal
+    if jet_cli_profile(jet_argv, "test", color) == {
+        .Refused(refusal) -> return refusal
+        .Selected(release) -> options.release = release
+    }
     if show_default && !quiet -> options.status = "jet test: using stock default\n"
     // A bare `jet test` runs the package (spec S43), not ported yet.
     if positionals.len() == 0 {
