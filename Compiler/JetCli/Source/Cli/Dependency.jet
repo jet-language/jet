@@ -60,7 +60,7 @@ fn jet_cli_dependency_read(path: String, color: Bool, json: Bool) -[FS, Env]> (r
 fn jet_cli_dependency_with_notice(error: JetCLIDependencyError, notice: String) -> JetCLIDependencyError Never! {
     JetCLIDependencyError{output: JetDriverVerbOutput{stdout: error.output.stdout, stderr: "{notice}{error.output.stderr}", exit_code: error.output.exit_code}}
 }
-fn jet_cli_dependency_input(root: String, color: Bool, json: Bool) -[FS, Env]> JetCLIPackageInput JetCLIDependencyError! {
+fn jet_cli_package_input_entry(root: String, color: Bool, json: Bool) -[FS, Env]> (path: String, notice: String) JetCLIDependencyError! {
     notices := [String]{}
     entry :: if jet_cli_find_project_entry(root, "fetch", color, &notices) == {
         .Entry(found) -> found.path
@@ -76,9 +76,13 @@ fn jet_cli_dependency_input(root: String, color: Bool, json: Bool) -[FS, Env]> J
         }
         .Absent -> jet_cli_entry_join(root, JET_CLI_DEFAULT_ENTRY_FILE)
     }
-    notice :: notices.join("")
-    input := jet_cli_dependency_input_at_entry(root, entry, color, json) ?? return Err(jet_cli_dependency_with_notice(err, notice))
-    input.notice = notice
+    Ok((path: entry, notice: notices.join("")))
+}
+
+fn jet_cli_dependency_input(root: String, color: Bool, json: Bool) -[FS, Env]> JetCLIPackageInput JetCLIDependencyError! {
+    entry :: jet_cli_package_input_entry(root, color, json)
+    input := jet_cli_dependency_input_at_entry(root, entry.path, color, json) ?? return Err(jet_cli_dependency_with_notice(err, entry.notice))
+    input.notice = entry.notice
     Ok(input)
 }
 
@@ -92,6 +96,10 @@ fn jet_cli_dependency_input_at_entry(root: String, entry: String, color: Bool, j
         manifest :: pkg_to_manifest(facts, block.body(source.raw)) ?? return Err(jet_cli_dependency_source_error(entry, block.body(source.raw), err.diagnostic))
         return Ok(JetCLIPackageInput{path: entry, raw: source.raw, inline: inline, manifest: manifest, authority: source.authority})
     }
+    jet_cli_package_input_from_facts(root, facts, color, json)
+}
+
+fn jet_cli_package_input_from_facts(root: String, facts: PackageFacts, color: Bool, json: Bool) -[FS, Env]> JetCLIPackageInput JetCLIDependencyError! {
     path :: (pkg_manifest_path_checked(root) ?? return Err(jet_cli_dependency_source_error(JET_CLI_PACKAGE_FILE, "", err.diagnostic))) ?? return Err(jet_cli_dependency_cli_error("E2105", "couldn't locate {JET_CLI_PACKAGE_FILE}", None, color, json))
     carrier :: jet_cli_dependency_read(path, color, json)
     manifest :: pkg_to_manifest(facts, carrier.raw) ?? return Err(jet_cli_dependency_source_error(path, carrier.raw, err.diagnostic))
@@ -109,12 +117,25 @@ fn jet_cli_dependency_edit(input: JetCLIPackageInput, name: String, spec: DepSpe
 fn jet_cli_dependency_publish(input: JetCLIPackageInput, updated: String) String! -[FS, Env, Time]> {
     parent :: cli_files.dirname(input.path)
     name :: cli_files.basename(input.path)
-    current :: foundation_open_file_authority(parent, name) ?? return Err("could not check {input.path}: {jet_cli_io_error_text(err)}")
-    bytes :: current.read_bounded(MAX_TREE_FILE_BYTES) ?? return Err("could not read {input.path}: {jet_cli_io_error_text(err)}")
-    raw :: String.from_bytes(bytes) ?? return Err("could not read {input.path}: stream did not contain valid UTF-8")
+    resolver :: AuthorityResolver.open(parent) ?? return Err("could not open package source authority: {err.message()}")
+    current :: resolver.checked_file(name) ?? return Err("could not check {input.path}: {err.message()}")
+    raw :: current.text() ?? return Err("could not read {input.path}: {err.message()}")
     if raw != input.raw -> return Err("{input.path} changed while the package edit was prepared")
+    resolver.revalidate_file(current) ?? return Err("package source changed before writing: {err.message()}")
     input.authority.revalidate() ?? return Err("package source changed before writing: {jet_cli_io_error_text(err)}")
-    foundation_write_file_nofollow_at_root(parent, name, updated.bytes(), Val(() -> input.authority.revalidate())) ?? return Err("could not publish {input.path}: {jet_cli_io_error_text(err)}")
+    foundation_write_file_nofollow_at_root(parent, name, updated.bytes(), Val(() -> input.authority.revalidate())) ?? return Err(jet_cli_dependency_publication_error(input.path, err))
+}
+
+fn jet_cli_dependency_publication_error(path: String, failure: FoundationPublicationError) -> String Never! {
+    detail :: jet_cli_io_error_text(failure.error)
+    if failure.phase == {
+        .PreparePath -> "could not check {path}: {detail}"
+        .OpenRoot | .OpenParent -> "could not open package source authority: {detail}"
+        .CreateStage | .WriteStage | .SetMode | .InspectStage -> "could not stage {path}: {detail}"
+        .SyncStage | .SyncParent -> "could not sync {path}: {detail}"
+        .ValidateSource -> "package source changed before publishing: {detail}"
+        .InspectDestination | .ValidateAuthority | .Rename | .ValidatePublished -> "could not publish {path}: {detail}"
+    }
 }
 
 fn jet_cli_dependency_registry_tiers(lock: LockFile) -> String Never! {

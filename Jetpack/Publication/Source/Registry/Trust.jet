@@ -76,7 +76,7 @@ pub fn publication_ensure_registry_root_key(registry_name: String, public_key: S
 fn publication_install_registry_root_pin(path: String, public_key: String) -[FS, Env, Time]> String IOError! {
     if publication_check_registry_root_pin(path, public_key) -> return Ok(path)
     policy :: FoundationPublicationPolicy{mode: 384, create: .CreateNew, destination_links: .Refuse, create_root: false}
-    foundation_write_file_nofollow_at_root(files.dirname(path), files.basename(path), "{public_key}\n".bytes(), None, policy)
+    foundation_write_file_nofollow_at_root(files.dirname(path), files.basename(path), "{public_key}\n".bytes(), None, policy) ?? return Err(err.error)
     Ok(path)
 }
 pub fn publication_read_registry_root_key(registry_name: String) -[FS, Env]> String IOError! {

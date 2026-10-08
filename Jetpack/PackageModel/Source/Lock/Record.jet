@@ -104,7 +104,7 @@ pub fn pkg_lock_write_atomically(project_root: String, contents: [U8]) LockError
     if contents.len() > PKG_MAX_LOCK_BYTES -> return Err(LockError.Invalid("internal error: refusing to write project lock `{path}`: serialized lock is {contents.len()} bytes, over the 1 MiB limit"))
     if foundation_write_file_nofollow_at_root(project_root, UNIFIED_LOCK_FILE, contents, None) == {
         .Ok(_) -> {}
-        .Err(error) -> return Err(LockError.Invalid("could not atomically publish project lock `{path}`: {error}"))
+        .Err(error) -> return Err(LockError.Invalid("could not atomically publish project lock `{path}`: {error.error}"))
     }
 }
 

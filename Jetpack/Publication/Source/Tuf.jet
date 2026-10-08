@@ -136,11 +136,10 @@ pub fn publication_verify_registry_package(repo: String, registry_name: String, 
 
 fn publication_tuf_all_index_entries(repo: String) -[FS]> [String: [PublicationIndexEntry]] IOError! {
     root :: files.join(repo, "index")
-    info :: if files.stat(root) == {
-        .Ok(info) -> info
-        .Err(error) -> if error == {
+    info :: files.stat(root) ?? {
+        if err == {
             .NotFound(_) -> return Ok([String: [PublicationIndexEntry]]{})
-            else -> return Err(error)
+            else -> return Err(err)
         }
     }
     if info.is_symlink || !info.is_dir -> return Err(publication_tuf_invalid("registry index root is not a real directory"))
@@ -246,11 +245,10 @@ fn publication_tuf_validate_referrers(entries: [PublicationIndexEntry], referrer
 
 fn publication_tuf_read_log(repo: String) -[FS, Env]> [PublicationLogRecord] IOError! {
     path :: publication_tuf_transparency_log_path(repo)
-    text :: if publication_tuf_read_bounded(repo, path, PUBLICATION_TUF_MAX_LOG_BYTES, "registry transparency log is too large") == {
-        .Ok(text) -> text
-        .Err(error) -> if error == {
+    text :: publication_tuf_read_bounded(repo, path, PUBLICATION_TUF_MAX_LOG_BYTES, "registry transparency log is too large") ?? {
+        if err == {
             .NotFound(_) -> return Ok([PublicationLogRecord]{})
-            else -> return Err(error)
+            else -> return Err(err)
         }
     }
     publication_tuf_parse_log(text)
@@ -499,11 +497,10 @@ fn publication_tuf_read_bounded(root: String, path: String, limit: Int, oversize
     Ok(text)
 }
 fn publication_tuf_snapshot_file(repo: String, path: String) -[FS, Env]> PublicationMetadataFileSnapshot IOError! {
-    metadata :: if files.stat(path) == {
-        .Ok(metadata) -> metadata
-        .Err(error) -> if error == {
+    metadata :: files.stat(path) ?? {
+        if err == {
             .NotFound(_) -> return Ok(PublicationMetadataFileSnapshot{path: path, bytes: None})
-            else -> return Err(error)
+            else -> return Err(err)
         }
     }
     if metadata.is_symlink || !metadata.is_file -> return Err(publication_tuf_invalid("registry metadata path is not a regular file"))
@@ -524,11 +521,10 @@ fn publication_tuf_restore_snapshot(repo: String, snapshot: PublicationMetadataF
     if snapshot.bytes == {
         Val(bytes) -> publication_tuf_atomic_write(repo, snapshot.path, bytes)
         None -> {
-            metadata :: if files.stat(snapshot.path) == {
-                .Ok(metadata) -> metadata
-                .Err(error) -> if error == {
+            metadata :: files.stat(snapshot.path) ?? {
+                if err == {
                     .NotFound(_) -> return
-                    else -> return Err(error)
+                    else -> return Err(err)
                 }
             }
             if metadata.is_symlink || !metadata.is_file -> return Err(publication_tuf_invalid("registry metadata rollback destination is not a regular file"))
@@ -547,7 +543,7 @@ fn publication_tuf_atomic_write(root: String, path: String, bytes: [U8]) IOError
     if files.stat(parent) == .Ok(metadata) {
         if metadata.is_symlink || !metadata.is_dir -> return Err(publication_tuf_invalid("registry metadata parent is not a real directory"))
     }
-    foundation_write_file_nofollow_at_root(root, files.relative(path, root), bytes, None)
+    foundation_write_file_nofollow_at_root(root, files.relative(path, root), bytes, None) ?? return Err(err.error)
 }
 // Rust line: no partial append on unsafe keys/values. The boolean core keeps
 // unsigned construction's intentional ignored refusal without another encoder.

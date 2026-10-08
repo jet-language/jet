@@ -332,6 +332,19 @@ pub struct FoundationPublicationPolicy {
     pub create_root: Bool{false}
 }
 
+// Phase is recorded at the producing operation, never guessed from IO text.
+// All callers share this one publisher; callers needing only IO project error.
+pub enum FoundationPublicationPhase {
+    PreparePath OpenRoot OpenParent InspectDestination CreateStage
+    WriteStage SetMode SyncStage InspectStage ValidateSource
+    ValidateAuthority Rename SyncParent ValidatePublished
+}
+#Error
+pub struct FoundationPublicationError {
+    pub phase: FoundationPublicationPhase
+    pub error: IOError
+}
+
 // Rust SHA256::rooted_authority::write, with CmdPkg::write_package_source's
 // checked-source validation point. A checked edit passes the ORIGINAL held
 // source it was prepared from, as `Val(() -> source.revalidate())` over its
@@ -339,22 +352,22 @@ pub struct FoundationPublicationPolicy {
 // after write/fsync, before the final authority checks and descriptor-relative
 // rename; failure removes the stage. None uses the same mechanism without
 // source validation (e.g. a new lock).
-pub fn foundation_write_file_nofollow_at_root(root: String, relative: String, contents: [U8], before_rename: (fn() IOError! -[FS, Env]>)?, policy: FoundationPublicationPolicy{FoundationPublicationPolicy{}}) IOError! -[FS, Env, Time]> {
-    components :: foundation_normal_components(.Write, relative)
-    if components.len() == 0 -> return Err(foundation_io_error(.Write, relative, "file authority publication path is empty"))
-    directories := foundation_open_root_directories(root, policy.create_root)
+pub fn foundation_write_file_nofollow_at_root(root: String, relative: String, contents: [U8], before_rename: (fn() IOError! -[FS, Env]>)?, policy: FoundationPublicationPolicy{FoundationPublicationPolicy{}}) FoundationPublicationError! -[FS, Env, Time]> {
+    components :: foundation_normal_components(.Write, relative) ?? return Err(FoundationPublicationError{phase: .PreparePath, error: err})
+    if components.len() == 0 -> return Err(FoundationPublicationError{phase: .PreparePath, error: foundation_io_error(.Write, relative, "file authority publication path is empty")})
+    directories := foundation_open_root_directories(root, policy.create_root) ?? return Err(FoundationPublicationError{phase: .OpenRoot, error: err})
     loop index in 0..<(components.len() - 1) {
         name :: components[index]
         parent_index :: directories.len() - 1
-        child :: foundation_open_or_create_directory(directories[parent_index].handle, name)
+        child :: foundation_open_or_create_directory(directories[parent_index].handle, name) ?? return Err(FoundationPublicationError{phase: .OpenParent, error: err})
         child_path :: files.join(directories[parent_index].path, name)
         // Both parent projections end before resizing the held chain.
         &directories.push(FoundationPublicationDirectory{handle: child, path: child_path, publication_parent: true})
     }
     parent :: directories[directories.len() - 1].handle
     final_name :: components[components.len() - 1]
-    expected_destination :: foundation_inspect_destination(parent, final_name, policy.destination_links)
-    if policy.create == .CreateNew && expected_destination != None -> return Err(IOError.AlreadyExists(foundation_io_context(.Write, relative, "file authority publication target already exists")))
+    expected_destination :: foundation_inspect_destination(parent, final_name, policy.destination_links) ?? return Err(FoundationPublicationError{phase: .InspectDestination, error: err})
+    if policy.create == .CreateNew && expected_destination != None -> return Err(FoundationPublicationError{phase: .InspectDestination, error: IOError.AlreadyExists(foundation_io_context(.Write, relative, "file authority publication target already exists"))})
     stamp :: time.unix_ms(time.now())
     pid :: sys.pid()
     loop attempt in 0..<128 {
@@ -363,17 +376,19 @@ pub fn foundation_write_file_nofollow_at_root(root: String, relative: String, co
         writer :: parent.create(candidate, if_exists: .Refuse, mode: Val(384)) ?? {
             if err == {
                 .AlreadyExists(_) -> {}
-                else -> return Err(err)
+                else -> return Err(FoundationPublicationError{phase: .CreateStage, error: err})
             }
             next
         }
         if foundation_stage_and_rename(directories, parent, writer, candidate, final_name, contents, expected_destination, before_rename, policy) == {
             .Ok(staged) -> {
-                loop directory in directories -> directory.handle.fsync()
-                foundation_ensure_directories_current(directories)
-                current :: foundation_inspect_destination(parent, final_name)
-                published :: current ?? return Err(IOError.Other(foundation_io_context(.Write, relative, "file authority publication target disappeared after rename")))
-                if published != staged -> return Err(IOError.Other(foundation_io_context(.Write, relative, "file authority publication target changed after rename")))
+                loop directory in directories {
+                    directory.handle.fsync() ?? return Err(FoundationPublicationError{phase: .SyncParent, error: err})
+                }
+                foundation_ensure_directories_current(directories) ?? return Err(FoundationPublicationError{phase: .ValidatePublished, error: err})
+                current :: foundation_inspect_destination(parent, final_name) ?? return Err(FoundationPublicationError{phase: .ValidatePublished, error: err})
+                published :: current ?? return Err(FoundationPublicationError{phase: .ValidatePublished, error: IOError.Other(foundation_io_context(.Write, relative, "file authority publication target disappeared after rename"))})
+                if published != staged -> return Err(FoundationPublicationError{phase: .ValidatePublished, error: IOError.Other(foundation_io_context(.Write, relative, "file authority publication target changed after rename"))})
                 return
             }
             .Err(error) -> {
@@ -382,7 +397,7 @@ pub fn foundation_write_file_nofollow_at_root(root: String, relative: String, co
             }
         }
     }
-    return Err(IOError.AlreadyExists(foundation_io_context(.Write, relative, "could not reserve a temporary authority file")))
+    return Err(FoundationPublicationError{phase: .CreateStage, error: IOError.AlreadyExists(foundation_io_context(.Write, relative, "could not reserve a temporary authority file"))})
 }
 
 // Rust rooted_authority::Authority: one regular single-link file opened
@@ -809,31 +824,31 @@ fn foundation_same_directory(path_stat: Stat, held: Stat) -> Bool Never! {
 
 // One staging/rename path; the callback is fallible production validation,
 // not a notification hook. All failures here are pre-publication.
-fn foundation_stage_and_rename(directories: [FoundationPublicationDirectory], parent: Directory, writer: FileWriter, temporary: String, final_name: String, contents: [U8], expected_destination: FileID?, before_rename: (fn() IOError! -[FS, Env]>)?, policy: FoundationPublicationPolicy{FoundationPublicationPolicy{}}) -[FS, Env]> FileID IOError! {
-    writer.write_all(contents)
+fn foundation_stage_and_rename(directories: [FoundationPublicationDirectory], parent: Directory, writer: FileWriter, temporary: String, final_name: String, contents: [U8], expected_destination: FileID?, before_rename: (fn() IOError! -[FS, Env]>)?, policy: FoundationPublicationPolicy{FoundationPublicationPolicy{}}) -[FS, Env]> FileID FoundationPublicationError! {
+    writer.write_all(contents) ?? return Err(FoundationPublicationError{phase: .WriteStage, error: err})
     // #3593: permissions are applied to the HELD writer, never a pathname.
     // The stage starts owner-only even when its final public mode is 0644.
-    writer.set_mode(policy.mode)
-    writer.fsync()
-    staged :: writer.stat()
-    if staged.links != 1 -> return Err(IOError.PermissionDenied(foundation_io_context(.Write, temporary, "file authority temporary has multiple hard links")))
-    if staged.mode & 4095 != policy.mode -> return Err(IOError.PermissionDenied(foundation_io_context(.Write, temporary, "file authority temporary has incorrect permissions")))
-    if before_rename == .Val(validate) -> validate()
-    foundation_ensure_directories_current(directories)
-    destination :: foundation_inspect_destination(parent, final_name, policy.destination_links)
+    writer.set_mode(policy.mode) ?? return Err(FoundationPublicationError{phase: .SetMode, error: err})
+    writer.fsync() ?? return Err(FoundationPublicationError{phase: .SyncStage, error: err})
+    staged :: writer.stat() ?? return Err(FoundationPublicationError{phase: .InspectStage, error: err})
+    if staged.links != 1 -> return Err(FoundationPublicationError{phase: .InspectStage, error: IOError.PermissionDenied(foundation_io_context(.Write, temporary, "file authority temporary has multiple hard links"))})
+    if staged.mode & 4095 != policy.mode -> return Err(FoundationPublicationError{phase: .InspectStage, error: IOError.PermissionDenied(foundation_io_context(.Write, temporary, "file authority temporary has incorrect permissions"))})
+    if before_rename == .Val(validate) -> validate() ?? return Err(FoundationPublicationError{phase: .ValidateSource, error: err})
+    foundation_ensure_directories_current(directories) ?? return Err(FoundationPublicationError{phase: .ValidateAuthority, error: err})
+    destination :: foundation_inspect_destination(parent, final_name, policy.destination_links) ?? return Err(FoundationPublicationError{phase: .InspectDestination, error: err})
     if destination != expected_destination {
         // An immutable CreateNew contender appeared after staging. Report the
         // typed collision so callers can authenticate identical/conflict bytes;
         // ordinary replacement and every authority/durability refusal stay Other.
-        if policy.create == .CreateNew && expected_destination == None && destination != None -> return Err(IOError.AlreadyExists(foundation_io_context(.Write, final_name, "file authority publication target already exists")))
-        return Err(IOError.Other(foundation_io_context(.Write, final_name, "file authority publication target changed while staging")))
+        if policy.create == .CreateNew && expected_destination == None && destination != None -> return Err(FoundationPublicationError{phase: .InspectDestination, error: IOError.AlreadyExists(foundation_io_context(.Write, final_name, "file authority publication target already exists"))})
+        return Err(FoundationPublicationError{phase: .InspectDestination, error: IOError.Other(foundation_io_context(.Write, final_name, "file authority publication target changed while staging"))})
     }
     if policy.create == .CreateNew {
         // #3593: descriptor-relative atomic no-replace rename is mandatory;
         // checking absence then ordinary rename would clobber a competing key.
-        parent.rename(temporary, final_name, if_exists: .Refuse)
+        parent.rename(temporary, final_name, if_exists: .Refuse) ?? return Err(FoundationPublicationError{phase: .Rename, error: err})
     } else {
-        parent.rename(temporary, final_name)
+        parent.rename(temporary, final_name) ?? return Err(FoundationPublicationError{phase: .Rename, error: err})
     }
     Ok(staged.id)
 }

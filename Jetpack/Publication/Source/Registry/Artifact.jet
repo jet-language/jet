@@ -50,7 +50,7 @@ fn publication_snapshot_verified_artifact(repo: String, entry: PublicationIndexE
         .Ok(.Val(lock)) -> {
             foundation_write_file_nofollow_at_root(snapshot.path(), UNIFIED_LOCK_FILE, pkg_lock_write(lock).bytes(), None) ?? {
                 close(^snapshot)
-                return Err(err)
+                return Err(err.error)
             }
         }
         .Ok(.None) -> {}
