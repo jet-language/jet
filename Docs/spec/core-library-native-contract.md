@@ -123,6 +123,13 @@ when the shared object writer packages a runtime library. Atomic values still
 require their typed allocation, ordering and ownership contract; a raw machine
 compare-and-swap primitive does not establish that contract.
 
+The runtime-library-only `rt_observe_writer_address()` intrinsic resolves the
+checked `jet_rt_observe_writer` C export through the same FunctionAddress
+validation as scheduler callbacks. The target must be infallible, take one
+read-only I64, and return I64; missing exports or mismatched callback signatures
+produce no runtime object. This recognition does not admit the live Observe
+provider or bind its environment startup before that provider is reviewed.
+
 Duration arithmetic marshals the canonical nanosecond carrier into the shared
 saturated fixed-width arithmetic and duration constructors. It must preserve
 the I64 endpoints; negating the right operand and subtracting is not a valid

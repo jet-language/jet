@@ -39,6 +39,66 @@ fn fx_runtime_o1_check() -> Bool Never! {
     library.object.bytes == expected.bytes && library.object.bytes != before.bytes
 }
 
+// The Observe writer address is substituted only by the checked runtime
+// library feed. Missing exports and a valid-C but wrong callback arity refuse.
+fn fx_observe_address_program(mode: Int) -> MIRProgram Never! {
+    a := fx_builder()
+    zero :: fx_i64_const(&a, 0)
+    fx_block(&a, 0, MIRTerminator.Return{value: Val(zero)})
+    address := fx_function("rt_observe_writer_address", a, fx_i64())
+    r := fx_builder()
+    pointer :: fx_copy(&r, fx_i64(), MIROperation.Call{callee: MIRCallee.User{function: address.id}, args: [MIRCallArg]{}, type_args: [MIRType]{}})
+    fx_block(&r, 0, MIRTerminator.Return{value: Val(pointer)})
+    root := fx_function("observe_address_root", r, fx_i64())
+    root_source :: "#Export(c) fn observe_address_root() -> I64 {{ rt_observe_writer_address() }}\n"
+    address_source :: "fn rt_observe_writer_address() -> I64 {{ I64{{0}} }}\n"
+    root.span = Span{start: 0, end: root_source.bytes().len()}
+    address.span = Span{start: root_source.bytes().len(), end: root_source.bytes().len() + address_source.bytes().len()}
+    exports := [MIRExport]{MIRExport{symbol: root.name, function: root.id, abi: MIRForeignABI.C}}
+    functions := [MIRFunction]{root, address}
+    source := "{root_source}{address_source}"
+    if mode != 0 {
+        w := fx_builder()
+        argument :: fx_param(&w, "argument", fx_i64(), mir_copy_ownership())
+        if mode == 1 -> _ := fx_param(&w, "extra", fx_i64(), mir_copy_ownership())
+        fx_block(&w, 0, MIRTerminator.Return{value: Val(argument)})
+        writer := fx_function("jet_rt_observe_writer", w, fx_i64())
+        writer_source :: if mode == 1 -> "#Export(c) fn jet_rt_observe_writer(argument: I64, extra: I64) -> I64 {{ argument }}\n" else -> "#Export(c) fn jet_rt_observe_writer(argument: I64) -> I64 {{ argument }}\n"
+        writer.span = Span{start: source.bytes().len(), end: source.bytes().len() + writer_source.bytes().len()}
+        source = "{source}{writer_source}"
+        &exports.push(MIRExport{symbol: writer.name, function: writer.id, abi: MIRForeignABI.C})
+        &functions.push(writer)
+    }
+    program := fx_program(functions, [MIRTypeDef]{})
+    program.source_files = [MIRSourceFile]{MIRSourceFile{id: fx_source_file(), path: "observe-address.jet", source: source}}
+    program.artifacts = [MIRArtifactPlan]{MIRArtifactPlan{
+        id: MIRArtifactID{value: 1}, kind: MIRArtifactKind.NativeLibrary,
+        name: "observe-address", target: MIRArtifactTarget.RustAOT, mode: MIRArtifactBuildMode.Dev,
+        modules: [MIRModuleID]{}, links: [MIRLinkUnitID]{}, jobs: [MIRJobID]{},
+        runtime_parts: [MIRRuntimePartID]{}, exports: exports,
+        provider_identity: "", closure_identity: "", artifact_identity: "", entry: None, harness: None,
+    }}
+    program
+}
+
+fn fx_observe_address_checks() -> Bool Never! {
+    missing :: x64_runtime_library(fx_observe_address_program(0), [String]{"observe_address_root"})
+    named := false
+    loop error in missing.object.errors {
+        if error.contains("rt_observe_writer_address requires #Export(c) jet_rt_observe_writer") -> named = true
+    }
+    if !named || missing.object.bytes.len() != 0 -> return false
+    invalid :: x64_runtime_library(fx_observe_address_program(1), [String]{"observe_address_root", "jet_rt_observe_writer"})
+    named = false
+    loop error in invalid.object.errors {
+        if error.contains("jet_rt_observe_writer must export an infallible C function with 1 I64 parameters and an I64 result") -> named = true
+    }
+    if !named || invalid.object.bytes.len() != 0 -> return false
+    valid :: x64_runtime_library(fx_observe_address_program(2), [String]{"observe_address_root", "jet_rt_observe_writer"})
+    loop error in valid.object.errors -> print("observe-address: {error}")
+    valid.object.errors.len() == 0 && valid.object.bytes.len() > 0
+}
+
 // Consume the OS templates from the same checkout, not copied instruction
 // strings. These are the leaves used by Secret zeroize, sync load/store/CAS,
 // futex waits, and scheduler signal/control syscalls.
