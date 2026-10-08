@@ -597,10 +597,11 @@ specification.
 
 ### Shared native text-list ownership
 
-`DataSequences.jet` owns the inline List24 deep-text copy and field-only drop
-used by TLS certificate/config fields, ProcessSpec plain-text lists, and native
-Authority rights. Copy allocates only the destination buffer and clones each
-text; drop frees initialized text owners and the buffer, never the inline
-header. Owning holder APIs release their own shell separately. ProcessSpec's
+`DataSequences.jet` owns the inline List24 deep-text copy used by TLS
+certificate/config fields, ProcessSpec plain-text lists, and native Authority
+rights. Copy allocates only the destination buffer and clones each text.
+The existing `Collections.jet::coll_text_list_drop(header, true)` frees those
+initialized text owners and the buffer, never the inline header. Owning holder
+APIs release their own shell separately. ProcessSpec's
 ordered pair lists retain their specialized two-text-per-entry representation.
 
