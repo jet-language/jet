@@ -97,12 +97,12 @@ pub fn jet_fs_glob(pattern: &str) -> std::io::Result<Vec<String>> {
 }
 
 fn collect_glob_entries(root: &std::path::Path, output: &mut Vec<String>) -> std::io::Result<()> {
-    let mut entries = std::fs::read_dir(root)?.collect::<Result<Vec<_>, _>>()?;
+    let mut entries = jet_fs_read_directory_raw(root)?.collect::<Result<Vec<_>, _>>()?;
     entries.sort_by_key(|entry| entry.file_name());
     for entry in entries {
         let path = entry.path();
         output.push(path.to_string_lossy().into_owned());
-        if entry.file_type()?.is_dir() {
+        if jet_fs_entry_type_raw(&entry)?.is_dir() {
             collect_glob_entries(&path, output)?;
         }
     }
@@ -123,4 +123,17 @@ fn jet_fs_glob_match(pattern: &str, text: &str) -> bool {
         }
     }
     inner(pattern.as_bytes(), text.as_bytes())
+}
+
+pub(crate) fn jet_fs_read_directory_raw(path: &std::path::Path) -> std::io::Result<std::fs::ReadDir> {
+    std::fs::read_dir(path)
+}
+pub(crate) fn jet_fs_entry_type_raw(entry: &std::fs::DirEntry) -> std::io::Result<std::fs::FileType> {
+    entry.file_type()
+}
+pub(crate) fn jet_fs_create_directory_tree_raw(path: &std::path::Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(path)
+}
+pub(crate) fn jet_fs_copy_native_raw(from: &std::path::Path, to: &std::path::Path) -> std::io::Result<u64> {
+    std::fs::copy(from, to)
 }
