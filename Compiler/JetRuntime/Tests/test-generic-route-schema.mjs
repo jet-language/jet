@@ -30,6 +30,10 @@ assert.equal(substituteRecordType("pub second: B", bindings), "pub second: bool"
 assert.equal(substituteRecordType("pub stable: AA", bindings), "pub stable: AA");
 assert.throws(() => recordBindings("struct Pair<A, B>", ["f64"], "Pair<f64>"), /Pair<f64>.*expected 2/);
 assert.throws(() => recordApplication("Pair<Vec<f64>,bool>"), /Pair<Vec<f64>,bool>.*nested/);
+assert.equal(recordApplication("Option<&String>"), null);
+assert.equal(recordApplication("core::option::Option<&String>"), null);
+assert.equal(recordApplication("Result<Vec<f64>, String>"), null);
+assert.deepEqual(recordApplication("crate::Option<f64>"), { base: "crate::Option", args: ["f64"] });
 assert.equal(generatedRecordPath("grades.curve"), "__jet_grades_dcurve");
 assert.equal(generatedRecordPath("a_b::c/d"), "__jet_a_ub_c_cc_sd");
 assert.deepEqual(recordApplicationsIn("fn value(x: Pair<f64,bool>) -> Option<Pair<f64,bool>>", "Pair"), ["Pair<f64,bool>", "Pair<f64,bool>"]);
@@ -88,12 +92,29 @@ pub struct JetPair<A, B> { first: A, second: B }
 pub fn jet_fixture_scalar(value: f64) -> f64 { value }
 pub fn jet_fixture_plain(value: JetFixture) -> JetFixture { value }
 `;
+  // The FINAL seed has this real Rust builtin parameter. It is unsupported
+  // by the parameter codec, not a missing emitted generic crate record.
+  put("crates/jet-foundation/src/Syntax/core_calls.rs", registry('CoreCallRecord::new("core.fixture", "optional", "jet_fixture_optional", true)\n'));
+  put("runtime.rs", declarations + "pub fn jet_fixture_optional(value: Option<&String>) -> f64 { 0.0 }\n");
+  success(run());
+  assert.ok(readFileSync(join(fixture, "crates/jet-codegen/src/Prelude/Core/CAbiRoutes.rs"), "utf8").includes("parameter types value: Option<&String>"));
   put("crates/jet-foundation/src/Syntax/core_calls.rs", registry(""));
   put("runtime.rs", declarations);
   success(run());
   success(run(true));
   const baselineRust = readFileSync(join(fixture, "crates/jet-codegen/src/Prelude/Core/CAbiRoutes.rs"), "utf8");
   const baselineJet = readFileSync(join(fixture, "Compiler/JetBackend/Source/Lower/RuntimeRoutes.jet"), "utf8");
+  // List-only is the real native descriptor pass and must leave BOTH outputs
+  // byte-identical, even when this source still has seed-only runtime owners.
+  const listed = spawnSync(process.execPath, [join(fixture, "Tools/agent/gen-c-abi-routes.mjs"), join(fixture, "runtime.rs"), "--native-list-only"], { encoding: "utf8" });
+  success(listed);
+  const inventory = JSON.parse(listed.stdout);
+  assert.equal(inventory.mode, "native-pack-descriptors");
+  assert.match(inventory.provenance.runtimeSha256, /^[0-9a-f]{64}$/u);
+  assert.ok(inventory.seedHelperNames.some((name) => name === "jet_rt_handle_drop_JetFixture"));
+  assert.deepEqual(inventory.nativeExports, []);
+  assert.equal(readFileSync(join(fixture, "crates/jet-codegen/src/Prelude/Core/CAbiRoutes.rs"), "utf8"), baselineRust);
+  assert.equal(readFileSync(join(fixture, "Compiler/JetBackend/Source/Lower/RuntimeRoutes.jet"), "utf8"), baselineJet);
   const genericRows = `CoreCallRecord::new("core.fixture", "measurement", "jet_fixture_measurement", true)\nCoreCallRecord::new("core.fixture", "pair", "jet_fixture_pair", true)\n`;
   put("crates/jet-foundation/src/Syntax/core_calls.rs", registry(genericRows));
   put("runtime.rs", declarations + `pub fn jet_fixture_measurement(value: JetMeasurement<f64>) -> JetMeasurement<f64> { value }\npub fn jet_fixture_pair(value: JetPair<f64,bool>) -> JetPair<f64,bool> { value }\n`);

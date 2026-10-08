@@ -46,6 +46,7 @@
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createHash } from "node:crypto";
 
 import { generatedRecordPath, nativeProviderHandles, recordApplication, recordApplicationsIn, recordBindings, recordInstanceName, substituteRecordType, runtimeExportSignatures, validateLoweringRuntimeAbi, validateRuntimeOwnership, validateRuntimeRoute } from "./runtime-route-abi.mjs";
 import { nativeHandleExports } from "./native-route-handles.mjs";
@@ -53,8 +54,9 @@ import { nativeRecordExports } from "./native-route-records.mjs";
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const runtimePath = process.argv[2];
 const check = process.argv.includes("--check");
+const nativeListOnly = process.argv.includes("--native-list-only");
 if (!runtimePath) {
-  console.error("usage: gen-c-abi-routes.mjs <runtime.rs> [--check]");
+  console.error("usage: gen-c-abi-routes.mjs <runtime.rs> [--check | --native-list-only]");
   process.exit(64);
 }
 const rsOut = "crates/jet-codegen/src/Prelude/Core/CAbiRoutes.rs";
@@ -687,7 +689,9 @@ function elementCarrier(ty) {
 // element: a record element converts through Records.jet for the call).
 function handleElement(ty, path) {
   if (!opaqueName.test(ty) || tagCarrier(ty, path)) return null;
-  const { name, full } = runtimeHandle(ty, path);
+  const handle = runtimeHandle(ty, path);
+  if (!handle) return null;
+  const { name, full } = handle;
   if (name === "String" || name === "Self" || !derivesClone(full)) return null;
   return { jet: `Handle{name: "${name}"}`, read: handleCopy(full, `(w as *mut ${handleType(full)})`), handle: { name, full } };
 }
@@ -730,7 +734,9 @@ function paramCarrier(ty, path, symbol) {
   // caller's own box (the lowering lends the handle of its Write place).
   const borrowedMut = /^&mut(.+)$/.exec(ty);
   if (borrowedMut && opaqueName.test(borrowedMut[1]) && !tagCarrier(borrowedMut[1], path)) {
-    const { name, full } = runtimeHandle(borrowedMut[1], path);
+    const handle = runtimeHandle(borrowedMut[1], path);
+    if (!handle) return null;
+    const { name, full } = handle;
     if (name === "String" || name === "Self") return null;
     if (handleBridge(full)) throw new Error(`${name} route ${symbol}: mutable Rust borrowing is not a C carrier`);
     return { ...one(`HandleMut{name: "${name}"}`, `*mut ${full}`, (a) => `unsafe { &mut *${a} }`), handle: { name, full } };
@@ -740,13 +746,17 @@ function paramCarrier(ty, path, symbol) {
   const borrowedTag = borrowed ? tagCarrier(borrowed[1], path) : null;
   if (borrowedTag) return one(borrowedTag.jet, "i64", (a) => `&${borrowedTag.read(a)}`);
   if (borrowed && !borrowed[1].startsWith("mut") && opaqueName.test(borrowed[1])) {
-    const { name, full } = runtimeHandle(borrowed[1], path);
+    const handle = runtimeHandle(borrowed[1], path);
+    if (!handle) return null;
+    const { name, full } = handle;
     if (name === "String" || name === "Self") return null;
     return { ...one(`Handle{name: "${name}"}`, `*mut ${handleType(full)}`, (a) => handleBorrow(full, a)), handle: { name, full } };
   }
   // A cloneable handle by value: the adapter copies the borrowed handle.
   if (!borrowed && opaqueName.test(ty)) {
-    const { name, full } = runtimeHandle(ty, path);
+    const handle = runtimeHandle(ty, path);
+    if (!handle) return null;
+    const { name, full } = handle;
     if (name === "String" || name === "Self" || !derivesClone(full)) return null;
     return { ...one(`Handle{name: "${name}"}`, `*mut ${handleType(full)}`, (a) => handleCopy(full, a)), handle: { name, full } };
   }
@@ -775,7 +785,9 @@ function valueCarrier(ty, path, nativeInt, rawFixed = false) {
   // An owned exact Int: its carrier word, ownership passing to the caller.
   if (/^(?:[a-z_][a-z0-9_]*::)*(?:Numeric::)?JetInt$/.test(ty)) return { jet: "Word", cty: "i64", wrap: (v) => `(${v}).into_raw()` };
   if (opaqueName.test(ty)) {
-    const { name, full } = runtimeHandle(ty, path);
+    const handle = runtimeHandle(ty, path);
+    if (!handle) return null;
+    const { name, full } = handle;
     if (name === "Self" || name === "String") return null;
     return { jet: `Handle{name: "${name}"}`, cty: `*mut ${handleType(full)}`, wrap: (v) => handleOut(full, v), handle: { name, full } };
   }
@@ -848,7 +860,9 @@ function resultShape(ty, path, nativeInt, rawFixed = false) {
     const plain = elementCarrier(t);
     if (plain) return plain;
     if (!opaqueName.test(t) || tagCarrier(t, path)) return null;
-    const { name, full } = runtimeHandle(t, path);
+    const handle = runtimeHandle(t, path);
+    if (!handle) return null;
+    const { name, full } = handle;
     if (name === "String" || name === "Self") return null;
     return { jet: `Handle{name: "${name}"}`, write: `${handleOut(full, "e")} as u64`, handle: { name, full } };
   };
@@ -1215,6 +1229,7 @@ const nativeType = (name) => {
 const handleOf = (rustPath) => {
   if (!rustPath || !opaqueName.test(rustPath)) return null;
   const application = recordApplication(rustPath);
+  if (!application) return null;
   if (application.args.length > 0) return runtimeHandle(rustPath, "");
   const name = application.base.split("::").pop();
   if (handles.get(name) === `crate::${rustPath}`) return { name, full: `crate::${rustPath}` };
@@ -1499,7 +1514,9 @@ const recordMember = (ty, path, site) => {
     };
   }
   if (opaqueName.test(ty)) {
-    const { name } = runtimeHandle(ty, path);
+    const handle = runtimeHandle(ty, path);
+    if (!handle) return null;
+    const { name } = handle;
     const nested = handles.get(name);
     if (!nested || nested !== qualify(ty, path) && (!ty.includes("<") && declarationOf(nested.replace(/^crate::/, ""))?.key !== declarationOf(qualify(ty, path).replace(/^crate::/, ""))?.key)) return null;
     if (!cloneable.has(name)) return null;
@@ -1753,6 +1770,27 @@ const nativeExports = [
   ...nativeRecordExports(nativeTypes),
 ].filter((descriptor) => seedHelperNames.has(descriptor.name) && !jetRuntimeExports.has(descriptor.name));
 const nativeSourceExports = new Set(nativeExports.map((row) => row.name));
+// Inventory uses the SAME descriptor pass as native-pack emission. It never
+// writes generated tables or treats this list as actual MIR layout admission.
+if (nativeListOnly) {
+  const digest = (body) => createHash("sha256").update(body).digest("hex");
+  const declarations = [...new Set(nativeTypes.map((type) => type.source.path))].sort();
+  const inventory = {
+    mode: "native-pack-descriptors",
+    provenance: {
+      runtime: resolve(runtimePath), runtimeSha256: digest(text),
+      generatorSha256: digest(readFileSync(fileURLToPath(import.meta.url))),
+      providerManifestSha256: digest(readFileSync(`${repo}/Compiler/JetRuntime/exports.list`)),
+      sourceDeclarations: declarations.map((path) => ({ path, sha256: digest(readFileSync(`${repo}/${path}`)) })),
+    },
+    nativeTypes, nativeExports, handleRows,
+    seedHelperNames: [...seedHelperNames].sort(),
+    jetRuntimeExports: [...jetRuntimeExports].sort(),
+  };
+  // Wait for the pipe to drain; a direct process.exit can truncate large JSON.
+  await new Promise((done) => process.stdout.write(JSON.stringify(inventory) + "\n", done));
+  process.exit(0);
+}
 for (const adapter of adapters) {
   if (adapter.external) continue;
   const params = [];
