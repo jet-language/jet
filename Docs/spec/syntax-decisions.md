@@ -213,6 +213,10 @@ Fields, including fields reached through list elements, support text append;
 direct indexed compound updates remain E0164 (copy, update, then store).
 User-record compound arithmetic requires the same operator hook as its binary
 form; without that hook sema reports E0360, before any execution tier runs.
+Operator implementation identity includes the left type, trait, and right type
+(D-OPMIX1). Hooks with different right types are distinct trait instantiations,
+not ordinary method-name overloads. Binary operators and explicit calls such as
+`value.mul(rhs)` select the same operand-pair hook; repeating one pair is E0908.
 
 **D-INCR1 — Increment/decrement** *(retired 2026-09-28, owner decision, card
 #3727)*: `++` and `--` are not Jet operators. `x += 1` / `x -= 1` (S17) is the

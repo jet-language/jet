@@ -798,6 +798,7 @@ pub(super) fn check_bundle_opts_for_output_inner(
                         }
                         TypeRegistry {
                             types,
+                            operator_signatures: st.registry.operator_signatures.clone(),
                             error_types: st.registry.error_types.clone(),
                             unit_types: st.registry.unit_types.clone(),
                             unit_facts: st.registry.unit_facts.clone(),

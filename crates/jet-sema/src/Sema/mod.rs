@@ -648,6 +648,8 @@ impl UnitFact {
 #[derive(Clone)]
 pub(crate) struct TypeRegistry {
     types: HashMap<String, TypeDef>,
+    /// Validated operator-hook signatures, never ordinary name-only members.
+    operator_signatures: HashMap<String, MethodSig>,
     /// D-FAILURE-FOUNDATION1=A: user-named types carrying `#Error` may be
     /// used as explicit callable failure domains.
     error_types: HashSet<String>,
