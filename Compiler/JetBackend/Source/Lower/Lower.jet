@@ -95,11 +95,6 @@ enum LowerRepr {
     Word
     // Float: the IEEE double's bits in one word (LIR Float layout).
     FloatBits
-    // F32: four stored bytes, raw binary32 bits in the low 32 of a word
-    // register. Reader materialization and binary32 shortest text only;
-    // numeric/compare/cast operations remain refused. Future FP-register
-    // operations must use the canonical LIR Bitcast, never numeric Convert.
-    Float32Bits
     // Bool: one byte holding 0 or 1.
     Flag
     // A runtime-owned object (String, loop cursor): a pointer the runtime
@@ -454,7 +449,6 @@ fn lower_repr(p: MIRProgram, ty: MIRType) -> LowerRepr Never! {
         .Char -> LowerRepr.Word
         .Bool -> LowerRepr.Flag
         .Float -> LowerRepr.FloatBits
-        .Float32 -> LowerRepr.Float32Bits
         .IntN(_, bits) -> if bits <= 64 -> LowerRepr.Word else -> LowerRepr.Unsupported{reason: "{bits}-bit integers"}
         .String -> LowerRepr.Handle{drop: "jet_rt_string_drop", clone: "jet_rt_string_clone"}
         .Tagged(_, inner) -> lower_repr(p, inner)
@@ -549,7 +543,6 @@ fn lower_repr_layout(repr: LowerRepr) -> LIRLayout? {
         .Discriminant -> Val(lir_layout_word())
         .Flag -> Val(lir_layout_bool())
         .FloatBits -> Val(lir_layout_float())
-        .Float32Bits -> Val(lir_layout_word())
         .Handle(_, _) -> Val(lir_layout_pointer())
         .Boxed(_) | .Inline(_) -> Val(lir_layout_pointer())
         else -> None
@@ -2510,7 +2503,6 @@ fn lower_binary(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFuncti
     left_value :: lower_use(&m, &f, left) ?? return
     right_value :: lower_use(&m, &f, right) ?? return
     left_ty :: lower_value_type(c, left) ?? return lower_fail(&m, &f, "operand {left.value} has no checked type")
-    if lower_repr(p, left_ty) == .Float32Bits -> return lower_fail(&m, &f, "Float32 operations are not lowered at O0 yet")
     exact :: lower_is_exact_int(left_ty)
     unsigned :: lower_is_unsigned_word(left_ty)
     dst :: lower_result(p, c, &m, &f, instruction) ?? return lower_fail(&m, &f, "binary operator has no result")
@@ -2644,7 +2636,6 @@ fn lower_float_binary(m: &LowerModule, f: &LowerFunction, dst: LIRValueID, op: M
 fn lower_unary(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, op: MIRUnaryOp, value: MIRValueID) Never! {
     operand :: lower_use(&m, &f, value) ?? return
     ty :: lower_value_type(c, value) ?? return lower_fail(&m, &f, "operand {value.value} has no checked type")
-    if lower_repr(p, ty) == .Float32Bits -> return lower_fail(&m, &f, "Float32 operations are not lowered at O0 yet")
     dst :: lower_result(p, c, &m, &f, instruction) ?? return lower_fail(&m, &f, "unary operator has no result")
     layout :: lower_value_layout(f, operand)
     if op == .Not {
@@ -2725,7 +2716,7 @@ fn lower_display(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunct
     // its erased scalar representation (MIRRust.rs selected_trait_impl_for_type).
     if lower_type_def(p, ty) == .Val(_) -> return lower_display_boxed(p, c, &m, &f, ty, lowered)
     if lower_repr(p, ty) == {
-        .Word | .Flag | .FloatBits | .Float32Bits -> {}
+        .Word | .Flag | .FloatBits -> {}
         else -> return lower_display_boxed(p, c, &m, &f, ty, lowered)
     }
     symbol :: if lower_repr(p, ty) == {
@@ -2737,7 +2728,6 @@ fn lower_display(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunct
         }
         .Flag -> "jet_rt_bool_to_string"
         .FloatBits -> "jet_rt_float_to_string"
-        .Float32Bits -> "jet_rt_float32_to_string"
         else -> "jet_rt_i64_to_string"
     }
     text :: lower_new_value(&f, lir_layout_pointer(), LIRDrop.Runtime{symbol: "jet_rt_string_drop"}, None)

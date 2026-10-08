@@ -165,7 +165,6 @@ IR with these choices, which the Jet lowering keeps or replaces as noted:
 | `Int`, ranges/tags/quantities over Int | exact-Int word | `i64` (Integer 8) | none (big integers are runtime-managed) |
 | `Char`, `IntN(_, 64)` | word | `i64` | none |
 | `Bool` | flag | `i8` (Integer 1, 0 or 1) | none |
-| `F32` (reader materialization/text only) | `Float32Bits`: zero-extended raw binary32 word in registers | four stored bytes, align 4 | none |
 | `Unit`, `Never` | no LIR value | — | — |
 | `String` | runtime handle | `ptr` | `jet_rt_string_drop` |
 | `RangeCursor`, `IterCursor` | runtime handle | `ptr` | `jet_loop_cursor_drop` |
@@ -180,20 +179,12 @@ IR with these choices, which the Jet lowering keeps or replaces as noted:
 | `View<str>` | an owned String handle holding the window's text: the `_view` kernels run their owned twins (`jet_string_after`, `jet_string_before`, `jet_unicode_trim`); costs one allocation the zero-copy `&str` avoids, otherwise unobservable (a window is only read) | `ptr` | `jet_rt_string_drop` |
 | `Distinct`/`Alias` types | as their base | — | — |
 
-The `F32` carrier is deliberately not a numeric Integer despite its word
-register layout. Reader routes return binary32 in the low 32 of their
-zero-extended out word. Native storage writes four bytes; reads load U32 and
-zero-extend, with no FP conversion. Display and Debug borrow that raw word
-for `jet_rt_float32_to_string` and `jet_rt_float32_debug` respectively, using
-binary32 shortest text rather than widening to binary64 text. Numeric,
-comparison and cast operations remain explicit refusals in this minimal
-reader/text scope. Future FP-register operations must use the canonical LIR
-`Bitcast`, not introduce another reinterpretation mechanism.
-F32 runtime result admission is a named allow-list: only
-`jet_reader_read_f32_le` and `jet_reader_read_f32_be`, producing
-`Result<F32, String>`. All F32 route parameters, F32-containing list/tuple
-results and other producers receive explicit refusals until their canonical
-Jet provider is approved; a generic Word carrier never grants admission.
+Binary32 reader materialization, storage and text are a separately held
+source packet (`c36758991`), not admitted by this composed carrier inventory.
+Their required behavioral fixtures remain on the held packet; absence from
+this composition is not a claim that those cases passed. Admission requires
+the reviewed native binary32 provider before bringing that whole packet in.
+
 Only `Reader.take`, `Reader.skip` and `Reader.seek` narrow their exact-Int
 count/position operand through the existing checked `jet_int_owned_to_i64`
 adapter. A count outside I64 stops before the method, matching reference
