@@ -3468,6 +3468,11 @@ callback-bearing host leaves retain their original unsupported AOT tiers.
 HTTP router creation, parsing, and dispatch, TLS byte I/O, and WebSocket
 connect/upgrade are also source-owned; the reserved transport/carrier leaves
 keep their old effects (including no new WebSocket effect) and tier support.
+Reserved Unix connect, TLS client handshake, HTTP serve/bind, static-files,
+and middleware leaves use full positional signatures inside Core. Their
+public overload selection, implicit option defaults, and escaping callback
+admission still precede source forwarding; registration of a raw alias alone
+does not replace those public admission checks.
 
 DNS error classification is Jet source policy. Reserved Core-only
 `__dns_*_lookup` leaves call the existing resolver and return its raw string

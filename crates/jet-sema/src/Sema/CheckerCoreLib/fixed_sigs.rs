@@ -1280,6 +1280,15 @@ fn core_fixed_sig_impl(
     }
 
     match (module, name) {
+        ("core.net", "__unix_connect_host") => Some((vec![(read, Type::String)], Some(result_ty(Type::Named("UnixStream".to_string()), Type::Named("NetError".to_string()))))),
+        ("core.net", "__unix_connect_deadline_host") => Some((vec![(read, Type::String), (read, Type::Named("Duration".to_string()))], Some(result_ty(Type::Named("UnixStream".to_string()), Type::Named("NetError".to_string()))))),
+        ("core.net.tls", "__client_stream") => Some((vec![(moved, Type::Named("TCPStream".to_string())), (read, Type::String)], Some(result_ty(Type::Named("TLSStream".to_string()), Type::Named("IOError".to_string()))))),
+        ("core.net.tls", "__client_deadline") => Some((vec![(moved, Type::Named("TCPStream".to_string())), (read, Type::String), (read, Type::Named("Duration".to_string()))], Some(result_ty(Type::Named("TLSStream".to_string()), Type::Named("NetError".to_string()))))),
+        ("core.net.tls", "__client_config_deadline") => Some((vec![(moved, Type::Named("TCPStream".to_string())), (read, Type::String), (read, Type::Named("TLSClientConfig".to_string())), (read, Type::Named("Duration".to_string()))], Some(result_ty(Type::Named("TLSStream".to_string()), Type::Named("NetError".to_string()))))),
+        ("core.http.server", "__serve") => Some((vec![(read, Type::String), (read, Type::Named("HTTPMux".to_string())), (read, Type::Option(Box::new(Type::Named("HTTPServerTLS".to_string())))), (read, Type::Option(Box::new(Type::Named("Duration".to_string()))))], Some(result_ty(unit_ty(), Type::Named("HTTPError".to_string()))))),
+        ("core.http.server", "__bind") => Some((vec![(read, Type::String), (read, Type::Named("HTTPMux".to_string())), (read, Type::Option(Box::new(Type::Named("HTTPServerTLS".to_string())))), (read, Type::Option(Box::new(Type::Named("Duration".to_string()))))], Some(result_ty(Type::Named("HTTPServer".to_string()), Type::Named("HTTPError".to_string()))))),
+        ("core.http.server", "__static_files") => Some((vec![(read, Type::Named("HTTPMux".to_string())), (read, Type::String), (read, Type::String), (read, Type::Option(Box::new(Type::Bool))), (read, Type::Option(Box::new(Type::Bool))), (read, Type::Option(Box::new(Type::Bool)))], Some(unit_ty()))),
+        ("core.http.server", "__middleware") => Some((vec![(read, Type::Named("HTTPMux".to_string())), (moved, Type::Fn { params: vec![Type::Named("HTTPHandler".to_string())], ret: Some(Box::new(Type::Named("HTTPHandler".to_string()))), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None })], Some(unit_ty()))),
         ("core.http", "__router") => Some((vec![], Some(Type::Named("HTTPRouter".to_string())))),
         ("core.http", "__parse") => Some((vec![(read, Type::String)], Some(Type::Named("HTTPRequest".to_string())))),
         ("core.http", "__dispatch") => Some((vec![(read, Type::Named("HTTPRouter".to_string())), (read, Type::Named("HTTPRequest".to_string()))], Some(result_ty(Type::Named("HTTPResponse".to_string()), Type::Named("HTTPError".to_string()))))),

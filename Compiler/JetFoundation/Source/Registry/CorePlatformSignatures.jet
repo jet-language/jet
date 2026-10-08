@@ -197,6 +197,15 @@ fn core_sig_row_atom_at(bytes: [U8], start: Int) -> CoreSigRowType Never! {
 
 pub fn core_platform_fixed_signature(module_name: String, member: String) -> CoreTypedCallSignature? {
     rows :: """
+core.net __unix_connect_host String Result<UnixStream,NetError>
+core.net __unix_connect_deadline_host String,Duration Result<UnixStream,NetError>
+core.net.tls __client_stream ^TCPStream,String Result<TLSStream,IOError>
+core.net.tls __client_deadline ^TCPStream,String,Duration Result<TLSStream,NetError>
+core.net.tls __client_config_deadline ^TCPStream,String,TLSClientConfig,Duration Result<TLSStream,NetError>
+core.http.server __serve String,HTTPMux,HTTPServerTLS?,Duration? Result<Unit,HTTPError>
+core.http.server __bind String,HTTPMux,HTTPServerTLS?,Duration? Result<HTTPServer,HTTPError>
+core.http.server __static_files HTTPMux,String,String,Bool?,Bool?,Bool? Unit
+core.http.server __middleware HTTPMux,^fn(HTTPHandler;HTTPHandler) Unit
 core.http __router - HTTPRouter
 core.http __parse String HTTPRequest
 core.http __dispatch HTTPRouter,HTTPRequest Result<HTTPResponse,HTTPError>
