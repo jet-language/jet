@@ -1545,6 +1545,15 @@ profile explicitly retains overflow checks (`Compiler/Bootstrap/Tests.rs:68-83`)
 the unchecked `opt-level=1` pack build (`Tools/packaging/prebuild-runtime.sh:70-71`)
 is not the semantic oracle for the plain `v + 1` in `JetBitSet::len`.
 
+The generic Rust symbol census also includes List operations already emitted
+directly as Jet-authored LIR, rather than imported runtime functions.
+`Compiler/JetRuntime/Tests/lists-native.tsv` records each audited symbol's
+dispatcher, concrete body, Rust reference, ownership behavior and supported
+type limits. The first batch reuses the existing `Lower/Lists.jet` implementation
+(all-ref search finds its introduction in `1e7f948f3`), not a second runtime
+kernel. `check-lists-native.mjs` checks source/dispatch/helper consistency;
+its receipt is not native execution or unrestricted type-coverage proof.
+
 Lazy cursor initialization and advancement may invoke user callbacks. Both
 are can-stop MIR operations: their results are usable only on the immediately
 following Propagate poll's resume edge. Prefetched HasNext/Value operations
