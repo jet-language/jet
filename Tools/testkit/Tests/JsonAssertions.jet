@@ -1,0 +1,60 @@
+#Test("JSON assertions use typed equality independent of object key order") {
+    assert_eq(kit_steps_json_test("{{\"a\":1,\"b\":true}}", "doc", "$", "=", "{{\"b\":true,\"a\":1}}"), None)
+    assert_eq(kit_steps_json_test("[1,2]", "doc", "$", "=", "[1,2]"), None)
+    assert(kit_steps_json_test("[1,2]", "doc", "$", "=", "[2,1]") != None)
+    assert_eq(kit_steps_json_test("{{\"a\":\"quoted text\"}}", "doc", "$.a", "=", "\"quoted text\""), None)
+    assert(kit_steps_json_test("{{\"a\":null}}", "doc", "$.a", "=", "false") != None)
+}
+
+#Test("JSON assertions pin types and array or object cardinality") {
+    assert_eq(kit_steps_json_test("{{\"a\":[null,true,3,1.5,\"s\",{{}}]}}", "doc", "$", "#=", "1"), None)
+    assert_eq(kit_steps_json_test("{{\"a\":[null,true,3,1.5,\"s\",{{}}]}}", "doc", "$.a", "#=", "6"), None)
+    assert_eq(kit_steps_json_test("[null,true,3,1.5,\"s\",{{}}]", "doc", "$[0]", ":", "null"), None)
+    assert_eq(kit_steps_json_test("[null,true,3,1.5,\"s\",{{}}]", "doc", "$[1]", ":", "bool"), None)
+    assert_eq(kit_steps_json_test("[null,true,3,1.5,\"s\",{{}}]", "doc", "$[2]", ":", "int"), None)
+    assert_eq(kit_steps_json_test("[null,true,3,1.5,\"s\",{{}}]", "doc", "$[2]", ":", "number"), None)
+    assert_eq(kit_steps_json_test("[null,true,3,1.5,\"s\",{{}}]", "doc", "$[3]", ":", "number"), None)
+    assert_eq(kit_steps_json_test("[null,true,3,1.5,\"s\",{{}}]", "doc", "$[4]", ":", "string"), None)
+    assert_eq(kit_steps_json_test("[null,true,3,1.5,\"s\",{{}}]", "doc", "$[5]", ":", "object"), None)
+    assert_eq(kit_steps_json_test("[]", "doc", "$", ":", "array"), None)
+    assert(kit_steps_json_test("1.5", "doc", "$", ":", "int") != None)
+    assert(kit_steps_json_test("[1]", "doc", "$", "#=", "2") != None)
+    assert(kit_steps_json_test("1", "doc", "$", "#=", "0") != None)
+}
+
+#Test("JSON wildcard requires every nonempty selected record to match") {
+    rows :: "{{\"name\":\"needle\",\"mean_ns\":1}}\n\n{{\"mean_ns\":1.5,\"name\":\"needle\"}}\n"
+    assert_eq(kit_steps_json_test(rows, "ndjson", "$", "#=", "2"), None)
+    assert_eq(kit_steps_json_test(rows, "ndjson", "$[*].name", "=", "\"needle\""), None)
+    assert_eq(kit_steps_json_test(rows, "ndjson", "$[*].mean_ns", ":", "number"), None)
+    assert(kit_steps_json_test("[]", "doc", "$[*]", ":", "number") != None)
+    assert(kit_steps_json_test("[1,\"bad\"]", "doc", "$[*]", ":", "number") != None)
+    assert(kit_steps_json_test("{{\"name\":\"needle\"}}\n{{}}", "ndjson", "$[*].name", "=", "\"needle\"") != None)
+}
+
+#Test("JSON failures identify malformed documents missing paths and invalid grammar") {
+    assert(kit_steps_json_test("not JSON", "doc", "$", "=", "null") != None)
+    assert(kit_steps_json_test("{{}}", "doc", "$.missing", "=", "null") != None)
+    assert(kit_steps_json_test("[]", "doc", "$[0]", "=", "null") != None)
+    assert(kit_steps_json_test("true", "doc", "$.missing", "=", "null") != None)
+    assert(kit_steps_json_test("{{}}", "doc", "$[0]", "=", "null") != None)
+    assert(kit_steps_json_test("{{}}\nnot JSON", "ndjson", "$", "#=", "2") != None)
+    assert(kit_steps_json_test("[1]", "ndjson", "$", "#=", "1") != None)
+    assert(kit_steps_json_test("null", "doc", "$", "=", "invalid") != None)
+    assert(kit_steps_json_test("[]", "doc", "$", "#=", "-1") != None)
+    assert_eq(kit_steps_json_path("$.items[*].value[0]"), Val([".items", "*", ".value", "0"]))
+    loop path in ["", ".a", "$.", "$[", "$[]", "$[-1]", "$[01]", "$[no]", "$..a", "$[0]trailing"] {
+        assert_eq(kit_steps_json_path(path), None)
+    }
+}
+
+#Test("JSON has selects all pinned keys in one record without imposing array order") {
+    records :: "[{{\"claim\":\"needle\",\"kind\":\"unit\",\"outcome\":\"failed\",\"expectation\":\"expected_failure\",\"extra\":9}},{{\"claim\":\"other\",\"kind\":\"unit\"}}]"
+    wanted :: "{{\"kind\":\"unit\",\"claim\":\"needle\",\"expectation\":\"expected_failure\",\"outcome\":\"failed\"}}"
+    assert_eq(kit_steps_json_test(records, "doc", "$", "has", wanted), None)
+    assert(kit_steps_json_test(records, "doc", "$", "has", "{{\"claim\":\"needle\",\"outcome\":\"passed\"}}") != None)
+    assert(kit_steps_json_test(records, "doc", "$", "has", "{{\"claim\":\"missing\"}}") != None)
+    assert(kit_steps_json_test("{{\"claim\":\"needle\"}}", "doc", "$", "has", "{{\"claim\":\"needle\"}}") != None)
+    assert(kit_steps_json_test(records, "doc", "$", "has", "{{}}") != None)
+    assert(kit_steps_json_test(records, "doc", "$", "has", "[]") != None)
+}
