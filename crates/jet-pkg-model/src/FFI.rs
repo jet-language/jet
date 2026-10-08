@@ -938,6 +938,64 @@ mod inline_asm_target_tests {
         assert!(diagnostic.what.contains("aarch64-unknown-linux-gnu"));
     }
 
+
+    #[test]
+    fn inline_bridge_failure_keeps_spanless_pressure_without_guessing_first_entry() {
+        let mut first = entry();
+        first.jet_name = "os_syscall".into();
+        first.line_hint = "`#FFI(asm) fn os_syscall`".into();
+        let mut second = entry();
+        second.jet_name = "os_syscall_stack4_i64".into();
+        second.line_hint = "`#FFI(asm) fn os_syscall_stack4_i64`".into();
+        let stderr = "   Updating crates.io index\nerror: inline assembly requires more registers than available\nerror: aborting due to 1 previous error\n";
+        let diagnostic = inline_bridge_failure_diagnostic(&[first, second], stderr).unwrap();
+        assert_eq!(diagnostic.code, "E3222");
+        assert!(diagnostic.span.is_none());
+        assert!(!diagnostic.what.contains("os_syscall"));
+        assert!(!diagnostic.why.contains("signature"));
+        let detail = diagnostic.detail.as_deref().unwrap();
+        assert!(detail.contains("inline assembly requires more registers than available"));
+        assert!(detail.contains("aborting due to 1 previous error"));
+        assert!(!detail.contains("Updating crates.io"));
+        let mut plain = entry();
+        plain.inline = None;
+        assert!(inline_bridge_failure_diagnostic(&[plain], stderr).is_none());
+    }
+
+    #[test]
+    fn stack4_syscall_preserves_argument_gprs_and_uses_only_syscall_clobbers() {
+        fn body(source: &str) -> &str {
+            source
+                .split("fn os_syscall_stack4_i64(")
+                .nth(1)
+                .unwrap()
+                .split("\"\"\"")
+                .nth(1)
+                .unwrap()
+                .trim()
+        }
+        let source = include_str!("../../../Compiler/JetBackend/Source/OS/Linux.jet");
+        let fixture = include_str!("../../../tests/fixtures/ffi_stack4_i64.jet");
+        assert_eq!(body(source), body(fixture), "focused witness must match the runtime leaf");
+        let assembly = body(source);
+        assert!(assembly.starts_with("push rdi\n    push rsi\n    push rdx\n    push r10\n    push r8\n    push r9\n    push {number}"));
+        assert!(assembly.ends_with("pop r9\n    pop r8\n    pop r10\n    pop rdx\n    pop rsi\n    pop rdi\n    mov rax, rax ; -> return\n    ; clobbers rcx, r11"));
+        let names = ["number", "a1", "w0", "w1", "w2", "w3", "a4"];
+        let mut entry = entry();
+        entry.param_names = names.iter().map(|name| (*name).into()).collect();
+        entry.params = vec![(AccessConvention::Read, Type::Int); names.len()];
+        let inline = entry.inline.as_mut().unwrap();
+        inline.param_names = entry.param_names.clone();
+        inline.source = assembly.into();
+        inline.asm_contract.as_mut().unwrap().clobbers = vec!["rcx".into(), "r11".into()];
+        let wrapper = emit_asm_wrapper(&entry, entry.inline.as_ref().unwrap());
+        assert_eq!(wrapper.matches(" = in(reg) ").count(), 7, "{wrapper}");
+        assert_eq!(wrapper.matches("out(\"").count(), 3, "{wrapper}");
+        assert!(wrapper.contains("out(\"rax\") __jet_result"), "{wrapper}");
+        assert!(wrapper.contains("out(\"rcx\") _"), "{wrapper}");
+        assert!(wrapper.contains("out(\"r11\") _"), "{wrapper}");
+        assert!(!wrapper.contains("lateout("), "{wrapper}");
+    }
     #[test]
     fn inline_asm_uses_checked_output_and_discarded_clobber_operands() {
         let mut entry = entry();
@@ -3351,19 +3409,8 @@ fn build_bridge_full(
 
     if !out.status.success() {
         let stderr = String::from_utf8_lossy(&out.stderr);
-        if entries.iter().any(|e| e.inline.is_some()) {
-            let hint = entries
-                .iter()
-                .find(|e| e.inline.is_some())
-                .map(|e| e.line_hint.clone())
-                .unwrap_or_else(|| "an inline foreign declaration".to_string());
-            return Err(vec![Diagnostic::error(
-                "E3222",
-                format!("the foreign body doesn't match the Jet signature at {hint}"),
-                "Jet compiled and linked the body against the declared scalar ABI contract, and the foreign toolchain rejected that contract".to_string(),
-                "make the foreign function name, parameter types, return type, operands, and target match the Jet signature".to_string(),
-                None,
-            )]);
+        if let Some(diagnostic) = inline_bridge_failure_diagnostic(entries, &stderr) {
+            return Err(vec![diagnostic]);
         }
         if looks_like_signature_mismatch(&stderr) {
             let hint = entries
@@ -5076,6 +5123,19 @@ fn cargo_bridge_failure_diagnostic(dep: &str, detail: &str) -> Diagnostic {
         None,
     )
     .with_detail(format!("  cargo said:\n{detail}"))
+}
+
+fn inline_bridge_failure_diagnostic(entries: &[ExternEntry], stderr: &str) -> Option<Diagnostic> {
+    entries.iter().any(|entry| entry.inline.is_some()).then(|| {
+        Diagnostic::error(
+            "E3222",
+            "the inline foreign bridge could not compile or link".to_string(),
+            "the foreign toolchain rejected the bridge; its diagnostic does not identify a Jet declaration".to_string(),
+            "inspect the foreign diagnostic and correct the inline body or bridge; a generated adapter failure is a compiler defect".to_string(),
+            None,
+        )
+        .with_detail(format!("  cargo said:\n{}", stable_cargo_detail(stderr)))
+    })
 }
 
 fn inline_native_toolchain(
