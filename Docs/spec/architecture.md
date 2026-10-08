@@ -57,6 +57,13 @@ referenced input script/path exists. Outputs created by earlier steps are
 identified separately; the runtime assembly driver is
 `Compiler/JetBackend/Tests/run-runtime.mjs`, not a JetRuntime test script.
 
+The bootstrap completion owner may initiate Source resource retirement after
+its caller consumes the factory result and grants retirement permission; a
+prior request is not required. Callback jobs and retained roots still block
+retirement. The runtime library-object feed requires an observed retirement
+request, retired resources and zero retained roots in its frontend receipt
+before accepting the object.
+
 The seed/native C-ABI fixture declares each allocator export once in its shared
 extern block. Its ABI metadata checks must pass in both configurations before a
 runtime pack is admitted. The transitional Rust producer build retains debug

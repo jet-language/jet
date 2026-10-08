@@ -97,8 +97,13 @@ if (until === 1) {
     encoding: "utf8", timeout: Number(process.env.JET_FRONT_TIMEOUT_MS ?? 120000), maxBuffer: 1 << 27,
   });
   writeFileSync(join(out, "front.log"), `${run.stdout ?? ""}${run.stderr ?? ""}`);
-  const problem = frontReceipt(existsSync(receipt) ? readFileSync(receipt, "utf8") : "", run);
+  const receiptText = existsSync(receipt) ? readFileSync(receipt, "utf8") : "";
+  const problem = frontReceipt(receiptText, run);
   if (problem) throw new Error(problem.detail);
+  const receiptLines = receiptText.split("\n");
+  for (const witness of ["source_retirement_requested=true", "source_resources_retired=true", "source_retained_roots=0"]) {
+    if (!receiptLines.includes(witness)) throw new Error(`library-object Source retirement witness missing: ${witness}`);
+  }
   if (existsSync(prefix + ".issues")) throw new Error(readFileSync(prefix + ".issues", "utf8"));
   if (!existsSync(prefix + ".o")) throw new Error("candidate lacks the Jet library-object hook; rebuild it from this tree");
 }
