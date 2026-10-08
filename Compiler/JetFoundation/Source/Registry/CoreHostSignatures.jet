@@ -66,10 +66,10 @@ core.files __xattr_set String,String,[u8] Result<Unit,IOError>
 core.files __reader_stat FileReader Result<[Int],IOError>
 core.files __writer_stat FileWriter Result<[Int],IOError>
 core.files __writer_set_mode FileWriter,Int Result<Unit,IOError>
-core.watcher files Union<String,Path> Result<WatchHandle,IOError>
-core.watcher process_pid Int WatchHandle
-core.watcher port String,Int WatchHandle
-core.watcher set - WatchSet
+core.watcher files|__files Union<String,Path> Result<WatchHandle,IOError>
+core.watcher process_pid|__process_pid Int WatchHandle
+core.watcher port|__port String,Int WatchHandle
+core.watcher set|__set - WatchSet
 core.process argv|args - [String]
 core.process check ProcessReceipt Result<Unit,IOError>
 core.process status_ok ProcessReceipt Bool
@@ -337,9 +337,15 @@ core.time zoned_local LocalDate,LocalTime,Zone,String Result<ZonedDateTime,TimeE
 core.rt callback Int,Int,callback RealtimeStream
 core.tasks timeout Duration Unit
 core.tasks interval Duration Receiver<Int>
-core.tasks yield_now - Unit
+core.tasks yield_now|__yield_now - Unit
 core.tasks current_task - String
 core.game run GameScene,GameReplay,GameBackend,Int String
+core.event __scope_new - EventScope
+core.event __policy_sync - EventPolicy
+core.event __event_with_policy EventPolicy Event<T> T
+core.event __hook_new R Hook<T,R> T|R
+core.event __decision_hook_new HookPolicy DecisionHook<T,E> T|E
+core.event __async_new AsyncPolicy,FailurePolicy Result<AsyncEvent<T,E>,EventConfigError> T|E
 core.encoding.json parse|loads|decode String Result<DataTree,EncodingError>
 core.encoding.json to_string|to_string_pretty|dumps|canonical|events DataTree String
 core.encoding.json reader ^FileReader,EncodingLimits Result<JSONReader,EncodingError>
