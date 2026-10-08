@@ -23,6 +23,23 @@ extern void jet_rt_test_capture_begin(void);
 extern Text *jet_rt_test_capture_take(void);
 extern bool jet_rt_test_capture_print(Text *);
 extern void jet_rt_test_print(Text *, bool);
+extern void jet_rt_test_expect_fail_enter_scope(int64_t, Text *, Text *);
+extern Text *jet_rt_test_expect_fail_leave_scope(int64_t);
+extern void jet_rt_test_record_stop(Text *, Text *);
+extern bool jet_rt_test_expect_fail_stopped_scope(int64_t *);
+extern bool jet_rt_test_expect_fail_catch_scope(int64_t *);
+extern Text *jet_rt_test_expect_fail_error(Text *, Text *, Text *, Text *);
+extern void jet_rt_test_expect_fail_abort(void);
+extern void jet_rt_test_timeout_enter(int64_t, int64_t);
+extern bool jet_rt_test_timeout_leave(int64_t, int64_t *);
+extern void jet_rt_test_timeout_abort(void);
+extern Text *jet_rt_test_timeout_message(int64_t, int64_t);
+extern void jet_rt_test_skip_scope(bool);
+extern bool jet_rt_test_take_whole_skip(void);
+extern void jet_rt_test_skip_abort(void);
+extern void jet_rt_testing_record_failure(Text *, Text *);
+extern bool jet_rt_testing_take_failure(Text **);
+extern void jet_rt_testing_clear_failure(void);
 
 static Text *text(const char *s, int64_t n) {
     Text *value = jet_rt_alloc(24, 8);
@@ -103,6 +120,134 @@ static void capture_fixtures(void) {
     for (int i = 0; i < 8; i++) assert(pthread_join(threads[i], NULL) == 0);
     expect_wire(jet_rt_test_capture_take(), "parent\n");
 }
+// Core.rs:678-860 policy witnesses against the Jet cells, not a C substitute.
+static void scope_fixtures(void) {
+    Text *code = text("E3010", 5), *message = text("index 99", 8);
+    Text *wrong = text("E3001", 5), *needle = text("99", 2);
+    Text *ordinary = text("__jet_test_ordinary_failure__", 29);
+    int64_t found = -77, timer[2] = {-78, -79};
+    Text *pair[2] = {(Text *)(uintptr_t)123, (Text *)(uintptr_t)456};
+    assert(!jet_rt_testing_take_failure(pair));
+    assert(pair[0] == (Text *)(uintptr_t)123 && pair[1] == (Text *)(uintptr_t)456);
+    assert(!jet_rt_test_expect_fail_stopped_scope(&found) && found == -77);
+    assert(!jet_rt_test_expect_fail_catch_scope(&found) && found == -77);
+    assert(!jet_rt_test_timeout_leave(999, timer) && timer[0] == -78 && timer[1] == -79);
+
+    assert(jet_rt_test_expect_fail_error(code, needle, code, message) == NULL);
+    assert(jet_rt_test_expect_fail_error(NULL, NULL, code, message) == NULL);
+    expect_wire(jet_rt_test_expect_fail_error(wrong, NULL, code, message),
+                "expected a stop with E3001, got E3010: index 99");
+    expect_wire(jet_rt_test_expect_fail_error(wrong, needle, code, message),
+                "expected a stop with E3001 whose message contains \"99\", got E3010: index 99");
+    Text *other_needle = text("absent", 6);
+    expect_wire(jet_rt_test_expect_fail_error(NULL, other_needle, code, message),
+                "expected a stop whose message contains \"absent\", got E3010: index 99");
+    expect_wire(jet_rt_test_expect_fail_error(NULL, NULL, NULL, NULL),
+                "expected this region to fail, but it passed");
+    expect_wire(jet_rt_test_expect_fail_error(code, NULL, NULL, NULL),
+                "expected this region to stop with E3010, but it passed");
+    expect_wire(jet_rt_test_expect_fail_error(NULL, needle, NULL, NULL),
+                "expected a stop whose message contains \"99\", but it passed");
+    expect_wire(jet_rt_test_expect_fail_error(code, needle, NULL, NULL),
+                "expected this region to stop with E3010 whose message contains \"99\", but it passed");
+    Text *quoted = text("\"\n\\", 3);
+    expect_wire(jet_rt_test_expect_fail_error(NULL, quoted, NULL, NULL),
+                "expected a stop whose message contains \"\\\"\\n\\\\\", but it passed");
+    drop_text(quoted);
+    drop_text(other_needle);
+    expect_wire(jet_rt_test_timeout_message(INT64_MAX, INT64_MIN),
+                "timeout: region took 9223372036854775807ns, limit was -9223372036854775808ns");
+
+    jet_rt_test_timeout_enter(100, -1); // depth zero retained by inner catch.
+    jet_rt_test_expect_fail_enter_scope(0, code, needle);
+    assert(jet_rt_test_expect_fail_leave_scope(0) == NULL); // frame stays.
+    jet_rt_test_timeout_enter(101, 5); // depth one also retained.
+    jet_rt_test_expect_fail_enter_scope(7, code, needle);
+    jet_rt_test_timeout_enter(102, 6); // depth two pruned by catch.
+    jet_rt_test_expect_fail_enter_scope(8, ordinary, NULL);
+    jet_rt_test_record_stop(code, message);
+    jet_rt_test_record_stop(wrong, ordinary); // first stop wins on all frames.
+    assert(jet_rt_test_expect_fail_stopped_scope(&found) && found == 7);
+    assert(jet_rt_test_expect_fail_catch_scope(&found) && found == 7);
+    expect_wire(jet_rt_test_expect_fail_leave_scope(7), "E3010");
+    assert(jet_rt_test_expect_fail_leave_scope(8) == NULL); // child truncated.
+    assert(!jet_rt_test_expect_fail_stopped_scope(&found)); // parent stop reset.
+    assert(!jet_rt_test_timeout_leave(102, timer));
+    assert(jet_rt_test_timeout_leave(101, timer) && timer[0] >= 0 && timer[1] == 5);
+    assert(jet_rt_test_timeout_leave(100, timer) && timer[0] >= 0 && timer[1] == -1);
+    jet_rt_test_record_stop(code, message);
+    assert(jet_rt_test_expect_fail_stopped_scope(&found) && found == 0); // zero is Some.
+    assert(jet_rt_test_expect_fail_catch_scope(&found) && found == 0);
+    expect_wire(jet_rt_test_expect_fail_leave_scope(0), "E3010");
+    // Duplicate IDs: latest completed result precedes latest stopped frame.
+    jet_rt_test_expect_fail_enter_scope(9, code, NULL);
+    jet_rt_test_expect_fail_enter_scope(9, code, NULL);
+    jet_rt_test_record_stop(code, message);
+    assert(jet_rt_test_expect_fail_catch_scope(&found) && found == 9);
+    expect_wire(jet_rt_test_expect_fail_leave_scope(9), "E3010");
+    assert(jet_rt_test_expect_fail_leave_scope(9) == NULL);
+    jet_rt_test_record_stop(code, message);
+    expect_wire(jet_rt_test_expect_fail_leave_scope(9), "E3010");
+    jet_rt_test_timeout_enter(3, 1);
+    jet_rt_test_timeout_enter(3, 2);
+    assert(jet_rt_test_timeout_leave(3, timer) && timer[1] == 2);
+    assert(jet_rt_test_timeout_leave(3, timer) && timer[1] == 1);
+    jet_rt_test_timeout_enter(3, 4);
+    jet_rt_test_timeout_abort();
+    assert(!jet_rt_test_timeout_leave(3, timer));
+    jet_rt_test_expect_fail_enter_scope(10, code, NULL);
+    jet_rt_test_record_stop(code, message);
+    assert(jet_rt_test_expect_fail_catch_scope(&found));
+    jet_rt_test_expect_fail_abort();
+    assert(jet_rt_test_expect_fail_leave_scope(10) == NULL);
+    assert(!jet_rt_test_expect_fail_stopped_scope(&found));
+    jet_rt_test_skip_scope(false);
+    assert(!jet_rt_test_take_whole_skip());
+    jet_rt_test_skip_scope(true);
+    jet_rt_test_skip_scope(false);
+    assert(jet_rt_test_take_whole_skip());
+    assert(!jet_rt_test_take_whole_skip());
+    jet_rt_test_skip_scope(true);
+    jet_rt_test_skip_abort();
+    assert(!jet_rt_test_take_whole_skip());
+    jet_rt_testing_record_failure(code, message);
+    jet_rt_testing_record_failure(wrong, ordinary); // replacement owns clones.
+    assert(jet_rt_testing_take_failure(pair));
+    expect_wire(pair[0], "E3001");
+    expect_wire(pair[1], "__jet_test_ordinary_failure__");
+    jet_rt_testing_record_failure(code, message);
+    jet_rt_testing_clear_failure();
+    assert(!jet_rt_testing_take_failure(pair));
+    // Capture take must not delete any of the non-capture cells.
+    jet_rt_test_skip_scope(true);
+    jet_rt_test_capture_begin();
+    expect_wire(jet_rt_test_capture_take(), "");
+    assert(jet_rt_test_take_whole_skip());
+    // Abandon every owned row + capture; the single TLS destructor reclaims all.
+    jet_rt_test_expect_fail_enter_scope(11, code, needle);
+    jet_rt_test_record_stop(code, message);
+    jet_rt_test_timeout_enter(12, 1);
+    jet_rt_testing_record_failure(code, message);
+    jet_rt_test_skip_scope(true);
+    jet_rt_test_capture_begin();
+    print_capture("abandoned scope");
+    drop_text(code); drop_text(message); drop_text(wrong); drop_text(needle); drop_text(ordinary);
+    jet_rt_thread_detach();
+    jet_rt_thread_attach();
+    found = -77;
+    assert(!jet_rt_test_expect_fail_stopped_scope(&found) && found == -77);
+    assert(!jet_rt_test_timeout_leave(12, timer));
+    assert(!jet_rt_test_take_whole_skip());
+    assert(!jet_rt_testing_take_failure(pair));
+}
+
+static void *scope_thread(void *unused) {
+    (void)unused;
+    jet_rt_thread_attach();
+    for (int i = 0; i < 100; i++) scope_fixtures();
+    jet_rt_thread_detach();
+    return NULL;
+}
 int main(int argc, char **argv) {
     jet_rt_alloc_init();
     jet_rt_thread_init();
@@ -110,6 +255,16 @@ int main(int argc, char **argv) {
     if (argc == 2 && strcmp(argv[1], "capture") == 0) {
         capture_fixtures();
         puts("unit capture OK");
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "scopes") == 0) {
+        scope_fixtures();
+        jet_rt_test_skip_scope(true); // parent cells remain thread-local.
+        pthread_t threads[8];
+        for (int i = 0; i < 8; i++) assert(pthread_create(&threads[i], NULL, scope_thread, NULL) == 0);
+        for (int i = 0; i < 8; i++) assert(pthread_join(threads[i], NULL) == 0);
+        assert(jet_rt_test_take_whole_skip());
+        puts("unit scope cells OK");
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "wire") == 0) {
