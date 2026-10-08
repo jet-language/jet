@@ -482,6 +482,12 @@ fn scheduler_worker_count() -> I64 {
     parsed :: scheduler_parse_threads(value, out)
     jet_rt_string_drop(value)
     if parsed -> return sync_load(out)
+    scheduler_available_parallelism(I64{4})
+}
+
+// The pool's environment override stays in worker_count. Joined parallel
+// walks use this same available-parallelism probe with their own fallback1.
+fn scheduler_available_parallelism(fallback: I64) -> I64 {
     // CPU affinity is Linux's available_parallelism input. Retry EINVAL with
     // a larger mask rather than truncate large CPU sets; syscall returns size.
     bytes := I64{128}
@@ -511,7 +517,7 @@ fn scheduler_worker_count() -> I64 {
         }
         jet_rt_free(mask, bytes, I64{8})
         if (count > I64{0}) -> return count
-        return I64{4}
+        return fallback
     }
 }
 
