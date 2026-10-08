@@ -648,6 +648,9 @@ impl UnitFact {
 #[derive(Clone)]
 pub(crate) struct TypeRegistry {
     types: HashMap<String, TypeDef>,
+    /// Exact ledger authority intersected with declarations loaded from that Core file.
+    source_owned_types: HashSet<&'static str>,
+    core_source_module: Option<&'static jet_foundation::CoreModuleExports::CoreSourceModule>,
     /// D-FAILURE-FOUNDATION1=A: user-named types carrying `#Error` may be
     /// used as explicit callable failure domains.
     error_types: HashSet<String>,
@@ -677,6 +680,14 @@ pub(crate) struct TypeRegistry {
 }
 
 impl TypeRegistry {
+    pub(crate) fn source_owns_type(&self, name: &str) -> bool {
+        self.source_owned_types.contains(name)
+    }
+
+    pub(crate) fn reserves_type_name(&self, name: &str) -> bool {
+        crate::Collections::is_reserved_type(name) && !self.source_owns_type(name)
+    }
+
 
     pub(crate) fn receipt_section(&self, type_name: &str) -> Option<&ReceiptSectionMeta> {
         self.receipt_sections.get(type_name)
