@@ -1359,6 +1359,31 @@ fn core_fixed_sig_impl(
             vec![(read, Type::Named("DataTree".to_string()))],
             Some(Type::Apply { name: "View".to_string(), args: vec![u8_ty()] }),
         )),
+        // Core DNS source classifies native resolver String failures once.
+        ("core.net", "__dns_a_lookup" | "__dns_aaaa_lookup") => Some((
+            vec![(read, Type::String), (read, Type::Int)],
+            Some(result_ty(Type::List(Box::new(Type::Named("IPAddr".to_string()))), Type::String)),
+        )),
+        ("core.net", "__dns_a_at_lookup" | "__dns_aaaa_at_lookup") => Some((
+            vec![(read, Type::String), (read, Type::String), (read, Type::Int)],
+            Some(result_ty(Type::List(Box::new(Type::Named("IPAddr".to_string()))), Type::String)),
+        )),
+        ("core.net", "__dns_txt_lookup" | "__dns_ptr_lookup") => Some((
+            vec![(read, Type::String), (read, Type::Int)],
+            Some(result_ty(Type::List(Box::new(Type::String)), Type::String)),
+        )),
+        ("core.net", "__dns_txt_at_lookup") => Some((
+            vec![(read, Type::String), (read, Type::String), (read, Type::Int)],
+            Some(result_ty(Type::List(Box::new(Type::String)), Type::String)),
+        )),
+        ("core.net", "__dns_srv_lookup") => Some((
+            vec![(read, Type::String), (read, Type::Int)],
+            Some(result_ty(Type::List(Box::new(Type::Named("DNSSRV".to_string()))), Type::String)),
+        )),
+        ("core.net", "__dns_srv_at_lookup") => Some((
+            vec![(read, Type::String), (read, Type::String), (read, Type::Int)],
+            Some(result_ty(Type::List(Box::new(Type::Named("DNSSRV".to_string()))), Type::String)),
+        )),
         ("core.files", "scope") => Some((
             vec![(read, Type::Named(Syntax::TYPE_AUTHORITY.to_string()))],
             Some(Type::Named("FileScope".to_string())),
