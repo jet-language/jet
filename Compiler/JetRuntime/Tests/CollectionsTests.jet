@@ -443,6 +443,121 @@ fn coll_test_ordered_map() {
     jet_rt_free(snapshot, I64{64}, I64{8})
 }
 
+fn coll_test_text_slots_drop(data: I64, length: I64) {
+    at := I64{0}
+    loop at < length {
+        jet_rt_string_drop(trap_word(data + at * I64{8}))
+        at += I64{1}
+    }
+    if (length != I64{0}) { jet_rt_free(data, length * I64{8}, I64{8}) }
+}
+
+fn coll_test_counter() {
+    snapshot :: jet_rt_alloc(I64{64}, I64{8})
+    width := I64{32}
+    at := I64{0}
+    loop at < I64{8} {
+        trap_store(snapshot + at * I64{8}, coll_test_live(width))
+        width *= I64{2}
+        at += I64{1}
+    }
+    a :: coll_test_short_text(I64{97}, I64{1})
+    b :: coll_test_short_text(I64{98}, I64{1})
+    c :: coll_test_short_text(I64{99}, I64{1})
+    keys :: jet_rt_alloc(I64{24}, I64{8})
+    out :: jet_rt_alloc(I64{8}, I64{8})
+    trap_store(keys, a)
+    trap_store(keys + I64{8}, b)
+    trap_store(keys + I64{16}, a)
+    empty :: jet_coll_counter()
+    from :: jet_coll_counter_from(keys, I64{3})
+    clone :: jet_rt_handle_clone_JetCounter(from)
+    coll_test_require(jet_coll_counter_get(empty, a) == I64{0} && jet_coll_counter_get(from, a) == I64{2} && jet_coll_counter_total(from) == I64{3})
+    unchanged :: jet_coll_counter_add(from, c, I64{0})
+    coll_test_require(trap_word(unchanged) == I64{2} && jet_coll_counter_get(unchanged, c) == I64{0})
+    inc :: jet_coll_counter_inc(from, b)
+    dec :: jet_coll_counter_dec(from, b)
+    coll_test_require(jet_coll_counter_get(inc, b) == I64{2} && trap_word(dec) == I64{1} && jet_coll_counter_get(dec, b) == I64{0})
+    negative :: jet_coll_counter_set_count(from, a, I64{-1})
+    coll_test_require(jet_coll_counter_get(negative, a) == I64{-1} && jet_coll_counter_total(negative) == I64{0})
+    expected :: jet_rt_alloc(I64{40}, I64{8})
+    // Independent literal: Counter{keys: [a, b], counts: [-1, 1]}.
+    trap_store(expected, I64{8895283764753952579})
+    trap_store(expected + I64{8}, I64{7015236279977207147})
+    trap_store(expected + I64{16}, I64{8026294335821717548})
+    trap_store(expected + I64{24}, I64{3268241390004629109})
+    trap_store(expected + I64{32}, I64{137839209622577})
+    mode := I64{0}
+    loop mode < I64{3} {
+        text :: if (mode == I64{0}) -> jet_rt_handle_display_JetCounter(negative) else if (mode == I64{1}) -> jet_rt_handle_show_JetCounter(negative) else -> jet_rt_handle_debug_JetCounter(negative)
+        coll_test_require(rt_text_len(text) == I64{38})
+        at = I64{0}
+        loop at < I64{38} {
+            coll_test_require(trap_byte(rt_text_data(text) + at) == trap_byte(expected + at))
+            at += I64{1}
+        }
+        jet_rt_string_drop(text)
+        mode += I64{1}
+    }
+    jet_rt_free(expected, I64{40}, I64{8})
+    coll_test_require(jet_coll_counter_names(from, out) == I64{2})
+    names :: trap_word(out)
+    coll_test_require(jet_rt_string_eq(trap_word(names), a) && jet_rt_string_eq(trap_word(names + I64{8}), b))
+    coll_test_text_slots_drop(names, I64{2})
+    coll_test_require(jet_coll_counter_elements(negative, out) == I64{1})
+    elements :: trap_word(out)
+    coll_test_require(jet_rt_string_eq(trap_word(elements), b))
+    coll_test_text_slots_drop(elements, I64{1})
+    common :: jet_coll_counter_most_common(inc, I64{-1})
+    zero :: jet_coll_counter_most_common(inc, I64{0})
+    top :: jet_coll_counter_most_common(from, I64{1})
+    coll_test_require(trap_word(common) == I64{2} && trap_word(zero) == I64{0} && trap_word(top) == I64{1})
+    coll_test_require(jet_rt_string_eq(trap_word(trap_word(common + I64{16})), a))
+    merged :: jet_coll_counter_merge_add(from, negative)
+    subtracted :: jet_coll_counter_subtract(from, from)
+    cleared :: jet_coll_counter_clear(from)
+    coll_test_require(jet_coll_counter_get(merged, a) == I64{1} && jet_coll_counter_get(merged, b) == I64{2})
+    coll_test_require(trap_word(subtracted) == I64{0} && trap_word(cleared) == I64{0} && trap_word(from) == I64{2})
+    minimum :: jet_coll_counter_add(empty, a, I64{-9223372036854775808})
+    wide :: jet_coll_counter_get(minimum, a)
+    coll_test_require(jet_int_owned_to_i64(wide) == I64{-9223372036854775808})
+    jet_rt_int_drop(wide)
+    min_text :: jet_rt_handle_show_JetCounter(minimum)
+    coll_test_require(rt_text_len(min_text) == I64{50})
+    // Decimal formatting must not negate I64::MIN in signed arithmetic.
+    coll_test_require(trap_byte(rt_text_data(min_text) + I64{28}) == I64{45} && trap_byte(rt_text_data(min_text) + I64{48}) == I64{93})
+    jet_rt_string_drop(min_text)
+    jet_rt_handle_drop_JetCounter(minimum)
+    jet_rt_handle_drop_JetCounter(empty)
+    jet_rt_handle_drop_JetCounter(from)
+    jet_rt_handle_drop_JetCounter(unchanged)
+    jet_rt_handle_drop_JetCounter(inc)
+    jet_rt_handle_drop_JetCounter(dec)
+    jet_rt_handle_drop_JetCounter(negative)
+    jet_rt_handle_drop_JetCounter(common)
+    jet_rt_handle_drop_JetCounter(zero)
+    jet_rt_handle_drop_JetCounter(top)
+    jet_rt_handle_drop_JetCounter(merged)
+    jet_rt_handle_drop_JetCounter(subtracted)
+    jet_rt_handle_drop_JetCounter(cleared)
+    jet_rt_string_drop(a)
+    jet_rt_string_drop(b)
+    jet_rt_string_drop(c)
+    coll_test_require(jet_coll_counter_total(clone) == I64{3})
+    jet_rt_handle_drop_JetCounter(clone)
+    jet_rt_handle_drop_JetCounter(I64{0})
+    jet_rt_free(keys, I64{24}, I64{8})
+    jet_rt_free(out, I64{8}, I64{8})
+    width = I64{32}
+    at = I64{0}
+    loop at < I64{8} {
+        coll_test_require(coll_test_live(width) == trap_word(snapshot + at * I64{8}))
+        width *= I64{2}
+        at += I64{1}
+    }
+    jet_rt_free(snapshot, I64{64}, I64{8})
+}
+
 fn collections_tests() {
     jet_rt_alloc_init()
     coll_test_bytes()
@@ -450,6 +565,7 @@ fn collections_tests() {
     coll_test_para_fold()
     coll_test_i64_lists()
     coll_test_ordered_map()
+    coll_test_counter()
     // Fresh ceil(5/2) differs from the remaining floor(4/2) after one pull.
     stepped :: jet_rt_native_iter_step_by(coll_test_source(), I64{2})
     coll_test_require(iter_exact_length(stepped) == I64{3})
