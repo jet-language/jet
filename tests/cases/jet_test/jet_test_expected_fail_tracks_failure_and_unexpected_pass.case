@@ -1,0 +1,16 @@
+# Port of jet_test.rs::jet_test_expected_fail_tracks_failure_and_unexpected_pass.
+fixture: fixtures/package
+step: jet test --show-default --capture=all --serial --filter=known {root}/Examples/features/tooling/expected_fail.jet
+stdout: = expected-fail-filter.out
+step: jet test --show-default --capture=all --serial {root}/Examples/features/tooling/expected_fail.jet
+exit: 1
+stdout: = ../../../Examples/features/expected/tooling/expected_fail.test.out
+step: jet test --json --serial {root}/Examples/features/tooling/expected_fail.jet
+exit: 1
+json: stdout doc $.test.expectedFailures = 1
+json: stdout doc $.test.unexpectedPasses = 1
+json: stdout doc $.evidence.identity.claim = ""
+json: stdout doc $.evidence.identity.evidence = ""
+# Both selected claims occur once in this fixture; no duplicate claim+kind records.
+json: stdout doc $.evidence.evidence has {"claim":"known bug remains expected-fail","kind":"unit","outcome":"failed","expectation":"expected_failure"}
+json: stdout doc $.evidence.evidence has {"claim":"E3001","kind":"runtime","expectation":"expected_failure"}
