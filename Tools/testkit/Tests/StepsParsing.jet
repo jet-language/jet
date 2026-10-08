@@ -95,7 +95,7 @@ fn kit_test_steps_env() -> KitEnv {
     outcome :: kit_steps_execute(kit_steps_context(plan, "case", env, root, root, root, kit_test_steps_bless()), kit_steps_hooks())
     assert_eq(outcome.verdict.status, "PASS")
     assert_eq(outcome.run.stdout, "hello\n")
-    missing :: kit_steps_parse("step: built\n")
+    missing :: kit_steps_parse_case("step: built\n")
     refused :: kit_steps_execute(kit_steps_context(missing, "case", env, root, root, root, kit_test_steps_bless()), kit_steps_hooks())
     assert_eq(refused.verdict.status, "REFUSED")
     files.remove_all(root) ?? panic("remove steps-built scratch")
@@ -106,10 +106,7 @@ fn kit_test_steps_env() -> KitEnv {
     kit_exec_write(files.join(root, "nested/marker"), "")
     kit_exec_write(files.join(root, "expected.out"), "{{work}}/nested|step|unset")
     env :: kit_test_golden_env(root)
-    plan := kit_steps_parse("env: TESTKIT_ORDER=case\nstep: sh -c 'printf \"%s|%s|%s\" \"$PWD\" \"$TESTKIT_ORDER\" \"${{JET_RECEIPT_BYPASS-unset}}\"'\nstdout: = expected.out\n")
-    plan.steps[0].cwd = "nested"
-    plan.steps[0].environment = [KitEnvVar{name: "TESTKIT_ORDER", value: Val("step")}]
-    plan.steps[0].unset = ["JET_RECEIPT_BYPASS"]
+    plan :: kit_steps_parse("env: TESTKIT_ORDER=case\nstep: sh -c 'printf \"%s|%s|%s\" \"$PWD\" \"$TESTKIT_ORDER\" \"${{JET_RECEIPT_BYPASS-unset}}\"'\ncwd: nested\nenv: TESTKIT_ORDER=step\nunset: JET_RECEIPT_BYPASS\nstdout: = expected.out\n")
     outcome :: kit_steps_execute(kit_steps_context(plan, "case", env, root, root, root, kit_test_steps_bless()), kit_steps_hooks())
     assert_eq(outcome.verdict.status, "PASS")
     assert_eq(outcome.run.stdout, "{root}/nested|step|unset")
