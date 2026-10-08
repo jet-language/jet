@@ -1,0 +1,43 @@
+# Port of tests/cli_parts/budget.rs:1401-1478; fixture sources copied verbatim.
+# PENDING-SAME-HEAD: original assertions authored; no runtime reference run.
+# PENDING-GRAMMAR: step env/unset
+fixture: fixtures/typed_markers
+step: jet run typed.jet -- -v
+env: JET_TYPED_PORT=4100
+exit: 0
+stdout: = typed-env.out
+step: jet run typed.jet -- --port 4200
+env: JET_TYPED_PORT=4100
+exit: 0
+stdout: = typed-long.out
+step: jet run typed.jet -- -p 4300
+env: JET_TYPED_PORT=4100
+exit: 0
+stdout: = typed-short.out
+step: jet run typed.jet --
+unset: JET_TYPED_PORT
+exit: 0
+stdout: = typed-default.out
+step: jet run --release typed.jet -- -v
+env: JET_TYPED_PORT=4100
+exit: 0
+stdout: = typed-env.out
+step: jet run --release typed.jet -- --port 4200
+env: JET_TYPED_PORT=4100
+exit: 0
+stdout: = typed-long.out
+step: jet run --release typed.jet -- -p 4300
+env: JET_TYPED_PORT=4100
+exit: 0
+stdout: = typed-short.out
+step: jet run --release typed.jet --
+unset: JET_TYPED_PORT
+exit: 0
+stdout: = typed-default.out
+step: jet run --release typed.jet -- --help
+unset: JET_TYPED_PORT
+exit: 0
+stdout: ~ "-v, --verbose" # original predicate
+stdout: ~ "-p, --port PORT" # original predicate
+stdout: ~ "[env: JET_TYPED_PORT]" # original predicate
+stdout: ~ "[default: 3000]" # original predicate
