@@ -275,17 +275,25 @@ fn hll_round(value: Float) -> I64 {
 fn hll_count(value: I64) -> I64 {
     sync_mutex_lock(value + HLL_MUTEX)
     empty := I64{0}
-    sum := Float{-0.0}
     at := I64{0}
     loop at < HLL_REGISTERS {
         rank :: rt_text_byte(value + HLL_DATA + at * HLL_REGISTER_BYTES)
         if (rank == I64{0}) -> empty += I64{1}
+        at += I64{1}
+    }
+    if (empty > I64{0}) {
+        sync_mutex_unlock(value + HLL_MUTEX)
+        return hll_linear(empty)
+    }
+    sum := Float{-0.0}
+    at = I64{0}
+    loop at < HLL_REGISTERS {
+        rank :: rt_text_byte(value + HLL_DATA + at * HLL_REGISTER_BYTES)
         // Every U8 rank0..255 gives a normal, exact power-of-two exponent.
         sum += rt_f64_from_bits((I64{1023} - rank) << I64{52})
         at += I64{1}
     }
     sync_mutex_unlock(value + HLL_MUTEX)
-    if (empty > I64{0}) -> return hll_linear(empty)
     alpha :: Float{0.7213} / (Float{1.0} + Float{1.079} / Float{256.0})
     hll_round(alpha * Float{256.0} * Float{256.0} / sum)
 }

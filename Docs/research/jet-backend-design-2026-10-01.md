@@ -2252,6 +2252,24 @@ vectors, uniform ranks through 255, mixed ranks, exact show, shared concurrent
 mutation and last-owner free. Its stdout file is expected output, not proof;
 native method routing, execution and obsolete seed suppression remain gates.
 
+`TDigest.jet` preserves `Sketch.rs:61-122` on a shared Native40 owner
+(references0, mutex8, embedded canonical sequence24 at16). Its centroid buffer
+has stride16, mean0 and weight8. One mutex covers insertion/compression; one
+covers quantile. The exact rustc1.97.1 `slice::partition_point` binary-search
+shape is retained, including its non-monotone NaN behavior. In-place
+compression is safe because write never overtakes read, and avoids the seed's
+temporary allocation without changing floating operation order. In particular,
+cumulative advances only when a centroid is pushed, not when it is merged.
+The canonical new/add/quantile exports serve real callers and the C witness,
+which compares all 250 frozen centroid pairs in `TDigestVectors.txt` bit for
+bit after 512 samples and reports the first mismatch index. Pass that vector
+file as argv1. It also checks ten seed quantiles, NaN at first/middle/last,
+IEEE edges, concurrent shared mutation and final buffer/shell ownership.
+The separately authorized NaN-only offline seed output SHA256 is
+`f26a9917f71a55a4e476d2e32554fc4680d1f247116e787c3161367b98bedbb9`.
+This is reference data, not a shipping Rust dependency or native-execution
+proof. Composed native routing, execution and seed suppression remain gates.
+
 `EmailError.jet` provides the three retained Error clone/drop/equality exports
 on the registry-plain `EmailError` layout, not on a Rust enum or private facade.
 `Lower/Lower.jet:439,443` and `Lower/Values.jet:49-55,65-74,111-127,137-145`
