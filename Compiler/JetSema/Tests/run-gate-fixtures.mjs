@@ -24,6 +24,7 @@ const fixtures = [
     ["unsafe-obligations", "Compiler/JetSema/Tests/UnsafeObligations.jet"],
     ["gate-ledger", "Compiler/JetSema/Tests/GateLedger.jet"],
     ["gate-projection", "Compiler/JetCli/Tests/GateProjection.jet"],
+    ["core-failure-records", "Compiler/JetSema/Tests/CoreFailureRecordFixtures.jet"],
 ];
 for (const [name, path] of fixtures) {
     const project = join(out, name);

@@ -341,6 +341,7 @@ pub struct CoreRecordFieldRow {
 pub struct CoreRecordLiteralRow {
     pub owner: String
     pub fields: [TypeTupleField]
+    pub core_only: Bool{false}
 }
 
 // Corelib nominal types carry a source identity; the record oracle is keyed
@@ -365,6 +366,14 @@ fn core_record_field_in(rows: [CoreRecordFieldRow], owner: String, field: String
 
 pub fn core_record_literal_fields(owner: String) -> [TypeTupleField]? {
     core_record_literal_fields_in(CORE_RECORD_LITERAL_ROWS, core_record_leaf(owner))
+}
+
+pub fn core_record_literal_is_core_only(owner: String) -> Bool Never! {
+    leaf :: core_record_leaf(owner)
+    loop row in CORE_RECORD_LITERAL_ROWS {
+        if row.owner == leaf -> return row.core_only
+    }
+    false
 }
 
 fn core_record_literal_fields_in(rows: [CoreRecordLiteralRow], owner: String) -> [TypeTupleField]? {
