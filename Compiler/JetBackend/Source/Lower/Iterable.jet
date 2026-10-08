@@ -117,7 +117,7 @@ fn lower_iterable_pull(p: MIRProgram, m: &LowerModule, f: &LowerFunction, next: 
     if lower_pipe_next_name(next.params[0].ty) != "" {
         receiver = lower_read_at(p, &f, cell, 0, next.params[0].ty) ?? {
             lower_fail(&m, &f, "process line source has no native stream carrier")
-            return cell
+            return ~cell
         }
     }
     item :: lower_pointer(&f)
@@ -147,7 +147,8 @@ fn lower_iterable_pull(p: MIRProgram, m: &LowerModule, f: &LowerFunction, next: 
         descriptor :: lower_pointer(&f)
         lower_emit(&f, LIRInst.DataAddress{dst: descriptor, data: data})
         null :: lower_require_null(&f)
-        lower_noreturn_call(&m, &f, "jet_rt_require_stop", [LIRValueID]{lower_const(&f, 2), descriptor, text.value, null, null, null})
+        panic_kind :: lower_const(&f, 2)
+        lower_noreturn_call(&m, &f, "jet_rt_require_stop", [LIRValueID]{panic_kind, descriptor, text.value, null, null, null})
         lower_start(&f, valid, [LIRValueID]{})
         optional :: lower_read_at(p, &f, item, 8, ok) ?? {
             lower_fail(&m, &f, "process line source Option has no native representation")
@@ -267,7 +268,8 @@ fn lower_pipe_cursor_init(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &L
         if lower_value_layout(f, stride) != lir_layout_word() -> return lower_fail(&m, &f, "process line stride has no native word carrier")
     }
     invalid :: lower_flag(&f)
-    lower_emit(&f, LIRInst.Compare{dst: invalid, condition: LIRCondition.Le, left: stride, right: lower_const(&f, 0)})
+    zero :: lower_const(&f, 0)
+    lower_emit(&f, LIRInst.Compare{dst: invalid, condition: LIRCondition.Le, left: stride, right: zero})
     lower_iter_check(&m, &f, invalid, "iterator loop stride must be positive")
     source :: lower_use(&m, &f, collection) ?? return
     held :: lower_pointer(&f)
