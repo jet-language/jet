@@ -1125,3 +1125,77 @@ fn coll_chain_render(chain: I64) -> I64 {
 #Export(c) fn jet_rt_handle_show_JetChain(chain: I64) -> I64 { coll_chain_render(chain) }
 
 #Export(c) fn jet_rt_handle_debug_JetChain(chain: I64) -> I64 { coll_chain_render(chain) }
+
+// Legacy numeric LoopRange uses the CAbi.rs:735-780 exact-Int boundary.
+// The private native cursor keeps [current, end, step, exclusive, done].
+fn coll_loop_range_stop(exhausted: Bool) {
+    trap_header(I64{0})
+    trap_write_word(I64{8028827855593824626}, I64{8})
+    if exhausted {
+        trap_write_word(I64{7310868735955333231}, I64{8})
+        trap_write_word(I64{8391162085809418784}, I64{8})
+        trap_write_word(I64{8243122676036559973}, I64{8})
+        trap_write_word(I64{8391179591946364192}, I64{8})
+        trap_write_word(I64{7237481}, I64{3})
+    } else {
+        trap_write_word(I64{7235440120820691055}, I64{8})
+        trap_write_word(I64{7935470582666960997}, I64{8})
+        trap_write_word(I64{7312192564799501423}, I64{8})
+        trap_write_word(I64{28530}, I64{2})
+    }
+    trap_msg_prelude_end()
+    trap_footer(I64{0})
+}
+
+#Export(c) fn jet_loop_range_init(start: I64, end: I64, step: I64, has_step: U8, exclusive: U8) -> I64 {
+    stride :: if (has_step == U8{0}) -> I64{1} else -> jet_int_owned_to_i64(step)
+    first :: jet_int_owned_to_i64(start)
+    last :: jet_int_owned_to_i64(end)
+    if (stride == I64{0}) { coll_loop_range_stop(false) }
+    cursor :: jet_rt_alloc(I64{40}, I64{8})
+    trap_store(cursor, first)
+    trap_store(cursor + I64{8}, last)
+    trap_store(cursor + I64{16}, stride)
+    trap_store(cursor + I64{24}, if (exclusive == U8{0}) -> I64{0} else -> I64{1})
+    trap_store(cursor + I64{32}, I64{0})
+    cursor
+}
+
+#Export(c) fn jet_loop_range_has_next(cursor: I64) -> Bool {
+    if (trap_word(cursor + I64{32}) != I64{0}) { return false }
+    current :: trap_word(cursor)
+    end :: trap_word(cursor + I64{8})
+    exclusive :: trap_word(cursor + I64{24}) != I64{0}
+    if {
+        (trap_word(cursor + I64{16}) > I64{0}) -> current < end || (!exclusive && current == end)
+        else -> current > end || (!exclusive && current == end)
+    }
+}
+
+#Export(c) fn jet_loop_range_value(cursor: I64) -> I64 {
+    if !jet_loop_range_has_next(cursor) -> coll_loop_range_stop(true)
+    jet_int_owned_from_i64(trap_word(cursor))
+}
+
+#Export(c) fn jet_loop_range_advance(cursor: I64) {
+    if (trap_word(cursor + I64{32}) != I64{0}) {
+        return
+    }
+    current :: trap_word(cursor)
+    step :: trap_word(cursor + I64{16})
+    advanced :: wrapping(current + step)
+    if (((current ^ advanced) & (step ^ advanced)) < I64{0}) {
+        trap_store(cursor + I64{32}, I64{1})
+        return
+    }
+    trap_store(cursor, advanced)
+    trap_store(cursor + I64{32}, if jet_loop_range_has_next(cursor) -> I64{0} else -> I64{1})
+}
+
+#Export(c) fn jet_loop_cursor_drop(cursor: I64) {
+    if (cursor != I64{0}) { jet_rt_free(cursor, I64{40}, I64{8}) }
+}
+
+#Export(c) fn jet_range_contains(start: I64, end: I64, exclusive: U8, value: I64) -> Bool {
+    value >= start && (value < end || (exclusive == U8{0} && value == end))
+}
