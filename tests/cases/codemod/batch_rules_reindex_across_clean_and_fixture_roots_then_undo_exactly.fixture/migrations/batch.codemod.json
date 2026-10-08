@@ -1,0 +1,14 @@
+{
+  "version": 2,
+  "name": "ReportV2",
+  "project": "..",
+  "roots": [
+    {"path": "Examples/report.jet", "validate": "clean"},
+    {"path": "tests/ui/report_type.jet", "validate": "fixture"}
+  ],
+  "rules": [
+    {"id": "rename-report", "kind": "symbol_rename", "from": {"name": "report", "symbol_kind": "function"}, "to": "summarize", "matches": 4},
+    {"id": "parse-needs-base", "kind": "ast_rewrite", "node": "expr", "match": "legacy_parse($input)", "replace": "parse_int($input, base: 10)", "matches": 2}
+  ],
+  "snapshot_after": {"tests/ui/report_type.jet": "migrations/report_type.after.stderr"}
+}

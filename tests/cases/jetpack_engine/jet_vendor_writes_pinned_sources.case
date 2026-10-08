@@ -1,0 +1,22 @@
+# HAND-PORT tests/jetpack_engine.rs:9158-9196 jet_vendor_writes_pinned_sources
+# PENDING-GRAMMAR: approved batch-two/four forms.
+fixture: jet_vendor_writes_pinned_sources.fixture
+env: NO_COLOR=1
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+when os unix: step: chmod 755 jet-pkgs/pkgs/hello/bin/hello
+exit: 0
+write: project/env.jet env.template
+step: jetpack build --no-color
+exit: 0
+cwd: project
+env: PATH=/usr/bin:/bin
+step: jetpack hangar vendor --no-color
+exit: 0
+cwd: project
+env: PATH=/usr/bin:/bin
+file: project/vendor/hello.sha256 is-file
+file.trim: project/vendor/hello.sha256 ^= "sha256-" # original predicate
+file: project/vendor/hello is-dir
+
