@@ -1489,7 +1489,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: cc5827b264353b43c848229ddfbd4158fe5abf0b80039cdb34609eee2d599110
+// Source SHA-256: 43b6d354c7d615c8d73ec87833a89f93cf7207c75531e14c168f3055bb8be97c
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -2308,7 +2308,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.compute", "matmul_f32_tile", "jet_compute_matmul_f32_tile", true, &[true, true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_frame_accesses(&[CoreCallResourceAccess::read(0), CoreCallResourceAccess::read(1)]) .with_frame_completion(CoreCallCompletion::synchronous("jet_compute_matmul_f32_tile")),
     CoreCallRecord::new( "core.compute", "profile_f32_strict", "jet_compute_profile_f32_strict", true, &[], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.compute", "profile_show", "jet_compute_profile_show", true, &[], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.service", "tree", "jet_services_tree", true, &[false]) .without_direct_aot() .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::source_owned("core.service", "tree", &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::source_owned("core.service", "tree_show", &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::source_owned("core.service", "set_delivery", &[true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.service", "worker", "jet_services_worker", true, &[true, false, false, false, false], ) .without_direct_aot() .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
@@ -3374,6 +3374,8 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.service", "__tree_observation_parts", "jet_services_raw_tree_observation_parts", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.service", "__endpoint_identity_parts", "jet_services_raw_endpoint_identity_parts", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.service", "__endpoint_validation_snapshot", "jet_services_raw_endpoint_validation_snapshot", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__tree_allocate", "jet_services_raw_tree_allocate", true, &[false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "__tree_task_group_new", "jet_services_raw_tree_task_group_new", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
 ];
 // END GENERATED CORE CALLS
 

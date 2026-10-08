@@ -2772,6 +2772,14 @@ fn jet_rust_emit_service_handle_type_name(name: String) -> String? {
         "DeliveryEvent" -> Val("JetDeliveryEvent")
         "TaskOutcome" -> Val("JetTaskOutcome")
         "TaskStatus" -> Val("JetTaskStatus")
+        // Private allocation transports, dies at cutover; native Services cites.
+        "__TreeWorker" -> Val("JetServiceWorker") // Services.rs:954
+        "__TreeGroup" -> Val("JetServiceGroup") // Services.rs:955
+        "__TreeStateAdapter" -> Val("JetServiceStateAdapter") // Services.rs:957
+        "__TreeStateAuthority" -> Val("JetServiceStateAuthority") // Services.rs:958
+        "__TreeWorkflowState" -> Val("JetServiceWorkflow") // Services.rs:966
+        "__TreeTaskGroup" -> Val("JetServiceTreeTaskGroup") // Services.rs:970
+        "__TreeSupervisorState" -> Val("JetServiceTreeSupervisorState") // Services.rs:971
         else -> None
     }
 }

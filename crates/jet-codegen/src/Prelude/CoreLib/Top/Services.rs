@@ -941,6 +941,11 @@ struct JetWorkflowHandle {
     state: std::sync::Arc<std::sync::Mutex<JetServiceWorkflow>>,
 }
 
+// Exact aliases of the existing fields at lines 970-971, not new carriers.
+// Required by the existing root-prefixed type-name mapper; dies at cutover.
+type JetServiceTreeTaskGroup = std::sync::Arc<JetTaskGroupRuntime<JetServiceSupervisorTask>>;
+type JetServiceTreeSupervisorState = std::sync::Arc<std::sync::Mutex<JetServiceSupervisorState>>;
+
 #[derive(Clone, Debug)]
 struct JetServiceTree {
     name: String,
@@ -1316,6 +1321,34 @@ fn jet_services_tree(name: String) -> JetServiceTree {
         chaos_fails: 0,
         previous_generation: 0,
         last_upgrade: None,
+    }
+}
+
+fn jet_services_raw_tree_task_group_new() -> JetServiceTreeTaskGroup {
+    std::sync::Arc::new(JetTaskGroupRuntime::new())
+}
+
+// Allocation/materialization only. Every field value, including empty stores
+// and absent records, is supplied by Core/service/service.jet::tree in the
+// original initializer order. No policy check or default is chosen here.
+fn jet_services_raw_tree_allocate(
+    authority: String, name: String, generation: i64, delivery: JetServiceDelivery,
+    restart: JetServiceRestart, budget: (i64, i64),
+    workers: Vec<JetServiceWorker>, groups: Vec<JetServiceGroup>, started: bool,
+    state_adapter: JetServiceStateAdapter, state_authority: Option<JetServiceStateAuthority>,
+    snapshot: Option<String>, event_log: Vec<String>, dead_letters: Vec<String>,
+    idempotency_seen: Vec<(String, JetServiceEndpoint, String)>,
+    directory: Vec<(String, JetServiceEndpoint, String)>,
+    draining: Vec<String>, partitioned: Vec<String>, workflows: Vec<JetServiceWorkflow>,
+    task_group: JetServiceTreeTaskGroup, supervisor_tasks: Vec<JetServiceTreeSupervisorState>,
+    chaos_fails: i64, previous_generation: i64, last_upgrade: Option<JetServiceUpgradeReceipt>,
+) -> JetServiceTree {
+    JetServiceTree {
+        authority, name, generation, delivery, restart,
+        restart_budget: JetServiceRestartBudget { max: budget.0, per_ms: budget.1 },
+        workers, groups, started, state_adapter, state_authority, snapshot, event_log,
+        dead_letters, idempotency_seen, directory, draining, partitioned, workflows,
+        task_group, supervisor_tasks, chaos_fails, previous_generation, last_upgrade,
     }
 }
 

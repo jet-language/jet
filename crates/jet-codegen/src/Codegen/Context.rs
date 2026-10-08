@@ -1584,6 +1584,15 @@ pub(crate) fn service_handle_rust_type(name: &str) -> Option<&'static str> {
         "DeliveryEvent" => Some("JetDeliveryEvent"),
         "TaskOutcome" => Some("JetTaskOutcome"),
         "TaskStatus" => Some("JetTaskStatus"),
+        // Allocation-only private transports; Services.rs native field cites.
+        // All seven bindings die at the Jet-runtime cutover.
+        "__TreeWorker" => Some("JetServiceWorker"), // Services.rs:954
+        "__TreeGroup" => Some("JetServiceGroup"), // Services.rs:955
+        "__TreeStateAdapter" => Some("JetServiceStateAdapter"), // Services.rs:957
+        "__TreeStateAuthority" => Some("JetServiceStateAuthority"), // Services.rs:958
+        "__TreeWorkflowState" => Some("JetServiceWorkflow"), // Services.rs:966
+        "__TreeTaskGroup" => Some("JetServiceTreeTaskGroup"), // Services.rs:970
+        "__TreeSupervisorState" => Some("JetServiceTreeSupervisorState"), // Services.rs:971
         _ => None,
     }
 }
@@ -7900,6 +7909,26 @@ fn walk_type_edge<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn service_allocation_type_aliases_match_the_jet_mapper() {
+        let jet = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../Compiler/JetCodegen/Source/Emit/Types.jet"
+        ));
+        for (alias, rust, jet_case) in [
+            ("__TreeWorker", "JetServiceWorker", "\"__TreeWorker\" -> Val(\"JetServiceWorker\")"),
+            ("__TreeGroup", "JetServiceGroup", "\"__TreeGroup\" -> Val(\"JetServiceGroup\")"),
+            ("__TreeStateAdapter", "JetServiceStateAdapter", "\"__TreeStateAdapter\" -> Val(\"JetServiceStateAdapter\")"),
+            ("__TreeStateAuthority", "JetServiceStateAuthority", "\"__TreeStateAuthority\" -> Val(\"JetServiceStateAuthority\")"),
+            ("__TreeWorkflowState", "JetServiceWorkflow", "\"__TreeWorkflowState\" -> Val(\"JetServiceWorkflow\")"),
+            ("__TreeTaskGroup", "JetServiceTreeTaskGroup", "\"__TreeTaskGroup\" -> Val(\"JetServiceTreeTaskGroup\")"),
+            ("__TreeSupervisorState", "JetServiceTreeSupervisorState", "\"__TreeSupervisorState\" -> Val(\"JetServiceTreeSupervisorState\")"),
+        ] {
+            assert_eq!(service_handle_rust_type(alias), Some(rust));
+            assert!(jet.contains(jet_case), "paired Jet mapper differs for {alias}");
+        }
+    }
 
     #[test]
     fn source_file_handles_use_the_native_owned_carriers() {
