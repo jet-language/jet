@@ -74,6 +74,11 @@ The CBOR whole-value rows likewise execute their existing source encoders and
 parser. Alphabet decoders already use source ownership, not native dispatcher
 aliases. `Examples/features/serde/encoding_source_cutover.jet` records focused
 vectors for these routing contracts.
+Untyped `json.decode` performs the D-JSON3 coercion walk in Jet. The wall-clock
+snapshot and stderr emission remain private raw adapters to the existing seed
+operations. Their shipped hidden Time/IO effects are preserved, not promoted
+to new public effects; this truthfulness gap is tracked in the cutover ledger.
+Typed `decode<T>` remains the existing target-directed compiler lowering.
 
 `EncodingLimits` has these fields:
 

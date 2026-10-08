@@ -2398,6 +2398,21 @@ impl<'a> Checker<'a> {
             return None;
         }
         if module == "core.encoding"
+            && matches!(name, "__coerce_now" | "__coerce_emit")
+        {
+            let vetted = source_alias
+                .and_then(jet_foundation::CoreModuleExports::core_source_module_by_alias)
+                .is_some_and(|source| source.module == "core.encoding.json");
+            if !vetted || !self.in_unsafe {
+                self.diags.push(Diagnostic::error(
+                    "E0510", "JSON coercion host leaves are compiler-private",
+                    "the existing hidden Time/IO boundary is restricted to audited Core JSON source",
+                    "use the public JSON decoder", Some(span),
+                ));
+                return None;
+            }
+        }
+        if module == "core.encoding"
             && matches!(name, "__bytes_into_text" | "__string_byte"
                 | "__object_from_entries" | "__object_into_entries" | "__typed_text" | "__tree_tag" | "__object_entries_view" | "__bytes_view")
             && !self.in_unsafe
@@ -2521,6 +2536,7 @@ impl<'a> Checker<'a> {
                 args.first().is_some_and(|arg| arg.convention == AccessConvention::Move),
             ) || (module == "core.encoding.json" && name == "__parse_typed"))
                 && self.name_ledger.module_alias(self.module_idx) != Some(source.alias)
+                && !(module == "core.encoding.json" && name == "decode" && !type_args.is_empty())
                 // #4747: retain width-polymorphic checking; lowering selects
                 // the reserved Jet marshalling wrapper for F32 arguments.
                 && !(module == "core.math" && matches!(name, "cmp" | "is_finite"))

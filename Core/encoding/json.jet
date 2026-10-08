@@ -3,9 +3,9 @@
 //
 // `parse` is the strict codec: objects keep insertion order, whole numbers
 // become `DataTree.Int` (exact `Int`, not binary64), fractions become
-// `DataTree.Float`, and `NaN` / `Infinity` are syntax errors. `decode` is the
-// same tree with the historical lenient name; typed `decode<T>` stays a
-// compiler lowering over this tree and is not reimplemented here.
+// `DataTree.Float`, and `NaN` / `Infinity` are syntax errors. Untyped `decode`
+// applies the historical lenient coercion walk and emits an audit line for
+// each coercion. Typed `decode<T>` keeps its existing compiler lowering.
 //
 // `to_string` is compact. `to_string_pretty` uses two-space indent. Neither
 // emits a trailing newline, sorts keys, or is a hashing contract: insertion
@@ -28,6 +28,7 @@
 // process out of stack.
 
 
+use core as core
 use core.encoding.[DataEvent, DataTree, EncodingError, EncodingErrorKind, EncodingFormat, EncodingLimits]
 use core.math as math
 use __core_encoding_stream as stream
@@ -87,8 +88,72 @@ pub fn parse(text: String) -> DataTree EncodingError! { parse_json(text, false) 
 /// value at the first name's position.
 pub fn parse_allow_duplicates(text: String) -> DataTree EncodingError! { parse_json(text, true) }
 
-/// Dynamic lenient decode stays on its existing route until its host leaves land.
-pub fn decode(text: String) -> DataTree EncodingError! { parse_json(text, false) }
+/// D-JSON3: coerce strings that are exactly booleans or finite numbers.
+pub fn decode(text: String) -> DataTree EncodingError! {
+    tree :: parse(text) ?? {
+        return Err(EncodingError.new(.JSON, .Syntax, 0, err.line, None, "", err.reason))
+    }
+    coerce_tree(tree, "", (line: String) -> { emit_coercion(line) })
+}
+
+fn emit_coercion(line: String) Never! {
+    #Unsafe("preserve the shipped decoder's hidden stderr effect at its existing host boundary") {
+        core.encoding.__coerce_emit(line)
+    }
+}
+
+fn coerce_line(path: String, target: String) -> String Never! {
+    label :: if path == "" -> "<root>" else -> path
+    timestamp := 0
+    #Unsafe("preserve the shipped decoder's hidden wall-clock snapshot at its existing host boundary") {
+        timestamp = core.encoding.__coerce_now()
+    }
+    "{{\"level\":\"info\",\"body\":\"json coerce: field \"{label}\" string → {target}\",\"ts\":{timestamp}}}"
+}
+
+fn coerce_tree(value: DataTree, path: String, emit: fn(String)) -> DataTree Never! {
+    if value == {
+        .Text(text) -> {
+            if text == "true" || text == "false" {
+                emit(coerce_line(path, "boolean"))
+                return DataTree.Bool(text == "true")
+            }
+            if Float.parse(text) == .Val(number) {
+                if math.is_finite(number) {
+                    emit(coerce_line(path, "number"))
+                    return DataTree.Float(number)
+                }
+            }
+            return value
+        }
+        .Array(items) -> {
+            out := [DataTree]{}
+            loop i in 0..<items.len() -> &out.push(coerce_tree(items[i], "{path}[{i}]", emit))
+            return DataTree.Array(out)
+        }
+        .Object(_) -> {
+            out := [(key: String, value: DataTree)]{}
+            loop entry in stream.object_entries(value) {
+                child_path :: if path == "" -> entry.key else -> "{path}.{entry.key}"
+                &out.push({key: ~entry.key, value: coerce_tree(entry.value, child_path, emit)})
+            }
+            return stream.object_from_entries(^out)
+        }
+        else -> return value
+    }
+}
+
+#Test("lenient JSON preserves ordered shape and coercion traversal") {
+    lines := [String]{}
+    value :: parse("{{\"port\":\"8080\",\"enabled\":\"true\",\"x\":[\"false\",\"Infinity\",\"2\"]}}") ?? panic("JSON")
+    actual :: coerce_tree(value, "", (line: String) -> { &lines.push(line) })
+    assert_eq(to_string(actual), "{{\"port\":8080.0,\"enabled\":true,\"x\":[false,\"Infinity\",2.0]}}")
+    assert_eq(lines.len(), 4)
+    assert(lines[0].contains("field \"port\" string → number"))
+    assert(lines[1].contains("field \"enabled\" string → boolean"))
+    assert(lines[2].contains("field \"x[0]\" string → boolean"))
+    assert(lines[3].contains("field \"x[2]\" string → number"))
+}
 
 /// Python-compatible spelling for JSON parsing.
 pub fn loads(text: String) -> DataTree EncodingError! { parse(text) }

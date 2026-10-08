@@ -170,6 +170,7 @@ fn sema_call_core_source_target(environment: SemaScopeEnvironment, module_identi
     // Module rows are read in place; binding one would copy its whole program.
     source_name :: graph.modules[module_index].module_name
     if source_name == "core.http.client" && member == "request" -> return None
+    if source_name == "core.encoding.json" && member == "decode" && type_args.len() != 0 -> return None
     caller_index :: sema_registration_module_index(graph, environment.module_identity) ?? return None
     // Only the source module itself keeps the host row for its own members
     // (Rust core_call.rs: by registered identity, never by file name, so a
@@ -683,6 +684,12 @@ fn sema_call_core_posix_control(member: String) -> Bool Never! {
 
 fn sema_call_core_check_fixed_record(record: CoreCallRecord, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if !sema_pin_check_call(record.module_name, record.member, args, &diagnostics) -> return None
+    if record.module_name == "core.encoding" && (record.member == "__coerce_now" || record.member == "__coerce_emit") {
+        if !environment.source_file.starts_with("<corelib>/") || environment.module_name != "core.encoding.json" || context.unsafe_depth == 0 {
+            &diagnostics.push(sema_error("E0510", span, "JSON coercion host leaves are compiler-private", "the existing hidden Time/IO boundary is restricted to audited Core JSON source", "use the public JSON decoder"))
+            return None
+        }
+    }
     backing :: (record.module_name == "core.mem" && (record.member == "__list_capacity" || record.member == "__list_reserve_exact" || record.member == "__type_size")) || (record.module_name == "core.encoding" && (record.member == "__read_byte" || record.member == "__write_bytes" || record.member == "__write_text" || record.member == "__flush" || record.member == "__utf8_validate" || record.member == "__bytes_into_text" || record.member == "__text_into_bytes" || record.member == "__string_byte" || record.member == "__object_from_entries" || record.member == "__object_into_entries" || record.member == "__object_entries_view" || record.member == "__bytes_view" || record.member == "__typed_text" || record.member == "__tree_tag"))
     checked_backing_source :: environment.source_file.starts_with("<corelib>/") && (environment.module_name == "__core_encoding_stream" || environment.module_name == "core.encoding.csv" || ((record.module_name == "core.mem" || (record.module_name == "core.encoding" && record.member == "__utf8_validate")) && environment.module_name == "__core_encoding_cbor_parse"))
     if backing && !checked_backing_source {

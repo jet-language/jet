@@ -2136,7 +2136,7 @@ function parseCoreSource(source) {
   }
   for (const sourceModule of sourceModules) {
     const sourceFunctions = new Set(Array.from(
-      read(sourceModule.path).matchAll(/^\s*(?:#[A-Za-z_][A-Za-z0-9_]*(?:\("(?:[^"\\]|\\.)*"\))?\s+)*pub\s+fn\s+([A-Za-z_][A-Za-z0-9_]*)/gm),
+      read(sourceModule.path).matchAll(/^\s*(?:#[A-Za-z_][A-Za-z0-9_]*(?:\("(?:[^"\\]|\\.)*"\))?\s+)*(?:pub\s+)?fn\s+([A-Za-z_][A-Za-z0-9_]*)/gm),
     ).map(function (match) { return match[1]; }));
     for (const member of sourceModule.ownedMembers) {
       if (!sourceFunctions.has(member)) {
@@ -2145,7 +2145,7 @@ function parseCoreSource(source) {
       }
     }
     const sourceTypes = new Set(Array.from(
-      read(sourceModule.path).matchAll(/^pub\s+(?:struct|enum|alias)\s+([A-Za-z_][A-Za-z0-9_]*)/gm),
+      read(sourceModule.path).matchAll(/^(?:pub\s+)?(?:struct|enum|alias)\s+([A-Za-z_][A-Za-z0-9_]*)/gm),
     ).map(function (match) { return match[1]; }));
     for (const type of sourceModule.ownedTypes) {
       if (!sourceTypes.has(type)) {

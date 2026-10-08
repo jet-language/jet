@@ -529,6 +529,8 @@ fn core_sig_encoding_backing(request: CoreCallSignatureRequest) -> CoreTypedCall
         return Val(core_sig_generic(module_name, member, params, Val(result), core_sig_type_parameter("T", CoreCallTypeConstraint.Any)))
     }
     if module_name != "core.encoding" -> return None
+    if member == "__coerce_now" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(Type.Int)))
+    if member == "__coerce_emit" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(unit)))
     if member == "__read_byte" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("FileReader"), write)}, Val(core_sig_result(Type.Option{inner: byte}, cause))))
     if member == "__write_bytes" || member == "__write_text" {
         value_type :: if member == "__write_bytes" -> core_sig_apply("View", byte) else -> Type.String

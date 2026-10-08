@@ -1292,6 +1292,8 @@ fn core_fixed_sig_impl(
             Some(Type::Bool),
         )),
         ("core.mem", "__type_size") => Some((vec![], Some(Type::Int))),
+        ("core.encoding", "__coerce_now") => Some((vec![], Some(Type::Int))),
+        ("core.encoding", "__coerce_emit") => Some((vec![(read, Type::String)], Some(unit.clone()))),
         ("core.encoding", "__read_byte") => Some((
             vec![(AccessConvention::Write, Type::Named("FileReader".to_string()))],
             Some(result_ty(Type::Option(Box::new(u8_ty())), Type::Named("EncodingCause".to_string()))),

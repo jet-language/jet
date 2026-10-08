@@ -1,10 +1,61 @@
 // Whole-value CBOR encoding. Typed Decode remains a compiler intrinsic.
 use core.encoding.[DataTree]
-use core.encoding.cbor.[CBORError, CBORErrorKind]
-use core.encoding.cbor.[CBOROptions]
 use __core_encoding_stream as stream
 use core.math as math
 use __core_encoding_cbor_parse as parser
+
+#Equatable
+pub struct CBOROptions {
+    pub max_depth: Int
+    pub max_items: Int
+    pub max_bytes: Int
+    pub require_canonical: Bool
+}
+impl CBOROptions {
+    pub fn safe() -> CBOROptions Never! {
+        CBOROptions{max_depth: 256, max_items: 1000000, max_bytes: 1073741824, require_canonical: false}
+    }
+}
+#Equatable
+pub enum CBORErrorKind {
+    Syntax
+    Truncated
+    Unsupported
+    Limit
+    TypeMismatch
+    TrailingData
+    NonCanonical
+}
+#[Error, Equatable]
+pub struct CBORError {
+    pub kind: CBORErrorKind
+    pub byte_offset: Int
+    pub path: String
+    pub reason: String
+    impl Display {
+        fn display(self) -> String Never! { self.display_text() }
+    }
+    impl Debug {
+        fn debug(self) -> String Never! { self.display_text() }
+    }
+}
+impl CBORError {
+    fn display_text(self) -> String Never! {
+        kind :: if self.kind == {
+            .Syntax -> "Syntax"
+            .Truncated -> "Truncated"
+            .Unsupported -> "Unsupported"
+            .Limit -> "Limit"
+            .TypeMismatch -> "TypeMismatch"
+            .TrailingData -> "TrailingData"
+            .NonCanonical -> "NonCanonical"
+        }
+        out := "CBOR {kind} at byte {self.byte_offset}"
+        if self.path != "" -> out = "{out}, path {self.path}"
+        "{out}: {self.reason}"
+    }
+}
+
 
 pub fn to_bytes<T: Encode>(value: T) -> [U8] CBORError! { encode(value.encode(), false) }
 pub fn to_bytes_canonical<T: Encode>(value: T) -> [U8] CBORError! { encode(value.encode(), true) }
