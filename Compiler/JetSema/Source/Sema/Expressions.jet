@@ -3312,12 +3312,14 @@ fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expect
         right_name :: sema_expr_type_base_name(rhs.ty) ?? ""
         source_operator = sema_type_source_owns_nominal(graph, left_name, environment.module_identity) || sema_type_source_owns_nominal(graph, right_name, environment.module_identity)
     }
-    if source_operator && (op == BinOp.Add || op == BinOp.Sub || op == BinOp.Mul || op == BinOp.Div) {
+    if source_operator && sema_expr_operator_trait(op) != None {
         before :: diagnostics.len()
         value :: sema_expr_check_operator(op, left, right, lhs, rhs, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics, line)
         if value != None || diagnostics.len() != before -> return value
-        &diagnostics.push(sema_expr_missing_operator_hook(op, lhs.ty, span))
-        return None
+        if op == BinOp.Add || op == BinOp.Sub || op == BinOp.Mul || op == BinOp.Div {
+            &diagnostics.push(sema_expr_missing_operator_hook(op, lhs.ty, span))
+            return None
+        }
     }
     geometry_present := sema_expr_geometry_is_point(lhs.ty) || sema_expr_geometry_is_delta(lhs.ty) || sema_expr_geometry_is_point(rhs.ty) || sema_expr_geometry_is_delta(rhs.ty)
     geometry := sema_expr_check_geometry_binary(op, lhs, rhs, span, line, &diagnostics)
