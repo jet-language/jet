@@ -598,11 +598,11 @@ fn io_err(operation: String, path: String, message: String) -> IOError Never! {
 
 
 // Public checkpoints precede OS work exactly once, not once per raw leaf.
-fn file_fault(effect: String, operation: IOOperation, path: String) IOError! {
-    if core.testing.__fault_should_fail(effect) {
+fn file_fault(operation_path: String, operation: IOOperation, path: String) IOError! {
+    if core.testing.__fault_should_fail(operation_path) {
         return Err(IOError.Other(IOContext{
             operation: operation, resource: Val(path), os_code: None,
-            cause: Val("fault injected: {effect}"),
+            cause: Val("fault injected: {operation_path}"),
         }))
     }
     Ok()
@@ -1770,7 +1770,6 @@ pub fn cd(path: String) IOError! -[FS, Env]> { sys.set_current_dir(path) }
 
 #Test("whole-file policy preserves UTF-8 error text and negative range clamping") {
     root :: mktemp("whole-file-source-policy")
-    defer { remove_all(root) ?? panic("cleanup whole-file source policy") }
     path :: join(root, "data")
     write_bytes(path, [U8]{255}) ?? panic("write invalid UTF-8")
     if read(path) == {
@@ -1790,4 +1789,5 @@ pub fn cd(path: String) IOError! -[FS, Env]> { sys.set_current_dir(path) }
     assert_eq(read(path) ?? panic("read text"), "xbcd")
     create_dir(join(root, "one/two")) ?? panic("recursive create_dir parity")
     create_dir_all(join(root, "one/two")) ?? panic("existing directory")
+    remove_all(root) ?? panic("cleanup whole-file source policy")
 }

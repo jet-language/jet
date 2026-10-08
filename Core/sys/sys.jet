@@ -42,7 +42,7 @@ pub fn get(name: String) -[Env]> String? Never! {
     decode_host_env(core.sys.__env_value(name))
 }
 
-pub fn set(name: String, value: String) -[Env]> Never! {
+pub fn set(name: String, value: String) Never! -[Env]> {
     if validate_env_name(name) == {
         .Err(error) -> panic("core.sys.set: {error}")
         .Ok(_) -> {}
@@ -126,7 +126,7 @@ fn remove_process_entries(entries: &[(name: [U8], value: [U8])], name: [U8]) Nev
     }
 }
 
-fn validate_env_name(name: String) -> Unit EnvError! {
+fn validate_env_name(name: String) EnvError! {
     if name.bytes().len() == 0 || has_nul(name) -> return Err(EnvError.InvalidName)
     loop byte in name.bytes() {
         if byte == (U8{61}) -> return Err(EnvError.InvalidName)

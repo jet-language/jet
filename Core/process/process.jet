@@ -12,6 +12,14 @@ package {
 use core as core
 use core.files as files
 
+// Exact ProcessSignal shape from JetStd/CommonTypes.rs. Signal arming shares
+// the one native interrupt dispatcher; source owns mask and failure policy.
+pub enum ProcessSignal {
+    Term
+    Hup
+    Int
+}
+
 
 pub fn args() -[Exec.Args]> [String] Never! { args_from_argv(argv()) }
 
@@ -112,7 +120,17 @@ pub fn exit(code: Int) -[Exec]> Never Never! {
     loop {}
 }
 
-pub fn on_signal(signal: ProcessSignal) Never! -[Exec]> { core.process.on_signal(signal) }
+pub fn on_signal(signal: ProcessSignal) Never! -[Exec]> {
+    mask :: if signal == {
+        .Int -> 1
+        .Hup -> 2
+        .Term -> 4
+    }
+    if core.process.__signal_arm(mask) == {
+        .Ok(_) -> {}
+        .Err(message) -> panic("core.process.on_signal: {message}")
+    }
+}
 
 pub fn pipeline(steps: [ProcessSpec]) -[Exec, Time.Wait]> ProcessReceipt IOError! {
     core.process.pipeline(steps)
@@ -231,13 +249,9 @@ pub fn list2cmdline(argv: [String]) -> String Never! {
 
 pub fn signal_number(signal: ProcessSignal) -> Int Never! {
     if signal == {
-        .Interrupt -> 2
-        .Terminate -> 15
-        .Hangup -> 1
-        .Child -> 17
-        .User1 -> 10
-        .User2 -> 12
-        else -> 0
+        .Int -> 2
+        .Term -> 15
+        .Hup -> 1
     }
 }
 

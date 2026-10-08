@@ -53,6 +53,15 @@ fn jet_process_on_signal(signal: &jet_std::ProcessSignal) {
     }
 }
 
+// Existing shared signal host operation; source computes the mask and formats
+// the deterministic on_signal failure. L7 replacement, dies at cutover.
+fn jet_process_signal_arm_raw(mask: i64) -> Result<(), String> {
+    let _ = jet_scheduler_root_task_control();
+    let callback: std::sync::Arc<dyn Fn() + Send + Sync + 'static> =
+        std::sync::Arc::new(|| jet_scheduler_root_task_control().cancel());
+    jet_process_signal_register(mask as usize, callback)
+}
+
 fn jet_process_spec_timeout(
     mut spec: jet_std::ProcessSpec,
     timeout: &jet_std::Duration,
