@@ -2016,3 +2016,33 @@ is `EncodingErrors ownership/equality/render OK`. Native execution remains
 unexercised until the integrator composes the fresh green E2 FINAL runtime;
 parser and strict C11 syntax receipts alone do not establish runtime parity.
 
+### Native network error ownership boundary
+
+`JetBackend/Source/NetErrorABI.jet` single-sources Detail48, Dns16 and Error16,
+not Rust layouts. `JetRuntime/Source/NetErrors.jet` provides the complete HAND
+families for JetNetErrorDetail, JetNetDnsError and JetNetError. The C ABI follows
+`CAbiRoutes.rs:10732-10962`: text inputs borrow and clone, optional text inputs
+lend nullable pointer-to-word options, optional exact-Int OS codes convert to
+raw i64 before allocation. Error construction consumes its Detail/Dns payload;
+getters and clone recursively duplicate owners. Nullable owned address/name
+pointers distinguish absence from present empty text. Equality follows the
+ordered derive in `NetHTTP.rs:149-181`, including fields omitted from render.
+
+The C tag table uses DNS11/TLS12/Protocol13/Other14. The explicit rendering
+conversion uses DNS14/TLS11/Protocol12/Other13, as `NetHTTP.rs:530-558` does;
+these are not interchangeable enum ordinals. Show/display/debug all follow
+`Core/NetError.rs:7-22`: non-DNS errors render only their detail.message,
+DNS.Failure only its message, DNS.NotFound the exact backtick-enclosed name
+projection. Existing text helpers and allocation are reused.
+
+`JetRuntime/Tests/NetErrorsWitness.c` requires the real composed Jet object and
+`--wrap=jet_rt_free`; interception is asserted, with exact-once frees for
+recursive original/clone/getter owners. It exercises all 54 exports, all 15 C
+tags, both DNS payloads, optional absence versus present empty/zero, ordered
+equality field mutations, min/max OS codes, clone/getter independence and
+all render branches. `wrong-variant` and `native-overflow` separately require
+the canonical variant and exact-Int range stops. Expected normal output is
+`NetErrors ownership/equality/render OK`. Native execution remains unexercised
+until the integrator composes the fresh green E2 FINAL runtime; light parser
+and strict C11 syntax receipts alone do not establish runtime parity.
+
