@@ -342,6 +342,12 @@ independently from a real prepared imported-key plan, then compare shared SHA-25
 digests without calling the provider's serialization builders. Historical-pair
 migration checks the canonical starting-store hash and preserves the UUID shown
 in the authorized plan through the first installed JVLT2 revision.
+Cancellation and substitution witnesses use only the existing thread-local fault
+points and inspect actual directory entries and inode identities. The concurrent
+backup witness starts a real runtime-owned native thread and waits on the shared
+entered/release barriers; a reader cannot recover or remove the authenticated
+backup while the writer holds its lock. Direct ciphertext observations precede
+the recovery-triggering current-key read, preserving visibility versus durability.
 
 The internal X25519 boundary borrows 32-byte scalar and point spans and writes
 32 bytes to a disjoint output. Its 1536-byte, word-aligned scratch is exclusive

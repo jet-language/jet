@@ -84,6 +84,24 @@ extern void jet_rt_vault_fixture_trust(void *, const Text *);
 extern void jet_rt_vault_fixture_legacy_cipher(const Text *, const ByteList *, ByteList **);
 extern void jet_rt_vault_fixture_bytes_drop(ByteList *);
 extern void historical_pairs_migrate_with_the_previewed_uuid_and_exact_start_hash(const Text *, const Text *, const Text *, const Text *, const Text *, const Text *, const Text *);
+extern void jet_rt_vault_fixture_fault_commit(const Text *, const Text *, const Text *, const Text *, const Text *, int64_t, void **);
+extern void jet_rt_vault_fixture_durability(const Text *, const Text *, const Text *, const Text *, const Text *);
+extern void linux_install_cancellation_and_durability_boundaries_are_literal(const Text *, const Text *, void *);
+extern void jet_rt_vault_fixture_concurrent_prepare(const Text *, const Text *, const Text *, const Text *, const Text *, void **);
+extern int64_t jet_rt_vault_fixture_spawn(int64_t (*)(intptr_t), intptr_t);
+extern int64_t jet_rt_vault_fixture_join(int64_t, intptr_t *);
+extern int64_t jet_rt_vault_fixture_rotation_worker(const Text *, void *, void *, const Text *);
+extern void jet_rt_vault_fixture_reader_conflict(const Text *, const Text *);
+extern void concurrent_reader_defers_backup_recovery_until_writer_releases_lock(const Text *, const Text *, const ByteList *);
+extern void stale_lock_requires_age_owner_dead_pid_nonce_and_unchanged_store(const Text *, void *, const Text *);
+extern void jet_rt_vault_fixture_guard(const Text *, void *, void **);
+extern void lock_drop_never_unlinks_an_inode_substituted_after_its_check(void *, const Text *);
+extern void anonymous_temp_substitution_never_reaches_the_visible_store(const Text *, const Text *, const Text *, const Text *, const Text *);
+extern void jet_rt_vault_set_test_fault(const Text *);
+extern void *jet_rt_vault_test_barrier_new(int64_t);
+extern void jet_rt_vault_test_barrier_wait(void *);
+extern void jet_rt_vault_test_barrier_drop(void *);
+extern void jet_rt_vault_set_test_backup_barrier(const Text *, void *, void *);
 static unsigned unavailable_calls;
 static int64_t unavailable_entropy(void *context, void *out, int64_t count) {
     assert(context == NULL && count == 32);
@@ -733,6 +751,131 @@ static void filesystem_batch_b(void) {
     historical_pairs_migrate_with_the_previewed_uuid_and_exact_start_hash(&root, &name, &empty, &migrate, &token, &value, &starting);
     fixture_remove_tree(migration);
 }
+static void fixture_no_name(const char *root, const char *needle, const char *exact) {
+    char path[512]; fixture_path(path, sizeof(path), root, ".jet");
+    DIR *dir = opendir(path); assert(dir != NULL);
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+        assert(strstr(entry->d_name, needle) == NULL);
+        if (exact != NULL) assert(strcmp(entry->d_name, exact) != 0);
+    }
+    assert(closedir(dir) == 0);
+}
+static unsigned char *fixture_read(const char *path, size_t *length) {
+    int fd = open(path, O_RDONLY); assert(fd >= 0);
+    struct stat st; assert(fstat(fd, &st) == 0 && st.st_size >= 0);
+    *length = (size_t)st.st_size;
+    unsigned char *data = malloc(*length + 1); assert(data != NULL);
+    size_t at = 0;
+    while (at < *length) {
+        ssize_t got = read(fd, data + at, *length - at);
+        if (got < 0 && errno == EINTR) continue;
+        assert(got > 0); at += (size_t)got;
+    }
+    assert(close(fd) == 0);
+    return data;
+}
+typedef struct { const Text *root, *fault; void *plan, *write; } VaultWriter;
+static int64_t fixture_writer(intptr_t raw) {
+    VaultWriter *writer = (VaultWriter *)raw;
+    return jet_rt_vault_fixture_rotation_worker(writer->root, writer->plan, writer->write, writer->fault);
+}
+static void fixture_hex(char *out, const unsigned char *raw, size_t count) {
+    static const char digits[] = "0123456789abcdef";
+    for (size_t i = 0; i < count; ++i) {
+        out[2 * i] = digits[raw[i] >> 4]; out[2 * i + 1] = digits[raw[i] & 15];
+    }
+    out[2 * count] = '\0';
+}
+static void filesystem_batch_c(void) {
+    Text name = text("release"), empty = text(""), initial = text("initial signer");
+    Text cancel_before = text("cancel-before-install"), cancel_after = text("cancel-after-install");
+    Text durability = text("durability-after-install"), rotate_fault = text("rotate with durability fault");
+    char faults[] = "/tmp/jet-vault-faults-XXXXXX", store_path[512], backup_path[512];
+    Text root = fixture_scratch(faults, 1); fixture_authorizer(1);
+    void *first = NULL;
+    jet_rt_vault_fixture_fault_commit(&root, &name, &empty, &initial, &cancel_before, 6, &first);
+    fixture_path(store_path, sizeof(store_path), faults, ".jet/secrets.age");
+    assert(access(store_path, F_OK) == -1 && errno == ENOENT);
+    fixture_no_name(faults, ".next.", ".secrets.age.backup");
+    jet_rt_vault_set_test_fault(&cancel_after);
+    jet_rt_vault_fixture_fault_commit(&root, &name, &empty, &initial, &cancel_after, -1, &first);
+    jet_rt_vault_fixture_durability(&root, &name, &empty, &rotate_fault, &durability);
+    fixture_path(backup_path, sizeof(backup_path), faults, ".jet/.secrets.age.backup");
+    assert(access(backup_path, F_OK) == 0 && "authenticated old inode remains as recovery backup");
+    fixture_write(store_path, (const unsigned char *)"substituted", 11);
+    linux_install_cancellation_and_durability_boundaries_are_literal(&root, &name, first);
+    assert(access(backup_path, F_OK) == -1 && errno == ENOENT);
+    fixture_remove_tree(faults);
+
+    char concurrent[] = "/tmp/jet-vault-reader-writer-backup-XXXXXX";
+    root = fixture_scratch(concurrent, 1); fixture_authorizer(1);
+    Text rotation = text("concurrent rotation");
+    void *objects[2]; jet_rt_vault_fixture_concurrent_prepare(&root, &name, &empty, &initial, &rotation, objects);
+    void *entered = jet_rt_vault_test_barrier_new(2), *release = jet_rt_vault_test_barrier_new(2);
+    jet_rt_vault_set_test_backup_barrier(&root, entered, release);
+    VaultWriter writer = {&root, &durability, objects[0], objects[1]};
+    int64_t thread = jet_rt_vault_fixture_spawn(fixture_writer, (intptr_t)&writer); assert(thread >= 0);
+    jet_rt_vault_test_barrier_wait(entered);
+    fixture_path(backup_path, sizeof(backup_path), concurrent, ".jet/.secrets.age.backup");
+    struct stat st; assert(stat(backup_path, &st) == 0);
+    ino_t backup_inode = st.st_ino;
+    jet_rt_vault_fixture_reader_conflict(&root, &name);
+    assert(stat(backup_path, &st) == 0 && st.st_ino == backup_inode);
+    jet_rt_vault_test_barrier_wait(release);
+    intptr_t result; assert(jet_rt_vault_fixture_join(thread, &result) == 0 && result == 9);
+    jet_rt_vault_set_test_backup_barrier(NULL, NULL, NULL);
+    assert(stat(backup_path, &st) == 0 && st.st_ino == backup_inode);
+    size_t backup_length; unsigned char *backup_raw = fixture_read(backup_path, &backup_length);
+    ByteList backup_bytes = {(int64_t)backup_length, 0, backup_raw};
+    concurrent_reader_defers_backup_recovery_until_writer_releases_lock(&root, &name, &backup_bytes);
+    free(backup_raw);
+    assert(access(backup_path, F_OK) == -1 && errno == ENOENT);
+    jet_rt_vault_test_barrier_drop(entered); jet_rt_vault_test_barrier_drop(release);
+    fixture_remove_tree(concurrent);
+
+    char stale[] = "/tmp/jet-vault-stale-lock-XXXXXX", lock_path[512], lock_text[256];
+    root = fixture_scratch(stale, 1); fixture_authorizer(1);
+    void *raw_plan; jet_rt_vault_fixture_generate_plan(&root, &name, &empty, &raw_plan);
+    const unsigned char *plan = raw_plan;
+    char uuid[33], hash[65]; fixture_hex(uuid, plan + 40, 16); fixture_hex(hash, plan + 64, 32);
+    int written = snprintf(lock_text, sizeof(lock_text),
+        "repo=%s revision=0 pid=999999 process-start=1 nonce=11111111111111111111111111111111 hash=%s\n", uuid, hash);
+    assert(written > 0 && (size_t)written < sizeof(lock_text));
+    fixture_path(lock_path, sizeof(lock_path), stale, ".jet/.secrets.age.lock");
+    fixture_write(lock_path, (const unsigned char *)lock_text, (size_t)written);
+    struct timespec times[2]; assert(clock_gettime(CLOCK_REALTIME, &times[0]) == 0);
+    times[0].tv_sec -= 601; times[1] = times[0];
+    int fd = open(lock_path, O_RDONLY); assert(fd >= 0 && futimens(fd, times) == 0 && close(fd) == 0);
+    Text recover = text("recover stale lock");
+    stale_lock_requires_age_owner_dead_pid_nonce_and_unchanged_store(&root, raw_plan, &recover);
+    assert(access(lock_path, F_OK) == -1 && errno == ENOENT);
+    fixture_no_name(stale, "lock.stale", NULL);
+    fixture_remove_tree(stale);
+
+    char substitution[] = "/tmp/jet-vault-lock-substitution-XXXXXX", acquired[512];
+    root = fixture_scratch(substitution, 1);
+    jet_rt_vault_fixture_generate_plan(&root, &name, &empty, &raw_plan);
+    void *guard; jet_rt_vault_fixture_guard(&root, raw_plan, &guard);
+    Text lock_fault = text("substitute-lock-after-check");
+    lock_drop_never_unlinks_an_inode_substituted_after_its_check(guard, &lock_fault);
+    fixture_path(lock_path, sizeof(lock_path), substitution, ".jet/.secrets.age.lock");
+    assert(stat(lock_path, &st) == 0); ino_t replacement_inode = st.st_ino;
+    size_t replacement_length; unsigned char *replacement = fixture_read(lock_path, &replacement_length);
+    assert(replacement_length == 11 && memcmp(replacement, "replacement", 11) == 0); free(replacement);
+    assert(stat(lock_path, &st) == 0 && st.st_ino == replacement_inode);
+    fixture_path(acquired, sizeof(acquired), substitution, ".jet/.secrets.age.lock.acquired");
+    assert(stat(acquired, &st) == 0 && st.st_ino != replacement_inode);
+    fixture_remove_tree(substitution);
+
+    char temp[] = "/tmp/jet-vault-temp-substitution-XXXXXX";
+    root = fixture_scratch(temp, 1); fixture_authorizer(1);
+    Text temp_fault = text("substitute-temp-before-install");
+    anonymous_temp_substitution_never_reaches_the_visible_store(&root, &name, &empty, &initial, &temp_fault);
+    fixture_path(store_path, sizeof(store_path), temp, ".jet/secrets.age");
+    assert(access(store_path, F_OK) == -1 && errno == ENOENT);
+    fixture_remove_tree(temp);
+}
 int main(int argc, char **argv) {
     jet_rt_alloc_init();
     jet_rt_host_arguments(argc, argv, environ);
@@ -812,6 +955,7 @@ int main(int argc, char **argv) {
     trust_home_fixtures();
     filesystem_batch_a();
     filesystem_batch_b();
+    filesystem_batch_c();
     puts("vault witness OK (13 errors, legacy+JVLT2 codec, imported origin/default entropy, native Secret redaction/wipe, long-origin hash, duplicate priority)");
     jet_rt_thread_detach();
     return 0;

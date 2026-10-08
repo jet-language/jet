@@ -1356,3 +1356,113 @@ fn vault_fixture_stream_hash(stream: I64, expected: I64) {
 #Export(c) fn jet_rt_vault_fixture_generate_plan(root: I64, name: I64, empty: I64, out: I64) {
     rt_text_store(out, vault_fixture_prepare(root, name, I64{1}, I64{1}, I64{0}, empty, out))
 }
+
+#Export(c) fn jet_rt_vault_fixture_fault_commit(root: I64, name: I64, empty: I64, reason: I64, fault: I64, expected: I64, out: I64) {
+    slots :: jet_rt_alloc(I64{16}, I64{8})
+    plan :: vault_fixture_prepare(root, name, I64{1}, I64{1}, I64{0}, empty, slots)
+    write :: vault_fixture_authorize(plan, I64{1}, reason, slots)
+    jet_rt_vault_set_test_fault(fault)
+    error :: vault_commit_at_root(root, plan, write, I64{1}, I64{1}, slots, slots + I64{8})
+    if (expected < I64{0}) {
+        vault_fixture_check(error == I64{0})
+        reference :: rt_text_word(slots + I64{8})
+        vault_fixture_check(rt_text_word(reference + VAULT_REF_GENERATION) == I64{1})
+        rt_text_store(out, reference)
+    } else {
+        vault_fixture_error(error, expected)
+    }
+    jet_rt_free(slots, I64{16}, I64{8})
+}
+#Export(c) fn jet_rt_vault_fixture_durability(root: I64, name: I64, empty: I64, reason: I64, fault: I64) {
+    slots :: jet_rt_alloc(I64{64}, I64{8})
+    plan :: vault_fixture_prepare(root, name, I64{1}, I64{3}, I64{0}, empty, slots)
+    write :: vault_fixture_authorize(plan, I64{1}, reason, slots)
+    jet_rt_vault_set_test_fault(fault)
+    vault_fixture_error(vault_commit_at_root(root, plan, write, I64{3}, I64{1}, slots, slots + I64{8}), I64{9})
+    store :: vault_fixture_decoded(root, slots)
+    if (rt_text_word(store + VAULT_STORE_REVISION) != I64{2}) -> panic("installed revision is visible")
+    vault_store_drop(store)
+    jet_rt_free(slots, I64{64}, I64{8})
+}
+#Export(c) fn linux_install_cancellation_and_durability_boundaries_are_literal(root: I64, name: I64, first: I64) {
+    slots :: jet_rt_alloc(I64{64}, I64{8})
+    vault_fixture_check(vault_key_query_at_root(root, name, I64{1}, false, slots) == I64{0})
+    current :: rt_text_word(slots)
+    vault_fixture_check(current != I64{0} && vault_ref_equal(current, first))
+    vault_ref_drop(current)
+    store :: vault_fixture_decoded(root, slots)
+    if (rt_text_word(store + VAULT_STORE_REVISION) != I64{1}) -> panic("next open restores authenticated backup")
+    vault_store_drop(store)
+    vault_ref_drop(first)
+    jet_rt_vault_set_test_fault(I64{0})
+    jet_rt_vault_clear_test_authorizer()
+    jet_rt_free(slots, I64{64}, I64{8})
+}
+#Export(c) fn jet_rt_vault_fixture_concurrent_prepare(root: I64, name: I64, empty: I64, initial: I64, rotation: I64, out: I64) {
+    slots :: jet_rt_alloc(I64{16}, I64{8})
+    reference :: vault_fixture_generate(root, name, empty, initial, slots)
+    vault_ref_drop(reference)
+    plan :: vault_fixture_prepare(root, name, I64{1}, I64{3}, I64{0}, empty, slots)
+    write :: vault_fixture_authorize(plan, I64{1}, rotation, slots)
+    rt_text_store(out, plan)
+    rt_text_store(out + I64{8}, write)
+    jet_rt_free(slots, I64{16}, I64{8})
+}
+#Export(c) fn jet_rt_vault_fixture_spawn(entry: I64, argument: I64) -> I64 { thread_spawn(entry, argument) }
+#Export(c) fn jet_rt_vault_fixture_join(handle: I64, out: I64) -> I64 { thread_join(handle, out) }
+#Export(c) fn jet_rt_vault_fixture_rotation_worker(root: I64, plan: I64, write: I64, fault: I64) -> I64 {
+    slots :: jet_rt_alloc(I64{16}, I64{8})
+    jet_rt_vault_set_test_fault(fault)
+    error :: vault_commit_at_root(root, plan, write, I64{3}, I64{1}, slots, slots + I64{8})
+    jet_rt_vault_set_test_fault(I64{0})
+    vault_fixture_error(error, I64{9})
+    jet_rt_free(slots, I64{16}, I64{8})
+    I64{9}
+}
+#Export(c) fn jet_rt_vault_fixture_reader_conflict(root: I64, name: I64) {
+    slot :: jet_rt_alloc(I64{8}, I64{8})
+    vault_fixture_error(vault_key_query_at_root(root, name, I64{1}, false, slot), I64{6})
+    jet_rt_free(slot, I64{8}, I64{8})
+}
+#Export(c) fn concurrent_reader_defers_backup_recovery_until_writer_releases_lock(root: I64, name: I64, backup_bytes: I64) {
+    slots :: jet_rt_alloc(I64{64}, I64{8})
+    vault_fixture_check(vault_decode_ciphertext_at_root(root, backup_bytes, slots, slots + I64{8}, slots + I64{40}) == I64{0})
+    old :: rt_text_word(slots)
+    vault_fixture_check(rt_text_word(old + VAULT_STORE_REVISION) == I64{1})
+    vault_store_drop(old)
+    installed :: vault_fixture_decoded(root, slots)
+    vault_fixture_check(rt_text_word(installed + VAULT_STORE_REVISION) == I64{2})
+    vault_store_drop(installed)
+    vault_fixture_check(vault_key_query_at_root(root, name, I64{1}, false, slots) == I64{0})
+    current :: rt_text_word(slots)
+    vault_fixture_check(current != I64{0} && rt_text_word(current + VAULT_REF_GENERATION) == I64{2})
+    vault_ref_drop(current)
+    jet_rt_vault_clear_test_authorizer()
+    jet_rt_free(slots, I64{64}, I64{8})
+}
+#Export(c) fn stale_lock_requires_age_owner_dead_pid_nonce_and_unchanged_store(root: I64, plan: I64, reason: I64) {
+    slots :: jet_rt_alloc(I64{16}, I64{8})
+    write :: vault_fixture_authorize(plan, I64{1}, reason, slots)
+    vault_fixture_check(vault_commit_at_root(root, plan, write, I64{1}, I64{1}, slots, slots + I64{8}) == I64{0})
+    reference :: rt_text_word(slots + I64{8})
+    vault_fixture_check(rt_text_word(reference + VAULT_REF_GENERATION) == I64{1})
+    vault_ref_drop(reference)
+    jet_rt_vault_clear_test_authorizer()
+    jet_rt_free(slots, I64{16}, I64{8})
+}
+#Export(c) fn jet_rt_vault_fixture_guard(root: I64, plan: I64, out: I64) {
+    vault_fixture_check(vault_acquire_lock(root, plan + VAULT_PLAN_UUID, rt_text_word(plan + VAULT_PLAN_REVISION), plan + VAULT_PLAN_START_HASH, out) == I64{0})
+    vault_plan_drop(plan)
+}
+#Export(c) fn lock_drop_never_unlinks_an_inode_substituted_after_its_check(guard: I64, fault: I64) {
+    jet_rt_vault_set_test_fault(fault)
+    vault_lock_drop(guard)
+    jet_rt_vault_set_test_fault(I64{0})
+}
+#Export(c) fn anonymous_temp_substitution_never_reaches_the_visible_store(root: I64, name: I64, empty: I64, reason: I64, fault: I64) {
+    slot :: jet_rt_alloc(I64{8}, I64{8})
+    jet_rt_vault_fixture_fault_commit(root, name, empty, reason, fault, I64{6}, slot)
+    jet_rt_vault_set_test_fault(I64{0})
+    jet_rt_vault_clear_test_authorizer()
+    jet_rt_free(slot, I64{8}, I64{8})
+}
