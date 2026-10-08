@@ -43,6 +43,12 @@ fn checked_core_record(
     arity: usize,
     span: Span,
 ) -> Result<&'static crate::Syntax::CoreCallRecord, TExpr> {
+    if let Some(row) = crate::Syntax::core_call(module, method).filter(|row| row.source_member().is_some()) {
+        if row.accepts_arity(arity) {
+            return Ok(row);
+        }
+        return Err(invariant_violation_expr(span, format!("source-owned Core call `{module}.{method}` has the wrong checked arity")));
+    }
     crate::Syntax::core_call_projection(
         module,
         method,

@@ -773,6 +773,14 @@ fn checked_core_record(
         } else {
             (module, method)
         };
+    if let Some(row) = crate::Syntax::core_call(lookup_module, lookup_method)
+        .filter(|row| row.source_member().is_some())
+    {
+        if row.accepts_arity(arity) {
+            return Ok(row);
+        }
+        return Err(invariant_method_expr(span, format!("source-owned Core call `{lookup_module}.{lookup_method}` has the wrong checked arity")));
+    }
     crate::Syntax::core_call_projection(
         lookup_module,
         lookup_method,
@@ -1592,6 +1600,11 @@ fn lower_core_source_call(
     cx: &Cx,
     env: &mut LowerEnv,
 ) -> Option<TExpr> {
+    if crate::Syntax::core_call(module, method)
+        .is_some_and(|row| row.source_member().is_some() && row.source_target.is_some())
+    {
+        return None;
+    }
     let alias = cx.core_source_modules.get(module)?;
     if (alias == &cx.module_alias && !(module == "core.net.url" && method == "literal"))
         || !jet_foundation::CoreModuleExports::core_source_owns_call(
@@ -1672,6 +1685,126 @@ fn lower_core_source_call(
         },
     })
 }
+/// Forward already-checked Core operands, after each legacy admission and
+/// normalization step. Receiver normalization has already supplied argument 0.
+fn lower_checked_core_source_call(
+    record: CoreCallRecord,
+    span: Span,
+    type_args: &[Type],
+    args: &mut Vec<TExpr>,
+    ty: &Type,
+    cx: &Cx,
+) -> Option<TExpr> {
+    let target = record.source_member()?;
+    let target = if record.module == "core.math" && args.first().is_some_and(|arg| arg.ty == Type::Float32) {
+        match record.member {
+            "cmp" => "__cmp_f32",
+            "is_finite" => "__is_finite_f32",
+            _ => target,
+        }
+    } else { target };
+    let target = match (record.module, record.member, args.len()) {
+        ("core.net", "unix_connect", 1) => "__unix_connect_entry",
+        ("core.net", "unix_connect", 2) => "__unix_connect_deadline_entry",
+        ("core.net.tls", "client", 2) if args.first().is_some_and(|arg| arg.ty != Type::String) => "__client_stream_entry",
+        ("core.net.tls", "client", 3) => "__client_deadline_entry",
+        ("core.net.tls", "client", 4) => "__client_config_deadline_entry",
+        ("core.net.tls", "client", 2) => "client",
+        _ => target,
+    };
+    // Typed JSON remains the compiler-owned sealed Decode projection.
+    if record.module == "core.encoding.json" && record.member == "decode" && !type_args.is_empty() {
+        return None;
+    }
+    let (module, method) = if target.starts_with("core.") {
+        target.rsplit_once('.').unwrap_or((record.module, target))
+    } else {
+        (record.module, target)
+    };
+    let Some(signature) = cx.core_source_sigs.get(&(module.to_string(), method.to_string())) else {
+        return Some(invariant_method_expr(span, format!("source-owned Core call `{module}.{method}` has no loaded checked signature")));
+    };
+    let params = checked_core_source_call_signature(cx, signature, type_args);
+    if params.len() != args.len() {
+        return Some(invariant_method_expr(span, format!("source-owned Core call `{module}.{method}` has the wrong normalized arity")));
+    }
+    let target_return = match module_call_target_return(cx, Some(ty)) {
+        Ok(value) => Some(value),
+        Err(error) => return Some(invariant_method_expr(span, error)),
+    };
+    let lowered_args = std::mem::take(args).into_iter().zip(params).map(|(value, (convention, expected))| {
+        // Core handle paths materialize receiver borrows. Ordinary module
+        // calls carry that convention in TCallArg, never in two wrappers.
+        let value = match value.kind {
+            TExprKind::Borrow { place, .. } => *place,
+            kind => TExpr { ty: value.ty, kind },
+        };
+        let widen_to_vec = matches!((&value.ty, &expected),
+            (Type::FixedList { elem, .. }, Type::List(want)) if elem == want);
+        let widen_to_union = match &expected {
+            Type::Union(members) if members.contains(&value.ty) => Some(expected.clone()),
+            _ => None,
+        };
+        let fn_coerce = if matches!(expected, Type::Fn { .. }) {
+            let already_boxed = match &value.kind {
+                TExprKind::Lambda(lambda) => lambda.boxed || lambda.rc || lambda.arc,
+                TExprKind::HostBorrowCallback { .. } => false,
+                _ => matches!(value.ty, Type::Fn { .. }),
+            };
+            Some(crate::Codegen::TIR::TFnCoerce { ty: expected.clone(), already_boxed })
+        } else { None };
+        let box_as_trait = match (&value.ty, &expected) {
+            (Type::TraitObject(_), _) => None,
+            (Type::Named(concrete) | Type::Apply { name: concrete, .. }, want) => {
+                let trait_name = match want {
+                    Type::TraitObject(names) if names.len() == 1 => names.first(),
+                    Type::Named(name) if cx.trait_names.contains(name) => Some(name),
+                    _ => None,
+                };
+                trait_name.filter(|name| *name != concrete).cloned().map(|name| Type::TraitObject(vec![name]))
+            },
+            _ => None,
+        };
+        let value = if convention == AccessConvention::Move
+            && !matches!(value.kind, TExprKind::Move(_) | TExprKind::ResourceTake(_)) {
+            TExpr { ty: value.ty.clone(), kind: TExprKind::Move(Box::new(value)) }
+        } else { value };
+        TCallArg {
+            borrow: convention == AccessConvention::Read && !expected.is_scalar(),
+            mut_borrow: convention == AccessConvention::Write,
+            value,
+            template_items: None,
+            clone: false,
+            arc_clone: false,
+            fn_coerce,
+            widen_to_vec,
+            widen_to_union,
+            box_as_trait,
+        }
+    }).collect::<Vec<_>>();
+    let form = if signature.type_params.is_empty() {
+        core_source_module_target(signature, method)
+    } else {
+        let Some(instance) = demand_core_source_generic_function(cx, method, signature, &lowered_args, type_args) else {
+            return Some(invariant_method_expr(span, format!("source-owned Core generic call `{module}.{method}` has no checked instantiation")));
+        };
+        TModuleCallForm::Qualified { rust_mod: signature.module_identity.clone(), rust_fn: instance }
+    };
+    Some(TExpr {
+        ty: ty.clone(),
+        kind: TExprKind::ModuleCall { form, target_return, type_args: type_args.to_vec(), args: lowered_args },
+    })
+}
+
+pub(super) fn lower_checked_core_source_expr(mut expr: TExpr, cx: &Cx) -> TExpr {
+    if let TExprKind::CoreCall { record, args, type_args, source_span, .. } = &mut expr.kind {
+        if let Some(source) = lower_checked_core_source_call(**record, *source_span, type_args, args, &expr.ty, cx) {
+            return source;
+        }
+    }
+    expr
+}
+
 
 /// Lower a compiler-private String receiver method as a typed call into the
 /// reserved source-part module. This gate is intentionally separate from the
@@ -6298,7 +6431,6 @@ fn lower_method_call_impl(
                     {
                         env.note_stack_address();
                     }
-                    let widen_to_vec = core_widen_to_vec(&module, method, &targs);
                     let ty = match resolved_ret.cloned().or_else(|| {
                         crate::Sema::core_call_semantic_signature(&module, method)
                             .map(|(_, ret)| ret)
@@ -6328,6 +6460,11 @@ fn lower_method_call_impl(
                             Ok(record) => record,
                             Err(expr) => return expr,
                         };
+                    let checked_type_args = checked_core_type_args(&module, method, type_args, &targs);
+                    if let Some(source) = lower_checked_core_source_call(*record, method_span, &checked_type_args, &mut targs, &ty, cx) {
+                        return source;
+                    }
+                    let widen_to_vec = core_widen_to_vec(&module, method, &targs);
                     prepare_generic_serde_codec(cx, &env.fn_name, &module, method, &mut targs, &ty);
                     let data_plan = match data_plan_for_core_call(record, &targs, &ty, method_span)
                     {
@@ -6338,7 +6475,7 @@ fn lower_method_call_impl(
                         ty: ty.clone(),
                         kind: TExprKind::CoreCall {
                             record,
-                            type_args: checked_core_type_args(&module, method, type_args, &targs),
+                            type_args: checked_type_args,
                             args: targs,
                             source_span: method_span,
                             widen_to_vec,
@@ -6439,7 +6576,6 @@ fn lower_method_call_impl(
                     {
                         env.note_stack_address();
                     }
-                    let widen_to_vec = core_widen_to_vec(&submodule, method, &targs);
                     let Some(ty) = resolved_ret.cloned().or_else(|| {
                         crate::Sema::core_call_semantic_signature(&submodule, method)
                             .map(|(_, ret)| ret)
@@ -6463,6 +6599,11 @@ fn lower_method_call_impl(
                             Ok(record) => record,
                             Err(expr) => return expr,
                         };
+                    let checked_type_args = checked_core_type_args(&submodule, method, type_args, &targs);
+                    if let Some(source) = lower_checked_core_source_call(*record, method_span, &checked_type_args, &mut targs, &ty, cx) {
+                        return source;
+                    }
+                    let widen_to_vec = core_widen_to_vec(&submodule, method, &targs);
                     prepare_generic_serde_codec(
                         cx,
                         &env.fn_name,
@@ -6480,9 +6621,7 @@ fn lower_method_call_impl(
                         ty: ty.clone(),
                         kind: TExprKind::CoreCall {
                             record,
-                            type_args: checked_core_type_args(
-                                &submodule, method, type_args, &targs,
-                            ),
+                            type_args: checked_type_args,
                             args: targs,
                             source_span: method_span,
                             widen_to_vec,
@@ -8470,6 +8609,14 @@ fn lower_method_call_impl(
                     lower_expr(&a.expr, cx, env)
                 })
                 .collect();
+            if let Some(record) = crate::Syntax::core_receiver_method(&kind, method)
+                .filter(|record| record.source_member().is_some()) {
+                let mut normalized = Vec::with_capacity(targs.len() + 1);
+                normalized.push(recv_t);
+                normalized.extend(targs);
+                return lower_checked_core_source_call(*record, method_span, type_args, &mut normalized, &result_ty, cx)
+                    .unwrap_or_else(|| invariant_method_expr(method_span, "source-owned receiver has no checked source route"));
+            }
             let server_message_method = matches!(
                 (kind.as_str(), method, args.len()),
                 (
@@ -10208,6 +10355,11 @@ fn lower_method_call_impl(
                         lowered_args.extend(args.iter().map(|arg| lower_expr(&arg.expr, cx, env)));
                     }
                 }
+                if let Some(record) = crate::Syntax::core_receiver_method(handle, method).filter(|record| record.source_member().is_some()) {
+                    if let Some(source) = lower_checked_core_source_call(*record, method_span, type_args, &mut lowered_args, &ty, cx) {
+                        return source;
+                    }
+                }
                 let widen_to_vec = vec![false; lowered_args.len()];
                 let record =
                     match checked_core_record("core.jobs", method, lowered_args.len(), method_span)
@@ -10272,7 +10424,6 @@ fn lower_method_call_impl(
                 } else {
                     lowered_args.extend(args.iter().map(|arg| lower_expr(&arg.expr, cx, env)));
                 }
-                let widen_to_vec = vec![false; lowered_args.len()];
                 let Some(ty) = resolved_ret.cloned() else {
                     return invariant_method_expr(
                         method_span,
@@ -10290,6 +10441,10 @@ fn lower_method_call_impl(
                     Ok(record) => record,
                     Err(expr) => return expr,
                 };
+                if let Some(source) = lower_checked_core_source_call(*record, method_span, type_args, &mut lowered_args, &ty, cx) {
+                    return source;
+                }
+                let widen_to_vec = vec![false; lowered_args.len()];
                 TExpr {
                     ty: ty.clone(),
                     kind: TExprKind::CoreCall {

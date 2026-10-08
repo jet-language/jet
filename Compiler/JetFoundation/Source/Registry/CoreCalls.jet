@@ -349,6 +349,15 @@ pub fn core_call_source_owned(module_name: String, member: String, borrow_mask: 
     row.aot_direct = false
     row
 }
+pub fn core_call_with_source_owned(row: ^CoreCallRecord) -> CoreCallRecord Never! {
+    updated := row
+    updated.symbol = CoreCallSymbol.SourceOwned
+    updated.coverage = CoreCallCoverage{bits: CORE_CALL_COVERAGE_SEMA}
+    updated.interpreter_route = CoreCallInterpreterRoute.NoRoute
+    updated.aot_direct = false
+    updated
+}
+
 
 pub fn core_call_with_source_target(row: ^CoreCallRecord, target: String) -> CoreCallRecord Never! {
     updated := row

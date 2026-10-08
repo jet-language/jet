@@ -633,12 +633,10 @@ fn project_fragment_module(
         let Some(source) = source_module else {
             continue;
         };
-        if !function.is_pub
-            || !jet_foundation::CoreModuleExports::core_source_owns(
-                source.module,
-                &function.name,
-            )
-        {
+        let registered_target = crate::Syntax::CORE_CALLS.iter()
+            .any(|row| row.targets_source_function(source.module, &function.name));
+        if !registered_target && (!function.is_pub
+            || !jet_foundation::CoreModuleExports::core_source_owns(source.module, &function.name)) {
             continue;
         }
         core_source_sigs.push(((source.module.to_string(), function.name.clone()), signature));

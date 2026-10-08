@@ -2536,6 +2536,10 @@ impl<'a> Checker<'a> {
                 args.first().is_some_and(|arg| arg.convention == AccessConvention::Move),
             ) || (module == "core.encoding.json" && name == "__parse_typed"))
                 && self.name_ledger.module_alias(self.module_idx) != Some(source.alias)
+                // Explicit target rows keep the old specialized argument
+                // checker; TIR forwards only its normalized operands.
+                && !crate::Syntax::core_call(module, name)
+                    .is_some_and(|row| row.source_member().is_some() && row.source_target.is_some())
                 && !(module == "core.encoding.json" && name == "decode" && !type_args.is_empty())
                 // #4747: retain width-polymorphic checking; lowering selects
                 // the reserved Jet marshalling wrapper for F32 arguments.
