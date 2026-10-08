@@ -1,0 +1,9 @@
+# Port of tests/fmt_round_trip_regressions.rs:115-130. Sources copied verbatim from the original include_str! paths.
+fixture: fixtures/generated_source_template_bodies_round_trip_retired_signatures
+step: jet fmt build.jet
+exit: 0
+file: build.jet ~ fn foundation_marker() -> String { "foundation" } # Original formatter substring assertion.
+copy: build.jet build.jet.once
+step: jet fmt build.jet
+exit: 0
+file: build.jet == build.jet.once
