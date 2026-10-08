@@ -64,7 +64,8 @@ pub(super) fn evaluate(
         (CoreCallPureRoute::Email, "serialize") => {
             return EmailAdapter::evaluate("serialize", args, span)
         }
-        (CoreCallPureRoute::Email, "__address_parts" | "__attachment_parts" | "__envelope_parts") => {
+        (CoreCallPureRoute::Email, "__address_parts" | "__attachment_parts" | "__envelope_parts"
+            | "__address_view" | "__attachment_view" | "__message_view" | "__message_parts") => {
             return EmailAdapter::evaluate(row.member, args, span)
         }
         (CoreCallPureRoute::EncodingXml, "canonical") => xml_canonical(args, span),

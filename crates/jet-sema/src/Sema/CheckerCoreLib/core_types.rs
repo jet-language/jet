@@ -903,6 +903,30 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
     {
         return Some(Type::Int);
     }
+    if type_name == "__EmailAddressView" {
+        return match field {
+            "display" => Some(Type::Option(Box::new(Type::String))),
+            "mailbox" => Some(Type::String),
+            _ => None,
+        };
+    }
+    if type_name == "__EmailAttachmentView" {
+        return match field {
+            "filename" | "mime" => Some(Type::String),
+            "bytes" => Some(Type::List(Box::new(Type::IntN { signed: false, bits: 8 }))),
+            _ => None,
+        };
+    }
+    if type_name == "__EmailMessageView" {
+        return match field {
+            "from" => Some(Type::Named("Address".into())),
+            "to" | "bcc" => Some(Type::List(Box::new(Type::Named("Address".into())))),
+            "subject" | "text" | "html" => Some(Type::String),
+            "attachments" => Some(Type::List(Box::new(Type::Named("Attachment".into())))),
+            "wire_upper" => Some(Type::Int),
+            _ => None,
+        };
+    }
     if type_name == "Address" {
         return match field {
             "display" => Some(Type::Option(Box::new(Type::String))),

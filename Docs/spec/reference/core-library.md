@@ -76,12 +76,16 @@ never escapes a raw operation. Ordinary Close first unloads any opened native
 library, then removes its staged payload, matching the verification provider's
 error path. Successful finish transfers those resources into the existing Mod.
 
-Email address, attachment, and envelope construction validates in
+Email address, attachment, envelope, and message construction validates in
 `Core/email/email.jet`: control-character refusal precedes address parsing,
 mailbox grammar is ASCII dot-atom or quoted local, MIME and physical-header
 limits precede attachment size, and envelopes require 1–100 recipients.
-Private raw builders only marshal the existing validated native carriers;
-their construction errors retain the original Configuration operation strings.
+The same source computes the native conservative wire bound and assembles MIME:
+UTF-8 encoded words never split a scalar, transfer base64 folds at 76 bytes,
+and native-order SHA-256 absorption determines mixed/alternative boundaries.
+BCC participates in envelope and boundary generation, never visible headers.
+Private whole-carrier views and builders only marshal native storage; refusal
+errors retain the original Configuration operation strings.
 The canonical `core.files.__create_dir_all_raw` leaf calls the shared recursive
 directory-creation host operation without a second fault probe; source callers
 retain their own FS.Write preflight and the host's Write/path error context.

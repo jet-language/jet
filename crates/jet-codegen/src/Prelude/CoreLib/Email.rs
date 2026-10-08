@@ -1620,6 +1620,48 @@ pub mod jet_email {
         Envelope { from, recipients }
     }
 
+    #[derive(Clone, Debug)]
+    pub struct __EmailAddressView {
+        pub display: Option<String>,
+        pub mailbox: String,
+    }
+    #[derive(Clone, Debug)]
+    pub struct __EmailAttachmentView {
+        pub filename: String,
+        pub mime: String,
+        pub bytes: Vec<u8>,
+    }
+    #[derive(Clone, Debug)]
+    pub struct __EmailMessageView {
+        pub from: Address,
+        pub to: Vec<Address>,
+        pub bcc: Vec<Address>,
+        pub subject: String,
+        pub text: String,
+        pub html: String,
+        pub attachments: Vec<Attachment>,
+        pub wire_upper: jet_foundation::Numeric::JetInt,
+    }
+    pub fn address_view(value: &Address) -> __EmailAddressView {
+        __EmailAddressView { display: value.display.clone(), mailbox: value.mailbox.clone() }
+    }
+    pub fn attachment_view(value: &Attachment) -> __EmailAttachmentView {
+        __EmailAttachmentView { filename: value.filename.clone(), mime: value.mime.clone(), bytes: value.bytes.clone() }
+    }
+    pub fn message_view(value: &Message) -> __EmailMessageView {
+        __EmailMessageView {
+            from: value.from.clone(), to: value.to.clone(), bcc: value.bcc.clone(),
+            subject: value.subject.clone(), text: value.text.clone(), html: value.html.clone(),
+            attachments: value.attachments.clone(), wire_upper: jet_foundation::Numeric::JetInt::from_i64(value.wire_upper as i64),
+        }
+    }
+    pub fn message_parts(from: Address, to: Vec<Address>, bcc: Vec<Address>, subject: String,
+        text: String, html: String, attachments: Vec<Attachment>, envelope: Envelope,
+        wire_upper: jet_foundation::Numeric::JetInt) -> Message {
+        Message { from, to, bcc, subject, text, html, attachments, envelope,
+            wire_upper: wire_upper.to_native_i64().expect("source checked wire bound") as usize }
+    }
+
     impl Message {
         pub fn envelope(&self) -> &Envelope { &self.envelope }
 

@@ -1584,7 +1584,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 7faa8d6c67e79f4991b4c4479db6b34f3733f7dad8d97607645a445e693524d4
+// Source SHA-256: 71a738aef88863b02510126181e69352118d1f1188edbd3d946751c42c295284
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -2770,12 +2770,16 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.net.mime", "extension", "jet_mime_extension", true, &[true], ) .with_pure_route(CoreCallPureRoute::Mime),
     CoreCallRecord::new("core.email", "address", "jet_email::address", true, &[true]) .with_pure_route(CoreCallPureRoute::Email),
     CoreCallRecord::new( "core.email", "attachment", "jet_email::attachment", true, &[true, true, true], ) .with_pure_route(CoreCallPureRoute::Email),
-    CoreCallRecord::new( "core.email", "message", "jet_email::message", true, &[true, true, true, true, true, true, true], ) .with_pure_route(CoreCallPureRoute::Email),
+    CoreCallRecord::source_owned("core.email", "message", &[true, true, true, true, true, true, true]),
     CoreCallRecord::new( "core.email", "envelope", "jet_email::envelope", true, &[true, true], ) .with_pure_route(CoreCallPureRoute::Email),
-    CoreCallRecord::new( "core.email", "serialize", "jet_email::serialize", true, &[true], ) .with_pure_route(CoreCallPureRoute::Email),
+    CoreCallRecord::source_owned("core.email", "serialize", &[true]),
     CoreCallRecord::new("core.email", "__address_parts", "jet_email::address_parts", true, &[false, false]).with_pure_route(CoreCallPureRoute::Email),
     CoreCallRecord::new("core.email", "__attachment_parts", "jet_email::attachment_parts", true, &[false, false, false]).with_pure_route(CoreCallPureRoute::Email),
     CoreCallRecord::new("core.email", "__envelope_parts", "jet_email::envelope_parts", true, &[false, false]).with_pure_route(CoreCallPureRoute::Email),
+    CoreCallRecord::new("core.email", "__address_view", "jet_email::address_view", true, &[true]).with_pure_route(CoreCallPureRoute::Email),
+    CoreCallRecord::new("core.email", "__attachment_view", "jet_email::attachment_view", true, &[true]).with_pure_route(CoreCallPureRoute::Email),
+    CoreCallRecord::new("core.email", "__message_view", "jet_email::message_view", true, &[true]).with_pure_route(CoreCallPureRoute::Email),
+    CoreCallRecord::new("core.email", "__message_parts", "jet_email::message_parts", true, &[false, false, false, false, false, false, false, false, false]).with_pure_route(CoreCallPureRoute::Email),
     CoreCallRecord::new("core.text", "nfc", "jet_text_nfc", true, &[true]),
     CoreCallRecord::new("core.text", "nfd", "jet_text_nfd", true, &[true]),
     CoreCallRecord::new("core.text", "nfkc", "jet_text_nfkc", true, &[true]),

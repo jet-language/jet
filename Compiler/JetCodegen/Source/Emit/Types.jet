@@ -1822,6 +1822,7 @@ JET_RUST_EMIT_COMPILER_OWNED_CORE_RECORDS :: prep { [String]{
     "WebTablePage", "WebVirtualPlan", "MemoStats", "GameScene", "GameFrame", "GameAssets", "GameInputMap", "GameInputSnapshot", "GameBackend", "GameReplay",
     "GameImage", "GameSound", "TestSuite", "TestComparison", "ProcessReceipt", "ProcessPlan", "ProcessChild", "TerminalSize", "TerminalPolicy", "Address",
     "Message", "Attachment", "RecipientReport", "SendReport", "Limits", "Mailer", "Envelope", "DKIMConfig", "SMTPConfig", "XMLCanonical",
+    "__EmailAddressView", "__EmailAttachmentView", "__EmailMessageView",
     "Size", "UINode", "JSONWriter", "JSONReader", "JSONLWriter", "JSONLReader", "DirEntry", "WalkEntry", "TempDir", "TempFile",
     "FileLock", "WatchEvent", "DataColumn", "DataStatus", "FontFace", "Glyph", "GlyphRun", "UIFileFilter", "UIFSGrant",
     "UIGrantedPath", "UIFileDialogRequest", "UIFileDialogSelection", "UIClipboardText", "UIClipboardWrite", "UITextRange", "UIIMEComposition", "UIIMEEvent", "UIDragEvent", "UIShortcut",
@@ -2848,7 +2849,7 @@ fn jet_rust_emit_core_email_type_name(raw: String) -> String? {
     name :: if raw.starts_with(prefix) -> jet_rust_emit_core_source_type_leaf(raw) else -> ~raw
     leaf :: jet_rust_emit_qualified_leaf_under(name, [String]{"email", "core.email", "core::email"}) ?? return None
     if leaf == "EmailError" -> return Val("Error")
-    carriers :: [String]{"Address", "Message", "Attachment", "Envelope", "SMTPSecurity", "RecipientPolicy", "RecipientReport", "SendReport", "Limits", "SMTPAuth", "TLSTrust", "DKIMConfig", "SMTPConfig", "Mailer"}
+    carriers :: [String]{"Address", "Message", "Attachment", "Envelope", "__EmailAddressView", "__EmailAttachmentView", "__EmailMessageView", "SMTPSecurity", "RecipientPolicy", "RecipientReport", "SendReport", "Limits", "SMTPAuth", "TLSTrust", "DKIMConfig", "SMTPConfig", "Mailer"}
     if carriers.contains(leaf) -> return Val(leaf)
     None
 }
