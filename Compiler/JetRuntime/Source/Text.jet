@@ -442,6 +442,10 @@ fn rt_text_push_number(target: I64, value: I64) {
     }
 }
 #Export(c) fn jet_rt_string_slice_range(value: I64, start: I64, end: I64, exclusive: U8, file: I64, file_len: I64, line: I64) -> I64 {
+    rt_text_slice_range(value, start, end, exclusive, file, file_len, line, false)
+}
+
+fn rt_text_slice_range(value: I64, start: I64, end: I64, exclusive: U8, file: I64, file_len: I64, line: I64, builtin: Bool) -> I64 {
     count :: jet_char_len(value)
     valid :: start >= I64{0} && end >= I64{0} && start <= end && (if (exclusive != U8{0}) -> end <= count else -> end < count)
     if !valid {
@@ -458,7 +462,12 @@ fn rt_text_push_number(target: I64, value: I64) {
         rt_text_push_word(message, if (exclusive != U8{0}) -> I64{8319675061114316832} else -> I64{8319675060946806816}, I64{8})
         rt_text_push_word(message, I64{694515305}, I64{4})
         // Static filenames use the same lossy UTF-8 convention as CAbi.rs.
-        location :: rt_text_lossy(file, file_len)
+        location := I64{0}
+        if builtin {
+            location = rt_text_builder_with_capacity(I64{14})
+            rt_text_push_word(location, I64{8458374063401689916}, I64{8})
+            rt_text_push_word(location, I64{68643936562281}, I64{6})
+        } else { location = rt_text_lossy(file, file_len) }
         trap_simple(I64{0}, rt_text_data(location), rt_text_len(location), trap_line(line), rt_text_data(message), rt_text_len(message))
         return I64{0}
     }
