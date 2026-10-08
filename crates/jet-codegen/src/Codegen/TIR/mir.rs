@@ -6727,7 +6727,13 @@ impl<'a> LowerCtx<'a> {
         let stop = self.new_block(self.span(), "poll.stop")?;
         self.terminate(MirTerminator::Poll { kind, resume, stop });
         self.current = stop;
-        self.terminate_with_cleanup(MirTerminator::Stopped, 0)?;
+        // A propagation edge owes only the actions still registered here.
+        // Never share an entry whose explicit count predates consumption.
+        self.stop_cleanup_active = true;
+        let cleanup = self.emit_deferred_cleanups_from(0, false);
+        self.stop_cleanup_active = false;
+        cleanup?;
+        self.terminate(MirTerminator::Stopped);
         self.current = resume;
         Ok(())
     }
@@ -7028,8 +7034,10 @@ impl<'a> LowerCtx<'a> {
                 };
                 let mut block = entry(0, self)?;
                 self.switch_to(block);
-                for action in automatic.iter().rev() {
-                    self.emit_cleanup_action(*action, false)?;
+                let propagating = exit.target == ExitTarget::Stopped;
+                for index in (0..automatic.len()).rev() {
+                    self.emit_cleanup_suffix(depth, &[], &automatic[..index],
+                        automatic[index], propagating)?;
                 }
                 self.terminate(MirTerminator::Jump { target: next });
                 let deepest = entries.last().map_or(0, |last| last.explicit);
@@ -7040,7 +7048,8 @@ impl<'a> LowerCtx<'a> {
                     let action = explicit.get(count - 1).copied().ok_or_else(|| {
                         self.error(self.span(), "drop chain entry outlives its explicit cleanup")
                     })?;
-                    self.emit_cleanup_action(action, false)?;
+                    self.emit_cleanup_suffix(depth, &explicit[..count - 1], &automatic,
+                        action, propagating)?;
                     self.terminate(MirTerminator::Jump { target: following });
                 }
             }
@@ -7154,11 +7163,44 @@ impl<'a> LowerCtx<'a> {
             let (automatic, explicit): (Vec<_>, Vec<_>) = actions
                 .into_iter()
                 .partition(|action| matches!(action, DeferredCleanup::DropPlace { .. }));
-            for action in explicit.into_iter().rev().chain(automatic.into_iter().rev()) {
-                self.emit_cleanup_action(action, stop_path)?;
+            for index in (0..explicit.len()).rev() {
+                self.emit_cleanup_suffix(depth, &explicit[..index], &automatic,
+                    explicit[index], stop_path)?;
+            }
+            for index in (0..automatic.len()).rev() {
+                self.emit_cleanup_suffix(depth, &[], &automatic[..index],
+                    automatic[index], stop_path)?;
+            }
+            if self.stop_cleanup_active {
+                if let Some(scope) = self.defer_stack[depth].owner {
+                    self.emit("stop.scope.exit", None, MirOperation::ScopeExit { scope })?;
+                }
             }
         }
         Ok(())
+    }
+
+    /// Present only the not-yet-run suffix to a cleanup's propagation edge.
+    /// The saved registrations belong to sibling paths, not this exit.
+    fn emit_cleanup_suffix(
+        &mut self,
+        depth: usize,
+        explicit: &[DeferredCleanup],
+        automatic: &[DeferredCleanup],
+        action: DeferredCleanup,
+        stop_path: bool,
+    ) -> Result<(), LowerError> {
+        let deeper = self.defer_stack.split_off(depth + 1);
+        let saved = std::mem::take(&mut self.defer_stack[depth].actions);
+        let count = self.defer_stack[depth].explicit;
+        self.defer_stack[depth].actions.extend_from_slice(automatic);
+        self.defer_stack[depth].actions.extend_from_slice(explicit);
+        self.defer_stack[depth].explicit = explicit.len();
+        let result = self.emit_cleanup_action(action, stop_path);
+        self.defer_stack[depth].actions = saved;
+        self.defer_stack[depth].explicit = count;
+        self.defer_stack.extend(deeper);
+        result
     }
 
     /// Lower one cleanup action into the current block. On a stop path a
@@ -7169,7 +7211,7 @@ impl<'a> LowerCtx<'a> {
         stop_path: bool,
     ) -> Result<(), LowerError> {
         let masked = self.stop_cleanup_active;
-        self.stop_cleanup_active = true;
+        self.stop_cleanup_active = masked || stop_path;
         let result = (|| {
         match action {
             DeferredCleanup::Close(index) => self.emit_deferred_close(index)?,
