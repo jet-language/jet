@@ -42,7 +42,7 @@ fn s3_truth_example_paths(text: String) -> [String] {
 
 // Port of tests/truthfulness.rs:258-301 and helpers304-319/1999-2015.
 #Test("docs_referenced_examples_exist") {
-    content := s3_truth_files.read_text("README.md") ?? ""
+    content := s3_truth_files.read("README.md") ?? ""
     entries :: s3_truth_files.list_dir("Docs") ?? panic("Docs/ missing")
     paths := [String]{}
     loop entry in entries -> &paths.push(~entry.path)
@@ -53,11 +53,11 @@ fn s3_truth_example_paths(text: String) -> [String] {
             if path == "Docs/audits" || path == "Docs/proposals" -> next
             nested :: s3_truth_md_paths(path)
             loop item in nested {
-                body :: s3_truth_files.read_text(item) ?? next
+                body :: s3_truth_files.read(item) ?? next
                 content = "{content}{body}"
             }
         } else if path.ends_with(".md") && !path.ends_with("/.md") {
-            body :: s3_truth_files.read_text(path) ?? next
+            body :: s3_truth_files.read(path) ?? next
             content = "{content}{body}"
         }
     }
@@ -167,7 +167,7 @@ fn s3_truth_link_path(raw: String) -> String {
     seen := [String:Bool]{}
     targets := [String]{}
     loop source in markdown {
-        text :: s3_truth_files.read_text(source) ?? next
+        text :: s3_truth_files.read(source) ?? next
         loop raw in s3_truth_link_targets(text) {
             target :: s3_truth_link_path(raw)
             if target == "" || target.starts_with("/") || target.contains("://") -> next
@@ -175,13 +175,13 @@ fn s3_truth_link_path(raw: String) -> String {
             if candidate != docs_root && !candidate.starts_with("{docs_root}/") -> next
             if !candidate.ends_with(".md") || candidate.ends_with("/.md") -> next
             if seen.get(candidate) ?? false -> next
-            &seen.insert(candidate, true)
+            _ :: &seen.add(candidate, true)
             &targets.push(candidate)
         }
     }
     violations := [String]{}
     loop target in targets {
-        text :: s3_truth_files.read_text(target) ?? next
+        text :: s3_truth_files.read(target) ?? next
         if target != vocabulary_path {
             retired :: s3_truth_retired_senses(text)
             if retired.len() > 0 -> &violations.push("{target}: retired senses: {retired}")
