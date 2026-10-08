@@ -64,6 +64,25 @@ fn kit_test_steps_env() -> KitEnv {
     assert(refused.verdict.detail.contains("COM"))
 }
 
+#Test("conditional capability refusals remain inside their inline and nested block guards") {
+    env :: kit_test_steps_env()
+    loop source in ["when os {sys.family()}: refused: selected-capability\n", "when os {sys.family()}\nwhen os-name {kit_steps_host_name()}\nrefused: selected-capability\nend when\nend when\n"] {
+        plan :: kit_steps_parse_case(source)
+        assert_eq(plan.error, "")
+        assert_eq(plan.refused, "")
+        result :: kit_steps_execute(kit_steps_context(plan, "case", env, env.root, env.scratch, env.root, kit_test_steps_bless()), kit_steps_hooks())
+        assert_eq(result.verdict.status, "REFUSED")
+        assert_eq(result.verdict.detail, "selected-capability")
+    }
+    loop source in ["when os !{sys.family()}: refused: unselected-capability\n", "when os {sys.family()}\nwhen os-name !{kit_steps_host_name()}\nrefused: unselected-capability\nend when\nend when\n"] {
+        plan :: kit_steps_parse_case(source)
+        assert_eq(plan.error, "")
+        result :: kit_steps_execute(kit_steps_context(plan, "case", env, env.root, env.scratch, env.root, kit_test_steps_bless()), kit_steps_hooks())
+        assert_eq(result.verdict.status, "PASS")
+    }
+    loop source in ["refused:\n", "when os {sys.family()}: refused:\n", "when made-up host: refused: bad\n", "when os {sys.family()}\nrefused: bad\n"] -> assert(kit_steps_parse_case(source).error != "")
+}
+
 #Test("step stream assertions enforce exit and exact bytes") {
     env :: kit_test_steps_env()
     run :: KitRun{stdout: "two words", stderr: "", code: 0, signal: None, timed_out: false, error: ""}

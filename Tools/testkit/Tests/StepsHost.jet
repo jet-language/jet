@@ -202,3 +202,78 @@ use core.sys as sys
     assert(kit_steps_parse_case("when !env-set: step: true\n").error.contains("invalid when condition"))
     files.remove_all(root) ?? panic("remove directory guard scratch")
 }
+
+#Test("conditional step environment selects before expanding unselected values") {
+    root :: cases_test_root("host-conditional-step-env")
+    source :: "env: SELECT=base\nstep: printf '%s|%s' {{env:SELECT}} {{env:SKIP|base}}\nwhen os {sys.family()}: env: SELECT=selected\nwhen os !{sys.family()}: env: SKIP={{tool:jet-testkit-unavailable}}\nstdout: = \"selected|base\"\n"
+    plan :: kit_steps_parse_case(source)
+    assert_eq(plan.error, "")
+    assert_eq(plan.steps[0].environment.len(), 2)
+    assert_eq(plan.steps[0].conditions.len(), 0)
+    assert_eq(cases_test_advanced(root, "selected", source).verdict.status, "PASS")
+    assert_eq(cases_test_advanced(root, "wrong", source.replace("selected|base", "wrong")).verdict.status, "FAIL")
+    selected_missing :: "step: printf ok\nwhen os {sys.family()}: env: VALUE={{tool:jet-testkit-unavailable}}\n"
+    assert_eq(cases_test_advanced(root, "missing-selected", selected_missing).verdict.status, "ERROR")
+    assert(kit_steps_parse_case("when os {sys.family()}: env: VALUE=header\nstep: printf ok\n").error != "")
+    files.remove_all(root) ?? panic("remove conditional environment scratch")
+}
+
+#Test("modifiers inherit their exact process branch without rerunning its probe") {
+    root :: cases_test_root("host-modifier-branch-owner")
+    directory :: files.join(root, "tests/cases/group")
+    kit_exec_write(files.join(directory, "tree/nested/value"), "ready")
+    source :: "fixture: tree\nwhen probe sh -c 'test ! -f selected && touch selected': step: cat value\nwhen probe sh -c 'test ! -f selected && touch selected': cwd: nested\nwhen probe sh -c 'test ! -f selected && touch selected': env: VALUE=selected\nstdout: = \"ready\"\n"
+    plan :: kit_steps_parse_case(source)
+    assert_eq(plan.error, "")
+    assert_eq(plan.steps[0].cwd, "nested")
+    assert_eq(plan.steps[0].environment[0].conditions.len(), 0)
+    assert_eq(cases_test_advanced(root, "once", source).verdict.status, "PASS")
+    assert_eq(cases_test_advanced(root, "wrong", source.replace("stdout: = \"ready\"", "stdout: = \"wrong\"")).verdict.status, "FAIL")
+    skipped :: "when probe false: step: cat absent\nwhen probe false: cwd: missing\nwhen probe false: env: VALUE={{tool:jet-testkit-unavailable}}\n"
+    assert_eq(cases_test_advanced(root, "unselected-owner", skipped).verdict.status, "PASS")
+    foreign :: "when os {sys.family()}: step: printf ok\nwhen os !{sys.family()}: cwd: missing\n"
+    assert(kit_steps_parse_case(foreign).error.contains("process owner's guard"))
+    files.remove_all(root) ?? panic("remove branch owner scratch")
+}
+
+#Test("immutable named history complements select one capture without renaming its identity") {
+    root :: cases_test_root("host-capture-history-join")
+    source :: "step producer: printf ready\nwhen producer.stdout != \"\": capture: chosen = text stdout\nwhen producer.stdout = \"\": capture: chosen = text stderr\ncap:chosen: = \"ready\"\n"
+    assert_eq(kit_steps_parse_case(source).error, "")
+    assert_eq(cases_test_advanced(root, "nonempty", source).verdict.status, "PASS")
+    assert_eq(cases_test_advanced(root, "wrong", source.replace("cap:chosen: = \"ready\"", "cap:chosen: = \"wrong\"")).verdict.status, "FAIL")
+    empty :: "step producer: printf ''\nwhen producer.stdout != \"\": capture: chosen = text stderr\nwhen producer.stdout = \"\": capture: chosen = text stdout\ncap:chosen: = \"\"\n"
+    assert_eq(cases_test_advanced(root, "empty", empty).verdict.status, "PASS")
+    overlapping :: "{source}when producer.stdout != \"\": capture: chosen = text stdout\n"
+    assert(kit_steps_parse_case(overlapping).error.contains("duplicate capture"))
+    producer_changed :: "session producer raw: cat\nwhen producer.stdout != \"\": capture: chosen = text file value\nclose producer\nwhen producer.stdout = \"\": capture: chosen = text file value\n"
+    assert(kit_steps_parse_case(producer_changed).error.contains("duplicate capture"))
+    files.remove_all(root) ?? panic("remove history capture scratch")
+}
+
+#Test("platform capture branches retain identity through nested guards and fresh loop scopes") {
+    root :: cases_test_root("host-capture-platform-join")
+    directory :: files.join(root, "tests/cases/group")
+    kit_exec_write(files.join(directory, "tree/value"), "ready")
+    source :: "fixture: tree\nwhen os-name {kit_steps_host_name()}\ncapture: chosen = text file value\nend when\nwhen os-name not-a-host\ncapture: chosen = text file absent\nend when\ncap:chosen: = \"ready\"\n"
+    assert_eq(kit_steps_parse_case(source).error, "")
+    assert_eq(cases_test_advanced(root, "platform", source).verdict.status, "PASS")
+    assert_eq(cases_test_advanced(root, "wrong", source.replace("cap:chosen: = \"ready\"", "cap:chosen: = \"wrong\"")).verdict.status, "FAIL")
+    loops :: "step producer: printf 'a\\nb\\n'\nfor line stdout as row\nwhen os-name {kit_steps_host_name()}: capture: chosen = text stdout.line(0)\nwhen os-name not-a-host: capture: chosen = text stderr\ncap:chosen: = \"a\"\nend for\nfor line stdout as row\ncapture: chosen = text stdout.line(0)\ncap:chosen: = \"a\"\nend for\n"
+    assert_eq(kit_steps_parse_case(loops).error, "")
+    assert_eq(cases_test_advanced(root, "scopes", loops).verdict.status, "PASS")
+    files.remove_all(root) ?? panic("remove platform capture scratch")
+}
+
+#Test("capture joins reject mutable guards unconditional overlap and accumulating declarations") {
+    loop source in [
+        "capture: chosen = text file value\ncapture: chosen = text file value\n",
+        "when os unix: capture: chosen = text file value\nwhen os unix: capture: chosen = text file value\n",
+        "when os unix: capture: chosen = text file value\ncapture: chosen = text file value\n",
+        "mkdir: changed\nwhen dir-readable changed: capture: chosen = text file value\nremove: changed\nwhen !dir-readable changed: capture: chosen = text file value\n",
+        "step producer: printf ready\nwhen stdout != \"\": capture: chosen = text stdout\nwhen stdout = \"\": capture: chosen = text stderr\n",
+        "step producer: printf ready\nwhen producer.stdout != value: capture: chosen = text stdout\nwhen producer.stdout = value: capture: chosen = text stderr\n",
+        "step producer: printf ready\nfor line stdout as row\nwhen os unix: capture: chosen += text stdout\nwhen os windows: capture: chosen = text stdout\nend for\n",
+        "when os unix: capture: chosen = text file value\nstep producer: printf ready\nfor line stdout as row\nfor line stdout as inner\ncapture: chosen += text stdout\nend for\nend for\nwhen os windows: capture: chosen = text file value\n",
+    ] -> assert(kit_steps_parse_case(source).error.contains("duplicate capture"))
+}

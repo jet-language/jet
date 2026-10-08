@@ -147,8 +147,10 @@ fn kit_steps_parse(source: String) -> KitPlan {
             plan.error = "line {line_number}: modifier not adjacent to its step"
             return plan
         }
-        if modifier && conditions.len() > 0 {
-            plan.error = "line {line_number}: when cannot guard a step modifier"
+        // A modifier in the owner's exact branch inherits that selection.
+        // Only env can carry a different guard; header env stays unconditional.
+        if modifier && conditions.len() > 0 && (!process_seen || (key != "env" && plan.steps[plan.steps.len() - 1].conditions != conditions)) {
+            plan.error = "line {line_number}: conditional modifier needs its process owner's guard"
             return plan
         }
         if process_line {
@@ -226,11 +228,25 @@ fn kit_steps_parse(source: String) -> KitPlan {
             } else -> raw_value
             assignment :: "{kit_steps_byte_slice(value, 0, equals)}={decoded}"
             if !process_seen -> &plan.environment.push(assignment)
-            else -> &plan.steps[plan.steps.len() - 1].environment.push(KitEnvVar{name: kit_steps_byte_slice(value, 0, equals), value: Val(decoded)})
+            else {
+                owner_conditions :: plan.steps[plan.steps.len() - 1].conditions
+                selected :: if conditions == owner_conditions -> [String]{} else -> conditions
+                &plan.steps[plan.steps.len() - 1].environment.push(KitEnvVar{name: kit_steps_byte_slice(value, 0, equals), value: Val(decoded), conditions: selected})
+            }
             next
         }
+        // Header refusals remain case-wide; guarded refusals are ordered actions
+        // so a false branch cannot refuse the entire case before selection.
         if key == "refused" {
-            plan.refused = value
+            if value == "" {
+                plan.error = "line {line_number}: refused needs a capability"
+                return plan
+            }
+            if conditions.len() > 0 || kit_expect_named(blocks, "when") {
+                &plan.steps.push(KitStep{argv: [], stdin: "", exit: "any", assertions: [], action: "assert", refused_capability: value})
+            } else {
+                plan.refused = value
+            }
             next
         }
         if key == "artifact" {
@@ -395,13 +411,13 @@ fn kit_steps_parse(source: String) -> KitPlan {
                     return plan
                 }
             }
-            if !kit_steps_capture_valid(words, original) || (!accumulating && kit_expect_named(captures, words[0])) {
+            if !kit_steps_capture_valid(words, original) || (!accumulating && kit_expect_named(captures, words[0]) && !kit_steps_capture_duplicate_valid(plan, words[0], conditions)) {
                 plan.error = "line {line_number}: invalid or duplicate capture"
                 return plan
             }
             selector :: if words[1] == "=" && (words[2] == "text" || words[2] == "lines") -> kit_steps_subject(words[3]) else -> kit_steps_subject(words[1])
             stream_capture :: if words[1] == "=" -> (words[2] == "text" || words[2] == "lines") && selector != "file" && selector != "file?" else -> selector != "file" && selector != "file?"
-            if plan.steps.len() == 0 && stream_capture {
+            if !process_seen && stream_capture {
                 plan.error = "line {line_number}: stream capture without step"
                 return plan
             }
@@ -528,6 +544,21 @@ fn kit_steps_parse(source: String) -> KitPlan {
             if spawning -> &pending.push(label)
             &plan.steps.push(KitStep{argv: argv, stdin: "", exit: "0", assertions: [], label: label, action: if spawning -> "spawn" else -> ""})
             next
+        }
+        independent :: kit_steps_independent_assertion(key, original)
+        if !process_seen && (key == "exit" || key == "elapsed" || ((key == "json" || kit_steps_subject_valid(key)) && !independent)) {
+            plan.error = "line {line_number}: assertion without process step"
+            return plan
+        }
+        if independent {
+            if plan.steps.len() == 0 {
+                &plan.steps.push(KitStep{argv: [], stdin: "", exit: "any", assertions: [], action: "assert"})
+            } else {
+                owner :: plan.steps[plan.steps.len() - 1]
+                if kit_expect_named(["when", "end when", "for", "repeat", "end for", "end repeat", "parallel", "end parallel"], owner.action) || (owner.action != "" && owner.conditions.len() > 0) {
+                    &plan.steps.push(KitStep{argv: [], stdin: "", exit: "any", assertions: [], action: "assert"})
+                }
+            }
         }
         if plan.steps.len() == 0 {
             plan.error = "line {line_number}: assertion without step"

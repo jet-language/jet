@@ -41,6 +41,20 @@ fn kit_steps_condition_atom_valid(text: String) -> Bool {
     false
 }
 
+// Filesystem and captured-value assertions observe state without inventing a
+// process. Stream, exit and elapsed assertions still need a process owner.
+fn kit_steps_independent_assertion(key: String, original: String) -> Bool {
+    if key == "entries" || key == "tree" -> return true
+    selector := key
+    if key == "json" {
+        words :: kit_steps_words(kit_steps_body(original)) ?? return false
+        if words.len() == 0 -> return false
+        selector = words[0]
+    }
+    subject :: kit_steps_subject(selector)
+    subject == "file" || subject == "file?" || subject.starts_with("cap:")
+}
+
 fn kit_steps_attach_conditions(original: KitPlan, before_steps: Int, before_assertions: Int, conditions: [String]) -> KitPlan {
     plan := original
     if conditions.len() == 0 -> return plan

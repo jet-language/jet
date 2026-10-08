@@ -157,3 +157,29 @@ use core.files as files
     assert_eq(kit_steps_work_path("/owned/scratch/tmp-other/escape", env, "/owned/work", "/owned/scratch", ""), None)
     files.remove_all(root) ?? panic("remove temp setup scratch")
 }
+
+#Test("fixture filesystem and captured values can be asserted before the first process") {
+    root :: cases_test_root("filesystem-preprocess-assertions")
+    directory :: files.join(root, "tests/cases/group")
+    kit_exec_write(files.join(directory, "tree/value"), "ready")
+    kit_exec_write(files.join(directory, "tree/doc.json"), "{{\"ready\":true}}")
+    loop assertion in ["file: value = \"ready\"", "entries: . kind file name = \"value\" = 1", "tree: . bytes = 19", "json: file doc.json doc $.ready = true", "capture: value = text file value\ncap:value: = \"ready\""] {
+        plan :: kit_steps_parse_case("fixture: tree\n{assertion}\n")
+        assert_eq(plan.error, "")
+        assert_eq(cases_test_advanced(root, "independent", "fixture: tree\n{assertion}\n").verdict.status, "PASS")
+    }
+    loop assertion in ["file: value = \"wrong\"", "entries: . kind file name = \"value\" = 0", "tree: . bytes = 0", "json: file doc.json doc $.ready = false", "capture: value = text file value\ncap:value: = \"wrong\""] -> assert_eq(cases_test_advanced(root, "wrong", "fixture: tree\n{assertion}\n").verdict.status, "FAIL")
+    loop assertion in ["stdout: empty", "stderr: empty", "exit: 0", "elapsed: absent <= 1s", "json: stdout doc $ valid", "capture: value = text stdout"] -> assert(kit_steps_parse_case("fixture: tree\n{assertion}\n").error != "")
+    files.remove_all(root) ?? panic("remove independent assertion scratch")
+}
+
+#Test("assertions after an unselected setup action keep their own guard and owner") {
+    root :: cases_test_root("filesystem-assertion-guards")
+    directory :: files.join(root, "tests/cases/group")
+    kit_exec_write(files.join(directory, "tree/value"), "ready")
+    source :: "fixture: tree\nwhen os not-a-host: mkdir: absent\nfile: absent absent\nfile: value = \"ready\"\nwhen os not-a-host\nfile: value = \"wrong\"\nend when\nfile: value = \"ready\"\n"
+    assert_eq(kit_steps_parse_case(source).error, "")
+    assert_eq(cases_test_advanced(root, "independent", source).verdict.status, "PASS")
+    assert_eq(cases_test_advanced(root, "must-check", "fixture: tree\nwhen os not-a-host: mkdir: absent\nfile: value = \"wrong\"\n").verdict.status, "FAIL")
+    files.remove_all(root) ?? panic("remove assertion guard scratch")
+}

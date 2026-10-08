@@ -77,6 +77,93 @@ fn kit_steps_capture_failure(status: String, detail: String) -> KitSubjectResult
     KitSubjectResult{verdict: kit_expect_verdict(status, detail)}
 }
 
+// A name may join disjoint branches only for immutable host facts, or for
+// complementary literal tests of the SAME completed named-history producer.
+// Mutable files/env/captures/probes and unnamed streams are not evidence of
+// exclusion. Loop-local declarations disappear at their existing scope end;
+// += never grants permission to redeclare a capture.
+fn kit_steps_capture_guards(plan: KitPlan, before: Int, inline: [String]) -> [String] {
+    guards := [String]{}
+    frames := [Int]{}
+    loop index in 0..<before {
+        step :: plan.steps[index]
+        if step.action == "when" {
+            &frames.push(guards.len())
+            loop condition in step.conditions -> &guards.push(condition)
+            &guards.push(step.argv[0])
+        } else if step.action == "end when" {
+            guards = guards.slice(0, frames[frames.len() - 1])
+            frames = frames.slice(0, frames.len() - 1)
+        }
+    }
+    loop condition in inline -> &guards.push(condition)
+    guards
+}
+
+fn kit_steps_capture_history_owner(plan: KitPlan, subject: String, before: Int) -> Int {
+    label :: if subject.ends_with(".stdout+stderr") -> kit_steps_byte_slice(subject, 0, subject.count_bytes() - 14) else -> kit_steps_relation_label(subject)
+    owner := -1
+    loop index in 0..<before {
+        step :: plan.steps[index]
+        if label != "" && step.label == label && kit_expect_named(["", "wait", "close", "poll"], step.action) -> owner = index
+    }
+    owner
+}
+
+fn kit_steps_capture_guard_disjoint(plan: KitPlan, left: String, left_before: Int, right: String, right_before: Int) -> Bool {
+    a :: kit_steps_tokens(kit_steps_body(left)) ?? return false
+    b :: kit_steps_tokens(kit_steps_body(right)) ?? return false
+    if a.len() != b.len() || a.len() < 2 || a[0].text != b[0].text -> return false
+    if a.len() == 2 && kit_expect_named(["os", "os-name", "arch"], a[0].text) {
+        loop token in [a[1].text, b[1].text] {
+            if token.starts_with("!") || token.contains("|") || token.contains("{{") -> return false
+        }
+        return a[1].text != b[1].text
+    }
+    if a.len() != 3 || !kit_expect_named(["=", "!="], a[1].text) || !kit_expect_named(["=", "!="], b[1].text) || a[1].text == b[1].text || a[2].text != b[2].text || a[2].text.contains("{{") -> return false
+    subject :: a[0].text
+    if !subject.ends_with(".stdout") && !subject.ends_with(".stderr") && !subject.ends_with(".stdout+stderr") -> return false
+    left_raw :: kit_steps_byte_slice(left, a[2].start, a[2].end)
+    right_raw :: kit_steps_byte_slice(right, b[2].start, b[2].end)
+    if (!left_raw.starts_with("\"") && !left_raw.starts_with("'")) || (!right_raw.starts_with("\"") && !right_raw.starts_with("'")) -> return false
+    owner :: kit_steps_capture_history_owner(plan, subject, left_before)
+    owner >= 0 && owner == kit_steps_capture_history_owner(plan, subject, right_before)
+}
+
+fn kit_steps_capture_duplicate_valid(plan: KitPlan, name: String, conditions: [String]) -> Bool {
+    active := [Int]{}
+    scopes := [Int]{}
+    loop (index, step) in plan.steps {
+        if step.action == "for" || step.action == "repeat" -> &scopes.push(active.len())
+        else if step.action == "end for" || step.action == "end repeat" {
+            restored := scopes[scopes.len() - 1]
+            // Aggregates survive loop restoration, including nested loops.
+            // Compact their evidence in place; ordinary locals disappear.
+            loop position in restored..<active.len() {
+                if plan.steps[active[position]].argv[1] != "+=" -> next
+                active[restored] = active[position]
+                restored += 1
+            }
+            active = active.slice(0, restored)
+            scopes = scopes.slice(0, scopes.len() - 1)
+        } else if step.action == "capture" && step.argv[0] == name -> &active.push(index)
+    }
+    if active.len() == 0 -> return false
+    current :: kit_steps_capture_guards(plan, plan.steps.len(), conditions)
+    loop index in active {
+        if plan.steps[index].argv[1] == "+=" -> return false
+        previous :: kit_steps_capture_guards(plan, index, plan.steps[index].conditions)
+        disjoint := false
+        loop left in previous {
+            loop right in current {
+                if kit_steps_capture_guard_disjoint(plan, left, index, right, plan.steps.len()) -> disjoint = true
+            }
+        }
+        if !disjoint -> return false
+    }
+    true
+}
+
 fn kit_steps_captured_subject(name: String, captures: [KitCapture]) -> String? {
     loop capture in captures {
         if capture.name != name -> next
