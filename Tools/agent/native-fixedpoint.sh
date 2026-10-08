@@ -8,7 +8,7 @@ usage() {
     printf '%s\n' 'usage: native-fixedpoint.sh --builder PATH --unit FILE.jet|DIR --out DIR [--level o0|o1] [--stages 3]'
 }
 fail() { printf 'native-fixedpoint: %s\n' "$*" >&2; exit 2; }
-builder='' unit='' out='' level=o1 stages=3
+builder='' unit='' out='' level=o0 stages=3
 while (( $# )); do
     case $1 in
         --builder|--unit|--out|--level|--stages)
@@ -24,6 +24,7 @@ while (( $# )); do
 done
 [[ -n $builder && -n $unit && -n $out ]] || { usage >&2; fail 'builder, unit and out are required'; }
 [[ $level == o0 || $level == o1 ]] || fail 'level must be o0 or o1'
+[[ $level != o1 ]] || fail 'native O1 not selectable from hosted CLI yet'
 [[ $stages == 3 ]] || fail 'stages must be 3'
 limit=${NATIVE_FP_TIMEOUT:-7200}
 [[ $limit =~ ^[1-9][0-9]*$ ]] || fail 'NATIVE_FP_TIMEOUT must be a positive integer in seconds'
@@ -65,10 +66,7 @@ if [[ -d ${builder%/*}/jet-runtime ]]; then
         ln -s -- "$runtime" "$out/jet-runtime" || fail 'cannot expose runtime beside stages'
     fi
 fi
-if [[ $level == o1 ]]; then
-    printf '%s\n' 'NOTE: hosted CLI has no native O1 selection yet; using native O0 (jet build without --release).'
-fi
-printf 'stage\tseconds\tpeak_rss_kb\tbytes\tsha256\n' > "$out/stages.tsv"
+printf 'stage\tlevel\tseconds\tpeak_rss_kb\tbytes\tsha256\n' > "$out/stages.tsv"
 printf 'pair\tidentical\n' > "$out/comparisons.tsv"
 for stage in 1 2 3; do
     marker=$out/stage-$stage.started
@@ -81,7 +79,7 @@ for stage in 1 2 3; do
     metrics=
     while IFS= read -r line; do metrics=$line; done < "$out/stage-$stage.time"
     if (( status != 0 )); then
-        printf '%s\t%s\t-\t-\n' "$stage" "$metrics" >> "$out/stages.tsv"
+        printf '%s\t%s\t%s\t-\t-\n' "$stage" "$level" "$metrics" >> "$out/stages.tsv"
         printf 'native-fixedpoint: stage %s build failed (exit %s); see %s\n' "$stage" "$status" "$out/stage-$stage.log" >&2
         exit 3
     fi
@@ -100,7 +98,7 @@ for stage in 1 2 3; do
     cp -- "${binaries[0]}" "$out/jetc$stage" || fail 'cannot copy stage executable'
     chmod +x -- "$out/jetc$stage"
     digest=$(sha256sum "$out/jetc$stage"); digest=${digest%% *}
-    printf '%s\t%s\t%s\t%s\n' "$stage" "$metrics" "$(stat -c %s "$out/jetc$stage")" "$digest" >> "$out/stages.tsv"
+    printf '%s\t%s\t%s\t%s\t%s\n' "$stage" "$level" "$metrics" "$(stat -c %s "$out/jetc$stage")" "$digest" >> "$out/stages.tsv"
     builder=$out/jetc$stage
 done
 # Detailed triage is developer-only: section fingerprints, defined symbols,

@@ -1186,3 +1186,18 @@ ambiguous pairing is reported, never treated as equality. `--bootstrap JETC0`
 provides a front-end diagnostic census before the probe can be built.
 Preparation and a receipt-only census never establish differential parity;
 only `summary.json` with `differential_verified: true` does.
+
+### Native compiler fixed-point receipts
+
+`Tools/agent/native-fixedpoint.sh --builder H0 --unit COMPILER_UNIT --out OUT`
+builds three real native compiler stages and compares the later stages.
+The selected level defaults to `o0`. While the hosted CLI cannot select
+native O1, `--level o1` fails with exit 2 and
+`native O1 not selectable from hosted CLI yet`; it never silently substitutes
+an O0 build for a requested O1 receipt. The script never selects `--release`.
+
+`stages.tsv` records `stage`, `level`, `seconds`, `peak_rss_kb`, `bytes`
+and `sha256`, including the selected level on failed stage rows. A semantic
+or optimization-level claim requires the corresponding real native build,
+not just deterministic output from the script's synthetic harness.
+
