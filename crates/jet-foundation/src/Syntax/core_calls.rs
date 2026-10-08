@@ -1547,7 +1547,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 6c886c73e0126958db6f63792ccffd5fd4a45b4d654da9c175afc8a07099eae3
+// Source SHA-256: c26386b58f26423c53e1f2b4683e314f29b953fa772c2a99f888273efd2942d1
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -3001,7 +3001,8 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.term", "read_key", "jet_term_read_key", true, &[]),
     CoreCallRecord::new("core.perf", "__read_bits", "jet_perf_read_bits", false, &[]) .with_native_int_result() .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.perf", "__write_bits", "jet_perf_write_bits", false, &[false]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.ui", "null_backend", "jet_ui_null", true, &[]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::source_owned("core.ui", "null_backend", &[]),
+    CoreCallRecord::new("core.ui", "__null_backend", "jet_ui_null", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.ui", "tui_backend", "jet_ui_tui", true, &[]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.ui", "gtk_backend", "jet_ui_gtk", true, &[]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.ui", "preview", "jet_ui_preview_with_viewport", true, &[true, false, false], ) .with_max_arity(3) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
@@ -3014,17 +3015,24 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.ui", "text_input", "jet_ui_text_input", true, &[true, false]) .with_max_arity(3) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.ui", "reactive_render", "jet_ui_reactive_render", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.tui", "capabilities", "jet_tui_capabilities", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new( "core.ui.host", "capabilities", "jet_ui_host_capabilities", true, &[], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::source_owned("core.ui.host", "capabilities", &[]),
+    CoreCallRecord::new("core.ui.host", "__capabilities", "jet_ui_host_capabilities", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.ui.host", "file_filter", "jet_ui_host_file_filter", true, &[true, true, true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.ui.host", "fs_grant", "jet_ui_host_fs_grant", true, &[true, false]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.ui.host", "open_file", "jet_ui_host_open_file", true, &[false]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_ui_capabilities(&["UI.FileDialog"]),
-    CoreCallRecord::new("core.ui.host", "save_file", "jet_ui_host_save_file", true, &[false]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_ui_capabilities(&["UI.FileDialog"]),
+    CoreCallRecord::source_owned("core.ui.host", "fs_grant", &[true, false]),
+    CoreCallRecord::source_owned("core.ui.host", "open_file", &[false]).with_ui_capabilities(&["UI.FileDialog"]),
+    CoreCallRecord::new("core.ui.host", "__open_file", "jet_ui_host_open_file", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).with_ui_capabilities(&["UI.FileDialog"]),
+    CoreCallRecord::source_owned("core.ui.host", "save_file", &[false]).with_ui_capabilities(&["UI.FileDialog"]),
+    CoreCallRecord::new("core.ui.host", "__save_file", "jet_ui_host_save_file", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).with_ui_capabilities(&["UI.FileDialog"]),
     CoreCallRecord::source_owned("core.ui.host", "shortcut", &[true, false]).with_ui_capabilities(&["UI.Shortcuts"]),
-    CoreCallRecord::new( "core.ui.host", "accessibility", "jet_ui_host_accessibility", true, &[true, true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_ui_capabilities(&["UI.Accessibility"]),
-    CoreCallRecord::new( "core.ui.host.clipboard", "read_text", "jet_ui_host_clipboard_read_text", true, &[], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_ui_capabilities(&["UI.Clipboard"]),
-    CoreCallRecord::new( "core.ui.host.clipboard", "write_text", "jet_ui_host_clipboard_write_text", true, &[true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_ui_capabilities(&["UI.Clipboard"]),
-    CoreCallRecord::new("core.ui.host.ime", "poll", "jet_ui_host_ime_poll", true, &[]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_ui_capabilities(&["UI.IME"]),
-    CoreCallRecord::new("core.ui.host.drag_drop", "poll", "jet_ui_host_drag_poll", true, &[]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_ui_capabilities(&["UI.DragDrop"]),
+    CoreCallRecord::source_owned("core.ui.host", "accessibility", &[true, true]).with_ui_capabilities(&["UI.Accessibility"]),
+    CoreCallRecord::source_owned("core.ui.host.clipboard", "read_text", &[]).with_ui_capabilities(&["UI.Clipboard"]),
+    CoreCallRecord::new("core.ui.host.clipboard", "__read_text", "jet_ui_host_clipboard_read_text", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).with_ui_capabilities(&["UI.Clipboard"]),
+    CoreCallRecord::source_owned("core.ui.host.clipboard", "write_text", &[true]).with_ui_capabilities(&["UI.Clipboard"]),
+    CoreCallRecord::new("core.ui.host.clipboard", "__write_text", "jet_ui_host_clipboard_write_text", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).with_ui_capabilities(&["UI.Clipboard"]),
+    CoreCallRecord::source_owned("core.ui.host.ime", "poll", &[]).with_ui_capabilities(&["UI.IME"]),
+    CoreCallRecord::new("core.ui.host.ime", "__poll", "jet_ui_host_ime_poll", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).with_ui_capabilities(&["UI.IME"]),
+    CoreCallRecord::source_owned("core.ui.host.drag_drop", "poll", &[]).with_ui_capabilities(&["UI.DragDrop"]),
+    CoreCallRecord::new("core.ui.host.drag_drop", "__poll", "jet_ui_host_drag_poll", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).with_ui_capabilities(&["UI.DragDrop"]),
     CoreCallRecord::source_owned("core.ui.host.shortcuts", "binding", &[false, true]).with_ui_capabilities(&["UI.Shortcuts"]),
     CoreCallRecord::new( "core.ui.host.shortcuts", "register", "jet_ui_host_shortcuts_register", true, &[false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_ui_capabilities(&["UI.Shortcuts"]),
     CoreCallRecord::new( "core.ui.host.shortcuts", "dispatch", "jet_ui_host_shortcuts_dispatch", true, &[false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_ui_capabilities(&["UI.Shortcuts"]),

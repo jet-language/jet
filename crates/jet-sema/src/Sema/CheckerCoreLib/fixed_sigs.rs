@@ -6383,7 +6383,7 @@ fn core_fixed_sig_impl(
             Some(ui_preview),
         )),
         // D-RENDERTGT2=A (c133 M1): UI geometry constructors.
-        ("core.ui", "null_backend") => Some((vec![], Some(Type::Named("NullBackend".to_string())))),
+        ("core.ui", "null_backend" | "__null_backend") => Some((vec![], Some(Type::Named("NullBackend".to_string())))),
         ("core.ui", "tui_backend") => Some((vec![], Some(Type::Named("TUIBackend".to_string())))),
         // D-UIDEVSHELL1=A (c134 Phase 8): native Linux GTK4 backend constructor.
         ("core.ui", "gtk_backend") => Some((vec![], Some(Type::Named("GtkBackend".to_string())))),
@@ -6678,7 +6678,7 @@ fn core_fixed_sig_impl(
             vec![(read, Type::Named("TUIListState".to_string()))],
             Some(int),
         )),
-        ("core.ui.host", "capabilities") => Some((
+        ("core.ui.host", "capabilities" | "__capabilities") => Some((
             vec![],
             Some(Type::Named("UICapabilityFacts".to_string())),
         )),
@@ -6705,7 +6705,7 @@ fn core_fixed_sig_impl(
             vec![(read, Type::Named("UIFSGrant".to_string()))],
             Some(Type::Named("UIFileDialogRequest".to_string())),
         )),
-        ("core.ui.host", "open_file" | "save_file") => Some((
+        ("core.ui.host", "open_file" | "save_file" | "__open_file" | "__save_file") => Some((
             vec![(read, Type::Named("UIFileDialogRequest".to_string()))],
             Some(ui_result(Type::Named("UIFileDialogSelection".to_string()))),
         )),
@@ -6720,21 +6720,21 @@ fn core_fixed_sig_impl(
             vec![(read, string.clone()), (read, string.clone())],
             Some(ui_result(Type::Named("UIAccessibility".to_string()))),
         )),
-        ("core.ui.host.clipboard", "read_text") => Some((
+        ("core.ui.host.clipboard", "read_text" | "__read_text") => Some((
             vec![],
             Some(ui_result(Type::Named("UIClipboardText".to_string()))),
         )),
-        ("core.ui.host.clipboard", "write_text") => Some((
+        ("core.ui.host.clipboard", "write_text" | "__write_text") => Some((
             vec![(read, string.clone())],
             Some(ui_result(Type::Named("UIClipboardWrite".to_string()))),
         )),
-        ("core.ui.host.ime", "poll") => Some((
+        ("core.ui.host.ime", "poll" | "__poll") => Some((
             vec![],
             Some(ui_result(Type::Option(Box::new(Type::Named(
                 "UIIMEEvent".to_string(),
             ))))),
         )),
-        ("core.ui.host.drag_drop", "poll") => Some((
+        ("core.ui.host.drag_drop", "poll" | "__poll") => Some((
             vec![],
             Some(ui_result(Type::Option(Box::new(Type::Named(
                 "UIDragEvent".to_string(),

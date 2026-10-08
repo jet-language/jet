@@ -2905,7 +2905,7 @@ fn eval_core_call_binding(
     }
     if module == "core.ui" {
         match member {
-            "null_backend" => {
+            "__null_backend" => {
                 return Ok(mir_ui_backend_value(MirUiBackend::Null(
                     mir_ui_kernel::jet_ui_null(),
                 )))
