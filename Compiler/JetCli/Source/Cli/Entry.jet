@@ -1178,26 +1178,33 @@ pub fn jet_cli_resolve_bare_entry(command: String, cwd: String, member_flag: Str
 // main.rs `missing_bare_entry`: a retired manifest name teaches E1226;
 // otherwise there is no file and no project (E2104).
 pub fn jet_cli_missing_bare_entry(command: String, cwd: String, color: Bool) -[FS, Env]> JetCLIPlan Never! {
+    if jet_cli_find_stale_manifest(cwd, color) == .Val(report) -> return JetCLIPlan.Refused{report: report, color: color, exit_code: JET_DRIVER_EXIT_USAGE, notice: ""}
+    jet_cli_fail("E2104", "no file given and no `package.jet` found in this directory or above", jet_cli_why("E2104"), "run `jet {command} <file.jet>` or cd into a project", color, JET_DRIVER_EXIT_USAGE)
+}
+
+// Loader.rs `find_stale_manifest_name`: one authority/workspace-bounded walk
+// shared by the bare-entry and manifest-required diagnostic paths.
+fn jet_cli_find_stale_manifest(cwd: String, color: Bool) -[FS, Env]> Diagnostic? Never! {
     dir := cli_files.realpath(cwd) ?? cwd
     loop {
         if jet_cli_checked_file(dir, JET_CLI_PACKAGE_FILE) != None -> break
         if jet_cli_checked_file(dir, JET_CLI_PAYLOAD_FILE) != None {
-            return jet_cli_stale_manifest(dir, JET_CLI_PAYLOAD_FILE, color)
+            return Val(jet_cli_stale_manifest(dir, JET_CLI_PAYLOAD_FILE))
         }
         loop stale in JET_CLI_STALE_MANIFEST_NAMES {
             if jet_cli_checked_file(dir, stale) != None {
-                return jet_cli_stale_manifest(dir, stale, color)
+                return Val(jet_cli_stale_manifest(dir, stale))
             }
         }
         if jet_cli_workspace_present(jet_cli_workspace_source(dir, color)) -> break
         dir = jet_cli_walk_up(dir) ?? break
     }
-    jet_cli_fail("E2104", "no file given and no `package.jet` found in this directory or above", jet_cli_why("E2104"), "run `jet {command} <file.jet>` or cd into a project", color, JET_DRIVER_EXIT_USAGE)
+    None
 }
 
 // Loader.rs `stale_manifest_name_diagnostic`.
-fn jet_cli_stale_manifest(dir: String, stale: String, color: Bool) -> JetCLIPlan Never! {
-    jet_cli_fail("E1226", "`{stale}` is not the package manifest name — Jet reads `{JET_CLI_PACKAGE_FILE}`", "the Package root filename is frozen to one spelling (D-ECO-FILEROOT1) so tooling, docs, and every worked example never have to guess which file to read", "rename `{jet_cli_entry_join(dir, stale)}` to `{jet_cli_entry_join(dir, JET_CLI_PACKAGE_FILE)}`", color, JET_DRIVER_EXIT_USAGE)
+fn jet_cli_stale_manifest(dir: String, stale: String) -> Diagnostic Never! {
+    diagnostic_from_registry("E1226", None, "`{stale}` is not the package manifest name — Jet reads `{JET_CLI_PACKAGE_FILE}`", "the Package root filename is frozen to one spelling (D-ECO-FILEROOT1) so tooling, docs, and every worked example never have to guess which file to read", "rename `{jet_cli_entry_join(dir, stale)}` to `{jet_cli_entry_join(dir, JET_CLI_PACKAGE_FILE)}`")
 }
 
 // main.rs `resolve_command_target` for a directory `raw`: the shared bare

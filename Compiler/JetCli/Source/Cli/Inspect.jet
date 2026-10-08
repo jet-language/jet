@@ -409,24 +409,12 @@ fn jet_cli_inspect_package_root(start: String) -[FS, Env]> String? Never! {
     jet_cli_manifest_root(directory)
 }
 
-// main.rs `require_manifest_root`: the package root at or above `start`
-// (Loader.rs `find_package_root_checked`), else `hint` on stderr. A retired
-// manifest name on the walk teaches E1226 (Loader.rs
-// `stale_manifest_name_message`), whose rendering is not ported yet.
-fn jet_cli_inspect_require_root(start: String, hint: String, plane: String, color: Bool) -[FS, Env]> JetCLIInspectEntry Never! {
-    if jet_cli_find_package_root(start, color) == {
+// Plane and action inspection share one manifest-required root resolver.
+fn jet_cli_inspect_require_root(start: String, hint: String, color: Bool) -[FS, Env]> JetCLIInspectEntry Never! {
+    if jet_cli_require_inspect_root(start, hint, color) == {
         .Root(root) -> return JetCLIInspectEntry.File{path: root, notice: ""}
         .Refused(plan) -> return JetCLIInspectEntry.Refused{plan: plan}
-        .Absent -> {}
     }
-    current := cli_files.realpath(start) ?? start
-    loop {
-        loop name in JET_CLI_RETIRED_MANIFESTS {
-            if cli_files.is_file(jet_cli_entry_join(current, name)) -> return JetCLIInspectEntry.Refused{plan: jet_cli_not_ported("inspect {plane} <retired manifest name>", color)}
-        }
-        current = jet_cli_walk_up(current) ?? break
-    }
-    JetCLIInspectEntry.Refused{plan: jet_cli_inspect_plain_error("{hint}\n", JET_DRIVER_EXIT_USER_ERROR)}
 }
 
 // CmdInspect.rs `inspect_entry_path`: a file target as typed; a package
@@ -441,7 +429,7 @@ fn jet_cli_inspect_entry(scope: JetCLIInspectScope, plane: String, color: Bool) 
         hint = "error: no package.jet found for this inspect target"
     }
     root := ""
-    if jet_cli_inspect_require_root(start, hint, plane, color) == {
+    if jet_cli_inspect_require_root(start, hint, color) == {
         .Refused(plan) -> return JetCLIInspectEntry.Refused{plan: plan}
         .File(path, _) -> root = path
     }

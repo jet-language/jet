@@ -95,6 +95,12 @@ version; they do not substitute a semantic check or reparse a manifest in the
 CLI. Squash uses that declared version (falling back to `0.0.0` only when it
 is absent).
 
+Inspection planes and schema actions resolve explicit and inline Packages through
+the same checked entry resolver as compilation. When a root is genuinely absent,
+the action retains its own hint; a stale manifest filename uses the shared E1226
+teaching diagnostic. Manifest-required hints and stale-name reports are direct,
+uncolored stderr user errors, including under `--json`.
+
 ## Executable command metadata
 
 Application completion reads the canonical v8 `JetCommandSchema` carrier,

@@ -1,0 +1,68 @@
+// Inspection actions and planes consume the same Package discovery as
+// compilation, including inline roots and the command-specific error channel.
+fn inspection_root_fixture_require_root(start: String, expected: String) {
+    if jet_cli_require_inspect_root(start, "missing package", true) == {
+        .Root(root) -> assert(root == expected)
+        .Refused(_) -> panic("checked inspection Package root")
+    }
+    if jet_cli_inspect_require_root(start, "missing package", true) == {
+        .File(root, notice) -> { assert(root == expected); assert(notice == "") }
+        .Refused(_) -> panic("plane Package root")
+    }
+}
+
+fn inspection_root_fixture_missing(start: String, stale: String?) {
+    action := JetCLIPlan.Done{output: JetDriverVerbOutput{stdout: "", stderr: "", exit_code: 0}}
+    if jet_cli_require_inspect_root(start, "missing package", true) == {
+        .Root(_) -> panic("missing root was invented")
+        .Refused(plan) -> action = plan
+    }
+    plane := JetCLIPlan.Done{output: JetDriverVerbOutput{stdout: "", stderr: "", exit_code: 0}}
+    if jet_cli_inspect_require_root(start, "missing package", true) == {
+        .File(_, _) -> panic("missing plane root was invented")
+        .Refused(plan) -> plane = plan
+    }
+    if action == {
+        .Done(output) -> {
+            assert(output.stdout == "" && output.exit_code == JET_DRIVER_EXIT_USER_ERROR)
+            if stale == .Val(name) {
+                assert(output.stderr.contains("E1226"))
+                assert(output.stderr.contains("`{name}` is not the package manifest name"))
+                report :: jet_cli_find_stale_manifest(start, false) ?? panic("stale filename diagnostic")
+                assert(output.stderr == diagnostic_render_all("", "", [Diagnostic]{report}, false))
+            } else {
+                assert(output.stderr == "missing package\n")
+            }
+            if plane == {
+                .Done(other) -> assert(other.stdout == output.stdout && other.stderr == output.stderr && other.exit_code == output.exit_code)
+                else -> panic("plane and action root error channel differ")
+            }
+        }
+        else -> panic("manifest-required missing/stale root reports directly, not through JSON selection")
+    }
+}
+
+fn run() {
+    root :: "{cli_sys.temp_dir()}/jet-inspection-roots-{cli_process.current_pid()}"
+    cli_files.create_dir_all("{root}/manifest/sub") ?? panic("manifest fixture")
+    cli_files.create_dir_all("{root}/inline/sub") ?? panic("inline fixture")
+    cli_files.create_dir_all("{root}/missing/sub") ?? panic("missing fixture")
+    cli_files.create_dir_all("{root}/stale/sub") ?? panic("stale fixture")
+    defer cli_files.remove_all(root).drop("inspection roots cleanup")
+    cli_files.write("{root}/manifest/package.jet", "package { name: \"manifest\" version: \"0.0.0\" edition: \"2026\" outputs: {} }\n") ?? panic("manifest")
+    inspection_root_fixture_require_root("{root}/manifest/sub", "{root}/manifest")
+    cli_files.write("{root}/inline/run.jet", "package { name: \"inline\" version: \"0.0.0\" edition: \"2026\" outputs: { app: .Executable{entry: run} } }\nfn run() {}\n") ?? panic("inline Package")
+    inspection_root_fixture_require_root("{root}/inline/sub", "{root}/inline")
+    // A loose main.jet is not an inline Package or an excuse to refuse a mode.
+    cli_files.write("{root}/missing/main.jet", "fn run() {}\n") ?? panic("loose source")
+    inspection_root_fixture_missing("{root}/missing/sub", None)
+    loop name in JET_CLI_STALE_MANIFEST_NAMES {
+        cli_files.write("{root}/stale/{name}", "retired name\n") ?? panic("stale manifest")
+        inspection_root_fixture_missing("{root}/stale/sub", Val(name))
+        if jet_cli_missing_bare_entry("check", "{root}/stale/sub", false) == {
+            .Refused(report, _, code, _) -> { assert(report.code == "E1226"); assert(code == JET_DRIVER_EXIT_USAGE) }
+            else -> panic("bare commands keep their original usage status")
+        }
+        cli_files.remove("{root}/stale/{name}") ?? panic("remove stale manifest")
+    }
+}
