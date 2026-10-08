@@ -227,7 +227,7 @@ fn jet_term_positive_env_int(value: Option<String>) -> Option<i64> {
     value?.parse::<i64>().ok().filter(|value| *value > 0)
 }
 
-fn jet_term_size_from_stty() -> Option<(i64, i64)> {
+pub(crate) fn jet_term_size_from_stty() -> Option<(i64, i64)> {
     let output = std::process::Command::new("stty")
         .arg("size")
         .output()
@@ -297,9 +297,26 @@ pub(crate) enum JetTermRead {
     EndOfInput,
 }
 
-pub(crate) fn jet_term_read_stdin_line() -> std::io::Result<JetTermRead> {
+pub(crate) fn jet_term_read_stdin_line_raw() -> std::io::Result<(bool, String)> {
     let mut line = String::new();
-    if std::io::stdin().read_line(&mut line)? == 0 {
+    let count = std::io::stdin().read_line(&mut line)?;
+    Ok((count == 0, line))
+}
+
+pub(crate) fn jet_term_read_key_bytes_raw() -> ([u8; 6], usize) {
+    use std::io::Read;
+    let mut bytes = [0u8; 6];
+    let count = std::io::stdin().lock().read(&mut bytes).unwrap_or(0);
+    (bytes, count)
+}
+
+pub(crate) fn jet_term_color_mode_raw() -> i64 {
+    JET_TERM_COLOR_MODE.with(|mode| i64::from(mode.get()))
+}
+
+pub(crate) fn jet_term_read_stdin_line() -> std::io::Result<JetTermRead> {
+    let (eof, mut line) = jet_term_read_stdin_line_raw()?;
+    if eof {
         return Ok(JetTermRead::EndOfInput);
     }
     jet_term_trim_line(&mut line);

@@ -3230,6 +3230,7 @@ fn push_typed_core_optional_parts(
             out.push_str(include_str!("../Prelude/CoreLib/Top/TestingShared.rs"));
         }
         out.push_str(include_str!("../Prelude/CoreLib/Top/IoLineStream.rs"));
+        out.push_str(include_str!("../Prelude/Core/Terminal8Raw.rs"));
         out.push_str(include_str!("../Prelude/Core/EnvConfig.rs"));
         out.push_str(include_str!("../Prelude/Core/EnvProjection.rs"));
         out.push_str(include_str!("../Prelude/Core/FSOps.rs"));
@@ -3968,6 +3969,7 @@ fn push_corelib_prelude_body(
         // #1480: split out of FSIoEnvOsTesting.rs so the JIT host can
         // `include!` this exact source (I9 — single Prelude source of truth).
         out.push_str(include_str!("../Prelude/CoreLib/Top/IoLineStream.rs"));
+        out.push_str(include_str!("../Prelude/Core/Terminal8Raw.rs"));
         // D-CONFIG-ENV1 / I9: source overlay and dotenv parsing are one
         // Prelude fragment for AOT and the interpreter ambient adapter.
         out.push_str(include_str!("../Prelude/Core/EnvConfig.rs"));

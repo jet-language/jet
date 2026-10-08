@@ -29,7 +29,7 @@ fn jet_terminal8_read_until(delimiter: &String) -> (String, Option<String>) {
 fn jet_terminal8_env(name: &String) -> Option<String> { jet_std_env_get(name) }
 fn jet_terminal8_env_has(name: &String) -> bool { jet_env_value_raw(name).is_some() }
 fn jet_terminal8_stty() -> Option<(i64, i64)> { jet_term_size_from_stty() }
-fn jet_terminal8_color_mode() -> i64 { JET_TERM_COLOR_MODE.with(|mode| i64::from(mode.get())) }
+fn jet_terminal8_color_mode() -> i64 { jet_term_color_mode_raw() }
 fn jet_terminal8_key_bytes() -> (Vec<u8>, i64) {
     // One six-byte read, shared with the existing Unix/Windows key kernels.
     let platform = if cfg!(unix) { 1 } else if cfg!(windows) { 2 } else { 0 };
