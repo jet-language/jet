@@ -1567,6 +1567,16 @@ larger inputs use one compacted partial buffer. Raw witnesses distinguish
 per-chunk seeding, tree versus serial rounding, odd-partial association and
 empty negative-zero seed, and require allocator-class balance.
 
+The legacy nine heap/bisection routes now use Jet implementations in
+`Collections.jet`, preserving their existing native signed-I64 input slots,
+exact-Int scalar index results and transferred output buffers
+(`CAbiRoutes.rs:14034-14239`, `MathLibPure.rs:1287-1438`). Binary bounds keep
+duplicate left/right placement; heap operations preserve strict child ties;
+sorted merge takes the left equal item first. Top-N selection uses only an
+N-element heap and sorts its selected output, avoiding a full input copy for
+small N. The raw witnesses cover duplicates, empty input, immutable borrowed
+inputs, growth, signed extrema, ordering and per-class allocator balance.
+
 Lazy cursor initialization and advancement may invoke user callbacks. Both
 are can-stop MIR operations: their results are usable only on the immediately
 following Propagate poll's resume edge. Prefetched HasNext/Value operations

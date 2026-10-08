@@ -360,3 +360,169 @@ fn coll_bits_render(bits: I64) -> I64 {
 #Export(c) fn jet_rt_handle_display_JetBitSet(bits: I64) -> I64 { coll_bits_render(bits) }
 #Export(c) fn jet_rt_handle_show_JetBitSet(bits: I64) -> I64 { coll_bits_render(bits) }
 #Export(c) fn jet_rt_handle_debug_JetBitSet(bits: I64) -> I64 { coll_bits_render(bits) }
+
+// These legacy collection routes use native signed-I64 words, not tagged Int
+// input slots (CAbiRoutes.rs list_in(... |w| w as i64)). Their scalar index
+// results are exact Int carriers; returned slot buffers transfer ownership.
+fn coll_i64_output(length: I64, out_data: I64) -> I64 {
+    data :: if (length == I64{0}) -> I64{0} else -> jet_rt_alloc(length * I64{8}, I64{8})
+    trap_store(out_data, data)
+    data
+}
+
+fn coll_i64_bound(data: I64, length: I64, value: I64, right: Bool) -> I64 {
+    low := I64{0}
+    high := length
+    loop low < high {
+        middle :: low + (high - low) / I64{2}
+        item :: trap_word(data + middle * I64{8})
+        if item < value || (right && item == value) {
+            low = middle + I64{1}
+        } else {
+            high = middle
+        }
+    }
+    low
+}
+
+#Export(c) fn jet_coll_bisect_left(data: I64, length: I64, value: I64) -> I64 {
+    jet_int_owned_from_i64(coll_i64_bound(data, length, value, false))
+}
+
+#Export(c) fn jet_coll_bisect_right(data: I64, length: I64, value: I64) -> I64 {
+    jet_int_owned_from_i64(coll_i64_bound(data, length, value, true))
+}
+
+fn coll_i64_insort(data: I64, length: I64, value: I64, out_data: I64, right: Bool) -> I64 {
+    at :: coll_i64_bound(data, length, value, right)
+    result :: coll_i64_output(length + I64{1}, out_data)
+    coll_copy(data, result, at * I64{8})
+    trap_store(result + at * I64{8}, value)
+    coll_copy(data + at * I64{8}, result + (at + I64{1}) * I64{8}, (length - at) * I64{8})
+    length + I64{1}
+}
+
+#Export(c) fn jet_coll_insort_left(data: I64, length: I64, value: I64, out_data: I64) -> I64 {
+    coll_i64_insort(data, length, value, out_data, false)
+}
+
+#Export(c) fn jet_coll_insort_right(data: I64, length: I64, value: I64, out_data: I64) -> I64 {
+    coll_i64_insort(data, length, value, out_data, true)
+}
+
+fn coll_i64_swap(data: I64, left: I64, right: I64) {
+    value :: trap_word(data + left * I64{8})
+    trap_store(data + left * I64{8}, trap_word(data + right * I64{8}))
+    trap_store(data + right * I64{8}, value)
+}
+
+// Same strict child/tie choice as MathLibPure.rs:1287-1306; minimum=false
+// is the max-heap dual used to select the n smallest values without a copy
+// of the unselected input.
+fn coll_i64_sift(data: I64, length: I64, root: I64, minimum: Bool) {
+    index := root
+    loop index < length / I64{2} {
+        left :: index * I64{2} + I64{1}
+        best := index
+        left_value :: trap_word(data + left * I64{8})
+        best_value := trap_word(data + best * I64{8})
+        if (if minimum -> left_value < best_value else -> left_value > best_value) {
+            best = left
+            best_value = left_value
+        }
+        right :: left + I64{1}
+        if (right < length) {
+            right_value :: trap_word(data + right * I64{8})
+            if (if minimum -> right_value < best_value else -> right_value > best_value) { best = right }
+        }
+        if (best == index) { return }
+        coll_i64_swap(data, index, best)
+        index = best
+    }
+}
+
+fn coll_i64_heap(data: I64, length: I64, minimum: Bool) {
+    index := length / I64{2}
+    loop index > I64{0} {
+        index -= I64{1}
+        coll_i64_sift(data, length, index, minimum)
+    }
+}
+
+#Export(c) fn jet_coll_heapify(data: I64, length: I64, out_data: I64) -> I64 {
+    result :: coll_i64_output(length, out_data)
+    coll_copy(data, result, length * I64{8})
+    coll_i64_heap(result, length, true)
+    length
+}
+
+#Export(c) fn jet_coll_heappush(data: I64, length: I64, value: I64, out_data: I64) -> I64 {
+    result :: coll_i64_output(length + I64{1}, out_data)
+    coll_copy(data, result, length * I64{8})
+    trap_store(result + length * I64{8}, value)
+    index := length
+    loop index > I64{0} {
+        parent :: (index - I64{1}) / I64{2}
+        if (trap_word(result + index * I64{8}) >= trap_word(result + parent * I64{8})) { break }
+        coll_i64_swap(result, index, parent)
+        index = parent
+    }
+    length + I64{1}
+}
+
+#Export(c) fn jet_coll_merge_sorted(left: I64, left_len: I64, right: I64, right_len: I64, out_data: I64) -> I64 {
+    length :: left_len + right_len
+    result :: coll_i64_output(length, out_data)
+    a := I64{0}
+    b := I64{0}
+    written := I64{0}
+    loop a < left_len && b < right_len {
+        x :: trap_word(left + a * I64{8})
+        y :: trap_word(right + b * I64{8})
+        if x <= y {
+            trap_store(result + written * I64{8}, x)
+            a += I64{1}
+        } else {
+            trap_store(result + written * I64{8}, y)
+            b += I64{1}
+        }
+        written += I64{1}
+    }
+    coll_copy(left + a * I64{8}, result + written * I64{8}, (left_len - a) * I64{8})
+    written += left_len - a
+    coll_copy(right + b * I64{8}, result + written * I64{8}, (right_len - b) * I64{8})
+    length
+}
+
+fn coll_i64_select(n: I64, data: I64, length: I64, out_data: I64, largest: Bool) -> I64 {
+    count :: if (n <= I64{0}) -> I64{0} else if (n < length) -> n else -> length
+    result :: coll_i64_output(count, out_data)
+    if (count == I64{0}) { return I64{0} }
+    coll_copy(data, result, count * I64{8})
+    coll_i64_heap(result, count, largest)
+    at := count
+    loop at < length {
+        value :: trap_word(data + at * I64{8})
+        worst :: trap_word(result)
+        if (if largest -> value > worst else -> value < worst) {
+            trap_store(result, value)
+            coll_i64_sift(result, count, I64{0}, largest)
+        }
+        at += I64{1}
+    }
+    remaining := count
+    loop remaining > I64{1} {
+        remaining -= I64{1}
+        coll_i64_swap(result, I64{0}, remaining)
+        coll_i64_sift(result, remaining, I64{0}, largest)
+    }
+    count
+}
+
+#Export(c) fn jet_coll_nsmallest(n: I64, data: I64, length: I64, out_data: I64) -> I64 {
+    coll_i64_select(n, data, length, out_data, false)
+}
+
+#Export(c) fn jet_coll_nlargest(n: I64, data: I64, length: I64, out_data: I64) -> I64 {
+    coll_i64_select(n, data, length, out_data, true)
+}
