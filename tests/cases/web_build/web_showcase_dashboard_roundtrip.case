@@ -1,0 +1,17 @@
+# HAND-PORT tests/web_build.rs:4466-4572 web_showcase_dashboard_roundtrip
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# Original source and DOM harness verbatim; all original accessible-label/color/focus/reactive/count and HTML/timer predicates; independently computed exact six smoothstep fuel samples. LIVE root HTML copy approved; no snapshot invented.
+requires: tool:node
+fixture: web_showcase_dashboard_roundtrip.fixture
+env: NO_COLOR=1
+step: jet build --target=web main.jet
+exit: 0
+file: .jet/build/web.manifest.json ~ "\"status\": \"m2\"" # original build_web_fixture M2 assertion
+file: .jet/build/web.manifest.json ~ "\"partitions\"" # original helper manifest assertion
+file: .jet/build/app.wasm is-file
+copy: {root}/Examples/features/web/ui_showcase.html .jet/build/ui_showcase.html
+copy: showcase_harness.mjs .jet/build/showcase_harness.mjs
+copy: verify.mjs .jet/build/verify.mjs
+step: node verify.mjs
+cwd: .jet/build
+exit: 0

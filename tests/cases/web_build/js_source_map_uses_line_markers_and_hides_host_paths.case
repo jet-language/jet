@@ -1,0 +1,15 @@
+# HAND-PORT tests/web_build.rs:1427-1483 js_source_map_uses_line_markers_and_hides_host_paths
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# Repeat artifact equality, exact source bytes/privacy/user marker, both original VLQ tuples and each UTF16 statement column. Raw-emitter URL absence is exactly equivalent to suffix+single occurrence on public CLI artifact per reviewer. No fabricated map or snapshot.
+fixture: js_source_map_uses_line_markers_and_hides_host_paths.fixture
+env: NO_COLOR=1
+step: jet build --target=web private/build-host/project/main.jet
+exit: 0
+copy: .jet/build/app.js first-app.js
+copy: .jet/build/app.js.map first-map.json
+step: jet build --target=web private/build-host/project/main.jet
+exit: 0
+file: .jet/build/app.js $= "//# sourceMappingURL=app.js.map\n" # CmdCompile11862-11867 exact CLI suffix, TestLead1 ruling; default dev profile emits maps(CmdCompile14430)
+file: .jet/build/app.js count "sourceMappingURL" = 1 # original raw js_app had NO occurrence; suffix-only equivalent
+step: node verify.mjs
+exit: 0

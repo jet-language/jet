@@ -1,0 +1,15 @@
+# HAND-PORT tests/web_build.rs:4260-4295 web_trace_map_keeps_qualified_handler_identity
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# Exact original source/JS harness; every runtime/JS marker and source path/hash/qualified-symbol predicate retained against the LIVE public hex traceMap schema (BrowserTrace.rs400-510).
+fixture: web_trace_map_keeps_qualified_handler_identity.fixture
+env: NO_COLOR=1
+step: jet build --target=web tests/fixtures/web_qualified_handler.jet
+exit: 0
+file: .jet/build/web.manifest.json ~ "\"status\": \"m2\"" # original build_web_fixture M2 assertion
+file: .jet/build/web.manifest.json ~ "\"partitions\"" # original helper manifest assertion
+file: .jet/build/app.wasm is-file
+file: .jet/build/app.js ~ "\"__jet_handlers__init$handler0\"" # original qualified handler string
+copy: trace.mjs .jet/build/trace.mjs
+step: node trace.mjs
+cwd: .jet/build
+exit: 0
