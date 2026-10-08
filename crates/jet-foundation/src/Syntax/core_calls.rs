@@ -59,7 +59,6 @@ const fn one_of(method: &str, names: &[&str]) -> bool {
 /// `Effects::core_effect`'s legacy resolver; a row never consults that second
 /// key table.
 const fn effect_for(module: &str, method: &str) -> Option<Effect> {
-<<<<<<< HEAD
     if same_text(module, "core.files") {
         if same_text(method, "__temp_path_sample") {
             return Some(Effect::Time);
@@ -74,12 +73,9 @@ const fn effect_for(module: &str, method: &str) -> Option<Effect> {
     if same_text(module, "core.process") && same_text(method, "__with_directory_raw") {
         return Some(Effect::FS);
     }
-||||||| d4aa52706
-=======
     if same_text(module, "core.data") && same_text(method, "__host_path_is_file") {
         return Some(Effect::FS);
     }
->>>>>>> 3d6b63fe3
     if (same_text(module, "core.time")
         && one_of(
             method,
