@@ -509,3 +509,15 @@ Fallible add borrows one 32-byte stack workspace, leaves the cell unchanged
 on refusal and converts the physical failed request to the canonical
 `AllocError` with allocator name `"exact-int"` using the existing record
 constructor, not a private error carrier.
+
+## Native Realtime callback boundary
+
+The native producer moves one callback environment into the worker and borrows
+its canonical Int rate/frame words. Its invoke adapter borrows the reusable
+`List<Float>` header without cloning, releasing or reallocating that buffer.
+The runtime releases the environment on failed start as well as worker exit.
+One module-local System V worker forwarder calls the existing Jet runtime
+export; its checked function address uses ordinary backend relocation.
+`next_deadline` reconstructs the source `Instant { start_ns: Int }` from the
+owned canonical Int result, never a Rust Instant handle. Receipt snapshots
+cross the existing shape-checked record boundary into the source DTO.

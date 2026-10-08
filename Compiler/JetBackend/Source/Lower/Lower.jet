@@ -3041,6 +3041,7 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
     if semantic == .Select(call, kind, values) -> return lower_task_select(p, c, &m, &f, instruction, call, kind, values)
     if semantic == .CoreClosureCall(call, kind, values, closure, _, _) {
         if kind == .Spawn -> return lower_task_spawn(p, c, &m, &f, instruction, call, values, closure)
+        if kind == .Realtime -> return lower_realtime_start(p, c, &m, &f, instruction, call, values, closure)
         if kind == .Guard -> return lower_scope_guard(p, c, &m, &f, instruction, closure)
         if kind == .OnCommit || kind == .OnRollback -> return lower_transaction_hook(p, c, &m, &f, instruction, call, kind, values, closure)
     }
@@ -3764,6 +3765,8 @@ fn lower_helper_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIR
     if glue.helper == "list.record_handles_free" -> return lower_helper_record_handles_free(p, &m, glue)
     if glue.helper == "task.body" -> return lower_helper_task_body(p, &m, glue)
     if glue.helper == "task.release" -> return lower_helper_task_release(p, &m, glue)
+    if glue.helper == "realtime.invoke" -> return lower_helper_realtime_invoke(p, &m, glue)
+    if glue.helper == "realtime.worker" -> return lower_helper_realtime_worker(&m, glue)
     if glue.helper == "task.debug" -> return lower_helper_task_debug(p, &m, glue)
     if glue.helper.starts_with("closure.release:") -> return lower_closure_release(p, &m, glue)
     if glue.helper == "iter.release" -> return lower_helper_iter_typed(p, &m, glue, false)
