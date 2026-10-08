@@ -47,6 +47,21 @@ path and the members that it owns. The corresponding `Core/**/*.jet` file owns
 public algorithms, validation, defaults, policy, effects, authority, typed
 errors, and composition.
 
+Parsed Core declarations retain their original module and owner identity, ordered
+generic binders (including authoritative empty binders), logical fields,
+visibility, bounds, and computed-getter provenance. Qualified imported
+declarations retain their exact owner when a local declaration shadows the leaf
+name. Substitution requires an exact binder count. A known declaration's field
+miss or arity mismatch must not switch to a differently owned builtin or native
+field schema; unknown binder metadata is not an empty nongeneric declaration.
+
+Readable logical fields do not grant struct-literal construction or make computed
+getters stored fields. This declaration-fact contract does not supply missing
+native-only declarations or reconcile Source/native public-contract differences,
+including Web, store, and virtual-record shapes. Source `VJPRun` remains
+nongeneric with `value` and `gradient: Tensor`; native generic `grads` or `pull`
+semantics do not follow from these parsed facts.
+
 The generator must verify that:
 
 - every declared export has one canonical Jet source or an explicit registered
