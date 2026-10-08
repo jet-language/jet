@@ -44,7 +44,7 @@ const bodies = paths.map((path) => {
 mkdirSync(out, { recursive: true });
 const unit = join(out, "unit.jet");
 writeFileSync(unit, [...uses, "", ...bodies].join("\n"));
-const packageSource = tests || secretTests
+const packageSource = test !== null
   ? 'name: "jet_runtime_tests"\nversion: "0.0.1"\nedition: "2028"\n'
   : readFileSync(join(root, "Compiler/JetRuntime/package.jet"));
 writeFileSync(join(out, "package.jet"), packageSource);
