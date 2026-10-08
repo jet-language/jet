@@ -35,6 +35,11 @@ name; there is no `jet.*` or `std.*` library namespace. Core wrappers keep
 source-facing types and policy in Jet while typed provider leaves perform the
 operations that require the host environment.
 
+Filesystem internal host calls use their canonical `core.files.__*` names
+directly. There is no second `__files7_*` alias layer: the Prelude's existing
+registry entries provide the raw host boundary until Jet runtime L7 replaces
+them at Rust cutover.
+
 Types and error enums use PascalCase (`String`, `IOError`, `JSON`); functions
 and module segments use snake_case (`read`, `core.files`) (S54). Acronyms keep
 their declared spelling; see S66.
