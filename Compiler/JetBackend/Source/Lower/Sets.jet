@@ -1,5 +1,5 @@
-// Native Set<T> is the ordered Map<T, Unit> carrier. HashSet's iteration
-// order is unspecified; O0 chooses key order and reuses Map lookup/growth.
+// Native Set<T> and Rank<T> share the ordered Map<T, Unit> carrier.
+// Set's iteration order is unspecified; Rank keeps the key's Ord order.
 // The stored entry tuple (not the packed source List element) fixes stride.
 use jet_foundation.[
     MIRCallArg, MIRInstruction, MIRPlaceID, MIRPreludeCall, MIRPreludeCallID,
@@ -10,10 +10,18 @@ use jet_foundation.[
 fn lower_set_element(ty: MIRType) -> MIRType? {
     if ty.kind == {
         .Apply(name, args) -> {
-            if name.id == mir_nominal_ref("Set").id && args.len() == 1 -> Val(args[0]) else -> None
+            if (name.id == mir_nominal_ref("Set").id || name.id == mir_nominal_ref("Rank").id) && args.len() == 1 -> Val(args[0]) else -> None
         }
         .Tagged(_, inner) -> lower_set_element(inner)
         else -> None
+    }
+}
+
+fn lower_rank_type(ty: MIRType) -> Bool Never! {
+    if ty.kind == {
+        .Apply(name, args) -> name.id == mir_nominal_ref("Rank").id && args.len() == 1
+        .Tagged(_, inner) -> lower_rank_type(inner)
+        else -> false
     }
 }
 
@@ -107,19 +115,20 @@ fn lower_set_new(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunct
     if lower_set_element(ty) == None -> return false
     row :: lower_prelude_row(p, call) ?? return false
     symbol :: lower_runtime_symbol(row)
-    if symbol == "jet_set_from" && args.len() == 1 {
+    rank :: lower_rank_type(ty)
+    if symbol == (if rank -> "jet_sorted_set_from" else -> "jet_set_from") && args.len() == 1 {
         lower_set_from(p, c, &m, &f, instruction, args[0].value)
         return true
     }
-    if symbol != "std::collections::HashSet::new" || args.len() != 0 -> return false
+    if symbol != (if rank -> "std::collections::BTreeSet::new" else -> "std::collections::HashSet::new") || args.len() != 0 -> return false
     dst :: lower_result(p, c, &m, &f, instruction) ?? return true
     lower_set_empty(p, &f, dst, ty)
     true
 }
 
 fn lower_set_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, row: MIRPreludeCall, receiver: MIRValueID, receiver_place: MIRPlaceID?, args: [MIRValueID]) -> Bool Never! {
-    symbol :: lower_runtime_symbol(row)
-    if symbol == "jet_set_from" || symbol == "jet_iter_to_set" {
+    symbol := lower_runtime_symbol(row)
+    if symbol == "jet_set_from" || symbol == "jet_sorted_set_from" || symbol == "jet_iter_to_set" {
         if args.len() != 0 -> return false
         result_ty :: lower_checked_type(c, instruction) ?? return false
         if lower_set_element(result_ty) == None -> return false
@@ -128,6 +137,23 @@ fn lower_set_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
     }
     ty :: lower_value_type(c, receiver) ?? return false
     elem :: lower_set_element(ty) ?? return false
+    rank :: lower_rank_type(ty)
+    if rank {
+        symbol = if symbol == {
+            "jet_sorted_set_to_list" -> "jet_set_to_list"
+            "jet_sorted_set_len" -> "jet_set_len"
+            "jet_sorted_set_is_empty" -> "jet_set_is_empty"
+            "jet_sorted_set_first" -> "jet_set_first"
+            "jet_sorted_set_last" -> "jet_set_last"
+            "jet_sorted_set_insert" -> "jet_set_insert"
+            "jet_sorted_set_remove" -> "jet_set_remove"
+            "jet_sorted_set_union" -> "jet_set_union"
+            "jet_sorted_set_intersection" -> "jet_set_intersection"
+            "std::collections::BTreeSet::contains" -> "jet_set_has"
+            "std::collections::BTreeSet::clear" -> "std::collections::HashSet::clear"
+            else -> { return false }
+        }
+    }
     if row.family != .BuiltinMethod || row.module_name != "core.builtin" -> return false
     if !symbol.starts_with("jet_set_") && symbol != "std::collections::HashSet::clear" -> return false
     shape :: lower_map_shape(p, lower_set_map(ty)) ?? return false
@@ -166,6 +192,32 @@ fn lower_set_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
         } else {
             lower_set_list(p, &m, &f, set, ty, dst)
         }
+        return true
+    }
+    if rank && (symbol == "jet_set_first" || symbol == "jet_set_last") {
+        if args.len() != 0 -> return false
+        dst :: lower_result(p, c, &m, &f, instruction) ?? return true
+        lower_call_helper(&m, &f, if symbol == "jet_set_first" -> "set.first" else -> "set.last", ty, [LIRValueID]{set}, Val(dst))
+        return true
+    }
+    if rank && symbol == "jet_set_insert" {
+        if args.len() != 1 -> return false
+        key :: lower_use(&m, &f, args[0]) ?? return true
+        offered := key
+        if !lower_value_owned(c, args[0]) {
+            offered = lower_new_like(&f, key)
+            lower_clone_into(p, &m, &f, key, offered, elem)
+        }
+        lower_set_insert(p, &m, &f, set, ty, offered)
+        lower_alias_absent(&f, instruction)
+        return true
+    }
+    if rank && symbol == "jet_set_remove" {
+        if args.len() != 1 -> return false
+        key :: lower_use(&m, &f, args[0]) ?? return true
+        lower_call_helper(&m, &f, "set.remove", ty, [LIRValueID]{set, key}, None)
+        if lower_value_owned(c, args[0]) -> lower_map_drop_value(p, &m, &f, key, elem)
+        lower_alias_absent(&f, instruction)
         return true
     }
     if symbol == "jet_set_has" || symbol == "jet_set_insert" || symbol == "jet_set_remove" || symbol == "jet_set_pop_kernel" || symbol == "jet_set_replace_kernel" {
@@ -232,6 +284,32 @@ fn lower_set_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
         lower_each_end(&f, each, [LIRValueID]{})
         return true
     }
+    if rank && symbol == "jet_set_intersection" {
+        if args.len() != 1 -> return false
+        other :: lower_use(&m, &f, args[0]) ?? return true
+        dst :: lower_result(p, c, &m, &f, instruction) ?? return true
+        lower_set_empty(p, &f, dst, ty)
+        // The Map intersection kernel specialized to Unit: keep shared keys,
+        // clone each kept key, and insert through the same ordered carrier.
+        each :: lower_each_begin(p, &f, set, shape.entry, [LIRValueID]{})
+        key :: lower_read_at(p, &f, each.address, shape.key_offset, elem) ?? return true
+        found :: lower_word(&f)
+        lower_call_helper(&m, &f, "map.find", lower_set_map(ty), [LIRValueID]{other, key}, Val(found))
+        zero :: lower_const(&f, 0)
+        shared :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Compare{dst: shared, condition: LIRCondition.Ge, left: found, right: zero})
+        keep :: lower_new_block(&f)
+        skip :: lower_new_block(&f)
+        lower_seal(&f, LIRTerminator.Branch{condition: shared, then_target: lower_target(keep, [LIRValueID]{}), else_target: lower_target(skip, [LIRValueID]{})})
+        lower_start(&f, keep, [LIRValueID]{})
+        owned :: lower_new_like(&f, key)
+        lower_clone_into(p, &m, &f, key, owned, elem)
+        lower_set_insert(p, &m, &f, dst, ty, owned)
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(skip, [LIRValueID]{})})
+        lower_start(&f, skip, [LIRValueID]{})
+        lower_each_end(&f, each, [LIRValueID]{})
+        return true
+    }
     false
 }
 
@@ -239,7 +317,8 @@ fn lower_set_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
 // its key and returns its value, so it cannot express Set.pop/replace.
 fn lower_helper_set_take(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     shape :: lower_map_shape(p, lower_set_map(glue.ty)) ?? panic("Set take has no entry layout")
-    f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), lower_map_key_layout(p, shape)}, Val(lir_layout_pointer()))
+    discard :: glue.helper == "set.remove"
+    f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), lower_map_key_layout(p, shape)}, if discard -> None else -> Val(lir_layout_pointer()))
     set :: ~f.open_params[0]
     key :: ~f.open_params[1]
     found :: lower_word(&f)
@@ -251,15 +330,24 @@ fn lower_helper_set_take(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIR
     miss :: lower_new_block(&f)
     lower_seal(&f, LIRTerminator.Branch{condition: present, then_target: lower_target(hit, [LIRValueID]{}), else_target: lower_target(miss, [LIRValueID]{})})
     lower_start(&f, miss, [LIRValueID]{})
-    null :: lower_pointer(&f)
-    lower_emit(&f, LIRInst.Const{dst: null, value: 0})
-    lower_seal(&f, LIRTerminator.Return{value: Val(null)})
+    absent := LIRValueID?{None}
+    if !discard {
+        null :: lower_pointer(&f)
+        lower_emit(&f, LIRInst.Const{dst: null, value: 0})
+        absent = Val(null)
+    }
+    lower_seal(&f, LIRTerminator.Return{value: absent})
     lower_start(&f, hit, [LIRValueID]{})
     data :: lower_list_data(&f, set)
     entry :: lower_list_address(&f, data, found, shape.stride)
-    boxed :: lower_pointer(&f)
-    lower_alloc(&m, &f, boxed, lower_option_box_size(p, shape.key))
-    lower_list_move(p, &f, boxed, entry, shape.key)
+    taken := LIRValueID?{None}
+    if discard -> lower_drop_stored(p, &m, &f, entry, shape.key_offset, shape.key)
+    else {
+        boxed :: lower_pointer(&f)
+        lower_alloc(&m, &f, boxed, lower_option_box_size(p, shape.key))
+        lower_list_move(p, &f, boxed, entry, shape.key)
+        taken = Val(boxed)
+    }
     length :: lower_list_word(&f, set, 0)
     one :: lower_const(&f, 1)
     last :: lower_word(&f)
@@ -282,7 +370,69 @@ fn lower_helper_set_take(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIR
     lower_seal(&f, LIRTerminator.Jump{target: lower_target(head, [LIRValueID]{next_at})})
     lower_start(&f, done, [LIRValueID]{})
     lower_emit(&f, LIRInst.Store{base: set, offset: 0, value: last})
+    lower_seal(&f, LIRTerminator.Return{value: taken})
+    lir_builder_finish(f.builder)
+}
+
+fn lower_helper_set_edge(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    shape :: lower_map_shape(p, lower_set_map(glue.ty)) ?? panic("Rank edge has no entry layout")
+    f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, Val(lir_layout_pointer()))
+    set :: ~f.open_params[0]
+    length :: lower_list_word(&f, set, 0)
+    zero :: lower_const(&f, 0)
+    empty :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: empty, condition: LIRCondition.Eq, left: length, right: zero})
+    miss :: lower_new_block(&f)
+    hit :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: empty, then_target: lower_target(miss, [LIRValueID]{}), else_target: lower_target(hit, [LIRValueID]{})})
+    lower_start(&f, miss, [LIRValueID]{})
+    null :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Const{dst: null, value: 0})
+    lower_seal(&f, LIRTerminator.Return{value: Val(null)})
+    lower_start(&f, hit, [LIRValueID]{})
+    at := zero
+    if glue.helper == "set.last" {
+        at = lower_word(&f)
+        one :: lower_const(&f, 1)
+        lower_emit(&f, LIRInst.Binary{dst: at, op: LIRBinaryOp.Sub, left: length, right: one})
+    }
+    data :: lower_list_data(&f, set)
+    entry :: lower_list_address(&f, data, at, shape.stride)
+    source :: lower_address(&f, entry, shape.key_offset)
+    boxed :: lower_pointer(&f)
+    lower_alloc(&m, &f, boxed, lower_option_box_size(p, shape.key))
+    lower_list_clone_element(p, &m, &f, source, boxed, shape.key)
     lower_seal(&f, LIRTerminator.Return{value: Val(boxed)})
+    lir_builder_finish(f.builder)
+}
+
+// Rank renders the stored key order directly, never sorted rendered text.
+fn lower_helper_rank_render(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    shape :: lower_map_shape(p, lower_set_map(glue.ty)) ?? panic("Rank render has no entry layout")
+    f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, Val(lir_layout_pointer()))
+    set :: ~f.open_params[0]
+    mode :: lower_display_mode(glue.helper)
+    builder :: lower_pointer(&f)
+    lower_call_runtime(&m, &f, "jet_rt_string_builder_new", [LIRValueID]{}, Val(builder))
+    lower_render_static(&m, &f, builder, "[")
+    each :: lower_each_begin(p, &f, set, shape.entry, [LIRValueID]{})
+    zero :: lower_const(&f, 0)
+    first :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: first, condition: LIRCondition.Eq, left: each.at, right: zero})
+    item :: lower_new_block(&f)
+    comma :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: first, then_target: lower_target(item, [LIRValueID]{}), else_target: lower_target(comma, [LIRValueID]{})})
+    lower_start(&f, comma, [LIRValueID]{})
+    lower_render_static(&m, &f, builder, ", ")
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(item, [LIRValueID]{})})
+    lower_start(&f, item, [LIRValueID]{})
+    key :: lower_render_load(p, &f, each.address, shape.key_offset, shape.key, false)
+    lower_render_push(p, &m, &f, builder, shape.key, key, mode)
+    lower_each_end(&f, each, [LIRValueID]{})
+    lower_render_static(&m, &f, builder, "]")
+    result :: lower_render_string(&f)
+    lower_call_runtime(&m, &f, "jet_rt_string_builder_finish", [LIRValueID]{builder}, Val(result))
+    lower_seal(&f, LIRTerminator.Return{value: Val(result)})
     lir_builder_finish(f.builder)
 }
 
@@ -323,6 +473,7 @@ fn lower_helper_set_equal(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LI
 // HashSet's three render modes sort their rendered strings, not keys:
 // Set.from([2, 10]) renders [10, 2] (Values.rs / TextValues.rs).
 fn lower_helper_set_render(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    if lower_rank_type(glue.ty) -> return lower_helper_rank_render(p, &m, glue)
     shape :: lower_map_shape(p, lower_set_map(glue.ty)) ?? panic("Set render has no entry layout")
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, Val(lir_layout_pointer()))
     set :: ~f.open_params[0]
