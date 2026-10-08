@@ -249,6 +249,38 @@ fn float_shortest(scratch: I64, bits: I64) {
             }
         }
     }
+    float_shortest_decoded(scratch, mantissa, exp, upper, inclusive)
+}
+
+// Binary32 decoder: 24-bit significand, bias 127, subnormal unit 2^-149.
+// Raw positive low32 input, never widened to binary64 before rounding.
+fn float32_shortest(scratch: I64, bits: I64) {
+    fraction :: bits & I64{8388607}
+    exponent :: (bits >> I64{23}) & I64{255}
+    mantissa := fraction << I64{1}
+    exp := I64{-150}
+    upper := I64{1}
+    inclusive := true
+    if (exponent != I64{0}) {
+        full :: fraction | I64{8388608}
+        inclusive = (full & I64{1}) == I64{0}
+        if {
+            (fraction == I64{0}) -> {
+                mantissa = full << I64{2}
+                upper = I64{2}
+                exp = exponent - I64{152}
+            }
+            else -> {
+                mantissa = full << I64{1}
+                exp = exponent - I64{151}
+            }
+        }
+    }
+    float_shortest_decoded(scratch, mantissa, exp, upper, inclusive)
+}
+
+// The bounded Dragon arithmetic and tie rounding are shared by both widths.
+fn float_shortest_decoded(scratch: I64, mantissa: I64, exp: I64, upper: I64, inclusive: Bool) {
     nbits :: I64{64} - float_leading_zeros(mantissa + upper - I64{1})
     k := ((nbits + exp) * I64{1292913986}) >> I64{32}
     mant :: scratch

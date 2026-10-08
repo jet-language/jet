@@ -24,7 +24,7 @@ for (let i = 0; i < args.length; ++i) {
 }
 if (process.argv.length < 4 || (!prepare && (!object || !pack))) throw new Error("usage: run-display-goldens.mjs OUT --prepare [--baseline RESULTS.tsv] | --object JET.o --pack PACK.o");
 mkdirSync(out, { recursive: true });
-const exports = ["jet_rt_bool_to_string", "jet_rt_char_to_string", "jet_rt_i64_to_string", "jet_rt_u64_to_string", "jet_rt_int_to_string", "jet_rt_float_to_string", "jet_rt_float_debug"];
+const exports = ["jet_rt_bool_to_string", "jet_rt_char_to_string", "jet_rt_i64_to_string", "jet_rt_u64_to_string", "jet_rt_int_to_string", "jet_rt_float_to_string", "jet_rt_float_debug", "jet_rt_float32_to_string", "jet_rt_float32_debug"];
 const mask = (1n << 64n) - 1n, sign = 1n << 63n, fraction = (1n << 52n) - 1n;
 const benchmarkBits = [0n, sign, 0x3ff0000000000000n, 0xbff0000000000000n, 0x3fb999999999999an, 0xbfb999999999999an, 1n, sign | 1n, 0x0010000000000000n, 0x7fefffffffffffffn, 0x3ee4f8b588e368f1n, 0x4341c37937e08000n, 0x7ff0000000000000n, 0xfff0000000000000n, 0x7ff8000000000042n, 0xfff8000000000042n];
 const floatWord = (value) => { const buffer = Buffer.alloc(8); buffer.writeDoubleLE(value); return buffer.readBigUInt64LE(); };
@@ -52,6 +52,42 @@ if (prepare) {
     random ^= (random << 13n) & mask; random ^= random >> 7n; random ^= (random << 17n) & mask; random &= mask;
     add(random);
   }
+  const corpus32 = new Set();
+  const add32 = (bits) => {
+    if (bits < 0n || bits > 0xffffffffn) return;
+    corpus32.add(bits.toString(16).padStart(16, "0"));
+  };
+  const neighbors32 = (bits, width = 4n) => {
+    for (let i = -width; i <= width; ++i) {
+      add32(bits + i); add32((bits + i) ^ 0x80000000n);
+    }
+  };
+  const float32Word = (value) => { const buffer = Buffer.alloc(4); buffer.writeFloatLE(value); return BigInt(buffer.readUInt32LE()); };
+  for (let exponent = 0n; exponent < 255n; ++exponent) {
+    for (const mantissa of [0n, 1n, 2n, 0x3fffffn, 0x400000n, 0x400001n, 0x7ffffen, 0x7fffffn]) {
+      const bits = (exponent << 23n) | mantissa;
+      add32(bits); add32(bits ^ 0x80000000n);
+    }
+  }
+  for (let exponent = -45; exponent <= 38; ++exponent) neighbors32(float32Word(Number(`1e${exponent}`)));
+  for (const value of [0, 0.1, 1e-4, 1e-5, 1e16, 1e15, 1e21, 1e-7, 2 ** 24, 2 ** -149, 2 ** -126, 0.5, 1.5, 2.5, 0.125, 0.375, 1.25, 1.75, Infinity]) neighbors32(float32Word(value), 16n);
+  for (let offset = -32; offset <= 32; ++offset) neighbors32(float32Word(2 ** 24 + offset), 1n);
+  for (const bits of [0x7f7fffffn, 0x7f800001n, 0x7fc00000n, 0x7fc00042n, 0x7fffffffn]) { add32(bits); add32(bits ^ 0x80000000n); }
+  // A second raw-word form for each edge proves upper32 is ignored.
+  for (const hex of [...corpus32]) corpus32.add((BigInt(`0x${hex}`) | 0xdeadbeef00000000n).toString(16));
+  let random32 = 0x6a09e667;
+  for (let i = 0; i < 1000000; ++i) {
+    random32 ^= random32 << 13; random32 ^= random32 >>> 17; random32 ^= random32 << 5;
+    add32(BigInt(random32 >>> 0));
+  }
+  writeFileSync(join(out, "bits32.txt"), [...corpus32].sort().join("\n") + "\n");
+  writeFileSync(join(out, "oracle32.rs"), `use std::io::{self, Read, Write};
+fn main() {
+ let mut input=String::new(); io::stdin().read_to_string(&mut input).unwrap();
+ let mut out=io::BufWriter::new(io::stdout().lock());
+ for line in input.lines() { let bits=u64::from_str_radix(line,16).unwrap(); let value=f32::from_bits(bits as u32); writeln!(out,"{bits:016x}\\t{value}\\t{value:?}").unwrap(); }
+}
+`);
   const entries = collectGoldenEntries(join(root, "Examples/features"));
   const passes = baseline ? new Set(readFileSync(baseline, "utf8").split("\n").filter((line) => line.split("\t")[1] === "pass").map((line) => line.split("\t")[0])) : null;
   const cases = [];
@@ -65,7 +101,7 @@ if (prepare) {
   if (!cases.length || !literals) throw new Error("empty display golden selection or literal corpus");
   writeFileSync(join(out, "bits.txt"), [...corpus].sort().join("\n") + "\n");
   writeFileSync(join(out, "golden.cases"), cases.join("\n") + "\n");
-  writeFileSync(join(out, "corpus.json"), JSON.stringify({ bit_patterns: corpus.size, random_bit_samples: 1000000, golden_literals: literals, golden_cases: cases.length, baseline: baseline ?? null }, null, 2) + "\n");
+  writeFileSync(join(out, "corpus.json"), JSON.stringify({ bit_patterns: corpus.size, random_bit_samples: 1000000, binary32_patterns: corpus32.size, binary32_random_samples: 1000000, golden_literals: literals, golden_cases: cases.length, baseline: baseline ?? null }, null, 2) + "\n");
   // Values.rs JetDisplay/JetShow/JetDebug f64 all call format!("{:?}").
   writeFileSync(join(out, "benchmark_bits.h"), `#define DISPLAY_BENCH_ITERATIONS UINT64_C(1000000)\n#define DISPLAY_BENCH_VALUES ${benchmarkBits.length}\nstatic const uint64_t benchmark_bits[] = {${benchmarkBits.map((bits) => `UINT64_C(0x${bits.toString(16)})`).join(",")}};\n`);
   writeFileSync(join(out, "oracle.rs"), `use std::io::{self, Read, Write};
@@ -125,6 +161,16 @@ if (native && oracle) {
   for (let i = 0; i < Math.max(actual.length, expected.length); ++i) if (actual[i] !== expected[i]) mismatches.push({ row: i + 1, expected: expected[i] ?? null, actual: actual[i] ?? null });
   if (mismatches.length) ++failures;
 }
+const rust32 = command("oracle32-compile", process.env.RUSTC ?? "rustc", ["--edition=2021", "-O", join(out, "oracle32.rs"), "-o", join(out, "oracle32")]);
+const bits32 = readFileSync(join(out, "bits32.txt"), "utf8");
+const native32 = linked?.ok ? command("native32", join(out, "witness"), [], bits32.split("\n").filter(Boolean).map((line) => `F${line}\n`).join("")) : null;
+const oracle32 = rust32.ok ? command("rust32", join(out, "oracle32"), [], bits32) : null;
+const mismatches32 = [];
+if (native32 && oracle32) {
+  const actual = native32.text.trimEnd().split("\n"), expected = oracle32.text.trimEnd().split("\n");
+  for (let i = 0; i < Math.max(actual.length, expected.length); ++i) if (actual[i] !== expected[i]) mismatches32.push({ row: i + 1, expected: expected[i] ?? null, actual: actual[i] ?? null });
+  if (mismatches32.length) ++failures;
+}
 let performance = null;
 if (native?.ok && oracle?.ok && !mismatches.length) {
   const nativeBench = command("native-benchmark", join(out, "witness"), [], "B\n", { timeout: 0 });
@@ -143,8 +189,9 @@ try { goldenRows = new Map(readFileSync(join(goldenOut, "results.tsv"), "utf8").
 catch (error) { if (error.code !== "ENOENT") throw error; }
 const goldenFailures = selected.filter((stem) => goldenRows.get(stem) !== "pass");
 if (goldenFailures.length) ++failures;
-const summary = { ...JSON.parse(readFileSync(join(out, "corpus.json"), "utf8")), receipts, missingExports, unresolved, exactImports, mismatches: mismatches.length, byte_equal: Boolean(native?.ok && oracle?.ok && !mismatches.length), performance, golden_passes: selected.length - goldenFailures.length, goldenFailures, goldens_ok: goldenHarness.ok && !goldenFailures.length, failures };
+const summary = { ...JSON.parse(readFileSync(join(out, "corpus.json"), "utf8")), receipts, missingExports, unresolved, exactImports, mismatches: mismatches.length, byte_equal: Boolean(native?.ok && oracle?.ok && !mismatches.length), binary32_mismatches: mismatches32.length, binary32_byte_equal: Boolean(native32?.ok && oracle32?.ok && !mismatches32.length), performance, golden_passes: selected.length - goldenFailures.length, goldenFailures, goldens_ok: goldenHarness.ok && !goldenFailures.length, failures };
 writeFileSync(join(out, "mismatches.json"), JSON.stringify(mismatches, null, 2) + "\n");
+writeFileSync(join(out, "mismatches32.json"), JSON.stringify(mismatches32, null, 2) + "\n");
 writeFileSync(join(out, "summary.json"), JSON.stringify(summary, null, 2) + "\n");
 console.log(JSON.stringify(summary, null, 2));
 process.exitCode = failures ? 1 : 0;
