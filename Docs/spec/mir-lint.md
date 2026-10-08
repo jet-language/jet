@@ -25,6 +25,13 @@ archived Rust bootstrap compiler does not carry the lint.
 - The lint is linear in the size of the program. Ownership uses one forward
   dataflow over flat bit rows per function, with no per-block copies of maps.
 
+Native stop-point lowering and legality verification use the same checked
+Prelude route effects. A route marked `Panic` in
+`Compiler/JetFoundation/Source/Registry/PreludeEffects.jet` needs `Propagate`
+before its result is bound or consumed; returning a `Result` is not a stop.
+Semantic Prelude operations gain polls only from checked stop facts; existing
+user, indirect, Core, callback and general-call stop classification is retained.
+
 ## Type compatibility
 
 The lint compares types with one relation, *compatible*. Each side is first

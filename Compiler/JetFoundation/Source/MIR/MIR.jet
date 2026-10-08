@@ -2238,10 +2238,13 @@ pub fn mir_terminator_value_uses(terminator: MIRTerminator) -> [MIRValueID] Neve
     }
 }
 
-// Whether `operation` can stop (unified host/stop contract, #4720): it runs
-// user or Core code, invokes a callback, or waits, so a stop may be delivered
-// before it returns. Only such an operation may precede a Propagate poll.
-pub fn mir_operation_can_stop(operation: MIROperation) -> Bool Never! {
+// User/callback/wait operations can deliver stops. For Prelude routes, Panic
+// is a checked registry fact, independent of a returned failure carrier.
+pub fn mir_operation_can_stop(operation: MIROperation, prelude_calls: [MIRPreludeCall], prelude_positions: [U64:Int]) -> Bool Never! {
+    loop call in mir_operation_prelude_calls(operation) {
+        position :: prelude_positions.get(call.value) ?? next
+        if prelude_calls[position].effect_kind == Val(Effect.Panic) -> return true
+    }
     if operation == {
         .Call(_, _, _) | .IndirectCall(_, _, _) | .CoreCall(_, _, _, _, _, _) | .ScopeExit(_) -> true
         .Semantic(semantic) -> if semantic == {

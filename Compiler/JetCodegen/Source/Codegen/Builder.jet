@@ -1225,7 +1225,7 @@ fn jet_codegen_emit(builder: &JetCodegenBuilder, program: JetCodegenProgram, spa
         .WritePlace(place, _) | .ReplacePlace(place, _) -> jet_codegen_set_drop_live(&builder, program, place, true)
         else -> {}
     }
-    if mir_operation_can_stop(operation) -> jet_codegen_emit_poll(&builder, program, MIRPollKind.Propagate)
+    if mir_operation_can_stop(operation, builder.prelude_calls, builder.prelude_call_positions) -> jet_codegen_emit_poll(&builder, program, MIRPollKind.Propagate)
     result
 }
 
@@ -1249,7 +1249,7 @@ fn jet_codegen_emit_mir_type(builder: &JetCodegenBuilder, program: JetCodegenPro
         .WritePlace(place, _) | .ReplacePlace(place, _) -> jet_codegen_set_drop_live(&builder, program, place, true)
         else -> {}
     }
-    if mir_operation_can_stop(operation) -> jet_codegen_emit_poll(&builder, program, MIRPollKind.Propagate)
+    if mir_operation_can_stop(operation, builder.prelude_calls, builder.prelude_call_positions) -> jet_codegen_emit_poll(&builder, program, MIRPollKind.Propagate)
     value
 }
 

@@ -7912,7 +7912,9 @@ impl<'a> LowerCtx<'a> {
         let identity = self.reserve_identity("operation", span, role, &detail)?;
         let value = MirValueId(stable_id("mir-value", &identity));
         let op_id = jet_foundation::MIR::MirOpId(stable_id("mir-op", &identity));
-        let can_stop = mir_operation_can_stop(&operation);
+        let can_stop = mir_operation_can_stop(&operation, |call| {
+            self.prelude_call_positions.get(&call).and_then(|position| self.prelude_calls[*position].effect)
+        });
         if let Some(value_type) = &value_type {
             let ownership = match forced_ownership {
                 Some(ownership) => ownership,
