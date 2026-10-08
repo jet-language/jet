@@ -681,6 +681,14 @@ If a runtime declaration already has concrete generic rows, an unsupported or
 unregistered application is a named `LowerRepr.Unsupported`, never a silent
 native-struct fallback. Generic Core enums use the same concrete handle key.
 Ordinary Jet generics with no runtime declaration rows remain native.
+Native glue metadata records the actual Core declaration and its ordered type
+arguments, not a Rust layout. `lower_native_source_type` is the shared ownership
+gate: the current MIR must contain that declaration and Lower must already
+represent it as inline storage, a native payload box, or a native enum tag.
+Opaque/special runtime handles are not admitted by declaration presence alone;
+existing handwritten Jet C providers are excluded from generated descriptors.
+Only surviving boundary callers need synthesized native glue. Direct native
+reads/writes require no replacement C symbol.
 Recursive record collection members use generated `jet_rt_record_seq_*`
 holders while crossing the boundary. Byte lists, record lists and `(key:
 String, value: Record)` entry lists retain their native List layouts; the
