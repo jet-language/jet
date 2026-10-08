@@ -398,6 +398,9 @@ existing parallel chunk scheduler joins every worker. Inputs and captures
 are borrowed, each worker writes disjoint output slots, and result order
 is the source order. Callbacks with a checked stop across native frames
 remain refused until the task stop-record protocol supports that edge.
+The `para-map-owned` and `try-map-owned-{ok,err,empty}` MIR fixtures cover
+owned String outputs surviving input retirement, the successful and empty
+Result paths, and first-error short-circuiting with an owned produced prefix.
 
 Parallel predicates evaluate through the same joined range walk, then move
 source items to their source-ordered filter/partition destinations.
