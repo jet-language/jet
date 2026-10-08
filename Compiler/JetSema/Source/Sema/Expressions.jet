@@ -3196,6 +3196,12 @@ fn sema_expr_optional_builder(expr: Expr) -> Bool Never! {
     }
 }
 
+fn sema_expr_missing_operator_hook(op: BinOp, owner: Type, span: Span) -> Diagnostic Never! {
+    name :: type_name(owner)
+    trait_name :: sema_expr_operator_trait(op) ?? ""
+    sema_error("E0360", span, "no `{sema_expr_binary_name(op)}` operator is defined for `{name}`", "user arithmetic dispatches only through one `impl {name}.{trait_name}` hook", "implement `{name}.{trait_name}`, or call a named method")
+}
+
 fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     checked_lhs :: sema_check_expression(left, sema_expr_decimal_lhs_expected(op, left, right, expected, environment, &scopes, state, &tail_store, &context), environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     rhs_expected := Type?{None}
@@ -3310,7 +3316,7 @@ fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expect
         before :: diagnostics.len()
         value :: sema_expr_check_operator(op, left, right, lhs, rhs, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics, line)
         if value != None || diagnostics.len() != before -> return value
-        &diagnostics.push(sema_error("E0360", span, "no {sema_expr_binary_name(op)} operator is defined for `{type_name(lhs.ty)}` and `{type_name(rhs.ty)}`", "source-owned Core operands use only their declared operator implementations", "implement the operator trait for this pair, or call a named method"))
+        &diagnostics.push(sema_expr_missing_operator_hook(op, lhs.ty, span))
         return None
     }
     geometry_present := sema_expr_geometry_is_point(lhs.ty) || sema_expr_geometry_is_delta(lhs.ty) || sema_expr_geometry_is_point(rhs.ty) || sema_expr_geometry_is_delta(rhs.ty)
@@ -3340,7 +3346,7 @@ fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expect
         return sema_expr_expected(compared, expected, environment, &diagnostics)
     }
     if sema_expr_has_numeric_overload(lhs.ty) || sema_expr_has_numeric_overload(rhs.ty) {
-        &diagnostics.push(sema_error("E0360", span, "no {sema_expr_binary_name(op)} operator is defined for `{type_name(lhs.ty)}` and `{type_name(rhs.ty)}`", "user arithmetic and ordering dispatch requires one exact registered trait implementation", "implement the operator trait for this pair, or call a named method"))
+        &diagnostics.push(sema_expr_missing_operator_hook(op, lhs.ty, span))
         return None
     }
 
