@@ -171,6 +171,22 @@ fn unrelated_core_module_cannot_redefine_decimal() {
     assert!(diagnostics.iter().any(|d| d.code == "E0106"), "{diagnostics:?}");
 }
 
+#[test]
+fn core_source_mixed_operator_displaces_seed_but_duplicate_source_impl_still_fails() {
+    let source = "struct Vec3 { x: Float }\nimpl Float.Div(Vec3) { fn div(self, rhs: Vec3) -> Vec3 Never! { rhs } }\n";
+    let (_, diagnostics) = check_modules(&[
+        ("<corelib>/Core/math/math.jet", source, &[]),
+        ("pkg-a/src/main.jet", "fn run() {}\n", &[]),
+    ]);
+    assert!(!diagnostics.iter().any(|d| d.code == "E0908"), "{diagnostics:?}");
+    let duplicate = format!("{source}\nimpl Float.Div(Vec3) {{ fn div(self, rhs: Vec3) -> Vec3 Never! {{ rhs }} }}\n");
+    let (_, diagnostics) = check_modules(&[
+        ("<corelib>/Core/math/math.jet", &duplicate, &[]),
+        ("pkg-a/src/main.jet", "fn run() {}\n", &[]),
+    ]);
+    assert!(diagnostics.iter().any(|d| d.code == "E0908"), "{diagnostics:?}");
+}
+
 fn error_codes(diags: &[Diagnostic]) -> Vec<&str> {
     diags
         .iter()

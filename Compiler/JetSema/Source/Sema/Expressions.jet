@@ -3293,6 +3293,19 @@ fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expect
         if distinct != None -> return sema_expr_expected(distinct ?? lhs, expected, environment, &diagnostics)
         return None
     }
+    source_operator := false
+    if environment.registration_graph == .Val(graph) {
+        left_name :: sema_expr_type_base_name(lhs.ty) ?? ""
+        right_name :: sema_expr_type_base_name(rhs.ty) ?? ""
+        source_operator = sema_type_source_owns_nominal(graph, left_name, environment.module_identity) || sema_type_source_owns_nominal(graph, right_name, environment.module_identity)
+    }
+    if source_operator {
+        before :: diagnostics.len()
+        value :: sema_expr_check_operator(op, left, right, lhs, rhs, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics, line)
+        if value != None || diagnostics.len() != before -> return value
+        &diagnostics.push(sema_error("E0360", span, "no {sema_expr_binary_name(op)} operator is defined for `{type_name(lhs.ty)}` and `{type_name(rhs.ty)}`", "source-owned Core operands use only their declared operator implementations", "implement the operator trait for this pair, or call a named method"))
+        return None
+    }
     geometry_present := sema_expr_geometry_is_point(lhs.ty) || sema_expr_geometry_is_delta(lhs.ty) || sema_expr_geometry_is_point(rhs.ty) || sema_expr_geometry_is_delta(rhs.ty)
     geometry := sema_expr_check_geometry_binary(op, lhs, rhs, span, line, &diagnostics)
     if geometry != None -> return sema_expr_expected(geometry ?? lhs, expected, environment, &diagnostics)
