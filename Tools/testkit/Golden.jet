@@ -20,7 +20,7 @@ fn kit_golden_collect(root: String, directory: String, expected_root: String, pr
         if child.is_dir {
             if kit_golden_exists(files.join(child.path, "package.jet")) || kit_golden_exists(files.join(child.path, "workspace.jet")) || kit_golden_exists(files.join(child.path, "run.jet")) {
                 if kit_golden_exists(files.join(child.path, "run.jet")) {
-                    stem :: shown.slice(prefix.len(), shown.len())
+                    stem :: kit_steps_byte_slice(shown, prefix.count_bytes(), shown.count_bytes())
                     &entries.push(KitEntry{path: files.join(shown, "run.jet"), expected: files.join(expected_root, stem), project: shown, suite: "golden", mode: ""})
                 }
                 next
@@ -31,7 +31,7 @@ fn kit_golden_collect(root: String, directory: String, expected_root: String, pr
             // Examples' nested folders contain support modules, not flat entries.
             // Runtime-test group folders may contain flat generated test cases.
             if prefix == "Examples/features/" && directory.split("/").len() != 3 -> next
-            stem :: shown.slice(prefix.len(), shown.len() - 4)
+            stem :: kit_steps_byte_slice(shown, prefix.count_bytes(), shown.count_bytes() - 4)
             &entries.push(KitEntry{path: shown, expected: files.join(expected_root, stem), project: directory, suite: "golden", mode: ""})
         }
     }
@@ -411,7 +411,11 @@ fn kit_golden_mark_tier_splits(results: &[KitCaseResult]) {
     loop i in 0..<results.len() {
         loop j in 0..<i {
             if results[i].case != results[j].case -> next
-            if (results[i].status == "PASS" && results[j].status == "FAIL") || (results[i].status == "FAIL" && results[j].status == "PASS") {
+            a_pass :: results[i].status == "PASS" || results[i].status == "UNEXPECTED-PASS"
+            b_pass :: results[j].status == "PASS" || results[j].status == "UNEXPECTED-PASS"
+            a_fail :: results[i].status == "FAIL" || results[i].status == "KNOWN-FAILING"
+            b_fail :: results[j].status == "FAIL" || results[j].status == "KNOWN-FAILING"
+            if (a_pass && b_fail) || (a_fail && b_pass) {
                 results[i].detail = "tier-split: {results[i].detail}"
                 results[j].detail = "tier-split: {results[j].detail}"
             }
@@ -422,7 +426,9 @@ fn kit_golden_mark_tier_splits(results: &[KitCaseResult]) {
 fn kit_golden_discover_suite(context: KitCtx) -> [KitEntry] { kit_golden_discover(context.root) }
 
 fn kit_golden_run_suite(entry: KitEntry, context: KitCtx) -> [KitOutcome] {
-    plan :: kit_steps_parse(kit_exec_optional(files.join(context.root, "{entry.expected}.case")) ?? "")
+    source :: kit_exec_optional(files.join(context.root, "{entry.expected}.case")) ?? ""
+    plan :: kit_steps_parse(source)
+    annotation :: kit_cases_known_failure(entry, context.root, source)
     independent :: kit_golden_tier_independent(plan)
     results := [KitOutcome]{}
     loop (index, tier_name) in context.options.tiers {
@@ -444,7 +450,7 @@ fn kit_golden_run_suite(entry: KitEntry, context: KitCtx) -> [KitOutcome] {
             outcome.verdict = kit_expect_verdict("ERROR", "remove tier scratch: {err}")
             ()
         }
-        &results.push(outcome)
+        &results.push(kit_cases_known_verdict(outcome, annotation))
     }
     results
 }

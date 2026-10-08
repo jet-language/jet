@@ -27,13 +27,21 @@ Public CLI scenarios live in `tests/cases/**/*.case` and run once in fresh
 scratch directories through the same step parser as golden sidecars:
 
 ```sh
-jet build Tools/testkit
+jet build Tools/testkit/run.jet
 testkit cases --jet /absolute/path/to/jet --scratch /outside/checkout
 ```
 
 Each scenario may stage a `fixture:` directory relative to its `.case` file;
 exact stdout, stderr, and file snapshots live beside the scenario. Program
 fixtures belong outside `Tools/testkit`, whose `.jet` files are package members.
+
+Golden sidecars and CLI cases may carry `# KNOWN-FAILING #NNNN` comments.
+Alternatively, `Tools/testkit/known-failing.tsv` assigns a repository-relative
+case or golden example ID to its owning card and reason. Marked cases still
+execute: a failing comparison or exit is reported as `KNOWN-FAILING`, retaining
+the original receipt and diff. A pass is `UNEXPECTED-PASS` and fails the suite
+until its stale annotation or ledger row is removed. Host skips, refusals,
+timeouts, and harness errors retain their ordinary verdicts.
 
 Label a process step with `step NAME:` and compare normalized streams with
 `stdout: == NAME` or `stderr: == NAME`. Labels must be unique, and stream

@@ -122,3 +122,25 @@ fn cases_test_source(root: String, name: String, text: String) {
     assert_eq(files.read(files.join(directory, "new.out")) ?? panic("new snapshot"), "new")
     files.remove_all(root) ?? panic("remove bless scratch")
 }
+
+#Test("case known-failing headers and ledger preserve real failures and reject stale passes") {
+    root :: cases_test_root("known-failing")
+    cases_test_source(root, "header", "# KNOWN-FAILING #4865\nstep: jet -c 'exit 7'\n")
+    cases_test_source(root, "ledger", "step: jet -c 'exit 8'\n")
+    kit_exec_write(files.join(root, "Tools/testkit/known-failing.tsv"), "{cases_test_entry("ledger").path}\t#4866\towned case failure\n")
+    context :: cases_test_context(root, files.join(root, "scratch"))
+    header :: kit_cases_run(cases_test_entry("header"), context)[0]
+    assert_eq(header.verdict.status, "KNOWN-FAILING")
+    assert_eq(header.run.code, 7)
+    assert(header.verdict.detail.contains("#4865"))
+    assert_eq(kit_cases_run(cases_test_entry("ledger"), context)[0].verdict.status, "KNOWN-FAILING")
+    cases_test_source(root, "header", "# KNOWN-FAILING #4865\nstep: jet -c 'exit 0'\n")
+    cases_test_source(root, "ledger", "step: jet -c 'exit 0'\n")
+    assert_eq(kit_cases_run(cases_test_entry("header"), context)[0].verdict.status, "UNEXPECTED-PASS")
+    assert_eq(kit_cases_run(cases_test_entry("ledger"), context)[0].verdict.status, "UNEXPECTED-PASS")
+    cases_test_source(root, "header", "# KNOWN-FAILING #4865\nrequires: os:not-{sys.family()}\nstep: jet -c 'exit 7'\n")
+    assert_eq(kit_cases_run(cases_test_entry("header"), context)[0].verdict.status, "SKIP-HOST")
+    cases_test_source(root, "header", "# KNOWN-FAILING #4865\nstdout: ~ invalid\n")
+    assert_eq(kit_cases_run(cases_test_entry("header"), context)[0].verdict.status, "REFUSED")
+    files.remove_all(root) ?? panic("remove known-failing case scratch")
+}

@@ -23,13 +23,15 @@ fn kit_report_counts(results: [KitCaseResult], suites: [String]) -> String {
     refused :: kit_report_count(results, "REFUSED")
     error :: kit_report_count(results, "ERROR")
     timeout :: kit_report_count(results, "TIMEOUT")
+    known :: kit_report_count(results, "KNOWN-FAILING")
+    unexpected :: kit_report_count(results, "UNEXPECTED-PASS")
     names :: json.to_string(suites)
-    "{{\"PASS\":{pass},\"FAIL\":{fail},\"UNSUPPORTED\":{unsupported},\"SKIP-HOST\":{skip},\"OPT-IN\":{opt_in},\"REFUSED\":{refused},\"ERROR\":{error},\"TIMEOUT\":{timeout},\"suites\":{names}}}"
+    "{{\"PASS\":{pass},\"FAIL\":{fail},\"KNOWN-FAILING\":{known},\"UNEXPECTED-PASS\":{unexpected},\"UNSUPPORTED\":{unsupported},\"SKIP-HOST\":{skip},\"OPT-IN\":{opt_in},\"REFUSED\":{refused},\"ERROR\":{error},\"TIMEOUT\":{timeout},\"suites\":{names}}}"
 }
 
 fn kit_report_exit_code(results: [KitCaseResult]) -> Int {
     if kit_report_count(results, "REFUSED") + kit_report_count(results, "ERROR") + kit_report_count(results, "TIMEOUT") > 0 -> return 2
-    if kit_report_count(results, "FAIL") > 0 -> return 1
+    if kit_report_count(results, "FAIL") + kit_report_count(results, "UNEXPECTED-PASS") > 0 -> return 1
     0
 }
 

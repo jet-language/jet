@@ -13,6 +13,18 @@ fn kit_test_unblessed() -> KitBless {
     assert_eq(kit_report_exit_code([passed]), 0)
     assert_eq(kit_report_exit_code([passed, failed]), 1)
     assert_eq(kit_report_exit_code([failed, refused]), 2)
+    known :: KitCaseResult{suite: "cases", case: "d", tier: "-", status: "KNOWN-FAILING", detail: "#4865", exit: 7}
+    unexpected :: KitCaseResult{suite: "golden", case: "d", tier: "o1", status: "UNEXPECTED-PASS", detail: "#4865", exit: 0}
+    assert_eq(kit_report_exit_code([known]), 0)
+    assert_eq(kit_report_exit_code([known, unexpected]), 1)
+    assert_eq(kit_report_exit_code([known, refused]), 2)
+    counts :: kit_report_counts([known, unexpected], ["golden", "cases"])
+    assert(counts.contains("\"KNOWN-FAILING\":1"))
+    assert(counts.contains("\"UNEXPECTED-PASS\":1"))
+    results := [KitCaseResult]{known, unexpected}
+    kit_golden_mark_tier_splits(&results)
+    assert(results[0].detail.starts_with("tier-split:"))
+    assert(results[1].detail.starts_with("tier-split:"))
 }
 
 #Test("bless-all reason and shard guards refuse unsafe writes") {

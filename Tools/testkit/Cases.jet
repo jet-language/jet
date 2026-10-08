@@ -36,5 +36,38 @@ fn kit_cases_run(entry: KitEntry, context: KitCtx) -> [KitOutcome] {
     // CLI scenarios run once, independent of the golden tier selection.
     steps :: kit_steps_context(plan, entry.path, context.env, work, context.scratch,
         files.join(context.root, entry.project), context.bless)
-    [kit_steps_execute(steps, kit_steps_hooks())]
+    [kit_cases_known_verdict(kit_steps_execute(steps, kit_steps_hooks()), kit_cases_known_failure(entry, context.root, source))]
+}
+
+// An annotation changes the verdict, not execution or the underlying receipt.
+// Header ownership wins over the central ledger for the same case.
+fn kit_cases_known_failure(entry: KitEntry, root: String, source: String) -> String {
+    prefix :: "# KNOWN-FAILING "
+    loop raw in source.split("\n") {
+        line :: ~raw.trim()
+        if line.starts_with(prefix) -> return kit_steps_byte_slice(line, prefix.count_bytes(), line.count_bytes()).trim()
+    }
+    ledger :: kit_exec_optional(files.join(root, "Tools/testkit/known-failing.tsv")) ?? ""
+    loop raw in ledger.split("\n") {
+        line :: ~raw.trim()
+        if line == "" || line.starts_with("#") -> next
+        fields :: line.split("\t").to_list()
+        if fields.len() != 3 -> next
+        id :: fields[0]
+        if entry.path == id || entry.path == ("{id}.jet") || entry.path == ("{id}/run.jet") -> return "{fields[1]} {fields[2]}"
+    }
+    ""
+}
+
+fn kit_cases_known_verdict(outcome: KitOutcome, annotation: String) -> KitOutcome {
+    result := outcome
+    if annotation == "" -> return result
+    if result.verdict.status == "FAIL" {
+        result.verdict.status = "KNOWN-FAILING"
+        result.verdict.detail = "{annotation}: {result.verdict.detail}"
+    } else if result.verdict.status == "PASS" {
+        result.verdict.status = "UNEXPECTED-PASS"
+        result.verdict.detail = "{annotation}: remove stale known-failing annotation"
+    }
+    result
 }

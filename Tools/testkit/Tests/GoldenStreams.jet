@@ -121,3 +121,30 @@ fn kit_test_golden_env(root: String) -> KitEnv {
     assert(kit_expect_named(ids, "tests/run/ownership/case.jet"))
     files.remove_all(root) ?? panic("remove discovery scratch")
 }
+
+#Test("golden known-failing ledger and sidecar classify real mismatches on every tier") {
+    root :: kit_test_golden_scratch("known-failing")
+    project :: "Examples/features/topic"
+    entry :: KitEntry{path: "{project}/hello.jet", expected: "Examples/features/expected/topic/hello", project: project, suite: "golden", mode: ""}
+    kit_exec_write(files.join(root, entry.path), "fn run() {{ print(\"hello\") }}\n")
+    kit_exec_write(files.join(root, "{entry.expected}.out"), "wrong\n")
+    kit_exec_write(files.join(root, "Tools/testkit/known-failing.tsv"), "{project}/hello\t#4867\towned golden mismatch\n")
+    options := kit_exec_defaults()
+    options.tiers = ["o1", "o2"]
+    context :: KitCtx{options: options, env: kit_test_golden_env(root), root: root, scratch: files.join(root, "scratch"), bless: options.bless}
+    failed :: kit_golden_run_suite(entry, context)
+    assert_eq(failed.len(), 2)
+    loop outcome in failed {
+        assert_eq(outcome.verdict.status, "KNOWN-FAILING")
+        assert(outcome.verdict.diff.contains("wrong"))
+        assert(outcome.verdict.detail.contains("#4867"))
+    }
+    kit_exec_write(files.join(root, "{entry.expected}.out"), "hello\n")
+    loop outcome in kit_golden_run_suite(entry, context) -> assert_eq(outcome.verdict.status, "UNEXPECTED-PASS")
+    kit_exec_write(files.join(root, "{entry.expected}.case"), "# KNOWN-FAILING #4868\n")
+    loop outcome in kit_golden_run_suite(entry, context) {
+        assert_eq(outcome.verdict.status, "UNEXPECTED-PASS")
+        assert(outcome.verdict.detail.contains("#4868"))
+    }
+    files.remove_all(root) ?? panic("remove known-failing golden scratch")
+}
