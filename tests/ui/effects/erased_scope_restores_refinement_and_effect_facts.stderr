@@ -1,0 +1,19 @@
+Error [E0310]: This needs Int (a whole number), but the value is Int?
+  --> erased_scope_restores_refinement_and_effect_facts.jet:15:10
+    |
+ 15 |     need(value)
+    |          ^^^^^
+ Why: A plain value is required here, not an optional one
+ Fix: Test with `== Val(...)` or `== None` first, e.g. `if x == Val(n) { ... }`
+More: jet-lang.dev/e/E0310
+
+Error [E0740]: `active_effect` uses the effect `FS.Read`, which its signature doesn't allow
+  --> tests/ui/effects/erased_scope_restores_refinement_and_effect_facts.jet:27:22
+    |
+ 27 | fn active_effect() -[IO]> {
+    |                      ^^
+ Why: The signature declares `-[IO]>`, so the body may only use those; `FS.Read` is outside that set
+ Fix: Add `FS.Read` to the effect list, or stop using it in `active_effect`
+ Denial: invocation
+ Call chain: active_effect
+More: jet-lang.dev/e/E0740

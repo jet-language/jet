@@ -1,0 +1,10 @@
+Error [E0740]: `load` uses the effect `FS.Read`, which its signature doesn't allow
+  --> tests/ui/effects/effects_propagate_transitively.jet:4:25
+    |
+  4 | fn load(path: String) -[Net]> String { return helper(path) }
+    |                         ^^^
+ Why: The signature declares `-[Net]>`, so the body may only use those; `FS.Read` is outside that set
+ Fix: Add `FS.Read` to the effect list, or stop using it in `load`
+ Denial: invocation
+ Call chain: load
+More: jet-lang.dev/e/E0740
