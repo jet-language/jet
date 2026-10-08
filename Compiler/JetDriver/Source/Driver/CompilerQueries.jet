@@ -508,12 +508,16 @@ pub fn jet_driver_compiler_check(input: JetDriverCompilerCheckInput) -> JetDrive
         schema_ingress :: schema_check.ingress ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val("the retained compiler query lost its actual schema input"))
         resolved_registration := sema_comptime_graph_with_values(registration, validation.values)
         projection := jet_driver_project_completed_check(input.request, ^load, resolved_registration, graph, validation.values, canonical.module_identity, schema_ingress, validation.trace)
+        diagnostics :: projection.compile.diagnostics
+        failed_stage :: projection.compile.failed_stage
+        complete :: projection.compile.complete
+        internal_problem :: projection.compile.internal_problem
         return JetDriverCompilerCheckResult{
-            product: .RetainedCheckedProjection{projection: projection},
-            diagnostics: projection.compile.diagnostics,
-            failed_stage: projection.compile.failed_stage,
-            complete: projection.compile.complete,
-            internal_problem: projection.compile.internal_problem,
+            product: .RetainedCheckedProjection{projection: ^projection},
+            diagnostics: diagnostics,
+            failed_stage: failed_stage,
+            complete: complete,
+            internal_problem: internal_problem,
         }
     }
     jet_driver_compiler_check_result(input, ^registration, ^graph, module_sources, load.diagnostics)
