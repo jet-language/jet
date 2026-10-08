@@ -80,6 +80,12 @@ such as [`Core.rs`](../../crates/jet-codegen/src/Prelude/Core.rs),
 [`CoreLib/`](../../crates/jet-codegen/src/Prelude/CoreLib/) provide registered
 leaves and adapters; they do not become an independent public API registry.
 
+Embedded runtime fragments must retain the dependencies of their emitted
+definitions, even when no user call selects the owning API. The assembler's
+Prelude dependency graph carries these fragment edges; a field type is a
+dependency just as a function call is. Optional API selection must not sever
+an edge from an already-emitted fragment.
+
 ## Jet semantics and native leaves
 
 Jet owns the parts that give an operation its meaning:
