@@ -1,0 +1,6 @@
+# Port of tests/corelib_parts/runtime.rs::core_auth_requires_named_key_and_audience; guest sources preserved verbatim.
+# PENDING-GRAMMAR(batch-four): diagnostic-code alternatives.
+fixture: fixtures/core_auth_requires_named_key_and_audience
+step: jet check fixture.jet --json
+exit: nonzero
+json: stdout doc $.reports[?code in ["E0764","E0769"]] #>= 2 # original count >=2

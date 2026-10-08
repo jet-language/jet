@@ -1,0 +1,7 @@
+# Port of tests/corelib_parts/system.rs::jet_raylib_namespace_is_not_a_core_module_alias; guest sources preserved verbatim.
+# Internal Syntax module-membership assertions -> compiler-lib ledger; CLI diagnostic predicates retained.
+fixture: fixtures/jet_raylib_namespace_is_not_a_core_module_alias
+step: jet check fixture.jet --json
+exit: nonzero
+json: stdout doc $.reports[?code="E0341"] #>= 1 # original code existential
+json: stdout doc $.reports[?fix~="core.game.raylib"] #>= 1 # original separate fix existential

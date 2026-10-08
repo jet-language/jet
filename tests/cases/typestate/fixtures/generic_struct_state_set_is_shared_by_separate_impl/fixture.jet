@@ -1,0 +1,26 @@
+
+struct Box<T> {
+    state { Empty, Full }
+    value: T
+}
+
+impl Box {
+    #Transition(_, Empty) fn new(value: ^T) -[]> Box<T> {
+        return Box<T>{ value: value }
+    }
+    #Transition(Empty, Full) fn fill(self: ^Box<T>) -[]> Box<T> {
+        return self
+    }
+}
+
+impl Box {
+    #State(Full) fn read(self) -[]> T {
+        return self.value
+    }
+}
+
+fn run() {
+    box := Box<Int>.new(1)
+    box = box.fill()
+    print(box.read())
+}

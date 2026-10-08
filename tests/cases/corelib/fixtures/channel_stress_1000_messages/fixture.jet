@@ -1,0 +1,17 @@
+
+use core.tasks as tasks
+
+fn run() {
+(sender, ch) : channel<Int>()
+    producer :: task {
+        loop i in 1..1000 {
+            sender.send(i)
+        }
+    }
+    producer.join() ?? 0
+    total: Int = 0
+    loop i in 1..1000 {
+        total = total + (ch.receive() ?? panic("channel closed"))
+    }
+    print(total)
+}
