@@ -53,11 +53,7 @@ fn jet_driver_compiler_check_registration_inputs(load: JetDriverLoadResult, core
             return None
         }
         unit := load.source_units[loaded_module.source_unit_index]
-        core_source_alias := ""
-        if jet_driver_unit_is_core(unit) && unit.file_index >= 0 && unit.file_index < core_sources.len() {
-            owner :: core_sources[unit.file_index]
-            if owner.path == unit.relative_path && owner.module_name == loaded_module.module_name -> core_source_alias = owner.alias
-        }
+        core_source_alias :: jet_driver_core_source_alias(unit, loaded_module, core_sources)
         handles :: jet_driver_registration_foreign_handle_facts(loaded_module.module_identity, providers, &diagnostics) ?? return None
         &inputs.push(SemaRegistrationModuleInput{
             package_identity: loaded_module.package_identity,
