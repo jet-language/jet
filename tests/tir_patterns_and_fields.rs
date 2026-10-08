@@ -964,6 +964,22 @@ fn run() {
     assert_eq!(stdout, "database\ndocs\nother\n");
 }
 
+/// Structural tuple pattern tests and bindings use the same checked tuple field
+/// IDs as ordinary projections in both compiler implementations.
+#[test]
+fn tuple_field_pattern_tests_bindings_and_dispatch_run() {
+    if !have_rustc() {
+        return;
+    }
+    let source = include_str!("../Examples/features/patterns/tuple_field_patterns.jet");
+    let (code, stdout) = build_and_run("tir_tuple_field_patterns", source);
+    assert_eq!(code, 0);
+    assert_eq!(
+        stdout,
+        include_str!("../Examples/features/expected/patterns/tuple_field_patterns.out")
+    );
+}
+
 /// c109 (B4): a user-enum variant if-let condition `if m == .Ping(n) { } else { }`
 /// routes through the TIR and binds the payload, matching the old if-let baseline.
 #[test]

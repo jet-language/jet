@@ -2836,7 +2836,7 @@ fn jet_codegen_lower_pattern_probe(builder: &JetCodegenBuilder, program: JetCode
     type_id := jet_codegen_pattern_mir_type_id(builder, program, expression.ty)
     fields := [MIRFieldValue]{}
     loop (index, field) in types {
-        field_id := jet_codegen_pattern_field_id(builder, program, expression.ty, field.name)
+        field_id := jet_codegen_host_field_id(builder, program, expression.ty, field.name)
         value := jet_codegen_emit_value(&builder, program, expression.span, field.ty, MIROperation.PatternCapture{matched: matched, index: index})
         &fields.push(MIRFieldValue{field: field_id, value: value})
     }
@@ -3098,7 +3098,7 @@ fn jet_codegen_lower_switch_subject(builder: &JetCodegenBuilder, program: JetCod
     subject :: builder.switch_subject ?? panic("checked switch subject is not available")
     subject_value := subject.value
     if field == .Val(name) {
-        field_id := jet_codegen_pattern_field_id(builder, program, subject.ty, name)
+        field_id := jet_codegen_host_field_id(builder, program, subject.ty, name)
         return jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Field{base: subject_value, field: field_id})
     }
     subject_value
