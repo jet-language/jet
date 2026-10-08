@@ -1,0 +1,47 @@
+# Port of tests/cli_parts/surface.rs:1954-2131; exact original sources/predicates.
+# PENDING-SAME-HEAD: runtime not run.
+# PENDING-GRAMMAR(batch-four).
+fixture: fixtures/cost
+step lint: jet lint --cost {work}/tests/cli/cost_rows.jet
+env: NO_COLOR=1
+exit: 1
+stderr: ~ "L2510" # original predicate
+stderr: ~ "Why:" # original predicate
+stderr: ~ "Fix:" # original predicate
+stderr: count "Editing a shared map backing store" = 1 # original predicate
+stderr: count "An exact Int operation may spill to bigint" = 1 # original predicate
+stderr: count "Using a generic collection representation" = 1 # original predicate
+stderr: count "Constructing an Outcome carrier" = 1 # original predicate
+stderr: count "view into an owned slot" = 1 # original predicate
+stderr: count "Warning [L2510] (hidden_cost_in_loop):" = 5 # original predicate
+step: jet check {work}/tests/cli/cost_rows.jet
+env: NO_COLOR=1
+exit: 0
+stderr: count "Warning [L2510] (hidden_cost_in_loop):" = 5 # original predicate
+stderr: count "view into an owned slot" = 1 # original predicate
+step: jet explain --cost {work}/tests/cli/cost_rows.jet --json
+env: NO_COLOR=1
+exit: 0
+stdout: ~ "\"kind\":\"view materialization\"" # original predicate
+stdout: ~ "\"kind\":\"map copy-on-write\"" # original predicate
+stdout: ~ "\"kind\":\"exact Int spill\"" # original predicate
+stdout: ~ "\"kind\":\"outcome construction\"" # original predicate
+stdout: ~ "\"kind\":\"generic representation fallback\"" # original predicate
+stdout: ~ "\"state\":\"semantic remainder\"" # original predicate
+stdout: count "\"tier\":\"shared-tir\"" = 5 # original predicate
+stdout: !~ "\"source\":\"shared-tir\"" # original predicate
+step: jet explain --cost {work}/tests/cli/cost_rows.jet
+env: NO_COLOR=1
+exit: 0
+stdout.trim_lines.filter(!= ""): each-line ~ "tier=shared-tir" # original predicate
+step: jet lint --cost {work}/tests/cli/cost_removed.jet
+env: NO_COLOR=1
+exit: 0
+stdout: ~ "no hidden dynamic costs in loops" # original predicate
+stdout: !~ "L2510" # original predicate
+stderr: !~ "L2510" # original predicate
+step: jet explain --cost {work}/tests/cli/cost_removed.jet --json
+env: NO_COLOR=1
+exit: 0
+stdout: ~ "\"kind\":\"exact Int spill\"" # original predicate
+stdout: ~ "\"state\":\"optimizer-proven removed\"" # original predicate

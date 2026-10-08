@@ -1,0 +1,25 @@
+use core.game as game
+
+module perf.game {
+    budgets: [
+        Budget.{
+    name: "assets_forged",
+    scope: .Scene("main"),
+    metric: .SceneAssetBytes,
+    provider: .SceneProbe("main"),
+    comparison: .AbsoluteFrom("local/main"),
+    limit: .AtMost(1MiB),
+    enforcement: .Warn,
+},
+    ]
+}
+
+fn run() {
+    scene := game.Scene.new("main")
+    counter := 0
+    scene.on_frame((frame) -> {
+        counter = counter + 1
+    })
+    transcript :: game.run(scene)
+    print(transcript)
+}
