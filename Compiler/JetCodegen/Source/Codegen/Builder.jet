@@ -66,6 +66,7 @@ use jet_foundation.[
     mir_type_same_checked_type,
     stable_id,
     type_identity_equal,
+    type_mir_identity_key,
     tir_expr_children,
     tir_if_cond_children,
     tir_stmt_children,
@@ -1711,7 +1712,8 @@ fn jet_codegen_register_drop_live(builder: &JetCodegenBuilder, program: JetCodeg
     }
     if split {
         if jet_codegen_nominal_close_function(builder, program, ty) != None && !jet_codegen_is_consuming_close_receiver(builder, program, place, ty) {
-            panic("cannot lower projected move from `{ty}`: owner has its own Close implementation")
+            owner_type :: type_mir_identity_key(ty)
+            panic("cannot lower projected move from `{owner_type}`: owner has its own Close implementation")
         }
         if jet_codegen_drop_field_names(builder, program, ty).len() != 0 {
             builder.split_drop_roots[place.value] = true

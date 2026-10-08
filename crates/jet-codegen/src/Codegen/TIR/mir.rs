@@ -7734,7 +7734,8 @@ impl<'a> LowerCtx<'a> {
             let checked = self.mir_type(ty)?;
             if self.scope_end_close_for_place(place, &checked).is_some() {
                 return Err(self.error(self.span(), format!(
-                    "cannot lower projected move from `{ty}`: owner has its own Close implementation"
+                    "cannot lower projected move from `{}`: owner has its own Close implementation",
+                    type_identity_key(ty)
                 )));
             }
             let mut paths = Vec::new();
