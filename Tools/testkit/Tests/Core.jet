@@ -137,3 +137,12 @@ fn kit_test_core_scratch(label: String) -> String {
     }
     files.remove_all(root) ?? panic("remove fixture modes scratch")
 }
+
+#Test("timeout options refuse invalid or out-of-range durations before discovery") {
+    assert(kit_parse_options(["golden", "--timeout", "invalid"]).error != "")
+    assert(kit_parse_options(["golden", "--timeout", "0"]).error != "")
+    assert(kit_parse_options(["golden", "--timeout", "-1"]).error != "")
+    options :: kit_parse_options(["golden", "--timeout", "9223372036854775807"])
+    assert_eq(options.error, "")
+    assert_eq(kit_execute_suites(options, ""), 2)
+}

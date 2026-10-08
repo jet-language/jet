@@ -95,6 +95,8 @@ Use `--list`, `--cases FILE` (exact repository-relative IDs), or `--filter TEXT`
 to select cases. `--shard I/N` partitions the sorted corpus deterministically.
 Scratch must be disk-backed and outside the checkout; it is staged and removed
 per case. The gate supplies concurrency, not a thread pool inside the kit.
+Timeouts must be positive seconds within `Duration`'s representable range;
+out-of-range values are refused before corpus discovery with exit code 2.
 
 Expected files are read-only unless explicitly selected for blessing:
 

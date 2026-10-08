@@ -322,7 +322,11 @@ fn kit_execute_suites(options: KitOptions, root: String) -> Int {
         print("REFUSED\tselection\t\tsuite not installed: {options.suite}")
         return 2
     }
-    discovery_env :: KitEnv{root: root, scratch: "", jet: options.jet, jetpack: options.jetpack, timeout: Duration.seconds(options.timeout), memory_limit: 0}
+    timeout :: Duration.seconds(options.timeout) ?? {
+        print("REFUSED\tselection\t\ttimeout: {err}")
+        return 2
+    }
+    discovery_env :: KitEnv{root: root, scratch: "", jet: options.jet, jetpack: options.jetpack, timeout: timeout, memory_limit: 0}
     discovery_ctx :: KitCtx{options: options, env: discovery_env, root: root, scratch: "", bless: options.bless}
     corpus := [KitSelected]{}
     loop suite in selected_suites {
@@ -378,7 +382,7 @@ fn kit_execute_suites(options: KitOptions, root: String) -> Int {
         print("ERROR\tselection\t\tscratch: {err}")
         return 2
     }
-    env :: KitEnv{root: root, scratch: run_scratch, jet: jet, jetpack: jetpack, timeout: Duration.seconds(options.timeout), memory_limit: 0}
+    env :: KitEnv{root: root, scratch: run_scratch, jet: jet, jetpack: jetpack, timeout: timeout, memory_limit: 0}
     results := [KitCaseResult]{}
     ran_suites := [String]{}
     loop (index, item) in entries {
