@@ -465,7 +465,11 @@ fn cli_services_health(verification: &StoreVerification, theme: Theme, parsed: C
         loop svc in targets {
             state :: cli_service_health_label(services_health_one_with_env(project_dir, Val(env), svc), true)
             all_healthy = all_healthy && state.healthy
-            lifecycle :: services_lifecycle_json(project_dir, svc.name) ?? "null"
+            found :: services_lifecycle_json(project_dir, svc.name) ?? {
+                eprint("services JSON: {err.message}")
+                return EXIT_USAGE
+            }
+            lifecycle :: found ?? "null"
             &records.push("{{\"service\":{cli_json_quote(svc.name)},\"health\":{cli_json_quote(state.label)},\"lifecycle\":{lifecycle}}}")
         }
         print("[{records.join(",")}]")
