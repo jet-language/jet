@@ -58,7 +58,7 @@ fn channel_fixture_check(ok: Bool) {
     scheduler_control_discard_stop(control)
     channel_fixture_check(channel_iter_pull(rx, endpoints + I64{16}))
     channel_fixture_check(sync_load(endpoints + I64{16}) == I64{42})
-    shared :: jet_rt_native_shared_new(endpoints + I64{16}, meta)
+    shared :: jet_rt_native_shared_new(endpoints + I64{16}, meta, I64{0})
     sync_store(endpoints + I64{16}, I64{987})
     jet_rt_native_shared_edit(shared, I64{0}, stopped_callback, endpoints + I64{16})
     channel_fixture_check(sync_load(endpoints + I64{16}) == I64{987})
@@ -88,7 +88,7 @@ fn channel_fixture_check(ok: Bool) {
 #Export(c) fn jet_rt_channel_fixture_shared_guard_stops(meta: I64) {
     storage :: jet_rt_alloc(I64{40}, I64{8})
     sync_store(storage, I64{17})
-    shared :: jet_rt_native_shared_new(storage, meta)
+    shared :: jet_rt_native_shared_new(storage, meta, I64{0})
     control :: scheduler_control_new()
     scheduler_control_enter(control, storage + I64{8})
     guard :: jet_rt_native_shared_guard_edit(shared)

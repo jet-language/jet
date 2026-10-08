@@ -41,7 +41,12 @@ extern void jet_rt_native_receiver_drop(W);
 extern W jet_rt_native_receiver_iter(W,uint8_t,const Meta*);
 extern void jet_rt_native_iter_drop(W);
 extern void jet_rt_native_select_wait(Header*,Header*,uint8_t,int64_t*,W*);
+#ifdef JET_SEED
+// Seed-only client of the Rust provider: this ABI dies at native cutover.
 extern W jet_rt_native_shared_new(W,const Meta*);
+#else
+extern W jet_rt_native_shared_new(W,const Meta*,W);
+#endif
 extern W jet_rt_native_shared_clone(W);
 extern void jet_rt_native_shared_drop(W);
 extern void jet_rt_native_shared_read(W,W,W,W);
@@ -96,6 +101,14 @@ extern uint8_t jet_fixture_rust_select_wake_handoff(void);
 #endif
 
 static const Meta word_meta = {8,0,0,0,0,0,2,0,0};
+static W fixture_shared_new(W slot, const Meta *meta, W drop_code) {
+#ifdef JET_SEED
+    (void)drop_code;
+    return jet_rt_native_shared_new(slot, meta);
+#else
+    return jet_rt_native_shared_new(slot, meta, drop_code);
+#endif
+}
 static atomic_uint drops;
 static void payload_drop(W p) { (void)p; atomic_fetch_add_explicit(&drops,1,memory_order_relaxed); }
 static const Meta owned_meta = {8,0,(W)payload_drop,0,0,0,2,0,0};
@@ -157,7 +170,77 @@ static uint64_t increment(W env,W input,W output){(void)env;*(W*)input+=1;*(W*)o
 static uint64_t inspect(W env,W input,W output){(void)env;*(W*)output=*(W*)input;return 0;}
 typedef struct { W shared,rounds; } Edits;
 static void *editor(void *p){jet_rt_thread_attach();Edits *e=p;W out;for(W i=0;i<e->rounds;i++)jet_rt_native_shared_edit(e->shared,0,(W)increment,(W)&out);jet_rt_native_shared_drop(e->shared);jet_rt_thread_detach();return NULL;}
-static void shared_tests(void){W value=0;W shared=jet_rt_native_shared_new((W)&value,&word_meta);pthread_t threads[4];Edits args[4];for(size_t i=0;i<4;i++){args[i]=(Edits){jet_rt_native_shared_clone(shared),25000};assert(!pthread_create(&threads[i],NULL,editor,&args[i]));}for(size_t i=0;i<4;i++)assert(!pthread_join(threads[i],NULL));W out=0;jet_rt_native_shared_read(shared,0,(W)inspect,(W)&out);assert(out==100000);jet_rt_native_shared_drop(shared);unsigned before=atomic_load(&drops);shared=jet_rt_native_shared_new((W)&value,&owned_meta);W alias=jet_rt_native_shared_clone(shared);jet_rt_native_shared_drop(shared);assert(atomic_load(&drops)==before);jet_rt_native_shared_drop(alias);assert(atomic_load(&drops)==before+1);puts("shared concurrent edits/drop ok");}
+static void shared_tests(void) {
+    W value = 0, shared = fixture_shared_new((W)&value, &word_meta, 0);
+    pthread_t threads[4];
+    Edits args[4];
+    for (size_t i = 0; i < 4; i++) {
+        args[i] = (Edits){jet_rt_native_shared_clone(shared), 25000};
+        assert(!pthread_create(&threads[i], NULL, editor, &args[i]));
+    }
+    for (size_t i = 0; i < 4; i++) assert(!pthread_join(threads[i], NULL));
+    W out = 0;
+    jet_rt_native_shared_read(shared, 0, (W)inspect, (W)&out);
+    assert(out == 100000);
+    jet_rt_native_shared_drop(shared);
+    unsigned before = atomic_load(&drops);
+    shared = fixture_shared_new((W)&value, &owned_meta, (W)payload_drop);
+    W alias = jet_rt_native_shared_clone(shared);
+    jet_rt_native_shared_drop(shared);
+    assert(atomic_load(&drops) == before);
+    jet_rt_native_shared_drop(alias);
+    assert(atomic_load(&drops) == before + 1);
+#ifndef JET_SEED
+    // No descriptor-drop fallback: null glue is a plain-free contract.
+    shared = fixture_shared_new((W)&value, &owned_meta, 0);
+    jet_rt_native_shared_drop(shared);
+    assert(atomic_load(&drops) == before + 1);
+    // The supplied glue, not meta.drop, owns final payload destruction.
+    shared = fixture_shared_new((W)&value, &word_meta, (W)payload_drop);
+    jet_rt_native_shared_drop(shared);
+    assert(atomic_load(&drops) == before + 2);
+#endif
+    puts("shared concurrent edits/drop ok");
+}
+
+typedef struct {
+    W shared;
+    atomic_uint *arrived, *start;
+} SharedCloneRace;
+static void *shared_clone_racer(void *argument) {
+    jet_rt_thread_attach();
+    SharedCloneRace *race = argument;
+    W shared = race->shared;
+    atomic_fetch_add(race->arrived, 1);
+    while (!atomic_load(race->start)) sched_yield();
+    for (W i = 0; i < 100000; ++i) {
+        W clone = jet_rt_native_shared_clone(shared);
+        jet_rt_native_shared_drop(clone);
+    }
+    jet_rt_native_shared_drop(shared);
+    jet_rt_thread_detach();
+    return NULL;
+}
+
+static void shared_clone_drop_race(void) {
+    W value = 17;
+    unsigned before = atomic_load(&drops);
+    W shared = fixture_shared_new((W)&value, &owned_meta, (W)payload_drop);
+    atomic_uint arrived = 0, start = 0;
+    SharedCloneRace owners[2] = {
+        {jet_rt_native_shared_clone(shared), &arrived, &start},
+        {jet_rt_native_shared_clone(shared), &arrived, &start}};
+    pthread_t workers[2];
+    for (size_t i = 0; i < 2; ++i)
+        assert(!pthread_create(&workers[i], NULL, shared_clone_racer, &owners[i]));
+    while (atomic_load(&arrived) != 2) sched_yield();
+    // The root does not pin the cell through join: a worker owns last release.
+    jet_rt_native_shared_drop(shared);
+    atomic_store(&start, 1);
+    for (size_t i = 0; i < 2; ++i) assert(!pthread_join(workers[i], NULL));
+    assert(atomic_load(&drops) == before + 1);
+    puts("shared two-thread 100k clone/drop exactly-once payload drop ok");
+}
 
 #ifdef JET_CHANNEL_INTERNAL
 static W guard_drop_probe;
@@ -172,7 +255,7 @@ static const Meta guard_meta = {8,0,(W)guard_payload_drop,0,0,0,2,0,0};
 static void shared_guard_lifetime(void) {
     W value = 19;
     unsigned before = atomic_load(&drops);
-    W shared = jet_rt_native_shared_new((W)&value, &guard_meta);
+    W shared = fixture_shared_new((W)&value, &guard_meta, (W)guard_payload_drop);
     W first = jet_rt_native_shared_guard_read(shared);
     W second = jet_rt_native_shared_guard_read(shared);
     assert(first == shared && second == shared);
@@ -185,7 +268,7 @@ static void shared_guard_lifetime(void) {
     jet_rt_native_shared_read_guard_drop(second);
     guard_drop_probe = 0;
     assert(atomic_load(&drops) == before + 1);
-    shared = jet_rt_native_shared_new((W)&value, &guard_meta);
+    shared = fixture_shared_new((W)&value, &guard_meta, (W)guard_payload_drop);
     W edit = jet_rt_native_shared_guard_edit(shared);
     assert(edit == shared && jet_rt_native_shared_guard_revision(edit) == 0);
     assert(jet_rt_native_shared_edit_guard_read(edit) == jet_rt_native_shared_edit_guard_edit(edit));
@@ -269,7 +352,7 @@ static void *guard_reader(void *arg) {
 
 static void shared_readers(bool guards) {
     void *(*start)(void *) = guards ? guard_reader : reader;
-    W value = 9, shared = jet_rt_native_shared_new((W)&value, &word_meta);
+    W value = 9, shared = fixture_shared_new((W)&value, &word_meta, 0);
     atomic_uint arrived = 0, release = 0, stage = 0;
     Reader args[4];
     pthread_t threads[4];
@@ -303,6 +386,7 @@ static void shared_readers(bool guards) {
 #endif
 
 int main(int argc,char **argv){jet_rt_thread_attach();if(argc>1&&!strcmp(argv[1],"perf")){ping(1000000);return 0;}if(argc>1&&!strcmp(argv[1],"select-closed")){W tx,rx;jet_rt_native_channel(0,0,&tx,&rx);jet_rt_native_sender_drop(tx);Header rs=words(&rx,1),ts=words(NULL,0);int64_t arm;W value;jet_rt_native_select_wait(&rs,&ts,0,&arm,&value);return 99;}if(argc>1&&!strcmp(argv[1],"select-empty")){Header rs=words(NULL,0),ts=words(NULL,0);int64_t arm;W value;jet_rt_native_select_wait(&rs,&ts,0,&arm,&value);return 99;}queue_tests();select_tests();shared_tests();
+    shared_clone_drop_race();
 #ifdef JET_CHANNEL_INTERNAL
     shared_readers(false);
     shared_readers(true);

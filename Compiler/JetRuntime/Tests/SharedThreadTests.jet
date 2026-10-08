@@ -1,6 +1,5 @@
-// Separate fixture: uses the real remaining Shared kernel (never a mocked
-// drop) until L8a-4 supplies its same-unit Jet definitions. All assertions Jet.
-#Import(c) fn thread_test_shared_new(slot: I64, meta: I64) -> I64 = "jet_rt_native_shared_new"
+// Separate fixture against the actual Jet Shared provider. All assertions Jet.
+#Import(c) fn thread_test_shared_new(slot: I64, meta: I64, drop_code: I64) -> I64 = "jet_rt_native_shared_new"
 #Import(c) fn thread_test_shared_clone(shared: I64) -> I64 = "jet_rt_native_shared_clone"
 
 #Export(c) fn jet_rt_shared_tls_fixture_payload_drop(slot: I64) {
@@ -68,7 +67,7 @@
     thread_zero(meta, I64{72})
     sync_store(meta, I64{8})
     sync_store(meta + I64{16}, drop_code)
-    shared :: thread_test_shared_new(payload, meta)
+    shared :: thread_test_shared_new(payload, meta, drop_code)
     kept :: thread_test_shared_clone(shared)
     jet_rt_tls_set(key, shared)
     jet_rt_tls_reset_attempt()
@@ -80,14 +79,14 @@
     jet_rt_tls_reset_attempt()
     thread_test_require(sync_load(counter) == I64{1} && jet_rt_tls_get(thread_key) == I64{73})
     // The same process key serves the next attempt, with no previous value.
-    next :: thread_test_shared_new(payload, meta)
+    next :: thread_test_shared_new(payload, meta, drop_code)
     jet_rt_tls_set(key, next)
     jet_rt_tls_reset_attempt()
     thread_test_require(sync_load(counter) == I64{2} && jet_rt_tls_get(key) == I64{0})
     repeat = I64{0}
     loop repeat < (I64{10000}) {
         thread_test_require(jet_rt_tls_shared_key(site, I64{1}) == key && jet_rt_tls_get(key) == I64{0})
-        attempt :: thread_test_shared_new(payload, meta)
+        attempt :: thread_test_shared_new(payload, meta, drop_code)
         jet_rt_tls_set(key, attempt)
         jet_rt_tls_reset_attempt()
         thread_test_require(sync_load(counter) == repeat + I64{3} && jet_rt_tls_get(key) == I64{0})
@@ -105,7 +104,7 @@
     sync_store(scoped_payload, scoped_count)
     state :: jet_rt_alloc(I64{16}, I64{8})
     sync_store(state, thread_site)
-    sync_store(state + I64{8}, thread_test_shared_new(scoped_payload, meta))
+    sync_store(state + I64{8}, thread_test_shared_new(scoped_payload, meta, drop_code))
     handle :: thread_spawn(scope_worker, state)
     thread_test_require(handle > I64{0})
     thread_test_require(thread_join(handle, I64{0}) == I64{0})
