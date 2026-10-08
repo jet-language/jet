@@ -85,8 +85,8 @@ documented host-dependent alternatives and must be edited by hand.
 Golden sidecars and CLI cases share one step sequencer and assertion checker.
 In a CLI case, `step: built [args…]` runs the artifact from the preceding
 successful `step: jet build <entry>`; Golden also supplies its implicit build.
-Shared kit record types and callback factories are colocated in `run.jet` while
-the front end's cross-file nominal-identity issue (#4780) is unresolved. List
+Shared kit record types, callback factories and the step sequencer are colocated
+in `run.jet` while the front end's cross-file identity issue (#4780) is unresolved. List
 field defaults use explicitly typed empty lists, just like kit constructors.
 
 Use `--list`, `--cases FILE` (exact repository-relative IDs), or `--filter TEXT`

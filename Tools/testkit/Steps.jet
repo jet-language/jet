@@ -354,33 +354,3 @@ fn kit_steps_check_state(step: KitStep, index: Int, context: KitStepCtx, state: 
     kit_steps_check(step, context.id, state.last, context.env, context.work, context.scratch, context.snapshots, context.bless, context.plan.normalize, state.built, "")
 }
 
-// All suites share this sequencing loop. Hooks supply only suite-specific
-// invocation and expectations, never an alternative parser or executor.
-fn kit_steps_execute(context: KitStepCtx, hooks: KitStepHooks) -> KitOutcome {
-    state := KitStepState{last: kit_exec_failed("no steps"), built: "", built_once: false}
-    plan :: context.plan
-    if plan.error != "" -> return KitOutcome{verdict: kit_expect_verdict("REFUSED", plan.error), run: state.last}
-    requirement :: kit_steps_required(plan, context.env, context.work, context.scratch)
-    if requirement == {
-        .Val(value) -> return KitOutcome{verdict: value, run: state.last}
-        .None -> {}
-    }
-    if plan.compile_only && context.golden == None -> return KitOutcome{verdict: kit_expect_verdict("REFUSED", "run: none is golden-only"), run: state.last}
-    if plan.refused != "" -> return KitOutcome{verdict: kit_expect_verdict("REFUSED", plan.refused), run: state.last}
-    if plan.steps.len() == 0 -> return KitOutcome{verdict: kit_expect_verdict("REFUSED", "case has no steps"), run: state.last}
-    blessing :: kit_steps_bless_plan(plan, context.id, context.bless)
-    if blessing == {
-        .Val(value) -> return KitOutcome{verdict: value, run: state.last}
-        .None -> {}
-    }
-    if plan.fixture != "" -> kit_exec_copy_tree(files.join(context.snapshots, plan.fixture), context.work, true)
-    loop (index, step) in plan.steps {
-        invoked :: hooks.invoke(step, index, context, state)
-        state = invoked.state
-        if invoked.verdict.status != "PASS" -> return KitOutcome{verdict: invoked.verdict, run: state.last}
-        verdict :: hooks.check(step, index, context, state)
-        if verdict.status != "PASS" -> return KitOutcome{verdict: verdict, run: state.last}
-        if plan.compile_only -> break
-    }
-    KitOutcome{verdict: kit_expect_verdict("PASS", ""), run: state.last}
-}
