@@ -46,7 +46,7 @@ if (mode === 'assemble') {
   for (const line of imports.trim().split('\n').filter(Boolean)) if (!allowed.has(line.split(/\s+/)[0])) throw Error(`unledgered host fixture import ${line}`);
   const symbols = command('nm', ['-g', '--defined-only', '--format=posix', object]).stdout;
   writeFileSync(join(out, 'exports.nm'), symbols);
-  for (const file of ['HostFiles.jet', 'HostSpawn.jet', 'Err.jet', 'ErrReport.jet', 'JourneyReport.jet']) {
+  for (const file of ['HostFiles.jet', 'HostSpawn.jet', 'Err.jet', 'ErrReport.jet', 'JourneyReport.jet', 'Journey.jet']) {
     const source = readFileSync(join(root, 'Compiler/JetRuntime/Source', file), 'utf8');
     for (const match of source.matchAll(/^#Export\(c\)\s+fn\s+(\w+)\(/gm)) if (!new RegExp(`^${match[1]} T `, 'm').test(symbols)) throw Error(`missing real host leaf ${match[1]}`);
   }
@@ -60,7 +60,7 @@ if (mode === 'assemble') {
     const [name, kind] = line.trim().split(/\s+/);
     if (/^[TDBRS]$/.test(kind ?? '')) counts.set(name, (counts.get(name) ?? 0) + 1);
   }
-  for (const file of ['Err.jet', 'ErrReport.jet', 'JourneyReport.jet']) {
+  for (const file of ['Err.jet', 'ErrReport.jet', 'JourneyReport.jet', 'Journey.jet']) {
     const source = readFileSync(join(root, 'Compiler/JetRuntime/Source', file), 'utf8');
     for (const match of source.matchAll(/^#Export\(c\)\s+fn\s+(\w+)\(/gm)) {
       if (counts.get(match[1]) !== 1) throw Error(`native Err export ${match[1]} has ${counts.get(match[1]) ?? 0} strong definitions`);

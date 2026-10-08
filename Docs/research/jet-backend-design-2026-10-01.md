@@ -1715,4 +1715,12 @@ intermediate rendered measurement strings. Its goldens reuse literal expected
 bytes from `Outcome.rs:2066–2172`, covering stream/80-column/40-column,
 independent ANSI coloring, path-segment elision, note truncation and repeated
 hop counts.
+`Journey.jet` owns the pure Journey32 accumulator over an explicit caller slot:
+new-origin resets old handled state, only consecutive equal function/file/line
+sites collapse, the first site's column/note remain, clone copies all children,
+take drains once, and adopt transfers carried children. The real
+`jet_rt_journey_destructor(header,value)` has the Closure24 callback signature.
+Its address and dynamic TLS slot adapter require the published E2 FINAL checked
+named-FunctionAddress mechanism; no guessed address or placeholder TLS export
+substitutes for that prerequisite.
 
