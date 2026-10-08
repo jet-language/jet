@@ -1874,6 +1874,8 @@ The registry below is written by reviewers, one row per safe abstraction:
 its file, function, and the proof that no caller can break memory safety
 through it. The checker never writes a proof; it fails on a missing row and on
 a row whose function no longer opens a gate.
+Default-value literals in function parameters are part of the signature, not
+the function body; they do not exempt a wrapper from the proof requirement.
 
 <!-- unsafe-abstractions:begin -->
 ```json
