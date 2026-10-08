@@ -266,7 +266,7 @@ fn fx_shared_site_program(lifetime: MIRSharedLifetime) -> MIRProgram Never! {
 }
 
 fn fx_shared_site_checks() -> Bool Never! {
-    loop lifetime in [MIRSharedLifetime]{.Process, .World, .Thread, .Attempt} {
+    loop lifetime in ([MIRSharedLifetime]{MIRSharedLifetime.Process, MIRSharedLifetime.World, MIRSharedLifetime.Thread, MIRSharedLifetime.Attempt}) {
         program :: fx_shared_site_program(lifetime)
         initializer :: program.functions[1].id
         getter :: mir_shared_site_getter_symbol(initializer)
@@ -286,7 +286,7 @@ fn fx_shared_site_checks() -> Bool Never! {
         if !startup_text.contains("jet_rt_string_from_static") || startup_text.contains("jet_rt_native_shared_new") -> return false
         getter_text :: lir_print_module(pinned.lir)
         if !getter_text.contains("jet_rt_native_shared_clone") -> return false
-        if lifetime == {.Process | .World -> true else -> false} {
+        if lifetime == MIRSharedLifetime.Process || lifetime == MIRSharedLifetime.World {
             if !getter_text.contains("jet_rt_shared_site_publish") -> return false
         } else {
             if !getter_text.contains("jet_rt_tls_shared_key") || !getter_text.contains("jet_rt_tls_set") -> return false

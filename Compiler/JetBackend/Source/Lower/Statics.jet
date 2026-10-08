@@ -346,7 +346,8 @@ fn lower_static_walk(p: MIRProgram, m: &LowerModule, f: &LowerFunction, row: MIR
 
 // The address of module storage `definition`'s value.
 fn lower_static_storage(p: MIRProgram, m: &LowerModule, f: &LowerFunction, definition: MIRConstantDef) -> LIRValueID? {
-    if definition.value == {.SharedSite(_) -> true else -> false} && m.shared_sites_dynamic -> panic("dynamic image attempted to emit a Core publication cell")
+    shared_site :: if definition.value == {.SharedSite(_) -> true else -> false}
+    if shared_site && m.shared_sites_dynamic -> panic("dynamic image attempted to emit a Core publication cell")
     if lower_repr(p, definition.ty) == {
         .Word | .Flag | .FloatBits | .Discriminant | .Handle(_, _) -> {}
         else -> {
@@ -360,7 +361,7 @@ fn lower_static_storage(p: MIRProgram, m: &LowerModule, f: &LowerFunction, defin
         object = LIRDataID{value: index}
     } else {
         object = lower_static_object(&m, 8)
-        if definition.value != {.SharedSite(_) -> true else -> false} {
+        if !shared_site {
             lower_static_child(p, &m, &f, object, 0, definition.ty, definition.value)
         }
         if f.failed -> return None
@@ -447,7 +448,7 @@ fn lower_shared_site_helper(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> 
     }
     &m.shared_sites.push(LIRSharedSiteExport{initializer: site.initializer, site_key: definition.key, function: glue.id, symbol: ~f.builder.name, lifetime: site.lifetime, ty: definition.ty})
     cell :: lower_static_storage(p, &m, &f, definition) ?? return lir_builder_finish(f.builder)
-    tls :: site.lifetime == {.Thread | .Attempt -> true else -> false}
+    tls :: site.lifetime == MIRSharedLifetime.Thread || site.lifetime == MIRSharedLifetime.Attempt
     key := LIRValueID{value: -1}
     if tls {
         scope :: lower_const(&f, if site.lifetime == MIRSharedLifetime.Attempt -> 1 else -> 0)

@@ -219,6 +219,29 @@ accepts one already-admitted address per import and performs the existing
 slot/relocation checks and writable-to-executable mapping. It performs no
 symbol lookup or startup. The parent supplies runtime addresses from its sealed
 library inventory and Core getter addresses from its pinned Core map.
+
+The Source `CoreSharedManifest` recipe uses the canonical `<corelib>` owner and
+the sorted complete installed source inventory (module-owner key, installation-
+relative path, source bytes, and owned members). Its recursive keyed native
+layout inventory comes from ordinary lowering's size, stride, representation,
+member/variant offsets, and clone/drop policy. Stable semantic initializer IDs
+identify sites; LIR IDs, linked offsets, addresses, compiler-factory identity,
+and per-user reached-module subsets are excluded from the schema digest.
+`core_shared_expected_manifest` walks checked Core declarations without lowering
+an image. The producing LIR must export exactly that schema. The separate binding
+retains the producing MIR/source recipe, its digest and producer identity, the
+compiled image hash, and actual linked getter offsets.
+
+`CoreSharedParent` is the Source admission/cache component. The outer static host
+must construct it once, not in a compiler factory or metadata/projector context.
+It checks a factory's expected schema before invoking the cold producer, accepts
+imports only from the admitted runtime inventory, and shares the existing raw
+mapper and startup primitive with the child loader. It pins provenance and the
+image before startup, permanently poisons a stopped startup, and publishes only
+the validated getter map on success. A warm attachment neither recompiles nor
+reinitializes Core. These components alone are not evidence that the outer host
+bridge or the composed native-runtime admission has executed successfully.
+
 ## One meaning across execution tiers
 
 AOT, interpreter/comptime evaluation, and web execution are
