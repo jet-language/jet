@@ -25,7 +25,7 @@ pub enum CoreLeafKind {
 
 // BEGIN GENERATED CORE DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 7e71ebbce3e8298f6132e9808d83cedd9bdc31f48c7d7f49f1417902e6b78d5d
+// Source SHA-256: 9c13e51d343190c6c46a5cceba35d9f159ce677b2d01decf9c7a1915880d2c42
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreModuleDeclaration {
     pub module: &'static str,
@@ -876,6 +876,16 @@ pub const CORE_SOURCE_OWNED_TYPES: &[CoreSourceOwnedType] = &[
     CoreSourceOwnedType { path: "Core/compute/compute.jet", name: "SparseTensor" },
     CoreSourceOwnedType { path: "Core/compute/compute.jet", name: "VJPRun" },
     CoreSourceOwnedType { path: "Core/compute/solve.jet", name: "LinearSolver" },
+    CoreSourceOwnedType { path: "Core/data/data.jet", name: "DataWatchStatus" },
+    CoreSourceOwnedType { path: "Core/data/data.jet", name: "DataLoaderStatus" },
+    CoreSourceOwnedType { path: "Core/data/data.jet", name: "DataStatus" },
+    CoreSourceOwnedType { path: "Core/data/data.jet", name: "DataError" },
+    CoreSourceOwnedType { path: "Core/data/data.jet", name: "DataErrorKind" },
+    CoreSourceOwnedType { path: "Core/data/data.jet", name: "DataSummary" },
+    CoreSourceOwnedType { path: "Core/data/data.jet", name: "DataFreshness" },
+    CoreSourceOwnedType { path: "Core/data/data.jet", name: "DataInvalidationCause" },
+    CoreSourceOwnedType { path: "Core/data/data.jet", name: "DataFormat" },
+    CoreSourceOwnedType { path: "Core/data/data.jet", name: "DataLimits" },
     CoreSourceOwnedType { path: "Core/encoding/json.jet", name: "JSONReader" },
     CoreSourceOwnedType { path: "Core/encoding/jsonl.jet", name: "JSONLReader" },
     CoreSourceOwnedType { path: "Core/game/raylib.jet", name: "RaylibSound" },

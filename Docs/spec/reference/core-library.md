@@ -2646,6 +2646,14 @@ authority, freshness, invalidation, and an optional last-good snapshot;
 operation, location, reason, and optional cause rather than silently falling
 back to another provider.
 
+The data error, summary, limit, and status declarations are source-owned Jet
+values rather than native nominal substitutes. `DataError` displays its kind
+and operation, then any row, column, and index in that order, followed by the
+reason; its optional cause is retained but not included in that text.
+`DataWatchStatus` exposes the complete retained status record in a stable field
+order. `DataTree` remains the existing native nominal and ordered-object
+carrier; source-owned data policy does not introduce a second tree algebra.
+
 ```jet
 use core.data as data
 

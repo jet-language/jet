@@ -25,7 +25,7 @@ module plot
 
 module sketch
 
-#Equatable
+#[Copy, Comparable, Hashable, Equatable]
 pub enum DataFormat {
     CSV
     JSON
@@ -35,6 +35,7 @@ pub enum DataFormat {
 }
 
 
+#Equatable
 pub enum DataErrorKind {
     Decode
     Limit
@@ -51,9 +52,35 @@ pub enum DataErrorKind {
     WrongOwner
     StaleRevision
     InvalidValue
+    impl Display {
+        fn display(self) -> String Never! { data_error_kind_text(self) }
+    }
+    impl Debug {
+        fn debug(self) -> String Never! { data_error_kind_text(self) }
+    }
 }
 
-#Error
+fn data_error_kind_text(kind: DataErrorKind) -> String Never! {
+    if kind == {
+        .Decode -> "Decode"
+        .Limit -> "Limit"
+        .IO -> "IO"
+        .Empty -> "Empty"
+        .InvalidArgument -> "InvalidArgument"
+        .NonFinite -> "NonFinite"
+        .Overflow -> "Overflow"
+        .State -> "State"
+        .Bridge -> "Bridge"
+        .Unsupported -> "Unsupported"
+        .DuplicateKey -> "DuplicateKey"
+        .MissingKey -> "MissingKey"
+        .WrongOwner -> "WrongOwner"
+        .StaleRevision -> "StaleRevision"
+        .InvalidValue -> "InvalidValue"
+    }
+}
+
+#[Equatable, Error]
 pub struct DataError {
     pub kind: DataErrorKind
     pub operation: String
@@ -62,6 +89,12 @@ pub struct DataError {
     pub index: Int?
     pub reason: String
     pub cause: EncodingError?
+    impl Display {
+        fn display(self) -> String Never! { data_error_text(self) }
+    }
+    impl Debug {
+        fn debug(self) -> String Never! { data_error_text(self) }
+    }
 }
 
 impl DataError {
@@ -87,6 +120,14 @@ fn data_error(kind: DataErrorKind, message: String, operation: String) -> DataEr
         reason: message,
         cause: None,
     }
+}
+
+fn data_error_text(error: DataError) -> String Never! {
+    text := "{data_error_kind_text(error.kind)} {error.operation}"
+    if error.row == .Val(row) -> text = "{text}, row {row}"
+    if error.column == .Val(column) -> text = "{text}, column {column}"
+    if error.index == .Val(index) -> text = "{text}, index {index}"
+    "{text}: {error.reason}"
 }
 
 fn data_error_at(kind: DataErrorKind, message: String, operation: String, index: Int) -> DataError Never! {
@@ -119,6 +160,7 @@ pub struct DataLineOptions {
 }
 
 
+#[Copy, Comparable]
 pub enum DataFreshness {
     Pending
     Fresh
@@ -127,7 +169,7 @@ pub enum DataFreshness {
     Offline
     Cancelled
 }
-#Equatable
+#[Copy, Comparable, Equatable]
 pub enum DataInvalidationCause {
     NoCause
     Loader
@@ -140,6 +182,7 @@ pub enum DataInvalidationCause {
 }
 
 
+#Equatable
 pub struct DataStatus {
     pub step: String
     pub path: String
@@ -151,6 +194,7 @@ pub struct DataStatus {
 }
 
 
+#Equatable
 pub struct DataLimits {
     pub encoding: EncodingLimits
     pub max_groups: Int
@@ -222,6 +266,7 @@ pub struct DataLoader<T> {
     pub status: DataLoaderStatus
 }
 
+#Comparable
 pub struct DataLoaderStatus {
     pub identity: String
     pub freshness: DataFreshness
@@ -233,6 +278,7 @@ pub struct DataLoaderStatus {
     pub last_good: Bool
 }
 
+#Equatable
 pub struct DataWatchStatus {
     pub mode: String
     pub revision: Int
@@ -246,6 +292,16 @@ pub struct DataWatchStatus {
     pub invalidation_cause: String
     pub refreshing: Bool
     pub cancelled: Bool
+    impl Display {
+        fn display(self) -> String Never! { data_watch_status_text(self) }
+    }
+    impl Debug {
+        fn debug(self) -> String Never! { data_watch_status_text(self) }
+    }
+}
+
+fn data_watch_status_text(status: DataWatchStatus) -> String Never! {
+    "DataWatchStatus{{mode: {status.mode}, revision: {status.revision}, retained_rows: {status.retained_rows}, recomputations: {status.recomputations}, active: {status.active}, generation: {status.generation}, dirty: {status.dirty}, error: {status.error}, freshness_ms: {status.freshness_ms}, invalidation_cause: {status.invalidation_cause}, refreshing: {status.refreshing}, cancelled: {status.cancelled}}}"
 }
 
 pub struct DataStream<T> {
@@ -264,6 +320,7 @@ pub struct DataPivotCell {
     pub sum: Float
     pub mean: Float
 }
+#Equatable
 pub struct DataSummary {
     pub count: Int
     pub sum: Float
@@ -1581,4 +1638,15 @@ fn upper(text: String) -> String Never! {
         if n >= 97 && n <= 122 -> &out.push(U8{n - 32}) else -> &out.push(b)
     }
     String.from_bytes(out) ?? ""
+}
+
+#Test("DataError preserves native diagnostic order without displaying cause") {
+    error :: DataError{kind: .InvalidArgument, operation: "data.query", row: Val(2), column: Val(3), index: Val(4), reason: "bad column", cause: None}
+    assert(data_error_text(error) == "InvalidArgument data.query, row 2, column 3, index 4: bad column")
+    assert(data_error_text(DataError.new(.Empty, "no rows", "describe")) == "Empty describe: no rows")
+}
+
+#Test("DataWatchStatus preserves all native status fields in display order") {
+    status :: DataWatchStatus{mode: "maintained", revision: 2, retained_rows: 3, recomputations: 4, active: true, generation: 5, dirty: false, error: "", freshness_ms: 6, invalidation_cause: "input", refreshing: false, cancelled: false}
+    assert(data_watch_status_text(status) == "DataWatchStatus{{mode: maintained, revision: 2, retained_rows: 3, recomputations: 4, active: true, generation: 5, dirty: false, error: , freshness_ms: 6, invalidation_cause: input, refreshing: false, cancelled: false}}")
 }
