@@ -2,6 +2,8 @@
 // root/targets/snapshot/timestamp documents, the offline keyring, the
 // persistent trusted-root bootstrap pin, and the publication-safe public
 // trust keys.
+// Public-manifest encoding uses the existing InvalidPublisher error channel;
+// a serialization failure never hands partial JSON to the publisher.
 
 pub enum MetadataRole {
     Root
@@ -278,7 +280,8 @@ pub fn trust_public_trust_manifest(domain: String, bootstrap: RootBootstrap?, ke
     manifest["root"] = root
     manifest["keys"] = DataTree.Array(rendered)
     manifest["rotation"] = DataTree.Text("offline threshold root rotation; publish a new manifest only after the old root verifies the new root")
-    Ok("{json.to_string(DataTree.Object(manifest))}\n")
+    text :: json.to_string(DataTree.Object(manifest)) ?? return Err(TrustRootError.InvalidPublisher{detail: err.reason})
+    Ok("{text}\n")
 }
 
 // Rust `str::parse::<u64>`: ASCII digits only, no sign.
