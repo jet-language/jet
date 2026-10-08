@@ -50,6 +50,10 @@ The Rust verification tier single-homes filesystem syscall tails in
 fault probes and call those tails; Jet entry points can perform the same
 preflight once before the raw call. Temporary and lock results still own the
 native cleanup resource, rather than substituting a path-only record.
+The same direct-boundary rule applies to the held reader, directory, xattr,
+writer-stat and lock operations: canonical private names select the existing
+host kernels without source pass-through facades. Path permission and ownership
+policy uses the compile-target OS family, not a duplicate platform detector.
 
 Types and error enums use PascalCase (`String`, `IOError`, `JSON`); functions
 and module segments use snake_case (`read`, `core.files`) (S54). Acronyms keep
