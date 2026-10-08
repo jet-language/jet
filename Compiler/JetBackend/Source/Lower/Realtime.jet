@@ -53,9 +53,11 @@ fn lower_realtime_start(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
     // pointer; it never compares identity with the runtime worker's export.
     worker_ty :: mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref("Unit"), args: [MIRType]{}})
     worker :: lower_lazy_helper_address(&m, &f, "realtime.worker", worker_ty)
-    skip :: lower_const(&f, 0)
+    // ABI skipped_word: zero selects the stream's preallocated internal skip
+    // signal; no caller-owned Atomic<Bool> is borrowed by this producer.
+    skipped_word :: lower_const(&f, 0)
     dst :: lower_result(p, c, &m, &f, instruction) ?? lower_new_value(&f, lir_layout_pointer(), LIRDrop.Runtime{symbol: "jet_rt_handle_drop_JetRealtimeStream"}, result_ty.identity)
-    lower_call_runtime(&m, &f, "jet_rt_native_realtime_start", [LIRValueID]{rate, frames, env, invoke, release, worker, skip}, Val(dst))
+    lower_call_runtime(&m, &f, "jet_rt_native_realtime_start", [LIRValueID]{rate, frames, env, invoke, release, worker, skipped_word}, Val(dst))
     // The runtime owns env even on validation/spawn failure and releases it
     // exactly once. Never release it here or clone/drop the borrowed inputs.
     if instruction.result == None -> lower_emit(&f, LIRInst.Drop{value: dst})
@@ -65,10 +67,7 @@ fn lower_helper_realtime_invoke(p: MIRProgram, m: &LowerModule, glue: LowerGlue)
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), lir_layout_pointer()}, None)
     env :: ~f.open_params[0]
     buffer :: ~f.open_params[1]
-    code :: lower_pointer(&f)
-    lower_emit(&f, LIRInst.Load{dst: code, base: env, offset: 8})
-    signature :: lower_signature(&m, [LIRLayout]{lir_layout_pointer(), lir_layout_pointer()}, None)
-    lower_emit(&f, LIRInst.Call{dst: None, signature: signature, callee: LIRCallee.Value{value: code}, args: [LIRValueID]{env, buffer}})
+    lower_call_closure_box(p, &m, &f, env, [LIRValueID]{buffer}, mir_type_from_kind(MIRTypeKind.Unit)).drop("Realtime callbacks return Unit")
     lower_seal(&f, LIRTerminator.Return{value: None})
     lir_builder_finish(f.builder)
 }
