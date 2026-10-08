@@ -545,6 +545,13 @@ and fails rather than silently skipping a Jet-owned route whose ABI cannot
 be derived. Exact `Int`, typed `String`, write borrows, failures, and mismatched
 parameter/result widths are not raw route signatures. `--check` validates
 ownership and signatures as well as generated-file freshness.
+`--native-list-only` instead emits the same native-pack descriptor partition
+as JSON and writes neither generated file. It includes SHA-256 provenance for
+the emitted runtime, generator, provider manifest, and admitted source files.
+This inventory is not a layout declaration: Lower still requires the actual
+checked MIR declaration and surviving import before exporting a typed helper.
+Combining an emitted seed with held source/provider changes must be labelled
+as an uncomposed inventory, not native execution or retirement evidence.
 The raw tagged-Int destructor `jet_rt_int_drop` receives metadata only once
 the Int layer owns that export in `exports.list`: one Word parameter, Unit
 result, and no generated Rust body. Earlier runtime epochs have no such row.
