@@ -391,6 +391,51 @@ pub(crate) fn jit_env_snapshot_raw() -> JitEnvEntries {
     jit_env_read().clone()
 }
 
+// Canonical column transport: one locked logical snapshot, not indexed rereads.
+pub(crate) fn jet_sys_env_columns_raw() -> Vec<Vec<u8>> {
+    jit_env_snapshot_raw()
+        .into_iter()
+        .flat_map(|(name, value)| [name.into_encoded_bytes(), value.into_encoded_bytes()])
+        .collect()
+}
+
+// Match FSIoEnvOsTesting.rs's immutable host bootstrap, separate from the
+// mutable logical table. Source owns entry pairing and environment policy.
+pub(crate) fn jet_sys_startup_env_columns_raw() -> Vec<Vec<u8>> {
+    static STARTUP: std::sync::OnceLock<Vec<Vec<u8>>> = std::sync::OnceLock::new();
+    STARTUP
+        .get_or_init(|| {
+            std::env::vars_os()
+                .flat_map(|(name, value)| [name.into_encoded_bytes(), value.into_encoded_bytes()])
+                .collect()
+        })
+        .clone()
+}
+
+// JET_VETTED_UNSAFE_BEGIN: jit_env_windows
+#[cfg(windows)]
+pub(crate) fn jet_sys_env_key_compare_raw(left: &Vec<u8>, right: &Vec<u8>) -> i64 {
+    // SAFETY: source passes complete valid Unicode names or unmodified
+    // platform OsString encoded bytes, exactly like the AOT comparison leaf.
+    let left = unsafe { std::ffi::OsStr::from_encoded_bytes_unchecked(left) };
+    let right = unsafe { std::ffi::OsStr::from_encoded_bytes_unchecked(right) };
+    match jit_env_key_cmp(left, right) {
+        std::cmp::Ordering::Less => -1,
+        std::cmp::Ordering::Equal => 0,
+        std::cmp::Ordering::Greater => 1,
+    }
+}
+// JET_VETTED_UNSAFE_END: jit_env_windows
+
+#[cfg(not(windows))]
+pub(crate) fn jet_sys_env_key_compare_raw(left: &Vec<u8>, right: &Vec<u8>) -> i64 {
+    match left.cmp(right) {
+        std::cmp::Ordering::Less => -1,
+        std::cmp::Ordering::Equal => 0,
+        std::cmp::Ordering::Greater => 1,
+    }
+}
+
 // #2003 / D-ENV-MUTATE1: one raw-by-name read over Jet's logical environment
 // table, for every in-process engine. The resident JIT host (`IO.rs`), the
 // `core.sys` shims above, the extern "C" heap-ABI shims below and the

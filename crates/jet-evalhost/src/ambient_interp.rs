@@ -2028,12 +2028,11 @@ fn sys_env_ambient_core_call(
     }
     let failed = |message: &str| CtValue::failed(Box::new(CtValue::Str(message.to_string())));
     match (method, args.as_slice()) {
-        ("__startup_env_count", []) => Some(Ok(sys_exact(crate::CoreHost::jet_sys_startup_env_count_raw()))),
-        ("__startup_env_name", [CtValue::Int(index)]) => Some(Ok(CtValue::Bytes(
-            crate::CoreHost::jet_sys_startup_env_name_raw(*index),
+        ("__startup_env_columns", []) => Some(Ok(CtValue::List(
+            crate::CoreHost::jet_sys_startup_env_columns_raw().into_iter().map(CtValue::Bytes).collect(),
         ))),
-        ("__startup_env_value", [CtValue::Int(index)]) => Some(Ok(CtValue::Bytes(
-            crate::CoreHost::jet_sys_startup_env_value_raw(*index),
+        ("__env_columns", []) => Some(Ok(CtValue::List(
+            crate::CoreHost::jet_sys_env_columns_raw().into_iter().map(CtValue::Bytes).collect(),
         ))),
         ("__env_key_compare", [CtValue::Bytes(left), CtValue::Bytes(right)]) => Some(Ok(sys_exact(
             crate::CoreHost::jet_sys_env_key_compare_raw(left, right),
