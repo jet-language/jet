@@ -40,7 +40,9 @@ fn jet_codegen_cost_expr(value: TExpr, function: String, depth: Int, sites: &[TC
             jet_codegen_cost_expr(inner, function, depth, &sites, true, Val(TCostState.OptimizerRemoved))
             if fallback == {
                 .Value(value) | .Panic(value, _) -> jet_codegen_cost_expr(value, function, depth, &sites)
-                .Return(value) -> if value == .Val(nested) -> jet_codegen_cost_expr(nested, function, depth, &sites)
+                .Return(value) -> {
+                    if value == .Val(nested) -> jet_codegen_cost_expr(nested, function, depth, &sites)
+                }
                 else -> {}
             }
             return
@@ -63,7 +65,9 @@ fn jet_codegen_cost_expr(value: TExpr, function: String, depth: Int, sites: &[TC
         }
         .FnValue(kind) -> {
             if kind == {
-                .NamedFn(_, lambda) -> if lambda == .Val(executable) -> jet_codegen_cost_lambda(executable, function, depth, &sites)
+                .NamedFn(_, lambda) -> {
+                    if lambda == .Val(executable) -> jet_codegen_cost_lambda(executable, function, depth, &sites)
+                }
                 .Policy(_, args, _, _, _, callee) | .Call(callee, args) -> {
                     jet_codegen_cost_expr(callee, function, depth, &sites)
                     loop argument in args -> jet_codegen_cost_expr(argument.value, function, depth, &sites)
@@ -72,8 +76,14 @@ fn jet_codegen_cost_expr(value: TExpr, function: String, depth: Int, sites: &[TC
             }
             return
         }
-        .InlineBlock(body) -> { jet_codegen_cost_stmts(body, function, depth, &sites); return }
-        .Lambda(lambda) | .LambdaValue(lambda) -> { jet_codegen_cost_lambda(lambda, function, depth, &sites); return }
+        .InlineBlock(body) -> {
+            jet_codegen_cost_stmts(body, function, depth, &sites)
+            return
+        }
+        .Lambda(lambda) | .LambdaValue(lambda) -> {
+            jet_codegen_cost_lambda(lambda, function, depth, &sites)
+            return
+        }
         .IfExpr(condition, left, left_value, right, right_value) -> {
             jet_codegen_cost_condition(condition, function, depth, &sites)
             jet_codegen_cost_stmts(left, function, depth, &sites)
@@ -99,48 +109,53 @@ fn jet_codegen_cost_expr(value: TExpr, function: String, depth: Int, sites: &[TC
             jet_codegen_cost_lambda(predicate, function, depth, &sites)
             return
         }
-        .CoreClosureCall(kind) -> { jet_codegen_cost_core_closure(kind, function, depth, &sites); return }
-        .HostCall(call) -> if call == {
-            .Helper(_, _, args) -> {
-                loop argument in args {
-                    if argument == {
-                        .Expr(child) | .Borrow(child) -> jet_codegen_cost_expr(child, function, depth, &sites)
-                        .Lambda(lambda) -> jet_codegen_cost_lambda(lambda, function, depth, &sites)
+        .CoreClosureCall(kind) -> {
+            jet_codegen_cost_core_closure(kind, function, depth, &sites)
+            return
+        }
+        .HostCall(call) -> {
+            if call == {
+                .Helper(_, _, args) -> {
+                    loop argument in args {
+                        if argument == {
+                            .Expr(child) | .Borrow(child) -> jet_codegen_cost_expr(child, function, depth, &sites)
+                            .Lambda(lambda) -> jet_codegen_cost_lambda(lambda, function, depth, &sites)
+                        }
                     }
+                    return
                 }
-                return
+                .CarrierFact(inner, _, _) | .OptionProbe(inner, _) -> {
+                    jet_codegen_cost_expr(inner, function, depth, &sites, true)
+                    return
+                }
+                .CCallback(_, lambda, _, _, _, _) -> jet_codegen_cost_lambda(lambda, function, depth, &sites)
+                .Method(receiver, _, args) -> {
+                    jet_codegen_cost_expr(receiver, function, depth, &sites)
+                    loop child in args -> jet_codegen_cost_expr(child, function, depth, &sites)
+                }
+                .CellGuardProject(child, _, _, _, _) | .TypedText(_, child) | .TupleIndex(child, _)
+                | .StrMatchScan(child, _, _) | .BinMatchScan(child, _, _) | .YieldSend(child)
+                | .ExpectSnapshot(child, _) -> jet_codegen_cost_expr(child, function, depth, &sites)
+                .FixedListIndex(base, index, _) -> {
+                    jet_codegen_cost_expr(base, function, depth, &sites)
+                    jet_codegen_cost_expr(index, function, depth, &sites)
+                }
+                .GCEdit(_, _, _, edit, index, _) -> {
+                    jet_codegen_cost_expr(edit, function, depth, &sites)
+                    if index == .Val(child) -> jet_codegen_cost_expr(child, function, depth, &sites)
+                }
+                .TypedTextInterp(_, _, holes, _) -> loop child in holes -> jet_codegen_cost_expr(child, function, depth, &sites)
+                .EnvSet(name, child, _) -> {
+                    jet_codegen_cost_expr(name, function, depth, &sites)
+                    jet_codegen_cost_expr(child, function, depth, &sites)
+                }
+                .ExpiringSecretNew(child, duration, clock, _) | .ExpiringValueNew(child, duration, clock) -> {
+                    jet_codegen_cost_expr(child, function, depth, &sites)
+                    jet_codegen_cost_expr(duration, function, depth, &sites)
+                    jet_codegen_cost_expr(clock, function, depth, &sites)
+                }
+                else -> {}
             }
-            .CarrierFact(inner, _, _) | .OptionProbe(inner, _) -> {
-                jet_codegen_cost_expr(inner, function, depth, &sites, true)
-                return
-            }
-            .CCallback(_, lambda, _, _, _, _) -> jet_codegen_cost_lambda(lambda, function, depth, &sites)
-            .Method(receiver, _, args) -> {
-                jet_codegen_cost_expr(receiver, function, depth, &sites)
-                loop child in args -> jet_codegen_cost_expr(child, function, depth, &sites)
-            }
-            .CellGuardProject(child, _, _, _, _) | .TypedText(_, child) | .TupleIndex(child, _)
-            | .StrMatchScan(child, _, _) | .BinMatchScan(child, _, _) | .YieldSend(child)
-            | .ExpectSnapshot(child, _) -> jet_codegen_cost_expr(child, function, depth, &sites)
-            .FixedListIndex(base, index, _) -> {
-                jet_codegen_cost_expr(base, function, depth, &sites)
-                jet_codegen_cost_expr(index, function, depth, &sites)
-            }
-            .GCEdit(_, _, _, edit, index, _) -> {
-                jet_codegen_cost_expr(edit, function, depth, &sites)
-                if index == .Val(child) -> jet_codegen_cost_expr(child, function, depth, &sites)
-            }
-            .TypedTextInterp(_, _, holes, _) -> loop child in holes -> jet_codegen_cost_expr(child, function, depth, &sites)
-            .EnvSet(name, child, _) -> {
-                jet_codegen_cost_expr(name, function, depth, &sites)
-                jet_codegen_cost_expr(child, function, depth, &sites)
-            }
-            .ExpiringSecretNew(child, duration, clock, _) | .ExpiringValueNew(child, duration, clock) -> {
-                jet_codegen_cost_expr(child, function, depth, &sites)
-                jet_codegen_cost_expr(duration, function, depth, &sites)
-                jet_codegen_cost_expr(clock, function, depth, &sites)
-            }
-            else -> {}
         }
         else -> {}
     }
