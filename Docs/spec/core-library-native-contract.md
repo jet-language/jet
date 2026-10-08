@@ -133,6 +133,15 @@ accepts an empty salt as RFC 5869's zero salt, and limits output to 255 hash
 blocks (8160 bytes). Aligned scratch is 672 bytes for HMAC and 744 for HKDF;
 key pads, intermediate digests, PRK, and expansion blocks are wiped on return.
 
+The vault recovery KDF uses Argon2id version 19 with the existing JVKW policy:
+65536 KiB, three passes, one lane, 32-byte result and 16-byte salt. Its internal
+RFC vector entry also carries optional secret/associated-data fields. Memory
+and 4800-byte scratch are caller-owned and wiped on return. The first half of
+the first pass uses data-independent addresses; later references are
+data-dependent as required by RFC 9106, not a constant-time substitution.
+Its BLAKE2b engine streams borrowed spans through one fixed 128-byte block
+buffer, avoiding a concatenated copy of the password and parameter fields.
+
 A high-level native implementation must not be retained as an invisible runtime
 fallback for a Jet implementation. If an API changes identity or semantics,
 make the change at the contract boundary and migrate its users in one cutover.
