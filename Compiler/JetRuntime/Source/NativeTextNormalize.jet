@@ -20,11 +20,11 @@ fn normal_buffer_push(buffer: I64, value: I64) {
     length :: rt_text_len(buffer)
     capacity :: rt_text_word(buffer + I64{16})
     if length == capacity {
-        if capacity > I64{576460752303423487} -> rt_text_capacity_stop()
-        grown :: if capacity == I64{0} -> I64{16} else -> capacity * I64{2}
+        if (capacity > I64{576460752303423487}) -> rt_text_capacity_stop()
+        grown :: if (capacity == I64{0}) -> I64{16} else -> capacity * I64{2}
         data :: jet_rt_alloc(grown * I64{8}, I64{8})
         rt_text_bytes_copy(data, rt_text_data(buffer), length * I64{8})
-        if capacity != I64{0} -> jet_rt_free(rt_text_data(buffer), capacity * I64{8}, I64{8})
+        if (capacity != I64{0}) -> jet_rt_free(rt_text_data(buffer), capacity * I64{8}, I64{8})
         rt_text_store(buffer, data)
         rt_text_store(buffer + I64{16}, grown)
     }
@@ -33,15 +33,15 @@ fn normal_buffer_push(buffer: I64, value: I64) {
 }
 fn normal_buffer_drop(buffer: I64) {
     capacity :: rt_text_word(buffer + I64{16})
-    if capacity != I64{0} -> jet_rt_free(rt_text_data(buffer), capacity * I64{8}, I64{8})
+    if (capacity != I64{0}) -> jet_rt_free(rt_text_data(buffer), capacity * I64{8}, I64{8})
     jet_rt_free(buffer, I64{24}, I64{8})
 }
 fn normal_decompose_cp(buffer: I64, cp: I64) {
     sindex :: cp - I64{44032}
-    if sindex >= I64{0} && sindex < I64{11172} {
+    if (sindex >= I64{0} && sindex < I64{11172}) {
         normal_buffer_push(buffer, I64{4352} + sindex /% I64{588})
         normal_buffer_push(buffer, I64{4449} + (sindex % I64{588}) /% I64{28})
-        if sindex % I64{28} != I64{0} -> normal_buffer_push(buffer, I64{4519} + sindex % I64{28})
+        if (sindex % I64{28} != I64{0}) -> normal_buffer_push(buffer, I64{4519} + sindex % I64{28})
         return
     }
     mapped :: unicode_canonical_mapping(cp)
@@ -51,7 +51,7 @@ fn normal_decompose_cp(buffer: I64, cp: I64) {
     }
     normal_decompose_cp(buffer, mapped & I64{2097151})
     second :: mapped >> I64{21}
-    if second != I64{0} -> normal_decompose_cp(buffer, second)
+    if (second != I64{0}) -> normal_decompose_cp(buffer, second)
 }
 // Scratch is allocated only for an unordered run, and reused for later runs.
 fn normal_canon_order(buffer: I64) {
@@ -60,7 +60,7 @@ fn normal_canon_order(buffer: I64) {
     at := I64{0}
     length :: rt_text_len(buffer)
     loop at < length {
-        if unicode_normal_ccc(normal_buffer_get(buffer, at)) == I64{0} {
+        if (unicode_normal_ccc(normal_buffer_get(buffer, at)) == I64{0}) {
             at += I64{1}
             next
         }
@@ -69,18 +69,18 @@ fn normal_canon_order(buffer: I64) {
         unordered := false
         loop at < length {
             class :: unicode_normal_ccc(normal_buffer_get(buffer, at))
-            if class == I64{0} -> break
+            if (class == I64{0}) -> break
             if previous > class -> unordered = true
             previous = class
             at += I64{1}
         }
         if !unordered -> next
-        if positions == I64{0} {
+        if (positions == I64{0}) {
             positions = jet_rt_alloc(I64{2048}, I64{8})
             scratch = normal_buffer_new()
         }
         class := I64{1}
-        loop class < I64{256} {
+        loop class < (I64{256}) {
             rt_text_store(positions + class * I64{8}, I64{0})
             class += I64{1}
         }
@@ -92,7 +92,7 @@ fn normal_canon_order(buffer: I64) {
         }
         offset := I64{0}
         class = I64{1}
-        loop class < I64{256} {
+        loop class < (I64{256}) {
             cell :: positions + class * I64{8}
             count :: rt_text_word(cell)
             rt_text_store(cell, offset)
@@ -114,7 +114,7 @@ fn normal_canon_order(buffer: I64) {
             i += I64{1}
         }
     }
-    if positions != I64{0} {
+    if (positions != I64{0}) {
         jet_rt_free(positions, I64{2048}, I64{8})
         normal_buffer_drop(scratch)
     }
@@ -122,12 +122,12 @@ fn normal_canon_order(buffer: I64) {
 fn normal_compose_pair(a: I64, b: I64) -> I64 {
     lindex :: a - I64{4352}
     vindex :: b - I64{4449}
-    if lindex >= I64{0} && lindex < I64{19} && vindex >= I64{0} && vindex < I64{21} {
+    if (lindex >= I64{0} && lindex < I64{19} && vindex >= I64{0} && vindex < I64{21}) {
         return I64{44032} + (lindex * I64{21} + vindex) * I64{28}
     }
     sindex :: a - I64{44032}
     tindex :: b - I64{4519}
-    if sindex >= I64{0} && sindex < I64{11172} && sindex % I64{28} == I64{0} && tindex > I64{0} && tindex < I64{28} {
+    if (sindex >= I64{0} && sindex < I64{11172} && sindex % I64{28} == I64{0} && tindex > I64{0} && tindex < I64{28}) {
         return a + tindex
     }
     unicode_normal_compose(a, b)
@@ -141,15 +141,15 @@ fn normal_compose(buffer: I64) -> I64 {
         cp :: normal_buffer_get(buffer, i)
         class :: unicode_normal_ccc(cp)
         i += I64{1}
-        if starter >= I64{0} && last_class < class {
+        if (starter >= I64{0} && last_class < class) {
             combined :: normal_compose_pair(normal_buffer_get(buffer, starter), cp)
-            if combined >= I64{0} {
+            if (combined >= I64{0}) {
                 normal_buffer_set(buffer, starter, combined)
                 next
             }
         }
         normal_buffer_set(buffer, length, cp)
-        if class == I64{0} {
+        if (class == I64{0}) {
             starter = length
             last_class = I64{-1}
         } else {
@@ -163,7 +163,7 @@ fn native_text_normalize_nfc(value: I64) -> I64 {
     data :: rt_text_data(value)
     bytes :: rt_text_len(value)
     at := I64{0}
-    loop at < bytes && rt_text_byte(data + at) < I64{128} -> at += I64{1}
+    loop at < bytes && rt_text_byte(data + at) < (I64{128}) -> at += I64{1}
     if at == bytes -> return jet_rt_string_clone(value)
     buffer :: normal_buffer_new()
     at = I64{0}
@@ -178,12 +178,12 @@ fn native_text_normalize_nfc(value: I64) -> I64 {
     loop at < length {
         cp :: normal_buffer_get(buffer, at)
         width :: if {
-            cp < I64{128} -> I64{1}
-            cp < I64{2048} -> I64{2}
-            cp < I64{65536} -> I64{3}
+            (cp < I64{128}) -> I64{1}
+            (cp < I64{2048}) -> I64{2}
+            (cp < I64{65536}) -> I64{3}
             else -> I64{4}
         }
-        if output_bytes > I64{9223372036854775807} - width -> rt_text_capacity_stop()
+        if (output_bytes > I64{9223372036854775807} - width) -> rt_text_capacity_stop()
         output_bytes += width
         at += I64{1}
     }
