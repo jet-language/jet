@@ -1333,7 +1333,55 @@ fn web_fixed_sig(
 }
 
 
+// S73: synthesized registry types obey the same tuple construction invariant
+// as parsed types, including tuples nested inside containers and failures.
+fn canonicalize_signature_tuples(ty: &mut Type) {
+    match ty {
+        Type::Tuple(fields) => {
+            for (_, field) in fields.iter_mut() {
+                canonicalize_signature_tuples(field);
+            }
+            *fields = crate::AST::canonicalize_tuple_fields(std::mem::take(fields));
+        }
+        Type::List(inner) | Type::Shared(inner) | Type::Option(inner)
+        | Type::Tagged { inner, .. } | Type::InlineRange { base: inner, .. }
+        | Type::Quantity { base: inner, .. } | Type::FixedList { elem: inner, .. } => {
+            canonicalize_signature_tuples(inner);
+        }
+        Type::Map { key, value, .. } => {
+            canonicalize_signature_tuples(key);
+            canonicalize_signature_tuples(value);
+        }
+        Type::Result { ok, err } => {
+            canonicalize_signature_tuples(ok);
+            canonicalize_signature_tuples(err);
+        }
+        Type::Apply { args, .. } | Type::Union(args) => {
+            for arg in args { canonicalize_signature_tuples(arg); }
+        }
+        Type::Fn { params, ret, .. } => {
+            for param in params { canonicalize_signature_tuples(param); }
+            if let Some(ret) = ret { canonicalize_signature_tuples(ret); }
+        }
+        Type::Int | Type::Float | Type::Bool | Type::String | Type::Char
+        | Type::Named(_) | Type::TraitObject(_) | Type::IntN { .. }
+        | Type::Float32 | Type::Measure(_) => {}
+    }
+}
+
 fn core_fixed_sig_impl(
+    module: &str,
+    name: &str,
+) -> Option<(Vec<(AccessConvention, Type)>, Option<Type>)> {
+    let (mut parameters, mut result) = core_fixed_sig_raw(module, name)?;
+    for (_, parameter) in &mut parameters {
+        canonicalize_signature_tuples(parameter);
+    }
+    if let Some(result) = &mut result { canonicalize_signature_tuples(result); }
+    Some((parameters, result))
+}
+
+fn core_fixed_sig_raw(
     module: &str,
     name: &str,
 ) -> Option<(Vec<(AccessConvention, Type)>, Option<Type>)> {
@@ -7949,6 +7997,22 @@ pub(crate) fn apply_core_call_defaults(
 mod tests {
     use super::{core_fixed_sig, result_ty};
     use crate::AST::Type;
+
+    #[test]
+    fn synthesized_named_tuples_use_canonical_field_order() {
+        let (_, line) = core_fixed_sig("core.term", "__terminal8_line").unwrap();
+        let Type::Tuple(fields) = line.unwrap() else { panic!("line tuple"); };
+        assert_eq!(fields.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>(),
+            ["cause", "eof", "line"]);
+        let (_, size) = core_fixed_sig("core.term", "__terminal8_stty").unwrap();
+        let Type::Option(inner) = size.unwrap() else { panic!("optional size"); };
+        let Type::Tuple(fields) = *inner else { panic!("nested size tuple"); };
+        assert_eq!(fields.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>(), ["h", "w"]);
+        let (_, failure) = core_fixed_sig("core.sys", "__dotenv_read").unwrap();
+        let Type::Result { err, .. } = failure.unwrap() else { panic!("fallible dotenv"); };
+        let Type::Tuple(fields) = *err else { panic!("tuple failure domain"); };
+        assert_eq!(fields.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>(), ["cause", "not_found"]);
+    }
 
     #[test]
     fn ui_host_result_signatures_are_structural_results() {
