@@ -716,6 +716,12 @@ fn jet_target_layout_type_inner(engine: TargetLayoutEngine, ty: Type, owner_qual
         .InlineRange(base, _, _) | .Tagged(_, base) | .Quantity(base, _) -> jet_target_layout_type_inner(engine, base, owner_qualified_name, &query)
         .Named(name) -> jet_target_layout_named_type(engine, name, [Type]{}, owner_qualified_name, &query)
         .Apply(name, args) -> {
+            // A raw pointer stores one selected-target address, independently
+            // of the pointee's physical or generic layout.
+            if name == "Ptr" {
+                if args.len() != 1 -> return None
+                return Val(ByteLayout{size: engine.target.pointer_size, alignment: engine.target.pointer_alignment, stride: engine.target.pointer_size})
+            }
             if jet_target_layout_is_atomic_name(name) -> return jet_target_layout_atomic_layout(engine, args)
             jet_target_layout_named_type(engine, name, args, owner_qualified_name, &query)
         }
@@ -939,4 +945,22 @@ fn jet_layout_align_up(value: Int, alignment: Int) -> Int? {
     effective :: if alignment < 1 -> 1 else -> alignment
     padding :: jet_layout_checked_add(value, effective - 1) ?? return None
     Val((padding /% effective) * effective)
+}
+
+#Test("raw pointer layout uses the selected target without pointee layout") {
+    loop triple in [String]{"x86_64-unknown-linux-gnu", "wasm32-unknown-unknown"} {
+        target :: jet_target_layout_from_triple(triple, "0.0.1")
+        engine :: jet_target_layout_engine([Item]{}, target)
+        pointer_size :: if triple.starts_with("wasm32-") -> 4 else -> 8
+        loop pointee in [Type]{Type.Int, Type.Named{name: "UnresolvedPointee"}} {
+            pointer :: Type.Apply{name: "Ptr", args: [Type]{pointee}}
+            layout :: jet_target_layout_type_facts(engine, pointer) ?? panic("raw pointer layout is missing")
+            assert(layout.size == pointer_size)
+            assert(layout.alignment == pointer_size)
+            assert(layout.stride == pointer_size)
+        }
+        loop args in [[Type]]{[Type]{}, [Type]{Type.Int, Type.Bool}} {
+            assert(jet_target_layout_type_facts(engine, Type.Apply{name: "Ptr", args: args}) == None)
+        }
+    }
 }
