@@ -135,15 +135,30 @@ fn fd_flush_locked(state: I64) -> I64 {
     fd_put(state, I64{48}, remaining)
     failure
 }
+// Read/dup have no separate WriteZero output. Preserve that flush failure as
+// the existing custom ErrorOut32 domain, never as invented POSIX errno 4096.
+fn fd_read_error(result: I64, error: I64) -> I64 {
+    if (result != HOST_WRITE_ZERO) { return fd_error(result, error) }
+    fd_put(error, I64{0}, I64{4})
+    fd_put(error, I64{8}, I64{0})
+    fd_put(error, I64{16}, HOST_IO_KIND_OTHER)
+    fd_put(error, I64{24}, host_write_zero_text())
+    I64{-1}
+}
+
 
 // A single mechanical read into caller-owned compact bytes. Source FileReader
 // owns buffering/retry; EINTR is a real POSIX ErrorOut32 code4, not swallowed.
 #Export(c) fn jet_fd_read_raw(state: I64, bytes: I64, length: I64, error: I64) -> I64 {
     requested :: host_native_int(length)
     fd_lock(state)
-    result :: if (fd_word(state, I64{16}) != I64{0}) -> I64{-9} else -> host_call(I64{0}, fd_word(state, I64{8}), bytes, requested)
+    result := fd_flush_locked(state)
+    if (result == I64{0}) {
+        // A writer's filled bytes are pending output, never readable input.
+        result = host_call(I64{0}, fd_word(state, I64{8}), bytes, requested)
+    }
     fd_unlock(state)
-    fd_error(result, error)
+    fd_read_error(result, error)
 }
 
 #Export(c) fn jet_fd_write_raw(state: I64, bytes: I64, length: I64, errno: I64, zero: I64) -> I64 {
@@ -151,6 +166,13 @@ fn fd_flush_locked(state: I64) -> I64 {
     fd_lock(state)
     result := I64{-9}
     if (fd_word(state, I64{16}) == I64{0}) {
+        if (fd_word(state, I64{40}) >= I64{0}) {
+            // A retained reader alias cannot overwrite shared refill bytes.
+            result = host_call(I64{1}, fd_word(state, I64{8}), bytes, requested)
+            fd_unlock(state)
+            fd_zero(result, zero)
+            return fd_error(result, errno)
+        }
         filled :: fd_word(state, I64{48})
         result = I64{0}
         if (requested > wrapping(I64{8192} - filled)) { result = fd_flush_locked(state) }
@@ -293,12 +315,19 @@ fn fd_operation(state: I64, syscall: I64, a2: I64, a3: I64, errno: I64) {
     jet_rt_free(state, I64{72}, I64{8})
 }
 
+// Historical FileHandles.rs (958047768^, JetStd/FileHandles.rs) owns plain
+// std::fs::File in JetFsHeld, not a buffered writer. Its descriptor duplicates
+// therefore see every preceding write. Flush our private buffer before dup
+// to preserve that visibility; the new state never copies pending bytes.
 #Export(c) fn jet_fd_dup_raw(state: I64, errno: I64) -> I64 {
     fd_lock(state)
-    result :: if (fd_word(state, I64{16}) != I64{0}) -> I64{-9} else -> host_call(I64{72}, fd_word(state, I64{8}), I64{1030}, I64{3})
+    result := fd_flush_locked(state)
+    if (result == I64{0}) {
+        result = host_call(I64{72}, fd_word(state, I64{8}), I64{1030}, I64{3})
+    }
     duplicate :: if (result < I64{0}) -> I64{0} else -> fd_new(result, fd_word(state, I64{24}), fd_word(state, I64{40}) < I64{0})
     fd_unlock(state)
-    _ := fd_error(result, errno)
+    _ := fd_read_error(result, errno)
     duplicate
 }
 
@@ -411,6 +440,9 @@ fn fd_dup_number(state: I64) -> I64 {
     result
 }
 
+// link(2): AT_EMPTY_PATH requires CAP_DAC_READ_SEARCH (otherwise ENOENT).
+// Historical FileHandles.rs::jet_fs_link_fd_at_raw passes 0x1000 once and
+// returns errno, with no /proc/self/fd + AT_SYMLINK_FOLLOW fallback. Match it.
 #Export(c) fn jet_fd_link_at_raw(source: I64, directory: I64, path: I64, errno: I64) {
     a :: fd_dup_number(source)
     if (a < I64{0}) {

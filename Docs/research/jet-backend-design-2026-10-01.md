@@ -1948,10 +1948,20 @@ source inode or substitute an ambient pathname.
 
 Core owns validation, fault injection and IOError construction. Private leaves
 report ErrorOut32 (domain/stage U32, code I64, kind/pad U32, owned E4 message)
-and a separate WriteZero fact. Linux errors have POSIX domain 1 and zero
-kind/message. File reads are a single mechanical syscall into caller-owned
-compact bytes: no runtime buffering, retry or allocation; source FileReader
-owns those policies and preserves Interrupted. The six-argument process launch
+and a separate WriteZero fact on write/flush/seek/close. Linux syscall errors
+have POSIX domain 1 and zero kind/message. Read and descriptor dup first flush
+pending writer bytes; their flush WriteZero error uses custom domain 4, Other
+kind and the owned canonical cause because those ABIs have no Bool output.
+Reads then make a single kernel read into caller-owned compact bytes, never
+consume the write buffer, and preserve Interrupted. A dup owns a fresh empty
+buffer and sees the flushed shared kernel offset. Historical
+`958047768^:crates/jet-codegen/src/Prelude/CoreLib/JetStd/FileHandles.rs`
+owns unbuffered `std::fs::File` descriptors, so private native buffering must
+not hide preceding writes from either operation. Its `jet_fs_link_fd_at_raw`
+calls AT_EMPTY_PATH once with no pathname or `/proc/self/fd` fallback.
+Linux [link(2)](https://man7.org/linux/man-pages/man2/link.2.html) requires
+CAP_DAC_READ_SEARCH for that flag and reports ENOENT without it; the transport
+returns that fact unchanged. The six-argument process launch
 borrows ExecCandidates32 (count, NUL candidate column, script-fallback bit,
 searched bit) and Core-prepared argv and effective environment bytes. This
 preserves non-Unicode PATH entries without an independent environment. Source
@@ -2027,6 +2037,14 @@ includes LF, preserves malformed UTF-8 and bare CR, and retries Interrupted
 as `BufRead::read_until` does. Checked Core `__stdout_next_line` and
 `__stderr_next_line` own empty-byte EOF, UTF-8 decoding and the one-LF/one-CR
 terminator policy. No fixed host next-line iterator substitutes for them.
+
+When TAKE supplies a writer-mode FD72, the first buffered read flushes pending
+output under the FD lock before converting its buffer to reader refill mode
+and resetting both cursors. Flush failures leave the writer suffix intact and
+return through the fallible read edge (TAKE itself has no error result).
+Writes through retained reader-mode aliases bypass refill storage and use a
+kernel write, so they cannot corrupt unread lines and a pipe read-end write
+returns EBADF.
 
 A conflicting mutable borrow panics with `RefCell already borrowed`, matching
 the seed's observed rustc 1.97.1 commit `8bab26f4f` and that commit's
