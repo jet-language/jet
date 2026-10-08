@@ -3618,6 +3618,14 @@ pub fn encoding_handle_method_return(
     }
 }
 
+// Literal visibility is data projected into the Jet record rows. Field reads
+// remain public; these failure carriers are constructed only by vetted Core.
+pub(crate) const CORE_ONLY_RECORD_LITERALS: &[&str] = &["TextError", "RangeError"];
+
+pub(crate) fn core_record_literal_is_core_only(name: &str) -> bool {
+    CORE_ONLY_RECORD_LITERALS.contains(&name)
+}
+
 /// E2-M10: field definitions for compiler-known constructable struct types.
 /// Returns `Some(fields)` when the named type is a prelude struct users can construct.
 pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, Type)>> {
