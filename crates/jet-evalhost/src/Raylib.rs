@@ -27,6 +27,24 @@ fn jet_raylib_ambient_core_call(
         jet_foundation::Diagnostics::Diagnostic,
     >,
 > {
+    let method = match (module, method) {
+        ("core.game.raylib", "__window_open") => "window_open",
+        ("core.game.raylib", "__window_should_close") => "window_should_close",
+        ("core.game.raylib", "__window_ready") => "window_ready",
+        ("core.game.raylib", "__begin_drawing") => "begin_drawing",
+        ("core.game.raylib", "__clear_background") => "clear_background",
+        ("core.game.raylib", "__draw_text") => "draw_text",
+        ("core.game.raylib", "__draw_rectangle") => "draw_rectangle",
+        ("core.game.raylib", "__end_drawing") => "end_drawing",
+        ("core.game.raylib", "__close_window") => "close_window",
+        ("core.game.raylib", "__key_down") => "key_down",
+        ("core.game.raylib", "__set_target_fps") => "set_target_fps",
+        ("core.game.raylib", "__gamepad_down") => "gamepad_down",
+        ("core.game.raylib", "__gamepad_axis") => "gamepad_axis",
+        ("core.game.raylib", "__load_texture_atlas") => "load_texture_atlas",
+        ("core.game.raylib", "__draw_sprite") => "draw_sprite",
+        _ => method,
+    };
     jet_codegen::Comptime::apply_raylib_ambient_core_call(
         module,
         method,
