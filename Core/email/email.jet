@@ -1,5 +1,5 @@
 // SMTP defaults and environment configuration are Core policy, not host policy.
-// Transport and message construction retain the registered provider boundary.
+// Transport and private message carriers retain the registered provider boundary.
 use core as core
 use core.sys as sys
 use core.crypto.[Secret]
@@ -194,7 +194,9 @@ pub fn smtp_from_env() -[Env, Net]> Mailer EmailError! {
     // Eleven complete quartets decode to 33 bytes before the invalid tail.
     encoded :: Secret.from_text("AAAA".repeat(11) + "AAA?")
     decoded :: decode_dkim(encoded)
-    assert(decoded == .Err(EmailError.Configuration{operation: "smtp_from_env", server: None, code: None, reason: "SMTP_DKIM_PRIVATE_KEY_BASE64 must be valid base64"}))
+    if decoded == .Err(error) {
+        assert_eq(error, EmailError.Configuration{operation: "smtp_from_env", server: None, code: None, reason: "SMTP_DKIM_PRIVATE_KEY_BASE64 must be valid base64"})
+    } else { panic("invalid quartet must be refused") }
 }
 
 #Test("SMTP port grammar retains signed-i64 parsing boundaries") {
@@ -206,4 +208,247 @@ pub fn smtp_from_env() -[Env, Net]> Mailer EmailError! {
     }
     assert_eq(ascii_lower("STARTTLS"), "starttls")
     assert_eq(ascii_lower("TLSÉ"), "tlsÉ")
+}
+
+// These errors use Configuration exactly as the original message builder;
+// InvalidAddress/InvalidHeader/etc. are operation strings, not new variants.
+fn construction_error(operation: String, reason: String) -> EmailError Never! {
+    EmailError.Configuration{operation: operation, server: None, code: None, reason: reason}
+}
+
+fn reject_controls(value: String, what: String) EmailError! {
+    bytes :: value.bytes()
+    loop index in 0..<bytes.len() {
+        byte :: Int.from_u8(bytes[index])
+        if byte < 32 || byte == 127 ||
+            (byte == 194 && index + 1 < bytes.len() && Int.from_u8(bytes[index + 1]) >= 128 && Int.from_u8(bytes[index + 1]) <= 159) {
+            return Err(construction_error("InvalidHeader", what + " contains a forbidden control character"))
+        }
+    }
+    Ok()
+}
+
+fn byte_text(bytes: [U8]) -> String Never! {
+    String.from_bytes(bytes) ?? panic("checked UTF-8 byte boundary")
+}
+
+fn parse_display(value: String) -> String EmailError! {
+    bytes :: value.bytes()
+    if bytes[0] != (U8{34}) {
+        loop byte in bytes {
+            if byte == (U8{34}) || byte == (U8{60}) || byte == (U8{62}) ->
+                return Err(construction_error("InvalidAddress", "display name has an unmatched quote or angle bracket"))
+        }
+        return Ok(value)
+    }
+    if bytes.len() < 2 || bytes[bytes.len() - 1] != (U8{34}) ->
+        return Err(construction_error("InvalidAddress", "quoted display name needs a closing quote"))
+    out := [U8]{}
+    escaped := false
+    loop index in 1..<bytes.len() - 1 {
+        byte :: bytes[index]
+        if escaped {
+            if byte != (U8{34}) && byte != (U8{92}) ->
+                return Err(construction_error("InvalidAddress", "quoted display name may escape only quote or backslash"))
+            &out.push(byte)
+            escaped = false
+        } else if byte == (U8{92}) {
+            escaped = true
+        } else if byte == (U8{34}) {
+            return Err(construction_error("InvalidAddress", "quoted display name contains an unescaped quote"))
+        } else {
+            &out.push(byte)
+        }
+    }
+    if escaped || out.len() == 0 ->
+        return Err(construction_error("InvalidAddress", "quoted display name is empty or ends with an escape"))
+    Ok(byte_text(out))
+}
+
+fn ascii_alphanumeric(byte: U8) -> Bool Never! {
+    value :: Int.from_u8(byte)
+    (value >= 65 && value <= 90) || (value >= 97 && value <= 122) || (value >= 48 && value <= 57)
+}
+
+fn atext(byte: U8) -> Bool Never! {
+    if ascii_alphanumeric(byte) -> return true
+    loop allowed in "!#$%&'*+-/=?^_`{{|}}~.".bytes() {
+        if byte == allowed -> return true
+    }
+    false
+}
+
+fn mailbox_separator(bytes: [U8]) -> Int EmailError! {
+    quoted := false
+    escaped := false
+    separator := Int?{None}
+    loop index in 0..<bytes.len() {
+        byte :: bytes[index]
+        if escaped {
+            escaped = false
+        } else if quoted && byte == (U8{92}) {
+            escaped = true
+        } else if byte == (U8{34}) {
+            quoted = !quoted
+        } else if byte == (U8{64}) && !quoted {
+            if separator != None -> return Err(construction_error("InvalidAddress", "mailbox needs exactly one unquoted `@`"))
+            separator = Val(index)
+        }
+    }
+    if quoted || escaped ->
+        return Err(construction_error("InvalidAddress", "mailbox has an unterminated quoted local part"))
+    Ok(separator ?? return Err(construction_error("InvalidAddress", "mailbox needs one unquoted `@`")))
+}
+
+fn validate_quoted_local(bytes: [U8]) EmailError! {
+    if bytes.len() < 2 || bytes[bytes.len() - 1] != (U8{34}) ->
+        return Err(construction_error("InvalidAddress", "quoted mailbox local part needs a closing quote"))
+    escaped := false
+    loop index in 1..<bytes.len() - 1 {
+        byte :: Int.from_u8(bytes[index])
+        if escaped {
+            if byte < 33 || byte > 126 ->
+                return Err(construction_error("InvalidAddress", "quoted mailbox escape is not printable ASCII"))
+            escaped = false
+        } else if byte == 92 {
+            escaped = true
+        } else if byte == 34 || byte < 32 || byte > 126 {
+            return Err(construction_error("InvalidAddress", "quoted mailbox local part contains an invalid byte"))
+        }
+    }
+    if escaped -> return Err(construction_error("InvalidAddress", "quoted mailbox local part ends with an escape"))
+    Ok()
+}
+
+fn validate_mailbox(mailbox: String) EmailError! {
+    bytes :: mailbox.bytes()
+    if bytes.len() == 0 || bytes.len() > 254 ->
+        return Err(construction_error("InvalidAddress", "mailbox must be 1 to 254 ASCII bytes"))
+    loop byte in bytes {
+        if Int.from_u8(byte) > 127 -> return Err(construction_error("InvalidAddress", "mailbox must be 1 to 254 ASCII bytes"))
+    }
+    at :: mailbox_separator(bytes) ? index -> index ! error -> return Err(error)
+    local :: bytes[0..<at]
+    domain :: byte_text(bytes[at + 1..<bytes.len()])
+    if local.len() == 0 || domain.bytes().len() == 0 || local.len() > 64 || domain.bytes().len() > 253 ->
+        return Err(construction_error("InvalidAddress", "mailbox local part or domain has an invalid length"))
+    if local[0] == (U8{34}) {
+        validate_quoted_local(local) ? unit -> unit ! error -> return Err(error)
+    } else {
+        if local[0] == (U8{46}) || local[local.len() - 1] == (U8{46}) || byte_text(local).contains("..") ->
+            return Err(construction_error("InvalidAddress", "mailbox local part is not dot-atom or quoted-string"))
+        loop byte in local {
+            if !atext(byte) -> return Err(construction_error("InvalidAddress", "mailbox local part is not dot-atom or quoted-string"))
+        }
+    }
+    loop label in domain.split(".") {
+        if label.bytes().len() == 0 || label.starts_with("-") || label.ends_with("-") ->
+            return Err(construction_error("InvalidAddress", "mailbox domain has an invalid label"))
+        loop byte in label.bytes() {
+            if !ascii_alphanumeric(byte) && byte != (U8{45}) ->
+                return Err(construction_error("InvalidAddress", "mailbox domain has an invalid label"))
+        }
+    }
+    Ok()
+}
+
+pub fn address(input: String) -> Address EmailError! {
+    reject_controls(input, "email address") ? unit -> unit ! error -> return Err(error)
+    value :: input.trim()
+    bytes :: value.bytes()
+    if bytes.len() == 0 || bytes.len() > 512 ->
+        return Err(construction_error("InvalidAddress", "email address must contain 1 to 512 bytes"))
+    opens := 0
+    closes := 0
+    open := 0
+    loop index in 0..<bytes.len() {
+        if bytes[index] == (U8{60}) { opens += 1; open = index }
+        if bytes[index] == (U8{62}) -> closes += 1
+    }
+    display := String?{None}
+    mailbox := value
+    if opens == 0 && closes == 0 {
+    } else if opens == 1 && closes == 1 && bytes[bytes.len() - 1] == (U8{62}) {
+        shown :: byte_text(bytes[0..<open]).trim()
+        if shown.bytes().len() == 0 -> return Err(construction_error("InvalidAddress", "display name cannot be empty"))
+        shown_display :: parse_display(shown) ? text -> text ! error -> return Err(error)
+        display = Val(shown_display)
+        mailbox = byte_text(bytes[open + 1..<bytes.len() - 1]).trim()
+    } else {
+        return Err(construction_error("InvalidAddress", "display address must have one final `<mailbox>`"))
+    }
+    validate_mailbox(mailbox) ? unit -> unit ! error -> return Err(error)
+    Ok(core.email.__address_parts(display, mailbox))
+}
+
+fn physical_header_len(name: String, value_len: Int) EmailError! {
+    if name.bytes().len() + 2 + value_len + 2 > 998 ->
+        return Err(construction_error("LimitExceeded", name + " physical header line exceeds 998 bytes"))
+    Ok()
+}
+
+fn percent_encoded_len(value: String) -> Int Never! {
+    total := 0
+    loop byte in value.bytes() {
+        total += if ascii_alphanumeric(byte) || byte == (U8{45}) || byte == (U8{95}) || byte == (U8{46}) || byte == (U8{126}) -> 1 else -> 3
+    }
+    total
+}
+
+fn valid_mime(value: String) -> Bool Never! {
+    parts :: value.split("/").to_list()
+    if parts.len() != 2 || parts[0].bytes().len() == 0 || parts[1].bytes().len() == 0 -> return false
+    loop part in parts {
+        loop byte in part.bytes() {
+            if !ascii_alphanumeric(byte) {
+                allowed := false
+                loop candidate in "!#$&-^_.+".bytes() {
+                    if byte == candidate -> allowed = true
+                }
+                if !allowed -> return false
+            }
+        }
+    }
+    true
+}
+
+pub fn attachment(filename: String, mime: String, bytes: [U8]) -> Attachment EmailError! {
+    reject_controls(filename, "attachment filename") ? unit -> unit ! error -> return Err(error)
+    reject_controls(mime, "attachment content type") ? unit -> unit ! error -> return Err(error)
+    if filename.trim().bytes().len() == 0 || filename.contains("/") || filename.contains("\\") ->
+        return Err(construction_error("InvalidAttachment", "attachment filename must be a plain non-empty name"))
+    if !valid_mime(mime) ->
+        return Err(construction_error("InvalidAttachment", "attachment content type must be `type/subtype`"))
+    physical_header_len("Content-Type", mime.bytes().len()) ? unit -> unit ! error -> return Err(error)
+    physical_header_len("Content-Disposition", "attachment; filename*=UTF-8''".bytes().len() + percent_encoded_len(filename)) ? unit -> unit ! error -> return Err(error)
+    if bytes.len() > 26214400 ->
+        return Err(construction_error("LimitExceeded", "attachment exceeds 26214400 bytes"))
+    Ok(core.email.__attachment_parts(filename, ascii_lower(mime), bytes))
+}
+
+pub fn envelope(from: Address, recipients: [Address]) -> Envelope EmailError! {
+    if recipients.len() == 0 ->
+        return Err(construction_error("envelope", "email envelope needs at least one recipient"))
+    if recipients.len() > 100 ->
+        return Err(construction_error("envelope", "email envelope exceeds 100 recipients"))
+    Ok(core.email.__envelope_parts(from, recipients))
+}
+
+#Test("email address grammar preserves quoted local and display rules") {
+    loop input in ["alice@example.test", "\"a@b\"@example.test", "A Name <a@example.test>", "\"A\\\"B\" <a@example.test>"] {
+        assert(address(input) == .Ok(_))
+    }
+    loop input in ["", "a@@example.test", ".a@example.test", "a..b@example.test", "a@-example.test", "a@é.test", "<a@example.test>", "\"\" <a@example.test>", "a@example.test\n"] {
+        assert(address(input) == .Err(_))
+    }
+}
+
+#Test("email attachment and envelope limits preserve refusal operations") {
+    assert(attachment("part.bin", "APPLICATION/OCTET-STREAM", [U8]{}) == .Ok(_))
+    assert(attachment("dir/part.bin", "text/plain", [U8]{}) == .Err(_))
+    assert(attachment("part.bin", "text/plain/extra", [U8]{}) == .Err(_))
+    sender :: address("a@example.test") ?? panic("sender fixture")
+    if envelope(sender, [Address]{}) == .Err(error) {
+        assert_eq(error, EmailError.Configuration{operation: "envelope", server: None, code: None, reason: "email envelope needs at least one recipient"})
+    } else { panic("empty envelope must be refused") }
 }

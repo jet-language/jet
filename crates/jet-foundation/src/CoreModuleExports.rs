@@ -25,7 +25,7 @@ pub enum CoreLeafKind {
 
 // BEGIN GENERATED CORE DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 2ca7a63110086a8e313312f60a6f89d8371511a33c35290fac63d3f1d2699b1e
+// Source SHA-256: 583ac8ed793a0dba3fce781190ab231926230dd5897a923620b8bf94d3c39864
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreModuleDeclaration {
     pub module: &'static str,
@@ -784,7 +784,7 @@ pub const CORE_SOURCE_MODULES: &[CoreSourceModule] = &[
     CoreSourceModule { module: "core.data.sketch.reservoir", alias: "core_core_data_sketch_reservoir", path: "Core/data/sketch/reservoir.jet", owned_members: &["new"] },
     CoreSourceModule { module: "core.data.sketch.tdigest", alias: "core_core_data_sketch_tdigest", path: "Core/data/sketch/tdigest.jet", owned_members: &["new"] },
     CoreSourceModule { module: "core.db", alias: "core_core_db", path: "Core/db/db.jet", owned_members: &["row_bool", "row_float", "row_int", "row_text", "row_value"] },
-    CoreSourceModule { module: "core.email", alias: "core_core_email", path: "Core/email/email.jet", owned_members: &["smtp_from_env"] },
+    CoreSourceModule { module: "core.email", alias: "core_core_email", path: "Core/email/email.jet", owned_members: &["address", "attachment", "envelope", "smtp_from_env"] },
     CoreSourceModule { module: "core.encoding", alias: "core_encoding", path: "Core/encoding/encoding.jet", owned_members: &["hex_nibble", "hex_value", "bytes_to_hex", "hex_to_bytes", "wrap32"] },
     CoreSourceModule { module: "core.encoding.base32", alias: "core_core_encoding_base32", path: "Core/encoding/base32.jet", owned_members: &["b32decode", "b32encode", "b32hexdecode", "b32hexencode", "decode", "encode", "is_base32"] },
     CoreSourceModule { module: "core.encoding.base64", alias: "core_encoding_base64", path: "Core/encoding/base64.jet", owned_members: &["is_base64", "a2b_base64", "a85decode", "a85encode", "b16decode", "b16encode", "b2a_base64", "b32decode", "b32encode", "b32hexdecode", "b32hexencode", "b64decode", "b64encode", "b85decode", "b85encode", "decode", "decode_padded", "decode_url", "decodebytes", "encode", "encode_url", "encode_url_padded", "encodebytes", "pad", "standard_b64decode", "standard_b64encode", "unpad", "urlsafe_b64decode", "urlsafe_b64encode", "z85decode", "z85encode"] },

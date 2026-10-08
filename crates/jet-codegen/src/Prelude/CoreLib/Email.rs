@@ -1607,6 +1607,19 @@ pub mod jet_email {
         Ok(Envelope { from: from.clone(), recipients: recipients.clone() })
     }
 
+    // Private carrier marshaling after Core source validates construction.
+    pub fn address_parts(display: Option<String>, mailbox: String) -> Address {
+        Address { display, mailbox }
+    }
+
+    pub fn attachment_parts(filename: String, mime: String, bytes: Vec<u8>) -> Attachment {
+        Attachment { filename, mime, bytes }
+    }
+
+    pub fn envelope_parts(from: Address, recipients: Vec<Address>) -> Envelope {
+        Envelope { from, recipients }
+    }
+
     impl Message {
         pub fn envelope(&self) -> &Envelope { &self.envelope }
 
