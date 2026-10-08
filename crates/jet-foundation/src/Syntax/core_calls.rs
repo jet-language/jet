@@ -1547,7 +1547,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 17976a4ef9405f65b6d30c4ec8266dd381159814c919b98bed65b89087f39c81
+// Source SHA-256: 6c886c73e0126958db6f63792ccffd5fd4a45b4d654da9c175afc8a07099eae3
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -2874,7 +2874,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.net", "__unix_read", "jet_net_unix_read", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::source_owned("core.net", "unix_write_all_bytes", &[true, true]),
     CoreCallRecord::new("core.net", "__unix_write_all_bytes", "jet_net_unix_write_all_bytes", true, &[true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new( "core.net", "unix_connect", "jet_net_unix_connect", true, &[true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new( "core.net", "unix_connect", "jet_net_unix_connect", true, &[true], ) .with_max_arity(2) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_source_owned() .with_source_target("__unix_connect_entry"),
     CoreCallRecord::new("core.net", "__unix_connect_host", "jet_net_unix_connect", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.net", "__unix_connect_deadline_host", "jet_net_unix_connect_deadline", true, &[true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::source_owned("core.net", "unix_shutdown", &[true, true]),
@@ -2899,7 +2899,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.net", "__dns_ptr_lookup", "jet_net_dns_ptr_lookup", true, &[true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.net", "__dns_srv_lookup", "jet_net_dns_srv_lookup", true, &[true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.net", "__dns_srv_at_lookup", "jet_net_dns_srv_at_lookup", true, &[true, true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new( "core.net.tls", "client", "jet_net_tls_client", false, &[false, true], ) .with_max_arity(4) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .without_direct_aot(),
+    CoreCallRecord::new( "core.net.tls", "client", "jet_net_tls_client", false, &[false, true], ) .with_max_arity(4) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .without_direct_aot() .with_source_owned() .with_source_target("client"),
     CoreCallRecord::new("core.net.tls", "__client_stream", "jet_net_tls_client", false, &[false, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).without_direct_aot(),
     CoreCallRecord::new("core.net.tls", "__client_deadline", "jet_net_tls_client_deadline", false, &[false, true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).without_direct_aot(),
     CoreCallRecord::new("core.net.tls", "__client_config_deadline", "jet_net_tls_client_config_deadline", false, &[false, true, true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).without_direct_aot(),
@@ -3241,7 +3241,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.web.browser", "locked", "jet_browser_locked", false, &[true], ),
     CoreCallRecord::new( "core.web.browser", "connect", "jet_browser_connect", false, &[true], ),
     CoreCallRecord::new( "core.web.browser", "connect_profile", "jet_browser_connect_profile", false, &[true, true, false], ),
-    CoreCallRecord::new( "core.http.server", "serve", "jet_http_mux_serve", false, &[true, false, false, false], ) .with_max_arity(4) .without_direct_aot(),
+    CoreCallRecord::new( "core.http.server", "serve", "jet_http_mux_serve", false, &[true, false, false, false], ) .with_max_arity(4) .without_direct_aot() .with_source_owned() .with_source_target("__serve_entry"),
     CoreCallRecord::source_owned("core.http.server", "serve_once", &[true, false]),
     CoreCallRecord::new("core.http.server", "__serve_once", "jet_http_mux_serve_once", false, &[true, false]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::source_owned("core.http.server", "serve_once_listener", &[true, true]),
@@ -3250,7 +3250,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.http.server", "__static_file", "jet_http_srv_static_file", false, &[true, true]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::source_owned("core.http.server", "static_file_range", &[true, true, true]),
     CoreCallRecord::new("core.http.server", "__static_file_range", "jet_http_srv_static_file_range", false, &[true, true, true]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new( "core.http.server", "static_files", "jet_http_srv_static_files_mount_defaulted", false, &[true, true, true], ) .with_max_arity(6) .without_direct_aot(),
+    CoreCallRecord::new( "core.http.server", "static_files", "jet_http_srv_static_files_mount_defaulted", false, &[true, true, true], ) .with_max_arity(6) .without_direct_aot() .with_source_owned() .with_source_target("__static_files_entry"),
     CoreCallRecord::source_owned("core.http.server", "mux", &[]),
     CoreCallRecord::new("core.http.server", "__mux", "jet_http_mux_new", false, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.http.server", "__response_parts", "jet_http_srv_raw_response_parts", true, &[false, false, false, false, false, false, false, false, false, false, false, false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
@@ -3259,7 +3259,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.http.server", "__route_template", "jet_http_srv_raw_route_template", false, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::source_owned("core.http.server", "request_id", &[true]),
     CoreCallRecord::new("core.http.server", "__request_id", "jet_http_srv_install_request_id", false, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::receiver_with_symbol(&["HTTPMux"], "middleware", "jet_http_mux_middleware", false, &[true, false]),
+    CoreCallRecord::receiver_with_symbol(&["HTTPMux"], "middleware", "jet_http_mux_middleware", false, &[true, false]) .with_source_owned() .with_source_target("core.http.server.__middleware_entry"),
     CoreCallRecord::source_owned("core.net.ws", "connect", &[true]),
     CoreCallRecord::new("core.net.ws", "__connect", "jet_ws_connect", false, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::source_owned("core.net.ws", "upgrade", &[true]),
@@ -3502,7 +3502,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::receiver(&["Solver"], "failure_count", &[]),
     CoreCallRecord::receiver(&["Solver"], "status", &[]),
     CoreCallRecord::receiver( &[ "Solver", "ServiceUpgradeReceipt", "DataError", VAULT_KEY_REF_TYPE, ], "__display", &[], ),
-    CoreCallRecord::new( "core.http.server", "bind", "jet_http_server_bind", false, &[true, false, false, false], ) .with_max_arity(4) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .without_direct_aot(),
+    CoreCallRecord::new( "core.http.server", "bind", "jet_http_server_bind", false, &[true, false, false, false], ) .with_max_arity(4) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .without_direct_aot() .with_source_owned() .with_source_target("__bind_entry"),
     CoreCallRecord::new( "core.data", "inner_join", "jet_data_inner_join_checked_default", true, &[true, true, false, false], ) .without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.data.arrow", "import", "jet_data_arrow_import", true, &[false]),
     CoreCallRecord::new("core.data.arrow", "query", "jet_data_query_arrow", true, &[false]),

@@ -4061,6 +4061,12 @@ list are the executable authority; this reference explains the durable rules
 and points to those files instead of duplicating their generated details.
 The audited intrinsic/ABI kernel is the only provider seam; ordinary Core packages remain Jet source. Archive byte-format calls cross that seam only where the source implementation requires them.
 
+The overloaded Unix connect and TLS client calls retain their checked public
+argument forms before forwarding into their owning Jet entry points. HTTP
+server serve/bind and static-file mounts likewise forward normalized options;
+`HTTPMux.middleware` forwards only after the existing escaping-callback
+admission. The original effects and resource conventions remain in force.
+
 ### Examples in the repository
 
 Executable examples are organized by capability. Useful entry points for this

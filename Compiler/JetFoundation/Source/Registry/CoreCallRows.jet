@@ -1,6 +1,6 @@
 // BEGIN GENERATED CORE CALL ROWS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 17976a4ef9405f65b6d30c4ec8266dd381159814c919b98bed65b89087f39c81
+// Source SHA-256: 6c886c73e0126958db6f63792ccffd5fd4a45b4d654da9c175afc8a07099eae3
 // Source: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs (TIR_CORE_CALL_RECORDS, appended in declaration order)
 // Source SHA-256: aa835bf61c1e1983aa327853e9a8768652a2af7dbf86b8e9561650ddc00384fa
 // Core ABI rows keep Core.jet order followed by the TIR extension order.
@@ -1033,7 +1033,7 @@ pub CORE_CALLS :: prep { [CoreCallRecord]{
     core_call_with_interpreter_route(core_call_new("core.net", "__unix_read", "jet_net_unix_read", true, [Bool]{true}), CoreCallInterpreterRoute.Ambient),
     core_call_source_owned("core.net", "unix_write_all_bytes", [Bool]{true, true}),
     core_call_with_interpreter_route(core_call_new("core.net", "__unix_write_all_bytes", "jet_net_unix_write_all_bytes", true, [Bool]{true, true}), CoreCallInterpreterRoute.Ambient),
-    core_call_with_interpreter_route(core_call_new("core.net", "unix_connect", "jet_net_unix_connect", true, [Bool]{true}), CoreCallInterpreterRoute.Ambient),
+    core_call_with_source_target(core_call_with_source_owned(core_call_with_interpreter_route(core_call_with_max_arity(core_call_new("core.net", "unix_connect", "jet_net_unix_connect", true, [Bool]{true}), 2), CoreCallInterpreterRoute.Ambient)), "__unix_connect_entry"),
     core_call_with_interpreter_route(core_call_new("core.net", "__unix_connect_host", "jet_net_unix_connect", true, [Bool]{true}), CoreCallInterpreterRoute.Ambient),
     core_call_with_interpreter_route(core_call_new("core.net", "__unix_connect_deadline_host", "jet_net_unix_connect_deadline", true, [Bool]{true, true}), CoreCallInterpreterRoute.Ambient),
     core_call_source_owned("core.net", "unix_shutdown", [Bool]{true, true}),
@@ -1058,7 +1058,7 @@ pub CORE_CALLS :: prep { [CoreCallRecord]{
     core_call_with_interpreter_route(core_call_new("core.net", "__dns_ptr_lookup", "jet_net_dns_ptr_lookup", true, [Bool]{true, false}), CoreCallInterpreterRoute.Ambient),
     core_call_with_interpreter_route(core_call_new("core.net", "__dns_srv_lookup", "jet_net_dns_srv_lookup", true, [Bool]{true, false}), CoreCallInterpreterRoute.Ambient),
     core_call_with_interpreter_route(core_call_new("core.net", "__dns_srv_at_lookup", "jet_net_dns_srv_at_lookup", true, [Bool]{true, true, false}), CoreCallInterpreterRoute.Ambient),
-    core_call_without_direct_aot(core_call_with_interpreter_route(core_call_with_max_arity(core_call_new("core.net.tls", "client", "jet_net_tls_client", false, [Bool]{false, true}), 4), CoreCallInterpreterRoute.Ambient)),
+    core_call_with_source_target(core_call_with_source_owned(core_call_without_direct_aot(core_call_with_interpreter_route(core_call_with_max_arity(core_call_new("core.net.tls", "client", "jet_net_tls_client", false, [Bool]{false, true}), 4), CoreCallInterpreterRoute.Ambient))), "client"),
     core_call_without_direct_aot(core_call_with_interpreter_route(core_call_new("core.net.tls", "__client_stream", "jet_net_tls_client", false, [Bool]{false, true}), CoreCallInterpreterRoute.Ambient)),
     core_call_without_direct_aot(core_call_with_interpreter_route(core_call_new("core.net.tls", "__client_deadline", "jet_net_tls_client_deadline", false, [Bool]{false, true, true}), CoreCallInterpreterRoute.Ambient)),
     core_call_without_direct_aot(core_call_with_interpreter_route(core_call_new("core.net.tls", "__client_config_deadline", "jet_net_tls_client_config_deadline", false, [Bool]{false, true, true, true}), CoreCallInterpreterRoute.Ambient)),
@@ -1400,7 +1400,7 @@ pub CORE_CALLS :: prep { [CoreCallRecord]{
     core_call_new("core.web.browser", "locked", "jet_browser_locked", false, [Bool]{true}),
     core_call_new("core.web.browser", "connect", "jet_browser_connect", false, [Bool]{true}),
     core_call_new("core.web.browser", "connect_profile", "jet_browser_connect_profile", false, [Bool]{true, true, false}),
-    core_call_without_direct_aot(core_call_with_max_arity(core_call_new("core.http.server", "serve", "jet_http_mux_serve", false, [Bool]{true, false, false, false}), 4)),
+    core_call_with_source_target(core_call_with_source_owned(core_call_without_direct_aot(core_call_with_max_arity(core_call_new("core.http.server", "serve", "jet_http_mux_serve", false, [Bool]{true, false, false, false}), 4))), "__serve_entry"),
     core_call_source_owned("core.http.server", "serve_once", [Bool]{true, false}),
     core_call_with_interpreter_route(core_call_without_direct_aot(core_call_new("core.http.server", "__serve_once", "jet_http_mux_serve_once", false, [Bool]{true, false})), CoreCallInterpreterRoute.Ambient),
     core_call_source_owned("core.http.server", "serve_once_listener", [Bool]{true, true}),
@@ -1409,7 +1409,7 @@ pub CORE_CALLS :: prep { [CoreCallRecord]{
     core_call_with_interpreter_route(core_call_without_direct_aot(core_call_new("core.http.server", "__static_file", "jet_http_srv_static_file", false, [Bool]{true, true})), CoreCallInterpreterRoute.Ambient),
     core_call_source_owned("core.http.server", "static_file_range", [Bool]{true, true, true}),
     core_call_with_interpreter_route(core_call_without_direct_aot(core_call_new("core.http.server", "__static_file_range", "jet_http_srv_static_file_range", false, [Bool]{true, true, true})), CoreCallInterpreterRoute.Ambient),
-    core_call_without_direct_aot(core_call_with_max_arity(core_call_new("core.http.server", "static_files", "jet_http_srv_static_files_mount_defaulted", false, [Bool]{true, true, true}), 6)),
+    core_call_with_source_target(core_call_with_source_owned(core_call_without_direct_aot(core_call_with_max_arity(core_call_new("core.http.server", "static_files", "jet_http_srv_static_files_mount_defaulted", false, [Bool]{true, true, true}), 6))), "__static_files_entry"),
     core_call_source_owned("core.http.server", "mux", [Bool]{}),
     core_call_with_interpreter_route(core_call_new("core.http.server", "__mux", "jet_http_mux_new", false, [Bool]{}), CoreCallInterpreterRoute.Ambient),
     core_call_with_interpreter_route(core_call_new("core.http.server", "__response_parts", "jet_http_srv_raw_response_parts", true, [Bool]{false, false, false, false, false, false, false, false, false, false, false, false, false}), CoreCallInterpreterRoute.Ambient),
@@ -1418,7 +1418,7 @@ pub CORE_CALLS :: prep { [CoreCallRecord]{
     core_call_with_interpreter_route(core_call_new("core.http.server", "__route_template", "jet_http_srv_raw_route_template", false, [Bool]{true}), CoreCallInterpreterRoute.Ambient),
     core_call_source_owned("core.http.server", "request_id", [Bool]{true}),
     core_call_with_interpreter_route(core_call_new("core.http.server", "__request_id", "jet_http_srv_install_request_id", false, [Bool]{true}), CoreCallInterpreterRoute.Ambient),
-    core_call_receiver_with_symbol([String]{"HTTPMux"}, "middleware", "jet_http_mux_middleware", false, [Bool]{true, false}),
+    core_call_with_source_target(core_call_with_source_owned(core_call_receiver_with_symbol([String]{"HTTPMux"}, "middleware", "jet_http_mux_middleware", false, [Bool]{true, false})), "core.http.server.__middleware_entry"),
     core_call_source_owned("core.net.ws", "connect", [Bool]{true}),
     core_call_with_interpreter_route(core_call_new("core.net.ws", "__connect", "jet_ws_connect", false, [Bool]{true}), CoreCallInterpreterRoute.Ambient),
     core_call_source_owned("core.net.ws", "upgrade", [Bool]{true}),
@@ -1661,7 +1661,7 @@ pub CORE_CALLS :: prep { [CoreCallRecord]{
     core_call_receiver([String]{"Solver"}, "failure_count", [Bool]{}),
     core_call_receiver([String]{"Solver"}, "status", [Bool]{}),
     core_call_receiver([String]{"Solver", "ServiceUpgradeReceipt", "DataError", "KeyRef"}, "__display", [Bool]{}),
-    core_call_without_direct_aot(core_call_with_interpreter_route(core_call_with_max_arity(core_call_new("core.http.server", "bind", "jet_http_server_bind", false, [Bool]{true, false, false, false}), 4), CoreCallInterpreterRoute.Ambient)),
+    core_call_with_source_target(core_call_with_source_owned(core_call_without_direct_aot(core_call_with_interpreter_route(core_call_with_max_arity(core_call_new("core.http.server", "bind", "jet_http_server_bind", false, [Bool]{true, false, false, false}), 4), CoreCallInterpreterRoute.Ambient))), "__bind_entry"),
     core_call_with_interpreter_route(core_call_without_direct_aot(core_call_new("core.data", "inner_join", "jet_data_inner_join_checked_default", true, [Bool]{true, true, false, false})), CoreCallInterpreterRoute.Ambient),
     core_call_new("core.data.arrow", "import", "jet_data_arrow_import", true, [Bool]{false}),
     core_call_new("core.data.arrow", "query", "jet_data_query_arrow", true, [Bool]{false}),
