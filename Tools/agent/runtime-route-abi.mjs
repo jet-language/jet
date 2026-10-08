@@ -60,7 +60,7 @@ export function generatedRecordPath(name) {
 
 export function recordApplicationsIn(signature, base) {
   const applications = [];
-  const pattern = new RegExp(`\\b${base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*<`, "g");
+  const pattern = new RegExp(`\\b(?:[A-Za-z_]\\w*::)*${base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*<`, "g");
   for (const match of signature.matchAll(pattern)) {
     let end = match.index + match[0].length, depth = 1;
     for (; end < signature.length && depth > 0; end++) {
