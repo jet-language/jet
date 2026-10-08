@@ -1070,3 +1070,220 @@ fn jet_rt_vault_commit_boundary_fixture(name: I64, empty: I64, retired: I64, rev
     thread_zero(scratch, I64{8256})
     jet_rt_free(scratch, I64{8256}, I64{8})
 }
+
+// Exact filesystem fixtures: transport creates only real directories/files.
+fn vault_fixture_error(error: I64, expected: I64) {
+    vault_fixture_check(error != I64{0} && vault_error_tag(error) == expected)
+    vault_error_drop(error)
+}
+fn vault_fixture_prepare(root: I64, name: I64, kind: I64, action: I64, reference: I64, reason: I64, slots: I64) -> I64 {
+    vault_fixture_check(vault_prepare_at_root(root, name, kind, action, reference, I64{0}, jet_rt_string_clone(reason), slots) == I64{0})
+    rt_text_word(slots)
+}
+fn vault_fixture_authorize(plan: I64, kind: I64, reason: I64, slots: I64) -> I64 {
+    vault_fixture_check(vault_authorize_write(plan, kind, reason, slots) == I64{0})
+    rt_text_word(slots)
+}
+fn vault_fixture_generate(root: I64, name: I64, empty: I64, reason: I64, slots: I64) -> I64 {
+    plan :: vault_fixture_prepare(root, name, I64{1}, I64{1}, I64{0}, empty, slots)
+    write :: vault_fixture_authorize(plan, I64{1}, reason, slots)
+    vault_fixture_check(vault_commit_at_root(root, plan, write, I64{1}, I64{1}, slots, slots + I64{8}) == I64{0})
+    vault_fixture_check(rt_text_word(slots) == I64{0})
+    rt_text_word(slots + I64{8})
+}
+fn vault_fixture_status(root: I64, reference: I64, expected: I64, slots: I64) {
+    vault_fixture_check(vault_status_at_root(root, reference, I64{1}, slots) == I64{0})
+    vault_fixture_check(rt_text_word(slots) == expected)
+}
+fn vault_fixture_load(root: I64, reference: I64, slots: I64) {
+    vault_fixture_check(vault_load_at_root(root, reference, I64{1}, slots) == I64{0})
+    vault_secret_drop(rt_text_word(slots))
+}
+fn vault_fixture_decoded(root: I64, slots: I64) -> I64 {
+    // This is the unrecovered reader: observe the installed ciphertext directly.
+    vault_fixture_check(vault_read_contents_unrecovered_at_root(root, slots, slots + I64{8}, slots + I64{40}) == I64{0})
+    vault_fixture_check(rt_text_word(slots + I64{40}) == VAULT_START_V2)
+    rt_text_word(slots)
+}
+#Export(c) fn jet_rt_vault_fixture_provision(out: I64) {
+    vault_fixture_check(vault_crypto_keygen(out, out + I64{8}) == I64{0})
+}
+#Export(c) fn absent_store_reads_do_not_require_mutation_recipients(root: I64, name: I64) {
+    slots :: jet_rt_alloc(I64{64}, I64{8})
+    vault_fixture_check(vault_key_query_at_root(root, name, I64{1}, false, slots) == I64{0})
+    vault_fixture_check(rt_text_word(slots) == I64{0})
+    vault_fixture_check(vault_key_query_at_root(root, name, I64{1}, true, slots) == I64{0})
+    versions :: rt_text_word(slots)
+    vault_fixture_check(rt_text_word(versions + DATA_SEQUENCE_LENGTH) == I64{0})
+    vault_refs_drop(versions)
+    missing :: jet_rt_alloc(VAULT_REF_BYTES, I64{8})
+    thread_zero(missing, VAULT_REF_BYTES)
+    rt_text_store(missing + VAULT_REF_NAME, jet_rt_string_clone(name))
+    rt_text_store(missing + VAULT_REF_GENERATION, I64{1})
+    at := I64{0}
+    loop at < (I64{32}) {
+        if (at < I64{16}) {
+            rt_text_put(missing + VAULT_REF_UUID + at, I64{1})
+            rt_text_put(missing + VAULT_REF_OPAQUE + at, I64{2})
+        }
+        rt_text_put(missing + VAULT_REF_HASH + at, I64{3})
+        at += I64{1}
+    }
+    vault_fixture_error(vault_load_at_root(root, missing, I64{1}, slots), I64{1})
+    vault_fixture_error(vault_status_at_root(root, missing, I64{1}, slots), I64{1})
+    vault_ref_drop(missing)
+    jet_rt_free(slots, I64{64}, I64{8})
+}
+#Export(c) fn typed_generate_rotate_retire_revoke_and_conflict(root: I64, texts: I64) {
+    data :: rt_text_word(texts + DATA_SEQUENCE_DATA)
+    name :: rt_text_word(data)
+    transport :: rt_text_word(data + I64{8})
+    empty :: rt_text_word(data + I64{16})
+    initial :: rt_text_word(data + I64{24})
+    stale_reason :: rt_text_word(data + I64{32})
+    quarterly :: rt_text_word(data + I64{40})
+    exposure :: rt_text_word(data + I64{48})
+    incident :: rt_text_word(data + I64{56})
+    slots :: jet_rt_alloc(I64{64}, I64{8})
+    plan :: vault_fixture_prepare(root, name, I64{1}, I64{1}, I64{0}, empty, slots)
+    stale :: vault_fixture_prepare(root, transport, I64{2}, I64{1}, I64{0}, empty, slots)
+    write :: vault_fixture_authorize(plan, I64{1}, initial, slots)
+    vault_fixture_check(vault_commit_at_root(root, plan, write, I64{1}, I64{1}, slots, slots + I64{8}) == I64{0})
+    first :: rt_text_word(slots + I64{8})
+    vault_fixture_check(rt_text_word(first + VAULT_REF_GENERATION) == I64{1})
+    vault_fixture_status(root, first, I64{0}, slots)
+    vault_fixture_load(root, first, slots)
+    stale_write :: vault_fixture_authorize(stale, I64{2}, stale_reason, slots)
+    vault_fixture_error(vault_commit_at_root(root, stale, stale_write, I64{1}, I64{2}, slots, slots + I64{8}), I64{6})
+    rotate :: vault_fixture_prepare(root, name, I64{1}, I64{3}, I64{0}, empty, slots)
+    rotation_write :: vault_fixture_authorize(rotate, I64{1}, quarterly, slots)
+    vault_fixture_check(vault_commit_at_root(root, rotate, rotation_write, I64{3}, I64{1}, slots, slots + I64{8}) == I64{0})
+    previous :: rt_text_word(slots)
+    current :: rt_text_word(slots + I64{8})
+    vault_fixture_check(vault_ref_equal(previous, first))
+    vault_fixture_check(rt_text_word(current + VAULT_REF_GENERATION) == I64{2})
+    vault_fixture_status(root, first, I64{1}, slots)
+    retired_load :: vault_load_at_root(root, first, I64{1}, slots)
+    if (retired_load != I64{0}) -> panic("retired exact refs remain loadable")
+    vault_secret_drop(rt_text_word(slots))
+    revoke :: vault_fixture_prepare(root, name, I64{1}, I64{5}, vault_ref_clone(first), exposure, slots)
+    revoke_write :: vault_fixture_authorize(revoke, I64{1}, incident, slots)
+    vault_fixture_check(vault_commit_at_root(root, revoke, revoke_write, I64{5}, I64{1}, slots, slots + I64{8}) == I64{0})
+    vault_ref_drop(rt_text_word(slots))
+    vault_ref_drop(rt_text_word(slots + I64{8}))
+    vault_fixture_status(root, first, I64{2}, slots)
+    vault_fixture_error(vault_load_at_root(root, first, I64{1}, slots), I64{3})
+    vault_fixture_check(vault_key_query_at_root(root, name, I64{1}, false, slots) == I64{0})
+    queried :: rt_text_word(slots)
+    vault_fixture_check(vault_ref_equal(queried, current))
+    vault_ref_drop(queried)
+    vault_fixture_check(vault_key_query_at_root(root, name, I64{1}, true, slots) == I64{0})
+    versions :: rt_text_word(slots)
+    vault_fixture_check(rt_text_word(versions + DATA_SEQUENCE_LENGTH) == I64{2})
+    vault_refs_drop(versions)
+    vault_ref_drop(previous)
+    vault_ref_drop(current)
+    vault_ref_drop(first)
+    jet_rt_vault_clear_test_authorizer()
+    jet_rt_free(slots, I64{64}, I64{8})
+}
+#Export(c) fn authority_is_exact_and_denial_generates_no_key(root: I64, name: I64, empty: I64, reason: I64) {
+    slots :: jet_rt_alloc(I64{8}, I64{8})
+    plan :: vault_fixture_prepare(root, name, I64{1}, I64{1}, I64{0}, empty, slots)
+    vault_fixture_error(vault_authorize_write(plan, I64{1}, reason, slots), I64{5})
+    vault_plan_drop(plan)
+    jet_rt_vault_clear_test_authorizer()
+    jet_rt_free(slots, I64{8}, I64{8})
+}
+#Export(c) fn linux_openat2_rejects_a_symlinked_vault_directory(root: I64, name: I64, empty: I64) {
+    slots :: jet_rt_alloc(I64{8}, I64{8})
+    error :: vault_prepare_at_root(root, name, I64{1}, I64{1}, I64{0}, I64{0}, jet_rt_string_clone(empty), slots)
+    if (error == I64{0}) -> panic("symlinked .jet directory was accepted")
+    vault_fixture_error(error, I64{7})
+    jet_rt_free(slots, I64{8}, I64{8})
+}
+#Export(c) fn jet_rt_vault_fixture_prepared(root: I64, name: I64, empty: I64, reason: I64, out: I64) {
+    plan :: vault_fixture_prepare(root, name, I64{1}, I64{1}, I64{0}, empty, out)
+    write :: vault_fixture_authorize(plan, I64{1}, reason, out + I64{8})
+    rt_text_store(out, plan)
+    rt_text_store(out + I64{8}, write)
+}
+#Export(c) fn provider_change_invalidates_an_authorized_plan(root: I64, plan: I64, write: I64) {
+    slots :: jet_rt_alloc(I64{16}, I64{8})
+    vault_fixture_error(vault_commit_at_root(root, plan, write, I64{1}, I64{1}, slots, slots + I64{8}), I64{6})
+    jet_rt_vault_clear_test_authorizer()
+    jet_rt_free(slots, I64{16}, I64{8})
+}
+#Export(c) fn string_updates_preserve_typed_rows_in_the_shared_atomic_store(root: I64, name: I64, empty: I64, reason: I64, token: I64, value: I64) {
+    slots :: jet_rt_alloc(I64{64}, I64{8})
+    reference :: vault_fixture_generate(root, name, empty, reason, slots)
+    pairs :: data_sequence_new(I64{1}, VAULT_PAIR_BYTES)
+    pair :: rt_text_word(pairs + DATA_SEQUENCE_DATA)
+    rt_text_store(pair, jet_rt_string_clone(token))
+    rt_text_store(pair + I64{8}, jet_rt_string_clone(value))
+    rt_text_store(pairs + DATA_SEQUENCE_LENGTH, I64{1})
+    vault_fixture_check(vault_replace_strings_at_root(root, pairs) == I64{0})
+    store :: vault_fixture_decoded(root, slots)
+    vault_fixture_check(rt_text_word(store + VAULT_STORE_REVISION) == I64{2})
+    strings :: rt_text_word(store + VAULT_STORE_STRINGS)
+    vault_fixture_check(rt_text_word(strings + DATA_SEQUENCE_LENGTH) == I64{1})
+    row :: rt_text_word(strings + DATA_SEQUENCE_DATA)
+    vault_fixture_check(jet_rt_string_eq(rt_text_word(row), token) && jet_rt_string_eq(rt_text_word(row + I64{8}), value))
+    vault_fixture_check(rt_text_word(rt_text_word(store + VAULT_STORE_RECORDS) + DATA_SEQUENCE_LENGTH) == I64{1})
+    vault_fixture_load(root, reference, slots)
+    vault_store_drop(store)
+    vault_ref_drop(reference)
+    jet_rt_vault_clear_test_authorizer()
+    jet_rt_free(slots, I64{64}, I64{8})
+}
+#Export(c) fn lifecycle_timestamps_do_not_decrease_when_wall_clock_rolls_back(root: I64, name: I64, empty: I64, reason: I64, rotation: I64, fault: I64) {
+    slots :: jet_rt_alloc(I64{64}, I64{8})
+    reference :: vault_fixture_generate(root, name, empty, reason, slots)
+    vault_ref_drop(reference)
+    before_store :: vault_fixture_decoded(root, slots)
+    before_data :: rt_text_word(rt_text_word(before_store + VAULT_STORE_RECORDS) + DATA_SEQUENCE_DATA)
+    before :: rt_text_word(rt_text_word(before_data) + VAULT_RECORD_CREATED)
+    vault_store_drop(before_store)
+    plan :: vault_fixture_prepare(root, name, I64{1}, I64{3}, I64{0}, empty, slots)
+    write :: vault_fixture_authorize(plan, I64{1}, rotation, slots)
+    jet_rt_vault_set_test_fault(fault)
+    vault_fixture_check(vault_commit_at_root(root, plan, write, I64{3}, I64{1}, slots, slots + I64{8}) == I64{0})
+    vault_ref_drop(rt_text_word(slots))
+    vault_ref_drop(rt_text_word(slots + I64{8}))
+    store :: vault_fixture_decoded(root, slots)
+    data :: rt_text_word(rt_text_word(store + VAULT_STORE_RECORDS) + DATA_SEQUENCE_DATA)
+    status :: rt_text_word(rt_text_word(data) + VAULT_RECORD_STATUS_MS)
+    created :: rt_text_word(rt_text_word(data + I64{8}) + VAULT_RECORD_CREATED)
+    vault_fixture_check(!vault_unsigned_less(status, before))
+    vault_fixture_check(!vault_unsigned_less(created, status))
+    vault_store_drop(store)
+    jet_rt_vault_set_test_fault(I64{0})
+    jet_rt_vault_clear_test_authorizer()
+    jet_rt_free(slots, I64{64}, I64{8})
+}
+#Export(c) fn decoder_rejects_a_downgraded_current_generation(root: I64, name: I64, empty: I64, first_reason: I64, second_reason: I64) {
+    slots :: jet_rt_alloc(I64{64}, I64{8})
+    reference :: vault_fixture_generate(root, name, empty, first_reason, slots)
+    vault_ref_drop(reference)
+    plan :: vault_fixture_prepare(root, name, I64{1}, I64{3}, I64{0}, empty, slots)
+    write :: vault_fixture_authorize(plan, I64{1}, second_reason, slots)
+    vault_fixture_check(vault_commit_at_root(root, plan, write, I64{3}, I64{1}, slots, slots + I64{8}) == I64{0})
+    vault_ref_drop(rt_text_word(slots))
+    vault_ref_drop(rt_text_word(slots + I64{8}))
+    store :: vault_fixture_decoded(root, slots)
+    vault_fixture_check(vault_encode_v2(store, slots) == I64{-1})
+    bytes :: rt_text_word(slots)
+    raw :: rt_text_data(bytes)
+    length :: rt_text_len(bytes)
+    vault_put_u64(raw + I64{47} + rt_text_len(name), I64{1})
+    scratch :: jet_rt_alloc(I64{592}, I64{8})
+    vault_payload_hash(raw, length - I64{32}, raw + length - I64{32}, scratch)
+    vault_fixture_check(vault_decode_v2(raw, length, slots + I64{8}) == I64{8})
+    vault_store_drop(store)
+    vault_text_zero(bytes)
+    jet_rt_string_drop(bytes)
+    thread_zero(scratch, I64{592})
+    jet_rt_free(scratch, I64{592}, I64{8})
+    jet_rt_vault_clear_test_authorizer()
+    jet_rt_free(slots, I64{64}, I64{8})
+}

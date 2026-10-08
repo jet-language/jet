@@ -13,6 +13,7 @@
 #include <signal.h>
 #include <sys/wait.h>
 #include <time.h>
+#include <dirent.h>
 typedef struct { const unsigned char *data; int64_t length, capacity; } Text;
 typedef struct { int64_t length, capacity; Text **data; } TextList;
 extern void jet_rt_alloc_init(void);
@@ -64,6 +65,16 @@ extern void jet_rt_vault_clear_test_authorizer(void);
 extern void imported_origin_round_trips_and_invalid_combinations_reject(const Text *, const Text *);
 extern void jet_rt_vault_crypto_fixture(const ByteList *);
 extern void jet_rt_vault_crypto_unavailable_fixture(int64_t (*)(void *, void *, int64_t));
+extern void jet_rt_vault_fixture_provision(Text **);
+extern void absent_store_reads_do_not_require_mutation_recipients(const Text *, const Text *);
+extern void typed_generate_rotate_retire_revoke_and_conflict(const Text *, const TextList *);
+extern void authority_is_exact_and_denial_generates_no_key(const Text *, const Text *, const Text *, const Text *);
+extern void linux_openat2_rejects_a_symlinked_vault_directory(const Text *, const Text *, const Text *);
+extern void jet_rt_vault_fixture_prepared(const Text *, const Text *, const Text *, const Text *, void **);
+extern void provider_change_invalidates_an_authorized_plan(const Text *, void *, void *);
+extern void string_updates_preserve_typed_rows_in_the_shared_atomic_store(const Text *, const Text *, const Text *, const Text *, const Text *, const Text *);
+extern void lifecycle_timestamps_do_not_decrease_when_wall_clock_rolls_back(const Text *, const Text *, const Text *, const Text *, const Text *, const Text *);
+extern void decoder_rejects_a_downgraded_current_generation(const Text *, const Text *, const Text *, const Text *, const Text *);
 static unsigned unavailable_calls;
 static int64_t unavailable_entropy(void *context, void *out, int64_t count) {
     assert(context == NULL && count == 32);
@@ -503,6 +514,124 @@ static void trust_home_fixtures(void) {
     assert(unlink(trust) == 0 && unlink(raw_trust) == 0);
     assert(rmdir(dir) == 0 && rmdir(raw_dir) == 0 && rmdir(invalid) == 0 && rmdir(root) == 0);
 }
+// Exact suite filesystem transport. No vault policy lives in C.
+static void fixture_remove_tree(const char *path) {
+    struct stat st;
+    assert(lstat(path, &st) == 0);
+    if (!S_ISDIR(st.st_mode)) { assert(unlink(path) == 0); return; }
+    DIR *dir = opendir(path); assert(dir != NULL);
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) continue;
+        char child[512];
+        int count = snprintf(child, sizeof(child), "%s/%s", path, entry->d_name);
+        assert(count > 0 && (size_t)count < sizeof(child));
+        fixture_remove_tree(child);
+    }
+    assert(closedir(dir) == 0 && rmdir(path) == 0);
+}
+static void fixture_path(char *out, size_t capacity, const char *root, const char *relative) {
+    int count = snprintf(out, capacity, "%s/%s", root, relative);
+    assert(count > 0 && (size_t)count < capacity);
+}
+static void fixture_write(const char *path, const unsigned char *bytes, size_t length) {
+    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0600); assert(fd >= 0);
+    input_write_all(fd, bytes, length);
+    assert(close(fd) == 0);
+}
+static void fixture_recipients(const char *root, const Text *recipient) {
+    char path[512]; fixture_path(path, sizeof(path), root, ".jet/secrets-recipients");
+    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0600); assert(fd >= 0);
+    input_write_all(fd, recipient->data, (size_t)recipient->length);
+    input_write_all(fd, (const unsigned char *)"\n", 1);
+    assert(close(fd) == 0);
+}
+static Text fixture_scratch(char *root, int provisioned) {
+    assert(mkdtemp(root) != NULL);
+    char path[512]; fixture_path(path, sizeof(path), root, ".jet");
+    assert(mkdir(path, 0700) == 0);
+    if (provisioned) {
+        fixture_path(path, sizeof(path), root, "keys"); assert(mkdir(path, 0700) == 0);
+        Text *keys[2]; jet_rt_vault_fixture_provision(keys);
+        fixture_path(path, sizeof(path), root, "keys/secrets.identity");
+        fixture_write(path, keys[0]->data, (size_t)keys[0]->length);
+        fixture_recipients(root, keys[1]);
+        jet_rt_string_drop(keys[0]); jet_rt_string_drop(keys[1]);
+    }
+    return text(root);
+}
+static int64_t filesystem_authorizer(void *raw, const Text *preview) {
+    VaultAuthorizer *closure = raw;
+    if (!closure->answer) {
+        static const char needle[] = "generate SigningKey release";
+        int found = 0;
+        for (int64_t at = 0; at + (int64_t)sizeof(needle) - 1 <= preview->length; ++at)
+            if (memcmp(preview->data + at, needle, sizeof(needle) - 1) == 0) { found = 1; break; }
+        assert(found);
+    }
+    return closure->answer;
+}
+static void fixture_authorizer(int granted) {
+    VaultAuthorizer *closure = jet_rt_alloc((int64_t)sizeof(VaultAuthorizer), 8);
+    *closure = (VaultAuthorizer){1, filesystem_authorizer, plan_authorizer_release, granted};
+    jet_rt_vault_set_test_authorizer(closure);
+}
+static void filesystem_batch_a(void) {
+    Text name = text("release"), empty = text(""), initial = text("initial signer");
+    char absent[] = "/tmp/jet-vault-absent-read-XXXXXX";
+    Text root = fixture_scratch(absent, 0);
+    absent_store_reads_do_not_require_mutation_recipients(&root, &name);
+    fixture_remove_tree(absent);
+    char lifecycle[] = "/tmp/jet-vault-lifecycle-XXXXXX";
+    root = fixture_scratch(lifecycle, 1); fixture_authorizer(1);
+    Text lifecycle_texts[] = {name, text("transport"), empty, text("initial release key"),
+        text("stale write"), text("quarterly rotation"), text("suspected exposure"), text("incident response")};
+    Text *lifecycle_items[8];
+    for (size_t i = 0; i < 8; ++i) lifecycle_items[i] = &lifecycle_texts[i];
+    TextList texts = {8, 8, lifecycle_items};
+    typed_generate_rotate_retire_revoke_and_conflict(&root, &texts);
+    fixture_remove_tree(lifecycle);
+    char authority[] = "/tmp/jet-vault-authority-XXXXXX", path[512];
+    root = fixture_scratch(authority, 1); fixture_authorizer(0);
+    Text unapproved = text("unapproved");
+    authority_is_exact_and_denial_generates_no_key(&root, &name, &empty, &unapproved);
+    fixture_path(path, sizeof(path), authority, ".jet/secrets.age");
+    assert(access(path, F_OK) == -1 && errno == ENOENT);
+    fixture_remove_tree(authority);
+    char downgrade[] = "/tmp/jet-vault-downgrade-XXXXXX";
+    root = fixture_scratch(downgrade, 1); fixture_authorizer(1);
+    Text first = text("first"), second = text("second");
+    decoder_rejects_a_downgraded_current_generation(&root, &name, &empty, &first, &second);
+    fixture_remove_tree(downgrade);
+    char symlink_root[] = "/tmp/jet-vault-symlink-XXXXXX", actual[512];
+    root = fixture_scratch(symlink_root, 0);
+    fixture_path(actual, sizeof(actual), symlink_root, "actual"); assert(mkdir(actual, 0700) == 0);
+    fixture_path(path, sizeof(path), symlink_root, ".jet");
+    assert(rmdir(path) == 0 && symlink(actual, path) == 0);
+    linux_openat2_rejects_a_symlinked_vault_directory(&root, &name, &empty);
+    fixture_remove_tree(symlink_root);
+    char changed[] = "/tmp/jet-vault-provider-change-XXXXXX";
+    root = fixture_scratch(changed, 1); fixture_authorizer(1);
+    void *authority_objects[2];
+    jet_rt_vault_fixture_prepared(&root, &name, &empty, &initial, authority_objects);
+    Text *other[2]; jet_rt_vault_fixture_provision(other);
+    fixture_recipients(changed, other[1]);
+    jet_rt_string_drop(other[0]); jet_rt_string_drop(other[1]);
+    provider_change_invalidates_an_authorized_plan(&root, authority_objects[0], authority_objects[1]);
+    fixture_path(path, sizeof(path), changed, ".jet/secrets.age");
+    assert(access(path, F_OK) == -1 && errno == ENOENT);
+    fixture_remove_tree(changed);
+    char hybrid[] = "/tmp/jet-vault-hybrid-store-XXXXXX";
+    root = fixture_scratch(hybrid, 1); fixture_authorizer(1);
+    Text token = text("token"), secret = text("secret");
+    string_updates_preserve_typed_rows_in_the_shared_atomic_store(&root, &name, &empty, &initial, &token, &secret);
+    fixture_remove_tree(hybrid);
+    char clock[] = "/tmp/jet-vault-clock-rollback-XXXXXX";
+    root = fixture_scratch(clock, 1); fixture_authorizer(1);
+    Text rotation = text("rollback rotation"), fault = text("clock-rollback");
+    lifecycle_timestamps_do_not_decrease_when_wall_clock_rolls_back(&root, &name, &empty, &initial, &rotation, &fault);
+    fixture_remove_tree(clock);
+}
 int main(int argc, char **argv) {
     jet_rt_alloc_init();
     jet_rt_host_arguments(argc, argv, environ);
@@ -580,6 +709,7 @@ int main(int argc, char **argv) {
     jet_rt_vault_lifecycle_strings_fixture(&lifecycle_name, &rollback, &missing_root);
     plan_auth_fixtures();
     trust_home_fixtures();
+    filesystem_batch_a();
     puts("vault witness OK (13 errors, legacy+JVLT2 codec, imported origin/default entropy, native Secret redaction/wipe, long-origin hash, duplicate priority)");
     jet_rt_thread_detach();
     return 0;

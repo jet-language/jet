@@ -330,6 +330,13 @@ are thread-local and released at thread exit. Backup barriers are shared,
 root-filtered immutable snapshots: clearing a hook does not invalidate a writer
 already blocked on its entered/release phases. Reentrant mutable authorizer
 access preserves the reference foreign-panic body and exit status 101.
+Filesystem witnesses call the same prepare, authorize, commit, read, and string
+replacement provider paths as production. Their transport creates real scratch
+directories and persists real generated age identities/recipients; it never
+substitutes replay ciphertext, descriptors, or provider decisions. Direct decoded
+store observations bypass recovery so installed revision assertions cannot be
+satisfied by a recovery side effect. Exact-reference retirement remains loadable,
+revocation rejects load, and denied authorization never creates a visible store.
 
 The internal X25519 boundary borrows 32-byte scalar and point spans and writes
 32 bytes to a disjoint output. Its 1536-byte, word-aligned scratch is exclusive
