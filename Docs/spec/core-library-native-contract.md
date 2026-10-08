@@ -200,6 +200,14 @@ inventory-checked addresses, caching each lookup without per-call allocation.
 `RuntimeLibrary::receipt_identity` and `library_identity` borrow the validated,
 cached SHA-256 values, allowing the private host record to compare both pins
 without re-reading library bytes or recomputing their hash.
+The private `HostBootstrapRuntimeAdmission` is cached by the outer completion
+owner and retained in the factory's adapter root, so escaped callback scopes
+use that same admission rather than reading another receipt. It checks the
+embedded receipt hash and the embedded library pin's agreement with the receipt
+before the loader may execute constructors. The installation root is the running
+host executable's directory, independent of the working directory. Admission
+failures carry `E0956` and the loader's named refusal key; they are not an absent
+host-operation answer.
 The caller supplies the declared C ABI. The Source host maps named refusals into
 the registered adapter-failure channel. This Rust bootstrap seam dies at the
 Jet-hosted cutover; it does not define runtime behavior.
