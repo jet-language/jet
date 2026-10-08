@@ -8,6 +8,7 @@
 #include <stdint.h>
 #include <stdio.h>
 
+extern void jet_rt_alloc_init(void);
 extern int64_t jet_rt_alloc(int64_t bytes, int64_t alignment);
 extern void __real_jet_rt_free(int64_t address, int64_t bytes, int64_t alignment);
 #define DECLARE(T) \
@@ -58,6 +59,7 @@ static void set_tag(int64_t value, int64_t tag) {
     *(int64_t *)(uintptr_t)value = tag;
 }
 int main(void) {
+    jet_rt_alloc_init();
     const size_t count = sizeof families / sizeof families[0];
     assert(count == 12);
     for (size_t i = 0; i < count; ++i) {

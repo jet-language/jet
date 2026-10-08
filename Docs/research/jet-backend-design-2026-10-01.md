@@ -1979,3 +1979,17 @@ tags, not pointers. These allocations never alias a Rust or source/MIR enum.
 `DataPlotEnumsWitness.c` links the real Jet provider and intercepts frees with
 `--wrap=jet_rt_free`, checking clone independence and tag equality. Syntax
 receipts alone do not admit native layouts or prove execution.
+
+There is no native producer of the boxed unit-enum handles today: no enum
+constructor is exported, and the plot behavior routes are not yet enrolled.
+Future producers must allocate the exact 8-byte DataABI carrier. Rust
+`Box<enum>` allocations must never reach these drops; the generic all-or-none
+guard governs generated glue, not unenrolled behavior or future Lower code.
+
+`DataPlotFlat.jet` and `DataPlotValue.jet` preserve declaration-order equality,
+owned text clones, and IEEE Float comparisons, including NaN self-inequality
+and signed-zero equality. Rust `i64` fields remain raw private words:
+constructors perform the existing checked exact-Int-to-i64 conversion and
+getters produce fresh exact Int owners; clone/drop never treat those raw
+words as Int handles. Typed Field/Axis/Legend/Capability list helpers share
+the existing native List holder allocator and lend indexed child handles.
