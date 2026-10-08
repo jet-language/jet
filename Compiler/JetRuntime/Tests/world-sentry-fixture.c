@@ -16,6 +16,7 @@ extern void jet_panic(Text *, int64_t, Text *);
 extern void jet_panic_rich(Text *, int64_t, Text *, Text *, int64_t, int64_t, Text *, Text *);
 extern void jet_rt_require_stop(int64_t, int64_t *, Text *, Text *, Text *, Text *);
 extern int64_t jet_rt_trap_report_fixture(int64_t (*)(int64_t), int64_t, bool);
+extern int64_t jet_rt_alloc_policy_fixture(void);
 static int64_t trap_callback(int64_t mode) {
     Text file = {"trapfixture.jet", 15, 0}, function = {"check", 5, 0};
     Text source = {" panic()", 8, 0}, message = {"fault", 5, 0}, locals = {"answer=42", 9, 0};
@@ -43,5 +44,6 @@ int main(int argc, char **argv, char **envp) {
     if (jet_rt_sentry_fixture_run((int64_t)(uintptr_t)jet_rt_sentry_fixture_worker)) return 3;
     if (jet_rt_sentry_fixture_inline((int64_t)(uintptr_t)jet_rt_sentry_inline_stopped)) return 4;
     Text code = {"E3010", 5, 0}, wrong = {"E3001", 5, 0}, message = {"index 99", 8, 0};
-    return (int)jet_rt_test_scope_fault_fixture(&code, &wrong, &message);
+    if (jet_rt_test_scope_fault_fixture(&code, &wrong, &message)) return 5;
+    return (int)jet_rt_alloc_policy_fixture();
 }

@@ -154,6 +154,30 @@ The ordinary allocation door still delivers its existing fatal layout/OOM
 diagnostic. Successful reservations retain their original size and alignment
 for the shared exact-layout free operation, including aligned zero-size places.
 
+`jet_rt_alloc_try(size: I64, align: I64) -> I64` is the shared native fallible
+door: zero means invalid layout, injected allocation failure, selected-program
+allocator refusal, or heap failure, without a Stop or stderr. The allocation
+fault channel observes before reservation; a refused reservation changes no
+accounting; a heap failure cancels its live reservation before returning.
+Ordinary `jet_rt_alloc` uses the same policy reserve and exact-layout free, but
+retains its fatal layout/OOM edge and does not observe the fallible fault rail.
+System-mode blocks keep the two-word heap header. Only counted payloads own
+private bypass-policy side-table nodes; freeing a tracked payload releases its
+reservation even after switching back to system mode. Policy facts retain
+historical allocation/request/high-water counters on cancelled heap requests,
+while live bytes and tracker nodes return to zero.
+
+The explicit native host policy edges are `jet_rt_program_allocator_configure`
+and `jet_rt_program_allocator_fact` (allocations, requested, live, high-water,
+cap, mode at indices 0..5). Hosts serialize run configuration and preserve mode
+and cap for restoration. These words carry unsigned source `usize` bits. The
+allocation schedule uses dynamic TLS, not a new task-control slot; its arming,
+fact and clearing edges implement the allocation channel only, not an effect
+path or the full fault-plan loop. `AllocationPolicyTests.jet` is included in
+the composed World/Sentry fixture and requires empty output, no pending Stop,
+fault/counting-cap refusal, cancellation after a real refused mmap, policy-
+switch-safe free, and zero live bytes/tracker nodes.
+
 
 ### Exact integer carrier
 
