@@ -34,6 +34,21 @@ for (const [name, text, accepted] of [
     : result.status !== 0 && result.stderr.includes(rejection));
   if (!pass) failures.push(name);
   rows.push(`${name}\t${pass ? 'PASS' : 'FAIL'}`);
+  if (accepted && result.status === 0) {
+    const runtime = readFileSync(prepared, 'utf8');
+    // The refreshed seed allocator reaches the shared terminal kernel even
+    // when the input program never calls core.term. The real parity runner
+    // separately checks the fatal path's exact bytes and SIGABRT.
+    const allocator = runtime.match(/pub extern "C" fn jet_rt_alloc\(size: usize, align: usize\) -> \*mut u8 \{([\s\S]*?)\n    \}/)?.[1];
+    const allocatorClosure = allocator?.includes('allocation_failure(layout.size());')
+      && !allocator.includes('handle_alloc_error')
+      && runtime.includes('fn allocation_failure_message(')
+      && runtime.includes('fn allocation_failure(size: usize) -> !')
+      && runtime.includes('super::jet_term_write_stderr_bytes(message, true);')
+      && runtime.includes('pub(crate) fn jet_term_write_stderr_bytes(');
+    if (!allocatorClosure) failures.push('allocator-terminal-closure');
+    rows.push(`allocator-terminal-closure\t${allocatorClosure ? 'PASS' : 'FAIL'}`);
+  }
 }
 writeFileSync(join(out, 'results.tsv'), rows.join('\n') + '\n');
 console.log(rows.join('\n'));

@@ -115,6 +115,17 @@ reads and writes through static-rooted places address that same cell, including
 when the shared object writer packages a runtime library. Atomic values still
 require their typed allocation, ordering and ownership contract; a raw machine
 compare-and-swap primitive does not establish that contract.
+
+The runtime allocator distinguishes an invalid layout from exhausted storage.
+Invalid layouts retain the canonical Jet panic diagnostic. Failure to allocate
+a valid nonzero layout writes exactly `memory allocation of N bytes failed\n`
+to stderr, with `N` rendered as unsigned decimal, then aborts the process
+(SIGABRT on the hosted native target). This fatal path uses stack storage and
+the shared raw-byte terminal writer: it neither allocates a diagnostic carrier
+nor invokes a Rust panic hook, task-stop publication, or backtrace rendering.
+The Rust-tier seed adapter preserves the same bytes and termination as the
+Jet-owned allocator; it does not inherit host-toolchain allocation-error policy.
+
 ## One meaning across execution tiers
 
 AOT, interpreter/comptime evaluation, and web execution are

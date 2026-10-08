@@ -582,6 +582,40 @@ mod jet_c_abi {
         guard(|| record(super::JetTaskFailure::Panicked(view(reason).to_owned())))
     }
 
+    // One decimal digit needs at most one bit, so this stack bound covers the
+    // complete usize range on every target without a heap-backed formatter.
+    #[cfg(not(jet_native_pack))]
+    const ALLOCATION_FAILURE_CAPACITY: usize =
+        b"memory allocation of ".len() + usize::BITS as usize + b" bytes failed\n".len();
+
+    #[cfg(not(jet_native_pack))]
+    fn allocation_failure_message(mut size: usize, buffer: &mut [u8; ALLOCATION_FAILURE_CAPACITY]) -> &[u8] {
+        let suffix = b" bytes failed\n";
+        let mut start = buffer.len() - suffix.len();
+        buffer[start..].copy_from_slice(suffix);
+        loop {
+            start -= 1;
+            buffer[start] = b'0' + (size % 10) as u8;
+            size /= 10;
+            if size == 0 { break; }
+        }
+        let prefix = b"memory allocation of ";
+        start -= prefix.len();
+        buffer[start..start + prefix.len()].copy_from_slice(prefix);
+        &buffer[start..]
+    }
+
+    #[cfg(not(jet_native_pack))]
+    #[cold]
+    fn allocation_failure(size: usize) -> ! {
+        // OOM is process-fatal, not a Jet panic or a task stop. In particular,
+        // Rust's allocation-error/panic hook must not add a backtrace note.
+        let mut buffer = [0u8; ALLOCATION_FAILURE_CAPACITY];
+        let message = allocation_failure_message(size, &mut buffer);
+        let _ = super::jet_term_write_stderr_bytes(message, true);
+        std::process::abort()
+    }
+
     // Rust-tier seed/verification path only; dies when that tier is cut over.
     // Native packs have one allocator definition, in the Jet runtime object.
     #[cfg(not(jet_native_pack))]
@@ -593,7 +627,7 @@ mod jet_c_abi {
             // SAFETY: the layout has a non-zero size.
             let ptr = unsafe { std::alloc::alloc(layout) };
             if ptr.is_null() {
-                std::alloc::handle_alloc_error(layout);
+                allocation_failure(layout.size());
             }
             ptr
         })
