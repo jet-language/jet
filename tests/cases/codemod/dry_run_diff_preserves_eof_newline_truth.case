@@ -1,0 +1,10 @@
+# HAND-PORT tests/codemod.rs:890-920 dry_run_diff_preserves_eof_newline_truth
+# Original predicates; same-head kit verification pending.
+fixture: dry_run_diff_preserves_eof_newline_truth.fixture
+env: NO_COLOR=1
+copy: Examples/a.jet before.bytes
+step: jet inspect codemod rename.codemod.json --dry-run
+exit: 0
+stdout: count "\\ No newline at end of file" = 2 # original predicate
+file: Examples/a.jet == before.bytes
+

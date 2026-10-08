@@ -1,0 +1,48 @@
+# HAND-PORT tests/jetdoc.rs:56-118 json_and_local_outputs_are_stable_and_complete
+# Original predicates; same-head kit verification pending.
+fixture: json_and_local_outputs_are_stable_and_complete.fixture
+env: NO_COLOR=1
+step first: jet doc --json {work}/run.jet
+exit: 0
+step: jet doc --json {work}/run.jet
+exit: 0
+stdout: == first
+stdout: ~ "\"schema_version\":1" # original predicate
+stdout: ~ "\"modules\"" # original predicate
+stdout: ~ "\"kind\":\"struct\"" # original predicate
+stdout: ~ "\"kind\":\"function\"" # original predicate
+stdout: ~ "\"kind\":\"marker\"" # original predicate
+stdout: ~ "\"kind\":\"protocol\"" # original predicate
+stdout: ~ "\"impls\"" # original predicate
+stdout: ~ "\"kind\":\"trait_impl\"" # original predicate
+stdout: ~ "\"doctests\"" # original predicate
+stdout: ~ "answer()" # original predicate
+stdout: ~ "\"failure_contract\":\"Int\"" # original predicate
+stdout: ~ "\"failure_source\":\"implicit default !Err\"" # original predicate
+stdout: ~ "\"examples\":[\"`answer()`\"]" # original predicate
+stdout: ~ "\"expression\":\"1 + 1\",\"expected\":\"2\"" # original predicate
+stdout: ~ "\"link\":\"run.jet#L35\"" # original predicate
+stdout: ~ "run.jet#L" # original predicate
+stdout: ~ "run.jet#L" # original predicate
+stdout: ~ "run.jet#L" # original predicate
+stdout: before "\"qualified_name\":\"Checked\"" "\"qualified_name\":\"Choice\"" # original predicate
+stdout: before "\"qualified_name\":\"Choice\"" "\"qualified_name\":\"Displayable\"" # original predicate
+stdout: before "\"qualified_name\":\"Displayable\"" "\"qualified_name\":\"Displayable::display\"" # original predicate
+stdout: before "\"qualified_name\":\"Displayable::display\"" "\"qualified_name\":\"Payment\"" # original predicate
+stdout: before "\"qualified_name\":\"Payment\"" "\"qualified_name\":\"Widget\"" # original predicate
+stdout: before "\"qualified_name\":\"Widget\"" "\"qualified_name\":\"answer\"" # original predicate
+step: jet doc {work}/run.jet
+exit: 0
+file: docs/index.html ~ "Jet Documentation" # original predicate
+file: docs/index.html ~ "<h4>Examples</h4>" # original predicate
+file: docs/index.html ~ "<li><code>`answer()`</code></li>" # original predicate
+file: docs/index.html ~ "1 + 1 // =&gt; 2" # original predicate
+file: docs/index.html ~ "../run.jet#L35" # original predicate
+file: docs/index.html ~ "run.jet#L" # original predicate
+file: docs/index.md ~ "Examples:\n\n- `answer()`" # original predicate
+file: docs/index.md ~ "failure: Int (implicit default Err!)" # original predicate
+file: docs/index.md ~ "## Doctests" # original predicate
+file: docs/index.md ~ "1 + 1 // => 2" # original predicate
+file: docs/index.md ~ "[Source](../run.jet#L35)" # original predicate
+file: docs/index.md ~ "run.jet#L" # original predicate
+

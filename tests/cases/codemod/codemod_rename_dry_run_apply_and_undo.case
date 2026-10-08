@@ -1,0 +1,27 @@
+# HAND-PORT tests/codemod.rs:41-116 codemod_rename_dry_run_apply_and_undo
+# Original predicates; same-head kit verification pending.
+fixture: codemod_rename_dry_run_apply_and_undo.fixture
+env: NO_COLOR=1
+write: rename.codemod.json object.template
+step: jet inspect codemod rename.codemod.json --dry-run
+exit: 0
+stdout: ~ "RenameReport" # original predicate
+stdout: ~ "report -> summarize" # original predicate
+file: Examples/main.jet ~ "fn report" # original predicate
+step: jet inspect codemod apply rename.codemod.json
+exit: 0
+file: Examples/main.jet ~ "fn summarize" # original predicate
+file: Examples/main.jet ~ "summarize()" # original predicate
+file: .jet/codemods/RenameReport.log.json exists
+file: .jet/codemods/RenameReport.log.json ~ "inverse_from" # original predicate
+file: .jet/codemods/RenameReport.log.json ~ "after_hash" # original predicate
+file: .jet/codemods/RenameReport.log.json ~ "inverse_edits" # original predicate
+file: .jet/codemods/RenameReport.log.json ~ "\"semantic_ops\"" # original predicate
+file: .jet/codemods/RenameReport.log.json ~ "\"kind\":\"rename\"" # original predicate
+file: .jet/codemods/RenameReport.log.json ~ "\"from\":\"report\"" # original predicate
+file: .jet/codemods/RenameReport.log.json ~ "\"to\":\"summarize\"" # original predicate
+step: jet inspect codemod undo .jet/codemods/RenameReport.log.json
+exit: 0
+file: Examples/main.jet ~ "fn report" # original predicate
+file: Examples/main.jet ~ "report()" # original predicate
+

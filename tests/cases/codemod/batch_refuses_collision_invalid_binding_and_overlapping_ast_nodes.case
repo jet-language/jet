@@ -1,0 +1,19 @@
+# HAND-PORT tests/codemod.rs:465-508 batch_refuses_collision_invalid_binding_and_overlapping_ast_nodes
+# Original predicates; same-head kit verification pending.
+fixture: batch_refuses_collision_invalid_binding_and_overlapping_ast_nodes.fixture
+env: NO_COLOR=1
+copy: Examples/a.jet before.bytes
+copy: Collision.json bad.codemod.json
+step: jet inspect codemod bad.codemod.json --dry-run
+exit: nonzero
+stderr: ~ "destination `summarize`" # original predicate
+copy: Binding.json bad.codemod.json
+step: jet inspect codemod bad.codemod.json --dry-run
+exit: nonzero
+stderr: ~ "does not resolve" # original predicate
+copy: Overlap.json bad.codemod.json
+step: jet inspect codemod bad.codemod.json --dry-run
+exit: nonzero
+stderr: ~ "overlapping edits" # original predicate
+file: Examples/a.jet == before.bytes
+
