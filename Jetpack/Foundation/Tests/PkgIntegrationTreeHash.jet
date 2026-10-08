@@ -1,0 +1,33 @@
+// Assertion-for-assertion ports of tests/pkg.rs:2736-2763.
+// PENDING-SEAM(package-tests); original source strings are hashed as data.
+
+// Ported from pkg.rs:28-40: temp root plus parent-creating file writes.
+fn foundation_pkg_integration_hash_dir(label: String) -[FS, Env]> String Never! {
+    dir :: files.join(sys.temp_dir(), "jet_pkg_{label}_{process.current_pid()}")
+    files.create_dir_all(dir) ?? panic("create original temp dir")
+    dir
+}
+
+// Ported from pkg.rs:2736-2750.
+#Test("pkg integration tree_hash_deterministic") {
+    dir :: foundation_pkg_integration_hash_dir("tree_hash_det")
+    files.write(files.join(dir, "a.jet"), "fn foo() {{}}") ?? panic("write a")
+    files.write(files.join(dir, "b.jet"), "fn bar() {{}}") ?? panic("write b")
+    h1 :: foundation_tree_hash(dir)
+    h2 :: foundation_tree_hash(dir)
+    assert_eq(h1, h2)
+    assert(h1.starts_with("sha256-"))
+    files.remove_all(dir).drop("original cleanup result unasserted")
+}
+
+// Ported from pkg.rs:2753-2763.
+#Test("pkg integration tree_hash_changes_on_content_change") {
+    dir :: foundation_pkg_integration_hash_dir("tree_hash_chg")
+    path :: files.join(dir, "a.jet")
+    files.write(path, "fn foo() {{}}") ?? panic("write original")
+    h1 :: foundation_tree_hash(dir)
+    files.write(path, "fn foo() {{ print(\"hello\") }}") ?? panic("write mutation")
+    h2 :: foundation_tree_hash(dir)
+    assert(h1 != h2)
+    files.remove_all(dir).drop("original cleanup result unasserted")
+}
