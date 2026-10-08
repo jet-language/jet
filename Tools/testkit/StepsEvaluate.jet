@@ -8,7 +8,10 @@ fn kit_steps_path_tokens(value: String) -> Bool {
 fn kit_steps_history_stream(reference: String, subject: String, history: [KitCapturedStep], raw: Bool) -> String? {
     label :: kit_steps_relation_label(reference)
     selected :: kit_steps_relation_stream(reference, subject)
-    loop saved in history {
+    index := history.len()
+    loop index > 0 {
+        index -= 1
+        saved :: history[index]
         if saved.label == label {
             if raw -> return Val(kit_steps_select_stream(saved.raw_stdout, saved.raw_stderr, selected))
             return Val(kit_steps_select_stream(saved.stdout, saved.stderr, selected))

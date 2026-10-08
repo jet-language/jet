@@ -56,7 +56,10 @@ fn kit_steps_median_value(labels: [String], history: [KitCapturedStep]) -> Int? 
     values := [Int]{}
     loop label in labels {
         found := false
-        loop receipt in history {
+        index := history.len()
+        loop index > 0 {
+            index -= 1
+            receipt :: history[index]
             if receipt.label == label {
                 &values.push(receipt.elapsed_ns)
                 found = true

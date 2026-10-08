@@ -174,7 +174,10 @@ fn kit_steps_json_relation(actual: String, assertion: KitAssertion, history: [Ki
     stream :: kit_steps_relation_stream(reference, assertion.stream)
     factor :: if target == "" -> 1 else -> Int.parse(assertion.value.slice(0, assertion.value.index("*") ?? 0)) ?? 0
     previous := String?{None}
-    loop capture in history {
+    index := history.len()
+    loop index > 0 {
+        index -= 1
+        capture :: history[index]
         if capture.label == label {
             previous = Val(kit_steps_select_stream(capture.raw_stdout, capture.raw_stderr, stream))
             break
