@@ -591,6 +591,32 @@ fn os_clone_i64(flags: I64, stack: I64, parent_tid: I64, child_tid: I64) -> I64 
     """
 }
 
+#[Unsafe("calls checked System V Unit code; the caller lends one live raw machine-word argument"), FFI(asm)]
+fn os_call1_unit_i64(address: I64, a: I64) {
+    """
+    push {address}
+    push {a}
+    pop rdi
+    pop r11
+    call r11
+    ; clobbers rax, rcx, rdx, rsi, rdi, r8, r9, r10, r11, xmm0, xmm1, xmm2, xmm3, xmm4, xmm5, xmm6, xmm7, xmm8, xmm9, xmm10, xmm11, xmm12, xmm13, xmm14, xmm15
+    """
+}
+
+#[Unsafe("calls checked System V Unit code; the caller vouches for both raw machine-word arguments"), FFI(asm)]
+fn os_call2_unit_i64(address: I64, a: I64, b: I64) {
+    """
+    push {address}
+    push {a}
+    push {b}
+    pop rsi
+    pop rdi
+    pop r11
+    call r11
+    ; clobbers rax, rcx, rdx, rsi, rdi, r8, r9, r10, r11, xmm0, xmm1, xmm2, xmm3, xmm4, xmm5, xmm6, xmm7, xmm8, xmm9, xmm10, xmm11, xmm12, xmm13, xmm14, xmm15
+    """
+}
+
 #[Unsafe("calls a checked native runtime callback with one machine-word argument"), FFI(asm)]
 fn os_call1_i64(address: I64, a: I64) -> I64 {
     """
