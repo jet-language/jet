@@ -357,6 +357,14 @@ fn run() {
 // prove several rows, and each row may require several deterministic witnesses.
 // Paths are relative to the conformance corpus root.
 const FIXTURE_BINDINGS = new Map([
+  ["core.crypto.expert.aes256gcm_open", [
+    "core/crypto/aes/nist_gcm.jet",
+    "core/crypto/aes/seed_differential.jet",
+  ]],
+  ["core.crypto.expert.aes256gcm_seal", [
+    "core/crypto/aes/nist_gcm.jet",
+    "core/crypto/aes/seed_differential.jet",
+  ]],
   ["collection.Condition.notify_one", [
     "core/sync/condition_deadline.jet",
     "core/sync/condition_notify_all.jet",
