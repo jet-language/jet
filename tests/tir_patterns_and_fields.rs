@@ -1192,6 +1192,30 @@ fn run() {
     assert_tiers_agree("parameter_shadows_const", src, "7\n");
 }
 
+/// Jet's embedded CtValue.Int is exact; values beyond i64 must reach the MIR
+/// bridge as BigInt rather than an out-of-range native Int constant.
+#[test]
+fn embedded_comptime_integer_constants_keep_exact_values_on_all_tiers() {
+    let src = r#"
+MASK :: prep { 0xffffffffffffffff }
+BELOW :: prep { -9223372036854775809 }
+EDGE :: prep { 9223372036854775807 }
+fn run() {
+    print(MASK)
+    print(BELOW)
+    print(EDGE)
+    print(MASK - 1)
+    fixed :: U64{MASK}
+    print(fixed)
+}
+"#;
+    assert_tiers_agree(
+        "embedded_comptime_exact_int",
+        src,
+        "18446744073709551615\n-9223372036854775809\n9223372036854775807\n18446744073709551614\n18446744073709551615\n",
+    );
+}
+
 /// #3678: a comptime fragment lowers only the callables its constant reaches.
 /// An unrelated inherent method declared in a type body must not leave its type
 /// row pointing at an unlowered target (E0956 + E0107 for the constant).

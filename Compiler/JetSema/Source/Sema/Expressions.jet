@@ -330,7 +330,8 @@ fn sema_expr_precise_integer(value: TExpr, type_name_value: String, span: Span) 
     literal :: sema_expr_integer_literal_value(value) ?? return None
     if type_name_value == "Fraction" {
         one := sema_tir_expr(Type.Int, TExprKind.IntLit{value: 1, width: None}, span)
-        return Val(sema_tir_expr(Type.Named{name: "Fraction"}, TExprKind.PreciseBuiltin{type_name: "Fraction", function: "from_parts", args: [TExpr]{sema_tir_expr(Type.Int, TExprKind.IntLit{value: literal, width: None}, span), one}}, span))
+        numerator :: sema_expr_unbounded_integer_literal(literal, span)
+        return Val(sema_tir_expr(Type.Named{name: "Fraction"}, TExprKind.PreciseBuiltin{type_name: "Fraction", function: "from_parts", args: [TExpr]{numerator, one}}, span))
     }
     if type_name_value == "Decimal" {
         text := sema_tir_expr(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: "{literal}"}}}, span)
@@ -1899,6 +1900,13 @@ fn sema_expr_exact_integer_literal(value: Int, raw: String?) -> Int Never! {
     if negative -> -exact else -> exact
 }
 
+// Every synthesized unbounded literal shares the native i64/BigInt boundary;
+// Jet's exact Int carrier is wider than Rust's CtValue.Int and TIR IntLit.
+fn sema_expr_unbounded_integer_literal(value: Int, span: Span) -> TExpr Never! {
+    kind :: if value >= -9223372036854775807 - 1 && value <= 9223372036854775807 -> TExprKind.IntLit{value: value, width: None} else -> TExprKind.CtLit{value: TComptimeValue.BigInt{decimal: "{value}"}}
+    TExpr{ty: Type.Int, kind: kind, span: span, integer_bounds: Val(integer_bounds_exact(value)), cost: None}
+}
+
 // D-INTBIG1: a literal outside the i64 range keeps its exact value as a
 // BigInt constant (Rust TIR `CtLit(BigInt)`); a fixed-width one crosses the
 // checked Int-to-fixed conversion, as in Rust's lowering.
@@ -1907,7 +1915,7 @@ fn sema_expr_int_literal_tir(value: Int, ty: Type, width: TIntegerWidth?, span: 
     if value >= -9223372036854775807 - 1 && value <= 9223372036854775807 {
         return Val(TExpr{ty: ty, kind: TExprKind.IntLit{value: value, width: width}, span: span, integer_bounds: Val(bounds), cost: None})
     }
-    big :: TExpr{ty: Type.Int, kind: TExprKind.CtLit{value: TComptimeValue.BigInt{decimal: "{value}"}}, span: span, integer_bounds: Val(bounds), cost: None}
+    big :: sema_expr_unbounded_integer_literal(value, span)
     if width == None -> return Val(big)
     line :: sema_source_line_at(environment.source_segments, span) ?? 0
     sema_expr_numeric_conversion(big, ty, span, line)
@@ -3386,9 +3394,12 @@ fn sema_expr_check_pointer_from_address(alias: String, alias_span: Span, element
 
 fn sema_expr_check_comptime_name(name: String, span: Span, embedded: CtValue?, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if embedded == .Val(value) {
+        if value == .Int(number) {
+            literal :: sema_expr_int_literal_tir(number, Type.Int, None, span, environment) ?? return None
+            return sema_expr_expected(literal, expected, environment, &diagnostics)
+        }
         ty := sema_expr_expected_type(ast_comptime_value_type(value), environment)
         kind := if value == {
-            .Int(number) -> TExprKind.IntLit{value: number, width: None}
             .Float(float_value) -> if float_value == {
                 .F32(bits) | .F64(bits) -> TExprKind.FloatLit{value: bits}
             }

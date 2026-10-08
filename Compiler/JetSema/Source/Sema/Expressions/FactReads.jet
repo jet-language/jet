@@ -717,8 +717,12 @@ pub fn sema_fact_build_read(base: Expr, member: String, span: Span, expected: Ty
 // A prepared value as a checked expression: scalars keep their literal forms,
 // records and lists stay one compile-time literal.
 pub fn sema_fact_prepared_expr(value: TComptimeValue, ty: Type, span: Span) -> TExpr Never! {
+    if value == .Int(number) {
+        literal := sema_expr_unbounded_integer_literal(number, span)
+        literal.ty = ty
+        return literal
+    }
     kind :: if value == {
-        .Int(number) -> TExprKind.IntLit{value: number, width: None}
         .Bool(flag) -> TExprKind.BoolLit{value: flag}
         .String(text) -> TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: text}}}
         else -> TExprKind.CtLit{value: value}

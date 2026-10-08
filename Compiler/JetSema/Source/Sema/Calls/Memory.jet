@@ -183,7 +183,7 @@ pub fn sema_call_try_memory_static(receiver: Expr, method: String, args: [CallAr
                             return SemaMethodSpecialCheck{handled: true, value: None}
                         }
                         constructor = TAllocCtor.Fixed{size: size}
-                        &values.push(sema_tir_expr(Type.Int, TExprKind.IntLit{value: size, width: None}, argument.span))
+                        &values.push(sema_expr_unbounded_integer_literal(size, argument.span))
                     }
                     else -> {
                         if name == "Fixed" && method == "over" && !sema_call_memory_check_fixed_buffer(argument, checked, environment, &scopes, &state, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}

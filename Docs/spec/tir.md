@@ -122,6 +122,15 @@ payloads; recognizing that domain does not declare a conversion into default
 `Err`. Ordinary fallible bindings still propagate, so diagnostic-policy probes
 handle a decoder call directly instead of first binding only its success value.
 
+Synthesized integer literals use the same native-carrier boundary as parsed
+literals. `IntLit` and native `MIRConstant::Int` carry only signed 64-bit values;
+an exact `Int` outside that range uses `CtLit(BigInt)` and `MIRConstant::BigInt`
+with its exact decimal spelling and integer bounds. This includes embedded
+comptime integers, prepared facts, Fraction numerators, unit values and scales,
+and reconstructed fixed-allocation sizes. Fixed-width destinations retain the
+checked numeric conversion. The native MIR decoder rejects an out-of-range
+`Int` instead of truncating it or silently changing the constant kind.
+
 Pattern payload and field types instantiate the checked subject's owner
 parameters before binding locals; a declaration's bare `T`/`E` does not escape
 into its concrete match. Associated types in a trait declaration use `Self::X`.

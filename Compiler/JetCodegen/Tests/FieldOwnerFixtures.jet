@@ -44,8 +44,38 @@ fn fc_nominal_owners() {
     fc_require(diagnostic.contains("fixture-function") && diagnostic.contains("left") && diagnostic.contains("kind Option") && diagnostic.contains("kind Int"), "diagnostic retains original and normalized kinds and function")
 }
 
+// An embedded Jet CtValue.Int is exact, unlike the Rust half's i64 carrier.
+// Exercise the production semantic path before the checked native MIR codec.
+fn fc_embedded_integer_constants() {
+    span :: Span{start: 0, end: 1}
+    environment :: sema_scope_environment_init(None, "fixture", "fixture", "fixture", "fixture.jet", SemaSourceOrigin.Snapshot, [SemaSourceSegment]{}, [TTypeDef]{}, [SemaScopeDeclaration]{})
+    scopes := sema_scope_init("fixture")
+    state := sema_ownership_state_init()
+    context := sema_check_context_init()
+    diagnostics := [Diagnostic]{}
+    loop decimal in [String]{"18446744073709551615", "-9223372036854775809"} {
+        number :: Int.parse(decimal) ?? panic("fixture integer")
+        checked :: sema_expr_check_comptime_name("EXACT", span, Val(CtValue.Int{value: number}), None, environment, &scopes, &state, &context, &diagnostics) ?? panic("embedded integer was not checked")
+        expected :: TExprKind.CtLit{value: TComptimeValue.BigInt{decimal: decimal}}
+        fc_require(checked.ty == Type.Int && checked.kind == expected, "embedded exact integer uses BigInt")
+        fc_require(checked.integer_bounds == Val(integer_bounds_exact(number)), "embedded exact bounds")
+        prepared :: sema_fact_prepared_expr(TComptimeValue.Int{value: number}, Type.Int, span)
+        fc_require(prepared.kind == expected && prepared.integer_bounds == checked.integer_bounds, "prepared exact integer uses BigInt")
+        if checked.kind == .CtLit(value) {
+            lowered :: jet_codegen_lower_comptime_value(value, [SemaGraphModuleResult]{}, "", [String]{}) ?? panic("exact integer was not lowered")
+            fc_require(lowered == (MIRConstant.BigInt{decimal: decimal}), "native MIR keeps exact decimal")
+        }
+    }
+    loop number in [Int]{-9223372036854775807 - 1, 0, 9223372036854775807} {
+        checked :: sema_expr_check_comptime_name("NATIVE", span, Val(CtValue.Int{value: number}), None, environment, &scopes, &state, &context, &diagnostics) ?? panic("native integer was not checked")
+        fc_require(checked.kind == (TExprKind.IntLit{value: number, width: None}), "native integer keeps IntLit")
+    }
+    fc_require(diagnostics.len() == 0, "exact integer diagnostics")
+}
+
 fn run() {
     fc_tuple_owners()
     fc_nominal_owners()
+    fc_embedded_integer_constants()
     print("field owner contracts passed")
 }
