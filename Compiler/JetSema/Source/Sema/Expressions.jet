@@ -3196,10 +3196,21 @@ fn sema_expr_optional_builder(expr: Expr) -> Bool Never! {
     }
 }
 
+fn sema_expr_operator_label(op: BinOp) -> String Never! {
+    if op == {
+        .BitAnd -> "the bitwise and operator `&`"
+        .BitOr -> "the bitwise or operator `|`"
+        .BitXor -> "the bitwise xor operator `~|`"
+        .Pow -> "the power operator `^`"
+        .Rem -> "the operator `%%`"
+        else -> "the operator `{sema_expr_binary_name(op)}`"
+    }
+}
+
 fn sema_expr_missing_operator_hook(op: BinOp, owner: Type, span: Span) -> Diagnostic Never! {
     name :: type_name(owner)
     trait_name :: sema_expr_operator_trait(op) ?? ""
-    sema_error("E0360", span, "no `{sema_expr_binary_name(op)}` operator is defined for `{name}`", "user arithmetic dispatches only through one `impl {name}.{trait_name}` hook", "implement `{name}.{trait_name}`, or call a named method")
+    sema_error("E0360", span, "no {sema_expr_operator_label(op)} is defined for `{name}`", "user arithmetic dispatches only through one `impl {name}.{trait_name}` hook", "implement `{name}.{trait_name}`, or call a named method")
 }
 
 fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
@@ -3312,7 +3323,7 @@ fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expect
         right_name :: sema_expr_type_base_name(rhs.ty) ?? ""
         source_operator = sema_type_source_owns_nominal(graph, left_name, environment.module_identity) || sema_type_source_owns_nominal(graph, right_name, environment.module_identity)
     }
-    if source_operator {
+    if source_operator && sema_expr_operator_trait(op) != None {
         before :: diagnostics.len()
         value :: sema_expr_check_operator(op, left, right, lhs, rhs, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics, line)
         if value != None || diagnostics.len() != before -> return value
@@ -3345,7 +3356,7 @@ fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expect
         compared :: comparison.value ?? return None
         return sema_expr_expected(compared, expected, environment, &diagnostics)
     }
-    if sema_expr_has_numeric_overload(lhs.ty) || sema_expr_has_numeric_overload(rhs.ty) {
+    if sema_expr_operator_trait(op) != None && (sema_expr_has_numeric_overload(lhs.ty) || sema_expr_has_numeric_overload(rhs.ty)) {
         &diagnostics.push(sema_expr_missing_operator_hook(op, lhs.ty, span))
         return None
     }
