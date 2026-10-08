@@ -337,6 +337,8 @@ substitutes replay ciphertext, descriptors, or provider decisions. Direct decode
 store observations bypass recovery so installed revision assertions cannot be
 satisfied by a recovery side effect. Exact-reference retirement remains loadable,
 revocation rejects load, and denied authorization never creates a visible store.
+Rotation preparation supplies the seed lifecycle reason `rotated`; it is distinct
+from the caller's authorization reason and participates in the operation hash.
 Operation and authority-preview witnesses build their expected byte streams
 independently from a real prepared imported-key plan, then compare shared SHA-256
 digests without calling the provider's serialization builders. Historical-pair

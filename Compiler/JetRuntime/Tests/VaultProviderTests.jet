@@ -1077,7 +1077,14 @@ fn vault_fixture_error(error: I64, expected: I64) {
     vault_error_drop(error)
 }
 fn vault_fixture_prepare(root: I64, name: I64, kind: I64, action: I64, reference: I64, reason: I64, slots: I64) -> I64 {
-    vault_fixture_check(vault_prepare_at_root(root, name, kind, action, reference, I64{0}, jet_rt_string_clone(reason), slots) == I64{0})
+    owned_reason := I64{0}
+    if (action == I64{3}) {
+        rt_text_store(slots, I64{28259048196697970})
+        owned_reason = jet_rt_string_from_static(slots, I64{7})
+    } else {
+        owned_reason = jet_rt_string_clone(reason)
+    }
+    vault_fixture_check(vault_prepare_at_root(root, name, kind, action, reference, I64{0}, owned_reason, slots) == I64{0})
     rt_text_word(slots)
 }
 fn vault_fixture_authorize(plan: I64, kind: I64, reason: I64, slots: I64) -> I64 {
