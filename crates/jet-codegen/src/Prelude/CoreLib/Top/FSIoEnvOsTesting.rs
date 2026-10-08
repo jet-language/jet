@@ -27,6 +27,13 @@ fn jet_std_fs_walk_with_ignore(
             "fault injected: FS.Read",
         ));
     }
+    jet_std_fs_walk_with_ignore_raw(path, ignore_name)
+}
+
+fn jet_std_fs_walk_with_ignore_raw(
+    path: &String,
+    ignore_name: Option<&str>,
+) -> Result<Vec<jet_std::WalkEntry>, jet_std::IOError> {
     let mut out = jet_fs_walk_parallel_with_ignore(
         path,
         path,
@@ -49,6 +56,14 @@ fn jet_std_fs_walk_parallel(
 ) -> Result<Vec<jet_std::WalkEntry>, jet_std::IOError> {
     let ignore_name = jet_std_fs_walk_ignore_name(ignore_name);
     jet_std_fs_walk_parallel_with_ignore(path, ignore_name.as_deref())
+}
+
+pub(crate) fn jet_std_fs_walk_parallel_raw(
+    path: &String,
+    ignore_name: JetOutcome<String, JetAbsent>,
+) -> Result<Vec<jet_std::WalkEntry>, jet_std::IOError> {
+    let ignore_name = jet_std_fs_walk_ignore_name(ignore_name);
+    jet_std_fs_walk_with_ignore_raw(path, ignore_name.as_deref())
 }
 
 fn jet_std_fs_walk_parallel_with_ignore(
