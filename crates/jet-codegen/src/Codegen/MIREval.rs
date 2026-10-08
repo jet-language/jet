@@ -6,7 +6,7 @@
 //! canonical Core/Prelude dispatcher named by each row.
 
 use std::cell::{Cell, RefCell};
-use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 #[cfg(unix)]
 use std::ffi::{c_char, c_int, c_void, CString};
 use std::fmt::Write as _;
