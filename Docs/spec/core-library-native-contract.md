@@ -100,6 +100,13 @@ call and wiped before return. Domain-separated callers can hash two spans
 without allocating a concatenated message; the digest must not alias either
 input span. The algorithm is shared by vault and other runtime crypto callers.
 
+The internal X25519 boundary borrows 32-byte scalar and point spans and writes
+32 bytes to a disjoint output. Its 1536-byte, word-aligned scratch is exclusive
+and wiped before return (1568 bytes for public-key derivation). Field arithmetic
+uses bounded radix-65536 limbs, fixed-index loops, and mask-based swaps, not
+secret-dependent branches or arbitrary-precision reduction. A zero shared
+result is rejected by recipient protocols, not by the RFC 7748 primitive.
+
 A high-level native implementation must not be retained as an invisible runtime
 fallback for a Jet implementation. If an API changes identity or semantics,
 make the change at the contract boundary and migrate its users in one cutover.
