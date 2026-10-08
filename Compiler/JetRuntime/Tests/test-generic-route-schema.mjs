@@ -84,6 +84,12 @@ fn is_source_owned_core_web_query_shape() {}
   put("Compiler/JetBackend/Source/Lower/RuntimeRoutes.jet", "");
   put("Core/units/units.jet", "pub struct Measurement<T> { value: T, uncertainty: T }\npub struct Pair<A,B> { first: A, second: B }\n");
   const registry = (extra) => `CoreCallRecord::new("core.fixture", "scalar", "jet_fixture_scalar", true)\nCoreCallRecord::new("core.fixture", "plain", "jet_fixture_plain", true)\n${extra}`;
+  // Canonical scalar codec adapters also require the real FieldError Clone
+  // declaration (Prelude/CoreLib/JetStd/DataTree.rs:11-15), even in this
+  // metadata-only fixture. Do not weaken that production ownership gate.
+  const fieldErrorSource = readFileSync(join(root, "crates/jet-codegen/src/Prelude/CoreLib/JetStd/DataTree.rs"), "utf8");
+  const fieldErrorDeclaration = /#\[derive\(Clone, Debug, PartialEq\)\]\npub struct FieldError \{[^]*?\n\}/.exec(fieldErrorSource)?.[0];
+  assert.ok(fieldErrorDeclaration, "canonical FieldError declaration must be present");
   const declarations = `
 #[derive(Clone, PartialEq)]
 pub struct JetFixture { pub value: f64 }
@@ -93,6 +99,9 @@ pub struct JetMeasurement<T: Copy> { value: T, uncertainty: T }
 pub struct JetPair<A, B> { first: A, second: B }
 pub fn jet_fixture_scalar(value: f64) -> f64 { value }
 pub fn jet_fixture_plain(value: JetFixture) -> JetFixture { value }
+pub mod jet_std {
+${fieldErrorDeclaration}
+}
 `;
   // The FINAL seed has this real Rust builtin parameter. It is unsupported
   // by the parameter codec, not a missing emitted generic crate record.
