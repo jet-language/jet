@@ -3627,6 +3627,14 @@ Snapshot/event-log selection, replay framing, topology/observation text, and
 workflow history/outcome selection are Jet policies. Durable reads retain the
 existing host storage/replay operation during the Rust-seed tier; field
 projections expose only existing facts and retire at the Jet-runtime cutover.
+Group membership validation and chaos-failure ordering are Jet policies.
+Group reparenting retains its original per-worker order, and chaos increments
+its checked counter before selecting the first running worker.
+Event append and snapshot commit validate their adapter, authority, payload,
+and limits in Jet and frame UTF-8 byte lengths there. Snapshot persistence and
+the snapshot field assignment remain inside the same existing host mutex;
+event persistence retains the existing locked store append before the local
+event record is appended. No lock guard or second authority is exposed.
 
 | Signature | Result | Description |
 |---|---|---|

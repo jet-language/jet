@@ -849,3 +849,109 @@ fn state_prefix(raw: [U8], windows: Bool) -> StatePathPrefix Never! {
     assert(state_parent_lex("\\\\?\\C:\\dir\\.\\file", true) == (Val("\\\\?\\C:\\dir\\.")))
     assert(state_parent_lex("\\\\.\\COM42\\file", true) == (Val("\\\\.\\COM42\\")))
 }
+
+pub fn group(tree: ServiceTree, name: String, workers: [String]) ServiceError! {
+    #Unsafe("Services1546: exclusive tree write borrow preserves validation, reparent, append ordering") {
+        if core.service.__tree_started(tree) -> return Err(ServiceError.Policy("cannot add groups after start"))
+        facts :: core.service.__group_parts(tree)
+        if validate_group(name, workers, facts.workers, facts.groups) == {
+            .Err(error) -> return Err(error)
+            .Ok(_) -> {}
+        }
+        loop worker in workers {
+            if core.service.__group_reparent(&tree, name, worker) == {
+                .Err(error) -> return Err(error)
+                .Ok(_) -> {}
+            }
+        }
+        core.service.__group_push(&tree, name, workers)
+    }
+}
+
+fn validate_group(name: String, workers: [String], known: [String], groups: [(name: String, workers: [String])]) ServiceError! {
+    if name.trim().len() == 0 || !valid_service_text(name, 256) || workers.len() == 0 || workers.len() > 4096 {
+        return Err(ServiceError.Policy("service group needs a visible name and at least one worker"))
+    }
+    loop existing in groups {
+        if existing.name == name -> return Err(ServiceError.Policy("group `{name}` already exists"))
+    }
+    loop worker in workers {
+        found := false
+        loop existing in known {
+            if existing == worker -> found = true
+        }
+        if !found -> return Err(ServiceError.Unknown("group `{name}` references unknown worker `{worker}`"))
+    }
+    loop worker in workers {
+        loop existing in groups {
+            loop member in existing.workers {
+                if member == worker -> return Err(ServiceError.Policy("a worker can belong to only one service supervisor group"))
+            }
+        }
+    }
+    loop i in 0..<workers.len() {
+        loop j in 0..<i {
+            if workers[j] == workers[i] -> return Err(ServiceError.Policy("group `{name}` lists a worker more than once"))
+        }
+    }
+}
+
+pub fn chaos_fail(tree: ServiceTree) -> Int ServiceError! {
+    #Unsafe("Services7044: counter write precedes reachable-worker selection and canonical failure policy") {
+        if !core.service.__tree_started(tree) -> return Err(ServiceError.NotStarted("service tree is not started"))
+        counter :: core.service.__tree_chaos_count(tree)
+        if counter == 9223372036854775807 -> return Err(ServiceError.Policy("chaos failure counter exhausted"))
+        next :: counter + 1
+        core.service.__tree_write_chaos_count(&tree, next)
+        endpoint :: core.service.__first_running_endpoint(tree) ?? return Err(ServiceError.Partitioned("chaos failure has no reachable service worker"))
+        if core.service.fail_worker(&tree, endpoint) == {
+            .Err(error) -> return Err(error)
+            .Ok(_) -> {}
+        }
+        return core.service.__tree_chaos_count(tree)
+    }
+}
+
+pub fn append_event(tree: ServiceTree, event: String) ServiceError! {
+    #Unsafe("Services4575: source owns adapter/authority/payload/count checks and record framing; store append before field push") {
+        if !core.service.__tree_started(tree) -> return Err(ServiceError.NotStarted("service tree is not started"))
+        if core.service.__tree_state_adapter(tree) != __TreeStateAdapter.EventLog -> return Err(ServiceError.Policy("append_event requires EventLog state adapter"))
+        authority :: core.service.__tree_state_authority(tree) ?? return Err(ServiceError.Policy("EventLog state has no injected authority"))
+        if !valid_record_payload(event) -> return Err(ServiceError.Policy("event record exceeds the state record limit"))
+        if core.service.__tree_event_count(tree) >= 100000 -> return Err(ServiceError.Policy("event-log record limit exceeded"))
+        record :: "v{authority.version}:{event.bytes().len()}:{event}"
+        if core.service.__event_store_append(tree, record) == {
+            .Err(error) -> return Err(error)
+            .Ok(_) -> {}
+        }
+        core.service.__tree_event_push(&tree, record)
+    }
+}
+
+pub fn commit_snapshot(tree: ServiceTree, payload: String) ServiceError! {
+    #Unsafe("Services4525: host record-write leaf retains existing mutex through store write and field assignment; no guard exposed") {
+        if !core.service.__tree_started(tree) -> return Err(ServiceError.NotStarted("service tree is not started"))
+        if core.service.__tree_state_adapter(tree) != __TreeStateAdapter.Snapshot -> return Err(ServiceError.Policy("commit_snapshot requires Snapshot state adapter"))
+        authority :: core.service.__tree_state_authority(tree) ?? return Err(ServiceError.Policy("Snapshot state has no injected authority"))
+        if !valid_record_payload(payload) -> return Err(ServiceError.Policy("snapshot record exceeds the state record limit"))
+        record :: "v{authority.version}:{payload.bytes().len()}:{payload}"
+        return core.service.__snapshot_store_write(&tree, record)
+    }
+}
+
+fn valid_record_payload(text: String) -> Bool Never! {
+    // Rust allows empty messages/records but rejects every Unicode Cc scalar.
+    text.len() == 0 || valid_service_text(text, 1048576)
+}
+
+#Test("service group policy preserves native error precedence") {
+    assert(if validate_group("", [String]{}, [String]{}, [(name: String, workers: [String])]{}) == {.Err(.Policy(message)) -> message == "service group needs a visible name and at least one worker" else -> false})
+    existing :: [(name: String, workers: [String])]{(name: "g", workers: [String]{"w"})}
+    assert(if validate_group("g", [String]{"unknown"}, [String]{"w"}, existing) == {.Err(.Policy(message)) -> message == "group `g` already exists" else -> false})
+    assert(if validate_group("new", [String]{"unknown", "w"}, [String]{"w"}, existing) == {.Err(.Unknown(message)) -> message == "group `new` references unknown worker `unknown`" else -> false})
+    assert(if validate_group("new", [String]{"w", "w"}, [String]{"w"}, existing) == {.Err(.Policy(message)) -> message == "a worker can belong to only one service supervisor group" else -> false})
+    assert(if validate_group("new", [String]{"w", "w"}, [String]{"w"}, [(name: String, workers: [String])]{}) == {.Err(.Policy(message)) -> message == "group `new` lists a worker more than once" else -> false})
+    assert(valid_record_payload(""))
+    assert(valid_record_payload("é"))
+    assert(!valid_record_payload("\n"))
+}
