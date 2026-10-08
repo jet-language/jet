@@ -3254,6 +3254,19 @@ mod core_native_projection_tests {
     };
 
     #[test]
+    fn root_native_carrier_projection_preserves_qualified_user_names() {
+        for name in [
+            jet_foundation::Syntax::TYPE_COMPLEX,
+            jet_foundation::Syntax::TYPE_VIEW_ITER,
+        ] {
+            assert!(super::has_native_type_projection(name));
+        }
+        for name in ["user::Complex", "user::ViewIter"] {
+            assert!(!super::has_native_type_projection(name));
+        }
+    }
+
+    #[test]
     fn imported_core_native_names_project_without_matching_user_qualified_names() {
         let compute_error = "<corelib>/Core/compute::Core/compute/compute.jet::ComputeError";
         let vjp_run = "<corelib>/Core/compute::Core/compute/compute.jet::VJPRun";

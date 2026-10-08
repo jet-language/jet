@@ -3,6 +3,10 @@ use std::process::Command;
 mod common;
 
 fn emit_native_aot(bundle: &jet::AST::ProgramBundle) -> String {
+    emit_native_aot_with_root_prefix(bundle, "")
+}
+
+fn emit_native_aot_with_root_prefix(bundle: &jet::AST::ProgramBundle, root_prefix: &str) -> String {
     let request = jet_foundation::MIR::MirArtifactRequest::new(
         jet_foundation::MIR::MirArtifactTarget::RustAot,
         jet_foundation::MIR::MirArtifactKind::NativeExecutable,
@@ -22,10 +26,22 @@ fn emit_native_aot(bundle: &jet::AST::ProgramBundle) -> String {
         &jet::Codegen::MIRRust::MirRustConfig {
             target: jet_foundation::Layout::TargetLayout::host(),
             target_kind: jet::Codegen::MIRRust::MirRustTarget::Native,
-            root_prefix: String::new(),
+            root_prefix: root_prefix.to_string(),
             execution: jet::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact),
         },
     )
+}
+
+#[test]
+fn complex_unit_literals_use_registered_native_root_with_prefix() {
+    let bundle = checked_project(
+        "complex_root_projection",
+        "authority: { holds: { allow: [IO, Mem.Alloc] } }",
+        include_str!("../Examples/features/types/unit_literals.jet"),
+    );
+    let rust = emit_native_aot_with_root_prefix(&bundle, "runtime::");
+    assert!(rust.contains("runtime::JetComplex"), "{rust}");
+    assert!(!rust.contains("runtime::__jet_Complex"), "{rust}");
 }
 
 /// Number of `impl <rust_trait> for <type>` headers in generated Rust for the
