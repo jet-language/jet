@@ -41,6 +41,28 @@ for (const [name, text] of Object.entries({json: "JET_TEST_JSON", capture: "JET_
   for (let i = 0; i < bytes.length; i++) source += `    trap_put(data + I64{${i}}, I64{${bytes[i]}})\n`;
   source += "    text\n}\n\n";
 }
+// Core.rs:678-860 / Outcome.rs:2502-2528 test-scope diagnostics use owned E4
+// builders, sharing these fixed-width literal appenders with the reporter.
+for (const [name, text] of Object.entries({
+  expected: "expected ", region_stop: "this region to stop with ", region_fail: "this region to fail",
+  stop_code: "a stop with ", stop_message: "a stop whose message contains ",
+  code_message: " whose message contains ", passed: ", but it passed", got: ", got ",
+  colon: ": ", timeout: "timeout: region took ", timeout_limit: "ns, limit was ", ns: "ns",
+})) {
+  source += `fn test_scope_msg_${name}(builder: I64) {\n`;
+  const bytes = Buffer.from(text);
+  for (let at = 0; at < bytes.length; at += 8) {
+    const piece = bytes.subarray(at, at + 8);
+    let word = 0n;
+    for (let i = 0; i < piece.length; i++) word |= BigInt(piece[i]) << BigInt(8 * i);
+    source += `    rt_text_push_word(builder, I64{${BigInt.asIntN(64, word)}}, I64{${piece.length}})\n`;
+  }
+  source += "}\n\n";
+}
+const ordinary = Buffer.from("__jet_test_ordinary_failure__");
+source += `fn test_scope_ordinary(text: I64) -> Bool {\n    if (text == I64{0}) { return false }\n    if (trap_word(text + I64{8}) != I64{${ordinary.length}}) { return false }\n    data :: trap_word(text)\n`;
+for (let i = 0; i < ordinary.length; i++) source += `    if (trap_byte(data + I64{${i}}) != I64{${ordinary[i]}}) { return false }\n`;
+source += "    true\n}\n\n";
 const target = resolve(root, "Compiler/JetRuntime/Source/TestMessages.jet");
 if (args.includes("--check")) {
   if (readFileSync(target, "utf8") !== source) throw new Error("TestMessages.jet is stale");
