@@ -1215,7 +1215,6 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         // `RNG` handle's Prelude carrier is `jet_std::Rng`.
         "Clock" => Some("Clock"),
         "RNG" => Some("Rng"),
-        "Fake" => Some("Fake"),
         // D-SHAPE-DURATION1/D-SHAPE-DURATIONCONVERT1: checked duration values.
         "Duration" => Some("Duration"),
         "DurationUnit" => Some("DurationUnit"),

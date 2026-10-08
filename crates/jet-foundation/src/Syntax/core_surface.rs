@@ -993,8 +993,6 @@ pub const RNG_TYPE: &str = "RNG";
 /// world carrying the controlled clock, scheduler, external-input providers,
 /// and seeded test randomness.
 pub const DETERMINISTIC_WORLD_TYPE: &str = "DeterministicWorld";
-/// D-TESTDATA1: deterministic locale-aware fake-data capability.
-pub const FAKE_TYPE: &str = "Fake";
 
 /// D-SHAPE-DURATION1=A / D-SHAPE-DURATIONCONVERT1=A (ratified 2026-07-14) /
 /// D-TYPE2-TIME1=A (ratified 2026-08-06): runtime numbers become checked

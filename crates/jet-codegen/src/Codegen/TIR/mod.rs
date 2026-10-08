@@ -14392,12 +14392,6 @@ pub enum THandleOp {
     HistoryRngNextU64,
     /// D-TEST-STRATEGY1=A HistoryRng: `below(bound)` consumes the callback RNG.
     HistoryRngBelow,
-    /// D-TESTDATA1 Fake: locale and deterministic fake-data domain draws.
-    FakeLocale,
-    FakeName,
-    FakeEmail,
-    FakeHost,
-    FakeAddress,
     GameSceneNew,
     GameReplayRecord,
     GameBackendHeadless,

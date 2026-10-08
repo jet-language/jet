@@ -2323,28 +2323,6 @@ impl<'a> Interp<'a> {
                 )?;
                 return Ok(value);
             }
-            (
-                CtValue::Struct { type_name, .. },
-                method @ ("locale" | "name" | "email" | "host" | "address"),
-            ) if type_name == crate::Syntax::FAKE_TYPE => {
-                if method != "locale" && !matches!(receiver, Expr::Ident(..) | Expr::Field(..)) {
-                    return Err(unsupported("Fake method on a temporary value", span));
-                }
-                // The kernel advances the generator's own state, so it needs a
-                // mutable value; `recv` is bound by the match, so take a local
-                // copy and write it back below exactly as the RNG arm does.
-                let mut fake_recv = recv.clone();
-                let value = super::super::core_calls::apply_fake_method(
-                    &mut fake_recv,
-                    method,
-                    &argv,
-                    span,
-                )?;
-                if method != "locale" {
-                    self.write_back(receiver, fake_recv, scope)?;
-                }
-                return Ok(value);
-            }
             _ => {}
         }
         if is_build_context && method == "fetch" {

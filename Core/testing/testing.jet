@@ -18,7 +18,7 @@ pub alias RNG :: random.RNG
 
 // core.testing — deterministic tests and comparison records.
 //
-// Fixture, golden, world, fake-data, and suite state remain host-owned;
+// Fixture, golden, world, and suite state remain host-owned;
 // callback comparison and bounded history generation stay portable Jet code.
 
 pub fn assert_equal(comparison: TestComparison) -> Bool Never! {
@@ -139,8 +139,127 @@ pub fn fake_clock(unix_ms: Int) -> Clock Never! { Clock.new(unix_ms) }
 /// A caller-owned deterministic RNG seeded by the ordinary source constructor.
 pub fn fake_rng(seed: Int) -> random.RNG Never! { random.rng(seed) }
 
-/// The deterministic Prelude `Fake` data capability built by the provider constructor.
-pub fn fake_data(seed: Int) -> Fake Never! { core.testing.fake_data(seed) }
+/// Deterministic fake data uses the same source SplitMix64 stream as RNG.
+pub fn fake_data(seed: Int) -> Fake Never! {
+    Fake{state: U64{Int{I64{seed}} & 18446744073709551615}, locale_code: 0}
+}
+
+pub struct Fake {
+    state: U64
+    locale_code: Int
+
+    impl Display {
+        fn display(self) -> String {
+            language :: if self.locale_code == 1 -> "de" else -> "en"
+            "Fake {{ locale: {language} }}"
+        }
+    }
+
+    impl Debug {
+        fn debug(self) -> String Never! {
+            "Fake {{ state: {self.state}, locale: {self.locale_code} }}"
+        }
+    }
+
+    pub fn locale(self, locale: String) -> Fake Never! {
+        code :: if locale == "en" -> 0 else if locale == "de" -> 1 else -> panic("unsupported fake-data locale `{locale}`; supported locales: en, de")
+        Fake{state: self.state ~| (U64{code}.wrapping_mul(U64{15111065706836454659})), locale_code: code}
+    }
+
+    pub fn name(&self) -> String Never! {
+        first :: fake_first(&self.state, self.locale_code)
+        last :: fake_last(&self.state, self.locale_code)
+        "{first} {last}"
+    }
+
+    pub fn email(&self) -> String Never! {
+        first :: core.text.parse.lower(fake_first(&self.state, self.locale_code))
+        last :: core.text.parse.lower(fake_last(&self.state, self.locale_code))
+        host :: fake_host(&self.state, self.locale_code)
+        "{first}.{last}@{host}"
+    }
+
+    pub fn host(&self) -> String Never! {
+        name :: fake_host(&self.state, self.locale_code)
+        "www.{name}"
+    }
+
+    pub fn address(&self) -> String Never! {
+        number :: core.math.random.__seeded_int(&self.state, 1, 999) ?? panic("fake address has a valid range")
+        street :: fake_street(&self.state, self.locale_code)
+        city :: fake_city(&self.state, self.locale_code)
+        "{number} {street}, {city}"
+    }
+}
+
+FAKE_EN_FIRST :: [String]{"Alice", "Bob", "Clara", "Diego"}
+FAKE_EN_LAST :: [String]{"Smith", "Jones", "Taylor", "Brown"}
+FAKE_EN_HOSTS :: [String]{"example.test", "mail.test", "demo.test"}
+FAKE_EN_STREETS :: [String]{"Oak Street", "Pine Street", "Maple Street", "Cedar Street"}
+FAKE_EN_CITIES :: [String]{"Austin", "Boston", "Denver", "Portland"}
+FAKE_DE_FIRST :: [String]{"Anna", "Bruno", "Clara", "Dieter"}
+FAKE_DE_LAST :: [String]{"Schmidt", "Fischer", "Weber", "Wagner"}
+FAKE_DE_HOSTS :: [String]{"beispiel.test", "mail.test", "demo.test"}
+FAKE_DE_STREETS :: [String]{"Bahnhofstraße", "Hauptstraße", "Lindenweg", "Gartenweg"}
+FAKE_DE_CITIES :: [String]{"Berlin", "Bremen", "Dresden", "Hamburg"}
+
+fn fake_index(state: &U64, count: Int) -> Int Never! {
+    core.math.random.__seeded_int(&state, 0, count - 1) ?? panic("fake tables are nonempty")
+}
+
+fn fake_first(state: &U64, locale: Int) -> String Never! {
+    index :: fake_index(&state, 4)
+    if locale == 1 -> FAKE_DE_FIRST[index] else -> FAKE_EN_FIRST[index]
+}
+
+fn fake_last(state: &U64, locale: Int) -> String Never! {
+    index :: fake_index(&state, 4)
+    if locale == 1 -> FAKE_DE_LAST[index] else -> FAKE_EN_LAST[index]
+}
+
+fn fake_host(state: &U64, locale: Int) -> String Never! {
+    index :: fake_index(&state, 3)
+    if locale == 1 -> FAKE_DE_HOSTS[index] else -> FAKE_EN_HOSTS[index]
+}
+
+fn fake_street(state: &U64, locale: Int) -> String Never! {
+    index :: fake_index(&state, 4)
+    if locale == 1 -> FAKE_DE_STREETS[index] else -> FAKE_EN_STREETS[index]
+}
+
+fn fake_city(state: &U64, locale: Int) -> String Never! {
+    index :: fake_index(&state, 4)
+    if locale == 1 -> FAKE_DE_CITIES[index] else -> FAKE_EN_CITIES[index]
+}
+
+#Test("Fake English draw order matches the shipped seed 42 corpus") {
+    fake := fake_data(42)
+    assert_eq(&fake.name(), "Clara Smith")
+    assert_eq(&fake.email(), "bob.jones@example.test")
+    assert_eq(&fake.host(), "www.demo.test")
+    assert_eq(&fake.address(), "219 Cedar Street, Boston")
+}
+
+#Test("Fake German locale salt and draw order match the shipped seed 42 corpus") {
+    fake := fake_data(42).locale("de")
+    assert_eq(&fake.name(), "Dieter Schmidt")
+    assert_eq(&fake.email(), "bruno.schmidt@mail.test")
+    assert_eq(&fake.host(), "www.beispiel.test")
+    assert_eq(&fake.address(), "406 Hauptstraße, Berlin")
+}
+
+#Test("Fake copies keep independent streams and locale selection does not draw") {
+    original := fake_data(-1)
+    duplicate := ~original
+    english := original.locale("en")
+    assert_eq(&original.name(), &duplicate.name())
+    fresh := fake_data(-1)
+    assert_eq(&english.name(), &fresh.name())
+}
+
+#Test("Fake debug keeps the native state and locale field rendering") {
+    assert_eq(fake_data(42).debug(), "Fake {{ state: 42, locale: 0 }}")
+}
 
 /// The Prelude `TestSuite` carrying the current harness iteration and result.
 pub fn test_suite() -> TestSuite Never! { core.testing.test_suite() }

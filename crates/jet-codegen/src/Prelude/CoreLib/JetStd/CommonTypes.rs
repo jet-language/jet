@@ -2808,13 +2808,6 @@ pub struct Rng {
     pub state: u64,
 }
 
-// Deterministic fake-data capability. `locale` is a closed
-// code: 0 = en, 1 = de. The Prelude owns all generation semantics.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Fake {
-    pub state: u64,
-    pub locale: u8,
-}
 
 // D-SOLVER-LIB1=A: explicit finite solver state. This first slice records
 // ordinary Bool constraints in insertion order; no hidden backtracking.
@@ -6803,14 +6796,6 @@ impl super::JetDebug for Clock {
 impl super::JetShow for Rng {
     fn jet_show(&self) -> String {
         format!("RNG {{ .. }}")
-    }
-}
-impl super::JetShow for Fake {
-    fn jet_show(&self) -> String {
-        format!(
-            "Fake {{ locale: {} }}",
-            if self.locale == 1 { "de" } else { "en" }
-        )
     }
 }
 impl super::JetShow for Solver {

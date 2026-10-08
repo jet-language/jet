@@ -552,7 +552,6 @@ pub fn builtin_method_return(
         Type::Named(n) if n == crate::Syntax::DETERMINISTIC_WORLD_TYPE => {
             deterministic_world_method_return(method, arg_count)
         }
-        Type::Named(n) if n == crate::Syntax::FAKE_TYPE => fake_method_return(method, arg_count),
         // D-SHAPE-DURATIONCONVERT1=A: checked whole-unit read.
         Type::Named(n) if n == crate::Syntax::DURATION_TYPE => {
             duration_method_return(method, arg_count)
@@ -2090,13 +2089,6 @@ fn history_rng_method_return(method: &str, nargs: usize) -> Option<Option<Type>>
     }
 }
 
-fn fake_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
-    match (method, nargs) {
-        ("name" | "email" | "host" | "address", 0) => Some(Some(Type::String)),
-        ("locale", 1) => Some(Some(Type::Named(crate::Syntax::FAKE_TYPE.to_string()))),
-        _ => None,
-    }
-}
 
 
 /// D-SHAPE-DURATIONCONVERT1=A: one checked whole-unit reader.
@@ -2886,9 +2878,6 @@ pub fn builtin_method_mutates(recv_ty: &Type, method: &str) -> bool {
             )
         }
         Type::Named(n) if n == "HistoryRNG" => matches!(method, "next_u64" | "below"),
-        Type::Named(n) if n == crate::Syntax::FAKE_TYPE => {
-            matches!(method, "name" | "email" | "host" | "address")
-        }
         _ => false,
     }
 }
@@ -3868,10 +3857,6 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             }]),
             _ => Some(vec![]),
         },
-        Type::Named(n) if n == crate::Syntax::FAKE_TYPE => match method {
-            "locale" => Some(vec![Type::String]),
-            _ => Some(vec![]),
-        },
         Type::Named(n) if n == crate::Syntax::DURATION_TYPE => Some(vec![]),
         _ => None,
     }
@@ -3925,7 +3910,6 @@ pub fn builtin_receiver_borrow(recv_ty: &Type, method: &str) -> BuiltinReceiverB
                 if name == Syntax::CLOCK_TYPE
                     || name == Syntax::RNG_TYPE
                     || name == "HistoryRNG"
-                    || name == Syntax::FAKE_TYPE
         )
     {
         // TIR lowers these through helpers whose first argument is an explicit

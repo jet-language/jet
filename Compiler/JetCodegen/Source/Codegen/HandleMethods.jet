@@ -1026,11 +1026,6 @@ fn jet_codegen_general_handle_route(operation: THandleOp, receiver: Type, argume
         .RNGShuffle -> return Val(jet_codegen_handle_h("rng.shuffle", "jet_rng_shuffle", [Bool]{true, true}, Val(Effect.Rand)))
         .HistoryRNGNextU64 -> return Val(jet_codegen_handle_h("history_rng.next_u64", "jet_testing_history_rng_next_u64", [Bool]{true}, Val(Effect.Rand)))
         .HistoryRNGBelow -> return Val(jet_codegen_handle_h("history_rng.below", "jet_testing_history_rng_below", [Bool]{true, false}, Val(Effect.Rand)))
-        .FakeLocale -> return Val(jet_codegen_handle_h("fake.locale", "jet_fake_locale", [Bool]{true, true}, Val(Effect.Rand)))
-        .FakeName -> return Val(jet_codegen_handle_h("fake.name", "jet_fake_name", [Bool]{true}, Val(Effect.Rand)))
-        .FakeEmail -> return Val(jet_codegen_handle_h("fake.email", "jet_fake_email", [Bool]{true}, Val(Effect.Rand)))
-        .FakeHost -> return Val(jet_codegen_handle_h("fake.host", "jet_fake_host", [Bool]{true}, Val(Effect.Rand)))
-        .FakeAddress -> return Val(jet_codegen_handle_h("fake.address", "jet_fake_address", [Bool]{true}, Val(Effect.Rand)))
         .GameSceneNew -> return Val(jet_codegen_handle_h("game.scene_new", "jet_game_scene_new", [Bool]{true}, None))
         .GameReplayRecord -> return Val(jet_codegen_handle_h("game.replay_record", "jet_game_replay_record", [Bool]{true}, None))
         .GameBackendHeadless -> return Val(jet_codegen_handle_core("core.game", "backend_headless", "jet_game_backend_headless", [Bool]{}, None))
@@ -1334,7 +1329,7 @@ fn jet_codegen_handle_receiver_is_mutating(operation: THandleOp) -> Bool Never! 
     }
     if operation == {
         .StdinReadLine -> true
-        .FileReaderReadLine | .FileReaderRead | .AllocReset | .FileWriterWriteLine | .FileWriterFlush | .FileWriterWriteAll | .FileWriterFsync | .ClockTick | .ClockAdvance | .ClockWait | .FakeName | .FakeEmail | .FakeHost | .FakeAddress | .TCPStreamRead | .TCPStreamWrite | .TCPStreamClose | .TCPStreamReadBytes | .TCPStreamReadBytesDeadline | .TCPStreamReadText | .TCPStreamReadTextDeadline | .TCPStreamWriteBytes | .TCPStreamWriteBytesDeadline | .TCPStreamWriteAllBytes | .TCPStreamWriteAllBytesDeadline | .TCPStreamWriteText | .TCPStreamWriteTextDeadline | .TCPStreamShutdown | .TCPStreamReady | .UnixStreamReadDeadline | .UnixStreamWriteAllDeadline | .UnixStreamClose | .UnixStreamSetTimeout | .TLSStreamReadDeadline | .TLSStreamWriteAllDeadline | .TLSStreamClose | .TLSStreamCloseWrite -> true
+        .FileReaderReadLine | .FileReaderRead | .AllocReset | .FileWriterWriteLine | .FileWriterFlush | .FileWriterWriteAll | .FileWriterFsync | .ClockTick | .ClockAdvance | .ClockWait | .TCPStreamRead | .TCPStreamWrite | .TCPStreamClose | .TCPStreamReadBytes | .TCPStreamReadBytesDeadline | .TCPStreamReadText | .TCPStreamReadTextDeadline | .TCPStreamWriteBytes | .TCPStreamWriteBytesDeadline | .TCPStreamWriteAllBytes | .TCPStreamWriteAllBytesDeadline | .TCPStreamWriteText | .TCPStreamWriteTextDeadline | .TCPStreamShutdown | .TCPStreamReady | .UnixStreamReadDeadline | .UnixStreamWriteAllDeadline | .UnixStreamClose | .UnixStreamSetTimeout | .TLSStreamReadDeadline | .TLSStreamWriteAllDeadline | .TLSStreamClose | .TLSStreamCloseWrite -> true
         else -> false
     }
 }

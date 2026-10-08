@@ -217,11 +217,6 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("RNG", "shuffle", 1) => THandleOp::RngShuffle,
         ("HistoryRNG", "next_u64", 0) => THandleOp::HistoryRngNextU64,
         ("HistoryRNG", "below", 1) => THandleOp::HistoryRngBelow,
-        ("Fake", "locale", 1) => THandleOp::FakeLocale,
-        ("Fake", "name", 0) => THandleOp::FakeName,
-        ("Fake", "email", 0) => THandleOp::FakeEmail,
-        ("Fake", "host", 0) => THandleOp::FakeHost,
-        ("Fake", "address", 0) => THandleOp::FakeAddress,
         ("GameScene", "on_frame", 1) => THandleOp::GameSceneOnFrame {
             schedule: None,
             derivation: None,
@@ -525,11 +520,7 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
             | THandleOp::RngSample
             | THandleOp::RngShuffle
             | THandleOp::HistoryRngNextU64
-            | THandleOp::HistoryRngBelow
-            | THandleOp::FakeName
-            | THandleOp::FakeEmail
-            | THandleOp::FakeHost
-            | THandleOp::FakeAddress => crate::Collections::BuiltinReceiverBorrow::EagerWrite,
+            | THandleOp::HistoryRngBelow => crate::Collections::BuiltinReceiverBorrow::EagerWrite,
             _ => crate::Collections::BuiltinReceiverBorrow::Read,
         };
         debug_assert_eq!(

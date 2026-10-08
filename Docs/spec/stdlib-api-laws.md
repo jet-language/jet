@@ -510,3 +510,31 @@ other hosts. Neither bridge writes the operating-system environment.
 `RealtimeStream.cancel(&self)` forwards its write-borrowed stream to
 `core.rt.__cancel(&self)`. The public method and its provider call both retain
 the explicit write-access marker; cancellation does not consume the stream.
+
+## Source Fake clean cutover
+
+The private state and locale fields, seed-bit conversion, exact locale salt,
+fixed draw order, tables, Display, Debug, clone, and equality belong to
+`Core/testing/testing.jet::Fake`. The seeded helper is the existing source
+`core.math.random.__seeded_int`, not another RNG or native Fake carrier.
+
+Removed native routes → source replacements (reviewed pre-removal line anchors):
+
+- `Context.rs:1218`, `Emit/Types.jet:2665`, `core_types.rs:277`,
+  `Traits.rs:2702` → source nominal Fake and ordinary record traits.
+- `Collections.rs:558,2103,2908,3890,3952` and
+  `method_calls.rs:6290` → source Fake methods and ordinary parameter/borrow rules.
+- Rust `TIR/mod.rs:14242`, `routes.rs:2078`, `subset/handles.rs:248,561`,
+  `tir_to_mir_expr.rs:4506`; Jet `TIR.jet:948`, `HandleMethods.jet:1043,1355`
+  → source locale/name/email/host/address bodies, no closed Fake handle operations.
+- Comptime `Builtins.rs:1438`, `dispatch/eval_method.rs:2355`,
+  `Methods/core_calls.rs:378`, `plain_calls.rs:1243` → ordinary source dispatch.
+- `Core.jet:414`, `CoreHostSignatures.jet:191`, `fixed_sigs.rs:1864`,
+  `Codegen/mod.rs:3865`, native `FakeData.rs:1-69`,
+  `CommonTypes.rs:2822,6819` → source constructor, fields, rendering and tables.
+- `Syntax/core_surface.rs:996` → source type identity, no builtin Fake marker.
+
+The Jet Foundation collection/trait registries and Jet Sema builtin-owner
+registry had no Fake-specific path; they intentionally remain unchanged.
+Generated C-ABI/route views are regenerated centrally from these canonical
+removals; no old Fake handle or constructor is a compatibility path.
