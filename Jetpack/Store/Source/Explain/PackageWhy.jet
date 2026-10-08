@@ -155,8 +155,8 @@ pub struct PackageWhy {
 
 // The facts on the one-screen `why` surface; read-only like the detailed
 // explanation it projects.
-pub fn store_why_package(roots: HangarRoots, query: String) -> PackageWhy? StoreError! {
-    found :: store_explain_package(roots, query, ExplainLens.All)
+pub fn store_why_package(verification: &StoreVerification, roots: HangarRoots, query: String) -> PackageWhy? StoreError! {
+    found :: store_explain_package(&verification, roots, query, ExplainLens.All)
     explanation :: found ?? return Ok(None)
     Ok(Val(PackageWhy.from_explain(roots, explanation)))
 }
