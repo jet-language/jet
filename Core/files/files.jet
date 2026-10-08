@@ -176,7 +176,7 @@ pub struct FileLock {
 
 // The fd is guarded before it becomes the native FileLock carrier. Failed
 // opens, waits and identity checks therefore close without unlinking a name.
-struct __LockFd { priv fd: Int }
+struct __LockFd { fd: Int }
 impl __LockFd.Close {
     fn close(^self) {
         held := ^self
@@ -1643,25 +1643,45 @@ fn lock_timeout(path: String) -> IOError Never! {
     IOError.TimedOut(lock_context(path, None, "timed out waiting for an exclusive file lock; retry or allow a longer timeout"))
 }
 
+// Contention: Linux EWOULDBLOCK=EAGAIN(11), macOS EWOULDBLOCK=EAGAIN(35),
+// Windows ERROR_LOCK_VIOLATION(33). RuntimePolicy/Lock/unix.rs:160-169 and
+// windows.rs:249-269 use those same kernel results.
 fn lock_contended(code: Int, platform: Int) -> Bool Never! {
     (platform == 1 && code == 11) || (platform == 2 && code == 35) || (platform == 3 && code == 33)
 }
 
+// Project native errno exactly as jet_std::io_error_at
+// (JetStd/JSONDataTree.rs:2-34) projects std::io::ErrorKind. Unknown kinds stay
+// Other. In particular EBADF/ERROR_INVALID_HANDLE are NOT Closed: the shared
+// mapper reserves Closed for NotConnected/BrokenPipe.
 fn lock_errno(path: String, code: Int, platform: Int) -> IOError Never! {
     if platform == 0 -> return IOError.Unsupported(lock_context(path, None, "file locking is unavailable on this operating system"))
     context :: lock_context(path, Val(code), core.sys.__errno_text(code))
     if platform == 3 {
-        if code == 2 || code == 3 -> return IOError.NotFound(context)
-        if code == 5 || code == 1314 -> return IOError.PermissionDenied(context)
-        if code == 6 -> return IOError.Closed(context)
-        if code == 87 -> return IOError.InvalidInput(context)
+        // std sys/io/error/windows.rs decode_error_kind (blob 6056f177),
+        // constants in windows/c/windows_sys.rs (blob 0c865494).
+        if code == 2 || code == 3 || code == 15 || code == 53 || code == 67 -> return IOError.NotFound(context)
+        if code == 5 || code == 10013 -> return IOError.PermissionDenied(context)
+        if code == 80 || code == 183 -> return IOError.AlreadyExists(context)
+        if code == 87 || code == 131 || code == 10022 -> return IOError.InvalidInput(context)
+        if code == 109 || code == 232 || code == 10057 || code == 10058 -> return IOError.Closed(context)
+        if code == 121 || code == 258 || code == 594 || code == 995 || code == 1053 || code == 1121 || code == 1460 ||
+            code == 5910 || code == 7012 || code == 7040 || code == 8014 || code == 8226 || code == 9705 ||
+            code == 10060 || code == 13805 || code == 15402 || code == 15403 -> return IOError.TimedOut(context)
+        // FILEERROR1: ERROR_NOT_SUPPORTED(50); std: ERROR_CALL_NOT_IMPLEMENTED(120).
         if code == 50 || code == 120 -> return IOError.Unsupported(context)
     } else {
         if code == 2 -> return IOError.NotFound(context)
+        // std sys/io/error/unix.rs decode_error_kind (blob 5f60abf9);
+        // Linux rows also observed against rust 1.97.1's installed decoder.
         if code == 1 || code == 13 -> return IOError.PermissionDenied(context)
-        if code == 9 -> return IOError.Closed(context)
         if code == 22 -> return IOError.InvalidInput(context)
+        if code == 17 -> return IOError.AlreadyExists(context)
+        if code == 32 || (platform == 1 && code == 107) || (platform == 2 && code == 57) -> return IOError.Closed(context)
+        if (platform == 1 && code == 110) || (platform == 2 && code == 60) -> return IOError.TimedOut(context)
+        // JSONDataTree.rs:14-22: Unsupported override plus std ENOSYS.
         if (platform == 1 && (code == 38 || code == 95)) || (platform == 2 && (code == 45 || code == 78 || code == 102)) -> return IOError.Unsupported(context)
+        // Existing no-follow-open rule, FileHandles.rs:381-395.
         if (platform == 1 && code == 40) || (platform == 2 && code == 62) {
             return IOError.InvalidInput(lock_context(path, Val(code), "the final lock path is a symbolic link; use a regular lock file"))
         }
