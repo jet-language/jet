@@ -1,0 +1,71 @@
+use core.files as files
+
+fn s5_web_is_200(response: [U8]) -> Bool {
+    prefix :: "HTTP/1.1 200 OK{s5_web_crlf()}".bytes()
+    if response.len() < prefix.len() -> return false
+    loop index in 0..<prefix.len() { if response[index] != prefix[index] -> return false }
+    true
+}
+
+fn s5_web_rejected(response: [U8]?) -> Bool {
+    if response == .Val(bytes) -> !s5_web_is_200(bytes) else -> true
+}
+
+#Test("original line aggregate and header count boundaries") {
+    port :: s5_web_port()
+    s5_web_wait_up(port, 30000)
+    max_line :: 8192
+    max_header :: 32768
+    max_count :: 100
+    prefix :: "GET "
+    suffix :: " HTTP/1.1{s5_web_crlf()}"
+    target_prefix :: "/__jet_dev_version?"
+    target_len :: max_line - prefix.bytes().len() - suffix.bytes().len()
+    assert(target_len > target_prefix.bytes().len())
+    exact_padding :: "q".repeat(target_len - target_prefix.bytes().len())
+    exact_target :: "{target_prefix}{exact_padding}"
+    assert_eq("{prefix}{exact_target}{suffix}".bytes().len(), max_line)
+    response :: s5_web_raw(port, s5_web_raw_get(exact_target, [String]{})) ?? panic("request at boundary not served")
+    assert(s5_web_is_200(response))
+    over_padding :: "q".repeat(target_len + 1 - target_prefix.bytes().len())
+    over_target :: "{target_prefix}{over_padding}"
+    assert_eq("{prefix}{over_target}{suffix}".bytes().len(), max_line + 1)
+    assert(s5_web_rejected(s5_web_raw(port, s5_web_raw_get(over_target, [String]{}))))
+    header_prefix :: "X-Pad: "
+    exact_header_padding :: "x".repeat(max_line - header_prefix.bytes().len() - 2)
+    exact_header :: "{header_prefix}{exact_header_padding}"
+    assert_eq(exact_header.bytes().len() + 2, max_line)
+    exact_response :: s5_web_raw(port, s5_web_raw_get("/__jet_dev_version", [String]{exact_header})) ?? panic("header line at boundary not served")
+    assert(s5_web_is_200(exact_response))
+    over_header_padding :: "x".repeat(max_line - header_prefix.bytes().len() - 1)
+    over_header :: "{header_prefix}{over_header_padding}"
+    assert_eq(over_header.bytes().len() + 2, max_line + 1)
+    assert(s5_web_rejected(s5_web_raw(port, s5_web_raw_get("/__jet_dev_version", [String]{over_header}))))
+    exact_headers := [String]{}
+    exact_header_bytes := 0
+    loop index in 0..<max_header /% max_line {
+        &exact_headers.push(exact_header)
+        exact_header_bytes = exact_header_bytes + exact_header.bytes().len() + 2
+    }
+    assert_eq(exact_header_bytes, max_header)
+    aggregate :: s5_web_raw(port, s5_web_raw_get("/__jet_dev_version", exact_headers)) ?? panic("aggregate headers at boundary not served")
+    assert(s5_web_is_200(aggregate))
+    over_headers := exact_headers
+    &over_headers.push("X: y")
+    over_header_bytes := 0
+    loop header in over_headers {
+        assert(header.bytes().len() + 2 <= max_line)
+        over_header_bytes = over_header_bytes + header.bytes().len() + 2
+    }
+    assert(over_header_bytes > max_header)
+    assert(s5_web_rejected(s5_web_raw(port, s5_web_raw_get("/__jet_dev_version", over_headers))))
+    exact_count_headers := [String]{}
+    loop index in 0..<max_count -> &exact_count_headers.push("X-{index}: y")
+    assert_eq(exact_count_headers.len(), max_count)
+    count_response :: s5_web_raw(port, s5_web_raw_get("/__jet_dev_version", exact_count_headers)) ?? panic("100 headers at boundary not served")
+    assert(s5_web_is_200(count_response))
+    over_count_headers := exact_count_headers
+    &over_count_headers.push("X-extra: y")
+    assert_eq(over_count_headers.len(), max_count + 1)
+    assert(s5_web_rejected(s5_web_raw(port, s5_web_raw_get("/__jet_dev_version", over_count_headers))))
+}
