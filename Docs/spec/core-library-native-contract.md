@@ -106,6 +106,13 @@ contain redacted provider descriptions only. The historical pair codec preserves
 UTF-8 values byte-for-byte, including embedded NUL; it rejects truncation,
 invalid UTF-8, and trailing bytes. Owned value buffers are wiped before release.
 
+Vault test hooks are explicitly initialized test transport, never an authority
+mechanism for production callers. Authorizer, trust-path, and fault overrides
+are thread-local and released at thread exit. Backup barriers are shared,
+root-filtered immutable snapshots: clearing a hook does not invalidate a writer
+already blocked on its entered/release phases. Reentrant mutable authorizer
+access preserves the reference foreign-panic body and exit status 101.
+
 A high-level native implementation must not be retained as an invisible runtime
 fallback for a Jet implementation. If an API changes identity or semantics,
 make the change at the contract boundary and migrate its users in one cutover.
