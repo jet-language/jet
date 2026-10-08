@@ -1,0 +1,12 @@
+# PORT tests/repl.rs:2606-2630, helper343-357 where used; exact bytes/predicates, no reference snapshot.
+# PENDING-GRAMMAR(batch-four); runtime PENDING-SAME-HEAD.
+fixture: repl_cooked_rerun_edits_and_applies_downstream_state.fixture
+env: NO_COLOR=1
+env: XDG_STATE_HOME={work}/state
+step: jet repl
+unset: JET_REPL_HISTORY
+stdin: repl_cooked_rerun_edits_and_applies_downstream_state.fixture/input.in
+exit: 0
+stdout: ~ "Edit turn 1 [x := 1]" # Original substring predicate rs2618.
+stdout: ~ "rerun #2: y :: x + 1" # Original substring predicate rs2622.
+stdout: ~ "9 : Int" # Original substring predicate rs2626.
