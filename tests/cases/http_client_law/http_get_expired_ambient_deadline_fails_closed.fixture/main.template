@@ -1,0 +1,11 @@
+
+use core.http.client as http
+use core.time as time
+fn run() {
+    #Context(deadline: time.now()) {
+        if http.get("http://{cap:addr}/expired") == {
+            .Ok(_) -> print("ok")
+            .Err(_) -> print("timeout")
+        }
+    }
+}

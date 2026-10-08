@@ -1,0 +1,23 @@
+# HAND-PORT tests/http_client_law.rs:2894-2939 http_post_expired_ambient_deadline_fails_closed
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# Original AOT expired Context source verbatim expanded, exact timeout output and real one-byte100ms ignored-error hit counter; counter SNAPSHOT0 BEFORE original ignored zero-byte wake connect; ignored server join status retained, not strengthened to post-wake zero.
+fixture: http_post_expired_ambient_deadline_fails_closed.fixture
+env: NO_COLOR=1
+write: peer/main.jet peer/source.template
+step: jet build peer/main.jet
+exit: 0
+spawn peer: built
+await: file addr.txt timeout 30s
+capture: addr = text file addr.txt
+write: main.jet main.template
+step: jet build main.jet
+exit: 0
+step: built
+exit: 0
+stdout: = http_post_expired_ambient_deadline_fails_closed.stdout.expected
+file: hits.txt = "0"
+write: wake/main.jet wake/source.template
+step: jet run wake/main.jet
+exit: 0
+wait: peer
+exit: any # original server.join result ignored; no response/panic equality assertion
