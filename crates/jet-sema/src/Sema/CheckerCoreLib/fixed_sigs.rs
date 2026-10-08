@@ -3848,6 +3848,91 @@ fn core_fixed_sig_impl(
         ("core.service", "__mailbox_receive") => Some((
             vec![(read, Type::Named("__EndpointMailbox".into()))], Some(Type::Named("__MailboxRead".into())),
         )),
+        ("core.service", "__tree_delivery") => Some((
+            vec![(read, Type::Named("ServiceTree".into()))], Some(Type::Named("ServiceDelivery".into())),
+        )),
+        ("core.service", "__mailbox_snapshot") => Some((
+            vec![(read, Type::Named("ServiceTree".into())), (read, Type::Int)], Some(list_string.clone()),
+        )),
+        ("core.service", "__idempotency_records") => Some((
+            vec![(read, Type::Named("ServiceTree".into()))], Some(Type::List(Box::new(Type::Tuple(vec![
+                ("key".into(), Box::new(Type::String)), ("endpoint".into(), Box::new(Type::Named("ServiceEndpoint".into()))),
+                ("message".into(), Box::new(Type::String)),
+            ])))),
+        )),
+        ("core.service", "__worker_named_index") => Some((
+            vec![(read, Type::Named("ServiceTree".into())), (read, Type::String)],
+            Some(Type::Option(Box::new(Type::Int))),
+        )),
+        ("core.service", "__delivery_allocate") => Some((
+            vec![(AccessConvention::Move, Type::String), (AccessConvention::Move, Type::String), (read, Type::Bool),
+                (AccessConvention::Move, Type::String), (read, Type::Int)], Some(Type::Named("Delivery".into())),
+        )),
+        ("core.service", "__delivery_identity") => Some((
+            vec![(read, Type::Named("Delivery".into()))], Some(Type::Tuple(vec![
+                ("id".into(), Box::new(Type::String)), ("store".into(), Box::new(Type::String)),
+                ("duplicate".into(), Box::new(Type::Bool)), ("authority".into(), Box::new(Type::String)),
+                ("generation".into(), Box::new(Type::Int)),
+            ])),
+        )),
+        ("core.service", "__mailbox_restore") => Some((
+            vec![(AccessConvention::Write, Type::Named("ServiceTree".into())), (read, Type::Int),
+                (AccessConvention::Move, list_string.clone()), (read, Type::Bool)],
+            Some(result_ty(unit_ty(), Type::Named("ServiceError".into()))),
+        )),
+        ("core.service", "__dead_letter_push") => Some((
+            vec![(AccessConvention::Write, Type::Named("ServiceTree".into())), (AccessConvention::Move, Type::String)], None,
+        )),
+        ("core.service", "__idempotency_push") => Some((
+            vec![(AccessConvention::Write, Type::Named("ServiceTree".into())), (AccessConvention::Move, Type::String),
+                (read, Type::Named("ServiceEndpoint".into())), (AccessConvention::Move, Type::String)], None,
+        )),
+        ("core.service", "__mailbox_try_send") => Some((
+            vec![(AccessConvention::Write, Type::Named("ServiceTree".into())), (read, Type::Int), (read, Type::String)], Some(Type::Int),
+        )),
+        ("core.service", "__mailbox_try_receive") => Some((
+            vec![(AccessConvention::Write, Type::Named("ServiceTree".into())), (read, Type::Int)], Some(Type::Tuple(vec![
+                ("message".into(), Box::new(Type::Option(Box::new(Type::String)))), ("status".into(), Box::new(Type::Int)),
+            ])),
+        )),
+        ("core.service", "__worker_wait_notify") => Some((
+            vec![(AccessConvention::Write, Type::Named("ServiceTree".into())), (read, Type::Int),
+                (read, Type::Named("ServiceEndpoint".into()))], None,
+        )),
+        ("core.service", "__worker_receive_account") => Some((
+            vec![(AccessConvention::Write, Type::Named("ServiceTree".into())), (read, Type::Int), (read, Type::Int)], Some(Type::Bool),
+        )),
+        ("core.service", "__delivery_id") => Some((
+            vec![(read, Type::Named("ServiceRuntime".into())), (read, Type::Named("ServiceEndpoint".into())),
+                (read, Type::String), (read, Type::String)], Some(Type::String),
+        )),
+        ("core.service", "__runtime_send") => Some((
+            vec![(read, Type::Named("ServiceRuntime".into())), (read, Type::Named("ServiceEndpoint".into())),
+                (read, Type::String), (read, Type::String)],
+            Some(result_ty(Type::Named("Delivery".into()), Type::Named("ServiceError".into()))),
+        )),
+        ("core.service", "__runtime_dead_letter") => Some((
+            vec![(read, Type::Named("ServiceRuntime".into())), (read, Type::Named("Delivery".into()))],
+            Some(result_ty(Type::Named("Delivery".into()), Type::Named("ServiceError".into()))),
+        )),
+        ("core.service", "__mark_delivered") => Some((
+            vec![(read, Type::String), (read, Type::String)], Some(result_ty(unit_ty(), Type::Named("ServiceError".into()))),
+        )),
+        ("core.service", "__take_pending") => Some((
+            vec![(read, Type::Named("ServiceEndpoint".into())), (read, Type::Int), (read, list_string.clone())],
+            Some(result_ty(Type::List(Box::new(Type::Tuple(vec![
+                ("id".into(), Box::new(Type::String)), ("message".into(), Box::new(Type::String)), ("store".into(), Box::new(Type::String)),
+            ]))), Type::Named("ServiceError".into()))),
+        )),
+        ("core.service", "__requeue_pending") => Some((
+            vec![(read, Type::Named("ServiceEndpoint".into())), (AccessConvention::Move, Type::List(Box::new(Type::Tuple(vec![
+                ("id".into(), Box::new(Type::String)), ("message".into(), Box::new(Type::String)), ("store".into(), Box::new(Type::String)),
+            ]))))], Some(result_ty(unit_ty(), Type::Named("ServiceError".into()))),
+        )),
+        ("core.service", "__finish_drain") => Some((
+            vec![(AccessConvention::Write, Type::Named("ServiceTree".into())), (read, Type::Named("ServiceEndpoint".into()))],
+            Some(result_ty(unit_ty(), Type::Named("ServiceError".into()))),
+        )),
         ("core.service", "__state_load") => Some((
             vec![(read, Type::Named("ServiceTree".into())), (read, Type::Bool)],
             Some(result_ty(list_string.clone(), Type::Named("ServiceError".into()))),

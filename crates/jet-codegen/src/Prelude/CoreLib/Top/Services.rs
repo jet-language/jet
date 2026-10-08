@@ -3358,6 +3358,70 @@ fn jet_services_raw_worker_sent_account(tree: &mut JetServiceTree, index: i64, m
         jet_services_topology_publish_state(&snapshot);
     }
 }
+fn jet_services_raw_tree_delivery(tree: &JetServiceTree) -> JetServiceDelivery { tree.delivery.clone() }
+fn jet_services_raw_mailbox_snapshot(tree: &JetServiceTree, index: i64) -> Vec<String> {
+    tree.workers[index as usize].mailbox.channel.snapshot()
+}
+fn jet_services_raw_idempotency_records(tree: &JetServiceTree) -> Vec<(String, JetServiceEndpoint, String)> {
+    tree.idempotency_seen.clone()
+}
+fn jet_services_raw_worker_named_index(tree: &JetServiceTree, name: &String) -> Option<jet_foundation::Numeric::JetInt> {
+    tree.workers.iter().position(|worker| &worker.name == name).map(|index| jet_std::jet_int_owned_from_i64(index as i64))
+}
+fn jet_services_raw_delivery_allocate(id: String, store: String, duplicate: bool, authority: String, generation: i64) -> JetDelivery {
+    JetDelivery { id, store, duplicate, authority, generation }
+}
+fn jet_services_raw_delivery_identity(delivery: &JetDelivery) -> (String, String, bool, String, jet_foundation::Numeric::JetInt) {
+    (delivery.id.clone(), delivery.store.clone(), delivery.duplicate, delivery.authority.clone(),
+        jet_std::jet_int_owned_from_i64(delivery.generation))
+}
+fn jet_services_raw_mailbox_restore(tree: &mut JetServiceTree, index: i64, messages: Vec<String>, draining: bool) -> Result<(), JetServiceError> {
+    jet_services_restore_mailbox(&mut tree.workers[index as usize], messages, draining)
+}
+fn jet_services_raw_dead_letter_push(tree: &mut JetServiceTree, id: String) { tree.dead_letters.push(id); }
+fn jet_services_raw_idempotency_push(tree: &mut JetServiceTree, key: String, endpoint: &JetServiceEndpoint, message: String) {
+    tree.idempotency_seen.push((key, endpoint.clone(), message));
+}
+fn jet_services_raw_mailbox_try_send(tree: &mut JetServiceTree, index: i64, message: &String) -> i64 {
+    match tree.workers[index as usize].mailbox.channel.try_send(message.clone()) {
+        Ok(()) => 0,
+        Err(JetServiceChannelError::Full(_)) => 1,
+        Err(JetServiceChannelError::Closed) => 2,
+        Err(JetServiceChannelError::Empty) => 3,
+    }
+}
+fn jet_services_raw_mailbox_try_receive(tree: &mut JetServiceTree, index: i64) -> (Option<String>, jet_foundation::Numeric::JetInt) {
+    let (message, status) = match tree.workers[index as usize].mailbox.channel.try_recv() {
+        Ok(message) => (Some(message), 0),
+        Err(JetServiceChannelError::Empty) => (None, 1),
+        Err(JetServiceChannelError::Closed) => (None, 2),
+        Err(JetServiceChannelError::Full(_)) => (None, 3),
+    };
+    (message, jet_std::jet_int_owned_from_i64(status))
+}
+fn jet_services_raw_worker_wait_notify(tree: &mut JetServiceTree, index: i64, endpoint: &JetServiceEndpoint) {
+    let worker = &mut tree.workers[index as usize];
+    let wait_target = jet_services_topology_endpoint_id(&endpoint.tree, &endpoint.worker);
+    if let Ok(mut state) = worker.task.lock() {
+        state.status = JetServiceSupervisorStatus::Running;
+        state.topology_wait_target = Some(wait_target);
+        let snapshot = state.clone();
+        drop(state);
+        jet_services_topology_publish_state(&snapshot);
+    }
+}
+fn jet_services_raw_worker_receive_account(tree: &mut JetServiceTree, index: i64, message_bytes: i64) -> bool {
+    let worker = &mut tree.workers[index as usize];
+    worker.sent_bytes = worker.sent_bytes.saturating_add(message_bytes as u64);
+    let snapshot = if let Ok(mut state) = worker.task.lock() {
+        state.status = JetServiceSupervisorStatus::Running;
+        state.topology_wait_target = None;
+        Some(state.clone())
+    } else { None };
+    let empty = worker.mailbox.channel.depth() == 0;
+    if let Some(snapshot) = snapshot.as_ref() { jet_services_topology_publish_state(snapshot); }
+    empty
+}
 fn jet_services_raw_tree_upgrade_receipt(tree: &JetServiceTree) -> Option<JetServiceUpgradeReceipt> { tree.last_upgrade.clone() }
 fn jet_services_raw_upgrade_receipt_parts(receipt: &JetServiceUpgradeReceipt)
     -> (jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt, String, bool, Vec<String>)

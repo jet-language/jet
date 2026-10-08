@@ -1616,3 +1616,236 @@ fn delivery_parse_state(text: String) -> DeliveryState? Never! {
     event :: delivery_event_signature(authority, 7, "d1", 4, DeliveryState.Delivered, 3, 1700000000123) ?? panic("event vector")
     assert(core.encoding.bytes_to_hex(event) == "b26b530c1223a26a44476d6d44df66905c6cf02eaf51f440790b5ee153140aa6")
 }
+
+fn local_delivery_ids(tree: ServiceTree, endpoint: ServiceEndpoint, store: String) -> [String] Never! {
+    #Unsafe("Services2864: local queued-message/idempotency matching stays source; existing cryptographic ID leaf") {
+        worker :: core.service.__worker_route(tree, endpoint) ?? return [String]{}
+        messages :: core.service.__mailbox_snapshot(tree, worker.index)
+        runtime :: ServiceRuntime{store: store, retention_ms: 0}
+        identity :: core.service.__endpoint_identity_parts(endpoint)
+        ids := [String]{}
+        loop record in core.service.__idempotency_records(tree) {
+            recorded :: core.service.__endpoint_identity_parts(record.endpoint)
+            if recorded.tree != identity.tree || recorded.worker != identity.worker || recorded.authority != identity.authority -> next
+            queued := false
+            loop message in messages {
+                if message == record.message -> queued = true
+            }
+            if queued -> &ids.push(core.service.__delivery_id(runtime, record.endpoint, record.message, record.key))
+        }
+        return ids
+    }
+}
+
+pub fn send_durable(tree: ServiceTree, endpoint: ServiceEndpoint, message: String, idempotency_key: String) -> Delivery ServiceError! {
+    #Unsafe("Services3127: no enclosing lock; source owns local deduplication/admission/rollback orchestration") {
+        if core.service.__tree_delivery(tree) != ServiceDelivery.DurableAtLeastOnce -> return Err(ServiceError.Policy("send_durable requires DurableAtLeastOnce delivery"))
+        authority :: core.service.__tree_state_authority(tree) ?? return Err(ServiceError.Policy("durable service delivery needs its injected authority"))
+        runtime :: ServiceRuntime{store: "{authority.store}.delivery", retention_ms: 0}
+        if !valid_service_text(idempotency_key, 256) -> return Err(ServiceError.Policy("durable send requires a non-empty idempotency key"))
+        if !valid_record_payload(message) -> return Err(ServiceError.Policy("service message exceeds the 1 MiB limit"))
+        if !core.service.__tree_started(tree) -> return Err(ServiceError.NotStarted("service tree is not started"))
+        if validate_tree_endpoint(tree, endpoint) == {
+            .Err(error) -> return Err(error)
+            .Ok(_) -> {}
+        }
+        identity :: core.service.__endpoint_identity_parts(endpoint)
+        parts :: core.service.__tree_route_parts(tree)
+        draining := false
+        loop name in parts.draining {
+            if name == identity.worker -> draining = true
+        }
+        if draining -> return Err(ServiceError.Unavailable("service endpoint is draining"))
+        local_id :: core.service.__delivery_id(runtime, endpoint, message, idempotency_key)
+        loop id in local_delivery_ids(tree, endpoint, runtime.store) {
+            if id == local_id -> return core.service.__delivery_allocate(local_id, runtime.store, true, identity.authority, identity.generation)
+        }
+        delivery :: if core.service.__runtime_send(runtime, endpoint, message, idempotency_key) == {
+            .Ok(value) -> value
+            .Err(error) -> {
+                return Err(error)
+            }
+        }
+        id :: core.service.__delivery_identity(delivery).id
+        if core.service.delivery_status(delivery) == {
+            .Err(error) -> return Err(error)
+            .Ok(state) -> {
+                if state != DeliveryState.Accepted -> return delivery
+            }
+        }
+        index :: core.service.__worker_named_index(tree, identity.worker) ?? return Err(ServiceError.Unknown("endpoint {identity.tree}/{identity.worker} is not in this tree"))
+        before :: core.service.__mailbox_snapshot(tree, index)
+        if send(&tree, endpoint, message) == {
+            .Err(error) -> {
+                if error == {
+                    .Full(_) -> {
+                        _ :: core.service.__runtime_dead_letter(runtime, delivery)
+                        if core.service.__tree_dead_letter_count(tree) < 100000 -> core.service.__dead_letter_push(&tree, id)
+                    }
+                    else -> {}
+                }
+                return Err(error)
+            }
+            .Ok(_) -> {}
+        }
+        if core.service.__mark_delivered(runtime.store, id) == {
+            .Err(error) -> {
+                restore_index :: core.service.__worker_named_index(tree, identity.worker) ?? return Err(ServiceError.Policy("{service_error_show(error)}; mailbox rollback failed: endpoint {identity.tree}/{identity.worker} disappeared during durable delivery"))
+                if core.service.__mailbox_restore(&tree, restore_index, before, draining) == {
+                    .Err(rollback_error) -> return Err(ServiceError.Policy("{service_error_show(error)}; mailbox rollback failed: {service_error_show(rollback_error)}"))
+                    .Ok(_) -> return Err(error)
+                }
+            }
+            .Ok(_) -> {}
+        }
+        records :: core.service.__idempotency_records(tree)
+        if records.len() < 100000 {
+            seen := false
+            loop record in records {
+                if record.key == idempotency_key -> seen = true
+            }
+            if !seen -> core.service.__idempotency_push(&tree, idempotency_key, endpoint, message)
+        }
+        return delivery
+    }
+}
+
+pub fn receive(tree: ServiceTree, endpoint: ServiceEndpoint) -> String ServiceError! {
+    #Unsafe("Services2629: no enclosing guard; existing atomic authority operations retain their locks") {
+        if !core.service.__tree_started(tree) -> return Err(ServiceError.NotStarted("service tree is not started"))
+        if validate_tree_endpoint(tree, endpoint) == {
+            .Err(error) -> return Err(error)
+            .Ok(_) -> {}
+        }
+        identity :: core.service.__endpoint_identity_parts(endpoint)
+        parts :: core.service.__tree_route_parts(tree)
+        draining := false
+        loop name in parts.draining {
+            if name == identity.worker -> draining = true
+        }
+        worker :: core.service.__worker_route(tree, endpoint) ?? return Err(ServiceError.Unknown("endpoint {identity.tree}/{identity.worker} is not in this tree"))
+        available := 0
+        if worker.running || draining -> available = worker.capacity - worker.depth
+        if available > 0 {
+            local_ids := [String]{}
+            if core.service.__tree_delivery(tree) == ServiceDelivery.DurableAtLeastOnce {
+                if core.service.__tree_state_authority(tree) == {
+                    .Val(authority) -> local_ids = local_delivery_ids(tree, endpoint, "{authority.store}.delivery")
+                    else -> {}
+                }
+            }
+            pending :: if core.service.__take_pending(endpoint, available, local_ids) == {
+                .Ok(value) -> value
+                .Err(error) -> {
+                    return Err(error)
+                }
+            }
+            if pending.len() != 0 {
+                if validate_tree_endpoint(tree, endpoint) == {
+                    .Err(error) -> return Err(error)
+                    .Ok(_) -> {}
+                }
+                target :: core.service.__worker_route(tree, endpoint) ?? return Err(ServiceError.Unknown("endpoint {identity.tree}/{identity.worker} is not in this tree"))
+                loop i in 0..<pending.len() {
+                    record :: pending[i]
+                    before :: core.service.__mailbox_snapshot(tree, target.index)
+                    status :: core.service.__mailbox_try_send(&tree, target.index, record.message)
+                    if status != 0 {
+                        error :: if status == {
+                            1 -> ServiceError.Policy("service authority delivery exceeded mailbox capacity")
+                            2 -> ServiceError.NotStarted("service authority worker mailbox is closed")
+                            else -> ServiceError.Policy("service channel returned an invalid send result")
+                        }
+                        return Err(pending_delivery_rollback(&tree, endpoint, target.index, pending.slice(i, pending.len()), before, draining, error))
+                    }
+                    if core.service.__mark_delivered(record.store, record.id) == {
+                        .Err(error) -> return Err(pending_delivery_rollback(&tree, endpoint, target.index, pending.slice(i, pending.len()), before, draining, error))
+                        .Ok(_) -> {}
+                    }
+                }
+            }
+        }
+        if validate_tree_endpoint(tree, endpoint) == {
+            .Err(error) -> return Err(error)
+            .Ok(_) -> {}
+        }
+        current :: core.service.__worker_route(tree, endpoint) ?? return Err(ServiceError.Unknown("endpoint {identity.tree}/{identity.worker} is not in this tree"))
+        if !current.running && current.depth == 0 -> return Err(ServiceError.NotStarted("worker `{current.name}` is not running"))
+        before :: core.service.__mailbox_snapshot(tree, current.index)
+        read :: core.service.__mailbox_try_receive(&tree, current.index)
+        if read.status == 1 {
+            core.service.__worker_wait_notify(&tree, current.index, endpoint)
+            return Err(ServiceError.Ambiguous("mailbox for `{current.name}` is empty"))
+        }
+        if read.status == 2 -> return Err(ServiceError.NotStarted("mailbox for `{current.name}` is closed"))
+        if read.status != 0 -> return Err(ServiceError.Policy("service channel returned an invalid receive result"))
+        message :: read.message ?? panic("successful channel read has no message")
+        empty :: core.service.__worker_receive_account(&tree, current.index, message.bytes().len())
+        if draining && empty {
+            if core.service.__finish_drain(&tree, endpoint) == {
+                .Err(error) -> {
+                    restore :: core.service.__worker_route(tree, endpoint)
+                    if restore == {
+                        .Val(target) -> {
+                            if core.service.__mailbox_restore(&tree, target.index, before, draining) == {
+                                .Err(restore_error) -> return Err(ServiceError.Policy("{service_error_show(error)}; drained mailbox restore failed: {service_error_show(restore_error)}"))
+                                .Ok(_) -> return Err(error)
+                            }
+                        }
+                        else -> return Err(ServiceError.Policy("{service_error_show(error)}; drained mailbox restore failed: endpoint {identity.tree}/{identity.worker} disappeared while restoring a drained mailbox"))
+                    }
+                }
+                .Ok(_) -> {}
+            }
+        }
+        return message
+    }
+}
+
+fn pending_delivery_rollback(tree: ServiceTree, endpoint: ServiceEndpoint, index: Int, remaining: [(id: String, message: String, store: String)], before: [String], draining: Bool, error: ServiceError) -> ServiceError Never! {
+    #Unsafe("Services2693-2762: retain authority requeue then mailbox-restore ordering and both failure texts") {
+        if core.service.__requeue_pending(endpoint, remaining) == {
+            .Err(rollback_error) -> {
+                if core.service.__mailbox_restore(&tree, index, before, draining) == {
+                    .Err(mailbox_error) -> return pending_rollback_error(error, Val(rollback_error), Val(mailbox_error))
+                    .Ok(_) -> return pending_rollback_error(error, Val(rollback_error), None)
+                }
+            }
+            .Ok(_) -> {
+                if core.service.__mailbox_restore(&tree, index, before, draining) == {
+                    .Err(rollback_error) -> return pending_rollback_error(error, None, Val(rollback_error))
+                    .Ok(_) -> return pending_rollback_error(error, None, None)
+                }
+            }
+        }
+    }
+}
+
+fn pending_rollback_error(error: ServiceError, authority_error: ServiceError?, mailbox_error: ServiceError?) -> ServiceError Never! {
+    if authority_error == {
+        .Val(rollback) -> {
+            if mailbox_error == {
+                .Val(mailbox) -> return ServiceError.Policy("{service_error_show(error)}; authority rollback failed: {service_error_show(rollback)}; mailbox rollback failed: {service_error_show(mailbox)}")
+                else -> return ServiceError.Policy("{service_error_show(error)}; authority rollback failed: {service_error_show(rollback)}; unmarked receipts remain recoverable from the authority log")
+            }
+        }
+        else -> {
+            if mailbox_error == {
+                .Val(mailbox) -> return ServiceError.Policy("{service_error_show(error)}; mailbox rollback failed: {service_error_show(mailbox)}")
+                else -> return error
+            }
+        }
+    }
+}
+
+#Test("pending delivery failure preserves authority-requeue then mailbox-restore partial-failure text") {
+    send_error :: ServiceError.Policy("service authority delivery exceeded mailbox capacity")
+    requeue_error :: ServiceError.Policy("requeue")
+    restore_error :: ServiceError.Policy("restore")
+    both :: pending_rollback_error(send_error, Val(requeue_error), Val(restore_error))
+    assert(service_error_show(both) == "service authority delivery exceeded mailbox capacity; authority rollback failed: requeue; mailbox rollback failed: restore")
+    recoverable :: pending_rollback_error(send_error, Val(requeue_error), None)
+    assert(service_error_show(recoverable) == "service authority delivery exceeded mailbox capacity; authority rollback failed: requeue; unmarked receipts remain recoverable from the authority log")
+    assert(service_error_show(pending_rollback_error(send_error, None, Val(restore_error))) == "service authority delivery exceeded mailbox capacity; mailbox rollback failed: restore")
+    assert(pending_rollback_error(send_error, None, None) == send_error)
+}

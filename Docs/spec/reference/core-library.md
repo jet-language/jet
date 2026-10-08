@@ -3885,6 +3885,13 @@ authority operation without adding a registry or signing-key cache.
 Tree sends validate routing and payloads in Jet, preserve the native repeated
 authority checks, remap mailbox-capacity failures to the worker-specific text,
 and update accounting only after successful atomic authority sends.
+Durable tree sends and receives own local deduplication, pending-message
+admission, receipt marking, and rollback orchestration in Jet. Each existing
+authority/storage operation retains its internal locks; a failed pending send
+requeues the remaining authority suffix before restoring the pre-send mailbox.
+Combined rollback failures preserve the original diagnostic and recovery text.
+Generation rollout and start/stop policies remain native pending a reviewed
+lock-lifetime seam; this source port does not claim those rows are complete.
 
 | Signature | Result | Description |
 |---|---|---|
