@@ -2203,3 +2203,11 @@ clipboard range helpers; no text-offset validation is added to cloning.
 All four phase ordinals are checked through the shared variant panic
 before allocation or release. Absent composition/marked range remains
 distinct from a present empty composition/zero range.
+
+`UiDrag.jet` preserves all five phases and three operations plus owned
+NodeId and an ordered List24 of inline DropItem32 values. Text/URI own E4
+text; File owns inline GrantedPath24 using the canonical path field
+helpers without temporary carriers. All item/phase/operation ordinals use
+the shared variant panic. Fresh list clones allocate capacity equal to
+length; drops release each active payload and the original capacity-sized
+storage exactly once. Private success graphs do not enroll Result aliases.

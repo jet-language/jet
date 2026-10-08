@@ -1,0 +1,95 @@
+// Seed runtime.rs131672-131693 / HostServices.rs1423-1444; #4825.
+fn ui_drop_item_kind(value: I64) -> I64 {
+    kind :: ui_carrier_word(value + UI_DROP_ITEM_KIND)
+    if (kind < I64{0} || kind >= I64{3}) -> rt_record_variant_panic()
+    kind
+}
+fn ui_drop_item_copy(value: I64, result: I64) {
+    kind :: ui_drop_item_kind(value)
+    ui_carrier_store(result + UI_DROP_ITEM_KIND, kind)
+    if {
+        (kind == I64{2}) -> ui_granted_path_copy(value + UI_DROP_ITEM_PAYLOAD, result + UI_DROP_ITEM_PAYLOAD)
+        else -> {
+            ui_carrier_store(result + UI_DROP_ITEM_PAYLOAD, jet_rt_string_clone(ui_carrier_word(value + UI_DROP_ITEM_PAYLOAD)))
+            ui_carrier_store(result + UI_DROP_ITEM_PAYLOAD + UI_GRANTED_PATH_ROOT, I64{0})
+            ui_carrier_store(result + UI_DROP_ITEM_PAYLOAD + UI_GRANTED_PATH_ACCESS, I64{0})
+        }
+    }
+}
+fn ui_drop_item_fields_drop(value: I64) {
+    if {
+        (ui_drop_item_kind(value) == I64{2}) -> ui_granted_path_fields_drop(value + UI_DROP_ITEM_PAYLOAD)
+        else -> jet_rt_string_drop(ui_carrier_word(value + UI_DROP_ITEM_PAYLOAD))
+    }
+}
+fn ui_drop_item_eq(a: I64, b: I64) -> Bool {
+    kind :: ui_drop_item_kind(a)
+    if (kind != ui_drop_item_kind(b)) -> return false
+    if (kind == I64{2}) -> return ui_granted_path_eq(a + UI_DROP_ITEM_PAYLOAD, b + UI_DROP_ITEM_PAYLOAD)
+    jet_rt_string_eq(ui_carrier_word(a + UI_DROP_ITEM_PAYLOAD), ui_carrier_word(b + UI_DROP_ITEM_PAYLOAD))
+}
+fn ui_drop_items_clone(value: I64) -> I64 {
+    length :: ui_carrier_word(value + DATA_SEQUENCE_LENGTH)
+    result :: data_sequence_new(length, UI_DROP_ITEM_BYTES)
+    source :: ui_carrier_word(value + DATA_SEQUENCE_DATA)
+    target :: ui_carrier_word(result + DATA_SEQUENCE_DATA)
+    at := I64{0}
+    loop at < length {
+        ui_drop_item_copy(source + at * UI_DROP_ITEM_BYTES, target + at * UI_DROP_ITEM_BYTES)
+        at += I64{1}
+    }
+    ui_carrier_store(result + DATA_SEQUENCE_LENGTH, length)
+    result
+}
+fn ui_drop_items_drop(value: I64) {
+    length :: ui_carrier_word(value + DATA_SEQUENCE_LENGTH)
+    capacity :: ui_carrier_word(value + DATA_SEQUENCE_CAPACITY)
+    data :: ui_carrier_word(value + DATA_SEQUENCE_DATA)
+    at := I64{0}
+    loop at < length {
+        ui_drop_item_fields_drop(data + at * UI_DROP_ITEM_BYTES)
+        at += I64{1}
+    }
+    if (capacity != I64{0}) -> jet_rt_free(data, capacity * UI_DROP_ITEM_BYTES, I64{8})
+    jet_rt_free(value, DATA_SEQUENCE_BYTES, I64{8})
+}
+fn ui_drop_items_eq(a: I64, b: I64) -> Bool {
+    length :: ui_carrier_word(a + DATA_SEQUENCE_LENGTH)
+    if (length != ui_carrier_word(b + DATA_SEQUENCE_LENGTH)) -> return false
+    first :: ui_carrier_word(a + DATA_SEQUENCE_DATA)
+    second :: ui_carrier_word(b + DATA_SEQUENCE_DATA)
+    at := I64{0}
+    loop at < length {
+        if (!ui_drop_item_eq(first + at * UI_DROP_ITEM_BYTES, second + at * UI_DROP_ITEM_BYTES)) -> return false
+        at += I64{1}
+    }
+    true
+}
+fn ui_drag_event_tags(value: I64) {
+    phase :: ui_carrier_word(value + UI_DRAG_EVENT_PHASE)
+    operation :: ui_carrier_word(value + UI_DRAG_EVENT_OPERATION)
+    if (phase < I64{0} || phase >= I64{5} || operation < I64{0} || operation >= I64{3}) -> rt_record_variant_panic()
+}
+fn ui_drag_event_clone(value: I64) -> I64 {
+    if (value == I64{0}) -> return I64{0}
+    ui_drag_event_tags(value)
+    result :: jet_rt_alloc(UI_DRAG_EVENT_BYTES, I64{8})
+    ui_carrier_store(result + UI_DRAG_EVENT_TARGET, jet_rt_string_clone(ui_carrier_word(value + UI_DRAG_EVENT_TARGET)))
+    ui_carrier_store(result + UI_DRAG_EVENT_PHASE, ui_carrier_word(value + UI_DRAG_EVENT_PHASE))
+    ui_carrier_store(result + UI_DRAG_EVENT_OPERATION, ui_carrier_word(value + UI_DRAG_EVENT_OPERATION))
+    ui_carrier_store(result + UI_DRAG_EVENT_ITEMS, ui_drop_items_clone(ui_carrier_word(value + UI_DRAG_EVENT_ITEMS)))
+    result
+}
+fn ui_drag_event_drop(value: I64) {
+    if (value == I64{0}) -> return
+    ui_drag_event_tags(value)
+    jet_rt_string_drop(ui_carrier_word(value + UI_DRAG_EVENT_TARGET))
+    ui_drop_items_drop(ui_carrier_word(value + UI_DRAG_EVENT_ITEMS))
+    jet_rt_free(value, UI_DRAG_EVENT_BYTES, I64{8})
+}
+fn ui_drag_event_eq(a: I64, b: I64) -> Bool {
+    if (a == I64{0} || b == I64{0}) -> return a == b
+    ui_drag_event_tags(a)
+    ui_drag_event_tags(b)
+    ui_carrier_word(a + UI_DRAG_EVENT_PHASE) == ui_carrier_word(b + UI_DRAG_EVENT_PHASE) && ui_carrier_word(a + UI_DRAG_EVENT_OPERATION) == ui_carrier_word(b + UI_DRAG_EVENT_OPERATION) && jet_rt_string_eq(ui_carrier_word(a + UI_DRAG_EVENT_TARGET), ui_carrier_word(b + UI_DRAG_EVENT_TARGET)) && ui_drop_items_eq(ui_carrier_word(a + UI_DRAG_EVENT_ITEMS), ui_carrier_word(b + UI_DRAG_EVENT_ITEMS))
+}
