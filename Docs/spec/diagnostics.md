@@ -80,6 +80,12 @@ and never inherit the root diagnostic's location. If a source snapshot is
 unavailable, the projection must not invent a path, line, column, or `0:0`
 position. An explicitly supplied byte span remains unchanged.
 
+Bundle checks retain the owning source snapshot when a later phase reports
+against a module-local span. In particular, solved-effect boundary diagnostics
+belong to the function's declaring module, not the bundle entry file. The
+Jet checker attaches the module's source segments when publishing effect
+reports; the reference checker attaches the same origin before merging them.
+
 ## No-OS E3301 contract
 
 E3301 is the registered rule for an OS-dependent API selected for a no-OS
