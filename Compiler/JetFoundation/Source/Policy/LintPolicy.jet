@@ -5,8 +5,9 @@
 use core.text as lint_unicode
 
 // D-LINTPOLICY1: canonical package fields (Rust Syntax/predicates.rs).
-pub POLICY_FIELD_LINTS :: "lints"
-pub LINTS_FIELD_DENY :: "deny"
+// Compiler-scoped names stay distinct from Jetpack Syntax in the flat bootstrap.
+pub LINT_POLICY_FIELD_LINTS :: "lints"
+pub LINT_POLICY_FIELD_DENY :: "deny"
 
 // One parse failure from a lint-selection surface. Code/name are present only
 // when the rejected value is a registered diagnostic code, so the caller can
@@ -66,10 +67,10 @@ pub fn lint_auto_derive_name() -> String Never! {
 
 // Rust `parse_policy_lints`: the `lints:` part of a package policy.
 pub fn lint_parse_policy_lints(body: String) -> [String]? LintPolicyError! {
-    lints_body :: lint_block_body(body, POLICY_FIELD_LINTS) ?? return Ok(None)
+    lints_body :: lint_block_body(body, LINT_POLICY_FIELD_LINTS) ?? return Ok(None)
     deny := [String]{}
     loop entry in lint_key_value_entries(lints_body) {
-        if entry.key != LINTS_FIELD_DENY -> return Err(lint_policy_error("unknown `policy.lints` field `{entry.key}` — allowed: `{LINTS_FIELD_DENY}`"))
+        if entry.key != LINT_POLICY_FIELD_DENY -> return Err(lint_policy_error("unknown `policy.lints` field `{entry.key}` — allowed: `{LINT_POLICY_FIELD_DENY}`"))
         deny = lint_parse_name_list(entry.value.trim())
     }
     Ok(Val(deny))
@@ -78,7 +79,7 @@ pub fn lint_parse_policy_lints(body: String) -> [String]? LintPolicyError! {
 // Rust `parse_lint_name_list`.
 fn lint_parse_name_list(value: String) -> [String] LintPolicyError! {
     text :: value.trim()
-    if !text.starts_with("[") || !text.ends_with("]") || text.bytes().len() < 2 -> return Err(lint_policy_error("`{LINTS_FIELD_DENY}:` must be a list like `[same_enum_guard_table, float_money]`"))
+    if !text.starts_with("[") || !text.ends_with("]") || text.bytes().len() < 2 -> return Err(lint_policy_error("`{LINT_POLICY_FIELD_DENY}:` must be a list like `[same_enum_guard_table, float_money]`"))
     names := [String]{}
     loop item in lint_top_level_commas(lint_slice(text.bytes(), 1, text.bytes().len() - 1)) {
         entry :: item.trim()
