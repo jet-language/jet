@@ -447,8 +447,8 @@ fn lower_repr(p: MIRProgram, ty: MIRType) -> LowerRepr Never! {
             // shapes. Only exact Core paths may override their MIR definition,
             // and a record schema keeps its MIR layout (Records.jet): its
             // fields read natively and it converts only at a route boundary.
-            if args.len() == 0 && name.name.starts_with("<corelib>/") && lower_record_schema(p, ty) == None {
-                if lower_runtime_handle(name.name) == .Val(runtime) {
+            if name.name.starts_with("<corelib>/") && lower_record_schema(p, ty) == None {
+                if lower_runtime_handle_type(p, ty) == .Val(runtime) {
                     clone :: if runtime.clone -> "jet_rt_handle_clone_{runtime.runtime}" else -> ""
                     return LowerRepr.Handle{drop: "jet_rt_handle_drop_{runtime.runtime}", clone: clone}
                 }
@@ -456,12 +456,9 @@ fn lower_repr(p: MIRProgram, ty: MIRType) -> LowerRepr Never! {
             definition :: lower_type_def(p, ty) ?? {
                 // A Core type with no Jet definition is the runtime's own
                 // value behind an owned handle (RuntimeRoutes.jet).
-                if args.len() == 0 {
-                    runtime :: lower_runtime_handle(name.name) ?? return LowerRepr.Unsupported{reason: "type {name.name} without a definition"}
-                    clone :: if runtime.clone -> "jet_rt_handle_clone_{runtime.runtime}" else -> ""
-                    return LowerRepr.Handle{drop: "jet_rt_handle_drop_{runtime.runtime}", clone: clone}
-                }
-                return LowerRepr.Unsupported{reason: "type {name.name} without a definition"}
+                runtime :: lower_runtime_handle_type(p, ty) ?? return LowerRepr.Unsupported{reason: "type {name.name} without a definition"}
+                clone :: if runtime.clone -> "jet_rt_handle_clone_{runtime.runtime}" else -> ""
+                return LowerRepr.Handle{drop: "jet_rt_handle_drop_{runtime.runtime}", clone: clone}
             }
             if definition.kind == {
                 .Struct(_, _) -> LowerRepr.Inline{ty: ty}

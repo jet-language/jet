@@ -44,6 +44,22 @@ reject(tuple, ["value: I64", "item0: I64", "item1: I64"], "-> I64");
 check(route([], null), []);
 check(route([], "f64"), [], "-> F64");
 reject(route([], "f64"), [], "-> I64");
+// Only the reviewed resolver-constructor flag may widen to a masked word.
+const resolverFlag = { ...route([["i64"], ["u8"], ["i64"], ["JetCString"]], "*mut crate::Jet__ResolveError"), name: "jet_rt_record_new_Jet__ResolveError" };
+check(resolverFlag, ["kind: I64", "flag: I64", "os_code: I64", "message: I64"], "-> I64");
+reject({ ...resolverFlag, name: "jet_unlisted" }, ["kind: I64", "flag: I64", "os_code: I64", "message: I64"], "-> I64");
+reject(resolverFlag, ["kind: I64", "flag: U64", "os_code: I64", "message: I64"], "-> I64");
+reject({ ...resolverFlag, result: { ret: "u8", outs: [] } }, ["kind: I64", "flag: I64", "os_code: I64", "message: I64"], "-> I64");
+const socketWords = { ...route([["*mut crate::JetIpAddr"], ["u16"], ["u32"], ["u32"]], "*mut crate::JetSocketAddr"), name: "jet_net_raw_socket_from_parts" };
+check(socketWords, ["ip: I64", "port: I64", "flow: I64", "scope: I64"], "-> I64");
+reject({ ...socketWords, name: "jet_unlisted" }, ["ip: I64", "port: I64", "flow: I64", "scope: I64"], "-> I64");
+const resolverPort = { ...route([["JetCString"], ["u16"]], "i64", ["*mut u64", "i64", "JetCString"]), name: "jet_net_raw_resolve_ordered" };
+check(resolverPort, ["host: I64", "port: I64", "data: I64", "len: I64", "error: I64"], "-> I64");
+const maskedFlag = "#Export(c) fn jet_rt_record_new_Jet__ResolveError(kind: I64, flag: I64, os: I64, text: I64) -> I64 { if (flag & I64{255}) != I64{0} { return kind } kind }";
+assert.ok(parseRuntimeExports(maskedFlag, "Source/Test.jet").has("jet_rt_record_new_Jet__ResolveError"));
+assert.throws(() => parseRuntimeExports(maskedFlag.replace("flag & I64{255}", "flag"), "Source/Test.jet"), /low-8-bit mask/);
+assert.throws(() => parseRuntimeExports(maskedFlag.replace("flag & I64{255}", "flag /* flag & I64{255} */"), "Source/Test.jet"), /low-8-bit mask/);
+assert.throws(() => parseRuntimeExports(maskedFlag.replace("flag & I64{255}", "flag") + "\nfn unrelated(flag: I64) { flag & I64{255} }", "Source/Test.jet"), /low-8-bit mask/);
 
 const source = "#Export(c)\nfn jet_a(a: I64, b: U64,) -> I64 { return a }\n#Export(c) fn jet_b(out: I64) { }\nfn internal() { }\n";
 const parsed = parseRuntimeExports(source, "Source/Test.jet");
