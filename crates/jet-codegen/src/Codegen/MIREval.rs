@@ -32954,33 +32954,142 @@ fn run() {
     #[test]
     fn mir_zeroize_writes_the_original_caller_allocation() {
         jet_foundation::CompilerStack::run_on_compiler_stack(|| {
-            // Lower the real primitive to obtain its canonical Core/Prelude IDs.
-            // Supply a Write address directly so this tests the interception,
-            // independently of the old consuming signature being corrected.
-            let bundle = checked_bundle(
-                "use core.crypto as crypto\nfn run() {\n    bytes := [U8]{1, 2, 3}\n    crypto.__zeroize(^bytes)\n}",
-                true,
+            use jet_foundation::MIR::*;
+            // Build the canonical call row directly: this machine-level witness
+            // needs no source loader and must also run against the old signature.
+            let row = MirCoreCall::from_record(
+                jet_foundation::Syntax::core_call("core.crypto", "__zeroize")
+                    .expect("canonical zeroize declaration"),
             );
-            let request = jet_foundation::MIR::MirArtifactRequest::new(
-                MirArtifactTarget::Interpreter,
-                jet_foundation::MIR::MirArtifactKind::NativeExecutable,
-                jet_foundation::MIR::MirArtifactBuildMode::Dev,
-            );
-            let (program, _) = crate::Codegen::TIR::lower_checked_mir_program_for(&bundle, request)
-                .expect("zeroize witness MIR");
-            let row = program.core_calls.iter()
-                .find(|row| row.module == "core.crypto" && row.member == "__zeroize")
-                .expect("canonical zeroize row");
-            let route = program.prelude_calls.iter()
-                .find(|route| route.module == "core.crypto" && route.member == "__zeroize")
-                .expect("canonical zeroize route");
-            let function = program.functions.iter().find(|function| {
-                function.locals.iter().any(|local| local.name == "bytes")
-            }).expect("caller function");
-            let local = function.locals.iter().find(|local| local.name == "bytes").unwrap();
-            let place = function.places.iter().find(|place| {
-                place.base == MirPlaceBase::Local(local.id) && place.projections.is_empty()
-            }).expect("caller byte storage place");
+            let route = MirPreludeCall {
+                id: MirPreludeCallId(stable_id("prelude-call", &row.key)),
+                family: MirPreludeFamily::StaticPrelude,
+                module: row.module.clone(),
+                member: row.member.clone(),
+                symbol: MirSymbol::Prelude(row.symbol.name().to_string()),
+                signature: MirCallSignature {
+                    arity: row.arity,
+                    max_arity: row.max_arity,
+                    borrow_mask: row.borrow_mask.clone(),
+                },
+                effect: row.effect,
+                fallibility: MirCallFallibility::Infallible,
+                abi: MirPreludeAbi::Effect,
+                authority: None,
+                db_metadata: None,
+            };
+            let span = Span { start: 0, end: 0 };
+            let ty = MirType::from_kind(MirTypeKind::List(Box::new(
+                MirType::from_kind(MirTypeKind::IntN { signed: false, bits: 8 }),
+            )));
+            let local = MirLocal {
+                id: MirLocalId(1),
+                name: "bytes".into(),
+                span,
+                ty: ty.clone(),
+                place: MirPlaceId(1),
+                mutable: true,
+                ownership: MirOwnership::Owned,
+                comptime: false,
+                uninit: false,
+                arena_view: false,
+                string_view: false,
+                gc_root: false,
+            };
+            let place = MirPlace {
+                id: local.place,
+                span,
+                ty,
+                base: MirPlaceBase::Local(local.id),
+                projections: Vec::new(),
+                access: MirAccess::Write,
+                persist_key: None,
+            };
+            let function = MirFunction {
+                id: MirFunctionId(1),
+                module_id: MirModuleId(1),
+                source_file: MirSourceFileId(1),
+                key: "zeroize-witness.run".into(),
+                module: "zeroize-witness".into(),
+                name: "run".into(),
+                span,
+                kind: MirFunctionKind::Jet,
+                form: MirFunctionForm::TopLevel,
+                visibility: MirVisibility::Private,
+                target_applicability: MirTargetApplicability {
+                    interpreter: true,
+                    ..Default::default()
+                },
+                web_bucket: None,
+                web_marker: None,
+                generic_params: Vec::new(),
+                capture_params: Vec::new(),
+                params: Vec::new(),
+                declared_return: None,
+                return_type: MirType::from_kind(MirTypeKind::Tuple(Vec::new())),
+                failure: MirFailureCarrier::Infallible,
+                effects: MirEffectFacts::default(),
+                captures: None,
+                generator: None,
+                optimization: MirOptimizationFacts::default(),
+                is_unsafe: false,
+                unsafe_gate: None,
+                is_pure: false,
+                memo_bound: None,
+                is_reactive: false,
+                reactive_upgrades: Vec::new(),
+                is_inline: false,
+                is_inline_always: false,
+                is_scalar: false,
+                kernel_proof: None,
+                gc_return: false,
+                return_view_provenance: None,
+                web_param_reconstructions: Vec::new(),
+                blocks: vec![MirBasicBlock {
+                    id: MirBlockId(1),
+                    span,
+                    instructions: Vec::new(),
+                    terminator: MirTerminator::Return { value: None },
+                }],
+                entry: MirBlockId(1),
+                locals: vec![local.clone()],
+                values: Vec::new(),
+                places: vec![place.clone()],
+                scopes: Vec::new(),
+                drops: Vec::new(),
+                foreign_language: None,
+            };
+            let program = MirProgram {
+                cffi: MirCffiFacts::default(),
+                schema_version: MIR_SCHEMA_VERSION,
+                package_identity: "zeroize-witness".into(),
+                facts: MirPackageFacts::default(),
+                names: MirNameFacts::default(),
+                modules: Vec::new(),
+                imports: Vec::new(),
+                types: Vec::new(),
+                traits: Vec::new(),
+                core_owners: Vec::new(),
+                impls: Vec::new(),
+                constants: Vec::new(),
+                fields: Vec::new(),
+                source_files: Vec::new(),
+                functions: vec![function],
+                foreign: Vec::new(),
+                links: Vec::new(),
+                callbacks: Vec::new(),
+                handles: Vec::new(),
+                jobs: Vec::new(),
+                tests: Vec::new(),
+                harnesses: Vec::new(),
+                artifacts: Vec::new(),
+                core_calls: vec![row.clone()],
+                prelude_calls: vec![route.clone()],
+                type_instances: Vec::new(),
+                codec_migrations: HashMap::new(),
+                unreachable: Vec::new(),
+            };
+            let function = &program.functions[0];
             let bytes = vec![0x53u8, 0x45, 0x43, 0x52, 0x45, 0x54];
             let original = bytes.as_ptr();
             let mut frame = Frame::new(function, Vec::new(), Vec::new()).unwrap();
