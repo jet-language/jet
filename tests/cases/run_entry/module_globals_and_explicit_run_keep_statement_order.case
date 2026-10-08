@@ -1,0 +1,29 @@
+# HAND-PORT tests/run_entry.rs:35-120 module_globals_and_explicit_run_keep_statement_order
+# PENDING-KIT; PENDING-GRAMMAR; no runtime/reference proof.
+# Original default/interpreter/dev-interpreter matrix retained; module-global explicit CLI and guarded AOT output/stderr assertions included.
+fixture: module_globals_and_explicit_run_keep_statement_order.fixture
+env: NO_COLOR=1
+step default: jet run main.jet
+exit: 0
+stdout: = module_globals_and_explicit_run_keep_statement_order.stdout.expected
+stderr: empty
+step interpret: jet run --interpret main.jet
+exit: 0
+stdout: = module_globals_and_explicit_run_keep_statement_order.stdout.expected
+stderr: empty
+step dev_interpreter: jet run --interpret main.jet
+exit: 0
+stdout: = module_globals_and_explicit_run_keep_statement_order.stdout.expected
+stderr: empty
+step cli: jet run main.jet
+exit: 0
+stdout: = module_globals_and_explicit_run_keep_statement_order.stdout.expected
+stderr: empty
+when tool rustc
+step: jet build --profile=debug main.jet
+exit: 0
+step: built
+exit: 0
+stdout: = module_globals_and_explicit_run_keep_statement_order.stdout.expected
+stderr: empty
+end when

@@ -1,0 +1,9 @@
+# HAND-PORT tests/fact_reads.rs:361-373 build_fact_reads_do_not_enter_type_position
+# PENDING-KIT; PENDING-GRAMMAR; no runtime/reference proof.
+# Original first matching diagnostic predicates; every required what/why/fix read refers to the SAME first report.
+fixture: build_fact_reads_do_not_enter_type_position.fixture
+env: NO_COLOR=1
+step: jet check --json main.jet
+exit: nonzero
+json: stdout doc $.reports[?code="E0119"][0].what ~ "fact value" # original first matching diagnostic
+json: stdout doc $.reports[?code="E0119"][0].why ~ "do not mint or select types" # original first matching diagnostic
