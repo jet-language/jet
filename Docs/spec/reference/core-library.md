@@ -2662,6 +2662,10 @@ reason; its optional cause is retained but not included in that text.
 `DataWatchStatus` exposes the complete retained status record in a stable field
 order. `DataTree` remains the existing native nominal and ordered-object
 carrier; source-owned data policy does not introduce a second tree algebra.
+The source plot selector enums preserve the native variant order and spellings,
+including text/detail channels, point scales, row/column facets, zoom/brush
+interactions, terminal/browser/native/export backends, and supported/degraded
+capabilities. The default `show` backend is Browser; Terminal selects text.
 
 ```jet
 use core.data as data
