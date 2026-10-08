@@ -42,6 +42,7 @@ use jet_foundation.[
     core_record_literal_is_core_only,
     core_call,
     expr_span,
+    mir_typed_head_kind,
     regex_syntax_validate,
     symbol_id,
     type_identity_key,
@@ -700,20 +701,6 @@ struct SemaExpressionTypedTextParts {
     pub trusted_html: [Bool]
 }
 
-fn sema_expression_typed_literal_head_kind(head: Type) -> MIRTypedHeadKind? {
-    if head == {
-        .Named(name) -> {
-            if name == "SQL" -> return Val(MIRTypedHeadKind.SQL)
-            if name == "HTML" -> return Val(MIRTypedHeadKind.HTML)
-            if name == "Sh" -> return Val(MIRTypedHeadKind.Sh)
-            if name == "URL" -> return Val(MIRTypedHeadKind.URL)
-            if name == "Path" -> return Val(MIRTypedHeadKind.Path)
-            if name == "DateTime" -> return Val(MIRTypedHeadKind.DateTime)
-        }
-        else -> {}
-    }
-    None
-}
 
 fn sema_expression_typed_literal_printable_bound(ty: Type, environment: SemaScopeEnvironment) -> Bool Never! {
     graph_option :: environment.registration_graph
@@ -1344,10 +1331,10 @@ fn sema_expression_typed_literal(head: Type?, body: TypedLitBody, span: Span, ex
         &diagnostics.push(sema_error("E0119", span, "this inferred typed literal needs a known type", "an inferred typed literal needs an expected type from the surrounding context", "add a type head, or annotate the binding with the intended type"))
         return None
     })
-    source_kind := sema_expression_typed_literal_head_kind(written_head)
+    source_kind := mir_typed_head_kind(written_head)
     result_head := sema_expr_expected_type(sema_expr_unwrap_tag(written_head), environment)
     kind := source_kind
-    if kind == None -> kind = sema_expression_typed_literal_head_kind(result_head)
+    if kind == None -> kind = mir_typed_head_kind(result_head)
     checked_text := sema_expression_checked_text_literal(result_head, head, body, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     if checked_text.handled -> return checked_text.value
 
