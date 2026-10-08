@@ -1527,6 +1527,12 @@ type limits. The first batch reuses the existing `Lower/Lists.jet` implementatio
 (all-ref search finds its introduction in `1e7f948f3`), not a second runtime
 kernel. `check-lists-native.mjs` checks source/dispatch/helper consistency;
 its receipt is not native execution or unrestricted type-coverage proof.
+The second batch records 22 more List bodies in `Combinators.jet`,
+`Parallel.jet` and `Lists.jet`, including eager callback ordering, first-error
+cleanup and explicit unsupported callback/type shapes. The parallel map still
+uses the separately owned `jet_rt_native_para_walk` scheduler seam. The census's
+`jet_list_para_fold_add_fixed_f64` is not included: it still selects a Rust
+runtime route, so the List audit is 44 of 45 rather than a false full closure.
 
 Lazy cursor initialization and advancement may invoke user callbacks. Both
 are can-stop MIR operations: their results are usable only on the immediately
