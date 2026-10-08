@@ -538,7 +538,43 @@ struct ServiceStateStore {
 }
 
 pub fn tree(name: String) -> ServiceTree Never! {
-    core.service.tree(name)
+    #Unsafe("Allocation only: source supplies every Services.rs initializer field at 2d9953adf:1293-1319, in native evaluation order") {
+        return core.service.__tree_allocate(
+            "", // native 1295: authority
+            name, // native 1296: name
+            I64{1}, // native 1297: generation
+            ServiceDelivery.AtMostOnce, // native 1298: delivery
+            ServiceRestart.OneForOne, // native 1299: restart
+            (max: I64{5}, per_ms: I64{60000}), // native 1300 / ratified_default 60-61
+            [__TreeWorker]{}, // native 1301: workers
+            [__TreeGroup]{}, // native 1302: groups
+            false, // native 1303: started
+            __TreeStateAdapter.Empty, // native 1304: state_adapter
+            None, // native 1305: state_authority
+            None, // native 1306: snapshot
+            [String]{}, // native 1307: event_log
+            [String]{}, // native 1308: dead_letters
+            [(key: String, endpoint: ServiceEndpoint, value: String)]{}, // native 1309: idempotency_seen
+            [(key: String, endpoint: ServiceEndpoint, handler: String)]{}, // native 1310: directory
+            [String]{}, // native 1311: draining
+            [String]{}, // native 1312: partitioned
+            [__TreeWorkflowState]{}, // native 1313: workflows
+            core.service.__tree_task_group_new(), // native 1314: existing task runtime allocation
+            [__TreeSupervisorState]{}, // native 1315: supervisor_tasks
+            I64{0}, // native 1316: chaos_fails
+            I64{0}, // native 1317: previous_generation
+            None // native 1318: last_upgrade
+        )
+    }
+}
+
+#Test("fresh service tree exposes every native seed without starting a task") {
+    fresh :: tree("seed")
+    assert(tree_show(fresh) == "ServiceTree(name=seed, workers=0, handlers=[], started=false, restart=OneForOne, budget=5/60000ms, delivery=AtMostOnce)")
+    assert(observe(fresh) == "Observe(workers=0, started=false, generation=1, dead_letters=0, events=0, chaos=0, draining=0, partitions=0, rollback=false, workflows=0,statuses={{running:0,paused:0,cancel_requested:0}},outcomes={{pending:0,finished:0,panicked:0,cancelled:0,deadline_blown:0}})")
+    assert(directory_generation(fresh) == 1)
+    assert(event_count(fresh) == 0)
+    assert(dead_letter_count(fresh) == 0)
 }
 
 pub fn runtime(store: String, retention: Duration) -> ServiceRuntime Never! {

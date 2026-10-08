@@ -3850,6 +3850,13 @@ Endpoint input and authority-status validation also live in that module.
 The reserved `__authority_validate` preserves native check order, including
 partition-before-generation for an exact registry entry, and reads one
 consistent snapshot of the existing endpoint registry for its fallback scans.
+The fresh-tree constructor supplies all initial fields in Jet, in their native
+evaluation order: generation 1, OneForOne restart with a 5/60000ms budget,
+AtMostOnce delivery, no authority/snapshot/upgrade, and empty topology/state
+stores. Its two temporary host leaves only allocate the existing task runtime
+and materialize those supplied fields. Seven private type-name bindings expose
+the existing field types without introducing a new carrier; both compiler
+mappers bind the same names and retire at the Jet-runtime cutover.
 
 Snapshot/event-log selection, replay framing, topology/observation text, and
 workflow history/outcome selection are Jet policies. Durable reads retain the

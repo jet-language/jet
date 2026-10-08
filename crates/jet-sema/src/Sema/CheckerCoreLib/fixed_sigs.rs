@@ -3795,6 +3795,51 @@ fn core_fixed_sig_impl(
                 ]), Type::Named("ServiceError".into()),
             ))))
         },
+        ("core.service", "__tree_task_group_new") => Some((
+            vec![], Some(Type::Named("__TreeTaskGroup".into())),
+        )),
+        ("core.service", "__tree_allocate") => {
+            let native_i64 = Type::IntN { signed: true, bits: 64 };
+            let endpoint_record = Type::Tuple(vec![
+                ("key".into(), Box::new(Type::String)),
+                ("endpoint".into(), Box::new(Type::Named("ServiceEndpoint".into()))),
+                ("value".into(), Box::new(Type::String)),
+            ]);
+            let directory_record = Type::Tuple(vec![
+                ("key".into(), Box::new(Type::String)),
+                ("endpoint".into(), Box::new(Type::Named("ServiceEndpoint".into()))),
+                ("handler".into(), Box::new(Type::String)),
+            ]);
+            Some((vec![
+                (AccessConvention::Move, Type::String), // authority
+                (AccessConvention::Move, Type::String), // name
+                (read, native_i64.clone()), // generation
+                (AccessConvention::Move, Type::Named("ServiceDelivery".into())),
+                (AccessConvention::Move, Type::Named("ServiceRestart".into())),
+                (AccessConvention::Move, Type::Tuple(vec![
+                    ("max".into(), Box::new(native_i64.clone())),
+                    ("per_ms".into(), Box::new(native_i64.clone())),
+                ])),
+                (AccessConvention::Move, Type::List(Box::new(Type::Named("__TreeWorker".into())))),
+                (AccessConvention::Move, Type::List(Box::new(Type::Named("__TreeGroup".into())))),
+                (read, Type::Bool),
+                (AccessConvention::Move, Type::Named("__TreeStateAdapter".into())),
+                (AccessConvention::Move, Type::Option(Box::new(Type::Named("__TreeStateAuthority".into())))),
+                (AccessConvention::Move, Type::Option(Box::new(Type::String))),
+                (AccessConvention::Move, list_string.clone()), // event_log
+                (AccessConvention::Move, list_string.clone()), // dead_letters
+                (AccessConvention::Move, Type::List(Box::new(endpoint_record))),
+                (AccessConvention::Move, Type::List(Box::new(directory_record))),
+                (AccessConvention::Move, list_string.clone()), // draining
+                (AccessConvention::Move, list_string.clone()), // partitioned
+                (AccessConvention::Move, Type::List(Box::new(Type::Named("__TreeWorkflowState".into())))),
+                (AccessConvention::Move, Type::Named("__TreeTaskGroup".into())),
+                (AccessConvention::Move, Type::List(Box::new(Type::Named("__TreeSupervisorState".into())))),
+                (read, native_i64.clone()), // chaos_fails
+                (read, native_i64), // previous_generation
+                (AccessConvention::Move, Type::Option(Box::new(Type::Named("ServiceUpgradeReceipt".into())))),
+            ], Some(Type::Named("ServiceTree".into()))))
+        },
         ("core.service", "drain_dead_letters") => Some((
             vec![(
                 AccessConvention::Write,
