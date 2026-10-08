@@ -2304,3 +2304,20 @@ functions only, then links the client to a supplied fresh Jet object for
 direct seed comparison. Seed compilation and native execution belong to
 the heavy proof lane; parser/C11 and generator freshness are not native
 parity proof.
+
+### Native deterministic-world handle leases
+
+`WorldHandleGlue.jet` delegates the two generic DeterministicWorld handle
+routes to the existing World128 lease implementation. The seed's derived
+Clone shares both `Arc<Mutex<JetWorldState>>` and `Arc<Condvar>`; native clone
+likewise increments the existing shared refcount, not a deep state copy.
+The actual `jet_rt_world_new` and `jet_testing_world` producers, controlled
+callbacks and all world methods continue using the same native world state.
+Core head `02ffaf12a` registers only Fake as a source-owned testing type,
+so these DeterministicWorld routes remain runtime-owned.
+
+`WorldHandleWitness.c` links real Jet objects with `--wrap=jet_rt_free`
+and checks shared mutation, multiple leases, surviving original/intermediate
+drops, nullable drop and the final exact-once World128 free. Native execution
+and composed caller admission are still required; source parsing and C11
+syntax checks do not establish runtime parity.
