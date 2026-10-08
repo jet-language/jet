@@ -38,10 +38,10 @@ fn ui_optional_text_clone(value: I64) -> I64 {
     loop index < length {
         state :: source + index * UI_STATE_BYTES
         target :: data + index * UI_STATE_BYTES
-        tag :: ui_word(state)
-        ui_store(target, tag)
+        variant :: ui_word(state)
+        ui_store(target, variant)
         // Unit variants have no payload; never interpret their unused word.
-        payload :: if (tag == UI_STATE_VALUE) -> ui_text_clone(ui_word(state + UI_STATE_PAYLOAD)) else if (tag == UI_STATE_EXPANDED || tag == UI_STATE_CHECKED || tag == UI_STATE_SELECTED) -> ui_word(state + UI_STATE_PAYLOAD) else -> I64{0}
+        payload :: if (variant == UI_STATE_VALUE) -> ui_text_clone(ui_word(state + UI_STATE_PAYLOAD)) else if (variant == UI_STATE_EXPANDED || variant == UI_STATE_CHECKED || variant == UI_STATE_SELECTED) -> ui_word(state + UI_STATE_PAYLOAD) else -> I64{0}
         ui_store(target + UI_STATE_PAYLOAD, payload)
         index += I64{1}
     }
@@ -80,11 +80,11 @@ fn ui_optional_text_clone(value: I64) -> I64 {
     loop index < length {
         a :: left_data + index * UI_STATE_BYTES
         b :: right_data + index * UI_STATE_BYTES
-        tag :: ui_word(a)
-        if (tag != ui_word(b)) -> return false
-        if (tag == UI_STATE_VALUE) {
+        variant :: ui_word(a)
+        if (variant != ui_word(b)) -> return false
+        if (variant == UI_STATE_VALUE) {
             if !ui_text_eq(ui_word(a + UI_STATE_PAYLOAD), ui_word(b + UI_STATE_PAYLOAD)) -> return false
-        } else if (tag == UI_STATE_EXPANDED || tag == UI_STATE_CHECKED || tag == UI_STATE_SELECTED) {
+        } else if (variant == UI_STATE_EXPANDED || variant == UI_STATE_CHECKED || variant == UI_STATE_SELECTED) {
             if (ui_word(a + UI_STATE_PAYLOAD) != ui_word(b + UI_STATE_PAYLOAD)) -> return false
         }
         index += I64{1}

@@ -103,6 +103,15 @@ int main(void) {
     other->name = 0;
     assert(!jet_rt_handle_eq_JetUiAccessibility(a, b));
     other->name = saved;
+    saved = other->description;
+    other->description = (uintptr_t)&mismatch;
+    assert(!jet_rt_handle_eq_JetUiAccessibility(a, b));
+    other->description = saved;
+    struct State swap = other->data[2];
+    other->data[2] = other->data[3];
+    other->data[3] = swap;
+    assert(!jet_rt_handle_eq_JetUiAccessibility(a, b));
+    swap = other->data[2]; other->data[2] = other->data[3]; other->data[3] = swap;
     struct Accessibility empty = {0, 0, 0, 0, (void *)1};
     uintptr_t e = jet_rt_handle_clone_JetUiAccessibility((uintptr_t)&empty);
     assert(jet_rt_handle_eq_JetUiAccessibility(e, (uintptr_t)&empty));
