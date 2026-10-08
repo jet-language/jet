@@ -1,0 +1,20 @@
+
+struct Payload {
+    callback: fn(Int) -> Int
+}
+
+fn identity(value: Int) -> Int {
+    return value
+}
+
+fn equal<T: Equatable>(left: T, right: T) -> Bool {
+    return left == right
+}
+
+fn run() {
+    pool := Pool<Payload>.new()
+    left :: pool.add(Payload.{callback: identity})
+    right :: pool.add(Payload.{callback: identity})
+    same :: equal(left, right)
+    print(same)
+}

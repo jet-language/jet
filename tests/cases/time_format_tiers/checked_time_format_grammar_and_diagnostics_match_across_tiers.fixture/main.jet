@@ -1,0 +1,58 @@
+
+use core.time as time
+
+
+fn run() {
+    datetime :: time.datetime(2024, 3, 9, 12, 34, 56)
+    zoned :: time.zoned(datetime, time.utc())
+
+    if datetime.format_checked("yyyy-MM-dd HH:mm:ss.SSSSSSSSS") == {
+        .Ok(text) -> { print("tokens:ok:{text}") }
+        .Err(_) -> { print("tokens:err:unexpected") }
+    }
+    if datetime.format_checked("'day' EEEE 'month' MMMM") == {
+        .Ok(text) -> { print("names:ok:{text}") }
+        .Err(_) -> { print("names:err:unexpected") }
+    }
+    if datetime.format_checked("%F %T %A %B") == {
+        .Ok(text) -> { print("percent:ok:{text}") }
+        .Err(_) -> { print("percent:err:unexpected") }
+    }
+    if zoned.format_checked("VV XXX") == {
+        .Ok(text) -> { print("zone-ok:ok:{text}") }
+        .Err(_) -> { print("zone-ok:err:unexpected") }
+    }
+    if zoned.format_checked("yyyy|MM|dd|DDD|HH|mm|ss|SSS|SSSSSS|SSSSSSSSS|EEE|EEEE|MMM|MMMM|VV|XXX") == {
+        .Ok(text) -> { print("all-jet:ok:{text}") }
+        .Err(_) -> { print("all-jet:err:unexpected") }
+    }
+    if zoned.format_checked("%%|%A|%a|%B|%b|%Y|%y|%m|%d|%e|%j|%H|%I|%M|%S|%p|%z|%Z|%F|%T|%R|%D|%f") == {
+        .Ok(text) -> { print("all-percent:ok:{text}") }
+        .Err(_) -> { print("all-percent:err:unexpected") }
+    }
+    if datetime.format_checked("'broken") == {
+        .Ok(text) -> { print("unterminated:ok:{text}") }
+        .Err(error) -> { print("unterminated:err:{error:Debug}") }
+    }
+    if datetime.format_checked("%") == {
+        .Ok(text) -> { print("dangling-percent:ok:{text}") }
+        .Err(error) -> { print("dangling-percent:err:{error:Debug}") }
+    }
+    if datetime.format_checked("%Q") == {
+        .Ok(text) -> { print("unknown-percent:ok:{text}") }
+        .Err(error) -> { print("unknown-percent:err:{error:Debug}") }
+    }
+    if datetime.format_checked("qq") == {
+        .Ok(text) -> { print("unknown-token:ok:{text}") }
+        .Err(error) -> { print("unknown-token:err:{error:Debug}") }
+    }
+    if datetime.format_checked("%z") == {
+        .Ok(text) -> { print("missing-zone-percent:ok:{text}") }
+        .Err(error) -> { print("missing-zone-percent:err:{error:Debug}") }
+    }
+    if datetime.format_checked("VV") == {
+        .Ok(text) -> { print("missing-zone-token:ok:{text}") }
+        .Err(error) -> { print("missing-zone-token:err:{error:Debug}") }
+    }
+    return
+}
