@@ -79,20 +79,27 @@ if (mode !== "--plan") {
                 writeFileSync(join(raw, "run.status.json"), `${JSON.stringify({ status: run.status, signal: run.signal, error: run.error?.message ?? null })}\n`);
                 if (run.error || run.status !== 0 || run.signal || run.stdout || run.stderr) failures.push(`raw run: ${run.error?.message ?? `rc=${run.status}, signal=${run.signal}, stdout=${JSON.stringify(run.stdout)}, stderr=${JSON.stringify(run.stderr)}`}`);
             }
-            const directory = join(executableRoot, "bits-extent");
-            mkdirSync(directory, { recursive: true });
-            const extentFile = join(directory, "unit.jet");
-            const extentPrefix = join(directory, "stop");
-            writeFileSync(extentFile, readFileSync(join(raw, "unit.jet"), "utf8") + "\nfn run() { coll_test_bits_extent_stop() }\n");
-            const extentProblem = runJetFront({ candidate: candidateJetc0(), file: extentFile, root: directory, cwd: root, prefix: extentPrefix, receipt: join(directory, "front.receipt"), pack, store: join(raw, "store") });
-            if (extentProblem) failures.push(`bits extent compile: ${extentProblem.detail}`);
-            else {
-                const stopped = spawnSync(`${extentPrefix}.exe`, [], { encoding: "utf8", timeout: 30000 });
-                writeFileSync(join(directory, "run.stdout"), stopped.stdout ?? "");
-                writeFileSync(join(directory, "run.stderr"), stopped.stderr ?? "");
-                writeFileSync(join(directory, "run.status.json"), `${JSON.stringify({ status: stopped.status, signal: stopped.signal, error: stopped.error?.message ?? null })}\n`);
-                const headline = "Stop [E3001]: `panic: This addition overflows the value's type (the result is outside its range)`\n  --> <core.prelude>:0\n";
-                if (stopped.error || stopped.status !== 70 || stopped.signal || stopped.stdout || !stopped.stderr?.startsWith(headline)) failures.push(`bits extent: ${stopped.error?.message ?? `rc=${stopped.status}, signal=${stopped.signal}, stdout=${JSON.stringify(stopped.stdout)}, stderr=${JSON.stringify(stopped.stderr)}`}`);
+            const overflowHeadline = "Stop [E3001]: `panic: This addition overflows the value's type (the result is outside its range)`\n  --> <core.prelude>:0\n";
+            const boundsHeadline = "Stop [E3001]: `panic: the list has 0 items, so position 0 doesn't exist`\n  --> <core.prelude>:0\n";
+            for (const [name, entry, headline] of [
+                ["bits-extent", "coll_test_bits_extent_stop()", overflowHeadline],
+                ["chain-get-bounds", "coll_test_chain_bounds_stop(false)", boundsHeadline],
+                ["chain-contains-bounds", "coll_test_chain_bounds_stop(true)", boundsHeadline],
+            ]) {
+                const directory = join(executableRoot, name);
+                mkdirSync(directory, { recursive: true });
+                const stopFile = join(directory, "unit.jet");
+                const stopPrefix = join(directory, "stop");
+                writeFileSync(stopFile, readFileSync(join(raw, "unit.jet"), "utf8") + `\nfn run() { ${entry} }\n`);
+                const problem = runJetFront({ candidate: candidateJetc0(), file: stopFile, root: directory, cwd: root, prefix: stopPrefix, receipt: join(directory, "front.receipt"), pack, store: join(raw, "store") });
+                if (problem) failures.push(`${name} compile: ${problem.detail}`);
+                else {
+                    const stopped = spawnSync(`${stopPrefix}.exe`, [], { encoding: "utf8", timeout: 30000 });
+                    writeFileSync(join(directory, "run.stdout"), stopped.stdout ?? "");
+                    writeFileSync(join(directory, "run.stderr"), stopped.stderr ?? "");
+                    writeFileSync(join(directory, "run.status.json"), `${JSON.stringify({ status: stopped.status, signal: stopped.signal, error: stopped.error?.message ?? null })}\n`);
+                    if (stopped.error || stopped.status !== 70 || stopped.signal || stopped.stdout || !stopped.stderr?.startsWith(headline)) failures.push(`${name}: ${stopped.error?.message ?? `rc=${stopped.status}, signal=${stopped.signal}, stdout=${JSON.stringify(stopped.stdout)}, stderr=${JSON.stringify(stopped.stderr)}`}`);
+                }
             }
         } catch (error) { failures.push(`raw witness: ${error.message}`); }
     }
