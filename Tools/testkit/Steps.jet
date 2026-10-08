@@ -53,15 +53,15 @@ fn kit_steps_parse(source: String) -> KitPlan {
     line_number := 0
     loop raw in source.split("\n") {
         line_number += 1
-        line :: raw.trim()
+        line :: ~raw.trim()
         if line == "" || line.starts_with("#") -> next
         colon :: line.index(":") ?? -1
         if colon < 0 {
             plan.error = "line {line_number}: missing ':'"
             return plan
         }
-        key :: line.slice(0, colon).trim()
-        value :: line.slice(colon + 1, line.len()).trim()
+        key :: ~line.slice(0, colon).trim()
+        value :: ~line.slice(colon + 1, line.len()).trim()
         if key == "requires" {
             &plan.requires.push(value)
             next
