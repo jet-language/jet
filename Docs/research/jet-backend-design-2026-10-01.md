@@ -2367,3 +2367,41 @@ clone survival after dropping all original inline fields. Fatal modes are
 `index-equals-length` and `index-over-length`; these require the shared
 capacity/OOB stops and exit 101. Native/fatal execution and composed caller
 admission remain unexercised; parser and C11 checks are not parity proof.
+
+### Native Layout solver and handle ownership
+
+`NativeLayoutABI.jet`, `NativeLayoutText.jet`, `NativeLayout.jet` and
+`NativeLayoutSolve.jet` port the seed Layout expression and solver together,
+including the six Handle/Constraint/LinExpr clone/drop routes. Expr288 owns
+only its shell: sixteen index/coefficient pairs, count, constant, and optional
+thread-local registry id. Handle16 and Constraint16 retain Inner152; their
+clones share solver mutation, while expression clones are independent copies.
+These values are thread-confined, matching seed Rc/RefCell; non-atomic Inner
+references must never cross threads.
+
+The registry uses canonical `jet_rt_tls_shared_key(site, 0)` and Shared88,
+not a private TLS slot. Its initializer root is site8 + immutable List24 +
+descriptor72 (no children). The arity-one FunctionAddress entry invokes
+`jet_rt_layout_registry_drop` on its borrowed List24 payload at thread exit.
+Registry references survive all user drops, but are released at thread exit;
+escaped user owners retain Inner independently. Shared itself owns the
+payload, descriptor and cell. `DataSequences.jet` at `6d4fa9ba6` is the
+cite-only composition dependency for reserve/index geometry.
+
+The full dirty re-solve preserves seed nonnegative variables, negative-RHS
+normalization, slack/surplus/artificial/error-pair allocation, two phases,
+EPS 1e-7, phase-one infeasibility threshold 1e-5, Strong/Medium/Weak weights
+1e6/1e3/1, and Bland entering/leaving ties. Suggestions replace an edit by
+variable index. Required artificial rows supply conflict labels; the seed
+fallback and fatal text are byte-exact. MAX16 overflow publishes the canonical
+panic/Stop and returns immediately before compare registers a row.
+
+`LayoutVectors.txt` and one-time frozen `LayoutSeed.json` drive
+`run-native-layout.mjs --native OUT fresh-runtime.o`. The runner compares all
+seed observations, exact conflict labels and three fatal modes, and the real
+object witness intercepts frees to check all six ownership routes, shared
+mutation, registry lifetime, attempt-reset survival and escaped-owner survival
+across same-thread detach/attach. `--freeze OUT` is the authorized offline
+seed-only cargo recipe and refuses a second capture. Native execution,
+composed MIR/caller admission and solver parity must run in the proof lane;
+parser/C11 checks do not establish them.
