@@ -1,0 +1,25 @@
+// Checked Prelude route effects. Both compiler halves read these rows; a
+// returned Result is not a Panic effect. Panic is deny-only, never authority.
+pub PRELUDE_ROUTE_EFFECT_ROWS :: prep { """
+::JetAuthority with Panic
+::JetAtomic try_new Mem
+core.shared_guard map_read Panic
+core.shared_guard map_edit Panic
+core.shared_guard split_read Panic
+core.shared_guard split_edit Panic
+core.shared_guard wait Panic
+""" }
+
+pub fn prelude_route_effect(module_name: String, member: String) -> Effect? Never! {
+    loop line in PRELUDE_ROUTE_EFFECT_ROWS.lines() {
+        if line == "" -> next
+        fields :: line.split(" ")
+        if fields.len() != 3 -> panic("invalid Prelude effect registry row")
+        if fields[0] == module_name && fields[1] == member {
+            if fields[2] == "Panic" -> return Val(Effect.Panic)
+            if fields[2] == "Mem" -> return Val(Effect.Mem)
+            panic("invalid Prelude effect registry effect")
+        }
+    }
+    None
+}

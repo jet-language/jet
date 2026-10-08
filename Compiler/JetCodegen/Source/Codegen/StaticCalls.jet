@@ -24,6 +24,7 @@ use jet_foundation.[
     TStaticOwner,
     Type,
     mir_symbol_name,
+    prelude_route_effect,
     stable_id,
 ]
 
@@ -84,14 +85,16 @@ fn jet_codegen_lower_static_prelude_args(builder: &JetCodegenBuilder, program: J
 }
 
 fn jet_codegen_intern_static_call_route(builder: &JetCodegenBuilder, program: JetCodegenProgram, family: MIRPreludeFamily, module_name: String, member: String, symbol: MIRSymbol, borrow_mask: [Bool], route_effect: Effect?, carrier: TFailureCarrier) -> MIRPreludeCallID Never! {
+    checked_effect := prelude_route_effect(module_name, member)
+    if checked_effect == None -> checked_effect = route_effect
     mask_names := [String]{}
     loop borrowed in borrow_mask {
         if borrowed -> &mask_names.push("true") else -> &mask_names.push("false")
     }
     symbol_name := mir_symbol_name(symbol)
     effect_identity := "None"
-    if route_effect != None {
-        effect_name :: jet_codegen_core_effect_name(route_effect) ?? panic("static Prelude route effect lost its canonical name")
+    if checked_effect != None {
+        effect_name :: jet_codegen_core_effect_name(checked_effect) ?? panic("static Prelude route effect lost its canonical name")
         effect_identity = "Some({effect_name})"
     }
     identity := "{family}:{module_name}:{member}:{symbol_name}:{borrow_mask.len()}:{borrow_mask.len()}:[{mask_names.join(", ")}]:{effect_identity}:{jet_codegen_core_route_fallibility_identity(carrier)}:Value"
@@ -104,7 +107,7 @@ fn jet_codegen_intern_static_call_route(builder: &JetCodegenBuilder, program: Je
         member: member,
         symbol: symbol,
         signature: MIRCallSignature{arity: borrow_mask.len(), max_arity: borrow_mask.len(), borrow_mask: borrow_mask},
-        effect_kind: route_effect,
+        effect_kind: checked_effect,
         fallibility: call_fallibility,
         abi: MIRPreludeABI.Value,
         authority: None,
@@ -184,7 +187,7 @@ fn jet_codegen_lower_prelude_static_call(builder: &JetCodegenBuilder, program: J
             "{path}::{member}"
         }
     }
-    route_effect := if module_name == "::JetAtomic" && member == "try_new" -> Val(Effect.Mem) else -> None
+    route_effect := prelude_route_effect(module_name, member)
     call := jet_codegen_static_prelude_call(&builder, program, module_name, member, symbol, borrow_mask, route_effect, carrier, rooted)
     return jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.StaticPreludeCall{call: call, args: lowered_args, owner_type_args: owner_type_args, type_args: lowered_type_args}})
 }

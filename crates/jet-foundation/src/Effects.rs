@@ -445,3 +445,25 @@ pub fn is_irreversible_effect(e: Effect) -> bool {
         declaration.irreversible && crate::Authority::root(declaration.name) == e.name()
     })
 }
+
+/// The Jet registry is the authority for checked Prelude route effects.
+pub fn prelude_route_effect(module: &str, member: &str) -> Option<Effect> {
+    static ROWS: LazyLock<std::collections::HashMap<(&'static str, &'static str), Effect>> =
+        LazyLock::new(|| {
+            let source = include_str!("../../../Compiler/JetFoundation/Source/Registry/PreludeEffects.jet");
+            let rows = source.split("\"\"\"").nth(1).expect("Prelude effect registry rows");
+            rows.lines().filter(|line| !line.is_empty()).map(|line| {
+                let mut fields = line.split_whitespace();
+                let module = fields.next().expect("Prelude effect module");
+                let member = fields.next().expect("Prelude effect member");
+                let effect = match fields.next() {
+                    Some("Panic") => Effect::Panic,
+                    Some("Mem") => Effect::Mem,
+                    _ => panic!("invalid Prelude effect registry effect"),
+                };
+                assert!(fields.next().is_none(), "invalid Prelude effect registry row");
+                ((module, member), effect)
+            }).collect()
+        });
+    ROWS.get(&(module, member)).copied()
+}

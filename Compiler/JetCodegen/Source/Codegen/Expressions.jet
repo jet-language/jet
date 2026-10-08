@@ -5,6 +5,7 @@ use jet_foundation.[
     BinEndian,
     CoreCallRecord,
     Effect,
+    prelude_route_effect,
     MIRAccess,
     MIRAuthorityDecision,
     MIRBinaryDispatch,
@@ -816,13 +817,15 @@ fn jet_codegen_intern_route(builder: &JetCodegenBuilder, program: JetCodegenProg
     jet_codegen_intern_route_with_authority(&builder, program, family, module_name, member, symbol, arity, borrow_mask, route_effect, carrier, abi, None)
 }
 fn jet_codegen_intern_route_with_authority(builder: &JetCodegenBuilder, program: JetCodegenProgram, family: MIRPreludeFamily, module_name: String, member: String, symbol: String, arity: Int, borrow_mask: [Bool], route_effect: Effect?, carrier: TFailureCarrier, abi: MIRPreludeABI, authority: MIRAuthorityDecision?) -> MIRPreludeCallID Never! {
+    checked_effect := prelude_route_effect(module_name, member)
+    if checked_effect == None -> checked_effect = route_effect
     mask_names := [String]{}
     loop borrowed in borrow_mask {
         if borrowed -> &mask_names.push("true") else -> &mask_names.push("false")
     }
     effect_identity := "None"
-    if route_effect != None {
-        effect_name :: jet_codegen_core_effect_name(route_effect) ?? panic("checked Prelude route effect lost its canonical name")
+    if checked_effect != None {
+        effect_name :: jet_codegen_core_effect_name(checked_effect) ?? panic("checked Prelude route effect lost its canonical name")
         effect_identity = "Some({effect_name})"
     }
     abi_identity := if abi == {
@@ -841,7 +844,7 @@ fn jet_codegen_intern_route_with_authority(builder: &JetCodegenBuilder, program:
         member: member,
         symbol: MIRSymbol.Prelude{name: symbol},
         signature: MIRCallSignature{arity: arity, max_arity: arity, borrow_mask: borrow_mask},
-        effect_kind: route_effect,
+        effect_kind: checked_effect,
         fallibility: call_fallibility,
         abi: abi,
         authority: authority,

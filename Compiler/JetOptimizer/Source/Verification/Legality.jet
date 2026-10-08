@@ -319,7 +319,7 @@ fn mir_pass_validate_function(function: MIRFunction, pass: MIROptimizationPassID
             if !mir_pass_dominates(dominance, definition.block, block.id) -> return Val(mir_pass_error(pass, .InvalidDefUse, Val(function.id), block.span, "MIR terminator use is not dominated by its definition"))
         }
     }
-    stop_failure :: mir_pass_validate_stop_points(function, definitions, dominance)
+    stop_failure :: mir_pass_validate_stop_points(function, definitions, dominance, tables)
     if stop_failure == .Val(message) -> return Val(mir_pass_error(pass, .InvalidDefUse, Val(function.id), function.span, message))
     semantic_failure := mir_pass_validate_function_legality(function, tables, definitions)
     if semantic_failure == .Val(message) {
@@ -335,7 +335,7 @@ fn mir_pass_validate_function(function: MIRFunction, pass: MIROptimizationPassID
 // left uninitialized. A function that ends in Stopped has closed every Shield
 // scope it opened on each path to it.
 // Rust: crates/jet-foundation/src/MIR.rs::validate_stop_points
-fn mir_pass_validate_stop_points(function: MIRFunction, definitions: MIRPassDefinitions, dominance: MIRPassDominance) -> String? {
+fn mir_pass_validate_stop_points(function: MIRFunction, definitions: MIRPassDefinitions, dominance: MIRPassDominance, tables: MIRPassLegalityTables) -> String? {
     stopped := false
     loop block in function.blocks {
         if block.terminator == {
@@ -345,7 +345,7 @@ fn mir_pass_validate_stop_points(function: MIRFunction, definitions: MIRPassDefi
                     count :: block.instructions.len()
                     if count == 0 -> return Val("MIR Propagate poll does not follow a can-stop operation")
                     last :: block.instructions[count - 1]
-                    if !mir_operation_can_stop(last.operation) -> return Val("MIR Propagate poll does not follow a can-stop operation")
+                    if !mir_operation_can_stop(last.operation, tables.prelude_calls, tables.prelude_positions) -> return Val("MIR Propagate poll does not follow a can-stop operation")
                     if last.result == .Val(result) {
                         failure :: mir_pass_validate_resume_uses(function, definitions, dominance, result, resume)
                         if failure != None -> return failure

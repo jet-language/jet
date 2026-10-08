@@ -5167,6 +5167,10 @@ impl MirSemanticOp {
 
 impl MirSemanticOp {
     pub fn prelude_calls(&self) -> Vec<MirPreludeCallId> {
+        self.prelude_call_slots().into_iter().flatten().collect()
+    }
+
+    fn prelude_call_slots(&self) -> [Option<MirPreludeCallId>; 2] {
         match self {
             Self::Print { call, .. }
             | Self::AmbientInput { call, .. }
@@ -5196,20 +5200,18 @@ impl MirSemanticOp {
             | Self::Select { call, .. }
             | Self::HostCall { call, .. }
             | Self::TextPatternMatch { call, .. }
-            | Self::BinaryPatternMatch { call, .. } => vec![*call],
+            | Self::BinaryPatternMatch { call, .. } => [Some(*call), None],
             Self::CarrierFact { call, .. }
             | Self::GcEdit { call, .. }
             | Self::TypedTextInterp { call, .. }
-            | Self::CCallback { call, .. } => vec![*call],
+            | Self::CCallback { call, .. } => [Some(*call), None],
             Self::CellGuardProject {
                 map_call,
                 split_call,
                 ..
-            } => std::iter::once(*map_call)
-                .chain(split_call.iter().copied())
-                .collect(),
-            Self::SharedGuardSplit { call, map_call, .. } => vec![*call, *map_call],
-            _ => Vec::new(),
+            } => [Some(*map_call), *split_call],
+            Self::SharedGuardSplit { call, map_call, .. } => [Some(*call), Some(*map_call)],
+            _ => [None, None],
         }
     }
 
@@ -7906,7 +7908,7 @@ impl MirProgram {
             validate_mir_type(&field.field.ty, &type_ids)?;
         }
 
-        let mut prelude_ids = HashSet::new();
+        let mut prelude_ids = HashMap::new();
         for call in &self.prelude_calls {
             validate_call_fallibility(&call.fallibility, &type_ids)?;
             if call.id.0 == 0 {
@@ -7915,7 +7917,7 @@ impl MirProgram {
                     span: None,
                 });
             }
-            if !prelude_ids.insert(call.id) {
+            if prelude_ids.insert(call.id, call).is_some() {
                 return Err(MirValidationError::DuplicateId {
                     kind: "Prelude call",
                     id: call.id.0,
@@ -8346,7 +8348,7 @@ fn validate_function(
     function_ids: &HashSet<MirFunctionId>,
     function_rows: &HashMap<MirFunctionId, &MirFunction>,
     core_ids: &HashSet<MirCoreCallId>,
-    prelude_ids: &HashSet<MirPreludeCallId>,
+    prelude_ids: &HashMap<MirPreludeCallId, &MirPreludeCall>,
     callback_ids: &HashSet<MirCallbackId>,
     foreign_ids: &HashSet<MirForeignId>,
     type_ids: &HashSet<MirTypeId>,
@@ -8413,7 +8415,7 @@ fn validate_function(
                     ..
                 } => {
                     for call in std::iter::once(call).chain(write_call.iter()) {
-                        if !prelude_ids.contains(call) {
+                        if !prelude_ids.contains_key(call) {
                             return Err(MirValidationError::MissingPreludeCall {
                                 function: function.id,
                                 call: *call,
@@ -8627,7 +8629,7 @@ fn validate_function(
                 }
             }
             for call in operation_prelude_calls(&instruction.operation) {
-                if !prelude_ids.contains(&call) {
+                if !prelude_ids.contains_key(&call) {
                     return Err(MirValidationError::MissingPreludeCall {
                         function: function.id,
                         call,
@@ -8767,14 +8769,21 @@ fn validate_function(
             }
         }
     }
-    validate_stop_points(function, &blocks, &place_rows, &dominators)
+    validate_stop_points(function, &blocks, &place_rows, &dominators, prelude_ids)
 }
 
 /// Whether `operation` can stop (unified host/stop contract, #4720): it runs
 /// user or Core code, invokes a callback, or waits. Mirrors MIR.jet
 /// `mir_operation_can_stop`.
-pub fn mir_operation_can_stop(operation: &MirOperation) -> bool {
+pub fn mir_operation_can_stop(
+    operation: &MirOperation,
+    mut effect: impl FnMut(MirPreludeCallId) -> Option<Effect>,
+) -> bool {
+    if operation_prelude_calls(operation).any(|call| effect(call) == Some(Effect::Panic)) {
+        return true;
+    }
     match operation {
+        MirOperation::Call { callee: MirCallee::Prelude(_), .. } => false,
         MirOperation::Call { .. } | MirOperation::IndirectCall { .. } | MirOperation::CoreCall { .. } => true,
         MirOperation::Semantic(semantic) => matches!(
             semantic,
@@ -8801,6 +8810,7 @@ fn validate_stop_points(
     blocks: &HashMap<MirBlockId, usize>,
     place_rows: &HashMap<MirPlaceId, &MirPlace>,
     dominators: &MirDominators,
+    prelude_rows: &HashMap<MirPreludeCallId, &MirPreludeCall>,
 ) -> Result<(), MirValidationError> {
     let invalid = |message: &str| MirValidationError::InvalidOperation { function: function.id, message: message.to_string() };
     let mut stopped = false;
@@ -8811,7 +8821,7 @@ fn validate_stop_points(
                     return Err(invalid("MIR poll resumes and stops on the same block"));
                 }
                 if *kind == MirPollKind::Propagate {
-                    let Some(last) = block.instructions.last().filter(|last| mir_operation_can_stop(&last.operation)) else {
+                    let Some(last) = block.instructions.last().filter(|last| mir_operation_can_stop(&last.operation, |call| prelude_rows.get(&call).and_then(|row| row.effect))) else {
                         return Err(invalid("MIR Propagate poll does not follow a can-stop operation"));
                     };
                     if let Some(result) = last.result {
@@ -9156,8 +9166,8 @@ fn operation_core_calls(operation: &MirOperation) -> Vec<MirCoreCallId> {
         _ => Vec::new(),
     }
 }
-fn operation_prelude_calls(operation: &MirOperation) -> Vec<MirPreludeCallId> {
-    match operation {
+fn operation_prelude_calls(operation: &MirOperation) -> impl Iterator<Item = MirPreludeCallId> {
+    let slots = match operation {
         MirOperation::Call {
             callee: MirCallee::Prelude(route),
             ..
@@ -9175,18 +9185,19 @@ fn operation_prelude_calls(operation: &MirOperation) -> Vec<MirPreludeCallId> {
         | MirOperation::LoopIterHasNext { call: route, .. }
         | MirOperation::LoopIterValue { call: route, .. }
         | MirOperation::LoopIterAdvance { call: route, .. }
-        => vec![*route],
+        => [Some(*route), None],
         MirOperation::Convert {
             conversion: MirConversion::Prelude { call, .. },
             ..
-        } => vec![*call],
+        } => [Some(*call), None],
         MirOperation::Binary {
             dispatch: MirBinaryDispatch::Prelude { call, .. },
             ..
-        } => vec![*call],
-        MirOperation::Semantic(operation) => operation.prelude_calls(),
-        _ => Vec::new(),
-    }
+        } => [Some(*call), None],
+        MirOperation::Semantic(operation) => operation.prelude_call_slots(),
+        _ => [None, None],
+    };
+    slots.into_iter().flatten()
 }
 
 fn operation_types(operation: &MirOperation) -> Vec<MirTypeId> {
