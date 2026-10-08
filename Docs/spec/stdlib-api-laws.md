@@ -566,8 +566,13 @@ Removed native routes → source replacements (reviewed pre-removal line anchors
 
 The Jet Foundation collection/trait registries and Jet Sema builtin-owner
 registry had no Fake-specific path; they intentionally remain unchanged.
-Generated C-ABI/route views are regenerated centrally from these canonical
-removals; no old Fake handle or constructor is a compatibility path.
+Generated C-ABI/route views remain frozen until the E2 final artifact permits
+central regeneration. Receipt-2 temporarily restores the Rust Fake carrier,
+its Clone/PartialEq/JetShow support, the six FakeData functions and their
+helpers, and the Prelude include verbatim from `459cfe7cd^`, solely to satisfy
+references in those frozen generated files. Core source ownership, registry
+rows, and compiler/comptime dispatch remain cut over. This dead generated-route
+glue dies at the post-freeze regeneration; it is not a source compatibility path.
 
 ## Browser resident adapter cleanup
 

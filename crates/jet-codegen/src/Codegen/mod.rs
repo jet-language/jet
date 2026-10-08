@@ -3867,6 +3867,7 @@ fn push_corelib_prelude_body(
     out.push_str(include_str!("../Prelude/Core/StringBytes.rs"));
     out.push_str(include_str!("../Prelude/Core/TimeInstant.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/MathRandomTime.rs"));
+    out.push_str(include_str!("../Prelude/CoreLib/Top/FakeData.rs"));
 
     if needs_email {
         out.push_str(include_str!("../Prelude/CoreLib/Email.rs"));

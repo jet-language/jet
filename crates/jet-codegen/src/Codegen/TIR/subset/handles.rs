@@ -500,7 +500,6 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         Syntax::CLOCK_TYPE
             | Syntax::RNG_TYPE
             | "HistoryRNG"
-            | Syntax::FAKE_TYPE
     ) {
         let emitted_borrow = match &op {
             THandleOp::ClockTick
