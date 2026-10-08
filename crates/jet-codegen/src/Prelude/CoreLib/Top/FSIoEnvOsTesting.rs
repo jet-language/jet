@@ -859,3 +859,48 @@ fn jet_std_process_pipeline(
 ) -> Result<jet_std::ProcessReceipt, jet_std::IOError> {
     jet_process_spec_pipeline(specs)
 }
+
+// Temporary transport for the Jet logical-environment policy. The existing
+// cell remains the only process writer until the pinned source Shared lands.
+// These are seed/verification leaves, replaced by Jet runtime L7/L8 and die
+// at cutover; no operation below mutates the operating system environment.
+fn jet_sys_env_value_raw(name: &String) -> Option<Vec<u8>> {
+    jet_env_value_raw(name).map(std::ffi::OsString::into_encoded_bytes)
+}
+
+fn jet_sys_env_columns_raw() -> Vec<Vec<u8>> {
+    jet_std_env_snapshot_raw().into_iter()
+        .flat_map(|(name, value)| [name.into_encoded_bytes(), value.into_encoded_bytes()])
+        .collect()
+}
+
+fn jet_sys_startup_env_columns_raw() -> Vec<Vec<u8>> {
+    static STARTUP: std::sync::OnceLock<Vec<Vec<u8>>> = std::sync::OnceLock::new();
+    STARTUP.get_or_init(|| std::env::vars_os()
+        .flat_map(|(name, value)| [name.into_encoded_bytes(), value.into_encoded_bytes()])
+        .collect()).clone()
+}
+
+// JET_VETTED_UNSAFE_BEGIN: jet_env_windows
+#[cfg(windows)]
+fn jet_sys_env_key_compare_raw(left: &Vec<u8>, right: &Vec<u8>) -> i64 {
+    // SAFETY: Core supplies whole valid UTF-8 names or startup OsString WTF-8
+    // names. Neither slicing nor arbitrary user FFI can reach this boundary.
+    let left = unsafe { std::ffi::OsStr::from_encoded_bytes_unchecked(left) };
+    let right = unsafe { std::ffi::OsStr::from_encoded_bytes_unchecked(right) };
+    match jet_env_key_cmp(left, right) {
+        std::cmp::Ordering::Less => -1,
+        std::cmp::Ordering::Equal => 0,
+        std::cmp::Ordering::Greater => 1,
+    }
+}
+// JET_VETTED_UNSAFE_END: jet_env_windows
+
+#[cfg(not(windows))]
+fn jet_sys_env_key_compare_raw(left: &Vec<u8>, right: &Vec<u8>) -> i64 {
+    match left.cmp(right) {
+        std::cmp::Ordering::Less => -1,
+        std::cmp::Ordering::Equal => 0,
+        std::cmp::Ordering::Greater => 1,
+    }
+}
