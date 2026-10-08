@@ -484,5 +484,6 @@ fn lower_scope_guard(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
     }
     env :: lower_task_owned_closure(p, c, &m, &f, body, closure_ty) ?? return
     dst :: lower_result(p, c, &m, &f, instruction) ?? return
-    lower_emit(&f, LIRInst.Move{dst: dst, src: env})
+    // The box becomes a guard: same bits, but drop now invokes its callback.
+    lower_emit(&f, LIRInst.Reown{dst: dst, src: env})
 }

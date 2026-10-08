@@ -58,6 +58,8 @@ fn opt_rename_inst(facts: OptFacts, inst: LIRInst) -> LIRInst Never! {
         .Binary(dst, op, left, right) -> LIRInst.Binary{dst: dst, op: op, left: opt_id(facts, left), right: opt_id(facts, right)}
         .Compare(dst, condition, left, right) -> LIRInst.Compare{dst: dst, condition: condition, left: opt_id(facts, left), right: opt_id(facts, right)}
         .Move(dst, src) -> LIRInst.Move{dst: dst, src: opt_id(facts, src)}
+        // Consuming conversion: retain the destination's new drop obligation.
+        .Reown(dst, src) -> LIRInst.Reown{dst: dst, src: opt_id(facts, src)}
         .Copy(dst, src) -> LIRInst.Copy{dst: dst, src: opt_id(facts, src)}
         // Pure, but never an alias: the destination may change ABI class.
         .Bitcast(dst, src) -> LIRInst.Bitcast{dst: dst, src: opt_id(facts, src)}
@@ -520,6 +522,7 @@ fn opt_inst_has_effect(inst: LIRInst) -> Bool Never! {
         .Call(_, _, _, _) | .InlineAsm(_, _, _, _, _) -> true
         .Drop(_) -> true
         .Store(_, _, _) -> true
+        .Reown(_, _) -> true
         else -> false
     }
 }
@@ -702,6 +705,7 @@ fn opt_renumber_inst(map: [Int], inst: LIRInst) -> LIRInst Never! {
         .Binary(dst, op, left, right) -> LIRInst.Binary{dst: opt_n(map, dst), op: op, left: opt_n(map, left), right: opt_n(map, right)}
         .Compare(dst, condition, left, right) -> LIRInst.Compare{dst: opt_n(map, dst), condition: condition, left: opt_n(map, left), right: opt_n(map, right)}
         .Move(dst, src) -> LIRInst.Move{dst: opt_n(map, dst), src: opt_n(map, src)}
+        .Reown(dst, src) -> LIRInst.Reown{dst: opt_n(map, dst), src: opt_n(map, src)}
         .Copy(dst, src) -> LIRInst.Copy{dst: opt_n(map, dst), src: opt_n(map, src)}
         .Bitcast(dst, src) -> LIRInst.Bitcast{dst: opt_n(map, dst), src: opt_n(map, src)}
         .Call(dst, signature, callee, args) -> {

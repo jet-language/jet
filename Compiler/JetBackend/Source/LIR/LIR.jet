@@ -71,6 +71,9 @@ pub enum LIRInst {
     Compare(dst: LIRValueID, condition: LIRCondition, left: LIRValueID, right: LIRValueID)
     // Ownership transfer: `src` is dead after the move.
     Move(dst: LIRValueID, src: LIRValueID)
+    // Consuming pointer-owner conversion with a new drop obligation (e.g.
+    // closure -> ScopeGuard). Same layout; never a copy or an alias.
+    Reown(dst: LIRValueID, src: LIRValueID)
     // Duplicate of a trivially destructible value.
     Copy(dst: LIRValueID, src: LIRValueID)
     // Pure reinterpretation of one trivial 64-bit scalar. Unlike Copy, its
@@ -183,6 +186,7 @@ pub fn lir_inst_def(inst: LIRInst) -> LIRValueID? {
         .Binary(dst, _, _, _) -> Val(dst)
         .Compare(dst, _, _, _) -> Val(dst)
         .Move(dst, _) -> Val(dst)
+        .Reown(dst, _) -> Val(dst)
         .Copy(dst, _) -> Val(dst)
         .Bitcast(dst, _) -> Val(dst)
         .Call(dst, _, _, _) -> dst
@@ -205,6 +209,7 @@ pub fn lir_inst_uses(inst: LIRInst) -> [LIRValueID] Never! {
         .Binary(_, _, left, right) -> [LIRValueID]{left, right}
         .Compare(_, _, left, right) -> [LIRValueID]{left, right}
         .Move(_, src) -> [LIRValueID]{src}
+        .Reown(_, src) -> [LIRValueID]{src}
         .Copy(_, src) -> [LIRValueID]{src}
         .Bitcast(_, src) -> [LIRValueID]{src}
         .Call(_, _, callee, args) -> {
@@ -231,7 +236,7 @@ pub fn lir_inst_uses(inst: LIRInst) -> [LIRValueID] Never! {
 // Values whose life the instruction ends.
 pub fn lir_inst_consumes(inst: LIRInst) -> [LIRValueID] Never! {
     if inst == {
-        .Move(_, src) -> [LIRValueID]{src}
+        .Move(_, src) | .Reown(_, src) -> [LIRValueID]{src}
         .Drop(value) -> [LIRValueID]{value}
         else -> [LIRValueID]{}
     }

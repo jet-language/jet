@@ -3,13 +3,13 @@
 // the creating function reads back.
 use jet_foundation.[
     MIRAccess, MIRBinaryOp, MIRCallArg, MIRCallee, MIRCaptureFacts, MIRCopyFact,
-    MIRCaptureOperand, MIRCaptureParam, MIRDropKind, MIRFunction,
+    MIRCaptureOperand, MIRCaptureParam, MIRCoreClosureKind, MIRDropKind, MIRFunction,
     MIRFunctionSignature, MIROperation, MIRPlace, MIRPlaceBase, MIRPlaceID,
-    MIRProgram, MIRProjection, MIRTerminator, MIRType, MIRTypeDef, MIRTypeKind,
+    MIRProgram, MIRProjection, MIRSemanticOp, MIRSiteID, MIRTerminator, MIRType, MIRTypeDef, MIRTypeKind,
     MIRValueID, mir_function_id, mir_owned_ownership, mir_ownership_from_access,
     mir_type_from_kind,
 ]
-use jet_backend.[lir_lower_entry, LIRInst, LIRCallee]
+use jet_backend.[lir_lower_entry, lir_lint_inst, lir_lint_module, lir_layout_pointer, lir_layout_word, lir_optimize_module, LIRInst, LIRCallee, LIRDrop]
 
 fn fx_fn_int_type() -> MIRType Never! {
     mir_type_from_kind(MIRTypeKind.Fn{signature: MIRFunctionSignature{params: [MIRType]{fx_int()}, ret: Val(fx_int()), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}})
@@ -198,4 +198,65 @@ fn fx_closures_owned_write() -> MIRProgram Never! {
     fx_do(&b, MIROperation.Drop{value: callback, kind: MIRDropKind.Value})
     fx_block(&b, 0, MIRTerminator.Return{value: None})
     fx_program([MIRFunction]{body, fx_function("run", b, fx_unit())}, [MIRTypeDef]{})
+}
+
+// guard transfers a closure box to a different drop obligation. The ordinary
+// closure copy is released without invoking the callback; the guard runs once.
+// expect-stdout scope-guard-reown: "body\ncleanup\n"
+fn fx_scope_guard_reown() -> MIRProgram Never! {
+    fn_ty :: mir_type_from_kind(MIRTypeKind.Fn{signature: MIRFunctionSignature{params: [MIRType]{}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}})
+    a := fx_builder()
+    cleanup :: fx_owned(&a, fx_string(), MIROperation.Constant{value: .String{value: "cleanup"}})
+    fx_print(&a, cleanup)
+    fx_do(&a, MIROperation.Drop{value: cleanup, kind: MIRDropKind.Value})
+    fx_block(&a, 0, MIRTerminator.Return{value: None})
+    b := fx_builder()
+    callback :: fx_owned(&b, fn_ty, MIROperation.Closure{function: mir_function_id("cleanup"), captures: [MIRCaptureOperand]{}, facts: fx_capture_facts()})
+    held :: fx_owned(&b, fn_ty, MIROperation.Copy{value: callback, fact: MIRCopyFact.Explicit})
+    guard :: fx_owned(&b, fx_named("ScopeGuard"), MIROperation.Semantic{operation: MIRSemanticOp.CoreClosureCall{call: fx_prelude_id("core.mem.scope", "guard"), kind: MIRCoreClosureKind.Guard, values: [MIRValueID]{}, closure: Val(held), site: MIRSiteID{value: U64{0}}, label: ""}})
+    fx_do(&b, MIROperation.Drop{value: callback, kind: MIRDropKind.Value})
+    text :: fx_owned(&b, fx_string(), MIROperation.Constant{value: .String{value: "body"}})
+    fx_print(&b, text)
+    fx_do(&b, MIROperation.Drop{value: text, kind: MIRDropKind.Value})
+    fx_do(&b, MIROperation.Drop{value: guard, kind: MIRDropKind.Value})
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{fx_function("cleanup", a, fx_unit()), fx_function("run", b, fx_unit())}, [MIRTypeDef]{})
+}
+
+fn fx_scope_guard_reown_checks() -> Bool Never! {
+    lowered :: lir_lower_entry(fx_scope_guard_reown(), mir_function_id("run"))
+    if lowered.issues.len() != 0 || lir_lint_module(lowered.lir).len() != 0 -> return false
+    found := false
+    loop function in lowered.lir.functions {
+        loop block in function.blocks {
+            loop inst in block.insts {
+                if inst == .Reown(dst, src) {
+                    found = true
+                    // Ordinary Move must still reject the changed destructor.
+                    if lir_lint_inst(lowered.lir, function, LIRInst.Move{dst: dst, src: src}).len() == 0 -> return false
+                    bad := ~function
+                    bad.values[src.value].layout = lir_layout_word()
+                    if lir_lint_inst(lowered.lir, bad, inst).len() == 0 -> return false
+                    bad = ~function
+                    bad.values[dst.value].layout = lir_layout_word()
+                    if lir_lint_inst(lowered.lir, bad, inst).len() == 0 -> return false
+                    bad = ~function
+                    bad.values[dst.value].drop = LIRDrop.Trivial
+                    if lir_lint_inst(lowered.lir, bad, inst).len() == 0 -> return false
+                    if function.values[src.value].layout != lir_layout_pointer() -> return false
+                }
+            }
+        }
+    }
+    optimized :: lir_optimize_module(lowered.lir, 1)
+    if lir_lint_module(optimized).len() != 0 -> return false
+    kept := false
+    loop function in optimized.functions {
+        loop block in function.blocks {
+            loop inst in block.insts {
+                if inst == .Reown(_, _) -> kept = true
+            }
+        }
+    }
+    found && kept
 }
