@@ -88,6 +88,15 @@ The freeze example is a lowering rule, not an engine-side capture check. A
 self-host implementation must carry the same already-proved ownership facts to
 each lens.
 
+A spawned worker's return carrier is the element of sema's checked
+`Task<carrier>` type. Lowering uses that same type for the task handle and its
+closure signature, including `Result<T, Never>`; it must not probe the body or
+inherit the enclosing callable's failure carrier. A missing checked task
+element is a lowering invariant failure at the spawn's source span.
+Join lowering likewise consumes its checked result: it retains the worker
+element when that is sema's join success, and selects the existing flattening
+adapter only when sema has checked the element's success payload instead.
+
 Native reference carriers (`View`, `ViewMut`, `Pin`, and the internal
 allocator-view tag) do not own their referents. Their synthetic scope cleanup
 must not read or move the reference after its last checked use: doing so would

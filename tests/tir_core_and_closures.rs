@@ -13,6 +13,58 @@ use tir_support::{
     assert_tiers_agree, build_and_run, build_and_run_full_with_cfg, build_and_run_multi, have_rustc,
 };
 
+
+/// #4790 / I2: the task lambda's checked Never carrier must survive a typed
+/// list boundary. Joining unwraps the task failure and then the worker result.
+#[test]
+fn task_lambda_never_carrier_typed_list_builds_and_runs() {
+    if !have_rustc() {
+        return;
+    }
+    let source = r#"
+fn report() -> String Never! { "done" }
+fn run() {
+    workers := [Task<String Never!>]{}
+    task.group group {
+        &workers.push(task { report() })
+        loop pending in workers {
+            joined :: ^pending.join() ?? panic("join failed")
+            print(joined ?? panic("infallible worker"))
+        }
+    }
+}
+"#;
+    let (code, stdout) = build_and_run("task_lambda_never_carrier_typed_list", source);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "done\n");
+}
+
+#[test]
+fn recursive_task_explicit_joins_build_and_run() {
+    if !have_rustc() {
+        return;
+    }
+    let source = r#"
+fn report() Never! {}
+fn start(group: Group, remaining: Int) Never! {
+    if remaining == 0 -> return
+    worker :: task report()
+    start(group, remaining - 1)
+    joined :: ^worker.join() ?? panic("join failed")
+    joined ?? panic("infallible worker")
+}
+fn run() {
+    task.group group {
+        start(group, 2)
+    }
+    print("joined")
+}
+"#;
+    let (code, stdout) = build_and_run("recursive_task_explicit_joins", source);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "joined\n");
+}
+
 /// c109 Phase 10: core/stdlib module calls route through the TIR. `math.*`,
 /// `Path.join`, and `crypto.sha256` are type-monomorphic (in `core_fixed_sig`),
 /// so `calc`/`make_path`/`hash`/`main` are all covered. The call forms

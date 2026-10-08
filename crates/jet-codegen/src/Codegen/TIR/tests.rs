@@ -3937,6 +3937,103 @@ fn run() {
     assert_eq!(names, ["z", "a"]);
 }
 
+/// #4790 / I3: a task lambda must retain sema's Never error carrier when
+/// stored in a typed task list, not inherit its enclosing callable's Err.
+#[test]
+fn task_lambda_never_carrier_matches_typed_list() {
+    let source = r#"
+fn report() -> String Never! { "done" }
+fn run() {
+    workers := [Task<String Never!>]{}
+    task.group group {
+        worker :: task { report() }
+        &workers.push(^worker)
+        loop pending in workers {
+            joined :: ^pending.join() ?? panic("join failed")
+            print(joined ?? panic("infallible worker"))
+        }
+    }
+}
+"#;
+    let bundle = checked_bundle(source);
+    let run = bundle.modules[bundle.entry].items.iter().find_map(|item| match item {
+        Item::Func(function) if function.name == "run" => Some(function),
+        _ => None,
+    }).expect("checked run function");
+    let checked_list = run.body.iter().find_map(|stmt| match stmt {
+        Stmt::Val(binding) if binding.name == "workers" => binding.ty.as_ref(),
+        _ => None,
+    }).expect("sema's checked workers type");
+    let Type::List(checked_task) = checked_list else {
+        panic!("workers must be a checked task list");
+    };
+    let tir = lower_after_sema(source, "run");
+    fn check(stmts: &[TStmt], checked_task: &Type) -> usize {
+        let mut found = 0;
+        for stmt in stmts {
+            match stmt {
+                TStmt::Let { init, .. } => {
+                    if let TExprKind::CoreClosureCall {
+                        kind: TCoreClosureKind::Spawn { executable, .. },
+                    } = &init.kind
+                    {
+                        let Type::Apply { name, args } = checked_task else {
+                            panic!("sema must establish the Task element");
+                        };
+                        assert_eq!(name, "Task");
+                        assert_eq!(args.len(), 1);
+                        assert_eq!(executable.ret.as_ref(), Some(&args[0]));
+                        assert_eq!(&init.ty, checked_task);
+                        found += 1;
+                    }
+                }
+                TStmt::TaskGroup { body, .. } => found += check(body, checked_task),
+                _ => {}
+            }
+        }
+        found
+    }
+    assert_eq!(check(&tir.body, checked_task), 1);
+}
+
+/// #4790: a recursive Group helper must join the checked worker element
+/// without flattening the inner Never result retained by Rust sema.
+#[test]
+fn recursive_task_explicit_join_preserves_checked_carrier() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let source = r#"
+fn report() Never! {}
+fn start(group: Group, remaining: Int) Never! {
+    if remaining == 0 -> return
+    worker :: task report()
+    start(group, remaining - 1)
+    joined :: ^worker.join() ?? panic("join failed")
+    joined ?? panic("infallible worker")
+}
+fn run() {
+    task.group group {
+        start(group, 2)
+    }
+}
+"#;
+        let (mir, rust) = emitted_rust(source);
+        let direct_join = mir.prelude_calls.iter().find(|call| {
+            call.symbol.name() == "jet_std::JetTask::join"
+        }).expect("checked join must retain the Task element");
+        let join_success = match &direct_join.fallibility {
+            jet_foundation::MIR::MirCallFallibility::Failure(
+                jet_foundation::MIR::MirFailureCarrier::Result { success, .. },
+            ) => success,
+            _ => panic!("checked join must have a Result carrier"),
+        };
+        assert!(matches!(
+            &join_success.kind,
+            jet_foundation::MIR::MirTypeKind::Result { .. }
+        ), "sema retains the worker Result inside the join Result");
+        assert!(!rust.contains("jet_std::jet_task_join_result"), "{rust}");
+    });
+}
+
 #[test]
 fn d_simd3_default_fact_reaches_native_emission() {
     let source = r#"

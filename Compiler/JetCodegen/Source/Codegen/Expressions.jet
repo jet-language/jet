@@ -3320,8 +3320,20 @@ fn jet_codegen_lower_core_closure_call(builder: &JetCodegenBuilder, program: Jet
             &values.push(jet_codegen_emit_value(&builder, program, expression.span, Type.Int, MIROperation.Constant{value: MIRConstant.Int{value: spawn_site, width: None, spelling: None}}))
             label_text = label ?? ""
             &values.push(jet_codegen_emit_value(&builder, program, expression.span, Type.String, MIROperation.Constant{value: MIRConstant.String{value: label_text}}))
-            spawned := jet_codegen_lower_lambda(&builder, program, executable, false, "spawn").value
-            jet_codegen_promote_spawn_closure_to_send(&builder, program, spawned, jet_codegen_lambda_function_type(executable))
+            // The checked Task element owns the worker ABI, including Never.
+            // Do not reconstruct it from the lambda body or the caller.
+            carrier_type := if expression.ty == {
+                .Apply(name, args) -> {
+                    if name != "Task" || args.len() != 1 -> panic("checked task spawn in {builder.function.key} at {expression.span.start}..{expression.span.end} has no Task<carrier> type")
+                    args[0]
+                }
+                else -> panic("checked task spawn in {builder.function.key} at {expression.span.start}..{expression.span.end} has no Task<carrier> type")
+            }
+            checked_executable := executable
+            checked_executable.ret = if carrier_type == (Type.Named{name: "Unit"}) -> None else -> Val(carrier_type)
+            checked_executable.failure_carrier = jet_codegen_failure_carrier_for_type(carrier_type)
+            spawned := jet_codegen_lower_lambda(&builder, program, checked_executable, false, "spawn").value
+            jet_codegen_promote_spawn_closure_to_send(&builder, program, spawned, jet_codegen_lambda_function_type(checked_executable))
             closure = Val(spawned)
             mir_kind = MIRCoreClosureKind.Spawn
             grouped_spawn = group != None
