@@ -49,6 +49,7 @@ use jet_sema.[
     SemaRegistrationImportEdge,
     SemaSourceOrigin,
     SemaSourceSegment,
+    SchemaSnapshot,
 ]
 use jet_codegen.[
 JetRustEmitManifest,
@@ -174,6 +175,9 @@ pub struct JetDriverCompileRequest {
     pub eval_config: JetEvalConfig
     pub target: JetDriverCompileTarget
     pub record_store: JetDriverRecordStore?
+    // Captured snapshots override the canonical project schema cache; absence
+    // reads that cache once through the same ordinary populated checker.
+    pub schema_snapshots: [String:SchemaSnapshot]?{None}
     // The host's streaming trace (`JET_TRACE_FILE`); `None` traces nothing.
     pub trace_sink: CompilerTraceSink?
     // Full verification: the optimizer re-verifies legality and runs MIR
