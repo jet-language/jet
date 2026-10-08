@@ -54,7 +54,8 @@ fn pkg_fetch_provenance(lock: LockFile, manifest: Manifest) PackageFetchError! {
 }
 fn pkg_fetch_semantic_records(root: String, lock: LockFile, manifest: Manifest, options: PackageFetchOptions) -[FS, Env, Time]> SemanticLockFile PackageFetchError! {
     semantic := trust_semantic_lock_load(root) ?? SemanticLockFile.empty()
-    semantic.source_maps = loop pattern in manifest.policy.source_maps.keys() -> SourceMapEntry{pattern: pattern, sources: manifest.policy.source_maps[pattern]}
+    semantic.source_maps = loop map in manifest.policy.source_maps -> SourceMapEntry{pattern: map.pattern, sources: map.sources}
+    &semantic.source_maps.sort_by(map -> map.pattern)
     scope :: if options.update_dep == .Val(target) -> Val(pkg_fetch_closure(lock, target)) else -> None
     loop package in lock.packages {
         if scope == .Val(names) && !names.contains(package.name) -> next

@@ -70,3 +70,12 @@
     assert_eq(publication_registry_artifact_hash(root) ?? panic("managed hash"), after)
     files.remove_all(root) ?? panic("cleanup")
 }
+
+#Test("fetch semantic source maps use the canonical policy vector and preserve source authority order") {
+    root :: files.tmpdir("jet-fetch-semantic-sources-") ?? panic("fixture")
+    manifest :: Manifest.parse("package.jet", "name: \"consumer\"\nversion: \"1.0.0\"\npolicy: {{ sources: {{ \"Z.*\": [\"second\", \"first\"], \"A.*\": [\"internal\"] }} }}\n") ?? panic("manifest")
+    semantic :: pkg_fetch_semantic_records(root, LockFile.empty(), manifest, PackageFetchOptions{}) ?? panic("semantic")
+    assert_eq(semantic.source_maps, [SourceMapEntry]{SourceMapEntry{pattern: "A.*", sources: [String]{"internal"}}, SourceMapEntry{pattern: "Z.*", sources: [String]{"second", "first"}}})
+    assert_eq(trust_write_semantic_lock(semantic), "semantic-lock-version = 1\n\n[[source_map]]\npattern = \"A.*\"\nsources = [\"internal\"]\n\n[[source_map]]\npattern = \"Z.*\"\nsources = [\"second\", \"first\"]\n")
+    files.remove_all(root) ?? panic("cleanup")
+}
