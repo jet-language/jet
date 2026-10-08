@@ -10690,6 +10690,7 @@ fn checked_core_source_call_edges(
             .is_some_and(|source| bundle.modules[callable.module].alias == source.alias
                 && bundle.modules[callable.module].display.as_str() == source.path);
         let mut precise_families = [false; 3];
+        let mut int_abs = false;
         // Source helper bodies have explicit checked calls. Their parameter
         // names do not request every operation on the represented carrier.
         if !authored_math {
@@ -10702,6 +10703,9 @@ fn checked_core_source_call_edges(
         }
         for statement in &function.body {
             statement.for_each_expr(&mut |expression: &Expr| {
+                if matches!(expression, Expr::MethodCall { method, recv_type: Some(owner), .. } if method == "abs" && owner == "Int") {
+                    int_abs = true;
+                }
                 if !authored_math {
                 match expression {
                     Expr::Call(call) => {
@@ -10798,6 +10802,9 @@ fn checked_core_source_call_edges(
                     continue;
                 }
                 let Some(name) = target.source_name.as_deref() else { continue };
+                if int_abs && name == "abs" {
+                    edges.push((caller_index, target_index));
+                }
                 for (family, prefix) in ["__fraction_", "__decimal_", "__complex_"].iter().enumerate() {
                     if precise_families[family] && name.starts_with(prefix) {
                         edges.push((caller_index, target_index));
@@ -10815,6 +10822,7 @@ fn checked_core_source_call_edges(
 // body. Both the bootstrap reachability closure and the MIR output gate use it.
 fn precise_source_helper(owner: &str, operation: &str) -> Option<&'static str> {
     Some(match (owner, operation) {
+        ("Int", "abs") => "abs",
         ("Fraction", "new") => "__fraction_new",
         ("Fraction", "from_parts") => "__fraction_from_parts",
         ("Fraction", "from_owned_parts") => "__fraction_from_owned_parts",
@@ -10902,6 +10910,8 @@ mod checked_function_reference_tests {
         }).collect::<Vec<_>>();
         assert_eq!(kept, ["__fraction_mul", "__fraction_add"]);
         assert_eq!(precise_source_helper("Fraction", "mul"), Some("__fraction_mul"));
+        assert_eq!(precise_source_helper("Int", "abs"), Some("abs"));
+        assert_eq!(precise_source_helper("Int", "add"), None);
         assert_eq!(precise_source_helper("Measurement", "mul"), None);
     }
     #[test]

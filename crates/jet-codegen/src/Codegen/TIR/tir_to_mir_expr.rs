@@ -1735,6 +1735,22 @@ pub(super) fn lower_expr(
             func,
             args,
         } => {
+            if type_name == "Int" && func == "abs" {
+                if let Some(function) = ctx.precise_source_target(type_name, func)? {
+                    let args = args.iter().map(|argument| ctx.lower_plain_arg(argument)).collect::<Result<Vec<_>, _>>()?;
+                    let returned = ctx.function_registry.call_return_type_for(function, &[])
+                        .map_err(|message| ctx.error(ctx.span(), message))?;
+                    let value = ctx.emit("int-abs-source-call", returned.clone(), MirOperation::Call {
+                        callee: MirCallee::User(function), args, type_args: Vec::new(),
+                    })?;
+                    if let Some(returned) = returned {
+                        if super::is_plain_call_return(&returned, &expr.ty) {
+                            return ctx.reconcile_plain_call_return(expr, value, &returned);
+                        }
+                    }
+                    return Ok(value);
+                }
+            }
             let args = lower_values(ctx, args)?;
             let type_id = math_builtin_type_id(ctx, type_name)?;
             let route = if crate::Sema::is_geometry_type(type_name) {

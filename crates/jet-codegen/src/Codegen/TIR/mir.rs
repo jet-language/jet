@@ -10983,7 +10983,7 @@ impl<'a> LowerCtx<'a> {
         let Some(module) = self.modules.iter().find(|module| module.path == source.path) else {
             return Ok(None);
         };
-        let owned = self.type_defs.iter().any(|definition| {
+        let owned = (owner == "Int" && operation == "abs") || self.type_defs.iter().any(|definition| {
             definition.name == owner && definition.key == format!("{}::{owner}", module.key)
                 && jet_foundation::CoreModuleExports::core_source_owns_type(&definition.key)
         });

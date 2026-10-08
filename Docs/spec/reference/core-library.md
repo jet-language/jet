@@ -1997,6 +1997,8 @@ tree (each lane seeded with positive zero); average divides the sum by four.
 Product, minimum, and maximum fold in lane order from one, positive infinity,
 and negative infinity respectively. Min/max use scalar IEEE `min`/`max`,
 including their NaN behavior; `sqrt` applies the existing scalar root leaf.
+Bare `Int.abs()` autoloads and retains the existing Jet `math.abs` body; it
+preserves arbitrary-precision values, including magnitudes beyond i64.
 Stock coordinate constructors (`ScreenPoint`/`ScreenDelta` and the World,
 View, Camera, and Device counterparts) set `frame_id` to zero. Their
 arithmetic keeps the left operand's frame; point-minus-point yields a delta.

@@ -957,6 +957,7 @@ fn sema_core_collect_expr(expr: Expr, imports: [SemaCoreImport], registered: [St
             recv_type_name := recv_type ?? ""
             if sema_core_is_internal_task_key(recv_name, "") || sema_core_is_internal_task_key(recv_type_name, ".surface") || sema_core_is_internal_task_key(recv_type_name, ".group.surface") -> sema_core_note_usage(&used, &spans, "core.concurrency::task", Val(method_span))
             if recv_type != None -> sema_core_note_builtin_math_type(recv_type_name, registered, &used, &spans, Val(method_span))
+            if recv_type_name == "Int" && method == "abs" -> sema_core_note_usage(&used, &spans, "core.math::abs", Val(method_span))
             if (recv_type_name == "Float" || recv_type_name == "F32") && (method == "is_nan" || method == "is_infinite" || method == "is_finite") -> sema_core_note_usage(&used, &spans, "core.math::__scalar_predicates__", Val(method_span))
             if method == {
                 "trim_start" | "trim_end" | "pad_start" | "pad_end" |

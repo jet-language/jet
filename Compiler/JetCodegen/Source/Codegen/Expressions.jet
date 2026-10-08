@@ -887,6 +887,7 @@ fn jet_codegen_precise_builtin_route(builder: &JetCodegenBuilder, program: JetCo
 }
 
 fn jet_codegen_precise_source_helper(owner: String, operation: String) -> String? Never! {
+    if owner == "Int" && operation == "abs" -> return Val("abs")
     if owner == "Fraction" {
         return if operation == {
             "new" -> Val("__fraction_new")
@@ -954,7 +955,7 @@ fn jet_codegen_lower_precise_builtin(builder: &JetCodegenBuilder, program: JetCo
     helper := jet_codegen_precise_source_helper(type_name, function)
     if helper == .Val(name) {
         loop semantic_module in program.modules {
-            if semantic_module.module_name != "core.math" || semantic_module.nominal_positions.get(type_name) == None -> next
+            if semantic_module.module_name != "core.math" || (type_name != "Int" && semantic_module.nominal_positions.get(type_name) == None) -> next
             target :: jet_codegen_find_function_by_key(program.function_index, name, semantic_module.module_identity) ?? panic("checked precise source helper was pruned")
             call_args := [MIRCallArg]{}
             loop argument in args {
@@ -2220,6 +2221,7 @@ fn jet_codegen_lower_fn_value(builder: &JetCodegenBuilder, program: JetCodegenPr
 }
 
 fn jet_codegen_lower_math_builtin(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, type_name: String, function: String, args: [TExpr]) -> MIRValueID {
+    if type_name == "Int" && function == "abs" -> return jet_codegen_lower_precise_builtin(&builder, program, expression, type_name, function, args, jet_codegen_failure_carrier_for_type(expression.ty))
     values := [MIRValueID]{}
     loop argument in args -> &values.push(jet_codegen_lower_expr(&builder, program, argument))
     jet_codegen_emit_math_builtin(&builder, program, expression, type_name, function, values)
@@ -6866,4 +6868,9 @@ fn jet_codegen_lower_take_pattern(builder: &JetCodegenBuilder, program: JetCodeg
         }
         else -> panic("checked handle operation is not a take_pattern operation")
     }
+}
+
+#Test("Int.abs extends the existing source helper gate by one exact key") {
+    assert_eq(jet_codegen_precise_source_helper("Int", "abs"), Val("abs"))
+    assert_eq(jet_codegen_precise_source_helper("Int", "add"), None)
 }
