@@ -267,7 +267,7 @@ fn parser_parse_expression_restricted(state: &JetParserState, minimum: Int, dept
             next
         }
 
-        if operator == TOKEN_EQ_EQ && parser_pattern_rhs_ahead(&state) {
+        if operator == TOKEN_EQ_EQ && parser_comparison_pattern_rhs_ahead(&state) {
             pattern :: parser_parse_pattern(&state, depth + 1, allow_struct_lit)
             span := parser_cover(left.span, pattern.span)
             left = ParsedExpr{expr: Expr.PatternTest{subject: left.expr, pattern: pattern.pattern, span: span}, span: span}
