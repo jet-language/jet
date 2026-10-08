@@ -45,3 +45,24 @@ fn run() {
         else -> panic("invalid help ordering must refuse")
     }
 }
+
+#Test("try front door carries exact plan keep and JSON selections") {
+    cases :: [(keep: Bool, json: Bool, quiet: Bool)]{(keep: false, json: false, quiet: false), (keep: true, json: false, quiet: false), (keep: false, json: true, quiet: false), (keep: true, json: true, quiet: true)}
+    loop selected in cases {
+        argv := [String]{"try", "plan with spaces.json", "ignored-extra-target"}
+        if selected.keep -> &argv.push("--keep")
+        if selected.json -> &argv.push("--json")
+        if selected.quiet -> &argv.push("--quiet")
+        if jet_cli_plan(argv) == {
+            .Try(plan_path, keep, json) -> {
+                assert_eq(plan_path, "plan with spaces.json")
+                assert_eq(keep, selected.keep)
+                assert_eq(json, selected.json)
+            }
+            else -> panic("try must retain its actual plan projection")
+        }
+    }
+    cli_front_fixture_done(jet_cli_plan([String]{"try"}), "", jet_cli_command_help("try"), JET_DRIVER_EXIT_USAGE)
+    cli_front_fixture_done(jet_cli_plan([String]{"try", "--keep", "--quiet"}), "", "", JET_DRIVER_EXIT_USAGE)
+    cli_front_fixture_done(jet_cli_plan([String]{"try", "--json"}), "", "", JET_DRIVER_EXIT_USAGE)
+}
