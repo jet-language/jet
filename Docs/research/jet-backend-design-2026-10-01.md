@@ -331,7 +331,7 @@ function parameters and jumps to it (LIR forbids jumps to the entry).
 | exact-Int other ops (division family, pow, shifts, bit ops) | call of the route's runtime symbol with `(left, right)`, plus `(file_ptr, file_len, line)` for routes of arity 4 |
 | exact-Int comparison (Primitive) | native `Compare` when both are inline, else `jet_int_compare(l, r)` compared with 0 |
 | word `+ - *` (Primitive) | `Binary`; with `overflow: Trap`, an `Overflows` test branches to `jet_rt_panic_overflow` first |
-| word `/ %` (Primitive) | zero check to `jet_rt_panic_division_by_zero`, then a minimum-divided-by-minus-one check to `jet_rt_panic_overflow` (x86-64 `idiv` faults on it), then `Div`/`Rem` |
+| word `/ %` (Primitive) | zero check to `jet_rt_panic_division_by_zero`, then a minimum-divided-by-minus-one check to `jet_rt_panic_overflow` (x86-64 `idiv` faults on it), then `Div`/`Rem`; signed I64 division truncates toward zero and remainder keeps the dividend's sign (`numeric-i64-truncation` fixture distinguishes this from floor division) |
 | word bit ops and shifts | `Binary And/Or/Xor/Shl/Shr` |
 | Bool, tag and word comparisons | `Compare` |
 | String `==`/`!=` | `jet_rt_string_eq(l, r) -> Bool` |
