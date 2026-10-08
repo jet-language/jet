@@ -20859,7 +20859,7 @@ impl<'a> RustEmitter<'a> {
                             );
                         }
                     }
-                    format!("{}({})", kind.symbol(), self.value_copy(*value, *fact))
+                    format!("{}({})", kind.symbol(), self.value_borrow(*value))
                 } else if is_allocator_result_type(value_ty) {
                     self.value_move(*value)
                 } else if !matches!(value_ty.kind(), MirTypeKind::Int)
