@@ -216,7 +216,7 @@ function compareFacts(rust, jet, stem) {
   const tables = ['types', 'fields', 'functions', 'core_calls', 'prelude_calls', 'type_instances'];
   rust = symbolic(rust); jet = symbolic(jet);
   for (const table of tables) {
-    const key = row => table === 'fields' ? row.field?.name ?? row.name : table === 'core_calls' || table === 'prelude_calls' ? `${row.module_name}.${row.member}` : row.name ?? row.kind?.variant;
+    const key = row => table === 'fields' ? row.field?.name ?? row.name : table === 'core_calls' || table === 'prelude_calls' ? `${row.module_name}.${row.member}` : row.name ?? row.kind?.$variant;
     const group = rows => { const map = new Map(); for (const row of rows ?? []) { const k = key(row); if (!map.has(k)) map.set(k, []); map.get(k).push(row); } return map; };
     const a = group(rust[table]); const b = group(jet[table]);
     for (const name of new Set([...a.keys(), ...b.keys()])) {

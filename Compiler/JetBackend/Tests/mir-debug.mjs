@@ -479,7 +479,8 @@ export class Converter {
     }
     let values = [];
     if (node.k === "struct") {
-      const renames = def.name === "MIRImportKind" && variant.name === "Unqualified" ? { module: "module_id" } : {};
+      const renames = def.name === "MIRImportKind" && variant.name === "Unqualified" ? { module: "module_id" }
+        : def.name === "MIROperation" && variant.name === "PtrFromAddr" ? { addr: "address" } : {};
       const host = new Map(node.fields.map(([field, value]) => [fold(renames[field] ?? field), value]));
       // By checked name where shared; otherwise exact positional correspondence.
       const named = variant.fields.some((f) => host.has(fold(f.name)));
