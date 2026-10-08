@@ -1067,6 +1067,14 @@ fn run() {
 "#;
     check_comptime_src(2003, "CBOR options and hostile error projection", src);
 }
+
+#[test]
+fn string_count_comptime_and_runtime_use_the_builtin_kernel() {
+    let stdout = compile_and_run(include_str!("fixtures/string_count_comptime.jet"));
+    let expected = "[2, 2, 1, 2, 1, 1, 0, 0, 0, 0, 0]";
+    assert_eq!(stdout.lines().collect::<Vec<_>>(), vec![expected, expected]);
+}
+
 #[test]
 fn local_comptime_is_literal_data() {
     let stdout = compile_and_run(
