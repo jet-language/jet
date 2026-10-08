@@ -440,6 +440,13 @@ remain distinct from tagged Int and require their own typed identity/codec.
 List-only collects classification failures with runtime/caller/declaration
 sites in one error packet, exits 1, and emits no admission tables. Normal
 generation and `--check` keep their immediate hard-error policy.
+Concrete application discovery preserves the complete Rust namespace. Default
+prelude `Box` is recognized only after local/import shadowing and only where
+the actual emitted module has not disabled its Rust prelude. Actual public
+`Result` aliases and declaration-proved seed-only nested/default generic or
+unsupported stored layouts remain explicitly unadmitted inventory rows; source
+nominals still hard-fail without their typed codec. These rows are port work,
+not permission to retain Rust in the native toolchain.
 Every generated handle helper shares one provider-ownership gate: a name in
 `JetRuntime/exports.list` must have its exact drop, clone, Bool equality, or
 text-render C ABI validated against the Jet declaration before its Rust
