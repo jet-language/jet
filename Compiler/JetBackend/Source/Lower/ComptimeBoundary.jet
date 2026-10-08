@@ -30,6 +30,7 @@ pub struct X64ValueBoundary {
 }
 pub struct LIRClosureValueLayout {
     pub code: LIRFunctionID
+    pub release: LIRFunctionID?
     pub function: MIRFunctionID
     pub boundary: X64ValueBoundary
     pub captures: [X64ValueMember]
@@ -206,6 +207,10 @@ fn lower_closure_value_layouts(program: MIRProgram, prepared: LowerPrepared, m: 
             thunk :: m.glue_rows.get(lower_glue_row_key("h:closure.thunk", "{index}")) ?? next
             code = m.glue[thunk].id
         }
+        release := LIRFunctionID?{None}
+        if m.glue_rows.get(lower_glue_row_key("h:closure.release", "{index}")) == .Val(release_row) {
+            release = Val(m.glue[release_row].id)
+        }
         layout :: lower_closure_layout(program, source)
         state := LowerValueBoundary{rows: [String:Int]{}, descriptors: [X64ValueDescriptor]{}, errors: [String]{}}
         unit :: mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref("Unit"), args: [MIRType]{}})
@@ -215,7 +220,7 @@ fn lower_closure_value_layouts(program: MIRProgram, prepared: LowerPrepared, m: 
             descriptor :: lower_value_descriptor(program, &state, capture.ty)
             &captures.push(X64ValueMember{name: capture.name, offset: layout.offsets[position], descriptor: descriptor, boxed: layout.by_ref[position]})
         }
-        &layouts.push(LIRClosureValueLayout{code: code, function: original.id, boundary: X64ValueBoundary{root: root, descriptors: state.descriptors, errors: state.errors}, captures: captures})
+        &layouts.push(LIRClosureValueLayout{code: code, release: release, function: original.id, boundary: X64ValueBoundary{root: root, descriptors: state.descriptors, errors: state.errors}, captures: captures})
     }
     layouts
 }

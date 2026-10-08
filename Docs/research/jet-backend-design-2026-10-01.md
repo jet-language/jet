@@ -1369,6 +1369,20 @@ a runtime-producing build without it refuses with `CoreSharedSeedIngressMissing`
 Stage zero without a runtime retains its existing bootstrap path. Native
 physical Shared interop and composed runtime execution still require integration.
 
+The boundary's ownership rails are fixed:
+
+| Carrier | Retained owner | Release rail |
+| --- | --- | --- |
+| Native closure box | Native refs at 0; emitted code at 8, emitted release at 16; captures from 24 | Clone increments refs; last unref invokes emitted release, drops by-value captures and frees the box |
+| Source callback | Originating `JetEvalMachine.callback_roots`; retain copies reusable roots, transfer consumes one-shot roots | Checked `jet_eval_callback_release` removes the root exactly once; Source drop frees captures |
+| Native callback envelope | Source callback/job session registration; job owner remains live through cleanup | Owner pump handles Release via checked Source release followed by release completion |
+| Canonical Core parent | Original source recipe, admitted runtime, pinned native image and digest-only attachment | Never retains a factory evaluator, callback root, projector or typed context |
+
+Closure code and release resolve only through actual emitted callable rows.
+Missing exports are named refusals; the generic concrete-layout/provenance gap
+remains a named refusal, not an ID/offset guess or a copied factory root.
+
+
 `x64_memory_core_shared_image` consumes the explicit pinned-Core lowering
 inventory, rather than guessing exports from MIR function numbers. Getter names
 are `jet_core_shared_` followed by the initializer's sixteen lowercase hex

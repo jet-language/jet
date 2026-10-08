@@ -280,6 +280,16 @@ pub struct CoreSharedGetterBinding {
     pub function: LIRFunctionID
     pub linked_offset: Int
 }
+pub struct CoreSharedCallableBinding {
+    pub semantic_identity: String
+    pub role: String
+    pub type_key: String
+    pub symbol: String
+    pub function: LIRFunctionID
+    pub signature: LIRSignature
+    pub linked_offset: Int
+}
+
 pub struct CoreSharedBinding {
     pub manifest_digest: String
     pub source_seal: String
@@ -290,11 +300,73 @@ pub struct CoreSharedBinding {
     pub compiled_image_sha: String
     pub image: X64MemoryImage
     pub getters: [CoreSharedGetterBinding]
+    pub callables: [CoreSharedCallableBinding]
+    pub callable_digest: String
     pub errors: [String]
 }
+fn core_shared_abi_class(class: LIRABIClass) -> String Never! {
+    if class == {
+        .Integer -> "Integer"
+        .Pointer -> "Pointer"
+        .Float -> "Float"
+        .Memory -> "Memory"
+    }
+}
+
+fn core_shared_callable_rows_digest(rows: [CoreSharedCallableBinding]) -> String Never! {
+    encoded := [String]{}
+    loop row in rows {
+        parameters :: loop layout in row.signature.params -> "[{layout.size},{layout.align},{foundation_json_quote(core_shared_abi_class(layout.class))}]"
+        result :: if row.signature.result == .Val(layout) -> "[{layout.size},{layout.align},{foundation_json_quote(core_shared_abi_class(layout.class))}]" else -> "null"
+        &encoded.push("[{foundation_json_quote(row.semantic_identity)},{foundation_json_quote(row.role)},{foundation_json_quote(row.type_key)},{foundation_json_quote(row.symbol)},{row.function.value},{row.signature.id.value},\"SystemV\",[{parameters.join(",")}],{result},{row.linked_offset}]")
+    }
+    core_shared_crypto.sha256("[{encoded.join(",")}]".bytes()).hex()
+}
+
+fn core_shared_callable_digest_error(rows: [CoreSharedCallableBinding], digest: String) -> String Never! {
+    if digest != core_shared_callable_rows_digest(rows) -> "CoreSharedCallableBindingIdentityMismatch" else -> ""
+}
+pub fn core_shared_callable_required_error(rows: [CoreSharedCallableBinding], identity: String) -> String Never! {
+    loop row in rows { if row.semantic_identity == identity -> return "" }
+    "CoreSharedCallableBindingMissing: {identity}"
+}
+
+pub fn core_shared_callable_inventory_error(binding: CoreSharedBinding) -> String Never! {
+    digest_error :: core_shared_callable_digest_error(binding.callables, binding.callable_digest)
+    if digest_error != "" -> return digest_error
+    seen := [String:Bool]{}
+    symbols := [String:Bool]{}
+    loop row in binding.callables {
+        if row.role != "lazy.clone" && row.role != "lazy.drop" && row.role != "closure.code" && row.role != "closure.release" -> return "CoreSharedCallableBindingInvalid: {row.semantic_identity}"
+        if row.signature.convention != .SystemV -> return "CoreSharedCallableSignatureMismatch: {row.semantic_identity}"
+        if row.role != "closure.code" {
+            count :: if row.role == "lazy.clone" -> 2 else -> 1
+            if row.signature.params.len() != count || row.signature.result != None -> return "CoreSharedCallableSignatureMismatch: {row.semantic_identity}"
+            loop parameter in row.signature.params {
+                if parameter != lir_layout_pointer() -> return "CoreSharedCallableSignatureMismatch: {row.semantic_identity}"
+            }
+        }
+        if seen.get(row.semantic_identity) != None -> return "CoreSharedClosureConcreteProvenanceGap: {row.semantic_identity}"
+        seen[row.semantic_identity] = true
+        if row.semantic_identity != "{row.role}:{row.type_key}" || row.symbol != "jet_core_callable_{row.function.value}" -> return "CoreSharedCallableBindingInvalid: {row.semantic_identity}"
+        if row.function.value < 0 || row.function.value >= binding.image.functions.len() -> return "CoreSharedCallableBindingMissing: {row.semantic_identity}"
+        if binding.image.functions[row.function.value] != row.linked_offset || binding.image.exports.get(row.symbol) != Val(row.linked_offset) -> return "CoreSharedCallableBindingIdentityMismatch"
+        symbols[row.symbol] = true
+    }
+    if binding.image.exports.len() != binding.getters.len() + symbols.len() -> return "CoreSharedExportInventoryMismatch"
+    ""
+}
+
+// Caller has already admitted/validated this binding; lookup never rehashes
+// a complete compiler image while a physical payload permit is held.
+pub fn core_shared_callable_binding(binding: CoreSharedBinding, identity: String) -> CoreSharedCallableBinding? Never! {
+    loop row in binding.callables { if row.semantic_identity == identity -> return Val(row) }
+    None
+}
+
 pub fn core_shared_binding(program: MIRProgram, lowered: LIRLowering, manifest: CoreSharedManifest, sources: [CoreSharedSource], producer_identity: String) -> CoreSharedBinding Never! {
     image :: x64_memory_core_shared_image(lowered)
-    binding := CoreSharedBinding{manifest_digest: manifest.digest, source_seal: core_shared_source_seal(sources), producing_program: program, original_sources: sources, producing_program_digest: mir_program_digest(program), producer_identity: producer_identity, compiled_image_sha: core_shared_crypto.sha256(image.text).hex(), image: image, getters: [CoreSharedGetterBinding]{}, errors: manifest.errors}
+    binding := CoreSharedBinding{manifest_digest: manifest.digest, source_seal: core_shared_source_seal(sources), producing_program: program, original_sources: sources, producing_program_digest: mir_program_digest(program), producer_identity: producer_identity, compiled_image_sha: core_shared_crypto.sha256(image.text).hex(), image: image, getters: [CoreSharedGetterBinding]{}, callables: [CoreSharedCallableBinding]{}, callable_digest: "", errors: manifest.errors}
     loop error in image.errors -> &binding.errors.push(error)
     if binding.source_seal != manifest.seal || manifest.digest != core_shared_crypto.sha256(core_shared_manifest_body(manifest).bytes()).hex() -> &binding.errors.push("CoreSharedManifestIdentityMismatch")
     if producer_identity == "" -> &binding.errors.push("CoreSharedProducerIdentityMissing")
@@ -312,5 +384,39 @@ pub fn core_shared_binding(program: MIRProgram, lowered: LIRLowering, manifest: 
         }
         if !found -> &binding.errors.push("CoreSharedGetterBindingMissing: {site.canonical_site_key}")
     }
+    loop row in lowered.core_callables {
+        symbol :: "jet_core_callable_{row.function.value}"
+        offset :: image.exports.get(symbol) ?? {
+            &binding.errors.push("CoreSharedCallableBindingMissing: {row.semantic_identity}")
+            next
+        }
+        function :: lowered.lir.functions[row.function.value]
+        signature :: lir_signature(lowered.lir, function.signature) ?? {
+            &binding.errors.push("CoreSharedCallableBindingMissing: {row.semantic_identity}")
+            next
+        }
+        &binding.callables.push(CoreSharedCallableBinding{semantic_identity: row.semantic_identity, role: row.role, type_key: row.type_key, symbol: symbol, function: row.function, signature: signature, linked_offset: offset})
+    }
+    &binding.callables.sort_by((a: CoreSharedCallableBinding, b: CoreSharedCallableBinding) -> a.semantic_identity <=> b.semantic_identity)
+    binding.callable_digest = core_shared_callable_rows_digest(binding.callables)
+    error :: core_shared_callable_inventory_error(binding)
+    if error != "" -> &binding.errors.push(error)
     binding
+}
+
+#Test("Core callable digest refuses a changed linked offset or signature") {
+    row :: CoreSharedCallableBinding{semantic_identity: "lazy.drop:checked", role: "lazy.drop", type_key: "checked", symbol: "jet_core_callable_7", function: LIRFunctionID{value: 7}, signature: LIRSignature{id: LIRSignatureID{value: 3}, convention: .SystemV, params: [LIRLayout]{lir_layout_pointer()}, result: None}, linked_offset: 40}
+    digest :: core_shared_callable_rows_digest([CoreSharedCallableBinding]{row})
+    changed := ~row
+    changed.linked_offset = 48
+    assert_eq(core_shared_callable_digest_error([CoreSharedCallableBinding]{changed}, digest), "CoreSharedCallableBindingIdentityMismatch")
+    changed = ~row
+    changed.signature.params = [LIRLayout]{lir_layout_word()}
+    assert_eq(core_shared_callable_digest_error([CoreSharedCallableBinding]{changed}, digest), "CoreSharedCallableBindingIdentityMismatch")
+}
+
+#Test("an absent emitted clone or drop callable is a named refusal") {
+    rows :: [CoreSharedCallableBinding]{}
+    assert_eq(core_shared_callable_required_error(rows, "lazy.clone:checked"), "CoreSharedCallableBindingMissing: lazy.clone:checked")
+    assert_eq(core_shared_callable_required_error(rows, "lazy.drop:checked"), "CoreSharedCallableBindingMissing: lazy.drop:checked")
 }

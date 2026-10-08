@@ -84,7 +84,9 @@ pub fn core_shared_parent_admit(parent: &CoreSharedParent, expected: CoreSharedM
     if binding.errors.len() != 0 -> return core_shared_parent_refusal("CoreSharedProductionFailed: {binding.errors.join("; ")}")
     if binding.manifest_digest != expected.digest || binding.source_seal != expected.seal || core_shared_source_seal(binding.original_sources) != expected.seal -> return core_shared_parent_refusal("CoreSharedSchemaMismatch")
     if binding.compiled_image_sha != core_parent_crypto.sha256(binding.image.text).hex() || binding.producing_program_digest != mir_program_digest(binding.producing_program) -> return core_shared_parent_refusal("CoreSharedBindingIdentityMismatch")
-    if binding.getters.len() != expected.sorted_sites.len() || binding.image.exports.len() != expected.sorted_sites.len() -> return core_shared_parent_refusal("CoreSharedGetterInventoryMismatch")
+    if binding.getters.len() != expected.sorted_sites.len() -> return core_shared_parent_refusal("CoreSharedGetterInventoryMismatch")
+    callable_error :: core_shared_callable_inventory_error(binding)
+    if callable_error != "" -> return core_shared_parent_refusal(callable_error)
     loop (index, site) in expected.sorted_sites {
         getter :: binding.getters[index]
         if getter.canonical_site_key != site.canonical_site_key || getter.getter_canonical_symbol != site.getter_canonical_symbol || binding.image.exports.get(getter.getter_canonical_symbol) != Val(getter.linked_offset) -> return core_shared_parent_refusal("CoreSharedGetterInventoryMismatch")
@@ -176,4 +178,22 @@ pub fn core_shared_parent_getter(parent: &CoreSharedParent, attachment: CoreShar
     assert_eq(guard.value.manifest, Val(original))
     assert_eq(guard.value.getters.len(), 0)
     assert(!guard.value.ready)
+}
+
+// Callable lookup uses the same pinned image and digest as the admitted getter.
+// The factory receives only an address for this invocation, never binding state.
+pub struct CoreSharedParentCallableResult {
+    pub address: Int
+    pub refusal_key: String
+}
+pub fn core_shared_parent_callable(parent: &CoreSharedParent, attachment: CoreSharedParentAttachment, identity: String) -> CoreSharedParentCallableResult Never! {
+    guard :: parent.state.guard_read()
+    manifest :: guard.value.manifest ?? return CoreSharedParentCallableResult{address: 0, refusal_key: "CoreSharedNotAdmitted"}
+    if !guard.value.ready || guard.value.poisoned || attachment.manifest_digest != manifest.digest -> return CoreSharedParentCallableResult{address: 0, refusal_key: "CoreSharedSchemaMismatch"}
+    binding :: guard.value.binding ?? return CoreSharedParentCallableResult{address: 0, refusal_key: "CoreSharedNotAdmitted"}
+    error :: core_shared_callable_inventory_error(binding)
+    if error != "" -> return CoreSharedParentCallableResult{address: 0, refusal_key: error}
+    row :: core_shared_callable_binding(binding, identity) ?? return CoreSharedParentCallableResult{address: 0, refusal_key: "CoreSharedCallableBindingMissing: {identity}"}
+    loaded :: guard.value.loaded ?? return CoreSharedParentCallableResult{address: 0, refusal_key: "CoreSharedNotAdmitted"}
+    CoreSharedParentCallableResult{address: loaded.base + row.linked_offset, refusal_key: ""}
 }
