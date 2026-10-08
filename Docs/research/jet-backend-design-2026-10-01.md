@@ -2133,3 +2133,9 @@ resize dimensions preserve IEEE equality (including NaN self-inequality and
 signed-zero equivalence); timer elapsed values retain all i64 bits. Modifier
 and focus fields ignore padding beyond their seed byte width. The event
 ownership witness checks all variants, byte-list independence and exact frees.
+
+`UiViewSnapshots.jet` copies preview device metadata and virtualization plans,
+not live viewport signals. Preview custom-device text is owned; u32 dimensions
+and u16 scale ignore padding without applying constructor policy. Virtual
+plans preserve twelve raw i64 fields and sparse ordered `(index, size)` pairs,
+including duplicate indices; clone owns independent pair storage.
