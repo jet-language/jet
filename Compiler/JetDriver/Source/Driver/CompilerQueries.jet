@@ -41,31 +41,43 @@
 // - Keep registration, policies, plugin interfaces, resolved imports and
 //   target/profile facts canonical. This is not a BuildGraph/receipt facade,
 //   a second frontend, or two complete checks with inferred reuse counters.
+// - Root-result eligibility and Sema-body eligibility are distinct. A volatile
+//   root still supplies its opaque Sema session to the FINAL real verdict when
+//   that same compile supplies complete actual Sema inputs/frozen epochs.
+//   This does not authorize a root hit: fresh global/schema verdict work runs.
+//   A body-relevant uncaptured input instead makes that logical BODY query
+//   volatile through its real producer; Driver invents no flag or key for it.
 //
 // Opaque Sema contract (sole implementation editor: SpeedPareto2):
-// - Begin-bundle compares the canonical global environment (excluding only
-//   BuildStamp.At), span-stripped module interfaces with callable bodies
-//   removed, and resolved-import dependencies. Invalidate the changed module
-//   interface and its reverse-import closure; a private body edit does not
-//   dirty unrelated interfaces. Deleted modules and changed import resolution
-//   invalidate their owned entries too.
-// - Body inputs include the complete raw function AST, all source spans,
-//   raw-protocol-return mode and every checking input. Text-only or span-free
-//   fingerprints cannot stand in for this input. Sema supplies this contract;
-//   Driver cannot invent a partial serialization of its private state.
-// - An entry owns the accepted final typed body and ALL ordered diagnostics,
-//   calls, comptime requests, name facts, wanted hooks and checked function
-//   facts: completion, exact-Int reachability, copies, hardware use, body
-//   sources, compute/failure facts and every pending/publication/summary row.
-// - Commit only after the main callback retry accepts the final owned packet
-//   with wanted_hooks=false. Never cache a provisional/withheld packet or a
-//   partially borrowed parallel worker result. Comptime/embed inputs and a
-//   missing/incomplete owned body follow the real recompute path.
+// - Compare the actual graph/stage/values/providers/policies and frozen
+//   registration/module views from the same compile. Body-cleared interfaces
+//   preserve all headers/defaults/non-body facts; dependency projections strip
+//   spans with the canonical quote/escape-aware law, not a guessed serializer.
+//   Frozen binding/declaration/source views separately retain their full spans.
+// - Capture full relevant/callee source-segment maps and post-summary scope/
+//   environment inputs ONCE per request/module epoch, not a scalar name line
+//   or an entire graph serialized into each function key. Physical counters/
+//   callback addresses/reconstructible indexes are not semantic input.
+// - A row retains its own full raw/planned function, owner/generic/memory facts
+//   and exact frozen input epoch. Exact owned values decide equality, not a
+//   hash alone. No private-body key depends on every other executable body.
+// - An entry owns the actual private SemaFunctionResult, WHOLE TFunc and four
+//   ordered outputs: diagnostics, calls, comptime requests and name references.
+//   Preserve all actual completion/exact-Int/copy/hardware/body-source/compute/
+//   failure facts. Do not invent absent publication/pending-ledger arrays.
+// - Commit only the accepted complete final owned packet after the main
+//   callback retry. wanted_hooks=false alone is insufficient: sticky BOTH-mode
+//   host reach and actual foreign HTTP-handler raw-body reads bypass retention.
+//   Never retain provisional/withheld/part-borrowed packets. Comptime/embed,
+//   volatile and incomplete outcomes use the real logical recompute path.
 // - Replay through the SAME ordered append path used by fresh bodies
 //   (currently sema_append_function plus its explicit facts loops), preserving
 //   parallel result order. Factoring that path belongs to the checker owner;
 //   planned helper names are not existing APIs. Re-run all global failure,
 //   effect, borrow and other bundle obligations after all body products join.
+// - Prepared replay descriptors carry the frozen epoch. Ordered return-view
+//   publication invalidates stale descriptors; discarded candidates count no
+//   hit and follow canonical checking. Worker results join before mutable apply.
 //
 // Counters and command cutover:
 // - Root hits/recomputes and body hits/recomputes are distinct cumulative
@@ -75,6 +87,8 @@
 //   Provisional callback attempts do not publish or increment separately;
 //   global rechecks/probes are not initial body-cache hits/recomputes.
 //   No result-derived counts or synthetic cached claims.
+// - Stats use exact Int. clear drops retained rows but preserves cumulative
+//   hits/recomputes; clear_measurement resets only the ordered recomputed window.
 // - CmdTry takes stats after its baseline check_disk, installs each staged
 //   document, calls check_text, and reports saturating deltas of the actual
 //   item counters, exactly as Rust CmdTry313-330.
