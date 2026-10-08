@@ -742,19 +742,38 @@ const jetTablesOut = HEADER_COMMENT.trimEnd() + "\n"
 if ([...canonDecomp.values()].some((seq) => seq.length > 2)) {
   throw new Error("canonical decomposition exceeds the NFC two-lane contract");
 }
-const jetNormalizeTablesOut = HEADER_COMMENT.trimEnd() + "\n"
+const jetNormalizeHeader = HEADER_COMMENT.trimEnd() + "\n"
   + Object.entries(PINNED_SHA256).map(([file, hash]) => `// SHA256 ${file}: ${hash}\n`).join("")
   + "// NFC canonical-only tables; static I64 decisions, no allocation/Core indexing.\n"
-  + "// Canonical mappings pack two 21-bit scalar lanes (low lane first).\n"
-  + jetMapping("canonical", canonDecomp) + "\n"
-  + "fn unicode_normal_ccc(cp: I64) -> I64 Never! {\n"
-  + jetLookupTree(cccRanges, "I64{0}", (row) => `I64{${row[2]}}`) + "}\n\n"
-  + "fn unicode_normal_compose(a: I64, b: I64) -> I64 Never! {\n"
-  + "    cp :: (a << I64{21}) | b\n"
-  + jetLookupTree(composePairs.map(([a, b, c]) => {
+  + "// Canonical mappings pack two 21-bit scalar lanes (low lane first).\n";
+const jetNormalizeChunks = [];
+// Bound each lexer/parser input as well as each decision tree. 128 rows keep
+// the generated functions small without changing the balanced search policy.
+function jetNormalizeLookup(name, rows, missing, mapped) {
+  const dispatch = [];
+  for (let start = 0; start < rows.length; start += 128) {
+    const chunk = rows.slice(start, start + 128);
+    const index = dispatch.length;
+    const fn = `unicode_${name}_${index}`;
+    const text = jetNormalizeHeader + `fn ${fn}(cp: I64) -> I64 Never! {\n`
+      + jetLookupTree(chunk, missing, mapped) + "}\n";
+    if (text.length > jetTablesOut.length) throw new Error(`${fn} exceeds existing UnicodeTables.jet size`);
+    jetNormalizeChunks.push([`Compiler/JetRuntime/Source/UnicodeNormalize_${name}_${index}.jet`, text]);
+    dispatch.push([chunk[0][0], chunk.at(-1)[1], fn]);
+  }
+  return `fn unicode_${name}(cp: I64) -> I64 Never! {\n`
+    + jetLookupTree(dispatch, missing, (row) => `${row[2]}(cp)`) + "}\n";
+}
+const jetNormalizeTablesOut = jetNormalizeHeader
+  + jetNormalizeLookup("canonical_mapping", jetMappingRows(canonDecomp), "cp", (row) => row[2] === null
+    ? `I64{${row[3]}}` : row[2] === 0 ? "cp" : `wrapping(cp + I64{${row[2]}})`) + "\n"
+  + jetNormalizeLookup("normal_ccc", cccRanges, "I64{0}", (row) => `I64{${row[2]}}`) + "\n"
+  + jetNormalizeLookup("normal_compose_key", composePairs.map(([a, b, c]) => {
     const key = (BigInt(a) << 21n) | BigInt(b);
     return [key, key, c];
-  }), "I64{-1}", (row) => `I64{${row[2]}}`) + "}\n";
+  }), "I64{-1}", (row) => `I64{${row[2]}}`) + "\n"
+  + "fn unicode_normal_compose(a: I64, b: I64) -> I64 Never! {\n"
+  + "    unicode_normal_compose_key((a << I64{21}) | b)\n}\n";
 
 const outPaths = [
   ["crates/jet-foundation/src/generated/UnicodeString.rs", stringModuleOut],
@@ -762,6 +781,7 @@ const outPaths = [
   ["crates/jet-codegen/src/Prelude/CoreLib/Top/UnicodeTables.rs", tablesFlatOut],
   ["Compiler/JetRuntime/Source/UnicodeTables.jet", jetTablesOut],
   ["Compiler/JetRuntime/Source/UnicodeNormalizeTables.jet", jetNormalizeTablesOut],
+  ...jetNormalizeChunks,
 ];
 for (const [rel, text] of outPaths) {
   const full = path.join(process.cwd(), rel);

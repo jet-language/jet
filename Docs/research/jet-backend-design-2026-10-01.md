@@ -2288,6 +2288,12 @@ checksum-verified Unicode 17.0.0 inputs; they allocate nothing and never call
 Core indexing. Composition uses the current seed's absent-starter and -1
 blocking sentinel, including class-zero compositions and intervening marks.
 
+Generated normalization trees are partitioned into 128-row functions/files
+behind balanced static dispatch, with the same pinned checksum header in
+each file. Generation rejects any chunk larger than the existing generated
+`UnicodeTables.jet` (1,014,070 bytes for this UCD pin). This bounds individual
+parser inputs without introducing heap tables or changing lookup semantics.
+
 `native_text_normalize_nfc` borrows an E4 Text header and returns an
 independent owned E4 Text header. Both `jet_text_nfc` and
 `jet_text_normalize_nfc` use that kernel. ASCII (including embedded NUL and
