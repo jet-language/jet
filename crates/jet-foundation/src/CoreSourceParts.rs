@@ -20,6 +20,13 @@ pub const CORE_ENCODING_STREAM_ALIAS: &str = "__core_encoding_stream";
 pub const CORE_ENCODING_CBOR_PARSE_OWNER: &str = "core.encoding.cbor";
 pub const CORE_ENCODING_CBOR_PARSE_MODULE: &str = "__core_encoding_cbor_parse";
 pub const CORE_ENCODING_CBOR_PARSE_ALIAS: &str = "__core_encoding_cbor_parse";
+
+pub const CORE_ENCODING_XML_ENGINE_OWNER: &str = "core.encoding.xml";
+pub const CORE_ENCODING_XML_ENGINE_MODULE: &str = "__core_encoding_xml_engine";
+pub const CORE_ENCODING_XML_ENGINE_ALIAS: &str = "__core_encoding_xml_engine";
+pub const CORE_ENCODING_XML_KERNEL_OWNER: &str = "core.encoding.xml";
+pub const CORE_ENCODING_XML_KERNEL_MODULE: &str = "__core_encoding_xml_kernel";
+pub const CORE_ENCODING_XML_KERNEL_ALIAS: &str = "__core_encoding_xml_kernel";
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CorePrivateSourcePart {
     /// Public source module that schedules this part.
@@ -58,11 +65,31 @@ pub const CORE_ENCODING_CBOR_PARSE_SOURCE_PART: CorePrivateSourcePart = CorePriv
         owned_members: &["parse", "narrow_bits"],
     },
 };
+
+pub const CORE_ENCODING_XML_ENGINE_SOURCE_PART: CorePrivateSourcePart = CorePrivateSourcePart {
+    owner: CORE_ENCODING_XML_ENGINE_OWNER,
+    source: CoreSourceModule {
+        module: CORE_ENCODING_XML_ENGINE_MODULE,
+        alias: CORE_ENCODING_XML_ENGINE_ALIAS,
+        path: "Core/encoding/xml_engine.jet",
+        owned_members: &["clean", "parse_document", "parse_document_with", "parse_document_bytes_with", "render_document", "render_document_bytes", "canonical_document", "document_root", "expanded_name_parts", "lookup_attribute", "element_content", "project_document_for_decode", "stream_event_value"],
+    },
+};
+
+pub const CORE_ENCODING_XML_KERNEL_SOURCE_PART: CorePrivateSourcePart = CorePrivateSourcePart {
+    owner: CORE_ENCODING_XML_KERNEL_OWNER,
+    source: CoreSourceModule {
+        module: CORE_ENCODING_XML_KERNEL_MODULE,
+        alias: CORE_ENCODING_XML_KERNEL_ALIAS,
+        path: "Core/encoding/xml_kernel.jet",
+        owned_members: &["parse_document", "parse_document_with", "parse_document_bytes_with", "render_document", "render_document_bytes", "canonical_document", "document_root", "expanded_name_parts", "lookup_attribute", "element_content", "project_document_for_decode", "public_error", "parse_options", "render_encoding", "lexical_policy", "canonical_options", "field_error"],
+    },
+};
 /// All compiler-private source parts. Keep this separate from
 /// `CoreModuleExports::CORE_SOURCE_MODULES`: adding a row there would make the
 /// part publicly importable.
 pub const CORE_PRIVATE_SOURCE_PARTS: &[CorePrivateSourcePart] =
-    &[CORE_TEXT_STRING_SOURCE_PART, CORE_ENCODING_STREAM_SOURCE_PART, CORE_ENCODING_CBOR_PARSE_SOURCE_PART];
+    &[CORE_TEXT_STRING_SOURCE_PART, CORE_ENCODING_STREAM_SOURCE_PART, CORE_ENCODING_CBOR_PARSE_SOURCE_PART, CORE_ENCODING_XML_ENGINE_SOURCE_PART, CORE_ENCODING_XML_KERNEL_SOURCE_PART];
 
 pub fn core_private_source_part(owner: &str) -> Option<&'static CorePrivateSourcePart> {
     CORE_PRIVATE_SOURCE_PARTS

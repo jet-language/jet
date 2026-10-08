@@ -1492,7 +1492,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 4d86e1668e28be872ae80e869da5cb1a025cf0c95f0903867aa3999c63a3f6e7
+// Source SHA-256: fca1148fc24f030f438bda72ba952bdaf9a9934791f49670355304d52bdf1f1c
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -2224,7 +2224,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.encoding.jsonl", "writer", "jet_enc_jsonl_writer", true, &[false, true]),
     CoreCallRecord::new("core.encoding.cbor", "reader", "jet_enc_cbor_reader", true, &[false, true]),
     CoreCallRecord::new("core.encoding.cbor", "writer", "jet_enc_cbor_writer", true, &[false, true]),
-    CoreCallRecord::new("core.encoding.xml", "reader", "jet_enc_xml_reader", true, &[false, true, true]),
+    CoreCallRecord::source_owned("core.encoding.xml", "reader", &[false, true, true]),
     CoreCallRecord::new("core.crypto.vault", "prepare_rotate", "jet_vault_prepare_rotate_impl", false, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).without_direct_aot(),
     CoreCallRecord::new("core.crypto.vault", "authorize_write", "jet_vault_authorize_write_impl", false, &[true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).without_direct_aot(),
     CoreCallRecord::new("core.crypto.vault", "commit_rotate", "jet_vault_commit_rotate_impl", false, &[false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).without_direct_aot(),
@@ -2448,13 +2448,14 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.encoding.toml", "load", "jet_std_toml_parse", true, &[true], ),
     CoreCallRecord::new( "core.encoding.toml", "loads", "jet_std_toml_parse", true, &[true], ),
     CoreCallRecord::new( "core.encoding.yaml", "parse", "jet_std_yaml_parse", true, &[true], ),
-    CoreCallRecord::new( "core.encoding.xml", "parse", "jet_std_xml_parse", true, &[true], ),
-    CoreCallRecord::new( "core.encoding.xml", "parse_with", "jet_std_xml_parse_with", true, &[true, true], ),
-    CoreCallRecord::new( "core.encoding.xml", "to_string", "jet_std_xml_render", true, &[true], ),
-    CoreCallRecord::new( "core.encoding.xml", "canonical", "jet_std_xml_canonical", true, &[true, true], ) .with_pure_route(CoreCallPureRoute::EncodingXml),
-    CoreCallRecord::new( "core.encoding.xml", "root", "jet_std_xml_root", true, &[true], ),
-    CoreCallRecord::new( "core.encoding.xml", "attribute", "jet_std_xml_attribute", true, &[true, true], ),
-    CoreCallRecord::new( "core.encoding.xml", "content", "jet_std_xml_content", true, &[true], ),
+    CoreCallRecord::source_owned("core.encoding.xml", "parse", &[true]),
+    CoreCallRecord::source_owned("core.encoding.xml", "parse_with", &[true, true]),
+    CoreCallRecord::source_owned("core.encoding.xml", "parse_bytes", &[true, true]).with_max_arity(2),
+    CoreCallRecord::source_owned("core.encoding.xml", "to_string", &[true]),
+    CoreCallRecord::source_owned("core.encoding.xml", "canonical", &[true, true]),
+    CoreCallRecord::source_owned("core.encoding.xml", "root", &[true]),
+    CoreCallRecord::source_owned("core.encoding.xml", "attribute", &[true, true]),
+    CoreCallRecord::source_owned("core.encoding.xml", "content", &[true]),
     CoreCallRecord::source_owned("core.encoding.cbor", "to_bytes", &[true]).with_marker(CoreMarkerApplication::deprecated("encode", "2027", "cbor.to_bytes", Some("2028"))),
     CoreCallRecord::source_owned("core.encoding.cbor", "parse", &[true]).with_max_arity(2).with_marker(CoreMarkerApplication::deprecated("decode", "2027", "cbor.parse", Some("2028"))),
     CoreCallRecord::new("core.encoding.binary", "pack_u8", "jet_std_binary_pack_u8", true, &[false]),
@@ -3092,7 +3093,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.time", "from_timestamp", "JetDateTime::from_timestamp", false, &[false], ) .with_pure_route(CoreCallPureRoute::DateTime) .without_direct_aot(),
     CoreCallRecord::new( "core.time", "parse_time", "JetLocalTime::parse", false, &[true], ) .with_pure_route(CoreCallPureRoute::Time) .without_direct_aot(),
     CoreCallRecord::new("core.time", "parse", "JetDate::parse", false, &[true]) .with_pure_route(CoreCallPureRoute::Date) .without_direct_aot(),
-    CoreCallRecord::new( "core.encoding.xml", "decode", "jet_enc_xml_decode", true, &[true], ) .with_pure_route(CoreCallPureRoute::EncodingXml) .with_max_arity(2) .without_direct_aot(),
+    CoreCallRecord::source_owned("core.encoding.xml", "decode", &[true, true]).with_max_arity(2),
     CoreCallRecord::receiver_with_coverage( &["WebTable"], "with_column", &[false], CoreCallCoverage::from_bits(CoreCallCoverage::SEMA), ),
     CoreCallRecord::receiver_with_coverage( &["WebTable"], "paginate", &[true, true], CoreCallCoverage::from_bits(CoreCallCoverage::SEMA), ),
     CoreCallRecord::receiver_with_coverage( &["WebTable"], "page", &[], CoreCallCoverage::from_bits(CoreCallCoverage::SEMA), ),
@@ -3331,7 +3332,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.data.arrow", "import", "jet_data_arrow_import", true, &[false]),
     CoreCallRecord::new("core.data.arrow", "query", "jet_data_query_arrow", true, &[false]),
     CoreCallRecord::new("core.data", "mean", "jet_data_mean_checked", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.encoding.xml", "to_bytes", "jet_std_xml_to_bytes", true, &[true, true]),
+    CoreCallRecord::source_owned("core.encoding.xml", "to_bytes", &[true, true]),
     CoreCallRecord::new("core.service", "workflow_start", "jet_services_workflow_start", true, &[true, false, false]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.sync", "text_edit", "jet_sync_text_edit", true, &[true, false, false, false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.service", "workflow_outcome", "jet_services_workflow_outcome", true, &[true, false]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),

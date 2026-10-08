@@ -25,7 +25,7 @@ pub enum CoreLeafKind {
 
 // BEGIN GENERATED CORE DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 30f9acc583205f64befcce307ee37500f5e852b421b1115ceaf7ee89dd9ebef4
+// Source SHA-256: fca1148fc24f030f438bda72ba952bdaf9a9934791f49670355304d52bdf1f1c
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreModuleDeclaration {
     pub module: &'static str,
@@ -300,8 +300,8 @@ const CORE_MODULE_29_MEMBERS: &[&str] = &["new", "Centroid", "TDigest"];
 const CORE_MODULE_29_TYPES: &[(&str, CoreLeafKind)] = &[("Centroid", CoreLeafKind::Plain), ("TDigest", CoreLeafKind::Plain)];
 const CORE_MODULE_29_DEPENDENCIES: &[&str] = &["core.data"];
 
-const CORE_MODULE_30_MEMBERS: &[&str] = &["decode", "migrate", "open", "open_memory", "pool", "policy", "policy_audit", "row_bool", "row_float", "row_int", "row_text", "row_value", "transaction", "DBConnection", "DBScope", "DBPool", "DBLease", "DBPoolReceipt", "DBError", "DBValue", "SQL"];
-const CORE_MODULE_30_TYPES: &[(&str, CoreLeafKind)] = &[("DBConnection", CoreLeafKind::Plain), ("DBScope", CoreLeafKind::Plain), ("DBPool", CoreLeafKind::Plain), ("DBLease", CoreLeafKind::Plain), ("DBPoolReceipt", CoreLeafKind::Plain), ("DBError", CoreLeafKind::Plain), ("DBValue", CoreLeafKind::Enum(&["Null", "Int", "Float", "Text", "Bool", "Blob"])), ("SQL", CoreLeafKind::Plain)];
+const CORE_MODULE_30_MEMBERS: &[&str] = &["decode", "migrate", "open", "open_memory", "pool", "policy", "policy_audit", "row_bool", "row_float", "row_int", "row_text", "row_value", "transaction", "DBConnection", "DBScope", "DBPool", "DBLease", "DBPoolReceipt", "DBError", "DBValue", "SQL", "__open", "__open_memory", "__pool", "__policy", "__policy_audit", "__transaction", "__migrate", "__PoolLifecycle"];
+const CORE_MODULE_30_TYPES: &[(&str, CoreLeafKind)] = &[("DBConnection", CoreLeafKind::Plain), ("DBScope", CoreLeafKind::Plain), ("DBPool", CoreLeafKind::Plain), ("DBLease", CoreLeafKind::Plain), ("DBPoolReceipt", CoreLeafKind::Plain), ("DBError", CoreLeafKind::Plain), ("DBValue", CoreLeafKind::Enum(&["Null", "Int", "Float", "Text", "Bool", "Blob"])), ("SQL", CoreLeafKind::Plain), ("__PoolLifecycle", CoreLeafKind::Enum(&["Open", "Draining", "Drained"]))];
 const CORE_MODULE_30_DEPENDENCIES: &[&str] = &["core.encoding"];
 
 const CORE_MODULE_31_MEMBERS: &[&str] = &["Address", "Attachment", "DKIMConfig", "EmailError", "Envelope", "Limits", "Mailer", "Message", "RecipientPolicy", "RecipientReport", "SMTPAuth", "SMTPConfig", "SMTPSecurity", "SendReport", "TLSTrust", "address", "attachment", "envelope", "message", "serialize", "smtp", "smtp_from_env", "HTML", "dkim", "limits", "send_report", "smtp_auth"];
@@ -782,7 +782,7 @@ pub const CORE_SOURCE_MODULES: &[CoreSourceModule] = &[
     CoreSourceModule { module: "core.data.sketch.hll", alias: "core_core_data_sketch_hll", path: "Core/data/sketch/hll.jet", owned_members: &["new"] },
     CoreSourceModule { module: "core.data.sketch.reservoir", alias: "core_core_data_sketch_reservoir", path: "Core/data/sketch/reservoir.jet", owned_members: &["new"] },
     CoreSourceModule { module: "core.data.sketch.tdigest", alias: "core_core_data_sketch_tdigest", path: "Core/data/sketch/tdigest.jet", owned_members: &["new"] },
-    CoreSourceModule { module: "core.db", alias: "core_core_db", path: "Core/db/db.jet", owned_members: &["row_bool", "row_float", "row_int", "row_text", "row_value"] },
+    CoreSourceModule { module: "core.db", alias: "core_core_db", path: "Core/db/db.jet", owned_members: &["open", "open_memory", "pool", "policy", "policy_audit", "transaction", "migrate", "row_bool", "row_float", "row_int", "row_text", "row_value"] },
     CoreSourceModule { module: "core.email", alias: "core_core_email", path: "Core/email/email.jet", owned_members: &["smtp_from_env"] },
     CoreSourceModule { module: "core.encoding", alias: "core_encoding", path: "Core/encoding/encoding.jet", owned_members: &["hex_nibble", "hex_value", "bytes_to_hex", "hex_to_bytes", "wrap32"] },
     CoreSourceModule { module: "core.encoding.base32", alias: "core_core_encoding_base32", path: "Core/encoding/base32.jet", owned_members: &["b32decode", "b32encode", "b32hexdecode", "b32hexencode", "decode", "encode", "is_base32"] },
@@ -795,7 +795,7 @@ pub const CORE_SOURCE_MODULES: &[CoreSourceModule] = &[
     CoreSourceModule { module: "core.encoding.json", alias: "core_core_encoding_json", path: "Core/encoding/json.jet", owned_members: &["canonical", "decode", "dump", "dumps", "events", "load", "loads", "parse", "parse_allow_duplicates", "patch", "patch_with_limits", "pointer", "reader", "reader_allow_duplicates", "to_string", "to_string_pretty"] },
     CoreSourceModule { module: "core.encoding.jsonl", alias: "core_core_encoding_jsonl", path: "Core/encoding/jsonl.jet", owned_members: &["append_line", "count_rows", "dumps", "first", "loads", "parse", "reader", "to_string"] },
     CoreSourceModule { module: "core.encoding.toml", alias: "core_core_encoding_toml", path: "Core/encoding/toml.jet", owned_members: &["load", "loads", "parse", "to_string"] },
-    CoreSourceModule { module: "core.encoding.xml", alias: "core_core_encoding_xml", path: "Core/encoding/xml.jet", owned_members: &[] },
+    CoreSourceModule { module: "core.encoding.xml", alias: "core_core_encoding_xml", path: "Core/encoding/xml.jet", owned_members: &["parse", "parse_with", "parse_bytes", "to_string", "to_bytes", "canonical", "root", "expanded_name", "attribute", "content", "decode", "reader"] },
     CoreSourceModule { module: "core.event", alias: "core_core_event", path: "Core/event/event.jet", owned_members: &["async_result", "decision_hook", "hook", "new", "policy_sync", "scope", "with_policy"] },
     CoreSourceModule { module: "core.files", alias: "core_core_files", path: "Core/files/files.jet", owned_members: &["basename", "is_absolute", "is_file", "scope", "stem", "suffix", "with_name", "with_suffix", "is_abs", "split_slash", "collapse", "join", "dirname", "glob_match", "relative", "is_symlink", "cwd", "home", "expanduser", "touch", "relocate", "replace", "relativeto", "chmod", "copy2", "copyfile", "mkdir", "rmdir", "unlink", "joinpath", "getcwd", "chdir", "scandir", "gettempdir", "getenv", "read_lines", "write_lines", "commonpath", "fnmatch", "which", "splitext", "split", "normpath", "getsize", "getmtime", "lexists", "samefile", "commonprefix", "expandvars", "move", "rmtree", "makedirs", "listdir", "glob_recursive", "fnmatch_filter", "is_mount", "ensure_parent", "readdir", "walkdir", "truncate", "createdirectory", "filesize", "delete", "cp", "rm", "realpath", "pwd", "tmpdir", "topath", "cd", "open", "create", "append", "stat", "lstat", "rename", "open_directory", "extended_attribute_names", "extended_attribute", "set_extended_attribute", "__link_held", "exists", "is_dir", "absolute", "mktemp", "__with_process_directory"] },
     CoreSourceModule { module: "core.encoding.yaml", alias: "core_core_encoding_yaml", path: "Core/encoding/yaml.jet", owned_members: &["parse", "to_string"] },
@@ -883,6 +883,10 @@ pub const CORE_SOURCE_OWNED_TYPES: &[CoreSourceOwnedType] = &[
     CoreSourceOwnedType { path: "Core/data/data.jet", name: "DataLoaderStatus" },
     CoreSourceOwnedType { path: "Core/data/data.jet", name: "DataWatchStatus" },
     CoreSourceOwnedType { path: "Core/data/data.jet", name: "DataSummary" },
+    CoreSourceOwnedType { path: "Core/db/db.jet", name: "DBValue" },
+    CoreSourceOwnedType { path: "Core/db/db.jet", name: "DBError" },
+    CoreSourceOwnedType { path: "Core/db/db.jet", name: "DBPoolReceipt" },
+    CoreSourceOwnedType { path: "Core/db/db.jet", name: "__PoolLifecycle" },
     CoreSourceOwnedType { path: "Core/encoding/encoding.jet", name: "DataEvent" },
     CoreSourceOwnedType { path: "Core/encoding/encoding.jet", name: "EncodingFormat" },
     CoreSourceOwnedType { path: "Core/encoding/encoding.jet", name: "EncodingErrorKind" },
@@ -894,10 +898,6 @@ pub const CORE_SOURCE_OWNED_TYPES: &[CoreSourceOwnedType] = &[
     CoreSourceOwnedType { path: "Core/encoding/cbor.jet", name: "CBORError" },
     CoreSourceOwnedType { path: "Core/encoding/csv.jet", name: "CSVReader" },
     CoreSourceOwnedType { path: "Core/encoding/csv.jet", name: "CSVWriter" },
-    CoreSourceOwnedType { path: "Core/db/db.jet", name: "DBValue" },
-    CoreSourceOwnedType { path: "Core/db/db.jet", name: "DBError" },
-    CoreSourceOwnedType { path: "Core/db/db.jet", name: "DBPoolReceipt" },
-    CoreSourceOwnedType { path: "Core/db/db.jet", name: "__PoolLifecycle" },
     CoreSourceOwnedType { path: "Core/encoding/json.jet", name: "JSONReader" },
     CoreSourceOwnedType { path: "Core/encoding/jsonl.jet", name: "JSONLReader" },
     CoreSourceOwnedType { path: "Core/encoding/xml.jet", name: "XMLError" },
@@ -910,6 +910,7 @@ pub const CORE_SOURCE_OWNED_TYPES: &[CoreSourceOwnedType] = &[
     CoreSourceOwnedType { path: "Core/encoding/xml.jet", name: "XMLRenderOptions" },
     CoreSourceOwnedType { path: "Core/encoding/xml.jet", name: "XMLCanonicalMode" },
     CoreSourceOwnedType { path: "Core/encoding/xml.jet", name: "XMLCanonical" },
+    CoreSourceOwnedType { path: "Core/encoding/xml.jet", name: "XMLReader" },
     CoreSourceOwnedType { path: "Core/game/raylib.jet", name: "RaylibSound" },
     CoreSourceOwnedType { path: "Core/http/http.jet", name: "Body" },
     CoreSourceOwnedType { path: "Core/http/http.jet", name: "Headers" },
