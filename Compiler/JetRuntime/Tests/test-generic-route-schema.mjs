@@ -4,7 +4,7 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } f
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
-import { generatedRecordPath, recordApplication, recordApplicationsIn, recordBindings, recordInstanceName, substituteRecordType } from "../../../Tools/agent/runtime-route-abi.mjs";
+import { generatedRecordPath, nativeProviderHandles, parseRuntimeExports, recordApplication, recordApplicationsIn, recordBindings, recordInstanceName, substituteRecordType } from "../../../Tools/agent/runtime-route-abi.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const scratch = process.env.JET_TEST_SCRATCH ?? join(process.env.HOME, ".cache/jet-dev/scratch");
@@ -33,6 +33,22 @@ assert.throws(() => recordApplication("Pair<Vec<f64>,bool>"), /Pair<Vec<f64>,boo
 assert.equal(generatedRecordPath("grades.curve"), "__jet_grades_dcurve");
 assert.equal(generatedRecordPath("a_b::c/d"), "__jet_a_ub_c_cc_sd");
 assert.deepEqual(recordApplicationsIn("fn value(x: Pair<f64,bool>) -> Option<Pair<f64,bool>>", "Pair"), ["Pair<f64,bool>", "Pair<f64,bool>"]);
+
+const pipeDefinitions = ["ProcessStdoutStream", "ProcessStderrStream"].flatMap((type) => [
+  `#Export(c) fn jet_rt_handle_clone_${type}(value: I64) -> I64 { value }`,
+  `#Export(c) fn jet_rt_handle_drop_${type}(value: I64) {}`,
+]).concat([
+  "#Export(c) fn jet_process_pipe_take_raw(fd: I64) -> I64 { fd }",
+  "#Export(c) fn jet_process_stream_line_bytes_raw(pipe: I64, data: I64, len: I64, error: I64) -> I64 { I64{1} }",
+]).join("\n");
+const pipeAbi = parseRuntimeExports(pipeDefinitions, "PipeFixture.jet");
+assert.deepEqual(nativeProviderHandles(new Map()), []);
+assert.equal(nativeProviderHandles(pipeAbi).length, 4);
+const incompletePipe = new Map(pipeAbi);
+incompletePipe.delete("jet_rt_handle_drop_ProcessStderrStream");
+assert.throws(() => nativeProviderHandles(incompletePipe), /native Pipe24 provider requires jet_rt_handle_drop_ProcessStderrStream/);
+const wrongPipe = parseRuntimeExports(pipeDefinitions.replace("len: I64", "len: F64"), "PipeFixture.jet");
+assert.throws(() => nativeProviderHandles(wrongPipe), /line_bytes_raw.*does not match C ABI/);
 
 try {
   for (const name of ["gen-c-abi-routes.mjs", "runtime-route-abi.mjs", "native-route-handles.mjs"]) {
@@ -96,6 +112,24 @@ pub fn jet_fixture_plain(value: JetFixture) -> JetFixture { value }
   const helper = (source) => [...source.matchAll(/    #\[no_mangle\]\n    pub extern "C" fn jet_rt_(?:handle|record)_\w*JetFixture\w*\([^]*?\n    \}/g)].map((match) => match[0]);
   assert.deepEqual(helper(rust), helper(baselineRust));
   assert.ok(helper(baselineRust).length > 0, "non-generic helper comparison must exercise real definitions");
+  // No source declaration or Rust carrier is needed for an opaque provider.
+  put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: F64) -> F64 { value }\n" + pipeDefinitions);
+  put("Compiler/JetRuntime/exports.list", ["jet_fixture_scalar", ...pipeAbi.keys()].join("\n") + "\n");
+  success(run());
+  success(run(true));
+  const pipeJet = readFileSync(join(fixture, "Compiler/JetBackend/Source/Lower/RuntimeRoutes.jet"), "utf8");
+  const pipeRust = readFileSync(join(fixture, "crates/jet-codegen/src/Prelude/Core/CAbiRoutes.rs"), "utf8");
+  for (const type of ["ProcessStdoutStream", "ProcessStderrStream"]) {
+    assert.ok(pipeJet.includes(`jet_name: "<corelib>/Core/process::Core/process/process.jet::${type}", runtime: "${type}", clone: true`));
+    assert.ok(pipeJet.includes(`jet_name: "${type}", runtime: "${type}", clone: true`));
+    assert.ok(!pipeRust.includes(type), "provider must not invent a Rust carrier or adapter");
+    assert.ok(!pipeJet.includes(`LowerRecordSchema{jet_name: "${type}"`));
+    assert.ok(!pipeJet.includes(`LowerNativeType{jet_name: "${type}"`));
+  }
+  const lookup = pipeJet.slice(pipeJet.indexOf("pub fn lower_runtime_handle("));
+  assert.ok(lookup.indexOf("loop handle in LOWER_RUNTIME_HANDLES") < lookup.indexOf("loop handle in LOWER_NATIVE_PROVIDER_HANDLES"), "seed lookup must never override an existing Rust row");
+  put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: F64) -> F64 { value }\n");
+  put("Compiler/JetRuntime/exports.list", "jet_fixture_scalar\n");
   // Source-owned generics have actual mangled declarations and private,
   // mangled fields, not a historical native carrier name or a C route.
   const sampleKey = "<corelib>/Core/fixture::Core/fixture/fixture.jet::Sample";

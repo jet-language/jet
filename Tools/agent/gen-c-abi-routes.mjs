@@ -47,7 +47,7 @@ import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { generatedRecordPath, recordApplication, recordApplicationsIn, recordBindings, recordInstanceName, substituteRecordType, runtimeExportSignatures, validateLoweringRuntimeAbi, validateRuntimeOwnership, validateRuntimeRoute } from "./runtime-route-abi.mjs";
+import { generatedRecordPath, nativeProviderHandles, recordApplication, recordApplicationsIn, recordBindings, recordInstanceName, substituteRecordType, runtimeExportSignatures, validateLoweringRuntimeAbi, validateRuntimeOwnership, validateRuntimeRoute } from "./runtime-route-abi.mjs";
 import { nativeHandleExports } from "./native-route-handles.mjs";
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const runtimePath = process.argv[2];
@@ -414,6 +414,7 @@ if ([...streamExports].some((name) => jetRuntimeExports.has(name))) {
 }
 validateRuntimeOwnership(jetRuntimeExports, jetRuntimeSignatures);
 validateLoweringRuntimeAbi(jetRuntimeSignatures);
+const nativeProviders = nativeProviderHandles(jetRuntimeSignatures);
 const fixedInts = new Set(["u8", "u16", "u32", "u64", "usize", "i8", "i16", "i32", "isize"]);
 
 // A handle type whose runtime declaration derives `Clone` also gets a clone
@@ -1544,8 +1545,17 @@ for (const [jetName, name] of [...jetNames].sort((a, b) => a[0].localeCompare(b[
 }
 jet.push("} }");
 jet.push("");
+jet.push("// Opaque native providers: physical ownership ABI only, no Rust schema.");
+jet.push("LOWER_NATIVE_PROVIDER_HANDLES :: prep { [LowerRuntimeHandle]{");
+for (const row of nativeProviders) jet.push(`    LowerRuntimeHandle{jet_name: "${row.jetName}", runtime: "${row.runtime}", clone: true, display: false, show: false, debug: false, eq: false},`);
+jet.push("} }");
+jet.push("");
 jet.push("pub fn lower_runtime_handle(name: String) -> LowerRuntimeHandle? {");
 jet.push("    loop handle in LOWER_RUNTIME_HANDLES {");
+jet.push("        if handle.jet_name == name -> return Val(~handle)");
+jet.push("    }");
+jet.push("    // Existing Rust rows win in seed mode; absent nominals may use a provider.");
+jet.push("    loop handle in LOWER_NATIVE_PROVIDER_HANDLES {");
 jet.push("        if handle.jet_name == name -> return Val(~handle)");
 jet.push("    }");
 jet.push("    None");
