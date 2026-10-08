@@ -3319,6 +3319,10 @@ pub fn apply_jobs_runtime(
     args: &[MirRuntimeValue],
     span: Span,
 ) -> Result<MirRuntimeValue, Diagnostic> {
+    if method == "__sleep_ms" {
+        jet_job_queue_sleep_ms(queue_int(queue_one(args, 0, method, span)?, "core.jobs", method, span)?);
+        return Ok(MirRuntimeValue::Unit);
+    }
     if method == "__publish_parts" {
         let text = |index| match queue_one(args, index, method, span)? {
             MirRuntimeValue::Str(value) => Ok(value),

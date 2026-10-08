@@ -2925,6 +2925,7 @@ fn core_fixed_sig_impl(
             ],
             Some(unit_ty()),
         )),
+        ("core.jobs", "__sleep_ms") => Some((vec![(read, Type::Int)], Some(unit_ty()))),
         ("core.data.loader", "snapshot_reusable") => Some((
             vec![
                 (read, Type::Named("DataSnapshotIdentity".to_string())),
