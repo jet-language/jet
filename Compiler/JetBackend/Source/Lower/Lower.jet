@@ -3627,7 +3627,7 @@ fn lower_helper_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIR
     if glue.helper == "task.body" -> return lower_helper_task_body(p, &m, glue)
     if glue.helper == "task.release" -> return lower_helper_task_release(p, &m, glue)
     if glue.helper == "task.debug" -> return lower_helper_task_debug(p, &m, glue)
-    if glue.helper == "closure.release" -> return lower_closure_release(p, &m, glue)
+    if glue.helper.starts_with("closure.release:") -> return lower_closure_release(p, &m, glue)
     if glue.helper == "iter.release" -> return lower_helper_iter_typed(p, &m, glue, false)
     if glue.helper == "iter.advance.typed" -> return lower_helper_iter_typed(p, &m, glue, true)
     if glue.helper == "iter.advance" -> return lower_helper_iter_advance(p, &m, glue)

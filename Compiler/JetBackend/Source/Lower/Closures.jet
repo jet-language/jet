@@ -16,8 +16,9 @@
 // box with its own size.
 //
 // A capture parameter that borrows (ReadBorrow or WriteBorrow, or Write
-// access) is by reference: the box holds the captured place's address.
-// Every other capture is by value: its bytes live in the box. Inside a body
+// access) is by reference: the box holds the captured place's address, or
+// points into its own cell for an owned Value operand. Every other capture
+// is by value: its bytes live in the box. Inside a body
 // every captured place is a memory cell (LowerSlot.cell): the box field for
 // a by-value capture, the referenced storage for a by-reference one. A
 // place the creating function captures by reference is a cell there too
@@ -34,6 +35,7 @@ LOWER_CLOSURE_HEADER :: prep { 24 }
 struct LowerClosureLayout {
     pub offsets: [Int]
     pub by_ref: [Bool]
+    pub owned_offsets: [Int]
     pub size: Int
 }
 
@@ -46,6 +48,7 @@ fn lower_capture_by_ref(param: MIRCaptureParam) -> Bool Never! {
 fn lower_closure_layout(p: MIRProgram, function: MIRFunction) -> LowerClosureLayout Never! {
     offsets := [Int]{}
     by_ref := [Bool]{}
+    owned_offsets := [Int]{}
     offset := LOWER_CLOSURE_HEADER
     loop param in function.capture_params {
         reference :: lower_capture_by_ref(param)
@@ -53,9 +56,28 @@ fn lower_closure_layout(p: MIRProgram, function: MIRFunction) -> LowerClosureLay
         offset = lower_align_up(offset, size.align)
         &offsets.push(offset)
         &by_ref.push(reference)
+        &owned_offsets.push(-1)
         offset += size.size
     }
-    LowerClosureLayout{offsets: offsets, by_ref: by_ref, size: lower_align_up(offset, 8)}
+    LowerClosureLayout{offsets: offsets, by_ref: by_ref, owned_offsets: owned_offsets, size: lower_align_up(offset, 8)}
+}
+
+// Value operands own their captured cell even when the body borrows it.
+// Keep the body's pointer-field ABI, appending storage only for those cells.
+// The release helper's shape selects the same storage and drop obligations.
+fn lower_closure_owned_layout(p: MIRProgram, function: MIRFunction, shape: String) -> LowerClosureLayout Never! {
+    layout := lower_closure_layout(p, function)
+    bytes :: shape.bytes()
+    offset := layout.size
+    loop (position, param) in function.capture_params {
+        if !layout.by_ref[position] || bytes[position] != (U8{49}) -> next
+        size :: lower_size(p, param.ty)
+        offset = lower_align_up(offset, size.align)
+        layout.owned_offsets[position] = offset
+        offset += size.size
+    }
+    layout.size = lower_align_up(offset, 8)
+    layout
 }
 
 // The position in `function.capture_params` of capture slot `slot`, or -1.
@@ -253,7 +275,9 @@ fn lower_closure(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunct
     if index < 0 -> return lower_fail(&m, &f, "closure over function {function.value}, which is not lowered (a generic instance's closure is not lowered at O0 yet)")
     source :: lower_row_source(p, m, index)
     if captures.len() != source.capture_params.len() -> return lower_fail(&m, &f, "closure passes {captures.len()} captures to {source.name}, which takes {source.capture_params.len()}")
-    layout :: lower_closure_layout(p, source)
+    shape := ""
+    loop capture in captures -> shape += if capture == .Value(_) -> "1" else -> "0"
+    layout :: lower_closure_owned_layout(p, source, shape)
     dst :: lower_result(p, c, &m, &f, instruction) ?? lower_pointer(&f)
     lower_alloc(&m, &f, dst, layout.size)
     lower_store_word(&f, dst, 0, 1)
@@ -262,7 +286,7 @@ fn lower_closure(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunct
     lower_emit(&f, LIRInst.FunctionAddress{dst: code, function: code_id})
     lower_emit(&f, LIRInst.Store{base: dst, offset: 8, value: code})
     release :: lower_pointer(&f)
-    lower_emit(&f, LIRInst.FunctionAddress{dst: release, function: lower_closure_helper_id(&m, "closure.release", index, source)})
+    lower_emit(&f, LIRInst.FunctionAddress{dst: release, function: lower_closure_helper_id(&m, "closure.release:{shape}", index, source)})
     lower_emit(&f, LIRInst.Store{base: dst, offset: 16, value: release})
     loop (position, capture) in captures {
         param :: source.capture_params[position]
@@ -273,7 +297,15 @@ fn lower_closure(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunct
                 lower_emit(&f, LIRInst.Store{base: dst, offset: offset, value: address})
                 next
             }
-            return lower_fail(&m, &f, "capture {param.name} borrows a value without a place, which is not lowered at O0 yet")
+            if capture == .Value(value) {
+                cell :: lower_address(&f, dst, layout.owned_offsets[position])
+                if !lower_is_absent(f, value) {
+                    lowered :: lower_use(&m, &f, value) ?? return
+                    lower_write_at(p, &f, cell, 0, lowered, param.ty)
+                }
+                lower_emit(&f, LIRInst.Store{base: dst, offset: offset, value: cell})
+                next
+            }
         }
         if capture == .Value(value) {
             if lower_is_absent(f, value) -> next
@@ -321,7 +353,7 @@ fn lower_indirect_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
 // ---------------------------------------------------------------------------
 // Generated functions.
 
-// A per-function closure helper ("closure.thunk" or "closure.release") for
+// A per-function closure helper (thunk or shape-specialized release) for
 // lowered function row `index`.
 fn lower_closure_helper_id(m: &LowerModule, helper: String, index: Int, source: MIRFunction) -> LIRFunctionID Never! {
     row_key :: lower_glue_row_key("h:{helper}", "{index}")
@@ -352,15 +384,18 @@ fn lower_closure_thunk(m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     lir_builder_finish(f.builder)
 }
 
-// The release helper of one closure: drops the by-value captures and frees
-// the box.
+// The release helper drops every owned capture cell, never a borrowed place,
+// and frees the exact capture-shape allocation.
 fn lower_closure_release(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     source :: lower_row_source(p, m, glue.function)
-    layout :: lower_closure_layout(p, source)
+    bytes :: glue.helper.bytes()
+    shape :: String.from_bytes(bytes.slice(16, bytes.len())) ?? panic("closure capture shape is not UTF-8")
+    layout :: lower_closure_owned_layout(p, source, shape)
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, None)
     boxed :: ~f.open_params[0]
     loop (position, param) in source.capture_params {
         if !layout.by_ref[position] -> lower_drop_stored(p, &m, &f, boxed, layout.offsets[position], param.ty)
+        else if layout.owned_offsets[position] >= 0 -> lower_drop_stored(p, &m, &f, boxed, layout.owned_offsets[position], param.ty)
     }
     size :: lower_const(&f, layout.size)
     align :: lower_const(&f, 8)
