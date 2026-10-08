@@ -263,8 +263,8 @@ fn lower_route_result_call(m: &LowerModule, f: &LowerFunction, symbol: String, a
 }
 
 // Int.to_radix is checked String, while the kernel's raw ABI returns
-// Result<Text, Text>. Match MIRRust/JetEmit's caller-owned fault adapter:
-// the selected text is the result on success, or a borrowed stop message.
+// Result<Text, Text>. Match MIRRust.rs:31336-31345's caller fault adapter:
+// retain the selected text on success, and report faults at the MIR location.
 fn lower_route_int_radix(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, route: LowerRoute, args: [LIRValueID]) Never! {
     dst :: lower_result(p, c, &m, &f, instruction)
     if f.failed -> return
@@ -282,8 +282,8 @@ fn lower_route_int_radix(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
     length :: lower_word(&f)
     lower_emit(&f, LIRInst.Load{dst: message, base: text, offset: 0})
     lower_emit(&f, LIRInst.Load{dst: length, base: text, offset: 8})
-    site :: lower_static_text(&m, &f, "<mir>")
-    lower_noreturn_call(&m, &f, "jet_rt_numeric_stop", [LIRValueID]{site[0], site[1], zero, message, length})
+    site :: lower_numeric_location(p, c, &m, &f, instruction, None)
+    lower_noreturn_call(&m, &f, "jet_rt_numeric_stop", [LIRValueID]{site[0], site[1], site[2], message, length})
     lower_start(&f, success, [LIRValueID]{})
     if dst == None -> lower_emit(&f, LIRInst.Drop{value: text})
 }
