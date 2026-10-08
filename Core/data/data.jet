@@ -2297,3 +2297,206 @@ fn data_query_sort_keyed<T>(keyed: [DataQueryKeyed<T>]) -> [T] Never! {
     }
     assert_eq(data_query_sort_keyed<Int>(keyed), [Int]{4, 2, 3, 1})
 }
+
+fn data_watch_accepts<T>(operations: [DataQueryOperation<T>], row: T) -> (accepted: Bool, key: String?) Never! {
+    sort_key := String?{None}
+    loop operation in operations {
+        if operation == {
+            .Filter(predicate) -> { if !predicate(row) -> return (accepted: false, key: None) }
+            .SortBy(key) -> { sort_key = Val(key(row)) }
+        }
+    }
+    (accepted: true, key: sort_key)
+}
+
+fn data_watch_insert_entry<T>(entries: &[DataWatchEntry<T>], entry: DataWatchEntry<T>) Never! {
+    position := 0
+    loop position < entries.len() {
+        existing :: entries[position]
+        earlier := entry.order < existing.order
+        if entry.key == .Val(left) && existing.key == .Val(right) {
+            earlier = left < right || (left == right && entry.order < existing.order)
+        }
+        if earlier -> break
+        position = position + 1
+    }
+    &entries.insert(position, entry)
+}
+
+fn data_watch_snapshot_entries<T>(rows: [DataTrackedEntry<T>], operations: [DataQueryOperation<T>]) -> [DataWatchEntry<T>] Never! {
+    entries := [DataWatchEntry<T>]{}
+    loop row in rows {
+        accepted :: data_watch_accepts<T>(operations, row.value)
+        if accepted.accepted -> data_watch_insert_entry<T>(&entries, DataWatchEntry<T>{order: row.order, key: accepted.key, value: row.value})
+    }
+    entries
+}
+
+fn data_watch_sort_limit<T>(reader: DataTrackedReader<T>, operations: [DataQueryOperation<T>]) DataError! {
+    loop operation in operations {
+        if operation == .SortBy(_) {
+            limit :: DataLimits.safe().max_sort_rows
+            if reader.retained_rows() > limit -> return Err(data_error(.Limit, "max_sort_rows {limit} exceeded", "data.query.watch"))
+            break
+        }
+    }
+    Ok(())
+}
+
+fn data_watch_apply_change<T>(entries: &[DataWatchEntry<T>], change: DataTrackedChange<T>, operations: [DataQueryOperation<T>]) Never! {
+    index := Int?{None}
+    loop (position, entry) in entries {
+        if entry.order == change.order {
+            index = Val(position)
+            break
+        }
+    }
+    if change.kind == {
+        .Insert(row) -> {
+            accepted :: data_watch_accepts<T>(operations, row)
+            if accepted.accepted -> data_watch_insert_entry<T>(&entries, DataWatchEntry<T>{order: change.order, key: accepted.key, value: row})
+        }
+        .Replace(_, after) -> {
+            if index == .Val(position) -> entries.remove(position).drop("replaced watch entry")
+            accepted :: data_watch_accepts<T>(operations, after)
+            if accepted.accepted -> data_watch_insert_entry<T>(&entries, DataWatchEntry<T>{order: change.order, key: accepted.key, value: after})
+        }
+        .Remove(_) -> {
+            if index == .Val(position) -> entries.remove(position).drop("removed watch entry")
+        }
+    }
+}
+
+fn data_watch_tracked_source<T>(reader: DataTrackedReader<T>, operations: [DataQueryOperation<T>]) -> DataWatchSource<T> Never! {
+    DataWatchSource<T>{
+        initial: () -> {
+            data_watch_sort_limit<T>(reader, operations) ?? return Err(err)
+            snapshot :: reader.entries()
+            Ok(DataWatchMaterialized<T>{entries: data_watch_snapshot_entries<T>(snapshot.entries, operations), revision: snapshot.revision, mode: "incremental", recomputed: false, changed: true, retained_rows: reader.retained_rows()})
+        },
+        refresh: (revision, prior) -> {
+            data_watch_sort_limit<T>(reader, operations) ?? return Err(err)
+            changes :: reader.changes(revision) ?? return Err(err)
+            entries := ~prior
+            loop change in changes -> data_watch_apply_change<T>(&entries, change, operations)
+            Ok(DataWatchMaterialized<T>{entries: entries, revision: reader.revision(), mode: "incremental", recomputed: false, changed: reader.revision() != revision, retained_rows: reader.retained_rows()})
+        },
+    }
+}
+
+fn data_query_maintained_source<T>(query: DataQueryState<T>) -> DataWatchSource<T>? Never! {
+    if query.watch_source == .Val(source) -> return Val(source)
+    if query.source == .Tracked(reader) -> return Val(data_watch_tracked_source<T>(reader, query.operations))
+    None
+}
+
+fn data_watch_apply_operation<T>(entries: [DataWatchEntry<T>], operation: DataQueryOperation<T>, retained_rows: Int) -> [DataWatchEntry<T>] DataError! {
+    values := ~entries
+    if operation == {
+        .Filter(predicate) -> {
+            filtered := [DataWatchEntry<T>]{}
+            loop entry in values { if predicate(entry.value) -> &filtered.push(entry) }
+            values = filtered
+        }
+        .SortBy(key) -> {
+            limit :: DataLimits.safe().max_sort_rows
+            if retained_rows > limit -> return Err(data_error(.Limit, "max_sort_rows {limit} exceeded", "data.query.watch"))
+            loop index in 0..<values.len() -> values[index].key = Val(key(values[index].value))
+            indices := [Int]{}
+            loop index in 0..<values.len() -> &indices.push(index)
+            &indices.sort_by((left: Int, right: Int) -> {
+                order :: data_watch_optional_key_order(values[left].key, values[right].key)
+                if order == Ordering.Equal -> left <=> right else -> order
+            })
+            sorted := [DataWatchEntry<T>]{}
+            loop index in indices -> &sorted.push(values[index])
+            values = sorted
+        }
+    }
+    Ok(values)
+}
+
+fn data_watch_optional_key_order(left: String?, right: String?) -> Ordering Never! {
+    if left == {
+        .None -> { if right == .None -> Ordering.Equal else -> Ordering.Less }
+        .Val(value) -> {
+            if right == .Val(other) -> value <=> other else -> Ordering.Greater
+        }
+    }
+}
+
+fn data_watch_operation_source<T>(source: DataWatchSource<T>, operation: DataQueryOperation<T>) -> DataWatchSource<T> Never! {
+    base :: shared [DataWatchEntry<T>]?{None}
+    DataWatchSource<T>{
+        initial: () -> {
+            materialized :: source.initial() ?? return Err(err)
+            entries :: data_watch_apply_operation<T>(materialized.entries, operation, materialized.retained_rows) ?? return Err(err)
+            base_guard := base.guard_edit()
+            base_guard.value = Val(materialized.entries)
+            Ok(DataWatchMaterialized<T>{entries: entries, revision: materialized.revision, mode: materialized.mode, recomputed: materialized.recomputed, changed: materialized.changed, retained_rows: materialized.retained_rows})
+        },
+        refresh: (revision, prior) -> {
+            previous :: base.capture().value() ?? return Err(data_error(.State, "derived watch was not initialized", "data.query.watch"))
+            materialized :: source.refresh(revision, previous) ?? return Err(err)
+            if !materialized.changed && materialized.revision == revision -> return Ok(DataWatchMaterialized<T>{entries: prior, revision: materialized.revision, mode: materialized.mode, recomputed: false, changed: false, retained_rows: materialized.retained_rows})
+            entries :: data_watch_apply_operation<T>(materialized.entries, operation, materialized.retained_rows) ?? return Err(err)
+            base_guard := base.guard_edit()
+            base_guard.value = Val(materialized.entries)
+            Ok(DataWatchMaterialized<T>{entries: entries, revision: materialized.revision, mode: materialized.mode, recomputed: materialized.recomputed, changed: materialized.changed, retained_rows: materialized.retained_rows})
+        },
+    }
+}
+
+fn data_watch_map_entries<T, U>(entries: [DataWatchEntry<T>], map: fn(T) -> U DataError!) -> [DataWatchEntry<U>] DataError! {
+    mapped := [DataWatchEntry<U>]{}
+    loop entry in entries {
+        value :: map(entry.value) ?? return Err(err)
+        &mapped.push(DataWatchEntry<U>{order: entry.order, key: None, value: value})
+    }
+    Ok(mapped)
+}
+
+fn data_watch_map_source<T, U>(source: DataWatchSource<T>, map: fn(T) -> U DataError!) -> DataWatchSource<U> Never! {
+    base :: shared [DataWatchEntry<T>]?{None}
+    DataWatchSource<U>{
+        initial: () -> {
+            materialized :: source.initial() ?? return Err(err)
+            entries :: data_watch_map_entries<T, U>(materialized.entries, map) ?? return Err(err)
+            base_guard := base.guard_edit()
+            base_guard.value = Val(materialized.entries)
+            Ok(DataWatchMaterialized<U>{entries: entries, revision: materialized.revision, mode: materialized.mode, recomputed: materialized.recomputed, changed: materialized.changed, retained_rows: materialized.retained_rows})
+        },
+        refresh: (revision, prior) -> {
+            previous :: base.capture().value() ?? return Err(data_error(.State, "mapped watch was not initialized", "data.query.watch"))
+            materialized :: source.refresh(revision, previous) ?? return Err(err)
+            if !materialized.changed && materialized.revision == revision -> return Ok(DataWatchMaterialized<U>{entries: prior, revision: materialized.revision, mode: materialized.mode, recomputed: false, changed: false, retained_rows: materialized.retained_rows})
+            entries :: data_watch_map_entries<T, U>(materialized.entries, map) ?? return Err(err)
+            base_guard := base.guard_edit()
+            base_guard.value = Val(materialized.entries)
+            Ok(DataWatchMaterialized<U>{entries: entries, revision: materialized.revision, mode: materialized.mode, recomputed: materialized.recomputed, changed: materialized.changed, retained_rows: materialized.retained_rows})
+        },
+    }
+}
+
+fn data_query_state_map<T, U>(query: DataQueryState<T>, map: fn(T) -> U DataError!) -> DataQueryState<U> Never! {
+    steps := ~query.steps
+    &steps.push("map")
+    mapped := data_query_state_reducer<U>(query.tracking, steps, () -> {
+        rows :: data_query_state_collect<T>(query) ?? return Err(err)
+        result := [U]{}
+        loop row in rows {
+            value :: map(row) ?? return Err(err)
+            &result.push(value)
+        }
+        Ok(result)
+    })
+    if data_query_maintained_source<T>(query) == .Val(source) -> mapped.watch_source = Val(data_watch_map_source<T, U>(source, map))
+    mapped
+}
+
+#Test("Watch optional sort keys use native None ordering") {
+    assert(data_watch_optional_key_order(None, Val("")) == Ordering.Less)
+    assert(data_watch_optional_key_order(Val(""), None) == Ordering.Greater)
+    assert(data_watch_optional_key_order(None, None) == Ordering.Equal)
+    assert(data_watch_optional_key_order(Val("same"), Val("same")) == Ordering.Equal)
+}
