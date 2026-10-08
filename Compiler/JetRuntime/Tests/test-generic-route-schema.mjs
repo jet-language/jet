@@ -322,6 +322,26 @@ pub fn jet_fixture_plain(value: JetFixture) -> JetFixture { value }
   assert.match(run().stderr, /bits_clear.*does not match C ABI/);
   put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: F64) -> F64 { value }\n");
   put("Compiler/JetRuntime/exports.list", "jet_fixture_scalar\n");
+  const weakDefinitions = [
+    "#Export(c) fn jet_rt_native_shared_downgrade(shared: I64) -> I64 { shared }",
+    "#Export(c) fn jet_rt_native_shared_weak_upgrade(weak: I64, out: I64) -> Bool { true }",
+    "#Export(c) fn jet_rt_native_shared_weak_drop(weak: I64) {}",
+  ].join("\n") + "\n";
+  const weakNames = [...weakDefinitions.matchAll(/fn (\w+)\(/g)].map((match) => match[1]);
+  put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: F64) -> F64 { value }\n" + weakDefinitions);
+  put("Compiler/JetRuntime/exports.list", ["jet_fixture_scalar", ...weakNames].join("\n") + "\n");
+  success(run());
+  success(run(true));
+  const weakJet = readFileSync(join(fixture, "Compiler/JetBackend/Source/Lower/RuntimeRoutes.jet"), "utf8");
+  const weakRust = readFileSync(join(fixture, "crates/jet-codegen/src/Prelude/Core/CAbiRoutes.rs"), "utf8");
+  for (const name of weakNames) assert.ok(!weakRust.includes(`fn ${name}(`), "native weak exports must never synthesize Rust provider bodies");
+  assert.ok(weakJet.includes('export: "jet_rt_native_shared_downgrade", native_lists: true, params: [LowerRouteCarrier]{LowerRouteCarrier.Word}, result: LowerRouteResult.Plain{carrier: LowerRouteCarrier.Word}'));
+  assert.ok(weakJet.includes('export: "jet_rt_native_shared_weak_upgrade", native_lists: true, params: [LowerRouteCarrier]{LowerRouteCarrier.Word, LowerRouteCarrier.Word}, result: LowerRouteResult.Plain{carrier: LowerRouteCarrier.Flag}'));
+  assert.ok(weakJet.includes('export: "jet_rt_native_shared_weak_drop", native_lists: true, params: [LowerRouteCarrier]{LowerRouteCarrier.Word}, result: LowerRouteResult.Plain{carrier: LowerRouteCarrier.Unit}'));
+  put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: F64) -> F64 { value }\n" + weakDefinitions.replace("out: I64", "out: F64"));
+  assert.match(run().stderr, /weak_upgrade.*does not match C ABI/);
+  put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: F64) -> F64 { value }\n");
+  put("Compiler/JetRuntime/exports.list", "jet_fixture_scalar\n");
   // Source-owned generics have actual mangled declarations and private,
   // mangled fields, not a historical native carrier name or a C route.
   const sampleKey = "<corelib>/Core/fixture::Core/fixture/fixture.jet::Sample";
