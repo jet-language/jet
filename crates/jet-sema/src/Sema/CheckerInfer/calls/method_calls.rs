@@ -1497,7 +1497,7 @@ impl<'a> Checker<'a> {
                         span,
                         owner_type_args,
                         type_args,
-                        args,, checked_callee_out);
+                        args, checked_callee_out);
                     }
                 }
             }
@@ -2031,7 +2031,7 @@ impl<'a> Checker<'a> {
                         span,
                         owner_type_args,
                         type_args,
-                        args,, checked_callee_out);
+                        args, checked_callee_out);
                     }
                     if ns == "core.encoding" && leaf == "EncodingLimits" && method == "safe" {
                         return self.check_static_method("EncodingLimits",
@@ -2039,7 +2039,7 @@ impl<'a> Checker<'a> {
                         span,
                         owner_type_args,
                         type_args,
-                        args,, checked_callee_out);
+                        args, checked_callee_out);
                     }
                     if ns == "core.encoding.cbor" && leaf == "CBOROptions" && method == "safe" {
                         return self.check_static_method("CBOROptions",
@@ -2047,7 +2047,7 @@ impl<'a> Checker<'a> {
                         span,
                         owner_type_args,
                         type_args,
-                        args,, checked_callee_out);
+                        args, checked_callee_out);
                     }
                     if ns == "core.encoding.xml"
                         && (leaf == "XMLLimits" || leaf == "XMLParseOptions")
@@ -2058,7 +2058,7 @@ impl<'a> Checker<'a> {
                         span,
                         owner_type_args,
                         type_args,
-                        args,, checked_callee_out);
+                        args, checked_callee_out);
                     }
                     if ns == "core.email" && leaf == "Limits" && method == "safe" {
                         return self.check_static_method("Limits",
@@ -2066,7 +2066,7 @@ impl<'a> Checker<'a> {
                         span,
                         owner_type_args,
                         type_args,
-                        args,, checked_callee_out);
+                        args, checked_callee_out);
                     }
                     if ns == "core.data" && leaf == "DataLimits" && method == "safe" {
                         return self.check_static_method("DataLimits",
@@ -2074,7 +2074,7 @@ impl<'a> Checker<'a> {
                         span,
                         owner_type_args,
                         type_args,
-                        args,, checked_callee_out);
+                        args, checked_callee_out);
                     }
                 }
             }
@@ -2160,7 +2160,7 @@ impl<'a> Checker<'a> {
                     span,
                     owner_type_args,
                     type_args,
-                    args,, checked_callee_out);
+                    args, checked_callee_out);
                     *resolved_ret_out = ret.clone();
                     return ret;
                 }
@@ -2175,7 +2175,7 @@ impl<'a> Checker<'a> {
                     span,
                     owner_type_args,
                     type_args,
-                    args,, checked_callee_out);
+                    args, checked_callee_out);
                     *resolved_ret_out = ret.clone();
                     return ret;
                 }
@@ -2662,7 +2662,7 @@ impl<'a> Checker<'a> {
                 span,
                 owner_type_args,
                 type_args,
-                args,, checked_callee_out);
+                args, checked_callee_out);
                 let ret = if type_name == crate::Syntax::CLOCK_TYPE && method == "system" {
                     ret.map(crate::Sema::Diagnostics::system_clock_type)
                 } else {
@@ -3395,7 +3395,7 @@ impl<'a> Checker<'a> {
                 span,
                 owner_type_args,
                 type_args,
-                args,, checked_callee_out);
+                args, checked_callee_out);
             }
         }
         // D-VALIDATE1: `Validate.over(s).check(...)` and `.finish()` are
