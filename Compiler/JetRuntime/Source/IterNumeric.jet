@@ -125,7 +125,7 @@ fn coll_f64_fixed(data: I64, length: I64, seed: Float) -> Float {
     a6 := Float{0.0}
     a7 := Float{0.0}
     at := I64{0}
-    loop length - at >= I64{8} {
+    loop length - at >= (I64{8}) {
         a0 += rt_f64_from_bits(trap_word(data + at * I64{8}))
         a1 += rt_f64_from_bits(trap_word(data + (at + I64{1}) * I64{8}))
         a2 += rt_f64_from_bits(trap_word(data + (at + I64{2}) * I64{8}))
@@ -167,16 +167,14 @@ fn coll_f64_fixed(data: I64, length: I64, seed: Float) -> Float {
         chunk += I64{1}
     }
     active := count
-    loop active > I64{1} {
+    loop active > (I64{1}) {
         read := I64{0}
         write := I64{0}
         loop read < active {
             if (read + I64{1} < active) {
                 value :: coll_f64_fixed(partials + read * I64{8}, I64{2}, Float{0.0})
                 trap_store(partials + write * I64{8}, rt_f64_bits(value))
-            } else {
-                trap_store(partials + write * I64{8}, trap_word(partials + read * I64{8}))
-            }
+            } else { trap_store(partials + write * I64{8}, trap_word(partials + read * I64{8})) }
             read += I64{2}
             write += I64{1}
         }
