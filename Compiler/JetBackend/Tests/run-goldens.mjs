@@ -19,8 +19,9 @@
 //               with $JET_RUNTIME_C_LIB: cc, -lpthread -ldl -lm) runs with the
 //               golden's stdin and is compared with Examples/features/expected/
 //               <stem>.out (exit 0; plus <stem>.stderr.out when present) or,
-//               for a <stem>.err.out golden, exit 70 or 1 and that stderr, as
-//               tests/golden.rs compares them.
+//               for a <stem>.err.out golden, that stderr, stdout from its .out
+//               (empty when absent), and the exact executed reference exit.
+//               Emit-only references cannot establish a failure exit oracle.
 //
 // Verdicts: pass, wrong (ran, output or exit differs), unsupported (lowering
 // or object issue, or a runtime symbol the C library does not export),
@@ -111,7 +112,7 @@ for (const entry of entries) {
   // non-zero exit (70 panic, 1 uncaught Err); `.stderr.out` pins the stderr of
   // a successful run beside its `.out`.
   const expect = existsSync(expectedErr)
-    ? { failure: true, stderr: readFileSync(expectedErr, "utf8") }
+    ? { failure: true, stdout: existsSync(expectedOut) ? readFileSync(expectedOut, "utf8") : "", stderr: readFileSync(expectedErr, "utf8") }
     : { failure: false, stdout: readFileSync(expectedOut, "utf8"), stderr: existsSync(expectedStderr) ? readFileSync(expectedStderr, "utf8") : null };
   cases.push({ entry, slug, expect, stdin: stdinTable.get(entry.stem) ?? null, verdict: null, detail: "" });
 }
@@ -556,13 +557,23 @@ for (const c of until >= 3 ? open() : []) {
   writeFileSync(join(dirs.run, `${c.slug}.stderr`), run.stderr ?? "");
   writeFileSync(join(dirs.run, `${c.slug}.status.json`), JSON.stringify({ status: run.status, signal: run.signal, error: run.error ? { code: run.error.code, message: run.error.message } : null }) + "\n");
   const { expect } = c;
-  const exitOk = expect.failure ? run.status === 70 || run.status === 1 : run.status === 0;
-  const stdoutOk = expect.failure || run.stdout === expect.stdout;
+  let expectedExit = expect.failure ? null : 0;
+  if (expect.failure) {
+    const referencePath = join(dirs.mir, `${c.slug}.ref`);
+    if (existsSync(referencePath)) {
+      const reference = JSON.parse(readFileSync(referencePath, "utf8"));
+      if (reference.mode === "run" && (reference.status === 70 || reference.status === 1)) expectedExit = reference.status;
+    }
+  }
+  const exitOk = expectedExit !== null && run.status === expectedExit;
+  const stdoutOk = run.stdout === expect.stdout;
   const stderrOk = expect.stderr === null || run.stderr === expect.stderr;
   if (exitOk && stdoutOk && stderrOk) c.verdict = "pass";
   else {
     c.verdict = "wrong";
-    c.detail = !exitOk ? `exit ${run.status ?? run.signal}${expect.failure ? " (expected 70 or 1)" : ""}: ${(run.stderr ?? "").split("\n")[0]}` : !stdoutOk ? "stdout differs" : "stderr differs";
+    c.detail = !exitOk
+      ? expectedExit === null ? "missing executed failure exit reference" : `exit ${run.status ?? run.signal} (expected ${expectedExit}): ${(run.stderr ?? "").split("\n")[0]}`
+      : !stdoutOk ? "stdout differs" : "stderr differs";
   }
   c.detail = `${c.leg}${c.detail ? `: ${c.detail}` : ""}`;
 }

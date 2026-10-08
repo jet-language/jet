@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // L2 exit witness after E1/E2: native panic/trap stems run against
-// the Jet-object pack. In addition to golden stderr bytes, pin the EXACT exit
-// code of each Rust reference, not the backend harness's loose 70-or-1 rule.
+// the Jet-object pack. Pin golden stdout/stderr bytes, both reference streams,
+// and the EXACT exit code of each executed Rust reference.
 // --plan only records the stem selection; it does not build or execute anything.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
@@ -48,8 +48,10 @@ if (mode !== "--plan") {
     const refPath = join(out, "mir", `${slug}.ref`);
     const statusPath = join(out, "run", `${slug}.status.json`);
     const stderrPath = join(out, "run", `${slug}.stderr`);
+    const stdoutPath = join(out, "run", `${slug}.stdout`);
+    const goldenStdoutPath = join(expected, `${stem}.out`);
     const goldenPath = join(expected, `${stem}.${existsSync(join(expected, `${stem}.err.out`)) ? "err" : "stderr"}.out`);
-    if (![refPath, statusPath, stderrPath].every(existsSync)) {
+    if (![refPath, statusPath, stdoutPath, stderrPath].every(existsSync)) {
       failures.push(`${stem}: missing reference/native result`);
       rows.push(`${stem}\tmissing`);
       continue;
@@ -57,13 +59,16 @@ if (mode !== "--plan") {
     const reference = JSON.parse(readFileSync(refPath, "utf8"));
     const native = JSON.parse(readFileSync(statusPath, "utf8"));
     const stderr = readFileSync(stderrPath);
+    const stdout = readFileSync(stdoutPath);
+    const stdoutBytesMatch = stdout.equals(existsSync(goldenStdoutPath) ? readFileSync(goldenStdoutPath) : Buffer.alloc(0));
+    const stdoutReferenceMatch = typeof reference.stdout === "string" && stdout.equals(Buffer.from(reference.stdout));
     const bytesMatch = stderr.equals(readFileSync(goldenPath));
     const referenceMatch = typeof reference.stderr === "string" && stderr.equals(Buffer.from(reference.stderr));
     const exitMatch = reference.mode === "run" && Number.isInteger(reference.status) &&
       native.status === reference.status && native.signal === null && native.error === null;
-    const ok = bytesMatch && referenceMatch && exitMatch;
-    rows.push(`${stem}\t${ok ? "pass" : "wrong"}\tref=${reference.status}\tnative=${native.status ?? native.signal}\tgolden-stderr=${bytesMatch}\treference-stderr=${referenceMatch}`);
-    if (!ok) failures.push(`${stem}: exact exit/stderr mismatch`);
+    const ok = bytesMatch && referenceMatch && stdoutBytesMatch && stdoutReferenceMatch && exitMatch;
+    rows.push(`${stem}\t${ok ? "pass" : "wrong"}\tref=${reference.status}\tnative=${native.status ?? native.signal}\tgolden-stdout=${stdoutBytesMatch}\treference-stdout=${stdoutReferenceMatch}\tgolden-stderr=${bytesMatch}\treference-stderr=${referenceMatch}`);
+    if (!ok) failures.push(`${stem}: exact exit/stdout/stderr mismatch`);
   }
   writeFileSync(join(out, "trap-results.tsv"), rows.join("\n") + "\n");
   for (const failure of failures) console.error(failure);
