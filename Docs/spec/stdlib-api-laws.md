@@ -504,3 +504,9 @@ startup columns cache immutable host `vars_os` separately. Both preserve
 platform encoded name/value bytes and let source `env_columns` pair them.
 The key comparison reuses Windows ordinal comparison and byte ordering on
 other hosts. Neither bridge writes the operating-system environment.
+
+### Realtime cancellation access
+
+`RealtimeStream.cancel(&self)` forwards its write-borrowed stream to
+`core.rt.__cancel(&self)`. The public method and its provider call both retain
+the explicit write-access marker; cancellation does not consume the stream.
