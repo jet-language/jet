@@ -87,7 +87,7 @@ fn lower_iterable_state_size(p: MIRProgram, iter_ty: MIRType) -> Int Never! {
 fn lower_iterable_next_problem(p: MIRProgram, m: LowerModule, next: MIRFunction, iter_ty: MIRType) -> String? {
     if next.generic_params.len() > 0 || next.capture_params.len() > 0 || next.params.len() != 1 -> return Val("Iterator.next {next.key} has no plain receiver-only signature")
     if lower_pipe_next_name(iter_ty) != "" {
-        if next.params[0].access != .Read -> return Val("process next helper {next.key} does not borrow its stream")
+        if next.params[0].access != .Read && next.params[0].access != .Move -> return Val("process next helper {next.key} has no by-value or borrowed stream argument")
         if next.return_type.kind == .Result(ok, _) {
             if ok.kind == .Option(inner) {
                 if inner.kind != .String -> return Val("process next helper {next.key} does not return Result<Option<String>, IOError>")
@@ -118,6 +118,14 @@ fn lower_iterable_pull(p: MIRProgram, m: &LowerModule, f: &LowerFunction, next: 
         receiver = lower_read_at(p, &f, cell, 0, next.params[0].ty) ?? {
             lower_fail(&m, &f, "process line source has no native stream carrier")
             return cell
+        }
+        // Read is a calling convention, not a lifetime proof. A checked owned
+        // helper parameter receives one retained reference; a borrow receives
+        // the held reference directly. Cursor release retains its own owner.
+        if lower_is_owned(next.params[0].ownership) {
+            retained :: lower_pointer(&f)
+            lower_clone_into(p, &m, &f, receiver, retained, next.params[0].ty)
+            receiver = retained
         }
     }
     item :: lower_pointer(&f)

@@ -214,6 +214,9 @@ mechanics; a returned `Result<Option<String>, IOError>` transfers its Option
 payload without cloning it, and read errors use the native panic route with
 the Core diagnostic's Display. Selection requires the authored Core source
 and its checked stream receiver identity, never a guessed MIR function ID.
+Each pull follows the helper's checked parameter ownership: an owned parameter
+receives one retained pipe reference; a borrow receives the held reference
+without retaining it. A read calling convention alone does not prove a borrow.
 Missing native stream clone/drop carriers are lowering errors, not seed
 `Rc<RefCell<BufReader>>` layout assumptions. Native execution of this boundary
 requires the runtime's vetted shared-pipe carrier and raw byte provider.
