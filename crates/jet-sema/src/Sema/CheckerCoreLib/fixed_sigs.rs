@@ -462,8 +462,6 @@ fn web_fixed_sig(
         ("core.web.browser", "__server_start") => Some((vec![(read, web_named("BrowserTestConfig"))],
             Some(web_result_error(web_named("BrowserTestServer"), "BrowserError")))),
         ("core.web.browser", "__server_stop") => Some((vec![(AccessConvention::Write, web_named("BrowserTestServer"))], None)),
-        ("core.devtools", "__publish_checked") => Some((vec![(moved, string.clone()), (moved, string.clone()),
-            (moved, string.clone()), (moved, string.clone()), (moved, t.clone())], None)),
         ("core.web", "__openapi_inputs") => Some((vec![(read, http_router.clone())],
             Some(result_ty(web_list(web_named("OpenApiRouteInput")), string.clone())))),
         ("core.web", "__openapi_render") => Some((vec![(moved, web_list(web_named("OpenApiRouteInput"))),
@@ -531,6 +529,9 @@ fn web_fixed_sig(
         ("core.web.table", "__row_key") => Some((vec![(read, table.clone()), (read, t.clone())], Some(string.clone()))),
         ("core.web.table", "__make_page") => Some((vec![(moved, web_list(t.clone())), (moved, web_list(string.clone())),
             (moved, int.clone()), (moved, int.clone()), (moved, int.clone()), (moved, int.clone())], Some(table_page.clone()))),
+
+        ("core.devtools", "__publish_payload") => Some((vec![(moved, string.clone()), (moved, string.clone()),
+            (moved, string.clone()), (moved, string.clone()), (moved, t.clone())], None)),
         ("core.data.sketch", "empty") => Some((vec![], Some(string.clone()))),
         ("core.data.sketch", "merge") => Some((
             vec![(read, string.clone()), (read, string.clone())],

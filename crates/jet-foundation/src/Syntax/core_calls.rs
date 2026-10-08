@@ -1584,7 +1584,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 618cb62ba41f6a3827e30593c6650c459e813d30882fce4af31b929270a01391
+// Source SHA-256: 11d4b1b6a4a0f4cc74a47e2cc2bc8cf4d7b6f9bb127380af518f51ddde4027f3
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -3265,7 +3265,6 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     sema_web_call("core.web.browser", "__write_report_bytes", "jet_browser_report_write_bytes_raw", &[true, true]),
     sema_web_call("core.web.browser", "__server_start", "jet_browser_test_server_start", &[true]),
     sema_web_call("core.web.browser", "__server_stop", "jet_browser_test_server_stop", &[true]),
-    CoreCallRecord::new("core.devtools", "__publish_checked", "jet_devtools_publish", false, &[false, false, false, false, false]).with_interpreter_route(CoreCallInterpreterRoute::TypedIntrinsic),
     sema_web_call("core.web", "__openapi_inputs", "jet_openapi_router_inputs", &[true]),
     sema_web_call("core.web", "__openapi_render", "jet_web_openapi_from_routes", &[false, false, false, false]),
     CoreCallRecord::new("core.web", "__contract_stop", "jet_openapi_contract_stop_raw", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::TypedIntrinsic),
@@ -3297,6 +3296,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     sema_web_call("core.web.table", "__rows", "jet_table_rows_raw", &[true]),
     sema_web_call("core.web.table", "__row_key", "jet_table_row_key_raw", &[true, true]),
     sema_web_call("core.web.table", "__make_page", "jet_table_make_page_raw", &[false, false, false, false, false, false]),
+    CoreCallRecord::new("core.devtools", "__publish_payload", "jet_devtools_publish_payload", false, &[false, false, false, false, false]).with_interpreter_route(CoreCallInterpreterRoute::TypedIntrinsic),
     sema_web_call("core.web.forms", "new", "jet_web_forms_new", &[false]),
     sema_web_call( "core.web.forms", "field", "jet_web_forms_field", &[true, false, false, false], ),
     sema_web_call("core.web.forms", "set", "jet_web_forms_set", &[true, false, false]),
