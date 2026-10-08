@@ -91,17 +91,11 @@ fn native_runtime_publication_execute(mode: String, request_path: String, result
     files.write_bytes(result_path, result)
 }
 
-fn native_runtime_pack_publisher() {
+fn native_runtime_pack_publisher() NativeRuntimePackError! {
     args :: process.args()
     if (args.len() != 3 || (args[0] != "prepare" && args[0] != "publish")) {
         eprint("internal runtime publisher requires prepare/publish, request and result paths\n")
         process.exit(EXIT_USAGE)
     }
-    if native_runtime_publication_execute(args[0], args[1], args[2]) == {
-        .Ok(_) -> {}
-        .Err(error) -> {
-            eprint("internal runtime publication refused: {error.message()}\n")
-            process.exit(EXIT_USER_ERROR)
-        }
-    }
+    native_runtime_publication_execute(args[0], args[1], args[2])
 }

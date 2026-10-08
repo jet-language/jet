@@ -9,15 +9,6 @@ pub enum NativeRuntimePackError {
     Store(ArtifactStoreError)
     IO(IOError)
     Invalid(String)
-
-    fn message(self) -> String Never! {
-        if self == {
-            .Encoding(error) -> error.reason
-            .Store(error) -> error.message()
-            .IO(error) -> "{error}"
-            .Invalid(reason) -> reason
-        }
-    }
 }
 
 impl encoding.EncodingError -> NativeRuntimePackError { NativeRuntimePackError.Encoding(self) }
