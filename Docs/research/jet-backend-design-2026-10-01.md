@@ -1836,3 +1836,15 @@ using the native runner's same-head host/reference protocol checks.
 `run-test-runtime.mjs OUT NATIVE_STATICLIB JET_OBJECT HOSTED_JET REFERENCE_JET`
 checks the object's audited undefined-symbol set, builds/runs that fixture,
 and runs the three-example native CLI parity checks with the fresh pack.
+
+The native Shared transaction log retains each participating cell and runs each
+edit callback once against a private working value. Nested commit transfers
+the child's stage to its parent; outer commit acquires all permits in physical
+owner order, prepares every clone and revision, then publishes all participants
+before releasing permits. The commit clone is observable and matches
+`MathTaskMem.rs`'s commit hook. Failure disposes prepared stages without
+publication. The process-wide outer gate covers begin through commit or
+rollback; generated scope/drop glue must close that authority on every exit.
+The actual-kernel clients are `JetRuntime/Tests/StmTests.jet` and
+`sync-fixture.c`, assembled separately by `run-channel-fixtures.mjs`
+(`assemble-stm`, `link-stm`, `run-stm`).
