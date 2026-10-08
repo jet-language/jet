@@ -514,7 +514,7 @@ fn member_namespaces_wrong_method_arguments_never_call_the_field() {
     let source = r#"
 struct Worker {
     step: fn() Int
-    fn step(self, amount: Int) Int Never! -> amount
+    fn step(self, amount: Int) -> Int Never! { amount }
 }
 fn run() {
     worker :: Worker{step: () -> 1}
@@ -536,7 +536,7 @@ fn member_namespaces_keep_generic_trait_default_and_operator_routes() {
 fn member_namespaces_private_method_never_calls_public_field() {
     let dir = common::unique_tmp("namespace_private_method");
     std::fs::create_dir_all(&dir).unwrap();
-    std::fs::write(dir.join("worker.jet"), "pub struct Worker { pub step: fn(Int) Int fn step(self, amount: Int) Int Never! -> amount }\n").unwrap();
+    std::fs::write(dir.join("worker.jet"), "pub struct Worker { pub step: fn(Int) Int fn step(self, amount: Int) -> Int Never! { amount } }\n").unwrap();
     let entry = dir.join("run.jet");
     std::fs::write(&entry, "use worker.[Worker]\nfn run() { worker :: Worker{step: n -> n}\nprint(worker.step(1)) }\n").unwrap();
     let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap()).unwrap();
@@ -566,7 +566,7 @@ fn member_namespaces_preserve_method_receiver_and_effect_checks() {
     let receiver = r#"
 struct Worker {
     step: fn(Int) Int
-    fn step(&self, amount: Int) Int Never! -> amount
+    fn step(&self, amount: Int) -> Int Never! { amount }
 }
 fn run() {
     worker := Worker{step: n -> n}
@@ -579,12 +579,12 @@ fn run() {
     let effects = r#"
 struct Worker {
     step: fn(Int) Int
-    fn step(self, amount: Int) Int -> {
+    fn step(self, amount: Int) -> Int {
         print(amount)
         amount
     }
 }
-fn pure(worker: Worker) Int -[]> { worker.step(1) }
+fn pure(worker: Worker) -[]> Int { worker.step(1) }
 fn run() {}
 "#;
     let errors = sema_errors("namespace_method_effect", effects);
