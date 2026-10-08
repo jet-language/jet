@@ -10075,48 +10075,56 @@ struct TCostCallable {
     root: bool,
 }
 
-/// The checked source function of every callable declaration, keyed by its
-/// module and declaration span, with whether its owner type is generic. The
-/// cost passes ask once per callable, so the items are walked once per pass
-/// instead of once per question (which made `jet check` quadratic).
+/// The checked source body of every executable declaration, keyed by its
+/// module and canonical declaration name, with whether its owner is generic.
+/// Generated derives share provider-template spans; those offsets are source
+/// diagnostics, not executable identities. Walk each module once per pass.
 struct CostFunctionIndex<'a> {
-    functions: std::collections::HashMap<(usize, crate::Diagnostics::Span), (&'a Func, bool)>,
+    functions: Vec<std::collections::HashMap<String, (&'a Func, bool)>>,
 }
 
 impl<'a> CostFunctionIndex<'a> {
     fn new(bundle: &'a ProgramBundle) -> Self {
-        let mut functions = std::collections::HashMap::new();
-        for (module, data) in bundle.modules.iter().enumerate() {
-            index_cost_functions(&data.items, module, &mut functions);
+        let mut functions = Vec::with_capacity(bundle.modules.len());
+        for module in &bundle.modules {
+            let mut declarations = std::collections::HashMap::new();
+            index_cost_functions(&module.items, None, &mut declarations);
+            functions.push(declarations);
         }
         Self { functions }
     }
 
-    fn get(&self, module: usize, span: crate::Diagnostics::Span) -> Option<(&'a Func, bool)> {
-        self.functions.get(&(module, span)).copied()
+    fn get(&self, module: usize, name: &str) -> Option<(&'a Func, bool)> {
+        self.functions.get(module)?.get(name).copied()
     }
 }
 
 fn index_cost_functions<'a>(
     items: &'a [Item],
-    module: usize,
-    functions: &mut std::collections::HashMap<(usize, crate::Diagnostics::Span), (&'a Func, bool)>,
+    prefix: Option<&str>,
+    functions: &mut std::collections::HashMap<String, (&'a Func, bool)>,
 ) {
-    // The first declaration at a span wins, as in a front-to-back search.
+    fn scoped_name(prefix: Option<&str>, name: &str) -> String {
+        prefix.map_or_else(
+            || name.to_string(),
+            |prefix| jet_foundation::Names::member_name(prefix, name),
+        )
+    }
     fn add<'a>(
-        functions: &mut std::collections::HashMap<(usize, crate::Diagnostics::Span), (&'a Func, bool)>,
-        module: usize,
+        functions: &mut std::collections::HashMap<String, (&'a Func, bool)>,
+        owner: &str,
         methods: impl IntoIterator<Item = &'a Func>,
         owner_is_generic: bool,
     ) {
         for function in methods {
-            functions
-                .entry((module, function.name_span))
-                .or_insert((function, owner_is_generic));
+            // Match Bundle::declare_method_names and NameLedger's winning
+            // declaration; never join two owners by their template offsets.
+            functions.insert(
+                format!("{owner}.{}", function.name),
+                (function, owner_is_generic),
+            );
         }
     }
-    // An `impl` extends a generic owner when this item list declares that
-    // owner with type parameters.
     let generic_owners = items
         .iter()
         .filter_map(|item| match item {
@@ -10131,42 +10139,105 @@ fn index_cost_functions<'a>(
         .collect::<std::collections::HashSet<_>>();
     for item in items {
         match item {
-            Item::Func(function) => add(functions, module, [function], false),
+            Item::Func(function) => {
+                functions.insert(scoped_name(prefix, &function.name), (function, false));
+            }
             Item::Struct(definition) => add(
                 functions,
-                module,
+                &scoped_name(prefix, &definition.name),
                 definition.methods.iter().chain(
-                    definition
-                        .trait_impls
-                        .iter()
-                        .flat_map(|implementation| implementation.methods.iter()),
+                    definition.trait_impls.iter().flat_map(|implementation| {
+                        implementation.methods.iter()
+                    }),
                 ),
                 !definition.type_params.is_empty(),
             ),
             Item::Enum(definition) => add(
                 functions,
-                module,
+                &scoped_name(prefix, &definition.name),
                 definition.methods.iter().chain(
-                    definition
-                        .trait_impls
-                        .iter()
-                        .flat_map(|implementation| implementation.methods.iter()),
+                    definition.trait_impls.iter().flat_map(|implementation| {
+                        implementation.methods.iter()
+                    }),
                 ),
                 !definition.type_params.is_empty(),
             ),
             Item::Impl(implementation) => add(
                 functions,
-                module,
+                &scoped_name(prefix, &implementation.type_name),
                 &implementation.methods,
                 generic_owners.contains(implementation.type_name.as_str()),
             ),
-            Item::CodeModule(code_module) => {
-                if let Some(body) = &code_module.body {
-                    index_cost_functions(body, module, functions);
+            Item::CodeModule(module) => {
+                if let Some(body) = &module.body {
+                    let nested = scoped_name(prefix, &module.name);
+                    index_cost_functions(body, Some(&nested), functions);
                 }
             }
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod cost_function_identity_tests {
+    use super::*;
+
+    #[test]
+    fn shared_derive_offsets_do_not_join_distinct_owner_bodies() {
+        let source = concat!(
+            "struct First { fn compare(self, other: First) -> Int Never! { 0 } }\n",
+            "struct Second { fn compare(self, other: Second) -> Int Never! { 1 } }\n",
+        );
+        let (tokens, diagnostics) = crate::Lexer::lex(source);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        let mut program = crate::Parser::parse(&tokens).expect("method bodies parse");
+        let shared_span = match &program.items[0] {
+            Item::Struct(owner) => owner.methods[0].name_span,
+            _ => panic!("expected First"),
+        };
+        match &mut program.items[1] {
+            Item::Struct(owner) => owner.methods[0].name_span = shared_span,
+            _ => panic!("expected Second"),
+        }
+        let mut indexed = std::collections::HashMap::new();
+        index_cost_functions(&program.items, None, &mut indexed);
+        for (position, name) in ["First.compare", "Second.compare"].into_iter().enumerate() {
+            let Item::Struct(owner) = &program.items[position] else {
+                panic!("expected nominal owner");
+            };
+            let (body, generic) = indexed.get(name).expect("canonical body");
+            assert!(std::ptr::eq(*body, &owner.methods[0]));
+            assert!(!generic);
+        }
+        assert_eq!(indexed.len(), 2);
+    }
+
+    #[test]
+    fn scoped_executable_names_and_declaration_replacement_match_the_ledger() {
+        let source = "fn first() {}\nfn second() {}\n";
+        let (tokens, diagnostics) = crate::Lexer::lex(source);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        let mut program = crate::Parser::parse(&tokens).expect("functions parse");
+        let Item::Func(first) = &program.items[0] else {
+            panic!("expected first function");
+        };
+        let shared_span = first.name_span;
+        let Item::Func(second) = &mut program.items[1] else {
+            panic!("expected second function");
+        };
+        second.name = "first".to_string();
+        second.name_span = shared_span;
+        let mut indexed = std::collections::HashMap::new();
+        index_cost_functions(&program.items, Some("nested"), &mut indexed);
+        let Item::Func(second) = &program.items[1] else {
+            panic!("expected winning declaration");
+        };
+        let name = jet_foundation::Names::member_name("nested", "first");
+        let (body, generic) = indexed.get(&name).expect("scoped body");
+        assert!(std::ptr::eq(*body, second));
+        assert!(!generic);
+        assert_eq!(indexed.len(), 1);
     }
 }
 
@@ -10369,7 +10440,7 @@ fn cost_callables(
         let function = if declaration.kind == "extern" {
             None
         } else {
-            functions.get(declaration.module, declaration.span)
+            functions.get(declaration.module, &declaration.name)
         };
         if declaration.kind != "extern" && function.is_none() {
             continue;
@@ -10681,7 +10752,7 @@ fn checked_core_source_call_edges(
     let mut edges = Vec::new();
 
     for (caller_index, callable) in callables.iter().enumerate() {
-        let Some((function, _)) = functions.get(callable.module, callable.declaration_span) else {
+        let Some((function, _)) = functions.get(callable.module, &callable.declaration_name) else {
             continue;
         };
         let Some(imports) = core_imports.get(callable.module) else {
@@ -11085,7 +11156,7 @@ fn reachable_core_source_callables(
         let ffi_callback = callable_semantic_identity(bundle, callable)
             .is_some_and(|identity| bundle.ffi_callback_fns.contains(&identity));
         let sampled_contract = functions
-            .get(callable.module, callable.declaration_span)
+            .get(callable.module, &callable.declaration_name)
             .is_some_and(|(function, _)| {
                 !function.pre.is_empty() && !function.params.is_empty()
             });
@@ -11343,7 +11414,7 @@ fn cost_error_conversion_gaps(
         if !is_reachable || callable.foreign {
             continue;
         }
-        let Some((function, _)) = functions.get(callable.module, callable.declaration_span) else {
+        let Some((function, _)) = functions.get(callable.module, &callable.declaration_name) else {
             continue;
         };
         collect_cost_typed_conversions(&function.body, &mut required);
