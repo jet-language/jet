@@ -1152,6 +1152,7 @@ fn jet_codegen_emit_poll(builder: &JetCodegenBuilder, program: JetCodegenProgram
     stop :: jet_codegen_new_block(&builder, program, span, "poll-stop")
     jet_codegen_terminate(&builder, program, MIRTerminator.Poll{kind: kind, resume: resume, stop: stop})
     builder.current = stop
+    jet_codegen_emit_test_stop_edges(&builder, program)
     _ := jet_codegen_terminate_with_owned_cleanup(&builder, program, MIRTerminator.Stopped, -1)
     builder.current = resume
 }
@@ -1167,6 +1168,42 @@ fn jet_codegen_terminate_program_stop(builder: &JetCodegenBuilder, program: JetC
     else -> jet_codegen_terminate(&builder, program, MIRTerminator.Unreachable{reason: reason})
 }
 
+// These are real MIR branches, not hidden facts-only successors. Only an
+// active native expectation has native_test_exit; non-test MIR is unchanged.
+// A caught stop runs the existing deeper-frame chains, then the expectation's
+// canonical exit runs its own defer/drop actions exactly once.
+fn jet_codegen_emit_test_stop_edges(builder: &JetCodegenBuilder, program: JetCodegenProgram) Never! {
+    index := builder.cleanup_frames.len()
+    loop index > 0 {
+        index -= 1
+        scope :: builder.cleanup_frames[index].owner ?? next
+        exit_value := String?{None}
+        loop row in builder.scopes {
+            if row.id != scope -> next
+            loop fact in row.facts {
+                if fact.key == "native_test_exit" -> exit_value = Val(fact.value)
+            }
+        }
+        text :: exit_value ?? next
+        exit_number :: Int.parse(text) ?? panic("native expectation exit fact is not a block ID")
+        exit_id :: U64.from_int(exit_number) ?? panic("native expectation exit fact exceeds a block ID")
+        exit :: MIRBlockID{value: exit_id}
+        masked :: builder.stop_cleanup_active
+        builder.stop_cleanup_active = true
+        span :: builder.current_span
+        scope_value :: jet_codegen_emit_value(&builder, program, span, Type.IntN{signed: false, bits: 64}, MIROperation.Constant{value: MIRConstant.Int{value: scope.value.to_int(), width: Val(MIRIntegerWidth{signed: false, bits: 64}), spelling: None}})
+        route :: jet_codegen_static_prelude_call(&builder, program, "core.testing", "catch_for_scope", "jet_rt_test_catch_for_scope", [Bool]{false}, None, TFailureCarrier.Infallible, false)
+        caught :: jet_codegen_emit_static_prelude_call(&builder, program, span, Type.Bool, route, [MIRValueID]{scope_value})
+        deeper := exit
+        if index + 1 < builder.cleanup_frames.len() {
+            deeper = jet_codegen_exit_chain_entry(&builder, program, builder.cleanup_frames.len() - 1, "test-catch|{scope.value}", MIRTerminator.Jump{target: exit}, None, index + 1)
+        }
+        otherwise :: jet_codegen_new_block(&builder, program, span, "test-catch.next")
+        jet_codegen_terminate(&builder, program, MIRTerminator.Branch{condition: caught, then_target: deeper, else_target: otherwise})
+        builder.current = otherwise
+        builder.stop_cleanup_active = masked
+    }
+}
 // The entry of a stop-point function, after its parameters are bound: a
 // compiler callable first enters one level of comptime depth, then the Check.
 fn jet_codegen_emit_entry_check(builder: &JetCodegenBuilder, program: JetCodegenProgram) Never! {
@@ -1904,6 +1941,14 @@ fn jet_codegen_leave_scope(builder: &JetCodegenBuilder, program: JetCodegenProgr
     _ := &builder.cleanup_frames.pop()
     loop builder.drop_live_places.len() > frame.drop_live_start -> _ := &builder.drop_live_places.pop()
     loop builder.bindings.len() > frame.binding_start -> _ := &builder.bindings.pop()
+    if program.stop_points && !program.comptime_budget {
+        loop row in builder.scopes {
+            if row.id == scope && row.kind == MIRScopeKind.ScopeMember && row.name != Val("skip") && row.name != Val("measure") {
+                jet_codegen_emit_poll(&builder, program, MIRPollKind.Propagate)
+                return
+            }
+        }
+    }
 }
 
 

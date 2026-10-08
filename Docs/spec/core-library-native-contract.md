@@ -70,8 +70,13 @@ source parsing alone is not a behavioral receipt.
 
 Native expectation probes consume only a pending panic with a recorded raw
 `E3001` or `R0801`–`R0803` stop in the innermost matching scope. A successful
-`jet_rt_test_catch_for_scope` clears the original scheduler stop and completes
-that expectation; a mismatch replaces it with `E3001` and sets unmet so no
+`jet_rt_test_catch_for_scope` completes that expectation but retains the original
+scheduler stop while deeper frames unwind. `jet_rt_test_catch_boundary` clears it
+at the canonical expectation exit, before that frame's own cleanup: the Rust
+reference `MIRRust.rs:14998–15061` catches the block closure, then dispatches this
+exit after `catch_unwind` returns. Thus a deeper cleanup panic still sees pending
+and aborts, while a panic in the expectation's own cleanup is a fresh stop.
+A mismatch replaces the original with `E3001` and sets unmet so no
 parent can catch the mismatch. Cancellation, deadlines, skips, unrecognized
 codes, and probes for another scope do not mutate the pending stop. Sentry
 records its raw fault detail before dropping it, never its rendered report.

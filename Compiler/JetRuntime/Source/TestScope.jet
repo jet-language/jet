@@ -225,13 +225,29 @@ fn test_scope_stopped_index(state: I64) -> I64 {
         at += I64{1}
     }
     if (word != I64{211261862725} && word != I64{211262386258} && word != I64{215557353554} && word != I64{219852320850}) -> return false
-    // Clear before matching: a mismatch must replace the original stop with
-    // E3001, rather than lose to scheduler first-stop-wins publication.
-    scheduler_control_discard_stop(control)
     saved :: jet_rt_poll_call_enter()
-    caught :: jet_rt_test_expect_fail_catch_scope(I64{0})
+    caught :: test_scope_catch(I64{0}, true)
     jet_rt_poll_call_leave(saved)
     caught
+}
+
+// The compiler enters the canonical expectation exit after deeper frames
+// unwind. Its own cleanup is outside the caught closure (MIRRust.rs:15056).
+#Export(c) fn jet_rt_test_catch_boundary(scope: I64) {
+    control :: scheduler_control_current()
+    if (control == I64{0} || scheduler_control_status(control) != I64{5}) -> return
+    state :: test_capture_state()
+    if (state == I64{0}) -> return
+    completed :: state + I64{56}
+    at := trap_word(completed)
+    loop at > (I64{0}) {
+        at -= I64{2}
+        row :: trap_word(completed + I64{16}) + at * I64{8}
+        if (trap_word(row) == scope) {
+            scheduler_control_discard_stop(control)
+            return
+        }
+    }
 }
 
 fn test_scope_quoted(builder: I64, text: I64) {
@@ -278,6 +294,10 @@ fn test_scope_fail(message: I64) {
 // Rust Core.rs:775-806. Remove caught+children, clear parent stops, retain
 // timeouts entered outside the caught expectation, then enqueue completion.
 #Export(c) fn jet_rt_test_expect_fail_catch_scope(output: I64) -> Bool {
+    test_scope_catch(output, false)
+}
+
+fn test_scope_catch(output: I64, native: Bool) -> Bool {
     state :: test_capture_state()
     if (state == I64{0}) -> return false
     index :: test_scope_stopped_index(state)
@@ -307,6 +327,8 @@ fn test_scope_fail(message: I64) {
     if (error != I64{0}) {
         test_text_drop(code)
         trap_store(state + I64{80}, I64{1})
+        // A mismatch replaces the original stop, not first-stop-wins rejection.
+        if native -> scheduler_control_discard_stop(scheduler_control_current())
         test_scope_fail(error)
         return false
     }

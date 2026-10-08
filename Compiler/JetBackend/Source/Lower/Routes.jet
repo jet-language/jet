@@ -126,7 +126,7 @@ fn lower_route_values(p: MIRProgram, m: &LowerModule, f: &LowerFunction, call: M
 // for the call and dropped after it.
 fn lower_route_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, args: [MIRValueID], what: String) Never! {
     row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "{what} names missing Prelude call {call.value}")
-    if lower_cleanup_control_call(p, c, &m, &f, instruction, row, args) -> return
+    if lower_native_control_call(p, c, &m, &f, instruction, row, args) -> return
     if lower_lazy_route(p, c, &m, &f, instruction, row, args) -> return
     name :: "{row.module_name}.{row.member}"
     route :: lower_runtime_route(lower_route_symbol(row)) ?? return lower_fail(&m, &f, "{what} {name} has no runtime C-ABI route ({mir_symbol_name(row.symbol)})")
@@ -185,22 +185,24 @@ fn lower_route_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
 
 // Compiler-owned native control calls use the runtime's raw word ABI, not a
 // Core value-carrier adapter (the same rail as Poll's session imports).
-fn lower_cleanup_control_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, row: MIRPreludeCall, args: [MIRValueID]) -> Bool Never! {
+fn lower_native_control_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, row: MIRPreludeCall, args: [MIRValueID]) -> Bool Never! {
     symbol :: lower_route_symbol(row)
-    if symbol != "jet_rt_cleanup_enter" && symbol != "jet_rt_cleanup_leave" -> return false
     entering :: symbol == "jet_rt_cleanup_enter"
+    leaving :: symbol == "jet_rt_cleanup_leave" || symbol == "jet_rt_test_catch_boundary"
+    catching :: symbol == "jet_rt_test_catch_for_scope"
+    if !entering && !leaving && !catching -> return false
     if args.len() != (if entering -> 0 else -> 1) {
-        lower_fail(&m, &f, "native cleanup control call has incorrect arity")
+        lower_fail(&m, &f, "native control call has incorrect arity")
         return true
     }
     values := [LIRValueID]{}
     if !entering {
-        saved :: lower_use(&m, &f, args[0]) ?? return true
-        &values.push(saved)
+        value :: lower_use(&m, &f, args[0]) ?? return true
+        &values.push(value)
     }
-    if entering {
-        saved :: lower_result(p, c, &m, &f, instruction) ?? return true
-        lower_call_runtime(&m, &f, symbol, values, Val(saved))
+    if entering || catching {
+        result :: lower_result(p, c, &m, &f, instruction) ?? return true
+        lower_call_runtime(&m, &f, symbol, values, Val(result))
     } else {
         lower_call_runtime(&m, &f, symbol, values, None)
         lower_alias_absent(&f, instruction)

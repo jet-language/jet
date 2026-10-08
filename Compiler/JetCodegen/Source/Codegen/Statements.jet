@@ -344,8 +344,13 @@ fn jet_codegen_lower_task_group(builder: &JetCodegenBuilder, program: JetCodegen
 }
 
 fn jet_codegen_lower_scope_member_body(builder: &JetCodegenBuilder, program: JetCodegenProgram, scope: MIRScopeID, body: [TStmt], span: Span, expect_fail: Bool) {
+    native_exit := MIRBlockID?{None}
+    if expect_fail && program.stop_points && !program.comptime_budget {
+        native_exit = Val(jet_codegen_new_block(&builder, program, span, "scope-member.exit"))
+        jet_codegen_set_scope_fact(&builder, program, scope, "native_test_exit", "{(native_exit ?? MIRBlockID{value: 0}).value}")
+    }
     jet_codegen_lower_block(&builder, program, body)
-    exit := jet_codegen_new_block(&builder, program, span, "scope-member.exit")
+    exit :: native_exit ?? jet_codegen_new_block(&builder, program, span, "scope-member.exit")
     join := jet_codegen_new_block(&builder, program, span, "scope-member.join")
     // Rust lower_scope_member_body: an `.expect_fail` body that ends in an
     // unconditional stop jumps to its exit after the stop. The stop never
@@ -358,6 +363,14 @@ fn jet_codegen_lower_scope_member_body(builder: &JetCodegenBuilder, program: Jet
     }
     if jet_codegen_current_is_open(builder, program) || (expect_fail && ends_in_stop) -> jet_codegen_terminate(&builder, program, MIRTerminator.Jump{target: exit})
     jet_codegen_switch_block(&builder, program, exit)
+    if native_exit != None {
+        masked :: builder.stop_cleanup_active
+        builder.stop_cleanup_active = true
+        scope_value :: jet_codegen_emit_value(&builder, program, span, Type.IntN{signed: false, bits: 64}, MIROperation.Constant{value: MIRConstant.Int{value: scope.value.to_int(), width: Val(MIRIntegerWidth{signed: false, bits: 64}), spelling: None}})
+        route :: jet_codegen_static_prelude_call(&builder, program, "core.testing", "catch_boundary", "jet_rt_test_catch_boundary", [Bool]{false}, None, TFailureCarrier.Infallible, false)
+        _ := jet_codegen_emit_static_prelude_call(&builder, program, span, Type.Named{name: "Unit"}, route, [MIRValueID]{scope_value})
+        builder.stop_cleanup_active = masked
+    }
     jet_codegen_leave_scope(&builder, program, scope)
     if jet_codegen_current_is_open(builder, program) -> jet_codegen_terminate(&builder, program, MIRTerminator.Jump{target: join})
     jet_codegen_switch_block(&builder, program, join)
