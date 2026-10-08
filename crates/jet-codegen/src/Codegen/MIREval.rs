@@ -30868,6 +30868,7 @@ fn int_value(value: MirEvalValue, span: Span) -> Result<i64, Diagnostic> {
 fn data_key(value: &MirEvalValue, span: Span) -> Result<MirEvalKey, Diagnostic> {
     match value {
         MirEvalValue::Int(value) => Ok(MirEvalKey::Int(*value)),
+        MirEvalValue::BigInt(value) => Ok(MirEvalKey::from_bigint(&mir_bigint(value, span)?)),
         MirEvalValue::String(value) => Ok(MirEvalKey::String(value.clone())),
         MirEvalValue::Bool(value) => Ok(MirEvalKey::Bool(*value)),
         MirEvalValue::Char(value) => Ok(MirEvalKey::Char(*value)),
@@ -32048,6 +32049,90 @@ fn mir_range_parts(range: &MirEvalValue, span: Span) -> Result<(i64, i64, bool),
 #[allow(dead_code)]
 mod mir_fixed_arithmetic {
     include!("../Prelude/Core/FixedArithmetic.rs");
+}
+
+#[cfg(test)]
+mod map_key_tests {
+    use super::*;
+
+    #[test]
+    fn runtime_data_keys_preserve_exact_integers_and_nested_fields() {
+        let span = Span::new(0, 0);
+        for decimal in [
+            "18446744073709551615",
+            "-9223372036854775809",
+            "340282366920938463463374607431768211457",
+            "-340282366920938463463374607431768211457",
+            "+00042",
+            "-0000",
+        ] {
+            let value = MirEvalValue::BigInt(decimal.to_string());
+            let expected = MirConstKey::from_bigint(&CtBigInt::from_str(decimal).unwrap());
+            assert_eq!(data_key(&value, span).unwrap(), expected);
+            assert_eq!(mir_const_key(value.clone(), span).unwrap(), expected);
+            assert_eq!(data_key(&mir_const_key_value(&expected), span).unwrap(), expected);
+            for type_name in ["Tuple", "KeyRecord"] {
+                let nested = MirEvalValue::Struct {
+                    type_name: type_name.to_string(),
+                    fields: vec![("key".to_string(), value.clone())],
+                };
+                assert_eq!(
+                    data_key(&nested, span).unwrap(),
+                    MirConstKey::Struct {
+                        type_name: type_name.to_string(),
+                        fields: vec![("key".to_string(), expected.clone())],
+                    },
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn runtime_map_keys_keep_numeric_order_and_lookup_identity() {
+        let span = Span::new(0, 0);
+        let mut entries = Vec::new();
+        for (decimal, label) in [
+            ("18446744073709551615", "large"),
+            ("-9223372036854775809", "negative"),
+            ("0", "zero"),
+        ] {
+            let value = MirEvalValue::BigInt(decimal.to_string());
+            insert_map_entry(
+                &mut entries,
+                data_key(&value, span).unwrap(),
+                MirEvalValue::String(label.to_string()),
+            );
+        }
+        assert_eq!(
+            entries.iter().map(|(_, value)| value.clone()).collect::<Vec<_>>(),
+            vec![
+                MirEvalValue::String("negative".to_string()),
+                MirEvalValue::String("zero".to_string()),
+                MirEvalValue::String("large".to_string()),
+            ],
+        );
+        for (key, _) in &entries {
+            assert_eq!(data_key(&mir_const_key_value(key), span).unwrap(), *key);
+        }
+        let mut map = MirEvalValue::Map(entries);
+        let ct_map = crate::Comptime::MirBridge::mir_to_ct_value(map.clone(), span).unwrap();
+        let ct_key = CtValue::BigInt(CtBigInt::from_str("18446744073709551615").unwrap());
+        assert_eq!(
+            crate::Comptime::Builtins::apply_method(&ct_map, "get", vec![ct_key.clone()], span).unwrap(),
+            CtValue::Present(Box::new(CtValue::Str("large".to_string()))),
+        );
+        assert_eq!(
+            crate::Comptime::Builtins::apply_method(&ct_map, "has_key", vec![ct_key], span).unwrap(),
+            CtValue::Bool(true),
+        );
+        let key = MirEvalValue::BigInt("+00018446744073709551615".to_string());
+        assert_eq!(
+            direct_mutating_collection(&mut map, "map_remove", vec![key], None, span).unwrap(),
+            Some(MirEvalValue::Present(Box::new(MirEvalValue::String("large".to_string())))),
+        );
+        let MirEvalValue::Map(entries) = map else { panic!("map carrier changed") };
+        assert_eq!(entries.len(), 2);
+    }
 }
 
 #[cfg(test)]
