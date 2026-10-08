@@ -1677,7 +1677,7 @@ function translateCoreCallConstructor(name, args, context) {
 }
 
 function translateCoreCallMethod(record, name, args, context) {
-  if (name === "without_direct_aot" || name === "with_native_int_result") {
+  if (name === "without_direct_aot" || name === "with_native_int_result" || name === "with_source_owned") {
     expectRustArgumentCount(name, args, 0, context);
     return "core_call_" + name + "(" + record + ")";
   }
@@ -1713,10 +1713,6 @@ function translateCoreCallMethod(record, name, args, context) {
   if (name === "with_ui_capabilities") {
     return "core_call_with_ui_capabilities(" + record + ", " +
       translateStringSlice(argument, context) + ")";
-  }
-  if (name === "with_source_owned") {
-    if (argument.trim()) throw new Error(context + ": with_source_owned takes no argument");
-    return "core_call_with_source_owned(" + record + ")";
   }
   if (name === "with_source_target") {
     return "core_call_with_source_target(" + record + ", " +
@@ -5843,6 +5839,15 @@ function hostileFixtures() {
       "source-owned constructor fixture");
     if (actual !== 'core_call_with_ui_capabilities(core_call_source_owned("core.ui.host", "shortcut", [Bool]{false, false}), [String]{"UI.Shortcuts"})') {
       throw new Error("source-owned constructor lost its signature or UI capability facts: " + actual);
+    }
+  }));
+  results.push(holds("source-owned builder preserves normalized source targets", function () {
+    const actual = translateCoreCallExpression(
+      'CoreCallRecord::new("core.net", "unix_connect", "jet_net_unix_connect", true, &[true]).with_max_arity(2).with_source_owned().with_source_target("__unix_connect_entry")',
+      "source-owned builder fixture");
+    const expected = 'core_call_with_source_target(core_call_with_source_owned(core_call_with_max_arity(core_call_new("core.net", "unix_connect", "jet_net_unix_connect", true, [Bool]{true}), 2)), "__unix_connect_entry")';
+    if (actual !== expected) {
+      throw new Error("source-owned builder lost its declaration facts or target: " + actual);
     }
   }));
 
