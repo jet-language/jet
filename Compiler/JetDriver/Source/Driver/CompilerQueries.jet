@@ -70,8 +70,11 @@
 // Counters and command cutover:
 // - Root hits/recomputes and body hits/recomputes are distinct cumulative
 //   observations. Increment a body hit only for an actual accepted replay;
-//   increment a body recompute only when its real checker executes, including
-//   bypassed bodies. No result-derived counts or synthetic cached claims.
+//   increment a body recompute once when the tracked initial logical body
+//   query accepts its final outcome, including uncached/bypassed outcomes.
+//   Provisional callback attempts do not publish or increment separately;
+//   global rechecks/probes are not initial body-cache hits/recomputes.
+//   No result-derived counts or synthetic cached claims.
 // - CmdTry takes stats after its baseline check_disk, installs each staged
 //   document, calls check_text, and reports saturating deltas of the actual
 //   item counters, exactly as Rust CmdTry313-330.
