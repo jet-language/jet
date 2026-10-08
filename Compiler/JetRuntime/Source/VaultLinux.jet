@@ -281,6 +281,14 @@ fn vault_linux_read_file(file: I64, out: I64, scratch: I64) -> I64 {
         vault_linux_close(cloned)
         return vault_error_new(I64{4}, I64{0}, I64{0})
     }
+    error :: vault_linux_read_to_end(cloned, out, scratch)
+    vault_linux_close(cloned)
+    error
+}
+// std::fs::read_to_string's opened fd has no duplicate or seek. This shared
+// EOF loop accepts regular files AND FIFOs/char devices/pipes. It borrows the
+// descriptor and one caller byte, retries EINTR and wipes partial error bytes.
+fn vault_linux_read_to_end(file: I64, out: I64, scratch: I64) -> I64 {
     bytes :: data_sequence_new(I64{8192}, RT_HOST_U8_STRIDE)
     loop {
         length :: rt_text_word(bytes + DATA_SEQUENCE_LENGTH)
@@ -288,7 +296,7 @@ fn vault_linux_read_file(file: I64, out: I64, scratch: I64) -> I64 {
         full :: length == capacity
         target :: if full -> scratch else -> rt_text_word(bytes + DATA_SEQUENCE_DATA) + length
         available :: if full -> I64{1} else -> capacity - length
-        count :: trap_syscall(I64{0}, cloned, target, available, I64{0}, I64{0}, I64{0})
+        count :: trap_syscall(I64{0}, file, target, available, I64{0}, I64{0}, I64{0})
         if (count > I64{0}) {
             if full {
                 slot :: data_sequence_reserve(bytes, RT_HOST_U8_STRIDE)
@@ -296,11 +304,11 @@ fn vault_linux_read_file(file: I64, out: I64, scratch: I64) -> I64 {
             }
             rt_text_store(bytes + DATA_SEQUENCE_LENGTH, length + count)
         } else if (count == I64{0}) {
-            vault_linux_close(cloned)
             rt_text_store(out, bytes)
             return I64{0}
         } else if (count != I64{-4}) {
-            vault_linux_close(cloned)
+            thread_zero(rt_text_word(bytes + DATA_SEQUENCE_DATA), rt_text_word(bytes + DATA_SEQUENCE_CAPACITY))
+            rt_text_put(scratch, I64{0})
             data_sequence_drop(bytes, DATA_TREE_BYTE_LIST)
             return vault_error_new(I64{4}, I64{0}, I64{0})
         }
@@ -452,11 +460,14 @@ fn vault_identity_path(root: I64) -> I64 {
 fn vault_identity_read_at_root(root: I64, out: I64) -> I64 {
     path :: vault_identity_path(root)
     if (path == I64{0}) -> return vault_error_new(I64{4}, I64{0}, I64{0})
-    file :: trap_syscall(I64{257}, I64{-100}, rt_text_data(path), VAULT_O_CLOEXEC, I64{0}, I64{0}, I64{0})
+    file := I64{-4}
+    loop file == (I64{-4}) {
+        file = trap_syscall(I64{257}, I64{-100}, rt_text_data(path), VAULT_O_CLOEXEC, I64{0}, I64{0}, I64{0})
+    }
     jet_rt_string_drop(path)
     if (file < I64{0}) -> return vault_error_new(I64{4}, I64{0}, I64{0})
     scratch :: jet_rt_alloc(I64{8}, I64{8})
-    error :: vault_linux_read_file(file, out, scratch)
+    error :: vault_linux_read_to_end(file, out, scratch)
     vault_linux_close(file)
     jet_rt_free(scratch, I64{8}, I64{8})
     error

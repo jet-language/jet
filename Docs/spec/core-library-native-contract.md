@@ -192,6 +192,13 @@ nonempty JET_KEYS_DIR, then HOME (including empty), USERPROFILE, then ".".
 Only component-wise CurDir roots take this environment route. Other roots
 append keys/secrets.identity directly, including the relative empty-root case.
 Identity opens deliberately follow symlinks; vault-directory opens do not.
+Plain identity open retries EINTR, then reads its descriptor to EOF without
+duplication or rewind, preserving FIFO/pipe/character-device behavior. The held
+file reader reuses this same EINTR-aware EOF loop after its required duplicate
+and seek. Failed reads wipe the entire partial allocation before release.
+Supplemental transport fixtures supply actual 8192/8193-byte pipes, /dev/null,
+a FIFO identity after non-SA_RESTART signals, and observe the real error-buffer
+free for full-capacity zeroization; execution remains owned by composition.
 Unrecovered reads stay explicit, allowing the recovered caller to perform its
 lock-aware recovery first. Supplemental transport fixtures carry independent
 starting/recipient hash vectors and exercise trim/case/duplicate/UTF-8 policy,

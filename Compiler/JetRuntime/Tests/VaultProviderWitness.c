@@ -8,6 +8,11 @@
 #include <stdlib.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <signal.h>
+#include <sys/wait.h>
+#include <time.h>
 typedef struct { const unsigned char *data; int64_t length, capacity; } Text;
 typedef struct { int64_t length, capacity; Text **data; } TextList;
 extern void jet_rt_alloc_init(void);
@@ -36,6 +41,8 @@ extern void jet_rt_vault_linux_read_fixture(const Text *, const Text *, const Te
 extern void jet_rt_vault_identity_path_fixture(const Text *, _Bool, const Text *);
 extern void jet_rt_vault_recipients_fixture(const Text *, int64_t, int64_t, const void *, const Text *);
 extern void jet_rt_vault_plaintext_fixture(const ByteList *, int64_t, int64_t, int64_t, const void *);
+extern void jet_rt_vault_linux_stream_fixture(int64_t, const Text *);
+extern void jet_rt_vault_identity_stream_fixture(const Text *, const Text *);
 extern void imported_origin_round_trips_and_invalid_combinations_reject(const Text *, const Text *);
 extern void jet_rt_vault_crypto_fixture(const ByteList *);
 extern void jet_rt_vault_crypto_unavailable_fixture(int64_t (*)(void *, void *, int64_t));
@@ -48,7 +55,13 @@ static int64_t unavailable_entropy(void *context, void *out, int64_t count) {
 }
 static struct { void *data; int64_t capacity; unsigned frees; } observed[2];
 static size_t observed_count;
+static unsigned stream_error_frees;
+static int observe_stream_error;
 void __wrap_jet_rt_free(void *data, int64_t size, int64_t align) {
+    if (observe_stream_error && size == 8192) {
+        assert(align == 8 && ++stream_error_frees == 1);
+        for (int64_t byte = 0; byte < size; ++byte) assert(((const unsigned char *)data)[byte] == 0);
+    }
     for (size_t i = 0; i < observed_count; ++i) if (data == observed[i].data) {
         assert(size == observed[i].capacity && align == 8 && ++observed[i].frees == 1);
         for (int64_t byte = 0; byte < size; ++byte) assert(((const unsigned char *)data)[byte] == 0);
@@ -139,6 +152,84 @@ static void linux_dir_fixture(void) {
     assert(rename(child, actual) == 0 && symlink(actual, child) == 0);
     jet_rt_vault_linux_dir_fixture(&path, 7);
     assert(unlink(child) == 0 && rmdir(actual) == 0 && rmdir(root) == 0);
+}
+static void input_write_all(int fd, const unsigned char *data, size_t length) {
+    size_t at = 0;
+    while (at < length) {
+        ssize_t written = write(fd, data + at, length - at);
+        if (written < 0 && errno == EINTR) continue;
+        assert(written > 0);
+        at += (size_t)written;
+    }
+}
+static volatile sig_atomic_t identity_interrupts;
+static void identity_interrupt(int signal_number) {
+    (void)signal_number;
+    ++identity_interrupts;
+}
+static void wait_input_writer(pid_t child) {
+    int status;
+    pid_t waited;
+    do { waited = waitpid(child, &status, 0); } while (waited < 0 && errno == EINTR);
+    assert(waited == child && WIFEXITED(status) && WEXITSTATUS(status) == 0);
+}
+static void stream_read_fixtures(void) {
+    unsigned char raw[8193];
+    for (size_t i = 0; i < sizeof(raw); ++i) raw[i] = (unsigned char)(i % 256);
+    for (size_t length = 8192; length <= sizeof(raw); ++length) {
+        int descriptors[2];
+        assert(pipe(descriptors) == 0);
+        pid_t child = fork();
+        assert(child >= 0);
+        if (child == 0) {
+            assert(close(descriptors[0]) == 0);
+            input_write_all(descriptors[1], raw, length);
+            assert(close(descriptors[1]) == 0);
+            _exit(0);
+        }
+        assert(close(descriptors[1]) == 0);
+        Text expected = {raw, (int64_t)length, 0};
+        jet_rt_vault_linux_stream_fixture(descriptors[0], &expected);
+        assert(close(descriptors[0]) == 0);
+        wait_input_writer(child);
+    }
+    int null_file = open("/dev/null", O_RDONLY);
+    assert(null_file >= 0);
+    Text empty = text("");
+    jet_rt_vault_linux_stream_fixture(null_file, &empty);
+    assert(close(null_file) == 0);
+    observe_stream_error = 1;
+    jet_rt_vault_linux_stream_fixture(-1, NULL);
+    observe_stream_error = 0;
+    assert(stream_error_frees == 1);
+
+    char root[] = "/tmp/jet-vault-identity-XXXXXX", keys[128], identity[128];
+    assert(mkdtemp(root) != NULL);
+    assert(snprintf(keys, sizeof(keys), "%s/keys", root) > 0);
+    assert(snprintf(identity, sizeof(identity), "%s/keys/secrets.identity", root) > 0);
+    assert(mkdir(keys, 0700) == 0 && mkfifo(identity, 0600) == 0);
+    struct sigaction action = {0}, previous;
+    action.sa_handler = identity_interrupt;
+    assert(sigemptyset(&action.sa_mask) == 0 && sigaction(SIGUSR1, &action, &previous) == 0);
+    Text expected = text("AGE-SECRET-KEY-1GQ9778VQXMMJVE8SK7J6VT8UJ4HDQAJUVSFCWCM02D8GEWQ72PVQ2Y5J33");
+    pid_t parent = getpid(), child = fork();
+    assert(child >= 0);
+    if (child == 0) {
+        const struct timespec pause = {0, 50000000};
+        for (unsigned i = 0; i < 4; ++i) {
+            assert(nanosleep(&pause, NULL) == 0 && kill(parent, SIGUSR1) == 0);
+        }
+        int writer = open(identity, O_WRONLY | O_NONBLOCK);
+        assert(writer >= 0);
+        input_write_all(writer, expected.data, (size_t)expected.length);
+        assert(close(writer) == 0);
+        _exit(0);
+    }
+    Text path = text(root);
+    jet_rt_vault_identity_stream_fixture(&path, &expected);
+    wait_input_writer(child);
+    assert(identity_interrupts > 0 && sigaction(SIGUSR1, &previous, NULL) == 0);
+    assert(unlink(identity) == 0 && rmdir(keys) == 0 && rmdir(root) == 0);
 }
 static void fixture_hash(unsigned char out[32], const char *hex) {
     assert(strlen(hex) == 64);
@@ -275,6 +366,7 @@ int main(void) {
     crypto_plain.length = crypto_plain.capacity = 65537;
     jet_rt_vault_crypto_fixture(&crypto_plain);
     canonical_read_fixtures();
+    stream_read_fixtures();
     puts("vault witness OK (13 errors, legacy+JVLT2 codec, imported origin/default entropy, native Secret redaction/wipe, long-origin hash, duplicate priority)");
     jet_rt_thread_detach();
     return 0;

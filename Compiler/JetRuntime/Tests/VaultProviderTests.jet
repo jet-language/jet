@@ -659,3 +659,34 @@ fn jet_rt_vault_plaintext_fixture(input: I64, kind: I64, count: I64, expected_er
     }
     jet_rt_free(scratch, I64{48}, I64{8})
 }
+
+// The native helper borrows actual pipe/device descriptors; no seek model.
+fn jet_rt_vault_linux_stream_fixture(file: I64, expected: I64) {
+    scratch :: jet_rt_alloc(I64{16}, I64{8})
+    rt_text_store(scratch, I64{91})
+    error :: vault_linux_read_to_end(file, scratch, scratch + I64{8})
+    if (expected == I64{0}) {
+        vault_fixture_check(error != I64{0} && rt_text_word(error) == I64{4})
+        vault_fixture_check(rt_text_word(scratch) == I64{91})
+        vault_error_drop(error)
+    } else {
+        vault_fixture_check(error == I64{0})
+        bytes :: rt_text_word(scratch)
+        vault_fixture_check(rt_text_word(bytes + DATA_SEQUENCE_LENGTH) == rt_text_len(expected))
+        vault_fixture_check(rt_text_equal_bytes(rt_text_word(bytes + DATA_SEQUENCE_DATA), rt_text_data(expected), rt_text_len(expected)))
+        thread_zero(rt_text_word(bytes + DATA_SEQUENCE_DATA), rt_text_word(bytes + DATA_SEQUENCE_CAPACITY))
+        data_sequence_drop(bytes, DATA_TREE_BYTE_LIST)
+    }
+    jet_rt_free(scratch, I64{16}, I64{8})
+}
+fn jet_rt_vault_identity_stream_fixture(root: I64, expected: I64) {
+    scratch :: jet_rt_alloc(I64{8}, I64{8})
+    error :: vault_identity_read_at_root(root, scratch)
+    vault_fixture_check(error == I64{0})
+    bytes :: rt_text_word(scratch)
+    vault_fixture_check(rt_text_word(bytes + DATA_SEQUENCE_LENGTH) == rt_text_len(expected))
+    vault_fixture_check(rt_text_equal_bytes(rt_text_word(bytes + DATA_SEQUENCE_DATA), rt_text_data(expected), rt_text_len(expected)))
+    thread_zero(rt_text_word(bytes + DATA_SEQUENCE_DATA), rt_text_word(bytes + DATA_SEQUENCE_CAPACITY))
+    data_sequence_drop(bytes, DATA_TREE_BYTE_LIST)
+    jet_rt_free(scratch, I64{8}, I64{8})
+}
