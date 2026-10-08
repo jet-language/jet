@@ -132,6 +132,14 @@ pub struct LIRSignature {
     pub params: [LIRLayout]
     pub result: LIRLayout?
 }
+fn core_shared_abi_class(class: LIRABIClass) -> String Never! {
+    if class == {
+        .Integer -> "Integer"
+        .Pointer -> "Pointer"
+        .Float -> "Float"
+        .Memory -> "Memory"
+    }
+}
 
 // `values[i].id.value == i`; `blocks[0]` is the entry block.
 pub struct LIRFunction {

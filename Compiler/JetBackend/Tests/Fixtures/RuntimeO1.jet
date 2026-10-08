@@ -32,6 +32,10 @@ fn fx_runtime_o1_check() -> Bool Never! {
     globals :: [X64RuntimeExport]{X64RuntimeExport{function: id, symbol: export.symbol}}
     optimized :: lir_optimize_module(lowered.lir, 1)
     if optimized.functions[id.value].id != id -> return false
+    if library.export_abis.len() != 1 -> return false
+    abi :: library.export_abis[0]
+    signature :: optimized.signatures[optimized.functions[id.value].signature.value]
+    if abi.symbol != export.symbol || abi.parameters != signature.params || abi.result != signature.result -> return false
     expected :: x64_runtime_object(optimized, globals)
     before :: x64_runtime_object(lowered.lir, globals)
     if expected.errors.len() != 0 || before.errors.len() != 0 -> return false

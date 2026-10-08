@@ -12,7 +12,7 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { exportRows, sealObject, sealShared } from './runtime-shared-seal.mjs';
+import { exactExportABI, exportRows, sealObject, sealShared } from './runtime-shared-seal.mjs';
 import { embeddedAdmission, installRelative } from './runtime-admission.mjs';
 
 const [inputPath, output, ...extra] = process.argv.slice(2);
@@ -113,9 +113,10 @@ step('e2-byte-identity', () => {
 });
 const object = join(out, 'runtime/jet_runtime_jet.o');
 step('runtime-lower', () => lower(config.source.root, config.compiler.path, join(out, 'runtime'), 'runtime.log'));
-let audit;
+let audit, exportABI;
 step('object-seal', () => {
   audit = sealObject(object, rows);
+  exportABI = exactExportABI(JSON.parse(readFileSync(join(out, 'runtime/jet_runtime_jet.abi.json'), 'utf8')), expectedNames);
   const allowed = new Set(source(config.source.root, `${runtime}/imports.list`).split('\n').map(line => line.trim().split(/\s+/)[0]).filter(name => name && !name.startsWith('#')));
   const unlisted = audit.imports.filter(name => !allowed.has(name));
   if (unlisted.length) throw Error(`unlisted object imports: ${unlisted.join(', ')}`);
@@ -147,7 +148,7 @@ const receipt = {
   e2SHA: config.e2.sha, layers: config.layers, optimization: 'O0',
   library: 'jet_runtime.so', libraryInstallRelative, librarySHA256: fileHash(candidate), objectSHA256: fileHash(object),
   compilerSHA256: config.compiler.sha256, e2CompilerSHA256: config.e2.compilerSHA256, e2ObjectSHA256: config.e2.objectSHA256,
-  exportManifestSHA256: hash(manifest), runtimeLoweringSHA256: fileHash(join(config.source.root, loweringPath)), e2Exports, sourceFiles, ...seal,
+  exportManifestSHA256: hash(manifest), runtimeLoweringSHA256: fileHash(join(config.source.root, loweringPath)), e2Exports, sourceFiles, exportABI, ...seal,
 };
 const receiptBytes = JSON.stringify(receipt, null, 2) + '\n';
 const embedded = embeddedAdmission(Buffer.from(receiptBytes), receipt.librarySHA256, libraryInstallRelative);

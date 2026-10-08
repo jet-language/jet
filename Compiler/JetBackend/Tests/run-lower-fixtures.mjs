@@ -119,6 +119,7 @@ const parts = [
     ].map((head) => item("Compiler/JetFoundation/Source/Target/Layout.jet", head)),
     body("Compiler/JetFoundation/Source/MIR/MIR.jet"),
     body("Compiler/JetFoundation/Source/Text/RustDebug.jet"),
+    body("Compiler/JetFoundation/Source/Encoding/Json.jet"),
   ]),
   body("Compiler/JetBackend/Source/LIR/LIR.jet"),
   body("Compiler/JetBackend/Source/LIR/Lint.jet"),

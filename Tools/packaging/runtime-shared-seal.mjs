@@ -14,6 +14,27 @@ export function exportRows(text) {
   if (!rows.length || new Set(rows.map(row => row.name)).size !== rows.length) throw Error('empty or duplicate runtime exports');
   return rows;
 }
+// The library hook writes these rows from the final callable's LIRSignature.
+// Require the exact sealed object inventory; never reconstruct ABI from names.
+export function exactExportABI(rows, names) {
+  if (!Array.isArray(rows) || rows.length !== names.length) throw Error('runtime export ABI inventory mismatch');
+  const expected = [...names].sort();
+  const layout = value => {
+    if (!value || Object.keys(value).sort().join(',') !== 'align,class,size'
+      || !Number.isSafeInteger(value.size) || value.size <= 0
+      || !Number.isSafeInteger(value.align) || value.align <= 0
+      || (BigInt(value.align) & (BigInt(value.align) - 1n)) !== 0n
+      || !['Integer', 'Pointer', 'Float', 'Memory'].includes(value.class)) throw Error('invalid runtime export ABI layout');
+  };
+  rows.forEach((row, index) => {
+    if (!row || Object.keys(row).sort().join(',') !== 'parameters,result,symbol'
+      || row.symbol !== expected[index] || !Array.isArray(row.parameters)) throw Error('runtime export ABI inventory mismatch');
+    row.parameters.forEach(layout);
+    if (row.result !== null) layout(row.result);
+  });
+  return rows;
+}
+
 
 
 export function exactExports(actual, expected) {

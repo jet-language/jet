@@ -61,6 +61,7 @@ if (from <= 0 && until >= 0) {
   support.push(item("Compiler/JetFoundation/Source/Types/Types.jet", /^(pub )?fn param_zone_name\(/));
   const backend = [
     "Compiler/JetFoundation/Source/Text/RustDebug.jet",
+    "Compiler/JetFoundation/Source/Encoding/Json.jet",
     "Compiler/JetBackend/Source/LIR/LIR.jet", "Compiler/JetBackend/Source/LIR/Lint.jet",
     ...sorted("Compiler/JetBackend/Source/Lower"),
     ...sorted("Compiler/JetBackend/Source/Opt"),
@@ -83,7 +84,7 @@ if (until === 1) {
   const candidate = candidateJetc0();
   const prefix = join(out, "jet_runtime_jet");
   const receipt = join(out, "front.receipt");
-  for (const suffix of [".o", ".exports", ".issues"]) rmSync(prefix + suffix, { force: true });
+  for (const suffix of [".o", ".exports", ".abi.json", ".issues"]) rmSync(prefix + suffix, { force: true });
   rmSync(receipt, { force: true });
   const run = spawnSync(candidate, [], {
     cwd: repo,
@@ -102,5 +103,8 @@ if (until === 1) {
   if (problem) throw new Error(problem.detail);
   if (existsSync(prefix + ".issues")) throw new Error(readFileSync(prefix + ".issues", "utf8"));
   if (!existsSync(prefix + ".o")) throw new Error("candidate lacks the Jet library-object hook; rebuild it from this tree");
+  for (const suffix of [".exports", ".abi.json"]) {
+    if (!existsSync(prefix + suffix)) throw new Error(`candidate lacks the checked library receipt ${suffix}; rebuild it from this tree`);
+  }
 }
 console.log(join(out, until === 1 ? "jet_runtime_jet.o" : "unit.jet"));

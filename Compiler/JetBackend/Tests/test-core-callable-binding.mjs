@@ -23,9 +23,9 @@ const lir = load('Compiler/JetBackend/Source/LIR/LIR.jet');
 const json = load('Compiler/JetFoundation/Source/Encoding/Json.jet');
 const manifest = load('Compiler/JetBackend/Source/Image/CoreSharedManifest.jet');
 const pieces = ['use core.crypto as core_shared_crypto'];
-for (const marker of ['pub struct LIRFunctionID ', 'pub struct LIRSignatureID ', 'pub enum LIRABIClass ', 'pub struct LIRLayout ', 'pub enum LIRCallConv ', 'pub struct LIRSignature {', 'pub fn lir_layout_word(', 'pub fn lir_layout_pointer(']) pieces.push(declaration(lir, marker));
+for (const marker of ['pub struct LIRFunctionID ', 'pub struct LIRSignatureID ', 'pub enum LIRABIClass ', 'pub struct LIRLayout ', 'pub enum LIRCallConv ', 'pub struct LIRSignature {', 'fn core_shared_abi_class(', 'pub fn lir_layout_word(', 'pub fn lir_layout_pointer(']) pieces.push(declaration(lir, marker));
 for (const marker of ['pub fn foundation_json_escape(', 'pub fn foundation_json_quote(', 'fn foundation_json_append(']) pieces.push(declaration(json, marker));
-for (const marker of ['pub struct CoreSharedCallableBinding {', 'fn core_shared_abi_class(', 'fn core_shared_callable_rows_digest(', 'fn core_shared_callable_digest_error(', 'pub fn core_shared_callable_required_error(']) pieces.push(declaration(manifest, marker));
+for (const marker of ['pub struct CoreSharedCallableBinding {', 'fn core_shared_callable_rows_digest(', 'fn core_shared_callable_digest_error(', 'pub fn core_shared_callable_required_error(']) pieces.push(declaration(manifest, marker));
 const tests = ['Core callable digest refuses a changed linked offset or signature', 'an absent emitted clone or drop callable is a named refusal'];
 for (const [index, name] of tests.entries()) {
   const marker = `#Test(${JSON.stringify(name)})`;

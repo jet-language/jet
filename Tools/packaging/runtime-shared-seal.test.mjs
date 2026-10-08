@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { elf64, exactExports, exportRows } from './runtime-shared-seal.mjs';
+import { elf64, exactExportABI, exactExports, exportRows } from './runtime-shared-seal.mjs';
 import { embeddedAdmission, installRelative } from './runtime-admission.mjs';
 
 test('canonical export qualifiers and exact priorities', () => {
@@ -15,6 +15,22 @@ test('canonical export qualifiers and exact priorities', () => {
     { name: 'jet_fn', init: null, fini: null },
   ]);
   for (const text of ['', 'jet_fn\njet_fn', 'main', 'jet_fn init', 'jet_fn init 65536', 'jet_fn fini -1', 'jet_fn int-index-seam 2', 'jet_fn init 1 extra']) assert.throws(() => exportRows(text));
+});
+
+test('actual LIR ABI rows require exact sorted sealed exports and concrete layouts', () => {
+  const word = { size: 8, align: 8, class: 'Integer' };
+  const rows = [
+    { symbol: 'jet_one', parameters: [], result: null },
+    { symbol: 'jet_two', parameters: [word], result: word },
+  ];
+  assert.equal(exactExportABI(rows, ['jet_two', 'jet_one']), rows);
+  for (const bad of [undefined, null, [], [...rows].reverse(), [rows[0], rows[0]], [...rows, rows[1]],
+    [{ ...rows[0], extra: true }, rows[1]], [rows[0], { ...rows[1], parameters: null }],
+    [rows[0], { ...rows[1], result: undefined }]]) assert.throws(() => exactExportABI(bad, ['jet_one', 'jet_two']));
+  for (const bad of [{ ...word, size: 0 }, { ...word, align: 3 }, { ...word, class: 'Unknown' },
+    { ...word, size: 1.5 }, { ...word, guessed: true }]) {
+    assert.throws(() => exactExportABI([rows[0], { ...rows[1], parameters: [bad] }], ['jet_one', 'jet_two']));
+  }
 });
 
 

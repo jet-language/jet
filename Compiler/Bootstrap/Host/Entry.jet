@@ -16,7 +16,7 @@
 // assembler keeps once.
 use core.sys as cli_sys
 use core.files as cli_files
-use jet_backend.[CoreSharedParentGetterResult, CoreSharedParentRuntime]
+use jet_backend.[CoreSharedParentGetterResult, CoreSharedParentRuntime, CoreSharedRuntimeExportABI, core_shared_runtime_export_abis_decode]
 use jet_driver.[
     JetDriverCompileRequest,
     JetDriverCompileResult,
@@ -34,7 +34,7 @@ use jet_driver.[
     jet_driver_core_source_parent_attach,
     jet_driver_core_source_parent_getter,
 ]
-use jet_backend.[lir_lower_entry, lir_print_module, x64_relocatable_object, x64_link_executable, x64_runtime_library]
+use jet_backend.[lir_lower_entry, lir_print_module, x64_relocatable_object, x64_link_executable, x64_runtime_library, x64_runtime_export_abi_json]
 
 // Self-host inventories observe Jet's checked MIR without entering Rust emit.
 fn jet_bootstrap_mir(request: ^JetDriverCompileRequest) -> JetDriverCompileResult Never! {
@@ -71,6 +71,7 @@ fn jet_bootstrap_native(request: ^JetDriverCompileRequest, prefix: String) -> Je
         cli_files.write_bytes("{prefix}.o", library.object.bytes) ?? return jet_driver_compile_escaped_failure("cannot write runtime library object")
         symbols_out :: loop entry_row in library.exports -> entry_row.symbol
         cli_files.write("{prefix}.exports", symbols_out.join("\n")) ?? return jet_driver_compile_escaped_failure("cannot write runtime library export receipt")
+        cli_files.write("{prefix}.abi.json", x64_runtime_export_abi_json(library.export_abis)) ?? return jet_driver_compile_escaped_failure("cannot write checked runtime export ABI receipt")
         return result
     }
     entry_id :: result.entry_function ?? return jet_driver_compile_escaped_failure("the native front end finished without an entry")
@@ -141,4 +142,8 @@ fn jet_bootstrap_core_attach(host: &JetDriverCoreSourceParentHost, preparation: 
 
 fn jet_bootstrap_core_getter(host: &JetDriverCoreSourceParentHost, site_key: String) -> CoreSharedParentGetterResult Never! {
     jet_driver_core_source_parent_getter(&host, site_key)
+}
+
+fn jet_bootstrap_core_runtime_abis(tree: DataTree) -> [String:CoreSharedRuntimeExportABI]? Never! {
+    core_shared_runtime_export_abis_decode(tree)
 }

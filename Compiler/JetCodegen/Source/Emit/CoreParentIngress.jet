@@ -82,6 +82,7 @@ fn jet_rust_emit_core_parent_ingress(ctx: &JetRustEmitContext, manifest: JetRust
     receipt_field :: jet_rust_core_parent_initializer_field(manifest, runtime, "receipt_identity", "__jet_receipt_identity") ?? return None
     library_field :: jet_rust_core_parent_initializer_field(manifest, runtime, "library_identity", "__jet_library_identity") ?? return None
     symbols_field :: jet_rust_core_parent_initializer_field(manifest, runtime, "symbols", "__jet_symbols") ?? return None
+    abis_field :: jet_rust_core_parent_initializer_field(manifest, runtime, "export_abis", "__jet_export_abis") ?? return None
     symbols_type := String?{None}
     if runtime.kind == .Struct(fields, _) {
         loop field in fields { if field.name == "symbols" -> symbols_type = Val(jet_rust_emit_type(&ctx, field.ty)) }
@@ -92,12 +93,13 @@ fn jet_rust_emit_core_parent_ingress(ctx: &JetRustEmitContext, manifest: JetRust
     prepare_call :: jet_rust_core_parent_call(ctx, manifest, "jet_bootstrap_core_prepare", [String]{"__jet_recipe_request"}) ?? return None
     attach_call :: jet_rust_core_parent_call(ctx, manifest, "jet_bootstrap_core_attach", [String]{"__jet_host", "__jet_prepared"}) ?? return None
     getter_call :: jet_rust_core_parent_call(ctx, manifest, "jet_bootstrap_core_getter", [String]{"__jet_host", "__jet_site_key"}) ?? return None
+    abis_decode_call :: jet_rust_core_parent_call(ctx, manifest, "jet_bootstrap_core_runtime_abis", [String]{"__jet_export_abi"}) ?? return None
     Val(jet_rust_emit_core_parent_seed(JetRustCoreParentSeedBindings{
         host_type: host_type, request_type: request_type, getter_type: getter_type,
         symbols_type: native_symbols, int_from_address: "{ctx.config.root_prefix}JetInt::from_i64(__jet_address)",
-        runtime_initializer: "{runtime_type} {{ {receipt_field}, {library_field}, {symbols_field} }}",
+        runtime_initializer: "{runtime_type} {{ {receipt_field}, {library_field}, {symbols_field}, {abis_field} }}",
         request_rows_field: rows_field,
         new_call: new_call, request_call: request_call, prepare_call: prepare_call,
-        attach_call: attach_call, getter_call: getter_call,
+        attach_call: attach_call, getter_call: getter_call, abis_decode_call: abis_decode_call,
     }))
 }

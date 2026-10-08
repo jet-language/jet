@@ -212,6 +212,22 @@ fn prepare(path: &Path, receipt_bytes: &[u8]) -> Result<Prepared, Refusal> {
     if exports.is_empty() {
         return Err(Refusal::RuntimeLibraryExportSealMismatch);
     }
+    // Primitive seed transport only: Source decodes and governs layout classes.
+    // Bind the mandatory ABI rows to this same sealed symbol inventory.
+    let abi = receipt
+        .get("exportABI")
+        .and_then(DataTree::as_array)
+        .map_err(|_| Refusal::RuntimeLibraryExportSealMismatch)?;
+    if abi.len() != exports.len() {
+        return Err(Refusal::RuntimeLibraryExportSealMismatch);
+    }
+    for (row, name) in abi.iter().zip(exports.iter()) {
+        if row.get("symbol").and_then(DataTree::as_str)
+            .map_err(|_| Refusal::RuntimeLibraryExportSealMismatch)? != name.as_str()
+        {
+            return Err(Refusal::RuntimeLibraryExportSealMismatch);
+        }
+    }
     let bytes = read_library(path)?;
     let library_identity = SHA256::sha256(&bytes);
     let expected_library = text(&receipt, "librarySHA256")?.as_bytes();
@@ -600,7 +616,12 @@ mod tests {
             admit(path, bad, &SHA256::sha256(bad)),
             Err(Refusal::RuntimeLibraryReceiptHashMismatch)
         ));
-        let good = br#"{"kind":"jet-parent-runtime-candidate","optimization":"O0","exports":["jet_rt_alloc"]}"#;
+        let old = br#"{"kind":"jet-parent-runtime-candidate","optimization":"O0","exports":["jet_rt_alloc"]}"#;
+        assert!(matches!(
+            admit(path, old, &SHA256::sha256(old)),
+            Err(Refusal::RuntimeLibraryExportSealMismatch)
+        ));
+        let good = br#"{"kind":"jet-parent-runtime-candidate","optimization":"O0","exports":["jet_rt_alloc"],"exportABI":[{"symbol":"jet_rt_alloc","parameters":[{"size":8,"align":8,"class":"Integer"},{"size":8,"align":8,"class":"Integer"}],"result":{"size":8,"align":8,"class":"Integer"}}]}"#;
         assert!(matches!(
             admit(path, good, &SHA256::sha256(good)),
             Err(Refusal::RuntimeLibraryLoadFailed)

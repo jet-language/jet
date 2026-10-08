@@ -1,15 +1,36 @@
 // The library feed consumes checked MIR in-process. An explicit audited list
 // may supply exports while the Jet artifact producer lacks export rows; it is
 // never a naming heuristic, and every listed definition must be #Export(c).
-use jet_foundation.[MIRProgram, MIRExport, MIRFunction, MIRFunctionID, MIRType]
+use jet_foundation.[MIRProgram, MIRExport, MIRFunction, MIRFunctionID, MIRType, foundation_json_quote]
+
+pub struct CoreSharedRuntimeExportABI {
+    pub symbol: String
+    pub parameters: [LIRLayout]
+    pub result: LIRLayout?
+}
+
+fn runtime_export_layout_json(layout: LIRLayout) -> String Never! {
+    "{{\"size\":{layout.size},\"align\":{layout.align},\"class\":{foundation_json_quote(core_shared_abi_class(layout.class))}}}"
+}
+
+pub fn x64_runtime_export_abi_json(rows: [CoreSharedRuntimeExportABI]) -> String Never! {
+    encoded := [String]{}
+    loop row in rows {
+        parameters :: loop layout in row.parameters -> runtime_export_layout_json(layout)
+        result :: if row.result == .Val(layout) -> runtime_export_layout_json(layout) else -> "null"
+        &encoded.push("{{\"symbol\":{foundation_json_quote(row.symbol)},\"parameters\":[{parameters.join(",")}],\"result\":{result}}}")
+    }
+    "[{encoded.join(",")}]"
+}
 
 struct X64RuntimeLibraryResult {
     object: X64ExecutableResult
     exports: [MIRExport]
+    export_abis: [CoreSharedRuntimeExportABI]
 }
 
 fn runtime_export_error(message: String) -> X64RuntimeLibraryResult Never! {
-    X64RuntimeLibraryResult{object: X64ExecutableResult{bytes: [U8]{}, errors: [String]{message}}, exports: [MIRExport]{}}
+    X64RuntimeLibraryResult{object: X64ExecutableResult{bytes: [U8]{}, errors: [String]{message}}, exports: [MIRExport]{}, export_abis: [CoreSharedRuntimeExportABI]{}}
 }
 
 fn runtime_export_word(ty: MIRType) -> Bool Never! {
@@ -272,16 +293,21 @@ fn x64_runtime_library(program: MIRProgram, explicit: [String]) -> X64RuntimeLib
     lowered :: lir_lower_runtime_callables(program, roots, ^intrinsics)
     if lowered.issues.len() > 0 {
         errors :: loop issue in lowered.issues -> "{issue.function}\t{issue.message}"
-        return X64RuntimeLibraryResult{object: X64ExecutableResult{bytes: [U8]{}, errors: errors}, exports: exports}
+        return X64RuntimeLibraryResult{object: X64ExecutableResult{bytes: [U8]{}, errors: errors}, exports: exports, export_abis: [CoreSharedRuntimeExportABI]{}}
     }
     globals := [X64RuntimeExport]{}
+    export_abis := [CoreSharedRuntimeExportABI]{}
     loop entry_row in exports {
         function :: lowered.callables.get(entry_row.function.value) ?? return runtime_export_error("export {entry_row.symbol} has no lowered callable")
         &globals.push(X64RuntimeExport{function: function, symbol: entry_row.symbol})
+        signature :: lowered.lir.signatures[lowered.lir.functions[function.value].signature.value]
+        if signature.convention != .SystemV -> return runtime_export_error("export {entry_row.symbol} has no SystemV C signature")
+        &export_abis.push(CoreSharedRuntimeExportABI{symbol: entry_row.symbol, parameters: signature.params, result: signature.result})
     }
+    &export_abis.sort_by((a: CoreSharedRuntimeExportABI, b: CoreSharedRuntimeExportABI) -> a.symbol <=> b.symbol)
     // The shared runtime is a build artifact: use the canonical O1 pipeline.
     // It preserves callable IDs/signatures, so audited exports still name the
     // same functions. x64_runtime_object lints the optimized module again.
     optimized :: lir_optimize_module(lowered.lir, 1)
-    X64RuntimeLibraryResult{object: x64_runtime_object(optimized, globals), exports: exports}
+    X64RuntimeLibraryResult{object: x64_runtime_object(optimized, globals), exports: exports, export_abis: export_abis}
 }

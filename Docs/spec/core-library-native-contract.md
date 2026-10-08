@@ -344,6 +344,22 @@ and lifecycle targets, rejects text relocations and writable executable
 mappings, and binds compiler, object, source, and library hashes in
 `runtime-shared.json`. A failed producer publishes no receipt.
 
+The library-object feed also emits an intermediate `.abi.json` directly from
+each checked export's actual lowered callable and `LIRSignature`. Its sorted
+rows contain `symbol`, `parameters` (size/alignment/ABI class), and nullable
+`result`; local signature/function row IDs are never exported as ABI identity.
+The producer requires exact agreement with the object export inventory and
+embeds these mandatory rows as `exportABI` inside `runtime-shared.json`.
+The existing receipt hash seals those bytes with the object/library/source
+pins. No runtime consumer reads an ABI sidecar or reconstructs signatures from
+symbol names. Old receipts without these rows are refused, not upgraded.
+The checked-metadata seed calls Source's layout decoder and transports the
+result into `CoreSharedParentRuntime.export_abis`; Source admission checks its
+inventory against the already admitted symbols before production or startup.
+The seed loader mirrors only the mandatory inventory binding, not ABI-class
+policy. Future fixed-word dispatch must use these declarations and reject
+unsupported classes or widths before invoking an address.
+
 This receipt is not admission. The private parent runtime loader must verify
 its externally pinned receipt hash, the library hash, and exact export,
 dependency, and lifecycle seals before opening the image or exposing symbols.

@@ -1,6 +1,7 @@
 // The outer parent owns this cache. Factory adapters borrow attachments, never
 // a typed evaluator context or a previous factory's callback/projector.
 use core.crypto as core_parent_crypto
+use core.encoding.json as core_parent_json
 use jet_foundation.[MIRFunctionID, MIRProgram, MIRSharedLifetime, mir_program_digest]
 
 pub enum CoreSharedParentAdmission {
@@ -31,7 +32,59 @@ pub struct CoreSharedParentRuntime {
     pub receipt_identity: String
     pub library_identity: String
     pub symbols: [String:Int]
+    pub export_abis: [String:CoreSharedRuntimeExportABI]
 }
+// These are actual library-feed layouts sealed in the embedded receipt, not
+// signatures inferred from a symbol name or rebuilt by the receiving factory.
+fn core_shared_abi_field(tree: DataTree, name: String) -> DataTree? Never! {
+    if tree == .Object(fields) {
+        selected := DataTree?{None}
+        loop field in fields {
+            if field.key != name -> next
+            if selected != None -> return None
+            selected = Val(field.value)
+        }
+        return selected
+    }
+    None
+}
+fn core_shared_runtime_layout_decode(tree: DataTree) -> LIRLayout? Never! {
+    if tree == .Object(fields) && fields.len() != 3 -> return None
+    size :: x64_execution_int(core_shared_abi_field(tree, "size") ?? return None) ?? return None
+    align :: x64_execution_int(core_shared_abi_field(tree, "align") ?? return None) ?? return None
+    name :: x64_execution_string(core_shared_abi_field(tree, "class") ?? return None) ?? return None
+    if size <= 0 || align <= 0 || (align & (align - 1)) != 0 -> return None
+    class :: if name == "Integer" -> LIRABIClass.Integer else if name == "Pointer" -> LIRABIClass.Pointer else if name == "Float" -> LIRABIClass.Float else if name == "Memory" -> LIRABIClass.Memory else -> return None
+    Val(LIRLayout{size: size, align: align, class: class})
+}
+pub fn core_shared_runtime_export_abis_decode(tree: DataTree) -> [String:CoreSharedRuntimeExportABI]? Never! {
+    rows :: x64_execution_array(tree) ?? return None
+    result := [String:CoreSharedRuntimeExportABI]{}
+    previous := ""
+    loop row in rows {
+        if row == .Object(fields) && fields.len() != 3 -> return None
+        symbol :: x64_execution_string(core_shared_abi_field(row, "symbol") ?? return None) ?? return None
+        if symbol == "" || symbol <= previous -> return None
+        parameters := [LIRLayout]{}
+        params :: x64_execution_array(core_shared_abi_field(row, "parameters") ?? return None) ?? return None
+        loop param in params -> &parameters.push(core_shared_runtime_layout_decode(param) ?? return None)
+        result_tree :: core_shared_abi_field(row, "result") ?? return None
+        output := LIRLayout?{None}
+        if !(result_tree == .Null) -> output = Val(core_shared_runtime_layout_decode(result_tree) ?? return None)
+        result[symbol] = CoreSharedRuntimeExportABI{symbol: symbol, parameters: parameters, result: output}
+        previous = symbol
+    }
+    Val(result)
+}
+fn core_shared_runtime_abi_inventory_valid(runtime: CoreSharedParentRuntime) -> Bool Never! {
+    if runtime.symbols.len() != runtime.export_abis.len() -> return false
+    loop (symbol, address) in runtime.symbols {
+        row :: runtime.export_abis.get(symbol) ?? return false
+        if address == 0 || row.symbol != symbol -> return false
+    }
+    true
+}
+
 pub trait CoreSharedParentProducer {
     fn produce(self) -> CoreSharedBinding Never!
 }
@@ -77,6 +130,7 @@ fn core_shared_parent_warm_admission(state: CoreSharedParentState, expected: Cor
 // A mapped/stopped startup is permanently retained and poisoned, never replayed.
 pub fn core_shared_parent_admit(parent: &CoreSharedParent, expected: CoreSharedManifest, runtime: CoreSharedParentRuntime, producer: CoreSharedParentProducer) -> CoreSharedParentAdmission Never! {
     if !core_shared_parent_manifest_valid(expected) -> return core_shared_parent_refusal("CoreSharedManifestInvalid")
+    if !core_shared_runtime_abi_inventory_valid(runtime) -> return core_shared_parent_refusal("RuntimeLibraryExportABIInvalid")
     guard := parent.state.guard_edit()
     if core_shared_parent_warm_admission(guard.value, expected, runtime) == .Val(admission) -> return admission
     if runtime.receipt_identity == "" || runtime.library_identity == "" -> return core_shared_parent_refusal("RuntimeLibraryMissingAdmission")
@@ -165,7 +219,7 @@ pub fn core_shared_parent_getter(parent: &CoreSharedParent, attachment: CoreShar
     assert(core_shared_parent_manifest_valid(original))
     assert(core_shared_parent_manifest_valid(perturbed))
     parent := core_shared_parent_new()
-    runtime :: CoreSharedParentRuntime{receipt_identity: "receipt", library_identity: "library", symbols: [String:Int]{}}
+    runtime :: CoreSharedParentRuntime{receipt_identity: "receipt", library_identity: "library", symbols: [String:Int]{}, export_abis: [String:CoreSharedRuntimeExportABI]{}}
     if true {
         guard := parent.state.guard_edit()
         guard.value.manifest = Val(original)
@@ -196,4 +250,28 @@ pub fn core_shared_parent_callable(parent: &CoreSharedParent, attachment: CoreSh
     row :: core_shared_callable_binding(binding, identity) ?? return CoreSharedParentCallableResult{address: 0, refusal_key: "CoreSharedCallableBindingMissing: {identity}"}
     loaded :: guard.value.loaded ?? return CoreSharedParentCallableResult{address: 0, refusal_key: "CoreSharedNotAdmitted"}
     CoreSharedParentCallableResult{address: loaded.base + row.linked_offset, refusal_key: ""}
+}
+
+#Test("parent runtime ABI rows decode sealed layouts and refuse malformed inventories") {
+    word :: LIRLayout{size: 8, align: 8, class: LIRABIClass.Integer}
+    first :: CoreSharedRuntimeExportABI{symbol: "jet_one", parameters: [LIRLayout]{word}, result: Val(word)}
+    second :: CoreSharedRuntimeExportABI{symbol: "jet_two", parameters: [LIRLayout]{}, result: None}
+    text :: x64_runtime_export_abi_json([CoreSharedRuntimeExportABI]{first, second})
+    tree :: core_parent_json.parse(text) ?? panic("library ABI JSON was not valid")
+    decoded :: core_shared_runtime_export_abis_decode(tree) ?? panic("actual ABI rows did not decode")
+    assert_eq(decoded.get(first.symbol), Val(first))
+    assert_eq(decoded.get(second.symbol), Val(second))
+    assert(core_shared_runtime_export_abis_decode(DataTree.Null) == None)
+    loop rows in [[CoreSharedRuntimeExportABI]]{
+        [CoreSharedRuntimeExportABI]{second, first},
+        [CoreSharedRuntimeExportABI]{first, first},
+        [CoreSharedRuntimeExportABI]{CoreSharedRuntimeExportABI{symbol: "", parameters: [LIRLayout]{}, result: None}},
+        [CoreSharedRuntimeExportABI]{CoreSharedRuntimeExportABI{symbol: "jet_one", parameters: [LIRLayout]{LIRLayout{size: 0, align: 8, class: LIRABIClass.Integer}}, result: None}},
+        [CoreSharedRuntimeExportABI]{CoreSharedRuntimeExportABI{symbol: "jet_one", parameters: [LIRLayout]{LIRLayout{size: 8, align: 3, class: LIRABIClass.Integer}}, result: None}},
+    } {
+        invalid :: core_parent_json.parse(x64_runtime_export_abi_json(rows)) ?? panic("invalid rows must still be JSON")
+        assert(core_shared_runtime_export_abis_decode(invalid) == None)
+    }
+    unknown :: core_parent_json.parse("[{{\"symbol\":\"jet_one\",\"parameters\":[],\"result\":{{\"size\":8,\"align\":8,\"class\":\"Unknown\"}}}}]") ?? panic("unknown-class fixture must be JSON")
+    assert(core_shared_runtime_export_abis_decode(unknown) == None)
 }

@@ -355,6 +355,7 @@ function body(path) {
 const sortedJet = (dir) => readdirSync(join(repo, dir)).filter((name) => name.endsWith(".jet")).sort().map((name) => `${dir}/${name}`);
 const BACKEND = [
   "Compiler/JetFoundation/Source/Text/RustDebug.jet",
+  "Compiler/JetFoundation/Source/Encoding/Json.jet",
   "Compiler/JetBackend/Source/LIR/LIR.jet",
   "Compiler/JetBackend/Source/LIR/Lint.jet",
   "Compiler/JetBackend/Source/LIR/Print.jet",
