@@ -1279,3 +1279,14 @@ within Jet, retaining the event state machine, canonical mode, bounded
 allocation checks and sticky errors. File writes and flushes alone cross the
 registered provider boundary above. The target remains consumed, default
 limits remain safe, and canonical mode defaults to false.
+
+`core.encoding.jsonl.writer` uses the shipped native JSONL policy, not the
+earlier source helper's immediate-LF behavior. A successful write emits value
+bytes only; the next write closes the preceding LF before validating its new
+record, and `finish` closes the final LF. `flush` does not close that LF, so
+dropping without finish retains an incomplete line. Before emitting a record,
+the source preflights decoded tree size/depth and reserves its exact wire size
+plus the deferred LF against the total limit. Errors retain native record
+index/path projection and sticky-terminal behavior. These differences follow
+`EncodingStream.rs`'s `jet_jsonl_tree_size`, `jet_jsonl_wire_size`,
+`JSONLWriter.write_record`, `flush_output`, and `finish_output`.
