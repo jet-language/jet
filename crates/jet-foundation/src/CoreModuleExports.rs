@@ -25,7 +25,7 @@ pub enum CoreLeafKind {
 
 // BEGIN GENERATED CORE DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 60aaa871805cdcd4a72c8c4ecb2ce69e195a7133b63df00e7099d1c0efd1e43c
+// Source SHA-256: ea6bd9da7a3eba73d1e41616f7feace1c47c4715f746a5eeaf05add3f28bb3b5
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreModuleDeclaration {
     pub module: &'static str,
@@ -404,8 +404,8 @@ const CORE_MODULE_55_MEMBERS: &[&str] = &["bool", "close", "counter", "critical"
 const CORE_MODULE_55_TYPES: &[(&str, CoreLeafKind)] = &[("LogRecord", CoreLeafKind::Plain), ("Formatter", CoreLeafKind::Plain), ("Handler", CoreLeafKind::Plain), ("LogField", CoreLeafKind::Plain), ("Pair", CoreLeafKind::Plain)];
 const CORE_MODULE_55_DEPENDENCIES: &[&str] = &[];
 
-const CORE_MODULE_56_MEMBERS: &[&str] = &["abs", "acos", "acosh", "asin", "asinh", "atan", "atan2", "atanh", "binomial", "cbrt", "ceil", "checked_abs", "checked_add", "checked_div", "checked_mul", "checked_neg", "checked_pow", "checked_rem", "checked_sub", "clamp", "cmp", "copy", "copysign", "conj", "cos", "cosh", "cot", "decimal", "degrees", "digits", "div_mod", "div_rem", "e", "erf", "erfc", "exp", "exp2", "exp_m1", "factorial", "floor", "fma", "float32", "float64", "fract", "fraction", "frexp", "from_bits", "gamma", "gcd", "hypot", "ilogb", "imag", "infinity", "int_pow", "inv", "is_canonical", "is_even", "is_finite", "is_inf", "is_integer", "is_nan", "is_normal", "is_odd", "is_signed", "is_subnormal", "is_zero", "isqrt", "lcm", "ldexp", "leading_ones", "lerp", "lgamma", "ln", "ln_1p", "log", "log10", "log2", "logb", "max", "min", "modf", "muladd", "nan", "next_after", "nextafter", "next_down", "next_up", "pi", "pow", "radians", "radix", "real", "round", "saturating_add", "saturating_mul", "saturating_sub", "scaleb", "sign", "sign_bit", "significand", "signum", "sin", "sin_cos", "sinh", "sqrt", "tan", "tanh", "tau", "to_bits", "trailing_ones", "trunc", "truncate", "ulp", "zero", "Fraction", "abs_diff", "abs_float", "clamp_float", "comb", "dist", "even", "fmod", "fsum", "gcd_many", "hypot3", "in_range", "isclose", "isfinite", "isinf", "isnan", "lcm_many", "max_float", "midpoint", "min_float", "odd", "perm", "powmod", "prod", "prod_int", "remainder", "sum_int", "sumprod", "tau_const", "log1p", "xor", "random", "fabs", "expm1", "__cmp_f32", "__is_finite_f32", "__numeric_stop", "Vec2", "Vec3", "Vec4", "Mat3", "Mat4", "F64x4"];
-const CORE_MODULE_56_TYPES: &[(&str, CoreLeafKind)] = &[("Fraction", CoreLeafKind::Plain), ("Vec2", CoreLeafKind::Plain), ("Vec3", CoreLeafKind::Plain), ("Vec4", CoreLeafKind::Plain), ("Mat3", CoreLeafKind::Plain), ("Mat4", CoreLeafKind::Plain), ("F64x4", CoreLeafKind::Plain)];
+const CORE_MODULE_56_MEMBERS: &[&str] = &["abs", "acos", "acosh", "asin", "asinh", "atan", "atan2", "atanh", "binomial", "cbrt", "ceil", "checked_abs", "checked_add", "checked_div", "checked_mul", "checked_neg", "checked_pow", "checked_rem", "checked_sub", "clamp", "cmp", "copy", "copysign", "conj", "cos", "cosh", "cot", "decimal", "degrees", "digits", "div_mod", "div_rem", "e", "erf", "erfc", "exp", "exp2", "exp_m1", "factorial", "floor", "fma", "float32", "float64", "fract", "fraction", "frexp", "from_bits", "gamma", "gcd", "hypot", "ilogb", "imag", "infinity", "int_pow", "inv", "is_canonical", "is_even", "is_finite", "is_inf", "is_integer", "is_nan", "is_normal", "is_odd", "is_signed", "is_subnormal", "is_zero", "isqrt", "lcm", "ldexp", "leading_ones", "lerp", "lgamma", "ln", "ln_1p", "log", "log10", "log2", "logb", "max", "min", "modf", "muladd", "nan", "next_after", "nextafter", "next_down", "next_up", "pi", "pow", "radians", "radix", "real", "round", "saturating_add", "saturating_mul", "saturating_sub", "scaleb", "sign", "sign_bit", "significand", "signum", "sin", "sin_cos", "sinh", "sqrt", "tan", "tanh", "tau", "to_bits", "trailing_ones", "trunc", "truncate", "ulp", "zero", "Fraction", "abs_diff", "abs_float", "clamp_float", "comb", "dist", "even", "fmod", "fsum", "gcd_many", "hypot3", "in_range", "isclose", "isfinite", "isinf", "isnan", "lcm_many", "max_float", "midpoint", "min_float", "odd", "perm", "powmod", "prod", "prod_int", "remainder", "sum_int", "sumprod", "tau_const", "log1p", "xor", "random", "fabs", "expm1", "__cmp_f32", "__is_finite_f32", "__numeric_stop", "Vec2", "Vec3", "Vec4", "Mat3", "Mat4", "F64x4", "ScreenPoint", "ScreenDelta", "WorldPoint", "WorldDelta", "ViewPoint", "ViewDelta", "CameraPoint", "CameraDelta", "DevicePoint", "DeviceDelta", "Point2", "Delta2", "TransformError"];
+const CORE_MODULE_56_TYPES: &[(&str, CoreLeafKind)] = &[("Fraction", CoreLeafKind::Plain), ("Vec2", CoreLeafKind::Plain), ("Vec3", CoreLeafKind::Plain), ("Vec4", CoreLeafKind::Plain), ("Mat3", CoreLeafKind::Plain), ("Mat4", CoreLeafKind::Plain), ("F64x4", CoreLeafKind::Plain), ("ScreenPoint", CoreLeafKind::Plain), ("ScreenDelta", CoreLeafKind::Plain), ("WorldPoint", CoreLeafKind::Plain), ("WorldDelta", CoreLeafKind::Plain), ("ViewPoint", CoreLeafKind::Plain), ("ViewDelta", CoreLeafKind::Plain), ("CameraPoint", CoreLeafKind::Plain), ("CameraDelta", CoreLeafKind::Plain), ("DevicePoint", CoreLeafKind::Plain), ("DeviceDelta", CoreLeafKind::Plain), ("Point2", CoreLeafKind::Generic(2)), ("Delta2", CoreLeafKind::Generic(2)), ("TransformError", CoreLeafKind::Plain)];
 const CORE_MODULE_56_DEPENDENCIES: &[&str] = &[];
 
 const CORE_MODULE_57_MEMBERS: &[&str] = &["RNG", "bool", "bytes", "exponential", "float", "float_range", "int", "normal", "pick", "rng", "sample", "seed", "shuffle", "split", "weighted_pick", "random", "randint", "uniform", "normalvariate", "gauss", "expovariate", "randbytes", "getrandbits", "randrange", "choice", "choices", "triangular", "gammavariate", "betavariate", "lognormvariate", "paretovariate", "weibullvariate", "vonmisesvariate", "binomialvariate", "__rng_state", "__rng_try_update", "__word", "__seeded_int"];
@@ -917,6 +917,19 @@ pub const CORE_SOURCE_OWNED_TYPES: &[CoreSourceOwnedType] = &[
     CoreSourceOwnedType { path: "Core/math/math.jet", name: "Mat3" },
     CoreSourceOwnedType { path: "Core/math/math.jet", name: "Mat4" },
     CoreSourceOwnedType { path: "Core/math/math.jet", name: "F64x4" },
+    CoreSourceOwnedType { path: "Core/math/math.jet", name: "ScreenPoint" },
+    CoreSourceOwnedType { path: "Core/math/math.jet", name: "ScreenDelta" },
+    CoreSourceOwnedType { path: "Core/math/math.jet", name: "WorldPoint" },
+    CoreSourceOwnedType { path: "Core/math/math.jet", name: "WorldDelta" },
+    CoreSourceOwnedType { path: "Core/math/math.jet", name: "ViewPoint" },
+    CoreSourceOwnedType { path: "Core/math/math.jet", name: "ViewDelta" },
+    CoreSourceOwnedType { path: "Core/math/math.jet", name: "CameraPoint" },
+    CoreSourceOwnedType { path: "Core/math/math.jet", name: "CameraDelta" },
+    CoreSourceOwnedType { path: "Core/math/math.jet", name: "DevicePoint" },
+    CoreSourceOwnedType { path: "Core/math/math.jet", name: "DeviceDelta" },
+    CoreSourceOwnedType { path: "Core/math/math.jet", name: "Point2" },
+    CoreSourceOwnedType { path: "Core/math/math.jet", name: "Delta2" },
+    CoreSourceOwnedType { path: "Core/math/math.jet", name: "TransformError" },
     CoreSourceOwnedType { path: "Core/math/random.jet", name: "RNG" },
     CoreSourceOwnedType { path: "Core/net/net.jet", name: "SRVRecord" },
     CoreSourceOwnedType { path: "Core/net/mime.jet", name: "MIME" },
@@ -1155,6 +1168,19 @@ pub const CORE_BARE_SOURCE_MODULES: &[CoreBareSourceModule] = &[
     CoreBareSourceModule { name: "Mat3", module_name: "core.math" },
     CoreBareSourceModule { name: "Mat4", module_name: "core.math" },
     CoreBareSourceModule { name: "F64x4", module_name: "core.math" },
+    CoreBareSourceModule { name: "ScreenPoint", module_name: "core.math" },
+    CoreBareSourceModule { name: "ScreenDelta", module_name: "core.math" },
+    CoreBareSourceModule { name: "WorldPoint", module_name: "core.math" },
+    CoreBareSourceModule { name: "WorldDelta", module_name: "core.math" },
+    CoreBareSourceModule { name: "ViewPoint", module_name: "core.math" },
+    CoreBareSourceModule { name: "ViewDelta", module_name: "core.math" },
+    CoreBareSourceModule { name: "CameraPoint", module_name: "core.math" },
+    CoreBareSourceModule { name: "CameraDelta", module_name: "core.math" },
+    CoreBareSourceModule { name: "DevicePoint", module_name: "core.math" },
+    CoreBareSourceModule { name: "DeviceDelta", module_name: "core.math" },
+    CoreBareSourceModule { name: "Point2", module_name: "core.math" },
+    CoreBareSourceModule { name: "Delta2", module_name: "core.math" },
+    CoreBareSourceModule { name: "TransformError", module_name: "core.math" },
 ];
 
 pub fn core_bare_source_module(name: &str) -> Option<&'static str> {
