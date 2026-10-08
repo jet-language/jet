@@ -7118,7 +7118,9 @@ impl<'a> LowerCtx<'a> {
         self.places
             .iter()
             .find(|row| row.id == place)
-            .is_some_and(|row| self.scope_end_close(&row.ty).is_some())
+            .is_some_and(|row| self.scope_end_close_for_place(place, &row.ty).is_some()
+                || crate::Codegen::MIRRust::contains_owned_close_with(
+                    self.type_defs, &row.ty, &|ty| self.scope_end_close(ty).is_some(), &mut Vec::new()))
     }
 
     fn emit_deferred_cleanups(&mut self, from_depth: usize) -> Result<(), LowerError> {
@@ -7564,7 +7566,7 @@ impl<'a> LowerCtx<'a> {
             Some(ty.clone()),
             MirOperation::MovePlace { place },
         )?;
-        match self.scope_end_close(&ty) {
+        match self.scope_end_close_for_place(place, &ty) {
             Some(function) => self.emit_scope_end_close(function, ty, value)?,
             None => {
                 self.emit(
@@ -7581,13 +7583,25 @@ impl<'a> LowerCtx<'a> {
 
     /// D-SHAPE-RESOURCE1=A: a still-live local whose type has a nominal
     /// `Close` implementation is closed, not merely released, at scope end.
-    /// Inside that type's own `close` body the receiver is the value being
-    /// closed, so values of the type are released there without re-entering
-    /// `close`.
+    /// Only the consuming receiver is exempt from re-entering its own Close;
+    /// a second local of the same type still owns an independent cleanup.
     pub(super) fn scope_end_close(&self, ty: &MirType) -> Option<MirFunctionId> {
-        let function = self.function_registry.close_impl_for(ty)?;
-        let current = self.function_registry.id_for(self.function).ok();
-        (current != Some(function)).then_some(function)
+        self.function_registry.close_impl_for(ty)
+    }
+
+    fn scope_end_close_for_place(&self, place: MirPlaceId, ty: &MirType) -> Option<MirFunctionId> {
+        let function = self.scope_end_close(ty)?;
+        let receiver = self.places.iter().find(|row| row.id == place)
+            .filter(|row| row.projections.is_empty())
+            .and_then(|row| match row.base {
+                MirPlaceBase::Parameter(value) => self.value_instruction(value),
+                _ => None,
+            })
+            .is_some_and(|instruction| matches!(
+                instruction.operation, MirOperation::Parameter { index: 0, .. }
+            ));
+        (!(receiver && self.function_registry.id_for(self.function).ok() == Some(function)))
+            .then_some(function)
     }
 
     /// The same consuming receiver call an explicit `close(^value)` lowers to.
