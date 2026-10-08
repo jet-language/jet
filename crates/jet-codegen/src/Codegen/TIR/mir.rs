@@ -7589,7 +7589,7 @@ impl<'a> LowerCtx<'a> {
         self.function_registry.close_impl_for(ty)
     }
 
-    fn scope_end_close_for_place(&self, place: MirPlaceId, ty: &MirType) -> Option<MirFunctionId> {
+    pub(super) fn scope_end_close_for_place(&self, place: MirPlaceId, ty: &MirType) -> Option<MirFunctionId> {
         let function = self.scope_end_close(ty)?;
         let receiver = self.places.iter().find(|row| row.id == place)
             .filter(|row| row.projections.is_empty())
