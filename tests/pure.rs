@@ -51,6 +51,18 @@ fn run() {
     assert!(res.is_ok(), "#Pure fn should compile: {:?}", res.err());
 }
 
+/// Deny-only allocation facts do not make an inferred callee impure (#4866).
+#[test]
+fn pure_fn_inferred_interpolation_compiles() {
+    let source = include_str!("fixtures/pure_deny_only_interpolation.jet");
+    let result = jet::compile(source);
+    assert!(
+        result.is_ok(),
+        "string interpolation must remain legal through a `-[]>` caller: {:?}",
+        result.err()
+    );
+}
+
 /// Impure call inside `pure fn` fires E3401.
 #[test]
 fn pure_fn_impure_call_is_e3401() {
