@@ -145,6 +145,54 @@ impl __ClockObserver {
         clock_state_now(guard.value)
     }
 }
+
+// Ordinary expiry values retain their payload and absolute deadline; get()
+// reads the caller's original timeline through an observer, never a Clock fork.
+pub struct ExpiringValue<T> {
+    value: T
+    deadline_ms: Int
+}
+
+impl ExpiringValue {
+    pub fn new<T>(value: T, ttl: Duration, clock: Clock) -> ExpiringValue<T> Never! {
+        observer :: clock.__observer()
+        ExpiringValue<T>{value: value, deadline_ms: saturating_add_ns(observer.now(), ttl.ns /% 1000000)}
+    }
+
+    pub fn get(self, clock: Clock) -> T Expired! {
+        observer :: clock.__observer()
+        if observer.now() > self.deadline_ms -> return Err(Expired{})
+        Ok(~self.value)
+    }
+
+    fn __show(self) -> String Never! { "Expiring(deadline={self.deadline_ms})" }
+}
+
+#Test("ExpiringValue observes original clocks and expires strictly after its deadline") {
+    clock := Clock.new(100)
+    cached :: ExpiringValue.new("fresh", Duration{ns: 2000000}, clock)
+    &clock.tick(2)
+    assert_eq(cached.get(clock) ?? panic("equality must remain valid"), "fresh")
+    &clock.tick(1)
+    if cached.get(clock) == {
+        .Err(_) -> {}
+        .Ok(_) -> assert(false)
+    }
+}
+
+#Test("ExpiringValue zero and negative TTL preserve open expiry boundaries") {
+    clock :: Clock.new(100)
+    zero :: ExpiringValue.new(17, Duration{ns: 0}, clock)
+    assert_eq(zero.get(clock) ?? panic("zero TTL is valid at equality"), 17)
+    negative :: ExpiringValue.new(17, Duration{ns: -1000000}, clock)
+    if negative.get(clock) == {
+        .Err(_) -> {}
+        .Ok(_) -> assert(false)
+    }
+    high :: Clock.new(time_int_max())
+    saturated :: ExpiringValue.new(17, Duration{ns: 1000000}, high)
+    assert_eq(saturated.get(high) ?? panic("saturated deadline remains valid"), 17)
+}
 impl Clock.Equatable {
     fn equal(self, other: Clock) -> Bool Never! { self.__now() == other.__now() }
 }
@@ -166,7 +214,7 @@ impl Clock.Equatable {
     assert_eq(&original.advance(time_int_min()), time_int_min())
     assert_eq(&original.wait(duration_ns(-1000000)), time_int_min())
     assert(original.equal(Clock.new(time_int_min())))
-    assert_eq(original.__show(), "Clock { now: -9223372036854775808 }")
+    assert_eq(original.__show(), "Clock {{ now: -9223372036854775808 }}")
 }
 
 #Test("Clock ordinary and nested aggregate copies fork the timeline") {
@@ -182,8 +230,8 @@ impl Clock.Equatable {
 
 #Test("Clock Show and Debug keep the existing nominal rendering") {
     value :: Clock.new(5)
-    assert_eq("{value}", "Clock { now: 5 }")
-    assert_eq("{value:Debug}", "Clock { now: 5 }")
+    assert_eq("{value}", "Clock {{ now: 5 }}")
+    assert_eq("{value:Debug}", "Clock {{ now: 5 }}")
 }
 
 fn time_int_min() -> Int Never! { -9223372036854775808 }
@@ -1624,7 +1672,7 @@ impl Instant {
 }
 
 #Test("Date alias receivers retain projections and ISO year boundaries") {
-    date: Date :: new(2021, 1, 1)
+    date :: Date{new(2021, 1, 1)}
     assert_eq(date.year(), 2021)
     assert_eq(date.month(), 1)
     assert_eq(date.day(), 1)
@@ -1642,7 +1690,7 @@ impl Instant {
 }
 
 #Test("Date alias arithmetic preserves leap clamps and signed periods") {
-    date: Date :: new(2024, 2, 29)
+    date :: Date{new(2024, 2, 29)}
     assert_eq(date.quarter_of_year(), 1)
     assert_eq(new(2024, 12, 1).quarter_of_year(), 4)
     assert_eq(date.days_in_month(), 29)
@@ -1659,7 +1707,7 @@ impl Instant {
 }
 
 #Test("Date alias truncation formatting and rounded differences preserve errors") {
-    date: Date :: new(2024, 2, 29)
+    date :: Date{new(2024, 2, 29)}
     assert_eq(date.truncate("year"), new(2024, 1, 1))
     assert_eq(date.truncate("month"), new(2024, 2, 1))
     assert_eq(date.truncate("unknown"), date)

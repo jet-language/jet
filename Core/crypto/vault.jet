@@ -6,6 +6,8 @@
 use core.crypto.[Secret, SigningKey, X25519PublicKey, X25519SecretKey]
 use core.crypto.vault as vault
 use core.text as unicode
+use core as core
+use core.time as time
 
 pub struct KeyRef<T> {
     pub name: String
@@ -18,9 +20,11 @@ pub enum KeyStatus {
     Revoked
 }
 
-pub struct ExpiringSecret<T> {
-    pub secret: T
-    pub expires_at_ms: Int
+// Secret storage and zeroizing loans stay in the existing provider carrier.
+// The closure captures an observer of the original source Clock, not a fork.
+pub fn __expiring_secret_new<T>(value: ^T, ttl: time.Duration, clock: time.Clock) -> ExpiringSecret<T> Never! {
+    observer :: clock.__observer()
+    core.crypto.vault.__expiring_secret_storage_new<T>(^value, ttl.ns /% 1000000, () -> observer.now())
 }
 
 pub struct MutationPlan<T> {

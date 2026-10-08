@@ -1344,6 +1344,10 @@ adds the `Time` effect. See
 [`vault_keys.jet`](../../../Examples/features/crypto/vault_keys.jet) and
 [`expiring_secret.jet`](../../../Examples/features/memory/expiring_secret.jet).
 
+Expiry is strictly after the deadline, not at equality. Secret wrappers
+observe the original injected clock through a retained observer, so advancing
+that clock expires the secret without advancing an independent Clock copy.
+
 ### `core.auth` — token verification and sessions
 
 `core.auth` verifies the closed JWT and PASETO forms and provides password,
