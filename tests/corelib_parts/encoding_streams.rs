@@ -13,11 +13,11 @@ use core.process as process
 use core.encoding.csv as csv
 use core.files as files
 fn run() {{
-    spec := process.cmd([String]{{"jet"}})
+    spec :: process.cmd([String]{{"jet"}})
     print(spec.cmd.len())
     input :: files.open("{path}") ?? panic("open")
     reader := csv.reader(^input) ?? panic("reader")
-    first :: &reader.next() ?? panic("first")
+    first :: &reader.next()
     if first == {{
         Val(row) -> {{
             print(row.fields[0])
@@ -25,9 +25,9 @@ fn run() {{
         }}
         None -> panic("missing row")
     }}
-    eof :: &reader.next() ?? panic("eof")
+    eof :: &reader.next()
     print(eof == None)
-    again :: &reader.next() ?? panic("eof again")
+    again :: &reader.next()
     print(again == None)
 }}
 "#,
