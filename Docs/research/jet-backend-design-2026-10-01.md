@@ -1969,3 +1969,13 @@ clone independence, ordered equality and exact-once frees. Its non-finite
 mode exercises the JSON stop separately. Parse and C syntax receipts do not
 admit native caller layouts or prove execution: source-root/MIR ownership and
 the generator's provider ABI validation remain required before pack cutover.
+
+### Native DataPlot ownership boundary
+
+`DataPlotEnums.jet` supplies the complete clone/drop/eq families of the twelve
+native-private unit-enum handles. `DataABI.jet` owns their tag-word layout;
+record enum fields still cross the descriptor ABI as raw declaration-order
+tags, not pointers. These allocations never alias a Rust or source/MIR enum.
+`DataPlotEnumsWitness.c` links the real Jet provider and intercepts frees with
+`--wrap=jet_rt_free`, checking clone independence and tag equality. Syntax
+receipts alone do not admit native layouts or prove execution.
