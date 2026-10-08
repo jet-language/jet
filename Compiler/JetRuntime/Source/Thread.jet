@@ -1,18 +1,29 @@
 // Jet threads and dynamic TLS. GS belongs exclusively to Jet; FS remains
 // musl's TLS until libc exit. The interim pthread imports die when musl leaves
 // the pack (U4 end); raw clone is implemented below but used only by fixtures.
-// TCB (256 bytes, align64), append-only runtime layout:
-// @0 self; @8 tid; @16 current task; @24 shield; @32 wait boundary;
-// @40 typed deadline boundary; @48 deadline present; @56 deadline ms;
-// @64 native body active; @72 park slot; @80 completion frames List*;
-// @88 compensation stack List*; @96 owner deadlines; @104 world;
-// @112 world flags; @120 world park; @128 sentry enabled; @136 sentry file;
-// @144 file length; @152 line; @160 reason; @168 reason length;
-// @176 fence depth; @184 sentry frames List*; @192/@200 reserved;
-// @208 dynamic TLS native List<I64>* (also owns T1 capture/scope services);
-// @216/224 absolute futex timespec; @232/240 clock_gettime scratch;
-// @248 shared scratch word (scheduler worker-count out). Attach before the
-// first GS read, never lazily from TLS.
+// TCB (320 bytes, align64), append-only runtime layout; owner per slot:
+// @0 Thread self; @8 Thread tid; @16 Scheduler current control;
+// @24 Scheduler shield; @32 Scheduler wait boundary; @40 Deadline boundary;
+// @48 Deadline presence; @56 Deadline ms; @64 Scheduler native body active;
+// @72 Sync park slot; @80 Task completion frames List*;
+// @88 Task compensation stack List*; @96 Deadline owner deadlines;
+// @104 World current lease; @112 World flags; @120 World park slot;
+// @128 Sentry enabled; @136 Sentry file; @144 Sentry file length;
+// @152 Sentry line; @160 Sentry reason; @168 Sentry reason length;
+// @176 Sentry fence depth; @184 Sentry frames List*; @192 reserved;
+// @200 Comptime request-scope flag; @208 Thread dynamic TLS List<I64>*
+// (also owns T1 capture/scope services); @216/@224 Sync absolute futex
+// timespec; @232/@240 Sync/HostIO clock_gettime timespec scratch;
+// @248 Scheduler shared scratch word (worker-count out).
+// Appended Comptime frame: @256 depth, @264 owner, @272 start, @280 end,
+// all raw U64 bit carriers. Comptime scope saves Scheduler's four words at
+// @288 previous control, @296 shield, @304 wait boundary, @312 body active.
+// Slot200 provenance: before this append, the 26b5c5911 source map reserves
+// 192/200. Searching I64{192}/I64{200} across Thread, Scheduler, Task,
+// TaskGroup, Deadline, World, TestCapture and Sync finds no TCB access:
+// Task's matches concern its separate 200-byte child, not the TCB.
+// RtL8a6 confirms no T1/Thread claim on either reserved slot. Attach before
+// the first GS read, never lazily from TLS.
 #Import(c) fn thread_pthread_create(out: I64, attr: I64, start: I64, arg: I64) -> I64 = "pthread_create"
 #Import(c) fn thread_pthread_join(thread: I64, out: I64) -> I64 = "pthread_join"
 #Import(c) fn thread_pthread_detach(thread: I64) -> I64 = "pthread_detach"
@@ -53,8 +64,8 @@ fn thread_tid() -> I64 {
 }
 
 fn thread_new_tcb(tid: I64) -> I64 {
-    tcb :: jet_rt_alloc(I64{256}, I64{64})
-    thread_zero(tcb, I64{256})
+    tcb :: jet_rt_alloc(I64{320}, I64{64})
+    thread_zero(tcb, I64{320})
     sync_store(tcb, tcb)
     sync_store(tcb + I64{8}, tid)
     tcb
@@ -297,7 +308,7 @@ fn thread_tls_destroy(table: I64, key: I64, attempt_only: Bool) -> Bool {
     }
     thread_unregister_tcb(tcb)
     thread_set_base(I64{0})
-    jet_rt_free(tcb, I64{256}, I64{64})
+    jet_rt_free(tcb, I64{320}, I64{64})
 }
 
 // RuntimeLower alone replaces this body with FunctionAddress of the checked
