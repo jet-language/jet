@@ -105,6 +105,10 @@ pub(crate) fn ambient_core_call(
             jet_std_time_sleep_duration_ns(nanos);
             CtValue::Unit
         }
+        ("__reject_uncontrolled", [CtValue::Str(effect)]) => {
+            scheduler::jet_scheduler_world_reject_uncontrolled(effect);
+            CtValue::Unit
+        }
         ("__zone_env", [CtValue::Str(name)]) => optional_value(
             time_rt::jet_time_zone_environment(name).map(CtValue::Str), Type::String,
         ),
