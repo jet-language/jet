@@ -92,7 +92,10 @@ fn jet_cli_fix_fn_header(source: String, open: Int) -> Int? Never! {
         if boundary {
             paren := -1
             loop index in (found + 3)..<open {
-                if (bytes[index] == U8{40}) { paren = index; break }
+                if (bytes[index] == U8{40}) {
+                    paren = index
+                    break
+                }
             }
             if paren >= 0 {
                 if jet_cli_fix_matching_paren(source, paren + 1) == .Val(close) && close < open {
@@ -185,13 +188,13 @@ fn jet_cli_fix_inline_insertion(source: String) -> Int Never! {
     bytes :: source.bytes()
     first :: jet_driver_inline_trivia_end(bytes, 0)
     at := first
-    loop (at > 0 && bytes[at - 1] != U8{10}) -> at -= 1
+    loop at > 0 && bytes[at - 1] != (U8{10}) -> at -= 1
     loop index in at..<first {
         if !jet_driver_inline_space(Int.from_u8(bytes[index])) -> return first
     }
     loop at > 0 {
         previous := at - 1
-        loop (previous > 0 && bytes[previous - 1] != U8{10}) -> previous -= 1
+        loop previous > 0 && bytes[previous - 1] != (U8{10}) -> previous -= 1
         if !source.slice(previous..<at).trim_start().starts_with("///") -> break
         at = previous
     }
