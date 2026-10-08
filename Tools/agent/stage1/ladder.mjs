@@ -4,9 +4,9 @@
 // per-phase report over their JET_TRACE_FILE traces.
 //
 //   ladder.mjs rungs SOURCE_TREE RUNGS_DIR
-//     For L1..L4, a private tree holding only the rung's packages (hard links
-//     to SOURCE_TREE's files), SOURCE_TREE's own assemble.mjs, the
-//     sources.list filtered to those packages in their canonical order, and
+//     For L1..L4, a private tree holding the rung's packages and the manifest's
+//     shared sources (hard links to SOURCE_TREE's files), SOURCE_TREE's own
+//     assemble.mjs, sources.list filtered in its canonical order, and
 //     an anchor file (Compiler/Bootstrap/Host/LadderAnchor.jet, outside the
 //     inventory like Host/Entry.jet); that tree's assemble.mjs writes
 //     RUNGS_DIR/<rung>/project (package.jet + src/compiler.jet) and
@@ -158,7 +158,9 @@ function rungs(sourceTree, rungsDir) {
     } else {
       const tree = join(dir, "tree");
       rmSync(tree, { recursive: true, force: true });
-      const selected = listed.filter((path) => rung.packages.some((pkg) => path.startsWith(`Compiler/${pkg}/`)));
+      // Manifest entries outside Compiler/ are shared source dependencies,
+      // including Jetpack's canonical Syntax constants; keep that closure.
+      const selected = listed.filter((path) => !path.startsWith("Compiler/") || rung.packages.some((pkg) => path.startsWith(`Compiler/${pkg}/`)));
       if (selected.length === 0) fail(`${rung.name}: no sources for ${rung.packages.join(",")}`);
       for (const root of sourceRoots) mkdirSync(join(tree, root), { recursive: true });
       for (const path of selected) place(join(src, path), join(tree, path));

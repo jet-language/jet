@@ -20,8 +20,10 @@ They require the matching `host3.path`/`host4.path` cache file and overlay check
 Linux systemd user scopes, flock, Node, Python runners and the project devshell are required.
 
 `ladder.mjs rungs SOURCE_TREE RUNGS_DIR` assembles the selected tree's manifest
-sources without rewriting their bodies. Keep its entry anchors aligned with the
-package APIs; the lowering anchor borrows the checked rows and uses a single
+sources without rewriting their bodies. Each subset keeps the manifest-listed
+shared sources outside `Compiler/`, including Jetpack's canonical syntax names,
+in manifest order. Keep its entry anchors aligned with the package APIs; the
+lowering anchor borrows the checked rows and uses a single
 compiler thread. `Compiler/JetCodegen/Tests/run-field-owner-fixtures.mjs OUTDIR`
 adds the field-owner contracts to the freshly assembled L4 unit and generates
 their package budget, including the compiler's `Time.Wait` effect. Fix source or
