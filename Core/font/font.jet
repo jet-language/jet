@@ -63,6 +63,13 @@ pub fn shape_with(face: FontFace, text: String) -> GlyphRun Never! {
     shape_fallback(face, text)
 }
 
+pub fn shape(text: String, face: FontFace) -> GlyphRun Never! {
+    if core.font.__shape_text(text, face) == {
+        .Ok(run) -> run
+        .Err(cause) -> panic("font shaping host contract failure: {cause}")
+    }
+}
+
 fn shape_fallback(face: FontFace, text: String) -> GlyphRun {
     glyphs := [Glyph]{}
     advance := Float{0.0}
