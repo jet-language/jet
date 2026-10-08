@@ -1290,3 +1290,11 @@ plus the deferred LF against the total limit. Errors retain native record
 index/path projection and sticky-terminal behavior. These differences follow
 `EncodingStream.rs`'s `jet_jsonl_tree_size`, `jet_jsonl_wire_size`,
 `JSONLWriter.write_record`, `flush_output`, and `finish_output`.
+
+Typed `csv.decode<T>` owns the native header-to-record policy in Jet. The
+whole-value comma parser retains blank records, doubled quotes, CRLF rules,
+Unicode-scalar columns and the exact `E2701` failure text. It intentionally
+does not impose streaming `EncodingLimits` on the shipped unbounded whole-value
+operation. Each header names a text cell (missing cells are empty; extra cells
+are ignored), and all typed errors are accumulated in data-record order with
+the native `row N` path prefix.
