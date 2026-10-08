@@ -452,6 +452,18 @@ wrapper allocation and ignores null handles. `DbConnectionHandleWitness.c`
 pins that shell-only deallocation for zero, ordinary and maximal u64 IDs;
 it does not claim admission of a database transport engine.
 
+The held native TLS stream handle is 112 bytes: ID, owned canonical FD72,
+optional timeout facts, seven borrowed callback pointers and one nullable
+owned peer snapshot. The seventh callback is the seed's `peer_snapshot`,
+distinct from its optional `peer_identity` owner. Drop releases the descriptor
+through `HostFiles.jet`'s canonical `jet_fd_drop_raw` (dependency `047fb460b`),
+then the peer snapshot in field declaration order, then the stream shell.
+It never invokes a TLS-close or other borrowed callback, matching the absence
+of a custom seed destructor. Show is exactly `TLSStream(<signed ID>)`.
+`TLSStreamHandleWitness.c` checks real descriptor closure before snapshot
+release, optional ownership and untouched callbacks. This does not claim a
+native TLS handshake engine or transport callback admission.
+
 ## Dependency order
 
 Core work follows the dependency graph. These categories describe dependency
