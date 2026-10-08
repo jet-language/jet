@@ -1,32 +1,6 @@
 // Temporary ABI projections over existing host operations; no new runtime state.
 // Replaced by Jet runtime layers L5/L6/L7/L9; every seed dies at cutover.
 
-pub(crate) fn jet_log_record_emit_raw(level: &String, message: &String, fields: &Vec<jet_std::LogField>) {
-    jet_log_emit(level.as_str(), message.as_str(), fields.as_slice());
-}
-pub(crate) fn jet_log_span_allocate_raw(name: &String) -> (i64, String) {
-    let span = jet_ring_log_span(name);
-    (span.id, span.name)
-}
-pub(crate) fn jet_browser_path_join_raw(root: &String, path: &String) -> String {
-    std::path::Path::new(root).join(path).to_string_lossy().into_owned()
-}
-pub(crate) fn jet_browser_read_text_raw(path: &String) -> Option<String> {
-    std::fs::read_to_string(path).ok()
-}
-pub(crate) fn jet_browser_is_file_raw(path: &String) -> bool {
-    std::path::Path::new(path).is_file()
-}
-pub(crate) fn jet_browser_file_size_raw(path: &String) -> Option<i64> {
-    std::fs::metadata(path).ok().map(|metadata| metadata.len() as i64)
-}
-pub(crate) fn jet_browser_modified_ms_raw(path: &String) -> Option<i64> {
-    let metadata = std::fs::metadata(path).ok()?;
-    Some(metadata.modified().ok()
-        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|duration| i64::try_from(duration.as_millis()).unwrap_or(i64::MAX))
-        .unwrap_or(0))
-}
 pub(crate) fn jet_openapi_contract_stop_raw(message: &String) -> ! {
     jet_runtime_stop("E2805", "", 0, message.as_str())
 }
@@ -60,9 +34,6 @@ pub(crate) fn jet_table_invoke_loader_raw<T: Clone + Send + Sync + 'static>(tabl
     // Source tests presence before calling; this has no alternate loader policy.
     (table.server_page.as_ref().expect("checked table loader"))(state)
 }
-pub(crate) fn jet_table_validate_loaded_raw<T>(table: &JetWebTable<T>, page: JetWebTablePage<T>) -> Result<JetWebTablePage<T>, String> {
-    jet_web_table_validate_server_page(page, table.row_key.as_ref())
-}
 pub(crate) fn jet_table_accept_keys_raw<T: Clone + Send + Sync + 'static>(table: &JetWebTable<T>, page: &JetWebTablePage<T>) -> Result<(), String> {
     table.accept_server_page_keys(page)
 }
@@ -78,3 +49,56 @@ pub(crate) fn jet_table_page_store_raw<T: Clone>(table: &JetWebTable<T>, page: O
 pub(crate) fn jet_table_state_store_raw<T>(table: &JetWebTable<T>, state: JetWebTableState) {
     table.state.set(state);
 }
+
+pub(crate) fn jet_table_set_state_raw<T: Clone + Send + Sync + 'static>(table: &JetWebTable<T>, state: JetWebTableState) {
+    table.set_state(state);
+}
+pub(crate) fn jet_table_alias_raw<T: Clone>(table: &JetWebTable<T>) -> JetWebTable<T> {
+    table.clone()
+}
+pub(crate) fn jet_table_generation_raw<T>(table: &JetWebTable<T>, advance: bool) -> u64 {
+    jet_web_table_page_generation(&table.name, advance)
+}
+pub(crate) fn jet_table_page_facts_raw<T>(page: &JetWebTablePage<T>) -> (i64, i64, i64, i64, i64, i64) {
+    (page.total_rows, page.page_index, page.page_size, page.page_count, page.rows.len() as i64, page.row_keys.len() as i64)
+}
+pub(crate) fn jet_table_has_key_raw<T>(table: &JetWebTable<T>) -> bool {
+    table.row_key.is_some()
+}
+pub(crate) fn jet_table_page_accessor_keys_raw<T>(table: &JetWebTable<T>, mut page: JetWebTablePage<T>) -> JetWebTablePage<T> {
+    let key = table.row_key.as_ref().expect("checked table key accessor");
+    page.row_keys = page.rows.iter().map(|row| key(row)).collect();
+    page
+}
+pub(crate) fn jet_table_page_keys_raw<T>(page: &JetWebTablePage<T>) -> Vec<String> {
+    page.row_keys.clone()
+}
+pub(crate) fn jet_table_page_replace_keys_raw<T>(mut page: JetWebTablePage<T>, keys: Vec<String>) -> JetWebTablePage<T> {
+    page.row_keys = keys;
+    page
+}
+pub(crate) fn jet_table_cell_raw<T>(column: &JetWebTableColumn<T>, row: &T) -> String {
+    column.value(row)
+}
+pub(crate) fn jet_table_column_info_raw<T>(column: &JetWebTableColumn<T>) -> (String, String) {
+    (column.name.clone(), column.cell_type.clone())
+}
+pub(crate) fn jet_table_make_page_raw<T>(rows: Vec<T>, keys: Vec<String>, total: i64, index: i64, size: i64, count: i64) -> JetWebTablePage<T> {
+    JetWebTablePage { rows, row_keys: keys, total_rows: total, page_index: index, page_size: size, page_count: count }
+}
+
+pub(crate) fn jet_table_rows_raw<T: Clone + Send + Sync + 'static>(table: &JetWebTable<T>) -> Vec<T> {
+    table.rows()
+}
+pub(crate) fn jet_table_row_key_raw<T>(table: &JetWebTable<T>, row: &T) -> String {
+    (table.row_key.as_ref().expect("checked table key accessor"))(row)
+}
+pub(crate) fn jet_table_state_equal_raw(left: &JetWebTableState, right: &JetWebTableState) -> bool {
+    left == right
+}
+pub(crate) fn jet_table_query_facts_raw(state: &JetWebTableState) -> (i64, i64, bool, Option<(String, bool)>, Option<(String, String)>) {
+    (state.page_index, state.page_size, state.page_mode.is_server(),
+        state.sort.as_ref().map(|sort| (sort.column.clone(), sort.direction.is_descending())),
+        state.filter.as_ref().map(|filter| (filter.column.clone(), filter.value.clone())))
+}
+
