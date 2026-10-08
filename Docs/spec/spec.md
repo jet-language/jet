@@ -301,6 +301,13 @@ qualified as `core.math.random` (D-NAME-ALIAS1=A, D-CORE-PRELUDE1=A).
 A user declaration shadows a readable prelude alias; the language-owned built-in
 names remain reserved. `#NoPrelude` disables the readable prelude aliases for that
 file, so use the qualified Core call instead (D-NAME-ALIAS1=A, D-PRELUDEX1=A).
+
+Automatic Core source loading and readable-prelude alias injection use identifiers
+from the canonical lexer, including code inside string interpolation.
+Text inside string literals, raw/foreign payloads, and comments is data, not
+identifier demand; explicit imports and their dependency/private-part closure
+are unchanged.
+
 The readable prelude is a closed set. A candidate must satisfy its seven
 membership tests: measured frequency; total and safe behavior; names that never
 carry semantics; no better home; first-hour coverage; one fixed set for every
