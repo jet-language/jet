@@ -93,6 +93,20 @@ pub enum Body {
 
 
 
+// Shared router/request carriers keep their native callback/body ownership.
+// Public operations enter source before crossing the reserved host boundary.
+pub fn router() -> HTTPRouter Never! {
+    core.http.__router()
+}
+
+pub fn parse(raw: String) -> HTTPRequest Never! {
+    core.http.__parse(raw)
+}
+
+pub fn dispatch(router: HTTPRouter, request: ^HTTPRequest) -> HTTPResponse HTTPError! {
+    core.http.__dispatch(router, request)
+}
+
 pub fn method_parse(token: String) -> Method Never! {
     u :: ascii_upper(token)
     if u == {
