@@ -4481,9 +4481,6 @@ pub(super) fn lower_expr(
                         | THandleOp::FileWriterFlush
                         | THandleOp::FileWriterWriteAll
                         | THandleOp::FileWriterFsync
-                        | THandleOp::ClockTick
-                        | THandleOp::ClockAdvance
-                        | THandleOp::ClockWait
                         | THandleOp::FakeName
                         | THandleOp::FakeEmail
                         | THandleOp::FakeHost
@@ -7719,12 +7716,6 @@ fn lower_host_call(
             ];
             emit_host_route_call(ctx, expr, route, args)
         }
-        THostCall::Helper { kind, args, .. } => {
-            let args = lower_host_args(ctx, args)?;
-            let carrier = super::TFailureCarrier::from_checked_type(&expr.ty);
-            let route = super::helper_route(*kind, &expr.ty, &carrier)?;
-            emit_host_route_call(ctx, expr, route, args)
-        }
         THostCall::Method { recv, method, args } => {
             let carrier = super::TFailureCarrier::from_checked_type(&expr.ty);
             let route = super::host_method_route(&recv.ty, method, args.len(), &expr.ty, &carrier)?;
@@ -8325,42 +8316,6 @@ fn numeric_bound_constant(ty: &Type, member: &str) -> Option<MirConstant> {
     }
 }
 
-fn lower_host_args(
-    ctx: &mut LowerCtx,
-    args: &[super::THostArg],
-) -> Result<Vec<MirCallArg>, LowerError> {
-    args.iter()
-        .map(|arg| match arg {
-            super::THostArg::Expr(value) => ctx.lower_plain_arg(value),
-            super::THostArg::Borrow(value) => {
-                let mut lowered = ctx.lower_plain_arg(value)?;
-                lowered.access = MirAccess::Read;
-                Ok(lowered)
-            }
-            super::THostArg::Lambda(lambda) => {
-                let value = ctx.lower_lambda(lambda)?;
-                Ok(MirCallArg {
-                    value,
-                    place: None,
-                    access: MirAccess::Read,
-                    span: ctx.span(),
-                    label: None,
-                    source_index: None,
-                    binder_slot: None,
-                    spread: false,
-                    implicit_clone: false,
-                    shared_auto_clone: false,
-                    owned_last_use: false,
-                    authority_boundary: false,
-                    fn_coercion: None,
-                    widen_fixed_to_list: false,
-                    widen_to_union: None,
-                    box_as_trait: None,
-                })
-            }
-        })
-        .collect()
-}
 
 fn apply_route_access(
     ctx: &LowerCtx,

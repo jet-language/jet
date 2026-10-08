@@ -188,16 +188,10 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("Stderr", "flush", 0) => THandleOp::StderrFlush,
         ("Stderr", "is_tty", 0) => THandleOp::StderrIsTty,
         ("TestSuite", "run", 0) => THandleOp::TestSuiteRun,
-        // D-DET1: deterministic injected Clock/Rng capability methods.
-        ("Clock", "now", 0) => THandleOp::ClockNow,
-        ("Clock", "tick", 1) => THandleOp::ClockTick,
         (Syntax::DETERMINISTIC_WORLD_TYPE, "now", 0) => THandleOp::WorldNow,
         (Syntax::DETERMINISTIC_WORLD_TYPE, "advance", 1) => THandleOp::WorldAdvance,
         (Syntax::DETERMINISTIC_WORLD_TYPE, "wait_idle", 0) => THandleOp::WorldWaitIdle,
         (Syntax::DETERMINISTIC_WORLD_TYPE, "history", 0) => THandleOp::WorldHistory,
-        // D-DET-CAPAPI: absolute set + Duration advance; the widened Rng draws; Duration read.
-        ("Clock", "advance", 1) => THandleOp::ClockAdvance,
-        ("Clock", "wait", 1) => THandleOp::ClockWait,
         ("RealtimeStream", "next_deadline", 0) => THandleOp::RealtimeNextDeadline,
         ("RealtimeStream", "receipt", 0) => THandleOp::RealtimeReceipt,
         ("RealtimeStream", "cancel", 0) => THandleOp::RealtimeCancel,
@@ -502,16 +496,12 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
     };
     if matches!(
         handle,
-        Syntax::CLOCK_TYPE
-            | Syntax::RNG_TYPE
+        Syntax::RNG_TYPE
             | "HistoryRNG"
             | Syntax::FAKE_TYPE
     ) {
         let emitted_borrow = match &op {
-            THandleOp::ClockTick
-            | THandleOp::ClockAdvance
-            | THandleOp::ClockWait
-            | THandleOp::RngInt
+            THandleOp::RngInt
             | THandleOp::RngFloat
             | THandleOp::RngFloatRange
             | THandleOp::RngBool

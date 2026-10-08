@@ -8,7 +8,7 @@
 #![allow(dead_code)]
 use super::{
     ListRemoveMode, LowerError, TBuiltinOp, TClosureOp, TFailureCarrier, TGcEditKind, THandleOp,
-    THelperKind, TNumericOp, TPreludeRoute, TRoutePlan, TTryConvert, TTypedTextForm,
+    TNumericOp, TPreludeRoute, TRoutePlan, TTryConvert, TTypedTextForm,
     TTypedTextInterpKind,
 };
 use crate::AST::{BinOp, Type};
@@ -1794,42 +1794,6 @@ impl THandleOp {
                 1,
                 &[true],
                 None,
-                carrier,
-            ),
-            ClockNow => h(
-                "clock.now",
-                "jet_clock_now",
-                1,
-                1,
-                &[true],
-                Some(Effect::Time),
-                carrier,
-            ),
-            ClockTick => h(
-                "clock.tick",
-                "jet_clock_tick",
-                2,
-                2,
-                &[true, false],
-                Some(Effect::Time),
-                carrier,
-            ),
-            ClockAdvance => h(
-                "clock.advance",
-                "jet_clock_advance",
-                2,
-                2,
-                &[true, false],
-                Some(Effect::Time),
-                carrier,
-            ),
-            ClockWait => h(
-                "clock.wait",
-                "jet_clock_wait",
-                2,
-                2,
-                &[true, true],
-                Some(Effect::Time),
                 carrier,
             ),
             WorldNow => h(
@@ -7811,32 +7775,6 @@ pub(super) fn shared_guard_split_route(
     )
 }
 
-/// Select one of the checked clock helper kernels. The legacy helper spelling
-/// is retained only by the old renderer; MIR sees this closed set.
-pub(super) fn helper_route(
-    helper: THelperKind,
-    result: &Type,
-    carrier: &TFailureCarrier,
-) -> Result<TPreludeRoute, LowerError> {
-    let _ = result;
-    let (member, symbol, arity, mask) = match helper {
-        THelperKind::ClockNew => ("clock_new", "jet_std_clock_new", 1, vec![false]),
-        THelperKind::ClockSystem => ("clock_system", "jet_std_clock_system", 0, Vec::new()),
-    };
-    prelude_route_row(
-        MirPreludeFamily::StaticPrelude,
-        "core.clock",
-        member,
-        symbol,
-        arity,
-        arity,
-        &mask,
-        None,
-        carrier,
-        MirPreludeAbi::Value,
-        "clock helper",
-    )
-}
 
 pub(super) fn memo_stats_route(
     result: &Type,

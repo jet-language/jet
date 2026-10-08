@@ -5607,43 +5607,6 @@ fn lower_method_call_impl(
     if matches!(receiver, Expr::Ident(name, _) if name == Syntax::CLOCK_TYPE)
         && !env.locals.contains_key(Syntax::CLOCK_TYPE)
     {
-        if method == "new" && args.len() == 1 {
-            return in_own_frame(|| {
-                let Some(ty) = resolved_ret.cloned() else {
-                    return invariant_method_expr(
-                        method_span,
-                        "Clock.new without a resolved return type",
-                    );
-                };
-                let seed = lower_expr(&args[0].expr, cx, env);
-                TExpr {
-                    ty,
-                    kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::Helper {
-                        helper: format!("{}jet_std_clock_new", cx.root_prefix),
-                        kind: crate::Codegen::TIR::THelperKind::ClockNew,
-                        args: vec![crate::Codegen::TIR::THostArg::Expr(seed)],
-                    })),
-                }
-            });
-        }
-        if method == "system" && args.is_empty() {
-            return in_own_frame(|| {
-                let Some(ty) = resolved_ret.cloned() else {
-                    return invariant_method_expr(
-                        method_span,
-                        "Clock.system without a resolved return type",
-                    );
-                };
-                return TExpr {
-                    ty,
-                    kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::Helper {
-                        helper: format!("{}jet_std_clock_system", cx.root_prefix),
-                        kind: crate::Codegen::TIR::THelperKind::ClockSystem,
-                        args: vec![],
-                    })),
-                };
-            });
-        }
         if method == "now" && args.is_empty() {
             return in_own_frame(|| {
                 let Some(ty) = resolved_ret.cloned() else {

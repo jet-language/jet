@@ -1009,10 +1009,6 @@ fn jet_codegen_general_handle_route(operation: THandleOp, receiver: Type, argume
         .StderrIsTTY -> return Val(jet_codegen_handle_h("stderr.is_tty", "jet_std_io_stderr_is_tty", [Bool]{true}, Val(Effect.IO)))
         .StopwatchElapsedMillis -> return Val(jet_codegen_handle_h("stopwatch.elapsed_millis", "jet_stopwatch_elapsed_millis", [Bool]{true}, Val(Effect.Time)))
         .TestSuiteRun -> return Val(jet_codegen_handle_h("test_suite.run", "jet_test_suite_run", [Bool]{true}, None))
-        .ClockNow -> return Val(jet_codegen_handle_h("clock.now", "jet_clock_now", [Bool]{true}, Val(Effect.Time)))
-        .ClockTick -> return Val(jet_codegen_handle_h("clock.tick", "jet_clock_tick", [Bool]{true, false}, Val(Effect.Time)))
-        .ClockAdvance -> return Val(jet_codegen_handle_h("clock.advance", "jet_clock_advance", [Bool]{true, false}, Val(Effect.Time)))
-        .ClockWait -> return Val(jet_codegen_handle_h("clock.wait", "jet_clock_wait", [Bool]{true, true}, Val(Effect.Time)))
         .WorldNow -> return Val(jet_codegen_handle_h("deterministic_world.now", "jet_world_now", [Bool]{true}, Val(Effect.Time)))
         .WorldAdvance -> return Val(jet_codegen_handle_h("deterministic_world.advance", "jet_world_advance", [Bool]{true, true}, Val(Effect.Time)))
         .WorldWaitIdle -> return Val(jet_codegen_handle_h("deterministic_world.wait_idle", "jet_world_wait_idle", [Bool]{true}, Val(Effect.Time)))
@@ -1344,7 +1340,7 @@ fn jet_codegen_handle_receiver_is_mutating(operation: THandleOp) -> Bool Never! 
     }
     if operation == {
         .StdinReadLine -> true
-        .FileReaderReadLine | .FileReaderRead | .AllocReset | .FileWriterWriteLine | .FileWriterFlush | .FileWriterWriteAll | .FileWriterFsync | .ClockTick | .ClockAdvance | .ClockWait | .FakeName | .FakeEmail | .FakeHost | .FakeAddress | .TCPStreamRead | .TCPStreamWrite | .TCPStreamClose | .TCPStreamReadBytes | .TCPStreamReadBytesDeadline | .TCPStreamReadText | .TCPStreamReadTextDeadline | .TCPStreamWriteBytes | .TCPStreamWriteBytesDeadline | .TCPStreamWriteAllBytes | .TCPStreamWriteAllBytesDeadline | .TCPStreamWriteText | .TCPStreamWriteTextDeadline | .TCPStreamShutdown | .TCPStreamReady | .UnixStreamReadDeadline | .UnixStreamWriteAllDeadline | .UnixStreamClose | .UnixStreamSetTimeout | .TLSStreamReadDeadline | .TLSStreamWriteAllDeadline | .TLSStreamClose | .TLSStreamCloseWrite -> true
+        .FileReaderReadLine | .FileReaderRead | .AllocReset | .FileWriterWriteLine | .FileWriterFlush | .FileWriterWriteAll | .FileWriterFsync | .FakeName | .FakeEmail | .FakeHost | .FakeAddress | .TCPStreamRead | .TCPStreamWrite | .TCPStreamClose | .TCPStreamReadBytes | .TCPStreamReadBytesDeadline | .TCPStreamReadText | .TCPStreamReadTextDeadline | .TCPStreamWriteBytes | .TCPStreamWriteBytesDeadline | .TCPStreamWriteAllBytes | .TCPStreamWriteAllBytesDeadline | .TCPStreamWriteText | .TCPStreamWriteTextDeadline | .TCPStreamShutdown | .TCPStreamReady | .UnixStreamReadDeadline | .UnixStreamWriteAllDeadline | .UnixStreamClose | .UnixStreamSetTimeout | .TLSStreamReadDeadline | .TLSStreamWriteAllDeadline | .TLSStreamClose | .TLSStreamCloseWrite -> true
         else -> false
     }
 }

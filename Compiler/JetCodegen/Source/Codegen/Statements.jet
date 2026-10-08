@@ -3610,13 +3610,6 @@ fn jet_codegen_stability_expr(state: &JetCodegenLetStability, expression: TExpr,
         }
         .HostCall(call) -> {
             if call == {
-                .Helper(_, _, args) -> loop argument in args {
-                    if argument == {
-                        .Expr(passed) -> jet_codegen_stability_expr(&state, passed, write)
-                        .Borrow(passed) -> jet_codegen_stability_expr(&state, passed, inspect)
-                        .Lambda(_) -> state.pinned["*"] = true
-                    }
-                }
                 .CCallback(_, _, _, _, _, _) -> state.pinned["*"] = true
                 .GCEdit(root, _, edges, _, _, _) -> {
                     loop child in tir_expr_children(expression) -> jet_codegen_stability_expr(&state, child, write)

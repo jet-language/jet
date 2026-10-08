@@ -704,16 +704,6 @@ pub enum TOrFallback {
     ContinueLabel(label: String)
 }
 
-pub enum THelperKind {
-    ClockNew
-    ClockSystem
-}
-
-pub enum THostArg {
-    Expr(value: TExpr)
-    Borrow(value: TExpr)
-    Lambda(value: TLambda)
-}
 
 pub enum TMatchProbe {
     IsSome
@@ -747,7 +737,6 @@ pub enum TGCEditKind {
 }
 
 pub enum THostCall {
-    Helper(helper: String, kind: THelperKind, args: [THostArg])
     Method(receiver: TExpr, method: String, args: [TExpr])
     CarrierFact(receiver: TExpr, field: String, notes: Bool)
     CellGuardProject(receiver: TExpr, paths: [[String]], result_type: Type, editable: Bool, edit_paths_disjoint: Bool)
@@ -927,10 +916,6 @@ pub enum THandleOp {
     StderrWriteBytes
     StderrFlush
     StderrIsTTY
-    ClockNow
-    ClockTick
-    ClockAdvance
-    ClockWait
     WorldNow
     WorldAdvance
     WorldWaitIdle
@@ -2376,21 +2361,10 @@ fn tir_list_spread_children(parts: [TListSpreadPart]) -> [TExpr] Never! {
     children
 }
 
-fn tir_host_arg_children(argument: THostArg) -> [TExpr] Never! {
-    children := [TExpr]{}
-    if argument == {
-        .Expr(value) | .Borrow(value) -> &children.push(value)
-        .Lambda(value) -> loop child in tir_lambda_children(value) -> &children.push(child)
-    }
-    children
-}
 
 fn tir_host_call_children(call: THostCall) -> [TExpr] Never! {
     children := [TExpr]{}
     if call == {
-        .Helper(_, _, args) -> loop argument in args {
-            loop child in tir_host_arg_children(argument) -> &children.push(child)
-        }
         .Method(receiver, _, args) -> {
             &children.push(receiver)
             loop value in args -> &children.push(value)
