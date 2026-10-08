@@ -202,17 +202,11 @@ fn host_optional_text_equal(left: I64, right: I64) -> Bool {
     host_context_equal(left + I64{8}, right + I64{8})
 }
 
-#Export(c) fn jet_rt_handle_clone_IOOperation(value: I64) -> I64 {
-    result :: jet_rt_alloc(I64{8}, I64{8})
-    rt_text_store(result, rt_text_word(value))
-    result
-}
+#Export(c) fn jet_rt_handle_clone_IOOperation(value: I64) -> I64 { encoding_enum_clone(value) }
 
-#Export(c) fn jet_rt_handle_drop_IOOperation(value: I64) {
-    if (value != I64{0}) -> jet_rt_free(value, I64{8}, I64{8})
-}
+#Export(c) fn jet_rt_handle_drop_IOOperation(value: I64) { encoding_enum_drop(value) }
 
-#Export(c) fn jet_rt_handle_eq_IOOperation(left: I64, right: I64) -> Bool { rt_text_word(left) == rt_text_word(right) }
+#Export(c) fn jet_rt_handle_eq_IOOperation(left: I64, right: I64) -> Bool { encoding_enum_eq(left, right) }
 
 // Streaming labels follow StructuralDebug.rs:182-228 and the seed's custom
 // JetDebug implementations at preregeneration-runtime.rs:72109-72218.
