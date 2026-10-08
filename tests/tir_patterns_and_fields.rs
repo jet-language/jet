@@ -964,8 +964,8 @@ fn run() {
     assert_eq!(stdout, "database\ndocs\nother\n");
 }
 
-/// Structural tuple pattern tests and bindings use the same checked tuple field
-/// IDs as ordinary projections in both compiler implementations.
+/// Text/binary pattern capture tuples use the same checked tuple field IDs as
+/// ordinary projections in both compiler implementations.
 #[test]
 fn tuple_field_pattern_tests_bindings_and_dispatch_run() {
     if !have_rustc() {
