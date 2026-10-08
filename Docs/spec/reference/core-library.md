@@ -3446,6 +3446,13 @@ The `*_at` DNS forms take an explicit server, and `error_operation`,
 nonnegative milliseconds. A blocking socket call declares `Net` and
 `Time.Wait`, so the suspension boundary remains visible.
 
+DNS error classification is Jet source policy. Reserved Core-only
+`__dns_*_lookup` leaves call the existing resolver and return its raw string
+cause; Jet preserves not-found, cancellation, protocol, timeout, and generic
+failure precedence and caller-name context. Public signatures and unsupported
+tier behavior are unchanged; raw leaves keep the same `Net` and `Time.Wait`
+requirements as their public operations.
+
 `unix_connect` retains the native entry so its ratified `deadline:` overload is
 not narrowed to a path-only source wrapper. Unix and TLS byte/text wrappers use
 the native access contract: reads and writes borrow the named stream with `&`,

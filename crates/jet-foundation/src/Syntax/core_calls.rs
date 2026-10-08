@@ -636,6 +636,15 @@ const fn effect_leaf_for(module: &str, method: &str) -> Option<&'static str> {
                 "tls_read",
                 "tls_write",
                 "tls_close",
+                "__dns_a_lookup",
+                "__dns_aaaa_lookup",
+                "__dns_a_at_lookup",
+                "__dns_aaaa_at_lookup",
+                "__dns_txt_lookup",
+                "__dns_txt_at_lookup",
+                "__dns_ptr_lookup",
+                "__dns_srv_lookup",
+                "__dns_srv_at_lookup",
             ],
         )
     {
@@ -1469,7 +1478,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: fd27317a56a19cad0e7c8ed21202ac98f4ca80945148daec9639b83a5aa68369
+// Source SHA-256: 7bef00c0c47274a5d4d98a9fad404a9d3befcec978a3bafeafaff8f5e3177b33
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -2703,15 +2712,24 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.net", "unix_connect", "jet_net_unix_connect", true, &[true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.net", "unix_shutdown", "jet_net_unix_shutdown", true, &[true, true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.net", "unix_close", "jet_net_unix_close", true, &[true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new( "core.net", "dns_a", "jet_net_dns_a", true, &[true, false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new( "core.net", "dns_a_at", "jet_net_dns_a_at", true, &[true, true, false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new( "core.net", "dns_aaaa", "jet_net_dns_aaaa", true, &[true, false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new( "core.net", "dns_aaaa_at", "jet_net_dns_aaaa_at", true, &[true, true, false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new( "core.net", "dns_txt", "jet_net_dns_txt", true, &[true, false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new( "core.net", "dns_txt_at", "jet_net_dns_txt_at", true, &[true, true, false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new( "core.net", "dns_ptr", "jet_net_dns_ptr", true, &[true, false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new( "core.net", "dns_srv", "jet_net_dns_srv", true, &[true, false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new( "core.net", "dns_srv_at", "jet_net_dns_srv_at", true, &[true, true, false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::source_owned("core.net", "dns_a", &[true, false]),
+    CoreCallRecord::source_owned("core.net", "dns_a_at", &[true, true, false]),
+    CoreCallRecord::source_owned("core.net", "dns_aaaa", &[true, false]),
+    CoreCallRecord::source_owned("core.net", "dns_aaaa_at", &[true, true, false]),
+    CoreCallRecord::source_owned("core.net", "dns_txt", &[true, false]),
+    CoreCallRecord::source_owned("core.net", "dns_txt_at", &[true, true, false]),
+    CoreCallRecord::source_owned("core.net", "dns_ptr", &[true, false]),
+    CoreCallRecord::source_owned("core.net", "dns_srv", &[true, false]),
+    CoreCallRecord::source_owned("core.net", "dns_srv_at", &[true, true, false]),
+    CoreCallRecord::new("core.net", "__dns_a_lookup", "jet_net_dns_a_lookup", true, &[true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.net", "__dns_a_at_lookup", "jet_net_dns_a_at_lookup", true, &[true, true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.net", "__dns_aaaa_lookup", "jet_net_dns_aaaa_lookup", true, &[true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.net", "__dns_aaaa_at_lookup", "jet_net_dns_aaaa_at_lookup", true, &[true, true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.net", "__dns_txt_lookup", "jet_net_dns_txt_lookup", true, &[true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.net", "__dns_txt_at_lookup", "jet_net_dns_txt_at_lookup", true, &[true, true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.net", "__dns_ptr_lookup", "jet_net_dns_ptr_lookup", true, &[true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.net", "__dns_srv_lookup", "jet_net_dns_srv_lookup", true, &[true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.net", "__dns_srv_at_lookup", "jet_net_dns_srv_at_lookup", true, &[true, true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.net.tls", "client", "jet_net_tls_client", false, &[false, true], ) .with_max_arity(4) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .without_direct_aot(),
     CoreCallRecord::new("core.net.tls", "read", "jet_net_tls_read_bytes", true, &[true, false]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.net.tls", "write", "jet_net_tls_write_bytes", true, &[true, true]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_native_int_result(),
