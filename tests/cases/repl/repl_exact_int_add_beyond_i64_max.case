@@ -1,0 +1,11 @@
+# PORT tests/repl.rs:3087-3101; verbatim inputs and original predicate forms.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no blessed snapshots.
+# Banner/prompt non-overlap: crates/jet-repl/src/Render.rs24-37,67-74; stderr discovery41-61.
+# lib.rs2469-2470 cooked floor mirrors transcript. No stripping/projection.
+fixture: repl_exact_int_add_beyond_i64_max.fixture
+step: jet repl
+env: NO_COLOR=1
+env: XDG_STATE_HOME={work}/state
+stdin: repl_exact_int_add_beyond_i64_max.fixture/input.txt
+exit: any # original library predicates did not assert process status
+stdout|stderr: ~ "\"9223372036854775808\" : String" # original predicate

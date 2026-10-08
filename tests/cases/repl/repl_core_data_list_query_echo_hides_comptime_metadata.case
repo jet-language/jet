@@ -1,0 +1,16 @@
+# PORT tests/repl.rs:3468-3495; verbatim inputs and original predicate forms.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no blessed snapshots.
+# Banner/prompt non-overlap: crates/jet-repl/src/Render.rs24-37,67-74; stderr discovery41-61.
+# lib.rs2469-2470 cooked floor mirrors transcript. No stripping/projection.
+fixture: repl_core_data_list_query_echo_hides_comptime_metadata.fixture
+step: jet repl
+env: NO_COLOR=1
+env: XDG_STATE_HOME={work}/state
+stdin: repl_core_data_list_query_echo_hides_comptime_metadata.fixture/input.txt
+exit: any # original library predicates did not assert process status
+stdout: !~ "E0956" # original predicate
+stderr: !~ "E0956" # original predicate
+stdout|stderr: ~ "Query(" # original predicate
+stdout|stderr: ~ "[] : List" # original predicate
+stdout: !~ "elem_type:" # original predicate
+stderr: !~ "elem_type:" # original predicate
