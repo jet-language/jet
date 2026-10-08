@@ -2504,9 +2504,10 @@ particular call uses UTC or bundled web data. `now`, `now_utc`, `today`,
 The civil carriers (`Date`/`LocalDate`, `LocalTime`, `DateTime`, `Period`,
 `Zone`, `ZonedDateTime`, and `Instant`) and their arithmetic, parsing,
 formatting, and text codecs are implemented in `Core/time/time.jet` on all
-tiers. `Date` aliases `LocalDate`; zone data is shared rather than copied
-when a zoned value is copied. Native seams supply raw clock samples,
-environment values and TZif bytes. Sleep delegates to the shared scheduler,
+tiers. `Date` aliases `LocalDate`; immutable zone tables are plain values,
+copied with their zone, and borrowed reads need no shared-memory guard or
+`Time.Wait` effect. Native seams supply raw clock samples, environment values
+and TZif bytes. Sleep delegates to the shared scheduler,
 including its deadline, shielding, cancellation, and timer policy; it is not a
 separate host wait. Zero and negative durations still check the wait boundary
 (their parked duration is zero), as do already-elapsed `sleep_until` deadlines.

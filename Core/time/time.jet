@@ -329,7 +329,9 @@ pub struct Period { years_value: Int, months_value: Int, days_value: Int }
 struct ZoneInfo { offset: Int, is_dst: Bool }
 struct ZoneTransition { at: Int, info: Int }
 struct ZoneData { transitions: [ZoneTransition], infos: [ZoneInfo] }
-pub struct Zone { name_value: String, data: Shared<ZoneData> }
+// Zone tables never change after construction; plain borrowed reads do not
+// acquire scheduler permits or add Time / Time.Wait to civil operations.
+pub struct Zone { name_value: String, data: ZoneData }
 pub struct ZonedDateTime { instant: DateTime, zone_value: Zone }
 pub struct Instant { start_ns: Int }
 
@@ -848,7 +850,7 @@ fn civil_parse_offset(value: String) -> Int TimeError! {
 
 pub fn utc() -> Zone Never! {
     data :: ZoneData{transitions: [ZoneTransition]{}, infos: [ZoneInfo]{ZoneInfo{offset: 0, is_dst: false}}}
-    Zone{name_value: "UTC", data: shared data}
+    Zone{name_value: "UTC", data: data}
 }
 pub fn zone(name: String) -[Env, FS.Read]> Zone TimeError! {
     if name == "UTC" || name == "Etc/UTC" || name == "Z" -> return Ok(utc())
@@ -924,19 +926,18 @@ fn civil_tzif(name: String, bytes: [U8]) -> Zone TimeError! {
     transitions := [ZoneTransition]{}
     loop i in 0..<times.len() -> &transitions.push(ZoneTransition{at: times[i], info: civil_clamp(Int{bytes[indices + i]}, 0, infos.len() - 1)})
     data :: ZoneData{transitions: transitions, infos: infos}
-    Ok(Zone{name_value: name, data: shared data})
+    Ok(Zone{name_value: name, data: data})
 }
 fn civil_zone_info(value: Zone, seconds: Int) -> ZoneInfo Never! {
-    data :: value.data.guard_read()
     lo := 0
-    hi := data.value.transitions.len()
+    hi := value.data.transitions.len()
     loop lo < hi {
         mid :: (lo + hi) /% 2
-        if data.value.transitions[mid].at <= seconds -> lo = mid + 1 else -> hi = mid
+        if value.data.transitions[mid].at <= seconds -> lo = mid + 1 else -> hi = mid
     }
     index := 0
-    if lo > 0 -> index = data.value.transitions[lo - 1].info
-    data.value.infos[index]
+    if lo > 0 -> index = value.data.transitions[lo - 1].info
+    value.data.infos[index]
 }
 fn civil_local_parts(value: Zone, seconds: Int) -> (date: LocalDate, time: LocalTime, offset: Int) Never! {
     offset :: civil_zone_info(value, seconds).offset
@@ -949,12 +950,11 @@ fn civil_local_matches(value: Zone, date: LocalDate, t: LocalTime, offset: Int, 
 }
 fn civil_local_utc(value: Zone, date: LocalDate, t: LocalTime, disambiguation: String) -> Int TimeError! {
     if disambiguation != "compatible" && disambiguation != "earlier" && disambiguation != "later" && disambiguation != "reject" -> return Err(TimeError{reason: "invalid disambiguation: {disambiguation}"})
-    data :: value.data.guard_read()
     local :: civil_utc(date, t)
     offsets := [Int]{}
     first := Int?{None}
     last := Int?{None}
-    loop info in data.value.infos {
+    loop info in value.data.infos {
         if offsets.contains(info.offset) -> next
         &offsets.push(info.offset)
         candidate :: saturating_sub_ns(local, info.offset)
@@ -976,12 +976,12 @@ fn civil_local_utc(value: Zone, date: LocalDate, t: LocalTime, disambiguation: S
         if disambiguation == "later" -> return Ok(maximum)
         return Err(TimeError{reason: "ambiguous local time in {value.name_value}"})
     }
-    loop i in 0..<data.value.transitions.len() {
-        transition :: data.value.transitions[i]
+    loop i in 0..<value.data.transitions.len() {
+        transition :: value.data.transitions[i]
         before_index := 0
-        if i > 0 -> before_index = data.value.transitions[i - 1].info
-        before :: data.value.infos[before_index].offset
-        after :: data.value.infos[transition.info].offset
+        if i > 0 -> before_index = value.data.transitions[i - 1].info
+        before :: value.data.infos[before_index].offset
+        after :: value.data.infos[transition.info].offset
         if after > before && local >= saturating_add_ns(transition.at, before) && local < saturating_add_ns(transition.at, after) {
             if disambiguation == "earlier" -> return Ok(saturating_sub_ns(local, after))
             if disambiguation == "reject" -> return Err(TimeError{reason: "nonexistent local time in {value.name_value}"})
@@ -1000,18 +1000,16 @@ impl Zone {
     }
     pub fn to_string(self) -> String Never! { self.name() }
     pub fn next_transition(self, utc_seconds: Int) -> Int? Never! {
-        data :: self.data.guard_read()
-        loop transition in data.value.transitions {
+        loop transition in self.data.transitions {
             if transition.at > utc_seconds -> return Val(transition.at)
         }
         None
     }
     pub fn previous_transition(self, utc_seconds: Int) -> Int? Never! {
-        data :: self.data.guard_read()
-        i := data.value.transitions.len()
+        i := self.data.transitions.len()
         loop i > 0 {
             i = i - 1
-            if data.value.transitions[i].at < utc_seconds -> return Val(data.value.transitions[i].at)
+            if self.data.transitions[i].at < utc_seconds -> return Val(self.data.transitions[i].at)
         }
         None
     }
@@ -1451,7 +1449,7 @@ impl Instant {
 
 #Test("Zoned local resolution keeps gap and overlap disambiguation") {
     data :: ZoneData{transitions: [ZoneTransition]{ZoneTransition{at: 3600, info: 1}, ZoneTransition{at: 10800, info: 0}}, infos: [ZoneInfo]{ZoneInfo{offset: 0, is_dst: false}, ZoneInfo{offset: 3600, is_dst: true}}}
-    z :: Zone{name_value: "test", data: shared data}
+    z :: Zone{name_value: "test", data: data}
     day :: new(1970, 1, 1)
     gap :: local_time(1, 30, 0)
     assert_eq((zoned_local(day, gap, z, "earlier") ?? panic("earlier")).to_datetime().to_timestamp(), 1800)
@@ -1466,7 +1464,7 @@ impl Instant {
 
 #Test("Zoned equality compares instant and immutable zone name without a guard") {
     first :: zoned(from_timestamp(0), utc())
-    same_name :: Zone{name_value: "UTC", data: shared ZoneData{transitions: [ZoneTransition]{}, infos: [ZoneInfo]{ZoneInfo{offset: 3600, is_dst: false}}}}
+    same_name :: Zone{name_value: "UTC", data: ZoneData{transitions: [ZoneTransition]{}, infos: [ZoneInfo]{ZoneInfo{offset: 3600, is_dst: false}}}}
     other_name :: Zone{name_value: "other", data: same_name.data}
     assert_eq(same_name.name(), "UTC")
     assert_eq(other_name.name(), "other")
