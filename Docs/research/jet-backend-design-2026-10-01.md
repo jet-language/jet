@@ -2239,3 +2239,21 @@ conversion's `native Int argument exceeds host range` message at
 syntax receipts do not admit native caller layouts or prove execution:
 source-root/MIR ownership and the generator's provider ABI validation remain
 required before pack cutover.
+
+### Shared record-variant panic parity
+
+DataTree and TLS wrong-variant payload getters call the single internal
+`rt_record_variant_panic()` in `JetRuntime/Source/Trap.jet`. It specializes the
+existing `jet_panic("<core.prelude>", 0, "record variant index out of range")`
+path without allocating file/message text: the same `trap_header(0)`,
+33 message bytes, `trap_msg_prelude_end()`, and `trap_footer(0)`.
+`trap_msg_prelude_end()` is the message terminator plus
+`trap_context("<core.prelude>", 0, empty function/source)` bytes.
+
+The reference is `PortableCore.rs:109-110` and
+`Trap.jet:195-200,263-265` before this insertion. The existing native
+`jet_panic`/`trap_simple` path does not publish to task state; this specialization
+preserves that fatal behavior rather than inventing a separate transport.
+Rust task-unwind versus native fatal-stop parity is a pre-existing shared
+Trap issue, not a task-parity claim for these data providers. Any shared Trap
+task/publication change must cover this specialization as well.
