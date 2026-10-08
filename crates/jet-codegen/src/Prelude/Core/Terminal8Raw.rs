@@ -20,12 +20,6 @@ fn jet_terminal8_read_all() -> (String, Option<String>) {
         Err(error) => (String::new(), Some(error.to_string())),
     }
 }
-fn jet_terminal8_take(n: i64) -> (Vec<u8>, Option<String>) {
-    match jet_std_io_take_raw(n) {
-        Ok(bytes) => (bytes, None),
-        Err(error) => (Vec::new(), Some(error.to_string())),
-    }
-}
 fn jet_terminal8_read_until(delimiter: &String) -> (String, Option<String>) {
     match jet_std_io_read_until_raw(delimiter) {
         Ok(text) => (text, None),
