@@ -115,6 +115,12 @@ fn capability_raw_flag(value: [U8]?) -> Bool Never! {
     false
 }
 
+fn capability_stdout_terminal() -> Bool Never! {
+    #Unsafe("Core TUI samples the same stdout terminal fact consumed by terminal style/progress") {
+        core.term.__stdout_terminal()
+    }
+}
+
 fn capability_inputs() -> TUICapabilityInputs Never! {
     // env::var: invalid UTF-8 is absent (Ui.rs:500,516-519).
     columns :: capability_env_text("COLUMNS")
@@ -125,13 +131,11 @@ fn capability_inputs() -> TUICapabilityInputs Never! {
     ascii :: capability_env_flag("JET_TUI_ASCII")
     forced :: capability_env_flag("FORCE_COLOR")
     no_color :: capability_env_bytes("NO_COLOR") != None
-    #Unsafe("Core TUI samples the same stdout terminal fact consumed by terminal style/progress") {
-        terminal :: core.term.__stdout_terminal()
-        return TUICapabilityInputs{
-            columns: columns, lines: lines, term: term, color_term: color_term,
-            ascii: ascii, forced: forced, no_color: no_color, terminal: terminal,
-            usize_max: core.sys.usize_max()
-        }
+    terminal :: capability_stdout_terminal()
+    TUICapabilityInputs{
+        columns: columns, lines: lines, term: term, color_term: color_term,
+        ascii: ascii, forced: forced, no_color: no_color, terminal: terminal,
+        usize_max: core.sys.usize_max()
     }
 }
 
@@ -636,19 +640,23 @@ fn scalar_display_width(n: Int) -> Int Never! {
     assert(escape.len() == 1)
 }
 
+fn normalized_style_test_node(words: StyleWords) -> UINode Never! {
+    #Unsafe("Core TUI test: normalized style words and explicit absent UI slots") {
+        ui.__node_transfer("jet", 3.0, 1.0, 2, 1, [UINode]{}, false, "", 63, true,
+            words.foreground.kind, words.foreground.word, words.background.kind, words.background.word, words.flags)
+    }
+}
+
 #Test("TUI normalized style words cross the actual retained renderer boundary") {
     styled :: style_background(style_foreground(style_bold(style(), true), color_rgb(12, 34, 56)), color_ansi16(2))
     words :: style_words(styled)
     assert(words.foreground.kind == 3 && words.foreground.word == 795192)
     assert(words.background.kind == 1 && words.background.word == 2 && words.flags == 1)
-    #Unsafe("Core TUI test: normalized style words and explicit absent UI slots") {
-        node :: ui.__node_transfer("jet", 3.0, 1.0, 2, 1, [UINode]{}, false, "", 63, true,
-            words.foreground.kind, words.foreground.word, words.background.kind, words.background.word, words.flags)
-        backend :: ui.tui_backend()
-        ui.mount(backend, node)
-        lines :: backend.frame_lines()
-        assert(lines.len() > 0 && lines[0] == style_text("jet", styled, capabilities()))
-    }
+    node :: normalized_style_test_node(words)
+    backend :: ui.tui_backend()
+    ui.mount(backend, node)
+    lines :: backend.frame_lines()
+    assert(lines.len() > 0 && lines[0] == style_text("jet", styled, capabilities()))
 }
 
 #Test("TUI list/table formatting keeps scalar widths and empty cells") {
