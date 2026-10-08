@@ -1046,7 +1046,7 @@ fn expand_nested_generics_in_code_module(
     traits.register_synthetic_rollback();
     traits.register_synthetic_display_debug();
     traits.register_synthetic_close();
-    traits.register_synthetic_operators();
+    traits.register_synthetic_operators(|_| false);
     traits.register_synthetic_iter_index();
     traits.register_synthetic_io();
     traits.register_synthetic_driver();
@@ -1963,7 +1963,7 @@ fn expand_alias(
         nested_traits.register_synthetic_rollback();
         nested_traits.register_synthetic_display_debug();
         nested_traits.register_synthetic_close();
-        nested_traits.register_synthetic_operators();
+        nested_traits.register_synthetic_operators(|_| false);
         nested_traits.register_synthetic_iter_index();
         nested_traits.register_synthetic_io();
         nested_traits.register_synthetic_driver();
