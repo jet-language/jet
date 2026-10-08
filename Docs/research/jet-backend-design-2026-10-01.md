@@ -2211,3 +2211,21 @@ helpers without temporary carriers. All item/phase/operation ordinals use
 the shared variant panic. Fresh list clones allocate capacity equal to
 length; drops release each active payload and the original capacity-sized
 storage exactly once. Private success graphs do not enroll Result aliases.
+
+`UiBrowserError.jet` owns the seed BrowserError8 carrier and the real pure
+profile/timeout producers (`Browser.rs:48-89,578-595`). The kind borrows a
+process-static E4 view: cloning preserves its identity and dropping frees only
+the error carrier. The native `rt_static_text` intrinsic emits that immutable
+view through the canonical `.data` relocation path, not a heap-as-static
+substitute; capacity zero does not permit passing its header to String drop.
+Show/Debug/Display share the exact eleven seed messages and fallback, returning
+fresh owned text. Profile accepts exactly the two seed names and clones its
+name/version; timeout checks the already-narrowed raw i64 in 1..600000 without
+a second exact-Int conversion. Both preserve the frozen Result ABI's selected
+out-pointer identity (1=Ok, 0=Err), leaving the other slot untouched.
+The real-provider C ownership witness covers all render modes, equal-content
+distinct static views, two valid/seven invalid profiles, timeout extrema and
+boundaries, independent owners, selected-out slots, and exact frees.
+Source approval and light parsing are not native execution or enrollment:
+the StaticText seam and these providers compose only after E2 r5 FINAL.
+
