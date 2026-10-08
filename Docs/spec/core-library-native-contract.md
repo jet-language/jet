@@ -486,3 +486,8 @@ have no text child; Url owns E4. Its Url constructor clones borrowed text and
 its getter returns a fresh clone. Requesting Url from another variant takes
 the canonical record-variant panic. Proxy ownership performs no URL parsing
 or network access.
+
+HTTP CORS Origins owns either Any or an ordered list of text owners. Clone
+preserves empty lists and repetitions while duplicating every text owner.
+Drop releases only the active list and its initialized elements. The CORS
+policy embeds this variant's two words rather than allocating another box.
