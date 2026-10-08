@@ -64,13 +64,24 @@ listed below:
 | Fixture | Meaning |
 | --- | --- |
 | `<stem>.out` | Expected native stdout. |
-| `<stem>.err.out` | Expected non-zero execution, including a panic or uncaught error. |
+| `<stem>.err.out` | Expected stderr for failing execution; ratified runtime faults exit 70, source-proved unhandled/fatal entries exit 1. |
 | `<stem>.stderr.out` | Expected stderr while execution exits successfully. |
 | `<stem>.web.out` | Web-target output used by the corresponding web fixture. |
 | `<stem>.harness.out` | Harness-managed output. |
 | `<stem>.seed.out` / `<stem>.greet.out` | Input-specific output for the matching example. |
 | `<stem>.test.out` | Test-command output. |
 | `<stem>.fuzz.out` | Fuzz-command output. |
+
+Failing runs compare stdout as well as stderr and the exact exit code. A
+failure's sibling `.out` is authoritative; without one, stdout must be empty.
+Unknown failure contracts and contradictory exit claims in an oracle are
+missing exit proofs, not permission to accept an arbitrary nonzero status.
+These rules apply to the Rust feature
+runner (`tests/golden.rs`), the native backend runner
+(`Compiler/JetBackend/Tests/run-goldens.mjs`), and the runtime trap runner
+(`Compiler/JetRuntime/Tests/run-trap-goldens.mjs`). Native parity additionally
+requires an executed reference with the same exit and both output streams;
+an emit-only reference does not establish runtime parity.
 
 The relevant golden checker is the executable definition of each mapping. Keep
 source changes and their fixtures together; do not use this README as a second
