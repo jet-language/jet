@@ -526,3 +526,6 @@ consumer. Its compile-time coverage assertions remain the same authority gate.
 
 Resident collection evaluation includes the same fixed-list bounds kernel as
 comptime and transports its arithmetic stop through the existing E3010 path.
+
+Resident filesystem adapters construct the canonical four-field I/O context
+without changing operation, resource, OS-code, or cause provenance.

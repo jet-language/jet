@@ -2034,7 +2034,7 @@ fn sys_env_ambient_core_call(
         ("__env_columns", []) => Some(Ok(CtValue::List(
             crate::CoreHost::jet_sys_env_columns_raw().into_iter().map(CtValue::Bytes).collect(),
         ))),
-        ("__env_key_compare", [CtValue::Bytes(left), CtValue::Bytes(right)]) => Some(Ok(sys_exact(
+        ("__env_key_compare", [CtValue::Bytes(left), CtValue::Bytes(right)]) => Some(Ok(CtValue::Int(
             crate::CoreHost::jet_sys_env_key_compare_raw(left, right),
         ))),
         ("__current_dir", []) => Some(Ok(match crate::CoreHost::os_rt::jet_sys_current_dir_raw() {

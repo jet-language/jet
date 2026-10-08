@@ -190,6 +190,18 @@ pub(crate) mod os_rt {
             pub(crate) cause: Option<String>
         }
 
+        impl IOContext {
+            // Mirror of Prelude/CoreLib/JetStd/Open.rs:42-48; host fields already use Option.
+            pub(crate) fn new(
+                operation: IOOperation,
+                resource: Option<String>,
+                os_code: Option<i64>,
+                cause: Option<String>,
+            ) -> Self {
+                Self { operation, resource, os_code, cause }
+            }
+        }
+
         #[derive(Clone, Debug, PartialEq)]
         pub(crate) enum IOError {
             InvalidInput(IOContext),
