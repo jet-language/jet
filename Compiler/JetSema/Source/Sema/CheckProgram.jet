@@ -1259,13 +1259,13 @@ pub fn check_program(program: Program, module_name: String, source_file: String,
                 function_call_facts := [SemaCallSiteFact]{}
                 function_comptime_requests := [SemaComptimeRequest]{}
                 function_name_references := [SemaNameReferenceFact]{}
-                memory_row := sema_function_memory_find(memory_plan, module_name, "", func.span)
+                memory_row := sema_function_memory_position(memory_plan, module_name, "", func.span)
                 memory_func := func
                 if memory_row == {
-                    .Val(row) -> {
-                        if row.function == .Val(planned) -> memory_func = planned
-                        loop diagnostic in row.diagnostics -> &diagnostics.push(diagnostic)
-                        if !row.complete -> complete = false
+                    .Val(position) -> {
+                        if memory_plan.functions[position].function == .Val(planned) -> memory_func = planned
+                        loop diagnostic in memory_plan.functions[position].diagnostics -> &diagnostics.push(diagnostic)
+                        if !memory_plan.functions[position].complete -> complete = false
                     }
                     else -> {
                         complete = false
@@ -1429,14 +1429,14 @@ pub fn sema_check_comptime_function(graph: SemaRegistrationGraph, environment: &
     // already carries `values`; it is re-targeted here, not rebuilt.
     if !sema_scope_environment_enter_probe_module(&environment, module_identity, sema_comptime_body_values_from_items(values)) -> return unresolved
     diagnostics := [Diagnostic]{}
-    memory_row := sema_function_memory_find(memory_plan, module_identity, sema_function_memory_owner(source.kind), source.declaration.span)
+    memory_row := sema_function_memory_position(memory_plan, module_identity, sema_function_memory_owner(source.kind), source.declaration.span)
     memory_func := source.declaration
     memory_complete := true
     if memory_row == {
-        .Val(row) -> {
-            if row.function == .Val(planned) -> memory_func = planned
-            loop diagnostic in row.diagnostics -> &diagnostics.push(diagnostic)
-            memory_complete = row.complete
+        .Val(position) -> {
+            if memory_plan.functions[position].function == .Val(planned) -> memory_func = planned
+            loop diagnostic in memory_plan.functions[position].diagnostics -> &diagnostics.push(diagnostic)
+            memory_complete = memory_plan.functions[position].complete
         }
         else -> {
             memory_complete = false
@@ -1594,13 +1594,13 @@ struct SemaMethodInput {
 
 fn sema_check_method_input(source_module: SemaRegistrationModule, memory_plan: SemaFunctionMemoryPlan, registered: SemaRegistrationFunction, owner_type: Type, trait_symbol: Symbol?, environment: SemaScopeEnvironment) -> SemaMethodInput {
     diagnostics := [Diagnostic]{}
-    memory_row := sema_function_memory_find(memory_plan, source_module.module_identity, sema_type_graph_base_name(owner_type) ?? "", registered.declaration.span)
+    memory_position := sema_function_memory_position(memory_plan, source_module.module_identity, sema_type_graph_base_name(owner_type) ?? "", registered.declaration.span)
     memory_func := registered.declaration
     memory_complete := false
-    if memory_row == .Val(row) {
-        if row.function == .Val(planned) -> memory_func = planned
-        loop diagnostic in row.diagnostics -> &diagnostics.push(diagnostic)
-        memory_complete = row.complete
+    if memory_position == .Val(position) {
+        if memory_plan.functions[position].function == .Val(planned) -> memory_func = planned
+        loop diagnostic in memory_plan.functions[position].diagnostics -> &diagnostics.push(diagnostic)
+        memory_complete = memory_plan.functions[position].complete
     }
     method_generic_params := ~environment.generic_params
     owner_generic_complete := true
@@ -1619,7 +1619,7 @@ fn sema_check_method_input(source_module: SemaRegistrationModule, memory_plan: S
         }
     }
     function_kind := sema_comptime_method_kind(memory_func, normalized_owner_type, trait_symbol)
-    SemaMethodInput{func: ^memory_func, diagnostics: ^diagnostics, generic_params: ^method_generic_params, normalized_owner_type: ^normalized_owner_type, function_kind: ^function_kind, memory_found: memory_row != None, memory_complete: memory_complete, owner_generic_complete: owner_generic_complete}
+    SemaMethodInput{func: ^memory_func, diagnostics: ^diagnostics, generic_params: ^method_generic_params, normalized_owner_type: ^normalized_owner_type, function_kind: ^function_kind, memory_found: memory_position != None, memory_complete: memory_complete, owner_generic_complete: owner_generic_complete}
 }
 
 // Includes the stub's check in the location wrapper, not just the real body.
@@ -1846,10 +1846,10 @@ fn sema_check_view_summaries(graph: SemaRegistrationGraph, source_module: SemaRe
                     summary_calls := [SemaCallSiteFact]{}
                     summary_comptime_requests := [SemaComptimeRequest]{}
                     summary_name_references := [SemaNameReferenceFact]{}
-                    summary_row := sema_function_memory_find(memory_plan, source_module.module_identity, "", func.span)
+                    summary_row := sema_function_memory_position(memory_plan, source_module.module_identity, "", func.span)
                     summary_func := func
-                    if summary_row == .Val(row) {
-                        if row.function == .Val(planned) -> summary_func = planned
+                    if summary_row == .Val(position) {
+                        if memory_plan.functions[position].function == .Val(planned) -> summary_func = planned
                     }
                     if trace_sink != None -> summary_functions_checked += 1
                     checked := sema_function_check(summary_func, symbol_id(SymbolKind.Function, source_module.module_identity, "", func.name), TFuncKind.TopLevel, false, &environment, &scopes, host_hooks, &summary_diagnostics, &summary_calls, &summary_comptime_requests, &summary_name_references)
@@ -2185,9 +2185,9 @@ fn sema_check_body_part_in(environment: SemaScopeEnvironment, memory_plan: SemaF
             .TopLevel(item_index) -> {
                 if source_module.program.items[item_index] == .Func(func) {
                     memory_func := func
-                    memory_row := sema_function_memory_find(memory_plan, source_module.module_identity, "", func.span)
-                    if memory_row == .Val(row) {
-                        if row.function == .Val(planned) -> memory_func = planned
+                    memory_row := sema_function_memory_position(memory_plan, source_module.module_identity, "", func.span)
+                    if memory_row == .Val(position) {
+                        if memory_plan.functions[position].function == .Val(planned) -> memory_func = planned
                     }
                     diagnostics := [Diagnostic]{}
                     call_facts := [SemaCallSiteFact]{}
@@ -2391,13 +2391,13 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, owned_environmen
                             function_comptime_requests := [SemaComptimeRequest]{}
                             function_name_references := [SemaNameReferenceFact]{}
                             function_diagnostic_start :: diagnostics.len()
-                            memory_row := sema_function_memory_find(memory_plan, source_module.module_identity, "", func.span)
+                            memory_row := sema_function_memory_position(memory_plan, source_module.module_identity, "", func.span)
                             memory_func := func
                             if memory_row == {
-                                .Val(row) -> {
-                                    if row.function == .Val(planned) -> memory_func = planned
-                                    loop diagnostic in row.diagnostics -> &diagnostics.push(diagnostic)
-                                    if !row.complete {
+                                .Val(position) -> {
+                                    if memory_plan.functions[position].function == .Val(planned) -> memory_func = planned
+                                    loop diagnostic in memory_plan.functions[position].diagnostics -> &diagnostics.push(diagnostic)
+                                    if !memory_plan.functions[position].complete {
                                         complete = false
                                         &incomplete_reasons.push("function `{func.name}`: memory plan is incomplete")
                                     }
