@@ -55,6 +55,12 @@ if (existsSync(fixtureDir)) {
       if (nativeOnly) expected.find((fixture) => fixture.name === nativeOnly[1]).nativeOnly = true;
       const nativeTask = /^\/\/ expect-native-task ([\w-]+)\s*$/.exec(line);
       if (nativeTask) expected.find((fixture) => fixture.name === nativeTask[1]).nativeTask = true;
+      const taskPass = /^\/\/ expect-task-pass ([\w-]+)\s*$/.exec(line);
+      if (taskPass) expected.find((fixture) => fixture.name === taskPass[1]).taskPass = true;
+      const taskMessage = /^\/\/ expect-task-message ([\w-]+): (".*")\s*$/.exec(line);
+      if (taskMessage) expected.find((fixture) => fixture.name === taskMessage[1]).taskMessage = JSON.parse(taskMessage[2]);
+      const stderrContains = /^\/\/ expect-stderr-contains ([\w-]+): (".*")\s*$/.exec(line);
+      if (stderrContains) expected.find((fixture) => fixture.name === stderrContains[1]).stderrContains = JSON.parse(stderrContains[2]);
       // `// expect-stderr <name>: <JSON string>` (after its expect-stdout
       // line): the exact stderr, e.g. a stop report; unchecked when absent.
       const stderr = /^\/\/ expect-stderr ([\w-]+): (".*")\s*$/.exec(line);
@@ -77,7 +83,8 @@ function check(label, path, fixture, args = [], options = {}, compareStderr = tr
   const status = fixture.status ?? 0;
   const stderr = compareStderr ? fixture.stderr : undefined;
   const run = spawnSync(path, args, { encoding: "utf8", timeout: 10000, ...options });
-  const ok = run.status === status && run.stdout === fixture.stdout && (stderr === undefined || run.stderr === stderr);
+  const ok = run.status === status && run.stdout === fixture.stdout && (stderr === undefined || run.stderr === stderr)
+    && (!fixture.stderrContains || run.stderr.includes(fixture.stderrContains));
   if (!ok) failures += 1;
   console.log(`${label}: ${ok ? "ok" : "FAIL"} (exit ${run.status ?? run.signal})`);
   if (!ok) {
@@ -90,7 +97,7 @@ function check(label, path, fixture, args = [], options = {}, compareStderr = tr
 
 // These witnesses need no runtime library: dirty ABI bytes enter generated
 // callees directly, and a tiny C host checks the linked object's data address.
-for (const place of ["register", "stack"]) {
+for (const place of (only.size === 0 || only.has("bool-abi") ? ["register", "stack"] : [])) {
   for (const [value, status] of [["false", 0], ["true", 1]]) {
     const name = `bool-${place}-${value}`;
     const run = spawnSync(`${outDir}/${name}.elf`, [], { encoding: "utf8", timeout: 10000 });
@@ -99,6 +106,7 @@ for (const place of ["register", "stack"]) {
     console.log(`${name}: ${ok ? "ok" : "FAIL"} (exit ${run.status ?? run.signal}, expected ${status})`);
   }
 }
+if (only.size === 0 || only.has("align64")) {
 check("align64 (static image)", `${outDir}/align64.elf`, "");
 const alignmentSource = `${dirname(fileURLToPath(import.meta.url))}/check-alignment.c`;
 const alignmentProgram = `${outDir}/align64.hosted`;
@@ -108,6 +116,7 @@ if (alignmentLink.status !== 0) {
   failures += 1;
 } else {
   check("align64 (linked object)", alignmentProgram, "");
+}
 }
 
 // Link one loader per fixture: `-rdynamic` exports the runtime's symbols to
@@ -172,7 +181,9 @@ for (const fixture of process.argv.includes("--abi") ? [] : expected.filter(({ n
     }
   }
   const program = `${outDir}/${fixture.name}.hosted`;
-  const taskHost = fixture.nativeTask ? [`${dirname(fileURLToPath(import.meta.url))}/check-trap-task.c`, "-Wl,--wrap=jet_rt_main"] : [];
+  const taskHost = fixture.nativeTask ? [`${dirname(fileURLToPath(import.meta.url))}/check-trap-task.c`, "-Wl,--wrap=jet_rt_main",
+    ...(fixture.taskPass ? ["-DJET_FX_TASK_PASS"] : []),
+    ...(fixture.taskMessage ? [`-DJET_FX_TASK_MESSAGE=${JSON.stringify(fixture.taskMessage)}`] : [])] : [];
   const link = spawnSync(process.env.CC ?? "cc", [`${outDir}/${fixture.name}.o`, ...taskHost, runtimeLib, "-lpthread", "-ldl", "-lm", "-o", program], { encoding: "utf8" });
   if (link.status !== 0) {
     console.log(`${fixture.name} (compiled runtime): LINK FAILED\n${link.stderr}`);
@@ -185,7 +196,7 @@ for (const fixture of process.argv.includes("--abi") ? [] : expected.filter(({ n
 // Stop points (#4720): stop-points.o linked with the compiled runtime and a
 // scripted session rail (check-stop-points.c) that stops it at chosen polls;
 // stderr counts the program's String from static text and its drops.
-if (runtimeLib && !process.argv.includes("--abi") && existsSync(`${outDir}/stop-points.o`)) {
+if (runtimeLib && !process.argv.includes("--abi") && (only.size === 0 || only.has("stop-points")) && existsSync(`${outDir}/stop-points.o`)) {
   const rail = `${dirname(fileURLToPath(import.meta.url))}/check-stop-points.c`;
   const program = `${outDir}/stop-points.rail`;
   const link = spawnSync(process.env.CC ?? "cc", [`${outDir}/stop-points.o`, rail, runtimeLib, "-Wl,--wrap=jet_rt_string_from_static,--wrap=jet_rt_string_drop", "-lpthread", "-ldl", "-lm", "-o", program], { encoding: "utf8" });
@@ -208,7 +219,7 @@ if (runtimeLib && !process.argv.includes("--abi") && existsSync(`${outDir}/stop-
     }
   }
 }
-if (runtimeLib && !process.argv.includes("--abi")) {
+if (runtimeLib && !process.argv.includes("--abi") && (only.size === 0 || only.has("record-sequences"))) {
   const source = `${dirname(fileURLToPath(import.meta.url))}/check-record-sequences.c`;
   const program = `${outDir}/record-sequences.hosted`;
   const link = spawnSync(process.env.CC ?? "cc", [source, runtimeLib, "-lpthread", "-ldl", "-lm", "-o", program], { encoding: "utf8" });

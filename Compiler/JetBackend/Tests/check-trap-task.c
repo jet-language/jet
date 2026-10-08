@@ -14,6 +14,9 @@ extern void jet_rt_string_drop(int64_t);
 extern int64_t jet_rt_record_tag_JetTaskFailure(int64_t);
 extern void jet_rt_handle_drop_JetTaskFailure(int64_t);
 extern void jet_rt_stdout_flush(void);
+#ifdef JET_FX_TASK_MESSAGE
+extern int64_t jet_rt_record_get_JetTaskFailure_Panicked(int64_t);
+#endif
 #ifdef JET_FX_CANCEL_DURING_CLEANUP
 extern int64_t __real_jet_rt_cleanup_enter(void);
 extern void jet_rt_native_task_cancel(int64_t);
@@ -64,14 +67,31 @@ int __wrap_jet_rt_main(void (*entry)(void)) {
 #endif
     jet_rt_string_drop(label);
     int64_t success = jet_rt_native_task_join(task, 0, (int64_t)(uintptr_t)&outcome);
+#ifdef JET_FX_TASK_PASS
+    if (!success || outcome != 0) return 1;
+#else
 #ifdef JET_FX_CANCEL_DURING_CLEANUP
     if (success || jet_rt_record_tag_JetTaskFailure(outcome) != 0) return 1;
 #else
     if (success || jet_rt_record_tag_JetTaskFailure(outcome) != 2) return 1;
 #endif
+#ifdef JET_FX_TASK_MESSAGE
+    int64_t reason = jet_rt_record_get_JetTaskFailure_Panicked(outcome);
+    const int64_t *text = (const int64_t *)(uintptr_t)reason;
+    const char *bytes = (const char *)(uintptr_t)text[0];
+    size_t length = (size_t)text[1], needle_length = strlen(JET_FX_TASK_MESSAGE);
+    int found = 0;
+    for (size_t at = 0; at + needle_length <= length; ++at)
+        if (!memcmp(bytes + at, JET_FX_TASK_MESSAGE, needle_length)) { found = 1; break; }
+    jet_rt_string_drop(reason);
+    if (!found) return 1;
+#endif
     jet_rt_handle_drop_JetTaskFailure(outcome);
+#endif
     jet_rt_stdout_flush();
-#ifdef JET_FX_CANCEL_DURING_CLEANUP
+#ifdef JET_FX_TASK_PASS
+    puts("expectation task passed");
+#elif defined(JET_FX_CANCEL_DURING_CLEANUP)
     puts("task cancelled; process continued");
 #else
     puts("task published; process continued");

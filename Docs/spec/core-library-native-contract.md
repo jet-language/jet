@@ -87,6 +87,16 @@ records its raw fault detail before dropping it, never its rendered report.
 The bootstrap's opt-in `JET_FRONT_MIR_DUMP` observer writes canonical
 `mir_program_bytes` to its supplied path. It does not alter lowering mode;
 non-test regression proofs compare those bytes and their SHA-256 digests.
+`Tests/Fixtures/ExpectFail.jet` supplies compiled native match, mismatch,
+unmet, nested, checked/unarmed R080 and deeper/own-close witnesses through the
+real Task transport. `run-expect-producer.mjs` appends a focused proof to the
+compiler aggregate: it reuses the CLI's authorized request, selects Test mode,
+checks real MIR branch/boundary/exit-poll edges, then emits and runs that checked
+test's object. `check-expect-mir-identity.mjs` compares a fixed non-test corpus
+with stop points enabled in before/after shared compilers (the baseline needs
+the observer backported, without the expectation amendment). These execution
+and byte-identity checks belong to the composed compiler-unit proof, not the
+light source-parser lane.
 
 ## Purpose and scope
 
