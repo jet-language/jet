@@ -144,8 +144,8 @@ releasing caller's context. The provider adds neither a cleanup mask nor a
 session shield; releases inside a MIR cleanup frame inherit that frame's
 bracket. A callback that returns with pending stop still permits the provider
 to free the payload allocation, descriptor and cell before the caller propagates
-it. This intentionally differs from Rust unwinding, which may leak the `Arc`
-allocation when `T::drop` unwinds. The seed-only C fixture retains its separate
+it. Reclamation on a pending stop is explicit, not unwind-dependent.
+The seed-only C fixture retains its separate
 two-argument Rust-provider declaration for comparison; it is not a native alias
 and retires at cutover. Native runtime fixtures pass explicit drop functions,
 including two threads each racing 100,000 clone/drop pairs and a null-glue
