@@ -14,6 +14,8 @@ use core.files as files
 use core.process as process
 use core.text.parse as text
 
+use core.encoding.[DataTree]
+use __core_files_path_components as host_path
 // Reused from Foundation CLISchema/TargetWidth (a736ba79d). This pointer
 // record measures the selected build target, never the compiler host.
 #Layout(c)
@@ -719,4 +721,269 @@ fn has_nul(value: String) -> Bool {
     assert((call_value((available: true, value: 0, errno: 0), "fork", .Resolve, None) ?? -1) == 0)
     assert((call_value((available: false, value: 0, errno: 0), "fork", .Resolve, None) ?? -1) == -1)
     assert(has_nul(String.from_bytes([U8]{65, 0, 66}) ?? ""))
+}
+
+// Typed `decode<T>` supplies these four existing Dotenv annotation values,
+// then invokes the existing Decode protocol on the returned tree. Metadata
+// selection and the typed codec remain the compiler's established lowering.
+// Everything between metadata and codec, and error provenance afterwards,
+// is source policy rather than a second codec or host environment writer.
+pub fn __decode_tree(prefix: String, file: String, allow: [String], names: [(env_name: String, key: String)]) -[FS.Read, Env]> (tree: DataTree, origins: [(name: String, path: String)]) [FieldError]! {
+    platform :: if core.files.__path_windows() -> host_path.PathPlatform.Windows else -> host_path.PathPlatform.Unix
+    path :: host_path.from_text(file, platform)
+    if host_path.is_absolute(path) -> return Err(config_error("E2416: Dotenv.file must be project-relative"))
+    cursor := host_path.components(path)
+    loop {
+        part :: host_path.next(path, &cursor) ?? break
+        if part.kind == .ParentDir -> return Err(config_error("E2416: Dotenv.file must be project-relative"))
+    }
+    dotenv := None
+    if file.len() > 0 {
+        if core.sys.__dotenv_read(file) == {
+            .Ok(value) -> dotenv = Val(value)
+            .Err(error) -> {
+                if !error.not_found -> return Err(config_error("E2416: cannot read Dotenv.file `{file}`: {error.cause}"))
+            }
+        }
+    }
+    process := [(name: String, value: String)]{}
+    loop entry in __env_snapshot() {
+        name :: String.from_bytes(entry.name)
+        value :: String.from_bytes(entry.value)
+        if name == .Val(unicode_name) && value == .Val(unicode_value) {
+            &process.push((name: unicode_name, value: unicode_value))
+        }
+    }
+    values :: if config_entries(prefix, dotenv, allow, process) == {
+        .Ok(entries) -> entries
+        .Err(reason) -> { return Err(config_error("E2416: {reason}")) }
+    }
+    tree := ConfigTree.Object([(key: String, value: ConfigTree)]{})
+    origins := [(name: String, path: String)]{}
+    loop entry in values {
+        segments := entry.segments
+        loop rename in names {
+            full_match :: ascii_lower(entry.name) == ascii_lower(rename.env_name)
+            suffix_match :: ascii_lower(slice_ascii(entry.name.bytes(), prefix.bytes().len(), entry.name.bytes().len())) == ascii_lower(rename.env_name)
+            if full_match || suffix_match {
+                segments = [String]{rename.key}
+                break
+            }
+        }
+        &origins.push((name: entry.name, path: segments.join(".")))
+        tree = config_insert(^tree, segments, 0, entry.value)
+    }
+    Ok((tree: config_tree(^tree), origins: origins))
+}
+
+pub fn __decode_errors(errors: [FieldError], origins: [(name: String, path: String)]) -> [FieldError] Never! {
+    framed := [FieldError]{}
+    loop error in errors {
+        reason := error.reason
+        raw :: error.path.bytes()
+        start := 0
+        loop at in 0..<raw.len() + 1 {
+            separator :: at == raw.len() || raw[at] == (U8{46}) || raw[at] == (U8{91}) || raw[at] == (U8{93})
+            if separator {
+                part :: ascii_lower(slice_ascii(raw, start, at))
+                if part == "secret" || part == "password" || part == "token" || part == "key" -> reason = "secret value rejected"
+                start = at + 1
+            }
+        }
+        origin := None
+        loop entry in origins {
+            if ascii_lower(entry.path) == ascii_lower(error.path) {
+                origin = Val(entry.name)
+                break
+            }
+        }
+        message :: if origin == {
+            .Val(name) -> "E2416: env var {name} -> {error.path}: {reason}"
+            .None -> "E2416: config field {error.path}: {reason}"
+        }
+        &framed.push(FieldError{path: error.path, reason: message})
+    }
+    framed
+}
+
+fn config_error(reason: String) -> [FieldError] Never! { [FieldError]{FieldError{path: "", reason: reason}} }
+
+struct ConfigEntry { name: String value: String segments: [String] }
+struct ConfigValue { folded: String name: String value: String }
+enum ConfigTree {
+    Text(String)
+    Object([(key: String, value: ConfigTree)])
+}
+
+fn ascii_upper(value: String) -> String Never! {
+    out := [U8]{}
+    loop byte in value.bytes() {
+        if byte >= (U8{97}) && byte <= (U8{122}) -> &out.push(U8{Int.from_u8(byte) - 32}) else -> &out.push(byte)
+    }
+    String.from_bytes(out) ?? panic("ASCII fold preserves UTF-8")
+}
+
+fn config_allowed(name: String, allow: [String]) -> Bool Never! {
+    if name.len() == 0 -> return false
+    loop byte in name.bytes() { if byte == (U8{61}) || byte == (U8{0}) -> return false }
+    if allow.len() == 0 -> return true
+    folded :: ascii_lower(name)
+    loop candidate in allow { if ascii_lower(candidate) == folded -> return true }
+    false
+}
+
+fn config_put(values: &[ConfigValue], name: String, value: String) Never! {
+    folded :: ascii_upper(name)
+    loop index in 0..<values.len() {
+        if values[index].folded == folded {
+            values[index] = ConfigValue{folded: folded, name: name, value: value}
+            return
+        }
+    }
+    &values.push(ConfigValue{folded: folded, name: name, value: value})
+}
+
+fn config_find(raw: [U8], needle: [U8]) -> Int? Never! {
+    if needle.len() > raw.len() -> return None
+    loop at in 0..<raw.len() - needle.len() + 1 {
+        matched := true
+        loop i in 0..<needle.len() { if raw[at + i] != needle[i] -> matched = false }
+        if matched -> return Val(at)
+    }
+    None
+}
+
+fn config_dotenv_value(value: String) -> String Never! {
+    trimmed :: core.text.trim(value)
+    raw :: trimmed.bytes()
+    if raw.len() >= 2 {
+        double_quote :: raw[0] == (U8{34}) && raw[raw.len() - 1] == (U8{34})
+        single_quote :: raw[0] == (U8{39}) && raw[raw.len() - 1] == (U8{39})
+        if double_quote || single_quote -> return slice_ascii(raw, 1, raw.len() - 1)
+    }
+    comment :: config_find(raw, " #".bytes()) ?? return trimmed
+    core.text.trim_end(slice_ascii(raw, 0, comment))
+}
+
+fn config_entries(prefix: String, dotenv: String?, allow: [String], process: [(name: String, value: String)]) -> [ConfigEntry] String! {
+    values := [ConfigValue]{}
+    if dotenv == .Val(contents) {
+        raw :: contents.bytes()
+        start := 0
+        line_index := 0
+        loop start < raw.len() {
+            end := start
+            loop end < raw.len() && raw[end] != (U8{10}) -> end += 1
+            line_end := end
+            if end < raw.len() && line_end > start && raw[line_end - 1] == (U8{13}) -> line_end -= 1
+            line := core.text.trim(slice_ascii(raw, start, line_end))
+            line_index += 1
+            if line.len() > 0 && line.bytes()[0] != (U8{35}) {
+                bytes :: line.bytes()
+                if bytes.len() >= 7 && slice_ascii(bytes, 0, 7) == "export " -> line = slice_ascii(bytes, 7, bytes.len())
+                equal :: config_find(line.bytes(), "=".bytes()) ?? return Err("invalid .env line {line_index}")
+                name :: core.text.trim(slice_ascii(line.bytes(), 0, equal))
+                if config_allowed(name, allow) {
+                    value :: config_dotenv_value(slice_ascii(line.bytes(), equal + 1, line.bytes().len()))
+                    config_put(&values, name, value)
+                }
+            }
+            start = end + 1
+        }
+    }
+    loop entry in process { if config_allowed(entry.name, allow) -> config_put(&values, entry.name, entry.value) }
+    // Same bytewise uppercase-name order as the native BTreeMap, including
+    // punctuation. Lowercase sorting would move '_' before alphabetic keys.
+    loop index in 1..<values.len() {
+        at := index
+        loop at > 0 && values[at].folded < values[at - 1].folded {
+            held :: values[at - 1]
+            values[at - 1] = values[at]
+            values[at] = held
+            at -= 1
+        }
+    }
+    out := [ConfigEntry]{}
+    prefix_bytes :: prefix.bytes()
+    loop entry in values {
+        name_bytes :: entry.name.bytes()
+        if name_bytes.len() >= prefix_bytes.len() && ascii_lower(slice_ascii(name_bytes, 0, prefix_bytes.len())) == ascii_lower(prefix) {
+            rest :: slice_ascii(name_bytes, prefix_bytes.len(), name_bytes.len())
+            segments := [String]{}
+            bytes :: rest.bytes()
+            start := 0
+            loop start < bytes.len() {
+                found :: config_find(bytes[start..bytes.len()], "__".bytes())
+                end :: if found == {
+                    .Val(relative) -> start + relative
+                    .None -> bytes.len()
+                }
+                if end > start -> &segments.push(ascii_lower(slice_ascii(bytes, start, end)))
+                start = end + 2
+            }
+            if segments.len() > 0 -> &out.push(ConfigEntry{name: entry.name, value: entry.value, segments: segments})
+        }
+    }
+    Ok(out)
+}
+
+fn config_insert(^tree: ConfigTree, segments: [String], at: Int, value: String) -> ConfigTree Never! {
+    owned := ^tree
+    if ^owned == {
+        .Object(pairs) -> {
+            out := ^pairs
+            segment :: segments[at]
+            loop index in 0..<out.len() {
+                pair := ^out[index]
+                matches :: ascii_lower(pair.key) == ascii_lower(segment)
+                if matches && at + 1 == segments.len() {
+                    out[index] = (key: pair.key, value: ConfigTree.Text(value))
+                    return ConfigTree.Object(^out)
+                }
+                if matches && pair.value == .Object(_) {
+                    child :: config_insert(^pair.value, segments, at + 1, value)
+                    out[index] = (key: pair.key, value: ^child)
+                    return ConfigTree.Object(^out)
+                }
+                out[index] = ^pair
+            }
+            child :: if at + 1 == segments.len() -> ConfigTree.Text(value) else -> config_insert(ConfigTree.Object([(key: String, value: ConfigTree)]{}), segments, at + 1, value)
+            &out.push((key: segment, value: ^child))
+            ConfigTree.Object(^out)
+        }
+        .Text(text) -> ConfigTree.Text(^text)
+    }
+}
+
+fn config_tree(^tree: ConfigTree) -> DataTree Never! {
+    owned := ^tree
+    if ^owned == {
+        .Text(text) -> DataTree.Text(^text)
+        .Object(pairs) -> {
+            encoded := [(key: String, value: DataTree)]{}
+            loop pair in ^pairs {
+                &encoded.push((key: pair.key, value: config_tree(^pair.value)))
+            }
+            core.sys.__config_object(^encoded)
+        }
+    }
+}
+
+#Test("Dotenv overlay preserves folded order, process precedence, empty values and nested names") {
+    process :: [(name: String, value: String)]{(name: "App_PORT", value: "9000")}
+    entries :: config_entries("APP_", Val("APP_PORT=8000\nAPP_DB__HOST='local'\nAPP_EMPTY=\n"), [String]{}, process) ?? panic("valid config")
+    assert_eq(entries[0].name, "APP_DB__HOST")
+    assert_eq(entries[0].segments, [String]{"db", "host"})
+    assert_eq(entries[0].value, "local")
+    assert_eq(entries[1].value, "")
+    assert_eq(entries[2].value, "9000")
+}
+
+#Test("Dotenv malformed unallowed lines still error and decoder secret errors are redacted") {
+    if config_entries("", Val("not an assignment"), [String]{"ONLY_THIS"}, [(name: String, value: String)]{}) == {
+        .Err(reason) -> assert_eq(reason, "invalid .env line 1")
+        .Ok(_) -> assert(false)
+    }
+    errors :: __decode_errors([FieldError]{FieldError{path: "db.password", reason: "rejected supersecret"}}, [(name: String, path: String)]{(name: "APP_DB__PASSWORD", path: "db.password")})
+    assert_eq(errors[0].reason, "E2416: env var APP_DB__PASSWORD -> db.password: secret value rejected")
 }
