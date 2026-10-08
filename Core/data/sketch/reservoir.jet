@@ -1,11 +1,10 @@
 // The shipped Algorithm R sampler, with its fixed xorshift seed and slot order.
 pub struct ReservoirSampler {
-    state: Shared<ReservoirState>
+    state: ReservoirState
 
     impl Display {
         fn display(self) -> String {
-            guard :: self.state.guard_read()
-            "ReservoirSampler(n={guard.value.count})"
+            "ReservoirSampler(n={self.state.count})"
         }
     }
 }
@@ -22,7 +21,7 @@ pub fn new(capacity: Int) -> ReservoirSampler Never! { ReservoirSampler.new(capa
 impl ReservoirSampler {
     pub fn new(capacity: Int) -> ReservoirSampler Never! {
         limit :: if capacity < 1 -> 1 else -> capacity
-        ReservoirSampler{state: shared ReservoirState{
+        ReservoirSampler{state: ReservoirState{
             capacity: limit,
             items: [String]{},
             count: U64{0},
@@ -30,46 +29,45 @@ impl ReservoirSampler {
         }}
     }
 
-    pub fn add(self, item: String) Never! {
-        guard := self.state.guard_edit()
-        guard.value.count = guard.value.count.wrapping_add(U64{1})
-        if guard.value.items.len() < guard.value.capacity {
-            &guard.value.items.push(item)
+    pub fn add(&self, item: String) Never! {
+        self.state.count = self.state.count.wrapping_add(U64{1})
+        if self.state.items.len() < self.state.capacity {
+            &self.state.items.push(item)
             return
         }
-        state := guard.value.rng
+        state := self.state.rng
         state = state ~| (state << 13)
         state = state ~| (state >> 7)
         state = state ~| (state << 17)
-        guard.value.rng = state
-        index :: state %% guard.value.count
-        if index < (U64{guard.value.capacity}) -> guard.value.items[Int.from_u64(index)] = item
+        self.state.rng = state
+        index :: state %% self.state.count
+        if index < (U64{self.state.capacity}) -> self.state.items[Int.from_u64(index)] = item
     }
 
     pub fn sample(self) -> [String] Never! {
-        guard :: self.state.guard_read()
-        ~guard.value.items
+        ~self.state.items
     }
 }
 
 #Test("reservoir keeps filled slots and native minimum capacity") {
-    sampler :: new(3)
-    alias :: ~sampler
-    sampler.add("x")
-    alias.add("y")
-    sampler.add("z")
-    assert_eq(alias.sample(), [String]{"x", "y", "z"})
-    minimum :: new(-1)
-    minimum.add("only")
+    sampler := new(3)
+    &sampler.add("x")
+    clone := ~sampler
+    &clone.add("y")
+    &clone.add("z")
+    assert_eq(sampler.sample(), [String]{"x"})
+    assert_eq(clone.sample(), [String]{"x", "y", "z"})
+    minimum := new(-1)
+    &minimum.add("only")
     assert_eq(minimum.sample(), [String]{"only"})
 }
 
 #Test("reservoir replacement is replayable") {
-    left :: new(3)
-    right :: new(3)
+    left := new(3)
+    right := new(3)
     loop i in 0..<20 {
-        left.add("{i}")
-        right.add("{i}")
+        &left.add("{i}")
+        &right.add("{i}")
     }
     assert_eq(left.sample(), right.sample())
 }

@@ -4385,6 +4385,9 @@ The built-module inventory is a source-facing registry, not a missing-domain led
 - `core.web.table`
 - `core.web.virtual`
 
+The sketch types are source-owned plain values: cloning one produces independent
+storage, and mutating a sketch uses its `&self` receiver with an explicit `&` call.
+
 ### Writing Core in Jet
 
 The Rust-hosted compiler remains Jet's production and reference compiler. Jet
