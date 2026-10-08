@@ -1615,6 +1615,16 @@ jet.push("pub fn lower_native_export(symbol: String) -> LowerNativeExport? {");
 jet.push("    loop row in LOWER_NATIVE_EXPORTS { if row.symbol == symbol -> return Val(~row) }");
 jet.push("    None");
 jet.push("}");
+jet.push("// All possible external C imports, mechanically derived from the ABI tables.");
+jet.push("LOWER_NATIVE_IMPORTS :: prep { [String]{");
+const nativeImportNames = new Set([
+  ...adapters.map((row) => row.name),
+  ...jetRuntimeExports,
+  ...[...rs.join("\n").matchAll(/pub extern "C" fn ([A-Za-z_]\w*)\(/g)].map((match) => match[1]),
+  ...nativeExports.map((row) => row.name),
+]);
+for (const name of [...nativeImportNames].sort()) jet.push(`    "${name}",`);
+jet.push("} }");
 jet.push("// END GENERATED C-ABI ROUTES");
 
 // Lifecycle and record/field helpers obey the same ownership partition as

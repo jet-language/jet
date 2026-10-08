@@ -91,6 +91,15 @@ fn lower_reach_callee(p: MIRProgram, q: &LowerPrepared, callee: MIRCallee, type_
             &q.foreign_seen.add(id.value, true).drop("checked absent above")
             foreign :: p.foreign[row]
             loop param in foreign.params -> lower_mono_intern_type(&q, param.ty, parent)
+            if q.native_pack {
+                if lower_native_export(foreign.symbol) == .Val(export_row) {
+                    if export_row.op == "handle.display" || export_row.op == "handle.show" {
+                        if lower_native_source_type(p, export_row.jet_name) == .Val(ty) {
+                            lower_reach_render_type(p, &q, ty, export_row.op == "handle.show", parent)
+                        }
+                    }
+                }
+            }
             if foreign.return_type == .Val(ty) -> lower_mono_intern_type(&q, ty, parent)
             lower_reach_optional(p, &q, foreign.close_function, parent, site)
             lower_reach_optional(p, &q, foreign.undo_function, parent, site)
