@@ -96,10 +96,12 @@ fn jet_cli_remote_parse(bytes: [U8], builder: String) -> JetCLIRemoteBinding Str
     text :: String.from_bytes(bytes) ?? return Err("remote binding record is not UTF-8")
     fields := [String:String]{}
     lines :: text.split("\n").to_list()
+    carriage_return :: String.from_bytes([U8]{13}) ?? panic("ASCII carriage return is valid UTF-8")
     loop (index, line) in lines {
         if index == lines.len() - 1 && line == "" -> next
         // Rust lines() strips the CR of CRLF, but interior control text fails.
-        normalized :: line.removesuffix("\r")
+        normalized := line
+        if index < lines.len() - 1 -> normalized = line.removesuffix(carriage_return)
         parts :: normalized.split("=").to_list()
         if parts.len() < 2 -> return Err("remote binding record has a malformed line")
         field :: parts[0]
