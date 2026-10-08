@@ -1,0 +1,308 @@
+use core.encoding.[DataTree]
+use core.encoding.json as json
+
+// Paths are deliberately smaller than JSONPath: keys, indices, and universal
+// array selection only. JSON itself always goes through the standard codec.
+fn kit_steps_json_path(path: String) -> [String]? {
+    if !path.starts_with("$") -> return None
+    parts := [String]{}
+    bytes :: path.bytes()
+    i := 1
+    loop i < bytes.len() {
+        if bytes[i] == (U8{46}) {
+            start :: i
+            i += 1
+            key_start :: i
+            loop i < bytes.len() {
+                if bytes[i] == (U8{46}) || bytes[i] == (U8{91}) -> break
+                if bytes[i] <= (U8{32}) || bytes[i] == (U8{93}) -> return None
+                i += 1
+            }
+            if i == key_start -> return None
+            &parts.push(path.slice(start, i))
+        } else if bytes[i] == (U8{91}) {
+            i += 1
+            start :: i
+            loop i < bytes.len() && bytes[i] != (U8{93}) -> i += 1
+            if i == bytes.len() -> return None
+            token :: path.slice(start, i)
+            if token != "*" {
+                number :: Int.parse(token) ?? return None
+                if number < 0 || token != "{number}" -> return None
+            }
+            &parts.push(token)
+            i += 1
+        } else -> return None
+    }
+    Val(parts)
+}
+
+// Like the standard JSON patch test operation, object key order is immaterial.
+// Do not serialize/canonicalize: canonical numbers have a narrower domain than
+// exact JSON integers, and comparing trees avoids an extra rendered copy.
+fn kit_steps_json_equal(left: DataTree, right: DataTree) -> Bool Never! {
+    if left == {
+        .Object(a) -> {
+            if right == {
+                .Object(b) -> {
+                    if a.len() != b.len() -> return false
+                    loop pair in a {
+                        other :: b.get(pair.key) ?? return false
+                        if !kit_steps_json_equal(pair.value, other) -> return false
+                    }
+                    return true
+                }
+                else -> return false
+            }
+        }
+        .Array(a) -> {
+            if right == {
+                .Array(b) -> {
+                    if a.len() != b.len() -> return false
+                    loop i in 0..<a.len() {
+                        if !kit_steps_json_equal(a[i], b[i]) -> return false
+                    }
+                    return true
+                }
+                else -> return false
+            }
+        }
+        .Int(a) -> {
+            if right == {
+                .Int(b) -> return a == b
+                .Float(b) -> return Float{a} == b
+                else -> return false
+            }
+        }
+        .Float(a) -> {
+            if right == {
+                .Int(b) -> return a == Float{b}
+                .Float(b) -> return a == b
+                else -> return false
+            }
+        }
+        .Null -> {
+            if right == {
+                .Null -> return true
+                else -> return false
+            }
+        }
+        .Bool(a) -> {
+            if right == {
+                .Bool(b) -> return a == b
+                else -> return false
+            }
+        }
+        .Text(a) -> {
+            if right == {
+                .Text(b) -> return a == b
+                else -> return false
+            }
+        }
+        else -> return false
+    }
+}
+
+fn kit_steps_json_type(value: DataTree) -> String Never! {
+    if value == {
+        .Null -> "null"
+        .Bool(_) -> "bool"
+        .Int(_) -> "int"
+        .Float(_) -> "number"
+        .Text(_) -> "string"
+        .Array(_) -> "array"
+        .Object(_) -> "object"
+        else -> "non-JSON value"
+    }
+}
+
+fn kit_steps_json_has(value: DataTree, expected: DataTree) -> String? {
+    if expected == {
+        .Object(wanted) -> {
+            if wanted.len() == 0 -> return Val("JSON has needs a nonempty object")
+            if value == {
+                .Array(items) -> {
+                    loop item in items {
+                        if item == {
+                            .Object(fields) -> {
+                                matches := true
+                                loop pair in wanted {
+                                    actual :: fields.get(pair.key)
+                                    if actual == {
+                                        .Val(child) -> {
+                                            if !kit_steps_json_equal(child, pair.value) -> matches = false
+                                        }
+                                        .None -> matches = false
+                                    }
+                                    if !matches -> break
+                                }
+                                if matches -> return None
+                            }
+                            else -> {}
+                        }
+                    }
+                    return Val("JSON array has no object matching {json.to_string(expected)}")
+                }
+                else -> return Val("JSON has needs an array")
+            }
+        }
+        else -> return Val("JSON has needs a nonempty object")
+    }
+}
+
+fn kit_steps_json_at(value: DataTree, parts: [String], depth: Int, op: String, expected: DataTree, expected_type: String, count: Int) -> String? {
+    if depth == parts.len() {
+        if op == "has" -> return kit_steps_json_has(value, expected)
+        if op == "=" {
+            if kit_steps_json_equal(value, expected) -> return None
+            return Val("JSON value differs: expected {json.to_string(expected)}, got {json.to_string(value)}")
+        }
+        if op == ":" {
+            actual :: kit_steps_json_type(value)
+            if actual == expected_type || (expected_type == "number" && actual == "int") -> return None
+            return Val("JSON type differs: expected {expected_type}, got {actual}")
+        }
+        size :: if value == {
+            .Array(items) -> items.len()
+            .Object(fields) -> fields.len()
+            else -> { return Val("JSON count needs an array or object") }
+        }
+        if size != count -> return Val("JSON count differs: expected {count}, got {size}")
+        return None
+    }
+    part :: parts[depth]
+    if part.starts_with(".") {
+        if value == {
+            .Object(fields) -> {
+                child :: fields.get(part.slice(1, part.len())) ?? return Val("JSON path has no member {part}")
+                return kit_steps_json_at(child, parts, depth + 1, op, expected, expected_type, count)
+            }
+            else -> return Val("JSON path member {part} needs an object")
+        }
+    }
+    if value == {
+        .Array(items) -> {
+            if part == "*" {
+                if items.len() == 0 -> return Val("JSON [*] cannot match an empty array")
+                loop (index, child) in items {
+                    failure :: kit_steps_json_at(child, parts, depth + 1, op, expected, expected_type, count)
+                    if failure == {
+                        .Val(message) -> return Val("JSON [*] element {index}: {message}")
+                        .None -> {}
+                    }
+                }
+                return None
+            }
+            index :: Int.parse(part) ?? return Val("JSON path has an invalid index {part}")
+            if index >= items.len() -> return Val("JSON path index {index} is missing")
+            return kit_steps_json_at(items[index], parts, depth + 1, op, expected, expected_type, count)
+        }
+        else -> return Val("JSON path index [{part}] needs an array")
+    }
+}
+
+fn kit_steps_json_test(text: String, mode: String, path: String, op: String, literal: String) -> String? {
+    parts :: kit_steps_json_path(path) ?? return Val("invalid JSON path: {path}")
+    tree := DataTree.Null
+    if mode == "doc" {
+        tree = json.parse(text) ?? return Val("JSON parse: {err}")
+    } else if mode == "ndjson" {
+        records := [DataTree]{}
+        line_number := 0
+        loop raw in text.split("\n") {
+            line_number += 1
+            line :: ~raw.trim()
+            if line == "" -> next
+            record :: json.parse(line) ?? return Val("NDJSON line {line_number}: {err}")
+            if kit_steps_json_type(record) != "object" -> return Val("NDJSON line {line_number} is not an object")
+            &records.push(record)
+        }
+        tree = DataTree.Array(records)
+    } else -> return Val("unknown JSON mode: {mode}")
+    expected := DataTree.Null
+    expected_type := ""
+    count := 0
+    if op == "=" || op == "has" {
+        expected = json.parse(literal) ?? return Val("expected JSON literal: {err}")
+        if op == "has" {
+            if expected == {
+                .Object(fields) -> {
+                    if fields.len() == 0 -> return Val("JSON has needs a nonempty object")
+                }
+                else -> return Val("JSON has needs a nonempty object")
+            }
+        }
+    } else if op == ":" {
+        expected_type = literal
+        if literal != "string" && literal != "number" && literal != "int" && literal != "bool" && literal != "null" && literal != "array" && literal != "object" -> return Val("unknown JSON type: {literal}")
+    } else if op == "#=" {
+        count = Int.parse(literal) ?? return Val("JSON count must be a nonnegative integer")
+        if count < 0 -> return Val("JSON count must be a nonnegative integer")
+    } else -> return Val("unknown JSON operator: {op}")
+    kit_steps_json_at(tree, parts, 0, op, expected, expected_type, count)
+}
+
+fn kit_steps_json_assertion(value: String) -> KitAssertion? {
+    needed :: if value.starts_with("file ") || value.starts_with("file\t") -> 5 else -> 4
+    bytes :: value.bytes()
+    words := 0
+    active := false
+    quote := 0
+    escape := false
+    end := 0
+    loop end < bytes.len() {
+        byte :: Int.from_u8(bytes[end])
+        if escape -> escape = false
+        else if byte == 92 -> escape = true
+        else if quote != 0 {
+            if byte == quote -> quote = 0
+        } else if byte == 34 || byte == 39 -> quote = byte
+        else if byte == 32 || byte == 9 {
+            if active {
+                words += 1
+                active = false
+                if words == needed -> break
+            }
+            end += 1
+            next
+        }
+        active = true
+        end += 1
+    }
+    if words != needed -> return None
+    header :: kit_steps_words(value.slice(0, end)) ?? return None
+    if header.len() != needed -> return None
+    stream :: if header[0] == "file" -> "file" else -> header[0]
+    if stream != "file" && stream != "stdout" && stream != "stderr" -> return None
+    offset :: needed - 4
+    mode :: header[1 + offset]
+    path :: header[2 + offset]
+    op :: header[3 + offset]
+    if mode != "doc" && mode != "ndjson" -> return None
+    if kit_steps_json_path(path) == None -> return None
+    source :: if stream == "file" -> header[1] else -> ""
+    if stream == "file" && !kit_steps_relative_path(source) -> return None
+    literal := ~value.slice(end, value.len()).trim()
+    if op == "=" || op == "has" {
+        expected :: json.parse(literal) ?? return None
+        if op == "has" {
+            if expected == {
+                .Object(fields) -> {
+                    if fields.len() == 0 -> return None
+                }
+                else -> return None
+            }
+        }
+    } else if op == ":" {
+        reason :: literal.index(" #") ?? literal.len()
+        type_name :: ~literal.slice(0, reason).trim()
+        if type_name == "number" && (reason == literal.len() || literal.slice(reason + 2, literal.len()).trim() == "") -> return None
+        if type_name != "string" && type_name != "number" && type_name != "int" && type_name != "bool" && type_name != "null" && type_name != "array" && type_name != "object" -> return None
+        literal = type_name
+    } else if op == "#=" {
+        count :: Int.parse(literal) ?? return None
+        if count < 0 -> return None
+    } else -> return None
+    Val(KitAssertion{stream: stream, path: source, mode: "json", value: literal,
+        json_mode: mode, json_path: path, json_op: op})
+}

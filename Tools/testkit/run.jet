@@ -95,6 +95,8 @@ struct KitEnv {
     jetpack: String
     timeout: Duration
     memory_limit: Int
+    version: String{""}
+    version_error: String{""}
 }
 
 struct KitEnvVar {
@@ -117,6 +119,8 @@ struct KitRun {
     signal: Int?
     timed_out: Bool
     error: String
+    elapsed_ns: Int{0}
+    limit_hit: String{""}
 }
 struct KitOptions {
     suite: String
@@ -169,6 +173,27 @@ struct KitAssertion {
     path: String
     mode: String
     value: String
+    json_mode: String{""}
+    json_path: String{""}
+    json_op: String{""}
+    ratio: Float{0.0}
+}
+
+struct KitJsonNormalization {
+    stream: String
+    path: String
+    kind: String
+}
+
+struct KitJsonSpan {
+    start: Int
+    end: Int
+    normalizer: Int
+}
+
+struct KitJsonResult {
+    text: String
+    error: String
 }
 
 struct KitStep {
@@ -179,6 +204,10 @@ struct KitStep {
     cwd: String{""}
     unset: [String]{[String]{}}
     environment: [KitEnvVar]{[KitEnvVar]{}}
+    label: String{""}
+    limit_time: Int{0}
+    limit_memory: Int{0}
+    json_normalize: [KitJsonNormalization]{[KitJsonNormalization]{}}
 }
 
 struct KitPlan {
@@ -192,6 +221,7 @@ struct KitPlan {
     refused: String
     steps: [KitStep]
     error: String
+    json_normalize: [KitJsonNormalization]{[KitJsonNormalization]{}}
 }
 
 struct KitOutcome {
@@ -226,10 +256,20 @@ struct KitStepCtx {
     golden: KitGoldenStepCtx?
 }
 
+struct KitCapturedStep {
+    label: String
+    stdout: String
+    stderr: String
+    elapsed_ns: Int
+}
+
 struct KitStepState {
     last: KitRun
     built: String
     built_once: Bool
+    history: [KitCapturedStep]{[KitCapturedStep]{}}
+    json_stdout: String?{None}
+    json_stderr: String?{None}
 }
 
 struct KitStepResult {
@@ -268,6 +308,7 @@ fn kit_steps_execute(context: KitStepCtx, hooks: KitStepHooks) -> KitOutcome {
         .Val(value) -> return KitOutcome{verdict: value, run: state.last}
         .None -> {}
     }
+    if kit_expect_named(plan.normalize, "version") && (context.env.version == "" || context.env.version_error != "") -> return KitOutcome{verdict: kit_expect_verdict("ERROR", "jet version: {context.env.version_error}"), run: state.last}
     if plan.compile_only && context.golden == None -> return KitOutcome{verdict: kit_expect_verdict("REFUSED", "run: none is golden-only"), run: state.last}
     if plan.refused != "" -> return KitOutcome{verdict: kit_expect_verdict("REFUSED", plan.refused), run: state.last}
     if plan.steps.len() == 0 -> return KitOutcome{verdict: kit_expect_verdict("REFUSED", "case has no steps"), run: state.last}
@@ -281,6 +322,28 @@ fn kit_steps_execute(context: KitStepCtx, hooks: KitStepHooks) -> KitOutcome {
         invoked :: hooks.invoke(step, index, context, state)
         state = invoked.state
         if invoked.verdict.status != "PASS" -> return KitOutcome{verdict: invoked.verdict, run: state.last}
+        state.json_stdout = None
+        state.json_stderr = None
+        if (plan.json_normalize.len() > 0 || step.json_normalize.len() > 0) && kit_steps_failure(step, state.last) == None {
+            rules := plan.json_normalize
+            loop rule in step.json_normalize -> &rules.push(rule)
+            output :: kit_steps_json_normalize(state.last.stdout, "stdout", rules)
+            errors :: kit_steps_json_normalize(state.last.stderr, "stderr", rules)
+            if output.error != "" -> return KitOutcome{verdict: kit_expect_verdict("FAIL", output.error), run: state.last}
+            if errors.error != "" -> return KitOutcome{verdict: kit_expect_verdict("FAIL", errors.error), run: state.last}
+            state.json_stdout = Val(output.text)
+            state.json_stderr = Val(errors.text)
+        }
+        if step.label != "" {
+            source_name :: if context.golden == {
+                .Val(golden) -> kit_golden_source_name(golden.entry)
+                .None -> ""
+            }
+            &state.history.push(KitCapturedStep{label: step.label,
+                stdout: kit_steps_normalize(state.json_stdout ?? state.last.stdout, context.env, context.work, context.scratch, plan.normalize, state.built, source_name),
+                stderr: kit_steps_normalize(state.json_stderr ?? state.last.stderr, context.env, context.work, context.scratch, plan.normalize, state.built, source_name),
+                elapsed_ns: state.last.elapsed_ns})
+        }
         verdict :: hooks.check(step, index, context, state)
         if verdict.status != "PASS" -> return KitOutcome{verdict: verdict, run: state.last}
         if plan.compile_only -> break
@@ -383,7 +446,14 @@ fn kit_execute_suites(options: KitOptions, root: String) -> Int {
         print("ERROR\tselection\t\tscratch: {err}")
         return 2
     }
-    env :: KitEnv{root: root, scratch: run_scratch, jet: jet, jetpack: jetpack, timeout: timeout, memory_limit: 0}
+    env := KitEnv{root: root, scratch: run_scratch, jet: jet, jetpack: jetpack, timeout: timeout, memory_limit: 0}
+    version_run :: kit_exec_invoke(env, [jet, "--version"], root, run_scratch, "")
+    if version_run.code == 0 && kit_exec_process_failure(version_run) == None {
+        env.version = kit_steps_version(version_run.stdout) ?? ""
+        if env.version == "" -> env.version_error = "unparseable jet --version banner"
+    } else {
+        env.version_error = "jet --version failed: {version_run.error} {version_run.stderr}"
+    }
     results := [KitCaseResult]{}
     ran_suites := [String]{}
     loop (index, item) in entries {

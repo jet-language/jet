@@ -35,6 +35,41 @@ Each scenario may stage a `fixture:` directory relative to its `.case` file;
 exact stdout, stderr, and file snapshots live beside the scenario. Program
 fixtures belong outside `Tools/testkit`, whose `.jet` files are package members.
 
+Label a process step with `step NAME:` and compare normalized streams with
+`stdout: == NAME` or `stderr: == NAME`. Labels must be unique, and stream
+comparisons name a prior step. `file: A == B` and `file: A != B` compare raw
+bytes, including non-UTF-8 files. `copy: A B` and `remove: A` operate only on
+work-relative paths; failed file operations report `ERROR`.
+
+An `env: NAME=VALUE` before the first step applies to the case. After a step,
+it applies only to that step; `unset: NAME` removes a variable after all
+environment overlays. `cwd: PATH` sets that step's working directory under
+`{work}`. `built` invokes the most recent successful `jet build` artifact;
+using it without a preceding build is a parse error.
+In argv only, `{env:NAME|default}` reads the effective environment after
+those overlays and unsets; unset or empty values expand to `default`.
+
+`limit: time=SECONDS memory=KiB` bounds a step, with an explicit limit hit
+reported as `FAIL`. `elapsed: B <= FACTOR * A` compares captured monotonic
+durations for labelled steps. `normalize: version` replaces the exact
+version reported by the supplied compiler with `VERSION`; an unreadable
+version banner reports `ERROR`, not a guessed version.
+
+Structured assertions use `json: stdout|stderr doc|ndjson PATH OP VALUE`, or
+`json: file FILE doc|ndjson PATH OP VALUE`. Paths support `$`, `.key`, `[i]`,
+and `[*]` (every selected record must match, and an empty selection fails).
+Operators are `=` for typed JSON equality, `:` for a type, `#=` for a count,
+and `has` for an array element containing all keys in a nonempty JSON object.
+Object key order is not significant; array order is significant for `=`.
+A `: number` assertion needs a same-line `#` reason for the nondeterminism.
+
+`normalize: json stdout|stderr PATH : TYPE # reason` replaces each selected
+typed value with the JSON string `"<<TYPE>>"` before snapshot comparison.
+All other bytes remain unchanged; malformed JSON, a missing path, or a wrong
+type fails. Before the first step this applies case-wide; after a step it
+attaches only to that step. Typed `json:` assertions still inspect the
+original values. No stream is silently skipped merely because it is not JSON.
+
 ## Find an example
 
 Start with the smallest source in [`features/basics/`](features/basics/), then
