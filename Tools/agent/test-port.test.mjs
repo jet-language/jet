@@ -524,3 +524,85 @@ test('analyzer recovery never treats byte literal punctuation as a call delimite
     assert.ok(analyzeFunction(row).classes.includes('unmodeled call later'));
   }
 });
+
+const compileCodes = 'fn codes(src: &str) -> Vec<String> { match jet::compile(src) { Ok(_) => Vec::new(), Err(diags) => diags.iter().map(|d| d.code.clone()).collect(), } }';
+const requiredCodes = 'fn codes(src: &str) -> Vec<String> { jet::compile(src).err().unwrap().into_iter().map(|d| d.code.to_string()).collect() }';
+const stagedCodes = 'fn codes(source: &str, stem: &str) -> Vec<String> { let root = common::unique_tmp(stem); let path = root.join("main.jet"); fs::write(&path, source).unwrap(); let diagnostics = jet::check_with_path(path.to_str().unwrap()); let _ = fs::remove_dir_all(root); diagnostics.into_iter().map(|diagnostic| diagnostic.code).collect() }';
+const pathCodes = 'fn codes(entry: &str) -> Vec<String> { jet::Driver::check_file_with_effect_facts(entry, None, false).0.iter().map(|d| d.code.clone()).collect() }';
+const setCodes = 'fn codes(diags: &[jet::Diagnostics::Diagnostic]) -> BTreeSet<String> { diags.iter().map(|d| d.code.clone()).collect() }';
+function codesRow(helper, body, imports = '') {
+  const rows = functionsIn(`${imports} ${helper} #[test] fn example() { ${body} }`, 'tests/sample.rs');
+  return classify(rows.find(row => row.test), rows.filter(row => !row.test));
+}
+
+test('E3 compile codes drops successful lints and keeps ordered duplicate errors only', async () => {
+  for (const helper of [compileCodes, compileCodes.replace('diags.iter().map(|d| d.code.clone())', 'diags.into_iter().map(|d| d.code.to_string())')]) {
+    const row = codesRow(helper, 'assert_eq!(codes("fn run() {}"), ["E0209", "E0209"]);');
+    const observed = async (source, mode) => ({ source, mode, code: 1, diagnostics: [diagnostic, { ...diagnostic, severity: 'warning', code: 'L0100' }, diagnostic] });
+    assert.equal((await checkOriginal(row, observed)).assertions, 1);
+    assert.deepEqual(analyzeFunction(row).classes, []);
+    await assert.rejects(checkOriginal(row, reference), /original assert_eq! not satisfied/u);
+    const success = codesRow(helper, 'assert!(codes("fn run() {}").is_empty());');
+    await checkOriginal(success, async (source, mode) => ({ source, mode, code: 0, diagnostics: [{ ...diagnostic, severity: 'warning', code: 'L0100' }] }));
+  }
+});
+
+test('E3 required-failure codes retains the implicit unwrap assertion', async () => {
+  const row = codesRow(requiredCodes, 'assert_eq!(codes("fn run() {}"), ["E0209"]);');
+  assert.equal((await checkOriginal(row, reference)).assertions, 2);
+  await assert.rejects(checkOriginal(row, async (source, mode) => ({ source, mode, code: 0, diagnostics: [] })), /compile\.err\(\)\.unwrap\(\) not satisfied/u);
+});
+
+test('E3 staged check codes preserves all diagnostics, order, duplicates and exact project input', async (t) => {
+  const root = fixture(t), row = codesRow(stagedCodes, 'assert_eq!(codes("fn run() {}", "scope"), ["L0100", "E0209", "L0100"]);');
+  const warning = { ...diagnostic, severity: 'warning', code: 'L0100' };
+  let metadata;
+  const observed = async (source, mode, options) => {
+    metadata = options;
+    return { source, mode, code: 1, diagnostics: [warning, diagnostic, warning], rendered: 'real reference warning and error\n' };
+  };
+  await checkOriginal(row, observed, root);
+  assert.equal(metadata.allDiagnostics, true);
+  assert.deepEqual(metadata.project, { entry: 'run.jet', files: [{ path: 'run.jet', content: 'fn run() {}' }] });
+  await assert.rejects(checkOriginal(row, reference, root), /original assert_eq! not satisfied/u);
+  await assert.rejects(emitFunction(row, { root, reference: observed }), /explicit verbose CLI case/u);
+  assert.equal(existsSync(join(root, 'tests/ui')), false);
+});
+
+test('E3 Driver codes uses the supplied staged entry rather than treating its path as source', async (t) => {
+  const root = fixture(t), row = codesRow(pathCodes, 'let root = common::unique_tmp("scope"); let path = root.join("entry.jet"); fs::write(&path, "fn run() {}").unwrap(); assert_eq!(codes(path.to_str().unwrap()), ["E0209"]);');
+  let metadata, actualSource;
+  const observed = async (source, mode, options) => { actualSource = source; metadata = options; return reference(source, mode); };
+  observed.createProject = makeReference('/not-invoked', root, root).createProject;
+  await checkOriginal(row, observed, root);
+  assert.equal(actualSource, 'fn run() {}');
+  assert.equal(metadata.allDiagnostics, true);
+  assert.equal(metadata.project.files[0].content, actualSource);
+  await assert.rejects(checkOriginal(codesRow(pathCodes, 'codes("outside.jet");'), reference, root), /staged input path/u);
+});
+
+test('E3 diagnostic slice codes sorts with Rust UTF-8 ordering and deduplicates, without another check', async () => {
+  const row = codesRow(setCodes, 'let d = jet::compile("fn run() {}").unwrap_err(); assert_eq!(codes(&d), ["E0209", "", "𐀀"]);', 'use std::collections::BTreeSet;');
+  let calls = 0;
+  await checkOriginal(row, async (source, mode) => { calls++; return { source, mode, code: 1, diagnostics: [ { ...diagnostic, code: '𐀀' }, diagnostic, { ...diagnostic, code: '' }, diagnostic] }; });
+  assert.equal(calls, 1);
+  await assert.rejects(checkOriginal(row, reference), /original assert_eq! not satisfied/u);
+});
+
+test('E3 lexical aliases qualify only an exact codes body; different bodies and signatures remain hand-port', async () => {
+  const alias = codesRow(compileCodes, 'assert_eq!(inspected("fn run() {}"), ["E0209"]);', 'use crate::{codes as inspected};');
+  await checkOriginal(alias, reference);
+  for (const helper of [
+    compileCodes.replace('diags.iter()', 'diags.iter().filter(|d| d.code != "E0209")'),
+    compileCodes.replace('match jet::compile(src)', 'assert!(false); match jet::compile(src)'),
+    compileCodes.replace('src: &str', 'src: &String'),
+    setCodes.replace('BTreeSet<String>', 'Vec<String>'),
+    'fn codes(src: &str) -> Vec<String> { Vec::new() }',
+  ]) {
+    const row = codesRow(helper, 'codes("fn run() {}");');
+    await assert.rejects(checkOriginal(row, reference), /unmodeled call codes/u);
+    assert.ok(analyzeFunction(row).classes.some(name => name.startsWith('unmodeled call codes')));
+  }
+  const foreign = codesRow(compileCodes, 'inspected("fn run() {}");', 'use foreign::codes as inspected;');
+  await assert.rejects(checkOriginal(foreign, reference), /unmodeled call inspected/u);
+});
