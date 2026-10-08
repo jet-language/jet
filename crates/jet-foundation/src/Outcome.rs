@@ -1227,7 +1227,7 @@ fn jet_write_journey_block<'a>(
         jet_write_journey_line(out, style, depth, |out| {
             match layout {
                 Some(layout) => jet_write_journey_hop_line(out, label, site, layout, error_report),
-                None => jet_write_journey_hop_text(out, label, site, site.file, site.note, false, error_report),
+                None => jet_write_journey_hop_text(out, label, site, (site.file, false), site.note, false, error_report),
             }
         });
     }
@@ -1285,7 +1285,7 @@ fn jet_journey_path_budget<'a>(
     error_report: bool,
 ) -> usize {
     let widest = sites.map(|(label, site)| {
-        jet_journey_text_columns(label, site, "", site.note, error_report)
+        jet_journey_text_columns(label, site, ("", false), site.note, error_report)
     }).max().unwrap_or(0);
     width.saturating_sub(widest)
 }
@@ -1304,10 +1304,10 @@ fn jet_write_journey_hop_line(
     error_report: bool,
 ) -> std::fmt::Result {
     let file = jet_report_elide_path(site.file, path_budget);
-    let (note, ellipsis) = if jet_journey_text_columns(label, site, &file, site.note, error_report) <= width {
+    let (note, ellipsis) = if jet_journey_text_columns(label, site, file, site.note, error_report) <= width {
         (site.note, false)
     } else {
-        let fixed = jet_journey_text_columns(label, site, &file, "", error_report);
+        let fixed = jet_journey_text_columns(label, site, file, "", error_report);
         // The em dash and ellipsis cost four columns; omit a note that cannot
         // show one character instead of leaving only ` — …`.
         let room = width.saturating_sub(fixed + 4);
@@ -1318,14 +1318,14 @@ fn jet_write_journey_hop_line(
             (&site.note[..end], true)
         }
     };
-    jet_write_journey_hop_text(out, label, site, &file, note, ellipsis, error_report)
+    jet_write_journey_hop_text(out, label, site, file, note, ellipsis, error_report)
 }
 
 fn jet_write_journey_hop_text(
     out: &mut dyn std::fmt::Write,
     label: JetJourneyLabel,
     site: JetJourneySite<'_>,
-    file: &str,
+    file: (&str, bool),
     note: &str,
     ellipsis: bool,
     error_report: bool,
@@ -1333,7 +1333,10 @@ fn jet_write_journey_hop_text(
     write!(out, "  {label} ")?;
     jet_write_journey_source_text(out, site.function, error_report)?;
     out.write_str(" (")?;
-    jet_write_journey_source_text(out, file, error_report)?;
+    if file.1 {
+        jet_write_journey_source_text(out, "…/", error_report)?;
+    }
+    jet_write_journey_source_text(out, file.0, error_report)?;
     write!(out, ":{}", site.line)?;
     if error_report && site.column != 0 {
         write!(out, ":{}", site.column)?;
@@ -1377,7 +1380,7 @@ impl std::fmt::Write for JetJourneyColumnCount {
 fn jet_journey_text_columns(
     label: JetJourneyLabel,
     site: JetJourneySite<'_>,
-    file: &str,
+    file: (&str, bool),
     note: &str,
     error_report: bool,
 ) -> usize {
@@ -1390,19 +1393,21 @@ fn jet_journey_text_columns(
 /// Shed whole leading segments, never characters inside a name, so the file you
 /// have to open is still spelled correctly. `…/` marks what went. The basename
 /// is the floor: a half-spelled file name is worse than a line that wraps.
-fn jet_report_elide_path(file: &str, budget: usize) -> String {
-    if jet_report_columns(file) <= budget {
-        return file.to_string();
+fn jet_report_elide_path(file: &str, budget: usize) -> (&str, bool) {
+    let mut columns = jet_report_columns(file);
+    if columns <= budget {
+        return (file, false);
     }
     let mut start = 0;
     while let Some(slash) = file[start..].find('/') {
-        start += slash + 1;
-        let candidate = format!("…/{}", &file[start..]);
-        if jet_report_columns(&candidate) <= budget {
-            return candidate;
+        let next = start + slash + 1;
+        columns -= jet_report_columns(&file[start..next]);
+        start = next;
+        if columns + 2 <= budget {
+            return (&file[start..], true);
         }
     }
-    file[start..].to_string()
+    (&file[start..], false)
 }
 
 /// D-FAIL-BREACH1=A / D-FAIL-CTX1: the one order for a failure report — the
@@ -2203,11 +2208,44 @@ mod journey_tests {
                 note, hops: 1,
             };
             let label = JetJourneyLabel::Hop(1);
-            let fixed = jet_journey_text_columns(label, site, site.file, "", error_report);
+            let fixed = jet_journey_text_columns(label, site, (site.file, false), "", error_report);
             let mut rendered = String::new();
             jet_write_journey_hop_line(&mut rendered, label, site, (fixed + 7, 64), error_report)
                 .unwrap();
             assert_eq!(rendered, format!("  1. run (app.jet:3) — {suffix}"));
+        }
+    }
+
+    #[test]
+    fn journey_path_elision_preserves_segment_and_basename_policy() {
+        for (file, budget, expected) in [
+            ("dir/app.jet", 32, ("dir/app.jet", false)),
+            ("dir/app.jet", 9, ("app.jet", true)),
+            ("dir/app.jet", 8, ("app.jet", false)),
+            ("dir/sub/app.jet", 13, ("sub/app.jet", true)),
+            ("dir/sub/app.jet", 12, ("app.jet", true)),
+            ("singlelong.jet", 1, ("singlelong.jet", false)),
+            ("dir/é.jet", 7, ("é.jet", true)),
+            ("dir/é.jet", 6, ("é.jet", false)),
+            ("dir/", 2, ("", true)),
+            ("dir/", 1, ("", false)),
+            ("dir/\napp.jet", 10, ("\napp.jet", true)),
+        ] {
+            assert_eq!(jet_report_elide_path(file, budget), expected);
+        }
+        for (error_report, expected) in [
+            (false, "  1. run (…/\napp.jet:3)"),
+            (true, "  1. run (…/\\napp.jet:3)"),
+        ] {
+            let site = JetJourneySite {
+                function: "run", file: "dir/\napp.jet", line: 3, column: 0,
+                note: "", hops: 1,
+            };
+            let mut rendered = String::new();
+            jet_write_journey_hop_line(
+                &mut rendered, JetJourneyLabel::Hop(1), site, (usize::MAX, 10), error_report,
+            ).unwrap();
+            assert_eq!(rendered, expected);
         }
     }
 
