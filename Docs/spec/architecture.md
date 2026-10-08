@@ -42,6 +42,9 @@ runtime-owned statics before the loader unmaps code and data. Initialization
 and finalization share a live flag, so repeated calls reuse the same statics
 without duplicating owners. Calls through the x86-64 assembly host boundary
 declare all System V caller-saved vector registers as clobbered.
+The callable lifetime witness in `Compiler/JetBackend/Tests/CallableStatics.jet`
+starts with MIR and uses the admitted runtime's actual constructors and drops,
+observing reuse, live-flag clearing, and reinitialization before loader unload.
 
 ### Build graph and compiler nodes
 

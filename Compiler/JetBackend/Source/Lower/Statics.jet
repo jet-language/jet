@@ -3,8 +3,9 @@
 //
 // Runtime-owned words inside a frozen tree (String and spilled exact Int)
 // cannot be frozen at build time. Their slots stay zero until the entry
-// runs the recorded constructor on static text. The resulting owners live
-// for the process; an ownership-bearing Global read clones them.
+// runs the recorded constructor on static text. Program owners live until
+// process exit; callable owners live until image finalization. An
+// ownership-bearing Global read clones them.
 use jet_foundation.[
     MIRConstant, MIRConstantDef, MIRInstruction, MIRPlace, MIRProgram, MIRType, MIRValueID,
     mir_type_display_name,
