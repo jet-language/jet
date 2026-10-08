@@ -515,6 +515,14 @@ Resolver transfers are inline arrays of those 56-byte rows, in platform
 order without sorting or deduplication. `__ResolveError` is a 32-byte owner
 with exact-Int kind/code words and an owned E4 message. Its projections and
 clone/drop use the canonical numeric ownership seam.
+TCP and Unix stream holders are 56 bytes: the FD72 pointer, one reserved
+word, separate shutdown flags, read/write timeout milliseconds, and a
+metadata mutex. They do not keep another closed flag. TCP listener copies
+duplicate the descriptor into a new FD72; Unix listener copies retain the
+shared FD72, matching the Rust Arc lifetime. UDP's eight-byte holder points
+to one shared 32-byte state containing refs, mutex, FD72 and a single timeout
+used for both directions. All timeout projections transfer canonical exact
+Int owners, while the source alone validates durations and chooses deadlines.
 The resolver uses platform `getaddrinfo` with zeroed hints except SOCK_STREAM
 and a null service, then applies the port. All returned chains are released
 with `freeaddrinfo`, including empty results. EAI_SYSTEM preserves errno;
