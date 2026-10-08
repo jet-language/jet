@@ -1,0 +1,19 @@
+# HAND-PORT tests/http_client_law.rs:2211-2242 public_client_proxy_url_sends_absolute_form
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# Exact absolute-form starts_with, literal response and original AOT-only stdout; request_head 512-byte/64KiB/5s invariants retained.
+fixture: public_client_proxy_url_sends_absolute_form.fixture
+env: NO_COLOR=1
+write: peer/main.jet peer/source.template
+step: jet build peer/main.jet
+exit: 0
+spawn peer: built
+await: file addr.txt timeout 30s
+capture: addr = text file addr.txt
+write: main.jet main.template
+step: jet build main.jet
+exit: 0
+step client: built
+exit: 0
+stdout: = public_client_proxy_url_sends_absolute_form.stdout.expected
+wait: peer
+exit: 0
