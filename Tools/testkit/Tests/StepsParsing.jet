@@ -188,3 +188,21 @@ fn kit_test_steps_env() -> KitEnv {
     assert_eq(kit_steps_exit_test(relation, state).status, "PASS")
     assert_eq(kit_steps_exit_test(membership, state).status, "FAIL")
 }
+
+#Test("bounded polls preserve each exact exit predicate and require reasons for partial stream predicates") {
+    plan :: kit_steps_parse_case("poll ready: printf 'ready && complete' until exit: 0 && stdout: ~ \"ready && complete\" && exit: 7 timeout 1s every 1ms # readiness substring\n")
+    assert_eq(plan.error, "")
+    assert_eq(plan.steps[0].exit, "any")
+    assert_eq(plan.steps[0].assertions.len(), 3)
+    assert_eq(plan.steps[0].assertions[0].stream, "exit")
+    assert_eq(plan.steps[0].assertions[0].mode, "in")
+    assert_eq(plan.steps[0].assertions[0].alternatives, ["0"])
+    assert_eq(plan.steps[0].assertions[1].value, "ready && complete")
+    assert_eq(plan.steps[0].assertions[2].alternatives, ["7"])
+    default_status :: kit_steps_parse_case("poll ready: printf ready until stdout: = \"ready\" timeout 1s every 1ms\n")
+    assert_eq(default_status.error, "")
+    assert_eq(default_status.steps[0].exit, "0")
+    loop source in ["poll ready: printf ready until exit: any timeout 1s every 1ms", "poll ready: printf ready until exit: nope timeout 1s every 1ms", "poll ready: printf ready until exit: 0 && stdout: ~ \"ready\" timeout 1s every 1ms", "poll ready: printf ready until exit: 0 && timeout 1s every 1ms"] {
+        assert(kit_steps_parse_case("{source}\n").error != "")
+    }
+}

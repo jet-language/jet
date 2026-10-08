@@ -39,17 +39,27 @@ fn kit_steps_poll_step(label: String, original: String) -> KitStep? {
     interval :: kit_steps_duration_ns(tokens[boundary + 3].text) ?? return None
     predicates :: kit_steps_predicates(kit_steps_byte_slice(body, tokens[until + 1].start, tokens[boundary - 1].end)) ?? return None
     assertions := [KitAssertion]{}
+    exit := "0"
     reason :: kit_steps_byte_slice(original, kit_steps_comment(original), original.count_bytes())
     loop predicate in predicates {
         colon :: kit_steps_condition_colon(predicate) ?? return None
         subject :: ~kit_steps_byte_slice(predicate, 0, colon).trim()
         form :: ~kit_steps_byte_slice(predicate, colon + 1, predicate.count_bytes()).trim()
-        assertion :: if subject == "json" -> kit_steps_json_assertion("{form} {reason}") ?? return None else -> kit_steps_stream_assertion(subject, "{form} {reason}") ?? return None
+        assertion :: if subject == "exit" {
+            if kit_steps_integer(form) == None -> return None
+            // Every explicit status is checked below; "any" must not exempt exit 101 from process failure classification.
+            exit = "any"
+            KitAssertion{stream: "exit", mode: "in", alternatives: [form]}
+        } else if subject == "json" {
+            kit_steps_json_assertion("{form} {reason}") ?? return None
+        } else {
+            kit_steps_stream_assertion(subject, "{form} {reason}") ?? return None
+        }
         &assertions.push(assertion)
     }
     argv := [String]{}
     loop token in tokens.slice(0, until) -> &argv.push(token.text)
-    Val(KitStep{argv: argv, stdin: "", exit: "0", assertions: assertions, label: label, action: "poll", duration: timeout, instruction: "{interval}"})
+    Val(KitStep{argv: argv, stdin: "", exit: exit, assertions: assertions, label: label, action: "poll", duration: timeout, instruction: "{interval}"})
 }
 
 fn kit_steps_poll(step: KitStep, index: Int, context: KitStepCtx, previous: KitStepState, hooks: KitStepHooks) -> KitStepResult {

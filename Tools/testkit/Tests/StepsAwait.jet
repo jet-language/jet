@@ -2,14 +2,31 @@ use core.files as files
 
 #Test("await file and dir preserve quoted paths and distinguish predicate failure from optional expiry") {
     root :: cases_test_root("await-files")
-    source :: "write: 'two words' = \"timeout\"\nawait: file 'two words' = \"timeout\" timeout 1s every 1ms\nmkdir: directory\nawait: dir directory timeout 1s every 1ms\nawait: file missing timeout 2ms every 1ms optional\nstdout: empty\n"
-    assert_eq(cases_test_advanced(root, "ready", source).verdict.status, "PASS")
+    source :: "write: 'two words' = \"timeout\"\nawait: file 'two words' = \"timeout\" timeout 1s every 1ms\nmkdir: directory\nawait: dir directory timeout 1s every 1ms\nawait: file missing timeout 2ms every 1ms optional\n"
+    outcome :: cases_test_advanced(root, "ready", source)
+    assert_eq(outcome.verdict.status, "PASS")
+    assert_eq(outcome.run.stdout, "")
     loop wait in ["await: file missing timeout 2ms every 1ms", "await: dir missing timeout 2ms every 1ms", "write: value = \"wrong\"\nawait: file value = \"right\" timeout 2ms every 1ms"] {
         result :: cases_test_advanced(root, "deadline", "{wait}\n")
         assert_eq(result.verdict.status, "FAIL")
         assert_eq(result.verdict.detail, "await deadline exceeded")
     }
     files.remove_all(root) ?? panic("remove await file scratch")
+}
+
+#Test("await partial file predicates require reasons and preserve substring and relational line checks") {
+    root :: cases_test_root("await-partial")
+    ready :: "write: value = \"ready\\nnext\\n\"\nawait: file value ~ \"ready\" timeout 1s every 1ms # fixture readiness marker\nawait: file value lines >= 2 timeout 1s every 1ms # fixture readiness line count\n"
+    assert_eq(cases_test_advanced(root, "ready", ready).verdict.status, "PASS")
+    loop predicate in ["~ \"ready\"", "lines >= 2"] {
+        failed :: "write: value = \"waiting\"\nawait: file value {predicate} timeout 2ms every 1ms # fixture readiness predicate\n"
+        result :: cases_test_advanced(root, "deadline", failed)
+        assert_eq(result.verdict.status, "FAIL")
+        assert_eq(result.verdict.detail, "await deadline exceeded")
+        invalid :: "write: value = \"ready\\nnext\\n\"\nawait: file value {predicate} timeout 1s every 1ms\n"
+        assert_eq(cases_test_advanced(root, "missing-reason", invalid).verdict.status, "REFUSED")
+    }
+    files.remove_all(root) ?? panic("remove await partial scratch")
 }
 
 #Test("await entry chooses the first matching entry with all required readable files and exposes its path") {
@@ -49,4 +66,35 @@ use core.files as files
         assert_eq(cases_test_advanced(root, "invalid", "{invalid}\n").verdict.status, "REFUSED")
     }
     files.remove_all(root) ?? panic("remove poll scratch")
+}
+
+#Test("poll explicit exit predicates and quoted conjunctions observe one real command result") {
+    root :: cases_test_root("poll-status")
+    ready :: "poll ready: printf 'ready && complete' until exit: 0 && stdout: ~ \"ready && complete\" timeout 1s every 1ms # readiness substring\n"
+    assert_eq(cases_test_advanced(root, "ready", ready).verdict.status, "PASS")
+    nonzero :: "poll ready: jet -c 'printf ready; exit 7' until exit: 7 && stdout: = \"ready\" timeout 1s every 1ms\n"
+    assert_eq(cases_test_advanced(root, "nonzero", nonzero).verdict.status, "PASS")
+    loop source in ["poll ready: jet -c 'printf ready; exit 7' until exit: 0 && stdout: = \"ready\" timeout 20ms every 1ms", "poll ready: printf ready until exit: 0 && exit: 7 && stdout: = \"ready\" timeout 20ms every 1ms", "poll ready: jet -c 'if test -f seen; then exit 7; else : > seen; exit 0; fi' until exit: 0 && exit: 7 timeout 20ms every 1ms"] {
+        result :: cases_test_advanced(root, "mismatch", "{source}\n")
+        assert_eq(result.verdict.status, "FAIL")
+        assert(result.verdict.detail.contains("poll deadline exceeded"))
+    }
+    files.remove_all(root) ?? panic("remove poll status scratch")
+}
+
+#Test("poll checked exit predicates retain compiler-error signal deadline and invocation failures") {
+    root :: cases_test_root("poll-status-failures")
+    crashed :: cases_test_advanced(root, "compiler-error", "poll ready: jet -c 'exit 101' until exit: 101 timeout 1s every 1ms\n")
+    assert_eq(crashed.verdict.status, "ERROR")
+    assert_eq(crashed.verdict.detail, "internal compiler error (exit 101)")
+    signalled :: cases_test_advanced(root, "signal", "requires: os:unix\npoll ready: jet -c 'kill -TERM $$' until exit: 0 timeout 1s every 1ms\n")
+    assert_eq(signalled.verdict.status, "ERROR")
+    assert_eq(signalled.verdict.detail, "child terminated by signal")
+    expired :: cases_test_advanced(root, "child-timeout", "poll ready: jet -c 'sleep 20' until exit: 0 timeout 20ms every 1ms\n")
+    assert_eq(expired.verdict.status, "FAIL")
+    assert_eq(expired.verdict.detail, "poll deadline exceeded")
+    missing :: cases_test_advanced(root, "invocation-error", "poll ready: {{work}}/no-such-command until exit: 0 timeout 1s every 1ms\n")
+    assert_eq(missing.verdict.status, "ERROR")
+    assert(missing.verdict.detail.starts_with("spawn:"))
+    files.remove_all(root) ?? panic("remove poll failure scratch")
 }
