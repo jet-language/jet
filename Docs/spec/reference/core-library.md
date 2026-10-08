@@ -3106,6 +3106,11 @@ accessibility attach/project also enter their Jet public functions first.
 `attach` preserves its public `Unit !UIHostError` contract: Core discards the
 private provider's returned canonical node only on success and propagates
 the same typed host error on failure.
+TUI capability selection, ASCII-only case folding, encoded-OS flag semantics,
+dimension parsing, and defaults are Jet policy. The private environment-byte
+leaf samples the same startup facts; the shared terminal leaf remains the
+canonical stdout `IsTerminal` sample. No environment effect is added to the
+existing public capability row.
 
 ### `core.reactive` — explicit signals and dependency tracking
 

@@ -1547,7 +1547,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: ea251c5f1f93f0cbaf656cccdbad66b38a38940b489279bae83d108f29b70076
+// Source SHA-256: 92f1ca31a2a885224a6ce38eb213df422c07f0d211cb6d269d9abed22c59c9df
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -3016,7 +3016,8 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.font", "shape", "jet_font_shape", true, &[true, true]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_ui_capabilities(&["UI.FontShaping"]),
     CoreCallRecord::new("core.ui", "text_input", "jet_ui_text_input", true, &[true, false]) .with_max_arity(3) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.ui", "reactive_render", "jet_ui_reactive_render", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.tui", "capabilities", "jet_tui_capabilities", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::source_owned("core.tui", "capabilities", &[]),
+    CoreCallRecord::new("core.tui", "__cap_env_bytes", "jet_tui_cap_env_bytes", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::source_owned("core.ui.host", "capabilities", &[]),
     CoreCallRecord::new("core.ui.host", "__capabilities", "jet_ui_host_capabilities", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.ui.host", "file_filter", "jet_ui_host_file_filter", true, &[true, true, true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),

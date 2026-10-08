@@ -1317,6 +1317,10 @@ fn core_fixed_sig_impl(
         ("core.files", "__reader_line_bytes") => Some((vec![(AccessConvention::Write, Type::Named("FileReader".into()))], Some(result_ty(Type::List(Box::new(u8_ty())), io.clone())))),
         ("core.process", "__stdout_line_bytes") => Some((vec![(read, Type::Named("ProcessStdoutStream".into()))], Some(result_ty(Type::List(Box::new(u8_ty())), io.clone())))),
         ("core.process", "__stderr_line_bytes") => Some((vec![(read, Type::Named("ProcessStderrStream".into()))], Some(result_ty(Type::List(Box::new(u8_ty())), io.clone())))),
+        ("core.tui", "__cap_env_bytes") => Some((
+            vec![(read, Type::String)],
+            Some(Type::Option(Box::new(Type::List(Box::new(u8_ty()))))),
+        )),
         ("core.mem", "__list_capacity") => Some((
             vec![(read, Type::List(Box::new(Type::Named("__element".to_string()))))],
             Some(Type::Int),
