@@ -397,6 +397,7 @@ fn jet_std_time_duration_to_millis(ns: i64) -> i64 {
     ns
 }
 
+include!("../crates/jet-codegen/src/Prelude/Core/NativeTaskBody.rs");
 include!("../crates/jet-codegen/src/Prelude/Scheduler.rs");
 
 /// D-LIVEQUERY1/D-WS1: the native transport is the shared Prelude seam. A
