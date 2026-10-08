@@ -16,7 +16,8 @@ export function recordApplication(type) {
   if (match[2] === undefined) return { base: match[1], args: [] };
   // Nested declaration arguments are not yet representable in the route key.
   // Reject them explicitly rather than confusing their commas with parameters.
-  if (/[<>()[\]]/.test(match[2])) throw new Error(`generic record ${type}: nested or structural arguments are unsupported`);
+  // () is a real TYPE, not a nested tuple. Parsing it claims no Unit codec.
+  if (/[<>()[\]]/.test(match[2].replace(/\(\)/g, ""))) throw new Error(`generic record ${type}: nested or structural arguments are unsupported`);
   const args = match[2].split(",");
   if (args.some((arg) => !arg)) throw new Error(`generic record ${type}: empty argument`);
   return { base: match[1], args };

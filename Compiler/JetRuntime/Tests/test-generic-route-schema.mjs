@@ -143,6 +143,18 @@ pub fn jet_fixture_plain(value: JetFixture) -> JetFixture { value }
   put("runtime.rs", declarations + "#[derive(Clone,PartialEq)]\npub struct Arc<T> { pub value: T }\npub fn jet_fixture_arc(value: crate::Arc<f64>) -> f64 { 0.0 }\n");
   success(run());
   assert.ok(readFileSync(join(fixture, "crates/jet-codegen/src/Prelude/Core/CAbiRoutes.rs"), "utf8").includes("fn jet_fixture_arc("), "crate-local Arc must remain nominal");
+  put("crates/jet-foundation/src/Syntax/core_calls.rs", registry('CoreCallRecord::new("core.fixture", "unit", "jet_fixture_unit", true)\n'));
+  const unitRecord = "#[derive(Clone)]\npub enum JetLoadable<T:Clone,E:Clone> { Idle, Loading, Loaded(T), Failed(E) }\npub fn jet_fixture_unit() -> JetLoadable<(),()> { unreachable!() }\n";
+  put("runtime.rs", declarations + unitRecord);
+  success(run());
+  assert.ok(readFileSync(join(fixture, "crates/jet-codegen/src/Prelude/Core/CAbiRoutes.rs"), "utf8").includes("result type JetLoadable<(),()>"));
+  const unitList = spawnSync(process.execPath, [join(fixture, "Tools/agent/gen-c-abi-routes.mjs"), join(fixture, "runtime.rs"), "--native-list-only"], { encoding: "utf8" });
+  success(unitList);
+  assert.match(JSON.parse(unitList.stdout).unsupportedGenericCarriers[0].reason, /seed TYPE-Unit specialization unsupported/);
+  put("runtime.rs", declarations + unitRecord.replaceAll("JetLoadable", "__jet_Loadable"));
+  const sourceUnit = run();
+  assert.notEqual(sourceUnit.status, 0);
+  assert.match(sourceUnit.stderr, /SOURCE TYPE-Unit specialization requires a typed Unit codec/);
   put("crates/jet-foundation/src/Syntax/core_calls.rs", registry(""));
   put("runtime.rs", declarations);
   success(run());
