@@ -38,6 +38,13 @@ that its semantic check passed. In Codegen poll and comptime-budget emission,
 `span := builder.current_span` snapshots the source span before write-access to
 `&builder`; `span ::` would retain a builder view across those mutations.
 
+The all-parts runtime includes `CAbiTest.rs` once through Codegen's canonical
+prelude; the compiler-call preparation step must not append a second copy.
+Test callbacks transfer owned E4 text errors through the shared carrier `take`
+operation, outcome wire output uses `handle`, and finish-wire parsing borrows
+the caller-owned carrier through `view`. No Rust `Box<String>` layout crosses
+these C doors.
+
 The front end owns language checks and user-facing compiler diagnostics.
 Backends consume checked facts; a back end that rejects checked MIR has hit an
 internal compiler error, not another language checker.
