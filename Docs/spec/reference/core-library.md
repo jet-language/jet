@@ -52,6 +52,13 @@ Encoding stream capacity/reservation/layout operations use their canonical
 private `core.mem.__list_capacity`, `__list_reserve_exact`, and `__type_size`
 leaves directly; no public wrapper or duplicate alias is introduced.
 
+Compiled-module loading sequences grant/read, header checks, digest, staging,
+native mapping, export resolution, and Text release-symbol checks in Jet.
+The private context owns one file buffer and parsed metadata; the header borrow
+never escapes a raw operation. Ordinary Close first unloads any opened native
+library, then removes its staged payload, matching the verification provider's
+error path. Successful finish transfers those resources into the existing Mod.
+
 Email address, attachment, and envelope construction validates in
 `Core/email/email.jet`: control-character refusal precedes address parsing,
 mailbox grammar is ASCII dot-atom or quoted local, MIME and physical-header

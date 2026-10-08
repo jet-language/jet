@@ -119,6 +119,9 @@ fn core_call_effect_for(module_name: String, member: String) -> Effect? {
         module_name == "core.files" && member == "__temp_directory" -> Val(Effect.Env)
         module_name == "core.files" && core_call_one_of(member, [String]{"__host_path_is_absolute", "__host_path_join"}) -> None
         module_name == "core.devtools" && member == "__publish_payload" -> None
+        module_name == "core.mod" && core_call_one_of(member, [String]{"__supported", "__os",
+            "__parse_context", "__check_context", "__context_name", "__context_digest", "__exports_count", "__export_info", "__finish_context"}) -> None
+        module_name == "core.mod" && core_call_one_of(member, [String]{"__read_context", "__stage_context"}) -> Val(Effect.FS)
         module_name == "core.process" && member == "__with_directory_raw" -> Val(Effect.FS)
         module_name == "core.time" && member == "__zone_env" -> Val(Effect.Env)
         module_name == "core.time" && core_call_one_of(member, [String]{"zone", "parse_zoned", "__zone_file_bytes"}) -> Val(Effect.FS)

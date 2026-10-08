@@ -25,7 +25,7 @@ pub enum CoreLeafKind {
 
 // BEGIN GENERATED CORE DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 7377441094986e70c6ce5b42ed17a4197c5829a01edc6774cc68527f4ae6a50c
+// Source SHA-256: 1469cbc5ffa1630468574f1677f8a2377724a7429b53989493d2d91559601f49
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreModuleDeclaration {
     pub module: &'static str,
@@ -428,8 +428,8 @@ const CORE_MODULE_61_MEMBERS: &[&str] = &["guard"];
 const CORE_MODULE_61_TYPES: &[(&str, CoreLeafKind)] = &[];
 const CORE_MODULE_61_DEPENDENCIES: &[&str] = &[];
 
-const CORE_MODULE_62_MEMBERS: &[&str] = &["is_loaded", "load", "path", "unload", "CompiledModule"];
-const CORE_MODULE_62_TYPES: &[(&str, CoreLeafKind)] = &[("CompiledModule", CoreLeafKind::Plain)];
+const CORE_MODULE_62_MEMBERS: &[&str] = &["is_loaded", "load", "path", "unload", "CompiledModule", "ModError"];
+const CORE_MODULE_62_TYPES: &[(&str, CoreLeafKind)] = &[("CompiledModule", CoreLeafKind::Plain), ("ModError", CoreLeafKind::Enum(&["Denied", "NotFound", "Invalid", "Unsupported"])), ("__LoadContext", CoreLeafKind::Plain)];
 const CORE_MODULE_62_DEPENDENCIES: &[&str] = &["core.compiler", "core.files"];
 
 const CORE_MODULE_63_MEMBERS: &[&str] = &["__resolve_ordered", "__ip_from_bytes", "__ip_bytes", "__ip_is_v4", "__socket_from_parts", "__socket_ip", "__socket_port", "__socket_scope", "__udp_packet_addr", "dns_a", "dns_a_at", "dns_aaaa", "dns_aaaa_at", "dns_ptr", "dns_srv", "dns_srv_at", "dns_srv_port", "dns_srv_priority", "dns_srv_target", "dns_srv_weight", "dns_txt", "dns_txt_at", "error_address", "error_message", "error_name", "error_operation", "error_os_code", "getservbyname", "getservbyport", "ip_addr", "ip_is_ipv4", "ip_to_string", "listener_local_socket_addr", "nodelay", "ready_readable", "ready_writable", "sendfile", "set_nodelay", "set_read_timeout", "set_timeout", "set_ttl", "set_write_timeout", "socket_addr", "socket_addr_parse", "socket_host", "socket_port", "socket_to_string", "socket_type", "tcp_accept", "tcp_close", "tcp_connect", "tcp_connect_addr", "tcp_connect_happy", "tcp_connect_timeout", "tcp_listen", "tcp_listen_addr", "tcp_local_addr", "tcp_local_socket_addr", "tcp_peer_addr", "tcp_peer_socket_addr", "tcp_read", "tcp_read_bytes", "tcp_read_text", "tcp_ready", "tcp_reply", "tcp_shutdown", "tcp_write", "tcp_write_all_bytes", "tcp_write_bytes", "tcp_write_text", "ttl", "udp_bind", "udp_bind_addr", "udp_local_addr", "udp_packet_addr", "udp_packet_bytes", "udp_packet_data", "udp_packet_original_len", "udp_packet_truncated", "udp_receive", "udp_recv_from", "udp_send_bytes_to", "udp_send_to", "udp_set_timeout", "unix_accept", "unix_close", "unix_connect", "unix_listen", "unix_read", "unix_read_bytes", "unix_shutdown", "unix_write", "unix_write_all_bytes", "TCPListener", "TCPStream", "UDPPacket", "UDPSocket", "SocketAddr", "SRVRecord", "UnixListener", "UnixStream", "create_connection", "create_server", "send", "gethostbyname", "gethostbyaddr", "gethostname", "addressfamily"];
@@ -916,6 +916,8 @@ pub const CORE_SOURCE_OWNED_TYPES: &[CoreSourceOwnedType] = &[
     CoreSourceOwnedType { path: "Core/http/http.jet", name: "Headers" },
     CoreSourceOwnedType { path: "Core/http/http.jet", name: "Header" },
     CoreSourceOwnedType { path: "Core/http/http.jet", name: "Query" },
+    CoreSourceOwnedType { path: "Core/mod/mod.jet", name: "ModError" },
+    CoreSourceOwnedType { path: "Core/mod/mod.jet", name: "__LoadContext" },
     CoreSourceOwnedType { path: "Core/net/net.jet", name: "SRVRecord" },
     CoreSourceOwnedType { path: "Core/net/mime.jet", name: "MIME" },
     CoreSourceOwnedType { path: "Core/net/url.jet", name: "URL" },

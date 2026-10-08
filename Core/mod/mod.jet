@@ -13,9 +13,9 @@ use core.text.parse as parse
 
 // core.mod — a compiled Jet unit loaded under an explicit read grant.
 //
-// The provider owns artifact validation, staging, ABI checks, and handle
-// lifetime.  The returned `Mod` is opaque; dropping it releases the native
-// module, so source cannot manufacture a detached or already-unloaded handle.
+// Source owns loader sequencing and typed refusals. Private raw operations
+// retain the existing header parser, native mapping, and owning resources.
+// Dropping the context closes its native handle before removing staged bytes.
 
 /// D-MOD-ERR1=A: each case asks the caller for a different action. `Denied`:
 /// the grant refuses the path or an effect the library declares. `NotFound`:
@@ -30,11 +30,40 @@ pub enum ModError {
     Unsupported(String)
 }
 
-pub fn load(path: String, grant: ModGrant) -[FS, Exec]> Mod ModError! {
-    if core.mod.load(path, grant: grant) == {
-        .Ok(loaded) -> Ok(loaded)
-        .Err(reason) -> Err(mod_error(reason))
+struct __LoadContext { handle: Int }
+
+impl __LoadContext.Close {
+    fn close(^self) {
+        held := ^self
+        core.mod.__close_context(held.handle)
     }
+}
+
+pub fn load(path: String, grant: ModGrant) -[FS, Exec]> Mod ModError! {
+    if !core.mod.__supported() ->
+        return Err(ModError.Unsupported("Mod.load is not supported on target `" + core.mod.__os() + "`"))
+    handle :: core.mod.__read_context(path, grant) ? value -> value ! reason -> return Err(mod_error(reason))
+    context :: __LoadContext{handle: handle}
+    core.mod.__parse_context(handle) ? unit -> unit ! reason -> return Err(ModError.Invalid(reason))
+    core.mod.__check_context(handle) ? unit -> unit ! reason -> return Err(mod_error(reason))
+    if !core.mod.__context_digest(handle) ->
+        return Err(ModError.Invalid("cannot map library payload: `" + core.mod.__context_name(handle) + "` has a content digest that does not match its metadata"))
+    core.mod.__stage_context(handle) ? unit -> unit ! reason -> return Err(ModError.Invalid(reason))
+    core.mod.__open_context(handle) ? unit -> unit ! reason ->
+        return Err(ModError.Invalid("cannot map library payload: " + reason))
+    text_exports := false
+    loop index in 0..<core.mod.__exports_count(handle) {
+        info :: core.mod.__export_info(handle, index)
+        text_exports = text_exports || info.text
+        core.mod.__resolve_export(handle, index) ? unit -> unit ! reason ->
+            return Err(ModError.Invalid("E1341: library `" + core.mod.__context_name(handle) + "` metadata names `" + info.name + "`, but the payload has no `" + info.symbol + "` export: " + reason))
+    }
+    if text_exports {
+        core.mod.__resolve_symbol(handle, "jet_text_free") ? unit -> unit ! reason ->
+            return Err(ModError.Invalid("E1341: library `" + core.mod.__context_name(handle) + "` has Text exports but no `jet_text_free` allocator release export: " + reason))
+    }
+    // Finish consumes the raw owner; the lexical Close sees an empty slot.
+    Ok(core.mod.__finish_context(handle))
 }
 pub struct CompiledModule {
     pub path: String
@@ -64,5 +93,13 @@ pub fn is_loaded(compiled: CompiledModule) -> Bool Never! {
 
 pub fn path(compiled: CompiledModule) -> String Never! {
     compiled.path
+}
+
+#Test("module loader preserves tagged refusal categories and reasons") {
+    assert_eq(mod_error("Denied: outside roots"), ModError.Denied("outside roots"))
+    assert_eq(mod_error("NotFound: absent"), ModError.NotFound("absent"))
+    assert_eq(mod_error("Invalid: bad header"), ModError.Invalid("bad header"))
+    assert_eq(mod_error("Unsupported: target"), ModError.Unsupported("target"))
+    assert_eq(mod_error("untagged"), ModError.Invalid("untagged"))
 }
 
