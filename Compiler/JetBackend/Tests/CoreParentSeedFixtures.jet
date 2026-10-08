@@ -1,4 +1,15 @@
 fn run() {
+    private_header :: "// [jet-bootstrap private host: Compiler/Bootstrap/Host/Entry.jet]\n"
+    ordinary_factory :: "fn jet_bootstrap_compile() {{}}\n"
+    per_source_marker :: "// [jet-bootstrap source: Compiler/Bootstrap/Host/Entry.jet]\n"
+    assert(jet_rust_core_parent_source_is_private("Compiler/Bootstrap/Host/Entry.jet", ordinary_factory))
+    assert(jet_rust_core_parent_source_is_private("/repo/Compiler/Bootstrap/Host/Entry.jet", ordinary_factory))
+    assert(jet_rust_core_parent_source_is_private("compiler.jet", "{private_header}{ordinary_factory}"))
+    assert(!jet_rust_core_parent_source_is_private("user.jet", "{ordinary_factory}{per_source_marker}"))
+    assert(!jet_rust_core_parent_source_is_private("user.jet", "{ordinary_factory}{private_header}"))
+    assert(!jet_rust_core_parent_source_is_private("user.jet", "\n{private_header}{ordinary_factory}"))
+    assert(!jet_rust_core_parent_source_is_private("user.jet", ordinary_factory))
+    print("Core parent private provenance: PASS; exact assembler header, same-name user/comment refused (7/7)")
     bindings :: JetRustCoreParentSeedBindings{
         host_type: "CheckedHost", request_type: "CheckedRequest", getter_type: "CheckedGetter",
         symbols_type: "CheckedMap", int_from_address: "CheckedInt::from_i64(__jet_address)",

@@ -62,7 +62,7 @@ fn jet_rust_emit_core_parent_ingress(ctx: &JetRustEmitContext, manifest: JetRust
     loop function in ctx.program.functions {
         if function.name != "jet_bootstrap_compile" -> next
         loop file in ctx.program.source_files {
-            if file.id == function.source_file && (file.path == "Compiler/Bootstrap/Host/Entry.jet" || file.path.ends_with("/Compiler/Bootstrap/Host/Entry.jet") || file.source.contains("// [jet-bootstrap source: Compiler/Bootstrap/Host/Entry.jet]")) {
+            if file.id == function.source_file && jet_rust_core_parent_source_is_private(file.path, file.source) {
                 if factory != None -> return None
                 factory = Val(function)
             }
