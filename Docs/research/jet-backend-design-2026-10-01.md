@@ -66,6 +66,10 @@ read-only data; each table's ID equals its index.
   `LIRLoweringIssue` with the `inline asm:` prefix and the offending line.
   No bytes from a refused template enter the LIR. The OS-template witnesses
   in `Tests/Fixtures/InlineAsm.jet` use the actual `OS/Linux.jet` source.
+  `inline-asm-exit` calls the raw seven-argument syscall leaf with Linux
+  `exit_group(23)` and expects process exit 23 without stdout or stderr;
+  together with the write/memory and call-address fixtures it covers the
+  compiler's kernel and indirect-call leaf shapes.
   The one read-only frame-register form, `mov r64, rsp`, may expose storage
   owned by balanced template pushes; it is refused with an empty template stack.
   Byte stores use explicit low-byte register names (including sil/dil and
