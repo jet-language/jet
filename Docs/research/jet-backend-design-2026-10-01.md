@@ -1530,9 +1530,16 @@ its receipt is not native execution or unrestricted type-coverage proof.
 The second batch records 22 more List bodies in `Combinators.jet`,
 `Parallel.jet` and `Lists.jet`, including eager callback ordering, first-error
 cleanup and explicit unsupported callback/type shapes. The parallel map still
-uses the separately owned `jet_rt_native_para_walk` scheduler seam. The census's
-`jet_list_para_fold_add_fixed_f64` is not included: it still selects a Rust
-runtime route, so the List audit is 44 of 45 rather than a false full closure.
+uses the separately owned `jet_rt_native_para_walk` scheduler seam.
+The last census List route, `jet_list_para_fold_add_fixed_f64`, is implemented
+in `IterNumeric.jet` with the existing `(Float slots, length, seed)` C ABI.
+It preserves 64-element indexed chunks, the seed in lane zero of every chunk,
+the eight-lane finish tree and adjacent-pair merges with zero seed/odd carry
+(`ParallelKernel.rs:95-124`, `SimdLanes.rs:683-717,785-794`), without callbacks
+or scheduling-dependent results. Single chunks need no scratch allocation;
+larger inputs use one compacted partial buffer. Raw witnesses distinguish
+per-chunk seeding, tree versus serial rounding, odd-partial association and
+empty negative-zero seed, and require allocator-class balance.
 
 Lazy cursor initialization and advancement may invoke user callbacks. Both
 are can-stop MIR operations: their results are usable only on the immediately

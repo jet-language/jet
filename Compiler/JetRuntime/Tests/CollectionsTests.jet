@@ -229,10 +229,52 @@ fn coll_test_bits_extent_stop() {
     trap_exit(I64{1})
 }
 
+fn coll_test_para_fold() {
+    snapshot :: jet_rt_alloc(I64{64}, I64{8})
+    width := I64{32}
+    at := I64{0}
+    loop at < I64{8} {
+        trap_store(snapshot + at * I64{8}, coll_test_live(width))
+        width *= I64{2}
+        at += I64{1}
+    }
+    data :: jet_rt_alloc(I64{1536}, I64{8})
+    at = I64{0}
+    loop at < I64{192} {
+        trap_store(data + at * I64{8}, rt_f64_bits(Float{1.0}))
+        at += I64{1}
+    }
+    coll_test_require(rt_f64_bits(jet_list_para_fold_add_fixed_f64(I64{0}, I64{0}, Float{-0.0})) == I64{-9223372036854775808})
+    coll_test_require(jet_list_para_fold_add_fixed_f64(data, I64{1}, Float{10.0}) == Float{11.0})
+    coll_test_require(jet_list_para_fold_add_fixed_f64(data, I64{64}, Float{10.0}) == Float{74.0})
+    coll_test_require(jet_list_para_fold_add_fixed_f64(data, I64{65}, Float{10.0}) == Float{85.0})
+    coll_test_require(jet_list_para_fold_add_fixed_f64(data, I64{129}, Float{10.0}) == Float{159.0})
+    // A left serial fold gives 1, but the canonical eight-lane tree gives 0.
+    trap_store(data, rt_f64_bits(Float{10000000000000000.0}))
+    trap_store(data + I64{16}, rt_f64_bits(Float{-10000000000000000.0}))
+    coll_test_require(jet_list_para_fold_add_fixed_f64(data, I64{4}, Float{0.0}) == Float{0.0})
+    coll_zero(data, I64{1536})
+    trap_store(data, rt_f64_bits(Float{10000000000000000.0}))
+    trap_store(data + I64{512}, rt_f64_bits(Float{-10000000000000000.0}))
+    trap_store(data + I64{1024}, rt_f64_bits(Float{1.0}))
+    // Three chunks distinguish adjacent-pair/odd-carry from right association.
+    coll_test_require(jet_list_para_fold_add_fixed_f64(data, I64{192}, Float{0.0}) == Float{1.0})
+    jet_rt_free(data, I64{1536}, I64{8})
+    width = I64{32}
+    at = I64{0}
+    loop at < I64{8} {
+        coll_test_require(coll_test_live(width) == trap_word(snapshot + at * I64{8}))
+        width *= I64{2}
+        at += I64{1}
+    }
+    jet_rt_free(snapshot, I64{64}, I64{8})
+}
+
 fn collections_tests() {
     jet_rt_alloc_init()
     coll_test_bytes()
     coll_test_bits()
+    coll_test_para_fold()
     // Fresh ceil(5/2) differs from the remaining floor(4/2) after one pull.
     stepped :: jet_rt_native_iter_step_by(coll_test_source(), I64{2})
     coll_test_require(iter_exact_length(stepped) == I64{3})

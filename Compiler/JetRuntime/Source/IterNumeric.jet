@@ -111,3 +111,78 @@ fn iter_wide_float(high: I64, low: U64) -> Float {
     jet_rt_native_iter_drop(node)
     if (length == I64{0}) -> Float{0.0} else -> sum / iter_wide_float(I64{0}, U64{length})
 }
+
+// SimdLanes.rs:683-717,785-794: seed lane zero, source i in lane i&7,
+// then the fixed eight-lane tree. Scalar locals need no scratch allocation.
+fn coll_f64_fixed(data: I64, length: I64, seed: Float) -> Float {
+    if (length == I64{0}) { return seed }
+    a0 := seed
+    a1 := Float{0.0}
+    a2 := Float{0.0}
+    a3 := Float{0.0}
+    a4 := Float{0.0}
+    a5 := Float{0.0}
+    a6 := Float{0.0}
+    a7 := Float{0.0}
+    at := I64{0}
+    loop length - at >= I64{8} {
+        a0 += rt_f64_from_bits(trap_word(data + at * I64{8}))
+        a1 += rt_f64_from_bits(trap_word(data + (at + I64{1}) * I64{8}))
+        a2 += rt_f64_from_bits(trap_word(data + (at + I64{2}) * I64{8}))
+        a3 += rt_f64_from_bits(trap_word(data + (at + I64{3}) * I64{8}))
+        a4 += rt_f64_from_bits(trap_word(data + (at + I64{4}) * I64{8}))
+        a5 += rt_f64_from_bits(trap_word(data + (at + I64{5}) * I64{8}))
+        a6 += rt_f64_from_bits(trap_word(data + (at + I64{6}) * I64{8}))
+        a7 += rt_f64_from_bits(trap_word(data + (at + I64{7}) * I64{8}))
+        at += I64{8}
+    }
+    if (at < length) { a0 += rt_f64_from_bits(trap_word(data + at * I64{8})) }
+    if (at + I64{1} < length) { a1 += rt_f64_from_bits(trap_word(data + (at + I64{1}) * I64{8})) }
+    if (at + I64{2} < length) { a2 += rt_f64_from_bits(trap_word(data + (at + I64{2}) * I64{8})) }
+    if (at + I64{3} < length) { a3 += rt_f64_from_bits(trap_word(data + (at + I64{3}) * I64{8})) }
+    if (at + I64{4} < length) { a4 += rt_f64_from_bits(trap_word(data + (at + I64{4}) * I64{8})) }
+    if (at + I64{5} < length) { a5 += rt_f64_from_bits(trap_word(data + (at + I64{5}) * I64{8})) }
+    if (at + I64{6} < length) { a6 += rt_f64_from_bits(trap_word(data + (at + I64{6}) * I64{8})) }
+    left :: (a0 + a1) + (a2 + a3)
+    right :: (a4 + a5) + (a6 + a7)
+    left + right
+}
+
+// ParallelKernel.rs:95-124: 64-item chunks, each with the original seed,
+// followed by adjacent-pair fixed-tree merges with zero seed and odd carry.
+// No callback or external side effect exists here; scheduling cannot change
+// the indexed partials or merge order. The boundary borrows the input slots.
+#Export(c) fn jet_list_para_fold_add_fixed_f64(data: I64, length: I64, seed: Float) -> Float {
+    if (length <= I64{0}) { return seed }
+    if (length <= I64{64}) { return coll_f64_fixed(data, length, seed) }
+    count :: length / I64{64} + (if (length % I64{64} == I64{0}) -> I64{0} else -> I64{1})
+    partials :: jet_rt_alloc(count * I64{8}, I64{8})
+    chunk := I64{0}
+    loop chunk < count {
+        start :: chunk * I64{64}
+        remaining :: length - start
+        width :: if (remaining < I64{64}) -> remaining else -> I64{64}
+        value :: coll_f64_fixed(data + start * I64{8}, width, seed)
+        trap_store(partials + chunk * I64{8}, rt_f64_bits(value))
+        chunk += I64{1}
+    }
+    active := count
+    loop active > I64{1} {
+        read := I64{0}
+        write := I64{0}
+        loop read < active {
+            if (read + I64{1} < active) {
+                value :: coll_f64_fixed(partials + read * I64{8}, I64{2}, Float{0.0})
+                trap_store(partials + write * I64{8}, rt_f64_bits(value))
+            } else {
+                trap_store(partials + write * I64{8}, trap_word(partials + read * I64{8}))
+            }
+            read += I64{2}
+            write += I64{1}
+        }
+        active = write
+    }
+    result :: rt_f64_from_bits(trap_word(partials))
+    jet_rt_free(partials, count * I64{8}, I64{8})
+    result
+}
