@@ -342,12 +342,114 @@ fn coll_test_i64_lists() {
     jet_rt_free(snapshot, I64{64}, I64{8})
 }
 
+fn coll_test_short_text(word: I64, length: I64) -> I64 {
+    scratch :: jet_rt_alloc(I64{8}, I64{8})
+    trap_store(scratch, word)
+    text :: jet_rt_string_from_static(scratch, length)
+    jet_rt_free(scratch, I64{8}, I64{8})
+    text
+}
+
+fn coll_test_ordered_map() {
+    snapshot :: jet_rt_alloc(I64{64}, I64{8})
+    width := I64{32}
+    at := I64{0}
+    loop at < I64{8} {
+        trap_store(snapshot + at * I64{8}, coll_test_live(width))
+        width *= I64{2}
+        at += I64{1}
+    }
+    a :: coll_test_short_text(I64{97}, I64{1})
+    b :: coll_test_short_text(I64{98}, I64{1})
+    x :: coll_test_short_text(I64{120}, I64{1})
+    y :: coll_test_short_text(I64{121}, I64{1})
+    nul :: coll_test_short_text(I64{6422625}, I64{3}) // a NUL b
+    out :: jet_rt_alloc(I64{8}, I64{8})
+    empty :: jet_coll_ordered_map()
+    coll_test_require(jet_coll_map_len(empty) == I64{0} && !jet_coll_map_contains(empty, a))
+    trap_store(out, I64{-1})
+    coll_test_require(jet_coll_map_get(empty, a, out) == I64{0} && trap_word(out) == I64{-1})
+    one :: jet_coll_map_set(empty, a, x)
+    clone :: jet_rt_handle_clone_JetOrderedMap(one)
+    // Independent literal oracle: OrderedMap{keys: [a], values: [x]}.
+    expected :: jet_rt_alloc(I64{40}, I64{8})
+    trap_store(expected, I64{5576693780593275471})
+    trap_store(expected + I64{8}, I64{4211843553023455329})
+    trap_store(expected + I64{16}, I64{7022836043848178464})
+    trap_store(expected + I64{24}, I64{8672560942848243052})
+    trap_store(expected + I64{32}, I64{32093})
+    mode := I64{0}
+    loop mode < I64{3} {
+        text :: if (mode == I64{0}) -> jet_rt_handle_display_JetOrderedMap(one) else if (mode == I64{1}) -> jet_rt_handle_show_JetOrderedMap(one) else -> jet_rt_handle_debug_JetOrderedMap(one)
+        coll_test_require(rt_text_len(text) == I64{34})
+        at = I64{0}
+        loop at < I64{34} {
+            coll_test_require(trap_byte(rt_text_data(text) + at) == trap_byte(expected + at))
+            at += I64{1}
+        }
+        jet_rt_string_drop(text)
+        mode += I64{1}
+    }
+    jet_rt_free(expected, I64{40}, I64{8})
+    replaced :: jet_coll_map_set(one, a, nul)
+    two :: jet_coll_map_set(replaced, b, y)
+    coll_test_require(jet_coll_map_len(one) == I64{1} && jet_coll_map_len(two) == I64{2})
+    coll_test_require(jet_coll_map_get(one, a, out) == I64{1})
+    original_value :: trap_word(out)
+    coll_test_require(rt_text_len(original_value) == I64{1} && trap_byte(rt_text_data(original_value)) == I64{120})
+    jet_rt_string_drop(original_value)
+    coll_test_require(jet_coll_map_keys(two, out) == I64{2})
+    keys :: trap_word(out)
+    coll_test_require(jet_rt_string_eq(trap_word(keys), a) && jet_rt_string_eq(trap_word(keys + I64{8}), b))
+    jet_rt_string_drop(trap_word(keys))
+    jet_rt_string_drop(trap_word(keys + I64{8}))
+    jet_rt_free(keys, I64{16}, I64{8})
+    coll_test_require(jet_coll_map_values(two, out) == I64{2})
+    values :: trap_word(out)
+    coll_test_require(jet_rt_string_eq(trap_word(values), nul) && jet_rt_string_eq(trap_word(values + I64{8}), y))
+    jet_rt_string_drop(trap_word(values))
+    jet_rt_string_drop(trap_word(values + I64{8}))
+    jet_rt_free(values, I64{16}, I64{8})
+    missing_copy :: jet_coll_map_remove(one, b)
+    removed :: jet_coll_map_remove(two, a)
+    coll_test_require(missing_copy != one && jet_coll_map_len(missing_copy) == I64{1})
+    coll_test_require(jet_coll_map_len(removed) == I64{1} && !jet_coll_map_contains(removed, a) && jet_coll_map_contains(removed, b))
+    coll_test_require(jet_coll_map_get(two, a, out) == I64{1})
+    surviving_value :: trap_word(out)
+    jet_rt_handle_drop_JetOrderedMap(two)
+    jet_rt_handle_drop_JetOrderedMap(replaced)
+    jet_rt_handle_drop_JetOrderedMap(one)
+    jet_rt_handle_drop_JetOrderedMap(empty)
+    jet_rt_handle_drop_JetOrderedMap(missing_copy)
+    jet_rt_handle_drop_JetOrderedMap(removed)
+    jet_rt_string_drop(a)
+    jet_rt_string_drop(b)
+    jet_rt_string_drop(x)
+    jet_rt_string_drop(y)
+    jet_rt_string_drop(nul)
+    coll_test_require(rt_text_len(surviving_value) == I64{3} && trap_byte(rt_text_data(surviving_value) + I64{1}) == I64{0})
+    jet_rt_string_drop(surviving_value)
+    coll_test_require(jet_coll_map_len(clone) == I64{1})
+    jet_rt_handle_drop_JetOrderedMap(clone)
+    jet_rt_handle_drop_JetOrderedMap(I64{0})
+    jet_rt_free(out, I64{8}, I64{8})
+    width = I64{32}
+    at = I64{0}
+    loop at < I64{8} {
+        coll_test_require(coll_test_live(width) == trap_word(snapshot + at * I64{8}))
+        width *= I64{2}
+        at += I64{1}
+    }
+    jet_rt_free(snapshot, I64{64}, I64{8})
+}
+
 fn collections_tests() {
     jet_rt_alloc_init()
     coll_test_bytes()
     coll_test_bits()
     coll_test_para_fold()
     coll_test_i64_lists()
+    coll_test_ordered_map()
     // Fresh ceil(5/2) differs from the remaining floor(4/2) after one pull.
     stepped :: jet_rt_native_iter_step_by(coll_test_source(), I64{2})
     coll_test_require(iter_exact_length(stepped) == I64{3})

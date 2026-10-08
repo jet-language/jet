@@ -526,3 +526,176 @@ fn coll_i64_select(n: I64, data: I64, length: I64, out_data: I64, largest: Bool)
 #Export(c) fn jet_coll_nlargest(n: I64, data: I64, length: I64, out_data: I64) -> I64 {
     coll_i64_select(n, data, length, out_data, true)
 }
+
+// Insertion-ordered paired lists: keys at 0, values at 24, each a native
+// [len, cap, data] header. String slots own independent E4 text handles.
+fn coll_pair_new(capacity: I64) -> I64 {
+    pair :: jet_rt_alloc(I64{48}, I64{8})
+    coll_zero(pair, I64{48})
+    if capacity != I64{0} {
+        trap_store(pair + I64{8}, capacity)
+        trap_store(pair + I64{16}, jet_rt_alloc(capacity * I64{8}, I64{8}))
+        trap_store(pair + I64{32}, capacity)
+        trap_store(pair + I64{40}, jet_rt_alloc(capacity * I64{8}, I64{8}))
+    }
+    pair
+}
+
+fn coll_pair_append(pair: I64, key: I64, value: I64) {
+    length :: trap_word(pair)
+    trap_store(trap_word(pair + I64{16}) + length * I64{8}, key)
+    trap_store(trap_word(pair + I64{40}) + length * I64{8}, value)
+    trap_store(pair, length + I64{1})
+    trap_store(pair + I64{24}, length + I64{1})
+}
+
+fn coll_text_list_drop(header: I64, strings: Bool) {
+    length :: trap_word(header)
+    capacity :: trap_word(header + I64{8})
+    data :: trap_word(header + I64{16})
+    if strings {
+        at := I64{0}
+        loop at < length {
+            jet_rt_string_drop(trap_word(data + at * I64{8}))
+            at += I64{1}
+        }
+    }
+    if capacity != I64{0} { jet_rt_free(data, capacity * I64{8}, I64{8}) }
+}
+
+fn coll_pair_drop(pair: I64, numeric: Bool) {
+    if (pair == I64{0}) { return }
+    coll_text_list_drop(pair, true)
+    coll_text_list_drop(pair + I64{24}, !numeric)
+    jet_rt_free(pair, I64{48}, I64{8})
+}
+
+fn coll_pair_find(pair: I64, key: I64) -> I64 {
+    length :: trap_word(pair)
+    keys :: trap_word(pair + I64{16})
+    at := I64{0}
+    loop at < length {
+        if jet_rt_string_eq(trap_word(keys + at * I64{8}), key) { return at }
+        at += I64{1}
+    }
+    I64{-1}
+}
+
+fn coll_pair_copy(pair: I64, numeric: Bool) -> I64 {
+    length :: trap_word(pair)
+    result :: coll_pair_new(length)
+    keys :: trap_word(pair + I64{16})
+    values :: trap_word(pair + I64{40})
+    at := I64{0}
+    loop at < length {
+        value :: trap_word(values + at * I64{8})
+        coll_pair_append(result, jet_rt_string_clone(trap_word(keys + at * I64{8})), if numeric -> value else -> jet_rt_string_clone(value))
+        at += I64{1}
+    }
+    result
+}
+
+fn coll_text_list_copy(header: I64, out_data: I64) -> I64 {
+    length :: trap_word(header)
+    data :: trap_word(header + I64{16})
+    result :: coll_i64_output(length, out_data)
+    at := I64{0}
+    loop at < length {
+        trap_store(result + at * I64{8}, jet_rt_string_clone(trap_word(data + at * I64{8})))
+        at += I64{1}
+    }
+    length
+}
+
+#Export(c) fn jet_coll_ordered_map() -> I64 { coll_pair_new(I64{0}) }
+#Export(c) fn jet_rt_handle_drop_JetOrderedMap(map: I64) { coll_pair_drop(map, false) }
+#Export(c) fn jet_rt_handle_clone_JetOrderedMap(map: I64) -> I64 { coll_pair_copy(map, false) }
+
+#Export(c) fn jet_coll_map_contains(map: I64, key: I64) -> Bool { coll_pair_find(map, key) != I64{-1} }
+#Export(c) fn jet_coll_map_len(map: I64) -> I64 { jet_int_owned_from_i64(trap_word(map)) }
+
+#Export(c) fn jet_coll_map_get(map: I64, key: I64, some: I64) -> I64 {
+    at :: coll_pair_find(map, key)
+    if (at == I64{-1}) { return I64{0} }
+    trap_store(some, jet_rt_string_clone(trap_word(trap_word(map + I64{40}) + at * I64{8})))
+    I64{1}
+}
+
+#Export(c) fn jet_coll_map_keys(map: I64, out_data: I64) -> I64 { coll_text_list_copy(map, out_data) }
+#Export(c) fn jet_coll_map_values(map: I64, out_data: I64) -> I64 { coll_text_list_copy(map + I64{24}, out_data) }
+
+#Export(c) fn jet_coll_map_set(map: I64, key: I64, value: I64) -> I64 {
+    length :: trap_word(map)
+    found :: coll_pair_find(map, key)
+    result :: coll_pair_new(length + (if (found == I64{-1}) -> I64{1} else -> I64{0}))
+    keys :: trap_word(map + I64{16})
+    values :: trap_word(map + I64{40})
+    at := I64{0}
+    loop at < length {
+        stored_key :: trap_word(keys + at * I64{8})
+        stored_value :: trap_word(values + at * I64{8})
+        same :: jet_rt_string_eq(stored_key, key)
+        coll_pair_append(result, jet_rt_string_clone(if same -> key else -> stored_key), jet_rt_string_clone(if same -> value else -> stored_value))
+        at += I64{1}
+    }
+    if (found == I64{-1}) { coll_pair_append(result, jet_rt_string_clone(key), jet_rt_string_clone(value)) }
+    result
+}
+
+#Export(c) fn jet_coll_map_remove(map: I64, key: I64) -> I64 {
+    length :: trap_word(map)
+    keys :: trap_word(map + I64{16})
+    removed := I64{0}
+    scan := I64{0}
+    loop scan < length {
+        if jet_rt_string_eq(trap_word(keys + scan * I64{8}), key) { removed += I64{1} }
+        scan += I64{1}
+    }
+    result :: coll_pair_new(length - removed)
+    values :: trap_word(map + I64{40})
+    at := I64{0}
+    loop at < length {
+        if !jet_rt_string_eq(trap_word(keys + at * I64{8}), key) {
+            coll_pair_append(result, jet_rt_string_clone(trap_word(keys + at * I64{8})), jet_rt_string_clone(trap_word(values + at * I64{8})))
+        }
+        at += I64{1}
+    }
+    result
+}
+
+fn coll_render_word(text: I64, scratch: I64, word: I64, length: I64) {
+    trap_store(scratch, word)
+    rt_text_append(text, scratch, length)
+}
+
+// Values.rs:278-281,369-372: String's list Show is raw text (no quoting),
+// with comma-space separators. All three OrderedMap modes share this form.
+fn coll_render_text_items(text: I64, scratch: I64, header: I64) {
+    length :: trap_word(header)
+    data :: trap_word(header + I64{16})
+    at := I64{0}
+    loop at < length {
+        if (at != I64{0}) { coll_render_word(text, scratch, I64{8236}, I64{2}) }
+        jet_rt_string_builder_push(text, trap_word(data + at * I64{8}))
+        at += I64{1}
+    }
+}
+
+fn coll_ordered_map_render(map: I64) -> I64 {
+    text :: jet_rt_string_builder_new()
+    scratch :: jet_rt_alloc(I64{8}, I64{8})
+    coll_render_word(text, scratch, I64{5576693780593275471}, I64{8}) // OrderedM
+    coll_render_word(text, scratch, I64{4211843553023455329}, I64{8}) // ap{keys:
+    coll_render_word(text, scratch, I64{23328}, I64{2}) //  [
+    coll_render_text_items(text, scratch, map)
+    coll_render_word(text, scratch, I64{7310868735955315805}, I64{8}) // ], value
+    coll_render_word(text, scratch, I64{2314885531808316019}, I64{4}) // s: [
+    coll_render_text_items(text, scratch, map + I64{24})
+    coll_render_word(text, scratch, I64{32093}, I64{2}) // ]}
+    jet_rt_free(scratch, I64{8}, I64{8})
+    jet_rt_string_builder_finish(text)
+}
+
+#Export(c) fn jet_rt_handle_display_JetOrderedMap(map: I64) -> I64 { coll_ordered_map_render(map) }
+#Export(c) fn jet_rt_handle_show_JetOrderedMap(map: I64) -> I64 { coll_ordered_map_render(map) }
+#Export(c) fn jet_rt_handle_debug_JetOrderedMap(map: I64) -> I64 { coll_ordered_map_render(map) }
