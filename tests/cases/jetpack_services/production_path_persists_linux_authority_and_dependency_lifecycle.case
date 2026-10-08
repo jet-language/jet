@@ -17,7 +17,7 @@ file: .jet/services/api/lifecycle ~ "containment=delegated-cgroup"
 file: .jet/services/api/lifecycle ~ "phase=ready"
 file: .jet/services/api/lifecycle ~ "dependency=database"
 step: jetpack services health --json --no-color
-stdout: ~ "linux-systemd-user"
-stdout: ~ "\"after\":[\"database\"]"
+stdout: ~ "linux-systemd-user" # original ed77c235f tests/jetpack_services.rs:1280 contains predicate
+stdout: ~ "\"after\":[\"database\"]" # original ed77c235f tests/jetpack_services.rs:1281 contains predicate
 step: jetpack services down --no-color
 file: .jet/services/api/lifecycle ~ "phase=stopped"
