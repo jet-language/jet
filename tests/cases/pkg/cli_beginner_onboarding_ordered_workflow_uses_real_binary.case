@@ -1,0 +1,37 @@
+# Port of tests/pkg.rs:5281-5382; full ordered workflow, source mutations copied verbatim.
+# ORACLE-LITERAL hello-world.out/hello-jet.out from original5304/5352.
+# PENDING-GRAMMAR(batch-four): mkdir.
+mkdir: store
+env: JET_PACKAGE_STORE_DIR={work}/store
+step: jet new hello
+exit: 0
+file: hello/run.jet is-file
+file: hello/package.jet is-file
+step: jet run
+cwd: hello
+exit: 0
+stdout: = hello-world.out
+copy: {root}/tests/cases/pkg/fixtures/sources/greeting-cli.txt hello/run.jet
+step: jet check
+cwd: hello
+exit: 0
+step: jet test
+cwd: hello
+exit: 0
+stdout: ~ "greet says hello: pass" # original predicate
+stdout: ~ "1 passed, 0 failed, 0 skipped" # original predicate
+step: jet run run.jet
+cwd: hello
+exit: 0
+stdout: = hello-jet.out
+copy: {root}/tests/cases/pkg/fixtures/sources/top-level-executable.txt hello/run.jet
+step: jet check
+cwd: hello
+exit: nonzero
+stderr: ~ "E0621" # original predicate
+step: jet explain E0621
+cwd: hello
+exit: 0
+stdout: ~ "What this means:" # original predicate
+stdout: ~ "Why Jet enforces it:" # original predicate
+stdout: ~ "How to fix it:" # original predicate

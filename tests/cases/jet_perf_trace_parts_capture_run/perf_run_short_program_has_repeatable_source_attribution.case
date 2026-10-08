@@ -1,0 +1,60 @@
+# Port of tests/jet_perf_trace_parts/capture_run.rs:158-197; source verbatim.
+# ORACLE-LITERAL short.out from line181; structured fields reproduce identity tuple lines184-194.
+# Three actual runs each check the exact two ordered identities; volatile profile fields are not compared.
+# PENDING-GRAMMAR(batch-four): os-name alternatives.
+requires: os-name:linux|android
+fixture: fixtures/short
+step: jet perf run short.jet --out {work}/short-0.jettrace
+exit: 0
+stdout: = short.out
+json: file short-0.jettrace doc $.content.profile.status = "captured"
+json: file short-0.jettrace doc $.content.profile.window_status = "exit"
+json: file short-0.jettrace doc $.content.profile.rows #= 2
+json: file short-0.jettrace doc $.content.profile.rows[0].clock = "wall"
+json: file short-0.jettrace doc $.content.profile.rows[0].symbol.name = "run"
+json: file short-0.jettrace doc $.content.profile.rows[0].source.start_line = 2
+json: file short-0.jettrace doc $.content.profile.rows[0].source.start_column = 1
+json: file short-0.jettrace doc $.content.profile.rows[0].source.end_line = 4
+json: file short-0.jettrace doc $.content.profile.rows[0].source.end_column = 2
+json: file short-0.jettrace doc $.content.profile.rows[1].clock = "cpu"
+json: file short-0.jettrace doc $.content.profile.rows[1].symbol.name = "run"
+json: file short-0.jettrace doc $.content.profile.rows[1].source.start_line = 2
+json: file short-0.jettrace doc $.content.profile.rows[1].source.start_column = 1
+json: file short-0.jettrace doc $.content.profile.rows[1].source.end_line = 4
+json: file short-0.jettrace doc $.content.profile.rows[1].source.end_column = 2
+step: jet perf run short.jet --out {work}/short-1.jettrace
+exit: 0
+stdout: = short.out
+json: file short-1.jettrace doc $.content.profile.status = "captured"
+json: file short-1.jettrace doc $.content.profile.window_status = "exit"
+json: file short-1.jettrace doc $.content.profile.rows #= 2
+json: file short-1.jettrace doc $.content.profile.rows[0].clock = "wall"
+json: file short-1.jettrace doc $.content.profile.rows[0].symbol.name = "run"
+json: file short-1.jettrace doc $.content.profile.rows[0].source.start_line = 2
+json: file short-1.jettrace doc $.content.profile.rows[0].source.start_column = 1
+json: file short-1.jettrace doc $.content.profile.rows[0].source.end_line = 4
+json: file short-1.jettrace doc $.content.profile.rows[0].source.end_column = 2
+json: file short-1.jettrace doc $.content.profile.rows[1].clock = "cpu"
+json: file short-1.jettrace doc $.content.profile.rows[1].symbol.name = "run"
+json: file short-1.jettrace doc $.content.profile.rows[1].source.start_line = 2
+json: file short-1.jettrace doc $.content.profile.rows[1].source.start_column = 1
+json: file short-1.jettrace doc $.content.profile.rows[1].source.end_line = 4
+json: file short-1.jettrace doc $.content.profile.rows[1].source.end_column = 2
+step: jet perf run short.jet --out {work}/short-2.jettrace
+exit: 0
+stdout: = short.out
+json: file short-2.jettrace doc $.content.profile.status = "captured"
+json: file short-2.jettrace doc $.content.profile.window_status = "exit"
+json: file short-2.jettrace doc $.content.profile.rows #= 2
+json: file short-2.jettrace doc $.content.profile.rows[0].clock = "wall"
+json: file short-2.jettrace doc $.content.profile.rows[0].symbol.name = "run"
+json: file short-2.jettrace doc $.content.profile.rows[0].source.start_line = 2
+json: file short-2.jettrace doc $.content.profile.rows[0].source.start_column = 1
+json: file short-2.jettrace doc $.content.profile.rows[0].source.end_line = 4
+json: file short-2.jettrace doc $.content.profile.rows[0].source.end_column = 2
+json: file short-2.jettrace doc $.content.profile.rows[1].clock = "cpu"
+json: file short-2.jettrace doc $.content.profile.rows[1].symbol.name = "run"
+json: file short-2.jettrace doc $.content.profile.rows[1].source.start_line = 2
+json: file short-2.jettrace doc $.content.profile.rows[1].source.start_column = 1
+json: file short-2.jettrace doc $.content.profile.rows[1].source.end_line = 4
+json: file short-2.jettrace doc $.content.profile.rows[1].source.end_column = 2

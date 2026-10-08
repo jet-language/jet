@@ -1,0 +1,11 @@
+# Port of tests/pkg.rs:2541-2587; ui/lint_policy_code_name.jet @lint_policy_config bytes verbatim.
+# PENDING-GRAMMAR(batch-four): mkdir.
+mkdir: store
+env: JET_PACKAGE_STORE_DIR={work}/store
+copy: {root}/tests/cases/pkg/fixtures/manifests/lint-code.txt package.jet
+copy: {root}/tests/cases/pkg/fixtures/sources/hi.txt run.jet
+step: jet build run.jet
+exit: nonzero
+stderr: ~ "Error [E1206]: `package.jet` has a manifest shape error." # original predicate
+stderr: ~ "Why: A manifest field, value, or policy form is outside the current `package.jet` grammar." # original predicate
+stderr: ~ "Fix: For a lint selector, use `same_enum_guard_table` in `policy.lints.deny` instead of diagnostic code `L0302`; otherwise use the current `package.jet` grammar." # original predicate

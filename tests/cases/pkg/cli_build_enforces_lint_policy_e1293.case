@@ -1,0 +1,11 @@
+# Port of tests/pkg.rs:2437-2478; source and expanded min_manifest verbatim.
+# PENDING-GRAMMAR(batch-four): mkdir.
+mkdir: store
+env: JET_PACKAGE_STORE_DIR={work}/store
+copy: {root}/tests/cases/pkg/fixtures/manifests/float-deny.txt package.jet
+copy: {root}/tests/cases/pkg/fixtures/sources/invoice.txt run.jet
+step: jet build run.jet
+exit: nonzero
+stderr: ~ "E1293" # original predicate
+stderr: ~ "L0504" # original predicate
+stderr: !~ "Warning [L0504]" # original predicate

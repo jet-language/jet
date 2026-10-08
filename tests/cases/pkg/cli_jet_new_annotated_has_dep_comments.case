@@ -1,0 +1,7 @@
+# Port of tests/pkg.rs:5643-5665; command's exit deliberately NOT asserted in original.
+# PENDING-GRAMMAR(batch-four): mkdir.
+mkdir: store
+env: JET_PACKAGE_STORE_DIR={work}/store
+step: jet new annotated_app --annotated
+exit: any # original predicate: reads resulting manifest only
+file: annotated_app/package.jet ~ "// Jet package dependencies:" # original predicate
