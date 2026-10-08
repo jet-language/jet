@@ -1,0 +1,12 @@
+// Original shared served AtomicUsize >0; sum independent four load counts.
+use core.files as files
+use core.sys as sys
+#Test("at least one request was served during the race") {
+    root :: sys.get("S5_ROOT") ?? panic("root")
+    total := 0
+    loop worker in 0..<4 {
+        count :: files.read(files.join(root, "served-{worker}")) ?? panic("served count")
+        total = total + (Int.parse(count) ?? panic("served integer"))
+    }
+    assert(total > 0)
+}

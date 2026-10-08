@@ -1,0 +1,23 @@
+# Original tests/math_display_parity.rs:85-107; verbatim sources and original predicates.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no reference-run or PASS claim.
+fixture: user_display_rejects_consuming_and_edit_receivers_in_sema.fixture
+step: jet check consume-external.jet --json
+exit: nonzero
+json: machine doc $.reports[?code="E0907"] #>= 1
+json: machine doc $.reports[?code="E0907"][0].what = "`display` doesn't match the `Display` contract"
+json: machine doc $.reports[?code="E0907"][0].fix ~ "`fn display(self) -> String`" # original predicate
+step: jet check consume-inline.jet --json
+exit: nonzero
+json: machine doc $.reports[?code="E0907"] #>= 1
+json: machine doc $.reports[?code="E0907"][0].what = "`display` doesn't match the `Display` contract"
+json: machine doc $.reports[?code="E0907"][0].fix ~ "`fn display(self) -> String`" # original predicate
+step: jet check edit-external.jet --json
+exit: nonzero
+json: machine doc $.reports[?code="E0907"] #>= 1
+json: machine doc $.reports[?code="E0907"][0].what = "`display` doesn't match the `Display` contract"
+json: machine doc $.reports[?code="E0907"][0].fix ~ "`fn display(self) -> String`" # original predicate
+step: jet check edit-inline.jet --json
+exit: nonzero
+json: machine doc $.reports[?code="E0907"] #>= 1
+json: machine doc $.reports[?code="E0907"][0].what = "`display` doesn't match the `Display` contract"
+json: machine doc $.reports[?code="E0907"][0].fix ~ "`fn display(self) -> String`" # original predicate
