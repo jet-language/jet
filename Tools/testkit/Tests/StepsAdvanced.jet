@@ -210,7 +210,7 @@ fn cases_test_advanced(root: String, name: String, source: String) -> KitOutcome
     root :: cases_test_root("advanced-jet-copy")
     cases_test_source(root, "jet-copy", "step original: jet --version\ncopy: {{jet}} isolated/jet\nfile: isolated/jet is-file\nstep: {{work}}/isolated/jet --version\nstdout: == original\nstderr: empty\n")
     context := cases_test_context(root, files.join(root, "scratch"))
-    context.env.jet = sys.get("TESTKIT_JET") ?? process.which("jet") ?? panic("a real Jet compiler is required for executable-copy acceptance")
+    context.env.jet = sys.get("TESTKIT_JET") ?? (process.which("jet") ?? panic("a real Jet compiler is required for executable-copy acceptance"))
     result :: kit_cases_run(cases_test_entry("jet-copy"), context)[0]
     assert_eq(result.verdict.status, "PASS")
     assert(result.run.stdout.starts_with("Jet "))
