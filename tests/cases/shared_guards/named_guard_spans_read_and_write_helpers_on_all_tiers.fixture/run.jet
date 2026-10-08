@@ -1,0 +1,16 @@
+
+fn inspect(guard: SharedGuard<Int>) -> Int {
+    return guard.value
+}
+
+fn bump(&guard: SharedGuard<Int>) {
+    guard.value += 1
+}
+
+fn run() {
+    cell := shared 4
+    guard := cell.guard_edit()
+    print(inspect(guard))
+    bump(&guard)
+    print(guard.value)
+}

@@ -1,0 +1,21 @@
+
+#Error
+enum StoreErr { Missing }
+
+impl StoreErr -> Err {
+    return Err("store unavailable")
+}
+
+fn read_store() -> Int StoreErr! {
+    return Err(StoreErr.Missing)
+}
+
+fn get_user() -> Int {
+    value :: read_store()
+    return Ok(value)
+}
+
+#Target(Wasm)
+fn run() {
+    value :: get_user()
+}

@@ -1,0 +1,23 @@
+
+struct Counter {
+    value: Int
+}
+
+fn increment(counter: Shared<Counter>) {
+    #Transact(tx) {
+        print("transaction-body")
+        counter.value += 1
+    }
+}
+
+fn run() {
+    counter := shared Counter{ value: 0 }
+    task.group workers {
+        first := task increment(counter)
+        second := task increment(counter)
+        first.join() ?? panic("task failed")
+        second.join() ?? panic("task failed")
+    }
+    guard := counter.guard_read()
+    print(guard.value.value)
+}

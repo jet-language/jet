@@ -1,0 +1,12 @@
+# tests/error_conversions.rs::seeded_error_cascade_metric_keeps_one_first_root_per_domain at tests/error_conversions.rs:278; converter c4189f521f54bea78e49f62cb127d50ad22ac3e0
+# PENDING-SAME-HEAD (heavy lane paused); sources/expected literals unchanged.
+fixture: seeded_error_cascade_metric_keeps_one_first_root_per_domain.fixture
+env: NO_COLOR=1
+step: jet check run.jet --json
+exit: nonzero
+json: stdout doc $.reports #= 2
+json: stdout doc $.reports[?code="E2404"] #= 2
+json: stdout doc $.reports[?detail^="failure-domain:load_row|"] #= 1 # original predicate
+json: stdout doc $.reports[0].code = "E2404"
+json: stdout doc $.reports[0].what ~ "from `load_row`" # original predicate
+json: stdout doc $.reports[0].cause = []

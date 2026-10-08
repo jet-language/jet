@@ -1,0 +1,11 @@
+# tests/error_conversions.rs::missing_typed_conversion_preserves_helper_provenance at tests/error_conversions.rs:166; converter c4189f521f54bea78e49f62cb127d50ad22ac3e0
+# PENDING-SAME-HEAD (heavy lane paused); sources/expected literals unchanged.
+fixture: missing_typed_conversion_preserves_helper_provenance.fixture
+env: NO_COLOR=1
+step: jet check run.jet --json
+exit: nonzero
+json: stdout doc $.reports[?code="E2404"] #>= 1 # original predicate
+json: stdout doc $.reports[?code="E2404"][0].detail ~ "failure-domain:load_row|SourceErr|TargetErr" # original predicate
+json: stdout doc $.reports[?code="E2404"][0].detail ~ "callee: load_row" # original predicate
+json: stdout doc $.reports[?code="E2404"][0].detail ~ "effective contract: explicit !SourceErr" # original predicate
+json: stdout doc $.reports[?code="E2404"][0].detail ~ "caller contract: explicit !TargetErr" # original predicate

@@ -1,0 +1,11 @@
+
+use core.http.server as server
+
+fn run() {
+    mux :: server.mux()
+    result :: server.serve("127.0.0.1:999999", mux, tls: server.tls("not a cert", "not a key"))
+    if result == {
+        Ok(_) -> { print("unexpected") }
+        Err(e) -> { print(e) }
+    }
+}

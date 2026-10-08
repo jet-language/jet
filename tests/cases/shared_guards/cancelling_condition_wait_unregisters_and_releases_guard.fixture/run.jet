@@ -1,0 +1,40 @@
+
+fn mark_started(started: Shared<Int>, began: Condition) {
+    started_guard :: started.guard_edit()
+    started_guard.value = 1
+    began.notify_all()
+}
+
+fn wait_until_cancel(
+    handle: Shared<Int>,
+    changed: Condition,
+    started: Shared<Int>,
+    began: Condition
+) -> Int {
+    mark_started(started, began)
+    guard :: handle.guard_edit()
+    guard.wait(changed, value -> value == 1) ?? panic("wait failed")
+    return 1
+}
+
+fn finish_after_start(started: Shared<Int>, began: Condition) -> Int {
+    started_guard :: started.guard_edit()
+    started_guard.wait(began, value -> value == 1) ?? panic("start failed")
+    return 7
+}
+
+fn run() {
+    cell := shared 0
+    changed := Condition.new()
+    started := shared 0
+    began := Condition.new()
+    task.group workers {
+        print((task.race {
+            wait_until_cancel(cell, changed, started, began),
+            finish_after_start(started, began)
+        }) ?? panic("race failed"))
+    }
+    reacquired :: cell.guard_edit()
+    reacquired.value += 1
+    print(reacquired.value)
+}
