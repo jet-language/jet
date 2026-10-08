@@ -112,13 +112,13 @@ fn s2_closeout_validate(ledger: String, observed: [String:Int]) -> String {
     ""
 }
 
-#Test("every_observed_hostile_closeout_finding_has_one_owner_row") {
+fn s2_closeout_test_owner_row() {
     ledger :: closeout_files.read("Docs/audits/dogfood-jet-experience-5-of-5.md") ?? panic("read closeout ledger")
     error :: s2_closeout_validate(ledger, s2_closeout_observed())
     assert(error == "", "hostile closeout ledger is incomplete: {error}")
 }
 
-#Test("closeout_rejects_an_observed_finding_when_its_owner_row_is_missing") {
+fn s2_closeout_test_missing_row() {
     ledger :: closeout_files.read("Docs/audits/dogfood-jet-experience-5-of-5.md") ?? panic("read closeout ledger")
     observed :: s2_closeout_observed()
     loop spec in s2_closeout_specs() {
@@ -133,7 +133,7 @@ fn s2_closeout_validate(ledger: String, observed: [String:Int]) -> String {
     }
 }
 
-#Test("closeout_rejects_a_mismatched_owner_or_witness") {
+fn s2_closeout_test_mismatched_row() {
     ledger :: closeout_files.read("Docs/audits/dogfood-jet-experience-5-of-5.md") ?? panic("read closeout ledger")
     observed :: s2_closeout_observed()
     loop spec in s2_closeout_specs() {
@@ -152,7 +152,7 @@ fn s2_closeout_validate(ledger: String, observed: [String:Int]) -> String {
     }
 }
 
-#Test("l0503_current_fixture_keeps_subject_span_and_teaching_snapshot") {
+fn s2_closeout_test_l0503_fixture() {
     fixture :: closeout_files.read("tests/ui_lint/prefer_compound_assign.jet") ?? panic("L0503 fixture")
     snapshot :: closeout_files.read("tests/ui_lint/prefer_compound_assign.warn") ?? panic("L0503 snapshot")
     fixture_markers :: [String]{"p.hp = p.hp - amount", "n = (n + 1)", "Indexed compound is E0164"}
@@ -164,4 +164,17 @@ fn s2_closeout_validate(ledger: String, observed: [String:Int]) -> String {
     loop expected in snapshot_markers {
         assert(snapshot.contains(expected), "L0503 snapshot lost {expected}")
     }
+}
+
+#Test("every_observed_hostile_closeout_finding_has_one_owner_row") {
+    s2_closeout_test_owner_row()
+}
+#Test("closeout_rejects_an_observed_finding_when_its_owner_row_is_missing") {
+    s2_closeout_test_missing_row()
+}
+#Test("closeout_rejects_a_mismatched_owner_or_witness") {
+    s2_closeout_test_mismatched_row()
+}
+#Test("l0503_current_fixture_keeps_subject_span_and_teaching_snapshot") {
+    s2_closeout_test_l0503_fixture()
 }
