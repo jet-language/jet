@@ -17,6 +17,34 @@ const AGGREGATE_FIXTURE: &str = include_str!("../Examples/features/reflection/re
 const AGGREGATE_EXPECTED: &str =
     include_str!("../Examples/features/expected/reflection/reflect-value.out");
 
+#[test]
+fn nominal_layout_intrinsic_in_comptime_helper_agrees_on_tiers() {
+    let source = r#"
+#Layout(c)
+struct TargetPointer { pointer: *Int }
+POINTER_BYTES :: prep { pointer_bytes() }
+fn pointer_bytes() -> Int Never! {
+    layout :: TargetPointer.$layout
+    layout.size ?? panic("target pointer layout is missing")
+}
+fn run() {
+    print(POINTER_BYTES == prep { TargetPointer.$layout.size ?? 0 })
+}
+"#;
+    tir_support::assert_tiers_agree("nominal-layout-comptime-helper", source, "true\n");
+}
+
+#[test]
+fn core_sys_layout_helper_loads_and_agrees_on_tiers() {
+    let source = r#"
+use core.sys as sys
+fn run() {
+    print(sys.usize_max() > U64{0})
+}
+"#;
+    tir_support::assert_tiers_agree("core-sys-layout-helper", source, "true\n");
+}
+
 fn diagnostics(source: &str) -> Vec<jet::Diagnostics::Diagnostic> {
     jet::compile(source).expect_err("the fixture must be rejected")
 }
