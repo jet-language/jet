@@ -2105,6 +2105,9 @@ View, Camera, and Device counterparts) set `frame_id` to zero. Their
 arithmetic keeps the left operand's frame; point-minus-point yields a delta.
 Dynamic `Point2`/`Delta2` arithmetic rejects unequal nonzero frame identities,
 otherwise keeps the nonzero identity. These policies are authored in Jet.
+The stock coordinate types, `Point2`, `Delta2`, and `TransformError` are
+source-owned declarations. Bare, `math.Type` (when imported), and
+`core.math.Type` spellings identify the same declaration.
 
 ```jet
 fn rotate(v: Vec3, transform: Mat3) -> Vec3 {
