@@ -117,6 +117,21 @@ an optional origin name. Hashing therefore streams even over-limit origin names
 through borrowed spans and fixed scratch; a bad hash remains the earlier
 `InvalidEncoding` error, whereas a matching hash reaches `InvalidName`.
 
+The typed JVLT2 codec keeps the historical canonical wire: sorted UTF-8 string
+names, sorted `(key type, name)` groups, contiguous generations, bounded counts
+(4096 strings, 1024 groups, 8192 versions), and a domain-separated payload hash
+within the 16-MiB total limit. Sorting uses stable borrowed-pointer index merges,
+not key-owner copies. Private bounded AVL scratch detects duplicate opaque IDs
+at the seed's exact insertion point; it is never persisted or a public carrier.
+Decoding rejects reserved fields, noncanonical order, inconsistent group/current
+metadata, malformed origins, lifecycle violations, trailing data, and incorrect
+public-key/payload hashes. It derives immutable record hashes absent from the
+wire. Raw unsigned words are preserved. Decoder lifecycle checks intentionally
+remain stricter than the historical encoder's checks, rather than silently
+strengthening encoding. Every partial owner is released on failure; native
+Secret capacity is wiped on release. The private binary output's storage owner
+must likewise be wiped by the persistence caller before release.
+
 Vault test hooks are explicitly initialized test transport, never an authority
 mechanism for production callers. Authorizer, trust-path, and fault overrides
 are thread-local and released at thread exit. Backup barriers are shared,

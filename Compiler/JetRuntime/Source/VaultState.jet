@@ -96,16 +96,19 @@ fn vault_origin_equal(left: I64, right: I64) -> Bool {
 }
 // Allocates a fully initialized owner and adopts its sole Secret. Persistence
 // commits set the immutable identity/time/hash fields before encoding it.
-fn vault_record_allocate(name: I64, key_type: I64, generation: I64, status: I64, provenance: I64, secret: I64) -> I64 {
+fn vault_record_allocate_owned(name: I64, key_type: I64, generation: I64, status: I64, provenance: I64, secret: I64) -> I64 {
     result :: jet_rt_alloc(VAULT_RECORD_BYTES, I64{8})
     thread_zero(result, VAULT_RECORD_BYTES)
-    rt_text_store(result + VAULT_RECORD_NAME, jet_rt_string_clone(name))
+    rt_text_store(result + VAULT_RECORD_NAME, name)
     rt_text_store(result + VAULT_RECORD_TYPE, key_type)
     rt_text_store(result + VAULT_RECORD_GENERATION, generation)
     rt_text_store(result + VAULT_RECORD_STATUS, status)
     rt_text_store(result + VAULT_RECORD_PROVENANCE, provenance)
     rt_text_store(result + VAULT_RECORD_SECRET, secret)
     result
+}
+fn vault_record_allocate(name: I64, key_type: I64, generation: I64, status: I64, provenance: I64, secret: I64) -> I64 {
+    vault_record_allocate_owned(jet_rt_string_clone(name), key_type, generation, status, provenance, secret)
 }
 fn vault_record_clone(record: I64) -> I64 {
     result :: jet_rt_alloc(VAULT_RECORD_BYTES, I64{8})
@@ -155,10 +158,8 @@ fn vault_store_new(uuid: I64) -> I64 {
     rt_text_store(result + VAULT_STORE_RECORDS, data_sequence_new(I64{0}, DATA_TREE_ELEMENT_BYTES))
     result
 }
-fn vault_store_drop(store: I64) {
-    if (store == I64{0}) -> return
-    vault_pairs_drop(rt_text_word(store + VAULT_STORE_STRINGS))
-    records :: rt_text_word(store + VAULT_STORE_RECORDS)
+fn vault_records_drop(records: I64) {
+    if (records == I64{0}) -> return
     count :: rt_text_word(records + DATA_SEQUENCE_LENGTH)
     data :: rt_text_word(records + DATA_SEQUENCE_DATA)
     at := I64{0}
@@ -169,6 +170,11 @@ fn vault_store_drop(store: I64) {
     capacity :: rt_text_word(records + DATA_SEQUENCE_CAPACITY)
     if (capacity != I64{0}) -> jet_rt_free(data, capacity * DATA_TREE_ELEMENT_BYTES, I64{8})
     jet_rt_free(records, DATA_SEQUENCE_BYTES, I64{8})
+}
+fn vault_store_drop(store: I64) {
+    if (store == I64{0}) -> return
+    vault_pairs_drop(rt_text_word(store + VAULT_STORE_STRINGS))
+    vault_records_drop(rt_text_word(store + VAULT_STORE_RECORDS))
     jet_rt_free(store, VAULT_STORE_BYTES, I64{8})
 }
 fn vault_store_equal(left: I64, right: I64) -> Bool {

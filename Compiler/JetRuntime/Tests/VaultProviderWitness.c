@@ -18,6 +18,8 @@ extern void stored_key_bytes_are_redacted_and_zeroized_on_drop(const Text *, Byt
 extern void jet_rt_vault_record_fixture_drop(void *);
 extern Text *jet_rt_vault_record_fixture_debug(void *);
 extern void jet_rt_vault_origin_hash_bound_fixture(void *, const Text *, const unsigned char *);
+extern void jvlt2_codec_is_canonical_bounded_and_preserves_legacy_strings(const Text *, const Text *, const Text *, const Text *, const Text *);
+extern void jet_rt_vault_codec_duplicate_fixture(void *, const Text *);
 static struct { void *data; int64_t capacity; unsigned frees; } observed[2];
 static size_t observed_count;
 void __wrap_jet_rt_free(void *data, int64_t size, int64_t align) {
@@ -64,6 +66,8 @@ static void zeroization_fixture(void) {
         0xda,0xf2,0x9f,0xac,0x76,0x0f,0x2e,0x29,0x62,0x8a,0xa1,0x9c,0xd7,0x22,0xb2,0xed
     };
     jet_rt_vault_origin_hash_bound_fixture(parts[0], &origin_name, origin_hash);
+    Text invalid_origin = text(".");
+    jet_rt_vault_codec_duplicate_fixture(parts[0], &invalid_origin);
     observed[0].data = data; observed[0].capacity = 40;
     observed[1].data = clone_key->data; observed[1].capacity = 32; observed_count = 2;
     jet_rt_string_drop(parts[2]);
@@ -111,7 +115,10 @@ int main(void) {
     jet_rt_vault_invalid_legacy_fixture(huge_count, 4);
     static const unsigned char overlong[] = {1,0,0,0, 0xff,0xff,0xff,0xff};
     jet_rt_vault_invalid_legacy_fixture(overlong, 8);
+    Text codec_name = text("db_password"), codec_value = text("hunter2");
+    Text bad_name = text(" ../secret "), non_nfc = text("e\xcc\x81"), nfc = text("\xc3\xa9");
+    jvlt2_codec_is_canonical_bounded_and_preserves_legacy_strings(&codec_name, &codec_value, &bad_name, &non_nfc, &nfc);
     zeroization_fixture();
-    puts("vault witness OK (13 errors, legacy codec, native Secret redaction/wipe, long-origin hash)");
+    puts("vault witness OK (13 errors, legacy+JVLT2 codec, native Secret redaction/wipe, long-origin hash, duplicate priority)");
     return 0;
 }
