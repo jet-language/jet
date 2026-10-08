@@ -1475,6 +1475,8 @@ fn provision() -[Secret, IO]> {
 `Locked`, `AuthorityDenied`, `Conflict`, `UnsupportedProvider`,
 `InvalidEncoding`, `DurabilityUnknown`, `Crypto(CryptoError)`,
 `IO{operation: String, redacted_path: String}`, and `Internal{incident_id: String}`.
+The `Crypto` payload is a matchable `CryptoError` case (`OpenFailed`,
+`VerifyFailed`, `KeyRejected`, `Length`, or `Unavailable`), never backend text.
 Invalid names or reasons return `InvalidName` before provider access; raw key
 imports that are not exactly 32 bytes return `InvalidEncoding`. Missing or wrong
 identity and age-open failures return `Locked`. Error payloads never contain

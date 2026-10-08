@@ -16,8 +16,10 @@ fn error_name(error: vault.VaultError) -> String Never! {
         .InvalidEncoding -> "InvalidEncoding"
         .DurabilityUnknown -> "DurabilityUnknown"
         .Crypto(cause) -> {
-            assert_eq(cause, crypto.CryptoError.Unavailable)
-            "Crypto"
+            if cause == {
+                .Unavailable -> "Crypto"
+                else -> panic("Crypto must contain the public CryptoError case")
+            }
         }
         .IO{operation, redacted_path} -> {
             assert_eq(operation, "read")
