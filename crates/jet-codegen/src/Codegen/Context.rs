@@ -7994,6 +7994,19 @@ mod tests {
             assert_eq!(service_handle_rust_type(alias), Some(rust));
             assert!(jet.contains(jet_case), "paired Jet mapper differs for {alias}");
         }
+        for (alias, rust) in [
+            ("__EvidenceRead", "JetTestingEvidenceRead"),
+            ("__TempFacts", "JetTestingTempFacts"),
+            ("__TempPath", "JetTestingTempPath"),
+            ("__TempRemove", "JetTestingTempRemove"),
+            ("__TempCreate", "JetTestingTempCreate"),
+        ] {
+            assert_eq!(root_prelude_rust_type_name(alias), Some(rust));
+            assert!(
+                jet.contains(&format!("\"{alias}\" -> Val(\"{rust}\")")),
+                "paired Jet mapper differs for {alias}",
+            );
+        }
     }
 
     #[test]

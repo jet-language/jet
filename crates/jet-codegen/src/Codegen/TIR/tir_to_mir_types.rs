@@ -2403,11 +2403,6 @@ const COMPILER_OWNED_CORE_RECORDS: &[(&str, &[&str])] = &[
     ("__ResolveError", &["kind", "has_os_code", "os_code", "message"]),
     ("AsyncPolicy", &["capacity", "overflow"]),
     ("CSVRow", &["fields", "line"]),
-    ("__EvidenceRead", &["ok", "text", "missing"]),
-    ("__TempFacts", &["pid", "thread"]),
-    ("__TempPath", &["path", "text"]),
-    ("__TempRemove", &["ok", "missing", "cause"]),
-    ("__TempCreate", &["ok", "cause"]),
     (
         "DataLineOptions",
         &[
@@ -3962,12 +3957,22 @@ mod native_encoding_record_tests {
             ("core.service", "__DeliveryRecord"),
             ("core.service", "__MailboxRead"),
             ("core.encoding.csv", "__QueryRead"),
+            ("core.testing", "__EvidenceRead"),
+            ("core.testing", "__TempFacts"),
+            ("core.testing", "__TempPath"),
+            ("core.testing", "__TempRemove"),
+            ("core.testing", "__TempCreate"),
         ] {
             let source = jet_sema::CoreSources::core_source_text(module).expect(module);
             assert!(source.contains(&format!("struct {name} {{")), "{module}::{name}");
             assert!(!is_compiler_owned_core_record(name), "{name}");
             assert!(!is_compiler_owned_type(name), "{name}");
             assert!(!emitter_records.contains(&format!("\"{name}\"")), "{name}");
+            if module == "core.testing" {
+                let rust = crate::Codegen::Context::root_prelude_rust_type_name(name)
+                    .expect("raw testing transport retains its root carrier mapping");
+                assert!(emitter.contains(&format!("\"{name}\" -> Val(\"{rust}\")")), "{name}");
+            }
         }
     }
 
