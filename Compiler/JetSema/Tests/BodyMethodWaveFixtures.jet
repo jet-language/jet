@@ -39,7 +39,7 @@ fn method_wave_registration(source: String, keep_going: Bool) -> SemaRegistratio
 fn method_wave_comptime_rows(graph: SemaRegistrationGraph, hooks: Shared<SemaRegistrationHostHooks>, negative: Bool) -> [SemaComptimeFunctionResult] {
     memory_plan :: sema_function_memory_plan_from_graph(graph)
     environment := sema_comptime_environment(~graph, [SemaComptimeItemValue]{})
-    probe := sema_comptime_probe_init(Val(SemaHostHookAccess.Callbacks{hooks: hooks}))
+    probe := sema_comptime_probe_init(sema_host_hook_access(hooks))
     available :: sema_comptime_available_constants(graph, [SemaComptimeItemValue]{})
     name :: if negative -> "method_2" else -> "method_0"
     loop nominal in graph.modules[0].nominals {
@@ -56,7 +56,7 @@ fn method_wave_comptime_rows(graph: SemaRegistrationGraph, hooks: Shared<SemaReg
 fn method_wave_checked(graph: SemaRegistrationGraph, threads: CompilerThreads, cached: [SemaComptimeFunctionResult]) -> SemaGraphResult {
     hooks :: shared SemaRegistrationHostHooks{numeric_unit_conversion_exact: None, typed_boundary_literal_validate: None}
     stage := sema_collect_comptime_declarations(graph, [SemaRegistrationPackagePolicy]{}, hooks, threads, None)
-    sema_finalize_registration_graph(graph, None, ^stage, [SemaComptimeItemValue]{}, cached, hooks, threads, None)
+    sema_finalize_registration_graph(graph, None, ^stage, [SemaComptimeItemValue]{}, cached, hooks, threads, None, None)
 }
 
 fn method_wave_lowered(checked: SemaGraphResult, source: String) -> JetCodegenFunctions {
@@ -143,7 +143,7 @@ fn method_wave_product_witnesses(graph: SemaRegistrationGraph, checked: SemaGrap
     }
     environment := sema_check_pass_environment(graph, types)
     hooks :: shared SemaRegistrationHostHooks{numeric_unit_conversion_exact: None, typed_boundary_literal_validate: None}
-    scopes := sema_check_module_summary_scopes(graph, &environment, Val(SemaHostHookAccess.Callbacks{hooks: hooks}), memory_plan, 0, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, [String:Int]{}, "fixture", None)
+    scopes := sema_check_module_summary_scopes(graph, &environment, sema_host_hook_access(hooks), memory_plan, 0, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, [String:Int]{}, "fixture", None)
     jobs := [SemaBodyJob]{}
     loop nominal_index in 0..<graph.modules[0].nominals.len() {
         nominal :: graph.modules[0].nominals[nominal_index]
@@ -153,9 +153,18 @@ fn method_wave_product_witnesses(graph: SemaRegistrationGraph, checked: SemaGrap
         }
     }
     method_wave_require(jobs.len() == 2, "real host-reaching method and adjacent normal method are registered")
-    part := SemaBodyPart{scopes: ^scopes, items: ^jobs, bodies: [SemaParallelBody]{}}
+    part := SemaBodyPart{scopes: ^scopes, items: ^jobs, bodies: [SemaPreparedBody]{}}
     method_wave_require(sema_check_body_part_in(environment, memory_plan, &part, 0) == 2, "both real method jobs were checked by the canonical worker")
-    method_wave_require(part.bodies.len() == 2 && part.bodies[0].wanted_hooks && !part.bodies[1].wanted_hooks, "actual conversion requests ordered owner retry; adjacent method does not inherit wanted")
+    method_wave_require(part.bodies.len() == 2, "both worker products are present")
+    first :: if part.bodies[0] == {
+        .Checked(body) -> body.wanted_hooks
+        .Replay(_) -> panic("a cold host witness became a replay descriptor")
+    }
+    second :: if part.bodies[1] == {
+        .Checked(body) -> body.wanted_hooks
+        .Replay(_) -> panic("a cold normal witness became a replay descriptor")
+    }
+    method_wave_require(first && !second, "actual conversion requests ordered owner retry; adjacent method does not inherit wanted")
 }
 
 fn method_wave_case(source: String, negative: Bool, keep_going: Bool, use_comptime: Bool, host_retry: Bool) {
@@ -195,6 +204,38 @@ fn method_wave_case(source: String, negative: Bool, keep_going: Bool, use_compti
     method_wave_require("{single_lowered:Debug}" == "{default_lowered:Debug}", "default thread policy has identical lowered products")
 }
 
+fn method_wave_cached_checked(graph: SemaRegistrationGraph, threads: CompilerThreads, cache: SemaIncrementalCache) -> SemaGraphResult {
+    hooks :: shared SemaRegistrationHostHooks{numeric_unit_conversion_exact: None, typed_boundary_literal_validate: None}
+    stage := sema_collect_comptime_declarations(graph, [SemaRegistrationPackagePolicy]{}, hooks, threads, None)
+    sema_finalize_registration_graph(graph, None, ^stage, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, hooks, threads, Val(cache), None)
+}
+
+fn method_wave_cache_case(source: String) {
+    graph :: method_wave_registration(source, false)
+    serial :: CompilerThreads{cap: Val(1), cores: 2, memory_available: Val(268435456)}
+    parallel :: CompilerThreads{cap: Val(2), cores: 2, memory_available: Val(268435456)}
+    cache :: sema_incremental_cache_new()
+    baseline :: method_wave_checked(graph, serial, [SemaComptimeFunctionResult]{})
+    first :: method_wave_cached_checked(graph, parallel, cache)
+    method_wave_require("{baseline:Debug}" == "{first:Debug}", "memo cold check retains the identical full graph products")
+    primed :: sema_incremental_cache_stats(cache)
+    method_wave_require(primed.hits == 0 && primed.recomputes > 0 && primed.live_items > 0 && primed.live_item_bytes > 0, "cold memo records real recomputes and retainable products")
+    sema_incremental_cache_clear_measurement(cache)
+    method_wave_require(sema_incremental_cache_stats(cache).recomputed_items.len() == 0, "measurement clear does not discard rows")
+    warm :: method_wave_cached_checked(graph, serial, cache)
+    method_wave_require("{baseline:Debug}" == "{warm:Debug}", "ordered warm replay retains full checked rows, diagnostics, spans and facts")
+    measured :: sema_incremental_cache_stats(cache)
+    method_wave_require(measured.hits > primed.hits, "a warm hit counts only a consumed real body product")
+    sema_incremental_cache_clear(cache)
+    cleared :: sema_incremental_cache_stats(cache)
+    method_wave_require(cleared.live_items == 0 && cleared.live_item_bytes == 0 && cleared.hits == measured.hits && cleared.recomputes == measured.recomputes, "cache clear removes retained data and preserves cumulative logical counters")
+    again :: method_wave_cached_checked(graph, parallel, cache)
+    method_wave_require("{baseline:Debug}" == "{again:Debug}", "clear forces a real identical check")
+    final :: sema_incremental_cache_stats(cache)
+    method_wave_require(final.recomputes > measured.recomputes && final.hits == measured.hits, "generation change prevents a stale replay")
+}
+
+
 fn run() {
     positive :: method_wave_source(false)
     negative :: method_wave_source(true)
@@ -203,6 +244,7 @@ fn run() {
     method_wave_case(negative, true, true, false, false)
     method_wave_case(positive, false, false, true, false)
     method_wave_case(negative, true, true, true, false)
+    method_wave_cache_case(positive)
     unit_source :: "{positive}\n#UnitFamily(WaveLength, base: meter) {{ meter\nfoot(scale: 381/1250) }}\nstruct UnitOwner {{ value: Int\nfn unit_value(&self) -> Meter Never! {{ converted :: Meter{{Foot.from_float(Float{{8.0}})}}\nconverted }}\nfn after_unit(&self) -> Int Never! {{ self.value }} }}\n"
     method_wave_case(unit_source, true, true, false, true)
     generated_source :: "{positive}\nderive T.BrokenWave {{ fn generated_value(self) -> Int Never! {{ missing_generated_value }} }}\n#BrokenWave\nstruct GeneratedOwner {{ value: Int }}\n"

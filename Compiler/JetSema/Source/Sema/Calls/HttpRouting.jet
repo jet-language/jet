@@ -71,9 +71,9 @@ fn sema_http_route_find_struct(environment: SemaScopeEnvironment, ty: Type, modu
     }
 }
 
-fn sema_http_route_shape(expression: Expr, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> SemaHTTPRouteShape? {
+fn sema_http_route_shape(expression: Expr, environment: SemaScopeEnvironment, scopes: SemaScopeTable, host_hooks: SemaHostHookAccess?) -> SemaHTTPRouteShape? {
     if expression == {
-        .Paren(inner, _) -> return sema_http_route_shape(inner, environment, scopes)
+        .Paren(inner, _) -> return sema_http_route_shape(inner, environment, scopes, host_hooks)
         .Lambda(lambda) -> {
             params := [SemaHTTPRouteParameter]{}
             loop parameter in lambda.params {
@@ -92,6 +92,9 @@ fn sema_http_route_shape(expression: Expr, environment: SemaScopeEnvironment, sc
                 resolved := sema_type_resolve_declared(graph, parameter.ty, function.symbol.module_name)
                 &params.push(SemaHTTPRouteParameter{name: parameter.name, ty: resolved})
             }
+            // Endpoint metadata below reads this foreign raw body, not just
+            // its callable header. The accepted logical query must recompute.
+            sema_body_check_mark_foreign_raw_body(host_hooks)
             return Val(SemaHTTPRouteShape{params: params, body: LambdaBody.Block{body: function.declaration.body}, module_identity: function.symbol.module_name})
         }
         else -> return None
@@ -889,7 +892,7 @@ pub fn sema_call_try_http_router(receiver: Expr, receiver_value: TExpr, method: 
     }
     path_error :: sema_http_route_pattern_error(pattern) ?? {
         path_fields :: sema_http_route_path_fields(pattern) ?? [SemaHTTPRoutePathField]{}
-        handler_shape :: sema_http_route_shape(updated_args[1].expr, environment, scopes) ?? {
+        handler_shape :: sema_http_route_shape(updated_args[1].expr, environment, scopes, context.host_hooks) ?? {
             &diagnostics.push(sema_error("E2805", updated_args[1].span, "HTTP route handler must be a lambda or named function with explicit typed parameters", "route binding needs source parameter names and types before it can define transport inputs", "write `(id: Int, req: HTTPRequest) -> ...` or pass a named function"))
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
