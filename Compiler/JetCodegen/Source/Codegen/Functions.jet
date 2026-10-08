@@ -1,5 +1,6 @@
 // Complete checked top-level TIR functions into backend-neutral MIR.
 use jet_foundation.[
+    mir_integer_constant,
     AccessConvention,
     CORE_CALLS,
     CORE_ENUM_ROWS,
@@ -959,7 +960,7 @@ fn jet_codegen_lower_constant_reference(builder: &JetCodegenBuilder, program: Je
     // A sized-integer read keeps its width, as a literal does.
     if constant == {
         .Int(number, width, spelling) -> {
-            if width == None -> constant = MIRConstant.Int{value: number, width: jet_codegen_pattern_integer_width(expression.ty), spelling: spelling}
+            if width == None -> constant = mir_integer_constant(number, jet_codegen_pattern_integer_width(expression.ty), spelling)
         }
         else -> {}
     }

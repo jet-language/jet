@@ -60,6 +60,7 @@ fn fc_embedded_integer_constants() {
     exact_decimals :: [String]{"18446744073709551615", "-9223372036854775809"}
     loop decimal in exact_decimals {
         number :: Int.parse(decimal) ?? panic("fixture integer")
+        fc_require(mir_integer_constant(number, None, None) == (MIRConstant.BigInt{decimal: decimal}), "ordinary literals share the exact carrier")
         checked :: sema_expr_check_comptime_name("EXACT", span, Val(CtValue.Int{value: number}), None, environment, &scopes, &state, &context, &diagnostics) ?? panic("embedded integer was not checked")
         expected :: TExprKind.CtLit{value: TComptimeValue.BigInt{decimal: decimal}}
         fc_require(checked.ty == Type.Int && checked.kind == expected, "embedded exact integer uses BigInt")
@@ -72,6 +73,15 @@ fn fc_embedded_integer_constants() {
         }
     }
     maximum :: Int.parse("18446744073709551615") ?? panic("fixture maximum")
+    unsigned_width :: Val(MIRIntegerWidth{signed: false, bits: 64})
+    fc_require(mir_integer_constant(maximum, unsigned_width, None) == (MIRConstant.Int{value: -1, width: unsigned_width, spelling: None}), "U64 maximum keeps native signed-bit payload and width")
+    fc_require(mir_integer_constant(9223372036854775808, unsigned_width, None) == (MIRConstant.Int{value: -9223372036854775807 - 1, width: unsigned_width, spelling: None}), "U64 high bit keeps native signed-bit payload")
+    fc_require(mir_integer_constant(-1, unsigned_width, None) == (MIRConstant.Int{value: -1, width: unsigned_width, spelling: None}), "native payload is not encoded twice")
+    fc_require(mir_integer_value(-1, unsigned_width) == maximum, "U64 maximum decodes to the mathematical value")
+    fc_require(mir_integer_value(-1, None) == -1, "signed payload remains negative")
+    high :: mir_integer_constant(maximum, unsigned_width, None)
+    low :: mir_integer_constant(0, unsigned_width, None)
+    fc_require(mir_pass_fold_binary(MIRBinaryOp.Gt, high, low, mir_type_from_kind(MIRTypeKind.Bool)) == (Val(MIRConstant.Bool{value: true})), "unsigned optimizer comparison decodes the high bit")
     fixed_ty :: Type.IntN{signed: false, bits: 64}
     fixed :: sema_fact_prepared_expr(TComptimeValue.Int{value: maximum}, fixed_ty, span, environment) ?? panic("fixed prepared integer was not checked")
     fc_require(fixed.ty == fixed_ty, "prepared fixed destination type")

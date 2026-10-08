@@ -5,6 +5,7 @@ use jet_foundation.[
     MIRCallArg,
     MIRCallFallibility,
     MIRConstant,
+    mir_integer_constant,
     MIRConversion,
     MIRFieldID,
     MIRFieldValue,
@@ -1295,11 +1296,11 @@ fn jet_codegen_builtin_zip_context_args(builder: &JetCodegenBuilder, program: Je
     [
         jet_codegen_builtin_zip_context_arg(&builder, program, span, Type.String, MIRConstant.String{value: "strict"}),
         jet_codegen_builtin_zip_context_arg(&builder, program, span, Type.String, MIRConstant.String{value: source_file}),
-        jet_codegen_builtin_zip_context_arg(&builder, program, span, u32_type, MIRConstant.Int{value: line, width: u32_width, spelling: None}),
+        jet_codegen_builtin_zip_context_arg(&builder, program, span, u32_type, mir_integer_constant(line, u32_width, None)),
         jet_codegen_builtin_zip_context_arg(&builder, program, span, Type.String, MIRConstant.String{value: name}),
         jet_codegen_builtin_zip_context_arg(&builder, program, span, Type.String, MIRConstant.String{value: source_line}),
-        jet_codegen_builtin_zip_context_arg(&builder, program, span, u32_type, MIRConstant.Int{value: column, width: u32_width, spelling: None}),
-        jet_codegen_builtin_zip_context_arg(&builder, program, span, u32_type, MIRConstant.Int{value: caret, width: u32_width, spelling: None}),
+        jet_codegen_builtin_zip_context_arg(&builder, program, span, u32_type, mir_integer_constant(column, u32_width, None)),
+        jet_codegen_builtin_zip_context_arg(&builder, program, span, u32_type, mir_integer_constant(caret, u32_width, None)),
     ]
 }
 

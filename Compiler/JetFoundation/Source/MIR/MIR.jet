@@ -1363,6 +1363,29 @@ pub enum MIRConstant {
 
 pub struct MIRIntegerWidth { pub signed: Bool, pub bits: Int }
 
+// Native MIR Int carries an i64. Keep an unbounded value outside that range in
+// BigInt; a checked U64 literal instead keeps the seed's signed-bit i64 payload
+// and its width. Both emitters recover the same unsigned value from that pair.
+pub fn mir_integer_constant(number: Int, width: MIRIntegerWidth?, spelling: String?) -> MIRConstant Never! {
+    payload := number
+    if width == Val(word) {
+        if !word.signed && word.bits == 64 && number > 9223372036854775807 {
+            payload = number - 18446744073709551616
+        }
+    }
+    if payload < -9223372036854775807 - 1 || payload > 9223372036854775807 -> return MIRConstant.BigInt{decimal: "{payload}"}
+    MIRConstant.Int{value: payload, width: width, spelling: spelling}
+}
+
+// Decode the i64 payload only for readers doing mathematical comparisons or
+// arithmetic. Machine-word lowering and canonical digesting keep the raw bits.
+pub fn mir_integer_value(payload: Int, width: MIRIntegerWidth?) -> Int Never! {
+    if width == Val(word) {
+        if !word.signed && word.bits == 64 && payload < 0 -> return payload + 18446744073709551616
+    }
+    payload
+}
+
 pub struct MIRConstMapEntry { pub key: MIRConstKey, pub value: MIRConstant }
 
 pub struct MIRPanicLoc { pub file: MIRSourceFileID, pub line: Int, pub column: Int }

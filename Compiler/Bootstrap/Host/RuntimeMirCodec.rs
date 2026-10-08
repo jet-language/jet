@@ -129,6 +129,8 @@ struct PairRecord {
     symbol: String,
     /// Each field's emitted symbol and Source type, in declaration order.
     fields: Vec<(String, String)>,
+    /// Unmangled entity paths for diagnostics from inline tuple/map fields.
+    field_paths: Vec<String>,
 }
 
 impl PairRecord {
@@ -159,6 +161,10 @@ fn pair_records(
         if fields.len() < 2 {
             continue;
         }
+        let field_paths = fields
+            .iter()
+            .map(|field| format!("{}.{}", definition.name, field.name))
+            .collect();
         let fields = fields
             .iter()
             .map(|field| {
@@ -173,6 +179,7 @@ fn pair_records(
             PairRecord {
                 symbol: symbols.type_symbol(&definition.name)?.to_string(),
                 fields,
+                field_paths,
             },
         );
     }
@@ -1333,7 +1340,8 @@ fn host_tuple_from_source(
         .fields
         .iter()
         .zip(host_types)
-        .map(|((symbol, ty), host_type)| {
+        .zip(&record.field_paths)
+        .map(|(((symbol, ty), host_type), field_path)| {
             let source_type = parse_type(ty).map_err(BootstrapHostCodecError::InvalidMetadata)?;
             let converted = convert_type_expression(
                 &source_type,
@@ -1341,7 +1349,7 @@ fn host_tuple_from_source(
                 &format!("({base}).{symbol}"),
                 pairs,
             )?;
-            Ok(with_field_context(&converted, &format!("{}.{symbol}", record.symbol)))
+            Ok(with_field_context(&converted, field_path))
         })
         .collect::<Result<Vec<_>, BootstrapHostCodecError>>()?;
     Ok(format!("({})", elements.join(", ")))
