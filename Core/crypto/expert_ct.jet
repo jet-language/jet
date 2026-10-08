@@ -286,13 +286,13 @@ fn hash_parts(w: &[I64], out: Int, a: Int, an: Int, b: Int, bn: Int, msg: [U8]) 
     loop v in msg -> &data.push(v)
     digest := crypto.sha512(data).bytes
     load(&w, out, digest)
-    crypto.__zeroize(^data)
-    crypto.__zeroize(^digest)
+    crypto.__zeroize(&data)
+    crypto.__zeroize(&digest)
 }
 fn expand(w: &[I64], seed: [U8]) Never! {
     digest := crypto.sha512(seed).bytes
     load(&w, 4096, digest)
-    crypto.__zeroize(^digest)
+    crypto.__zeroize(&digest)
     put(&w, 4096, byte(w, 4096) & I64{248})
     put(&w, 4127, (byte(w, 4127) & I64{63}) | I64{64})
     constants(&w)
