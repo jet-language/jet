@@ -6,7 +6,7 @@
 //! first crate that reads them, so editing a Core body rebuilds jet-sema and
 //! its dependents but never jet-foundation, the lexer, the parser or comptime.
 
-use jet_foundation::CoreSourceParts::{CORE_TEXT_STRING_MODULE, CORE_ENCODING_STREAM_MODULE, CORE_ENCODING_CBOR_PARSE_MODULE, CORE_ENCODING_XML_ENGINE_MODULE, CORE_ENCODING_XML_KERNEL_MODULE};
+use jet_foundation::CoreSourceParts::{CORE_TEXT_STRING_MODULE, CORE_ENCODING_STREAM_MODULE, CORE_ENCODING_CBOR_PARSE_MODULE, CORE_ENCODING_CBOR_STREAM_ALIAS, CORE_FILES_PATH_COMPONENTS_SOURCE_PART, CORE_ENCODING_XML_ENGINE_MODULE, CORE_ENCODING_XML_KERNEL_MODULE};
 
 include!("CoreSourceTexts.rs");
 
@@ -14,6 +14,8 @@ const CORE_PRIVATE_SOURCE_TEXTS: &[(&str, &str)] = &[
     (CORE_TEXT_STRING_MODULE, include_str!("../../../Core/text/string.jet")),
     (CORE_ENCODING_STREAM_MODULE, include_str!("../../../Core/encoding/stream.jet")),
     (CORE_ENCODING_CBOR_PARSE_MODULE, include_str!("../../../Core/encoding/cbor_parse.jet")),
+    (CORE_FILES_PATH_COMPONENTS_SOURCE_PART.source.module, include_str!("../../../Core/files/runtime/kernel_path_components.jet")),
+    (CORE_ENCODING_CBOR_STREAM_ALIAS, include_str!("../../../Core/encoding/cbor_stream.jet")),
     (CORE_ENCODING_XML_ENGINE_MODULE, include_str!("../../../Core/encoding/xml_engine.jet")),
     (CORE_ENCODING_XML_KERNEL_MODULE, include_str!("../../../Core/encoding/xml_kernel.jet")),
 ];
@@ -26,4 +28,19 @@ pub fn core_source_text(module: &str) -> Option<&'static str> {
         .chain(CORE_PRIVATE_SOURCE_TEXTS)
         .find(|(name, _)| *name == module)
         .map(|(_, text)| *text)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn every_private_core_source_part_has_body_text() {
+        for part in jet_foundation::CoreSourceParts::CORE_PRIVATE_SOURCE_PARTS {
+            assert!(
+                super::core_source_text(part.source.module).is_some_and(|text| !text.is_empty()),
+                "private Core source part {} has no body text ({})",
+                part.source.module,
+                part.source.path,
+            );
+        }
+    }
 }

@@ -529,3 +529,7 @@ comptime and transports its arithmetic stop through the existing E3010 path.
 
 Resident filesystem adapters construct the canonical four-field I/O context
 without changing operation, resource, OS-code, or cause provenance.
+
+Each compiler-private Core source part is embedded beside its public owner,
+including path components and CBOR streaming. The body-text registry must cover
+every canonical private source-part identity without making it publicly importable.
