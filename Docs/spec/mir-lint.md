@@ -51,6 +51,13 @@ Shield and transaction masks suppress cancellation `Check` polls, not
 retains panic/fault statuses while deferring cancellation/deadline statuses.
 Legality rejects cancellation checks and non-Panic propagation under a mask.
 
+Normal-exit cleanup can publish a Panic. Its current action is consumed before
+the call, and its propagation edge runs only the remaining registered actions,
+once each. Already-run actions are not replayed; sibling exit paths retain
+their own registrations. Propagation cleanup does not introduce another poll:
+a second panic after any delivered stop is fatal in the runtime. Legality
+rejects a stop edge that reuses a consuming call's moved input or deferred thunk.
+
 ## Type compatibility
 
 The lint compares types with one relation, *compatible*. Each side is first

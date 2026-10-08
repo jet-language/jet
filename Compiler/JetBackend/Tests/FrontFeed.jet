@@ -4,7 +4,7 @@
 use core.files as ff_files
 use jet_driver.[JetDriverCompileMode, jet_driver_present_diagnostics]
 use jet_cli.[jet_cli_compile_file]
-use jet_foundation.[DIAGNOSTIC_ERROR, MIRProgram, MIRFunctionID]
+use jet_foundation.[DIAGNOSTIC_ERROR, MIRProgram, MIRFunctionID, MIRPlaceID, MIRBlockID, MIRInstruction, MIROperation, MIROpID, mir_terminator_targets]
 
 fn ff_native(name: String, program: MIRProgram, entry_id: MIRFunctionID, pack: GLPack) -> String {
     lowered :: lir_lower_entry(program, entry_id)
@@ -62,7 +62,109 @@ fn ff_case(file: String, name: String, pack: GLPack) -> String {
     "front-error"
 }
 
+// Focused native-host producer witness; never a successful golden or a
+// hand-built MIR substitute. Its source is shared with the Rust builder test.
+fn ff_cleanup_place(operation: MIROperation, moved: [U64:MIRPlaceID]) -> MIRPlaceID? {
+    if operation == .Call(_, args, _) {
+        loop arg in args {
+            if arg.access == .Move && moved.get(arg.value.value) != None -> return moved.get(arg.value.value)
+        }
+    }
+    None
+}
+
+fn ff_cleanup_program(program: MIRProgram) {
+    tables :: mir_pass_legality_tables(program)
+    loop function in program.functions {
+        first := MIRPlaceID?{None}
+        remaining := MIRPlaceID?{None}
+        loop local in function.locals {
+            if local.name == "first" -> first = Val(local.place)
+            if local.name == "remaining" -> remaining = Val(local.place)
+        }
+        if first == None -> next
+        if remaining == None -> panic("cleanup witness lost remaining owner")
+        moved := [U64:MIRPlaceID]{}
+        maximum := U64{0}
+        loop block in function.blocks {
+            loop instruction in block.instructions {
+                if instruction.id.value > maximum -> maximum = instruction.id.value
+                if instruction.operation == .MovePlace(place) && instruction.result == .Val(value) -> moved[value.value] = place
+            }
+        }
+        loop block in function.blocks {
+            if block.instructions.len() == 0 -> next
+            last :: block.instructions[block.instructions.len() - 1]
+            if ff_cleanup_place(last.operation, moved) != first -> next
+            if block.terminator == .Poll(kind, _, stop) {
+                if kind != .Propagate -> panic("first normal cleanup has no propagation edge")
+                pending := [MIRBlockID]{stop}
+                seen := [U64:Bool]{}
+                calls := 0
+                loop pending.len() > 0 {
+                    id :: &pending.pop() ?? panic("cleanup witness worklist underflow")
+                    if seen.get(id.value) != None -> next
+                    seen[id.value] = true
+                    found := false
+                    loop successor in function.blocks {
+                        if successor.id != id -> next
+                        found = true
+                        loop instruction in successor.instructions {
+                            place :: ff_cleanup_place(instruction.operation, moved)
+                            if place == first -> panic("first cleanup was replayed")
+                            if place == remaining -> calls += 1
+                        }
+                        if successor.terminator == .Poll(_, _, _) -> panic("propagation cleanup recursively polled")
+                        loop target in mir_terminator_targets(successor.terminator) -> &pending.push(target)
+                    }
+                    if !found -> panic("cleanup witness stop edge names a missing block")
+                }
+                if calls != 1 -> panic("remaining cleanup must run exactly once, found {calls}")
+                definitions :: mir_pass_definitions(function)
+                dominance :: mir_pass_legality_dominators(function)
+                if mir_pass_validate_stop_points(function, definitions, dominance, tables) != None -> panic("clean cleanup witness failed native Legality")
+                duplicate := last
+                duplicate.id = MIROpID{value: maximum + U64{1}}
+                duplicate.result = None
+                duplicate.ty = None
+                loop index in 0..<function.blocks.len() {
+                    if function.blocks[index].id == stop {
+                        instructions := [MIRInstruction]{duplicate}
+                        loop instruction in function.blocks[index].instructions -> &instructions.push(instruction)
+                        function.blocks[index].instructions = instructions
+                    }
+                }
+                failure :: mir_pass_validate_stop_points(function, mir_pass_definitions(function), mir_pass_legality_dominators(function), tables)
+                if failure != Val("MIR stop edge reuses an already-consumed cleanup input") -> panic("native Legality accepted replay of the first cleanup: {failure}")
+                print("normal cleanup: first consumed; remaining once; duplicate rejected")
+                return
+            }
+        }
+        panic("first normal cleanup has no Propagate poll")
+    }
+    panic("cleanup witness source produced no first owner")
+}
+
+fn ff_cleanup_case(file: String) {
+    compiled :: jet_cli_compile_file(file, false, false, Val(1), JetDriverCompileMode.Program)
+    if compiled == {
+        .Refused(refusal) -> panic("cleanup witness refused: {refusal.stderr}")
+        .Compiled(result, snapshot) -> {
+            loop diagnostic in jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files) {
+                if diagnostic.severity == DIAGNOSTIC_ERROR -> panic("cleanup witness diagnostic {diagnostic.code}: {diagnostic.what}")
+            }
+            if result.internal_problem == .Val(problem) -> panic("cleanup witness compiler ICE: {problem}")
+            if !result.complete -> panic("cleanup witness front end incomplete")
+            ff_cleanup_program(result.mir ?? panic("cleanup witness lost checked MIR"))
+        }
+    }
+}
+
 fn run() {
+    if ff_files.read("front-cleanup-stop.txt") == .Val(file) {
+        ff_cleanup_case(file.trim())
+        return
+    }
     pack :: gl_pack() ?? panic("front-feed differential requires the shared runtime pack")
     list :: ff_files.read("front-cases.txt") ?? panic("cannot read front-cases.txt")
     loop row in list.split("\n").to_list() {

@@ -173,3 +173,79 @@ fn run() { trap(I64{9223372036854775807}) }
         assert!(mir.validate().is_err(), "verifier accepted a cancellation check under Shield");
     });
 }
+
+#[test]
+fn normal_cleanup_stop_consumes_first_and_runs_remaining_once() {
+    use jet_foundation::MIR::{MirAccess, MirOpId, MirValueId};
+    use std::collections::{HashMap, HashSet};
+    jet::run_compiler_work(|| {
+        let scratch = common::Scratch::new("mir_cleanup_stop");
+        std::fs::write(scratch.path.join("package.jet"),
+            "name: \"mir_cleanup_stop\"\nversion: \"0.1.0\"\n").unwrap();
+        let entry = scratch.path.join("main.jet");
+        std::fs::write(&entry, include_str!("fixtures/mir_cleanup_stop.jet")).unwrap();
+        let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap()).unwrap();
+        let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+            .into_iter().filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error)).collect();
+        assert!(errors.is_empty(), "{errors:#?}");
+        let request = MirArtifactRequest::new(MirArtifactTarget::RustAot,
+            MirArtifactKind::NativeExecutable, MirArtifactBuildMode::Dev);
+        let tir = jet::Codegen::TIR::lower_checked_tir_program_for(&bundle, request).unwrap();
+        let mut mir = jet::Codegen::TIR::lower_native_tir_to_mir(tir).unwrap();
+        mir.validate().unwrap();
+        let function = mir.functions.iter_mut().find(|function|
+            function.locals.iter().any(|local| local.name == "first")).unwrap();
+        let first = function.locals.iter().find(|local| local.name == "first").unwrap().place;
+        let remaining = function.locals.iter().find(|local| local.name == "remaining").unwrap().place;
+        let moved: HashMap<_, _> = function.blocks.iter().flat_map(|block| &block.instructions)
+            .filter_map(|instruction| match (&instruction.operation, instruction.result) {
+                (MirOperation::MovePlace { place }, Some(value)) => Some((value, *place)),
+                _ => None,
+            }).collect();
+        let cleanup_place = |operation: &MirOperation| match operation {
+            MirOperation::Call { args, .. } => args.iter()
+                .find(|arg| arg.access == MirAccess::Move).and_then(|arg| moved.get(&arg.value)).copied(),
+            _ => None,
+        };
+        let (stop, mut duplicate) = function.blocks.iter().find_map(|block| {
+            let instruction = block.instructions.last()?;
+            if cleanup_place(&instruction.operation) != Some(first) { return None; }
+            match block.terminator {
+                MirTerminator::Poll { kind: MirPollKind::Propagate, stop, .. } =>
+                    Some((stop, instruction.clone())),
+                _ => None,
+            }
+        }).expect("normal first cleanup has no propagation edge");
+        let mut pending = vec![stop];
+        let mut seen = HashSet::new();
+        let mut remaining_calls = 0;
+        while let Some(id) = pending.pop() {
+            if !seen.insert(id) { continue; }
+            let block = function.blocks.iter().find(|block| block.id == id).unwrap();
+            for instruction in &block.instructions {
+                match cleanup_place(&instruction.operation) {
+                    Some(place) if place == first => panic!("first cleanup was replayed"),
+                    Some(place) if place == remaining => remaining_calls += 1,
+                    _ => {}
+                }
+            }
+            assert!(!matches!(block.terminator, MirTerminator::Poll { .. }),
+                "propagation cleanup recursively polled");
+            pending.extend(block.terminator.targets());
+        }
+        assert_eq!(remaining_calls, 1, "stop edge must run remaining cleanup exactly once");
+        duplicate.id = MirOpId(function.blocks.iter().flat_map(|block| &block.instructions)
+            .map(|instruction| instruction.id.0).max().unwrap() + 1);
+        if let Some(old) = duplicate.result {
+            let new = MirValueId(function.values.iter().map(|row| row.0.0).max().unwrap() + 1);
+            let mut metadata = function.values.iter().find(|row| row.0 == old).unwrap().clone();
+            metadata.0 = new;
+            function.values.push(metadata);
+            duplicate.result = Some(new);
+        }
+        function.blocks.iter_mut().find(|block| block.id == stop).unwrap()
+            .instructions.insert(0, duplicate);
+        let error = mir.validate().expect_err("verifier accepted replay of first cleanup");
+        assert!(format!("{error:?}").contains("already-consumed cleanup input"), "{error:?}");
+    });
+}
