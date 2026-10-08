@@ -141,6 +141,8 @@ pub(super) fn history_schema_field(
 pub(super) fn comptime_history_data_tree_command(
     value: &jet_foundation::DataTree::DataTree,
 ) -> Result<CtValue, String> {
+    jet_foundation::EncodingJson::validate_json(value)
+        .map_err(|error| jet_foundation::EncodingJson::encoding_error_show(&error))?;
     let json = jet_foundation::EncodingJson::render_json(value, false, 0);
     crate::Comptime::JSONInterp::parse_json(&json)
         .map_err(|error| format!("history command could not be encoded: {}", error.message))
@@ -1476,10 +1478,10 @@ pub(crate) fn apply_testing_histories_explicit(
                     .collect(),
             );
             let observe_value = |value: CtValue| {
-                invoke(&observe, value, "observe").map(|value| {
-                    jet_foundation::TestingComparison::ComparisonObservation::value(
-                        crate::Comptime::JSONInterp::render_ordered_datatree(&value, false, 0),
-                    )
+                invoke(&observe, value, "observe").and_then(|value| {
+                    crate::Comptime::JSONInterp::render_ordered_datatree(&value, false, 0)
+                        .map(jet_foundation::TestingComparison::ComparisonObservation::value)
+                        .map_err(|error| jet_foundation::EncodingJson::encoding_error_show(&error))
                 })
             };
             let reference_value = match invoke(&model, input.clone(), "model") {
@@ -1827,12 +1829,10 @@ pub(crate) fn apply_testing_histories(
                 };
                 let input = CtValue::List(command_values);
                 let observe_value = |value: CtValue| {
-                    invoke(&observe, value, "observe").map(|value| {
-                        jet_foundation::TestingComparison::ComparisonObservation::value(
-                            crate::Comptime::JSONInterp::render_ordered_datatree(
-                                &value, false, 0,
-                            ),
-                        )
+                    invoke(&observe, value, "observe").and_then(|value| {
+                        crate::Comptime::JSONInterp::render_ordered_datatree(&value, false, 0)
+                            .map(jet_foundation::TestingComparison::ComparisonObservation::value)
+                            .map_err(|error| jet_foundation::EncodingJson::encoding_error_show(&error))
                     })
                 };
                 let reference_value = match invoke(&model, input.clone(), "model") {

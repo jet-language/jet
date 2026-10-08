@@ -701,11 +701,9 @@ impl<'a> Interp<'a> {
                             matches!(value, CtValue::Enum { type_name, .. } if type_name == "DataTree");
                         if !is_dynamic_data_tree {
                             let tree = self.encode_value(value, span)?;
-                            return Ok(CtValue::Str(
+                            return Ok(crate::Comptime::json_render_result_for_tir(
                                 super::super::super::JSONInterp::render_ordered_datatree(
-                                    &tree,
-                                    method == "to_string_pretty",
-                                    0,
+                                    &tree, method == "to_string_pretty", 0,
                                 ),
                             ));
                         }

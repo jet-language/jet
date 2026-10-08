@@ -817,17 +817,17 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
                 span,
             ))
         }
-        ("core.encoding.json", "to_string" | "dumps") => {
+        ("core.encoding.json", "to_string" | "dumps" | "dump") => {
             let v = one(0)?;
-            Ok(CtValue::Str(crate::Comptime::JSONInterp::render_json_pretty(
-                v, false, 0,
-            )))
+            Ok(crate::Comptime::json_render_result_for_tir(
+                crate::Comptime::JSONInterp::render_ordered_datatree(v, false, 0),
+            ))
         }
         ("core.encoding.json", "to_string_pretty") => {
             let v = one(0)?;
-            Ok(CtValue::Str(crate::Comptime::JSONInterp::render_json_pretty(
-                v, true, 0,
-            )))
+            Ok(crate::Comptime::json_render_result_for_tir(
+                crate::Comptime::JSONInterp::render_ordered_datatree(v, true, 0),
+            ))
         }
         // --- card #392 pass 4 / #1394: core.encoding.json.canonical/events ---
         ("core.encoding.json", "canonical") => {
@@ -848,7 +848,9 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
                     Err(error) => Ok(CtValue::failed(Box::new(error))),
                 }
             } else {
-                Ok(CtValue::Str(crate::Comptime::EncodingLite::json_canonical(v)))
+                Ok(crate::Comptime::json_render_result_for_tir(
+                    crate::Comptime::EncodingLite::json_canonical(v),
+                ))
             }
         }
         ("core.encoding.json", "events") => Ok(CtValue::Str(
@@ -862,9 +864,9 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
                 Err(e) => Ok(CtValue::failed(Box::new(e))),
             }
         }
-        ("core.encoding.jsonl", "to_string") => {
+        ("core.encoding.jsonl", "to_string" | "dumps") => {
             let rows = match one(0)? {
-                CtValue::List(xs) => xs.clone(),
+                CtValue::List(xs) => xs,
                 _ => {
                     return Err(unsupported(
                         "core.encoding.jsonl.to_string: expected a list",
@@ -872,9 +874,10 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
                     ))
                 }
             };
-            Ok(CtValue::Str(crate::Comptime::EncodingLite::jsonl_render(
-                &rows,
-            )))
+            match crate::Comptime::EncodingLite::jsonl_render(rows) {
+                Ok(text) => Ok(CtValue::Present(Box::new(CtValue::Str(text)))),
+                Err(error) => Ok(CtValue::failed(Box::new(error))),
+            }
         }
         // --- core.encoding.csv (ported verbatim, `EncodingLite.rs`) ---
         ("core.encoding.csv", "parse") => {

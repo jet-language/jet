@@ -1027,7 +1027,7 @@ pub(super) fn display(value: &CtValue) -> Option<String> {
         value,
         CtValue::Enum { type_name, .. } if type_name == "DataTree"
     ) {
-        return Some(crate::Comptime::render_datatree_for_tir(value));
+        return Some(crate::Comptime::JSONInterp::display_datatree(value));
     }
     if let Some(text) = io_error_display(value) {
         return Some(text);
@@ -3556,7 +3556,7 @@ mod tests {
             Some("DeliveryReceipt(id=d-1, state=Accepted, attempts=1, retention_until=20, deadline=30, key=order-1, duplicate=false, authority=orders, generation=2, signature=sig)".to_string())
         );
         assert_eq!(
-            receipt.to_json(),
+            receipt.to_json().unwrap(),
             "{\"id\":\"d-1\",\"state\":\"Accepted\",\"attempts\":1,\"retention_until\":20,\"deadline\":30,\"idempotency_key\":\"order-1\",\"duplicate\":false,\"authority\":\"orders\",\"generation\":2,\"signature\":\"sig\"}"
         );
         let error = CtValue::Enum {

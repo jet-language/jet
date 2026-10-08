@@ -2988,16 +2988,19 @@ pub(super) fn jsonl_parse(text: &str) -> Result<Vec<CtValue>, CtValue> {
     }
     Ok(out)
 }
-pub(super) fn jsonl_render(rows: &[CtValue]) -> String {
-    let mut out = rows
-        .iter()
-        .map(|v| super::JSONInterp::render_json_pretty(v, false, 0))
-        .collect::<Vec<_>>()
-        .join("\n");
-    if !out.is_empty() {
+pub(super) fn jsonl_render(rows: &[CtValue]) -> Result<String, CtValue> {
+    let mut out = String::new();
+    for (index, value) in rows.iter().enumerate() {
+        let text = super::JSONInterp::render_ordered_datatree(value, false, 0)
+            .map_err(|error| encoding_error_value_fields(
+                "JSONL", &format!("{:?}", error.kind), out.len() as i64,
+                Some(index as i64 + 1), error.column.ok(), format!("/{index}"),
+                error.reason,
+            ))?;
+        out.push_str(&text);
         out.push('\n');
     }
-    out
+    Ok(out)
 }
 
 // ── core.encoding.json: canonical / events ─────────────────────────────────
@@ -3085,7 +3088,7 @@ fn encoding_error_value(kind: &str, reason: impl Into<String>) -> CtValue {
     encoding_error_value_at("JSON", kind, 1, 1, reason)
 }
 
-fn encoding_error_value_fields(
+pub(super) fn encoding_error_value_fields(
     format: &str,
     kind: &str,
     byte_offset: i64,
@@ -3583,7 +3586,7 @@ pub(super) fn json_canonical_jcs(
         .map_err(|_| encoding_error_value("Unsupported", "canonical JSON output is not UTF-8"))
 }
 
-pub(super) fn json_canonical(v: &CtValue) -> String {
+pub(super) fn json_canonical(v: &CtValue) -> Result<String, jet_foundation::EncodingJson::EncodingError> {
     super::JSONInterp::render_json_pretty(v, false, 0)
 }
 pub(super) fn json_events(v: &CtValue) -> String {
@@ -3609,7 +3612,7 @@ pub(super) fn json_events(v: &CtValue) -> String {
             out.push(format!("array_end {here}"));
             return;
         }
-        out.push(format!("value {here} {}", json_canonical(t)));
+        out.push(format!("value {here} {}", super::JSONInterp::display_datatree(t)));
     }
     let mut out = Vec::new();
     walk(String::new(), v, &mut out);

@@ -100,9 +100,9 @@ pub(super) fn query_cell_text(value: &CtValue) -> String {
         CtValue::Str(text) => text.clone(),
         CtValue::Int(value) => value.to_string(),
         CtValue::BigInt(value) => value.to_string_rep(),
-        CtValue::Float(value) => value.to_json(),
+        CtValue::Float(value) => value.render(),
         CtValue::Bool(value) => value.to_string(),
-        _ => super::JSONInterp::render_json_pretty(value, false, 0),
+        _ => super::JSONInterp::display_datatree(value),
     }
 }
 fn query_cell_sql_value(value: &CtValue) -> Option<sql_query::JetSqlValue> {
@@ -349,6 +349,20 @@ fn data_loader_error_value(kind: &str, operation: &str, reason: impl Into<String
 
 fn data_loader_failure(kind: &str, operation: &str, reason: impl Into<String>) -> CtValue {
     CtValue::failed(Box::new(data_loader_error_value(kind, operation, reason)))
+}
+
+fn data_json_failure(error: jet_foundation::EncodingJson::EncodingError) -> CtValue {
+    let reason = error.reason.clone();
+    let cause = super::JSONInterp::text_encoding_error_value(error);
+    CtValue::failed(Box::new(ct_struct("DataError", vec![
+        ("kind", data_loader_enum("DataErrorKind", "Unsupported")),
+        ("operation", CtValue::Str("data.loader".to_string())),
+        ("row", CtValue::absent(Type::Int)),
+        ("column", CtValue::absent(Type::Int)),
+        ("index", CtValue::absent(Type::Int)),
+        ("reason", CtValue::Str(reason)),
+        ("cause", CtValue::Present(Box::new(cause))),
+    ])))
 }
 
 fn data_loader_kernel_failure(
@@ -2162,8 +2176,14 @@ fn data_snapshot_dynamic(
     } else {
         data_dynamic_canonical(&value)
     };
-    let canonical =
-        super::JSONInterp::render_ordered_datatree(&canonical_value, false, 0).into_bytes();
+    let canonical = match super::JSONInterp::render_ordered_datatree(&canonical_value, false, 0) {
+        Ok(text) => text.into_bytes(),
+        Err(error) => {
+            let failure = data_json_failure(error);
+            data_loader_fail_value(loader, &failure, "data.loader");
+            return Err(failure);
+        }
+    };
     let schema = data_schema_value(&tree, &loader.state.format);
     let schema_id = match struct_field(&schema, "DataSchema", "identity") {
         Some(CtValue::Str(value)) => value.clone(),
@@ -2640,8 +2660,14 @@ fn data_snapshot_dynamic_in_state(
     } else {
         data_dynamic_canonical(&value)
     };
-    let canonical =
-        super::JSONInterp::render_ordered_datatree(&canonical_value, false, 0).into_bytes();
+    let canonical = match super::JSONInterp::render_ordered_datatree(&canonical_value, false, 0) {
+        Ok(text) => text.into_bytes(),
+        Err(error) => {
+            let failure = data_json_failure(error);
+            data_loader_fail_value(loader, &failure, "data.loader");
+            return Err(failure);
+        }
+    };
     let schema = data_schema_value(&tree, &loader.state.format);
     let schema_id = match struct_field(&schema, "DataSchema", "identity") {
         Some(CtValue::Str(value)) => value.clone(),
@@ -3098,7 +3124,10 @@ fn data_loader_constructor_in_state(
                     .cloned()
                     .ok_or_else(|| unsupported("`data.value()` is missing value", span))?;
                 let limits = data_limits_from_value(args.get(1));
-                let text = super::JSONInterp::render_ordered_datatree(&value, false, 0);
+                let text = match super::JSONInterp::render_ordered_datatree(&value, false, 0) {
+                    Ok(text) => text,
+                    Err(error) => return Ok(data_json_failure(error)),
+                };
                 let authority = match data_loader_authority("local", "") {
                     Ok(authority) => authority,
                     Err(error) => return Ok(error),
@@ -3464,7 +3493,10 @@ pub(super) fn eval_data_loader_call(
                                 .cloned()
                                 .ok_or_else(|| unsupported("`data.value()` is missing value", span))?;
                             let limits = data_limits_from_value(args.get(1));
-                            let text = super::JSONInterp::render_ordered_datatree(&value, false, 0);
+                            let text = match super::JSONInterp::render_ordered_datatree(&value, false, 0) {
+                                Ok(text) => text,
+                                Err(error) => return Ok(data_json_failure(error)),
+                            };
                             let authority = match data_loader_authority("local", "") {
                                 Ok(authority) => authority,
                                 Err(error) => return Ok(error),

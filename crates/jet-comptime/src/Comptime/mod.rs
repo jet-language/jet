@@ -578,12 +578,22 @@ fn empty_method_traits() -> &'static HashMap<(String, String), String> {
     EMPTY_METHOD_TRAITS.get_or_init(HashMap::new)
 }
 
-pub fn render_datatree_for_tir(value: &CtValue) -> String {
+pub fn render_datatree_for_tir(value: &CtValue) -> Result<String, jet_foundation::EncodingJson::EncodingError> {
     JSONInterp::render_ordered_datatree(value, false, 0)
 }
 
-pub fn render_datatree_pretty_for_tir(value: &CtValue) -> String {
+pub fn render_datatree_pretty_for_tir(value: &CtValue) -> Result<String, jet_foundation::EncodingJson::EncodingError> {
     JSONInterp::render_ordered_datatree(value, true, 0)
+}
+
+/// Marshal a text encoding result onto the language's existing report carrier.
+pub fn json_render_result_for_tir(
+    rendered: Result<String, jet_foundation::EncodingJson::EncodingError>,
+) -> CtValue {
+    match rendered {
+        Ok(text) => CtValue::Present(Box::new(CtValue::Str(text))),
+        Err(error) => CtValue::failed(Box::new(JSONInterp::text_encoding_error_value(error))),
+    }
 }
 
 /// TIR typed JSON decode uses the ordered DataTree shape. Dynamic JSON keeps

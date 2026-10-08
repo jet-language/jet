@@ -66,7 +66,7 @@ pub(super) fn csv_rows_from_records(v: &CtValue) -> Option<Vec<Vec<String>>> {
         CtValue::Float(f) => f.render(),
         CtValue::Bool(b) => b.to_string(),
         CtValue::Unit | CtValue::Failed(CtReport::Clean(_)) => String::new(),
-        other => other.to_json(),
+        other => crate::Comptime::JSONInterp::display_datatree(other),
     };
     let mut rows = vec![header.clone()];
     for item in items {
