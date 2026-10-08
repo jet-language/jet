@@ -82,7 +82,7 @@ fn jetc_hash_update(hash: &JetcHash, data: [U8]) Never! {
         }
         if hash.pending.bytes.len() == 64 {
             sha256_block(&hash.state, hash.pending.bytes, 0)
-            core.crypto.__zeroize(^hash.pending.bytes)
+            core.crypto.__zeroize(&hash.pending.bytes)
             hash.pending.bytes = [U8]{}
         }
     }
@@ -102,7 +102,7 @@ fn jetc_hash_finish(hash: &JetcHash) -> [U8] Never! {
     loop tail.len() %% 64 != 56 -> &tail.push(U8{0})
     loop b in be64(hash.length * 8) -> &tail.push(b)
     loop offset in 0..<tail.len(), 64 -> sha256_block(&hash.state, tail, offset)
-    core.crypto.__zeroize(^tail)
+    core.crypto.__zeroize(&tail)
     words_to_bytes(hash.state, 4)
 }
 
@@ -173,12 +173,12 @@ pub struct Secret {
 }
 
 // Secret-bearing values wipe their bytes when they close (D-SHAPE-RESOURCE1=A).
-// The wipe consumes the byte buffer; the emptied field keeps the owner whole
-// for its own release.
+// The wipe borrows the resident buffer exclusively; only after that allocation
+// is zeroed does the emptied field release it and keep the owner whole.
 impl Secret.Close {
     fn close(^self) {
         secret := ^self
-        core.crypto.__zeroize(^secret.bytes)
+        core.crypto.__zeroize(&secret.bytes)
         secret.bytes = [U8]{}
     }
 }
@@ -205,7 +205,7 @@ pub struct SigningKey {
 impl SigningKey.Close {
     fn close(^self) {
         key := ^self
-        core.crypto.__zeroize(^key.bytes)
+        core.crypto.__zeroize(&key.bytes)
         key.bytes = [U8]{}
     }
 }
@@ -243,7 +243,7 @@ pub struct X25519SecretKey {
 impl X25519SecretKey.Close {
     fn close(^self) {
         key := ^self
-        core.crypto.__zeroize(^key.bytes)
+        core.crypto.__zeroize(&key.bytes)
         key.bytes = [U8]{}
     }
 }
@@ -275,7 +275,7 @@ pub struct SharedSecret {
 impl SharedSecret.Close {
     fn close(^self) {
         secret := ^self
-        core.crypto.__zeroize(^secret.bytes)
+        core.crypto.__zeroize(&secret.bytes)
         secret.bytes = [U8]{}
     }
 }

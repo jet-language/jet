@@ -989,21 +989,6 @@ fn ambient_core_call(
                     fields: vec![("bytes".to_string(), CtValue::Bytes(bytes))]
                 }))
             }
-            "__zeroize" => {
-                let [bytes] = args.as_slice() else {
-                    return Some(Err(vault_diag(
-                        "core.crypto.__zeroize received malformed arguments",
-                        span,
-                    )));
-                };
-                match jet_as_bytes(bytes, span) {
-                    Ok(bytes) => {
-                        runtime::jet_crypto_zeroize(bytes);
-                        Some(Ok(CtValue::Unit))
-                    }
-                    Err(error) => Some(Err(error))
-                }
-            }
             "__x25519_generate" => Some(crypto_result(
                 runtime::jet_crypto_x25519_generate_impl(),
                 |key| {

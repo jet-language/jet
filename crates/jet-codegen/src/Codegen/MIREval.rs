@@ -23208,23 +23208,23 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             return Ok(RuntimeValue::Data(result));
         }
         self.prelude_row(route, span)?;
-        let mut runtime_args = args
-            .into_iter()
-            .map(|value| self.materialize_runtime(value, span))
-            .collect::<Result<Vec<_>, Diagnostic>>()?;
         if row.module == "core.crypto" && row.member == "__zeroize" {
-            // D-SHAPE-RESOURCE1=A: the argument is the moved `bytes` storage of
-            // the closing secret. Wipe that storage itself; a CtValue copy
-            // would leave the resident bytes to be freed unwiped.
-            let [RuntimeValue::Data(bytes)] = runtime_args.as_mut_slice() else {
+            // The Write argument is the caller's place, not a CtValue/host
+            // adapter copy. Keep the resident allocation until the wipe ends.
+            let [RuntimeValue::Address(address)] = args.as_slice() else {
                 return Err(mir_error_at(
-                    "core.crypto.__zeroize expects one owned [U8] argument",
+                    "core.crypto.__zeroize expects one writable [U8] place",
                     span,
                 ));
             };
-            mir_zeroize_owned_bytes(bytes, span)?;
+            require_address_access(address, MirAccess::Write, span)?;
+            self.zeroize_place_path(address.frame, address.place, &[], span)?;
             return Ok(RuntimeValue::Data(MirEvalValue::Unit));
         }
+        let runtime_args = args
+            .into_iter()
+            .map(|value| self.materialize_runtime(value, span))
+            .collect::<Result<Vec<_>, Diagnostic>>()?;
         if (row.module.is_empty() && row.member == "attach")
             || (row.module == "core.prelude" && row.member == "__receipt_attach")
         {
@@ -23575,6 +23575,55 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         }
         let _ = span;
         Ok(value)
+    }
+
+    /// Wipe an exclusive byte-list place without the read/writeback adapters'
+    /// clones. Projected storage is moved out temporarily and restored zeroed.
+    fn zeroize_place_path(
+        &mut self,
+        frame_index: usize,
+        place_id: MirPlaceId,
+        extra_steps: &[MoveStep],
+        span: Span,
+    ) -> Result<(), Diagnostic> {
+        if extra_steps.is_empty() {
+            if let Some(bytes) = self.place_data_mut(frame_index, place_id, span)? {
+                return mir_zeroize_bytes(bytes, span);
+            }
+        }
+        let place = program_function(self.program, self.frames[frame_index].function)?
+            .places.iter().find(|place| place.id == place_id)
+            .ok_or_else(|| mir_error_at("MIR zeroize place is unavailable", span))?
+            .clone();
+        let base = match &place.base {
+            MirPlaceBase::Local(local) => self.frames[frame_index].locals.get(local),
+            MirPlaceBase::Parameter(value) | MirPlaceBase::Temporary(value)
+                | MirPlaceBase::Capture(value) => self.frames[frame_index].values.get(value),
+            MirPlaceBase::Static(_) => None,
+        };
+        if let Some(RuntimeValue::Address(address)) = base {
+            let address = address.clone();
+            require_address_access(&address, MirAccess::Write, span)?;
+            let mut steps = self.raw_move_steps_for_place(frame_index, place_id, span)?;
+            steps.extend_from_slice(extra_steps);
+            let steps = self.canonicalize_address_steps(
+                address.frame, address.place, &steps, span,
+            )?;
+            return self.zeroize_place_path(address.frame, address.place, &steps, span);
+        }
+        let mut steps = self.raw_move_steps_for_place(frame_index, place_id, span)?;
+        steps.extend_from_slice(extra_steps);
+        let steps = self.canonicalize_move_steps_for_place(frame_index, place_id, &steps, span)?;
+        self.invalidate_base_overrides(frame_index, &place.base)?;
+        let base = self.take_base_value(frame_index, &place.base, span)?;
+        let (base, mut bytes) = self.take_runtime_steps(base, &steps, span)?;
+        let result = match &mut bytes {
+            RuntimeValue::Data(bytes) => mir_zeroize_bytes(bytes, span),
+            _ => Err(mir_error_at("MIR zeroize place is not [U8] storage", span)),
+        };
+        let restored = self.replace_runtime_steps(base, &steps, bytes, span)?;
+        self.store_base_value(frame_index, &place.base, restored, span)?;
+        result
     }
 
     fn place_data_mut(
@@ -30735,13 +30784,12 @@ fn runtime_from_ct(value: CtValue, span: Span) -> Result<RuntimeValue, Diagnosti
     }
 }
 
-/// D-SHAPE-RESOURCE1=A: wipe a moved `[U8]` in its own storage. Byte buffers
-/// go through the one vetted volatile kernel; a boxed list wipes each element
-/// cell in place.
-fn mir_zeroize_owned_bytes(value: &mut MirEvalValue, span: Span) -> Result<(), Diagnostic> {
+/// D-SHAPE-RESOURCE1=A: wipe an exclusively borrowed `[U8]` in its own storage.
+/// Byte buffers use the vetted volatile kernel; a boxed list wipes each cell.
+fn mir_zeroize_bytes(value: &mut MirEvalValue, span: Span) -> Result<(), Diagnostic> {
     match value {
         MirEvalValue::Bytes(bytes) => {
-            crate::Comptime::jet_crypto_zeroize(std::mem::take(bytes));
+            crate::Comptime::jet_crypto_zeroize(bytes);
             Ok(())
         }
         MirEvalValue::List(items) => {
@@ -30752,14 +30800,14 @@ fn mir_zeroize_owned_bytes(value: &mut MirEvalValue, span: Span) -> Result<(), D
                         span,
                     ));
                 };
-                // SAFETY: `byte` is a live, uniquely borrowed element of the moved list.
+                // SAFETY: `byte` is a live, uniquely borrowed list element.
                 unsafe { std::ptr::write_volatile(byte, 0) };
             }
             std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
             Ok(())
         }
         _ => Err(mir_error_at(
-            "core.crypto.__zeroize expects one owned [U8] argument",
+            "core.crypto.__zeroize expects one writable [U8] argument",
             span,
         )),
     }
@@ -33096,10 +33144,16 @@ fn run() {
             frame.locals.insert(local.id, RuntimeValue::Data(MirEvalValue::Bytes(bytes)));
             let config = MirEvalConfig::default();
             let mut machine = Machine::new(&program, &config, vec![frame], None, None);
+            let checked_args = function.blocks.iter()
+                .flat_map(|block| block.instructions.iter())
+                .find_map(|instruction| match &instruction.operation {
+                    MirOperation::CoreCall { call, args, .. } if *call == row.id => Some(args),
+                    _ => None,
+                }).expect("checked zeroize arguments");
+            let args = machine.call_args(0, checked_args, place.span)
+                .expect("marshal the real Write argument without cloning");
             machine.eval_core_call(
-                row.id, route.id,
-                vec![RuntimeValue::Address(Address { frame: 0, place: place.id, access: MirAccess::Write })],
-                &[], None, None, place.span,
+                row.id, route.id, args, &[], None, None, place.span,
             ).expect("zeroize must accept the caller's writable place");
             let RuntimeValue::Data(MirEvalValue::Bytes(bytes)) =
                 machine.frames[0].locals.get(&local.id).expect("caller storage remains live")
