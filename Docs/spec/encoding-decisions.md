@@ -60,6 +60,13 @@ format handles and format-only options/events in
 `core.encoding.json`, `core.encoding.jsonl`, `core.encoding.csv`,
 `core.encoding.xml`, and `core.encoding.cbor`. `FileReader` and `FileWriter`
 remain `core.files` types; do not add duplicate re-exports. (D-ENCSTREAM-SURFACE1=A)
+The handle-free event, format, cause, error, and limits declarations are ordinary
+Jet source nominals in `Core/encoding/encoding.jet`. Encoding error Display and
+Debug use the shared location ladder: format, kind, byte offset, optional line
+and column, optional nonempty path, then reason. Attaching a cause does not
+change this rendering. `DataTree` remains the native nominal pending the
+ordered Object/public Map representation ruling; its policy uses borrowed
+ordered Object leaves rather than replacing the carrier.
 
 `EncodingLimits` has these fields:
 
