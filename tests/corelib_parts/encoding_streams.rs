@@ -1,4 +1,49 @@
 #[test]
+fn process_spec_and_csv_reader_runtime_compiles_and_reads() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_process_spec_csv_runtime_{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&dir).unwrap();
+    let input = dir.join("input.csv");
+    fs::write(&input, "left,right\n").unwrap();
+    let source = format!(
+        r#"
+use core.process as process
+use core.encoding.csv as csv
+use core.files as files
+fn run() {{
+    spec := process.cmd([String]{{"jet"}})
+    print(spec.cmd.len())
+    input :: files.open("{path}") ?? panic("open")
+    reader := csv.reader(^input) ?? panic("reader")
+    first :: &reader.next() ?? panic("first")
+    if first == {{
+        Val(row) -> {{
+            print(row.fields[0])
+            print(row.fields[1])
+        }}
+        None -> panic("missing row")
+    }}
+    eof :: &reader.next() ?? panic("eof")
+    print(eof == None)
+    again :: &reader.next() ?? panic("eof again")
+    print(again == None)
+}}
+"#,
+        path = input.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"")
+    );
+    // This rustc-compiles the selected runtime as well as the program. The
+    // unconditional CollectionSources CSV adapter must have its native leaf.
+    let (code, stdout, stderr) =
+        build_and_run(&dir, "process_spec_csv_runtime", &source, &[], None);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert_eq!(stdout, "1\nleft\nright\ntrue\ntrue\n");
+    assert_eq!(stderr, "");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn xml_reader_latches_byte_offset_after_non_ascii_scalar() {
     let dir = std::env::temp_dir().join(format!("jet_xml_utf8_reader_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
