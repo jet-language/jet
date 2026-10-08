@@ -10214,6 +10214,46 @@ fn lower_method_call_impl(
         }
         if let Some((core_method, mutates)) = service_method_route(handle, method) {
             return in_own_frame(|| {
+                let normalized_arity = args.len() + if core_method == "worker" { 2 } else { 1 };
+                if jet_foundation::CoreModuleExports::core_source_owns_call(
+                    "core.service", core_method, normalized_arity, false,
+                ) {
+                    // Reuse the ordinary checked SourceOwned → ModuleCall hop.
+                    // Worker alone carries the existing normalized handler name.
+                    let mut source_args = Vec::with_capacity(normalized_arity);
+                    source_args.push(crate::AST::CallArg {
+                        convention: if mutates { AccessConvention::Write } else { AccessConvention::Read },
+                        expr: receiver.clone(),
+                        span: method_span,
+                        flags: Default::default(),
+                        label: None,
+                        spread: false,
+                    });
+                    if core_method == "worker" && args.len() == 3 {
+                        source_args.extend(args[..2].iter().cloned());
+                        let handler = match &args[1].expr {
+                            Expr::Ident(name, _) => name.clone(),
+                            _ => String::new(),
+                        };
+                        source_args.push(crate::AST::CallArg {
+                            convention: AccessConvention::Read,
+                            expr: Expr::Str(vec![crate::AST::StrPart::Lit(handler)], method_span),
+                            span: method_span,
+                            flags: Default::default(),
+                            label: None,
+                            spread: false,
+                        });
+                        source_args.push(args[2].clone());
+                    } else {
+                        source_args.extend(args.iter().cloned());
+                    }
+                    return lower_core_source_call(
+                        method_span, "core.service", core_method, &[], resolved_ret,
+                        &source_args, cx, env,
+                    ).unwrap_or_else(|| invariant_method_expr(
+                        method_span, "source-owned service method has no checked source target",
+                    ));
+                }
                 let mut lowered_args = Vec::with_capacity(args.len() + 2);
                 let lowered_receiver = lowered_receiver.borrow_mut().take();
                 let lowered_receiver =

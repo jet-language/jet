@@ -7238,3 +7238,92 @@ fn jet_services_observe(tree: &JetServiceTree) -> String {
         jet_services_workflow_observation(&tree.workflows)
     )
 }
+
+// Mechanical source-policy transports; all die at the Jet-runtime cutover.
+// No restart selection, validation, budget test, rollback or error remap here.
+fn jet_services_raw_worker_tree_parts(tree: &JetServiceTree) -> (
+    Vec<(JetServiceEndpoint, Vec<i64>, JetServiceTreeSupervisorState)>,
+    Vec<(JetServiceRestart, jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt)>,
+    Vec<JetServiceTreeSupervisorState>,
+    Vec<String>,
+) {
+    (
+        tree.workers.iter().map(|worker| (
+            worker.endpoint.clone(), worker.restarts.clone(), worker.task.clone(),
+        )).collect(),
+        tree.groups.iter().map(|group| (
+            group.restart.clone(), jet_std::jet_int_owned_from_i64(group.budget.max),
+            jet_std::jet_int_owned_from_i64(group.budget.per_ms),
+        )).collect(),
+        tree.supervisor_tasks.clone(),
+        tree.partitioned.clone(),
+    )
+}
+
+fn jet_services_raw_tree_write_authority(tree: &mut JetServiceTree, authority: String) {
+    tree.authority = authority;
+}
+
+fn jet_services_raw_worker_task_new(status: JetServiceSupervisorStatus) -> JetServiceTreeSupervisorState {
+    std::sync::Arc::new(std::sync::Mutex::new(JetServiceSupervisorState::new(status)))
+}
+
+fn jet_services_raw_worker_push(
+    tree: &mut JetServiceTree,
+    name: String,
+    handler: JetServiceWorkerHandler,
+    handler_name: String,
+    endpoint: JetServiceEndpoint,
+    mailbox: JetServiceMailbox,
+    restarts: Vec<i64>,
+    running: bool,
+    received_bytes: u64,
+    sent_bytes: u64,
+    task: JetServiceTreeSupervisorState,
+) {
+    tree.workers.push(JetServiceWorker {
+        name, handler_name, handler, endpoint, mailbox, restarts, running,
+        received_bytes, sent_bytes, task,
+    });
+}
+
+fn jet_services_raw_worker_write_restarts(tree: &mut JetServiceTree, index: i64, restarts: Vec<i64>) {
+    tree.workers[index as usize].restarts = restarts;
+}
+
+fn jet_services_raw_worker_write_running(tree: &mut JetServiceTree, index: i64, running: bool) {
+    tree.workers[index as usize].running = running;
+}
+
+fn jet_services_raw_tree_write_started(tree: &mut JetServiceTree, started: bool) {
+    tree.started = started;
+}
+
+fn jet_services_raw_worker_write_mailbox(tree: &mut JetServiceTree, index: i64, mailbox: JetServiceMailbox) {
+    tree.workers[index as usize].mailbox = mailbox;
+}
+
+fn jet_services_raw_mailbox_close(tree: &JetServiceTree, index: i64) {
+    tree.workers[index as usize].mailbox.channel.close();
+}
+
+fn jet_services_raw_mailbox_depth(tree: &JetServiceTree, index: i64) -> i64 {
+    tree.workers[index as usize].mailbox.channel.depth() as i64
+}
+
+// Services3070-3073 holds exactly this one Mutex across these two writes.
+// Poison is ignored there, so this leaf preserves that same host outcome.
+fn jet_services_raw_task_write_partition(
+    task: &JetServiceTreeSupervisorState,
+    status: JetServiceSupervisorStatus,
+    failure: JetTaskFailure,
+) {
+    if let Ok(mut state) = task.lock() {
+        state.status = status;
+        state.failure = Some(failure);
+    }
+}
+
+// A type-name binding only: lets both emitters qualify the existing Arc as
+// one root symbol without incorrectly qualifying `std` or its inner channel.
+type JetServiceWorkerChannel = std::sync::Arc<JetServiceChannel<String>>;

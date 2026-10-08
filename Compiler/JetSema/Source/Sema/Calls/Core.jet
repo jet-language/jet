@@ -323,7 +323,9 @@ fn sema_call_core_native_resource_consumer(module_name: String, member: String, 
     // The checked TIR call below selects the reserved source wrapper.
     (module_name == "core.math" && (member == "cmp" || member == "is_finite")) ||
     ((module_name == "core.encoding.json" || module_name == "core.encoding.jsonl") && member == "reader" && first_is_move) ||
-        (module_name == "core.net.tls" && member == "client" && first_is_move)
+        (module_name == "core.net.tls" && member == "client" && first_is_move) ||
+        // Worker alone keeps checked fn() inference; its source slot is opaque.
+        (module_name == "core.service" && member == "worker")
 }
 
 // Source exports resolve as ordinary functions. Only remaining static members
@@ -797,4 +799,17 @@ pub fn sema_call_core_identity_value(value: TExpr, type_args: [Type], expected: 
         result = sema_expr_expected(value, Val(required), environment, &diagnostics) ?? return None
     }
     sema_expr_expected(result, expected, environment, &diagnostics)
+}
+
+#Test("worker checked-function inference changes no other Core route") {
+    moves :: [Bool]{false, true}
+    loop row in CORE_CALLS {
+        loop moved in moves {
+            previous :: (row.module_name == "core.math" && (row.member == "cmp" || row.member == "is_finite")) ||
+                ((row.module_name == "core.encoding.json" || row.module_name == "core.encoding.jsonl") && row.member == "reader" && moved) ||
+                (row.module_name == "core.net.tls" && row.member == "client" && moved)
+            worker :: row.module_name == "core.service" && row.member == "worker"
+            assert(sema_call_core_native_resource_consumer(row.module_name, row.member, moved) == (previous || worker))
+        }
+    }
 }

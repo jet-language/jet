@@ -1593,6 +1593,14 @@ pub(crate) fn service_handle_rust_type(name: &str) -> Option<&'static str> {
         "__TreeWorkflowState" => Some("JetServiceWorkflow"), // Services.rs:966
         "__TreeTaskGroup" => Some("JetServiceTreeTaskGroup"), // Services.rs:970
         "__TreeSupervisorState" => Some("JetServiceTreeSupervisorState"), // Services.rs:971
+        // Worker policy transports; exact native shapes, mechanical, dies at cutover.
+        "__WorkerMailbox" => Some("JetServiceMailbox"), // Services.rs:758-762
+        "__WorkerChannel" => Some("JetServiceWorkerChannel"), // Services.rs:761, exact Arc type alias
+        "__WorkerHandler" => Some("JetServiceWorkerHandler"), // Services.rs:821
+        "__WorkerStatus" => Some("JetServiceSupervisorStatus"), // Services.rs:123-130
+        "__WorkerTopologyKind" => Some("JetServiceTopologyKind"), // Services.rs:134-137
+        "__WorkerTopologyState" => Some("JetDevtoolsTopologySupervisorState"), // DevtoolsTopologyPanel.rs:62-70
+        "__WorkerRestartReason" => Some("JetDevtoolsTopologyRestartReason"), // DevtoolsTopologyPanel.rs:282-288
         _ => None,
     }
 }
@@ -7999,5 +8007,20 @@ mod tests {
             args: vec![Type::Bool],
         });
         assert_eq!(expanded.name(), "fn(*, force: Bool) -> Int");
+    }
+
+    #[test]
+    fn worker_policy_private_transports_match_existing_native_shapes() {
+        for (name, rust) in [
+            ("__WorkerMailbox", "JetServiceMailbox"),
+            ("__WorkerChannel", "JetServiceWorkerChannel"),
+            ("__WorkerHandler", "JetServiceWorkerHandler"),
+            ("__WorkerStatus", "JetServiceSupervisorStatus"),
+            ("__WorkerTopologyKind", "JetServiceTopologyKind"),
+            ("__WorkerTopologyState", "JetDevtoolsTopologySupervisorState"),
+            ("__WorkerRestartReason", "JetDevtoolsTopologyRestartReason"),
+        ] {
+            assert_eq!(service_handle_rust_type(name), Some(rust));
+        }
     }
 }

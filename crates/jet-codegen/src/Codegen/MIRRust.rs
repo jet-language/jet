@@ -22850,17 +22850,31 @@ impl<'a> RustEmitter<'a> {
                     panic!("MIR captured function called without a Closure operation");
                 }
                 let borrow_mask = self.parameter_borrow_mask(&row.params);
-                self.call_symbol_for_function(
-                    function,
-                    self.function_name(*id),
-                    args,
-                    if row.generic_params.is_empty() {
-                        &[]
-                    } else {
-                        type_args
-                    },
-                    Some(&borrow_mask),
-                )
+                if row.module == "core_core_service" && row.name == "worker" {
+                    assert_eq!(args.len(), 5, "checked source worker ABI");
+                    let rendered = args.iter().enumerate().map(|(index, arg)| {
+                        if index == 2 {
+                            let handler = self.service_worker_handler(function, arg.value);
+                            let handler = format!("({handler} as {}JetServiceWorkerHandler)", self.config.root_prefix);
+                            if borrow_mask[index] { format!("&{handler}") } else { handler }
+                        } else {
+                            self.call_arg_for_function_with_literal(function, arg, borrow_mask[index], false)
+                        }
+                    }).collect::<Vec<_>>().join(", ");
+                    format!("{}({rendered})", self.function_name(*id))
+                } else {
+                    self.call_symbol_for_function(
+                        function,
+                        self.function_name(*id),
+                        args,
+                        if row.generic_params.is_empty() {
+                            &[]
+                        } else {
+                            type_args
+                        },
+                        Some(&borrow_mask),
+                    )
+                }
             }
             MirCallee::Associated {
                 function: target,

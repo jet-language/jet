@@ -904,7 +904,7 @@ pub fn chaos_fail(tree: ServiceTree) -> Int ServiceError! {
         next :: counter + 1
         core.service.__tree_write_chaos_count(&tree, next)
         endpoint :: core.service.__first_running_endpoint(tree) ?? return Err(ServiceError.Partitioned("chaos failure has no reachable service worker"))
-        if core.service.fail_worker(&tree, endpoint) == {
+        if fail_worker(&tree, endpoint) == {
             .Err(error) -> return Err(error)
             .Ok(_) -> {}
         }
@@ -1299,4 +1299,334 @@ fn pending_rollback_error(error: ServiceError, authority_error: ServiceError?, m
     assert(service_error_show(recoverable) == "service authority delivery exceeded mailbox capacity; authority rollback failed: requeue; unmarked receipts remain recoverable from the authority log")
     assert(service_error_show(pending_rollback_error(send_error, None, Val(restore_error))) == "service authority delivery exceeded mailbox capacity; mailbox rollback failed: restore")
     assert(pending_rollback_error(send_error, None, None) == send_error)
+}
+
+// Physical transports only. Their paired emitters use the existing Services
+// types, not a second mailbox, callback carrier, supervisor or channel.
+struct __WorkerMailbox {
+    endpoint: ServiceEndpoint
+    capacity: I64
+    channel: __WorkerChannel
+}
+
+enum __WorkerStatus { Starting Running Failed Cancelling Stopped Escalated Partitioned }
+enum __WorkerTopologyKind { Supervisor Task }
+enum __WorkerTopologyState { Starting Running Failed Restarting Stopping Stopped Escalated }
+enum __WorkerRestartReason { Failed Exited HealthCheck Manual Policy }
+
+pub fn worker(tree: &ServiceTree, name: String, handler: __WorkerHandler, handler_name: String, capacity: Int) -> ServiceEndpoint ServiceError! {
+    #Unsafe("Services1464-1544: checked function item is passed through; source owns validation and every seed") {
+        if core.service.__tree_started(tree) -> return Err(ServiceError.Policy("cannot add workers after start"))
+        if capacity <= 0 || capacity > 1000000 -> return Err(ServiceError.Policy("mailbox capacity must be positive and bounded"))
+        if name.trim().len() == 0 || !valid_service_text(name, 256) -> return Err(ServiceError.Policy("worker name must be non-empty and visible"))
+        if handler_name.trim().len() == 0 || !valid_service_text(handler_name, 256) -> return Err(ServiceError.Policy("worker handler name must be non-empty and visible"))
+        names :: core.service.__group_parts(tree)
+        if names.workers.len() >= 4096 -> return Err(ServiceError.Policy("service tree worker limit exceeded"))
+        route :: core.service.__tree_route_parts(tree)
+        loop existing in names.workers {
+            if existing == name -> return Err(ServiceError.Unknown("worker `{name}` already exists in tree `{route.name}`"))
+        }
+        authority := route.authority
+        if authority.len() == 0 {
+            authority = if core.service.__authority_issue() == {
+                .Ok(value) -> value
+                .Err(error) -> {
+                    return Err(error)
+                }
+            }
+            core.service.__tree_write_authority(&tree, ~authority)
+        }
+        unchecked :: if core.service.__endpoint_unchecked(~route.name, ~name, route.generation, authority) == {
+            .Ok(value) -> value
+            .Err(error) -> {
+                return Err(error)
+            }
+        }
+        mailbox :: if core.service.__worker_mailbox_new(unchecked, I64{capacity}, [String]{}) == {
+            .Ok(value) -> value
+            .Err(error) -> {
+                return Err(error)
+            }
+        }
+        endpoint :: ~mailbox.endpoint
+        // Services1519-1521: allocation precedes registry publication.
+        if core.service.__authority_register(endpoint, false) == {
+            .Err(error) -> return Err(error)
+            else -> {}
+        }
+        worker_task :: core.service.__worker_task_new(__WorkerStatus.Stopped)
+        worker_id :: core.service.__topology_worker_id(route.name, name)
+        parent_id :: core.service.__topology_root_id(route.name)
+        if core.service.__task_bind_topology(worker_task, __WorkerTopologyKind.Task, worker_id, Val(parent_id)) == {
+            .Err(error) -> return Err(error)
+            else -> {}
+        }
+        // Mailbox must move: native Mailbox::clone forks its channel.
+        core.service.__worker_push(&tree, name, handler, handler_name, ~endpoint, mailbox, [I64]{}, false, U64{0}, U64{0}, worker_task)
+        return endpoint
+    }
+}
+
+fn worker_contains(names: [String], name: String) -> Bool Never! {
+    loop existing in names {
+        if existing == name -> return true
+    }
+    false
+}
+
+fn worker_index(names: [String], name: String) -> Int? Never! {
+    loop i in 0..<names.len() {
+        if names[i] == name -> return Val(i)
+    }
+    None
+}
+
+fn worker_supervisor(groups: [(name: String, workers: [String])], worker: String) -> Int Never! {
+    loop i in 0..<groups.len() {
+        if worker_contains(groups[i].workers, worker) -> return i
+    }
+    groups.len()
+}
+
+fn worker_scope(names: [String], groups: [(name: String, workers: [String])], worker: String) -> (supervisor: Int, scope: [Int]) Never! {
+    supervisor :: worker_supervisor(groups, worker)
+    if supervisor < groups.len() {
+        scope := [Int]{}
+        loop member in groups[supervisor].workers {
+            if worker_index(names, member) == {
+                .Val(index) -> &scope.push(index)
+                else -> {}
+            }
+        }
+        return (supervisor: supervisor, scope: scope)
+    }
+    scope := [Int]{}
+    loop i in 0..<names.len() {
+        grouped := false
+        loop group in groups {
+            if worker_contains(group.workers, names[i]) -> grouped = true
+        }
+        if !grouped -> &scope.push(i)
+    }
+    (supervisor: groups.len(), scope: scope)
+}
+
+fn worker_targets(restart: ServiceRestart, scope: [Int], failed: Int) -> [Int] Never! {
+    if restart == ServiceRestart.OneForOne -> return [Int]{failed}
+    begin := 0
+    if restart == ServiceRestart.RestForOne {
+        loop i in 0..<scope.len() {
+            if scope[i] == failed {
+                begin = i
+                break
+            }
+        }
+    }
+    out := [Int]{}
+    loop i in begin..<scope.len() -> &out.push(scope[i])
+    out
+}
+
+fn worker_window_start(now: I64, per: I64) -> I64 Never! {
+    if per > 0 {
+        if now < -9223372036854775808 + per -> return I64{-9223372036854775808}
+    }
+    if per < 0 {
+        if now > 9223372036854775807 + per -> return I64{9223372036854775807}
+    }
+    now - per
+}
+
+fn worker_spent(restarts: [I64], now: I64, per: I64) -> Int Never! {
+    start :: worker_window_start(now, per)
+    spent := 0
+    loop at in restarts {
+        if at > start -> spent = spent + 1
+    }
+    spent
+}
+
+fn worker_pruned(restarts: [I64], now: I64, per: I64) -> [I64] Never! {
+    start :: worker_window_start(now, per)
+    out := [I64]{}
+    loop at in restarts {
+        if at > start -> &out.push(at)
+    }
+    if now > start -> &out.push(now)
+    out
+}
+
+pub fn fail_worker(tree: &ServiceTree, endpoint: ServiceEndpoint) ServiceError! {
+    #Unsafe("Services2917-3078: exclusive tree borrow; each write follows the native order") {
+        if !core.service.__tree_started(tree) -> return Err(ServiceError.NotStarted("service tree is not started"))
+        if validate_tree_endpoint(tree, endpoint) == {
+            .Err(error) -> return Err(error)
+            else -> {}
+        }
+        identity :: core.service.__endpoint_identity_parts(endpoint)
+        topology :: core.service.__group_parts(tree)
+        facts :: core.service.__worker_tree_parts(tree)
+        root :: core.service.__tree_display_parts(tree)
+        scope :: worker_scope(topology.workers, topology.groups, identity.worker)
+        restart := root.restart
+        max := root.budget_max
+        per := I64{root.budget_per_ms}
+        if scope.supervisor < facts.groups.len() {
+            restart = facts.groups[scope.supervisor].restart
+            max = facts.groups[scope.supervisor].max
+            per = I64{facts.groups[scope.supervisor].per_ms}
+        }
+        now :: core.service.__authority_now()
+        preserve :: root.delivery == ServiceDelivery.DurableAtLeastOnce
+        failed :: worker_index(topology.workers, identity.worker) ?? return Err(ServiceError.Unknown("endpoint {identity.tree}/{identity.worker} is not in this tree"))
+        targets :: worker_targets(restart, scope.scope, failed)
+        loop index in targets {
+            if worker_spent(facts.workers[index].restarts, now, per) >= max {
+                reason :: "worker `{topology.workers[index]}` spent its restart budget of {max} per {per}ms; the supervisor escalates to its parent group"
+                // Identical ignored Results: native2989,2992.
+                loop worker in facts.workers {
+                    _ :: core.service.__task_escalate(worker.task, reason)
+                }
+                loop supervisor in facts.supervisors {
+                    _ :: core.service.__task_escalate(supervisor, reason)
+                }
+                loop i in 0..<facts.workers.len() {
+                    core.service.__worker_write_running(&tree, i, false) // native2995
+                    if core.service.__authority_update(facts.workers[i].endpoint, false) == {
+                        .Err(_) -> {
+                            _ :: core.service.__authority_register(facts.workers[i].endpoint, false)
+                        }
+                        else -> {}
+                    } // native2996-2997 ignores the fallback Result too.
+                }
+                core.service.__close_runtime_groups(&tree) // native2999
+                core.service.__tree_write_started(&tree, false) // native3000
+                core.service.__publish_tree_topology(tree, __WorkerTopologyState.Escalated)
+                return Err(ServiceError.Unavailable(reason))
+            }
+        }
+        previous := [Bool]{}
+        desired := [Bool]{}
+        loop i in 0..<facts.workers.len() {
+            current :: core.service.__worker_route(tree, facts.workers[i].endpoint) ?? panic("physical worker route must exist")
+            &previous.push(current.running)
+            targeted := false
+            loop target in targets {
+                if target == i -> targeted = true
+            }
+            &desired.push(if targeted -> !worker_contains(facts.partitioned, topology.workers[i]) else -> current.running)
+        }
+        updated := 0
+        loop i in 0..<facts.workers.len() {
+            if core.service.__authority_update(facts.workers[i].endpoint, desired[i]) == {
+                .Err(error) -> {
+                    rollback := ServiceError?{None}
+                    loop updated > 0 {
+                        updated = updated - 1
+                        if core.service.__authority_update(facts.workers[updated].endpoint, previous[updated]) == {
+                            .Err(failure) -> {
+                                if rollback == None -> rollback = Val(failure)
+                            }
+                            else -> {}
+                        }
+                    }
+                    if rollback == {
+                        .Val(failure) -> return Err(ServiceError.Policy("{service_error_show(error)}; service failure authority rollback failed: {service_error_show(failure)}"))
+                        else -> return Err(error)
+                    }
+                }
+                else -> updated = updated + 1
+            }
+        }
+        // Identical ignored Results: native3043-3051.
+        _ :: core.service.__task_fail(facts.workers[failed].task, "worker `{identity.worker}` failed under supervisor")
+        if scope.supervisor < facts.supervisors.len() {
+            _ :: core.service.__task_fail(facts.supervisors[scope.supervisor], "supervisor restarted worker `{identity.worker}`")
+        }
+        loop index in targets {
+            // Services1992-1994: append/prune restart times before running.
+            core.service.__worker_write_restarts(&tree, index, worker_pruned(facts.workers[index].restarts, now, per))
+            core.service.__worker_write_running(&tree, index, true)
+            mailbox :: core.service.__worker_route(tree, facts.workers[index].endpoint) ?? panic("physical worker route must exist")
+            messages :: if preserve -> core.service.__mailbox_snapshot(tree, index) else -> [String]{}
+            core.service.__mailbox_close(tree, index) // native2000
+            replacement :: core.service.__worker_mailbox_new(facts.workers[index].endpoint, I64{mailbox.capacity}, messages) ?? panic("validated service mailbox must restart with its bounded queue")
+            core.service.__worker_write_mailbox(&tree, index, replacement) // MOVE, native2001-2006
+            // Native2007-2012 ignores both Results; clamp its u64 time identically.
+            at :: U64{if now < 0 -> 0 else -> now}
+            _ :: core.service.__record_topology_restart(facts.workers[index].task, at, __WorkerRestartReason.Failed)
+            _ :: core.service.__task_restart(facts.workers[index].task)
+        }
+        if scope.supervisor < facts.supervisors.len() {
+            _ :: core.service.__task_restart(facts.supervisors[scope.supervisor]) // native3062 ignored.
+        }
+        loop i in 0..<facts.workers.len() {
+            if worker_contains(facts.partitioned, topology.workers[i]) {
+                core.service.__worker_write_running(&tree, i, false) // native3069
+                // Native3070-3073: both state fields under ONE mutex.
+                core.service.__task_write_partition(facts.workers[i].task, __WorkerStatus.Partitioned, TaskFailure.Cancelled)
+            }
+        }
+        core.service.__publish_tree_topology(tree, __WorkerTopologyState.Running)
+    }
+}
+
+pub fn restarts(tree: ServiceTree, endpoint: ServiceEndpoint) -> Int ServiceError! {
+    #Unsafe("Services3080-3100: pinned validation, group policy, one now, then weak name/tree match") {
+        if validate_tree_endpoint(tree, endpoint) == {
+            .Err(error) -> return Err(error)
+            else -> {}
+        }
+        identity :: core.service.__endpoint_identity_parts(endpoint)
+        topology :: core.service.__group_parts(tree)
+        facts :: core.service.__worker_tree_parts(tree)
+        root :: core.service.__tree_display_parts(tree)
+        supervisor :: worker_supervisor(topology.groups, identity.worker)
+        per :: I64{if supervisor < facts.groups.len() -> facts.groups[supervisor].per_ms else -> root.budget_per_ms}
+        now :: core.service.__authority_now()
+        loop i in 0..<facts.workers.len() {
+            physical :: core.service.__endpoint_identity_parts(facts.workers[i].endpoint)
+            if topology.workers[i] == identity.worker && physical.tree == identity.tree -> return worker_spent(facts.workers[i].restarts, now, per)
+        }
+        return Err(ServiceError.Unknown("endpoint {identity.tree}/{identity.worker} is not in this tree"))
+    }
+}
+
+pub fn mailbox_depth(tree: ServiceTree, endpoint: ServiceEndpoint) -> Int ServiceError! {
+    #Unsafe("Services2847-2862: validated endpoint, then deliberately weak name/tree match, channel depth") {
+        if validate_tree_endpoint(tree, endpoint) == {
+            .Err(error) -> return Err(error)
+            else -> {}
+        }
+        identity :: core.service.__endpoint_identity_parts(endpoint)
+        topology :: core.service.__group_parts(tree)
+        facts :: core.service.__worker_tree_parts(tree)
+        loop i in 0..<facts.workers.len() {
+            physical :: core.service.__endpoint_identity_parts(facts.workers[i].endpoint)
+            if topology.workers[i] == identity.worker && physical.tree == identity.tree -> return core.service.__mailbox_depth(tree, i)
+        }
+        return Err(ServiceError.Unknown("endpoint {identity.tree}/{identity.worker} is not in this tree"))
+    }
+}
+
+#Test("service worker restart scope preserves group declaration order and root membership") {
+    names :: [String]{"a", "b", "c", "d"}
+    groups :: [(name: String, workers: [String])]{(name: "g", workers: [String]{"c", "a", "missing"})}
+    grouped :: worker_scope(names, groups, "a")
+    assert(grouped.supervisor == 0 && grouped.scope == [Int]{2, 0})
+    root :: worker_scope(names, groups, "b")
+    assert(root.supervisor == 1 && root.scope == [Int]{1, 3})
+    assert(worker_targets(ServiceRestart.OneForOne, grouped.scope, 0) == [Int]{0})
+    assert(worker_targets(ServiceRestart.OneForAll, grouped.scope, 0) == [Int]{2, 0})
+    assert(worker_targets(ServiceRestart.RestForOne, grouped.scope, 0) == [Int]{0})
+    assert(worker_targets(ServiceRestart.RestForOne, grouped.scope, 99) == [Int]{2, 0})
+}
+
+#Test("service worker restart budget excludes the exact boundary and saturates i64 subtraction") {
+    assert(worker_window_start(-9223372036854775808, 1) == I64{-9223372036854775808})
+    assert(worker_window_start(9223372036854775807, -1) == I64{9223372036854775807})
+    instants :: [I64]{I64{0}, I64{1}, I64{10}}
+    assert(worker_spent(instants, 10, 10) == 2)
+    assert(worker_pruned(instants, 10, 10) == [I64]{I64{1}, I64{10}, I64{10}})
+    assert(worker_pruned([I64]{}, -9223372036854775808, 1).len() == 0)
 }
