@@ -134,6 +134,8 @@ fn comptime_publish_locked(kind: I64, status: I64) {
 // Scheduler.rs:889-921 framing: decimal UTF-8 byte length + '\n' + JSON.
 // Budget records always have a site and an empty message, including U64.MAX
 // (not a missing optional field). Use World's unsigned decimal helper.
+// The root's only writers are comptime_publish_locked(3,2) in work and
+// comptime_publish_locked(4,3) in enter; its status is exactly 2 or 3.
 #Export(c) fn jet_rt_comptime_stop_write() -> U32 {
     sync_mutex_lock(comptime_root)
     record :: sync_load(comptime_root + I64{32})
@@ -142,6 +144,12 @@ fn comptime_publish_locked(kind: I64, status: I64) {
         return U32{0}
     }
     status :: sync_load(record + I64{8})
+    owner :: sync_load(record + I64{16})
+    start :: sync_load(record + I64{24})
+    end :: sync_load(record + I64{32})
+    // Rust CAbi.rs:256-257 clones under the mutex, then channel_write may
+    // block without excluding other budget charges or the next request.
+    sync_mutex_unlock(comptime_root)
     scratch :: jet_rt_alloc(I64{192}, I64{8})
     sync_store(scratch, I64{4189021028785791611})
     at := I64{0}
@@ -160,20 +168,22 @@ fn comptime_publish_locked(kind: I64, status: I64) {
         sync_store(scratch + I64{40}, I64{249686025582})
         at = I64{45}
     }
-    at += world_decimal(scratch + at, sync_load(record + I64{16}))
+    at += world_decimal(scratch + at, owner)
     sync_store(scratch + at, I64{2482735057479082540})
     trap_put(scratch + at + I64{8}, I64{58})
     at += I64{9}
-    at += world_decimal(scratch + at, sync_load(record + I64{24}))
+    at += world_decimal(scratch + at, start)
     sync_store(scratch + at, I64{16363363393413676})
     at += I64{7}
-    at += world_decimal(scratch + at, sync_load(record + I64{32}))
+    at += world_decimal(scratch + at, end)
     sync_store(scratch + at, I64{7449362198107595308})
     sync_store(scratch + at + I64{8}, I64{137585556595301})
     at += I64{14}
     header :: scratch + I64{160}
     digits :: world_decimal(header, at)
     trap_put(header + digits, I64{10})
+    // Core.rs:988-994 flushes program stdout before the private channel frame.
+    // This is the same active stdout flush used by every native process stop.
     trap_flush_stdout()
     // fcntl F_DUPFD_CLOEXEC borrows the compiler worker's lifetime descriptor3;
     // failed duplicate is ignored just like protocol_channel's Option in Rust.
@@ -184,7 +194,6 @@ fn comptime_publish_locked(kind: I64, status: I64) {
         _ := trap_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     }
     jet_rt_free(scratch, I64{192}, I64{8})
-    sync_mutex_unlock(comptime_root)
     U32{status}
 }
 
