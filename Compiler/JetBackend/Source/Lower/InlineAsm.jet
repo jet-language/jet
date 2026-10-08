@@ -80,7 +80,7 @@ fn lower_asm_function(p: MIRProgram, m: &LowerModule, f: &LowerFunction, functio
 // No callback, handle, owned carrier, or external link-unit bridge is implied.
 fn lower_asm_import_word(ty: MIRType) -> Bool Never! {
     kind :: lower_convert_type(ty).kind
-    if kind == .IntN(_, bits) -> return bits == 64
+    if kind == .IntN(signed, bits) -> return bits == 64 || (!signed && bits == 32)
     if kind == .Bool -> return true
     lower_ptr_element(ty) != None
 }
@@ -115,5 +115,5 @@ fn lower_asm_import_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
             dst = Val(lower_new_value(&f, layout, LIRDrop.Trivial, ty.identity))
         }
     }
-    lower_call_runtime(&m, &f, row.symbol, lowered, dst)
+    lower_call_runtime_typed(c, &m, &f, instruction, row.symbol, lowered, dst)
 }
