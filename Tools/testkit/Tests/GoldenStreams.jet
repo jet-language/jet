@@ -11,7 +11,8 @@ fn kit_test_golden_run(stdout: String, stderr: String, code: Int) -> KitRun {
 }
 
 fn kit_test_golden_fixture(name: String) -> String {
-    files.join(sys.current_dir(), "Tools/testkit/Fixtures/golden/{name}")
+    root :: sys.current_dir() ?? panic("fixture checkout root: {err}")
+    files.join(root, "Tools/testkit/Fixtures/golden/{name}")
 }
 
 fn kit_test_golden_scratch(label: String) -> String {

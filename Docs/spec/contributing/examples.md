@@ -88,6 +88,8 @@ successful `step: jet build <entry>`; Golden also supplies its implicit build.
 Shared kit record types, callback factories and the step sequencer are colocated
 in `run.jet` while the front end's cross-file identity issue (#4780) is unresolved. List
 field defaults use explicitly typed empty lists, just like kit constructors.
+Fixture copies preserve file permission bits, including executable tools nested
+under `state/` when that directory is staged as `.jet/` in the case workspace.
 
 Use `--list`, `--cases FILE` (exact repository-relative IDs), or `--filter TEXT`
 to select cases. `--shard I/N` partitions the sorted corpus deterministically.

@@ -106,3 +106,34 @@ fn kit_test_core_scratch(label: String) -> String {
 #Test("argv0 replaces only the first usage prefix") {
     assert_eq(kit_expect_argv0("Usage: binary\nUsage: binary\n", "binary", "source"), "Usage: source\nUsage: binary\n")
 }
+
+#Test("fixture tree preserves executable modes through recursive state staging") {
+    root :: kit_test_core_scratch("fixture-modes")
+    fixture :: files.join(root, "fixture")
+    work :: files.join(root, "work")
+    executable :: files.join(fixture, "bin/tool")
+    state_executable :: files.join(fixture, "state/hooks/tool")
+    data :: files.join(fixture, "data.txt")
+    kit_exec_write(executable, "#!/bin/sh\nprintf 'fixture executable\\n'\n")
+    kit_exec_write(state_executable, "#!/bin/sh\nprintf 'fixture executable\\n'\n")
+    kit_exec_write(data, "fixture data\n")
+    files.chmod(executable, 493) ?? panic("chmod fixture executable: {err}")
+    files.chmod(state_executable, 448) ?? panic("chmod state executable: {err}")
+    files.chmod(data, 416) ?? panic("chmod fixture data: {err}")
+    kit_exec_copy_tree(fixture, work, true)
+    copied :: files.join(work, "bin/tool")
+    copied_state :: files.join(work, ".jet/hooks/tool")
+    assert_eq((files.stat(copied) ?? panic("stat copied executable: {err}")).mode % 512, 493)
+    assert_eq((files.stat(copied_state) ?? panic("stat copied state executable: {err}")).mode % 512, 448)
+    assert_eq((files.stat(files.join(work, "data.txt")) ?? panic("stat copied data: {err}")).mode % 512, 416)
+    assert_eq(files.read(files.join(work, "data.txt")) ?? panic("read copied data: {err}"), "fixture data\n")
+    env :: kit_test_golden_env(root)
+    loop path in [copied, copied_state] {
+        result :: kit_exec_invoke(env, [path], work, root, "")
+        assert_eq(result.error, "")
+        assert_eq(result.code, 0)
+        assert_eq(result.stdout, "fixture executable\n")
+        assert_eq(result.stderr, "")
+    }
+    files.remove_all(root) ?? panic("remove fixture modes scratch")
+}

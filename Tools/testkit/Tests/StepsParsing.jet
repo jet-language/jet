@@ -6,7 +6,7 @@ fn kit_test_steps_bless() -> KitBless {
 }
 
 fn kit_test_steps_env() -> KitEnv {
-    root :: sys.current_dir()
+    root :: sys.current_dir() ?? panic("step checkout root: {err}")
     KitEnv{root: root, scratch: files.join(sys.get("HOME") ?? panic("HOME required"), ".cache/jet-dev/scratch"), jet: "", jetpack: "", timeout: 5s, memory_limit: 0}
 }
 
@@ -37,7 +37,8 @@ fn kit_test_steps_env() -> KitEnv {
 }
 
 #Test("one-of compares exact alternatives and refuses blessing before writes") {
-    directory :: files.join(sys.current_dir(), "Tools/testkit/Fixtures/steps")
+    root :: sys.current_dir() ?? panic("step fixture checkout root: {err}")
+    directory :: files.join(root, "Tools/testkit/Fixtures/steps")
     accepted :: "vulkan:accepted\nwebgpu:rejected\n"
     rejected :: "vulkan:rejected\nwebgpu:rejected\n"
     alternatives :: "accepted.out rejected.out"
@@ -103,7 +104,7 @@ fn kit_test_steps_env() -> KitEnv {
 #Test("step cwd and environment overlay apply after case values and unset last") {
     root :: kit_test_core_scratch("step-env")
     kit_exec_write(files.join(root, "nested/marker"), "")
-    kit_exec_write(files.join(root, "expected.out"), "{root}/nested|step|unset")
+    kit_exec_write(files.join(root, "expected.out"), "{{work}}/nested|step|unset")
     env :: kit_test_golden_env(root)
     plan := kit_steps_parse("env: TESTKIT_ORDER=case\nstep: sh -c 'printf \"%s|%s|%s\" \"$PWD\" \"$TESTKIT_ORDER\" \"${{JET_RECEIPT_BYPASS-unset}}\"'\nstdout: = expected.out\n")
     plan.steps[0].cwd = "nested"

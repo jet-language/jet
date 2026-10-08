@@ -419,7 +419,14 @@ fn run() {
         print("REFUSED\tselection\t\t{options.error}")
         process.exit(2)
     }
-    root :: files.canonicalize(sys.current_dir()) ?? panic("checkout root: {err}")
+    cwd :: sys.current_dir() ?? {
+        result :: KitCaseResult{suite: "kit", case: "startup", tier: "-", status: "ERROR", detail: "checkout directory: {err}", exit: -1}
+        kit_report_row(result)
+        code :: kit_report_finish(options.jet, [result], options.results, [String]{})
+        process.exit(code)
+        return
+    }
+    root :: files.canonicalize(cwd) ?? panic("checkout root: {err}")
     code :: kit_execute_suites(options, root)
     if code != 0 -> process.exit(code)
 }
