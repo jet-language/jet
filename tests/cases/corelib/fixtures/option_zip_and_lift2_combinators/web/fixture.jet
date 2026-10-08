@@ -1,0 +1,19 @@
+
+#Target(Web)
+#Target(JS)
+fn add(x: Int, y: Int) -> Int { return x + y }
+
+#Target(JS)
+fn choose() -> fn(Int, Int) -> Int {
+    print("choose")
+    return add
+}
+
+#Target(JS)
+fn run() {
+    if Option.lift2(add, Val(2), Val(3)) == .Val(value) { print(value) }
+    local :: add
+    if Option.lift2(local, Val(2), Val(3)) == .Val(value) { print(value) }
+    if Option.lift2(choose(), Val(2), Val(3)) == .Val(value) { print(value) }
+    if Option.lift2(choose(), Val(2), None) == .None { print("none") }
+}
