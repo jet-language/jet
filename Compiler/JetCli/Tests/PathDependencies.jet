@@ -1,0 +1,26 @@
+// #4833: dependency reach uses the root's declarations, not ambient siblings.
+// The filesystem acceptance cases live in tests/cases/pkg; this exercises the
+// host's pure pre-open boundary with the same D-MOD-CYCLE1 examples.
+fn run() Never! {
+    isolated :: [String: DepSpec]{"dep": DepSpec.Path("./deps/dep")}
+    if jet_cli_path_dependency_reachable("/project/outside", "/project", isolated) {
+        panic("an in-tree declaration must not authorize an ambient sibling")
+    }
+    declared :: [String: DepSpec]{"dep": DepSpec.Path("./deps/dep"), "shared": DepSpec.Path("./shared")}
+    if !jet_cli_path_dependency_reachable("/project/shared", "/project", declared) {
+        panic("an explicitly root-declared dependency must remain reachable")
+    }
+    siblings :: [String: DepSpec]{"jet_parser": DepSpec.Path("../JetParser")}
+    if !jet_cli_path_dependency_reachable("/Compiler/JetLexer", "/Compiler/JetSema", siblings) {
+        panic("compiler sibling dependency closure must remain reachable")
+    }
+    if jet_cli_path_dependency_reachable("/CompilerOther/JetLexer", "/Compiler/JetSema", siblings) {
+        panic("a textual prefix is not an authorized directory boundary")
+    }
+    if jet_cli_dependency_within("/project/dependency-other", "/project/dependency") {
+        panic("transitive containment must use component boundaries")
+    }
+    if !jet_cli_dependency_within("/project/dependency/sub", "/project/dependency") {
+        panic("nested transitive path dependencies must remain reachable")
+    }
+}
