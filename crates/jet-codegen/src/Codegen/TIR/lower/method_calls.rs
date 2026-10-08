@@ -3912,6 +3912,56 @@ fn lower_method_call_impl(
     });
     let declared_recv_type = declared_recv_type.or_else(|| recv_type.clone());
     let recv_type = &declared_recv_type;
+    // File handles keep their native carrier, but these receiver policies are
+    // the registered Jet source functions, not the legacy HandleOp bodies.
+    let file_source_member = recv_type.as_deref().and_then(|name| {
+        match (crate::Codegen::file_handle_rust_type(name), method, args.len()) {
+            (Some("JetFileReader"), "read_line", 0) => Some("__reader_read_line"),
+            (Some("JetFileScope"), "read", 1) => Some("scoped_read"),
+            _ => None,
+        }
+    });
+    if let Some(member) = file_source_member {
+        return in_own_frame(|| {
+            let Some(signature) = cx.core_source_sigs.get(&("core.files".to_string(), member.to_string())) else {
+                return invariant_method_expr(method_span, "filesystem receiver has no loaded Jet source signature");
+            };
+            let Some((access, receiver_ty)) = signature.params.first() else {
+                return invariant_method_expr(method_span, "filesystem source function has no receiver parameter");
+            };
+            let value = if *access == AccessConvention::Write {
+                lower_expr_as_mut_place(receiver, cx, env)
+            } else {
+                lowered_receiver.clone().unwrap_or_else(|| lower_expr(receiver, cx, env))
+            };
+            let mut call_args = vec![TCallArg {
+                value,
+                template_items: None,
+                borrow: *access == AccessConvention::Read && !receiver_ty.is_scalar(),
+                mut_borrow: *access == AccessConvention::Write,
+                clone: false,
+                arc_clone: false,
+                fn_coerce: None,
+                widen_to_vec: false,
+                widen_to_union: None,
+                box_as_trait: None,
+            }];
+            call_args.extend(lower_module_args(args, signature.params.get(1..), env, cx));
+            let Some(ty) = resolved_ret.cloned() else {
+                return invariant_method_expr(method_span, "filesystem source receiver has no resolved return");
+            };
+            let target_return = match module_call_target_return(cx, Some(&ty)) {
+                Ok(value) => Some(value),
+                Err(error) => return invariant_method_expr(method_span, error),
+            };
+            TExpr { ty, kind: TExprKind::ModuleCall {
+                form: core_source_module_target(signature, member),
+                target_return,
+                type_args: type_args.to_vec(),
+                args: call_args,
+            }}
+        });
+    }
     // D-TRAIT-OVERLOAD1=A: `z.abs()` on a Complex is its magnitude (a Float),
     // lowered to the same MathBuiltin route `math.abs` used for Complex. It is
     // resolved first so no user-method path claims `Complex::abs`.

@@ -311,31 +311,30 @@ fn sema_stream_handle_lines_value(receiver: TExpr, owner: String, span: Span, ex
     SemaMethodSpecialCheck{handled: true, value: Val(checked)}
 }
 
-fn sema_stream_file_scope_read(receiver: Expr, receiver_value: TExpr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
-    if args.len() != 1 {
-        sema_stream_handle_infer_args(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-        &diagnostics.push(sema_call_arity_diagnostic("FileScope.read", 1, args.len(), false, span))
-        return SemaMethodSpecialCheck{handled: true, value: None}
-    }
-    record :: sema_call_core_receiver_record(receiver_value.ty, "read", args.len() + 1, span, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    parameter_access := sema_call_core_access(record, 1) ?? AccessConvention.Read
-    params := [SemaCallParam]{sema_stream_handle_param("path", Type.String, parameter_access)}
-    typed_args :: sema_stream_handle_checked_args("FileScope.read", params, args, Val(receiver), receiver_value, sema_call_core_access(record, 0) ?? AccessConvention.Read, -1, span, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    result_type := sema_stream_handle_result(Type.String, sema_stream_handle_io_error())
-    failure := sema_call_failure_carrier(Val(result_type))
-    core_args := [TExpr]{receiver_value}
-    loop argument in typed_args -> &core_args.push(argument)
-    if !sema_call_core_record_effects(record, span, [Type]{}, result_type, failure, [FunctionDefaultRef]{}, &scopes, &context, environment, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-    value :: sema_call_core_tir(record, core_args, span, [Type]{}, [Bool]{false, false}, None, result_type, failure, expected, environment, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    SemaMethodSpecialCheck{handled: true, value: Val(value)}
-}
 
 
 // Called before ordinary method lookup for canonical Core handle types.
 pub fn sema_call_try_stream_handle_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     owner :: sema_stream_handle_owner(receiver_value.ty) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     if !sema_stream_handle_is_canonical(receiver_value.ty, owner, environment) -> return SemaMethodSpecialCheck{handled: false, value: None}
-    if owner == "FileScope" && method == "read" -> return sema_stream_file_scope_read(receiver, receiver_value, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    source_member := if owner == "FileScope" && method == "read" -> "scoped_read" else if owner == "FileReader" && method == "read_line" -> "__reader_read_line" else -> ""
+    if source_member != "" {
+        identity :: sema_call_core_module_identity(environment, "core.files") ?? {
+            &diagnostics.push(sema_error("E0003", span, "filesystem source module is not loaded", "receiver policy requires Core/files/files.jet", "load the registered Core source module"))
+            return SemaMethodSpecialCheck{handled: true, value: None}
+        }
+        target :: sema_call_core_source_target(environment, identity, source_member, [Type]{}, span, &diagnostics) ?? {
+            &diagnostics.push(sema_error("E0003", span, "filesystem source receiver target is missing", "receiver policy requires its canonical source function", "load the registered Core source function"))
+            return SemaMethodSpecialCheck{handled: true, value: None}
+        }
+        access :: if owner == "FileReader" -> AccessConvention.Write else -> AccessConvention.Read
+        source_args := [CallArg]{CallArg{convention: access, expr: receiver, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}}
+        loop argument in args -> &source_args.push(argument)
+        scopes.ownership_call_depth += 1
+        value := sema_call_core_check_source_owned(target, "{owner}.{method}", [Type]{}, source_args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        scopes.ownership_call_depth -= 1
+        return SemaMethodSpecialCheck{handled: true, value: value}
+    }
     if (owner == "FileReader" && method == "lines") || (owner == "StdinHandle" && method == "lines") {
         if args.len() != 0 {
             sema_stream_handle_infer_args(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
