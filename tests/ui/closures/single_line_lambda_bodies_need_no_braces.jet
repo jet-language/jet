@@ -1,0 +1,16 @@
+
+struct Box {
+    n: Int
+}
+
+fn bump(box: Shared<Box>) {
+    slot :: box.guard_edit().map(b -> b.n)
+    slot.value += 1
+}
+
+fn run() {
+    box :: shared Box{n: 0}
+    t :: task bump(box)
+    t.join() ?? panic("task failed")
+    print(box.n)
+}
