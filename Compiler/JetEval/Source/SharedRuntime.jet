@@ -106,6 +106,9 @@ pub struct JetEvalSharedGuardLeaseMeta {
     pub handles: Int
     pub dirty: Bool
     pub released: Bool
+    // An arena-issued capability for the actual native Guard40 lease. It is
+    // not a copied permit; callback READ loans still use their scoped selector.
+    pub physical_root: JetEvalSharedHostRootCapability?
 }
 
 pub struct JetEvalSharedGuardLease { pub metadata: Shared<JetEvalSharedGuardLeaseMeta> }
@@ -934,7 +937,50 @@ pub fn jet_eval_shared_runtime_host_set_root_capability(carrier: JetEvalSharedHo
             else -> return false
         }
     }
+    if carrier.kind == JetEvalSharedHostKind.Guard {
+        if carrier.physical == {
+            .Guard(entry) -> {
+                guard :: entry.metadata.guard_read()
+                lease := guard.value.lease
+                permit := lease.metadata.guard_edit()
+                if permit.value.released || permit.value.handles <= 0 -> return false
+                if permit.value.physical_root != None
+                    && !jet_eval_shared_runtime_same_root_capability(permit.value.physical_root, Val(capability)) -> return false
+                permit.value.physical_root = Val(capability)
+                return true
+            }
+            else -> return false
+        }
+    }
     false
+}
+
+pub fn jet_eval_shared_runtime_host_root_capability(carrier: JetEvalSharedHostCarrier) -> JetEvalSharedHostRootCapability? {
+    if carrier.physical == {
+        .Shared(entry) -> {
+            permit :: entry.metadata.guard_read()
+            if permit.value.dropped -> return None
+            permit.value.physical_root
+        }
+        .Condition(entry) -> {
+            permit :: entry.metadata.guard_read()
+            if permit.value.dropped -> return None
+            permit.value.physical_root
+        }
+        .Snapshot(entry) -> {
+            permit :: entry.metadata.guard_read()
+            if permit.value.dropped || !permit.value.valid -> return None
+            permit.value.owner_root
+        }
+        .Guard(entry) -> {
+            permit :: entry.metadata.guard_read()
+            if permit.value.dropped -> return None
+            lease :: permit.value.lease.metadata.guard_read()
+            if lease.value.released || lease.value.handles <= 0 -> return None
+            lease.value.physical_root
+        }
+        else -> None
+    }
 }
 
 pub fn jet_eval_shared_runtime_host_set_owner_alias_token(carrier: JetEvalSharedHostCarrier, token_id: Int) -> Bool {
@@ -1600,6 +1646,7 @@ pub fn jet_eval_shared_runtime_host_entry_loan(
                     handles: 1,
                     dirty: false,
                     released: false,
+                    physical_root: source_lease.physical_root,
                 },
             }
             local_guard :: JetEvalSharedGuard{
@@ -2769,6 +2816,7 @@ fn jet_eval_shared_runtime_guard_prepare(machine: &JetEvalMachine, shared: Int, 
         handles: 1,
         dirty: false,
         released: false,
+        physical_root: None,
     }
     lease :: JetEvalSharedGuardLease{metadata: lease_meta}
     Val(jet_eval_shared_runtime_guard_create(machine, shared, row, editable, [MIRFieldID]{}, lease, false, None))

@@ -328,7 +328,7 @@ fn lower_helper_priority_queue_render(p: MIRProgram, m: &LowerModule, glue: Lowe
     lower_call_helper(&m, &f, "list.sort_desc", list_ty, [LIRValueID]{snapshot}, None)
     text :: lower_render_string(&f)
     lower_call_helper(&m, &f, glue.helper, list_ty, [LIRValueID]{snapshot}, Val(text))
-    lower_inline_drop(p, &m, &f, snapshot, list_ty)
+    lower_map_drop_value(p, &m, &f, snapshot, list_ty)
     lower_seal(&f, LIRTerminator.Return{value: Val(text)})
     lir_builder_finish(f.builder)
 }

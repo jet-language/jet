@@ -325,6 +325,7 @@ fn lower_alloc_bytes(m: &LowerModule, f: &LowerFunction, dst: LIRValueID, size: 
 // glue takes (source, target) and fills the target with a deep copy.
 
 fn lower_needs_drop(p: MIRProgram, ty: MIRType) -> Bool Never! {
+    if lower_close_impl(p, ty) != None -> return true
     if lower_repr(p, ty) == {
         .Handle(_, _) -> true
         .Boxed(_) -> true

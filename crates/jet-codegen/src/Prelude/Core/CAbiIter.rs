@@ -46,6 +46,9 @@ pub(crate) mod jet_c_abi_iter {
                 child1: (!row.child1.is_null()).then(|| Self::copy(row.child1)),
             })
         }
+        pub(crate) fn require_shared_drop_code(&self, drop_code: usize) {
+            assert_eq!(drop_code, self.drop, "CoreSharedNativeDestructorMismatch");
+        }
         pub(crate) fn tag(&self) -> u32 { self.kind as u32 }
         pub(crate) fn stride(&self) -> usize { self.stride }
         pub(crate) fn payload_size(&self) -> usize { match self.tag() { 11 => 0, 9 => 1, _ => self.stride } }
@@ -167,7 +170,11 @@ pub(crate) mod jet_c_abi_iter {
     }
     impl Drop for NativeValue {
         fn drop(&mut self) {
-            if self.owned && self.meta.drop != 0 {
+            if !self.owned { return; }
+            // The consuming callback owns cleanup, including a typed Stop.
+            // Never replay it while releasing the surrounding Rust container.
+            self.owned = false;
+            if self.meta.drop != 0 {
                 let drop: unsafe extern "C" fn(*mut u8) = unsafe { std::mem::transmute(self.meta.drop) };
                 unsafe { drop(self.slot.data_mut()) };
             }
@@ -796,6 +803,97 @@ pub(crate) mod jet_c_abi_iter {
             let value = value.initialized();
             assert_eq!(value.word(), 1);
             assert_eq!(NativeValue::uninitialized(meta(11, 0)).initialized().word(), 0);
+        }
+
+        #[repr(C)]
+        #[derive(Clone, Copy)]
+        struct CloseWitness {
+            close: *const AtomicUsize,
+            structural: *const AtomicUsize,
+            publish_stop: u64,
+        }
+
+        unsafe extern "C" fn close_and_drop(slot: *mut u8) {
+            let witness = ptr::read_unaligned(slot.cast::<CloseWitness>());
+            (*witness.close).fetch_add(1, Ordering::Relaxed);
+            (*witness.structural).fetch_add(1, Ordering::Relaxed);
+            if witness.publish_stop != 0 {
+                jet_scheduler_native_publish(JetStopRecord::signal(JetStopKind::Cancelled, String::new()));
+            }
+        }
+
+        fn close_meta() -> NativeMeta {
+            NativeMeta {
+                stride: std::mem::size_of::<CloseWitness>(),
+                clone: 0, drop: close_and_drop as usize, show: 0, equal: 0,
+                compare: 0, kind: 10, child0: ptr::null(), child1: ptr::null(),
+            }
+        }
+
+        #[cfg(not(jet_native_pack))]
+        #[test]
+        fn shared_seed_abi3_consumes_close_once_after_final_alias() {
+            let closes = AtomicUsize::new(0);
+            let structural = AtomicUsize::new(0);
+            let witness = CloseWitness { close: &closes, structural: &structural, publish_stop: 0 };
+            let descriptor = close_meta();
+            unsafe {
+                let owner = super::super::jet_c_abi_task::jet_rt_native_shared_new(
+                    (&witness as *const CloseWitness).cast(), &descriptor, descriptor.drop,
+                );
+                assert!(!owner.is_null());
+                let alias = super::super::jet_c_abi_task::jet_rt_native_shared_clone(owner);
+                super::super::jet_c_abi_task::jet_rt_native_shared_drop(owner);
+                assert_eq!(closes.load(Ordering::Relaxed), 0);
+                super::super::jet_c_abi_task::jet_rt_native_shared_drop(alias);
+            }
+            assert_eq!(closes.load(Ordering::Relaxed), 1);
+            assert_eq!(structural.load(Ordering::Relaxed), 1);
+        }
+
+        #[test]
+        fn shared_destructor_refusal_preserves_staged_payload_for_rollback() {
+            for wrong_drop in [0, release as usize] {
+                let closes = AtomicUsize::new(0);
+                let structural = AtomicUsize::new(0);
+                let witness = CloseWitness { close: &closes, structural: &structural, publish_stop: 0 };
+                let descriptor = close_meta();
+                let copied = unsafe { Meta::copy(&descriptor) };
+                let source = (&witness as *const CloseWitness).cast();
+                let refusal = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    copied.require_shared_drop_code(wrong_drop);
+                    unsafe { NativeValue::moved(source, copied.clone()) }
+                })).err().expect("wrong destructor must be refused before ownership moves");
+                let message = refusal.downcast_ref::<String>().expect("named bridge invariant");
+                assert!(message.contains("CoreSharedNativeDestructorMismatch"));
+                assert_eq!(closes.load(Ordering::Relaxed), 0);
+                assert_eq!(structural.load(Ordering::Relaxed), 0);
+                drop(unsafe { NativeValue::moved(source, copied) });
+                assert_eq!(closes.load(Ordering::Relaxed), 1);
+                assert_eq!(structural.load(Ordering::Relaxed), 1);
+            }
+            meta(2 | (64 << 32), 0).require_shared_drop_code(0);
+        }
+
+        #[test]
+        fn consuming_native_close_is_single_shot_and_retains_typed_stop() {
+            let _scope = JetNativeTaskControlScope::enter(JetTaskControl::new());
+            let closes = AtomicUsize::new(0);
+            let structural = AtomicUsize::new(0);
+            let witness = CloseWitness { close: &closes, structural: &structural, publish_stop: 1 };
+            let descriptor = close_meta();
+            {
+                let mut value = unsafe { NativeValue::moved(
+                    (&witness as *const CloseWitness).cast(), Meta::copy(&descriptor),
+                ) };
+                <NativeValue as Drop>::drop(&mut value);
+                <NativeValue as Drop>::drop(&mut value);
+            }
+            assert_eq!(closes.load(Ordering::Relaxed), 1);
+            assert_eq!(structural.load(Ordering::Relaxed), 1);
+            assert_ne!(jet_scheduler_native_propagate(), 0);
+            let stopped = std::panic::catch_unwind(jet_scheduler_resume_native_stop);
+            assert!(jet_scheduler_is_cancel_unwind(&*stopped.err().expect("typed Stop must remain pending")));
         }
     }
 }

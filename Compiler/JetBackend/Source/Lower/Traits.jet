@@ -1,7 +1,7 @@
 // Reused from db0a9182a: an owned trait value is
 // [concrete drop-helper ID, concrete payload @8]. Closed-module dispatch
 // rejects unknown keys; payloads use ordinary stored-value layout/glue.
-use jet_foundation.[MIRAccess, MIRCallArg, MIRFunction, MIRImplDef, MIRInstruction, MIRProgram, MIRTraitMethod, MIRTraitMethodID, MIRTraitRef, MIRType, MIRTypeID, MIRTypeKind, MIRValueID, mir_type_display_name, mir_type_identity_key]
+use jet_foundation.[MIRAccess, MIRCallArg, MIRFunction, MIRFunctionID, MIRImplDef, MIRInstruction, MIRProgram, MIRTraitMethod, MIRTraitMethodID, MIRTraitRef, MIRType, MIRTypeID, MIRTypeKind, MIRValueID, mir_trait_id, mir_type_display_name, mir_type_identity_key]
 
 fn lower_trait_ref(p: MIRProgram, ty: MIRType) -> MIRTraitRef? {
     if ty.kind == .TraitObject(bounds) {
@@ -23,6 +23,85 @@ fn lower_trait_impl(p: MIRProgram, ty: MIRType, bound: MIRTraitRef) -> MIRImplDe
         if trait_ref.id == bound.id && mir_type_identity_key(implementation.self_type) == mir_type_identity_key(ty) -> return Val(implementation)
     }
     None
+}
+
+fn lower_close_receiver(ty: MIRType) -> MIRType Never! {
+    if ty.kind == .Tagged(_, inner) -> return lower_close_receiver(inner)
+    ty
+}
+
+// Use the checked Close impl, not an inherent method with the same spelling.
+// Generic receiver matching is the same nominal-template rule used by render.
+fn lower_close_impl(p: MIRProgram, ty: MIRType) -> MIRImplDef? {
+    receiver :: lower_close_receiver(ty)
+    bound :: MIRTraitRef{id: mir_trait_id("Close"), name: "Close"}
+    direct :: lower_trait_impl(p, receiver, bound)
+    selected := MIRImplDef?{None}
+    loop implementation in p.impls {
+        trait_ref :: implementation.trait_ref ?? next
+        if trait_ref.id != bound.id || !implementation.target_applicability.rust_aot -> next
+        if implementation.target_os == .Val(os) {
+            os_name :: if os == {.Linux -> "linux" .MacOS -> "macos" .Windows -> "windows"}
+            if os_name != p.facts.active_os -> next
+        }
+        exact :: if direct == {.Val(candidate) -> candidate.id == implementation.id .None -> false}
+        if !exact && !lower_render_template(p, implementation.self_type, receiver) -> next
+        if selected != None -> panic("checked Close implementation is ambiguous for {mir_type_display_name(receiver)}")
+        selected = Val(implementation)
+    }
+    selected
+}
+
+fn lower_close_method(p: MIRProgram, implementation: MIRImplDef) -> MIRFunction? {
+    selected := MIRFunction?{None}
+    loop id in implementation.methods {
+        loop function in p.functions {
+            if function.id != id || function.name != "close" -> next
+            if selected != None -> panic("checked Close implementation has duplicate close methods")
+            selected = Val(function)
+        }
+    }
+    selected
+}
+
+// Close consumes its receiver and owns its cleanup. A second structural drop
+// here would release the same members twice; raw MIR Drop inside Close remains
+// structural so the method never re-enters itself.
+fn lower_close_call(p: MIRProgram, m: &LowerModule, f: &LowerFunction, implementation: MIRImplDef, value: LIRValueID?, ty: MIRType) Never! {
+    method :: lower_close_method(p, implementation) ?? {
+        lower_fail(&m, &f, "checked Close implementation has no close method")
+        return
+    }
+    receiver :: lower_close_receiver(ty)
+    instance :: lower_instance_id(method.id, lower_call_bindings(Val(receiver), [MIRType]{}))
+    row :: lower_function_index(m, instance)
+    if row < 0 {
+        lower_fail(&m, &f, "checked Close method {method.id.value} has no concrete native instance")
+        return
+    }
+    if method.params.len() != 1 || method.params[0].access != .Move
+        || method.capture_params.len() != 0 || method.generic_params.len() != 0
+        || lower_repr(p, method.return_type) != .Absent {
+        lower_fail(&m, &f, "checked Close must have one consuming receiver and no returned native value")
+        return
+    }
+    args := [LIRValueID]{}
+    if value == .Val(owned) -> &args.push(owned)
+    signature :: ~m.mir_signatures[row]
+    lower_emit(&f, LIRInst.Call{dst: None, signature: signature, callee: LIRCallee.Function{id: LIRFunctionID{value: row}}, args: args})
+}
+
+fn lower_close_value(p: MIRProgram, m: &LowerModule, f: &LowerFunction, value: LIRValueID, ty: MIRType) -> Bool Never! {
+    implementation :: lower_close_impl(p, ty) ?? return false
+    lower_close_call(p, &m, &f, implementation, Val(value), ty)
+    true
+}
+
+fn lower_close_stored(p: MIRProgram, m: &LowerModule, f: &LowerFunction, base: LIRValueID, offset: Int, ty: MIRType) -> Bool Never! {
+    implementation :: lower_close_impl(p, ty) ?? return false
+    value :: lower_read_at(p, &f, base, offset, ty)
+    lower_close_call(p, &m, &f, implementation, value, ty)
+    true
 }
 
 fn lower_trait_size(p: MIRProgram, ty: MIRType) -> Int Never! {
@@ -229,7 +308,7 @@ fn lower_trait_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
     params := [LIRValueID]{}
     if !inline_result && dst == .Val(value) -> &params.push(value)
     lower_start(&f, done, params)
-    if dst == None && result_storage == .Val(storage) -> lower_inline_drop(p, &m, &f, storage, result_ty)
+    if dst == None && result_storage == .Val(storage) -> lower_map_drop_value(p, &m, &f, storage, result_ty)
     loop writeback in writebacks -> lower_write_back(p, c, &m, &f, writeback)
     loop temporary in temporaries -> lower_emit(&f, LIRInst.Drop{value: temporary})
 }

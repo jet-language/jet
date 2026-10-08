@@ -439,8 +439,14 @@ mod jet_c_abi_task {
     }
 
     #[no_mangle]
-    pub unsafe extern "C" fn jet_rt_native_shared_new(slot: *const u8, meta: *const NativeMeta) -> *mut NativeShared {
-        guard(|| Box::into_raw(Box::new(NativeShared::new(NativeValue::moved(slot, Meta::copy(meta))))))
+    pub unsafe extern "C" fn jet_rt_native_shared_new(slot: *const u8, meta: *const NativeMeta, drop_code: usize) -> *mut NativeShared {
+        guard(|| {
+            let meta = Meta::copy(meta);
+            // Canonical Source supplies this exact typed destructor, including
+            // consuming Close. Refusal leaves the caller's staged slot untouched.
+            meta.require_shared_drop_code(drop_code);
+            Box::into_raw(Box::new(NativeShared::new(NativeValue::moved(slot, meta))))
+        })
     }
 
     #[no_mangle]

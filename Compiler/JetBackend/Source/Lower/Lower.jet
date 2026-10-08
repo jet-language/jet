@@ -2225,8 +2225,8 @@ fn lower_stored_operands(operation: MIROperation) -> [MIRValueID] Never! {
 
 // A root write rebinds the slot to the written value (an inline aggregate's
 // pointer: back edges copy it into the slot's storage, lower_edge), after
-// dropping the old value for ReplacePlace; a Write parameter's root write
-// moves the value into the caller's storage. A cell slot's places are
+// publishing the new value before consuming the detached old owner for
+// ReplacePlace; a Write parameter moves into the caller's storage. A cell's places are
 // written in memory like projections.
 fn lower_write_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, place: MIRPlaceID, value: MIRValueID, replace: Bool) Never! {
     row :: lower_place_row(c.mir, place) ?? return lower_fail(&m, &f, "place {place.value} is missing")
@@ -2234,7 +2234,7 @@ fn lower_write_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
         if lower_is_absent(f, value) -> return
         stored :: lower_use(&m, &f, value) ?? return
         walk :: lower_static_walk(p, &m, &f, row, name) ?? return
-        if replace -> lower_drop_stored(p, &m, &f, walk.base, walk.offset, row.ty)
+        if replace -> return lower_replace_stored(p, &m, &f, walk.base, walk.offset, stored, row.ty)
         return lower_write_at(p, &f, walk.base, walk.offset, stored, row.ty)
     }
     slot :: c.place_slots.get(place.value) ?? return lower_fail(&m, &f, "place {place.value} has no lowered root")
@@ -2243,33 +2243,33 @@ fn lower_write_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
     if lower_map_index_write(p, c, &m, &f, slot, row, lowered) -> return
     if c.slots[slot].cell {
         walk :: lower_cell_walk(p, c, &m, &f, slot, row) ?? return
-        if replace -> lower_drop_stored(p, &m, &f, walk.base, walk.offset, row.ty)
+        if replace -> return lower_replace_stored(p, &m, &f, walk.base, walk.offset, lowered, row.ty)
         return lower_write_at(p, &f, walk.base, walk.offset, lowered, row.ty)
     }
     held :: ~f.current[slot]
     if row.projections.len() == 0 {
         if c.slots[slot].write_param >= 0 {
-            // The caller's place: the old value is dropped once, here, and
-            // the new one lands in the caller's storage.
+            // Publish both physical and local ownership before Close re-entry.
             address :: (~f.params[c.slots[slot].write_param]) ?? return lower_fail(&m, &f, "Write parameter of place {place.value} has no pointer")
-            if replace -> lower_drop_stored(p, &m, &f, address, 0, row.ty)
+            detached :: if replace && lower_needs_drop(p, row.ty) -> Val(lower_detach_stored(p, &f, address, 0, row.ty)) else -> None
             lower_write_at(p, &f, address, 0, lowered, row.ty)
-            if lower_is_inline(p, row.ty) -> return lower_set_slot(&f, slot, Val(address))
-        } else if replace && lower_is_inline(p, row.ty) {
-            if lower_is_owned(c.slots[slot].ownership) {
-                if held == .Val(old) -> lower_inline_drop(p, &m, &f, old, row.ty)
-            }
-        } else if replace {
-            if held == .Val(old) {
-                if lower_value_drop(f, old) != .Trivial -> lower_emit(&f, LIRInst.Drop{value: old})
-            }
+            lower_set_slot(&f, slot, Val(if lower_is_inline(p, row.ty) -> address else -> lowered))
+            if detached == .Val(old) -> lower_drop_stored(p, &m, &f, old, 0, row.ty)
+            return
         }
         lower_set_slot(&f, slot, Val(lowered))
+        if replace && held == .Val(old) {
+            if lower_is_owned(c.slots[slot].ownership) {
+                lower_map_drop_value(p, &m, &f, old, row.ty)
+            } else if !lower_is_inline(p, row.ty) && lower_value_drop(f, old) != .Trivial {
+                lower_emit(&f, LIRInst.Drop{value: old})
+            }
+        }
         return
     }
     root :: held ?? return lower_fail(&m, &f, "field of place {place.value} is written before the place has a value")
     walk :: lower_walk_projections(p, &m, &f, root, c.slots[slot].ty, row.projections) ?? return
-    if replace -> lower_drop_stored(p, &m, &f, walk.base, walk.offset, row.ty)
+    if replace -> return lower_replace_stored(p, &m, &f, walk.base, walk.offset, lowered, row.ty)
     lower_write_at(p, &f, walk.base, walk.offset, lowered, row.ty)
 }
 

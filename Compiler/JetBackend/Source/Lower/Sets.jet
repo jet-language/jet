@@ -521,7 +521,7 @@ fn lower_helper_set_render(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> L
     lower_render_static(&m, &f, builder, "]")
     finished :: lower_render_string(&f)
     lower_call_runtime(&m, &f, "jet_rt_string_builder_finish", [LIRValueID]{builder}, Val(finished))
-    lower_inline_drop(p, &m, &f, parts, list_ty)
+    lower_map_drop_value(p, &m, &f, parts, list_ty)
     lower_seal(&f, LIRTerminator.Return{value: Val(finished)})
     lir_builder_finish(f.builder)
 }

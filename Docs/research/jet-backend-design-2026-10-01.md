@@ -1440,6 +1440,15 @@ result is Integer/1, with a Bool/U8 zero-extension contract (reached by
 zero-extending signed values. Refusals identify the export and unsupported
 class/width. These helpers do not imply runtime or Core admission.
 
+Native stored-owner destruction uses the checked MIR `Close` implementation,
+when present, with its concrete receiver bindings and consuming call convention.
+That call owns cleanup; the slot destructor does not also drop its members.
+Without `Close`, the existing structural destructor applies. Raw MIR drop in
+the close body remains structural to prevent recursive re-entry. This distinction
+also makes a fieldless resource nontrivial. The Shared constructor receives the
+exact `NativeMeta.drop` callable as its third argument, so last-owner retirement
+uses the same destructor as other owned native slots.
+
 
 `x64_memory_core_shared_image` consumes the explicit pinned-Core lowering
 inventory, rather than guessing exports from MIR function numbers. Getter names

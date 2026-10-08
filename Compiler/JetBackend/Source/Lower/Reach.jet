@@ -326,6 +326,10 @@ fn lower_reach_body(p: MIRProgram, q: &LowerPrepared, function: MIRFunction, bin
 // A concrete type's lifecycle edges (handle close/undo functions and their
 // shared close adapters) and its stored components.
 fn lower_reach_concrete_type(p: MIRProgram, q: &LowerPrepared, ty: MIRType, parent: Int) Never! {
+    if lower_close_impl(p, ty) == .Val(implementation) {
+        method :: lower_close_method(p, implementation) ?? return lower_mono_issue(&q, "checked Close implementation has no close method")
+        lower_mono_request(p, &q, method.id, Val(lower_close_receiver(ty)), [MIRType]{}, parent, "Close of {mir_type_display_name(ty)}").drop("stored-owner Close dependency")
+    }
     fingerprint :: lower_mono_fingerprint(ty)
     first :: q.lifecycle.get(fingerprint) ?? -1
     lower_reach_edges(p, &q, first, parent, "lifecycle of {mir_type_display_name(ty)}")

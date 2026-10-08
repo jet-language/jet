@@ -543,7 +543,7 @@ fn lower_closure_flat_map(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &L
     }
     lower_call_helper(&m, &f, "list.push", result_ty, [LIRValueID]{dst, value}, None)
     lower_each_end(&f, inner, [LIRValueID]{})
-    lower_inline_drop(p, &m, &f, part, part_ty)
+    lower_map_drop_value(p, &m, &f, part, part_ty)
     lower_each_end(&f, outer, [LIRValueID]{})
     if closure_arg.access == .Move -> lower_map_drop_value(p, &m, &f, closure, closure_ty)
 }
@@ -560,11 +560,7 @@ fn lower_closure_each(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
     each :: lower_each_begin(p, &f, list, elem, [LIRValueID]{})
     item :: lower_read_at(p, &f, each.address, 0, elem) ?? return
     if lower_call_closure_box(p, &m, &f, closure, [LIRValueID]{item}, ret) == .Val(out) {
-        if lower_is_inline(p, ret) {
-            lower_inline_drop(p, &m, &f, out, ret)
-        } else {
-            lower_map_drop_value(p, &m, &f, out, ret)
-        }
+        lower_map_drop_value(p, &m, &f, out, ret)
     }
     lower_each_end(&f, each, [LIRValueID]{})
     if closure_arg.access == .Move -> lower_map_drop_value(p, &m, &f, closure, closure_ty)
@@ -686,8 +682,8 @@ fn lower_closure_fold_owned(p: MIRProgram, c: LowerContext, m: &LowerModule, f: 
         each :: lower_each_begin(p, &f, list, elem, [LIRValueID]{})
         item :: lower_read_at(p, &f, each.address, 0, elem) ?? return
         out :: lower_call_closure_box(p, &m, &f, closure, [LIRValueID]{dst, item}, result_ty) ?? return
-        if !consumed -> lower_inline_drop(p, &m, &f, dst, result_ty)
-        lower_write_at(p, &f, dst, 0, out, result_ty)
+        if consumed -> lower_write_at(p, &f, dst, 0, out, result_ty)
+        else -> lower_replace_stored(p, &m, &f, dst, 0, out, result_ty)
         lower_each_end(&f, each, [LIRValueID]{})
     } else {
         each :: lower_each_begin(p, &f, list, elem, [LIRValueID]{start})

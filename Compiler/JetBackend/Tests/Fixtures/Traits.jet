@@ -72,3 +72,131 @@ fn fx_trait_values() -> MIRProgram Never! {
     p.impls = [MIRImplDef]{impl_row}
     p
 }
+
+fn fx_close_method(owner: MIRType, identity: String, label: String) -> MIRFunction Never! {
+    body := fx_builder()
+    receiver :: fx_param(&body, "self", owner, mir_owned_ownership())
+    body.params[0].access = MIRAccess.Move
+    message :: fx_owned(&body, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: label}})
+    fx_print(&body, message)
+    fx_do(&body, MIROperation.Drop{value: message, kind: MIRDropKind.Value})
+    // This is the raw structural cleanup emitted inside the close method.
+    // It must not re-enter Close or run again in the caller's slot destructor.
+    fx_do(&body, MIROperation.Drop{value: receiver, kind: MIRDropKind.Value})
+    fx_block(&body, 0, MIRTerminator.Return{value: None})
+    function := fx_function(identity, body, fx_unit())
+    function.name = "close"
+    function.form = .TraitMethod{owner: owner, trait_ref: MIRTraitRef{id: mir_trait_id("Close"), name: "Close"}, self_access: Val(MIRAccess.Move), serde: None}
+    function
+}
+
+fn fx_close_trait(function: MIRFunction) -> MIRTraitDef Never! {
+    MIRTraitDef{id: mir_trait_id("Close"), module_id: function.module_id, key: "Close", name: "Close", span: fx_span(), visibility: .Private, associated_types: [], methods: [MIRTraitMethod]{
+        MIRTraitMethod{id: MIRTraitMethodID{value: 780}, name: "close", span: fx_span(), self_access: Val(MIRAccess.Move), params: [], declared_return: Val(fx_unit()), return_type: fx_unit(), failure: .Infallible, effects: function.effects, is_pure: false, return_view_provenance: None, declared_return_view_provenance: None, default: None},
+    }}
+}
+
+// expect-stdout close-stored-owners: "resource\nempty\n"
+// expect-runtime-only close-stored-owners: consuming custom Close and nested String ownership
+// expect-stdout close-stored-generic: "resource\nempty\n"
+// expect-runtime-only close-stored-generic: receiver-bound generic Close and nested String ownership
+fn fx_close_stored_owners(generic: Bool) -> MIRProgram Never! {
+    resource :: if generic -> fx_mono_apply("CloseResource", [MIRType]{fx_string()}) else -> fx_named("CloseResource")
+    template :: if generic -> fx_mono_apply("CloseResource", [MIRType]{fx_mono_parameter("T")}) else -> resource
+    empty :: fx_named("CloseEmpty")
+    resource_definition := fx_type_def("CloseResource", .Struct{fields: [MIRField]{fx_field("CloseResource", "label", if generic -> fx_mono_parameter("T") else -> fx_string())}, methods: [MIRFunctionID]{}})
+    if generic -> resource_definition.generic_params = fx_mono_binders("T")
+    close_resource :: fx_close_method(template, "CloseResource.close", "resource")
+    close_empty :: fx_close_method(empty, "CloseEmpty.close", "empty")
+    body := fx_builder()
+    text :: fx_owned(&body, fx_string(), .Constant{value: .String{value: "owned child"}})
+    first :: fx_owned(&body, resource, .Struct{type_id: mir_type_id("CloseResource"), fields: [MIRFieldValue]{fx_struct_literal_field("CloseResource.label", text)}})
+    second :: fx_struct_literal_value(&body, "CloseEmpty", [MIRFieldValue]{}, [MIRFieldID]{})
+    plain :: fx_owned(&body, fx_string(), .Constant{value: .String{value: "plain owner"}})
+    wrapper :: fx_struct_literal_value(&body, "CloseWrapper", [MIRFieldValue]{
+        fx_struct_literal_field("CloseWrapper.first", first),
+        fx_struct_literal_field("CloseWrapper.second", second),
+        fx_struct_literal_field("CloseWrapper.plain", plain),
+    }, [MIRFieldID]{})
+    fx_do(&body, .Drop{value: wrapper, kind: .Value})
+    fx_block(&body, 0, .Return{value: None})
+    p := fx_program([MIRFunction]{fx_function("run", body, fx_unit()), close_resource, close_empty}, [MIRTypeDef]{
+        resource_definition,
+        fx_type_def("CloseEmpty", .Struct{fields: [MIRField]{}, methods: [MIRFunctionID]{}}),
+        fx_type_def("CloseWrapper", .Struct{fields: [MIRField]{
+            fx_field("CloseWrapper", "first", resource),
+            fx_field("CloseWrapper", "second", empty),
+            fx_field("CloseWrapper", "plain", fx_string()),
+        }, methods: [MIRFunctionID]{}}),
+    })
+    p.traits = [MIRTraitDef]{fx_close_trait(close_resource)}
+    p.impls = [MIRImplDef]{
+        fx_display_impl("CloseResource.Close", "Close", template, close_resource.id, 780),
+        fx_display_impl("CloseEmpty.Close", "Close", empty, close_empty.id, 781),
+    }
+    p
+}
+
+// expect-stdout close-shared-owners: "resource\nempty\n"
+// expect-runtime-only close-shared-owners: admitted ABI3 Shared runtime and exact NativeMeta destructor
+fn fx_close_shared_owners() -> MIRProgram Never! {
+    p := fx_close_stored_owners(false)
+    body := fx_builder()
+    text :: fx_owned(&body, fx_string(), .Constant{value: .String{value: "owned child"}})
+    resource :: fx_struct_literal_value(&body, "CloseResource", [MIRFieldValue]{fx_struct_literal_field("CloseResource.label", text)}, [MIRFieldID]{})
+    empty :: fx_struct_literal_value(&body, "CloseEmpty", [MIRFieldValue]{}, [MIRFieldID]{})
+    shared_resource :: mir_type_from_kind(.Shared{inner: fx_named("CloseResource")})
+    shared_empty :: mir_type_from_kind(.Shared{inner: fx_named("CloseEmpty")})
+    shared_int :: mir_type_from_kind(.Shared{inner: fx_int()})
+    call :: fx_prelude_id("core.host", "Shared.new")
+    first :: fx_owned(&body, shared_resource, .Call{callee: .Prelude{call: call}, args: [MIRCallArg]{fx_arg(resource, .Move)}, type_args: [MIRType]{}})
+    second :: fx_owned(&body, shared_empty, .Call{callee: .Prelude{call: call}, args: [MIRCallArg]{fx_arg(empty, .Move)}, type_args: [MIRType]{}})
+    scalar :: fx_int_const(&body, 7)
+    third :: fx_owned(&body, shared_int, .Call{callee: .Prelude{call: call}, args: [MIRCallArg]{fx_arg(scalar, .Move)}, type_args: [MIRType]{}})
+    fx_do(&body, .Drop{value: first, kind: .Value})
+    fx_do(&body, .Drop{value: second, kind: .Value})
+    fx_do(&body, .Drop{value: third, kind: .Value})
+    fx_block(&body, 0, .Return{value: None})
+    p.functions[0] = fx_function("run", body, fx_unit())
+    &p.prelude_calls.push(fx_prelude(.StaticPrelude, "core.host", "Shared.new", "jet_std::JetShared::new", 1, .Value))
+    p
+}
+
+// Lower-only shape proof accompanies the real runtime fixtures. It prevents a
+// scalar-zero workaround, wrong destructor provenance, or signature weakening.
+fn fx_close_owned_shape_checks() -> Bool {
+    p :: fx_close_shared_owners()
+    if !lower_needs_drop(p, fx_named("CloseEmpty")) || lower_needs_drop(p, fx_int()) -> return false
+    lowered :: lir_lower_entry(p, mir_function_id("run"))
+    if lowered.issues.len() != 0 -> return false
+    constructors := 0
+    loop function in lowered.lir.functions {
+        loop block in function.blocks {
+            loop (index, instruction) in block.insts {
+                if instruction == .Call(_, _, callee, args) {
+                    if callee == .Runtime(symbol) {
+                        if symbol != "jet_rt_native_shared_new" -> next
+                        constructors += 1
+                        if args.len() != 3 || index == 0 -> return false
+                        if block.insts[index - 1] == .Load(dst, base, offset) {
+                            if dst != args[2] || base != args[1] || offset != 16 -> return false
+                        } else { return false }
+                    }
+                }
+            }
+        }
+    }
+    if constructors != 3 -> return false
+    // An inherent `close` spelling is not a checked Close implementation.
+    plain := fx_close_stored_owners(false)
+    plain.impls = [MIRImplDef]{}
+    if lower_close_impl(plain, fx_named("CloseResource")) != None -> return false
+    invalid := fx_close_stored_owners(false)
+    invalid.functions[1].params[0].access = .Read
+    refused :: lir_lower_entry(invalid, mir_function_id("run"))
+    if refused.issues.len() == 0 -> return false
+    loop issue in refused.issues {
+        if issue.message.contains("one consuming receiver") -> return true
+    }
+    false
+}

@@ -879,6 +879,13 @@ fn run() {
     if !fx_report("queues", fx_queues()) -> clean = false
     if !fx_report("priority-queues", fx_priority_queues()) -> clean = false
     if !fx_report("trait-values", fx_trait_values()) -> clean = false
+    if !fx_close_owned_shape_checks() {
+        print("issue close-owned: constructor destructor provenance or Close signature contract changed")
+        clean = false
+    }
+    if !fx_report_runtime("close-stored-owners", fx_close_stored_owners(false)) -> clean = false
+    if !fx_report_runtime("close-stored-generic", fx_close_stored_owners(true)) -> clean = false
+    if !fx_report_runtime("close-shared-owners", fx_close_shared_owners()) -> clean = false
     if !fx_report("value-builtins", fx_value_builtins()) -> clean = false
     if !fx_report_runtime("try-capacity", fx_try_capacity()) -> clean = false
     if !fx_report_runtime("try-capacity-fault", fx_try_capacity_fault()) -> clean = false
