@@ -384,3 +384,75 @@ fn list_string_view_materialization_runs_on_awaited_web() {
         "source\ncopy\n",
     );
 }
+
+const STRING_VIEW_RUNTIME_SOURCE: &str = r##"
+fn run() {
+    text := "  key  "
+    key :: text.trim()
+    counts := [String:Int]{}
+    counts[key] = 7
+    counts[key] = 9
+    print(counts["key"] ?? 0)
+    print(key.is_empty())
+    print(key.starts_with("k"))
+    print(key.ends_with("y"))
+    print(key.contains("e"))
+    print(key.count_bytes())
+    print(key.repeat(2))
+    print(key.replace("e", "a"))
+    print(key.slice(0, 2))
+    print(key.split("e").len())
+    print(key.lines().len())
+    print(key.chars().len())
+    print(["a", "b"].join(key))
+    whitespace := " \t "
+    empty :: whitespace.trim()
+    print(empty.is_empty())
+    print(empty.starts_with(""))
+    loop line in ["  # comment  ", "  value  "] {
+        trimmed :: line.trim()
+        if !trimmed.is_empty() && !trimmed.starts_with("#") -> print(~trimmed)
+    }
+}
+"##;
+
+#[test]
+fn string_view_runtime_read_leaves_accept_text_without_materialization() {
+    let compiled = jet::compile(STRING_VIEW_RUNTIME_SOURCE)
+        .expect("checked string views can lend text to runtime read parameters");
+    // Builtin receivers and indexed map writes borrow the same view carrier.
+    // Only the explicit ~trimmed above may materialize it.
+    for signature in [
+        "fn jet_string_is_empty(text: &str)",
+        "fn jet_string_repeat(text: &str,",
+        "fn jet_string_replace(text: &str, from: &str, to: &str)",
+        "fn jet_string_count_bytes(text: &str)",
+        "fn jet_string_split(s: &str,",
+        "fn jet_string_lines(s: &str)",
+        "fn jet_string_chars(s: &str)",
+        "fn jet_string_slice_builtin(s: &str,",
+    ] {
+        assert!(compiled.rust.contains(signature), "missing read ABI: {signature}");
+    }
+    assert!(
+        compiled.rust.contains("key: &str,\n    f: F,"),
+        "map update must borrow text and own its key only on insertion"
+    );
+    for line in compiled.rust.lines().filter(|line| {
+        !line.trim_start().starts_with("fn ")
+            && (line.contains("jet_map_update_string(")
+                || line.contains("jet_string_is_empty(")
+                || line.contains("jet_string_starts_with("))
+    }) {
+        assert!(!line.contains("jet_string_view_copy("), "{line}");
+    }
+}
+
+#[test]
+fn string_view_runtime_reads_agree_across_native_tiers() {
+    tir_support::assert_tiers_agree(
+        "string_view_runtime_reads",
+        STRING_VIEW_RUNTIME_SOURCE,
+        "9\nfalse\ntrue\ntrue\ntrue\n3\nkeykey\nkay\nke\n2\n1\n3\nakeyb\ntrue\ntrue\nvalue\n",
+    );
+}
