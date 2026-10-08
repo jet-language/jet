@@ -1,0 +1,12 @@
+// Fixture transport: the live production API and ONE existing adapter execute.
+#Export(c) fn jet_rt_os_entropy_fixture_stride() -> I64 { RT_HOST_U8_STRIDE }
+#Export(c) fn jet_rt_os_entropy_fixture_world(count: I64, some: I64, some_len: I64) -> I64 {
+    world :: jet_rt_world_new()
+    base :: thread_base()
+    previous :: sync_load(base + I64{104})
+    sync_store(base + I64{104}, world)
+    result :: jet_random_os_entropy(count, some, some_len)
+    sync_store(base + I64{104}, previous)
+    jet_rt_world_drop(world)
+    result
+}

@@ -110,6 +110,21 @@ public operation metadata and never reads the password-policy reason or any
 secret material. Scripted provider and redaction results are compared with
 a once-frozen Rust seed receipt, separately from live-provider checks.
 
+`core.crypto.random.__os_entropy` first rejects uncontrolled entropy through
+the existing World guard, including invalid and zero counts, and propagates a
+published native task stop before touching the provider. Outside World it
+returns `None` for counts outside 0..1MiB or an unavailable provider, leaving
+both output slots untouched; zero is `Some(empty)` without a provider call.
+One final allocation receives a packed fill through the shared provider, then
+widening proceeds backward in place only in the word-slot U8 epoch. The same
+shared stride controls allocation, padding initialization and later release.
+On success the Option-list C ABI transfers the payload pointer/count, not a
+list header; failure wipes the complete allocation before release.
+The fixture retains a one-time deterministic seed-render/status receipt for the
+World entropy rejection (`E3001`, empty owner context, exit 70), not random
+bytes or a claim that the native guard has executed. Native provider/ABI and
+World execution remain separate composed witness obligations.
+
 The `core.crypto.__zeroize` native ABI borrows the initialized `(pointer, length)`
 payload from a moved byte list. It clears the actual storage through the shared
 effectful wipe, using the canonical host U8 element stride, without allocation,
