@@ -735,7 +735,11 @@ pub fn expiring_method_return(
 ) -> Option<Option<Type>> {
     let val_ty = match type_apply {
         Type::Apply { name, args }
-            if name == crate::Syntax::EXPIRING_VALUE_TYPE && args.len() == 1 =>
+            if args.len() == 1
+                && (name == crate::Syntax::EXPIRING_VALUE_TYPE
+                    || (method == "force"
+                        && jet_foundation::CoreModuleExports::core_source_owns_type(name)
+                        && name.ends_with("::Core/time/time.jet::ExpiringValue"))) =>
         {
             args[0].clone()
         }

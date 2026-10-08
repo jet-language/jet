@@ -2319,6 +2319,16 @@ clock affect its attached secret's lifetime. Clock Show and Debug retain the
 millisecond bounds.
 `time.clock(seed)` stays retired (E1004); use the type-owned `Clock.new(seed)` constructor.
 
+`ExpiringValue.new(value, ttl, clock)` computes a saturating absolute
+millisecond deadline in Jet. `get(clock)` returns a copy of the payload until
+`now > deadline` (equality is still live), otherwise `Expired`. Zero and
+negative TTLs retain this same boundary. Show/Debug retain the existing
+`Expiring(deadline=N)` rendering. Its fields are private, with
+`expires_at_ms()` for the deadline and fallible `get(clock)` for payload
+access: this is Main's owner-approved, veto-able private-field correction,
+following the Measurement/LogSpan rule. The retired module constructor and
+`force` diagnostics are unchanged.
+
 #### Named zones and local-time resolution
 
 `parse_zoned(text)` accepts RFC9557-style text with a bracketed zone name,

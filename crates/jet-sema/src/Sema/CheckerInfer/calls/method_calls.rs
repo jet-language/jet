@@ -2485,41 +2485,6 @@ impl<'a> Checker<'a> {
                 return Some(result_ty);
             }
             if self.lookup(type_name).is_none()
-                && type_name == crate::Syntax::EXPIRING_VALUE_TYPE
-                && method == "new"
-            {
-                if args.len() != 3 {
-                    self.diags
-                        .push(wrong_core_arity("ExpiringValue.new", 3, args.len(), span));
-                    for arg in args.iter_mut() {
-                        self.infer(&mut arg.expr);
-                    }
-                    return None;
-                }
-                let value_ty = self
-                    .infer(&mut args[0].expr)
-                    .unwrap_or(Type::Named("Unknown".to_string()));
-                self.expect_core_arg(
-                    "ExpiringValue.new",
-                    1,
-                    &Type::Named(crate::Syntax::DURATION_TYPE.to_string()),
-                    &mut args[1],
-                );
-                self.expect_core_arg(
-                    "ExpiringValue.new",
-                    2,
-                    &Type::Named(crate::Syntax::CLOCK_TYPE.to_string()),
-                    &mut args[2],
-                );
-                let ret = Type::Apply {
-                    name: crate::Syntax::EXPIRING_VALUE_TYPE.to_string(),
-                    args: vec![value_ty],
-                };
-                *recv_type_out = Some(crate::Syntax::EXPIRING_VALUE_TYPE.to_string());
-                *resolved_ret_out = Some(ret.clone());
-                return Some(ret);
-            }
-            if self.lookup(type_name).is_none()
                 && matches!(type_name.as_str(), "SigningKey" | "X25519SecretKey")
                 && method == "generate"
             {
@@ -6388,7 +6353,11 @@ impl<'a> Checker<'a> {
         // The actual dispatch (`finish_pool_add` etc.) already lives in
         // `finish_builtin_method`, reached the same way Signal/Derived reach it.
         if let Type::Apply { name, .. } = &recv_ty {
-            if name == crate::Syntax::EXPIRING_VALUE_TYPE {
+            if name == crate::Syntax::EXPIRING_VALUE_TYPE
+                || (method == "force"
+                    && jet_foundation::CoreModuleExports::core_source_owns_type(name)
+                    && name.ends_with("::Core/time/time.jet::ExpiringValue"))
+            {
                 if method == "force" {
                     self.diags.push(Diagnostic::error(
                             "E0511",

@@ -506,7 +506,6 @@ fn sema_call_builtin_static_lowered(row: BuiltinStaticRow, values: [TExpr], args
         }
         .ArgumentHandle(operation) -> Val(TExprKind.HandleMethod{receiver: values[0], operation: operation, args: rest})
         .DurationNew(unit_name) -> Val(TExprKind.HandleMethod{receiver: values[0], operation: THandleOp.DurationNew{unit: unit_name, float: values[0].ty == Type.Float || values[0].ty == Type.Float32}, args: [TExpr]{}})
-        .ExpiringValueNew -> Val(TExprKind.HostCall{call: THostCall.ExpiringValueNew{value: values[0], duration: values[1], clock: values[2]}})
         .EmptyMap -> Val(TExprKind.MapLit{entries: [TMapEntry]{}})
         .Numeric(operation) -> Val(TExprKind.NumericMethod{receiver: values[0], operation: operation})
         .Precise(precise_type, function) -> Val(TExprKind.PreciseBuiltin{type_name: precise_type, function: function, args: values})

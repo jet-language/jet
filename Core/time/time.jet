@@ -142,6 +142,58 @@ impl __ClockObserver {
         clock_state_now(guard.value)
     }
 }
+
+// Payloads remain owned; an explicit caller clock determines access.
+// Main's owner-approved private-field correction keeps deadline mutation out
+// of the public API; payload access always checks the strict expiry boundary.
+pub struct ExpiringValue<T> {
+    value: T
+    deadline_ms: Int
+}
+
+impl ExpiringValue {
+    pub fn new<T>(value: T, ttl: Duration, clock: Clock) -> ExpiringValue<T> Never! {
+        observer :: clock.__observer()
+        ExpiringValue<T>{value: value, deadline_ms: saturating_add_ns(observer.now(), ttl.ns /% 1000000)}
+    }
+
+    pub fn get(self, clock: Clock) -> T Expired! {
+        observer :: clock.__observer()
+        if observer.now() > self.deadline_ms -> return Err(Expired{})
+        Ok(~self.value)
+    }
+
+    pub fn expires_at_ms(self) -> Int Never! { self.deadline_ms }
+    fn __show(self) -> String Never! { "Expiring(deadline={self.deadline_ms})" }
+}
+
+#Test("ExpiringValue observes original clocks and expires strictly after its deadline") {
+    clock := Clock.new(100)
+    cached :: ExpiringValue.new("fresh", Duration{ns: 2000000}, clock)
+    &clock.tick(2)
+    assert_eq(cached.get(clock) ?? panic("equality must remain valid"), "fresh")
+    &clock.tick(1)
+    if cached.get(clock) == {
+        .Err(_) -> {}
+        .Ok(_) -> assert(false)
+    }
+    assert_eq(cached.expires_at_ms(), 102)
+    assert_eq("{cached}", "Expiring(deadline=102)")
+}
+
+#Test("ExpiringValue zero and negative TTL preserve open expiry boundaries") {
+    clock :: Clock.new(100)
+    zero :: ExpiringValue.new(17, Duration{ns: 0}, clock)
+    assert_eq(zero.get(clock) ?? panic("zero TTL is valid at equality"), 17)
+    negative :: ExpiringValue.new(17, Duration{ns: -1000000}, clock)
+    if negative.get(clock) == {
+        .Err(_) -> {}
+        .Ok(_) -> assert(false)
+    }
+    high :: Clock.new(time_int_max())
+    saturated :: ExpiringValue.new(17, Duration{ns: 1000000}, high)
+    assert_eq(saturated.get(high) ?? panic("saturated deadline remains valid"), 17)
+}
 impl Clock.Equatable {
     fn equal(self, other: Clock) -> Bool Never! { self.now() == other.now() }
 }

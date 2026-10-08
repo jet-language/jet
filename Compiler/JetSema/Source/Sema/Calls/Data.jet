@@ -18,6 +18,7 @@ use jet_foundation.[
     Type,
     ast_empty_call_arg_flags,
     core_receiver_method,
+    core_source_owns_type,
     type_name,
 ]
 
@@ -303,7 +304,7 @@ pub fn sema_call_try_data_method(receiver: Expr, receiver_value: TExpr, method: 
                     return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, &diagnostics)}
                 }
             }
-            if name == "ExpiringValue" && parameters.len() == 1 {
+            if parameters.len() == 1 && (name == "ExpiringValue" || (method == "force" && core_source_owns_type(name) && name.ends_with("::Core/time/time.jet::ExpiringValue"))) {
                 if method == "force" -> &diagnostics.push(sema_error("E0511", span, "`ExpiringValue.force` bypasses expiry checking", "TTL-wrapped values must use fallible `get(clock)` so expired access is handled explicitly", "use `.get(clock)` and handle `Expired`"))
                 if method == "get" || method == "is_valid" || method == "force" {
                     expected_count := if method == "get" -> 1 else -> 0
