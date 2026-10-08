@@ -1,0 +1,43 @@
+// Frozen seed preregeneration-runtime.rs:145401-145406; CAbiRoutes.rs:85,
+// 93,6693,8556-8575. Native Attachment40=[Text ptr,Text ptr,inline List24].
+// Constructor borrows E4 texts, consumes the byte-list shell and buffer;
+// text getters own their clones, while the byte getter borrows the inline header.
+#Export(c) fn jet_rt_record_new_Attachment(filename: I64, mime: I64, bytes: I64) -> I64 {
+    result :: jet_rt_alloc(I64{40}, I64{8})
+    rt_text_store(result, jet_rt_string_clone(filename))
+    rt_text_store(result + I64{8}, jet_rt_string_clone(mime))
+    coll_copy(bytes, result + I64{16}, DATA_SEQUENCE_BYTES)
+    jet_rt_free(bytes, DATA_SEQUENCE_BYTES, I64{8})
+    result
+}
+#Export(c) fn jet_rt_record_get_Attachment_filename(value: I64) -> I64 { jet_rt_string_clone(rt_text_word(value)) }
+#Export(c) fn jet_rt_record_get_Attachment_mime(value: I64) -> I64 { jet_rt_string_clone(rt_text_word(value + I64{8})) }
+#Export(c) fn jet_rt_record_get_Attachment_bytes(value: I64) -> I64 { value + I64{16} }
+#Export(c) fn jet_rt_handle_clone_Attachment(value: I64) -> I64 {
+    result :: jet_rt_alloc(I64{40}, I64{8})
+    rt_text_store(result, jet_rt_string_clone(rt_text_word(value)))
+    rt_text_store(result + I64{8}, jet_rt_string_clone(rt_text_word(value + I64{8})))
+    data_u8_list_copy_into(value + I64{16}, result + I64{16})
+    result
+}
+#Export(c) fn jet_rt_handle_drop_Attachment(value: I64) {
+    if (value == I64{0}) -> return
+    jet_rt_string_drop(rt_text_word(value))
+    jet_rt_string_drop(rt_text_word(value + I64{8}))
+    data_u8_list_drop_fields(value + I64{16})
+    jet_rt_free(value, I64{40}, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_Attachment(left: I64, right: I64) -> Bool {
+    if (!jet_rt_string_eq(rt_text_word(left), rt_text_word(right))) -> return false
+    if (!jet_rt_string_eq(rt_text_word(left + I64{8}), rt_text_word(right + I64{8}))) -> return false
+    length :: rt_text_word(left + I64{16} + DATA_SEQUENCE_LENGTH)
+    if (length != rt_text_word(right + I64{16} + DATA_SEQUENCE_LENGTH)) -> return false
+    a :: rt_text_word(left + I64{16} + DATA_SEQUENCE_DATA)
+    b :: rt_text_word(right + I64{16} + DATA_SEQUENCE_DATA)
+    at := I64{0}
+    loop at < length {
+        if (host_u8_get(a, at) != host_u8_get(b, at)) -> return false
+        at += I64{1}
+    }
+    true
+}

@@ -402,6 +402,18 @@ unchanged helpers. TLS byte-list children use `data_u8_list_copy_into` and
 definitions are removed. The shared sequence index and capacity failure
 providers still require composition before native caller admission.
 
+Native mail attachment data uses `MailAttachment.jet`'s 40-byte carrier:
+two owned E4 text pointers followed by an inline native U8 list header.
+Construction clones borrowed filename/MIME text and transfers the consumed
+byte-list buffer without copying it, releasing only the donor list shell.
+Text projections return independent owned clones; the bytes projection borrows
+the parent's inline header. Cloning uses the shared `DataSequences.jet` U8
+ownership helpers and the packed `RT_HOST_U8_STRIDE`; equality compares text
+and initialized bytes, ignoring capacity. Null drops are harmless. The
+`AttachmentWitness.c` composed-object client pins binary text/bytes, ownership,
+capacity-sized frees, mutation independence, and projection lifetimes. These
+data operations make no claim about SMTP transport or MIME serialization.
+
 ## Dependency order
 
 Core work follows the dependency graph. These categories describe dependency
