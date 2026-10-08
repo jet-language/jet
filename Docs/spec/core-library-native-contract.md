@@ -507,6 +507,29 @@ lifetime; logical close and shutdown remain visible through those aliases.
 `TCPStreamFieldsWitness.c` uses real canonical owners and tests pointer
 identity, low-byte reads, live shutdown/close updates and parent-only release.
 
+Native mail messages use `MailMessage.jet`'s 160-byte owner: inline Address16,
+two inline Address lists, three owned text pointers, an inline Attachment40
+list, inline Envelope40 and a raw wire bound. `MailAddress.jet` and
+`MailEnvelope.jet` own the canonical inline copying, destruction and equality
+helpers; attachment lists reuse `MailAttachment.jet`'s existing field owners.
+Clones allocate only initialized list elements, without temporary child or
+list shells; destruction releases buffers by their actual capacities.
+Equality includes every field and the wire bound, but not capacities.
+
+The generator-derived `message_parts` ABI takes twelve raw arguments:
+borrowed Address/Envelope handles, borrowed text descriptors, three borrowed
+pointer-to-handle slot arrays with lengths, and a borrowed exact Int wire bound.
+It clones every input owner and only performs the source-checked native range
+conversion. Like the canonical C ABI list input adapter, null slot arrays or
+nonpositive lengths mean an empty list. Source-owned validation, private views
+and MIME serialization remain outside this carrier provider. Field projections
+borrow inline Address/Envelope storage or fill read/clone-only text descriptors.
+`MailMessageWitness.c` links the real composed object and covers bcc and
+attachment stack arguments, binary and empty data, optional display states,
+deep ownership, every equality field, exact wire edges, projection lifetimes
+and capacity-sized frees. Runtime execution and route enrollment are separate
+admission steps; the witness source alone does not establish execution parity.
+
 ## Dependency order
 
 Core work follows the dependency graph. These categories describe dependency
