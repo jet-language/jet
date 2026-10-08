@@ -375,7 +375,21 @@ pub fn jet_driver_compiler_check(input: JetDriverCompilerCheckInput) -> JetDrive
     providers := jet_driver_assemble_foreign_providers(input.request.authorized_sources, &load)
     if (!load.complete || jet_driver_has_errors(load.diagnostics)) && !parse_only -> return jet_driver_compiler_check_failure(load, JetDriverStage.Load, None)
     if !jet_driver_foreign_provider_owners_valid(load.modules, providers, &load.diagnostics) -> return jet_driver_compiler_check_failure(load, JetDriverStage.Load, None)
-    module_sources :: jet_driver_compiler_check_module_sources(load, canonical, input.request.canonical_effect_source, input.parsed) ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val("the compiler query source is not the exact loaded entry or a loaded module source is missing"))
+    module_sources := [SemaCompilerModuleSource]{}
+    if {
+        input.retain_projection -> {
+            // Retained products use the canonical registration/Doc ownership
+            // bijection, including ABI catalog units without physical source.
+            // Only the actual entry is replaced by the prepared parser's program.
+            entry_source :: jet_driver_compiler_check_source_bytes(load, input.request.authorized_sources.entry_path) ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val("the compiler query source is not the exact loaded entry or a loaded module source is missing"))
+            if entry_source != input.parsed.source || (input.parsed.compiler_source.len() > 0 && input.parsed.compiler_source.len() != entry_source.len()) {
+                return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val("the compiler query source is not the exact loaded entry or a loaded module source is missing"))
+            }
+        }
+        else -> {
+            module_sources = jet_driver_compiler_check_module_sources(load, canonical, input.request.canonical_effect_source, input.parsed) ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val("the compiler query source is not the exact loaded entry or a loaded module source is missing"))
+        }
+    }
     target_option := jet_driver_selected_target_machine(input.request, &load.diagnostics)
     if target_option == None -> return jet_driver_compiler_check_failure(load, JetDriverStage.Check, None)
     target :: target_option ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Check, None)
