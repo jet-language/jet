@@ -230,6 +230,7 @@ fn float_text(value: Float) -> String Never! {
     String.from_bytes(out) ?? panic("decimal float text must be UTF-8")
 }
 
+
 #Test("typed SQL rows preserve conversion and missing-column errors") {
     row :: [String: DBValue]{"number": DBValue.Int(42), "text": DBValue.Text("jet"), "zero": DBValue.Int(0), "one": DBValue.Int(1)}
     assert_eq(row_int(row, "number") ?? -1, 42)
@@ -261,3 +262,4 @@ fn float_text(value: Float) -> String Never! {
         .Err(error) -> assert_eq(error.message, "expected text, got [1, 2]")
     }
 }
+
