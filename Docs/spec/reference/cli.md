@@ -767,8 +767,8 @@ identity and checked derivation references for live snapshots and replay;
 readers reject altered identities, row IDs, derivations, and noncanonical bytes.
 
 Live inspection consumes only the runtime's private `jet.live.v1` snapshot.
-Its no-follow read retains one file descriptor, checks its identity, owner and
-private permissions, and bounds the bytes to 1 MiB. Linux process start identity
+Its no-follow read retains one file descriptor, checks its regular-file type,
+owner and private permissions, and bounds the bytes to 1 MiB. Linux start identity
 and the two-second publication age bind it to the requested process. The closed
 snapshot schema bounds values, tasks and channels to 4096 rows; event observations
 retain exactly fifteen payload-free fields, at most 256 records, strictly

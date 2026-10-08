@@ -35,7 +35,6 @@ fn jet_cli_live_read_at(pid: Int, path: String) -[FS, Env, Time]> JetCLILiveSnap
     reader :: cli_files.open(path, cli_files.LinkPolicy.Refuse) ?? return Err(jet_cli_read_error("cannot securely open live runtime snapshot for process {pid}"))
     before :: reader.stat() ?? return Err(jet_cli_read_error("cannot inspect live runtime snapshot: {jet_cli_io_error_text(err)}"))
     if !before.is_file -> return Err(jet_cli_read_error("live runtime snapshot is not a regular file"))
-    if before.id != entry.id -> return Err(jet_cli_read_error("live runtime snapshot changed before its secure open"))
     if cli_sys.is_unix() {
         if (before.mode & 0o077) != 0 -> return Err(jet_cli_read_error("live runtime snapshot permissions expose runtime state"))
         if before.owner != Val(cli_sys.getuid()) -> return Err(jet_cli_read_error("live runtime snapshot belongs to another user"))
@@ -48,8 +47,6 @@ fn jet_cli_live_read_at(pid: Int, path: String) -[FS, Env, Time]> JetCLILiveSnap
         loop byte in chunk -> &bytes.push(byte)
         if bytes.len() > 1048576 -> return Err(jet_cli_read_error("live runtime snapshot exceeds the 1 MiB safety limit"))
     }
-    after :: reader.stat() ?? return Err(jet_cli_read_error("cannot inspect live runtime snapshot: {jet_cli_io_error_text(err)}"))
-    if after.id != before.id || after.size != bytes.len() -> return Err(jet_cli_read_error("live runtime snapshot changed while it was read"))
     text :: String.from_bytes(bytes) ?? return Err(jet_cli_read_error("cannot read live runtime snapshot: stream did not contain valid UTF-8"))
     parsed := jet_cli_live_decode(text) ?? return Err(jet_cli_read_error("live runtime snapshot has an invalid or unsafe schema: {err.message}"))
     if parsed.pid != pid -> return Err(jet_cli_read_error("live runtime snapshot does not belong to process {pid}"))
