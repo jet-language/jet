@@ -82,14 +82,10 @@ pub struct KeyUnlock {
 }
 // These retain a read borrow of the real owner's bytes, never a copied secret.
 pub fn __key_unlock_recipient(identity: X25519SecretKey) -> KeyUnlock Never! {
-    #Unsafe("vault unlock borrows the recipient's actual secret bytes") {
-        KeyUnlock{kind: 1, secret: identity.bytes[0..<identity.bytes.len()]}
-    }
+    KeyUnlock{kind: 1, secret: identity.bytes[0..<identity.bytes.len()]}
 }
 pub fn __key_unlock_passphrase(passphrase: Secret) -> KeyUnlock Never! {
-    #Unsafe("vault unlock borrows the passphrase's actual secret bytes") {
-        KeyUnlock{kind: 2, secret: passphrase.bytes[0..<passphrase.bytes.len()]}
-    }
+    KeyUnlock{kind: 2, secret: passphrase.bytes[0..<passphrase.bytes.len()]}
 }
 
 #Error
