@@ -146,6 +146,18 @@ vectors, and every variant additionally checks official NIST CAVP byte
 ShortMsg cases at lengths 0, 1, rate-1, and rate. There is no legacy-padding
 mode and no change to the current Core SHA3 meaning.
 
+BLAKE3-256 shares the existing Core algorithm's seven-round compressor and
+fixed message permutation. Its private leaf borrows the message and streams
+1024-byte chunks into a binary-carry CV stack, retaining the last chunk for
+the right-to-left root fold. Only the last block of a single chunk or the
+final parent carries ROOT. Caller-owned aligned scratch is 3904 bytes,
+including 54 CV slots covering every nonnegative I64 byte length, and is
+fully wiped on return. Output is 32 bytes; keyed hashing and XOF are not new
+public surfaces. The complete official BLAKE3-team vector file is frozen
+as fixture data; all 35 default-output cases use its prescribed `i % 251`
+input. The seed at `Crypto.rs:351` calls the same official `blake3::hash`
+crate directly, so no redundant Rust oracle capture is needed.
+
 The internal X25519 boundary borrows 32-byte scalar and point spans and writes
 32 bytes to a disjoint output. Its 1536-byte, word-aligned scratch is exclusive
 and wiped before return (1568 bytes for public-key derivation). Field arithmetic
