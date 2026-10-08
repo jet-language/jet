@@ -6,7 +6,7 @@
 //! first crate that reads them, so editing a Core body rebuilds jet-sema and
 //! its dependents but never jet-foundation, the lexer, the parser or comptime.
 
-use jet_foundation::CoreSourceParts::{CORE_TEXT_STRING_MODULE, CORE_ENCODING_STREAM_MODULE, CORE_ENCODING_CBOR_PARSE_MODULE, CORE_ENCODING_CBOR_STREAM_ALIAS, CORE_FILES_PATH_COMPONENTS_SOURCE_PART, CORE_ENCODING_XML_ENGINE_MODULE, CORE_ENCODING_XML_KERNEL_MODULE};
+use jet_foundation::CoreSourceParts::{CORE_TEXT_STRING_MODULE, CORE_ENCODING_STREAM_MODULE, CORE_ENCODING_CBOR_PARSE_MODULE, CORE_ENCODING_CBOR_STREAM_ALIAS, CORE_FILES_PATH_COMPONENTS_SOURCE_PART, CORE_ENCODING_XML_ENGINE_MODULE, CORE_ENCODING_XML_KERNEL_MODULE, CORE_CRYPTO_JETC_MODULE};
 
 include!("CoreSourceTexts.rs");
 
@@ -19,6 +19,7 @@ const CORE_PRIVATE_SOURCE_TEXTS: &[(&str, &str)] = &[
     (CORE_ENCODING_CBOR_STREAM_ALIAS, include_str!("../../../Core/encoding/cbor_stream.jet")),
     (CORE_ENCODING_XML_ENGINE_MODULE, include_str!("../../../Core/encoding/xml_engine.jet")),
     (CORE_ENCODING_XML_KERNEL_MODULE, include_str!("../../../Core/encoding/xml_kernel.jet")),
+    (CORE_CRYPTO_JETC_MODULE, include_str!("../../../Core/crypto/jetc.jet")),
 ];
 
 /// Source text of the Core source module (public or private part) whose
@@ -43,5 +44,28 @@ mod tests {
                 part.source.path,
             );
         }
+    }
+
+    #[test]
+    fn crypto_chunk_engine_is_private_and_embedded() {
+        use jet_foundation::CoreSourceParts::core_private_source_part_by_module;
+        let part = core_private_source_part_by_module("__core_crypto_jetc")
+            .expect("crypto chunk engine private part");
+        assert_eq!(part.owner, "core.crypto");
+        assert_eq!(part.source.alias, "__core_crypto_jetc");
+        assert_eq!(part.source.path, "Core/crypto/jetc.jet");
+        assert!(part.source.owned_members.is_empty());
+        assert_eq!(super::core_source_text(part.source.module),
+            Some(include_str!("../../../Core/crypto/jetc.jet")));
+        assert!(jet_foundation::CoreModuleExports::core_source_module(part.source.module).is_none());
+        assert!(!jet_foundation::CoreModuleExports::CORE_MODULE_NAMES.contains(&part.source.module));
+    }
+
+    #[test]
+    fn crypto_private_part_matches_generated_cli_projection() {
+        let projection = include_str!("../../../Compiler/JetCli/Source/Cli/CoreSources.jet");
+        assert!(projection.contains(
+            "JetDriverCoreSource{module_name: \"__core_crypto_jetc\", alias: \"__core_crypto_jetc\", path: \"Core/crypto/jetc.jet\", owner: \"core.crypto\", owned_members: [String]{}, source: \"\"}"
+        ));
     }
 }
