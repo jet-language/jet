@@ -971,7 +971,10 @@ ban.
 **S45 — Generic functions & types**: `fn largest<T: Comparable>(…)`,
 `struct Pair<T> { }`; multi-trait bounds are lists `<T: [A, B]>`
 (D-VARARGBOUND1). No `where`. **D-LIB2**: associated types + default method
-bodies; no higher-kinded types.
+bodies; no higher-kinded types. Method headers and bodies see the owner's
+generic parameters followed by the method's own parameters. A method parameter
+with the same name shadows the owner parameter; checking that lexical scope
+does not alter the method's declared generic signature.
 
 **S73 — Tuples**: named members only — `p :: (x: 1, y: 2)`, `p.x`, type
 position `(min: Int, max: Int)`. No positional tuples, no `.0`.
