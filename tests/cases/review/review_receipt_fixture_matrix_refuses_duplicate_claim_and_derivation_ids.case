@@ -1,0 +1,13 @@
+# PORT tests/review.rs::review_receipt_fixture_matrix_refuses_duplicate_claim_and_derivation_ids; helpers review.rs17-176 preserved.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no reference snapshot claim.
+fixture: review_receipt_fixture_matrix_refuses_duplicate_claim_and_derivation_ids.fixture
+step: jet review {work}/m0/base/run.jet {work}/m0/head/run.jet --base-receipt {work}/m0/invalid.jetproof --json
+exit: nonzero
+# Original invalid-receipt matrix-duplicate-claim.
+stdout+stderr: ~ "E2105" # Original contains predicate.
+stdout+stderr: ~ "duplicate evidence claim" # Original contains predicate.
+step: jet review {work}/m1/base/run.jet {work}/m1/head/run.jet --base-receipt {work}/m1/invalid.jetproof --json
+exit: nonzero
+# Original invalid-receipt matrix-duplicate-derivation.
+stdout+stderr: ~ "E2105" # Original contains predicate.
+stdout+stderr: ~ "duplicate derivation ids" # Original contains predicate.
