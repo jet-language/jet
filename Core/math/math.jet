@@ -1298,19 +1298,19 @@ fn __complex_abs(value: Complex) -> Float Never! {
 }
 struct F64x4 {
     lanes: [F64#4]
-    impl F64x4 {
-        fn new(a: F64, b: F64, c: F64, d: F64) -> F64x4 Never! {
-            F64x4{lanes: [F64#4]{a, b, c, d}}
-        }
-        fn splat(value: F64) -> F64x4 Never! {
-            F64x4{lanes: [F64#4]{value, value, value, value}}
-        }
-        fn from_array(lanes: [F64#4]) -> F64x4 Never! { F64x4{lanes: lanes} }
-        fn to_array(self) -> [F64#4] Never! { ~self.lanes }
-        fn lane(self, index: Int) -> F64 Never! {
-            if index < 0 || index >= 4 -> core.math.__numeric_stop("lane index {index} out of range for F64x4 (4 lanes)")
-            self.lanes[index]
-        }
+}
+impl F64x4 {
+    fn new(a: F64, b: F64, c: F64, d: F64) -> F64x4 Never! {
+        F64x4{lanes: [F64#4]{a, b, c, d}}
+    }
+    fn splat(value: F64) -> F64x4 Never! {
+        F64x4{lanes: [F64#4]{value, value, value, value}}
+    }
+    fn from_array(lanes: [F64#4]) -> F64x4 Never! { F64x4{lanes: lanes} }
+    fn to_array(self) -> [F64#4] Never! { ~self.lanes }
+    fn lane(self, index: Int) -> F64 Never! {
+        if index < 0 || index >= 4 -> core.math.__numeric_stop("lane index {index} out of range for F64x4 (4 lanes)")
+        self.lanes[index]
     }
 }
 
@@ -1630,7 +1630,7 @@ impl DeviceDelta.Sub {
 #Error
 struct TransformError { message: String }
 impl TransformError.Display {
-    fn display(self) -> String Never! { ~self.message }
+    fn display(self) -> String { ~self.message }
 }
 // Phantom params follow existing KeyRef<T>/DataTracked<T,K> source declarations.
 // The seed erases both params and keeps f64 payloads even for F32 spellings.
@@ -1931,13 +1931,13 @@ fn __complex_to_string(value: Complex) -> String Never! {
     "{value.real} {sign} {abs_float(value.imaginary)}i"
 }
 impl Decimal.Display {
-    fn display(self) -> String Never! { __decimal_to_string(self) }
+    fn display(self) -> String { __decimal_to_string(self) }
 }
 impl Fraction.Display {
-    fn display(self) -> String Never! { __fraction_to_string(self) }
+    fn display(self) -> String { __fraction_to_string(self) }
 }
 impl Complex.Display {
-    fn display(self) -> String Never! { __complex_to_string(self) }
+    fn display(self) -> String { __complex_to_string(self) }
 }
 
 #Test("Source exact rendering preserves decimal scale and quotient form") {

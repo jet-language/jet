@@ -34,6 +34,9 @@ rejection sampling, distributions, and collection draws are source behavior;
 `bool(p)` retains its existing arity-specific receiver row. Bare source-loading
 triggers remain limited to URL/url, Perf, and RNG; unrelated Core aliases do not
 become bare names, and Date retains its existing annotation identity.
+Bounded caller-owned draws keep the complete 64-by-64 product in exact `Int`
+before selecting its high and low words. Rejection thresholds and stream
+consumption remain identical to the native SplitMix64 seed.
 
 <!-- Stable IDs bind these public Core declarations to reviewed feature depth. -->
 <!-- FEATURE_CLAIMS:BEGIN -->
@@ -2116,6 +2119,8 @@ they do not resolve a user function with the same helper spelling.
 The bare and `core.math`-qualified `Fraction`, `Decimal`, and `Complex`
 spellings name the same declarations; local user types retain their own
 declaration identity.
+Their `Display` implementations use the canonical `fn display(self) -> String`
+contract: rendering borrows the value and keeps the exact text policy above.
 
 #### Measurement propagation
 
@@ -2154,6 +2159,7 @@ above the vector's fixed width.
 The bare and `core.math`-qualified matrix and `F64x4` spellings identify the
 same source declaration. Matrix arithmetic preserves column-major indexing;
 `F64x4` uses its fixed `[F64#4]` array as the checked lane bridge.
+Its constructors and lane accessors are inherent methods of that declaration.
 `Mat4` products accumulate from positive zero in row/column/k order; `*`
 between matrices is `matmul`, and `*` by a `Vec4` is `transform`.
 `F64x4.sum()` and `.reduce(.Avg)` use the Rust seed's D-FRED1 eight-lane

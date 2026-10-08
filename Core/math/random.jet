@@ -23,8 +23,8 @@ C_BASE53_FLOAT :: 9007199254740992.0
 
 
 // Caller-owned capabilities use SplitMix64, not the ambient xorshift stream.
-// Keep the arithmetic in sized words: every multiplication is explicitly
-// wrapping, while the bounded draw's full product is exactly representable.
+// Keep state transitions in explicitly wrapping sized words. Jet's exact Int
+// holds the bounded draw's full 64-by-64 product without a new scalar carrier.
 fn seeded_next(state: &U64) -> U64 Never! {
     state = state.wrapping_add(U64{11400714819323198485})
     word := U64{state}
@@ -40,8 +40,8 @@ fn seeded_bounded(state: &U64, bound: U64) -> U64 Never! {
     if bound == (U64{0}) -> return seeded_next(&state)
     threshold :: U64{0}.wrapping_sub(bound) %% bound
     loop {
-        product :: U128{seeded_next(&state)} * U128{bound}
-        low :: U64{product & U128{18446744073709551615}}
+        product :: Int{seeded_next(&state)} * Int{bound}
+        low :: U64{product & 18446744073709551615}
         if low >= threshold -> return U64{product >> 64}
     }
 }
@@ -164,7 +164,7 @@ pub struct RNG {
     }
 
     impl Display {
-        fn display(self) -> String Never! { "RNG {{ .. }}" }
+        fn display(self) -> String { "RNG {{ .. }}" }
     }
 }
 // The world owns synchronization and journaling. Jet owns the transition;
@@ -670,4 +670,51 @@ struct RNGAnswer {
     assert_eq(second.state, U64{11400714819323198527})
     assert_eq("{first}", "RNG {{ .. }}")
     assert_eq("{second}", "RNG {{ .. }}")
+}
+
+// Eight consecutive draws captured by executing Prelude/Core/SeededRandom.rs
+// from seed 42. Final states also cover rejection's extra word consumption.
+#Test("caller-owned exact bounded products retain eight native draws per range") {
+    small :: [Int]{75, 16, 28, 35, 4, 87, 22, 81}
+    wide :: [Int]{3674083908946410616, -1560806464107718934, -492589827703751123, 97716448712738216, -2657728483137783600, 4814052688918791390, -1034353256590340050, 4205686890421530943}
+    rejection :: [Int]{1474913046063446144, 8007990562831494530, 2014432356388812461, 7384525663493887953, 3135310438806241001, 5704490196125334486, 1889885825713147102, 4735243383115555698}
+    full :: [Int]{4456085495900499605, -6273545944727883517, -4084088288392011950, -2874173976596520044, -8521839250712812558, 6792609088808213254, -5194507324077150883, 5545679290133000100}
+    stream := rng(42)
+    loop expected in small -> assert_eq(&stream.int(1, 100), expected)
+    assert_eq(stream.state, U64{17418742259747381458})
+    stream = rng(42)
+    loop expected in wide -> assert_eq(&stream.int(-3000000000000000000, 6000000000000000000), expected)
+    assert_eq(stream.state, U64{17418742259747381458})
+    stream = rng(42)
+    loop expected in rejection -> assert_eq(&stream.int(-1, 9223372036854775807), expected)
+    assert_eq(stream.state, U64{635340061525167419})
+    stream = rng(42)
+    loop expected in full -> assert_eq(&stream.int(-9223372036854775808, 9223372036854775807), expected)
+    assert_eq(stream.state, U64{17418742259747381458})
+}
+
+#Test("caller-owned bounded collection draws retain eight native results each") {
+    items :: [Int]{0, 1, 2, 3, 4}
+    picks :: [Int]{3, 0, 1, 1, 0, 4, 1, 4}
+    samples :: [[Int]]{
+        [Int]{3, 1, 2}, [Int]{1, 0, 4}, [Int]{1, 4, 3}, [Int]{3, 1, 0},
+        [Int]{2, 3, 1}, [Int]{1, 0, 3}, [Int]{0, 3, 4}, [Int]{0, 3, 1},
+    }
+    shuffles :: [[Int]]{
+        [Int]{1, 2, 4, 0, 3}, [Int]{2, 1, 4, 3, 0}, [Int]{4, 3, 0, 2, 1}, [Int]{3, 0, 1, 4, 2},
+        [Int]{2, 3, 4, 1, 0}, [Int]{3, 2, 1, 0, 4}, [Int]{4, 3, 2, 1, 0}, [Int]{0, 1, 3, 2, 4},
+    }
+    stream := rng(42)
+    loop expected in picks -> assert_eq(&stream.pick(items), Val(expected))
+    assert_eq(stream.state, U64{17418742259747381458})
+    stream = rng(42)
+    loop expected in samples -> assert_eq(&stream.sample(items, 3), expected)
+    assert_eq(stream.state, U64{15362738631823041058})
+    stream = rng(42)
+    loop expected in shuffles {
+        shuffled := ~items
+        &stream.shuffle(&shuffled)
+        assert_eq(shuffled, expected)
+    }
+    assert_eq(stream.state, U64{14334736817860870858})
 }
