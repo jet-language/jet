@@ -1,0 +1,70 @@
+// #4843; predicates from tests/gate_law.rs:20-38,77-85. E3415 text
+// observed from dev-595e0dca3 `jet check main.jet --force --json` (exit 1).
+
+fn pkg_gate_test_dir(label: String) -[FS]> String {
+    files.tmpdir("gate-law-{label}-") ?? panic("gate law scratch")
+}
+
+fn pkg_gate_test_refusal(error: PackageGateError, key: String, site: String, policy: String) Never! {
+    assert_eq(error.diagnostics.len(), 1)
+    diagnostic :: error.diagnostics[0]
+    assert_eq(diagnostic.code, "E3415")
+    assert_eq(diagnostic.what, "The `{key}` gate at `{site}` is forbidden by `{policy}`.")
+    assert_eq(diagnostic.why, "The shared policy ladder keeps an organization or package `.Forbid` authoritative; a package `.GateOnly` or invocation allowance cannot widen it.")
+    assert_eq(diagnostic.fix, "Remove this gate or change the owning policy in `{policy}`.")
+    assert(diagnostic.span == None)
+}
+
+#Test("gate refusal preserves the outer floor and exact registered text") {
+    declarations :: [PolicyDeclaration]{
+        PolicyDeclaration{key: PolicyKey.ForcePin, value: PolicyValue.GateOnly, scope: PolicyScope.Package, span: Span{start: 0, end: 0}, target: None, source: "package.jet"},
+        PolicyDeclaration{key: PolicyKey.ForcePin, value: PolicyValue.Forbid, scope: PolicyScope.Organization, span: Span{start: 0, end: 0}, target: None, source: "org-policy.jet"},
+        PolicyDeclaration{key: PolicyKey.ForcePin, value: PolicyValue.Forbid, scope: PolicyScope.Package, span: Span{start: 0, end: 0}, target: None, source: "package.jet"}
+    }
+    refusal :: pkg_gate_refusal(PolicyKey.ForcePin, "main.jet:4..9", None, declarations) ?? panic("outer refusal")
+    pkg_gate_test_refusal(PackageGateError{diagnostics: [Diagnostic]{refusal}}, "force_pin", "main.jet:4..9", "org-policy.jet")
+}
+
+#Test("invocation choices refuse for their own key without writing project state") {
+    keys :: [PolicyKey]{PolicyKey.BuildFlag, PolicyKey.DependencyGrant, PolicyKey.SessionFlag, PolicyKey.ForcePin}
+    args :: [String]{"--allow=Net", "--allow=Net", "--trust", "--force"}
+    loop index in 0..<keys.len() {
+        root :: pkg_gate_test_dir("invocation-denied")
+        key :: policy_key_name(keys[index])
+        manifest :: "name: \"law\"\nversion: \"0.1.0\"\npolicy: {{ {key}: .Forbid }}\n"
+        files.write(files.join(root, PACKAGE_FILE), manifest) ?? panic("gate policy")
+        canonical :: files.canonicalize(root) ?? panic("canonical policy root")
+        if pkg_check_invocation_flags(root, [String]{args[index]}) == {
+            .Ok(_) -> panic("forbidden invocation succeeded")
+            .Err(error) -> pkg_gate_test_refusal(error, key, "command line ({args[index]})", files.join(canonical, PACKAGE_FILE))
+        }
+        assert(!files.exists(files.join(root, CONFIG_DEFAULT_DIR)))
+        assert_eq(files.read(files.join(root, PACKAGE_FILE)) ?? panic("policy preserved"), manifest)
+        files.remove_all(root).drop("test cleanup")
+    }
+}
+
+#Test("invocation GateOnly permits every recognized choice and plain arguments skip policy loading") {
+    root :: pkg_gate_test_dir("invocation-allowed")
+    files.write(files.join(root, PACKAGE_FILE), "name: \"law\"\npolicy: {{ build_flag: .GateOnly, dependency_grant: .GateOnly, session_flag: .GateOnly, force_pin: .GateOnly }}\n") ?? panic("gate policy")
+    flags :: [String]{"--force", "--gate", "--gate=unsafe", "--allow", "--allow=Net", "--release", "--target", "--target=native", "--profile", "--profile=release", "--deny", "--deny=Net", "--trust", "--online", "--try-anyway", "--interpret", "--offline", "--locked"}
+    pkg_check_invocation_flags(root, flags) ?? panic("GateOnly is permitted")
+    assert(!files.exists(files.join(root, CONFIG_DEFAULT_DIR)))
+    pkg_check_invocation_flags(files.join(root, "absent"), [String]{"check", "file.jet"}) ?? panic("ungated invocation must not load policy")
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("invocation allow checks build and dependency keys in Rust diagnostic order") {
+    root :: pkg_gate_test_dir("double-denial")
+    files.write(files.join(root, PACKAGE_FILE), "name: \"law\"\npolicy: {{ build_flag: .Forbid, dependency_grant: .Forbid }}\n") ?? panic("gate policy")
+    if pkg_check_invocation_flags(root, [String]{"--allow=Net"}) == {
+        .Ok(_) -> panic("forbidden allowance succeeded")
+        .Err(error) -> {
+            assert_eq(error.diagnostics.len(), 2)
+            assert(error.diagnostics[0].what.contains("`build_flag`"))
+            assert(error.diagnostics[1].what.contains("`dependency_grant`"))
+        }
+    }
+    assert(!files.exists(files.join(root, CONFIG_DEFAULT_DIR)))
+    files.remove_all(root).drop("test cleanup")
+}

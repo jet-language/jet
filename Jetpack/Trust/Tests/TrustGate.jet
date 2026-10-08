@@ -167,3 +167,59 @@ fn trust_test_secret(name: String) -> SecretSpec {
     trust_grant_hash(store, dir, hash) ?? panic("flake grant")
     assert(trust_is_trusted(store, dir, hash))
 }
+
+// tests/gate_law.rs:65-75: every writer returns E3415 before creating the
+// store or its parent; an existing store also remains byte-identical.
+fn trust_test_write_refusal(error: PackageGateError, site: String, root: String) -[FS]> {
+    assert_eq(error.diagnostics.len(), 1)
+    diagnostic :: error.diagnostics[0]
+    policy :: files.join(files.canonicalize(root) ?? panic("canonical policy root"), PACKAGE_FILE)
+    assert_eq(diagnostic.code, "E3415")
+    assert_eq(diagnostic.what, "The `trust_grant` gate at `{site}` is forbidden by `{policy}`.")
+}
+
+#Test("trust policy refuses all grant writers without creating or changing the store") {
+    root :: trust_test_gate_dir("grant-forbidden")
+    files.write(files.join(root, PACKAGE_FILE), "name: \"law\"\nversion: \"0.1.0\"\npolicy: {{ trust_grant: .Forbid }}\n") ?? panic("gate policy")
+    parent :: files.join(root, "new-parent")
+    store :: files.join(parent, "trust")
+    grant :: trust_parse_grant_selector("build:audited", "repo") ?? panic("grant selector")
+    if trust_add_grant(store, root, grant) == {
+        .Ok(_) -> panic("forbidden typed grant succeeded")
+        .Err(error) -> trust_test_write_refusal(error, "build:audited -> {store}", root)
+    }
+    if trust_grant_hash(store, root, "audited") == {
+        .Ok(_) -> panic("forbidden hash grant succeeded")
+        .Err(error) -> trust_test_write_refusal(error, "hash:audited -> {store}", root)
+    }
+    if trust_add_pattern(store, root, "/reviewed/*") == {
+        .Ok(_) -> panic("forbidden pattern grant succeeded")
+        .Err(error) -> trust_test_write_refusal(error, "pattern:/reviewed/* -> {store}", root)
+    }
+    assert(!files.exists(store))
+    assert(!files.exists(parent))
+    files.create_dir_all(parent) ?? panic("existing parent")
+    prior :: "hash:audited\n"
+    files.write(store, prior) ?? panic("existing store")
+    if trust_grant_hash(store, root, "audited") == {
+        .Ok(_) -> panic("idempotence must not bypass the gate")
+        .Err(error) -> trust_test_write_refusal(error, "hash:audited -> {store}", root)
+    }
+    assert_eq(files.read(store) ?? panic("store preserved"), prior)
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("trust GateOnly permits all three writers with false only for duplicate grants") {
+    root :: trust_test_gate_dir("grant-allowed")
+    files.write(files.join(root, PACKAGE_FILE), "name: \"law\"\npolicy: {{ trust_grant: .GateOnly }}\n") ?? panic("gate policy")
+    store :: files.join(root, "new-parent/trust")
+    grant :: trust_parse_grant_selector("build:audited", "repo") ?? panic("grant selector")
+    assert(trust_add_grant(store, root, grant) ?? panic("typed grant permitted"))
+    assert(trust_grant_hash(store, root, "audited") ?? panic("hash permitted"))
+    assert(trust_add_pattern(store, root, "/reviewed/*") ?? panic("pattern permitted"))
+    assert(!(trust_add_grant(store, root, grant) ?? panic("typed duplicate permitted")))
+    assert(!(trust_grant_hash(store, root, "audited") ?? panic("hash duplicate permitted")))
+    assert(!(trust_add_pattern(store, root, "/reviewed/*") ?? panic("pattern duplicate permitted")))
+    assert_eq(files.read(store) ?? panic("grant store"), "grant:repo:build:audited\nhash:audited\npattern:/reviewed/*\n")
+    files.remove_all(root).drop("test cleanup")
+}

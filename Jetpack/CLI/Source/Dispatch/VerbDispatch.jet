@@ -136,20 +136,20 @@ fn cli_read_only_command(verb: String, parsed: CLIParsed) -> Bool Never! {
 
 // Process entry after invocation setup. Returns the process exit code.
 pub fn cli_main(args: [String], invocation: DiagnosticInvocation) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
-    // GateWriters.rs:266 / Source/main.rs:1537: invocation choices must
-    // be refused before migration, profile drift repair, or any command.
-    if pkg_check_invocation_flags(cli_current_dir(), args) == .Err(error) {
-        loop diagnostic in error.diagnostics {
-            terminal_write_output(diagnostics_render_all("command line", "", [Diagnostic]{diagnostic}))
-        }
-        return EXIT_USAGE
-    }
     verification := StoreVerification.new()
     // Bare `jetpack` is the keyboard-first dashboard; its own TTY guard keeps
     // the status-summary floor for pipes, CI, and redirected output.
     verb :: args.get(0) ?? return cli_run_dashboard(&verification)
     rest :: cli_tail(args, 1)
     if verb == "cc" || verb == "c++" -> return cli_cc_main(&verification, verb, rest)
+    // GateWriters.rs:266 / Source/main.rs:1537: invocation choices must
+    // be refused before migration, profile drift repair, or any command.
+    if pkg_check_invocation_flags(cli_current_dir(), cli_before_argument_separator(args)) == .Err(error) {
+        loop diagnostic in error.diagnostics {
+            terminal_write_output(diagnostics_render_all("command line", "", [Diagnostic]{diagnostic}))
+        }
+        return EXIT_USAGE
+    }
     parsed :: cli_parse_args_for(verb, rest)
     color :: if parsed.flags.json -> ColorChoice.Never else -> parsed.flags.color
     theme :: Theme.resolve_choice(color).with_invocation(invocation)
