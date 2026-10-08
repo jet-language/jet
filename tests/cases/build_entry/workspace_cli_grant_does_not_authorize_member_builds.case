@@ -1,0 +1,7 @@
+# Port of tests/build_entry.rs:1800-1844; all original source files verbatim.
+# PENDING-SAME-HEAD; source acceptance and original public filesystem predicates.
+fixture: fixtures/workspace_cli_grant_does_not_authorize_member_builds
+step: jet build workspace.jet --allow-exec --json
+exit: nonzero
+json: machine doc $.reports[?code="E3504"] #>= 1
+file: packages/member/stamp absent
