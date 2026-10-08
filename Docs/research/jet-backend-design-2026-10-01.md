@@ -1904,3 +1904,21 @@ Evidence's bounded big-endian encoder lives in `Evidence/EvidenceEncode.jet`;
 wire implementation and allows the native runtime to compose encoding without
 the frame-schedule JSON decoder or Core JSON. Source moves do not establish
 runtime ABI admission or native execution parity; those require composed gates.
+
+### Declaration-proven scalar record carriers
+
+The C ABI generator recognizes a uniquely resolved, ungated, non-generic
+struct with one accessible `i64` or canonical exact-Int field. Scalar value
+results and value/immutable-borrowed parameters use the existing exact-Int
+Word carrier; constructing the seed-tier parameter never boxes the record.
+Generated `LOWER_WORD_RECORDS` membership names the actual runtime type and
+field, rather than overriding a particular route symbol.
+
+Lower independently requires the actual checked declaration, matching generated
+record schema, one unboxed exact-Int field, and native inline size/alignment
+8 with offset 0. Mismatches refuse the route and name the type and field.
+Parameters read existing native field storage; results transfer the owned word
+into that storage, including tagged payloads. Unused result owners are dropped.
+Mutable borrows, enums, generic records and List element encodings are not
+broadened. Static carrier metadata is not native layout/import/ABI admission;
+the composed native runtime still requires its actual-LIR sealed ABI receipt.

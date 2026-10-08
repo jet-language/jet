@@ -631,6 +631,31 @@ const qualify = (ty, path) => {
   if (ty.startsWith("super::")) return `crate::${path.split("::").slice(0, -1).filter(Boolean).concat(ty.slice(7)).join("::")}`;
   return path ? `crate::${path}::${ty}` : `crate::${ty}`;
 };
+const recordDeclUnchecked = (full) => {
+  const found = declarationOf(full.replace(/^crate::/, ""));
+  if (!found || found.decls.length !== 1) return null;
+  const decl = found.decls[0];
+  if (decl.gated || decl.at === undefined) return null;
+  const open = text.indexOf("{", decl.at);
+  const head = text.slice(decl.at, open);
+  if (open < 0 || /[;(]/.test(head) || /\bwhere\b/.test(head)) return null;
+  const application = recordApplication(full);
+  if (application.args.some((arg) => arg.startsWith("'"))) return null;
+  const bindings = recordBindings(head, application.args, full);
+  let depth = 0;
+  let close = open;
+  for (; close < text.length; close++) {
+    if (text[close] === "{") depth++;
+    else if (text[close] === "}" && --depth === 0) break;
+  }
+  const body = text.slice(open + 1, close).replace(/\/\/[^\n]*/g, "");
+  if (/#\[cfg/.test(body)) return null;
+  return { kind: decl.kind, path: decl.path, items: splitTop(body.replace(/#\[[^\]]*\]/g, "")).map((item) => substituteRecordType(item, bindings)) };
+};
+const recordDecl = (full) => {
+  try { return recordDeclUnchecked(full); }
+  catch (error) { classificationFailure(error, full, "", { phase: "record declaration" }); return null; }
+};
 // Canonical C carriers shared with Jet host kernels. Match resolved
 // declarations, never a leaf spelling that could name a user type.
 const handleBridges = new Map();
@@ -656,6 +681,34 @@ const handleCopy = (full, value) => handleBridge(full) ? `super::jet_c_abi_host:
 const handleTake = (full, value) => handleBridge(full) ? `super::jet_c_abi_host::${handleBridge(full).stem}_take(${value})` : `*unsafe { Box::from_raw(${value}) }`;
 const handleOut = (full, value) => handleBridge(full) ? `super::jet_c_abi_host::${handleBridge(full).stem}_handle(${value})` : `Box::into_raw(Box::new(${value}))`;
 const opaqueName = /^(?:[A-Za-z_][A-Za-z0-9_]*::)*([A-Z][A-Za-z0-9_]*|__jet_[A-Za-z0-9_]+)(?:<[\s\S]*>)?$/;
+// Scalar records keep native storage in Jet; only the exact-Int field crosses
+// this ABI. Resolve the declaration, never a route symbol or leaf-name alias.
+const wordRecords = new Map();
+function wordRecord(ty, path) {
+  if (!opaqueName.test(ty) || ty.includes("<")) return null;
+  const full = qualify(ty, path);
+  const found = declarationOf(full.replace(/^crate::/, ""));
+  if (!found || found.decls.length !== 1) return null;
+  const declaration = found.decls[0];
+  if (!declaration.visible || declaration.gated || declaration.generic || declaration.kind !== "struct") return null;
+  const record = recordDecl(full);
+  if (!record || record.items.length !== 1) return null;
+  const field = /^(pub(?:\([a-z]+\))?\s+)?([a-z_][a-z0-9_]*|__jet_[A-Za-z0-9_]+)\s*:\s*(.+)$/.exec(record.items[0]);
+  if (!field || (record.path && !field[1])) return null;
+  const fieldType = field[3].replace(/\s+/g, "");
+  let resolvedField = qualify(fieldType, record.path).replace(/^crate::/, "");
+  const seen = new Set();
+  while (renames.has(resolvedField) && !seen.has(resolvedField)) {
+    seen.add(resolvedField);
+    resolvedField = renames.get(resolvedField).replace(/^crate::/, "");
+  }
+  const exact = resolvedField === "jet_foundation::Numeric::JetInt";
+  if (fieldType !== "i64" && !exact) return null;
+  const result = { full: `crate::${found.key}`, declaration: found.key, field: field[2],
+    member: field[2].replace(/^__jet_/, ""), exact };
+  wordRecords.set(found.key, result);
+  return result;
+}
 const concreteHandles = new Map(); // specialization name -> resolved declaration application
 const borrowedHandles = new Map(); // seed-only Rust lifetime carriers, not Jet type instances
 const unsupportedSumCarriers = new Map(); // declaration-proved seed alias, no plain C codec
@@ -872,6 +925,12 @@ function paramCarrier(ty, path, symbol) {
   // A fieldless enum by value: its variant index (results keep their carrier).
   const tag = tagCarrier(ty, path);
   if (tag) return one(tag.jet, "i64", tag.read);
+  const scalarRecord = wordRecord(ty.startsWith("&") && !ty.startsWith("&mut") ? ty.slice(1) : ty, path);
+  if (scalarRecord) {
+    const read = (a) => scalarRecord.exact
+      ? `unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(${a}) }` : `native(${a})`;
+    return one("Word", "i64", (a) => `${ty.startsWith("&") ? "&" : ""}${scalarRecord.full} { ${scalarRecord.field}: ${read(a)} }`);
+  }
   // An exact Int by value: the borrowed carrier word, cloned into an owner.
   // The exact Int is spelled from the crate root wherever its kernel names it.
   if (/^(?:[a-z_][a-z0-9_]*::)*(?:Numeric::)?JetInt$/.test(ty)) return one("Word", "i64", (a) => `unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(${a}) }`);
@@ -939,6 +998,9 @@ function valueCarrier(ty, path, nativeInt, rawFixed = false) {
   if (ty === "__jet_Ordering") return { jet: `Tag{name: "Ordering", variants: "Less,Equal,Greater"}`, cty: "i64", wrap: (v) => `match ${v} { crate::__jet_Ordering::__jet_Less => 0, crate::__jet_Ordering::__jet_Equal => 1, crate::__jet_Ordering::__jet_Greater => 2 }` };
   // An owned exact Int: its carrier word, ownership passing to the caller.
   if (/^(?:[a-z_][a-z0-9_]*::)*(?:Numeric::)?JetInt$/.test(ty)) return { jet: "Word", cty: "i64", wrap: (v) => `(${v}).into_raw()` };
+  const scalarRecord = wordRecord(ty, path);
+  if (scalarRecord) return { jet: "Word", cty: "i64", wrap: (v) => scalarRecord.exact
+    ? `(${v}).${scalarRecord.field}.into_raw()` : `crate::jet_std::jet_int_from_i64((${v}).${scalarRecord.field})` };
   if (opaqueName.test(ty)) {
     const handle = runtimeHandle(ty, path);
     if (!handle) return null;
@@ -1611,31 +1673,6 @@ for (const [name, full] of handleRows) {
 // String, an Int or a record. Each schema row names its members' kinds, so the
 // lowering crosses a Jet type only when every member means the same carrier.
 // Records CAbi.rs writes by hand (their exports there) are not generated.
-const recordDeclUnchecked = (full) => {
-  const found = declarationOf(full.replace(/^crate::/, ""));
-  if (!found || found.decls.length !== 1) return null;
-  const decl = found.decls[0];
-  if (decl.gated || decl.at === undefined) return null;
-  const open = text.indexOf("{", decl.at);
-  const head = text.slice(decl.at, open);
-  if (open < 0 || /[;(]/.test(head) || /\bwhere\b/.test(head)) return null;
-  const application = recordApplication(full);
-  if (application.args.some((arg) => arg.startsWith("'"))) return null;
-  const bindings = recordBindings(head, application.args, full);
-  let depth = 0;
-  let close = open;
-  for (; close < text.length; close++) {
-    if (text[close] === "{") depth++;
-    else if (text[close] === "}" && --depth === 0) break;
-  }
-  const body = text.slice(open + 1, close).replace(/\/\/[^\n]*/g, "");
-  if (/#\[cfg/.test(body)) return null;
-  return { kind: decl.kind, path: decl.path, items: splitTop(body.replace(/#\[[^\]]*\]/g, "")).map((item) => substituteRecordType(item, bindings)) };
-};
-const recordDecl = (full) => {
-  try { return recordDeclUnchecked(full); }
-  catch (error) { classificationFailure(error, full, "", { phase: "record declaration" }); return null; }
-};
 const recordable = new Map(); // runtime name -> { full, kind, path, members }
 for (const [name, full] of handleRows) {
   const decl = recordDecl(full);
@@ -2003,6 +2040,7 @@ if (nativeListOnly) {
       borrowedCarriers: [...borrowedHandles.values()].sort((a, b) => a.runtime.localeCompare(b.runtime)),
     },
     nativeTypes, nativeExports, handleRows,
+    wordRecords: [...wordRecords.values()],
     seedHelperNames: [...seedHelperNames].sort(),
     jetRuntimeExports: [...jetRuntimeExports].sort(),
     unsupportedSumCarriers: [...unsupportedSumCarriers.values()],
@@ -2117,6 +2155,14 @@ jet.push("// variants in index order, each `name=kind` when it carries a member 
 jet.push("// Int, Flag, Float, Tag.<enum>, Rec.<record>, Opt<kind>).");
 jet.push("LOWER_GENERATED_RECORDS :: prep { [LowerRecordSchema]{");
 for (const schema of recordSchemas) jet.push(`    LowerRecordSchema{jet_name: "${schema.name}", variants: "${schema.variants}", fields: "${schema.fields}"},`);
+jet.push("} }");
+jet.push("// Declaration-proven scalar records; Lower still proves the actual native field.");
+jet.push("pub struct LowerWordRecord { pub runtime: String, pub field: String }");
+jet.push("LOWER_WORD_RECORDS :: prep { [LowerWordRecord]{");
+for (const [runtime, full] of handleRows) {
+  const record = wordRecord(full, "");
+  if (record) jet.push(`    LowerWordRecord{runtime: "${runtime}", field: "${record.member}"},`);
+}
 jet.push("} }");
 jet.push("");
 jet.push("// Fields of runtime handle structs readable in place (Places.jet):");

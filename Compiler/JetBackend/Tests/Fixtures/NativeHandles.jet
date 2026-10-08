@@ -5,6 +5,15 @@ fn fx_native_handle_checks() -> Bool Never! {
     p := fx_values_payload()
     aggregates :: fx_aggregates()
     &p.types.push(~aggregates.types[2])
+    scalar :: fx_named("WordRecord")
+    &p.types.push(fx_type_def("WordRecord", MIRTypeDefKind.Struct{
+        fields: [MIRField]{fx_field("WordRecord", "value", fx_int())}, methods: [MIRFunctionID]{},
+    }))
+    schema :: LowerRecordSchema{jet_name: "WordRecord", variants: "", fields: "value=Int"}
+    if lower_route_word_shape(p, scalar, "value", schema) == None -> return false
+    if lower_route_word_shape(p, scalar, "wrong", schema) != None -> return false
+    if lower_route_word_shape(p, fx_named("Pt"), "value", schema) != None -> return false
+    if lower_route_word_shape(p, fx_int(), "value", schema) != None -> return false
     prepared := lower_mono_empty()
     lower_mono_index(p, &prepared)
     m := LowerModule{

@@ -72,7 +72,7 @@ fn is_source_owned_core_compute_shape() {}
 fn is_source_owned_core_net_shape() {}
 fn is_source_owned_core_web_query_shape() {}
 `);
-  const table = `match name { "Fixture" => Some("JetFixture"), "Measurement" => Some("JetMeasurement"), "Pair" => Some("JetPair"), }`;
+  const table = `match name { "Fixture" => Some("JetFixture"), "Measurement" => Some("JetMeasurement"), "Pair" => Some("JetPair"), "Scalar" => Some("JetScalar"), }`;
   put("crates/jet-codegen/src/Codegen/Context.rs", ["root_prelude_rust_type_name", "job_queue_rust_type", "net_handle_rust_type", "core_rust_type_name", "file_handle_rust_type", "core_email_rust_type_name", "compute_handle_rust_type", "service_handle_rust_type", "layout_handle_rust_type"].map((name) => `fn ${name}() { ${table} }`).join("\n"));
   put("crates/jet-foundation/src/Syntax.rs", "");
   put("crates/jet-foundation/src/Syntax/predicates.rs", ["reflect_handle_rust_type", "binary_text_handle_rust_type", "alloc_handle_rust_type"].map((name) => `fn ${name}() { ${table} }`).join("\n"));
@@ -272,6 +272,35 @@ pub fn jet_fixture_plain(value: JetFixture) -> JetFixture { value }
   assert.match(mismatchedGlue.stderr, /jet_rt_handle_eq_JetFixture.*does not match C ABI/);
   put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: F64) -> F64 { value }\n");
   put("Compiler/JetRuntime/exports.list", "jet_fixture_scalar\n");
+  // Single-Int records cross scalar routes as exact words, without a Box.
+  // A mutable borrow or a different declaration keeps its existing carrier.
+  put("crates/jet-foundation/src/Syntax/core_calls.rs", registry(
+    ["scalar_record", "borrowed_record", "mutable_record", "wide_record", "shadow_record"]
+      .map((name) => `CoreCallRecord::new("core.fixture", "${name}", "jet_fixture_${name}", true)`).join("\n")));
+  put("runtime.rs", declarations + `
+#[derive(Clone, PartialEq)] pub struct JetScalar { pub value: i64 }
+pub fn jet_fixture_scalar_record(value: JetScalar) -> JetScalar { value }
+pub fn jet_fixture_borrowed_record(value: &JetScalar) -> i64 { value.value }
+pub fn jet_fixture_mutable_record(value: &mut JetScalar) {}
+#[derive(Clone)] pub struct JetWide { pub first: i64, pub second: i64 }
+pub fn jet_fixture_wide_record(value: JetWide) -> JetWide { value }
+pub mod shadow {
+  #[derive(Clone)] pub struct JetScalar { pub value: bool }
+  pub fn jet_fixture_shadow_record(value: JetScalar) -> JetScalar { value }
+}
+`);
+  success(run());
+  const scalarRust = readFileSync(join(fixture, "crates/jet-codegen/src/Prelude/Core/CAbiRoutes.rs"), "utf8");
+  const scalarJet = readFileSync(join(fixture, "Compiler/JetBackend/Source/Lower/RuntimeRoutes.jet"), "utf8");
+  assert.match(scalarRust, /fn jet_fixture_scalar_record\(a0: i64\) -> i64/);
+  assert.ok(scalarRust.includes("crate::JetScalar { value: native(a0) }"));
+  assert.ok(scalarRust.includes("crate::jet_std::jet_int_from_i64((crate::jet_fixture_scalar_record"));
+  assert.match(scalarRust, /fn jet_fixture_borrowed_record\(a0: i64\)/);
+  assert.ok(scalarRust.includes("&crate::JetScalar { value: native(a0) }"));
+  assert.match(scalarRust, /fn jet_fixture_mutable_record\(a0: \*mut crate::JetScalar\)/);
+  assert.ok(scalarJet.includes('LowerWordRecord{runtime: "JetScalar", field: "value"}'));
+  assert.ok(!scalarJet.includes('LowerWordRecord{runtime: "JetWide"'));
+  assert.ok(!scalarJet.includes('LowerWordRecord{runtime: "shadow::JetScalar"'));
   const genericRows = `CoreCallRecord::new("core.fixture", "measurement", "jet_fixture_measurement", true)\nCoreCallRecord::new("core.fixture", "pair", "jet_fixture_pair", true)\n`;
   put("crates/jet-foundation/src/Syntax/core_calls.rs", registry(genericRows));
   put("runtime.rs", declarations + `pub fn jet_fixture_measurement(value: JetMeasurement<f64>) -> JetMeasurement<f64> { value }\npub fn jet_fixture_pair(value: JetPair<f64,bool>) -> JetPair<f64,bool> { value }\n`);

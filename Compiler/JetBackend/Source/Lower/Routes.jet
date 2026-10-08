@@ -123,8 +123,45 @@ fn lower_reader_count_route(symbol: String) -> Bool Never! {
     symbol == "jet_reader_take" || symbol == "jet_reader_skip" || symbol == "jet_reader_seek"
 }
 
+// Metadata only nominates a field. Actual checked MIR/native storage decides
+// admission; a mismatched candidate is never retried as a runtime handle.
+fn lower_route_word_field(p: MIRProgram, ty: MIRType) -> String? {
+    runtime :: lower_runtime_handle_type(p, ty) ?? return None
+    loop row in LOWER_WORD_RECORDS {
+        if row.runtime == runtime.runtime -> return Val(~row.field)
+    }
+    None
+}
+
+fn lower_route_word_record(p: MIRProgram, ty: MIRType) -> LowerFieldInfo? {
+    member :: lower_route_word_field(p, ty) ?? return None
+    schema :: lower_record_schema(p, ty) ?? return None
+    lower_route_word_shape(p, ty, member, schema)
+}
+
+fn lower_route_word_shape(p: MIRProgram, ty: MIRType, member: String, schema: LowerRecordSchema) -> LowerFieldInfo? {
+    if lower_repr(p, ty) != .Inline(ty) -> return None
+    definition :: lower_type_def(p, ty) ?? return None
+    if schema.variants != "" || schema.fields != "{member}=Int" -> return None
+    if definition.kind == .Struct(fields, _) {
+        stored :: lower_stored_fields(fields)
+        if stored.len() != 1 || stored[0].name != member || !lower_is_exact_int(stored[0].ty) -> return None
+        info :: lower_struct_field(p, ty, stored[0].id) ?? return None
+        size :: lower_size(p, ty)
+        if info.boxed || info.offset != 0 || size.size != 8 || size.align != 8 -> return None
+        return Val(info)
+    }
+    None
+}
+
+fn lower_route_type_name(p: MIRProgram, ty: MIRType) -> String Never! {
+    if lower_route_word_field(p, ty) == .Val(member) -> return "{mir_type_display_name(ty)} field {member}"
+    mir_type_display_name(ty)
+}
+
 fn lower_route_carrier_matches(p: MIRProgram, ty: MIRType, carrier: LowerRouteCarrier) -> Bool Never! {
     if carrier == .Tag(_, variants) -> return lower_route_tag_matches(p, ty, variants)
+    if carrier == .Word && lower_route_word_field(p, ty) != None -> return lower_route_word_record(p, ty) != None
     if carrier == .HandleMut(name) {
         expected :: LowerRouteCarrier.Handle{name: name}
         return lower_route_carrier_of(p, ty) == Val(expected)
@@ -244,9 +281,14 @@ fn lower_route_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
             &lowered.push(mode)
             next
         }
-        if !lower_route_carrier_matches(p, ty, route.params[index]) -> return lower_fail(&m, &f, "{what} {name} argument {index} of type {mir_type_display_name(ty)} does not match its runtime route carrier")
+        if !lower_route_carrier_matches(p, ty, route.params[index]) -> return lower_fail(&m, &f, "{what} {name} argument {index} of type {lower_route_type_name(p, ty)} does not match its runtime route carrier or checked native layout")
         if route.params[index] == .Unit -> next
         value :: lower_use(&m, &f, arg) ?? return
+        if route.params[index] == .Word && lower_route_word_record(p, ty) == .Val(info) {
+            field :: lower_read_at(p, &f, value, info.offset, info.ty) ?? return lower_fail(&m, &f, "Word carrier {lower_route_type_name(p, ty)} has no checked field storage")
+            &lowered.push(field)
+            next
+        }
         if route.params[index] == .List(_) {
             if !route.native_lists && lower_record_list_element(p, ty, route.params[index]) != None {
                 length :: lower_list_word(&f, value, 0)
@@ -321,7 +363,7 @@ fn lower_route_result(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
                 return lower_alias_absent(&f, instruction)
             }
             if result_ty == .Val(ty) {
-                if !lower_route_result_matches(p, ty, carrier) -> return lower_fail(&m, &f, "{what} {name} result type {mir_type_display_name(ty)} does not match its runtime route")
+                if !lower_route_result_matches(p, ty, carrier) -> return lower_fail(&m, &f, "{what} {name} result type {lower_route_type_name(p, ty)} does not match its runtime route or checked native layout")
             }
             dst :: lower_result(p, c, &m, &f, instruction)
             if f.failed -> return
@@ -347,6 +389,17 @@ fn lower_route_result(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
                 return
             }
             if result_ty == .Val(ty) {
+                if carrier == .Word && lower_route_word_record(p, ty) == .Val(info) {
+                    word :: lower_new_value(&f, lir_layout_word(), LIRDrop.Runtime{symbol: "jet_rt_int_drop"}, info.ty.identity)
+                    lower_call_runtime(&m, &f, route.export, lowered, Val(word))
+                    if dst == .Val(kept) {
+                        lower_storage_into(p, &f, kept, ty)
+                        lower_write_at(p, &f, kept, info.offset, word, info.ty)
+                    } else {
+                        lower_emit(&f, LIRInst.Drop{value: word})
+                    }
+                    return
+                }
                 if lower_route_record(p, ty, carrier) == .Val(runtime) {
                     handle :: lower_new_value(&f, lir_layout_pointer(), LIRDrop.Runtime{symbol: "jet_rt_handle_drop_{runtime}"}, None)
                     lower_call_runtime(&m, &f, route.export, lowered, Val(handle))
@@ -384,6 +437,7 @@ fn lower_route_result(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
             lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge, [LIRValueID]{null})})
             joined :: dst ?? lower_pointer(&f)
             lower_start(&f, merge, [LIRValueID]{joined})
+            if dst == None && lower_route_word_field(p, inner) != None -> lower_map_drop_value(p, &m, &f, joined, ty)
         }
         .Result(ok, err) -> {
             ty :: result_ty ?? return lower_fail(&m, &f, "{what} {name} Result result has no checked type")
@@ -428,6 +482,7 @@ fn lower_route_result(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
                 lower_emit(&f, LIRInst.Load{dst: payload, base: out.slot, offset: 0})
                 lower_emit(&f, LIRInst.Store{base: box, offset: 8, value: payload})
             }
+            if dst == None && (lower_route_word_field(p, ok_ty) != None || lower_route_word_field(p, err_ty) != None) -> lower_map_drop_value(p, &m, &f, box, ty)
         }
         .Tuple(items) -> {
             ty :: result_ty ?? return lower_fail(&m, &f, "{what} {name} tuple result has no checked type")
@@ -450,6 +505,14 @@ fn lower_route_result(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
             loop (index, item) in items {
                 address :: lower_address(&f, slot, 8 * index)
                 lower_route_store_payload(p, &m, &f, box, members[index].offset, members[index].ty, item, address, route.native_lists)
+            }
+            if dst == None {
+                loop member in members {
+                    if lower_route_word_field(p, member.ty) != None {
+                        lower_inline_drop(p, &m, &f, box, ty)
+                        break
+                    }
+                }
             }
         }
     }
@@ -518,6 +581,11 @@ fn lower_route_out_call(m: &LowerModule, f: &LowerFunction, export: String, args
 fn lower_route_store_payload(p: MIRProgram, m: &LowerModule, f: &LowerFunction, box: LIRValueID, offset: Int, ty: MIRType, carrier: LowerRouteCarrier, slot: LIRValueID, native_lists: Bool) Never! {
     if carrier == .Unit -> return
     if lower_route_record(p, ty, carrier) == .Val(runtime) -> return lower_record_store_from_slot(p, &m, &f, ty, runtime, slot, box, offset)
+    if carrier == .Word && lower_route_word_record(p, ty) == .Val(info) {
+        word :: lower_word(&f)
+        lower_emit(&f, LIRInst.Load{dst: word, base: slot, offset: 0})
+        return lower_write_at(p, &f, box, offset + info.offset, word, info.ty)
+    }
     if carrier == .List(_) {
         data :: lower_pointer(&f)
         length :: lower_word(&f)
