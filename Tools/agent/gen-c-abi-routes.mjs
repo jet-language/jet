@@ -448,15 +448,24 @@ const qualify = (ty, path) => {
   if (ty.startsWith("super::")) return `crate::${path.split("::").slice(0, -1).filter(Boolean).concat(ty.slice(7)).join("::")}`;
   return path ? `crate::${path}::${ty}` : `crate::${ty}`;
 };
-// IOError has a canonical C carrier shared with Jet host kernels. Match the
-// resolved declaration, never a leaf spelling that could name a user type.
-const ioErrorKey = declarationOf("jet_std::IOError")?.key;
-const isIOError = (full) => ioErrorKey !== undefined && declarationOf(full.replace(/^crate::/, ""))?.key === ioErrorKey;
-const handleType = (full) => isIOError(full) ? "super::jet_c_abi_host::JetCIOError" : full;
-const handleBorrow = (full, value) => isIOError(full) ? `&super::jet_c_abi_host::error_view(${value})` : `unsafe { &*${value} }`;
-const handleCopy = (full, value) => isIOError(full) ? `super::jet_c_abi_host::error_view(${value})` : `unsafe { &*${value} }.clone()`;
-const handleTake = (full, value) => isIOError(full) ? `super::jet_c_abi_host::error_take(${value})` : `*unsafe { Box::from_raw(${value}) }`;
-const handleOut = (full, value) => isIOError(full) ? `super::jet_c_abi_host::error_handle(${value})` : `Box::into_raw(Box::new(${value}))`;
+// Canonical C carriers shared with Jet host kernels. Match resolved
+// declarations, never a leaf spelling that could name a user type.
+const handleBridges = new Map();
+for (const [rust, type, stem] of [
+  ["jet_std::IOError", "JetCIOError", "error"],
+  ["jet_std::IOContext", "JetCIOContext", "context"],
+  ...(jetRuntimeExports.has("jet_rt_handle_drop_JetTaskFailure")
+    ? [["JetTaskFailure", "JetCTaskFailure", "failure"]] : []),
+]) {
+  const key = declarationOf(rust)?.key;
+  if (key !== undefined) handleBridges.set(key, { type, stem });
+}
+const handleBridge = (full) => handleBridges.get(declarationOf(full.replace(/^crate::/, ""))?.key);
+const handleType = (full) => handleBridge(full) ? `super::jet_c_abi_host::${handleBridge(full).type}` : full;
+const handleBorrow = (full, value) => handleBridge(full) ? `&super::jet_c_abi_host::${handleBridge(full).stem}_view(${value})` : `unsafe { &*${value} }`;
+const handleCopy = (full, value) => handleBridge(full) ? `super::jet_c_abi_host::${handleBridge(full).stem}_view(${value})` : `unsafe { &*${value} }.clone()`;
+const handleTake = (full, value) => handleBridge(full) ? `super::jet_c_abi_host::${handleBridge(full).stem}_take(${value})` : `*unsafe { Box::from_raw(${value}) }`;
+const handleOut = (full, value) => handleBridge(full) ? `super::jet_c_abi_host::${handleBridge(full).stem}_handle(${value})` : `Box::into_raw(Box::new(${value}))`;
 const opaqueName = /^(?:[A-Za-z_][A-Za-z0-9_]*::)*([A-Z][A-Za-z0-9_]*)$/;
 
 // A fieldless runtime enum crosses as its variant index in a word; the Jet
@@ -547,7 +556,7 @@ function paramCarrier(ty, path, symbol) {
     const name = opaqueName.exec(borrowedMut[1])[1];
     if (name === "String" || name === "Self") return null;
     const full = qualify(borrowedMut[1], path);
-    if (isIOError(full)) throw new Error(`IOError route ${symbol}: mutable Rust-enum borrowing is not a C carrier`);
+    if (handleBridge(full)) throw new Error(`${name} route ${symbol}: mutable Rust borrowing is not a C carrier`);
     return { ...one(`HandleMut{name: "${name}"}`, `*mut ${full}`, (a) => `unsafe { &mut *${a} }`), handle: { name, full } };
   }
   const borrowed = /^&([^&].*)$/.exec(ty);
@@ -961,8 +970,8 @@ const jetNames = new Map(); // Jet name -> runtime handle name
 // Handle drops: Core types that cross the boundary by handle.
 const handleRows = [...handles].sort((a, b) => a[0].localeCompare(b[0]));
 for (const [name, full] of handleRows) {
-  if (isIOError(full) && (!jetRuntimeExports.has(`jet_rt_handle_drop_${name}`) || !jetRuntimeExports.has(`jet_rt_handle_clone_${name}`))) {
-    throw new Error(`IOError carrier requires Jet clone/drop exports in sources.list and exports.list before adapter cutover`);
+  if (handleBridge(full) && (!jetRuntimeExports.has(`jet_rt_handle_drop_${name}`) || !jetRuntimeExports.has(`jet_rt_handle_clone_${name}`))) {
+    throw new Error(`${name} carrier requires Jet clone/drop exports in sources.list and exports.list before adapter cutover`);
   }
 }
 
@@ -1025,7 +1034,7 @@ for (const [name, full] of handleRows) {
   rs.push(`    pub extern "C" fn jet_rt_handle_drop_${name}(value: *mut ${handleType(full)}) {`);
   rs.push("        if !value.is_null() {");
   rs.push("            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.");
-  rs.push(isIOError(full) ? "            super::jet_c_abi_host::error_drop(value);" : "            drop(unsafe { Box::from_raw(value) });");
+  rs.push(handleBridge(full) ? `            super::jet_c_abi_host::${handleBridge(full).stem}_drop(value);` : "            drop(unsafe { Box::from_raw(value) });");
   rs.push("        }");
   rs.push("    }");
   if (!cloneable.has(name)) continue;
@@ -1132,7 +1141,7 @@ const recordMember = (ty, path, site) => {
     const elementTy = entries ? entries[1] : list[1];
     const element = elementTy === "u8" ? null : recordMember(elementTy, path, site);
     if (elementTy !== "u8" && !element?.kind.startsWith("Rec.")) return null;
-    if (element?.ioError) throw new Error(`IOError record ${site}: borrowed sequence projections are not C carriers`);
+    if (element?.bridge) throw new Error(`record ${site}: borrowed C-carrier sequence projections are unsupported`);
     const kind = `${entries ? "Entries" : "List"}.${element ? element.kind : "Byte"}`;
     const elementFull = element ? element.cty.replace(/^\*mut /, "") : "u8";
     const full = `Vec<${entries ? `(String, ${elementFull})` : elementFull}>`;
@@ -1162,7 +1171,7 @@ const recordMember = (ty, path, site) => {
     const nested = handles.get(name);
     if (!nested || nested !== qualify(ty, path) && declarationOf(nested.replace(/^crate::/, ""))?.key !== declarationOf(qualify(ty, path).replace(/^crate::/, ""))?.key) return null;
     if (!cloneable.has(name)) return null;
-    return { kind: `Rec.${name}`, ret: `*mut ${handleType(nested)}`, get: (v) => handleOut(nested, `${v}.clone()`), cty: `*mut ${handleType(nested)}`, make: (p) => handleTake(nested, p), ioError: isIOError(nested) };
+    return { kind: `Rec.${name}`, ret: `*mut ${handleType(nested)}`, get: (v) => handleOut(nested, `${v}.clone()`), cty: `*mut ${handleType(nested)}`, make: (p) => handleTake(nested, p), bridge: handleBridge(nested) !== undefined };
   }
   return null;
 };
@@ -1262,7 +1271,7 @@ for (const [name, full] of handleRows) {
       const nested = opaqueName.exec(ty)[1];
       const held = handles.get(nested);
       if (held && declarationOf(held.replace(/^crate::/, ""))?.key === declarationOf(qualify(ty, decl.path).replace(/^crate::/, ""))?.key) {
-        if (isIOError(held)) throw new Error(`IOError field ${name}.${field[2]}: borrowed address projections are not C carriers`);
+        if (handleBridge(held)) throw new Error(`field ${name}.${field[2]}: borrowed C-carrier address projections are unsupported`);
         kind = `Handle.${nested}`; pointee = held;
       }
     }
