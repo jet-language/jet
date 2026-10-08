@@ -106,6 +106,10 @@ int main(int argc,char **argv) {
     nul_bytes[2]='x';
     jet_rt_handle_drop_JetAuthority(held);
     assert(jet_rt_handle_eq_JetAuthority(clone,permuted));
+    Text other_net=borrow("Net.Write");
+    Text *changed_slots[]={&other_net,&empty,&nul,&unicode,&fs,&fsread};
+    Authority *changed=from(changed_slots,6);
+    assert(changed->len==clone->len && !jet_rt_handle_eq_JetAuthority(changed,clone));
     narrow(clone,"FS");
     narrow(clone,"FS.Read");
     narrow(clone,"FS:repo");
@@ -118,6 +122,7 @@ int main(int argc,char **argv) {
     Text *remaining[]={&empty,&nul,&net,&unicode};
     Authority *expected=from(remaining,4);
     independent(without,expected);
+    assert(!jet_rt_handle_eq_JetAuthority(clone,without));
     Authority *unchanged=jet_authority_without(clone,&near);
     authority_watch(unchanged);
     independent(unchanged,clone);
@@ -132,6 +137,9 @@ int main(int argc,char **argv) {
     Authority *none=from(NULL,99),*negative=from(slots,-1),*zero=from(slots,0);
     assert(none->len==0 && negative->len==0 && zero->len==0);
     assert(jet_rt_handle_eq_JetAuthority(none,negative) && jet_rt_handle_eq_JetAuthority(none,zero));
+    Authority *empty_clone=jet_rt_handle_clone_JetAuthority(none);
+    authority_watch(empty_clone);
+    independent(empty_clone,none);
     Authority *workspace=jet_authority_workspace();
     authority_watch(workspace);
     Text workspace_read=borrow("FS.Read:repo"),workspace_write=borrow("FS.Write:.jet/build");
@@ -139,7 +147,7 @@ int main(int argc,char **argv) {
     Authority *workspace_expected=from(workspace_slots,2);
     independent(workspace,workspace_expected);
     jet_rt_handle_drop_JetAuthority(NULL);
-    Authority *owners[]={clone,permuted,without,expected,unchanged,exact,dot_rights,none,negative,zero,workspace,workspace_expected};
+    Authority *owners[]={clone,permuted,changed,without,expected,unchanged,exact,dot_rights,none,negative,zero,empty_clone,workspace,workspace_expected};
     for(size_t i=0;i<sizeof(owners)/sizeof(owners[0]);++i) jet_rt_handle_drop_JetAuthority(owners[i]);
     assert(interceptions>0);
     for(size_t i=0;i<count;++i) assert(watched[i].freed==1);
