@@ -315,15 +315,6 @@ fn kit_golden_build(entry: KitEntry, tier: KitTier, plan: KitPlan, env: KitEnv, 
     KitOutcome{verdict: kit_expect_verdict("PASS", ""), run: result}
 }
 
-fn kit_golden_artifact(result: KitRun, source: String) -> String {
-    loop line in result.stdout.split("\n") {
-        if line.starts_with("built: ") {
-            path :: line.slice(7, line.len())
-            return files.join(source, path.slice(0, path.index(" (") ?? path.len()).trim())
-        }
-    }
-    ""
-}
 
 fn kit_golden_default_step(word: String) -> KitStep {
     KitStep{argv: [word], stdin: "", exit: "0", assertions: []}
@@ -373,8 +364,8 @@ fn kit_golden_run_entry(entry: KitEntry, tier: KitTier, env: KitEnv, scratch: St
             compiled :: kit_golden_build(entry, tier, plan, env, source, work, scratch)
             if compiled.verdict.status != "PASS" -> return compiled
             last = compiled.run
-            built = if tier.direct -> env.jet else -> kit_golden_artifact(last, source)
-            if built == "" -> return KitOutcome{verdict: kit_expect_verdict("ERROR", "CLI build did not report its executable artifact"), run: last}
+            built = if tier.direct -> env.jet else -> kit_steps_artifact(entry.path, source, plan.artifact)
+            if !files.exists(built) -> return KitOutcome{verdict: kit_expect_verdict("ERROR", "CLI build artifact missing: {built}"), run: last}
             built_once = true
         }
         if command == "build" {
@@ -382,8 +373,8 @@ fn kit_golden_run_entry(entry: KitEntry, tier: KitTier, env: KitEnv, scratch: St
             compiled :: kit_golden_build(entry, tier, plan, env, source, work, scratch)
             if compiled.verdict.status != "PASS" -> return compiled
             last = compiled.run
-            built = if tier.direct -> env.jet else -> kit_golden_artifact(last, source)
-            if built == "" -> return KitOutcome{verdict: kit_expect_verdict("ERROR", "CLI build did not report its executable artifact"), run: last}
+            built = if tier.direct -> env.jet else -> kit_steps_artifact(entry.path, source, plan.artifact)
+            if !files.exists(built) -> return KitOutcome{verdict: kit_expect_verdict("ERROR", "CLI build artifact missing: {built}"), run: last}
             built_once = true
             checked :: kit_steps_check(step, entry.path, last, env, work, scratch, snapshots, bless, plan.normalize, built, kit_golden_source_name(entry))
             if checked.status != "PASS" -> return KitOutcome{verdict: checked, run: last}

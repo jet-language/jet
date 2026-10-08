@@ -49,7 +49,7 @@ fn kit_steps_words(text: String) -> [String]? {
 }
 
 fn kit_steps_parse(source: String) -> KitPlan {
-    plan := KitPlan{requires: [], fixture: "", environment: [], normalize: ["paths"], compile_only: false, ref_audit: "", refused: "", steps: [], error: ""}
+    plan := KitPlan{requires: [], fixture: "", environment: [], normalize: ["paths"], compile_only: false, ref_audit: "", artifact: "", refused: "", steps: [], error: ""}
     line_number := 0
     loop raw in source.split("\n") {
         line_number += 1
@@ -76,6 +76,10 @@ fn kit_steps_parse(source: String) -> KitPlan {
         }
         if key == "refused" {
             plan.refused = value
+            next
+        }
+        if key == "artifact" {
+            plan.artifact = value
             next
         }
         if key == "ref-audit" {
@@ -276,6 +280,27 @@ fn kit_steps_check(step: KitStep, id: String, result: KitRun, env: KitEnv, work:
         if verdict.status != "PASS" -> return verdict
     }
     kit_expect_verdict("PASS", "")
+}
+
+// The public build contract places executable artifacts beside the staged
+// project root; progress output is not a machine-readable artifact receipt.
+fn kit_steps_artifact(entry: String, source: String, artifact: String) -> String {
+    directory :: files.dirname(files.join(source, entry))
+    root := directory
+    ancestor := directory
+    loop {
+        if files.exists(files.join(ancestor, "package.jet")) {
+            root = ancestor
+            break
+        }
+        if ancestor == source -> break
+        parent :: files.dirname(ancestor)
+        if parent == ancestor -> break
+        ancestor = parent
+    }
+    name :: files.basename(entry)
+    stem :: if name.ends_with(".jet") -> name.slice(0, name.len() - 4) else -> name
+    files.join(files.join(root, ".jet/build"), if artifact == "" -> stem else -> artifact)
 }
 
 fn kit_steps_execute(plan: KitPlan, id: String, env: KitEnv, work: String, scratch: String, snapshots: String, bless: KitBless) -> KitOutcome {

@@ -10,18 +10,20 @@ case "$1" in
     emit) printf 'fn main() {}\n' ;;
     check) exit 0 ;;
     build)
+        directory=$(dirname "$2")
+        name=$(basename "$2" .jet)
+        artifact="$directory/.jet/build/$name"
+        mkdir -p "$directory/.jet/build"
+        program="$here/program.sh"
         if [ "${JET_TESTKIT_INPUT:-}" = echo ]; then
-            printf 'built: %s/echo.sh\n' "$here"
-            exit 0
+            program="$here/echo.sh"
+        elif [ "${JET_TESTKIT_STDERR:-}" = 1 ]; then
+            program="$here/notice.sh"
+        else
+            case "$*" in *--release*) program="$here/wrong.sh" ;; esac
         fi
-        if [ "${JET_TESTKIT_STDERR:-}" = 1 ]; then
-            printf 'built: %s/notice.sh\n' "$here"
-            exit 0
-        fi
-        case "$*" in
-            *--release*) printf 'built: %s/wrong.sh\n' "$here" ;;
-            *) printf 'built: %s/program.sh\n' "$here" ;;
-        esac
+        cp "$program" "$artifact"
+        chmod +x "$artifact"
         ;;
     run) printf 'hello\n' ;;
     *) printf 'unknown fixture command\n' >&2; exit 2 ;;
