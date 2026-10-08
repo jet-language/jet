@@ -34,10 +34,20 @@ fn jet_cli_optimization_optional_int(value: Int?) -> JetCLIStatusValue Never! {
     if value == .Val(number) -> jet_cli_status_int(number) else -> JetCLIStatusValue.Null
 }
 fn jet_cli_optimization_vector_rule(rule: MIRVectorRule) -> String Never! {
-    if rule == { .Elementwise -> "elementwise" .FieldAccess -> "field-access" .ConditionalAccumulate -> "conditional-accumulate" .EarlyExitSearch -> "early-exit-search" .Reduction -> "reduction" }
+    if rule == {
+        .Elementwise -> "elementwise"
+        .FieldAccess -> "field-access"
+        .ConditionalAccumulate -> "conditional-accumulate"
+        .EarlyExitSearch -> "early-exit-search"
+        .Reduction -> "reduction"
+    }
 }
 fn jet_cli_optimization_vector_layout(layout: MIRVectorLayout) -> String Never! {
-    if layout == { .Flat -> "flat" .AosStrided -> "aos-strided" .ColumnarDirect -> "columnar-direct" }
+    if layout == {
+        .Flat -> "flat"
+        .AosStrided -> "aos-strided"
+        .ColumnarDirect -> "columnar-direct"
+    }
 }
 fn jet_cli_optimization_rejection(reason: MIROptimizationRejection) -> (code: String, statement: String) Never! {
     if reason == {
@@ -200,8 +210,15 @@ pub fn jet_cli_acceleration_report(query: JetDriverOptimizationQueryResult, scop
                 if U64.from_int(items) == .Val(count) -> decision = Val(mir_acceleration_evaluate(gate, fact.transform, mir_acceleration_deferred(fact, count, query.release_build, parity)))
             }
             runtime_index := Int?{None}
-            loop (index, value) in runtime {
-                if value.function == function.key && value.loop_header == fact.loop_header.value && U64.from_int(fact.span.start) == Val(value.source.start) && U64.from_int(fact.span.end) == Val(value.source.end) { runtime_index = Val(index); decision = Val(value.decision); break }
+            source_start :: U64.from_int(fact.span.start)
+            source_end :: U64.from_int(fact.span.end)
+            if source_start == .Val(start) && source_end == .Val(end) {
+                loop (index, value) in runtime {
+                    if value.function != function.key || value.loop_header != fact.loop_header.value || start != value.source.start || end != value.source.end -> next
+                    runtime_index = Val(index)
+                    decision = Val(value.decision)
+                    break
+                }
             }
             status :: decision.map(value -> value.status)
             selected :: if status == .Val(value) -> value == .Selected else -> false
@@ -250,16 +267,47 @@ pub fn jet_cli_acceleration_report(query: JetDriverOptimizationQueryResult, scop
     "{jet_cli_status_render("inspect.accel", true, fields)}\n"
 }
 fn jet_cli_optimization_kind(kind: MIRDecisionKind) -> String Never! {
-    if kind == { .Tier -> "tier" .Inline -> "inline" .Vectorize -> "vectorize" .Parallel -> "parallel" .Copy -> "copy" .Bounds -> "bounds" .Deopt -> "deopt" .Unreachable -> "unreachable" .LoopInvariant -> "loop-invariant" }
+    if kind == {
+        .Tier -> "tier"
+        .Inline -> "inline"
+        .Vectorize -> "vectorize"
+        .Parallel -> "parallel"
+        .Copy -> "copy"
+        .Bounds -> "bounds"
+        .Deopt -> "deopt"
+        .Unreachable -> "unreachable"
+        .LoopInvariant -> "loop-invariant"
+    }
 }
 fn jet_cli_optimization_disposition(value: MIRDecisionDisposition) -> String Never! {
-    if value == { .Accepted -> "accepted" .Rejected -> "rejected" .Selected -> "selected" .NotAttempted -> "not-attempted" .Unavailable -> "unavailable" }
+    if value == {
+        .Accepted -> "accepted"
+        .Rejected -> "rejected"
+        .Selected -> "selected"
+        .NotAttempted -> "not-attempted"
+        .Unavailable -> "unavailable"
+    }
 }
 fn jet_cli_optimization_method(value: MIRDerivationMethod) -> String Never! {
-    if value == { .StaticDerivation -> "static_derivation" .FormalProof -> "formal_proof" .RecordedExecution -> "recorded_execution" .SampledAgreement -> "sampled_agreement" .ExternalAssumption -> "external_assumption" }
+    if value == {
+        .StaticDerivation -> "static_derivation"
+        .FormalProof -> "formal_proof"
+        .RecordedExecution -> "recorded_execution"
+        .SampledAgreement -> "sampled_agreement"
+        .ExternalAssumption -> "external_assumption"
+    }
 }
 fn jet_cli_optimization_derivation(value: MIRDerivationDisposition) -> String Never! {
-    if value == { .Current -> "current" .Stale -> "stale" .Expired -> "expired" .Redacted -> "redacted" .Unavailable -> "unavailable" .Unsupported -> "unsupported" .BudgetExhausted -> "budget_exhausted" .Unknown -> "unknown" }
+    if value == {
+        .Current -> "current"
+        .Stale -> "stale"
+        .Expired -> "expired"
+        .Redacted -> "redacted"
+        .Unavailable -> "unavailable"
+        .Unsupported -> "unsupported"
+        .BudgetExhausted -> "budget_exhausted"
+        .Unknown -> "unknown"
+    }
 }
 fn jet_cli_optimization_identity(value: MIRDecisionIdentity) -> JetCLIStatusValue Never! {
     jet_cli_status_object([
@@ -334,10 +382,12 @@ pub fn jet_cli_optimization_host(request: JetDriverCompileRequest, query: JetDri
         return JetDriverVerbOutput{stdout: if json -> report else -> "", stderr: if json -> "" else -> report, exit_code: JET_DRIVER_EXIT_USER_ERROR}
     }
     output := ""
-    if plane == "accel" -> output = jet_cli_acceleration_report(query, scope, file, runtime, json)
-    else {
-        ledger :: query.decisions ?? panic("completed optimization query lost its canonical decisions")
-        output = jet_cli_decisions_report(ledger, scope, file, query.profile, canonical_routes, query.canonical_route_gaps, json)
+    if {
+        plane == "accel" -> output = jet_cli_acceleration_report(query, scope, file, runtime, json)
+        else -> {
+            ledger :: query.decisions ?? panic("completed optimization query lost its canonical decisions")
+            output = jet_cli_decisions_report(ledger, scope, file, query.profile, canonical_routes, query.canonical_route_gaps, json)
+        }
     }
     JetDriverVerbOutput{stdout: output, stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
