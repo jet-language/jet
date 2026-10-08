@@ -2138,3 +2138,44 @@ byte-list expectation derives from `WS_MESSAGE_U8_STRIDE`, which must match
 the composed runtime's canonical one-byte stride. Its wrong-variant mode and
 expected stdout remain unexercised; native ownership admission and execution
 are not established by parse or C syntax receipts.
+
+### Byte buffer, POSIX path, row policy and event unit glue
+
+`ByteHandlesABI.jet` defines the native ByteBuffer (owned byte-list pointer,
+raw unsigned cursor), Path (owned byte-list pointer) and RowPolicy (owned
+table/expression Text pointers and the compiled closed-policy ordinal).
+These are native layouts, not Rust struct layouts or generated carrier aliases.
+ByteBuffer copies the complete byte list and cursor; its three renders ignore
+the cursor and print decimal bytes with comma-space separators, matching
+`Collections.rs:191-204`. Decimal U8 output creates no temporary Int/Text or
+heap scratch. Path preserves arbitrary POSIX path bytes across clone, then
+uses the shared UTF8-lossy decoder only when rendering (`PathFiles.rs:6-18`).
+The canonical packed byte stride renders directly without staging; legacy
+word-stride composition packs through `host_u8_get`. Byte clone/drop uses
+the existing stride-aware DataTree helpers, never a private byte stride.
+
+RowPolicy retains the compiled `AllowAll`/`OwnerEqualsUser` form as well as its
+canonical text (`Sync.rs:65-68`, `RowPolicy.rs:18-21`). Its two field routes
+preserve the actual two-argument, void C ABI in `CAbiRoutes.rs:12832-12840`:
+they fill the caller's stack `[data, length, capacity]` descriptor borrowing
+the owner's bytes. They do not return fresh Text owners. The descriptor must
+never be grown, consumed or dropped; callers may explicitly clone it.
+
+FailurePolicy, DispatchState, EventConfigError and LateEventDisposition
+delegate clone/drop/equality to the shared Encoding unit-enum owner.
+JetBitSet's five existing native providers in `Collections.jet` are reused
+unchanged (external-provider precedent `814254e43`), not duplicated.
+All-ref searches found no existing Jet providers for the other new families.
+Fraction is intentionally not given a hand carrier: CoreReview4's ruling
+retires it to Core-source structural glue on the CoreNumerics7 composition
+(`9cea21818` through `4bf243903`).
+
+`ByteHandleWitness.c` requires real Jet exports and free interception. It
+covers all 256 byte values, empty/full lists, raw cursor high bits, clone
+independence, exact-once frees, arbitrary path bytes including NUL and malformed
+UTF8, borrowed policy descriptor lifetime, both compiled policies, every valid
+unit-enum equality pair, and reused BitSet sorting/duplicate/negative behavior.
+Its byte-list expectations use `BYTE_HANDLE_U8_STRIDE`, which must match the
+composed runtime. Its stdout fixture is an expectation, not an execution
+receipt. Source parsing and strict C11 syntax do not establish native
+ownership admission, runtime linking or execution.
