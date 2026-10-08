@@ -3115,11 +3115,6 @@ impl<'a> Checker<'a> {
         if let Some(core_fields) = core_constructable_fields(type_name)
             .or_else(|| core_generic_constructable_fields(type_name, type_args))
         {
-            let str_map_ty = Type::Map {
-                key: Box::new(Type::String),
-                key_span: None,
-                value: Box::new(Type::String),
-            };
             let provided_names: std::collections::HashSet<String> =
                 fields.iter().map(|(n, ..)| n.clone()).collect();
             for (fname, _, fexpr) in fields.iter_mut() {
@@ -3134,12 +3129,9 @@ impl<'a> Checker<'a> {
                 let got = self.infer(fexpr);
                 self.clone_borrowed_struct_field_value(Some(fname), fexpr, got.as_ref());
                 self.expected_type = saved;
-                if type_name == Syntax::TYPE_ERR {
-                    if let (Some(expected), Some(got)) = (expected_ty.as_ref(), got.as_ref()) {
-                        self.check_type_assignable(expected, got, fexpr.span());
-                    }
+                if let (Some(expected), Some(got)) = (expected_ty.as_ref(), got.as_ref()) {
+                    self.check_type_assignable(expected, got, fexpr.span());
                 }
-                let _ = (&str_map_ty, &expected_ty);
             }
             // Report missing fields.
             let missing: Vec<_> = core_fields
