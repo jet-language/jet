@@ -300,23 +300,21 @@ pub fn apply_impure_core_call_with_type_args(
     if module == "core.event"
         && matches!(
             method,
-            "scope"
-                | "policy_sync"
-                | "new"
-                | "with_policy"
-                | "hook"
-                | "decision_hook"
-                | "async_result"
+            "__scope_new"
+                | "__policy_sync"
+                | "__event_with_policy"
+                | "__hook_new"
+                | "__decision_hook_new"
+                | "__async_new"
         )
     {
         return match method {
-            "scope" => Ok(crate::Comptime::core_event_scope()),
-            "policy_sync" => Ok(crate::Comptime::core_event_policy_sync()),
-            "new" => Ok(crate::Comptime::core_event_new()),
-            "with_policy" => Ok(crate::Comptime::core_event_with_policy(one(0)?.clone())),
-            "hook" => Ok(crate::Comptime::core_event_hook(one(0)?.clone())),
-            "decision_hook" => Ok(crate::Comptime::core_event_decision_hook(one(0)?.clone())),
-            "async_result" => {
+            "__scope_new" => Ok(crate::Comptime::core_event_scope()),
+            "__policy_sync" => Ok(crate::Comptime::core_event_policy_sync()),
+            "__event_with_policy" => Ok(crate::Comptime::core_event_with_policy(one(0)?.clone())),
+            "__hook_new" => Ok(crate::Comptime::core_event_hook(one(0)?.clone())),
+            "__decision_hook_new" => Ok(crate::Comptime::core_event_decision_hook(one(0)?.clone())),
+            "__async_new" => {
                 crate::Comptime::core_event_async_result(one(0)?, one(1)?, span)
             }
             _ => unreachable!("core.event constructor route was not selected"),

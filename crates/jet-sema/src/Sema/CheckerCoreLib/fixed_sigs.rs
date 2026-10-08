@@ -1767,7 +1767,7 @@ fn core_fixed_sig_impl(
                 io_error_ty(),
             )),
         )),
-        ("core.watcher", "files") => Some((
+        ("core.watcher", "files" | "__files") => Some((
             vec![(
                 read,
                 Type::Union(vec![Type::String, Type::Named("Path".to_string())]),
@@ -1777,15 +1777,15 @@ fn core_fixed_sig_impl(
                 io_error_ty(),
             )),
         )),
-        ("core.watcher", "process_pid") => Some((
+        ("core.watcher", "process_pid" | "__process_pid") => Some((
             vec![(read, Type::Int)],
             Some(Type::Named("WatchHandle".to_string())),
         )),
-        ("core.watcher", "port") => Some((
+        ("core.watcher", "port" | "__port") => Some((
             vec![(read, Type::String), (read, Type::Int)],
             Some(Type::Named("WatchHandle".to_string())),
         )),
-        ("core.watcher", "set") => Some((vec![], Some(Type::Named("WatchSet".to_string())))),
+        ("core.watcher", "set" | "__set") => Some((vec![], Some(Type::Named("WatchSet".to_string())))),
         ("core.process", "argv" | "args") => {
             Some((vec![], Some(Type::List(Box::new(Type::String)))))
         }
@@ -2886,7 +2886,7 @@ fn core_fixed_sig_impl(
                 args: vec![Type::Int],
             }),
         )),
-        ("core.tasks", "yield_now") => Some((vec![], Some(unit))),
+        ("core.tasks", "yield_now" | "__yield_now") => Some((vec![], Some(unit))),
         ("core.tasks", "current_task") => Some((vec![], Some(string.clone()))),
         ("core.tasks", "__task_paused" | "__task_cancelled") => {
             Some((vec![], Some(Type::Option(Box::new(Type::Bool)))))

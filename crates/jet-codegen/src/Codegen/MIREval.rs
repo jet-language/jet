@@ -21984,7 +21984,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         let expected_symbol = match member {
             "after" => "jet_std::after_value",
             "interval" => "jet_std::interval",
-            "yield_now" => "jet_std::jet_task_yield",
+            "__yield_now" => "jet_std::jet_task_yield",
             "__task_paused" => "jet_scheduler_task_paused",
             "__task_cancelled" => "jet_scheduler_task_cancelled_state",
             _ => {
@@ -22040,7 +22040,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     MirChannelEndpoint::Receiver(channel),
                 )))
             }
-            ("yield_now", []) => {
+            ("__yield_now", []) => {
                 crate::scheduler::jet_scheduler_yield_now();
                 Ok(RuntimeValue::Data(MirEvalValue::Unit))
             }

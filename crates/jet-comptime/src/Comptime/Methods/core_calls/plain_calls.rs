@@ -785,17 +785,16 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
         ("core.args", "spec") => Ok(crate::Comptime::core_args_spec()),
         // --- core.event (shared TIR evaluator / deopt; mirrors AOT JetEvent*) ---
         // parity: guard tests/event_hooks.rs::decision_hook_outcomes_transform_and_short_circuit
-        ("core.event", "scope") => Ok(crate::Comptime::core_event_scope()),
-        ("core.event", "policy_sync") => Ok(crate::Comptime::core_event_policy_sync()),
-        ("core.event", "new") => Ok(crate::Comptime::core_event_new()),
-        ("core.event", "with_policy") => {
+        ("core.event", "__scope_new") => Ok(crate::Comptime::core_event_scope()),
+        ("core.event", "__policy_sync") => Ok(crate::Comptime::core_event_policy_sync()),
+        ("core.event", "__event_with_policy") => {
             Ok(crate::Comptime::core_event_with_policy(one(0)?.clone()))
         }
-        ("core.event", "hook") => Ok(crate::Comptime::core_event_hook(one(0)?.clone())),
-        ("core.event", "decision_hook") => {
+        ("core.event", "__hook_new") => Ok(crate::Comptime::core_event_hook(one(0)?.clone())),
+        ("core.event", "__decision_hook_new") => {
             Ok(crate::Comptime::core_event_decision_hook(one(0)?.clone()))
         }
-        ("core.event", "async_result") => {
+        ("core.event", "__async_new") => {
             crate::Comptime::core_event_async_result(one(0)?, one(1)?, span)
         }
         // --- core.encoding.json ---

@@ -6413,7 +6413,7 @@ impl<'a> Checker<'a> {
             // D-EVENT1=D: first-party typed Event/Hook family. Constructors are
             // module functions so the semantic family is one Core library surface,
             // not new syntax.
-            ("core.event", "scope") => {
+            ("core.event", "scope" | "__scope_new") => {
                 if !args.is_empty() {
                     self.diags
                         .push(wrong_core_arity("scope", 0, args.len(), span));
@@ -6424,7 +6424,7 @@ impl<'a> Checker<'a> {
                 }
                 return Some(Type::Named(crate::Syntax::TYPE_EVENT_SCOPE.to_string()));
             }
-            ("core.event", "policy_sync") => {
+            ("core.event", "policy_sync" | "__policy_sync") => {
                 if !args.is_empty() {
                     self.diags
                         .push(wrong_core_arity("policy_sync", 0, args.len(), span));
@@ -6460,7 +6460,7 @@ impl<'a> Checker<'a> {
                     args: vec![type_args[0].clone()],
                 });
             }
-            ("core.event", "with_policy") => {
+            ("core.event", "with_policy" | "__event_with_policy") => {
                 if args.len() != 1 {
                     self.diags
                         .push(wrong_core_arity("with_policy", 1, args.len(), span));
@@ -6491,7 +6491,7 @@ impl<'a> Checker<'a> {
                     args: vec![type_args[0].clone()],
                 });
             }
-            ("core.event", "async_result") => {
+            ("core.event", "async_result" | "__async_new") => {
                 if args.len() != 2 {
                     self.diags
                         .push(wrong_core_arity("async_result", 2, args.len(), span));
@@ -6534,7 +6534,7 @@ impl<'a> Checker<'a> {
                     )),
                 });
             }
-            ("core.event", "hook") => {
+            ("core.event", "hook" | "__hook_new") => {
                 if args.len() != 1 {
                     self.diags
                         .push(wrong_core_arity("hook", 1, args.len(), span));
@@ -6561,7 +6561,7 @@ impl<'a> Checker<'a> {
                     args: vec![type_args[0].clone(), type_args[1].clone()],
                 });
             }
-            ("core.event", "decision_hook") => {
+            ("core.event", "decision_hook" | "__decision_hook_new") => {
                 if args.len() != 1 {
                     self.diags
                         .push(wrong_core_arity("decision_hook", 1, args.len(), span));

@@ -25,7 +25,7 @@ pub enum CoreLeafKind {
 
 // BEGIN GENERATED CORE DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 01eaf6c051b07885a77a8d94e6f14f73734385cceff357f6ebf313e686e09b13
+// Source SHA-256: 9f5aed2112cc9e98c2a4dea82d138f3d31ab394310cf4dd31217863b538fb894
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreModuleDeclaration {
     pub module: &'static str,
@@ -356,7 +356,7 @@ const CORE_MODULE_43_MEMBERS: &[&str] = &["XMLCanonical", "XMLCanonicalMode", "X
 const CORE_MODULE_43_TYPES: &[(&str, CoreLeafKind)] = &[("XMLReader", CoreLeafKind::Plain), ("XMLWriter", CoreLeafKind::Plain), ("XMLError", CoreLeafKind::Plain), ("XMLReason", CoreLeafKind::Enum(&["InvalidEncoding", "Malformed", "MismatchedTag", "InvalidName", "Namespace", "DuplicateAttribute", "Entity", "EntityCycle", "Limit", "Canonicalization", "Shape", "Unsupported"])), ("XMLCanonical", CoreLeafKind::Plain), ("XMLCanonicalMode", CoreLeafKind::Enum(&["Inclusive11", "Exclusive10"])), ("XMLEncoding", CoreLeafKind::Enum(&["UTF8", "UTF8BOM", "UTF16LE", "UTF16BE"])), ("XMLEntityPolicy", CoreLeafKind::Enum(&["Preserve", "Reject", "Resolve"])), ("XMLLexicalPolicy", CoreLeafKind::Enum(&["PreserveValid", "Deterministic"])), ("XMLLimits", CoreLeafKind::Plain), ("XMLParseOptions", CoreLeafKind::Plain), ("XMLRenderOptions", CoreLeafKind::Plain)];
 const CORE_MODULE_43_DEPENDENCIES: &[&str] = &["core.encoding"];
 
-const CORE_MODULE_44_MEMBERS: &[&str] = &["async_result", "decision_hook", "hook", "new", "policy_sync", "scope", "with_policy", "Event", "AsyncEvent", "Hook", "DecisionHook", "HookDecision", "HookOutcome", "Subscription", "EventScope", "EventPolicy", "EventTrace", "AsyncPolicy", "Overflow", "FailurePolicy", "DispatchReport", "DispatchFailure", "DispatchState", "HookPolicy", "EventConfigError"];
+const CORE_MODULE_44_MEMBERS: &[&str] = &["async_result", "decision_hook", "hook", "new", "policy_sync", "scope", "with_policy", "Event", "AsyncEvent", "Hook", "DecisionHook", "HookDecision", "HookOutcome", "Subscription", "EventScope", "EventPolicy", "EventTrace", "AsyncPolicy", "Overflow", "FailurePolicy", "DispatchReport", "DispatchFailure", "DispatchState", "HookPolicy", "EventConfigError", "__scope_new", "__decision_hook_new", "__hook_new", "__policy_sync", "__event_with_policy", "__async_new"];
 const CORE_MODULE_44_TYPES: &[(&str, CoreLeafKind)] = &[("Event", CoreLeafKind::Generic(1)), ("AsyncEvent", CoreLeafKind::Generic(2)), ("Hook", CoreLeafKind::Generic(2)), ("DecisionHook", CoreLeafKind::Generic(2)), ("HookDecision", CoreLeafKind::Generic(2)), ("HookOutcome", CoreLeafKind::Generic(2)), ("Subscription", CoreLeafKind::Plain), ("EventScope", CoreLeafKind::Plain), ("EventPolicy", CoreLeafKind::Plain), ("EventTrace", CoreLeafKind::Plain), ("AsyncPolicy", CoreLeafKind::Plain), ("Overflow", CoreLeafKind::Enum(&["Block", "DropNewest", "DropOldest"])), ("FailurePolicy", CoreLeafKind::Enum(&["StopFirst", "Collect", "Log", "Ignore"])), ("DispatchReport", CoreLeafKind::Generic(1)), ("DispatchFailure", CoreLeafKind::Generic(1)), ("DispatchState", CoreLeafKind::Enum(&["Delivered", "HandlerFailed", "DroppedNewest", "DroppedOldest", "Closed", "Cancelled", "DeadlineExceeded"])), ("HookPolicy", CoreLeafKind::Enum(&["FirstCancelElseTransform"])), ("EventConfigError", CoreLeafKind::Enum(&["InvalidCapacity"]))];
 const CORE_MODULE_44_DEPENDENCIES: &[&str] = &["core.mem"];
 
@@ -504,7 +504,7 @@ const CORE_MODULE_80_MEMBERS: &[&str] = &["arch", "atexit", "close_fd", "cpu_cou
 const CORE_MODULE_80_TYPES: &[(&str, CoreLeafKind)] = &[("EnvError", CoreLeafKind::Plain)];
 const CORE_MODULE_80_DEPENDENCIES: &[&str] = &["core.files", "core.process", "core.text.parse"];
 
-const CORE_MODULE_81_MEMBERS: &[&str] = &["after", "current_task", "interval", "yield_now", "Receiver", "TaskState", "delay_ms", "is_interval", "is_timer", "recv", "get", "result", "wait", "channel", "put", "clear", "shutdown", "stop", "reset", "lock", "acquire", "release", "notify", "start", "run", "waitall", "waitany", "is_cancelled", "is_ready", "timeout", "sleep", "try_recv", "cancel", "is_closed", "is_locked", "size", "capacity", "generation", "spawn_name", "__task_paused", "__task_cancelled"];
+const CORE_MODULE_81_MEMBERS: &[&str] = &["after", "current_task", "interval", "yield_now", "Receiver", "TaskState", "delay_ms", "is_interval", "is_timer", "recv", "get", "result", "wait", "channel", "put", "clear", "shutdown", "stop", "reset", "lock", "acquire", "release", "notify", "start", "run", "waitall", "waitany", "is_cancelled", "is_ready", "timeout", "sleep", "try_recv", "cancel", "is_closed", "is_locked", "size", "capacity", "generation", "spawn_name", "__task_paused", "__task_cancelled", "__yield_now"];
 const CORE_MODULE_81_TYPES: &[(&str, CoreLeafKind)] = &[("Receiver", CoreLeafKind::Plain), ("TaskState", CoreLeafKind::Plain)];
 const CORE_MODULE_81_DEPENDENCIES: &[&str] = &["core.time"];
 
@@ -584,7 +584,7 @@ const CORE_MODULE_100_MEMBERS: &[&str] = &["Measurement", "abs", "add", "centi",
 const CORE_MODULE_100_TYPES: &[(&str, CoreLeafKind)] = &[("Measurement", CoreLeafKind::Generic(1))];
 const CORE_MODULE_100_DEPENDENCIES: &[&str] = &["core.math"];
 
-const CORE_MODULE_101_MEMBERS: &[&str] = &["add", "contains", "files", "kind", "len", "port", "process_pid", "remove", "set", "target", "WatchHandle", "WatchSet", "recursive", "debounce", "poll", "events", "cancel", "is_active", "summary", "drain", "WatchDomain", "WatchEventKind", "WatchEvent"];
+const CORE_MODULE_101_MEMBERS: &[&str] = &["add", "contains", "files", "kind", "len", "port", "process_pid", "remove", "set", "target", "WatchHandle", "WatchSet", "recursive", "debounce", "poll", "events", "cancel", "is_active", "summary", "drain", "WatchDomain", "WatchEventKind", "WatchEvent", "__files", "__process_pid", "__port", "__set"];
 const CORE_MODULE_101_TYPES: &[(&str, CoreLeafKind)] = &[("WatchHandle", CoreLeafKind::Plain), ("WatchSet", CoreLeafKind::Plain), ("WatchDomain", CoreLeafKind::Enum(&["File", "Process", "Port"])), ("WatchEventKind", CoreLeafKind::Enum(&["Created", "Modified", "Removed", "Error", "Exited", "Ready"])), ("WatchEvent", CoreLeafKind::Plain)];
 const CORE_MODULE_101_DEPENDENCIES: &[&str] = &["core.files"];
 

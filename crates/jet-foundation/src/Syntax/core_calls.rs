@@ -209,11 +209,11 @@ const fn effect_for(module: &str, method: &str) -> Option<Effect> {
         return None;
     }
     if same_text(module, "core.watcher") {
-        return if same_text(method, "files") {
+        return if one_of(method, &["files", "__files"]) {
             Some(Effect::FS)
-        } else if same_text(method, "process_pid") {
+        } else if one_of(method, &["process_pid", "__process_pid"]) {
             Some(Effect::Exec)
-        } else if same_text(method, "port") {
+        } else if one_of(method, &["port", "__port"]) {
             Some(Effect::Net)
         } else {
             None
@@ -493,7 +493,7 @@ const fn effect_leaf_for(module: &str, method: &str) -> Option<&'static str> {
     if same_text(module, "core.time") && one_of(method, &["sleep", "sleep_until"]) {
         return Some("Time.Wait");
     }
-    if same_text(module, "core.tasks") && same_text(method, "yield_now") {
+    if same_text(module, "core.tasks") && one_of(method, &["yield_now", "__yield_now"]) {
         return Some("Time.Wait");
     }
     if same_text(module, "core.files") && same_text(method, "scope") {
@@ -1550,7 +1550,7 @@ impl CoreCallRecord {
             ("core.files", "read_link") => &[true],
             ("core.files", "read_at") => &[true],
             ("core.files", "write_at") => &[true],
-            ("core.watcher", "files") => &[true],
+            ("core.watcher", "files" | "__files") => &[true],
             ("core.encoding.csv", "query") => &[true],
             ("core.term", "binread") => &[true],
             ("core.term", "binwrite") => &[true],
@@ -1584,7 +1584,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 01eaf6c051b07885a77a8d94e6f14f73734385cceff357f6ebf313e686e09b13
+// Source SHA-256: 9f5aed2112cc9e98c2a4dea82d138f3d31ab394310cf4dd31217863b538fb894
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -1994,7 +1994,8 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.encoding", "__coerce_emit", "jet_raw_json_coerce_emit", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.tasks", "interval", "jet_std::interval", true, &[false], ),
     CoreCallRecord::new("core.tasks", "after", "jet_std::after_value", true, &[false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new( "core.tasks", "yield_now", "jet_std::jet_task_yield", true, &[], ),
+    CoreCallRecord::source_owned("core.tasks", "yield_now", &[]),
+    CoreCallRecord::new("core.tasks", "__yield_now", "jet_std::jet_task_yield", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.tasks", "__task_paused", "jet_scheduler_task_paused", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.tasks", "__task_cancelled", "jet_scheduler_task_cancelled_state", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.tasks", super::INTERNAL_CHANNEL_NEW_METHOD, "jet_std::channel", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
@@ -2004,13 +2005,19 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.reactive.loadable", "loading", "jet_loadable_loading", false, &[]),
     CoreCallRecord::new("core.reactive.loadable", "loaded", "jet_loadable_loaded", false, &[false]),
     CoreCallRecord::new("core.reactive.loadable", "failed", "jet_loadable_failed", false, &[false]),
-    CoreCallRecord::new( "core.event", "scope", "jet_std::JetEventScope::new", true, &[], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new( "core.event", "decision_hook", "jet_std::JetDecisionHook::new", true, &[false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .without_direct_aot(),
-    CoreCallRecord::new("core.event", "hook", "jet_std::JetHook::new", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new( "core.event", "policy_sync", "jet_std::JetEventPolicy::sync", true, &[], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.event", "new", "jet_std::JetEvent::new", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.event", "with_policy", "jet_std::JetEvent::with_policy", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.event", "async_result", "jet_std::JetAsyncEvent::new", true, &[false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::source_owned("core.event", "scope", &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::source_owned("core.event", "decision_hook", &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::source_owned("core.event", "hook", &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::source_owned("core.event", "policy_sync", &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::source_owned("core.event", "new", &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::source_owned("core.event", "with_policy", &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::source_owned("core.event", "async_result", &[false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.event", "__scope_new", "jet_std::JetEventScope::new", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.event", "__decision_hook_new", "jet_std::JetDecisionHook::new", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).without_direct_aot(),
+    CoreCallRecord::new("core.event", "__hook_new", "jet_std::JetHook::new", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.event", "__policy_sync", "jet_std::JetEventPolicy::sync", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.event", "__event_with_policy", "jet_std::JetEvent::with_policy", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.event", "__async_new", "jet_std::JetAsyncEvent::new", true, &[false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.math", "fraction", "jet_fraction_new", true, &[false, false], ) .with_pure_route(CoreCallPureRoute::Math),
     CoreCallRecord::new( "core.math", "decimal", "jet_decimal_from_str", true, &[true], ) .with_pure_route(CoreCallPureRoute::Math),
     CoreCallRecord::new("core.math", "__numeric_stop", "jet_numeric_stop", true, &[true]).with_pure_route(CoreCallPureRoute::Math),
@@ -2095,10 +2102,14 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.files", "__temp_clock_raw", "jet_std::jet_fs_temp_path_sample_raw", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "__process_id_raw", "jet_std_os_pid", true, &[]).with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "__temp_directory_raw", "jet_std::jet_fs_temp_directory_raw", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.watcher", "files", "jet_watcher_files", true, &[true]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new( "core.watcher", "process_pid", "jet_watcher_process_pid", true, &[false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new( "core.watcher", "port", "jet_watcher_port", true, &[true, false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.watcher", "set", "jet_watcher_set", true, &[]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::source_owned("core.watcher", "files", &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::source_owned("core.watcher", "process_pid", &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::source_owned("core.watcher", "port", &[true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::source_owned("core.watcher", "set", &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.watcher", "__files", "jet_watcher_files", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.watcher", "__process_pid", "jet_watcher_process_pid", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.watcher", "__port", "jet_watcher_port", true, &[true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.watcher", "__set", "jet_watcher_set", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.args", "decode", "jet_args_decode", true, &[]),
     CoreCallRecord::new("core.args", "merge", "jet_config_merge", true, &[true, true]),
     CoreCallRecord::new("core.args", "spec", "jet_args_spec", true, &[]),
