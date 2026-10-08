@@ -7,7 +7,7 @@ mkdir: project
 env: JET_REPL_HISTORY=off
 step raw: jet repl --project {work}/project --allow-exec
 pty: true
-limit: time=6s
+limit: time=6
 pty-send: "use core.process as process\r" after 200ms
 pty-send: "#FX(authority: Exec) { process.run([\"sh\", \"-c\", \"trap 'sleep 0.4; exit 130' INT; while :; do :; done\"]) ?? panic(\"run failed\") }\r" after 150ms
 pty-send: "\u0003" after 600ms

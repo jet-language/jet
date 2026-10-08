@@ -5,7 +5,7 @@ fixture: structured_data_database_http_production_paths_handle_success_and_hosti
 env: NO_COLOR=1
 copy: {root}/tests/agent_workloads/manifest.tsv manifest.tsv
 file: manifest.tsv first-line = "version\ttask_id\tdomain\tcase\tdeclared_outcome\tinput\texpected\tauthority\tadapters\tplatforms\tevidence\ttower_card\tloss_cards"
-for line file manifest.tsv.after_first("\n").filter(!= "") as r
+for line file.after_first("\n").filter(!= "") manifest.tsv as r
 write: row.txt = "{r}"
 file: row.txt.append("_").replace("\t", "\n") lines = 13
 capture: version = text file row.txt.split("\t", 0)

@@ -6,7 +6,7 @@ copy: run.jet original.bytes
 step: jet fix run.jet
 env: NO_COLOR=1
 exit: 0
-capture: log stderr after "log: " trim
+capture: log stderr.trim_lines line ^= "log: " # original runtime.rs:139-143 finds the first trimmed line with this prefix
 file: {cap:log} is-file
 file: {cap:log} ~ "\"operation\": \"fix\"" # original predicate
 file: {cap:log} ~ "\"kind\":\"rewrite\"" # original predicate

@@ -3,7 +3,7 @@
 fixture: run_recorded_alias_time_receipt_replays_without_execution.fixture
 step: jet run main.jet --record=causal -- recorded-arg
 exit: 0
-capture: epoch stdout.filter(^= "recorded-") after "recorded-"
+capture: epoch stdout.filter(^= "recorded-") after "recorded-" # original prove.rs:343-347 strips this prefix from the first matching line
 cap:epoch: is-i64 # original parse::<i64>().is_ok()
 stdout.filter(= "recorded-arg"): lines >= 1 # original lines().any equality
 file: .jet/replays/causal.jetproof-replay is-file

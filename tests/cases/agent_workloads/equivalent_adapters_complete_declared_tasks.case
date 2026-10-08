@@ -32,7 +32,7 @@ exit: 0
 stdout+stderr: len <= 1048576
 copy: {root}/tests/agent_workloads/baselines/receipt.tsv pins.tsv
 file: pins.tsv first-line = "version\trun_id\tmachine\tadapter\ttask_id\texpressibility\tfinding\tinput_sha256\texpected_sha256\texit_code\tsource_tokens\tstdout_file\tstdout_sha256\tstderr_file\tstderr_sha256\tcold_ns\twarm_ns\twarm_stdout_sha256\twarm_stderr_sha256\toutput_stable\tscoring\ttool_version\tpolicy_digest"
-for line file pins.tsv.after_first("\n").filter(!= "") as pin
+for line file.after_first("\n").filter(!= "") pins.tsv as pin
 write: pin.row = "{pin}"
 file: pin.row.append("_").replace("\t", "\n") lines = 23
 capture: adapter = text file pin.row.split("\t", 3)
@@ -67,7 +67,7 @@ capture: policy_receipt = prefixed file policy.tsv "receipt="
 capture: policy_authority = prefixed file policy.tsv "authority="
 copy: {root}/tests/agent_workloads/manifest.tsv manifest.tsv
 file: manifest.tsv first-line = "version\ttask_id\tdomain\tcase\tdeclared_outcome\tinput\texpected\tauthority\tadapters\tplatforms\tevidence\ttower_card\tloss_cards"
-for line file manifest.tsv.after_first("\n").filter(!= "") as row
+for line file.after_first("\n").filter(!= "") manifest.tsv as row
 write: task.row = "{row}"
 file: task.row.append("_").replace("\t", "\n") lines = 13
 capture: version = text file task.row.split("\t", 0)

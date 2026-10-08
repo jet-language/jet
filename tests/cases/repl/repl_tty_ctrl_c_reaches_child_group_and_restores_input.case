@@ -7,7 +7,7 @@ requires: os-name:linux
 mkdir: project
 step raw: jet repl --project {work}/project --allow-exec
 pty: true
-limit: time=8s
+limit: time=8
 pty-send: "use core.process as process\r" after 200ms
 pty-send: "#FX(authority: Exec) { process.run([\"sh\", \"-c\", \"trap 'printf done > child-exited.txt; exit 130' INT; printf $$ > child.pid; while :; do :; done\"]) ?? panic(\"run failed\") }\r" after 200ms
 pty-send: "\u0003" after 800ms
