@@ -2384,19 +2384,21 @@ fn jet_driver_empty_core_identifier_demand() -> JetDriverCoreIdentifierDemand Ne
     JetDriverCoreIdentifierDemand{bare_names: [String]{}, option_or_err: false}
 }
 
-fn jet_driver_collect_core_identifier_demand(tokens: [Token], demand: &JetDriverCoreIdentifierDemand) Never! {
+fn jet_driver_collect_core_identifier_demand(tokens: [Token], demand: &JetDriverCoreIdentifierDemand, collect_bare: Bool) Never! {
     loop index in 0..<tokens.len() {
         if tokens[index].kind == TOKEN_IDENT {
             if tokens[index].payload.decoded == "or_err" -> demand.option_or_err = true
-            loop bare in CORE_BARE_SOURCE_MODULES {
-                if tokens[index].payload.decoded == bare.name || (bare.name == "URL" && tokens[index].payload.decoded == "url") {
-                    if !demand.bare_names.contains(bare.name) -> &demand.bare_names.push(bare.name)
+            if collect_bare {
+                loop bare in CORE_BARE_SOURCE_MODULES {
+                    if tokens[index].payload.decoded == bare.name || (bare.name == "URL" && tokens[index].payload.decoded == "url") {
+                        if !demand.bare_names.contains(bare.name) -> &demand.bare_names.push(bare.name)
+                    }
                 }
             }
         }
         loop part_index in 0..<tokens[index].payload.string_parts.len() {
             if tokens[index].payload.string_parts[part_index].kind == STRING_PART_INTERPOLATION {
-                jet_driver_collect_core_identifier_demand(tokens[index].payload.string_parts[part_index].tokens, &demand)
+                jet_driver_collect_core_identifier_demand(tokens[index].payload.string_parts[part_index].tokens, &demand, collect_bare)
             }
         }
     }
@@ -2410,7 +2412,7 @@ fn jet_driver_parse_user_unit(text: String, retain_demand: Bool) -> JetDriverPar
     source :: if carrier.found -> jet_driver_mask_inline_package(text, carrier).bytes() else -> text.bytes()
     lexed :: lex(source)
     demand := jet_driver_empty_core_identifier_demand()
-    if retain_demand -> jet_driver_collect_core_identifier_demand(lexed.tokens, &demand)
+    if retain_demand -> jet_driver_collect_core_identifier_demand(lexed.tokens, &demand, true)
     parsed :: parse_lexed_with_source(lexed, source, parser_line_starts(source))
     JetDriverParsedUnit{parsed: ^parsed, demand: ^demand}
 }
@@ -2465,7 +2467,7 @@ fn jet_driver_parse_core_source(text: String, owned_members: [String]) -> JetDri
     source :: jet_driver_mask_inline_package(text, jet_driver_inline_package(text)).bytes()
     lexed :: lex_generated(source)
     demand := jet_driver_empty_core_identifier_demand()
-    jet_driver_collect_core_identifier_demand(lexed.tokens, &demand)
+    jet_driver_collect_core_identifier_demand(lexed.tokens, &demand, false)
     parsed := parse_lexed_with_source(lexed, source, parser_line_starts(source))
     kept := [Item]{}
     loop item in parsed.program.items {
