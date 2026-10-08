@@ -6687,9 +6687,10 @@ fn jet_codegen_lower_index_hook_failure(builder: &JetCodegenBuilder, program: Je
         &args.push(argument)
         source_index += 1
     }
-    jet_codegen_emit_explicit_stop_cleanups(&builder, program)
+    propagated :: jet_codegen_can_emit_propagate(builder, program)
+    if !propagated -> jet_codegen_emit_explicit_stop_cleanups(&builder, program)
     _ := jet_codegen_emit_value(&builder, program, span, never, MIROperation.Call{callee: MIRCallee.Prelude{call: call}, args: args, type_args: [MIRType]{}})
-    jet_codegen_terminate(&builder, program, MIRTerminator.Unreachable{reason: "index miss"})
+    jet_codegen_terminate_program_stop(&builder, program, propagated, "index miss")
 }
 
 fn jet_codegen_lower_index_hook(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, base: TExpr, index: TExpr, line: Int, checked_call: SymbolID?) -> MIRValueID {

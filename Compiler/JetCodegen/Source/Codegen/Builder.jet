@@ -1145,8 +1145,7 @@ fn jet_codegen_switch_block(builder: &JetCodegenBuilder, program: JetCodegenProg
 // Shield suppresses Check, but Propagate must carry panics/runtime faults;
 // the runtime masks only cancellation/deadline/interrupt-class stops.
 fn jet_codegen_emit_poll(builder: &JetCodegenBuilder, program: JetCodegenProgram, kind: MIRPollKind) Never! {
-    if !program.stop_points || builder.stop_cleanup_active || builder.transactions.len() > 0 -> return
-    if !jet_codegen_current_is_open(builder, program) -> return
+    if !jet_codegen_can_emit_propagate(builder, program) -> return
     if kind == MIRPollKind.Check && jet_codegen_in_shield(builder) -> return
     span :: builder.current_span
     resume :: jet_codegen_new_block(&builder, program, span, "poll-resume")
@@ -1155,6 +1154,17 @@ fn jet_codegen_emit_poll(builder: &JetCodegenBuilder, program: JetCodegenProgram
     builder.current = stop
     _ := jet_codegen_terminate_with_owned_cleanup(&builder, program, MIRTerminator.Stopped, -1)
     builder.current = resume
+}
+
+// Shared with explicit program-side stops: skip pre-call cleanup only when
+// the operation's actual Propagate edge will own the canonical cleanup.
+fn jet_codegen_can_emit_propagate(builder: JetCodegenBuilder, program: JetCodegenProgram) -> Bool Never! {
+    program.stop_points && !builder.stop_cleanup_active && builder.transactions.len() == 0 && jet_codegen_current_is_open(builder, program)
+}
+
+fn jet_codegen_terminate_program_stop(builder: &JetCodegenBuilder, program: JetCodegenProgram, propagated: Bool, reason: String) Never! {
+    if propagated -> jet_codegen_terminate(&builder, program, MIRTerminator.Stopped)
+    else -> jet_codegen_terminate(&builder, program, MIRTerminator.Unreachable{reason: reason})
 }
 
 // The entry of a stop-point function, after its parameters are bound: a

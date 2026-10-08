@@ -421,9 +421,10 @@ fn jet_codegen_lower_conditional_stop(builder: &JetCodegenBuilder, program: JetC
     failure := jet_codegen_new_block(&builder, program, span, "{role}-failure")
     jet_codegen_terminate(&builder, program, MIRTerminator.Branch{condition: condition, then_target: success, else_target: failure})
     jet_codegen_switch_block(&builder, program, failure)
-    jet_codegen_emit_explicit_stop_cleanups(&builder, program)
+    propagated :: jet_codegen_can_emit_propagate(builder, program)
+    if !propagated -> jet_codegen_emit_explicit_stop_cleanups(&builder, program)
     _ := jet_codegen_emit_value(&builder, program, span, result_type, MIROperation.Semantic{operation: MIRSemanticOp.RequireStop{call: call, kind: kind, condition: Val(condition), location: location, context: context, values: values, always_stops: true}})
-    jet_codegen_terminate(&builder, program, MIRTerminator.Unreachable{reason: "checked conditional stop"})
+    jet_codegen_terminate_program_stop(&builder, program, propagated, "checked conditional stop")
     jet_codegen_switch_block(&builder, program, success)
     jet_codegen_emit_value(&builder, program, span, result_type, MIROperation.Constant{value: MIRConstant.Unit})
 }
@@ -2498,9 +2499,10 @@ fn jet_codegen_lower_fallback_panic(builder: &JetCodegenBuilder, program: JetCod
     }
     panic_location := MIRPanicLoc{file: mir_source_file_id(location.file), line: location.line, column: location.column}
     context := MIRPanicContext{function: builder.function.name, source_line: location.source_line, caret: location.caret, locals: locals}
-    jet_codegen_emit_explicit_stop_cleanups(&builder, program)
+    propagated :: jet_codegen_can_emit_propagate(builder, program)
+    if !propagated -> jet_codegen_emit_explicit_stop_cleanups(&builder, program)
     _ := jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.RequireStop{call: call, kind: MIRRequireKind.Panic, condition: None, location: panic_location, context: context, values: [MIRValueID]{value}, always_stops: true}})
-    jet_codegen_terminate(&builder, program, MIRTerminator.Unreachable{reason: "checked fallback panic"})
+    jet_codegen_terminate_program_stop(&builder, program, propagated, "checked fallback panic")
 }
 
 fn jet_codegen_lower_fallback_route(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, fallback: TOrFallback) -> MIRValueID? {
@@ -2937,9 +2939,10 @@ fn jet_codegen_lower_env_set(builder: &JetCodegenBuilder, program: JetCodegenPro
     }
     panic_location := MIRPanicLoc{file: mir_source_file_id(location.file), line: location.line, column: location.column}
     context := MIRPanicContext{function: builder.function.name, source_line: location.source_line, caret: location.caret, locals: locals}
-    jet_codegen_emit_explicit_stop_cleanups(&builder, program)
+    propagated :: jet_codegen_can_emit_propagate(builder, program)
+    if !propagated -> jet_codegen_emit_explicit_stop_cleanups(&builder, program)
     _ := jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.RequireStop{call: stop_call, kind: MIRRequireKind.Require, condition: Val(condition), location: panic_location, context: context, values: [MIRValueID]{shown}, always_stops: true}})
-    jet_codegen_terminate(&builder, program, MIRTerminator.Unreachable{reason: "environment update failure"})
+    jet_codegen_terminate_program_stop(&builder, program, propagated, "environment update failure")
     jet_codegen_switch_block(&builder, program, join)
     jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Constant{value: MIRConstant.Unit})
 }
@@ -3153,9 +3156,10 @@ fn jet_codegen_lower_require_stop(builder: &JetCodegenBuilder, program: JetCodeg
     if condition == .Val(condition_value) && !always_stops {
         return jet_codegen_lower_conditional_stop(&builder, program, expression.span, expression.ty, call, operation, condition_value, panic_location, context, values, "require-stop")
     }
-    jet_codegen_emit_explicit_stop_cleanups(&builder, program)
+    propagated :: jet_codegen_can_emit_propagate(builder, program)
+    if !propagated -> jet_codegen_emit_explicit_stop_cleanups(&builder, program)
     result := jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.RequireStop{call: call, kind: operation, condition: condition, location: panic_location, context: context, values: values, always_stops: always_stops}})
-    if always_stops -> jet_codegen_terminate(&builder, program, MIRTerminator.Unreachable{reason: "checked unconditional stop"})
+    if always_stops -> jet_codegen_terminate_program_stop(&builder, program, propagated, "checked unconditional stop")
     result
 }
 

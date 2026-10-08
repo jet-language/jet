@@ -6708,13 +6708,27 @@ impl<'a> LowerCtx<'a> {
         }
     }
 
+    /// The exact emission predicate also decides whether a program stop's
+    /// cleanup belongs before the call or on its real Propagate edge.
+    pub(super) fn can_emit_propagate(&self) -> bool {
+        self.function_registry.stop_points && !self.stop_cleanup_active
+            && self.transaction_restores.is_empty() && !self.is_terminated()
+    }
+
+    pub(super) fn terminate_program_stop(&mut self, propagated: bool, reason: &str) {
+        self.terminate(if propagated {
+            MirTerminator::Stopped
+        } else {
+            MirTerminator::Unreachable { reason: reason.to_string() }
+        });
+    }
+
     /// Never read a can-stop result on the stop edge. Only the resume edge
     /// binds it into a lexical frame; Stopped exits through that frame's
     /// ordinary drop chain. Cleanup and transaction bodies are masked; Shield
     /// suppresses Check only, since Propagate must carry panic/runtime faults.
     pub(super) fn emit_poll(&mut self, kind: MirPollKind) -> Result<(), LowerError> {
-        if !self.function_registry.stop_points || self.stop_cleanup_active
-            || !self.transaction_restores.is_empty() || self.is_terminated()
+        if !self.can_emit_propagate()
             || (kind == MirPollKind::Check && self.defer_stack.iter().filter_map(|frame| frame.owner).any(|owner| {
                 self.scopes.iter().any(|scope| scope.id == owner && scope.kind == MirScopeKind::Shield)
             }))
@@ -10820,7 +10834,10 @@ impl<'a> LowerCtx<'a> {
                 place: None,
             })
             .collect::<Vec<_>>();
-        self.emit_deferred_cleanups(0)?;
+        let propagated = self.can_emit_propagate();
+        if !propagated {
+            self.emit_deferred_cleanups(0)?;
+        }
         self.emit(
             &format!("index-miss.panic.{}", self.current.0),
             Some(never),
@@ -10830,9 +10847,7 @@ impl<'a> LowerCtx<'a> {
                 type_args: Vec::new(),
             },
         )?;
-        self.terminate(MirTerminator::Unreachable {
-            reason: "index miss".to_string(),
-        });
+        self.terminate_program_stop(propagated, "index miss");
         Ok(())
     }
     fn capture_facts_for(&self, lambda: &TLambda) -> MirCaptureFacts {

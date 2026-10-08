@@ -31,6 +31,18 @@ runner restores the body word through `scheduler_body_leave(body)` after
 `coll_call2` (`Compiler/JetRuntime/Source/Task.jet`). A process-fatal call does
 not resume the scheduler and therefore needs no surviving capability restore.
 
+Program-side require, panic, and index-miss producers run registered cleanup
+before the call only when they cannot emit a real Propagate (plain mode,
+cleanup-masked code, transactions, or a closed block). Otherwise the Poll stop
+edge owns that cleanup exactly once, and an unconditional stop's impossible
+resume seals `Stopped`. This minimal runtime-port seam is mirrored in
+`crates/jet-codegen/src/Codegen/TIR/{mir,tir_to_mir_expr}.rs`; that seed and
+verification mirror dies at the Rust cutover.
+The Rust seed's plain `TOrFallback::Panic` path in `tir_to_mir_expr.rs`
+emits RequireStop then Unreachable without pre-call cleanup, unlike the Jet
+`jet_codegen_lower_fallback_panic` path in `Statements.jet`. This seam preserves
+that pre-existing plain-mode divergence rather than changing seed semantics.
+
 ## Purpose and scope
 
 Core modules own public behavior. A Core API must be useful for real programs,
