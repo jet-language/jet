@@ -1237,3 +1237,129 @@ fn comptime_qualified_module_function_call_reaches_its_body() {
         value => panic!("qualified call initializer produced {value:?}"),
     }
 }
+
+#[test]
+fn enum_leaf_member_calls_keep_method_nodes_and_groups_build_children() {
+    let scratch = common::Scratch::new("enum_leaf_member_boundary");
+    let source = r#"
+enum Choice {
+    Empty
+    Branch { Leaf(Int), Nested { Tip(Int), Unit } }
+}
+impl Choice {
+    fn measure(self) -> Int { 7 }
+}
+fn run() {
+    text :: DataTree.Null.to_text()
+    equal :: DataTree.Null.equal_unordered(DataTree.Null)
+    empty :: Choice.Empty.measure()
+    unit :: Choice.Branch.Nested.Unit.measure()
+    leaf :: Choice.Branch.Leaf(2)
+    tip :: Choice.Branch.Nested.Tip(3)
+}
+"#;
+    let path = scratch.join("main.jet");
+    fs::write(&path, source).unwrap();
+    let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Check);
+    assert!(diagnostics.iter().all(|diagnostic|
+        diagnostic.severity != jet::Diagnostics::Severity::Error), "{diagnostics:#?}");
+    let run = bundle.modules[bundle.entry].items.iter().find_map(|item| match item {
+        jet::AST::Item::Func(function) if function.name == "run" => Some(function),
+        _ => None,
+    }).unwrap();
+    for (binding_name, method_name) in [
+        ("text", "to_text"), ("equal", "equal_unordered"), ("empty", "measure"), ("unit", "measure"),
+    ] {
+        let initializer = run.body.iter().find_map(|statement| match statement {
+            jet::AST::Stmt::Val(binding) if binding.name == binding_name => Some(&binding.init),
+            _ => None,
+        }).unwrap();
+        assert!(matches!(initializer, jet::AST::Expr::MethodCall { method, .. } if method == method_name),
+            "leaf {binding_name} was normalized as a constructor: {initializer:#?}");
+    }
+    for (binding_name, variant_name) in [("leaf", "Branch.Leaf"), ("tip", "Branch.Nested.Tip")] {
+        let initializer = run.body.iter().find_map(|statement| match statement {
+            jet::AST::Stmt::Val(binding) if binding.name == binding_name => Some(&binding.init),
+            _ => None,
+        }).unwrap();
+        assert!(matches!(initializer, jet::AST::Expr::EnumLit { variant, .. } if variant == variant_name),
+            "group child {binding_name} was not normalized: {initializer:#?}");
+    }
+}
+
+#[test]
+fn imported_enum_groups_use_canonical_facts_and_local_values_shadow_types() {
+    let scratch = common::Scratch::new("imported_enum_member_boundary");
+    let source = r#"
+#NoPrelude
+use "tags"
+use tags.Choice
+struct Holder { pub Empty: Choice }
+fn run() {
+    alias_empty :: tags.Choice.Empty.measure()
+    imported_empty :: Choice.Empty.measure()
+    alias_leaf :: tags.Choice.Branch.Leaf(2)
+    imported_tip :: Choice.Branch.Nested.Tip(3)
+    holder :: Holder{Empty: Choice.Empty}
+    Choice :: holder
+    shadowed :: Choice.Empty.measure()
+}
+"#;
+    let tags = r#"
+#NoPrelude
+pub enum Choice {
+    Empty
+    Branch { Leaf(Int), Nested { Tip(Int) } }
+}
+impl Choice {
+    pub fn measure(self) -> Int { 7 }
+}
+"#;
+    let path = scratch.join("main.jet");
+    fs::write(&path, source).unwrap();
+    fs::write(scratch.join("tags.jet"), tags).unwrap();
+    let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Check);
+    assert!(diagnostics.iter().all(|diagnostic|
+        diagnostic.severity != jet::Diagnostics::Severity::Error), "{diagnostics:#?}");
+    let run = bundle.modules[bundle.entry].items.iter().find_map(|item| match item {
+        jet::AST::Item::Func(function) if function.name == "run" => Some(function),
+        _ => None,
+    }).unwrap();
+    for (binding_name, variant_name) in [("alias_leaf", "Branch.Leaf"), ("imported_tip", "Branch.Nested.Tip")] {
+        let initializer = run.body.iter().find_map(|statement| match statement {
+            jet::AST::Stmt::Val(binding) if binding.name == binding_name => Some(&binding.init),
+            _ => None,
+        }).unwrap();
+        assert!(matches!(initializer, jet::AST::Expr::EnumLit { type_name, variant, .. }
+            if type_name.contains("::") && variant == variant_name), "{initializer:#?}");
+    }
+    for binding_name in ["alias_empty", "imported_empty", "shadowed"] {
+        let initializer = run.body.iter().find_map(|statement| match statement {
+            jet::AST::Stmt::Val(binding) if binding.name == binding_name => Some(&binding.init),
+            _ => None,
+        }).unwrap();
+        assert!(matches!(initializer, jet::AST::Expr::MethodCall { method, .. } if method == "measure"),
+            "{initializer:#?}");
+    }
+}
+
+#[test]
+fn enum_group_value_and_bad_child_errors_do_not_turn_leaves_into_constructors() {
+    for (label, source, expected_code) in [
+        ("enum_group_value", "#NoPrelude\nenum Choice { Branch { Leaf(Int) } }\nfn run() { value :: Choice.Branch }\n", "E0332"),
+        ("enum_group_bad_child", "#NoPrelude\nenum Choice { Branch { Leaf(Int) } }\nfn run() { value :: Choice.Branch.Missing(1) }\n", "E0304"),
+        ("enum_leaf_bad_method", "#NoPrelude\nenum Choice { Empty }\nfn run() { value :: Choice.Empty.Missing() }\n", "E0102"),
+    ] {
+        let scratch = common::Scratch::new(label);
+        let path = scratch.join("main.jet");
+        fs::write(&path, source).unwrap();
+        let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
+        let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Check);
+        let errors = diagnostics.iter().filter(|diagnostic|
+            diagnostic.severity == jet::Diagnostics::Severity::Error)
+            .map(|diagnostic| diagnostic.code.to_string()).collect::<Vec<_>>();
+        assert_eq!(errors, [expected_code], "{label}: {diagnostics:#?}");
+    }
+}

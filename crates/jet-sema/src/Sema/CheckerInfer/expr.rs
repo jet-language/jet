@@ -5153,7 +5153,7 @@ impl<'a> Checker<'a> {
                 // `Enum.Variant` keeps its existing Field route (unchanged Rust).
                 // D-MOD2: an alias-qualified enum (`types.Kind.Alpha`) always
                 // folds, because the Field route has no module-alias hop.
-                if let Some((type_name, variant)) = self.fold_enum_variant_path(e) {
+                if let Some((type_name, variant)) = self.fold_enum_variant_path(e, false) {
                     if variant.contains('.') || (type_name.contains("::") && !variant.is_empty()) {
                         let ty = self.check_enum_lit(&type_name, &variant, &mut [], span, None);
                         *e = Expr::EnumLit {
@@ -5323,7 +5323,7 @@ impl<'a> Checker<'a> {
                     && type_args.is_empty()
                     && args.iter().all(|a| a.label.is_none())
                 {
-                    if let Some((type_name, prefix)) = self.fold_enum_variant_path(receiver) {
+                    if let Some((type_name, prefix)) = self.fold_enum_variant_path(receiver, true) {
                         let variant = if prefix.is_empty() {
                             method.clone()
                         } else {
