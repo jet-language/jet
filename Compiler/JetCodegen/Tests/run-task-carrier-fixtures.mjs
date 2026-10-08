@@ -25,6 +25,7 @@ const definitions = [
   ...["fn jet_codegen_handle_route(", "fn jet_codegen_handle_core(", "fn jet_codegen_handle_type_without_tags(", "fn jet_codegen_handle_task_route("].map((head) => item(handles, head)),
   item("Compiler/JetCodegen/Source/Codegen/Expressions.jet", "fn jet_codegen_failure_carrier_for_type("),
   item(taskgroups, "fn sema_taskgroup_failure_result("),
+  item(taskgroups, "fn sema_taskgroup_task_element("),
 ];
 const foundation = readFileSync(join(rungs, "L1/project/src/compiler.jet"), "utf8");
 const fixtures = readFileSync(join(repo, "Compiler/JetCodegen/Tests/TaskCarrierFixtures.jet"), "utf8");

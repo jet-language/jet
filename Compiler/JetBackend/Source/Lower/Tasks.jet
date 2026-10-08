@@ -128,9 +128,9 @@ fn lower_task_kind(kind: MIRTaskGroupKind) -> Int Never! {
 }
 
 // `task.all` / `task.any` / `task.race` over one List of tasks or of SendFn
-// bodies (spawned first); `*_result` routes flatten `T E!` bodies.
+// bodies (spawned first); the checked worker element remains the payload.
 fn lower_task_group(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, kind: MIRTaskGroupKind, tasks: [MIRValueID]) Never! {
-    row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "task group names missing Prelude call {call.value}")
+    _ :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "task group names missing Prelude call {call.value}")
     if kind != .All -> return lower_fail(&m, &f, "task.any/task.race cancellation across native frames is not lowered at O0 yet")
     if tasks.len() != 1 -> return lower_fail(&m, &f, "task group over {tasks.len()} operands is not lowered at O0 yet")
     list_ty :: lower_value_type(c, tasks[0]) ?? return lower_fail(&m, &f, "task group operand has no checked type")
@@ -141,7 +141,6 @@ fn lower_task_group(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
     ok := MIRType?{None}
     if result_ty.kind == .Result(success, _) -> ok = Val(success)
     ok_ty :: ok ?? return lower_fail(&m, &f, "task group result {mir_type_display_name(result_ty)} is not lowered at O0 yet")
-    flatten :: lower_runtime_symbol(row).ends_with("_result")
     spawn := false
     body := MIRType?{None}
     if lower_task_element(elem) == .Val(inner) {
@@ -152,12 +151,12 @@ fn lower_task_group(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
     }
     body_ty :: body ?? return lower_fail(&m, &f, "task group element {mir_type_display_name(elem)} is not lowered at O0 yet")
     list :: lower_use(&m, &f, tasks[0]) ?? return
-    body_meta :: lower_task_body_meta(p, &m, &f, body_ty, flatten)
+    body_meta :: lower_task_body_meta(p, &m, &f, body_ty, false)
     zero :: lower_const(&f, 0)
     invoke :: if spawn -> lower_lazy_helper_address(&m, &f, "task.body", elem) else -> zero
     release :: if spawn -> lower_lazy_helper_address(&m, &f, "task.release", elem) else -> zero
     ok_meta :: lower_lazy_meta(p, &m, &f, ok_ty)
-    args :: [LIRValueID]{lower_const(&f, lower_task_kind(kind)), lower_const_flag(&f, if flatten -> 1 else -> 0), list, lower_const_flag(&f, if spawn -> 1 else -> 0), body_meta, invoke, release, ok_meta}
+    args :: [LIRValueID]{lower_const(&f, lower_task_kind(kind)), lower_const_flag(&f, 0), list, lower_const_flag(&f, if spawn -> 1 else -> 0), body_meta, invoke, release, ok_meta}
     lower_task_outcome(p, c, &m, &f, instruction, "jet_rt_native_task_group", args, result_ty)
 }
 

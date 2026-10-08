@@ -3937,6 +3937,125 @@ fn run() {
     assert_eq!(names, ["z", "a"]);
 }
 
+/// Removing metadata-based group normalization must not widen ordinary
+/// expression-bodied tasks or literal siblings to Result elements.
+#[test]
+fn task_group_expression_branches_keep_scalar_elements() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let source = r#"
+fn work() -> Int { 7 }
+fn run() {
+    values :: task.all {work(), work()} ?? []
+    raced :: task.race {work(), 1} ?? 0
+    first :: task.any {work(), 2} ?? 0
+    print(values[0], raced, first)
+}
+"#;
+        let (mir, _) = emitted_rust(source);
+        let mut groups = 0;
+        for call in &mir.prelude_calls {
+            if !matches!(
+                call.symbol.name(),
+                "jet_std::jet_task_all" | "jet_std::jet_task_race" | "jet_std::jet_task_any"
+            ) {
+                continue;
+            }
+            let success = match &call.fallibility {
+                jet_foundation::MIR::MirCallFallibility::Failure(
+                    jet_foundation::MIR::MirFailureCarrier::Result { success, .. },
+                ) => success,
+                _ => panic!("a task group must retain its waiting failure carrier"),
+            };
+            use jet_foundation::MIR::MirTypeKind;
+            match &success.kind {
+                MirTypeKind::List(element) => assert!(matches!(element.kind, MirTypeKind::Int)),
+                other => assert!(matches!(other, MirTypeKind::Int)),
+            }
+            groups += 1;
+        }
+        assert_eq!(
+            groups, 3,
+            "all, race, and any must preserve the scalar element"
+        );
+    });
+}
+
+/// I3: all/race/any add a TaskFailure rail around the checked worker element,
+/// rather than guessing a flattening route from the element's Result shape.
+#[test]
+fn task_groups_preserve_checked_worker_results() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let source = r#"
+fn report() -> String Never! { "done" }
+#Error
+enum WorkerError { Bad }
+fn fallible_report() -> String WorkerError! { Ok("done") }
+fn fail() -> String WorkerError! { Err(WorkerError.Bad) }
+fn run() {
+    values :: task.all {{ report() }, { report() }} ?? panic("all failed")
+    named :: task.all {z: { report() }, a: { report() }} ?? panic("named all failed")
+    raced :: task.race {{ report() }, { report() }} ?? panic("race failed")
+    first :: task.any {{ report() }, { report() }} ?? panic("any failed")
+    expression_values :: task.all {fallible_report(), fallible_report()} ?? panic("all failed")
+    expression_raced :: task.race {fallible_report(), fallible_report()} ?? panic("race failed")
+    expression_first :: task.any {fallible_report(), fallible_report()} ?? panic("any failed")
+    print(values[0] ?? panic("worker failed"))
+    print(named.z ?? panic("worker failed"))
+    print(raced ?? panic("worker failed"))
+    print(first ?? panic("worker failed"))
+    print(expression_values[0] ?? panic("worker failed"))
+    print(expression_raced ?? panic("worker failed"))
+    print(expression_first ?? panic("worker failed"))
+    worker :: task fail()
+    joined :: ^worker.join() ?? panic("join failed")
+    print(joined ?? "worker failed")
+}
+"#;
+        let (mir, rust) = emitted_rust(source);
+        let mut groups = 0;
+        for call in &mir.prelude_calls {
+            let name = call.symbol.name();
+            if !matches!(
+                name,
+                "jet_std::jet_task_all" | "jet_std::jet_task_race" | "jet_std::jet_task_any"
+            ) {
+                continue;
+            }
+            let success = match &call.fallibility {
+                jet_foundation::MIR::MirCallFallibility::Failure(
+                    jet_foundation::MIR::MirFailureCarrier::Result { success, .. },
+                ) => success,
+                _ => panic!("a task group must retain its waiting failure carrier"),
+            };
+            use jet_foundation::MIR::MirTypeKind;
+            match &success.kind {
+                MirTypeKind::List(element) => {
+                    assert!(matches!(element.kind, MirTypeKind::Result { .. }));
+                }
+                MirTypeKind::Tuple(fields) => {
+                    assert!(fields
+                        .iter()
+                        .all(|(_, field)| matches!(field.kind, MirTypeKind::Result { .. })));
+                }
+                other => assert!(matches!(other, MirTypeKind::Result { .. })),
+            }
+            groups += 1;
+        }
+        assert_eq!(
+            groups, 7,
+            "block and expression workers must retain Result elements on direct routes"
+        );
+        for name in [
+            "jet_task_all_result",
+            "jet_task_race_result",
+            "jet_task_any_result",
+            "jet_task_join_result",
+        ] {
+            assert!(!rust.contains(name), "{rust}");
+        }
+    });
+}
+
 /// #4790 / I3: a task lambda must retain sema's Never error carrier when
 /// stored in a typed task list, not inherit its enclosing callable's Err.
 #[test]

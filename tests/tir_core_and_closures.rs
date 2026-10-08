@@ -65,6 +65,57 @@ fn run() {
     assert_eq!(stdout, "joined\n");
 }
 
+/// A worker's ordinary error remains an inner Result, not TaskFailure.Panicked.
+/// Successful workers likewise retain their Never carrier through every group.
+#[test]
+fn task_groups_preserve_worker_results_builds_and_runs() {
+    if !have_rustc() {
+        return;
+    }
+    let source = r#"
+#Error
+enum WorkerError { Bad }
+fn report() -> String Never! { "done" }
+fn fail() -> String WorkerError! { Err(WorkerError.Bad) }
+fn run() {
+    values :: task.all {{ report() }, { report() }} ?? panic("all failed")
+    print(values[0] ?? panic("infallible worker"))
+    print(values[1] ?? panic("infallible worker"))
+    named :: task.all {z: { report() }, a: { report() }} ?? panic("named all failed")
+    print(named.z ?? panic("infallible worker"))
+    print(named.a ?? panic("infallible worker"))
+    raced :: task.race {{ report() }, { report() }} ?? panic("race failed")
+    print(raced ?? panic("infallible worker"))
+    first :: task.any {{ report() }, { report() }} ?? panic("any failed")
+    print(first ?? panic("infallible worker"))
+    failures :: task.all {{ fail() }, { fail() }} ?? panic("worker error became a waiting failure")
+    loop result in failures {
+        if result == {
+            .Err(error) -> {
+                if error == {
+                    .Bad -> print("worker error")
+                }
+            }
+            .Ok(_) -> panic("worker error was lost")
+        }
+    }
+    worker :: task fail()
+    joined :: ^worker.join() ?? panic("worker error became a waiting failure")
+    if joined == {
+        .Err(error) -> {
+            if error == {
+                .Bad -> print("joined worker error")
+            }
+        }
+        .Ok(_) -> panic("joined worker error was lost")
+    }
+}
+"#;
+    let (code, stdout) = build_and_run("task_groups_preserve_worker_results", source);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "done\ndone\ndone\ndone\ndone\ndone\nworker error\nworker error\njoined worker error\n");
+}
+
 /// c109 Phase 10: core/stdlib module calls route through the TIR. `math.*`,
 /// `Path.join`, and `crypto.sha256` are type-monomorphic (in `core_fixed_sig`),
 /// so `calc`/`make_path`/`hash`/`main` are all covered. The call forms

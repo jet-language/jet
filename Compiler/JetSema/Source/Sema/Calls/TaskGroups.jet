@@ -373,17 +373,10 @@ fn sema_taskgroup_failure_result(ok: Type) -> Type Never! {
     Type.Result{ok: ok, err: Type.Named{name: "TaskFailure"}}
 }
 
-fn sema_taskgroup_success_type(ty: Type) -> Type Never! {
-    return if ty == {
-        .Result(ok, _) -> ok
-        else -> ty
-    }
-}
-
-fn sema_taskgroup_task_success(ty: Type) -> Type? {
+fn sema_taskgroup_task_element(ty: Type) -> Type? {
     if ty == {
         .Apply(name, args) -> {
-            if name == "Task" && args.len() == 1 -> return Val(sema_taskgroup_success_type(args[0]))
+            if name == "Task" && args.len() == 1 -> return Val(args[0])
         }
         else -> {}
     }
@@ -631,7 +624,7 @@ fn sema_taskgroup_check_branches(args: [CallArg], span: Span, method: String, al
     result_ty := Type?{None}
     if values.ty == {
         .List(inner) -> {
-            elem :: sema_taskgroup_task_success(inner) ?? {
+            elem :: sema_taskgroup_task_element(inner) ?? {
                 &diagnostics.push(sema_error("E0112", expr_span(args[0].expr), "`{method}` needs task branches, not `{type_name(values.ty)}`", "each branch must produce one Task result", "write `{method}([task_a, task_b])` with Task values"))
                 return SemaMethodSpecialCheck{handled: true, value: None}
             }
@@ -644,7 +637,7 @@ fn sema_taskgroup_check_branches(args: [CallArg], span: Span, method: String, al
             }
             result_fields := [TypeTupleField]{}
             loop field in fields {
-                result_elem :: sema_taskgroup_task_success(field.ty) ?? {
+                result_elem :: sema_taskgroup_task_element(field.ty) ?? {
                     &diagnostics.push(sema_error("E0112", expr_span(args[0].expr), "`{method}` field `{field.name}` is not a Task", "each named branch must produce one Task result", "give every named branch a Task value"))
                     return SemaMethodSpecialCheck{handled: true, value: None}
                 }

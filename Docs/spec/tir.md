@@ -96,6 +96,12 @@ element is a lowering invariant failure at the spawn's source span.
 Join lowering likewise consumes its checked result: its success is the task
 element, including a worker's `Result` or `Option` carrier. The outer
 `TaskFailure` rail reports waiting failure; it does not flatten that element.
+The same rule applies to `all`, `race`, and `any`: their list, named tuple, or
+single success value retains each checked task element. Sema does not rebuild
+worker carriers from propagation metadata or the enclosing function's error
+domain, and codegen does not choose a Result-flattening runtime route. Every
+executable lens accepts the same direct group routes. Callers handle waiting
+failure first, then consume any authored worker Result.
 
 Native reference carriers (`View`, `ViewMut`, `Pin`, and the internal
 allocator-view tag) do not own their referents. Their synthetic scope cleanup
