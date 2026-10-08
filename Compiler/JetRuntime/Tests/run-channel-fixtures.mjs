@@ -149,6 +149,7 @@ if (mode === 'assemble' || mode.startsWith('assemble-')) {
     'STM nested commit transfer/rollback/clone parity ok',
     'STM two-thread body gate serialization ok',
     'STM prepare rejection/no publication/drop/revision stop ok',
+    'STM dropped uncommitted root releases second-thread gate ok',
     ...(kind !== 'stm' ? ['Condition FIFO/drain/pending/wait/cancel/unheld access+drop ok'] : []),
     ...(kind === 'observe' ? ['Observe empty/parked exact report/owned once ok', 'Observe final writers publish once/periodic cannot overwrite ok'] : []),
   ].join('\n') + '\n';

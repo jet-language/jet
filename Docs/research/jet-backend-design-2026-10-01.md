@@ -1523,6 +1523,12 @@ rollback; generated scope/drop glue must close that authority on every exit.
 The actual-kernel clients are `JetRuntime/Tests/StmTests.jet` and
 `sync-fixture.c`, assembled separately by `run-channel-fixtures.mjs`
 (`assemble-stm`, `link-stm`, `run-stm`).
+The dropped-root witness holds an uncommitted staged edit while a second
+attached pthread attempts begin; rollback must let that thread enter and see
+the old published value. Its subsequent commit advances exactly one revision.
+Together with the compiler's generated early-return `MovePlace`/rollback
+`Drop` fixture, this covers the uncommitted-root gate-release obligation.
+The witness is source evidence until the assembled native fixture is run.
 
 Condition wait registers its FIFO ParkSlot before releasing an edit permit.
 Notify-one consumes the oldest registration; notify-all drains the queue;
