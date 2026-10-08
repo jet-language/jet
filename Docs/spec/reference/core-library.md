@@ -3728,6 +3728,12 @@ display uses the raw panic reason, while Debug quotes and escapes that String.
 `core.rt.RealtimeReceipt` preserves the eight scalar provider facts in their
 original positional order.
 
+Restart/delivery/state-empty selection and dead-letter draining enforce their
+original validation order in Jet. Private single-field host leaves only read
+or write the existing service tree storage, under the caller's exclusive borrow.
+The signing key remains the exact 32 bytes decoded from the current `sa-`
+authority token; this port adds no key cache or security-policy change.
+
 | Signature | Result | Description |
 |---|---|---|
 | `tree(name: String) -> ServiceTree` | tree | Create a named service topology. |

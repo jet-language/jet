@@ -55,7 +55,7 @@ enum DeliveryState {
     Cancelled
 }
 
-fn delivery_state_show(state: DeliveryState) -> String Never! {
+pub fn delivery_state_show(state: DeliveryState) -> String Never! {
     if state == {
         .Pending -> "Pending"
         .Accepted -> "Accepted"
@@ -123,6 +123,79 @@ fn task_outcome_show(outcome: TaskOutcome) -> String Never! {
     assert(task_outcome_show(TaskOutcome.Panicked("a\"b")) == "Panicked(a\"b)")
     outcome :: TaskOutcome.Panicked("a\"b")
     assert("{outcome:Debug}" == "Panicked(\"a\\\"b\")")
+}
+
+// Byte-exact current token-derived key. This intentionally does not introduce
+// a signing-key registry or strengthen the existing authority proof.
+fn authority_signing_key(authority: String) -> [U8] ServiceError! {
+    raw :: authority.bytes()
+    if raw.len() != 67 || raw[0] != U8{115} || raw[1] != U8{97} || raw[2] != U8{45} {
+        return Err(ServiceError.Revoked("service authority proof is malformed"))
+    }
+    key := [U8]{}
+    loop i in 0..<32 {
+        high :: authority_hex_digit(Int.from_u8(raw[3 + i * 2])) ?? return Err(ServiceError.Revoked("service authority proof is malformed"))
+        low :: authority_hex_digit(Int.from_u8(raw[4 + i * 2])) ?? return Err(ServiceError.Revoked("service authority proof is malformed"))
+        &key.push(U8{high * 16 + low})
+    }
+    key
+}
+
+fn authority_hex_digit(value: Int) -> Int? Never! {
+    if value >= 48 && value <= 57 -> return Val(value - 48)
+    if value >= 65 && value <= 70 -> return Val(value - 65 + 10)
+    if value >= 97 && value <= 102 -> return Val(value - 97 + 10)
+    None
+}
+
+pub fn endpoint_show(endpoint: ServiceEndpoint) -> String Never! {
+    #Unsafe("read the existing endpoint's tree, worker and generation fields") {
+        parts :: core.service.__endpoint_parts(endpoint)
+        "Endpoint({parts.tree}/{parts.worker}@g{parts.generation})"
+    }
+}
+
+pub fn set_delivery(tree: &ServiceTree, delivery: ServiceDelivery) ServiceError! {
+    #Unsafe("Services3081: check started before the single delivery-field write") {
+        if core.service.__tree_started(tree) -> return Err(ServiceError.Policy("cannot change delivery after start"))
+        core.service.__tree_write_delivery(&tree, delivery)
+    }
+}
+
+pub fn set_restart(tree: &ServiceTree, restart: ServiceRestart) ServiceError! {
+    #Unsafe("Services1415: root policy write precedes each declared group policy write") {
+        if core.service.__tree_started(tree) -> return Err(ServiceError.Policy("cannot change restart policy after start"))
+        core.service.__tree_write_restart(&tree, restart)
+        count :: core.service.__tree_group_count(tree)
+        loop i in 0..<count -> core.service.__group_write_restart(&tree, i, restart)
+    }
+}
+
+pub fn drain_dead_letters(tree: &ServiceTree) -> Int ServiceError! {
+    #Unsafe("Services3220: tree's exclusive write borrow covers count then clear") {
+        if !core.service.__tree_started(tree) -> return Err(ServiceError.NotStarted("service tree is not started"))
+        count :: core.service.__tree_dead_letter_count(tree)
+        core.service.__tree_clear_dead_letters(&tree)
+        count
+    }
+}
+
+pub fn set_state_empty(tree: &ServiceTree) ServiceError! {
+    #Unsafe("Services3231: started and record checks precede adapter then authority writes") {
+        if core.service.__tree_started(tree) -> return Err(ServiceError.Policy("cannot change state adapter after start"))
+        if core.service.__tree_has_snapshot(tree) || core.service.__tree_event_count(tree) != 0 {
+            return Err(ServiceError.Policy("cannot discard state records while selecting Empty state adapter"))
+        }
+        core.service.__tree_write_empty_adapter(&tree)
+        core.service.__tree_clear_state_authority(&tree)
+    }
+}
+
+#Test("service authority key decodes the existing token, including uppercase hex") {
+    key :: authority_signing_key("sa-000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F") ?? panic("key")
+    assert(key.len() == 32)
+    loop i in 0..<32 -> assert(Int.from_u8(key[i]) == i)
+    assert(if authority_signing_key("bad") == {.Err(.Revoked(message)) -> message == "service authority proof is malformed" else -> false})
 }
 
 #Test("service errors keep every message and delivery receipts keep every field") {

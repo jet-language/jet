@@ -3217,6 +3217,30 @@ fn jet_services_raw_tree_dead_letter_count(tree: &JetServiceTree) -> i64 {
     tree.dead_letters.len() as i64
 }
 
+// Existing service field operations used by the Jet policy implementation.
+// No validation belongs in these leaves; the exclusive ServiceTree borrow
+// covers the source-side validation/order and every write below.
+fn jet_services_raw_tree_started(tree: &JetServiceTree) -> bool { tree.started }
+fn jet_services_raw_tree_has_snapshot(tree: &JetServiceTree) -> bool { tree.snapshot.is_some() }
+fn jet_services_raw_tree_group_count(tree: &JetServiceTree) -> i64 { tree.groups.len() as i64 }
+fn jet_services_raw_tree_write_delivery(tree: &mut JetServiceTree, value: JetServiceDelivery) {
+    tree.delivery = value;
+}
+fn jet_services_raw_tree_write_restart(tree: &mut JetServiceTree, value: JetServiceRestart) {
+    tree.restart = value;
+}
+fn jet_services_raw_group_write_restart(tree: &mut JetServiceTree, index: i64, value: JetServiceRestart) {
+    tree.groups[index as usize].restart = value;
+}
+fn jet_services_raw_tree_clear_dead_letters(tree: &mut JetServiceTree) { tree.dead_letters.clear(); }
+fn jet_services_raw_tree_write_empty_adapter(tree: &mut JetServiceTree) {
+    tree.state_adapter = JetServiceStateAdapter::Empty;
+}
+fn jet_services_raw_tree_clear_state_authority(tree: &mut JetServiceTree) { tree.state_authority = None; }
+fn jet_services_raw_endpoint_parts(endpoint: &JetServiceEndpoint) -> (String, String, jet_foundation::Numeric::JetInt) {
+    (endpoint.tree.clone(), endpoint.worker.clone(), jet_std::jet_int_owned_from_i64(endpoint.generation))
+}
+
 fn jet_services_drain_dead_letters(tree: &mut JetServiceTree) -> Result<i64, JetServiceError> {
     if !tree.started {
         return Err(JetServiceError::NotStarted(
