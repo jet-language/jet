@@ -1,0 +1,34 @@
+# HAND-PORT tests/web_build.rs:2393-2462 web_e3012_context_matches_on_js_and_wasm
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# Both original JS/Wasm inputs, displayed source paths, exact original harness bytes, and EVERY conjunct in runtime diagnostic predicates retained.
+requires: tool:node
+fixture: web_e3012_context_matches_on_js_and_wasm.fixture
+env: NO_COLOR=1
+step: jet build --target web tests/fixtures/web_e3012_js_context.jet
+exit: 0
+file: tests/fixtures/.jet/build/web.manifest.json ~ "\"status\": \"m2\"" # original build_web_fixture M2 predicate
+file: tests/fixtures/.jet/build/web.manifest.json ~ "\"partitions\"" # original build_web_fixture partitions predicate
+file: tests/fixtures/.jet/build/app.wasm is-file
+copy: harness.mjs tests/fixtures/.jet/build/harness.mjs
+step: node harness.mjs
+cwd: tests/fixtures/.jet/build
+exit: 0
+stdout: ~ "Stop [E3012]: stack overflow in `recurse`" # original contains predicate
+stdout: ~ "2 | fn recurse(n: Int) -> Int" # original contains predicate
+stdout: ~ "Why: the call stack kept growing without reaching a safe return." # original contains predicate
+stdout: ~ "Fix: end the recursion or make progress toward a base case." # original contains predicate
+stdout: ~ "--> tests/fixtures/web_e3012_js_context.jet:2 in recurse" # original function context
+step: jet build --target web tests/fixtures/web_e3012_wasm_context.jet
+exit: 0
+file: tests/fixtures/.jet/build/web.manifest.json ~ "\"status\": \"m2\"" # original build_web_fixture M2 predicate
+file: tests/fixtures/.jet/build/web.manifest.json ~ "\"partitions\"" # original build_web_fixture partitions predicate
+file: tests/fixtures/.jet/build/app.wasm is-file
+copy: harness.mjs tests/fixtures/.jet/build/harness.mjs
+step: node harness.mjs
+cwd: tests/fixtures/.jet/build
+exit: 0
+stdout: ~ "Stop [E3012]: stack overflow in `recurse`" # original contains predicate
+stdout: ~ "2 | fn recurse(n: Int) -> Int" # original contains predicate
+stdout: ~ "Why: the call stack kept growing without reaching a safe return." # original contains predicate
+stdout: ~ "Fix: end the recursion or make progress toward a base case." # original contains predicate
+stdout: ~ "--> tests/fixtures/web_e3012_wasm_context.jet:2 in recurse" # original function context

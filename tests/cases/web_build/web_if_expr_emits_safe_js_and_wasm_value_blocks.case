@@ -1,0 +1,19 @@
+# HAND-PORT tests/web_build.rs:3396-3450 web_if_expr_emits_safe_js_and_wasm_value_blocks
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# All original public predicates and exact runtime oracles retained; generated-Rust-only structure assertions retire.
+requires: tool:node
+fixture: web_if_expr_emits_safe_js_and_wasm_value_blocks.fixture
+env: NO_COLOR=1
+step: jet build --target web main.jet
+exit: 0
+file: .jet/build/web.manifest.json ~ "\"status\": \"m2\"" # original build_web_fixture M2 predicate
+file: .jet/build/web.manifest.json ~ "\"partitions\"" # original build_web_fixture partitions predicate
+file: .jet/build/app.wasm is-file
+file: .jet/build/app.js ~ "await (async () =>" # original generated JavaScript/runtime predicate
+file: .jet/build/app.js ~ "let n = 6n;" # original generated JavaScript/runtime predicate
+step: node --check .jet/build/app.js
+exit: 0
+step: node app.js
+cwd: .jet/build
+exit: 0
+stdout: = web_if_expr_emits_safe_js_and_wasm_value_blocks.stdout.expected

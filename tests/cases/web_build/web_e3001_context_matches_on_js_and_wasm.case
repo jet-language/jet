@@ -1,0 +1,34 @@
+# HAND-PORT tests/web_build.rs:2322-2391 web_e3001_context_matches_on_js_and_wasm
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# Both original JS/Wasm inputs, displayed source paths, exact original harness bytes, and EVERY conjunct in runtime diagnostic predicates retained.
+requires: tool:node
+fixture: web_e3001_context_matches_on_js_and_wasm.fixture
+env: NO_COLOR=1
+step: jet build --target web tests/fixtures/web_e3001_js_context.jet
+exit: 0
+file: tests/fixtures/.jet/build/web.manifest.json ~ "\"status\": \"m2\"" # original build_web_fixture M2 predicate
+file: tests/fixtures/.jet/build/web.manifest.json ~ "\"partitions\"" # original build_web_fixture partitions predicate
+file: tests/fixtures/.jet/build/app.wasm is-file
+copy: harness.mjs tests/fixtures/.jet/build/harness.mjs
+step: node harness.mjs
+cwd: tests/fixtures/.jet/build
+exit: 0
+stdout: ~ "Stop [E3001]: `panic: missing value`" # original contains predicate
+stdout: ~ "7 |     print(missing() ?? panic(\"missing value\"))" # original contains predicate
+stdout: ~ "Why: the program hit a `panic`" # original contains predicate
+stdout: ~ "Fix: fix the logic that led to the failure" # original contains predicate
+stdout: ~ "--> tests/fixtures/web_e3001_js_context.jet:7 in run" # original function context
+step: jet build --target web tests/fixtures/web_e3001_wasm_context.jet
+exit: 0
+file: tests/fixtures/.jet/build/web.manifest.json ~ "\"status\": \"m2\"" # original build_web_fixture M2 predicate
+file: tests/fixtures/.jet/build/web.manifest.json ~ "\"partitions\"" # original build_web_fixture partitions predicate
+file: tests/fixtures/.jet/build/app.wasm is-file
+copy: harness.mjs tests/fixtures/.jet/build/harness.mjs
+step: node harness.mjs
+cwd: tests/fixtures/.jet/build
+exit: 0
+stdout: ~ "Stop [E3001]: `panic: missing value`" # original contains predicate
+stdout: ~ "7 |     print(missing() ?? panic(\"missing value\"))" # original contains predicate
+stdout: ~ "Why: the program hit a `panic`" # original contains predicate
+stdout: ~ "Fix: fix the logic that led to the failure" # original contains predicate
+stdout: ~ "--> tests/fixtures/web_e3001_wasm_context.jet:7 in run" # original function context

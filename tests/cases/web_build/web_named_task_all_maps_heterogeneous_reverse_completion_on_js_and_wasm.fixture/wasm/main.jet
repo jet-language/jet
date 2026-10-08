@@ -1,0 +1,20 @@
+
+#Target(Web)
+fn slow() -> String {
+    turns := 0
+    loop _ in 0..<50000 {
+        turns += 1
+    }
+    return "slow"
+}
+fn fast() -> Int {
+    return 7
+}
+fn run() {
+    values :: (task.all {
+        z: slow(),
+        a: fast()
+    }) ?? panic("named task.all failed")
+    print(values.z)
+    print(values.a)
+}

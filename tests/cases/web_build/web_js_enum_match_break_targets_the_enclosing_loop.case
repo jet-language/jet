@@ -1,0 +1,16 @@
+# HAND-PORT tests/web_build.rs:3318-3355 web_js_enum_match_break_targets_the_enclosing_loop
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# All original public predicates and exact runtime oracles retained; generated-Rust-only structure assertions retire.
+requires: tool:node
+fixture: web_js_enum_match_break_targets_the_enclosing_loop.fixture
+env: NO_COLOR=1
+step: jet build --target web main.jet
+exit: 0
+file: .jet/build/web.manifest.json ~ "\"status\": \"m2\"" # original build_web_fixture M2 predicate
+file: .jet/build/web.manifest.json ~ "\"partitions\"" # original build_web_fixture partitions predicate
+file: .jet/build/app.wasm is-file
+file: .jet/build/app.js !~ "switch (__jet_match.tag)" # original generated JavaScript/runtime predicate
+step: node app.js
+cwd: .jet/build
+exit: 0
+stdout: = web_js_enum_match_break_targets_the_enclosing_loop.stdout.expected
