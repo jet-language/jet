@@ -1838,12 +1838,12 @@ fn core_fixed_sig_impl(
             )),
         )),
         ("core.files", "lock") => Some((
-            vec![(read, path), (read, Type::Option { inner: Box::new(Type::Named("Duration".to_string())) })],
+            vec![(read, path), (read, Type::Option(Box::new(Type::Named("Duration".to_string()))))],
             Some(result_ty(Type::Named("FileLock".to_string()), io_error_ty())),
         )),
         ("core.files", "try_lock") => Some((
             vec![(read, path)],
-            Some(result_ty(Type::Option { inner: Box::new(Type::Named("FileLock".to_string())) }, io_error_ty())),
+            Some(result_ty(Type::Option(Box::new(Type::Named("FileLock".to_string()))), io_error_ty())),
         )),
         ("core.watcher", "files" | "__files") => Some((
             vec![(
