@@ -1428,26 +1428,27 @@ fn jet_cli_inspect_run_job(job: JetCLIInspectJob) -> JetDriverVerbOutput {
 
 fn jet_cli_inspect_checked_build_host(job: JetCLIInspectJob) -> JetDriverVerbOutput {
     prepared :: jet_cli_prepare_overlays(job.file, job.file, [], job.color, job.threads, JetDriverCompileMode.Doc)
-    request :: if prepared == {
-        .Prepared(value, _) -> value
+    if prepared == {
         .Refused(output) -> return output
-    }
-    // The checked build scope belongs to this invocation, not a CLI cache or
-    // process-global integer. Driver owns evaluation and graph provenance.
-    scope := JetDriverBuildQueryScope{next_session_id: 1}
-    if job.action == "explain-build" && job.subject == None {
-        snapshot :: request.authorized_sources
-        workspace := String?{None}
-        loop root in snapshot.roots {
-            if root.identity == snapshot.entry_root_identity -> workspace = Val(root.canonical_path)
+        .Prepared(request, _) -> {
+            // The checked build scope belongs to this invocation, not a CLI cache or
+            // process-global integer. Driver owns evaluation and graph provenance.
+            scope := JetDriverBuildQueryScope{next_session_id: 1}
+            if job.action == "explain-build" && job.subject == None {
+                snapshot :: request.authorized_sources
+                workspace := String?{None}
+                loop root in snapshot.roots {
+                    if root.identity == snapshot.entry_root_identity -> workspace = Val(root.canonical_path)
+                }
+                root :: workspace ?? return jet_cli_ice("the selected build entry has no authenticated source root")
+                program :: jet_cli_build_record_program_at(snapshot.entry_path, root, cli_sys.cwd())
+                store :: ArtifactStore.from_env() ?? return jet_cli_execute(jet_cli_inspect_b_report("E2104", "can't open authenticated build execution-node evidence", "{err}", "check the machine-wide artifact store configuration and permissions", job.color, job.json, JET_DRIVER_EXIT_USER_ERROR))
+                record :: store.last_build_record(root, program) ?? return jet_cli_execute(jet_cli_inspect_b_report("E2104", "can't read authenticated build execution-node evidence", "{err}", "check the selected workspace last-run pointer and artifact store", job.color, job.json, JET_DRIVER_EXIT_USER_ERROR))
+                return jet_cli_build_nodes_host(request, &scope, job.file, program, record, job.json, job.color, job.verbose)
+            }
+            return jet_cli_build_host(request, &scope, job.file, job.subject, job.json, job.color, job.verbose)
         }
-        root :: workspace ?? return jet_cli_ice("the selected build entry has no authenticated source root")
-        program :: jet_cli_build_record_program_at(snapshot.entry_path, root, cli_sys.cwd())
-        store :: ArtifactStore.from_env() ?? return jet_cli_inspect_b_report("E2104", "can't open authenticated build execution-node evidence", "{err}", "check the machine-wide artifact store configuration and permissions", job.color, job.json, JET_DRIVER_EXIT_USER_ERROR)
-        record :: store.last_build_record(root, program) ?? return jet_cli_inspect_b_report("E2104", "can't read authenticated build execution-node evidence", "{err}", "check the selected workspace last-run pointer and artifact store", job.color, job.json, JET_DRIVER_EXIT_USER_ERROR)
-        return jet_cli_build_nodes_host(request, &scope, job.file, program, record, job.json, job.color, job.verbose)
     }
-    jet_cli_build_host(request, &scope, job.file, job.subject, job.json, job.color, job.verbose)
 }
 
 // CmdInspect.rs `run_accel`/`run_decisions` over the shared optimization
@@ -1461,26 +1462,28 @@ fn jet_cli_inspect_checked_build_host(job: JetCLIInspectJob) -> JetDriverVerbOut
 // reporting no runtime rows.
 fn jet_cli_inspect_optimization_host(job: JetCLIInspectJob, source: String) -> JetDriverVerbOutput {
     prepared :: jet_cli_prepare_overlays(job.file, job.file, [], job.color, job.threads, JetDriverCompileMode.Doc)
-    request := if prepared == {
-        .Prepared(value, _) -> value
+    if prepared == {
         .Refused(output) -> return output
+        .Prepared(value, _) -> {
+            request := ^value
+            request.profile = job.profile
+            if job.release_build -> request.build_mode = MIRArtifactBuildMode.Release
+            request.adapter_mode = cli_sys.get("JET_ADAPTER_MODE") ?? ""
+            ids :: cli_sys.get("JET_ADAPTER_OPERATION_IDS") ?? ""
+            if ids != "" -> request.adapter_operation_ids = ids.split(",").to_list()
+            query :: jet_driver_optimization_query(request)
+            errors :: jet_cli_errors(jet_driver_present_diagnostics(query.compile.diagnostics, request.authorized_sources, query.compile.generated_source_files))
+            if errors.len() > 0 -> return jet_cli_inspect_check_failed(job, source, errors)
+            if query.compile.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
+            runtime := [JetCLIAccelerationRuntime]{}
+            if job.action == "accel" {
+                runtime = jet_cli_acceleration_runtime_rows(request, query, job.file, job.scope, job.subject) ?? return jet_cli_not_ported_output("inspect accel <runtime receipts: {err}>", job.color)
+            }
+            process :: cli_sys.get("JET_ADAPTER_CANONICAL_PASS_PROCESS") ?? "inspect"
+            routes :: jet_cli_canonical_routes(query.canonical_routes, process)
+            return jet_cli_optimization_host(request, query, job.action, job.scope, job.file, runtime, routes, job.color, job.json)
+        }
     }
-    request.profile = job.profile
-    if job.release_build -> request.build_mode = MIRArtifactBuildMode.Release
-    request.adapter_mode = cli_sys.get("JET_ADAPTER_MODE") ?? ""
-    ids :: cli_sys.get("JET_ADAPTER_OPERATION_IDS") ?? ""
-    if ids != "" -> request.adapter_operation_ids = ids.split(",").to_list()
-    query :: jet_driver_optimization_query(request)
-    errors :: jet_cli_errors(jet_driver_present_diagnostics(query.compile.diagnostics, request.authorized_sources, query.compile.generated_source_files))
-    if errors.len() > 0 -> return jet_cli_inspect_check_failed(job, source, errors)
-    if query.compile.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
-    runtime := [JetCLIAccelerationRuntime]{}
-    if job.action == "accel" {
-        runtime = jet_cli_acceleration_runtime_rows(request, query, job.file, job.scope, job.subject) ?? return jet_cli_not_ported_output("inspect accel <runtime receipts: {err}>", job.color)
-    }
-    process :: cli_sys.get("JET_ADAPTER_CANONICAL_PASS_PROCESS") ?? "inspect"
-    routes :: jet_cli_canonical_routes(query.canonical_routes, process)
-    jet_cli_optimization_host(request, query, job.action, job.scope, job.file, runtime, routes, job.color, job.json)
 }
 
 // jet-impact `ImpactEdge` / `ImpactRef`.

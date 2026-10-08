@@ -1397,7 +1397,10 @@ fn jet_cli_plan(raw: [String]) -[FS, Env, Time, Time.Wait]> JetCLIPlan Never! {
             notice := ""
             if cli_files.is_dir(target) {
                 if jet_cli_resolve_source_path("fix", target, color, [String]{}) == {
-                    .File(path, _, written) -> { file = path; notice = written }
+                    .File(path, _, written) -> {
+                        file = path
+                        notice = written
+                    }
                     .Refused(plan) -> return plan
                 }
             } else if !cli_files.is_file(target) && cli_files.is_file("{target}.jet") {
