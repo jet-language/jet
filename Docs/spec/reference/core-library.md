@@ -722,7 +722,7 @@ Whole-file and metadata functions:
 | `map(path)` | `MappedFile !IOError` | Map a file into the checked byte-view carrier. |
 | `read_at(path, offset, count)` | `[U8] !IOError` | Read one bounded byte range; negative offset or count is clamped to zero. |
 | `write_at(path, offset, bytes)` | `!IOError` | Write bytes at an offset; negative offset is clamped to zero. |
-| `write_atomic(path, bytes)` | `!IOError` | Publish bytes through a temporary file and rename. |
+| `write_atomic(path, bytes)` | `!IOError` | Reserve one of 128 same-directory `.jet_tmp_<pid>_<sequence>` names, write and sync it, preserve available target permissions, close, then rename; on Unix, sync the parent after publication. |
 | `fsync(path)` | `!IOError` | Flush a file, or a folder so earlier renames inside it are durable. |
 | `open(path, links:)` / `create(path, if_exists:, mode:, links:)` / `append(path, mode:, links:)` | `FileReader` / `FileWriter !IOError` | Open a close-on-exec stream handle. `if_exists: .Refuse` creates exclusively, `mode` sets a new file's bits before the umask, and `links: .Refuse` refuses a final symbolic link. |
 | `open_directory(path)` | `Directory !IOError` | Hold a directory whose last part is a real directory, not a link. |
@@ -823,6 +823,11 @@ return `View<U8> !IOError`, and `lines()` yields `ViewIter<View<U8>>`.
 Copying a line with `~line` produces `[U8]`, not `[[U8]]`. A `FileScope`
 parameter imported as `files.FileScope` retains its checked `read` method;
 source qualification does not change its capability dispatch.
+Scoped reads select only captured authority roots, reject parent/root/prefix
+components in the relative name, and keep descriptor-relative no-follow opening
+as the security boundary. If every eligible root fails, the last OS error is
+returned; invalid UTF-8 retains its byte offset and invalid-sequence length.
+
 
 Streaming constructors keep memory bounded:
 

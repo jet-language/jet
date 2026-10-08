@@ -530,3 +530,20 @@ pub(crate) fn jet_std_fs_map_is_empty(map: &jet_std::JetMappedFile) -> bool {
 pub(crate) fn jet_std_fs_map_lines(map: &jet_std::JetMappedFile) -> jet_std::JetMappedLines {
     jet_std::jet_std_files_map_lines(map)
 }
+
+// Temporary existing-authority projection and no-follow OS leaf. Root choice,
+// lexical component policy, checkpoints, retry-last-error, and UTF-8 are Jet.
+// Replaced by Jet runtime L7; dies at cutover (CoreFiles1-2 leaf ledger).
+pub(crate) fn jet_files_scope_roots_raw(scope: &JetFileScope) -> Vec<(Vec<u8>, bool)> {
+    scope.roots().iter().map(|root| (root.path().as_os_str().as_encoded_bytes().to_vec(), root.allow_absolute())).collect()
+}
+
+pub(crate) fn jet_files_scope_read_at_raw(scope: &JetFileScope, index: i64, relative: &String, requested: &String) -> Result<Vec<u8>, jet_std::IOError> {
+    let root = usize::try_from(index).ok().and_then(|index| scope.roots().get(index))
+        .ok_or_else(|| jet_std::IOError::PermissionDenied(jet_std::IOContext::new(
+            jet_std::IOOperation::Read, Some(requested.clone()), None,
+            Some("path is outside the granted FS.Read root".to_string()))))?;
+    jet_foundation::SHA256::read_file_nofollow_at_root(
+        root.path(), std::path::Path::new(relative), jet_foundation::SHA256::MAX_TREE_FILE_BYTES,
+    ).map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Read, requested, error))
+}
