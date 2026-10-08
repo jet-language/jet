@@ -2024,3 +2024,276 @@ fn data_track_state_changes<T, K>(owner: Shared<DataTrackedState<T, K>>, revisio
     changes :: data_track_state_changes<Int, Int>(alias, 0) ?? panic("changes")
     assert_eq(changes.len(), 3)
 }
+
+enum DataQueryOperation<T> {
+    Filter(predicate: fn(T) -> Bool)
+    SortBy(key: fn(T) -> String)
+}
+
+struct DataTrackedReader<T> {
+    rows: fn() -> [T]
+    entries: fn() -> (revision: Int, entries: [DataTrackedEntry<T>])
+    changes: fn(Int) -> [DataTrackedChange<T>] DataError!
+    revision: fn() -> Int
+    retained_rows: fn() -> Int
+    plan: fn(Int) -> __TablePlan
+}
+
+struct DataTrackedMeta {
+    revision: fn() -> Int
+    retained_rows: fn() -> Int
+}
+
+struct DataQueryComputation<T> {
+    producer: (fn() -> [T] DataError!)?
+}
+
+enum DataQuerySource<T> {
+    Rows(rows: [T], missing: Int, plan: __TablePlan)
+    Tracked(reader: DataTrackedReader<T>)
+    Computed(compute: Shared<DataQueryComputation<T>>)
+    Recomputed(compute: fn() -> [T] DataError!)
+}
+
+struct DataWatchEntry<T> {
+    order: Int
+    key: String?
+    value: T
+}
+
+struct DataWatchMaterialized<T> {
+    entries: [DataWatchEntry<T>]
+    revision: Int
+    mode: String
+    recomputed: Bool
+    changed: Bool
+    retained_rows: Int
+}
+
+struct DataWatchSource<T> {
+    initial: fn() -> DataWatchMaterialized<T> DataError!
+    refresh: fn(Int, [DataWatchEntry<T>]) -> DataWatchMaterialized<T> DataError!
+}
+
+struct DataQueryState<T> {
+    source: DataQuerySource<T>
+    operations: [DataQueryOperation<T>]
+    steps: [String]
+    tracking: DataTrackedMeta?
+    watch_source: DataWatchSource<T>?
+    consumed: Shared<Bool>
+}
+
+fn data_query_state_rows<T>(rows: [T], missing: Int, plan: __TablePlan) -> DataQueryState<T> Never! {
+    DataQueryState<T>{source: .Rows{rows: rows, missing: missing, plan: plan}, operations: [DataQueryOperation<T>]{}, steps: [String]{"scan"}, tracking: None, watch_source: None, consumed: shared false}
+}
+
+fn data_query_state_computed<T>(steps: [String], compute: fn() -> [T] DataError!) -> DataQueryState<T> Never! {
+    DataQueryState<T>{source: .Computed{compute: shared DataQueryComputation<T>{producer: Val(compute)}}, operations: [DataQueryOperation<T>]{}, steps: steps, tracking: None, watch_source: None, consumed: shared false}
+}
+
+fn data_query_state_recomputed<T>(steps: [String], tracking: DataTrackedMeta, compute: fn() -> [T] DataError!) -> DataQueryState<T> Never! {
+    DataQueryState<T>{source: .Recomputed{compute: compute}, operations: [DataQueryOperation<T>]{}, steps: steps, tracking: Val(tracking), watch_source: None, consumed: shared false}
+}
+
+fn data_query_state_tracked<T>(reader: DataTrackedReader<T>) -> DataQueryState<T> Never! {
+    DataQueryState<T>{source: .Tracked{reader: reader}, operations: [DataQueryOperation<T>]{}, steps: [String]{"track"}, tracking: Val(DataTrackedMeta{revision: reader.revision, retained_rows: reader.retained_rows}), watch_source: None, consumed: shared false}
+}
+
+fn data_query_state_reducer<T>(tracking: DataTrackedMeta?, steps: [String], compute: fn() -> [T] DataError!) -> DataQueryState<T> Never! {
+    if tracking == .Val(meta) -> data_query_state_recomputed<T>(steps, meta, compute)
+    else -> data_query_state_computed<T>(steps, compute)
+}
+
+fn data_query_state_operation<T>(query: DataQueryState<T>, operation: DataQueryOperation<T>, step: String) -> DataQueryState<T> Never! {
+    operations := ~query.operations
+    &operations.push(operation)
+    steps := ~query.steps
+    &steps.push(step)
+    watch_source := DataWatchSource<T>?{None}
+    if query.watch_source == .Val(source) -> watch_source = Val(data_watch_operation_source<T>(source, operation))
+    DataQueryState<T>{source: query.source, operations: operations, steps: steps, tracking: query.tracking, watch_source: watch_source, consumed: query.consumed}
+}
+
+fn data_query_take_computation<T>(query: DataQueryState<T>) -> (fn() -> [T] DataError!)? Never! {
+    if query.source == .Computed(compute) {
+        consumed := query.consumed.guard_edit()
+        if consumed.value -> return None
+        consumed.value = true
+        consumed.drop("release the shared single-use gate before taking its producer")
+        producer := compute.guard_edit()
+        result :: ~producer.value.producer
+        producer.value.producer = None
+        return result
+    }
+    None
+}
+
+struct DataQueryPull<T> {
+    next: fn() -> T? DataError!
+}
+
+struct DataQueryScan<T> {
+    rows: [T]
+    index: Int
+}
+
+struct DataQuerySort<T> {
+    rows: [T]?
+    index: Int
+}
+
+struct DataQueryKeyed<T> {
+    key: String
+    row: T
+}
+
+fn data_query_rows_pull<T>(rows: [T], operations: [DataQueryOperation<T>]) -> DataQueryPull<T> Never! {
+    scan :: shared DataQueryScan<T>{rows: rows, index: 0}
+    pull := DataQueryPull<T>{next: () -> {
+        cursor := scan.guard_edit()
+        if cursor.value.index >= cursor.value.rows.len() -> return Ok(None)
+        row :: ~cursor.value.rows[cursor.value.index]
+        cursor.value.index = cursor.value.index + 1
+        Ok(Val(row))
+    }}
+    loop operation in operations {
+        input :: ~pull
+        if operation == {
+            .Filter(predicate) -> {
+                pull = DataQueryPull<T>{next: () -> {
+                    loop {
+                        row :: input.next() ?? return Err(err)
+                        if row == {
+                            .Val(value) -> { if predicate(value) -> return Ok(Val(value)) }
+                            .None -> return Ok(None)
+                        }
+                    }
+                }}
+            }
+            .SortBy(key) -> {
+                sorted :: shared DataQuerySort<T>{rows: None, index: 0}
+                pull = DataQueryPull<T>{next: () -> {
+                    cursor := sorted.guard_edit()
+                    if cursor.value.rows == None {
+                        keyed := [DataQueryKeyed<T>]{}
+                        limit :: DataLimits.safe().max_sort_rows
+                        loop {
+                            row :: input.next() ?? return Err(err)
+                            if row == .None -> break
+                            if keyed.len() >= limit -> return Err(data_error(.Limit, "max_sort_rows {limit} exceeded", "sort_by"))
+                            if row == .Val(value) -> &keyed.push(DataQueryKeyed<T>{key: key(value), row: value})
+                        }
+                        values :: data_query_sort_keyed<T>(keyed)
+                        cursor.value.rows = Val(values)
+                    }
+                    values :: cursor.value.rows ?? panic("sort rows initialized")
+                    if cursor.value.index >= values.len() -> return Ok(None)
+                    row :: ~values[cursor.value.index]
+                    cursor.value.index = cursor.value.index + 1
+                    Ok(Val(row))
+                }}
+            }
+        }
+    }
+    pull
+}
+
+fn data_query_collect_pull<T>(pull: DataQueryPull<T>) -> [T] DataError! {
+    limit :: DataLimits.safe().max_output_rows
+    rows := [T]{}
+    loop {
+        // The native collector pulls in bounded batches of up to 256, including
+        // one row beyond the output bound before reporting the limit.
+        request :: if limit - rows.len() + 1 < 256 -> limit - rows.len() + 1 else -> 256
+        batch := [T]{}
+        loop batch.len() < request {
+            row :: pull.next() ?? return Err(err)
+            if row == {
+                .None -> break
+                .Val(value) -> &batch.push(value)
+            }
+        }
+        if batch.len() > limit - rows.len() -> return Err(data_error(.Limit, "max_output_rows {limit} exceeded", "query.collect"))
+        exhausted :: batch.len() < request
+        loop row in batch -> &rows.push(row)
+        if exhausted -> return Ok(rows)
+    }
+}
+
+fn data_query_apply_operations<T>(rows: [T], operations: [DataQueryOperation<T>]) -> [T] DataError! {
+    values := ~rows
+    loop operation in operations {
+        if operation == {
+            .Filter(predicate) -> {
+                filtered := [T]{}
+                loop row in values { if predicate(row) -> &filtered.push(row) }
+                values = filtered
+            }
+            .SortBy(key) -> {
+                limit :: DataLimits.safe().max_sort_rows
+                if values.len() > limit -> return Err(data_error(.Limit, "max_sort_rows {limit} exceeded", "query.sort_by"))
+                keyed := [DataQueryKeyed<T>]{}
+                loop row in values -> &keyed.push(DataQueryKeyed<T>{key: key(row), row: row})
+                next_rows :: data_query_sort_keyed<T>(keyed)
+                values = next_rows
+            }
+        }
+    }
+    limit :: DataLimits.safe().max_output_rows
+    if values.len() > limit -> return Err(data_error(.Limit, "max_output_rows {limit} exceeded", "query.collect"))
+    Ok(values)
+}
+
+fn data_query_state_collect<T>(query: DataQueryState<T>) -> [T] DataError! {
+    if query.source == {
+        .Rows(rows, _, _) -> data_query_collect_pull<T>(data_query_rows_pull<T>(rows, query.operations))
+        .Tracked(reader) -> data_query_collect_pull<T>(data_query_rows_pull<T>(reader.rows(), query.operations))
+        .Recomputed(compute) -> {
+            rows :: compute() ?? return Err(err)
+            data_query_apply_operations<T>(rows, query.operations)
+        }
+        .Computed(_) -> {
+            compute :: data_query_take_computation<T>(query) ?? return Err(data_error(.State, "query has already been collected", "query.collect"))
+            rows :: compute() ?? return Err(err)
+            data_query_apply_operations<T>(rows, query.operations)
+        }
+    }
+}
+
+#Test("Computed derived Query states share their single-use producer") {
+    query :: data_query_state_computed<Int>([String]{"stream"}, () -> Ok([Int]{1, 2, 3}))
+    filtered :: data_query_state_operation<Int>(query, .Filter{predicate: row -> row > 1}, "filter")
+    assert_eq(data_query_state_collect<Int>(filtered) ?? panic("first collect"), [Int]{2, 3})
+    if data_query_state_collect<Int>(query) == {
+        .Ok(_) -> panic("single-use query replayed")
+        .Err(error) -> {
+            assert(error.kind == .State)
+            assert_eq(error.reason, "query has already been collected")
+        }
+    }
+}
+
+fn data_query_sort_keyed<T>(keyed: [DataQueryKeyed<T>]) -> [T] Never! {
+    indices := [Int]{}
+    loop index in 0..<keyed.len() -> &indices.push(index)
+    // Reuse List's comparator sort. Explicit original positions make ties
+    // stable regardless of the host sorting implementation.
+    &indices.sort_by((left: Int, right: Int) -> {
+        order :: keyed[left].key <=> keyed[right].key
+        if order == Ordering.Equal -> left <=> right else -> order
+    })
+    rows := [T]{}
+    loop index in indices -> &rows.push(keyed[index].row)
+    rows
+}
+
+#Test("Query stable sort preserves tied String keys and UTF-8 byte order") {
+    keyed :: [DataQueryKeyed<Int>]{
+        DataQueryKeyed<Int>{key: "é", row: 1},
+        DataQueryKeyed<Int>{key: "a", row: 2},
+        DataQueryKeyed<Int>{key: "a", row: 3},
+        DataQueryKeyed<Int>{key: "", row: 4},
+    }
+    assert_eq(data_query_sort_keyed<Int>(keyed), [Int]{4, 2, 3, 1})
+}
