@@ -171,8 +171,14 @@ pub fn apply_seeded_rng_method_with_type(
     };
     match method {
         "int" => {
-            let low = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?;
-            let high = as_int(args.get(1).unwrap_or(&CtValue::Int(0)), span)?;
+            let native_int = |value: &CtValue| match value {
+                CtValue::BigInt(value) => value.try_i64().ok_or_else(|| {
+                    Diagnostic::from_row("E1003", &[], Some(span))
+                }),
+                value => as_int(value, span),
+            };
+            let low = native_int(args.first().unwrap_or(&CtValue::Int(0)))?;
+            let high = native_int(args.get(1).unwrap_or(&CtValue::Int(0)))?;
             let value = seeded_rng_int(state, low, high).map_err(|message| {
                 Diagnostic::from_row("E3010", &[("msg", message)], Some(span))
             })?;

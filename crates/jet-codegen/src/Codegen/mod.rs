@@ -831,7 +831,7 @@ fn runtime_diagnostic_projection() -> String {
     let rows = jet_foundation::Registry::diagnostic_rows()
         .iter()
         .filter(|row| {
-            row.stage == "runtime"
+            row.has_stage("runtime")
                 && row.status == jet_foundation::Registry::DiagnosticStatus::Active
         });
     let mut out = String::from(
@@ -894,7 +894,7 @@ fn portable_runtime_diagnostic_projection() -> String {
     let rows = jet_foundation::Registry::diagnostic_rows()
         .iter()
         .filter(|row| {
-            row.stage == "runtime"
+            row.has_stage("runtime")
                 && row.status == jet_foundation::Registry::DiagnosticStatus::Active
         });
     let mut out = String::from(
