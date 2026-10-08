@@ -134,8 +134,8 @@ JET_CLI_TABLE_MARK_BYTES :: prep { [U8]{140, 172, 144, 156, 188, 164, 148, 180, 
 fn jet_cli_table_cell_width(cell: JetCLITableCell) -> Int Never! {
     if cell == {
         .Text(value) -> jet_cli_table_text_width(value)
-        .Integer(value) -> jet_cli_table_text_width("{value}".bytes())
-        .Unsigned(value) -> jet_cli_table_text_width("{value}".bytes())
+        .Integer(value) -> "{value}".count_bytes()
+        .Unsigned(value) -> "{value}".count_bytes()
         .Boolean(value) -> if value -> 4 else -> 5
         .Empty -> 0
     }
