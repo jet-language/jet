@@ -1280,6 +1280,10 @@ fn core_fixed_sig_impl(
     }
 
     match (module, name) {
+        ("core.tui", "__cap_env_bytes") => Some((
+            vec![(read, Type::String)],
+            Some(Type::Option(Box::new(Type::List(Box::new(u8_ty()))))),
+        )),
         ("core.mem", "__list_capacity") => Some((
             vec![(read, Type::List(Box::new(Type::Named("__element".to_string()))))],
             Some(Type::Int),

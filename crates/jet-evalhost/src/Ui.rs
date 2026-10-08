@@ -1820,25 +1820,13 @@ fn jet_ui_host_ambient_core_call(
         })());
     }
     match (module, method) {
-        ("core.tui", "capabilities") => Some((|| {
-            ambient_expect_arity(&args, 0, "core.tui.capabilities", span)?;
-            let caps = ui_rt::jet_tui_capabilities();
-            let profile = match caps.profile {
-                ui_rt::JetTuiColorProfile::ANSI16 => "ANSI16",
-                ui_rt::JetTuiColorProfile::ANSI256 => "ANSI256",
-                ui_rt::JetTuiColorProfile::TrueColor => "TrueColor",
-                ui_rt::JetTuiColorProfile::ASCII => "ASCII",
-            };
-            Ok(ambient_struct("TUICapabilities", vec![
-                ("profile".to_string(), ambient_enum_value("TUIColorProfile", profile, Vec::new())),
-                ("color".to_string(), CtValue::Bool(caps.color)),
-                ("unicode".to_string(), CtValue::Bool(caps.unicode)),
-                ("mouse".to_string(), CtValue::Bool(caps.mouse)),
-                ("resize".to_string(), CtValue::Bool(caps.resize)),
-                ("clipboard".to_string(), CtValue::Bool(caps.clipboard)),
-                ("width".to_string(), CtValue::Int(caps.width as i64)),
-                ("height".to_string(), CtValue::Int(caps.height as i64)),
-            ]))
+        ("core.tui", "__cap_env_bytes") => Some((|| {
+            ambient_expect_arity(&args, 1, "core.tui.__cap_env_bytes", span)?;
+            let name = ambient_string(&args[0], "core.tui.__cap_env_bytes", span)?;
+            let bytes = ui_rt::jet_tui_cap_env_bytes(&name).map(|bytes| {
+                CtValue::List(bytes.into_iter().map(|byte| CtValue::Int(i64::from(byte))).collect())
+            });
+            Ok(ambient_option_value("[u8]", bytes))
         })()),
         ("core.ui", "__node_transfer") => Some((|| {
             let call = "core.ui.__node_transfer";
