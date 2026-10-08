@@ -5022,14 +5022,15 @@ impl<'a> Checker<'a> {
                 // receiver's take mark before inference reaches it, so a take
                 // mark that arrives here stands on a bare place in a value
                 // position. D-COPY-DEFAULT1=A (#3714): that is the
-                // programmer's exact move. Record it, then leave the bare
-                // place, which every owning position already moves.
+                // programmer's exact move. Type its operand without the
+                // ordinary owning-field copy, and retain the take for TIR.
                 if *access == crate::AST::PlaceAccess::Take {
                     let mark_span = *span;
+                    self.borrow_ctx = true;
                     let ty = self.infer(inner);
                     self.note_exact_move(inner, ty.as_ref(), mark_span);
-                    let place = std::mem::replace(inner.as_mut(), Expr::Absent(mark_span));
-                    *e = place;
+                    // Keep the projected place intact: erasing Take here
+                    // loses the distinction between a field read and a move.
                     return ty;
                 }
                 if self.place_from_expr(inner).is_none() {
