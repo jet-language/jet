@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { readTrace } from '../throughput/measure.mjs';
 
 const sha256 = value => crypto.createHash('sha256').update(value).digest('hex');
 const median = values => [...values].sort((a, b) => a < b ? -1 : a > b ? 1 : 0)[Math.floor(values.length / 2)];
@@ -33,11 +34,35 @@ export function startupInputHash(root) {
   return sha256(JSON.stringify(entries));
 }
 
-export function startupTiming(events, timeText) {
-  const begin = events.find(event => event.name === 'compile' && event.ph === 'B');
-  const end = events.find(event => event.name === 'compile' && event.ph === 'E');
-  const firstParse = events.find(event => event.name === 'main' && event.cat === 'parse' && event.ph === 'B');
-  if (![begin?.ts, end?.ts, firstParse?.ts].every(Number.isSafeInteger) || !(begin.ts < firstParse.ts && firstParse.ts < end.ts)) throw new Error('missing or invalid compile/first-parse trace boundaries');
+export function startupTiming(events, timeText, selectedEntry) {
+  const stacks = new Map();
+  const spans = [];
+  const lastTime = new Map();
+  for (const event of events) {
+    if (event.ph !== 'B' && event.ph !== 'E') continue;
+    if (!Number.isSafeInteger(event.pid) || !Number.isSafeInteger(event.tid) ||
+        !Number.isSafeInteger(event.ts) || typeof event.name !== 'string' ||
+        typeof event.cat !== 'string') throw new Error('invalid trace span identity');
+    const thread = `${event.pid}:${event.tid}`;
+    if (event.ts < (lastTime.get(thread) ?? 0)) throw new Error('invalid trace span time order');
+    lastTime.set(thread, event.ts);
+    const stack = stacks.get(thread) ?? [];
+    stacks.set(thread, stack);
+    if (event.ph === 'B') {
+      stack.push({ event, compile: stack.find(frame => frame.event.cat === 'compile' && frame.event.name === 'compile')?.event });
+    } else {
+      const frame = stack.pop();
+      if (!frame || frame.event.name !== event.name || frame.event.cat !== event.cat) throw new Error('unbalanced trace spans');
+      spans.push({ begin: frame.event, end: event, compile: frame.compile });
+    }
+  }
+  if ([...stacks.values()].some(stack => stack.length)) throw new Error('unbalanced trace spans');
+  const compiles = spans.filter(span => span.begin.cat === 'compile' && span.begin.name === 'compile');
+  const parses = spans.filter(span => span.begin.cat === 'parse' && span.begin.name === selectedEntry);
+  if (compiles.length !== 1 || parses.length !== 1) throw new Error('missing or ambiguous compile/selected-entry parse boundaries');
+  const { begin, end } = compiles[0];
+  const firstParse = parses[0].begin;
+  if (parses[0].compile !== begin || !(begin.ts < firstParse.ts && parses[0].end.ts <= end.ts)) throw new Error('invalid compile/selected-entry parse boundaries');
   const elapsed = /Elapsed \(wall clock\) time \(h:mm:ss or m:ss\):\s*(?:(\d+):)?(\d+):(\d+(?:\.\d+)?)/.exec(timeText);
   if (!elapsed) throw new Error('missing process wall time');
   const wallSeconds = Number(elapsed[1] ?? 0) * 3600 + Number(elapsed[2]) * 60 + Number(elapsed[3]);
@@ -74,19 +99,31 @@ export function compareStartupDirectory(root) {
   if (pair.schema !== 'jet.native-host-shape-pair.v1' || !/^[0-9a-f]{64}$/.test(pair.source_sha256 ?? '') || !pair.machine || !pair.build_profile) throw new Error('startup pair must record shared source hash, machine, and build profile');
   const inputRoot = fs.realpathSync(path.join(root, 'inputs'));
   if (startupInputHash(inputRoot) !== pair.source_sha256) throw new Error('startup input snapshot differs from the paired source hash');
+  if (typeof pair.entry !== 'string' || path.isAbsolute(pair.entry) ||
+      path.relative(inputRoot, fs.realpathSync(path.join(inputRoot, pair.entry))) !== pair.entry ||
+      !fs.statSync(path.join(inputRoot, pair.entry)).isFile()) throw new Error('startup pair must pin its relative source entry');
   const names = arm => fs.readdirSync(path.join(root, arm)).filter(name => /^trial-[0-9]+$/.test(name)).sort();
   const trials = names('plain');
   if (JSON.stringify(trials) !== JSON.stringify(names('optimized'))) throw new Error('unmatched startup trial directories');
   const readArm = arm => trials.map(name => {
     const dir = path.join(root, arm, name);
-    if (fs.readFileSync(path.join(dir, 'rc'), 'utf8').trim() !== '0') throw new Error('startup process failed');
+    const exitCode = fs.readFileSync(path.join(dir, 'rc'), 'utf8').trim();
+    if (exitCode !== '0') throw new Error('startup process failed');
     const invocation = JSON.parse(fs.readFileSync(path.join(dir, 'invocation.json'), 'utf8'));
-    if (fs.realpathSync(invocation.source_root) !== inputRoot || invocation.source_sha256 !== pair.source_sha256) throw new Error('startup trial did not use the actual matched input snapshot');
+    if (fs.realpathSync(invocation.source_root) !== inputRoot || invocation.source_sha256 !== pair.source_sha256 || invocation.entry !== pair.entry) throw new Error('startup trial did not use the actual matched input snapshot and entry');
+    const receipt = startupReceipt(fs.readFileSync(path.join(dir, 'receipt'), 'utf8'));
+    if (!receipt.complete || receipt.report_count !== 0) throw new Error('startup compile did not complete');
+    const traceFile = path.join(dir, 'trace.json');
+    if (invocation.trace_sha256 !== sha256(fs.readFileSync(traceFile))) throw new Error('startup trace differs from the recorded completed process');
+    const trace = readTrace(traceFile, { completedProcess: {
+      exitCode: Number(exitCode), pid: invocation.process_pid,
+      startedUnixMs: invocation.process_started_unix_ms, finishedUnixMs: invocation.process_finished_unix_ms,
+    } });
     return {
-      receipt: startupReceipt(fs.readFileSync(path.join(dir, 'receipt'), 'utf8')),
+      receipt,
       source_sha256: invocation.source_sha256,
       artifact_sha256: sha256(fs.readFileSync(path.join(dir, 'out.rs'))),
-      timing: startupTiming(JSON.parse(fs.readFileSync(path.join(dir, 'trace.json'), 'utf8')), fs.readFileSync(path.join(dir, 'time.txt'), 'utf8')),
+      timing: startupTiming(trace, fs.readFileSync(path.join(dir, 'time.txt'), 'utf8'), pair.entry),
     };
   });
   return { ...compareStartup(readArm('plain'), readArm('optimized')), pair, trial_directories: trials };

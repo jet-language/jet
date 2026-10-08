@@ -3,29 +3,71 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import crypto from 'node:crypto';
+import { readTrace } from '../throughput/measure.mjs';
 import { startupTiming, startupReceipt, startupInputHash, compareStartup, compareStartupDirectory } from './startup.mjs';
 
+const entry = 'entry.jet';
+const processIdentity = { exitCode: 0, pid: 42, startedUnixMs: 1000, finishedUnixMs: 1001 };
+const digest = value => crypto.createHash('sha256').update(value).digest('hex');
+const stream = rows => '[\n' + rows.map(event => JSON.stringify(event) + ',\n').join('');
 const events = (parse, end) => [
-  { name: 'compile', ph: 'B', ts: 1 },
-  { name: 'main', cat: 'parse', ph: 'B', ts: parse },
-  { name: 'compile', ph: 'E', ts: end },
-];
+  { name: 'process_name', ph: 'M', tid: 0, args: { name: 'jetc0' } },
+  { name: 'trace.start', ph: 'i', tid: 0, ts: 0, args: { unix_ms: 1000 } },
+  { name: 'compile', cat: 'compile', ph: 'B', ts: 1 },
+  { name: entry, cat: 'parse', ph: 'B', ts: parse },
+  { name: entry, cat: 'parse', ph: 'E', ts: parse + 1 },
+  { name: 'compile', cat: 'compile', ph: 'E', ts: end },
+].map(event => ({ pid: 42, tid: 1, ...event }));
 const timing = wall => `Elapsed (wall clock) time (h:mm:ss or m:ss): ${wall}\n`;
 const receipt = identity => ({ complete: true, report_count: 0, source_bytes: 123, selected_factory_tier: 'Aot', actual_factory_tier: 'Aot', compiler_identity: identity });
 const receiptText = identity => Object.entries(receipt(identity)).map(([key, value]) => `${key}=${value}`).join('\n') + '\n';
 const row = ns => ({ receipt: receipt('compiler'), source_sha256: 'c'.repeat(64), artifact_sha256: 'a'.repeat(64), timing: { wall_ns: ns, compile_ns: ns, pre_parse_ns: ns } });
 
 test('startup timings use compile and first parse trace boundaries plus process wall time', () => {
-  assert.deepEqual(startupTiming(events(101, 201), timing('0:03.33')), { wall_ns: 3330000000n, compile_ns: 200000n, pre_parse_ns: 100000n });
-  assert.equal(startupTiming(events(101, 201), timing('1:02:03.33')).wall_ns, 3723330000000n);
-  assert.throws(() => startupTiming(events(1, 201), timing('0:03.33')), /boundaries/);
-  assert.throws(() => startupTiming(events(101, 101), timing('0:03.33')), /boundaries/);
-  assert.throws(() => startupTiming(events(101, 201), ''), /wall time/);
+  assert.deepEqual(startupTiming(events(101, 201), timing('0:03.33'), entry), { wall_ns: 3330000000n, compile_ns: 200000n, pre_parse_ns: 100000n });
+  assert.equal(startupTiming(events(101, 201), timing('1:02:03.33'), entry).wall_ns, 3723330000000n);
+  assert.throws(() => startupTiming(events(1, 201), timing('0:03.33'), entry), /boundaries/);
+  assert.throws(() => startupTiming(events(101, 101), timing('0:03.33'), entry), /time order/);
+  assert.throws(() => startupTiming(events(101, 201), '', entry), /wall time/);
 });
 
 test('startup receipt parses the actual line-oriented canonical Aot receipt', () => {
   assert.deepEqual(startupReceipt(receiptText('compiler')), receipt('compiler'));
   assert.throws(() => startupReceipt('not a receipt'), /canonical startup receipt/);
+});
+
+test('completed trace consumes the actual open stream and rejects corrupt or unbound evidence', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'jet-startup-trace-'));
+  const file = path.join(root, 'trace.json');
+  const complete = stream(events(101, 201));
+  try {
+    fs.writeFileSync(file, complete);
+    assert.deepEqual(readTrace(file, { completedProcess: processIdentity }), events(101, 201));
+    for (const text of ['[\n', complete + '{"name":\n', complete.slice(0, -2), complete + 'junk\n', JSON.stringify(events(101, 201)), '[\n{"name":broken},\n']) {
+      fs.writeFileSync(file, text);
+      assert.throws(() => readTrace(file, { completedProcess: processIdentity }), /completed trace|process identity/);
+    }
+    fs.writeFileSync(file, complete);
+    for (const changed of [{ exitCode: 1 }, { pid: 43 }, { startedUnixMs: 1001, finishedUnixMs: 1002 }]) {
+      assert.throws(() => readTrace(file, { completedProcess: { ...processIdentity, ...changed } }), /process identity/);
+    }
+    fs.writeFileSync(file, complete + '{"name":');
+    assert.deepEqual(readTrace(file), events(101, 201), 'the live reader keeps its partial-tail behavior');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('startup spans reject missing, ambiguous, unbalanced, wrong-thread and crossing entry scopes', () => {
+  const wall = timing('0:03.33');
+  const good = events(101, 201);
+  assert.throws(() => startupTiming(good, wall, 'other.jet'), /missing or ambiguous/);
+  assert.throws(() => startupTiming(good.slice(0, -1), wall, entry), /unbalanced/);
+  assert.throws(() => startupTiming(good.map(event => event.ph === 'E' && event.cat === 'parse' ? { ...event, tid: 2 } : event), wall, entry), /unbalanced/);
+  assert.throws(() => startupTiming(good.map(event => event.cat === 'parse' ? { ...event, tid: 2 } : event), wall, entry), /boundaries/);
+  assert.throws(() => startupTiming([...good.slice(0, -1), { ...good[3], ts: 151 }, { ...good[4], ts: 152 }, good.at(-1)], wall, entry), /missing or ambiguous/);
+  assert.throws(() => startupTiming([...good.slice(0, 4), good.at(-1), good[4]], wall, entry), /unbalanced/);
 });
 
 test('startup pair fails closed on equality, incomplete compile, output drift and identity changes', () => {
@@ -56,19 +98,23 @@ test('startup filesystem cell reads matching immutable trial evidence and reject
   try {
     const inputRoot = path.join(root, 'inputs');
     fs.mkdirSync(inputRoot);
-    fs.writeFileSync(path.join(inputRoot, 'main.jet'), 'fn run() {}');
+    fs.writeFileSync(path.join(inputRoot, entry), 'fn run() {}');
     fs.writeFileSync(path.join(inputRoot, 'package.jet'), 'name: "startup_fixture"');
     const source_sha256 = startupInputHash(inputRoot);
-    fs.writeFileSync(path.join(root, 'pair.json'), JSON.stringify({ schema: 'jet.native-host-shape-pair.v1', source_sha256, machine: { cpu: 'fixture' }, build_profile: 'same-profile' }));
+    fs.writeFileSync(path.join(root, 'pair.json'), JSON.stringify({ schema: 'jet.native-host-shape-pair.v1', source_sha256, entry, machine: { cpu: 'fixture' }, build_profile: 'same-profile' }));
     for (const arm of ['plain', 'optimized']) {
       for (let trial = 1; trial <= 3; trial++) {
         const dir = path.join(root, arm, `trial-00${trial}`);
         fs.mkdirSync(dir, { recursive: true });
         fs.writeFileSync(path.join(dir, 'rc'), '0\n');
         fs.writeFileSync(path.join(dir, 'receipt'), receiptText(arm));
-        fs.writeFileSync(path.join(dir, 'invocation.json'), JSON.stringify({ source_root: inputRoot, source_sha256 }));
         fs.writeFileSync(path.join(dir, 'out.rs'), 'identical emitted compiler artifact');
-        fs.writeFileSync(path.join(dir, 'trace.json'), JSON.stringify(events(arm === 'plain' ? 101 : 51, arm === 'plain' ? 201 : 101)));
+        const trace = stream(events(arm === 'plain' ? 101 : 51, arm === 'plain' ? 201 : 101));
+        fs.writeFileSync(path.join(dir, 'trace.json'), trace);
+        fs.writeFileSync(path.join(dir, 'invocation.json'), JSON.stringify({
+          source_root: inputRoot, source_sha256, entry, trace_sha256: digest(trace),
+          process_pid: processIdentity.pid, process_started_unix_ms: processIdentity.startedUnixMs, process_finished_unix_ms: processIdentity.finishedUnixMs,
+        }));
         fs.writeFileSync(path.join(dir, 'time.txt'), timing(arm === 'plain' ? '0:03.33' : '0:02.00'));
       }
     }
@@ -82,10 +128,21 @@ test('startup filesystem cell reads matching immutable trial evidence and reject
     assert.throws(() => compareStartupDirectory(root), /unmatched startup/);
     fs.renameSync(path.join(root, 'optimized', 'unmatched'), path.join(root, 'optimized', 'trial-003'));
     const invocation = path.join(root, 'optimized', 'trial-003', 'invocation.json');
+    const originalInvocation = fs.readFileSync(invocation, 'utf8');
+    const recordedInvocation = JSON.parse(originalInvocation);
+    for (const changed of [{ trace_sha256: '0'.repeat(64) }, { process_pid: 43 }, { entry: 'other.jet' }]) {
+      fs.writeFileSync(invocation, JSON.stringify({ ...recordedInvocation, ...changed }));
+      assert.throws(() => compareStartupDirectory(root), /recorded completed process|process identity|matched input snapshot/);
+    }
+    fs.writeFileSync(invocation, originalInvocation);
+    const receiptFile = path.join(root, 'optimized', 'trial-003', 'receipt');
+    fs.writeFileSync(receiptFile, receiptText('optimized').replace('complete=true', 'complete=false'));
+    assert.throws(() => compareStartupDirectory(root), /did not complete/);
+    fs.writeFileSync(receiptFile, receiptText('optimized'));
     fs.writeFileSync(invocation, JSON.stringify({ source_root: inputRoot, source_sha256: 'd'.repeat(64) }));
     assert.throws(() => compareStartupDirectory(root), /actual matched input snapshot/);
-    fs.writeFileSync(invocation, JSON.stringify({ source_root: inputRoot, source_sha256 }));
-    fs.writeFileSync(path.join(inputRoot, 'main.jet'), 'fn run() { print("different"); }');
+    fs.writeFileSync(invocation, originalInvocation);
+    fs.writeFileSync(path.join(inputRoot, entry), 'fn run() { print("different"); }');
     assert.throws(() => compareStartupDirectory(root), /input snapshot differs/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
