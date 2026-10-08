@@ -177,7 +177,7 @@ pub(crate) fn register_distinct(
     funcs: &HashMap<String, FuncSig>,
     consts: &HashMap<String, Type>,
 ) {
-    if is_reserved_type(&d.name) {
+    if registry.reserves_type_name(&d.name) {
         diags.push(Diagnostic::error(
             "E0106",
             format!("the name `{}` is built in and can't be redefined", d.name),
@@ -263,7 +263,7 @@ pub(crate) fn register_type_alias(
     funcs: &HashMap<String, FuncSig>,
     consts: &HashMap<String, Type>,
 ) {
-    if is_reserved_type(&a.name) {
+    if registry.reserves_type_name(&a.name) {
         diags.push(Diagnostic::error(
             "E0106",
             format!("the name `{}` is built in and can't be redefined", a.name),
@@ -1709,7 +1709,7 @@ pub(crate) fn register_struct(
     consts: &HashMap<String, Type>,
     target: &jet_foundation::Layout::TargetLayout,
 ) {
-    if is_reserved_type(&s.name) {
+    if registry.reserves_type_name(&s.name) {
         diags.push(Diagnostic::error(
             "E0106",
             format!("the name `{}` is built in and can't be redefined", s.name),
@@ -2259,7 +2259,7 @@ pub(crate) fn register_enum(
     funcs: &HashMap<String, FuncSig>,
     consts: &HashMap<String, Type>,
 ) {
-    if is_reserved_type(&e.name) {
+    if registry.reserves_type_name(&e.name) {
         diags.push(Diagnostic::error(
             "E0106",
             format!("the name `{}` is built in and can't be redefined", e.name),
