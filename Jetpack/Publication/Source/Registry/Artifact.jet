@@ -1,0 +1,298 @@
+// Source/Publish/Registry.rs:1447-1502,1524-1669,2241-2395,2806-3097,3161-3165.
+// Unix oracle port over ratified #3593 (Core receipt-2, 497daa7a0).
+// Unlike Foundation's protected tree publisher, this oracle accepts hard links
+// and checks device/inode only. Do not add ancestor, mtime or size validation.
+// Windows reparse-point facts / non-Unix identity remain separately owed.
+
+fn publication_artifact_path(repo: String, name: String, version: String) -> String IOError! {
+    publication_validate_index_component(name, "package name")
+    publication_validate_index_component(version, "package version")
+    Ok(files.join(files.join(files.join(repo, "artifacts"), name), version))
+}
+fn publication_artifact_context(path: String, detail: String) -> IOContext Never! {
+    IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val(detail)}
+}
+fn publication_artifact_invalid(path: String, detail: String) -> IOError Never! {
+    IOError.InvalidData(publication_artifact_context(path, detail))
+}
+fn publication_ensure_real_directory(path: String, label: String) IOError! -[FS]> {
+    metadata :: files.stat(path)
+    if metadata.is_symlink || !metadata.is_dir -> return Err(publication_artifact_invalid(path, "{label} is not a real directory"))
+}
+fn publication_ensure_real_directory_if_present(path: String, label: String) IOError! -[FS]> {
+    if files.stat(path) == {
+        .Ok(_) -> publication_ensure_real_directory(path, label)
+        .Err(error) -> {
+            if error == .NotFound(_) -> return
+            return Err(error)
+        }
+    }
+}
+fn publication_remove_artifact_staging(path: String) IOError! -[FS]> {
+    if files.stat(path) == {
+        .Ok(metadata) -> {
+            if metadata.is_symlink || !metadata.is_dir {
+                files.remove(path)
+            } else {
+                files.remove_all(path)
+            }
+        }
+        .Err(error) -> {
+            if error == .NotFound(_) -> return
+            return Err(error)
+        }
+    }
+}
+// Rust same_registry_identity's Unix arm: no content/mtime/link-count check.
+fn publication_same_registry_identity(left: Stat, right: Stat) -> Bool Never! {
+    left.id.device == right.id.device && left.id.inode == right.id.inode
+}
+// Directory.list retains raw names in byte order. A trailing '/.' makes the
+// original root an ancestor, preserving read_dir's following-root semantics.
+// #3593 FileHandles.rs:307-315 (negative key = ordinary path), :358-403
+// (openat O_DIRECTORY/O_NOFOLLOW on the FINAL component only).
+fn publication_registry_directory_entries(path: String) -[FS]> [files.DirectoryEntry] IOError! {
+    opened_path :: if path == "" -> path else -> files.join(path, ".")
+    directory :: files.open_directory(opened_path)
+    directory.list()
+}
+fn publication_registry_entry_name(path: String, entry: files.DirectoryEntry) -> String IOError! {
+    if !entry.name_is_unicode -> return Err(publication_artifact_invalid(files.join(path, entry.name), "registry source contains a non-UTF-8 name `{files.join(path, entry.name)}`"))
+    Ok(entry.name)
+}
+fn publication_ensure_registry_tree_directory(path: String) IOError! -[FS]> {
+    if files.stat(path) == {
+        .Ok(metadata) -> {
+            if metadata.is_symlink -> return Err(IOError.PermissionDenied(publication_artifact_context(path, "registry tree directory must not be a symlink or reparse point")))
+            if metadata.is_dir -> return
+            return Err(IOError.AlreadyExists(publication_artifact_context(path, "registry tree path is not a directory")))
+        }
+        .Err(error) -> {
+            if error != .NotFound(_) -> return Err(error)
+            parent :: files.dirname(path)
+            if parent != "" && parent != path -> publication_ensure_registry_tree_directory(parent)
+            directory :: files.open_directory(if parent == "" -> "." else -> parent)
+            _ :: directory.create_directory(files.basename(path))
+        }
+    }
+}
+fn publication_copy_registry_file_nofollow(source: String, destination: String, expected: Stat) IOError! -[FS]> {
+    reader :: files.open(source, links: .Refuse)
+    opened :: reader.stat()
+    if !opened.is_file || !publication_same_registry_identity(expected, opened) -> return Err(IOError.PermissionDenied(publication_artifact_context(source, "registry source file changed before copy `{source}`")))
+    writer :: files.create(destination, links: .Refuse)
+    loop {
+        bytes :: reader.read(FOUNDATION_READ_CHUNK)
+        if bytes.len() == 0 -> break
+        writer.write_all(bytes)
+    }
+    writer.fsync()
+    after :: files.stat(source)
+    if !publication_same_registry_identity(expected, after) -> return Err(IOError.Other(publication_artifact_context(source, "registry source file changed while copying `{source}`")))
+}
+fn publication_copy_artifact_tree(source: String, destination: String) IOError! -[FS]> {
+    source_metadata :: files.stat(source)
+    if source_metadata.is_symlink || !source_metadata.is_dir -> return Err(publication_artifact_invalid(source, "registry source root is not a real directory `{source}`"))
+    publication_ensure_registry_tree_directory(destination)
+    entries :: publication_registry_directory_entries(source)
+    names := [[U8]]{}
+    loop entry in entries -> &names.push(entry.raw_name)
+    loop entry in entries {
+        name :: publication_registry_entry_name(source, entry)
+        from :: files.join(source, name)
+        metadata :: files.stat(from)
+        if metadata.is_symlink || (!metadata.is_dir && !metadata.is_file) -> return Err(publication_artifact_invalid(from, "registry source contains an unsupported node `{from}`"))
+        if name.starts_with(".") || name == "build" || name == "target" -> next
+        to :: files.join(destination, name)
+        if metadata.is_dir {
+            publication_ensure_registry_tree_directory(to)
+            publication_copy_artifact_tree(from, to)
+            after :: files.stat(from)
+            if !publication_same_registry_identity(metadata, after) -> return Err(IOError.Other(publication_artifact_context(from, "registry source directory changed while copying `{from}`")))
+        } else {
+            publication_copy_registry_file_nofollow(from, to, metadata)
+        }
+    }
+    after_names := [[U8]]{}
+    loop entry in publication_registry_directory_entries(source) -> &after_names.push(entry.raw_name)
+    after_metadata :: files.stat(source)
+    if !publication_same_registry_identity(source_metadata, after_metadata) || names != after_names -> return Err(IOError.Other(publication_artifact_context(source, "registry source changed while copying `{source}`")))
+}
+fn publication_copy_publish_lock(source: String, destination: String) IOError! -[FS]> {
+    managed :: files.join(source, ".jet")
+    metadata :: files.stat(managed) ?? {
+        if err == .NotFound(_) -> return
+        return Err(err)
+    }
+    if metadata.is_symlink || !metadata.is_dir -> return Err(publication_artifact_invalid(managed, "package .jet metadata directory must be a real directory"))
+    source_lock :: files.join(managed, "lock")
+    lock_metadata :: files.stat(source_lock) ?? {
+        if err == .NotFound(_) -> return
+        return Err(err)
+    }
+    if lock_metadata.is_symlink || !lock_metadata.is_file -> return Err(publication_artifact_invalid(source_lock, "package lock must be a regular file"))
+    destination_metadata :: files.join(destination, ".jet")
+    publication_ensure_registry_tree_directory(destination_metadata)
+    publication_copy_registry_file_nofollow(source_lock, files.join(destination_metadata, "lock"), lock_metadata)
+}
+fn publication_load_publish_lock(source: String) -[FS]> LockFile? IOError! {
+    managed :: files.join(source, ".jet")
+    metadata :: files.stat(managed) ?? {
+        if err == .NotFound(_) -> return Ok(None)
+        return Err(err)
+    }
+    if metadata.is_symlink || !metadata.is_dir -> return Err(publication_artifact_invalid(managed, "package .jet metadata directory must be a real directory"))
+    path :: files.join(managed, "lock")
+    lock_metadata :: files.stat(path) ?? {
+        if err == .NotFound(_) -> return Ok(None)
+        return Err(err)
+    }
+    if lock_metadata.is_symlink || !lock_metadata.is_file -> return Err(publication_artifact_invalid(path, "package lock must be a regular file"))
+    raw :: files.read(path)
+    parsed :: pkg_lock_parse(raw) ?? return Err(publication_artifact_invalid(path, "package lock is malformed: {err.message()}"))
+    Ok(Val(parsed))
+}
+struct PublicationArtifactSnapshot {
+    path: String
+    cleanup_root: String
+    content_hash: String
+}
+impl PublicationArtifactSnapshot.Close {
+    fn close(^self) -[FS]> {
+        files.remove_all(self.cleanup_root).drop("Rust ArtifactSnapshot::drop best-effort cleanup")
+    }
+}
+fn publication_snapshot_registry_tree(scratch_parent: String, source: String) -[FS, Rand]> PublicationArtifactSnapshot IOError! {
+    cleanup_root :: provider_exclusive_temp_dir(scratch_parent, "jet-registry-artifact")
+    path :: files.join(cleanup_root, "tree")
+    result :: (() -> {
+        publication_copy_artifact_tree(source, path)
+        publication_copy_publish_lock(source, path)
+        hash :: publication_registry_artifact_hash(path)
+        Ok(PublicationArtifactSnapshot{path: path, cleanup_root: cleanup_root, content_hash: hash})
+    })()
+    if result == .Err(error) {
+        files.remove_all(cleanup_root).drop("Rust snapshot_registry_tree preserves its original error")
+        return Err(error)
+    }
+    result
+}
+fn publication_publish_artifact(repo: String, source: String, name: String, version: String, expected_hash: String) -[FS, Env, Time, Rand]> String IOError! {
+    snapshot :: publication_snapshot_registry_tree(repo, source)
+    publication_validate_registry_metadata_file(snapshot.path, name, version)
+    actual :: publication_registry_artifact_hash(snapshot.path)
+    if expected_hash != "" && actual != expected_hash -> return Err(publication_artifact_invalid(source, "registry source hash changed during publish: expected {expected_hash}, got {actual}"))
+    destination :: publication_artifact_path(repo, name, version)
+    if files.stat(destination) == .Ok(metadata) {
+        if metadata.is_symlink -> return Err(publication_artifact_invalid(destination, "registry artifact path must not be a symlink"))
+    }
+    if files.is_dir(destination) {
+        if publication_registry_artifact_hash(destination) != actual -> return Err(IOError.AlreadyExists(publication_artifact_context(destination, "registry artifact already exists with conflicting source bytes")))
+        publication_stage_oci_sbom(repo, snapshot.path, name, version, actual)
+        publication_finalize_oci_referrers_for_package(repo, name, version)
+        return Ok(destination)
+    }
+    if files.exists(destination) -> return Err(IOError.AlreadyExists(publication_artifact_context(destination, "registry artifact path is not a directory")))
+    parent :: files.dirname(destination)
+    if parent == "" -> return Err(IOError.InvalidInput(publication_artifact_context(destination, "registry artifact has no parent")))
+    publication_ensure_real_directory(repo, "registry checkout")
+    publication_ensure_real_directory_if_present(files.join(repo, "artifacts"), "registry artifact root")
+    publication_ensure_real_directory_if_present(files.join(files.join(repo, "artifacts"), name), "registry artifact package directory")
+    files.create_dir_all(parent)
+    publication_ensure_real_directory(parent, "registry artifact parent")
+    staging :: files.join(parent, ".{version}.jet-artifact-{publication_registry_unique_suffix()}")
+    if files.stat(staging) == .Ok(_) -> return Err(IOError.AlreadyExists(publication_artifact_context(staging, "registry artifact staging path already exists")))
+    subject_root :: files.join(files.join(repo, "referrers"), actual)
+    subject_root_existed :: files.stat(subject_root) == .Ok(_)
+    pending :: files.join(subject_root, PUBLICATION_OCI_PENDING_SBOM)
+    pending_existed :: files.stat(pending) == .Ok(_)
+    artifact_published := false
+    result :: (() -> {
+        publication_stage_oci_sbom(repo, snapshot.path, name, version, actual)
+        publication_copy_artifact_tree(snapshot.path, staging)
+        if publication_registry_artifact_hash(staging) != actual -> return Err(publication_artifact_invalid(staging, "staged registry artifact does not match its source hash"))
+        files.rename(staging, destination)
+        artifact_published = true
+        publication_finalize_oci_referrers_for_package(repo, name, version)
+    })()
+    if result == .Err(error) {
+        if publication_remove_artifact_staging(staging) == .Err(cleanup_error) -> return Err(foundation_io_error_with_cause(error, "{error}; couldn't remove staged registry artifact `{staging}`: {cleanup_error}"))
+        if !pending_existed -> files.remove(pending).drop("Rust publish rollback preserves the primary error")
+        if artifact_published && !subject_root_existed -> publication_remove_artifact_staging(destination).drop("Rust publish rollback preserves the primary error")
+        if !subject_root_existed -> files.remove_all(subject_root).drop("Rust publish rollback preserves the primary error")
+        return Err(error)
+    }
+    Ok(destination)
+}
+fn publication_verify_artifact(repo: String, entry: PublicationIndexEntry) -[FS, Env]> String IOError! {
+    path :: publication_artifact_path(repo, entry.name, entry.version)
+    package_dir :: files.dirname(path)
+    if package_dir == "" -> return Err(IOError.InvalidInput(publication_artifact_context(path, "registry artifact has no parent")))
+    publication_ensure_real_directory_if_present(repo, "registry checkout")
+    publication_ensure_real_directory_if_present(files.join(repo, "artifacts"), "registry artifact root")
+    publication_ensure_real_directory_if_present(package_dir, "registry artifact package directory")
+    metadata :: files.stat(path) ?? {
+        if err == .NotFound(_) -> return Err(IOError.NotFound(publication_artifact_context(path, "registry has no source artifact for {entry.name} {entry.version}")))
+        return Err(err)
+    }
+    if metadata.is_symlink || !metadata.is_dir -> return Err(IOError.NotFound(publication_artifact_context(path, "registry has no source artifact for {entry.name} {entry.version}")))
+    if entry.content_hash != "" && publication_registry_artifact_hash(path) != entry.content_hash -> return Err(publication_artifact_invalid(path, "registry source artifact for {entry.name} {entry.version} failed its content hash"))
+    publication_verify_oci_referrers(repo, entry)
+    Ok(path)
+}
+// Rust retains file contents, globally sorts relative paths, then hashes the
+// path/NUL/u64be-length/content framing. registry.json alone has a 1 MiB cap.
+struct PublicationRegistryIdentityFile {
+    relative: String
+    content: [U8]
+}
+fn publication_registry_artifact_hash(root: String) -[FS]> String IOError! {
+    entries := [PublicationRegistryIdentityFile]{}
+    publication_collect_registry_identity_files(root, root, &entries)
+    &entries.sort_by((left: PublicationRegistryIdentityFile, right: PublicationRegistryIdentityFile) -> left.relative <=> right.relative)
+    input := [U8]{}
+    loop entry in entries {
+        &input.extend(entry.relative.bytes())
+        &input.push(U8{0})
+        loop shift in FOUNDATION_U64_SHIFTS -> &input.push(U8{(entry.content.len() >> shift) & 255})
+        &input.extend(entry.content)
+    }
+    Ok("sha256-{pkg_sha256_hex(input)}")
+}
+fn publication_collect_registry_identity_files(directory: String, root: String, out: &[PublicationRegistryIdentityFile]) IOError! -[FS]> {
+    entries :: publication_registry_directory_entries(directory)
+    loop entry in entries {
+        name :: publication_registry_entry_name(directory, entry)
+        path :: files.join(directory, name)
+        metadata :: files.stat(path)
+        if metadata.is_symlink || (!metadata.is_dir && !metadata.is_file) -> return Err(publication_artifact_invalid(path, "registry source contains an unsupported node `{path}`"))
+        if name.starts_with(".") || name == "build" || name == "target" -> next
+        if metadata.is_dir {
+            publication_collect_registry_identity_files(path, root, &out)
+            next
+        }
+        relative :: files.relative(path, root).replace("\\", "/")
+        maximum :: if name == PUBLICATION_REGISTRY_PACKAGE_METADATA_FILE -> PUBLICATION_MAX_REGISTRY_PACKAGE_METADATA_BYTES else -> PUBLICATION_U64_MAX
+        content :: publication_read_registry_file_nofollow(path, maximum)
+        &out.push(PublicationRegistryIdentityFile{relative: relative, content: content})
+    }
+}
+fn publication_read_registry_file_nofollow(path: String, maximum: Int) -[FS]> [U8] IOError! {
+    expected :: files.stat(path)
+    if expected.is_symlink || !expected.is_file -> return Err(publication_artifact_invalid(path, "registry identity entry is not a regular file `{path}`"))
+    reader :: files.open(path, links: .Refuse)
+    opened :: reader.stat()
+    if !publication_same_registry_identity(expected, opened) -> return Err(IOError.Other(publication_artifact_context(path, "registry identity entry changed before read `{path}`")))
+    read_limit :: if maximum < PUBLICATION_U64_MAX -> maximum + 1 else -> maximum
+    content := [U8]{}
+    loop content.len() < read_limit {
+        remaining :: read_limit - content.len()
+        bytes :: reader.read(if remaining < FOUNDATION_READ_CHUNK -> remaining else -> FOUNDATION_READ_CHUNK)
+        if bytes.len() == 0 -> break
+        &content.extend(bytes)
+    }
+    if content.len() > maximum -> return Err(publication_artifact_invalid(path, "registry identity file exceeds its size limit"))
+    after :: files.stat(path)
+    if !publication_same_registry_identity(expected, after) -> return Err(IOError.Other(publication_artifact_context(path, "registry identity entry changed while reading `{path}`")))
+    Ok(content)
+}
