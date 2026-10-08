@@ -785,3 +785,55 @@ impl Float.Div(Vec3) {
     assert_eq(Vec2.from_array(value.to_array()).lane(1), 4.0)
     assert_eq(Vec2.splat(2.0).dot(Vec2.splat(3.0)), 12.0)
 }
+
+struct Vec4 {
+    lanes: [Float#4]
+}
+impl Vec4 {
+    fn new(x: Float, y: Float, z: Float, w: Float) -> Vec4 Never! {
+        Vec4{lanes: [Float#4]{x, y, z, w}}
+    }
+    fn splat(x: Float) -> Vec4 Never! { Vec4.new(x, x, x, x) }
+    fn from_array(lanes: [Float#4]) -> Vec4 Never! { Vec4{lanes: lanes} }
+    fn to_array(self) -> [Float#4] Never! { ~self.lanes }
+    fn lane(self, index: Int) -> Float Never! {
+        if index < 0 || index >= 4 -> core.math.__numeric_stop("lane index {index} out of range for Vec4 (4 lanes)")
+        self.lanes[index]
+    }
+    fn dot(self, other: Vec4) -> Float Never! {
+        total := Float{0.0}
+        loop i in 0..<4 -> total = total + self.lanes[i] * other.lanes[i]
+        total
+    }
+    fn length(self) -> Float Never! { sqrt(self.dot(self)) }
+    fn normalize(self) -> Vec4 Never! {
+        length :: self.length()
+        if length == 0.0 -> return ~self
+        Vec4.new(self.lanes[0] / length, self.lanes[1] / length, self.lanes[2] / length, self.lanes[3] / length)
+    }
+}
+impl Vec4.Add {
+    fn add(self, rhs: Vec4) -> Vec4 Never! {
+        Vec4.new(self.lanes[0] + rhs.lanes[0], self.lanes[1] + rhs.lanes[1], self.lanes[2] + rhs.lanes[2], self.lanes[3] + rhs.lanes[3])
+    }
+}
+impl Vec4.Sub {
+    fn sub(self, rhs: Vec4) -> Vec4 Never! {
+        Vec4.new(self.lanes[0] - rhs.lanes[0], self.lanes[1] - rhs.lanes[1], self.lanes[2] - rhs.lanes[2], self.lanes[3] - rhs.lanes[3])
+    }
+}
+impl Vec4.Mul {
+    fn mul(self, rhs: Vec4) -> Vec4 Never! {
+        Vec4.new(self.lanes[0] * rhs.lanes[0], self.lanes[1] * rhs.lanes[1], self.lanes[2] * rhs.lanes[2], self.lanes[3] * rhs.lanes[3])
+    }
+}
+
+#Test("Vec4 dot folds from zero in lane order") {
+    large :: Vec4.new(10000000000000000.0, 1.0, -10000000000000000.0, 2.0)
+    assert_eq(large.dot(Vec4.splat(1.0)), 2.0)
+    assert_eq(Vec4.new(0.0, -0.0, 0.0, -0.0).normalize().to_array()[1].to_bits(), to_bits(-0.0))
+    assert_eq(Vec4.from_array([Float#4]{1.0, 2.0, 3.0, 4.0}).length(), sqrt(30.0))
+    assert_eq((Vec4.splat(2.0) + Vec4.splat(3.0)).lane(3), 5.0)
+    assert_eq((Vec4.splat(2.0) - Vec4.splat(3.0)).lane(3), -1.0)
+    assert_eq((Vec4.splat(2.0) * Vec4.splat(3.0)).lane(3), 6.0)
+}
