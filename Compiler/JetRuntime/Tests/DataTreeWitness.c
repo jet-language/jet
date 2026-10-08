@@ -23,6 +23,7 @@ extern void *jet_rt_alloc(int64_t, int64_t);
 extern void __real_jet_rt_free(void *, int64_t, int64_t);
 extern Text *jet_rt_string_from_static(const void *, int64_t);
 extern void jet_rt_string_drop(Text *);
+extern void jet_panic(Text *, int64_t, Text *);
 extern int64_t jet_int_owned_from_i64(int64_t);
 extern int64_t jet_int_owned_to_i64(int64_t);
 extern int64_t jet_int_add(int64_t, int64_t);
@@ -205,6 +206,15 @@ static void sequence_cases(void) {
 }
 int main(int argc, char **argv) {
     jet_rt_alloc_init();
+    if (argc > 1 && strcmp(argv[1], "panic-reference") == 0) {
+        const char file[] = "<core.prelude>", message[] = "record variant index out of range";
+        jet_panic(jet_rt_string_from_static(file,sizeof(file)-1),0,jet_rt_string_from_static(message,sizeof(message)-1));
+        assert(!"jet_panic reference must stop");
+    }
+    if (argc > 1 && strcmp(argv[1], "wrong-variant") == 0) {
+        (void)jet_rt_record_get_DataTree_Int(jet_rt_record_new_DataTree_Null());
+        assert(!"record variant index out of range must stop");
+    }
     if (argc > 1 && strcmp(argv[1], "nonfinite") == 0) {
         union { uint64_t bits; double value; } infinity = { UINT64_C(0x7ff0000000000000) };
         Tree *tree = jet_rt_record_new_DataTree_Float(infinity.value);

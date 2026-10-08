@@ -2016,3 +2016,30 @@ is `EncodingErrors ownership/equality/render OK`. Native execution remains
 unexercised until the integrator composes the fresh green E2 FINAL runtime;
 parser and strict C11 syntax receipts alone do not establish runtime parity.
 
+### Shared record-variant panic parity
+
+DataTree and DataEvent wrong-variant payload getters call the single internal
+`rt_record_variant_panic()` in `JetRuntime/Source/Trap.jet`. It specializes the
+existing `jet_panic("<core.prelude>", 0, "record variant index out of range")`
+path without allocating file/message text: the same `trap_header(0)`,
+33 message bytes, `trap_msg_prelude_end()`, and `trap_footer(0)`.
+`trap_msg_prelude_end()` is the message terminator plus
+`trap_context("<core.prelude>", 0, empty function/source)` bytes.
+
+The reference is `PortableCore.rs:109-110` and
+`Trap.jet:195-200,263-265` before this insertion. The existing native
+`jet_panic`/`trap_simple` path does not publish to task state; this specialization
+preserves that fatal behavior rather than inventing a separate transport.
+Rust task-unwind versus native fatal-stop parity is a pre-existing shared
+Trap issue, not a task-parity claim for these data providers. Any shared Trap
+task/publication change must cover this specialization as well.
+
+Both C witnesses have `panic-reference` (real `jet_panic` with heap text,
+line 0) and `wrong-variant` modes.
+`Tests/run-record-variant-panic.mjs OUT DATA_TREE_WITNESS DATA_EVENT_WITNESS`
+runs the real linked clients serially, requires exact exit 70 and empty
+stdout, saves the direct reference's stderr as the process-mode golden,
+asserts message/location, and byte-compares the wrong-variant output.
+This runner has not been executed; parser/C syntax receipts alone do not
+prove native panic-byte parity or native execution.
+
