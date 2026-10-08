@@ -30,5 +30,13 @@ fn run() {
     mir_pass_sort_functions(&single)
     jet_codegen_sort_functions(&single)
     if single.len() != 1 || single[0].name != "single" -> panic("sorting changed a singleton")
+    instances := [MIRType]{mir_type_with_identity(fx_string(), MIRTypeID{value: 0}), fx_bool(), fx_int()}
+    mir_pass_sort_type_instances(&instances)
+    if instances[0].kind != MIRTypeKind.Bool || instances[0].identity != None || instances[1].kind != MIRTypeKind.Int || instances[1].identity != None || instances[2].identity != Val(MIRTypeID{value: 0}) -> panic("type-instance cycle permutation changed identity/key order")
+    mir_pass_sort_type_instances(&instances)
+    if instances[0].kind != MIRTypeKind.Bool || instances[1].kind != MIRTypeKind.Int || instances[2].kind != MIRTypeKind.String -> panic("type-instance permutation is not idempotent")
+    empty_instances := [MIRType]{}
+    mir_pass_sort_type_instances(&empty_instances)
+    if empty_instances.len() != 0 -> panic("type-instance sorting inserted a row")
     print("PASS canonical borrowed-row sorting: stable keys, idempotence, empty, singleton")
 }

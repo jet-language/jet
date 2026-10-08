@@ -90,6 +90,9 @@ const parts = [
   body("Compiler/JetBackend/Tests/LowerFixtures.jet", ["fn fx_report(", "fn fx_report_lir(", "fn fx_report_image(", "fn fx_report_executable(", "fn run("]),
   ...(canonicalOrder ? [
     item("Compiler/JetOptimizer/Source/Facts/CanonicalOrdering.jet", "fn mir_pass_sort_functions("),
+    item("Compiler/JetOptimizer/Source/Facts/CanonicalOrdering.jet", "fn mir_pass_canonical_order("),
+    item("Compiler/JetOptimizer/Source/Facts/CanonicalOrdering.jet", "fn mir_pass_order_before("),
+    item("Compiler/JetOptimizer/Source/Facts/CanonicalOrdering.jet", "fn mir_pass_sort_type_instances("),
     item("Compiler/JetCodegen/Source/Codegen/Functions.jet", "fn jet_codegen_sort_functions("),
     body("Compiler/JetOptimizer/Tests/CanonicalOrderingFixtures.jet"),
   ] : [body("Compiler/JetOptimizer/Tests/LintFixtures.jet")]),

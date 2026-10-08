@@ -36,11 +36,11 @@ fn mir_pass_eliminate_unreachable_function(function: &MIRFunction) Never! {
     kept_blocks := [MIRBasicBlock]{}
     loop {
         block :: &function.blocks.pop() ?? break
-        if reachable_rows.get(block.id.value) != None -> &kept_blocks.push(block)
+        if reachable_rows.get(block.id.value) != None -> &kept_blocks.push(^block)
     }
     loop {
         block :: &kept_blocks.pop() ?? break
-        &function.blocks.push(block)
+        &function.blocks.push(^block)
     }
     // Live values and predecessors are keyed once per function instead of
     // rescanned per value and per block.
@@ -61,11 +61,11 @@ fn mir_pass_eliminate_unreachable_function(function: &MIRFunction) Never! {
     kept_values := [MIRValueFact]{}
     loop {
         value :: &function.values.pop() ?? break
-        if live_values.get(value.id.value) != None -> &kept_values.push(value)
+        if live_values.get(value.id.value) != None -> &kept_values.push(^value)
     }
     loop {
         value :: &kept_values.pop() ?? break
-        &function.values.push(value)
+        &function.values.push(^value)
     }
     // Only phi operands change below, so the predecessor map stays exact.
     predecessors :: mir_pass_predecessor_map(function)

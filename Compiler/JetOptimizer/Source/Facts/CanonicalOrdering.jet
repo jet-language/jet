@@ -194,8 +194,8 @@ fn mir_pass_sort_constants(rows: &[MIRConstantDef]) Never! {
 }
 
 // Instances without an identity sort first (0); the canonical key breaks
-// ties and is built once per row rather than once per comparison. The sorted
-// list then replaces `rows` whole, so each row is copied once, not twice.
+// ties and is built once per row rather than once per comparison. Apply the
+// stable index permutation by swapping rows, never copying their payloads.
 fn mir_pass_sort_type_instances(rows: &[MIRType]) Never! {
     primary := [U64]{}
     secondary := [U64]{}
@@ -205,9 +205,17 @@ fn mir_pass_sort_type_instances(rows: &[MIRType]) Never! {
         &secondary.push(rows[index].identity.map(value -> value.value) ?? U64{0})
         &text.push(mir_type_canonical_key(rows[index]))
     }
-    sorted := [MIRType]{}
-    loop position in mir_pass_canonical_order(primary, secondary, text) -> &sorted.push(rows[position])
-    rows = sorted
+    order :: mir_pass_canonical_order(primary, secondary, text)
+    destinations := [Int]{}
+    loop index in 0..<rows.len() -> &destinations.push(index)
+    loop index in 0..<order.len() -> destinations[order[index]] = index
+    loop index in 0..<rows.len() {
+        loop destinations[index] != index {
+            target :: destinations[index]
+            &rows.swap(index, target)
+            &destinations.swap(index, target)
+        }
+    }
 }
 
 fn mir_pass_sort_fields(rows: &[MIRFieldRow]) Never! {
