@@ -1,0 +1,17 @@
+# Port of tests/comptime_cli_parity.rs::comptime_enum_discriminants_keep_duplicates_and_report_invalid_expressions; exact original predicates, runtime UNRUN.
+fixture: fixtures/comptime_enum_discriminants_keep_duplicates_and_report_invalid_expressions
+step: jet check duplicate_codes.jet
+exit: 0
+step: jet check overflow.jet
+exit: nonzero
+stderr: ~ "E0035" # Original diagnostic lookup by code.
+stderr: ~ "An enum discriminant is outside the signed integer range" # Original exact diagnostic.what remains compiler-lib.
+step: jet check noninteger.jet
+exit: nonzero
+stderr: ~ "E0035" # Original diagnostic lookup by code.
+stderr: ~ "An enum discriminant must be an integer, got Float (an approximate binary number)" # Original exact diagnostic.what remains compiler-lib.
+step: jet check unknown.jet
+exit: nonzero
+stderr: ~ "E0035" # Original diagnostic lookup by code.
+stderr: ~ "An enum discriminant must be computable at compile time" # Original exact diagnostic.what remains compiler-lib.
+

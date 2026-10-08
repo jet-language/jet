@@ -1,0 +1,23 @@
+# Port of tests/comptime_cli_parity.rs::package_build_entry_discovery_matches_committed_golden_across_tiers; exact original predicates, runtime UNRUN.
+# ORIGINAL-TEST-BUG: duplicate store assignments preserved.
+step release: jet run --release {root}/Examples/features/tooling/build_entry_discovery/run.jet
+cwd: {root}/Examples/features/tooling/build_entry_discovery
+env: JET_STORE_DIR={work}/cache/release-run
+env: JET_STORE_DIR={work}/cache/release-build
+exit: 0
+stdout: = ../../../Examples/features/expected/tooling/build_entry_discovery.out
+step default: jet run {root}/Examples/features/tooling/build_entry_discovery/run.jet
+cwd: {root}/Examples/features/tooling/build_entry_discovery
+env: JET_STORE_DIR={work}/cache/run
+env: JET_STORE_DIR={work}/cache/default
+exit: 0
+stdout: = ../../../Examples/features/expected/tooling/build_entry_discovery.out
+exit: == release # Original ExitStatus::code equality.
+step dev: jet dev {root}/Examples/features/tooling/build_entry_discovery/run.jet --interpret --watch=off
+cwd: {root}/Examples/features/tooling/build_entry_discovery
+env: JET_STORE_DIR={work}/cache/dev-run
+env: JET_STORE_DIR={work}/cache/dev-build
+exit: 0
+stdout: = ../../../Examples/features/expected/tooling/build_entry_discovery.out
+exit: == release # Original ExitStatus::code equality.
+

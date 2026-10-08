@@ -1,0 +1,27 @@
+# Port of tests/comptime_cli_parity.rs::measured_test_cli_and_selected_claim_keep_aot_golden_contract; exact original predicates, runtime UNRUN.
+# ORIGINAL-TEST-BUG: duplicate bench JET_STORE_DIR assignments preserved.
+fixture: fixtures/measured_test_cli_and_selected_claim_keep_aot_golden_contract
+step: jet build main.jet
+exit: 0
+step: built
+exit: 0
+stdout: = ../../../Examples/features/expected/tooling/test_target.out
+step: jet test --help
+exit: 0
+stdout: ~ "--filter" # Original help contains.
+stdout: ~ "--measure" # Original help contains.
+step: jet test main.jet --measure "--filter=sum_to(1000)"
+exit: 0
+stdout: ~ "sum_to(1000)" # Original selected contains claim name.
+stdout: ~ "ns" # Original selected contains timing unit.
+step: jet test Examples/features/tooling/bench.jet --measure --json
+cwd: {root}
+env: JET_STORE_DIR={work}/bench-cache
+env: JET_STORE_DIR={work}/bench-run-cache
+exit: 0
+capture: elided = text stdout.filter(~ "\"name\":\"elided baseline\"").line(0).split("\"mean_ns\":", 1).split(",", 0).split("}", 0)
+capture: kept = text stdout.filter(~ "\"name\":\"keep loop\"").line(0).split("\"mean_ns\":", 1).split(",", 0).split("}", 0)
+cap:kept: is-f64
+cap:elided: is-f64
+cap:kept: f64 > {cap:elided} # Original same-run f64 keep mean > elided control; never an absolute threshold.
+
