@@ -5157,8 +5157,7 @@ fn lower_method_call_impl(
         }
         tasks
     }
-    // The vault's opaque key-wrap carriers are the one remaining host-owned
-    // static surface; every core.crypto type method is Jet-declared Core.
+    // The published vault static spellings resolve to their source-owned helpers.
     let crypto_static = static_call_type_name_lower(receiver, env).and_then(|ty| {
         let helper = match (ty.as_str(), method) {
             ("WrappedVaultKey", "from_bytes") => "__vault_wrapped_from_bytes",
@@ -5170,31 +5169,12 @@ fn lower_method_call_impl(
     });
     if let Some(helper) = crypto_static {
         return in_own_frame(|| {
-            let module = "core.crypto";
-            let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
-            let widen_to_vec = core_widen_to_vec(module, helper, &targs);
-            let Some(ty) = resolved_ret.cloned() else {
-                return invariant_method_expr(
-                    method_span,
-                    "crypto static call without a resolved return type",
-                );
-            };
-            let record = match checked_core_record(module, helper, targs.len(), method_span) {
-                Ok(record) => record,
-                Err(expr) => return expr,
-            };
-            TExpr {
-                ty: ty.clone(),
-                kind: TExprKind::CoreCall {
-                    record,
-                    args: targs,
-                    source_span: method_span,
-                    type_args: Vec::new(),
-                    widen_to_vec,
-                    data_plan: None,
-                    fallibility: TFailureCarrier::from_checked_type(&ty),
-                },
-            }
+            lower_core_source_call(
+                method_span, "core.crypto", helper, &[], resolved_ret,
+                args, cx, env,
+            ).unwrap_or_else(|| invariant_method_expr(
+                method_span, "vault static call has no loaded source helper",
+            ))
         });
     }
     if let Some(kind) = recv_type
@@ -5203,33 +5183,36 @@ fn lower_method_call_impl(
     {
         if let Some(helper) = vault_instance_helper(kind, method) {
             return in_own_frame(|| {
-                let recv = lower_expr(receiver, cx, env);
-                let targs = vec![recv];
-                let widen_to_vec = core_widen_to_vec("core.crypto", helper, &targs);
-                let ty = match resolved_ret.cloned() {
-                    Some(ty) => ty,
-                    None => {
-                        return invariant_method_expr(
-                            method_span,
-                            "crypto instance call without a resolved return type",
-                        );
-                    }
+                let Some(source_signature) = cx.core_source_sigs
+                    .get(&("core.crypto".to_string(), helper.to_string()))
+                else {
+                    return invariant_method_expr(method_span, "vault bytes call has no loaded source helper");
                 };
-                let record =
-                    match checked_core_record("core.crypto", helper, targs.len(), method_span) {
-                        Ok(record) => record,
-                        Err(expr) => return expr,
-                    };
+                let Some(ty) = resolved_ret.cloned() else {
+                    return invariant_method_expr(method_span, "vault bytes call has no resolved return type");
+                };
+                let target_return = match module_call_target_return(cx, Some(&ty)) {
+                    Ok(target_return) => Some(target_return),
+                    Err(error) => return invariant_method_expr(method_span, error),
+                };
                 TExpr {
-                    ty: ty.clone(),
-                    kind: TExprKind::CoreCall {
-                        record,
-                        args: targs,
-                        source_span: method_span,
+                    ty,
+                    kind: TExprKind::ModuleCall {
+                        form: core_source_module_target(source_signature, helper),
+                        target_return,
                         type_args: Vec::new(),
-                        widen_to_vec,
-                        data_plan: None,
-                        fallibility: TFailureCarrier::from_checked_type(&ty),
+                        args: vec![TCallArg {
+                            value: lower_expr(receiver, cx, env),
+                            template_items: None,
+                            borrow: true,
+                            mut_borrow: false,
+                            clone: false,
+                            arc_clone: false,
+                            fn_coerce: None,
+                            widen_to_vec: false,
+                            widen_to_union: None,
+                            box_as_trait: None,
+                        }],
                     },
                 }
             });
