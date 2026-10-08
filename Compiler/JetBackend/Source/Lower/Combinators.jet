@@ -508,10 +508,8 @@ fn lower_closure_flat_map(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &L
     if closure_ty.kind == .Fn(signature) -> ret = signature.ret
     part_ty :: ret ?? return lower_fail(&m, &f, unsupported)
     if lower_list_element(part_ty) == None || lower_view_element(part_ty) != None || !lower_is_inline(p, part_ty) -> return lower_fail(&m, &f, "flat_map with a {mir_type_display_name(part_ty)} step is not lowered at O0 yet")
-    // An owning aggregate returned from a borrowed eager callback can alias
-    // the source slot. Its destruction invalidates later uses of the list.
-    // Lazy adapters have their separate owned NativeValue callback boundary.
-    if lower_is_inline(p, elem) && lower_needs_drop(p, elem) -> return lower_fail(&m, &f, "List.flat_map over owning aggregate elements is not lowered at O0 yet")
+    // Checked MIR materializes an owned callback return from borrowed elements;
+    // lower_copy uses typed inline clone glue before this temporary is dropped.
     list :: lower_use(&m, &f, receiver) ?? return
     closure :: lower_use(&m, &f, closure_arg.value) ?? return
     dst :: lower_result(p, c, &m, &f, instruction) ?? return

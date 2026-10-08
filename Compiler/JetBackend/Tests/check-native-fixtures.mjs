@@ -177,6 +177,17 @@ for (const fixture of process.argv.includes("--abi") ? [] : expected.filter(({ n
     continue;
   }
   check(`${fixture.name} (compiled runtime)`, program, fixture);
+  if (fixture.name === "flat-map-owned" || fixture.name === "list-try-collect") {
+    const rail = `${dirname(fileURLToPath(import.meta.url))}/check-collector-alloc.c`;
+    const balanced = `${outDir}/${fixture.name}.balanced`;
+    const balanceLink = spawnSync(process.env.CC ?? "cc", [`${outDir}/${fixture.name}.o`, rail, runtimeLib, "-Wl,--wrap=main,--wrap=jet_rt_alloc,--wrap=jet_rt_free", "-lpthread", "-ldl", "-lm", "-o", balanced], { encoding: "utf8" });
+    if (balanceLink.status !== 0) {
+      console.log(`${fixture.name} (allocator balance): LINK FAILED\n${balanceLink.stderr}`);
+      failures += 1;
+    } else {
+      check(`${fixture.name} (allocator balance)`, balanced, { ...fixture, stderr: "collector-alloc: balanced live=0\n" });
+    }
+  }
 }
 
 // Stop points (#4720): stop-points.o linked with the compiled runtime and a
