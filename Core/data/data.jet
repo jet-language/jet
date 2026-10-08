@@ -1864,3 +1864,163 @@ fn data_query_revision_contract() Never! {
 #Test("Query revision metadata reads the canonical Shared owner and ticket") {
     data_query_revision_contract()
 }
+
+// Native DataTrackedState and its optimistic publication protocol. These
+// helpers remain unregistered until the complete Query spine is cut over.
+enum DataTrackedChangeKind<T> {
+    Insert(row: T)
+    Replace(before: T, after: T)
+    Remove(row: T)
+}
+
+struct DataTrackedChange<T> {
+    revision: Int
+    order: Int
+    kind: DataTrackedChangeKind<T>
+}
+
+struct DataTrackedState<T, K> {
+    rows: [T]
+    keys: [K]
+    orders: [Int]
+    next_order: Int
+    changes: [DataTrackedChange<T>]
+    key: fn(T) -> K
+}
+
+fn data_track_state_new<T, K: Equatable>(rows: [T], key: fn(T) -> K) -> Shared<DataTrackedState<T, K>> DataError! {
+    limit :: DataLimits.safe().max_output_rows
+    if rows.len() > limit -> return Err(data_error(.Limit, "retained rows {rows.len()} exceed max_output_rows {limit}", "data.track"))
+    keys := [K]{}
+    orders := [Int]{}
+    loop (index, row) in rows {
+        candidate :: key(row)
+        loop existing in keys {
+            if existing == candidate -> return Err(data_error(.DuplicateKey, "source keys must be unique", "data.track"))
+        }
+        &keys.push(candidate)
+        &orders.push(index)
+    }
+    Ok(shared DataTrackedState<T, K>{rows: rows, keys: keys, orders: orders, next_order: keys.len(), changes: [DataTrackedChange<T>]{}, key: key})
+}
+
+fn data_track_state_update<T, K>(state: Shared<DataTrackedState<T, K>>, operation: String, update: fn(DataTrackedState<T, K>, Int) -> DataTrackedState<T, K> DataError!) DataError! {
+    ticket :: state.capture()
+    revision :: core.mem.__snapshot_revision<DataTrackedState<T, K>, DataTrackedState<T, K>>(ticket)
+    if revision == 18446744073709551615 -> return Err(data_error(.Overflow, "source revision exhausted", operation))
+    next_state :: update(ticket.value(), revision + 1) ?? return Err(err)
+    if state.try_replace(^ticket, next_state) == {
+        .Ok(published) -> {
+            if published -> Ok(()) else -> Err(data_error(.StaleRevision, "source changed before publication", operation))
+        }
+        .Err(.WrongOwner) -> Err(data_error(.WrongOwner, "source snapshot belongs to another owner", operation))
+        .Err(.GenerationExhausted) -> Err(data_error(.Overflow, "source revision exhausted", operation))
+    }
+}
+
+fn data_track_change_capacity<T, K>(state: DataTrackedState<T, K>, operation: String) DataError! {
+    limit :: DataLimits.safe().max_output_rows
+    if state.changes.len() >= limit -> return Err(data_error(.Limit, "retained change state exceeds max_output_rows {limit}", operation))
+    Ok(())
+}
+
+fn data_track_state_insert<T, K: Equatable>(owner: Shared<DataTrackedState<T, K>>, row: T) DataError! {
+    data_track_state_update<T, K>(owner, "data.track.insert", (prior, revision) -> {
+        state := ~prior
+        candidate :: state.key(row)
+        loop existing in state.keys {
+            if existing == candidate -> return Err(data_error(.DuplicateKey, "source key already exists", "data.track.insert"))
+        }
+        limit :: DataLimits.safe().max_output_rows
+        if state.rows.len() >= limit -> return Err(data_error(.Limit, "retained rows would exceed max_output_rows {limit}", "data.track.insert"))
+        data_track_change_capacity<T, K>(state, "data.track.insert") ?? return Err(err)
+        order :: state.next_order
+        if order == 18446744073709551615 -> return Err(data_error(.Overflow, "source order exhausted", "data.track.insert"))
+        state.next_order = order + 1
+        &state.rows.push(row)
+        &state.keys.push(candidate)
+        &state.orders.push(order)
+        &state.changes.push(DataTrackedChange<T>{revision: revision, order: order, kind: .Insert{row: row}})
+        Ok(state)
+    })
+}
+
+fn data_track_key_index<K: Equatable>(keys: [K], key: K) -> Int? Never! {
+    loop (index, existing) in keys {
+        if existing == key -> return Val(index)
+    }
+    None
+}
+
+fn data_track_state_replace<T, K: Equatable>(owner: Shared<DataTrackedState<T, K>>, key: K, row: T) DataError! {
+    data_track_state_update<T, K>(owner, "data.track.replace", (prior, revision) -> {
+        state := ~prior
+        index :: data_track_key_index<K>(state.keys, key) ?? return Err(data_error(.MissingKey, "source key does not exist", "data.track.replace"))
+        if state.key(row) != key -> return Err(data_error(.InvalidValue, "replacement row must retain its source key", "data.track.replace"))
+        data_track_change_capacity<T, K>(state, "data.track.replace") ?? return Err(err)
+        before :: ~state.rows[index]
+        state.rows[index] = row
+        &state.changes.push(DataTrackedChange<T>{revision: revision, order: state.orders[index], kind: .Replace{before: before, after: row}})
+        Ok(state)
+    })
+}
+
+fn data_track_state_remove<T, K: Equatable>(owner: Shared<DataTrackedState<T, K>>, key: K) DataError! {
+    data_track_state_update<T, K>(owner, "data.track.remove", (prior, revision) -> {
+        state := ~prior
+        index :: data_track_key_index<K>(state.keys, key) ?? return Err(data_error(.MissingKey, "source key does not exist", "data.track.remove"))
+        data_track_change_capacity<T, K>(state, "data.track.remove") ?? return Err(err)
+        row :: state.rows.remove(index)
+        state.keys.remove(index).drop("removed identity key")
+        order :: state.orders.remove(index)
+        &state.changes.push(DataTrackedChange<T>{revision: revision, order: order, kind: .Remove{row: row}})
+        Ok(state)
+    })
+}
+
+fn data_track_state_rows<T, K>(owner: Shared<DataTrackedState<T, K>>) -> [T] Never! {
+    owner.capture().value().rows
+}
+
+fn data_track_state_entries<T, K>(owner: Shared<DataTrackedState<T, K>>) -> (revision: Int, entries: [DataTrackedEntry<T>]) Never! {
+    ticket :: owner.capture()
+    state :: ticket.value()
+    entries := [DataTrackedEntry<T>]{}
+    loop (index, row) in state.rows {
+        &entries.push(DataTrackedEntry<T>{order: state.orders[index], value: row})
+    }
+    (revision: core.mem.__snapshot_revision<DataTrackedState<T, K>, DataTrackedState<T, K>>(ticket), entries: entries)
+}
+
+struct DataTrackedEntry<T> {
+    order: Int
+    value: T
+}
+
+fn data_track_state_changes<T, K>(owner: Shared<DataTrackedState<T, K>>, revision: Int) -> [DataTrackedChange<T>] DataError! {
+    current :: core.mem.__shared_revision<DataTrackedState<T, K>>(owner)
+    state :: owner.capture().value()
+    if revision > current -> return Err(data_error(.StaleRevision, "requested revision is newer than the source", "data.query.watch"))
+    next_revision :: if revision == 18446744073709551615 -> revision else -> revision + 1
+    if state.changes.len() > 0 && next_revision < state.changes[0].revision -> return Err(data_error(.StaleRevision, "requested revision is no longer retained", "data.query.watch"))
+    changes := [DataTrackedChange<T>]{}
+    loop change in state.changes {
+        if change.revision > revision -> &changes.push(change)
+    }
+    Ok(changes)
+}
+
+#Test("Tracked state keeps identity, order and revisions across shared handles") {
+    owner :: data_track_state_new<Int, Int>([Int]{2, 4}, row -> row) ?? panic("track")
+    alias :: owner
+    data_track_state_insert<Int, Int>(owner, 6) ?? panic("insert")
+    data_track_state_replace<Int, Int>(alias, 4, 4) ?? panic("replace")
+    data_track_state_remove<Int, Int>(owner, 2) ?? panic("remove")
+    snapshot :: data_track_state_entries<Int, Int>(alias)
+    assert_eq(snapshot.revision, 3)
+    assert_eq(snapshot.entries[0].order, 1)
+    assert_eq(snapshot.entries[1].order, 2)
+    assert_eq(data_track_state_rows<Int, Int>(owner), [Int]{4, 6})
+    changes :: data_track_state_changes<Int, Int>(alias, 0) ?? panic("changes")
+    assert_eq(changes.len(), 3)
+}
