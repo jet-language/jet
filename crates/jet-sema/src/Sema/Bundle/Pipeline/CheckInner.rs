@@ -195,7 +195,9 @@ pub(super) fn check_bundle_opts_for_output_inner(
             let mut registry = builtin_type_registry();
             registry.core_source_module = m.is_core_source()
                 .then(|| jet_foundation::CoreModuleExports::core_source_module_by_alias(&m.alias))
-                .flatten();
+                .flatten()
+                .filter(|source| m.path.strip_prefix(crate::Diagnostics::CORE_SOURCE_ROOT)
+                    .is_ok_and(|path| path == std::path::Path::new(source.path)));
             if let Some(source) = registry.core_source_module {
                 for row in jet_foundation::CoreModuleExports::CORE_SOURCE_OWNED_TYPES {
                     if row.path == source.path && m.items.iter().any(|item| match item {
