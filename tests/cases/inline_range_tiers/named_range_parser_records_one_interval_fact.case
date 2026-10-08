@@ -1,0 +1,11 @@
+# Port of tests/inline_range_tiers.rs:160-175. AUTHORED PENDING-SAME-HEAD PENDING-SEAM(compiler-lib). Sources verbatim.
+# ORACLE-LITERAL: original literals or original included golden, not captures.
+# SyntaxNode exposes kind/name/span only (Source/Compiler.rs2151); exact AST range=(1,6) subclaim ledgered, never inferred from text.
+fixture: fixtures/named_range_parser_records_one_interval_fact
+step: jet inspect compiler lex main.jet
+exit: 0
+json: stdout doc $.compiler.value.diagnostics #= 0
+step: jet inspect compiler parse main.jet
+exit: 0
+json: stdout doc $.compiler.value.diagnostics #= 0
+json: stdout doc $.compiler.value.items[?kind="distinct"][?name="Die"] #>= 1 # original find_map first Distinct Die

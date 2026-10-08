@@ -1,0 +1,10 @@
+# Port of tests/inline_range_tiers.rs:85-155. AUTHORED PENDING-SAME-HEAD. Sources verbatim.
+# ORACLE-LITERAL: original literals or original included golden, not captures.
+# Retire generated wasm_rust symbol scan and direct rustc build mechanics only. Erase rustc/wasm-target guards; Node branch keeps original runtime success and exact42/3 oracle.
+fixture: fixtures/inline_range_web_runtime_matches_the_shared_value
+step: jet build main.jet --target web
+exit: 0
+file: .jet/build/app.js ~ "function jet_inline_range_from_int" # original JS kernel predicate
+when tool node: step: node .jet/build/app.js
+when tool node: exit: 0
+when tool node: stdout: = inline_range_web_runtime_matches_the_shared_value.out
