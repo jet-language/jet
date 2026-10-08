@@ -144,6 +144,14 @@ a failed direct mapping never publishes a payload or its allocation header.
 The ordinary allocation door still delivers its existing fatal layout/OOM
 diagnostic. Successful reservations retain their original size and alignment
 for the shared exact-layout free operation, including aligned zero-size places.
+Places retain the full four-word schema identity plus size/alignment, and are
+visible only during a non-reentrant turn on their owning worker. Publish
+establishes initialization; take transfers ownership and clears it before
+returning the borrowed address. End frees only uninitialized reservations or
+moved storage. Binding IDs increase as unsigned words and are never reused,
+including after retirement. Destroy and worker-TLS teardown run canonical drop
+glue in reverse declaration order after removing the session from the registry;
+the host keeps every defining code image pinned until that cleanup completes.
 
 
 ### Exact integer carrier

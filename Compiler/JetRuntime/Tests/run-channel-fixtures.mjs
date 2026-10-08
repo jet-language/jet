@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { candidateJetc0, frontReceipt } from '../../JetBackend/Tests/jet-front.mjs';
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const [output, mode, source] = process.argv.slice(2);
-const modes = ['assemble', 'lower', 'prepare-native', 'prepare-seed', 'link', 'link-seed', 'run', 'run-seed', 'cross', 'fatal', 'perf'];
+const modes = ['assemble', 'lower', 'prepare-native', 'prepare-seed', 'link', 'link-seed', 'link-session', 'run-session', 'run', 'run-seed', 'cross', 'fatal', 'perf'];
 if (!output || !modes.includes(mode)) throw Error(`usage: run-channel-fixtures.mjs OUT ${modes.join('|')} [FRESH_RUNTIME_RS]`);
 const out = resolve(output), fixture = join(out, 'fixture');
 const read = p => readFileSync(join(repo, p), 'utf8');
@@ -88,6 +88,14 @@ if (mode === 'assemble') {
   const flags=seed?['-DJET_SEED','-Djet_rt_handle_clone_Closed=jet_fixture_rust_closed_clone','-Djet_rt_handle_drop_Closed=jet_fixture_rust_closed_drop','-Djet_rt_handle_eq_Closed=jet_fixture_rust_closed_eq','-Djet_rt_handle_show_Closed=jet_fixture_rust_closed_show']:['-DJET_CHANNEL_INTERNAL','-DJET_CLOSED_CROSS'];
   const objects=seed?[]:[join(fixture,'fixture.o')];
   command(process.env.CC??'cc',['-O2',...flags,join(repo,'Compiler/JetRuntime/Tests/channel-fixture.c'),...objects,lib,'-lpthread','-ldl','-lm','-o',join(out,seed?'channel-seed':'channel-native')]);
+} else if (mode === 'link-session') {
+  const lib = process.env.JET_CHANNEL_NATIVE_C_LIB;
+  if (!lib || !existsSync(lib)) throw Error('missing freshly compiled native fixture library');
+  command(process.env.CC ?? 'cc', ['-std=c11', '-Wall', '-Wextra', '-Werror', join(repo, 'Compiler/JetRuntime/Tests/session-fixture.c'), join(fixture, 'fixture.o'), lib, '-lpthread', '-ldl', '-lm', '-o', join(out, 'session-native')]);
+} else if (mode === 'run-session') {
+  const result = command(join(out, 'session-native'), [], {timeout:120000});
+  writeFileSync(join(out, 'run-session.txt'), result.stdout + result.stderr);
+  if (result.stdout !== 'resident session typed places/lifecycle/drop/thread confinement ok\n' || result.stderr !== '') throw Error('invalid resident session fixture result');
 } else if (mode === 'fatal') {
   const failures = [];
   for (const name of ['select-closed', 'select-empty']) {
