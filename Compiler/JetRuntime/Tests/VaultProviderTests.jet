@@ -920,3 +920,74 @@ fn jet_rt_vault_reference_fixture(original: I64, display: I64, debug: I64) {
     thread_zero(scratch, I64{8240})
     jet_rt_free(scratch, I64{8240}, I64{8})
 }
+
+fn jet_rt_vault_plan_auth_fixture(name: I64, empty: I64, reason: I64, expected: I64, operation_hash: I64, preview_hash: I64, granted: Bool, entropy: I64) {
+    scratch :: jet_rt_alloc(I64{1632}, I64{8})
+    plan :: jet_rt_alloc(VAULT_PLAN_BYTES, I64{8})
+    thread_zero(plan, VAULT_PLAN_BYTES)
+    rt_text_store(plan + VAULT_PLAN_ACTION, I64{2})
+    rt_text_store(plan + VAULT_PLAN_NAME, jet_rt_string_clone(name))
+    rt_text_store(plan + VAULT_PLAN_REASON, jet_rt_string_clone(empty))
+    at := I64{0}
+    loop at < (I64{16}) {
+        rt_text_put(plan + VAULT_PLAN_UUID + at, I64{7})
+        at += I64{1}
+    }
+    rt_text_store(plan + VAULT_PLAN_REVISION, I64{9})
+    at = I64{0}
+    loop at < (I64{32}) {
+        rt_text_put(plan + VAULT_PLAN_START_HASH + at, I64{1})
+        rt_text_put(plan + VAULT_PLAN_PROVIDER + at, I64{2})
+        rt_text_put(plan + VAULT_PLAN_PUBLIC_HASH + at, I64{3})
+        rt_text_put(plan + VAULT_PLAN_KEY_DIGEST + at, I64{4})
+        at += I64{1}
+    }
+    rt_text_store(plan + VAULT_PLAN_TO, I64{2})
+    rt_text_store(plan + VAULT_PLAN_EXPIRES, I64{123456})
+    vault_instant_now(plan + VAULT_PLAN_ISSUED)
+    rt_text_store(plan + VAULT_PLAN_DEADLINE, rt_text_word(plan + VAULT_PLAN_ISSUED) + I64{300000000000})
+    vault_plan_operation(plan, I64{1}, scratch + I64{576}, scratch)
+    vault_fixture_check(rt_text_equal_bytes(plan + VAULT_PLAN_OPERATION, operation_hash, I64{32}))
+    preview :: vault_preview_text(plan, I64{1}, reason)
+    vault_fixture_check(jet_rt_string_eq(preview, expected))
+    jet_rt_string_drop(preview)
+    slot :: scratch + I64{1536}
+    rt_text_store(slot, I64{91})
+    rt_crypto_entropy_set(entropy, I64{0})
+    error :: vault_authorize_write(plan, I64{1}, reason, slot)
+    rt_crypto_entropy_clear()
+    if granted {
+        vault_fixture_check(error == I64{0})
+        write :: rt_text_word(slot)
+        vault_fixture_check(rt_text_equal_bytes(write + VAULT_WRITE_OPERATION, operation_hash, I64{32}))
+        vault_fixture_check(rt_text_equal_bytes(write + VAULT_WRITE_PREVIEW, preview_hash, I64{32}))
+        vault_fixture_check(rt_text_word(write + VAULT_WRITE_USER) == trap_syscall(I64{107}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}))
+        vault_write_drop(write)
+    } else {
+        vault_fixture_check(error != I64{0} && vault_error_tag(error) == I64{5})
+        vault_fixture_check(rt_text_word(slot) == I64{91})
+        vault_error_drop(error)
+    }
+    rt_text_store(plan + VAULT_PLAN_DEADLINE, I64{0})
+    expired :: vault_authorize_write(plan, I64{1}, reason, slot)
+    vault_fixture_check(expired != I64{0} && vault_error_tag(expired) == I64{6})
+    vault_error_drop(expired)
+    vault_plan_drop(plan)
+    thread_zero(scratch, I64{1632})
+    jet_rt_free(scratch, I64{1632}, I64{8})
+}
+fn jet_rt_vault_trust_path_fixture(home: I64, expected: I64) {
+    path :: vault_trust_home_path(rt_text_data(home))
+    vault_fixture_check(path != I64{0})
+    length :: host_startup_byte_length(path)
+    vault_fixture_check(length == rt_text_len(expected))
+    vault_fixture_check(rt_text_equal_bytes(path, rt_text_data(expected), length))
+    vault_fixture_check(rt_text_byte(path + length) == I64{0})
+    jet_rt_free(path, length + I64{1}, I64{1})
+}
+fn jet_rt_vault_headless_fixture() {
+    repo :: jet_rt_alloc(I64{16}, I64{8})
+    thread_zero(repo, I64{16})
+    vault_fixture_check(vault_headless_granted(repo))
+    jet_rt_free(repo, I64{16}, I64{8})
+}

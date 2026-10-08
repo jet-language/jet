@@ -474,12 +474,15 @@ fn vault_identity_read_at_root(root: I64, out: I64) -> I64 {
 
 // Every seed std File::open/fs::read* site uses cvt_r; raw openat2/pidfd sites
 // do NOT. This single plain reader follows symlinks and retries only EINTR.
-fn vault_linux_plain_open(path: I64) -> I64 {
+fn vault_linux_plain_open_at(dir: I64, path: I64, flags: I64, mode: I64) -> I64 {
     file := I64{-4}
     loop file == (I64{-4}) {
-        file = trap_syscall(I64{257}, I64{-100}, path, VAULT_O_CLOEXEC, I64{0}, I64{0}, I64{0})
+        file = trap_syscall(I64{257}, dir, path, flags | VAULT_O_CLOEXEC, mode, I64{0}, I64{0})
     }
     file
+}
+fn vault_linux_plain_open(path: I64) -> I64 {
+    vault_linux_plain_open_at(I64{-100}, path, I64{0}, I64{0})
 }
 // Reuse Display.jet's unsigned split and final integer-digit writer directly,
 // avoiding a temporary Text owner/copy for decimal path and lock fields.
@@ -1117,10 +1120,7 @@ fn vault_writer_substitute(dir: I64, next: I64, scratch: I64) -> I64 {
     rt_text_store(stolen + I64{51}, I64{1684825448}) // held
     rt_text_put(stolen + I64{55}, I64{0})
     if (trap_syscall(I64{264}, dir, next, dir, stolen, I64{0}, I64{0}) != I64{0}) -> return vault_error_new(I64{6}, I64{0}, I64{0})
-    file := I64{-4}
-    loop file == (I64{-4}) {
-        file = trap_syscall(I64{257}, dir, next, I64{524865}, I64{438}, I64{0}, I64{0})
-    }
+    file :: vault_linux_plain_open_at(dir, next, I64{577}, I64{438})
     if (file < I64{0}) -> return vault_error_new(I64{6}, I64{0}, I64{0})
     rt_text_store(scratch, I64{8463505548608959859})
     rt_text_store(scratch + I64{8}, I64{6579572})
@@ -1296,4 +1296,168 @@ fn vault_write_at_root(root: I64, store: I64, hash: I64, provider: I64, kind: I6
     thread_zero(scratch, I64{928})
     jet_rt_free(scratch, I64{928}, I64{8})
     error
+}
+
+// Seed2058-2083 var_os(HOME) parity. The shared HostStartup raw accessor lends
+// process-lifetime bytes only while this final NUL path is constructed.
+fn vault_trust_home_path(home: I64) -> I64 {
+    length :: host_startup_byte_length(home)
+    separator :: length != I64{0} && rt_text_byte(home + length - I64{1}) != I64{47}
+    if (length > I64{9223372036854775795}) -> return I64{0}
+    suffix :: length + (if separator -> I64{1} else -> I64{0})
+    path :: jet_rt_alloc(suffix + I64{11}, I64{1})
+    rt_text_bytes_copy(path, home, length)
+    if separator -> rt_text_put(path + length, I64{47})
+    rt_text_store(path + suffix, I64{8462954396947671598})
+    rt_text_put(path + suffix + I64{8}, I64{115})
+    rt_text_put(path + suffix + I64{9}, I64{116})
+    rt_text_put(path + suffix + I64{10}, I64{0})
+    path
+}
+fn vault_trust_lines(bytes: I64, length: I64, repo: I64, scratch: I64) -> Bool {
+    if !vault_utf8_valid(bytes, length) -> return false
+    rt_text_store(scratch, I64{8319620158379356775})
+    rt_text_store(scratch + I64{8}, I64{8389209267340210789})
+    rt_text_store(scratch + I64{16}, I64{16437099308939054})
+    vault_hex_put(scratch + I64{23}, repo, I64{16})
+    start := I64{0}
+    loop start < length {
+        end := start
+        loop end < length {
+            if (rt_text_byte(bytes + end) == I64{10}) -> break
+            end += I64{1}
+        }
+        begin :: vault_crypto_trim_start(bytes + start, end - start)
+        finish :: vault_crypto_trim_end(bytes + start, begin, end - start)
+        if (finish - begin == I64{55}) {
+            line :: bytes + start + begin
+            rt_text_store(scratch, I64{8319620158379356775})
+            rt_text_store(scratch + I64{8}, I64{8389209267340210789})
+            if rt_text_equal_bytes(line, scratch, I64{55}) -> return true
+            rt_text_store(scratch, I64{7309969416918233703})
+            rt_text_store(scratch + I64{8}, I64{8389209267340210032})
+            if rt_text_equal_bytes(line, scratch, I64{55}) -> return true
+        }
+        start = end + I64{1}
+    }
+    false
+}
+fn vault_headless_granted(repo: I64) -> Bool {
+    scratch :: jet_rt_alloc(I64{128}, I64{8})
+    test_path :: jet_rt_vault_test_trust_path()
+    path := I64{0}
+    if (test_path != I64{0}) {
+        path = vault_linux_path(test_path)
+    } else {
+        rt_text_store(scratch + I64{64}, I64{1162694472}) // HOME
+        rt_text_store(scratch + I64{72}, scratch + I64{64})
+        rt_text_store(scratch + I64{80}, I64{4})
+        rt_text_store(scratch + I64{88}, I64{0})
+        home :: host_environment_value(scratch + I64{72})
+        if (home != I64{0}) -> path = vault_trust_home_path(home)
+    }
+    if (path == I64{0}) {
+        thread_zero(scratch, I64{128})
+        jet_rt_free(scratch, I64{128}, I64{8})
+        return false
+    }
+    path_bytes :: host_startup_byte_length(path) + I64{1}
+    file :: vault_linux_plain_open(path)
+    jet_rt_free(path, path_bytes, I64{1})
+    if (file < I64{0}) {
+        thread_zero(scratch, I64{128})
+        jet_rt_free(scratch, I64{128}, I64{8})
+        return false
+    }
+    error :: vault_linux_read_to_end(file, scratch + I64{104}, scratch + I64{112})
+    vault_linux_close(file)
+    if (error != I64{0}) {
+        vault_error_drop(error)
+        thread_zero(scratch, I64{128})
+        jet_rt_free(scratch, I64{128}, I64{8})
+        return false
+    }
+    bytes :: rt_text_word(scratch + I64{104})
+    granted :: vault_trust_lines(rt_text_word(bytes + DATA_SEQUENCE_DATA), rt_text_word(bytes + DATA_SEQUENCE_LENGTH), repo, scratch)
+    thread_zero(rt_text_word(bytes + DATA_SEQUENCE_DATA), rt_text_word(bytes + DATA_SEQUENCE_CAPACITY))
+    data_sequence_drop(bytes, DATA_TREE_BYTE_LIST)
+    thread_zero(scratch, I64{128})
+    jet_rt_free(scratch, I64{128}, I64{8})
+    granted
+}
+// Seed BufReader::read_line: grow only when the line fills the current buffer,
+// stop at its FIRST LF (ignore any read-ahead), and retry only read's EINTR.
+fn vault_tty_answer(file: I64) -> Bool {
+    bytes :: data_sequence_new(I64{8192}, RT_HOST_U8_STRIDE)
+    complete := false
+    valid := true
+    loop {
+        if complete -> break
+        length :: rt_text_word(bytes + DATA_SEQUENCE_LENGTH)
+        if (length == rt_text_word(bytes + DATA_SEQUENCE_CAPACITY)) -> _ := data_sequence_reserve(bytes, RT_HOST_U8_STRIDE)
+        data :: rt_text_word(bytes + DATA_SEQUENCE_DATA)
+        capacity :: rt_text_word(bytes + DATA_SEQUENCE_CAPACITY)
+        read :: trap_syscall(I64{0}, file, data + length, capacity - length, I64{0}, I64{0}, I64{0})
+        if (read == I64{-4}) -> next
+        if (read < I64{0}) {
+            valid = false
+            break
+        }
+        if (read == I64{0}) -> break
+        end := length
+        loop end < length + read {
+            if (rt_text_byte(data + end) == I64{10}) {
+                end += I64{1}
+                complete = true
+                break
+            }
+            end += I64{1}
+        }
+        rt_text_store(bytes + DATA_SEQUENCE_LENGTH, end)
+    }
+    data :: rt_text_word(bytes + DATA_SEQUENCE_DATA)
+    length :: rt_text_word(bytes + DATA_SEQUENCE_LENGTH)
+    accepted := false
+    if valid && vault_utf8_valid(data, length) {
+        begin :: vault_crypto_trim_start(data, length)
+        end :: vault_crypto_trim_end(data, begin, length)
+        if (end - begin == I64{9}) {
+            accepted = vault_lock_key(data + begin, I64{9}, I64{8820707168001226081}, I64{101}, I64{9})
+        }
+    }
+    thread_zero(data, rt_text_word(bytes + DATA_SEQUENCE_CAPACITY))
+    data_sequence_drop(bytes, DATA_TREE_BYTE_LIST)
+    accepted
+}
+// Seed2085-2125: test hook FIRST; tty open failure alone allows headless trust.
+fn vault_native_authorize(preview: I64, repo: I64) -> Bool {
+    test_answer :: jet_rt_vault_test_authorize(preview)
+    if (test_answer != I64{-1}) -> return test_answer == I64{1}
+    scratch :: jet_rt_alloc(I64{16}, I64{8})
+    rt_text_store(scratch, I64{8751747723086357551})
+    rt_text_store(scratch + I64{8}, I64{0})
+    tty :: vault_linux_plain_open_at(I64{-100}, scratch, I64{2}, I64{0})
+    jet_rt_free(scratch, I64{16}, I64{8})
+    if (tty < I64{0}) -> return vault_headless_granted(repo)
+    request :: jet_rt_string_builder_new()
+    rt_text_push_word(request, I64{8248096926960279894}, I64{8})
+    rt_text_push_word(request, I64{8462656715650069609}, I64{8})
+    rt_text_push_word(request, I64{138419663717}, I64{5})
+    jet_rt_string_builder_push(request, preview)
+    rt_text_push_word(request, I64{7016643839494018058}, I64{8})
+    rt_text_push_word(request, I64{7312272885205726325}, I64{8})
+    rt_text_push_word(request, I64{7957688057546940512}, I64{8})
+    rt_text_push_word(request, I64{2878957203384692}, I64{7})
+    written :: vault_linux_write_all(tty, rt_text_data(request), rt_text_len(request))
+    jet_rt_string_drop(request)
+    accepted := false
+    if written {
+        cloned :: trap_syscall(I64{72}, tty, I64{1030}, I64{0}, I64{0}, I64{0}, I64{0})
+        if (cloned >= I64{0}) {
+            accepted = vault_tty_answer(cloned)
+            vault_linux_close(cloned)
+        }
+    }
+    vault_linux_close(tty)
+    accepted
 }

@@ -262,6 +262,23 @@ reverse unsigned generation order. Find matches exact identity before checking
 type and immutable hash. Load rejects revoked rows before cloning their secret
 bytes and validating the 32-byte key. Status projects wire Active1/Retired2/
 Revoked3 by name to the unchanged Core-source Active0/Retired1/Revoked2.
+MutationPlan and VaultWrite preserve their existing seed field identities;
+phantom key types remain explicit checked provider tags, never stored tags.
+Preparation hashes the exact JVLT2 operation byte sequence, including the
+absent-reference zeros and reserved zeros. Authorization binds the separate
+preview byte hash, full human-readable preview, effective user/session and the
+300-second deadline. The single shared host monotonic provider supplies native
+nanoseconds in the existing Instant slots (word0 ns, word1 reserved zero);
+checked wall-clock expiry is independent. Imported plan bytes are wiped on drop,
+and write Debug stays exactly `VaultWrite(<redacted>)`.
+Authorization checks the thread-local test authorizer first, otherwise prompts
+on a cloned tty reader and accepts only the Unicode-trimmed first line equal to
+`authorize`. Only tty open failure allows headless trust. Trust HOME uses the
+immutable shared raw startup environment accessor (var_os parity), preserving
+empty, trailing-slash and invalid-UTF-8 paths; identity still uses the UTF-8
+rt_env_get accessor. Trust files must be valid UTF-8 and have an exact trimmed
+user/repo vault.write grant for the repository UUID. The actual HostStartup and
+host monotonic producers must be composed, not replaced with test stubs.
 
 Typed vault records own native Secret buffers. Equality compares the key bytes,
 not just immutable hashes, while Debug always prints a redacted key marker.

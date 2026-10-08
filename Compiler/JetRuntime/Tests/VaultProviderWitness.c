@@ -51,6 +51,15 @@ extern void jet_rt_vault_lock_guard_fixture(const Text *, const Text *);
 extern void jet_rt_vault_lock_acquire_fixture(const Text *);
 extern void jet_rt_vault_lifecycle_strings_fixture(const Text *, const Text *, const Text *);
 extern void jet_rt_vault_reference_fixture(void *, const Text *, const Text *);
+extern void jet_rt_vault_plan_auth_fixture(const Text *, const Text *, const Text *, const Text *, const void *, const void *, _Bool, int64_t (*)(void *, void *, int64_t));
+extern void jet_rt_vault_trust_path_fixture(const Text *, const Text *);
+extern void jet_rt_vault_headless_fixture(void);
+extern void jet_rt_host_arguments(int64_t, char **, char **);
+extern char **environ;
+extern void jet_rt_free(void *, int64_t, int64_t);
+typedef struct { int64_t refs; int64_t (*invoke)(void *, const Text *); int64_t (*release)(void *); int64_t answer; } VaultAuthorizer;
+extern void jet_rt_vault_set_test_authorizer(VaultAuthorizer *);
+extern void jet_rt_vault_clear_test_authorizer(void);
 extern void imported_origin_round_trips_and_invalid_combinations_reject(const Text *, const Text *);
 extern void jet_rt_vault_crypto_fixture(const ByteList *);
 extern void jet_rt_vault_crypto_unavailable_fixture(int64_t (*)(void *, void *, int64_t));
@@ -423,11 +432,81 @@ static void lock_fields_fixtures(void) {
         jet_rt_vault_lock_fields_fixture(&input, 0, 0, 0, 0, &nonce);
     }
 }
-int main(void) {
+static const char preview_golden[] = "store SigningKey release 0 -> 2 in repository 07070707070707070707070707070707 at revision 9; reason: <none>; authority reason: initial signer; expires_unix_ms: 123456";
+static unsigned authorizer_calls;
+static int64_t plan_authorizer(void *raw, const Text *preview) {
+    VaultAuthorizer *closure = raw;
+    assert(preview->length == (int64_t)strlen(preview_golden));
+    assert(memcmp(preview->data, preview_golden, strlen(preview_golden)) == 0);
+    ++authorizer_calls;
+    return closure->answer;
+}
+static int64_t plan_authorizer_release(void *raw) {
+    jet_rt_free(raw, (int64_t)sizeof(VaultAuthorizer), 8);
+    return 0;
+}
+static void plan_auth_fixtures(void) {
+    unsigned char op[32], preview[32];
+    fixture_hash(op, "75c0c0605ef7585d948b1d70fa281d2670096615407872a28d5ff804a7bdea69");
+    fixture_hash(preview, "22e75a073b0c9e7c8abcf54aa5939e36633347addd28040c0736e0a4fc4cc43d");
+    Text name = text("release"), empty = text(""), reason = text("initial signer"), expected = text(preview_golden);
+    for (int granted = 0; granted < 2; ++granted) {
+        VaultAuthorizer *closure = jet_rt_alloc((int64_t)sizeof(VaultAuthorizer), 8);
+        *closure = (VaultAuthorizer){1, plan_authorizer, plan_authorizer_release, granted};
+        jet_rt_vault_set_test_authorizer(closure);
+        jet_rt_vault_plan_auth_fixture(&name, &empty, &reason, &expected, op, preview, granted, unavailable_entropy);
+        jet_rt_vault_clear_test_authorizer();
+    }
+    assert(authorizer_calls == 2 && unavailable_calls == 1);
+}
+static void trust_home_fixtures(void) {
+    Text empty = text(""), relative = text(".jet/trust"), trailing = text("/tmp/raw/"), joined = text("/tmp/raw/.jet/trust");
+    Text raw = text("raw\xff"), raw_joined = text("raw\xff/.jet/trust");
+    jet_rt_vault_trust_path_fixture(&empty, &relative);
+    jet_rt_vault_trust_path_fixture(&trailing, &joined);
+    jet_rt_vault_trust_path_fixture(&raw, &raw_joined);
+    char root[] = "/tmp/jet-vault-home-XXXXXX", dir[128], trust[160], invalid[128], raw_dir[160], raw_trust[192], slash[128];
+    assert(mkdtemp(root) != NULL);
+    assert(snprintf(dir, sizeof(dir), "%s/.jet", root) > 0 && mkdir(dir, 0700) == 0);
+    assert(snprintf(trust, sizeof(trust), "%s/trust", dir) > 0);
+    assert(snprintf(invalid, sizeof(invalid), "%s/raw\xff", root) > 0 && mkdir(invalid, 0700) == 0);
+    assert(snprintf(raw_dir, sizeof(raw_dir), "%s/.jet", invalid) > 0 && mkdir(raw_dir, 0700) == 0);
+    assert(snprintf(raw_trust, sizeof(raw_trust), "%s/trust", raw_dir) > 0);
+    assert(snprintf(slash, sizeof(slash), "%s/", root) > 0);
+    static const unsigned char grant[] = "\xc2\x85grant:repo:vault.write:00000000000000000000000000000000\xe2\x80\xa8\r\n";
+    const char *files[] = {trust, raw_trust};
+    for (unsigned i = 0; i < 2; ++i) {
+        int fd = open(files[i], O_WRONLY | O_CREAT | O_EXCL, 0600);
+        assert(fd >= 0);
+        input_write_all(fd, grant, sizeof(grant) - 1);
+        assert(close(fd) == 0);
+    }
+    const char *homes[] = {"", slash, invalid};
+    for (unsigned i = 0; i < 3; ++i) {
+        pid_t child = fork(); assert(child >= 0);
+        if (child == 0) {
+            assert(chdir(root) == 0 && setenv("HOME", homes[i], 1) == 0);
+            char *const args[] = {"/proc/self/exe", "--vault-home-grant", NULL};
+            execv(args[0], args);
+            _exit(127);
+        }
+        int status; assert(waitpid(child, &status, 0) == child);
+        assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+    }
+    assert(unlink(trust) == 0 && unlink(raw_trust) == 0);
+    assert(rmdir(dir) == 0 && rmdir(raw_dir) == 0 && rmdir(invalid) == 0 && rmdir(root) == 0);
+}
+int main(int argc, char **argv) {
     jet_rt_alloc_init();
+    jet_rt_host_arguments(argc, argv, environ);
     jet_rt_thread_init();
     jet_rt_crypto_entropy_init();
     jet_rt_vault_test_hooks_init(jet_rt_vault_test_hooks_destroy);
+    if (argc == 2 && strcmp(argv[1], "--vault-home-grant") == 0) {
+        jet_rt_vault_headless_fixture();
+        jet_rt_thread_detach();
+        return 0;
+    }
     Text forbidden[] = {text("secrets.age"), text("AGE-SECRET"), text("/home/"), text("hunter2"), text("ciphertext sentinel")};
     Text *needles[] = {&forbidden[0], &forbidden[1], &forbidden[2], &forbidden[3], &forbidden[4]};
     TextList list = {5, 5, needles};
@@ -492,6 +571,8 @@ int main(void) {
     lock_guard_fixtures();
     Text lifecycle_name = text("."), rollback = text("clock-rollback"), missing_root = text("/proc/jet-vault-no-such-root");
     jet_rt_vault_lifecycle_strings_fixture(&lifecycle_name, &rollback, &missing_root);
+    plan_auth_fixtures();
+    trust_home_fixtures();
     puts("vault witness OK (13 errors, legacy+JVLT2 codec, imported origin/default entropy, native Secret redaction/wipe, long-origin hash, duplicate priority)");
     jet_rt_thread_detach();
     return 0;
