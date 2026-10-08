@@ -3,12 +3,10 @@
 # PENDING-GRAMMAR: tool expansion and step-scoped unset.
 requires: tool:bash
 requires: tool:env
-requires: tool:mkdir
 fixture: export_does_not_emit_untrusted_typed_environment_shell_code.fixture
 env: PATH=/usr/bin:/bin
 env: HOME={work}/home
-step: {tool:mkdir} home
-exit: 0
+mkdir: home
 step: {tool:bash} --noprofile --norc -c 'exec "$1" env export bash > hook.sh' hook-export {jetpack}
 unset: JET_ENV_DISABLE
 unset: JETPACK_ENV
