@@ -487,6 +487,12 @@ every manifest entry.
 layout is identical for all six admitted scalar types, including signed
 `I64`; an unsupported scalar does not acquire an atomic layout.
 
+An explicitly supplied atomic record field is initialized from its scalar
+payload after substituting the record's type arguments. The checker keeps
+the field's atomic type and uses the same typed constructor as `Atomic.new`;
+an already constructed atomic is not a scalar initializer. Declared defaults
+retain their full field-type check, like other defaults.
+
 An atomic is move-only and non-Clone: `~atomic` is rejected by the existing
 `E0211` copy check, as is copying a record or enum containing an atomic.
 The same recursive classification still permits non-atomic generic values
