@@ -3575,7 +3575,8 @@ fn jet_rust_emit_field_read(ctx: &JetRustEmitContext, function: MIRFunction, bas
     }
     if key == "WebFormFieldSpec" && (field_name == "default" || field_name == "group") -> return "({value}).ok_or({root}JetAbsent)"
     if field_row == .Val(declared) {
-        if jet_rust_emit_core_email_type_name(key) == (Val("Address")) && declared.name == "display" {
+        email_owner :: jet_rust_emit_core_email_type_name(key)
+        if (email_owner == (Val("Address")) || email_owner == (Val("__EmailAddressView"))) && declared.name == "display" {
             if declared.ty.kind == .Option(inner) {
                 if inner.kind == MIRTypeKind.String -> return "({value}).ok_or({root}JetAbsent)"
             }

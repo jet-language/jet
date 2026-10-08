@@ -69,6 +69,8 @@ pub fn evaluate(method: &str, args: &[CtValue], span: Span) -> Option<Result<CtV
         "__address_parts" => email_address_parts(args, span),
         "__attachment_parts" => email_attachment_parts(args, span),
         "__envelope_parts" => email_envelope_parts(args, span),
+        "__address_view" | "__attachment_view" | "__message_view" => email_view(method, args, span),
+        "__message_parts" => email_message_parts(args, span),
         _ => return None,
     };
     Some(result)
@@ -226,6 +228,29 @@ fn email_envelope_parts(args: &[CtValue], span: Span) -> Result<CtValue, Diagnos
     let from = address_from_value(one(args, 0, "__envelope_parts", span)?, span)?;
     let recipients = address_list(one(args, 1, "__envelope_parts", span)?, span)?;
     Ok(envelope_value(&jet_email::envelope_parts(from, recipients)))
+}
+
+fn email_view(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
+    let input = one(args, 0, method, span)?;
+    let (owner, result, names): (&str, &str, &[&str]) = match method {
+        "__address_view" => ("Address", "__EmailAddressView", &["display", "mailbox"]),
+        "__attachment_view" => ("Attachment", "__EmailAttachmentView", &["filename", "mime", "bytes"]),
+        _ => ("Message", "__EmailMessageView",
+            &["from", "to", "bcc", "subject", "text", "html", "attachments", "wire_upper"]),
+    };
+    let fields = names.iter().map(|name| {
+        field(input, owner, name).cloned().map(|value| (*name, value))
+            .ok_or_else(|| unsupported("email carrier is missing a private part", span))
+    }).collect::<Result<Vec<_>, _>>()?;
+    Ok(structure(result, fields))
+}
+
+fn email_message_parts(args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
+    let names = ["from", "to", "bcc", "subject", "text", "html", "attachments", "envelope", "wire_upper"];
+    let fields = names.iter().enumerate().map(|(index, name)| {
+        one(args, index, "__message_parts", span).cloned().map(|value| (*name, value))
+    }).collect::<Result<Vec<_>, _>>()?;
+    Ok(structure("Message", fields))
 }
 
 fn attachment_value(attachment: &jet_email::Attachment) -> CtValue {

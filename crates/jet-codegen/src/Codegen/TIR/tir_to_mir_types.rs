@@ -2639,6 +2639,9 @@ const COMPILER_OWNED_CORE_RECORDS: &[(&str, &[&str])] = &[
     ("Address", &[]),
     ("Message", &[]),
     ("Attachment", &[]),
+    ("__EmailAddressView", &["display", "mailbox"]),
+    ("__EmailAttachmentView", &["filename", "mime", "bytes"]),
+    ("__EmailMessageView", &["from", "to", "bcc", "subject", "text", "html", "attachments", "wire_upper"]),
     (
         "RecipientReport",
         &["address", "accepted", "code", "message"],

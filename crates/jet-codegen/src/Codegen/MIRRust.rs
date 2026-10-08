@@ -4966,7 +4966,7 @@ impl<'a> RustEmitter<'a> {
 
     fn native_email_struct_field_argument(&self, id: MirFieldId, value: &str) -> Option<String> {
         let (owner, field) = self.native_email_field(id)?;
-        if owner == "Address"
+        if matches!(owner, "Address" | "__EmailAddressView")
             && field.name == "display"
             && matches!(
                 field.ty.kind(),
@@ -4981,7 +4981,7 @@ impl<'a> RustEmitter<'a> {
 
     fn native_email_struct_field_result(&self, id: MirFieldId, value: &str) -> Option<String> {
         let (owner, field) = self.native_email_field(id)?;
-        if owner == "Address"
+        if matches!(owner, "Address" | "__EmailAddressView")
             && field.name == "display"
             && matches!(
                 field.ty.kind(),

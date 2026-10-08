@@ -1395,6 +1395,9 @@ pub(crate) fn core_email_rust_type_name(name: &str) -> Option<&'static str> {
         "Message" => Some("Message"),
         "Attachment" => Some("Attachment"),
         "Envelope" => Some("Envelope"),
+        "__EmailAddressView" => Some("__EmailAddressView"),
+        "__EmailAttachmentView" => Some("__EmailAttachmentView"),
+        "__EmailMessageView" => Some("__EmailMessageView"),
         "SMTPSecurity" => Some("SMTPSecurity"),
         "RecipientPolicy" => Some("RecipientPolicy"),
         "RecipientReport" => Some("RecipientReport"),
@@ -2464,6 +2467,9 @@ impl Cx {
             (Some("core.email"), "Message") => Some("Message"),
             (Some("core.email"), "Attachment") => Some("Attachment"),
             (Some("core.email"), "Envelope") => Some("Envelope"),
+            (Some("core.email"), "__EmailAddressView") => Some("__EmailAddressView"),
+            (Some("core.email"), "__EmailAttachmentView") => Some("__EmailAttachmentView"),
+            (Some("core.email"), "__EmailMessageView") => Some("__EmailMessageView"),
             (Some("core.email"), "SMTPSecurity") => Some("SMTPSecurity"),
             (Some("core.email"), "Limits") => Some("Limits"),
             (Some("core.email"), "RecipientPolicy") => Some("RecipientPolicy"),
@@ -3415,6 +3421,7 @@ impl Cx {
                         | "Message"
                         | "Attachment"
                         | "Envelope"
+                        | "__EmailAddressView" | "__EmailAttachmentView" | "__EmailMessageView"
                         | "SMTPSecurity"
                         | "RecipientPolicy"
                         | "RecipientReport"
@@ -3428,6 +3435,9 @@ impl Cx {
                     "Message" => "Message",
                     "Attachment" => "Attachment",
                     "Envelope" => "Envelope",
+                    "__EmailAddressView" => "__EmailAddressView",
+                    "__EmailAttachmentView" => "__EmailAttachmentView",
+                    "__EmailMessageView" => "__EmailMessageView",
                     "SMTPSecurity" => "SMTPSecurity",
                     "RecipientPolicy" => "RecipientPolicy",
                     "RecipientReport" => "RecipientReport",
@@ -3900,6 +3910,7 @@ impl Cx {
                         | "Message"
                         | "Attachment"
                         | "Envelope"
+                        | "__EmailAddressView" | "__EmailAttachmentView" | "__EmailMessageView"
                         | "SMTPSecurity"
                         | "RecipientPolicy"
                         | "RecipientReport"

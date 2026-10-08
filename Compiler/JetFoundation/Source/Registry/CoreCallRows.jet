@@ -1,6 +1,6 @@
 // BEGIN GENERATED CORE CALL ROWS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 8750315699cb82e46220560d9a95162afc1df5ab26d0b8c8cbd510da7e816d99
+// Source SHA-256: 17c6f5a63c6438d3d44a0712fdd42c72a90a1dd5f172067e44bbdf90b84ab24a
 // Source: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs (TIR_CORE_CALL_RECORDS, appended in declaration order)
 // Source SHA-256: 59e81d97924b03778b14a3a1c87c2bffb8722fc906d822c4f93850bd2fdb6f30
 // Core ABI rows keep Core.jet order followed by the TIR extension order.
@@ -770,12 +770,16 @@ pub CORE_CALLS :: prep { [CoreCallRecord]{
     core_call_with_pure_route(core_call_new("core.net.mime", "extension", "jet_mime_extension", true, [Bool]{true}), CoreCallPureRoute.MIME),
     core_call_with_pure_route(core_call_new("core.email", "address", "jet_email::address", true, [Bool]{true}), CoreCallPureRoute.Email),
     core_call_with_pure_route(core_call_new("core.email", "attachment", "jet_email::attachment", true, [Bool]{true, true, true}), CoreCallPureRoute.Email),
-    core_call_with_pure_route(core_call_new("core.email", "message", "jet_email::message", true, [Bool]{true, true, true, true, true, true, true}), CoreCallPureRoute.Email),
+    core_call_source_owned("core.email", "message", [Bool]{true, true, true, true, true, true, true}),
     core_call_with_pure_route(core_call_new("core.email", "envelope", "jet_email::envelope", true, [Bool]{true, true}), CoreCallPureRoute.Email),
-    core_call_with_pure_route(core_call_new("core.email", "serialize", "jet_email::serialize", true, [Bool]{true}), CoreCallPureRoute.Email),
+    core_call_source_owned("core.email", "serialize", [Bool]{true}),
     core_call_with_pure_route(core_call_new("core.email", "__address_parts", "jet_email::address_parts", true, [Bool]{false, false}), CoreCallPureRoute.Email),
     core_call_with_pure_route(core_call_new("core.email", "__attachment_parts", "jet_email::attachment_parts", true, [Bool]{false, false, false}), CoreCallPureRoute.Email),
     core_call_with_pure_route(core_call_new("core.email", "__envelope_parts", "jet_email::envelope_parts", true, [Bool]{false, false}), CoreCallPureRoute.Email),
+    core_call_with_pure_route(core_call_new("core.email", "__address_view", "jet_email::address_view", true, [Bool]{true}), CoreCallPureRoute.Email),
+    core_call_with_pure_route(core_call_new("core.email", "__attachment_view", "jet_email::attachment_view", true, [Bool]{true}), CoreCallPureRoute.Email),
+    core_call_with_pure_route(core_call_new("core.email", "__message_view", "jet_email::message_view", true, [Bool]{true}), CoreCallPureRoute.Email),
+    core_call_with_pure_route(core_call_new("core.email", "__message_parts", "jet_email::message_parts", true, [Bool]{false, false, false, false, false, false, false, false, false}), CoreCallPureRoute.Email),
     core_call_new("core.text", "nfc", "jet_text_nfc", true, [Bool]{true}),
     core_call_new("core.text", "nfd", "jet_text_nfd", true, [Bool]{true}),
     core_call_new("core.text", "nfkc", "jet_text_nfkc", true, [Bool]{true}),
@@ -1676,7 +1680,7 @@ pub CORE_MODULE_EXPORTS :: [CoreModuleExportNames]{
     CoreModuleExportNames{module_name: "core.data.sketch.reservoir", members: [String]{"new", "ReservoirSampler"}, type_exports: [String]{"ReservoirSampler"}},
     CoreModuleExportNames{module_name: "core.data.sketch.tdigest", members: [String]{"new", "Centroid", "TDigest"}, type_exports: [String]{"Centroid", "TDigest"}},
     CoreModuleExportNames{module_name: "core.db", members: [String]{"decode", "migrate", "open", "open_memory", "pool", "policy", "policy_audit", "row_bool", "row_float", "row_int", "row_text", "row_value", "transaction", "DBConnection", "DBScope", "DBPool", "DBLease", "DBPoolReceipt", "DBError", "DBValue", "SQL", "__open", "__open_memory", "__pool", "__policy", "__policy_audit", "__transaction", "__migrate", "__PoolLifecycle"}, type_exports: [String]{"DBConnection", "DBScope", "DBPool", "DBLease", "DBPoolReceipt", "DBError", "DBValue", "SQL", "__PoolLifecycle"}},
-    CoreModuleExportNames{module_name: "core.email", members: [String]{"Address", "Attachment", "DKIMConfig", "EmailError", "Envelope", "Limits", "Mailer", "Message", "RecipientPolicy", "RecipientReport", "SMTPAuth", "SMTPConfig", "SMTPSecurity", "SendReport", "TLSTrust", "address", "attachment", "envelope", "message", "serialize", "smtp", "smtp_from_env", "HTML", "dkim", "limits", "send_report", "smtp_auth"}, type_exports: [String]{"Address", "Message", "Attachment", "Envelope", "SMTPSecurity", "RecipientPolicy", "RecipientReport", "SendReport", "EmailError", "Limits", "SMTPAuth", "TLSTrust", "DKIMConfig", "SMTPConfig", "Mailer", "HTML"}},
+    CoreModuleExportNames{module_name: "core.email", members: [String]{"Address", "Attachment", "DKIMConfig", "EmailError", "Envelope", "Limits", "Mailer", "Message", "RecipientPolicy", "RecipientReport", "SMTPAuth", "SMTPConfig", "SMTPSecurity", "SendReport", "TLSTrust", "address", "attachment", "envelope", "message", "serialize", "smtp", "smtp_from_env", "HTML", "dkim", "limits", "send_report", "smtp_auth"}, type_exports: [String]{"Address", "Message", "Attachment", "Envelope", "SMTPSecurity", "RecipientPolicy", "RecipientReport", "SendReport", "EmailError", "Limits", "SMTPAuth", "TLSTrust", "DKIMConfig", "SMTPConfig", "Mailer", "HTML", "__EmailAddressView", "__EmailAttachmentView", "__EmailMessageView"}},
     CoreModuleExportNames{module_name: "core.encoding", members: [String]{"DataEvent", "DataTree", "EncodingCause", "EncodingError", "EncodingErrorKind", "EncodingFormat", "EncodingLimits", "Reader", "hex_nibble", "hex_value", "bytes_to_hex", "hex_to_bytes", "wrap32", "HexError", "__edition"}, type_exports: [String]{"DataTree", "EncodingLimits", "EncodingError", "EncodingCause", "EncodingFormat", "EncodingErrorKind", "DataEvent", "Reader", "HexError"}},
     CoreModuleExportNames{module_name: "core.encoding.base32", members: [String]{"decode", "encode", "is_base32", "b32encode", "b32decode", "b32hexencode", "b32hexdecode", "Base32Error"}, type_exports: [String]{"Base32Error"}},
     CoreModuleExportNames{module_name: "core.encoding.base64", members: [String]{"decode", "decode_url", "encode", "encode_url", "encode_url_padded", "decode_padded", "pad", "unpad", "is_base64", "b64encode", "standard_b64encode", "urlsafe_b64encode", "b64decode", "standard_b64decode", "urlsafe_b64decode", "b16encode", "b16decode", "b32encode", "b32decode", "b32hexencode", "b32hexdecode", "a85encode", "a85decode", "b85encode", "b85decode", "z85encode", "z85decode", "encodebytes", "decodebytes", "b2a_base64", "a2b_base64", "Base64Error"}, type_exports: [String]{"Base64Error"}},

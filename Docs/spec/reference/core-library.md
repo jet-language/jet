@@ -77,12 +77,16 @@ Emission-fixture parity (Rust/Jet output diff = 0) and rejection-fixture executi
 are UNOBSERVED in the light-lane port; plugin behavior credit remains held until
 the cycle's emission lane observes them.
 
-Email address, attachment, and envelope construction validates in
+Email address, attachment, envelope, and message construction validates in
 `Core/email/email.jet`: control-character refusal precedes address parsing,
 mailbox grammar is ASCII dot-atom or quoted local, MIME and physical-header
 limits precede attachment size, and envelopes require 1–100 recipients.
-Private raw builders only marshal the existing validated native carriers;
-their construction errors retain the original Configuration operation strings.
+The same source computes the native conservative wire bound and assembles MIME:
+UTF-8 encoded words never split a scalar, transfer base64 folds at 76 bytes,
+and native-order SHA-256 absorption determines mixed/alternative boundaries.
+BCC participates in envelope and boundary generation, never visible headers.
+Private whole-carrier views and builders only marshal native storage; refusal
+errors retain the original Configuration operation strings.
 Filesystem internal host calls use their canonical `core.files.__*` names
 directly. There is no second `__files7_*` alias layer: the Prelude's existing
 registry entries provide the raw host boundary until Jet runtime L7 replaces
