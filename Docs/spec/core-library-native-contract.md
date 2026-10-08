@@ -162,6 +162,15 @@ accepts an empty salt as RFC 5869's zero salt, and limits output to 255 hash
 blocks (8160 bytes). Aligned scratch is 672 bytes for HMAC and 744 for HKDF;
 key pads, intermediate digests, PRK, and expansion blocks are wiped on return.
 
+PBKDF2-HMAC-SHA256 uses that same HMAC engine, preparing the password's
+normalized key pads once per derivation. Salt and the big-endian 32-bit block
+counter stay separate borrowed spans. Iteration counts and output lengths
+are public; every accumulation scans all 32 PRF bytes. Its disjoint output
+and exclusive aligned 872-byte scratch are caller-owned, and all pads,
+intermediate blocks, and counters are wiped on return. The private kernel
+permits a zero-length output, as the seed does; the Core API retains its
+existing positive-output validation.
+
 The vault recovery KDF uses Argon2id version 19 with the existing JVKW policy:
 65536 KiB, three passes, one lane, 32-byte result and 16-byte salt. Its internal
 RFC vector entry also carries optional secret/associated-data fields. Memory
