@@ -1,5 +1,5 @@
 // tests/gate_law.rs88-102: KNOWN-FAILING #4843, refusal before lock publication.
-// Existing workspace write API; precise E3415/key detail remains compiler-lib ledger.
+// Exact E3415/key diagnostic restored by the #4843 owner's typed Gate error.
 // PENDING-SAME-HEAD nested package-test admission.
 
 #Test("workspace force and dependency grants refuse before lock publication") {
@@ -17,7 +17,16 @@
         }
         cache := WorkspaceDeclarationCache.new()
         denied :: if env_workspace_lock_write(&cache, root, plan) == {
-            .Err(_) -> true
+            .Err(error) -> if error == {
+                .Gate(gate) -> {
+                    found := false
+                    loop diagnostic in gate.diagnostics {
+                        if diagnostic.code == "E3415" && diagnostic.what.contains(key) -> found = true
+                    }
+                    found
+                }
+                else -> false
+            }
             .Ok(_) -> false
         }
         &refused.push(denied)
