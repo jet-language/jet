@@ -1920,3 +1920,27 @@ retained owner, never another writer's permit or revision. The wait callback
 writes a single Bool byte; its error output transfers one E4 String owner only
 on a non-stopping error return. `assemble-sync`, `link-sync`, and `run-sync`
 include the Condition queue and cancellation-cleanup witnesses.
+
+### Remaining native String routes
+
+`TextRoutes.jet` supplies the C route ABI for chars, copy, byte count, lines,
+repeat, replace, both explicit slice forms and ASCII case conversion, reusing
+E4 ownership, UTF-8 scalar decoding, constant-storage substring search and the
+existing character-range failure report. Chars/lines return an owned word
+column plus its count, with null for empty columns, matching generated
+`list_out`. Byte count returns the canonical exact-Int word. Lines match
+Rust `str::lines`: remove LF and its optional preceding CR, preserve bare CR,
+and omit the extra line after a final LF. Replace uses nonoverlapping matches;
+an empty pattern inserts at each Unicode-scalar boundary including both ends.
+Repeat clamps negative counts to zero and copies into one exact allocation.
+ASCII casing leaves every non-ASCII byte unchanged. Slice bounds are character
+indices and exclude the end, including an empty slice at the character count.
+The generated route exporter removes replaced Rust definitions while retaining
+shared carrier metadata; no second String carrier is introduced.
+
+The x64 runtime-pack census excludes wasm32-only allocation exports (WebAbi,
+font/HarfBuzz scratch, numeric Web buffers and Web D-FRED). Those U32 linear-
+memory/provenance/TLS contracts remain separate target rows, not native-pointer
+casts. Date/time formatting and Pool construction are Core source-owner rows,
+not String/allocator runtime aliases. The private image-runtime stop/String
+allocator and L1/L3 canonical allocator/split providers are existing Jet bodies.
