@@ -520,13 +520,32 @@ fn lower_sort_loop(f: &LowerFunction, start: LIRValueID, end: LIRValueID) -> Low
     LowerEach{head: head, done: done, at: at, address: at, state: [LIRValueID]{}, exit: [LIRValueID]{}}
 }
 
+// A bounded merge run has at most `width` of the remaining List positions.
+// Clamp before adding, so no start + 2 * width intermediate can overflow.
+fn lower_sort_run_size(f: &LowerFunction, width: LIRValueID, remaining: LIRValueID) -> LIRValueID Never! {
+    short :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: short, condition: LIRCondition.Lt, left: remaining, right: width})
+    take_remaining :: lower_new_block(&f)
+    take_width :: lower_new_block(&f)
+    done :: lower_new_block(&f)
+    result :: lower_word(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: short, then_target: lower_target(take_remaining, [LIRValueID]{}), else_target: lower_target(take_width, [LIRValueID]{})})
+    lower_start(&f, take_remaining, [LIRValueID]{})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{remaining})})
+    lower_start(&f, take_width, [LIRValueID]{})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{width})})
+    lower_start(&f, done, [LIRValueID]{result})
+    result
+}
+
 // `xs.sort_by(key)` / `sort_by_desc(key)` (SortKernel.rs
 // jet_list_try_sort_by_key_kernel: every key computed once, in List order,
 // then a stable sort of the keys) and `xs.sort_by(compare)`
-// (jet_list_sort_by_compare, a stable sort under the comparator). A stable
-// insertion sort orders a permutation of positions; the elements then move
-// once into a new buffer in that order. `mode`: 0 key ascending, 1 key
-// descending, 2 comparator, 3/4 fallible key ascending/descending
+// (jet_list_sort_by_compare, a stable sort under the comparator). The same
+// width-doubling index merge as canonical MIR row ordering sorts positions;
+// inverse permutation cycles transfer payloads within the original buffer.
+// `mode`: 0 key ascending, 1 key descending, 2 comparator, 3/4 fallible key
+// ascending/descending
 // (jet_list_try_sort_by[_desc]: the first Err key stops before any later key
 // is computed and leaves the List as it was; the method's Result is that Err,
 // else Ok).
@@ -564,7 +583,6 @@ fn lower_closure_sort(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
     list :: lower_use(&m, &f, receiver) ?? return
     closure :: lower_use(&m, &f, closure_arg.value) ?? return
     length :: lower_list_word(&f, list, 0)
-    cap :: lower_list_word(&f, list, 8)
     data :: lower_list_data(&f, list)
     stride :: lower_list_stride(p, elem)
     zero :: lower_const(&f, 0)
@@ -621,71 +639,156 @@ fn lower_closure_sort(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
     }
     lower_each_end(&f, fill, [LIRValueID]{})
 
-    // Stable insertion sort: slot j moves down while it orders strictly
-    // before slot j - 1.
-    outer :: lower_sort_loop(&f, one, length)
-    inner :: lower_new_block(&f)
-    check :: lower_new_block(&f)
-    swap :: lower_new_block(&f)
-    advance :: lower_new_block(&f)
-    lower_seal(&f, LIRTerminator.Jump{target: lower_target(inner, [LIRValueID]{outer.at})})
-    j :: lower_word(&f)
-    lower_start(&f, inner, [LIRValueID]{j})
-    positive :: lower_flag(&f)
-    lower_emit(&f, LIRInst.Compare{dst: positive, condition: LIRCondition.Gt, left: j, right: zero})
-    lower_seal(&f, LIRTerminator.Branch{condition: positive, then_target: lower_target(check, [LIRValueID]{}), else_target: lower_target(advance, [LIRValueID]{})})
-    lower_start(&f, check, [LIRValueID]{})
-    previous :: lower_word(&f)
-    lower_emit(&f, LIRInst.Binary{dst: previous, op: LIRBinaryOp.Sub, left: j, right: one})
+    // Stable index merge: keys stay at their original positions and borrowed
+    // payloads are not relocated until every comparison has completed.
+    scratch :: lower_list_buffer(&m, &f, length, 8)
+    pass_head :: lower_new_block(&f)
+    pass_body :: lower_new_block(&f)
+    pass_done :: lower_new_block(&f)
+    width :: lower_word(&f)
+    source :: lower_pointer(&f)
+    target :: lower_pointer(&f)
+    ordered :: lower_pointer(&f)
+    inverse :: lower_pointer(&f)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(pass_head, [LIRValueID]{one, order, scratch})})
+    lower_start(&f, pass_head, [LIRValueID]{width, source, target})
+    more_passes :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: more_passes, condition: LIRCondition.Lt, left: width, right: length})
+    lower_seal(&f, LIRTerminator.Branch{condition: more_passes, then_target: lower_target(pass_body, [LIRValueID]{}), else_target: lower_target(pass_done, [LIRValueID]{source, target})})
+    lower_start(&f, pass_body, [LIRValueID]{})
+
+    run_head :: lower_new_block(&f)
+    run_body :: lower_new_block(&f)
+    run_done :: lower_new_block(&f)
+    start :: lower_word(&f)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(run_head, [LIRValueID]{zero})})
+    lower_start(&f, run_head, [LIRValueID]{start})
+    more_runs :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: more_runs, condition: LIRCondition.Lt, left: start, right: length})
+    lower_seal(&f, LIRTerminator.Branch{condition: more_runs, then_target: lower_target(run_body, [LIRValueID]{}), else_target: lower_target(run_done, [LIRValueID]{})})
+    lower_start(&f, run_body, [LIRValueID]{})
+    remaining :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: remaining, op: LIRBinaryOp.Sub, left: length, right: start})
+    left_size :: lower_sort_run_size(&f, width, remaining)
+    middle :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: middle, op: LIRBinaryOp.Add, left: start, right: left_size})
+    right_remaining :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: right_remaining, op: LIRBinaryOp.Sub, left: length, right: middle})
+    right_size :: lower_sort_run_size(&f, width, right_remaining)
+    end :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: end, op: LIRBinaryOp.Add, left: middle, right: right_size})
+
+    merge_head :: lower_new_block(&f)
+    check_left :: lower_new_block(&f)
+    check_right :: lower_new_block(&f)
+    compare :: lower_new_block(&f)
+    take_left :: lower_new_block(&f)
+    take_right :: lower_new_block(&f)
+    merge_done :: lower_new_block(&f)
+    left :: lower_word(&f)
+    right :: lower_word(&f)
+    out :: lower_word(&f)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge_head, [LIRValueID]{start, middle, start})})
+    lower_start(&f, merge_head, [LIRValueID]{left, right, out})
+    more_items :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: more_items, condition: LIRCondition.Lt, left: out, right: end})
+    lower_seal(&f, LIRTerminator.Branch{condition: more_items, then_target: lower_target(check_left, [LIRValueID]{}), else_target: lower_target(merge_done, [LIRValueID]{})})
+    lower_start(&f, check_left, [LIRValueID]{})
+    left_available :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: left_available, condition: LIRCondition.Lt, left: left, right: middle})
+    lower_seal(&f, LIRTerminator.Branch{condition: left_available, then_target: lower_target(check_right, [LIRValueID]{}), else_target: lower_target(take_right, [LIRValueID]{})})
+    lower_start(&f, check_right, [LIRValueID]{})
+    right_available :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: right_available, condition: LIRCondition.Lt, left: right, right: end})
+    lower_seal(&f, LIRTerminator.Branch{condition: right_available, then_target: lower_target(compare, [LIRValueID]{}), else_target: lower_target(take_left, [LIRValueID]{})})
+    lower_start(&f, compare, [LIRValueID]{})
+    left_at :: lower_sort_load(&f, source, left)
+    right_at :: lower_sort_load(&f, source, right)
     before := LIRValueID{value: -1}
     if by_key {
-        current_slot :: lower_sort_slot(&f, keys, j)
-        previous_slot :: lower_sort_slot(&f, keys, previous)
-        current_key :: lower_read_at(p, &f, current_slot, 0, key_ty) ?? return
-        previous_key :: lower_read_at(p, &f, previous_slot, 0, key_ty) ?? return
-        ordered :: if ascending -> lower_map_key_order(p, &m, &f, key_ty, current_key, previous_key) else -> lower_map_key_order(p, &m, &f, key_ty, previous_key, current_key)
-        before = ordered.less
+        right_slot :: lower_sort_slot(&f, keys, right_at)
+        left_slot :: lower_sort_slot(&f, keys, left_at)
+        right_key :: lower_read_at(p, &f, right_slot, 0, key_ty) ?? return
+        left_key :: lower_read_at(p, &f, left_slot, 0, key_ty) ?? return
+        key_order :: if ascending -> lower_map_key_order(p, &m, &f, key_ty, right_key, left_key) else -> lower_map_key_order(p, &m, &f, key_ty, left_key, right_key)
+        before = key_order.less
     } else {
-        current_at :: lower_sort_load(&f, order, j)
-        previous_at :: lower_sort_load(&f, order, previous)
-        current_address :: lower_list_address(&f, data, current_at, stride)
-        previous_address :: lower_list_address(&f, data, previous_at, stride)
-        current :: lower_read_at(p, &f, current_address, 0, elem) ?? return
-        earlier :: lower_read_at(p, &f, previous_address, 0, elem) ?? return
-        verdict :: lower_call_closure_box(p, &m, &f, closure, [LIRValueID]{current, earlier}, ret) ?? return lower_fail(&m, &f, "sort_by comparator has no result")
+        right_address :: lower_list_address(&f, data, right_at, stride)
+        left_address :: lower_list_address(&f, data, left_at, stride)
+        right_item :: lower_read_at(p, &f, right_address, 0, elem) ?? return
+        left_item :: lower_read_at(p, &f, left_address, 0, elem) ?? return
+        verdict :: lower_call_closure_box(p, &m, &f, closure, [LIRValueID]{right_item, left_item}, ret) ?? return lower_fail(&m, &f, "sort_by comparator has no result")
         less_word :: lower_const(&f, less_index)
         before = lower_flag(&f)
         lower_emit(&f, LIRInst.Compare{dst: before, condition: LIRCondition.Eq, left: verdict, right: less_word})
     }
-    lower_seal(&f, LIRTerminator.Branch{condition: before, then_target: lower_target(swap, [LIRValueID]{}), else_target: lower_target(advance, [LIRValueID]{})})
-    lower_start(&f, swap, [LIRValueID]{})
-    buffers := [LIRValueID]{order}
-    if by_key -> &buffers.push(keys)
-    loop buffer in buffers {
-        here_slot :: lower_sort_slot(&f, buffer, j)
-        there_slot :: lower_sort_slot(&f, buffer, previous)
-        here :: lower_word(&f)
-        there :: lower_word(&f)
-        lower_emit(&f, LIRInst.Load{dst: here, base: here_slot, offset: 0})
-        lower_emit(&f, LIRInst.Load{dst: there, base: there_slot, offset: 0})
-        lower_emit(&f, LIRInst.Store{base: here_slot, offset: 0, value: there})
-        lower_emit(&f, LIRInst.Store{base: there_slot, offset: 0, value: here})
-    }
-    lower_seal(&f, LIRTerminator.Jump{target: lower_target(inner, [LIRValueID]{previous})})
-    lower_start(&f, advance, [LIRValueID]{})
-    lower_each_end(&f, outer, [LIRValueID]{})
+    // Right wins only on strictly Less; Equal always keeps the left run first.
+    lower_seal(&f, LIRTerminator.Branch{condition: before, then_target: lower_target(take_right, [LIRValueID]{}), else_target: lower_target(take_left, [LIRValueID]{})})
+    lower_start(&f, take_left, [LIRValueID]{})
+    left_value :: lower_sort_load(&f, source, left)
+    left_output :: lower_sort_slot(&f, target, out)
+    lower_emit(&f, LIRInst.Store{base: left_output, offset: 0, value: left_value})
+    next_left :: lower_word(&f)
+    next_left_out :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: next_left, op: LIRBinaryOp.Add, left: left, right: one})
+    lower_emit(&f, LIRInst.Binary{dst: next_left_out, op: LIRBinaryOp.Add, left: out, right: one})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge_head, [LIRValueID]{next_left, right, next_left_out})})
+    lower_start(&f, take_right, [LIRValueID]{})
+    right_value :: lower_sort_load(&f, source, right)
+    right_output :: lower_sort_slot(&f, target, out)
+    lower_emit(&f, LIRInst.Store{base: right_output, offset: 0, value: right_value})
+    next_right :: lower_word(&f)
+    next_right_out :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: next_right, op: LIRBinaryOp.Add, left: right, right: one})
+    lower_emit(&f, LIRInst.Binary{dst: next_right_out, op: LIRBinaryOp.Add, left: out, right: one})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge_head, [LIRValueID]{left, next_right, next_right_out})})
+    lower_start(&f, merge_done, [LIRValueID]{})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(run_head, [LIRValueID]{end})})
+    lower_start(&f, run_done, [LIRValueID]{})
+    // min(width, length - width) bounds doubling by length, including the
+    // final pass; no overflowing width * 2 intermediate is evaluated.
+    width_remaining :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: width_remaining, op: LIRBinaryOp.Sub, left: length, right: width})
+    width_step :: lower_sort_run_size(&f, width, width_remaining)
+    next_width :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: next_width, op: LIRBinaryOp.Add, left: width, right: width_step})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(pass_head, [LIRValueID]{next_width, target, source})})
+    lower_start(&f, pass_done, [LIRValueID]{ordered, inverse})
 
-    // Move every element once into its sorted position.
-    sorted :: lower_list_buffer(&m, &f, length, stride)
-    place :: lower_sort_loop(&f, zero, length)
-    source_at :: lower_sort_load(&f, order, place.at)
-    from :: lower_list_address(&f, data, source_at, stride)
-    to :: lower_list_address(&f, sorted, place.at, stride)
-    lower_list_move(p, &f, to, from, elem)
-    lower_each_end(&f, place, [LIRValueID]{})
-    lower_list_free_buffer(&m, &f, data, cap, stride)
-    lower_emit(&f, LIRInst.Store{base: list, offset: 8, value: length})
-    lower_emit(&f, LIRInst.Store{base: list, offset: 16, value: sorted})
+    // Reuse the spare scalar buffer for old-position -> new-position.
+    // Only inverse entries change during cycles; element storage keeps its
+    // original pointer and capacity, and no payload is cloned or dropped.
+    destinations :: lower_sort_loop(&f, zero, length)
+    original :: lower_sort_load(&f, ordered, destinations.at)
+    destination_slot :: lower_sort_slot(&f, inverse, original)
+    lower_emit(&f, LIRInst.Store{base: destination_slot, offset: 0, value: destinations.at})
+    lower_each_end(&f, destinations, [LIRValueID]{})
+    temporary :: lower_new_storage(p, &f, elem)
+    cycle :: lower_sort_loop(&f, zero, length)
+    cycle_head :: lower_new_block(&f)
+    cycle_swap :: lower_new_block(&f)
+    cycle_done :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(cycle_head, [LIRValueID]{})})
+    lower_start(&f, cycle_head, [LIRValueID]{})
+    destination :: lower_sort_load(&f, inverse, cycle.at)
+    misplaced :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: misplaced, condition: LIRCondition.Ne, left: destination, right: cycle.at})
+    lower_seal(&f, LIRTerminator.Branch{condition: misplaced, then_target: lower_target(cycle_swap, [LIRValueID]{}), else_target: lower_target(cycle_done, [LIRValueID]{})})
+    lower_start(&f, cycle_swap, [LIRValueID]{})
+    here :: lower_list_address(&f, data, cycle.at, stride)
+    there :: lower_list_address(&f, data, destination, stride)
+    lower_list_move(p, &f, temporary, here, elem)
+    lower_list_move(p, &f, here, there, elem)
+    lower_list_move(p, &f, there, temporary, elem)
+    here_slot :: lower_sort_slot(&f, inverse, cycle.at)
+    there_slot :: lower_sort_slot(&f, inverse, destination)
+    there_destination :: lower_sort_load(&f, inverse, destination)
+    lower_emit(&f, LIRInst.Store{base: here_slot, offset: 0, value: there_destination})
+    lower_emit(&f, LIRInst.Store{base: there_slot, offset: 0, value: destination})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(cycle_head, [LIRValueID]{})})
+    lower_start(&f, cycle_done, [LIRValueID]{})
+    lower_each_end(&f, cycle, [LIRValueID]{})
+    lower_list_free_buffer(&m, &f, scratch, length, 8)
 
     if by_key && lower_needs_drop(p, key_ty) {
         release :: lower_sort_loop(&f, zero, length)
