@@ -1,7 +1,7 @@
 use jet_foundation.[
-    MIRBinaryOp, MIRBlockID, MIRDropKind, MIRFunction, MIRLoopSourceKind,
+    MIRBinaryOp, MIRBlockID, MIRDropKind, MIRFunction, MIRLoopSourceKind, MIRMapEntry,
     MIROperation, MIRPlaceID, MIRPreludeABI, MIRPreludeFamily, MIRProgram,
-    MIRTerminator, MIRType, MIRTypeDef, MIRValueID, mir_owned_ownership,
+    MIRTerminator, MIRType, MIRTypeDef, MIRTypeKind, MIRValueID, mir_nominal_ref, mir_owned_ownership, mir_type_from_kind,
 ]
 
 fn fx_iter_program(b: FxBuilder) -> MIRProgram Never! {
@@ -174,4 +174,34 @@ fn fx_pipe_missing_carrier_checks() -> Bool Never! {
         if !fx_mono_has_issue(fx_iter_program(b), name, false) -> return false
     }
     true
+}
+
+// Compiler maps use keys().to_list() and direct keys() loops. The existing
+// native snapshot must outlive the map and preserve sorted owned String keys.
+// expect-stdout iter-map-keys: "a\nz\na\nz\n"
+// expect-runtime-only iter-map-keys
+fn fx_iter_map_keys() -> MIRProgram Never! {
+    b := fx_builder()
+    map_ty :: mir_type_from_kind(MIRTypeKind.Map{key: fx_string(), value: fx_int()})
+    iter_ty :: mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref("Iter"), args: [MIRType]{fx_string()}})
+    z :: fx_strings_literal(&b, "z")
+    a :: fx_strings_literal(&b, "a")
+    one :: fx_int_const(&b, 1)
+    map :: fx_owned(&b, map_ty, MIROperation.BuildMap{entries: [MIRMapEntry]{MIRMapEntry{key: z, value: one}, MIRMapEntry{key: a, value: one}}})
+    direct :: fx_list_method(&b, "map_keys", map, None, [MIRValueID]{}, iter_ty, true)
+    second :: fx_list_method(&b, "map_keys", map, None, [MIRValueID]{}, iter_ty, true)
+    listed :: fx_list_method(&b, "iter_to_list", second, None, [MIRValueID]{}, fx_list_type(fx_string()), true)
+    fx_do(&b, MIROperation.Drop{value: map, kind: MIRDropKind.Value})
+    after_direct :: fx_iter_loop(&b, direct, fx_string(), true, None, None, U64{0})
+    after_list :: fx_iter_loop(&b, listed, fx_string(), true, None, None, after_direct)
+    fx_block(&b, after_list, MIRTerminator.Return{value: None})
+    p := fx_iter_program(b)
+    rows :: [String]{"map_keys", "iter_to_list"}
+    symbols :: [String]{"jet_map_keys", "jet_iter_to_list"}
+    loop (index, member) in rows {
+        row := fx_prelude(MIRPreludeFamily.BuiltinMethod, "core.builtin", member, symbols[index], 1, MIRPreludeABI.Value)
+        row.signature.borrow_mask[0] = index == 0
+        &p.prelude_calls.push(row)
+    }
+    p
 }
