@@ -94,6 +94,22 @@ values and fail-closed policy in Jet; the OS CSPRNG is a host cell. The raw
 algorithm controls in `core.crypto.expert` remain an explicit audited door, not
 a hidden provider policy.
 
+The internal entropy fill boundary borrows an exclusive writable span and
+returns zero only when every requested byte is filled. On Linux x86-64 it
+uses `getrandom` with flags zero: short reads continue on the remaining suffix,
+and interruption clears that suffix before retrying. Other provider failures
+clear the entire attempted span; there is no file, time, or deterministic
+fallback. Zero-byte requests do not invoke a provider. Core retains ownership
+of count validation and public error projection.
+
+The test/fault harness installs its Rand provider at this same adapter site,
+scoped to the current OS thread. Its callback and context stay live until
+reset; reset restores the real provider and releases the adapter state. Thread
+exit also wipes and releases that state. Private error rendering accepts only
+public operation metadata and never reads the password-policy reason or any
+secret material. Scripted provider and redaction results are compared with
+a once-frozen Rust seed receipt, separately from live-provider checks.
+
 The runtime SHA-256 byte boundary borrows its input and writes to a caller-owned
 32-byte digest. Its 576-byte, word-aligned scratch region is exclusive to the
 call and wiped before return. Domain-separated callers can hash up to four spans
@@ -139,6 +155,76 @@ root-filtered immutable snapshots: clearing a hook does not invalidate a writer
 already blocked on its entered/release phases. Reentrant mutable authorizer
 access preserves the reference foreign-panic body and exit status 101.
 
+The internal X25519 boundary borrows 32-byte scalar and point spans and writes
+32 bytes to a disjoint output. Its 1536-byte, word-aligned scratch is exclusive
+and wiped before return (1568 bytes for public-key derivation). Field arithmetic
+uses bounded radix-65536 limbs, fixed-index loops, and mask-based swaps, not
+secret-dependent branches or arbitrary-precision reduction. A zero shared
+result is rejected by recipient protocols, not by the RFC 7748 primitive.
+
+Vault signing-key public derivation uses the internal Ed25519 fixed-limb
+boundary with a borrowed 32-byte seed, 32-byte output, and exclusive 4096-byte
+scratch wiped before return. Its SHA-512 engine separately accepts a borrowed
+byte span, disjoint 64-byte digest, and 704-byte aligned scratch. Signed machine
+words carry hash bit patterns with wrapping additions and explicitly logical
+right shifts; scalar multiplication uses mask swaps and complete additions.
+
+The internal ChaCha20/XChaCha20 engines use borrowed key/nonce/input/output
+spans and caller-owned word-aligned scratch (320/368 bytes). Exact in-place XOR
+is supported; partial overlap is not. Counter exhaustion is rejected before
+output writes. HChaCha20 derives the XChaCha key without feed-forward, then
+uses four zero nonce bytes followed by the final eight extended-nonce bytes.
+
+Poly1305 uses bounded 26-bit limbs and mask-based canonical reduction. AEAD
+borrows AAD and ciphertext independently instead of allocating a MAC message;
+the Poly1305 length block commits to both byte lengths. Open compares all 16
+tag bytes before plaintext writes, leaving output untouched on failure.
+Exclusive aligned scratch is 560 bytes (608 for XChaCha) and is wiped on
+success and failure.
+
+HMAC-SHA256 and HKDF-SHA256 share the runtime SHA-256 engine, which supports
+four borrowed spans without concatenation. HKDF uses extract then expand,
+accepts an empty salt as RFC 5869's zero salt, and limits output to 255 hash
+blocks (8160 bytes). Aligned scratch is 672 bytes for HMAC and 744 for HKDF;
+key pads, intermediate digests, PRK, and expansion blocks are wiped on return.
+
+The vault recovery KDF uses Argon2id version 19 with the existing JVKW policy:
+65536 KiB, three passes, one lane, 32-byte result and 16-byte salt. Its internal
+RFC vector entry also carries optional secret/associated-data fields. Memory
+and 4800-byte scratch are caller-owned and wiped on return. The first half of
+the first pass uses data-independent addresses; later references are
+data-dependent as required by RFC 9106, not a constant-time substitution.
+Its BLAKE2b engine streams borrowed spans through one fixed 128-byte block
+buffer, avoiding a concatenated copy of the password and parameter fields.
+
+Age identities and recipients retain age v1's Bech32 checksum (constant 1),
+not the typed Core recipient format's Bech32m checksum. Identity output is
+uppercase `AGE-SECRET-KEY-1…`; recipient output is lowercase `age1…`. Parsing
+rejects mixed case and nonzero unused key bits. Header base64 is unpadded and
+canonical; padded, URL-safe, and nonzero-trailing-bit encodings are rejected.
+
+The internal age v1 recipient framing uses a 16-byte file key, X25519 stanza
+wrapping, HKDF-SHA256 header/payload keys, HMAC-SHA256 over the header through
+the three `---` bytes, and a 16-byte file nonce. Payload STREAM uses 65536-byte
+plaintext chunks, a big-endian eleven-byte counter and one-byte final flag;
+a full final chunk is marked final without an extra empty chunk. An empty
+final chunk is accepted only for an empty whole payload. Every chunk uses
+ChaCha20-Poly1305 without AAD. Open wipes previously emitted plaintext on any
+later authentication failure and wipes its exclusive aligned 2048-byte
+workspace on every return.
+
+Framing accepts binary recipient files, as the existing SecretsCrypto path
+does, and rejects scrypt passphrase files. The reader retains the seed's two
+beta-era stanza spellings: missing body and missing short final body line
+(`age0.10.1/tests/testkit.rs:606-620`). Key/header decoding is not claimed to be
+constant-time. Seal borrows recipient keys, CSPRNG-provided per-recipient
+ephemeral scalars, file key, nonce and a valid caller-provided grease stanza;
+all input/output/workspace spans are disjoint. There is no entropy fallback.
+`AgeV1Fixtures.json` freezes the official binary age testkit, Rust 0.10.1 chunk
+boundary outputs and an independent fixed-material Node/OpenSSL seal recipe.
+`run-crypto-fixtures.mjs` composes the Jet KAT exports, audits strong symbols,
+and emits Jet seal captures for a one-time Rust-opener comparison; the old raw
+crypto leaves stay until native execution and consumer admission.
 A high-level native implementation must not be retained as an invisible runtime
 fallback for a Jet implementation. If an API changes identity or semantics,
 make the change at the contract boundary and migrate its users in one cutover.
