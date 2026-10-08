@@ -40,3 +40,59 @@ fn kit_steps_wiring_finish(step: KitStep, context: KitStepCtx, state: KitStepSta
     if step.stderr_target == "null" -> result.last.stderr = ""
     KitStepResult{state: result, verdict: kit_expect_verdict("PASS", "")}
 }
+
+fn kit_steps_stream_nulled(selector: String, output: Bool, errors: Bool) -> Bool {
+    subject :: kit_steps_subject(selector)
+    if subject.starts_with("cap:") -> return false
+    (output && (subject.contains("stdout") || subject == "machine")) || (errors && (subject.contains("stderr") || subject == "machine"))
+}
+
+// Joining inherits the opener's wiring. Check at the plan boundary so neither
+// JSON/capture selectors nor a later recv can bypass the stream assertion rule.
+fn kit_steps_wiring_error(plan: KitPlan) -> String {
+    output := false
+    errors := false
+    loop step in plan.steps {
+        if step.action == "recv" || step.action == "send" {
+            loop opened in plan.steps {
+                if opened.label != step.label || opened.action != "session" -> next
+                if step.action == "recv" && opened.stdout_target == "null" -> return "recv on a nulled stream"
+                if step.action == "send" && opened.stdin == "null" -> return "send on closed null stdin"
+            }
+        }
+        if step.action == "capture" {
+            selector := step.argv[1]
+            if selector == "=" || selector == "+=" -> selector = if step.argv[2] == "text" || step.argv[2] == "lines" -> step.argv[3] else -> ""
+            if kit_steps_stream_nulled(selector, output, errors) -> return "capture on a nulled stream"
+        } else if step.action == "for" && step.argv[1] == "line" {
+            loop_output := output
+            loop_errors := errors
+            if step.argv.len() == 7 {
+                loop opened in plan.steps {
+                    if opened.label == step.argv[4] && kit_expect_named(["", "poll", "session", "spawn"], opened.action) {
+                        loop_output = opened.stdout_target == "null"
+                        loop_errors = opened.stderr_target == "null"
+                    }
+                }
+            }
+            if kit_steps_stream_nulled(step.argv[2], loop_output, loop_errors) -> return "line loop on a nulled stream"
+        } else if step.action == "" || step.action == "poll" {
+            output = step.stdout_target == "null"
+            errors = step.stderr_target == "null"
+        } else if step.action == "wait" || step.action == "close" {
+            loop opened in plan.steps {
+                if opened.label == step.label && (opened.action == "session" || opened.action == "spawn") {
+                    output = opened.stdout_target == "null"
+                    errors = opened.stderr_target == "null"
+                }
+            }
+        } else if !kit_expect_named(["assert", "session", "spawn", "send", "signal", "for", "end for", "repeat", "end repeat", "when", "end when", "parallel", "end parallel"], step.action) {
+            output = false
+            errors = false
+        }
+        loop assertion in step.assertions {
+            if kit_steps_stream_nulled(assertion.stream, output, errors) -> return "assertion on a nulled stream"
+        }
+    }
+    ""
+}

@@ -12,27 +12,47 @@ fn kit_steps_recv_valid(text: String) -> Bool {
     if words.len() < 2 || words[0].text != "recv" -> return false
     cursor := 2
     if cursor < words.len() && words[cursor].text == "line" -> cursor += 1
-    if cursor < words.len() && words[cursor].text == "collect" -> cursor += 1
-    start := cursor
+    collecting :: cursor < words.len() && words[cursor].text == "collect"
+    if collecting -> cursor += 1
     if cursor < words.len() && words[cursor].text == "until" {
         cursor += 1
-        start = cursor
-        loop cursor < words.len() && !kit_expect_named(["timeout", "within", "every", "optional"], words[cursor].text) -> cursor += 1
-        if cursor == start -> return false
-        predicate :: text.slice(words[start].start, words[cursor - 1].end)
-        if predicate.starts_with("$") {
-            if words[start + 1].text != "=" || kit_steps_json_path(words[start].text) == None -> return false
-        } else if predicate.starts_with("ndjson ") {
-            _ :: kit_steps_json_assertion("stdout {predicate}") ?? return false
-        } else {
-            _ :: kit_steps_stream_assertion("stdout", "{predicate}{text.slice(kit_steps_comment(text), text.len())}") ?? return false
+        start :: cursor
+        loop cursor < words.len() {
+            raw :: text.slice(words[cursor].start, words[cursor].end)
+            if kit_expect_named(["timeout", "within", "every", "optional"], raw) -> break
+            cursor += 1
         }
-    }
+        if cursor == start -> return false
+        predicates :: kit_steps_predicates(text.slice(words[start].start, words[cursor - 1].end)) ?? return false
+        reason :: text.slice(kit_steps_comment(text), text.len())
+        loop predicate in predicates {
+            tokens :: kit_steps_tokens(predicate) ?? return false
+            if predicate.starts_with("$") {
+                if tokens.len() < 3 || tokens[1].text != "=" || kit_steps_json_path(tokens[0].text) == None -> return false
+                _ :: kit_steps_json_assertion("stdout doc {predicate}") ?? return false
+            } else if predicate.starts_with("ndjson ") {
+                _ :: kit_steps_json_assertion("stdout {predicate} {reason}") ?? return false
+            } else {
+                _ :: kit_steps_stream_assertion("stdout", "{predicate} {reason}") ?? return false
+            }
+        }
+    } else if collecting -> return false
+    deadline := ""
+    every := false
     loop cursor < words.len() {
-        if words[cursor].text == "optional" -> return cursor + 1 == words.len()
-        if !kit_expect_named(["timeout", "within", "every"], words[cursor].text) || cursor + 1 >= words.len() || kit_steps_duration_ns(words[cursor + 1].text) == None -> return false
+        key :: words[cursor].text
+        if key == "optional" -> return deadline != "" && cursor + 1 == words.len()
+        if cursor + 1 >= words.len() || kit_steps_duration_ns(words[cursor + 1].text) == None -> return false
+        if key == "timeout" || key == "within" {
+            if deadline != "" -> return false
+            deadline = key
+        } else if key == "every" {
+            if every -> return false
+            every = true
+        } else -> return false
         cursor += 2
     }
+    if every && deadline == "" -> return false
     true
 }
 
@@ -43,8 +63,18 @@ fn kit_steps_session_action(step: KitStep, context: KitStepCtx, previous: KitSte
         policy :: kit_steps_policy(step, context.env) ?? return kit_steps_action_error(state, "invalid session policy")
         overlay :: kit_steps_environment(context.plan, policy, context.work, context.scratch, state.built)
         prepared :: kit_steps_prepare(step, context.env, context.work, context.scratch, context.snapshots, state.built, overlay) ?? return kit_steps_action_error(state, "{err}")
-        child :: kit_exec_spec(prepared.env, prepared.argv, prepared.cwd, context.scratch, prepared.overlay).spawn() ?? return kit_steps_action_error(state, "session spawn: {err}")
-        &state.children.push(KitPendingChild{label: step.label, child: child, started: time.instant(), step: step, joined: false, input_error: ""})
+        started :: time.instant()
+        child := kit_exec_spec(prepared.env, prepared.argv, prepared.cwd, context.scratch, prepared.overlay).spawn() ?? return kit_steps_action_error(state, "session spawn: {err}")
+        input_error := ""
+        if step.stdin == "null" -> child.stdin.close()
+        else if prepared.stdin != "" {
+            &child.stdin.write(prepared.stdin) ?? {
+                input_error = "session stdin: {err}"
+                ()
+            }
+        }
+        &state.children.push(KitPendingChild{label: step.label, child: child, started: started, step: step, joined: false, input_error: input_error})
+        if input_error != "" -> return kit_steps_action_error(state, input_error)
         return KitStepResult{state: state, verdict: kit_expect_verdict("PASS", "")}
     }
     loop index in 0..<state.children.len() {

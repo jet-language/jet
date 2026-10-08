@@ -269,6 +269,12 @@ struct KitFreePort {
     port: Int
 }
 
+struct KitCaptureScope {
+    start: Int
+    names: [String]
+    aggregates: [String]
+}
+
 struct KitLoopFrame {
     start: Int
     end: Int
@@ -340,6 +346,7 @@ struct KitStep {
     json_normalize: [KitJSONNormalization]{[KitJSONNormalization]{}}
     replacements: [KitReplacement]{[KitReplacement]{}}
     conditions: [String]{[String]{}}
+    aggregate_names: [String]{[String]{}}
 }
 
 struct KitPlan {
@@ -488,6 +495,21 @@ fn kit_steps_execute(original_context: KitStepCtx, hooks: KitStepHooks) -> KitOu
     cursor := 0
     loops := [KitLoopFrame]{}
     loop cursor < plan.steps.len() {
+        if loops.len() > 0 {
+            slot :: loops.len() - 1
+            frame :: loops[slot]
+            if frame.kind == "repeat" && cursor == frame.start + 1 {
+                opening :: plan.steps[frame.start]
+                active :: kit_steps_repeat_active(opening, context, state) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "{err}"))
+                if !active {
+                    state = kit_steps_loop_restore(frame, state)
+                    loops = loops.slice(0, slot)
+                    cursor = frame.end + 1
+                    next
+                }
+                if frame.started.elapsed().ns >= (kit_steps_duration_ns(opening.argv[6]) ?? 0) -> return kit_steps_finish(state, kit_expect_verdict("FAIL", opening.argv[10]))
+            }
+        }
         index :: cursor
         original :: plan.steps[index]
         cursor += 1
@@ -504,6 +526,7 @@ fn kit_steps_execute(original_context: KitStepCtx, hooks: KitStepHooks) -> KitOu
             next
         }
         if original.action == "end when" -> next
+        if original.action == "for" || original.action == "repeat" -> state = kit_steps_loop_initialize(original, state)
         if original.action == "for" {
             values :: kit_steps_loop_values(kit_steps_resolve_step(original, context, state) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "loop token unavailable")), context, state) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "{err}"))
             end :: kit_steps_block_end(plan.steps, index)
@@ -535,7 +558,9 @@ fn kit_steps_execute(original_context: KitStepCtx, hooks: KitStepHooks) -> KitOu
                 active :: kit_steps_repeat_active(opening, context, state) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "{err}"))
                 if active {
                     if frame.started.elapsed().ns >= (kit_steps_duration_ns(opening.argv[6]) ?? 0) -> return kit_steps_finish(state, kit_expect_verdict("FAIL", opening.argv[10]))
-                    time.sleep(time.duration_ns(kit_steps_duration_ns(opening.argv[8]) ?? 0))
+                    remaining :: (kit_steps_duration_ns(opening.argv[6]) ?? 0) - frame.started.elapsed().ns
+                    interval :: kit_steps_duration_ns(opening.argv[8]) ?? 0
+                    time.sleep(time.duration_ns(if interval < remaining -> interval else -> remaining))
                     cursor = frame.start + 1
                     next
                 }
@@ -565,18 +590,18 @@ fn kit_steps_execute(original_context: KitStepCtx, hooks: KitStepHooks) -> KitOu
             if step.argv.len() != 2 -> return kit_steps_finish(state, kit_expect_verdict("REFUSED", "fail needs one message"))
             return kit_steps_finish(state, kit_expect_verdict("FAIL", step.argv[1]))
         }
-        invoked :: if kit_steps_setup_kind(step.action) || kit_expect_named(["await", "session", "send", "recv", "signal", "close", "spawn", "wait", "capture", "write", "inventory"], step.action) ->
+        invoked :: if step.action == "poll" -> kit_steps_poll(step, index, context, state, hooks) else if kit_steps_setup_kind(step.action) || kit_expect_named(["assert", "await", "session", "send", "recv", "signal", "close", "spawn", "wait", "capture", "write", "inventory"], step.action) ->
             kit_steps_action(step, context, state) else -> hooks.invoke(step, index, context, state)
         state = invoked.state
         if invoked.verdict.status != "PASS" -> return kit_steps_finish(state, invoked.verdict)
         if kit_expect_named(["spawn", "session", "send", "signal"], step.action) -> next
-        if step.action == "" || step.action == "wait" || step.action == "close" {
+        if kit_expect_named(["", "wait", "close", "poll"], step.action) {
             wired :: kit_steps_wiring_finish(step, context, state)
             state = wired.state
             if wired.verdict.status != "PASS" -> return kit_steps_finish(state, wired.verdict)
         }
-        if step.action == "capture" {
-            if step.assertions.len() > 0 {
+        if step.action == "capture" || step.action == "assert" {
+            if step.assertions.len() > 0 || step.action == "assert" {
                 verdict :: hooks.check(step, index, context, state)
                 if verdict.status != "PASS" -> return kit_steps_finish(state, verdict)
             }
@@ -586,7 +611,7 @@ fn kit_steps_execute(original_context: KitStepCtx, hooks: KitStepHooks) -> KitOu
         state.replacements = step.replacements
         state.json_stdout = None
         state.json_stderr = None
-        if (step.action == "" || step.action == "wait") && (plan.json_normalize.len() > 0 || step.json_normalize.len() > 0) && kit_steps_failure(step, state.last) == None {
+        if kit_expect_named(["", "wait", "close", "poll"], step.action) && (plan.json_normalize.len() > 0 || step.json_normalize.len() > 0) && kit_steps_failure(step, state.last) == None {
             rules := plan.json_normalize
             loop rule in step.json_normalize -> &rules.push(rule)
             output :: kit_steps_json_normalize(state.last.stdout, "stdout", rules)
@@ -596,7 +621,7 @@ fn kit_steps_execute(original_context: KitStepCtx, hooks: KitStepHooks) -> KitOu
             state.json_stdout = Val(output.text)
             state.json_stderr = Val(errors.text)
         }
-        if step.label != "" && (step.action == "" || step.action == "wait") {
+        if step.label != "" && kit_expect_named(["", "wait", "close", "poll"], step.action) {
             source_name :: if context.golden == {
                 .Val(golden) -> kit_golden_source_name(golden.entry)
                 .None -> ""

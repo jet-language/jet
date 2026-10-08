@@ -90,6 +90,8 @@ use core.sys as sys
     context.env.root = files.cwd() ?? panic("free-port probe source root")
     context.env.timeout = 600s
     assert_eq(kit_cases_run(cases_test_entry("ports"), context)[0].verdict.status, "PASS")
+    cases_test_source(root, "ports-wrong", "step: printf '%s' {{free-port:app}}\nstdout: = \"wrong\"\n")
+    assert_eq(kit_cases_run(cases_test_entry("ports-wrong"), context)[0].verdict.status, "FAIL")
     files.remove_all(root) ?? panic("remove free-port scratch")
 }
 
@@ -102,4 +104,40 @@ use core.sys as sys
     malformed :: "step: printf yes\ncapture: answer = text stdout\nwhen cap:answer in [yes]: stdout: = \"yes\"\n"
     assert_eq(cases_test_advanced(root, "malformed", malformed).verdict.status, "REFUSED")
     files.remove_all(root) ?? panic("remove host-triple scratch")
+}
+
+#Test("every process modifier rejects separation by assertions captures setup or a when block") {
+    root :: cases_test_root("host-all-adjacency")
+    modifiers :: ["env: NAME=value", "unset: NAME", "env-clear: true", "cwd: .", "limit: time=1", "stdin: null", "stdout: null", "stderr: file errors", "pty: true", "pty-send: \"x\" after 1ms", "pty-close: after 1ms", "pty-resize: 24x80 at 1ms", "stderr-to-stdout: true", "timeout: 1s", "normalize: replace \"ok\" \"OK\"", "normalize: json stdout $.elapsed : number # volatile"]
+    loop modifier in modifiers {
+        source :: "step: printf ok\nstdout: = \"ok\"\n{modifier}\n"
+        result :: cases_test_advanced(root, "separated", source)
+        assert_eq(result.verdict.status, "REFUSED")
+        assert(result.verdict.detail.contains("modifier not adjacent to its step"))
+    }
+    loop boundary in ["when exit == 0\nend when", "parallel\nend parallel"] {
+        result :: cases_test_advanced(root, "block", "step: printf ok\n{boundary}\nenv: NAME=value\n")
+        assert_eq(result.verdict.status, "REFUSED")
+        assert(result.verdict.detail.contains("modifier not adjacent to its step"))
+    }
+    files.remove_all(root) ?? panic("remove all modifier scratch")
+}
+
+#Test("when guards setup without executing the rejected branch and treats quoted boolean tokens as text") {
+    root :: cases_test_root("host-setup-guards")
+    source :: "step named: printf '&&'\ncapture: token = text stdout\nwhen stdout = \"&&\" && cap:token = \"&&\": write: selected = \"yes\"\nfile: selected = \"yes\"\nwhen cap:token != \"&&\": remove: missing\nwhen !captured missing\nstep: printf pass\nstdout: = \"pass\"\nend when\nwhen captured missing: step: false\nwhen exit == 0: mkdir: guarded\nfile: guarded is-dir\n"
+    assert_eq(cases_test_advanced(root, "selected", source).verdict.status, "PASS")
+    assert_eq(cases_test_advanced(root, "wrong-setup", "step: true\nwhen exit == 0: write: selected = \"wrong\"\nfile: selected = \"right\"\n").verdict.status, "FAIL")
+    assert_eq(cases_test_advanced(root, "guarded-modifier", "step: true\nwhen exit == 0: stdin: null\n").verdict.status, "REFUSED")
+    files.remove_all(root) ?? panic("remove setup guard scratch")
+}
+
+#Test("malformed free-port tokens and non-canonical control/session spellings are parse errors") {
+    root :: cases_test_root("host-canonical")
+    loop source in ["step: printf {{free-port:}}\n", "step: printf {{free-port:bad:name}}\n", "step: printf {{free-port:unterminated\n", "session peer raw: cat\nclose: peer\n", "session peer raw extra: cat\nclose peer\n", "spawn peer: cat\nwait peer: ignored\n", "repeat while file: missing absent timeout 1s every 1ms fail unquoted\nend repeat\n", "session peer raw: cat\nsend peer: \"x\"\nclose peer\nclose peer\n"] {
+        result :: cases_test_advanced(root, "noncanonical", source)
+        assert_eq(result.verdict.status, "REFUSED")
+        assert(result.verdict.detail != "read_bytes")
+    }
+    files.remove_all(root) ?? panic("remove canonical scratch")
 }

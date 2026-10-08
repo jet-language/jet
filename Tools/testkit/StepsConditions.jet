@@ -147,7 +147,7 @@ fn kit_steps_condition_tree_atom(text: String, tokens: [KitWord], start: Int, co
         return KitLinePredicate{valid: true, value: inner.value, next: inner.next + 1}
     }
     end := start
-    loop end < tokens.len() && !kit_expect_named(["&&", "||", ")"], tokens[end].text) -> end += 1
+    loop end < tokens.len() && !kit_expect_named(["&&", "||", ")"], text.slice(tokens[end].start, tokens[end].end)) -> end += 1
     if end == start -> return KitLinePredicate{valid: false, value: false, next: end}
     atom :: text.slice(tokens[start].start, tokens[end - 1].end)
     if !kit_steps_condition_atom_valid(atom) -> return KitLinePredicate{valid: false, value: false, next: end}

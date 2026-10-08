@@ -43,6 +43,7 @@ fn kit_steps_inventory_equal(left: [KitInventoryItem], right: [KitInventoryItem]
 
 fn kit_steps_action(step: KitStep, context: KitStepCtx, previous: KitStepState) -> KitStepResult {
     state := previous
+    if step.action == "assert" -> return KitStepResult{state: state, verdict: kit_expect_verdict("PASS", "")}
     if step.action == "await" -> return kit_steps_await(step, context, state)
     if kit_expect_named(["session", "send", "recv", "signal", "close", "wait"], step.action) -> return kit_steps_session_action(step, context, state)
     if kit_steps_setup_kind(step.action) {

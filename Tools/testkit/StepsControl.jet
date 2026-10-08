@@ -2,6 +2,23 @@ use core.files as files
 use core.time as time
 use core.sys as sys
 
+fn kit_steps_loop_words(text: String) -> [String]? {
+    tokens :: kit_steps_tokens(kit_steps_body(text)) ?? return None
+    if tokens.len() < 5 -> return None
+    if tokens[1].text != "line" -> return kit_steps_words(kit_steps_body(text))
+    binding :: tokens.len() - 2
+    if tokens[binding].text != "as" -> return None
+    end := binding
+    label := ""
+    if binding >= 4 && tokens[binding - 2].text == "of" {
+        end = binding - 2
+        label = tokens[binding - 1].text
+    }
+    if end <= 2 -> return None
+    selector :: ~text.slice(tokens[2].start, tokens[end - 1].end).trim()
+    if label == "" -> return Val(["for", "line", selector, "as", tokens[binding + 1].text])
+    Val(["for", "line", selector, "of", label, "as", tokens[binding + 1].text])
+}
 fn kit_steps_block_end(steps: [KitStep], start: Int) -> Int {
     kind :: steps[start].action
     depth := 1
@@ -23,13 +40,15 @@ fn kit_steps_loop_valid(words: [String]) -> Bool {
         return end >= 3 && kit_steps_entries_valid(words.slice(2, end))
     }
     if words[1] != "line" || !kit_steps_subject_valid(words[2]) -> return false
-    words.len() == 5 || (words.len() == 7 && words[3] == "of")
+    words.len() == 5 || (words.len() == 7 && words[3] == "of" && words[4] != "" && !words[4].contains(" ") && !words[4].contains("\t"))
 }
 
-fn kit_steps_repeat_valid(words: [String]) -> Bool {
+fn kit_steps_repeat_valid(words: [String], text: String) -> Bool {
     if words.len() != 11 || words[0] != "repeat" || words[1] != "while" -> return false
     if words[5] != "timeout" || words[7] != "every" || words[9] != "fail" -> return false
     if kit_steps_duration_ns(words[6]) == None || kit_steps_duration_ns(words[8]) == None -> return false
+    tokens :: kit_steps_tokens(kit_steps_body(text)) ?? return false
+    if tokens.len() != 11 || text.bytes()[tokens[10].start] != (U8{34}) -> return false
     if words[2] == "file:" -> return kit_steps_relative_path(words[3]) && kit_expect_named(["exists", "absent"], words[4])
     words[2] == "process" && words[4] == "alive"
 }
@@ -46,8 +65,10 @@ fn kit_steps_loop_values(step: KitStep, context: KitStepCtx, state: KitStepState
     }
     selector :: words[2]
     source := state.last.stdout
-    if words.len() == 7 -> source = kit_steps_history_stream(words[4], kit_steps_subject(selector), state.history, true) ?? return Err("loop step label unavailable")
-    else -> source = kit_steps_select_stream(state.last.stdout, state.last.stderr, kit_steps_subject(selector))
+    subject :: kit_steps_subject(selector)
+    if subject.starts_with("cap:") -> source = kit_steps_captured_subject(subject.slice(4, subject.len()), state.captures) ?? return Err("loop capture unavailable")
+    else if words.len() == 7 -> source = kit_steps_history_stream(words[4], subject, state.history, true) ?? return Err("loop step label unavailable")
+    else -> source = kit_steps_select_stream(state.last.stdout, state.last.stderr, subject)
     transformed :: kit_steps_transform(source, kit_steps_subject_transform(selector)) ?? return Err("loop subject transform failed")
     Ok(kit_steps_rust_lines(transformed))
 }
@@ -100,4 +121,12 @@ fn kit_steps_process_alive(pid: Int) -> Bool {
         sys.kill(pid, 0) ?? return false
     }
     true
+}
+
+fn kit_steps_loop_initialize(step: KitStep, previous: KitStepState) -> KitStepState {
+    state := previous
+    loop name in step.aggregate_names {
+        if kit_steps_capture_named(name, state.captures) == None -> &state.captures.push(KitCapture{name: name, value: KitCapturedValue.Text(""), aggregate: true})
+    }
+    state
 }

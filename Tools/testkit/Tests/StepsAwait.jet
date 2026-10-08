@@ -1,0 +1,52 @@
+use core.files as files
+
+#Test("await file and dir preserve quoted paths and distinguish predicate failure from optional expiry") {
+    root :: cases_test_root("await-files")
+    source :: "write: 'two words' = \"timeout\"\nawait: file 'two words' = \"timeout\" timeout 1s every 1ms\nmkdir: directory\nawait: dir directory timeout 1s every 1ms\nawait: file missing timeout 2ms every 1ms optional\nstdout: empty\n"
+    assert_eq(cases_test_advanced(root, "ready", source).verdict.status, "PASS")
+    loop wait in ["await: file missing timeout 2ms every 1ms", "await: dir missing timeout 2ms every 1ms", "write: value = \"wrong\"\nawait: file value = \"right\" timeout 2ms every 1ms"] {
+        result :: cases_test_advanced(root, "deadline", "{wait}\n")
+        assert_eq(result.verdict.status, "FAIL")
+        assert_eq(result.verdict.detail, "await deadline exceeded")
+    }
+    files.remove_all(root) ?? panic("remove await file scratch")
+}
+
+#Test("await entry chooses the first matching entry with all required readable files and exposes its path") {
+    root :: cases_test_root("await-entry")
+    source :: "mkdir: entries/other\nwrite: entries/ready/marker = \"x\"\nwrite: entries/ready/readable = \"y\"\nawait: entry entries with-file \"marker\" readable \"readable\" timeout 1s every 1ms capture selected\nfile: {{cap:selected}}/marker = \"x\"\n"
+    assert_eq(cases_test_advanced(root, "entry", source).verdict.status, "PASS")
+    failed :: "remove: entries\nmkdir: entries/other\nawait: entry entries with-file \"marker\" timeout 2ms every 1ms capture selected\n"
+    assert_eq(cases_test_advanced(root, "no-match", failed).verdict.status, "FAIL")
+    loop invalid in ["await: file ../escape timeout 1s", "await: file value timeout 1s timeout 2s", "await: entry entries capture invalid-name", "await: entry entries", "await: process 1 timeout 1s", "await: dir entries capture selected"] {
+        assert_eq(cases_test_advanced(root, "invalid", "{invalid}\n").verdict.status, "REFUSED")
+    }
+    files.remove_all(root) ?? panic("remove await entry scratch")
+}
+
+#Test("await process state executable and non-zombie liveness observe real spawned children") {
+    root :: cases_test_root("await-process")
+    source :: "requires: os-name:linux\nsession peer raw: jet -c 'exec sleep 20'\nsignal peer: STOP\nawait: process {{pid:peer}} state in [\"T\",\"t\"] timeout 1s every 1ms\nprocess {{pid:peer}}: alive-nonzombie\nprocess {{pid:peer}}: state not-in [\"Z\"]\nsignal peer: CONT\nawait: process {{pid:peer}} state not-in [\"T\",\"t\"] timeout 1s every 1ms\nsignal peer: KILL\nwait peer timeout 1s\nexit: any # explicit termination is judged by exit\n"
+    assert_eq(cases_test_advanced(root, "states", source).verdict.status, "PASS")
+    executable :: "requires: os-name:linux\nsession peer raw: cat\nawait: process {{pid:peer}} executable = {{tool:cat}} timeout 1s every 1ms\nclose peer\n"
+    assert_eq(cases_test_advanced(root, "executable", executable).verdict.status, "PASS")
+    failed :: "requires: os-name:linux\nawait: process -1 state in [\"T\"] timeout 1s every 1ms\n"
+    assert_eq(cases_test_advanced(root, "missing", failed).verdict.status, "FAIL")
+    files.remove_all(root) ?? panic("remove await process scratch")
+}
+
+#Test("poll repeats a real command and checks conjunctions on one attempt rather than accumulating successes") {
+    root :: cases_test_root("poll-attempts")
+    source :: "poll ready: printf yes until stdout: = \"yes\" && stderr: empty timeout 1s every 1ms\nstep: printf yes\nstdout: == ready\n"
+    assert_eq(cases_test_advanced(root, "ready", source).verdict.status, "PASS")
+    alternating :: "poll ready: jet -c 'if test -f seen; then printf second; else printf first; : > seen; fi' until stdout: = \"first\" && stdout: = \"second\" timeout 20ms every 1ms\n"
+    failed :: cases_test_advanced(root, "same-attempt", alternating)
+    assert_eq(failed.verdict.status, "FAIL")
+    assert(failed.verdict.detail.contains("poll deadline exceeded"))
+    eventual :: "poll ready: jet -c 'if test -f eventual-seen; then printf ready; else : > eventual-seen; printf waiting; fi' until stdout: = \"ready\" timeout 1s every 1ms\n"
+    assert_eq(cases_test_advanced(root, "eventual", eventual).verdict.status, "PASS")
+    loop invalid in ["poll ready: printf yes until stdout: = \"yes\"", "poll ready: printf yes until stdout: = \"yes\" timeout 1s every 0ms", "poll ready: printf yes until stdout: = \"yes\" && timeout 1s every 1ms"] {
+        assert_eq(cases_test_advanced(root, "invalid", "{invalid}\n").verdict.status, "REFUSED")
+    }
+    files.remove_all(root) ?? panic("remove poll scratch")
+}
