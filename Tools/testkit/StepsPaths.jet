@@ -1,0 +1,34 @@
+use core.files as files
+
+// Validate the lexical work-relative form before execution; tokens can name
+// work, but must not redirect a destructive operation into root or scratch.
+fn kit_steps_relative_path(path: String) -> Bool {
+    if path == "" || path.contains("{{root}}") || path.contains("{{scratch}}") -> return false
+    relative :: path.replace("{{work}}", ".")
+    if relative.starts_with("/") || relative.contains("\\") || relative.contains(":") -> return false
+    collapsed :: files.collapse(relative)
+    collapsed != ".." && !collapsed.starts_with("../")
+}
+
+fn kit_steps_work_path(path: String, env: KitEnv, work: String, scratch: String, built: String) -> String? {
+    expanded :: kit_steps_expand(path, env, work, scratch, built)
+    absolute :: files.collapse(files.join(work, expanded))
+    if absolute != work && !absolute.starts_with("{work}/") -> return None
+    Val(absolute)
+}
+
+fn kit_steps_file_action(step: KitStep, env: KitEnv, work: String, scratch: String, built: String) -> KitRun {
+    source :: kit_steps_work_path(step.argv[1], env, work, scratch, built) ?? return kit_exec_failed("file action escapes work directory")
+    if !files.exists(source) -> return kit_exec_failed("file action source is missing: {source}")
+    if step.argv[0] == "remove" {
+        files.remove_all(source) ?? return kit_exec_failed("remove {source}: {err}")
+    } else {
+        destination :: kit_steps_work_path(step.argv[2], env, work, scratch, built) ?? return kit_exec_failed("copy destination escapes work directory")
+        bytes :: files.read_bytes(source) ?? return kit_exec_failed("read copy {source}: {err}")
+        info :: files.stat(source) ?? return kit_exec_failed("stat copy {source}: {err}")
+        files.create_dir_all(files.dirname(destination)) ?? return kit_exec_failed("mkdir copy {destination}: {err}")
+        files.write_bytes(destination, bytes) ?? return kit_exec_failed("write copy {destination}: {err}")
+        files.chmod(destination, info.mode % 512) ?? return kit_exec_failed("copy mode {destination}: {err}")
+    }
+    KitRun{stdout: "", stderr: "", code: 0, signal: None, timed_out: false, error: ""}
+}
