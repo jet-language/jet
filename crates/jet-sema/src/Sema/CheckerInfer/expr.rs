@@ -2419,6 +2419,10 @@ impl<'a> Checker<'a> {
     /// context. Give those positions the same default materialization rule,
     /// with the same `Expr::Copy` node and the same policy gate.
     pub(crate) fn infer_owning_value(&mut self, e: &mut Expr) -> Option<Type> {
+        self.infer_owning_value_carrier(e, false)
+    }
+
+    fn infer_owning_value_carrier(&mut self, e: &mut Expr, preserve_carrier: bool) -> Option<Type> {
         let owns_if_arms = matches!(e.without_parens(), Expr::If { .. })
             && !matches!(
                 self.expected_type.as_ref(),
@@ -2428,12 +2432,12 @@ impl<'a> Checker<'a> {
         if owns_if_arms {
             self.owning_if_value_depth += 1;
         }
-        let result = self.infer_owning_value_inner(e);
+        let result = self.infer_owning_value_inner(e, preserve_carrier);
         self.owning_if_value_depth = saved_if_depth;
         result
     }
 
-    fn infer_owning_value_inner(&mut self, e: &mut Expr) -> Option<Type> {
+    fn infer_owning_value_inner(&mut self, e: &mut Expr, preserve_carrier: bool) -> Option<Type> {
         let default_copy = !self.copies_explicit();
         let borrowed_param_place = matches!(e, Expr::Field(..) | Expr::Index { .. })
             && crate::Sema::Diagnostics::expr_root_ident(e).is_some_and(|root| {
@@ -2457,7 +2461,11 @@ impl<'a> Checker<'a> {
             // enough to turn it into the shared owning-copy node.
             self.allow_string_view_read = true;
         }
-        let ty = self.infer(e);
+        let ty = if preserve_carrier {
+            self.infer_without_auto_propagation(e)
+        } else {
+            self.infer(e)
+        };
         self.borrow_ctx = saved_borrow_ctx;
         self.allow_string_view_read = saved_string_view_read;
         let Some(ty) = ty else {
@@ -3223,12 +3231,31 @@ impl<'a> Checker<'a> {
         }
     }
 
+    fn uncontextual_err_arm(&self, value: &Expr) -> bool {
+        match value.without_parens() {
+            Expr::Err(..) => true,
+            Expr::Call(call) => {
+                call.name == Syntax::LIT_ERR
+                    && !self.funcs.contains_key(&call.name)
+                    && self.lookup(&call.name).is_none()
+                    && call.args.len() == 1
+                    && call.args[0].label.is_none()
+            }
+            _ => false,
+        }
+    }
+
     /// A direct valueless call is a legal effectful Result-handler branch when
     /// the handler itself is used as a statement. Ordinary expression calls
     /// still use `infer`, so a value-producing call keeps its normal type and
     /// ownership checks. This is the same call checker used by statement
     /// position; the handler adds no carrier or runtime operation.
-    fn infer_pattern_branch_value(&mut self, cond: &Expr, value: &mut Expr) -> Option<Type> {
+    fn infer_pattern_branch_value(
+        &mut self,
+        cond: &Expr,
+        value: &mut Expr,
+        preserve_carrier: bool,
+    ) -> Option<Type> {
         // A value-if checked under a callable's Result contract still has
         // success-valued branches. Keep explicit `Ok`/`Err` constructors on
         // the carrier path, but let every other branch call use the normal
@@ -3282,7 +3309,9 @@ impl<'a> Checker<'a> {
                 // contribute a value to the surrounding branch.
                 self.infer_fallible_stmt(value)
             } else if owning_arm {
-                self.infer_owning_value(value)
+                self.infer_owning_value_carrier(value, preserve_carrier)
+            } else if preserve_carrier {
+                self.infer_without_auto_propagation(value)
             } else {
                 self.infer(value)
             };
@@ -3303,7 +3332,9 @@ impl<'a> Checker<'a> {
         self.normalize_contextual_expr(value);
         let Expr::Call(call) = value else {
             let result = if owning_arm {
-                self.infer_owning_value(value)
+                self.infer_owning_value_carrier(value, preserve_carrier)
+            } else if preserve_carrier {
+                self.infer_without_auto_propagation(value)
             } else {
                 self.infer(value)
             };
@@ -3318,6 +3349,7 @@ impl<'a> Checker<'a> {
         };
         self.clear_uninit_mut_args(&call.args);
         let result = match self.check_call(call, true) {
+            Some(Some(ty)) if preserve_carrier => Some(ty),
             Some(Some(ty)) => self.auto_propagate_call(value, Some(ty)),
             Some(None) => Some(Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())),
             None => None,
@@ -3548,36 +3580,73 @@ impl<'a> Checker<'a> {
                 let sibling_rule = !if_expected
                     .as_ref()
                     .is_some_and(|ty| ty.unwrap_option().is_some());
+                // An uncontextual Err arm takes only a fallible sibling's
+                // carrier, not the callable's return type or a plain success
+                // type. Classify it before normalization consumes the call.
+                let defer_then_err =
+                    if_expected.is_none() && self.uncontextual_err_arm(then_value);
                 let defer_then = sibling_rule && bare_absent_arm(then_value, false);
-                let then_ty = if defer_then {
+                let then_ty = if defer_then || defer_then_err {
                     None
                 } else {
-                    self.infer_pattern_branch_value(cond, then_value)
+                    let carrier_sibling =
+                        if_expected.is_none() && self.uncontextual_err_arm(else_value);
+                    self.infer_pattern_branch_value(cond, then_value, carrier_sibling)
                 };
-                self.pop_scope();
-                for (name, at) in restore_moved {
-                    self.flow.moved.set(&name, at);
-                }
-                let then_path = self.flow.clone();
-                self.flow = before.clone();
+                // Err payloads can read branch locals and move values. Keep
+                // the open flow store and detach its three auxiliary frames;
+                // do not perform scope-exit checks until that payload is real.
+                let mut then_path = None;
+                let deferred_then = if defer_then_err {
+                    Some((
+                        std::mem::replace(&mut self.flow, before.clone()),
+                        self.concrete_unit_values.pop().expect("open then scope"),
+                        self.lambda_mut_borrow_stack.pop().expect("open then scope"),
+                        self.ct_scopes.pop().expect("open then scope"),
+                    ))
+                } else {
+                    self.pop_scope();
+                    for (name, at) in restore_moved.drain(..) {
+                        self.flow.moved.set(&name, at);
+                    }
+                    then_path = Some(std::mem::replace(&mut self.flow, before.clone()));
+                    None
+                };
                 self.push_scope();
                 self.check_block(else_body, false);
                 let saved_expected = self.expected_type.clone();
                 if sibling_rule && bare_absent_arm(else_value, true) {
                     self.expected_type = then_ty.clone().filter(|ty| ty.unwrap_option().is_some());
+                } else if if_expected.is_none() && self.uncontextual_err_arm(else_value) {
+                    self.expected_type =
+                        then_ty.clone().filter(|ty| matches!(ty, Type::Result { .. }));
                 }
-                let else_ty = self.infer_pattern_branch_value(cond, else_value);
+                let else_ty =
+                    self.infer_pattern_branch_value(cond, else_value, defer_then_err);
                 self.pop_scope();
-                let then_ty = if defer_then {
-                    self.expected_type = else_ty.clone().filter(|ty| ty.unwrap_option().is_some());
-                    let ty = self.infer_pattern_branch_value(cond, then_value);
-                    self.expected_type = saved_expected;
+                let else_path = self.flow.clone();
+                let then_ty = if let Some((flow, unit_values, lambda_borrows, ct_scope)) = deferred_then {
+                    self.flow = flow;
+                    self.concrete_unit_values.push(unit_values);
+                    self.lambda_mut_borrow_stack.push(lambda_borrows);
+                    self.ct_scopes.push(ct_scope);
+                    self.expected_type =
+                        else_ty.clone().filter(|ty| matches!(ty, Type::Result { .. }));
+                    let ty = self.infer_pattern_branch_value(cond, then_value, false);
+                    self.pop_scope();
+                    for (name, at) in restore_moved {
+                        self.flow.moved.set(&name, at);
+                    }
+                    then_path = Some(self.flow.clone());
                     ty
+                } else if defer_then {
+                    self.expected_type = else_ty.clone().filter(|ty| ty.unwrap_option().is_some());
+                    self.infer_pattern_branch_value(cond, then_value, false)
                 } else {
-                    self.expected_type = saved_expected;
                     then_ty
                 };
-                let else_path = self.flow.clone();
+                self.expected_type = saved_expected;
+                let then_path = then_path.expect("checked then path");
                 let then_ty = then_ty.filter(|_| then_path.reachable);
                 let else_ty = else_ty.filter(|_| else_path.reachable);
                 // D-LIN1 / D-FACT-FLOW1: E0141 — a `#SingleUse` value consumed
