@@ -1,0 +1,35 @@
+use core.files as files
+
+// Port of tests/canvas.rs:5986-6077. These JavaScript DOM/protocol laws remain
+// observable Canvas behavior, not retiring Rust representation assertions.
+#Test("canvas_details_are_descriptor_driven_and_dom_safe") {
+    inspector :: files.read("crates/jet-canvas/src/js/inspector-connections.js") ?? panic("read inspector JavaScript")
+    diagnostics :: files.read("crates/jet-canvas/src/js/diagnostics-query.js") ?? panic("read diagnostics JavaScript")
+    project :: files.read("crates/jet-canvas/src/js/project-navigation.js") ?? panic("read project JavaScript")
+    inspector_terms :: [String]{
+        "function renderFieldDescriptors",
+        "function validatedFieldDescriptors",
+        "const operationCache = new WeakMap()",
+        "operationCache.has(operation)",
+        "function appendSafeDescriptorAttributes",
+        "function detailsEditorSelectionIsCurrent",
+        "if (state.phase === \"applying\") return false",
+        "apply_op",
+        "function variableDetailDescriptors",
+        "function functionDetailDescriptors",
+        "function nodeDetailDescriptors",
+    }
+    loop term in inspector_terms {
+        assert(inspector.contains(term), "inspector omits {term}")
+    }
+    assert(!inspector.contains("innerHTML"), "Details retained an HTML sink")
+    assert(!inspector.contains("row.innerHTML"), "Details retained per-row HTML construction")
+    assert(diagnostics.contains("function diagnosticDetailDescriptors"))
+    assert(diagnostics.contains("function diagnosticLabel(severity)"), "Canvas diagnostic text must derive its header from machine severity")
+    assert(diagnostics.contains("diagnosticLabel(entry.severity)") && diagnostics.contains("diagnosticLabel(severity)"), "Canvas diagnostic fallbacks must preserve warning severity")
+    assert(diagnostics.contains("renderFieldDescriptors(problemsList"))
+    assert(!diagnostics.contains("problemsList.innerHTML"), "diagnostics retained an HTML sink")
+    assert(project.contains("function projectMiniCard"))
+    assert(project.contains("renderFieldDescriptors(projectRail"))
+    assert(!project.contains("projectRail.innerHTML"), "project selection retained an HTML sink")
+}

@@ -1,0 +1,7 @@
+# Port of tests/find.rs:73-85.
+# The public `find --help` invocation covers top-level command registration;
+# the retiring Rust CLI::is_canonical_top_level function identity is not retained.
+step: jet find --help
+exit: 0
+stdout: ~ jet find # Original canonical help assertion.
+stdout: !~ jet inspect find # Original rejection of the old nested command spelling.

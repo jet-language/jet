@@ -1,0 +1,48 @@
+use core.files as files
+
+fn s4_agent_adapter_has_all(adapter: String, needles: [String]) {
+    source :: files.read("tests/agent_workloads/adapters/{adapter}") ?? panic("read {adapter}")
+    loop needle in needles {
+        assert(source.contains(needle), "{adapter} no longer reaches the production path containing {needle}")
+    }
+}
+
+// Port of tests/agent_workloads.rs:2015-2044; all original adapter/needle pairs.
+#Test("repository_and_git_jet_adapters_use_production_paths") {
+    s4_agent_adapter_has_all("repository_marker_scan.jet", [String]{"core.files", "fs.walk"})
+    s4_agent_adapter_has_all("repository_semantic_inspection.jet", [String]{"inspect", "semindex"})
+    s4_agent_adapter_has_all("repository_semantic_edit.jet", [String]{"inspect", "codemod", "--yes"})
+    s4_agent_adapter_has_all("git_diff_review.jet", [String]{"git", "diff", "--no-index", "--name-status"})
+}
+
+// Port of tests/agent_workloads.rs:2046-2093; no production path checks retired.
+#Test("structured_data_database_http_jet_adapters_use_production_paths") {
+    s4_agent_adapter_has_all("structured_data.jet", [String]{
+        "use core.encoding.json", "fs.read(input)", "json.decode<Batch>", "json.to_string",
+    })
+    s4_agent_adapter_has_all("database_access.jet", [String]{
+        "use core.db", "db.open_memory()", "db.migrate", "scoped.execute(", "scoped.query_one(", "scoped.close()",
+    })
+    s4_agent_adapter_has_all("http_api.jet", [String]{
+        "use core.http.client", "use core.http.server", "net.tcp_listen(",
+        "http_server.serve_once_listener", "http_client.request(", "request.send()",
+    })
+}
+
+// Port of tests/agent_workloads.rs:2095-2154; include hostile and cleanup paths.
+#Test("mcp_terminal_service_jet_adapters_use_production_paths") {
+    s4_agent_adapter_has_all("mcp_resource.jet", [String]{
+        "process.cmd([jet, \"self\", \"lsp\"])", "resources/list", "resources/read",
+        "child.stdin.write", "jet://environment", "-32002", "/agent-secret",
+    })
+    s4_agent_adapter_has_all("interactive_terminal.jet", [String]{
+        ".terminal(TerminalPolicy", ".spawn()", "terminal_session.sh", "session.resize",
+        "child.wait()", "Name: ", "Hello Ada", "Choice blue", "terminal_closed.sh",
+        "interactive-terminal-closed", ".timeout(",
+    })
+    s4_agent_adapter_has_all("service_lifecycle.jet", [String]{
+        "JETPACK_FAKE_SYSTEMD_STATE", "\"services\", \"up\"", "\"services\", \"health\"",
+        "\"services\", \"wait\"", "\"services\", \"logs\"", "\"services\", \"down\"",
+        "E1261", "supervisor.error", "phase=failed", "recovery=startup-failed",
+    })
+}
