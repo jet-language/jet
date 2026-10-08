@@ -258,6 +258,9 @@ constructor. Zero capacity and zero-sized elements consume the fault check
 once without allocating a buffer; a zero-sized List carries capacity I64.MAX.
 Metadata allocations use the ordinary fatal door, which does not consume the
 injected-fault rail; policy caps still apply.
+`jet_rt_alloc_try` consumes exactly one injected-fault probe before its buffer
+reservation (provider change `9b79e3ae6`); lowering does not add a second probe
+on that path.
 
 Sizes: a word, handle or box pointer is 8 bytes (align 8), a Bool 1 byte, Unit
 0. An inline aggregate is 8-aligned and padded to whole words, so copies move
