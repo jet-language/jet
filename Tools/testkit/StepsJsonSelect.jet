@@ -1,5 +1,6 @@
 use core.encoding.[DataTree]
 use core.encoding.json as json
+use core.encoding.toml as toml
 
 fn kit_steps_json_projection_valid(part: String) -> Bool {
     if !part.starts_with("{{") || !part.ends_with("}}") -> return false
@@ -108,6 +109,7 @@ fn kit_steps_json_values(text: String, mode: String, path: String) -> [DataTree]
     parts :: kit_steps_json_path(path) ?? return None
     tree := DataTree.Null
     if mode == "doc" -> tree = json.parse(text) ?? return None
+    else if mode == "toml" -> tree = toml.parse(text) ?? return None
     else if mode == "ndjson" {
         records := [DataTree]{}
         loop raw in text.split("\n") {

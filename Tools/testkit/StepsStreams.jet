@@ -1,4 +1,6 @@
 use core.text as strtext
+use core.encoding.[DataTree]
+use core.encoding.json as json
 
 fn kit_steps_relation_label(reference: String) -> String {
     if reference.ends_with(".stdout") || reference.ends_with(".stderr") -> return reference.slice(0, reference.len() - 7)
@@ -53,10 +55,43 @@ fn kit_steps_stream_assertion(key: String, original: String) -> KitAssertion? {
     path :: if offset == 1 -> tokens[0].text else -> ""
     if offset == 1 && !kit_steps_relative_path(path) -> return None
     mode := tokens[offset].text
+    if stream == "file" && mode == "first" {
+        inner :: "{original.slice(0, tokens[offset].start)}{original.slice(tokens[offset].end, original.len())}"
+        assertion := kit_steps_stream_assertion(key, inner) ?? return None
+        if assertion.file_first -> return None
+        assertion.file_first = true
+        return Val(assertion)
+    }
     data := ""
     extra := ""
     alternatives := [String]{}
     arity :: tokens.len() - offset
+    if stream == "file" && mode == "same-as" {
+        if arity != 2 -> return None
+        data = tokens[offset + 1].text
+        if !data.starts_with("{{cap:") || !data.ends_with("}}") -> return None
+        return Val(KitAssertion{stream: stream, path: path, mode: mode, value: data})
+    }
+    if stream == "file" && mode == "names" {
+        if arity < 3 || (tokens[offset + 1].text != "=" && tokens[offset + 1].text != "==") -> return None
+        extra = tokens[offset + 1].text
+        data = if extra == "==" -> tokens[offset + 2].text else -> ~value.slice(tokens[offset + 2].start, value.len()).trim()
+        if extra == "==" {
+            if arity != 3 || !kit_steps_relative_path(data) -> return None
+        } else if kit_steps_string_array(data) == None -> return None
+        return Val(KitAssertion{stream: stream, path: path, mode: mode, value: data, extra: extra})
+    }
+    if stream == "file" && (mode == "size" || mode == "mode" || mode == "sha256") {
+        if arity != 3 || !kit_expect_named(["=", ">=", "<=", ">", "<"], tokens[offset + 1].text) -> return None
+        extra = tokens[offset + 1].text
+        data = tokens[offset + 2].text
+        if mode == "mode" {
+            if extra != "=" || kit_steps_octal(data) == None -> return None
+        } else if mode == "sha256" {
+            if extra != "=" || data.len() != 64 -> return None
+        } else if (Int.parse(kit_steps_json_preview(data)) ?? -1) < 0 -> return None
+        return Val(KitAssertion{stream: stream, path: path, mode: mode, value: data, extra: extra, optional_file: subject == "file?"})
+    }
     if kit_expect_named(["empty", "nonempty", "exists", "absent", "is-file", "is-dir"], mode) {
         if arity != 1 || (stream != "file" && mode != "empty" && mode != "nonempty") -> return None
         if mode == "nonempty" && !kit_steps_reason(original) -> return None
@@ -236,8 +271,25 @@ fn kit_steps_file_predicate(bytes: [U8], mode: String, value: String, extra: Str
         end := start
         loop end < bytes.len() && bytes[end] != (U8{10}) -> end += 1
         content_end :: if end < bytes.len() && end > start && bytes[end - 1] == (U8{13}) -> end - 1 else -> end
-        if kit_steps_byte_index(bytes, needle, start, content_end, false) == Val(start) && kit_steps_byte_index(bytes, tail, start, content_end, false) != None -> return true
+        if (kit_steps_byte_index(bytes, needle, start, content_end, false) ?? -1) == start && kit_steps_byte_index(bytes, tail, start, content_end, false) != None -> return true
         start = end + 1
     }
     false
+}
+
+fn kit_steps_string_array(text: String) -> [String]? {
+    tree :: json.parse(text) ?? return None
+    if tree == {
+        .Array(items) -> {
+            result := [String]{}
+            loop item in items {
+                if item == {
+                    .Text(value) -> &result.push(value)
+                    else -> return None
+                }
+            }
+            return Val(result)
+        }
+        else -> return None
+    }
 }

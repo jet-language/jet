@@ -43,12 +43,23 @@ fn kit_steps_inventory_equal(left: [KitInventoryItem], right: [KitInventoryItem]
 
 fn kit_steps_action(step: KitStep, context: KitStepCtx, previous: KitStepState) -> KitStepResult {
     state := previous
+    if kit_steps_setup_kind(step.action) {
+        verdict :: kit_steps_setup_run(step, context.env, context.work, context.scratch, state.built)
+        state.last = kit_steps_action_run()
+        return KitStepResult{state: state, verdict: verdict}
+    }
     if step.action == "capture" {
-        source :: if step.argv[1] == "stderr" -> state.last.stderr else -> state.last.stdout
-        stream :: kit_steps_replace(source, state.replacements, context, state, false, "")
-        captured :: if step.argv[2] == "line" -> kit_steps_line(stream, step.argv[4], "") else -> kit_steps_json_scalar(stream, step.argv[2], step.argv[3])
-        value :: captured ?? return kit_steps_action_error(state, "capture {step.argv[0]}: missing or non-scalar selection")
-        &state.captures.push(KitCapture{name: step.argv[0], value: value})
+        if step.argv[1] == "=" && step.argv[2] == "opt-bytes" {
+            path :: kit_steps_work_path(step.argv[4], context.env, context.work, context.scratch, state.built) ?? return kit_steps_action_error(state, "capture bytes path escapes work")
+            bytes :: if files.exists(path) -> Val(files.read_bytes(path) ?? return kit_steps_action_error(state, "capture bytes: {err}")) else -> None
+            &state.captures.push(KitCapture{name: step.argv[0], value: "", kind: "bytes", bytes: bytes})
+            state.last = kit_steps_action_run()
+        } else {
+            value :: kit_steps_capture_value(step.argv, context, state) ?? return KitStepResult{state: state, verdict: err}
+            &state.captures.push(KitCapture{name: step.argv[0], value: value})
+            selector :: if step.argv[1] == "=" && (step.argv[2] == "text" || step.argv[2] == "lines") -> kit_steps_subject(step.argv[3]) else -> kit_steps_subject(step.argv[1])
+            if selector == "file" || selector == "file?" || (step.argv[1] == "=" && step.argv[2] != "text" && step.argv[2] != "lines") -> state.last = kit_steps_action_run()
+        }
         return KitStepResult{state: state, verdict: kit_expect_verdict("PASS", "")}
     }
     if step.action == "write" {

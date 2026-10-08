@@ -181,6 +181,7 @@ struct KitAssertion {
     ratio: Float{0.0}
     extra: String{""}
     optional_file: Bool{false}
+    file_first: Bool{false}
     transform: String{""}
     alternatives: [String]{[String]{}}
 }
@@ -220,6 +221,8 @@ struct KitPendingChild {
 struct KitCapture {
     name: String
     value: String
+    kind: String{""}
+    bytes: [U8]?{None}
 }
 
 struct KitInventoryItem {
@@ -390,11 +393,18 @@ fn kit_steps_execute(context: KitStepCtx, hooks: KitStepHooks) -> KitOutcome {
     if plan.fixture != "" -> kit_exec_copy_tree(files.join(context.snapshots, plan.fixture), context.work, true)
     loop (index, original) in plan.steps {
         step := kit_steps_resolve_step(original, context, state) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "undefined capture or unavailable tool token"))
-        invoked :: if step.action == "spawn" || step.action == "wait" || step.action == "capture" || step.action == "write" || step.action == "inventory" ->
+        invoked :: if kit_steps_setup_kind(step.action) || step.action == "spawn" || step.action == "wait" || step.action == "capture" || step.action == "write" || step.action == "inventory" ->
             kit_steps_action(step, context, state) else -> hooks.invoke(step, index, context, state)
         state = invoked.state
         if invoked.verdict.status != "PASS" -> return kit_steps_finish(state, invoked.verdict)
-        if step.action == "spawn" || step.action == "capture" -> next
+        if step.action == "spawn" -> next
+        if step.action == "capture" {
+            if step.assertions.len() > 0 {
+                verdict :: hooks.check(step, index, context, state)
+                if verdict.status != "PASS" -> return kit_steps_finish(state, verdict)
+            }
+            next
+        }
         step.replacements = kit_steps_replacements(step.replacements, context, state) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "replacement token unavailable"))
         state.replacements = step.replacements
         state.json_stdout = None

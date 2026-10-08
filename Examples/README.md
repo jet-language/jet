@@ -42,6 +42,13 @@ bytes, including non-UTF-8 files. Untransformed file substring, prefix,
 line, count and absence predicates also inspect raw bytes before UTF-8
 decoding. `copy: A B` preserves the source permission bits; destinations and
 `remove: A` stay work-relative. Failed file operations report `ERROR`.
+Setup belongs to kit actions rather than platform shell commands. `mkdir:`
+creates parents, while link and rename actions preserve filesystem identity.
+Directory selection uses OS listing order unless the assertion explicitly
+compares sorted names. `await: file PATH timeout 30s` bounds readiness without
+joining the peer process; an expired readiness predicate is `FAIL`, and a
+failed filesystem operation is `ERROR`. A missing sparse-resize seam is
+`REFUSED`, never an emulated sparse file.
 
 An `env: NAME=VALUE` before the first step applies to the case. After a step,
 it applies only to that step; `unset: NAME` removes a variable after all

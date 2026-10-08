@@ -1,3 +1,5 @@
+use core.crypto as crypto
+
 fn kit_steps_path_tokens(value: String) -> Bool {
     value.contains("{{work}}") || value.contains("{{root}}") || value.contains("{{scratch}}") || value.contains("{{jet}}") || value.contains("{{jetpack}}")
 }
@@ -28,6 +30,16 @@ fn kit_steps_first_line(text: String, needle: String) -> String? {
 
 fn kit_steps_check_assertion(assertion: KitAssertion, context: KitStepCtx, state: KitStepState, source_name: String, allow_bless: Bool) -> KitVerdict {
     if assertion.stream == "elapsed" -> return kit_steps_elapsed(assertion, state.history)
+    if assertion.stream == "tree" -> return kit_steps_tree_check(assertion, context, state)
+    if assertion.stream == "entries" {
+        path :: kit_steps_work_path(assertion.path, context.env, context.work, context.scratch, state.built) ?? return kit_expect_verdict("REFUSED", "entries directory escapes work")
+        words := [String]{}
+        loop word in assertion.alternatives -> &words.push(kit_steps_runtime_expand(word, context, state) ?? return kit_expect_verdict("ERROR", "entries filter token unavailable"))
+        paths :: kit_steps_entries(path, words) ?? return kit_expect_verdict("ERROR", err)
+        expected :: kit_steps_runtime_expand(assertion.value, context, state) ?? return kit_expect_verdict("ERROR", "entries count token unavailable")
+        matches :: kit_steps_compare(paths.len(), assertion.mode, Int.parse(expected) ?? -1)
+        return if matches -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "entries count comparison failed")
+    }
     if assertion.stream.contains("|") {
         first := assertion
         first.stream = if assertion.stream == "stdout|stderr" -> "stdout" else -> "stderr"
@@ -50,10 +62,15 @@ fn kit_steps_check_assertion(assertion: KitAssertion, context: KitStepCtx, state
     stdout :: if raw_match -> state.last.stdout else -> state.json_stdout ?? state.last.stdout
     stderr :: if raw_match -> state.last.stderr else -> state.json_stderr ?? state.last.stderr
     actual := kit_steps_select_stream(stdout, stderr, assertion.stream)
-    value := kit_steps_runtime_expand(assertion.value, context, state) ?? return kit_expect_verdict("ERROR", "assertion token unavailable")
+    value := if assertion.mode == "same-as" -> assertion.value else -> kit_steps_runtime_expand(assertion.value, context, state) ?? return kit_expect_verdict("ERROR", "assertion token unavailable")
     extra := kit_steps_runtime_expand(assertion.extra, context, state) ?? return kit_expect_verdict("ERROR", "assertion token unavailable")
     if assertion.stream == "file" {
-        path :: kit_steps_work_path(assertion.path, context.env, context.work, context.scratch, state.built) ?? return kit_expect_verdict("REFUSED", "file assertion escapes work directory")
+        path := kit_steps_work_path(assertion.path, context.env, context.work, context.scratch, state.built) ?? return kit_expect_verdict("REFUSED", "file assertion escapes work directory")
+        if assertion.file_first {
+            entries :: files.list_dir(path) ?? return kit_expect_verdict("ERROR", "first file entry: {err}")
+            if entries.len() == 0 -> return kit_expect_verdict("FAIL", "first file directory is empty")
+            path = entries[0].path
+        }
         exists :: files.exists(path)
         if assertion.mode == "exists" -> return if exists -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "missing file: {assertion.path}")
         if assertion.mode == "absent" -> return if !exists -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "unexpected file: {assertion.path}")
@@ -63,7 +80,40 @@ fn kit_steps_check_assertion(assertion: KitAssertion, context: KitStepCtx, state
             matches :: if assertion.mode == "is-file" -> info.is_file else -> info.is_dir
             return if matches -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "wrong file kind: {assertion.path}")
         }
+        if assertion.mode == "same-as" {
+            name :: assertion.value.slice(5, assertion.value.len() - 1)
+            loop capture in state.captures {
+                if capture.name == name && capture.kind == "bytes" {
+                    actual_bytes :: if exists -> Val(files.read_bytes(path) ?? return kit_expect_verdict("ERROR", "file optional bytes: {err}")) else -> None
+                    return if actual_bytes == capture.bytes -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "optional file bytes differ")
+                }
+            }
+            return kit_expect_verdict("ERROR", "same-as needs an opt-bytes capture")
+        }
+        if assertion.mode == "names" {
+            names :: kit_steps_directory_names(path) ?? return kit_expect_verdict("ERROR", err)
+            expected := [String]{}
+            if extra == "==" {
+                other :: kit_steps_work_path(value, context.env, context.work, context.scratch, state.built) ?? return kit_expect_verdict("REFUSED", "names relation escapes work")
+                expected = kit_steps_directory_names(other) ?? return kit_expect_verdict("ERROR", err)
+            } else {
+                expected = kit_steps_string_array(value) ?? return kit_expect_verdict("ERROR", "invalid expected names")
+            }
+            return if names == expected -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "directory names differ")
+        }
         if !exists && !assertion.optional_file -> return kit_expect_verdict("FAIL", "missing file: {assertion.path}")
+        if assertion.mode == "size" || assertion.mode == "mode" || assertion.mode == "sha256" {
+            if !exists -> return kit_expect_verdict("FAIL", "missing file: {assertion.path}")
+            info :: files.stat(path) ?? return kit_expect_verdict("ERROR", "file metadata: {err}")
+            matches := false
+            if assertion.mode == "size" -> matches = kit_steps_compare(info.size, extra, Int.parse(value) ?? -1)
+            else if assertion.mode == "mode" -> matches = info.mode % 4096 == (kit_steps_octal(value) ?? -1)
+            else {
+                bytes :: files.read_bytes(path) ?? return kit_expect_verdict("ERROR", "file digest read: {err}")
+                matches = crypto.sha256(bytes).hex() == value
+            }
+            return if matches -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "file {assertion.mode} comparison failed")
+        }
         if assertion.mode == "==" || assertion.mode == "!=" {
             other :: kit_steps_work_path(value, context.env, context.work, context.scratch, state.built) ?? return kit_expect_verdict("REFUSED", "file relation escapes work directory")
             other_exists :: files.exists(other)

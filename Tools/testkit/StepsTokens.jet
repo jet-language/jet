@@ -20,7 +20,11 @@ fn kit_steps_dll_suffix() -> String {
 fn kit_steps_runtime_expand(text: String, context: KitStepCtx, state: KitStepState) -> String? {
     expanded := kit_steps_expand(text, context.env, context.work, context.scratch, state.built)
     if expanded.contains("{{sys:dll-suffix}}") -> expanded = expanded.replace("{{sys:dll-suffix}}", kit_steps_dll_suffix())
-    loop capture in state.captures -> expanded = expanded.replace("{{cap:{capture.name}}}", capture.value)
+    loop capture in state.captures {
+        token :: "{{cap:{capture.name}}}"
+        if capture.kind == "bytes" && expanded.contains(token) -> return None
+        expanded = expanded.replace(token, capture.value)
+    }
     if expanded.contains("{{cap:") -> return None
     rest := expanded
     result := ""

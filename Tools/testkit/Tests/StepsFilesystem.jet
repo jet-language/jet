@@ -1,0 +1,104 @@
+use core.files as files
+
+#Test("mkdir links rename permissions truncate and poke run as kit actions from real case text") {
+    root :: cases_test_root("filesystem-actions")
+    directory :: files.join(root, "tests/cases/group")
+    kit_exec_write(files.join(directory, "tree/source"), "ABCDE")
+    kit_exec_write(files.join(directory, "changed.out"), "AxBDE")
+    kit_exec_write(files.join(directory, "short.out"), "Ax")
+    source :: "fixture: tree\nmkdir: sub/deep\nfile: sub/deep is-dir\nhardlink: source hard\nsymlink: source symbolic\nchmod: source 0600\nfile: source mode = 0600\nfile: source size = 5\nfile: source size > 4 # original predicate\npoke: source at 1 hex \"78\"\npoke: source at mid xor \"01\"\nfile: source = changed.out\nfile: hard = changed.out\nfile: symbolic = changed.out\nrename: sub renamed\nfile: sub absent\nfile: renamed/deep is-dir\ntruncate: source 3\ntruncate: source -1\nfile: source = short.out\nfile: hard size = 2\n"
+    assert_eq(cases_test_advanced(root, "actions", source).verdict.status, "PASS")
+    loop (index, wrong) in ["mkdir: source/child", "hardlink: missing hard", "symlink: source source", "rename: missing destination", "truncate: source -6", "poke: source at 5 hex \"ff\""] {
+        assert_eq(cases_test_advanced(root, "error-{index}", "fixture: tree\n{wrong}\n").verdict.status, "ERROR")
+    }
+    assert_eq(cases_test_advanced(root, "wrong-mode", "fixture: tree\nchmod: source 0600\nfile: source mode = 0700\n").verdict.status, "FAIL")
+    files.remove_all(root) ?? panic("remove setup scratch")
+}
+
+#Test("file size relations and sha256 compare metadata and bytes without UTF-8 conversion") {
+    root :: cases_test_root("filesystem-metadata")
+    directory :: files.join(root, "tests/cases/group")
+    kit_exec_write(files.join(directory, "tree/value"), "abc")
+    source :: "fixture: tree\nstep: printf ready\nfile: value size = 3\nfile: value size >= 3 # original predicate\nfile: value size <= 3 # original predicate\nfile: value size < 4 # original predicate\nfile: value size > 2 # original predicate\nfile: value sha256 = \"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\"\n"
+    assert_eq(cases_test_advanced(root, "metadata", source).verdict.status, "PASS")
+    loop comparison in ["size = 4", "size >= 4", "size <= 2", "size < 3", "size > 3", "sha256 = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\""] {
+        assert_eq(cases_test_advanced(root, "wrong", "fixture: tree\nstep: printf ready\nfile: value {comparison} # original predicate\n").verdict.status, "FAIL")
+    }
+    files.remove_all(root) ?? panic("remove metadata scratch")
+}
+
+#Test("await file uses a bounded readiness deadline while children remain genuinely concurrent") {
+    root :: cases_test_root("filesystem-await")
+    kit_exec_write(files.join(root, "tests/cases/group/ready.out"), "ready")
+    source :: "spawn peer: jet -c 'printf ready > ready.tmp; mv ready.tmp ready'\nawait: file ready timeout 2s\nfile: ready = ready.out\nwait: peer\nstderr: empty\n"
+    assert_eq(cases_test_advanced(root, "ready", source).verdict.status, "PASS")
+    assert_eq(cases_test_advanced(root, "deadline", "await: file absent timeout 20ms\n").verdict.status, "FAIL")
+    assert_eq(cases_test_advanced(root, "resize", "resize: sparse 100000000000\n").verdict.status, "REFUSED")
+    loop invalid in ["mkdir: ../escape", "hardlink: a ../escape", "rename: a ../escape", "chmod: a 0800", "poke: a at -1 hex \"ff\"", "poke: a at 0 hex \"f\"", "await: file a timeout 0s", "await: file a timeout -1s", "resize: a -1"] {
+        assert_eq(cases_test_advanced(root, "invalid", "{invalid}\n").verdict.status, "REFUSED")
+    }
+    files.remove_all(root) ?? panic("remove readiness scratch")
+}
+
+#Test("entries filters names first entry and filesystem captures share real directory observations") {
+    root :: cases_test_root("filesystem-entries")
+    directory :: files.join(root, "tests/cases/group")
+    kit_exec_write(files.join(directory, "tree/one.tmp"), "one")
+    kit_exec_write(files.join(directory, "tree/two.tmp"), "two")
+    kit_exec_write(files.join(directory, "tree/.tmp"), "hidden")
+    kit_exec_write(files.join(directory, "tree/sub/three.tmp"), "three")
+    kit_exec_write(files.join(directory, "tree/only/value"), "only")
+    kit_exec_write(files.join(directory, "count.out"), "2")
+    source :: "fixture: tree\nstep: printf ready\nentries: . kind file ext = \"tmp\" = 2\nentries: . recursive kind file ext = \"tmp\" parent = \"sub\" = 1\nentries: . kind file name ^= \"o\" name != \"two.tmp\" = 1\nentries: . kind file name $= \".tmp\" name ~ \"tw\" = 1\nentries: . kind file name = \".tmp\" ext = \"tmp\" = 0\nentries: . kind dir >= 2 # original predicate\nfile: . names = [\".tmp\",\"one.tmp\",\"only\",\"sub\",\"two.tmp\"]\ncapture: count = entries . kind file ext = \"tmp\"\nstep: printf \"%s\" {{cap:count}}\nstdout: = count.out\ncapture: selected = sole-entry . kind file name = \"one.tmp\"\nfile: {{cap:selected}} size = 3\ncapture: size = size file {{cap:selected}}\nfile: {{cap:selected}} size = {{cap:size}}\ncapture: first = first-entry only\nfile: only first == {{cap:first}}\nfile: only first ~ only # original predicate\ncapture: total = tree-bytes .\ntree: . bytes = {{cap:total}}\ntree: . !~ forbidden # original predicate\ntree: . kind file depth = 1 ~ hidden # original predicate\ntree: . recursive ext = \"tmp\" ~ three # original predicate\nmkdir: empty\nfile: empty names = []\n"
+    assert_eq(cases_test_advanced(root, "entries", source).verdict.status, "PASS")
+    loop (index, wrong) in ["entries: . ext = \"tmp\" = 3", "file: . names = []", "capture: selected = sole-entry . kind file ext = \"tmp\"", "capture: first = first-entry empty", "file: empty first empty", "tree: . !~ hidden # original predicate", "tree: . ~ absent # original predicate", "tree: . bytes = 0"] {
+        assert_eq(cases_test_advanced(root, "fail-{index}", "fixture: tree\nmkdir: empty\n{wrong}\n").verdict.status, "FAIL")
+    }
+    files.remove_all(root) ?? panic("remove directory selection scratch")
+}
+
+#Test("optional byte captures distinguish absent files empty files and unequal binary values") {
+    root :: cases_test_root("filesystem-optional-bytes")
+    directory :: files.join(root, "tests/cases/group")
+    files.create_dir_all(files.join(directory, "tree")) ?? panic("optional bytes fixture")
+    files.write_bytes(files.join(directory, "tree/binary"), [U8{0}, U8{255}]) ?? panic("binary fixture")
+    kit_exec_write(files.join(directory, "tree/empty"), "")
+    source :: "fixture: tree\ncapture: missing = opt-bytes file missing\nfile: missing same-as {{cap:missing}}\ncapture: binary = opt-bytes file binary\nfile: binary same-as {{cap:binary}}\ncapture: empty = opt-bytes file empty\nfile: empty same-as {{cap:empty}}\n"
+    assert_eq(cases_test_advanced(root, "optional", source).verdict.status, "PASS")
+    loop path in ["empty", "binary"] {
+        assert_eq(cases_test_advanced(root, "different", "fixture: tree\ncapture: missing = opt-bytes file missing\nfile: {path} same-as {{cap:missing}}\n").verdict.status, "FAIL")
+    }
+    assert_eq(cases_test_advanced(root, "no-byte-string-fallback", "fixture: tree\ncapture: binary = opt-bytes file binary\nstep: printf \"%s\" {{cap:binary}}\n").verdict.status, "ERROR")
+    files.remove_all(root) ?? panic("remove optional byte scratch")
+}
+
+#Test("capture text lines after markers and file JSON selectors execute through case text") {
+    root :: cases_test_root("filesystem-capture-text")
+    directory :: files.join(root, "tests/cases/group")
+    cr :: String.from_bytes([U8{13}]) ?? panic("CR")
+    kit_exec_write(files.join(directory, "input.txt"), "first{cr}\nTOKEN= chosen \nlast\n")
+    kit_exec_write(files.join(directory, "text.out"), "first{cr}\nTOKEN= chosen \nlast")
+    kit_exec_write(files.join(directory, "lines.out"), "3")
+    kit_exec_write(files.join(directory, "chosen.out"), "chosen")
+    kit_exec_write(files.join(directory, "tree/doc.json"), "{{\"value\":7}}")
+    kit_exec_write(files.join(directory, "tree/doc.toml"), "value = 7\n")
+    source :: "fixture: tree\nstep: cat\nstdin: input.txt\ncapture: text = text stdout.trim\ncapture: lines = lines stdout\ncapture: after stdout after \"TOKEN=\" trim # original predicate\nstep: printf \"%s\" {{cap:text}}\nstdout: = text.out\nstep: printf \"%s\" {{cap:lines}}\nstdout: = lines.out\nstep: printf \"%s\" {{cap:after}}\nstdout: = chosen.out\ncapture: json file doc.json doc $.value\ncapture: toml file doc.toml toml $.value\nstep: printf \"%s\" {{cap:json}}\nstdout: = seven.out\nstep: printf \"%s\" {{cap:toml}}\nstdout: = seven.out\ncapture: filetext = text file doc.toml\n"
+    kit_exec_write(files.join(directory, "seven.out"), "7")
+    assert_eq(cases_test_advanced(root, "text", source).verdict.status, "PASS")
+    assert_eq(cases_test_advanced(root, "marker-missing", "step: cat\nstdin: input.txt\ncapture: missing stdout after absent # original predicate\n").verdict.status, "FAIL")
+    assert_eq(cases_test_advanced(root, "json-missing", "fixture: tree\nstep: printf ready\ncapture: missing file doc.json doc $.missing\n").verdict.status, "FAIL")
+    assert_eq(cases_test_advanced(root, "file-missing", "step: printf ready\ncapture: missing = text file absent\n").verdict.status, "ERROR")
+    files.remove_all(root) ?? panic("remove text capture scratch")
+}
+
+#Test("directory names relations ignore file contents but detect renamed entries") {
+    root :: cases_test_root("filesystem-names-relation")
+    directory :: files.join(root, "tests/cases/group")
+    kit_exec_write(files.join(directory, "tree/left/a"), "alpha")
+    kit_exec_write(files.join(directory, "tree/right/a"), "different")
+    source :: "fixture: tree\nstep: printf ready\nfile: left names = [\"a\"]\nfile: left names == right\nchmod: left/a 0600\nfile: left first mode = 0600\nfile: left first size = 5\n"
+    assert_eq(cases_test_advanced(root, "equal", source).verdict.status, "PASS")
+    wrong :: "fixture: tree\nrename: right/a right/b\nfile: left names == right\n"
+    assert_eq(cases_test_advanced(root, "different", wrong).verdict.status, "FAIL")
+    files.remove_all(root) ?? panic("remove names relation scratch")
+}

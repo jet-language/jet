@@ -115,6 +115,17 @@ fn kit_steps_parse(source: String) -> KitPlan {
             plan.compile_only = true
             next
         }
+        if kit_steps_setup_kind(key) {
+            words :: kit_steps_words(value) ?? []
+            if !kit_steps_setup_valid(key, words) {
+                plan.error = "line {line_number}: invalid {key} setup action"
+                return plan
+            }
+            argv := [String]{key}
+            loop word in words -> &argv.push(word)
+            &plan.steps.push(KitStep{argv: argv, stdin: "", exit: "0", assertions: [], action: key})
+            next
+        }
         if key == "copy" || key == "remove" || key == "concat" || key == "write" {
             paths :: kit_steps_words(value) ?? {
                 plan.error = "line {line_number}: invalid file action paths"
@@ -139,16 +150,14 @@ fn kit_steps_parse(source: String) -> KitPlan {
         }
         if key == "capture" {
             words :: kit_steps_words(value) ?? []
-            if words.len() != 4 && words.len() != 5 {
-                plan.error = "line {line_number}: capture needs name stream doc|ndjson path, or name stream line ^= prefix"
-                return plan
-            }
-            if plan.steps.len() == 0 || kit_expect_named(captures, words[0]) || (words[1] != "stdout" && words[1] != "stderr") || (words[2] != "doc" && words[2] != "ndjson" && words[2] != "line") {
+            if !kit_steps_capture_valid(words, original) || kit_expect_named(captures, words[0]) {
                 plan.error = "line {line_number}: invalid or duplicate capture"
                 return plan
             }
-            if (words[2] == "line" && (words.len() != 5 || words[3] != "^=" || !kit_steps_reason(original))) || (words[2] != "line" && (words.len() != 4 || kit_steps_json_path(kit_steps_json_preview(words[3])) == None)) {
-                plan.error = "line {line_number}: invalid capture path or missing partial reason"
+            selector :: if words[1] == "=" && (words[2] == "text" || words[2] == "lines") -> kit_steps_subject(words[3]) else -> kit_steps_subject(words[1])
+            stream_capture :: if words[1] == "=" -> (words[2] == "text" || words[2] == "lines") && selector != "file" && selector != "file?" else -> selector != "file" && selector != "file?"
+            if plan.steps.len() == 0 && stream_capture {
+                plan.error = "line {line_number}: stream capture without step"
                 return plan
             }
             &captures.push(words[0])
@@ -302,6 +311,22 @@ fn kit_steps_parse(source: String) -> KitPlan {
         if plan.steps[i].action == "spawn" && key != "stdin" {
             plan.error = "line {line_number}: spawned child assertions belong after wait"
             return plan
+        }
+        if key == "entries" {
+            assertion :: kit_steps_entries_assertion(original) ?? {
+                plan.error = "line {line_number}: invalid entries filters or comparison"
+                return plan
+            }
+            &plan.steps[i].assertions.push(assertion)
+            next
+        }
+        if key == "tree" {
+            assertion :: kit_steps_tree_assertion(original) ?? {
+                plan.error = "line {line_number}: invalid tree filters or predicate"
+                return plan
+            }
+            &plan.steps[i].assertions.push(assertion)
+            next
         }
         if key == "elapsed" {
             relation :: kit_steps_words(value) ?? []
