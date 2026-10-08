@@ -100,7 +100,7 @@ struct KitSelected {
 }
 
 fn kit_suites() -> [KitSuite] {
-    [KitSuite{name: "golden", discover: kit_golden_discover_suite, run: kit_golden_run_suite}]
+    [KitSuite{name: "golden", discover: (context: KitCtx) -> kit_golden_discover_suite(context), run: (entry: KitEntry, context: KitCtx) -> kit_golden_run_suite(entry, context)}]
 }
 
 fn kit_execute_suites(options: KitOptions, root: String) -> Int {

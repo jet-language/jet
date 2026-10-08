@@ -54,10 +54,10 @@ fn kit_test_core_scratch(label: String) -> String {
     older :: "Error [E0001]: first\nError [E0002]: second\n"
     newer :: "Error [E0001]: first\n"
     kit_exec_write(first, older)
-    assert_eq(kit_expect_exact_with_count("first", first, Val(older), newer, bless, kit_expect_diagnostics).status, "REFUSED")
+    assert_eq(kit_expect_exact_with_count("first", first, Val(older), newer, bless, (text: String) -> kit_expect_diagnostics(text)).status, "REFUSED")
     assert_eq(files.read(first) ?? panic("first"), older)
     allowed :: KitBless{ids: ["first"], all: false, reason: "", allow_shrink: ["first"], first_tier: true}
-    assert_eq(kit_expect_exact_with_count("first", first, Val(older), newer, allowed, kit_expect_diagnostics).status, "PASS")
+    assert_eq(kit_expect_exact_with_count("first", first, Val(older), newer, allowed, (text: String) -> kit_expect_diagnostics(text)).status, "PASS")
     assert_eq(files.read(first) ?? panic("first"), newer)
     files.remove_all(root) ?? panic("remove bless scratch")
 }

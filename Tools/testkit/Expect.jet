@@ -35,7 +35,7 @@ fn kit_expect_unified(path: String, expected: String, actual: String) -> String 
     out
 }
 
-fn kit_expect_diagnostics(text: String) -> Int {
+fn kit_expect_diagnostics(text: String) -[]> Int {
     count := 0
     loop line in text.split("\n") {
         if line.starts_with("Error [") || line.starts_with("Warning [") || line.starts_with("Stop [") -> count += 1
@@ -77,7 +77,7 @@ fn kit_expect_exact_with_count(id: String, path: String, expected: String?, actu
     KitVerdict{status: "FAIL", detail: "snapshot mismatch: {path}", diff: kit_expect_unified(path, old, actual)}
 }
 
-fn kit_expect_no_count(text: String) -> Int { 0 }
+fn kit_expect_no_count(text: String) -[]> Int { 0 }
 
 fn kit_expect_exact(id: String, path: String, expected: String?, actual: String, bless: KitBless, diagnostic: Bool) -> KitVerdict {
     if diagnostic -> return kit_expect_exact_with_count(id, path, expected, actual, bless, kit_expect_diagnostics)
