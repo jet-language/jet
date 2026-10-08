@@ -1131,12 +1131,13 @@ logged. `file_seal` and `file_open` take typed `Path` values at their checked
 boundary and use `FS` plus `Rand` where indicated.
 
 The native `Secret` carrier owns the canonical List header `[len, cap, data]`
-(three words, 24 bytes); `U8` elements occupy padded eight-byte slots. Creating
+(three words, 24 bytes); `U8` elements use the canonical host U8 stride. Creating
 a Secret adopts the List buffer without copying secret material. Borrowing
 `bytes` reads or writes the actual parent's header, and permits only fixed-length
 indexed mutation, not growth, removal, clearing, or whole-List assignment.
-Close effectfully wipes all `cap * 8` bytes, including slot padding and spare
-capacity, then releases that buffer at alignment eight and clears the header.
+Close effectfully wipes cap × the host U8 stride bytes, including any slot
+padding and spare capacity, then releases that same byte count at alignment
+eight and clears the header.
 Repeated Close is harmless; final owner drop alone releases the header.
 
 Key wrapping authenticates the `JETW` header as AAD prefixed with the
