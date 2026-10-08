@@ -188,6 +188,12 @@ descriptor at construction, before any output slot is allocated. A blocking
 pull writes directly into that slot; closed and stopped pulls leave it
 unwritten. Dropping the iterator releases the receiver exactly once.
 
+Channel's Observe imports retain their explicit C symbol bindings, and Shared's
+process-pinned publication registry remains a mutable root initialized at
+runtime. Until formatter issue #4770 is fixed, diff-scoped formatting receipts
+preserve those declarations rather than accepting empty import bodies or
+rewriting the registry as an immutable binding.
+
 At native C byte boundaries, `List<U8>` retains its word-stride layout.
 `jet_rt_bytes_pack` borrows that header and returns an independently owned
 packed byte buffer; `jet_rt_bytes_free` releases it with its original length
