@@ -1,0 +1,39 @@
+use core.files as files
+use core.crypto as crypto
+use core.sys as sys
+use core.encoding.hex as hex
+use core.encoding.base64 as base64
+use core.encoding.base32 as base32
+fn verify(root: String) -> Int {
+    manifest :: files.read(files.join(root, "MANIFEST.tsv")) ?? panic("manifest missing")
+    count := 0
+    loop line in manifest.lines() {
+        if line.starts_with("#") || line == "" -> next
+        fields :: line.split("\t").to_list()
+        assert(fields.len() >= 4, "bad manifest row")
+        bytes :: files.read_bytes(files.join(root, fields[0])) ?? panic("manifest file missing")
+        assert_eq(crypto.sha256(bytes).hex(), fields[1])
+        assert(fields[2].starts_with("https://") || fields[2] == "local", "bad source URL")
+        assert(fields[3] != "", "missing license")
+        count += 1
+    }
+    return count
+}
+fn run() {
+    root :: sys.get("JET_ENCODING_ROOT") ?? panic("root required")
+    manifests := 0
+    entries :: files.list_dir(root) ?? panic("list corpus")
+    loop entry in entries {
+        if files.is_file(files.join(entry.path, "MANIFEST.tsv")) {
+            manifests += verify(entry.path)
+            next
+        }
+        if entry.is_dir {
+            nested :: files.list_dir(entry.path) ?? panic("list nested corpus")
+            loop item in nested {
+                if files.is_file(files.join(item.path, "MANIFEST.tsv")) -> manifests += verify(item.path)
+            }
+        }
+    }
+    assert(manifests >= 14, "manifest verification count")
+}

@@ -1,0 +1,8 @@
+# PORT tests/auto_derive_policy.rs:620-696.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no blessed snapshots.
+# Split: ; compiler-lib LEDGER-ONLY Loader nested defaults ordered Outerfalse/Innerfalse; per actual module-path map app AppTypetrue/ImportedOutertrue and dep DepTypefalse; TraitRegistry app auto_printable excludes ImportedOuter; original no public module-default/selected-set projection
+fixture: package_default_reaches_nested_and_dependency_modules.fixture
+step: jet check app/main.jet --json
+exit: nonzero
+json: machine doc $.reports[?code="E0112"] #>= 1
+# KNOWN-FAILING #4833: path dependency resolution absent in current Jet frontend; original E0112 remains required.

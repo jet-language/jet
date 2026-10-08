@@ -1,0 +1,10 @@
+# PORT tests/tir_language_features.rs:1236-1270.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no blessed snapshots.
+fixture: http_router_retired_bare_catchall_is_jet_runtime_error.fixture
+step: jet build --profile=debug tir_http_retired_catchall.jet
+exit: 0
+step: built
+exit: nonzero
+stderr: ~ "panic: E2805: invalid HTTP route `/assets/*`: write a named catch-all such as `*wildcard`"
+stderr: ~ "tir_http_retired_catchall.jet:11"
+stderr: !~ "thread 'main' panicked"
