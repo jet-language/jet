@@ -1,0 +1,18 @@
+# Port of jetpack_tasks.rs::jet_top_jobs_forward_flags_after_name.
+fixture: fixtures/graph
+step: jet web --port 3000
+stdout: = web-local.out
+step: jet web -- --port 3000
+stdout: = web-local.out
+step: jet --interpret web --port 3000 --host 0.0.0.0
+stdout: = web-any.out
+step: jet populate --label ci
+stdout: = populate.out
+step: jet populate --json
+exit: 2
+stderr: ~ E1331 # original predicate
+stdout: !~ migrate # original predicate
+step: jet --port 3000 web
+exit: 2
+stderr: ~ E2102 # original predicate
+stderr: ~ 'after the job name' # original predicate
