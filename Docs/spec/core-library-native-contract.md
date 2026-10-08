@@ -605,3 +605,38 @@ initialized text owners and the buffer, never the inline header. Owning holder
 APIs release their own shell separately. ProcessSpec's
 ordered pair lists retain their specialized two-text-per-entry representation.
 
+### Native Authority ownership and attenuation
+
+`Authority.jet` replaces the existing Authority handle clone/drop/equality and
+its producers with one private NativeAuthority24: an owning List24 of unique
+Text handles sorted by UTF-8 bytes, matching `BTreeSet<String>` order. It does
+not interpret a Rust collection or change the public Authority API. Construction
+borrows input slots, sorts their pointers in the final buffer, and clones only
+unique rights; cloning deep-copies through the shared inline text-list helper.
+Destruction uses the canonical collection text-list drop, then frees the holder.
+Equality compares the sorted text values, not allocation identity or capacity.
+
+The `with` producer returns a fresh singleton only when a held right equals the
+request or is its prefix immediately followed by `.`, `:`, or `/`. Otherwise it
+raises the exact seed message `E0712: authority cannot narrow to ` followed by
+the backtick-delimited request and ` outside its held rights`. The `without`
+producer removes precisely that subtree and deep-copies the surviving rights.
+The workspace producer defines the exact two seed rights once in native source:
+`FS.Read:repo` and `FS.Write:.jet/build`.
+
+`Tests/AuthorityWitness.c` calls the real producers, checks permutation and
+duplicate equivalence, empty/null/nonpositive inputs, embedded NUL and Unicode,
+deep independence, attenuation boundaries and workspace rights, and observes
+exact-once buffer/text/holder frees. Its `denied` mode expects the canonical
+Jet panic with that exact E0712 message and exit70. Per NativeLead21's ruling,
+the seed's raw Rust panic/host-fault exit101 is a seed defect, not the contract;
+`Tests/AuthoritySeedDivergence.tsv` records this open divergence, not parity.
+The stdout fixture is expected output, not native execution evidence.
+
+`Tests/AuthorityRoutes.tsv` records the existing three producer routes and the
+workspace route's post-freeze regeneration obligation. The workspace C export
+can be tested directly but is unreachable from checked MIR until the canonical
+route row is regenerated; adding a native producer does not discharge that
+consumer obligation. Native ownership/import/layout and process proof remain
+composition gates. No frozen generated route file is hand-edited.
+
