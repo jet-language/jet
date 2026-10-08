@@ -43,6 +43,7 @@ use jet_foundation.[
     core_enum_variants,
     core_record_field,
     core_type_modules,
+    mir_typed_head_kind,
     mir_boundary_head_carrier_module,
     mir_field_id,
     mir_nominal_ref,
@@ -321,7 +322,7 @@ fn jet_codegen_find_source_nominal_identity(modules: [SemaGraphModuleResult], cu
     if !name.contains("::") && !name.contains(".") {
         carrier :: mir_boundary_head_carrier_module(name)
         if carrier != None -> core_owner = carrier
-        else if name != "Path" {
+        else if mir_typed_head_kind(Type.Named{name: name}) == None {
             owners :: core_type_modules(name)
             if owners.len() == 1 -> core_owner = Val(owners[0])
         }
