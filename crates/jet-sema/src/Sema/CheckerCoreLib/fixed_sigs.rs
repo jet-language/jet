@@ -516,8 +516,6 @@ fn web_fixed_sig(
         ("core.plugin", "__load_wire") => Some((vec![(read, string.clone()), (read, string.clone())], Some(string.clone()))),
         ("core.plugin", "__from_handle") => Some((vec![(read, Type::IntN { signed: false, bits: 64 })], Some(web_named("Plugin")))),
         ("core.plugin", "__stop") => Some((vec![(read, string.clone())], Some(web_named("Never")))),
-        ("core.files", "__create_dir_all_raw") => Some((vec![(read, string.clone())],
-            Some(result_ty(unit_ty(), web_named("IOError"))))),
 
 >>>>>>> 6af6612a1 (core.files: pair canonical raw recursive mkdir leaf)
         ("core.data.sketch", "empty") => Some((vec![], Some(string.clone()))),
@@ -3945,6 +3943,8 @@ fn core_fixed_sig_impl(
         )),
         // #3593: policy-free provider leaves behind Core/files/files.jet. Only
         // embedded Core sources may spell the reserved `__` names.
+        ("core.files", "__create_dir_all_raw") => Some((vec![(read, string.clone())],
+            Some(result_ty(unit_ty(), io.clone())))),
         ("core.files", "__open_reader") => Some((
             vec![(read, Type::Int), (read, Type::String), (read, Type::Int)],
             Some(result_ty(Type::Named("FileReader".to_string()), io.clone())),
