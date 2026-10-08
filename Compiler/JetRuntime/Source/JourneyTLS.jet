@@ -9,6 +9,9 @@ fn rt_journey_destructor_address() -> I64 {
     loop { jet_rt_unreachable(I64{0}, I64{0}) }
 }
 
+// exports.list: allocator init 0 -> Host init 1 -> Thread init 2 (publishes
+// thread_tls_registry and attaches main) -> Journey init 3. Thus key/alloc
+// operations here cannot precede their actual providers' initialization.
 #Export(c) fn jet_rt_journey_init() {
     closure :: jet_rt_alloc(I64{24}, I64{8})
     rt_text_store(closure, I64{1})
@@ -50,24 +53,18 @@ fn journey_tls_value() -> I64 {
 fn journey_env_word(word: I64, length: I64) -> I64 {
     key :: jet_rt_string_builder_new()
     rt_text_push_word(key, word, length)
-    value :: rt_env_get(key)
+    value :: jet_rt_logical_env_get(key)
     jet_rt_string_drop(key)
     value
 }
 fn journey_env_present(key: I64) -> Bool {
-    host_arguments_require()
-    index := I64{0}
-    loop index < host_env_length {
-        row :: host_env_rows + index * I64{24}
-        if (rt_text_word(row + I64{8}) == rt_text_len(key)) {
-            bytes :: rt_text_word(row)
-            at := I64{0}
-            loop at < rt_text_len(key) && rt_text_byte(bytes + at) == rt_text_byte(rt_text_data(key) + at) -> at += I64{1}
-            if (at == rt_text_len(key)) -> return true
-        }
-        index += I64{1}
-    }
-    false
+    jet_rt_logical_env_seed()
+    shared_acquire(logical_env_root, false)
+    // The get_os cell's raw lookup preserves presence even for non-UTF8
+    // values. Presence needs no payload copy or temporary allocation.
+    present :: logical_environment_find(rt_text_data(key), rt_text_len(key)) != I64{0}
+    shared_release(logical_env_root, false)
+    present
 }
 fn journey_auto_color(tty: Bool) -> Bool {
     key :: jet_rt_string_builder_new()

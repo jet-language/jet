@@ -1661,6 +1661,15 @@ casts. Date/time formatting and Pool construction are Core source-owner rows,
 not String/allocator runtime aliases. The private image-runtime stop/String
 allocator and L1/L3 canonical allocator/split providers are existing Jet bodies.
 
+The inherited 42-row disposition ledger retains every row: ten String route
+ports and four entry/Err ports are source-complete with light receipts only;
+four image/allocator rows and two canonical split replacements already have
+Jet bodies; five time-format rows belong to the Core time owner, Pool to Core
+Mem, the comptime-stop writer to its runtime owner, and fifteen wasm allocation
+rows remain separate target contracts. `jet_err_from_message` is Err88 source
+`453a68026`; the three entry exits are `JourneyTLS.jet` source `695b6dc40`.
+No row is discarded or promoted to native behavioral proof by a parse receipt.
+
 ### Native shared process pipe holder
 
 `HostPipe.jet` owns `Pipe24`: non-atomic reference count at 0, RefCell mutable
@@ -1748,6 +1757,13 @@ N=1000 owned getter/drop cycles also preserve Err88 LIVE BYTES; Lower's separate
 borrowed hand-MIR witness requires no getter, clone, or allocation Call.
 These behavioral/ledger/object witnesses require the composed proof; light
 parse/C-syntax receipts alone do not establish them.
+Presence is read allocation-free under the logical environment cell's Shared
+reader lock; COLUMNS uses that cell's strict Unicode getter. Runtime set/remove
+mutations therefore affect subsequent reports rather than freezing startup
+environment state. The fixture toggles NO_COLOR after initialization and tests
+FORCE_COLOR, invalid-UTF8 presence, changed COLUMNS and unsigned-width overflow.
+Initialization order is explicit: allocator priority 0, Host priority 1, Thread
+priority 2 (registry publication and main attach), then Journey priority 3.
 
 `LogicalEnvironment.jet` replaces the executable-local Rust environment cell
 with one owned native reader/writer cell using the existing Shared protocol.

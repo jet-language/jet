@@ -1,5 +1,6 @@
 // Real dynamic TLS, thread teardown, taken carries and entry process edges.
 #include <assert.h>
+#include <stdbool.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -35,6 +36,10 @@ extern void jet_rt_thread_detach(void);
 extern void jet_rt_program_allocator_configure(W,W);
 extern void jet_rt_program_allocator_restore(W,W);
 extern W jet_rt_program_allocator_fact(W);
+extern W jet_rt_logical_env_set(Text *,Text *);
+extern W jet_rt_logical_env_unset(Text *);
+extern bool fixture_journey_auto_color_raw(bool);
+extern W fixture_journey_columns_raw(bool);
 static Text *text(const char *s) { return jet_rt_string_from_static(s,(W)strlen(s)); }
 static void equal(Text *value,const char *expected) {
     assert(value->length==(W)strlen(expected));
@@ -82,6 +87,31 @@ static void entry(unsigned kind,int wire,const char *expected) {
     assert(WIFEXITED(status) && WEXITSTATUS(status)==1);
     assert(size==strlen(expected) && !memcmp(bytes,expected,size));
 }
+static void live_environment(void) {
+    Text *no=text("NO_COLOR"),*force=text("FORCE_COLOR"),*columns=text("COLUMNS"),*empty=text("");
+    jet_rt_logical_env_unset(no);
+    assert(!jet_rt_logical_env_set(force,empty));
+    assert(fixture_journey_auto_color_raw(false));
+    char invalid[]={ (char)0xff }; Text os_bytes={invalid,1,0};
+    assert(!jet_rt_logical_env_set(no,&os_bytes));
+    assert(!fixture_journey_auto_color_raw(false));
+    assert(jet_rt_logical_env_unset(no)==1);
+    assert(fixture_journey_auto_color_raw(false));
+    assert(!jet_rt_logical_env_set(no,empty));
+    assert(!fixture_journey_auto_color_raw(true));
+    assert(jet_rt_logical_env_unset(force)==1);
+    Text *width=text("  +120  ");
+    assert(!jet_rt_logical_env_set(columns,width));
+    assert(fixture_journey_columns_raw(true)==120 && !fixture_journey_columns_raw(false));
+    jet_rt_string_drop(width); width=text("18446744073709551615");
+    assert(!jet_rt_logical_env_set(columns,width));
+    assert(fixture_journey_columns_raw(true)==INTPTR_MAX);
+    jet_rt_string_drop(width); width=text("18446744073709551616");
+    assert(!jet_rt_logical_env_set(columns,width));
+    assert(fixture_journey_columns_raw(true)==80);
+    jet_rt_string_drop(width);
+    jet_rt_string_drop(no); jet_rt_string_drop(force); jet_rt_string_drop(columns); jet_rt_string_drop(empty);
+}
 int main(int argc,char **argv) {
     jet_rt_host_arguments(argc,(W)(uintptr_t)argv,(W)(uintptr_t)environ);
     // Warm persistent registry/table capacity outside the measured interval.
@@ -107,6 +137,7 @@ int main(int argc,char **argv) {
     jet_rt_program_allocator_restore(mode,cap);
     entry(0,0,"Error: failed\n"); entry(1,0,"Error: failed\n"); entry(2,0,"failed\n");
     entry(2,1,"{\"schema\":\"jet.err/v1\",\"message\":\"failed\",\"code\":null,\"cause\":null}\n");
+    live_environment();
     puts("Journey TLS: isolated threads, destructor, take/adopt/reset, ledger balance, entry status1 bytes");
     return 0;
 }
