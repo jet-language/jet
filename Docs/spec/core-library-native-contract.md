@@ -559,7 +559,8 @@ Each compiler-private Core source part is embedded beside its public owner,
 including path components and CBOR streaming. The body-text registry must cover
 every canonical private source-part identity without making it publicly importable.
 
-Private service delivery/mailbox reader results and CSV bounded-read results
-take their checked record shapes from the canonical Core source declarations,
+Private service delivery/mailbox reader results, CSV bounded-read results, and
+crypto physical records take their checked shapes from canonical Core source
+declarations,
 not synthetic compiler-owned field-oracle rows. Native carrier names remain
 boundary mappings and do not replace those source declarations.
