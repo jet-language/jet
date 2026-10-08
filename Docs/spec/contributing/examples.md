@@ -59,11 +59,6 @@ builds with `--release`. Every tier compares against the same expected bytes.
 A PASS/FAIL disagreement is reported as `tier-split`, not blessed separately.
 An E2104 build refusal is `UNSUPPORTED` only on a native tier.
 
-The kit's shared types and suite table live together in `Tools/testkit/run.jet`.
-Area implementations stay in their prefixed sibling files; suite rows use
-forwarding lambdas so the package works with the reference compiler's
-cross-file function-value and nominal-type limitations (#4780).
-
 Discovery covers `Examples/features` and `tests/run`. A package or workspace
 root stops descent; its `run.jet` is the entry, not its support modules.
 `.out` expects successful stdout, `.err.out` expects stderr and exit 1 or 70,
