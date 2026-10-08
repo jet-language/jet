@@ -132,7 +132,7 @@ fn lower_map_key_order(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MI
 fn lower_map_drop_value(p: MIRProgram, m: &LowerModule, f: &LowerFunction, value: LIRValueID, ty: MIRType) Never! {
     repr :: lower_repr(p, ty)
     if repr == .Inline(_) -> return lower_inline_drop(p, &m, &f, value, ty)
-    if lower_drop(&m, repr, true) == .Trivial -> return
+    if lower_drop(&m, f, repr, true) == .Trivial -> return
     cell :: lower_pointer(&f)
     lower_emit(&f, LIRInst.StackSlot{dst: cell, size: 8, align: 8})
     lower_emit(&f, LIRInst.Store{base: cell, offset: 0, value: value})

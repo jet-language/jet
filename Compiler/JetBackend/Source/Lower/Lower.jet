@@ -265,6 +265,9 @@ struct LowerFunction {
     // Caller-owned saves for sentry scopes and the function's unsafe gate.
     pub sentry_scopes: [U64:Int]
     pub sentry_function: LIRValueID?
+    // A consuming Close receiver uses structural-only cleanup in its body.
+    pub closing: MIRType?
+    pub partial_drops: [LowerPartialDrop]
 }
 
 // Lowers the functions `entry` reaches (Mono.jet: generic functions and
@@ -657,11 +660,11 @@ fn lower_is_owned(ownership: MIROwnership) -> Bool Never! {
     ownership.mode != MIROwnershipMode.ReadBorrow && ownership.mode != MIROwnershipMode.WriteBorrow
 }
 
-fn lower_drop(m: &LowerModule, repr: LowerRepr, owned: Bool) -> LIRDrop Never! {
+fn lower_drop(m: &LowerModule, f: LowerFunction, repr: LowerRepr, owned: Bool) -> LIRDrop Never! {
     if !owned -> return LIRDrop.Trivial
     if repr == {
         .Handle(drop, _) -> LIRDrop.Runtime{symbol: drop}
-        .Boxed(ty) -> LIRDrop.Function{id: lower_glue_id(&m, ty)}
+        .Boxed(ty) -> LIRDrop.Function{id: lower_drop_glue_id(&m, f, ty)}
         else -> LIRDrop.Trivial
     }
 }
@@ -841,6 +844,9 @@ fn lower_set_slot(f: &LowerFunction, slot: Int, value: LIRValueID?) Never! {
 }
 
 fn lower_define(c: LowerContext, f: &LowerFunction, value: MIRValueID, lowered: LIRValueID) Never! {
+    if f.partial_drops.len() != 0 && c.moves.get(value.value) == None && c.read_slots.get(value.value) == None {
+        lower_partial_reset(&f, lower_partial_owner(c, value), [LowerGlueField]{})
+    }
     _ := &f.values.add(value.value, lowered.value)
     slot :: c.defined_slots.get(value.value) ?? return
     lower_set_slot(&f, slot, Val(lowered))
@@ -894,7 +900,7 @@ fn lower_result(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFuncti
         return None
     }
     layout :: lower_repr_layout(repr) ?? return None
-    drop :: lower_drop(&m, repr, lower_value_owned(c, result))
+    drop :: lower_drop(&m, f, repr, lower_value_owned(c, result))
     dst :: lower_new_value(&f, layout, drop, ty.identity)
     lower_define(c, &f, result, dst)
     Val(dst)
@@ -997,12 +1003,15 @@ fn lower_new_function(id: LIRFunctionID, name: String, signature: LIRSignatureID
         cells: [LIRValueID?]{},
         sentry_scopes: [U64:Int]{},
         sentry_function: None,
+        closing: None,
+        partial_drops: [LowerPartialDrop]{},
     }
 }
 
 fn lower_function(p: MIRProgram, m: &LowerModule, function: MIRFunction, id: LIRFunctionID, signature: LIRSignatureID) -> LIRFunction Never! {
     name :: if function.key == "" -> function.name else -> function.key
     f := lower_new_function(id, name, signature, function.entry)
+    f.closing = lower_close_receiver(p, function)
     if m.runtime_intrinsics.get(function.id.value) == .Val(intrinsic) {
         output_layout :: lower_repr_layout(lower_repr(p, function.return_type)) ?? panic("validated runtime intrinsic result layout")
         output :: lower_new_value(&f, output_layout, LIRDrop.Trivial, function.return_type.identity)
@@ -1042,7 +1051,7 @@ fn lower_function(p: MIRProgram, m: &LowerModule, function: MIRFunction, id: LIR
             return lir_builder_finish(f.builder)
         }
         param :: function.params[0]
-        input :: lower_new_value(&f, lir_layout_pointer(), lower_drop(&m, lower_repr(p, param.ty), lower_is_owned(param.ownership)), param.ty.identity)
+        input :: lower_new_value(&f, lir_layout_pointer(), lower_drop(&m, f, lower_repr(p, param.ty), lower_is_owned(param.ownership)), param.ty.identity)
         block :: lower_new_block(&f)
         lower_start(&f, block, [LIRValueID]{input})
         output :: lower_pointer(&f)
@@ -1361,7 +1370,7 @@ fn lower_function_body(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
         repr :: lower_repr(p, param.ty)
         if repr == .Unsupported(reason) -> return lower_fail(&m, &f, "parameter {param.name}: {reason} is not lowered at O0 yet")
         if lower_repr_layout(repr) == .Val(layout) {
-            value :: if param.access == .Write -> lower_pointer(&f) else -> lower_new_value(&f, layout, lower_drop(&m, repr, lower_is_owned(param.ownership)), param.ty.identity)
+            value :: if param.access == .Write -> lower_pointer(&f) else -> lower_new_value(&f, layout, lower_drop(&m, f, repr, lower_is_owned(param.ownership)), param.ty.identity)
             &entry_params.push(value)
             &f.params.push(Val(value))
         } else {
@@ -1379,6 +1388,7 @@ fn lower_function_body(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
         lower_frame_storage(p, c, &f)
         lower_frame_cells(p, c, &m, &f)
         lower_sentry_frame(c, &m, &f)
+        lower_partial_frame(p, c, &f)
         f.mir_block = MIRBlockID{value: U64.MAX}
         edge :: lower_edge(p, c, &m, &f, c.mir.entry) ?? return
         lower_seal(&f, LIRTerminator.Jump{target: edge})
@@ -1463,7 +1473,7 @@ fn lower_block(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunctio
             row :: c.slots[slot]
             repr :: lower_repr(p, row.ty)
             layout :: lower_repr_layout(repr) ?? next
-            drop :: lower_drop(&m, repr, lower_is_owned(row.ownership))
+            drop :: lower_drop(&m, f, repr, lower_is_owned(row.ownership))
             param :: lower_new_value(&f, layout, drop, row.ty.identity)
             &params.push(param)
             lower_set_slot(&f, slot, Val(param))
@@ -1475,6 +1485,7 @@ fn lower_block(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunctio
         lower_frame_storage(p, c, &f)
         lower_frame_cells(p, c, &m, &f)
         lower_sentry_frame(c, &m, &f)
+        lower_partial_frame(p, c, &f)
     }
     loop instruction in block.instructions {
         if f.failed -> return
@@ -2025,6 +2036,10 @@ fn lower_drop_value(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
         }
     }
     if lower_value_type(c, value) == .Val(ty) {
+        if lower_value_owned(c, value) && lower_partial_drop_value(p, c, &m, &f, value, lowered, ty) {
+            if cell_slot >= 0 -> lower_cell_dropped(p, c, &f, cell_slot, lowered)
+            return
+        }
         if lower_is_inline(p, ty) {
             if lower_value_owned(c, value) {
                 lower_inline_drop(p, &m, &f, lowered, ty)
@@ -2087,7 +2102,10 @@ fn lower_read_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
     } else {
         lower_read_into(p, &f, dst, walk.base, walk.offset, row.ty)
     }
-    if moving -> lower_clear_at(p, &f, walk.base, walk.offset, row.ty)
+    if moving {
+        lower_partial_transfer(&f, instruction)
+        lower_clear_at(p, &f, walk.base, walk.offset, row.ty)
+    }
 }
 
 // A read (not a move) of a place whose owned result is stored into another
@@ -2172,12 +2190,16 @@ fn lower_write_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
             }
         }
         lower_set_slot(&f, slot, Val(lowered))
+        if f.partial_drops.len() != 0 -> lower_partial_reset(&f, "slot.{slot}", [LowerGlueField]{})
         return
     }
     root :: held ?? return lower_fail(&m, &f, "field of place {place.value} is written before the place has a value")
     walk :: lower_walk_projections(p, &m, &f, root, c.slots[slot].ty, row.projections) ?? return
     if replace -> lower_drop_stored(p, &m, &f, walk.base, walk.offset, row.ty)
     lower_write_at(p, &f, walk.base, walk.offset, lowered, row.ty)
+    if f.partial_drops.len() != 0 {
+        if lower_partial_field_path(p, c.slots[slot].ty, row.projections) == .Val(path) -> lower_partial_reset(&f, "slot.{slot}", path)
+    }
 }
 
 // `[T#N]{ uninit }` (D-UNINIT-SENTINEL2): the List of its N slots, without
@@ -2347,6 +2369,7 @@ fn lower_read_member(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
         } else {
             lower_read_into(p, &f, dst, base, offset, ty)
         }
+        lower_partial_transfer(&f, instruction)
         lower_clear_at(p, &f, base, offset, ty)
         return
     }
@@ -3412,7 +3435,7 @@ fn lower_write_back(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
     layout :: lower_repr_layout(repr) ?? return
     if row.projections.len() == 0 {
         holder :: c.slots[writeback.slot]
-        updated :: lower_new_value(&f, layout, lower_drop(&m, lower_repr(p, holder.ty), lower_is_owned(holder.ownership)), row.ty.identity)
+        updated :: lower_new_value(&f, layout, lower_drop(&m, f, lower_repr(p, holder.ty), lower_is_owned(holder.ownership)), row.ty.identity)
         lower_read_into(p, &f, updated, writeback.cell, 0, row.ty)
         lower_set_slot(&f, writeback.slot, Val(updated))
     } else {
@@ -3441,6 +3464,9 @@ struct LowerGlueShape {
 }
 
 fn lower_glue_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    if glue.helper != "drop.structural" {
+        if lower_close_method(p, glue.ty) == .Val(method) -> return lower_close_drop_glue(p, &m, glue, method)
+    }
     if lower_trait_ref(p, glue.ty) != None -> return lower_trait_glue(p, &m, glue)
     if lower_is_transaction(glue.ty) -> return lower_transaction_drop_glue(&m, glue)
     if lower_is_iter_cursor(glue.ty) -> return lower_iter_drop_glue(p, &m, glue)
@@ -3647,6 +3673,7 @@ fn lower_helper_start(m: &LowerModule, glue: LowerGlue, params: [LIRLayout], res
 }
 
 fn lower_helper_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    if glue.helper == "drop.structural" -> return lower_glue_function(p, &m, glue)
     if glue.helper == "trait.drop" || glue.helper == "trait.clone" -> return lower_trait_payload_glue(p, &m, glue)
     if glue.helper.starts_with("builtin.") -> return lower_helper_value_builtin(p, &m, glue)
     if glue.helper.starts_with("lazy.") -> return lower_lazy_helper(p, &m, glue)
