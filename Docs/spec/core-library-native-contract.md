@@ -472,3 +472,11 @@ duplicates both owners, preserving repetitions and empty values. Equality is
 byte-exact and order-sensitive; case-insensitive header lookup does not change
 value equality. Drop releases all initialized pairs, buffer capacity, and the
 sequence shell, and accepts a null handle.
+
+HTTP Operation owns one ordinal word. HTTP Error owns a tag and one payload
+word: unit variants own no child, BodyTooLarge stores a raw signed limit,
+text variants own E4, and UnsupportedTarget stores an Operation ordinal.
+Clone and equality follow the active variant; drop releases only its owned
+text child. Display, show and debug all use the same user-facing rendering,
+including unescaped payload text. Invalid Error tags or rendered Operation
+ordinals take the canonical `<core.prelude>` record-variant panic.
