@@ -2137,3 +2137,21 @@ the canonical native arithmetic range diagnostic. The expected normal output
 is `EncodingErrors ownership/equality/render OK`. Native execution remains
 unexercised until the integrator composes the fresh green E2 FINAL runtime;
 parser and strict C11 syntax receipts alone do not establish runtime parity.
+### Native Process value enums
+
+`JetRuntime/Source/ProcessEnums.jet` supplies the complete ResourceLimit6 and
+StreamMode3 families. They reuse `EncodingErrors.jet`'s eight-byte enum owner
+helpers, not a second ownership implementation. Native tags are declaration
+order in `DataABI.jet`: WallTime/CpuTime/Memory/OpenFiles/Output and
+Stream/Inherit/Capture. These private native handles do not describe Rust boxes
+or establish source/MIR admission.
+
+ResourceLimit show/display use `wall time`, `CPU time`, `memory`,
+`open file handles`, `output`; Debug uses the variant names. StreamMode has
+no renderer or constructor export. The real-object C client
+`Tests/ProcessEnumsWitness.c` checks every legal tag, cross-tag inequality,
+clone independence, all three ResourceLimit renders and exact-once frees
+with `--wrap=jet_rt_free`. Its `.stdout` file is expected output, not an
+execution receipt. Whole-unit seed suppression and native caller/import/layout
+admission remain composition gates.
+
