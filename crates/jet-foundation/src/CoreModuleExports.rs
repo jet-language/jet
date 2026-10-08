@@ -25,7 +25,7 @@ pub enum CoreLeafKind {
 
 // BEGIN GENERATED CORE DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: f72115893038f8c380ec668327f4fbc55d2d35cd96570f92bd6978bde12b3162
+// Source SHA-256: 0f5af3a83b3952f03bd781393f39e361997e511cb6598f96f26b16d33eaa8297
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreModuleDeclaration {
     pub module: &'static str,
@@ -762,7 +762,7 @@ pub const CORE_SOURCE_MODULES: &[CoreSourceModule] = &[
     CoreSourceModule { module: "core.args", alias: "core_core_args", path: "Core/args/args.jet", owned_members: &["decode", "decode_argv", "get_bool", "get_int", "get_text", "merge", "spec", "positionals", "program", "help_text", "flag", "has", "argument", "define", "dest", "required", "default_value", "get_or", "get_choice", "missing_required", "apply_defaults", "usage", "help_from", "remainder", "count_flag", "wants_help"] },
     CoreSourceModule { module: "core.auth", alias: "core_core_auth", path: "Core/auth/auth.jet", owned_members: &["magic_link_consume", "magic_link_issue", "oauth_begin", "oauth_finish", "password_login", "register_user", "session_cookie", "session_id", "session_show", "session_user", "session_validate", "verify_jwt", "verify_paseto", "__store_load", "__store_replace"] },
     CoreSourceModule { module: "core.build", alias: "core_core_build", path: "Core/build/build.jet", owned_members: &["graph", "receipt_diff"] },
-    CoreSourceModule { module: "core.compiler", alias: "core_core_compiler", path: "Core/compiler/compiler.jet", owned_members: &["check", "lex", "lock", "manifest", "package", "parse", "profiles", "source_map"] },
+    CoreSourceModule { module: "core.compiler", alias: "core_core_compiler", path: "Core/compiler/compiler.jet", owned_members: &[] },
     CoreSourceModule { module: "core.compiler.lang", alias: "core_core_compiler_lang", path: "Core/compiler/lang.jet", owned_members: &[] },
     CoreSourceModule { module: "core.collections", alias: "core_core_collections", path: "Core/collections/collections.jet", owned_members: &["add", "clear_counter", "counter", "counter_from", "dec", "elements", "get", "inc", "merge_add", "most_common", "names", "set_count", "subtract", "total", "heapify", "heappush", "heappop", "heappushpop", "heapreplace", "nsmallest", "nlargest", "merge_sorted", "bisect_left", "bisect_right", "insort_left", "insort_right", "ordered_map", "map_get", "map_set", "map_remove", "map_keys", "map_values", "map_contains", "map_len", "chain", "chain_push", "chain_get", "chain_contains"] },
     CoreSourceModule { module: "core.collections.set", alias: "core_collections_set", path: "Core/collections/set.jet", owned_members: &["new", "from_list", "add", "discard", "remove", "contains", "len", "is_empty", "to_list", "clear", "union", "intersection", "difference", "symmetric_difference", "issubset", "issuperset", "isdisjoint", "clone_set"] },

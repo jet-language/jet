@@ -430,6 +430,53 @@ fn compiler_api_is_compile_time_only() {
 }
 
 #[test]
+fn compiler_api_local_prepared_values_keep_checked_types() {
+    let source = r#"
+use core.compiler as jc
+fn run() {
+    source :: prep { "fn helper() {{}}" }
+    lexed :: prep { jc.lex(source) ?? panic("lex failed") }
+    parsed :: prep { jc.parse(source) ?? panic("parse failed") }
+    checked :: prep { jc.check(parsed) ?? panic("check failed") }
+    map :: prep { jc.source_map("// jet:source-map source=generated.jet\n// jet:line 1") ?? panic("source map failed") }
+    if lexed.tokens().len() == 0 -> panic("lost tokens")
+    if checked.functions().len() != 1 -> panic("lost function")
+    if map.generated_lines().len() != 1 -> panic("lost source mapping")
+}
+"#;
+    jet::compile(source).expect("compiler API prep values must cross the checked fragment boundary");
+}
+
+#[test]
+fn failed_prepared_binding_preserves_original_failure_without_evaluator_cascades() {
+    for annotation in ["", ": Int"] {
+        let source = format!(
+            r#"
+fn identity(value: Int) -> Int {{ value }}
+fn failing() -> Int {{ panic("original prep failure") }}
+fn run() {{
+    failed: Int :: prep {{ failing() }}
+    dependent{annotation} :: prep {{ identity(failed) }}
+    transitive :: prep {{ identity(dependent) }}
+    print(transitive)
+}}
+"#
+        );
+        let diagnostics = jet::compile(&source).expect_err("the original prep panic must fail");
+        let errors = diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error)
+            .collect::<Vec<_>>();
+        assert_eq!(errors.len(), 1, "unexpected cascade: {diagnostics:?}");
+        assert_eq!(errors[0].code, "E0953", "{diagnostics:?}");
+        assert!(
+            errors[0].why.contains("original prep failure"),
+            "lost original failure: {diagnostics:?}"
+        );
+    }
+}
+
+#[test]
 fn compiler_api_rejects_zero_and_extra_arguments_at_checking() {
     for operation in ["lex", "parse", "check", "source_map"] {
         let zero = format!(

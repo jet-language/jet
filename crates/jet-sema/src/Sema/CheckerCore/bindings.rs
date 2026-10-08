@@ -1941,10 +1941,11 @@ impl<'a> Checker<'a> {
         // is that earlier error's cascade: poison this binding as well, so
         // later uses of it stay silent instead of reporting `Unknown`.
         let init_read_invalid = self.invalid_binding_reads != invalid_reads_before_init;
-        let init_type_unusable = (b.ty.is_none()
+        let mut init_type_unusable = (b.ty.is_none()
             && it.is_none()
             && (init_has_error || init_read_invalid))
-            || (init_has_error && initializer_type_error);
+            || (init_has_error && initializer_type_error)
+            || (b.is_comptime && init_read_invalid);
         if b.ty.is_none() && it.is_none() && !init_has_error && !init_read_invalid {
             if let Expr::MethodCall {
                 method,
@@ -2065,10 +2066,12 @@ impl<'a> Checker<'a> {
         }
         if !self.defer_ct_evaluation
             && b.is_comptime
+            && !init_type_unusable
             && !crate::Comptime::check_build_time_io(&b.init, self.ct_base_dir, &mut self.diags)
         {
             // D-CTIO1: the path law already reported against the call.
-        } else if !self.defer_ct_evaluation && b.is_comptime {
+            init_type_unusable = true;
+        } else if !self.defer_ct_evaluation && b.is_comptime && !init_type_unusable {
             let is_patch_binding =
                 matches!(&final_ty, Type::Named(name) if name.ends_with(".Patch"));
             let globals = self.current_ct_globals().into_owned();
@@ -2119,7 +2122,13 @@ impl<'a> Checker<'a> {
                     // D-CTEFFECT1 Tier-1: accumulate embed inputs for .jet/lock.
                     self.ct_embed_inputs.extend(inputs);
                 }
-                Err(d) => self.diags.push(d),
+                Err(d) => {
+                    // The checked type still exists, but this binding has no
+                    // compile-time value. Keep the original evaluation failure
+                    // and poison dependent reads before another fragment runs.
+                    init_type_unusable = true;
+                    self.diags.push(d);
+                }
             }
         }
         if b.name == "_" {
