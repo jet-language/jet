@@ -18150,13 +18150,7 @@ impl<'a> RustEmitter<'a> {
                 .get(index)
                 .copied()
                 .unwrap_or(false),
-            MirCallee::Prelude(call) => self
-                .prelude_row(*call)
-                .signature
-                .borrow_mask
-                .get(index)
-                .copied()
-                .unwrap_or(false),
+            MirCallee::Prelude(call) => self.core_call_argument_borrowed(*call, index),
             MirCallee::Foreign(_) => false,
             MirCallee::Indirect(value) => {
                 Self::callable_parameters(self.value_type(function, *value))
@@ -18177,12 +18171,13 @@ impl<'a> RustEmitter<'a> {
     }
 
     fn core_call_argument_borrowed(&self, route: MirPreludeCallId, index: usize) -> bool {
-        self.prelude_row(route)
-            .signature
-            .borrow_mask
-            .get(index)
-            .copied()
-            .unwrap_or(false)
+        let row = self.prelude_row(route);
+        // The native UI box retains its owned children. Borrow analysis and
+        // emission must agree so a ReadPlace value is materialized exactly once.
+        if row.symbol.name() == "jet_ui_box" {
+            return false;
+        }
+        row.signature.borrow_mask.get(index).copied().unwrap_or(false)
     }
 
     fn borrowed_operation_use(
@@ -25696,15 +25691,8 @@ impl<'a> RustEmitter<'a> {
                 // the list query row shares the same checked Core signature.
                 let borrowed = if stream_query && index == 0 {
                     false
-                } else if row.module == "core.ui" && row.member == "box" {
-                    false
                 } else {
-                    route_row
-                        .signature
-                        .borrow_mask
-                        .get(index)
-                        .copied()
-                        .unwrap_or(false)
+                    self.core_call_argument_borrowed(route, index)
                 };
                 // `core.reactive.signal` constructs `JetSignal<JetInt>` directly.
                 // Keep its checked Int on the exact carrier; the other native
