@@ -1,0 +1,9 @@
+# Port of tests/build_entry.rs:2290-2329; sources verbatim.
+# PENDING-SAME-HEAD; nominal subclaims below are not replaced by CLI success.
+fixture: fixtures/graph_query_denies_ambient_impure_effects_before_host_side_effects
+write: main.jet main.template
+step: jet query build main.jet --json
+unset: JET_QUERY_MUST_NOT_SET
+exit: nonzero
+json: machine doc $.reports[?code="E3411"] #>= 1
+file: must-not-exist absent

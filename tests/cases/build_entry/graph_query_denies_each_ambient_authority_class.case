@@ -1,0 +1,15 @@
+# Port of tests/build_entry.rs:2331-2374; sources verbatim.
+# PENDING-SAME-HEAD; nominal subclaims below are not replaced by CLI success.
+fixture: fixtures/graph_query_denies_each_ambient_authority_class
+step: jet query build filesystem.jet --json
+exit: nonzero
+json: machine doc $.reports[?code="E3411"] #>= 1
+step: jet query build environment.jet --json
+exit: nonzero
+json: machine doc $.reports[?code="E3411"] #>= 1
+step: jet query build exec-process.jet --json
+exit: nonzero
+json: machine doc $.reports[?code="E3411"] #>= 1
+step: jet query build network.jet --json
+exit: nonzero
+json: machine doc $.reports[?code="E3411"] #>= 1

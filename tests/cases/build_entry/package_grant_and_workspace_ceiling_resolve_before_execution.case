@@ -1,0 +1,12 @@
+# Port of tests/build_entry.rs:2875-2928; sources verbatim.
+# PENDING-SAME-HEAD; nominal subclaims below are not replaced by CLI success.
+fixture: fixtures/package_grant_and_workspace_ceiling_resolve_before_execution
+step: jet build main.jet --gate impure=allow
+exit: 0
+file: stamp = "ok"
+remove: stamp
+copy: workspace.template workspace.jet
+step: jet build main.jet --allow-exec --gate impure=allow --json
+exit: nonzero
+json: machine doc $.reports[?code="E3503"] #>= 1
+file: stamp absent

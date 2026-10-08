@@ -1,0 +1,20 @@
+
+fn build(b: BuildContext) -[Exec, FS]> BuildPlan {
+    #Impure("probe selected toolchain") {
+    tc :: b.toolchain("native", "x86_64-linux")
+    shell :: b.probe("shell", "find_program", "sh")
+    action :: b.action(
+        "stamp",
+        [],
+        ["probe.txt"],
+        ["sh", "-c", "printf probe > probe.txt"],
+        ["Exec", "FS"],
+        tc,
+        [shell]
+    )
+    app :: b.add_executable("app", ["main.jet"], [action])
+    return b.plan(app)
+    }
+    return b.plan()
+}
+fn run() {}

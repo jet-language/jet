@@ -1,0 +1,13 @@
+# Port of tests/build_entry.rs:2484-2497; helper 2499-2560; sources verbatim.
+# PENDING-SAME-HEAD; nominal subclaims below are not replaced by CLI success.
+fixture: fixtures/program_info_uses_qualified_collision_free_type_function_and_method_identities
+step: jet check main.jet --json
+exit: 0
+json: machine doc $.ok = true
+step: jet build main.jet  --json
+exit: nonzero
+json: machine doc $.reports[?code="CALL"] #>= 1
+json: machine doc $.reports[?code="ENUM"] #>= 1
+json: machine doc $.reports[?code="METHOD"] #>= 1
+json: machine doc $.reports[?code="LEFT"] #>= 1
+json: machine doc $.reports[?code="BAD"] #= 0

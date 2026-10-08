@@ -1,0 +1,11 @@
+# Port of tests/build_entry.rs:2681-2712; sources verbatim.
+# PENDING-SAME-HEAD; nominal subclaims below are not replaced by CLI success.
+fixture: fixtures/sandbox_refuses_output_parent_symlink_escape
+requires: os:unix
+requires: tool:sh
+mkdir: {tmp}/outside
+symlink: {tmp}/outside redirect
+step: jet build main.jet --allow-exec --allow-fs --gate impure=allow --json
+exit: nonzero
+json: machine doc $.reports[?code="E3505"] #>= 1
+file: {tmp}/outside/pwn absent
