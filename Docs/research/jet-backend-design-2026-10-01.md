@@ -1626,6 +1626,23 @@ This differs from the source Core `layer_from` normalization
 length. The native provider preserves the existing checked ABI rather than
 changing Core emission policy or silently normalizing its input.
 
+The remaining 21-row collection census is tracked per symbol in
+`JetRuntime/Tests/collections-residue.tsv`. Thirteen paths already lower
+directly: three typed LoopIter operations, Option.map, three slices, two view
+combinators and four view constructors. Slice/view bounds use the Jet-owned
+`jet_rt_slice_end`/`jet_rt_view_end`; the original generic providers are not
+called by these paths. Two LoopIter adapter metadata rows still exist, so this
+is path provenance, not proof that every generated adapter has been retired.
+
+Eight providers remain live: the RangeCursor destructor and four legacy
+numeric LoopRange operations call handwritten runtime ABIs; the two range
+contains operations and Regex.count use generated Rust adapters. The direct
+Range-value iterator in `Lower/Iter.jet` is a different path and does not close
+the legacy LoopRange instructions in `Lower/Lower.jet:1750-1771`. Nor does a
+zero literal-call census prove closure: those instructions select their runtime
+symbols dynamically and the destructor carries a Runtime drop descriptor.
+The consistency checker records those dynamic/drop call paths explicitly.
+
 Lazy cursor initialization and advancement may invoke user callbacks. Both
 are can-stop MIR operations: their results are usable only on the immediately
 following Propagate poll's resume edge. Prefetched HasNext/Value operations

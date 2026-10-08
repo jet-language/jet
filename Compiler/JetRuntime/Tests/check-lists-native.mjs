@@ -59,6 +59,37 @@ for (const line of ledger.slice(1)) {
         if (hasRoute) failures.push(`${symbol}: obsolete runtime route remains`);
     } catch (error) { failures.push(`${symbol}: ${error.message}`); }
 }
+const residue = read(join(root, "Compiler/JetRuntime/Tests/collections-residue.tsv")).trim().split("\n").slice(1);
+const residueSeen = new Set();
+const nativeExports = new Set(read(join(root, "Compiler/JetRuntime/exports.list")).split("\n").map(line => line.trim().split(/\s+/u)[0]));
+let nativePaths = 0, liveProviders = 0;
+for (const line of residue) {
+    const [symbol, status, dispatch, body, reference, remaining, routeState, semantics, limits, ...extra] = line.split("\t");
+    if (!symbol || !status || !dispatch || !body || !reference || !remaining || !routeState || !semantics || !limits || extra.length || residueSeen.has(symbol)) {
+        failures.push(`invalid or duplicate residue row: ${symbol}`);
+        continue;
+    }
+    residueSeen.add(symbol);
+    try {
+        jetFunction(dispatch);
+        const code = jetFunction(body);
+        const hasRoute = runtimeRoutes.includes(`export: "${symbol}"`);
+        if (hasRoute !== (routeState === "present")) failures.push(`${symbol}: route metadata state changed; reconcile the ledger`);
+        if (status === "native-path") {
+            nativePaths++;
+            if (!/lower_emit|lower_call|lower_slice_window/u.test(code)) failures.push(`${symbol}: direct lowering body is missing`);
+            const calls = runtimeCalls.filter(call => call.symbol === symbol);
+            if (calls.length) failures.push(`${symbol}: remaining literal provider calls in ${calls.map(call => call.file).join(", ")}`);
+        } else if (status === "provider-live") {
+            liveProviders++;
+            if (nativeExports.has(symbol)) failures.push(`${symbol}: provider has acquired a native export; reconcile its call path`);
+            if (!/lower_runtime_symbol|LIRDrop\.Runtime|lower_route_result/u.test(code)) failures.push(`${symbol}: missing dynamic provider/drop path`);
+        } else failures.push(`${symbol}: unknown residue status ${status}`);
+        console.log(`${symbol}\t${status}\t${body}\t${remaining}\troute ${routeState}`);
+    } catch (error) { failures.push(`${symbol}: ${error.message}`); }
+}
+if (residueSeen.size !== 21) failures.push(`expected 21 residue rows, found ${residueSeen.size}`);
+console.log(`collection residue consistency: ${residueSeen.size} rows, ${nativePaths} native paths, ${liveProviders} live providers (dynamic/drop calls included; native behavior not measured)`);
 for (const failure of failures) console.error(failure);
 console.log(`lists-native source consistency: ${seen.size} rows, ${failures.length} failures (native behavior not measured)`);
 if (failures.length) process.exitCode = 1;
