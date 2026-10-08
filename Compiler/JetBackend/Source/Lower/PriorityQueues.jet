@@ -23,7 +23,28 @@ fn lower_priority_queue_list(elem: MIRType) -> MIRType {
 
 fn lower_priority_queue_repr(p: MIRProgram, ty: MIRType, elem: MIRType) -> LowerRepr Never! {
     if lower_map_key_kind(p, elem) == "" -> return LowerRepr.Unsupported{reason: "PriorityQueue element has no native Ord"}
+    if lower_priority_queue_custom_order(p, elem) -> return LowerRepr.Unsupported{reason: "PriorityQueue user-defined Comparable ordering is not lowered at O0 yet"}
     lower_list_repr(p, ty, elem)
+}
+
+// Do not substitute structural order for a checked user Comparable impl,
+// including one on a member of a derived aggregate key.
+fn lower_priority_queue_custom_order(p: MIRProgram, ty: MIRType) -> Bool Never! {
+    loop implementation in p.impls {
+        bound :: implementation.trait_ref ?? next
+        if bound.name != "Comparable" -> next
+        if mir_type_same_checked_type(implementation.self_type, ty) || lower_render_template(p, implementation.self_type, ty) -> return true
+    }
+    if ty.kind == .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> return lower_priority_queue_custom_order(p, inner)
+    if lower_type_def(p, ty) == .Val(definition) {
+        if definition.kind == .Alias(base) | .Distinct(base, _) -> return lower_priority_queue_custom_order(p, base)
+    }
+    if lower_is_inline(p, ty) {
+        loop member in lower_inline_members(p, ty) {
+            if lower_priority_queue_custom_order(p, member.ty) -> return true
+        }
+    }
+    false
 }
 
 fn lower_priority_queue_from(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, source_id: MIRValueID) Never! {
