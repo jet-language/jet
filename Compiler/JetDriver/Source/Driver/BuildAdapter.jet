@@ -64,8 +64,8 @@ fn jet_driver_build_host_call(session: &BuildSession, inputs: JetDriverBuildInpu
             value :: jet_eval_build_session_host_input(args[index].host) ?? return Val(jet_driver_build_host_failure(session, span, "build method received a non-data argument"))
             if method == "generate" && index == 2 {
                 if value == .Text(source) -> generated = Val(source)
-                else -> return Val(jet_driver_build_host_failure(session, span, "generated items lost their checked source"))
-            } else -> &values.push(value)
+                else { return Val(jet_driver_build_host_failure(session, span, "generated items lost their checked source")) }
+            } else { &values.push(value) }
         }
         reply := build_session_call(&session, method, values, generated, jet_driver_build_impure(machine), span.start, span.end)
         if reply == .HostRequest(service, request_args) -> reply = jet_driver_build_input_reply(inputs, http_inputs, network_declared, base_dir, service, request_args, span)
@@ -322,14 +322,16 @@ fn jet_driver_build_public_address(address: [U8]) -> Bool Never! {
     }
     if address.len() != 16 -> return false
     mapped := true
-    loop index in 0..<10 -> if address[index] != (U8{0}) -> mapped = false
+    loop index in 0..<10 {
+        if address[index] != (U8{0}) -> mapped = false
+    }
     if mapped && address[10] == (U8{255}) && address[11] == (U8{255}) -> return jet_driver_build_public_address(address[12..<16])
     first :: Int.from_u8(address[0]) * 256 + Int.from_u8(address[1])
     second :: Int.from_u8(address[2]) * 256 + Int.from_u8(address[3])
     (first & 57344) == 8192 && !(first == 8193 && second == 3512)
 }
 
-fn jet_driver_build_http_length(headers: [[U8]]) -> Unit String! {
+fn jet_driver_build_http_length(headers: [[U8]]) String! {
     loop bytes in headers {
         line :: String.from_bytes(bytes) ?? next
         colon :: line.find(":")

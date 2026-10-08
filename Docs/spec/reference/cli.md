@@ -122,6 +122,10 @@ likewise retain the existing `jet_term_is_terminal_raw` and
 `jet_process_exit_status_raw` runtime spellings, rather than reserved
 double-underscore member aliases or alternate host APIs.
 
+Remote builder records accept LF or CRLF line endings, removing only the single
+carriage return immediately before a newline. Extra or interior control bytes
+remain malformed record data, not whitespace to silently normalize.
+
 File-size arithmetic is bounded by `JET_COMPILER_TARGET_USIZE_MAX`, a
 compiler-private constant folded from the selected build target's pointer
 layout. It is not inferred from the inspected executable's ISA and requires
