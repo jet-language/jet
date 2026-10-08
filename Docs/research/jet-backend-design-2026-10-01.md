@@ -2146,3 +2146,10 @@ seed's constructor/getter behavior; atlas native texture is a copied optional
 plain C record, not a shared resource owner. Drop frees only metadata because
 the seed defines no close/unload destructor. Atlas show/debug append the name
 verbatim inside `RaylibTextureAtlas(...)`, without Rust Debug string quoting.
+
+`UiFileDialog.jet` owns the complete request graph: title, inline filesystem
+grant, optional granted path with its grant root/access, and ordered filters
+with extension/MIME lists. Inline grant cloning reuses the same field-copy
+helper as standalone grants without allocating a temporary grant. Field
+accessors lend live title/grant/bool storage; optional absence is distinct
+from a present empty path. Equality observes every nested field and list order.
