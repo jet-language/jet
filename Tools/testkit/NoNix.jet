@@ -56,7 +56,7 @@ fn kit_no_nix_patch_bytes(source: [U8]) -> [U8]? {
     None
 }
 
-fn kit_no_nix_patch(source: String, destination: String) -> String String! {
+fn kit_no_nix_patch(source: String, destination: String) -> String Err! {
     bytes :: files.read_bytes(source) ?? return Err("no-nix read {source}: {err}")
     if kit_no_nix_patch_bytes(bytes) == {
         .None -> return Ok("")
@@ -69,7 +69,7 @@ fn kit_no_nix_patch(source: String, destination: String) -> String String! {
     }
 }
 
-fn kit_no_nix_argv(env: KitEnv, argv: [String], scratch: String, network: String) -> [String] String! {
+fn kit_no_nix_argv(env: KitEnv, argv: [String], scratch: String, network: String) -> [String] Err! {
     helpers := [String]{}
     loop name in ["unshare", "mount", "umount", "sh", "mkdir", "ldd", "readlink", "sort", "ln", "true"] {
         helper :: kit_no_nix_helper(name) ?? return Err("no-nix required namespace helper not installed: {name}")

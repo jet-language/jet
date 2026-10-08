@@ -10,7 +10,7 @@ fn kit_steps_action_error(state: KitStepState, message: String) -> KitStepResult
     KitStepResult{state: state, verdict: kit_expect_verdict("ERROR", message)}
 }
 
-fn kit_steps_inventory(directory: String, root: String) -> [KitInventoryItem] String! {
+fn kit_steps_inventory(directory: String, root: String) -> [KitInventoryItem] Err! {
     result := [KitInventoryItem]{}
     entries :: files.list_dir(directory) ?? return Err("inventory directory: {err}")
     loop entry in entries {
@@ -95,8 +95,8 @@ fn kit_steps_action(step: KitStep, context: KitStepCtx, previous: KitStepState) 
         if state.children[i].label == step.label && !state.children[i].joined {
             pending :: state.children[i]
             receipt :: pending.child.wait() ?? return kit_steps_action_error(state, "wait: {err}")
-            state.children[i].joined = true
             state.last = kit_exec_receipt(receipt, pending.started.elapsed().ns, pending.input_error)
+            state.children[i].joined = true
             return KitStepResult{state: state, verdict: kit_expect_verdict("PASS", "")}
         }
     }

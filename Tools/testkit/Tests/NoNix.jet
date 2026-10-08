@@ -46,7 +46,7 @@ use core.process as process
     plan :: kit_steps_parse_case(files.read(files.join(root, cases_test_entry("image").path)) ?? panic("read image case"))
     context :: cases_test_context(root, root)
     step :: plan.steps[0]
-    argv :: kit_no_nix_argv(context.env, [context.env.jetpack, "env"], root, step.isolate_network) ?? panic(err)
+    argv :: kit_no_nix_argv(context.env, [context.env.jetpack, "env"], root, step.isolate_network) ?? panic("{err}")
     assert(kit_expect_named(argv, "--user"))
     assert(kit_expect_named(argv, "--map-root-user"))
     assert(kit_expect_named(argv, "--mount"))
@@ -63,7 +63,7 @@ use core.process as process
     destination :: files.join(root, "patched")
     files.write_bytes(source, bytes) ?? panic("write ELF")
     files.chmod(source, 0o751) ?? panic("chmod ELF")
-    assert_eq(kit_no_nix_patch(source, destination) ?? panic(err), destination)
+    assert_eq(kit_no_nix_patch(source, destination) ?? panic("{err}"), destination)
     patched :: files.read_bytes(destination) ?? panic("read patched ELF")
     assert_eq(patched.len(), bytes.len())
     assert_eq((files.stat(destination) ?? panic("stat patch")).mode % 512, 0o751)
