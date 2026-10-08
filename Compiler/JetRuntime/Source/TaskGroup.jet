@@ -228,7 +228,7 @@ fn task_selection(handles: I64, count: I64, kind: I64, flatten: Bool) -> I64 {
             (kind == I64{0}) -> {
                 if {
                     (first_error >= I64{0}) -> winner = first_error
-                    !pending -> winner = I64{0}
+                    (!pending) -> winner = I64{0}
                 }
             }
             (kind == I64{1}) -> winner = earliest
@@ -240,7 +240,7 @@ fn task_selection(handles: I64, count: I64, kind: I64, flatten: Bool) -> I64 {
                     at += I64{1}
                 }
             }
-            !pending -> winner = first_error
+            (!pending) -> winner = first_error
         }
         if (winner >= I64{0}) {
             scheduler_blocking_wait_leave()
