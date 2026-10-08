@@ -65,7 +65,7 @@ pub fn jet_driver_check_schema_migrations(request: JetDriverCompileRequest, regi
     if request.schema_snapshots == .Val(snapshots) {
         ingress :: if retain_inputs -> Val(JetDriverSchemaIngress.Supplied{snapshots: snapshots}) else -> None
         checked_schema := sema_check_schema_migration_graph(^registration, checked, snapshots)
-        return JetDriverSchemaCheckResult{registration: ^checked_schema.0, diagnostics: ^checked_schema.1, ingress: ingress}
+        return JetDriverSchemaCheckResult{registration: ^checked_schema.registration, diagnostics: ^checked_schema.diagnostics, ingress: ingress}
     }
     root :: jet_driver_entry_root_path(request.authorized_sources)
     snapshots := [String:SchemaSnapshot]{}
@@ -84,5 +84,5 @@ pub fn jet_driver_check_schema_migrations(request: JetDriverCompileRequest, regi
     }
     ingress :: if retain_inputs -> Val(JetDriverSchemaIngress.Cache{root: root, reads: reads}) else -> None
     checked_schema := sema_check_schema_migration_graph(^registration, checked, snapshots)
-    JetDriverSchemaCheckResult{registration: ^checked_schema.0, diagnostics: ^checked_schema.1, ingress: ingress}
+    JetDriverSchemaCheckResult{registration: ^checked_schema.registration, diagnostics: ^checked_schema.diagnostics, ingress: ingress}
 }

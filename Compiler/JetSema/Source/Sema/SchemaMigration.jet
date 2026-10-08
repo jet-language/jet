@@ -5,7 +5,7 @@ use jet_foundation.[Diagnostic, Item, MigrationOp, Span, StructDef, Type, type_n
 
 pub fn sema_schema_published(definition: StructDef) -> Bool Never! {
     if definition.is_published_schema -> return true
-    loop derive in definition.derives { if derive.name == "PublishedSchema" -> return true }
+    loop derivation in definition.derives { if derivation.name == "PublishedSchema" -> return true }
     false
 }
 
@@ -15,7 +15,7 @@ fn sema_schema_codec(definition: StructDef, codec: String, environment: SemaScop
         direction :: if codec == "Decode" -> SemaSerdeDirection.Decode else -> SemaSerdeDirection.Encode
         return sema_serde_implementation(scope, checked, direction)
     }
-    loop derive in definition.derives { if derive.name == codec -> return true }
+    loop derivation in definition.derives { if derivation.name == codec -> return true }
     false
 }
 
@@ -39,7 +39,7 @@ fn sema_schema_decodable(ty: Type, environment: SemaScopeEnvironment?) -> Bool N
 pub fn check_schema_migrations(items: [Item], snapshots: [String:SchemaSnapshot], environment: SemaScopeEnvironment?) -> [Diagnostic] Never! {
     diagnostics := [Diagnostic]{}
     migrations := [String:[MigrationOp]]{}
-    conversions := [(String, String)]{}
+    conversions := [(from_ty: String, to_ty: String)]{}
     loop item in items {
         if item == {
             .Migration(migration) -> {
@@ -47,7 +47,7 @@ pub fn check_schema_migrations(items: [Item], snapshots: [String:SchemaSnapshot]
                 loop operation in migration.ops -> &operations.push(operation)
                 migrations[migration.type_name] = ^operations
             }
-            .ErrorConv(conversion) -> &conversions.push((conversion.from_ty, conversion.to_ty))
+            .ErrorConv(conversion) -> &conversions.push((from_ty: conversion.from_ty, to_ty: conversion.to_ty))
             else -> {}
         }
     }
@@ -65,27 +65,41 @@ pub fn check_schema_migrations(items: [Item], snapshots: [String:SchemaSnapshot]
             loop operation in operations {
                 if operation == {
                     .Remove(field, _) -> {
-                        if current.get(field) != None -> &diagnostics.push(sema_schema_remove_present(name, field, span))
-                        else if old.get(field) == None -> &diagnostics.push(sema_schema_unknown(name, field, "remove", span))
+                        if {
+                            current.get(field) != None -> &diagnostics.push(sema_schema_remove_present(name, field, span))
+                            old.get(field) == None -> &diagnostics.push(sema_schema_unknown(name, field, "remove", span))
+                        }
                     }
                     .Add(field, _, ty, _, _, _, _) -> {
                         declared :: type_name(ty)
-                        if old.get(field) != None -> &diagnostics.push(sema_schema_add_old(name, field, span))
-                        else if current.get(field) == .Val(actual) {
-                            if actual != declared -> &diagnostics.push(sema_schema_add_mismatch(name, field, declared, actual, span))
-                            else if sema_schema_codec(definition, "Decode", environment) && !sema_schema_codec(definition, "Encode", environment) {
-                                loop added in definition.fields {
-                                    if added.name == field && !sema_schema_decodable(added.ty, environment) -> &diagnostics.push(sema_schema_add_decode(name, field, actual, span))
+                        if {
+                            old.get(field) != None -> &diagnostics.push(sema_schema_add_old(name, field, span))
+                            current.get(field) == .Val(actual) -> {
+                                if {
+                                    actual != declared -> &diagnostics.push(sema_schema_add_mismatch(name, field, declared, actual, span))
+                                    sema_schema_codec(definition, "Decode", environment) && !sema_schema_codec(definition, "Encode", environment) -> {
+                                        loop added in definition.fields {
+                                            if added.name == field && !sema_schema_decodable(added.ty, environment) -> &diagnostics.push(sema_schema_add_decode(name, field, actual, span))
+                                        }
+                                    }
                                 }
                             }
-                        } else -> &diagnostics.push(sema_schema_unknown(name, field, "add", span))
+                            else -> &diagnostics.push(sema_schema_unknown(name, field, "add", span))
+                        }
                     }
                     .Change(field, _, from, _, to, _, _, _, _) -> {
-                        if (old.get(field), current.get(field)) == {
-                            (.Val(old_ty), .Val(new_ty)) -> {
-                                declared_from :: type_name(from)
-                                declared_to :: type_name(to)
-                                if old_ty != declared_from || new_ty != declared_to -> &diagnostics.push(sema_schema_change_mismatch(name, field, declared_from, declared_to, old_ty, new_ty, span))
+                        old_type :: old.get(field)
+                        new_type :: current.get(field)
+                        if {
+                            old_type == .Val(old_ty) -> {
+                                if {
+                                    new_type == .Val(new_ty) -> {
+                                        declared_from :: type_name(from)
+                                        declared_to :: type_name(to)
+                                        if old_ty != declared_from || new_ty != declared_to -> &diagnostics.push(sema_schema_change_mismatch(name, field, declared_from, declared_to, old_ty, new_ty, span))
+                                    }
+                                    else -> &diagnostics.push(sema_schema_unknown(name, field, "change", span))
+                                }
                             }
                             else -> &diagnostics.push(sema_schema_unknown(name, field, "change", span))
                         }
@@ -98,8 +112,14 @@ pub fn check_schema_migrations(items: [Item], snapshots: [String:SchemaSnapshot]
                 bridged := false
                 loop operation in operations {
                     if operation == {
-                        .Rename(from, _, to, _) -> if from == field.name && current.get(to) == Val(field.ty) -> bridged = true
-                        .Remove(removed, _) -> if removed == field.name -> bridged = true
+                        .Rename(from, _, to, _) -> {
+                            if current.get(to) == .Val(actual) {
+                                if from == field.name && actual == field.ty -> bridged = true
+                            }
+                        }
+                        .Remove(removed, _) -> {
+                            if removed == field.name -> bridged = true
+                        }
                         else -> {}
                     }
                 }
@@ -112,15 +132,19 @@ pub fn check_schema_migrations(items: [Item], snapshots: [String:SchemaSnapshot]
                 converter := Bool?{None}
                 loop operation in operations {
                     if operation == .Change(changed, _, from, _, to, _, via, _, _) {
-                        if changed == field.name && type_name(from) == old_ty && type_name(to) == new_ty { converter = Val(via != None); break }
+                        if changed == field.name && type_name(from) == old_ty && type_name(to) == new_ty {
+                            converter = Val(via != None)
+                            break
+                        }
                     }
                 }
                 if converter == {
-                    .Val(true) -> {}
-                    .Val(false) -> {
-                        has_impl := false
-                        loop conversion in conversions { if conversion.0 == old_ty && conversion.1 == new_ty -> has_impl = true }
-                        if !has_impl -> &diagnostics.push(sema_schema_no_converter(name, field.name, old_ty, new_ty, span))
+                    .Val(has_converter) -> {
+                        if !has_converter {
+                            has_impl := false
+                            loop conversion in conversions { if conversion.from_ty == old_ty && conversion.to_ty == new_ty -> has_impl = true }
+                            if !has_impl -> &diagnostics.push(sema_schema_no_converter(name, field.name, old_ty, new_ty, span))
+                        }
                     }
                     .None -> &diagnostics.push(sema_schema_changed(name, field.name, old_ty, new_ty, span))
                 }
@@ -130,8 +154,12 @@ pub fn check_schema_migrations(items: [Item], snapshots: [String:SchemaSnapshot]
                 supplied := false
                 loop operation in operations {
                     if operation == {
-                        .Rename(_, _, to, _) -> if to == field.name -> supplied = true
-                        .Add(added, _, _, _, _, _, _) -> if added == field.name -> supplied = true
+                        .Rename(_, _, to, _) -> {
+                            if to == field.name -> supplied = true
+                        }
+                        .Add(added, _, _, _, _, _, _) -> {
+                            if added == field.name -> supplied = true
+                        }
                         else -> {}
                     }
                 }
@@ -195,8 +223,8 @@ fn sema_schema_check_registered_module(environment: SemaScopeEnvironment?, modul
 
 // The populated schema pass temporarily owns the same actual registered graph
 // through the existing scope corridor, then returns it to its genuine caller.
-pub fn sema_check_schema_migration_graph(registration: ^SemaRegistrationGraph, checked: SemaGraphResult, snapshots: [String:SchemaSnapshot]) -> (SemaRegistrationGraph, [Diagnostic]) Never! {
-    if snapshots.len() == 0 -> return (^registration, [Diagnostic]{})
+pub fn sema_check_schema_migration_graph(registration: ^SemaRegistrationGraph, checked: SemaGraphResult, snapshots: [String:SchemaSnapshot]) -> (registration: SemaRegistrationGraph, diagnostics: [Diagnostic]) Never! {
+    if snapshots.len() == 0 -> return (registration: ^registration, diagnostics: [Diagnostic]{})
     module_count :: registration.modules.len()
     types := [jet_foundation.TTypeDef]{}
     loop module_row in checked.modules {
@@ -212,5 +240,5 @@ pub fn sema_check_schema_migration_graph(registration: ^SemaRegistrationGraph, c
     graph_out := ^environment_out.registration_graph
     environment_out.registration_graph = None
     restored :: ^graph_out ?? panic("a completed schema pass lost its registration graph")
-    (^restored, ^diagnostics)
+    (registration: ^restored, diagnostics: ^diagnostics)
 }
