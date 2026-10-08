@@ -599,7 +599,7 @@ fn decode_envelope_prefix(
     })
 }
 
-fn encode_identity(identity: &MirExecutionIdentity) -> Result<Vec<u8>, CompilerImageError> {
+pub(crate) fn encode_identity(identity: &MirExecutionIdentity) -> Result<Vec<u8>, CompilerImageError> {
     let mut writer = CompilerImageMetadataWriter::new();
     writer.write_u16(identity.schema_version);
     let artifact = &identity.artifact;

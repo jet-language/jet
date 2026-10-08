@@ -136,17 +136,16 @@ pub(crate) fn emit_bootstrap_native_adapter_impl(
          }}\n\
          fn __jet_bootstrap_native_adapter_template(\n\
              bindings: &::std::sync::Arc<::jet_evalhost::SourceInterfaces::NativeInterfaceBindings>,\n\
-             program: &::jet_foundation::MIR::MirProgram,\n\
-             artifact: ::jet_foundation::MIR::MirArtifactId,\n\
+             image: &crate::__JetBootstrapCompilerImage,\n\
              receiver_type: ::jet_foundation::MIR::MirType,\n\
          ) -> Result<::jet_evalhost::SourceInterfaces::NativeInterfaceObject, String> {{\n\
              if receiver_type.canonical_key() != {expected_receiver_key} {{\n\
                  return Err(\"native adapter receiver type differs from the exact checked JetEvalConfig.host_adapter leaf\".to_string());\n\
              }}\n\
              let template = bindings.create_object(()).map_err(|error| error.to_string())?;\n\
-             // The image's sealed identity: restore proved it equals the\n\
-             // archived execution identity, so no method re-digests the program.\n\
-             let execution = program.sealed_execution_identity(Some(artifact)).map_err(|error| error.to_string())?;\n"
+             // Reuse the identity checked once by the immutable image owner.\n\
+             let artifact = image.header.artifact;\n\
+             let execution = image.header.identity.clone();\n"
     )
     .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
 
@@ -211,12 +210,11 @@ pub(crate) fn emit_bootstrap_native_adapter_impl(
              fn new_with_bindings(\n\
                  resources: ::jet_evalhost::SourceResources::SourceResourceLease,\n\
                  bindings: ::std::sync::Arc<::jet_evalhost::SourceInterfaces::NativeInterfaceBindings>,\n\
-                 program: ::std::sync::Arc<::jet_foundation::MIR::MirProgram>,\n\
+                 image: ::std::sync::Arc<crate::__JetBootstrapCompilerImage>,\n\
                  machine_abi_shape: crate::compiler_bootstrap_entry_codec::BootstrapEntryHostTypeShape,\n\
                  shared_payload_shapes: ::std::collections::BTreeMap<String, crate::compiler_bootstrap_entry_codec::BootstrapEntryHostTypeShape>,\n\
                  completion_scope: ::jet_evalhost::SourceExecutionCompletionScope,\n\
                  callback_jobs: ::std::sync::Arc<dyn ::jet_evalhost::SourceCallbacks::SourceCallbackJobOwner>,\n\
-                 artifact: ::jet_foundation::MIR::MirArtifactId,\n\
                  receiver_type: ::jet_foundation::MIR::MirType,\n\
                  template: ::jet_evalhost::SourceInterfaces::NativeInterfaceObject,\n\
                  native_bindings: Vec<__JetBootstrapNativeBindingRegistration>,\n\
@@ -224,16 +222,16 @@ pub(crate) fn emit_bootstrap_native_adapter_impl(
                  if receiver_type.canonical_key() != {expected_receiver_key} {{\n\
                      return Err(\"native adapter constructor receiver type differs from the checked host-adapter field\".to_string());\n\
                  }}\n\
-                 let execution = program.sealed_execution_identity(Some(artifact)).map_err(|error| error.to_string())?;\n\
+                 let execution = image.header.identity.clone();\n\
                  let root = ::std::sync::Arc::new(__JetBootstrapNativeAdapterRoot {{\n\
                      bindings,\n\
-                     program,\n\
+                     program: image.program.clone(),\n\
                      machine_abi_shape,\n\
                      shared_payload_shapes,\n\
                      completion_scope: completion_scope.downgrade(),\n\
                      callback_jobs: ::std::sync::Arc::downgrade(&callback_jobs),\n\
                      resources_weak: resources.downgrade(),\n\
-                     artifact,\n\
+                     artifact: image.header.artifact,\n\
                      execution,\n\
                      receiver_type,\n\
                      template,\n\
@@ -1042,12 +1040,13 @@ fn emit_native_binding_helpers(
 
         fn __jet_bootstrap_native_numeric_callable_template(
             bindings: &::std::sync::Arc<::jet_evalhost::SourceInterfaces::NativeInterfaceBindings>,
-            program: &::jet_foundation::MIR::MirProgram,
-            artifact: ::jet_foundation::MIR::MirArtifactId,
+            image: &crate::__JetBootstrapCompilerImage,
         ) -> Result<(
             ::jet_evalhost::SourceInterfaces::NativeInterfaceObject,
             ::jet_evalhost::SourceInterfaces::NativeCallableIdentity,
         ), String> {
+            let program = image.program.as_ref();
+            let artifact = image.header.artifact;
             let checked = crate::__jet_bootstrap_entry_field_type(
                 program,
                 ::jet_foundation::MIR::MirTypeId(__JET_NUMERIC_OWNER__),
@@ -1056,8 +1055,7 @@ fn emit_native_binding_helpers(
             let callable_type = checked.option_inner()
                 .ok_or_else(|| "checked numeric callback field lost its Option leaf".to_string())?
                 .clone();
-            let execution = program.sealed_execution_identity(Some(artifact))
-                .map_err(|error| error.to_string())?;
+            let execution = image.header.identity.clone();
             let identity = ::jet_evalhost::SourceInterfaces::NativeCallableIdentity::checked_for_execution(
                 execution,
                 artifact,
@@ -1076,12 +1074,13 @@ fn emit_native_binding_helpers(
 
 
         fn __jet_bootstrap_native_numeric_wrapper(
-            bindings: &::std::sync::Arc<::jet_evalhost::SourceInterfaces::NativeInterfaceBindings>,
-            program: &::std::sync::Arc<::jet_foundation::MIR::MirProgram>,
-            artifact: ::jet_foundation::MIR::MirArtifactId,
+            adapter: &__JetBootstrapNativeAdapter,
             identity: ::jet_evalhost::SourceInterfaces::NativeCallableIdentity,
             carrier: ::jet_foundation::MIR::MirNativeOwned,
         ) -> Result<__JetBootstrapNativeNumericWrapper, String> {
+            let bindings = &adapter.root.bindings;
+            let program = &adapter.root.program;
+            let artifact = adapter.root.artifact;
             let checked = crate::__jet_bootstrap_entry_field_type(
                 program.as_ref(),
                 ::jet_foundation::MIR::MirTypeId(__JET_NUMERIC_OWNER__),
@@ -1089,8 +1088,7 @@ fn emit_native_binding_helpers(
             )?;
             let callable_type = checked.option_inner()
                 .ok_or_else(|| "checked numeric callback field lost its Option leaf".to_string())?;
-            let execution = program.sealed_execution_identity(Some(artifact))
-                .map_err(|error| error.to_string())?;
+            let execution = adapter.root.execution.clone();
             let expected = ::jet_evalhost::SourceInterfaces::NativeCallableIdentity::checked_for_execution(
                 execution.clone(),
                 artifact,
@@ -1215,9 +1213,7 @@ fn emit_native_binding_helpers(
         ) -> Result<__JetBootstrapNativeNumericWrapper, String> {
             let (identity, carrier) = __jet_bootstrap_native_numeric_registration(adapter)?;
             __jet_bootstrap_native_numeric_wrapper(
-                &adapter.root.bindings,
-                &adapter.root.program,
-                adapter.root.artifact,
+                adapter,
                 identity,
                 carrier,
             )

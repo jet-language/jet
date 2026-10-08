@@ -415,6 +415,23 @@ fn __jet_bootstrap_harness_main() {
             "unknown bootstrap factory tier `{factory_tier_name}`: stage zero runs the compiler factory only as AOT"
         ),
     };
+    if mode == "image-identity-check" {
+        let image = crate::__jet_bootstrap_compiler_image()
+            .unwrap_or_else(|error| panic!("cannot restore compiler identity: {error}"));
+        let cached = crate::__jet_bootstrap_compiler_image()
+            .unwrap_or_else(|error| panic!("cannot reuse compiler identity: {error}"));
+        assert!(std::sync::Arc::ptr_eq(&image, &cached), "compiler image cache changed owner");
+        let fresh = image.program.sealed_execution_identity(Some(image.header.artifact))
+            .unwrap_or_else(|error| panic!("cannot recompute compiler identity: {error}"));
+        let encode = crate::compiler_bootstrap_compiler_image::encode_identity;
+        assert_eq!(
+            encode(&image.header.identity).expect("cannot encode cached compiler identity"),
+            encode(&fresh).expect("cannot encode fresh compiler identity"),
+            "cached compiler identity differs from the same artifact"
+        );
+        println!("compiler-image-identity-check: complete");
+        return;
+    }
     // JET_BOOTSTRAP_BATCH names a file of `source_root<TAB>entry<TAB>output<TAB>receipt`
     // rows: one process compiles them in order, restoring the compiler image
     // once. A panicking entry is reported between its `jet-bootstrap-batch:`

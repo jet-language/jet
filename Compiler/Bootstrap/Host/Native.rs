@@ -2053,15 +2053,13 @@ pub fn __jet_bootstrap_compile_with_native(
             .clone();
         let __jet_template = __jet_bootstrap_native_adapter_template(
             &__jet_bindings,
-            __jet_compiler_image.program.as_ref(),
-            __jet_compiler_image.header.artifact,
+            __jet_compiler_image.as_ref(),
             __jet_receiver_type.clone(),
         )?;
         let (__jet_numeric_object, __jet_numeric_identity) =
             __jet_bootstrap_native_numeric_callable_template(
                 &__jet_bindings,
-                __jet_compiler_image.program.as_ref(),
-                __jet_compiler_image.header.artifact,
+                __jet_compiler_image.as_ref(),
             )?;
         let __jet_numeric_type = crate::__jet_bootstrap_entry_field_type(
             __jet_compiler_image.program.as_ref(),
@@ -2074,15 +2072,13 @@ pub fn __jet_bootstrap_compile_with_native(
         if !__jet_numeric_callable_type.same_checked_type(&__jet_numeric_identity.callable_type) {
             return Err("numeric callable template differs from the exact checked config field".to_string());
         }
-        let __jet_image_execution = __jet_compiler_image.program
-            .sealed_execution_identity(Some(__jet_compiler_image.header.artifact))
-            .map_err(|error| error.to_string())?;
+        let __jet_image_execution = &__jet_compiler_image.header.identity;
         let __jet_numeric_registration = __jet_bootstrap_native_binding_registration(
             &__jet_root_lease,
             None,
             __jet_compiler_image.program.as_ref(),
             __jet_compiler_image.header.artifact,
-            &__jet_image_execution,
+            __jet_image_execution,
             vec!["SemaRegistrationHostHooks".to_string(), "numeric_unit_conversion_exact".to_string()],
             @new.JetEvalNativeBindingIdentity.Callable@{ binding: @s.JetEvalNativeCallableBinding@{
                 key: __jet_numeric_identity.key.clone(),
@@ -2136,12 +2132,11 @@ pub fn __jet_bootstrap_compile_with_native(
         let __jet_native_adapter = __JetBootstrapNativeAdapter::new_with_bindings(
             __jet_root_lease,
             __jet_bindings,
-            __jet_compiler_image.program.clone(),
+            __jet_compiler_image.clone(),
             __jet_machine_abi_shape,
             __jet_shared_payload_shapes,
             __jet_completion_scope.clone(),
             __jet_callback_jobs.clone(),
-            __jet_compiler_image.header.artifact,
             __jet_receiver_type,
             __jet_template,
             vec![__jet_numeric_registration],
