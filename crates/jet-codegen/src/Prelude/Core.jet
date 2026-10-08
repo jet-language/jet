@@ -16,6 +16,7 @@ module app exports { AppError, Auth, LiveQuery, Session, auth, auth_oauth, auth_
 source_module app path Core/app/app.jet alias app owns { auth, auth_oauth, auth_routes, auth_show, live, live_get, live_show, live_stats, subscribe, invalidate, transact_invalidate, signal_push, sync }
 module core exports {  } depends_on []
 module core.devtools exports { publish } depends_on [core]
+source_module core.devtools path Core/devtools/devtools.jet alias core_core_devtools owns { publish }
 module core.archive exports { ArchiveError, adler32, crc32, deflate, inflate, compress, decompress, tar_add, tar_get, tar_names_json, unzip, zip_close, zip_decompress, zip_extract, zip_names_json, zip_next, zip_open, zip_read, zip_write, list, create } types { ArchiveError:plain(Malformed|Unsupported|Checksum|NotFound) } depends_on []
 source_module core.archive path Core/archive/archive.jet alias core_archive owns { crc32, adler32, deflate, inflate, compress, decompress, zip_decompress, zip_names_json, list, zip_open, zip_next, zip_read, zip_write, zip_close, zip_extract, unzip, tar_add, tar_get, tar_names_json, create }
 module core.archive.gzip exports { compress, decompress, is_gzip, isize, magic, crc, compress_text, decompress_text, peek_isize, compress_file, decompress_file, GzipFileError } types { GzipFileError:plain(Read|Write|Malformed|Unsupported|Checksum) } depends_on [core.archive]
@@ -1384,6 +1385,8 @@ dispatcher_row plain core.web.browser server_stop | sema_web_call( "core.web.bro
 dispatcher_row plain core.web.browser server_url | sema_web_call( "core.web.browser", "server_url", "jet_browser_test_server_url", &[true], )
 dispatcher_row plain core.web.browser server_logs | sema_web_call( "core.web.browser", "server_logs", "jet_browser_test_server_logs", &[true], )
 dispatcher_row plain core.web.browser watch_changed | sema_web_call( "core.web.browser", "watch_changed", "jet_browser_test_watch_changed", &[true, false], )
+dispatcher_row adapter core.devtools __publish_payload | CoreCallRecord::new("core.devtools", "__publish_payload", "jet_devtools_publish_payload", false, &[false, false, false, false, false]).with_interpreter_route(CoreCallInterpreterRoute::TypedIntrinsic)
+
 dispatcher_row plain core.web.forms new | sema_web_call("core.web.forms", "new", "jet_web_forms_new", &[false])
 dispatcher_row plain core.web.forms field | sema_web_call( "core.web.forms", "field", "jet_web_forms_field", &[true, false, false, false], )
 dispatcher_row plain core.web.forms set | sema_web_call("core.web.forms", "set", "jet_web_forms_set", &[true, false, false])

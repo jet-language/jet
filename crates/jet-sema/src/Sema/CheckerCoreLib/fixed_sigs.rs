@@ -452,6 +452,9 @@ fn web_fixed_sig(
     let form_submission = web_named("WebFormTypedSubmission");
     let form_field_state = web_named("WebFormFieldState");
     match (module, name) {
+
+        ("core.devtools", "__publish_payload") => Some((vec![(moved, string.clone()), (moved, string.clone()),
+            (moved, string.clone()), (moved, string.clone()), (moved, t.clone())], None)),
         ("core.data.sketch", "empty") => Some((vec![], Some(string.clone()))),
         ("core.data.sketch", "merge") => Some((
             vec![(read, string.clone()), (read, string.clone())],
