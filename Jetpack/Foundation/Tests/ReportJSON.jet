@@ -2,7 +2,8 @@ use core.math as report_json_math
 use core.encoding.json as report_json_codec
 
 #Test("status JSON rejects non-finite fields through ReportError on every entry point") {
-    loop number in [Float]{report_json_math.nan(), report_json_math.infinity(), -report_json_math.infinity()} {
+    numbers :: [Float]{report_json_math.nan(), report_json_math.infinity(), -report_json_math.infinity()}
+    loop number in numbers {
         fields :: StatusFields.new().with("value", DataTree.Float(number))
         envelope :: StatusEnvelope.new("json", true).with_fields(fields)
         if envelope.json() == {
