@@ -1,6 +1,6 @@
 // Range callbacks preserve input order and lend the caller's storage. Owned
 // implicit receiver reads copy before consumption; try_map short-circuits.
-use jet_foundation.[MIRAccess, MIRBinaryDispatch, MIRBinaryOp, MIRBinaryOverflow, MIRBlockID, MIRCallArg, MIRCaptureOperand, MIRDropKind, MIRFunctionSignature, MIROperation, MIRPreludeABI, MIRPreludeFamily, MIRProgram, MIRSemanticOp, MIRTerminator, MIRTupleField, MIRType, MIRTypeKind, MIRValueID, mir_function_id, mir_owned_ownership, mir_type_from_kind]
+use jet_foundation.[MIRAccess, MIRBinaryDispatch, MIRBinaryOp, MIRBinaryOverflow, MIRBlockID, MIRCallArg, MIRCaptureOperand, MIRCopyFact, MIRDropKind, MIRFunctionSignature, MIROperation, MIRPreludeABI, MIRPreludeFamily, MIRProgram, MIRSemanticOp, MIRTerminator, MIRTupleField, MIRType, MIRTypeKind, MIRValueID, mir_function_id, mir_owned_ownership, mir_type_from_kind]
 
 // expect-stdout para-map: "2\n3\n4\n1\n"
 // expect-runtime-only para-map
@@ -166,3 +166,73 @@ fn fx_parallel_flags_fixture() -> MIRProgram Never! {
     &p.prelude_calls.push(fx_prelude(MIRPreludeFamily.ClosureMethod, "core.list", "para_partition", "jet_list_para_partition", 2, MIRPreludeABI.Value))
     p
 }
+
+// Owned output strings must survive retiring the consumed input List. The
+// failing callback also proves that the owned prefix is discarded and the
+// remaining source item is not visited.
+fn fx_owned_map_program(parallel: Bool, failing: Bool, empty: Bool) -> MIRProgram Never! {
+    list_ty :: fx_list_type(fx_string())
+    callback_result :: if parallel -> fx_string() else -> mir_type_from_kind(MIRTypeKind.Result{ok: fx_string(), err: fx_string()})
+    result_ty :: if parallel -> list_ty else -> mir_type_from_kind(MIRTypeKind.Result{ok: list_ty, err: fx_string()})
+    fn_ty :: mir_type_from_kind(MIRTypeKind.Fn{signature: MIRFunctionSignature{params: [MIRType]{fx_string()}, ret: Val(callback_result), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}})
+    a := fx_builder()
+    item :: fx_param(&a, "item", fx_string(), fx_borrow())
+    if !parallel -> fx_print(&a, item)
+    if failing {
+        beta :: fx_strings_literal(&a, "beta")
+        is_beta :: fx_compare(&a, MIRBinaryOp.Eq, item, beta)
+        fx_do(&a, MIROperation.Drop{value: beta, kind: MIRDropKind.Value})
+        fx_block(&a, 0, MIRTerminator.Branch{condition: is_beta, then_target: MIRBlockID{value: 1}, else_target: MIRBlockID{value: 2}})
+        reason :: fx_strings_literal(&a, "stop")
+        error :: fx_owned(&a, callback_result, MIROperation.ResultErr{value: reason})
+        fx_block(&a, 1, MIRTerminator.Return{value: Val(error)})
+    }
+    copied_item :: fx_owned(&a, fx_string(), MIROperation.Copy{value: item, fact: MIRCopyFact.Explicit})
+    returned :: if parallel -> copied_item else -> fx_owned(&a, callback_result, MIROperation.ResultOk{value: copied_item})
+    fx_block(&a, if failing -> 2 else -> 0, MIRTerminator.Return{value: Val(returned)})
+    b := fx_builder()
+    values := [MIRValueID]{}
+    if !empty { loop text in ([String]{"alpha", "beta", "omega"}) -> &values.push(fx_strings_literal(&b, text)) }
+    source :: fx_owned(&b, list_ty, MIROperation.BuildList{values: values, trait_coercion: None})
+    callback :: fx_owned(&b, fn_ty, MIROperation.Closure{function: mir_function_id("copy_owned_item"), captures: [], facts: fx_capture_facts()})
+    args := [MIRCallArg]{fx_arg(callback, MIRAccess.Move)}
+    if parallel -> &args.push(fx_arg(fx_int_const(&b, 2), MIRAccess.Read))
+    member :: if parallel -> "para_map" else -> "try_map"
+    outcome :: fx_owned(&b, result_ty, MIROperation.Semantic{operation: MIRSemanticOp.ClosureMethod{receiver: source, args: args, call: fx_prelude_id("core.list", member)}})
+    if failing {
+        error :: fx_owned(&b, fx_string(), MIROperation.ResultValue{subject: outcome, ok: false})
+        fx_print(&b, error)
+        fx_do(&b, MIROperation.Drop{value: error, kind: MIRDropKind.Value})
+    } else {
+        mapped :: if parallel -> outcome else -> fx_owned(&b, list_ty, MIROperation.ResultValue{subject: outcome, ok: true})
+        if empty {
+            length :: fx_list_method(&b, "len", mapped, None, [], fx_int(), false)
+            fx_print(&b, length)
+        } else {
+            loop index in 0..3 {
+                value :: fx_list_index(&b, mapped, fx_int_const(&b, index), fx_string(), false)
+                fx_print(&b, value)
+            }
+        }
+        if !parallel -> fx_do(&b, MIROperation.Drop{value: mapped, kind: MIRDropKind.Value})
+    }
+    fx_do(&b, MIROperation.Drop{value: outcome, kind: MIRDropKind.Value})
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    p := fx_list_program(b)
+    &p.functions.push(fx_function("copy_owned_item", a, callback_result))
+    &p.prelude_calls.push(fx_prelude(MIRPreludeFamily.ClosureMethod, "core.list", member, if parallel -> "jet_list_para_map" else -> "jet_list_try_map", if parallel -> 3 else -> 2, MIRPreludeABI.Value))
+    p
+}
+
+// expect-stdout para-map-owned: "alpha\nbeta\nomega\n"
+// expect-runtime-only para-map-owned: joined native range scheduler
+fn fx_parallel_map_owned() -> MIRProgram Never! { fx_owned_map_program(true, false, false) }
+
+// expect-stdout try-map-owned-ok: "alpha\nbeta\nomega\nalpha\nbeta\nomega\n"
+fn fx_try_map_owned_ok() -> MIRProgram Never! { fx_owned_map_program(false, false, false) }
+
+// expect-stdout try-map-owned-err: "alpha\nbeta\nstop\n"
+fn fx_try_map_owned_err() -> MIRProgram Never! { fx_owned_map_program(false, true, false) }
+
+// expect-stdout try-map-owned-empty: "0\n"
+fn fx_try_map_owned_empty() -> MIRProgram Never! { fx_owned_map_program(false, false, true) }
