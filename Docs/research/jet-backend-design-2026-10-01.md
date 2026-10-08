@@ -1437,6 +1437,16 @@ optional sign followed by ASCII decimal digits, normalize zeros through
 exact Int, and preserve malformed input trimmed but otherwise unchanged.
 These reuse the historical `aa45bf8fc` formatting policy; they introduce
 no raw C runtime symbols.
+The compiler's shared selector-to-source map drives both Core reachability
+and expression lowering: a selected formatter is rooted by its checked
+function key and invoked as an ordinary user-function MIR call. Lookup is
+restricted to the canonical Core source unit, so same-named user functions
+cannot intercept selectors. Pretty formats Debug text; padding and textual
+radix helpers format Display text; numeric arguments use the source helper's
+checked parameter type. Exact integer selectors keep their exact Int carrier.
+Display and Debug retain native type-directed rendering rather than an
+erased formatter. This compiler-output migration lands after the gate;
+generated native route tables are regenerated with the unified native stack.
 
 `FloatBits.jet` contains ordinary Core-backed reference functions. Only the
 runtime-object driver may replace their validated checked IDs with internal

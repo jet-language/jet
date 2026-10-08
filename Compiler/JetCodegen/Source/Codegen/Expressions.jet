@@ -221,94 +221,65 @@ fn jet_codegen_string_format_integer(ty: Type) -> Bool Never! {
 // Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs::lower_expr
 // (`TExprKind::StrLit`): a selector is lowered to the String it renders before
 // `BuildString`, so every interpolated part is a displayed value. Display,
-// Debug and unit selectors take the direct render; every other selector calls
-// its `core.text.fmt` kernel with the selector's constants.
+// Debug take the typed render; every other selector calls its source-owned
+// `Core/text/fmt.jet` helper with the selector's constants.
 fn jet_codegen_lower_string_format_value(builder: &JetCodegenBuilder, program: JetCodegenProgram, value: MIRValueID, value_type: Type, format: TStrFormat, span: Span) -> MIRValueID Never! {
     if format == {
-        .Display -> return jet_codegen_lower_direct_render(&builder, program, value, value_type, "Display", "display", "jet_fmt_display", span)
-        .Debug -> return jet_codegen_lower_direct_render(&builder, program, value, value_type, "Debug", "debug", "jet_fmt_debug", span)
-        .Unit(_) -> {
-            // Rust routes.rs::quantity_format_route.
-            call := jet_codegen_intern_route(&builder, program, MIRPreludeFamily.StaticPrelude, "core.text.fmt", "quantity", "jet_fmt_quantity", 1, [Bool]{false}, None, TFailureCarrier.Infallible, MIRPreludeABI.Value)
-            return jet_codegen_emit_value(&builder, program, span, Type.String, MIROperation.Call{callee: MIRCallee.Prelude{call: call}, args: [MIRCallArg]{jet_codegen_numeric_call_arg(value, span)}, type_args: [MIRType]{}})
+        .Display -> {
+            return jet_codegen_lower_direct_render(&builder, program, value, value_type, "Display", "display", "jet_fmt_display", span)
+        }
+        .Debug -> {
+            return jet_codegen_lower_direct_render(&builder, program, value, value_type, "Debug", "debug", "jet_fmt_debug", span)
         }
         else -> {}
     }
-    integer :: jet_codegen_string_format_integer(value_type)
-    member := ""
-    symbol := ""
-    digits := Int?{None}
-    pad_width := Int?{None}
-    pad_fill := ""
+    member :: jet_codegen_string_format_member(value_type, format) ?? panic("checked selector has no source formatter")
+    row := program.function_index.first_by_name.get(member) ?? -1
+    loop row >= 0 {
+        if jet_codegen_string_format_source(program.function_index.rows[row]) -> break
+        row = program.function_index.next_by_name[row]
+    }
+    if row < 0 {
+        panic("source interpolation helper Core/text/fmt.jet::{member} is absent from the checked graph")
+    }
+    function :: program.function_index.rows[row]
+    if function.params.len() < 1 {
+        panic("source interpolation helper {member} has no value parameter")
+    }
+    target_type :: function.params[0].ty
+    argument := value
+    if {
+        format == .Pretty -> {
+            // Pretty expands Debug spelling, including quotes on a String.
+            argument = jet_codegen_lower_direct_render(&builder, program, value, value_type, "Debug", "debug", "jet_fmt_debug", span)
+        }
+        target_type == Type.String && value_type != Type.String -> {
+            argument = jet_codegen_lower_direct_render(&builder, program, value, value_type, "Display", "display", "jet_fmt_display", span)
+        }
+        target_type != Type.String && target_type != value_type -> {
+            target :: jet_codegen_lower_type_for_function(target_type, builder, program)
+            argument = jet_codegen_emit_value(&builder, program, span, target_type, MIROperation.Convert{value: value, parameters: [MIRValueID]{}, target: target, conversion: MIRConversion.NumericCast})
+        }
+        else -> {}
+    }
+    args := [MIRCallArg]{jet_codegen_numeric_call_arg(argument, span)}
     if format == {
-        .Pretty -> {
-            member = "pretty"
-            symbol = "jet_fmt_pretty"
+        .Fixed(count) | .Grouped(count) | .Hex(count) | .Sci(count) | .Percent(count) -> {
+            constant :: jet_codegen_emit_value(&builder, program, span, Type.Int, MIROperation.Constant{value: MIRConstant.Int{value: count, width: None, spelling: None}})
+            &args.push(jet_codegen_numeric_call_arg(constant, span))
         }
-        .Fixed(count) -> {
-            member = "fixed"
-            symbol = if integer -> "jet_fmt_decimal_int" else -> "jet_fmt_decimal"
-            digits = Val(count)
+        .Pad(width, fill) | .PadLeft(width, fill) -> {
+            width_value :: jet_codegen_emit_value(&builder, program, span, Type.Int, MIROperation.Constant{value: MIRConstant.Int{value: width, width: None, spelling: None}})
+            fill_value :: jet_codegen_emit_value(&builder, program, span, Type.String, MIROperation.Constant{value: MIRConstant.String{value: fill}})
+            &args.push(jet_codegen_numeric_call_arg(width_value, span))
+            &args.push(jet_codegen_numeric_call_arg(fill_value, span))
         }
-        .Grouped(count) -> {
-            member = "grouped"
-            symbol = if integer -> "jet_fmt_grouped_int" else -> "jet_fmt_grouped"
-            digits = Val(count)
-        }
-        .Hex(count) -> {
-            member = "hex"
-            symbol = if integer -> "jet_fmt_hex" else -> "jet_fmt_hex_decimal"
-            digits = Val(count)
-        }
-        .Sci(count) -> {
-            member = "sci"
-            symbol = "jet_fmt_sci"
-            digits = Val(count)
-        }
-        .Percent(count) -> {
-            member = "percent"
-            symbol = "jet_fmt_percent"
-            digits = Val(count)
-        }
-        .Pad(width, fill) -> {
-            member = "pad"
-            symbol = "jet_fmt_pad"
-            pad_width = Val(width)
-            pad_fill = fill
-        }
-        .PadLeft(width, fill) -> {
-            member = "pad_left"
-            symbol = "jet_fmt_pad_left"
-            pad_width = Val(width)
-            pad_fill = fill
-        }
-        .Bin -> {
-            member = "bin"
-            symbol = if integer -> "jet_fmt_bin" else -> "jet_fmt_bin_decimal"
-        }
-        .Oct -> {
-            member = "oct"
-            symbol = if integer -> "jet_fmt_oct" else -> "jet_fmt_oct_decimal"
-        }
-        else -> panic("checked string selector has no direct render")
+        else -> {}
     }
-    borrow_mask := [Bool]{}
-    args := [MIRCallArg]{jet_codegen_numeric_call_arg(value, span)}
-    if digits == .Val(count) {
-        borrow_mask = [Bool]{integer, false}
-        constant := jet_codegen_emit_value(&builder, program, span, Type.Int, MIROperation.Constant{value: MIRConstant.Int{value: count, width: None, spelling: None}})
-        &args.push(jet_codegen_numeric_call_arg(constant, span))
-    } else if pad_width == .Val(width_value) {
-        borrow_mask = [Bool]{true, false, true}
-        width := jet_codegen_emit_value(&builder, program, span, Type.Int, MIROperation.Constant{value: MIRConstant.Int{value: width_value, width: None, spelling: None}})
-        fill := jet_codegen_emit_value(&builder, program, span, Type.String, MIROperation.Constant{value: MIRConstant.String{value: pad_fill}})
-        &args.push(jet_codegen_numeric_call_arg(width, span))
-        &args.push(jet_codegen_numeric_call_arg(fill, span))
-    } else {
-        borrow_mask = [Bool]{true}
+    if args.len() != function.params.len() {
+        panic("source interpolation helper {member} has a mismatched arity")
     }
-    call := jet_codegen_intern_route(&builder, program, MIRPreludeFamily.StaticPrelude, "core.text.fmt", member, symbol, borrow_mask.len(), borrow_mask, None, TFailureCarrier.Infallible, MIRPreludeABI.Value)
-    jet_codegen_emit_value(&builder, program, span, Type.String, MIROperation.Semantic{operation: MIRSemanticOp.StaticPreludeCall{call: call, args: args, owner_type_args: [MIRPreludeTypeArg]{}, type_args: [MIRType]{}}})
+    jet_codegen_emit_value(&builder, program, span, Type.String, MIROperation.Call{callee: MIRCallee.User{function: jet_codegen_function_id(function)}, args: args, type_args: [MIRType]{}})
 }
 
 fn jet_codegen_exact_int_type(ty: Type) -> Bool Never! {

@@ -4,6 +4,8 @@ use jet_foundation.[
     TExpr,
     TFunc,
     TFuncKind,
+    TStrFormat,
+    Type,
     tir_expr_children,
     tir_stmt_children,
 ]
@@ -15,13 +17,37 @@ fn jet_codegen_core_reach_is_top_level(kind: TFuncKind) -> Bool Never! {
     }
 }
 
+// Source-owned selector policy. Both reachability and expression lowering
+// use this map, so the exact helper emitted by a selector is rooted.
+fn jet_codegen_string_format_member(ty: Type, format: TStrFormat) -> String? Never! {
+    integer :: jet_codegen_string_format_integer(ty)
+    if format == {
+        .Display | .Debug -> None
+        .Pretty -> Val("pretty")
+        .Fixed(_) -> Val(if integer -> "fixed_int" else -> "decimal")
+        .Grouped(_) -> Val(if integer -> "grouped_int_fixed" else -> "grouped")
+        .Hex(_) -> Val(if integer -> "hex" else -> "hex_decimal")
+        .Bin -> Val(if integer -> "bin" else -> "bin_decimal")
+        .Oct -> Val(if integer -> "oct" else -> "oct_decimal")
+        .Sci(_) -> Val("sci")
+        .Percent(_) -> Val("percent")
+        .Pad(_, _) -> Val("pad")
+        .PadLeft(_, _) -> Val("pad_left")
+        .Unit(_) -> Val("quantity")
+    }
+}
+
+fn jet_codegen_string_format_source(function: TFunc) -> Bool Never! {
+    function.module_identity.starts_with("<corelib>/") && (function.source_file == "Core/text/fmt.jet" || function.source_file.ends_with("/Core/text/fmt.jet")) && jet_codegen_core_reach_is_top_level(function.kind)
+}
+
 fn jet_codegen_core_reach_add(keys: &[String], key: String) Never! {
     if key != "" -> &keys.push(key)
 }
 
 // The function keys one checked expression names directly. Children are
 // walked by the caller.
-fn jet_codegen_core_reach_expr_keys(expression: TExpr, keys: &[String]) Never! {
+fn jet_codegen_core_reach_expr_keys(expression: TExpr, keys: &[String], fmt_keys: [String:String]) Never! {
     if expression.kind == {
         .Call(callee, _, args) -> {
             jet_codegen_core_reach_add(&keys, callee.key)
@@ -57,13 +83,22 @@ fn jet_codegen_core_reach_expr_keys(expression: TExpr, keys: &[String]) Never! {
         }
         // A function named as a value checks as a constant reference.
         .ConstRef(symbol) -> jet_codegen_core_reach_add(&keys, symbol.key)
+        .StrLit(parts) -> {
+            loop part in parts {
+                if part == .Interpolation(value, format) {
+                    member :: jet_codegen_string_format_member(value.ty, format) ?? next
+                    key :: fmt_keys.get(member) ?? panic("source interpolation helper Core/text/fmt.jet::{member} is absent from the checked graph")
+                    jet_codegen_core_reach_add(&keys, key)
+                }
+            }
+        }
         else -> {}
     }
 }
 
 // Every function key one checked function body names, including its
 // parameter defaults, which call sites lower from the callee.
-fn jet_codegen_core_reach_function_keys(function: TFunc) -> [String] Never! {
+fn jet_codegen_core_reach_function_keys(function: TFunc, fmt_keys: [String:String]) -> [String] Never! {
     keys := [String]{}
     pending := [TExpr]{}
     loop parameter in function.params {
@@ -74,7 +109,7 @@ fn jet_codegen_core_reach_function_keys(function: TFunc) -> [String] Never! {
     }
     loop pending.len() > 0 {
         expression :: &pending.pop() ?? return keys
-        jet_codegen_core_reach_expr_keys(expression, &keys)
+        jet_codegen_core_reach_expr_keys(expression, &keys, fmt_keys)
         loop child in tir_expr_children(expression) -> &pending.push(child)
     }
     keys
@@ -99,19 +134,21 @@ pub fn jet_codegen_reachable_core_rows(functions: [TFunc], candidates: ^[Bool], 
     by_key := [String:Int]{}
     reachable := [Bool]{}
     pending := [Int]{}
+    fmt_keys := [String:String]{}
     loop (index, function) in functions {
         if !candidates[index] {
             &reachable.push(false)
             next
         }
         _ := &by_key.add(function.key, index)
+        if jet_codegen_string_format_source(function) -> fmt_keys[function.name] = function.key
         rooted :: !core_module_identities.contains(function.module_identity) || (!jet_codegen_core_reach_is_top_level(function.kind) && !function.synthetic)
         &reachable.push(rooted)
         if rooted -> &pending.push(index)
     }
     loop pending.len() > 0 {
         caller :: &pending.pop() ?? { break }
-        loop key in jet_codegen_core_reach_function_keys(functions[caller]) {
+        loop key in jet_codegen_core_reach_function_keys(functions[caller], fmt_keys) {
             target :: by_key.get(key) ?? next
             if !reachable[target] {
                 reachable[target] = true
