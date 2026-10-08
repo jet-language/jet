@@ -1,16 +1,17 @@
 // Compiler-AST policy guards are isolated from the filesystem/manifest package.
 // This package requires compiler packages with their Tests/ trees excluded.
 use jet_foundation.[Program, Expr, Item, Stmt, Type, Func, StructDef, Binding, BinOp, UnOp, StrPart, StrFormat, AccessConvention, OrFallback, ForKind, LValue, OutputKind, TypedLitBody, Marker, Span, Pattern, CallArg, expr_span, DIAGNOSTIC_ERROR]
-use jet_foundation.CORE_MODULE_EXPORTS
+use jet_foundation.[CORE_MODULE_EXPORTS]
 use jet_parser.parse_source
 use jet_lexer.[lex, Token, TOKEN_IDENT, TOKEN_LINE_COMMENT, TOKEN_BLOCK_COMMENT, TOKEN_LBRACE, TOKEN_RBRACE]
 use core.files as policy_ast_files
 use corpus_manifest.[PolicyError, PolicyManifest, PolicySourceRow, PolicyOccurrence, policy_manifest, policy_source_row, policy_selector_matches, policy_violation, policy_inventory_error, policy_apply_exceptions, policy_inventory, policy_join, policy_validate_manifest, policy_slice_bytes, policy_split_whitespace]
 
-POLICY_TASK_INTERNAL_RECEIVER :: prep { (String.from_bytes([U8]{0}) ?? panic("UTF-8 task prefix")) + "jet.task" }
-POLICY_TASK_INTERNAL_ALL :: prep { POLICY_TASK_INTERNAL_RECEIVER + ".all" }
-POLICY_TASK_INTERNAL_RACE :: prep { POLICY_TASK_INTERNAL_RECEIVER + ".race" }
-POLICY_TASK_INTERNAL_ANY :: prep { POLICY_TASK_INTERNAL_RECEIVER + ".any" }
+POLICY_TASK_INTERNAL_PREFIX :: prep { String.from_bytes([U8]{0}) ?? panic("UTF-8 task prefix") }
+POLICY_TASK_INTERNAL_RECEIVER :: prep { "{POLICY_TASK_INTERNAL_PREFIX}jet.task" }
+POLICY_TASK_INTERNAL_ALL :: prep { "{POLICY_TASK_INTERNAL_RECEIVER}.all" }
+POLICY_TASK_INTERNAL_RACE :: prep { "{POLICY_TASK_INTERNAL_RECEIVER}.race" }
+POLICY_TASK_INTERNAL_ANY :: prep { "{POLICY_TASK_INTERNAL_RECEIVER}.any" }
 // The dependency contract is exercised on a real parser result, never a text
 // substitute. A build failure in the compiler packages blocks this guard port.
 fn policy_parse_program(source_label: String, source: String) -> Program PolicyError! {
