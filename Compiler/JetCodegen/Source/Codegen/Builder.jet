@@ -1446,7 +1446,9 @@ fn jet_codegen_partial_move_expression(expression: TExpr, roots: &[String:Bool])
             }
             return
         }
-        .FnValue(kind) -> if kind == .NamedFn(_, _) -> return
+        .FnValue(kind) -> {
+            if kind == .NamedFn(_, _) -> return
+        }
         else -> {}
     }
     loop child in tir_expr_children(expression) -> jet_codegen_partial_move_expression(child, &roots)

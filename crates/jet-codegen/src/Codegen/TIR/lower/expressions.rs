@@ -4973,6 +4973,16 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         }
         Expr::Place(inner, access, span) => {
             in_own_frame(|| {
+                if *access == crate::AST::PlaceAccess::Take {
+                    // Sema already proved this exact take legal. Resource
+                    // guard slots use through_ref too, but still own the place:
+                    // lower_owned_expr would materialize a clone of their field.
+                    let place = lower_expr(inner, cx, env);
+                    return TExpr {
+                        ty: place.ty.clone(),
+                        kind: TExprKind::Move(Box::new(place)),
+                    };
+                }
                 if let Expr::Slice {
                     base,
                     start,

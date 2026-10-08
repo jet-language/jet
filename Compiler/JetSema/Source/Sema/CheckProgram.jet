@@ -1122,6 +1122,11 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
             }
             else -> {
                 sema_ownership_declare_binding(&state, param_symbol, true)
+                if param_index == 0 && parameter.name == "self" && parameter.convention == AccessConvention.Move && func.name == "close" {
+                    if function_kind == .TraitMethod(_, self_access, _, trait_id, _) {
+                        if self_access == AccessConvention.Move && trait_id.key.ends_with(":Close") -> state.close_receiver_key = param_symbol.id.key
+                    }
+                }
                 if function_kind == {
                     .Method(_, _) | .TraitMethod(_, _, _, _, _) -> {
                         if param_index == 0 && parameter.name == "self" -> context.return_view_receiver_key = param_symbol.id.key

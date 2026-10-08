@@ -4758,6 +4758,65 @@ impl<'a> Checker<'a> {
         );
     }
 
+    fn is_consuming_close_body(&self, receiver_span: Span) -> bool {
+        let method_matches = |methods: &[crate::AST::Func]| methods.iter().any(|method| {
+            method.span == self.current_function_span
+                && method.name == Syntax::RESOURCE_CLOSE
+                && method.params.first().is_some_and(|parameter| {
+                    parameter.name == Syntax::KW_SELF
+                        && parameter.convention == AccessConvention::Move
+                        && parameter.name_span == receiver_span
+                })
+        });
+        let block_matches = |block: &crate::AST::TraitImplBlock| {
+            block.trait_name.rsplit("::").next() == Some(Syntax::TRAIT_CLOSE)
+                && method_matches(&block.methods)
+        };
+        self.items.iter().any(|item| match item {
+            crate::AST::Item::Impl(definition) => definition.trait_name.as_deref()
+                .is_some_and(|name| name.rsplit("::").next() == Some(Syntax::TRAIT_CLOSE))
+                && method_matches(&definition.methods),
+            crate::AST::Item::Struct(definition) => definition.trait_impls.iter().any(&block_matches),
+            crate::AST::Item::Enum(definition) => definition.trait_impls.iter().any(&block_matches),
+            _ => false,
+        })
+    }
+
+    fn reject_partial_close_move(&mut self, place: &ViewPlace, span: Span) -> bool {
+        if place.projections.is_empty() {
+            return false;
+        }
+        let Some(info) = self.lookup(&place.owner.name) else {
+            return false;
+        };
+        let receiver = place.owner.name == Syntax::KW_SELF
+            && info.def_span == place.owner.def_span
+            && info.param_conv == Some(AccessConvention::Move)
+            && self.is_consuming_close_body(place.owner.def_span);
+        let mut owner_ty = info.ty.clone();
+        for (depth, projection) in place.projections.iter().enumerate() {
+            if self.is_resource_type(&owner_ty) && !(depth == 0 && receiver) {
+                let name = Self::place_name(place);
+                self.diags.push(Diagnostic::error(
+                    "E0222",
+                    format!("A part of `{name}` cannot be moved independently"),
+                    format!("`{}` has its own Close implementation, which needs the complete owner; this move would leave it with an empty field", owner_ty.show()),
+                    "Move the Close owner as a whole, or copy the field if its type supports copying".to_string(),
+                    Some(span),
+                ));
+                return true;
+            }
+            let ViewProjection::Field(field) = projection else {
+                break;
+            };
+            let Some(field_ty) = self.projected_field_type(owner_ty, field) else {
+                break;
+            };
+            owner_ty = field_ty;
+        }
+        false
+    }
+
     fn mark_moved_place_with_consumer(
         &mut self,
         place: ViewPlace,
@@ -4768,6 +4827,9 @@ impl<'a> Checker<'a> {
         let name = place.owner.name.clone();
         let place_name = Self::place_name(&place);
         if !tracks_named_move(&name) {
+            return;
+        }
+        if !unmarked && self.reject_partial_close_move(&place, span) {
             return;
         }
         if self.reject_expiring_secret_loan_change(&name, "be moved", span) {

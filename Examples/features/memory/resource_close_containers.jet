@@ -44,11 +44,12 @@ fn listed() {
 
 fn optional(take_inner: Bool, id: Int) {
     held := Val(Secret{id: id, token: "owned"})
-    if take_inner {
-        taken :: ^held ?? return
-        print("take {taken.id}")
-    } else {
-        print("keep")
+    if {
+        take_inner -> {
+            taken :: ^held ?? return
+            print("take {taken.id}")
+        }
+        else -> print("keep")
     }
 }
 
@@ -81,7 +82,7 @@ fn early_remainder(leave: Bool, first_id: Int) {
     held :: Pair<Secret>{first: Secret{id: first_id, token: "owned"}, second: Secret{id: first_id + 1, token: "owned"}}
     taken :: ^held.first
     print("early {taken.id} {held.second.id}")
-    if leave { return }
+    if leave -> return
     print("fallthrough")
 }
 

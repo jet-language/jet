@@ -559,11 +559,9 @@ fn run() {
     };
     let rendered = jet::render_diagnostics("close_pair.jet", src, &diagnostics);
     assert!(diagnostics.iter().any(|diagnostic| {
-        [&diagnostic.what, &diagnostic.why].into_iter().any(|message| {
-            message.contains("cannot lower projected move from")
-                && message.contains("ClosePair")
-                && message.contains("owner has its own Close implementation")
-        })
+        diagnostic.code == "E0222"
+            && diagnostic.why.contains("ClosePair")
+            && diagnostic.why.contains("own Close implementation")
     }), "{rendered}");
     assert!(diagnostics.iter().any(|diagnostic| diagnostic.span.is_some_and(|span| {
         src[span.start..span.end].contains("held.first")
@@ -590,8 +588,40 @@ fn run() {
     };
     let rendered = jet::render_diagnostics("close_leaf.jet", src, &diagnostics);
     assert!(diagnostics.iter().any(|diagnostic| {
-        [&diagnostic.what, &diagnostic.why].into_iter().any(|message| {
-            message.contains("move covers no registered ownership leaf")
-        })
+        diagnostic.code == "E0222"
+            && diagnostic.why.contains("ClosePair")
+            && diagnostic.why.contains("own Close implementation")
     }), "{rendered}");
+}
+
+#[test]
+fn consuming_close_receiver_does_not_exempt_nested_close_owners() {
+    let src = include_str!("ui/E0222_close_receiver_nested.jet");
+    let diagnostics = jet::compile(src)
+        .expect_err("the Close receiver exemption must not extend into a nested Close owner");
+    let rendered = jet::render_diagnostics("close_receiver_nested.jet", src, &diagnostics);
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "E0222"
+            && diagnostic.what.contains("self.value.first")
+            && diagnostic.why.contains("ClosePair")
+    }), "{rendered}");
+}
+
+#[test]
+fn borrowed_close_owner_keeps_the_borrowed_move_diagnostic() {
+    let src = r#"
+struct ClosePair { first: String, second: String }
+impl ClosePair.Close {
+    fn close(^self) { print(self.second) }
+}
+fn borrowed(held: ClosePair) {
+    taken :: ^held.first
+    print(taken)
+}
+fn run() {}
+"#;
+    let diagnostics = jet::compile(src).expect_err("a borrowed field cannot move");
+    let rendered = jet::render_diagnostics("borrowed_close.jet", src, &diagnostics);
+    assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E0201"), "{rendered}");
+    assert!(!diagnostics.iter().any(|diagnostic| diagnostic.code == "E0222"), "{rendered}");
 }
