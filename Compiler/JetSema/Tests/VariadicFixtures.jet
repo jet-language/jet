@@ -29,9 +29,10 @@ fn variadic_fixture_arity(args: [MIRCallArg], arity: Int) {
     }
 }
 
-fn variadic_fixture_mir(program: MIRProgram, require_coercions: Bool) {
+fn variadic_fixture_mir(program: MIRProgram, require_coercions: Bool, require_indirect: Bool) {
     variadic_calls := 0
     trait_calls := 0
+    indirect_calls := 0
     boxes := 0
     materializations := 0
     loop function in program.functions {
@@ -40,6 +41,21 @@ fn variadic_fixture_mir(program: MIRProgram, require_coercions: Bool) {
                 if instruction.operation == {
                     .TraitBox(_, _) -> boxes += 1
                     .Copy(_, fact) -> if fact == MIRCopyFact.ViewMaterialize -> materializations += 1
+                    .IndirectCall(callee, args, _) -> {
+                        loop fact in function.values {
+                            if fact.id.value != callee.value -> next
+                            if fact.ty.kind == .Fn(signature) {
+                                if signature.call_metadata == .Val(metadata) {
+                                    variadic := false
+                                    loop flag in metadata.variadic -> if flag -> variadic = true
+                                    if variadic {
+                                        variadic_fixture_arity(args, signature.params.len())
+                                        indirect_calls += 1
+                                    }
+                                }
+                            }
+                        }
+                    }
                     .Call(callee, args, _) -> {
                         target := if callee == {
                             .User(id) | .Associated(id, _) | .Method(id, _) -> Val(id)
@@ -78,6 +94,7 @@ fn variadic_fixture_mir(program: MIRProgram, require_coercions: Bool) {
     }
     if variadic_calls == 0 -> panic("fixture did not exercise a checked variadic call")
     if require_coercions && (trait_calls == 0 || boxes == 0 || materializations == 0) -> panic("checked trait/fixed-list slot regression did not exercise its carriers")
+    if require_indirect && indirect_calls == 0 -> panic("fixture lost its checked variadic function-value signature")
 }
 
 fn variadic_fixture_accept(file: String, require_coercions: Bool) {
@@ -90,7 +107,7 @@ fn variadic_fixture_accept(file: String, require_coercions: Bool) {
                 if diagnostic.severity == DIAGNOSTIC_ERROR -> panic("{file}: unexpected {diagnostic.code}")
             }
             program :: result.mir ?? panic("{file}: compilation produced no MIR")
-            variadic_fixture_mir(program, require_coercions)
+            variadic_fixture_mir(program, require_coercions, file.ends_with("/variadics_eval_order.jet"))
         }
     }
 }
