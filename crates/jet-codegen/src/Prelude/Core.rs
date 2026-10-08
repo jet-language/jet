@@ -690,6 +690,7 @@ struct JetTestingFailure {
 thread_local! {
     pub static JET_IN_SCHEDULER_TASK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static JET_INTERRUPT_HANDLER_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+    static JET_RUNTIME_PROCESS_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
     static JET_TEST_EXPECT_FAIL: std::cell::RefCell<Vec<JetTestExpectFrame>> = const { std::cell::RefCell::new(Vec::new()) };
     static JET_TEST_EXPECT_COMPLETED: std::cell::RefCell<Vec<(u64, String)>> = const { std::cell::RefCell::new(Vec::new()) };
     static JET_TEST_EXPECT_UNMET: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
@@ -910,9 +911,33 @@ pub fn jet_interrupt_handler_panic_leave() {
     JET_INTERRUPT_HANDLER_DEPTH.with(|depth| depth.set(depth.get().saturating_sub(1)));
 }
 
+// Only a real catcher enables process-root unwinding. Restore the previous
+// depth on every return/unwind, including nested boundaries and host faults.
+struct JetRuntimeProcessBoundary {
+    previous_depth: u32,
+}
+
+impl JetRuntimeProcessBoundary {
+    fn enter() -> Self {
+        let previous_depth = JET_RUNTIME_PROCESS_DEPTH.with(|depth| {
+            let previous = depth.get();
+            depth.set(previous.saturating_add(1));
+            previous
+        });
+        Self { previous_depth }
+    }
+}
+
+impl Drop for JetRuntimeProcessBoundary {
+    fn drop(&mut self) {
+        JET_RUNTIME_PROCESS_DEPTH.with(|depth| depth.set(self.previous_depth));
+    }
+}
+
 fn jet_runtime_should_unwind() -> bool {
     jet_scheduler_in_task()
         || jet_interrupt_handler_should_unwind()
+        || JET_RUNTIME_PROCESS_DEPTH.with(|depth| depth.get() != 0)
         || JET_TEST_EXPECT_FAIL.with(|frames| !frames.borrow().is_empty())
 }
 
@@ -950,12 +975,10 @@ struct JetRenderedRuntimeStop {
 /// (`Codegen/TIR/eval/exprs.rs` `eval_require_failure`).
 ///
 /// Every intentional unwinding frame keeps the typed report: an `#Interrupt`
-/// handler and `jet test`'s expect-fail region catch the rendered stop, while
-/// scheduler tasks receive the program's message above. The ordinary process
-/// path may cross a boundary that cannot carry an unwind. This matters for
-/// debug native dispatch: its `extern "C"` trampoline is a non-unwinding ABI,
-/// so resuming a panic there aborts before `jet_runtime_boundary` can observe
-/// the report. End that path at the shared process boundary instead.
+/// handler, an expect-fail region, and the ordinary process root catch the
+/// rendered stop, while scheduler tasks receive the program's message above.
+/// Debug dispatch catches inside its non-unwinding C trampoline and transports
+/// the payload back to the Rust caller before resuming lexical cleanup.
 fn jet_runtime_stop_unwind(rendered: String, exit_code: i32, message: &str) -> ! {
     if jet_scheduler_in_task() {
         std::panic::resume_unwind(Box::new(message.to_string()));
@@ -974,6 +997,60 @@ fn jet_runtime_stop_unwind(rendered: String, exit_code: i32, message: &str) -> !
 /// run before the final native exit.
 struct JetExplicitExit {
     code: i32,
+}
+
+// The debug callable's caller owns this channel. Only std carrier types cross
+// the candidate shared-object boundary: private report TypeIds belong to the
+// producing artifact. Reports keep their already-rendered bytes and exit code;
+// all other payloads (task/cancellation/host faults) keep their original box.
+type JetNativeDispatchUnwind =
+    Option<Result<(Option<String>, i32), Box<dyn std::any::Any + Send>>>;
+
+fn jet_native_dispatch_boundary<T: Default>(
+    stop: &mut JetNativeDispatchUnwind,
+    run: impl FnOnce() -> T,
+) -> T {
+    let _boundary = JetRuntimeProcessBoundary::enter();
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(run)) {
+        Ok(value) => value,
+        Err(payload) => {
+            let payload = match payload.downcast::<JetRuntimeDiagnostic>() {
+                Ok(report) => {
+                    *stop = Some(Ok((Some(report.rendered), report.exit_code)));
+                    return T::default();
+                }
+                Err(payload) => payload,
+            };
+            let payload = match payload.downcast::<JetRenderedRuntimeStop>() {
+                Ok(report) => {
+                    *stop = Some(Ok((Some(report.rendered), report.exit_code)));
+                    return T::default();
+                }
+                Err(payload) => payload,
+            };
+            *stop = Some(match payload.downcast::<JetExplicitExit>() {
+                Ok(exit) => Ok((None, exit.code)),
+                Err(payload) if payload.is::<JetRuntimeExit>() => Ok((None, 70)),
+                Err(payload) => Err(payload),
+            });
+            // This scalar is transport only. The Rust caller must consume the
+            // stop channel before observing it; no foreign callback uses this.
+            T::default()
+        }
+    }
+}
+
+fn jet_native_dispatch_finish<T>(stop: JetNativeDispatchUnwind, value: T) -> T {
+    match stop {
+        None => value,
+        Some(Ok((Some(rendered), exit_code))) => {
+            std::panic::resume_unwind(Box::new(JetRenderedRuntimeStop { rendered, exit_code }))
+        }
+        Some(Ok((None, code))) => {
+            std::panic::resume_unwind(Box::new(JetExplicitExit { code }))
+        }
+        Some(Err(payload)) => std::panic::resume_unwind(payload),
+    }
 }
 
 // Process-edge callbacks live beside the one boundary so a program that does
@@ -1040,6 +1117,7 @@ fn jet_runtime_boundary<F, T>(run: F) -> T
 where
     F: FnOnce() -> T,
 {
+    let _boundary = JetRuntimeProcessBoundary::enter();
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(run)) {
         Ok(value) => {
             jet_std_os_run_atexit();
