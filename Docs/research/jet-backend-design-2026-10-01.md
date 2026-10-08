@@ -2342,3 +2342,21 @@ require exactly one JSONL row, and compare their complete bytes with each
 other and the existing canonical reference writer. Syntax receipts do not
 establish executed fault-detection parity.
 
+### Source-gate memory ledger test port
+
+`SentryTests.jet::jet_rt_sentry_fixture_source_gate` ports
+`tests/unsafe_sentries.rs:3-28` using the real native scope and checker.
+It enables the `unsafe.jet:12` gate with reason `reads raw storage`, checks
+address 1 for eight bytes/alignment 1 under strict provenance, and requires
+R0801 with the source metadata retained before scope leave/reset.
+
+`node Compiler/JetRuntime/Tests/run-sentry-source-gate.mjs OUT REAL_FIXTURE`
+runs the composed `world-sentry-fixture` client's `source-gate` mode with a
+fresh isolated ledger path. It requires exit 0 and empty stdout/stderr, then
+the original six ledger substring predicates: schema, kind sentry, code
+R0801, source unsafe.jet, source-Unsafe-gate provenance, and the derive-from-live-
+storage repair. It additionally requires exactly one row to guard the
+fault-detection/stop separation. The client must be composed with the actual
+SentryTests source; no Rust driver or fabricated ledger writer is used.
+Native execution is not established by the syntax receipt.
+

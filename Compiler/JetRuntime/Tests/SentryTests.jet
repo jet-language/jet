@@ -180,3 +180,28 @@ fn sentry_test_leave(save: I64) {
     jet_rt_free(save, I64{32}, I64{8})
     I64{0}
 }
+// tests/unsafe_sentries.rs:3-28, the real non-stopping source-gate witness.
+#Export(c) fn jet_rt_sentry_fixture_source_gate() -> I64 {
+    sentry_test_reset()
+    file :: jet_rt_string_builder_new()
+    rt_text_push_word(file, I64{7651164307345075829}, I64{8}) // unsafe.j
+    rt_text_push_word(file, I64{29797}, I64{2}) // et
+    reason :: jet_rt_string_builder_new()
+    rt_text_push_word(reason, I64{7021710449001457010}, I64{8}) // reads ra
+    rt_text_push_word(reason, I64{7449361081668149367}, I64{8}) // w storag
+    rt_text_push_word(reason, I64{101}, I64{1})
+    save :: jet_rt_alloc(I64{56}, I64{8})
+    jet_rt_sentry_scope_enter(save, I64{1}, I64{0}, rt_text_data(file), rt_text_len(file), I64{12}, rt_text_data(reason), rt_text_len(reason))
+    fault :: jet_rt_sentry_check(I64{1}, I64{8}, I64{1}, I64{1})
+    sentry_test_require(fault == I64{1} && sentry_code(fault) == I64{1})
+    // The native fault retains its source through the live borrowed gate.
+    sentry_test_require(sync_load(thread_base() + I64{136}) == rt_text_data(file))
+    sentry_test_require(sync_load(thread_base() + I64{144}) == I64{10})
+    sentry_test_require(sync_load(thread_base() + I64{152}) == I64{12})
+    jet_rt_sentry_scope_leave(save)
+    sentry_test_reset()
+    jet_rt_free(save, I64{56}, I64{8})
+    jet_rt_string_drop(file)
+    jet_rt_string_drop(reason)
+    I64{0}
+}
