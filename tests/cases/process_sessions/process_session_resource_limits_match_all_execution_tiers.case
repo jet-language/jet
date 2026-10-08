@@ -1,0 +1,24 @@
+# Port of tests/process_sessions.rs:442-488; original cfg(any(unix,windows)) native hosts.
+# Source verbatim after original format/builder selection; ORACLE-LITERAL; PENDING-SAME-HEAD.
+# have_rustc guard erased; all assertions remain in the case.
+fixture: subjects
+step: jet build session_fixture.jet
+exit: 0
+copy: .jet/build/session_fixture session_fixture
+step: jet run resource-builders.jet
+exit: 0
+capture: resource_builders = text stdout.trim
+write: run.jet process_session_resource_limits_match_all_execution_tiers.source
+step default: jet run run.jet
+exit: 0
+stdout: = process_session_resource_limits_match_all_execution_tiers.out
+step: jet run --interpret run.jet
+exit: == default
+stdout: == default
+stderr: == default
+step: jet build run.jet
+exit: 0
+step: built
+exit: == default
+stdout: == default
+stderr: == default

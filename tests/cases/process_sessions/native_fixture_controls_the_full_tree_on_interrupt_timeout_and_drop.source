@@ -1,0 +1,60 @@
+
+use core.process as process
+use core.time as time
+
+fn dropped(fixture: String, pid: String) {
+    child :: process.cmd([fixture, "tree", pid]).terminal().spawn() ?? panic("drop spawn failed")
+    time.sleep(100ms)
+}
+
+fn run() {
+    session :: process.current_pid()
+
+    interrupt_pid := "{work}/session-{session}-interrupt.pid"
+    interrupt :: process.cmd(["{work}/session_fixture", "tree", interrupt_pid]).terminal().spawn() ?? panic("interrupt spawn failed")
+    time.sleep(100ms)
+    interrupt.interrupt() ?? panic("interrupt failed")
+    interrupt_result :: interrupt.wait() ?? panic("interrupt wait failed")
+    print(interrupt_result.success)
+    if interrupt.stdin.write("late") == {
+        .Ok(_) -> panic("interrupt cleanup left stdin open")
+        .Err(error) -> {
+            if error == { .Closed(_) -> {} else -> panic("interrupt cleanup was not typed") }
+        }
+    }
+
+    terminate_pid := "{work}/session-{session}-terminate.pid"
+    terminate :: process.cmd(["{work}/session_fixture", "tree", terminate_pid]).terminal().spawn() ?? panic("terminate spawn failed")
+    time.sleep(100ms)
+    terminate.terminate() ?? panic("terminate failed")
+    terminate_result :: terminate.wait() ?? panic("terminate wait failed")
+    print(terminate_result.success)
+    if terminate.stdin.write("late") == {
+        .Ok(_) -> panic("terminate cleanup left stdin open")
+        .Err(error) -> {
+            if error == { .Closed(_) -> {} else -> panic("terminate cleanup was not typed") }
+        }
+    }
+
+    kill_pid := "{work}/session-{session}-kill.pid"
+    kill :: process.cmd(["{work}/session_fixture", "tree", kill_pid]).terminal().spawn() ?? panic("kill spawn failed")
+    time.sleep(100ms)
+    kill.kill() ?? panic("kill failed")
+    kill_result :: kill.wait() ?? panic("kill wait failed")
+    print(kill_result.success)
+    if kill.stdin.write("late") == {
+        .Ok(_) -> panic("kill cleanup left stdin open")
+        .Err(error) -> {
+            if error == { .Closed(_) -> {} else -> panic("kill cleanup was not typed") }
+        }
+    }
+
+    timeout :: Duration.milliseconds(100) ?? panic("duration failed")
+    timeout_pid := "{work}/session-{session}-timeout.pid"
+    timed :: process.cmd(["{work}/session_fixture", "tree", timeout_pid]).terminal().timeout(timeout).run() ?? panic("timeout failed")
+    print(timed.timed_out)
+
+    drop_pid := "{work}/session-{session}-drop.pid"
+    dropped("{work}/session_fixture", drop_pid)
+    print("drop returned")
+}

@@ -1,0 +1,23 @@
+# Port of tests/process_sessions.rs:154-197; source verbatim after original format expansion.
+# ORACLE-LITERAL; PENDING-SAME-HEAD; have_rustc guard erased.
+requires: os:unix
+requires: tool:sh
+requires: tool:cat
+fixture: process_stdin_text_propagates_child_status_across_execution_tiers.fixture
+step: jet run canonical-shell.jet
+exit: 0
+capture: shell = text stdout.trim
+write: run.jet process_stdin_text_propagates_child_status_across_execution_tiers.source
+step default: jet run run.jet
+exit: 0
+stdout: = process_stdin_text_propagates_child_status_across_execution_tiers.out
+step: jet run --interpret run.jet
+exit: == default
+stdout: == default
+stderr: == default
+step: jet build run.jet
+exit: 0
+step: built
+exit: == default
+stdout: == default
+stderr: == default

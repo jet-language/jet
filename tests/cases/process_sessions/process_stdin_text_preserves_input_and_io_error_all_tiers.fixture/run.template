@@ -1,0 +1,22 @@
+
+use core.process as process
+
+fn run() {
+    session :: process.current_pid()
+    path := "{work}/stdin-{session}.txt"
+    process.stdin_text(
+        process.cmd(["sh", "-c", "cat > \"$1\"", "sh", path]),
+        "exact stdin\nbytes\n"
+    ) ?? panic("stdin text failed")
+    print("stdin:sent")
+
+    if process.stdin_text(process.cmd(["sh", "-c", "exit 0"]), "__JET_PAYLOAD__") == {
+        .Ok(_) -> print("write:missed")
+        .Err(error) -> {
+            if error == {
+                .Closed(_) -> print("write:closed")
+                else -> print("write:wrong")
+            }
+        }
+    }
+}
