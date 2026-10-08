@@ -1135,12 +1135,16 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
     // Check the original statement rows before transferring them to the TFunc.
     // Contracts wrap those rows but must not change the fallthrough check.
     if returns_value && !sema_stmt_check_value_block_end(func.body, statements.value, Val(effective_return), func.span, context.function_name, &diagnostics) -> complete = false
-    body := [TStmt]{}
+    reversed := [TStmt]{}
     loop statements.value.len() > 0 {
         statement := &statements.value.pop() ?? { break }
+        &reversed.push(^statement)
+    }
+    body := [TStmt]{}
+    loop reversed.len() > 0 {
+        statement := &reversed.pop() ?? { break }
         &body.push(^statement)
     }
-    &body.reverse()
     if contract.complete && contract.post.len() > 0 {
         body = [TStmt]{TStmt.ContractScope{pre: [TContract]{}, body: ^body, post: contract.post, result: contract.result, span: func.span}}
     }
