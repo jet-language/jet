@@ -562,6 +562,12 @@ dropped after the call; a returned handle is dropped after conversion. Records
 render through their runtime type's own Display, Show and Debug, as generated
 Rust does, and a failing entry's `Err` reaches `jet_rt_entry_error_exit_err` the
 same way.
+Qualified Core record nominals resolve through their checked MIR declaration
+identity to the runtime's short-name row, then must match the stored-member
+schema. No suffix-only match authorizes a user type. Thus `core.files.list_dir`
+rebuilds native, qualified `DirEntry` list elements rather than refusing the
+runtime's `DirEntry` handle carrier; the qualified-record fixtures also retain
+user-nominal and changed-schema refusals.
 Recursive record collection members use generated `jet_rt_record_seq_*`
 holders while crossing the boundary. Byte lists, record lists and `(key:
 String, value: Record)` entry lists retain their native List layouts; the

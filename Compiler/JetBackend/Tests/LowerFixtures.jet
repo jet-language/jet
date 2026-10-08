@@ -753,6 +753,11 @@ fn run() {
         print("issue opaque-enum: rejection checks failed")
         clean = false
     }
+    if !fx_qualified_record_identity_checks() {
+        print("issue qualified-record-identity: canonical Core identity or schema refusal failed")
+        clean = false
+    }
+    if !fx_report_runtime("qualified-dir-entries", fx_qualified_dir_entries()) -> clean = false
     if !fx_runtime_bitcast_refusals() {
         print("issue runtime-bitcast: scalar layout/drop refusals failed")
         clean = false
