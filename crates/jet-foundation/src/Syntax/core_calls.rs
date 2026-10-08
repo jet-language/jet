@@ -674,6 +674,9 @@ const fn effect_leaf_for(module: &str, method: &str) -> Option<&'static str> {
                 "write_all",
                 "write_text",
                 "close",
+                "__read",
+                "__write",
+                "__write_all",
             ],
         ))
         || (same_text(module, "core.http.client")
@@ -1491,7 +1494,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 42f9fc74558a69d39979b6b7fd7b261a42b9d0974722a5f155f27e2b60d5adff
+// Source SHA-256: c8ac0c7f27809432528474c10aad17f9709de626d47b9e62fce0b21d541f8e60
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -1709,8 +1712,8 @@ pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.net", "__udp_recv_from"),
     ("core.net", "__udp_send_bytes_to"),
     ("core.net", "__udp_receive"),
-    ("core.net.ws", "connect"),
-    ("core.net.ws", "upgrade"),
+    ("core.net.ws", "__connect"),
+    ("core.net.ws", "__upgrade"),
     ("core.db", "policy_audit"),
     ("core.db", "pool"),
     ("core.db", "open"),
@@ -2776,16 +2779,22 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.net", "__dns_srv_lookup", "jet_net_dns_srv_lookup", true, &[true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.net", "__dns_srv_at_lookup", "jet_net_dns_srv_at_lookup", true, &[true, true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.net.tls", "client", "jet_net_tls_client", false, &[false, true], ) .with_max_arity(4) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .without_direct_aot(),
-    CoreCallRecord::new("core.net.tls", "read", "jet_net_tls_read_bytes", true, &[true, false]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.net.tls", "write", "jet_net_tls_write_bytes", true, &[true, true]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_native_int_result(),
-    CoreCallRecord::new("core.net.tls", "write_all", "jet_net_tls_write_all_bytes", true, &[true, true]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::source_owned("core.net.tls", "read", &[true, false]),
+    CoreCallRecord::new("core.net.tls", "__read", "jet_net_tls_read_bytes", true, &[true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::source_owned("core.net.tls", "write", &[true, true]),
+    CoreCallRecord::new("core.net.tls", "__write", "jet_net_tls_write_bytes", true, &[true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).with_native_int_result(),
+    CoreCallRecord::source_owned("core.net.tls", "write_all", &[true, true]),
+    CoreCallRecord::new("core.net.tls", "__write_all", "jet_net_tls_write_all_bytes", true, &[true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.net", "dns_srv_target", "jet_net_dns_srv_target", true, &[true], ) .with_pure_route(CoreCallPureRoute::Net),
     CoreCallRecord::new( "core.net", "dns_srv_port", "jet_net_dns_srv_port", true, &[true], ) .with_pure_route(CoreCallPureRoute::Net) .with_native_int_result(),
     CoreCallRecord::new( "core.net", "dns_srv_priority", "jet_net_dns_srv_priority", true, &[true], ) .with_pure_route(CoreCallPureRoute::Net) .with_native_int_result(),
     CoreCallRecord::new( "core.net", "dns_srv_weight", "jet_net_dns_srv_weight", true, &[true], ) .with_pure_route(CoreCallPureRoute::Net) .with_native_int_result(),
-    CoreCallRecord::new("core.http", "router", "jet_http_router_new", true, &[]),
-    CoreCallRecord::new( "core.http", "parse", "jet_http_parse_request", true, &[true], ),
-    CoreCallRecord::new( "core.http", "dispatch", "jet_http_router_dispatch", true, &[true, false], ),
+    CoreCallRecord::source_owned("core.http", "router", &[]),
+    CoreCallRecord::new("core.http", "__router", "jet_http_router_new", true, &[]),
+    CoreCallRecord::source_owned("core.http", "parse", &[true]),
+    CoreCallRecord::new("core.http", "__parse", "jet_http_parse_request", true, &[true]),
+    CoreCallRecord::source_owned("core.http", "dispatch", &[true, false]),
+    CoreCallRecord::new("core.http", "__dispatch", "jet_http_router_dispatch", true, &[true, false]),
     CoreCallRecord::new("core.http", "reason_phrase", "jet_http_reason_phrase", true, &[false]),
     CoreCallRecord::new("core.http", "basic_auth", "jet_http_basic_auth", true, &[true, true]),
     CoreCallRecord::new("core.http", "bearer_auth", "jet_http_bearer_auth", true, &[true]),
@@ -3120,8 +3129,10 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::source_owned("core.http.server", "request_id", &[true]),
     CoreCallRecord::new("core.http.server", "__request_id", "jet_http_srv_install_request_id", false, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::receiver_with_symbol(&["HTTPMux"], "middleware", "jet_http_mux_middleware", false, &[true, false]),
-    CoreCallRecord::new("core.net.ws", "connect", "jet_ws_connect", false, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.net.ws", "upgrade", "jet_ws_upgrade", false, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::source_owned("core.net.ws", "connect", &[true]),
+    CoreCallRecord::new("core.net.ws", "__connect", "jet_ws_connect", false, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::source_owned("core.net.ws", "upgrade", &[true]),
+    CoreCallRecord::new("core.net.ws", "__upgrade", "jet_ws_upgrade", false, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.time", "new", "JetDate::new", false, &[false, false, false], ) .with_pure_route(CoreCallPureRoute::Date) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .without_direct_aot(),
     CoreCallRecord::new( "core.time", "from_timestamp", "JetDateTime::from_timestamp", false, &[false], ) .with_pure_route(CoreCallPureRoute::DateTime) .without_direct_aot(),
     CoreCallRecord::new( "core.time", "parse_time", "JetLocalTime::parse", false, &[true], ) .with_pure_route(CoreCallPureRoute::Time) .without_direct_aot(),

@@ -3465,6 +3465,9 @@ HTTP client `get`, `post`, and `request`, and server `mux`, `serve_once`,
 `request_id` likewise enter their Jet source functions before the reserved
 raw leaves. Existing specialized public admission remains unchanged;
 callback-bearing host leaves retain their original unsupported AOT tiers.
+HTTP router creation, parsing, and dispatch, TLS byte I/O, and WebSocket
+connect/upgrade are also source-owned; the reserved transport/carrier leaves
+keep their old effects (including no new WebSocket effect) and tier support.
 
 DNS error classification is Jet source policy. Reserved Core-only
 `__dns_*_lookup` leaves call the existing resolver and return its raw string
