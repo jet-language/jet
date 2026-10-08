@@ -60,6 +60,10 @@ with a fresh canonical computation for the same image. Run that check separately
 from the timed hello processes: its intentional recomputation is not startup
 work. Source edits may change a candidate's compiler identity; reuse must not
 change the identity of the same artifact, or the emitted hello output.
+Bootstrap backend builds honor `CARGO_TARGET_DIR` for the compiler and fixture
+artifacts; when it is unset they use the checkout's `target` directory. Pass the
+same explicit target into the detached build environment, not merely the shell
+that launches it.
 
 Before measuring, the main agent must admit a written pre-flight. Use the same
 trusted hello project, build profile, environment and machine for both compiler
