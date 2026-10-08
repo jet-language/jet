@@ -84,6 +84,16 @@ tables: `types`, `core_owners`, `modules`, and `handles`. Its index is built onc
 for every ABI query in a native compile, then released with the view. The full
 native compiler image and its identity/root checks are unchanged.
 
+The immutable compiler-image owner also caches its canonical execution identity.
+Restore computes and checks that identity against the archived identity once;
+adapter descriptors, callable templates and callback activation reuse that same
+artifact-bound identity instead of rehashing source maps. The bootstrap harness
+mode `image-identity-check` checks cache ownership and compares the cached bytes
+with a fresh canonical computation for the same image. Run that check separately
+from the timed hello processes: its intentional recomputation is not startup
+work. Source edits may change a candidate's compiler identity; reuse must not
+change the identity of the same artifact, or the emitted hello output.
+
 Before measuring, the main agent must admit a written pre-flight. Use the same
 trusted hello project, build profile, environment and machine for both compiler
 artifacts. Persist every process's stdout/stderr and exit status through the
