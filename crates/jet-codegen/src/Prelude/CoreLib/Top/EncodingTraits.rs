@@ -680,27 +680,6 @@ fn jet_enc_json_to_string_pretty<T: __jet_Encode>(v: &T) -> Result<String, jet_s
     Ok(jet_std::render_datatree_json(&tree, true, 0))
 }
 
-fn jet_enc_json_to_string_shape<T: __jet_Encode>(
-    value: &T,
-    projection: &ShapeProjection,
-) -> Result<String, Vec<jet_std::FieldError>> {
-    if projection.kind != ShapeProjectionKind::Json {
-        return Err(jet_std::FieldError::one("JSON needs a JSON shape projection"));
-    }
-    let projected = jet_std::jet_datatree_project(&value.jet_encode(), projection)?;
-    Ok(jet_std::render_datatree_json(&projected, false, 0))
-}
-
-fn jet_enc_json_to_string_shape_pretty<T: __jet_Encode>(
-    value: &T,
-    projection: &ShapeProjection,
-) -> Result<String, Vec<jet_std::FieldError>> {
-    if projection.kind != ShapeProjectionKind::Json {
-        return Err(jet_std::FieldError::one("JSON needs a JSON shape projection"));
-    }
-    let projected = jet_std::jet_datatree_project(&value.jet_encode(), projection)?;
-    Ok(jet_std::render_datatree_json(&projected, true, 0))
-}
 fn jet_enc_json_decode<T: __jet_Decode>(text: &String) -> Result<T, Vec<jet_std::FieldError>> {
     let tree = jet_std::parse_json_typed_datatree(text).map_err(|e| {
         let line = e.line.ok().unwrap_or(0);
