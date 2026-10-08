@@ -1527,3 +1527,76 @@ impl WorldDelta.Sub {
     left :: ScreenPoint{x: 1.0, y: 2.0, frame_id: 7}
     assert_eq((left + delta).frame_id, 7)
 }
+
+struct ViewPoint { x: Float, y: Float, frame_id: Int }
+struct ViewDelta { x: Float, y: Float, frame_id: Int }
+struct CameraPoint { x: Float, y: Float, frame_id: Int }
+struct CameraDelta { x: Float, y: Float, frame_id: Int }
+impl ViewPoint {
+    fn new(x: Float, y: Float) -> ViewPoint Never! { ViewPoint{x: x, y: y, frame_id: 0} }
+}
+impl ViewDelta {
+    fn new(x: Float, y: Float) -> ViewDelta Never! { ViewDelta{x: x, y: y, frame_id: 0} }
+}
+impl CameraPoint {
+    fn new(x: Float, y: Float) -> CameraPoint Never! { CameraPoint{x: x, y: y, frame_id: 0} }
+}
+impl CameraDelta {
+    fn new(x: Float, y: Float) -> CameraDelta Never! { CameraDelta{x: x, y: y, frame_id: 0} }
+}
+impl ViewPoint.Add(ViewDelta) {
+    fn add(self, rhs: ViewDelta) -> ViewPoint Never! { ViewPoint{x: self.x + rhs.x, y: self.y + rhs.y, frame_id: self.frame_id} }
+}
+impl ViewPoint.Sub {
+    fn sub(self, rhs: ViewPoint) -> ViewDelta Never! { ViewDelta{x: self.x - rhs.x, y: self.y - rhs.y, frame_id: self.frame_id} }
+}
+impl ViewPoint.Sub(ViewDelta) {
+    fn sub(self, rhs: ViewDelta) -> ViewPoint Never! { ViewPoint{x: self.x - rhs.x, y: self.y - rhs.y, frame_id: self.frame_id} }
+}
+impl ViewDelta.Add {
+    fn add(self, rhs: ViewDelta) -> ViewDelta Never! { ViewDelta{x: self.x + rhs.x, y: self.y + rhs.y, frame_id: self.frame_id} }
+}
+impl ViewDelta.Add(ViewPoint) {
+    fn add(self, rhs: ViewPoint) -> ViewPoint Never! { ViewPoint{x: self.x + rhs.x, y: self.y + rhs.y, frame_id: self.frame_id} }
+}
+impl ViewDelta.Sub {
+    fn sub(self, rhs: ViewDelta) -> ViewDelta Never! { ViewDelta{x: self.x - rhs.x, y: self.y - rhs.y, frame_id: self.frame_id} }
+}
+impl CameraPoint.Add(CameraDelta) {
+    fn add(self, rhs: CameraDelta) -> CameraPoint Never! { CameraPoint{x: self.x + rhs.x, y: self.y + rhs.y, frame_id: self.frame_id} }
+}
+impl CameraPoint.Sub {
+    fn sub(self, rhs: CameraPoint) -> CameraDelta Never! { CameraDelta{x: self.x - rhs.x, y: self.y - rhs.y, frame_id: self.frame_id} }
+}
+impl CameraPoint.Sub(CameraDelta) {
+    fn sub(self, rhs: CameraDelta) -> CameraPoint Never! { CameraPoint{x: self.x - rhs.x, y: self.y - rhs.y, frame_id: self.frame_id} }
+}
+impl CameraDelta.Add {
+    fn add(self, rhs: CameraDelta) -> CameraDelta Never! { CameraDelta{x: self.x + rhs.x, y: self.y + rhs.y, frame_id: self.frame_id} }
+}
+impl CameraDelta.Add(CameraPoint) {
+    fn add(self, rhs: CameraPoint) -> CameraPoint Never! { CameraPoint{x: self.x + rhs.x, y: self.y + rhs.y, frame_id: self.frame_id} }
+}
+impl CameraDelta.Sub {
+    fn sub(self, rhs: CameraDelta) -> CameraDelta Never! { CameraDelta{x: self.x - rhs.x, y: self.y - rhs.y, frame_id: self.frame_id} }
+}
+#Test("View and camera coordinate arithmetic retains left frame") {
+    point :: ViewPoint.new(2.0, 3.0)
+    delta :: ViewDelta.new(4.0, 5.0)
+    assert_eq((point + delta).x, 6.0)
+    assert_eq((point - point).y, 0.0)
+    assert_eq((point - delta).x, -2.0)
+    assert_eq((delta + point).y, 8.0)
+    assert_eq((delta + delta).y, 10.0)
+    assert_eq((delta - delta).y, 0.0)
+    camera :: CameraPoint.new(7.0, 8.0)
+    shift :: CameraDelta.new(3.0, 4.0)
+    assert_eq((camera + shift).x, 10.0)
+    assert_eq((camera - camera).y, 0.0)
+    assert_eq((camera - shift).x, 4.0)
+    assert_eq((shift + camera).y, 12.0)
+    assert_eq((shift + shift).x, 6.0)
+    assert_eq((shift - shift).y, 0.0)
+    assert_eq(camera.frame_id, 0)
+    assert_eq((ViewDelta{x: 1.0, y: 2.0, frame_id: 9} + point).frame_id, 9)
+}
