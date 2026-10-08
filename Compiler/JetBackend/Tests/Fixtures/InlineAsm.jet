@@ -4,6 +4,8 @@
 // expect-stdout inline-asm-call: "42\n"
 // expect-stdout inline-asm-call-two: "42\n"
 // expect-stdout inline-asm-call-unit: "42\n73\n"
+// expect-stdout inline-asm-call-one-unit: "4\n73\n"
+// expect-stdout inline-asm-call-two-unit: "42\n73\n"
 // expect-stdout inline-asm-call-three-unit: "421\n73\n"
 // expect-stdout inline-asm-fixed: "ok\nok\n682863\n42\n42\n111\n0\n"
 // expect-stdout inline-asm-int-input: ""
@@ -190,11 +192,20 @@ fn fx_inline_asm_print_word(builder: &LIRFunctionBuilder, value: LIRValueID, pri
 
 // The exact audited OS Unit leaf calls a real native LIR callback. Its own
 // signature and the callback both have NO result; no incidental RAX is read.
-// The three-word callback encodes argument order, while the caller's marker
+// Every nonzero arity encodes argument order, while the caller's marker
 // remains live across the call and the callback's actual runtime calls.
-fn fx_inline_asm_call_unit(three: Bool) -> LIRModule Never! {
-    name :: if three -> "os_call_address_three_unit" else -> "os_call_address_unit"
-    params :: if three -> [String]{"address", "first", "second", "third"} else -> [String]{"address"}
+fn fx_inline_asm_call_unit(arity: Int) -> LIRModule Never! {
+    name :: if arity == {
+        0 -> "os_call_address_unit"
+        1 -> "os_call_address_one_unit"
+        2 -> "os_call_address_two_unit"
+        3 -> "os_call_address_three_unit"
+        else -> panic("Unit assembly witness needs arity zero through three")
+    }
+    params := [String]{"address"}
+    if arity >= 1 -> &params.push("first")
+    if arity >= 2 -> &params.push("second")
+    if arity >= 3 -> &params.push("third")
     lowered :: lir_lower_callables(fx_asm_program([MIRFunction]{fx_asm_leaf(name, params, false)}), [MIRFunctionID]{mir_function_id(name)})
     if lowered.issues.len() > 0 -> panic("Unit assembly callable refused: {lowered.issues}")
     p := lowered.lir
@@ -206,29 +217,22 @@ fn fx_inline_asm_call_unit(three: Bool) -> LIRModule Never! {
     &p.signatures.push(LIRSignature{id: line_signature, convention: LIRCallConv.SystemV, params: [LIRLayout]{lir_layout_word(), lir_layout_bool()}, result: None})
     callback_id :: LIRFunctionID{value: p.functions.len()}
     callback_signature :: LIRSignatureID{value: p.signatures.len()}
-    callback_layouts :: if three -> [LIRLayout]{lir_layout_word(), lir_layout_word(), lir_layout_word()} else -> [LIRLayout]{}
+    callback_layouts :: loop _ in 0..<arity -> lir_layout_word()
     &p.signatures.push(LIRSignature{id: callback_signature, convention: LIRCallConv.SystemV, params: callback_layouts, result: None})
     callback := lir_builder(callback_id, "asm-unit-callback", callback_signature)
-    callback_args := [LIRValueID]{}
-    output := lir_builder_word(&callback)
-    if three {
-        first :: lir_builder_word(&callback)
-        second :: lir_builder_word(&callback)
-        third :: lir_builder_word(&callback)
-        callback_args = [LIRValueID]{first, second, third}
-        hundred :: lir_builder_word(&callback)
+    callback_args :: loop _ in 0..<arity -> lir_builder_word(&callback)
+    output := if arity == 0 -> lir_builder_word(&callback) else -> callback_args[0]
+    if arity == 0 -> lir_builder_push(&callback, LIRInst.Const{dst: output, value: 42})
+    if arity > 1 {
         ten :: lir_builder_word(&callback)
-        hundreds :: lir_builder_word(&callback)
-        tens :: lir_builder_word(&callback)
-        prefix :: lir_builder_word(&callback)
-        lir_builder_push(&callback, LIRInst.Const{dst: hundred, value: 100})
         lir_builder_push(&callback, LIRInst.Const{dst: ten, value: 10})
-        lir_builder_push(&callback, LIRInst.Binary{dst: hundreds, op: LIRBinaryOp.Mul, left: first, right: hundred})
-        lir_builder_push(&callback, LIRInst.Binary{dst: tens, op: LIRBinaryOp.Mul, left: second, right: ten})
-        lir_builder_push(&callback, LIRInst.Binary{dst: prefix, op: LIRBinaryOp.Add, left: hundreds, right: tens})
-        lir_builder_push(&callback, LIRInst.Binary{dst: output, op: LIRBinaryOp.Add, left: prefix, right: third})
-    } else {
-        lir_builder_push(&callback, LIRInst.Const{dst: output, value: 42})
+        loop index in 1..<arity {
+            prefix :: lir_builder_word(&callback)
+            digit :: lir_builder_word(&callback)
+            lir_builder_push(&callback, LIRInst.Binary{dst: prefix, op: LIRBinaryOp.Mul, left: output, right: ten})
+            lir_builder_push(&callback, LIRInst.Binary{dst: digit, op: LIRBinaryOp.Add, left: prefix, right: callback_args[index]})
+            output = digit
+        }
     }
     fx_inline_asm_print_word(&callback, output, print_signature, line_signature)
     lir_builder_seal(&callback, LIRBlockID{value: 0}, callback_args, LIRTerminator.Return{value: None})
@@ -246,14 +250,11 @@ fn fx_inline_asm_call_unit(three: Bool) -> LIRModule Never! {
     marker :: lir_builder_word(&entry)
     lir_builder_push(&entry, LIRInst.Const{dst: marker, value: 73})
     call_args := [LIRValueID]{word}
-    if three {
-        first :: lir_builder_word(&entry)
-        second :: lir_builder_word(&entry)
-        third :: lir_builder_word(&entry)
-        lir_builder_push(&entry, LIRInst.Const{dst: first, value: 4})
-        lir_builder_push(&entry, LIRInst.Const{dst: second, value: 2})
-        lir_builder_push(&entry, LIRInst.Const{dst: third, value: 1})
-        call_args = [LIRValueID]{word, first, second, third}
+    loop index in 0..<arity {
+        argument :: lir_builder_word(&entry)
+        value :: if index == 0 -> 4 else -> if index == 1 -> 2 else -> 1
+        lir_builder_push(&entry, LIRInst.Const{dst: argument, value: value})
+        &call_args.push(argument)
     }
     lir_builder_push(&entry, LIRInst.Call{dst: None, signature: p.functions[0].signature, callee: LIRCallee.Function{id: p.functions[0].id}, args: call_args})
     fx_inline_asm_print_word(&entry, marker, print_signature, line_signature)
