@@ -11,6 +11,7 @@ use jet_foundation.[
     AppAuthorizedDirectory,
     AppAuthorizedDirectoryEntry,
     CompilerThreads,
+    CORE_SOURCE_OWNED_ROWS,
 ]
 use jet_driver.[
     JetDriverAuthorizedSourceFile,
@@ -263,7 +264,7 @@ pub enum JetCLICoreSources {
 pub fn jet_cli_core_sources() -> JetCLICoreSources Never! {
     toolchain :: cli_sys.get(JET_CLI_TOOLCHAIN_ROOT_ENV) ?? return JetCLICoreSources.Missing{what: "`{JET_CLI_TOOLCHAIN_ROOT_ENV}` is not set, so the Core library sources can't be found", fix: "set `{JET_CLI_TOOLCHAIN_ROOT_ENV}` to the Jet toolchain source tree, the directory that holds `Core/`"}
     core_sources := [JetDriverCoreSource]{}
-    loop row in JET_CLI_CORE_SOURCE_ROWS {
+    loop row in CORE_SOURCE_OWNED_ROWS {
         core_path :: jet_cli_authority_path(toolchain, row.path)
         body :: cli_files.read(core_path) ?? return JetCLICoreSources.Missing{what: "can't read the Core library source `{core_path}`", fix: "set `{JET_CLI_TOOLCHAIN_ROOT_ENV}` to the Jet toolchain source tree, the directory that holds `Core/`"}
         &core_sources.push(JetDriverCoreSource{module_name: row.module_name, alias: row.alias, path: row.path, owner: row.owner, owned_members: row.owned_members, source: body})
