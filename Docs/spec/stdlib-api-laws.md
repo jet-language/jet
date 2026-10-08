@@ -479,3 +479,10 @@ node Tools/agent/check-core-surface-ledger.mjs --core-api-release-check
 `--check` proves the source-derived inventory and frozen record shape. The
 release check requires complete measured evidence and an accepted Jet win for
 every manifest entry.
+
+## Atomic scalar representation (D-PLACE1=A, D-ATOMIC-WIDTH1=A)
+
+`Atomic<Bool>`, `Atomic<I32>`, `Atomic<U32>`, `Atomic<I64>`, `Atomic<U64>` and
+`Atomic<Int>` each store one inline, 8-byte, 8-aligned atomic word. The MIR
+layout is identical for all six admitted scalar types, including signed
+`I64`; an unsupported scalar does not acquire an atomic layout.
