@@ -1,0 +1,71 @@
+// The same driver is assembled with plain and optimized emit helpers.
+// Exact output is the oracle; no timer or output check changes either arm.
+use core.time as time
+
+fn emit_text_regressions() {
+    found :: jet_rust_emit_value_mentions("x__jet_v_1 __jet_v_22 __jet_v___jet_v_3 (__jet_v_4)")
+    assert(found.len() == 2)
+    assert(found[0].id == "22")
+    assert(found[0].column == 11)
+    assert(found[1].id == "4")
+    identifiers :: jet_rust_emit_fold_identifiers("__jet_a .__jet_field x__jet_joined __jet_a __jet_a__jet_b \"__jet_quoted\"")
+    assert(identifiers.names.len() == 3)
+    assert(identifiers.names[0] == "__jet_a")
+    assert(identifiers.counts.get("__jet_a") == .Val(2))
+    assert(identifiers.names[1] == "__jet_a__jet_b")
+    assert(identifiers.names[2] == "__jet_quoted")
+    assert(jet_rust_emit_fold_find("abcabc".bytes(), "bc".bytes(), 2) == 4)
+    assert(jet_rust_emit_fold_find("abc".bytes(), "abcd".bytes(), 0) == -1)
+    assert(jet_rust_emit_fold_find("abc".bytes(), "".bytes(), 3) == 3)
+    compact :: jet_rust_emit_compact_function_text([String]{
+        "fn sample() {{",
+        "    __jet_v_01 = __jet_v_1; __jet_v_01 = __jet_l_1;",
+        "    let text = \"__jet_v_99 λ\"; // __jet_v_88",
+        "    let raw = r###\"__jet_v_77\"###; /* __jet_v_66 */",
+        "    'jet_block_8: loop {{ break 'jet_block_8; }}",
+        "    __jet_v_18446744073709551615 = __jet_v_1;",
+        "}}",
+    }, 1)
+    assert(compact[1] == " _v0 = _v1; _v0 = _l0;")
+    assert(compact[2] == " let text = \"__jet_v_99 λ\"; // __jet_v_88")
+    assert(compact[3] == " let raw = r###\"__jet_v_77\"###; /* __jet_v_66 */")
+    assert(compact[4] == " 'b0: loop {{ break 'b0; }}")
+    assert(compact[5] == " _v2 = _v1;")
+    quoted :: jet_rust_emit_compact_function_text([String]{"fn text() {{", "    let s = \"one", "        __jet_v_7\";", "    __jet_v_8 = 0;", "}}"}, 1)
+    assert(quoted[2] == "        __jet_v_7\";")
+    assert(quoted[3] == " _v0 = 0;")
+    print("emit-text regressions ok")
+}
+
+fn emit_text_workload() -> [String] Never! {
+    lines := [String]{"fn sample() {{"}
+    loop id in 0..<64 -> &lines.push("    let mut __jet_v_{id}: Option<i64> = None;")
+    loop id in 0..<64 {
+        &lines.push("    __jet_v_{id} = Some({id});")
+        &lines.push("    consume(__jet_v_{id}.take().expect(\"MIR value\"));")
+        &lines.push("    // repeated inert ASCII text and \"__jet_v_quoted\" stay unchanged")
+    }
+    &lines.push("}}")
+    lines
+}
+
+fn run() {
+    emit_text_regressions()
+    body :: emit_text_workload()
+    spent := [Int]{0, 0, 0}
+    output := [String]{}
+    loop _ in 0..<32 {
+        begin :: time.unix_ns()
+        folded :: jet_rust_emit_fold_value_slots(body, 1, 65)
+        after_fold :: time.unix_ns()
+        unwrapped :: jet_rust_emit_unwrap_value_slots(folded, 1)
+        after_unwrap :: time.unix_ns()
+        output = jet_rust_emit_compact_function_text(unwrapped, 1)
+        after_compact :: time.unix_ns()
+        spent[0] += after_fold - begin
+        spent[1] += after_unwrap - after_fold
+        spent[2] += after_compact - after_unwrap
+    }
+    loop line in output -> print(line)
+    loop (index, name) in [String]{"fold", "unwrap", "compact"} -> print("@@time {name} {spent[index]}")
+}
