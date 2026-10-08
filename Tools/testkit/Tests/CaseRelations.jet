@@ -40,6 +40,15 @@ use core.files as files
     assert(kit_steps_parse_case("step: printf x\nfile: file != ../outside\n").error != "")
 }
 
+#Test("golden reserved build and built parse separately from case orphan built") {
+    golden :: kit_steps_parse("step: build\nstep: built \"two words\"\n")
+    assert_eq(golden.error, "")
+    assert_eq(golden.steps[0].argv, ["build"])
+    assert_eq(golden.steps[1].argv, ["built", "two words"])
+    assert(kit_steps_parse_case("step: built \"two words\"\n").error != "")
+    assert_eq(kit_steps_parse_case("step: jet build run.jet\nstep: built \"two words\"\n").error, "")
+}
+
 #Test("case copy errors are reported without aborting the harness") {
     root :: cases_test_root("relations-missing-copy")
     cases_test_source(root, "missing", "copy: missing saved\n")
