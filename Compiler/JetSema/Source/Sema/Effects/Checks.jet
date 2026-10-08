@@ -1850,15 +1850,22 @@ pub fn sema_effects_check_modules(inputs: ^[SemaEffectModuleInput], package_memo
     loop module_index in 0..<inputs.len() {
         sites := [String:MIRSharedLifetime]{}
         site_diagnostics := [Diagnostic]{}
-        facts := loop fact in inputs[module_index].call_facts if fact.shared_lifetime != None -> fact
+        facts := [SemaCallSiteFact]{}
+        loop fact in inputs[module_index].call_facts {
+            if fact.shared_lifetime != None -> &facts.push(fact)
+        }
         &facts.sort_by((left: SemaCallSiteFact, right: SemaCallSiteFact) -> (left.shared_source <=> right.shared_source).then(left.span.start <=> right.span.start).then(left.span.end <=> right.span.end).then(left.shared_member <=> right.shared_member))
         loop fact in facts {
             lifetime :: fact.shared_lifetime ?? next
             initializer :: fact.callee ?? panic("Core publication obligation has no initializer")
             target :: node_by_key.get(initializer.key) ?? panic("Core publication initializer has no solved effect row")
-            impure :: loop effect_name in solved[target] {
-                if effect_name != "Mem" -> break true
-            } else -> false
+            impure := false
+            loop effect_name in solved[target] {
+                if effect_name != "Mem" {
+                    impure = true
+                    break
+                }
+            }
             conflicting :: sites.get(initializer.key).map((previous) -> previous != lifetime) ?? false
             if impure || conflicting -> &site_diagnostics.push(sema_call_core_shared_diagnostic(fact.shared_member, fact.span))
             if sites.get(initializer.key) == None -> sites[initializer.key] = lifetime

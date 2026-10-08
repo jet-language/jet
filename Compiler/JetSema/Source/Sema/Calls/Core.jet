@@ -749,17 +749,25 @@ pub fn sema_call_core_global_shared(lifetime: MIRSharedLifetime, member: String,
     if scopes.bindings[nearest].symbol.kind != SymbolKind.Function -> return sema_call_core_shared_reject(member, span, &diagnostics)
     target :: sema_call_resolve_direct(name, [Type]{}, environment, &scopes, args[0].span, &diagnostics) ?? return sema_call_core_shared_reject(member, span, &diagnostics)
     if target.generic_params.len() != 0 -> return sema_call_core_shared_reject(member, span, &diagnostics)
-    same_module :: loop declaration in environment.declarations {
+    same_module := false
+    loop declaration in environment.declarations {
         if declaration.symbol_id != target.symbol.id -> next
-        if declaration.item == .Func(function) -> break function.external_type == None && function.type_params.len() == 0 && function.params.len() == 0
-    } else -> false
+        if declaration.item == .Func(function) {
+            same_module = function.external_type == None && function.type_params.len() == 0 && function.params.len() == 0
+            break
+        }
+    }
     if !same_module -> return sema_call_core_shared_reject(member, span, &diagnostics)
     params :: sema_call_params_from_type(target.signature) ?? return sema_call_core_shared_reject(member, span, &diagnostics)
     if params.len() != 0 -> return sema_call_core_shared_reject(member, span, &diagnostics)
     call :: Call{name: name, name_span: span, type_args: [Type]{}, args: [CallArg]{}, resolved_ret: None, range_checked: false, widen_approx: false}
     checked :: sema_call_check_direct_target_owned(&state, target, call, [SemaCallDefaultValue]{}, None, environment, &scopes, &tail_store, &context, &diagnostics) ?? return sema_call_core_shared_reject(member, span, &diagnostics)
     if checked.facts.failure_carrier != TFailureCarrier.Infallible -> return sema_call_core_shared_reject(member, span, &diagnostics)
-    if checked.value.ty != {.Shared(_) -> true else -> false} -> return sema_call_core_shared_reject(member, span, &diagnostics)
+    shared :: if checked.value.ty == {
+        .Shared(_) -> true
+        else -> false
+    }
+    if !shared -> return sema_call_core_shared_reject(member, span, &diagnostics)
     before :: context.call_facts.len()
     if !sema_expr_record_call_fact(environment, &scopes, &context, span, checked, &diagnostics) -> return None
     if context.call_facts.len() != before + 1 -> panic("checked Core publication call has no effect obligation")

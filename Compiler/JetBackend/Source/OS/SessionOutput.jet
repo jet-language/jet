@@ -27,7 +27,10 @@ fn os_session_output_read(fd: Int) -> [U8]? {
         if count > 4096 -> count = 4096
         got :: os_read(fd, buffer, count)
         if got == -4 -> next
-        if got <= 0 { valid = false; break }
+        if got <= 0 {
+            valid = false
+            break
+        }
         loop index in 0..<got {
             byte := 0
             #Unsafe("index is within the bytes just read into this mapping") { byte = os_load_byte(buffer + index) }

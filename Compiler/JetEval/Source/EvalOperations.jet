@@ -184,7 +184,7 @@ fn jet_eval_global_shared(machine: &JetEvalMachine, site: MIRSharedSite, ty: MIR
             [JetEvalRuntimeValue]{}, Val(ty), [JetEvalHostTypeShape]{}, [Bool]{}, None, span)
     }
     cached := JetEvalRuntimeValue?{None}
-    {
+    if true {
         permit :: machine.registry.storage.guard_read()
         loop entry in permit.value.comptime_shared_sites {
             if entry.site.initializer == site.initializer {
@@ -196,10 +196,14 @@ fn jet_eval_global_shared(machine: &JetEvalMachine, site: MIRSharedSite, ty: MIR
     }
     if cached == .Val(winner) -> return jet_eval_copy_value(winner, &machine, span)
     candidate :: jet_eval_invoke(&machine, site.initializer, [JetEvalRuntimeValue]{}, [JetEvalRuntimeValue]{}, span) ?? return None
-    if candidate != {.Shared(_) -> true else -> false} -> panic("checked publication initializer did not return Shared")
+    shared :: if candidate == {
+        .Shared(_) -> true
+        else -> false
+    }
+    if !shared -> panic("checked publication initializer did not return Shared")
     selected := candidate
     won := true
-    {
+    if true {
         permit :: machine.registry.storage.guard_edit()
         loop entry in permit.value.comptime_shared_sites {
             if entry.site.initializer == site.initializer {
@@ -215,13 +219,15 @@ fn jet_eval_global_shared(machine: &JetEvalMachine, site: MIRSharedSite, ty: MIR
     jet_eval_copy_value(selected, &machine, span)
 }
 
+fn jet_eval_pop_comptime_shared_site(machine: &JetEvalMachine) -> JetEvalComptimeSharedSiteEntry? Never! {
+    permit :: machine.registry.storage.guard_edit()
+    &permit.value.comptime_shared_sites.pop()
+}
+
 fn jet_eval_retire_comptime_shared_sites(machine: &JetEvalMachine, span: Span) -> Bool {
     ok := true
     loop {
-        retired :: {
-            permit :: machine.registry.storage.guard_edit()
-            &permit.value.comptime_shared_sites.pop()
-        } ?? break
+        retired :: jet_eval_pop_comptime_shared_site(&machine) ?? break
         if !jet_eval_drop_value(&machine, retired.value, span) -> ok = false
     }
     ok

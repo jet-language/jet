@@ -1963,7 +1963,13 @@ fn mir_digest_constant(writer: &MIRCanonicalWriter, constant: MIRConstant) {
         .SharedSite(site) -> {
             mir_digest_tag(&writer, "shared-site")
             mir_digest_u64(&writer, site.initializer.value)
-            mir_digest_tag(&writer, if site.lifetime == {.Process -> "process" .World -> "world" .Thread -> "thread" .Attempt -> "attempt"})
+            lifetime :: if site.lifetime == {
+                .Process -> "process"
+                .World -> "world"
+                .Thread -> "thread"
+                .Attempt -> "attempt"
+            }
+            mir_digest_tag(&writer, lifetime)
         }
         .BigInt(value) -> {
             mir_digest_tag(&writer, "bigint")

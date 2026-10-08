@@ -157,13 +157,23 @@ fn jet_driver_native_stop_field(body: String, key: String) -> DataTree? {
     }
     None
 }
+fn jet_driver_native_stop_int(body: String, key: String) -> Int? {
+    tree :: jet_driver_native_stop_field(body, key) ?? return None
+    if tree == .Int(value) -> return Val(value)
+    None
+}
+fn jet_driver_native_stop_text(body: String, key: String) -> String? {
+    tree :: jet_driver_native_stop_field(body, key) ?? return None
+    if tree == .Text(value) -> return Val(value)
+    None
+}
 fn jet_driver_native_comptime_stop(program: MIRProgram, graph: SemaRegistrationGraph, response: X64ExecutionResponse, site: Span) -> JetEvalResult {
     span := site
-    start :: jet_driver_native_stop_field(response.body, "start")
-    end :: jet_driver_native_stop_field(response.body, "end")
-    if start == .Val(DataTree.Int(begin)) && end == .Val(DataTree.Int(finish)) -> span = Span{start: begin, end: finish}
+    start :: jet_driver_native_stop_int(response.body, "start")
+    end :: jet_driver_native_stop_int(response.body, "end")
+    if start == .Val(begin) && end == .Val(finish) -> span = Span{start: begin, end: finish}
     location := SemaSourceLocation?{None}
-    if jet_driver_native_stop_field(response.body, "owner") == .Val(DataTree.Int(owner)) {
+    if jet_driver_native_stop_int(response.body, "owner") == .Val(owner) {
         if owner >= 0 && owner < program.functions.len() {
             function :: program.functions[owner]
             loop module in graph.modules {
@@ -175,9 +185,9 @@ fn jet_driver_native_comptime_stop(program: MIRProgram, graph: SemaRegistrationG
         }
     }
     kind := "HostFault"
-    if jet_driver_native_stop_field(response.body, "kind") == .Val(DataTree.Text(value)) -> kind = value
+    if jet_driver_native_stop_text(response.body, "kind") == .Val(value) -> kind = value
     message := ""
-    if jet_driver_native_stop_field(response.body, "message") == .Val(DataTree.Text(value)) -> message = value
+    if jet_driver_native_stop_text(response.body, "message") == .Val(value) -> message = value
     if kind == "BudgetFuel" || kind == "BudgetDepth" {
         return jet_driver_native_comptime_failure(span, "E0952", JetEvalErrorKind.Fuel, "native comptime exhausted its {kind}", "compile-time evaluation is bounded to keep compilation finite", location)
     }

@@ -3728,7 +3728,9 @@ fn jet_codegen_merge_shared_sites(rows: &[MIRConstantDef], incoming: [MIRConstan
             if existing.ty != site.ty -> panic("one Core initializer has conflicting Shared payload types")
             if existing.value == .SharedSite(left) && site.value == .SharedSite(right) {
                 if left.initializer != right.initializer || left.lifetime != right.lifetime -> panic("one Core initializer has conflicting publication lifetimes")
-            } else -> panic("Core publication site collides with ordinary constant")
+            } else {
+                panic("Core publication site collides with ordinary constant")
+            }
             found = true
         }
         if !found -> &rows.push(site)

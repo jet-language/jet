@@ -211,7 +211,11 @@ fn jet_rust_emit_constant_definition(ctx: &JetRustEmitContext, definition: MIRCo
     root :: ~ctx.config.root_prefix
     if definition.value == .SharedSite(site) {
         initialize :: jet_rust_emit_function_name(&ctx, site.initializer)
-        if site.lifetime == {.Process | .World -> true else -> false} {
+        process_or_world :: if site.lifetime == {
+            .Process | .World -> true
+            else -> false
+        }
+        if process_or_world {
             payload :: if definition.ty.kind == {.Shared(inner) -> jet_rust_emit_type(&ctx, inner) else -> panic("checked publication site has non-Shared type")}
             world :: site.lifetime == MIRSharedLifetime.World
             return "static __{name}_site: {root}jet_std::JetSharedSite<{payload}> = {root}jet_std::JetSharedSite::new();\n{visibility}fn {name}() -> {ty} {{ __{name}_site.get({initialize}, {world}) }}\n"
@@ -273,11 +277,12 @@ fn jet_rust_emit_ordinary_constant_definition(ctx: &JetRustEmitContext, definiti
 // in place, and only an owned use copies it. Scalars stay plain values.
 fn jet_rust_emit_shared_constant(no_os: Bool, definition: MIRConstantDef) -> Bool Never! {
     if definition.is_storage || no_os -> return false
-    if definition.value == {.SharedSite(_) -> true else -> false} -> return false
-    if definition.ty.kind == {
+    if definition.value == .SharedSite(_) -> return false
+    shared :: if definition.ty.kind == {
         .String | .List(_) | .Map(_, _) | .Option(_) | .Result(_, _) | .Tuple(_) | .Apply(_, _) -> true
         else -> false
     }
+    shared
 }
 
 // MIRRust emit_list_constant_chunks: the initializer of a large folded list
