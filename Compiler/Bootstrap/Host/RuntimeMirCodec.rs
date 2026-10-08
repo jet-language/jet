@@ -9,6 +9,7 @@
 
 use crate::compiler_bootstrap_host::{BootstrapCodecSymbols, BootstrapHostCodecError};
 use std::collections::BTreeMap;
+use jet_foundation::Numeric::JetInt;
 use std::fmt::Write as _;
 
 const SOURCE_MIR_SCHEMA: &str = include_str!("../../JetFoundation/Source/MIR/MIR.jet");
@@ -67,6 +68,19 @@ const HOST_SUPPORT_SCHEMAS: &[(&str, &str)] = &[
     ("TargetMachine", include_str!("../../../crates/jet-foundation/src/TargetMachine.rs")),
     ("WebPartition", include_str!("../../../crates/jet-foundation/src/WebPartition.rs")),
 ];
+
+/// Source MIR spells a Unicode scalar as an exact Int; native MIR carries a
+/// Rust char. Decimal text is not a character encoding (97 means 'a', not "97").
+pub(crate) fn source_char_to_host(value: &JetInt) -> Result<char, String> {
+    value
+        .to_i64()
+        .and_then(|value| u32::try_from(value).ok())
+        .and_then(char::from_u32)
+        .ok_or_else(|| format!(
+            "MIR integer is not a Unicode scalar: source Int -> host char; decimal value {}",
+            value.to_string_rep(),
+        ))
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Field {
@@ -928,6 +942,7 @@ fn emit_struct_converter(
                 &host_field.ty,
                 &format!("value.{}", symbols.field_symbol(&definition.name, &source_field.name)?),
                 pairs,
+                &format!("{}.{}", definition.name, source_field.name),
             )?
         } else {
             return Err(BootstrapHostCodecError::InvalidMetadata(format!(
@@ -1023,7 +1038,14 @@ fn emit_enum_converter(
             .zip(aligned.iter())
             .filter_map(|(host_field, source_index)| source_index.map(|index| (host_field, index)))
             .map(|(host_field, index)| {
-                convert_expression(&source_variant.fields[index].ty, &host_field.ty, &bindings[index], pairs)
+                let field = source_variant.fields[index].name.as_deref().unwrap_or_default();
+                convert_expression(
+                    &source_variant.fields[index].ty,
+                    &host_field.ty,
+                    &bindings[index],
+                    pairs,
+                    &format!("{}::{}.{}", definition.name, source_variant.name, field),
+                )
             })
             .collect::<Result<Vec<_>, _>>()?;
         // A derived Source field is checked against the converted native
@@ -1082,11 +1104,21 @@ fn convert_expression(
     host_type: &str,
     expression: &str,
     pairs: &PairRecords,
+    field_path: &str,
 ) -> Result<String, BootstrapHostCodecError> {
     let source_type = parse_type(source_type).map_err(BootstrapHostCodecError::InvalidMetadata)?;
     let host_type =
         parse_type(&expand_host_aliases(host_type)).map_err(BootstrapHostCodecError::InvalidMetadata)?;
-    convert_type_expression(&source_type, &host_type, expression, pairs)
+    let converted = convert_type_expression(&source_type, &host_type, expression, pairs)?;
+    Ok(with_field_context(&converted, field_path))
+}
+
+/// Keep entity context outside the recursively generated expression, so option,
+/// list and map element failures retain the field that owns them.
+fn with_field_context(expression: &str, field_path: &str) -> String {
+    format!(
+        "(|| -> Result<_, String> {{ Ok({expression}) }})().map_err(|__error| format!(\"{{}}: {{}}\", {field_path:?}, __error))?"
+    )
 }
 
 fn convert_from_host_expression(
@@ -1303,7 +1335,13 @@ fn host_tuple_from_source(
         .zip(host_types)
         .map(|((symbol, ty), host_type)| {
             let source_type = parse_type(ty).map_err(BootstrapHostCodecError::InvalidMetadata)?;
-            convert_type_expression(&source_type, host_type, &format!("({base}).{symbol}"), pairs)
+            let converted = convert_type_expression(
+                &source_type,
+                host_type,
+                &format!("({base}).{symbol}"),
+                pairs,
+            )?;
+            Ok(with_field_context(&converted, &format!("{}.{symbol}", record.symbol)))
         })
         .collect::<Result<Vec<_>, BootstrapHostCodecError>>()?;
     Ok(format!("({})", elements.join(", ")))
@@ -1365,6 +1403,11 @@ fn convert_named_from_host(
         ));
     }
     if source_name == "Int" {
+        if matches!(host_type, TypeExpr::Named(name) if name == "char") {
+            return Ok(format!(
+                "jet_foundation::Numeric::JetInt::from_i64(i64::from(u32::from(*({expression}))))"
+            ));
+        }
         return Ok(format!(
             "jet_foundation::Numeric::JetInt::from_big(jet_foundation::Numeric::CtBigInt::from_str(&({expression}).to_string())?)"
         ));
@@ -1549,8 +1592,20 @@ fn convert_named_expression(
         || source_name.starts_with('I')
     {
         if source_name == "Int" {
+            let target = match host_type {
+                TypeExpr::Named(name) => name.as_str(),
+                _ => return Err(BootstrapHostCodecError::InvalidMetadata(
+                    "MIR Int conversion has no named native target type".to_string(),
+                )),
+            };
+            if target == "char" {
+                return Ok(format!(
+                    "crate::compiler_bootstrap_runtime_mir_codec::source_char_to_host(&({expression}))?"
+                ));
+            }
+            let diagnostic = format!("MIR integer is outside native range: source Int -> host {target}; decimal value {{}}");
             return Ok(format!(
-                "({expression}).to_string_rep().parse::<_>().map_err(|_| \"MIR integer is outside native range\".to_string())?"
+                "{{ let __decimal = ({expression}).to_string_rep(); __decimal.parse::<_>().map_err(|_| format!({diagnostic:?}, __decimal))? }}"
             ));
         }
         return Ok(format!("({expression}).clone()"));
@@ -2569,5 +2624,42 @@ mod tests {
                 )))),
             )))
         );
+    }
+
+    #[test]
+    fn mir_char_codec_preserves_scalar_values_and_rejects_invalid_integers() {
+        use jet_foundation::Numeric::{CtBigInt, JetInt};
+        for expected in ['\0', ' ', 'a', 'π', '🙂', '\u{10ffff}'] {
+            let value = JetInt::from_i64(i64::from(u32::from(expected)));
+            assert_eq!(super::source_char_to_host(&value), Ok(expected));
+        }
+        for decimal in ["-1", "55296", "57343", "1114112", "18446744073709551615"] {
+            let value = JetInt::from_big(CtBigInt::from_str(decimal).expect("exact integer"));
+            let error = super::source_char_to_host(&value).expect_err("not a scalar");
+            assert!(error.contains("source Int -> host char"));
+            assert!(error.contains(&format!("decimal value {decimal}")));
+        }
+        let pairs = super::PairRecords::new();
+        for owner in ["MIRConstant::Char.value", "MIRConstKey::Char.value"] {
+            let expression = super::convert_expression("Int", "char", "value", &pairs, owner)
+                .expect("generated scalar converter");
+            assert!(expression.contains("source_char_to_host"));
+            assert!(expression.contains(owner));
+            let reverse = super::convert_from_host_expression("Int", "char", "value", &pairs)
+                .expect("generated codepoint converter");
+            assert!(reverse.contains("u32::from"));
+            assert!(!reverse.contains("from_str"));
+        }
+    }
+
+    #[test]
+    fn mir_integer_diagnostic_retains_type_field_and_decimal_value() {
+        let expression = super::convert_expression(
+            "Int", "i64", "value", &super::PairRecords::new(), "MIRConstant::Int.value",
+        ).expect("generated checked integer conversion");
+        assert!(expression.contains("MIRConstant::Int.value"));
+        assert!(expression.contains("source Int -> host i64"));
+        assert!(expression.contains("decimal value {}"));
+        assert!(expression.contains("format!"));
     }
 }
