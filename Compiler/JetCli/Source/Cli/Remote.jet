@@ -72,14 +72,15 @@ fn jet_cli_remote_record(binding: JetCLIRemoteBinding) -> [U8] String! {
 fn jet_cli_remote_unsigned(value: String) -> U64? Never! {
     bytes :: value.bytes()
     if bytes.len() == 0 -> return None
-    start :: if bytes[0] == U8{43} -> 1 else -> 0
+    start :: if Int.from_u8(bytes[0]) == 43 -> 1 else -> 0
     if start == bytes.len() -> return None
     result := U64{0}
     loop index in start..<bytes.len() {
         byte :: bytes[index]
-        if byte < U8{48} || byte > U8{57} -> return None
-        digit :: U64{Int.from_u8(byte) - 48}
-        if result > (U64.MAX - digit) / U64{10} -> return None
+        code :: Int.from_u8(byte)
+        if code < 48 || code > 57 -> return None
+        digit :: U64{code - 48}
+        if (result > (U64.MAX - digit) / U64{10}) -> return None
         result = result * U64{10} + digit
     }
     Val(result)
@@ -141,14 +142,15 @@ fn jet_cli_remote_value(args: [String], name: String) -> String? Never! {
 fn jet_cli_remote_has(args: [String], name: String) -> Bool Never! { args.contains(name) || args.contains("{name}=true") }
 
 fn jet_cli_remote_bind(args: [String]) -[FS, Env, Time]> JetCLIRemoteBinding String! {
-    builder :: if args.len() > 2 && !args[2].starts_with("-") -> args[2] else -> return Err("jet remote bind needs a builder name")
+    if args.len() <= 2 || args[2].starts_with("-") -> return Err("jet remote bind needs a builder name")
+    builder :: args[2]
     root :: jet_cli_remote_value(args, "--root") ?? return Err("jet remote bind needs `--root <absolute-path>`")
     credential :: jet_cli_remote_value(args, "--credential-file") ?? return Err("jet remote bind needs `--credential-file <path>`")
     trust :: jet_cli_remote_value(args, "--trust-domain") ?? return Err("jet remote bind needs `--trust-domain <name>`")
     timeout := U64{30000}
     if jet_cli_remote_value(args, "--timeout-ms") == .Val(value) {
         timeout = jet_cli_remote_unsigned(value) ?? return Err("`--timeout-ms` must be a positive integer")
-        if timeout == U64{0} -> return Err("`--timeout-ms` must be a positive integer")
+        if (timeout == U64{0}) -> return Err("`--timeout-ms` must be a positive integer")
     }
     known :: [String]{"--root", "--credential-file", "--trust-domain", "--worker-id", "--platform", "--abi", "--timeout-ms", "--cache-read", "--cache-write", "--execute", "--fallback-local", "--json"}
     loop index in 3..<args.len() {
@@ -214,7 +216,8 @@ fn jet_cli_remote_list(json: Bool) -[FS, Env, Time.Wait]> JetDriverVerbOutput St
 }
 
 fn jet_cli_remote_remove(args: [String]) String! -[FS, Env]> {
-    builder :: if args.len() > 2 && !args[2].starts_with("-") -> args[2] else -> return Err("jet remote remove needs a builder name")
+    if args.len() <= 2 || args[2].starts_with("-") -> return Err("jet remote remove needs a builder name")
+    builder :: args[2]
     jet_cli_remote_name(builder)
     directory :: jet_cli_remote_config()
     held :: JetCLIRootedDirectory.open("/", jet_cli_remote_parts(directory), false) ?? return Err("cannot inspect remote builder records: {err.message}")
