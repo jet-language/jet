@@ -1584,7 +1584,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 11d4b1b6a4a0f4cc74a47e2cc2bc8cf4d7b6f9bb127380af518f51ddde4027f3
+// Source SHA-256: e2d250e0513a94e30de2c62d3ca8f220f809148d16fdc2ec9d719579ca6d1057
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -2758,6 +2758,9 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.email", "message", "jet_email::message", true, &[true, true, true, true, true, true, true], ) .with_pure_route(CoreCallPureRoute::Email),
     CoreCallRecord::new( "core.email", "envelope", "jet_email::envelope", true, &[true, true], ) .with_pure_route(CoreCallPureRoute::Email),
     CoreCallRecord::new( "core.email", "serialize", "jet_email::serialize", true, &[true], ) .with_pure_route(CoreCallPureRoute::Email),
+    CoreCallRecord::new("core.email", "__address_parts", "jet_email::address_parts", true, &[false, false]).with_pure_route(CoreCallPureRoute::Email),
+    CoreCallRecord::new("core.email", "__attachment_parts", "jet_email::attachment_parts", true, &[false, false, false]).with_pure_route(CoreCallPureRoute::Email),
+    CoreCallRecord::new("core.email", "__envelope_parts", "jet_email::envelope_parts", true, &[false, false]).with_pure_route(CoreCallPureRoute::Email),
     CoreCallRecord::new("core.text", "nfc", "jet_text_nfc", true, &[true]),
     CoreCallRecord::new("core.text", "nfd", "jet_text_nfd", true, &[true]),
     CoreCallRecord::new("core.text", "nfkc", "jet_text_nfkc", true, &[true]),

@@ -532,6 +532,13 @@ fn web_fixed_sig(
 
         ("core.devtools", "__publish_payload") => Some((vec![(moved, string.clone()), (moved, string.clone()),
             (moved, string.clone()), (moved, string.clone()), (moved, t.clone())], None)),
+        ("core.email", "__address_parts") => Some((vec![(moved, Type::Option(Box::new(string.clone()))),
+            (moved, string.clone())], Some(web_named("Address")))),
+        ("core.email", "__attachment_parts") => Some((vec![(moved, string.clone()),
+            (moved, string.clone()), (moved, web_list(u8_ty()))], Some(web_named("Attachment")))),
+        ("core.email", "__envelope_parts") => Some((vec![(moved, web_named("Address")),
+            (moved, web_list(web_named("Address")))], Some(web_named("Envelope")))),
+
         ("core.data.sketch", "empty") => Some((vec![], Some(string.clone()))),
         ("core.data.sketch", "merge") => Some((
             vec![(read, string.clone()), (read, string.clone())],

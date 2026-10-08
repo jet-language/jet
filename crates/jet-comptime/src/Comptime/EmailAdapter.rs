@@ -66,6 +66,9 @@ pub fn evaluate(method: &str, args: &[CtValue], span: Span) -> Option<Result<CtV
         "message" => email_message(args, span),
         "envelope" => email_envelope(args, span),
         "serialize" => email_serialize(args, span),
+        "__address_parts" => email_address_parts(args, span),
+        "__attachment_parts" => email_attachment_parts(args, span),
+        "__envelope_parts" => email_envelope_parts(args, span),
         _ => return None,
     };
     Some(result)
@@ -200,6 +203,29 @@ fn address_list(value: &CtValue, span: Span) -> Result<Vec<jet_email::Address>, 
         .iter()
         .map(|value| address_from_value(value, span))
         .collect()
+}
+
+fn email_address_parts(args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
+    let display = match one(args, 0, "__address_parts", span)? {
+        CtValue::Present(value) => Some(string(value, span)?.to_string()),
+        CtValue::Failed(CtReport::Clean(_)) => None,
+        _ => return Err(unsupported("email Address display is invalid", span)),
+    };
+    let mailbox = string(one(args, 1, "__address_parts", span)?, span)?.to_string();
+    Ok(address_value(&jet_email::address_parts(display, mailbox)))
+}
+
+fn email_attachment_parts(args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
+    let filename = string(one(args, 0, "__attachment_parts", span)?, span)?.to_string();
+    let mime = string(one(args, 1, "__attachment_parts", span)?, span)?.to_string();
+    let bytes = bytes(one(args, 2, "__attachment_parts", span)?, span)?;
+    Ok(attachment_value(&jet_email::attachment_parts(filename, mime, bytes)))
+}
+
+fn email_envelope_parts(args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
+    let from = address_from_value(one(args, 0, "__envelope_parts", span)?, span)?;
+    let recipients = address_list(one(args, 1, "__envelope_parts", span)?, span)?;
+    Ok(envelope_value(&jet_email::envelope_parts(from, recipients)))
 }
 
 fn attachment_value(attachment: &jet_email::Attachment) -> CtValue {
