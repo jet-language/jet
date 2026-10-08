@@ -5150,21 +5150,21 @@ fn core_fixed_sig_impl(
                 Type::Named("NetError".to_string()),
             )),
         )),
-        ("core.net", "udp_local_addr") => Some((
+        ("core.net", "udp_local_addr" | "__udp_local_addr") => Some((
             vec![(read, Type::Named("UDPSocket".to_string()))],
             Some(result_ty(
                 Type::Named("SocketAddr".to_string()),
                 Type::Named("NetError".to_string()),
             )),
         )),
-        ("core.net", "udp_set_timeout") => Some((
+        ("core.net", "udp_set_timeout" | "__udp_set_timeout") => Some((
             vec![
                 (read, Type::Named("UDPSocket".to_string())),
                 (read, Type::Int),
             ],
             Some(result_ty(unit_ty(), Type::Named("NetError".to_string()))),
         )),
-        ("core.net", "udp_send_to") => Some((
+        ("core.net", "udp_send_to" | "__udp_send_to") => Some((
             vec![
                 (read, Type::Named("UDPSocket".to_string())),
                 (read, Type::String),
@@ -5172,7 +5172,7 @@ fn core_fixed_sig_impl(
             ],
             Some(result_ty(Type::Int, Type::Named("NetError".to_string()))),
         )),
-        ("core.net", "udp_recv_from") => Some((
+        ("core.net", "udp_recv_from" | "__udp_recv_from") => Some((
             vec![
                 (read, Type::Named("UDPSocket".to_string())),
                 (read, Type::Int),
@@ -5182,7 +5182,7 @@ fn core_fixed_sig_impl(
                 Type::Named("NetError".to_string()),
             )),
         )),
-        ("core.net", "udp_send_bytes_to") => Some((
+        ("core.net", "udp_send_bytes_to" | "__udp_send_bytes_to") => Some((
             vec![
                 (read, Type::Named("UDPSocket".to_string())),
                 (read, Type::List(Box::new(u8_ty()))),
@@ -5190,7 +5190,7 @@ fn core_fixed_sig_impl(
             ],
             Some(result_ty(Type::Int, Type::Named("NetError".to_string()))),
         )),
-        ("core.net", "udp_receive") => Some((
+        ("core.net", "udp_receive" | "__udp_receive") => Some((
             vec![
                 (read, Type::Named("UDPSocket".to_string())),
                 (read, Type::Int),
@@ -5220,14 +5220,14 @@ fn core_fixed_sig_impl(
             vec![(read, Type::Named("UDPPacket".to_string()))],
             Some(Type::Bool),
         )),
-        ("core.net", "unix_listen") => Some((
+        ("core.net", "unix_listen" | "__unix_listen") => Some((
             vec![(read, Type::String)],
             Some(result_ty(
                 Type::Named("UnixListener".to_string()),
                 Type::Named("NetError".to_string()),
             )),
         )),
-        ("core.net", "unix_accept") => Some((
+        ("core.net", "unix_accept" | "__unix_accept") => Some((
             vec![(read, Type::Named("UnixListener".to_string()))],
             Some(result_ty(
                 Type::Named("UnixStream".to_string()),
@@ -5241,7 +5241,7 @@ fn core_fixed_sig_impl(
                 Type::Named("NetError".to_string()),
             )),
         )),
-        ("core.net", "unix_read") => Some((
+        ("core.net", "unix_read" | "__unix_read") => Some((
             vec![(
                 AccessConvention::Write,
                 Type::Named("UnixStream".to_string()),
@@ -5271,7 +5271,7 @@ fn core_fixed_sig_impl(
                 Type::Named("NetError".to_string()),
             )),
         )),
-        ("core.net", "unix_write_all_bytes") => Some((
+        ("core.net", "unix_write_all_bytes" | "__unix_write_all_bytes") => Some((
             vec![
                 (
                     AccessConvention::Write,
@@ -5281,7 +5281,7 @@ fn core_fixed_sig_impl(
             ],
             Some(result_ty(unit_ty(), Type::Named("NetError".to_string()))),
         )),
-        ("core.net", "unix_shutdown") => Some((
+        ("core.net", "unix_shutdown" | "__unix_shutdown") => Some((
             vec![
                 (
                     AccessConvention::Write,
@@ -5291,7 +5291,7 @@ fn core_fixed_sig_impl(
             ],
             Some(result_ty(unit_ty(), Type::Named("NetError".to_string()))),
         )),
-        ("core.net", "unix_close") => Some((
+        ("core.net", "unix_close" | "__unix_close") => Some((
             vec![(
                 AccessConvention::Write,
                 Type::Named("UnixStream".to_string()),
