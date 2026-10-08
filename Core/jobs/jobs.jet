@@ -699,13 +699,26 @@ fn queue_acknowledge_on_driver(driver: &db.__Driver, authority: String, name: St
     record.event_sequence = queue_saturating_add(record.event_sequence, 1)
     Ok((receipt: queue_receipt(record, false), observation: Val(observation)))
 }
+// Match the durable provider's attempts.saturating_sub(1).min(20),
+// signed-i64 saturating multiplication, then the configured delay ceiling.
 fn queue_backoff(retry_delay_ms: Int, max_retry_delay_ms: Int, attempts: Int) -> Int Never! {
     exponent := attempts - 1
     if exponent < 0 -> exponent = 0
-    if exponent > 31 -> exponent = 31
-    delay :: retry_delay_ms * (1 << exponent)
+    if exponent > 20 -> exponent = 20
+    product :: retry_delay_ms * (1 << exponent)
+    delay :: if product > 9223372036854775807 -> 9223372036854775807 else -> product
     if delay > max_retry_delay_ms -> return max_retry_delay_ms
     delay
+}
+
+#Test("queue retry backoff caps its exponent at twenty and saturates before policy minimum") {
+    assert_eq(queue_backoff(3, 9223372036854775807, 0), 3)
+    assert_eq(queue_backoff(3, 9223372036854775807, 1), 3)
+    assert_eq(queue_backoff(3, 9223372036854775807, 2), 6)
+    assert_eq(queue_backoff(3, 9223372036854775807, 21), 3145728)
+    assert_eq(queue_backoff(3, 9223372036854775807, 64), 3145728)
+    assert_eq(queue_backoff(3, 100, 64), 100)
+    assert_eq(queue_backoff(9223372036854775807, 9223372036854775807, 2), 9223372036854775807)
 }
 fn queue_fail_on_driver(driver: &db.__Driver, authority: String, name: String, max_attempts: Int, retry_delay_ms: Int, max_retry_delay_ms: Int, claim: JobQueueClaim, failure: JobError, now: Int) -> (receipt: JobQueueReceipt, observation: QueueTransition?) ServiceError! {
     record := queue_find(&driver, authority, name, claim.receipt.id) ?? return Err(err)
