@@ -1,0 +1,18 @@
+# Port of tests/cli_parts/expand.rs:635-680; exact original sources and predicates.
+# PENDING-SAME-HEAD: runtime not run.
+# PENDING-GRAMMAR(batch-four): text split/filter, cap comparisons, zero-key JSON.
+# ORACLE-DERIVED schema 20: crates/jet-semindex/src/Types.rs:12 and Compiler/JetCli/Source/Cli/SemIndexTypes.jet:24; bump requires updating this case.
+# Original name notwithstanding, tree equality does not require canonical wire formatting.
+step first: jet inspect expand --facts inline --json {root}/tests/fixtures/expand_facts.jet
+env: NO_COLOR=1
+exit: 0
+stdout: ^= "{" # original predicate
+stdout: ~ "\"schema_version\":20" # original predicate
+stdout: ~ "\"expand\":{\"selection\":\"inline\"" # original predicate
+stdout: ~ "\"contract\":\"#Inline" # original predicate
+stdout: ~ "\"check\":{\"status\":\"passed\"" # original predicate
+stdout: !~ "inline —" # original predicate
+step: jet inspect expand --facts inline --json {root}/tests/fixtures/expand_facts.jet
+env: NO_COLOR=1
+exit: any # original predicate: exit not asserted
+json: stdout doc[zero elapsed_ms] $ == first # original predicate

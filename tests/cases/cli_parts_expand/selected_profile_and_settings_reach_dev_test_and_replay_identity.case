@@ -1,0 +1,26 @@
+# Port of tests/cli_parts/expand.rs:225-384; exact original sources and predicates.
+# PENDING-SAME-HEAD: runtime not run.
+# PENDING-GRAMMAR(batch-four): text split/filter, cap comparisons, zero-key JSON.
+# ORACLE-LITERAL expand.rs:286. Hashes are original TEXT split operations, not JSON parsing. Final duplicate env setter wins.
+fixture: fixtures/selected
+step: jet dev main.jet --profile=staging --small --set marker=cli --watch=off
+env: JET_STORE_DIR={work}/run-cache
+env: NO_COLOR=1
+exit: 0
+stdout: = selected-dev.out
+step: jet test main.jet --profile=staging --set marker=cli --serial --fresh --capture=all --record=selected-profile-settings
+env: JET_STORE_DIR={work}/run-cache
+env: NO_COLOR=1
+exit: 0
+file: .jet/replays/selected-profile-settings.jetproof-replay ~ "\"profile\":\"staging\"" # original predicate
+capture: selected_mir = text file.split("\"semantic_mir_hash\":\"", 1).split("\"", 0) .jet/replays/selected-profile-settings.jetproof-replay
+step: jet test main.jet --profile=staging --set marker=alternate --serial --fresh --capture=all --record=selected-profile-settings-alternate --filter "selected profile"
+env: JET_STORE_DIR={work}/run-cache
+env: NO_COLOR=1
+exit: 0
+capture: alternate_mir = text file.split("\"semantic_mir_hash\":\"", 1).split("\"", 0) .jet/replays/selected-profile-settings-alternate.jetproof-replay
+cap:selected_mir: != "{cap:alternate_mir}" # original predicate
+step: jet test main.jet --profile=staging --set marker=cli --coverage --serial --fresh
+env: JET_STORE_DIR={work}/run-cache
+env: NO_COLOR=1
+exit: 0
