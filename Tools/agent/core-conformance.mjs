@@ -202,8 +202,29 @@ fn run() {
 use core.encoding.json as json
 
 fn run() {
-    value :: json.loads("{\"ok\":true}")
-    print(json.dump(value))
+    value :: json.loads(\`{"ok":true}\`) ?? panic("JSON parse")
+    print(json.dump(value) ?? panic(err.reason))
+}
+`],
+  ["core.encoding.json.dumps", `// core-conformance: core.encoding.json.dumps
+use core.encoding.json as api
+
+fn run() {
+    print(api.dumps(DataTree{}) ?? panic(err.reason))
+}
+`],
+  ["core.encoding.jsonl.dumps", `// core-conformance: core.encoding.jsonl.dumps
+use core.encoding.jsonl as api
+
+fn run() {
+    print(api.dumps([DataTree]{}) ?? panic(err.reason))
+}
+`],
+  ["core.encoding.jsonl.append_line", `// core-conformance: core.encoding.jsonl.append_line
+use core.encoding.jsonl as api
+
+fn run() {
+    print(api.append_line("jet", DataTree{}) ?? panic(err.reason))
 }
 `],
   ["core.encoding.json.load", `// core-conformance: core.encoding.json.load
