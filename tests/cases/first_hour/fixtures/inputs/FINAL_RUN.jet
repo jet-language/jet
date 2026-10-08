@@ -1,0 +1,33 @@
+#CLI
+struct GreetingArgs {
+    #Doc("name to greet") name: String{"world"}
+}
+
+#Comparable
+struct Score {
+    value: Int
+}
+
+struct Node {
+    value: Int
+    next: Node?
+}
+
+fn comparable_max<T: Comparable>(left: T, right: T) -> T {
+    if right > left -> return right
+    left
+}
+
+fn greeting(name: String) -> String { "hello, {name}" }
+
+fn run(args: GreetingArgs) {
+    print(greeting(args.name))
+    best :: comparable_max(Score{value: 3}, Score{value: 5})
+    print(best.value)
+    node :: Node{value: 7, next: None}
+    print(node.value)
+}
+
+#Test("the greeting stays stable") {
+    assert_eq(greeting("world"), "hello, world")
+}

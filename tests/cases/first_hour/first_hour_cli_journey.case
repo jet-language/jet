@@ -1,0 +1,96 @@
+# Port of tests/first_hour.rs:225-404. PENDING-SAME-HEAD; no tier/availability skip.
+# Original command_with_environment last-wins store is run-cache; unused store root still created.
+mkdir: environment/store
+mkdir: environment/package-store
+mkdir: environment/run-cache
+mkdir: environment/test-scratch
+mkdir: environment/oracle-cache
+mkdir: environment/tmp
+env: JET_STORE_DIR={work}/environment/run-cache
+env: JET_PACKAGE_STORE_DIR={work}/environment/package-store
+env: JET_TEST_SCRATCH_DIR={work}/environment/test-scratch
+env: JET_DEV_ORACLE_CACHE_DIR={work}/environment/oracle-cache
+env: TMPDIR={work}/environment/tmp
+env: TMP={work}/environment/tmp
+env: TEMP={work}/environment/tmp
+env: NO_COLOR=1
+# Original tests/first_hour.rs:232 jet new demo
+step: jet new demo
+cwd: {work}/
+stdout: empty
+file: demo/package.jet is-file
+file: demo/run.jet is-file
+file: demo/.gitignore is-file
+copy: {root}/Docs/spec/guides/first-hour.md first-hour-guide.md
+capture: lesson = text file.split("The generated `run.jet` prints a greeting", 1).split("```jet\n", 1).split("```", 0) first-hour-guide.md
+write: lesson.jet first_hour_cli_journey.LESSON.template
+file: demo/run.jet == lesson.jet
+# Original tests/first_hour.rs:261 jet run
+step: jet run
+cwd: {work}/demo
+stdout: = first_hour_cli_journey.oracle0.out
+# Original tests/first_hour.rs:269 jet test
+step: jet test --capture=all
+cwd: {work}/demo
+stdout: ~ "greeting stays stable: pass" # original predicate: run_contains at269
+write: demo/second.jet fixtures/inputs/SECOND_MODULE.jet
+write: demo/run.jet fixtures/inputs/SECOND_MODULE_RUN.jet
+# Original tests/first_hour.rs:280 second module call
+step: jet run
+cwd: {work}/demo
+stdout: = first_hour_cli_journey.oracle1.out
+# Original tests/first_hour.rs:289 jet new lib1
+step: jet new lib1
+cwd: {work}/
+stdout: empty
+write: lib1/lib1.jet fixtures/inputs/LIBRARY.jet
+# Original tests/first_hour.rs:304 jet add lib1 --path ../lib1
+step: jet add lib1 --path ../lib1
+cwd: {work}/demo
+stdout: ~ "added `lib1`" # original predicate: run_contains at304
+write: demo/run.jet fixtures/inputs/PATH_DEPENDENCY_RUN.jet
+# Original tests/first_hour.rs:313 path dependency call
+step: jet run
+cwd: {work}/demo
+stdout: = first_hour_cli_journey.oracle2.out
+# Original tests/first_hour.rs:321 jet fetch
+step: jet fetch
+cwd: {work}/demo
+stdout: = first_hour_cli_journey.oracle3.out
+# Original tests/first_hour.rs:329 jet build --locked
+step: jet build --locked
+cwd: {work}/demo
+stdout: = first_hour_cli_journey.oracle4.out
+file: demo/build/run is-file
+# Original tests/first_hour.rs:338 jet build --release
+step: jet build --release
+cwd: {work}/demo
+stdout: = first_hour_cli_journey.oracle4.out
+write: demo/run.jet fixtures/inputs/WEB_RUN.jet
+# Original tests/first_hour.rs:348 jet build --target web
+step: jet build --target web
+cwd: {work}/demo
+stdout: ~ "built: build/app.wasm + build/app.js" # original predicate: run_contains at348
+file: demo/build/app.wasm is-file
+file: demo/build/app.js is-file
+write: demo/run.jet fixtures/inputs/FINAL_RUN.jet
+# Original tests/first_hour.rs:360 AOT final program
+step: jet run --release
+cwd: {work}/demo
+stdout: = first_hour_cli_journey.oracle5.out
+# Original tests/first_hour.rs:368 JIT final program
+step: jet run
+cwd: {work}/demo
+stdout: = first_hour_cli_journey.oracle5.out
+# Original tests/first_hour.rs:376 interpreter final program
+step: jet run --interpret
+cwd: {work}/demo
+stdout: = first_hour_cli_journey.oracle5.out
+# Original tests/first_hour.rs:384 jet fmt result
+step: jet fmt run.jet
+cwd: {work}/demo
+stdout: empty
+step: jet check
+cwd: {work}/demo
+stdout+stderr: lines = 1 # original predicate: combined stdout+stderr has exactly1 Rust .lines() line
+stdout+stderr: $= "has no problems\n" # original predicate: combined stdout+stderr ends_with has no problems LF
