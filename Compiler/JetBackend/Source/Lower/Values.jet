@@ -130,6 +130,7 @@ fn lower_inline_size(p: MIRProgram, ty: MIRType) -> Int Never! {
     if ty.kind == .List(_) | .Map(_, _) | .FixedList(_, _) -> return 24
     if lower_view_element(ty) != None -> return 24
     if lower_set_element(ty) != None -> return 24
+    if lower_tally_element(ty) != None -> return 24
     if lower_queue_element(ty) != None -> return 32
     if lower_priority_queue_element(ty) != None -> return 24
     lower_align_up(lower_members_end(p, lower_inline_members(p, ty), 0), 8)
@@ -327,6 +328,7 @@ fn lower_needs_drop(p: MIRProgram, ty: MIRType) -> Bool Never! {
             // A List or Map always owns its buffer.
             if aggregate.kind == .List(_) | .Map(_, _) -> return true
             if lower_set_element(aggregate) != None -> return true
+            if lower_tally_element(aggregate) != None -> return true
             if lower_queue_element(aggregate) != None -> return true
             if lower_priority_queue_element(aggregate) != None -> return true
             loop member in lower_inline_members(p, aggregate) {
