@@ -12,17 +12,17 @@ step: jet test --show-default --update-snapshots snap.jet
 exit: 0
 entries: snapshots ext = "snap" = 1
 capture: snap = sole-entry snapshots ext = "snap"
-file.trim: {cap:snap} = project_format_and_test.fresh.bytes
+file.trim: {cap:snap} = project_format_and_test.fresh.bytes # original ed77c235f tests/feature_acceptance.rs:749-753 created snapshot text.trim equals fresh-value
 write: {cap:snap} project_format_and_test.stale.template
 step: jet test --show-default snap.jet
 exit: nonzero
 step: jet test --show-default -u snap.jet
 exit: 0
-file.trim: {cap:snap} = project_format_and_test.fresh.bytes
+file.trim: {cap:snap} = project_format_and_test.fresh.bytes # original ed77c235f tests/feature_acceptance.rs:780-784 updated snapshot text.trim equals fresh-value
 mkdir: __snapshots__
 write: __snapshots__/helper-case.snap project_format_and_test.helper-stale.template
 step: jet test --show-default helper.jet
 exit: nonzero
 step: jet test --show-default --update-snapshots helper.jet
 exit: 0
-file.trim: __snapshots__/helper-case.snap = project_format_and_test.helper-fresh.bytes
+file.trim: __snapshots__/helper-case.snap = project_format_and_test.helper-fresh.bytes # original ed77c235f tests/feature_acceptance.rs:818-823 helper snapshot text.trim equals helper-fresh
