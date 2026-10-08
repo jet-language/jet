@@ -2319,3 +2319,203 @@ the canonical native arithmetic range diagnostic. The expected normal output
 is `EncodingErrors ownership/equality/render OK`. Native execution remains
 unexercised until the integrator composes the fresh green E2 FINAL runtime;
 parser and strict C11 syntax receipts alone do not establish runtime parity.
+
+### Memo statistics, mail limits and watcher C ownership
+
+`MemoABI.jet`, `MailLimitsABI.jet` and `WatchABI.jet` define native layouts,
+not Rust layouts. Their runtime providers preserve the field types in
+`Prelude/Memo.rs:74-80`, `CoreLib/Email.rs:156-164` and
+`CoreLib/JetStd/CommonTypes.rs:640-665`. The C boundary borrows exact Int
+arguments, converts to raw i64 before allocation, and returns freshly owned
+exact Int getters (`CAbiRoutes.rs:10703-10728,11668-11705,12158-12195`).
+Borrowed text is cloned on construction, getters and handle clone; drop
+releases each owned text and carrier. Watch enums are native ordinal words;
+event construction range-stops invalid domain/kind ordinals. WatchDomain's
+separate generated glue is not duplicated by this provider.
+
+Equality follows the Rust derives in field order. WatchEvent's custom show
+(`CommonTypes.rs:6772-6777`) deliberately omits pid/port and emits unquoted,
+unescaped path/detail, unlike a derived debug representation. It uses the
+existing text builder. `RecordGlueWitness.c` links the real Jet object with
+`--wrap=jet_rt_free`, asserts interception, clone/getter independence,
+exact-once destruction, per-field inequality and enum/render goldens. Its
+invalid-ordinal and exact-Int overflow modes exercise the established stops.
+Native execution remains unexercised until composed source-root ownership
+admission and generator ABI validation; syntax checks alone do not prove it.
+
+### Plugin records, log spans and asynchronous policy carriers
+
+`PluginABI.jet` defines inline 24-byte frames in the existing native List24
+header, and native faults owning that header. Frame sequence push moves the
+frame's text owners into inline storage and frees only its source shell;
+sequence get lends inline storage, never an independently droppable frame.
+Fault construction consumes the sequence holder; clone recursively copies its
+text owners and drop releases its children, buffer, holder and fault once.
+These contracts mirror `CAbiRoutes.rs:8496-8505,11755-11797` and the ordered
+derive equality in `jet-foundation/src/PluginWire.rs:28-43`.
+
+`LogABI.jet` stores LogSpan's raw i64 and owned name
+(`CommonTypes.rs:2704-2708`, `CAbiRoutes.rs:11738-11751`). `AsyncPolicyABI.jet`
+stores raw i64 capacity and overflow ordinal, with separately owned ordinal
+handles for overflow. Codec construction checks the ordinal but intentionally
+does not call policy validation: `CAbiRoutes.rs:9545-9558` permits zero and
+negative capacities; `ReactiveEventWatch.rs:808-841` distinguishes construction
+from validation. Exact Int arguments are borrowed and converted before
+allocation; Int getters return freshly owned exact values.
+
+`PluginPolicyWitness.c` requires real Jet exports and asserts free wrapping
+actually ran. It covers shell consumption, List growth, lent getters, recursive
+clone independence, exact-once destruction, ordered field/sequence equality,
+i64 edges, all unit enum values and invalid-ordinal/index stop modes. Its
+stdout fixture is an expected result, not an execution receipt. Native
+execution remains unexercised pending pack composition and ownership admission.
+
+### Exact borrowed String debug rendering
+
+`TextDebug.jet` appends the Rust reference's `str` debug representation into
+the existing native text builder, borrowing a distinct E4 UTF-8 input. It
+quotes the result, escapes NUL/tab/CR/LF/backslash/double quote, leaves single
+quotes unchanged, and emits lowercase minimal `\u{hex}` for Grapheme_Extend
+or non-printable scalars. Combining marks are escaped at any position.
+Plain runs append without temporary allocations; this is not JSON escaping.
+The shared core also serves `jet_rt_require_debug_string`, retaining Jet's
+D-STR-ESCAPE1 NUL spelling `\u{0}`; Rust-derived debug uses `\0`. Both modes
+reuse the existing `trap_scalar`, `trap_debug_short` and `trap_debug_escaped`
+helpers and canonical `TRAP_DEBUG_RANGES`, rather than a second decoder/table.
+
+The reference is rustc 1.97.1, commit
+`8bab26f4f68e0e26f0bb7960be334d5b520ea452`, with Unicode 17.0.0:
+`library/core/src/fmt/mod.rs:2916-2960`,
+`library/core/src/char/methods.rs:474-487`,
+`library/core/src/unicode/printable.rs` and
+`library/core/src/unicode/unicode_data.rs::grapheme_extend`.
+The source tarball SHA-256 is
+`622c2b429c53cbfdc0dd3a51d03554e91cd63ebec1912c1f5709640cdfef1a9d`.
+`Tools/agent/gen-text-debug-tables.mjs` checks both Unicode input checksums
+and compares their exact classification with the existing Trap table;
+it emits only C witness goldens, never a second runtime table. Generation is
+offline and normal builds need neither Rust nor network access.
+
+`TextDebugGoldens.h` contains 36 expected vectors produced by that exact
+rustc's `{:?}` for `str`, including embedded controls, combining marks at
+start/mid, ZWJ, soft hyphen, BOM, astral printable/unassigned characters,
+variation selectors and printability range edges. An exhaustive reference
+comparison found zero classification differences on 1,111,936 valid
+non-ASCII scalars. `TextDebugWitness.c` links real Jet exports, exercises
+borrowed input preservation and repeated builder appends, and requires
+free interception and exact-once destruction. Its stdout fixture is expected,
+not a native execution receipt; native execution remains unexercised.
+
+### Plugin failure debug and ownership
+
+`PluginError.jet` implements all handle routes for the native carrier in
+`PluginABI.jet`. Clone owns an independent recursive fault; drop releases it
+once. Equality follows `PluginWire.rs:46-50`: variant first, then Budget's
+limit before its fault, ignoring the inactive limit word for other variants.
+Display/show clone the message only (`PluginWire.rs:65-68`,
+`DBPluginWire.rs:4-11`); debug streams the complete derived enum, nested fault
+and ordered inline frame list into one existing builder. String fields use
+the shared Rust-debug mode, not Jet's NUL spelling, and raw i64 offsets use
+the existing signed-decimal builder helper.
+
+`PluginErrorGoldens.h` contains sixteen outputs of the real PluginWire Rust
+derives compiled with pinned rustc 1.97.1
+(`8bab26f4f68e0e26f0bb7960be334d5b520ea452`): all variants, all Budget limits,
+empty/two-frame faults and text/control/Unicode escapes. The offline
+`Tools/agent/gen-plugin-debug-goldens.mjs` packages those oracle outputs for
+`PluginErrorWitness.c`. The C client uses valid native allocations, requires
+free interception, checks recursive clone independence, inactive-word
+behavior, derived equality and separately owned render results. Expected
+stdout is not an execution receipt; native execution remains unexercised.
+
+### Shared enum and foreign sequence-stop leaves
+
+WatchKind, PluginLimit and EventOverflow handle glue uses the shared
+`EncodingABI.jet` owner through `encoding_enum_clone/drop/eq`; their record
+fields remain raw ordinals. Family files no longer duplicate the unit enum
+layout or its allocation/equality policy.
+
+PluginFrame's sequence getter preserves `CAbiRoutes.rs:8501`'s foreign
+`Vec[index as usize]` failure, calling shared `rt_seq_index_oob_stop` rather
+than a Jet language panic. Valid access lends inline frame storage directly.
+The foreign stop prints the standard length/index body, interpreting negative
+indices as unsigned, flushes stdout and exits 101 without task publication
+or atexit. The existing witness stop mode remains unexercised. These callsites
+require the shared Encoding and Trap leaves in the composed runtime unit;
+source parsing alone does not resolve those dependencies or prove execution.
+
+### Environment, websocket, task failure and SIMD handle families
+
+EnvError and TaskStatus reuse the shared unit enum owner. Their three render
+routes preserve the custom text in `CommonTypes.rs:6631-6645,6678-6681` and
+`Services.rs:1080-1087,1111-1120`. `WsABI.jet` stores websocket error and
+message variants from `WsClient.rs:10-19,57-61`. IO errors own operation text;
+MessageTooLarge stores raw i64; Text/Binary/Close messages own their text,
+byte list or close reason. Every binary clone, comparison and drop uses the
+existing byte-list helpers and `RT_HOST_U8_STRIDE`, never a literal word
+stride. Websocket error rendering follows the custom show (`WsClient.rs:22-52`),
+including raw operation text and signed limits rather than derived debug.
+
+TaskFailure extends the existing `Task.jet` carrier in place. Its layout is
+single-sourced by `TaskFailureABI.jet`; no competing task failure carrier is
+introduced. Equality follows `Outcome.rs:2185-2188`. Show/display render a
+raw Panicked reason (`Values.rs:454-460`, `TextValues.rs:212-218`), while
+debug quotes it with the shared Rust String escaper (`TextValues.rs:221-227`).
+Wrong-variant access uses the shared record-variant language panic.
+
+`SimdLaneABI.jet` defines four raw IEEE f64 lane words for F64x4. Clone copies
+those words, equality compares lanes in order without a pointer shortcut,
+and all renders follow the array-backed debug tuple in
+`MathTaskMem.rs:397-423`, using the existing shortest f64 debug formatter.
+NaN is unequal even to itself; signed zero lanes compare equal.
+
+`HandleFamiliesWitness.c` requires the real Jet runtime and free wrapping.
+It covers all variant render/equality tables, deep text/byte/failure clones,
+exact-once destruction, raw i64 edges, inactive payload independence, byte
+list empty/nonempty cases and IEEE lane truth tables. Lane render goldens
+were produced by pinned rustc 1.97.1's debug tuple/array formatting. The C
+byte-list expectation derives from `WS_MESSAGE_U8_STRIDE`, which must match
+the composed runtime's canonical one-byte stride. Its wrong-variant mode and
+expected stdout remain unexercised; native ownership admission and execution
+are not established by parse or C syntax receipts.
+
+### Byte buffer, POSIX path, row policy and event unit glue
+
+`ByteHandlesABI.jet` defines the native ByteBuffer (owned byte-list pointer,
+raw unsigned cursor), Path (owned byte-list pointer) and RowPolicy (owned
+table/expression Text pointers and the compiled closed-policy ordinal).
+These are native layouts, not Rust struct layouts or generated carrier aliases.
+ByteBuffer copies the complete byte list and cursor; its three renders ignore
+the cursor and print decimal bytes with comma-space separators, matching
+`Collections.rs:191-204`. Decimal U8 output creates no temporary Int/Text or
+heap scratch. Path preserves arbitrary POSIX path bytes across clone, then
+uses the shared UTF8-lossy decoder only when rendering (`PathFiles.rs:6-18`).
+The canonical packed byte stride renders directly without staging; legacy
+word-stride composition packs through `host_u8_get`. Byte clone/drop uses
+the existing stride-aware DataTree helpers, never a private byte stride.
+
+RowPolicy retains the compiled `AllowAll`/`OwnerEqualsUser` form as well as its
+canonical text (`Sync.rs:65-68`, `RowPolicy.rs:18-21`). Its two field routes
+preserve the actual two-argument, void C ABI in `CAbiRoutes.rs:12832-12840`:
+they fill the caller's stack `[data, length, capacity]` descriptor borrowing
+the owner's bytes. They do not return fresh Text owners. The descriptor must
+never be grown, consumed or dropped; callers may explicitly clone it.
+
+FailurePolicy, DispatchState, EventConfigError and LateEventDisposition
+delegate clone/drop/equality to the shared Encoding unit-enum owner.
+JetBitSet's five existing native providers in `Collections.jet` are reused
+unchanged (external-provider precedent `814254e43`), not duplicated.
+All-ref searches found no existing Jet providers for the other new families.
+Fraction is intentionally not given a hand carrier: CoreReview4's ruling
+retires it to Core-source structural glue on the CoreNumerics7 composition
+(`9cea21818` through `4bf243903`).
+
+`ByteHandleWitness.c` requires real Jet exports and free interception. It
+covers all 256 byte values, empty/full lists, raw cursor high bits, clone
+independence, exact-once frees, arbitrary path bytes including NUL and malformed
+UTF8, borrowed policy descriptor lifetime, both compiled policies, every valid
+unit-enum equality pair, and reused BitSet sorting/duplicate/negative behavior.
+Its byte-list expectations use `BYTE_HANDLE_U8_STRIDE`, which must match the
+composed runtime. Its stdout fixture is an expectation, not an execution
+receipt. Source parsing and strict C11 syntax do not establish native
+ownership admission, runtime linking or execution.

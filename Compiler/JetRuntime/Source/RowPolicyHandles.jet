@@ -1,0 +1,23 @@
+// Sync.rs:65-68; CAbiRoutes.rs:2965-2975,12832-12840.
+#Export(c) fn jet_rt_handle_clone_JetRowPolicy(policy: I64) -> I64 {
+    result :: jet_rt_alloc(ROW_POLICY_BYTES, I64{8})
+    data_tree_store(result + ROW_POLICY_TABLE, jet_rt_string_clone(data_tree_word(policy + ROW_POLICY_TABLE)))
+    data_tree_store(result + ROW_POLICY_EXPRESSION, jet_rt_string_clone(data_tree_word(policy + ROW_POLICY_EXPRESSION)))
+    data_tree_store(result + ROW_POLICY_COMPILED, data_tree_word(policy + ROW_POLICY_COMPILED))
+    result
+}
+#Export(c) fn jet_rt_handle_drop_JetRowPolicy(policy: I64) {
+    if (policy == I64{0}) -> return
+    jet_rt_string_drop(data_tree_word(policy + ROW_POLICY_TABLE))
+    jet_rt_string_drop(data_tree_word(policy + ROW_POLICY_EXPRESSION))
+    jet_rt_free(policy, ROW_POLICY_BYTES, I64{8})
+}
+fn row_policy_lend_text(text: I64, output: I64) {
+    // Caller-owned read/clone-only descriptor. It never owns the buffer and
+    // must not be grown, consumed or dropped as a native Text owner.
+    data_tree_store(output, rt_text_data(text))
+    data_tree_store(output + I64{8}, rt_text_len(text))
+    data_tree_store(output + I64{16}, rt_text_word(text + I64{16}))
+}
+#Export(c) fn jet_rt_handle_field_JetRowPolicy_table(policy: I64, output: I64) { row_policy_lend_text(data_tree_word(policy + ROW_POLICY_TABLE), output) }
+#Export(c) fn jet_rt_handle_field_JetRowPolicy_expression(policy: I64, output: I64) { row_policy_lend_text(data_tree_word(policy + ROW_POLICY_EXPRESSION), output) }
