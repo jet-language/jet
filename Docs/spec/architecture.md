@@ -319,8 +319,10 @@ any generation files are published.
 Package splits and folds use the same checked graph and one reversible journal.
 The journal is published before a multi-file mutation, so a stale, corrupt, or
 partially applied transition fails closed and `jet fold` can restore only the
-recorded before/after states. Atomic file publication and the package lock
-protect live bytes from concurrent writers and path escapes.
+recorded before/after states. Journal file states contain the original bytes as
+hex, not content digests; an absent file and an empty file remain distinct.
+Atomic file publication and the package lock protect live bytes from concurrent
+writers and path escapes.
 
 Environment OCI projection follows the same split. `jet-env-model` owns the
 pure `ImagePlan`; `jetpack::Image` is the one deterministic OCI realization

@@ -24,6 +24,26 @@ fn env_transition_test_error(result: TransitionResult EnvironmentError!, what: S
     }
 }
 
+#Test("transition journal preserves every byte and distinguishes absent from empty") {
+    bytes := [U8]{}
+    loop value in 0..<256 -> &bytes.push(U8{value})
+    encoded :: env_transition_encode_state(Val(bytes))
+    assert(encoded.starts_with("f00010203"))
+    assert(encoded.ends_with("fcfdfeff"))
+    assert_eq(encoded.bytes().len(), 513)
+    decoded :: env_transition_decode_state(Val(encoded), "fixture.journal") ?? panic("decode every byte")
+    assert_eq(decoded, Val(bytes))
+    assert_eq(env_transition_encode_state(None), "-")
+    assert_eq(env_transition_encode_state(Val([U8]{})), "f")
+    assert_eq(env_transition_decode_state(Val("-"), "fixture.journal") ?? panic("decode absent"), None)
+    assert_eq(env_transition_decode_state(Val("f"), "fixture.journal") ?? panic("decode empty"), Val([U8]{}))
+    binary :: [U8]{0, 10, 13, 34, 124, 128, 255}
+    assert_eq(env_transition_encode_state(Val(binary)), "f000a0d227c80ff")
+    assert_eq(env_transition_decode_state(Val("f000a0d227c80ff"), "fixture.journal") ?? panic("decode binary"), Val(binary))
+    if env_transition_decode_state(Val("f0"), "fixture.journal") == .Ok(_) -> panic("odd hex must be refused")
+    if env_transition_decode_state(Val("fgg"), "fixture.journal") == .Ok(_) -> panic("nonhex must be refused")
+}
+
 #Test("environment split and fold restore exact root") {
     root :: env_transition_test_root("env")
     env_transition_test_write(root, TRANSITION_PACKAGE_FILE, TRANSITION_TEST_ENV_PACKAGE)
