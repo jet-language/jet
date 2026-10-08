@@ -3390,45 +3390,45 @@ platform resolution.
 
 | Signature | Result | Description |
 |---|---|---|
-| `gethostname() -> String` | text | Read the local host name. |
-| `ip_addr(text: String) -[Net, Time.Wait]> IPAddr !NetError` | address | Parse an IP address. |
+| `gethostname() -[Env]> String` | text | Read the local host name. |
+| `ip_addr(text: String) -> IPAddr !NetError` | address | Parse an IP address. |
 | `ip_to_string(addr: IPAddr) -> String` / `ip_is_ipv4(addr: IPAddr) -> Bool` | text/Boolean | Render an address or test its family. |
-| `socket_addr(host: String, port: Int) -[Net, Time.Wait]> SocketAddr !NetError` | address | Build an address after checking the port. |
-| `socket_addr_parse(text: String) -[Net, Time.Wait]> SocketAddr !NetError` | address | Parse a rendered socket address. |
+| `socket_addr(host: String, port: Int) -[Net]> SocketAddr !NetError` | address | Build an address after checking the port. |
+| `socket_addr_parse(text: String) -> SocketAddr !NetError` | address | Parse a rendered socket address. |
 | `socket_host(addr: SocketAddr) -> String` / `socket_port(addr) -> Int` | scalar | Read address components. |
 | `socket_to_string(addr: SocketAddr) -> String` / `socket_type(stream: TCPStream) -> String` | text | Render an address or identify a stream. |
-| `tcp_listen(addr: String) -[Net, Time.Wait]> TCPListener !NetError` / `tcp_listen_addr(addr: SocketAddr) -[Net, Time.Wait]> TCPListener !NetError` | listener | Bind a TCP listener. |
+| `tcp_listen(addr: String) -[Net]> TCPListener !NetError` / `tcp_listen_addr(addr: SocketAddr) -[Net]> TCPListener !NetError` | listener | Bind a TCP listener. |
 | `tcp_accept(listener: TCPListener) -[Net, Time.Wait]> TCPStream !NetError` | stream | Accept one connection. |
 | `tcp_connect(addr: String) -[Net, Time.Wait]> TCPStream !NetError` / `tcp_connect_addr(addr: SocketAddr) -[Net, Time.Wait]> TCPStream !NetError` | stream | Connect to a TCP endpoint. |
 | `tcp_connect_timeout(addr: SocketAddr, timeout_ms: Int) -[Net, Time.Wait]> TCPStream !NetError` | stream | Connect with a nonnegative timeout. |
 | `tcp_connect_happy(host: String, port: Int, timeout_ms: Int) -[Net, Time.Wait]> TCPStream !NetError` | stream | Connect through the address-family race. |
-| `create_connection(host: String, port: Int) -[Net, Time.Wait]> TCPStream !NetError` / `create_server(host, port) -[Net, Time.Wait]> TCPListener !NetError` | endpoint | Build host/port TCP endpoints. |
+| `create_connection(host: String, port: Int) -[Net, Time.Wait]> TCPStream !NetError` / `create_server(host, port) -[Net]> TCPListener !NetError` | endpoint | Build host/port TCP endpoints. |
 | `send(&stream: TCPStream, text: String) -[Net, Time.Wait]> Int !NetError` | count | Write text through the caller's exclusive stream window. |
 | `tcp_read(&stream: TCPStream) -[Net, Time.Wait]> String !NetError` / `tcp_read_bytes(&stream, n) -[Net, Time.Wait]> [U8] !NetError` | text/bytes | Read from a TCP stream. |
 | `tcp_read_text(&stream, n) -[Net, Time.Wait]> String !NetError` | text | Read and decode up to `n` bytes. |
 | `tcp_write(&stream, text: String) -[Net, Time.Wait]> Unit !NetError` / `tcp_write_bytes(&stream, bytes) -[Net, Time.Wait]> Int !NetError` | unit/count | Write text or bytes. |
 | `tcp_write_all_bytes(&stream, bytes) -[Net, Time.Wait]> Unit !NetError` / `tcp_write_text(&stream, text) -[Net, Time.Wait]> Unit !NetError` | unit | Write all bytes or text. |
-| `tcp_shutdown(&stream, how: NetShutdown) -[Net, Time.Wait]> Unit !NetError` / `tcp_close(&stream) -[Net, Time.Wait]> Unit !NetError` | — | Shut down or close a stream. |
+| `tcp_shutdown(&stream, how: NetShutdown) -[Net]> Unit !NetError` / `tcp_close(&stream) -[Net]> Unit !NetError` | — | Shut down or close a stream. |
 | `tcp_reply(^stream, status: String, body: String) -[Net, Time.Wait]> Unit !NetError` | — | Consume a stream, write one checked reply with a three-digit status, and close it. |
 | `tcp_ready(&stream, interest: NetReadyInterest, deadline_ms: Int) -[Net, Time.Wait]> NetReady !NetError` | readiness | Wait for a readiness interest until a deadline. |
 | `ready_readable(ready: NetReady) -> Bool` / `ready_writable(ready) -> Bool` | Boolean | Inspect readiness. |
-| `tcp_local_addr(stream)`, `tcp_peer_addr(stream)` | `String !NetError` | Read rendered stream endpoints. |
-| `tcp_local_socket_addr(stream)`, `tcp_peer_socket_addr(stream)`, `listener_local_socket_addr(listener)` | `SocketAddr !NetError` | Read typed stream/listener endpoints. |
-| `set_timeout(&stream, timeout_ms: Int) -[Net, Time.Wait]> Unit !NetError` | — | Set a nonnegative timeout on the caller's stream, without copying the handle. |
-| `set_read_timeout(&stream, timeout_ms: Int) -[Net, Time.Wait]> Unit !NetError` / `set_write_timeout(&stream, timeout_ms: Int) -[Net, Time.Wait]> Unit !NetError` | — | Set read or write timeouts in milliseconds. |
-| `nodelay(stream) -[Net, Time.Wait]> Bool !NetError` / `set_nodelay(&stream, on: Bool) -[Net, Time.Wait]> Unit !NetError` | option | Read or set TCP no-delay. |
-| `ttl(stream) -[Net, Time.Wait]> Int !NetError` / `set_ttl(&stream, hops: Int) -[Net, Time.Wait]> Unit !NetError` | option | Read or set the TTL. |
-| `sendfile(&stream, path: String) -[Net, FS, Time.Wait]> Int !NetError` | count | Send file bytes through a TCP stream. |
-| `udp_bind(addr: String) -[Net, Time.Wait]> UDPSocket !NetError` / `udp_bind_addr(addr: SocketAddr) -[Net, Time.Wait]> UDPSocket !NetError` | socket | Bind a UDP socket. |
-| `udp_local_addr(socket: UDPSocket) -[Net, Time.Wait]> SocketAddr !NetError` / `udp_set_timeout(socket, timeout_ms: Int) -[Net, Time.Wait]> Unit !NetError` | address/— | Inspect a UDP endpoint or set its timeout. |
+| `tcp_local_addr(stream) -[Net]> String !NetError`, `tcp_peer_addr(stream) -[Net]> String !NetError` | text | Read rendered stream endpoints. |
+| `tcp_local_socket_addr(stream) -[Net]> SocketAddr !NetError`, `tcp_peer_socket_addr(stream) -[Net]> SocketAddr !NetError`, `listener_local_socket_addr(listener) -[Net]> SocketAddr !NetError` | address | Read typed stream/listener endpoints. |
+| `set_timeout(&stream, timeout_ms: Int) -[Net]> Unit !NetError` | — | Set a nonnegative timeout on the caller's stream, without copying the handle. |
+| `set_read_timeout(&stream, timeout_ms: Int) -[Net]> Unit !NetError` / `set_write_timeout(&stream, timeout_ms: Int) -[Net]> Unit !NetError` | — | Set read or write timeouts in milliseconds. |
+| `nodelay(stream) -[Net]> Bool !NetError` / `set_nodelay(&stream, on: Bool) -[Net]> Unit !NetError` | option | Read or set TCP no-delay. |
+| `ttl(stream) -[Net]> Int !NetError` / `set_ttl(&stream, hops: Int) -[Net]> Unit !NetError` | option | Read or set the TTL. |
+| `sendfile(&stream, path: String) -[Net, Time.Wait]> Int !NetError` | count | Send file bytes through a TCP stream. |
+| `udp_bind(addr: String) -[Net]> UDPSocket !NetError` / `udp_bind_addr(addr: SocketAddr) -[Net]> UDPSocket !NetError` | socket | Bind a UDP socket. |
+| `udp_local_addr(socket: UDPSocket) -[Net]> SocketAddr !NetError` / `udp_set_timeout(socket, timeout_ms: Int) -[Net]> Unit !NetError` | address/— | Inspect a UDP endpoint or set its timeout. |
 | `udp_send_to(socket, text, addr) -[Net, Time.Wait]> Int !NetError` / `udp_send_bytes_to(socket, bytes, addr) -[Net, Time.Wait]> Int !NetError` | count | Send text or bytes to a datagram address. |
 | `udp_recv_from(socket, limit) -[Net, Time.Wait]> UDPPacket !NetError` / `udp_receive(socket, limit) -[Net, Time.Wait]> UDPPacket !NetError` | packet | Receive a bounded datagram. |
 | `udp_packet_data(packet)`, `udp_packet_bytes(packet)`, `udp_packet_addr(packet)` | scalar | Read packet text, bytes, or address. |
 | `udp_packet_original_len(packet) -> Int` / `udp_packet_truncated(packet) -> Bool` | scalar | Inspect datagram length and truncation. |
-| `unix_listen(path: String) -[Net, FS, Time.Wait]> UnixListener !NetError` / `unix_connect(path) -[Net, FS, Time.Wait]> UnixStream !NetError` | endpoint | Use Unix-domain sockets. |
+| `unix_listen(path: String) -[Net]> UnixListener !NetError` / `unix_connect(path) -[Net, Time.Wait]> UnixStream !NetError` | endpoint | Use Unix-domain sockets. |
 | `unix_accept(listener) -[Net, Time.Wait]> UnixStream !NetError` / `unix_read(&stream) -[Net, Time.Wait]> String !NetError` | stream/text | Accept or read a Unix stream. |
 | `unix_write(&stream, text) -[Net, Time.Wait]> Unit !NetError` / `unix_read_bytes(&stream, n) -[Net, Time.Wait]> [U8] !NetError` | unit/bytes | Write text or read bytes through the caller's exclusive stream window. |
-| `unix_write_all_bytes(&stream, bytes) -[Net, Time.Wait]> Unit !NetError` / `unix_shutdown(&stream, how) -[Net, Time.Wait]> Unit !NetError` / `unix_close(&stream) -[Net, Time.Wait]> Unit !NetError` | — | Write all bytes or close the same Unix stream. |
+| `unix_write_all_bytes(&stream, bytes) -[Net, Time.Wait]> Unit !NetError` / `unix_shutdown(&stream, how) -[Net]> Unit !NetError` / `unix_close(&stream) -[Net]> Unit !NetError` | — | Write all bytes or close the same Unix stream. |
 | `dns_a(name: String, ms: Int) -[Net, Time.Wait]> [IPAddr] !NetError` / `dns_aaaa(name, ms) -[Net, Time.Wait]> [IPAddr] !NetError` | addresses | Resolve IPv4 or IPv6 records. |
 | `dns_a_at(server: String, name: String, ms: Int) -[Net, Time.Wait]> [IPAddr] !NetError` / `dns_aaaa_at(server, name, ms) -[Net, Time.Wait]> [IPAddr] !NetError` | addresses | Resolve A or AAAA records through an explicit server. |
 | `dns_txt(name: String, ms: Int) -[Net, Time.Wait]> [String] !NetError` / `dns_ptr(addr, ms) -[Net, Time.Wait]> [String] !NetError` | records | Resolve TXT or PTR records. |
@@ -3445,6 +3445,13 @@ The `*_at` DNS forms take an explicit server, and `error_operation`,
 `NetError`. Ports are checked in `0..=65535`; timeout and deadline values are
 nonnegative milliseconds. A blocking socket call declares `Net` and
 `Time.Wait`, so the suspension boundary remains visible.
+
+Effects follow the existing per-function Core rows, not a module-wide waiting
+annotation. TCP listen and address getters, socket options, UDP bind/options,
+and Unix listen/shutdown/close require `Net` without `Time.Wait`. Accept,
+connect, byte transfer, DNS, and the other listed waiting operations retain
+their existing `Time.Wait` leaf. Reserved raw aliases mirror those same rows;
+moving public validation into Jet does not widen the authority contract.
 
 DNS error classification is Jet source policy. Reserved Core-only
 `__dns_*_lookup` leaves call the existing resolver and return its raw string

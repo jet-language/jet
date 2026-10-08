@@ -22659,7 +22659,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 span,
             );
         }
-        if row.module == "core.net" && row.member == "tcp_listen" {
+        if row.module == "core.net" && matches!(row.member, "tcp_listen" | "__tcp_listen") {
             let [address] = args.as_slice() else {
                 return Err(mir_error_at("MIR TCP listener expects one address", span));
             };
@@ -22689,7 +22689,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 fields: vec![("id".to_string(), MirEvalValue::Int(raw))],
             }));
         }
-        if row.module == "core.net" && row.member == "listener_local_socket_addr" {
+        if row.module == "core.net" && matches!(row.member, "listener_local_socket_addr" | "__listener_local_socket_addr") {
             self.ensure_core_route(id, route, span)?;
             let [listener] = args.as_slice() else {
                 return Err(mir_error_at(
