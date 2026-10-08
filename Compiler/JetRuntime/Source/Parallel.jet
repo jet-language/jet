@@ -28,7 +28,7 @@ fn parallel_limit(limit: I64, cap: I64) -> I64 {
         scheduler_control_enter(control, save)
         body :: scheduler_body_enter()
         #Unsafe("checked System V (env,start,end)->Unit callback; env remains borrowed and each range has exclusive output slots") {
-            _ := os_call3_i64(sync_load(worker + I64{40}), sync_load(worker + I64{32}), start, end)
+            os_call3_unit_i64(sync_load(worker + I64{40}), sync_load(worker + I64{32}), start, end)
         }
         scheduler_body_leave(body)
         record :: scheduler_control_take_stop(control)
