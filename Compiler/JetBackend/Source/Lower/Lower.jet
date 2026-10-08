@@ -434,7 +434,6 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
     if shared_sites_dynamic && !wrap_entry && m.static_fixups.len() > 0 -> m.static_live = Val(lower_static_object(&m, 8))
     callables := [U64:LIRFunctionID]{}
     loop root in roots {
-        if !shared_sites_dynamic -> break
         if callables.get(root.value) != None -> next
         concrete :: prepared.roots.get(root.value) ?? {
             &m.issues.push(LIRLoweringIssue{function: "entry preparation", message: "requested root {root.value} has no concrete monomorphization"})
@@ -444,6 +443,9 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
             &m.issues.push(LIRLoweringIssue{function: "entry preparation", message: "requested concrete root {concrete.value} is absent from the lowered inventory"})
             next
         }
+        // Both pinned Core and dynamic callables validate their concrete roots.
+        // Only the dynamic mode registers callable/value/release wrappers.
+        if !shared_sites_dynamic -> next
         if test_serial != None -> &m.test_rows.push(row)
         lowered := if wrap_entry -> lower_entry_id(program, &m, row) else -> LIRFunctionID{value: row}
         if !wrap_entry && m.static_fixups.len() > 0 {

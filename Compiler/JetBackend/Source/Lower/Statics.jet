@@ -389,22 +389,30 @@ fn lower_static_fixups(m: &LowerModule, f: &LowerFunction) Never! {
     }
 }
 
-// Releases only the canonical owners lower_static_fixups created, not the
-// frozen storage or the borrowed carriers reachable through its pointer
-// relocations. Each slot is cleared after its load. An exact-Int fixup holds
-// a word whose drop is trivial at O0 (lower_drop), so only Strings release.
+// Releases only the canonical owners lower_static_fixups created, not frozen
+// storage or its borrowed relocations. Clear before release: exact Int words
+// may own heap-backed digits, just as String words own their native carrier.
 fn lower_static_release(m: &LowerModule, f: &LowerFunction) Never! {
     fixups :: ~m.static_fixups
     loop fixup in fixups {
-        if fixup.constructor != "jet_rt_string_from_static" -> next
-        handle :: lower_pointer(&f)
+        release := ""
+        layout := lir_layout_pointer()
+        if {
+            fixup.constructor == "jet_rt_string_from_static" -> release = "jet_rt_string_drop"
+            fixup.constructor == "jet_rt_int_from_static" -> {
+                release = "jet_rt_int_drop"
+                layout = lir_layout_word()
+            }
+            else -> return lower_fail(&m, &f, "static owner constructor {fixup.constructor} has no canonical release")
+        }
+        handle :: lower_new_value(&f, layout, LIRDrop.Trivial, None)
         object :: lower_pointer(&f)
         lower_emit(&f, LIRInst.DataAddress{dst: object, data: fixup.object})
         lower_emit(&f, LIRInst.Load{dst: handle, base: object, offset: fixup.offset})
-        empty :: lower_pointer(&f)
+        empty :: lower_new_value(&f, layout, LIRDrop.Trivial, None)
         lower_emit(&f, LIRInst.Const{dst: empty, value: 0})
         lower_emit(&f, LIRInst.Store{base: object, offset: fixup.offset, value: empty})
-        lower_call_runtime(&m, &f, "jet_rt_string_drop", [LIRValueID]{handle}, None)
+        lower_call_runtime(&m, &f, release, [LIRValueID]{handle}, None)
     }
 }
 
@@ -457,7 +465,12 @@ fn lower_shared_site_helper(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> 
     }
     existing :: lower_pointer(&f)
     if tls -> lower_call_runtime(&m, &f, "jet_rt_tls_get", [LIRValueID]{key}, Val(existing))
-    else -> lower_emit(&f, LIRInst.Load{dst: existing, base: cell, offset: 0})
+    else {
+        // Native lowering currently targets x64 only: this naturally aligned
+        // word load has acquire ordering under TSO. An AArch64/native target
+        // must introduce an acquire LIR load before enabling publication sites.
+        lower_emit(&f, LIRInst.Load{dst: existing, base: cell, offset: 0})
+    }
     zero :: lower_const(&f, 0)
     initialized :: lower_flag(&f)
     lower_emit(&f, LIRInst.Compare{dst: initialized, condition: LIRCondition.Ne, left: existing, right: zero})

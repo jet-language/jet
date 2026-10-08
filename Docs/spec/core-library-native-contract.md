@@ -295,6 +295,8 @@ Process/World first publication calls the canonical runtime
 World=1. It transfers the candidate's existing owner, drops a losing candidate,
 and returns a borrowed winner. The getter clones before returning its owning
 result. The common read is an ordinary typed `Global` load.
+Racing initializers may each run; exactly one candidate is published and every
+losing candidate is dropped exactly once, on both the Rust seed and native tier.
 
 Thread/Attempt project the same pinned site identity through native TLS, with
 Thread scope 0 and Attempt scope 1. World/Attempt retirement occurs only after

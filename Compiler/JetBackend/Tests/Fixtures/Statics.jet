@@ -284,6 +284,9 @@ fn fx_shared_site_checks() -> Bool Never! {
         if !startup.name.contains("core.shared.init") -> return false
         startup_text :: lir_print_module(LIRModule{signatures: pinned.lir.signatures, functions: [LIRFunction]{startup}, data: pinned.lir.data})
         if !startup_text.contains("jet_rt_string_from_static") || startup_text.contains("jet_rt_native_shared_new") -> return false
+        finalizer :: pinned.finalizer ?? return false
+        release :: lir_print_module(LIRModule{signatures: pinned.lir.signatures, functions: [LIRFunction]{pinned.lir.functions[finalizer.value]}, data: pinned.lir.data})
+        if !release.contains("jet_rt_string_drop") || release.contains("jet_rt_native_shared_drop") -> return false
         getter_text :: lir_print_module(pinned.lir)
         if !getter_text.contains("jet_rt_native_shared_clone") -> return false
         if lifetime == MIRSharedLifetime.Process || lifetime == MIRSharedLifetime.World {
@@ -292,5 +295,16 @@ fn fx_shared_site_checks() -> Bool Never! {
             if !getter_text.contains("jet_rt_tls_shared_key") || !getter_text.contains("jet_rt_tls_set") -> return false
         }
     }
+    digits := fx_builder()
+    integer :: fx_value(&digits, fx_int(), fx_borrow(), MIROperation.Global{name: "fixture.shared_digits"})
+    fx_block(&digits, 0, MIRTerminator.Return{value: Val(integer)})
+    root :: fx_function("read_shared_digits", digits, fx_int())
+    exact := fx_program([MIRFunction]{root}, [])
+    exact.constants = [MIRConstantDef]{fx_static_definition("shared_digits", fx_int(), MIRConstant.BigInt{decimal: "18446744073709551616"})}
+    pinned :: lir_lower_core_shared(exact, [MIRFunctionID]{root.id})
+    if pinned.issues.len() != 0 -> return false
+    finalizer :: pinned.finalizer ?? return false
+    release :: lir_print_module(LIRModule{signatures: pinned.lir.signatures, functions: [LIRFunction]{pinned.lir.functions[finalizer.value]}, data: pinned.lir.data})
+    if !release.contains("jet_rt_int_drop") || release.contains("jet_rt_string_drop") -> return false
     true
 }
