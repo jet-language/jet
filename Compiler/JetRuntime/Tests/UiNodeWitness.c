@@ -24,6 +24,8 @@ extern uintptr_t jet_rt_handle_field_JetUiNode_width(uintptr_t);
 extern uintptr_t jet_rt_handle_field_JetUiNode_height(uintptr_t);
 extern void jet_rt_native_closure_retain(uintptr_t);
 extern bool jet_rt_native_closure_unref(uintptr_t);
+extern void jet_rt_thread_attach(void);
+extern void jet_rt_thread_detach(void);
 
 struct Text { const unsigned char *data; uint64_t len, cap; };
 struct Closure {
@@ -135,6 +137,7 @@ static void populated_golden(uintptr_t node, uintptr_t child,
 
 struct ThreadCase { uintptr_t node; struct Closure *click, *drop; };
 static void *clone_on_thread(void *argument) {
+    jet_rt_thread_attach();
     struct ThreadCase *test = argument;
     uintptr_t copy = jet_rt_handle_clone_JetUiNode(test->node);
     assert(copy != test->node && jet_rt_handle_eq_JetUiNode(copy, test->node));
@@ -143,15 +146,18 @@ static void *clone_on_thread(void *argument) {
     ((struct Closure *)word(copy, 128))->invoke(test->click, 7);
     ((struct Closure *)word(copy, 136))->invoke(test->drop, 7);
     jet_rt_handle_drop_JetUiNode(copy);
+    jet_rt_thread_detach();
     return NULL;
 }
 static void *contend_references(void *argument) {
+    jet_rt_thread_attach();
     struct Closure *value = argument;
     for (unsigned i = 0; i < 100000; ++i) {
         jet_rt_native_closure_retain((uintptr_t)value);
         // The node's original reference stays live throughout both threads.
         assert(!jet_rt_native_closure_unref((uintptr_t)value));
     }
+    jet_rt_thread_detach();
     return NULL;
 }
 int main(void) {

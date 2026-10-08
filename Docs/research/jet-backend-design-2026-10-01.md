@@ -1678,7 +1678,8 @@ those providers remain Rust.
 `UiNodeWitness.c` links the real native providers. It checks all 160 bytes'
 field contracts for absent and populated transfers, poisoned ignored words,
 borrowed getters, distinct cloning, callback invocation, and cross-thread
-clone/drop. Two threads additionally perform 100,000 retain/unref pairs
+clone/drop. Host pthread workers explicitly attach/detach the native TCB;
+they never reuse an inherited GS base. Two threads additionally perform 100,000 retain/unref pairs
 each on one shared closure before its single final destruction. Its counted
 closure allocations and frees use the real Jet allocator, not a replacement.
 Source parsing and C syntax checks are not native byte-parity evidence.
