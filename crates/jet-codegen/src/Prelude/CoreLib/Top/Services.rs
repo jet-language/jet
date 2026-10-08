@@ -3229,8 +3229,8 @@ fn jet_services_raw_tree_write_delivery(tree: &mut JetServiceTree, value: JetSer
 fn jet_services_raw_tree_write_restart(tree: &mut JetServiceTree, value: JetServiceRestart) {
     tree.restart = value;
 }
-fn jet_services_raw_group_write_restart(tree: &mut JetServiceTree, index: i64, value: JetServiceRestart) {
-    tree.groups[index as usize].restart = value;
+fn jet_services_raw_group_write_restart(tree: &mut JetServiceTree, index: i64) {
+    tree.groups[index as usize].restart = tree.restart.clone();
 }
 fn jet_services_raw_tree_clear_dead_letters(tree: &mut JetServiceTree) { tree.dead_letters.clear(); }
 fn jet_services_raw_tree_write_empty_adapter(tree: &mut JetServiceTree) {

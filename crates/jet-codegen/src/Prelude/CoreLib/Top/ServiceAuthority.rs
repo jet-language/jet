@@ -326,6 +326,22 @@ pub fn jet_services_active_execution_endpoint() -> Result<JetServiceEndpoint, Je
     })
 }
 
+// Raw projection only: copy authoritative facts from the existing Process
+// registry under ONE lock. Source owns endpoint-policy decisions. No channel,
+// secondary authority table, signing key cache or new lifetime is introduced.
+fn jet_services_raw_endpoint_authority_parts(endpoint: &JetServiceEndpoint)
+    -> Result<(String, String, String, jet_foundation::Numeric::JetInt, bool, bool, bool), JetServiceError>
+{
+    let key = service_endpoint_key(&endpoint.authority, &endpoint.worker, endpoint.generation);
+    let registry = service_endpoint_registry().lock()
+        .map_err(|_| service_authority_error("service endpoint registry lock is poisoned"))?;
+    let state = registry.get(&key).ok_or_else(|| JetServiceError::Partitioned(
+        "service endpoint authority is not registered".to_string()))?;
+    Ok((state.authority.clone(), state.tree.clone(), state.worker.clone(),
+        jet_std::jet_int_owned_from_i64(state.generation),
+        state.started, state.draining, state.partitioned))
+}
+
 fn service_authority_require_issued(authority: &str) -> Result<(), JetServiceError> {
     // Issuance is recorded by the one endpoint authority registry. Do not
     // maintain a second process-local rights table for directory proofs.

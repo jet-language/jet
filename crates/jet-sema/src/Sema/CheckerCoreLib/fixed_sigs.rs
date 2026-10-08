@@ -3339,13 +3339,21 @@ fn core_fixed_sig_impl(
                 (AccessConvention::Move, Type::Named("ServiceRestart".into()))], None)),
         ("core.service", "__group_write_restart") =>
             Some((vec![(AccessConvention::Write, Type::Named("ServiceTree".into())),
-                (read, Type::Int), (AccessConvention::Move, Type::Named("ServiceRestart".into()))], None)),
+                (read, Type::Int)], None)),
         ("core.service", "__tree_clear_dead_letters" | "__tree_write_empty_adapter" | "__tree_clear_state_authority") =>
             Some((vec![(AccessConvention::Write, Type::Named("ServiceTree".into()))], None)),
         ("core.service", "__endpoint_parts") =>
             Some((vec![(read, Type::Named("ServiceEndpoint".into()))], Some(Type::Tuple(vec![
                 ("tree".into(), Box::new(Type::String)), ("worker".into(), Box::new(Type::String)),
                 ("generation".into(), Box::new(Type::Int))])))),
+        ("core.service", "__active_endpoint") =>
+            Some((vec![], Some(result_ty(Type::Named("ServiceEndpoint".into()), Type::Named("ServiceError".into()))))),
+        ("core.service", "__endpoint_authority_parts") =>
+            Some((vec![(read, Type::Named("ServiceEndpoint".into()))], Some(result_ty(Type::Tuple(vec![
+                ("authority".into(), Box::new(Type::String)), ("tree".into(), Box::new(Type::String)),
+                ("worker".into(), Box::new(Type::String)), ("generation".into(), Box::new(Type::Int)),
+                ("started".into(), Box::new(Type::Bool)), ("draining".into(), Box::new(Type::Bool)),
+                ("partitioned".into(), Box::new(Type::Bool))]), Type::Named("ServiceError".into()))))),
         ("core.service", "drain_dead_letters") => Some((
             vec![(
                 AccessConvention::Write,

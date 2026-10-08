@@ -377,9 +377,11 @@ core.service __tree_started|__tree_has_snapshot ServiceTree Bool
 core.service __tree_group_count ServiceTree Int
 core.service __tree_write_delivery &ServiceTree,^ServiceDelivery -
 core.service __tree_write_restart &ServiceTree,^ServiceRestart -
-core.service __group_write_restart &ServiceTree,I64,^ServiceRestart -
+core.service __group_write_restart &ServiceTree,I64 -
 core.service __tree_clear_dead_letters|__tree_write_empty_adapter|__tree_clear_state_authority &ServiceTree -
 core.service __endpoint_parts ServiceEndpoint (tree:String,worker:String,generation:Int)
+core.service __active_endpoint - Result<ServiceEndpoint,ServiceError>
+core.service __endpoint_authority_parts ServiceEndpoint Result<(authority:String,tree:String,worker:String,generation:Int,started:Bool,draining:Bool,partitioned:Bool),ServiceError>
 core.http.server __route_template HTTPRequest String?
 core.http.server __response_parts I64,^String,^Headers,^Body,^Headers,U64?,Bool,^String,^String,^[String],^[I64],Bool,^String? HTTPResponse
     """
