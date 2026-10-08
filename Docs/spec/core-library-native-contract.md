@@ -126,6 +126,13 @@ nor invokes a Rust panic hook, task-stop publication, or backtrace rendering.
 The Rust-tier seed adapter preserves the same bytes and termination as the
 Jet-owned allocator; it does not inherit host-toolchain allocation-error policy.
 
+Runtime C routes use canonical `Float` for a direct 64-bit floating argument or
+result, matching the Rust `f64` register carrier. The validator does not admit
+convenience spellings or a 32-bit floating carrier. Pointer and indirect output
+slots remain `I64` or `U64` words even when their payload is a float; byte and
+boolean carriers retain their separate checks. This is carrier validation, not
+a numeric conversion.
+
 ## One meaning across execution tiers
 
 AOT, interpreter/comptime evaluation, and web execution are
