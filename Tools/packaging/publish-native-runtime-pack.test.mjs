@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { captureStep, captureTerminal, fileObject, lifecycleSection, main, observeStep, parseProofqMetadata, publication } from './publish-native-runtime-pack.mjs';
+import { captureStep, captureTerminal, fileObject, lifecycleSection, main, observeStep, parseProofqMetadata, publication, readelfSectionNames } from './publish-native-runtime-pack.mjs';
 
 function fixture(fn) {
   const root = mkdtempSync(join(tmpdir(), 'native-runtime-publication-'));
@@ -104,4 +104,19 @@ test('lifecycle section is exact five-digit canonical priority, never a padding 
   assert.equal(lifecycleSection('init', '65535'), '.init_array.65535');
   for (const priority of ['00', '00001', '65536', '-1', '1.0', '1.extra', ' 1', '', 1]) assert.throws(() => lifecycleSection('init', priority));
   assert.throws(() => lifecycleSection('unknown', '0'));
+});
+
+test('lifecycle evidence uses exact actual readelf section-name fields', () => {
+  const header = 'Section Headers:\n  [Nr] Name              Type            Address          Off    Size   ES Flg Lk Inf Al\n';
+  const row = name => `  [ 3] ${name} INIT_ARRAY      0000000000000000 000040 000008 08  WA  0   0  8\n`;
+  const expected = lifecycleSection('init', '0');
+  assert(readelfSectionNames(header + row(expected)).has(expected));
+  assert(readelfSectionNames(header + row(lifecycleSection('fini', '1'))).has('.fini_array.00001'));
+  assert(readelfSectionNames(header + row(lifecycleSection('init', '65535'))).has('.init_array.65535'));
+  for (const alias of ['.init_array.00000.extra', '.init_array.000000', '.init_array.0', '.init_array.000é0', '.init_array.0000٠', '.rela.init_array.00000']) {
+    assert(!readelfSectionNames(header + row(alias)).has(expected), alias);
+  }
+  assert(!readelfSectionNames(`${header}  prose contains ${expected}\n`).has(expected));
+  assert(!readelfSectionNames(`${header}  [Nr] ${expected} INIT_ARRAY\n`).has(expected));
+  assert(!readelfSectionNames(header + row('.other') + `  note ${expected}\n`).has(expected));
 });

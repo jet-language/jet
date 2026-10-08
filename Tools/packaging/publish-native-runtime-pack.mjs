@@ -141,8 +141,15 @@ export function lifecycleSection(phase, priority) {
   return `.${phase}_array.${priority.padStart(5, '0')}`;
 }
 
+// readelf -SW's bracketed index precedes the complete section-name field.
+// Evidence must name that field exactly, never a substring in another name.
+export function readelfSectionNames(text) {
+  return new Set([...text.matchAll(/^[ \t]*\[[ \t]*[0-9]+\][ \t]+([^ \t\r\n]+)[ \t]/gm)].map(match => match[1]));
+}
+
 function lifecycle(wt, manifest, subject, blob, directory) {
   const sectionText = runReadelf(manifest.artifacts.pack_object, ['-SW']);
+  const sectionNames = readelfSectionNames(sectionText);
   const relocText = runReadelf(manifest.artifacts.pack_object, ['-rW']);
   const sectionsPath = join(directory, 'lifecycle.sections');
   const relocsPath = join(directory, 'lifecycle.relocations');
@@ -167,7 +174,7 @@ function lifecycle(wt, manifest, subject, blob, directory) {
     const actual = declarations.get(symbol);
     insist(actual && actual.phase === phase && actual.priority === priority, `lifecycle annotation differs for ${symbol}`);
     const section = lifecycleSection(phase, priority);
-    insist(sectionText.includes(section), `pack lost lifecycle section ${section}`);
+    insist(sectionNames.has(section), `pack lost lifecycle section ${section}`);
     const relocationSection = `.rela${section}`;
     const block = relocText.split(/(?=Relocation section ')/).find(part => part.startsWith(`Relocation section '${relocationSection}'`));
     insist(block && block.split('\n').some(row => row.includes('R_X86_64_64') && row.split(/\s+/).includes(symbol)), `pack lost lifecycle relocation ${symbol}`);
