@@ -1703,4 +1703,16 @@ Outcome's recursive root report and ordered `jet.err/v1` serialization,
 including Unicode C1 control escapes and raw canonical typed field JSON.
 `Tests/err-report.c` exercises the real carrier and allocator LIVE BYTES fact
 (index 2), not historical allocation count, for a deep-clone/drop ledger.
+The native-pack source batch depends on G1f's `135db4321` generated-adapter
+guard: `exports.list` selects each same-name Rust adapter's
+`cfg(not(jet_native_pack))`. Hand-written `CAbi.rs` Err constructors/getters
+carry the same guard explicitly, so the seed tier remains unchanged while
+native packs contain only the canonical Jet implementation.
+`run-host-fixtures.mjs audit` requires exactly one strong pack definition for
+every Err/report export rather than accepting a mixed Rust fallback.
+`JourneyReport.jet` ports Outcome's scalar-column terminal policy without
+intermediate rendered measurement strings. Its goldens reuse literal expected
+bytes from `Outcome.rs:2066–2172`, covering stream/80-column/40-column,
+independent ANSI coloring, path-segment elision, note truncation and repeated
+hop counts.
 

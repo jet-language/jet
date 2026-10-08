@@ -369,6 +369,8 @@ mod jet_c_abi {
         super::jet_panic("<core.prelude>", 0, "record variant index out of range")
     }
 
+    // Same-name canonical Err88 provider owns this ABI in native packs.
+    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_rt_record_new_JetErr(message: JetCString, code: *const JetCString, cause: *mut super::JetErr) -> *mut super::JetErr {
         guard(|| {
@@ -377,18 +379,21 @@ mod jet_c_abi {
         })
     }
 
+    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_rt_record_get_JetErr_message(error: *mut super::JetErr) -> JetCString {
         // SAFETY: `error` is a live handle the caller lends for this call.
         guard(|| handle(super::jet_err_message(unsafe { &*error })))
     }
 
+    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_rt_record_get_JetErr_code(error: *mut super::JetErr, some: *mut JetCString) -> i64 {
         // SAFETY: `error` is a live handle the caller lends for this call.
         guard(|| some_text(some, &super::jet_err_code(unsafe { &*error })))
     }
 
+    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_rt_record_get_JetErr_cause(error: *mut super::JetErr, some: *mut *mut super::JetErr) -> i64 {
         // SAFETY: `error` is a live handle the caller lends; `some` is its zeroed out slot.

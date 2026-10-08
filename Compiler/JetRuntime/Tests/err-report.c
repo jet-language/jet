@@ -14,6 +14,10 @@ typedef struct { Text *name, *value; } Field;
 typedef struct { Text *variant; List fields; W has_span, start, end; } Details;
 typedef struct Err { Text *message, *code; struct Err *cause; Text *identity; List context, conversions; Details *details; } Err;
 _Static_assert(sizeof(Err)==88 && sizeof(Details)==56 && sizeof(Context)==24 && sizeof(Conversion)==16 && sizeof(Field)==16,"canonical native error ABI");
+typedef struct { Text *function, *file; W line, column; Text *note; W count; } Hop;
+typedef struct { Hop *origin; List hops; } Journey;
+_Static_assert(sizeof(Hop)==48 && sizeof(Journey)==32,"canonical native Journey ABI");
+extern Text *jet_journey_render_styled(Journey *,bool,W);
 extern void *jet_rt_alloc(W,W);
 extern Text *jet_rt_string_from_static(const char *,W);
 extern void jet_rt_string_drop(Text *);
@@ -40,10 +44,62 @@ static void equal(Text *value,const char *expected) {
     assert(!memcmp(value->data,expected,(size_t)value->length));
     jet_rt_string_drop(value);
 }
+static Text borrowed(char *value) { return (Text){value,(W)strlen(value),0}; }
+static void journey_goldens(void) {
+    // Literal bytes from Outcome.rs:2066-2172; no regenerated approximation.
+    Text file=borrowed("Examples/features/errors/error_context.jet");
+    Text empty=borrowed(""), a=borrowed("read_raw"), b=borrowed("parse_config"), c=borrowed("load_config"), d=borrowed("run");
+    Text n1=borrowed("reading raw config"), n2=borrowed("loading config app.toml");
+    Hop origin={&a,&file,4,1,&empty,1}, first={&b,&file,7,1,&n1,1}, second={&c,&file,12,1,&n2,1}, third={&d,&file,16,1,&empty,1};
+    Hop *hops[]={&first,&second,&third}; Journey journey={&origin,{3,3,hops}};
+    const char *plain=
+        "  failed here: read_raw (Examples/features/errors/error_context.jet:4)\n"
+        " Trail [E3002] (3 hops via ?, origin first):\n"
+        "  1. parse_config (Examples/features/errors/error_context.jet:7) — reading raw config\n"
+        "  2. load_config (Examples/features/errors/error_context.jet:12) — loading config app.toml\n"
+        "  3. run (Examples/features/errors/error_context.jet:16)\n";
+    equal(jet_journey_render_styled(&journey,false,0),plain);
+    equal(jet_journey_render_styled(&journey,false,80),
+        "  failed here: read_raw (…/errors/error_context.jet:4)\n"
+        " Trail [E3002] (3 hops via ?, origin first):\n"
+        "  1. parse_config (…/errors/error_context.jet:7) — reading raw config\n"
+        "  2. load_config (…/errors/error_context.jet:12) — loading config app.toml\n"
+        "  3. run (…/errors/error_context.jet:16)\n");
+    equal(jet_journey_render_styled(&journey,true,80),
+        "\033[2;37m  failed here: read_raw (…/errors/error_context.jet:4)\033[0m\n"
+        "\033[2;37m Trail [E3002] (3 hops via ?, origin first):\033[0m\n"
+        "\033[2;37m  1. parse_config (…/errors/error_context.jet:7) — reading raw config\033[0m\n"
+        "\033[2;37m  2. load_config (…/errors/error_context.jet:12) — loading config app.toml\033[0m\n"
+        "\033[2;37m  3. run (…/errors/error_context.jet:16)\033[0m\n");
+    equal(jet_journey_render_styled(&journey,false,40),
+        "  failed here: read_raw (error_context.jet:4)\n"
+        " Trail [E3002] (3 hops):\n"
+        "  1. parse_config (error_context.jet:7)\n"
+        "  2. load_config (error_context.jet:12)\n"
+        "  3. run (error_context.jet:16)\n");
+    // FORCE_COLOR pipe: ANSI changes no path budgets when width is absent.
+    Text *colored=jet_journey_render_styled(&journey,true,0);
+    char expected[2048]; size_t used=0; const char *start=plain;
+    while (*start) {
+        const char *end=strchr(start,'\n'); assert(end);
+        int count=snprintf(expected+used,sizeof expected-used,"\033[2;37m%.*s\033[0m\n",(int)(end-start),start);
+        assert(count>0 && (size_t)count<sizeof expected-used); used+=(size_t)count; start=end+1;
+    }
+    equal(colored,expected);
+    file=borrowed("a.jet"); a=borrowed("g"); b=borrowed("f"); n1=borrowed("a very long note");
+    origin=(Hop){&a,&file,1,1,&empty,1}; first=(Hop){&b,&file,2,1,&n1,1}; journey.hops.length=1;
+    equal(jet_journey_render_styled(&journey,false,30),
+        "  failed here: g (a.jet:1)\n Trail [E3002] (1 hop):\n  1. f (a.jet:2) — a very lon…\n");
+    first.count=4; n1=empty;
+    equal(jet_journey_render_styled(&journey,false,0),
+        "  failed here: g (a.jet:1)\n Trail [E3002] (4 hops via ?, origin first):\n  1. f (a.jet:2) ×4\n");
+    equal(jet_journey_render_styled(NULL,false,80),"");
+}
 int main(void) {
     // Pack constructors initialize allocator/thread roots before measuring.
     W cap=jet_rt_program_allocator_fact(4), mode=jet_rt_program_allocator_fact(5);
     jet_rt_program_allocator_configure(1,0);
+    journey_goldens();
     Text *message=text("outer"), *code=text("E42"), *cause_message=text("inner");
     Err *cause=jet_err_from_message(cause_message);
     jet_rt_string_drop(cause_message);

@@ -10,7 +10,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const [output, mode] = process.argv.slice(2);
 if (!output || !['assemble', 'lower', 'audit', 'compile', 'link', 'run'].includes(mode)) throw Error('usage: run-host-fixtures.mjs OUT assemble|lower|audit|compile|link|run');
 const out = resolve(output), dir = join(out, 'unit');
-const fixtures = [['files', 'HostFilesTests.c', 'files raw: ok\n'], ['process', 'HostSpawnTests.c', 'process raw: ok\n']];
+const fixtures = [['files', 'HostFilesTests.c', 'files raw: ok\n'], ['process', 'HostSpawnTests.c', 'process raw: ok\n'], ['err', 'err-report.c', 'Err88: taken cause, deep clone/projection/metadata, root+wire bytes, ledger zero\n']];
 function command(bin, args, options = {}) {
   const result = spawnSync(bin, args, { encoding: 'utf8', maxBuffer: 1 << 27, cwd: root, ...options });
   if (result.error || result.status !== 0) throw Error(`${bin}: ${result.error?.message ?? result.status}\n${result.stdout ?? ''}${result.stderr ?? ''}`);
@@ -46,9 +46,25 @@ if (mode === 'assemble') {
   for (const line of imports.trim().split('\n').filter(Boolean)) if (!allowed.has(line.split(/\s+/)[0])) throw Error(`unledgered host fixture import ${line}`);
   const symbols = command('nm', ['-g', '--defined-only', '--format=posix', object]).stdout;
   writeFileSync(join(out, 'exports.nm'), symbols);
-  for (const file of ['HostFiles.jet', 'HostSpawn.jet']) {
+  for (const file of ['HostFiles.jet', 'HostSpawn.jet', 'Err.jet', 'ErrReport.jet', 'JourneyReport.jet']) {
     const source = readFileSync(join(root, 'Compiler/JetRuntime/Source', file), 'utf8');
     for (const match of source.matchAll(/^#Export\(c\)\s+fn\s+(\w+)\(/gm)) if (!new RegExp(`^${match[1]} T `, 'm').test(symbols)) throw Error(`missing real host leaf ${match[1]}`);
+  }
+  // The native pack owns every Err export exactly once, including hand CAbi
+  // constructors/getters. A generated seed adapter or Rust fallback is a bug.
+  const pack = process.env.JET_RUNTIME_PACK;
+  if (!pack || !existsSync(pack)) throw Error('fresh JET_RUNTIME_PACK required for Err duplicate-definition audit');
+  const packSymbols = command('nm', ['-g', '--defined-only', '--format=posix', pack]).stdout;
+  const counts = new Map();
+  for (const line of packSymbols.split('\n')) {
+    const [name, kind] = line.trim().split(/\s+/);
+    if (/^[TDBRS]$/.test(kind ?? '')) counts.set(name, (counts.get(name) ?? 0) + 1);
+  }
+  for (const file of ['Err.jet', 'ErrReport.jet', 'JourneyReport.jet']) {
+    const source = readFileSync(join(root, 'Compiler/JetRuntime/Source', file), 'utf8');
+    for (const match of source.matchAll(/^#Export\(c\)\s+fn\s+(\w+)\(/gm)) {
+      if (counts.get(match[1]) !== 1) throw Error(`native Err export ${match[1]} has ${counts.get(match[1]) ?? 0} strong definitions`);
+    }
   }
   writeFileSync(join(out, 'disassembly.txt'), command('objdump', ['-dr', object]).stdout);
 } else if (mode === 'compile') {
