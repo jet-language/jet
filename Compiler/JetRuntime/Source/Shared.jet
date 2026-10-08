@@ -8,9 +8,10 @@
 // retained until both halves of refs0 reach zero; pins alone never upgrade.
 fn shared_count_retain(cell: I64, pin: Bool) -> Bool {
     refs := sync_load(cell)
-    loop (refs & I64{4294967295}) != I64{0} {
+    loop {
+        if (refs & I64{4294967295}) == (I64{0}) -> break
         count :: if pin -> refs >> I64{32} else -> refs & I64{4294967295}
-        if count == I64{2147483647} {
+        if count == (I64{2147483647}) {
             jet_rt_panic_overflow()
             return false
         }
@@ -22,7 +23,7 @@ fn shared_count_retain(cell: I64, pin: Bool) -> Bool {
     false
 }
 fn shared_retain(shared: I64) {
-    if !shared_count_retain(shared, false) && jet_rt_session_propagate() == I64{0} -> shared_guard_invalid()
+    if !shared_count_retain(shared, false) && jet_rt_session_propagate() == (I64{0}) -> shared_guard_invalid()
 }
 // Reserve a physical borrow while a logical owner is still live. Mutex
 // serialization with retirement closes the last-owner/acquire race.
@@ -218,7 +219,7 @@ fn shared_count_release(shared: I64, pin: Bool) {
     next := refs
     loop {
         count :: if pin -> refs >> I64{32} else -> refs & I64{4294967295}
-        if count == I64{0} {
+        if count == (I64{0}) {
             sync_mutex_unlock(shared + I64{8})
             shared_guard_invalid()
             return
@@ -231,7 +232,7 @@ fn shared_count_release(shared: I64, pin: Bool) {
     meta := I64{0}
     payload := I64{0}
     drop_code := I64{0}
-    if (next & I64{4294967295}) == I64{0} && sync_load(shared + I64{72}) == I64{0} {
+    if (next & I64{4294967295}) == (I64{0}) && sync_load(shared + I64{72}) == (I64{0}) {
         meta = sync_load(shared + I64{56})
         payload = sync_load(shared + I64{64})
         drop_code = sync_load(shared + I64{80})
@@ -243,16 +244,16 @@ fn shared_count_release(shared: I64, pin: Bool) {
     temporary_weak :: meta != I64{0} || next == I64{0}
     if temporary_weak -> _ := sync_add(shared + I64{88}, I64{1})
     sync_mutex_unlock(shared + I64{8})
-    if meta != I64{0} {
-        if drop_code != I64{0} -> _ := coll_call1(drop_code, payload)
+    if meta != (I64{0}) {
+        if drop_code != (I64{0}) -> _ := coll_call1(drop_code, payload)
         jet_rt_free(payload, coll_size(meta), I64{8})
         coll_meta_drop(meta)
     }
-    if next == I64{0} -> shared_weak_release(shared)
+    if next == (I64{0}) -> shared_weak_release(shared)
     if temporary_weak -> shared_weak_release(shared)
 }
 #Export(c) fn jet_rt_native_shared_drop(shared: I64) {
-    if shared != I64{0} -> shared_count_release(shared, false)
+    if shared != (I64{0}) -> shared_count_release(shared, false)
 }
 
 fn shared_weak_release(weak: I64) {
@@ -351,12 +352,12 @@ fn shared_registry_publish(expected: I64, candidate: I64) -> Bool {
     true
 }
 #Export(c) fn jet_rt_shared_pin_drop(pin: I64) {
-    if pin != I64{0} -> shared_count_release(pin, true)
+    if pin != (I64{0}) -> shared_count_release(pin, true)
 }
 fn shared_alias_next() -> I64 {
     next := sync_load(shared_registered + I64{8})
     loop {
-        if next == I64{9223372036854775807} {
+        if next == (I64{9223372036854775807}) {
             jet_rt_panic_overflow()
             return I64{0}
         }
@@ -372,7 +373,7 @@ fn shared_alias_next() -> I64 {
         return false
     }
     token :: shared_alias_next()
-    if token == I64{0} {
+    if token == (I64{0}) {
         jet_rt_native_shared_drop(owner)
         jet_rt_free(alias, I64{24}, I64{8})
         return false
@@ -387,9 +388,9 @@ fn shared_alias_next() -> I64 {
 }
 #Export(c) fn jet_rt_shared_alias_drop(owned_slot: I64) {
     alias :: sync_load(owned_slot)
-    if alias == I64{0} -> return
+    if alias == (I64{0}) -> return
     sync_store(owned_slot, I64{0})
-    if sync_load(alias + I64{16}) != I64{0} {
+    if sync_load(alias + I64{16}) != (I64{0}) {
         sync_store(alias + I64{16}, I64{0})
         jet_rt_native_shared_drop(sync_load(alias))
     }
@@ -411,7 +412,7 @@ fn shared_alias_next() -> I64 {
 }
 #Export(c) fn jet_rt_shared_guard_clone(guard: I64) -> I64 {
     refs :: sync_load(guard + I64{32})
-    if refs == I64{2147483647} {
+    if refs == (I64{2147483647}) {
         jet_rt_panic_overflow()
         return I64{0}
     }
@@ -436,7 +437,7 @@ fn shared_alias_next() -> I64 {
     sync_load(sync_load(guard) + I64{48})
 }
 #Export(c) fn jet_rt_shared_guard_mark_dirty(guard: I64) {
-    if !jet_rt_shared_guard_held(guard) || sync_load(guard + I64{8}) == I64{0} {
+    if !jet_rt_shared_guard_held(guard) || sync_load(guard + I64{8}) == (I64{0}) {
         shared_guard_invalid()
         return
     }
@@ -447,7 +448,7 @@ fn shared_physical_guard_release(guard: I64, commit: Bool) {
     cell :: sync_load(guard)
     editable :: sync_load(guard + I64{8}) != I64{0}
     exhausted := false
-    if editable && commit && sync_load(guard + I64{24}) != I64{0} {
+    if editable && commit && sync_load(guard + I64{24}) != (I64{0}) {
         revision :: sync_load(cell + I64{48})
         exhausted = revision == I64{-1}
         if !exhausted -> sync_store(cell + I64{48}, wrapping(revision + I64{1}))
@@ -458,7 +459,7 @@ fn shared_physical_guard_release(guard: I64, commit: Bool) {
     if exhausted -> shared_revision_stop()
 }
 #Export(c) fn jet_rt_shared_guard_publish_and_release(guard: I64) {
-    if !jet_rt_shared_guard_held(guard) || sync_load(guard + I64{8}) == I64{0} {
+    if !jet_rt_shared_guard_held(guard) || sync_load(guard + I64{8}) == (I64{0}) {
         shared_guard_invalid()
         return
     }
@@ -504,7 +505,7 @@ fn shared_physical_guard_release(guard: I64, commit: Bool) {
 #Export(c) fn jet_rt_shared_guard_drop(guard: I64) {
     refs :: sync_load(guard + I64{32})
     sync_store(guard + I64{32}, refs - I64{1})
-    if refs != I64{1} -> return
+    if refs != (I64{1}) -> return
     // Release protocol before user drop glue can reenter Shared. A suspended
     // guard has no permit to release, but still owns its pin/lifetime borrow.
     shared_physical_guard_release(guard, true)

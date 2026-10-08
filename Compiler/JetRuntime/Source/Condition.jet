@@ -203,7 +203,7 @@ fn condition_reacquire(cell: I64) -> Bool {
 // precedes releasing the held edit permit; cleanup removes the same node
 // before reacquisition. Source, not this leaf, owns the predicate loop.
 #Export(c) fn jet_rt_shared_guard_wait_once(guard: I64, condition: I64) -> I64 {
-    if !jet_rt_shared_guard_held(guard) || sync_load(guard + I64{8}) == I64{0} {
+    if !jet_rt_shared_guard_held(guard) || sync_load(guard + I64{8}) == (I64{0}) {
         shared_guard_invalid()
         return jet_rt_session_propagate()
     }
@@ -217,16 +217,16 @@ fn condition_reacquire(cell: I64) -> Bool {
     // A publication stop must still remove/free its registration and leave the
     // guard unheld. Never park or reacquire through an already delivered stop.
     status := jet_rt_session_propagate()
-    if status == I64{0} && !notified -> _ := scheduler_yield(reason, node + I64{8}, I64{-1})
+    if status == (I64{0}) && !notified -> _ := scheduler_yield(reason, node + I64{8}, I64{-1})
     condition_unregister(condition, node)
     jet_rt_free(node, I64{48}, I64{8})
     jet_rt_string_drop(reason)
     jet_rt_native_condition_drop(condition)
     status = jet_rt_session_propagate()
-    if status != I64{0} -> return status
+    if status != (I64{0}) -> return status
     if !jet_rt_shared_guard_reacquire_and_refresh(guard, I64{0}) {
         status = jet_rt_session_propagate()
-        return if status != I64{0} -> status else -> I64{1}
+        return if status != (I64{0}) -> status else -> I64{1}
     }
     I64{0}
 }
