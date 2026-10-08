@@ -48,6 +48,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { runtimeExportSignatures, validateRuntimeOwnership, validateRuntimeRoute } from "./runtime-route-abi.mjs";
+import { nativeEnvironmentRoutes, emitNativeEnvironmentRoutes } from "./native-route-environment.mjs";
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const runtimePath = process.argv[2];
 const check = process.argv.includes("--check");
@@ -1624,6 +1625,7 @@ jet.push("        if row.runtime == runtime && row.field == field -> return Val(
 jet.push("    }");
 jet.push("    None");
 jet.push("}");
+jet.push(...emitNativeEnvironmentRoutes(nativeEnvironmentRoutes(routes, jetRuntimeExports, jetRuntimeSignatures)));
 jet.push("// END GENERATED C-ABI ROUTES");
 
 const outputs = [[rsOut, rs.join("\n") + "\n"], [jetOut, jet.join("\n") + "\n"]];

@@ -137,6 +137,21 @@ fn lower_route_drop(carrier: LowerRouteCarrier) -> LIRDrop Never! {
 // handle mutably. The pointer stays in the caller's place; no copy or write-back.
 fn lower_route_values(p: MIRProgram, m: &LowerModule, f: &LowerFunction, call: MIRPreludeCallID, args: [MIRCallArg], what: String) -> [MIRValueID]? {
     row :: lower_prelude_row(p, call) ?? return None
+    if lower_environment_route(lower_route_symbol(row)) == .Val(environment) {
+        if args.len() != environment.arity {
+            lower_fail(&m, &f, "{what} environment route has incorrect arity")
+            return None
+        }
+        values := [MIRValueID]{}
+        loop arg in args {
+            if arg.access == .Write {
+                lower_fail(&m, &f, "{what} environment route requires borrowed or moved inputs")
+                return None
+            }
+            &values.push(arg.value)
+        }
+        return Val(values)
+    }
     route :: lower_runtime_route(lower_route_symbol(row)) ?? {
         lower_fail(&m, &f, "{what} {row.module_name}.{row.member} has no runtime C-ABI route ({mir_symbol_name(row.symbol)})")
         return None
@@ -163,6 +178,10 @@ fn lower_route_values(p: MIRProgram, m: &LowerModule, f: &LowerFunction, call: M
 fn lower_route_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, args: [MIRValueID], what: String) Never! {
     row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "{what} names missing Prelude call {call.value}")
     if lower_lazy_route(p, c, &m, &f, instruction, row, args) -> return
+    if lower_environment_route(lower_route_symbol(row)) == .Val(environment) {
+        lower_environment_call(p, c, &m, &f, instruction, environment, args)
+        return
+    }
     name :: "{row.module_name}.{row.member}"
     route :: lower_runtime_route(lower_route_symbol(row)) ?? return lower_fail(&m, &f, "{what} {name} has no runtime C-ABI route ({mir_symbol_name(row.symbol)})")
     // Native adapters for these operations have not established the same
@@ -490,4 +509,183 @@ fn lower_route_store_payload(p: MIRProgram, m: &LowerModule, f: &LowerFunction, 
         lower_emit(&f, LIRInst.Load{dst: payload, base: slot, offset: 0})
         lower_write_at(p, &f, box, offset, payload, ty)
     }
+}
+
+// Logical environment providers have an intentionally smaller physical ABI
+// than the seed adapters. The unified generator owns their symbol bindings;
+// only these checked carrier translations differ from ordinary route calls.
+fn lower_environment_bytes(p: MIRProgram, ty: MIRType) -> Bool Never! {
+    if ty.kind == .List(elem) {
+        return elem.kind == .IntN(false, 8) && lower_list_stride(p, elem) == 1
+    }
+    false
+}
+
+fn lower_environment_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, route: LowerEnvironmentRoute, args: [MIRValueID]) Never! {
+    if args.len() != route.arity -> return lower_fail(&m, &f, "environment route has incorrect arity")
+    ty :: lower_checked_type(c, instruction) ?? return lower_fail(&m, &f, "environment route has no checked result")
+    values := [LIRValueID]{}
+    loop arg in args {
+        arg_ty :: lower_value_type(c, arg) ?? return lower_fail(&m, &f, "environment argument has no checked type")
+        if route.op == .Compare {
+            if !lower_environment_bytes(p, arg_ty) -> return lower_fail(&m, &f, "environment comparator requires compact byte Lists")
+        } else {
+            if !lower_text_type(arg_ty) -> return lower_fail(&m, &f, "environment argument requires String")
+        }
+        value :: lower_use(&m, &f, arg) ?? return
+        &values.push(value)
+    }
+    if route.op == .Seed {
+        if lower_repr(p, ty) != .Absent -> return lower_fail(&m, &f, "environment seed requires Unit")
+        lower_call_runtime(&m, &f, route.export, values, None)
+        lower_alias_absent(&f, instruction)
+        return
+    }
+    if route.op == .Compare {
+        if !lower_is_exact_int(ty) -> return lower_fail(&m, &f, "environment comparator requires exact Int")
+        dst :: lower_result(p, c, &m, &f, instruction) ?? return
+        raw :: lower_word(&f)
+        lower_call_runtime(&m, &f, route.export, values, Val(raw))
+        lower_convert_exact(&m, &f, dst, raw, "jet_int_owned_from_i64", false)
+        return
+    }
+    if route.op == .Columns {
+        inner :: lower_list_element(ty) ?? return lower_fail(&m, &f, "environment columns require List<List<U8>>")
+        if !lower_environment_bytes(p, inner) || lower_list_stride(p, inner) != 24 -> return lower_fail(&m, &f, "environment columns require canonical compact nested Lists")
+        dst :: lower_result(p, c, &m, &f, instruction)
+        if f.failed -> return
+        header :: dst ?? lower_pointer(&f)
+        lower_storage_into(p, &f, header, ty)
+        lower_call_runtime(&m, &f, route.export, [LIRValueID]{header}, None)
+        if dst == None -> lower_inline_drop(p, &m, &f, header, ty)
+        return
+    }
+    if route.op == .Set || route.op == .Remove {
+        return lower_environment_status(p, c, &m, &f, instruction, route, values, ty)
+    }
+    inner :: if ty.kind == .Option(payload) -> payload else -> {
+        lower_fail(&m, &f, "environment getter requires Option")
+        return
+    }
+    if route.op == .Bytes {
+        if !lower_environment_bytes(p, inner) -> return lower_fail(&m, &f, "environment value requires Option<List<U8>>")
+    } else {
+        if !lower_text_type(inner) -> return lower_fail(&m, &f, "strict environment getter requires Option<String>")
+    }
+    dst :: lower_result(p, c, &m, &f, instruction)
+    if f.failed -> return
+    slot :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.StackSlot{dst: slot, size: 16, align: 8})
+    zero :: lower_const(&f, 0)
+    lower_emit(&f, LIRInst.Store{base: slot, offset: 0, value: zero})
+    lower_emit(&f, LIRInst.Store{base: slot, offset: 8, value: zero})
+    raw :: lower_word(&f)
+    call_args := values
+    if route.op == .Bytes {
+        &call_args.push(slot)
+        &call_args.push(lower_address(&f, slot, 8))
+    }
+    lower_call_runtime(&m, &f, route.export, call_args, Val(raw))
+    present :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: present, condition: LIRCondition.Ne, left: raw, right: zero})
+    some_block :: lower_new_block(&f)
+    none_block :: lower_new_block(&f)
+    merge :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: present, then_target: lower_target(some_block, [LIRValueID]{}), else_target: lower_target(none_block, [LIRValueID]{})})
+    lower_start(&f, some_block, [LIRValueID]{})
+    box :: lower_pointer(&f)
+    lower_alloc(&m, &f, box, lower_option_box_size(p, inner))
+    if route.op == .Bytes {
+        lower_environment_byte_payload(p, &m, &f, box, slot, inner)
+    } else {
+        lower_emit(&f, LIRInst.Store{base: box, offset: 0, value: raw})
+    }
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge, [LIRValueID]{box})})
+    lower_start(&f, none_block, [LIRValueID]{})
+    null :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Const{dst: null, value: 0})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge, [LIRValueID]{null})})
+    joined :: dst ?? lower_pointer(&f)
+    lower_start(&f, merge, [LIRValueID]{joined})
+    if dst == None -> lower_map_drop_value(p, &m, &f, joined, ty)
+}
+
+// get_os owns an align1 raw buffer; native List<U8> owns align8 storage.
+// Copy exactly the compact bytes, then release the raw allocation once.
+fn lower_environment_byte_payload(p: MIRProgram, m: &LowerModule, f: &LowerFunction, box: LIRValueID, slot: LIRValueID, ty: MIRType) Never! {
+    data :: lower_list_word(&f, slot, 0)
+    length :: lower_list_word(&f, slot, 8)
+    buffer :: lower_list_buffer(&m, &f, length, 1)
+    lower_emit(&f, LIRInst.Store{base: box, offset: 0, value: length})
+    lower_emit(&f, LIRInst.Store{base: box, offset: 8, value: length})
+    lower_emit(&f, LIRInst.Store{base: box, offset: 16, value: buffer})
+    source :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.StackSlot{dst: source, size: 24, align: 8})
+    lower_emit(&f, LIRInst.Store{base: source, offset: 0, value: length})
+    lower_emit(&f, LIRInst.Store{base: source, offset: 8, value: length})
+    lower_emit(&f, LIRInst.Store{base: source, offset: 16, value: data})
+    elem :: lower_list_element(ty) ?? panic("checked byte List")
+    each :: lower_each_begin(p, &f, source, elem, [LIRValueID]{})
+    byte :: lower_read_at(p, &f, each.address, 0, elem) ?? panic("byte has a value")
+    target :: lower_list_address(&f, buffer, each.at, 1)
+    lower_write_at(p, &f, target, 0, byte, elem)
+    lower_each_end(&f, each, [LIRValueID]{})
+    empty :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: empty, condition: LIRCondition.Eq, left: length, right: lower_const(&f, 0)})
+    release :: lower_new_block(&f)
+    done :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: empty, then_target: lower_target(done, [LIRValueID]{}), else_target: lower_target(release, [LIRValueID]{})})
+    lower_start(&f, release, [LIRValueID]{})
+    lower_call_runtime(&m, &f, "jet_rt_free", [LIRValueID]{data, length, lower_const(&f, 1)}, None)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, done, [LIRValueID]{})
+}
+
+fn lower_environment_status(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, route: LowerEnvironmentRoute, args: [LIRValueID], ty: MIRType) Never! {
+    if ty.kind != .Result(_, _) -> return lower_fail(&m, &f, "environment mutation requires Result")
+    ok_ty :: if ty.kind == .Result(ok, _) -> ok else -> panic("checked Result")
+    err_ty :: if ty.kind == .Result(_, err) -> err else -> panic("checked Result")
+    expected :: if route.op == .Set -> LowerRepr.Absent else -> LowerRepr.Flag
+    if lower_repr(p, ok_ty) != expected || lower_repr(p, err_ty) != .Discriminant -> return lower_fail(&m, &f, "environment mutation has incorrect checked carriers")
+    definition :: lower_type_def(p, err_ty) ?? return lower_fail(&m, &f, "environment error has no definition")
+    if definition.name != "EnvError" && !definition.name.ends_with("::EnvError") -> return lower_fail(&m, &f, "environment mutation requires checked EnvError")
+    invalid_name :: lower_variant(definition, "InvalidName") ?? return lower_fail(&m, &f, "environment error lacks InvalidName")
+    invalid_value :: lower_variant(definition, "InvalidValue") ?? return lower_fail(&m, &f, "environment error lacks InvalidValue")
+    if invalid_name.variant.payload != .Unit || invalid_value.variant.payload != .Unit -> return lower_fail(&m, &f, "environment error tags must be fieldless")
+    dst :: lower_result(p, c, &m, &f, instruction)
+    if f.failed -> return
+    box :: dst ?? lower_pointer(&f)
+    lower_alloc(&m, &f, box, lower_box_size(p, ty))
+    status :: lower_word(&f)
+    lower_call_runtime(&m, &f, route.export, args, Val(status))
+    zero :: lower_const(&f, 0)
+    success_flag :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: success_flag, condition: LIRCondition.Ge, left: status, right: zero})
+    success :: lower_new_block(&f)
+    failure :: lower_new_block(&f)
+    merge :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: success_flag, then_target: lower_target(success, [LIRValueID]{}), else_target: lower_target(failure, [LIRValueID]{})})
+    lower_start(&f, success, [LIRValueID]{})
+    lower_emit(&f, LIRInst.Store{base: box, offset: 0, value: lower_const(&f, 1)})
+    if route.op == .Remove {
+        removed :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Compare{dst: removed, condition: LIRCondition.Ne, left: status, right: zero})
+        lower_write_at(p, &f, box, 8, removed, ok_ty)
+    }
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge, [LIRValueID]{})})
+    lower_start(&f, failure, [LIRValueID]{})
+    lower_emit(&f, LIRInst.Store{base: box, offset: 0, value: zero})
+    is_name :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: is_name, condition: LIRCondition.Eq, left: status, right: lower_const(&f, -1)})
+    name_block :: lower_new_block(&f)
+    value_block :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: is_name, then_target: lower_target(name_block, [LIRValueID]{}), else_target: lower_target(value_block, [LIRValueID]{})})
+    lower_start(&f, name_block, [LIRValueID]{})
+    lower_emit(&f, LIRInst.Store{base: box, offset: 8, value: lower_const(&f, lower_discriminant(invalid_name.index))})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge, [LIRValueID]{})})
+    lower_start(&f, value_block, [LIRValueID]{})
+    lower_emit(&f, LIRInst.Store{base: box, offset: 8, value: lower_const(&f, lower_discriminant(invalid_value.index))})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge, [LIRValueID]{})})
+    lower_start(&f, merge, [LIRValueID]{})
+    if dst == None -> lower_map_drop_value(p, &m, &f, box, ty)
 }
