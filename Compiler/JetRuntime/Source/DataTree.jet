@@ -20,36 +20,6 @@ fn data_tree_payload(tree: I64, kind: I64) -> I64 {
     if data_tree_word(tree + DATA_TREE_TAG) != kind -> rt_record_variant_panic()
     data_tree_word(tree + DATA_TREE_PAYLOAD)
 }
-fn data_sequence_new(capacity: I64, stride: I64) -> I64 {
-    if (capacity < I64{0} || capacity > I64{9223372036854775807} /% stride) -> rt_seq_capacity_overflow_stop()
-    header :: jet_rt_alloc(DATA_SEQUENCE_BYTES, I64{8})
-    data :: if (capacity == I64{0}) -> I64{8} else -> jet_rt_alloc(capacity * stride, I64{8})
-    data_tree_store(header + DATA_SEQUENCE_LENGTH, I64{0})
-    data_tree_store(header + DATA_SEQUENCE_CAPACITY, capacity)
-    data_tree_store(header + DATA_SEQUENCE_DATA, data)
-    header
-}
-fn data_sequence_slot(sequence: I64, index: I64, stride: I64) -> I64 {
-    length :: data_tree_word(sequence + DATA_SEQUENCE_LENGTH)
-    if (index < I64{0} || index >= length) -> rt_seq_index_oob_stop(length, index)
-    data_tree_word(sequence + DATA_SEQUENCE_DATA) + index * stride
-}
-fn data_sequence_reserve(sequence: I64, stride: I64) -> I64 {
-    length :: data_tree_word(sequence + DATA_SEQUENCE_LENGTH)
-    capacity :: data_tree_word(sequence + DATA_SEQUENCE_CAPACITY)
-    old :: data_tree_word(sequence + DATA_SEQUENCE_DATA)
-    if length < capacity -> return old + length * stride
-    // Check before multiplying, including length+1 at the maximum capacity.
-    limit :: I64{9223372036854775807} /% stride
-    if capacity >= limit -> rt_seq_capacity_overflow_stop()
-    next :: if (capacity == I64{0}) -> I64{4} else if (capacity > limit /% I64{2}) -> limit else -> capacity * I64{2}
-    data :: jet_rt_alloc(next * stride, I64{8})
-    coll_copy(old, data, length * stride)
-    if (capacity != I64{0}) -> jet_rt_free(old, capacity * stride, I64{8})
-    data_tree_store(sequence + DATA_SEQUENCE_CAPACITY, next)
-    data_tree_store(sequence + DATA_SEQUENCE_DATA, data)
-    data + length * stride
-}
 fn data_sequence_push(sequence: I64, key: I64, child: I64, entries: Bool) {
     stride :: if entries -> DATA_TREE_ENTRY_BYTES else -> DATA_TREE_ELEMENT_BYTES
     slot :: data_sequence_reserve(sequence, stride)

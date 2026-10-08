@@ -393,6 +393,15 @@ and an ALPN text list. Its trust projection borrows the parent's inline field.
 ALPN ownership, null drops, and private-key capacity erasure before deallocation.
 This data-provider contract does not claim TLS engine or certificate validation.
 
+`DataSequences.jet` owns the shared native List header constants
+`DATA_SEQUENCE_BYTES`, `DATA_SEQUENCE_LENGTH`, `DATA_SEQUENCE_CAPACITY`, and
+`DATA_SEQUENCE_DATA`, plus `data_sequence_new`, `data_sequence_slot`, and
+`data_sequence_reserve`. DataTree and TLS certificate sequences use those
+unchanged helpers. TLS byte-list children use `data_u8_list_copy_into` and
+`data_u8_list_drop_fields` from the same provider; their old private TLS
+definitions are removed. The shared sequence index and capacity failure
+providers still require composition before native caller admission.
+
 ## Dependency order
 
 Core work follows the dependency graph. These categories describe dependency
