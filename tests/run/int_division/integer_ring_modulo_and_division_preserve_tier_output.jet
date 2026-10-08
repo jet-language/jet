@@ -1,0 +1,10 @@
+fn run() {
+    state := 0
+    loop tick in 0..<64 {
+        raw :: (tick * 73 + 19) % 4096
+        frame :: (raw * 17 + tick * 31 + 7) % 65536
+        state = (state * 33 + frame) % 1000000007
+        state += frame /% 3
+    }
+    print(state)
+}
