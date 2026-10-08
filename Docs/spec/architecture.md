@@ -303,6 +303,12 @@ tiers. `jet cache prune --to <size>` performs an explicit LRU prune, while
 implement filesystem or eviction rules themselves. `jet self doctor` reads the
 same status and reports one artifact-store row.
 
+Source-store Git launches retain their held directory descriptors in the existing
+`ProcessSpec` carrier. Descriptor copies are placed above every requested child
+slot before fork; the child performs only `dup2` and `fchdir`, without reopening
+source paths, allocating, or taking locks. An attached held cwd supersedes the
+lexical cwd; launches without that attachment keep the ordinary cwd behavior.
+
 Package-to-JetOS projection stays on this split. jet-pkg-model reads the
 canonical Package outputs and computes the semantic graph identity.
 jet-env-model::ModuleEval::project_package_outputs lowers System and Fleet

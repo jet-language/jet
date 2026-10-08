@@ -1146,6 +1146,12 @@ pub(crate) fn apply_files_leaf(
                 Ok(value) => CtValue::Present(Box::new(CtValue::Bool(value))),
                 Err(cause) => CtValue::failed(Box::new(CtValue::Str(cause))),
             },
+            "__directory_fd" => {
+                let (available, held, fd) = text_kernel::jet_std::jet_fs_directory_fd_raw(int(0)?);
+                CtValue::Struct { type_name: "(available,held,fd)".to_string(), fields: vec![
+                    ("available".to_string(), CtValue::Bool(available)), ("held".to_string(), CtValue::Bool(held)),
+                    ("fd".to_string(), CtValue::Int(fd.to_i64().expect("directory fd is i32")))] }
+            }
             "__link_reader_at" => {
                 let handle = args.first().and_then(file_reader_handle).ok_or_else(|| {
                     format!("core.files.{method} argument 0 must be a FileReader")

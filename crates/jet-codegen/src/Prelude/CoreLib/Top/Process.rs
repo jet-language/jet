@@ -291,9 +291,13 @@ fn jet_process_command_builder_with_identity(
     }
     let mut command = std::process::Command::new(executable_identity.unwrap_or(&spec.cmd[0]));
     command.args(&spec.cmd[1..]);
-    if let Some(cwd) = &spec.cwd {
-        command.current_dir(cwd);
+    if !spec.inherited_directories.iter().any(|entry| entry.as_cwd) {
+        if let Some(cwd) = &spec.cwd {
+            command.current_dir(cwd);
+        }
     }
+    jet_std::jet_process_attach_held_directories(&mut command, &spec.inherited_directories)
+        .map_err(|error| jet_std::IOError::other(jet_std::IOOperation::Resolve, spec.cmd.first().cloned(), error))?;
     if spec.env_clear || !spec.env_set.is_empty() || !spec.env_remove.is_empty() {
         let child_env = jet_process_environment(spec)?;
         command.env_clear();

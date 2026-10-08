@@ -59,6 +59,9 @@ const fn one_of(method: &str, names: &[&str]) -> bool {
 /// `Effects::core_effect`'s legacy resolver; a row never consults that second
 /// key table.
 const fn effect_for(module: &str, method: &str) -> Option<Effect> {
+    if same_text(module, "core.process") && same_text(method, "__with_directory_raw") {
+        return Some(Effect::FS);
+    }
     if (same_text(module, "core.time")
         && one_of(
             method,
@@ -450,6 +453,9 @@ const fn default_capability(
 /// Keep this beside `effect_for`: every engine already consumes the row returned
 /// by this module, so a call cannot acquire a second sema-only key.
 const fn effect_leaf_for(module: &str, method: &str) -> Option<&'static str> {
+    if same_text(module, "core.process") && same_text(method, "__with_directory_raw") {
+        return Some("FS.Read");
+    }
     if same_text(module, "core.time") && one_of(method, &["sleep", "sleep_until"]) {
         return Some("Time.Wait");
     }
@@ -492,6 +498,7 @@ const fn effect_leaf_for(module: &str, method: &str) -> Option<&'static str> {
                 "__list_directory",
                 "__stat_at",
                 "__metadata_directory",
+                "__directory_fd",
                 "__read_link_at",
                 "__xattr_names",
                 "__xattr_get",
@@ -1433,7 +1440,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: cf8479b206f2604d6a65411bdb3e3555acdfee4c6c044f85c727fcf495bbea85
+// Source SHA-256: 79020f397b2445773da27063f4a8b7cddc1dfcf8d295c588b7cbf8b7e23f4f91
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -1529,6 +1536,7 @@ pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.files", "absolute"),
     ("core.files", "__stat_at"),
     ("core.files", "__metadata_directory"),
+    ("core.files", "__directory_fd"),
     ("core.files", "set_mode"),
     ("core.files", "__open_reader"),
     ("core.files", "jet_std_files_open_reader_nonblocking"),
@@ -1607,6 +1615,7 @@ pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.sys", "close_fd"),
     ("core.sys", "__mkfifo"),
     ("core.process", "__spec_fields"),
+    ("core.process", "__with_directory_raw"),
     ("core.process", "pipeline"),
     ("core.process", "argv"),
     ("core.process", "jet_process_exit_status_raw"),
@@ -1814,6 +1823,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.files", "temp_file", "jet_std_fs_temp_file", true, &[true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "lock", "jet_std_fs_lock", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "__link_reader_at", "jet_files_link_reader_at_raw", true, &[true, false, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.files", "__directory_fd", "jet_std::jet_fs_directory_fd_raw", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.watcher", "files", "jet_watcher_files", true, &[true]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.watcher", "process_pid", "jet_watcher_process_pid", true, &[false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.watcher", "port", "jet_watcher_port", true, &[true, false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
@@ -1886,6 +1896,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.sys", "__mkfifo", "jet_sys_mkfifo_raw", true, &[true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.process", "exit", "jet_std_process_exit", true, &[false], ),
     CoreCallRecord::new("core.process", "__spec_fields", "jet_process_spec_fields_raw", true, &[false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false]).with_max_arity(26).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.process", "__with_directory_raw", "jet_process_spec_with_directory_raw", true, &[false, false, false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.process", "pipeline", "jet_std_process_pipeline", true, &[true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.process", "argv", "jet_std_io_args", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.process", "on_signal", "jet_process_on_signal", true, &[true], ),
