@@ -4132,7 +4132,9 @@ fn build_backend_artifact_with_native_library(
 ) -> (PathBuf, String) {
     let manifest_path =
         write_backend_project(repo, project, package_name, source, compiler_image, native_library, ffi);
-    let target = repo.join("target");
+    let target = std::env::var_os("CARGO_TARGET_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| repo.join("target"));
     let profile = backend_release_profile();
 
     let mut command = Command::new(repo.join("Tools/agent/jet-env"));
