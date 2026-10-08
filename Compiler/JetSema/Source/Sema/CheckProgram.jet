@@ -1126,19 +1126,28 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
     if returns_value && func.body.len() > 0 && func.body[func.body.len() - 1] == .Switch(_, _, _, table_span) {
         context.value_tail_span = Val(table_span)
     }
-    statements :: sema_check_statements(func.body, Val(effective_return), updated, &scopes, &state, &tail_store, &context, &diagnostics, 0)
+    statements := sema_check_statements(func.body, Val(effective_return), updated, &scopes, &state, &tail_store, &context, &diagnostics, 0)
     context.lost_tail_span = None
     context.value_tail_span = None
     loop site in state.share_found -> &share_found.push(site)
     if !statements.complete -> complete = false
     if !sema_check_never_fallthrough(func, scopes, &diagnostics) -> complete = false
-    body := statements.value
-    if contract.complete && contract.post.len() > 0 {
-        body = [TStmt]{TStmt.ContractScope{pre: [TContract]{}, body: body, post: contract.post, result: contract.result, span: func.span}}
-    }
-    // Rust `check_value_block` over the body (Registration.rs:937-938): a
-    // value body reports E0114 when it can reach its end without a value.
+    // Check the original statement rows before transferring them to the TFunc.
+    // Contracts wrap those rows but must not change the fallthrough check.
     if returns_value && !sema_stmt_check_value_block_end(func.body, statements.value, Val(effective_return), func.span, context.function_name, &diagnostics) -> complete = false
+    reversed := [TStmt]{}
+    loop statements.value.len() > 0 {
+        statement := &statements.value.pop() ?? { break }
+        &reversed.push(^statement)
+    }
+    body := [TStmt]{}
+    loop reversed.len() > 0 {
+        statement := &reversed.pop() ?? { break }
+        &body.push(^statement)
+    }
+    if contract.complete && contract.post.len() > 0 {
+        body = [TStmt]{TStmt.ContractScope{pre: [TContract]{}, body: ^body, post: contract.post, result: contract.result, span: func.span}}
+    }
     sema_ownership_finalize_references(&state, &diagnostics)
     loop fact in context.call_facts -> &call_facts.push(fact)
     loop request in context.comptime_requests -> &comptime_requests.push(request)
@@ -1197,7 +1206,7 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
         memo_unbounded: false,
         is_reactive: func.is_reactive,
         reactive_upgrades: context.reactive_upgrades,
-        body: body,
+        body: ^body,
         is_inline: func.is_inline,
         is_inline_always: func.is_inline_always,
         is_scalar: false,
