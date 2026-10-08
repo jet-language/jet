@@ -544,6 +544,16 @@ Network close marks the descriptor state closed and unregisters waits, while
 the socket owner retains the physical descriptor until final drop. This
 matches the Rust TCP/UDP logical-close lifetime and preserves descriptor
 ownership even when an operation has already observed closed.
+Stream reads and writes make one nonblocking attempt; source alone chooses
+retry and wait behavior. Socket writes use MSG_NOSIGNAL, independently of the
+embedding host's signal disposition. UDP receives expose the original
+datagram length through MSG_TRUNC while initializing at most the borrowed
+buffer length; Core constructs the packet and truncation fields.
+Unix path refusal statuses are distinct from OS errno: -4098 means interior
+NUL and -4097 means too long for sun_path. The leaf checks NUL first, then the
+108-byte bound, matching Rust 1.90 `os/unix/net/addr.rs` sockaddr_un. Core maps
+those facts to the exact std InvalidInput messages with no OS code. An empty
+path preserves std's two-byte address length rather than inventing a name.
 
 Raw clock samples carry exact Int words, not truncated i64 timestamps. Wall
 samples preserve the unsigned duration magnitude and an independent
