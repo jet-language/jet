@@ -8,6 +8,8 @@ fn fx_native_handle_checks() -> Bool Never! {
     m := LowerModule{
         signatures: [LIRSignature]{},
         test_harness: false,
+        native_pack: true,
+        native_exports: [String:LIRFunctionID]{},
         signature_rows: [String:Int]{},
         data: [LIRData]{},
         data_rows: [String:Int]{},
@@ -55,4 +57,18 @@ fn fx_native_handle_checks() -> Bool Never! {
     if m.issues.len() > 0 -> return false
     lowered :: LIRModule{signatures: ~m.signatures, functions: functions, data: ~m.data}
     lir_lint_module(lowered).len() == 0
+}
+
+// The mode gate is explicit; ordinary callable lowering never requests native
+// export synthesis. Empty external consumers keep the native API selective.
+fn fx_native_mode_checks() -> Bool Never! {
+    program :: fx_hello()
+    roots :: [MIRFunctionID]{mir_function_id("run")}
+    seed :: lir_lower_callables(program, roots)
+    packed :: lir_lower_native_callables(program, roots)
+    explicit :: lir_lower_native_imports(program, roots, [String]{})
+    if seed.issues.len() != 0 || packed.issues.len() != 0 || explicit.issues.len() != 0 -> return false
+    if seed.callables.len() != 1 || packed.callables.len() != 1 || explicit.callables.len() != 1 -> return false
+    if seed.native_exports.len() != 0 || packed.native_exports.len() != 0 || explicit.native_exports.len() != 0 -> return false
+    seed.lir.functions.len() == packed.lir.functions.len() && packed.lir.functions.len() == explicit.lir.functions.len()
 }

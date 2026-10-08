@@ -137,6 +137,39 @@ fn lower_native_source_type(p: MIRProgram, key: String) -> MIRType? {
         else -> None
     }
 }
+
+// Register only imports the lowered callable closure actually uses. Calls keep
+// their C symbol: the object writer binds this map, without a pointer thunk or
+// a Runtime-to-Function rewrite. Newly emitted helpers are scanned too.
+fn lower_native_glue_rewrite(p: MIRProgram, m: &LowerModule, function: LIRFunction) Never! {
+    loop block in function.blocks {
+        loop instruction in block.insts {
+            if instruction == .Call(_, _, .Runtime(symbol), _) -> lower_native_glue_import(p, &m, function.name, symbol)
+            if instruction == .Drop(value) {
+                if function.values[value.value].drop == .Runtime(symbol) -> lower_native_glue_import(p, &m, function.name, symbol)
+            }
+        }
+    }
+}
+
+fn lower_native_glue_import(p: MIRProgram, m: &LowerModule, caller: String, symbol: String) Never! {
+    if m.native_exports.get(symbol) != None -> return
+    row :: lower_native_export(symbol) ?? return
+    ty :: lower_native_source_type(p, row.jet_name) ?? {
+        &m.issues.push(LIRLoweringIssue{function: caller, message: "native export {symbol} requires the actual source declaration's native layout"})
+        return
+    }
+    if !row.op.starts_with("handle.") {
+        &m.issues.push(LIRLoweringIssue{function: caller, message: "native export {symbol} has unsupported operation {row.op}"})
+        return
+    }
+    op :: lower_record_tail(row.op, 7)
+    id :: lower_native_handle_id(&m, ty, op) ?? {
+        &m.issues.push(LIRLoweringIssue{function: caller, message: "native export {symbol} has unsupported handle operation {op}"})
+        return
+    }
+    &m.native_exports.add(symbol, id).drop("native symbol is registered once")
+}
 fn lower_record_schema(p: MIRProgram, ty: MIRType) -> LowerRecordSchema? {
     lower_record_schema_with_handle(p, ty, lower_runtime_handle_type(p, ty))
 }
@@ -363,6 +396,7 @@ fn lower_record_render(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MI
     runtime :: lower_record_handle(p, ty) ?? return None
     schema :: lower_record_schema(p, ty) ?? return None
     row :: lower_runtime_handle(schema.jet_name) ?? return None
+    if m.native_pack && lower_native_source_type(p, row.jet_name) != None -> return None
     rendered :: if mode == {
         .Display -> row.display
         .Show -> row.show
