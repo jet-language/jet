@@ -169,6 +169,8 @@ int main(int argc,char **argv) {
     if(argc>1) {
         if(strcmp(argv[1],"bad-overflow")==0) (void)jet_rt_record_new_JetAsyncPolicy(0,3);
         else if(strcmp(argv[1],"bad-sequence-index")==0) (void)jet_rt_record_seq_List_Rec_PluginFrame_get(jet_rt_record_seq_List_Rec_PluginFrame_new(0),0);
+        // Foreign Vec bounds stop: len 0, unsigned index UINT64_MAX, exit101.
+        else if(strcmp(argv[1],"negative-sequence-index")==0) (void)jet_rt_record_seq_List_Rec_PluginFrame_get(jet_rt_record_seq_List_Rec_PluginFrame_new(0),-1);
         else return 2;
         assert(!"stop returned");
     }

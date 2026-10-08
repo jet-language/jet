@@ -59,12 +59,6 @@
     rt_text_push_word(result, I64{32032}, I64{2})
     result
 }
-#Export(c) fn jet_rt_handle_clone_WatchKind(value: I64) -> I64 {
-    result :: jet_rt_alloc(WATCH_KIND_BYTES, I64{8})
-    data_tree_store(result + WATCH_KIND_TAG, data_tree_word(value + WATCH_KIND_TAG))
-    result
-}
-#Export(c) fn jet_rt_handle_drop_WatchKind(value: I64) {
-    if (value != I64{0}) -> jet_rt_free(value, WATCH_KIND_BYTES, I64{8})
-}
-#Export(c) fn jet_rt_handle_eq_WatchKind(left: I64, right: I64) -> Bool { data_tree_word(left + WATCH_KIND_TAG) == data_tree_word(right + WATCH_KIND_TAG) }
+#Export(c) fn jet_rt_handle_clone_WatchKind(value: I64) -> I64 { encoding_enum_clone(value) }
+#Export(c) fn jet_rt_handle_drop_WatchKind(value: I64) { encoding_enum_drop(value) }
+#Export(c) fn jet_rt_handle_eq_WatchKind(left: I64, right: I64) -> Bool { encoding_enum_eq(left, right) }

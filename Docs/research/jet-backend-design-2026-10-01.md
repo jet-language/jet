@@ -2087,3 +2087,19 @@ empty/two-frame faults and text/control/Unicode escapes. The offline
 free interception, checks recursive clone independence, inactive-word
 behavior, derived equality and separately owned render results. Expected
 stdout is not an execution receipt; native execution remains unexercised.
+
+### Shared enum and foreign sequence-stop leaves
+
+WatchKind, PluginLimit and EventOverflow handle glue uses the shared
+`EncodingABI.jet` owner through `encoding_enum_clone/drop/eq`; their record
+fields remain raw ordinals. Family files no longer duplicate the unit enum
+layout or its allocation/equality policy.
+
+PluginFrame's sequence getter preserves `CAbiRoutes.rs:8501`'s foreign
+`Vec[index as usize]` failure, calling shared `rt_seq_index_oob_stop` rather
+than a Jet language panic. Valid access lends inline frame storage directly.
+The foreign stop prints the standard length/index body, interpreting negative
+indices as unsigned, flushes stdout and exits 101 without task publication
+or atexit. The existing witness stop mode remains unexercised. These callsites
+require the shared Encoding and Trap leaves in the composed runtime unit;
+source parsing alone does not resolve those dependencies or prove execution.

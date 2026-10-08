@@ -19,12 +19,6 @@
 #Export(c) fn jet_rt_handle_drop_JetAsyncPolicy(value: I64) {
     if (value != I64{0}) -> jet_rt_free(value, ASYNC_POLICY_BYTES, I64{8})
 }
-#Export(c) fn jet_rt_handle_clone_JetEventOverflow(value: I64) -> I64 {
-    result :: jet_rt_alloc(EVENT_OVERFLOW_BYTES, I64{8})
-    data_tree_store(result + EVENT_OVERFLOW_TAG, data_tree_word(value + EVENT_OVERFLOW_TAG))
-    result
-}
-#Export(c) fn jet_rt_handle_drop_JetEventOverflow(value: I64) {
-    if (value != I64{0}) -> jet_rt_free(value, EVENT_OVERFLOW_BYTES, I64{8})
-}
-#Export(c) fn jet_rt_handle_eq_JetEventOverflow(left: I64, right: I64) -> Bool { data_tree_word(left + EVENT_OVERFLOW_TAG) == data_tree_word(right + EVENT_OVERFLOW_TAG) }
+#Export(c) fn jet_rt_handle_clone_JetEventOverflow(value: I64) -> I64 { encoding_enum_clone(value) }
+#Export(c) fn jet_rt_handle_drop_JetEventOverflow(value: I64) { encoding_enum_drop(value) }
+#Export(c) fn jet_rt_handle_eq_JetEventOverflow(left: I64, right: I64) -> Bool { encoding_enum_eq(left, right) }
