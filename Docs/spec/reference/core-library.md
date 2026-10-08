@@ -2090,6 +2090,9 @@ the reproducible fixed-array contract (D-LINALG1; `to_array` is the fixed-array 
 Normalizing a vector whose length is zero returns its lanes unchanged,
 including signed zero. Lane reads reject negative indices and indices at or
 above the vector's fixed width.
+The bare and `core.math`-qualified matrix and `F64x4` spellings identify the
+same source declaration. Matrix arithmetic preserves column-major indexing;
+`F64x4` uses its fixed `[F64#4]` array as the checked lane bridge.
 
 ```jet
 fn rotate(v: Vec3, transform: Mat3) -> Vec3 {
