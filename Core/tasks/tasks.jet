@@ -109,7 +109,29 @@ pub fn after(delay: time.Duration, value: Int{0}) -[Time]> Receiver<Int> Never! 
 }
 
 pub fn interval(period: time.Duration) -[Time]> Receiver<Int> Never! {
-    core.tasks.interval(period)
+    core.tasks.__interval_ms(interval_milliseconds(period))
+}
+
+fn interval_milliseconds(period: time.Duration) -> Int Never! {
+    milliseconds :: period.ns /% 1000000
+    if milliseconds < 1 -> return 1
+    milliseconds
+}
+
+// Distinct names keep the value-only TaskState convenience API separate from
+// the scheduler's real generic channel pair and its backpressure state.
+pub fn scheduler_channel<T>() -> (sender: Sender<T>, receiver: Receiver<T>) Never! {
+    core.tasks.__channel_new<T>()
+}
+
+pub fn scheduler_channel_bounded<T>(capacity: Int) -> (sender: Sender<T>, receiver: Receiver<T>) Never! {
+    limit :: if capacity < 1 -> 1 else -> capacity
+    core.tasks.__channel_bounded<T>(limit)
+}
+
+impl Condition {
+    pub fn notify_one(self) Never! { core.tasks.__condition_notify_one(self) }
+    pub fn notify_all(self) Never! { core.tasks.__condition_notify_all(self) }
 }
 
 pub fn yield_now() Never! -[Time.Wait]> { host_yield() }
@@ -198,4 +220,12 @@ pub fn spawn_name(name: String) -> String Never! {
     assert_eq(task_trace(true, false), "paused=true,cancel=false")
     assert_eq(task_trace(false, true), "paused=false,cancel=true")
     assert_eq(task_trace(true, true), "paused=true,cancel=true")
+}
+
+#Test("interval periods truncate whole milliseconds and never spin at zero") {
+    assert_eq(interval_milliseconds(time.Duration{ns: -1000000}), 1)
+    assert_eq(interval_milliseconds(time.Duration{ns: 0}), 1)
+    assert_eq(interval_milliseconds(time.Duration{ns: 999999}), 1)
+    assert_eq(interval_milliseconds(time.Duration{ns: 1999999}), 1)
+    assert_eq(interval_milliseconds(time.Duration{ns: 2000000}), 2)
 }
