@@ -1,0 +1,8 @@
+Error [E0420]: `bytes` may be read before it is given a value
+  --> fixed_uninit_requires_every_slot_before_read.jet:5:11
+    |
+  5 |     print(bytes[0])
+    |           ^^^^^
+ Why: `bytes` was declared with `Type{ uninit }`, so no value is available until you write to it — this read could see garbage
+ Fix: Write to `bytes` on every path before reading it (e.g. fill it via `mut bytes`)
+More: jet-lang.dev/e/E0420
