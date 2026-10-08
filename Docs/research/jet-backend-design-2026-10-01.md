@@ -1918,7 +1918,9 @@ Lower independently requires the actual checked declaration, matching generated
 record schema, one unboxed exact-Int field, and native inline size/alignment
 8 with offset 0. Mismatches refuse the route and name the type and field.
 Parameters read existing native field storage; results transfer the owned word
-into that storage, including tagged payloads. Unused result owners are dropped.
+into that storage, including tagged payloads. Discarded Option, Result and Tuple
+results use the same checked `lower_needs_drop` ownership predicate for every
+payload kind, not a word-record-only cleanup path.
 Mutable borrows, enums, generic records and List element encodings are not
 broadened. Static carrier metadata is not native layout/import/ABI admission;
 the composed native runtime still requires its actual-LIR sealed ABI receipt.

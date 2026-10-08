@@ -437,7 +437,7 @@ fn lower_route_result(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
             lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge, [LIRValueID]{null})})
             joined :: dst ?? lower_pointer(&f)
             lower_start(&f, merge, [LIRValueID]{joined})
-            if dst == None && lower_route_word_field(p, inner) != None -> lower_map_drop_value(p, &m, &f, joined, ty)
+            if dst == None && lower_needs_drop(p, m, ty) -> lower_map_drop_value(p, &m, &f, joined, ty)
         }
         .Result(ok, err) -> {
             ty :: result_ty ?? return lower_fail(&m, &f, "{what} {name} Result result has no checked type")
@@ -482,7 +482,7 @@ fn lower_route_result(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
                 lower_emit(&f, LIRInst.Load{dst: payload, base: out.slot, offset: 0})
                 lower_emit(&f, LIRInst.Store{base: box, offset: 8, value: payload})
             }
-            if dst == None && (lower_route_word_field(p, ok_ty) != None || lower_route_word_field(p, err_ty) != None) -> lower_map_drop_value(p, &m, &f, box, ty)
+            if dst == None && lower_needs_drop(p, m, ty) -> lower_map_drop_value(p, &m, &f, box, ty)
         }
         .Tuple(items) -> {
             ty :: result_ty ?? return lower_fail(&m, &f, "{what} {name} tuple result has no checked type")
@@ -506,14 +506,7 @@ fn lower_route_result(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
                 address :: lower_address(&f, slot, 8 * index)
                 lower_route_store_payload(p, &m, &f, box, members[index].offset, members[index].ty, item, address, route.native_lists)
             }
-            if dst == None {
-                loop member in members {
-                    if lower_route_word_field(p, member.ty) != None {
-                        lower_inline_drop(p, &m, &f, box, ty)
-                        break
-                    }
-                }
-            }
+            if dst == None && lower_needs_drop(p, m, ty) -> lower_inline_drop(p, &m, &f, box, ty)
         }
     }
 }
