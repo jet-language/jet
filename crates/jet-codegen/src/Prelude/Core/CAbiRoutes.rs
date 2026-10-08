@@ -21069,7 +21069,7 @@ mod jet_c_abi_routes {
     /// core.term.input, core.term.input
     #[no_mangle]
     pub extern "C" fn jet_std_io_input(a0: JetCString, ok: *mut JetCString, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_io_input((!a0.is_null()).then(|| unsafe { &*a0 })) {
+        guard(|| match crate::jet_std_io_input((!a0.is_null()).then(|| borrowed(a0)).as_ref()) {
             Ok(value) => { unsafe { ok.write(handle(value)) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
