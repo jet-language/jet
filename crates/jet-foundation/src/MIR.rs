@@ -8772,12 +8772,17 @@ fn validate_function(
     validate_stop_points(function, &blocks, &place_rows, &dominators, prelude_ids)
 }
 
-/// The checked Trap policy is absent on sema-proven total operations.
-pub fn mir_binary_can_trap(op: MirBinaryOp, overflow: MirBinaryOverflow) -> bool {
-    overflow == MirBinaryOverflow::Trap && matches!(op,
-        MirBinaryOp::Add | MirBinaryOp::Sub | MirBinaryOp::Mul | MirBinaryOp::Div |
-        MirBinaryOp::FloorDiv | MirBinaryOp::Mod | MirBinaryOp::Rem | MirBinaryOp::Pow |
-        MirBinaryOp::Shl | MirBinaryOp::Shr)
+/// Rust MIR stores the checked numeric policy in dispatch, not a separate
+/// overflow field. TIR routes::binary_route selects a Panic Prelude route
+/// for checked arithmetic and Primitive for proven-total arithmetic.
+pub fn mir_binary_can_trap(
+    dispatch: &MirBinaryDispatch,
+    mut effect: impl FnMut(MirPreludeCallId) -> Option<Effect>,
+) -> bool {
+    match dispatch {
+        MirBinaryDispatch::Primitive => false,
+        MirBinaryDispatch::Prelude { call, .. } => effect(*call) == Some(Effect::Panic),
+    }
 }
 
 /// Whether `operation` can stop (unified host/stop contract, #4720): it runs
@@ -8787,10 +8792,8 @@ pub fn mir_operation_can_stop(
     operation: &MirOperation,
     mut effect: impl FnMut(MirPreludeCallId) -> Option<Effect>,
 ) -> bool {
-    if let MirOperation::Binary { op, overflow, .. } = operation {
-        if mir_binary_can_trap(*op, *overflow) {
-            return true;
-        }
+    if let MirOperation::Binary { dispatch, .. } = operation {
+        return mir_binary_can_trap(dispatch, effect);
     }
     if operation_prelude_calls(operation).any(|call| effect(call) == Some(Effect::Panic)) {
         return true;
@@ -8855,7 +8858,7 @@ fn validate_stop_points(
         }
     }
     if stopped {
-        validate_stop_shields(function, blocks, prelude_calls)?;
+        validate_stop_shields(function, blocks, prelude_rows)?;
     }
     Ok(())
 }

@@ -40,6 +40,11 @@ The shared `mir_binary_can_trap` predicate consumes the operation and checked
 overflow policy: `Trap` on arithmetic or shifts is stopping, while bitwise and
 proven-total (`Unchecked`) operations are not. Exact Euclidean division and
 remainder carry checked `Panic` route facts for zero-divisor failures.
+The Rust seed represents this checked policy through `MirBinaryDispatch`:
+`Codegen/TIR/routes.rs::binary_route` selects a trapping Prelude row when
+overflow is checked (and for division/remainder/power that can fail for other
+reasons), otherwise a primitive operation. Its `mir_binary_can_trap` consumes
+that dispatch's checked `Panic` effect, without reconstructing symbol names.
 Shield and transaction masks suppress cancellation `Check` polls, not
 `Propagate` after Panic-capable operations. The runtime delivery contract is
 `Compiler/JetRuntime/Source/Scheduler.jet::scheduler_delivered_status`: Shield

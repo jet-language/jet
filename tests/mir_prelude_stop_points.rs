@@ -102,19 +102,24 @@ fn checked_slice_routes_publish_panic_stop_facts() {
 #[test]
 fn checked_numeric_policy_classifies_only_trapping_operations() {
     use jet_foundation::MIR::{mir_binary_can_trap, mir_operation_can_stop,
-        MirBinaryOp, MirBinaryOverflow, MirBinaryDispatch, MirValueId};
+        MirBinaryOp, MirBinaryDispatch, MirPreludeCallId, MirValueId};
     use jet_foundation::Effects::{prelude_route_effect, Effect};
+    let dispatch = MirBinaryDispatch::Prelude { call: MirPreludeCallId(1), location: None };
+    assert!(mir_binary_can_trap(&dispatch, |_| Some(Effect::Panic)));
+    assert!(!mir_binary_can_trap(&dispatch, |_| None));
+    assert!(!mir_binary_can_trap(&MirBinaryDispatch::Primitive, |_| Some(Effect::Panic)));
     for op in [MirBinaryOp::Add, MirBinaryOp::Sub, MirBinaryOp::Mul,
         MirBinaryOp::Div, MirBinaryOp::FloorDiv, MirBinaryOp::Mod, MirBinaryOp::Rem,
         MirBinaryOp::Pow, MirBinaryOp::Shl, MirBinaryOp::Shr] {
-        assert!(mir_binary_can_trap(op, MirBinaryOverflow::Trap));
-        assert!(!mir_binary_can_trap(op, MirBinaryOverflow::Unchecked));
-        let operation = MirOperation::Binary { op, overflow: MirBinaryOverflow::Trap,
-            dispatch: MirBinaryDispatch::Primitive, left: MirValueId(1), right: MirValueId(2) };
-        assert!(mir_operation_can_stop(&operation, |_| None));
+        let operation = MirOperation::Binary { op, dispatch: dispatch.clone(),
+            left: MirValueId(1), right: MirValueId(2) };
+        assert!(mir_operation_can_stop(&operation, |_| Some(Effect::Panic)));
+        assert!(!mir_operation_can_stop(&operation, |_| None));
     }
     for op in [MirBinaryOp::BitAnd, MirBinaryOp::BitOr, MirBinaryOp::BitXor] {
-        assert!(!mir_binary_can_trap(op, MirBinaryOverflow::Trap));
+        let operation = MirOperation::Binary { op, dispatch: MirBinaryDispatch::Primitive,
+            left: MirValueId(1), right: MirValueId(2) };
+        assert!(!mir_operation_can_stop(&operation, |_| Some(Effect::Panic)));
     }
     for member in ["div_euclid", "rem_euclid"] {
         assert_eq!(prelude_route_effect("core.numeric", member), Some(Effect::Panic));
@@ -150,7 +155,8 @@ fn run() { trap(I64{9223372036854775807}) }
         for function in &mut mir.functions {
             for block in &mut function.blocks {
                 if block.instructions.last().is_some_and(|instruction|
-                    matches!(instruction.operation, MirOperation::Binary { overflow: jet_foundation::MIR::MirBinaryOverflow::Trap, .. })) {
+                    matches!(instruction.operation, MirOperation::Binary {
+                        dispatch: jet_foundation::MIR::MirBinaryDispatch::Prelude { .. }, .. })) {
                     let MirTerminator::Poll { kind, .. } = &mut block.terminator else {
                         panic!("shielded trapping operation has no propagation edge");
                     };
