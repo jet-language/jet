@@ -26860,12 +26860,24 @@ impl<'a> RustEmitter<'a> {
                             self.borrowed_value_reference(function, value_id, MirAccess::Read)
                         );
                     }
+                    // rng.int borrows tagged exact-Int words, unlike the
+                    // machine-word lengths accepted by bytes/sample. These
+                    // owners stay alive until the entire kernel call ends.
+                    if route.module == "core.handle"
+                        && route.member == "rng.int"
+                        && index > 0
+                        && matches!(self.value_type(function, value_id).kind(), MirTypeKind::Int)
+                    {
+                        return format!("({}).to_raw()", self.value_move(value_id));
+                    }
                     if (route.module == "core.time"
                         || (route.module == "core.handle"
                             && matches!(
                                 route.member.as_str(),
                                 "clock.tick"
                                     | "clock.advance"
+                                    | "rng.bytes"
+                                    | "rng.sample"
                                     | "Match.group_start"
                                     | "Match.group_end"
                                     | "reader.seek"
@@ -26905,6 +26917,9 @@ impl<'a> RustEmitter<'a> {
                                 ));
                         let access = if reader_consumes
                             || (route.module == "core.transaction" && route.member == "commit")
+                            || (index == 0
+                                && route.module == "core.handle"
+                                && route.member.starts_with("rng."))
                         {
                             MirAccess::Write
                         } else {
@@ -30191,6 +30206,19 @@ impl<'a> RustEmitter<'a> {
                     frame_schedule_derivation.as_ref(),
                     location.as_ref(),
                 );
+                // rng.int returns a fresh owned tagged word. Decode that
+                // owner once before the generic native-result adapter, whose
+                // i64 input denotes a machine value rather than a tagged word.
+                let emitted = if self.prelude_row(*call).module == "core.handle"
+                    && self.prelude_row(*call).member == "rng.int"
+                {
+                    format!(
+                        "{}jet_std::jet_int_owned_from_raw_result({emitted})",
+                        self.config.root_prefix,
+                    )
+                } else {
+                    emitted
+                };
                 let emitted = if self.prelude_row(*call).member == "file_reader.read_line" {
                     format!(
                         "({emitted}).map(|line| line.ok_or({}JetAbsent))",
