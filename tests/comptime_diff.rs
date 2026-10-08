@@ -480,6 +480,23 @@ fn comptime_exact_int_matches_runtime() {
 }
 
 #[test]
+fn comptime_arbitrary_precision_map_keys_match_runtime() {
+    if !have_rustc() {
+        eprintln!("note: rustc not found; skipping exact Int map-key differential");
+        return;
+    }
+    let cases = CASES
+        .iter()
+        .enumerate()
+        .filter(|(_, expr)| expr.starts_with("[18446744073709551615:"))
+        .collect::<Vec<_>>();
+    assert_eq!(cases.len(), 2, "exact Int map-key witnesses must stay focused");
+    for (index, expression) in cases {
+        check_comptime_case(index, expression);
+    }
+}
+
+#[test]
 fn comptime_generic_alias_matches_runtime() {
     if !have_rustc() {
         eprintln!("note: rustc not found; skipping generic alias differential");
