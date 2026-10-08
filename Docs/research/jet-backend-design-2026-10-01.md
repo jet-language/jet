@@ -2037,3 +2037,34 @@ the existing report footer and exit 70, rather than reporting a private
 provider source line. `DataPlotStops.c` supplies separate real-provider
 process modes with byte-exact stderr goldens derived from `TrapMessages.jet`.
 These goldens and syntax checks alone do not claim process execution.
+
+### Native UI scalar and record carriers
+
+`UiCarriersABI.jet` in JetBackend/Source defines opaque native-private
+TerminalSize, TerminalPolicy, TextWidth and Browser metadata carriers.
+It is not the layout of a Rust allocation or a checked-MIR source record.
+The Lower-facing Node/Accessibility/Shortcut contract remains the shared
+`UiABI.jet` precedent; these scalar carriers do not introduce another Node
+layout or closure convention.
+
+Rust `i64` fields (TerminalSize cols/rows, BrowserTimeout milliseconds and
+BrowserLocked size) remain raw signed words. Constructors checked-narrow
+exact Int inputs; getters return fresh exact Int owners. Clone/equality/drop
+never retain or destroy an Int owner for those stored words. Browser text
+fields own independent E4 headers and buffers, and text getters clone them.
+Record enum fields are raw declaration-order tags; unit handle traits own
+separate 8-byte carriers.
+
+TerminalPolicy24 embeds the byte-identical TerminalSize16 at offset zero.
+Its constructor copies the two raw size words and frees the consumed Size
+via its canonical drop exactly once, before checking the mode as the pinned
+constructor does. Policy clone allocates only its own 24-byte carrier; the
+Size getter returns a fresh 16-byte owner. Equality compares cols, rows and
+mode, with no pointer-identity shortcut.
+
+`UiCarriersBasicWitness.c` targets the real Jet providers with allocation/free
+wrapping: clone independence, exact-once release, signed extrema, enum
+ordinals, embedded NUL/UTF-8 text and distinct record fields. Separate
+`width-stop` and `policy-stop` process modes expect the existing E3010 footer
+and exit 70. Syntax/ABI receipts do not claim linking, process execution,
+checked caller layout or native-only admission.
