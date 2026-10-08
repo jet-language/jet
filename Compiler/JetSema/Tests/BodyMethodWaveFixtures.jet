@@ -267,6 +267,29 @@ fn method_wave_cache_host_case(source: String) {
     method_wave_require(second_count == 1 && measured.recomputes > primed.recomputes, "host reach remains volatile across requests and thread modes")
 }
 
+fn method_wave_cache_line_case() {
+    before :: "struct LineOwner {{ fn point(self) -> Int Never! {{  panic(\"line\") }} }}\n"
+    after :: "struct LineOwner {{ fn point(self) -> Int Never! {{ \npanic(\"line\") }} }}\n"
+    before_graph :: method_wave_registration(before, false)
+    after_graph :: method_wave_registration(after, false)
+    before_func :: before_graph.modules[0].nominals[0].methods[0].declaration
+    after_func :: after_graph.modules[0].nominals[0].methods[0].declaration
+    method_wave_require(before.bytes().len() == after.bytes().len() && "{before_func:Debug}" == "{after_func:Debug}", "the source-map regression preserves full AST and byte offsets")
+    threads :: CompilerThreads{cap: Val(1), cores: 2, memory_available: Val(268435456)}
+    cache :: sema_incremental_cache_new()
+    first :: method_wave_cached_checked(before_graph, threads, cache)
+    baseline_before :: method_wave_checked(before_graph, threads, [SemaComptimeFunctionResult]{})
+    method_wave_require("{first:Debug}" == "{baseline_before:Debug}", "the first line-sensitive check has canonical products")
+    primed :: sema_incremental_cache_stats(cache)
+    sema_incremental_cache_clear_measurement(cache)
+    second :: method_wave_cached_checked(after_graph, threads, cache)
+    baseline_after :: method_wave_checked(after_graph, threads, [SemaComptimeFunctionResult]{})
+    method_wave_require("{second:Debug}" == "{baseline_after:Debug}", "same-byte newlines invalidate cached panic and diagnostic locations")
+    measured :: sema_incremental_cache_stats(cache)
+    method_wave_require(measured.hits == primed.hits && measured.recomputes > primed.recomputes, "actual source segments prevent a span-preserving stale hit")
+}
+
+
 
 
 fn run() {
@@ -278,6 +301,7 @@ fn run() {
     method_wave_case(positive, false, false, true, false)
     method_wave_case(negative, true, true, true, false)
     method_wave_cache_case(positive)
+    method_wave_cache_line_case()
     unit_source :: "{positive}\n#UnitFamily(WaveLength, base: meter) {{ meter\nfoot(scale: 381/1250) }}\nstruct UnitOwner {{ value: Int\nfn unit_value(&self) -> Meter Never! {{ converted :: Meter{{Foot.from_float(Float{{8.0}})}}\nconverted }}\nfn after_unit(&self) -> Int Never! {{ self.value }} }}\n"
     method_wave_case(unit_source, true, true, false, true)
     method_wave_cache_host_case(unit_source)
