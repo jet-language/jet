@@ -8,8 +8,8 @@
 // inline aggregate stored in one is its bytes, not a further box. Recursive
 // edges stay boxed through the one-value wrapper.
 use jet_foundation.[
-    MIRBlockID, MIRFieldID, MIRProgram, MIRType, MIRTypeDef, MIRTypeKind,
-    MIRVariant, mir_field_id, mir_type_from_kind, mir_type_identity_key,
+    MIRAccess, MIRBlockID, MIRFieldID, MIRFunction, MIRFunctionID, MIRProgram, MIRType, MIRTypeDef, MIRTypeKind,
+    MIRVariant, mir_field_id, mir_type_from_kind, mir_type_identity_key, mir_type_same_checked_type,
 ]
 
 struct LowerSize {
@@ -320,6 +320,80 @@ fn lower_alloc_bytes(m: &LowerModule, f: &LowerFunction, dst: LIRValueID, size: 
 // members (null-safe, so a moved-out slot's placeholder is harmless); clone
 // glue takes (source, target) and fills the target with a deep copy.
 
+// Close is selected from checked nominal implementations after substitution.
+// Its consuming body owns the structural release; the caller must not release
+// the same fields or box a second time.
+fn lower_close_method(p: MIRProgram, ty: MIRType) -> MIRFunctionID? Never! {
+    if ty.kind == .Tagged(_, inner) -> return lower_close_method(p, inner)
+    if ty.kind != .Apply(_, _) -> return None
+    loop implementation in p.impls {
+        trait_ref :: implementation.trait_ref ?? next
+        if trait_ref.name != "Close" || !implementation.target_applicability.rust_aot -> next
+        if implementation.target_os == .Val(os) {
+            name :: if os == {
+                .Linux -> "linux"
+                .MacOS -> "macos"
+                .Windows -> "windows"
+            }
+            if name != p.facts.active_os -> next
+        }
+        if !mir_type_same_checked_type(implementation.self_type, ty) && !lower_nominal_impl_template(p, implementation.self_type, ty) -> next
+        loop id in implementation.methods {
+            loop function in p.functions {
+                if function.id == id && function.name == "close" -> return Val(id)
+            }
+        }
+    }
+    None
+}
+
+fn lower_close_receiver(p: MIRProgram, function: MIRFunction) -> MIRType? Never! {
+    if function.params.len() != 1 || function.params[0].access != .Move -> return None
+    ty :: function.params[0].ty
+    method :: lower_close_method(p, ty) ?? return None
+    if function.id != lower_instance_id(method, lower_call_bindings(Val(ty), [MIRType]{})) -> return None
+    Val(ty)
+}
+
+fn lower_drop_glue_id(m: &LowerModule, f: LowerFunction, ty: MIRType) -> LIRFunctionID Never! {
+    if f.closing == .Val(receiver) {
+        if mir_type_same_checked_type(receiver, ty) -> return lower_helper_id(&m, "drop.structural", ty)
+    }
+    lower_glue_id(&m, ty)
+}
+
+fn lower_close_drop_glue(p: MIRProgram, m: &LowerModule, glue: LowerGlue, method: MIRFunctionID) -> LIRFunction Never! {
+    signature :: lower_signature(&m, [LIRLayout]{lir_layout_pointer()}, None)
+    f := lower_new_function(glue.id, "drop.{glue.key}", signature, MIRBlockID{value: U64.MAX})
+    value :: lower_pointer(&f)
+    entry :: lower_new_block(&f)
+    lower_start(&f, entry, [LIRValueID]{value})
+    zero :: lower_const(&f, 0)
+    absent :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: absent, condition: .Eq, left: value, right: zero})
+    done :: lower_new_block(&f)
+    live :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: absent, then_target: lower_target(done, [LIRValueID]{}), else_target: lower_target(live, [LIRValueID]{})})
+    lower_start(&f, live, [LIRValueID]{})
+    row :: lower_function_index(m, lower_instance_id(method, lower_call_bindings(Val(glue.ty), [MIRType]{})))
+    if row < 0 {
+        lower_fail(&m, &f, "Close implementation of {glue.key} has no reachable instance")
+        lower_seal(&f, LIRTerminator.Unreachable)
+    } else {
+        function :: p.functions[m.mir_sources[row]]
+        if function.params.len() != 1 || function.params[0].access != .Move || lower_repr(p, function.return_type) != .Absent {
+            lower_fail(&m, &f, "Close implementation of {glue.key} has an invalid consuming signature")
+            lower_seal(&f, LIRTerminator.Unreachable)
+        } else {
+            lower_emit(&f, LIRInst.Call{dst: None, signature: m.mir_signatures[row], callee: LIRCallee.Function{id: LIRFunctionID{value: row}}, args: [LIRValueID]{value}})
+            lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+        }
+    }
+    lower_start(&f, done, [LIRValueID]{})
+    lower_seal(&f, LIRTerminator.Return{value: None})
+    lir_builder_finish(f.builder)
+}
+
 fn lower_needs_drop(p: MIRProgram, ty: MIRType) -> Bool Never! {
     if lower_repr(p, ty) == {
         .Handle(_, _) -> true
@@ -331,6 +405,7 @@ fn lower_needs_drop(p: MIRProgram, ty: MIRType) -> Bool Never! {
             if lower_tally_element(aggregate) != None -> return true
             if lower_queue_element(aggregate) != None -> return true
             if lower_priority_queue_element(aggregate) != None -> return true
+            if lower_close_method(p, aggregate) != None -> return true
             loop member in lower_inline_members(p, aggregate) {
                 if member.boxed || lower_needs_drop(p, member.ty) -> return true
             }
@@ -344,7 +419,7 @@ fn lower_inline_drop(p: MIRProgram, m: &LowerModule, f: &LowerFunction, value: L
     aggregate :: lower_inline_type(p, ty) ?? return
     if !lower_needs_drop(p, aggregate) -> return
     signature :: lower_signature(&m, [LIRLayout]{lir_layout_pointer()}, None)
-    id :: lower_glue_id(&m, aggregate)
+    id :: lower_drop_glue_id(&m, f, aggregate)
     lower_emit(&f, LIRInst.Call{dst: None, signature: signature, callee: LIRCallee.Function{id: id}, args: [LIRValueID]{value}})
 }
 
