@@ -205,11 +205,13 @@ test('ref tier runs the debug-built artifact with input, and refuses I9 disagree
   const binary = join(root, 'reference');
   writeFileSync(binary, `#!/usr/bin/env node
 const fs=require("node:fs");
+const path=require("node:path");
 const args=process.argv.slice(2);
 if(args[0]==="build") {
   if(!args.includes("--profile=debug")) process.exit(101);
-  fs.writeFileSync("artifact", '#!/usr/bin/env node\\nprocess.stdout.write("ref:"+require("node:fs").readFileSync(0,"utf8"));\\n', {mode:0o755});
-  console.log("built: artifact");
+  const entry=args[1], directory=path.join(path.dirname(entry),".jet/build");
+  fs.mkdirSync(directory,{recursive:true});
+  fs.writeFileSync(path.join(directory,path.basename(entry,".jet").replaceAll(".","_")), '#!/usr/bin/env node\\nprocess.stdout.write("ref:"+require("node:fs").readFileSync(0,"utf8"));\\n', {mode:0o755});
 } else if(args[0]==="run") {
   const source=fs.readFileSync(args.at(-1),"utf8");
   process.stdout.write((source==="DIVERGE" ? "wrong:" : "ref:")+fs.readFileSync(0,"utf8"));
@@ -330,4 +332,30 @@ test('success-with-warnings non-lint schema mismatch has its own blocker class',
   const binary = join(root, 'reference');
   writeFileSync(binary, '#!/usr/bin/env node\nif(process.argv.includes("--json")) console.log(JSON.stringify({status:"passed",contract:"jet.check/v1",schema_version:1,provenance:{diagnostics:1},rows:[]})); else console.error("Warning [L0202]: lint");\n', { mode: 0o755 });
   await assert.rejects(makeReference(binary, root, scratch)('fn run() {}', 'compile'), /success-with-warnings, non-lint/u);
+});
+
+test('reference artifacts use nearest package root and dotted entry stem without progress parsing', async (t) => {
+  const root = fixture(t), scratch = join(root, 'scratch'); mkdirSync(scratch);
+  const binary = join(root, 'reference');
+  writeFileSync(binary, `#!/usr/bin/env node
+const fs=require("node:fs"), path=require("node:path"), entry=process.argv[3];
+const project=path.dirname(path.dirname(entry));
+if(!fs.existsSync(path.join(project,"package.jet"))) process.exit(101);
+const directory=path.join(project,".jet/build");
+fs.mkdirSync(directory,{recursive:true});
+fs.writeFileSync(path.join(directory,path.basename(entry,".jet").replaceAll(".","_")), '#!/usr/bin/env node\\nprocess.stdout.write("package artifact");\\n', {mode:0o755});
+console.log("progress display, not an artifact receipt");
+`, { mode: 0o755 });
+  const observe = makeReference(binary, root, scratch);
+  const result = await observe('fn run() {}', 'run', {
+    path: 'project/nested/main.extra.jet',
+    project: { entry: 'project/nested/main.extra.jet', files: [{ path: 'project/package.jet', content: 'name: "sample"\nversion: "0.1.0"\n' }] },
+  });
+  assert.equal(result.stdout, 'package artifact');
+  writeFileSync(binary, '#!/usr/bin/env node\n', { mode: 0o755 });
+  await assert.rejects(observe('fn run() {}', 'run'), (error) => {
+    assert.equal(error.status, 'ERROR');
+    assert.match(error.message, /missing artifact: .*test_port\/\.jet\/build\/run$/u);
+    return true;
+  });
 });

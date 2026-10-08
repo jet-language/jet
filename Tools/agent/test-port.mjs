@@ -788,9 +788,16 @@ export function makeReference(binary, root, scratch, timeout = 600000) {
     if (mode === 'run') {
       const built = call(binary, ['build', shown, '--profile=debug'], dir);
       if (built.code !== 0 || /Warning \[L0507\]/u.test(built.stderr)) refuse(`reference ref-tier build failed: exit ${built.code}: ${built.stderr}`);
-      const artifact = `${built.stdout}\n${built.stderr}`.match(/^built:\s*(.+)$/mu)?.[1];
-      if (!artifact) refuse('reference build did not report a built: artifact');
-      const run = call(resolve(dir, artifact), [], dir, metadata.stdin ?? '');
+      // Progress output omits `built:`; use CmdCompile's documented bin_path.
+      const entryDirectory = dirname(file);
+      let projectRoot = entryDirectory;
+      for (let candidate = entryDirectory; ; candidate = dirname(candidate)) {
+        if (existsSync(join(candidate, 'package.jet'))) { projectRoot = candidate; break; }
+        if (dirname(candidate) === candidate) break;
+      }
+      const artifact = join(projectRoot, '.jet/build', basename(file, '.jet').replaceAll('.', '_'));
+      if (!existsSync(artifact)) throw Object.assign(new Error(`successful reference build is missing artifact: ${artifact}`), { status: 'ERROR' });
+      const run = call(artifact, [], dir, metadata.stdin ?? '');
       if (metadata.agreement) {
         const tiers = [['default', ['run', shown]]];
         if (metadata.interpreterAgreement) tiers.push(['interpreter', ['run', '--interpret', shown]]);
