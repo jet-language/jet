@@ -31,6 +31,7 @@ mod stdin_reader {
 }
 
 pub(crate) use stdin_reader::JetStdinReader as SourceStdinReader;
+pub(crate) use stdin_reader::jet_stdin_line_raw;
 
 pub(crate) fn source_stdin_reader() -> SourceStdinReader {
     stdin_reader::jet_std_io_stdin()

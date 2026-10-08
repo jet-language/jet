@@ -26,6 +26,17 @@ pub struct Writer {
 
 pub struct StdinHandle {
     pub fd: Int
+
+    // The declaration's fd is informational; every token reads shared stdin.
+    // StdinReader.rs:9-43 owns no independent unread buffer or close operation.
+    pub fn read_line(&self) -[IO, Time.Wait]> String? IOError! {
+        stdio_checkpoint(.Read, "stdin", "IO.Read")
+        line :: core.term.__stdin_line()
+        if line == {
+            .None -> None
+            .Val(text) -> Val(stdin_chomp(text))
+        }
+    }
 }
 
 pub struct Stdout {
@@ -129,7 +140,7 @@ pub fn choose(prompt: String, options: [String]) -[IO, Time.Wait]> String IOErro
     core.term.choose(prompt, options)
 }
 
-pub fn stdin() -> StdinHandle Never! { core.term.stdin() }
+pub fn stdin() -> StdinHandle Never! { StdinHandle{fd: 0} }
 
 pub fn stdout() -> Stdout Never! { Stdout{fd: 1} }
 
@@ -275,6 +286,29 @@ fn parse_int(text: String) -> Int? {
     Val(n)
 }
 
+
+fn stdin_chomp(text: String) -> String Never! {
+    raw := text.bytes()
+    original_len :: raw.len()
+    loop raw.len() > 0 {
+        last :: raw[raw.len() - 1]
+        if last != (U8{10}) && last != (U8{13}) -> break
+        &raw.pop()
+    }
+    if raw.len() == original_len -> return text
+    String.from_bytes(raw) ?? panic("ASCII line endings preserve UTF-8")
+}
+
+#Test("stdin source token and trimming preserve declaration and EOF distinction") {
+    assert(stdin().fd == 0 && buffered().fd == 0)
+    assert(stdin() == StdinHandle{fd: 0})
+    assert(stdin() != StdinHandle{fd: 9})
+    endings :: String.from_bytes([U8]{13, 10, 13, 13, 10}) ?? panic("line ending fixture UTF-8")
+    unicode :: String.from_bytes([U8]{104, 195, 169, 108, 108, 111, 13, 10, 13}) ?? panic("line ending fixture UTF-8")
+    assert(stdin_chomp(endings) == "")
+    assert(stdin_chomp(unicode) == "héllo")
+    assert(stdin_chomp("no ending") == "no ending")
+}
 
 fn stdio_error(operation: IOOperation, resource: String, cause: String) -> IOError Never! {
     IOError.Other(IOContext{

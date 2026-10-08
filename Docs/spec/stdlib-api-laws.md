@@ -294,6 +294,12 @@ The core-library slate ratifies these durable rules:
   an empty write flushes only on a terminal. Write and its selected flush share
   one held writer lock, and both failures keep the original `Write` context.
   Explicit `flush` uses one `IO.Flush` checkpoint and a `Flush` context.
+- **Stdin source representation** — `StdinHandle` retains its public `fd: Int`;
+  both `stdin()` and `buffered()` produce `0`. The field is informational:
+  constructed tokens still read the one process-wide buffered stdin and do not
+  close its borrowed descriptor. `read_line` checks `IO.Read` once, preserves
+  typed read errors, distinguishes EOF from an empty line, and removes every
+  trailing CR or LF in source.
 
 ## Extended Core API doctrine
 

@@ -2011,6 +2011,16 @@ fn sys_env_ambient_core_call(
     }
     let failed = |message: &str| CtValue::failed(Box::new(CtValue::Str(message.to_string())));
     match (method, args.as_slice()) {
+        ("__startup_env_count", []) => Some(Ok(sys_exact(crate::CoreHost::jet_sys_startup_env_count_raw()))),
+        ("__startup_env_name", [CtValue::Int(index)]) => Some(Ok(CtValue::Bytes(
+            crate::CoreHost::jet_sys_startup_env_name_raw(*index),
+        ))),
+        ("__startup_env_value", [CtValue::Int(index)]) => Some(Ok(CtValue::Bytes(
+            crate::CoreHost::jet_sys_startup_env_value_raw(*index),
+        ))),
+        ("__env_key_compare", [CtValue::Bytes(left), CtValue::Bytes(right)]) => Some(Ok(sys_exact(
+            crate::CoreHost::jet_sys_env_key_compare_raw(left, right),
+        ))),
         ("__current_dir", []) => Some(Ok(match crate::CoreHost::os_rt::jet_sys_current_dir_raw() {
             Ok(value) => CtValue::Present(Box::new(CtValue::Str(value))),
             Err(cause) => failed(&cause),
@@ -2171,6 +2181,7 @@ pub fn with_interpreter_ambient<R>(
         context.register_core_call(sys_env_ambient_core_call);
         context.register_core_call(testing_ambient_core_call);
         context.register_core_call(crate::Time::ambient_core_call);
+        context.register_core_call(crate::IO::ambient_core_call);
         context.register_mir_extern(crate::Ffi::ambient_mir_extern_call);
         context.register_mir_handle(crate::Process::ambient_mir_handle);
         let previous = ACTIVE_CONTEXT.with(|slot| slot.replace(Some(context.clone())));
