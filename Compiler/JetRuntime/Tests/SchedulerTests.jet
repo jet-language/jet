@@ -15,23 +15,19 @@ fn scheduler_test_env(log: I64, mode: I64, value: I64) -> I64 {
     sync_store(env + I64{16}, value)
     env
 }
-#Export(c) fn jet_rt_scheduler_fixture_clone(source: I64, target: I64) -> I64 {
+#Export(c) fn jet_rt_scheduler_fixture_clone(source: I64, target: I64) {
     sync_store(target, sync_load(source))
-    I64{0}
 }
-#Export(c) fn jet_rt_scheduler_fixture_release(env: I64) -> I64 {
+#Export(c) fn jet_rt_scheduler_fixture_release(env: I64) {
     _ := sync_add(sync_load(env), I64{1})
     jet_rt_free(env, I64{32}, I64{8})
-    I64{0}
 }
-#Export(c) fn jet_rt_scheduler_fixture_exit_body(_closure: I64) -> I64 {
+#Export(c) fn jet_rt_scheduler_fixture_exit_body(_closure: I64) {
     scheduler_test_require(false)
-    I64{0}
 }
-#Export(c) fn jet_rt_scheduler_fixture_exit_release(closure: I64) -> I64 {
+#Export(c) fn jet_rt_scheduler_fixture_exit_release(closure: I64) {
     _ := sync_add(sync_load(closure + I64{24}), I64{1})
     jet_rt_free(closure, I64{32}, I64{8})
-    I64{0}
 }
 #Export(c) fn jet_rt_scheduler_fixture_exit_worker(arguments: I64) -> I64 {
     closure :: jet_rt_alloc(I64{32}, I64{8})

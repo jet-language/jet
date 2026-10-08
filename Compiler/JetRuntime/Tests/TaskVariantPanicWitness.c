@@ -492,10 +492,9 @@ static int64_t body(int64_t environment, int64_t out) {
     }
     return 0;
 }
-static int64_t release(int64_t env) { (void)env; ++released; return 0; }
-static int64_t clone(int64_t source, int64_t target) {
+static void release(int64_t env) { (void)env; ++released; }
+static void clone(int64_t source, int64_t target) {
     *(int64_t *)(uintptr_t)target = *(int64_t *)(uintptr_t)source;
-    return 0;
 }
 int main(int argc, char **argv, char **envp) {
     jet_rt_host_arguments(argc, WORD(argv), WORD(envp));
