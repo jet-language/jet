@@ -76,9 +76,11 @@ fn rt_sha256_k(round: I64) -> I64 {
 fn rt_sha256_rotate(word: I64, shift: I64) -> I64 {
     ((word >> shift) | (word << (I64{32} - shift))) & I64{0xffffffff}
 }
-fn rt_sha256_byte(left: I64, left_len: I64, right: I64, length: I64, at: I64, end: I64) -> I64 {
+fn rt_sha256_byte(left: I64, left_len: I64, right: I64, right_len: I64, third: I64, third_len: I64, fourth: I64, length: I64, at: I64, end: I64) -> I64 {
     if (at < left_len) -> return rt_text_byte(left + at)
-    if (at < length) -> return rt_text_byte(right + at - left_len)
+    if (at < left_len + right_len) -> return rt_text_byte(right + at - left_len)
+    if (at < left_len + right_len + third_len) -> return rt_text_byte(third + at - left_len - right_len)
+    if (at < length) -> return rt_text_byte(fourth + at - left_len - right_len - third_len)
     if (at == length) -> return I64{128}
     if (at >= end - I64{8}) {
         shift :: (end - I64{1} - at) * I64{8}
@@ -87,14 +89,24 @@ fn rt_sha256_byte(left: I64, left_len: I64, right: I64, length: I64, at: I64, en
     }
     I64{0}
 }
-// Hash left || right. Both spans may be empty; digest must not alias input.
-// Negative lengths or a padded length beyond the machine address range trap.
-fn rt_sha256_parts(left: I64, left_len: I64, right: I64, right_len: I64, digest: I64, scratch: I64) {
-    if (left_len < I64{0} || right_len < I64{0} || left_len > I64{9223372036854775735} - right_len) {
+// Four borrowed spans support HMAC/HKDF without concatenating secret input.
+// Guard the sum incrementally before any overflow; digest disjoint from inputs.
+fn rt_sha256_parts4(left: I64, left_len: I64, right: I64, right_len: I64, third: I64, third_len: I64, fourth: I64, fourth_len: I64, digest: I64, scratch: I64) {
+    if (left_len < I64{0} || right_len < I64{0} || third_len < I64{0} || fourth_len < I64{0} || left_len > I64{9223372036854775735} - right_len) {
         jet_rt_unreachable(I64{0}, I64{0})
         return
     }
-    length :: left_len + right_len
+    first_two :: left_len + right_len
+    if (third_len > I64{9223372036854775735} - first_two) {
+        jet_rt_unreachable(I64{0}, I64{0})
+        return
+    }
+    first_three :: first_two + third_len
+    if (fourth_len > I64{9223372036854775735} - first_three) {
+        jet_rt_unreachable(I64{0}, I64{0})
+        return
+    }
+    length :: first_three + fourth_len
     end :: ((length + I64{8}) / I64{64} + I64{1}) * I64{64}
     rt_text_store(scratch, I64{0x6a09e667})
     rt_text_store(scratch + I64{8}, I64{0xbb67ae85})
@@ -114,7 +126,7 @@ fn rt_sha256_parts(left: I64, left_len: I64, right: I64, right_len: I64, digest:
             j := I64{0}
             loop {
                 if (j >= I64{4}) -> break
-                word = (word << I64{8}) | rt_sha256_byte(left, left_len, right, length, off + t * I64{4} + j, end)
+                word = (word << I64{8}) | rt_sha256_byte(left, left_len, right, right_len, third, third_len, fourth, length, off + t * I64{4} + j, end)
                 j += I64{1}
             }
             rt_text_store(schedule + t * I64{8}, word)
@@ -180,6 +192,9 @@ fn rt_sha256_parts(left: I64, left_len: I64, right: I64, right_len: I64, digest:
         rt_text_store(scratch + at, I64{0})
         at += I64{8}
     }
+}
+fn rt_sha256_parts(left: I64, left_len: I64, right: I64, right_len: I64, digest: I64, scratch: I64) {
+    rt_sha256_parts4(left, left_len, right, right_len, I64{1}, I64{0}, I64{1}, I64{0}, digest, scratch)
 }
 #Export(c) fn jet_rt_native_sha256(bytes: I64, length: I64, digest: I64, scratch: I64) {
     rt_sha256_parts(bytes, length, I64{1}, I64{0}, digest, scratch)

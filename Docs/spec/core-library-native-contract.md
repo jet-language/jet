@@ -127,6 +127,12 @@ tag bytes before plaintext writes, leaving output untouched on failure.
 Exclusive aligned scratch is 560 bytes (608 for XChaCha) and is wiped on
 success and failure.
 
+HMAC-SHA256 and HKDF-SHA256 share the runtime SHA-256 engine, which supports
+four borrowed spans without concatenation. HKDF uses extract then expand,
+accepts an empty salt as RFC 5869's zero salt, and limits output to 255 hash
+blocks (8160 bytes). Aligned scratch is 672 bytes for HMAC and 744 for HKDF;
+key pads, intermediate digests, PRK, and expansion blocks are wiped on return.
+
 A high-level native implementation must not be retained as an invisible runtime
 fallback for a Jet implementation. If an API changes identity or semantics,
 make the change at the contract boundary and migrate its users in one cutover.

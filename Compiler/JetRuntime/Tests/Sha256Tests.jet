@@ -39,6 +39,41 @@
         if (rt_text_byte(output + I64{1} + at) != rt_text_byte(expected + at)) -> jet_rt_unreachable(I64{0}, I64{0})
         at += I64{1}
     }
+    // Every short-input split across four borrowed spans, including empty
+    // inner spans; the million-byte vector uses selected block-edge splits.
+    first := I64{0}
+    loop first <= length {
+        second := first
+        loop second <= length {
+            third := second
+            loop third <= length {
+                rt_sha256_parts4(input, first, input + first, second - first, input + second, third - second, input + third, length - third, output + I64{1}, scratch)
+                at = I64{0}
+                loop {
+                    if (at >= I64{32}) -> break
+                    if (rt_text_byte(output + I64{1} + at) != rt_text_byte(expected + at)) -> jet_rt_unreachable(I64{0}, I64{0})
+                    at += I64{1}
+                }
+                at = I64{0}
+                loop {
+                    if (at >= I64{576}) -> break
+                    if (rt_text_word(scratch + at) != I64{0}) -> jet_rt_unreachable(I64{0}, I64{0})
+                    at += I64{8}
+                }
+                if (length > I64{64}) -> break
+                third += I64{1}
+            }
+            if (length > I64{64}) -> break
+            second += I64{1}
+        }
+        if (length > I64{64}) {
+            if {
+                (first == I64{0}) -> first = I64{64}
+                (first == I64{64}) -> first = length
+                else -> break
+            }
+        } else { first += I64{1} }
+    }
     jet_rt_free(output, I64{34}, I64{1})
     jet_rt_free(scratch, I64{576}, I64{8})
 }
