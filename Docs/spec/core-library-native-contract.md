@@ -129,6 +129,28 @@ before dropping its retained cell owner, so final payload cleanup runs outside
 the lock. An edit guard commits one revision on drop even without a write or
 on an already-delivered stop rail. Generation exhaustion also releases both
 permit and owner before delivering its stop.
+
+Native `Shared<T>` construction supplies `(payload slot, NativeMeta descriptor,
+monomorphized payload-drop function)` to `jet_rt_native_shared_new`. Its 88-byte
+cell stores the function pointer at byte 80; the thunk borrows the owned slot
+address and returns `Unit`. Only the atomic `1 -> 0` strong-release transition
+invokes it, exactly once, outside all Shared locks. The glue performs the complete
+typed destruction, including `T.Close` and owned fields. The provider must not
+also invoke the descriptor's drop callback. A null function is reserved for
+trivial payloads and means plain free, not a descriptor-drop fallback.
+
+Like Rust's `Arc<T>` releasing its final strong owner, the callback runs in the
+releasing caller's context. The provider adds neither a cleanup mask nor a
+session shield; releases inside a MIR cleanup frame inherit that frame's
+bracket. A callback that returns with pending stop still permits the provider
+to free the payload allocation, descriptor and cell before the caller propagates
+it. This intentionally differs from Rust unwinding, which may leak the `Arc`
+allocation when `T::drop` unwinds. The seed-only C fixture retains its separate
+two-argument Rust-provider declaration for comparison; it is not a native alias
+and retires at cutover. Native runtime fixtures pass explicit drop functions,
+including two threads each racing 100,000 clone/drop pairs and a null-glue
+case that must not fall back to the descriptor callback.
+
 ### Exact integer carrier
 
 An exact `Int` crosses the scalar ABI in one 64-bit word. Values whose two

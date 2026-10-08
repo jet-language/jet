@@ -12,7 +12,7 @@
 typedef uintptr_t W;
 typedef struct { W stride, clone, drop, show, equal, compare, kind, child0, child1; } Meta;
 extern void jet_rt_thread_attach(void), jet_rt_thread_detach(void);
-extern W jet_rt_native_shared_new(W,const Meta*), jet_rt_native_shared_clone(W);
+extern W jet_rt_native_shared_new(W,const Meta*,W), jet_rt_native_shared_clone(W);
 extern void jet_rt_native_shared_drop(W), jet_rt_native_shared_read(W,W,W,W);
 extern W jet_rt_native_shared_guard_edit(W), jet_rt_native_shared_guard_read(W);
 extern W jet_rt_native_shared_edit_guard_edit(W), jet_rt_native_shared_edit_guard_read(W);
@@ -67,7 +67,7 @@ static void clean_cell(W cell,W refs) {
     assert(jet_rt_sync_fixture_cell_word(cell,72)==0);
 }
 static void nested_stm(void) {
-    W value=10,out=0,cell=jet_rt_native_shared_new((W)&value,&word_meta);
+    W value=10,out=0,cell=jet_rt_native_shared_new((W)&value,&word_meta,(W)release_word);
     unsigned before=atomic_load(&clones), before_drop=atomic_load(&drops);
     W parent=jet_rt_native_stm_begin();
     jet_rt_native_shared_edit_txn(cell,parent,20,(W)set_word,(W)&out);
@@ -102,7 +102,7 @@ static void *gate_worker(void *argument) {
     jet_rt_native_stm_commit(state); jet_rt_thread_detach(); return NULL;
 }
 static void gate_stm(void) {
-    W value=40,out=0,cell=jet_rt_native_shared_new((W)&value,&word_meta);
+    W value=40,out=0,cell=jet_rt_native_shared_new((W)&value,&word_meta,(W)release_word);
     W state=jet_rt_native_stm_begin();
     jet_rt_native_shared_edit_txn(cell,state,41,(W)set_word,(W)&out);
     Gate g={.cell=cell}; pthread_t worker; assert(!pthread_create(&worker,NULL,gate_worker,&g));
@@ -117,7 +117,7 @@ static void gate_stm(void) {
 }
 static void rejected_stm(void) {
     W save[4],control=jet_rt_control_new(); jet_rt_control_enter(control,(W)save);
-    W value=1,out=0,a=jet_rt_native_shared_new((W)&value,&word_meta),b=jet_rt_native_shared_new((W)&value,&word_meta);
+    W value=1,out=0,a=jet_rt_native_shared_new((W)&value,&word_meta,(W)release_word),b=jet_rt_native_shared_new((W)&value,&word_meta,(W)release_word);
     unsigned before_drop=atomic_load(&drops);
     W state=jet_rt_native_stm_begin();
     jet_rt_native_shared_edit_txn(a,state,2,(W)set_word,(W)&out);
@@ -171,7 +171,7 @@ static void *condition_waiter(void *argument) {
 static void condition_tests(void) {
     W condition=jet_rt_native_condition_new(); W alias=jet_rt_native_condition_clone(condition);
     jet_rt_native_condition_drop(alias); jet_rt_sync_fixture_condition_fifo(condition);
-    W value=0,cell=jet_rt_native_shared_new((W)&value,&word_meta),failure=0;
+    W value=0,cell=jet_rt_native_shared_new((W)&value,&word_meta,(W)release_word),failure=0;
     W read=jet_rt_native_shared_guard_read(cell);
     assert(jet_rt_native_shared_guard_wait((W)&read,0,condition,0,(W)ready_word,(W)&failure)==1);
     text_is(failure,"a condition wait needs an edit guard"); jet_rt_string_drop(failure);
