@@ -528,6 +528,7 @@ const concreteHandles = new Map(); // specialization name -> resolved declaratio
 const borrowedHandles = new Map(); // seed-only Rust lifetime carriers, not Jet type instances
 const unsupportedSumCarriers = new Map(); // declaration-proved seed alias, no plain C codec
 const unsupportedRustCarriers = new Map(); // std/core/alloc provenance, no C record codec
+const unsupportedGenericCarriers = new Map(); // proved seed TYPEs without a record codec
 const genericArgumentKinds = new Map([["f64", "Float"], ["bool", "Bool"], ["String", "String"], ["crate::jet_foundation::Numeric::JetInt", "Int"]]);
 function runtimeHandle(ty, path) {
   const aliasPath = qualify(ty.replace(/<[\s\S]*>$/, ""), path);
@@ -571,6 +572,7 @@ function runtimeHandle(ty, path) {
   }
   // Arguments name types in the caller's module, not the declaration's.
   const args = application.args.map((arg) => {
+    if (arg === "()") return arg;
     if (genericArgumentKinds.has(arg)) return arg;
     if (/^(?:(?:crate|super|[a-z_][a-z0-9_]*)::)*(?:Numeric::)?JetInt$/.test(arg)) return "crate::jet_foundation::Numeric::JetInt";
     const argument = declarationOf(qualify(arg, path).replace(/^crate::/, ""));
@@ -581,6 +583,17 @@ function runtimeHandle(ty, path) {
   });
   const open = text.indexOf("{", decl.at);
   recordBindings(text.slice(decl.at, open), args, ty);
+  if (args.includes("()")) {
+    if (found.key.split("::").pop().startsWith("__jet_")) {
+      throw new Error(`generic record ${ty}: SOURCE TYPE-Unit specialization requires a typed Unit codec`);
+    }
+    // RUST-EXIT S5: the prior seed routes skip these results; no ZST payload
+    // schema exists, so keep them unadmitted rather than inventing a layout.
+    unsupportedGenericCarriers.set(`${requested}:${ty}`, { type: ty, qualified: requested,
+      declaration: { kind: decl.kind, path: decl.path, at: decl.at },
+      reason: "seed TYPE-Unit specialization unsupported: actual generic declaration and arity proved, no unit-payload record codec; seed-only" });
+    return null;
+  }
   const name = recordInstanceName(found.key, args);
   const full = `crate::${found.key}<${args.join(",")}>`;
   const handle = { name, full, args };
@@ -1138,6 +1151,7 @@ const jetNames = new Map(); // Jet name -> runtime handle name
         if (!signature || signature.generics || def.gated || def.wasmOnly) continue;
         for (const application of recordApplicationsIn(def.sig, base)) {
           const handle = runtimeHandle(application, def.path);
+          if (!handle) continue; // Classified unadmitted carriers remain in the inventory.
           const known = handles.get(handle.name);
           if (known && known !== handle.full) throw new Error(`generic record ${application}: handle key names two declarations`);
           handles.set(handle.name, handle.full);
@@ -1588,6 +1602,7 @@ if (nativeListOnly) {
     jetRuntimeExports: [...jetRuntimeExports].sort(),
     unsupportedSumCarriers: [...unsupportedSumCarriers.values()],
     unsupportedRustCarriers: [...unsupportedRustCarriers.values()],
+    unsupportedGenericCarriers: [...unsupportedGenericCarriers.values()],
     skipped,
   };
   // Wait for the pipe to drain; a direct process.exit can truncate large JSON.

@@ -432,6 +432,10 @@ including unqualified `Arc`/`Box` imports. Their preserved qualified types
 and unsupported C record/callback-codec reasons appear in the inventory;
 crate-local names remain nominal and cannot gain this classification by
 spelling alone.
+Unit TYPE arguments retain their real generic arity. Legacy seed records
+without a unit-payload schema remain explicitly unadmitted; source `__jet_`
+record specializations require a typed Unit codec and fail rather than
+inventing a zero-sized payload layout.
 These RUST-EXIT S5 seed compatibility rules disappear at cutover.
 The raw tagged-Int destructor `jet_rt_int_drop` receives metadata only once
 the Int layer owns that export in `exports.list`: one Word parameter, Unit
