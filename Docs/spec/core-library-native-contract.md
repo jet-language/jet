@@ -167,10 +167,36 @@ result is rejected by recipient protocols, not by the RFC 7748 primitive.
 
 Vault signing-key public derivation uses the internal Ed25519 fixed-limb
 boundary with a borrowed 32-byte seed, 32-byte output, and exclusive 4096-byte
-scratch wiped before return. Its SHA-512 engine separately accepts a borrowed
-byte span, disjoint 64-byte digest, and 704-byte aligned scratch. Signed machine
+scratch wiped before return. Its SHA-512 engine accepts up to three borrowed
+spans without concatenation, a disjoint 64-byte digest, and 704-byte aligned scratch. Signed machine
 words carry hash bit patterns with wrapping additions and explicitly logical
 right shifts; scalar multiplication uses mask swaps and complete additions.
+
+Ed25519 deterministic signing borrows a 32-byte seed/message and writes a
+64-byte signature with exclusive aligned 4832-byte scratch. The seed expands
+once; the two multipart nonce/challenge hashes share the SHA-512 engine.
+Scalar reduction and `r + k*a mod L` use bounded radix-256 accumulators with
+fixed loops. Base multiplication and packing are shared with public derivation;
+no bigint, secret-dependent branch/index, allocation, or message copy is used.
+
+Key decoding and verification borrow public spans and exclusive aligned
+5472-byte scratch, wiped on every return. They match the **exact** dalek 2.2.0
+seed paths: typed verification (`Crypto.rs:216–219`) uses strict mode; legacy
+verification (`Crypto.rs:802–832`) uses ordinary mode. Both require `S < L`,
+hash the **original** compressed `R || A || message`, and compare canonical
+`[S]B - [k]A` bytes with R. Public-key decoding preserves ZIP-215-permitted
+noncanonical encodings. Strict mode additionally rejects small-order A/R
+(`8P == identity`), not all mixed-order points. A separate private decode
+validator lets Core retain its InvalidEncoding policy; the private verifier
+does not replace that error with a public false-result API.
+
+All five pure Ed25519 RFC 8032 section 7.1 KATs are frozen as literal vectors.
+One existing prebuilt dalek 2.2.0 oracle freezes 123 rows, each pinning both
+ordinary and strict verification plus key-decoding acceptance. It covers
+torsion/noncanonical points, negative-sign encodings, invalid points, S bounds,
+valid strong mixed-order points, message/signature tampering, and signing hash
+boundaries. The oracle has no `legacy_compatibility` feature. Its dependency,
+source and stdout hashes are retained; no Rust is used by the native fixture.
 
 The internal ChaCha20/XChaCha20 engines use borrowed key/nonce/input/output
 spans and caller-owned word-aligned scratch (320/368 bytes). Exact in-place XOR
