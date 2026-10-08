@@ -1,0 +1,30 @@
+// SETUP-PORT of tests/services_runtime.rs:472-477,482-494.
+// File mutation only; every original assertion remains in the case.
+use core.files as files
+use core.process as process
+
+fn run() {
+    path :: process.argv().get(1) ?? panic("missing store path")
+    corrupt := files.read_bytes(path) ?? panic("read authority store")
+    pipes := [Int]{}
+    pipe_byte :: U8{0x7c}
+    colon_byte :: U8{0x3a}
+    zero_byte :: U8{0x30}
+    one_byte :: U8{0x31}
+    loop (index, byte) in corrupt {
+        if byte == pipe_byte -> &pipes.push(index)
+    }
+    expires_start :: pipes[8] + 1
+    expires_end :: pipes[9]
+    expires_colon := -1
+    loop index in expires_start..expires_end {
+        if corrupt[index] == colon_byte {
+            expires_colon = index - expires_start
+            break
+        }
+    }
+    if expires_colon < 0 -> panic("receipt expiry field was not length framed")
+    expiry_hex :: expires_start + expires_colon + 1
+    corrupt[expiry_hex] = if corrupt[expiry_hex] == zero_byte -> one_byte else -> zero_byte
+    files.write_bytes(path, corrupt) ?? panic("write authority store")
+}

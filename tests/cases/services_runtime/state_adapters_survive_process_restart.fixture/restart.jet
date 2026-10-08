@@ -1,0 +1,49 @@
+
+use core.sys as env
+use core.service as services
+
+fn state_worker() {}
+
+fn run() {
+    store_path :: env.get("JET_SERVICE_AUTH_STORE") ?? panic("store")
+    phase :: env.get("JET_SERVICE_AUTH_PHASE") ?? panic("phase")
+    adapter :: env.get("JET_SERVICE_AUTH_ID") ?? panic("adapter")
+    tree := services.tree("state")
+    store :: services.state_store(store_path) ?? panic("state store")
+    if adapter == "snapshot" {
+        tree.set_state_snapshot(store, "app-state", 1, "reversible") ?? panic("snapshot state")
+    } else {
+        if adapter == "schema-drift" {
+            tree.set_state_event_log(store, "other-events", 1, "reversible") ?? panic("event state")
+        } else {
+            if adapter == "version-drift" {
+                tree.set_state_event_log(store, "app-state", 2, "reversible") ?? panic("event state")
+            } else {
+                tree.set_state_event_log(store, "app-state", 1, "reversible") ?? panic("event state")
+            }
+        }
+    }
+    tree.worker("worker", state_worker, capacity: 1) ?? panic("worker")
+    tree.start() ?? panic("start")
+    if adapter == "snapshot" {
+        if phase == "write" {
+            tree.commit_snapshot("state-v1") ?? panic("commit")
+            print("wrote:{tree.restore_snapshot() ?? panic("restore")}")
+        } else {
+            print("restored:{tree.restore_snapshot() ?? panic("restore")}")
+            tree.commit_snapshot("state-v2") ?? panic("recommit")
+            print("recommitted:{tree.restore_snapshot() ?? panic("restore")}")
+        }
+    } else {
+        if phase == "write" {
+            tree.append_event("first") ?? panic("first")
+            tree.append_event("second") ?? panic("second")
+            print("wrote:{tree.event_count()}")
+        } else {
+            print("count:{tree.event_count()}")
+            print("replay:{tree.replay_events()}")
+            tree.append_event("third") ?? panic("third")
+            print("appended:{tree.replay_events()}")
+        }
+    }
+}

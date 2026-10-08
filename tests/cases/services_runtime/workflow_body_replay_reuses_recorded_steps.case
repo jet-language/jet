@@ -1,0 +1,43 @@
+# Port of tests/services_runtime.rs:951-990; fixture source bytes unchanged.
+# Partial forms reproduce original predicates; literal expected bytes need no blessing.
+fixture: workflow_body_replay_reuses_recorded_steps.fixture
+step: jet build restart.jet
+step: built
+env: JET_SERVICE_AUTH_STORE={work}/workflow-replay.log
+env: JET_SERVICE_AUTH_PHASE=write
+stdout: = workflow_body_replay_reuses_recorded_steps.workflow-replay.log-write-aot.out
+step: built
+env: JET_SERVICE_AUTH_STORE={work}/workflow-replay.log
+env: JET_SERVICE_AUTH_PHASE=read
+stdout: = workflow_body_replay_reuses_recorded_steps.workflow-replay.log-read-aot.out
+step: built
+env: JET_SERVICE_AUTH_STORE={work}/workflow-replay.log
+env: JET_SERVICE_AUTH_PHASE=mismatch
+env: JET_SERVICE_AUTH_ID=
+exit: nonzero
+step: built
+env: JET_SERVICE_AUTH_STORE={work}/workflow-replay.log
+env: JET_SERVICE_AUTH_PHASE=activity-mismatch
+env: JET_SERVICE_AUTH_ID=
+exit: nonzero
+step: built
+env: JET_SERVICE_AUTH_STORE={work}/workflow-replay.log
+env: JET_SERVICE_AUTH_PHASE=completion-mismatch
+env: JET_SERVICE_AUTH_ID=
+exit: nonzero
+step: jet run restart.jet
+env: JET_SERVICE_AUTH_STORE={work}/workflow-replay-default.log
+env: JET_SERVICE_AUTH_PHASE=write
+stdout: = workflow_body_replay_reuses_recorded_steps.workflow-replay-default.log-write-default.out
+step: jet run restart.jet
+env: JET_SERVICE_AUTH_STORE={work}/workflow-replay-default.log
+env: JET_SERVICE_AUTH_PHASE=read
+stdout: = workflow_body_replay_reuses_recorded_steps.workflow-replay-default.log-read-default.out
+step: built
+env: JET_SERVICE_AUTH_STORE={work}/workflow-replay-crossed.log
+env: JET_SERVICE_AUTH_PHASE=write
+stdout: = workflow_body_replay_reuses_recorded_steps.workflow-replay-crossed.log-write-aot.out
+step: jet run restart.jet
+env: JET_SERVICE_AUTH_STORE={work}/workflow-replay-crossed.log
+env: JET_SERVICE_AUTH_PHASE=read
+stdout: = workflow_body_replay_reuses_recorded_steps.workflow-replay-crossed.log-read-default.out

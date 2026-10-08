@@ -1,0 +1,70 @@
+# Port of tests/services_runtime.rs:692-765; all source bytes unchanged.
+# PENDING-GRAMMAR(batch-four): capture transformed text, relational count, relative truncate, ends-with.
+fixture: state_adapters_survive_process_restart.fixture
+step: jet build restart.jet
+step: built
+env: JET_SERVICE_AUTH_STORE={work}/events.log
+env: JET_SERVICE_AUTH_PHASE=write
+env: JET_SERVICE_AUTH_ID=event-log
+stdout: = state_adapters_survive_process_restart.events.log-write-aot.out
+step: jet run restart.jet
+env: JET_SERVICE_AUTH_STORE={work}/events.log
+env: JET_SERVICE_AUTH_PHASE=read
+env: JET_SERVICE_AUTH_ID=event-log
+stdout: = state_adapters_survive_process_restart.events.log-read-default.out
+step: jet run restart.jet
+env: JET_SERVICE_AUTH_STORE={work}/events-default-to-aot.log
+env: JET_SERVICE_AUTH_PHASE=write
+env: JET_SERVICE_AUTH_ID=event-log
+stdout: = state_adapters_survive_process_restart.events-default-to-aot.log-write-default.out
+step: built
+env: JET_SERVICE_AUTH_STORE={work}/events-default-to-aot.log
+env: JET_SERVICE_AUTH_PHASE=read
+env: JET_SERVICE_AUTH_ID=event-log
+stdout: = state_adapters_survive_process_restart.events-default-to-aot.log-read-aot.out
+step: built
+env: JET_SERVICE_AUTH_STORE={work}/snapshot.log
+env: JET_SERVICE_AUTH_PHASE=write
+env: JET_SERVICE_AUTH_ID=snapshot
+stdout: = state_adapters_survive_process_restart.snapshot.log-write-aot.out
+step: jet run restart.jet
+env: JET_SERVICE_AUTH_STORE={work}/snapshot.log
+env: JET_SERVICE_AUTH_PHASE=read
+env: JET_SERVICE_AUTH_ID=snapshot
+stdout: = state_adapters_survive_process_restart.snapshot.log-read-default.out
+step: jet run restart.jet
+env: JET_SERVICE_AUTH_STORE={work}/snapshot-default-to-aot.log
+env: JET_SERVICE_AUTH_PHASE=write
+env: JET_SERVICE_AUTH_ID=snapshot
+stdout: = state_adapters_survive_process_restart.snapshot-default-to-aot.log-write-default.out
+step: built
+env: JET_SERVICE_AUTH_STORE={work}/snapshot-default-to-aot.log
+env: JET_SERVICE_AUTH_PHASE=read
+env: JET_SERVICE_AUTH_ID=snapshot
+stdout: = state_adapters_survive_process_restart.snapshot-default-to-aot.log-read-aot.out
+step: built
+env: JET_SERVICE_AUTH_STORE={work}/events-drift.log
+env: JET_SERVICE_AUTH_PHASE=write
+env: JET_SERVICE_AUTH_ID=event-log
+stdout: = state_adapters_survive_process_restart.events-drift.log-write-aot.out
+step: built
+env: JET_SERVICE_AUTH_STORE={work}/events-drift.log
+env: JET_SERVICE_AUTH_PHASE=read
+env: JET_SERVICE_AUTH_ID=schema-drift
+exit: nonzero
+step: built
+env: JET_SERVICE_AUTH_STORE={work}/events-drift.log
+env: JET_SERVICE_AUTH_PHASE=read
+env: JET_SERVICE_AUTH_ID=version-drift
+exit: nonzero
+step: built
+env: JET_SERVICE_AUTH_STORE={work}/events-torn.log
+env: JET_SERVICE_AUTH_PHASE=write
+env: JET_SERVICE_AUTH_ID=event-log
+stdout: = state_adapters_survive_process_restart.events-torn.log-write-aot.out
+truncate: events-torn.log -3
+step: built
+env: JET_SERVICE_AUTH_STORE={work}/events-torn.log
+env: JET_SERVICE_AUTH_PHASE=read
+env: JET_SERVICE_AUTH_ID=event-log
+exit: nonzero

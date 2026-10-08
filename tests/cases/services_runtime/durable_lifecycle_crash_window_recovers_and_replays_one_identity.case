@@ -1,0 +1,19 @@
+# Port of tests/services_runtime.rs:2403-2426; fixture source bytes unchanged.
+# Partial forms reproduce original predicates; literal expected bytes need no blessing.
+fixture: durable_lifecycle_crash_window_recovers_and_replays_one_identity.fixture
+step: jet build restart.jet
+step: built
+env: JET_SERVICE_AUTH_STORE={work}/crash.log
+env: JET_SERVICE_AUTH_PHASE=accept
+stdout: ^= "accepted:Delivery(svc-" # original predicate
+step: jet run restart.jet
+env: JET_SERVICE_AUTH_STORE={work}/crash.log
+env: JET_SERVICE_AUTH_PHASE=deliver
+stdout: ^= "before:Delivery(svc-" # original predicate
+stdout: ~ ":Accepted\nreceived:crash\ncrash_window:open\n" # original predicate
+step: built
+env: JET_SERVICE_AUTH_STORE={work}/crash.log
+env: JET_SERVICE_AUTH_PHASE=recover
+stdout: $= "\nsame_identity:true\n" # original predicate; recovered.lines().last() is exactly this line, printed with LF
+stdout: ~ "recovered:Delivery(svc-" # original predicate
+stdout: ~ ":Delivering\nretry:Accepted\nreceived:crash\nreplayed:Delivered:5\n" # original predicate
