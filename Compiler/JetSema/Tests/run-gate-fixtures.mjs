@@ -28,6 +28,7 @@ const fixtures = [
     ["core-failure-records", "Compiler/JetSema/Tests/CoreFailureRecordFixtures.jet"],
     ["effect-diagnostic-origins", "Compiler/JetSema/Tests/EffectDiagnosticOrigins.jet"],
     ["body-method-wave", "Compiler/JetSema/Tests/BodyMethodWaveFixtures.jet"],
+    ["comptime-body-index", "Compiler/JetSema/Tests/ComptimeBodyIndexFixtures.jet"],
 ];
 for (const [name, path] of fixtures) {
     const project = join(out, name);
