@@ -1,0 +1,4 @@
+#!/bin/sh
+if [ "$1" = project ] && [ "$2" = parts ]; then printf 'automatic __project.library library.jet\n'; exit 0; fi
+if [ "$1" = build ] && [ "${FAKE_JET_FAIL:-0}" = 1 ]; then exit 17; fi
+if [ "$1" = build ]; then mkdir -p .jet/build; printf '%s\n' "$@" > .jet/build/args; printf archive > .jet/build/libloadable.a; printf header > .jet/build/loadable.h; printf 'jet-jetlib-v3\0' > .jet/build/loadable.jetlib; a=$(sha256sum .jet/build/libloadable.a | cut -d' ' -f1); h=$(sha256sum .jet/build/loadable.h | cut -d' ' -f1); j=$(sha256sum .jet/build/loadable.jetlib | cut -d' ' -f1); printf 'jet-library-set-v1\nlibloadable.a\tsha256-%s\nloadable.h\tsha256-%s\nloadable.jetlib\tsha256-%s\n' "$a" "$h" "$j" > .jet/build/.loadable.jet-library.complete; fi

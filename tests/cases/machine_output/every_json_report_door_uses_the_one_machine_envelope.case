@@ -1,0 +1,276 @@
+# tests/machine_output.rs::every_json_report_door_uses_the_one_machine_envelope
+# Exact original argv/exit/action/record1 and opposite-stream whitespace assertions.
+# machine-output uses the kit shared production-reader port, not a fake validator or parallel envelope.
+fixture: every_json_report_door_uses_the_one_machine_envelope.fixture
+env: NO_COLOR=1
+step check: jet check run.jet --json
+exit: 0
+stdout: nonempty
+stdout: machine-output = [status]
+json: stdout doc $ : object
+json: stdout doc $.action = "check"
+stderr.trim: empty
+step build-effects: jet build run.jet --json
+exit: 0
+stdout: nonempty
+stdout: machine-output = [status]
+json: stdout doc $ : object
+json: stdout doc $.action = "build.effects"
+stderr.trim: empty
+step fmt: jet fmt --check run.jet --json
+exit: 0
+stdout: nonempty
+stdout: machine-output = [status]
+json: stdout doc $ : object
+json: stdout doc $.action = "fmt"
+stderr.trim: empty
+step budget: jet budget check --json
+exit: 0
+stdout: nonempty
+stdout: machine-output = [status]
+json: stdout doc $ : object
+json: stdout doc $.action = "check"
+stderr.trim: empty
+step compiler-always-json: jet inspect compiler lex run.jet
+exit: 0
+stdout: nonempty
+stdout: machine-output = [status]
+json: stdout doc $ : object
+json: stdout doc $.action = "inspect.compiler.lex"
+stderr.trim: empty
+step compiler: jet inspect compiler lex run.jet --json
+exit: 0
+stdout: nonempty
+stdout: machine-output = [status]
+json: stdout doc $ : object
+json: stdout doc $.action = "inspect.compiler.lex"
+stderr.trim: empty
+step compiler-parse: jet inspect compiler parse run.jet --json
+exit: 0
+stdout: nonempty
+stdout: machine-output = [status]
+json: stdout doc $ : object
+json: stdout doc $.action = "inspect.compiler.parse"
+stderr.trim: empty
+step compiler-check: jet inspect compiler check run.jet --json
+exit: 0
+stdout: nonempty
+stdout: machine-output = [status]
+json: stdout doc $ : object
+json: stdout doc $.action = "inspect.compiler.check"
+stderr.trim: empty
+step compiler-source-map: jet inspect compiler source-map run.jet --json
+exit: 0
+stdout: nonempty
+stdout: machine-output = [status]
+json: stdout doc $ : object
+json: stdout doc $.action = "inspect.compiler.source_map"
+stderr.trim: empty
+step reserved: jet inspect reserved --json
+exit: 0
+stdout: nonempty
+stdout: machine-output = [status]
+json: stdout doc $ : object
+json: stdout doc $.action = "inspect.reserved"
+stderr.trim: empty
+step digest: jet inspect digest --list-topics --json
+exit: 0
+stdout: nonempty
+stdout: machine-output = [status]
+json: stdout doc $ : object
+json: stdout doc $.action = "inspect.digest"
+stderr.trim: empty
+step env: jet inspect env env.jet --json
+exit: 0
+stdout: nonempty
+stdout: machine-output = [status]
+json: stdout doc $ : object
+json: stdout doc $.action = "inspect.env"
+stderr.trim: empty
+step semindex: jet inspect semindex run.jet --json
+exit: 0
+stdout: nonempty
+stdout: machine-output = [status]
+json: stdout doc $ : object
+json: stdout doc $.action = "inspect.semindex"
+stderr.trim: empty
+step expand: jet inspect expand --facts inline run.jet --json
+exit: 0
+stdout: nonempty
+stdout: machine-output = [status]
+json: stdout doc $ : object
+json: stdout doc $.action = "inspect.semindex"
+stderr.trim: empty
+step expand-memory: jet inspect expand --facts memory run.jet --json
+exit: 0
+stdout: nonempty
+stdout: machine-output = [status]
+json: stdout doc $ : object
+json: stdout doc $.action = "inspect.semindex"
+stderr.trim: empty
+step expand-web: jet inspect expand --facts web run.jet --json
+exit: 0
+stdout: nonempty
+stdout: machine-output = [status]
+json: stdout doc $ : object
+json: stdout doc $.action = "inspect.semindex"
+stderr.trim: empty
+step expand-effects: jet inspect expand --facts effects run.jet --json
+exit: 0
+stdout: nonempty
+stdout: machine-output = [status]
+json: stdout doc $ : object
+json: stdout doc $.action = "inspect.semindex"
+stderr.trim: empty
+step expand-layout: jet inspect expand --facts layout run.jet --json
+exit: 0
+stdout: nonempty
+stdout: machine-output = [status]
+json: stdout doc $ : object
+json: stdout doc $.action = "inspect.semindex"
+stderr.trim: empty
+step expand-derive: jet inspect expand --facts derive run.jet --json
+exit: 0
+stdout: nonempty
+stdout: machine-output = [status]
+json: stdout doc $ : object
+json: stdout doc $.action = "inspect.semindex"
+stderr.trim: empty
+step expand-templates: jet inspect expand --facts templates run.jet --json
+exit: 0
+stdout: nonempty
+stdout: machine-output = [status]
+json: stdout doc $ : object
+json: stdout doc $.action = "inspect.semindex"
+stderr.trim: empty
+step expand-callable-signature: jet inspect expand --facts callable-signature run.jet --json
+exit: 0
+stdout: nonempty
+stdout: machine-output = [status]
+json: stdout doc $ : object
+json: stdout doc $.action = "inspect.semindex"
+stderr.trim: empty
+step gates: jet inspect gates run.jet --json
+exit: 0
+stdout: nonempty
+stdout: machine-output = [status]
+json: stdout doc $ : object
+json: stdout doc $.action = "inspect.gates"
+stderr.trim: empty
+step structure: jet inspect structure run.jet --json
+exit: 0
+stdout: nonempty
+stdout: machine-output = [status]
+json: stdout doc $ : object
+json: stdout doc $.action = "inspect.structure"
+stderr.trim: empty
+step live: jet inspect live 0 --json
+exit: 1
+stdout: nonempty
+stdout: machine-output = [report]
+json: stdout doc $ : object
+stderr.trim: empty
+step impact: jet inspect impact run.jet square --json
+exit: 0
+stdout: nonempty
+stdout: machine-output = [status]
+json: stdout doc $ : object
+json: stdout doc $.action = "inspect.impact"
+stderr.trim: empty
+step graph: jet inspect graph run.jet --json
+exit: 0
+stdout: nonempty
+stdout: machine-output = [status]
+json: stdout doc $ : object
+json: stdout doc $.action = "inspect.build"
+stderr.trim: empty
+step query-build: jet inspect query build run.jet --json
+exit: 0
+stdout: nonempty
+stdout: machine-output = [status]
+json: stdout doc $ : object
+json: stdout doc $.action = "inspect.build"
+stderr.trim: empty
+step structural-diff: jet diff --structural before.jet after.jet --json
+exit: 0
+stdout: nonempty
+stdout: machine-output = [status]
+json: stdout doc $ : object
+json: stdout doc $.action = "diff.structural"
+stderr.trim: empty
+step find: jet find square run.jet --json
+exit: 0
+stdout: nonempty
+stdout: machine-output = [status]
+json: stdout doc $ : object
+json: stdout doc $.action = "find"
+stderr.trim: empty
+step fill: jet fill run.jet --json
+exit: 0
+stdout: nonempty
+stdout: machine-output = [status]
+json: stdout doc $ : object
+json: stdout doc $.action = "fill"
+stderr.trim: empty
+step eval: jet eval "1 + 2" --json
+exit: 0
+stdout: nonempty
+stdout: machine-output = [status]
+json: stdout doc $ : object
+json: stdout doc $.action = "eval"
+stderr.trim: empty
+step status: jet status run.jet --json
+exit: 0
+stdout: nonempty
+stdout: machine-output = [status]
+json: stdout doc $ : object
+json: stdout doc $.action = "status"
+stderr.trim: empty
+step audit-memory: jet audit memory --json
+exit: 1
+stdout: nonempty
+stdout: machine-output = [report]
+json: stdout doc $ : object
+stderr.trim: empty
+step audit-copies: jet audit copies run.jet --json
+exit: 0
+stdout: nonempty
+stdout: machine-output = [status]
+json: stdout doc $ : object
+json: stdout doc $.action = "audit.copies"
+stderr.trim: empty
+step gc-report: jet gc report --json
+exit: 1
+stdout: nonempty
+stdout: machine-output = [report]
+json: stdout doc $ : object
+stderr.trim: empty
+step remote-list: jet remote list --json
+exit: 0
+stdout: nonempty
+stdout: machine-output = [status]
+json: stdout doc $ : object
+json: stdout doc $.action = "remote.list"
+stderr.trim: empty
+step hangar-generations: jet hangar generations --json
+exit: 0
+stdout: nonempty
+stdout: machine-output = [status]
+json: stdout doc $ : object
+json: stdout doc $.action = "generations"
+stderr.trim: empty
+copy: {root}/.jet/perf/1787269028-687eeec2.jettrace fixture.jettrace
+step perf-view: jet perf view {work}/fixture.jettrace --json
+exit: 0
+stdout: nonempty
+stdout: machine-output = [status]
+json: stdout doc $ : object
+json: stdout doc $.action = "perf.view"
+stderr.trim: empty
+step perf-export: jet perf export {work}/fixture.jettrace --json
+exit: 0
+stdout: nonempty
+stdout: machine-output = [status]
+json: stdout doc $ : object
+json: stdout doc $.action = "perf.export"
+stderr.trim: empty

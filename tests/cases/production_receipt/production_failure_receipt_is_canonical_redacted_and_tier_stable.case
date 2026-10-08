@@ -1,0 +1,84 @@
+# tests/production_receipt.rs::production_failure_receipt_is_canonical_redacted_and_tier_stable
+# Every original mode/code/receipt field/redaction/byte-identity assertion; no captured oracle.
+fixture: production_failure_receipt_is_canonical_redacted_and_tier_stable.fixture
+env: JET_PRODUCTION_USER_DATA=PRODUCTION_RECEIPT_ENV_MARKER_755
+step tier0: jet run --interpret main.jet -- PRODUCTION_RECEIPT_INPUT_MARKER_755
+cwd: tier-0
+env: JET_STORE_DIR={work}/tier-0/cache
+exit: 70
+capture: report = first-entry {work}/tier-0/.jet/reports child-is-file "receipt"
+file: {cap:report}/receipt ^= "jet-development-receipt-v1\n"
+file: {cap:report}/receipt ~ "closure\t\t"
+file: {cap:report}/receipt ~ "input\t"
+file: {cap:report}/receipt ~ "failure-path\t636f6465\t4533303031"
+file: {cap:report}/receipt ~ "failure-path\t66696c65\t6d61696e2e6a6574"
+file: {cap:report}/receipt ~ "failure-path\t6c696e65\t32"
+file: {cap:report}/receipt ~ "failure-path\t66756e6374696f6e\t72756e"
+file: {cap:report}/receipt !~ "PRODUCTION_RECEIPT_SOURCE_MARKER_755"
+file: {cap:report}/receipt !~ "PRODUCTION_RECEIPT_INPUT_MARKER_755"
+file: {cap:report}/receipt !~ "PRODUCTION_RECEIPT_ENV_MARKER_755"
+copy: {cap:report}/receipt baseline.receipt
+step tier1: jet dev main.jet --watch=off -- PRODUCTION_RECEIPT_INPUT_MARKER_755
+cwd: tier-1
+env: JET_STORE_DIR={work}/tier-1/cache
+exit: 70
+capture: report = first-entry {work}/tier-1/.jet/reports child-is-file "receipt"
+file: {cap:report}/receipt ^= "jet-development-receipt-v1\n"
+file: {cap:report}/receipt ~ "closure\t\t"
+file: {cap:report}/receipt ~ "input\t"
+file: {cap:report}/receipt ~ "failure-path\t636f6465\t4533303031"
+file: {cap:report}/receipt ~ "failure-path\t66696c65\t6d61696e2e6a6574"
+file: {cap:report}/receipt ~ "failure-path\t6c696e65\t32"
+file: {cap:report}/receipt ~ "failure-path\t66756e6374696f6e\t72756e"
+file: {cap:report}/receipt !~ "PRODUCTION_RECEIPT_SOURCE_MARKER_755"
+file: {cap:report}/receipt !~ "PRODUCTION_RECEIPT_INPUT_MARKER_755"
+file: {cap:report}/receipt !~ "PRODUCTION_RECEIPT_ENV_MARKER_755"
+file: {cap:report}/receipt = baseline.receipt
+step tier2: jet dev main.jet --interpret --watch=off -- PRODUCTION_RECEIPT_INPUT_MARKER_755
+cwd: tier-2
+env: JET_STORE_DIR={work}/tier-2/cache
+exit: 70
+capture: report = first-entry {work}/tier-2/.jet/reports child-is-file "receipt"
+file: {cap:report}/receipt ^= "jet-development-receipt-v1\n"
+file: {cap:report}/receipt ~ "closure\t\t"
+file: {cap:report}/receipt ~ "input\t"
+file: {cap:report}/receipt ~ "failure-path\t636f6465\t4533303031"
+file: {cap:report}/receipt ~ "failure-path\t66696c65\t6d61696e2e6a6574"
+file: {cap:report}/receipt ~ "failure-path\t6c696e65\t32"
+file: {cap:report}/receipt ~ "failure-path\t66756e6374696f6e\t72756e"
+file: {cap:report}/receipt !~ "PRODUCTION_RECEIPT_SOURCE_MARKER_755"
+file: {cap:report}/receipt !~ "PRODUCTION_RECEIPT_INPUT_MARKER_755"
+file: {cap:report}/receipt !~ "PRODUCTION_RECEIPT_ENV_MARKER_755"
+file: {cap:report}/receipt = baseline.receipt
+step tier3: jet run main.jet -- PRODUCTION_RECEIPT_INPUT_MARKER_755
+cwd: tier-3
+env: JET_STORE_DIR={work}/tier-3/cache
+exit: 70
+capture: report = first-entry {work}/tier-3/.jet/reports child-is-file "receipt"
+file: {cap:report}/receipt ^= "jet-development-receipt-v1\n"
+file: {cap:report}/receipt ~ "closure\t\t"
+file: {cap:report}/receipt ~ "input\t"
+file: {cap:report}/receipt ~ "failure-path\t636f6465\t4533303031"
+file: {cap:report}/receipt ~ "failure-path\t66696c65\t6d61696e2e6a6574"
+file: {cap:report}/receipt ~ "failure-path\t6c696e65\t32"
+file: {cap:report}/receipt ~ "failure-path\t66756e6374696f6e\t72756e"
+file: {cap:report}/receipt !~ "PRODUCTION_RECEIPT_SOURCE_MARKER_755"
+file: {cap:report}/receipt !~ "PRODUCTION_RECEIPT_INPUT_MARKER_755"
+file: {cap:report}/receipt !~ "PRODUCTION_RECEIPT_ENV_MARKER_755"
+file: {cap:report}/receipt = baseline.receipt
+step tier4: jet run --release main.jet -- PRODUCTION_RECEIPT_INPUT_MARKER_755
+cwd: tier-4
+env: JET_STORE_DIR={work}/tier-4/cache
+exit: 70
+capture: report = first-entry {work}/tier-4/.jet/reports child-is-file "receipt"
+file: {cap:report}/receipt ^= "jet-development-receipt-v1\n"
+file: {cap:report}/receipt ~ "closure\t\t"
+file: {cap:report}/receipt ~ "input\t"
+file: {cap:report}/receipt ~ "failure-path\t636f6465\t4533303031"
+file: {cap:report}/receipt ~ "failure-path\t66696c65\t6d61696e2e6a6574"
+file: {cap:report}/receipt ~ "failure-path\t6c696e65\t32"
+file: {cap:report}/receipt ~ "failure-path\t66756e6374696f6e\t72756e"
+file: {cap:report}/receipt !~ "PRODUCTION_RECEIPT_SOURCE_MARKER_755"
+file: {cap:report}/receipt !~ "PRODUCTION_RECEIPT_INPUT_MARKER_755"
+file: {cap:report}/receipt !~ "PRODUCTION_RECEIPT_ENV_MARKER_755"
+file: {cap:report}/receipt = baseline.receipt
