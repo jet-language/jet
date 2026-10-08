@@ -139,7 +139,10 @@ fn scheduler_control_publish(control: I64, record: I64) -> Bool {
     }
     sync_mutex_lock(control + I64{72})
     old :: sync_load(control + I64{32})
-    accepted :: old == I64{0} || (old == I64{1} && kind == I64{2})
+    // A task panic replaces an undelivered cancellation/deadline/budget.
+    // rt_task_panic_publish has already rejected a delivered double panic.
+    accepted :: old == I64{0} || (old == I64{1} && kind == I64{2}) ||
+        (kind == I64{5} && old >= I64{1} && old <= I64{4})
     previous := I64{0}
     if accepted {
         previous = sync_load(control + I64{40})
@@ -940,6 +943,19 @@ fn scheduler_fatal(message: I64) {
 
 fn rt_task_panic_publish(message: I64, length: I64, form: I64) -> Bool {
     if (sync_load(thread_base() + I64{64}) == I64{0} || scheduler_control_current() == I64{0}) -> return false
+    // Scheduler.rs:234-244,1022-1024: a panic in already-stopping cleanup
+    // is a double panic, not a replacement task outcome. A shielded pending
+    // cancel/deadline is not delivered; the panic itself bypasses Shield.
+    status :: scheduler_delivered_status()
+    if (status != I64{0}) {
+        trap_flush_stdout()
+        trap_write_word(I64{7955925828069384560}, I64{8})
+        trap_write_word(I64{8247343696930955552}, I64{8})
+        trap_write_word(I64{8458921675976893301}, I64{8})
+        trap_write_word(I64{7308325286140864882}, I64{8})
+        trap_write_word(I64{44836417121}, I64{5})
+        alloc_abort()
+    }
     text :: scheduler_text_new(length)
     coll_copy(message, sync_load(text), length)
     record :: scheduler_stop_new(I64{5}, text)

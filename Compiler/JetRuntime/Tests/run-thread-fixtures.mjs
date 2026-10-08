@@ -39,6 +39,14 @@ if (mode === "assemble") {
     .replace(/^    scheduler_thread_detach\(\)\n/m, "")
     .replace(/^    sentry_thread_detach\(\)\n/m, "")
     .replace(/^    if rt_task_panic_publish\(message, message_len, I64\{0\}\) -> return\n/gm, "")
+    // This unit has no task scheduler or Text/Collections implementation.
+    // Strip only task-publication branches; retain the real root reports.
+    .replace(/^fn trap_native_index_range_stop\(\) \{\n[\s\S]*?^\}/m,
+      "fn trap_native_index_range_stop() { trap_native_index_range_root() }")
+    .replace(/^fn trap_internal_overflow_stop\(\) \{\n[\s\S]*?^\}/m,
+      "fn trap_internal_overflow_stop() { jet_rt_panic_overflow() }")
+    .replace(/^    \/\/ Outcome\.rs:2463-2466[\s\S]*?^    if published -> return\n/m, "")
+    .replace(/^        if \(jet_scheduler_native_propagate\(\) != I64\{0\}\) -> return\n/gm, "")
   ).join("\n");
   // The Shared factory, wrapper, import and private address intrinsic form
   // one explicit block. They belong only to the actual-Shared fixture, never
