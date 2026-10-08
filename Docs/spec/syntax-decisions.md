@@ -564,6 +564,13 @@ left to right; a dynamic nonpositive stride raises E0123 before the first pull.
 Stride N visits source indexes 0, N, 2N; exhaustion while advancing is normal.
 `in` joins a source binding to its source. Commas separate later loop header
 clauses. Semicolons remain statement boundaries only.
+
+For a typed-literal source, bind the literal first:
+`channels :: [Int]{0, 2, 4}`, then `loop channel in channels -> channel`.
+Both current parsers reject an unparenthesized typed head directly in the
+source slot (`loop channel in [Int]{0, 2, 4} -> channel`). This is current
+grammar guidance, not a ratification of additional loop-header syntax.
+
 **D-LOOP-HEADER3=D**: the old three-slot C-style counter (`loop i := 0, i < n, i += 1`)
 is retired with teaching diagnostic E0376; prefer `loop i in 0..<n` or a range step rule.
 **D-LOOPREAD1=A** *(ratified 2026-09-04, card #2896)* leaves this syntax
