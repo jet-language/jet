@@ -138,10 +138,6 @@ pub(crate) mod text_rt {
     pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/Core/UnicodeString.rs");
     use crate::fault_injection::jet_fault_should_fail;
-    use crate::CoreHost::fs_ops_kernel::{
-        jet_fs_read_directory_raw, jet_fs_entry_type_raw,
-        jet_fs_create_directory_tree_raw, jet_fs_copy_native_raw,
-    };
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/Text.rs");

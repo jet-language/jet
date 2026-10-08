@@ -162,12 +162,12 @@ where
                 };
                 let mut batch = Vec::with_capacity(64);
                 let mut children = Vec::new();
-                for entry in jet_fs_read_directory_raw(&dir)
+                for entry in std::fs::read_dir(&dir)
                     .map_err(|error| make_error(&shown, error))?
                 {
                     let entry = entry.map_err(|error| make_error(&shown, error))?;
                     let child = entry.path();
-                    let file_type = jet_fs_entry_type_raw(&entry);
+                    let file_type = entry.file_type();
                     let is_dir = file_type.as_ref().is_ok_and(std::fs::FileType::is_dir);
                     let is_file = file_type.as_ref().is_ok_and(std::fs::FileType::is_file);
                     let relative = child

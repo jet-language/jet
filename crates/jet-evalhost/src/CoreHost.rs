@@ -16,12 +16,11 @@ mod path_kernel {
 }
 
 mod fs_walk_kernel {
-    use super::fs_ops_kernel::{jet_fs_read_directory_raw, jet_fs_entry_type_raw};
     include!("../../jet-codegen/src/Prelude/Core/FSIgnore.rs");
     include!("../../jet-codegen/src/Prelude/Core/FSWalk.rs");
 }
 
-pub(crate) mod fs_ops_kernel {
+mod fs_ops_kernel {
     use crate::Collections::authority_semantics::JetFileScope;
     include!("../../jet-codegen/src/Prelude/Core/FSOps.rs");
 }
