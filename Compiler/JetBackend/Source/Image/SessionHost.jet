@@ -492,18 +492,6 @@ fn x64_execution_call(runtime: X64Runtime, symbol: String, word: Int) -> Int {
     result
 }
 
-fn x64_execution_alloc(runtime: X64Runtime, size: Int, align: Int) -> Int {
-    address :: os_library_symbol(runtime.library, "jet_rt_alloc")
-    if address == 0 -> return 0
-    result := 0
-    #Unsafe("canonical runtime allocator takes identical size/alignment as the matching free") { result = os_call_address_two(address, size, align) }
-    result
-}
-fn x64_execution_free(runtime: X64Runtime, pointer: Int, size: Int, align: Int) {
-    address :: os_library_symbol(runtime.library, "jet_rt_free")
-    if address == 0 -> panic("execution runtime lacks jet_rt_free")
-    #Unsafe("pointer is the canonical allocation for exactly these size/alignment words") { _ := os_call_address_three(address, pointer, size, align) }
-}
 fn x64_execution_scalar_word(runtime: X64Runtime, scalar: X64ExecutionScalar) -> Int? {
     if scalar.kind == "String" || scalar.kind == "Int" {
         if scalar.kind == "Int" {
@@ -678,11 +666,24 @@ pub fn x64_execution_service(runtime_path: String, runtime_identity: String) -> 
         &images.push(X64PinnedExecutionImage{session: request.session, image: loaded, codes: codes})
         output := 0
         header := 0
+        output_allocation := X64NativeAllocation?{None}
+        header_allocation := X64NativeAllocation?{None}
         if request.boundary == .Val(boundary) {
             layout :: boundary.descriptors[boundary.root]
-            output = x64_execution_alloc(runtime, layout.size, layout.align)
-            header = x64_execution_alloc(runtime, 32, 8)
-            if output == 0 || header == 0 -> return x64_execution_service_error("native value boundary could not allocate canonical result storage")
+            allocate :: os_library_symbol(runtime.library, "jet_rt_alloc")
+            release :: os_library_symbol(runtime.library, "jet_rt_free")
+            owned_output :: x64_execution_alloc(allocate, release, layout.size, layout.align)
+            if owned_output.refusal_key != "" -> return x64_execution_service_error(owned_output.refusal_key)
+            output_allocation = Val(owned_output)
+            output = owned_output.pointer
+            owned_header :: x64_execution_alloc(allocate, release, 32, 8)
+            if owned_header.refusal_key != "" {
+                error :: x64_execution_free(owned_output, layout.size, layout.align)
+                if error != "" -> return x64_execution_service_error(error)
+                return x64_execution_service_error(owned_header.refusal_key)
+            }
+            header_allocation = Val(owned_header)
+            header = owned_header.pointer
         }
         cells :: os_map(8 * (request.args.len() + 3), OS_PROT_READ + OS_PROT_WRITE)
         if os_failed(cells) -> return 101
@@ -734,8 +735,11 @@ pub fn x64_execution_service(runtime_path: String, runtime_identity: String) -> 
         if (x64_execution_call(runtime, "jet_rt_session_end", session) & 255) == 0 -> return 101
         if request.boundary == .Val(boundary) {
             layout :: boundary.descriptors[boundary.root]
-            x64_execution_free(runtime, output, layout.size, layout.align)
-            x64_execution_free(runtime, header, 32, 8)
+            owned_output :: output_allocation ?? return x64_execution_service_error("native result allocation receipt is missing")
+            owned_header :: header_allocation ?? return x64_execution_service_error("native header allocation receipt is missing")
+            output_error :: x64_execution_free(owned_output, layout.size, layout.align)
+            header_error :: x64_execution_free(owned_header, 32, 8)
+            if output_error != "" || header_error != "" -> return x64_execution_service_error("{output_error};{header_error}")
         }
         _ := os_unmap(cells, 8 * (request.args.len() + 3))
         if status != 0 {

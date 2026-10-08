@@ -190,21 +190,6 @@ pub fn x64_value_receive(fd: Int, first: String) -> X64NativeValue? {
     Val(X64NativeValue{kind: kind, attributes: attributes, text: text, children: children})
 }
 
-fn x64_value_word(address: Int) -> Int {
-    word := 0
-    #Unsafe("address names an initialized canonical native word owned by the pinned request or retained slot") { word = os_load_word(address) }
-    word
-}
-fn x64_value_byte(address: Int) -> Int {
-    byte := 0
-    #Unsafe("address names an initialized canonical native byte owned by the pinned request or retained slot") { byte = os_load_byte(address) }
-    byte
-}
-fn x64_value_unsigned_bytes(address: Int, size: Int) -> Int {
-    value := 0
-    loop index in 0..<size -> value |= x64_value_byte(address + index) << (8 * index)
-    value
-}
 
 fn x64_value_member_json(member: X64ValueMember) -> String Never! {
     "[{foundation_json_quote(member.name)},{member.offset},{member.descriptor},{member.boxed}]"

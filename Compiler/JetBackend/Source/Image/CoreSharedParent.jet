@@ -91,6 +91,58 @@ fn core_shared_runtime_abi_inventory_valid(runtime: CoreSharedParentRuntime) -> 
     true
 }
 
+pub struct CoreSharedRuntimeCallResult {
+    pub word: Int
+    pub refusal_key: String
+}
+fn core_shared_runtime_word_layout(layout: LIRLayout) -> Bool Never! {
+    (layout.class == LIRABIClass.Integer || layout.class == LIRABIClass.Pointer)
+        && (layout.size == 1 || layout.size == 2 || layout.size == 4 || layout.size == 8)
+        && layout.align > 0 && layout.align <= 8 && (layout.align & (layout.align - 1)) == 0
+}
+pub fn core_shared_runtime_call_error(runtime: CoreSharedParentRuntime, symbol: String, arity: Int) -> String Never! {
+    if runtime.receipt_identity == "" || runtime.library_identity == "" -> return "RuntimeLibraryMissingAdmission: {symbol}"
+    row :: runtime.export_abis.get(symbol) ?? return "RuntimeLibraryExportABIInvalid: {symbol}"
+    if row.symbol != symbol || (runtime.symbols.get(symbol) ?? 0) == 0 -> return "RuntimeLibraryExportSealMismatch: {symbol}"
+    if arity < 0 || arity > 3 || row.parameters.len() != arity -> return "RuntimeLibraryExportABIArityMismatch: {symbol}: {arity}"
+    loop (index, parameter) in row.parameters {
+        if !core_shared_runtime_word_layout(parameter) -> return "RuntimeLibraryExportABIUnsupported: {symbol}: parameter {index}: {lir_abi_class_name(parameter.class)}/{parameter.size}"
+    }
+    if row.result == .Val(output) && !core_shared_runtime_word_layout(output) -> return "RuntimeLibraryExportABIUnsupported: {symbol}: result: {lir_abi_class_name(output.class)}/{output.size}"
+    ""
+}
+// Fixed arguments avoid allocating/copying an argument list on this hot path.
+pub fn core_shared_runtime_call(runtime: CoreSharedParentRuntime, symbol: String, arity: Int, first: Int, second: Int, third: Int) -> CoreSharedRuntimeCallResult {
+    error :: core_shared_runtime_call_error(runtime, symbol, arity)
+    if error != "" -> return CoreSharedRuntimeCallResult{word: 0, refusal_key: error}
+    row :: runtime.export_abis.get(symbol) ?? panic("validated runtime ABI disappeared")
+    loop (index, parameter) in row.parameters {
+        value :: if index == 0 -> first else if index == 1 -> second else -> third
+        range_error :: x64_native_slot_write_error(8, parameter.size, value)
+        if range_error != "" -> return CoreSharedRuntimeCallResult{word: 0, refusal_key: "RuntimeLibraryExportABIArgumentInvalid: {symbol}: parameter {index}: {range_error}"}
+    }
+    word := x64_native_call(runtime.symbols.get(symbol) ?? panic("validated runtime symbol disappeared"), arity, first, second, third)
+    if row.result == .Val(output) {
+        if output.size < 8 -> word &= (1 << (output.size * 8)) - 1
+    } else -> word = 0
+    CoreSharedRuntimeCallResult{word: word, refusal_key: ""}
+}
+pub fn core_shared_runtime_allocate(runtime: CoreSharedParentRuntime, size: Int, align: Int) -> X64NativeAllocation {
+    error := x64_native_allocation_error(size, align)
+    if error == "" -> error = core_shared_runtime_call_error(runtime, "jet_rt_alloc", 2)
+    if error == "" -> error = core_shared_runtime_call_error(runtime, "jet_rt_free", 3)
+    if error == "" {
+        allocator :: runtime.export_abis.get("jet_rt_alloc") ?? panic("validated allocator disappeared")
+        release :: runtime.export_abis.get("jet_rt_free") ?? panic("validated free disappeared")
+        if allocator.result == None || release.result != None -> error = "RuntimeLibraryExportABIAllocatorMismatch"
+        loop parameter in allocator.parameters { if parameter.size != 8 -> error = "RuntimeLibraryExportABIAllocatorMismatch" }
+        loop parameter in release.parameters { if parameter.size != 8 -> error = "RuntimeLibraryExportABIAllocatorMismatch" }
+        if allocator.result == .Val(output) && output.size != 8 -> error = "RuntimeLibraryExportABIAllocatorMismatch"
+    }
+    if error != "" -> return X64NativeAllocation{pointer: 0, size: size, align: align, release: 0, refusal_key: error}
+    x64_execution_alloc(runtime.symbols.get("jet_rt_alloc") ?? 0, runtime.symbols.get("jet_rt_free") ?? 0, size, align)
+}
+
 pub trait CoreSharedParentProducer {
     fn produce(self) -> CoreSharedBinding Never!
 }
@@ -281,4 +333,39 @@ pub fn core_shared_parent_callable(parent: &CoreSharedParent, attachment: CoreSh
     }
     unknown :: core_parent_json.parse("[{{\"symbol\":\"jet_one\",\"parameters\":[],\"result\":{{\"size\":8,\"align\":8,\"class\":\"Unknown\"}}}}]") ?? panic("unknown-class fixture must be JSON")
     assert(core_shared_runtime_export_abis_decode(unknown) == None)
+}
+
+#Test("native slot validators reject unsupported widths and out of range writes before touching memory") {
+    loop size in [Int]{1, 2, 4, 8} {
+        assert_eq(x64_native_slot_error(8, size), "")
+        assert_eq(x64_native_slot_write_error(8, size, 255), "")
+    }
+    assert_eq(x64_native_slot_error(8, 3), "NativeSlotWidthInvalid: 3")
+    assert_eq(x64_native_slot_error(0, 8), "NativeSlotAddressInvalid")
+    assert_eq(x64_native_slot_write_error(8, 1, 256), "NativeSlotValueOutOfRange: 1")
+    assert_eq(x64_native_slot_write(8, 3, 0), "NativeSlotWidthInvalid: 3")
+}
+
+#Test("native allocations pair the original release address with exact layout") {
+    assert_eq(x64_native_allocation_error(32, 8), "")
+    assert_eq(x64_native_allocation_error(0, 8), "NativeAllocationSizeInvalid: 0")
+    assert_eq(x64_native_allocation_error(32, 3), "NativeAllocationAlignmentInvalid: 3")
+    owner :: X64NativeAllocation{pointer: 8, size: 32, align: 8, release: 8, refusal_key: ""}
+    assert_eq(x64_native_free_error(owner, 32, 8), "")
+    assert_eq(x64_execution_free(owner, 16, 8), "NativeAllocationFreeLayoutMismatch")
+    assert_eq(x64_execution_alloc(0, 0, 32, 8).refusal_key, "NativeAllocationProviderMissing")
+}
+
+#Test("native runtime dispatch requires sealed arity and one register classes") {
+    word :: LIRLayout{size: 8, align: 8, class: LIRABIClass.Integer}
+    runtime := CoreSharedParentRuntime{receipt_identity: "receipt", library_identity: "library", symbols: [String:Int]{"jet_word": 8}, export_abis: [String:CoreSharedRuntimeExportABI]{"jet_word": CoreSharedRuntimeExportABI{symbol: "jet_word", parameters: [LIRLayout]{word}, result: Val(word)}}}
+    assert_eq(core_shared_runtime_call_error(runtime, "jet_word", 1), "")
+    assert_eq(core_shared_runtime_call(runtime, "jet_word", 2, 0, 0, 0).refusal_key, "RuntimeLibraryExportABIArityMismatch: jet_word: 2")
+    assert_eq(core_shared_runtime_call(runtime, "jet_absent", 0, 0, 0, 0).refusal_key, "RuntimeLibraryExportABIInvalid: jet_absent")
+    floating :: LIRLayout{size: 8, align: 8, class: LIRABIClass.Float}
+    runtime.export_abis["jet_word"] = CoreSharedRuntimeExportABI{symbol: "jet_word", parameters: [LIRLayout]{floating}, result: Val(word)}
+    assert_eq(core_shared_runtime_call(runtime, "jet_word", 1, 0, 0, 0).refusal_key, "RuntimeLibraryExportABIUnsupported: jet_word: parameter 0: Float/8")
+    wide :: LIRLayout{size: 16, align: 8, class: LIRABIClass.Integer}
+    runtime.export_abis["jet_word"] = CoreSharedRuntimeExportABI{symbol: "jet_word", parameters: [LIRLayout]{word}, result: Val(wide)}
+    assert_eq(core_shared_runtime_call(runtime, "jet_word", 1, 0, 0, 0).refusal_key, "RuntimeLibraryExportABIUnsupported: jet_word: result: Integer/16")
 }

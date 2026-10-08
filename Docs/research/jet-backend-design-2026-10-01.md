@@ -1388,6 +1388,17 @@ Closure code and release resolve only through actual emitted callable rows.
 Missing exports are named refusals; the generic concrete-layout/provenance gap
 remains a named refusal, not an ID/offset guess or a copied factory root.
 
+Native payload slot access uses the promoted readers and checked writes in
+`OS/Linux.jet`. Only widths 1, 2, 4 and 8 are admitted; invalid addresses,
+widths and write ranges refuse before memory access. Allocation receipts retain
+the original free address and exact positive size/power-of-two alignment;
+release refuses a mismatched layout rather than truncating or guessing it.
+`core_shared_runtime_call` consumes the admitted runtime's sealed `export_abis`
+and symbol addresses. Its fixed zero-to-three-word argument path allocates no
+argument list, rejects mismatched arity and Float/Memory/wide carriers before
+invoking code, and masks narrow results. Refusals identify the export and the
+unsupported class/width. These helpers do not imply runtime or Core admission.
+
 
 `x64_memory_core_shared_image` consumes the explicit pinned-Core lowering
 inventory, rather than guessing exports from MIR function numbers. Getter names
