@@ -430,7 +430,8 @@ fn queue_int_binding(value: Int?) -> DBValue Never! {
     DBValue.Null
 }
 fn queue_initialize_on_driver(driver: &db.__Driver, authority: String, name: String, capacity: Int, now: Int) ServiceError! {
-    loop statement in [String]{QUEUE_CREATE_META, QUEUE_CREATE_JOBS, QUEUE_CREATE_EVENTS, QUEUE_CREATE_DUE_INDEX, QUEUE_CREATE_EVENT_INDEX} {
+    statements :: [String]{QUEUE_CREATE_META, QUEUE_CREATE_JOBS, QUEUE_CREATE_EVENTS, QUEUE_CREATE_DUE_INDEX, QUEUE_CREATE_EVENT_INDEX}
+    loop statement in statements {
         _ :: queue_execute(&driver, statement, [DBValue]{}, "schema") ?? return Err(err)
     }
     _ :: queue_execute(&driver,

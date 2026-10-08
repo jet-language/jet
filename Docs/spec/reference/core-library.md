@@ -3526,6 +3526,11 @@ prepared statements. Length-taking calls borrow UTF-8 data for the call;
 `SQLITE_TRANSIENT` copies bindings, and result bytes are copied before the next
 SQLite step. This private driver is not a public row-policy bypass.
 
+Embedded NUL text is checked as UTF-8 bytes, not a C-string terminator:
+row bindings preserve bytes after NUL, while an open filename containing NUL
+is rejected before the engine call. Driver and byte-carrier fixtures use
+explicit byte vectors for these cases.
+
 ### `core.compute` — checked tensors and explicit devices
 
 `core.compute` provides dense tensors, shape-checked operations, sparse CSR

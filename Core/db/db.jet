@@ -293,7 +293,12 @@ impl SqliteStmt.Close {
     }
 }
 struct CachedStatement { handle: SqliteStmt, sql: String }
-impl CachedStatement.Close { fn close(^self) { held := ^self; close(^held.handle) } }
+impl CachedStatement.Close {
+    fn close(^self) {
+        held := ^self
+        close(^held.handle)
+    }
+}
 
 // rusqlite 0.31.0 cache.rs:19-22 and inner_connection.rs:63-130: cache16,
 // READWRITE|CREATE|URI|NOMUTEX, extended codes and a 5000ms busy timeout.
@@ -325,7 +330,7 @@ fn error(driver: __Driver) -> DBError Never! {
 // Backend open reports None; public open preserves E3001, while the queue maps
 // None to its existing Unavailable error. Failed non-null handles close too.
 pub fn __driver_open(path: String) -> __Driver? Never! {
-    if path.contains("\0") -> return None
+    if path.contains(String.from_bytes([U8]{0}) ?? panic("NUL byte is valid UTF-8")) -> return None
     pointer := U64{0}
     #Unsafe("NUL-free filename goes through the canonical C String adapter; the output pointer slot belongs to this stack frame") {
         // rusqlite inner_connection.rs:406-438, for this pinned 3.45 engine:
@@ -478,7 +483,10 @@ pub fn __driver_execute(driver: &__Driver, sql: String, params: [DBValue]) -> In
 fn decimal_width(number: Int) -> Int Never! {
     rest := number
     width := if number < 0 -> 2 else -> 1
-    loop rest >= 10 || rest <= -10 { rest /= 10; width += 1 }
+    loop rest >= 10 || rest <= -10 {
+        rest /= 10
+        width += 1
+    }
     width
 }
 fn tagged_width(payload: Int) -> Int Never! { payload + decimal_width(payload) + 2 }
@@ -520,7 +528,10 @@ pub fn __driver_query(driver: &__Driver, sql: String, params: [DBValue]) -> [[St
         loop {
             status :: sqlite3.step(statement_raw(statement))
             if status == (I32{101}) -> break
-            if status != (I32{100}) { failure = Val(error(driver)); break }
+            if status != (I32{100}) {
+                failure = Val(error(driver))
+                break
+            }
             row := [String: DBValue]{}
             loop at in 0..<count {
                 index :: I32{at}
@@ -622,7 +633,9 @@ pub fn __driver_health(driver: &__Driver) -> Bool Never! {
     selected :: __driver_query(&driver, "SELECT value FROM values_store", [DBValue]{}) ?? panic("SQLite select failed")
     assert_eq(row_int(selected[0], "value") ?? -1, 42)
 
-    bindings :: [DBValue]{.Null, .Int(9223372036854775807), .Int(-9223372036854775808), .Float(1.25), .Text(""), .Text("jet\0λ"), .Bool(true), .Blob([U8]{}), .Blob([U8]{0, 1, 255})}
+    text_with_nul :: String.from_bytes([U8]{106, 101, 116, 0, 206, 187}) ?? panic("fixture text is valid UTF-8")
+    assert_eq(text_with_nul.bytes(), [U8]{106, 101, 116, 0, 206, 187})
+    bindings :: [DBValue]{.Null, .Int(9223372036854775807), .Int(-9223372036854775808), .Float(1.25), .Text(""), .Text(text_with_nul), .Bool(true), .Blob([U8]{}), .Blob([U8]{0, 1, 255})}
     rows :: __driver_query(&driver, "SELECT ? AS missing, ? AS largest, ? AS smallest, ? AS real, ? AS empty, ? AS text, ? AS flag, ? AS empty_blob, ? AS blob", bindings) ?? panic("SQLite bindings failed")
     row :: rows[0]
     assert((row_value(row, "missing") ?? panic("missing null")).is_null())
@@ -630,7 +643,7 @@ pub fn __driver_health(driver: &__Driver) -> Bool Never! {
     assert_eq(row_int(row, "smallest") ?? 0, -9223372036854775808)
     assert_eq(row_float(row, "real") ?? 0.0, 1.25)
     assert_eq(row_text(row, "empty") ?? "not empty", "")
-    assert_eq(row_text(row, "text") ?? "", "jet\0λ")
+    assert_eq((row_text(row, "text") ?? "").bytes(), [U8]{106, 101, 116, 0, 206, 187})
     assert_eq(row_int(row, "flag") ?? 0, 1)
     assert_eq((row_value(row, "empty_blob") ?? panic("missing empty blob")).blob() ?? [U8]{1}, [U8]{})
     assert_eq((row_value(row, "blob") ?? panic("missing blob")).blob() ?? [U8]{}, [U8]{0, 1, 255})
@@ -652,7 +665,7 @@ pub fn __driver_health(driver: &__Driver) -> Bool Never! {
     #Unsafe("SQLite's allocator counter is read-only; this test owns its connections and retains no foreign column pointers") {
         baseline = sqlite3.memory_used()
     }
-    {
+    if true {
         driver := __driver_open(":memory:") ?? panic("SQLite open failed")
         loop number in 0..<20 {
             rows :: __driver_query(&driver, "SELECT {number} AS value", [DBValue]{}) ?? panic("SQLite cache prepare failed")
@@ -686,7 +699,9 @@ pub fn __driver_health(driver: &__Driver) -> Bool Never! {
     #Unsafe("all test handles have reached Close before reading SQLite's allocator counter") {
         assert_eq(sqlite3.memory_used(), baseline)
     }
-    if __driver_open("bad\0filename") == .Val(_) -> assert(false)
+    nul :: String.from_bytes([U8]{0}) ?? panic("NUL byte is valid UTF-8")
+    assert_eq(nul.bytes(), [U8]{0})
+    if __driver_open("bad{nul}filename") == .Val(_) -> assert(false)
     if __driver_open("/") == .Val(_) -> assert(false)
     #Unsafe("failed opens, including non-null error handles, have already reached Close") {
         assert_eq(sqlite3.memory_used(), baseline)

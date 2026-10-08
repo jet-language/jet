@@ -51,15 +51,16 @@ pub fn address_of<T>(value: T) -> Int Never! { core.mem.address_of<T>(value) }
     length :: input.len()
     #Unsafe("pack owns length bytes; unpack completes before free, and an empty span never dereferences its sentinel") {
         pointer :: mem.__bytes_pack(input)
-        copy :: mem.__bytes_unpack(pointer, length)
+        copied :: mem.__bytes_unpack(pointer, length)
         mem.__bytes_free(pointer, length)
-        assert_eq(copy, input)
+        assert_eq(copied, input)
         input[0] = U8{255}
-        assert_eq(copy[0], U8{0})
+        assert_eq(copied[0], U8{0})
         empty :: mem.__bytes_pack([U8]{})
         assert_eq(mem.__bytes_unpack(empty, 0), [U8]{})
         mem.__bytes_free(empty, 0)
-        text :: "jet\0λ"
+        text :: String.from_bytes([U8]{106, 101, 116, 0, 206, 187}) ?? panic("fixture text is valid UTF-8")
+        assert_eq(text.bytes(), [U8]{106, 101, 116, 0, 206, 187})
         data :: mem.__string_data(text)
         bytes :: mem.__string_byte_len(text)
         assert_eq(bytes, 6)
