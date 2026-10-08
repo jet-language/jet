@@ -1,0 +1,31 @@
+// tests/inline_package.rs:316-343, assertion-for-assertion over the existing driver carrier.
+// Compiler-lib test: runnable with the canonical JetDriver package after packaging.
+fn jet_driver_test_inline_mask() {
+    // Original source bytes, including shebang, leading trivia, and final LF.
+    source :: "#!/usr/bin/env jet\n// leading trivia remains outside the carrier\npackage {{\n    name: \"mask\"\n}}\n\nfn run() {{\n    print(\"ok\")\n}}\n"
+    block :: jet_driver_inline_package(source)
+    assert(block.error == None, "extract leading inline Package")
+    assert(block.found, "leading inline Package must be found")
+    source_bytes :: source.bytes()
+    assert_eq(String.from_bytes(source_bytes[block.start..(block.end - 1)]) ?? panic("carrier UTF-8"), "package {{\n    name: \"mask\"\n}}")
+
+    // The Rust mask helper extracts its own returned carrier. Preserve that
+    // independent extraction, rather than comparing a carrier to itself.
+    found :: jet_driver_inline_package(source)
+    assert(found.error == None, "mask inline package source")
+    masked :: jet_driver_mask_inline_package(source, found)
+    assert(found.found, "mask must return its carrier")
+    assert_eq(found.start, block.start)
+    assert_eq(found.end, block.end)
+    masked_bytes :: masked.bytes()
+    assert_eq(masked_bytes.len(), source_bytes.len())
+    assert_eq(masked_bytes[block.end..(masked_bytes.len() - 1)], source_bytes[block.end..(source_bytes.len() - 1)])
+    loop offset in block.start..<block.end {
+        byte :: masked_bytes[offset]
+        assert(byte == (U8{32}) || byte == (U8{10}) || byte == (U8{13}), "the parser-facing carrier mask must retain only whitespace and line endings")
+    }
+}
+
+#Test("inline_package_mask_preserves_parser_offsets_and_code") {
+    jet_driver_test_inline_mask()
+}
