@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { functionsIn, collectFunctions, censusTsv, classify, checkOriginal, emitFunction, makeReference, machineDiagnostics, main } from './test-port.mjs';
+import { functionsIn, collectFunctions, censusTsv, classify, checkOriginal, emitFunction, makeReference, machineDiagnostics, analyzeFunction, main } from './test-port.mjs';
 
 function fixture(t) {
   const root = mkdtempSync(join(process.env.JET_SCRATCH_ROOT ?? tmpdir(), 'test-port-unit-'));
@@ -445,4 +445,33 @@ test('emission keeps the helper-aware disposition computed by its caller', async
   assert.equal(result.retiredAssertions, 1);
   assert.equal(readFileSync(join(root, 'tests/ui/sample/acceptance.jet'), 'utf8'), 'fn run() {}');
   await assert.rejects(emitFunction(original, { root, reference: observe }), /requires a classified function/u);
+});
+
+test('analysis collects all three independent blockers and a clean function has none', () => {
+  const row = fn('let a = first_helper(); let b = second_helper(); third_helper();');
+  assert.deepEqual(analyzeFunction(row).classes, ['unmodeled call first_helper', 'unmodeled call second_helper', 'unmodeled call third_helper']);
+  assert.deepEqual(analyzeFunction(fn('let d = jet::compile("fn run() {}").expect_err("bad"); assert_eq!(d.len(), 1);')).classes, []);
+  assert.equal(analyzeFunction(row).reference, 'runtime-unknown');
+});
+
+test('analysis recovers nested syntax blockers without discarding later calls or assertions', () => {
+  const result = analyzeFunction(fn('if true { hidden_helper(); } let a = first_helper(); let b = a.unknown_method();'));
+  assert.ok(result.classes.includes('unmodeled call hidden_helper'));
+  assert.ok(result.classes.includes('unmodeled call first_helper'));
+  assert.ok(result.classes.includes('unmodeled method unknown_method'));
+  assert.ok(result.classes.some(name => name.startsWith('expected ;, got')));
+  assert.deepEqual(analyzeFunction(fn('assert!(true, message_helper());')).classes, []);
+  assert.deepEqual(analyzeFunction(fn('let d = jet::compile(SOURCE).unwrap();')).classes, ['unbound value SOURCE']);
+});
+
+test('analyze CLI writes only the requested static TSV and never needs a reference', async (t) => {
+  const root = fixture(t), output = join(root, 'analysis.tsv');
+  writeFileSync(join(root, 'tests/sample.rs'), '#[test] fn clean() { jet::compile("fn run() {}").unwrap(); }\\n#[test] fn blocked() { one(); two(); three(); }'.replaceAll('\\n', '\n'));
+  assert.equal(await main(['--root', root, '--analyze', output]), 0);
+  const rows = readFileSync(output, 'utf8').trimEnd().split('\n');
+  assert.equal(rows.length, 3);
+  assert.match(rows[1], /clean\t-\t\truntime-unknown$/u);
+  assert.match(rows[2], /unmodeled call one;unmodeled call three;unmodeled call two/u);
+  assert.equal(existsSync(join(root, 'tests/ui')), false);
+  assert.equal(existsSync(join(root, 'test-port-')), false);
 });

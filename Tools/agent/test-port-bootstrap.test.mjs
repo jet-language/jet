@@ -54,3 +54,24 @@ test('E1 near-miss helpers and side-effectful notes stay hand-port', async () =>
     #[test] fn example() { if !have_rustc() { return; } ${body} }`, 'tests/sample.rs');
   await assert.rejects(checkOriginal({ ...rows[1], helpers: [rows[0]] }, reference));
 });
+
+test('E1b immutable availability binding used only by an adjacent negative guard', async () => {
+  for (const note of ['', 'eprintln!("need rustc");']) {
+    const checked = await checkOriginal(fn(`let present = have_rustc(); if !present { ${note} return; } ${body}`), reference);
+    assert.equal(checked.assertions, 2);
+    await assert.rejects(checkOriginal(fn(`let present = have_rustc(); if !present { ${note} return; } ${body} assert!(false);`), reference), /not satisfied/u);
+  }
+});
+
+test('E1b later uses, mutation, reassignment and changed conditions stay hand-port', async () => {
+  for (const setup of [
+    'let present = have_rustc(); if !present { return; } assert!(present);',
+    'let mut present = have_rustc(); if !present { return; }',
+    'let present = have_rustc(); present = false; if !present { return; }',
+    'let present = have_rustc(); if present { return; }',
+    'let present = have_rustc(); if !present && true { return; }',
+  ]) await assert.rejects(checkOriginal(fn(`${setup} ${body}`), reference));
+  const unrelated = functionsIn(`fn another() { use common::have_rustc; }
+    #[test] fn example() { if !have_rustc() { return; } ${body} }`, 'tests/sample.rs')[1];
+  await assert.rejects(checkOriginal(unrelated, reference));
+});

@@ -7,6 +7,10 @@
 // --attempt FILE.tsv selects human-PORT overrides: one FILE::FN per first column
 // (optional "function" header/comments). With --emit, selection is its intersection.
 // Only census retirement is bypassed; original assertions and rule G still apply.
+// --analyze OUT.tsv [--attempt FILE.tsv] [--slice-map FILES.tsv] is static:
+// all parser/model blockers, no reference execution or fixture writes. The
+// slice map has slice/file columns; classes escape literal semicolons as \;.
+// A clean model is still runtime-unknown, never a reference-run PASS.
 // Unsupported syntax/API facts and failed original assertions are HAND-PORT,
 // not permission to weaken a test. RETIRED rows name Rust-only subjects.
 // --report FILE records each decision; --exclusions FILE lists raw #[test]
@@ -455,20 +459,21 @@ class InputPath {
   }
 }
 
-function checkAst(node) {
+function checkAst(node, blockers = null) {
   if (!node) return;
   const allowedCalls = ['jet::compile', 'jet::compile_with_path', 'include_str!', 'assert!', 'assert_eq!', 'assert_ne!', 'matches!', 'panic!', 'format!', 'common::unique_tmp', 'fs::create_dir_all', 'fs::write', 'common::build_and_run', 'tir_support::assert_tiers_agree'];
   const allowedMethods = ['iter', 'any', 'all', 'find', 'filter', 'collect', 'count', 'len', 'is_empty', 'contains', 'starts_with', 'ends_with', 'as_str', 'expect', 'expect_err', 'unwrap', 'unwrap_err', 'unwrap_or_else', 'is_ok', 'is_err', 'is_some', 'is_none', 'trim', 'replace', 'to_string', 'to_owned', 'join', 'to_str'];
-  if (node.type === 'call' && !allowedCalls.includes(node.name)) refuse(`unmodeled call ${node.name}`);
-  if (node.type === 'method' && !allowedMethods.includes(node.name)) refuse(`unmodeled method ${node.name}`);
-  if (node.type === 'field' && !['lints', 'code', 'what', 'why', 'fix', 'severity'].includes(node.name)) refuse(`unmodeled field ${node.name}`);
+  const unsupported = message => blockers ? blockers.add(message) : refuse(message);
+  if (node.type === 'call' && !allowedCalls.includes(node.name)) unsupported(`unmodeled call ${node.name}`);
+  if (node.type === 'method' && !allowedMethods.includes(node.name)) unsupported(`unmodeled method ${node.name}`);
+  if (node.type === 'field' && !['lints', 'code', 'what', 'why', 'fix', 'severity'].includes(node.name)) unsupported(`unmodeled field ${node.name}`);
   // Message operands are never assertions; panic's arguments are only failure text.
   const assertion = node.type === 'call' && ['assert!', 'assert_eq!', 'assert_ne!'].includes(node.name);
   for (const [key, value] of Object.entries(node)) {
-    if (key === 'args' && assertion) value.slice(0, node.name === 'assert!' ? 1 : 2).forEach(checkAst);
+    if (key === 'args' && assertion) value.slice(0, node.name === 'assert!' ? 1 : 2).forEach(child => checkAst(child, blockers));
     else if (key === 'args' && node.type === 'call' && node.name === 'panic!') continue;
-    else if (Array.isArray(value)) value.forEach(checkAst);
-    else if (value && typeof value === 'object') checkAst(value);
+    else if (Array.isArray(value)) value.forEach(child => checkAst(child, blockers));
+    else if (value && typeof value === 'object') checkAst(value, blockers);
   }
 }
 
@@ -561,6 +566,7 @@ function helperBinding(fn, name) {
     }
   };
   for (let i = 0; i < imports.length; i++) {
+    if (imports[i].kind !== 'string' && ['{', '('].includes(imports[i].value)) { i = closeAt(imports, i); continue; }
     if (imports[i].kind !== 'word' || imports[i].value !== 'use') continue;
     let end = i + 1;
     while (end < imports.length && imports[end].value !== ';') end++;
@@ -581,6 +587,22 @@ function availabilityGuards(fn, tokens) {
   const output = [];
   const rustc = name => ['common::have_rustc', 'tir_support::have_rustc'].includes(helperBinding(fn, name)?.name);
   for (let i = 0; i < tokens.length;) {
+    // A saved availability value qualifies only for this adjacent, immutable,
+    // one-use early return. Do not erase later uses or mutations of the value.
+    if (tokens[i]?.value === 'let' && tokens[i + 1]?.kind === 'word' && tokens[i + 1].value !== 'mut' && tokens[i + 2]?.value === '=') {
+      const alias = tokens[i + 1].value;
+      let cursor = i + 3;
+      while (tokens[cursor]?.kind === 'word' || tokens[cursor]?.value === '::') cursor++;
+      const name = tokens.slice(i + 3, cursor).map(token => token.value).join('');
+      if (rustc(name) && tokens[cursor]?.value === '(' && tokens[cursor + 1]?.value === ')' && tokens[cursor + 2]?.value === ';' &&
+          tokens[cursor + 3]?.value === 'if' && tokens[cursor + 4]?.value === '!' && tokens[cursor + 5]?.value === alias && tokens[cursor + 6]?.value === '{') {
+        const close = closeAt(tokens, cursor + 6);
+        if (!tokens.slice(close + 1).some(token => token.kind === 'word' && token.value === alias) && tokens[close + 1]?.value !== 'else') {
+          const guard = [...tokens.slice(cursor + 3, cursor + 5), ...tokens.slice(i + 3, cursor + 2), ...tokens.slice(cursor + 6, close + 1)];
+          if (!availabilityGuards(fn, guard).length) { i = close + 1; continue; }
+        }
+      }
+    }
     if (tokens[i]?.value !== 'if' || tokens[i]?.kind === 'string') { output.push(tokens[i++]); continue; }
     let cursor = i + 1, negative = tokens[cursor]?.value === '!';
     if (negative) cursor++;
@@ -617,6 +639,76 @@ export function assertionPlan(fn) {
   for (const statement of statements) checkAst(statement);
   Object.defineProperty(statements, 'retiredAssertions', { value: retirement.retired });
   return statements;
+}
+
+// Analysis never observes a reference process or emits fixtures. The exact
+// parser/model remains authoritative; balanced recovery inspects every failed
+// statement's nested bodies/operands instead of hiding its later blockers.
+export function analyzeFunction(fn) {
+  const blockers = new Set(), normalize = error => error.message.replace(/ at line \d+$/u, '');
+  const retirement = retireRustAssertions(fn), tokens = availabilityGuards(fn, retirement.tokens);
+  const bindings = new Set();
+  const model = (node, scope) => {
+    if (!node || typeof node !== 'object') return;
+    if (node.type === 'variable' && !scope.has(node.name)) blockers.add(`unbound value ${node.name}`);
+    if (node.type === 'closure') { model(node.body, new Set([...scope, node.param])); return; }
+    for (const [key, value] of Object.entries(node)) {
+      if (key === 'args' && node.type === 'call' && node.name === 'panic!') continue;
+      let children = Array.isArray(value) ? value : [value];
+      if (key === 'args' && node.type === 'call' && ['assert!', 'assert_eq!', 'assert_ne!'].includes(node.name)) children = children.slice(0, node.name === 'assert!' ? 1 : 2);
+      children.forEach(child => model(child, scope));
+    }
+  };
+  const modelStatements = (statements, scope) => {
+    for (const statement of statements) {
+      if (statement.type === 'loop') {
+        model(statement.iterable, scope);
+        modelStatements(statement.statements, new Set([...scope, ...statement.names]));
+      } else {
+        model(statement.expr, scope);
+        statement.names?.forEach(name => scope.add(name));
+      }
+    }
+  };
+  const scanOperands = list => {
+    for (let i = 0; i < list.length; i++) {
+      const token = list[i];
+      if (token.kind === 'string') continue;
+      if (token.value === '{') { const end = closeAt(list, i); scanStatements(list.slice(i + 1, end)); i = end; continue; }
+      if (token.kind === 'word' && !['::'].includes(list[i - 1]?.value)) {
+        let endName = i, name = token.value;
+        while (list[endName + 1]?.value === '::' && list[endName + 2]?.kind === 'word') { name += `::${list[endName + 2].value}`; endName += 2; }
+        if (list[endName + 1]?.value === '!') { name += '!'; endName++; }
+        if (list[endName + 1]?.value === '(') {
+          const end = closeAt(list, endName + 1), method = list[i - 1]?.value === '.';
+          checkAst({ type: method ? 'method' : 'call', name, args: [] }, blockers);
+          let args = topLevelSplit(list.slice(endName + 2, end), ',');
+          if (['assert!', 'assert_eq!', 'assert_ne!'].includes(name)) args = args.slice(0, name === 'assert!' ? 1 : 2);
+          if (name !== 'panic!') args.forEach(scanOperands);
+          i = end; continue;
+        }
+        if (list[i - 1]?.value === '.') checkAst({ type: 'field', name }, blockers);
+      }
+      if (['(', '['].includes(token.value)) { const end = closeAt(list, i); scanOperands(list.slice(i + 1, end)); i = end; }
+    }
+  };
+  const scanStatements = list => {
+    for (const segment of topLevelSplit(list, ';')) {
+      if (!segment.length) continue;
+      // Try the complete statement first, retaining parsed expressions even if
+      // its final terminator or a later unsupported operator refuses.
+      const semicolon = { kind: 'punct', value: ';', raw: ';', line: segment.at(-1).line };
+      const parser = new Parser(segment[0]?.value === 'for' && segment.at(-1)?.value === '}' ? segment : [...segment, semicolon]);
+      try {
+        const statements = parser.statements();
+        statements.forEach(node => checkAst(node, blockers));
+        modelStatements(statements, bindings);
+      }
+      catch (error) { blockers.add(normalize(error)); scanOperands(segment); }
+    }
+  };
+  scanStatements(tokens);
+  return { file: fn.file, fn: fn.name, classes: [...blockers].sort(), reference: 'runtime-unknown' };
 }
 
 function rustEqual(a, b) {
@@ -951,7 +1043,7 @@ export async function main(argv) {
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--dry-run') options.dryRun = true;
-    else if (['--root', '--inventory', '--census', '--emit', '--attempt', '--bless-from', '--scratch', '--report', '--exclusions', '--timeout'].includes(arg)) {
+    else if (['--root', '--inventory', '--census', '--emit', '--attempt', '--analyze', '--slice-map', '--bless-from', '--scratch', '--report', '--exclusions', '--timeout'].includes(arg)) {
       if (!argv[i + 1]) refuse(`missing value for ${arg}`);
       options[arg.slice(2)] = argv[++i];
     } else refuse(`unknown option ${arg}`);
@@ -966,8 +1058,8 @@ export async function main(argv) {
     parts: census.functions.filter((fn) => dirname(fn.file) !== 'tests').length,
     topLevel: census.functions.filter((fn) => dirname(fn.file) === 'tests').length, dispositions: {} };
   for (const fn of census.functions) { const { disposition } = classify(fn, census.helpers); counts.dispositions[disposition] = (counts.dispositions[disposition] ?? 0) + 1; }
-  if (!options.emit && !options.attempt) { console.log(JSON.stringify(counts)); return 0; }
-  if (!options['bless-from']) refuse('--emit/--attempt requires --bless-from JET');
+  if (!options.emit && !options.attempt && !options.analyze) { console.log(JSON.stringify(counts)); return 0; }
+  if (!options.analyze && !options['bless-from']) refuse('--emit/--attempt requires --bless-from JET');
   const attempts = new Set(options.attempt ? readFileSync(options.attempt, 'utf8').split(/\r?\n/u)
     .map((line) => line.split('\t')[0].trim()).filter((id) => id && id !== 'function' && !id.startsWith('#')) : []);
   if (options.attempt) {
@@ -983,6 +1075,20 @@ export async function main(argv) {
   const selected = census.functions.filter((fn) => (!options.emit || fn.file === file && (name === '*' || name === fn.name))
     && (!options.attempt || attempts.has(`${fn.file}::${fn.name}`)));
   if (!selected.length) refuse(`function not found: ${options.emit ?? options.attempt}`);
+  if (options.analyze) {
+    const slices = new Map(options['slice-map'] ? readFileSync(options['slice-map'], 'utf8').trimEnd().split(/\r?\n/u).slice(1)
+      .map(line => { const [slice, file] = line.split('\t'); return [file, slice]; }) : []);
+    const rows = selected.map(fn => {
+      const owning = fn.file.match(/^tests\/([a-z0-9_]+?)(?:_parts)?\/.+\.rs$/u);
+      const slice = slices.get(fn.file) ?? (owning ? slices.get(`tests/${owning[1]}.rs`) : undefined);
+      if (options['slice-map'] && !slice) refuse(`analysis slice missing: ${fn.file}`);
+      return { ...analyzeFunction(classify(fn, census.helpers)), slice: slice ?? '-' };
+    });
+    writeFileSync(options.analyze, 'file\tfn\tslice\tclasses\treference\n' + rows.map(row =>
+      [row.file, row.fn, row.slice, row.classes.map(name => name.replaceAll('\\', '\\\\').replaceAll(';', '\\;')).join(';'), row.reference].join('\t')).join('\n') + '\n');
+    console.log(JSON.stringify({ analyzed: rows.length, staticallyClean: rows.filter(row => !row.classes.length).length, reference: 'runtime-unknown' }));
+    return 0;
+  }
   const scratchRoot = resolve(options.scratch ?? process.env.JET_SCRATCH_ROOT ?? join(process.env.HOME, '.cache/jet-dev/scratch/TestW4'));
   mkdirSync(scratchRoot, { recursive: true });
   const scratch = mkdtempSync(join(scratchRoot, 'test-port-'));
