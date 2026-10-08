@@ -94,6 +94,12 @@ values and fail-closed policy in Jet; the OS CSPRNG is a host cell. The raw
 algorithm controls in `core.crypto.expert` remain an explicit audited door, not
 a hidden provider policy.
 
+The runtime SHA-256 byte boundary borrows its input and writes to a caller-owned
+32-byte digest. Its 576-byte, word-aligned scratch region is exclusive to the
+call and wiped before return. Domain-separated callers can hash two spans
+without allocating a concatenated message; the digest must not alias either
+input span. The algorithm is shared by vault and other runtime crypto callers.
+
 A high-level native implementation must not be retained as an invisible runtime
 fallback for a Jet implementation. If an API changes identity or semantics,
 make the change at the contract boundary and migrate its users in one cutover.
