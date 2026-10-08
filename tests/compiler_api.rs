@@ -416,8 +416,8 @@ fn compiler_api_is_compile_time_only() {
         "manifest", "package", "lock", "profiles",
     ] {
         let arguments = match operation {
-            "lex" | "parse" | "source_map" => "\"fn run() {}\"",
-            "check" => "compiler.parse(\"fn run() {}\") ?? return",
+            "lex" | "parse" | "source_map" => "`fn run() {}`",
+            "check" => "compiler.parse(`fn run() {}`) ?? return",
             _ => "",
         };
         let source = format!(
@@ -447,10 +447,10 @@ fn compiler_queries_precede_source_facades_for_module_and_nested_aliases() {
     ] {
         let source = format!(
             "{import}\n\
-             LEXED :: prep {{ {prefix}.lex(\"fn run() {{}}\") ?? panic(\"lex\") }}\n\
-             PARSED :: prep {{ {prefix}.parse(\"fn run() {{}}\") ?? panic(\"parse\") }}\n\
+             LEXED :: prep {{ {prefix}.lex(`fn run() {{}}`) ?? panic(\"lex\") }}\n\
+             PARSED :: prep {{ {prefix}.parse(`fn run() {{}}`) ?? panic(\"parse\") }}\n\
              CHECKED :: prep {{ {prefix}.check(PARSED) ?? panic(\"check\") }}\n\
-             MAPPED :: prep {{ {prefix}.source_map(\"fn run() {{}}\") ?? panic(\"map\") }}\n\
+             MAPPED :: prep {{ {prefix}.source_map(`fn run() {{}}`) ?? panic(\"map\") }}\n\
              fn run() {{ print(\"compiler queries\") }}\n"
         );
         jet::compile(&source).unwrap_or_else(|diagnostics| {
@@ -467,10 +467,10 @@ fn compiler_query_phase_boundary_is_preserved_for_aliases() {
         ("use core as root", "root.compiler"),
     ] {
         for (operation, arguments) in [
-            ("lex", "\"fn run() {}\""),
-            ("parse", "\"fn run() {}\""),
+            ("lex", "`fn run() {}`"),
+            ("parse", "`fn run() {}`"),
             ("check", "\"not a syntax tree\""),
-            ("source_map", "\"fn run() {}\""),
+            ("source_map", "`fn run() {}`"),
             ("manifest", ""),
             ("package", ""),
             ("lock", ""),
