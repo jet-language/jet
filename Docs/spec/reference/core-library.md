@@ -2095,6 +2095,11 @@ same source declaration. Matrix arithmetic preserves column-major indexing;
 `F64x4` uses its fixed `[F64#4]` array as the checked lane bridge.
 `Mat4` products accumulate from positive zero in row/column/k order; `*`
 between matrices is `matmul`, and `*` by a `Vec4` is `transform`.
+`F64x4.sum()` and `.reduce(.Avg)` use the Rust seed's D-FRED1 eight-lane
+tree (each lane seeded with positive zero); average divides the sum by four.
+Product, minimum, and maximum fold in lane order from one, positive infinity,
+and negative infinity respectively. Min/max use scalar IEEE `min`/`max`,
+including their NaN behavior; `sqrt` applies the existing scalar root leaf.
 
 ```jet
 fn rotate(v: Vec3, transform: Mat3) -> Vec3 {
