@@ -4200,6 +4200,28 @@ fn jet_raw_encoding_read_byte(reader: &mut JetFileReader) -> Result<JetOutcome<u
         .map_err(jet_raw_encoding_cause)
 }
 
+// Mechanical reserved-buffer adapter over the existing XML seed read at :3084.
+// No growth or retry: preserve the FileReader's own BufReader and one read.
+fn jet_raw_encoding_read_into(reader: &mut JetFileReader, bytes: &mut Vec<u8>, max: i64) -> Result<i64, jet_std::EncodingCause> {
+    let max = usize::try_from(max).ok().filter(|max| bytes.is_empty() && *max <= bytes.capacity())
+        .ok_or_else(|| jet_raw_encoding_cause(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput, "read_into requires len == 0 and 0 <= max <= capacity",
+        )))?;
+    let capacity = bytes.capacity();
+    bytes.resize(max, 0);
+    assert_eq!(bytes.capacity(), capacity, "read_into must not reallocate");
+    match std::io::Read::read(&mut reader.inner, bytes.as_mut_slice()) {
+        Ok(count) => {
+            bytes.truncate(count);
+            Ok(count as i64)
+        }
+        Err(error) => {
+            bytes.clear();
+            Err(jet_raw_encoding_cause(error))
+        }
+    }
+}
+
 fn jet_raw_encoding_write_bytes(writer: &mut JetFileWriter, bytes: &[u8]) -> Result<(), jet_std::EncodingCause> {
     jet_encoding_file_write_all(writer, bytes).map_err(jet_raw_encoding_cause)
 }
