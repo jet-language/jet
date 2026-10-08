@@ -68,7 +68,8 @@ that launches it.
 Before measuring, the main agent must admit a written pre-flight. Use the same
 trusted hello project, build profile, environment and machine for both compiler
 artifacts. Persist every process's stdout/stderr and exit status through the
-proof lane; retain `/usr/bin/time -v` output, the canonical compile receipt,
+proof lane; retain verbose output from the pinned `GNU_TIME` exported by
+`Tools/perf/throughput/measure.mjs`, the canonical compile receipt,
 emitted `out.rs` and `JET_TRACE_FILE` trace. After one warmup per arm, interleave
 at least three matched trials under `plain/trial-001/` and
 `optimized/trial-001/`, and so on. Each trial has `rc`, the canonical
@@ -78,13 +79,19 @@ line-oriented `receipt` (factory tier `Aot`), `out.rs`, `trace.json`,
 Keep the actual immutable project snapshot in the pair's `inputs/` directory
 and use that same absolute `JET_BOOTSTRAP_SOURCE_ROOT` for every process.
 Calculate its hash with the exported `startupInputHash` function, which hashes
-sorted relative paths and file-byte hashes. Record each actual launch's
+sorted relative paths and file-byte hashes. Pin the selected relative source
+entry in `pair.json` as `entry`; each actual launch records that same `entry`,
 `source_root` and freshly calculated `source_sha256` in `invocation.json`.
-The comparator checks those against the snapshot bytes, not a free-standing
-manifest hash. Do not include stores or outputs inside the input snapshot.
+The launcher also records the actual compiler `process_pid`, independently
+captured `process_started_unix_ms` and `process_finished_unix_ms`, and the
+SHA-256 of the final trace bytes as `trace_sha256`. Do not synthesize these
+process facts from the trace. The comparator binds `trace.start` and every
+event's process ID to that successful completed run.
+The comparator checks the source facts against the snapshot bytes, not a
+free-standing manifest hash. Do not include stores or outputs in the snapshot.
 The shared `pair.json` records schema `jet.native-host-shape-pair.v1`,
-`source_sha256`, `machine` and `build_profile`; retain exact immutable compiler
-paths and build receipts with that evidence. Publish the comparison with:
+`source_sha256`, `entry`, `machine` and `build_profile`; retain exact immutable
+compiler paths and build receipts with that evidence. Publish the comparison:
 
 ```sh
 node Tools/perf/jetc-profile/startup.mjs /path/to/pair /path/to/new/receipt.json
@@ -93,11 +100,17 @@ node Tools/perf/jetc-profile/startup.mjs /path/to/pair /path/to/new/receipt.json
 The comparator requires complete AOT receipts with no reports, identical actual
 project inputs and byte-identical emitted artifacts. Receipt `source_bytes`
 counts emitted Rust bytes, not the input closure. Every median must strictly
-win: process wall time, compile
-trace duration and the interval from compile start to the first `main` parse
-span. The latter includes startup/load work before user-source parsing; it is
-not an off-CPU or lock-contention measurement. Losses, missing evidence or
-identity/output drift keep the cell open. Unit tests are in
+win: process wall time, compile trace duration and the interval from compile
+start to the selected source entry's parse span. Trace labels use the canonical
+loader's relative source path, not a literal `main` or `main.jet`. The canonical
+trace reader accepts the producer's open-array, object/comma-per-line format;
+completed evidence rejects malformed/truncated events, missing or ambiguous
+entry spans, unbalanced scopes and mismatched threads. The pre-parse interval
+includes startup/load work, not an off-CPU or lock-contention measurement.
+Losses, missing evidence or identity/output drift keep the cell open.
+This startup cell does not replace cold frontend acceptance on the same pinned
+30k fixture and real compiler sources; neither warm-cache nor removed emission
+work earns frontend speed credit. Unit tests are in
 `Tools/perf/jetc-profile/startup.test.mjs`; the actual Source `TaskRoots.jet`
 fixture separately receives the canonical codec's actual projected program,
 compares all registered handle shapes with the evaluator's full program/index,
