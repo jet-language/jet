@@ -848,9 +848,9 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
                     Err(error) => Ok(CtValue::failed(Box::new(error))),
                 }
             } else {
-                Ok(crate::Comptime::json_render_result_for_tir(
-                    crate::Comptime::EncodingLite::json_canonical(v),
-                ))
+                let text = crate::Comptime::EncodingLite::json_canonical(v)
+                    .map_err(|error| unsupported(&error.reason, span))?;
+                Ok(CtValue::Str(text))
             }
         }
         ("core.encoding.json", "events") => Ok(CtValue::Str(
