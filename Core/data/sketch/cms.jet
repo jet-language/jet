@@ -1,9 +1,9 @@
 // The shipped width-256/depth-4 count-min sketch. Seeded FNV hashing and
-// unit increments live in Jet; shared storage retains native alias semantics.
+// unit increments live in Jet; cloning copies the counter value independently.
 use core.data.sketch as sketch
 
 pub struct CountMinSketch {
-    counters: Shared<[Int]>
+    counters: [Int]
 
     impl Display {
         fn display(self) -> String { "CountMinSketch" }
@@ -16,24 +16,22 @@ impl CountMinSketch {
     pub fn new() -> CountMinSketch Never! {
         counters := [Int]{}
         loop _ in 0..<1024 -> &counters.push(0)
-        CountMinSketch{counters: shared counters}
+        CountMinSketch{counters: counters}
     }
 
-    pub fn add(self, key: String) Never! {
+    pub fn add(&self, key: String) Never! {
         (first, second) :: hashes(key)
-        guard := self.counters.guard_edit()
         loop row in 0..<4 {
             index :: counter_index(first, second, row)
-            if guard.value[index] < 4294967295 -> guard.value[index] = guard.value[index] + 1
+            if self.counters[index] < 4294967295 -> self.counters[index] = self.counters[index] + 1
         }
     }
 
     pub fn count(self, key: String) -> Int Never! {
         (first, second) :: hashes(key)
-        guard :: self.counters.guard_read()
-        count := guard.value[counter_index(first, second, 0)]
+        count := self.counters[counter_index(first, second, 0)]
         loop row in 1..<4 {
-            value :: guard.value[counter_index(first, second, row)]
+            value :: self.counters[counter_index(first, second, row)]
             if value < count -> count = value
         }
         count
@@ -51,27 +49,23 @@ fn counter_index(first: U64, second: U64, row: Int) -> Int Never! {
 }
 
 /// Merge by adding corresponding counters, as the existing source API does.
-/// Separate read scopes also permit merging two aliases of the same sketch.
 pub fn merge(a: CountMinSketch, b: CountMinSketch) -> CountMinSketch Never! {
-    counters := copy_counters(a)
-    guard :: b.counters.guard_read()
-    loop i in 0..<1024 -> counters[i] = counters[i] + guard.value[i]
-    CountMinSketch{counters: shared counters}
+    counters := ~a.counters
+    loop i in 0..<1024 -> counters[i] = counters[i] + b.counters[i]
+    CountMinSketch{counters: counters}
 }
 
-fn copy_counters(value: CountMinSketch) -> [Int] Never! {
-    guard :: value.counters.guard_read()
-    ~guard.value
-}
-
-#Test("CMS retains unit counts, aliases and additive merge") {
-    cms :: new()
-    alias :: ~cms
-    cms.add("hello")
-    alias.add("hello")
-    cms.add("world")
-    assert_eq(cms.count("hello"), 2)
+#Test("CMS retains unit counts, independent clones and additive merge") {
+    cms := new()
+    &cms.add("hello")
+    clone := ~cms
+    &clone.add("hello")
+    &clone.add("world")
+    assert_eq(cms.count("hello"), 1)
+    assert_eq(cms.count("world"), 0)
+    assert_eq(clone.count("hello"), 2)
     assert_eq(cms.count("absent"), 0)
-    combined :: merge(cms, alias)
-    assert_eq(combined.count("hello"), 4)
+    combined :: merge(cms, clone)
+    assert_eq(combined.count("hello"), 3)
+    assert_eq(combined.count("world"), 1)
 }

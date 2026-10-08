@@ -213,18 +213,18 @@ feed checks all artifact source files before reachability pruning, and the Jet
 feed checks the loader's exact generated Core source closure. An unnecessary
 `core.prelude` load is a test failure even if its functions would be pruned.
 
-`core.data.sketch.tdigest` has one source-owned `TDigest` carrier over `Shared`
-centroid storage. It retains the shipped unit-weight insertion/compression and
-step-quantile behavior, including empty and out-of-range queries; aliases share
-updates. The divergent weighted/interpolating source implementation is removed,
-not retained as an alternate mode.
+`core.data.sketch.tdigest` has one source-owned plain-value `TDigest` carrier
+with private centroid storage. It retains the shipped unit-weight insertion/
+compression and step-quantile behavior, including empty and out-of-range queries.
+Cloning produces an independent value. The divergent weighted/interpolating
+source implementation is removed, not retained as an alternate mode.
 HLL, count-min and reservoir sketches likewise have one source carrier under the
 shipped `HyperLogLog`, `CountMinSketch` and `ReservoirSampler` names. Jet owns
 the shared seeded FNV kernel, fixed sketch dimensions, unit counter saturation,
 reservoir minimum capacity, xorshift seed and replacement order. CMS `merge`
 keeps its existing source-level additive counter operation. The native sketch
 kernel and the divergent configurable/weighted/SplitMix source carriers are
-removed; copying a handle still shares updates.
+removed; cloning a sketch copies its independent value, not an aliasing handle.
 
 Audited embedded Core code may use `&items.__swap(first, second)` to move two
 List elements without cloning or closing either owner. Both indices are checked

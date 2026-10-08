@@ -25,7 +25,7 @@ pub enum CoreLeafKind {
 
 // BEGIN GENERATED CORE DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: f72115893038f8c380ec668327f4fbc55d2d35cd96570f92bd6978bde12b3162
+// Source SHA-256: 07432d6c1171ab1a6e3c95111d83800a5bae234d0b78a9fee754252413568c12
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreModuleDeclaration {
     pub module: &'static str,
@@ -887,6 +887,11 @@ pub const CORE_SOURCE_OWNED_TYPES: &[CoreSourceOwnedType] = &[
     CoreSourceOwnedType { path: "Core/data/data.jet", name: "DataLoaderStatus" },
     CoreSourceOwnedType { path: "Core/data/data.jet", name: "DataWatchStatus" },
     CoreSourceOwnedType { path: "Core/data/data.jet", name: "DataSummary" },
+    CoreSourceOwnedType { path: "Core/data/sketch/cms.jet", name: "CountMinSketch" },
+    CoreSourceOwnedType { path: "Core/data/sketch/hll.jet", name: "HyperLogLog" },
+    CoreSourceOwnedType { path: "Core/data/sketch/reservoir.jet", name: "ReservoirSampler" },
+    CoreSourceOwnedType { path: "Core/data/sketch/tdigest.jet", name: "Centroid" },
+    CoreSourceOwnedType { path: "Core/data/sketch/tdigest.jet", name: "TDigest" },
     CoreSourceOwnedType { path: "Core/db/db.jet", name: "DBValue" },
     CoreSourceOwnedType { path: "Core/db/db.jet", name: "DBError" },
     CoreSourceOwnedType { path: "Core/db/db.jet", name: "DBPoolReceipt" },

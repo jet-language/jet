@@ -1126,10 +1126,10 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   | `core.regex` | Kernel | The generated regex engine exposes one shared matching and validation kernel. |
   | `core.units` | Kernel | `Prelude/Core/Measurement.rs`; all tiers marshal `(value, uncertainty)`. |
   | `core.service` | Kernel | Typed tree declarations and the shipped mailbox, lifecycle, authenticated directory/routing, handoff, rollback, partition, reconciliation, and typed observability paths use `ServiceAuthority.rs` and `Services.rs`; structured export uses the existing `core.log` sink, and `ServicesLite` marshals the service calls. |
-  | `core.data.sketch.cms` | Jet | `Core/data/sketch/cms.jet` owns seeded hash selection, unit saturation and additive source merge over Shared storage. |
-  | `core.data.sketch.hll` | Jet | `Core/data/sketch/hll.jet` owns the 256-register estimator over Shared storage; seeded FNV lives in `Core/data/sketch.jet`. |
-  | `core.data.sketch.reservoir` | Jet | `Core/data/sketch/reservoir.jet` owns the shipped xorshift seed, Algorithm R and slot order over Shared storage. |
-  | `core.data.sketch.tdigest` | Jet | `Core/data/sketch/tdigest.jet` owns unit-weight insertion, compression and step quantiles over the canonical Shared storage primitive. |
+  | `core.data.sketch.cms` | Jet | `Core/data/sketch/cms.jet` owns seeded hash selection, unit saturation and additive source merge over plain value storage. |
+  | `core.data.sketch.hll` | Jet | `Core/data/sketch/hll.jet` owns the 256-register estimator over plain value storage; seeded FNV lives in `Core/data/sketch.jet`. |
+  | `core.data.sketch.reservoir` | Jet | `Core/data/sketch/reservoir.jet` owns the shipped xorshift seed, Algorithm R and slot order over plain value storage. |
+  | `core.data.sketch.tdigest` | Jet | `Core/data/sketch/tdigest.jet` owns unit-weight insertion, compression and step quantiles over plain value centroid storage. |
   | `core.compute.solve` | Kernel | `Prelude/CoreLib/Top/Solver.rs`; comptime marshals state. |
   | `core.sync` | Kernel | `Prelude/CoreLib/Top/Sync.rs`; `SyncLite` marshals values. |
   | `core.testing` | Mixed | Shared deterministic helpers call Prelude; harness and host work stay adapters. |
