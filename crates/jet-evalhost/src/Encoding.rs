@@ -96,7 +96,9 @@ pub(crate) mod json_rt {
         Cancelled(IOContext),
         Closed(IOContext),
         Protocol(IOContext),
-        Other(IOContext)
+        Other(IOContext),
+        AlreadyExists(IOContext),
+        Unsupported(IOContext)
     }
 
     #[allow(unused_imports)]
