@@ -2006,3 +2006,32 @@ with zero length queries size. FileHandles.rs:988–1031's absent/unsupported
 mapping, allocation and ERANGE retry remain source policy. Descriptor numbers
 are borrowed facts: source retains the directory until the consuming leaf
 duplicates it; they are not independent owned handles.
+
+### Native shared process pipe holder
+
+`HostPipe.jet` owns `Pipe24`: non-atomic reference count at 0, RefCell mutable
+borrow state at 8, and an owned reader FD72 pointer at 16 (`0` means `None`).
+The source facts are `CommonTypes.rs:162–165`'s
+`Rc<RefCell<Option<BufReader<ProcessReader>>>>` and `Process.rs:3325–3343`'s
+shared mutable buffered position. Clone returns the same holder and increments
+its count; only the last drop releases the FD72 and frees the holder. The FD
+is taken from `jet_process_take_stream_raw`, not borrowed from or retained
+through Child. Shared close takes the optional reader, so every clone sees EOF.
+No Rust Box/Rc/RefCell offset and no independently duplicated fd is involved.
+
+The four `jet_rt_handle_{clone,drop}_Process{Stdout,Stderr}Stream` exports use
+the canonical handle symbol convention. `jet_process_stream_line_bytes_raw`
+borrows the holder and returns `Result<[U8], IOError>` as a native tag plus
+owned compact data/length or an owned error. It shares FD72's refill buffer,
+includes LF, preserves malformed UTF-8 and bare CR, and retries Interrupted
+as `BufRead::read_until` does. Checked Core `__stdout_next_line` and
+`__stderr_next_line` own empty-byte EOF, UTF-8 decoding and the one-LF/one-CR
+terminator policy. No fixed host next-line iterator substitutes for them.
+
+A conflicting mutable borrow panics with `RefCell already borrowed`, matching
+the seed's observed rustc 1.97.1 commit `8bab26f4f` and that commit's
+`library/core/src/cell.rs:902,912–917`. Its trap path does not allocate.
+`Tests/process-pipe.c` plants real-descriptor, shared-refill, interleaved-clone,
+shared-close, actual comptime-stop release and signal-reentrant borrow
+witnesses. Execution and allocation-ledger-zero remain unexercised; the latter
+requires the ProgramAllocator counting/facts provider, not a fake allocator.
