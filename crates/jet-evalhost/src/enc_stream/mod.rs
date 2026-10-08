@@ -70,6 +70,11 @@ mod file_stream {
     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/FileStream.rs");
 }
 
+// #4821 private physical seed shared with AOT. No crypto policy lives here.
+pub(crate) mod crypto_file_io {
+    include!("../../../jet-codegen/src/Prelude/CoreLib/Top/CryptoFileIo.rs");
+}
+
 /// Canonical stream runtime (jet_std types + EncodingStream algorithm).
 #[allow(unused_imports, unused_variables, clippy::all)]
 pub(crate) mod runtime {
