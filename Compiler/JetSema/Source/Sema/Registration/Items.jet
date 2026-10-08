@@ -5,6 +5,7 @@
 // defaults remain AST references keyed by FunctionDefaultRef.
 use jet_foundation.[
     AccessConvention,
+    CORE_SOURCE_OWNED_ROWS,
     CLICommandBinding,
     CallContractRow,
     CallablePolicy,
@@ -411,6 +412,7 @@ pub struct SemaRegistrationModuleInput {
     pub package_identity: String
     pub module_identity: String
     pub module_name: String
+    pub core_source_alias: String
     pub module_path: String
     pub source_file: String
     pub source_segments: [SemaSourceSegment]
@@ -439,6 +441,7 @@ pub struct SemaRegistrationModule {
     pub package_identity: String
     pub module_identity: String
     pub module_name: String
+    pub core_source_alias: String
     pub module_path: String
     pub source_file: String
     pub source_segments: [SemaSourceSegment]
@@ -1693,6 +1696,9 @@ fn sema_registration_impl(module_row: SemaRegistrationModule, definition: ImplDe
             target_identity = type_identity(target_type)
             target_identity_key = "{module_row.module_identity}:{type_identity_key(target_type)}"
         }
+        if sema_registration_source_owns_impl(owner_row, definition.type_name) {
+            target_module_identity = Val(owner_row.module_identity)
+        }
     }
     trait_symbol := Symbol?{None}
     trait_identity := TypeIdentity?{None}
@@ -1765,6 +1771,19 @@ fn sema_registration_add_impl(module_row: &SemaRegistrationModule, item: Item, d
 
 fn sema_registration_unknown_impl_target(definition: ImplDef) -> Diagnostic {
     sema_error("E0301", definition.type_span, "the impl target `{definition.type_name}` is not a registered type", "an implementation needs one nominal declaration in the resolved module graph", "declare or import the target type before its impl")
+}
+
+// Opaque impl ownership is metadata, not a nominal declaration or public export.
+pub fn sema_registration_source_owns_impl(module_row: SemaRegistrationModule, name: String) -> Bool Never! {
+    if !module_row.module_identity.starts_with("<corelib>/") -> return false
+    loop row in CORE_SOURCE_OWNED_ROWS {
+        if row.module_name != module_row.module_name || row.alias != module_row.core_source_alias || module_row.source_file != "<corelib>/{row.path}" -> next
+        if !sema_reserved_type_name(name) && !core_module_has_type(row.module_name, name) -> next
+        loop owner in row.impl_types {
+            if owner == name -> return true
+        }
+    }
+    false
 }
 
 // D-OPMIX1 (Rust `opmix_allows_builtin_impl`): an operator hook on a built-in
@@ -1896,6 +1915,7 @@ fn sema_registration_prepare_module_row(input: SemaRegistrationModuleInput, temp
         package_identity: input.package_identity,
         module_identity: input.module_identity,
         module_name: input.module_name,
+        core_source_alias: input.core_source_alias,
         module_path: input.module_path,
         source_file: input.source_file,
         source_segments: input.source_segments,
