@@ -3255,6 +3255,7 @@ mod core_native_projection_tests {
 
     #[test]
     fn nominal_ingress_rejects_duplicate_identity_but_not_shared_leaf_names() {
+        jet_foundation::CompilerStack::run_on_compiler_stack(|| {
         let bundle = crate::Codegen::TIR::tests::checked_bundle(
             r#"
 module left { pub struct Item { pub value: Int } }
@@ -3335,6 +3336,7 @@ fn run() {
         }))
         .expect_err("raw ingress must reject a duplicate type key with a distinct ID");
         assert!(failure.downcast_ref::<String>().unwrap().contains("type definition key"));
+        });
     }
 
     #[test]
