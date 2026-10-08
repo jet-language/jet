@@ -34,7 +34,10 @@ fn run() {
         pack_roots_defined(c, name, 1)
     }
     pack_roots_defined(c, "jet_rt_fixture_weak", 2)
-    private_names :: [String]{"pack_private_helper", "jet_pack_hidden_helper", "_Rpack_private_helper"}
+    // GNU as calls the section directly; its unused local FUNC name is optional.
+    // The ELF consumer checks the helper's distinct result, not merely its label.
+    if pack_roots_symbol(c, "pack_private_helper") >= 0 -> pack_roots_defined(c, "pack_private_helper", 0)
+    private_names :: [String]{"pack_named_local_helper", "jet_pack_hidden_helper", "_Rpack_private_helper"}
     loop name in private_names {
         pack_roots_defined(c, name, 0)
     }
