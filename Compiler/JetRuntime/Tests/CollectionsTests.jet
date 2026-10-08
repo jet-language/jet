@@ -558,6 +558,160 @@ fn coll_test_counter() {
     jet_rt_free(snapshot, I64{64}, I64{8})
 }
 
+fn coll_test_chain() {
+    snapshot :: jet_rt_alloc(I64{64}, I64{8})
+    width := I64{32}
+    at := I64{0}
+    loop at < (I64{8}) {
+        trap_store(snapshot + at * I64{8}, coll_test_live(width))
+        width *= I64{2}
+        at += I64{1}
+    }
+    a :: coll_test_short_text(I64{97}, I64{1})
+    b :: coll_test_short_text(I64{98}, I64{1})
+    x :: coll_test_short_text(I64{120}, I64{1})
+    y :: coll_test_short_text(I64{121}, I64{1})
+    nul :: coll_test_short_text(I64{6422625}, I64{3})
+    keys :: jet_rt_alloc(I64{24}, I64{8})
+    values :: jet_rt_alloc(I64{16}, I64{8})
+    out :: jet_rt_alloc(I64{8}, I64{8})
+    trap_store(keys, a)
+    trap_store(keys + I64{8}, a)
+    trap_store(keys + I64{16}, b)
+    trap_store(values, x)
+    trap_store(values + I64{8}, y)
+    empty :: jet_coll_chain()
+    trap_store(out, I64{-1})
+    coll_test_require(!jet_coll_chain_contains(empty, a) && jet_coll_chain_get(empty, a, out) == I64{0} && trap_word(out) == I64{-1})
+    empty_clone :: jet_rt_handle_clone_JetChain(empty)
+    empty_render :: jet_rt_handle_display_JetChain(empty_clone)
+    expected :: jet_rt_alloc(I64{56}, I64{8})
+    trap_store(expected, I64{7020121633308371011})
+    trap_store(expected + I64{8}, I64{6727005903825036665})
+    trap_store(expected + I64{16}, I64{125})
+    coll_test_require(rt_text_len(empty_render) == I64{17})
+    at = I64{0}
+    loop at < (I64{17}) {
+        coll_test_require(trap_byte(rt_text_data(empty_render) + at) == trap_byte(expected + at))
+        at += I64{1}
+    }
+    jet_rt_string_drop(empty_render)
+    one :: jet_coll_chain_push(empty, keys, I64{2}, values, I64{2})
+    coll_test_require(jet_coll_chain_get(one, a, out) == I64{1})
+    first :: trap_word(out)
+    coll_test_require(jet_rt_string_eq(first, x))
+    jet_rt_string_drop(first)
+    coll_test_require(!jet_coll_chain_contains(one, b))
+    layer :: trap_word(one + I64{16})
+    layer_clone :: jet_rt_handle_clone_JetLayer(layer)
+    chain_clone :: jet_rt_handle_clone_JetChain(one)
+    coll_test_require(layer_clone != layer && trap_word(layer_clone + I64{16}) != trap_word(layer + I64{16}))
+    trap_store(expected, I64{7308070551597703500})
+    trap_store(expected + I64{8}, I64{2318334952199582585})
+    trap_store(expected + I64{16}, I64{8461244959896132961})
+    trap_store(expected + I64{24}, I64{2318360240967021413})
+    trap_store(expected + I64{32}, I64{8215929})
+    mode := I64{0}
+    loop mode < (I64{3}) {
+        text :: if (mode == I64{0}) -> jet_rt_handle_display_JetLayer(layer_clone) else if (mode == I64{1}) -> jet_rt_handle_show_JetLayer(layer_clone) else -> jet_rt_handle_debug_JetLayer(layer_clone)
+        coll_test_require(rt_text_len(text) == I64{35})
+        at = I64{0}
+        loop at < (I64{35}) {
+            coll_test_require(trap_byte(rt_text_data(text) + at) == trap_byte(expected + at))
+            at += I64{1}
+        }
+        jet_rt_string_drop(text)
+        mode += I64{1}
+    }
+    trap_store(expected, I64{7020121633308371011})
+    trap_store(expected + I64{8}, I64{5502026805180261753})
+    trap_store(expected + I64{16}, I64{8747516029181458785})
+    trap_store(expected + I64{24}, I64{6998642617586039411})
+    trap_store(expected + I64{32}, I64{7310868735955315805})
+    trap_store(expected + I64{40}, I64{8728024973280557683})
+    trap_store(expected + I64{48}, I64{2103278941})
+    mode = I64{0}
+    loop mode < (I64{3}) {
+        text :: if (mode == I64{0}) -> jet_rt_handle_display_JetChain(chain_clone) else if (mode == I64{1}) -> jet_rt_handle_show_JetChain(chain_clone) else -> jet_rt_handle_debug_JetChain(chain_clone)
+        coll_test_require(rt_text_len(text) == I64{52})
+        at = I64{0}
+        loop at < (I64{52}) {
+            coll_test_require(trap_byte(rt_text_data(text) + at) == trap_byte(expected + at))
+            at += I64{1}
+        }
+        jet_rt_string_drop(text)
+        mode += I64{1}
+    }
+    mismatch :: jet_coll_chain_push(one, keys, I64{3}, values, I64{2})
+    mismatch_layer :: trap_word(mismatch + I64{16})
+    coll_test_require(trap_word(mismatch_layer) == I64{3} && trap_word(mismatch_layer + I64{24}) == I64{2})
+    coll_test_require(jet_coll_chain_contains(mismatch, a))
+    extra :: jet_coll_chain_push(one, keys, I64{1}, values, I64{2})
+    coll_test_require(trap_word(trap_word(extra + I64{16}) + I64{24}) == I64{2})
+    trap_store(values, y)
+    override :: jet_coll_chain_push(one, keys, I64{1}, values, I64{1})
+    coll_test_require(jet_coll_chain_get(override, a, out) == I64{1})
+    preferred :: trap_word(out)
+    coll_test_require(jet_rt_string_eq(preferred, y))
+    jet_rt_string_drop(preferred)
+    skipped :: jet_coll_chain_push(override, I64{0}, I64{0}, I64{0}, I64{0})
+    coll_test_require(jet_coll_chain_get(skipped, a, out) == I64{1})
+    survivor :: trap_word(out)
+    trap_store(keys, nul)
+    trap_store(values, nul)
+    binary :: jet_coll_chain_push(one, keys, I64{1}, values, I64{1})
+    coll_test_require(jet_coll_chain_get(binary, nul, out) == I64{1})
+    binary_survivor :: trap_word(out)
+    jet_rt_handle_drop_JetChain(binary)
+    jet_rt_handle_drop_JetChain(skipped)
+    jet_rt_handle_drop_JetChain(override)
+    jet_rt_handle_drop_JetChain(extra)
+    jet_rt_handle_drop_JetChain(mismatch)
+    jet_rt_handle_drop_JetChain(one)
+    jet_rt_handle_drop_JetChain(empty)
+    jet_rt_handle_drop_JetChain(empty_clone)
+    jet_rt_string_drop(a)
+    jet_rt_string_drop(b)
+    jet_rt_string_drop(x)
+    jet_rt_string_drop(y)
+    jet_rt_string_drop(nul)
+    coll_test_require(rt_text_len(survivor) == I64{1} && trap_byte(rt_text_data(survivor)) == I64{121})
+    coll_test_require(rt_text_len(binary_survivor) == I64{3} && trap_byte(rt_text_data(binary_survivor) + I64{1}) == I64{0})
+    coll_test_require(trap_word(layer_clone) == I64{2} && trap_word(chain_clone) == I64{1})
+    jet_rt_string_drop(survivor)
+    jet_rt_string_drop(binary_survivor)
+    jet_rt_handle_drop_JetLayer(layer_clone)
+    jet_rt_handle_drop_JetChain(chain_clone)
+    jet_rt_handle_drop_JetLayer(I64{0})
+    jet_rt_handle_drop_JetChain(I64{0})
+    jet_rt_free(expected, I64{56}, I64{8})
+    jet_rt_free(keys, I64{24}, I64{8})
+    jet_rt_free(values, I64{16}, I64{8})
+    jet_rt_free(out, I64{8}, I64{8})
+    width = I64{32}
+    at = I64{0}
+    loop at < (I64{8}) {
+        coll_test_require(coll_test_live(width) == trap_word(snapshot + at * I64{8}))
+        width *= I64{2}
+        at += I64{1}
+    }
+    jet_rt_free(snapshot, I64{64}, I64{8})
+}
+
+fn coll_test_chain_bounds_stop(contains: Bool) {
+    jet_rt_alloc_init()
+    key :: coll_test_short_text(I64{97}, I64{1})
+    input :: jet_rt_alloc(I64{8}, I64{8})
+    out :: jet_rt_alloc(I64{8}, I64{8})
+    trap_store(input, key)
+    chain :: jet_coll_chain_push(jet_coll_chain(), input, I64{1}, I64{0}, I64{0})
+    if contains -> _ := jet_coll_chain_contains(chain, key) else {
+        _ := jet_coll_chain_get(chain, key, out)
+    }
+    // Returning from the required checked bounds panic is a witness failure.
+    coll_test_require(false)
+}
+
 fn collections_tests() {
     jet_rt_alloc_init()
     coll_test_bytes()
@@ -566,6 +720,7 @@ fn collections_tests() {
     coll_test_i64_lists()
     coll_test_ordered_map()
     coll_test_counter()
+    coll_test_chain()
     // Fresh ceil(5/2) differs from the remaining floor(4/2) after one pull.
     stepped :: jet_rt_native_iter_step_by(coll_test_source(), I64{2})
     coll_test_require(iter_exact_length(stepped) == I64{3})

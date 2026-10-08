@@ -1572,6 +1572,24 @@ exercise all routes, three exact render strings, wide boxed return ownership,
 independent clones and per-class balance. Ambient dispatcher rows remain
 (`Core.jet:504-517`); these are live ABI replacements, not row retirements.
 
+Chain's four routes and the Chain/Layer clone/drop/rendering rails own a native
+list of inline paired Layer headers. Push deep-copies the new front layer and
+all old layers once; get returns an independent string from the first matching
+key in the first matching layer. Contains performs the same checked borrowed
+lookup without allocating a discarded get result. Chain rendering writes
+layers directly into one builder rather than allocating intermediate strings.
+Raw witnesses cover duplicate keys, front precedence, empty layers, unequal
+input lengths, NUL keys/values, independent clone/output ownership, three exact
+rendering modes and allocator-class balance. Separate get/contains witnesses
+require the checked bounds stop for a matched key beyond the value array.
+
+The native ABI follows the Rust provider (`Core/Collections.rs:3524-3555`):
+push retains both complete input arrays, and a matched unpaired key panics.
+This differs from the source Core `layer_from` normalization
+(`Core/collections/collections.jet:593-605`) which truncates to the smaller
+length. The native provider preserves the existing checked ABI rather than
+changing Core emission policy or silently normalizing its input.
+
 Lazy cursor initialization and advancement may invoke user callbacks. Both
 are can-stop MIR operations: their results are usable only on the immediately
 following Propagate poll's resume edge. Prefetched HasNext/Value operations
