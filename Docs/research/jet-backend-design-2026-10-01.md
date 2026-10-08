@@ -1979,3 +1979,26 @@ conversion's `native Int argument exceeds host range` message at
 syntax receipts do not admit native caller layouts or prove execution:
 source-root/MIR ownership and the generator's provider ABI validation remain
 required before pack cutover.
+
+### Memo statistics, mail limits and watcher C ownership
+
+`MemoABI.jet`, `MailLimitsABI.jet` and `WatchABI.jet` define native layouts,
+not Rust layouts. Their runtime providers preserve the field types in
+`Prelude/Memo.rs:74-80`, `CoreLib/Email.rs:156-164` and
+`CoreLib/JetStd/CommonTypes.rs:640-665`. The C boundary borrows exact Int
+arguments, converts to raw i64 before allocation, and returns freshly owned
+exact Int getters (`CAbiRoutes.rs:10703-10728,11668-11705,12158-12195`).
+Borrowed text is cloned on construction, getters and handle clone; drop
+releases each owned text and carrier. Watch enums are native ordinal words;
+event construction range-stops invalid domain/kind ordinals. WatchDomain's
+separate generated glue is not duplicated by this provider.
+
+Equality follows the Rust derives in field order. WatchEvent's custom show
+(`CommonTypes.rs:6772-6777`) deliberately omits pid/port and emits unquoted,
+unescaped path/detail, unlike a derived debug representation. It uses the
+existing text builder. `RecordGlueWitness.c` links the real Jet object with
+`--wrap=jet_rt_free`, asserts interception, clone/getter independence,
+exact-once destruction, per-field inequality and enum/render goldens. Its
+invalid-ordinal and exact-Int overflow modes exercise the established stops.
+Native execution remains unexercised until composed source-root ownership
+admission and generator ABI validation; syntax checks alone do not prove it.
