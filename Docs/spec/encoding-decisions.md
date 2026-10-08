@@ -1308,3 +1308,24 @@ copy. CSV syntax and header/SQL-field validation precede typed decode errors;
 successful typed rows reuse `rows.query(SQL)`, never a second SQL engine.
 The private plain `__QueryRead` carrier keeps the path-based Ambient route,
 so the input policy does not introduce an interpreter-only file-handle gap.
+
+CBOR file streams retain the existing `CBORReader`/`CBORWriter` names,
+consuming file factories, optional pull events and IO method effects.
+The private `cbor_stream.jet` part of `core.encoding` owns the native
+`EncodingStream.rs` reader policy (`raw`, `arg`, `payload`, `string`,
+`retain_key`, `close_event`, `next_event`) and writer policy (`scalar`,
+`accept`, `write_key`, `close_array`, `close_object`, `write_event`,
+`flush_output`, `finish_output`). Definite and indefinite input, chunked
+strings, duplicate keys, preferred float widths, retained-item/heap bounds,
+error paths and sticky terminal state stay in Jet. Only the already
+registered byte read, byte write, flush, UTF-8 and allocation leaves remain.
+Whole-value float kernels are shared, not reimplemented.
+
+The writer buffers nested encoded items and sorts encoded map keys in
+place before committing one definite-length root. `flush` only flushes the
+file; it does not close an unfinished container. `finish` requires one
+complete root, is idempotent after success, and preserves the first failure.
+Known-answer source tests cover definite/indefinite nesting, chunked text,
+all float widths, item/total bounds, map order, and flush/finish behavior.
+The checked shared allocation helper distinguishes heap-ceiling failure
+from allocator refusal; existing Bool callers still map either to false.

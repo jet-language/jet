@@ -72,31 +72,40 @@ pub fn budget(limits: EncodingLimits) -> AllocationBudget Never! {
     AllocationBudget{state: shared AllocationState{used: 0, limit: heap_ceiling(limits)}}
 }
 
+pub enum __ReserveFailure {
+    Heap
+    Allocation
+}
+
 pub fn reserve<T>(allocation: AllocationBudget, values: &[T], additional: Int) -> Bool Never! {
+    __reserve_checked<T>(allocation, &values, additional) ?? return false
+    true
+}
+
+pub fn __reserve_checked<T>(allocation: AllocationBudget, values: &[T], additional: Int) __ReserveFailure! {
     old :: mem.__list_capacity<T>(values) * mem.__type_size<T>()
     requested :: (values.len() + additional) * mem.__type_size<T>()
-    if additional == 0 || requested <= old -> return true
+    if additional == 0 || requested <= old -> return
     growth :: requested - old
     if !allocation.charge(growth) {
         values = [T]{}
         allocation.release(old)
-        return false
+        return Err(.Heap)
     }
     if !mem.__list_reserve_exact<T>(&values, additional) {
         allocation.release(growth)
         actual :: mem.__list_capacity<T>(values) * mem.__type_size<T>()
         values = [T]{}
         allocation.release(actual)
-        return false
+        return Err(.Allocation)
     }
     actual :: mem.__list_capacity<T>(values) * mem.__type_size<T>()
     if actual < old || (actual > requested && !allocation.charge(actual - requested)) {
         values = [T]{}
         allocation.release(requested)
-        return false
+        return Err(.Heap)
     }
     if actual < requested -> allocation.release(requested - actual)
-    true
 }
 
 struct FoldBudget {

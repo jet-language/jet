@@ -1482,7 +1482,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: fd5dbb594eaacac375aa8ebb2a58ed928ec9e5fa12e4cdc7cb9c83c18076c095
+// Source SHA-256: 3e5b31e5dac459534f8a48c8786f23a98a3ee4af99e8cc7896cc8ff0b706b521
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -2211,8 +2211,8 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.encoding.json", "writer", "jet_enc_json_writer", true, &[false, true, true]),
     CoreCallRecord::new("core.encoding.jsonl", "reader", "jet_enc_jsonl_reader", true, &[false, true]),
     CoreCallRecord::new("core.encoding.jsonl", "writer", "jet_enc_jsonl_writer", true, &[false, true]),
-    CoreCallRecord::new("core.encoding.cbor", "reader", "jet_enc_cbor_reader", true, &[false, true]),
-    CoreCallRecord::new("core.encoding.cbor", "writer", "jet_enc_cbor_writer", true, &[false, true]),
+    CoreCallRecord::source_owned("core.encoding.cbor", "reader", &[false, true]),
+    CoreCallRecord::source_owned("core.encoding.cbor", "writer", &[false, true]),
     CoreCallRecord::new("core.encoding.xml", "reader", "jet_enc_xml_reader", true, &[false, true, true]),
     CoreCallRecord::new("core.crypto.vault", "prepare_rotate", "jet_vault_prepare_rotate_impl", false, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).without_direct_aot(),
     CoreCallRecord::new("core.crypto.vault", "authorize_write", "jet_vault_authorize_write_impl", false, &[true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).without_direct_aot(),

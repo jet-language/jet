@@ -1,8 +1,35 @@
-// Whole-value CBOR encoding. Typed Decode remains a compiler intrinsic.
-use core.encoding.[DataTree]
+use core as core
+// Whole-value and bounded streaming CBOR. Typed Decode remains an intrinsic.
+use core.encoding.[DataTree, DataEvent, EncodingError, EncodingLimits]
 use __core_encoding_stream as stream
 use core.math as math
 use __core_encoding_cbor_parse as parser
+use __core_encoding_cbor_stream as codec
+use core.files.[FileReader, FileWriter]
+
+pub struct CBORReader {
+    input: codec.CBORPull
+
+    pub fn next(&self) -[IO]> DataEvent? EncodingError! { &self.input.next() }
+}
+
+pub struct CBORWriter {
+    output: codec.CBORPush
+
+    pub fn write(&self, event: ^DataEvent) EncodingError! -[IO]> { &self.output.write(^event) }
+    pub fn flush(&self) EncodingError! -[IO]> { &self.output.flush() }
+    pub fn finish(&self) EncodingError! -[IO]> { &self.output.finish() }
+}
+
+pub fn reader(input: ^FileReader, limits: EncodingLimits{EncodingLimits.safe()}) -[FS]> CBORReader EncodingError! {
+    source :: codec.reader(^input, limits) ?? return Err(err)
+    Ok(CBORReader{input: ^source})
+}
+
+pub fn writer(output: ^FileWriter, limits: EncodingLimits{EncodingLimits.safe()}) -[FS]> CBORWriter EncodingError! {
+    target :: codec.writer(^output, limits) ?? return Err(err)
+    Ok(CBORWriter{output: ^target})
+}
 
 #Equatable
 pub struct CBOROptions {
@@ -205,4 +232,82 @@ pub fn parse(bytes: [U8], options: CBOROptions{CBOROptions{max_depth: 256, max_i
     assert_eq(parse([U8]{249, 62, 0}), Ok(DataTree.Float(Float{1.5})))
     if parse([U8]{65, 0}) == .Err(error) -> assert(error.kind == .Unsupported) else -> panic("dynamic bytes accepted")
     if parse([U8]{1, 2}) == .Err(error) -> assert(error.kind == .TrailingData) else -> panic("trailing root accepted")
+}
+
+#Test("CBOR stream definite and indefinite containers and text chunks") {
+    dir :: core.files.temp_dir("jet-cbor-events") ?? panic("temp")
+    path :: "{dir.path}/events.cbor"
+    core.files.write_bytes(path, [U8]{159, 130, 1, 2, 191, 97, 107, 127, 97, 97, 97, 98, 255, 255, 255}) ?? panic("fixture")
+    input :: core.files.open(path) ?? panic("open")
+    source := reader(^input) ?? panic("reader")
+    expected :: [DataEvent]{.ArrayStart, .ArrayStart, .Int(1), .Int(2), .ArrayEnd, .ObjectStart, .Key("k"), .Text("ab"), .ObjectEnd, .ArrayEnd}
+    loop event in expected -> assert_eq(&source.next() ?? panic("next"), Val(event))
+    assert_eq(&source.next() ?? panic("eof"), None)
+    assert_eq(&source.next() ?? panic("repeat eof"), None)
+}
+
+#Test("CBOR stream reads all float widths and sticky item limit") {
+    dir :: core.files.temp_dir("jet-cbor-floats") ?? panic("temp")
+    path :: "{dir.path}/floats.cbor"
+    core.files.write_bytes(path, [U8]{131, 249, 62, 0, 250, 71, 195, 80, 0, 251, 63, 241, 153, 153, 153, 153, 153, 154}) ?? panic("fixture")
+    input :: core.files.open(path) ?? panic("open")
+    source := reader(^input) ?? panic("reader")
+    assert_eq(&source.next() ?? panic("start"), Val(DataEvent.ArrayStart))
+    assert_eq(&source.next() ?? panic("half"), Val(DataEvent.Float(Float{1.5})))
+    assert_eq(&source.next() ?? panic("single"), Val(DataEvent.Float(Float{100000.0})))
+    assert_eq(&source.next() ?? panic("double"), Val(DataEvent.Float(Float{1.1})))
+    assert_eq(&source.next() ?? panic("end"), Val(DataEvent.ArrayEnd))
+    assert_eq(&source.next() ?? panic("eof"), None)
+    core.files.write_bytes(path, [U8]{98, 97, 98}) ?? panic("fixture")
+    limited_input :: core.files.open(path) ?? panic("open")
+    limits := EncodingLimits.safe()
+    limits.max_item_bytes = 1
+    limited := reader(^limited_input, limits) ?? panic("reader")
+    first := EncodingError?{None}
+    if &limited.next() == {
+        .Err(failure) -> {
+            assert_eq(failure.reason, "max_item_bytes 1 exceeded")
+            assert_eq(failure.byte_offset, 0)
+            first = Val(failure)
+        }
+        else -> panic("item limit must fail")
+    }
+    if &limited.next() == .Err(failure) -> assert_eq(Val(failure), first) else -> panic("failure must be sticky")
+}
+
+#Test("CBOR writer sorts encoded keys and flush does not complete a container") {
+    dir :: core.files.temp_dir("jet-cbor-write") ?? panic("temp")
+    path :: "{dir.path}/sorted.cbor"
+    output :: core.files.create(path) ?? panic("create")
+    sink := writer(^output) ?? panic("writer")
+    &sink.write(DataEvent.ObjectStart) ?? panic("object")
+    &sink.write(DataEvent.Key("aa")) ?? panic("key")
+    &sink.write(DataEvent.Int(1)) ?? panic("value")
+    &sink.flush() ?? panic("flush")
+    assert_eq(core.files.read_bytes(path) ?? panic("read"), [U8]{})
+    &sink.write(DataEvent.Key("b")) ?? panic("key")
+    &sink.write(DataEvent.Float(Float{1.5})) ?? panic("value")
+    &sink.write(DataEvent.ObjectEnd) ?? panic("end")
+    &sink.finish() ?? panic("finish")
+    &sink.finish() ?? panic("repeat finish")
+    assert_eq(core.files.read_bytes(path) ?? panic("read"), [U8]{162, 97, 98, 249, 62, 0, 98, 97, 97, 1})
+    if &sink.write(DataEvent.Null) == .Err(failure) -> assert_eq(failure.reason, "write called after finish") else -> panic("write after finish must fail")
+}
+
+#Test("CBOR writer incomplete finish is sticky and total limit is checked at root") {
+    dir :: core.files.temp_dir("jet-cbor-finish") ?? panic("temp")
+    path :: "{dir.path}/partial.cbor"
+    output :: core.files.create(path) ?? panic("create")
+    sink := writer(^output) ?? panic("writer")
+    &sink.write(DataEvent.ArrayStart) ?? panic("start")
+    &sink.flush() ?? panic("flush incomplete")
+    if &sink.finish() == .Err(failure) -> assert_eq(failure.reason, "finish requires one complete CBOR root") else -> panic("incomplete finish must fail")
+    if &sink.flush() == .Err(failure) -> assert_eq(failure.reason, "finish requires one complete CBOR root") else -> panic("flush must retain first failure")
+    limited_output :: core.files.create("{dir.path}/limit.cbor") ?? panic("create")
+    limits := EncodingLimits.safe()
+    limits.max_total_bytes = Val(1)
+    limited := writer(^limited_output, limits) ?? panic("writer")
+    &limited.write(DataEvent.ArrayStart) ?? panic("start")
+    &limited.write(DataEvent.Int(1)) ?? panic("item")
+    if &limited.write(DataEvent.ArrayEnd) == .Err(failure) -> assert_eq(failure.reason, "max_total_bytes 1 exceeded") else -> panic("root wire limit must fail")
 }
