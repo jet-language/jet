@@ -3046,6 +3046,11 @@ enter Jet source before reserved Core-only provider leaves. Public UI
 capability admission and the existing per-function Core effect rows remain
 unchanged. Lexical filesystem grants and accessibility metadata construction
 are Jet policy, not host facade calls.
+Terminal/GTK backend allocation, shortcut registration/dispatch, and host
+accessibility attach/project also enter their Jet public functions first.
+`attach` preserves its public `Unit !UIHostError` contract: Core discards the
+private provider's returned canonical node only on success and propagates
+the same typed host error on failure.
 
 ### `core.reactive` — explicit signals and dependency tracking
 

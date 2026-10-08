@@ -1942,7 +1942,7 @@ fn jet_ui_host_ambient_core_call(
                 ambient_shortcut_binding_value,
             ))
         })()),
-        ("core.ui.host.shortcuts", "register") => Some((|| {
+        ("core.ui.host.shortcuts", "__register") => Some((|| {
             ambient_expect_arity(&args, 1, "core.ui.host.shortcuts.register", span)?;
             let binding = ambient_shortcut_binding(&args[0], span)?;
             Ok(ambient_service_result(
@@ -1950,7 +1950,7 @@ fn jet_ui_host_ambient_core_call(
                 ambient_shortcut_binding_value,
             ))
         })()),
-        ("core.ui.host.shortcuts", "dispatch") => Some((|| {
+        ("core.ui.host.shortcuts", "__dispatch") => Some((|| {
             ambient_expect_arity(&args, 1, "core.ui.host.shortcuts.dispatch", span)?;
             let shortcut = ambient_shortcut(&args[0], span)?;
             Ok(ambient_service_result(
@@ -1958,7 +1958,7 @@ fn jet_ui_host_ambient_core_call(
                 ambient_shortcut_dispatch_value,
             ))
         })()),
-        ("core.ui.host.accessibility", "attach") => Some((|| {
+        ("core.ui.host.accessibility", "__attach") => Some((|| {
             ambient_expect_arity(&args, 2, "core.ui.host.accessibility.attach", span)?;
             let node = ambient_node(&args[0], span)?;
             let accessibility = ambient_accessibility(&args[1], span)?;
@@ -1967,7 +1967,7 @@ fn jet_ui_host_ambient_core_call(
                 ambient_node_value,
             ))
         })()),
-        ("core.ui.host.accessibility", "project") => Some((|| {
+        ("core.ui.host.accessibility", "__project") => Some((|| {
             ambient_expect_arity(&args, 2, "core.ui.host.accessibility.project", span)?;
             let node = ambient_node(&args[0], span)?;
             let node_id = ambient_node_id(&args[1], span)?;
