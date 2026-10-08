@@ -25,7 +25,7 @@ pub enum CoreLeafKind {
 
 // BEGIN GENERATED CORE DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 153214c5bc20b71c9f25478d428d5976a5e0d0affbba9df91ac985315d1960f6
+// Source SHA-256: a535bcfe74ab6d2e36ac2fa8b1e3e2d280221e52be843f9ed09b066bc4dc1a93
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreModuleDeclaration {
     pub module: &'static str,
@@ -257,7 +257,7 @@ const CORE_MODULE_18_TYPES: &[(&str, CoreLeafKind)] = &[("UUIDError", CoreLeafKi
 const CORE_MODULE_18_DEPENDENCIES: &[&str] = &["core.crypto"];
 
 const CORE_MODULE_19_MEMBERS: &[&str] = &["ExpiringSecret", "KeyRef", "KeyStatus", "KeyUnlock", "KeyWrapError", "MutationPlan", "Rotation", "VaultError", "VaultWrite", "WrappedImportPlan", "WrappedVaultKey", "authorize_wrapped_import", "authorize_write", "commit_generate", "commit_import_signing", "commit_import_wrapped", "commit_import_x25519", "commit_retire", "commit_revoke", "commit_rotate", "commit_store", "current", "export_to_passphrase", "export_to_recipients", "get", "load", "prepare_generate", "prepare_import_signing", "prepare_import_wrapped", "prepare_import_x25519", "prepare_retire", "prepare_revoke", "prepare_rotate", "prepare_store", "status", "versions", "PlanBits", "VaultRec", "__key_unlock_recipient", "__key_unlock_passphrase", "__wrapped_from_bytes", "__wrapped_bytes"];
-const CORE_MODULE_19_TYPES: &[(&str, CoreLeafKind)] = &[("ExpiringSecret", CoreLeafKind::Generic(1)), ("KeyRef", CoreLeafKind::Generic(1)), ("KeyStatus", CoreLeafKind::Enum(&["Current", "Retired", "Revoked"])), ("KeyUnlock", CoreLeafKind::Plain), ("KeyWrapError", CoreLeafKind::Plain), ("MutationPlan", CoreLeafKind::Generic(1)), ("Rotation", CoreLeafKind::Generic(1)), ("VaultError", CoreLeafKind::Enum(&["NotFound", "Revoked", "Unauthorized", "Corrupt"])), ("VaultWrite", CoreLeafKind::Generic(1)), ("WrappedImportPlan", CoreLeafKind::Generic(1)), ("WrappedVaultKey", CoreLeafKind::Plain), ("PlanBits", CoreLeafKind::Plain), ("VaultRec", CoreLeafKind::Plain)];
+const CORE_MODULE_19_TYPES: &[(&str, CoreLeafKind)] = &[("ExpiringSecret", CoreLeafKind::Generic(1)), ("KeyRef", CoreLeafKind::Generic(1)), ("KeyStatus", CoreLeafKind::Enum(&["Active", "Retired", "Revoked"])), ("KeyUnlock", CoreLeafKind::Plain), ("KeyWrapError", CoreLeafKind::Plain), ("MutationPlan", CoreLeafKind::Generic(1)), ("Rotation", CoreLeafKind::Generic(1)), ("VaultError", CoreLeafKind::Enum(&["InvalidName", "NotFound", "WrongType", "Revoked", "Locked", "AuthorityDenied", "Conflict", "UnsupportedProvider", "InvalidEncoding", "DurabilityUnknown", "Crypto", "IO", "Internal"])), ("VaultWrite", CoreLeafKind::Generic(1)), ("WrappedImportPlan", CoreLeafKind::Generic(1)), ("WrappedVaultKey", CoreLeafKind::Plain), ("PlanBits", CoreLeafKind::Plain), ("VaultRec", CoreLeafKind::Plain)];
 const CORE_MODULE_19_DEPENDENCIES: &[&str] = &["core.crypto"];
 
 const CORE_MODULE_20_MEMBERS: &[&str] = &["DataAuthority", "DataColumn", "DataError", "DataErrorKind", "DataFormat", "DataFreshness", "DataInvalidationCause", "DataLimits", "DataLineOptions", "DataLoader", "DataLoaderKind", "DataLoaderStatus", "DataPivotCell", "DataProvenance", "Query", "DataSchema", "DataSnapshot", "DataSnapshotIdentity", "DataSourceIdentity", "DataStatus", "DataStream", "DataTracked", "DataWatch", "DataWatchStatus", "Group", "JetDataPlotAccessibility", "JetDataPlotAggregate", "JetDataPlotAxis", "JetDataPlotBackend", "JetDataPlotCapability", "JetDataPlotChannel", "JetDataPlotColumn", "JetDataPlotDomain", "JetDataPlotEncoding", "JetDataPlotError", "JetDataPlotErrorKind", "JetDataPlotFacet", "JetDataPlotFacetKind", "JetDataPlotField", "JetDataPlotFilterOp", "JetDataPlotInspection", "JetDataPlotInteraction", "JetDataPlotLayer", "JetDataPlotLayout", "JetDataPlotLegend", "JetDataPlotLegendPosition", "JetDataPlotMark", "JetDataPlotPlan", "JetDataPlotProjection", "JetDataPlotRender", "JetDataPlotRenderFormat", "JetDataPlotScale", "JetDataPlotScaleKind", "JetDataPlotSchema", "JetDataPlotSelectedRow", "JetDataPlotSourceFacts", "JetDataPlotSupport", "JetDataPlotTransform", "JetDataPlotValue", "bar_svg", "bar_text", "count", "csv", "csv_reader", "database", "describe", "file", "file_member", "inner_join", "inspect", "inspect_json", "json", "json_reader", "left_join", "line_svg", "line_text", "load", "load_default", "max", "mean", "median", "min", "pivot_sum", "plot", "quantile", "query", "render", "require_bridge", "rolling_mean", "schema", "show", "snapshot", "status", "stddev", "sum", "svg", "text", "track", "url", "value", "variance", "DataSummary", "DataJoin", "JetDataPlot", "__host_path_is_file"];
@@ -882,6 +882,8 @@ pub const CORE_SOURCE_OWNED_TYPES: &[CoreSourceOwnedType] = &[
     CoreSourceOwnedType { path: "Core/compute/solve.jet", name: "LinearSolver" },
     CoreSourceOwnedType { path: "Core/crypto/vault.jet", name: "KeyUnlock" },
     CoreSourceOwnedType { path: "Core/crypto/vault.jet", name: "WrappedVaultKey" },
+    CoreSourceOwnedType { path: "Core/crypto/vault.jet", name: "VaultError" },
+    CoreSourceOwnedType { path: "Core/crypto/vault.jet", name: "KeyStatus" },
     CoreSourceOwnedType { path: "Core/data/data.jet", name: "DataError" },
     CoreSourceOwnedType { path: "Core/data/data.jet", name: "DataStatus" },
     CoreSourceOwnedType { path: "Core/data/data.jet", name: "DataLoaderStatus" },

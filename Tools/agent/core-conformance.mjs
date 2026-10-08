@@ -370,6 +370,8 @@ const FIXTURE_BINDINGS = new Map([
   ["core.crypto.verify", ["core/crypto/ct_ed25519.jet"]],
   ["core.crypto.expert.ed25519_sign", ["core/crypto/ct_ed25519.jet"]],
   ["core.crypto.expert.ed25519_verify_strict", ["core/crypto/ct_ed25519.jet"]],
+  ["core.crypto.vault.status", ["core/crypto/vault/error_identity.jet"]],
+  ["core.crypto.vault.prepare_import_signing", ["core/crypto/vault/guard_errors.jet"]],
   ["collection.Condition.notify_one", [
     "core/sync/condition_deadline.jet",
     "core/sync/condition_notify_all.jet",

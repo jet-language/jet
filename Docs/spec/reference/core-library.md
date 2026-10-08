@@ -1497,7 +1497,7 @@ fn provision() -[Secret, IO]> {
 | `get(name)` | `?String` | Read the separate untyped repository-secret value. |
 | `current<T>(name)` | `?KeyRef<T> !VaultError` | Return the active generation, if one exists. |
 | `versions<T>(name)` | `[KeyRef<T>] !VaultError` | Return generations in provider order. |
-| `load<T>(&key)` / `status<T>(&key)` | `T !VaultError` / `KeyStatus !VaultError` | Load an exact non-revoked key or inspect `Current`, `Retired`, or `Revoked`. |
+| `load<T>(&key)` / `status<T>(&key)` | `T !VaultError` / `KeyStatus !VaultError` | Load an exact Active or Retired key, or inspect `Active`, `Retired`, or `Revoked`. |
 | `prepare_generate<T>(name)` / `prepare_store<T>(name, ^key)` | `MutationPlan<T> !VaultError` | Prepare a typed mutation without publishing it. |
 | `prepare_import_signing` / `prepare_import_x25519` | typed plan `!VaultError` | Prepare a checked 32-byte signing or X25519 secret import. |
 | `prepare_rotate<T>(name)` | `MutationPlan<T> !VaultError` | Prepare a rotation for a named generation. |
@@ -1507,6 +1507,15 @@ fn provision() -[Secret, IO]> {
 | `export_to_recipients<T>(&key, recipients)` | `WrappedVaultKey !KeyWrapError` | Export a typed key for one to sixteen distinct X25519 recipients. |
 | `export_to_passphrase<T>(&key, &passphrase)` | `WrappedVaultKey !KeyWrapError` | Export a typed key under a bounded nominal Secret. |
 | `prepare_import_wrapped<T>` / `authorize_wrapped_import<T>` / `commit_import_wrapped<T>` | typed results | Bind, authorize, and commit a wrapped-key import. |
+
+`VaultError` is closed: `InvalidName`, `NotFound`, `WrongType`, `Revoked`,
+`Locked`, `AuthorityDenied`, `Conflict`, `UnsupportedProvider`,
+`InvalidEncoding`, `DurabilityUnknown`, `Crypto(CryptoError)`,
+`IO{operation: String, redacted_path: String}`, and `Internal{incident_id: String}`.
+Invalid names or reasons return `InvalidName` before provider access; raw key
+imports that are not exactly 32 bytes return `InvalidEncoding`. Missing or wrong
+identity and age-open failures return `Locked`. Error payloads never contain
+key or store bytes, identity material, raw OS prose, or foreign paths.
 
 Mutation plans, writes, and wrapped-import plans are one-use typed carriers.
 Provider authorization is required for every write; source, workspace settings,
