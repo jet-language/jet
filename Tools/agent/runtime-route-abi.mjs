@@ -2,6 +2,72 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
+// A concrete record application retains its declaration and ordered arguments.
+// Generic function monomorphization is separate; these helpers only instantiate
+// a declaration's stored field / variant types at a concrete ABI boundary.
+export function recordApplication(type) {
+  const match = /^((?:[A-Za-z_]\w*::)*(?:[A-Z]\w*|__jet_\w+))(?:<([\s\S]*)>)?$/.exec(type.replace(/\s+/g, ""));
+  if (!match) return null;
+  if (match[2] === undefined) return { base: match[1], args: [] };
+  // Nested declaration arguments are not yet representable in the route key.
+  // Reject them explicitly rather than confusing their commas with parameters.
+  if (/[<>()[\]]/.test(match[2])) throw new Error(`generic record ${type}: nested or structural arguments are unsupported`);
+  const args = match[2].split(",");
+  if (args.some((arg) => !arg)) throw new Error(`generic record ${type}: empty argument`);
+  return { base: match[1], args };
+}
+
+export function recordBindings(header, args, type) {
+  const match = /^(?:struct|enum)\s+[A-Za-z_]\w*\s*(?:<([^<>]*)>)?/.exec(header);
+  if (!match) throw new Error(`generic record ${type}: unparsed declaration`);
+  const params = match[1] === undefined ? [] : match[1].split(",").map((param) => {
+    const parsed = /^\s*([A-Za-z_]\w*)(?:\s*:\s*[^=]+)?\s*$/.exec(param);
+    if (!parsed) throw new Error(`generic record ${type}: unsupported declaration parameter ${param.trim()}`);
+    return parsed[1];
+  });
+  if (params.length !== args.length) throw new Error(`generic record ${type}: expected ${params.length} declaration arguments, got ${args.length}`);
+  if (new Set(params).size !== params.length) throw new Error(`generic record ${type}: duplicate declaration parameter`);
+  return new Map(params.map((param, index) => [param, args[index]]));
+}
+
+export function substituteRecordType(type, bindings) {
+  // Replace complete type identifiers, never substrings of a field/type name.
+  return type.replace(/\b[A-Za-z_]\w*\b/g, (name) => bindings.get(name) ?? name);
+}
+
+export function recordInstanceName(base, args) {
+  // Injective argument encoding: qualified names and underscores cannot alias
+  // another argument list. Argument-free names are unchanged.
+  return base.split("::").pop() + args.map((arg) => `__${Buffer.from(arg).toString("hex")}`).join("");
+}
+// Syntax::generated_path (and Jet Emit/Hardware.jet) gives a source nominal
+// one injective Rust identity. A caller still requires its actual declaration.
+export function generatedRecordPath(name) {
+  const escapes = new Map([[95, "u"], [46, "d"], [58, "c"], [47, "s"], [92, "b"], [45, "h"]]);
+  let out = "__jet_";
+  for (const byte of Buffer.from(name)) {
+    out += byte >= 48 && byte <= 57 || byte >= 65 && byte <= 90 || byte >= 97 && byte <= 122
+      ? String.fromCharCode(byte) : `_${escapes.get(byte) ?? `x${byte.toString(16).padStart(2, "0")}`}`;
+  }
+  return out;
+}
+
+export function recordApplicationsIn(signature, base) {
+  const applications = [];
+  const pattern = new RegExp(`\\b${base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*<`, "g");
+  for (const match of signature.matchAll(pattern)) {
+    let end = match.index + match[0].length, depth = 1;
+    for (; end < signature.length && depth > 0; end++) {
+      if (signature[end] === "<") depth++;
+      else if (signature[end] === ">") depth--;
+    }
+    if (depth !== 0) throw new Error(`generic record ${base}: unterminated application in ${signature}`);
+    applications.push(signature.slice(match.index, end).replace(/\s+/g, ""));
+  }
+  return applications;
+}
+
+
 export function runtimeExportSignatures(root) {
   const sources = readFileSync(join(root, "Compiler/JetRuntime/sources.list"), "utf8")
     .split("\n").map((line) => line.trim()).filter((line) => line && !line.startsWith("#"));
@@ -47,6 +113,28 @@ export function parseRuntimeExports(source, path) {
     const params = signature.slice(1, close).trim();
     const items = params ? params.split(",").map((param) => param.trim()) : [];
     if (items.at(-1) === "") items.pop(); // A single trailing comma is valid.
+    const widened = maskedWordParameters.get(name);
+    if (widened) {
+      // The reviewed allowance requires a mask in this export's source body,
+      // not just a compatible register width. Comments, strings and masks in
+      // another function do not establish the boundary's narrowing contract.
+      const begin = match.index + match[0].length;
+      const code = source.slice(begin).replace(/\/\/[^\n]*|\/\*[\s\S]*?\*\/|"(?:[^"\\]|\\.)*"/g, "");
+      let depth = 1, end = 0;
+      for (; end < code.length && depth > 0; end++) {
+        if (code[end] === "{") depth++;
+        else if (code[end] === "}") depth--;
+      }
+      if (depth !== 0) throw new Error(`${path}: unterminated masked export ${name}`);
+      const body = code.slice(0, end);
+      for (const [index, rust] of widened) {
+        const param = /^([A-Za-z_]\w*)\s*:\s*I64$/.exec(items[index]);
+        const bits = { u8: 8, u16: 16, u32: 32 }[rust];
+        if (!param || !new RegExp(`\\b${param[1]}\\s*&\\s*I64\\s*\\{\\s*${2 ** bits - 1}\\s*\\}`).test(body)) {
+          throw new Error(`${path}: ${name} parameter ${index} requires the reviewed low-${bits}-bit mask`);
+        }
+      }
+    }
     exports.set(name, { params: items, suffix: signature.slice(close + 1).trim(), path, ...(kind ? { lifecycle: `${kind} ${Number(priority)}` } : {}) });
   }
   return exports;
@@ -62,13 +150,28 @@ function accepts(rust, jet) {
   return false;
 }
 
+// Reviewed PARAMETER-only widening. HostNet's resolver constructor masks the
+// low byte before testing the flag (e5157d499); 0x100 is false, 0x101 is true.
+// Return/out carriers and every unlisted symbol remain strict.
+// HostNetAddress/Resolver18eb2f82f discard high port/flow/scope bits at the
+// boundary with the same explicit unsigned masks.
+const maskedWordParameters = new Map([
+  ["jet_rt_record_new_Jet__ResolveError", new Map([[1, "u8"]])],
+  ["jet_net_raw_socket_from_parts", new Map([[1, "u16"], [2, "u32"], [3, "u32"]])],
+  ["jet_net_raw_resolve_ordered", new Map([[1, "u16"]])],
+]);
+
 export function validateRuntimeRoute(adapter, definition) {
-  const expected = [...adapter.params.flatMap((param) => param.ctys), ...adapter.result.outs.map((out) => `*mut ${out.cty}`)];
+  const parameters = adapter.params.flatMap((param) => param.ctys);
+  const expected = [...parameters, ...adapter.result.outs.map((out) => `*mut ${out.cty}`)];
   const actual = definition.params.map((param) => /^[A-Za-z_]\w*\s*:\s*(I64|U64|F64|Bool|U8)$/.exec(param)?.[1]);
   const suffix = definition.suffix;
   const result = suffix === "" ? null : /^->\s*(I64|U64|F64|Bool|U8)$/.exec(suffix)?.[1];
   const unit = suffix === "" || /^->\s*\(\s*\)$/.test(suffix);
-  const valid = actual.length === expected.length && actual.every((type, index) => accepts(expected[index], type)) && (adapter.result.ret ? accepts(adapter.result.ret, result) : unit);
+  const allowed = maskedWordParameters.get(adapter.name);
+  const valid = actual.length === expected.length && actual.every((type, index) =>
+    accepts(expected[index], type) || (index < parameters.length && type === "I64" && allowed?.get(index) === expected[index]))
+    && (adapter.result.ret ? accepts(adapter.result.ret, result) : unit);
   if (!valid) {
     const wanted = `(${expected.join(", ")})${adapter.result.ret ? ` -> ${adapter.result.ret}` : ""}`;
     const found = `(${definition.params.join(", ")})${suffix ? ` ${suffix}` : ""}`;

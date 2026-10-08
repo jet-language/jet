@@ -630,6 +630,17 @@ records cross directly as native inline element buffers, with the checked
 record's native stride (for example SocketAddr56), not arrays of record
 handles. Seed routes retain the handle-buffer conversions. Both use the
 same data-pointer/length C call shape, and record schemas remain checked.
+StreamCursor's native cutover is one complete export family: all Cursor/Reader
+routes, clone/drop, and the borrowed Cursor buffer projection are Jet-owned.
+G1 rejects a partial family before generating routes; it retains logical
+List/handle metadata while checking Reader constructors' explicit source stride
+and Reader.take's target stride before its three result out slots. These
+physical strides come from checked native element layouts (one or eight
+bytes). Fixed-width Reader results are raw sign/zero-extended words, including
+all unsigned 64-bit patterns; only Int-typed results use exact-Int ownership.
+F32 reads preserve the low 32 IEEE bits in a zero-extended word, not a widened
+F64 value. The Rust Core implementation remains a verification path, but no
+stream Rust C adapter or Box lifecycle remains in the native pack.
 A MIR-defined Core record (the general `Err`, `IOError`, `IOContext`; schemas in
 `Lower/Records.jet`) keeps its native layout and crosses a route as its runtime
 type's handle: a generated `record.out` helper builds it through
@@ -648,6 +659,24 @@ schema. No suffix-only match authorizes a user type. Thus `core.files.list_dir`
 rebuilds native, qualified `DirEntry` list elements rather than refusing the
 runtime's `DirEntry` handle carrier; the qualified-record fixtures also retain
 user-nominal and changed-schema refusals.
+Generic record schemas bind the declaration's ordered type parameters to the
+concrete arguments at a route boundary, then substitute every stored member
+type before choosing its carrier. A concrete application's handle/schema key
+includes the resolved arguments (UTF-8 hex suffixes on the runtime name), so
+different applications cannot reuse one schema. Argument-free records keep
+their existing keys and exports. Native lookup uses the corresponding concrete
+Jet application name and the existing MIR declaration instantiation, not a
+type-specific codec. Unresolved, inaccessible, gated or unsupported arguments
+are generator errors naming the application. Nested declaration arguments are
+explicitly refused; generic function monomorphization is not an ABI schema.
+Source-owned generic records resolve through the emitters' existing
+`Syntax::generated_path` identity only when the emitted runtime actually
+declares that type. Concrete uses in non-generic emitted Core function
+signatures supply arguments even when no C route mentions the record.
+Schemas keep source member names; Rust projections retain the emitted
+`__jet_` member names. Root-private fields remain private in Jet and in
+emitted Rust: the internal adapter child module already reaches its parent
+record without adding an accessor or widening user-field visibility.
 Recursive record collection members use generated `jet_rt_record_seq_*`
 holders while crossing the boundary. Byte lists, record lists and `(key:
 String, value: Record)` entry lists retain their native List layouts; the
