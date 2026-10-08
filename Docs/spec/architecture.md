@@ -57,6 +57,12 @@ referenced input script/path exists. Outputs created by earlier steps are
 identified separately; the runtime assembly driver is
 `Compiler/JetBackend/Tests/run-runtime.mjs`, not a JetRuntime test script.
 
+The Rust-debug MIR conversion feed preserves the bootstrap codec's field-name
+mapping for all NameLedger rows, including display paths: the checked Rust
+`MIRNameDisplayPath.module` becomes Jet `module_index`. Internal and display
+paths remain distinct checked strings; conversion must not infer or discard
+either path.
+
 The seed/native C-ABI fixture declares each allocator export once in its shared
 extern block. Its ABI metadata checks must pass in both configurations before a
 runtime pack is admitted. The transitional Rust producer build retains debug
