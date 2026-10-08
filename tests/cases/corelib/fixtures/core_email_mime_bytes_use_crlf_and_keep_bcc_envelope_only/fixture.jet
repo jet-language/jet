@@ -1,0 +1,45 @@
+use core.email as email
+
+fn test_crlf() -> String { String.from_bytes([U8]{13, 10}) ?? panic("CRLF") }
+fn test_headers_fit(wire: String, include_folded: Bool) {
+    bytes :: wire.bytes()
+    start := 0
+    loop i in 0..<bytes.len() {
+        if bytes[i] == (U8{10}) {
+            line_bytes := [U8]{}
+            loop j in start..i -> &line_bytes.push(bytes[j])
+            line :: String.from_bytes(line_bytes) ?? panic("line UTF-8")
+            if line.contains(":") || (include_folded && line.starts_with(" ")) {
+                assert(i - start + 1 <= 998, "original MAX_HEADER_BYTES split_inclusive bound")
+            }
+            start = i + 1
+        }
+    }
+    if start < bytes.len() {
+        line_bytes := [U8]{}
+        loop j in start..<bytes.len() -> &line_bytes.push(bytes[j])
+        line :: String.from_bytes(line_bytes) ?? panic("final line UTF-8")
+        if line.contains(":") || (include_folded && line.starts_with(" ")) {
+            assert(bytes.len() - start <= 998, "original final line bound")
+        }
+    }
+}
+
+#Test("core_email_mime_bytes_use_crlf_and_keep_bcc_envelope_only") {
+    from :: email.address("Mara ☕ <mara@example.com>") ?? panic("from")
+    to :: email.address("Ada <ada@example.net>") ?? panic("to")
+    bcc :: email.address("secret@example.org") ?? panic("bcc")
+    item :: email.attachment("notes.txt", "text/plain", "hi".bytes()) ?? panic("attachment")
+    message :: email.message(from, [to], [bcc], "Welcome ☕", "plain", HTML{"<b>html</b>"}, [item]) ?? panic("message")
+    first :: email.serialize(message) ?? panic("first")
+    second :: email.serialize(message) ?? panic("second")
+    assert(first == second, "serialization deterministic")
+    wire :: String.from_bytes(first) ?? panic("wire UTF-8")
+    assert(wire.contains("Content-Type: multipart/mixed"), "mixed")
+    assert(wire.contains("Content-Type: multipart/alternative"), "alternative")
+    assert(wire.contains("aGk="), "attachment base64")
+    assert(!wire.contains("Bcc:"), "Bcc header forbidden")
+    assert(!wire.contains("secret@example.org"), "hidden recipient not on wire")
+    assert(!wire.replace(test_crlf(), "").contains("\n"), "no bare LF")
+    test_headers_fit(wire, false)
+}

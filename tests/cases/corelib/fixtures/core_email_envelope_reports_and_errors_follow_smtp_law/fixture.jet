@@ -1,0 +1,29 @@
+use core.email as email
+
+fn test_wire(message: email.Message) -> String {
+    String.from_bytes(email.serialize(message) ?? panic("serialize")) ?? panic("wire UTF-8")
+}
+
+#Test("core_email_envelope_reports_and_errors_follow_smtp_law") {
+    from :: email.address("sender@example.com") ?? panic("from")
+    visible :: email.address("visible@example.net") ?? panic("visible")
+    hidden :: email.address("hidden@example.org") ?? panic("hidden")
+    message :: email.message(from, [visible], [hidden], "subject", "body", HTML{""}, [email.Attachment]{}) ?? panic("message")
+    assert(message.envelope().recipients == [visible, hidden], "visible then hidden default envelope")
+    replacement :: email.envelope(from, [hidden]) ?? panic("envelope")
+    replaced :: message.with_envelope(replacement) ?? panic("with_envelope")
+    assert(replaced.envelope().recipients == [hidden], "replacement recipients")
+    assert(!test_wire(replaced).contains("Bcc:"), "replacement Bcc stays off wire")
+    result :: email.envelope(from, [email.Address]{})
+    if result == {
+        .Ok(_) -> panic("empty envelope accepted")
+        .Err(error) -> if error == {
+            .Configuration(operation, server, code, reason) -> {
+                assert(operation == "envelope", "empty envelope operation")
+                assert(server == None && code == None, "empty envelope optional context")
+                assert(reason.contains("recipient"), "empty envelope reason")
+            }
+            else -> panic("unexpected envelope error")
+        }
+    }
+}

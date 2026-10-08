@@ -1,0 +1,47 @@
+// SETUP-PORT of tests/corelib_parts/runtime.rs:1586-1632,1686-1697.
+// Only original data-dependent fixture construction; all assertions stay in the case.
+use core.files as files
+use core.crypto as crypto
+use core.encoding.base64 as base64
+use core.time as time
+
+fn clock_jwt(expiry: String) -> String {
+    header :: files.read("jwt-header.txt") ?? panic("header")
+    template :: files.read("jwt-payload.template") ?? panic("payload")
+    payload :: template.replace("EXP", expiry)
+    h :: base64.encode_url(header.bytes())
+    p :: base64.encode_url(payload.bytes())
+    signed :: "{h}.{p}"
+    signature :: crypto.hmac_sha256("0123456789abcdef0123456789abcdef".bytes(), signed.bytes())
+    encoded :: base64.encode_url(signature)
+    "{signed}.{encoded}"
+}
+fn run() {
+    now_ns :: time.unix_ns()
+    now_secs :: now_ns /% 1000000000
+    expires_at :: now_secs + 86400
+    skew_expiry :: now_secs - 60
+    token :: clock_jwt("{expires_at}")
+    skew_token :: clock_jwt("{skew_expiry}")
+    invalid_bytes := token.bytes()
+    last :: invalid_bytes[invalid_bytes.len() - 1]
+    invalid_bytes[invalid_bytes.len() - 1] = if last == (U8{65}) -> U8{66} else -> U8{65}
+    invalid :: String.from_bytes(invalid_bytes) ?? panic("invalid token UTF-8")
+    source := files.read("clock.template") ?? panic("clock source")
+    // Original replacement order is deliberate, including TOKEN/SKEW_TOKEN and bound prefix collisions (#4812).
+    source = source.replace("TOKEN", token)
+    source = source.replace("SKEW_TOKEN", skew_token)
+    source = source.replace("NOW_NS", "{now_ns}")
+    source = source.replace("SKEW_EXPIRY", "{skew_expiry}")
+    source = source.replace("EQUALITY", clock_jwt("{now_secs}"))
+    source = source.replace("UPPER", clock_jwt("9223372036854775"))
+    source = source.replace("ABOVE_UPPER", clock_jwt("9223372036854775808"))
+    source = source.replace("LOWER", clock_jwt("-9223372036854775"))
+    source = source.replace("BELOW_LOWER", clock_jwt("-9223372036854776"))
+    source = source.replace("I64_MAX", clock_jwt("9223372036854775807"))
+    source = source.replace("I64_MIN", clock_jwt("-9223372036854775808"))
+    source = source.replace("INVALID", invalid)
+    files.write("clock.jet", source) ?? panic("write clock")
+    waiter :: files.read("wait.template") ?? panic("wait source")
+    files.write("wait.jet", waiter.replace("SECOND", "{now_secs}")) ?? panic("write wait")
+}

@@ -1,0 +1,51 @@
+
+use core.auth as auth
+
+fn check(token: String, key: [U8], label: String, skew: Duration) {
+    if auth.verify_jwt(token, key: key, audience: "gateway", issuer: "clock", clock_skew: skew) == {
+        .Ok(_) -> { print("{label}-accepted") }
+        .Err(error) -> {
+            if error == {
+                .TokenExpired -> { print("{label}-expired") }
+                .MalformedToken(_) -> { print("{label}-malformed") }
+                .InvalidSignature -> { print("{label}-invalid") }
+                else -> { print("{label}-wrong-error") }
+            }
+        }
+    }
+}
+
+fn run() {
+    key :: [U8]{ 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102 }
+    skew_token := "SKEW_TOKEN"
+    skew_expiry :: SKEW_EXPIRY
+    base_ns :: NOW_NS - skew_expiry * 1000000000
+    boundary_ns :: base_ns
+    next_boundary_ns :: base_ns + 1
+    boundary :: Duration.nanoseconds(boundary_ns) ?? panic("boundary")
+    next_boundary :: Duration.nanoseconds(next_boundary_ns) ?? panic("next boundary")
+    boundary_read :: boundary.in(.Nanoseconds) ?? panic("boundary read")
+    next_boundary_read :: next_boundary.in(.Nanoseconds) ?? panic("next boundary read")
+    if boundary_read == boundary_ns { print("skew-boundary-exact") } else { print("skew-boundary-truncated") }
+    if next_boundary_read == next_boundary_ns { print("skew-boundary-plus-one-exact") } else { print("skew-boundary-plus-one-truncated") }
+    margin_ns :: 2000000000000
+    expired_skew :: Duration.nanoseconds(base_ns - margin_ns) ?? panic("expired skew")
+    accepted_skew :: Duration.nanoseconds(base_ns + margin_ns) ?? panic("accepted skew")
+    check(skew_token, key, "skew-margin-before", expired_skew)
+    check(skew_token, key, "skew-margin-after", accepted_skew)
+    token := "TOKEN"
+    zero :: Duration.milliseconds(0) ?? panic("zero")
+    check(token, key, "future", zero)
+    check("EQUALITY", key, "equality", zero)
+    check("UPPER", key, "upper", zero)
+    check("ABOVE_UPPER", key, "above-upper", zero)
+    check("LOWER", key, "lower", zero)
+    check("BELOW_LOWER", key, "below-lower", zero)
+    check("I64_MAX", key, "i64-max", zero)
+    check("I64_MIN", key, "i64-min", zero)
+    check("INVALID", key, "invalid", zero)
+    max_skew :: Duration.nanoseconds(9223372036854775807) ?? panic("max skew")
+    min_skew :: Duration.nanoseconds(-9223372036854775807 - 1) ?? panic("min skew")
+    check(token, key, "max-skew", max_skew)
+    check(token, key, "min-skew", min_skew)
+}

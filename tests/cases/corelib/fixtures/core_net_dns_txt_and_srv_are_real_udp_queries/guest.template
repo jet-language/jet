@@ -1,0 +1,9 @@
+
+use core.net as net
+
+fn run() {
+    txts :: net.dns_txt_at("@ADDR@", "service.example.test", 1000) ?? panic("txt")
+    print(txts[0])
+    srvs :: net.dns_srv_at("@ADDR@", "_jet._tcp.example.test", 1000) ?? panic("srv")
+    print("{net.dns_srv_target(srvs[0])}:{net.dns_srv_port(srvs[0])}")
+}
