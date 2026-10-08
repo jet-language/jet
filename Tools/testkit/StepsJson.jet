@@ -277,7 +277,7 @@ fn kit_steps_json_assertion(value: String) -> KitAssertion? {
     path :: tokens[2 + offset].text
     op :: tokens[3 + offset].text
     if mode != "doc" && mode != "ndjson" -> return None
-    if kit_steps_json_path(path) == None -> return None
+    if kit_steps_json_path(kit_steps_json_preview(path)) == None -> return None
     source :: if offset == 1 -> tokens[1].text else -> ""
     if stream == "file" && !kit_steps_relative_path(source) -> return None
     literal := ~body.slice(tokens[needed].start, body.len()).trim()

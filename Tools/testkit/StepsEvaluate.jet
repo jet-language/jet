@@ -47,8 +47,8 @@ fn kit_steps_check_assertion(assertion: KitAssertion, context: KitStepCtx, state
             if kit_steps_path_tokens(value) -> raw_match = true
         }
     }
-    stdout :: if raw_match && assertion.json_mode == "" -> state.last.stdout else -> state.json_stdout ?? state.last.stdout
-    stderr :: if raw_match && assertion.json_mode == "" -> state.last.stderr else -> state.json_stderr ?? state.last.stderr
+    stdout :: if raw_match -> state.last.stdout else -> state.json_stdout ?? state.last.stdout
+    stderr :: if raw_match -> state.last.stderr else -> state.json_stderr ?? state.last.stderr
     actual := kit_steps_select_stream(stdout, stderr, assertion.stream)
     value := kit_steps_runtime_expand(assertion.value, context, state) ?? return kit_expect_verdict("ERROR", "assertion token unavailable")
     extra := kit_steps_runtime_expand(assertion.extra, context, state) ?? return kit_expect_verdict("ERROR", "assertion token unavailable")
@@ -72,6 +72,16 @@ fn kit_steps_check_assertion(assertion: KitAssertion, context: KitStepCtx, state
             right :: if other_exists -> files.read_bytes(other) ?? return kit_expect_verdict("ERROR", "read relation file: {err}") else -> [U8]{}
             equal :: left == right
             return if equal == (assertion.mode == "==") -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "file relation failed")
+        }
+        if assertion.json_mode == "" && assertion.transform == "" && kit_expect_named(["~", "!~", "~i", "!~i", "^=", "~any", "empty", "nonempty", "count", "before", "line"], assertion.mode) {
+            bytes :: if exists -> files.read_bytes(path) ?? return kit_expect_verdict("ERROR", "read assertion bytes: {err}") else -> [U8]{}
+            alternatives := [String]{}
+            loop alternative in assertion.alternatives {
+                expanded :: kit_steps_runtime_expand(alternative, context, state) ?? return kit_expect_verdict("ERROR", "substring token unavailable")
+                &alternatives.push(expanded)
+            }
+            matches :: kit_steps_file_predicate(bytes, assertion.mode, value, extra, alternatives)
+            return if matches -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "file byte predicate {assertion.mode} failed")
         }
         actual = if exists -> files.read(path) ?? return kit_expect_verdict("ERROR", "read assertion file: {err}") else -> ""
     }

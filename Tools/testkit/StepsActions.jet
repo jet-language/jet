@@ -44,7 +44,7 @@ fn kit_steps_inventory_equal(left: [KitInventoryItem], right: [KitInventoryItem]
 fn kit_steps_action(step: KitStep, context: KitStepCtx, previous: KitStepState) -> KitStepResult {
     state := previous
     if step.action == "capture" {
-        source :: if step.argv[1] == "stderr" -> state.json_stderr ?? state.last.stderr else -> state.json_stdout ?? state.last.stdout
+        source :: if step.argv[1] == "stderr" -> state.last.stderr else -> state.last.stdout
         stream :: kit_steps_replace(source, state.replacements, context, state, false, "")
         captured :: if step.argv[2] == "line" -> kit_steps_line(stream, step.argv[4], "") else -> kit_steps_json_scalar(stream, step.argv[2], step.argv[3])
         value :: captured ?? return kit_steps_action_error(state, "capture {step.argv[0]}: missing or non-scalar selection")

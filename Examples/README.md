@@ -38,8 +38,10 @@ fixtures belong outside `Tools/testkit`, whose `.jet` files are package members.
 Label a process step with `step NAME:` and compare normalized streams with
 `stdout: == NAME` or `stderr: == NAME`. Labels must be unique, and stream
 comparisons name a prior step. `file: A == B` and `file: A != B` compare raw
-bytes, including non-UTF-8 files. `copy: A B` and `remove: A` operate only on
-work-relative paths; failed file operations report `ERROR`.
+bytes, including non-UTF-8 files. Untransformed file substring, prefix,
+line, count and absence predicates also inspect raw bytes before UTF-8
+decoding. `copy: A B` preserves the source permission bits; destinations and
+`remove: A` stay work-relative. Failed file operations report `ERROR`.
 
 An `env: NAME=VALUE` before the first step applies to the case. After a step,
 it applies only to that step; `unset: NAME` removes a variable after all
@@ -61,7 +63,11 @@ and `[*]` (every selected record must match, and an empty selection fails).
 Operators are `=` for typed JSON equality, `:` for a type, `#=` for a count,
 and `has` for an array element containing all keys in a nonempty JSON object.
 Object key order is not significant; array order is significant for `=`.
-A `: number` assertion needs a same-line `#` reason for the nondeterminism.
+Every partial predicate needs a nonempty same-line `#` reason, including
+every `: TYPE` assertion. Use `# original predicate` for an original
+partial assertion, or `# volatile: WHAT` for nondeterministic output.
+Subject transforms belong on the key (`stdout.trim: = result.out`), not
+in the value. JSON data assertions have the single `json:` spelling.
 
 `normalize: json stdout|stderr PATH : TYPE # reason` replaces each selected
 typed value with the JSON string `"<<TYPE>>"` before snapshot comparison.

@@ -414,8 +414,8 @@ fn kit_steps_execute(context: KitStepCtx, hooks: KitStepHooks) -> KitOutcome {
                 stdout: kit_steps_replace(kit_steps_normalize(state.json_stdout ?? state.last.stdout, context.env, context.work, context.scratch, plan.normalize, state.built, source_name), step.replacements, context, state, true, source_name),
                 stderr: kit_steps_replace(kit_steps_normalize(state.json_stderr ?? state.last.stderr, context.env, context.work, context.scratch, plan.normalize, state.built, source_name), step.replacements, context, state, true, source_name),
                 elapsed_ns: state.last.elapsed_ns,
-                raw_stdout: kit_steps_replace(state.json_stdout ?? state.last.stdout, step.replacements, context, state, false, source_name),
-                raw_stderr: kit_steps_replace(state.json_stderr ?? state.last.stderr, step.replacements, context, state, false, source_name)})
+                raw_stdout: kit_steps_replace(state.last.stdout, step.replacements, context, state, false, source_name),
+                raw_stderr: kit_steps_replace(state.last.stderr, step.replacements, context, state, false, source_name)})
         }
         verdict :: hooks.check(step, index, context, state)
         if verdict.status != "PASS" -> return kit_steps_finish(state, verdict)
