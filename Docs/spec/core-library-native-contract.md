@@ -192,6 +192,14 @@ length without releasing capacity or the buffer. Repeated empty clear and a
 subsequent push retain normal value semantics, and frozen borrowed trees are
 not released as owned elements.
 
+Native List `try_collect` adapts checked List storage through the same typed
+iterator source boundary as `.lazy()`: moved input transfers ownership and
+borrowed input snapshots before collection. An eager `flat_map` callback
+borrows each element; checked MIR materializes any owned aggregate return
+with its typed clone glue. Dropping that temporary must not retire the source.
+The `flat-map-owned` and `list-try-collect` lowering fixtures require exact
+output plus linker-observed Jet allocator balance after source/result cleanup.
+
 Lowering witnesses that call canonical kernels absent from the minimal
 freestanding runtime emit relocatable objects and memory images, not a partial
 static executable. Their runtime-only marker requires a real compiled runtime
