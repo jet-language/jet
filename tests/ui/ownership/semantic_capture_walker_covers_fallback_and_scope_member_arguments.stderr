@@ -1,0 +1,17 @@
+Error [E0107]: Nothing named `null` exists here
+  --> semantic_capture_walker_covers_fallback_and_scope_member_arguments.jet:2:33
+    |
+  2 | fn missing() -[]> Int? { return null }
+    |                                 ^^^^
+ Why: A name must be declared before it's used
+ Fix: Declare it first: `null :: ...`
+More: jet-lang.dev/e/E0107
+
+Error [E0204]: `values` is being changed in this call, so it can't be used again here
+  --> semantic_capture_walker_covers_fallback_and_scope_member_arguments.jet:10:46
+    |
+ 10 |         found :: missing() ?? panic("length {values.len()}")
+    |                                              ^^^^^^
+ Why: While something is being changed through the write-access marker `&`, nobody else may be looking at it
+ Fix: Pass the write-access marker `&` (`&values`) only once, or copy first with `~values`
+More: jet-lang.dev/e/E0204
