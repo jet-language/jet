@@ -2562,6 +2562,15 @@ with its `format` and `body`.
 output. Radix digits are lower-case. Padding widths count Unicode scalar
 values, not bytes; binary-size formatting uses binary units.
 
+`percent` groups the scaled number before appending `%`. Scientific output
+uses an unpadded exponent (`e0`, `e-3`, `e23`) and rounds the exact binary
+value to the requested precision with ties to even, preserving negative
+zero. Empty padding fill means a space; centered padding restarts the fill
+pattern on each side. `pretty` expands a complete outer brace, bracket, or
+parenthesis fragment, recursively splitting only its top-level commas;
+quoted delimiters, redacted lists, incomplete fragments, and trailing text
+remain unchanged.
+
 | Signature | Result | Description |
 |---|---|---|
 | `number(value: Int) -> String` | text | Format an integer with grouping separators. |
