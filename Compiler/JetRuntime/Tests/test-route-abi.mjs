@@ -70,9 +70,12 @@ const names = new Set(readFileSync(join(root, "Compiler/JetRuntime/exports.list"
 validateRuntimeOwnership(names, runtimeExportSignatures(root));
 const routeNames = new Set([...readFileSync(join(root, "Compiler/JetBackend/Source/Lower/RuntimeRoutes.jet"), "utf8")
   .matchAll(/LowerRoute\{symbol: "[^"]+", export: "([^"]+)"/g)].map((match) => match[1]));
-const rustNames = new Set([...readFileSync(join(root, "crates/jet-codegen/src/Prelude/Core/CAbiRoutes.rs"), "utf8")
-  .matchAll(/pub extern "C" fn ([A-Za-z_]\w*)\(/g)].map((match) => match[1]));
+const rustText = readFileSync(join(root, "crates/jet-codegen/src/Prelude/Core/CAbiRoutes.rs"), "utf8");
+const rustNames = new Set([...rustText.matchAll(/pub extern "C" fn ([A-Za-z_]\w*)\(/g)].map((match) => match[1]));
 const ported = [...names].filter((name) => routeNames.has(name));
 assert.ok(ported.length > 0, "no real Jet-owned family exercised");
 for (const name of ported) assert.ok(!rustNames.has(name), `Jet-owned route ${name} still has a Rust adapter`);
+const listOut = /    fn list_out\([\s\S]*?\n    \}/.exec(rustText)?.[0];
+assert.ok(listOut?.includes("super::jet_c_abi::jet_rt_alloc(len * 8, 8)"), "List results must use the shared runtime heap");
+assert.ok(!listOut.includes("std::alloc::alloc("), "List results must not escape Rust's heap");
 console.log("runtime route ABI: CHECK OK");
