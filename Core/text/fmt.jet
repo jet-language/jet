@@ -34,62 +34,221 @@ pub fn pad(text: String, width: Int, fill: String) -> String Never! { pad_right(
 
 pub fn grouped(n: Float, frac: Int) -> String Never! { group_decimal(float_fixed(n, frac)) }
 pub fn decimal(n: Float, frac: Int) -> String Never! { float_fixed(n, frac) }
-pub fn percent(n: Float, frac: Int) -> String Never! { "{float_fixed(n * 100.0, frac)}%" }
-pub fn sci(n: Float, frac: Int) -> String Never! {
-    if !math.is_finite(n) -> return "{n}"
-    if n == 0.0 -> return "{float_fixed(0.0, frac)}e+00"
-    sign := ""
-    value := n
-    if value < 0.0 {
-        sign = "-"
-        value = -value
-    }
-    exponent := 0
-    loop value >= 10.0 {
-        value = value / 10.0
-        exponent = exponent + 1
-    }
-    loop value < 1.0 {
-        value = value * 10.0
-        exponent = exponent - 1
-    }
-    exp_sign := if exponent < 0 -> "-" else -> "+"
-    exp_abs :: abs_int(exponent)
-    exp_text := radix(exp_abs, 10)
-    if exp_text.bytes().len() < 2 -> exp_text = "0{exp_text}"
-    "{sign}{float_fixed(value, frac)}e{exp_sign}{exp_text}"
+pub fn percent(n: Float, frac: Int) -> String Never! { "{grouped(n * 100.0, frac)}%" }
+
+// Compiler interpolation helpers reuse the source-owned formatting policy.
+// Ported from aa45bf8fc Core/text/runtime/kernel_fmt.jet; no C ABI adapter.
+pub fn quantity(n: Float) -> String Never! {
+    text :: "{n}"
+    if text.ends_with(".0") -> slice(text, 0, unicode.scalar_count(text) - 2) else -> text
 }
 
-pub fn pretty(value: String) -> String Never! {
-    out := ""
-    indent := 0
+pub fn fixed_int(n: Int, frac: Int) -> String Never! { exact_int_decimal(n, frac, false) }
+
+pub fn grouped_int_fixed(n: Int, frac: Int) -> String Never! { exact_int_decimal(n, frac, true) }
+
+fn exact_int_decimal(n: Int, frac: Int, grouped: Bool) -> String Never! {
+    whole :: if grouped -> grouped_int(n) else -> "{n}"
+    if frac <= 0 -> return whole
+    "{whole}.{"0".repeat(frac)}"
+}
+
+// The exact decimal spelling rail rejects everything except an optional
+// sign and ASCII digits. Malformed spellings return trimmed and unchanged.
+pub fn hex_decimal(value: String, width: Int) -> String Never! {
+    n :: decimal_spelling(value) ?? return value.trim()
+    hex(n, width)
+}
+
+pub fn bin_decimal(value: String) -> String Never! {
+    n :: decimal_spelling(value) ?? return value.trim()
+    bin(n)
+}
+
+pub fn oct_decimal(value: String) -> String Never! {
+    n :: decimal_spelling(value) ?? return value.trim()
+    oct(n)
+}
+
+fn decimal_spelling(value: String) -> Int? Never! {
+    text :: ~value.trim()
+    negative :: text.starts_with("-")
+    digits :: if negative || text.starts_with("+") -> slice(text, 1, unicode.scalar_count(text)) else -> text
+    if digits == "" -> return None
+    loop byte in digits.bytes() {
+        if byte < (U8{48}) || byte > (U8{57}) -> return None
+    }
+    magnitude :: digits.parse<Int>() ?? return None
+    Val(if negative -> -magnitude else -> magnitude)
+}
+
+// Core/Fmt.rs:153-155 formats the exact binary value with ties-to-even.
+// Unlike shortest Float display, an explicit precision cannot round a
+// repeatedly scaled Float without changing boundary cases.
+pub fn sci(n: Float, frac: Int) -> String Never! {
+    if !math.is_finite(n) -> return "{n}"
+    precision :: if frac < 0 -> 0 else -> frac
+    bits :: math.to_bits(n)
+    sign :: if bits < 0 -> "-" else -> ""
+    if n == 0.0 -> return "{sign}{scaled_decimal(0, precision)}e0"
+    binary_exponent :: (bits >> 52) & 2047
+    numerator := bits & 4503599627370495
+    shift := -1074
+    if binary_exponent != 0 {
+        numerator = numerator + 4503599627370496
+        shift = binary_exponent - 1075
+    }
+    denominator := 1
+    if shift >= 0 -> numerator = numerator << shift
+    else -> denominator = denominator << -shift
+    exponent := 0
+    loop numerator >= denominator * 10 {
+        denominator = denominator * 10
+        exponent = exponent + 1
+    }
+    loop numerator < denominator {
+        numerator = numerator * 10
+        exponent = exponent - 1
+    }
+    scale := 1
+    i := 0
+    loop i < precision {
+        scale = scale * 10
+        i = i + 1
+    }
+    numerator = numerator * scale
+    rounded := round_ratio_even(numerator, denominator)
+    if rounded == scale * 10 {
+        rounded = scale
+        exponent = exponent + 1
+    }
+    "{sign}{scaled_decimal(rounded, precision)}e{exponent}"
+}
+
+fn scaled_decimal(n: Int, precision: Int) -> String Never! {
+    digits :: radix(n, 10)
+    if precision == 0 -> return digits
+    body :: pad_left(digits, precision + 1, "0")
+    split :: body.bytes().len() - precision
+    "{slice(body, 0, split)}.{slice(body, split, body.bytes().len())}"
+}
+
+// Exact positive rational rounding shared by scientific and fixed formats.
+fn round_ratio_even(numerator: Int, denominator: Int) -> Int Never! {
+    rounded := numerator /% denominator
+    remainder :: numerator % denominator
+    if remainder * 2 > denominator || (remainder * 2 == denominator && rounded % 2 != 0) -> rounded = rounded + 1
+    rounded
+}
+
+// Core/Fmt.rs:166-310: expand only one complete outer fragment, with quoted
+// delimiters ignored and commas split only at the current structural depth.
+pub fn pretty(value: String) -> String Never! { pretty_fragment(value, 0) }
+
+fn pretty_fragment(value: String, indent: Int) -> String Never! {
+    text :: ~value.trim()
+    open_at :: first_structure(text) ?? return text
+    raw :: text.bytes()
+    open :: raw[open_at]
+    close :: structure_close(open) ?? return text
+    end :: matching_close(text, open, close) ?? return text
+    if byte_slice(text, end + 1, raw.len()).trim() != "" -> return text
+    prefix :: ~byte_slice(text, 0, open_at).trim_end()
+    body :: byte_slice(text, open_at + 1, end)
+    trimmed_body :: ~body.trim()
+    open_text :: String.from_bytes([U8]{open}) ?? ""
+    close_text :: String.from_bytes([U8]{close}) ?? ""
+    if trimmed_body == "" -> return ~"{prefix} {open_text}{close_text}".trim_start()
+    if open == (U8{91}) && (trimmed_body == ":" || trimmed_body.lower() == "redacted") -> return text
+    out := if prefix == "" -> open_text else -> "{prefix} {open_text}"
+    stack := [U8]{}
     quoted := false
     escaped := false
-    loop ch in unicode.scalars(value) {
+    start := 0
+    i := 0
+    body_raw :: body.bytes()
+    loop i < body_raw.len() {
+        ch :: body_raw[i]
         if quoted {
-            out = "{out}{ch}"
             if escaped -> escaped = false
-            else if ch == "\\" -> escaped = true
-            else if ch == "\"" -> quoted = false
-            next
-        }
-        if ch == "\"" {
+            else if ch == (U8{92}) -> escaped = true
+            else if ch == (U8{34}) -> quoted = false
+        } else if ch == (U8{34}) {
             quoted = true
-            out = "{out}{ch}"
-        } else if ch == "{{" || ch == "[" {
-            indent = indent + 2
-            out = "{out}{ch}\n{spaces(indent)}"
-        } else if ch == "}}" || ch == "]" {
-            indent = indent - 2
-            if indent < 0 -> indent = 0
-            out = "{trim_right(out)}\n{spaces(indent)}{ch}"
-        } else if ch == "," {
-            out = "{trim_right(out)},\n{spaces(indent)}"
-        } else {
-            out = "{out}{ch}"
+        } else if structure_close(ch) == .Val(expected) {
+            &stack.push(expected)
+        } else if stack.len() > 0 && stack[stack.len() - 1] == ch {
+            _ :: &stack.pop()
+        } else if ch == (U8{44}) && stack.len() == 0 {
+            item :: ~byte_slice(body, start, i).trim()
+            if item != "" -> out = "{out}\n{spaces(indent + 2)}{pretty_fragment(item, indent + 2)}"
+            start = i + 1
         }
+        i = i + 1
     }
-    trim_right(out)
+    item :: ~byte_slice(body, start, body_raw.len()).trim()
+    if item != "" -> out = "{out}\n{spaces(indent + 2)}{pretty_fragment(item, indent + 2)}"
+    "{out}\n{spaces(indent)}{close_text}"
+}
+
+fn structure_close(open: U8) -> U8? Never! {
+    if open == (U8{123}) -> return Val(U8{125})
+    if open == (U8{91}) -> return Val(U8{93})
+    if open == (U8{40}) -> return Val(U8{41})
+    None
+}
+
+fn first_structure(value: String) -> Int? Never! {
+    quoted := false
+    escaped := false
+    raw :: value.bytes()
+    i := 0
+    loop i < raw.len() {
+        ch :: raw[i]
+        if quoted {
+            if escaped -> escaped = false
+            else if ch == (U8{92}) -> escaped = true
+            else if ch == (U8{34}) -> quoted = false
+        } else if ch == (U8{34}) {
+            quoted = true
+        } else if structure_close(ch) != None {
+            return Val(i)
+        }
+        i = i + 1
+    }
+    None
+}
+
+fn matching_close(value: String, open: U8, close: U8) -> Int? Never! {
+    stack := [U8]{close}
+    quoted := false
+    escaped := false
+    seen_start := false
+    raw :: value.bytes()
+    i := 0
+    loop i < raw.len() {
+        ch :: raw[i]
+        if !seen_start {
+            if ch == open -> seen_start = true
+        } else if quoted {
+            if escaped -> escaped = false
+            else if ch == (U8{92}) -> escaped = true
+            else if ch == (U8{34}) -> quoted = false
+        } else if ch == (U8{34}) {
+            quoted = true
+        } else if structure_close(ch) == .Val(expected) {
+            &stack.push(expected)
+        } else if stack.len() > 0 && stack[stack.len() - 1] == ch {
+            _ :: &stack.pop()
+            if stack.len() == 0 -> return Val(i)
+        }
+        i = i + 1
+    }
+    None
+}
+
+fn byte_slice(value: String, start: Int, end: Int) -> String Never! {
+    String.from_bytes(slice_b(value.bytes(), start, end)) ?? ""
 }
 
 /// Decimal byte display (1000-based), with the unit selected before rounding.
@@ -108,7 +267,7 @@ fn bytes_scaled(n: Int, base: Int) -> String Never! {
         divisor = divisor * base
         unit = unit + 1
     }
-    suffix := if base == 1000 -> "kB" else -> "KiB"
+    suffix := if base == 1000 -> "KB" else -> "KiB"
     if unit == 2 -> suffix = if base == 1000 -> "MB" else -> "MiB"
     if unit == 3 -> suffix = if base == 1000 -> "GB" else -> "GiB"
     if unit == 4 -> suffix = if base == 1000 -> "TB" else -> "TiB"
@@ -134,6 +293,8 @@ fn bytes_scaled(n: Int, base: Int) -> String Never! {
 
 /// `n` is milliseconds. Composite output is bounded to three non-zero units.
 pub fn duration(n: Int) -> String Never! {
+    // Matches native bug; owner card: Rust i64::abs wraps at Int.MIN in release.
+    if n == -9223372036854775808 -> return "--9223372036854775808ms"
     sign := ""
     rest := n
     if rest < 0 {
@@ -221,27 +382,29 @@ fn radix(n: Int, base: Int) -> String {
     String.from_bytes(out) ?? "0"
 }
 
+// Core/Fmt.rs:7-9 formats the exact binary Float, ties-to-even, signed zero.
 fn float_fixed(n: Float, frac: Int) -> String Never! {
-    precision := frac
-    if precision < 0 -> precision = 0
-    scale := Float{1}
+    if !math.is_finite(n) -> return "{n}"
+    precision :: if frac < 0 -> 0 else -> frac
+    bits :: math.to_bits(n)
+    sign :: if bits < 0 -> "-" else -> ""
+    if n == 0.0 -> return "{sign}{scaled_decimal(0, precision)}"
+    binary_exponent :: (bits >> 52) & 2047
+    numerator := bits & 4503599627370495
+    shift := -1074
+    if binary_exponent != 0 {
+        numerator = numerator + 4503599627370496
+        shift = binary_exponent - 1075
+    }
+    denominator := 1
+    if shift >= 0 -> numerator = numerator << shift
+    else -> denominator = denominator << -shift
     i := 0
     loop i < precision {
-        scale = scale * Float{10}
+        numerator = numerator * 10
         i = i + 1
     }
-    scaled := n * scale
-    rounded := math.round(scaled)
-    sign := ""
-    if rounded < 0 {
-        sign = "-"
-        rounded = -rounded
-    }
-    digits :: radix(rounded, 10)
-    if precision == 0 -> return "{sign}{digits}"
-    body := pad_left(digits, precision + 1, "0")
-    split :: body.bytes().len() - precision
-    "{sign}{slice(body, 0, split)}.{slice(body, split, body.bytes().len())}"
+    "{sign}{scaled_decimal(round_ratio_even(numerator, denominator), precision)}"
 }
 
 fn group_decimal(text: String) -> String {
@@ -279,20 +442,28 @@ fn grouped_digits(text: String) -> String {
     String.from_bytes(out) ?? text
 }
 
+// Core/Fmt.rs:389-419: empty fill means space, and each centered side
+// begins its own fill cycle.
 fn pad_mode(text: String, width: Int, fill: String, mode: Int) -> String Never! {
-    need := width - unicode.scalar_count(text)
-    units :: unicode.scalars(fill)
-    if need <= 0 || units.len() == 0 -> return ~text
-    added := ""
+    need :: width - unicode.scalar_count(text)
+    if need <= 0 -> return ~text
+    units :: unicode.scalars(if fill == "" -> " " else -> fill)
+    if mode == 2 {
+        left :: need /% 2
+        return "{pad_fill(units, left)}{text}{pad_fill(units, need - left)}"
+    }
+    added :: pad_fill(units, need)
+    if mode == 0 -> "{added}{text}" else -> "{text}{added}"
+}
+
+fn pad_fill(units: [String], need: Int) -> String Never! {
+    out := ""
     i := 0
     loop i < need {
-        added = "{added}{units[i % units.len()]}"
+        out = "{out}{units[i % units.len()]}"
         i = i + 1
     }
-    if mode == 0 -> return "{added}{text}"
-    if mode == 1 -> return "{text}{added}"
-    left :: need /% 2
-    "{slice(added, 0, left)}{text}{slice(added, left, unicode.scalar_count(added))}"
+    out
 }
 
 fn spaces(n: Int) -> String {
@@ -305,12 +476,6 @@ fn spaces(n: Int) -> String {
     out
 }
 
-fn trim_right(text: String) -> String {
-    raw :: text.bytes()
-    i := raw.len()
-    loop i > 0 && (raw[i - 1] == (U8{32}) || raw[i - 1] == (U8{10}) || raw[i - 1] == (U8{9})) -> i = i - 1
-    String.from_bytes(slice_b(raw, 0, i)) ?? text
-}
 
 fn slice(text: String, start: Int, end: Int) -> String Never! {
     units :: unicode.scalars(text)
@@ -331,4 +496,40 @@ fn slice_b(raw: [U8], start: Int, end: Int) -> [U8] {
         &out.push(raw[i])
         i = i + 1
     }
+}
+
+#Test("fmt Rust scientific grouping and padding policy") {
+    assert_eq(percent(12345.625, 2), "1,234,562.50%")
+    assert_eq(sci(2.5, 0), "2e0")
+    assert_eq(sci(-0.0, 2), "-0.00e0")
+    assert_eq(sci(999.999, 2), "1.00e3")
+    assert_eq(sci(0.125, 1), "1.2e-1")
+    assert_eq(sci(1e23, 2), "1.00e23")
+    assert_eq(sci(math.from_bits(1), 2), "4.94e-324")
+    assert_eq(pad_left("x", 3, ""), "  x")
+    assert_eq(pad_center("x", 6, "ab"), "abxaba")
+}
+
+#Test("fmt Rust fixed rounding signed zero and compatibility units") {
+    assert_eq(decimal(2.5, 0), "2")
+    assert_eq(decimal(3.5, 0), "4")
+    assert_eq(decimal(-2.5, -1), "-2")
+    assert_eq(decimal(0.125, 2), "0.12")
+    assert_eq(decimal(-0.0, 2), "-0.00")
+    assert_eq(decimal(-0.125, 0), "-0")
+    assert_eq(grouped(12345.625, 2), "12,345.62")
+    assert_eq(percent(-12345.625, 0), "-1,234,562%")
+    assert_eq(bytes(1001), "1 KB")
+    assert_eq(bytes(-1001), "-1 KB")
+    assert_eq(duration(-9223372036854775808), "--9223372036854775808ms")
+}
+
+#Test("fmt Rust nested fragment scanner") {
+    assert_eq(pretty("  scalar  "), "scalar")
+    assert_eq(pretty("[]"), "[]")
+    assert_eq(pretty("[redacted]"), "[redacted]")
+    assert_eq(pretty("[1] trailing"), "[1] trailing")
+    assert_eq(pretty("[1, 2"), "[1, 2")
+    assert_eq(pretty("Point {{x: 1, y: [2, 3]}}"), "Point {{\n  x: 1\n  y: [\n    2\n    3\n  ]\n}}")
+    assert_eq(pretty("\"quoted [1, 2]\""), "\"quoted [1, 2]\"")
 }

@@ -1201,3 +1201,154 @@ ambiguous pairing is reported, never treated as equality. `--bootstrap JETC0`
 provides a front-end diagnostic census before the probe can be built.
 Preparation and a receipt-only census never establish differential parity;
 only `summary.json` with `differential_verified: true` does.
+
+### Native arena resource counters
+
+`MemRegistry.jet` is the single native owner of the seven memory observation
+words from `Prelude/Observe.rs`: outstanding arenas, allocations and bytes,
+retained block capacity, high-water bytes, and the two allocation-probe totals.
+Its priority-1 runtime initializer allocates its own state after the heap is
+ready; it does not share allocator policy cells or count ordinary heap blocks
+as arenas. The provider uses the existing `Sync.jet` atomic leaves.
+
+The compiler-owned native Arena/Bump/Fixed/Pool suppliers must call the
+open/alloc/reset/close hooks, and their RawBlock owners must call retain/release.
+There are no Core source lifecycle callsites or private Core aliases.
+Supplier wiring is not proved by the counter provider alone. Zero-sized
+values count as allocations with zero bytes. Counters carry unsigned machine-word bits,
+wrap on fetch-add/subtract, and snapshot independently with relaxed loads,
+matching the reference rather than promising a transactional metric snapshot.
+The high-water candidate alone saturates on unsigned overflow. Probe reset
+and take use sequentially consistent exchanges and never clear live facts.
+
+`jet_rt_mem_resources(out)` writes three words (arenas, allocations, bytes)
+into caller-owned 24-byte aligned storage for the Observe live writer.
+`MemRegistryWitness.c` links the real native provider and covers lifecycle,
+zero-size, unsigned wrapping, probe isolation and concurrent allocation totals.
+Compile it with `cc -pthread` against the composed runtime object; its success
+line is `MemRegistry: lifecycle, zero-size, probe isolation, unsigned wrap,
+concurrent totals ok`. Source/syntax checks do not establish native parity.
+
+### Native UI node ABI
+
+`Compiler/JetBackend/Source/UiABI.jet` defines the canonical 160-byte native
+node layout in one table, included by both compiler and runtime manifests.
+It is not the layout of a legacy Rust UI allocation and must never be used
+to reinterpret one. Callback slots are raw native `SendFn` closure pointers,
+not registry IDs or general `Fn` values. The transfer adds three private
+logical arguments: IME mode, click closure, and drop closure. A present IME
+has mode 0 (Native) or 1 (Disabled); absent appended words are ignored.
+
+Native node cloning allocates a distinct node, clones its owned text and
+children, and atomically retains each callback once for the new node.
+Final destruction releases the callbacks outside locks. This layout
+publication is not a runtime-provider or byte-parity claim. The private
+typed-call override and atomic `SendFn` ownership leaves are required
+before admitting callback-bearing nodes. Accessibility and shortcut
+metadata still depend on registered raw leaves; the native UI pack cannot
+be described as Jet-only until their providers are replaced.
+
+### Native display runtime
+
+`Compiler/JetRuntime/Source/Display.jet` owns the scalar C display leaves.
+The generic `jet_fmt_display`, `jet_fmt_debug`, and `jet_fmt_show` calls are
+resolved by checked type in native lowering, not erased into untyped runtime
+functions. Text results use the shared E4 `{ptr, len, cap}` UTF-8 carrier.
+Exact Int formatting borrows the canonical base-1e9 limb carrier; fixed
+signed/unsigned words never enter arbitrary-precision arithmetic.
+
+Today's `JetDisplay`, `JetShow`, and `JetDebug` implementations for binary64
+all use Rust's shortest Debug spelling: signed zero is `-0.0`, integral
+decimals keep `.0`, exponent notation applies below `1e-4` and at/above
+`1e16`, and NaN ignores its sign and payload. `FloatShortest.jet` reuses
+the pinned Dragon digit algorithm, with one bounded workspace released
+before returning. Rust-tier scalar C bodies remain seed/verification paths
+under `cfg(not(jet_native_pack))`; they do not define symbols in native packs.
+
+Binary32 has two raw-word C leaves, `jet_rt_float32_to_string(bits: I64)`
+and `jet_rt_float32_debug(bits: I64)`, returning the same owned E4 text.
+Only low32 is interpreted; upper32 is ignored. Its 24-bit decoder (bias
+127, subnormal unit 2^-149) feeds the shared bounded Dragon core, without
+widening to binary64. Display follows Rust f32 `{}`: fixed decimal, `-0`,
+and no mandatory `.0`. Debug follows Rust f32 `{:?}`: `-0.0`, integral
+`.0`, scientific notation below f32(1e-4) or at/above f32(1e16). Those
+binary32 bounds are `0x38d1b717` and `0x5a0e1bca`; the binary64 bounds
+are not reused. Rust 1.90 `core/src/fmt/float.rs` and
+`core/src/num/flt2dec/decoder.rs` define these spelling/decoder rules.
+
+`Core/text/fmt.jet` contains the source-owned interpolation policy helpers:
+`quantity` trims only an incidental `.0` from Float display; `fixed_int` and
+`grouped_int_fixed` append fixed decimal places to an exact Int without
+Float conversion. `hex_decimal`, `bin_decimal`, and `oct_decimal` accept an
+optional sign followed by ASCII decimal digits, normalize zeros through
+exact Int, and preserve malformed input trimmed but otherwise unchanged.
+These reuse the historical `aa45bf8fc` formatting policy; they introduce
+no raw C runtime symbols.
+Fixed decimal, grouping and percentage use the same exact binary-rational
+ties-to-even rounding as scientific formatting and preserve the IEEE sign
+bit even when rounded to zero. Decimal byte units spell `KB` like the seed.
+Duration's `Int.MIN` double-minus spelling is intentionally seed-compatible:
+it matches the native Rust release overflow bug pending the owner's bug card.
+The compiler's shared selector-to-source map drives both Core reachability
+and expression lowering: a selected formatter is rooted by its checked
+function key and invoked as an ordinary user-function MIR call. Lookup is
+restricted to the canonical Core source unit, so same-named user functions
+cannot intercept selectors. Pretty formats Debug text; padding and textual
+radix helpers format Display text; numeric arguments use the source helper's
+checked parameter type. Exact integer selectors keep their exact Int carrier.
+Display and Debug retain native type-directed rendering rather than an
+erased formatter. This compiler-output migration lands after the gate;
+generated native route tables are regenerated with the unified native stack.
+
+`Tests/run-fmt-parity.mjs prepare OUT` builds a verification-only oracle by
+including the existing Rust formatting bodies, then saves framed raw output
+for all 23 former C formatter kernels. The corpus covers signed limits, zero,
+precision and padding widths, Unicode, malformed decimal spellings, and
+nested/quoted pretty values. The optimized oracle matches the packaged seed's
+release overflow profile; its inputs never pass a decimal integer as a tagged
+machine-word Int.
+`compare OUT CHECKER` executes the local Core source bodies with that release
+profile and writes per-case input, expected bytes, actual bytes and source
+location to `parity.json`, together with the checker's resolved path, SHA-256,
+and the immutable expected-output SHA-256. Borrowed trim results used as owned
+String inputs use Core's explicit owned-copy pattern (`~value.trim()`); compare
+refreshes that source fix without regenerating the oracle. This is source-body seed parity, not native selector
+or runtime-pack proof. A mismatching kernel cannot retire until its parity
+cases pass; native generic Display/Debug/Show remain checked-type renderers.
+
+`FloatBits.jet` contains ordinary Core-backed reference functions. Only the
+runtime-object driver may replace their validated checked IDs with internal
+LIR `Bitcast` operations; normal program lowering executes their bodies.
+The same private table handles the thread-entry address relocation. Its
+signatures reject generics, captures, failure carriers, writable parameters,
+and mismatched scalar types. Bitcasts preserve all 64 bits and require
+trivial Integer/Float/Pointer layouts; they are pure operations, not optimizer
+copy aliases. There is no MIR, language, or Float-assembly extension.
+
+The optional ABI witnesses are selected with `run-runtime.mjs OUT --test
+FloatBits`, using the shared single-fixture selector. Their additional export
+list is confined to that test object, never the production runtime manifest.
+
+`Compiler/JetRuntime/Tests/run-display-goldens.mjs` prepares all binary
+exponents with mantissa edges, decimal-power neighbors, signed zero,
+NaN payloads, infinities, subnormals, one million deterministic random bit
+patterns, decimal ties, integer transitions around 2^53, and every floating
+literal in the registered golden corpus. Its freestanding
+client calls the real Jet exports in the native pack and compares both
+float leaves byte for byte with a separately compiled Rust Debug oracle.
+It also checks scalar limits, UTF-8 boundaries, the boxed Int limb layout,
+Jet-owned exports, and that every Jet-object import resolves in the pack.
+The binary32 differential additionally covers every finite exponent with
+mantissa edges, decimal powers, threshold neighborhoods, decimal ties,
+2^24 integer transitions, signed zero, subnormals, NaN payloads and
+infinities, upper32-poisoned edge words, and one million deterministic
+random32 samples. The real native C witness compares both leaves against
+independent Rust f32 Display/Debug bytes; `binary32_byte_equal` is recorded
+separately from binary64 parity.
+The same runner executes the selected passing print/format goldens against
+that pack and records a one-million-float formatting cell for native Jet and
+the Rust reference, including a digest comparison and measured timing ratio.
+The runtime-object path currently has no optimizer; its timing is labelled
+“runtime object unoptimized” and is not an O1 performance verdict.
+These checks are behavioral proof only when executed against the composed
+runtime object and pack; corpus preparation alone is not a pass.
