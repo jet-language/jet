@@ -230,7 +230,10 @@ fn jet_process_limit_i64(value: I64) -> I64 {
 #Export(c) fn jet_process_spec_open_file_limit(value: I64, limit: I64) -> I64 { process_spec_raw_replace(value, PROCESS_SPEC_OPEN_FILE_LIMIT, jet_process_limit_i64(limit)) }
 fn process_spec_mode(value: I64, mode: I64, field: I64) -> I64 {
     // Frozen CAbiRoutes range_stop, not exact Int native() conversion.
-    if (mode < PROCESS_STREAM_STREAM || mode > PROCESS_STREAM_CAPTURE) -> trap_native_index_range_stop()
+    if (mode < PROCESS_STREAM_STREAM || mode > PROCESS_STREAM_CAPTURE) {
+        trap_native_index_range_stop()
+        if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    }
     if (field == PROCESS_SPEC_STDIN) -> return process_spec_raw_replace(value, field, mode)
     result :: jet_rt_handle_clone_ProcessSpec(value)
     encoding_store(result + field, mode)

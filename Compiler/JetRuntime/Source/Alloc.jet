@@ -478,6 +478,11 @@ fn alloc_stop(invalid_layout: Bool, size: I64) {
     alloc_write_size(size)
     alloc_write_word(I64{7359008670706393632}, I64{8})
     alloc_write_word(I64{11426314611041}, I64{6})
+    alloc_abort()
+}
+
+// One process-abort mechanism for allocation failure and panic in cleanup.
+fn alloc_abort() {
     #Unsafe("the stack-word syscalls unblock SIGABRT and, if necessary, restore its default disposition before raising it again; no heap pointer is needed") {
         pid :: os_syscall_i64(I64{39}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
         _ := os_syscall_stack4_i64(I64{14}, I64{1}, I64{32}, I64{0}, I64{0}, I64{0}, I64{8})

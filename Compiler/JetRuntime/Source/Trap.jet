@@ -191,11 +191,47 @@ fn trap_simple(code: I64, file: I64, file_len: I64, line: I64, message: I64, mes
     trap_simple(I64{1}, file, file_len, line, message, message_len)
 }
 
+// CAbiRoutes.rs:11-12: publish the seed's raw native-Int range reason.
+// Int's fatal conversion path deliberately calls only the root body below.
 fn trap_native_index_range_stop() {
+    message :: jet_rt_alloc(I64{40}, I64{8})
+    trap_store(message, I64{5269323123273261422})
+    trap_store(message + I64{8}, I64{7887324063362741358})
+    trap_store(message + I64{16}, I64{7305815396256607845})
+    trap_store(message + I64{24}, I64{8391173023733081189})
+    trap_store(message + I64{32}, I64{111494907916832})
+    published :: rt_task_panic_publish(message, I64{38}, I64{0})
+    jet_rt_free(message, I64{40}, I64{8})
+    if published -> return
+    trap_native_index_range_root()
+}
+
+fn trap_native_index_range_root() {
     trap_header(I64{1})
     trap_msg_native_index_range()
     trap_msg_prelude_end()
     trap_footer(I64{1})
+}
+
+// Internal collection arithmetic is a registered Jet E3010 stop even where
+// Core/Collections.rs uses raw Rust overflow. Preserve the existing root
+// report; tasks carry exactly its trap_msg_overflow message bytes.
+fn trap_internal_overflow_stop() {
+    message :: jet_rt_alloc(I64{80}, I64{8})
+    trap_store(message, I64{7598242313330583636})
+    trap_store(message + I64{8}, I64{2333824980546840692})
+    trap_store(message + I64{16}, I64{8606216600190023279})
+    trap_store(message + I64{24}, I64{7022836288847093875})
+    trap_store(message + I64{32}, I64{8751655654842004844})
+    trap_store(message + I64{40}, I64{2334386829960177008})
+    trap_store(message + I64{48}, I64{7575182582412961138})
+    trap_store(message + I64{56}, I64{7235441220371030131})
+    trap_store(message + I64{64}, I64{7021710449270399077})
+    trap_store(message + I64{72}, I64{694511470})
+    published :: rt_task_panic_publish(message, I64{76}, I64{0})
+    jet_rt_free(message, I64{80}, I64{8})
+    if published -> return
+    jet_rt_panic_overflow()
 }
 
 #Export(c) fn jet_rt_panic_overflow() {
@@ -226,8 +262,26 @@ fn trap_native_index_range_stop() {
 #Export(c) fn jet_rt_panic_list_bounds(len: I64, index: Int) {
     native :: I64.from_int(index) ?? {
         trap_native_index_range_stop()
+        if (jet_scheduler_native_propagate() != I64{0}) -> return
         return
     }
+    // Outcome.rs:2463-2466 supplies the one list-index reason. Reuse the
+    // existing decimal formatter, including I64.MIN; publication copies it.
+    message :: jet_rt_string_builder_new()
+    scratch :: jet_rt_alloc(I64{24}, I64{8})
+    rt_text_push_word(message, I64{8391166443842267252}, I64{8})
+    rt_text_push_word(message, I64{139374716960}, I64{5})
+    coll_render_i64(message, scratch, len)
+    rt_text_push_word(message, I64{2318354821879720224}, I64{8})
+    rt_text_push_word(message, I64{8388362703413997427}, I64{8})
+    rt_text_push_word(message, I64{544108393}, I64{4})
+    coll_render_i64(message, scratch, native)
+    rt_text_push_word(message, I64{8369779874393449504}, I64{8})
+    rt_text_push_word(message, I64{128039039558944}, I64{6})
+    published :: rt_task_panic_publish(rt_text_data(message), rt_text_len(message), I64{0})
+    jet_rt_free(scratch, I64{24}, I64{8})
+    jet_rt_string_drop(message)
+    if published -> return
     trap_header(I64{1})
     trap_msg_list_head()
     trap_number(len)

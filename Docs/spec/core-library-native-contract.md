@@ -177,6 +177,13 @@ control preserves the native task-body marker: root/session panics remain
 process-fatal, while task-body panics become owned `TaskFailure.Panicked`
 outcomes and do not print stderr. Flattened body errors participate in
 completion-order selection, including heterogeneous tuple children.
+Task panic producers publish through the existing stop rail and return; private
+callers observe the delivered status before reading results or performing further
+effects, and discard only their owned partial results. The outcome carries the
+raw program reason, not the rendered diagnostic or location. Root reports retain
+their registered bytes and exit status. A panic during an already-delivered
+stop's cleanup aborts instead of replacing that outcome; a shielded pending
+cancel or deadline is not yet delivered and cannot suppress a task panic.
 Core `Task` handles are move-only: one consuming joiner uses the completion
 park slot, while lexical cleanup drains the retained state with a wake-all
 completion word. Rejected bounded-group spawns return their admission permit.

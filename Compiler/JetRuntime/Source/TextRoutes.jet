@@ -147,7 +147,8 @@ fn rt_text_ascii(value: I64, upper: Bool) -> I64 {
     // CAbiRoutes fixed::<u32> decodes an exact Int then checks the width.
     native_line :: jet_int_owned_to_i64(line)
     if (native_line < I64{0} || native_line > I64{4294967295}) {
-        int_stop(I64{0}, I64{0}, I64{0}, I64{4})
+        trap_native_index_range_stop()
+        if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
         return I64{0}
     }
     jet_rt_string_slice_range(value, jet_int_owned_to_i64(start), jet_int_owned_to_i64(end), U8{1}, rt_text_data(file), rt_text_len(file), native_line)
