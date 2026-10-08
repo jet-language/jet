@@ -1407,7 +1407,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: fd34a426a7661846ac8deb2d8b386bf740f4b1c3a3c63e64d17a5b4e7cbbd944
+// Source SHA-256: f1d4e369fb0e9a1cfde588585ecdd4a17413ed7cd533d7f2447523455d5a1416
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -1755,11 +1755,11 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.devtools", "publish", "jet_devtools_publish", true, &[false, false, false, false, false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.mem", "volatile_read", "std::ptr::read_volatile", false, &[false], ) .without_direct_aot(),
     CoreCallRecord::new( "core.mem", "volatile_write", "std::ptr::write_volatile", false, &[false, false], ) .without_direct_aot(),
-    CoreCallRecord::new("core.mem", "__string_data", "jet_mem::jet_string_data", false, &[true]).with_interpreter_route(CoreCallInterpreterRoute::None),
-    CoreCallRecord::new("core.mem", "__string_byte_len", "jet_mem::jet_string_byte_len", false, &[true]).with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::None),
-    CoreCallRecord::new("core.mem", "__bytes_pack", "jet_mem::jet_bytes_pack", false, &[true]).with_interpreter_route(CoreCallInterpreterRoute::None),
-    CoreCallRecord::new("core.mem", "__bytes_free", "jet_mem::jet_bytes_free", false, &[false, true]).with_interpreter_route(CoreCallInterpreterRoute::None),
-    CoreCallRecord::new("core.mem", "__bytes_unpack", "jet_mem::jet_bytes_unpack", false, &[false, true]).with_interpreter_route(CoreCallInterpreterRoute::None),
+    CoreCallRecord::new("core.mem", "__string_data", "jet_mem::jet_string_data", false, &[true]).with_interpreter_route(CoreCallInterpreterRoute::TypedIntrinsic),
+    CoreCallRecord::new("core.mem", "__string_byte_len", "jet_mem::jet_string_byte_len", false, &[true]).with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::TypedIntrinsic),
+    CoreCallRecord::new("core.mem", "__bytes_pack", "jet_mem::jet_bytes_pack", false, &[true]).with_interpreter_route(CoreCallInterpreterRoute::TypedIntrinsic),
+    CoreCallRecord::new("core.mem", "__bytes_free", "jet_mem::jet_bytes_free", false, &[false, true]).with_interpreter_route(CoreCallInterpreterRoute::TypedIntrinsic),
+    CoreCallRecord::new("core.mem", "__bytes_unpack", "jet_mem::jet_bytes_unpack", false, &[false, true]).with_interpreter_route(CoreCallInterpreterRoute::TypedIntrinsic),
     CoreCallRecord::new( "core.tasks", "interval", "jet_std::interval", true, &[false], ),
     CoreCallRecord::new("core.tasks", "after", "jet_std::after_value", true, &[false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.tasks", "yield_now", "jet_std::jet_task_yield", true, &[], ),

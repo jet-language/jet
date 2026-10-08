@@ -65,3 +65,40 @@ pub fn address_of<T>(value: T) -> Int Never! { core.mem.address_of<T>(value) }
         assert_eq(String.from_bytes(mem.__bytes_unpack(data, bytes)) ?? "", text)
     }
 }
+
+#Test("physical String loans preserve local, read parameter, field, list, map and nested homes without a byte registry") {
+    loan :: fn(text: String) -> U64 Never! {
+        #Unsafe("the caller retains the original String home until all subsequent byte-span reads complete") {
+            mem.__string_data(text)
+        }
+    }
+    local :: "local\0λ"
+    boxed :: .{text: "field\0λ"}
+    nested :: .{texts: [String]{"nested\0λ"}}
+    indexed :: [String]{"list\0λ"}
+    mapped :: [String:String]{"key": "map\0λ"}
+    empty :: ""
+    #Unsafe("each original home is live and unmodified while its returned pointer is compared and copied as an exact UTF-8 byte span") {
+        assert_eq(loan(local), mem.__string_data(local))
+        assert_eq(loan(boxed.text), mem.__string_data(boxed.text))
+        assert_eq(loan(nested.texts[0]), mem.__string_data(nested.texts[0]))
+        assert_eq(loan(indexed[0]), mem.__string_data(indexed[0]))
+        assert_eq(loan(mapped["key"]), mem.__string_data(mapped["key"]))
+        assert_eq(loan(empty), mem.__string_data(empty))
+        assert_eq(mem.__string_byte_len(local), 8)
+        assert_eq(String.from_bytes(mem.__bytes_unpack(loan(local), mem.__string_byte_len(local))) ?? "", local)
+        assert_eq(String.from_bytes(mem.__bytes_unpack(loan(boxed.text), mem.__string_byte_len(boxed.text))) ?? "", boxed.text)
+        assert_eq(String.from_bytes(mem.__bytes_unpack(loan(nested.texts[0]), mem.__string_byte_len(nested.texts[0]))) ?? "", nested.texts[0])
+        assert_eq(String.from_bytes(mem.__bytes_unpack(loan(indexed[0]), mem.__string_byte_len(indexed[0]))) ?? "", indexed[0])
+        assert_eq(String.from_bytes(mem.__bytes_unpack(loan(mapped["key"]), mem.__string_byte_len(mapped["key"]))) ?? "", mapped["key"])
+        assert_eq(mem.__bytes_unpack(loan(empty), 0), [U8]{})
+    }
+    prepared :: prep {
+        text :: "comptime\0λ"
+        #Unsafe("the comptime String home stays live until unpack finishes copying its exact UTF-8 span") {
+            assert_eq(String.from_bytes(mem.__bytes_unpack(mem.__string_data(text), mem.__string_byte_len(text))) ?? "", text)
+        }
+        true
+    }
+    assert(prepared)
+}

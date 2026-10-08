@@ -2,11 +2,14 @@ use super::{BootstrapCodecSymbols, BootstrapHostCodecError};
 use crate::Codegen::MIRRust::MirRustTraitMethodMetadata;
 use std::fmt::Write as _;
 
+#[path = "StringHome.rs"]
+mod string_home;
+
 /// Adapter methods the host answers with a native operation. Each takes the
 /// Source machine first and is served by `__jet_bootstrap_native_{name}`; any
 /// other machine method of the trait is answered as unavailable (`None`), which
 /// the evaluator reports as an explicit unsupported-host diagnostic.
-const HOST_OPERATIONS: &[&str] = &["host_call", "foreign_call", "handle_call"];
+const HOST_OPERATIONS: &[&str] = &["host_call", "foreign_call", "handle_call", "string_home", "bytes_pack", "bytes_free", "bytes_unpack"];
 
 pub(crate) fn emit_bootstrap_native_adapter_impl(
     out: &mut String,
@@ -304,6 +307,7 @@ pub(crate) fn emit_bootstrap_native_adapter_impl(
     }
     writeln!(out, "}}")
         .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
+    string_home::emit_string_home_operations(out, symbols, &methods)?;
     emit_native_unavailable_operations(out, &methods)?;
     emit_native_interface_helpers(out, &methods)?;
     emit_native_callback_scope_helpers(out)?;
@@ -671,6 +675,7 @@ fn emit_native_interface_helpers(
                     "poll_callbacks" | "drain_callbacks" => format!(
                         "|mut machine| match machine.typed_mut() {{ Some(machine) => Ok(Ok(__jet_bootstrap_native_{name}(&adapter.root, &adapter.callbacks, machine))), None => Err(\"native adapter {name} needs the typed Source machine\".to_string()) }}"
                     ),
+                    "bytes_free" => "|mut machine, pointer, length, span| Ok(Ok(__jet_bootstrap_native_bytes_free(&mut machine, &pointer, &length, &span)))".to_string(),
                     "physical_binding" => {
                         "|| Ok(Ok(__jet_bootstrap_native_adapter_physical_binding(&adapter)))".to_string()
                     }

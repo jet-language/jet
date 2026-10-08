@@ -508,6 +508,12 @@ trait JetEvalHostAdapter {
     fn host_call(self, machine: &JetEvalMachine, target: JetEvalHostCallTarget, static_operand: JetEvalHostStaticOperand?, args: ^[JetEvalHostArgument], result_shape: JetEvalHostTypeShape?, arg_shapes: [JetEvalHostTypeShape], span: Span) -[FS.Read]> JetEvalHostResult?
     fn foreign_call(self, machine: &JetEvalMachine, row: MIRForeign, args: ^[JetEvalHostArgument], span: Span) -[FS.Read]> JetEvalHostResult?
     fn handle_call(self, machine: &JetEvalMachine, operation: String, handle: MIRHandleID, raw: Int, span: Span) -[FS.Read]> JetEvalHostResult?
+    // Compiler-private TypedIntrinsic leaves, never a source-visible FFI cast.
+    // string_home receives selectors into the borrowed machine, not String bytes.
+    fn string_home(self, machine: &JetEvalMachine, request: JetEvalStringHomeRequest, span: Span) -[]> JetEvalStringHome?
+    fn bytes_pack(self, machine: &JetEvalMachine, bytes: [U8], span: Span) -[]> U64?
+    fn bytes_free(self, machine: &JetEvalMachine, pointer: U64, length: Int, span: Span) -[]> Bool
+    fn bytes_unpack(self, machine: &JetEvalMachine, pointer: U64, length: Int, span: Span) -[]> [U8]?
     // Cleanup-only path for Source backing-root refs and provisional owner
     // leases. A committed allocator lease is released by the allocator's
     // normal handle drop instead.
@@ -552,12 +558,16 @@ pub struct JetEvalOwnedRootDropResult {
 }
 
 
+struct JetEvalCallerSite { frame: Int, block: MIRBlockID, ip: Int }
+
 pub struct JetEvalFrame {
     pub function: MIRFunctionID
     pub block: MIRBlockID
     pub ip: Int
     pub predecessor: MIRBlockID?
     pub params: [JetEvalRuntimeValue]
+    // Call-site provenance, never copied String storage.
+    caller_site: JetEvalCallerSite?
     pub captures: [JetEvalRuntimeValue]
     pub values: [U64:JetEvalRuntimeValue]
     pub borrowed_values: [U64:Bool]
