@@ -10,7 +10,7 @@ function fixture(t) {
   mkdirSync(join(root, 'tests'), { recursive: true });
   t.after(() => rmSync(root, { recursive: true, force: true })); return root;
 }
-const fn = (body) => functionsIn(`#[test]\nfn example() { ${body} }`, 'tests/sample.rs')[0];
+const fn = (body) => classify(functionsIn(`#[test]\nfn example() { ${body} }`, 'tests/sample.rs')[0]);
 const diagnostic = { code: 'E0209', what: 'must copy value', why: 'one owner', fix: '~value', severity: 'error' };
 const reference = async (source, mode) => ({ source, mode, code: 1, diagnostics: [diagnostic], rendered: 'Error [E0209]: must copy value\n' });
 
@@ -422,4 +422,27 @@ test('attempt and emit selections intersect and unknown human rows are refused',
   assert.equal(report.results[0].status, 'HAND-PORT');
   writeFileSync(attempt, 'tests/sample.rs::missing\n');
   await assert.rejects(main(['--root', root, '--attempt', attempt, '--bless-from', '/unused']), /attempt function not found/u);
+});
+
+test('emission keeps the helper-aware disposition computed by its caller', async (t) => {
+  const root = fixture(t);
+  const rows = functionsIn(`fn rust_oracle() -> String {
+    let output = Command::new(env!("CARGO_BIN_EXE_jet")).args(["emit", "--rust"]).output().unwrap();
+    String::from_utf8(output.stdout).unwrap()
+  }
+  #[test] fn acceptance() {
+    let out = jet::compile("fn run() {}").expect("ok");
+    assert_eq!(out.rust, rust_oracle());
+  }`, 'tests/sample.rs');
+  const original = rows.find(row => row.test), helpers = rows.filter(row => !row.test);
+  assert.equal(classify(original).disposition, 'retire-with-Rust');
+  const classified = classify(original, helpers);
+  assert.equal(classified.disposition, 'CLI case+retire-rust-asserts');
+  const observe = async (source, mode) => ({ source, mode, code: 0, diagnostics: [], rendered: '(no errors)\n' });
+  const result = await emitFunction(classified, { root, reference: observe });
+  assert.equal(result.status, 'CONVERTED');
+  assert.equal(result.assertions, 1);
+  assert.equal(result.retiredAssertions, 1);
+  assert.equal(readFileSync(join(root, 'tests/ui/sample/acceptance.jet'), 'utf8'), 'fn run() {}');
+  await assert.rejects(emitFunction(original, { root, reference: observe }), /requires a classified function/u);
 });

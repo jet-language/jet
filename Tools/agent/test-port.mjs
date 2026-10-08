@@ -844,9 +844,12 @@ export function makeReference(binary, root, scratch, timeout = 600000) {
 
 // Every observation is checked first; only then construct the write set. No
 // partial cases when a later source/assertion fails. Existing cases are refused.
+// The caller supplies its helper-aware classified row; never make a second
+// disposition decision after lexical helper resolution.
 export async function emitFunction(fn, options) {
   const root = options.root ?? ROOT;
-  if (classify(fn).disposition === 'retire-with-Rust' && !options.attempted) refuse('Rust-only function must be retired, not emitted');
+  if (typeof fn.disposition !== 'string') refuse('emitFunction requires a classified function');
+  if (fn.disposition === 'retire-with-Rust' && !options.attempted) refuse('Rust-only function must be retired, not emitted');
   const checked = await checkOriginal(fn, options.reference, root);
   const suite = fn.file.replace(/^tests\//u, '').replace(/\.rs$/u, '').replaceAll('/', '_');
   const files = [];
@@ -934,7 +937,7 @@ export async function main(argv) {
       const attempted = attempts.has(`${fn.file}::${fn.name}`);
       if (classified.disposition === 'retire-with-Rust' && !attempted) result = { status: 'RETIRED', function: `${fn.file}::${fn.name}`, reason: classified.target };
       else {
-        try { result = await emitFunction(fn, { ...options, reference, attempted }); }
+        try { result = await emitFunction(classified, { ...options, reference, attempted }); }
         catch (error) {
           const primaryEdit = error.status !== 'ERROR' && /\.(?:edit|safety|applicability)\b/u.test(fn.body);
           const reason = primaryEdit ? `asserts primary Diagnostic.edit / Diagnostic.safety; jet.report/v3 exposes only all_edits (${error.message})` : error.message;
