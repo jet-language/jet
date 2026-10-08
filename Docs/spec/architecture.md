@@ -77,6 +77,16 @@ information and receives a scoped `RUST_MIN_STACK=67108864` environment setting
 for the large generated compiler units; tool crashes remain failed evidence,
 not a native-runtime semantic verdict.
 
+Runtime-pack roots include the public defined C-ABI globals of standalone
+runtime objects as well as the first runtime archive's indexed C ABI and
+explicit extra roots. The Jet object writer publishes audited exports as
+global symbols and private functions as locals. Packing preserves that
+boundary: undefined symbols, hidden/internal definitions, private functions
+and mangled implementation names do not become object export roots. Archive
+members pulled to satisfy these exports remain implementation dependencies.
+`Compiler/JetBackend/Tests/run-runtime-pack-roots.mjs` exercises this boundary
+with real objects, an archive and a consumer, including an unreferenced export.
+
 The all-parts runtime includes `CAbiTest.rs` once through Codegen's canonical
 prelude; the compiler-call preparation step must not append a second copy.
 Test callbacks transfer owned E4 text errors through the shared carrier `take`
