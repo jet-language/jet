@@ -1,0 +1,24 @@
+# Port of tests/cffi.rs:1433-1568 plus1236-1294. Sources and binding-cache bytes verbatim.
+# ORACLE-LITERAL stdout: rs1527 and1557-1559.
+# Generated-Rust extern/symbol text and direct rustc-acceptance asserts retire with Rust emitter.
+# PENDING-GRAMMAR write/tool alternatives; runtime PENDING-SAME-HEAD.
+requires: tool:cc|gcc|clang
+requires: tool:ar
+fixture: cffi-end-to-end.fixture
+write: package.jet cffi-end-to-end.package.template
+step: {tool:cc|gcc|clang} -c {work}/jetc.c -o {work}/jetc.o
+exit: 0
+step: ar rcs {work}/libjetc.a {work}/jetc.o
+exit: 0
+step: jet build main.jet
+exit: 0
+step: built
+exit: 0
+stdout: = cffi-end-to-end.out
+step: jet run jit.jet
+env: JET_STORE_DIR={work}/run-cache
+env: NO_COLOR=1
+exit: 0
+stdout: = cffi-signatures.out
+stderr: !~ "unbound wrapper" # original predicate
+stderr: !~ "unsupported signature" # original predicate
