@@ -3553,6 +3553,10 @@ TCP reply, TCP option access, and UDP bind enter their Jet public functions
 before the corresponding reserved `__tcp_reply`, `__set_*`, `__nodelay`,
 `__ttl`, and `__udp_bind*` leaves. Raw leaves retain existing native error
 mapping, borrow/move conventions, and interpreter-route availability.
+UDP address, timeout, send, and receive operations and Unix listen, accept,
+read, byte-write, shutdown, and close also enter Jet source first. Their
+reserved raw leaves preserve exactly the public operation's existing effect
+row and supported interpreter/native tiers.
 
 DNS error classification is Jet source policy. Reserved Core-only
 `__dns_*_lookup` leaves call the existing resolver and return its raw string
