@@ -14,7 +14,7 @@ fn cli_optional_text(value: String?) -> DataTree Never! {
     }
 }
 
-pub fn cli_cmd_explain(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+pub fn cli_cmd_explain(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     cache := WorkspaceDeclarationCache.new()
     query :: parsed.positional.get(0) ?? return cli_explain_error(theme, parsed, "E1274", "explain needs a package ref", "`jet explain <CODE>` is handled by the main compiler; `jetpack explain` explains package refs.", "write `jet explain weirdctl` after a failed build.")
     if query.starts_with("package-overlay:") -> return cli_cmd_explain_overlay(&cache, theme, parsed, query)
@@ -49,7 +49,7 @@ pub fn cli_cmd_explain(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net
         package = parsed.positional.get(1) ?? return cli_explain_error(theme, parsed, "E1274", "explain lens `{query}` needs a package ref", "causal package explanations need the lens and the package ref.", "write `jet explain {query} <ref>`.")
     }
     roots :: pkg_resolve_roots()
-    if store_explain_package(roots, package, lens) == {
+    if store_explain_package(&verification, roots, package, lens) == {
         .Ok(found) -> {
             explanation :: found ?? return cli_explain_error(theme, parsed, "E1274", "no package record or build attempt for `{package}`", "`jet explain` reads the Hangar Store and persisted Jetpack realization attempts; neither contains this package.", "run `jet build {package}` first, or use `jet explain E1234` for diagnostic-code help.")
             if parsed.flags.json {
