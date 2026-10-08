@@ -62,35 +62,108 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::Arc;
 
-/// Recover the stack-address fact from completed TIR, including deferred
-/// branches and expression-cache continuations.
-pub(crate) fn note_stack_sentry_in_tir(nodes: &[TStmt], env: &LowerEnv) {
-    fn walk_expr(node: &TExpr) -> bool {
+/// Borrowed traversal of completed TIR, including deferred branches and
+/// expression-cache continuations. A predicate that always returns false
+/// visits every node; no child expression is cloned or allocated.
+struct TirExprWalk<'a, F> {
+    predicate: &'a mut F,
+}
+
+impl<F: FnMut(&TExpr) -> bool> TirExprWalk<'_, F> {
+    fn expr(&mut self, node: &TExpr) -> bool {
+        if (self.predicate)(node) {
+            return true;
+        }
         match &node.kind {
-            TExprKind::CoreCall { record, args, .. } => {
-                (record.module == "core.mem"
-                    && record.member == "address_of"
-                    && args.first().is_some_and(|arg| {
-                        matches!(
-                            tir_address_lifetime(arg),
-                            crate::Codegen::TIR::TAddressLifetime::Stack
-                                | crate::Codegen::TIR::TAddressLifetime::Unknown
-                        )
-                    }))
-                    || args.iter().any(walk_expr)
-            }
-            TExprKind::RawOf(inner) => {
-                matches!(
-                    tir_address_lifetime(inner),
-                    crate::Codegen::TIR::TAddressLifetime::Stack
-                ) || walk_expr(inner)
-            }
-            TExprKind::InlineBlock(body) => walk_stmts(body),
+            TExprKind::StrLit(parts) => parts.iter().any(|part| match part {
+                super::super::TStrPart::Interp(value, _) => self.expr(value),
+                super::super::TStrPart::Lit(_) => false,
+            }),
+            TExprKind::HostCall(host) => match host.as_ref() {
+                super::super::THostCall::Helper { args, .. } => args.iter().any(|arg| match arg {
+                    super::super::THostArg::Expr(value) | super::super::THostArg::Borrow(value) => self.expr(value),
+                    super::super::THostArg::Lambda(_) => false,
+                }),
+                super::super::THostCall::Method { recv, args, .. } => {
+                    self.expr(recv) || args.iter().any(|arg| self.expr(arg))
+                }
+                super::super::THostCall::CarrierFact { recv, .. }
+                | super::super::THostCall::CellGuardProject { recv, .. }
+                | super::super::THostCall::OptionProbe { inner: recv, .. }
+                | super::super::THostCall::TupleIndex { base: recv, .. }
+                | super::super::THostCall::TypedText { arg: recv, .. }
+                | super::super::THostCall::YieldSend { value: recv }
+                | super::super::THostCall::StrMatchScan { subject: recv, .. }
+                | super::super::THostCall::BinMatchScan { subject: recv, .. }
+                | super::super::THostCall::ExpectSnapshot { value: recv, .. } => self.expr(recv),
+                super::super::THostCall::FixedListIndex { base, index, .. }
+                | super::super::THostCall::EnvSet { name: base, value: index, .. } => self.expr(base) || self.expr(index),
+                super::super::THostCall::GcEdit { edit, index_temp, .. } => {
+                    self.expr(edit) || index_temp.as_ref().is_some_and(|(_, index)| self.expr(index))
+                }
+                super::super::THostCall::TypedTextInterp { holes, .. } => holes.iter().any(|arg| self.expr(arg)),
+                super::super::THostCall::ExpiringSecretNew { value, duration, clock, .. }
+                | super::super::THostCall::ExpiringValueNew { value, duration, clock } => {
+                    self.expr(value) || self.expr(duration) || self.expr(clock)
+                }
+                super::super::THostCall::FnName(_)
+                | super::super::THostCall::MemoStats { .. }
+                | super::super::THostCall::GcRead { .. }
+                | super::super::THostCall::SwitchSubjectField { .. }
+                | super::super::THostCall::SwitchSubjectValue
+                | super::super::THostCall::NumericBounds { .. }
+                | super::super::THostCall::CCallback { .. } => false,
+            },
+            TExprKind::EnumLit { payload, .. } => match payload {
+                super::super::TEnumPayload::Unit => false,
+                super::super::TEnumPayload::Positional(args) => args.iter().any(|arg| self.expr(&arg.value)),
+                super::super::TEnumPayload::Named(fields) => fields.iter().any(|(_, value)| self.expr(&value.value)),
+            },
+            TExprKind::RequireStop { kind, .. } => match kind {
+                super::super::TRequireKind::Require { cond, msg } => {
+                    self.expr(cond) || msg.as_deref().is_some_and(|arg| self.expr(arg))
+                }
+                super::super::TRequireKind::RequireEq { left, right } => self.expr(left) || self.expr(right),
+                super::super::TRequireKind::Panic { msg } => self.expr(msg),
+            },
+            TExprKind::FnValue { kind } => match kind {
+                super::super::TFnValueKind::Policy { policy_args, callee, .. } => {
+                    policy_args.iter().any(|arg| self.expr(&arg.value)) || self.expr(callee)
+                }
+                super::super::TFnValueKind::Call { callee, args } => {
+                    self.expr(callee) || args.iter().any(|arg| self.expr(&arg.value))
+                }
+                super::super::TFnValueKind::Send { value } => self.expr(value),
+                super::super::TFnValueKind::NamedFn { .. } => false,
+            },
+            TExprKind::CoreClosureCall { kind } => match kind {
+                super::super::TCoreClosureKind::Spawn { group, .. } => group.as_deref().is_some_and(|arg| self.expr(arg)),
+                super::super::TCoreClosureKind::Realtime { rate, frames, .. } => self.expr(rate) || self.expr(frames),
+                super::super::TCoreClosureKind::Serve { addr, .. } => self.expr(addr),
+                super::super::TCoreClosureKind::OnInterrupt { callback } => self.expr(callback),
+                super::super::TCoreClosureKind::UiButtonOnClick { label, shortcut, accessible_label, .. } => {
+                    self.expr(label) || self.expr(shortcut) || self.expr(accessible_label)
+                }
+                super::super::TCoreClosureKind::UiTextInputOnDrop { state, ime, .. } => self.expr(state) || self.expr(ime),
+                super::super::TCoreClosureKind::UiPreview { name, viewport, .. } => {
+                    self.expr(name) || viewport.as_deref().is_some_and(|arg| self.expr(arg))
+                }
+                super::super::TCoreClosureKind::Guard { .. }
+                | super::super::TCoreClosureKind::OnCommit { .. }
+                | super::super::TCoreClosureKind::OnRollback { .. }
+                | super::super::TCoreClosureKind::ReactiveDerived { .. }
+                | super::super::TCoreClosureKind::ReactiveEffect { .. }
+                | super::super::TCoreClosureKind::UiReactiveRender { .. } => false,
+            },
+            TExprKind::CoreCall { args, .. } => args.iter().any(|arg| self.expr(arg)),
+            TExprKind::RawOf(inner) => self.expr(inner),
+            TExprKind::InlineBlock(body) => self.stmts(body),
             TExprKind::Call { args, .. }
+            | TExprKind::AllocNew { args, .. }
             | TExprKind::StaticCall { args, .. }
-            | TExprKind::ModuleCall { args, .. } => args.iter().any(|arg| walk_expr(&arg.value)),
-            TExprKind::ExternCall { args, .. } => args.iter().any(|arg| walk_expr(&arg.value)),
-            TExprKind::PtrFromAddr { addr, .. } => walk_expr(addr),
+            | TExprKind::ModuleCall { args, .. } => args.iter().any(|arg| self.expr(&arg.value)),
+            TExprKind::ExternCall { args, .. } => args.iter().any(|arg| self.expr(&arg.value)),
+            TExprKind::PtrFromAddr { addr, .. } => self.expr(addr),
             TExprKind::DistinctCtor { arg, .. }
             | TExprKind::RangeCheckedCtor { arg, .. }
             | TExprKind::DistinctConvert { arg, .. }
@@ -109,29 +182,23 @@ pub(crate) fn note_stack_sentry_in_tir(nodes: &[TStmt], env: &LowerEnv) {
             | TExprKind::Err(arg, _)
             | TExprKind::OptField { base: arg, .. }
             | TExprKind::PatternMatches { subj: arg, .. }
-            | TExprKind::NumericMethod { recv: arg, .. } => walk_expr(arg),
-            TExprKind::AmbientInput { prompt } => prompt.as_deref().is_some_and(walk_expr),
+            | TExprKind::NumericMethod { recv: arg, .. } => self.expr(arg),
+            TExprKind::AmbientInput { prompt } => prompt.as_deref().is_some_and(|arg| self.expr(arg)),
             TExprKind::Binary { lhs, rhs, .. }
             | TExprKind::LayoutCompare { lhs, rhs, .. }
             | TExprKind::OverflowOpt { lhs, rhs, .. }
-            | TExprKind::NumericBinaryMethod {
-                recv: lhs,
-                arg: rhs,
-                ..
-            } => walk_expr(lhs) || walk_expr(rhs),
+            | TExprKind::NumericBinaryMethod { recv: lhs, arg: rhs, .. } => self.expr(lhs) || self.expr(rhs),
             TExprKind::Unary { operand, .. }
             | TExprKind::LayoutLit { inner: operand }
-            | TExprKind::Borrow { place: operand, .. } => walk_expr(operand),
-            TExprKind::CompareChain { operands, .. } => operands.iter().any(walk_expr),
+            | TExprKind::Borrow { place: operand, .. } => self.expr(operand),
+            TExprKind::CompareChain { operands, .. } => operands.iter().any(|arg| self.expr(arg)),
             TExprKind::UnitConvert { arg, rounding, .. } => {
-                walk_expr(arg) || rounding.as_ref().is_some_and(|(_, value)| walk_expr(value))
+                self.expr(arg) || rounding.as_ref().is_some_and(|(_, value)| self.expr(value))
             }
             TExprKind::MathBuiltin { args, .. } | TExprKind::PreciseBuiltin { args, .. } => {
-                args.iter().any(walk_expr)
+                args.iter().any(|arg| self.expr(arg))
             }
-            TExprKind::StructLit { fields, .. } => {
-                fields.iter().any(|(_, value, _)| walk_expr(value))
-            }
+            TExprKind::StructLit { fields, .. } => fields.iter().any(|(_, value, _)| self.expr(value)),
             TExprKind::Field { recv, .. }
             | TExprKind::SharedGuardValue { guard: recv, .. }
             | TExprKind::SharedGuardMap { guard: recv, .. }
@@ -139,162 +206,137 @@ pub(crate) fn note_stack_sentry_in_tir(nodes: &[TStmt], env: &LowerEnv) {
             | TExprKind::MathSwizzleRead { recv, .. }
             | TExprKind::TaskGroupAll { tasks: recv }
             | TExprKind::TaskGroupRace { tasks: recv }
-            | TExprKind::TaskGroupAny { tasks: recv } => walk_expr(recv),
-            TExprKind::SharedGuardWait {
-                guard, condition, ..
-            } => walk_expr(guard) || walk_expr(condition),
-            TExprKind::ConditionNotify { condition, .. } => walk_expr(condition),
+            | TExprKind::TaskGroupAny { tasks: recv } => self.expr(recv),
+            TExprKind::SharedGuardWait { guard, condition, .. } => self.expr(guard) || self.expr(condition),
+            TExprKind::ConditionNotify { condition, .. } => self.expr(condition),
             TExprKind::ListLit(values) | TExprKind::ColumnarListLit { elems: values, .. } => {
-                values.iter().any(walk_expr)
+                values.iter().any(|arg| self.expr(arg))
             }
             TExprKind::ListSpread { parts } => parts.iter().any(|part| match part {
                 crate::Codegen::TIR::ListSpreadPart::Elem(value)
-                | crate::Codegen::TIR::ListSpreadPart::Spread(value) => walk_expr(value),
+                | crate::Codegen::TIR::ListSpreadPart::Spread(value) => self.expr(value),
             }),
             TExprKind::ColumnarGather { base, index, .. }
             | TExprKind::ColumnarColumnRead { base, index, .. }
             | TExprKind::Index { base, index, .. }
             | TExprKind::IndexHook { base, index, .. }
-            | TExprKind::MathLaneIndex { base, index, .. } => walk_expr(base) || walk_expr(index),
-            TExprKind::PoolSlot { pool, id, .. } => walk_expr(pool) || walk_expr(id),
-            TExprKind::Slice {
-                base,
-                start,
-                end,
-                range,
-                ..
-            } => {
-                walk_expr(base)
-                    || walk_expr(start)
-                    || walk_expr(end)
-                    || range.as_deref().is_some_and(walk_expr)
+            | TExprKind::MathLaneIndex { base, index, .. } => self.expr(base) || self.expr(index),
+            TExprKind::PoolSlot { pool, id, .. } => self.expr(pool) || self.expr(id),
+            TExprKind::Slice { base, start, end, range, .. } => {
+                self.expr(base) || self.expr(start) || self.expr(end)
+                    || range.as_deref().is_some_and(|arg| self.expr(arg))
             }
             TExprKind::MethodCall { recv, args, .. } => {
-                walk_expr(recv) || args.iter().any(|arg| walk_expr(&arg.value))
+                self.expr(recv) || args.iter().any(|arg| self.expr(&arg.value))
             }
-            TExprKind::DecodeUnder { segment, inner } => walk_expr(segment) || walk_expr(inner),
+            TExprKind::DecodeUnder { segment, inner } => self.expr(segment) || self.expr(inner),
             TExprKind::BuiltinMethod { recv, args, .. }
             | TExprKind::ClosureMethod { recv, args, .. }
             | TExprKind::HandleMethod { recv, args, .. } => {
-                walk_expr(recv) || args.iter().any(walk_expr)
+                self.expr(recv) || args.iter().any(|arg| self.expr(arg))
             }
-            TExprKind::IfExpr {
-                cond,
-                then_body,
-                then_value,
-                else_body,
-                else_value,
-            } => {
-                walk_cond(cond)
-                    || walk_stmts(then_body)
-                    || walk_expr(then_value)
-                    || walk_stmts(else_body)
-                    || walk_expr(else_value)
+            TExprKind::IfExpr { cond, then_body, then_value, else_body, else_value } => {
+                self.cond(cond) || self.stmts(then_body) || self.expr(then_value)
+                    || self.stmts(else_body) || self.expr(else_value)
             }
-            TExprKind::ResultHandler {
-                subject, ok_body, ok_value, err_body, err_value, terminal, ..
-            } => {
-                walk_expr(subject)
-                    || walk_stmts(ok_body)
-                    || walk_expr(ok_value)
-                    || walk_stmts(err_body)
-                    || walk_expr(err_value)
-                    || walk_expr(terminal)
+            TExprKind::ResultHandler { subject, ok_body, ok_value, err_body, err_value, terminal, .. } => {
+                self.expr(subject) || self.stmts(ok_body) || self.expr(ok_value)
+                    || self.stmts(err_body) || self.expr(err_value) || self.expr(terminal)
             }
             TExprKind::Try { inner, note, .. } => {
-                walk_expr(inner) || note.as_deref().is_some_and(walk_expr)
+                self.expr(inner) || note.as_deref().is_some_and(|arg| self.expr(arg))
             }
             TExprKind::OrFallback { value, fallback } => {
-                walk_expr(value)
-                    || match fallback {
-                        crate::Codegen::TIR::TOrFallback::Value(value)
-                        | crate::Codegen::TIR::TOrFallback::Return(Some(value)) => walk_expr(value),
-                        crate::Codegen::TIR::TOrFallback::Panic { msg, .. } => walk_expr(msg),
-                        _ => false,
-                    }
+                self.expr(value) || match fallback {
+                    crate::Codegen::TIR::TOrFallback::Value(value)
+                    | crate::Codegen::TIR::TOrFallback::Return(Some(value)) => self.expr(value),
+                    crate::Codegen::TIR::TOrFallback::Panic { msg, .. } => self.expr(msg),
+                    _ => false,
+                }
             }
-            TExprKind::OptionLift2 { f, a, b } => walk_expr(f) || walk_expr(a) || walk_expr(b),
-            TExprKind::HostBorrowCallback { callable, .. } => walk_expr(callable),
-            TExprKind::SelectRecv { builder, channel } => walk_expr(builder) || walk_expr(channel),
-            TExprKind::SelectAfter {
-                builder,
-                duration,
-                value,
-            } => {
-                walk_expr(builder) || walk_expr(duration) || value.as_deref().is_some_and(walk_expr)
+            TExprKind::OptionLift2 { f, a, b } => self.expr(f) || self.expr(a) || self.expr(b),
+            TExprKind::HostBorrowCallback { callable, .. } => self.expr(callable),
+            TExprKind::SelectRecv { builder, channel } => self.expr(builder) || self.expr(channel),
+            TExprKind::SelectAfter { builder, duration, value } => {
+                self.expr(builder) || self.expr(duration) || value.as_deref().is_some_and(|arg| self.expr(arg))
             }
-            TExprKind::SelectWait { builder, .. } => walk_expr(builder),
-            TExprKind::TupleLit { fields, .. } => fields.iter().any(|(_, value)| walk_expr(value)),
-            TExprKind::MapLit(fields) => fields
-                .iter()
-                .any(|(left, right)| walk_expr(left) || walk_expr(right)),
+            TExprKind::SelectWait { builder, .. } => self.expr(builder),
+            TExprKind::TupleLit { fields, .. } => fields.iter().any(|(_, value)| self.expr(value)),
+            TExprKind::MapLit(fields) => fields.iter().any(|(left, right)| self.expr(left) || self.expr(right)),
             TExprKind::JSONLit { arg, .. } | TExprKind::DBValueLit { arg, .. } => {
-                arg.as_ref().is_some_and(|arg| walk_expr(&arg.0))
+                arg.as_ref().is_some_and(|arg| self.expr(&arg.0))
             }
-            _ => false,
+            // Nested executables collect their own roots when lowered.
+            TExprKind::Lambda(_)
+            | TExprKind::IntLit(_, _)
+            | TExprKind::FloatLit(_)
+            | TExprKind::BoolLit(_)
+            | TExprKind::CharLit(_)
+            | TExprKind::Local(_)
+            | TExprKind::Unit
+            | TExprKind::DefaultLit
+            | TExprKind::Uninit
+            | TExprKind::CtLit(_)
+            | TExprKind::ConstRef(_)
+            | TExprKind::DataEntriesToMap(_)
+            | TExprKind::ResourceTake(_)
+            | TExprKind::Todo { .. }
+            | TExprKind::InvariantViolation { .. }
+            | TExprKind::Unreachable { .. }
+            | TExprKind::Absent
+            | TExprKind::SelectStart => false,
         }
     }
 
-    fn walk_cond(condition: &TIfCond) -> bool {
+    fn cond(&mut self, condition: &TIfCond) -> bool {
         match condition {
             TIfCond::Plain(value)
             | TIfCond::IfLet { subj: value, .. }
             | TIfCond::IsNone { subj: value }
-            | TIfCond::Matches { subj: value, .. } => walk_expr(value),
-            TIfCond::And { left, right } => walk_cond(left) || walk_cond(right),
-            TIfCond::WithPrelude { prelude, cond } => walk_stmts(prelude) || walk_cond(cond),
+            | TIfCond::Matches { subj: value, .. } => self.expr(value),
+            TIfCond::And { left, right } => self.cond(left) || self.cond(right),
+            TIfCond::WithPrelude { prelude, cond } => self.stmts(prelude) || self.cond(cond),
         }
     }
 
-    fn walk_contract(contract: &TContract) -> bool {
-        walk_expr(&contract.condition) || walk_expr(&contract.message)
+    fn contract(&mut self, contract: &TContract) -> bool {
+        self.expr(&contract.condition) || self.expr(&contract.message)
     }
 
-    fn walk_place(place: &TPlace) -> bool {
+    fn place(&mut self, place: &TPlace) -> bool {
         match place {
             TPlace::Local(_) => false,
-            TPlace::Expr(value) => walk_expr(value),
+            TPlace::Expr(value) => self.expr(value),
         }
     }
 
-    fn walk_stmts(items: &[TStmt]) -> bool {
+    fn stmts(&mut self, items: &[TStmt]) -> bool {
         items.iter().any(|stmt| match stmt {
-            TStmt::Contract { contract } => walk_contract(contract),
-            TStmt::ContractScope {
-                pre, body, post, ..
-            } => {
-                pre.iter().any(walk_contract) || walk_stmts(body) || post.iter().any(walk_contract)
+            TStmt::Contract { contract } => self.contract(contract),
+            TStmt::ContractScope { pre, body, post, .. } => {
+                pre.iter().any(|arg| self.contract(arg)) || self.stmts(body)
+                    || post.iter().any(|arg| self.contract(arg))
             }
             TStmt::Let { init, .. }
             | TStmt::TupleDestructure { init, .. }
             | TStmt::StructDestructure { init, .. }
-            | TStmt::ListDestructure { init, .. } => walk_expr(init),
-            TStmt::RefutableBind { init, fallback, .. } => walk_expr(init) || walk_stmts(fallback),
-            TStmt::GcEdit {
-                index_temp, stmt, ..
-            } => {
-                index_temp
-                    .as_ref()
-                    .is_some_and(|(_, index)| walk_expr(index))
-                    || walk_stmts(std::slice::from_ref(stmt.as_ref()))
+            | TStmt::ListDestructure { init, .. } => self.expr(init),
+            TStmt::RefutableBind { init, fallback, .. } => self.expr(init) || self.stmts(fallback),
+            TStmt::GcEdit { index_temp, stmt, .. } => {
+                index_temp.as_ref().is_some_and(|(_, index)| self.expr(index))
+                    || self.stmts(std::slice::from_ref(stmt.as_ref()))
             }
-            TStmt::SplitViews { owner, .. } => owner.as_ref().is_some_and(walk_expr),
-            TStmt::Assign { place, value, .. } => walk_place(place) || walk_expr(value),
-            TStmt::Return(value) => value.as_ref().is_some_and(walk_expr),
-            TStmt::ExprStmt(value) => walk_expr(value),
+            TStmt::SplitViews { owner, .. } => owner.as_ref().is_some_and(|arg| self.expr(arg)),
+            TStmt::Assign { place, value, .. } => self.place(place) || self.expr(value),
+            TStmt::Return(value) => value.as_ref().is_some_and(|arg| self.expr(arg)),
+            TStmt::ExprStmt(value) => self.expr(value),
             TStmt::TaskGroup { limit, body, .. } => {
-                limit.as_ref().is_some_and(walk_expr) || walk_stmts(body)
+                limit.as_ref().is_some_and(|arg| self.expr(arg)) || self.stmts(body)
             }
-            TStmt::DeferClose { close, .. } => walk_expr(close),
-            TStmt::If {
-                cond,
-                then_body,
-                else_body,
-                ..
-            } => {
-                walk_cond(cond)
-                    || walk_stmts(then_body)
-                    || else_body.as_ref().is_some_and(|body| walk_stmts(body))
+            TStmt::DeferClose { close, .. } => self.expr(close),
+            TStmt::If { cond, then_body, else_body, .. } => {
+                self.cond(cond) || self.stmts(then_body)
+                    || else_body.as_ref().is_some_and(|body| self.stmts(body))
             }
             TStmt::Loop { body, .. }
             | TStmt::Inline(body)
@@ -305,94 +347,43 @@ pub(crate) fn note_stack_sentry_in_tir(nodes: &[TStmt], env: &LowerEnv) {
             | TStmt::Region(body)
             | TStmt::Live { body }
             | TStmt::Shield { body }
-            | TStmt::ScopeMember { body, .. }
             | TStmt::Transact { body, .. }
-            | TStmt::Layout { body, .. } => walk_stmts(body),
-            TStmt::While { cond, body, .. } => walk_expr(cond) || walk_stmts(body),
-            TStmt::CountedLoop {
-                init,
-                cond,
-                step,
-                body,
-                ..
-            } => {
-                walk_stmts(std::slice::from_ref(init.as_ref()))
-                    || walk_expr(cond)
-                    || step
-                        .as_deref()
-                        .is_some_and(|step| walk_stmts(std::slice::from_ref(step)))
-                    || walk_stmts(body)
+            | TStmt::Layout { body, .. } => self.stmts(body),
+            TStmt::ScopeMember { kind, body } => {
+                matches!(kind, ScopeMemberKind::Timeout(value) if self.expr(value)) || self.stmts(body)
             }
-            TStmt::Range {
-                source,
-                start,
-                end,
-                step,
-                body,
-                ..
-            } => {
-                source.as_ref().is_some_and(walk_expr)
-                    || walk_expr(start)
-                    || walk_expr(end)
-                    || step.as_ref().is_some_and(walk_expr)
-                    || walk_stmts(body)
+            TStmt::While { cond, body, .. } => self.expr(cond) || self.stmts(body),
+            TStmt::CountedLoop { init, cond, step, body, .. } => {
+                self.stmts(std::slice::from_ref(init.as_ref())) || self.expr(cond)
+                    || step.as_deref().is_some_and(|step| self.stmts(std::slice::from_ref(step)))
+                    || self.stmts(body)
             }
-            TStmt::BreakValue { value, .. } => walk_expr(value),
-            TStmt::EnumMatch {
-                scrutinee,
-                arms,
-                else_body,
-                ..
-            } => {
-                walk_expr(scrutinee)
-                    || arms.iter().any(|arm| walk_stmts(&arm.body))
-                    || else_body.as_ref().is_some_and(|body| walk_stmts(body))
+            TStmt::Range { source, start, end, step, body, .. } => {
+                source.as_ref().is_some_and(|arg| self.expr(arg)) || self.expr(start) || self.expr(end)
+                    || step.as_ref().is_some_and(|arg| self.expr(arg)) || self.stmts(body)
             }
-            TStmt::RangeSwitch {
-                subject,
-                arms,
-                else_body,
-            } => {
-                walk_expr(subject)
-                    || arms.iter().any(|(_, _, body)| walk_stmts(body))
-                    || walk_stmts(else_body)
+            TStmt::BreakValue { value, .. } => self.expr(value),
+            TStmt::EnumMatch { scrutinee, arms, else_body, .. } => {
+                self.expr(scrutinee) || arms.iter().any(|arm| self.stmts(&arm.body))
+                    || else_body.as_ref().is_some_and(|body| self.stmts(body))
             }
-            TStmt::IndexAssign {
-                base, index, value, ..
+            TStmt::RangeSwitch { subject, arms, else_body } => {
+                self.expr(subject) || arms.iter().any(|(_, _, body)| self.stmts(body)) || self.stmts(else_body)
             }
-            | TStmt::IndexHookAssign {
-                base, index, value, ..
-            } => walk_expr(base) || walk_expr(index) || walk_expr(value),
-            TStmt::IndexFieldAssign(assign) => {
-                walk_expr(&assign.base) || walk_expr(&assign.index) || walk_expr(&assign.value)
+            TStmt::IndexAssign { base, index, value, .. }
+            | TStmt::IndexHookAssign { base, index, value, .. } => self.expr(base) || self.expr(index) || self.expr(value),
+            TStmt::IndexFieldAssign(assign) => self.expr(&assign.base) || self.expr(&assign.index) || self.expr(&assign.value),
+            TStmt::MathSwizzleAssign { base, value, .. } => self.expr(base) || self.expr(value),
+            TStmt::ForIn { source, collection, step, body, .. } => {
+                self.expr(source) || self.expr(collection)
+                    || step.as_ref().is_some_and(|arg| self.expr(arg)) || self.stmts(body)
             }
-            TStmt::MathSwizzleAssign { base, value, .. } => walk_expr(base) || walk_expr(value),
-            TStmt::ForIn {
-                source,
-                collection,
-                step,
-                body,
-                ..
-            } => {
-                walk_expr(source)
-                    || walk_expr(collection)
-                    || step.as_ref().is_some_and(walk_expr)
-                    || walk_stmts(body)
-            }
-            TStmt::MixedSwitch {
-                subject,
-                arms,
-                else_body,
-                ..
-            } => {
-                walk_expr(subject)
-                    || arms
-                        .iter()
-                        .any(|(condition, body)| walk_expr(condition) || walk_stmts(body))
-                    || else_body.as_ref().is_some_and(|body| walk_stmts(body))
+            TStmt::MixedSwitch { subject, arms, else_body, .. } => {
+                self.expr(subject) || arms.iter().any(|(condition, body)| self.expr(condition) || self.stmts(body))
+                    || else_body.as_ref().is_some_and(|body| self.stmts(body))
             }
             TStmt::ContextBlock { guards, body } => {
-                guards.iter().any(|(_, value)| walk_expr(value)) || walk_stmts(body)
+                guards.iter().any(|(_, value)| self.expr(value)) || self.stmts(body)
             }
             TStmt::Reactive { .. }
             | TStmt::Break(_)
@@ -403,8 +394,54 @@ pub(crate) fn note_stack_sentry_in_tir(nodes: &[TStmt], env: &LowerEnv) {
             | TStmt::InvariantViolation { .. } => false,
         })
     }
+}
 
-    let found = walk_stmts(nodes);
+pub(crate) fn projected_move_roots(nodes: &[TStmt], expr: Option<&TExpr>) -> HashSet<String> {
+    let mut roots = HashSet::new();
+    let mut inspect = |node: &TExpr| {
+        if let TExprKind::Move(inner) = &node.kind {
+            let mut root = inner.as_ref();
+            if matches!(root.kind, TExprKind::Field { .. }) {
+                while let TExprKind::Field { recv, .. } = &root.kind {
+                    root = recv;
+                }
+                if let TExprKind::Local(local) = &root.kind {
+                    if !inner.ty.is_scalar() {
+                        roots.insert(local.name.clone());
+                    }
+                }
+            }
+        }
+        false
+    };
+    let mut walk = TirExprWalk { predicate: &mut inspect };
+    if let Some(expr) = expr {
+        walk.expr(expr);
+    } else {
+        walk.stmts(nodes);
+    }
+    roots
+}
+
+/// Recover the stack-address fact from completed TIR.
+pub(crate) fn note_stack_sentry_in_tir(nodes: &[TStmt], env: &LowerEnv) {
+    let mut inspect = |node: &TExpr| match &node.kind {
+        TExprKind::CoreCall { record, args, .. } => {
+            record.module == "core.mem" && record.member == "address_of"
+                && args.first().is_some_and(|arg| matches!(
+                    tir_address_lifetime(arg),
+                    crate::Codegen::TIR::TAddressLifetime::Stack
+                        | crate::Codegen::TIR::TAddressLifetime::Unknown
+                ))
+        }
+        TExprKind::RawOf(inner) => matches!(
+            tir_address_lifetime(inner),
+            crate::Codegen::TIR::TAddressLifetime::Stack
+        ),
+        _ => false,
+    };
+
+    let found = TirExprWalk { predicate: &mut inspect }.stmts(nodes);
     if found {
         env.note_stack_address();
     }

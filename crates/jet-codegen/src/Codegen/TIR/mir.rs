@@ -4412,6 +4412,12 @@ fn lower_function(
         source_texts,
         modules,
     );
+    ctx.partial_move_roots = match body {
+        Some(TLambdaBody::Expr(expr)) => super::lower::projected_move_roots(&[], Some(expr)),
+        Some(TLambdaBody::Block(stmts)) => super::lower::projected_move_roots(stmts, None),
+        Some(TLambdaBody::SharedBlock(stmts)) => super::lower::projected_move_roots(stmts, None),
+        None => super::lower::projected_move_roots(&f.body, None),
+    };
     let source_file = ctx.source_file_id_for(&f.source_file);
 
     if let Some(lambda) = lambda {
@@ -5281,6 +5287,10 @@ pub(super) struct LowerCtx<'a> {
     /// slot, so a consuming use copies it instead of moving out of the owner.
     read_alias_places: HashSet<MirPlaceId>,
     pub(super) drop_live_places: HashMap<MirPlaceId, MirPlaceId>,
+    /// Source roots of projected, consuming moves, collected before emission.
+    partial_move_roots: HashSet<String>,
+    /// Only these roots use leaf flags; ordinary records keep one root flag.
+    split_drop_roots: HashSet<MirPlaceId>,
     /// Every file-owner leaf place registered for cleanup in this function.
     pub(super) file_owner_places: Vec<MirPlaceId>,
     send_fn_locals: HashSet<String>,
@@ -5470,6 +5480,8 @@ impl<'a> LowerCtx<'a> {
             read_parameter_values: HashSet::new(),
             read_alias_places: HashSet::new(),
             drop_live_places: HashMap::new(),
+            partial_move_roots: HashSet::new(),
+            split_drop_roots: HashSet::new(),
             file_owner_places: Vec::new(),
             send_fn_locals: HashSet::new(),
             capture_values: HashMap::new(),
@@ -7369,13 +7381,25 @@ impl<'a> LowerCtx<'a> {
         })
     }
 
-    fn owned_file_paths(
+    fn owned_leaf_paths(
         &mut self,
         ty: &MirType,
+        for_drop: bool,
         path: &mut Vec<(String, Type)>,
         visiting: &mut Vec<MirTypeId>,
         output: &mut Vec<Vec<(String, Type)>>,
     ) -> Result<(), LowerError> {
+        if for_drop {
+            if self.ownership_for(&mir_type_as_ast(ty)).drop == MirDropKind::None {
+                return Ok(());
+            }
+            // The root's nominal Close was checked by register_owned_drop;
+            // only its consuming Close receiver may enter structurally.
+            if !path.is_empty() && self.scope_end_close(ty).is_some() {
+                output.push(path.clone());
+                return Ok(());
+            }
+        }
         if ty.identity.is_some_and(|identity| self.is_core_file_owner(identity)) {
             output.push(path.clone());
             return Ok(());
@@ -7383,23 +7407,30 @@ impl<'a> LowerCtx<'a> {
         if let Some(fields) = ty.tuple_fields() {
             for (name, field_ty) in fields {
                 path.push((name.clone(), mir_type_as_ast(field_ty)));
-                self.owned_file_paths(field_ty, path, visiting, output)?;
+                self.owned_leaf_paths(field_ty, for_drop, path, visiting, output)?;
                 path.pop();
             }
             return Ok(());
         }
-        let Some(identity) = ty.identity else { return Ok(()) };
+        let Some(identity) = ty.identity else {
+            if for_drop { output.push(path.clone()); }
+            return Ok(());
+        };
         if visiting.contains(&identity) {
+            if for_drop { output.push(path.clone()); }
             return Ok(());
         }
         let definitions = self.type_defs;
         let Some(definition) = definitions.iter().find(|row| row.id == identity) else {
+            if for_drop { output.push(path.clone()); }
             return Ok(());
         };
         if !matches!(definition.ownership, MirOwnershipMode::Owned | MirOwnershipMode::Move) {
+            if for_drop { output.push(path.clone()); }
             return Ok(());
         }
         let MirTypeDefKind::Struct { fields, .. } = &definition.kind else {
+            if for_drop { output.push(path.clone()); }
             return Ok(());
         };
         visiting.push(identity);
@@ -7408,7 +7439,7 @@ impl<'a> LowerCtx<'a> {
             let field_ty = self.field_type_for_type(&owner, &field.name)?;
             let checked = self.mir_type(&field_ty)?;
             path.push((field.name.clone(), field_ty));
-            self.owned_file_paths(&checked, path, visiting, output)?;
+            self.owned_leaf_paths(&checked, for_drop, path, visiting, output)?;
             path.pop();
         }
         visiting.pop();
@@ -7469,7 +7500,7 @@ impl<'a> LowerCtx<'a> {
         }
         let ty = row.ty.clone();
         let mut paths = Vec::new();
-        self.owned_file_paths(&ty, &mut Vec::new(), &mut Vec::new(), &mut paths)?;
+        self.owned_leaf_paths(&ty, false, &mut Vec::new(), &mut Vec::new(), &mut paths)?;
         // Deferred bindings unwind in reverse order; record fields unwind in
         // declaration order within each binding.
         for path in paths.into_iter().rev() {
@@ -7694,6 +7725,43 @@ impl<'a> LowerCtx<'a> {
         {
             return Ok(());
         }
+        let split = !self.partial_move_roots.is_empty() && self.places.iter().find(|row| row.id == place)
+            .is_some_and(|row| row.projections.is_empty() && match row.base {
+                MirPlaceBase::Local(id) => self.locals.iter().any(|local| {
+                    local.id == id && self.partial_move_roots.contains(&local.name)
+                }),
+                MirPlaceBase::Parameter(value) => self.value_instruction(value)
+                    .and_then(|instruction| match instruction.operation {
+                        MirOperation::Parameter { index, .. } => self.params.get(index),
+                        _ => None,
+                    })
+                    .is_some_and(|parameter| self.partial_move_roots.contains(&parameter.name)),
+                _ => false,
+            });
+        if split {
+            let checked = self.mir_type(ty)?;
+            if self.scope_end_close_for_place(place, &checked).is_some() {
+                return Err(self.error(self.span(), format!(
+                    "cannot lower projected move from `{ty}`: owner has its own Close implementation"
+                )));
+            }
+            let mut paths = Vec::new();
+            self.owned_leaf_paths(&checked, true, &mut Vec::new(), &mut Vec::new(), &mut paths)?;
+            // A container, enum or opaque owner remains indivisible.
+            if !paths.iter().any(Vec::is_empty) {
+                self.split_drop_roots.insert(place);
+                for path in paths.into_iter().rev() {
+                    let mut leaf = place;
+                    let mut leaf_ty = ty.clone();
+                    for (name, field_ty) in path {
+                        leaf = self.project_field_place(leaf, &name, field_ty.clone(), self.span())?;
+                        leaf_ty = field_ty;
+                    }
+                    self.register_owned_drop(leaf, &leaf_ty, self.ownership_for(&leaf_ty), initialized)?;
+                }
+                return Ok(());
+            }
+        }
         let live_local = TLocal::generated(format!("owned_live_{}", place.0)).as_mutable();
         let live = self.bind_local(&live_local, Type::Bool, true, false, false)?;
         self.clear_live_flag_at_entry(live)?;
@@ -7720,6 +7788,35 @@ impl<'a> LowerCtx<'a> {
                 kind: ownership.drop,
             });
         Ok(())
+    }
+
+    fn drop_live_flags(&self, place: MirPlaceId) -> Vec<MirPlaceId> {
+        if self.drop_live_places.contains_key(&place) {
+            return Vec::new();
+        }
+        if self.split_drop_roots.is_empty() {
+            return Vec::new();
+        }
+        let Some(root) = self.places.iter().find(|row| row.id == place) else {
+            return Vec::new();
+        };
+        if !self.split_drop_roots.iter().any(|id| self.places.iter().any(|row| {
+            row.id == *id && row.base == root.base
+        })) {
+            return Vec::new();
+        }
+        let mut flags: Vec<_> = self.drop_live_places.iter().filter_map(|(id, flag)| {
+            let leaf = self.places.iter().find(|row| row.id == *id)?;
+            (root.base == leaf.base
+                && root.projections.len() <= leaf.projections.len()
+                && root.projections.iter().zip(&leaf.projections).all(|(a, b)| matches!(
+                    (a, b),
+                    (MirProjection::Field { field: a, .. }, MirProjection::Field { field: b, .. }) if a == b
+                )))
+                .then_some(*flag)
+        }).collect();
+        flags.sort_unstable_by_key(|flag| flag.0);
+        flags
     }
 
     pub(super) fn emit_file_owner_replacement(&mut self, place: MirPlaceId) -> Result<(), LowerError> {
@@ -7917,16 +8014,18 @@ impl<'a> LowerCtx<'a> {
             | MirOperation::ReplacePlace { place, .. } => (self.file_owner_leaves(*place), true),
             _ => (Vec::new(), false),
         };
-        let (drop_live_place, drop_live) = match &operation {
-            MirOperation::MovePlace { place } => (self.drop_live_places.get(place).copied(), false),
-            MirOperation::InitializeUninit { place } => {
-                (self.drop_live_places.get(place).copied(), true)
-            }
-            MirOperation::WritePlace { place, .. }
-            | MirOperation::ReplacePlace { place, .. } => {
-                (self.drop_live_places.get(place).copied(), true)
-            }
+        let (drop_place, drop_live) = match &operation {
+            MirOperation::MovePlace { place } => (Some(*place), false),
+            MirOperation::InitializeUninit { place }
+            | MirOperation::WritePlace { place, .. }
+            | MirOperation::ReplacePlace { place, .. } => (Some(*place), true),
             _ => (None, false),
+        };
+        let drop_live_place = drop_place.and_then(|place| self.drop_live_places.get(&place).copied());
+        let split_drop_flags = if drop_live_place.is_some() || self.split_drop_roots.is_empty() {
+            Vec::new()
+        } else {
+            drop_place.map_or_else(Vec::new, |place| self.drop_live_flags(place))
         };
         let span = self.span();
         let source_line = self.current_line;
@@ -7971,7 +8070,7 @@ impl<'a> LowerCtx<'a> {
                 MirOperation::WritePlace { place: flag, value: next },
             )?;
         }
-        if let Some(flag) = drop_live_place {
+        for flag in drop_live_place.into_iter().chain(split_drop_flags) {
             let next = self.emit(
                 "owned.local.live.state",
                 Some(Type::Bool),
