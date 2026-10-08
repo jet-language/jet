@@ -102,9 +102,15 @@ fn rt_crypto_hchacha(key: I64, nonce: I64, output: I64, scratch: I64) {
 // output may equal input (otherwise disjoint); caller scratch320 aligned8.
 // Return false for public length/counter overflow BEFORE writing output.
 fn rt_crypto_chacha_xor(key: I64, nonce: I64, counter: I64, input: I64, length: I64, output: I64, scratch: I64) -> Bool {
-    if (length < I64{0} || counter < I64{0} || counter > I64{0xffffffff}) -> return false
+    if (length < I64{0} || counter < I64{0} || counter > I64{0xffffffff}) {
+        rt_crypto_wipe(scratch, I64{320})
+        return false
+    }
     blocks :: length / I64{64} + if (length % I64{64} == I64{0}) -> I64{0} else -> I64{1}
-    if (blocks > I64{0x100000000} - counter) -> return false
+    if (blocks > I64{0x100000000} - counter) {
+        rt_crypto_wipe(scratch, I64{320})
+        return false
+    }
     block :: scratch + I64{256}
     at := I64{0}
     ctr := counter

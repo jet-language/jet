@@ -120,6 +120,13 @@ is supported; partial overlap is not. Counter exhaustion is rejected before
 output writes. HChaCha20 derives the XChaCha key without feed-forward, then
 uses four zero nonce bytes followed by the final eight extended-nonce bytes.
 
+Poly1305 uses bounded 26-bit limbs and mask-based canonical reduction. AEAD
+borrows AAD and ciphertext independently instead of allocating a MAC message;
+the Poly1305 length block commits to both byte lengths. Open compares all 16
+tag bytes before plaintext writes, leaving output untouched on failure.
+Exclusive aligned scratch is 560 bytes (608 for XChaCha) and is wiped on
+success and failure.
+
 A high-level native implementation must not be retained as an invisible runtime
 fallback for a Jet implementation. If an API changes identity or semantics,
 make the change at the contract boundary and migrate its users in one cutover.
