@@ -9,7 +9,8 @@
 typedef intptr_t Word;
 typedef struct { Word stride, clone, drop, show, equal, compare, kind, child0, child1; } Meta;
 typedef struct { Word payload, next, release, clone; } Adapter;
-typedef struct { int at, releases, clones, stop_at; } Source;
+typedef struct { int at, releases, clones, stop_at, moved_stop_at; } Source;
+static int drops;
 extern Word jet_rt_native_iter_file_lines(Word, Word, Word);
 extern Word jet_rt_native_iter_stdin_lines(Word, Word, Word);
 extern Word jet_rt_native_iter_process_lines(Word, Word, Word);
@@ -29,6 +30,7 @@ static Word text_clone(Word from, Word to) {
     return 0;
 }
 static Word text_drop(Word slot) {
+    ++drops;
     jet_rt_string_drop(*(Word *)slot);
     return 0;
 }
@@ -44,6 +46,10 @@ static Word next(Word raw, Word out) {
     if (source->at > 2) return 0;
     const char *line = lines[source->at - 1];
     *(Word *)out = jet_rt_string_from_static((Word)line, (Word)strlen(line));
+    if (source->at == source->moved_stop_at) {
+        jet_rt_comptime_work(UINT64_C(1000001));
+        assert(jet_rt_session_propagate());
+    }
     return 1;
 }
 static Word release(Word raw) { ++((Source *)raw)->releases; return 0; }
@@ -88,6 +94,15 @@ int main(void) {
         assert(jet_rt_session_propagate());
         jet_rt_native_iter_drop(iter);
         assert(source.releases == 1);
+        jet_rt_comptime_end();
+        source = (Source){.moved_stop_at = 1};
+        drops = 0;
+        assert(jet_rt_comptime_begin(UINT64_C(1000000), UINT64_C(1000)));
+        iter = providers[family]((Word)&adapter, 1, (Word)&meta);
+        assert(!jet_rt_native_iter_next(iter)); // iter_pull drops moved output.
+        assert(jet_rt_session_propagate() && drops == 1);
+        jet_rt_native_iter_drop(iter);
+        assert(source.releases == 1 && drops == 1);
         jet_rt_comptime_end();
     }
     for (size_t family = 0; family < 2; ++family) {
