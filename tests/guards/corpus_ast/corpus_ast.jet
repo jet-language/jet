@@ -1843,6 +1843,7 @@ struct PolicyPlantedPair { rule: String, kind: String, rejected: String, clean: 
         PolicyPlantedPair{rule: "regex-capture-recipe", kind: "recipe:regex-capture", rejected: "fn run() {{ Regex{{\"x\"}} }}", clean: "fn run() {{\n    pattern :: Regex{{\"^x$\"}}\n    matched :: re.match(pattern, value)\n    print(matched.group(1) ?? \"\")\n}}"},
         PolicyPlantedPair{rule: "dogfood-ascii", kind: "call:String.replace", rejected: "fn run() {{ {ladder} }}", clean: "fn run() {{ \"text\".to_ascii_lower() }}"},
         PolicyPlantedPair{rule: "first-hour-doc-recipe", kind: "literal:jet-build", rejected: "fn run() {{ print(\"jet build example.jet\") }}", clean: "fn run() {{ print(\"jet run example.jet\") }}"},
+        PolicyPlantedPair{rule: "http-unused-request", kind: "param:req", rejected: "fn handle(req: HTTPRequest) -> HTTPResponse {{ response }}", clean: "fn handle(req: HTTPRequest) -> HTTPResponse {{ req.response() }}"},
     }
     loop pair in pairs {
         // A closed synthetic manifest makes one rule active, independently of
