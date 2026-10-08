@@ -117,6 +117,8 @@ fn lower_realtime_deadline(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &
     if lower_result(p, c, &m, &f, instruction) == .Val(dst) {
         lower_storage_into(p, &f, dst, ty)
         lower_write_at(p, &f, dst, members[0].offset, word, members[0].ty)
-    } else -> lower_emit(&f, LIRInst.Drop{value: word})
+    } else {
+        lower_emit(&f, LIRInst.Drop{value: word})
+    }
     true
 }
