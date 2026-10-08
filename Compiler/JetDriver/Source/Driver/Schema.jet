@@ -1,0 +1,88 @@
+// Same-read published-schema inputs for the sema-owned canonical codec.
+use core.files as schema_files
+use core.sys as schema_sys
+use jet_sema.[SchemaSnapshot, SchemaSnapshotError, SemaRegistrationGraph, SemaGraphResult, sema_check_schema_migration_graph, sema_schema_published]
+use jet_foundation.Diagnostic
+
+// Only the schema inputs the populated checker actually reads. An absent,
+// unreadable or malformed snapshot is still an input; it is not an empty cache.
+pub enum JetDriverSchemaReadOutcome {
+    Missing(error: IOError)
+    IO(error: IOError, bytes: [U8]?)
+    Invalid(raw: String, error: SchemaSnapshotError)
+    Parsed(raw: String, snapshot: SchemaSnapshot)
+}
+pub struct JetDriverSchemaRead {
+    pub name: String
+    pub cache_dir: String
+    pub path: String
+    pub outcome: JetDriverSchemaReadOutcome
+}
+pub enum JetDriverSchemaIngress {
+    Supplied(snapshots: [String:SchemaSnapshot])
+    Cache(root: String, reads: [JetDriverSchemaRead])
+}
+pub struct JetDriverSchemaCheckResult {
+    pub registration: SemaRegistrationGraph
+    pub diagnostics: [Diagnostic]
+    pub ingress: JetDriverSchemaIngress?
+}
+
+pub fn schema_cache_dir(root: String) -[Env]> String {
+    schema_sys.get("JET_SCHEMA_CACHE_DIR") ?? schema_files.join(root, ".jet/cache/schema")
+}
+
+pub fn jet_driver_read_schema_dependency(root: String, type_name: String) -[Env, FS]> JetDriverSchemaRead {
+    cache :: schema_cache_dir(root)
+    path :: schema_files.join(cache, "{type_name}.snapshot")
+    bytes :: if schema_files.read_bytes(path) == {
+        .Ok(bytes) -> bytes
+        .Err(error) -> {
+            outcome :: if error == .NotFound(_) -> JetDriverSchemaReadOutcome.Missing{error: error} else -> JetDriverSchemaReadOutcome.IO{error: error, bytes: None}
+            return JetDriverSchemaRead{name: type_name, cache_dir: cache, path: path, outcome: outcome}
+        }
+    }
+    // Match core.files.read's UTF-8 refusal, while retaining the bytes of that
+    // same read. Neither decoding nor a parse failure reopens the path.
+    raw :: String.from_bytes(bytes) ?? {
+        error :: IOError.InvalidInput(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("stream did not contain valid UTF-8")})
+        return JetDriverSchemaRead{name: type_name, cache_dir: cache, path: path, outcome: .IO(error, Val(bytes))}
+    }
+    outcome :: if SchemaSnapshot.parse(raw) == {
+        .Ok(snapshot) -> JetDriverSchemaReadOutcome.Parsed{raw: raw, snapshot: snapshot}
+        .Err(error) -> JetDriverSchemaReadOutcome.Invalid{raw: raw, error: error}
+    }
+    JetDriverSchemaRead{name: type_name, cache_dir: cache, path: path, outcome: outcome}
+}
+
+pub fn load_snapshot(root: String, type_name: String) -[Env, FS]> SchemaSnapshot? {
+    read :: jet_driver_read_schema_dependency(root, type_name)
+    if read.outcome == .Parsed(_, snapshot) -> return Val(snapshot)
+    None
+}
+
+pub fn jet_driver_check_schema_migrations(request: JetDriverCompileRequest, registration: ^SemaRegistrationGraph, checked: SemaGraphResult, retain_inputs: Bool) -[Env, FS]> JetDriverSchemaCheckResult {
+    if request.schema_snapshots == .Val(snapshots) {
+        ingress :: if retain_inputs -> Val(JetDriverSchemaIngress.Supplied{snapshots: snapshots}) else -> None
+        checked_schema := sema_check_schema_migration_graph(^registration, checked, snapshots)
+        return JetDriverSchemaCheckResult{registration: ^checked_schema.0, diagnostics: ^checked_schema.1, ingress: ingress}
+    }
+    root :: jet_driver_entry_root_path(request.authorized_sources)
+    snapshots := [String:SchemaSnapshot]{}
+    seen := [String:Bool]{}
+    reads := [JetDriverSchemaRead]{}
+    loop module_row in registration.modules {
+        loop item in module_row.program.items {
+            if item == .Struct(definition) {
+                if !sema_schema_published(definition) || seen.get(definition.name) != None -> next
+                seen[definition.name] = true
+                read :: jet_driver_read_schema_dependency(root, definition.name)
+                if read.outcome == .Parsed(_, snapshot) -> snapshots[definition.name] = snapshot
+                if retain_inputs -> &reads.push(read)
+            }
+        }
+    }
+    ingress :: if retain_inputs -> Val(JetDriverSchemaIngress.Cache{root: root, reads: reads}) else -> None
+    checked_schema := sema_check_schema_migration_graph(^registration, checked, snapshots)
+    JetDriverSchemaCheckResult{registration: ^checked_schema.0, diagnostics: ^checked_schema.1, ingress: ingress}
+}
