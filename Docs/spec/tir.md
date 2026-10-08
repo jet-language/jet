@@ -32,6 +32,10 @@ which rows that check observes. MIR metadata collectors borrow top-level and
 nested function rows separately, sharing their identity sets rather than
 constructing a second owning concatenation. Canonical row ordering uses stable
 in-place sorting, preserving the same identity keys and tie order.
+The executable canonical-order fixture in
+`Compiler/JetOptimizer/Tests/CanonicalOrderingFixtures.jet` assembles the
+production sort helpers and checks keys, equal-key stability, idempotence,
+empty input, and singleton input.
 
 ## Read-only fact channel
 
