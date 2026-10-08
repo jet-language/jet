@@ -466,3 +466,9 @@ code. HTTP Version owns a single ordinal word: 0, 1 and 2 render HTTP/1.0,
 HTTP/1.1 and HTTP/2 respectively. An unknown version is unreachable and
 terminates with the runtime's status-101 stop. These carriers use Jet's
 one-word allocation contract, never a Rust enum or struct layout.
+
+HTTP Headers owns an ordered sequence of name/value text pairs. Deep cloning
+duplicates both owners, preserving repetitions and empty values. Equality is
+byte-exact and order-sensitive; case-insensitive header lookup does not change
+value equality. Drop releases all initialized pairs, buffer capacity, and the
+sequence shell, and accepts a null handle.
