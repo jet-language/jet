@@ -247,6 +247,13 @@ installed result with uncertain directory durability is DurabilityUnknown;
 cancel-after-install is ignored as the seed requires. No automatic cleanup
 changes seed-visible names on error. Native execution and the exact filesystem
 fixture run remain composition proof obligations, not parser-proof claims.
+Lifecycle timestamps use checked wall-clock milliseconds folded with all record
+creation/status times, preserving unsigned u64 order under clock rollback.
+String-only replacement canonicalizes before opening the repository, requires
+JVLT2, locks and rechecks the provider and exact starting state, wipes old values
+(not their names), preserves typed records, and uses the shared durable writer
+with a checked revision increment. Plaintext string extraction takes decoded
+typed string owners or canonicalizes historical pairs, without cloning secrets.
 
 Typed vault records own native Secret buffers. Equality compares the key bytes,
 not just immutable hashes, while Debug always prints a redacted key marker.

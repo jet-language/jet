@@ -49,6 +49,7 @@ extern void jet_rt_vault_proc_read_fixture(void);
 extern void jet_rt_vault_lock_fields_fixture(const Text *, int64_t, _Bool, int64_t, int64_t, const Text *);
 extern void jet_rt_vault_lock_guard_fixture(const Text *, const Text *);
 extern void jet_rt_vault_lock_acquire_fixture(const Text *);
+extern void jet_rt_vault_lifecycle_strings_fixture(const Text *, const Text *, const Text *);
 extern void imported_origin_round_trips_and_invalid_combinations_reject(const Text *, const Text *);
 extern void jet_rt_vault_crypto_fixture(const ByteList *);
 extern void jet_rt_vault_crypto_unavailable_fixture(int64_t (*)(void *, void *, int64_t));
@@ -485,6 +486,8 @@ int main(void) {
     process_start_fixtures();
     lock_fields_fixtures();
     lock_guard_fixtures();
+    Text lifecycle_name = text("."), rollback = text("clock-rollback"), missing_root = text("/proc/jet-vault-no-such-root");
+    jet_rt_vault_lifecycle_strings_fixture(&lifecycle_name, &rollback, &missing_root);
     puts("vault witness OK (13 errors, legacy+JVLT2 codec, imported origin/default entropy, native Secret redaction/wipe, long-origin hash, duplicate priority)");
     jet_rt_thread_detach();
     return 0;

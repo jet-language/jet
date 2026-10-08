@@ -751,3 +751,136 @@ fn vault_read_at_root(root: I64, store_out: I64, hash_out: I64, provider_out: I6
     jet_rt_free(scratch, I64{88}, I64{8})
     I64{0}
 }
+
+// SystemTime::duration_since(UNIX_EPOCH).as_millis, checked as u64.
+// out borrows8, scratch borrows16; preserve out on pre-epoch/syscall/overflow.
+fn vault_wall_unix_ms(out: I64, scratch: I64) -> Bool {
+    if (trap_syscall(I64{228}, I64{0}, scratch, I64{0}, I64{0}, I64{0}, I64{0}) != I64{0}) -> return false
+    seconds :: rt_text_word(scratch)
+    fraction :: rt_text_word(scratch + I64{8}) /% I64{1000000}
+    if (seconds < I64{0} || seconds > I64{18446744073709551} || (seconds == I64{18446744073709551} && fraction > I64{615})) -> return false
+    rt_text_store(out, wrapping(seconds * I64{1000} + fraction))
+    true
+}
+// SecretsCrypto.rs:2531-2548. Fold EVERY record, not only the active generation.
+fn vault_lifecycle_unix_ms(store: I64, out: I64) -> I64 {
+    scratch :: jet_rt_alloc(I64{80}, I64{8})
+    rollback :: vault_writer_fault(I64{8030531024808012899}, I64{118074579774572}, I64{0}, I64{0}, I64{14}, scratch)
+    if rollback {
+        rt_text_store(scratch + I64{64}, I64{1})
+    } else if !vault_wall_unix_ms(scratch + I64{64}, scratch) {
+        thread_zero(scratch, I64{80})
+        jet_rt_free(scratch, I64{80}, I64{8})
+        return vault_error_new(I64{7}, I64{0}, I64{0})
+    }
+    latest := rt_text_word(scratch + I64{64})
+    records :: rt_text_word(store + VAULT_STORE_RECORDS)
+    count :: rt_text_word(records + DATA_SEQUENCE_LENGTH)
+    data :: rt_text_word(records + DATA_SEQUENCE_DATA)
+    at := I64{0}
+    loop at < count {
+        record :: rt_text_word(data + at * DATA_TREE_ELEMENT_BYTES)
+        created :: rt_text_word(record + VAULT_RECORD_CREATED)
+        status :: rt_text_word(record + VAULT_RECORD_STATUS_MS)
+        if vault_unsigned_less(latest, created) -> latest = created
+        if vault_unsigned_less(latest, status) -> latest = status
+        at += I64{1}
+    }
+    rt_text_store(out, latest)
+    thread_zero(scratch, I64{80})
+    jet_rt_free(scratch, I64{80}, I64{8})
+    I64{0}
+}
+// SecretsCrypto.rs:2934-2944. Decode and take, never clone the typed strings.
+fn vault_strings_from_plaintext(plaintext: I64, out: I64) -> I64 {
+    bytes :: rt_text_word(plaintext + DATA_SEQUENCE_DATA)
+    length :: rt_text_word(plaintext + DATA_SEQUENCE_LENGTH)
+    scratch :: jet_rt_alloc(I64{8}, I64{8})
+    typed :: length >= I64{4} && rt_text_byte(bytes) == I64{74} && rt_text_byte(bytes + I64{1}) == I64{86} &&
+        rt_text_byte(bytes + I64{2}) == I64{76} && rt_text_byte(bytes + I64{3}) == I64{84}
+    if typed {
+        status :: vault_decode_v2(bytes, length, scratch)
+        if (status != I64{-1}) {
+            jet_rt_free(scratch, I64{8}, I64{8})
+            return vault_error_new(status, I64{0}, I64{0})
+        }
+        store :: rt_text_word(scratch)
+        pairs :: rt_text_word(store + VAULT_STORE_STRINGS)
+        rt_text_store(store + VAULT_STORE_STRINGS, I64{0})
+        vault_store_drop(store)
+        rt_text_store(out, pairs)
+    } else {
+        pairs :: vault_decode_pairs(bytes, length)
+        if (pairs == I64{0}) {
+            jet_rt_free(scratch, I64{8}, I64{8})
+            return vault_error_new(I64{8}, I64{0}, I64{0})
+        }
+        error :: vault_canonical_pairs(pairs, scratch)
+        if (error != I64{0}) {
+            vault_pairs_drop(pairs)
+            jet_rt_free(scratch, I64{8}, I64{8})
+            return error
+        }
+        canonical :: rt_text_word(scratch)
+        thread_zero(rt_text_word(canonical + DATA_SEQUENCE_DATA), rt_text_word(canonical + DATA_SEQUENCE_CAPACITY))
+        data_sequence_drop(canonical, DATA_TREE_BYTE_LIST)
+        rt_text_store(out, pairs)
+    }
+    thread_zero(scratch, I64{8})
+    jet_rt_free(scratch, I64{8}, I64{8})
+    I64{0}
+}
+fn vault_revision_overflow(scratch: I64) -> I64 {
+    rt_text_store(scratch, I64{7309955123234824566})
+    rt_text_store(scratch + I64{8}, I64{121424789596534})
+    incident :: jet_rt_string_from_static(scratch, I64{14})
+    error :: jet_rt_alloc(VAULT_ERROR_BYTES, I64{8})
+    rt_text_store(error + VAULT_ERROR_TAG, I64{12})
+    rt_text_store(error + VAULT_ERROR_FIRST, incident)
+    rt_text_store(error + VAULT_ERROR_SECOND, I64{0})
+    error
+}
+// SecretsCrypto.rs:2945-2984. Canonicalization precedes every filesystem read.
+// Scratch192 tracks all owners; adopted pairs are consumed even on an error.
+fn vault_replace_strings_inner(root: I64, scratch: I64) -> I64 {
+    pairs :: rt_text_word(scratch)
+    canonical_error :: vault_canonical_pairs(pairs, scratch + I64{8})
+    if (canonical_error != I64{0}) -> return canonical_error
+    canonical :: rt_text_word(scratch + I64{8})
+    thread_zero(rt_text_word(canonical + DATA_SEQUENCE_DATA), rt_text_word(canonical + DATA_SEQUENCE_CAPACITY))
+    data_sequence_drop(canonical, DATA_TREE_BYTE_LIST)
+    error :: vault_read_at_root(root, scratch + I64{16}, scratch + I64{40}, scratch + I64{72}, scratch + I64{104})
+    if (error != I64{0}) -> return error
+    if (rt_text_word(scratch + I64{104}) != VAULT_START_V2) -> return vault_error_new(I64{8}, I64{0}, I64{0})
+    store :: rt_text_word(scratch + I64{16})
+    revision :: rt_text_word(store + VAULT_STORE_REVISION)
+    lock_error :: vault_acquire_lock(root, store + VAULT_STORE_UUID, revision, scratch + I64{40}, scratch + I64{32})
+    if (lock_error != I64{0}) -> return lock_error
+    current_error :: vault_read_at_root(root, scratch + I64{24}, scratch + I64{112}, scratch + I64{144}, scratch + I64{176})
+    if (current_error != I64{0}) -> return current_error
+    current :: rt_text_word(scratch + I64{24})
+    if (!vault_writer_snapshot_matches(current, scratch + I64{112}, scratch + I64{144}, rt_text_word(scratch + I64{176}), scratch + I64{40}, scratch + I64{72}, VAULT_START_V2, revision) ||
+        !rt_text_equal_bytes(current + VAULT_STORE_UUID, store + VAULT_STORE_UUID, I64{16})) -> return vault_error_new(I64{6}, I64{0}, I64{0})
+    // pairs_drop wipes VALUES and drops keys without wiping their bytes.
+    vault_pairs_drop(rt_text_word(store + VAULT_STORE_STRINGS))
+    rt_text_store(store + VAULT_STORE_STRINGS, pairs)
+    rt_text_store(scratch, I64{0})
+    if (revision == I64{-1}) -> return vault_revision_overflow(scratch + I64{112})
+    rt_text_store(store + VAULT_STORE_REVISION, wrapping(revision + I64{1}))
+    lock :: rt_text_word(scratch + I64{32})
+    rt_text_store(scratch + I64{32}, I64{0})
+    vault_write_at_root(root, store, scratch + I64{40}, scratch + I64{72}, rt_text_word(scratch + I64{104}), revision, lock)
+}
+fn vault_replace_strings_at_root(root: I64, pairs: I64) -> I64 {
+    scratch :: jet_rt_alloc(I64{192}, I64{8})
+    thread_zero(scratch, I64{192})
+    rt_text_store(scratch, pairs)
+    error :: vault_replace_strings_inner(root, scratch)
+    vault_pairs_drop(rt_text_word(scratch))
+    vault_store_drop(rt_text_word(scratch + I64{16}))
+    vault_store_drop(rt_text_word(scratch + I64{24}))
+    vault_lock_drop(rt_text_word(scratch + I64{32}))
+    thread_zero(scratch, I64{192})
+    jet_rt_free(scratch, I64{192}, I64{8})
+    error
+}
