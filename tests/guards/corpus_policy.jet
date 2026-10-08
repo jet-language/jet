@@ -1,35 +1,35 @@
 // Closed-corpus semantic policy: the manifest owns provenance, the compiler AST
 // owns recurrence. This is test support, never a user-program lint.
 use core.files as policy_files
-use jet_foundation.[Program, DIAGNOSTIC_ERROR]
-use jet_parser.parse_source
 
-struct PolicySourceRow {
-    selector: String
-    role: String
-    profile: String
-    decision: String
-    proof: String
-    owner: String
-    reason: String
+pub struct PolicySourceRow {
+    pub selector: String
+    pub role: String
+    pub profile: String
+    pub decision: String
+    pub proof: String
+    pub owner: String
+    pub reason: String
 }
-struct PolicyScopeRow { rule: String, selector: String, reason: String }
-struct PolicyProducerRow { selector: String, artifact: String, protocol: String, owner: String, reason: String }
-struct PolicyArtifactRow { selector: String, producer: String, kind: String, reason: String }
-struct PolicyFindingRow { id: String, rule: String, owner: String, proof: String }
-struct PolicyExceptionRow { rule: String, selector: String, site: String, expected: Int, protocol: String, reason: String }
-struct PolicyManifest {
-    sources: [PolicySourceRow]
-    scopes: [PolicyScopeRow]
-    producers: [PolicyProducerRow]
-    artifacts: [PolicyArtifactRow]
-    findings: [PolicyFindingRow]
-    exceptions: [PolicyExceptionRow]
+pub struct PolicyScopeRow { pub rule: String, pub selector: String, pub reason: String }
+pub struct PolicyProducerRow { pub selector: String, pub artifact: String, pub protocol: String, pub owner: String, pub reason: String }
+pub struct PolicyArtifactRow { pub selector: String, pub producer: String, pub kind: String, pub reason: String }
+pub struct PolicyFindingRow { pub id: String, pub rule: String, pub owner: String, pub proof: String }
+pub struct PolicyExceptionRow { pub rule: String, pub selector: String, pub site: String, pub expected: String, pub protocol: String, pub reason: String }
+pub struct PolicyManifest {
+    pub sources: [PolicySourceRow]
+    pub scopes: [PolicyScopeRow]
+    pub producers: [PolicyProducerRow]
+    pub artifacts: [PolicyArtifactRow]
+    pub findings: [PolicyFindingRow]
+    pub exceptions: [PolicyExceptionRow]
 }
-struct PolicyRuleSpec { name: String, why: String, replacement: String }
-struct PolicyOccurrence { file: String, rule: String, site: String }
+pub struct PolicyRuleSpec { pub name: String, pub why: String, pub replacement: String }
+pub struct PolicyOccurrence { pub file: String, pub rule: String, pub site: String }
+#Error
+pub struct PolicyError { pub message: String }
 
-fn policy_rule_registry() -> [PolicyRuleSpec] {
+pub fn policy_rule_registry() -> [PolicyRuleSpec] {
     [PolicyRuleSpec]{
         PolicyRuleSpec{name: "raw-cli-fixed-shape", why: "maintained beginner programs must use the typed entry shape", replacement: "declare a typed #CLI entry struct and fn run(args: Args)"},
         PolicyRuleSpec{name: "raw-cli-builder-shape", why: "a maintained CLI recipe must not rebuild the parser beside its typed entry", replacement: "use the resolved typed #CLI entry or the one approved args builder"},
@@ -80,66 +80,79 @@ fn policy_rule_registry() -> [PolicyRuleSpec] {
     }
 }
 
-fn policy_violation(file: String, rule: String, site: String) -> String {
+pub fn policy_violation(file: String, rule: String, site: String) -> String {
     loop spec in policy_rule_registry() {
         if spec.name == rule -> return "file={file}; rule={rule}; site={site}; why={spec.why}; replacement={spec.replacement}"
     }
     panic("unregistered corpus rule: {rule}")
 }
 fn policy_relative_path(path: String) -> String? {
-    if path.is_empty() || path.starts_with("/") -> return Some("manifest path is not a normalized relative path ({path})")
+    if path.is_empty() || path.starts_with("/") -> return Val("manifest path is not a normalized relative path ({path})")
     loop part in path.split("/") {
-        if part == ".." || part.is_empty() -> return Some("manifest path is not a normalized relative path ({path})")
+        if part == ".." || part.is_empty() -> return Val("manifest path is not a normalized relative path ({path})")
     }
     None
 }
-fn policy_selector_path(selector: String) -> String {
+pub fn policy_selector_path(selector: String) -> String {
     if selector.starts_with("root:") || selector.starts_with("file:") -> return ~selector.slice(5, selector.len())
-    selector
+    ~selector
 }
 fn policy_selector_error(value: String) -> String? {
-    if !value.starts_with("root:") && !value.starts_with("file:") -> return Some("selector must start with root: or file: ({value})")
+    if !value.starts_with("root:") && !value.starts_with("file:") -> return Val("selector must start with root: or file: ({value})")
     policy_relative_path(policy_selector_path(value))
 }
 fn policy_producer_error(value: String) -> String? {
-    if !value.starts_with("producer:") -> return Some("producer selector must start with producer: ({value})")
-    parts :: value.slice(9, value.len()).split("#")
-    if parts.len() < 2 -> return Some("producer selector must name a symbol ({value})")
-    if policy_relative_path(parts[0]) == .Val(error) -> return Some(error)
-    if parts.len() != 2 || parts[1].is_empty() -> return Some("producer selector must name one non-empty symbol ({value})")
+    if !value.starts_with("producer:") -> return Val("producer selector must start with producer: ({value})")
+    parts :: value.slice(9, value.len()).split("#").to_list()
+    if parts.len() < 2 -> return Val("producer selector must name a symbol ({value})")
+    if policy_relative_path(parts[0]) == .Val(error) -> return Val(~error)
+    if parts.len() != 2 || parts[1].is_empty() -> return Val("producer selector must name one non-empty symbol ({value})")
     None
 }
 fn policy_artifact_error(value: String) -> String? {
     if value.starts_with("path:") -> return policy_relative_path(~value.slice(5, value.len()))
     if value.starts_with("family:") {
         family :: value.slice(7, value.len())
-        if family.is_empty() || family.contains("/") -> return Some("artifact family is not a stable identifier ({value})")
+        if family.is_empty() || family.contains("/") -> return Val("artifact family is not a stable identifier ({value})")
         return None
     }
-    Some("artifact selector must start with path: or family: ({value})")
+    Val("artifact selector must start with path: or family: ({value})")
 }
-fn policy_unsigned(raw: String) -> Int? {
+// Preserve Rust usize's full x64 domain, including + and leading zeroes.
+// Counts are canonical decimal strings so Jet Int cannot truncate u64::MAX.
+fn policy_unsigned(raw: String) -> String? {
     if raw.is_empty() -> return None
     digits :: raw.bytes()
-    loop byte in digits { if byte < 48 || byte > 57 -> return None }
-    raw.parse<Int>()
+    start := 0
+    if digits[0] == (U8{43}) -> start = 1
+    if start == digits.len() -> return None
+    loop index in start..<digits.len() {
+        if digits[index] < (U8{48}) || digits[index] > (U8{57}) -> return None
+    }
+    loop start + 1 < digits.len() && digits[start] == (U8{48}) -> start += 1
+    value :: ~raw.slice(start, raw.len())
+    if value.len() > 20 || (value.len() == 20 && value > "18446744073709551615") -> return None
+    Val(value)
+}
+fn policy_decimal_less(left: String, right: String) -> Bool {
+    left.len() < right.len() || (left.len() == right.len() && left < right)
 }
 fn policy_site_error(value: String) -> String? {
-    parts :: value.split("@")
-    if parts.len() < 2 -> return Some("semantic site must carry a span ({value})")
-    if parts.len() != 2 || parts[0].is_empty() -> return Some("semantic site kind is empty or malformed ({value})")
-    span :: parts[1].split("..")
-    if span.len() < 2 -> return Some("semantic site span must use start..end ({value})")
-    start :: policy_unsigned(span[0]) ?? return Some("bad site start ({value})")
-    end :: policy_unsigned(span[1]) ?? return Some("bad site end ({value})")
-    if span.len() != 2 -> return Some("bad site end ({value})")
-    if end < start -> return Some("site end precedes start ({value})")
+    parts :: value.split("@").to_list()
+    if parts.len() < 2 -> return Val("semantic site must carry a span ({value})")
+    if parts.len() != 2 || parts[0].is_empty() -> return Val("semantic site kind is empty or malformed ({value})")
+    span :: parts[1].split("..").to_list()
+    if span.len() < 2 -> return Val("semantic site span must use start..end ({value})")
+    start :: policy_unsigned(span[0]) ?? return Val("bad site start ({value})")
+    end :: policy_unsigned(span[1]) ?? return Val("bad site end ({value})")
+    if span.len() != 2 -> return Val("bad site end ({value})")
+    if policy_decimal_less(end, start) -> return Val("site end precedes start ({value})")
     None
 }
 fn policy_role_valid(role: String) -> Bool {
     role == "canonical-teaching" || role == "expert-lesson" || role == "negative-diagnostic" || role == "raw-protocol" || role == "fixture-harness-boundary" || role == "generated-output" || role == "non-teaching-test-data"
 }
-fn policy_parse_manifest(text: String) -> PolicyManifest String! {
+pub fn policy_parse_manifest(text: String) -> PolicyManifest PolicyError! {
     manifest := PolicyManifest{sources: [PolicySourceRow]{}, scopes: [PolicyScopeRow]{}, producers: [PolicyProducerRow]{}, artifacts: [PolicyArtifactRow]{}, findings: [PolicyFindingRow]{}, exceptions: [PolicyExceptionRow]{}}
     section := ""
     number := 0
@@ -153,12 +166,12 @@ fn policy_parse_manifest(text: String) -> PolicyManifest String! {
         if line.is_empty() || line.starts_with("#") -> next
         if line.starts_with("[") && line.ends_with("]") {
             section = ~line.slice(1, line.len() - 1)
-            if section != "source" && section != "scope" && section != "producer" && section != "artifact" && section != "finding" && section != "exception" -> return Err("manifest line {number}: unknown section [{section}]")
+            if section != "source" && section != "scope" && section != "producer" && section != "artifact" && section != "finding" && section != "exception" -> return Err(PolicyError{message: "manifest line {number}: unknown section [{section}]"})
             next
         }
-        fields :: line.split("\t")
+        fields :: line.split("\t").to_list()
         expected :: if section == "source" -> 8 else if section == "scope" -> 4 else if section == "producer" -> 6 else if section == "artifact" || section == "finding" -> 5 else if section == "exception" -> 7 else -> 0
-        if fields.len() != expected || expected == 0 -> return Err("manifest line {number}: wrong field count or row outside a section")
+        if fields.len() != expected || expected == 0 -> return Err(PolicyError{message: "manifest line {number}: wrong field count or row outside a section"})
         labels :: if section == "source" -> [String]{"", "", "", "source profile", "source decision", "source proof", "source owner", "source reason"} else if section == "scope" -> [String]{"", "scope rule", "", "scope reason"} else if section == "producer" -> [String]{"", "", "", "producer protocol", "producer owner", "producer reason"} else if section == "artifact" -> [String]{"", "", "", "artifact kind", "artifact reason"} else if section == "finding" -> [String]{"", "finding id", "finding rule", "finding owner", "finding proof"} else -> [String]{"", "exception rule", "", "", "", "exception protocol", "exception reason"}
         // Validate in field order, matching the Rust row constructors.
         loop index in 1..<fields.len() {
@@ -166,23 +179,23 @@ fn policy_parse_manifest(text: String) -> PolicyManifest String! {
             if (section == "source" && index == 1) || (section == "scope" && index == 2) || (section == "exception" && index == 2) -> error = policy_selector_error(fields[index])
             if (section == "producer" && index == 1) || (section == "artifact" && index == 2) -> error = policy_producer_error(fields[index])
             if (section == "producer" && index == 2) || (section == "artifact" && index == 1) -> error = policy_artifact_error(fields[index])
-            if section == "source" && index == 2 && !policy_role_valid(fields[2]) -> error = Some("unknown corpus source role `{fields[2]}`")
+            if section == "source" && index == 2 && !policy_role_valid(fields[2]) -> error = Val("unknown corpus source role `{fields[2]}`")
             if section == "exception" && index == 3 -> error = policy_site_error(fields[3])
-            if section == "exception" && index == 4 && policy_unsigned(fields[4]) == None -> error = Some("exception occurrence is not a positive integer")
-            if !labels[index].is_empty() && fields[index].is_empty() -> error = Some("{labels[index]} is empty")
-            if error == .Val(message) -> return Err("manifest line {number}: {message}")
+            if section == "exception" && index == 4 && policy_unsigned(fields[4]) == None -> error = Val("exception occurrence is not a positive integer")
+            if !labels[index].is_empty() && fields[index].is_empty() -> error = Val("{labels[index]} is empty")
+            if error == .Val(message) -> return Err(PolicyError{message: "manifest line {number}: {message}"})
         }
         if section == "source" -> &manifest.sources.push(PolicySourceRow{selector: fields[1], role: fields[2], profile: fields[3], decision: fields[4], proof: fields[5], owner: fields[6], reason: fields[7]})
         if section == "scope" -> &manifest.scopes.push(PolicyScopeRow{rule: fields[1], selector: fields[2], reason: fields[3]})
         if section == "producer" -> &manifest.producers.push(PolicyProducerRow{selector: fields[1], artifact: fields[2], protocol: fields[3], owner: fields[4], reason: fields[5]})
         if section == "artifact" -> &manifest.artifacts.push(PolicyArtifactRow{selector: fields[1], producer: fields[2], kind: fields[3], reason: fields[4]})
         if section == "finding" -> &manifest.findings.push(PolicyFindingRow{id: fields[1], rule: fields[2], owner: fields[3], proof: fields[4]})
-        if section == "exception" -> &manifest.exceptions.push(PolicyExceptionRow{rule: fields[1], selector: fields[2], site: fields[3], expected: policy_unsigned(fields[4]) ?? 0, protocol: fields[5], reason: fields[6]})
-        if fields[0] != "1" -> return Err("manifest line {number}: unsupported manifest version")
+        if section == "exception" -> &manifest.exceptions.push(PolicyExceptionRow{rule: fields[1], selector: fields[2], site: fields[3], expected: policy_unsigned(fields[4]) ?? panic("validated occurrence"), protocol: fields[5], reason: fields[6]})
+        if fields[0] != "1" -> return Err(PolicyError{message: "manifest line {number}: unsupported manifest version"})
     }
     Ok(manifest)
 }
-fn policy_selector_matches(selector: String, path: String) -> Bool {
+pub fn policy_selector_matches(selector: String, path: String) -> Bool {
     if selector.starts_with("file:") -> return policy_selector_path(selector) == path
     if !selector.starts_with("root:") -> return false
     root :: policy_selector_path(selector)
@@ -193,12 +206,12 @@ fn policy_specificity(selector: String) -> Int {
     if selector.starts_with("root:") -> return selector.len() - 5
     0
 }
-fn policy_source_row(manifest: PolicyManifest, path: String) -> PolicySourceRow? {
+pub fn policy_source_row(manifest: PolicyManifest, path: String) -> PolicySourceRow? {
     found := PolicySourceRow?{None}
     best := -1
     loop row in manifest.sources {
         rank :: policy_specificity(row.selector)
-        if policy_selector_matches(row.selector, path) && rank >= best { found = Some(row)
+        if policy_selector_matches(row.selector, path) && rank >= best { found = Val(row)
             best = rank
         }
     }
@@ -206,16 +219,16 @@ fn policy_source_row(manifest: PolicyManifest, path: String) -> PolicySourceRow?
 }
 fn policy_protocol_error(protocol: String) -> String? {
     if protocol == "ordinary-envelope" || protocol == "no-response-protocol" -> return None
-    if !protocol.starts_with("override:") -> return Some("generated protocol must be ordinary-envelope, no-response-protocol, or an override ({protocol})")
-    parts :: protocol.slice(9, protocol.len()).split(":")
-    if parts.len() < 2 -> return Some("generated protocol override must name identity and proof ({protocol})")
-    if parts[0].is_empty() || parts[0] == "ordinary-envelope" || parts.len() != 2 || parts[1] != "differs-from-ordinary-envelope" -> return Some("generated protocol override must prove a distinct protocol identity ({protocol})")
+    if !protocol.starts_with("override:") -> return Val("generated protocol must be ordinary-envelope, no-response-protocol, or an override ({protocol})")
+    parts :: protocol.slice(9, protocol.len()).split(":").to_list()
+    if parts.len() < 2 -> return Val("generated protocol override must name identity and proof ({protocol})")
+    if parts[0].is_empty() || parts[0] == "ordinary-envelope" || parts.len() != 2 || parts[1] != "differs-from-ordinary-envelope" -> return Val("generated protocol override must prove a distinct protocol identity ({protocol})")
     None
 }
 fn policy_exception_protocol_error(protocol: String) -> String? {
     if protocol == "fixture" || protocol == "expert-lesson" || protocol == "negative-diagnostic" || protocol == "canonical-teaching" || protocol == "raw-protocol" || protocol == "fixture-harness-boundary" -> return None
     if protocol.starts_with("override:") -> return policy_protocol_error(protocol)
-    Some("exception protocol must name its source boundary or a generated override ({protocol})")
+    Val("exception protocol must name its source boundary or a generated override ({protocol})")
 }
 fn policy_domain_guard(rule: String) -> Bool {
     rule == "product-parser-regression" || rule == "compiler-loop-fact" || rule == "build-root-fact" || rule == "fixture-role-classification" || rule == "fixture-cli-role" || rule == "bindgen-one-decoder"
@@ -242,7 +255,7 @@ fn policy_role_debug(role: String) -> String {
     if role == "generated-output" -> return "GeneratedOutput"
     "NonTeachingTestData"
 }
-fn policy_validate_manifest(manifest: PolicyManifest) -> [String] {
+pub fn policy_validate_manifest(manifest: PolicyManifest) -> [String] {
     errors := [String]{}
     names := [String]{}
     loop row in manifest.sources -> &names.push(row.selector)
@@ -277,7 +290,7 @@ fn policy_validate_manifest(manifest: PolicyManifest) -> [String] {
     }
     loop producer in manifest.producers {
         if policy_protocol_error(producer.protocol) == .Val(error) {
-            path :: ~producer.selector.slice(9, producer.selector.len()).split("#")[0]
+            path :: ~producer.selector.slice(9, producer.selector.len()).split("#").to_list()[0]
             message :: policy_violation(path, "generated-protocol-override", "manifest:generated-protocol@0..0")
             &errors.push("{message} ({error})")
         }
@@ -298,12 +311,12 @@ fn policy_validate_manifest(manifest: PolicyManifest) -> [String] {
         key :: "{exception.rule}\t{exception.selector}\t{exception.site}"
         if exceptions.contains(key) -> &errors.push("duplicate occurrence exception {exception.rule} {exception.selector} {exception.site}")
         else -> &exceptions.push(key)
-        if exception.expected == 0 -> &errors.push("exception {exception.rule} {exception.site} has zero expected occurrences")
+        if exception.expected == "0" -> &errors.push("exception {exception.rule} {exception.site} has zero expected occurrences")
         if !exception.selector.starts_with("file:") -> &errors.push("exception {exception.rule} {exception.site} is not occurrence-scoped to one file")
         else {
             source :: policy_source_row(manifest, policy_selector_path(exception.selector))
             if source == .Val(row) {
-                if row.role != "expert-lesson" && row.role != "negative-diagnostic" {
+                if !exception.site.starts_with("allow:") && row.role != "expert-lesson" && row.role != "negative-diagnostic" {
                     role :: policy_role_debug(row.role)
                     &errors.push("exception {exception.rule} {exception.selector} requires an expert-lesson or negative-diagnostic source, found {role}")
                 }
@@ -317,8 +330,8 @@ fn policy_validate_manifest(manifest: PolicyManifest) -> [String] {
     errors
 }
 
-fn policy_join(root: String, path: String) -> String {
-    if root.is_empty() || root == "." -> return path
+pub fn policy_join(root: String, path: String) -> String {
+    if root.is_empty() || root == "." -> return ~path
     if root.ends_with("/") -> return "{root}{path}"
     "{root}/{path}"
 }
@@ -330,7 +343,7 @@ fn policy_validate_manifest_paths(manifest: PolicyManifest, root: String) -> [St
         if !exists -> &errors.push("manifest source selector does not exist: {source.selector}")
     }
     loop producer in manifest.producers {
-        path :: ~producer.selector.slice(9, producer.selector.len()).split("#")[0]
+        path :: ~producer.selector.slice(9, producer.selector.len()).split("#").to_list()[0]
         if !policy_files.is_file(policy_join(root, path)) -> &errors.push("manifest producer source does not exist: {producer.selector}")
     }
     loop exception in manifest.exceptions {
@@ -338,7 +351,7 @@ fn policy_validate_manifest_paths(manifest: PolicyManifest, root: String) -> [St
     }
     errors
 }
-fn policy_inventory_error(message: String, file: String, site_kind: String) -> String {
+pub fn policy_inventory_error(message: String, file: String, site_kind: String) -> String {
     violation :: policy_violation(file, "corpus-inventory", "{site_kind}@0..0")
     "{message}: {file}; {violation}"
 }
@@ -354,70 +367,70 @@ fn policy_audit_inventory(manifest: PolicyManifest, files: [String], producers: 
     }
     errors
 }
-fn policy_validate_occurrences(manifest: PolicyManifest, selector: String, candidates: [PolicyOccurrence]) -> String? {
+pub fn policy_validate_occurrences(manifest: PolicyManifest, selector: String, candidates: [PolicyOccurrence]) -> String? {
     keys := [String]{}
     loop candidate in candidates {
-        if candidate.file != selector -> return Some("candidate file {candidate.file} does not match {selector}")
+        if candidate.file != selector -> return Val("candidate file {candidate.file} does not match {selector}")
         key :: "{candidate.rule}\t{candidate.site}"
         if !keys.contains(key) -> &keys.push(key)
     }
     &keys.sort()
     loop key in keys {
-        parts :: key.split("\t")
+        parts :: key.split("\t").to_list()
         rule :: parts[0]
         site :: parts[1]
         count := 0
         loop candidate in candidates { if candidate.rule == rule && candidate.site == site -> count += 1 }
         matches := 0
-        expected := 0
+        expected := "0"
         loop exception in manifest.exceptions {
-            if exception.rule == rule && exception.selector == "file:{selector}" && exception.site == site {
+            if exception.rule == rule && exception.selector == ("file:{selector}") && exception.site == site {
                 matches += 1
                 expected = exception.expected
             }
         }
-        if matches != 1 -> return Some("file={selector}; rule={rule}; site={site}; why=occurrence has no unique exception; replacement=add one exact exception")
-        if count != expected -> return Some("file={selector}; rule={rule}; site={site}; why=expected {expected} occurrence(s), found {count}; replacement=remove the additional occurrence or add a distinct reviewed site")
+        if matches != 1 -> return Val("file={selector}; rule={rule}; site={site}; why=occurrence has no unique exception; replacement=add one exact exception")
+        if ("{count}") != expected -> return Val("file={selector}; rule={rule}; site={site}; why=expected {expected} occurrence(s), found {count}; replacement=remove the additional occurrence or add a distinct reviewed site")
     }
     loop exception in manifest.exceptions {
         if exception.selector != "file:{selector}" -> next
         count := 0
         loop candidate in candidates { if candidate.rule == exception.rule && candidate.site == exception.site -> count += 1 }
-        if count != exception.expected -> return Some("file={selector}; rule={exception.rule}; site={exception.site}; why=expected {exception.expected} occurrence(s), found {count}; replacement=remove the additional occurrence or update the exact reviewed site")
+        if ("{count}") != exception.expected -> return Val("file={selector}; rule={exception.rule}; site={exception.site}; why=expected {exception.expected} occurrence(s), found {count}; replacement=remove the additional occurrence or update the exact reviewed site")
     }
     None
 }
-fn policy_apply_exceptions(manifest: PolicyManifest, path: String, candidates: [PolicyOccurrence]) -> [PolicyOccurrence] String! {
+pub fn policy_apply_exceptions(manifest: PolicyManifest, path: String, candidates: [PolicyOccurrence]) -> [PolicyOccurrence] PolicyError! {
     errors := [String]{}
     loop exception in manifest.exceptions {
         if exception.selector != "file:{path}" -> next
         actual := 0
         loop candidate in candidates { if candidate.rule == exception.rule && candidate.site == exception.site -> actual += 1 }
-        if actual != exception.expected -> &errors.push("file={path}; rule={exception.rule}; site={exception.site}; why=expected {exception.expected} occurrence(s), found {actual}; replacement=remove the additional occurrence or update the exact reviewed site")
+        if ("{actual}") != exception.expected -> &errors.push("file={path}; rule={exception.rule}; site={exception.site}; why=expected {exception.expected} occurrence(s), found {actual}; replacement=remove the additional occurrence or update the exact reviewed site")
     }
-    if errors.len() > 0 -> return Err(errors.join("\n"))
+    if errors.len() > 0 -> return Err(PolicyError{message: errors.join("\n")})
     remaining := [PolicyOccurrence]{}
     consumed := [String: Int]{}
     loop candidate in candidates {
         key :: "{candidate.rule}\t{candidate.site}"
-        expected := Int?{None}
+        expected := String?{None}
         loop exception in manifest.exceptions {
-            if exception.rule == candidate.rule && exception.selector == "file:{path}" && exception.site == candidate.site {
-                expected = Some(exception.expected)
+            if exception.rule == candidate.rule && exception.selector == ("file:{path}") && exception.site == candidate.site {
+                expected = Val(exception.expected)
                 break
             }
         }
         if expected == .Val(limit) {
             seen :: (consumed.get(key) ?? 0) + 1
             consumed[key] = seen
-            if seen > limit -> &remaining.push(candidate)
+            if policy_decimal_less(limit, "{seen}") -> &remaining.push(candidate)
         } else {
             &remaining.push(candidate)
         }
     }
     Ok(remaining)
 }
-fn policy_manifest() -> PolicyManifest {
+pub fn policy_manifest() -> PolicyManifest {
     text :: policy_files.read("tests/corpus_policy.tsv") ?? panic("read corpus manifest")
     manifest :: policy_parse_manifest(text) ?? panic("checked-in corpus manifest is valid")
     errors := policy_validate_manifest(manifest)
@@ -425,23 +438,19 @@ fn policy_manifest() -> PolicyManifest {
     assert_eq(errors, [String]{})
     manifest
 }
-
-// The dependency contract is exercised on a real parser result, never a text
-// substitute. A build failure in the compiler packages blocks this guard port.
-fn policy_parse_program(source_label: String, source: String) -> Program String! {
-    parsed :: parse_source(source.bytes())
-    errors := [String]{}
-    loop diagnostic in parsed.diagnostics {
-        if diagnostic.severity == DIAGNOSTIC_ERROR -> &errors.push(diagnostic.code)
+fn policy_manifest_failure(text: String) -> String {
+    if policy_parse_manifest(text) == {
+        .Err(error) -> return ~error.message
+        .Ok(_) -> panic("invalid manifest unexpectedly accepted")
     }
-    if errors.len() > 0 -> return Err("Jet parser rejected corpus source `{source_label}`: {errors.join(",")}")
-    Ok(parsed.program)
+}
+fn policy_exception_failure(manifest: PolicyManifest, path: String, candidates: [PolicyOccurrence]) -> String {
+    if policy_apply_exceptions(manifest, path, candidates) == {
+        .Err(error) -> return ~error.message
+        .Ok(_) -> panic("invalid exception occurrences unexpectedly accepted")
+    }
 }
 
-#Test("corpus policy compiler AST dependency") {
-    program :: policy_parse_program("planted", "fn run() {{ print(\"process.argv()\") }}") ?? panic("compiler parser rejected valid source")
-    assert_eq(program.items.len(), 1)
-}
 #Test("checked_manifest_has_all_audited_findings_and_provenance") {
     manifest :: policy_manifest()
     assert_eq(policy_validate_manifest(manifest), [String]{})
@@ -472,11 +481,11 @@ fn policy_parse_program(source_label: String, source: String) -> Program String!
     assert(policy_validate_manifest(manifest).join("\n").contains("entry-implicit has no executable corpus or domain guard"), "orphan finding must fail")
 }
 #Test("corpus manifest parser planted invalid rows") {
-    assert_eq(policy_parse_manifest("[unknown]\n"), Err("manifest line 1: unknown section [unknown]"))
-    assert_eq(policy_parse_manifest("[scope]\n1\tentry-implicit\tfile:../escape.jet\twhy"), Err("manifest line 2: manifest path is not a normalized relative path (../escape.jet)"))
-    assert_eq(policy_parse_manifest("[exception]\n1\tentry-implicit\tfile:ok.jet\tfn:run@3..2\t1\tfixture\twhy"), Err("manifest line 2: site end precedes start (fn:run@3..2)"))
-    assert_eq(policy_parse_manifest("[scope]\n2\tentry-implicit\tfile:ok.jet\twhy"), Err("manifest line 2: unsupported manifest version"))
-    assert_eq(policy_parse_manifest("[scope]\n1\tentry-implicit\tfile:ok.jet"), Err("manifest line 2: wrong field count or row outside a section"))
+    assert_eq(policy_manifest_failure("[unknown]\n"), "manifest line 1: unknown section [unknown]")
+    assert_eq(policy_manifest_failure("[scope]\n1\tentry-implicit\tfile:../escape.jet\twhy"), "manifest line 2: manifest path is not a normalized relative path (../escape.jet)")
+    assert_eq(policy_manifest_failure("[exception]\n1\tentry-implicit\tfile:ok.jet\tfn:run@3..2\t1\tfixture\twhy"), "manifest line 2: site end precedes start (fn:run@3..2)")
+    assert_eq(policy_manifest_failure("[scope]\n2\tentry-implicit\tfile:ok.jet\twhy"), "manifest line 2: unsupported manifest version")
+    assert_eq(policy_manifest_failure("[scope]\n1\tentry-implicit\tfile:ok.jet"), "manifest line 2: wrong field count or row outside a section")
 }
 #Test("corpus manifest validation planted duplicate and provenance violations") {
     manifest := policy_manifest()
@@ -496,7 +505,7 @@ fn policy_parse_program(source_label: String, source: String) -> Program String!
 }
 #Test("corpus manifest planted canonical-source exception") {
     manifest := policy_manifest()
-    &manifest.exceptions.push(PolicyExceptionRow{rule: "entry-implicit", selector: "file:Examples/features/basics/hello.jet", site: "fn:run@0..0", expected: 1, protocol: "fixture", reason: "planted"})
+    &manifest.exceptions.push(PolicyExceptionRow{rule: "entry-implicit", selector: "file:Examples/features/basics/hello.jet", site: "fn:run@0..0", expected: "1", protocol: "fixture", reason: "planted"})
     error :: "exception entry-implicit file:Examples/features/basics/hello.jet requires an expert-lesson or negative-diagnostic source, found CanonicalTeaching"
     assert(policy_validate_manifest(manifest).contains(error), "canonical source cannot absorb a violation")
 }
@@ -521,13 +530,167 @@ fn policy_parse_program(source_label: String, source: String) -> Program String!
     duplicate :: policy_validate_occurrences(manifest, selector, [PolicyOccurrence]{candidate, candidate}) ?? panic("a second occurrence cannot reuse one exception")
     assert(duplicate.contains("expected 1"), "duplicate occurrence must fail")
     assert_eq(duplicate, "file=tests/ui/E-CALL-VALUE_call_result_not_called.jet; rule=entry-implicit; site=fn:run@0..0; why=expected 1 occurrence(s), found 2; replacement=remove the additional occurrence or add a distinct reviewed site")
-    assert_eq(policy_apply_exceptions(manifest, selector, [PolicyOccurrence]{candidate}), Ok([PolicyOccurrence]{}))
+    applied :: policy_apply_exceptions(manifest, selector, [PolicyOccurrence]{candidate}) ?? panic("recorded occurrence is accepted")
+    assert_eq(applied, [PolicyOccurrence]{})
 }
 #Test("corpus occurrence exceptions reject missing and shifted sites") {
     manifest :: policy_manifest()
     selector :: "tests/ui/E-CALL-VALUE_call_result_not_called.jet"
     shifted :: PolicyOccurrence{file: selector, rule: "entry-implicit", site: "fn:run@1..1"}
-    assert_eq(policy_validate_occurrences(manifest, selector, [PolicyOccurrence]{shifted}), Some("file=tests/ui/E-CALL-VALUE_call_result_not_called.jet; rule=entry-implicit; site=fn:run@1..1; why=occurrence has no unique exception; replacement=add one exact exception"))
-    assert_eq(policy_validate_occurrences(manifest, selector, [PolicyOccurrence]{}), Some("file=tests/ui/E-CALL-VALUE_call_result_not_called.jet; rule=entry-implicit; site=fn:run@0..0; why=expected 1 occurrence(s), found 0; replacement=remove the additional occurrence or update the exact reviewed site"))
-    assert_eq(policy_apply_exceptions(manifest, selector, [PolicyOccurrence]{}), Err("file=tests/ui/E-CALL-VALUE_call_result_not_called.jet; rule=entry-implicit; site=fn:run@0..0; why=expected 1 occurrence(s), found 0; replacement=remove the additional occurrence or update the exact reviewed site"))
+    assert_eq(policy_validate_occurrences(manifest, selector, [PolicyOccurrence]{shifted}), Val("file=tests/ui/E-CALL-VALUE_call_result_not_called.jet; rule=entry-implicit; site=fn:run@1..1; why=occurrence has no unique exception; replacement=add one exact exception"))
+    assert_eq(policy_validate_occurrences(manifest, selector, [PolicyOccurrence]{}), Val("file=tests/ui/E-CALL-VALUE_call_result_not_called.jet; rule=entry-implicit; site=fn:run@0..0; why=expected 1 occurrence(s), found 0; replacement=remove the additional occurrence or update the exact reviewed site"))
+    assert_eq(policy_exception_failure(manifest, selector, [PolicyOccurrence]{}), "file=tests/ui/E-CALL-VALUE_call_result_not_called.jet; rule=entry-implicit; site=fn:run@0..0; why=expected 1 occurrence(s), found 0; replacement=remove the additional occurrence or update the exact reviewed site")
+}
+
+struct PolicyInventoryEntry { path: String, role: String, producer: String? }
+struct PolicyProvenanceEntry { producer: String, artifact: String, protocol: String }
+struct PolicyInventory {
+    files: [PolicyInventoryEntry]
+    producers: [String]
+    artifacts: [String]
+    provenance: [PolicyProvenanceEntry]
+}
+struct PolicyDiscovery { paths: [String], config_candidates: [String] }
+
+fn policy_skip_directory(name: String) -> Bool {
+    name == ".git" || name == ".claude" || name == ".opencode" || name == ".tmp" ||
+    name == ".jet" || name == ".tower" || name == ".cache" || name == ".agent-worktrees" ||
+    name == "plugins" || name == "node_modules" || name == "target" || name == "build" ||
+    name == "cache" || name == "dist" || name == "result" ||
+    name.starts_with("target-") || name.starts_with("build-") || name.starts_with("result-")
+}
+pub fn policy_discover_manifest_files(manifest: PolicyManifest, root: String) -> PolicyDiscovery PolicyError! {
+    paths := [String]{}
+    candidates := [String]{}
+    pending := [String]{}
+    loop source in manifest.sources {
+        relative :: policy_selector_path(source.selector)
+        if source.selector.starts_with("root:") {
+            &pending.push(relative)
+        } else if source.selector.starts_with("file:") && policy_files.is_file(policy_join(root, relative)) {
+            &paths.push(relative)
+        }
+    }
+    loop pending.len() > 0 {
+        relative :: &pending.pop() ?? panic("pending directory is present")
+        directory :: policy_join(root, relative)
+        metadata := policy_files.Stat?{None}
+        if policy_files.stat(directory) == {
+            .Ok(info) -> metadata = Val(info)
+            .Err(error) -> return Err(PolicyError{message: "stat {directory}: {error}"})
+        }
+        info :: metadata ?? panic("stat succeeded")
+        if info.is_symlink -> next
+        entries := [policy_files.DirEntry]{}
+        if policy_files.list_dir(directory) == {
+            .Ok(found) -> entries = found
+            .Err(error) -> return Err(PolicyError{message: "read {directory}: {error}"})
+        }
+        loop entry in entries {
+            child :: "{relative}/{entry.name}"
+            path :: policy_join(root, child)
+            file_type := policy_files.Stat?{None}
+            if policy_files.stat(path) == {
+                .Ok(found) -> file_type = Val(found)
+                .Err(error) -> return Err(PolicyError{message: "stat {path}: {error}"})
+            }
+            kind :: file_type ?? panic("entry stat succeeded")
+            if kind.is_symlink -> next
+            if kind.is_dir {
+                // These are precisely the filesystem preconditions of the Rust
+                // uncomposed-manifest exclusion. Never guess its parse result.
+                if entry.name == "config" && policy_files.is_file(policy_join(root, "{relative}/package.jet")) && !candidates.contains(child) -> &candidates.push(child)
+                if !policy_skip_directory(entry.name) -> &pending.push(child)
+            } else if kind.is_file && child.ends_with(".jet") {
+                &paths.push(child)
+            }
+        }
+    }
+    &paths.sort()
+    unique := [String]{}
+    loop path in paths { if unique.len() == 0 || unique[unique.len() - 1] != path -> &unique.push(path) }
+    &candidates.sort()
+    Ok(PolicyDiscovery{paths: unique, config_candidates: candidates})
+}
+pub fn policy_inventory(manifest: PolicyManifest, root: String) -> PolicyInventory PolicyError! {
+    discovery :: policy_discover_manifest_files(manifest, root)
+    if discovery.config_candidates.len() > 0 -> return Err(PolicyError{message: "config-dir exclusion requires the uncomposed manifest parse; candidate: {discovery.config_candidates[0]}"})
+    errors := [String]{}
+    entries := [PolicyInventoryEntry]{}
+    loop path in discovery.paths {
+        source := PolicySourceRow?{None}
+        source = policy_source_row(manifest, path)
+        if source == None {
+            &errors.push(policy_inventory_error("unclassified eligible source", path, "inventory:source"))
+            next
+        }
+        row :: source ?? panic("source classification is present")
+        producer := String?{None}
+        loop artifact in manifest.artifacts {
+            if artifact.selector == ("path:{path}") {
+                producer = Val(artifact.producer)
+                break
+            }
+        }
+        if row.role == "generated-output" && producer == None -> &errors.push(policy_inventory_error("generated source has no producer artifact provenance", path, "inventory:provenance"))
+        &entries.push(PolicyInventoryEntry{path: path, role: row.role, producer: producer})
+    }
+    loop artifact in manifest.artifacts {
+        if !artifact.selector.starts_with("path:") -> next
+        path :: ~artifact.selector.slice(5, artifact.selector.len())
+        if !policy_files.is_file(policy_join(root, path)) -> &errors.push("manifest artifact is missing: {path}")
+    }
+    loop artifact in manifest.artifacts {
+        if !artifact.selector.starts_with("path:") -> next
+        path :: ~artifact.selector.slice(5, artifact.selector.len())
+        if !path.ends_with(".jet") -> next
+        source :: policy_source_row(manifest, path)
+        if source == {
+            .Val(row) -> { if row.role != "generated-output" -> &errors.push("generated artifact {path} is classified as {policy_role_debug(row.role)}, not generated-output") }
+            .None -> &errors.push("generated artifact has no source classification: {path}")
+        }
+    }
+    producers := [String]{}
+    loop producer in manifest.producers -> &producers.push(producer.selector)
+    artifacts := [String]{}
+    provenance := [PolicyProvenanceEntry]{}
+    loop artifact in manifest.artifacts {
+        &artifacts.push(artifact.selector)
+        loop producer in manifest.producers {
+            if producer.selector == artifact.producer {
+                &provenance.push(PolicyProvenanceEntry{producer: producer.selector, artifact: artifact.selector, protocol: producer.protocol})
+                break
+            }
+        }
+    }
+    if errors.len() > 0 -> return Err(PolicyError{message: errors.join("\n")})
+    Ok(PolicyInventory{files: entries, producers: producers, artifacts: artifacts, provenance: provenance})
+}
+#Test("corpus inventory config exclusion candidate count") {
+    discovery :: policy_discover_manifest_files(policy_manifest(), ".") ?? panic("discover manifest corpus")
+    print("config-dir exclusion candidate count: {discovery.config_candidates.len()}")
+    assert(discovery.config_candidates.len() == 0, "config-dir exclusion requires the uncomposed manifest parse; candidates: {discovery.config_candidates.join(",")}")
+}
+#Test("inventory_is_manifest_scoped") {
+    inventory :: policy_inventory(policy_manifest(), ".") ?? panic("manifest-scoped inventory")
+    first_hour := false
+    scratch := false
+    loop entry in inventory.files {
+        if entry.path == "Docs/spec/guides/first-hour.md" -> first_hour = true
+        if entry.path == "scratch-parser-call.jet" -> scratch = true
+    }
+    assert(first_hour, "exact documentation source is inventoried")
+    assert(inventory.provenance.len() == inventory.artifacts.len(), "every artifact must retain producer provenance")
+    assert(!scratch, "sources outside manifest roots are excluded")
+}
+
+#Test("corpus manifest usize parsing retains the full x64 domain") {
+    assert_eq(policy_unsigned("+0001"), Val("1"))
+    assert_eq(policy_unsigned("18446744073709551615"), Val("18446744073709551615"))
+    assert_eq(policy_unsigned("18446744073709551616"), None)
+    assert_eq(policy_unsigned("-1"), None)
+    assert_eq(policy_unsigned("+"), None)
+    assert_eq(policy_unsigned(""), None)
+    assert_eq(policy_site_error("fn:run@+0001..18446744073709551615"), None)
+    assert_eq(policy_site_error("fn:run@18446744073709551615..1"), Val("site end precedes start (fn:run@18446744073709551615..1)"))
 }

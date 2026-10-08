@@ -1,0 +1,21 @@
+// Compiler-AST policy guards are isolated from the filesystem/manifest package.
+// This package requires compiler packages with their Tests/ trees excluded.
+use jet_foundation.[Program, DIAGNOSTIC_ERROR]
+use jet_parser.parse_source
+use corpus_manifest.PolicyError
+// The dependency contract is exercised on a real parser result, never a text
+// substitute. A build failure in the compiler packages blocks this guard port.
+fn policy_parse_program(source_label: String, source: String) -> Program PolicyError! {
+    parsed :: parse_source(source.bytes())
+    errors := [String]{}
+    loop diagnostic in parsed.diagnostics {
+        if diagnostic.severity == DIAGNOSTIC_ERROR -> &errors.push(diagnostic.code)
+    }
+    if errors.len() > 0 -> return Err(PolicyError{message: "Jet parser rejected corpus source `{source_label}`: {errors.join(",")}"})
+    Ok(parsed.program)
+}
+
+#Test("corpus policy compiler AST dependency") {
+    program :: policy_parse_program("planted", "fn run() {{ print(\"process.argv()\") }}") ?? panic("compiler parser rejected valid source")
+    assert_eq(program.items.len(), 1)
+}
