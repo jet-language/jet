@@ -40,32 +40,66 @@ LOWER_RECORD_SCHEMAS :: prep { [LowerRecordSchema]{
     LowerRecordSchema{jet_name: "TaskFailure", variants: "Cancelled,DeadlineBlown,Panicked", fields: ""},
 } }
 
-// Resolve a checked nominal through its declaration before consulting the
-// runtime's short-name table. Only a canonical Core declaration may bridge a
-// qualified source name; an unrelated user's same-named type stays native.
-fn lower_record_runtime_handle(p: MIRProgram, ty: MIRType) -> LowerRuntimeHandle? {
+// Resolve checked Core declarations before consulting short-name rows. Generic
+// keys retain their concrete arguments; Mono substitutes stored member types.
+fn lower_runtime_handle_type(p: MIRProgram, ty: MIRType) -> LowerRuntimeHandle? {
     if ty.kind == .Apply(name, args) {
-        if args.len() != 0 -> return None
-        if lower_runtime_handle(name.name) == .Val(row) -> return Val(row)
+        if args.len() == 0 {
+            if lower_runtime_handle(name.name) == .Val(row) -> return Val(row)
+            definition :: lower_type_def(p, ty) ?? return None
+            if !definition.key.starts_with("<corelib>/") -> return None
+            return lower_runtime_handle(definition.name)
+        }
+        labels := [String]{}
+        loop arg in args {
+            label :: lower_runtime_argument_name(p, arg) ?? return None
+            &labels.push(label)
+        }
+        suffix :: labels.join(",")
+        if lower_runtime_handle("{name.name}<{suffix}>") == .Val(row) -> return Val(row)
         definition :: lower_type_def(p, ty) ?? return None
         if !definition.key.starts_with("<corelib>/") -> return None
-        return lower_runtime_handle(definition.name)
+        return lower_runtime_handle("{definition.name}<{suffix}>")
     }
     None
 }
 
+fn lower_runtime_argument_name(p: MIRProgram, ty: MIRType) -> String? {
+    if ty.kind == {
+        .Float -> return Val("Float")
+        .Bool -> return Val("Bool")
+        .String -> return Val("String")
+        .Int -> return Val("Int")
+        .Apply(_, args) -> {
+            // Nested declaration arguments are explicitly refused by G1.
+            if args.len() > 0 -> return None
+            if lower_type_def(p, ty) == .Val(definition) {
+                if definition.kind == .Alias(target) -> return lower_runtime_argument_name(p, target)
+            }
+            runtime :: lower_runtime_handle_type(p, ty) ?? return None
+            // Alias spellings of a runtime declaration share one argument key.
+            loop row in LOWER_RUNTIME_HANDLES {
+                if row.runtime == runtime.runtime && row.jet_name.starts_with("<corelib>/") -> return Val(~row.jet_name)
+            }
+            return Val(~runtime.jet_name)
+        }
+        else -> {}
+    }
+    None
+}
 fn lower_record_schema(p: MIRProgram, ty: MIRType) -> LowerRecordSchema? {
     if ty.kind == .Apply(name, args) {
-        if args.len() > 0 -> return None
-        row :: lower_record_runtime_handle(p, ty) ?? return None
+        row :: lower_runtime_handle_type(p, ty) ?? return None
         definition :: lower_type_def(p, ty) ?? return None
         loop schema in LOWER_RECORD_SCHEMAS {
+            if args.len() != 0 -> next
             if schema.jet_name != row.jet_name -> next
             if !lower_record_shape_matches(p, definition, schema) -> return None
             return Val(~schema)
         }
         // A generated row (RuntimeRoutes.jet) is keyed by the runtime type the
         // Jet type's handle row names.
+
         loop schema in LOWER_GENERATED_RECORDS {
             if schema.jet_name != row.runtime -> next
             if !lower_record_shape_matches(p, definition, schema) -> return None
@@ -102,8 +136,8 @@ fn lower_record_kind_matches(p: MIRProgram, ty: MIRType, kind: String) -> Bool N
     }
     if kind.starts_with("Tag.") {
         if !lower_record_is_index(p, ty) -> return false
-        if ty.kind == .Apply(name, _) {
-            row :: lower_record_runtime_handle(p, ty) ?? return false
+        if ty.kind == .Apply(_, _) {
+            row :: lower_runtime_handle_type(p, ty) ?? return false
             return row.runtime == lower_record_tail(kind, 4)
         }
         return false
@@ -172,9 +206,8 @@ fn lower_record_sequence_kind(p: MIRProgram, ty: MIRType) -> String? {
         prefix = "Entries"
         nested = fields[1].ty
     }
-    if nested.kind == .Apply(name, args) {
-        if args.len() != 0 -> return None
-        runtime :: lower_record_runtime_handle(p, nested) ?? return None
+    if nested.kind == .Apply(_, _) {
+        runtime :: lower_runtime_handle_type(p, nested) ?? return None
         loop schema in LOWER_GENERATED_RECORDS {
             if schema.jet_name == runtime.runtime -> return Val("{prefix}.Rec.{runtime.runtime}")
         }
