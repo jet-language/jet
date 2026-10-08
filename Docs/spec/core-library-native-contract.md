@@ -129,6 +129,23 @@ lengths compare unequal; equal-length spans scan every byte without an
 early exit or branch on byte values. Empty spans compare equal. This private
 boundary changes neither the public nominal secret carriers nor the Core API.
 
+SHA3-224/256/384/512 share one fixed-lane Keccak-f[1600] permutation and
+borrow their message without concatenation. The private kernel uses exclusive
+aligned 440-byte scratch, wiped before and after hashing. Rates are
+144/136/104/72 bytes, with 28/32/48/64-byte output. Virtual final-block
+padding is canonical FIPS 202: at `length % rate == rate - 1`, the domain
+`0x06` and final `0x80` combine into a single `0x86` byte, matching the
+current Core `keccak` implementation.
+
+**Known seed divergence:** the old `SHAFamily.rs` SHA3 helper at lines 347–352
+incorrectly emits a second padding block for those boundary lengths.
+Its once-frozen output is retained as evidence in fixture metadata, not
+as the canonical expected digest. Non-boundary cases compare byte-for-byte
+with the frozen seed. Boundary expectations use independent OpenSSL/Node
+vectors, and every variant additionally checks official NIST CAVP byte
+ShortMsg cases at lengths 0, 1, rate-1, and rate. There is no legacy-padding
+mode and no change to the current Core SHA3 meaning.
+
 The internal X25519 boundary borrows 32-byte scalar and point spans and writes
 32 bytes to a disjoint output. Its 1536-byte, word-aligned scratch is exclusive
 and wiped before return (1568 bytes for public-key derivation). Field arithmetic
