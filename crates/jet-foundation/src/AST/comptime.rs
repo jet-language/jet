@@ -1307,7 +1307,7 @@ impl PartialEq for ClosureData {
 #[derive(Clone, Debug)]
 pub enum CtKey {
     Int(i64),
-    BigInt(CtBigInt),
+    BigInt(crate::Numeric::CtBigInt),
     Str(String),
     Bool(bool),
     Char(char),
