@@ -594,3 +594,34 @@ A stronger comparative claim additionally requires the strict performance and
 frequency-weighted learnability evidence above. Execution order, active work
 records, blockers, and evidence logs belong in Tower rather than in this
 specification.
+
+### Native service TaskOutcome carrier
+
+The registry-owned service TaskOutcome handle uses one private NativeTaskOutcome16
+in `Task.jet`: tag at byte0, owned Text at byte8 only for Panicked. The existing
+C ABI ordinals remain Finished0, Panicked1, Cancelled2 and DeadlineBlown3. The
+four record constructors are the producers; Panicked borrows and deep-copies its
+input. Clone and its getter return independent Text ownership. Unit variants
+never inspect, compare or release inactive payload storage. Drop releases an
+active reason and then the16-byte holder; equality compares tags and active Text
+bytes, not allocation identity.
+
+Show and Display preserve the raw `Panicked(reason)` bytes. Debug delegates the
+reason to the canonical `rt_text_push_rust_debug_str` renderer. This matches the
+read-only contract in `Core/service/service.jet:91-125` at497daa7a0, including
+the `a"b` source test vector; that source file is not imported by this carrier
+batch. `Tests/TaskOutcomeWitness.c` constructs through the real producers and
+checks every variant, deep clone/getter ownership, embedded NUL, Unicode,
+the shared Debug goldens, inactive payload poison and exact-once frees. Its
+stdout file is expected output, not native execution evidence. Its `wrong`
+mode uses the shared canonical record-variant panic, not a new trap.
+
+Workflow take/return APIs remain held without direct AOT; this carrier does not
+establish service or workflow behavior or native parity. The existing shared
+record-variant panic's task publication repair is a separate composition gate,
+recorded in `Tests/TaskOutcomeRoutes.tsv`; the getter does not work around it.
+The same table records the never-both retirement rule: if TaskOutcome enters
+`core.service types{}`, its native carrier glue, ABI constants, exports and
+fixtures retire in that same composition. No frozen registry, route or C ABI
+row is hand-edited, and no generated carrier alias is added.
+
