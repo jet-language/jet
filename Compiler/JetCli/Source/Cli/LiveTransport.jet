@@ -53,7 +53,8 @@ fn jet_cli_live_read_at(pid: Int, path: String) -[FS, Env, Time]> JetCLILiveSnap
     parsed.events = Val(jet_cli_live_event_render(parsed.raw_events) ?? return Err(jet_cli_read_error("live runtime event observations are invalid: {err.message}")))
     now :: max(0, live_time.unix_ns() /% 1000000)
     if now > parsed.captured_ms && now - parsed.captured_ms > 2000 -> return Err(jet_cli_read_error("process {pid} is not publishing a live runtime snapshot"))
-    if cli_sys.is_linux() {
+    platform :: cli_sys.name()
+    if platform == "linux" || platform == "android" {
         expected :: jet_cli_live_process_start(pid)
         if parsed.start_id != expected -> return Err(jet_cli_read_error("live runtime snapshot does not belong to process {pid}"))
     }

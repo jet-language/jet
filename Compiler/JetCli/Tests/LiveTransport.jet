@@ -11,7 +11,8 @@ fn live_transport_rejected(pid: Int, path: String, message: String) {
 }
 fn run() {
     // /proc start identity is the Linux/Android transport's actual authority.
-    if !cli_sys.is_linux() -> return
+    platform :: cli_sys.name()
+    if platform != "linux" && platform != "android" -> return
     pid :: cli_process.current_pid()
     root :: "{cli_sys.temp_dir()}/jet-live-transport-{pid}"
     cli_files.create_dir(root) ?? panic("exclusive transport fixture directory")
