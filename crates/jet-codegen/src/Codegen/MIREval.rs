@@ -21589,13 +21589,27 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             values.push(self.runtime_to_ct(value, span)?);
         }
         let result_type = result_ty.map(crate::Comptime::MirBridge::mir_to_ast_type);
-        let result = crate::Comptime::apply_seeded_rng_method_with_type(
+        let result = match crate::Comptime::apply_seeded_rng_method_with_type(
             &mut state,
             method,
             &mut values,
             span,
             result_type.as_ref(),
-        )?;
+        ) {
+            Ok(result) => result,
+            Err(error) => {
+                if self.is_runtime_invocation() {
+                    if let Some(row) =
+                        jet_foundation::Registry::active_runtime_diagnostic(&error.code)
+                    {
+                        return Err(self.located_runtime_stop(
+                            row.code, "", 0, &error.what, span,
+                        ));
+                    }
+                }
+                return Err(error);
+            }
+        };
         if let Some((frame, place)) = receiver_place {
             let updated = CtValue::Struct {
                 type_name: crate::Syntax::RNG_TYPE.to_string(),
