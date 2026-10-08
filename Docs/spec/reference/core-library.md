@@ -3518,6 +3518,13 @@ Pool receipts remain opaque values produced by a pool. Their equality and
 Show/Display/Debug projection are source-owned: each projection preserves the
 `db.pool lifecycle=...` text and the complete ordered set of pool counters.
 
+`open`, `open_memory`, `pool`, `policy`, `policy_audit`, `transaction`, and
+`migrate` enter through ordinary Core source functions. Their reserved
+Core-internal provider leaves retain the existing SQLite host bridge during
+native-driver admission; this changes neither public signatures nor engine
+identity. Pool `max` remains a required labeled argument. Transaction and
+migration retain both `DB` and `Time.Wait`, including at the provider boundary.
+
 Core's private SQLite driver uses the bundled SQLite 3.45.0 amalgamation from
 `libsqlite3-sys` 0.28.0 through the audited C FFI, not a system SQLite library,
 preserving the database format, open flags, busy timeout and statement-cache

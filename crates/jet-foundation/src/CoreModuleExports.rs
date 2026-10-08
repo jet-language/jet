@@ -25,7 +25,7 @@ pub enum CoreLeafKind {
 
 // BEGIN GENERATED CORE DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 6b8bcfee37d773a1c4516ec536e308e205675d2d3e303ece814d060d5cfdb563
+// Source SHA-256: bbed73a8375430deed7d1f874cdaaea0159801dfffd3cb836eed2cd9c578890e
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreModuleDeclaration {
     pub module: &'static str,
@@ -300,7 +300,7 @@ const CORE_MODULE_29_MEMBERS: &[&str] = &["new", "Centroid", "TDigest"];
 const CORE_MODULE_29_TYPES: &[(&str, CoreLeafKind)] = &[("Centroid", CoreLeafKind::Plain), ("TDigest", CoreLeafKind::Plain)];
 const CORE_MODULE_29_DEPENDENCIES: &[&str] = &["core.data"];
 
-const CORE_MODULE_30_MEMBERS: &[&str] = &["decode", "migrate", "open", "open_memory", "pool", "policy", "policy_audit", "row_bool", "row_float", "row_int", "row_text", "row_value", "transaction", "DBConnection", "DBScope", "DBPool", "DBLease", "DBPoolReceipt", "DBError", "DBValue", "SQL", "__PoolLifecycle", "__Driver", "__driver_open", "__driver_close", "__driver_begin", "__driver_begin_immediate", "__driver_commit", "__driver_rollback", "__driver_reset", "__driver_execute", "__driver_query", "__driver_query_one", "__driver_health"];
+const CORE_MODULE_30_MEMBERS: &[&str] = &["decode", "migrate", "open", "open_memory", "pool", "policy", "policy_audit", "row_bool", "row_float", "row_int", "row_text", "row_value", "transaction", "DBConnection", "DBScope", "DBPool", "DBLease", "DBPoolReceipt", "DBError", "DBValue", "SQL", "__open", "__open_memory", "__pool", "__policy", "__policy_audit", "__transaction", "__migrate", "__PoolLifecycle", "__Driver", "__driver_open", "__driver_close", "__driver_begin", "__driver_begin_immediate", "__driver_commit", "__driver_rollback", "__driver_reset", "__driver_execute", "__driver_query", "__driver_query_one", "__driver_health"];
 const CORE_MODULE_30_TYPES: &[(&str, CoreLeafKind)] = &[("DBConnection", CoreLeafKind::Plain), ("DBScope", CoreLeafKind::Plain), ("DBPool", CoreLeafKind::Plain), ("DBLease", CoreLeafKind::Plain), ("DBPoolReceipt", CoreLeafKind::Plain), ("DBError", CoreLeafKind::Plain), ("DBValue", CoreLeafKind::Enum(&["Null", "Int", "Float", "Text", "Bool", "Blob"])), ("SQL", CoreLeafKind::Plain), ("__PoolLifecycle", CoreLeafKind::Enum(&["Open", "Draining", "Drained"])), ("__Driver", CoreLeafKind::Plain)];
 const CORE_MODULE_30_DEPENDENCIES: &[&str] = &["core.encoding", "core.mem"];
 
@@ -782,7 +782,7 @@ pub const CORE_SOURCE_MODULES: &[CoreSourceModule] = &[
     CoreSourceModule { module: "core.data.sketch.hll", alias: "core_core_data_sketch_hll", path: "Core/data/sketch/hll.jet", owned_members: &["new"] },
     CoreSourceModule { module: "core.data.sketch.reservoir", alias: "core_core_data_sketch_reservoir", path: "Core/data/sketch/reservoir.jet", owned_members: &["new"] },
     CoreSourceModule { module: "core.data.sketch.tdigest", alias: "core_core_data_sketch_tdigest", path: "Core/data/sketch/tdigest.jet", owned_members: &["new"] },
-    CoreSourceModule { module: "core.db", alias: "core_core_db", path: "Core/db/db.jet", owned_members: &["row_bool", "row_float", "row_int", "row_text", "row_value", "__driver_open", "__driver_close", "__driver_begin", "__driver_begin_immediate", "__driver_commit", "__driver_rollback", "__driver_reset", "__driver_execute", "__driver_query", "__driver_query_one", "__driver_health"] },
+    CoreSourceModule { module: "core.db", alias: "core_core_db", path: "Core/db/db.jet", owned_members: &["open", "open_memory", "pool", "policy", "policy_audit", "transaction", "migrate", "row_bool", "row_float", "row_int", "row_text", "row_value", "__driver_open", "__driver_close", "__driver_begin", "__driver_begin_immediate", "__driver_commit", "__driver_rollback", "__driver_reset", "__driver_execute", "__driver_query", "__driver_query_one", "__driver_health"] },
     CoreSourceModule { module: "core.email", alias: "core_core_email", path: "Core/email/email.jet", owned_members: &["smtp_from_env"] },
     CoreSourceModule { module: "core.encoding", alias: "core_encoding", path: "Core/encoding/encoding.jet", owned_members: &["hex_nibble", "hex_value", "bytes_to_hex", "hex_to_bytes", "wrap32"] },
     CoreSourceModule { module: "core.encoding.base32", alias: "core_core_encoding_base32", path: "Core/encoding/base32.jet", owned_members: &["b32decode", "b32encode", "b32hexdecode", "b32hexencode", "decode", "encode", "is_base32"] },

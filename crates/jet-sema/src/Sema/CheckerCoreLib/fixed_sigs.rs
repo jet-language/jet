@@ -5844,12 +5844,12 @@ fn core_fixed_sig_impl(
         // below), not a second module-call surface. There is no raw-string
         // `execute(sql)` escape (D-DBDRIVER1's build plan: "must not expose a
         // generic `execute_raw(sql)` escape").
-        ("core.db", "open") => Some((
+        ("core.db", "open" | "__open") => Some((
             vec![(read, Type::String)],
             Some(Type::Named("DBConnection".to_string())),
         )),
-        ("core.db", "open_memory") => Some((vec![], Some(Type::Named("DBConnection".to_string())))),
-        ("core.db", "pool") => Some((
+        ("core.db", "open_memory" | "__open_memory") => Some((vec![], Some(Type::Named("DBConnection".to_string())))),
+        ("core.db", "pool" | "__pool") => Some((
             vec![(read, Type::String), (read, Type::Int)],
             Some(result_ty(
                 Type::Named("DBPool".to_string()),
@@ -5858,7 +5858,7 @@ fn core_fixed_sig_impl(
         )),
         // D-DBPOLICY1: policy compilation and row reads report on the module's
         // one failure domain, `DBError`, like pool/transaction/migrate.
-        ("core.db", "policy") => Some((
+        ("core.db", "policy" | "__policy") => Some((
             vec![(read, Type::String), (read, Type::String)],
             Some(result_ty(
                 Type::Named("RowPolicy".to_string()),
@@ -5867,11 +5867,11 @@ fn core_fixed_sig_impl(
         )),
         // D-DBPOLICY1: audit is scoped to the active DBScope, so it cannot
         // inspect or manufacture authority for another connection.
-        ("core.db", "policy_audit") => Some((
+        ("core.db", "policy_audit" | "__policy_audit") => Some((
             vec![(read, Type::Named("DBScope".to_string()))],
             Some(Type::String),
         )),
-        ("core.db", "transaction") | ("core.db", "migrate") => Some((
+        ("core.db", "transaction" | "__transaction" | "migrate" | "__migrate") => Some((
             vec![
                 (read, Type::Named("DBScope".to_string())),
                 (read, Type::String),

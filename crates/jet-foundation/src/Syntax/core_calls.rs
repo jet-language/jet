@@ -672,7 +672,7 @@ const fn effect_leaf_for(module: &str, method: &str) -> Option<&'static str> {
     {
         return Some("Time.Wait");
     }
-    if same_text(module, "core.db") && one_of(method, &["transaction", "migrate"]) {
+    if same_text(module, "core.db") && one_of(method, &["transaction", "__transaction", "migrate", "__migrate"]) {
         return Some("Time.Wait");
     }
     if same_text(module, "core.jobs") && one_of(method, &["wait", "poll"]) {
@@ -1451,7 +1451,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 6b8bcfee37d773a1c4516ec536e308e205675d2d3e303ece814d060d5cfdb563
+// Source SHA-256: bbed73a8375430deed7d1f874cdaaea0159801dfffd3cb836eed2cd9c578890e
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -2759,6 +2759,13 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.db", "open_memory", "jet_db_open_memory", true, &[], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.db", "pool", "jet_db_pool_new", true, &[true, false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.db", "policy", "jet_db_policy_checked", true, &[true, true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.db", "__open", "jet_db_open", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.db", "__open_memory", "jet_db_open_memory", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.db", "__pool", "jet_db_pool_new", true, &[true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.db", "__policy", "jet_db_policy_checked", true, &[true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.db", "__policy_audit", "jet_db_policy_audit", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.db", "__transaction", "jet_db_scope_transaction", false, &[true, true, true]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient).with_native_int_result(),
+    CoreCallRecord::new("core.db", "__migrate", "jet_db_scope_migrate", false, &[true, true, true]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient).with_native_int_result(),
     CoreCallRecord::new( "core.jobs", "queue", "jet_job_queue_default", true, &[], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::receiver_with_symbol( &["JobQueue"], "enqueue", "jet_job_queue_enqueue", true, &[true, true, true], ) .with_max_arity(4),
     CoreCallRecord::receiver_with_symbol( &["JobQueue"], "delay", "jet_job_queue_delay", true, &[true, false, false, false], ),

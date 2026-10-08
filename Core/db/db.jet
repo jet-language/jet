@@ -14,6 +14,30 @@ package {
 use c.[sqlite3]
 use core.mem as sqlite_mem
 
+// Public policy/effects are ordinary Core source. These reserved leaves keep
+// the existing SQLite bridge while the same-engine native driver is admitted.
+pub fn open(path: String) -[DB]> DBConnection Never! {
+    core.db.__open(path)
+}
+pub fn open_memory() -[DB]> DBConnection Never! {
+    core.db.__open_memory()
+}
+pub fn pool(url: String, *, max: Int) -[DB]> DBPool DBError! {
+    core.db.__pool(url, max)
+}
+pub fn policy(table: String, expression: String) -[DB]> RowPolicy DBError! {
+    core.db.__policy(table, expression)
+}
+pub fn policy_audit(scope: DBScope) -[DB]> String Never! {
+    core.db.__policy_audit(scope)
+}
+pub fn transaction(scope: DBScope, name: String, steps: [SQL]) -[DB, Time.Wait]> Int DBError! {
+    core.db.__transaction(scope, name, steps)
+}
+pub fn migrate(scope: DBScope, name: String, steps: [SQL]) -[DB, Time.Wait]> Int DBError! {
+    core.db.__migrate(scope, name, steps)
+}
+
 // core.db owns its SQL values, typed row selection and conversion. The private
 // SQLite adapter alone holds engine pointers; fallible row reads use DBError.
 
