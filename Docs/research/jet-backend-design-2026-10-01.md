@@ -1658,12 +1658,30 @@ has mode 0 (Native) or 1 (Disabled); absent appended words are ignored.
 
 Native node cloning allocates a distinct node, clones its owned text and
 children, and atomically retains each callback once for the new node.
-Final destruction releases the callbacks outside locks. This layout
-publication is not a runtime-provider or byte-parity claim. The private
-typed-call override and atomic `SendFn` ownership leaves are required
-before admitting callback-bearing nodes. Accessibility and shortcut
-metadata still depend on registered raw leaves; the native UI pack cannot
-be described as Jet-only until their providers are replaced.
+`UiNode.jet` owns the raw transfer, cloning, destruction, equality, three
+borrowed field getters, and the existing accessibility/shortcut transfer
+symbols. Callback ownership uses the already-atomic `ClosureRefs.jet`
+exports from `feaec0860`: retain publishes another owner, and unref's
+last-owner result alone authorizes invoking the generated release helper
+at offset 16. That helper drops captures and frees the closure allocation,
+as in `Lower/Closures.jet:445-455` at `27a73d5c9`. It runs outside locks.
+No separate SendFn refcount mechanism or exports are introduced.
+
+The private typed callback-call override remains an admission requirement;
+ordinary `Fn` values and Rust callback registry IDs cannot enter these native
+slots. E4 text and exact Int imports must resolve to their native Jet
+providers. Six accessibility/shortcut metadata clone/drop/equality imports
+are registered interim raw leaves in `Tools/agent/rust-leaves.tsv`; they
+remain opaque and die at the UI cutover. The UI pack is not Jet-only while
+those providers remain Rust.
+
+`UiNodeWitness.c` links the real native providers. It checks all 160 bytes'
+field contracts for absent and populated transfers, poisoned ignored words,
+borrowed getters, distinct cloning, callback invocation, and cross-thread
+clone/drop. Two threads additionally perform 100,000 retain/unref pairs
+each on one shared closure before its single final destruction. Its counted
+closure allocations and frees use the real Jet allocator, not a replacement.
+Source parsing and C syntax checks are not native byte-parity evidence.
 
 ### Native display runtime
 

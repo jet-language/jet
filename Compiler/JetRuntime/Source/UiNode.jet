@@ -1,0 +1,276 @@
+// Native Node160 only. UiABI.jet is included by both runtime and Lower.
+// Text uses E4, children own a native List<UINode> header, and callbacks own
+// one SendFn Closure24 reference each. A clone is a distinct node, not an Rc.
+// Registered raw metadata leaves below are interim #32 dependencies:
+// replaced by the Jet runtime layer <UI>, die at cutover. Their allocations
+// stay opaque; this provider never reads a Rust metadata layout.
+#Import(c) fn ui_accessibility_clone(value: I64) -> I64 = "jet_rt_handle_clone_JetUiAccessibility"
+#Import(c) fn ui_accessibility_drop(value: I64) = "jet_rt_handle_drop_JetUiAccessibility"
+#Import(c) fn ui_accessibility_eq(left: I64, right: I64) -> Bool = "jet_rt_handle_eq_JetUiAccessibility"
+#Import(c) fn ui_shortcut_clone(value: I64) -> I64 = "jet_rt_handle_clone_JetUiShortcut"
+#Import(c) fn ui_shortcut_drop(value: I64) = "jet_rt_handle_drop_JetUiShortcut"
+#Import(c) fn ui_shortcut_eq(left: I64, right: I64) -> Bool = "jet_rt_handle_eq_JetUiShortcut"
+// ClosureRefs.jet (feaec0860) atomically owns every Closure24 refcount.
+// The UI boundary admits SendFn values only, but shares the existing glue.
+#Import(c) fn ui_sendfn_retain(value: I64) = "jet_rt_native_closure_retain"
+#Import(c) fn ui_sendfn_unref(value: I64) -> Bool = "jet_rt_native_closure_unref"
+#Import(c) fn ui_text_clone(value: I64) -> I64 = "jet_rt_string_clone"
+#Import(c) fn ui_text_drop(value: I64) = "jet_rt_string_drop"
+#Import(c) fn ui_text_eq(left: I64, right: I64) -> Bool = "jet_rt_string_eq"
+#Import(c) fn ui_exact_word(value: I64) -> I64 = "jet_int_owned_to_i64"
+
+fn ui_word(address: I64) -> I64 {
+    #Unsafe("address borrows an initialized native node, E4 text, children-list, or Closure24 word") {
+        return os_load_i64(address)
+    }
+}
+fn ui_store(address: I64, word: I64) {
+    #Unsafe("address exclusively owns one writable native node or children-header word") {
+        os_store_i64(address, word)
+    }
+}
+
+#[Unsafe("calls the last-owned native Closure24 release helper with its box as the sole SysV argument; the helper drops captures and frees its own allocation"), FFI(asm)]
+fn ui_callback_final_release(address: I64, closure: I64) {
+    """
+    push {address}
+    push {closure}
+    pop rdi
+    pop r11
+    call r11
+    ; clobbers rax, rcx, rdx, rsi, rdi, r8, r9, r10, r11
+    """
+}
+fn ui_sendfn_release(value: I64) {
+    if !ui_sendfn_unref(value) -> return
+    // Same final-free path as Lower/Closures.jet:445-455 at 27a73d5c9:
+    // only unref's true result authorizes calling the helper at offset 16.
+    helper :: ui_word(value + I64{16})
+    #Unsafe("the last atomic closure owner alone invokes the generated capture-drop/free helper; no node or registry lock is held") {
+        ui_callback_final_release(helper, value)
+    }
+}
+fn ui_children_copy(data: I64, length: I64) -> I64 {
+    header :: jet_rt_alloc(I64{24}, I64{8})
+    kept :: if (length == I64{0}) -> I64{0} else -> jet_rt_alloc(length * I64{8}, I64{8})
+    index := I64{0}
+    loop index < length {
+        ui_store(kept + index * I64{8}, jet_rt_handle_clone_JetUiNode(ui_word(data + index * I64{8})))
+        index += I64{1}
+    }
+    ui_store(header, length)
+    ui_store(header + I64{8}, length)
+    ui_store(header + I64{16}, kept)
+    header
+}
+fn ui_children_drop(header: I64) {
+    length :: ui_word(header)
+    data :: ui_word(header + I64{16})
+    index := I64{0}
+    loop index < length {
+        jet_rt_handle_drop_JetUiNode(ui_word(data + index * I64{8}))
+        index += I64{1}
+    }
+    if (length != I64{0}) -> jet_rt_free(data, length * I64{8}, I64{8})
+    jet_rt_free(header, I64{24}, I64{8})
+}
+fn ui_color_word(kind: I64, word: I64) -> I64 {
+    if (kind == I64{0}) -> return I64{0}
+    if (kind == I64{1} || kind == I64{2}) -> return word & I64{255}
+    if (kind == I64{3}) -> return word & I64{16777215}
+    panic("invalid audited UI color carrier")
+}
+
+// E4 text and List data are borrowed. Scalar Int carriers are decoded exactly.
+// The last two words alone are raw SendFn pointers from private typed aliases:
+// present moves one strong reference; absent ignores the argument completely.
+#Export(c) fn jet_ui_raw_node_transfer(label: I64, width: Float, height: Float, role_word: I64, kind_word: I64, children_data: I64, children_length: I64, color_present: U8, color: I64, absent_word: I64, style_present: U8, foreground_kind_word: I64, foreground_word: I64, background_kind_word: I64, background_word: I64, style_flags_word: I64, ime_word: I64, click: I64, drop: I64) -> I64 {
+    role :: ui_exact_word(role_word)
+    kind :: ui_exact_word(kind_word)
+    absent :: ui_exact_word(absent_word)
+    if (role < I64{-1} || role > I64{3}) -> panic("invalid audited UI role carrier")
+    if (kind < I64{0} || kind > I64{4}) -> panic("invalid audited UI kind carrier")
+    if ((absent & UI_NODE_REQUIRED_ABSENT) != UI_NODE_REQUIRED_ABSENT || (absent & !UI_NODE_ALL_ABSENT) != I64{0}) -> panic("invalid audited UI absent-slot carrier")
+    node :: jet_rt_alloc(UI_NODE_BYTES, I64{8})
+    ui_store(node + UI_NODE_REFS, I64{1})
+    ui_store(node + UI_NODE_LABEL, ui_text_clone(label))
+    ui_store(node + UI_NODE_WIDTH, rt_f64_bits(width))
+    ui_store(node + UI_NODE_HEIGHT, rt_f64_bits(height))
+    ui_store(node + UI_NODE_ROLE, role)
+    ui_store(node + UI_NODE_KIND, kind)
+    ui_store(node + UI_NODE_CHILDREN, ui_children_copy(children_data, children_length))
+    ui_store(node + UI_NODE_COLOR, if (color_present == U8{0}) -> I64{0} else -> ui_text_clone(color))
+    if (style_present != U8{0}) {
+        foreground_kind :: ui_exact_word(foreground_kind_word)
+        background_kind :: ui_exact_word(background_kind_word)
+        ui_store(node + UI_NODE_STYLE_PRESENT, I64{1})
+        ui_store(node + UI_NODE_FOREGROUND_KIND, foreground_kind)
+        ui_store(node + UI_NODE_FOREGROUND_WORD, ui_color_word(foreground_kind, ui_exact_word(foreground_word)))
+        ui_store(node + UI_NODE_BACKGROUND_KIND, background_kind)
+        ui_store(node + UI_NODE_BACKGROUND_WORD, ui_color_word(background_kind, ui_exact_word(background_word)))
+        ui_store(node + UI_NODE_STYLE_FLAGS, ui_exact_word(style_flags_word) & I64{7})
+    } else {
+        ui_store(node + UI_NODE_STYLE_PRESENT, I64{0})
+        ui_store(node + UI_NODE_FOREGROUND_KIND, I64{0})
+        ui_store(node + UI_NODE_FOREGROUND_WORD, I64{0})
+        ui_store(node + UI_NODE_BACKGROUND_KIND, I64{0})
+        ui_store(node + UI_NODE_BACKGROUND_WORD, I64{0})
+        ui_store(node + UI_NODE_STYLE_FLAGS, I64{0})
+    }
+    ui_store(node + UI_NODE_ABSENT_MASK, absent)
+    if ((absent & UI_NODE_SLOT_IME) == I64{0}) {
+        ime :: ui_exact_word(ime_word)
+        if (ime < I64{0} || ime > I64{1}) -> panic("invalid audited UI IME carrier")
+        ui_store(node + UI_NODE_IME, ime)
+    } else {
+        ui_store(node + UI_NODE_IME, I64{0})
+    }
+    if ((absent & UI_NODE_SLOT_CLICK) == I64{0}) {
+        if (click == I64{0}) -> panic("present UI click callback must own a SendFn")
+        ui_store(node + UI_NODE_CLICK_FN, click)
+    } else {
+        ui_store(node + UI_NODE_CLICK_FN, I64{0})
+    }
+    if ((absent & UI_NODE_SLOT_DROP) == I64{0}) {
+        if (drop == I64{0}) -> panic("present UI drop callback must own a SendFn")
+        ui_store(node + UI_NODE_DROP_FN, drop)
+    } else {
+        ui_store(node + UI_NODE_DROP_FN, I64{0})
+    }
+    ui_store(node + UI_NODE_ACCESSIBILITY, I64{0})
+    ui_store(node + UI_NODE_SHORTCUT, I64{0})
+    node
+}
+
+fn ui_node_clone(value: I64, omitted: I64) -> I64 {
+    result :: jet_rt_alloc(UI_NODE_BYTES, I64{8})
+    ui_store(result + UI_NODE_REFS, I64{1})
+    offset := UI_NODE_WIDTH
+    loop offset < UI_NODE_CHILDREN {
+        ui_store(result + offset, ui_word(value + offset))
+        offset += I64{8}
+    }
+    offset = UI_NODE_STYLE_PRESENT
+    loop offset < UI_NODE_CLICK_FN {
+        ui_store(result + offset, ui_word(value + offset))
+        offset += I64{8}
+    }
+    ui_store(result + UI_NODE_LABEL, ui_text_clone(ui_word(value + UI_NODE_LABEL)))
+    children :: ui_word(value + UI_NODE_CHILDREN)
+    ui_store(result + UI_NODE_CHILDREN, ui_children_copy(ui_word(children + I64{16}), ui_word(children)))
+    color :: ui_word(value + UI_NODE_COLOR)
+    ui_store(result + UI_NODE_COLOR, if (color == I64{0}) -> I64{0} else -> ui_text_clone(color))
+    click :: ui_word(value + UI_NODE_CLICK_FN)
+    drop :: ui_word(value + UI_NODE_DROP_FN)
+    ui_store(result + UI_NODE_CLICK_FN, click)
+    ui_store(result + UI_NODE_DROP_FN, drop)
+    if (click != I64{0}) -> ui_sendfn_retain(click)
+    if (drop != I64{0}) -> ui_sendfn_retain(drop)
+    // Metadata transfer overwrites one slot; do not allocate a clone only to
+    // destroy it immediately. The other slot retains its normal ownership.
+    accessibility :: if ((omitted & UI_NODE_SLOT_ACCESSIBILITY) == I64{0}) -> ui_word(value + UI_NODE_ACCESSIBILITY) else -> I64{0}
+    shortcut :: if ((omitted & UI_NODE_SLOT_SHORTCUT) == I64{0}) -> ui_word(value + UI_NODE_SHORTCUT) else -> I64{0}
+    ui_store(result + UI_NODE_ACCESSIBILITY, if (accessibility == I64{0}) -> I64{0} else -> ui_accessibility_clone(accessibility))
+    ui_store(result + UI_NODE_SHORTCUT, if (shortcut == I64{0}) -> I64{0} else -> ui_shortcut_clone(shortcut))
+    result
+}
+
+#Export(c) fn jet_rt_handle_clone_JetUiNode(value: I64) -> I64 {
+    ui_node_clone(value, I64{0})
+}
+
+#Export(c) fn jet_rt_handle_drop_JetUiNode(value: I64) {
+    if (value == I64{0}) -> return
+    // No node or registry lock is held across callback final-release code.
+    click :: ui_word(value + UI_NODE_CLICK_FN)
+    drop :: ui_word(value + UI_NODE_DROP_FN)
+    if (click != I64{0}) -> ui_sendfn_release(click)
+    if (drop != I64{0}) -> ui_sendfn_release(drop)
+    ui_text_drop(ui_word(value + UI_NODE_LABEL))
+    ui_children_drop(ui_word(value + UI_NODE_CHILDREN))
+    color :: ui_word(value + UI_NODE_COLOR)
+    if (color != I64{0}) -> ui_text_drop(color)
+    accessibility :: ui_word(value + UI_NODE_ACCESSIBILITY)
+    shortcut :: ui_word(value + UI_NODE_SHORTCUT)
+    if (accessibility != I64{0}) -> ui_accessibility_drop(accessibility)
+    if (shortcut != I64{0}) -> ui_shortcut_drop(shortcut)
+    jet_rt_free(value, UI_NODE_BYTES, I64{8})
+}
+
+fn ui_optional_text_eq(left: I64, right: I64) -> Bool {
+    if (left == I64{0} || right == I64{0}) -> return left == right
+    ui_text_eq(left, right)
+}
+#Export(c) fn jet_rt_handle_eq_JetUiNode(left: I64, right: I64) -> Bool {
+    // Float equality must preserve Rust PartialEq: NaN != NaN, -0 == +0.
+    if (rt_f64_from_bits(ui_word(left + UI_NODE_WIDTH)) != rt_f64_from_bits(ui_word(right + UI_NODE_WIDTH))) -> return false
+    if (rt_f64_from_bits(ui_word(left + UI_NODE_HEIGHT)) != rt_f64_from_bits(ui_word(right + UI_NODE_HEIGHT))) -> return false
+    if !ui_text_eq(ui_word(left + UI_NODE_LABEL), ui_word(right + UI_NODE_LABEL)) -> return false
+    if !ui_optional_text_eq(ui_word(left + UI_NODE_COLOR), ui_word(right + UI_NODE_COLOR)) -> return false
+    if (ui_word(left + UI_NODE_ROLE) != ui_word(right + UI_NODE_ROLE) || ui_word(left + UI_NODE_KIND) != ui_word(right + UI_NODE_KIND)) -> return false
+    offset := UI_NODE_STYLE_PRESENT
+    loop offset <= UI_NODE_DROP_FN {
+        if (ui_word(left + offset) != ui_word(right + offset)) -> return false
+        offset += I64{8}
+    }
+    left_children :: ui_word(left + UI_NODE_CHILDREN)
+    right_children :: ui_word(right + UI_NODE_CHILDREN)
+    count :: ui_word(left_children)
+    if (count != ui_word(right_children)) -> return false
+    left_data :: ui_word(left_children + I64{16})
+    right_data :: ui_word(right_children + I64{16})
+    index := I64{0}
+    loop index < count {
+        if !jet_rt_handle_eq_JetUiNode(ui_word(left_data + index * I64{8}), ui_word(right_data + index * I64{8})) -> return false
+        index += I64{1}
+    }
+    left_accessibility :: ui_word(left + UI_NODE_ACCESSIBILITY)
+    right_accessibility :: ui_word(right + UI_NODE_ACCESSIBILITY)
+    if (left_accessibility == I64{0} || right_accessibility == I64{0}) {
+        if (left_accessibility != right_accessibility) -> return false
+    } else {
+        if !ui_accessibility_eq(left_accessibility, right_accessibility) -> return false
+    }
+    left_shortcut :: ui_word(left + UI_NODE_SHORTCUT)
+    right_shortcut :: ui_word(right + UI_NODE_SHORTCUT)
+    if (left_shortcut == I64{0} || right_shortcut == I64{0}) {
+        if (left_shortcut != right_shortcut) -> return false
+    } else {
+        if !ui_shortcut_eq(left_shortcut, right_shortcut) -> return false
+    }
+    true
+}
+
+// Matches native Lower/Places.jet's borrowed Text field out-header ABI.
+#Export(c) fn jet_rt_handle_field_JetUiNode_label(value: I64, out: I64) {
+    label :: ui_word(value + UI_NODE_LABEL)
+    ui_store(out, ui_word(label))
+    ui_store(out + I64{8}, ui_word(label + I64{8}))
+    ui_store(out + I64{16}, ui_word(label + I64{16}))
+}
+#Export(c) fn jet_rt_handle_field_JetUiNode_width(value: I64) -> I64 { value + UI_NODE_WIDTH }
+#Export(c) fn jet_rt_handle_field_JetUiNode_height(value: I64) -> I64 { value + UI_NODE_HEIGHT }
+
+// Existing transfer leaves borrow both inputs and return a distinct owned node.
+#Export(c) fn jet_ui_raw_accessibility_transfer(value: I64, accessibility: I64, present: U8) -> I64 {
+    result :: ui_node_clone(value, UI_NODE_SLOT_ACCESSIBILITY)
+    mask :: ui_word(result + UI_NODE_ABSENT_MASK)
+    if (present != U8{0}) {
+        ui_store(result + UI_NODE_ACCESSIBILITY, ui_accessibility_clone(accessibility))
+        ui_store(result + UI_NODE_ABSENT_MASK, mask & !UI_NODE_SLOT_ACCESSIBILITY)
+    } else {
+        ui_store(result + UI_NODE_ABSENT_MASK, mask | UI_NODE_SLOT_ACCESSIBILITY)
+    }
+    result
+}
+#Export(c) fn jet_ui_raw_shortcut_transfer(value: I64, shortcut: I64, present: U8) -> I64 {
+    result :: ui_node_clone(value, UI_NODE_SLOT_SHORTCUT)
+    mask :: ui_word(result + UI_NODE_ABSENT_MASK)
+    if (present != U8{0}) {
+        ui_store(result + UI_NODE_SHORTCUT, ui_shortcut_clone(shortcut))
+        ui_store(result + UI_NODE_ABSENT_MASK, mask & !UI_NODE_SLOT_SHORTCUT)
+    } else {
+        ui_store(result + UI_NODE_ABSENT_MASK, mask | UI_NODE_SLOT_SHORTCUT)
+    }
+    result
+}
