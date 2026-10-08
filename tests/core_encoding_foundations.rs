@@ -55,3 +55,34 @@ fn run() {
         "CBOR Syntax at byte 7, line 2, column 3, path $[0]: truncated item\n",
     );
 }
+
+#[test]
+fn user_duplicate_display_is_rejected_as_e0908() {
+    let source = r#"
+struct UserMessage {
+    text: String
+}
+
+impl UserMessage.Display {
+    fn display(self) -> String { self.text }
+}
+
+impl UserMessage.Display {
+    fn display(self) -> String { "duplicate" }
+}
+
+fn run() {}
+"#;
+    let diagnostics = jet::compile(source).expect_err("a user Display impl must remain unique");
+    let codes = diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error)
+        .map(|diagnostic| diagnostic.code.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(codes, ["E0908"], "unexpected diagnostics: {diagnostics:?}");
+    assert!(
+        diagnostics[0].what.contains("UserMessage")
+            && diagnostics[0].what.contains("Display"),
+        "duplicate Display diagnostic lost its owner or trait: {diagnostics:?}"
+    );
+}
