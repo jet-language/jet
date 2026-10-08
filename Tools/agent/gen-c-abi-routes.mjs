@@ -49,6 +49,7 @@ import { fileURLToPath } from "node:url";
 
 import { generatedRecordPath, nativeProviderHandles, recordApplication, recordApplicationsIn, recordBindings, recordInstanceName, substituteRecordType, runtimeExportSignatures, validateLoweringRuntimeAbi, validateRuntimeOwnership, validateRuntimeRoute } from "./runtime-route-abi.mjs";
 import { nativeHandleExports } from "./native-route-handles.mjs";
+import { nativeRecordExports } from "./native-route-records.mjs";
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const runtimePath = process.argv[2];
 const check = process.argv.includes("--check");
@@ -1474,13 +1475,21 @@ for (const [runtime] of handleRows) {
     if (!new RegExp(`\\b(?:struct|enum)\\s+${name}\\b`).test(source)) continue;
     const base = argumentsText === undefined ? key : key.slice(0, key.length - argumentsText.length - 2);
     const render = rendered(runtime, handles.get(runtime));
+    const members = recordMembers.get(runtime);
+    const record = members && recordSchemas.some((schema) => schema.name === runtime)
+      ? { kind: recordable.get(runtime).kind, members: members.map((member) => ({ name: member.name, kind: member.carrier?.kind ?? null })) } : undefined;
+    const fields = handleFields.filter((field) => field.name === runtime).map((field) => ({ name: field.field, kind: field.kind }));
     nativeTypes.push({ runtime, jetNames: names, jetName: key, source: { path, key: base },
-      arguments: argumentsText ?? "", clone: cloneable.has(runtime), eq: comparable.has(runtime), ...render });
+      arguments: argumentsText ?? "", clone: cloneable.has(runtime), eq: comparable.has(runtime), ...render, record, fields });
     break;
   }
 }
-const nativeExports = nativeHandleExports(nativeTypes)
-  .filter((descriptor) => !jetRuntimeExports.has(descriptor.name));
+const seedHelperNames = new Set([...rs.join("\n").matchAll(/pub extern "C" fn ([A-Za-z_]\w*)\(/g)].map((match) => match[1]));
+const nativeExports = [
+  ...nativeHandleExports(nativeTypes).map((row) => ({ ...row, op: `handle.${row.op}`, member: "" })),
+  ...nativeRecordExports(nativeTypes),
+].filter((descriptor) => seedHelperNames.has(descriptor.name) && !jetRuntimeExports.has(descriptor.name));
+const nativeSourceExports = new Set(nativeExports.map((row) => row.name));
 for (const adapter of adapters) {
   if (adapter.external) continue;
   const params = [];
@@ -1609,7 +1618,7 @@ jet.push("    None");
 jet.push("}");
 jet.push("pub struct LowerNativeExport { pub symbol: String, pub jet_name: String, pub op: String, pub member: String }");
 jet.push("LOWER_NATIVE_EXPORTS :: prep { [LowerNativeExport]{");
-for (const row of nativeExports) jet.push(`    LowerNativeExport{symbol: "${row.name}", jet_name: "${row.jetName}", op: "handle.${row.op}", member: ""},`);
+for (const row of nativeExports) jet.push(`    LowerNativeExport{symbol: "${row.name}", jet_name: "${row.jetName}", op: "${row.op}", member: "${row.member}"},`);
 jet.push("} }");
 jet.push("pub fn lower_native_export(symbol: String) -> LowerNativeExport? {");
 jet.push("    loop row in LOWER_NATIVE_EXPORTS { if row.symbol == symbol -> return Val(~row) }");
@@ -1635,11 +1644,13 @@ const rustParts = [];
 let copied = 0;
 for (const match of rustBody.matchAll(/^    #\[no_mangle\]\n    pub extern "C" fn ([A-Za-z_]\w*)([^{}]*?)\{/gm)) {
   const [, name, raw] = match;
-  if (!jetRuntimeExports.has(name)) continue;
-  const signature = parseSignature(`fn ${name}${raw}`);
-  if (!signature || signature.generics) throw new Error(`Jet-owned generated export ${name}: unparsed C ABI`);
-  const params = splitTop(signature.params).map((param) => ({ ctys: [param.slice(param.indexOf(":") + 1).trim()] }));
-  validateRuntimeRoute({ symbol: name, name, params, result: { outs: [], ret: signature.result === "()" ? null : signature.result } }, jetRuntimeSignatures.get(name));
+  if (!jetRuntimeExports.has(name) && !nativeSourceExports.has(name)) continue;
+  if (jetRuntimeExports.has(name)) {
+    const signature = parseSignature(`fn ${name}${raw}`);
+    if (!signature || signature.generics) throw new Error(`Jet-owned generated export ${name}: unparsed C ABI`);
+    const params = splitTop(signature.params).map((param) => ({ ctys: [param.slice(param.indexOf(":") + 1).trim()] }));
+    validateRuntimeRoute({ symbol: name, name, params, result: { outs: [], ret: signature.result === "()" ? null : signature.result } }, jetRuntimeSignatures.get(name));
+  }
   rustParts.push(rustBody.slice(copied, match.index));
   rustParts.push("    #[cfg(not(jet_native_pack))]\n");
   copied = match.index;

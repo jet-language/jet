@@ -51,7 +51,7 @@ const wrongPipe = parseRuntimeExports(pipeDefinitions.replace("len: I64", "len: 
 assert.throws(() => nativeProviderHandles(wrongPipe), /line_bytes_raw.*does not match C ABI/);
 
 try {
-  for (const name of ["gen-c-abi-routes.mjs", "runtime-route-abi.mjs", "native-route-handles.mjs"]) {
+  for (const name of ["gen-c-abi-routes.mjs", "runtime-route-abi.mjs", "native-route-handles.mjs", "native-route-records.mjs"]) {
     const path = `Tools/agent/${name}`;
     mkdirSync(dirname(join(fixture, path)), { recursive: true });
     cpSync(join(root, path), join(fixture, path));
@@ -177,6 +177,23 @@ pub fn source_pair(first: f64, second: bool) -> ${pairSource}<f64,bool> { ${pair
   assert.ok(sourceJet.includes(`jet_name: "${pairKey}<Float,Bool>", runtime: "${pairInstance}"`));
   assert.ok(sourceJet.includes(`LowerNativeType{jet_name: "${sampleKey}<Float>", declaration: "${sampleKey}", arguments: "Float"}`));
   assert.ok(sourceJet.includes(`LowerNativeExport{symbol: "jet_rt_handle_clone_${sampleInstance}", jet_name: "${sampleKey}<Float>", op: "handle.clone", member: ""}`));
+  assert.ok(sourceJet.includes(`LowerNativeExport{symbol: "jet_rt_record_new_${sampleInstance}", jet_name: "${sampleKey}<Float>", op: "record.new", member: ""}`));
+  assert.ok(sourceJet.includes(`LowerNativeExport{symbol: "jet_rt_record_get_${sampleInstance}_uncertainty", jet_name: "${sampleKey}<Float>", op: "record.get", member: "uncertainty"}`));
+  assert.ok(sourceRust.includes(`#[cfg(not(jet_native_pack))]\n    #[no_mangle]\n    pub extern "C" fn jet_rt_record_new_${sampleInstance}(`));
+  const treeKey = "<corelib>/Core/fixture::Core/fixture/fixture.jet::Tree";
+  const treeSource = generatedRecordPath(treeKey);
+  put("Core/fixture/fixture.jet", readFileSync(join(fixture, "Core/fixture/fixture.jet"), "utf8") + "pub enum Tree { Empty, Bytes([u8]), Number(Float) }\n");
+  put("runtime.rs", readFileSync(join(fixture, "runtime.rs"), "utf8") + `
+#[derive(Clone)]
+pub enum ${treeSource} { __jet_Empty, __jet_Bytes(Vec<u8>), __jet_Number(f64) }
+pub fn source_tree() -> ${treeSource} { ${treeSource}::__jet_Empty }
+`);
+  success(run());
+  success(run(true));
+  const treeJet = readFileSync(join(fixture, "Compiler/JetBackend/Source/Lower/RuntimeRoutes.jet"), "utf8");
+  assert.ok(treeJet.includes(`LowerNativeExport{symbol: "jet_rt_record_new_${treeSource}_Bytes", jet_name: "${treeKey}", op: "record.new", member: "Bytes"}`));
+  assert.ok(treeJet.includes(`LowerNativeExport{symbol: "jet_rt_record_seq_List_Byte_get", jet_name: "${treeKey}", op: "record.seq.get", member: "List.Byte"}`));
+  assert.ok(!treeJet.includes('symbol: "jet_rt_record_seq_List_Byte_key"'), "descriptors cannot invent a C symbol absent from the seed ABI");
   assert.ok(sourceRust.includes(`${sampleSource}::<f64> { __jet_value: m0, __jet_uncertainty: m1 }`));
   assert.ok(sourceJet.includes(`LowerNativeType{jet_name: "${scalarKey}", declaration: "${scalarKey}", arguments: ""}`));
   assert.ok(sourceJet.includes(`LowerRecordSchema{jet_name: "${scalarSource}", variants: "", fields: "value=Float"}`));
