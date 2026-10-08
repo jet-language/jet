@@ -148,6 +148,29 @@ uppercase `AGE-SECRET-KEY-1…`; recipient output is lowercase `age1…`. Parsin
 rejects mixed case and nonzero unused key bits. Header base64 is unpadded and
 canonical; padded, URL-safe, and nonzero-trailing-bit encodings are rejected.
 
+The internal age v1 recipient framing uses a 16-byte file key, X25519 stanza
+wrapping, HKDF-SHA256 header/payload keys, HMAC-SHA256 over the header through
+the three `---` bytes, and a 16-byte file nonce. Payload STREAM uses 65536-byte
+plaintext chunks, a big-endian eleven-byte counter and one-byte final flag;
+a full final chunk is marked final without an extra empty chunk. An empty
+final chunk is accepted only for an empty whole payload. Every chunk uses
+ChaCha20-Poly1305 without AAD. Open wipes previously emitted plaintext on any
+later authentication failure and wipes its exclusive aligned 2048-byte
+workspace on every return.
+
+Framing accepts binary recipient files, as the existing SecretsCrypto path
+does, and rejects scrypt passphrase files. The reader retains the seed's two
+beta-era stanza spellings: missing body and missing short final body line
+(`age0.10.1/tests/testkit.rs:606-620`). Key/header decoding is not claimed to be
+constant-time. Seal borrows recipient keys, CSPRNG-provided per-recipient
+ephemeral scalars, file key, nonce and a valid caller-provided grease stanza;
+all input/output/workspace spans are disjoint. There is no entropy fallback.
+`AgeV1Fixtures.json` freezes the official binary age testkit, Rust 0.10.1 chunk
+boundary outputs and an independent fixed-material Node/OpenSSL seal recipe.
+`run-crypto-fixtures.mjs` composes the Jet KAT exports, audits strong symbols,
+and emits Jet seal captures for a one-time Rust-opener comparison; the old raw
+crypto leaves stay until native execution and consumer admission.
+
 A high-level native implementation must not be retained as an invisible runtime
 fallback for a Jet implementation. If an API changes identity or semantics,
 make the change at the contract boundary and migrate its users in one cutover.
