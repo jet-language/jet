@@ -13,11 +13,13 @@ TRANSITION_ROLE_FILES :: prep { [String]{"pkg.jet", "env.jet", "workspace.jet", 
 pub enum SplitTarget {
     Environment
     Package(String)
+    Hosts(String)
 
     fn operation(self) -> String Never! {
         if self == {
             .Environment -> "split-env"
             .Package(name) -> "split-package-{name}"
+            .Hosts(name) -> "split-hosts-{name}"
         }
     }
 }
@@ -271,6 +273,21 @@ fn env_transition_split_plan(root: String, target: SplitTarget) -[FS, Env]> Tran
             semantic_before = env_transition_semantic_fingerprint(package)
             semantic_after = env_transition_semantic_fingerprint(composed_after)
             &changes.push(TransitionFileChange{relative: destination, before: None, after: Val(member.bytes())})
+        }
+        .Hosts(name) -> {
+            env_transition_validate_name(name, "host")
+            env_transition_require_output_declaration(entries, name, package_path)
+            output :: package.outputs.get(name) ?? return Err(env_transition_error("outputs.{name} is not declared in {TRANSITION_PACKAGE_FILE}"))
+            if output.kind != PackageOutputKind.System -> return Err(env_transition_error("outputs.{name} is {output.kind.debug_name()}, but host extraction needs a System Output"))
+            destination :: "package/fleet.jet"
+            env_transition_ensure_new_file(canonical, destination)
+            config_text :: env_transition_render_fleet_config(name, output.name)
+            config :: ConfigFacts.parse(config_text, destination) ?? return Err(env_transition_parse_error(destination, err))
+            root_after = env_transition_add_config_reference(package_text, package.configs, destination)
+            env_transition_validate_composed_root(root_after, package, config)
+            semantic_before = "sha256:{pkg_sha256_hex(pkg_debug_output(output).bytes())}"
+            semantic_after = semantic_before
+            &changes.push(TransitionFileChange{relative: destination, before: None, after: Val(config_text.bytes())})
         }
     }
     if root_after.bytes() == package_bytes {

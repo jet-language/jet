@@ -323,6 +323,8 @@ recorded before/after states. Journal file states contain the original bytes as
 hex, not content digests; an absent file and an empty file remain distinct.
 Atomic file publication and the package lock protect live bytes from concurrent
 writers and path escapes.
+Host extraction keeps the checked System Output intact and binds the sole-host
+Fleet to that System's name, not to its output-map key.
 
 Environment OCI projection follows the same split. `jet-env-model` owns the
 pure `ImagePlan`; `jetpack::Image` is the one deterministic OCI realization
