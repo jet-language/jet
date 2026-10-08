@@ -32,6 +32,7 @@ __asm__(
     ".size fixture_dirty_u32_status,.-fixture_dirty_u32_status\n"
 );
 
+#ifndef U32_KERNELS_ONLY
 int main(void) {
     assert(fixture_u32_zero_word() == INT64_C(0));
     assert(fixture_u32_max_word() == INT64_C(4294967295));
@@ -39,3 +40,4 @@ int main(void) {
     puts("CHECK OK — native U32 imports zero-extend dirty return bits: zero, max, comptime status");
     return 0;
 }
+#endif
