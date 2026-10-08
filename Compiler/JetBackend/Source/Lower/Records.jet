@@ -159,6 +159,18 @@ fn lower_native_glue_import(p: MIRProgram, m: &LowerModule, caller: String, symb
         &m.issues.push(LIRLoweringIssue{function: caller, message: "native export {symbol} requires the actual source declaration's native layout"})
         return
     }
+    if row.op.starts_with("record.") {
+        record_ty := ty
+        if row.op.starts_with("record.seq.") {
+            record_ty = lower_native_record_sequence_type(p, ty, row.member) ?? {
+                &m.issues.push(LIRLoweringIssue{function: caller, message: "native export {symbol} requires its actual sequence member type"})
+                return
+            }
+        }
+        id :: lower_native_record_id(&m, record_ty, row.op, row.member)
+        &m.native_exports.add(symbol, id).drop("native symbol is registered once")
+        return
+    }
     if !row.op.starts_with("handle.") {
         &m.issues.push(LIRLoweringIssue{function: caller, message: "native export {symbol} has unsupported operation {row.op}"})
         return
@@ -375,8 +387,26 @@ fn lower_record_to_runtime(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty
 
 // The native value of `ty` for the owned runtime record `handle` a route
 // returned, defining `dst` (None when the result is unused); drops `handle`.
+fn lower_native_record_source(p: MIRProgram, ty: MIRType) -> Bool {
+    row :: lower_runtime_handle_type(p, ty) ?? return false
+    lower_native_source_type(p, row.jet_name) != None
+}
+
 fn lower_record_from_runtime(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRType, handle: LIRValueID, dst: LIRValueID?) Never! {
     if dst == .Val(kept) {
+        if m.native_pack && lower_native_record_source(p, ty) {
+            if lower_is_inline(p, ty) {
+                lower_storage_into(p, &f, kept, ty)
+                lower_copy_bytes(&f, kept, 0, handle, 0, lower_size(p, ty).size)
+                lower_native_record_free_shell(p, &m, &f, ty, handle)
+            } else if lower_repr(p, ty) == .Boxed(_) {
+                lower_emit(&f, LIRInst.Move{dst: kept, src: handle})
+            } else {
+                lower_emit(&f, LIRInst.Load{dst: kept, base: handle, offset: 0})
+                lower_native_record_free_shell(p, &m, &f, ty, handle)
+            }
+            return
+        }
         if lower_is_inline(p, ty) {
             lower_storage_into(p, &f, kept, ty)
             lower_call_helper(&m, &f, "record.in", ty, [LIRValueID]{handle, kept}, None)
@@ -545,6 +575,19 @@ fn lower_helper_record_in(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LI
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), lir_layout_pointer()}, None)
     handle :: ~f.open_params[0]
     target :: ~f.open_params[1]
+    if m.native_pack && lower_native_record_source(p, glue.ty) {
+        if lower_repr(p, glue.ty) == .Boxed(_) {
+            cloned :: lower_pointer(&f)
+            lower_call_clone_glue(&m, &f, glue.ty, handle, cloned)
+            lower_emit(&f, LIRInst.Store{base: target, offset: 0, value: cloned})
+        } else if lower_is_inline(p, glue.ty) {
+            lower_inline_clone(p, &m, &f, handle, target, glue.ty)
+        } else {
+            lower_copy_bytes(&f, target, 0, handle, 0, lower_size(p, glue.ty).size)
+        }
+        lower_seal(&f, LIRTerminator.Return{value: None})
+        return lir_builder_finish(f.builder)
+    }
     runtime :: lower_record_handle(p, glue.ty) ?? panic("record.in is requested for records")
     definition :: lower_type_def(p, glue.ty) ?? panic("a record has a definition")
     if !lower_record_members_cross(p, glue.ty) {
@@ -738,6 +781,17 @@ fn lower_record_load_value(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ha
 fn lower_helper_record_out(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, Val(lir_layout_pointer()))
     value :: ~f.open_params[0]
+    if m.native_pack && lower_native_record_source(p, glue.ty) {
+        target :: lower_pointer(&f)
+        if lower_repr(p, glue.ty) == .Boxed(_) -> lower_call_clone_glue(&m, &f, glue.ty, value, target)
+        else {
+            lower_alloc(&m, &f, target, lower_native_handle_shell_size(p, glue.ty))
+            if lower_is_inline(p, glue.ty) -> lower_inline_clone(p, &m, &f, value, target, glue.ty)
+            else -> lower_emit(&f, LIRInst.Store{base: target, offset: 0, value: value})
+        }
+        lower_seal(&f, LIRTerminator.Return{value: Val(target)})
+        return lir_builder_finish(f.builder)
+    }
     runtime :: lower_record_handle(p, glue.ty) ?? panic("record.out is requested for records")
     schema :: lower_record_schema(p, glue.ty) ?? panic("a record has a schema")
     definition :: lower_type_def(p, glue.ty) ?? panic("a record has a definition")
