@@ -1584,7 +1584,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: e2d250e0513a94e30de2c62d3ca8f220f809148d16fdc2ec9d719579ca6d1057
+// Source SHA-256: f31ad7ca71406dde77506ad8893b503b948fcce16465111b9899bd24017f6664
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -2177,6 +2177,21 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.process", "on_signal", "jet_process_on_signal", true, &[true], ),
     CoreCallRecord::new("core.plugin", "load", "jet_plugin_load", true, &[true, true]) .without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.mod", "load", "jet_mod_load", true, &[true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.mod", "__supported", "jet_mod_supported_raw", true, &[]),
+    CoreCallRecord::new("core.mod", "__os", "jet_mod_os_raw", true, &[]),
+    CoreCallRecord::new("core.mod", "__read_context", "jet_mod_read_context_raw", true, &[true, true]).with_native_int_result(),
+    CoreCallRecord::new("core.mod", "__parse_context", "jet_mod_parse_context_raw", true, &[false]),
+    CoreCallRecord::new("core.mod", "__check_context", "jet_mod_check_context_raw", true, &[false]),
+    CoreCallRecord::new("core.mod", "__context_name", "jet_mod_context_name_raw", true, &[false]),
+    CoreCallRecord::new("core.mod", "__context_digest", "jet_mod_context_digest_raw", true, &[false]),
+    CoreCallRecord::new("core.mod", "__stage_context", "jet_mod_stage_context_raw", true, &[false]),
+    CoreCallRecord::new("core.mod", "__open_context", "jet_mod_open_context_raw", true, &[false]),
+    CoreCallRecord::new("core.mod", "__exports_count", "jet_mod_exports_count_raw", true, &[false]).with_native_int_result(),
+    CoreCallRecord::new("core.mod", "__export_info", "jet_mod_export_info_raw", true, &[false, false]),
+    CoreCallRecord::new("core.mod", "__resolve_export", "jet_mod_resolve_export_raw", true, &[false, false]),
+    CoreCallRecord::new("core.mod", "__resolve_symbol", "jet_mod_resolve_symbol_raw", true, &[false, true]),
+    CoreCallRecord::new("core.mod", "__close_context", "jet_mod_close_context_raw", true, &[false]),
+    CoreCallRecord::new("core.mod", "__finish_context", "jet_mod_finish_context_raw", true, &[false]),
     CoreCallRecord::new( "core.testing", "golden", "jet_testing_golden", true, &[true, true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.testing", "fixture", "jet_testing_fixture", true, &[true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.testing", "temp_dir", "jet_testing_temp_dir", true, &[true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
