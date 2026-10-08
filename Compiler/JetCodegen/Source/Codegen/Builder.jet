@@ -1029,52 +1029,54 @@ fn jet_codegen_function_state(builder: JetCodegenBuilder, program: JetCodegenPro
 }
 
 // Rust: none (Jet-only pass)
+// The parameter owns this state. Transfer every non-Copy field out of that
+// owner instead of cloning it into the builder and dropping the snapshot.
 fn jet_codegen_restore_function_state(builder: &JetCodegenBuilder, program: JetCodegenProgram, state: ^JetCodegenFunctionState) Never! {
-    builder.function = state.function
+    builder.function = ^state.function
     builder.current_span = state.current_span
     builder.current_line = state.current_line
-    builder.generic_type_names = state.generic_type_names
+    builder.generic_type_names = ^state.generic_type_names
     builder.current = state.current
     builder.entry = state.entry
     builder.next_identity = state.next_identity
     builder.scope_depth = state.scope_depth
-    builder.blocks = state.blocks
-    builder.block_positions = state.block_positions
-    builder.locals = state.locals
-    builder.local_positions = state.local_positions
-    builder.values = state.values
-    builder.value_positions = state.value_positions
-    builder.places = state.places
-    builder.place_positions = state.place_positions
-    builder.scopes = state.scopes
-    builder.contract_scopes = state.contract_scopes
-    builder.params = state.params
-    builder.capture_params = state.capture_params
-    builder.capture_facts = state.capture_facts
-    builder.bindings = state.bindings
-    builder.loops = state.loops
-    builder.prelude_calls = state.prelude_calls
-    builder.prelude_call_positions = state.prelude_call_positions
-    builder.core_calls = state.core_calls
-    builder.used_core = state.used_core
+    builder.blocks = ^state.blocks
+    builder.block_positions = ^state.block_positions
+    builder.locals = ^state.locals
+    builder.local_positions = ^state.local_positions
+    builder.values = ^state.values
+    builder.value_positions = ^state.value_positions
+    builder.places = ^state.places
+    builder.place_positions = ^state.place_positions
+    builder.scopes = ^state.scopes
+    builder.contract_scopes = ^state.contract_scopes
+    builder.params = ^state.params
+    builder.capture_params = ^state.capture_params
+    builder.capture_facts = ^state.capture_facts
+    builder.bindings = ^state.bindings
+    builder.loops = ^state.loops
+    builder.prelude_calls = ^state.prelude_calls
+    builder.prelude_call_positions = ^state.prelude_call_positions
+    builder.core_calls = ^state.core_calls
+    builder.used_core = ^state.used_core
     builder.nested_functions = ^state.nested_functions
-    builder.callbacks = state.callbacks
-    builder.checked_vector_facts = state.checked_vector_facts
-    builder.transactions = state.transactions
+    builder.callbacks = ^state.callbacks
+    builder.checked_vector_facts = ^state.checked_vector_facts
+    builder.transactions = ^state.transactions
     builder.transaction_cleanup_active = state.transaction_cleanup_active
-    builder.drop_live_places = state.drop_live_places
-    builder.drop_live_all = state.drop_live_all
-    builder.cleanup_frames = state.cleanup_frames
-    builder.exit_tails = state.exit_tails
-    builder.exit_value_slots = state.exit_value_slots
-    builder.switch_subject = state.switch_subject
-    builder.spawn_occurrences = state.spawn_occurrences
-    builder.pattern_windows = state.pattern_windows
-    builder.window_aliases = state.window_aliases
-    builder.read_windows = state.read_windows
-    builder.read_alias_places = state.read_alias_places
-    builder.stable_element_lets = state.stable_element_lets
-    builder.plain_try_operand = state.plain_try_operand
+    builder.drop_live_places = ^state.drop_live_places
+    builder.drop_live_all = ^state.drop_live_all
+    builder.cleanup_frames = ^state.cleanup_frames
+    builder.exit_tails = ^state.exit_tails
+    builder.exit_value_slots = ^state.exit_value_slots
+    builder.switch_subject = ^state.switch_subject
+    builder.spawn_occurrences = ^state.spawn_occurrences
+    builder.pattern_windows = ^state.pattern_windows
+    builder.window_aliases = ^state.window_aliases
+    builder.read_windows = ^state.read_windows
+    builder.read_alias_places = ^state.read_alias_places
+    builder.stable_element_lets = ^state.stable_element_lets
+    builder.plain_try_operand = ^state.plain_try_operand
     builder.plain_try_taken = state.plain_try_taken
 }
 
