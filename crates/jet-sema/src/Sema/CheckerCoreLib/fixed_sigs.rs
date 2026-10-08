@@ -1396,6 +1396,11 @@ fn core_fixed_sig_impl(
             vec![(read, Type::Named("DataTree".to_string()))],
             Some(Type::Apply { name: "View".to_string(), args: vec![u8_ty()] }),
         )),
+        ("core.http", "__router") => Some((vec![], Some(Type::Named("HTTPRouter".to_string())))),
+        ("core.http", "__parse") => Some((vec![(read, Type::String)], Some(Type::Named("HTTPRequest".to_string())))),
+        ("core.http", "__dispatch") => Some((vec![(read, Type::Named("HTTPRouter".to_string())), (read, Type::Named("HTTPRequest".to_string()))], Some(result_ty(Type::Named("HTTPResponse".to_string()), Type::Named("HTTPError".to_string()))))),
+        ("core.net.ws", "__connect") => Some((vec![(read, Type::String)], Some(result_ty(Type::Named("WsConn".to_string()), Type::Named("WsError".to_string()))))),
+        ("core.net.ws", "__upgrade") => Some((vec![(read, Type::Named("HTTPRequest".to_string()))], Some(result_ty(Type::Named("WsConn".to_string()), Type::Named("WsError".to_string()))))),
         ("core.http.client", "__get") => Some((vec![(read, Type::String)], Some(result_ty(Type::Named("HTTPResponse".to_string()), Type::Named("HTTPError".to_string()))))),
         ("core.http.client", "__post") => Some((vec![(read, Type::String), (read, Type::String)], Some(result_ty(Type::Named("HTTPResponse".to_string()), Type::Named("HTTPError".to_string()))))),
         ("core.http.client", "__request") => Some((vec![(read, Type::String), (read, Type::String)], Some(Type::Named("HTTPRequest".to_string())))),
@@ -5699,7 +5704,7 @@ fn core_fixed_sig_impl(
                 Type::Named(Syntax::TYPE_IO_ERROR.to_string()),
             )),
         )),
-        ("core.net.tls", "read") => Some((
+        ("core.net.tls", "read" | "__read") => Some((
             vec![
                 (
                     AccessConvention::Write,
@@ -5725,7 +5730,7 @@ fn core_fixed_sig_impl(
                 Type::Named(Syntax::TYPE_IO_ERROR.to_string()),
             )),
         )),
-        ("core.net.tls", "write") => Some((
+        ("core.net.tls", "write" | "__write") => Some((
             vec![
                 (
                     AccessConvention::Write,
@@ -5738,7 +5743,7 @@ fn core_fixed_sig_impl(
                 Type::Named(Syntax::TYPE_IO_ERROR.to_string()),
             )),
         )),
-        ("core.net.tls", "write_all") => Some((
+        ("core.net.tls", "write_all" | "__write_all") => Some((
             vec![
                 (
                     AccessConvention::Write,
