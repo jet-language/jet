@@ -1,14 +1,10 @@
 // D-NETSOCKET1=A: pure address value rules shared by NetHTTP and comptime.
 
-pub(crate) fn jet_net_pure_parse_ip(
-    text: &String,
-) -> Result<std::net::IpAddr, std::net::AddrParseError> {
+pub(crate) fn jet_net_pure_parse_ip(text: &str, ) -> Result<std::net::IpAddr, std::net::AddrParseError> {
     text.parse()
 }
 
-pub(crate) fn jet_net_pure_parse_socket_addr(
-    text: &String,
-) -> Result<std::net::SocketAddr, std::net::AddrParseError> {
+pub(crate) fn jet_net_pure_parse_socket_addr(text: &str, ) -> Result<std::net::SocketAddr, std::net::AddrParseError> {
     text.parse()
 }
 

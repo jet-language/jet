@@ -343,14 +343,10 @@ fn jet_fs_parent(handle: i64, name: &str, operation: IOOperation) -> Result<JetF
 /// `if_exists`: 0 open or replace, 1 refuse an existing name (exclusive).
 /// `mode`: permission bits for a newly created file, or negative for 0o666.
 /// `links`: 0 follow a final link, 1 refuse it.
-pub(crate) fn jet_fs_open_at(
-    handle: i64,
-    name: &String,
-    access: i64,
-    if_exists: i64,
-    mode: i64,
-    links: i64,
-) -> Result<std::fs::File, IOError> {
+pub(crate) fn jet_fs_open_at(handle: i64, name: &str, access: i64,
+if_exists: i64,
+mode: i64,
+links: i64,) -> Result<std::fs::File, IOError> {
     let operation = if access == 0 || access == 3 { IOOperation::Read } else { IOOperation::Write };
     #[cfg(unix)]
     {
@@ -449,7 +445,7 @@ pub(crate) fn jet_fs_open_at(
 
 /// Open and hold the directory `name` relative to `handle`. A final link is
 /// refused. Returns the held key.
-pub(crate) fn jet_fs_directory_open(handle: i64, name: &String) -> Result<i64, IOError> {
+pub(crate) fn jet_fs_directory_open(handle: i64, name: &str) -> Result<i64, IOError> {
     let base = jet_fs_held_path(handle, IOOperation::Read)?;
     let file = jet_fs_open_at(handle, name, 3, 0, -1, 1)?;
     Ok(jet_fs_hold(file, jet_fs_shown(&base, name)))
@@ -457,7 +453,7 @@ pub(crate) fn jet_fs_directory_open(handle: i64, name: &String) -> Result<i64, I
 
 /// Create the directory `name` relative to `handle`; an existing name is
 /// `AlreadyExists`. `mode` < 0 means 0o777 before the process umask.
-pub(crate) fn jet_fs_directory_create(handle: i64, name: &String, mode: i64) -> Result<(), IOError> {
+pub(crate) fn jet_fs_directory_create(handle: i64, name: &str, mode: i64) -> Result<(), IOError> {
     #[cfg(unix)]
     {
         let parent = jet_fs_parent(handle, name, IOOperation::Write)?;
@@ -690,7 +686,7 @@ pub(crate) fn jet_fs_stat_file(file: &std::fs::File, shown: &str) -> Result<Vec<
 /// Raw metadata-only classification, without following the final link.
 /// Unlike stat's identity row, this never opens a Windows handle; the caller
 /// owns target/ancestor validation and wording. 0=file, 1=dir, 2=link, 7=other.
-pub(crate) fn jet_fs_path_kind(path: &String) -> Result<i64, IOError> {
+pub(crate) fn jet_fs_path_kind(path: &str) -> Result<i64, IOError> {
     let file_type = std::fs::symlink_metadata(path)
         .map_err(|error| io_error_at(IOOperation::Read, path, error))?
         .file_type();
@@ -708,7 +704,7 @@ pub(crate) fn jet_fs_path_kind(path: &String) -> Result<i64, IOError> {
 /// Metadata for `name` relative to `handle` (negative: a path). An empty
 /// `name` with a held key describes the held directory. `follow` applies
 /// only to a path; held-directory entries are never followed.
-pub(crate) fn jet_fs_stat_at(handle: i64, name: &String, follow: bool) -> Result<Vec<i64>, IOError> {
+pub(crate) fn jet_fs_stat_at(handle: i64, name: &str, follow: bool) -> Result<Vec<i64>, IOError> {
     if handle < 0 {
         let meta = if follow { std::fs::metadata(name) } else { std::fs::symlink_metadata(name) }
             .map_err(|error| io_error_at(IOOperation::Read, name, error))?;
@@ -766,13 +762,9 @@ pub(crate) fn jet_fs_stat_at(handle: i64, name: &String, follow: bool) -> Result
 /// Rename `from` (relative to `from_handle`) to `to` (relative to
 /// `to_handle`); negative keys mean the current directory.
 /// `if_exists`: 0 replace, 1 refuse an existing target, 2 swap both names.
-pub(crate) fn jet_fs_rename_at(
-    from_handle: i64,
-    from: &String,
-    to_handle: i64,
-    to: &String,
-    if_exists: i64,
-) -> Result<(), IOError> {
+pub(crate) fn jet_fs_rename_at(from_handle: i64, from: &str, to_handle: i64,
+to: &str,
+if_exists: i64,) -> Result<(), IOError> {
     #[cfg(unix)]
     {
         use jet_fs_sys as sys;
@@ -863,7 +855,7 @@ pub(crate) fn jet_fs_rename_at(
 
 /// Remove `name` relative to a held directory: a non-directory when
 /// `directory` is false, an empty directory when it is true.
-pub(crate) fn jet_fs_remove_at(handle: i64, name: &String, directory: bool) -> Result<(), IOError> {
+pub(crate) fn jet_fs_remove_at(handle: i64, name: &str, directory: bool) -> Result<(), IOError> {
     #[cfg(unix)]
     {
         let parent = jet_fs_parent(handle, name, IOOperation::Write)?;
@@ -885,7 +877,7 @@ pub(crate) fn jet_fs_remove_at(handle: i64, name: &String, directory: bool) -> R
 }
 
 /// The text stored in the link `name` inside a held directory, unresolved.
-pub(crate) fn jet_fs_read_link_at(handle: i64, name: &String) -> Result<String, IOError> {
+pub(crate) fn jet_fs_read_link_at(handle: i64, name: &str) -> Result<String, IOError> {
     #[cfg(unix)]
     {
         use std::os::unix::ffi::OsStringExt;
@@ -921,7 +913,7 @@ pub(crate) fn jet_fs_read_link_at(handle: i64, name: &String) -> Result<String, 
 
 /// Extended-attribute names on `path` itself (a final link is not followed),
 /// sorted. A file system without attributes, and Windows, report none.
-pub(crate) fn jet_fs_xattr_names(path: &String) -> Result<Vec<String>, IOError> {
+pub(crate) fn jet_fs_xattr_names(path: &str) -> Result<Vec<String>, IOError> {
     #[cfg(unix)]
     {
         use jet_fs_sys as sys;
@@ -985,7 +977,7 @@ pub(crate) fn jet_fs_xattr_names(path: &String) -> Result<Vec<String>, IOError> 
 
 /// One extended-attribute value on `path` itself, or None when absent or
 /// when the file system has no attributes.
-pub(crate) fn jet_fs_xattr_get(path: &String, name: &String) -> Result<Option<Vec<u8>>, IOError> {
+pub(crate) fn jet_fs_xattr_get(path: &str, name: &str) -> Result<Option<Vec<u8>>, IOError> {
     #[cfg(unix)]
     {
         use jet_fs_sys as sys;
@@ -1040,7 +1032,7 @@ pub(crate) fn jet_fs_xattr_get(path: &String, name: &String) -> Result<Option<Ve
 
 /// Write one extended-attribute value on `path` itself. A file system or
 /// platform without attributes reports `IOError::Unsupported`.
-pub(crate) fn jet_fs_xattr_set(path: &String, name: &String, value: &Vec<u8>) -> Result<(), IOError> {
+pub(crate) fn jet_fs_xattr_set(path: &str, name: &str, value: &Vec<u8>) -> Result<(), IOError> {
     #[cfg(unix)]
     {
         use jet_fs_sys as sys;
@@ -1070,11 +1062,7 @@ pub(crate) fn jet_fs_xattr_set(path: &String, name: &String, value: &Vec<u8>) ->
 // A compiler-private descriptor-to-held-directory hard link. The caller
 // guarantees a live open file and a single, NUL-free plain name. Availability
 // and held-key presence are facts, not decisions about when to copy.
-pub(crate) fn jet_fs_link_fd_at_raw(
-    source: &std::fs::File,
-    into: i64,
-    name: &String,
-) -> (bool, bool, jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt) {
+pub(crate) fn jet_fs_link_fd_at_raw(source: &std::fs::File, into: i64, name: &str, ) -> (bool, bool, jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt) {
     #[cfg(any(target_os = "linux", target_os = "android"))]
     {
         use std::os::fd::AsRawFd;
@@ -1101,16 +1089,16 @@ pub(crate) fn jet_fs_link_fd_at_raw(
 }
 
 /// Raw following-metadata fact. Jet chooses the public false-on-error policy.
-pub(crate) fn jet_fs_metadata_directory_raw(path: &String) -> Result<bool, String> {
+pub(crate) fn jet_fs_metadata_directory_raw(path: &str) -> Result<bool, String> {
     std::fs::metadata(path).map(|metadata| metadata.is_dir()).map_err(|error| error.to_string())
 }
 
 /// Host path grammar facts; Jet owns the current-directory/error policy.
-pub(crate) fn jet_fs_host_path_is_absolute_raw(path: &String) -> bool {
+pub(crate) fn jet_fs_host_path_is_absolute_raw(path: &str) -> bool {
     std::path::Path::new(path).is_absolute()
 }
 
-pub(crate) fn jet_fs_host_path_join_raw(base: &String, path: &String) -> String {
+pub(crate) fn jet_fs_host_path_join_raw(base: &str, path: &str) -> String {
     std::path::Path::new(base).join(path).to_string_lossy().into_owned()
 }
 

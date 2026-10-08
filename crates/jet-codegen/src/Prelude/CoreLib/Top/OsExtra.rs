@@ -16,7 +16,7 @@ pub(crate) fn jet_sys_executable_raw() -> Option<String> {
 pub(crate) fn jet_std_os_pid() -> i64 {
     std::process::id() as i64
 }
-pub(crate) fn jet_sys_host_env_raw(name: &String) -> Option<Vec<u8>> {
+pub(crate) fn jet_sys_host_env_raw(name: &str) -> Option<Vec<u8>> {
     std::env::var_os(name).map(std::ffi::OsString::into_encoded_bytes)
 }
 
@@ -202,7 +202,7 @@ pub(crate) fn jet_sys_setsid_raw() -> (bool, jet_foundation::Numeric::JetInt, je
     #[cfg(not(unix))]
     { jet_sys_unavailable_sample() }
 }
-pub(crate) fn jet_sys_initgroups_raw(user: &String, group: i64) -> (bool, jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt) {
+pub(crate) fn jet_sys_initgroups_raw(user: &str, group: i64) -> (bool, jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt) {
     #[cfg(unix)]
     {
         // Jet checked NUL absence immediately before this private boundary.
@@ -261,7 +261,7 @@ pub(crate) fn jet_std_os_close_fd(fd: i64) {
         let _ = fd;
     }
 }
-pub(crate) fn jet_sys_mkfifo_raw(path: &String, mode: i64) -> (bool, jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt) {
+pub(crate) fn jet_sys_mkfifo_raw(path: &str, mode: i64) -> (bool, jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt) {
     #[cfg(unix)]
     {
         let c_path = unsafe { std::ffi::CString::from_vec_unchecked(path.as_bytes().to_vec()) };
@@ -304,7 +304,7 @@ pub(crate) fn jet_sys_loadavg_raw() -> (bool, jet_foundation::Numeric::JetInt, f
     #[cfg(not(unix))]
     { (false, jet_std::jet_int_owned_from_i64(0), 0.0, 0.0, 0.0) }
 }
-pub(crate) fn jet_sys_utime_raw(path: &String, atime: i64, mtime: i64) -> (bool, jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt) {
+pub(crate) fn jet_sys_utime_raw(path: &str, atime: i64, mtime: i64) -> (bool, jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt) {
     #[cfg(unix)]
     {
         let c_path = unsafe { std::ffi::CString::from_vec_unchecked(path.as_bytes().to_vec()) };
@@ -348,6 +348,6 @@ pub(crate) fn jet_sys_current_dir_raw() -> Result<String, String> {
         .map_err(|error| error.to_string())
 }
 
-pub(crate) fn jet_sys_set_current_dir_raw(path: &String) -> Result<(), String> {
+pub(crate) fn jet_sys_set_current_dir_raw(path: &str) -> Result<(), String> {
     std::env::set_current_dir(path).map_err(|error| error.to_string())
 }

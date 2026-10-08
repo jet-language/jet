@@ -449,6 +449,42 @@ fn string_view_runtime_read_leaves_accept_text_without_materialization() {
 }
 
 #[test]
+fn string_view_runtime_text_borrow_contract_covers_sibling_fragments() {
+    for (source, signature) in [
+        (
+            include_str!("../crates/jet-codegen/src/Prelude/Core/Fmt.rs"),
+            "fn jet_fmt_pad(text: &str, width: i64, fill: &str)",
+        ),
+        (
+            include_str!("../crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs"),
+            "fn jet_text_caseless_eq(a: &str, b: &str)",
+        ),
+        (
+            include_str!("../crates/jet-codegen/src/Prelude/Core/Time.rs"),
+            "fn jet_time_parse_rfc3339(s: &str)",
+        ),
+        (
+            include_str!("../crates/jet-codegen/src/Prelude/CoreLib/Top/FSIoEnvOsTesting.rs"),
+            "fn jet_std_io_stdout_write(_s: &JetStdout, text: &str)",
+        ),
+        (
+            include_str!("../crates/jet-codegen/src/Prelude/Core/CsvQueryRead.rs"),
+            "fn jet_data_query_read_bounded(path: &str, max: i64)",
+        ),
+        (
+            include_str!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs"),
+            "fn jet_http_client_request_new(method: &str, url: &str)",
+        ),
+        (
+            include_str!("../crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs"),
+            "fn jet_net_dns_a_at(server: &str, name: &str, ms: i64)",
+        ),
+    ] {
+        assert!(source.contains(signature), "missing read ABI: {signature}");
+    }
+}
+
+#[test]
 fn string_view_runtime_reads_agree_across_native_tiers() {
     tir_support::assert_tiers_agree(
         "string_view_runtime_reads",
