@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 // tests/unsafe_sentries.rs:3-28 over the real composed native Sentry fixture.
+// NODE-DEBT removal condition: at native cutover, the Jet test kit runner owns
+// this real-fixture process launch and all six ledger predicates; remove this
+// Node runner only after the Jet runner exercises the identical contract.
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';

@@ -2359,4 +2359,7 @@ storage repair. It additionally requires exactly one row to guard the
 fault-detection/stop separation. The client must be composed with the actual
 SentryTests source; no Rust driver or fabricated ledger writer is used.
 Native execution is not established by the syntax receipt.
+This Node runner is development-test debt: at native cutover, replace
+its launch and all six ledger predicates with the Jet test kit runner, then
+remove the Node implementation after identical exercised results.
 
