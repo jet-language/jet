@@ -66,7 +66,7 @@ pub fn cli_cmd_list(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Time.Wait]> 
                 .with("source_built", DataTree.Bool(entry.envelope.provenance.contains("core-")))
             &packages.push(report_status_object(fields))
         }
-        print(report_render_status("list", true, StatusFields.new().with("packages", DataTree.Array(packages))))
+        print(report_render_status("list", true, StatusFields.new().with("packages", DataTree.Array(packages))) ?? return cli_status_encoding_error(err))
         return EXIT_OK
     }
     if entries.len() == 0 {
@@ -91,7 +91,7 @@ pub fn cli_cmd_list(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Time.Wait]> 
 fn cli_hangar_path(theme: Theme, parsed: CLIParsed) -[IO, Env, Time.Wait]> Int Never! {
     path :: pkg_resolve_roots().hangar_dir()
     if parsed.flags.json {
-        cli_hangar_status_json("path", StatusFields.new().with("path", DataTree.Text(path)))
+        cli_hangar_status_json("path", StatusFields.new().with("path", DataTree.Text(path))) ?? return cli_status_encoding_error(err)
     } else {
         print(path)
     }
@@ -118,7 +118,7 @@ fn cli_hangar_du_all(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Time.Wait]>
         cli_hangar_status_json("du", StatusFields.new()
             .with("shared_cas", shared_cas)
             .with("roots", DataTree.Array(roots))
-            .with("total_bytes", DataTree.Int(report.total_bytes)))
+            .with("total_bytes", DataTree.Int(report.total_bytes))) ?? return cli_status_encoding_error(err)
         return EXIT_OK
     }
     theme.detail("Root  Physical Use")
@@ -150,7 +150,7 @@ fn cli_hangar_du(verification: &StoreVerification, theme: Theme, parsed: CLIPars
             .with("unique_bytes", cli_optional_int_tree(report.unique_bytes))
             .with("shared_bytes", cli_optional_int_tree(report.shared_bytes))
             .with("closure_physical_bytes", cli_optional_int_tree(report.closure_physical_bytes))
-            .with("entries", DataTree.Array(entries)))
+            .with("entries", DataTree.Array(entries))) ?? return cli_status_encoding_error(err)
         return EXIT_OK
     }
     theme.detail("ID  Unique  Shared")
@@ -177,7 +177,7 @@ fn cli_hangar_recover(verification: &StoreVerification, theme: Theme, parsed: CL
     if store_recover_hangar(&verification, pkg_resolve_roots()) == {
         .Ok(count) -> {
             if parsed.flags.json {
-                cli_hangar_status_json("recover", StatusFields.new().with("recovered", DataTree.Int(count)))
+                cli_hangar_status_json("recover", StatusFields.new().with("recovered", DataTree.Int(count))) ?? return cli_status_encoding_error(err)
             } else {
                 theme.status("recovered {count} abandoned or committed hangar item(s)")
             }
@@ -221,7 +221,7 @@ fn cli_hangar_ingest(verification: &StoreVerification, theme: Theme, parsed: CLI
                 cli_hangar_status_json("ingest", StatusFields.new()
                     .with("id", DataTree.Text(ingested.entry.id))
                     .with("output_hash", DataTree.Text(ingested.entry.envelope.output_hash))
-                    .with("deduplicated", DataTree.Bool(ingested.deduplicated)))
+                    .with("deduplicated", DataTree.Bool(ingested.deduplicated))) ?? return cli_status_encoding_error(err)
             } else {
                 note :: if ingested.deduplicated -> " (deduplicated)" else -> ""
                 theme.status("ingested {theme.bold(ingested.entry.id)} → {ingested.entry.envelope.output_hash}{note}")
@@ -261,7 +261,7 @@ fn cli_hangar_doctor(verification: &StoreVerification, theme: Theme, parsed: CLI
             .with("remaining", DataTree.Int(remaining))
             .with("seal_reused", DataTree.Int(report.seal_reused))
             .with("seal_resealed", DataTree.Int(report.seal_resealed))
-            .with("seal_reseal_needed", DataTree.Int(report.seal_reseal_needed))))
+            .with("seal_reseal_needed", DataTree.Int(report.seal_reseal_needed))) ?? return cli_status_encoding_error(err))
     } else {
         loop finding in report.findings {
             verdict :: if finding.fixed -> "fixed" else -> "remaining"
@@ -288,7 +288,7 @@ fn cli_hangar_verify(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Time, Time.
             verified += 1
         }
         if parsed.flags.json {
-            cli_hangar_status_json("verify", StatusFields.new().with("objects", DataTree.Int(verified)))
+            cli_hangar_status_json("verify", StatusFields.new().with("objects", DataTree.Int(verified))) ?? return cli_status_encoding_error(err)
         } else {
             theme.status("verified {verified} Hangar object(s)")
         }
@@ -311,7 +311,7 @@ fn cli_hangar_verify(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Time, Time.
     if store_verify_archive(roots, entry.id, key) == {
         .Ok(report) -> {
             if parsed.flags.json {
-                print(report.json("verify"))
+                print(report.json("verify") ?? return cli_status_encoding_error(err))
             } else {
                 theme.status("verified {entry.envelope.output_hash}")
             }
@@ -333,7 +333,7 @@ fn cli_hangar_referrers(verification: &StoreVerification, theme: Theme, parsed: 
     if parsed.flags.json {
         values := [DataTree]{}
         loop reference in referrers -> &values.push(DataTree.Text(reference))
-        cli_hangar_status_json("referrers", StatusFields.new().with("digest", DataTree.Text(digest)).with("referrers", DataTree.Array(values)))
+        cli_hangar_status_json("referrers", StatusFields.new().with("digest", DataTree.Text(digest)).with("referrers", DataTree.Array(values))) ?? return cli_status_encoding_error(err)
         return EXIT_OK
     }
     if referrers.len() == 0 {
@@ -407,7 +407,7 @@ pub fn cli_auto_clean_after_success(verification: &StoreVerification, theme: The
 // under `--json`, else the coded human diagnostic. Always exit 2.
 pub fn cli_hangar_report_error(theme: Theme, parsed: CLIParsed, code: String, what: String, why: String, fix: String) -[IO, FS, Env, Time.Wait]> Int Never! {
     if parsed.flags.json {
-        print(StatusEnvelope.new("hangar", false).with_report(cli_diagnostic_report(code, what, why, fix)).json())
+        print(StatusEnvelope.new("hangar", false).with_report(cli_diagnostic_report(code, what, why, fix)).json() ?? return cli_status_encoding_error(err))
     } else {
         theme.error_coded(code, what, why, fix)
     }
@@ -415,17 +415,17 @@ pub fn cli_hangar_report_error(theme: Theme, parsed: CLIParsed, code: String, wh
 }
 
 // One successful Hangar status object on stdout.
-fn cli_hangar_status_json(action: String, fields: StatusFields) Never! -[IO]> {
-    print(report_render_status(action, true, fields))
+fn cli_hangar_status_json(action: String, fields: StatusFields) ReportError! -[IO]> {
+    print(report_render_status(action, true, fields) ?? return Err(err))
 }
 
 // A plan-before-apply gate. Under `--json` without `--yes`, the unapplied
 // plan is the machine result.
-fn cli_hangar_confirm_apply(theme: Theme, parsed: CLIParsed, action: String) -[IO, Time.Wait]> Bool Never! {
-    if !parsed.flags.json -> return theme.confirm_apply(parsed.flags.assume_yes)
-    if parsed.flags.assume_yes -> return true
-    cli_hangar_status_json(action, StatusFields.new().with("applied", DataTree.Bool(false)))
-    false
+fn cli_hangar_confirm_apply(theme: Theme, parsed: CLIParsed, action: String) -[IO, Time.Wait]> Bool ReportError! {
+    if !parsed.flags.json -> return Ok(theme.confirm_apply(parsed.flags.assume_yes))
+    if parsed.flags.assume_yes -> return Ok(true)
+    cli_hangar_status_json(action, StatusFields.new().with("applied", DataTree.Bool(false))) ?? return Err(err)
+    Ok(false)
 }
 
 // Rust `StatusValue::from(Option<u64>)`.

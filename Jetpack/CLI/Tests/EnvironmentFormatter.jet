@@ -61,7 +61,7 @@ fn cli_test_formatter_fixture(tree: FormatterTree, fail: Bool, extra_args: [Stri
     fixture :: json.to_string(DataTree.Array([DataTree.Object([
         "drvPath": DataTree.Text("/nix/store/fixture-nixfmt.drv"),
         "outputs": DataTree.Object(["out": DataTree.Text(out)])
-    ])]))
+    ])])) ?? panic("valid formatter fixture JSON")
     files.write(files.join(tree.fixtures, "nixpkgs-nixfmt.json"), fixture) ?? panic("write nixfmt fixture")
     files.write(files.join(tree.project, "env.jet"), "module env.dev {{ formatter: pkgs.nixfmt }}\n") ?? panic("write env.jet")
     files.write(files.join(tree.project, "flake.nix"), "unformatted\n") ?? panic("write flake.nix")
