@@ -2029,3 +2029,11 @@ allocation ledger asserts size/alignment and exact-once release for every
 allocation, including opaque nested Limits owners, without inspecting that
 carrier's fields. It also checks tuple/list order, clone independence and
 nested NaN self-inequality. Syntax receipts are not execution receipts.
+
+DataPlot constructor ordinal rejection uses the existing native-index range
+stop (`E3010`, `<core.prelude>:0`), while a wrong Value variant getter uses
+the shared record-variant panic (`E3001`, `<core.prelude>:0`). Both preserve
+the existing report footer and exit 70, rather than reporting a private
+provider source line. `DataPlotStops.c` supplies separate real-provider
+process modes with byte-exact stderr goldens derived from `TrapMessages.jet`.
+These goldens and syntax checks alone do not claim process execution.

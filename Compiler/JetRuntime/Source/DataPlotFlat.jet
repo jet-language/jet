@@ -7,7 +7,8 @@
 // at constructors, fresh exact Int owners only at getters; never Int drops.
 fn data_plot_flag(value: U8) -> I64 { if (value == U8{0}) -> I64{0} else -> I64{1} }
 fn data_plot_tag(value: I64, count: I64) -> I64 {
-    if (value < I64{0} || value >= count) -> panic("record variant index out of range")
+    // CAbiRoutes.rs:11-13, ctor range_stop uses the shared arithmetic stop.
+    if (value < I64{0} || value >= count) -> trap_native_index_range_stop()
     value
 }
 fn data_plot_text_header(text: I64, out: I64) {

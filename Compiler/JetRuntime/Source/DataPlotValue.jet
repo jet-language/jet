@@ -8,7 +8,8 @@ fn data_plot_value_new(kind: I64, payload: I64) -> I64 {
     value
 }
 fn data_plot_value_payload(value: I64, kind: I64) -> I64 {
-    if data_tree_word(value + DP_VALUE_TAG) != kind -> panic("record variant index out of range")
+    // CAbiRoutes.rs:10128/10139: panic at <core.prelude>:0, not this source.
+    if data_tree_word(value + DP_VALUE_TAG) != kind -> rt_record_variant_panic()
     data_tree_word(value + DP_VALUE_PAYLOAD)
 }
 #Export(c) fn jet_rt_record_tag_JetDataPlotValue(value: I64) -> I64 { data_tree_word(value + DP_VALUE_TAG) }
