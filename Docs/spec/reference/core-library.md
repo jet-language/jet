@@ -2087,6 +2087,9 @@ use column-major storage; they provide `from_array`, `to_array`, addition,
 subtraction, matrix multiplication, `matmul`, `transform`, and `transpose`.
 Reductions use a scalar left-to-right fold, so the reduction order is part of
 the reproducible fixed-array contract (D-LINALG1; `to_array` is the fixed-array bridge, D-FIXARR1).
+Normalizing a vector whose length is zero returns its lanes unchanged,
+including signed zero. Lane reads reject negative indices and indices at or
+above the vector's fixed width.
 
 ```jet
 fn rotate(v: Vec3, transform: Mat3) -> Vec3 {
