@@ -18,7 +18,7 @@
 // fieldless Core enum inside a record crosses as its variant index. The rows
 // below have hand exports in CAbi.rs; every other record's schema and exports
 // are generated (RuntimeRoutes.jet LOWER_GENERATED_RECORDS, CAbiRoutes.rs).
-use jet_foundation.[MIRCallArg, MIREnumArg, MIRInstruction, MIRPreludeCallID, MIRProgram, MIRType, MIRTypeDef, mir_type_display_name]
+use jet_foundation.[MIRCallArg, MIREnumArg, MIRInstruction, MIRPreludeCallID, MIRProgram, MIRType, MIRTypeDef, MIRTypeKind, mir_nominal_ref, mir_type_from_kind, mir_type_display_name]
 
 // The shape the runtime's exports were written for. A MIR definition of the
 // same name with any other shape is not a record, so a changed Core type is
@@ -94,6 +94,40 @@ fn lower_runtime_missing_application(ty: MIRType, rows: ^[LowerRuntimeHandle]) -
         }
     }
     None
+}
+
+// This is the single ownership gate for native handle and record exports.
+// Source-file presence is only a candidate: the current MIR must supply the
+// exact declaration and arguments and Lower must already give it native storage.
+fn lower_native_source_type(p: MIRProgram, key: String) -> MIRType? {
+    row :: lower_native_type(key) ?? return None
+    args := [MIRType]{}
+    if row.arguments != "" {
+        loop label in row.arguments.split(",").to_list() {
+            arg :: if {
+                label == "Float" -> mir_type_from_kind(MIRTypeKind.Float)
+                label == "Bool" -> mir_type_from_kind(MIRTypeKind.Bool)
+                label == "String" -> mir_type_from_kind(MIRTypeKind.String)
+                label == "Int" -> mir_type_from_kind(MIRTypeKind.Int)
+                else -> mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref(label), args: [MIRType]{}})
+            }
+            if label != "Float" && label != "Bool" && label != "String" && label != "Int" {
+                definition :: lower_type_def(p, arg) ?? return None
+                if definition.generic_params.len() > 0 -> return None
+            }
+            &args.push(arg)
+        }
+    }
+    ty :: mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref(row.declaration), args: args})
+    definition :: lower_type_def(p, ty) ?? return None
+    if definition.kind == {
+        .Struct(_, _) | .Enum(_, _) -> {}
+        else -> return None
+    }
+    if lower_repr(p, ty) == {
+        .Inline(_) | .Boxed(_) | .Discriminant -> Val(ty)
+        else -> None
+    }
 }
 
 fn lower_record_schema(p: MIRProgram, ty: MIRType) -> LowerRecordSchema? {
