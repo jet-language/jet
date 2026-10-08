@@ -4392,3 +4392,24 @@ fn optimizer_fact_channel_absence_keeps_conservative_defaults() {
     assert!(facts.comptime_value.is_none());
     assert!(facts.cost.is_none());
 }
+
+#[test]
+fn geometry_method_binders_are_the_checked_operand_facts() {
+    use super::tir_to_mir_expr::geometry_checked_transform_type_args as binders;
+    let named = |name: &str| Type::Named(name.to_string());
+    let stock = Type::Apply { name: "Transform".into(), args: vec![named("Screen"), named("World")] };
+    let next = TExpr { ty: Type::Apply { name: "Transform".into(), args: vec![named("World"), named("Device")] }, kind: TExprKind::IntLit(0, None) };
+    assert_eq!(binders(&stock, "then", &[next]), Some(vec![named("Device")]));
+    let point_type = Type::Apply { name: "Point2".into(), args: vec![Type::Float, named("Screen")] };
+    let point = TExpr { ty: point_type.clone(), kind: TExprKind::IntLit(0, None) };
+    for method in ["point", "point_at_depth", "ray"] {
+        assert_eq!(binders(&stock, method, &[point.clone()]), Some(vec![point_type.clone()]));
+    }
+    let narrow = Type::Apply { name: "Transform2".into(), args: vec![Type::Float32, named("Screen"), named("World")] };
+    let next = TExpr { ty: Type::Apply { name: "Transform2".into(), args: vec![Type::Float32, named("World"), named("View")] }, kind: TExprKind::IntLit(0, None) };
+    assert_eq!(binders(&narrow, "then", &[next]), Some(vec![named("View")]));
+    let held = Type::Apply { name: "Transform2".into(), args: vec![Type::Float, named("Screen"), named("World")] };
+    assert_eq!(binders(&held, "inverse", &[]), None);
+    let cross = TExpr { ty: held, kind: TExprKind::IntLit(0, None) };
+    assert_eq!(binders(&stock, "then", &[cross]), None);
+}

@@ -4150,6 +4150,27 @@ pub(super) fn lower_expr(
             )
         }
         TExprKind::HandleMethod { recv, op, args } => {
+            if let super::THandleOp::MathMethod { method, .. } = op {
+                if let Some(type_args) = geometry_checked_transform_type_args(&recv.ty, method, args) {
+                    if let Some(function) = ctx.geometry_source_target(&recv.ty, method)? {
+                        let returned = ctx.function_registry.method_call_return_type_for(function, &type_args, &recv.ty)
+                            .map_err(|message| ctx.error(ctx.span(), message))?
+                            .unwrap_or_else(|| expr.ty.clone());
+                        let owner = ctx.mir_type(&recv.ty)?;
+                        let access = ctx.function_registry.receiver_access.get(&function).copied()
+                            .ok_or_else(|| ctx.error(ctx.span(), "checked geometry source method has no receiver convention"))?;
+                        let mut receiver = ctx.lower_plain_arg(recv)?;
+                        receiver.access = access;
+                        let mut call_args = Vec::with_capacity(args.len() + 1);
+                        call_args.push(receiver);
+                        for argument in args { call_args.push(ctx.lower_plain_arg(argument)?); }
+                        let type_args = lower_mir_types(ctx, &type_args)?;
+                        return ctx.emit("geometry-source-method", Some(returned), MirOperation::Call {
+                            callee: MirCallee::Method { function, owner }, args: call_args, type_args,
+                        });
+                    }
+                }
+            }
             if matches!(op, super::THandleOp::EventMethod { .. })
                 || matches!(
                     op,
@@ -11118,4 +11139,31 @@ fn unsupported_pattern<T>(ctx: &mut LowerCtx, variant: impl Into<String>) -> Res
     let span = ctx.span();
     let variant = variant.into();
     Err(ctx.error(span, format!("{variant} has no canonical MIR projection")))
+}
+
+/// Read method binders from the operand types already resolved by the checker.
+/// This is not inference: `Next` is the checked next transform's output space
+/// and `P` is the checked point's exact type. Cross-nominal paths remain gated.
+pub(super) fn geometry_checked_transform_type_args(
+    owner: &Type,
+    operation: &str,
+    args: &[TExpr],
+) -> Option<Vec<Type>> {
+    let Type::Apply { name, args: owner_args } = owner else { return None };
+    let family = crate::Sema::geometry_nominal_leaf(name);
+    if !matches!(family, "Transform" | "Transform2") { return None }
+    if family == "Transform2" && owner_args.first() == Some(&Type::Float)
+        && matches!(operation, "then" | "inverse") {
+        return None; // D-TRANSFORM-IDENTITY1: legacy result is the other nominal.
+    }
+    match operation {
+        "point" | "point_at_depth" | "ray" => Some(vec![args.first()?.ty.clone()]),
+        "then" => {
+            let Type::Apply { name: next_name, args: next_args } = &args.first()?.ty else { return None };
+            if crate::Sema::geometry_nominal_leaf(next_name) != family { return None }
+            Some(vec![next_args.last()?.clone()])
+        }
+        "inverse" => Some(Vec::new()),
+        _ => None,
+    }
 }
