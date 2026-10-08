@@ -1678,12 +1678,7 @@ fn policy_check_shapes(cases: [PolicyShapeCase]) PolicyError! {
         PolicyShapeCase{path: "Tools/gauntlet/entries/bulkrename/jet/run.jet", source: "fn pattern() {{ value :: Regex{{\"^x$\"}} }}\nfn run(value: String) {{\n    matched :: re.match(Regex{{\"x\"}}, value)\n    print(matched.group(1) ?? \"\")\n}}", rule: "regex-capture-recipe", present: true},
         PolicyShapeCase{path: "Docs/spec/guides/first-hour.md", source: "```jet\n#CLI\nstruct Args {{ name: String }}\n```\n```bash\njet build\n```", rule: "first-hour-doc-recipe", present: true},
     })
-    lower := "\"text\""
-    loop index in 0..<26 {
-        from :: String.from_bytes([U8]{U8.from_int(65 + index) ?? panic("ASCII uppercase byte")}) ?? panic("ASCII")
-        to :: String.from_bytes([U8]{U8.from_int(97 + index) ?? panic("ASCII lowercase byte")}) ?? panic("ASCII")
-        lower += ".replace(\"{from}\", \"{to}\")"
-    }
+    lower :: policy_planted_ascii_ladder()
     violations :: policy_evaluate_source(policy_manifest(), "Jetpack/PackageModel/Source/Envelope/PathLaw.jet", "fn run() {{ value :: {lower} }}")
     assert(policy_has_rule(violations, "dogfood-ascii"))
 }
@@ -1804,4 +1799,64 @@ fn policy_split_whitespace(text: String) -> [String] {
     assert(policy_has_jet_run_command("```bash\njet{emspace}run example.jet\n```"))
     assert(!policy_has_jet_run_command("```bash\n# jet run\n```"))
     assert(!policy_has_jet_run_command("```bash\njet # run\n```"))
+}
+
+fn policy_planted_ascii_ladder() -> String {
+    lower := "\"text\""
+    loop index in 0..<26 {
+        from :: String.from_bytes([U8]{U8.from_int(65 + index) ?? panic("ASCII uppercase byte")}) ?? panic("ASCII")
+        to :: String.from_bytes([U8]{U8.from_int(97 + index) ?? panic("ASCII lowercase byte")}) ?? panic("ASCII")
+        lower += ".replace(\"{from}\", \"{to}\")"
+    }
+    lower
+}
+
+struct PolicyPlantedPair { rule: String, kind: String, rejected: String, clean: String }
+#Test("corpus executable AST rules planted violation and clean pairs") {
+    ladder :: policy_planted_ascii_ladder()
+    pairs :: [PolicyPlantedPair]{
+        PolicyPlantedPair{rule: "raw-cli-fixed-shape", kind: "call:process.argv", rejected: "fn run() {{ process.argv() }}", clean: "fn run(args: Args) {{ print(args) }}"},
+        PolicyPlantedPair{rule: "raw-cli-builder-shape", kind: "call:process.argv.skip", rejected: "fn run() {{ process.argv().skip(1) }}", clean: "fn run() {{ process.args() }}"},
+        PolicyPlantedPair{rule: "duration-constant-safe", kind: "call:Duration.constructor", rejected: "fn run() {{ Duration.hours(2) }}", clean: "fn run(hours: Int) {{ Duration.hours(hours) }}"},
+        PolicyPlantedPair{rule: "unit-scalar-rewrap", kind: "call:unit-rewrap", rejected: "fn run() {{ Meter.from_float(value.raw() * 2) }}", clean: "fn run() {{ value * 2 }}"},
+        PolicyPlantedPair{rule: "readonly-copy", kind: "call:readonly-copy", rejected: "use core.files as fs\nfn run() {{ fs.read(~path) }}", clean: "use core.files as fs\nfn run() {{ fs.read(path) }}"},
+        PolicyPlantedPair{rule: "error-identity", kind: "expr:error-propagation", rejected: "use core.files as fs\nfn run() {{ fs.read(path) ?? return Err(\"read\") }}", clean: "use core.files as fs\nfn run() {{ fs.read(path) }}"},
+        PolicyPlantedPair{rule: "http-wrapper-json", kind: "call:http-wrapper", rejected: "fn run(req: HTTPRequest) {{ req.body(Json) }}", clean: "fn run(req: HTTPRequest) {{ req.json(Json) }}"},
+        PolicyPlantedPair{rule: "http-message-text", kind: "call:response.text", rejected: "fn run() {{ response.body().text(100) }}", clean: "fn run() {{ response.text() }}"},
+        PolicyPlantedPair{rule: "http-typed-json", kind: "call:request.body", rejected: "fn run(req: HTTPRequest) {{ req.body(Json) }}", clean: "fn run(req: HTTPRequest) {{ req.json(Json) }}"},
+        PolicyPlantedPair{rule: "delimited-reader-config", kind: "call:delimited-split", rejected: "fn run() {{ input.split(\"\\t\") }}", clean: "fn run() {{ input.split(\"|\") }}"},
+        PolicyPlantedPair{rule: "plain-format-fact", kind: "call:Fixed.replace", rejected: "fn run() {{ \"{{value:Fixed(2)}}\".replace(\",\", \"\") }}", clean: "fn run() {{ \"{{value:Fixed(2)}}\" }}"},
+        PolicyPlantedPair{rule: "dogfood-path-containment", kind: "call:path.starts_with", rejected: "fn run() {{ candidate.starts_with(\"root/\") }}", clean: "fn run() {{ candidate.is_within(root) }}"},
+        PolicyPlantedPair{rule: "dogfood-json", kind: "literal:json-wire", rejected: "fn run() {{ \"{{{{\\\"key\\\": {{value}}}}}}\" }}", clean: "fn run() {{ json.to_string(value) }}"},
+        PolicyPlantedPair{rule: "dogfood-url-query", kind: "call:url.query.split", rejected: "fn run() {{ query.split(\"&\") }}", clean: "fn run() {{ url.query() }}"},
+        PolicyPlantedPair{rule: "dogfood-list-equality", kind: "fn:same_strings", rejected: "fn run() {{ same_strings(left, right) }}", clean: "fn run() {{ left == right }}"},
+        PolicyPlantedPair{rule: "dogfood-directory-setup", kind: "call:fs.create_dir", rejected: "use core.files as files\nfn run() {{ files.create_dir(\"dir\") }}", clean: "use core.files as files\nfn run() {{ files.create_dir_all(\"dir\") }}"},
+        PolicyPlantedPair{rule: "crypto-naming-fact", kind: "call:crypto.sha256_bytes", rejected: "use core.crypto as crypto\nfn run() {{ crypto.sha256_bytes(bytes) }}", clean: "use core.crypto as crypto\nfn run() {{ crypto.sha256(bytes).hex() }}"},
+        PolicyPlantedPair{rule: "raw-cli-process-boundary", kind: "call:process.argv", rejected: "fn run() {{\n    first :: process.argv()\n    second :: process.argv()\n}}", clean: "fn run() {{ process.argv() }}"},
+        PolicyPlantedPair{rule: "entry-implicit", kind: "fn:run", rejected: "fn run() {{ print(\"hello\") }}", clean: "print(\"hello\")"},
+        PolicyPlantedPair{rule: "codable-structural", kind: "type:Record", rejected: "#Codable\nstruct Record {{ value: Int }}", clean: "struct Record {{ value: Int }}"},
+        PolicyPlantedPair{rule: "effect-row-inference", kind: "fn:run", rejected: "fn run() -[IO]> {{ print(\"hello\") }}", clean: "fn run() {{ print(\"hello\") }}"},
+        PolicyPlantedPair{rule: "task-one-child", kind: "stmt:task.group", rejected: "fn run() {{ task.group g {{ task.race {{1, 2}} }} }}", clean: "fn run() {{ task.race {{1, 2}} }}"},
+        PolicyPlantedPair{rule: "indexed-sequence", kind: "loop:manual-counter", rejected: "fn run() {{\n    count := 0\n    loop item in items {{\n        count += 1\n        print(count)\n    }}\n}}", clean: "fn run() {{ loop (index, item) in items -> print(index) }}"},
+        PolicyPlantedPair{rule: "datatree-domain-policy", kind: "fn:duplicate", rejected: "fn duplicate(left: DataTree, right: DataTree) -> Bool {{ true }}", clean: "fn duplicate(left: DataTree, right: DataTree) -> Bool {{ left.equal_unordered(right) }}"},
+        PolicyPlantedPair{rule: "walk-files-filter", kind: "call:fs.walk", rejected: "use core.files as fs\nfn run() {{ loop entry in fs.walk(root) {{ if !entry.is_dir -> print(entry.path) }} }}", clean: "use core.files as fs\nfn run() {{ loop entry in fs.walk_files(root) -> print(entry.path) }}"},
+        PolicyPlantedPair{rule: "regex-capture-recipe", kind: "recipe:regex-capture", rejected: "fn run() {{ Regex{{\"x\"}} }}", clean: "fn run() {{\n    pattern :: Regex{{\"^x$\"}}\n    matched :: re.match(pattern, value)\n    print(matched.group(1) ?? \"\")\n}}"},
+        PolicyPlantedPair{rule: "dogfood-ascii", kind: "call:String.replace", rejected: "fn run() {{ {ladder} }}", clean: "fn run() {{ \"text\".to_ascii_lower() }}"},
+        PolicyPlantedPair{rule: "first-hour-doc-recipe", kind: "literal:jet-build", rejected: "fn run() {{ print(\"jet build example.jet\") }}", clean: "fn run() {{ print(\"jet run example.jet\") }}"},
+    }
+    loop pair in pairs {
+        // A closed synthetic manifest makes one rule active, independently of
+        // real corpus exceptions or scope changes. Checked-manifest tests above
+        // still require every original source/provenance/classification.
+        path :: if pair.rule == "first-hour-doc-recipe" -> "Examples/features/types/typed_literal_forms.jet" else -> "planted/{pair.rule}.jet"
+        manifest := PolicyManifest{sources: [PolicySourceRow]{PolicySourceRow{selector: "file:{path}", role: "canonical-teaching", profile: "typed-cli", decision: "planted", proof: "planted", owner: "corpus-policy", reason: "planted AST pair"}}, scopes: [corpus_manifest.PolicyScopeRow]{corpus_manifest.PolicyScopeRow{rule: pair.rule, selector: "file:{path}", reason: "planted AST pair"}}, producers: [corpus_manifest.PolicyProducerRow]{}, artifacts: [corpus_manifest.PolicyArtifactRow]{}, findings: [corpus_manifest.PolicyFindingRow]{}, exceptions: [corpus_manifest.PolicyExceptionRow]{}}
+        bad :: policy_evaluate_source(manifest, path, pair.rejected)
+        assert_eq(bad.len(), 1, "{pair.rule}: exactly one planted violation")
+        assert_eq(bad[0].file, path)
+        assert_eq(bad[0].rule, pair.rule)
+        assert(bad[0].site.starts_with("{pair.kind}@"), "stable semantic site: {bad[0].site}")
+        assert_eq(policy_occurrence_messages(bad), policy_violation(path, pair.rule, bad[0].site))
+        good :: policy_evaluate_source(manifest, path, pair.clean)
+        assert_eq(good, [PolicyOccurrence]{}, "{pair.rule}: clean AST shape")
+    }
 }
