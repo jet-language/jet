@@ -3734,6 +3734,11 @@ or write the existing service tree storage, under the caller's exclusive borrow.
 The signing key remains the exact 32 bytes decoded from the current `sa-`
 authority token; this port adds no key cache or security-policy change.
 
+Snapshot/event-log selection, replay framing, topology/observation text, and
+workflow history/outcome selection are Jet policies. Durable reads retain the
+existing host storage/replay operation during the Rust-seed tier; field
+projections expose only existing facts and retire at the Jet-runtime cutover.
+
 | Signature | Result | Description |
 |---|---|---|
 | `tree(name: String) -> ServiceTree` | tree | Create a named service topology. |
