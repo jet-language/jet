@@ -83,6 +83,9 @@ version banner reports `ERROR`, not a guessed version.
 nanosecond receipt from each three-step list using saturating integer
 multiplication; `<` is strict and `elapsed: median [A,B,C] > 0ns` requires
 a positive median. Labels must already exist.
+An absolute bound such as `elapsed: A < 1s` judges a completed receipt;
+it does not kill the child. `<`, `<=`, `>`, `>=`, and `=` compare using the
+asserted unit's truncated integer duration.
 
 Captured text supports `cap:X: is-f64 # original predicate` and
 `cap:A: f64 < {cap:B} # original predicate` (also `>`, `<=`, `>=`, `==`,
@@ -97,6 +100,15 @@ preserving whether the original text ended in LF.
 `requires: path-exists:PATH` skips absent host paths. A header such as
 `requires: first-existing TOOL = "A" | "B"` captures the first present path
 as `{cap:TOOL}`, or reports `SKIP-HOST` when no alternative exists.
+
+`apply-edits: stdout doc $.fix_edits` consumes the published diagnostic edit
+schema `{file, span:{start,end}, new_text}`. Edits for each work-relative file
+use descending byte offsets; overlapping, out-of-range, or non-UTF-8-boundary
+spans fail. `poke: PATH at OFFSET hex "78"` overwrites bytes in place;
+`xor "01"` toggles bits, and `mid` means integer byte-length division by two.
+Malformed hex is an `ERROR` naming its argument. `{jet-build-target}` is
+reserved but reports `REFUSED build-target` until that capability exists;
+it never substitutes a guessed host triple.
 
 
 Structured assertions use `json: stdout|stderr doc|ndjson PATH OP VALUE`, or

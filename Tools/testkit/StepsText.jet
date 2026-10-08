@@ -103,11 +103,35 @@ fn kit_steps_invalid_utf8(bytes: [U8]) -> String {
     "{result}{suffix}"
 }
 
+fn kit_steps_hex_nibble(byte: U8) -> Int? {
+    code :: Int.from_u8(byte)
+    if code >= 48 && code <= 57 -> return Val(code - 48)
+    if code >= 65 && code <= 70 -> return Val(code - 55)
+    if code >= 97 && code <= 102 -> return Val(code - 87)
+    None
+}
+
+// #4834: switch this test-tooling decoder to Core hex.decode once its
+// duplicate HexError nominal identity is fixed. Validation shares the nibble
+// policy with each-line hex rather than maintaining a second alphabet.
+fn kit_steps_hex_decode(text: String) -> [U8] Err! {
+    if text.len() % 2 != 0 -> return Err("invalid hexadecimal argument: {text}")
+    bytes :: text.bytes()
+    result := [U8]{}
+    index := 0
+    loop index < bytes.len() {
+        high :: kit_steps_hex_nibble(bytes[index]) ?? return Err("invalid hexadecimal argument: {text}")
+        low :: kit_steps_hex_nibble(bytes[index + 1]) ?? return Err("invalid hexadecimal argument: {text}")
+        &result.push(U8{high * 16 + low})
+        index += 2
+    }
+    Ok(result)
+}
+
 fn kit_steps_hex_valid(text: String) -> Bool {
     if text.len() % 2 != 0 -> return false
     loop byte in text.bytes() {
-        code :: Int.from_u8(byte)
-        if !((code >= 48 && code <= 57) || (code >= 65 && code <= 70) || (code >= 97 && code <= 102)) -> return false
+        if kit_steps_hex_nibble(byte) == None -> return false
     }
     true
 }

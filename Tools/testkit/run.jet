@@ -455,6 +455,7 @@ fn kit_steps_execute(original_context: KitStepCtx, hooks: KitStepHooks) -> KitOu
     plan :: context.plan
     if plan.error != "" -> return KitOutcome{verdict: kit_expect_verdict("REFUSED", plan.error), run: state.last}
     loop requirement in plan.requires {
+        if kit_steps_build_target_text(requirement) -> return kit_steps_finish(state, kit_expect_verdict("REFUSED", "build-target"))
         if !requirement.starts_with("first-existing ") -> next
         words :: kit_steps_words(requirement) ?? return kit_steps_finish(state, kit_expect_verdict("REFUSED", "invalid first-existing requirement"))
         found := false
@@ -497,23 +498,24 @@ fn kit_steps_execute(original_context: KitStepCtx, hooks: KitStepHooks) -> KitOu
     loop cursor < plan.steps.len() {
         if loops.len() > 0 {
             slot :: loops.len() - 1
-            frame :: loops[slot]
-            if frame.kind == "repeat" && cursor == frame.start + 1 {
-                opening :: plan.steps[frame.start]
+            if loops[slot].kind == "repeat" && cursor == loops[slot].start + 1 {
+                opening :: plan.steps[loops[slot].start]
                 active :: kit_steps_repeat_active(opening, context, state) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "{err}"))
                 if !active {
-                    state = kit_steps_loop_restore(frame, state)
+                    state = kit_steps_loop_restore(loops[slot], state)
+                    cursor = loops[slot].end + 1
                     loops = loops.slice(0, slot)
-                    cursor = frame.end + 1
                     next
                 }
-                if frame.started.elapsed().ns >= (kit_steps_duration_ns(opening.argv[6]) ?? 0) -> return kit_steps_finish(state, kit_expect_verdict("FAIL", opening.argv[10]))
+                if loops[slot].started.elapsed().ns >= (kit_steps_duration_ns(opening.argv[6]) ?? 0) -> return kit_steps_finish(state, kit_expect_verdict("FAIL", opening.argv[10]))
             }
         }
         index :: cursor
         original :: plan.steps[index]
         cursor += 1
+        if kit_steps_build_target_conditions(original.conditions) -> return kit_steps_finish(state, kit_expect_verdict("REFUSED", "build-target"))
         if !kit_steps_conditions(original.conditions, context, state) -> next
+        if kit_steps_build_target_used(original, plan) -> return kit_steps_finish(state, kit_expect_verdict("REFUSED", "build-target"))
         if original.action == "when" {
             if !kit_steps_condition(original.argv[0], context, state) {
                 depth := 1
@@ -590,7 +592,7 @@ fn kit_steps_execute(original_context: KitStepCtx, hooks: KitStepHooks) -> KitOu
             if step.argv.len() != 2 -> return kit_steps_finish(state, kit_expect_verdict("REFUSED", "fail needs one message"))
             return kit_steps_finish(state, kit_expect_verdict("FAIL", step.argv[1]))
         }
-        invoked :: if step.action == "poll" -> kit_steps_poll(step, index, context, state, hooks) else if kit_steps_setup_kind(step.action) || kit_expect_named(["assert", "await", "session", "send", "recv", "signal", "close", "spawn", "wait", "capture", "write", "inventory"], step.action) ->
+        invoked :: if step.action == "poll" -> kit_steps_poll(step, index, context, state, hooks) else if kit_steps_setup_kind(step.action) || kit_expect_named(["assert", "apply-edits", "await", "session", "send", "recv", "signal", "close", "spawn", "wait", "capture", "write", "inventory"], step.action) ->
             kit_steps_action(step, context, state) else -> hooks.invoke(step, index, context, state)
         state = invoked.state
         if invoked.verdict.status != "PASS" -> return kit_steps_finish(state, invoked.verdict)

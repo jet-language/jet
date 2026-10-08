@@ -92,7 +92,7 @@ fn kit_steps_setup_valid(key: String, words: [String]) -> Bool {
     }
     if words.len() != 5 || words[1] != "at" || (words[3] != "hex" && words[3] != "xor") -> return false
     if words[2] != "mid" && (Int.parse(words[2]) ?? -1) < 0 -> return false
-    kit_steps_hex_valid(words[4])
+    true
 }
 
 fn kit_steps_setup_run(step: KitStep, env: KitEnv, work: String, scratch: String, built: String) -> KitVerdict {
@@ -123,8 +123,19 @@ fn kit_steps_setup_run(step: KitStep, env: KitEnv, work: String, scratch: String
         if size < 0 -> return kit_expect_verdict("ERROR", "truncate removes more bytes than the file contains")
         files.truncate(path, size) ?? return kit_expect_verdict("ERROR", "truncate: {err}")
     } else if step.action == "poke" {
-        // #4834: Core HexError's duplicate nominal identity prevents check lowering.
-        return kit_expect_verdict("ERROR", "poke hex blocked on #4834 (Core HexError duplicate)")
+        replacement :: kit_steps_hex_decode(step.argv[5]) ?? return kit_expect_verdict("ERROR", "{err}")
+        bytes := files.read_bytes(path) ?? return kit_expect_verdict("ERROR", "poke read: {err}")
+        offset :: if step.argv[3] == "mid" -> bytes.len() /% 2 else -> Int.parse(step.argv[3]) ?? return kit_expect_verdict("ERROR", "invalid poke offset: {step.argv[3]}")
+        if offset < 0 || offset > bytes.len() || replacement.len() > bytes.len() - offset -> return kit_expect_verdict("ERROR", "poke span exceeds file: {step.argv[3]}")
+        loop (index, byte) in replacement {
+            if step.argv[4] == "hex" -> bytes[offset + index] = byte
+            else {
+                a :: Int.from_u8(bytes[offset + index])
+                b :: Int.from_u8(byte)
+                bytes[offset + index] = U8{a + b - 2 * kit_steps_bit_and(a, b)}
+            }
+        }
+        files.write_bytes(path, bytes) ?? return kit_expect_verdict("ERROR", "poke write: {err}")
     }
     kit_expect_verdict("PASS", "")
 }

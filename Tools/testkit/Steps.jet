@@ -369,6 +369,15 @@ fn kit_steps_parse(source: String) -> KitPlan {
             &plan.steps.push(KitStep{argv: argv, stdin: "", exit: "0", assertions: [], action: key, literal_input: literal})
             next
         }
+        if key == "apply-edits" {
+            words :: kit_steps_words(value) ?? []
+            if !kit_steps_edits_valid(words) {
+                plan.error = "line {line_number}: apply-edits needs <selector> doc <path>"
+                return plan
+            }
+            &plan.steps.push(KitStep{argv: words, stdin: "", exit: "0", assertions: [], action: "apply-edits"})
+            next
+        }
         if key == "capture" {
             words := kit_steps_words(value) ?? []
             accumulating :: words.len() > 1 && words[1] == "+="
@@ -649,6 +658,14 @@ fn kit_steps_parse(source: String) -> KitPlan {
             next
         }
         if key == "elapsed" {
+            if (kit_steps_words(value) ?? []).len() == 3 {
+                assertion :: kit_steps_elapsed_absolute(original, plan, i + 1) ?? {
+                    plan.error = "line {line_number}: invalid absolute elapsed bound"
+                    return plan
+                }
+                &plan.steps[i].assertions.push(assertion)
+                next
+            }
             if value.starts_with("median ") {
                 assertion :: kit_steps_median_assertion(original, plan, i + 1) ?? {
                     plan.error = "line {line_number}: invalid elapsed median relation"
@@ -787,7 +804,12 @@ fn kit_steps_expand(value: String, env: KitEnv, work: String, scratch: String, b
 }
 
 fn kit_steps_required(plan: KitPlan, env: KitEnv, work: String, scratch: String) -> KitVerdict? {
+    if kit_steps_build_target_text(plan.fixture) || kit_steps_build_target_text(plan.artifact) -> return Val(kit_expect_verdict("REFUSED", "build-target"))
+    loop assignment in plan.environment {
+        if kit_steps_build_target_text(assignment) -> return Val(kit_expect_verdict("REFUSED", "build-target"))
+    }
     loop requirement in plan.requires {
+        if kit_steps_build_target_text(requirement) -> return Val(kit_expect_verdict("REFUSED", "build-target"))
         missing :: kit_exec_requires(requirement, env, work, scratch)
         if missing != None -> return missing
     }

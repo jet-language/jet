@@ -84,3 +84,33 @@ fn kit_steps_median_test(assertion: KitAssertion, history: [KitCapturedStep]) ->
     matches :: if assertion.extra == "<" -> left < allowed else -> left <= allowed
     if matches -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "elapsed median comparison failed: {left}ns {assertion.extra} {allowed}ns")
 }
+
+fn kit_steps_elapsed_absolute(original: String, plan: KitPlan, before: Int) -> KitAssertion? {
+    words :: kit_steps_words(kit_steps_body(original)) ?? return None
+    if words.len() != 3 || !kit_expect_named(["<", "<=", ">", ">=", "="], words[1]) || !kit_steps_known_label(plan, words[0], before) -> return None
+    if kit_steps_duration_ns(words[2]) == None -> return None
+    Val(KitAssertion{stream: "elapsed", path: words[0], mode: "absolute", value: words[2], extra: words[1]})
+}
+
+fn kit_steps_elapsed_unit(text: String) -> Int {
+    if text.ends_with("ns") -> return 1
+    if text.ends_with("us") || text.ends_with("µs") -> return 1000
+    if text.ends_with("ms") -> return 1000000
+    if text.ends_with("s") -> return 1000000000
+    60000000000
+}
+
+fn kit_steps_elapsed_absolute_test(assertion: KitAssertion, history: [KitCapturedStep]) -> KitVerdict {
+    unit :: kit_steps_elapsed_unit(assertion.value)
+    expected :: (kit_steps_duration_ns(assertion.value) ?? return kit_expect_verdict("ERROR", "invalid elapsed duration")) /% unit
+    index := history.len()
+    loop index > 0 {
+        index -= 1
+        receipt :: history[index]
+        if receipt.label != assertion.path -> next
+        actual :: receipt.elapsed_ns /% unit
+        matches :: kit_steps_compare(actual, assertion.extra, expected)
+        return if matches -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "elapsed: {assertion.path} ({receipt.elapsed_ns}ns) does not satisfy {assertion.extra} {assertion.value}")
+    }
+    kit_expect_verdict("ERROR", "elapsed label missing: {assertion.path}")
+}

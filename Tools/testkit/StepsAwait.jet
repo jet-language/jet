@@ -117,17 +117,17 @@ fn kit_steps_await(step: KitStep, context: KitStepCtx, previous: KitStepState) -
             entries :: files.list_dir(path) ?? []
             loop entry in entries {
                 matches := true
-                cursor := 2
-                loop cursor < boundary {
-                    child :: files.join(entry.path, tokens[cursor + 1].text)
-                    if tokens[cursor].text == "with-file" -> matches = matches && kit_steps_path_is_file(child)
+                child_cursor := 2
+                loop child_cursor < boundary {
+                    child :: files.join(entry.path, tokens[child_cursor + 1].text)
+                    if tokens[child_cursor].text == "with-file" -> matches = matches && kit_steps_path_is_file(child)
                     else {
                         _ :: files.read_bytes(child) ?? {
                             matches = false
                             [U8]{}
                         }
                     }
-                    cursor += 2
+                    child_cursor += 2
                 }
                 if matches {
                     selected = entry.path

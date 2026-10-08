@@ -82,6 +82,7 @@ fn kit_steps_session_action(step: KitStep, context: KitStepCtx, previous: KitSte
         pending := state.children[index]
         if step.action == "send" {
             payload :: if step.literal_input -> step.argv[0] else -> files.read(files.join(context.snapshots, step.argv[0])) ?? return kit_steps_action_error(state, "send file: {err}")
+            if kit_steps_build_target_text(payload) -> return KitStepResult{state: state, verdict: kit_expect_verdict("REFUSED", "build-target")}
             expanded :: kit_steps_runtime_expand(payload, context, state) ?? return kit_steps_action_error(state, "send token unavailable")
             cr :: String.from_bytes([U8{13}]) ?? panic("CR")
             framed :: if pending.step.session_mode == "content-length" -> "Content-Length: {expanded.len()}{cr}\n{cr}\n{expanded}" else if pending.step.session_mode == "line" -> "{expanded}\n" else -> expanded
@@ -119,7 +120,7 @@ fn kit_steps_signal(pid: Int, name: String) -> Bool Err! {
 }
 
 fn kit_steps_parallel(steps: [KitStep], context: KitStepCtx, state: KitStepState) -> KitStepResult {
-    workers := [Task<String>]{}
+    workers := [Task<String Never!>]{}
     errors := [String]{}
     task.group sends {
         loop original in steps {
@@ -134,17 +135,19 @@ fn kit_steps_parallel(steps: [KitStep], context: KitStepCtx, state: KitStepState
             &workers.push(task kit_steps_send_result(step, context, state))
         }
         loop worker in workers {
-            message :: ^worker.join() ?? {
+            joined :: ^worker.join() ?? {
                 &errors.push("parallel task join failed")
                 next
             }
+            message :: joined ?? panic("infallible parallel send")
             if message != "" -> &errors.push(message)
         }
     }
     KitStepResult{state: state, verdict: if errors.len() == 0 -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("ERROR", errors.join("; "))}
 }
 
-fn kit_steps_send_result(step: KitStep, context: KitStepCtx, state: KitStepState) -> String {
+// #4790: infallibility keeps task lowering at Task<String>, not Task<Result<...>>.
+fn kit_steps_send_result(step: KitStep, context: KitStepCtx, state: KitStepState) -> String Never! {
     result :: kit_steps_session_action(step, context, state)
     if result.verdict.status == "PASS" -> "" else -> result.verdict.detail
 }
