@@ -30,8 +30,11 @@ Checked statement rows transfer into their completed function after the
 fallthrough check; contract wrapping must not copy the checked body or change
 which rows that check observes. MIR metadata collectors borrow top-level and
 nested function rows separately, sharing their identity sets rather than
-constructing a second owning concatenation. Canonical row ordering uses stable
-in-place sorting, preserving the same identity keys and tie order.
+constructing a second owning concatenation. Canonical row ordering delegates
+to stable mutating List sorting with borrowed comparators, preserving the same
+identity keys and tie order without deep-cloning row payloads. This does not
+promise an allocation-free or physically in-place implementation: sorting
+kernels may use scratch storage or move payloads to a replacement buffer.
 The executable canonical-order fixture in
 `Compiler/JetOptimizer/Tests/CanonicalOrderingFixtures.jet` assembles the
 production sort helpers and checks keys, equal-key stability, idempotence,
