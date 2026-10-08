@@ -374,6 +374,14 @@ whereas a trust-variant projection returns an owned root clone. System trust
 has no active root buffer. These ownership operations do not perform certificate
 validation or a TLS handshake. `TLSRootsWitness.c` pins their ownership and
 wrong-variant contracts against the composed Jet object.
+Certificate and peer snapshots also use independent native data storage: cloning
+recurses through byte lists, DNS text lists, and the certificate chain without
+duplicating an inline record's header. The chain stores inline certificates;
+growth moves their owned children, and a sequence projection borrows its slot.
+Certificate subject/issuer and peer name/cipher projections lend caller-owned
+E4 descriptors, which must not be freed, grown, or consumed. Signed validity
+timestamps remain raw i64 facts. `TLSCertificateWitness.c` exercises deep clones,
+parent lifetimes, list growth, and these borrowed projections.
 ## Dependency order
 
 Core work follows the dependency graph. These categories describe dependency
