@@ -93,9 +93,9 @@ A spawned worker's return carrier is the element of sema's checked
 closure signature, including `Result<T, Never>`; it must not probe the body or
 inherit the enclosing callable's failure carrier. A missing checked task
 element is a lowering invariant failure at the spawn's source span.
-Join lowering likewise consumes its checked result: it retains the worker
-element when that is sema's join success, and selects the existing flattening
-adapter only when sema has checked the element's success payload instead.
+Join lowering likewise consumes its checked result: its success is the task
+element, including a worker's `Result` or `Option` carrier. The outer
+`TaskFailure` rail reports waiting failure; it does not flatten that element.
 
 Native reference carriers (`View`, `ViewMut`, `Pin`, and the internal
 allocator-view tag) do not own their referents. Their synthetic scope cleanup
