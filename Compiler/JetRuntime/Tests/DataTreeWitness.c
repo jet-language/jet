@@ -1,6 +1,6 @@
 // Link the real Jet runtime object with -Wl,--wrap=jet_rt_free.
 // This client is not a runtime provider. Define DATA_TREE_U8_STRIDE to match
-// Collections.jet's single RT_HOST_U8_STRIDE epoch (base aa926ddfb = 8).
+// Collections.jet's single RT_HOST_U8_STRIDE epoch (canonical packed = 1).
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -8,7 +8,7 @@
 #include <stdio.h>
 #include <string.h>
 #ifndef DATA_TREE_U8_STRIDE
-#define DATA_TREE_U8_STRIDE 8
+#define DATA_TREE_U8_STRIDE 1
 #endif
 _Static_assert(DATA_TREE_U8_STRIDE == 1 || DATA_TREE_U8_STRIDE == 8, "native U8 epoch");
 typedef struct { unsigned char *data; int64_t length, capacity; } Text;
@@ -206,6 +206,27 @@ static void sequence_cases(void) {
 }
 int main(int argc, char **argv) {
     jet_rt_alloc_init();
+    if (argc > 1 && (strcmp(argv[1], "list-capacity-negative") == 0 || strcmp(argv[1], "list-capacity-overflow") == 0)) {
+        int64_t capacity = strcmp(argv[1], "list-capacity-negative") == 0 ? -1 : INT64_MAX / 8 + 1;
+        (void)jet_rt_record_seq_List_Rec_DataTree_new(capacity);
+        assert(!"std Vec capacity overflow must stop");
+    }
+    if (argc > 1 && (strcmp(argv[1], "entries-capacity-negative") == 0 || strcmp(argv[1], "entries-capacity-overflow") == 0)) {
+        int64_t capacity = strcmp(argv[1], "entries-capacity-negative") == 0 ? -1 : INT64_MAX / 16 + 1;
+        (void)jet_rt_record_seq_Entries_Rec_DataTree_new(capacity);
+        assert(!"std Vec capacity overflow must stop");
+    }
+    if (argc > 1 && (strcmp(argv[1], "list-oob") == 0 || strcmp(argv[1], "list-negative") == 0)) {
+        int64_t index = strcmp(argv[1], "list-negative") == 0 ? -1 : 0;
+        (void)jet_rt_record_seq_List_Rec_DataTree_get(jet_rt_record_seq_List_Rec_DataTree_new(0),index);
+        assert(!"std Vec bounds must stop");
+    }
+    if (argc > 1 && (strcmp(argv[1], "entries-oob") == 0 || strcmp(argv[1], "entries-negative") == 0)) {
+        int64_t index = strcmp(argv[1], "entries-negative") == 0 ? -1 : 0;
+        Text *key = NULL;
+        (void)jet_rt_record_seq_Entries_Rec_DataTree_get(jet_rt_record_seq_Entries_Rec_DataTree_new(0),index,&key);
+        assert(!"std Vec bounds must stop");
+    }
     if (argc > 1 && strcmp(argv[1], "panic-reference") == 0) {
         const char file[] = "<core.prelude>", message[] = "record variant index out of range";
         jet_panic(jet_rt_string_from_static(file,sizeof(file)-1),0,jet_rt_string_from_static(message,sizeof(message)-1));
