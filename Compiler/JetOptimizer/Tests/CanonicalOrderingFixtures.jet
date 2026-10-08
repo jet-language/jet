@@ -70,5 +70,15 @@ fn run() {
     empty_instances := [MIRType]{}
     mir_pass_sort_type_instances(&empty_instances)
     if empty_instances.len() != 0 -> panic("type-instance sorting inserted a row")
+
+    from := [MIRFunction]{order_function(4, "a", "source-a"), order_function(5, "b", "source-b")}
+    to := [MIRFunction]{order_function(1, "prefix", "prefix")}
+    compiler_transfer_rows<MIRFunction>(&to, &from)
+    if from.len() != 0 || to.len() != 3 || to[0].name != "prefix" || to[1].name != "source-a" || to[2].name != "source-b" || !order_expect_payload(to) -> panic("owning row transfer lost prefix, order, or deep payload")
+    compiler_transfer_rows<MIRFunction>(&to, &from)
+    if to.len() != 3 -> panic("empty owning transfer changed destination")
+    optional_program := Val(fx_program(to, [MIRTypeDef]{}))
+    program := ^optional_program ?? panic("owning MIR optional transfer lost the program")
+    if program.functions.len() != 3 || !order_expect_payload(program.functions) || program.functions[1].name != "source-a" -> panic("owning MIR optional handoff lost identity or deep payload")
     print("PASS canonical owned-row permutation: stable keys, deep payloads, three-cycle, all-equal, large, idempotence, empty, singleton")
 }

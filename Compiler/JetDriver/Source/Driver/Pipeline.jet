@@ -89,6 +89,7 @@ use jet_foundation.[
     TJobFact,
     TOutputCheckFact,
     TTestFact,
+    compiler_transfer_rows,
     core_module_export,
     diagnostic_with_source_mapping,
     jet_ring_prelude_closure_layer,
@@ -193,7 +194,6 @@ use jet_codegen.[
     jet_codegen_comptime_session_add_constants,
     jet_codegen_comptime_session_restore,
     jet_codegen_lower_job_test_artifacts,
-    jet_codegen_move_function_rows,
     jet_codegen_reachable_core_rows,
     jet_codegen_sorted_order,
     jet_rust_emit_program,
@@ -1724,20 +1724,6 @@ fn jet_driver_comptime_eval_config(
     Val(config)
 }
 
-// Moves every function of `from` onto the end of `to` in order, leaving
-// `from` empty. Each pop moves one function, so the list is never resident
-// twice.
-fn jet_driver_move_mir_functions(to: &[MIRFunction], from: &[MIRFunction]) Never! {
-    reversed := [MIRFunction]{}
-    loop from.len() > 0 {
-        function := &from.pop() ?? { break }
-        &reversed.push(^function)
-    }
-    loop reversed.len() > 0 {
-        function := &reversed.pop() ?? { break }
-        &to.push(^function)
-    }
-}
 
 // Moves the rows of `functions` flagged in `mask` onto `kept` and the others
 // onto `rest`, both in order, leaving `functions` empty. Each pop moves one
@@ -1880,8 +1866,8 @@ fn jet_driver_assemble_mir(
     // move (`^lowered.functions`) would copy the whole list while `lowered`
     // still held it.
     all_functions := [MIRFunction]{}
-    jet_driver_move_mir_functions(&all_functions, &lowered.functions)
-    jet_driver_move_mir_functions(&all_functions, &lowered.nested_functions)
+    compiler_transfer_rows<MIRFunction>(&all_functions, &lowered.functions)
+    compiler_transfer_rows<MIRFunction>(&all_functions, &lowered.nested_functions)
     // Next-equal chains preserve the old pairwise diagnostic order without
     // visiting unrelated functions. Duplicate-heavy input costs only its output.
     id_heads := [U64:Int]{}
@@ -2633,10 +2619,10 @@ fn jet_driver_comptime_grow(
         live.instances[identity.value] = true
     }
     loop function in new_functions -> live.function_keys["{function.module_identity}\n{function.key}"] = true
-    jet_codegen_move_function_rows(&live.functions, &new_functions)
+    compiler_transfer_rows<TFunc>(&live.functions, &new_functions)
     rows := [MIRFunction]{}
-    jet_driver_move_mir_functions(&rows, &grown.functions)
-    jet_driver_move_mir_functions(&rows, &grown.nested_functions)
+    compiler_transfer_rows<MIRFunction>(&rows, &grown.functions)
+    compiler_transfer_rows<MIRFunction>(&rows, &grown.nested_functions)
     constants := [MIRConstantDef]{}
     jet_driver_comptime_take_constants(&constants, &staging.growth_constants)
     growth := JetEvalProgramGrowth{functions: ^rows, callbacks: ^callbacks, fields: ^fields, constants: ^constants, core_calls: ^core_calls, prelude_calls: ^prelude_calls, type_instances: ^instances}
@@ -4200,7 +4186,7 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
     runtime_semantic_modules := [SemaGraphModuleResult]{}
     loop graph_module_index in 0..<checked_graph.modules.len() {
         module_functions := [TFunc]{}
-        jet_codegen_move_function_rows(&module_functions, &checked_graph.modules[graph_module_index].functions)
+        compiler_transfer_rows<TFunc>(&module_functions, &checked_graph.modules[graph_module_index].functions)
         // The module carries no functions now, so the runtime copy below
         // holds only its declarations.
         graph_module :: checked_graph.modules[graph_module_index]
@@ -4243,7 +4229,7 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
             &lowering_candidates.push(true)
         }
         &module_function_counts.push(module_functions.len())
-        jet_codegen_move_function_rows(&checked_functions, &module_functions)
+        compiler_transfer_rows<TFunc>(&checked_functions, &module_functions)
     }
     // Rust Completion.rs under `CompileMode::Test`: a package with no named
     // `#Test` block in any module has nothing to run (E0601).
@@ -4373,7 +4359,10 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
         }
         return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Assemble), false, trace)
     }
-    program_value := program ?? return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Assemble), false, trace)
+    // Assembly hands off an owned optional program. Consume the whole local
+    // before projecting its payload, so the large MIR is not copied while
+    // an otherwise-unused Option still owns and drops the original.
+    program_value := ^program ?? return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Assemble), false, trace)
     web_profile := if request.target == {
         .Native -> None
         .Web(_, _, profile) -> Val(profile)
