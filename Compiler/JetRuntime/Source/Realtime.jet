@@ -292,7 +292,10 @@ fn realtime_join(stream: I64) {
         sync_store(stream + RT_DEADLINE_IDENTITY, realtime_add(sync_load(stream + RT_START_IDENTITY), offset))
         sync_mutex_unlock(scratch + RT_MATH_MUTEX)
     }
-    _ := realtime_now_ns() // Rust schedule.end = Some(Instant::now()).
+    // Preserve BOTH clock steps in Realtime.rs:327-329: JetInstant::now()
+    // samples the provider (TimeInstant.rs:10-13), then end_identity samples
+    // again. The discarded first value is observable to a stepping clock.
+    _ := realtime_now_ns()
     sync_store(stream + RT_END, realtime_now_ns())
     jet_scheduler_shield_enter()
     release_body :: scheduler_body_enter()
