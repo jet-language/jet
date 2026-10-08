@@ -72,7 +72,10 @@ fn net_node_fail(node: I64, failure: I64) {
 fn net_node_rearm(root: I64, node: I64) {
     if (net_word(node, I64{48}) != I64{0}) -> return
     interest :: net_node_interest(node)
-    if (interest == I64{0}) { net_put(node, I64{40}, I64{0}); return }
+    if (interest == I64{0}) {
+        net_put(node, I64{40}, I64{0})
+        return
+    }
     result :: net_epoll_ctl(root, node, I64{3}, interest)
     if (result < I64{0}) { net_node_fail(node, result) } else { net_put(node, I64{40}, interest) }
 }
@@ -90,7 +93,10 @@ fn net_node_rearm(root: I64, node: I64) {
             bucket := I64{0}
             loop bucket < (I64{1024}) {
                 node := net_word(wrapping(net_word(root, I64{32}) + bucket * I64{8}), I64{0})
-                loop node != (I64{0}) { net_node_fail(node, count); node = net_word(node, I64{0}) }
+                loop node != (I64{0}) {
+                    net_node_fail(node, count)
+                    node = net_word(node, I64{0})
+                }
                 bucket = bucket + I64{1}
             }
             sync_mutex_unlock(root)
@@ -140,7 +146,10 @@ fn net_chain_unlink(head: I64, node: I64, next_offset: I64) {
     cursor := head
     loop net_word(cursor, I64{0}) != (I64{0}) {
         item :: net_word(cursor, I64{0})
-        if (item == node) { net_put(cursor, I64{0}, net_word(node, next_offset)); return }
+        if (item == node) {
+            net_put(cursor, I64{0}, net_word(node, next_offset))
+            return
+        }
         cursor = wrapping(item + next_offset)
     }
 }
@@ -175,7 +184,10 @@ fn net_waiter_remove(root: I64, waiter: I64) {
     if (failure >= I64{0}) -> failure = net_word(root, I64{48})
     if (failure >= I64{0} && net_word(root, I64{40}) == I64{0}) {
         worker :: thread_spawn(rt_net_poller_worker_address(), root)
-        if (worker < I64{0}) { net_put(root, I64{48}, worker); failure = worker } else {
+        if (worker < I64{0}) {
+            net_put(root, I64{48}, worker)
+            failure = worker
+        } else {
             net_put(root, I64{40}, I64{1})
             _ := thread_detach(worker)
         }
