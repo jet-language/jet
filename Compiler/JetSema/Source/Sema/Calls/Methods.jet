@@ -517,7 +517,7 @@ fn sema_call_method_checked_from_value(state: &SemaOwnershipState, receiver: Exp
         }
         // Only existing non-mangled host references lack a registered row.
         // Graph-free local checks retain their existing declaration rules.
-        if visible == .Val(false) {
+        if !(visible ?? true) {
             name :: candidate.method.name
             &diagnostics.push(sema_error("E0605", span, "`{name}` exists but is private to its file", "only names marked `pub` can be used from another file (S18)", "add `pub` before `{name}`, or don't reach across files here"))
             return None

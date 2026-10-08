@@ -3063,7 +3063,7 @@ fn covers_named_fn_value_binding() {
 fn covers_fn_field_struct_value_type() {
     // Function-typed fields are covered value types. Calls through them are
     // normalized by sema to the same checked route as `.call(...)`.
-    let src = "struct Worker { step: fn(Int) Int }\nfn f() {}";
+    let src = "struct Worker { step: fn(Int) -> Int }\nfn f() {}";
     let (toks, _) = crate::Lexer::lex(src);
     let prog = crate::Parser::parse(&toks).expect("parse");
     let cx = build_cx(&prog, src, "test.jet");

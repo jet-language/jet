@@ -1,21 +1,21 @@
 // Paired checking fixture: no namespace selection depends on call validity.
 struct Generic<T> {
     value: T
-    step: fn(Int) Int
+    step: fn(Int) -> Int
     fn step<U>(self, amount: U) -> Int Never! { 20 }
 }
 trait Step {
     fn step(self, amount: Int) -> Int Never! { amount + 5 }
 }
-struct DefaultWorker { step: fn(Int) Int }
+struct DefaultWorker { step: fn(Int) -> Int }
 impl DefaultWorker.Step {}
-struct Hook { mul: fn(Int) Int }
+struct Hook { mul: fn(Int) -> Int }
 impl Hook.Mul(Int) {
     fn mul(self, rhs: Int) -> Int Never! { rhs + 10 }
 }
 struct MutableWorker {
     value: Int
-    step: fn(Int) Int
+    step: fn(Int) -> Int
     fn step(&self, amount: Int) -> Int Never! {
         self.value += amount
         self.value
