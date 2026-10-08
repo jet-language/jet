@@ -89,8 +89,11 @@ const parts = [
   body("Compiler/JetOptimizer/Source/Verification/Lint.jet"),
   body("Compiler/JetBackend/Tests/LowerFixtures.jet", ["fn fx_report(", "fn fx_report_lir(", "fn fx_report_image(", "fn fx_report_executable(", "fn run("]),
   ...(canonicalOrder ? [
+    item("Compiler/JetFoundation/Source/Collections.jet", "pub fn compiler_apply_order<T>("),
     item("Compiler/JetOptimizer/Source/Facts/CanonicalOrdering.jet", "fn mir_pass_sort_functions("),
     item("Compiler/JetCodegen/Source/Codegen/Functions.jet", "fn jet_codegen_sort_functions("),
+    item("Compiler/JetCodegen/Source/Codegen/Functions.jet", "pub fn jet_codegen_sorted_order("),
+    item("Compiler/JetCodegen/Source/Codegen/Functions.jet", "fn jet_codegen_order_before("),
     body("Compiler/JetOptimizer/Tests/CanonicalOrderingFixtures.jet"),
   ] : [body("Compiler/JetOptimizer/Tests/LintFixtures.jet")]),
 ];
