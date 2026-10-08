@@ -2220,7 +2220,51 @@ fn jet_codegen_lower_fn_value(builder: &JetCodegenBuilder, program: JetCodegenPr
     }
 }
 
+fn jet_codegen_geometry_source_target(builder: JetCodegenBuilder, program: JetCodegenProgram, owner_type: Type, operation: String) -> TFunc? Never! {
+    head :: jet_codegen_type_head_name(owner_type) ?? return None
+    owner :: jet_codegen_find_nominal_identity(program.modules, builder.function.module_identity, head, builder.generic_type_names) ?? return None
+    source_module := false
+    loop semantic_module in program.modules {
+        if semantic_module.module_identity == owner.module_identity && semantic_module.module_name == "core.math" {
+            source_module = true
+            break
+        }
+    }
+    if !source_module -> return None
+    if owner.name == {
+        "ScreenPoint" | "ScreenDelta" | "WorldPoint" | "WorldDelta" | "ViewPoint" | "ViewDelta" | "CameraPoint" | "CameraDelta" | "DevicePoint" | "DeviceDelta" | "Point2" | "Delta2" | "Transform" | "Transform2" -> {}
+        else -> return None
+    }
+    selected := TFunc?{None}
+    loop function in program.function_index.rows {
+        if function.module_identity != owner.module_identity || function.source_file != "Core/math/math.jet" -> next
+        if function.kind != .Method(_, _) -> next
+        if function.name != operation && !function.name.ends_with("::{operation}") -> next
+        target_owner :: jet_codegen_method_owner_type(function.kind) ?? next
+        target_head :: jet_codegen_type_head_name(target_owner) ?? next
+        if !jet_codegen_owner_heads_match(target_head, owner.qualified_name, owner.module_identity) -> next
+        if selected != None -> panic("checked geometry source method is ambiguous")
+        selected = Val(function)
+    }
+    Val(selected ?? panic("checked geometry source method was pruned"))
+}
+
 fn jet_codegen_lower_math_builtin(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, type_name: String, function: String, args: [TExpr]) -> MIRValueID {
+    if function == "new" || function == "affine" {
+        target := jet_codegen_geometry_source_target(builder, program, expression.ty, function)
+        if target == .Val(source) {
+            returned :: jet_codegen_checked_method_return_type(builder, program, source, expression.ty, [Type]{})
+            owner :: jet_codegen_lower_type_for_function(expression.ty, builder, program)
+            call_args := [MIRCallArg]{}
+            loop argument in args {
+                value :: jet_codegen_lower_expr(&builder, program, argument)
+                &call_args.push(jet_codegen_numeric_call_arg(value, argument.span))
+            }
+            value :: jet_codegen_emit_value(&builder, program, expression.span, returned, MIROperation.Call{callee: MIRCallee.Associated{function: jet_codegen_function_id(source), owner: owner}, args: call_args, type_args: [MIRType]{}})
+            if jet_codegen_is_plain_call_return(returned, expression.ty) -> return jet_codegen_reconcile_plain_call_return(&builder, program, expression, source.key, value, returned)
+            return value
+        }
+    }
     if type_name == "Int" && function == "abs" -> return jet_codegen_lower_precise_builtin(&builder, program, expression, type_name, function, args, jet_codegen_failure_carrier_for_type(expression.ty))
     values := [MIRValueID]{}
     loop argument in args -> &values.push(jet_codegen_lower_expr(&builder, program, argument))

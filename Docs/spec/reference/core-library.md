@@ -2007,6 +2007,9 @@ otherwise keeps the nonzero identity. These policies are authored in Jet.
 The stock coordinate types, `Point2`, `Delta2`, and `TransformError` are
 source-owned declarations. Bare, `math.Type` (when imported), and
 `core.math.Type` spellings identify the same declaration.
+The fourteen coordinate and transform constructors dispatch to their
+source-owned declarations through normal associated MIR calls, with checked
+owner type arguments preserved.
 `Transform` and `Transform2` keep the seed's f64 payload representation;
 scalar and space parameters are phantom identities. Composition checks
 nonzero middle-frame identity, inverse rejects nonfinite determinants and
