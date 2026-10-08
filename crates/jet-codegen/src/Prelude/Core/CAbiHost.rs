@@ -8,6 +8,19 @@ mod jet_c_abi_host {
     use crate::jet_c_abi::release;
     use crate::jet_std::{IOContext, IOError, IOOperation, ProcessResourceLimit};
 
+    pub(crate) const HOST_IO_KIND_INVALID_INPUT: i64 = 0;
+    pub(crate) const HOST_IO_KIND_NOT_FOUND: i64 = 1;
+    pub(crate) const HOST_IO_KIND_PERMISSION_DENIED: i64 = 2;
+    pub(crate) const HOST_IO_KIND_TIMED_OUT: i64 = 3;
+    pub(crate) const HOST_IO_KIND_CANCELLED: i64 = 4;
+    pub(crate) const HOST_IO_KIND_CLOSED: i64 = 5;
+    pub(crate) const HOST_IO_KIND_PROTOCOL: i64 = 6;
+    pub(crate) const HOST_IO_KIND_OTHER: i64 = 7;
+    pub(crate) const HOST_IO_KIND_RESOURCE_LIMIT: i64 = 8;
+    pub(crate) const HOST_IO_KIND_ALREADY_EXISTS: i64 = 9;
+    pub(crate) const HOST_IO_KIND_UNSUPPORTED: i64 = 10;
+    pub(crate) const HOST_IO_KIND_COUNT: i64 = 11;
+
     #[repr(C)]
     pub(crate) struct JetCIOError {
         pub(crate) kind: i64,
@@ -53,6 +66,8 @@ mod jet_c_abi_host {
                 ProcessResourceLimit::OpenFiles => 3,
                 ProcessResourceLimit::Output => 4,
             }),
+            IOError::AlreadyExists(context) => (9, Some(context), 0),
+            IOError::Unsupported(context) => (10, Some(context), 0),
         };
         let (operation, resource, has_os_code, os_code, cause) = if let Some(context) = context {
             let operation = match context.operation {
@@ -111,6 +126,8 @@ mod jet_c_abi_host {
             5 => IOError::Closed(context),
             6 => IOError::Protocol(context),
             7 => IOError::Other(context),
+            9 => IOError::AlreadyExists(context),
+            10 => IOError::Unsupported(context),
             _ => panic!("invalid IOError C carrier"),
         }
     }

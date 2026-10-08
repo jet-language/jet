@@ -61,6 +61,9 @@ mod jet_c_abi_host {
     use crate::jet_c_abi::release;
     use crate::jet_std::{IOContext, IOError, IOOperation, ProcessResourceLimit};
 
+${kinds.map((kind, index) => `    pub(crate) const HOST_IO_KIND_${kind.replace(/([a-z])([A-Z])/g, "$1_$2").toUpperCase()}: i64 = ${index};`).join("\n")}
+    pub(crate) const HOST_IO_KIND_COUNT: i64 = ${kinds.length};
+
     #[repr(C)]
     pub(crate) struct JetCIOError {
         pub(crate) kind: i64,

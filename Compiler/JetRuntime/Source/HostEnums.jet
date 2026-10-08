@@ -9,7 +9,9 @@ HOST_IO_KIND_CLOSED :: prep { I64{5} }
 HOST_IO_KIND_PROTOCOL :: prep { I64{6} }
 HOST_IO_KIND_OTHER :: prep { I64{7} }
 HOST_IO_KIND_RESOURCE_LIMIT :: prep { I64{8} }
-HOST_IO_KIND_COUNT :: prep { I64{9} }
+HOST_IO_KIND_ALREADY_EXISTS :: prep { I64{9} }
+HOST_IO_KIND_UNSUPPORTED :: prep { I64{10} }
+HOST_IO_KIND_COUNT :: prep { I64{11} }
 HOST_IO_OP_READ :: prep { I64{0} }
 HOST_IO_OP_WRITE :: prep { I64{1} }
 HOST_IO_OP_FLUSH :: prep { I64{2} }
@@ -142,3 +144,9 @@ fn host_write_zero_text() -> I64 {
 
 #Export(c) fn jet_rt_record_get_IOError_Other(error: I64) -> I64 { host_error_context(error, HOST_IO_KIND_OTHER) }
 #Export(c) fn jet_rt_record_new_IOError_Other(context: I64) -> I64 { host_error_with_context(context, HOST_IO_KIND_OTHER) }
+
+#Export(c) fn jet_rt_record_get_IOError_AlreadyExists(error: I64) -> I64 { host_error_context(error, HOST_IO_KIND_ALREADY_EXISTS) }
+#Export(c) fn jet_rt_record_new_IOError_AlreadyExists(context: I64) -> I64 { host_error_with_context(context, HOST_IO_KIND_ALREADY_EXISTS) }
+
+#Export(c) fn jet_rt_record_get_IOError_Unsupported(error: I64) -> I64 { host_error_context(error, HOST_IO_KIND_UNSUPPORTED) }
+#Export(c) fn jet_rt_record_new_IOError_Unsupported(context: I64) -> I64 { host_error_with_context(context, HOST_IO_KIND_UNSUPPORTED) }
