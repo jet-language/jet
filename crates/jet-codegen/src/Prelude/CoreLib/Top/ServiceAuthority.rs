@@ -3710,6 +3710,12 @@ fn jet_job_queue_publish_parts(
     }
 }
 
+// Only marshal the source-clamped milliseconds to the queue's existing raw
+// thread wait. Do not advance the controlled scheduler's clock.
+fn jet_job_queue_sleep_ms(millis: i64) {
+    std::thread::sleep(std::time::Duration::from_millis(millis as u64));
+}
+
 fn jet_job_queue_publish_transition(observation: &JetJobQueueDevtoolsTransition) {
     let duration = observation
         .duration_ms
