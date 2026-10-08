@@ -464,9 +464,10 @@ fn policy_exception_failure(manifest: PolicyManifest, path: String, candidates: 
 fn policy_test_checked_findings_and_provenance() {
     manifest :: policy_manifest()
     assert_eq(policy_validate_manifest(manifest), [String]{})
-    // Preserve all findings, including Fdogjet-1..9: their original proof rows
-    // are KNOWN-FAILING #4817 / no-subject (dogfood/jetpack deleted in 6fc6f3862).
-    // This checks metadata retention, not a passing proof for deleted subjects.
+    // Keep Fdogjet-1..9 original proofs KNOWN-FAILING #4817 / no-subject:
+    // dogfood/jetpack (1,2,5..9) was deleted in 6fc6f3862; dogfood/tower (3,4)
+    // is also absent at HEAD. This checks metadata retention, not a passing
+    // proof for either deleted subject.
     assert_eq(manifest.findings.len(), 38)
     assert_eq(manifest.producers.len(), 26)
     has_lua := false
