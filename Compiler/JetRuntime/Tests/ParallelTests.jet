@@ -16,7 +16,7 @@ fn parallel_test_require(ok: Bool) {
         message :: scheduler_text_new(I64{1})
         trap_put(sync_load(message), if (start == I64{0}) -> I64{65} else -> I64{66})
         record :: scheduler_stop_new(I64{5}, message)
-        sync_store(record + I64{48}, I64{1})
+        sync_store(record + I64{48}, if (sync_load(env + I64{24}) == I64{0}) -> I64{1} else -> I64{0})
         _ := scheduler_native_publish(record)
     }
     I64{0}
@@ -96,4 +96,24 @@ fn parallel_test_walk(env: I64, invoke: I64, length: I64, limit: I64, fails: Boo
     jet_rt_free(snapshot, I64{64}, I64{8})
     jet_rt_free(env, I64{128}, I64{8})
     I64{0}
+}
+
+#Export(c) fn jet_rt_parallel_fixture_root(invoke: I64, rendered: I64) -> I64 {
+    env :: jet_rt_alloc(I64{128}, I64{8})
+    thread_zero(env, I64{128})
+    sync_store(env, I64{193})
+    sync_store(env + I64{16}, I64{1})
+    sync_store(env + I64{24}, if (rendered == I64{0}) -> I64{1} else -> I64{0})
+    jet_rt_native_para_walk(I64{193}, I64{-1}, env, invoke)
+    // A process-edge failure must not return to the caller.
+    jet_rt_free(env, I64{128}, I64{8})
+    jet_rt_unreachable(I64{0}, I64{0})
+    I64{1}
+}
+
+// Calls the production host-fault writer with the OS's EAGAIN fact. A lane
+// able to constrain NPROC can additionally force the real thread_spawn edge.
+#Export(c) fn jet_rt_parallel_fixture_spawn_fault() -> I64 {
+    parallel_spawn_fault(I64{11})
+    I64{101}
 }

@@ -56,5 +56,19 @@ if (mode === 'assemble') {
   const result = spawnSync(join(out, 'parallel-fixture'), [], { encoding: 'utf8', timeout: 300000 });
   writeFileSync(join(out, 'run.receipt.json'), JSON.stringify({ status: result.status, signal: result.signal, error: result.error?.message ?? null, stdout: result.stdout, stderr: result.stderr }, null, 2) + '\n');
   if (result.error || result.status !== 0 || result.signal || result.stdout || result.stderr) throw Error(`parallel fixture: ${result.error?.message ?? result.status}; stderr=${result.stderr}`);
+  // Rust Core.rs:1170-1180,1223-1230 emits a rendered stop verbatim.
+  // A raw native panic uses the same active E3001 footer as errors/panic.
+  const footer = readFileSync(join(root, 'Examples/features/expected/errors/panic.err.out'), 'utf8').split('\n').slice(5).join('\n');
+  for (const [name, expected] of [
+    ['root-raw', 'Stop [E3001]: `panic: A`\n  --> <core.prelude>:0\n' + footer],
+    ['root-rendered', 'A'],
+  ]) {
+    const stopped = spawnSync(join(out, 'parallel-fixture'), [name], { encoding: 'utf8', timeout: 300000 });
+    writeFileSync(join(out, `${name}.receipt.json`), JSON.stringify({ status: stopped.status, signal: stopped.signal, error: stopped.error?.message ?? null, stdout: stopped.stdout, stderr: stopped.stderr }, null, 2) + '\n');
+    if (stopped.error || stopped.status !== 70 || stopped.signal || stopped.stdout || stopped.stderr !== expected) throw Error(`${name}: expected exact Rust/source stop bytes and exit70; actual=${JSON.stringify(stopped)}`);
+  }
+  const fault = spawnSync(join(out, 'parallel-fixture'), ['spawn-fault'], { encoding: 'utf8', timeout: 30000 });
+  writeFileSync(join(out, 'spawn-fault.receipt.json'), JSON.stringify(fault, null, 2) + '\n');
+  if (fault.error || fault.signal || fault.status !== 101 || fault.stdout || fault.stderr !== 'failed to spawn thread: Os { code: 11, ... }\n') throw Error('spawn failure: wrong host-fault class or observed Rust prefix/code');
   console.log('parallel walk: empty, serial limit, tail chunk, joined failures and allocator-class balance passed');
 }

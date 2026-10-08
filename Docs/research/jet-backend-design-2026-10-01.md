@@ -1567,6 +1567,16 @@ without the scheduler pool's environment override. `ParallelTests.jet` and
 `run-parallel-fixtures.mjs` exercise empty/serial/tail walks, joined multiple
 failures, stop-form preservation and allocator-class balance when run against
 the freshly composed runtime; source parsing alone is not behavioral proof.
+The process-edge fixtures also require verbatim rendered bytes or the active
+raw E3001 report and exit 70 (`Core.rs:1170-1180,1223-1230`).
+Thread creation failure is a host fault after all started workers join and
+descriptors are freed, never a scheduler stop: Rust `Scope::spawn` calls
+`spawn_scoped(...).expect("failed to spawn thread")`
+([std/thread/scoped.rs](https://doc.rust-lang.org/src/std/thread/scoped.rs.html#206)),
+and `CAbi.rs:91-98` assigns the uncaught payload exit 101. The native writer
+retains that observable prefix and errno through the shared host-fault writer.
+It intentionally does not fabricate missing Rust `io::Error` Debug kind or
+strerror wording; that portion remains absent in the unit-1 facts.
 The last census List route, `jet_list_para_fold_add_fixed_f64`, is implemented
 in `IterNumeric.jet` with the existing `(Float slots, length, seed)` C ABI.
 It preserves 64-element indexed chunks, the seed in lane zero of every chunk,

@@ -47,6 +47,23 @@ fn parallel_limit(limit: I64, cap: I64) -> I64 {
     I64{0}
 }
 
+// Rust std/thread/scoped.rs Scope::spawn calls spawn_scoped(...).expect(
+// "failed to spawn thread"); scope joins every started worker before unwind.
+// CAbi.rs:91-98 classifies that host payload as exit101, not a task stop.
+// GAP: unit1 has no io::Error Debug-kind/strerror tables. Preserve the exact
+// observable prefix/code; do not invent Rust or musl error-message wording.
+fn parallel_spawn_fault(errno: I64) {
+    trap_flush_stdout()
+    trap_write_word(I64{8367798494427701606}, I64{8})
+    trap_write_word(I64{2336936517033992303}, I64{8})
+    trap_write_word(I64{2322278927339513972}, I64{8})
+    trap_write_word(I64{7237112117363503951}, I64{8})
+    trap_write_word(I64{2112101}, I64{3})
+    trap_number(errno)
+    trap_write_word(I64{35219754804191276}, I64{7})
+    trap_host_fault(I64{0}, I64{0})
+}
+
 fn parallel_raise(record: I64) {
     if (record == I64{0}) {
         return
@@ -59,6 +76,8 @@ fn parallel_raise(record: I64) {
     }
     // The process edge has no parent control. Replay the captured diagnostic,
     // not a replacement panic; the owned stop is released before process exit.
+    // Core.rs:1170-1180,1223-1230 writes a rendered stop verbatim and exits70.
+    // Raw native E3001 bytes use the active errors/panic.err.out report row.
     message :: scheduler_stop_take_message(record)
     form :: sync_load(record + I64{48})
     scheduler_stop_drop(record)
@@ -69,6 +88,7 @@ fn parallel_raise(record: I64) {
         jet_rt_string_drop(message)
         trap_footer(I64{0})
     } else {
+        trap_flush_stdout()
         trap_write_handle(message)
         jet_rt_string_drop(message)
         trap_exit(I64{70})
@@ -90,7 +110,7 @@ fn parallel_raise(record: I64) {
     thread_zero(workers, bytes)
     at := I64{0}
     started := I64{0}
-    spawn_failed := false
+    spawn_errno := I64{0}
     loop at < count {
         worker :: workers + at * I64{112}
         sync_store(worker, length)
@@ -103,7 +123,7 @@ fn parallel_raise(record: I64) {
         if (count == I64{1}) { _ := jet_rt_native_para_worker(worker) } else {
             handle :: thread_spawn(rt_parallel_worker_address(), worker)
             if (handle < I64{0}) {
-                spawn_failed = true
+                spawn_errno = -handle
                 break
             }
             sync_store(worker + I64{64}, handle)
@@ -134,9 +154,9 @@ fn parallel_raise(record: I64) {
         at += I64{1}
     }
     jet_rt_free(workers, bytes, I64{8})
-    if spawn_failed {
+    if (spawn_errno != I64{0}) {
         scheduler_stop_drop(first)
-        scheduler_fatal(scheduler_msg_start_failed())
+        parallel_spawn_fault(spawn_errno)
         return
     }
     parallel_raise(first)
