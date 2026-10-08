@@ -763,6 +763,7 @@ fn sema_checked_foreign_nominal_type(graph: SemaRegistrationGraph, nominal: Sema
     next_seen := seen
     &next_seen.push(key)
     if nominal.source == {
+        .CompilerBuiltinTrait(_) -> false
         .ForeignHandle(facts) -> c_abi && sema_checked_foreign_handle_source_matches(handles, facts)
         .SourceAST(item) -> if item == {
             .Struct(definition) -> {
@@ -870,7 +871,7 @@ fn sema_checked_foreign_bridge_handle_type(graph: SemaRegistrationGraph, module_
     if nominal.kind != SemaRegistrationNominalKind.ForeignHandle -> return false
     if nominal.source == {
         .ForeignHandle(facts) -> sema_checked_foreign_handle_source_matches(handles, facts)
-        .SourceAST(_) -> false
+        .SourceAST(_) | .CompilerBuiltinTrait(_) -> false
     }
 }
 
@@ -1328,7 +1329,7 @@ fn sema_checked_foreign_handle_key_for_type(graph: SemaRegistrationGraph, module
     nominal :: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
     if nominal.source == {
         .ForeignHandle(facts) -> if sema_checked_foreign_handle_source_matches(provider.handles, facts) -> Val("c::{provider.module_library}::{facts.jet_name}") else -> None
-        .SourceAST(_) -> None
+        .SourceAST(_) | .CompilerBuiltinTrait(_) -> None
     }
 }
 
