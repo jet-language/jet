@@ -145,8 +145,22 @@ static void zones(void) {
     watch_zone(a); jet_rt_handle_drop_JetZone(a); done();
     text_is(owned,"\xcf\x80\n"); watch_text(owned); jet_rt_string_drop(owned); done(); check_texts(s,d,g,"\xcf\x80\n");
 }
-int main(void) {
-    jet_rt_alloc_init(); equality(); zones();
+int main(int argc,char **argv) {
+    jet_rt_alloc_init();
+    if(argc==2) {
+        Zoned *z=zoned(0,0,0,"Bad",0);
+        if(strcmp(argv[1],"empty-infos")==0) {
+            z->zone->infos->length=0;
+        } else {
+            assert(strcmp(argv[1],"info-index-equals-length")==0 || strcmp(argv[1],"negative-info-index")==0);
+            Pair transition={0,strcmp(argv[1],"negative-info-index")==0 ? UINT64_MAX : 1};
+            watch_rows(z->zone->transitions); __wrap_jet_rt_free(z->zone->transitions,24,8); done();
+            z->zone->transitions=rows(&transition,1,0);
+        }
+        (void)jet_rt_handle_show_JetZonedDateTime(z);
+        assert(!"invalid zone-info index unexpectedly returned"); return 1;
+    }
+    assert(argc==1); equality(); zones();
     date_render(INT64_MIN,0,0,"-292277022657-01-27 08:29:52 UTC");
     date_render(INT64_MAX,0,0,"292277026596-12-04 15:30:07 UTC");
     date_render(-62167219200LL,0,0,"0000-01-01 00:00:00 UTC");

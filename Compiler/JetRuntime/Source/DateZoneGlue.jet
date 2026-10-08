@@ -7,6 +7,7 @@ fn datetime_nanos(value: I64) -> I64 { time_glue_word(value + DATETIME_NANOS) & 
     time_glue_store(result + DATETIME_LEAP, if datetime_leap(value) -> I64{1} else -> I64{0})
     result
 }
+// time_glue_drop (TimeGlue14-16) already guards null, like Zone/Zoned drop.
 #Export(c) fn jet_rt_handle_drop_JetDateTime(value: I64) { time_glue_drop(value, DATETIME_BYTES) }
 #Export(c) fn jet_rt_handle_eq_JetDateTime(left: I64, right: I64) -> Bool {
     // Time729-733 deliberately compares leap before nanos.
@@ -172,6 +173,9 @@ fn zone_offset(value: I64, seconds: I64) -> I64 {
     }
     index :: if (low == I64{0}) -> I64{0} else -> time_glue_word(data + (low - I64{1}) * ZONE_ROW_BYTES + ZONE_ROW_INDEX_OR_DST)
     infos :: time_glue_word(value + ZONE_INFOS)
+    // Time1318/1335 index the Vec, including empty/out-of-range failures.
+    length :: time_glue_word(infos + DATA_SEQUENCE_LENGTH)
+    if (index < I64{0} || index >= length) -> rt_seq_index_oob_stop(length, index)
     return time_glue_word(time_glue_word(infos + DATA_SEQUENCE_DATA) + index * ZONE_ROW_BYTES + ZONE_ROW_VALUE)
 }
 #Export(c) fn jet_rt_handle_show_JetZonedDateTime(value: I64) -> I64 {

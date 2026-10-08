@@ -2270,3 +2270,10 @@ asserts interception/exact-once recursive frees, every equality field,
 borrowed field identities, normalized padding and deep-clone survival.
 Native execution and MIR/caller/layout admission remain unexercised;
 oracle math comparisons and parser/C11 checks are not native parity proof.
+
+Zone info selection uses the shared `rt_seq_index_oob_stop` for empty or
+out-of-range info tables, matching the seed's Vec indexing at
+`Time.rs:1318,1335`. The real C client exposes `empty-infos`,
+`info-index-equals-length` and `negative-info-index` fatal modes; each
+must exit 101 with the existing sequence-OOB body (unsigned raw index).
+These native fatal modes have not yet been executed.
