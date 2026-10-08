@@ -2117,3 +2117,12 @@ seed's four spellings; a malformed native-private ordinal uses the shared
 record-variant stop rather than a provider-local panic. The real-provider
 choices witness checks all pairwise ordinal comparisons, render spellings,
 clone independence and exact-once frees, and reuses the shared stop golden.
+
+`UiKey.jet` preserves all seed key variants in a native-private tagged carrier:
+char payloads use the low u32 scalar, function keys retain raw i64, and unit
+payload storage is ignored. Show, debug and display share one renderer.
+`TextDebugChar.jet` appends Rust char Debug directly into that builder using
+the canonical TextDebug Unicode escape primitive and Trap interval table,
+with single-quote (not double-quote) short escaping. The frozen pinned Rust
+oracle covers every valid scalar; native renderer execution is a separate
+integration gate. No transient scalar text or second Unicode table is used.
