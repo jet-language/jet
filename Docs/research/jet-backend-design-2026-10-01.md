@@ -1511,3 +1511,15 @@ the globals; executable startup and an entryless `dlopen` library inspect the
 allocator root before any explicit init call, then check repeated init leaves
 it unchanged. The pack-linked `run-cabi-driver.mjs` preserves all C-ABI trap
 cases, while the Rust-tier cargo driver only calls remaining Rust-tier routes.
+
+The native Shared transaction log retains each participating cell and runs each
+edit callback once against a private working value. Nested commit transfers
+the child's stage to its parent; outer commit acquires all permits in physical
+owner order, prepares every clone and revision, then publishes all participants
+before releasing permits. The commit clone is observable and matches
+`MathTaskMem.rs`'s commit hook. Failure disposes prepared stages without
+publication. The process-wide outer gate covers begin through commit or
+rollback; generated scope/drop glue must close that authority on every exit.
+The actual-kernel clients are `JetRuntime/Tests/StmTests.jet` and
+`sync-fixture.c`, assembled separately by `run-channel-fixtures.mjs`
+(`assemble-stm`, `link-stm`, `run-stm`).
