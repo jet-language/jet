@@ -300,7 +300,7 @@ fn kit_steps_artifact(entry: String, source: String, artifact: String) -> String
     }
     name :: files.basename(entry)
     stem :: if name.ends_with(".jet") -> name.slice(0, name.len() - 4) else -> name
-    files.join(files.join(root, ".jet/build"), if artifact == "" -> stem else -> artifact)
+    files.join(files.join(root, ".jet/build"), if artifact == "" -> stem.replace(".", "_") else -> artifact)
 }
 
 fn kit_steps_execute(plan: KitPlan, id: String, env: KitEnv, work: String, scratch: String, snapshots: String, bless: KitBless) -> KitOutcome {
