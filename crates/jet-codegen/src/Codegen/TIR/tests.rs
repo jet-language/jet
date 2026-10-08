@@ -233,7 +233,7 @@ fn compiler_fact_pattern_fold_does_not_claim_user_enums() {
 /// (S57/M9.5) — are present before gating. Builds a single-module bundle the
 /// same way `lib.rs::check_for_eval` does, asserts sema accepted the program,
 /// then runs `tir_covers` on the sema-enriched function.
-fn checked_bundle(src: &str) -> crate::AST::ProgramBundle {
+pub(in crate::Codegen) fn checked_bundle(src: &str) -> crate::AST::ProgramBundle {
     let (toks, lex_diags) = crate::Lexer::lex(src);
     assert!(lex_diags.is_empty(), "lex errors: {lex_diags:?}");
     let mut prog = crate::Parser::parse(&toks).expect("parse failed");

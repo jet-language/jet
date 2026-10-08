@@ -1130,10 +1130,14 @@ fn jet_rust_emit_context(program: MIRProgram, config: JetRustEmitConfig) -> JetR
         &ctx.function_names.add(key, jet_rust_emit_generated_path(function.key)).drop("the prior lookup proved this function key is new")
     }
     native_type_keys := [String:Bool]{}
-    loop definition in ctx.program.types {
+    loop (definition_index, definition) in ctx.program.types {
         key :: jet_rust_emit_id_key(definition.id.value)
         if ctx.type_names.get(key) != None {
             jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingIdentity, "E0003", "MIR type identity is duplicated", "each nominal type must have one stable source-emission symbol", Val(definition.span))
+            return ctx
+        }
+        if ctx.type_index_by_key.get(definition.key) != Val(definition_index) {
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingIdentity, "E0003", "MIR type definition key is duplicated", "each nominal type key must identify one checked declaration", Val(definition.span))
             return ctx
         }
         // MIRRust type_name/collect_type_fields: a Prelude carrier keeps its native
