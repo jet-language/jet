@@ -521,3 +521,7 @@ HTTP Server TLS owns certificate and key PEM text independently. Construction
 clones borrowed text; cloning and both getters produce independent owners.
 These ownership helpers preserve the input bytes and do not parse credentials,
 establish a connection, or choose TLS trust policy.
+
+HTTP Cookie Jar's Memory configuration owns a single ordinal word. Cloning
+this configuration does not copy cookies; the client's policy state owns
+cookie storage separately.
