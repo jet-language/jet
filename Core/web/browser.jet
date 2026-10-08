@@ -96,17 +96,15 @@ pub struct BrowserLocked {
     size: Int
     output_hash: String
 
-    impl {
-        pub fn engine(self) -> String Never! { self.engine }
-        pub fn version(self) -> String Never! { self.version }
-        pub fn binary(self) -> String Never! { self.binary }
-        pub fn protocol(self) -> String Never! { self.protocol }
-        pub fn verify(self) -[FS]> BrowserError! {
-            if !core.web.browser.__is_file(self.binary) -> return Err(BrowserError{kind: "missing binary"})
-            size :: core.web.browser.__file_size(self.binary) ?? return Err(BrowserError{kind: "missing binary"})
-            if size != self.size -> return Err(BrowserError{kind: "size mismatch"})
-            Ok()
-        }
+    pub fn engine(self) -> String Never! { self.engine }
+    pub fn version(self) -> String Never! { self.version }
+    pub fn binary(self) -> String Never! { self.binary }
+    pub fn protocol(self) -> String Never! { self.protocol }
+    pub fn verify(self) BrowserError! -[FS]> {
+        if !core.web.browser.__is_file(self.binary) -> return Err(BrowserError{kind: "missing binary"})
+        size :: core.web.browser.__file_size(self.binary) ?? return Err(BrowserError{kind: "missing binary"})
+        if size != self.size -> return Err(BrowserError{kind: "size mismatch"})
+        Ok()
     }
 }
 
@@ -148,18 +146,16 @@ pub struct BrowserTestConfig {
     report_path: String
     source_root: String
 
-    impl {
-        pub fn engines(self) -> [String] Never! { self.engines }
-        pub fn retries(self) -> Int Never! { self.retries }
-        pub fn filter(self) -> String Never! { self.filter }
-        pub fn reporter(self) -> String Never! { self.reporter }
-        pub fn ui(self) -> Bool Never! { self.ui }
-        pub fn visual(self) -> Bool Never! { self.visual }
-        pub fn watch(self) -> Bool Never! { self.watch }
-        pub fn server_url(self) -> String Never! { self.server_url }
-        pub fn artifact_dir(self) -> String Never! { self.artifact_dir }
-        pub fn report_path(self) -> String Never! { self.report_path }
-    }
+    pub fn engines(self) -> [String] Never! { self.engines }
+    pub fn retries(self) -> Int Never! { self.retries }
+    pub fn filter(self) -> String Never! { self.filter }
+    pub fn reporter(self) -> String Never! { self.reporter }
+    pub fn ui(self) -> Bool Never! { self.ui }
+    pub fn visual(self) -> Bool Never! { self.visual }
+    pub fn watch(self) -> Bool Never! { self.watch }
+    pub fn server_url(self) -> String Never! { self.server_url }
+    pub fn artifact_dir(self) -> String Never! { self.artifact_dir }
+    pub fn report_path(self) -> String Never! { self.report_path }
 }
 
 pub struct BrowserTestCase {
@@ -191,7 +187,7 @@ pub fn profile(name: String) -> BrowserProfile BrowserError! {
     version :: if name == {
         "bidi-2025.5" -> "2025.5"
         "bidi-2024.11" -> "2024.11"
-        else -> return Err(BrowserError{kind: "invalid profile"})
+        else -> { return Err(BrowserError{kind: "invalid profile"}) }
     }
     Ok(BrowserProfile{name: name, version: version})
 }
@@ -207,7 +203,7 @@ pub fn locked(engine: String) -[FS, IO]> BrowserLocked BrowserError! {
     root :: env_value(env, "JET_PROJECT_ROOT") ?? "."
     lock_path :: core.web.browser.__path_join(root, ".jet/lock")
     raw :: core.web.browser.__read_text(lock_path) ?? return Err(BrowserError{kind: "missing lock"})
-    entry :: parse_locked(raw, engine)?
+    entry :: parse_locked(raw, engine)
     if !core.web.browser.__is_file(entry.binary) -> return Err(BrowserError{kind: "missing binary"})
     size :: core.web.browser.__file_size(entry.binary) ?? return Err(BrowserError{kind: "missing binary"})
     if size != entry.size -> return Err(BrowserError{kind: "size mismatch"})
@@ -215,7 +211,7 @@ pub fn locked(engine: String) -[FS, IO]> BrowserLocked BrowserError! {
 }
 
 pub fn connect(endpoint: String) -[Net]> Browser BrowserError! {
-    connect_profile(endpoint, profile("bidi-2025.5")?, BrowserTimeout{milliseconds: 30000})
+    connect_profile(endpoint, profile("bidi-2025.5"), BrowserTimeout{milliseconds: 30000})
 }
 
 pub fn connect_profile(endpoint: String, p: BrowserProfile, t: BrowserTimeout) -[Net]> Browser BrowserError! {
@@ -318,10 +314,10 @@ pub fn write_report(report: BrowserTestReport, path: String) BrowserError! {
         "html" -> core.web.browser.__report_html(report)
         else -> core.web.browser.__report_text(report)
     }
-    write_report_text(path, rendered)?
+    write_report_text(path, rendered)
     if options.ui || options.reporter == "html" {
         viewer :: core.web.browser.__html_path(path)
-        write_report_text(viewer, core.web.browser.__report_html(report))?
+        write_report_text(viewer, core.web.browser.__report_html(report))
     }
     Ok()
 }
@@ -450,7 +446,7 @@ fn esc_source(text: String) -> String Never! {
     assert_eq(current.name, "bidi-2025.5")
     assert_eq(current.version, "2025.5")
     assert_eq(previous.version, "2024.11")
-    loop invalid in [String]{"", "default", "BIDI-2025.5", " bidi-2025.5", "bidi-2025.5 "} {
+    loop invalid in ([String]{"", "default", "BIDI-2025.5", " bidi-2025.5", "bidi-2025.5 "}) {
         if profile(invalid) == {
             .Ok(_) -> panic("invalid profile accepted")
             .Err(error) -> assert_eq("{error}", "browser profile is not supported")
@@ -463,7 +459,7 @@ fn esc_source(text: String) -> String Never! {
     maximum :: timeout(600000) ?? panic("maximum timeout rejected")
     assert_eq(minimum.milliseconds, 1)
     assert_eq(maximum.milliseconds, 600000)
-    loop invalid in [Int]{-1, 0, 600001, 9223372036854775807} {
+    loop invalid in ([Int]{-1, 0, 600001, 9223372036854775807}) {
         if timeout(invalid) == {
             .Ok(_) -> panic("invalid timeout accepted")
             .Err(error) -> assert_eq("{error}", "browser timeout must be between 1 and 600000 milliseconds")
@@ -494,8 +490,8 @@ fn source_position(value: Int) -> Int Never! {
 fn parse_i64(value: String) -> Int? Never! {
     raw :: value.bytes()
     if raw.len() == 0 -> return None
-    negative :: raw[0] == U8{45}
-    i := if negative || raw[0] == U8{43} -> 1 else -> 0
+    negative :: raw[0] == (U8{45})
+    i := if negative || raw[0] == (U8{43}) -> 1 else -> 0
     if i == raw.len() -> return None
     limit :: if negative -> -9223372036854775808 else -> -9223372036854775807
     n := 0
@@ -551,7 +547,7 @@ fn test_engines(raw: String) -> [String] BrowserError! {
     token := [U8]{}
     bytes :: raw.bytes()
     loop i in 0..(bytes.len() + 1) {
-        separator :: i == bytes.len() || bytes[i] == U8{44} || ascii_space(bytes[i])
+        separator :: i == bytes.len() || bytes[i] == (U8{44}) || ascii_space(bytes[i])
         if !separator {
             &token.push(bytes[i])
             next
@@ -563,7 +559,7 @@ fn test_engines(raw: String) -> [String] BrowserError! {
         &requested.push(value)
     }
     engines := [String]{}
-    loop engine in [String]{"chromium", "firefox", "webkit"} {
+    loop engine in ([String]{"chromium", "firefox", "webkit"}) {
         loop value in requested {
             if value == engine {
                 &engines.push(engine)
@@ -580,9 +576,9 @@ fn split_command(raw: String) -> [String] Never! {
     value := [U8]{}
     quote := U8{0}
     loop b in raw.bytes() {
-        if quote != U8{0} {
+        if quote != (U8{0}) {
             if b == quote -> quote = U8{0} else -> &value.push(b)
-        } else if b == U8{39} || b == U8{34} {
+        } else if b == (U8{39}) || b == (U8{34}) {
             quote = b
         } else if ascii_space(b) {
             if value.len() > 0 {
@@ -599,11 +595,11 @@ fn split_command(raw: String) -> [String] Never! {
 
 fn config_from_snapshot(root: String, env: [(name: [U8], value: [U8])]) -[FS]> BrowserTestConfig BrowserError! {
     browser_text :: env_value(env, "JET_TEST_BROWSERS") ?? setting(root, env, "JET_TEST_BROWSER", "browsers") ?? "chromium"
-    engines :: test_engines(browser_text)?
+    engines :: test_engines(browser_text)
     retries :: parse_i64(setting(root, env, "JET_TEST_RETRIES", "retries") ?? "") ?? 0
     if retries < 0 || retries > 5 -> return Err(BrowserError{kind: "protocol"})
     timeout_ms :: parse_i64(setting(root, env, "JET_TEST_TIMEOUT_MS", "timeout-ms") ?? "") ?? 30000
-    validated_timeout :: timeout(timeout_ms)?
+    validated_timeout :: timeout(timeout_ms)
     reporter :: parse.lower(setting(root, env, "JET_TEST_REPORTER", "reporter") ?? "text")
     if reporter != "text" && reporter != "json" && reporter != "html" -> return Err(BrowserError{kind: "protocol"})
     artifacts :: setting(root, env, "JET_TEST_ARTIFACTS", "artifacts") ?? core.web.browser.__path_join(root, ".jet/browser-tests/artifacts")
@@ -633,8 +629,8 @@ fn parse_locked(raw: String, engine: String) -> BrowserLocked BrowserError! {
     loop raw_line in parse.split(raw, "\n") {
         line :: text.trim(raw_line)
         bytes :: line.bytes()
-        if bytes.len() == 0 || bytes[0] == U8{35} -> next
-        if bytes[0] == U8{91} {
+        if bytes.len() == 0 || bytes[0] == (U8{35}) -> next
+        if bytes[0] == (U8{91}) {
             if in_browser && current.engine == engine -> found = Val(current)
             in_browser = line == "[[browser]]"
             current = BrowserLocked{engine: "", version: "", binary: "", protocol: "", size: 0, output_hash: ""}
@@ -652,6 +648,7 @@ fn parse_locked(raw: String, engine: String) -> BrowserLocked BrowserError! {
             "protocol" -> current.protocol = value
             "size" -> current.size = parse_i64(value) ?? return Err(BrowserError{kind: "invalid lock"})
             "output-hash" -> current.output_hash = value
+            else -> {}
         }
     }
     if in_browser && current.engine == engine -> found = Val(current)
@@ -664,8 +661,8 @@ fn strip_quotes(raw: String) -> String Never! {
     bytes :: raw.bytes()
     start := 0
     end := bytes.len()
-    loop start < end && bytes[start] == U8{34} -> start += 1
-    loop end > start && bytes[end - 1] == U8{34} -> end -= 1
+    loop start < end && bytes[start] == (U8{34}) -> start += 1
+    loop end > start && bytes[end - 1] == (U8{34}) -> end -= 1
     out := [U8]{}
     loop i in start..<end -> &out.push(bytes[i])
     String.from_bytes(out) ?? ""
@@ -677,7 +674,7 @@ fn strip_quotes(raw: String) -> String Never! {
     assert_eq(parse_i64("9223372036854775808"), None)
     assert_eq(parse_i64(" 1"), None)
     assert_eq(parse_i64("+5"), Val(5))
-    assert_eq(test_engines(" WEBKIT,chromium,webkit firefox ")?, [String]{"chromium", "firefox", "webkit"})
+    assert_eq(test_engines(" WEBKIT,chromium,webkit firefox "), [String]{"chromium", "firefox", "webkit"})
     assert_eq(split_command("run '' \"a b\" 'unterminated"), [String]{"run", "a b", "unterminated"})
     assert_eq(source_position(-1), 0)
     assert_eq(source_position(4294967296), 4294967295)
@@ -685,10 +682,13 @@ fn strip_quotes(raw: String) -> String Never! {
 
 #Test("locked browser entries use last match and validate all size fields") {
     raw :: "[[browser]]\nengine=firefox\nbinary=first\nprotocol=bidi\noutput-hash=a\n[[browser]]\nengine=firefox\nbinary=\"\"last\"\"\nprotocol=bidi\noutput-hash=b\nsize=-1\n"
-    entry :: parse_locked(raw, "firefox")?
+    entry :: parse_locked(raw, "firefox")
     assert_eq(entry.binary(), "last")
     assert_eq(entry.size, -1)
-    assert(parse_locked("{raw}[[browser]]\nengine=chromium\nsize=overflow\n", "firefox") == Err(BrowserError{kind: "invalid lock"}))
+    if parse_locked("{raw}[[browser]]\nengine=chromium\nsize=overflow\n", "firefox") == {
+        .Ok(_) -> panic("invalid size accepted")
+        .Err(error) -> assert_eq(error.kind, "invalid lock")
+    }
 }
 
 fn write_report_text(path: String, rendered: String) BrowserError! {

@@ -67,16 +67,14 @@ pub struct WebTable<T> {
     pub rows: [WebTableRow<T>]
     pub state: WebTableState
 
-    impl {
-        pub fn with_column(self, col: WebTableColumn<T>) -> WebTable<T> Never! {
-            with_column<T>(&self, col)
-        }
-        pub fn paginate(self, index: Int, size: Int) -> WebTable<T> Never! {
-            paginate<T>(&self, index, size)
-        }
-        pub fn page(self) -> WebTablePage<T> String! {
-            runtime_page<T>(self)
-        }
+    pub fn with_column(self, col: WebTableColumn<T>) -> WebTable<T> Never! {
+        with_column<T>(&self, col)
+    }
+    pub fn paginate(self, index: Int, size: Int) -> WebTable<T> Never! {
+        paginate<T>(&self, index, size)
+    }
+    pub fn page(self) -> WebTablePage<T> String! {
+        runtime_page<T>(self)
     }
 }
 
@@ -560,8 +558,10 @@ fn runtime_page<T>(table: WebTable<T>) -> WebTablePage<T> String! {
         validated :: if loaded == {
             .Ok(page) -> {
                 facts :: core.web.table.__page_facts(page)
-                if facts.index != query.index || facts.size != query.size -> Err("server table page response does not match the requested boundary")
-                else -> validate_runtime_page<T>(table, page)
+                if {
+                    facts.index != query.index || facts.size != query.size -> Err("server table page response does not match the requested boundary")
+                    else -> validate_runtime_page<T>(table, page)
+                }
             }
             .Err(error) -> Err(error)
         }
@@ -573,7 +573,7 @@ fn runtime_page<T>(table: WebTable<T>) -> WebTablePage<T> String! {
                 // WebTable.rs:296-311: cross-page collision is distinct from
                 // per-page validation; decide it in Jet while the raw gate
                 // lends each existing page's keys under one lock.
-                accepted :: core.web.table.__commit_keys(table, page, fn(other_page: Int, other_keys: [String]) String! {
+                accepted :: core.web.table.__commit_keys(table, page, (other_page: Int, other_keys: [String]) -> {
                     if other_page != query.index {
                         loop key in other_keys {
                             if keys.get(key) != None -> return Err("server table response duplicates a row key across pages")
@@ -648,7 +648,7 @@ fn validate_runtime_page<T>(table: WebTable<T>, page: WebTablePage<T>) -> (page:
     }
     keys :: core.web.table.__page_keys(canonical)
     if keys.len() != facts.rows -> return Err("server table row_keys must align with rows")
-    seen :: validate_runtime_keys(keys)?
+    seen :: validate_runtime_keys(keys)
     Ok((page: canonical, keys: seen))
 }
 
@@ -691,11 +691,11 @@ fn materialize_runtime_page<T>(table: WebTable<T>, state: WebTableState) -> WebT
         key :: if has_key -> core.web.table.__row_key(table, rows[i]) else -> "index:{i}"
         &keys.push(key)
     }
-    validate_runtime_keys(keys)?
+    _ :: validate_runtime_keys(keys)
     query :: core.web.table.__query_facts(state)
     order := [Int]{}
     if query.filter == Val(filter) {
-        column :: runtime_column<T>(columns, filter.column, "filter")?
+        column :: runtime_column<T>(columns, filter.column, "filter")
         loop i in 0..<rows.len() {
             if core.text.parse.contains(core.web.table.__cell(column, rows[i]), filter.value) -> &order.push(i)
         }
@@ -703,7 +703,7 @@ fn materialize_runtime_page<T>(table: WebTable<T>, state: WebTableState) -> WebT
         loop i in 0..<rows.len() -> &order.push(i)
     }
     if query.sort == Val(sort) {
-        column :: runtime_column<T>(columns, sort.column, "sort")?
+        column :: runtime_column<T>(columns, sort.column, "sort")
         stable_runtime_order<T>(&order, rows, column, sort.descending)
     }
     // WebTable.rs:1616-1657: clamp the page to its computed last boundary.
@@ -779,6 +779,9 @@ fn table_sat_mul(a: Int, b: Int) -> Int Never! {
 #Test("runtime table validation reports shipped key failures") {
     assert(!runtime_key_valid(""))
     assert(runtime_key_valid("λ"))
-    assert(validate_runtime_keys([String]{"same", "same"}) == Err("table row key `same` is duplicated"))
+    if validate_runtime_keys([String]{"same", "same"}) == {
+        .Ok(_) -> panic("duplicate key accepted")
+        .Err(error) -> assert_eq(error, "table row key `same` is duplicated")
+    }
     assert_eq(table_sat_mul(9223372036854775807, 10000), 9223372036854775807)
 }
