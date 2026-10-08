@@ -148,6 +148,118 @@ fn authority_hex_digit(value: Int) -> Int? Never! {
     None
 }
 
+// ServiceAuthority::service_authority_validate_endpoint / authority_validate:
+// keep input checks and all authoritative fallback/status decisions in source.
+pub fn __authority_validate(endpoint: ServiceEndpoint) ServiceError! {
+    #Unsafe("one existing registry read snapshots exact and candidate facts; no second authority or resource carrier") {
+        identity :: core.service.__endpoint_identity_parts(endpoint)
+        if validate_endpoint_identity(identity.authority, identity.tree, identity.worker, identity.generation) == {
+            .Err(error) -> return Err(error)
+            .Ok(_) -> {}
+        }
+        snapshot :: if core.service.__endpoint_validation_snapshot(endpoint) == {
+            .Ok(value) -> value
+            .Err(error) -> {
+                return Err(error)
+            }
+        }
+        return authority_validate_snapshot(identity, snapshot.exact, snapshot.candidates)
+    }
+}
+
+// Exact policy order from ServiceAuthority::jet_services_authority_validate:
+// missing-key identity fallback, newer unpartitioned fallback; for an exact
+// row, tree/worker mismatch, partition, generation, then stopped/newer-started.
+fn authority_validate_snapshot(identity: (authority: String, tree: String, worker: String, generation: Int), exact: (authority: String, tree: String, worker: String, generation: Int, started: Bool, draining: Bool, partitioned: Bool)?, candidates: [(authority: String, tree: String, worker: String, generation: Int, started: Bool, draining: Bool, partitioned: Bool)]) ServiceError! {
+    if exact == {
+        .None -> {
+            loop candidate in candidates {
+                if candidate.tree == identity.tree && candidate.worker == identity.worker && candidate.generation == identity.generation {
+                    return Err(ServiceError.Revoked("service endpoint authority does not match the registered worker"))
+                }
+            }
+            loop candidate in candidates {
+                if candidate.tree == identity.tree && candidate.worker == identity.worker && candidate.authority == identity.authority && candidate.generation > identity.generation && !candidate.partitioned {
+                    return Err(ServiceError.Stale("service endpoint generation {identity.generation} is no longer current"))
+                }
+            }
+            return Err(ServiceError.Partitioned("service endpoint authority is not registered"))
+        }
+        .Val(state) -> {
+            if state.tree != identity.tree -> return Err(ServiceError.Revoked("service endpoint belongs to another tree"))
+            if state.worker != identity.worker -> return Err(ServiceError.Revoked("service endpoint belongs to another worker"))
+            if state.partitioned -> return Err(ServiceError.Partitioned("service endpoint authority is partitioned"))
+            if state.generation != identity.generation {
+                return Err(ServiceError.Stale("service endpoint generation {identity.generation} is not current (current generation {state.generation})"))
+            }
+            if !state.started && !state.draining {
+                loop candidate in candidates {
+                    if candidate.tree == identity.tree && candidate.worker == identity.worker && candidate.authority == identity.authority && candidate.generation > identity.generation && candidate.started && !candidate.partitioned {
+                        return Err(ServiceError.Stale("service endpoint generation {identity.generation} is no longer current"))
+                    }
+                }
+                return Err(ServiceError.NotStarted("service worker `{identity.worker}` is not running"))
+            }
+            return Ok()
+        }
+    }
+}
+
+#Test("endpoint snapshot preserves mismatch partition stale and stopped priorities") {
+    token :: "sa-000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    identity :: (authority: token, tree: "tree", worker: "worker", generation: 2)
+    empty :: [(authority: String, tree: String, worker: String, generation: Int, started: Bool, draining: Bool, partitioned: Bool)]{}
+    wrong_tree :: (authority: token, tree: "other", worker: "worker", generation: 1, started: false, draining: false, partitioned: true)
+    wrong_worker :: (authority: token, tree: "tree", worker: "other", generation: 1, started: false, draining: false, partitioned: true)
+    partitioned :: (authority: token, tree: "tree", worker: "worker", generation: 1, started: false, draining: false, partitioned: true)
+    stale :: (authority: token, tree: "tree", worker: "worker", generation: 1, started: false, draining: false, partitioned: false)
+    stopped :: (authority: token, tree: "tree", worker: "worker", generation: 2, started: false, draining: false, partitioned: false)
+    assert(if authority_validate_snapshot(identity, Val(wrong_tree), empty) == {.Err(.Revoked(message)) -> message == "service endpoint belongs to another tree" else -> false})
+    assert(if authority_validate_snapshot(identity, Val(wrong_worker), empty) == {.Err(.Revoked(message)) -> message == "service endpoint belongs to another worker" else -> false})
+    assert(if authority_validate_snapshot(identity, Val(partitioned), empty) == {.Err(.Partitioned(message)) -> message == "service endpoint authority is partitioned" else -> false})
+    assert(if authority_validate_snapshot(identity, Val(stale), empty) == {.Err(.Stale(message)) -> message == "service endpoint generation 2 is not current (current generation 1)" else -> false})
+    assert(if authority_validate_snapshot(identity, Val(stopped), empty) == {.Err(.NotStarted(message)) -> message == "service worker `worker` is not running" else -> false})
+    newer :: (authority: token, tree: "tree", worker: "worker", generation: 3, started: true, draining: false, partitioned: false)
+    peers := [(authority: String, tree: String, worker: String, generation: Int, started: Bool, draining: Bool, partitioned: Bool)]{}
+    &peers.push(newer)
+    assert(if authority_validate_snapshot(identity, Val(stopped), peers) == {.Err(.Stale(message)) -> message == "service endpoint generation 2 is no longer current" else -> false})
+    assert(if authority_validate_snapshot(identity, None, empty) == {.Err(.Partitioned(message)) -> message == "service endpoint authority is not registered" else -> false})
+    assert(if authority_validate_snapshot(identity, None, peers) == {.Err(.Stale(message)) -> message == "service endpoint generation 2 is no longer current" else -> false})
+    other_authority :: (authority: "sa-ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", tree: "tree", worker: "worker", generation: 2, started: false, draining: false, partitioned: false)
+    &peers.push(other_authority)
+    assert(if authority_validate_snapshot(identity, None, peers) == {.Err(.Revoked(message)) -> message == "service endpoint authority does not match the registered worker" else -> false})
+}
+
+fn validate_endpoint_identity(authority: String, tree: String, worker: String, generation: Int) ServiceError! {
+    if !valid_service_text(tree, 256) -> return Err(ServiceError.Policy("service tree is empty, too long, or contains control characters"))
+    if !valid_service_text(worker, 256) -> return Err(ServiceError.Policy("service worker is empty, too long, or contains control characters"))
+    if !valid_authority_token(authority) -> return Err(ServiceError.Policy("service authority must be a provider-issued opaque token"))
+    if __authority_signing_key(authority) == {
+        .Err(error) -> return Err(error)
+        .Ok(_) -> {}
+    }
+    if generation < 1 -> return Err(ServiceError.Policy("service endpoint generation must be positive"))
+}
+
+fn valid_authority_token(authority: String) -> Bool Never! {
+    raw :: authority.bytes()
+    if raw.len() != 67 || !authority.starts_with("sa-") -> return false
+    loop i in 3..<67 {
+        value :: Int.from_u8(raw[i])
+        if !((value >= 48 && value <= 57) || (value >= 97 && value <= 102)) -> return false
+    }
+    true
+}
+
+#Test("endpoint identity checks preserve native order and lowercase issuance") {
+    token :: "sa-000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    assert(if validate_endpoint_identity(token, " ", "worker", 1) == {.Ok(_) -> true else -> false})
+    assert(if validate_endpoint_identity("bad", "", "", 0) == {.Err(.Policy(message)) -> message == "service tree is empty, too long, or contains control characters" else -> false})
+    assert(if validate_endpoint_identity(token, "tree", "", 0) == {.Err(.Policy(message)) -> message == "service worker is empty, too long, or contains control characters" else -> false})
+    assert(if validate_endpoint_identity("sa-000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F", "tree", "worker", 1) == {.Err(.Policy(message)) -> message == "service authority must be a provider-issued opaque token" else -> false})
+    assert(if validate_endpoint_identity(token, "tree", "worker", 0) == {.Err(.Policy(message)) -> message == "service endpoint generation must be positive" else -> false})
+}
+
 pub fn endpoint_show(endpoint: ServiceEndpoint) -> String Never! {
     #Unsafe("read the existing endpoint's tree, worker and generation fields") {
         parts :: core.service.__endpoint_parts(endpoint)
@@ -234,7 +346,12 @@ fn valid_service_text(text: String, limit: Int) -> Bool Never! {
 pub fn restore_snapshot(tree: ServiceTree) -> String ServiceError! {
     #Unsafe("Services4437: authority lookup, durable load, first record, then checked framing") {
         authority :: core.service.__tree_state_authority(tree) ?? return Err(ServiceError.Policy("Snapshot state has no injected authority"))
-        records :: core.service.__state_load(tree, false)
+        records :: if core.service.__state_load(tree, false) == {
+            .Ok(value) -> value
+            .Err(error) -> {
+                return Err(error)
+            }
+        }
         if records.len() == 0 -> return Err(ServiceError.Policy("no snapshot committed"))
         return read_state_record("v{authority.version}:", records[0])
     }
@@ -309,7 +426,12 @@ pub fn tree_show(tree: ServiceTree) -> String Never! {
 
 pub fn workflow_history(tree: ServiceTree, run_id: Int) -> String ServiceError! {
     #Unsafe("Services5867: durable replay before lookup; first matching run wins") {
-        workflows :: core.service.__workflow_replay_parts(tree)
+        workflows :: if core.service.__workflow_replay_parts(tree) == {
+            .Ok(value) -> value
+            .Err(error) -> {
+                return Err(error)
+            }
+        }
         loop workflow in workflows {
             if workflow.run_id == run_id -> return workflow.history.join("|")
         }
@@ -319,7 +441,12 @@ pub fn workflow_history(tree: ServiceTree, run_id: Int) -> String ServiceError! 
 
 pub fn workflow_outcome(tree: ServiceTree, run_id: Int) -> TaskOutcome ServiceError! {
     #Unsafe("Services5879: durable replay before lookup; missing or nonterminal run is Policy") {
-        workflows :: core.service.__workflow_replay_parts(tree)
+        workflows :: if core.service.__workflow_replay_parts(tree) == {
+            .Ok(value) -> value
+            .Err(error) -> {
+                return Err(error)
+            }
+        }
         loop workflow in workflows {
             if workflow.run_id == run_id {
                 return workflow.outcome ?? return Err(ServiceError.Policy("workflow run {run_id} has no recorded terminal outcome"))

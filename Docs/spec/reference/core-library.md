@@ -3735,6 +3735,10 @@ The signing key remains the exact 32 bytes decoded from the current `sa-`
 authority token; this port adds no key cache or security-policy change.
 The Core-internal `__authority_signing_key` shares that one decoder with jobs;
 it is source policy, not a second host signer or an additional authority store.
+Endpoint input and authority-status validation also live in that module.
+The reserved `__authority_validate` preserves native check order, including
+partition-before-generation for an exact registry entry, and reads one
+consistent snapshot of the existing endpoint registry for its fallback scans.
 
 Snapshot/event-log selection, replay framing, topology/observation text, and
 workflow history/outcome selection are Jet policies. Durable reads retain the

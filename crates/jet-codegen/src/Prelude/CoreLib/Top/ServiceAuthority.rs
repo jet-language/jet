@@ -342,6 +342,32 @@ fn jet_services_raw_endpoint_authority_parts(endpoint: &JetServiceEndpoint)
         state.started, state.draining, state.partitioned))
 }
 
+// These transports only project current storage. The source validator makes
+// every status/fallback decision from the same one-lock read, without a new
+// registry, cache, resource identity, or authority lifetime.
+type JetServiceEndpointFacts = (
+    String, String, String, jet_foundation::Numeric::JetInt, bool, bool, bool,
+);
+fn jet_services_raw_endpoint_identity_parts(endpoint: &JetServiceEndpoint)
+    -> (String, String, String, jet_foundation::Numeric::JetInt)
+{
+    (endpoint.authority.clone(), endpoint.tree.clone(), endpoint.worker.clone(),
+        jet_std::jet_int_owned_from_i64(endpoint.generation))
+}
+fn jet_services_raw_endpoint_validation_snapshot(endpoint: &JetServiceEndpoint)
+    -> Result<(Option<JetServiceEndpointFacts>, Vec<JetServiceEndpointFacts>), JetServiceError>
+{
+    let key = service_endpoint_key(&endpoint.authority, &endpoint.worker, endpoint.generation);
+    let registry = service_endpoint_registry().lock()
+        .map_err(|_| service_authority_error("service endpoint registry lock is poisoned"))?;
+    let fields = |state: &ServiceAuthorityEndpointState| (
+        state.authority.clone(), state.tree.clone(), state.worker.clone(),
+        jet_std::jet_int_owned_from_i64(state.generation),
+        state.started, state.draining, state.partitioned,
+    );
+    Ok((registry.get(&key).map(fields), registry.values().map(fields).collect()))
+}
+
 fn service_authority_require_issued(authority: &str) -> Result<(), JetServiceError> {
     // Issuance is recorded by the one endpoint authority registry. Do not
     // maintain a second process-local rights table for directory proofs.
