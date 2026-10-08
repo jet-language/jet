@@ -1758,6 +1758,29 @@ pub(super) fn lower_expr(
             func,
             args,
         } => {
+            if let Some(function) = ctx.precise_source_target(type_name, func)? {
+                let args = args.iter()
+                    .map(|argument| ctx.lower_plain_arg(argument))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let returned = ctx.function_registry.call_return_type_for(function, &[])
+                    .map_err(|message| ctx.error(ctx.span(), message))?;
+                let call_type = returned.as_ref().cloned().unwrap_or_else(|| expr.ty.clone());
+                let value = ctx.emit(
+                    "precise-source-call",
+                    Some(call_type),
+                    MirOperation::Call {
+                        callee: MirCallee::User(function),
+                        args,
+                        type_args: Vec::new(),
+                    },
+                )?;
+                if let Some(returned) = returned {
+                    if super::is_plain_call_return(&returned, &expr.ty) {
+                        return ctx.reconcile_plain_call_return(expr, value, &returned);
+                    }
+                }
+                return Ok(value);
+            }
             let args = lower_values(ctx, args)?;
             let type_id = ctx.nominal_type_id(type_name)?;
             let call = ctx.intern_prelude_route(super::precise_builtin_route(

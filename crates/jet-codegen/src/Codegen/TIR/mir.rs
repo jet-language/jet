@@ -4689,6 +4689,13 @@ const BUILTIN_TASK_GROUP_IDENTITY_KEY: &str = "builtin:task-group";
 /// the leaf (`core.files.path`'s `Path`) is a different type and never claims
 /// the bare spelling. Every other name may match by leaf.
 fn row_claims_bare_name(row: &MirTypeDef, name: &str) -> bool {
+    if matches!(name, "Fraction" | "Decimal" | "Complex")
+        && jet_foundation::CoreModuleExports::core_source_owns_type(&row.key)
+    {
+        return jet_foundation::CoreModuleExports::core_source_module("core.math")
+            .is_some_and(|source| row.name == name
+                && row.key.ends_with(&format!("{}::{name}", source.path)));
+    }
     let Some(kind) = crate::Syntax::typed_head_kind(name) else {
         return true;
     };
@@ -10960,6 +10967,30 @@ impl<'a> LowerCtx<'a> {
     }
     pub(super) fn resolve_function_id(&self, name: &str) -> Result<MirFunctionId, LowerError> {
         self.function_id_for(name)
+    }
+
+    pub(super) fn precise_source_target(
+        &self,
+        owner: &str,
+        operation: &str,
+    ) -> Result<Option<MirFunctionId>, LowerError> {
+        let Some(helper) = super::precise_source_helper(owner, operation) else {
+            return Ok(None);
+        };
+        let Some(source) = jet_foundation::CoreModuleExports::core_source_module("core.math") else {
+            return Ok(None);
+        };
+        let Some(module) = self.modules.iter().find(|module| module.path == source.path) else {
+            return Ok(None);
+        };
+        let owned = self.type_defs.iter().any(|definition| {
+            definition.name == owner && definition.key == format!("{}::{owner}", module.key)
+                && jet_foundation::CoreModuleExports::core_source_owns_type(&definition.key)
+        });
+        if !owned {
+            return Ok(None);
+        }
+        self.function_id_for(&format!("{}::{helper}", module.key)).map(Some)
     }
 
     pub(super) fn lower_pattern(
