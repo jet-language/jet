@@ -395,13 +395,13 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
         if lowered_entry == None -> lowered_entry = Val(lowered)
     }
     if test_serial != None -> lowered_entry = Val(lower_helper_id(&m, "test.main", lower_test_unit_type()))
-    // Drain concrete glue first. Nested payloads and closure thunks may add
-    // trait keys; deferred dispatchers must see the final inventory.
+    // Concrete trait keys are registered while lowering MIR bodies. Helpers
+    // only refer to those keys. Drain ordinary glue before emitting each
+    // deferred dispatcher once, including newly registered nested helpers.
     cursor := 0
     dispatchers := [Int]{}
-    dispatcher_slots := [Int]{}
     emitted := 0
-    inventory := -1
+    inventory :: lower_trait_key_count(m)
     loop {
         loop cursor < m.glue.len() {
             glue :: ~m.glue[cursor]
@@ -416,22 +416,13 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
             }
             cursor += 1
         }
-        keys :: lower_trait_key_count(m)
-        start :: if inventory == keys -> emitted else -> 0
-        loop index in start..dispatchers.len() {
-            glue :: ~m.glue[dispatchers[index]]
-            function :: if glue.helper != "" -> lower_helper_function(program, &m, glue) else if glue.clone -> lower_clone_glue_function(program, &m, glue) else -> lower_glue_function(program, &m, glue)
-            if index < emitted {
-                functions[dispatcher_slots[index]] = function
-            } else {
-                &dispatcher_slots.push(functions.len())
-                &functions.push(function)
-            }
-        }
-        emitted = dispatchers.len()
-        inventory = keys
-        if cursor == m.glue.len() && inventory == lower_trait_key_count(m) -> break
+        if emitted == dispatchers.len() -> break
+        glue :: ~m.glue[dispatchers[emitted]]
+        function :: if glue.helper != "" -> lower_helper_function(program, &m, glue) else if glue.clone -> lower_clone_glue_function(program, &m, glue) else -> lower_glue_function(program, &m, glue)
+        &functions.push(function)
+        emitted += 1
     }
+    if inventory != lower_trait_key_count(m) -> &m.issues.push(LIRLoweringIssue{function: "trait dispatch", message: "trait key inventory grew after dispatch emission"})
     lowered :: LIRModule{signatures: ~m.signatures, functions: functions, data: ~m.data}
     issues := ~m.issues
     if issues.len() == 0 {
