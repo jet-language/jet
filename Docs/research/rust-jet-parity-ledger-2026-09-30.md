@@ -341,3 +341,9 @@ a `[Rect]` list and a constructor result therefore names one declaration;
 the `imported-rect-identity` row in `core-ownership-cases.json` checks the same
 UI source in both compiler tiers. Jet's registration graph already preserves
 the nominal symbol; the seed import resolver no longer collapses it to a leaf.
+
+Core source aliases, paths, members and exported type names now have one Jet
+view in Foundation's generated `CoreSourceOwned.jet`. JetCli reads that row
+set when loading bodies; JetSema can use the same registration authority
+without depending on JetCli. The generator's `--check` covers both the shared
+ownership rows and the CLI effect-source projection.
