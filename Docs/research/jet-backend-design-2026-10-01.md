@@ -1606,3 +1606,18 @@ conversion and the compiler-image codec derive their fields from the updated
 real declarations, so their next generation includes the Boolean rather than
 defaulting a missing stream token. Schema-6 images must be regenerated; this
 seam belongs only to the post-gate compiler unit.
+
+### Physical ownership facts for exact Int
+
+The same schema 7 also carries `MIRLocal.ssa_value`, an optional association
+between a local cell and an SSA definition. Constructors initialize it absent;
+inlining remaps a present value, and canonical digests and both schema-generated
+MIR codecs retain it. It is a fact, not a second storage allocation.
+
+Exact `Int` keeps semantic `Copy` mode with physical `Value` ownership.
+Only `Copy` plus `NoDrop` can erase an implicit clone to a scalar copy;
+borrowed snapshots and last-use transfers retain their distinct MIR facts.
+The Rust mirror and Bootstrap optional-roundtrip witness preserve both
+physical ownership and absent/present SSA association. This fact tranche
+does not enable native physical cleanup or change Lower storage.
+The SSAStorage fixture is deferred to Lower consumption.

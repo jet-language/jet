@@ -27521,7 +27521,7 @@ impl<'a> RustEmitter<'a> {
                 } else {
                     MirCopyFact::Materialize
                 };
-                self.value_copy(arg.value, fact.for_ownership(self.value_ownership(arg.value).mode))
+                self.value_copy(arg.value, fact.for_ownership(&self.value_ownership(arg.value)))
             }
             MirAccess::Read => self.value_owned(arg.value),
             MirAccess::Write => self.value_borrow_mut(arg.value),

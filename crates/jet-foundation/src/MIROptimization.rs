@@ -1535,7 +1535,7 @@ fn verify_ownership(
     value: MirValueId,
 ) -> Result<(), MirLegalityError> {
     let valid = match ownership.mode {
-        MirOwnershipMode::Copy => ownership.drop == crate::MIR::MirDropKind::None && !ownership.moved,
+        MirOwnershipMode::Copy => matches!(ownership.drop, crate::MIR::MirDropKind::None | crate::MIR::MirDropKind::Value) && !ownership.moved,
         MirOwnershipMode::Owned => matches!(ownership.drop, crate::MIR::MirDropKind::Value | crate::MIR::MirDropKind::ForeignHandle),
         MirOwnershipMode::Shared => ownership.drop == crate::MIR::MirDropKind::Shared,
         MirOwnershipMode::ReadBorrow => matches!(ownership.drop, crate::MIR::MirDropKind::None | crate::MIR::MirDropKind::View),
@@ -4381,12 +4381,7 @@ fn verify_moves_and_borrows(
                         span: instruction.span,
                     });
                 };
-                if matches!(
-                    ownership.mode,
-                    MirOwnershipMode::Copy
-                        | MirOwnershipMode::ReadBorrow
-                        | MirOwnershipMode::WriteBorrow
-                ) || consumed.contains_key(&value)
+                if !ownership.is_runtime_owned() || consumed.contains_key(&value)
                 {
                     return Err(MirLegalityError::InvalidMove {
                         function: function.id,
@@ -5484,7 +5479,7 @@ fn inline_call(
                     } else {
                         MirCopyFact::Materialize
                     }
-                    .for_ownership(argument_ownership.mode),
+                    .for_ownership(&argument_ownership),
                 },
             });
             value
@@ -5677,6 +5672,7 @@ fn inline_call(
             span: local.span,
             ty: inline_type(&local.ty, &substitutions),
             place: ids.places[&local.place],
+            ssa_value: local.ssa_value.map(|value| ids.values[&value]),
             mutable: local.mutable,
             ownership: local.ownership,
             comptime: local.comptime,
@@ -8031,6 +8027,7 @@ fn normalized_local_place(
         span,
         ty: ty.clone(),
         place,
+        ssa_value: None,
         mutable: true,
         ownership: MirOwnership::copy(),
         comptime: false,
@@ -15510,6 +15507,13 @@ fn encode_local(writer: &mut CanonicalWriter, local: &crate::MIR::MirLocal) {
     writer.span(local.span);
     writer.mir_type(&local.ty);
     writer.u64(local.place.0);
+    match local.ssa_value {
+        Some(value) => {
+            writer.bool(true);
+            writer.u64(value.0);
+        }
+        None => writer.bool(false),
+    }
     writer.debug(&local.ownership);
     writer.bool(local.mutable);
     writer.bool(local.comptime);
@@ -16032,6 +16036,7 @@ mod ownership_guard_tests {
         let locals = places.iter().map(|place| MirLocal {
             id: MirLocalId(place.id.0), name: format!("local{}", place.id.0),
             span: place.span, ty: place.ty.clone(), place: place.id, mutable: true,
+            ssa_value: None,
             ownership: if place.ty.is_bool() { MirOwnership::copy() } else { MirOwnership::Owned },
             comptime: false, uninit: false, arena_view: false, string_view: false, gc_root: false,
         }).collect();
@@ -16364,6 +16369,7 @@ mod ownership_guard_tests {
             span,
             ty: ty.clone(),
             place: MirPlaceId(3),
+            ssa_value: None,
             mutable: true,
             ownership: MirOwnership::Owned,
             comptime: false,

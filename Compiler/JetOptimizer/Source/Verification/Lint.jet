@@ -38,6 +38,7 @@ use jet_foundation.[
     Span,
     mir_call_metadata_is_variadic,
     mir_operation_value_uses,
+    mir_runtime_owned_ownership,
     mir_terminator_targets,
     mir_terminator_value_uses,
     mir_type_display_name,
@@ -1782,8 +1783,8 @@ fn mir_lint_transfer(ctx: MIRLintContext, layout: MIRLintOwnership, block: MIRBa
             bit :: layout.value_bits.get(mir_lint_key(value.value)) ?? next
             if check {
                 row :: ctx.values.get(mir_lint_key(value.value)) ?? next
-                mode :: ctx.function.values[row].ownership.mode
-                if mode == .Copy || mode == .ReadBorrow || mode == .WriteBorrow -> return MIRLintStep{successors: [MIRBlockID]{}, failure: mir_lint_fail(ctx, rule, span, "value {value.value} is consumed but not owned")}
+                ownership :: ctx.function.values[row].ownership
+                if !mir_runtime_owned_ownership(ownership) -> return MIRLintStep{successors: [MIRBlockID]{}, failure: mir_lint_fail(ctx, rule, span, "value {value.value} is consumed but not owned")}
                 if mir_lint_state_has(state, bit) -> return MIRLintStep{successors: [MIRBlockID]{}, failure: mir_lint_fail(ctx, rule, span, "value {value.value} is consumed twice")}
             }
             mir_lint_state_set(&state, bit, true)
