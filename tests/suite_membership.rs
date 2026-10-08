@@ -75,10 +75,12 @@ const UNASSIGNED_CEILING: usize = 0;
 /// measurement suite whose sample count is ratified policy is the real
 /// exception, so `tests/suite_budgets.txt` exists — and this number is what
 /// keeps that exception an exception. It equals the row count today, so a
-/// SECOND exemption cannot land without moving this pin in the same reviewed
+/// THIRD exemption cannot land without moving this pin in the same reviewed
 /// diff. That friction is the feature: the goal is to speed development up, not
 /// to let the slow suites become the norm they were guarded against.
-const OVER_DEFAULT_BUDGET_CEILING: usize = 1;
+// The second named exception is authority: six isolated cold AOT plugin stores
+// plus the measured remaining witnesses cannot share one 900s suite deadline.
+const OVER_DEFAULT_BUDGET_CEILING: usize = 2;
 
 /// The targets that cannot run in any executable set, with the observed gate and
 /// the card that owes the fix. Sorted, and compared EXACTLY against the

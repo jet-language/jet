@@ -22,7 +22,7 @@
 // polls and counts the String the program owns.
 use jet_foundation.[
     MIRAccess, MIRBinaryOp, MIRBlockID, MIRCallArg, MIRCallee, MIRConstant,
-    MIRDropKind, MIRFunction, MIROperation, MIRPollKind, MIRProgram, MIRScope,
+    MIRDropKind, MIRFunction, MIRFunctionID, MIROperation, MIRPollKind, MIRProgram, MIRScope,
     MIRScopeFact, MIRScopeID, MIRScopeKind, MIRTerminator, MIRType, MIRTypeDef, MIRUnsafeGate,
     mir_function_id,
 ]
@@ -120,7 +120,7 @@ fn fx_sentry_scopes_check() -> Bool Never! {
         MIRScope{id: policy, kind: MIRScopeKind.Policy, span: fx_span(), name: Val("disabled"), deadline: None, facts: [MIRScopeFact]{MIRScopeFact{key: "sentry_enabled", value: "false"}}},
     }
     program :: fx_program([MIRFunction]{run}, [MIRTypeDef]{})
-    lowered :: lir_lower_callable(program, mir_function_id("run"))
+    lowered :: lir_lower_callables(program, [MIRFunctionID]{mir_function_id("run")})
     if lowered.issues.len() != 0 {
         loop issue in lowered.issues -> print("sentry-scopes: {issue.message}")
         return false

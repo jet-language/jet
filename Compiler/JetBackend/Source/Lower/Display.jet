@@ -168,6 +168,7 @@ fn lower_render_value(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIR
         }
         .Flag -> "jet_rt_bool_to_string"
         .FloatBits -> if mode == .Debug -> "jet_rt_float_debug" else -> "jet_rt_float_to_string"
+        .Float32Bits -> if mode == .Debug -> "jet_rt_float32_debug" else -> "jet_rt_float32_to_string"
         .Boxed(_) | .Inline(_) | .Discriminant -> ""
         else -> {
             lower_fail(&m, &f, "displaying {mir_type_display_name(ty)} is not lowered at O0 yet")
@@ -262,6 +263,8 @@ fn lower_render_payload_info(p: MIRProgram, definition: MIRTypeDef, variant_name
 
 fn lower_helper_display(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     if lower_set_element(glue.ty) != None -> return lower_helper_set_render(p, &m, glue)
+    if lower_queue_element(glue.ty) != None -> return lower_helper_queue(p, &m, glue)
+    if lower_priority_queue_element(glue.ty) != None -> return lower_helper_priority_queue_render(p, &m, glue)
     layout :: lower_repr_layout(lower_repr(p, glue.ty)) ?? lir_layout_pointer()
     f := lower_helper_start(&m, glue, [LIRLayout]{layout}, Val(lir_layout_pointer()))
     operand :: ~f.open_params[0]

@@ -95,6 +95,11 @@ enum LowerRepr {
     Word
     // Float: the IEEE double's bits in one word (LIR Float layout).
     FloatBits
+    // F32: four stored bytes, raw binary32 bits in the low 32 of a word
+    // register. Reader materialization and binary32 shortest text only;
+    // numeric/compare/cast operations remain refused. Future FP-register
+    // operations must use the canonical LIR Bitcast, never numeric Convert.
+    Float32Bits
     // Bool: one byte holding 0 or 1.
     Flag
     // A runtime-owned object (String, loop cursor): a pointer the runtime
@@ -472,6 +477,7 @@ fn lower_repr(p: MIRProgram, ty: MIRType) -> LowerRepr Never! {
         .Char -> LowerRepr.Word
         .Bool -> LowerRepr.Flag
         .Float -> LowerRepr.FloatBits
+        .Float32 -> LowerRepr.Float32Bits
         .IntN(_, bits) -> if bits <= 64 -> LowerRepr.Word else -> LowerRepr.Unsupported{reason: "{bits}-bit integers"}
         .String -> LowerRepr.Handle{drop: "jet_rt_string_drop", clone: "jet_rt_string_clone"}
         .Tagged(_, inner) -> lower_repr(p, inner)
@@ -507,6 +513,8 @@ fn lower_repr(p: MIRProgram, ty: MIRType) -> LowerRepr Never! {
             if lower_string_nominal(ty) -> return LowerRepr.Handle{drop: "jet_rt_string_drop", clone: "jet_rt_string_clone"}
             if lower_view_element(ty) == .Val(elem) -> return lower_list_repr(p, ty, elem)
             if lower_set_element(ty) == .Val(elem) -> return lower_set_repr(p, ty, elem)
+            if lower_queue_element(ty) == .Val(elem) -> return lower_queue_repr(p, ty, elem)
+            if lower_priority_queue_element(ty) == .Val(elem) -> return lower_priority_queue_repr(p, ty, elem)
             // The canonical runtime name table excludes source-owned Core
             // shapes. Only exact Core paths may override their MIR definition,
             // and a record schema keeps its MIR layout (Records.jet): its
@@ -567,6 +575,7 @@ fn lower_repr_layout(repr: LowerRepr) -> LIRLayout? {
         .Discriminant -> Val(lir_layout_word())
         .Flag -> Val(lir_layout_bool())
         .FloatBits -> Val(lir_layout_float())
+        .Float32Bits -> Val(lir_layout_word())
         .Handle(_, _) -> Val(lir_layout_pointer())
         .Boxed(_) | .Inline(_) -> Val(lir_layout_pointer())
         else -> None
@@ -2556,6 +2565,7 @@ fn lower_binary(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFuncti
     left_value :: lower_use(&m, &f, left) ?? return
     right_value :: lower_use(&m, &f, right) ?? return
     left_ty :: lower_value_type(c, left) ?? return lower_fail(&m, &f, "operand {left.value} has no checked type")
+    if lower_repr(p, left_ty) == .Float32Bits -> return lower_fail(&m, &f, "Float32 operations are not lowered at O0 yet")
     exact :: lower_is_exact_int(left_ty)
     unsigned :: lower_is_unsigned_word(left_ty)
     dst :: lower_result(p, c, &m, &f, instruction) ?? return lower_fail(&m, &f, "binary operator has no result")
@@ -2689,6 +2699,7 @@ fn lower_float_binary(m: &LowerModule, f: &LowerFunction, dst: LIRValueID, op: M
 fn lower_unary(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, op: MIRUnaryOp, value: MIRValueID) Never! {
     operand :: lower_use(&m, &f, value) ?? return
     ty :: lower_value_type(c, value) ?? return lower_fail(&m, &f, "operand {value.value} has no checked type")
+    if lower_repr(p, ty) == .Float32Bits -> return lower_fail(&m, &f, "Float32 operations are not lowered at O0 yet")
     dst :: lower_result(p, c, &m, &f, instruction) ?? return lower_fail(&m, &f, "unary operator has no result")
     layout :: lower_value_layout(f, operand)
     if op == .Not {
@@ -2769,7 +2780,7 @@ fn lower_display(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunct
     // its erased scalar representation (MIRRust.rs selected_trait_impl_for_type).
     if lower_type_def(p, ty) == .Val(_) -> return lower_display_boxed(p, c, &m, &f, ty, lowered)
     if lower_repr(p, ty) == {
-        .Word | .Flag | .FloatBits -> {}
+        .Word | .Flag | .FloatBits | .Float32Bits -> {}
         else -> return lower_display_boxed(p, c, &m, &f, ty, lowered)
     }
     symbol :: if lower_repr(p, ty) == {
@@ -2781,6 +2792,7 @@ fn lower_display(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunct
         }
         .Flag -> "jet_rt_bool_to_string"
         .FloatBits -> "jet_rt_float_to_string"
+        .Float32Bits -> "jet_rt_float32_to_string"
         else -> "jet_rt_i64_to_string"
     }
     text :: lower_new_value(&f, lir_layout_pointer(), LIRDrop.Runtime{symbol: "jet_rt_string_drop"}, None)
@@ -2865,6 +2877,8 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
         if lower_lazy_method(p, c, &m, &f, instruction, row, receiver, receiver_place, args) -> return
         if lower_string_method(p, c, &m, &f, instruction, row, receiver, receiver_place, args, aggregate_fields) -> return
         if lower_set_method(p, c, &m, &f, instruction, row, receiver, receiver_place, args) -> return
+        if lower_queue_method(p, c, &m, &f, instruction, row, receiver, receiver_place, args) -> return
+        if lower_priority_queue_method(p, c, &m, &f, instruction, row, receiver, receiver_place, args) -> return
         if lower_list_method(p, c, &m, &f, instruction, row, receiver, receiver_place, args) -> return
         if lower_map_method(p, c, &m, &f, instruction, row, receiver, receiver_place, args) -> return
         if lower_ordering_method(p, c, &m, &f, instruction, row, receiver, args) -> return
@@ -2904,6 +2918,8 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
         row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "static call names missing Prelude row")
         if row.module_name == "::JetAtomic" -> return lower_fail(&m, &f, "generic Atomic construction requires the canonical typed native allocation, ordering and ownership ABI; a word CAS is not an Atomic<T> carrier")
         if lower_set_new(p, c, &m, &f, instruction, call, args) -> return
+        if lower_queue_new(p, c, &m, &f, instruction, call, args) -> return
+        if lower_priority_queue_new(p, c, &m, &f, instruction, call, args) -> return
         if lower_lazy_call(p, c, &m, &f, instruction, call, args) -> return
         if lower_shared_new(p, c, &m, &f, instruction, call, args) -> return
         if lower_task_group_new(p, c, &m, &f, instruction, call, args) -> return
@@ -3373,6 +3389,8 @@ fn lower_glue_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFu
         shape :: lower_map_shape(p, lower_set_map(glue.ty)) ?? panic("Set drop has no entry layout")
         return lower_list_drop_glue(p, &m, glue, shape.entry)
     }
+    if lower_queue_element(glue.ty) != None -> return lower_helper_queue(p, &m, glue)
+    if lower_priority_queue_element(glue.ty) == .Val(elem) -> return lower_list_drop_glue(p, &m, glue, elem)
     if glue.ty.kind == .Fn(_) | .SendFn(_, _, _) -> return lower_closure_drop_glue(&m, glue, false)
     if lower_is_scope_guard(glue.ty) -> return lower_closure_drop_glue(&m, glue, true)
     if lower_is_inline(p, glue.ty) -> return lower_inline_drop_glue(p, &m, glue)
@@ -3445,6 +3463,8 @@ fn lower_clone_glue_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) ->
         shape :: lower_map_shape(p, lower_set_map(glue.ty)) ?? panic("Set clone has no entry layout")
         return lower_list_clone_glue(p, &m, glue, shape.entry)
     }
+    if lower_queue_element(glue.ty) != None -> return lower_helper_queue(p, &m, glue)
+    if lower_priority_queue_element(glue.ty) == .Val(elem) -> return lower_list_clone_glue(p, &m, glue, elem)
     if glue.ty.kind == .Fn(_) | .SendFn(_, _, _) -> return lower_closure_clone_glue(&m, glue)
     if lower_is_inline(p, glue.ty) -> return lower_inline_clone_glue(p, &m, glue)
     signature :: lower_signature(&m, [LIRLayout]{lir_layout_pointer()}, Val(lir_layout_pointer()))
@@ -3589,6 +3609,8 @@ fn lower_helper_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIR
     if glue.helper == "list.sort" || glue.helper == "list.sort_desc" -> return lower_helper_list_sort(p, &m, glue)
     if glue.helper.starts_with("map.") -> return lower_helper_map(p, &m, glue)
     if glue.helper == "set.take" -> return lower_helper_set_take(p, &m, glue)
+    if glue.helper.starts_with("queue.") -> return lower_helper_queue(p, &m, glue)
+    if glue.helper.starts_with("priority_queue.") -> return lower_helper_priority_queue(p, &m, glue)
     if glue.helper == "set.equal" -> return lower_helper_set_equal(p, &m, glue)
     if glue.helper == "numeric.pow.checked" || glue.helper == "numeric.pow.checked_policy" || glue.helper == "numeric.pow.wrapping" || glue.helper == "numeric.pow.saturating" -> return lower_helper_numeric_pow(p, &m, glue)
     if glue.helper == "text.html_escape" || glue.helper == "text.path_component" -> return lower_helper_typed_text_escape(&m, glue)
