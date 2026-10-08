@@ -1,0 +1,17 @@
+# Port of tests/cli_parts/runtime.rs:973-1037; exact original sources/predicates.
+# PENDING-SAME-HEAD: runtime not run.
+# PENDING-GRAMMAR(batch-four).
+fixture: fixtures/override
+step: jet test override.jet --serial --capture=all
+env: NO_COLOR=1
+exit: 0
+stderr: ~ "jet test: using fn test override" # original predicate
+stdout: ~ "override" # original predicate
+stdout: ~ "stock: pass" # original predicate
+step: jet test override.jet --show-default --serial --capture=all
+env: NO_COLOR=1
+exit: 0
+stderr: !~ "using fn test override" # original predicate
+stdout: !~ "override\n" # original predicate
+stdout: ~ "stock" # original predicate
+stdout: ~ "stock: pass" # original predicate

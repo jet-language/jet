@@ -1,0 +1,24 @@
+# Port of tests/cli_parts/runtime.rs:818-865; exact original sources/predicates.
+# PENDING-SAME-HEAD: runtime not run.
+# PENDING-GRAMMAR(batch-four).
+fixture: fixtures/job_snapshots
+step: jet help
+env: NO_COLOR=1
+exit: 0
+stdout: ~ "jet jobs" # original predicate
+stdout: ~ "jobs [--graph|--status|--explain|--watch[=<on|off>]] [<name>]" # original predicate
+stdout: ~ "List, inspect, or watch named project jobs" # original predicate
+stdout: !~ "tasks" # original predicate
+stdout: !~ "--task" # original predicate
+file: {work}/completions_fish.txt ~ "jobs" # original predicate
+file: {work}/completions_fish.txt ~ "List, inspect, or watch named project jobs" # original predicate
+file: {work}/completions_fish.txt !~ "tasks" # original predicate
+file: {work}/completions_fish.txt !~ "--task" # original predicate
+file: {work}/completions_zsh.txt ~ "jobs" # original predicate
+file: {work}/completions_zsh.txt ~ "List, inspect, or watch named project jobs" # original predicate
+file: {work}/completions_zsh.txt !~ "tasks" # original predicate
+file: {work}/completions_zsh.txt !~ "--task" # original predicate
+file: {work}/man.txt ~ "jobs" # original predicate
+file: {work}/man.txt ~ "List, inspect, or watch named project jobs" # original predicate
+file: {work}/man.txt !~ "tasks" # original predicate
+file: {work}/man.txt !~ "--task" # original predicate

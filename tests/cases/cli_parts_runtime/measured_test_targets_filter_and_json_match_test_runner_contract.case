@@ -1,0 +1,21 @@
+# Port of tests/cli_parts/runtime.rs:1553-1681; exact original sources/predicates.
+# PENDING-SAME-HEAD: runtime not run.
+# PENDING-GRAMMAR(batch-four).
+fixture: fixtures/measured
+step: jet test --show-default . --filter=needle --capture=all
+env: NO_COLOR=1
+exit: 0
+stdout: ~ "needle" # original predicate
+stdout: !~ "other: pass" # original predicate
+step: jet test --show-default . --measure --filter=measured-needle --capture=all
+env: NO_COLOR=1
+exit: 0
+stdout: count "measured-needle" = 2 # original predicate
+stdout: !~ "measured-other" # original predicate
+step: jet test --show-default . --measure --filter=measured-needle --json
+env: NO_COLOR=1
+exit: 0
+json: stdout ndjson $ #= 2
+json: stdout ndjson $[*] : object # original pattern
+json: stdout ndjson $[*].name = "measured-needle"
+json: stdout ndjson $[*] has "mean_ns" # original predicate: key presence
