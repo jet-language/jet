@@ -502,3 +502,7 @@ as part of the Bool value.
 HTTP Retry Policy owns one ordinal word (None, Safe or Idempotent). Its
 ownership helpers copy the value without executing retry policy or I/O;
 dropping a null handle has no effect.
+
+HTTP Redirect Policy's sole Follow variant stores a raw signed maximum and
+a Bool word. Clone preserves the maximum without revalidating policy and
+normalizes only the low Bool byte. The new owner has no shared allocation.
