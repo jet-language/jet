@@ -73,6 +73,28 @@ fn checked_project(name: &str, manifest_policy: &str, source: &str) -> jet::AST:
     checked_bundle(loaded_project(name, manifest_policy, source))
 }
 
+#[test]
+fn imported_distinct_raw_projects_its_declaring_base() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        for base in ["text", "record"] {
+            let entry = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/distinct-import-raw")
+                .join(base)
+                .join("run.jet");
+            let bundle = checked_bundle(jet::Loader::load_entry(entry.to_str().unwrap())
+                .expect("split distinct fixture loads"));
+            let request = jet_foundation::MIR::MirArtifactRequest::new(
+                jet_foundation::MIR::MirArtifactTarget::RustAot,
+                jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+                jet_foundation::MIR::MirArtifactBuildMode::Dev,
+            );
+            let (mir, _) = jet::Codegen::TIR::lower_checked_mir_program_for(&bundle, request)
+                .unwrap_or_else(|error| panic!("{base} imported distinct fixture: {error}"));
+            mir.validate().expect("split distinct raw and generated equality validate");
+        }
+    });
+}
+
 fn project_diagnostics(name: &str, manifest_policy: &str, source: &str) -> Vec<String> {
     let dir = project_dir(name);
     let _ = std::fs::remove_dir_all(&dir);
