@@ -164,6 +164,14 @@ pub fn jet_fixture_plain(value: JetFixture) -> JetFixture { value }
   const uiList = spawnSync(process.execPath, [join(fixture, "Tools/agent/gen-c-abi-routes.mjs"), join(fixture, "runtime.rs"), "--native-list-only"], { encoding: "utf8" });
   success(uiList);
   assert.ok(JSON.parse(uiList.stdout).unsupportedSumCarriers.some((row) => row.reason.includes("pub type JetUiServiceResult<T> = Result<T, JetUiHostError>")));
+  put("crates/jet-foundation/src/Syntax/core_calls.rs", registry('CoreCallRecord::new("core.fixture", "smtp", "jet_fixture_smtp", true)\n'));
+  put("runtime.rs", declarations + "pub struct SMTPConfig<S: AsRef<[u8]> = Vec<u8>> { pub secret: S }\npub fn jet_fixture_smtp(value: SMTPConfig<Vec<u8>>) -> f64 { 0.0 }\n");
+  success(run());
+  const smtpList = spawnSync(process.execPath, [join(fixture, "Tools/agent/gen-c-abi-routes.mjs"), join(fixture, "runtime.rs"), "--native-list-only"], { encoding: "utf8" });
+  success(smtpList);
+  assert.ok(JSON.parse(smtpList.stdout).unsupportedGenericCarriers.some((row) => row.type === "SMTPConfig<Vec<u8>>" && Number.isInteger(row.declaration.at)));
+  put("runtime.rs", declarations + "pub struct SMTPConfig<S = Vec<u8>> { pub secret: S }\npub fn jet_fixture_smtp(value: SMTPConfig<Vec<u8>,String>) -> f64 { 0.0 }\n");
+  assert.match(run().stderr, /expected 0\.\.1 declaration arguments, got 2/);
   put("crates/jet-foundation/src/Syntax/core_calls.rs", registry('CoreCallRecord::new("core.fixture", "unit", "jet_fixture_unit", true)\n'));
   const unitRecord = "#[derive(Clone)]\npub enum JetLoadable<T:Clone,E:Clone> { Idle, Loading, Loaded(T), Failed(E) }\npub fn jet_fixture_unit() -> JetLoadable<(),()> { unreachable!() }\n";
   put("runtime.rs", declarations + unitRecord);
