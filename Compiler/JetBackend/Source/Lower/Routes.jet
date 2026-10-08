@@ -185,7 +185,7 @@ fn lower_route_result_call(m: &LowerModule, f: &LowerFunction, symbol: String, a
     lower_emit(&f, LIRInst.Store{base: slot, offset: 0, value: zero})
     if has_list -> lower_emit(&f, LIRInst.Store{base: slot, offset: 8, value: zero})
     call_args := args
-    loop carrier in [LowerRouteCarrier]{ok, err} {
+    loop carrier in ([LowerRouteCarrier]{ok, err}) {
         if carrier == .Unit -> next
         &call_args.push(slot)
         if carrier == .List(_) -> &call_args.push(lower_address(&f, slot, 8))

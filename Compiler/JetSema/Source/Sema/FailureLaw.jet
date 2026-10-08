@@ -61,7 +61,9 @@ JET_CORE_ERROR_TYPES :: prep { [String]{
 
 // Owning an opaque impl or a compiler enum menu does not create an export.
 // Derive the qualified annotation gate from the same generated ownership rows.
-JET_CORE_OWNER_ANNOTATION_SUFFIXES :: prep {
+JET_CORE_OWNER_ANNOTATION_SUFFIXES :: prep { sema_core_owner_annotation_suffixes() }
+
+fn sema_core_owner_annotation_suffixes() -> [String] Never! {
     suffixes := [String]{}
     loop row in CORE_SOURCE_OWNED_ROWS {
         loop name in row.impl_types {
