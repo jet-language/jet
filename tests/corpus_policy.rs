@@ -208,7 +208,7 @@ fn manifest_rejects_a_scope_without_source_coverage() {
     let policy = CorpusPolicy::load().unwrap();
     let mut manifest = policy.manifest().clone();
     manifest.scopes.push(RuleScopeRow {
-        rule: "entry-implicit".to_string(),
+        rule: "entry-explicit".to_string(),
         selector: "file:unclassified/entry.jet".to_string(),
         reason: "synthetic uncovered scope".to_string(),
     });
@@ -222,32 +222,32 @@ fn manifest_rejects_a_scope_without_source_coverage() {
 fn manifest_rejects_a_finding_without_an_executable_guard() {
     let policy = CorpusPolicy::load().unwrap();
     let mut manifest = policy.manifest().clone();
-    manifest.scopes.retain(|scope| scope.rule != "entry-implicit");
+    manifest.scopes.retain(|scope| scope.rule != "entry-explicit");
     let error = manifest
         .validate()
         .expect_err("every finding must retain a corpus or domain guard");
-    assert!(error.contains("entry-implicit has no executable corpus or domain guard"), "{error}");
+    assert!(error.contains("entry-explicit has no executable corpus or domain guard"), "{error}");
 }
 
 #[test]
 fn exception_matching_is_occurrence_scoped() {
     let policy = CorpusPolicy::load().unwrap();
-    let site = "fn:run@0..0".to_string();
+    let site = "call:process.argv@0..0".to_string();
     let candidate = SemanticViolation::new(
-        "tests/ui/E-CALL-VALUE_call_result_not_called.jet",
-        "entry-implicit",
+        "tests/ui/args_spec_bad_parse_arity.jet",
+        "raw-cli-fixed-shape",
         site,
     );
     policy
         .validate_occurrences(
-            "tests/ui/E-CALL-VALUE_call_result_not_called.jet",
+            "tests/ui/args_spec_bad_parse_arity.jet",
             std::slice::from_ref(&candidate),
         )
         .expect("the recorded single occurrence is accepted");
     let duplicate = vec![candidate.clone(), candidate];
     let error = policy
         .validate_occurrences(
-            "tests/ui/E-CALL-VALUE_call_result_not_called.jet",
+            "tests/ui/args_spec_bad_parse_arity.jet",
             &duplicate,
         )
         .expect_err("a second occurrence cannot reuse one exception");
@@ -373,13 +373,53 @@ fn maintained_guidance_allow_explains_itself_at_the_source_site() {
 }
 
 #[test]
+fn explicit_entry_rule_matches_ordinary_file_execution() {
+    let policy = CorpusPolicy::load().unwrap();
+    for path in [
+        "Examples/features/basics/hello.jet",
+        "Examples/features/types/entry_law.jet",
+        "Examples/learn/entry_law.jet",
+        "tests/agent_workloads/llm_digest/first_program.jet",
+    ] {
+        for source in [
+            r#"fn run() { print("hello") }"#,
+            r#"VALUE :: 1
+fn helper() -> Int { VALUE }
+fn run() { print(helper()) }"#,
+            r#"fn helper() -> Int { 1 }"#,
+        ] {
+            let violations = policy.evaluate_source(path, source).unwrap();
+            assert!(
+                !violations.iter().any(|violation| violation.rule == "entry-explicit"),
+                "explicit execution and declaration-only files must be accepted: {path}: {violations:?}"
+            );
+        }
+        for (source, expected) in [
+            (r#"print("hello")"#, 1),
+            (r#"print("before")
+fn run() { print("inside") }
+print("after")"#, 2),
+        ] {
+            let violations = policy.evaluate_source(path, source).unwrap();
+            let entries = violations
+                .iter()
+                .filter(|violation| violation.rule == "entry-explicit")
+                .collect::<Vec<_>>();
+            assert_eq!(entries.len(), expected, "loose execution: {path}");
+            assert!(entries.iter().all(|violation| violation.site.starts_with("stmt:top-level@")));
+        }
+    }
+    assert!(!policy.manifest().exceptions.iter().any(|exception| exception.rule == "entry-explicit"));
+}
+
+#[test]
 fn card_2375_rules_reject_each_reintroduced_ceremony() {
     let policy = CorpusPolicy::load().unwrap();
     let cases = [
         (
             "Examples/features/basics/hello.jet",
-            r#"fn run() { print("hello") }"#,
-            "entry-implicit",
+            r#"print("hello")"#,
+            "entry-explicit",
         ),
         (
             "Docs/spec/guides/first-hour.md",

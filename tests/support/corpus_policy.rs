@@ -136,7 +136,7 @@ pub fn rule_registry() -> &'static [RuleSpec] {
         RuleSpec { name: "dogfood-json-url-list", why: "dogfood JSON, URL, and list operations have one typed path", replacement: "use the typed JSON, URL, or list API" },
         RuleSpec { name: "raw-cli-process-boundary", why: "a canonical program must not repeatedly reconstruct the process boundary", replacement: "use the one typed entry boundary or one explicit expert boundary" },
         RuleSpec { name: "product-parser-regression", why: "the parser boundary must reject the recorded invalid shape", replacement: "keep the shared parser regression fixture and assertion" },
-        RuleSpec { name: "entry-implicit", why: "the first-contact program should be its top-level body", replacement: "move the ordinary first-contact body to top level" },
+        RuleSpec { name: "entry-explicit", why: "ordinary-file execution belongs in an explicit fn run (D-ENTRY-SCRIPT1=C)", replacement: "move loose executable statements into fn run" },
         RuleSpec { name: "process_args_view", why: "the maintained corpus should use the canonical process argument view", replacement: "replace process.argv().skip(1) with process.args()" },
         RuleSpec { name: "message_text", why: "the maintained corpus should use the message-level HTTP text default", replacement: "replace body().text(default_limit) with text()" },
         RuleSpec { name: "redundant_fixed_cleanup", why: "the maintained corpus should keep plain Fixed output free of grouping cleanup", replacement: "delete the grouping-separator cleanup" },
@@ -2534,25 +2534,14 @@ fn evaluate_program(
             ));
         }
     }
-    if applies(manifest, path, row, "entry-implicit")
-        && program
-            .items
-            .iter()
-            .any(|item| matches!(item, Item::Func(function) if function.name == "run"))
-    {
-        let span = program
-            .items
-            .iter()
-            .find_map(|item| match item {
-                Item::Func(function) if function.name == "run" => Some(function.span),
-                _ => None,
-            })
-            .unwrap_or(Span { start: 0, end: 0 });
-        violations.push(SemanticViolation::new(
-            path,
-            "entry-implicit",
-            site("fn:run", span),
-        ));
+    if applies(manifest, path, row, "entry-explicit") {
+        for statement in &program.script_body {
+            violations.push(SemanticViolation::new(
+                path,
+                "entry-explicit",
+                site("stmt:top-level", statement.span()),
+            ));
+        }
     }
     if applies(manifest, path, row, "codable-structural") {
         for structure in structures {

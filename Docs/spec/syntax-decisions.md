@@ -304,6 +304,8 @@ work belongs inside `fn run`. Loose top-level statements are E0621, and an
 imported file with loose statements is E0620. Notebook and REPL adapters may
 construct an explicit `fn run` for their submitted fragment. `fn dev`,
 `fn build`, and `#Test` declarations remain legal beside module globals.
+The maintained example corpus enforces this same explicit-entry law: an
+ordinary `fn run` is not optional teaching ceremony.
 
 **D-CLI-POS1=A — positional by default, `#Flag` to opt out** *(ratified
 2026-07-23, card #748)*: on a `#CLI` struct, required value fields fill from
