@@ -44,10 +44,11 @@ fn policy_strip_inline_package(source: String, tokens: [Token]) -> String {
     ~source
 }
 
-#Test("corpus policy compiler AST dependency") {
+fn policy_ast_test_compiler_dependency() {
     program :: policy_parse_program("planted", "fn run() {{ print(\"process.argv()\") }}") ?? panic("compiler parser rejected valid source")
     assert_eq(program.items.len(), 1)
 }
+#Test("corpus policy compiler AST dependency") { policy_ast_test_compiler_dependency() }
 
 fn policy_without_parens(expression: Expr) -> View<Expr> from expression {
     current := expression
@@ -1543,7 +1544,7 @@ fn policy_has_rule(violations: [PolicyOccurrence], rule: String) -> Bool {
     loop violation in violations { if violation.rule == rule -> return true }
     false
 }
-#Test("semantic_rules_use_ast_shapes_not_source_text") {
+fn policy_ast_test_semantic_shapes() PolicyError! {
     manifest :: policy_manifest()
     path :: "Examples/features/basics/first_hour.jet"
     positive :: policy_evaluate_source(manifest, path, "fn run() {{ args :: process.argv() }}")
@@ -1551,8 +1552,10 @@ fn policy_has_rule(violations: [PolicyOccurrence], rule: String) -> Bool {
     loop violation in positive -> assert_eq(violation.file, path)
     literal :: policy_evaluate_source(manifest, path, "fn run() {{ print(\"process.argv()\") }}")
     assert(!policy_has_rule(literal, "raw-cli-fixed-shape"))
+    Ok(Unit{})
 }
-#Test("cli_boundary_rules_cover_builder_views_and_repeated_process_reads") {
+#Test("semantic_rules_use_ast_shapes_not_source_text") { policy_ast_test_semantic_shapes() }
+fn policy_ast_test_cli_boundaries() PolicyError! {
     manifest :: policy_manifest()
     path :: "Examples/features/basics/first_hour.jet"
     builder :: policy_evaluate_source(manifest, path, "fn run() {{ args :: process.argv().skip(1) }}")
@@ -1561,8 +1564,10 @@ fn policy_has_rule(violations: [PolicyOccurrence], rule: String) -> Bool {
     assert(policy_has_rule(repeated, "raw-cli-process-boundary"))
     single :: policy_evaluate_source(manifest, path, "fn run() {{ args :: process.argv() }}")
     assert(!policy_has_rule(single, "raw-cli-process-boundary"))
+    Ok(Unit{})
 }
-#Test("maintained_guidance_allow_explains_itself_at_the_source_site") {
+#Test("cli_boundary_rules_cover_builder_views_and_repeated_process_reads") { policy_ast_test_cli_boundaries() }
+fn policy_ast_test_allow_source_reason() PolicyError! {
     manifest :: policy_manifest()
     error := ""
     if policy_evaluate_source(manifest, "Examples/features/text/unreviewed_allow.jet", "fn run() {{ #allow(unit_scalar_rewrap) print(\"kept\") }}") == {
@@ -1571,8 +1576,10 @@ fn policy_has_rule(violations: [PolicyOccurrence], rule: String) -> Bool {
     }
     assert(error.contains("reason at its source site"), error)
     policy_evaluate_source(manifest, "Examples/features/text/reviewed_allow.jet", "fn run() {{ #allow(unit_scalar_rewrap, \"the example intentionally shows explicit conversion\") print(\"kept\") }}")
+    Ok(Unit{})
 }
-#Test("generated_protocol_check_requires_one_decoder_for_response_protocols") {
+#Test("maintained_guidance_allow_explains_itself_at_the_source_site") { policy_ast_test_allow_source_reason() }
+fn policy_ast_test_response_decoder() PolicyError! {
     manifest :: policy_manifest()
     violations :: policy_evaluate_generated(manifest, "producer:crates/jet-pkg-model/src/LuaBind.rs#render_jet", "fn run() {{}}")
     assert_eq(violations.len(), 1)
@@ -1580,8 +1587,10 @@ fn policy_has_rule(violations: [PolicyOccurrence], rule: String) -> Bool {
     assert(policy_occurrence_messages(violations).contains("replacement="))
     no_response :: policy_evaluate_generated(manifest, "producer:crates/jet-pkg-model/src/CBind.rs#render_jet", "fn run() {{}}")
     assert(no_response.is_empty())
+    Ok(Unit{})
 }
-#Test("every_response_binding_renderer_uses_the_shared_decoder_policy") {
+#Test("generated_protocol_check_requires_one_decoder_for_response_protocols") { policy_ast_test_response_decoder() }
+fn policy_ast_test_binding_renderers() PolicyError! {
     manifest :: policy_manifest()
     count := 0
     loop producer in manifest.producers {
@@ -1591,20 +1600,26 @@ fn policy_has_rule(violations: [PolicyOccurrence], rule: String) -> Bool {
         assert(violations.is_empty(), "{producer.selector} did not accept one shared response decoder: {policy_occurrence_messages(violations)}")
     }
     assert_eq(count, 7)
+    Ok(Unit{})
 }
-#Test("generated_decoder_policy_requires_the_canonical_decoder_symbol") {
+#Test("every_response_binding_renderer_uses_the_shared_decoder_policy") { policy_ast_test_binding_renderers() }
+fn policy_ast_test_canonical_decoder_symbol() PolicyError! {
     violations :: policy_evaluate_generated(policy_manifest(), "producer:crates/jet-pkg-model/src/LuaBind.rs#render_jet", "fn decode_other(raw: String, code: Int) -> DataTree Err! {{ return Ok(DataTree.Null) }}")
     assert_eq(violations.len(), 1)
     assert_eq(violations[0].rule, "bindgen-one-decoder")
+    Ok(Unit{})
 }
-#Test("generated_protocol_override_requires_a_distinct_envelope_shape") {
+#Test("generated_decoder_policy_requires_the_canonical_decoder_symbol") { policy_ast_test_canonical_decoder_symbol() }
+fn policy_ast_test_protocol_override() PolicyError! {
     manifest :: policy_manifest()
     producer :: "producer:crates/jet-pkg-model/src/LuaBind.rs#render_jet"
     raw :: policy_evaluate_generated(manifest, producer, "fn decode_response(raw: String, code: Int) -> DataTree Err! {{ return Ok(json.parse(raw)) }}")
     assert(raw.is_empty(), "raw JSON override is distinct: {policy_occurrence_messages(raw)}")
     ordinary :: policy_evaluate_generated(manifest, producer, "fn decode_response(raw: String, code: Int) -> DataTree Err! {{\n    response :: json.parse(raw)\n    ok :: response.field(\"ok\")\n    return Ok(response)\n}}")
     assert(policy_has_rule(ordinary, "generated-protocol-override"))
+    Ok(Unit{})
 }
+#Test("generated_protocol_override_requires_a_distinct_envelope_shape") { policy_ast_test_protocol_override() }
 
 struct PolicyShapeCase { path: String, source: String, rule: String, present: Bool }
 fn policy_check_shapes(cases: [PolicyShapeCase]) PolicyError! {
@@ -1615,7 +1630,7 @@ fn policy_check_shapes(cases: [PolicyShapeCase]) PolicyError! {
     }
     Ok(Unit{})
 }
-#Test("card_2375_rules_reject_each_reintroduced_ceremony") {
+fn policy_ast_test_reintroduced_ceremony() PolicyError! {
     cases :: [PolicyShapeCase]{
         PolicyShapeCase{path: "Examples/features/basics/hello.jet", source: "fn run() {{ print(\"hello\") }}", rule: "entry-implicit", present: true},
         PolicyShapeCase{path: "Docs/spec/guides/first-hour.md", source: "jet build Examples/features/basics/first_hour.jet", rule: "first-hour-doc-recipe", present: true},
@@ -1646,22 +1661,28 @@ fn policy_check_shapes(cases: [PolicyShapeCase]) PolicyError! {
         assert(rendered.contains("why="), rendered)
         assert(rendered.contains("replacement="), rendered)
     }
+    Ok(Unit{})
 }
-#Test("walk_policy_distinguishes_file_only_filters_from_directory_tree_walks") {
+#Test("card_2375_rules_reject_each_reintroduced_ceremony") { policy_ast_test_reintroduced_ceremony() }
+fn policy_ast_test_walk_shapes() PolicyError! {
     policy_check_shapes([PolicyShapeCase]{
         PolicyShapeCase{path: "Jetpack/Store/Tests/StoreIngest.jet", source: "use core.files as fs\nfn run() {{\n    entries :: fs.walk(root)\n    loop entry in entries {{\n        if !entry.is_dir -> print(entry.path)\n    }}\n}}", rule: "walk-files-filter", present: true},
         PolicyShapeCase{path: "Jetpack/Store/Tests/StoreIngest.jet", source: "use core.files as fs\nfn walk() {{\n    entries :: fs.walk(root)\n}}\nfn filter(entry: Entry) {{\n    if !entry.is_dir -> print(entry.path)\n}}", rule: "walk-files-filter", present: false},
         PolicyShapeCase{path: "Jetpack/Store/Tests/StoreIngest.jet", source: "use core.files as fs\nfn run() {{\n    entries :: fs.walk(root)\n    loop entry in entries {{\n        if entry.is_dir -> print(entry.relative) else -> print(entry.path)\n    }}\n}}", rule: "walk-files-filter", present: false},
     })
+    Ok(Unit{})
 }
-#Test("crypto_digest_rule_uses_the_resolved_core_module") {
+#Test("walk_policy_distinguishes_file_only_filters_from_directory_tree_walks") { policy_ast_test_walk_shapes() }
+fn policy_ast_test_crypto_module() PolicyError! {
     policy_check_shapes([PolicyShapeCase]{
         PolicyShapeCase{path: "Examples/features/crypto/reintroduced.jet", source: "use core.crypto as crypto\nfn run() {{ crypto.sha256_bytes(\"abc\".bytes()) }}", rule: "crypto-naming-fact", present: true},
         PolicyShapeCase{path: "Examples/features/crypto/reintroduced.jet", source: "use core.crypto as crypto\nfn run() {{ crypto.sha256(\"abc\".bytes()).hex() }}", rule: "crypto-naming-fact", present: false},
         PolicyShapeCase{path: "Examples/features/crypto/reintroduced.jet", source: "fn run() {{ sha256_bytes(\"abc\".bytes()) }}", rule: "crypto-naming-fact", present: false},
     })
+    Ok(Unit{})
 }
-#Test("semantic_migration_rules_match_only_their_structural_shapes") {
+#Test("crypto_digest_rule_uses_the_resolved_core_module") { policy_ast_test_crypto_module() }
+fn policy_ast_test_migration_shapes() PolicyError! {
     policy_check_shapes([PolicyShapeCase]{
         PolicyShapeCase{path: "Examples/features/memory/reintroduced.jet", source: "fn run() {{ delay :: Duration.seconds(1.5) }}", rule: "duration-constant-safe", present: true},
         PolicyShapeCase{path: "Examples/features/memory/reintroduced.jet", source: "fn run(seconds: Float) {{ delay :: Duration.seconds(seconds) }}", rule: "duration-constant-safe", present: false},
@@ -1681,8 +1702,10 @@ fn policy_check_shapes(cases: [PolicyShapeCase]) PolicyError! {
     lower :: policy_planted_ascii_ladder()
     violations :: policy_evaluate_source(policy_manifest(), "Jetpack/PackageModel/Source/Envelope/PathLaw.jet", "fn run() {{ value :: {lower} }}")
     assert(policy_has_rule(violations, "dogfood-ascii"))
+    Ok(Unit{})
 }
-#Test("scoped_dogfood_and_workload_recipes_have_positive_and_negative_shapes") {
+#Test("semantic_migration_rules_match_only_their_structural_shapes") { policy_ast_test_migration_shapes() }
+fn policy_ast_test_dogfood_and_workload_shapes() PolicyError! {
     policy_check_shapes([PolicyShapeCase]{
         PolicyShapeCase{path: "tests/agent_workloads/adapters/incident_report.jet", source: "fn run() {{ rows :: input.split(\"\\t\") }}", rule: "delimited-reader-config", present: true},
         PolicyShapeCase{path: "tests/agent_workloads/adapters/incident_report.jet", source: "fn run() {{ rows :: input.split(\"|\") }}", rule: "delimited-reader-config", present: false},
@@ -1703,16 +1726,20 @@ fn policy_check_shapes(cases: [PolicyShapeCase]) PolicyError! {
         PolicyShapeCase{path: "Jetpack/CLI/Source/Realize/ProjectPlan.jet", source: "fn run() {{ same_strings(left, right) }}", rule: "dogfood-list-equality", present: true},
         PolicyShapeCase{path: "Jetpack/CLI/Source/Realize/ProjectPlan.jet", source: "fn run() {{ left == right }}", rule: "dogfood-list-equality", present: false},
     })
+    Ok(Unit{})
 }
-#Test("fixture_roles_and_approved_builder_boundary_are_explicit") {
+#Test("scoped_dogfood_and_workload_recipes_have_positive_and_negative_shapes") { policy_ast_test_dogfood_and_workload_shapes() }
+fn policy_ast_test_fixture_roles() PolicyError! {
     manifest :: policy_manifest()
     policy_check_fixture_inventory(manifest, ".")
     fixture :: policy_evaluate_source(manifest, "tests/ui/args_spec_bad_parse_arity.jet", "fn run() {{ process.argv() }}")
     assert(fixture.is_empty(), "negative fixtures are role-gated")
     builder :: policy_evaluate_source(manifest, "Jetpack/CLI/Source/Entry/Main.jet", "fn run() {{\n    args.spec()\n    process.argv()\n}}")
     loop violation in builder -> assert(violation.rule != "raw-cli-fixed-shape" && violation.rule != "raw-cli-builder-shape")
+    Ok(Unit{})
 }
-#Test("cli_recipe_inventory_is_manifest_owned_and_ast_checked") {
+#Test("fixture_roles_and_approved_builder_boundary_are_explicit") { policy_ast_test_fixture_roles() }
+fn policy_ast_test_cli_recipe_inventory() PolicyError! {
     manifest :: policy_manifest()
     policy_check_cli_recipe_inventory(manifest, ".")
     typed_selectors :: [String]{"file:Tools/adoption/fixtures/clean-project/run.jet", "file:Examples/features/basics/first_hour.jet", "file:Examples/features/basics/onboarding/run.jet", "file:Docs/spec/guides/first-hour.md", "root:Tools/gauntlet/entries", "root:tests/agent_workloads/adapters", "root:tests/compiled_workloads/adapters/jet", "file:Jetpack/CLI/Source/Entry/Main.jet"}
@@ -1742,11 +1769,13 @@ fn policy_check_shapes(cases: [PolicyShapeCase]) PolicyError! {
         loop producer in manifest.producers { if producer.selector == selector -> found = true }
         assert(found, "missing CLI starter producer row: {selector}")
     }
+    Ok(Unit{})
 }
+#Test("cli_recipe_inventory_is_manifest_owned_and_ast_checked") { policy_ast_test_cli_recipe_inventory() }
 
 // corelib_parts/system.rs:1027-1041. Use the compiler's built module registry,
 // not Core/ directory names: unregistered files are not necessarily modules.
-#Test("core_reference_lists_every_built_core_module") {
+fn policy_ast_test_core_reference() {
     docs :: policy_ast_files.read("Docs/spec/reference/core-library.md") ?? panic("core library reference must exist")
     missing := [String]{}
     loop module_entry in CORE_MODULE_EXPORTS {
@@ -1755,8 +1784,9 @@ fn policy_check_shapes(cases: [PolicyShapeCase]) PolicyError! {
     }
     assert(missing.is_empty(), "Docs/spec/reference/core-library.md must list every built Core module from KNOWN_CORE_MODULES: {missing}")
 }
+#Test("core_reference_lists_every_built_core_module") { policy_ast_test_core_reference() }
 
-#Test("corpus document shell words use Rust Unicode whitespace") {
+fn policy_ast_test_unicode_shell_words() {
     nel :: String.from_bytes([U8]{194, 133}) ?? panic("NEL UTF-8")
     nbsp :: String.from_bytes([U8]{194, 160}) ?? panic("NBSP UTF-8")
     emspace :: String.from_bytes([U8]{226, 128, 131}) ?? panic("EM SPACE UTF-8")
@@ -1765,6 +1795,7 @@ fn policy_check_shapes(cases: [PolicyShapeCase]) PolicyError! {
     assert(!policy_has_jet_run_command("```bash\n# jet run\n```"))
     assert(!policy_has_jet_run_command("```bash\njet # run\n```"))
 }
+#Test("corpus document shell words use Rust Unicode whitespace") { policy_ast_test_unicode_shell_words() }
 
 fn policy_planted_ascii_ladder() -> String {
     lower := "\"text\""
@@ -1777,7 +1808,7 @@ fn policy_planted_ascii_ladder() -> String {
 }
 
 struct PolicyPlantedPair { rule: String, kind: String, rejected: String, clean: String }
-#Test("corpus executable AST rules planted violation and clean pairs") {
+fn policy_ast_test_planted_rule_pairs() PolicyError! {
     ladder :: policy_planted_ascii_ladder()
     pairs :: [PolicyPlantedPair]{
         PolicyPlantedPair{rule: "raw-cli-fixed-shape", kind: "call:process.argv", rejected: "fn run() {{ process.argv() }}", clean: "fn run(args: Args) {{ print(args) }}"},
@@ -1825,4 +1856,6 @@ struct PolicyPlantedPair { rule: String, kind: String, rejected: String, clean: 
         good :: policy_evaluate_source(manifest, path, pair.clean)
         assert_eq(good, [PolicyOccurrence]{}, "{pair.rule}: clean AST shape")
     }
+    Ok(Unit{})
 }
+#Test("corpus executable AST rules planted violation and clean pairs") { policy_ast_test_planted_rule_pairs() }
