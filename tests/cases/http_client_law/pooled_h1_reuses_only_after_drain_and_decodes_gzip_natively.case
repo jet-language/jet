@@ -1,0 +1,21 @@
+# HAND-PORT tests/http_client_law.rs:47-95 pooled_h1_reuses_only_after_drain_and_decodes_gzip_natively
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# Original accepted-connection count1, same-socket two request prefixes, ASCII gzip request header, literal25 gzip bytes and exact native decoded/header-removal output.
+# Peer is a REAL Jet Core.net fixture, re-expressing only original Rust harness setup/assertions; original client template verbatim after format expansion.
+# No original stderr equality predicate (stderr was only panic context). Original AOT-only matrix retained.
+fixture: pooled_h1_reuses_only_after_drain_and_decodes_gzip_natively.fixture
+env: NO_COLOR=1
+write: peer/main.jet peer/source.template
+step: jet build peer/main.jet
+exit: 0
+spawn peer: built
+await: file addr.txt timeout 30s
+capture: addr = text file addr.txt
+write: main.jet main.template
+step: jet build main.jet
+exit: 0
+step client: built
+exit: 0
+stdout: = pooled_h1_reuses_only_after_drain_and_decodes_gzip_natively.stdout.expected
+wait: peer
+exit: 0

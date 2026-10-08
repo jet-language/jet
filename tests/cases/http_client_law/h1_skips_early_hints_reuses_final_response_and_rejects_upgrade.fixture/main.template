@@ -1,0 +1,12 @@
+
+use core.http.client as http
+fn run() {
+    first :: http.get("http://{cap:addr}/early") ?? panic("early")
+    print(first.body().text(8) ?? panic("first body"))
+    second :: http.get("http://{cap:addr}/reuse") ?? panic("reuse")
+    print(second.body().text(8) ?? panic("second body"))
+    if http.get("http://{cap:upgrade_addr}/upgrade") == {
+        .Ok(_) -> { print("accepted") }
+        .Err(error) -> { print(error) }
+    }
+}

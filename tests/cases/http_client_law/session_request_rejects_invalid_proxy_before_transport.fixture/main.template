@@ -1,0 +1,15 @@
+
+use core.http.client as http
+fn run() -[Net, Time.Wait]> {
+    session :: http.session_proxy(http.session(), "not a proxy URL")
+    if http.session_request(session, "GET", "http://{cap:addr}/", "") == {
+        .Ok(_) -> print("accepted")
+        .Err(error) -> {
+            if error == {
+                .Proxy(stage) -> if stage == "invalid proxy" -> print("proxy rejected") else -> print("wrong error")
+                else -> print("wrong error")
+            }
+        }
+        else -> print("unexpected")
+    }
+}
