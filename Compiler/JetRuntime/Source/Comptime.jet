@@ -24,6 +24,9 @@ fn comptime_site(owner: I64, start: I64, end: I64) {
 
 // Caller holds request mutex. The first exhausted thread supplies the site;
 // later threads publish precisely that first record on their own control.
+// Lock order: request -> control.mutex72. Scheduler control_publish (134-152)
+// only stores record/status, unlocks, then drops the old owned text; it never
+// invokes callbacks, waits or charges a budget. No control -> request edge.
 fn comptime_publish_locked(kind: I64, status: I64) {
     record := sync_load(comptime_root + I64{32})
     if (record == I64{0}) {
@@ -125,4 +128,72 @@ fn comptime_publish_locked(kind: I64, status: I64) {
     }
     // Rust retains the first record until next begin so the host may report it.
     sync_mutex_unlock(comptime_root)
+}
+
+// Rust: extern "C" jet_rt_comptime_stop_write()->u32 (CAbi.rs:309).
+// Scheduler.rs:889-921 framing: decimal UTF-8 byte length + '\n' + JSON.
+// Budget records always have a site and an empty message, including U64.MAX
+// (not a missing optional field). Use World's unsigned decimal helper.
+#Export(c) fn jet_rt_comptime_stop_write() -> U32 {
+    sync_mutex_lock(comptime_root)
+    record :: sync_load(comptime_root + I64{32})
+    if (record == I64{0}) {
+        sync_mutex_unlock(comptime_root)
+        return U32{0}
+    }
+    status :: sync_load(record + I64{8})
+    scratch :: jet_rt_alloc(I64{192}, I64{8})
+    sync_store(scratch, I64{4189021028785791611})
+    at := I64{0}
+    if (status == I64{2}) {
+        sync_store(scratch + I64{8}, I64{5076794174694834722})
+        sync_store(scratch + I64{16}, I64{7163575730237629813})
+        sync_store(scratch + I64{24}, I64{8319683848551227252})
+        sync_store(scratch + I64{32}, I64{7959953058961701410})
+        sync_store(scratch + I64{40}, I64{975336037})
+        at = I64{44}
+    } else {
+        sync_store(scratch + I64{8}, I64{4932678986618978850})
+        sync_store(scratch + I64{16}, I64{7647723643521495141})
+        sync_store(scratch + I64{24}, I64{8463496752515740771})
+        sync_store(scratch + I64{32}, I64{8606134986161660531})
+        sync_store(scratch + I64{40}, I64{249686025582})
+        at = I64{45}
+    }
+    at += world_decimal(scratch + at, sync_load(record + I64{16}))
+    sync_store(scratch + at, I64{2482735057479082540})
+    trap_put(scratch + at + I64{8}, I64{58})
+    at += I64{9}
+    at += world_decimal(scratch + at, sync_load(record + I64{24}))
+    sync_store(scratch + at, I64{16363363393413676})
+    at += I64{7}
+    at += world_decimal(scratch + at, sync_load(record + I64{32}))
+    sync_store(scratch + at, I64{7449362198107595308})
+    sync_store(scratch + at + I64{8}, I64{137585556595301})
+    at += I64{14}
+    header :: scratch + I64{160}
+    digits :: world_decimal(header, at)
+    trap_put(header + digits, I64{10})
+    trap_flush_stdout()
+    // fcntl F_DUPFD_CLOEXEC borrows the compiler worker's lifetime descriptor3;
+    // failed duplicate is ignored just like protocol_channel's Option in Rust.
+    fd :: trap_syscall(I64{72}, I64{3}, I64{1030}, I64{0}, I64{0}, I64{0}, I64{0})
+    if (fd >= I64{0}) {
+        comptime_channel_write(fd, header, digits + I64{1})
+        comptime_channel_write(fd, scratch, at)
+        _ := trap_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+    }
+    jet_rt_free(scratch, I64{192}, I64{8})
+    sync_mutex_unlock(comptime_root)
+    U32{status}
+}
+
+fn comptime_channel_write(fd: I64, data: I64, length: I64) {
+    at := I64{0}
+    loop at < length {
+        written :: trap_syscall(I64{1}, fd, data + at, length - at, I64{0}, I64{0}, I64{0})
+        if (written == I64{-4}) -> next
+        if (written <= I64{0}) -> return
+        at += written
+    }
 }
