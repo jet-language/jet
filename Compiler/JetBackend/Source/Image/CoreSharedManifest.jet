@@ -308,8 +308,8 @@ pub struct CoreSharedBinding {
 fn core_shared_callable_rows_digest(rows: [CoreSharedCallableBinding]) -> String Never! {
     encoded := [String]{}
     loop row in rows {
-        parameters :: loop layout in row.signature.params -> "[{layout.size},{layout.align},{foundation_json_quote(core_shared_abi_class(layout.class))}]"
-        result :: if row.signature.result == .Val(layout) -> "[{layout.size},{layout.align},{foundation_json_quote(core_shared_abi_class(layout.class))}]" else -> "null"
+        parameters :: loop layout in row.signature.params -> "[{layout.size},{layout.align},{foundation_json_quote(lir_abi_class_name(layout.class))}]"
+        result :: if row.signature.result == .Val(layout) -> "[{layout.size},{layout.align},{foundation_json_quote(lir_abi_class_name(layout.class))}]" else -> "null"
         &encoded.push("[{foundation_json_quote(row.semantic_identity)},{foundation_json_quote(row.role)},{foundation_json_quote(row.type_key)},{foundation_json_quote(row.symbol)},{row.function.value},{row.signature.id.value},\"SystemV\",[{parameters.join(",")}],{result},{row.linked_offset}]")
     }
     core_shared_crypto.sha256("[{encoded.join(",")}]".bytes()).hex()

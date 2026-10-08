@@ -18,6 +18,7 @@ export function exportRows(text) {
 // Require the exact sealed object inventory; never reconstruct ABI from names.
 export function exactExportABI(rows, names) {
   if (!Array.isArray(rows) || rows.length !== names.length) throw Error('runtime export ABI inventory mismatch');
+  // exportRows admits ASCII C symbols, so default JS and Jet String order agree.
   const expected = [...names].sort();
   const layout = value => {
     if (!value || Object.keys(value).sort().join(',') !== 'align,class,size'

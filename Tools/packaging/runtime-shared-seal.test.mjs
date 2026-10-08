@@ -23,7 +23,9 @@ test('actual LIR ABI rows require exact sorted sealed exports and concrete layou
     { symbol: 'jet_one', parameters: [], result: null },
     { symbol: 'jet_two', parameters: [word], result: word },
   ];
-  assert.equal(exactExportABI(rows, ['jet_two', 'jet_one']), rows);
+  const declared = exportRows('jet_two\njet_one\n').map(row => row.name);
+  assert.deepEqual(declared, ['jet_two', 'jet_one']);
+  assert.equal(exactExportABI(rows, declared), rows);
   for (const bad of [undefined, null, [], [...rows].reverse(), [rows[0], rows[0]], [...rows, rows[1]],
     [{ ...rows[0], extra: true }, rows[1]], [rows[0], { ...rows[1], parameters: null }],
     [rows[0], { ...rows[1], result: undefined }]]) assert.throws(() => exactExportABI(bad, ['jet_one', 'jet_two']));
