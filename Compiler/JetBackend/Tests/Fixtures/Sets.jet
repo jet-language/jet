@@ -103,7 +103,8 @@ fn fx_sets() -> MIRProgram Never! {
     byte_output :: fx_set_method(&b, "set_to_list", byte_set, None, [MIRValueID]{}, bytes_ty, true)
     fx_print(&b, byte_output)
 
-    loop value in [MIRValueID]{source, original, items, union, replaced, snapshot_list, text_input, cloned, empty_list, empty_set, byte_input, byte_set, byte_output} -> fx_do(&b, MIROperation.Drop{value: value, kind: MIRDropKind.Value})
+    retired :: [MIRValueID]{source, original, items, union, replaced, snapshot_list, text_input, cloned, empty_list, empty_set, byte_input, byte_set, byte_output}
+    loop value in retired -> fx_do(&b, MIROperation.Drop{value: value, kind: MIRDropKind.Value})
     fx_block(&b, 0, MIRTerminator.Return{value: None})
     fx_set_program(b)
 }

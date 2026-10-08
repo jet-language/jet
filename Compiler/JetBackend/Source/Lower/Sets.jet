@@ -171,25 +171,20 @@ fn lower_set_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
     if symbol == "jet_set_has" || symbol == "jet_set_insert" || symbol == "jet_set_remove" || symbol == "jet_set_pop_kernel" || symbol == "jet_set_replace_kernel" {
         if args.len() != 1 -> return false
         key :: lower_use(&m, &f, args[0]) ?? return true
-        found :: lower_word(&f)
-        lower_call_helper(&m, &f, "map.find", lower_set_map(ty), [LIRValueID]{set, key}, Val(found))
-        zero :: lower_const(&f, 0)
-        present :: lower_flag(&f)
-        lower_emit(&f, LIRInst.Compare{dst: present, condition: LIRCondition.Ge, left: found, right: zero})
-        if symbol == "jet_set_has" {
+        if symbol == "jet_set_has" || symbol == "jet_set_insert" {
+            found :: lower_word(&f)
+            lower_call_helper(&m, &f, "map.find", lower_set_map(ty), [LIRValueID]{set, key}, Val(found))
+            zero :: lower_const(&f, 0)
             dst :: lower_result(p, c, &m, &f, instruction) ?? return true
-            lower_emit(&f, LIRInst.Move{dst: dst, src: present})
-            return true
-        }
-        if symbol == "jet_set_insert" {
-            dst :: lower_result(p, c, &m, &f, instruction) ?? return true
-            lower_emit(&f, LIRInst.Compare{dst: dst, condition: LIRCondition.Eq, left: present, right: lower_const_flag(&f, 0)})
-            offered := key
-            if !lower_value_owned(c, args[0]) {
-                offered = lower_new_like(&f, key)
-                lower_clone_into(p, &m, &f, key, offered, elem)
+            lower_emit(&f, LIRInst.Compare{dst: dst, condition: if symbol == "jet_set_has" -> LIRCondition.Ge else -> LIRCondition.Lt, left: found, right: zero})
+            if symbol == "jet_set_insert" {
+                offered := key
+                if !lower_value_owned(c, args[0]) {
+                    offered = lower_new_like(&f, key)
+                    lower_clone_into(p, &m, &f, key, offered, elem)
+                }
+                lower_set_insert(p, &m, &f, set, ty, offered)
             }
-            lower_set_insert(p, &m, &f, set, ty, offered)
             return true
         }
         if symbol == "jet_set_replace_kernel" {
@@ -202,12 +197,12 @@ fn lower_set_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
             }
             lower_set_insert(p, &m, &f, set, ty, offered)
         } else {
-            taken :: lower_pointer(&f)
-            lower_call_helper(&m, &f, "set.take", ty, [LIRValueID]{set, key}, Val(taken))
             if symbol == "jet_set_pop_kernel" {
                 dst :: lower_result(p, c, &m, &f, instruction) ?? return true
-                lower_emit(&f, LIRInst.Move{dst: dst, src: taken})
+                lower_call_helper(&m, &f, "set.take", ty, [LIRValueID]{set, key}, Val(dst))
             } else {
+                taken :: lower_pointer(&f)
+                lower_call_helper(&m, &f, "set.take", ty, [LIRValueID]{set, key}, Val(taken))
                 optional :: mir_type_from_kind(MIRTypeKind.Option{inner: elem})
                 lower_map_drop_value(p, &m, &f, taken, optional)
                 lower_alias_absent(&f, instruction)
