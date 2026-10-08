@@ -124,6 +124,12 @@ pub fn source_pair(first: f64, second: bool) -> ${pairSource}<f64,bool> { ${pair
   const unresolved = run();
   assert.notEqual(unresolved.status, 0);
   assert.match(unresolved.stderr, /JetMeasurement<Unbound>.*unresolved or unsupported argument Unbound/);
+  for (const argument of ["u8", "i64", "u64", "f32"]) {
+    put("runtime.rs", declarations + `pub fn jet_fixture_measurement(value: JetMeasurement<${argument}>) -> JetMeasurement<f64> { value }\n`);
+    const unsupported = run();
+    assert.notEqual(unsupported.status, 0, `${argument} must not create an unmatched Lower row`);
+    assert.ok(unsupported.stderr.includes(`JetMeasurement<${argument}>`) && unsupported.stderr.includes(`unsupported argument ${argument}`), unsupported.stderr);
+  }
   put("runtime.rs", declarations + "pub fn jet_fixture_measurement(value: JetMeasurement<Vec<f64>>) -> JetMeasurement<f64> { value }\n");
   const nested = run();
   assert.notEqual(nested.status, 0);
