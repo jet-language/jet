@@ -1,0 +1,8 @@
+Error [E1102]: `edit` cannot be shared into a task — it is a view that does not live long enough
+  --> write_window_cannot_cross_task_boundary.jet:5:25
+    |
+  5 |     handle :: task edit.len()
+    |                         ^^^
+ Why: A view is a borrow, not an owned value; tasks and channels move owned values between threads
+ Fix: Give the task plain owned data, or rebuild the value as an owned copy before spawning
+More: jet-lang.dev/e/E1102
