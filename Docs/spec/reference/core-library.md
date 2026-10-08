@@ -82,6 +82,9 @@ mailbox grammar is ASCII dot-atom or quoted local, MIME and physical-header
 limits precede attachment size, and envelopes require 1–100 recipients.
 Private raw builders only marshal the existing validated native carriers;
 their construction errors retain the original Configuration operation strings.
+The canonical `core.files.__create_dir_all_raw` leaf calls the shared recursive
+directory-creation host operation without a second fault probe; source callers
+retain their own FS.Write preflight and the host's Write/path error context.
 Filesystem internal host calls use their canonical `core.files.__*` names
 directly. There is no second `__files7_*` alias layer: the Prelude's existing
 registry entries provide the raw host boundary until Jet runtime L7 replaces

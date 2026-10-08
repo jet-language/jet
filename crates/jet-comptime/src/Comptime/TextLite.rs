@@ -1206,6 +1206,13 @@ pub(crate) fn apply_files_leaf(
                     }).collect())
                 })
             },
+            "__create_dir_all_raw" => {
+                let path = match args.first() {
+                    Some(CtValue::Str(value)) => value,
+                    _ => return Err("core.files.__create_dir_all_raw argument 0 must be a String".to_string()),
+                };
+                done(text_kernel::jet_std_fs_create_dir_all_raw(path), unit)
+            },
             "__temp_path_sample" | "__temp_clock_raw" => {
                 let (available, nanos) = text_kernel::jet_std::jet_fs_temp_path_sample_raw();
                 CtValue::Struct { type_name: "(clock_available,nanos)".to_string(),

@@ -1584,7 +1584,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 082c40450f185ddb216a5892683403606d887ff8d6e3ae4556a63887e19b9ed2
+// Source SHA-256: 15ac9f3fadf046cd52bd166b47814cea8fab422681d21d8a97c647c45f97c600
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -2026,7 +2026,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::source_owned("core.files", "list_dir", &[true]),
     CoreCallRecord::new( "core.files", "create_dir", "jet_std_fs_create_dir", true, &[true], ),
     CoreCallRecord::new( "core.files", "create_dir_all", "jet_std_fs_create_dir_all", true, &[true], ),
-    CoreCallRecord::new("core.files", "__create_dir_all_raw", "jet_std_fs_create_dir_all", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.files", "__create_dir_all_raw", "jet_std_fs_create_dir_all_raw", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::source_owned("core.files", "copy", &[true, true]),
     CoreCallRecord::new( "core.files", "copy_dir", "jet_std_fs_copy_dir", true, &[true, true], ),
     CoreCallRecord::source_owned("core.files", "symlink", &[true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
