@@ -1,0 +1,48 @@
+# tests/encoding_parity.rs::jsonl_csv_xml_cbor_streams_match_aot_and_default_dev
+# ORACLE-LITERAL and exact original tier equality; PENDING-SAME-HEAD, runtime UNRUN.
+# Rust emitter/rustc compile infrastructure retires; native AOT build and execution retained.
+fixture: jsonl_csv_xml_cbor_streams_match_aot_and_default_dev.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+write: jsonl.jet jsonl-source.jet
+step: jet build jsonl.jet
+exit: 0
+step jsonl_aot: built
+exit: 0
+step jsonl_default: jet run jsonl.jet
+stdin: null
+exit: == jsonl_aot
+stdout: == jsonl_aot
+stderr: == jsonl_aot
+write: csv.jet csv-source.jet
+step: jet build csv.jet
+exit: 0
+step csv_aot: built
+exit: 0
+step csv_default: jet run csv.jet
+stdin: null
+exit: == csv_aot
+stdout: == csv_aot
+stderr: == csv_aot
+write: xml.jet xml-source.jet
+step: jet build xml.jet
+exit: 0
+step xml_aot: built
+exit: 0
+step xml_default: jet run xml.jet
+stdin: null
+exit: == xml_aot
+stdout: == xml_aot
+stderr: == xml_aot
+write: cbor.jet cbor-source.jet
+step: jet build cbor.jet
+exit: 0
+step cbor_aot: built
+exit: 0
+step cbor_default: jet run cbor.jet
+stdin: null
+exit: == cbor_aot
+stdout: == cbor_aot
+stderr: == cbor_aot

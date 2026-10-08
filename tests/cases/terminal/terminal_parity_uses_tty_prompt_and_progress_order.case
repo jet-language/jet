@@ -1,0 +1,40 @@
+# tests/terminal.rs::terminal_parity_uses_tty_prompt_and_progress_order
+# Exact original helper/source predicates; PENDING-SAME-HEAD; runtime UNRUN.
+requires: os:unix
+fixture: terminal_parity_uses_tty_prompt_and_progress_order.fixture
+env: NO_COLOR=1
+step default: script -qfec "stty rows 24 cols 100; exec {jet} run --quiet {work}/terminal.jet" /dev/null
+stdin: tty.stdin
+exit: 0
+stdout.replace("\r", ""): before "Continue? [y/N]" "Choose a target:"
+stdout.replace("\r", ""): before "Choose a target:" "choice: production"
+stdout.replace("\r", ""): before "choice: production" "Secret: "
+stdout.replace("\r", ""): before "Secret: " "secret length: 6"
+stdout.replace("\r", ""): before "secret length: 6" "progress"
+stdout.replace("\r", ""): before "progress" "stderr stream"
+stdout: ~ "\rprogress"
+stdout: !~ "secret: non-tty"
+step release: script -qfec "stty rows 24 cols 100; exec {jet} run --quiet --release {work}/terminal.jet" /dev/null
+stdin: tty.stdin
+exit: 0
+stdout.replace("\r", ""): == default
+stdout.replace("\r", ""): before "Continue? [y/N]" "Choose a target:"
+stdout.replace("\r", ""): before "Choose a target:" "choice: production"
+stdout.replace("\r", ""): before "choice: production" "Secret: "
+stdout.replace("\r", ""): before "Secret: " "secret length: 6"
+stdout.replace("\r", ""): before "secret length: 6" "progress"
+stdout.replace("\r", ""): before "progress" "stderr stream"
+stdout: ~ "\rprogress"
+stdout: !~ "secret: non-tty"
+step interpret: script -qfec "stty rows 24 cols 100; exec {jet} run --quiet --interpret {work}/terminal.jet" /dev/null
+stdin: tty.stdin
+exit: 0
+stdout.replace("\r", ""): == default
+stdout.replace("\r", ""): before "Continue? [y/N]" "Choose a target:"
+stdout.replace("\r", ""): before "Choose a target:" "choice: production"
+stdout.replace("\r", ""): before "choice: production" "Secret: "
+stdout.replace("\r", ""): before "Secret: " "secret length: 6"
+stdout.replace("\r", ""): before "secret length: 6" "progress"
+stdout.replace("\r", ""): before "progress" "stderr stream"
+stdout: ~ "\rprogress"
+stdout: !~ "secret: non-tty"

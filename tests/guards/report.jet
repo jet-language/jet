@@ -1,0 +1,15 @@
+use core.files as s1_report_files
+
+// Port of tests/report.rs:59-65, document assertions unchanged.
+// Source/crates jet-cli/jetpack Rust-only .rs endpoint lexical audit retires with Rust.
+fn s1_report_policy_assertions() {
+    policy :: s1_report_files.read("Docs/spec/reference/network-policy.md") ?? panic("read network policy")
+    assert(policy.contains("D-TELEMETRY1=A"))
+    assert(policy.contains("Jet sends no telemetry"))
+    assert(policy.contains("Inventory of toolchain network paths"))
+    assert(!policy.contains("future send operation"))
+}
+
+#Test("zero_telemetry_policy_docs_and_source_audit") {
+    s1_report_policy_assertions()
+}
