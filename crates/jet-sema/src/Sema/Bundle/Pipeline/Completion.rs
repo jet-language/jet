@@ -616,7 +616,13 @@ pub(super) fn complete_bundle_check(
                 }
             })
             .collect::<HashMap<_, _>>();
-        check_effect_boundaries(&module.items, &local_solved, &local_summaries, &mut diags);
+        check_effect_boundaries(
+            &module.items,
+            &local_solved,
+            &local_summaries,
+            &bundle.modules,
+            &mut diags,
+        );
         let module_alias = name_ledger
             .module_alias(module_index)
             .unwrap_or(&module.alias);

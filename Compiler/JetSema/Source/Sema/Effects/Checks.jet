@@ -79,6 +79,11 @@ pub struct SemaEffectModuleInput {
     pub trait_bounds: [SemaEffectTraitBound]{[SemaEffectTraitBound]{}}
 }
 
+struct SemaEffectDispatchSite {
+    dispatch: TEffectSpan
+    module_index: Int
+}
+
 // One bounded trait method: an impl of `trait_name.method` may use only the
 // effects in `bound` (`-[]>` is the empty bound).
 pub struct SemaEffectTraitBound {
@@ -680,7 +685,7 @@ fn sema_effect_node_index(node_by_key: [String:Int], key: String) -> Int? Never!
 
 fn sema_effect_publish_diagnostics(all: &[Diagnostic], modules: &[SemaEffectModuleResult], module_index: Int, source_segments: [SemaSourceSegment], batch: [Diagnostic]) Never! {
     loop diagnostic in batch {
-        located :: sema_diagnostic_with_source_location(^diagnostic, source_segments)
+        located :: if diagnostic.source_path != None -> ^diagnostic else -> sema_diagnostic_with_source_location(^diagnostic, source_segments)
         &all.push(located)
         &modules[module_index].diagnostics.push(located)
     }
@@ -1449,12 +1454,21 @@ fn sema_effect_unbounded_dispatch_diagnostic(dispatch: TEffectSpan) -> Diagnosti
     sema_error("E0743", dispatch.span, "dynamic call `{dispatch.name}` has no effect bound", "a trait value can select any implementation at runtime, so an enclosing effect ceiling needs the trait method's declared upper bound", "declare an effect row on `{dispatch.name}`, such as `-[]>` for pure dispatch, or move this dynamic call outside the bounded function")
 }
 
+fn sema_effect_locate_dispatch(site: SemaEffectDispatchSite, inputs: [SemaEffectModuleInput]) -> Diagnostic Never! {
+    located := sema_diagnostic_with_source_location(
+        sema_effect_unbounded_dispatch_diagnostic(site.dispatch),
+        inputs[site.module_index].source_segments,
+    )
+    if located.source_path == None -> located.span = None
+    ^located
+}
+
 // The first unbounded trait dispatch reachable from `index` through the call
 // graph, the function's own calls first.
-fn sema_effect_find_dispatch(nodes: [SemaEffectNode], node_by_key: [String:Int], index: Int, seen: &[Bool]) -> TEffectSpan? {
+fn sema_effect_find_dispatch(nodes: [SemaEffectNode], node_by_key: [String:Int], index: Int, seen: &[Bool]) -> SemaEffectDispatchSite? {
     if seen[index] -> return None
     seen[index] = true
-    if nodes[index].dispatches.len() > 0 -> return Val(nodes[index].dispatches[0])
+    if nodes[index].dispatches.len() > 0 -> return Val(SemaEffectDispatchSite{dispatch: nodes[index].dispatches[0], module_index: nodes[index].module_index})
     loop edge in nodes[index].call_edges {
         target :: sema_effect_node_index(node_by_key, edge) ?? next
         found :: sema_effect_find_dispatch(nodes, node_by_key, target, &seen)
@@ -1697,7 +1711,7 @@ fn sema_effect_check_memory_denials(nodes: [SemaEffectNode], node_by_key: [Strin
     }
 }
 
-fn sema_effect_check_node(node: SemaEffectNode, solved: [String], secret_reached: Bool, dispatch: TEffectSpan?, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_effect_check_node(node: SemaEffectNode, solved: [String], secret_reached: Bool, dispatch: Diagnostic?, diagnostics: &[Diagnostic]) -> Bool {
     valid := true
     secret_granted :: loop bound in node.declared {
         if sema_effect_root(bound) == "Secret" -> break true
@@ -1712,7 +1726,7 @@ fn sema_effect_check_node(node: SemaEffectNode, solved: [String], secret_reached
             // reports the missing trait bound once instead of the generic
             // ceiling diagnostics, and a bare purity marker reports nothing.
             if !node.has_declared_row -> return valid
-            &diagnostics.push(sema_effect_unbounded_dispatch_diagnostic(found))
+            &diagnostics.push(found)
             return false
         }
         node.is_pure -> {
@@ -1847,10 +1861,13 @@ pub fn sema_effects_check_modules(inputs: ^[SemaEffectModuleInput], package_memo
     secret_reach :: sema_effect_secret_reach(nodes, node_by_key)
     loop node_index in 0..<nodes.len() {
         function_diagnostics := [Diagnostic]{}
-        dispatch := TEffectSpan?{None}
+        dispatch := Diagnostic?{None}
         if nodes[node_index].has_declared_row || nodes[node_index].is_pure {
             seen := (loop _ in nodes -> false)
-            dispatch = sema_effect_find_dispatch(nodes, node_by_key, node_index, &seen)
+            site :: sema_effect_find_dispatch(nodes, node_by_key, node_index, &seen)
+            if site == .Val(found) {
+                dispatch = Val(sema_effect_locate_dispatch(found, inputs))
+            }
         }
         if !sema_effect_check_node(nodes[node_index], solved[node_index], secret_reach[node_index], dispatch, &function_diagnostics) {
             // Keep all diagnostics; the caller receives one complete graph

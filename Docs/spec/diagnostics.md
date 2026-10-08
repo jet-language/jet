@@ -85,6 +85,10 @@ against a module-local span. In particular, solved-effect boundary diagnostics
 belong to the function's declaring module, not the bundle entry file. The
 Jet checker attaches the module's source segments when publishing effect
 reports; the reference checker attaches the same origin before merging them.
+For a transitive unbounded trait dispatch (E0743), the witness is the actual
+dispatch call in the callee's module, even when the effect ceiling belongs to
+a caller elsewhere. If that witness has no identifiable source module, the
+report remains unlocated instead of borrowing the caller's position.
 
 ## No-OS E3301 contract
 
