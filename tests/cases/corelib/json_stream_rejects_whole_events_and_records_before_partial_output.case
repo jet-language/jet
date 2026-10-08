@@ -1,0 +1,21 @@
+# Port of tests/corelib_parts/encoding_streams.rs::json_stream_rejects_whole_events_and_records_before_partial_output; guest source unchanged.
+# ORACLE-LITERAL: tests/corelib_parts/encoding_streams.rs:339.
+fixture: fixtures/json_stream_rejects_whole_events_and_records_before_partial_output
+write: guest.jet fixtures/json_stream_rejects_whole_events_and_records_before_partial_output/fixture.template
+step aot: jet build guest.jet
+step aot_run: built
+stdout: = json_stream_rejects_whole_events_and_records_before_partial_output.out
+stderr: empty
+file: text.json = json_stream_rejects_whole_events_and_records_before_partial_output.text.json.expected
+file: key.json = json_stream_rejects_whole_events_and_records_before_partial_output.key.json.expected
+file: depth.json = json_stream_rejects_whole_events_and_records_before_partial_output.depth.json.expected
+file: record.jsonl = json_stream_rejects_whole_events_and_records_before_partial_output.record.jsonl.expected
+file: nonfinite.jsonl = json_stream_rejects_whole_events_and_records_before_partial_output.nonfinite.jsonl.expected
+step: jet run guest.jet
+stdout: = json_stream_rejects_whole_events_and_records_before_partial_output.out
+stderr: empty
+file: text.json = json_stream_rejects_whole_events_and_records_before_partial_output.text.json.expected
+file: key.json = json_stream_rejects_whole_events_and_records_before_partial_output.key.json.expected
+file: depth.json = json_stream_rejects_whole_events_and_records_before_partial_output.depth.json.expected
+file: record.jsonl = json_stream_rejects_whole_events_and_records_before_partial_output.record.jsonl.expected
+file: nonfinite.jsonl = json_stream_rejects_whole_events_and_records_before_partial_output.nonfinite.jsonl.expected

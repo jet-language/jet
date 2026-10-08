@@ -1,0 +1,8 @@
+# Port of tests/corelib_parts/encoding_streams.rs::cbor_whole_requested_allocation_stays_under_counting_allocator_ceiling; guest source unchanged.
+# ORACLE-LITERAL: tests/corelib_parts/encoding_streams.rs:2777.
+# PENDING-SEAM(codec-allocation-probe): original encoding_streams.rs:2754 and2762 require per-call peak requested allocation <= options.max_bytes for BOTH parse and typed decode. Original options ceilings are100 and256 bytes. Never replaced by RSS/process memory or success-only checks. Generated-Rust function/attribute replacement assertions (2705,2707,2769) retire as Rust-only.
+refused: codec-allocation-probe
+fixture: fixtures/cbor_whole_requested_allocation_stays_under_counting_allocator_ceiling
+step aot: jet build fixture.jet
+step aot_run: built
+stdout: = cbor_whole_requested_allocation_stays_under_counting_allocator_ceiling.out
