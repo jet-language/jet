@@ -10279,28 +10279,7 @@ fn lower_method_call_impl(
                 });
             }
         }
-        if handle == "JobQueue"
-            && matches!(
-                method,
-                "enqueue"
-                    | "delay"
-                    | "receipt"
-                    | "inspect"
-                    | "events"
-                    | "claim"
-                    | "heartbeat"
-                    | "acknowledge"
-                    | "fail"
-                    | "cancel"
-                    | "dead_letter"
-                    | "recover_expired"
-                    | "status"
-                    | "pause"
-                    | "resume"
-                    | "wait"
-                    | "prune"
-            )
-        {
+        if handle == "JobQueue" && matches!(method, "enqueue" | "delay") {
             return in_own_frame(|| {
                 let Some(ty) = resolved_ret.cloned() else {
                     return invariant_method_expr(
@@ -10361,41 +10340,14 @@ fn lower_method_call_impl(
                             );
                         }
                     }
-                    "cancel" | "dead_letter" if args.len() == 2 => {
-                        lowered_args.extend(args.iter().map(|arg| lower_expr(&arg.expr, cx, env)));
-                        lowered_args.push(TExpr {
-                            ty: Type::Option(Box::new(Type::String)),
-                            kind: TExprKind::Absent,
-                        });
-                    }
-                    _ => {
-                        lowered_args.extend(args.iter().map(|arg| lower_expr(&arg.expr, cx, env)));
-                    }
+                    _ => unreachable!("only checked enqueue/delay use queue normalization"),
                 }
                 if let Some(record) = crate::Syntax::core_receiver_method(handle, method).filter(|record| record.source_member().is_some()) {
                     if let Some(source) = lower_checked_core_source_call(*record, method_span, type_args, &mut lowered_args, &ty, cx) {
                         return source;
                     }
                 }
-                let widen_to_vec = vec![false; lowered_args.len()];
-                let record =
-                    match checked_core_record("core.jobs", method, lowered_args.len(), method_span)
-                    {
-                        Ok(record) => record,
-                        Err(expr) => return expr,
-                    };
-                TExpr {
-                    ty: ty.clone(),
-                    kind: TExprKind::CoreCall {
-                        record,
-                        args: lowered_args,
-                        source_span: method_span,
-                        type_args: Vec::new(),
-                        widen_to_vec,
-                        data_plan: None,
-                        fallibility: TFailureCarrier::from_checked_type(&ty),
-                    },
-                }
+                invariant_method_expr(method_span, format!("JobQueue.{method} has no checked source target"))
             });
         }
         if let Some((core_method, mutates)) = service_method_route(handle, method) {

@@ -1,18 +1,15 @@
 // core-conformance: core.jobs.queue
+// Run with a fresh JET_JOB_QUEUE_DB path supplied at process startup.
 package {
     name: "jobs-conformance"
-    authority: { holds: { allow: [DB, FS, IO, Env, Mem.Alloc, Time.Wait] } }
+    authority: { holds: { allow: [DB, FS.Read, FS.Write, IO, Mem.Alloc, Rand, Time, Time.Wait] } }
 }
 use core.jobs as api
-use core.testing as testing
-use core.sys as sys
 
 #Job(.Dev)
 fn process(payload: String) { print(payload) }
 
 fn run() {
-    root :: testing.temp_dir("jobs-conformance")
-    sys.set("JET_JOB_QUEUE_DB", Path.from(root).join("jobs.db").to_string())
     queue := api.queue() ?? panic("queue authority/provider rejected")
     completed :: &queue.enqueue(process, "complete", key: "conformance-complete") ?? panic("enqueue failed")
     failed :: &queue.enqueue(process, "fail", key: "conformance-fail") ?? panic("enqueue failed")

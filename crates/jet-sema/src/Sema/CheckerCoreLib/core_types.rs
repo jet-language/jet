@@ -2585,47 +2585,6 @@ pub(crate) fn job_queue_method_return(
             n_args == 3,
             result(Type::Named("JobQueueReceipt".to_string())),
         ),
-        "receipt" => (
-            n_args == 1,
-            result(Type::Named("JobQueueReceipt".to_string())),
-        ),
-        "inspect" => (
-            n_args == 2,
-            result(Type::List(Box::new(Type::Named(
-                "JobQueueRecord".to_string(),
-            )))),
-        ),
-        "events" => (
-            n_args == 1,
-            result(Type::List(Box::new(Type::Named(
-                "JobQueueEvent".to_string(),
-            )))),
-        ),
-        "claim" => (
-            n_args == 2,
-            result(Type::List(Box::new(Type::Named(
-                "JobQueueClaim".to_string(),
-            )))),
-        ),
-        "heartbeat" | "acknowledge" | "fail" | "cancel" | "dead_letter" => {
-            let valid = match method {
-                "heartbeat" => n_args == 1,
-                "acknowledge" | "fail" => n_args == 2,
-                "cancel" | "dead_letter" => (2..=3).contains(&n_args),
-                _ => false,
-            };
-            (
-                valid,
-                result(Type::Named("JobQueueReceipt".to_string())),
-            )
-        }
-        "recover_expired" => (n_args == 0, result(unit_ty())),
-        "status" | "pause" | "resume" => (
-            n_args == 0,
-            result(Type::Named("JobQueueStatus".to_string())),
-        ),
-        "wait" => (n_args == 1, result(Type::Named("JobQueueStatus".to_string()))),
-        "prune" => (n_args == 0, result(Type::Int)),
         _ => return None,
     };
     Some(valid.then_some(ret))

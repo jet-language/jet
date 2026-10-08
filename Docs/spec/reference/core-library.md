@@ -3997,8 +3997,8 @@ API.
 
 ## `core.jobs` — durable receiver lifecycle
 
-`jobs.queue() -[DB]> JobQueue ServiceError!` opens the selected durable
-provider under the package's `DB` authority. `JobQueue` is an opaque handle,
+`jobs.queue() -[DB, FS.Read, FS.Write, Time]> JobQueue ServiceError!` opens the
+durable SQLite provider under the package authority. `JobQueue` has private state,
 not an in-memory record collection passed between free functions. Queue
 identity, capacity, retry budget, leases, and retention come from the
 authority/provider policy.
@@ -4018,9 +4018,28 @@ expiry. A status reports queued, running, retrying, completed, failed,
 dead-lettered, and cancelled counts rather than exposing mutable queue storage.
 All receiver operations retain typed `ServiceError` failures.
 
-`is_terminal(state)` and `is_cancelled(state)` are pure Jet policy. Durable
-transactions, shared authority, leases, and retained worker callbacks remain
-provider operations; the source facade does not simulate them.
+The source-owned lifecycle exposes the effects it actually consumes:
+
+| Operation | Effects |
+| --- | --- |
+| `queue()` | `DB`, `FS.Read`, `FS.Write`, `Time` |
+| `receipt` / `inspect` / `events` | `DB` |
+| `claim` | `DB`, `Rand`, `Time` |
+| `enqueue` / `delay` / `heartbeat` / `acknowledge` / `fail` / `cancel` / `dead_letter` / `recover_expired` / `status` / `pause` / `resume` / `prune` | `DB`, `Time` |
+| `wait` | `DB`, `Time`, `Time.Wait` |
+
+`JET_JOB_QUEUE_DB` is a startup-only provider-path exception: a nonempty UTF-8
+startup value selects the database; otherwise `.jet/state/jobs.db` is used.
+Logical environment overlays do not redirect this provider. Set an isolated
+database path before launching examples or conformance programs.
+
+The state transitions, SQL, row projections, CBOR payloads, signed receipts,
+retry policy, event fields, and commit-before-publication ordering are Jet
+source in `Core/jobs/jobs.jet`. The private SQLite and Devtools leaves call
+the existing host kernels; they do not implement a second queue or sink.
+The compiler checks the declared `#Job` identity and its payload type before
+normalizing the name and forwarding `enqueue`/`delay` to their checked source
+targets; arbitrary function values or string-selected jobs are not admitted.
 
 ## `core` — built Core modules
 
