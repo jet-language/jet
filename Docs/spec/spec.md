@@ -856,6 +856,10 @@ actions run in reverse declaration order, `scope.guard` closures run in reverse
 registration order, and `os.atexit` handlers run in registration order after
 scope cleanup. Work registered after the stop does not run. A host kill or an
 abort does not promise these finalizers.
+The ordinary process root follows the same rule for a runtime stop: lexical
+`Close` and deferred cleanup run before the report is delivered with exit 70.
+A non-unwinding native call boundary transports the stop to its caller for
+cleanup, without exposing a successful return value.
 
 ### Handling and discarding failure values
 
