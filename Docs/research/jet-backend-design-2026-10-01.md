@@ -2049,3 +2049,27 @@ combination. Its `kind-range`, `encoding-range`, `lexical-range` and
 Native execution and caller/MIR/layout admission remain unexercised; parser
 and strict C11 syntax checks alone do not establish runtime parity.
 
+### Native geometry ownership boundary
+
+`GeometryABI.jet` defines private Coord24, Transform64, Ray16 and inline
+Vec/Mat carriers. `LinalgFns.rs:561-584` and `MathTaskMem.rs:83-93` establish
+that every lane is f64, not f32. Matrix lanes retain their column-major order.
+Frame identifiers are raw i64, not enum ordinals. Constructors convert
+borrowed exact Int frames before allocation; getters create fresh owners
+(`CAbiRoutes.rs:9676-9697,11456-11507`).
+
+Clone preserves Float bits, but equality compares each lane numerically in
+Rust derive order. It must not shortcut pointer identity or compare bytes:
+NaN rejects even self-equality, while signed zeros compare equal. Ray's
+constructor consumes both Coord owners; its native shell holds pointers,
+clone/getters duplicate them, and drop releases children before the shell
+(`CAbiRoutes.rs:11045-11059`). No Rust allocation or layout is accepted.
+
+`GeometryGlueWitness.c` requires the real Jet object and
+`--wrap=jet_rt_free`, with asserted interception and exact-once frees. It
+exercises every lane, NaNs and signed zeros, borrowed boxed frame boundaries,
+fresh getters and Ray recursive ownership. `coord-overflow` and
+`transform-overflow` must stop on an out-of-native-range exact Int.
+Native execution and MIR/caller/layout admission remain unexercised; source
+parse and strict C11 syntax receipts are not execution evidence.
+
