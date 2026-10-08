@@ -2,7 +2,7 @@ use core.files as s3_control_files
 use core.text.parse as s3_control_parse
 
 // Port of tests/text_unicode.rs:96-110; exact UnicodeData Cc codepoint vector.
-#Test("control_category_has_exact_utf8_scan_ranges") {
+fn s3_guard_control_scan_ranges() {
     data :: s3_control_files.read("tests/data/unicode/ucd/UnicodeData.txt") ?? panic("missing UnicodeData")
     controls := [Int]{}
     loop raw in data.lines() {
@@ -15,4 +15,8 @@ use core.text.parse as s3_control_parse
     loop cp in 0..<32 -> &expected.push(cp)
     loop cp in 127..<160 -> &expected.push(cp)
     assert_eq(controls, expected)
+}
+
+#Test("control_category_has_exact_utf8_scan_ranges") {
+    s3_guard_control_scan_ranges()
 }

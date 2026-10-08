@@ -41,7 +41,7 @@ fn s3_truth_example_paths(text: String) -> [String] {
 }
 
 // Port of tests/truthfulness.rs:258-301 and helpers304-319/1999-2015.
-#Test("docs_referenced_examples_exist") {
+fn s3_guard_docs_examples() {
     content := s3_truth_files.read("README.md") ?? ""
     entries :: s3_truth_files.list_dir("Docs") ?? panic("Docs/ missing")
     paths := [String]{}
@@ -66,6 +66,10 @@ fn s3_truth_example_paths(text: String) -> [String] {
         if !s3_truth_files.exists(path) -> &missing.push(path)
     }
     assert(missing.len() == 0, "docs reference example files that do not exist: {missing}")
+}
+
+#Test("docs_referenced_examples_exist") {
+    s3_guard_docs_examples()
 }
 
 fn s3_truth_ascii_word_byte(b: U8) -> Bool Never! {
@@ -152,7 +156,7 @@ fn s3_truth_link_path(raw: String) -> String {
 }
 
 // Port of tests/truthfulness.rs:1679-1763 and all helpers1930-1992.
-#Test("vocabulary_page_has_one_definition_and_no_retired_senses") {
+fn s3_guard_vocabulary_senses() {
     labels :: [String]{"codec mode called a stream", "event called a stream", "collecting loop called yielding"}
     hostile :: [String]{"The codec mode is called a stream.", "The event is called a stream.", "The collecting loop is called yielding."}
     loop i in 0..<labels.len() {
@@ -192,4 +196,8 @@ fn s3_truth_link_path(raw: String) -> String {
         }
     }
     assert(violations.len() == 0, "linked Markdown targets must use the vocabulary page and current senses: {violations}")
+}
+
+#Test("vocabulary_page_has_one_definition_and_no_retired_senses") {
+    s3_guard_vocabulary_senses()
 }

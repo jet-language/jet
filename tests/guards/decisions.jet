@@ -44,7 +44,7 @@ fn s3_decision_expand(token: String) -> [String] {
     result
 }
 
-#Test("tombstoned_decision_ids_carry_provenance_document_subclaims") {
+fn s3_guard_tombstone_provenance() {
     docs :: decision_files.read("Docs/spec/syntax-decisions.md") ?? panic("read syntax decisions")
     header :: "### Superseded IDs (tombstones)"
     from :: s5_grammar_find(docs, header, 0)
@@ -79,4 +79,8 @@ fn s3_decision_expand(token: String) -> [String] {
     loop id in required {
         assert(ids.contains(id), "tombstone extraction regressed: missing {id}")
     }
+}
+
+#Test("tombstoned_decision_ids_carry_provenance_document_subclaims") {
+    s3_guard_tombstone_provenance()
 }

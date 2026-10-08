@@ -2,7 +2,7 @@ use core.files as files
 
 // Repository-root paths deliberately match tests/data_hostile.rs.
 // KNOWN-FAILING #4802: the original requires `Limit group_mean:`, but the checked-in golden says `Limit query.group_by.mean:`. Keep the assertion unchanged.
-#Test("hostile corpus covers required failure classes") {
+fn s3_guard_hostile_corpus() {
     output :: files.read("Examples/features/expected/tooling/data_hostile.out") ?? panic("read hostile data golden")
     needles :: [String]{
         "empty_mean: Empty mean:",
@@ -30,7 +30,11 @@ use core.files as files
     }
 }
 
-#Test("flagship example covers analysis pipeline") {
+#Test("hostile corpus covers required failure classes") {
+    s3_guard_hostile_corpus()
+}
+
+fn s3_guard_flagship_pipeline() {
     output :: files.read("Examples/features/expected/tooling/data_analysis.out") ?? panic("read flagship data golden")
     needles :: [String]{
         "tickets: 5", "focused: 4", "owned: Core", "mean: Core", "describe: count=5",
@@ -39,4 +43,8 @@ use core.files as files
     loop needle in needles {
         assert(output.contains(needle), "flagship golden missing: {needle}")
     }
+}
+
+#Test("flagship example covers analysis pipeline") {
+    s3_guard_flagship_pipeline()
 }

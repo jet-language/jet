@@ -2,7 +2,7 @@ use core.files as s3_marker_files
 
 // Port of tests/marker_declarations.rs:62-149. The full source scan remains;
 // no textual predicate is replaced with a smaller sample or file allowlist.
-#Test("retired_marker_declaration_forms_are_confined_to_fixtures_and_history") {
+fn s3_guard_retired_marker_forms() {
     allowed :: [String]{"Docs/spec/syntax-decisions.md", "tests/ui/marker_decl_rejected_forms.jet", "tests/ui/marker_decl_rejected_forms.stderr"}
     ignored :: [String]{".git", ".claude", ".opencode", ".tmp", ".jet", ".tower", ".agent-worktrees", "node_modules", "target", "build", ".cache", "cache", "dist", "result"}
     marker_head :: "mark"
@@ -53,4 +53,8 @@ use core.files as s3_marker_files
         }
     }
     assert(offenders.len() == 0, "retired marker declaration forms escaped their fixture/history allowlist: {offenders}")
+}
+
+#Test("retired_marker_declaration_forms_are_confined_to_fixtures_and_history") {
+    s3_guard_retired_marker_forms()
 }

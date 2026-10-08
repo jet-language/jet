@@ -3,7 +3,7 @@ use core.files as files
 // KNOWN-FAILING #4803: original tests/core_surface_ledger.rs:204-205 requires lowercase
 // "variadic parameter"; committed variadic_not_last.stderr starts with uppercase.
 // Predicate retained verbatim.
-#Test("Core API syntax is taught by reference editor and diagnostic surfaces") {
+fn s3_guard_core_syntax_surfaces() {
     syntax :: files.read("Docs/spec/reference/syntax-surface.jet") ?? panic("read syntax reference")
     markers :: [String]{
         "values: ...String", "[...tags", "user.[name, email]", "Stream<Int>", "yield i",
@@ -29,4 +29,8 @@ use core.files as files
     policy :: files.read("tests/ui/user_policy_bad_args.stderr") ?? panic("read policy diagnostic")
     assert(policy.contains("policy `audit`"))
     assert(policy.contains("Fix:"))
+}
+
+#Test("Core API syntax is taught by reference editor and diagnostic surfaces") {
+    s3_guard_core_syntax_surfaces()
 }
