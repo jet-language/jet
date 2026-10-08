@@ -213,7 +213,7 @@ fn vault_linux_quarantine_exact(dirfd: I64, name: I64, held: I64, quarantine: I6
         rt_text_store(acquired, I64{7882815992864204146})
         rt_text_store(acquired + I64{8}, I64{7630437})
         written :: vault_linux_write_all(replacement, acquired, I64{11})
-        synced :: if written -> trap_syscall(I64{74}, replacement, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}) else -> I64{-1}
+        synced :: if written -> vault_linux_fsync(replacement) else -> I64{-1}
         vault_linux_close(replacement)
         if (!written || synced != I64{0}) -> return vault_error_new(I64{6}, I64{0}, I64{0})
     }
@@ -790,7 +790,7 @@ fn vault_acquire_lock_inner(root: I64, repo: I64, revision: I64, hash: I64, reco
     at += I64{64}
     rt_text_put(buffer + at, I64{10})
     if !vault_linux_write_all(file, buffer, at + I64{1}) -> return vault_lock_io(buffer)
-    if (trap_syscall(I64{74}, file, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}) != I64{0}) -> return vault_lock_io(buffer)
+    if (vault_linux_fsync(file) != I64{0}) -> return vault_lock_io(buffer)
     guard :: vault_lock_adopt(dir, file, nonce)
     rt_text_store(dir_slot, I64{-1})
     rt_text_store(file_slot, I64{-1})
@@ -895,6 +895,7 @@ fn vault_recover_stale_inner(root: I64, dir: I64, hash: I64, revision: I64, repo
     rt_text_store(quarantine + I64{16}, I64{3343197464213794411})
     rt_text_bytes_copy(quarantine + I64{24}, rt_text_word(scratch + I64{480}), I64{32})
     rt_text_put(quarantine + I64{56}, I64{0})
+    // NUL shares out416: remove_exact writes out only after its last name use.
     remove_error :: vault_linux_remove_exact(dir, name, file, quarantine, scratch + I64{416}, scratch)
     if (remove_error != I64{0}) -> return remove_error
     if (rt_text_word(scratch + I64{416}) == I64{0}) -> return vault_error_new(I64{6}, I64{0}, I64{0})
@@ -1024,7 +1025,7 @@ fn vault_recover_backup_inner(root: I64, scratch: I64) -> I64 {
             if (rt_text_word(scratch + I64{504}) == I64{0}) -> return vault_error_new(I64{9}, I64{0}, I64{0})
         }
     }
-    if (trap_syscall(I64{74}, dir, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}) != I64{0}) -> return vault_error_new(I64{9}, I64{0}, I64{0})
+    if (vault_linux_fsync(dir) != I64{0}) -> return vault_error_new(I64{9}, I64{0}, I64{0})
     I64{0}
 }
 fn vault_recover_backup_at_root(root: I64) -> I64 {
@@ -1043,4 +1044,13 @@ fn vault_recover_backup_at_root(root: I64) -> I64 {
     thread_zero(scratch, I64{656})
     jet_rt_free(scratch, I64{656}, I64{8})
     error
+}
+
+// library/std/src/sys/fs/unix.rs File::fsync uses cvt_r: retry EINTR only.
+fn vault_linux_fsync(fd: I64) -> I64 {
+    result := I64{-4}
+    loop result == (I64{-4}) {
+        result = trap_syscall(I64{74}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+    }
+    result
 }
