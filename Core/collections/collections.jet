@@ -51,7 +51,7 @@ fn copy_ints(xs: [Int]) -> [Int] {
 // #4884 compiler-internal sort kernel. These are ordinary private Source
 // functions, not exports or runtime-name routes. Comparisons borrow the
 // original storage; payloads move only after the full stable order is known.
-fn collection_sort_order<T>(values: View<T>, compare: fn(T, T) -> Ordering, descending: Bool) -> [Int] {
+fn collection_sort_order<T, E>(values: View<T>, compare: fn(T, T) -> Ordering E!, descending: Bool) -> [Int] E! {
     count :: values.len()
     order := [Int]{}
     loop index in 0..<count -> &order.push(index)
@@ -59,6 +59,7 @@ fn collection_sort_order<T>(values: View<T>, compare: fn(T, T) -> Ordering, desc
     spare := [Int]{}
     loop index in 0..<count -> &spare.push(0)
     width := 1
+    order_active := true
     loop width < count {
         start := 0
         loop start < count {
@@ -72,42 +73,44 @@ fn collection_sort_order<T>(values: View<T>, compare: fn(T, T) -> Ordering, desc
             right := middle
             target := start
             loop left < middle && right < finish {
-                verdict :: compare(values[order[left]], values[order[right]])
+                left_position :: if order_active -> order[left] else -> spare[left]
+                right_position :: if order_active -> order[right] else -> spare[right]
+                verdict :: compare(values[left_position], values[right_position])
                 take_right :: if descending -> verdict == Ordering.Less else -> verdict == Ordering.Greater
                 if take_right {
-                    spare[target] = order[right]
+                    if order_active -> spare[target] = right_position else -> order[target] = right_position
                     right += 1
                 } else {
                     // Equal keys always select the original left run.
-                    spare[target] = order[left]
+                    if order_active -> spare[target] = left_position else -> order[target] = left_position
                     left += 1
                 }
                 target += 1
             }
             loop left < middle {
-                spare[target] = order[left]
+                position :: if order_active -> order[left] else -> spare[left]
+                if order_active -> spare[target] = position else -> order[target] = position
                 left += 1
                 target += 1
             }
             loop right < finish {
-                spare[target] = order[right]
+                position :: if order_active -> order[right] else -> spare[right]
+                if order_active -> spare[target] = position else -> order[target] = position
                 right += 1
                 target += 1
             }
             start = finish
         }
-        previous := ^order
-        order = ^spare
-        spare = ^previous
+        order_active = !order_active
         if width >= count - width -> width = count else -> width += width
     }
-    ^order
+    if order_active -> ^order else -> ^spare
 }
 
 // order[new] = old. Pop retains the receiver's allocation, and each payload
 // enters exactly one empty optional slot before returning in sorted order.
 // No indexed payload read, owning copy, or default T is needed.
-fn collection_sort_apply_order<T>(rows: &[T], order: [Int]) {
+fn collection_sort_apply_order<T>(rows: &[T], order: [Int]) Never! {
     count :: rows.len()
     if count < 2 -> return
     changed := false
@@ -134,8 +137,14 @@ fn collection_sort_apply_order<T>(rows: &[T], order: [Int]) {
     }
 }
 
-fn collection_sort_by_compare<T>(rows: &[T], ^compare: fn(T, T) -> Ordering) {
-    order := collection_sort_order<T>(rows[0..<rows.len()], compare, false)
+// The declared borrowed return checks the range as a View, not an owning List.
+fn collection_sort_view<T>(values: [T]) -> View<T> Never! from values {
+    values[0..<values.len()]
+}
+
+fn collection_sort_by_compare<T, E>(rows: &[T], ^compare: fn(T, T) -> Ordering E!) E! {
+    window :: collection_sort_view<T>(rows)
+    order := collection_sort_order<T, E>(window, compare, false)
     collection_sort_apply_order<T>(&rows, order)
 }
 
@@ -145,7 +154,8 @@ fn collection_sort_by_key<T, K: Comparable, E>(rows: &[T], ^key: fn(T) -> K E!, 
         value := key(rows[index])
         &keys.push(^value)
     }
-    order := collection_sort_order<K>(keys[0..<keys.len()], (a: K, b: K) -> a <=> b, descending)
+    window :: collection_sort_view<K>(keys)
+    order := collection_sort_order<K, Never>(window, (a: K, b: K) -> a <=> b, descending)
     // Normal key Close observes sorted order, whereas an earlier Err/Stop
     // closes only the initialized input prefix. The receiver is still intact
     // throughout key evaluation and every comparison.
