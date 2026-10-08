@@ -449,3 +449,19 @@ A stronger comparative claim additionally requires the strict performance and
 frequency-weighted learnability evidence above. Execution order, active work
 records, blockers, and evidence logs belong in Tower rather than in this
 specification.
+
+## Typed data convenience operations
+
+`core.data.csv<T>` and `core.data.json<T>` compose the canonical typed CSV and
+JSON decoders. Their checked result is `[T] [FieldError]!`: malformed text keeps
+the codec's exact reason and typed field failures retain their accumulated
+paths. These whole-value operations do not become lazy file streams.
+
+`core.data.value<T>` renders the encoded value to the loader's canonical JSON
+payload before checking payload limits or constructing a loader. Object keys
+use UTF-8 lexical order, floating values keep native Debug spelling, and
+control scalars retain the native C0/C1 escaping rules. Payload-size failures
+therefore precede constructor validation. The existing native constructor
+retains its private source-locator metadata; source policy sets only the
+already-public payload field. `snapshot`, `csv_reader`, and `json_reader`
+retain their native boundary and existing laziness.

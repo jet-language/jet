@@ -1480,6 +1480,18 @@ fn core_fixed_sig_impl(
             Some(Type::Bool),
         )),
         ("core.mem", "__type_size") => Some((vec![], Some(Type::Int))),
+        ("core.mem", "__loader_new") => Some((
+            vec![
+                (AccessConvention::Move, Type::Named("DataLoaderKind".to_string())),
+                (AccessConvention::Move, Type::String),
+                (AccessConvention::Move, Type::String),
+                (AccessConvention::Move, Type::List(Box::new(Type::String))),
+                (AccessConvention::Move, Type::Named("DataFormat".to_string())),
+                (AccessConvention::Move, Type::Named("DataLimits".to_string())),
+                (AccessConvention::Move, Type::Named("DataAuthority".to_string())),
+            ],
+            Some(result_ty(Type::Apply { name: "DataLoader".to_string(), args: vec![Type::Named("T".to_string())] }, Type::Named("DataError".to_string()))),
+        )),
         ("core.encoding", "__coerce_now") => Some((vec![], Some(Type::Int))),
         ("core.encoding", "__coerce_emit") => Some((vec![(read, Type::String)], Some(unit.clone()))),
         ("core.encoding", "__read_byte") => Some((

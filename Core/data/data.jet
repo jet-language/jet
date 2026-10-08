@@ -15,6 +15,8 @@ use core.math as math
 use core.encoding as encoding
 use core.encoding.[EncodingError, EncodingLimits]
 use core.encoding.json as json_codec
+use core.encoding.csv as csv_codec
+use __core_encoding_stream as encoding_stream
 use core.crypto.[sha256]
 use core.sys as sys
 module arrow
@@ -532,7 +534,19 @@ pub fn database<T>(query: String, parameters: [String], authority: String, limit
 }
 
 pub fn value<T: Encode>(value: T, limits: DataLimits) -> DataLoader<T> DataError! {
-    core.data.value<T>(value, limits)
+    payload := [U8]{}
+    data_loader_render(&payload, value.encode())
+    data_loader_check_payload(limits, payload.len(), "data.value") ?? return Err(err)
+    kind := DataLoaderKind.Value
+    locator := "value"
+    member := ""
+    parameters := [String]{}
+    format := DataFormat.JSON
+    owned_limits := ~limits
+    authority := DataAuthority{scope: "local", revision: ""}
+    loader := core.mem.__loader_new<T>(^kind, ^locator, ^member, ^parameters, ^format, ^owned_limits, ^authority) ?? return Err(err)
+    loader.payload = Val(payload)
+    Ok(loader)
 }
 
 /// Infer a core format from the final path extension, without reading the
@@ -603,22 +617,12 @@ fn locator_format(locator: String) -> String DataError! {
     }
 }
 
-pub fn csv<T: Decode>(text: String) -> [T] DataError! {
-    rows :: core.data.csv<T>(text) ?? return Err(data_error(DataErrorKind.Decode, "CSV decode failed", "csv"))
-    Ok(rows)
+pub fn csv<T: Decode>(text: String) -> [T] [FieldError]! {
+    csv_codec.decode<T>(text)
 }
 
-pub fn json<T: Decode>(text: String) -> [T] DataError! {
-    tree :: json_codec.__parse_typed(text) ?? return Err(data_error(DataErrorKind.Decode, "JSON decode failed", "json"))
-    if tree == .Array(items) {
-        rows := [T]{}
-        loop item in items {
-            row :: item.decode<T>() ?? return Err(data_error(DataErrorKind.Decode, "JSON decode failed", "json"))
-            &rows.push(row)
-        }
-        return Ok(rows)
-    }
-    Err(data_error(DataErrorKind.Decode, "typed JSON requires a top-level array", "json"))
+pub fn json<T: Decode>(text: String) -> [T] [FieldError]! {
+    json_codec.decode<[T]>(text)
 }
 
 #Test("typed data JSON reuses exact number decoding") {
@@ -1673,4 +1677,162 @@ fn upper(text: String) -> String Never! {
         if n >= 97 && n <= 122 -> &out.push(U8{n - 32}) else -> &out.push(b)
     }
     String.from_bytes(out) ?? ""
+}
+
+// Native DataFlow.rs::jet_data_loader_canonical_tree sorts object keys by
+// UTF-8 lexical order, but keeps Debug float spelling and exact Number text.
+fn data_loader_put_text(out: &[U8], text: String) Never! {
+    loop index in 0..<text.count_bytes() -> &out.push(encoding_stream.byte_at(text, index))
+}
+
+fn data_loader_put_control(out: &[U8], value: Int) Never! {
+    &out.push(U8{92})
+    &out.push(U8{117})
+    &out.push(U8{48})
+    &out.push(U8{48})
+    hex :: "0123456789abcdef"
+    &out.push(encoding_stream.byte_at(hex, value >> 4))
+    &out.push(encoding_stream.byte_at(hex, value & 15))
+}
+
+fn data_loader_quote(out: &[U8], text: String) Never! {
+    &out.push(U8{34})
+    index := 0
+    loop index < text.count_bytes() {
+        byte :: encoding_stream.byte_at(text, index)
+        n :: Int.from_u8(byte)
+        if n == 34 || n == 92 {
+            &out.push(U8{92})
+            &out.push(byte)
+        } else if n == 10 || n == 13 || n == 9 {
+            &out.push(U8{92})
+            &out.push(if n == 10 -> U8{110} else if n == 13 -> U8{114} else -> U8{116})
+        } else if n < 32 || n == 127 {
+            data_loader_put_control(&out, n)
+        } else if n == 194 && index + 1 < text.count_bytes() && Int.from_u8(encoding_stream.byte_at(text, index + 1)) <= 159 {
+            // Rust char::is_control includes the C1 scalars U+0080..U+009F.
+            index += 1
+            data_loader_put_control(&out, Int.from_u8(encoding_stream.byte_at(text, index)))
+        } else -> &out.push(byte)
+        index += 1
+    }
+    &out.push(U8{34})
+}
+
+fn data_loader_render(out: &[U8], tree: encoding.DataTree) Never! {
+    #Unsafe("inspect existing private Decode carriers only inside checked Core data source") {
+        if tree == .Number(text) {
+            data_loader_put_text(&out, text)
+            return
+        }
+        if tree == .TypedText(text) {
+            data_loader_quote(&out, text)
+            return
+        }
+        if tree == .Bytes(bytes) {
+            &out.push(U8{91})
+            loop (index, byte) in bytes {
+                if index != 0 -> &out.push(U8{44})
+                data_loader_put_text(&out, "{byte}")
+            }
+            &out.push(U8{93})
+            return
+        }
+    }
+    if tree == {
+        .Null -> data_loader_put_text(&out, "null")
+        .Bool(value) -> data_loader_put_text(&out, if value -> "true" else -> "false")
+        .Int(value) -> data_loader_put_text(&out, "{value}")
+        .Float(value) -> data_loader_put_text(&out, "{value:Debug}")
+        .Text(value) -> data_loader_quote(&out, value)
+        .Array(values) -> {
+            &out.push(U8{91})
+            loop (index, value) in values {
+                if index != 0 -> &out.push(U8{44})
+                data_loader_render(&out, value)
+            }
+            &out.push(U8{93})
+        }
+        .Object(_) -> {
+            entries :: encoding_stream.object_entries(tree)
+            indices := [Int]{}
+            loop index in 0..<entries.len() -> &indices.push(index)
+            &indices.sort_by((left: Int, right: Int) -> entries[left].key <=> entries[right].key)
+            &out.push(U8{123})
+            loop (position, index) in indices {
+                if position != 0 -> &out.push(U8{44})
+                data_loader_quote(&out, entries[index].key)
+                &out.push(U8{58})
+                data_loader_render(&out, entries[index].value)
+            }
+            &out.push(U8{125})
+        }
+        else -> panic("unknown native DataTree carrier")
+    }
+}
+
+fn data_loader_check_payload(limits: DataLimits, bytes: Int, operation: String) DataError! {
+    if bytes > limits.encoding.max_item_bytes -> return Err(data_error(.Limit, "payload is {bytes} bytes; max_item_bytes is {limits.encoding.max_item_bytes}", operation))
+    if limits.encoding.max_total_bytes == .Val(limit) {
+        if bytes > limit -> return Err(data_error(.Limit, "payload is {bytes} bytes; max_total_bytes is {limit}", operation))
+    }
+    Ok(())
+}
+
+#Encode
+struct DataLoaderPortRecord {
+    z: Float
+    a: String
+}
+
+#Test("value loader preserves canonical payload and user-record return type") {
+    record :: DataLoaderPortRecord{z: Float{2.0}, a: "x"}
+    loader :: value<DataLoaderPortRecord>(record, DataLimits.safe()) ?? panic("value loader")
+    payload :: loader.payload ?? panic("value payload")
+    assert_eq(payload, [U8]{123, 34, 97, 34, 58, 34, 120, 34, 44, 34, 122, 34, 58, 50, 46, 48, 125})
+    assert_eq(loader.source.kind, DataLoaderKind.Value)
+    assert_eq(loader.source.locator, "value")
+    assert_eq(loader.authority.scope, "local")
+    assert_eq(loader.format, DataFormat.JSON)
+    assert(loader.last_good == None)
+    assert(!loader.cancelled)
+    assert(!loader.offline)
+
+    limits := DataLimits.safe()
+    limits.encoding.max_item_bytes = 1
+    limits.encoding.buffer_bytes = 1
+    if value<String>("x", limits) == {
+        .Err(error) -> {
+            assert(error.kind == .Limit)
+            assert_eq(error.operation, "data.value")
+            assert_eq(error.reason, "payload is 3 bytes; max_item_bytes is 1")
+        }
+        else -> panic("value payload limit must precede constructor validation")
+    }
+}
+
+#Test("value canonical strings retain native C0 and C1 control escaping") {
+    text :: encoding_stream.text_from_bytes([U8]{8, 127, 194, 128, 194, 159, 9}) ?? panic("control text")
+    out := [U8]{}
+    data_loader_quote(&out, text)
+    assert_eq(out, [U8]{34, 92, 117, 48, 48, 48, 56, 92, 117, 48, 48, 55, 102, 92, 117, 48, 48, 56, 48, 92, 117, 48, 48, 57, 102, 92, 116, 34})
+}
+
+#Test("data CSV and JSON preserve malformed input field-error strings") {
+    if csv<Int>("n\n\"7\"x") == {
+        .Err(errors) -> {
+            assert_eq(errors.len(), 1)
+            assert_eq(errors[0].path, "")
+            assert_eq(errors[0].reason, "E2701: CSV row 2, line 2, column 4 — only quote, comma, CRLF, LF, or EOF may follow a closing quote")
+        }
+        else -> panic("malformed CSV accepted")
+    }
+    if json<Int>("[1e]") == {
+        .Err(errors) -> {
+            assert_eq(errors.len(), 1)
+            assert_eq(errors[0].path, "")
+            assert_eq(errors[0].reason, "invalid JSON (line 1): bad number")
+        }
+        else -> panic("malformed JSON accepted")
+    }
 }

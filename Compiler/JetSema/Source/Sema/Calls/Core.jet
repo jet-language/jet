@@ -745,6 +745,12 @@ fn sema_call_core_posix_control(member: String) -> Bool Never! {
 
 fn sema_call_core_check_fixed_record(record: CoreCallRecord, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if !sema_pin_check_call(record.module_name, record.member, args, &diagnostics) -> return None
+    if record.module_name == "core.mem" && record.member == "__loader_new" {
+        if !environment.source_file.starts_with("<corelib>/") || environment.module_name != "core.data" {
+            &diagnostics.push(sema_error("E0510", span, "data loader construction is compiler-private", "the native loader constructor is restricted to checked Core data source", "use core.data.value"))
+            return None
+        }
+    }
     if record.module_name == "core.encoding" && (record.member == "__coerce_now" || record.member == "__coerce_emit") {
         if !environment.source_file.starts_with("<corelib>/") || environment.module_name != "core.encoding.json" || context.unsafe_depth == 0 {
             &diagnostics.push(sema_error("E0510", span, "JSON coercion host leaves are compiler-private", "the existing hidden Time/IO boundary is restricted to audited Core JSON source", "use the public JSON decoder"))
@@ -850,4 +856,12 @@ pub fn sema_call_core_identity_value(value: TExpr, type_args: [Type], expected: 
         result = sema_expr_expected(value, Val(required), environment, &diagnostics) ?? return None
     }
     sema_expr_expected(result, expected, environment, &diagnostics)
+}
+
+#Test("private loader constructor substitutes a user record return type") {
+    record :: core_call("core.mem", "__loader_new") ?? panic("loader constructor row")
+    user_record :: Type.Named{name: "UserRec"}
+    signature :: sema_call_core_typed_signature(record, 7, [AccessConvention]{}, [Type]{user_record}) ?? panic("loader constructor signature")
+    result :: sema_call_core_result_type(signature, [Type]{user_record}, [TExpr]{}) ?? panic("loader constructor result")
+    assert_eq(result, Type.Result{ok: Type.Apply{name: "DataLoader", args: [Type]{user_record}}, err: Type.Named{name: "DataError"}})
 }

@@ -520,6 +520,17 @@ fn core_sig_encoding_backing(request: CoreCallSignatureRequest) -> CoreTypedCall
     entry :: Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "key", ty: Type.String}, TypeTupleField{name: "value", ty: tree}}}
     entries :: Type.List{element: entry}
     cause :: core_sig_named("EncodingCause")
+    if module_name == "core.mem" && member == "__loader_new" {
+        return Val(core_sig_generic(module_name, member, [CoreCallTypedParameter]{
+            core_sig_positional(core_sig_named("DataLoaderKind"), move),
+            core_sig_positional(Type.String, move),
+            core_sig_positional(Type.String, move),
+            core_sig_positional(Type.List{element: Type.String}, move),
+            core_sig_positional(core_sig_named("DataFormat"), move),
+            core_sig_positional(core_sig_named("DataLimits"), move),
+            core_sig_positional(core_sig_named("DataAuthority"), move),
+        }, Val(core_sig_result(core_sig_apply("DataLoader", core_sig_named("T")), core_sig_named("DataError"))), core_sig_type_parameter("T", CoreCallTypeConstraint.Any)))
+    }
     if module_name == "core.mem" && core_sig_one_of(member, [String]{"__list_capacity", "__list_reserve_exact", "__type_size"}) {
         element :: core_sig_named("T")
         params := [CoreCallTypedParameter]{}
