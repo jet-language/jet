@@ -84,3 +84,32 @@ fn fx_native_mode_checks() -> Bool Never! {
     if seed.native_exports.len() != 0 || packed.native_exports.len() != 0 || explicit.native_exports.len() != 0 -> return false
     seed.lir.functions.len() == packed.lir.functions.len() && packed.lir.functions.len() == explicit.lir.functions.len()
 }
+
+fn fx_native_err_borrow_checks() -> Bool Never! {
+    error_ty :: fx_named("Err")
+    definition :: fx_type_def("Err", MIRTypeDefKind.Struct{fields: [MIRField]{
+        fx_field("Err", "message", fx_string()),
+        fx_field("Err", "code", mir_type_from_kind(MIRTypeKind.Option{inner: fx_string()})),
+        fx_field("Err", "cause", mir_type_from_kind(MIRTypeKind.Option{inner: error_ty})),
+    }, methods: [MIRFunctionID]{}})
+    body := fx_builder()
+    error :: fx_param(&body, "error", error_ty, fx_borrow())
+    loop index in 0..<1000 {
+        fx_value(&body, fx_string(), fx_borrow(), MIROperation.Field{base: error, field: mir_field_id("Err.message")}).drop("borrowed field has no owner")
+    }
+    fx_block(&body, 0, MIRTerminator.Return{value: None})
+    function :: fx_function("fixture_native_err_borrows", body, fx_unit())
+    program :: fx_program([MIRFunction]{function}, [MIRTypeDef]{definition})
+    lowered :: lir_lower_native_callables(program, [MIRFunctionID]{function.id})
+    if lowered.issues.len() != 0 || lir_lint_module(lowered.lir).len() != 0 -> return false
+    // A borrowed projection has no getter/clone/allocation calls. The C Err88
+    // fixture checks LIVE BYTES across N owned getter+drop cycles separately.
+    loop function in lowered.lir.functions {
+        loop block in function.blocks {
+            loop instruction in block.insts {
+                if instruction == .Call(_, _, _, _) -> return false
+            }
+        }
+    }
+    true
+}
