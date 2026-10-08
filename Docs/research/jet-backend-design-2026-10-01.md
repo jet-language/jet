@@ -2179,3 +2179,12 @@ variant: its inactive area neither owns nor compares fields. `Dispatched`
 clones/drops the inline binding without temporary carrier allocations.
 Unknown dispatch tags stop through the canonical record-variant panic.
 These success helpers remain private pending canonical Result composition.
+
+`UiDialogSelection.jet` represents the seed's single `Vec<GrantedPath>`
+field as a private List24 of inline GrantedPath24 entries, not pointer
+slots. Cloning allocates capacity equal to length, as a logical fresh
+sequence, and clones each owned path/root through the canonical field
+helper also used by standalone granted paths. Dropping releases every
+inline owner, then the original capacity-sized storage and List header.
+Equality preserves order and all fields, never comparing spare capacity.
+No constructor validation is imposed by these clone/drop/equality helpers.

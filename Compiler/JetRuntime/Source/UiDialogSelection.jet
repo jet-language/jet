@@ -1,0 +1,42 @@
+// Seed runtime.rs131597-131599 / HostServices.rs1348-1350: Vec<GrantedPath>.
+// List24 itself is the single-field private success owner. Inline items use
+// existing GrantedPath24 fields. Capacity=length mirrors other fresh clones;
+// spare capacity is allocator detail, not seed PartialEq/owned payload state.
+fn ui_dialog_selection_clone(value: I64) -> I64 {
+    length :: ui_carrier_word(value + DATA_SEQUENCE_LENGTH)
+    result :: data_sequence_new(length, UI_GRANTED_PATH_BYTES)
+    source :: ui_carrier_word(value + DATA_SEQUENCE_DATA)
+    target :: ui_carrier_word(result + DATA_SEQUENCE_DATA)
+    at := I64{0}
+    loop at < length {
+        ui_granted_path_copy(source + at * UI_GRANTED_PATH_BYTES, target + at * UI_GRANTED_PATH_BYTES)
+        at += I64{1}
+    }
+    ui_carrier_store(result + DATA_SEQUENCE_LENGTH, length)
+    result
+}
+fn ui_dialog_selection_drop(value: I64) {
+    if (value == I64{0}) -> return
+    length :: ui_carrier_word(value + DATA_SEQUENCE_LENGTH)
+    capacity :: ui_carrier_word(value + DATA_SEQUENCE_CAPACITY)
+    data :: ui_carrier_word(value + DATA_SEQUENCE_DATA)
+    at := I64{0}
+    loop at < length {
+        ui_granted_path_fields_drop(data + at * UI_GRANTED_PATH_BYTES)
+        at += I64{1}
+    }
+    if (capacity != I64{0}) -> jet_rt_free(data, capacity * UI_GRANTED_PATH_BYTES, I64{8})
+    jet_rt_free(value, DATA_SEQUENCE_BYTES, I64{8})
+}
+fn ui_dialog_selection_eq(a: I64, b: I64) -> Bool {
+    length :: ui_carrier_word(a + DATA_SEQUENCE_LENGTH)
+    if (length != ui_carrier_word(b + DATA_SEQUENCE_LENGTH)) -> return false
+    first :: ui_carrier_word(a + DATA_SEQUENCE_DATA)
+    second :: ui_carrier_word(b + DATA_SEQUENCE_DATA)
+    at := I64{0}
+    loop at < length {
+        if (!ui_granted_path_eq(first + at * UI_GRANTED_PATH_BYTES, second + at * UI_GRANTED_PATH_BYTES)) -> return false
+        at += I64{1}
+    }
+    true
+}

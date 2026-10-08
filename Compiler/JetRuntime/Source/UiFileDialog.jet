@@ -1,17 +1,23 @@
 // HostServices.rs1214-1218,1288-1295: owns grant, optional granted path,
 // and ordered filters. Inline grant reuses its field-copy/drop, no temp owner.
-fn ui_granted_path_clone(value: I64) -> I64 {
-    if (value == I64{0}) -> return I64{0}
-    result :: jet_rt_alloc(UI_GRANTED_PATH_BYTES, I64{8})
+fn ui_granted_path_copy(value: I64, result: I64) {
     ui_carrier_store(result + UI_GRANTED_PATH_PATH, jet_rt_string_clone(ui_carrier_word(value + UI_GRANTED_PATH_PATH)))
     ui_carrier_store(result + UI_GRANTED_PATH_ROOT, jet_rt_string_clone(ui_carrier_word(value + UI_GRANTED_PATH_ROOT)))
     ui_carrier_store(result + UI_GRANTED_PATH_ACCESS, ui_carrier_word(value + UI_GRANTED_PATH_ACCESS))
+}
+fn ui_granted_path_fields_drop(value: I64) {
+    jet_rt_string_drop(ui_carrier_word(value + UI_GRANTED_PATH_PATH))
+    jet_rt_string_drop(ui_carrier_word(value + UI_GRANTED_PATH_ROOT))
+}
+fn ui_granted_path_clone(value: I64) -> I64 {
+    if (value == I64{0}) -> return I64{0}
+    result :: jet_rt_alloc(UI_GRANTED_PATH_BYTES, I64{8})
+    ui_granted_path_copy(value, result)
     result
 }
 fn ui_granted_path_drop(value: I64) {
     if (value == I64{0}) -> return
-    jet_rt_string_drop(ui_carrier_word(value + UI_GRANTED_PATH_PATH))
-    jet_rt_string_drop(ui_carrier_word(value + UI_GRANTED_PATH_ROOT))
+    ui_granted_path_fields_drop(value)
     jet_rt_free(value, UI_GRANTED_PATH_BYTES, I64{8})
 }
 fn ui_granted_path_eq(a: I64, b: I64) -> Bool {
