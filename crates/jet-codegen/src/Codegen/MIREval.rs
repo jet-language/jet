@@ -17219,6 +17219,33 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                         MirInterpreterStream::Source { values },
                     ))));
                 }
+                "string_count" => {
+                    if symbol != "jet_unicode_count" {
+                        return Err(mir_error_at(
+                            "MIR String.count route has an unknown checked symbol",
+                            span,
+                        ));
+                    }
+                    let [text, needle]: [RuntimeValue; 2] = args.try_into().map_err(|_| {
+                        mir_error_at("MIR String.count route requires two Strings", span)
+                    })?;
+                    let text = runtime_to_data(self.materialize_runtime(text, span)?, span)?;
+                    let needle = runtime_to_data(self.materialize_runtime(needle, span)?, span)?;
+                    let (MirEvalValue::String(text), MirEvalValue::String(needle)) = (text, needle)
+                    else {
+                        return Err(mir_error_at(
+                            "MIR String.count route requires two Strings",
+                            span,
+                        ));
+                    };
+                    let result = crate::Comptime::Builtins::apply_method(
+                        &CtValue::Str(text),
+                        "count",
+                        vec![CtValue::Str(needle)],
+                        span,
+                    )?;
+                    return runtime_from_ct(result, span);
+                }
                 "string_starts_with" | "string_ends_with" => {
                     let suffix = member_name == "string_ends_with";
                     let expected = if suffix {
