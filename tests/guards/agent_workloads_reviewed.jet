@@ -1,0 +1,501 @@
+// Exact tests/agent_workloads.rs reviewed four corpus/schema guards.
+// Constants below come from the original Rust definitions, not corpus-derived expectations.
+S4_REVIEW_HEADER :: prep { "version\ttask_id\tdomain\tcase\tdeclared_outcome\tinput\texpected\tauthority\tadapters\tplatforms\tevidence\ttower_card\tloss_cards" }
+S4_REVIEW_BASELINE_HEADER :: prep { "version\trun_id\tmachine\tadapter\ttask_id\texpressibility\tfinding\tinput_sha256\texpected_sha256\texit_code\tsource_tokens\tstdout_file\tstdout_sha256\tstderr_file\tstderr_sha256\tcold_ns\twarm_ns\twarm_stdout_sha256\twarm_stderr_sha256\toutput_stable\tscoring\ttool_version\tpolicy_digest" }
+S4_REVIEW_DOMAIN_SCORING :: prep { "#769:v1;exit=0;stdout=exact;cold=recorded;warm=equal;input=unchanged;scratch=closed" }
+S4_REVIEW_DOMAIN_CONTRACT_HEADER :: prep { "version\ttask_id\tallowed_dependencies\tmachine_spec\tvariant\tscoring" }
+S4_REVIEW_COMPILED_RECEIPT_HEADER :: prep { "version\ttask_id\tlanguage\tsource_sha256\tinput_sha256\texpected_sha256\toutput_sha256\thostile_input_sha256\thostile_output_sha256\tenvironment\tmachine\ttool_version\tcommand\tpeer_commit\texit_code\thostile_exit_code\tpeer_launcher_path\tpeer_launcher_version\tpeer_launcher_sha256\tauthority" }
+S4_REVIEW_PEER_LAUNCH_CONTRACT :: prep { "compiled-workload-peer-isolation-v1" }
+S4_REVIEW_POLICY_FIELDS :: prep { [String]{"version", "plan", "launch_transaction", "descendants", "limits", "outputs", "receipt", "authority"} }
+S4_REVIEW_BASELINE_ADAPTERS :: prep { [String]{"bash", "python", "node"} }
+S4_REVIEW_ADAPTER_EXTENSIONS :: prep { [String]{"jet", "bash", "py", "mjs"} }
+S4_REVIEW_EXPECTED_TASKS :: prep { [[String]]{[String]{"repository-marker-scan", "repository-search-and-edit", "success", "exit=0;stdout=exact"},
+[String]{"repository-marker-scan-empty", "repository-search-and-edit", "hostile-empty", "exit=0;stdout=exact"},
+[String]{"repository-semantic-inspection", "repository-search-and-edit", "semantic-index", "exit=0;stdout=exact"},
+[String]{"repository-semantic-edit", "repository-search-and-edit", "semantic-rename-with-decoys", "exit=0;stdout=exact"},
+[String]{"git-diff-review", "build-test-debug-and-git", "mixed-change", "exit=0;stdout=exact"},
+[String]{"git-diff-empty", "build-test-debug-and-git", "hostile-empty-diff", "exit=0;stdout=exact"},
+[String]{"build-test-failure-recovery", "build-test-debug-and-git", "compile-check-recovery", "exit=0;stdout=exact"},
+[String]{"incident-report-success", "data-cleanup-and-report-generation", "success", "exit=0;stdout=exact"},
+[String]{"incident-report-malformed", "data-cleanup-and-report-generation", "malformed-input", "exit=0;stdout=exact"},
+[String]{"incident-report-partial", "data-cleanup-and-report-generation", "partial-failure", "exit=0;stdout=exact"},
+[String]{"structured-data-transform", "structured-data", "json-normalize", "exit=0;stdout=exact"},
+[String]{"structured-data-hostile", "structured-data", "malformed-json", "exit=0;stdout=exact"},
+[String]{"database-access", "databases", "parameterized-query", "exit=0;stdout=exact"},
+[String]{"database-hostile", "databases", "invalid-row", "exit=0;stdout=exact"},
+[String]{"http-api", "http-apis", "loopback-json-post", "exit=0;stdout=exact"},
+[String]{"http-hostile", "http-apis", "rejected-payload", "exit=0;stdout=exact"},
+[String]{"process-batch-success", "long-running-and-interactive-commands", "success", "exit=0;stdout=exact"},
+[String]{"process-batch-large-stderr", "long-running-and-interactive-commands", "large-stderr", "exit=0;stdout=exact"},
+[String]{"process-batch-timeout-recovery", "long-running-and-interactive-commands", "timeout-cancellation-cleanup", "exit=0;stdout=exact"},
+[String]{"browser-automation-preflight", "browser-and-desktop-work", "profile-timeout-hostile", "exit=0;stdout=exact"},
+[String]{"desktop-interaction-focus", "browser-and-desktop-work", "keyboard-focus-hostile", "exit=0;stdout=exact"},
+[String]{"document-markdown-inspection", "document-and-media-work", "malformed-document", "exit=0;stdout=exact"},
+[String]{"media-asset-inventory", "document-and-media-work", "unsupported-media-hostile", "exit=0;stdout=exact"},
+[String]{"mcp-environment-readonly", "mcp-tools-and-hooks", "readonly-resource", "exit=0;stdout=exact"},
+[String]{"mcp-environment-denied", "mcp-tools-and-hooks", "hostile-denied-resource", "exit=0;stdout=exact"},
+[String]{"interactive-terminal-dialogue", "interactive-terminals", "pty-dialogue", "exit=0;stdout=exact"},
+[String]{"interactive-terminal-closed", "interactive-terminals", "hostile-closed-session", "exit=0;stdout=exact"},
+[String]{"service-lifecycle-roundtrip", "service-lifecycle", "up-health-wait-logs-down", "exit=0;stdout=exact"},
+[String]{"service-lifecycle-readiness-timeout", "service-lifecycle", "hostile-readiness-timeout", "exit=0;stdout=exact"}} }
+S4_REVIEW_EXPECTED_DOMAIN_CONTRACT :: prep { [[String]]{[String]{"build-test-failure-recovery", "jet=Core:files,process,sys,time;bash=bash,coreutils;python=stdlib-pathlib,stdlib-subprocess;node=stdlib-fs,stdlib-child-process", "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable", "hostile"},
+[String]{"process-batch-success", "jet=Core:files,process,time;bash=bash,coreutils;python=stdlib-pathlib,stdlib-subprocess;node=stdlib-fs,stdlib-child-process", "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable", "normal"},
+[String]{"process-batch-large-stderr", "jet=Core:files,process,time;bash=bash,coreutils;python=stdlib-pathlib,stdlib-subprocess;node=stdlib-fs,stdlib-child-process", "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable", "hostile"},
+[String]{"process-batch-timeout-recovery", "jet=Core:files,process,time;bash=bash,coreutils;python=stdlib-pathlib,stdlib-subprocess;node=stdlib-fs,stdlib-child-process", "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable", "hostile"},
+[String]{"structured-data-transform", "jet=Core:encoding.json,files,process;bash=jq;python=stdlib-json;node=stdlib-fs-json", "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable", "normal"},
+[String]{"structured-data-hostile", "jet=Core:encoding.json,files,process;bash=jq;python=stdlib-json;node=stdlib-fs-json", "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable", "hostile"},
+[String]{"database-access", "jet=Core:db,files,process+bundled-SQLite;bash=python3-stdlib-sqlite3;python=stdlib-sqlite3;node=node:sqlite", "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable", "normal"},
+[String]{"database-hostile", "jet=Core:db,files,process+bundled-SQLite;bash=python3-stdlib-sqlite3;python=stdlib-sqlite3;node=node:sqlite", "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable", "hostile"},
+[String]{"http-api", "jet=Core:http,http.client,http.server,net,files,process;bash=curl+python3-http.server;python=stdlib-urllib+http.server;node=stdlib-http-fs", "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable", "normal"},
+[String]{"http-hostile", "jet=Core:http,http.client,http.server,net,files,process;bash=curl+python3-http.server;python=stdlib-urllib+http.server;node=stdlib-http-fs", "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable", "hostile"},
+[String]{"browser-automation-preflight", "jet=Core:web.browser,files,process;bash=bash-stdlib;python=stdlib-pathlib;node=stdlib-fs", "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable", "hostile"},
+[String]{"desktop-interaction-focus", "jet=Core:ui,files,process;bash=bash-stdlib;python=stdlib-pathlib;node=stdlib-fs", "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable", "hostile"},
+[String]{"document-markdown-inspection", "jet=Core:files,process;bash=find,awk;python=stdlib-pathlib;node=stdlib-fs-path", "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable", "hostile"},
+[String]{"media-asset-inventory", "jet=Core:files,net.mime,process;bash=find,wc;python=stdlib-pathlib;node=stdlib-fs-path", "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable", "hostile"},
+[String]{"mcp-environment-readonly", "jet=Core:process,sys;bash=jet-cli;python=jet-cli;node=jet-cli", "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable", "normal"},
+[String]{"mcp-environment-denied", "jet=Core:process,sys;bash=jet-cli;python=jet-cli;node=jet-cli", "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable", "hostile"},
+[String]{"interactive-terminal-dialogue", "jet=Core:process,terminal,sh;bash=script,timeout,sh;python=script,stdlib-subprocess;node=script,stdlib-child-process", "linux-x86_64:nix-core;macos-native:util-linux-script-unavailable;windows-native:unavailable", "normal"},
+[String]{"interactive-terminal-closed", "jet=Core:process,terminal,sh;bash=script,timeout,sh;python=script,stdlib-subprocess;node=script,stdlib-child-process", "linux-x86_64:nix-core;macos-native:util-linux-script-unavailable;windows-native:unavailable", "hostile"},
+[String]{"service-lifecycle-roundtrip", "jet=Core:process,files,sys,jetpack-cli,systemd-shim;bash=jetpack-cli,systemd-shim,coreutils;python=jetpack-cli,systemd-shim,stdlib-subprocess;node=jetpack-cli,systemd-shim,stdlib-child-process", "linux-x86_64:nix-core;macos-native:E1332-service-authority;windows-native:unavailable", "normal"},
+[String]{"service-lifecycle-readiness-timeout", "jet=Core:process,files,sys,jetpack-cli,systemd-shim;bash=jetpack-cli,systemd-shim,coreutils;python=jetpack-cli,systemd-shim,stdlib-subprocess;node=jetpack-cli,systemd-shim,stdlib-child-process", "linux-x86_64:nix-core;macos-native:E1332-service-authority;windows-native:unavailable", "hostile"},
+[String]{"repository-marker-scan", "jet=Core:files,process;bash=bash-stdlib;python=stdlib-pathlib;node=stdlib-fs-path", "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable", "normal"},
+[String]{"repository-marker-scan-empty", "jet=Core:files,process;bash=bash-stdlib;python=stdlib-pathlib;node=stdlib-fs-path", "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable", "hostile"},
+[String]{"repository-semantic-inspection", "jet=Core:process,sys,inspect-semindex;bash=awk;python=stdlib-pathlib;node=stdlib-fs", "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable", "normal"},
+[String]{"repository-semantic-edit", "jet=Core:files,process,inspect-codemod;bash=cp,awk,mv;python=stdlib-shutil,pathlib;node=stdlib-fs", "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable", "hostile"},
+[String]{"git-diff-review", "jet=Core:process,git;bash=git;python=stdlib-subprocess+git;node=stdlib-child-process+git", "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable", "normal"},
+[String]{"git-diff-empty", "jet=Core:process,git;bash=git;python=stdlib-subprocess+git;node=stdlib-child-process+git", "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable", "hostile"}} }
+use core.files as s4_review_files
+use core.crypto as s4_review_crypto
+use core.sys as s4_review_sys
+use core.text.parse as s4_review_parse
+
+fn s4_review_slice(text: String, start: Int, end: Int) -> String {
+    if start == end -> return ""
+    raw :: text.bytes()
+    String.from_bytes(raw[start..(end - 1)]) ?? panic("ASCII boundary")
+}
+
+fn s4_review_read(path: String) -> String { s4_review_files.read(path) ?? panic("read {path}") }
+fn s4_review_rows(root: String, file: String, header: String, width: Int) -> [[String]] {
+    lines :: s4_review_read("{root}/{file}").lines()
+    assert(lines.len() > 0)
+    assert_eq(lines[0], header)
+    result := [[String]]{}
+    loop index in 1..<lines.len() {
+        if lines[index] == "" -> next
+        fields :: lines[index].split("\t").to_list()
+        assert_eq(fields.len(), width)
+        &result.push(fields)
+    }
+    result
+}
+fn s4_review_column(rows: [[String]], column: Int) -> [String] {
+    result := [String]{}
+    loop row in rows -> &result.push(row[column])
+    result
+}
+fn s4_review_set(values: [String]) -> [String] {
+    sorted := values
+    &sorted.sort()
+    result := [String]{}
+    loop value in sorted {
+        if result.len() == 0 || result[result.len() - 1] != value -> &result.push(value)
+    }
+    result
+}
+fn s4_review_row(rows: [[String]], id: String) -> [String] {
+    loop row in rows { if row[1] == id -> return row }
+    panic("missing row {id}")
+}
+fn s4_review_field(name: String) -> String {
+    loop line in s4_review_read("tests/agent_workloads/policy.tsv").lines() {
+        if line.starts_with("{name}=") -> return s4_review_parse.split_once(line.to_string(), "=").tail
+    }
+    panic("missing policy field {name}")
+}
+fn s4_review_digest() -> String {
+    loop field in S4_REVIEW_POLICY_FIELDS -> s4_review_field(field)
+    raw := s4_review_read("tests/agent_workloads/policy.tsv")
+    loop raw.ends_with("\n") -> raw = s4_review_slice(raw, 0, raw.len() - 1)
+    s4_review_crypto.sha256(raw.bytes()).hex()
+}
+fn s4_review_receipt(digest: String) -> String {
+    "policy\tversion={s4_review_field("version")}\tdigest={digest}\tplan={s4_review_field("plan")}\tlaunch_transaction={s4_review_field("launch_transaction")}\tdescendants={s4_review_field("descendants")}\tlimits={s4_review_field("limits")}\toutputs={s4_review_field("outputs")}\treceipt={s4_review_field("receipt")}\tauthority={s4_review_field("authority")}"
+}
+fn s4_review_path(relative: String) -> Bool {
+    if relative == "" || relative.starts_with("/") || relative.contains(":") -> return false
+    loop part in relative.replace("\\", "/").split("/") {
+        if part == "" || part == "." || part == ".." -> return false
+    }
+    true
+}
+fn s4_review_authority(authority: String) -> Bool { authority == s4_review_field("authority") }
+fn s4_review_sha(path: String) -> String {
+    bytes :: s4_review_files.read_bytes(path) ?? panic("read bytes {path}")
+    s4_review_crypto.sha256(bytes).hex()
+}
+fn s4_review_walk(directory: String, relative: String) -> [String] {
+    result := [String]{}
+    entries :: s4_review_files.list_dir(directory) ?? panic("walk {directory}")
+    loop entry in entries {
+        child :: if relative == "" -> entry.name else -> "{relative}/{entry.name}"
+        if s4_review_files.is_dir(entry.path) {
+            loop nested in s4_review_walk(entry.path, child) -> &result.push(nested)
+        } else {
+            &result.push(child)
+        }
+    }
+    &result.sort()
+    result
+}
+fn s4_review_input(path: String) -> String {
+    canonical := ""
+    if s4_review_files.is_dir(path) {
+        loop relative in s4_review_walk(path, "") -> canonical += "{relative}\t{s4_review_sha("{path}/{relative}")}\n"
+    } else {
+        parts :: path.split("/").to_list()
+        canonical = "{parts[parts.len() - 1]}\t{s4_review_sha(path)}\n"
+    }
+    s4_review_crypto.sha256(canonical.bytes()).hex()
+}
+fn s4_review_unsigned(value: String, maximum: String, canonical: Bool) -> Bool {
+    raw := value
+    if !canonical && raw.starts_with("+") -> raw = s4_review_slice(raw, 1, raw.len())
+    if raw == "" -> return false
+    loop byte in raw.bytes() { if byte < (U8{48}) || byte > (U8{57}) -> return false }
+    if canonical && raw.len() > 1 && raw.starts_with("0") -> return false
+    loop raw.len() > 1 && raw.starts_with("0") -> raw = s4_review_slice(raw, 1, raw.len())
+    raw.len() < maximum.len() || (raw.len() == maximum.len() && raw <= maximum)
+}
+fn s4_review_adapter(id: String) -> String {
+    if id == "repository-marker-scan" || id == "repository-marker-scan-empty" -> return "repository_marker_scan"
+    if id == "repository-semantic-inspection" -> return "repository_semantic_inspection"
+    if id == "repository-semantic-edit" -> return "repository_semantic_edit"
+    if id == "git-diff-review" || id == "git-diff-empty" -> return "git_diff_review"
+    if id == "build-test-failure-recovery" -> return "build_test_recovery"
+    prefixes :: [String]{"incident-report-", "structured-data-", "database-", "http-", "process-batch-", "mcp-environment-", "interactive-terminal-", "service-lifecycle-"}
+    stems :: [String]{"incident_report", "structured_data", "database_access", "http_api", "process_batch", "mcp_resource", "interactive_terminal", "service_lifecycle"}
+    loop index in 0..<prefixes.len() { if id.starts_with(prefixes[index]) -> return stems[index] }
+    singles :: [String]{"browser-automation-preflight", "desktop-interaction-focus", "document-markdown-inspection", "media-asset-inventory"}
+    loop single in singles { if id == single -> return single.replace("-", "_") }
+    panic("task has no adapter {id}")
+}
+fn s4_review_policy_digest_covers_authority_and_receipt_contract() {
+    digest :: s4_review_digest()
+    receipt :: s4_review_receipt(digest)
+    fields :: s4_review_read("tests/agent_workloads/policy.tsv").lines()
+    assert_eq(fields.len(), S4_REVIEW_POLICY_FIELDS.len())
+    loop index in 0..<fields.len() -> assert(fields[index].starts_with("{S4_REVIEW_POLICY_FIELDS[index]}="))
+    assert(receipt.contains("digest={digest}"))
+    receipt_names :: [String]{"plan", "launch_transaction", "descendants", "limits", "outputs", "receipt", "authority"}
+    loop name in receipt_names -> assert(receipt.contains("{name}={s4_review_field(name)}"))
+    assert(s4_review_authority(s4_review_field("authority")))
+    assert(!s4_review_authority("argv=input-root;cwd=scratch;host=ambient;network=denied;external-write=unmeasured"))
+    assert(!s4_review_authority("argv=input-root;cwd=scratch;host=ambient;network=unmeasured;external-write=denied"))
+}
+fn s4_review_recorded_baselines_cover_frozen_tasks() {
+    root :: "tests/agent_workloads"
+    tasks :: s4_review_rows(root, "manifest.tsv", S4_REVIEW_HEADER, 13)
+    loop subject in tasks {
+        assert_eq(subject[0], "1")
+        assert(s4_review_path(subject[5]) && s4_review_path(subject[6]))
+    }
+    rows :: s4_review_rows("{root}/baselines", "receipt.tsv", S4_REVIEW_BASELINE_HEADER, 23)
+    seen := [String]{}
+    run_id := ""
+    machine := ""
+    loop row in rows {
+        assert_eq(row[0], "1")
+        assert(S4_REVIEW_BASELINE_ADAPTERS.contains(row[3]))
+        subject :: s4_review_row(tasks, row[4])
+        key :: "{row[3]}\t{row[4]}"
+        assert(!seen.contains(key))
+        &seen.push(key)
+        if run_id == "" -> run_id = row[1] else -> assert_eq(run_id, row[1])
+        if machine == "" -> machine = row[2] else -> assert_eq(machine, row[2])
+        assert(row[1] != "" && row[2] != "")
+        assert(row[21] != "" && row[21] != "unknown")
+        assert_eq(row[22], s4_review_digest())
+        assert_eq(row[7], s4_review_input("{root}/{subject[5]}"))
+        expected :: s4_review_files.read_bytes("{root}/{subject[6]}") ?? panic("expected bytes")
+        assert_eq(row[8], s4_review_crypto.sha256(expected).hex())
+        arch :: s4_review_sys.arch()
+        maxusize :: if arch == "x86" || arch == "arm" || arch == "wasm32" -> "4294967295" else -> "18446744073709551615"
+        assert(s4_review_unsigned(row[10], maxusize, true))
+        assert(s4_review_unsigned(row[15], "340282366920938463463374607431768211455", false))
+        assert(s4_review_unsigned(row[16], "340282366920938463463374607431768211455", false))
+        assert_eq(row[20], S4_REVIEW_DOMAIN_SCORING)
+        if row[5] == {
+            "supported" -> {
+                assert_eq(row[6], "none")
+                assert_eq(row[9], "0")
+                assert_eq(row[19], "true")
+                assert(s4_review_path(row[11]) && s4_review_path(row[13]))
+                stdout :: s4_review_files.read_bytes("{root}/baselines/{row[11]}") ?? panic("stdout artifact")
+                stderr :: s4_review_files.read_bytes("{root}/baselines/{row[13]}") ?? panic("stderr artifact")
+                assert_eq(stdout, expected)
+                assert_eq(row[12], s4_review_crypto.sha256(stdout).hex())
+                assert_eq(row[14], s4_review_crypto.sha256(stderr).hex())
+                assert_eq(row[17], row[12])
+            }
+            "unsupported" -> {
+                assert(row[6] != "none")
+                assert_eq(row[11], "-")
+                assert_eq(row[13], "-")
+            }
+            else -> panic("unknown expressibility {row[5]}")
+        }
+    }
+    assert_eq(seen.len(), tasks.len() * S4_REVIEW_BASELINE_ADAPTERS.len())
+}
+fn s4_review_manifest_is_complete_frozen_and_non_vacuous() {
+    root :: "tests/agent_workloads"
+    hostile := [[String]]{}
+    loop line in s4_review_read("tests/fixtures/build_sandbox/hostile-corpus.tsv").lines() {
+        if line == "" || line.starts_with("#") -> next
+        row :: line.split("\t").to_list()
+        assert_eq(row.len(), 4)
+        assert_eq(row[3], "blocked-or-unsupported")
+        &hostile.push(row)
+    }
+    assert_eq(hostile.len(), 7)
+    tasks :: s4_review_rows(root, "manifest.tsv", S4_REVIEW_HEADER, 13)
+    actual := [[String]]{}
+    ids := [String]{}
+    loop subject in tasks {
+        assert_eq(subject[0], "1")
+        assert(s4_review_path(subject[5]) && s4_review_path(subject[6]))
+        &actual.push([String]{subject[1], subject[2], subject[3], subject[4]})
+        assert(!ids.contains(subject[1]))
+        &ids.push(subject[1])
+        assert_eq(subject[7], s4_review_field("authority"))
+        assert(s4_review_authority(subject[7]))
+        assert_eq(subject[8], "jet,bash,python,node")
+        assert_eq(subject[9], "linux=native;macos=native;windows=unavailable:bash-not-native")
+        assert_eq(subject[10], "tests/agent_workloads.rs::equivalent_adapters_complete_declared_tasks")
+        assert_eq(subject[11], "#769")
+        assert_eq(subject[12], "default-run=#688;wall-time=#666")
+        assert(s4_review_files.exists("{root}/{subject[5]}"))
+        assert(s4_review_files.is_file("{root}/{subject[6]}"))
+        id :: subject[1]
+        hostile_ids :: [String]{"browser-automation-preflight", "desktop-interaction-focus", "document-markdown-inspection", "media-asset-inventory", "mcp-environment-denied", "interactive-terminal-closed", "service-lifecycle-readiness-timeout"}
+        if id == "build-test-failure-recovery" {
+            invalid_names :: [String]{"invalid.jet", "invalid.sh", "invalid.py", "invalid.mjs"}
+            loop invalid in invalid_names {
+                source :: s4_review_read("{root}/{subject[5]}/{invalid}")
+                assert(source.contains("fn run( {{") || source.contains("if then") || source.contains("def run(:") || source.contains("function run( {{"))
+            }
+        } else if id == "process-batch-large-stderr" || id == "process-batch-timeout-recovery" {
+            source :: s4_review_read("{root}/{subject[5]}")
+            if id == "process-batch-large-stderr" -> assert(source.contains("100000") && source.contains(">&2")) else -> assert(source.contains("trap '' TERM") && source.contains("50"))
+        } else if hostile_ids.contains(id) {
+            found := false
+            loop line in s4_review_read("{root}/{subject[6]}").lines() {
+                if id == {
+                    "desktop-interaction-focus" -> { if line == "event|Empty|observed" -> found = true }
+                    "browser-automation-preflight" -> { if line.ends_with("|rejected") -> found = true }
+                    "mcp-environment-denied" -> { if line == "error=-32002" -> found = true }
+                    "interactive-terminal-closed" -> { if line == "closed=ok" -> found = true }
+                    "service-lifecycle-readiness-timeout" -> { if line == "error=E1261" -> found = true }
+                    else -> { if line.starts_with("reject|") -> found = true }
+                }
+            }
+            assert(found)
+        }
+        stem :: s4_review_adapter(id)
+        loop extension in S4_REVIEW_ADAPTER_EXTENSIONS -> assert(s4_review_files.is_file("{root}/adapters/{stem}.{extension}"))
+    }
+    assert_eq(actual, S4_REVIEW_EXPECTED_TASKS)
+    domains :: s4_review_rows(root, "domain_contract.tsv", S4_REVIEW_DOMAIN_CONTRACT_HEADER, 6)
+    actual_domains := [[String]]{}
+    loop row in domains {
+        assert_eq(row[0], "1")
+        assert(ids.contains(row[1]))
+        assert_eq(row[5], S4_REVIEW_DOMAIN_SCORING)
+        &actual_domains.push([String]{row[1], row[2], row[3], row[4]})
+    }
+    assert_eq(actual_domains, S4_REVIEW_EXPECTED_DOMAIN_CONTRACT)
+    actual_paths := [String]{}
+    fixture_roots :: [String]{"inputs", "expected"}
+    loop name in fixture_roots {
+        if s4_review_files.is_dir("{root}/{name}") {
+            loop relative in s4_review_walk("{root}/{name}", name) -> &actual_paths.push(relative)
+        }
+    }
+    declared := [String]{}
+    loop line in s4_review_read("{root}/SHA256SUMS").lines() {
+        if line == "" -> next
+        parts :: s4_review_parse.split_once(line.to_string(), "  ")
+        assert(parts.found)
+        assert(s4_review_path(parts.tail))
+        assert(!declared.contains(parts.tail))
+        &declared.push(parts.tail)
+        assert_eq(s4_review_sha("{root}/{parts.tail}"), parts.head)
+    }
+    assert_eq(s4_review_set(actual_paths), s4_review_set(declared))
+    assert_eq(declared.len(), 82)
+}
+
+fn s4_review_compiled_workload_contract_reuses_agent_schema_and_keeps_hosted_rows() {
+    root :: "tests/compiled_workloads"
+    manifest :: s4_review_rows(root, "manifest.tsv", S4_REVIEW_HEADER, 13)
+    task_ids :: s4_review_set(s4_review_column(manifest, 1))
+    assert_eq(manifest.len(), task_ids.len())
+    assert_eq(task_ids, s4_review_set([String]{"systems-file-index", "service-json-http", "cli-archive-filter", "library-json-roundtrip", "compute-mandelbrot", "embedded-sensor-ring", "cross-platform-notes"}))
+    loop row in manifest {
+        assert_eq(row[0], "1")
+        assert_eq(row[11], "#1414")
+        assert_eq(row[12], "#2414")
+        assert(s4_review_path(row[5]) && s4_review_path(row[6]))
+        if row[1] == "systems-file-index" -> assert(s4_review_files.is_dir("{root}/{row[5]}")) else -> assert(s4_review_files.is_file("{root}/{row[5]}"))
+        assert(s4_review_files.is_file("{root}/{row[6]}"))
+    }
+    systems :: s4_review_row(manifest, "systems-file-index")
+    assert_eq(systems[5], "fixtures/systems-file-index/input")
+    assert_eq(systems[7], "argv=input-root;cwd=scratch;host=ambient;network=disabled;external-write=disabled")
+    assert_eq(s4_review_row(manifest, "service-json-http")[7], "argv=input-root;cwd=scratch;host=ambient;network=loopback-only;external-write=disabled")
+    assert_eq(s4_review_row(manifest, "cli-archive-filter")[7], "argv=input-root;cwd=scratch;host=ambient;network=disabled;external-write=disabled")
+    adapters :: s4_review_rows(root, "adapter_ledger.tsv", "version\ttask_id\tjet_source\tjet_hostile\tpeer_source\tpeer_hostile\tpeer_commit", 7)
+    assert_eq(adapters.len(), manifest.len())
+    assert_eq(s4_review_set(s4_review_column(adapters, 1)), task_ids)
+    loop row in adapters {
+        assert_eq(row[0], "1")
+        loop index in 2..<6 {
+            assert(s4_review_path(row[index]))
+            assert(s4_review_files.is_file("{root}/{row[index]}") || s4_review_files.is_dir("{root}/{row[index]}"))
+        }
+        assert_eq(row[3], row[5])
+        assert_eq(row[6].len(), 40)
+    }
+    systems_adapter :: s4_review_row(adapters, "systems-file-index")
+    assert_eq(systems_adapter[3], "fixtures/systems-file-index/hostile")
+    assert_eq(systems_adapter[5], "fixtures/systems-file-index/hostile")
+    peers :: s4_review_rows(root, "peer_ledger.tsv", "version\ttask_id\tselection\tlanguage\tprogram\tsource_url\tsource_revision\tbuild_command\trun_command\tdependency_rule\tsource_boundary\tapplicable_targets\towner", 13)
+    selected := [[String]]{}
+    candidate_cxx := false
+    loop row in peers {
+        if row[2] == "best-applicable" -> &selected.push(row)
+        if row[2] == "candidate" && row[3] == "cxx" -> candidate_cxx = true
+        assert_eq(row[12], "#1414")
+    }
+    assert(candidate_cxx)
+    assert_eq(selected.len(), manifest.len())
+    assert_eq(s4_review_set(s4_review_column(selected, 3)), s4_review_set([String]{"cxx", "domain", "go", "rust", "zig"}))
+    assert_eq(s4_review_set(s4_review_column(selected, 1)), task_ids)
+    loop adapter in adapters -> assert_eq(adapter[6], s4_review_row(selected, adapter[1])[6])
+    exact_peers :: [[String]]{
+        [String]{"systems-file-index", "rust", "local systems file-index equivalent", "adapters/peer/systems-file-index.rs", "https://github.com/jet-language/jet", "8b9933668f7f7d3c1a62182ff865f68989b41209", "repository source only;no network"},
+        [String]{"service-json-http", "go", "local JSON HTTP service equivalent", "adapters/peer/service-json-http.go", "https://github.com/jet-language/jet", "8b9933668f7f7d3c1a62182ff865f68989b41209", "repository source only;loopback only"},
+        [String]{"cli-archive-filter", "cxx", "local archive filter equivalent", "adapters/peer/cli-archive-filter.cpp", "https://github.com/jet-language/jet", "8b9933668f7f7d3c1a62182ff865f68989b41209", "repository source only;no network"}
+    }
+    loop exact in exact_peers {
+        peer :: s4_review_row(selected, exact[0])
+        assert_eq(peer[3], exact[1])
+        assert_eq(peer[4], exact[2])
+        assert_eq(peer[5], exact[4])
+        assert_eq(peer[6], exact[5])
+        assert_eq(peer[9], exact[6])
+        adapter :: s4_review_row(adapters, exact[0])
+        assert_eq(adapter[4], exact[3])
+        assert_eq(adapter[6], peer[6])
+    }
+    cross :: s4_review_row(selected, "cross-platform-notes")
+    assert_eq(cross[3], "domain")
+    assert_eq(cross[4], "ECMAScript browser notes task adapter")
+    assert_eq(cross[11], "linux,macos,windows,web")
+    assert(cross[11].split(",").to_list().contains("web"))
+    loop row in selected {
+        assert(task_ids.contains(row[1]))
+        assert(row[5].starts_with("https://"))
+        assert(row[6].starts_with("tag:") || row[6].len() == 40)
+        loop index in 7..<12 -> assert(row[index] != "")
+        assert(row[12].starts_with("#"))
+    }
+    metrics :: s4_review_rows(root, "metric_contract.tsv", "version\tmetric\tunit\tcomparison\tmissing_policy", 5)
+    assert_eq(metrics.len(), 10)
+    assert_eq(s4_review_set(s4_review_column(metrics, 1)), s4_review_set([String]{"source_effort", "build_time", "edit_time", "runtime", "memory", "artifact_size", "diagnostics", "debugging", "deployment", "unsafe_burden"}))
+    loop row in metrics -> assert(row[0] == "1" && row[2] != "" && row[3] == "lower" && row[4] == "fail")
+    domains :: s4_review_rows(root, "domain_contract.tsv", S4_REVIEW_DOMAIN_CONTRACT_HEADER, 6)
+    loop row in domains -> assert(row[0] == "1" && task_ids.contains(row[1]) && row[2] != "" && row[3] != "" && row[4] != "" && row[5].starts_with("#1414:"))
+    assert_eq(domains.len(), manifest.len())
+    assert_eq(s4_review_row(domains, "systems-file-index")[2], "jet=Core:files,crypto;rust=rust-stdlib;cxx=libstdc++;go=stdlib-os-path-filepath;swift=Foundation;zig=std;domain=POSIX filesystem indexing")
+    assert_eq(s4_review_row(domains, "service-json-http")[2], "jet=Core:files,http.client,http.server,net,time;rust=tokio+hyper;cxx=boost-beast;go=stdlib-net-http;swift=swift-nio;zig=std-http;domain=bounded JSON HTTP service")
+    archive :: s4_review_row(domains, "cli-archive-filter")
+    assert_eq(archive[2], "jet=Core:archive,files;rust=std+tar;cxx=c++20-stdlib;go=archive-tar;swift=Foundation;zig=std-tar;domain=POSIX ustar extraction")
+    assert(!archive[2].contains("libarchive"))
+    toolchains :: s4_review_rows(root, "toolchain_contract.tsv", "version\tlanguage\tcommand\tversion_prefix", 4)
+    assert_eq(toolchains.len(), 6)
+    toolchain_keys := [String]{}
+    loop row in toolchains -> &toolchain_keys.push("{row[1]}|{row[2]}|{row[3]}")
+    assert_eq(s4_review_set(toolchain_keys), s4_review_set([String]{"jet|jet|Jet 0.1.0", "rust|rustc|rustc 1.97.1", "go|go|go version go1.26.5", "cxx|clang++|clang version 21.1.8", "zig|zig|zig 0.16.0", "domain|node|node v22.23.2"}))
+    receipt_fields :: S4_REVIEW_COMPILED_RECEIPT_HEADER.split("\t").to_list()
+    assert_eq(receipt_fields.len(), 20)
+    assert_eq([String]{receipt_fields[16], receipt_fields[17], receipt_fields[18], receipt_fields[19]}, [String]{"peer_launcher_path", "peer_launcher_version", "peer_launcher_sha256", "authority"})
+    assert_eq(S4_REVIEW_PEER_LAUNCH_CONTRACT, "compiled-workload-peer-isolation-v1")
+    tiers :: s4_review_rows(root, "tier_matrix.tsv", "version\ttask_id\tplatform\ttarget\ttier\trequirement\tavailability\tavailability_reason\trationale", 9)
+    assert_eq(tiers.len(), 39)
+    availability := [String]{}
+    aarch64 := 0
+    web_found := false
+    cross_web_found := false
+    loop row in tiers {
+        &availability.push("{row[6]}|{row[7]}")
+        if row[2] == "cross-target" && row[3] == "aarch64-unknown-linux-gnu" {
+            aarch64 += 1
+            assert(row[5] == "required" && row[6] == "external" && row[7] == "cross-toolchain")
+        }
+        // The Rust find() predicate asserts only the first cross-target web row.
+        if !web_found && row[2] == "cross-target" && row[3] == "web" {
+            web_found = true
+            assert_eq([String]{row[5], row[6], row[7]}, [String]{"required", "local", "browser-runtime"})
+        }
+        if !cross_web_found && row[1] == "cross-platform-notes" && row[2] == "cross-target" && row[3] == "web" && row[4] == "aot" {
+            cross_web_found = true
+            assert_eq(row[5], "required")
+        }
+    }
+    assert_eq(s4_review_set(availability), s4_review_set([String]{"local|host-toolchain", "local|host-runtime", "local|browser-runtime", "external|host-platform", "external|cross-toolchain", "excluded|freestanding-profile"}))
+    assert_eq(aarch64, 5)
+    assert(web_found && cross_web_found)
+    hosted_ids :: [String]{"systems-file-index", "service-json-http", "cli-archive-filter", "library-json-roundtrip", "compute-mandelbrot", "cross-platform-notes"}
+    loop id in hosted_ids {
+        cross_target :: if id == "cross-platform-notes" -> "web" else -> "aarch64-unknown-linux-gnu"
+        required := [String]{}
+        loop row in tiers {
+            if row[1] == id && row[5] == "required" -> &required.push("{row[1]}|{row[2]}|{row[3]}|{row[4]}")
+        }
+        assert_eq(s4_review_set(required), s4_review_set([String]{"{id}|linux|x86_64-unknown-linux-gnu|aot", "{id}|macos|x86_64-apple-darwin|aot", "{id}|windows|x86_64-pc-windows-msvc|aot", "{id}|cross-target|{cross_target}|aot", "{id}|linux|x86_64-unknown-linux-gnu|jit"}))
+    }
+    embedded := 0
+    excluded := 0
+    embedded_required := [String]{}
+    loop row in tiers {
+        if row[1] != "embedded-sensor-ring" -> next
+        embedded += 1
+        if row[5] == "excluded" {
+            excluded += 1
+            assert(row[6] == "excluded" && row[7] == "freestanding-profile" && row[8].contains("#2046") && row[8].contains("#2300"))
+        }
+        if row[5] == "required" -> &embedded_required.push("{row[2]}|{row[3]}|{row[4]}")
+    }
+    assert_eq(embedded, 9)
+    assert_eq(excluded, 5)
+    assert_eq(s4_review_set(embedded_required), s4_review_set([String]{"linux|x86_64-unknown-linux-gnu|aot", "macos|x86_64-apple-darwin|aot", "windows|x86_64-pc-windows-msvc|aot", "linux|x86_64-unknown-linux-gnu|jit"}))
+    canaries :: s4_review_rows(root, "canaries.tsv", "version\tcanary\tmutation\trequired_failure", 4)
+    assert_eq(canaries.len(), 20)
+    assert_eq(s4_review_set(s4_review_column(canaries, 1)), s4_review_set([String]{"comparison-dependency-drift", "comparison-toolchain-drift", "statistics-drift", "receipt-input-drift", "missing-samples", "missing-statistics", "missing-receipt", "missing-tier-receipt", "missing-outcome", "unrelated-live-owner", "missing-metric", "missing-tier", "changed-input", "embedded-review-claim", "stale-candidate", "unowned-metric-loss", "required-tier-loss", "toolchain-drift", "missing-peer-coverage", "candidate-peer-loss"}))
+    loop row in canaries -> assert(row[0] == "1" && row[1] != "" && row[2] != "" && row[3] != "")
+}
+
+#Test("policy_digest_covers_authority_and_receipt_contract") {
+    s4_review_policy_digest_covers_authority_and_receipt_contract()
+}
+#Test("recorded_baselines_cover_frozen_tasks") {
+    s4_review_recorded_baselines_cover_frozen_tasks()
+}
+#Test("manifest_is_complete_frozen_and_non_vacuous") {
+    s4_review_manifest_is_complete_frozen_and_non_vacuous()
+}
+#Test("compiled_workload_contract_reuses_agent_schema_and_keeps_hosted_rows") {
+    s4_review_compiled_workload_contract_reuses_agent_schema_and_keeps_hosted_rows()
+}
