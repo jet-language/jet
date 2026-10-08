@@ -2624,7 +2624,7 @@ mod tests {
     #[test]
     fn type_parser_distinguishes_optional_list_and_map() {
         assert_eq!(
-            parse_type("?[String: ?MirType]").expect("type"),
+            parse_type("?[String: ?MIRType]").expect("type"),
             TypeExpr::Optional(Box::new(TypeExpr::Map(
                 Box::new(TypeExpr::Named("String".to_string())),
                 Box::new(TypeExpr::Optional(Box::new(TypeExpr::Named(
