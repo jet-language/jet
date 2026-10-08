@@ -155,5 +155,34 @@ fn run() {
     cli_files.write(plan_file, "{{\"entry\":\"run.jet\",\"edits\":[],\"extra\":true}}") ?? panic("empty plan")
     empty :: jet_cli_try_run(plan_file, false, false)
     assert(empty.stderr == jet_cli_try_fail("try plan needs at least one edit").stderr)
+    cli_files.write_bytes(plan_file, [U8]{255}) ?? panic("actual malformed UTF-8 plan")
+    invalid_message :: "could not read try plan `{plan_file}`: stream did not contain valid UTF-8"
+    if jet_cli_try_read_plan(plan_file) == {
+        .Ok(_) -> panic("malformed plan bytes must not become a source or JSON value")
+        .Err(problem) -> assert(problem.message == invalid_message)
+    }
+    invalid_utf8 :: jet_cli_try_run(plan_file, false, true)
+    invalid_expected :: jet_cli_try_fail(invalid_message)
+    assert(invalid_utf8.stdout == invalid_expected.stdout && invalid_utf8.stderr == invalid_expected.stderr && invalid_utf8.exit_code == invalid_expected.exit_code)
+    cli_files.write_bytes(plan_file, [U8]{}) ?? panic("actual empty UTF-8 plan")
+    if jet_cli_try_read_plan(plan_file) == {
+        .Ok(_) -> panic("empty UTF-8 is valid text, not a valid JSON plan")
+        .Err(problem) -> assert(problem.message.starts_with("invalid try plan JSON: "))
+    }
+    bom := [U8]{239, 187, 191}
+    &bom.extend("{{\"entry\":\"run.jet\",\"edits\":[]}}".bytes())
+    cli_files.write_bytes(plan_file, bom) ?? panic("actual BOM plan")
+    if jet_cli_try_read_plan(plan_file) == {
+        .Ok(_) -> panic("the canonical JSON reader rejects the BOM, not the UTF-8 decoder")
+        .Err(problem) -> assert(problem.message.starts_with("invalid try plan JSON: "))
+    }
+    missing_plan :: "{root}/missing-plan.json"
+    if jet_cli_try_read_plan(missing_plan) == {
+        .Ok(_) -> panic("missing plan must fail before decoding")
+        .Err(problem) -> {
+            assert(problem.message.starts_with("could not read try plan `{missing_plan}`: "))
+            assert(!problem.message.contains("stream did not contain valid UTF-8"))
+        }
+    }
     cli_files.remove_all(root).drop("try fixture cleanup")
 }
