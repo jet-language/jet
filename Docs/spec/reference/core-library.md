@@ -15,6 +15,9 @@ self-hosted.
 Application and `#Test` helper functions retain their canonical entry-module
 call identity in both single-file and multi-file packages; the absence of
 sibling modules does not change callable resolution.
+The private testing evidence and temporary-path records are ordinary Core
+source records; lowering uses their checked declarations rather than synthetic
+compiler-owned records or root-Prelude carrier names.
 
 Whole-file filesystem checks, atomic-write sequencing, scoped path selection,
 logical environment policy, signal masks, and line decoding live in Jet source.
