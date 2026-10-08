@@ -1,6 +1,103 @@
 // Source-owned compiler query orchestration.
 // The check query follows the Driver's normal load, declaration-comptime,
 // body-comptime, and semantic-finalization phases before serialization.
+//
+// Invocation-memory incremental service. Source of truth: Rust
+// QueryService::CompilerQueries and CmdTry::verdict. Sema owns the accepted
+// typed body cache; no DriverRecordStore serialization or physical cache.
+//
+// Ownership and lifetime:
+// - One Driver session belongs to one try invocation and survives its edits.
+//   It owns canonical document inputs and one opaque Sema session per root.
+// - Root results are volatile: prepared source bytes alone do not capture
+//   every schema/external/config input. No checked-root memo or hit is claimed.
+// - Sema owns all typed body products and their replay. Driver never opens
+//   Sema-private fields. Closing the invocation releases its documents and
+//   every Sema session; no state leaks into a later try invocation.
+//
+// Authorized input adapter:
+// - The CLI retains Request.prepare_overlays as the one filesystem/authority
+//   resolver. check_disk prepares the entry without edits; set_document updates
+//   the session's exact canonical-path text; check_text prepares the complete
+//   overlay set through the same adapter and enters this existing check flow.
+// - Driver receives the actual prepared snapshot and parsed entry packet;
+//   it does not reopen display paths, infer a project root, or forward to Rust.
+// - Every verdict enters the real checker using the freshly prepared request.
+//   Schema/lock/external/comptime/config inputs retain their actual producers,
+//   not a source-only root key or a second SourceQuery load.
+// - Missing inputs follow ordinary diagnostics. Even unchanged source cannot
+//   authorize a root-result hit without the whole actual read closure.
+//
+// Root query flow:
+// - Run the normal load/declaration-comptime/body-comptime/semantic-finalization
+//   flow below once with the root's opaque Sema session on the final verdict.
+// - Keep registration, policies, plugin interfaces, resolved imports and
+//   target/profile facts canonical. This is not a BuildGraph/receipt facade,
+//   a second frontend, or two complete checks with inferred reuse counters.
+// - Root-result eligibility and Sema-body eligibility are distinct. A volatile
+//   root still supplies its opaque Sema session to the FINAL real verdict when
+//   that same compile supplies complete actual Sema inputs/frozen epochs.
+//   This does not authorize a root hit: fresh global/schema verdict work runs.
+//   A body-relevant uncaptured input instead makes that logical BODY query
+//   volatile through its real producer; Driver invents no flag or key for it.
+//
+// Opaque Sema contract (sole implementation editor: SpeedPareto2):
+// - Compare the actual graph/stage/values/providers/policies and frozen
+//   registration/module views from the same compile. Body-cleared interfaces
+//   preserve all headers/defaults/non-body facts; dependency projections strip
+//   spans with the canonical quote/escape-aware law, not a guessed serializer.
+//   Frozen binding/declaration/source views separately retain their full spans.
+// - Capture full relevant/callee source-segment maps and post-summary scope/
+//   environment inputs ONCE per request/module epoch, not a scalar name line
+//   or an entire graph serialized into each function key. Physical counters/
+//   callback addresses/reconstructible indexes are not semantic input.
+// - A row retains its own full raw/planned function, owner/generic/memory facts
+//   and exact frozen input epoch. Exact owned values decide equality, not a
+//   hash alone. No private-body key depends on every other executable body.
+// - An entry owns the actual private SemaFunctionResult, WHOLE TFunc and four
+//   ordered outputs: diagnostics, calls, comptime requests and name references.
+//   Preserve all actual completion/exact-Int/copy/hardware/body-source/compute/
+//   failure facts. Do not invent absent publication/pending-ledger arrays.
+// - Commit only the accepted complete final owned packet after the main
+//   callback retry. wanted_hooks=false alone is insufficient: sticky BOTH-mode
+//   host reach and actual foreign HTTP-handler raw-body reads bypass retention.
+//   Never retain provisional/withheld/part-borrowed packets. Comptime/embed,
+//   volatile and incomplete outcomes use the real logical recompute path.
+// - Replay through the SAME ordered append path used by fresh bodies
+//   (currently sema_append_function plus its explicit facts loops), preserving
+//   parallel result order. Factoring that path belongs to the checker owner;
+//   planned helper names are not existing APIs. Re-run all global failure,
+//   effect, borrow and other bundle obligations after all body products join.
+// - Prepared replay descriptors carry the frozen epoch. Ordered return-view
+//   publication invalidates stale descriptors; discarded candidates count no
+//   hit and follow canonical checking. Worker results join before mutable apply.
+//
+// Counters and command cutover:
+// - Root hits/recomputes and body hits/recomputes are distinct cumulative
+//   observations. Increment a body hit only for an actual accepted replay;
+//   increment a body recompute once when the tracked initial logical body
+//   query accepts its final outcome, including uncached/bypassed outcomes.
+//   Provisional callback attempts do not publish or increment separately;
+//   global rechecks/probes are not initial body-cache hits/recomputes.
+//   No result-derived counts or synthetic cached claims.
+// - Stats use exact Int. clear drops retained rows but preserves cumulative
+//   hits/recomputes; clear_measurement resets only the ordered recomputed window.
+// - CmdTry takes stats after its baseline check_disk, installs each staged
+//   document, calls check_text, and reports checked monotonic deltas of the actual
+//   item counters. Decreasing counters are an internal failure, not fake zero.
+// - Keep uses the existing SourceTransaction/SemanticOps writer after the
+//   checked verdict and current-byte comparison. Default speculation writes
+//   no source. Failed checks publish the normal diagnostics, not clean claims.
+//
+// Acceptance packet:
+// - Root verdicts remain volatile. Unchanged and edited inputs exercise actual
+//   Sema replay/recomputation while schema/global verdict work always runs.
+// - Fresh and replayed packets agree on diagnostics, names, effects, failure,
+//   copies, publications and borrow obligations on serial and parallel paths.
+// - Exact try human/JSON output, receipt identity and keep/no-keep transaction
+//   behavior use real item-counter deltas. Source approval requires the full
+//   typed input/replay/caller packet; parser success is not semantic proof.
+use jet_sema.sema_output_resolve
 use jet_foundation.[
     Diagnostic,
     MIRSourceFile,
@@ -10,12 +107,16 @@ use jet_sema.[
     SemaCompilerModuleSource,
     SemaComptimeFunctionResult,
     SemaComptimeItemValue,
-    SemaForeignProviderInput,
     SemaGraphResult,
+    SemaIncrementalCache,
+    sema_incremental_cache_new,
+    sema_incremental_cache_clear_measurement,
+    sema_incremental_cache_stats,
     SemaRegistrationGraph,
     SemaRegistrationModuleInput,
     SemaRegistrationPackagePolicy,
     sema_collect_comptime_declarations,
+    sema_comptime_graph_with_values,
     sema_finalize_registration_graph,
     sema_registration_prepare_graph,
 ]
@@ -26,51 +127,108 @@ use jet_eval.[
     jet_eval_compiler_services_checked,
 ]
 
+// Exactly one requested checked product; failed ingress has no manufactured
+// projection or opaque value. Ordinary compiler consumers request the value,
+// while the invocation service retains the original checked projection.
+pub enum JetDriverCompilerCheckProduct {
+    CheckedCompilerValue(checked: JetCompilerServicesCheckedFacts)
+    RetainedCheckedProjection(projection: JetDriverCheckedProjectionResult)
+    Failed
+}
+
 pub struct JetDriverCompilerCheckInput {
     pub parsed: JetCompilerServicesParseFacts
     pub request: JetDriverCompileRequest
+    pub sema_session: SemaIncrementalCache?
+    pub retain_projection: Bool
 }
 
 pub struct JetDriverCompilerCheckResult {
-    pub checked: JetCompilerServicesCheckedFacts?
+    pub product: JetDriverCompilerCheckProduct
     pub diagnostics: [Diagnostic]
     pub failed_stage: JetDriverStage?
     pub complete: Bool
     pub internal_problem: String?
 }
 
-fn jet_driver_compiler_check_failure(load: JetDriverLoadResult, stage: JetDriverStage, problem: String?) -> JetDriverCompilerCheckResult Never! {
-    JetDriverCompilerCheckResult{checked: None, diagnostics: load.diagnostics, failed_stage: Val(stage), complete: false, internal_problem: problem}
+// Invocation-owned documents use paths already resolved by the CLI's retained
+// authority adapter. This service never reopens or canonicalizes a display path.
+pub struct JetDriverCompilerQueryDocument {
+    pub path: String
+    pub source: String
 }
 
-fn jet_driver_compiler_check_registration_inputs(load: JetDriverLoadResult, core_sources: [JetDriverCoreSource], providers: [SemaForeignProviderInput], diagnostics: &[Diagnostic]) -> [SemaRegistrationModuleInput]? {
-    inputs := [SemaRegistrationModuleInput]{ }
-    source_positions :: jet_driver_source_file_positions(load.source_files)
-    loop module_index in 0..<load.modules.len() {
-        loaded_module :: load.modules[module_index]
-        if loaded_module.source_unit_index < 0 || loaded_module.source_unit_index >= load.source_units.len() {
-            &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a loaded module has no exact source-unit owner", "semantic registration preserves the loader's canonical source-unit identity", "retain the source-unit index returned by JetDriver"))
-            return None
-        }
-        unit := load.source_units[loaded_module.source_unit_index]
-        core_source_alias :: jet_driver_core_source_alias(unit, loaded_module, core_sources)
-        handles :: jet_driver_registration_foreign_handle_facts(loaded_module.module_identity, providers, &diagnostics) ?? return None
-        &inputs.push(SemaRegistrationModuleInput{
-            package_identity: loaded_module.package_identity,
-            module_identity: loaded_module.module_identity,
-            module_name: loaded_module.module_name,
-            core_source_alias: core_source_alias,
-            module_path: jet_driver_module_display(unit.relative_path),
-            source_file: unit.path,
-            source_segments: unit.source_segments,
-            source_origin: unit.source_origin,
-            program: loaded_module.program,
-            foreign_handles: handles,
-            source: jet_driver_source_text_at(load.source_files, source_positions, unit.path),
-        })
-    }
-    Val(inputs)
+pub struct JetDriverCompilerQueryStats {
+    pub item_hits: Int
+    pub item_recomputes: Int
+    pub live_items: Int
+    pub live_item_bytes: Int
+    pub recomputed_items: [String]
 }
+
+pub struct JetDriverCompilerQueries {
+    documents: [String:String]
+    roots: [String:SemaIncrementalCache]
+}
+
+pub fn jet_driver_compiler_queries_new() -> JetDriverCompilerQueries Never! {
+    JetDriverCompilerQueries{documents: [String:String]{}, roots: [String:SemaIncrementalCache]{}}
+}
+
+pub fn jet_driver_compiler_queries_set_document(queries: &JetDriverCompilerQueries, path: String, source: String) Never! {
+    queries.documents[path] = source
+}
+
+pub fn jet_driver_compiler_queries_documents(queries: &JetDriverCompilerQueries) -> [JetDriverCompilerQueryDocument] Never! {
+    documents := [JetDriverCompilerQueryDocument]{}
+    loop (path, source) in queries.documents -> &documents.push(JetDriverCompilerQueryDocument{path: path, source: source})
+    &documents.sort_by((a, b) -> a.path <=> b.path)
+    documents
+}
+
+pub fn jet_driver_compiler_queries_stats(queries: &JetDriverCompilerQueries) -> JetDriverCompilerQueryStats {
+    total := JetDriverCompilerQueryStats{item_hits: 0, item_recomputes: 0, live_items: 0, live_item_bytes: 0, recomputed_items: [String]{}}
+    loop (_, cache) in queries.roots {
+        stats :: sema_incremental_cache_stats(cache)
+        total.item_hits += stats.hits
+        total.item_recomputes += stats.recomputes
+        total.live_items += stats.live_items
+        total.live_item_bytes += stats.live_item_bytes
+        &total.recomputed_items.extend(stats.recomputed_items)
+    }
+    total
+}
+
+pub fn jet_driver_compiler_queries_clear_measurement(queries: &JetDriverCompilerQueries) {
+    loop (_, cache) in queries.roots -> sema_incremental_cache_clear_measurement(cache)
+}
+
+pub fn jet_driver_compiler_queries_check_disk(queries: &JetDriverCompilerQueries, parsed: JetCompilerServicesParseFacts, request: JetDriverCompileRequest) -> JetDriverCompilerCheckResult {
+    // Disk and text ingress differ only at the existing authorized CLI adapter.
+    jet_driver_compiler_queries_check_text(&queries, parsed, request)
+}
+
+pub fn jet_driver_compiler_queries_check_text(queries: &JetDriverCompilerQueries, parsed: JetCompilerServicesParseFacts, request: JetDriverCompileRequest) -> JetDriverCompilerCheckResult {
+    root :: request.authorized_sources.entry_path
+    jet_driver_compiler_queries_set_document(&queries, root, parsed.source)
+    cache :: if queries.roots.get(root) == {
+        .Val(existing) -> existing
+        .None -> {
+            created :: sema_incremental_cache_new()
+            queries.roots[root] = created
+            created
+        }
+    }
+    // Root results deliberately remain volatile: every invocation enters the
+    // ONE canonical checker, including fresh schema/global/downstream work.
+    // Only Sema's exact frozen inputs and actual sticky producers allow replay.
+    jet_driver_compiler_check(JetDriverCompilerCheckInput{parsed: parsed, request: request, sema_session: Val(cache), retain_projection: true})
+}
+
+fn jet_driver_compiler_check_failure(load: JetDriverLoadResult, stage: JetDriverStage, problem: String?) -> JetDriverCompilerCheckResult Never! {
+    JetDriverCompilerCheckResult{product: .Failed, diagnostics: load.diagnostics, failed_stage: Val(stage), complete: false, internal_problem: problem}
+}
+
 
 fn jet_driver_compiler_check_package_policies(load: JetDriverLoadResult) -> [SemaRegistrationPackagePolicy] Never! {
     policies := [SemaRegistrationPackagePolicy]{ }
@@ -151,7 +309,7 @@ fn jet_driver_compiler_check_result(input: JetDriverCompilerCheckInput, registra
         diagnostics: diagnostics,
     })
     complete := graph_complete && checked.semantic_index_complete
-    JetDriverCompilerCheckResult{checked: Val(checked), diagnostics: diagnostics, failed_stage: None, complete: complete, internal_problem: None}
+    JetDriverCompilerCheckResult{product: .CheckedCompilerValue{checked: checked}, diagnostics: diagnostics, failed_stage: None, complete: complete, internal_problem: None}
 }
 fn jet_driver_compiler_check_diagnostic_packet(
     input: JetDriverCompilerCheckInput,
@@ -161,6 +319,9 @@ fn jet_driver_compiler_check_diagnostic_packet(
     diagnostics: [Diagnostic],
 ) -> JetDriverCompilerCheckResult? {
     if graph.modules.len() != registration.modules.len() || !jet_driver_has_errors(diagnostics) -> return None
+    if input.retain_projection {
+        return Val(JetDriverCompilerCheckResult{product: .Failed, diagnostics: diagnostics, failed_stage: Val(JetDriverStage.Check), complete: false, internal_problem: None})
+    }
     Val(jet_driver_compiler_check_result(input, ^registration, ^graph, module_sources, diagnostics))
 }
 
@@ -187,16 +348,25 @@ pub fn jet_driver_compiler_check(input: JetDriverCompilerCheckInput) -> JetDrive
     providers := jet_driver_assemble_foreign_providers(input.request.authorized_sources, &load)
     if (!load.complete || jet_driver_has_errors(load.diagnostics)) && !parse_only -> return jet_driver_compiler_check_failure(load, JetDriverStage.Load, None)
     if !jet_driver_foreign_provider_owners_valid(load.modules, providers, &load.diagnostics) -> return jet_driver_compiler_check_failure(load, JetDriverStage.Load, None)
-    module_sources :: jet_driver_compiler_check_module_sources(load, canonical, input.request.canonical_effect_source, input.parsed) ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val("the compiler query source is not the exact loaded entry or a loaded module source is missing"))
+    module_sources := [SemaCompilerModuleSource]{}
+    if {
+        input.retain_projection -> {
+            // Retained products use the canonical registration/Doc ownership
+            // bijection, including ABI catalog units without physical source.
+            // Only the actual entry is replaced by the prepared parser's program.
+            entry_source :: jet_driver_compiler_check_source_bytes(load, input.request.authorized_sources.entry_path) ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val("the compiler query source is not the exact loaded entry or a loaded module source is missing"))
+            if entry_source != input.parsed.source || (input.parsed.compiler_source.len() > 0 && input.parsed.compiler_source.len() != entry_source.len()) {
+                return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val("the compiler query source is not the exact loaded entry or a loaded module source is missing"))
+            }
+        }
+        else -> {
+            module_sources = jet_driver_compiler_check_module_sources(load, canonical, input.request.canonical_effect_source, input.parsed) ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val("the compiler query source is not the exact loaded entry or a loaded module source is missing"))
+        }
+    }
     target_option := jet_driver_selected_target_machine(input.request, &load.diagnostics)
     if target_option == None -> return jet_driver_compiler_check_failure(load, JetDriverStage.Check, None)
     target :: target_option ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Check, None)
-    // The stage callees read `load` while they append diagnostics, so the
-    // diagnostics list travels beside it and is put back after each stage.
-    stage_diagnostics := load.diagnostics
-    load.diagnostics = [Diagnostic]{}
-    registration_inputs_option := jet_driver_compiler_check_registration_inputs(load, input.request.core_sources, providers, &stage_diagnostics)
-    load.diagnostics = stage_diagnostics
+    registration_inputs_option := jet_driver_registration_module_inputs(load.modules, load.source_units, load.source_files, providers, &load.diagnostics, input.request.core_sources)
     registration_inputs := registration_inputs_option ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Load, None)
     canonical_identity := canonical.module_identity
     &registration_inputs.push(^canonical)
@@ -216,12 +386,16 @@ pub fn jet_driver_compiler_check(input: JetDriverCompilerCheckInput) -> JetDrive
         jet_driver_build_facts(load, input.request, target),
         false,
     )
+    if input.retain_projection -> registration.retain_programs = true
+    output_diagnostics :: sema_output_resolve(&registration, input.request.output_intent, input.request.output_address)
+    loop diagnostic in output_diagnostics -> &registration.diagnostics.push(diagnostic)
+    if jet_driver_has_errors(output_diagnostics) -> registration.complete = false
     if registration.internal_problem == .Val(problem) -> return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val(problem))
     stage := sema_collect_comptime_declarations(registration, jet_driver_compiler_check_package_policies(load), input.request.eval_config.host_hooks, input.request.compiler_threads, input.request.trace_sink)
     if !stage.complete || stage.modules.len() != registration_inputs.len() || jet_driver_has_errors(stage.diagnostics) {
         jet_driver_comptime_diagnostics_add(&load.diagnostics, stage.diagnostics)
         if stage.modules.len() == registration_inputs.len() {
-            provisional := sema_finalize_registration_graph(registration, None, stage, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, input.request.eval_config.host_hooks, input.request.compiler_threads, input.request.trace_sink)
+            provisional := sema_finalize_registration_graph(registration, None, stage, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, input.request.eval_config.host_hooks, input.request.compiler_threads, None, input.request.trace_sink)
             jet_driver_comptime_diagnostics_add(&load.diagnostics, provisional.diagnostics)
             packet := jet_driver_compiler_check_diagnostic_packet(input, ^registration, ^provisional, module_sources, load.diagnostics)
             if packet == .Val(result) -> return result
@@ -230,7 +404,9 @@ pub fn jet_driver_compiler_check(input: JetDriverCompilerCheckInput) -> JetDrive
         return jet_driver_compiler_check_failure(load, JetDriverStage.Check, None)
     }
     initial_values := [SemaComptimeItemValue]{ }
-    stage_diagnostics = load.diagnostics
+    // Body/comptime stage callees read the complete load while appending
+    // diagnostics, so this existing stage boundary travels beside the load.
+    stage_diagnostics := load.diagnostics
     load.diagnostics = [Diagnostic]{}
     // The declaration pass's graph copy becomes the run's environment graph.
     staged_graph := ^stage.graph
@@ -250,7 +426,7 @@ pub fn jet_driver_compiler_check(input: JetDriverCompilerCheckInput) -> JetDrive
     if run.soft_stop -> return jet_driver_compiler_check_failure(load, JetDriverStage.Comptime, None)
     if !run.complete {
         if run.internal_problem == None {
-            provisional := sema_finalize_registration_graph(registration, None, stage, run.values, run.functions, input.request.eval_config.host_hooks, input.request.compiler_threads, input.request.trace_sink)
+            provisional := sema_finalize_registration_graph(registration, None, stage, run.values, run.functions, input.request.eval_config.host_hooks, input.request.compiler_threads, None, input.request.trace_sink)
             jet_driver_comptime_diagnostics_add(&load.diagnostics, provisional.diagnostics)
             packet := jet_driver_compiler_check_diagnostic_packet(input, ^registration, ^provisional, module_sources, load.diagnostics)
             if packet == .Val(result) -> return result
@@ -259,11 +435,14 @@ pub fn jet_driver_compiler_check(input: JetDriverCompilerCheckInput) -> JetDrive
     }
     run_graph := ^run.graph
     run.graph = None
-    graph := sema_finalize_registration_graph(registration, ^run_graph, stage, run.values, run.functions, input.request.eval_config.host_hooks, input.request.compiler_threads, input.request.trace_sink)
+    graph := sema_finalize_registration_graph(registration, ^run_graph, stage, run.values, run.functions, input.request.eval_config.host_hooks, input.request.compiler_threads, input.sema_session, input.request.trace_sink)
     if graph.modules.len() != registration_inputs.len() {
         jet_driver_comptime_diagnostics_add(&load.diagnostics, graph.diagnostics)
         return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val("semantic finalization did not return every registered module"))
     }
+    schema_check := jet_driver_check_schema_migrations(input.request, ^registration, graph, input.retain_projection)
+    registration = ^schema_check.registration
+    loop diagnostic in schema_check.diagnostics -> &load.diagnostics.push(diagnostic)
     stage_diagnostics = load.diagnostics
     load.diagnostics = [Diagnostic]{}
     body_run := jet_driver_orchestrate_comptime_bodies(
@@ -310,5 +489,21 @@ pub fn jet_driver_compiler_check(input: JetDriverCompilerCheckInput) -> JetDrive
         return jet_driver_compiler_check_failure(load, JetDriverStage.Comptime, validation.internal_problem)
     }
     graph = ^validation.graph
+    if input.retain_projection {
+        schema_ingress :: schema_check.ingress ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val("the retained compiler query lost its actual schema input"))
+        resolved_registration := sema_comptime_graph_with_values(registration, validation.values)
+        projection := jet_driver_project_completed_check(input.request, ^load, resolved_registration, graph, validation.values, canonical_identity, schema_ingress, validation.trace)
+        diagnostics :: projection.compile.diagnostics
+        failed_stage :: projection.compile.failed_stage
+        complete :: projection.compile.complete
+        internal_problem :: projection.compile.internal_problem
+        return JetDriverCompilerCheckResult{
+            product: .RetainedCheckedProjection{projection: ^projection},
+            diagnostics: diagnostics,
+            failed_stage: failed_stage,
+            complete: complete,
+            internal_problem: internal_problem,
+        }
+    }
     jet_driver_compiler_check_result(input, ^registration, ^graph, module_sources, load.diagnostics)
 }
