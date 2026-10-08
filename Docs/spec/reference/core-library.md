@@ -46,6 +46,17 @@ consumption remain identical to the native SplitMix64 seed.
 the public `numerator()` and `denominator()` accessors. Field and method names
 share one member namespace; the storage names are not a construction API.
 
+Manual Core `Debug` implementations use the Prelude's consuming `debug(^self)`
+contract; `Display` reads `self`. Neither formatting projection changes its text.
+`WrappedVaultKey` likewise keeps encrypted bytes in private storage separate
+from `bytes()`, which still returns an owned copy.
+
+File-backed JSON and CBOR writers pass borrowed byte views across the write
+boundary. Private CBOR sorting uses integral heap indexes and swaps paired
+key/value entries in place. Logical environment removal uses an explicit list
+slot; Dotenv replacement preserves sibling order and moves only the selected
+entry, rather than copying its subtree.
+
 <!-- Stable IDs bind these public Core declarations to reviewed feature depth. -->
 <!-- FEATURE_CLAIMS:BEGIN -->
 <!-- FEATURE_CLAIM: claim.core-foundation | Core foundations are reachable Jet software. -->
