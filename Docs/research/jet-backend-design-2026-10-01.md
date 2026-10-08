@@ -1622,6 +1622,21 @@ after `jet_runtime_jet.o`; the strong-definition check rejects any replaced
 Rust export. Rust-tier allocator bodies are seed/verification inputs only,
 recorded for deletion at cutover, not a second native-pack implementation.
 
+`Source/Main.jet` provides the native normal-entry `jet_rt_main` boundary;
+the seed CAbi copy is excluded by `cfg(not(jet_native_pack))`. The host must
+capture argc/argv/envp before entry. Main validates the single logical Env
+seed, initializes native TLS and registries, starts Observe exactly once,
+and invokes the checked System V `void(void)` entry through `os_call0_unit`.
+This raw entry is not a Jet closure header. On return, Main runs reverse-order
+exit handlers, obtains the single parked report, drains the scheduler, flushes
+the real stdout/stderr streams, and frees its shared output scratch before
+returning zero or exiting with the parked-report status. Its I64 result carries
+the existing C int32 status in eax; the loader normalizes those low 32 bits.
+`Tests/run-main-fixtures.mjs` requires an explicit fresh native pack and checks
+normal exit, a real blocked child, callback order, and merged stream bytes.
+Native fatal and explicit-exit paths are separate from this normal-return
+boundary; this source does not claim to intercept their direct process exits.
+
 Controlled clocks use the native World128 state in `Source/World.jet`.
 The active capability is borrowed at TCB offset 104; zero means no World.
 `world_wall_ms(out)` and `world_monotonic_ns(out)` return presence separately
