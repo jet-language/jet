@@ -1760,3 +1760,13 @@ Unix key comparison uses raw byte lexicographic order and returns -1/0/1.
 The composed World/Sentry lane registers empty/startup-duplicate/invalid-UTF8
 ordering goldens and a writer racing two snapshot readers; source registration
 is not a claim of native execution.
+
+The unresolved-link reconciliation (`Tests/link-native.tsv`) distinguishes a
+generic Rust spelling from its actual native Lower-selected provider. Shared
+read/edit, blocking/probing tagged select, atexit and progress iteration already
+select Jet providers with other physical names. Their six census rows reuse
+those bodies rather than adding aliases or duplicate implementations. A composed
+C fixture registers exact output goldens for lock-protected read/edit, select
+ownership/probing, reverse once-only exit callbacks, and progress pull order.
+Progress-state hooks remain a separately named host-policy seam; this census
+does not assert their retirement or native execution.

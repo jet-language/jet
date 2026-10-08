@@ -49,6 +49,7 @@ if (mode === 'assemble') {
   if (!library || !existsSync(library) || !rlib || !existsSync(rlib)) throw Error('fresh composed JET_RUNTIME_C_LIB and JET_RUNTIME_NATIVE_RLIB required');
   command('link', process.env.CC ?? 'cc', [join(root, 'Compiler/JetRuntime/Tests/world-sentry-fixture.c'), join(unit, 'fixture.o'), library, '-lpthread', '-ldl', '-lm', '-o', join(out, 'world-sentry-fixture')]);
   command('logical-env-link', process.env.CC ?? 'cc', [join(root, 'Compiler/JetRuntime/Tests/LogicalEnvironmentTests.c'), join(unit, 'fixture.o'), library, '-lpthread', '-ldl', '-lm', '-o', join(out, 'logical-env-fixture')]);
+  command('link-native-link', process.env.CC ?? 'cc', [join(root, 'Compiler/JetRuntime/Tests/LinkNativeTests.c'), join(unit, 'fixture.o'), library, '-lpthread', '-ldl', '-lm', '-o', join(out, 'link-native-fixture')]);
   command('reference-link', 'rustc', ['--edition', '2021', join(root, 'Compiler/JetRuntime/Tests/sentry-ledger-reference.rs'), '--extern', `jet_runtime=${rlib}`, '-C', `link-arg=${join(unit, 'fixture.o')}`, '-o', join(out, 'ledger-reference')]);
 } else {
   const failures = [];
@@ -62,6 +63,11 @@ if (mode === 'assemble') {
       if (result.stdout !== '' || result.stderr !== '') throw Error(`logical environment ${mode} witnesses changed empty output`);
     } catch (error) { failures.push(error.message); }
   }
+  try {
+    const result = command('link-native-goldens', join(out, 'link-native-fixture'), [], { timeout: 30000 });
+    const expected = 'shared read=7 edit=8 read=8\nselect wait=0 value=42 probe=-1\natexit=21 drops=2\nprogress=4,5 none=1\n';
+    if (result.stdout !== expected || result.stderr !== '') throw Error('existing native provider link goldens changed bytes');
+  } catch (error) { failures.push(error.message); }
   // Exercise both sides of the real stop boundary. Nonzero 70 is expected,
   // so retain both raw results rather than treating the first stop as failure.
   for (let mode = 0; mode < 4; mode++) {
