@@ -227,7 +227,7 @@ pub struct WinSize {
 pub fn progress(label: String) IOError! -[IO, Time.Wait]> {
     if !core.term.__terminal8_stderr_tty() || core.term.__terminal8_machine_output() -> return Ok(())
     terminal_write_preflight("stderr")
-    carriage_return :: String.from_bytes([U8]{13}) ?? ""
+    carriage_return :: String.from_bytes([U8]{13}) ?? panic("CR is valid UTF-8")
     cause :: core.term.__terminal8_write_stderr("{carriage_return}{label}", true)
     if cause != None -> return Err(terminal_other(.Flush, Val("stderr"), cause ?? ""))
     Ok(())
@@ -296,7 +296,7 @@ fn decode_key(raw: [U8], platform: Int) -> Key Never! {
     assert_eq(decode_key([U8]{3}, 1), Key.Ctrl('c'))
     assert_eq(decode_key([U8]{195, 169}, 1), Key.Char('é'))
     assert_eq(decode_key([U8]{195}, 1), Key.Unknown)
-    carriage_return :: String.from_bytes([U8]{13}) ?? ""
+    carriage_return :: String.from_bytes([U8]{13}) ?? panic("CR is valid UTF-8")
     assert_eq(chomp("a{carriage_return}{carriage_return}\n"), "a")
 }
 
