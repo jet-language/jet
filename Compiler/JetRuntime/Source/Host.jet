@@ -13,7 +13,7 @@ host_root := I64{0}
     }
     #Unsafe("runtime startup owns a fresh anonymous mapping before any program thread exists") {
         root :: os_syscall_i64(I64{9}, I64{0}, I64{12288}, I64{3}, I64{34}, I64{-1}, I64{0})
-        if (root < I64{0}) { alloc_stop(false, I64{12288}) }
+        if (root < I64{0}) { alloc_out_of_memory(I64{12288}) }
         // TCGETS identifies the stream once; any failure means non-terminal.
         tty :: os_syscall_i64(I64{16}, I64{1}, I64{21505}, wrapping(root + I64{32}), I64{0}, I64{0}, I64{0})
         os_store_i64(wrapping(root + I64{16}), if (tty == I64{0}) -> I64{1} else -> I64{0})
