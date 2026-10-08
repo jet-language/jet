@@ -1,0 +1,18 @@
+# Port of tests/inline_package.rs:117-244; sources verbatim; original predicates.
+# PENDING-SAME-HEAD: authored, no reference/runtime proof.
+fixture: fixtures/inline_and_extracted_package_keep_facts_graph_and_authority_identity
+file: workspace.jet = "module workspace { members: [] }\n"
+step: jet check inline/run.jet
+env: JET_STORE_DIR={work}/cache-0
+env: JET_PACKAGE_STORE_DIR={work}/store-0
+env: JETPACK_ROOT={work}/jetpack-0
+env: JETPACK_ENV=1
+env: NO_COLOR=1
+exit: 0
+step: jet check extracted/run.jet
+env: JET_STORE_DIR={work}/cache-1
+env: JET_PACKAGE_STORE_DIR={work}/store-1
+env: JETPACK_ROOT={work}/jetpack-1
+env: JETPACK_ENV=1
+env: NO_COLOR=1
+exit: 0

@@ -1,0 +1,15 @@
+
+use core.data as data
+fn run() {
+    status :: data.status()
+    loop row in status {
+        if row.step == "r.*" {
+            print("{row.step}:{row.path}")
+        }
+    }
+    asked := data.require_bridge("r")
+    if asked == {
+        Ok(_) -> print("r:ok")
+        Err(error) -> print("r:{error}")
+    }
+}
