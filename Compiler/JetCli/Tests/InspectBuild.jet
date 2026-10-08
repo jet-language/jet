@@ -1,4 +1,5 @@
 // Checked declarations, not hand-authored BuildGraph rows, drive the reports.
+use jet_foundation.[MIRBlockID, MIRVectorFact, Span]
 fn inspect_build_require(ok: Bool, message: String) Never! {
     if !ok -> panic("InspectBuild: {message}")
 }
@@ -12,7 +13,7 @@ fn inspect_build_request() -> JetDriverCompileRequest {
 fn run() {
     empty :: JetDriverBuildQueryResult{plan: None, graph: None, generated: [], diagnostics: [], complete: true, internal_problem: None}
     inspect_build_require(jet_cli_build_report(empty, "[]", None, false) == "default pipeline: no root fn build\n", "default pipeline human")
-    inspect_build_require(jet_cli_build_report(empty, "[]", None, true) == "{jet_cli_status_render("inspect.build", true, [jet_cli_status_field("build", JetCLIStatusValue.Null)])}\n", "default pipeline JSON")
+    inspect_build_require(jet_cli_build_report(empty, "[]", None, true) == "{{\"schema\":\"jet.status/v1\",\"action\":\"inspect.build\",\"ok\":true,\"reports\":[],\"build\":null}}\n", "default pipeline JSON")
     policy :: BuildSessionPolicy{legacy_denied: None, plugins_denied: None, plugin_grants: [String:[String]]{}}
     session :: build_session_new(101, "fixture", "compiler", policy)
     action_reply :: build_session_call(&session, "action", [BuildSessionValue]{.Text("compile"), .List([BuildSessionValue]{.Text("main.jet")}), .List([BuildSessionValue]{.Text("out/app")}), .List([BuildSessionValue]{.Text("compiler"), .Text("main.jet")}), .List([])}, None, false, 1, 2)
@@ -28,11 +29,46 @@ fn run() {
     human :: jet_cli_build_report(query, "", None, false)
     inspect_build_require(human == "target\tapp\tExecutable\naction\tcompile\tout/app\n", "checked graph human")
     machine :: jet_cli_build_report(query, "[]", None, true)
-    inspect_build_require(machine.contains("\"schema_version\":1") && machine.contains("\"default\":0") && machine.contains("\"kind\":\"Executable\"") && machine.contains("\"cache_status\":\"unknown\"") && machine.contains("\"compiler_owned\":false") && machine.contains("\"vector\":[]"), "checked graph JSON")
+    key :: graph.actions[0].key
+    // The checked graph owns the key; every observable projection field is
+    // pinned independently of the renderer, including the static file universe.
+    files :: "[{{\"path\":\"main.jet\",\"owner\":null,\"consumers\":[0],\"targets\":[0]}},{{\"path\":\"out/app\",\"owner\":0,\"consumers\":[],\"targets\":[0]}}]"
+    payload :: "{{\"schema_version\":1,\"default\":0,\"targets\":[{{\"id\":0,\"name\":\"app\",\"kind\":\"Executable\",\"deps\":[],\"actions\":[0],\"files\":[\"main.jet\"]}}],\"actions\":[{{\"id\":0,\"name\":\"compile\",\"inputs\":[\"main.jet\"],\"outputs\":[\"out/app\"],\"caps\":[],\"pools\":[\"cpu\"],\"toolchain\":\"host\",\"probes\":[],\"cache\":\"Cached\",\"cache_status\":\"unknown\",\"key\":\"{key}\",\"compiler_owned\":false,\"provenance\":[\"argv=compiler main.jet\",\"inputs=1\",\"outputs=1\",\"cache=Cached\"]}}],\"action_keys\":[{{\"action\":\"compile\",\"key\":\"{key}\"}}],\"cache_hits\":[],\"files\":{files},\"affected_files\":{files},\"toolchains\":[{{\"name\":\"host\",\"target\":\"host\"}}],\"probes\":[],\"generated\":[],\"vector\":[]}}"
+    inspect_build_require(jet_driver_build_plan_json(plan, "[]") == payload, "canonical graph JSON exact fields and order")
+    inspect_build_require(machine == "{{\"schema\":\"jet.status/v1\",\"action\":\"inspect.build\",\"ok\":true,\"reports\":[],\"build\":{payload}}}\n", "checked graph JSON exact envelope")
     inspect_build_require(jet_cli_build_report(query, "", Val("app"), false) == "app\n  kind=Executable\n  sources=1\n  deps=0\n  actions=1\n", "target explanation")
     inspect_build_require(jet_cli_build_report(query, "", Val("compile"), false) == "compile\n  argv=compiler main.jet\n  inputs=1\n  outputs=1\n  cache=Cached\n", "action explanation")
     inspect_build_require(jet_cli_build_report(query, "", Val("out/app"), false) == "out/app\n  owner=Some(ActionId(0))\n  consumers=[]\n  targets=[TargetId(0)]\n", "file ownership explanation")
     inspect_build_require(jet_cli_build_report(query, "", Val("missing"), false) == "missing\n  owner=None\n  consumers=[]\n  targets=[]\n", "unknown path is not an invented owner")
+    inspect_build_require(jet_cli_build_report(query, "", Val("app"), true) == "{{\"schema\":\"jet.status/v1\",\"action\":\"inspect.build\",\"ok\":true,\"reports\":[],\"label\":\"app\",\"provenance\":[\"kind=Executable\",\"sources=1\",\"deps=0\",\"actions=1\"]}}\n", "target explanation JSON")
+    inspect_build_require(jet_cli_build_report(query, "", Val("compile"), true) == "{{\"schema\":\"jet.status/v1\",\"action\":\"inspect.build\",\"ok\":true,\"reports\":[],\"label\":\"compile\",\"provenance\":[\"argv=compiler main.jet\",\"inputs=1\",\"outputs=1\",\"cache=Cached\"]}}\n", "action explanation JSON")
+    inspect_build_require(jet_cli_build_report(query, "", Val("out/app"), true) == "{{\"schema\":\"jet.status/v1\",\"action\":\"inspect.build\",\"ok\":true,\"reports\":[],\"label\":\"out/app\",\"provenance\":[\"owner=Some(ActionId(0))\",\"consumers=[]\",\"targets=[TargetId(0)]\"]}}\n", "file explanation JSON")
+    inspect_build_require(jet_cli_build_report(query, "", Val("missing"), true) == "{{\"schema\":\"jet.status/v1\",\"action\":\"inspect.build\",\"ok\":true,\"reports\":[],\"label\":\"missing\",\"provenance\":[\"owner=None\",\"consumers=[]\",\"targets=[]\"]}}\n", "unknown file JSON")
+    optimization := jet_driver_optimization_query(inspect_build_request())
+    inspect_build_require(optimization.compile.complete && optimization.compile.internal_problem == None, "build vector production query")
+    inspect_build_require(jet_cli_build_vector(optimization, false) == "" && jet_cli_build_vector(optimization, true) == "[]", "no-vector checked program")
+    program := optimization.compile.mir ?? panic("checked vector fixture lost MIR")
+    inspect_build_require(program.functions.len() > 0, "checked vector fixture has a function")
+    first := program.functions[0]
+    first.key = "z-first"
+    accepted :: MIRVectorFact{loop_header: MIRBlockID{value: U64{1}}, cursor: None, body_blocks: [], advance_block: None, rule: .Elementwise, accesses: [], layout: .Flat, element_type: None, packed: false, lane_width: Val(4), no_aliasing: true, no_early_exit: true, effect_free_body: true, no_cross_iteration_dependencies: true, fixed_reduction: None, span: Span{start: 2, end: 9}, decision: .Eligible}
+    first.optimization.vector_facts = [MIRVectorFact]{accepted}
+    second := first
+    second.key = "a-second"
+    rejected := accepted
+    rejected.rule = .Reduction
+    rejected.layout = .AosStrided
+    rejected.lane_width = None
+    rejected.span = Span{start: 12, end: 19}
+    rejected.decision = .Rejected(.MayAlias)
+    second.optimization.vector_facts = [MIRVectorFact]{rejected}
+    program.functions = [first, second]
+    optimization.compile.mir = Val(program)
+    // The acceleration view is a separate sorted projection. It must not
+    // replace the compiler's declaration order or supply build vector rows.
+    optimization.functions = []
+    inspect_build_require(jet_cli_build_vector(optimization, false) == "vector\tz-first\t2..9\telementwise\tflat\t4\taccepted\nvector\ta-second\t12..19\treduction\taos-strided\tnone\tmay-alias\n", "build vector declaration order human")
+    inspect_build_require(jet_cli_build_vector(optimization, true) == "[{{\"function\":\"z-first\",\"span\":{{\"start\":2,\"end\":9}},\"rule\":\"elementwise\",\"layout\":\"flat\",\"lane\":\"4\",\"decision\":\"accepted\"}},{{\"function\":\"a-second\",\"span\":{{\"start\":12,\"end\":19}},\"rule\":\"reduction\",\"layout\":\"aos-strided\",\"lane\":\"none\",\"decision\":\"may-alias\"}}]", "build vector declaration order JSON")
     inspect_build_require(jet_cli_build_duration(0.0) == "0.000", "positive zero")
     inspect_build_require(jet_cli_build_duration(build_math.from_bits(-9223372036854775808)) == "-0.000", "negative zero")
     inspect_build_require(jet_cli_build_duration(0.0625) == "0.062", "exact halfway rounds to even")

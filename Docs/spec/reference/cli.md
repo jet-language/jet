@@ -744,6 +744,14 @@ store; invocation choices and package/lock facts feed the same ledger before
 its policy checks. No CLI source scan, manifest parser, or invented receipt
 replaces those providers.
 
+Build graph inspection (`inspect build`, `inspect graph`, and `inspect query
+build`) shares the driver's checked plan projection. Its `files` and
+`affected_files` fields both list the static file universe; this is distinct
+from `core.build.receipt_diff`'s change-impact closure. Without an execution
+record, action cache status remains `unknown`. Build vector rows retain the
+compiler MIR's declaration order rather than acceleration inspection's
+key-sorted function view.
+
 Acceleration inspection projects the optimizer's actual loop, vector, and
 acceleration proof rows for the selected profile and machine layout. It does
 not convert a source proof into a runtime measurement. Decision inspection
