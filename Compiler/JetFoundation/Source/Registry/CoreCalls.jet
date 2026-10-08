@@ -81,6 +81,8 @@ pub struct CoreCallRecord {
     pub pure_route: CoreCallPureRoute
     pub interpreter_route: CoreCallInterpreterRoute
     pub symbol: CoreCallSymbol
+    // Optional checked Jet export name after special-call normalization.
+    pub source_target: String?
     pub coverage: CoreCallCoverage
     pub aot_direct: Bool
     // Rust: CoreCallRecord::native_int_result. The kernel returns its `Int`
@@ -327,6 +329,7 @@ pub fn core_call_new(module_name: String, member: String, symbol: String, prelud
         pure_route: CoreCallPureRoute.NoPureRoute,
         interpreter_route: route,
         symbol: if prelude -> CoreCallSymbol.Prelude{name: symbol} else -> CoreCallSymbol.Rust{name: symbol},
+        source_target: None,
         coverage: CoreCallCoverage{bits: coverage_bits},
         aot_direct: true,
         native_int_result: false,
@@ -343,6 +346,17 @@ pub fn core_call_source_owned(module_name: String, member: String, borrow_mask: 
     row.interpreter_route = CoreCallInterpreterRoute.NoRoute
     row.aot_direct = false
     row
+}
+
+pub fn core_call_with_source_target(row: ^CoreCallRecord, target: String) -> CoreCallRecord Never! {
+    updated := row
+    updated.source_target = Val(target)
+    updated
+}
+
+pub fn core_call_source_member(row: CoreCallRecord) -> String? Never! {
+    if row.symbol != CoreCallSymbol.SourceOwned -> return None
+    Val(row.source_target ?? row.member)
 }
 
 pub fn core_call_new_with_coverage(module_name: String, member: String, symbol: String, prelude: Bool, borrow_mask: [Bool], coverage: CoreCallCoverage) -> CoreCallRecord Never! {
@@ -367,6 +381,7 @@ pub fn core_call_receiver(receiver_types: [String], member: String, borrow_mask:
         pure_route: CoreCallPureRoute.NoPureRoute,
         interpreter_route: CoreCallInterpreterRoute.TypedIntrinsic,
         symbol: CoreCallSymbol.Rust{name: ""},
+        source_target: None,
         coverage: CoreCallCoverage{bits: CORE_CALL_COVERAGE_KNOWN},
         aot_direct: false,
         native_int_result: false,
