@@ -19,7 +19,7 @@ fn fx_realtime_start(b: &FxBuilder, callback: MIRValueID) -> MIRValueID Never! {
 // expect-stdout realtime-producer: "1000\n8\ntrue\n1000\n8\ntrue\n"
 // expect-runtime-only realtime-producer: actual Jet Realtime worker + record family, no Rust carrier
 fn fx_realtime_producer() -> MIRProgram Never! {
-    buffer_ty :: fx_list_type(fx_float())
+    buffer_ty :: fx_list_type(mir_type_from_kind(MIRTypeKind.Float))
     callback_ty :: mir_type_from_kind(MIRTypeKind.Fn{signature: MIRFunctionSignature{params: [MIRType]{buffer_ty}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}})
     a := fx_builder()
     _ := fx_param(&a, "buffer", buffer_ty, fx_borrow())
