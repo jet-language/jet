@@ -179,8 +179,9 @@ fn fx_inline_asm_call(two: Bool) -> LIRModule Never! {
 }
 
 fn fx_inline_asm_print_word(builder: &LIRFunctionBuilder, value: LIRValueID, print_signature: LIRSignatureID, line_signature: LIRSignatureID) Never! {
-    text :: lir_builder_value(&builder, lir_layout_pointer(), LIRDrop.Runtime{symbol: "jet_rt_string_drop"}, None)
-    flush :: lir_builder_word(&builder)
+    text :: lir_builder_value(&builder, lir_layout_word(), LIRDrop.Runtime{symbol: "jet_rt_string_drop"}, None)
+    // The runtime's flush parameter is U8: the canonical one-byte Integer layout.
+    flush :: lir_builder_bool(&builder)
     lir_builder_push(&builder, LIRInst.Const{dst: flush, value: 0})
     lir_builder_push(&builder, LIRInst.Call{dst: Val(text), signature: print_signature, callee: LIRCallee.Runtime{symbol: "jet_rt_int_to_string"}, args: [LIRValueID]{value}})
     lir_builder_push(&builder, LIRInst.Call{dst: None, signature: line_signature, callee: LIRCallee.Runtime{symbol: "jet_term_write_stdout_line"}, args: [LIRValueID]{text, flush}})
@@ -200,9 +201,9 @@ fn fx_inline_asm_call_unit(three: Bool) -> LIRModule Never! {
     signature :: lir_signature(p, p.functions[0].signature) ?? panic("Unit assembly callable has no checked signature")
     if signature.result != None -> panic("Unit assembly callable exposes an incidental result")
     print_signature :: LIRSignatureID{value: p.signatures.len()}
-    &p.signatures.push(LIRSignature{id: print_signature, convention: LIRCallConv.SystemV, params: [LIRLayout]{lir_layout_word()}, result: Val(lir_layout_pointer())})
+    &p.signatures.push(LIRSignature{id: print_signature, convention: LIRCallConv.SystemV, params: [LIRLayout]{lir_layout_word()}, result: Val(lir_layout_word())})
     line_signature :: LIRSignatureID{value: p.signatures.len()}
-    &p.signatures.push(LIRSignature{id: line_signature, convention: LIRCallConv.SystemV, params: [LIRLayout]{lir_layout_pointer(), lir_layout_word()}, result: None})
+    &p.signatures.push(LIRSignature{id: line_signature, convention: LIRCallConv.SystemV, params: [LIRLayout]{lir_layout_word(), lir_layout_bool()}, result: None})
     callback_id :: LIRFunctionID{value: p.functions.len()}
     callback_signature :: LIRSignatureID{value: p.signatures.len()}
     callback_layouts :: if three -> [LIRLayout]{lir_layout_word(), lir_layout_word(), lir_layout_word()} else -> [LIRLayout]{}
