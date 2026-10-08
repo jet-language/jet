@@ -220,6 +220,12 @@ decision.
   shared expansion budgets. Chunk boundaries cannot change events or errors.
   Collecting events reconstructs the structurally equal whole tree; lexical
   evidence belongs only to the XML fields below.
+  XML parsing, projection, rendering, canonicalization, and reader policy are
+  authored in Jet and share compiler-private `xml_engine` / `xml_kernel`
+  source parts. The reader's only input operation is the private `__read_into`
+  raw leaf: one read through the owned FileReader buffer into already-reserved
+  capacity, with no growth or retry; EOF and IO errors retain zero buffer length.
+  XML coordinates distinguish UTF-8 byte offsets from scalar-based columns.
 ```jet
 use core.encoding as encoding
 use core.encoding.json as json

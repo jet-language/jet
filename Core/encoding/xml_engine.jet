@@ -130,6 +130,41 @@ fn byte_find(bytes: View<U8>, start: Int, needle: View<U8>) -> Int? Never! {
     }
     None
 }
+fn text_byte(value: String, index: Int) -> U8 Never! {
+    #Unsafe("all callers iterate or check the UTF-8 byte bounds before borrowing this byte") {
+        encoding.__string_byte(value, U64{index})
+    }
+}
+fn byte_prefix_text(bytes: View<U8>, start: Int, needle: String) -> Bool Never! {
+    size :: needle.count_bytes()
+    if start < 0 || size > bytes.len() - start -> return false
+    loop index in 0..<size {
+        if bytes[start + index] != text_byte(needle, index) -> return false
+    }
+    true
+}
+fn byte_find_text(bytes: View<U8>, start: Int, needle: String) -> Int? Never! {
+    last :: bytes.len() - needle.count_bytes()
+    index := start
+    loop index <= last {
+        if byte_prefix_text(bytes, index, needle) -> return Val(index - start)
+        index += 1
+    }
+    None
+}
+fn wire_utf8_scalar(bytes: View<U8>, width: Int) -> Char? Never! {
+    first :: Int{bytes[0]}
+    if width == 1 -> return Val(Char{first})
+    code := first % if width == 2 -> 32 else if width == 3 -> 16 else -> 8
+    loop index in 1..<width {
+        byte :: Int{bytes[index]}
+        if byte < 128 || byte > 191 -> return None
+        code = code * 64 + byte - 128
+    }
+    minimum :: if width == 2 -> 0x80 else if width == 3 -> 0x800 else -> 0x10000
+    if code < minimum || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff) -> return None
+    Val(Char{code})
+}
 fn byte_text(bytes: View<U8>, start: Int, end: Int) -> String Never! {
     if start == end -> return ""
     owned := [U8]{}
@@ -448,7 +483,7 @@ fn lexical_semantic(value: DataTree, key: String) -> DataTree? Never! {
     Val(object(^out))
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:740
-fn clean(value: DataTree) -> DataTree Never! {
+pub fn clean(value: DataTree) -> DataTree Never! {
     if value == {
         .Array(values) -> {
             out := [DataTree]{}
@@ -549,7 +584,7 @@ fn lexical_value_to_wire(value: ^DataTree, encoding: WireEncoding) -> DataTree N
     object(^output)
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:888
- fn stream_event_value(item: StreamEvent) -> DataTree Never! {
+pub fn stream_event_value(item: StreamEvent) -> DataTree Never! {
     encoding :: item.encoding
     if item.event == {
         .DocumentStart -> {
@@ -627,9 +662,9 @@ fn finish_byte_element(frame: ^ByteElementFrame, close_lexical: ^DataTree) -> Da
     object([(key: "$xml", value: text("element")), (key: "name", value: ^frame.name), (key: "namespaces", value: ^frame.namespaces), (key: "attributes", value: ^frame.attributes), (key: "children", value: DataTree.Array(^frame.children)), (key: "empty_style", value: ^frame.empty_style), (key: "open_lexical", value: ^frame.open_lexical), (key: "close_lexical", value: ^close_lexical)])
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:1095
- fn parse_document(source: String) -> DataTree XMLFault! { parse_document_with(source, ParseOptions.safe()) }
+pub fn parse_document(source: String) -> DataTree XMLFault! { parse_document_with(source, ParseOptions.safe()) }
 // Rust: crates/jet-foundation/src/XmlPull.rs:1100
-fn parse_document_with(source: String, options: ParseOptions) -> DataTree XMLFault! {
+pub fn parse_document_with(source: String, options: ParseOptions) -> DataTree XMLFault! {
     options.limits.validate() ?? return Err(err)
     scanner := Scanner.with_options(source.bytes(), options) ?? return Err(err)
     document_children := [DataTree]{}
@@ -679,7 +714,7 @@ fn parse_document_with(source: String, options: ParseOptions) -> DataTree XMLFau
 // Rust: crates/jet-foundation/src/XmlPull.rs:1214
  fn parse_document_bytes(bytes: [U8]) -> DataTree XMLFault! { parse_document_bytes_with(bytes, ParseOptions.safe()) }
 // Rust: crates/jet-foundation/src/XmlPull.rs:1218
-fn parse_document_bytes_with(bytes: [U8], options: ParseOptions) -> DataTree XMLFault! {
+pub fn parse_document_bytes_with(bytes: [U8], options: ParseOptions) -> DataTree XMLFault! {
     options.limits.validate() ?? return Err(err)
     scanner := StreamScanner.new(bytes.len().max(4), options) ?? return Err(err)
     &scanner.push(bytes[0..<bytes.len()]) ?? return Err(err)
@@ -1005,15 +1040,15 @@ fn render_element_open(value: DataTree, output: &String) String! {
         }
     }
 // Rust: crates/jet-foundation/src/XmlPull.rs:1701
-fn render_document(value: DataTree) -> String String! {
+pub fn render_document(value: DataTree) -> String String! {
     output := ""
     render_node(value, &output) ?? return Err(err)
     ^output
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:1782
- enum RenderEncoding { UTF8 UTF8Bom Utf16Le Utf16Be }
+pub enum RenderEncoding { UTF8 UTF8Bom Utf16Le Utf16Be }
 // Rust: crates/jet-foundation/src/XmlPull.rs:1790
- enum LexicalPolicy { PreserveValid Deterministic }
+pub enum LexicalPolicy { PreserveValid Deterministic }
 // Rust: crates/jet-foundation/src/XmlPull.rs:1795
 
 // Rust: crates/jet-foundation/src/XmlPull.rs:1796
@@ -1150,7 +1185,7 @@ impl StreamWriter {
 }
 
 // Rust: crates/jet-foundation/src/XmlPull.rs:2042
- fn render_document_bytes(value: DataTree, encoding: RenderEncoding, lexical: LexicalPolicy) -> [U8] XMLFault! {
+pub fn render_document_bytes(value: DataTree, encoding: RenderEncoding, lexical: LexicalPolicy) -> [U8] XMLFault! {
     events :: unfold_events(value) ?? return Err(err)
     writer := StreamWriter.new(encoding, lexical)
     output := [U8]{}
@@ -1209,7 +1244,7 @@ fn base_namespaces() -> NamespaceScope Never! {
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:2118
 fn parse_name(value: DataTree) -> Name XMLFault! {
-    exact_keys(value, ["raw", "prefix", "local", "namespace_uri"])
+    exact_keys(value, ["raw", "prefix", "local", "namespace_uri"]) ?? return Err(err)
     raw :: required_text(value, "raw") ?? return Err(XMLFault.shape(err))
     prefix :: optional_text_field(value, "prefix") ?? return Err(XMLFault.shape(err))
     local :: required_text(value, "local") ?? return Err(XMLFault.shape(err))
@@ -1225,7 +1260,7 @@ fn validate_start(event: DataTree, name: Name, inherited: ^NamespaceScope) -> Na
     namespaces :: array_value(field(event, "namespaces")) ?? return Err(XMLFault.shape("element namespaces must be an Array"))
     declared := NamespaceSet.new()
     loop namespace in namespaces {
-        exact_keys(namespace, ["$xml", "prefix", "namespace_uri", "quote", "lexical"])
+        exact_keys(namespace, ["$xml", "prefix", "namespace_uri", "quote", "lexical"]) ?? return Err(err)
         kind :: required_text(namespace, "$xml") ?? return Err(XMLFault.shape(err))
         if kind != "namespace" -> return Err(XMLFault.shape("namespaces contains a non-namespace node"))
         prefix :: optional_text_field(namespace, "prefix") ?? return Err(XMLFault.shape(err))
@@ -1241,7 +1276,7 @@ fn validate_start(event: DataTree, name: Name, inherited: ^NamespaceScope) -> Na
     attributes :: array_value(field(event, "attributes")) ?? return Err(XMLFault.shape("element attributes must be an Array"))
     expanded := ExpandedNames.new()
     loop attribute in attributes {
-        exact_keys(attribute, ["$xml", "name", "parts", "normalized_value", "quote", "lexical"])
+        exact_keys(attribute, ["$xml", "name", "parts", "normalized_value", "quote", "lexical"]) ?? return Err(err)
         kind :: required_text(attribute, "$xml") ?? return Err(XMLFault.shape(err))
         if kind != "attribute" -> return Err(XMLFault.shape("attributes contains a non-attribute node"))
         attr :: parse_name(field(attribute, "name") ?? return Err(XMLFault.shape("attribute lacks name"))) ?? return Err(err)
@@ -1348,12 +1383,10 @@ fn utf16_word(output: &[U8], word: Int, little: Bool) Never! {
     }
 }
 fn ascii_equal(left: String, right: String) -> Bool Never! {
-    if left.len() != right.len() -> return false
-    a :: left.chars()
-    b :: right.chars()
-    loop index in 0..<a.len() {
-        x := Int{a[index]}
-        y := Int{b[index]}
+    if left.count_bytes() != right.count_bytes() -> return false
+    loop index in 0..<left.count_bytes() {
+        x := Int{text_byte(left, index)}
+        y := Int{text_byte(right, index)}
         if x >= 65 && x <= 90 -> x += 32
         if y >= 65 && y <= 90 -> y += 32
         if x != y -> return false
@@ -1361,11 +1394,11 @@ fn ascii_equal(left: String, right: String) -> Bool Never! {
     true
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:2402
- enum CanonicalMode { Inclusive11 Exclusive10 }
+pub enum CanonicalMode { Inclusive11 Exclusive10 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:2408
- struct CanonicalOptions {  mode: CanonicalMode,  comments: Bool,  inclusive_prefixes: [String] }
+pub struct CanonicalOptions { pub mode: CanonicalMode, pub comments: Bool, pub inclusive_prefixes: [String] }
 // Rust: crates/jet-foundation/src/XmlPull.rs:2416
- fn canonical_document(value: DataTree, options: CanonicalOptions) -> String XMLFault! {
+pub fn canonical_document(value: DataTree, options: CanonicalOptions) -> String XMLFault! {
     if options.mode == CanonicalMode.Inclusive11 && !options.inclusive_prefixes.is_empty() -> return Err(XMLFault.shape("inclusive_prefixes is legal only for Exclusive10"))
     kind :: required_text(value, "$xml") ?? return Err(XMLFault.shape(err))
     if kind != "document" -> return Err(XMLFault.shape("XML canonical input must be a document"))
@@ -1575,7 +1608,7 @@ fn is_simple_content(children: [DataTree]) -> Bool Never! {
     true
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:2808
-fn document_root(document: DataTree) -> DataTree XMLFault! {
+pub fn document_root(document: DataTree) -> DataTree XMLFault! {
     if xml_tag_of(document) != Val("document") -> return Err(projection_err("$", "XML root expects a document node"))
     content :: field(document, "children") ?? return Err(projection_err("$", "XML document children missing"))
     children :: if content == {
@@ -1592,18 +1625,18 @@ fn document_root(document: DataTree) -> DataTree XMLFault! {
     root ?? return Err(projection_err("$", "XML document must contain exactly one root element"))
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:2836
-fn expanded_name_parts(node: DataTree) -> (raw: String, prefix: String?, local: String, namespace_uri: String?) XMLFault! {
+pub fn expanded_name_parts(node: DataTree) -> (raw: String, prefix: String?, local: String, namespace_uri: String?) XMLFault! {
     kind :: xml_tag_of(node) ?? return Err(projection_err("$", "expanded_name requires a tagged XML node"))
     if kind == {
         "element" | "attribute" | "namespace" -> {}
         else -> return Err(projection_err("$", "expanded_name requires an element, attribute, or namespace node; found {kind}"))
     }
     name :: field(node, "name") ?? return Err(projection_err("$", "XML name object missing"))
-    parts :: read_name_parts(name, "$")
+    parts :: read_name_parts(name, "$") ?? return Err(err)
     (raw: ^parts.raw, prefix: ^parts.prefix, local: ^parts.local, namespace_uri: ^parts.namespace_uri)
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:2856
-fn lookup_attribute(element: DataTree, name: String) -> String? XMLFault! {
+pub fn lookup_attribute(element: DataTree, name: String) -> String? XMLFault! {
     if xml_tag_of(element) != Val("element") -> return Err(projection_err("$", "attribute helper requires an element node"))
     content :: field(element, "attributes") ?? return Err(projection_err("$", "XML element attributes missing"))
     attributes :: if content == {
@@ -1613,7 +1646,7 @@ fn lookup_attribute(element: DataTree, name: String) -> String? XMLFault! {
     loop attribute in attributes {
         if xml_tag_of(attribute) != Val("attribute") -> return Err(projection_err("$", "XML attributes array must contain attribute nodes"))
         attr_name :: field(attribute, "name") ?? return Err(projection_err("$", "XML attribute name missing"))
-        parts :: read_name_parts(attr_name, "$")
+        parts :: read_name_parts(attr_name, "$") ?? return Err(err)
         if !selector_matches(parts.local, parts.namespace_uri, name) -> next
         normalized :: optional_text_field(attribute, "normalized_value") ?? return Err(projection_err("$", err))
         if normalized == .Val(content) -> return Val(content)
@@ -1622,7 +1655,7 @@ fn lookup_attribute(element: DataTree, name: String) -> String? XMLFault! {
     None
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:2900
-fn element_content(element: DataTree) -> [DataTree] XMLFault! {
+pub fn element_content(element: DataTree) -> [DataTree] XMLFault! {
     if xml_tag_of(element) != Val("element") -> return Err(projection_err("$", "content helper requires an element node"))
     content :: field(element, "children") ?? return Err(projection_err("$", "XML element children missing"))
     if content == {
@@ -1671,7 +1704,7 @@ fn project_element_value(element: DataTree, path: String) -> DataTree XMLFault! 
         parts :: read_name_parts(name, path)
         key :: clark_key(parts.local, parts.namespace_uri)
         child_path :: if path == "$" -> key else -> "{path}.{key}"
-        projected :: project_element_value(child, child_path)
+        projected :: project_element_value(child, child_path) ?? return Err(err)
         if key_index.get(key) == .Val(index) {
             prior := ^child_keys[index].value
             if prior == {
@@ -1692,21 +1725,21 @@ fn project_element_value(element: DataTree, path: String) -> DataTree XMLFault! 
     object(^entries)
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:3030
- fn project_document_for_decode(document: DataTree) -> DataTree XMLFault! {
-    root :: document_root(document)
-    project_element_value(root, "$")
+pub fn project_document_for_decode(document: DataTree) -> DataTree XMLFault! {
+    root :: document_root(document) ?? return Err(err)
+    project_element_value(root, "$") ?? return Err(err)
 }
 
 
 // Rust: crates/jet-foundation/src/XmlPull.rs:4709
 #Error
-struct XMLFault {
-     kind: Reason
-     offset: Int
-     line: Int?
-     column: Int?
-     path: String
-     reason: String
+pub struct XMLFault {
+    pub kind: Reason
+    pub offset: Int
+    pub line: Int?
+    pub column: Int?
+    pub path: String
+    pub reason: String
 }
 impl XMLFault {
     // Rust: crates/jet-foundation/src/XmlPull.rs:4718
@@ -1742,17 +1775,17 @@ impl XMLFault {
     }
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:4759
- enum Reason { InvalidEncoding Malformed MismatchedTag InvalidName Namespace DuplicateAttribute Entity EntityCycle Limit Canonicalization Shape Unsupported }
+pub enum Reason { InvalidEncoding Malformed MismatchedTag InvalidName Namespace DuplicateAttribute Entity EntityCycle Limit Canonicalization Shape Unsupported }
 // Rust: crates/jet-foundation/src/XmlPull.rs:4775
-struct Limits {
-     max_depth: Int
-     max_nodes: Int
-     max_attributes_per_element: Int
-     max_name_bytes: Int
-     max_text_bytes: Int
-     max_entity_declarations: Int
-     max_entity_depth: Int
-     max_entity_replacement_bytes: Int
+pub struct Limits {
+    pub max_depth: Int
+    pub max_nodes: Int
+    pub max_attributes_per_element: Int
+    pub max_name_bytes: Int
+    pub max_text_bytes: Int
+    pub max_entity_declarations: Int
+    pub max_entity_depth: Int
+    pub max_entity_replacement_bytes: Int
 }
 impl Limits {
     // Rust: crates/jet-foundation/src/XmlPull.rs:4787
@@ -1760,7 +1793,7 @@ impl Limits {
         Limits{max_depth: 256, max_nodes: 1_000_000, max_attributes_per_element: 1024, max_name_bytes: 4096, max_text_bytes: 16_777_216, max_entity_declarations: 1024, max_entity_depth: 32, max_entity_replacement_bytes: 8_388_608}
     }
     // Rust: crates/jet-foundation/src/XmlPull.rs:4800
-     fn validate(self: &Limits) XMLFault! {
+    pub fn validate(self: Limits) XMLFault! {
         checks :: [LimitCheck]{
             LimitCheck{name: "max_depth", value: self.max_depth, minimum: 1, maximum: 4096}, LimitCheck{name: "max_nodes", value: self.max_nodes, minimum: 1, maximum: 1_000_000_000},
             LimitCheck{name: "max_attributes_per_element", value: self.max_attributes_per_element, minimum: 0, maximum: 1_000_000},
@@ -1776,9 +1809,9 @@ impl Limits {
     }
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:4848
- enum EntityPolicy { Preserve Reject Resolve([String:String]) }
+pub enum EntityPolicy { Preserve Reject Resolve([String:String]) }
 // Rust: crates/jet-foundation/src/XmlPull.rs:4855
-struct ParseOptions { entities: EntityPolicy, limits: Limits }
+pub struct ParseOptions { pub entities: EntityPolicy, pub limits: Limits }
 impl ParseOptions {
     // Rust: crates/jet-foundation/src/XmlPull.rs:4861
      fn safe() -> ParseOptions Never! { ParseOptions{entities: EntityPolicy.Preserve, limits: Limits.safe()} }
@@ -1799,6 +1832,7 @@ struct ByteLexer {
     undecided: [U8]
     pending: [U8]
     units: [DecodedUnit]
+    retained_bytes: Int
     max_item_bytes: Int
     wire_offset: Int
     eof: Bool
@@ -1807,10 +1841,10 @@ struct ByteLexer {
 impl ByteLexer {
     // Rust: crates/jet-foundation/src/XmlPull.rs:4918
      fn new(max_item_bytes: Int) -> ByteLexer Never! {
-        ByteLexer{encoding: None, bom: [], undecided: [], pending: [], units: [], max_item_bytes: max_item_bytes, wire_offset: 0, eof: false, terminal: None}
+        ByteLexer{encoding: None, bom: [], undecided: [], pending: [], units: [], retained_bytes: 0, max_item_bytes: max_item_bytes, wire_offset: 0, eof: false, terminal: None}
     }
     // Rust: crates/jet-foundation/src/XmlPull.rs:4931
-     fn encoding(self: &ByteLexer) -> WireEncoding? Never! { self.encoding }
+    fn encoding(self: ByteLexer) -> WireEncoding? Never! { self.encoding }
     // Rust: crates/jet-foundation/src/XmlPull.rs:4934
      fn bom(self: ByteLexer) -> View<U8> from self { self.bom[0..<self.bom.len()] }
     // Rust: crates/jet-foundation/src/XmlPull.rs:4937
@@ -1847,7 +1881,7 @@ impl ByteLexer {
     // Rust: crates/jet-foundation/src/XmlPull.rs:4974
     fn push(self: &ByteLexer, bytes: View<U8>) XMLFault! {
         if self.terminal == .Val(error) -> return Err(~error)
-        if self.eof -> return self.fail(Reason.Malformed, "XML bytes arrived after end of input")
+        if self.eof -> return &self.fail(Reason.Malformed, "XML bytes arrived after end of input")
         if self.encoding == None {
             loop byte in bytes -> &self.undecided.push(byte)
             &self.choose_encoding(false) ?? return Err(err)
@@ -1865,28 +1899,26 @@ impl ByteLexer {
     }
     // Rust: crates/jet-foundation/src/XmlPull.rs:4997
     fn retain(self: &ByteLexer, scalar: Char, raw: ^[U8]) XMLFault! {
-        retained := 0
-        loop unit in self.units -> retained += unit.raw.len()
-        if retained + raw.len() > self.max_item_bytes {
-            return self.fail(Reason.Limit, "XML token exceeds max_item_bytes ({self.max_item_bytes})")
+        if self.retained_bytes + raw.len() > self.max_item_bytes {
+            return &self.fail(Reason.Limit, "XML token exceeds max_item_bytes ({self.max_item_bytes})")
         }
         self.wire_offset += raw.len()
+        self.retained_bytes += raw.len()
         &self.units.push(DecodedUnit{scalar: scalar, raw: ^raw})
     }
     // Rust: crates/jet-foundation/src/XmlPull.rs:5009
     fn decode(self: &ByteLexer, final_input: Bool) XMLFault! {
         encoding :: self.encoding ?? return
         loop {
-            if &self.boundary() != None -> break
+            if self.boundary() != None -> break
             if encoding == {
                 .UTF8 -> {
                     if self.pending.is_empty() -> break
                     first :: Int{self.pending[0]}
-                    width :: if first < 0x80 -> 1 else if (first & 0xe0) == 0xc0 -> 2 else if (first & 0xf0) == 0xe0 -> 3 else if (first & 0xf8) == 0xf0 -> 4 else -> { return self.fail(Reason.InvalidEncoding, "invalid UTF-8 leading byte") }
+                    width :: if first < 0x80 -> 1 else if (first & 0xe0) == 0xc0 -> 2 else if (first & 0xf0) == 0xe0 -> 3 else if (first & 0xf8) == 0xf0 -> 4 else -> { return &self.fail(Reason.InvalidEncoding, "invalid UTF-8 leading byte") }
                     if self.pending.len() < width -> break
+                    scalar :: wire_utf8_scalar(self.pending[0..<width], width) ?? return &self.fail(Reason.InvalidEncoding, "invalid UTF-8 sequence")
                     raw :: take_bytes(&self.pending, width)
-                    text :: String.from_bytes(raw) ?? return self.fail(Reason.InvalidEncoding, "invalid UTF-8 sequence")
-                    scalar :: text.chars()[0]
                     &self.retain(scalar, ^raw) ?? return Err(err)
                 }
                 .Utf16Le | .Utf16Be -> {
@@ -1897,21 +1929,21 @@ impl ByteLexer {
                     if self.pending.len() < width -> break
                     raw :: take_bytes(&self.pending, width)
                     scalar :: if width == 2 -> {
-                        if unit >= 0xdc00 && unit <= 0xdfff -> return self.fail(Reason.InvalidEncoding, "unpaired UTF-16 low surrogate")
+                        if unit >= 0xdc00 && unit <= 0xdfff -> return &self.fail(Reason.InvalidEncoding, "unpaired UTF-16 low surrogate")
                         Char{unit}
                     } else -> {
                         low :: read_word(raw[0..<raw.len()], 2, little)
-                        if low < 0xdc00 || low > 0xdfff -> return self.fail(Reason.InvalidEncoding, "unpaired UTF-16 high surrogate")
+                        if low < 0xdc00 || low > 0xdfff -> return &self.fail(Reason.InvalidEncoding, "unpaired UTF-16 high surrogate")
                         Char{0x10000 + (unit - 0xd800) * 1024 + low - 0xdc00}
                     }
                     &self.retain(scalar, ^raw) ?? return Err(err)
                 }
             }
         }
-        if final_input && &self.boundary() == None && !self.pending.is_empty() -> return self.fail(Reason.InvalidEncoding, "truncated encoded XML scalar")
+        if final_input && self.boundary() == None && !self.pending.is_empty() -> return &self.fail(Reason.InvalidEncoding, "truncated encoded XML scalar")
     }
     // Rust: crates/jet-foundation/src/XmlPull.rs:5103
-    fn boundary(self: &ByteLexer) -> TokenBoundary? Never! {
+    fn boundary(self: ByteLexer) -> TokenBoundary? Never! {
         if self.units.is_empty() -> return None
         first :: self.units[0].scalar
         if first == '&' {
@@ -1957,8 +1989,8 @@ impl ByteLexer {
     fn next_token(self: &ByteLexer) -> ByteToken? XMLFault! {
         if self.terminal == .Val(error) -> return Err(~error)
         &self.decode(self.eof) ?? return Err(err)
-        boundary :: &self.boundary() ?? {
-            if self.eof && !self.units.is_empty() -> return self.fail(Reason.Malformed, "unterminated XML token at end of input")
+        boundary :: self.boundary() ?? {
+            if self.eof && !self.units.is_empty() -> return &self.fail(Reason.Malformed, "unterminated XML token at end of input")
             return None
         }
         count :: boundary.count
@@ -1973,6 +2005,7 @@ impl ByteLexer {
             text += "{unit.scalar}"
             loop byte in unit.raw -> &raw_bytes.push(byte)
         }
+        self.retained_bytes -= raw_bytes.len()
         drop_prefix(&self.units, count)
         Val(ByteToken{kind: boundary.kind, text: ^text, raw_bytes: ^raw_bytes, scalar_bytes: ^scalar_bytes})
     }
@@ -1993,16 +2026,17 @@ fn read_word(bytes: View<U8>, offset: Int, little: Bool) -> Int Never! {
     if little -> Int{bytes[offset]} + Int{bytes[offset + 1]} * 256 else -> Int{bytes[offset]} * 256 + Int{bytes[offset + 1]}
 }
 fn unit_prefix(units: View<DecodedUnit>, start: Int, needle: String) -> Bool Never! {
-    if needle.len() > units.len() - start -> return false
-    loop index in 0..<needle.len() {
-        if units[start + index].scalar != needle[index] -> return false
+    size :: needle.count_bytes()
+    if size > units.len() - start -> return false
+    loop index in 0..<size {
+        if (Int{units[start + index].scalar}) != (Int{text_byte(needle, index)}) -> return false
     }
     true
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:5180
-struct StreamEvent { event: Event, raw_bytes: [U8], encoding: WireEncoding, bom: [U8] }
+pub struct StreamEvent { event: Event, pub raw_bytes: [U8], encoding: WireEncoding, pub bom: [U8] }
 // Rust: crates/jet-foundation/src/XmlPull.rs:5190
-struct StreamScanner {
+pub struct StreamScanner {
     lexer: ByteLexer
     options: ParseOptions
     started: Bool
@@ -2023,12 +2057,12 @@ struct StreamScanner {
 }
 impl StreamScanner {
     // Rust: crates/jet-foundation/src/XmlPull.rs:5211
-     fn new(max_item_bytes: Int, options: ParseOptions) -> StreamScanner XMLFault! {
+    pub fn new(max_item_bytes: Int, options: ParseOptions) -> StreamScanner XMLFault! {
         options.limits.validate() ?? return Err(err)
         StreamScanner{lexer: ByteLexer.new(max_item_bytes), options: ^options, started: false, ended: false, root_seen: false, root_closed: false, declaration_seen: false, doctype_seen: false, declared_entities: [String:DeclaredEntityKind]{}, stack: [], nodes: 0, text_bytes: 0, entity_replacement_bytes: 0, wire_consumed: 0, line: 1, column: 1, terminal: None}
     }
     // Rust: crates/jet-foundation/src/XmlPull.rs:5233
-     fn push(self: &StreamScanner, bytes: View<U8>) XMLFault! {
+    pub fn push(self: &StreamScanner, bytes: View<U8>) XMLFault! {
         if self.terminal == .Val(error) -> return Err(~error)
         &self.lexer.push(bytes) ?? {
             self.terminal = Val(~err)
@@ -2036,7 +2070,7 @@ impl StreamScanner {
         }
     }
     // Rust: crates/jet-foundation/src/XmlPull.rs:5242
-     fn finish_input(self: &StreamScanner) XMLFault! {
+    pub fn finish_input(self: &StreamScanner) XMLFault! {
         if self.terminal == .Val(error) -> return Err(~error)
         &self.lexer.finish_input() ?? {
             self.terminal = Val(~err)
@@ -2053,9 +2087,9 @@ impl StreamScanner {
         Err(^error)
     }
     // Rust: crates/jet-foundation/src/XmlPull.rs:5259
-     fn next(self: &StreamScanner) -> StreamEvent? XMLFault! {
+    pub fn next(self: &StreamScanner) -> StreamEvent? XMLFault! {
         if self.terminal == .Val(error) -> return Err(~error)
-        encoding :: &self.lexer.encoding() ?? return None
+        encoding :: self.lexer.encoding() ?? return None
         if !self.started {
             self.started = true
             self.nodes = 1
@@ -2070,13 +2104,13 @@ impl StreamScanner {
             .Val(value) -> ^value
             .None -> {
                 if !self.lexer.eof || self.ended { return None }
-                if !self.stack.is_empty() { return self.fail(XMLFault.at_kind(self.wire_consumed, Reason.Malformed, "XML document ended before closing element")) }
-                if !self.root_seen { return self.fail(XMLFault.at_kind(self.wire_consumed, Reason.Malformed, "empty XML document")) }
+                if !self.stack.is_empty() { return &self.fail(XMLFault.at_kind(self.wire_consumed, Reason.Malformed, "XML document ended before closing element")) }
+                if !self.root_seen { return &self.fail(XMLFault.at_kind(self.wire_consumed, Reason.Malformed, "empty XML document")) }
                 self.ended = true
                 return Val(StreamEvent{event: Event.DocumentEnd, raw_bytes: [], encoding: encoding, bom: ~self.lexer.bom})
             }
         }
-        if token.text.starts_with("<?xml") && self.wire_consumed != self.lexer.bom().len() { return self.fail(XMLFault.at_kind(self.wire_consumed, Reason.Malformed, "XML declaration is out of order")) }
+        if token.text.starts_with("<?xml") && self.wire_consumed != self.lexer.bom().len() { return &self.fail(XMLFault.at_kind(self.wire_consumed, Reason.Malformed, "XML declaration is out of order")) }
         scanner := Scanner{source: token.text.bytes(), wire_encoding: Val(encoding), offset: 0, started: true, ended: false, root_seen: self.root_seen, root_closed: self.root_closed, declaration_seen: self.declaration_seen, doctype_seen: self.doctype_seen, declared_entities: ~self.declared_entities, stack: ~self.stack, options: ~self.options, nodes: self.nodes, text_bytes: self.text_bytes, entity_replacement_bytes: self.entity_replacement_bytes}
         candidate :: &scanner.next() ?? {
             error := ^err
@@ -2087,9 +2121,9 @@ impl StreamScanner {
             local_column :: error.column ?? 1
             error.line = Val(self.line + local_line - 1)
             error.column = Val(if local_line == 1 -> self.column + local_column - 1 else -> local_column)
-            return self.fail(^error)
+            return &self.fail(^error)
         }
-        event :: candidate ?? return self.fail(XMLFault.at_kind(self.wire_consumed, Reason.Malformed, "XML token produced no event"))
+        event :: candidate ?? return &self.fail(XMLFault.at_kind(self.wire_consumed, Reason.Malformed, "XML token produced no event"))
         self.root_seen = scanner.root_seen
         self.root_closed = scanner.root_closed
         self.declaration_seen = scanner.declaration_seen
@@ -2531,7 +2565,7 @@ impl Scanner {
         ^scanner
     }
     // Rust: crates/jet-foundation/src/XmlPull.rs:5919
-    fn path(self: &Scanner) -> String Never! {
+    fn path(self: Scanner) -> String Never! {
         path := "$"
         loop frame in self.stack {
             path += "/"
@@ -2552,11 +2586,11 @@ impl Scanner {
         } else if reason.contains("entity") || reason.contains("character reference") { error.kind = Reason.Entity }
     }
     // Rust: crates/jet-foundation/src/XmlPull.rs:5953
-    fn limit<T>(self: &Scanner, reason: String) -> T XMLFault! {
+    fn limit<T>(self: Scanner, reason: String) -> T XMLFault! {
         Err(XMLFault.at_kind(self.offset, Reason.Limit, ^reason))
     }
     // Rust: crates/jet-foundation/src/XmlPull.rs:5956
-    fn check_name(self: &Scanner, value: String, label: String) XMLFault! {
+    fn check_name(self: Scanner, value: String, label: String) XMLFault! {
         if value.count_bytes() > self.options.limits.max_name_bytes {
             return self.limit("XML {label} exceeds max_name_bytes ({self.options.limits.max_name_bytes})")
         }
@@ -2584,15 +2618,15 @@ impl Scanner {
                 total :: self.entity_replacement_bytes + bytes
                 if bytes > self.options.limits.max_entity_replacement_bytes || total > self.options.limits.max_entity_replacement_bytes -> return self.limit("XML entity replacement exceeds max_entity_replacement_bytes ({self.options.limits.max_entity_replacement_bytes})")
                 self.entity_replacement_bytes = total
-                self.charge_text(bytes, "entity replacement") ?? return Err(err)
+                &self.charge_text(bytes, "entity replacement") ?? return Err(err)
                 Val(~value)
             }
         }
     }
     // Rust: crates/jet-foundation/src/XmlPull.rs:6021
-    fn fail<T>(self: &Scanner, reason: String) -> T XMLFault! { Err(XMLFault.at(self.offset, ^reason)) }
+    fn fail<T>(self: Scanner, reason: String) -> T XMLFault! { Err(XMLFault.at(self.offset, ^reason)) }
     // Rust: crates/jet-foundation/src/XmlPull.rs:6024
-    fn validate_characters(self: &Scanner, start: Int, end: Int) XMLFault! {
+    fn validate_characters(self: Scanner, start: Int, end: Int) XMLFault! {
         offset := start
         loop offset < end {
             scalar :: utf8_scalar(self.source[0..<self.source.len()], offset)
@@ -2603,22 +2637,20 @@ impl Scanner {
         }
     }
     // Rust: crates/jet-foundation/src/XmlPull.rs:6039
-    fn starts(self: &Scanner, value: String) -> Bool Never! {
-        needle :: value.bytes()
-        byte_prefix(self.source[0..<self.source.len()], self.offset, needle[0..<needle.len()])
+    fn starts(self: Scanner, value: String) -> Bool Never! {
+        byte_prefix_text(self.source[0..<self.source.len()], self.offset, value)
     }
     // Rust: crates/jet-foundation/src/XmlPull.rs:6042
     fn take_until(self: &Scanner, end: String, reason: String) -> TakenText XMLFault! {
         start :: self.offset
-        needle :: end.bytes()
-        rel :: byte_find(self.source[0..<self.source.len()], self.offset, needle[0..<needle.len()]) ?? return self.fail(reason)
+        rel :: byte_find_text(self.source[0..<self.source.len()], self.offset, end) ?? return self.fail(reason)
         token_end :: self.offset + rel + end.count_bytes()
         self.validate_characters(start, token_end) ?? return Err(err)
         self.offset = token_end
         TakenText{raw: byte_text(self.source[0..<self.source.len()], start, self.offset), body: byte_text(self.source[0..<self.source.len()], start, self.offset - end.count_bytes())}
     }
     // Rust: crates/jet-foundation/src/XmlPull.rs:6055
-    fn scope_uri(self: &Scanner, prefix: String?, local: View<NamespaceBinding>) -> String? Never! {
+    fn scope_uri(self: Scanner, prefix: String?, local: View<NamespaceBinding>) -> String? Never! {
         index := local.len()
         loop index > 0 {
             index -= 1
@@ -2639,7 +2671,7 @@ impl Scanner {
         if prefix == (Val("xml")) -> Val("http://www.w3.org/XML/1998/namespace") else -> None
     }
     // Rust: crates/jet-foundation/src/XmlPull.rs:6076
-    fn resolved_name(self: &Scanner, raw: String, local: View<NamespaceBinding>, attribute: Bool) -> Name XMLFault! {
+    fn resolved_name(self: Scanner, raw: String, local: View<NamespaceBinding>, attribute: Bool) -> Name XMLFault! {
         self.check_name(raw, "name") ?? return Err(err)
         if !valid_name(raw) { return self.fail("invalid XML name `{raw}`") }
         split :: split_name(raw)
@@ -2657,7 +2689,7 @@ impl Scanner {
         name :: byte_text(self.source[0..<self.source.len()], start + 1, start + end)
         if name.is_empty() -> return self.fail("empty entity reference")
         self.validate_characters(start, start + end + 1) ?? return Err(err)
-        resolved :: self.resolve_entity(name) ?? return Err(err)
+        resolved :: &self.resolve_entity(name) ?? return Err(err)
         self.offset = start + end + 1
         Reference{raw: byte_text(self.source[0..<self.source.len()], start, self.offset), name: name, resolved: ^resolved}
     }
@@ -2679,7 +2711,7 @@ impl Scanner {
                 start :: at + rel
                 end :: byte_find(bytes[0..<bytes.len()], start, [U8]{59}[0..<1]) ?? return Err(XMLFault.at(source_base + start, "unterminated entity reference"))
                 name :: byte_text(bytes[0..<bytes.len()], start + 1, start + end)
-                resolved := self.resolve_entity(name) ?? {
+                resolved := &self.resolve_entity(name) ?? {
                     mapped := ^err
                     mapped.offset = source_base + start
                     return Err(^mapped)
@@ -2767,7 +2799,7 @@ impl Scanner {
                 if (prefix ?? "") == "xmlns" || ((prefix ?? "") == "xml" && value != "http://www.w3.org/XML/1998/namespace") {
                     return self.fail("reserved namespace prefix binding")
                 }
-                parsed :: self.parse_parts(value, value_source_base) ?? return Err(err)
+                parsed :: &self.parse_parts(value, value_source_base) ?? return Err(err)
                 namespace_uri :: parsed.normalized ?? return self.fail("namespace URI contains unresolved entity reference")
                 &declarations.push(DeclaredNamespace{prefix: ^prefix, uri: ^namespace_uri, quote: q, raw: ~raw})
             }
@@ -2792,7 +2824,7 @@ impl Scanner {
             if &expanded.insert(aname.namespace_uri, aname.local) {
                 return self.fail("duplicate expanded XML attribute")
             }
-            parsed :: self.parse_parts(value, value_source_base) ?? return Err(err)
+            parsed :: &self.parse_parts(value, value_source_base) ?? return Err(err)
             &attributes.push(Attribute{name: ^aname, parts: ^parsed.parts, normalized: ^parsed.normalized, quote: q, raw: ^raw})
         }
         self.offset = end + 1
@@ -2813,7 +2845,7 @@ impl Scanner {
     // Rust: crates/jet-foundation/src/XmlPull.rs:6379
     fn charge_event(self: &Scanner, event: Event) XMLFault! {
         if event == {
-            .DocumentStart -> self.charge_nodes(1) ?? return Err(err)
+            .DocumentStart -> &self.charge_nodes(1) ?? return Err(err)
             .DocumentEnd | .ElementEnd(_, _) -> {}
             .ElementStart(name, namespaces, attributes, empty, _) -> {
                 depth := self.stack.len()
@@ -2834,35 +2866,35 @@ impl Scanner {
                     if attribute.name.prefix == .Val(prefix) -> self.check_name(prefix, "attribute prefix") ?? return Err(err)
                     if attribute.name.namespace_uri == .Val(uri) -> self.check_name(uri, "attribute namespace URI") ?? return Err(err)
                     loop part in attribute.parts {
-                        if part == .Text(value, _) -> self.charge_text(value.count_bytes(), "attribute text") ?? return Err(err)
+                        if part == .Text(value, _) -> &self.charge_text(value.count_bytes(), "attribute text") ?? return Err(err)
                     }
                 }
-                self.charge_nodes(1 + namespaces.len() + attributes.len()) ?? return Err(err)
+                &self.charge_nodes(1 + namespaces.len() + attributes.len()) ?? return Err(err)
             }
             .Declaration(version, encoding, _, _) -> {
                 self.check_name(version, "XML version") ?? return Err(err)
                 if encoding == .Val(name) -> self.check_name(name, "XML encoding") ?? return Err(err)
-                self.charge_nodes(1) ?? return Err(err)
+                &self.charge_nodes(1) ?? return Err(err)
             }
             .Doctype(name, public_id, system_id, internal_subset, _) -> {
                 self.check_name(name, "DOCTYPE name") ?? return Err(err)
                 if public_id == .Val(value) -> self.check_name(value, "DOCTYPE identifier") ?? return Err(err)
                 if system_id == .Val(value) -> self.check_name(value, "DOCTYPE identifier") ?? return Err(err)
-                if internal_subset == .Val(value) -> self.charge_text(value.count_bytes(), "DOCTYPE internal subset") ?? return Err(err)
-                self.charge_nodes(1) ?? return Err(err)
+                if internal_subset == .Val(value) -> &self.charge_text(value.count_bytes(), "DOCTYPE internal subset") ?? return Err(err)
+                &self.charge_nodes(1) ?? return Err(err)
             }
             .ProcessingInstruction(target, value, _) -> {
                 self.check_name(target, "processing instruction target") ?? return Err(err)
-                self.charge_text(value.count_bytes(), "processing instruction text") ?? return Err(err)
-                self.charge_nodes(1) ?? return Err(err)
+                &self.charge_text(value.count_bytes(), "processing instruction text") ?? return Err(err)
+                &self.charge_nodes(1) ?? return Err(err)
             }
             .DocumentWhitespace(value, _) | .Text(value, _) | .Cdata(value, _) | .Comment(value, _) -> {
-                self.charge_text(value.count_bytes(), "text") ?? return Err(err)
-                self.charge_nodes(1) ?? return Err(err)
+                &self.charge_text(value.count_bytes(), "text") ?? return Err(err)
+                &self.charge_nodes(1) ?? return Err(err)
             }
             .EntityRef(name, _, _) -> {
                 self.check_name(name, "entity name") ?? return Err(err)
-                self.charge_nodes(1) ?? return Err(err)
+                &self.charge_nodes(1) ?? return Err(err)
             }
         }
     }
@@ -2880,7 +2912,7 @@ impl Scanner {
             return Val(Event.DocumentEnd)
         }
         if self.starts("<!--") {
-            taken :: self.take_until("-->", "unterminated XML comment") ?? return Err(err)
+            taken :: &self.take_until("-->", "unterminated XML comment") ?? return Err(err)
             raw :: ^taken.raw
             value :: taken.body[4..<taken.body.len()]
             if value.contains("--") { return self.fail("XML comment contains --") }
@@ -2888,12 +2920,12 @@ impl Scanner {
         }
         if self.starts("<![CDATA[") {
             if self.stack.is_empty() { return self.fail("CDATA outside root element") }
-            taken :: self.take_until("]]>", "unterminated CDATA") ?? return Err(err)
+            taken :: &self.take_until("]]>", "unterminated CDATA") ?? return Err(err)
             return Val(Event.Cdata(value: taken.body[9..<taken.body.len()], raw: ^taken.raw))
         }
         if self.starts("<?xml") {
             if self.declaration_seen || self.root_seen || self.offset != 0 { return self.fail("XML declaration is out of order") }
-            taken :: self.take_until("?>", "unterminated XML declaration") ?? return Err(err)
+            taken :: &self.take_until("?>", "unterminated XML declaration") ?? return Err(err)
             raw :: ^taken.raw
             data :: taken.body[5..<taken.body.len()].trim()
             declaration :: declaration_fields(data) ?? return Err(err)
@@ -2909,7 +2941,7 @@ impl Scanner {
             return Val(Event.Declaration(version: ^version, encoding: ^encoding, standalone: standalone, raw: ^raw))
         }
         if self.starts("<?") {
-            taken :: self.take_until("?>", "unterminated processing instruction") ?? return Err(err)
+            taken :: &self.take_until("?>", "unterminated processing instruction") ?? return Err(err)
             raw :: ^taken.raw
             data :: taken.body[2..<taken.body.len()]
             bytes :: data.bytes()
@@ -2985,12 +3017,12 @@ impl Scanner {
         }
         if self.starts("<") {
             if self.root_closed { return self.fail("multiple XML root elements") }
-            event :: self.open() ?? return Err(err)
+            event :: &self.open() ?? return Err(err)
             return Val(^event)
         }
         if self.starts("&") {
             if self.stack.is_empty() { return self.fail("entity reference outside root element") }
-            reference :: self.reference() ?? return Err(err)
+            reference :: &self.reference() ?? return Err(err)
             return Val(Event.EntityRef(name: ^reference.name, resolved: ^reference.resolved, raw: ^reference.raw))
         }
         start :: self.offset
@@ -3018,7 +3050,7 @@ impl Scanner {
             return Err(located.located(self.source[0..<self.source.len()], self.path()))
         }
         if event == .Val(value) {
-            self.charge_event(value) ?? {
+            &self.charge_event(value) ?? {
                 error :: ^err
                 located := ^error
                 Scanner.classify(&located)

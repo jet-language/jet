@@ -1,8 +1,8 @@
 // BEGIN GENERATED CORE CALL ROWS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 5393359679e0131ec4f20a417d2c45377f5470331302d44fe47105028eb4b1e3
+// Source SHA-256: 8b0e7a2948eece29a432da6457f46825f05df65c7c2e833601dc94dc8344afb9
 // Source: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs (TIR_CORE_CALL_RECORDS, appended in declaration order)
-// Source SHA-256: 2f64da0be95263cd190b708d590146678116640045017be65fe911450c23e7c1
+// Source SHA-256: 51e360a479b8f039f2c3827af0cf5c541e95e4d8981ddf88779e6a2fa70837bc
 // Core ABI rows keep Core.jet order followed by the TIR extension order.
 // CoreModuleExportNames is the separate module/export-name projection.
 pub CORE_CALLS :: prep { [CoreCallRecord]{
@@ -572,7 +572,7 @@ pub CORE_CALLS :: prep { [CoreCallRecord]{
     core_call_new("core.encoding.jsonl", "writer", "jet_enc_jsonl_writer", true, [Bool]{false, true}),
     core_call_source_owned("core.encoding.cbor", "reader", [Bool]{false, true}),
     core_call_source_owned("core.encoding.cbor", "writer", [Bool]{false, true}),
-    core_call_new("core.encoding.xml", "reader", "jet_enc_xml_reader", true, [Bool]{false, true, true}),
+    core_call_source_owned("core.encoding.xml", "reader", [Bool]{false, true, true}),
     core_call_without_direct_aot(core_call_with_interpreter_route(core_call_new("core.crypto.vault", "prepare_rotate", "jet_vault_prepare_rotate_impl", false, [Bool]{true}), CoreCallInterpreterRoute.Ambient)),
     core_call_without_direct_aot(core_call_with_interpreter_route(core_call_new("core.crypto.vault", "authorize_write", "jet_vault_authorize_write_impl", false, [Bool]{true, true}), CoreCallInterpreterRoute.Ambient)),
     core_call_without_direct_aot(core_call_with_interpreter_route(core_call_new("core.crypto.vault", "commit_rotate", "jet_vault_commit_rotate_impl", false, [Bool]{false, false}), CoreCallInterpreterRoute.Ambient)),
@@ -798,13 +798,14 @@ pub CORE_CALLS :: prep { [CoreCallRecord]{
     core_call_new("core.encoding.toml", "load", "jet_std_toml_parse", true, [Bool]{true}),
     core_call_new("core.encoding.toml", "loads", "jet_std_toml_parse", true, [Bool]{true}),
     core_call_new("core.encoding.yaml", "parse", "jet_std_yaml_parse", true, [Bool]{true}),
-    core_call_new("core.encoding.xml", "parse", "jet_std_xml_parse", true, [Bool]{true}),
-    core_call_new("core.encoding.xml", "parse_with", "jet_std_xml_parse_with", true, [Bool]{true, true}),
-    core_call_new("core.encoding.xml", "to_string", "jet_std_xml_render", true, [Bool]{true}),
-    core_call_with_pure_route(core_call_new("core.encoding.xml", "canonical", "jet_std_xml_canonical", true, [Bool]{true, true}), CoreCallPureRoute.EncodingXML),
-    core_call_new("core.encoding.xml", "root", "jet_std_xml_root", true, [Bool]{true}),
-    core_call_new("core.encoding.xml", "attribute", "jet_std_xml_attribute", true, [Bool]{true, true}),
-    core_call_new("core.encoding.xml", "content", "jet_std_xml_content", true, [Bool]{true}),
+    core_call_source_owned("core.encoding.xml", "parse", [Bool]{true}),
+    core_call_source_owned("core.encoding.xml", "parse_with", [Bool]{true, true}),
+    core_call_with_max_arity(core_call_source_owned("core.encoding.xml", "parse_bytes", [Bool]{true, true}), 2),
+    core_call_source_owned("core.encoding.xml", "to_string", [Bool]{true}),
+    core_call_source_owned("core.encoding.xml", "canonical", [Bool]{true, true}),
+    core_call_source_owned("core.encoding.xml", "root", [Bool]{true}),
+    core_call_source_owned("core.encoding.xml", "attribute", [Bool]{true, true}),
+    core_call_source_owned("core.encoding.xml", "content", [Bool]{true}),
     core_call_with_marker(core_call_source_owned("core.encoding.cbor", "to_bytes", [Bool]{true}), core_marker_deprecated("encode", "2027", "cbor.to_bytes", Val("2028"))),
     core_call_with_marker(core_call_with_max_arity(core_call_source_owned("core.encoding.cbor", "parse", [Bool]{true}), 2), core_marker_deprecated("decode", "2027", "cbor.parse", Val("2028"))),
     core_call_new("core.encoding.binary", "pack_u8", "jet_std_binary_pack_u8", true, [Bool]{false}),
@@ -1610,7 +1611,7 @@ pub CORE_CALLS :: prep { [CoreCallRecord]{
     core_call_without_direct_aot(core_call_with_pure_route(core_call_new("core.time", "from_timestamp", "JetDateTime::from_timestamp", false, [Bool]{false}), CoreCallPureRoute.DateTime)),
     core_call_without_direct_aot(core_call_with_pure_route(core_call_new("core.time", "parse_time", "JetLocalTime::parse", false, [Bool]{true}), CoreCallPureRoute.Time)),
     core_call_without_direct_aot(core_call_with_pure_route(core_call_new("core.time", "parse", "JetDate::parse", false, [Bool]{true}), CoreCallPureRoute.Date)),
-    core_call_without_direct_aot(core_call_with_max_arity(core_call_with_pure_route(core_call_new("core.encoding.xml", "decode", "jet_enc_xml_decode", true, [Bool]{true}), CoreCallPureRoute.EncodingXML), 2)),
+    core_call_with_max_arity(core_call_source_owned("core.encoding.xml", "decode", [Bool]{true, true}), 2),
     core_call_receiver_with_coverage([String]{"WebTable"}, "with_column", [Bool]{false}, CoreCallCoverage{bits: CORE_CALL_COVERAGE_SEMA}),
     core_call_receiver_with_coverage([String]{"WebTable"}, "paginate", [Bool]{true, true}, CoreCallCoverage{bits: CORE_CALL_COVERAGE_SEMA}),
     core_call_receiver_with_coverage([String]{"WebTable"}, "page", [Bool]{}, CoreCallCoverage{bits: CORE_CALL_COVERAGE_SEMA}),
@@ -1844,7 +1845,7 @@ pub CORE_CALLS :: prep { [CoreCallRecord]{
     core_call_new("core.data.arrow", "import", "jet_data_arrow_import", true, [Bool]{false}),
     core_call_new("core.data.arrow", "query", "jet_data_query_arrow", true, [Bool]{false}),
     core_call_with_interpreter_route(core_call_new("core.data", "mean", "jet_data_mean_checked", true, [Bool]{true}), CoreCallInterpreterRoute.Ambient),
-    core_call_new("core.encoding.xml", "to_bytes", "jet_std_xml_to_bytes", true, [Bool]{true, true}),
+    core_call_source_owned("core.encoding.xml", "to_bytes", [Bool]{true, true}),
     core_call_source_owned("core.service", "workflow_start", [Bool]{true, false, false}),
     core_call_with_interpreter_route(core_call_new("core.sync", "text_edit", "jet_sync_text_edit", true, [Bool]{true, false, false, false, false}), CoreCallInterpreterRoute.Ambient),
     core_call_source_owned("core.service", "workflow_outcome", [Bool]{true, false}),
@@ -1972,7 +1973,7 @@ pub CORE_CALLS :: prep { [CoreCallRecord]{
     core_call_with_interpreter_route(core_call_new("core.service", "__finish_drain", "jet_services_finish_drain", true, [Bool]{true, true}), CoreCallInterpreterRoute.Ambient),
     core_call_new("core.reflect", "of", "jet_reflect_of", true, [Bool]{true}),
     core_call_with_max_arity(core_call_new("core.encoding.json", "canonical", "jet_enc_json_canonical", true, [Bool]{true}), 2),
-    core_call_new("core.encoding.xml", "expanded_name", "jet_std_xml_expanded_name", true, [Bool]{true}),
+    core_call_source_owned("core.encoding.xml", "expanded_name", [Bool]{true}),
     core_call_with_interpreter_route(core_call_new("core.email", "smtp", "jet_email::smtp", true, [Bool]{true}), CoreCallInterpreterRoute.Ambient),
     core_call_new("core.encoding.toml", "decode", "jet_enc_toml_decode", true, [Bool]{true}),
     core_call_new("core.encoding.yaml", "decode", "jet_enc_yaml_decode", true, [Bool]{true}),

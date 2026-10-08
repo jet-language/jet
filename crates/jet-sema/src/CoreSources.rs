@@ -6,7 +6,7 @@
 //! first crate that reads them, so editing a Core body rebuilds jet-sema and
 //! its dependents but never jet-foundation, the lexer, the parser or comptime.
 
-use jet_foundation::CoreSourceParts::{CORE_TEXT_STRING_MODULE, CORE_ENCODING_STREAM_MODULE, CORE_ENCODING_CBOR_PARSE_MODULE};
+use jet_foundation::CoreSourceParts::{CORE_TEXT_STRING_MODULE, CORE_ENCODING_STREAM_MODULE, CORE_ENCODING_CBOR_PARSE_MODULE, CORE_ENCODING_XML_ENGINE_MODULE, CORE_ENCODING_XML_KERNEL_MODULE};
 
 include!("CoreSourceTexts.rs");
 
@@ -14,6 +14,8 @@ const CORE_PRIVATE_SOURCE_TEXTS: &[(&str, &str)] = &[
     (CORE_TEXT_STRING_MODULE, include_str!("../../../Core/text/string.jet")),
     (CORE_ENCODING_STREAM_MODULE, include_str!("../../../Core/encoding/stream.jet")),
     (CORE_ENCODING_CBOR_PARSE_MODULE, include_str!("../../../Core/encoding/cbor_parse.jet")),
+    (CORE_ENCODING_XML_ENGINE_MODULE, include_str!("../../../Core/encoding/xml_engine.jet")),
+    (CORE_ENCODING_XML_KERNEL_MODULE, include_str!("../../../Core/encoding/xml_kernel.jet")),
 ];
 
 /// Source text of the Core source module (public or private part) whose

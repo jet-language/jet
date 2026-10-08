@@ -55,13 +55,7 @@ const TIR_CORE_CALL_RECORDS: &[CoreCallRecord] = &[
         &[true],
     )
     .with_max_arity(2),
-    CoreCallRecord::new(
-        "core.encoding.xml",
-        "expanded_name",
-        "jet_std_xml_expanded_name",
-        true,
-        &[true],
-    ),
+    CoreCallRecord::source_owned("core.encoding.xml", "expanded_name", &[true]),
     CoreCallRecord::new("core.email", "smtp", "jet_email::smtp", true, &[true])
         .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new(

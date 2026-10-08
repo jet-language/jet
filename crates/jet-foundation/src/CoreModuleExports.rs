@@ -25,7 +25,7 @@ pub enum CoreLeafKind {
 
 // BEGIN GENERATED CORE DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 5393359679e0131ec4f20a417d2c45377f5470331302d44fe47105028eb4b1e3
+// Source SHA-256: 8b0e7a2948eece29a432da6457f46825f05df65c7c2e833601dc94dc8344afb9
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreModuleDeclaration {
     pub module: &'static str,
@@ -796,7 +796,7 @@ pub const CORE_SOURCE_MODULES: &[CoreSourceModule] = &[
     CoreSourceModule { module: "core.encoding.json", alias: "core_core_encoding_json", path: "Core/encoding/json.jet", owned_members: &["canonical", "decode", "dump", "dumps", "events", "load", "loads", "parse", "parse_allow_duplicates", "patch", "patch_with_limits", "pointer", "reader_allow_duplicates", "to_string", "to_string_pretty", "writer"] },
     CoreSourceModule { module: "core.encoding.jsonl", alias: "core_core_encoding_jsonl", path: "Core/encoding/jsonl.jet", owned_members: &["append_line", "count_rows", "dumps", "first", "loads", "parse", "reader", "to_string", "writer"] },
     CoreSourceModule { module: "core.encoding.toml", alias: "core_core_encoding_toml", path: "Core/encoding/toml.jet", owned_members: &["load", "loads", "parse", "to_string"] },
-    CoreSourceModule { module: "core.encoding.xml", alias: "core_core_encoding_xml", path: "Core/encoding/xml.jet", owned_members: &[] },
+    CoreSourceModule { module: "core.encoding.xml", alias: "core_core_encoding_xml", path: "Core/encoding/xml.jet", owned_members: &["parse", "parse_with", "parse_bytes", "to_string", "to_bytes", "canonical", "root", "expanded_name", "attribute", "content", "decode", "reader"] },
     CoreSourceModule { module: "core.event", alias: "core_core_event", path: "Core/event/event.jet", owned_members: &["async_result", "decision_hook", "hook", "new", "policy_sync", "scope", "with_policy"] },
     CoreSourceModule { module: "core.files", alias: "core_core_files", path: "Core/files/files.jet", owned_members: &["basename", "is_absolute", "is_file", "scope", "stem", "suffix", "with_name", "with_suffix", "is_abs", "split_slash", "collapse", "join", "dirname", "glob_match", "relative", "is_symlink", "cwd", "home", "expanduser", "touch", "relocate", "replace", "relativeto", "chmod", "copy2", "copyfile", "mkdir", "rmdir", "unlink", "joinpath", "getcwd", "chdir", "scandir", "gettempdir", "getenv", "read_lines", "write_lines", "commonpath", "fnmatch", "which", "splitext", "split", "normpath", "getsize", "getmtime", "lexists", "samefile", "commonprefix", "expandvars", "move", "rmtree", "makedirs", "listdir", "glob_recursive", "fnmatch_filter", "is_mount", "ensure_parent", "readdir", "walkdir", "truncate", "createdirectory", "filesize", "delete", "cp", "rm", "realpath", "pwd", "tmpdir", "topath", "cd", "open", "create", "append", "stat", "lstat", "rename", "open_directory", "extended_attribute_names", "extended_attribute", "set_extended_attribute", "__link_held", "exists", "is_dir", "absolute", "mktemp", "__with_process_directory", "read", "read_bytes", "write", "write_bytes", "append_all", "read_at", "write_at", "create_dir", "create_dir_all", "read_link", "write_atomic", "__reader_read_line", "scoped_read", "walk", "walk_files", "map", "remove", "remove_all", "copy", "symlink", "is_fifo", "chown", "set_mode", "fsync", "temp_file", "remove_dir", "list_dir", "hard_link", "is_socket", "mkdtemp", "canonicalize", "walk_parallel", "temp_dir", "lock"] },
     CoreSourceModule { module: "core.encoding.yaml", alias: "core_core_encoding_yaml", path: "Core/encoding/yaml.jet", owned_members: &["parse", "to_string"] },
@@ -919,6 +919,7 @@ pub const CORE_SOURCE_OWNED_TYPES: &[CoreSourceOwnedType] = &[
     CoreSourceOwnedType { path: "Core/encoding/xml.jet", name: "XMLRenderOptions" },
     CoreSourceOwnedType { path: "Core/encoding/xml.jet", name: "XMLCanonicalMode" },
     CoreSourceOwnedType { path: "Core/encoding/xml.jet", name: "XMLCanonical" },
+    CoreSourceOwnedType { path: "Core/encoding/xml.jet", name: "XMLReader" },
     CoreSourceOwnedType { path: "Core/game/raylib.jet", name: "RaylibSound" },
     CoreSourceOwnedType { path: "Core/http/http.jet", name: "Body" },
     CoreSourceOwnedType { path: "Core/http/http.jet", name: "Headers" },
