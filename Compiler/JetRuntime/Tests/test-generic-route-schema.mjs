@@ -201,24 +201,41 @@ pub fn jet_fixture_plain(value: JetFixture) -> JetFixture { value }
   assert.deepEqual(inventory.nativeExports, []);
   assert.equal(readFileSync(join(fixture, "crates/jet-codegen/src/Prelude/Core/CAbiRoutes.rs"), "utf8"), baselineRust);
   assert.equal(readFileSync(join(fixture, "Compiler/JetBackend/Source/Lower/RuntimeRoutes.jet"), "utf8"), baselineJet);
-  // Owning one helper must suppress only its Rust definition; metadata and
-  // the remaining seed helpers still exist. All physical ABIs stay strict.
+  // A provider changes the representation of the whole type. Partial helper
+  // ownership must fail before either generated output can be overwritten.
   const providedGlue = "#Export(c) fn jet_rt_handle_drop_JetFixture(value: I64) {}\n#Export(c) fn jet_rt_handle_eq_JetFixture(left: I64, right: I64) -> Bool { true }\n";
   put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: F64) -> F64 { value }\n" + providedGlue);
   put("Compiler/JetRuntime/exports.list", "jet_fixture_scalar\njet_rt_handle_drop_JetFixture\njet_rt_handle_eq_JetFixture\n");
+  const partialGlue = run();
+  assert.notEqual(partialGlue.status, 0);
+  assert.match(partialGlue.stderr, /all-or-none ownership for JetFixture.*jet_rt_handle_clone_JetFixture/);
+  assert.equal(readFileSync(join(fixture, "crates/jet-codegen/src/Prelude/Core/CAbiRoutes.rs"), "utf8"), baselineRust);
+  assert.equal(readFileSync(join(fixture, "Compiler/JetBackend/Source/Lower/RuntimeRoutes.jet"), "utf8"), baselineJet);
+  const completeGlue = providedGlue +
+    "#Export(c) fn jet_rt_handle_clone_JetFixture(value: I64) -> I64 { value }\n" +
+    "#Export(c) fn jet_rt_record_get_JetFixture_value(value: I64) -> F64 { F64{0} }\n" +
+    "#Export(c) fn jet_rt_record_new_JetFixture(value: F64) -> I64 { I64{0} }\n" +
+    "#Export(c) fn jet_fixture_plain(value: I64) -> I64 { value }\n";
+  const completeNames = [...completeGlue.matchAll(/fn (\w+)\(/g)].map((match) => match[1]);
+  const composeGlue = (names) => {
+    put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: F64) -> F64 { value }\n" +
+      completeGlue.split("\n").filter((line) => names.some((name) => line.includes(`fn ${name}(`))).join("\n"));
+    put("Compiler/JetRuntime/exports.list", ["jet_fixture_scalar", ...names].join("\n") + "\n");
+  };
+  // Clone/drop alone are insufficient: record constructors/projections still
+  // dereference Box storage even when lifecycle helpers have all moved.
+  composeGlue(completeNames.filter((name) => name.startsWith("jet_rt_handle_")));
+  assert.match(run().stderr, /all-or-none ownership for JetFixture.*jet_rt_record_get_JetFixture_value/);
+  composeGlue(completeNames.filter((name) => name !== "jet_fixture_plain"));
+  assert.match(run().stderr, /all-or-none ownership for JetFixture.*jet_fixture_plain/);
+  composeGlue(completeNames);
   success(run());
   success(run(true));
   const ownedRust = readFileSync(join(fixture, "crates/jet-codegen/src/Prelude/Core/CAbiRoutes.rs"), "utf8");
-  const ownedJet = readFileSync(join(fixture, "Compiler/JetBackend/Source/Lower/RuntimeRoutes.jet"), "utf8");
-  assert.ok(!ownedRust.includes("fn jet_rt_handle_drop_JetFixture("));
-  assert.ok(!ownedRust.includes("fn jet_rt_handle_eq_JetFixture("));
-  assert.ok(ownedRust.includes("fn jet_rt_handle_clone_JetFixture("));
-  assert.equal(ownedJet, baselineJet, "provider ownership must not alter carrier tables");
-  put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: F64) -> F64 { value }\n" + providedGlue + "#Export(c) fn jet_rt_handle_clone_JetFixture(value: I64) -> I64 { value }\n");
-  put("Compiler/JetRuntime/exports.list", "jet_fixture_scalar\njet_rt_handle_drop_JetFixture\njet_rt_handle_eq_JetFixture\njet_rt_handle_clone_JetFixture\n");
-  success(run());
-  assert.ok(!readFileSync(join(fixture, "crates/jet-codegen/src/Prelude/Core/CAbiRoutes.rs"), "utf8").includes("fn jet_rt_handle_clone_JetFixture("));
-  assert.equal(readFileSync(join(fixture, "Compiler/JetBackend/Source/Lower/RuntimeRoutes.jet"), "utf8"), baselineJet);
+  assert.ok(!ownedRust.includes("fn jet_rt_handle_clone_JetFixture("));
+  for (const name of ["jet_rt_record_get_JetFixture_value", "jet_rt_record_new_JetFixture", "jet_fixture_plain"]) {
+    assert.ok(ownedRust.includes(`#[cfg(not(jet_native_pack))]\n    #[no_mangle]\n    pub extern "C" fn ${name}(`));
+  }
   put("Compiler/JetRuntime/exports.list", "jet_fixture_scalar\njet_rt_handle_drop_JetFixture\njet_rt_handle_eq_JetFixture\n");
   put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: F64) -> F64 { value }\n" + providedGlue.replace("left: I64", "left: F64"));
   const mismatchedGlue = run();
