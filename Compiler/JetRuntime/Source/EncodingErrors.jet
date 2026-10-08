@@ -40,6 +40,7 @@ fn encoding_optional_eq(left: I64, right: I64, present: I64, field: I64) -> Bool
 #Export(c) fn jet_rt_record_new_EncodingCause(kind: I64, os_code: I64, message: I64) -> I64 {
     // Validate exact Int before allocation or ownership changes (CAbi native()).
     code :: encoding_optional_input(os_code)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     result :: jet_rt_alloc(ENCODING_CAUSE_BYTES, I64{8})
     encoding_store(result + ENCODING_CAUSE_KIND, jet_rt_string_clone(kind))
     encoding_store(result + ENCODING_CAUSE_OS_PRESENT, if (os_code == I64{0}) -> I64{0} else -> I64{1})
@@ -83,8 +84,20 @@ fn encoding_optional_eq(left: I64, right: I64, present: I64, field: I64) -> Bool
         }
     }
     raw_offset :: jet_int_owned_to_i64(offset)
+    if (jet_scheduler_native_propagate() != I64{0}) {
+        jet_rt_handle_drop_EncodingCause(cause)
+        return I64{0}
+    }
     raw_line :: encoding_optional_input(line)
+    if (jet_scheduler_native_propagate() != I64{0}) {
+        jet_rt_handle_drop_EncodingCause(cause)
+        return I64{0}
+    }
     raw_column :: encoding_optional_input(column)
+    if (jet_scheduler_native_propagate() != I64{0}) {
+        jet_rt_handle_drop_EncodingCause(cause)
+        return I64{0}
+    }
     result :: jet_rt_alloc(ENCODING_ERROR_BYTES, I64{8})
     encoding_store(result + ENCODING_ERROR_FORMAT, format)
     encoding_store(result + ENCODING_ERROR_KIND, kind)

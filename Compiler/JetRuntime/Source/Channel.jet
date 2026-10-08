@@ -226,6 +226,7 @@ fn channel_receive(channel: I64, out: I64) -> Bool {
     bound := I64{-1}
     if ((bounded & I64{255}) != I64{0}) {
         bound = jet_int_owned_to_i64(capacity)
+        if (jet_scheduler_native_propagate() != I64{0}) -> return
         // Public bound validation is owned by the current Core channel body;
         // the scheduler reference itself defaults capacity.max(1).
         if (bound < I64{1}) { bound = I64{1} }
@@ -507,6 +508,17 @@ fn channel_select_probe(receivers: I64, count: I64, timer_data: I64, timer_count
     I64{0}
 }
 
+// Consumed select lists share one cleanup on stopped and completed paths.
+fn channel_select_drop_inputs(receivers: I64, count: I64, capacity: I64, converted: I64, timer_count: I64) {
+    at := I64{0}
+    loop at < count {
+        jet_rt_native_receiver_drop(sync_load(receivers + at * I64{8}))
+        at += I64{1}
+    }
+    if (capacity != I64{0}) { jet_rt_free(receivers, capacity * I64{8}, I64{8}) }
+    if (timer_count != I64{0}) { jet_rt_free(converted, timer_count * I64{16}, I64{8}) }
+}
+
 #Export(c) fn jet_rt_native_select_wait(recvs: I64, timers: I64, probing: I64, arm: I64, value: I64) {
     count :: sync_load(recvs)
     capacity :: sync_load(recvs + I64{8})
@@ -523,16 +535,31 @@ fn channel_select_probe(receivers: I64, count: I64, timer_data: I64, timer_count
     }
     started :: sync_now_ns()
     at := I64{0}
+    stopped := false
     loop at < timer_count {
         raw :: sync_load(durations + at * I64{8})
         nanoseconds :: jet_int_owned_to_i64(raw)
         jet_rt_int_drop(raw)
+        if (jet_scheduler_native_propagate() != I64{0}) {
+            stopped = true
+            at += I64{1}
+            break
+        }
         // duration.to_millis truncates towards zero; negative delays default0.
         millis :: nanoseconds /% I64{1000000}
         delay :: if (millis < I64{0}) -> I64{0} else -> millis * I64{1000000}
         deadline :: if (delay > I64{9223372036854775807} - started) -> I64{9223372036854775807} else -> started + delay
         sync_store(converted + at * I64{16}, deadline)
         at += I64{1}
+    }
+    if stopped {
+        loop at < timer_count {
+            jet_rt_int_drop(sync_load(durations + at * I64{8}))
+            at += I64{1}
+        }
+        if (timer_capacity != I64{0}) { jet_rt_free(durations, timer_capacity * I64{8}, I64{8}) }
+        channel_select_drop_inputs(receivers, count, capacity, converted, timer_count)
+        return
     }
     if (timer_capacity != I64{0}) { jet_rt_free(durations, timer_capacity * I64{8}, I64{8}) }
     park := I64{0}
@@ -595,13 +622,7 @@ fn channel_select_probe(receivers: I64, count: I64, timer_data: I64, timer_count
         if (count != I64{0}) { jet_rt_free(registrations, count * I64{24}, I64{8}) }
         sync_park_drop(park)
     }
-    at = I64{0}
-    loop at < count {
-        jet_rt_native_receiver_drop(sync_load(receivers + at * I64{8}))
-        at += I64{1}
-    }
-    if (capacity != I64{0}) { jet_rt_free(receivers, capacity * I64{8}, I64{8}) }
-    if (timer_count != I64{0}) { jet_rt_free(converted, timer_count * I64{16}, I64{8}) }
+    channel_select_drop_inputs(receivers, count, capacity, converted, timer_count)
     // The selected payload and arm have already transferred to the caller.
     // Do not turn a completed selection into a stopped, uninitialized output.
     if (result == I64{1}) {

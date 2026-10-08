@@ -60,6 +60,7 @@
 #Export(c) fn jet_string_repeat(value: I64, count: I64) -> I64 {
     length :: rt_text_len(value)
     native :: jet_int_owned_to_i64(count)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     times :: if (native < I64{0}) -> I64{0} else -> native
     if (times == I64{0} || length == I64{0}) { return rt_text_builder_with_capacity(I64{0}) }
     if (times > I64{9223372036854775807} /% length) {
@@ -146,13 +147,22 @@ fn rt_text_ascii(value: I64, upper: Bool) -> I64 {
 #Export(c) fn jet_string_slice(value: I64, start: I64, end: I64, file: I64, line: I64) -> I64 {
     // CAbiRoutes fixed::<u32> decodes an exact Int then checks the width.
     native_line :: jet_int_owned_to_i64(line)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     if (native_line < I64{0} || native_line > I64{4294967295}) {
         trap_native_index_range_stop()
         return I64{0}
     }
-    jet_rt_string_slice_range(value, jet_int_owned_to_i64(start), jet_int_owned_to_i64(end), U8{1}, rt_text_data(file), rt_text_len(file), native_line)
+    first :: jet_int_owned_to_i64(start)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    last :: jet_int_owned_to_i64(end)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    jet_rt_string_slice_range(value, first, last, U8{1}, rt_text_data(file), rt_text_len(file), native_line)
 }
 
 #Export(c) fn jet_string_slice_builtin(value: I64, start: I64, end: I64) -> I64 {
-    rt_text_slice_range(value, jet_int_owned_to_i64(start), jet_int_owned_to_i64(end), U8{1}, I64{0}, I64{0}, I64{0}, true)
+    first :: jet_int_owned_to_i64(start)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    last :: jet_int_owned_to_i64(end)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    rt_text_slice_range(value, first, last, U8{1}, I64{0}, I64{0}, I64{0}, true)
 }

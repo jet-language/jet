@@ -43,8 +43,8 @@ if (mode === "assemble") {
     // Strip only task-publication branches; retain the real root reports.
     .replace(/^fn trap_native_index_range_stop\(\) \{\n[\s\S]*?^\}/m,
       "fn trap_native_index_range_stop() { trap_native_index_range_root() }")
-    .replace(/^fn trap_internal_overflow_stop\(\) \{\n[\s\S]*?^\}/m,
-      "fn trap_internal_overflow_stop() { jet_rt_panic_overflow() }")
+    .replace(/^#Export\(c\) fn jet_rt_panic_overflow\(\) \{\n[\s\S]*?^    if published -> return\n/m,
+      "#Export(c) fn jet_rt_panic_overflow() {\n")
     .replace(/^    \/\/ Outcome\.rs:2463-2466[\s\S]*?^    if published -> return\n/m, "")
     .replace(/^        if \(jet_scheduler_native_propagate\(\) != I64\{0\}\) -> return\n/gm, "")
   ).join("\n");

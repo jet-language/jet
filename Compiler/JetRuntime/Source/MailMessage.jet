@@ -7,6 +7,7 @@ MAIL_MESSAGE_BYTES :: prep { I64{160} }
 // This 12-argument plain-member ABI was admitted by NativeLead18.
 #Export(c) fn message_parts(from: I64, to_data: I64, to_length: I64, bcc_data: I64, bcc_length: I64, subject: I64, text: I64, html: I64, attachment_data: I64, attachment_length: I64, envelope: I64, wire_upper: I64) -> I64 {
     wire :: jet_int_owned_to_i64(wire_upper)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     result :: jet_rt_alloc(MAIL_MESSAGE_BYTES, I64{8})
     mail_address_copy_into(from, result)
     mail_address_list_from_slots_into(to_data, to_length, result + I64{16})

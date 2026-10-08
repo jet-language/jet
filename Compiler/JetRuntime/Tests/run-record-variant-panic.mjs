@@ -80,6 +80,15 @@ const rootModes = [
     ...Array.from({ length: 13 }, (_, i) => [`root-mode-${i + 5}`, golden(range)]),
     ...Array.from({ length: 8 }, (_, i) => [`root-mode-${i + 18}`, golden(overflow)]),
     ['root-mode-30', golden(overflow)], ['root-mode-31', golden(overflow)],
+    ...Array.from({ length: 115 }, (_, test) => {
+        const reason = test <= 5 ? 'divided by zero' :
+            test === 6 ? 'Negative default Int exponent' :
+            test <= 10 ? 'Invalid shift count' : "Value doesn't fit in destination type";
+        const expected = test <= 13 ?
+            Buffer.concat([header, Buffer.from(reason), literal('trap_msg_message_end'), footer]) :
+            golden(test === 15 ? overflow : range);
+        return [`root-mode-${200 + test}`, expected];
+    }),
 ];
 for (const [mode, expected] of rootModes) {
     const result = spawnSync(resolve(task), [mode], { timeout: 30000, maxBuffer: 1 << 20 });

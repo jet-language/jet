@@ -9,10 +9,12 @@ fn host_call(number: I64, a1: I64, a2: I64, a3: I64) -> I64 {
 
 // Route Int arguments are encoded exact-Int words, not necessarily i64.
 // The canonical L4 conversion reads without consuming the borrowed owner.
-fn host_native_int(value: I64) -> I64 Never! { jet_int_owned_to_i64(value) }
+fn host_native_int(value: I64) -> I64 { jet_int_owned_to_i64(value) }
 
-fn host_i32(value: I64) -> I64 Never! {
-    low :: host_native_int(value) & I64{4294967295}
+fn host_i32(value: I64) -> I64 {
+    native :: host_native_int(value)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    low :: native & I64{4294967295}
     if (low >= I64{2147483648}) -> wrapping(low - I64{4294967296}) else -> low
 }
 
@@ -32,7 +34,11 @@ fn host_i32(value: I64) -> I64 Never! {
 
 #Export(c) fn jet_std_os_getpgrp() -> I64 { host_call(I64{111}, I64{0}, I64{0}, I64{0}) }
 
-#Export(c) fn jet_std_os_close_fd(fd: I64) { _ := host_call(I64{3}, host_i32(fd), I64{0}, I64{0}) }
+#Export(c) fn jet_std_os_close_fd(fd: I64) {
+    native :: host_i32(fd)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    _ := host_call(I64{3}, native, I64{0}, I64{0})
+}
 
 #Export(c) fn jet_std_os_sync() {
     jet_rt_stdout_flush()
@@ -40,8 +46,10 @@ fn host_i32(value: I64) -> I64 Never! {
 }
 
 #Export(c) fn jet_std_process_exit(code: I64) {
+    native :: host_i32(code)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
     jet_rt_stdout_flush()
-    _ := host_call(I64{231}, host_i32(code), I64{0}, I64{0})
+    _ := host_call(I64{231}, native, I64{0}, I64{0})
 }
 
 // Raw tuples marshal into the generator's separate out slots, never a boxed
@@ -59,23 +67,35 @@ fn host_sample_fields(result: I64, error: I64, available: I64, value: I64, errno
 }
 
 #Export(c) fn jet_sys_getpgid_raw(pid: I64, available: I64, value: I64, errno: I64) {
-    host_sample_out(host_call(I64{121}, host_i32(pid), I64{0}, I64{0}), available, value, errno)
+    native :: host_i32(pid)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    host_sample_out(host_call(I64{121}, native, I64{0}, I64{0}), available, value, errno)
 }
 
 #Export(c) fn jet_sys_getsid_raw(pid: I64, available: I64, value: I64, errno: I64) {
-    host_sample_out(host_call(I64{124}, host_i32(pid), I64{0}, I64{0}), available, value, errno)
+    native :: host_i32(pid)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    host_sample_out(host_call(I64{124}, native, I64{0}, I64{0}), available, value, errno)
 }
 
 #Export(c) fn jet_sys_setuid_raw(uid: I64, available: I64, value: I64, errno: I64) {
-    host_sample_out(host_call(I64{105}, host_native_int(uid) & I64{4294967295}, I64{0}, I64{0}), available, value, errno)
+    native :: host_native_int(uid)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    host_sample_out(host_call(I64{105}, native & I64{4294967295}, I64{0}, I64{0}), available, value, errno)
 }
 
 #Export(c) fn jet_sys_setgid_raw(gid: I64, available: I64, value: I64, errno: I64) {
-    host_sample_out(host_call(I64{106}, host_native_int(gid) & I64{4294967295}, I64{0}, I64{0}), available, value, errno)
+    native :: host_native_int(gid)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    host_sample_out(host_call(I64{106}, native & I64{4294967295}, I64{0}, I64{0}), available, value, errno)
 }
 
 #Export(c) fn jet_sys_setpgid_raw(pid: I64, pgid: I64, available: I64, value: I64, errno: I64) {
-    host_sample_out(host_call(I64{109}, host_i32(pid), host_i32(pgid), I64{0}), available, value, errno)
+    native_pid :: host_i32(pid)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    native_pgid :: host_i32(pgid)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    host_sample_out(host_call(I64{109}, native_pid, native_pgid, I64{0}), available, value, errno)
 }
 
 #Export(c) fn jet_sys_setpgrp_raw(available: I64, value: I64, errno: I64) {
@@ -87,11 +107,17 @@ fn host_sample_fields(result: I64, error: I64, available: I64, value: I64, errno
 }
 
 #Export(c) fn jet_sys_kill_raw(pid: I64, signal: I64, available: I64, value: I64, errno: I64) {
-    host_sample_out(host_call(I64{62}, host_i32(pid), host_i32(signal), I64{0}), available, value, errno)
+    native_pid :: host_i32(pid)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    native_signal :: host_i32(signal)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    host_sample_out(host_call(I64{62}, native_pid, native_signal, I64{0}), available, value, errno)
 }
 
 #Export(c) fn jet_sys_getpriority_raw(who: I64, available: I64, value: I64, errno: I64) {
-    result :: host_call(I64{140}, I64{0}, host_native_int(who) & I64{4294967295}, I64{0})
+    native :: host_native_int(who)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    result :: host_call(I64{140}, I64{0}, native & I64{4294967295}, I64{0})
     // getpriority can legitimately return negative nice values on success.
     if (result < I64{0}) { host_sample_out(result, available, value, errno) } else {
         host_sample_fields(wrapping(I64{20} - result), I64{0}, available, value, errno)
@@ -99,20 +125,30 @@ fn host_sample_fields(result: I64, error: I64, available: I64, value: I64, errno
 }
 
 #Export(c) fn jet_sys_setpriority_raw(who: I64, priority: I64, available: I64, value: I64, errno: I64) {
-    host_sample_out(host_call(I64{141}, I64{0}, host_native_int(who) & I64{4294967295}, host_i32(priority)), available, value, errno)
+    native_who :: host_native_int(who)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    native_priority :: host_i32(priority)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    host_sample_out(host_call(I64{141}, I64{0}, native_who & I64{4294967295}, native_priority), available, value, errno)
 }
 
 #Export(c) fn jet_sys_umask_raw(mask: I64, some: I64) -> I64 {
-    result :: host_call(I64{95}, host_native_int(mask) & I64{4294967295}, I64{0}, I64{0})
+    native :: host_native_int(mask)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    result :: host_call(I64{95}, native & I64{4294967295}, I64{0}, I64{0})
     #Unsafe("some lends a writable C-ABI Option success word") { os_store_i64(some, result) }
     I64{1}
 }
 
 #Export(c) fn jet_sys_waitpid_raw(pid: I64, options: I64, available: I64, value: I64, errno: I64, status: I64) {
+    native_pid :: host_i32(pid)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    native_options :: host_i32(options)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
     jet_rt_stdout_flush()
     #Unsafe("status lends an eight-byte out slot; wait4 writes its low four bytes and retains no pointer") {
         os_store_i64(status, I64{0})
-        result :: os_syscall_i64(I64{61}, host_i32(pid), status, host_i32(options), I64{0}, I64{0}, I64{0})
+        result :: os_syscall_i64(I64{61}, native_pid, status, native_options, I64{0}, I64{0}, I64{0})
         host_sample_out(result, available, value, errno)
     }
 }

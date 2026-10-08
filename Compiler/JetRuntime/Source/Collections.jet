@@ -234,7 +234,7 @@ fn coll_bits_bound(bits: I64, value: I64) -> I64 {
     if (count == I64{0}) { return I64{0} }
     last :: trap_word(trap_word(bits + I64{16}) + (count - I64{1}) * I64{8})
     if (last == I64{9223372036854775807}) {
-        trap_internal_overflow_stop()
+        jet_rt_panic_overflow()
         if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     }
     jet_int_owned_from_i64(last + I64{1})
@@ -242,6 +242,7 @@ fn coll_bits_bound(bits: I64, value: I64) -> I64 {
 
 #Export(c) fn jet_bit_set_has(bits: I64, carrier: I64) -> Bool {
     value :: jet_int_owned_to_i64(carrier)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return false
     at :: coll_bits_bound(bits, value)
     if at == trap_word(bits) -> return false
     trap_word(trap_word(bits + I64{16}) + at * I64{8}) == value
@@ -249,6 +250,7 @@ fn coll_bits_bound(bits: I64, value: I64) -> I64 {
 
 #Export(c) fn jet_bitset_add(bits: I64, carrier: I64) -> Bool {
     value :: jet_int_owned_to_i64(carrier)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return false
     if (value < I64{0}) { return false }
     at :: coll_bits_bound(bits, value)
     length :: trap_word(bits)
@@ -276,6 +278,7 @@ fn coll_bits_bound(bits: I64, value: I64) -> I64 {
 
 #Export(c) fn jet_bitset_remove(bits: I64, carrier: I64) {
     value :: jet_int_owned_to_i64(carrier)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
     at := coll_bits_bound(bits, value)
     length :: trap_word(bits)
     data :: trap_word(bits + I64{16})
@@ -718,7 +721,7 @@ fn coll_ordered_map_render(map: I64) -> I64 {
 fn coll_i64_add(left: I64, right: I64) -> I64 {
     result :: wrapping(left + right)
     if (((left ^ result) & (right ^ result)) < I64{0}) {
-        trap_internal_overflow_stop()
+        jet_rt_panic_overflow()
         if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     }
     result
@@ -727,7 +730,7 @@ fn coll_i64_add(left: I64, right: I64) -> I64 {
 fn coll_i64_sub(left: I64, right: I64) -> I64 {
     result :: wrapping(left - right)
     if (((left ^ right) & (left ^ result)) < I64{0}) {
-        trap_internal_overflow_stop()
+        jet_rt_panic_overflow()
         if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     }
     result
@@ -1185,8 +1188,11 @@ fn coll_loop_range_stop(exhausted: Bool) {
 
 #Export(c) fn jet_loop_range_init(start: I64, end: I64, step: I64, has_step: U8, exclusive: U8) -> I64 {
     stride :: if (has_step == U8{0}) -> I64{1} else -> jet_int_owned_to_i64(step)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     first :: jet_int_owned_to_i64(start)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     last :: jet_int_owned_to_i64(end)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     if (stride == I64{0}) { coll_loop_range_stop(false) }
     cursor :: jet_rt_alloc(I64{40}, I64{8})
     trap_store(cursor, first)

@@ -9,7 +9,9 @@ fn ui_carrier_terminal_size_new(cols: I64, rows: I64) -> I64 {
 }
 #Export(c) fn jet_rt_record_new_TerminalSize(m0: I64, m1: I64) -> I64 {
     cols :: jet_int_owned_to_i64(m0)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     rows :: jet_int_owned_to_i64(m1)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     ui_carrier_terminal_size_new(cols, rows)
 }
 #Export(c) fn jet_rt_handle_clone_TerminalSize(value: I64) -> I64 {

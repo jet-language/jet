@@ -48,8 +48,11 @@ fn time_glue_pad(target: I64, value: I64, width: I64) {
 #Export(c) fn jet_rt_record_new_JetDate(year: I64, month: I64, day: I64) -> I64 {
     // CAbi10193-10194 is a record ctor, NOT the checked civil constructor.
     y :: jet_int_owned_to_i64(year)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     m :: jet_int_owned_to_i64(month)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     d :: jet_int_owned_to_i64(day)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     result :: jet_rt_alloc(TIME_DATE_BYTES, I64{8})
     time_glue_store(result + TIME_DATE_YEAR, y)
     time_glue_store(result + TIME_DATE_MONTH, m)
@@ -81,8 +84,11 @@ fn time_glue_pad(target: I64, value: I64, width: I64) {
 #Export(c) fn jet_rt_handle_debug_JetDate(value: I64) -> I64 { jet_rt_handle_show_JetDate(value) }
 #Export(c) fn jet_rt_record_new_JetPeriod(years: I64, months: I64, days: I64) -> I64 {
     y :: jet_int_owned_to_i64(years)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     m :: jet_int_owned_to_i64(months)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     d :: jet_int_owned_to_i64(days)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     result :: jet_rt_alloc(TIME_PERIOD_BYTES, I64{8})
     time_glue_store(result + TIME_PERIOD_YEARS, y)
     time_glue_store(result + TIME_PERIOD_MONTHS, m)
@@ -139,6 +145,7 @@ fn time_glue_pad(target: I64, value: I64, width: I64) {
 #Export(c) fn jet_rt_handle_debug_JetLocalTime(value: I64) -> I64 { jet_rt_handle_show_JetLocalTime(value) }
 #Export(c) fn jet_rt_record_new_Duration(ns: I64) -> I64 {
     raw :: jet_int_owned_to_i64(ns)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     result :: jet_rt_alloc(TIME_DURATION_BYTES, I64{8})
     time_glue_store(result + TIME_DURATION_NS, raw)
     result

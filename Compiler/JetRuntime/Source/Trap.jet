@@ -192,7 +192,7 @@ fn trap_simple(code: I64, file: I64, file_len: I64, line: I64, message: I64, mes
 }
 
 // CAbiRoutes.rs:11-12: publish the seed's raw native-Int range reason.
-// Int's fatal conversion path deliberately calls only the root body below.
+// Root rendering stays separate so task publication never prints a report.
 fn trap_native_index_range_stop() {
     message :: jet_rt_alloc(I64{40}, I64{8})
     trap_store(message, I64{5269323123273261422})
@@ -213,10 +213,9 @@ fn trap_native_index_range_root() {
     trap_footer(I64{1})
 }
 
-// Internal collection arithmetic is a registered Jet E3010 stop even where
-// Core/Collections.rs uses raw Rust overflow. Preserve the existing root
-// report; tasks carry exactly its trap_msg_overflow message bytes.
-fn trap_internal_overflow_stop() {
+// Registered E3010 overflow: tasks carry the exact root message; the root
+// report stays unchanged even where the seed uses raw Rust arithmetic.
+#Export(c) fn jet_rt_panic_overflow() {
     message :: jet_rt_alloc(I64{80}, I64{8})
     trap_store(message, I64{7598242313330583636})
     trap_store(message + I64{8}, I64{2333824980546840692})
@@ -231,10 +230,6 @@ fn trap_internal_overflow_stop() {
     published :: rt_task_panic_publish(message, I64{76}, I64{0})
     jet_rt_free(message, I64{80}, I64{8})
     if published -> return
-    jet_rt_panic_overflow()
-}
-
-#Export(c) fn jet_rt_panic_overflow() {
     trap_header(I64{1})
     trap_msg_overflow()
     trap_msg_prelude_end()

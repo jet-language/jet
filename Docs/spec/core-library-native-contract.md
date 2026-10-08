@@ -184,6 +184,10 @@ raw program reason, not the rendered diagnostic or location. Root reports retain
 their registered bytes and exit status. A panic during an already-delivered
 stop's cleanup aborts instead of replacing that outcome; a shielded pending
 cancel or deadline is not yet delivered and cannot suppress a task panic.
+Exact-Int arithmetic and native narrowing use that same publication path.
+Runtime marshaling checks each narrowing before subsequent syscalls, allocations,
+or output-slot initialization; moved constructor children and select inputs are
+released on the stopped path, while borrowed inputs remain caller-owned.
 Core `Task` handles are move-only: one consuming joiner uses the completion
 park slot, while lexical cleanup drains the retained state with a wake-all
 completion word. Rejected bounded-group spawns return their admission permit.

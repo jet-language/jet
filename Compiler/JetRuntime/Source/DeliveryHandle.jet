@@ -4,6 +4,7 @@
 DELIVERY_HANDLE_BYTES :: prep { I64{40} }
 #Export(c) fn jet_rt_record_new_JetDelivery(id: I64, store: I64, duplicate: U8, authority: I64, generation: I64) -> I64 {
     raw :: jet_int_owned_to_i64(generation)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     value :: jet_rt_alloc(DELIVERY_HANDLE_BYTES, I64{8})
     rt_text_store(value, jet_rt_string_clone(id))
     rt_text_store(value + I64{8}, jet_rt_string_clone(store))

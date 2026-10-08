@@ -3,6 +3,7 @@
 // remains representable here exactly as in the seed record constructor.
 #Export(c) fn jet_rt_record_new_JetAsyncPolicy(capacity: I64, overflow: I64) -> I64 {
     raw :: jet_int_owned_to_i64(capacity)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     if (overflow < I64{0} || overflow > I64{2}) {
         trap_native_index_range_stop()
         if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}

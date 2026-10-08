@@ -61,6 +61,7 @@ fn data_event_text(kind: I64) -> Bool {
 #Export(c) fn jet_rt_record_new_DataEvent_Bool(value: U8) -> I64 { data_event_new(DATA_EVENT_BOOL, if (value == U8{0}) -> I64{0} else -> I64{1}) }
 #Export(c) fn jet_rt_record_new_DataEvent_Int(value: I64) -> I64 {
     raw :: jet_int_owned_to_i64(value)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     data_event_new(DATA_EVENT_INT, raw)
 }
 #Export(c) fn jet_rt_record_new_DataEvent_Float(value: Float) -> I64 { data_event_new(DATA_EVENT_FLOAT, rt_f64_bits(value)) }

@@ -94,12 +94,19 @@ fn host_context_copy(value: I64) -> I64 {
 
 #Export(c) fn jet_rt_record_new_IOContext(operation: I64, resource: I64, os_code: I64, cause: I64) -> I64 {
     if (operation < I64{0} || operation >= HOST_IO_OP_COUNT) -> host_record_index_refused()
+    raw_code := I64{0}
+    if (os_code != I64{0}) {
+        #Unsafe("the optional code box borrows one initialized exact-Int word") {
+            raw_code = jet_int_owned_to_i64(os_load_i64(os_code))
+        }
+        if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    }
     value :: jet_rt_alloc(I64{40}, I64{8})
     #Unsafe("nullable option boxes lend one initialized payload word; value owns cloned texts and the complete new context") {
         os_store_i64(value, operation)
         os_store_i64(wrapping(value + I64{8}), if (resource == I64{0}) -> I64{0} else -> jet_rt_string_clone(os_load_i64(resource)))
         os_store_i64(wrapping(value + I64{16}), if (os_code == I64{0}) -> I64{0} else -> I64{1})
-        os_store_i64(wrapping(value + I64{24}), if (os_code == I64{0}) -> I64{0} else -> jet_int_owned_to_i64(os_load_i64(os_code)))
+        os_store_i64(wrapping(value + I64{24}), raw_code)
         os_store_i64(wrapping(value + I64{32}), if (cause == I64{0}) -> I64{0} else -> jet_rt_string_clone(os_load_i64(cause)))
     }
     value

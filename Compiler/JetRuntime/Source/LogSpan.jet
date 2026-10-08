@@ -1,6 +1,7 @@
 // CommonTypes.rs:2704-2708 derive Clone/PartialEq; CAbiRoutes.rs:11738-11751.
 #Export(c) fn jet_rt_record_new_LogSpan(id: I64, name: I64) -> I64 {
     raw :: jet_int_owned_to_i64(id)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     value :: jet_rt_alloc(LOG_SPAN_BYTES, I64{8})
     data_tree_store(value + LOG_SPAN_ID, raw)
     data_tree_store(value + LOG_SPAN_NAME, jet_rt_string_clone(name))

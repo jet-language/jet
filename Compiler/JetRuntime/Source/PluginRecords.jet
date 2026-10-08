@@ -1,6 +1,7 @@
 // PluginWire.rs:28-43; CAbiRoutes.rs:8496-8505,11755-11797.
 #Export(c) fn jet_rt_record_new_PluginFrame(function: I64, component: I64, offset: I64) -> I64 {
     raw :: jet_int_owned_to_i64(offset)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     frame :: jet_rt_alloc(PLUGIN_FRAME_BYTES, I64{8})
     data_tree_store(frame + PLUGIN_FRAME_FUNCTION, jet_rt_string_clone(function))
     data_tree_store(frame + PLUGIN_FRAME_COMPONENT, jet_rt_string_clone(component))
