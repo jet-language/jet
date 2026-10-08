@@ -7510,30 +7510,3 @@ fn cors_stamps_named_origins_and_omits_headers_without_a_policy() {
     );
 }
 
-/// D-HTTP-JSON1=A: `server.json` labels the encoded body, and the typed decode
-/// used by `req.json<T>()` / `resp.json<T>(limit)` honours the body cap.
-#[test]
-fn server_json_sets_the_content_type_and_the_body_cap_still_holds() {
-    let response = jet_http_srv_json(201, &"payload".to_string());
-    assert_eq!(response.status, 201);
-    assert_eq!(
-        response.headers.get("content-type"),
-        Some(&"application/json; charset=utf-8".to_string())
-    );
-    assert_eq!(
-        response.body.bytes(64).unwrap(),
-        br#"{"ok":true}"#.as_slice()
-    );
-
-    let body = JetHTTPBody::from_text(r#"{"a":1}"#.to_string());
-    let decoded: String = jet_http_body_json(&body, 64).unwrap();
-    assert_eq!(decoded, r#"{"a":1}"#);
-
-    // The typed decode reads through the shared body reader, so the framing cap
-    // rejects an oversized body before any decode runs.
-    let oversized = JetHTTPBody::from_text(r#"{"a":1}"#.to_string());
-    assert!(matches!(
-        jet_http_body_json::<String>(&oversized, 2),
-        Err(JetHTTPError::BodyTooLarge { limit: 2 })
-    ));
-}

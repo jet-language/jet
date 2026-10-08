@@ -1265,6 +1265,8 @@ non-reused connection. JSON adds `application/json; charset=utf-8`; `sse`
 wraps its text as `data: {body}\n\n`, adds `text/event-stream` and disables
 caching with `cache-control: no-cache`. The selected body is transferred into
 the transport's one-shot body resource without eager consumption.
+Typed response JSON decoding enforces the supplied body-byte cap before
+decoding, returning `HTTPError.BodyTooLarge` when the body exceeds that cap.
 
 ### `core.net.ws` — WebSocket transport
 
