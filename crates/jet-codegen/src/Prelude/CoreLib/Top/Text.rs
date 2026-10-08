@@ -1339,7 +1339,7 @@ pub(crate) fn jet_text_indent_with(text: &str, prefix: &str, predicate_nonblank:
 pub(crate) fn jet_text_wrap_paragraphs(text: &str, width: i64) -> String {
     text.split("\n\n")
         .filter(|paragraph| !paragraph.trim().is_empty())
-        .map(|paragraph| jet_text_fill(&paragraph.to_string(), width))
+        .map(|paragraph| jet_text_fill(paragraph, width))
         .collect::<Vec<_>>()
         .join("\n\n")
 }
@@ -1524,7 +1524,7 @@ pub(crate) fn jet_text_html_unescape_and_strip(text: &str) -> String {
 }
 pub(crate) fn jet_text_parse_capwords(text: &str) -> String {
     text.split_whitespace()
-        .map(|word| jet_text_capitalize(&word.to_string()))
+        .map(jet_text_capitalize)
         .collect::<Vec<_>>()
         .join(" ")
 }

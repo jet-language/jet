@@ -7018,5 +7018,5 @@ fn jet_http_serve_router(addr: &String, router: JetHTTPRouter) {
 }
 
 fn jet_http_request_param(req: &JetHTTPRequest, name: &str) -> Option<String> {
-    req.params.get(name.as_str()).cloned()
+    req.params.get(name).cloned()
 }
