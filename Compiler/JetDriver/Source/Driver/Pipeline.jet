@@ -3941,19 +3941,21 @@ struct JetDriverCheckedProjectionCapture {
 // ABI-only Core rows still have a catalog unit; their absent source-file bytes
 // remain empty. Real Core and private source units keep their actual bytes.
 fn jet_driver_registration_module_inputs(
-    load: JetDriverLoadResult,
+    modules: [JetDriverLoadedModule],
+    source_units: [JetDriverSourceUnit],
+    source_files: [MIRSourceFile],
     providers: [SemaForeignProviderInput],
     diagnostics: &[Diagnostic],
 ) -> [SemaRegistrationModuleInput]? {
     inputs := [SemaRegistrationModuleInput]{}
-    source_positions :: jet_driver_source_file_positions(load.source_files)
-    loop loaded_index in 0..<load.modules.len() {
-        loaded_module :: load.modules[loaded_index]
-        if loaded_module.source_unit_index < 0 || loaded_module.source_unit_index >= load.source_units.len() {
+    source_positions :: jet_driver_source_file_positions(source_files)
+    loop loaded_index in 0..<modules.len() {
+        loaded_module :: modules[loaded_index]
+        if loaded_module.source_unit_index < 0 || loaded_module.source_unit_index >= source_units.len() {
             &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a loaded module has no exact source-unit owner", "semantic registration preserves the loader's canonical source-unit identity", "retain the catalog source-unit index returned by JetDriver"))
             return None
         }
-        unit := load.source_units[loaded_module.source_unit_index]
+        unit := source_units[loaded_module.source_unit_index]
         handles :: jet_driver_registration_foreign_handle_facts(loaded_module.module_identity, providers, &diagnostics) ?? return None
         &inputs.push(SemaRegistrationModuleInput{
             package_identity: loaded_module.package_identity,
@@ -3965,7 +3967,7 @@ fn jet_driver_registration_module_inputs(
             source_origin: unit.source_origin,
             program: loaded_module.program,
             foreign_handles: handles,
-            source: jet_driver_source_text_at(load.source_files, source_positions, unit.path),
+            source: jet_driver_source_text_at(source_files, source_positions, unit.path),
         })
     }
     Val(inputs)
@@ -4104,7 +4106,7 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
     }
     target_machine :: target_machine_option ?? return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Check), false, trace)
 
-    registration_inputs := jet_driver_registration_module_inputs(load, foreign_provider_inputs, &load.diagnostics) ?? return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Load), false, trace)
+    registration_inputs := jet_driver_registration_module_inputs(load.modules, load.source_units, load.source_files, foreign_provider_inputs, &load.diagnostics) ?? return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Load), false, trace)
     canonical_effect_module_identity := canonical_effect_module.module_identity
     &registration_inputs.push(^canonical_effect_module)
     registration_module_count := registration_inputs.len()
