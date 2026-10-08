@@ -1,0 +1,70 @@
+// D-PATW (ratified 2026-06-19): `_` in payload slot = wildcard (ignore, bind nothing).
+// D-PATR (ratified 2026-06-19): range patterns `lo..hi` in arm-head and payload slots.
+// D-PATO (ratified 2026-06-19): `|` structural or-patterns `A(x) | B(x)`.
+enum Conn {
+    Active(Int)
+    Reconnecting(Int)
+    Idle(Int)
+    Closed
+}
+
+fn describe_conn(c: Conn) -> String {
+    if c == {
+        .Active(id) | .Reconnecting(id) -> "live:{id}"
+        .Idle(_) -> "idle"
+        .Closed -> "closed"
+    }
+}
+
+// D-PATO: or-pattern — Active and Reconnecting share the same body.
+// D-PATW: wildcard slot — Idle's payload doesn't matter here.
+enum HTTP {
+    Good(Int)
+    Fail(Int)
+}
+
+fn classify(r: HTTP) -> String {
+    if r == {
+        .Good(200..299) -> "success"
+        .Good(300..399) -> "redirect"
+        .Good(400..499) -> "client error"
+        .Good(500..599) -> "server error"
+        .Good(_) -> "other"
+        .Fail(_) -> "network error"
+    }
+}
+
+fn score_grade(score: Int) -> String {
+    // D-PATR: range pattern at arm-head level.
+    if score == {
+        0..59 -> "F"
+        60..69 -> "D"
+        70..79 -> "C"
+        80..89 -> "B"
+        90..100 -> "A"
+        else -> "?"
+    }
+}
+
+fn run() {
+    print(describe_conn(Conn.Active(42)))
+    print(describe_conn(Conn.Reconnecting(7)))
+    print(describe_conn(Conn.Idle(99)))
+    print(describe_conn(Conn.Closed))
+    print(classify(HTTP.Good(201)))
+    print(classify(HTTP.Good(301)))
+    print(classify(HTTP.Good(404)))
+    print(classify(HTTP.Good(503)))
+    print(classify(HTTP.Fail(0)))
+    print(score_grade(95))
+    print(score_grade(72))
+    print(score_grade(45))
+    // D-PATTERN-HOLE-NAME1=A: fresh names capture; parentheses compare.
+    version :: "v2.7"
+    if version == "v{major}.{minor}" -> print("{major}:{minor}")
+    root :: "/usr/"
+    print("/usr/jet" == ("{root}jet"))
+    print("/other/jet" == ("{root}jet"))
+    pair :: (prefix: "/usr/", suffix: "jet")
+    print("/usr/jet" == "{pair.prefix}{pair.suffix}")
+}
