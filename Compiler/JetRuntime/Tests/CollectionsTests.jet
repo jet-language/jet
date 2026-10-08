@@ -119,7 +119,7 @@ fn coll_test_bits_render(bits: I64, low: I64, high: I64, length: I64) {
     coll_test_require(rt_text_len(display) == length && rt_text_len(show) == length && rt_text_len(debug) == length)
     at := I64{0}
     loop at < length {
-        word :: if at < I64{8} -> low else -> high
+        word :: if (at < I64{8}) -> low else -> high
         shift :: (at % I64{8}) * I64{8}
         expected :: (word >> shift) & I64{255}
         coll_test_require(trap_byte(rt_text_data(display) + at) == expected)
@@ -146,13 +146,13 @@ fn coll_test_bits() {
     trap_store(out, I64{-1})
     coll_test_require(jet_bit_set_is_empty(bits) && jet_bit_set_count(bits) == I64{0} && jet_bit_set_len(bits) == I64{0})
     coll_test_require(jet_bit_set_to_list(bits, out) == I64{0} && trap_word(out) == I64{0})
-    coll_test_bits_render(bits, I64{23899}, I64{0}, I64{2}) // []
+    coll_test_bits_render(bits, I64{23899}, I64{0}, I64{2})  // []
     coll_test_require(!jet_bitset_add(bits, I64{-1}) && !jet_bit_set_has(bits, I64{-1}))
     coll_test_require(jet_bitset_add(bits, I64{100}) && jet_bitset_add(bits, I64{0}) && jet_bitset_add(bits, I64{4}))
     coll_test_require(!jet_bitset_add(bits, I64{4}) && jet_bit_set_count(bits) == I64{3} && jet_bit_set_len(bits) == I64{101})
     coll_test_require(jet_bit_set_has(bits, I64{0}) && jet_bit_set_has(bits, I64{4}) && jet_bit_set_has(bits, I64{100}) && !jet_bit_set_has(bits, I64{3}))
-    coll_test_bits_render(bits, I64{3539877909502898267}, I64{6107184}, I64{11}) // [0, 4, 100]
-    copy :: jet_bits_copy(bits)
+    coll_test_bits_render(bits, I64{3539877909502898267}, I64{6107184}, I64{11})  // [0, 4, 100]
+    copied :: jet_bits_copy(bits)
     empty_copy :: jet_bits_copy(bits)
     jet_rt_native_bits_clear(empty_copy)
     empty_clone :: jet_rt_handle_clone_JetBitSet(empty_copy)
@@ -161,22 +161,22 @@ fn coll_test_bits() {
     jet_rt_handle_drop_JetBitSet(empty_clone)
     cloned :: jet_rt_handle_clone_JetBitSet(bits)
     index := I64{0}
-    loop index < I64{20} {
+    loop index < (I64{20}) {
         coll_test_require(jet_bitset_add(cloned, I64{1000} + index))
         index += I64{1}
     }
     coll_test_require(jet_bit_set_count(cloned) == I64{23} && jet_bit_set_len(cloned) == I64{1020})
-    loop index > I64{0} {
+    loop index > (I64{0}) {
         index -= I64{1}
         jet_bitset_remove(cloned, I64{1000} + index)
     }
     coll_test_require(jet_bit_set_count(cloned) == I64{3})
-    coll_test_require(copy != bits && cloned != bits && cloned != copy)
-    coll_test_require(trap_word(copy + I64{16}) != trap_word(bits + I64{16}))
+    coll_test_require(copied != bits && cloned != bits && cloned != copied)
+    coll_test_require(trap_word(copied + I64{16}) != trap_word(bits + I64{16}))
     jet_bitset_remove(bits, I64{100})
     jet_bitset_remove(bits, I64{3})
     jet_bitset_remove(bits, I64{-1})
-    coll_test_require(jet_bit_set_len(bits) == I64{5} && jet_bit_set_count(bits) == I64{2} && jet_bit_set_has(copy, I64{100}) && jet_bit_set_has(cloned, I64{100}))
+    coll_test_require(jet_bit_set_len(bits) == I64{5} && jet_bit_set_count(bits) == I64{2} && jet_bit_set_has(copied, I64{100}) && jet_bit_set_has(cloned, I64{100}))
     jet_bitset_remove(bits, I64{0})
     jet_bitset_remove(bits, I64{4})
     coll_test_require(jet_bit_set_is_empty(bits) && jet_bit_set_len(bits) == I64{0})
@@ -196,13 +196,13 @@ fn coll_test_bits() {
     jet_rt_int_drop(wide)
     jet_rt_free(data, I64{8}, I64{8})
     // A fresh sorted list owns its storage independently of the copied set.
-    coll_test_require(jet_bit_set_to_list(copy, out) == I64{3})
+    coll_test_require(jet_bit_set_to_list(copied, out) == I64{3})
     sorted :: trap_word(out)
-    jet_rt_native_bits_clear(copy)
-    coll_test_require(jet_bit_set_is_empty(copy) && trap_word(copy + I64{8}) == I64{0} && trap_word(copy + I64{16}) == I64{0})
+    jet_rt_native_bits_clear(copied)
+    coll_test_require(jet_bit_set_is_empty(copied) && trap_word(copied + I64{8}) == I64{0} && trap_word(copied + I64{16}) == I64{0})
     coll_test_require(trap_word(sorted) == I64{0} && trap_word(sorted + I64{8}) == I64{4} && trap_word(sorted + I64{16}) == I64{100})
     jet_rt_free(sorted, I64{24}, I64{8})
-    jet_rt_handle_drop_JetBitSet(copy)
+    jet_rt_handle_drop_JetBitSet(copied)
     jet_rt_handle_drop_JetBitSet(cloned)
     jet_rt_handle_drop_JetBitSet(I64{0})
     jet_rt_free(out, I64{8}, I64{8})
@@ -233,14 +233,14 @@ fn coll_test_para_fold() {
     snapshot :: jet_rt_alloc(I64{64}, I64{8})
     width := I64{32}
     at := I64{0}
-    loop at < I64{8} {
+    loop at < (I64{8}) {
         trap_store(snapshot + at * I64{8}, coll_test_live(width))
         width *= I64{2}
         at += I64{1}
     }
     data :: jet_rt_alloc(I64{1536}, I64{8})
     at = I64{0}
-    loop at < I64{192} {
+    loop at < (I64{192}) {
         trap_store(data + at * I64{8}, rt_f64_bits(Float{1.0}))
         at += I64{1}
     }
@@ -262,7 +262,7 @@ fn coll_test_para_fold() {
     jet_rt_free(data, I64{1536}, I64{8})
     width = I64{32}
     at = I64{0}
-    loop at < I64{8} {
+    loop at < (I64{8}) {
         coll_test_require(coll_test_live(width) == trap_word(snapshot + at * I64{8}))
         width *= I64{2}
         at += I64{1}
@@ -274,7 +274,7 @@ fn coll_test_i64_lists() {
     snapshot :: jet_rt_alloc(I64{64}, I64{8})
     width := I64{32}
     at := I64{0}
-    loop at < I64{8} {
+    loop at < (I64{8}) {
         trap_store(snapshot + at * I64{8}, coll_test_live(width))
         width *= I64{2}
         at += I64{1}
@@ -312,7 +312,7 @@ fn coll_test_i64_lists() {
     grown :: trap_word(output)
     coll_test_require(trap_word(grown) == I64{0} && trap_word(heap) == I64{1} && trap_word(input) == I64{4})
     at = I64{1}
-    loop at < I64{6} {
+    loop at < (I64{6}) {
         coll_test_require(trap_word(grown + at * I64{8}) >= trap_word(grown + ((at - I64{1}) / I64{2}) * I64{8}))
         at += I64{1}
     }
@@ -334,7 +334,7 @@ fn coll_test_i64_lists() {
     jet_rt_free(output, I64{8}, I64{8})
     width = I64{32}
     at = I64{0}
-    loop at < I64{8} {
+    loop at < (I64{8}) {
         coll_test_require(coll_test_live(width) == trap_word(snapshot + at * I64{8}))
         width *= I64{2}
         at += I64{1}
@@ -354,7 +354,7 @@ fn coll_test_ordered_map() {
     snapshot :: jet_rt_alloc(I64{64}, I64{8})
     width := I64{32}
     at := I64{0}
-    loop at < I64{8} {
+    loop at < (I64{8}) {
         trap_store(snapshot + at * I64{8}, coll_test_live(width))
         width *= I64{2}
         at += I64{1}
@@ -363,7 +363,7 @@ fn coll_test_ordered_map() {
     b :: coll_test_short_text(I64{98}, I64{1})
     x :: coll_test_short_text(I64{120}, I64{1})
     y :: coll_test_short_text(I64{121}, I64{1})
-    nul :: coll_test_short_text(I64{6422625}, I64{3}) // a NUL b
+    nul :: coll_test_short_text(I64{6422625}, I64{3})  // a NUL b
     out :: jet_rt_alloc(I64{8}, I64{8})
     empty :: jet_coll_ordered_map()
     coll_test_require(jet_coll_map_len(empty) == I64{0} && !jet_coll_map_contains(empty, a))
@@ -379,11 +379,11 @@ fn coll_test_ordered_map() {
     trap_store(expected + I64{24}, I64{8672560942848243052})
     trap_store(expected + I64{32}, I64{32093})
     mode := I64{0}
-    loop mode < I64{3} {
+    loop mode < (I64{3}) {
         text :: if (mode == I64{0}) -> jet_rt_handle_display_JetOrderedMap(one) else if (mode == I64{1}) -> jet_rt_handle_show_JetOrderedMap(one) else -> jet_rt_handle_debug_JetOrderedMap(one)
         coll_test_require(rt_text_len(text) == I64{34})
         at = I64{0}
-        loop at < I64{34} {
+        loop at < (I64{34}) {
             coll_test_require(trap_byte(rt_text_data(text) + at) == trap_byte(expected + at))
             at += I64{1}
         }
@@ -435,7 +435,7 @@ fn coll_test_ordered_map() {
     jet_rt_free(out, I64{8}, I64{8})
     width = I64{32}
     at = I64{0}
-    loop at < I64{8} {
+    loop at < (I64{8}) {
         coll_test_require(coll_test_live(width) == trap_word(snapshot + at * I64{8}))
         width *= I64{2}
         at += I64{1}
@@ -456,7 +456,7 @@ fn coll_test_counter() {
     snapshot :: jet_rt_alloc(I64{64}, I64{8})
     width := I64{32}
     at := I64{0}
-    loop at < I64{8} {
+    loop at < (I64{8}) {
         trap_store(snapshot + at * I64{8}, coll_test_live(width))
         width *= I64{2}
         at += I64{1}
@@ -488,11 +488,11 @@ fn coll_test_counter() {
     trap_store(expected + I64{24}, I64{3268241390004629109})
     trap_store(expected + I64{32}, I64{137839209622577})
     mode := I64{0}
-    loop mode < I64{3} {
+    loop mode < (I64{3}) {
         text :: if (mode == I64{0}) -> jet_rt_handle_display_JetCounter(negative) else if (mode == I64{1}) -> jet_rt_handle_show_JetCounter(negative) else -> jet_rt_handle_debug_JetCounter(negative)
         coll_test_require(rt_text_len(text) == I64{38})
         at = I64{0}
-        loop at < I64{38} {
+        loop at < (I64{38}) {
             coll_test_require(trap_byte(rt_text_data(text) + at) == trap_byte(expected + at))
             at += I64{1}
         }
@@ -550,7 +550,7 @@ fn coll_test_counter() {
     jet_rt_free(out, I64{8}, I64{8})
     width = I64{32}
     at = I64{0}
-    loop at < I64{8} {
+    loop at < (I64{8}) {
         coll_test_require(coll_test_live(width) == trap_word(snapshot + at * I64{8}))
         width *= I64{2}
         at += I64{1}
