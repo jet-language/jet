@@ -923,6 +923,13 @@ impl<'a> Fmt<'a> {
                     f.source_list_span_after(m.name_span.end, super::SourceDelimiter::Paren),
                 );
                 f.write(")");
+                let unit_fallible = m
+                    .return_type
+                    .as_ref()
+                    .is_some_and(|ty| Self::is_unit_fallible_type(ty));
+                if let Some(ret) = m.return_type.as_ref().filter(|_| unit_fallible) {
+                    f.fmt_unit_fallible_return(ret);
+                }
                 if let Some(effects) = &m.declared_effects {
                     let source = f.source_effect_row_span_after(m.name_span.end);
                     f.write(" ");
@@ -939,10 +946,8 @@ impl<'a> Fmt<'a> {
                     f.write(Syntax::EFFECT_ARROW_OPEN);
                     f.write(Syntax::EFFECT_ARROW_CLOSE);
                 }
-                if let Some(ret) = &m.return_type {
-                    if Self::is_unit_fallible_type(ret) {
-                        f.fmt_unit_fallible_return(ret);
-                    } else if m.declared_effects.is_some() || m.is_pure {
+                if let Some(ret) = m.return_type.as_ref().filter(|_| !unit_fallible) {
+                    if m.declared_effects.is_some() || m.is_pure {
                         f.write(" ");
                         f.fmt_return_type(ret);
                     } else {
@@ -1378,7 +1383,10 @@ impl<'a> Fmt<'a> {
             .return_type
             .as_ref()
             .is_some_and(|ty| Self::is_unit_fallible_type(ty));
-        // D-SIG-AFTER1=A: the one arrow, then optional return facts.
+        // D-CALLABLE-ONE1 / D-FAIL-UNIT1: the unit error contract precedes effects.
+        if let Some(ret) = f.return_type.as_ref().filter(|_| unit_fallible) {
+            self.fmt_unit_fallible_return(ret);
+        }
         let has_effect_row = f.declared_effects.is_some() || f.effect_via.is_some() || f.is_pure;
         if has_effect_row {
             if let Some(effects) = &f.declared_effects {
@@ -1404,21 +1412,13 @@ impl<'a> Fmt<'a> {
                 self.write(param);
                 self.write(Syntax::EFFECT_ARROW_CLOSE);
             }
-            if let Some(ret) = &f.return_type {
-                if unit_fallible {
-                    self.fmt_unit_fallible_return(ret);
-                } else {
-                    self.write(" ");
-                    self.fmt_type_at(ret, f.return_type_span);
-                }
-            }
-        } else if let Some(ret) = &f.return_type {
-            if unit_fallible {
-                self.fmt_unit_fallible_return(ret);
-            } else {
-                self.write(" -> ");
+            if let Some(ret) = f.return_type.as_ref().filter(|_| !unit_fallible) {
+                self.write(" ");
                 self.fmt_type_at(ret, f.return_type_span);
             }
+        } else if let Some(ret) = f.return_type.as_ref().filter(|_| !unit_fallible) {
+            self.write(" -> ");
+            self.fmt_type_at(ret, f.return_type_span);
         }
         if let Some(map) = &f.declared_return_view_provenance {
             self.fmt_declared_return_view_from(map, &f.params);

@@ -2887,12 +2887,19 @@ fn notify(ready: Bool) -[Net]> {
     fn unit_fallible_signatures_format_without_arrow() {
         use crate::Formatter::format_source;
 
-        let source =
-            "fn save(path: String) IOError! {}\nfn sync() Err! {}\nfn bounded() -[FS]> IOError! {}\n";
+        let source = "fn save(path: String) IOError! {}\nfn sync() Err! {}\n\
+                      fn bounded() IOError! -[FS]> {}\nfn pure() Never! -[]> {}\n\
+                      trait Sink { fn save(self) IOError! -[FS]> }\n";
         let once = format_source(source).expect("unit-fallible signatures format");
         assert!(once.contains("fn save(path: String) IOError!"), "{once}");
         assert!(once.contains("fn sync() Err!"), "{once}");
-        assert!(once.contains("fn bounded() -[FS]> IOError!"), "{once}");
+        assert!(once.contains("fn bounded() IOError! -[FS]>"), "{once}");
+        assert!(once.contains("fn pure() Never! -[]>"), "{once}");
+        assert!(once.contains("fn save(self) IOError! -[FS]>"), "{once}");
+        program(&once);
+        program(include_str!(
+            "../../../../Compiler/JetParser/Tests/ContractFixtures.jet"
+        ));
         assert_eq!(
             once,
             format_source(&once).expect("formatted form is stable")
