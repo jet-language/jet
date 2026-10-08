@@ -242,7 +242,7 @@ fn lower_codec_csv(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFun
         return true
     }
     result :: lower_checked_type(c, instruction) ?? return true
-    errors :: if result.kind == .Result(values, failure) {
+    errors :: if result.kind == .Result(values, failure) -> {
         element :: lower_list_element(values) ?? {
             lower_fail(&m, &f, "typed CSV success is not a List")
             return true
@@ -252,7 +252,7 @@ fn lower_codec_csv(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFun
             return true
         }
         failure
-    } else {
+    } else -> {
         lower_fail(&m, &f, "typed CSV does not return a checked Result")
         return true
     }
