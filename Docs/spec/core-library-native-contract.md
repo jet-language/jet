@@ -640,3 +640,12 @@ route row is regenerated; adding a native producer does not discharge that
 consumer obligation. Native ownership/import/layout and process proof remain
 composition gates. No frozen generated route file is hand-edited.
 
+Composition also requires the canonical compiler's static Prelude stop-fact
+fix: `jet_codegen_emit` emits Propagate only when `mir_operation_can_stop`
+classifies the call as stopping. A task-published panic must take that cleanup
+edge before the stopped zero-word result is bound or consumed. Authority
+consumers are not given null special cases to hide a missing compiler edge.
+The existing CString-unpack and Shared-guard producers use the same stopped
+word convention; the registry-driven compiler fix is an explicit dependency,
+not evidence established by parsing this provider or checking its C witness.
+
