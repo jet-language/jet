@@ -42,6 +42,10 @@ Bounded caller-owned draws keep the complete 64-by-64 product in exact `Int`
 before selecting its high and low words. Rejection thresholds and stream
 consumption remain identical to the native SplitMix64 seed.
 
+`Fraction` keeps its reduced exact-`Int` parts in private storage, distinct from
+the public `numerator()` and `denominator()` accessors. Field and method names
+share one member namespace; the storage names are not a construction API.
+
 <!-- Stable IDs bind these public Core declarations to reviewed feature depth. -->
 <!-- FEATURE_CLAIMS:BEGIN -->
 <!-- FEATURE_CLAIM: claim.core-foundation | Core foundations are reachable Jet software. -->

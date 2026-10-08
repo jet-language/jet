@@ -32612,8 +32612,8 @@ impl<'a> RustEmitter<'a> {
                 format!(
                     "{}jet_fraction_from_parts({}, {})",
                     self.config.root_prefix,
-                    part("numerator"),
-                    part("denominator"),
+                    part("num_value"),
+                    part("den_value"),
                 )
             }
             MirConstant::Struct { type_name, fields } => {

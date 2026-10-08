@@ -931,8 +931,8 @@ impl Mat4.Sub {
 // Exact Int fields hold the normalized ratio. #4767 affects native Int
 // ownership, not this source policy or the arbitrary-precision contract.
 struct Fraction {
-    numerator: Int
-    denominator: Int
+    num_value: Int
+    den_value: Int
 }
 fn __fraction_new(numerator: Int, denominator: Int) -> Fraction? Never! {
     if denominator == 0 -> return None
@@ -943,7 +943,7 @@ fn __fraction_new(numerator: Int, denominator: Int) -> Fraction? Never! {
         bottom = -bottom
     }
     divisor :: gcd(top, bottom)
-    Val(Fraction{numerator: top /% divisor, denominator: bottom /% divisor})
+    Val(Fraction{num_value: top /% divisor, den_value: bottom /% divisor})
 }
 fn __fraction_from_parts(numerator: Int, denominator: Int) -> Fraction Never! {
     __fraction_new(numerator, denominator) ?? panic("invalid exact quotient")
@@ -952,23 +952,23 @@ fn __fraction_from_owned_parts(numerator: Int, denominator: Int) -> Fraction Nev
     __fraction_from_parts(numerator, denominator)
 }
 fn __fraction_from_int(value: Int) -> Fraction Never! {
-    Fraction{numerator: value, denominator: 1}
+    Fraction{num_value: value, den_value: 1}
 }
 fn __fraction_add(left: Fraction, right: Fraction) -> Fraction Never! {
-    __fraction_from_parts(left.numerator * right.denominator + right.numerator * left.denominator, left.denominator * right.denominator)
+    __fraction_from_parts(left.num_value * right.den_value + right.num_value * left.den_value, left.den_value * right.den_value)
 }
 fn __fraction_sub(left: Fraction, right: Fraction) -> Fraction Never! {
-    __fraction_from_parts(left.numerator * right.denominator - right.numerator * left.denominator, left.denominator * right.denominator)
+    __fraction_from_parts(left.num_value * right.den_value - right.num_value * left.den_value, left.den_value * right.den_value)
 }
 fn __fraction_mul(left: Fraction, right: Fraction) -> Fraction Never! {
-    __fraction_from_parts(left.numerator * right.numerator, left.denominator * right.denominator)
+    __fraction_from_parts(left.num_value * right.num_value, left.den_value * right.den_value)
 }
 fn __fraction_div(left: Fraction, right: Fraction) -> Fraction Never! {
-    if right.numerator == 0 -> panic("divided by zero")
-    __fraction_from_parts(left.numerator * right.denominator, left.denominator * right.numerator)
+    if right.num_value == 0 -> panic("divided by zero")
+    __fraction_from_parts(left.num_value * right.den_value, left.den_value * right.num_value)
 }
-fn __fraction_numerator(value: Fraction) -> Int Never! { ~value.numerator }
-fn __fraction_denominator(value: Fraction) -> Int Never! { ~value.denominator }
+fn __fraction_numerator(value: Fraction) -> Int Never! { ~value.num_value }
+fn __fraction_denominator(value: Fraction) -> Int Never! { ~value.den_value }
 impl Fraction {
     fn numerator(self) -> Int Never! { __fraction_numerator(self) }
     fn denominator(self) -> Int Never! { __fraction_denominator(self) }
@@ -1018,7 +1018,7 @@ fn __decimal_normalized(coefficient: Int, scale: Int) -> Decimal Never! {
     Decimal{negative: coefficient < 0 && magnitude != 0, magnitude: magnitude, scale: places}
 }
 fn __decimal_try_fraction(value: Fraction) -> Decimal? Never! {
-    remaining := value.denominator
+    remaining := value.den_value
     twos := 0
     fives := 0
     loop remaining %% 2 == 0 {
@@ -1031,21 +1031,21 @@ fn __decimal_try_fraction(value: Fraction) -> Decimal? Never! {
     }
     if remaining != 1 -> return None
     places :: max(twos, fives)
-    digits :: value.numerator * exact_power(10, places) /% value.denominator
+    digits :: value.num_value * exact_power(10, places) /% value.den_value
     Val(__decimal_normalized(digits, places))
 }
-fn __fraction_owned_numerator(value: Fraction) -> Int Never! { ~value.numerator }
-fn __fraction_owned_denominator(value: Fraction) -> Int Never! { ~value.denominator }
+fn __fraction_owned_numerator(value: Fraction) -> Int Never! { ~value.num_value }
+fn __fraction_owned_denominator(value: Fraction) -> Int Never! { ~value.den_value }
 fn __fraction_equal(left: Fraction, right: Fraction) -> Bool Never! {
-    left.numerator == right.numerator && left.denominator == right.denominator
+    left.num_value == right.num_value && left.den_value == right.den_value
 }
-fn __fraction_is_zero(value: Fraction) -> Bool Never! { value.numerator == 0 }
+fn __fraction_is_zero(value: Fraction) -> Bool Never! { value.num_value == 0 }
 fn __fraction_to_float(value: Fraction) -> Float Never! {
-    Float{value.numerator} / Float{value.denominator}
+    Float{value.num_value} / Float{value.den_value}
 }
 fn __fraction_to_int(value: Fraction) -> Int Never! {
-    if value.denominator != 1 -> panic("Fraction is not an integer")
-    ~value.numerator
+    if value.den_value != 1 -> panic("Fraction is not an integer")
+    ~value.num_value
 }
 fn __fraction_to_decimal(value: Fraction) -> Decimal Never! {
     __decimal_try_fraction(value) ?? panic("Fraction has a repeating expansion")
@@ -1908,7 +1908,7 @@ fn __decimal_to_string(value: Decimal) -> String Never! {
 }
 fn __fraction_to_string(value: Fraction) -> String Never! {
     if __decimal_try_fraction(value) == .Val(decimal) -> return __decimal_to_string(decimal)
-    "{value.numerator}/{value.denominator}"
+    "{value.num_value}/{value.den_value}"
 }
 fn __complex_from_parts(real: Float, imaginary: Float) -> Complex Never! {
     Complex{real: real, imaginary: imaginary}

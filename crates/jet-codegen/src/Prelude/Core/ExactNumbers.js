@@ -40,8 +40,8 @@ function jet_fraction_value(numerator, denominator) {
   d /= divisor;
   const value = {
     __jet_type: "Fraction",
-    numerator: n,
-    denominator: d,
+    num_value: n,
+    den_value: d,
     toString() { return jet_fraction_to_string(this); },
   };
   return value;
@@ -53,46 +53,46 @@ function jet_fraction_from_parts(numerator, denominator) {
 
 function jet_fraction_add(left, right) {
   return jet_fraction_value(
-    left.numerator * right.denominator + right.numerator * left.denominator,
-    left.denominator * right.denominator,
+    left.num_value * right.den_value + right.num_value * left.den_value,
+    left.den_value * right.den_value,
   );
 }
 
 function jet_fraction_sub(left, right) {
   return jet_fraction_value(
-    left.numerator * right.denominator - right.numerator * left.denominator,
-    left.denominator * right.denominator,
+    left.num_value * right.den_value - right.num_value * left.den_value,
+    left.den_value * right.den_value,
   );
 }
 
 function jet_fraction_mul(left, right) {
   return jet_fraction_value(
-    left.numerator * right.numerator,
-    left.denominator * right.denominator,
+    left.num_value * right.num_value,
+    left.den_value * right.den_value,
   );
 }
 
 function jet_fraction_div(left, right) {
   return jet_fraction_value(
-    left.numerator * right.denominator,
-    left.denominator * right.numerator,
+    left.num_value * right.den_value,
+    left.den_value * right.num_value,
   );
 }
 
 function jet_fraction_equal(left, right) {
-  return left.numerator === right.numerator && left.denominator === right.denominator;
+  return left.num_value === right.num_value && left.den_value === right.den_value;
 }
 
-function jet_fraction_numerator(value) { return value.numerator; }
-function jet_fraction_denominator(value) { return value.denominator; }
+function jet_fraction_numerator(value) { return value.num_value; }
+function jet_fraction_denominator(value) { return value.den_value; }
 function jet_fraction_to_float(value) {
-  return Number(value.numerator) / Number(value.denominator);
+  return Number(value.num_value) / Number(value.den_value);
 }
-function jet_fraction_is_zero(value) { return value.numerator === 0n; }
+function jet_fraction_is_zero(value) { return value.num_value === 0n; }
 
 function jet_fraction_to_string(value) {
-  const numerator = value.numerator;
-  const denominator = value.denominator;
+  const numerator = value.num_value;
+  const denominator = value.den_value;
   if (numerator === 0n) return "0";
   let factors = denominator;
   let twos = 0;
