@@ -1910,8 +1910,11 @@ const JETSTD_FFI_CALLBACKS_PRELUDE: &str = concat!(
 );
 // #3593: held directories, *at(2) opens, identity stat, rename modes, and
 // extended attributes. AOT and the interpreter include this one file.
-const FILE_HANDLES_PRELUDE: &str =
-    include_str!("../Prelude/CoreLib/JetStd/FileHandles.rs");
+const FILE_HANDLES_PRELUDE: &str = concat!(
+    include_str!("../Prelude/CoreLib/JetStd/FileHandles.rs"),
+    "\n",
+    include_str!("../Prelude/CoreLib/JetStd/Files1Raw.rs"),
+);
 const SHARED_ROUTES_PRELUDE: &str =
     include_str!("../Prelude/CoreLib/Top/SharedRoutes.rs");
 

@@ -58,11 +58,20 @@ pub const CORE_ENCODING_CBOR_PARSE_SOURCE_PART: CorePrivateSourcePart = CorePriv
         owned_members: &["parse", "narrow_bits"],
     },
 };
+pub const CORE_FILES_PATH_COMPONENTS_SOURCE_PART: CorePrivateSourcePart = CorePrivateSourcePart {
+    owner: "core.files",
+    source: CoreSourceModule {
+        module: "__core_files_path_components",
+        alias: "__core_files_path_components",
+        path: "Core/files/runtime/kernel_path_components.jet",
+        owned_members: &["from_text", "is_absolute", "components", "components_span", "next", "next_back", "parent_span", "strip_prefix_span", "owned_span", "push", "main_separator"],
+    },
+};
 /// All compiler-private source parts. Keep this separate from
 /// `CoreModuleExports::CORE_SOURCE_MODULES`: adding a row there would make the
 /// part publicly importable.
 pub const CORE_PRIVATE_SOURCE_PARTS: &[CorePrivateSourcePart] =
-    &[CORE_TEXT_STRING_SOURCE_PART, CORE_ENCODING_STREAM_SOURCE_PART, CORE_ENCODING_CBOR_PARSE_SOURCE_PART];
+    &[CORE_TEXT_STRING_SOURCE_PART, CORE_ENCODING_STREAM_SOURCE_PART, CORE_ENCODING_CBOR_PARSE_SOURCE_PART, CORE_FILES_PATH_COMPONENTS_SOURCE_PART];
 
 pub fn core_private_source_part(owner: &str) -> Option<&'static CorePrivateSourcePart> {
     CORE_PRIVATE_SOURCE_PARTS

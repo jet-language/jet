@@ -197,6 +197,43 @@ fn core_sig_row_atom_at(bytes: [U8], start: Int) -> CoreSigRowType Never! {
 
 pub fn core_platform_fixed_signature(module_name: String, member: String) -> CoreTypedCallSignature? {
     rows :: """
+core.auth __state_load - [u8]
+core.auth __state_replace [u8],[u8] Bool
+core.files __read_bytes_os String Result<[u8],IOError>
+core.files __write_bytes_os|__append_bytes_os String,[u8] Result<Unit,IOError>
+core.files __create_dirs_os String Result<Unit,IOError>
+core.files __writer_refusal String IOError?
+core.files __read_at_os String,Int,Int Result<[u8],IOError>
+core.files __write_at_os String,Int,[u8] Result<Unit,IOError>
+core.files __read_link_os String Result<String,IOError>
+core.testing __fault_should_fail String Bool
+core.sys __env_value String [u8]?
+core.sys __env_set String,String Result<Unit,EnvError>
+core.sys __env_remove String Result<Bool,EnvError>
+core.sys __env_columns|__startup_env_columns - [[u8]]
+core.sys __env_key_compare [u8],[u8] Int
+core.sys __family_os - String
+core.sys __pid_os - Int
+core.sys __sync_os - Unit
+core.sys __close_fd_os Int Unit
+core.sys __atexit_os fn(;Unit) Unit
+core.process __signal_arm Int Result<Unit,String>
+core.process __pipeline_run [ProcessSpec] Result<ProcessReceipt,IOError>
+core.files __path_windows - Bool
+core.files __atomic_pid - Int
+core.files __atomic_reserve String,String Result<Int,IOError>
+core.files __atomic_finish Int,[u8],String,String Result<Unit,IOError>
+core.files __atomic_remove String Result<Unit,IOError>
+core.files __atomic_rename|__atomic_sync_parent String,String Result<Unit,IOError>
+core.files __atomic_close Int Unit
+core.files __scope_roots FileScope [(encoded:[u8],absolute:Bool)]
+core.files __scope_read_at FileScope,Int,String,String Result<[u8],IOError>
+core.sys __dotenv_read String Result<String,(not_found:Bool,cause:String)>
+core.sys __config_object ^[(key:String,value:DataTree)] DataTree
+core.files __reader_path FileReader String
+core.files __reader_line_bytes &FileReader Result<[u8],IOError>
+core.process __stdout_line_bytes ProcessStdoutStream Result<[u8],IOError>
+core.process __stderr_line_bytes ProcessStderrStream Result<[u8],IOError>
 core.crypto sha256 [u8] Digest256
 core.crypto sha1|sha224|sha384|sha3_224|sha3_256|sha3_384|sha3_512 [u8] String
 core.crypto hmac_sha256 [u8],[u8] [u8]
