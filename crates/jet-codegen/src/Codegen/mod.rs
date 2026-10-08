@@ -390,6 +390,7 @@ const PRELUDE_PARTS: &[&str] = &[
     // no Prelude tree to read from.
     include_str!("../Prelude/Core/FSIgnore.rs"),
     include_str!("../Prelude/Core/FSWalk.rs"),
+    include_str!("../Prelude/Core/FSWalk8Raw.rs"),
     include_str!("../Prelude/CoreLib/JetStd/Iter.rs"),
     include_str!("../Prelude/Core/CollectionFailure.rs"),
     include_str!("../Prelude/Core/SortKernel.rs"),

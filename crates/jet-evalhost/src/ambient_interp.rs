@@ -2200,6 +2200,7 @@ pub fn with_interpreter_ambient<R>(
         context.register_core_call(files_fault_ambient_core_call);
         context.register_core_call(crate::Time::ambient_core_call);
         context.register_core_call(crate::IO::ambient_core_call);
+        context.register_core_call(crate::CoreHost::walk_ambient_core_call);
         context.register_mir_extern(crate::Ffi::ambient_mir_extern_call);
         context.register_mir_handle(crate::Process::ambient_mir_handle);
         let previous = ACTIVE_CONTEXT.with(|slot| slot.replace(Some(context.clone())));

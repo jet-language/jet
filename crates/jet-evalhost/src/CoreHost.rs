@@ -18,7 +18,68 @@ mod path_kernel {
 mod fs_walk_kernel {
     include!("../../jet-codegen/src/Prelude/Core/FSIgnore.rs");
     include!("../../jet-codegen/src/Prelude/Core/FSWalk.rs");
+    include!("../../jet-codegen/src/Prelude/Core/FSWalk8Raw.rs");
+    use jet_foundation::AST::{CtValue, Type};
+    fn tuple(fields: Vec<(&str, CtValue)>) -> CtValue {
+        CtValue::Struct {
+            type_name: format!("({})", fields.iter().map(|(name, _)| *name).collect::<Vec<_>>().join(",")),
+            fields: fields.into_iter().map(|(name, value)| (name.into(), value)).collect(),
+        }
+    }
+    fn error_fields(kind: i64, code: Option<i64>, cause: Option<String>) -> Vec<(&'static str, CtValue)> {
+        vec![
+            ("kind", CtValue::Int(kind)),
+            ("code", code.map_or_else(|| CtValue::absent(Type::Int), |value| CtValue::Present(Box::new(CtValue::Int(value))))),
+            ("cause", cause.map_or_else(|| CtValue::absent(Type::String), |value| CtValue::Present(Box::new(CtValue::Str(value))))),
+        ]
+    }
+    pub(crate) fn ambient_core_call(
+        module: &str, method: &str, args: Vec<CtValue>,
+        _span: jet_foundation::Diagnostics::Span, _resolved_ret: Option<Type>,
+        _sink: Option<&mut jet_codegen::Comptime::DevSink>,
+    ) -> Option<Result<CtValue, jet_foundation::Diagnostics::Diagnostic>> {
+        if module != "core.files" { return None; }
+        let value = match (method, args.as_slice()) {
+            ("__walk_context", [CtValue::Str(root), CtValue::Str(ignore), CtValue::Bool(enabled)]) => CtValue::Int(jet_walk8_open(root, ignore, *enabled)),
+            ("__walk_close", [CtValue::Int(context)]) => { jet_walk8_close(*context); CtValue::Unit },
+            ("__walk_matcher_new", [CtValue::Int(context)]) => { jet_walk8_matcher_new(*context); CtValue::Unit },
+            ("__walk_validation_path", [CtValue::Int(context), CtValue::Int(slot)]) => CtValue::Int(jet_walk8_validation_path(*context, *slot)),
+            ("__walk_ancestors", [CtValue::Int(context), CtValue::Int(slot)]) => CtValue::List(jet_walk8_ancestors(*context, *slot).into_iter().map(CtValue::Int).collect()),
+            ("__walk_shown", [CtValue::Int(context), CtValue::Int(slot)]) => CtValue::Str(jet_walk8_shown(*context, *slot)),
+            ("__walk_before", [CtValue::Int(context), CtValue::Int(left), CtValue::Int(right)]) => CtValue::Bool(jet_walk8_before(*context, *left, *right)),
+            ("__walk_inherit", [CtValue::Int(context), CtValue::Int(child), CtValue::Int(parent)]) => { jet_walk8_inherit(*context, *child, *parent); CtValue::Unit },
+            ("__walk_ignored", [CtValue::Int(context), CtValue::Int(slot), CtValue::Str(relative), CtValue::Bool(directory)]) => CtValue::Bool(jet_walk8_ignored(*context, *slot, relative, *directory)),
+            ("__walk_rules", [CtValue::Int(context), CtValue::Int(slot), CtValue::Str(filename)]) => {
+                let (kind, code, cause) = jet_walk8_rules(*context, *slot, filename);
+                tuple(error_fields(kind, code, cause))
+            }
+            ("__walk_read_dir", [CtValue::Int(context), CtValue::Int(slot)]) => {
+                let (kind, code, cause) = jet_walk8_read_dir(*context, *slot);
+                tuple(error_fields(kind, code, cause))
+            }
+            ("__walk_metadata", [CtValue::Int(context), CtValue::Int(slot)]) => {
+                let (directory, symlink, kind, code, cause) = jet_walk8_metadata(*context, *slot);
+                let mut fields = vec![("directory", CtValue::Bool(directory)), ("symlink", CtValue::Bool(symlink))];
+                fields.extend(error_fields(kind, code, cause));
+                tuple(fields)
+            }
+            ("__walk_next", [CtValue::Int(context), CtValue::Int(slot)]) => {
+                let (end, child, directory, file, path, relative, ignore_file, kind, code, cause) = jet_walk8_next(*context, *slot);
+                let mut fields = vec![
+                    ("end", CtValue::Bool(end)), ("child", CtValue::Int(child)),
+                    ("directory", CtValue::Bool(directory)), ("file", CtValue::Bool(file)),
+                    ("path", CtValue::Str(path)), ("relative", CtValue::Str(relative)),
+                    ("ignore_file", CtValue::Bool(ignore_file)),
+                ];
+                fields.extend(error_fields(kind, code, cause));
+                tuple(fields)
+            }
+            _ => return None,
+        };
+        Some(Ok(value))
+    }
 }
+pub(crate) use fs_walk_kernel::ambient_core_call as walk_ambient_core_call;
 
 mod fs_ops_kernel {
     use crate::Collections::authority_semantics::JetFileScope;

@@ -1400,6 +1400,35 @@ fn core_fixed_sig_impl(
             vec![(read, Type::String)],
             Some(Type::Option(Box::new(Type::List(Box::new(u8_ty()))))),
         )),
+        ("core.files", "__walk_context") => Some((vec![(read, Type::String), (read, Type::String), (read, Type::Bool)], Some(Type::Int))),
+        ("core.files", "__walk_close" | "__walk_matcher_new") => Some((vec![(read, Type::Int)], Some(unit_ty()))),
+        ("core.files", "__walk_validation_path") => Some((vec![(read, Type::Int), (read, Type::Int)], Some(Type::Int))),
+        ("core.files", "__walk_ancestors") => Some((vec![(read, Type::Int), (read, Type::Int)], Some(Type::List(Box::new(Type::Int))))),
+        ("core.files", "__walk_shown") => Some((vec![(read, Type::Int), (read, Type::Int)], Some(Type::String))),
+        ("core.files", "__walk_before") => Some((vec![(read, Type::Int), (read, Type::Int), (read, Type::Int)], Some(Type::Bool))),
+        ("core.files", "__walk_inherit") => Some((vec![(read, Type::Int), (read, Type::Int), (read, Type::Int)], Some(unit_ty()))),
+        ("core.files", "__walk_ignored") => Some((vec![(read, Type::Int), (read, Type::Int), (read, Type::String), (read, Type::Bool)], Some(Type::Bool))),
+        ("core.files", "__walk_rules" | "__walk_read_dir" | "__walk_metadata" | "__walk_next") => {
+            let mut params = vec![(read, Type::Int), (read, Type::Int)];
+            if name == "__walk_rules" { params.push((read, Type::String)); }
+            let mut fields = Vec::new();
+            if name == "__walk_metadata" {
+                fields.extend([("directory".into(), Box::new(Type::Bool)), ("symlink".into(), Box::new(Type::Bool))]);
+            } else if name == "__walk_next" {
+                fields.extend([
+                    ("end".into(), Box::new(Type::Bool)), ("child".into(), Box::new(Type::Int)),
+                    ("directory".into(), Box::new(Type::Bool)), ("file".into(), Box::new(Type::Bool)),
+                    ("path".into(), Box::new(Type::String)), ("relative".into(), Box::new(Type::String)),
+                    ("ignore_file".into(), Box::new(Type::Bool)),
+                ]);
+            }
+            fields.extend([
+                ("kind".into(), Box::new(Type::Int)),
+                ("code".into(), Box::new(Type::Option(Box::new(Type::Int)))),
+                ("cause".into(), Box::new(Type::Option(Box::new(Type::String)))),
+            ]);
+            Some((params, Some(Type::Tuple(fields))))
+        }
         ("core.mem", "__list_capacity") => Some((
             vec![(read, Type::List(Box::new(Type::Named("__element".to_string()))))],
             Some(Type::Int),

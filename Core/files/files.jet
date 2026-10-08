@@ -1302,59 +1302,102 @@ fn relative_impl(path: String, start: String) -> String Never! {
 pub fn relative(path: String, start: String) -> String Never! { relative_impl(path, start) }
 
 
-fn ignored(name: String, path: String, root: String, skip: [String]) -> Bool Never! {
-    rel :: relative_impl(path, root)
-    loop pat in skip {
-        if has_separator(pat) {
-            if glob_match_impl(pat, rel) -> return true
-        } else if glob_seg(pat, name) -> return true
+fn walk_error(kind: Int, code: Int?, cause: String?, resource: String) -> IOError Never! {
+    context :: IOContext{operation: .Read, resource: Val(resource), os_code: code, cause: cause}
+    if kind == {
+        1 -> IOError.InvalidInput(context)
+        2 -> IOError.NotFound(context)
+        3 -> IOError.PermissionDenied(context)
+        4 -> IOError.TimedOut(context)
+        5 -> IOError.Closed(context)
+        else -> IOError.Other(context)
     }
-    false
 }
 
-
-fn walk_rec(path: String, root: String, skip: [String], files_only: Bool) -[FS]> [WalkEntry] IOError! {
-    out := [WalkEntry]{}
-    entries :: core.files.list_dir(~path)
-    loop e in entries {
-        if ignored(e.name, e.path, root, skip) -> next
-        rel :: relative_impl(e.path, root)
-        depth := 1
-        loop b in rel.bytes() {
-            if is_separator(b) -> depth = depth + 1
-        }
-        if e.is_dir {
-            if !files_only -> &out.push(WalkEntry{path: e.path, relative: rel, is_dir: true, depth: depth})
-            kids :: walk_rec(e.path, root, skip, files_only)
-            loop k in kids -> &out.push(k)
-        } else if !files_only || !e.is_dir {
-            &out.push(WalkEntry{path: e.path, relative: rel, is_dir: false, depth: depth})
+fn walk_validate(context: Int, directory: Int, root: String) IOError! -[FS]> {
+    source :: core.files.__walk_validation_path(context, directory)
+    loop ancestor in core.files.__walk_ancestors(context, source) {
+        metadata :: core.files.__walk_metadata(context, ancestor)
+        if metadata.cause != None -> return Err(walk_error(metadata.kind, metadata.code, metadata.cause, root))
+        if metadata.symlink {
+            path :: core.files.__walk_shown(context, ancestor)
+            return Err(walk_error(3, None, Val("filesystem walk path contains symlink: {path}"), root))
         }
     }
+    metadata :: core.files.__walk_metadata(context, source)
+    if metadata.cause != None -> return Err(walk_error(metadata.kind, metadata.code, metadata.cause, root))
+    if !metadata.directory {
+        path :: core.files.__walk_shown(context, source)
+        return Err(walk_error(0, None, Val("filesystem walk root is not a directory: {path}"), root))
+    }
+    Ok(())
+}
+
+fn walk_batch(context: Int, directory: Int, depth: Int, root: String, ignore: String?, files_only: Bool) -[FS]> (entries: [WalkEntry], children: [Int]) IOError! {
+    walk_validate(context, directory, root)
+    if ignore != None {
+        rules :: core.files.__walk_rules(context, directory, ignore ?? "")
+        if rules.cause != None -> return Err(walk_error(rules.kind, rules.code, rules.cause, core.files.__walk_shown(context, directory)))
+    }
+    opened :: core.files.__walk_read_dir(context, directory)
+    if opened.cause != None -> return Err(walk_error(opened.kind, opened.code, opened.cause, root))
+    entries := [WalkEntry]{}
+    children := [Int]{}
+    loop {
+        entry :: core.files.__walk_next(context, directory)
+        if entry.cause != None -> return Err(walk_error(entry.kind, entry.code, entry.cause, root))
+        if entry.end -> break
+        skipped := false
+        if ignore != None {
+            skipped = entry.ignore_file || core.files.__walk_ignored(context, directory, entry.relative, entry.directory)
+        }
+        if skipped -> next
+        if !files_only || (!entry.directory && entry.file) {
+            &entries.push(WalkEntry{path: entry.path, relative: entry.relative, is_dir: entry.directory, depth: depth})
+        }
+        if entry.directory {
+            if ignore != None -> core.files.__walk_inherit(context, entry.child, directory)
+            &children.push(entry.child)
+        }
+    }
+    Ok((entries: entries, children: children))
+}
+
+fn walk_impl(root: String, ignore: String?, files_only: Bool) -[FS]> [WalkEntry] IOError! {
+    files8_preflight("FS.Read", .Read, root)
+    context :: core.files.__walk_context(root, ignore ?? "", ignore != None)
+    _guard :: core.mem.scope.guard(() -> core.files.__walk_close(context))
+    walk_validate(context, 0, root)
+    if ignore != None -> core.files.__walk_matcher_new(context)
+    queue := [(directory: Int, depth: Int)]{(directory: 0, depth: 0)}
+    cursor := 0
+    out := [WalkEntry]{}
+    first_error := None
+    error_directory := -1
+    loop cursor < queue.len() {
+        pending :: queue[cursor]
+        cursor += 1
+        if walk_batch(context, pending.directory, pending.depth, root, ignore, files_only) == {
+            .Ok(batch) -> {
+                loop entry in batch.entries -> &out.push(entry)
+                loop child in batch.children -> &queue.push((directory: child, depth: pending.depth + 1))
+            }
+            .Err(error) -> {
+                if error_directory == -1 || core.files.__walk_before(context, pending.directory, error_directory) {
+                    error_directory = pending.directory
+                    first_error = Val(error)
+                }
+            }
+        }
+    }
+    if first_error != None -> return Err(first_error ?? panic("recorded walk error"))
+    &out.sort_by((left: WalkEntry, right: WalkEntry) -> left.path <=> right.path)
     Ok(out)
 }
 
 
-fn walk_impl(root: String, ignore: String?, files_only: Bool) -[FS]> [WalkEntry] IOError! {
-    skip := [String]{}
-    ign :: ignore ?? ""
-    if ign.bytes().len() > 0 {
-        text :: core.files.read(join_impl(root, ign))
-        loop line in split_lines(text) {
-            t :: trim(line)
-            if t.bytes().len() == 0 -> next
-            if t.bytes()[0] == (U8{35}) -> next
-            &skip.push(t)
-        }
-        &skip.push(ign)
-    }
-    entries :: walk_rec(root, root, skip, files_only)
-    Ok(entries)
-}
-
-
-pub fn walk(root: String, ignore: String?) -[FS]> [WalkEntry] IOError! {
-    walk_impl(root, ignore, false)
+pub fn walk(root: String | Path, ignore: String?) -[FS]> [WalkEntry] IOError! {
+    walk_impl(path_text(root), ignore, false)
 }
 
 
@@ -1364,8 +1407,8 @@ pub fn walk_parallel(root: String, ignore: String?) -[FS]> [WalkEntry] IOError! 
 }
 
 
-pub fn walk_files(root: String, ignore: String?) -[FS]> [WalkEntry] IOError! {
-    walk_impl(root, ignore, true)
+pub fn walk_files(root: String | Path, ignore: String?) -[FS]> [WalkEntry] IOError! {
+    walk_impl(path_text(root), ignore, true)
 }
 
 
@@ -2064,5 +2107,48 @@ fn trim_file_line(bytes: &[U8]) Never! {
     assert((4096 & 61440) == 4096)
     assert((8192 & 61440) != 4096)
     assert((32768 & 61440) != 4096)
+}
+
+#Test("walk owns zero-based depth, path sorting and inherited ignore rules") {
+    directory :: core.files.temp_dir("walk_source").expect("temporary walk directory")
+    child :: join(directory.path, "nested")
+    core.files.create_dir(child).expect("nested directory")
+    core.files.write(join(directory.path, "visible"), "root").expect("root file")
+    core.files.write(join(directory.path, "hidden"), "hidden").expect("ignored file")
+    core.files.write(join(directory.path, ".gitignore"), "hidden\n").expect("root rules")
+    core.files.write(join(child, "visible"), "nested").expect("nested file")
+    core.files.write(join(child, "hidden"), "hidden").expect("inherited ignored file")
+    rows :: walk(directory.path, Val(".gitignore")).expect("walk")
+    assert_eq(rows.len(), 3)
+    assert_eq(rows[0].relative, "nested")
+    assert_eq(rows[0].depth, 0)
+    assert(rows[0].is_dir)
+    assert_eq(rows[1].relative, join("nested", "visible"))
+    assert_eq(rows[1].depth, 1)
+    assert_eq(rows[2].relative, "visible")
+    assert_eq(rows[2].depth, 0)
+    files :: walk_files(directory.path, Val(".gitignore")).expect("walk files")
+    assert_eq(files.len(), 2)
+    loop entry in files -> assert(!entry.is_dir)
+}
+
+#Test("walk validates an empty spelling but reads the actual empty root") {
+    if walk("", None) == {
+        .Ok(_) -> assert(false)
+        .Err(_) -> {}
+    }
+}
+
+#Test("walk rejects regular-file roots with the native cause") {
+    file :: temp_file("walk_root").expect("temporary walk root")
+    if walk(file.path, None) == {
+        .Ok(_) -> assert(false)
+        .Err(error) -> {
+            if error == {
+                .Other(context) -> assert_eq(context.cause, Val("filesystem walk root is not a directory: {file.path}"))
+                else -> assert(false)
+            }
+        }
+    }
 }
 
