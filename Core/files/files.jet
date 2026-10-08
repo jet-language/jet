@@ -199,6 +199,10 @@ pub struct FileReader {
     pub fn stat(self) -[FS.Read]> Stat IOError! {
         stat_from_row(core.files.__reader_stat(self))
     }
+
+    pub fn read_line(&self) -[FS.Read]> String? IOError! {
+        __reader_read_line(&self)
+    }
 }
 
 /// An open file for writing. `write_line` and `write_all` are buffered;
@@ -1943,4 +1947,38 @@ fn file_utf8_error(bytes: [U8]) -> String Never! {
     assert_eq(scope_relative(host_path.from_text("./a//./b", unix), "x") ?? panic("normal path"), "a/b")
     if scope_relative(host_path.from_text("a/../b", unix), "x") == { .Err(_) -> {} .Ok(_) -> assert(false) }
     if scope_relative(host_path.from_text(".", unix), "x") == { .Err(_) -> {} .Ok(_) -> assert(false) }
+}
+
+// FileStream.rs:91-118 is the exact contract. The existing BufReader owns
+// refill/position and retries Interrupted reads; the source owns the public
+// fault checkpoint, EOF, UTF-8 error and file-specific terminator trimming.
+pub fn __reader_read_line(reader: &FileReader) -[FS.Read]> String? IOError! {
+    if core.testing.__fault_should_fail("FS.Read") {
+        return Err(IOError.Other(IOContext{
+            operation: .Read, resource: Val(core.files.__reader_path(reader)),
+            os_code: None, cause: Val("fault injected: FS.Read"),
+        }))
+    }
+    bytes := core.files.__reader_line_bytes(&reader)
+    if bytes.len() == 0 -> return Ok(None)
+    trim_file_line(&bytes)
+    text :: String.from_bytes(^bytes) ?? return Err(io_err("read", core.files.__reader_path(reader), "stream did not contain valid UTF-8"))
+    Ok(Val(text))
+}
+
+fn trim_file_line(bytes: &[U8]) Never! {
+    loop bytes.len() > 0 {
+        last :: bytes[bytes.len() - 1]
+        if last != (U8{10}) && last != (U8{13}) -> break
+        _ :: &bytes.pop()
+    }
+}
+
+#Test("file read_line trims every trailing CR/LF including unterminated final CR") {
+    final := [U8]{108, 97, 115, 116, 13}
+    trim_file_line(&final)
+    assert_eq(String.from_bytes(final), Val("last"))
+    repeated := [U8]{120, 13, 13, 10}
+    trim_file_line(&repeated)
+    assert_eq(String.from_bytes(repeated), Val("x"))
 }

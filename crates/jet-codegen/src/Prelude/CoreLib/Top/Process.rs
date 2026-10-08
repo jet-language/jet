@@ -3327,3 +3327,18 @@ fn jet_process_stream_next_line<R: std::io::Read>(
 ) -> Result<Option<String>, jet_std::IOError> {
     jet_process_child_read_line(&mut handle.borrow_mut())
 }
+
+// Temporary OS shared-pipe buffered read. Shared position/BufReader lifetime
+// are unchanged; source owns EOF, UTF8 and the one-CRLF terminator rule.
+// Replaced by Jet runtime L7, dies at cutover (CoreFiles1-2 ledger).
+fn jet_process_stream_line_bytes_raw<R: std::io::Read>(
+    handle: &std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<R>>>>,
+) -> Result<Vec<u8>, jet_std::IOError> {
+    let mut held = handle.borrow_mut();
+    let Some(reader) = held.as_mut() else { return Ok(Vec::new()); };
+    let mut bytes = Vec::new();
+    std::io::BufRead::read_until(reader, b'\n', &mut bytes).map_err(|error| jet_std::IOError::other(
+        jet_std::IOOperation::Read, Some("process output".to_string()), error,
+    ))?;
+    Ok(bytes)
+}

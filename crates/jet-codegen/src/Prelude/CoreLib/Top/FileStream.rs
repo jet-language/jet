@@ -306,3 +306,13 @@ pub(crate) fn jet_files_link_reader_at_raw(
 ) -> (bool, bool, jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt) {
     jet_std::jet_fs_link_fd_at_raw(source.inner.get_ref(), into, name)
 }
+
+// Temporary OS buffered-read leaf for source FileReader.read_line policy.
+// Existing BufReader state is reused; no fault, UTF8 or terminator policy.
+// Replaced by Jet runtime L7, dies at cutover (CoreFiles1-2 ledger).
+pub(crate) fn jet_file_reader_line_bytes_raw(reader: &mut JetFileReader) -> Result<Vec<u8>, jet_std::IOError> {
+    let mut bytes = Vec::new();
+    std::io::BufRead::read_until(&mut reader.inner, b'\n', &mut bytes)
+        .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Read, &reader.path, error))?;
+    Ok(bytes)
+}
