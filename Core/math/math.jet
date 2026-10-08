@@ -1224,3 +1224,101 @@ fn __decimal_round(value: Decimal) -> Decimal Never! {
     assert_eq(__decimal_from_str("-0.00").scale, 2)
     assert(!__decimal_from_str("-0.00").negative)
 }
+
+fn __decimal_from_fraction(value: Fraction) -> Decimal Never! {
+    __decimal_try_fraction(value) ?? panic("Fraction has a repeating expansion")
+}
+fn __decimal_to_fraction(value: Decimal) -> Fraction Never! {
+    __fraction_from_parts(__decimal_signed(value), exact_power(10, value.scale))
+}
+fn __decimal_to_int(value: Decimal) -> Int Never! {
+    denominator :: exact_power(10, value.scale)
+    if value.magnitude %% denominator != 0 -> panic("Decimal is not an integer")
+    __decimal_signed(value) /% denominator
+}
+fn exact_bit_length(value: Int) -> Int Never! {
+    remaining := value
+    length := 0
+    loop remaining != 0 {
+        remaining = remaining >> 1
+        length = length + 1
+    }
+    length
+}
+fn __decimal_to_float(value: Decimal) -> Float Never! {
+    if value.magnitude == 0 -> return 0.0
+    if value.scale == 0 -> return Float{__decimal_signed(value)}
+    // Match CtDecimal: preserve its small-carrier projection, then the exact
+    // ratio rounding used by the arbitrary-precision carrier.
+    if value.magnitude <= 170141183460469231731687303715884105727 {
+        approximate :: Float{value.magnitude} / pow(10.0, Float{value.scale})
+        if value.negative -> return -approximate
+        return approximate
+    }
+    denominator :: exact_power(10, value.scale)
+    exponent := exact_bit_length(value.magnitude) - exact_bit_length(denominator)
+    if exponent >= 0 {
+        if value.magnitude < (denominator << exponent) -> exponent = exponent - 1
+    } else {
+        if (value.magnitude << -exponent) < denominator -> exponent = exponent - 1
+    }
+    if exponent > 1023 {
+        if value.negative -> return -infinity()
+        return infinity()
+    }
+    shift :: if exponent < -1022 -> 1074 else -> 52 - exponent
+    numerator := ~value.magnitude
+    divisor := denominator
+    if shift >= 0 -> numerator = numerator << shift
+    else -> divisor = divisor << -shift
+    significand := numerator /% divisor
+    remainder :: numerator %% divisor
+    if remainder * 2 > divisor || (remainder * 2 == divisor && significand %% 2 != 0) -> significand = significand + 1
+    bits := significand
+    if exponent >= -1022 {
+        if significand >= 9007199254740992 {
+            significand = significand >> 1
+            exponent = exponent + 1
+        }
+        if exponent > 1023 {
+            if value.negative -> return -infinity()
+            return infinity()
+        }
+        bits = (exponent + 1023) * 4503599627370496 + significand - 4503599627370496
+    }
+    if value.negative -> bits = bits - 9223372036854775808
+    from_bits(bits)
+}
+struct Complex {
+    real: Float
+    imaginary: Float
+}
+fn __complex_abs(value: Complex) -> Float Never! {
+    hypot(value.real, value.imaginary)
+}
+struct F64x4 {
+    lanes: [F64#4]
+    impl F64x4 {
+        fn new(a: F64, b: F64, c: F64, d: F64) -> F64x4 Never! {
+            F64x4{lanes: [F64#4]{a, b, c, d}}
+        }
+        fn splat(value: F64) -> F64x4 Never! {
+            F64x4{lanes: [F64#4]{value, value, value, value}}
+        }
+        fn from_array(lanes: [F64#4]) -> F64x4 Never! { F64x4{lanes: lanes} }
+        fn to_array(self) -> [F64#4] Never! { ~self.lanes }
+        fn lane(self, index: Int) -> F64 Never! {
+            if index < 0 || index >= 4 -> core.math.__numeric_stop("lane index {index} out of range for F64x4 (4 lanes)")
+            self.lanes[index]
+        }
+    }
+}
+
+#Test("Exact conversion helper policies and fixed-width SIMD bridge") {
+    assert_eq(__decimal_to_int(__decimal_from_str("-2.00")), -2)
+    assert_eq(__decimal_to_fraction(__decimal_from_str(".125")).denominator(), 8)
+    assert_eq(__decimal_from_fraction(__fraction_from_parts(1, 8)).magnitude, 125)
+    assert_eq(__decimal_to_float(__decimal_from_str("1.25")), 1.25)
+    assert_eq(__complex_abs(Complex{real: 3.0, imaginary: 4.0}), 5.0)
+    assert_eq(F64x4.from_array(F64x4.splat(F64{2.0}).to_array()).lane(3), F64{2.0})
+}
