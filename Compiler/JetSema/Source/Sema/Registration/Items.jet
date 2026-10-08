@@ -1212,6 +1212,14 @@ fn sema_registration_trait_method(method: TraitMethodSig, module_identity: Strin
     SemaRegistrationTraitMethod{symbol: symbol, declaration: method, signature: signature, identity: type_identity(signature), identity_key: sema_registration_function_identity_key(module_identity, owner.id.key, signature), parameters: parameters}
 }
 
+// Hook callable identity is the operand pair, not the ordinary owner/name key.
+fn sema_registration_operator_owner(owner: SymbolID, module_identity: String, left: Type, trait_name: String?, rhs: Type?) -> SymbolID Never! {
+    trait_value :: trait_name ?? return owner
+    if !sema_checked_operator_trait(trait_value) -> return owner
+    right :: rhs ?? left
+    symbol_id(SymbolKind.Impl, module_identity, owner.key, "{type_name(left)}::{trait_value}<{type_name(right)}>")
+}
+
 fn sema_registration_nominal(item: Item, module_identity: String, fallback_source_file: String, fallback_source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment], diagnostics: &[Diagnostic]) -> SemaRegistrationNominal? {
     if item == {
         .Struct(definition) -> {
@@ -1224,7 +1232,8 @@ fn sema_registration_nominal(item: Item, module_identity: String, fallback_sourc
             trait_methods :: [SemaRegistrationTraitMethod]{}
             loop block in definition.trait_impls {
                 loop method in block.methods {
-                    &methods.push(sema_registration_function(method, sema_raw_protocol_function_return(Val(block.trait_name), block.compiler_generated, method), module_identity, Val(symbol.id), fallback_source_file, fallback_source_origin, source_segments, &diagnostics))
+                    hook_owner :: sema_registration_operator_owner(symbol.id, module_identity, ty, Val(block.trait_name), block.operator_rhs)
+                    &methods.push(sema_registration_function(method, sema_raw_protocol_function_return(Val(block.trait_name), block.compiler_generated, method), module_identity, Val(hook_owner), fallback_source_file, fallback_source_origin, source_segments, &diagnostics))
                 }
             }
             Val(SemaRegistrationNominal{symbol: symbol, kind: SemaRegistrationNominalKind.Struct, source: SemaRegistrationNominalSource.SourceAST{value: item}, ty: ty, identity: type_identity(ty), identity_key: sema_registration_identity_key(module_identity, ty), generic_params: generic_params, generic_identity_key: generic_identity_key, fields: sema_registration_struct_fields(definition, symbol, &diagnostics), variants: [SemaRegistrationVariant]{}, methods: methods, trait_methods: trait_methods, compiler_owned: false, generated_provenance: None})
@@ -1239,7 +1248,8 @@ fn sema_registration_nominal(item: Item, module_identity: String, fallback_sourc
             trait_methods :: [SemaRegistrationTraitMethod]{}
             loop block in definition.trait_impls {
                 loop method in block.methods {
-                    &methods.push(sema_registration_function(method, sema_raw_protocol_function_return(Val(block.trait_name), block.compiler_generated, method), module_identity, Val(symbol.id), fallback_source_file, fallback_source_origin, source_segments, &diagnostics))
+                    hook_owner :: sema_registration_operator_owner(symbol.id, module_identity, ty, Val(block.trait_name), block.operator_rhs)
+                    &methods.push(sema_registration_function(method, sema_raw_protocol_function_return(Val(block.trait_name), block.compiler_generated, method), module_identity, Val(hook_owner), fallback_source_file, fallback_source_origin, source_segments, &diagnostics))
                 }
             }
             Val(SemaRegistrationNominal{symbol: symbol, kind: SemaRegistrationNominalKind.Enum, source: SemaRegistrationNominalSource.SourceAST{value: item}, ty: ty, identity: type_identity(ty), identity_key: sema_registration_identity_key(module_identity, ty), generic_params: generic_params, generic_identity_key: generic_identity_key, fields: [SemaRegistrationField]{}, variants: sema_registration_enum_variants(definition, symbol, &diagnostics), methods: methods, trait_methods: trait_methods, compiler_owned: false, generated_provenance: None})
@@ -1703,7 +1713,8 @@ fn sema_registration_impl(module_row: SemaRegistrationModule, definition: ImplDe
         associated_symbol :: Symbol{id: symbol_id(SymbolKind.Type, module_row.module_identity, symbol.id.key, declaration.name), kind: SymbolKind.Type, name: declaration.name, module_name: module_row.module_identity, owner: Val(symbol.id.key), span: declaration.span, ty: Val(declaration.ty), visibility: 0}
         SemaRegistrationAssociatedType{symbol: associated_symbol, declaration: declaration, ty: declaration.ty, identity: type_identity(declaration.ty), identity_key: "{symbol.id.key}:{declaration.name}:{type_identity_key(declaration.ty)}"}
     }
-    methods :: loop method in definition.methods -> sema_registration_function(method, sema_raw_protocol_function_return(definition.trait_name, false, method), module_row.module_identity, Val(owner_id), module_row.source_file, module_row.source_origin, module_row.source_segments, &diagnostics)
+    hook_owner :: sema_registration_operator_owner(owner_id, module_row.module_identity, target_type, definition.trait_name, definition.operator_rhs)
+    methods :: loop method in definition.methods -> sema_registration_function(method, sema_raw_protocol_function_return(definition.trait_name, false, method), module_row.module_identity, Val(hook_owner), module_row.source_file, module_row.source_origin, module_row.source_segments, &diagnostics)
     SemaRegistrationImpl{
         symbol: symbol,
         declaration: definition,

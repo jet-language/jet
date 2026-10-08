@@ -1,17 +1,8 @@
-Error [E0105]: Method `add` is defined twice on `Vec2`
-  --> tests/ui/operator_duplicate_hook.jet:11:8
-    |
- 11 |     fn add(self, rhs: Vec2) Vec2 -> { return Vec2{x: self.x + rhs.x, y: self.y + rhs.y} }
-    |        ^^^
- Why: Each method name may appear only once on a type
- Fix: Rename or remove one of the definitions
-More: jet-lang.dev/e/E0105
-
-Error [E0908]: `Vec2` already implements `Add`
+Error [E0908]: `Vec2` already implements `Add` for `Vec2`
   --> tests/ui/operator_duplicate_hook.jet:10:6
     |
  10 | impl Vec2.Add {
     |      ^^^^
- Why: Each type may implement a trait only once
- Fix: Remove the duplicate `impl` block
+ Why: Operator implementation identity includes both the left and right operand types
+ Fix: Remove the duplicate hook or choose a different right-hand type than `Vec2`
 More: jet-lang.dev/e/E0908
