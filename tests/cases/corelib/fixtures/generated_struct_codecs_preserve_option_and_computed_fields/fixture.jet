@@ -1,0 +1,17 @@
+
+use core.encoding.json as json
+
+#Codable
+struct Record {
+    base: Int
+    note: String?
+    doubled: Int -> base * 2
+}
+
+fn run() {
+    value := Record{ base: 4, note: None }
+    print(json.to_string(value))
+    back := json.decode<Record>("{{\"base\":5,\"doubled\":999}}") ?? panic("decode")
+    print(back.base)
+    print(back.doubled)
+}

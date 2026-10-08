@@ -1,0 +1,36 @@
+
+use core.encoding.json as json
+
+#Codable
+struct Inner { left: Int  right: Bool }
+
+#Codable
+struct Outer { inner: Inner  count: Int }
+
+#Codable
+struct Account {
+    email: String
+    age: Int
+
+    validate {
+        check(email.contains("@"), at: email, "email")
+        check(age >= 18, at: age, "age")
+    }
+}
+
+fn run() {
+    if json.decode<Outer>("{{\"inner\":{{\"left\":\"bad\",\"right\":\"bad\"}},\"count\":\"bad\"}}") == {
+        .Ok(_) -> {}
+        .Err(errors) -> {
+            print(errors.len())
+            loop error in errors { print(error.path) }
+        }
+    }
+    if json.decode<Account>("{{\"email\":\"missing-at\",\"age\":12}}") == {
+        .Ok(_) -> {}
+        .Err(errors) -> {
+            print(errors.len())
+            loop error in errors { print(error.path) }
+        }
+    }
+}

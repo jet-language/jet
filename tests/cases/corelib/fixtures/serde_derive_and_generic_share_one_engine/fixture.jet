@@ -1,0 +1,22 @@
+
+use core.encoding.json as json
+
+#Codable
+struct Boxed<T> { value: T }
+
+fn generic_encode<T: Encode>(value: T) -> String { json.to_string(value) }
+fn generic_decode<T: Decode>(wire: String) -> T [FieldError]! { json.decode<T>(wire) }
+
+fn run() {
+    value :: Boxed<Int>{ value: 7 }
+    derived_wire :: json.to_string(value)
+    generic_wire :: generic_encode(value)
+    derived_bytes :: derived_wire.bytes()
+    generic_bytes :: generic_wire.bytes()
+    assert(derived_bytes == generic_bytes)
+    derived_back :: json.decode<Boxed<Int>>(generic_wire) ?? panic("derived decode")
+    generic_back :: generic_decode<Boxed<Int>>(derived_wire) ?? panic("generic decode")
+    assert(derived_back.value == generic_back.value)
+    print(derived_bytes == generic_bytes)
+    print(derived_back.value == generic_back.value)
+}

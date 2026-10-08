@@ -1,0 +1,24 @@
+
+use core.encoding.json as json
+use core.encoding.toml as toml
+use core.encoding.csv as csv
+
+#[PublishedSchema, Codable]
+struct Config { port: Int  host: String }
+
+migration Config {
+    add host: String = "localhost"
+}
+
+fn run() ![FieldError] {
+    old :: json.decode<Config>("{{\"port\":2}}")
+    print("json {old.port} {old.host}")
+    toml_old :: toml.decode<Config>("port = 3\n")
+    print("toml {toml_old.port} {toml_old.host}")
+    rows :: csv.decode<Config>("port\n4\n5\n")
+    print("csv {rows.len()} {rows[1].port} {rows[1].host}")
+    if json.decode<Config>("{{\"port\":\"nope\",\"host\":\"h\"}}") == {
+        .Ok(value) -> print("unexpected {value.port}")
+        .Err(errors) -> print("error {errors.len()} {errors[0].path} {errors[0].reason}")
+    }
+}

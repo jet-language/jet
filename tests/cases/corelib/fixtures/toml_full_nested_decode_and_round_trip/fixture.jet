@@ -1,0 +1,15 @@
+
+use core.encoding.toml as toml
+#Codable
+struct Server { host: String  port: Int }
+#Codable
+struct Config { title: String  server: Server  ports: [Int] }
+fn run() {
+    raw :: "title = \"jet\"\nports = [80, 443]\n\n[server]\nhost = \"db.local\"\nport = 5432\n"
+    cfg :: toml.decode<Config>(raw) ?? panic("bad toml")
+    print(cfg.title)
+    print(cfg.server.host)
+    print(cfg.server.port)
+    print(cfg.ports.len())
+    print(toml.to_string(cfg))
+}

@@ -1,0 +1,17 @@
+
+use core.encoding.json as json
+
+derive T.ConfigSchema {
+    #Codable
+    struct GeneratedConfig {
+        ports: [Int]{[80, 443]}
+    }
+}
+
+#ConfigSchema
+struct Schema<T> { witness: T }
+
+fn run() {
+    config := json.decode<GeneratedConfig>("{{}}") ?? panic("decode")
+    print(config.ports)
+}
