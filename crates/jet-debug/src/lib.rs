@@ -65,7 +65,7 @@ pub struct FrameSnapshot {
     pub line: usize,
 }
 
-/// Runtime-owned debugger state for the current paused interpreter frame.
+/// Runtime-owned debugger state for the currently selected paused frame.
 /// Canvas projects this instead of guessing from terminal text.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DebugSnapshot {
@@ -378,7 +378,7 @@ fn unquote_debug_text(raw: &str) -> String {
     text
 }
 
-/// One post-statement source event shared by the interpreter, native adapter,
+/// One post-statement source event shared by the native adapter,
 /// DAP server, Canvas, and replay receipts. Values are already projected into
 /// safe Jet terms; no generated-Rust addresses or host objects cross this seam.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -546,9 +546,9 @@ enum IO {
     Scripted {
         inputs: std::collections::VecDeque<String>,
         out: String,
-        /// Keep the interpreter at the current stop when scripted input ends.
-        /// Canvas uses this to expose one live command boundary; transcript
-        /// tests retain the historical run-to-completion behavior.
+        /// Keep recorded history at the current stop when scripted input ends.
+        /// Canvas uses this to expose one command boundary; transcript
+        /// tests continue through the remaining recorded events.
         pause_on_input_end: bool,
     },
 }

@@ -6,8 +6,8 @@
 //!
 //! lldb is a runtime TOOL dependency on the user's machine, not an I6 compiler
 //! crate (same posture as nixpkgs for native/system deps) — [`Inferior::available`]
-//! gates every call site so a missing lldb degrades to a clear message pointing at
-//! the step-1 interpreter debugger, never a panic.
+//! gates every call site so a missing lldb produces the native-debugger
+//! availability diagnostic and installation guidance, never an engine fallback.
 //!
 //! Two lldb quirks this module works around, both confirmed against a live
 //! lldb (not just documentation — see the sidequest doc for the trace):
