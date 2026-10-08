@@ -25,7 +25,7 @@ pub enum CoreLeafKind {
 
 // BEGIN GENERATED CORE DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 961677930bffdb1307609bfeea17a47b0d6c5d98c8b66ba71221a65259b98ea2
+// Source SHA-256: 0157839e7f5efb098aed91e3a6b3deacd6152fe8b0f6725d547e2a99c80f86d2
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreModuleDeclaration {
     pub module: &'static str,
@@ -404,8 +404,8 @@ const CORE_MODULE_55_MEMBERS: &[&str] = &["bool", "close", "counter", "critical"
 const CORE_MODULE_55_TYPES: &[(&str, CoreLeafKind)] = &[("LogRecord", CoreLeafKind::Plain), ("Formatter", CoreLeafKind::Plain), ("Handler", CoreLeafKind::Plain), ("LogField", CoreLeafKind::Plain), ("Pair", CoreLeafKind::Plain)];
 const CORE_MODULE_55_DEPENDENCIES: &[&str] = &[];
 
-const CORE_MODULE_56_MEMBERS: &[&str] = &["abs", "acos", "acosh", "asin", "asinh", "atan", "atan2", "atanh", "binomial", "cbrt", "ceil", "checked_abs", "checked_add", "checked_div", "checked_mul", "checked_neg", "checked_pow", "checked_rem", "checked_sub", "clamp", "cmp", "copy", "copysign", "conj", "cos", "cosh", "cot", "decimal", "degrees", "digits", "div_mod", "div_rem", "e", "erf", "erfc", "exp", "exp2", "exp_m1", "factorial", "floor", "fma", "float32", "float64", "fract", "fraction", "frexp", "from_bits", "gamma", "gcd", "hypot", "ilogb", "imag", "infinity", "int_pow", "inv", "is_canonical", "is_even", "is_finite", "is_inf", "is_integer", "is_nan", "is_normal", "is_odd", "is_signed", "is_subnormal", "is_zero", "isqrt", "lcm", "ldexp", "leading_ones", "lerp", "lgamma", "ln", "ln_1p", "log", "log10", "log2", "logb", "max", "min", "modf", "muladd", "nan", "next_after", "nextafter", "next_down", "next_up", "pi", "pow", "radians", "radix", "real", "round", "saturating_add", "saturating_mul", "saturating_sub", "scaleb", "sign", "sign_bit", "significand", "signum", "sin", "sin_cos", "sinh", "sqrt", "tan", "tanh", "tau", "to_bits", "trailing_ones", "trunc", "truncate", "ulp", "zero", "Fraction", "abs_diff", "abs_float", "clamp_float", "comb", "dist", "even", "fmod", "fsum", "gcd_many", "hypot3", "in_range", "isclose", "isfinite", "isinf", "isnan", "lcm_many", "max_float", "midpoint", "min_float", "odd", "perm", "powmod", "prod", "prod_int", "remainder", "sum_int", "sumprod", "tau_const", "log1p", "xor", "random", "fabs", "expm1", "__cmp_f32", "__is_finite_f32", "__numeric_stop"];
-const CORE_MODULE_56_TYPES: &[(&str, CoreLeafKind)] = &[("Fraction", CoreLeafKind::Plain)];
+const CORE_MODULE_56_MEMBERS: &[&str] = &["abs", "acos", "acosh", "asin", "asinh", "atan", "atan2", "atanh", "binomial", "cbrt", "ceil", "checked_abs", "checked_add", "checked_div", "checked_mul", "checked_neg", "checked_pow", "checked_rem", "checked_sub", "clamp", "cmp", "copy", "copysign", "conj", "cos", "cosh", "cot", "decimal", "degrees", "digits", "div_mod", "div_rem", "e", "erf", "erfc", "exp", "exp2", "exp_m1", "factorial", "floor", "fma", "float32", "float64", "fract", "fraction", "frexp", "from_bits", "gamma", "gcd", "hypot", "ilogb", "imag", "infinity", "int_pow", "inv", "is_canonical", "is_even", "is_finite", "is_inf", "is_integer", "is_nan", "is_normal", "is_odd", "is_signed", "is_subnormal", "is_zero", "isqrt", "lcm", "ldexp", "leading_ones", "lerp", "lgamma", "ln", "ln_1p", "log", "log10", "log2", "logb", "max", "min", "modf", "muladd", "nan", "next_after", "nextafter", "next_down", "next_up", "pi", "pow", "radians", "radix", "real", "round", "saturating_add", "saturating_mul", "saturating_sub", "scaleb", "sign", "sign_bit", "significand", "signum", "sin", "sin_cos", "sinh", "sqrt", "tan", "tanh", "tau", "to_bits", "trailing_ones", "trunc", "truncate", "ulp", "zero", "Fraction", "abs_diff", "abs_float", "clamp_float", "comb", "dist", "even", "fmod", "fsum", "gcd_many", "hypot3", "in_range", "isclose", "isfinite", "isinf", "isnan", "lcm_many", "max_float", "midpoint", "min_float", "odd", "perm", "powmod", "prod", "prod_int", "remainder", "sum_int", "sumprod", "tau_const", "log1p", "xor", "random", "fabs", "expm1", "__cmp_f32", "__is_finite_f32", "__numeric_stop", "Vec2", "Vec3", "Vec4"];
+const CORE_MODULE_56_TYPES: &[(&str, CoreLeafKind)] = &[("Fraction", CoreLeafKind::Plain), ("Vec2", CoreLeafKind::Plain), ("Vec3", CoreLeafKind::Plain), ("Vec4", CoreLeafKind::Plain)];
 const CORE_MODULE_56_DEPENDENCIES: &[&str] = &[];
 
 const CORE_MODULE_57_MEMBERS: &[&str] = &["RNG", "bool", "bytes", "exponential", "float", "float_range", "int", "normal", "pick", "rng", "sample", "seed", "shuffle", "split", "weighted_pick", "random", "randint", "uniform", "normalvariate", "gauss", "expovariate", "randbytes", "getrandbits", "randrange", "choice", "choices", "triangular", "gammavariate", "betavariate", "lognormvariate", "paretovariate", "weibullvariate", "vonmisesvariate", "binomialvariate", "__rng_state", "__rng_try_update", "__word", "__seeded_int"];
@@ -934,6 +934,9 @@ pub const CORE_SOURCE_OWNED_TYPES: &[CoreSourceOwnedType] = &[
     CoreSourceOwnedType { path: "Core/jobs/jobs.jet", name: "JobQueueRecord" },
     CoreSourceOwnedType { path: "Core/jobs/jobs.jet", name: "JobQueueState" },
     CoreSourceOwnedType { path: "Core/jobs/jobs.jet", name: "JobQueueStatus" },
+    CoreSourceOwnedType { path: "Core/math/math.jet", name: "Vec2" },
+    CoreSourceOwnedType { path: "Core/math/math.jet", name: "Vec3" },
+    CoreSourceOwnedType { path: "Core/math/math.jet", name: "Vec4" },
     CoreSourceOwnedType { path: "Core/math/random.jet", name: "RNG" },
     CoreSourceOwnedType { path: "Core/mod/mod.jet", name: "ModError" },
     CoreSourceOwnedType { path: "Core/mod/mod.jet", name: "__LoadContext" },
@@ -1174,6 +1177,9 @@ pub const CORE_BARE_SOURCE_MODULES: &[CoreBareSourceModule] = &[
     CoreBareSourceModule { name: "URL", module_name: "core.net.url" },
     CoreBareSourceModule { name: "Perf", module_name: "core.perf" },
     CoreBareSourceModule { name: "RNG", module_name: "core.testing" },
+    CoreBareSourceModule { name: "Vec2", module_name: "core.math" },
+    CoreBareSourceModule { name: "Vec3", module_name: "core.math" },
+    CoreBareSourceModule { name: "Vec4", module_name: "core.math" },
 ];
 
 pub fn core_bare_source_module(name: &str) -> Option<&'static str> {
@@ -1232,6 +1238,10 @@ mod tests {
             format!("    CoreBareSourceModule{{name: \"{}\", module_name: \"{}\"}},", row.name, row.module_name))
             .collect::<Vec<_>>().join("\n");
         assert_eq!(rows.trim_matches('\n'), expected);
+        for name in ["Vec2", "Vec3", "Vec4"] {
+            assert_eq!(core_bare_source_module(name), Some("core.math"));
+        }
+        assert_eq!(core_bare_source_module("Vec5"), None);
         assert_eq!(core_bare_source_module("Date"), None);
         assert_eq!(core_bare_source_module("UnlistedPublicAlias"), None);
     }

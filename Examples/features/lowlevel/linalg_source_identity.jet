@@ -1,0 +1,19 @@
+// MAIN veto-able qualified-path correction; requires 17945a083.
+// Golden expectations are UNOBSERVED until the composed integration cycle.
+use core.math as math
+use core.reflect as reflect
+
+fn bare(value: Vec2) -> Vec2 { value }
+fn qualified(value: math.Vec2) -> core.math.Vec2 { value }
+fn canonical(value: core.math.Vec2) -> math.Vec2 { value }
+
+fn run() {
+    a :: Vec2.new(1.0, 2.0)
+    b :: qualified(bare(a))
+    c :: canonical(b)
+    print(reflect.of(a).type_name() == reflect.of(b).type_name())
+    print(reflect.of(b).type_name() == reflect.of(c).type_name())
+    print("{a}" == "{b}")
+    print("{b}" == "{c}")
+    print(bare(c).dot(a))
+}
