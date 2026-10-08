@@ -105,9 +105,12 @@ for (const m of fnBody(mirRustRs, "exact_prelude_adapter").matchAll(/"([^"]+)"\s
 if (exactAdapters.size === 0) throw new Error("gen-c-abi-routes: no exact_prelude_adapter rows");
 
 const routes = new Map();
+// Canonical records decide ownership even when their value is false. A TIR
+// handle/builtin route identifies a call, not a different provider ABI.
+const canonicalIntResults = new Map();
 const addRoute = (symbol, nativeInt, row) => {
   const entry = routes.get(symbol) ?? { nativeInt: false, rows: [] };
-  entry.nativeInt ||= nativeInt;
+  entry.nativeInt = canonicalIntResults.get(symbol) ?? (entry.nativeInt || nativeInt);
   entry.rows.push(row);
   routes.set(symbol, entry);
 };
@@ -115,30 +118,36 @@ const addRoute = (symbol, nativeInt, row) => {
 // non-direct row's symbol too unless `core_call` gives it its own form.
 const coreCalls = readFileSync(`${repo}/crates/jet-foundation/src/Syntax/core_calls.rs`, "utf8");
 for (const line of coreCalls.split("\n")) {
-  const record = /^\s*CoreCallRecord::new\(\s*"([^"]*)",\s*"([^"]*)",\s*"([^"]*)",\s*(?:true|false)/.exec(line);
-  if (!record) continue;
-  const [, module, member, symbol] = record;
+  const plain = /^\s*CoreCallRecord::new\(\s*"([^"]*)",\s*"([^"]*)",\s*"([^"]*)",\s*(?:true|false)/.exec(line);
+  const receiver = /^\s*CoreCallRecord::receiver_with_symbol\(\s*&\[([^\]]*)\],\s*"([^"]*)",\s*"([^"]*)",\s*(?:true|false)/.exec(line);
+  if (!plain && !receiver) continue;
+  const [, module, member, symbol] = plain ?? receiver;
   if (!symbol) continue;
+  const nativeInt = line.includes(".with_native_int_result()");
+  if (canonicalIntResults.has(symbol) && canonicalIntResults.get(symbol) !== nativeInt) {
+    throw new Error(`gen-c-abi-routes: conflicting native_int_result records for ${symbol}`);
+  }
+  canonicalIntResults.set(symbol, nativeInt);
   if (line.includes(".without_direct_aot()")) {
     if (ownForm.has(`${module}.${member}`)) continue;
     if (module === "core.math" && sourceMathMembers.has(member)) continue;
   }
-  addRoute(symbol, line.includes(".with_native_int_result()"), `${module}.${member}`);
+  addRoute(symbol, nativeInt, `${module}.${member}`);
 }
 const tirRoutes = readFileSync(`${repo}/crates/jet-codegen/src/Codegen/TIR/routes.rs`, "utf8");
 for (const match of tirRoutes.matchAll(/prelude_route_row\(\s*MirPreludeFamily::StaticPrelude,\s*"([^"]*)",\s*"([^"]*)",\s*"([^"]*)"/g)) {
   addRoute(match[3], false, `${match[1]}.${match[2]}`);
 }
 // Builtin method routes (`b(member, symbol, ...)` in the TBuiltinOp route
-// table). Generated Rust widens every builtin Int result from the native
-// kernel word (MIRRust.rs `native_int_result`), so these rows do too.
+// table). Rows without a canonical provider record retain their native-word
+// result convention; a record's native_int_result overrides it in addRoute.
 for (const match of tirRoutes.matchAll(/\bb\(\s*"([^"]*)",\s*"([^"]*)",/g)) {
   addRoute(match[2], true, `core.builtin.${match[1]}`);
 }
 // Handle method routes (`h(member, symbol, ...)` rows and
 // `prelude(MirPreludeFamily::HandleMethod, module, member, symbol, ...)`).
-// Generated Rust widens every handle method's Int result from the native
-// kernel word (MIRRust.rs HandleMethod -> native_int_result).
+// These fallback rows do not override a canonical provider record, including
+// an already-owned tagged Int result.
 for (const match of tirRoutes.matchAll(/\bh\(\s*"([^"]*)",\s*"([^"]*)",/g)) {
   addRoute(match[2], true, `core.handle.${match[1]}`);
 }

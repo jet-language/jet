@@ -1407,7 +1407,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: fd34a426a7661846ac8deb2d8b386bf740f4b1c3a3c63e64d17a5b4e7cbbd944
+// Source SHA-256: d74dd562e31788c2c527b9841e6b9a95a173f8a81eaa178ed10f97ac85bf70b0
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -3295,6 +3295,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::receiver_with_symbol( &["DataGroupedQuery"], "count", "jet_data_group_count_query", true, &[true], ),
     CoreCallRecord::receiver_with_symbol( &["DataGroupedQuery"], "sum", "jet_data_group_sum_query", true, &[true, false], ),
     CoreCallRecord::receiver_with_symbol( &["DataGroupedQuery"], "mean", "jet_data_group_mean_query", true, &[true, false], ),
+    CoreCallRecord::receiver_with_symbol(&["RNG"], "int", "jet_rng_int", true, &[true, false, false]),
     CoreCallRecord::receiver(&["ProcessStdin"], "close", &[]),
     CoreCallRecord::receiver_with_symbol( &["FileScope"], "read", "jet_std_fs_scope_read", true, &[true, true], ),
     CoreCallRecord::receiver(&["RealtimeStream"], "next_deadline", &[]),
@@ -3836,6 +3837,15 @@ pub fn core_call_mismatch(
 mod tests {
     use super::{core_call, CoreCapabilityKind};
     use crate::Effects::Effect;
+
+    #[test]
+    fn rng_int_returns_an_owned_exact_int_carrier() {
+        let row = super::core_receiver_method("RNG", "int").expect("canonical RNG.int row");
+        assert_eq!(row.symbol, super::CoreCallSymbol::Prelude("jet_rng_int"));
+        assert_eq!(row.signature.borrow_mask, &[true, false, false]);
+        assert!(!row.native_int_result, "the provider already tags and owns its Int result");
+        assert!(core_call("core.sys", "pid").expect("native Int row").native_int_result);
+    }
 
     #[test]
     fn filesystem_reads_and_walks_use_fs_read_leaf() {
