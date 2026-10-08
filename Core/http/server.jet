@@ -42,7 +42,7 @@ pub fn serve_once_listener(listener: TCPListener, mux: HTTPMux) HTTPError! {
     provider.__serve_once_listener(listener, mux) ?? return
 }
 
-pub fn __serve_entry(addr: String, mux: HTTPMux, tls: HTTPServerTLS?, deadline: Duration?) -[Net, Time.Wait]> Unit HTTPError! {
+pub fn __serve_entry(addr: String, mux: HTTPMux, tls: HTTPServerTLS?, deadline: Duration?) HTTPError! -[Net, Time.Wait]> {
     provider.__serve(addr, mux, tls, deadline)
 }
 
@@ -50,7 +50,7 @@ pub fn __bind_entry(addr: String, mux: HTTPMux, tls: HTTPServerTLS?, deadline: D
     provider.__bind(addr, mux, tls, deadline)
 }
 
-pub fn __static_files_entry(mux: HTTPMux, prefix: String, root: String, index: Bool?, dotfiles: Bool?, follow_links: Bool?) -> Unit Never! {
+pub fn __static_files_entry(mux: HTTPMux, prefix: String, root: String, index: Bool?, dotfiles: Bool?, follow_links: Bool?) Never! {
     provider.__static_files(mux, prefix, root, index, dotfiles, follow_links)
 }
 
@@ -131,10 +131,14 @@ pub fn cors(mux: HTTPMux, policy: HTTPCorsPolicy) Never! {
 }
 
 pub fn access_log(request: HTTPRequest, status: Int) -> String Never! {
-    template :: #Unsafe("borrow the request's stored optional route-template metadata; no route selection or formatting policy") {
-        core.http.server.__route_template(request)
-    }
+    template :: access_log_template(request)
     access_log_parts(request.method, request.path, template, status)
+}
+
+fn access_log_template(request: HTTPRequest) -> String? Never! {
+    #Unsafe("borrow the request's stored optional route-template metadata; no route selection or formatting policy") {
+        return core.http.server.__route_template(request)
+    }
 }
 
 fn access_log_parts(method: String, path: String, template: String?, status: Int) -> String Never! {
@@ -145,7 +149,7 @@ fn access_log_parts(method: String, path: String, template: String?, status: Int
 fn access_log_path(path: String) -> String Never! {
     raw :: path.bytes()
     end := 0
-    loop end < raw.len() && raw[end] != U8{63} -> end = end + 1
+    loop end < raw.len() && raw[end] != (U8{63}) -> end = end + 1
     if end == raw.len() -> return path
     String.from_bytes(raw.slice(0, end)) ?? panic("query separator is not a UTF-8 boundary")
 }
@@ -191,8 +195,7 @@ fn cors_join(values: [String], fallback: ^String) -> String Never! {
     assert(empty.cert_pem == "" && empty.key_pem == "")
 }
 
-#Test("access log retains route-template presence and strips only fallback query")
-fn _() {
+#Test("access log retains route-template presence and strips only fallback query") {
     assert(access_log_parts("GET", "/logs/42?secret=x", None, 200) == "GET /logs/42 200")
     assert(access_log_parts("POST", "/logs/42?secret=x", Val("/logs/:id"), 201) == "POST /logs/:id 201")
     assert(access_log_parts("GET", "/ignored?query=x", Val(""), -7) == "GET  -7")
