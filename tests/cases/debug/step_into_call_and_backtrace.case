@@ -1,0 +1,10 @@
+# tests/debug.rs::step_into_call_and_backtrace
+# Public production debugger transcript; original source/commands unchanged, PENDING-SAME-HEAD.
+fixture: step_into_call_and_backtrace.fixture
+env: NO_COLOR=1
+step: jet debug jet_debug_calls.jet
+stdin: step_into_call_and_backtrace.stdin
+exit: any # original transcript-only helper asserts no process code
+stdout+stderr: ~ "y := x * 2" # original contains predicate
+stdout+stderr: ~ "#0  double()" # original contains predicate
+stdout+stderr: ~ "#1  main()" # original contains predicate

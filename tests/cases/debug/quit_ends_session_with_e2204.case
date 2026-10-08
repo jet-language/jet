@@ -1,0 +1,9 @@
+# tests/debug.rs::quit_ends_session_with_e2204
+# Public production debugger transcript; original source/commands unchanged, PENDING-SAME-HEAD.
+fixture: quit_ends_session_with_e2204.fixture
+env: NO_COLOR=1
+step: jet debug jet_debug_quit.jet
+stdin: quit_ends_session_with_e2204.stdin
+exit: any # original transcript-only helper asserts no process code
+stdout+stderr: ~ "E2204" # original contains predicate
+stdout+stderr: count-lines = "program finished" = 0 # original exact standalone line count
