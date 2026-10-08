@@ -1684,3 +1684,11 @@ declares a program `run` entry. C exports have no failure-row annotation.
 The C ABI route generator reads every canonical `CAbi*.rs` except generated
 `CAbiRoutes.rs`, including unsafe C exports. Hand-owned exports do not get
 generated adapter bodies; canonical signatures still supply ownership checks.
+
+Five former raw encoding keys (`jet_raw_object_entries_view`,
+`jet_raw_object_from_entries`, `jet_raw_object_into_entries`, `jet_raw_tree_tag`,
+`jet_raw_typed_text`) have no producer, Core registrar or Rust body in the
+post-gate compiler unit. Before retirement their only name references were the
+legacy `lower_record_data_leaf` recognizer, not physical runtime calls. The
+recognizer and both CoreCall/StaticPreludeCall hooks are removed together; no
+replacement erased provider or compatibility alias is introduced.
