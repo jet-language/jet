@@ -1,0 +1,39 @@
+// Read-only observations of canonical native kernels, never alternate locks.
+#Export(c) fn jet_rt_sync_fixture_condition_count(condition: I64) -> I64 {
+    sync_mutex_lock(condition + I64{8})
+    node := sync_load(condition + I64{16})
+    count := I64{0}
+    loop node != (I64{0}) {
+        count += I64{1}
+        node = sync_load(node)
+    }
+    sync_mutex_unlock(condition + I64{8})
+    count
+}
+#Export(c) fn jet_rt_sync_fixture_condition_fifo(condition: I64) {
+    nodes :: jet_rt_alloc(I64{144}, I64{8})
+    thread_zero(nodes, I64{144})
+    condition_register(condition, nodes)
+    condition_register(condition, nodes + I64{48})
+    condition_register(condition, nodes + I64{96})
+    jet_rt_native_condition_notify_one(condition)
+    channel_fixture_check(sync_load(nodes + I64{8}) == I64{1})
+    channel_fixture_check(sync_load(nodes + I64{56}) == I64{0})
+    channel_fixture_check(sync_load(nodes + I64{104}) == I64{0})
+    condition_unregister(condition, nodes)
+    jet_rt_native_condition_notify_all(condition)
+    channel_fixture_check(sync_load(nodes + I64{56}) == I64{1})
+    channel_fixture_check(sync_load(nodes + I64{104}) == I64{1})
+    channel_fixture_check(jet_rt_sync_fixture_condition_count(condition) == I64{0})
+    condition_unregister(condition, nodes + I64{48})
+    condition_unregister(condition, nodes + I64{96})
+    // Pending notifications are consumed by exactly one new registration.
+    jet_rt_native_condition_notify_one(condition)
+    condition_register(condition, nodes)
+    channel_fixture_check(sync_load(nodes + I64{40}) == I64{1})
+    condition_unregister(condition, nodes)
+    condition_register(condition, nodes + I64{48})
+    channel_fixture_check(sync_load(nodes + I64{88}) == I64{0})
+    condition_unregister(condition, nodes + I64{48})
+    jet_rt_free(nodes, I64{144}, I64{8})
+}
