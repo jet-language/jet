@@ -1,6 +1,8 @@
 // Production field-owner contracts, assembled with the canonical L4 sources.
 // These exercise checked metadata directly, including internal guard/tag shapes
 // that source syntax cannot name and Pin without invoking an unrelated emitter.
+// Bind literal loop inputs and parenthesize optional equality expressions so
+// the Rust stage-zero parser and the Jet parser consume the same fixture.
 fn fc_require(ok: Bool, name: String) {
     if !ok -> panic("field owner contract failed: {name}")
 }
@@ -17,7 +19,8 @@ fn fc_tuple_owners() {
     fc_require(fc_field(tuple, "01").field_name == "right", "tuple leading zero")
     tagged :: Type.Tagged{marker: TagMarker.Internal{internal_tag: InternalTag.SharedGuardRead}, inner: tuple}
     fc_require(jet_codegen_mir_field_id(fc_field(tagged, "left")).value == expected.value, "tagged tuple")
-    loop wrapper in [String]{"SharedGuard", "CellReadGuard", "CellEditGuard", "Pin"} {
+    wrappers :: [String]{"SharedGuard", "CellReadGuard", "CellEditGuard", "Pin"}
+    loop wrapper in wrappers {
         guarded :: Type.Apply{name: wrapper, args: [Type]{tagged}}
         fc_require(jet_codegen_mir_field_id(fc_field(guarded, "left")).value == expected.value, "{wrapper} tuple")
     }
@@ -36,7 +39,8 @@ fn fc_nominal_owners() {
     fc_require(measurement.owner_key == "Measurement", "generic fields belong to the declaration")
     payload :: fc_field(Type.Named{name: "WsError"}, "limit")
     fc_require(payload.owner_key == "WsError::MessageTooLarge", "compiler-owned named enum payload")
-    loop name in [String]{"F32x4", "F64x2", "Vec2", "Vec3", "Vec4"} {
+    math_names :: [String]{"F32x4", "F64x2", "Vec2", "Vec3", "Vec4"}
+    loop name in math_names {
         owner :: Type.Named{name: name}
         fc_require(jet_codegen_mir_field_id(fc_field(owner, "1")).value == jet_codegen_mir_field_id(fc_field(owner, "y")).value, "{name} numeric lane")
     }
@@ -53,12 +57,13 @@ fn fc_embedded_integer_constants() {
     state := sema_ownership_state_init()
     context := sema_check_context_init()
     diagnostics := [Diagnostic]{}
-    loop decimal in [String]{"18446744073709551615", "-9223372036854775809"} {
+    exact_decimals :: [String]{"18446744073709551615", "-9223372036854775809"}
+    loop decimal in exact_decimals {
         number :: Int.parse(decimal) ?? panic("fixture integer")
         checked :: sema_expr_check_comptime_name("EXACT", span, Val(CtValue.Int{value: number}), None, environment, &scopes, &state, &context, &diagnostics) ?? panic("embedded integer was not checked")
         expected :: TExprKind.CtLit{value: TComptimeValue.BigInt{decimal: decimal}}
         fc_require(checked.ty == Type.Int && checked.kind == expected, "embedded exact integer uses BigInt")
-        fc_require(checked.integer_bounds == Val(integer_bounds_exact(number)), "embedded exact bounds")
+        fc_require(checked.integer_bounds == (Val(integer_bounds_exact(number))), "embedded exact bounds")
         prepared :: sema_fact_prepared_expr(TComptimeValue.Int{value: number}, Type.Int, span, environment) ?? panic("prepared integer was not checked")
         fc_require(prepared.kind == expected && prepared.integer_bounds == checked.integer_bounds, "prepared exact integer uses BigInt")
         if checked.kind == .CtLit(value) {
@@ -77,7 +82,8 @@ fn fc_embedded_integer_constants() {
         }
     }
     fc_require(converted, "prepared U64 maximum keeps checked Int-to-fixed conversion")
-    loop number in [Int]{-9223372036854775807 - 1, 0, 9223372036854775807} {
+    native_values :: [Int]{-9223372036854775807 - 1, 0, 9223372036854775807}
+    loop number in native_values {
         checked :: sema_expr_check_comptime_name("NATIVE", span, Val(CtValue.Int{value: number}), None, environment, &scopes, &state, &context, &diagnostics) ?? panic("native integer was not checked")
         fc_require(checked.kind == (TExprKind.IntLit{value: number, width: None}), "native integer keeps IntLit")
     }
