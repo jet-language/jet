@@ -18,11 +18,11 @@ fn cli_front_fixture_engine(plan: JetCLIPlan, verb: String, argv: [String]) Neve
 }
 
 fn run() {
-    loop verb in [String]{"cc", "c++"} {
+    loop verb in ([String]{"cc", "c++"}) {
         argv :: [String]{verb, "--version", "--help", "--unknown-compiler-option", "--", "source with spaces.c", "-Werror"}
         cli_front_fixture_engine(jet_cli_plan(argv), verb, argv)
     }
-    loop verb in [String]{"shared-store", "trust", "image", "os", "search", "clean"} {
+    loop verb in ([String]{"shared-store", "trust", "image", "os", "search", "clean"}) {
         argv :: [String]{verb, "--unknown-engine-option", "--", "argument with spaces", "--json"}
         forwarded :: jet_cli_engine_commands(verb, argv) ?? panic("registered engine verb")
         cli_front_fixture_engine(forwarded, verb, argv)
