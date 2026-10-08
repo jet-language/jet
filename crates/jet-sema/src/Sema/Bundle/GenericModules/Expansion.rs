@@ -134,6 +134,8 @@ pub(crate) fn expand_generic_module_aliases(
         traits.register_synthetic_rollback();
         traits.register_synthetic_display_debug();
         traits.register_synthetic_close();
+        // Bound-resolution-only registry: discarded before checked source
+        // registration, whose builtin rows use bundle-wide Core ownership.
         traits.register_synthetic_operators(|_| false);
         traits.register_synthetic_iter_index();
         traits.register_synthetic_io();

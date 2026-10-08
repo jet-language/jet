@@ -257,6 +257,11 @@ pub(super) fn check_bundle_opts_for_output_inner(
             }
         })
         .collect();
+    // Every module seeds against the loaded bundle, including primitive-left
+    // hooks whose source-owned operand is declared in a different Core module.
+    let source_owned_types: HashSet<&'static str> = states.iter()
+        .flat_map(|state| state.registry.source_owned_types.iter().copied())
+        .collect();
     let mut name_ledger = std::mem::take(&mut bundle.name_ledger);
     name_ledger.clear_sema_facts();
     let namespace_trait_scopes = {
@@ -1464,7 +1469,7 @@ pub(super) fn check_bundle_opts_for_output_inner(
         st.trait_reg.register_synthetic_rollback();
         st.trait_reg.register_synthetic_display_debug();
         st.trait_reg.register_synthetic_close();
-        st.trait_reg.register_synthetic_operators(|name| st.registry.source_owns_type(name));
+        st.trait_reg.register_synthetic_operators(|name| source_owned_types.contains(name));
         st.trait_reg.register_synthetic_iter_index();
         st.trait_reg.register_synthetic_io();
         st.trait_reg.register_synthetic_driver();
