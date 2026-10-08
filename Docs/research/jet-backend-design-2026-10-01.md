@@ -1388,6 +1388,15 @@ Closure code and release resolve only through actual emitted callable rows.
 Missing exports are named refusals; the generic concrete-layout/provenance gap
 remains a named refusal, not an ID/offset guess or a copied factory root.
 
+The canonical ordinary-layout inventory records `Float32Bits` explicitly.
+A Map's third child is its ordinary entry-tuple layout; that row's stride,
+not the Map header's stride or a member-offset calculation, spaces entries.
+Each member records both its logical type key and ordinary storage type key.
+A boxed member uses the latter's canonical Option box size, which differs
+from packed element stride (for example U8 stride 1 versus Option<U8> box 8).
+These facts are sealed in manifest body version 2. They do not change the
+runtime's 72-byte NativeMeta layout or its two child pointers at 56 and 64.
+
 Native payload slot access uses the promoted readers and checked writes in
 `OS/Linux.jet`. Only widths 1, 2, 4 and 8 are admitted; invalid addresses,
 widths and write ranges refuse before memory access. Allocation receipts retain
