@@ -10,9 +10,7 @@ use core
 use core.crypto.[CryptoError, FileCryptoError, Secret, SharedSecret, Signature, SigningKey, X25519SecretKey, constant_time_equal_bytes]
 use core.crypto as crypto
 
-C_AES_SBOX :: [Int]{99, 124, 119, 123, 242, 107, 111, 197, 48, 1, 103, 43, 254, 215, 171, 118, 202, 130, 201, 125, 250, 89, 71, 240, 173, 212, 162, 175, 156, 164, 114, 192, 183, 253, 147, 38, 54, 63, 247, 204, 52, 165, 229, 241, 113, 216, 49, 21, 4, 199, 35, 195, 24, 150, 5, 154, 7, 18, 128, 226, 235, 39, 178, 117, 9, 131, 44, 26, 27, 110, 90, 160, 82, 59, 214, 179, 41, 227, 47, 132, 83, 209, 0, 237, 32, 252, 177, 91, 106, 203, 190, 57, 74, 76, 88, 207, 208, 239, 170, 251, 67, 77, 51, 133, 69, 249, 2, 127, 80, 60, 159, 168, 81, 163, 64, 143, 146, 157, 56, 245, 188, 182, 218, 33, 16, 255, 243, 210, 205, 12, 19, 236, 95, 151, 68, 23, 196, 167, 126, 61, 100, 93, 25, 115, 96, 129, 79, 220, 34, 42, 144, 136, 70, 238, 184, 20, 222, 94, 11, 219, 224, 50, 58, 10, 73, 6, 36, 92, 194, 211, 172, 98, 145, 149, 228, 121, 231, 200, 55, 109, 141, 213, 78, 169, 108, 86, 244, 234, 101, 122, 174, 8, 186, 120, 37, 46, 28, 166, 180, 198, 232, 221, 116, 31, 75, 189, 139, 138, 112, 62, 181, 102, 72, 3, 246, 14, 97, 53, 87, 185, 134, 193, 29, 158, 225, 248, 152, 17, 105, 217, 142, 148, 155, 30, 135, 233, 206, 85, 40, 223, 140, 161, 137, 13, 191, 230, 66, 104, 65, 153, 45, 15, 176, 84, 187, 22}
-
-C_AES_RCON :: [Int]{1, 2, 4, 8, 16, 32, 64, 128, 27, 54}
+C_AES_RCON :: [U8]{1, 2, 4, 8, 16, 32, 64, 128, 27, 54}
 
 C_MASK32 :: 4294967295
 
@@ -626,37 +624,63 @@ pub fn migrate_v1(key: [U8], source: Path, recipients: [X25519PublicKey], destin
 
 
 fn aes_gcm_seal(key: [U8], nonce: [U8], aad: [U8], plain: [U8]) -> [U8] Never! {
-    rk :: aes256_expand(key)
-    h :: aes256_encrypt_block(rk, zeros16())
-    j0 := [U8]{}
-    loop b in nonce -> &j0.push(b)
-    loop i in 0..<4 -> &j0.push(U8{0})
-    j0[15] = (U8{1})
-    ctr :: inc32(j0)
-    ct :: aes_ctr(rk, ctr, plain)
-    auth_tag :: gcm_tag(h, aes256_encrypt_block(rk, j0), aad, ct)
-    out := [U8]{}
-    loop b in ct -> &out.push(b)
+    work := aes_workspace()
+    state := zeros16()
+    rk := aes256_expand(key, &state, &work)
+    h := zeros16()
+    aes256_encrypt_block(rk, h, &state, &work)
+    loop i in 0..<16 -> h[i] = state[i]
+    j0 := zeros16()
+    loop i in 0..<12 -> j0[i] = nonce[i]
+    j0[15] = U8{1}
+    mask := zeros16()
+    aes256_encrypt_block(rk, j0, &state, &work)
+    loop i in 0..<16 -> mask[i] = state[i]
+    out := aes_ctr(rk, j0, plain, plain.len(), &state, &work)
+    auth_tag := gcm_tag(h, mask, aad, out, out.len())
     loop b in auth_tag -> &out.push(b)
+    crypto.__zeroize(^rk)
+    crypto.__zeroize(^state)
+    crypto.__zeroize(^h)
+    crypto.__zeroize(^mask)
+    crypto.__zeroize(^auth_tag)
+    aes_workspace_clear(&work)
     out
 }
 
 fn aes_gcm_open(key: [U8], nonce: [U8], aad: [U8], cipher: [U8]) -> [U8]? {
-    ct :: slice_u8(cipher, 0, cipher.len() - 16)
-    auth_tag :: slice_u8(cipher, cipher.len() - 16, cipher.len())
-    rk :: aes256_expand(key)
-    h :: aes256_encrypt_block(rk, zeros16())
-    j0 := [U8]{}
-    loop b in nonce -> &j0.push(b)
-    loop i in 0..<4 -> &j0.push(U8{0})
-    j0[15] = (U8{1})
-    expect :: gcm_tag(h, aes256_encrypt_block(rk, j0), aad, ct)
-    equal :: constant_time_equal_bytes(auth_tag, expect) ?? return None
-    if equal {
-        ctr :: inc32(j0)
-        return Val(aes_ctr(rk, ctr, ct))
+    body_len :: cipher.len() - 16
+    work := aes_workspace()
+    state := zeros16()
+    rk := aes256_expand(key, &state, &work)
+    h := zeros16()
+    aes256_encrypt_block(rk, h, &state, &work)
+    loop i in 0..<16 -> h[i] = state[i]
+    j0 := zeros16()
+    loop i in 0..<12 -> j0[i] = nonce[i]
+    j0[15] = U8{1}
+    mask := zeros16()
+    aes256_encrypt_block(rk, j0, &state, &work)
+    loop i in 0..<16 -> mask[i] = state[i]
+    expect := gcm_tag(h, mask, aad, cipher, body_len)
+    different := U8{0}
+    loop i in 0..<16 -> different = different | (expect[i] ~| cipher[body_len + i])
+    crypto.__zeroize(^h)
+    crypto.__zeroize(^mask)
+    crypto.__zeroize(^expect)
+    // The only secret-result branch is after the complete tag comparison.
+    // No plaintext is allocated or written before authentication succeeds.
+    if different != (U8{0}) {
+        crypto.__zeroize(^rk)
+        crypto.__zeroize(^state)
+        aes_workspace_clear(&work)
+        return None
     }
-    None
+    out :: aes_ctr(rk, j0, cipher, body_len, &state, &work)
+    crypto.__zeroize(^rk)
+    crypto.__zeroize(^state)
+    aes_workspace_clear(&work)
+    Val(out)
 }
 
 fn zeros16() -> [U8] Never! {
@@ -665,165 +689,220 @@ fn zeros16() -> [U8] Never! {
     out
 }
 
-fn inc32(block: [U8]) -> [U8] Never! {
-    out := copy_bytes(block)
-    i := 15
-    loop i >= 12 {
-        n :: (u8_int(out[i]) + 1) & 255
-        out[i] = (U8{n})
-        if n != 0 -> break
-        i = i - 1
+fn inc32(block: &[U8]) Never! {
+    // Four fixed steps; carry depends only on the public counter.
+    carry := U64{1}
+    loop i in 0..<4 {
+        n :: U64.from_u8(block[15 - i]) + carry
+        block[15 - i] = U8{n & U64{255}}
+        carry = n >> 8
     }
-    out
 }
 
-fn aes_ctr(rk: [Int], ctr0: [U8], data: [U8]) -> [U8] Never! {
+fn aes_ctr(rk: [U8], j0: [U8], data: [U8], count: Int, state: &[U8], work: &[U64]) -> [U8] Never! {
     out := [U8]{}
-    ctr := copy_bytes(ctr0)
+    ctr := copy_bytes(j0)
     i := 0
-    loop i < data.len() {
-        ks :: aes256_encrypt_block(rk, ctr)
+    loop i < count {
+        inc32(&ctr)
+        aes256_encrypt_block(rk, ctr, state, work)
         j := 0
-        loop j < 16 && i < data.len() {
-            &out.push(U8{data[i] ~| ks[j]})
+        loop j < 16 && i < count {
+            &out.push(data[i] ~| state[j])
             i = i + 1
             j = j + 1
         }
-        if i < data.len() -> ctr = inc32(ctr)
     }
     out
 }
 
-fn gcm_tag(h: [U8], ek0: [U8], aad: [U8], ct: [U8]) -> [U8] Never! {
-    y := 0
-    h_value :: be_int(h)
-    y = ghash_blocks(y, h_value, aad)
-    y = ghash_blocks(y, h_value, ct)
-    len_block := [U8]{}
-    loop b in be_bytes(aad.len() * 8, 8) -> &len_block.push(b)
-    loop b in be_bytes(ct.len() * 8, 8) -> &len_block.push(b)
-    y = gf128_mul(y ~| be_int(len_block), h_value)
-    tag_n :: y ~| be_int(ek0)
-    be_bytes(tag_n, 16)
+fn gcm_tag(h: [U8], ek0: [U8], aad: [U8], ct: [U8], count: Int) -> [U8] Never! {
+    y := [U64]{U64{0}, U64{0}}
+    high :: aes_load_be64(h, 0)
+    low :: aes_load_be64(h, 8)
+    ghash_blocks(&y, high, low, aad, aad.len())
+    ghash_blocks(&y, high, low, ct, count)
+    y[0] = y[0] ~| U64{aad.len() * 8}
+    y[1] = y[1] ~| U64{count * 8}
+    gf128_mul(&y, high, low)
+    out := zeros16()
+    loop i in 0..<16 {
+        word :: y[i /% 8] >> (56 - 8 * (i %% 8))
+        out[i] = U8{word & U64{255}} ~| ek0[i]
+    }
+    y[0] = U64{0}
+    y[1] = U64{0}
+    out
 }
 
-fn ghash_blocks(y0: Int, h_value: Int, data: [U8]) -> Int Never! {
-    y := y0
-    i := 0
-    loop {
-        if i >= data.len() -> return y
-        block := [U8]{}
-        loop {
-            if block.len() >= 16 || i >= data.len() -> break
-            &block.push(data[i])
-            i = i + 1
+fn aes_load_be64(bytes: [U8], off: Int) -> U64 Never! {
+    word := U64{0}
+    loop i in 0..<8 -> word = (word << 8) | U64.from_u8(bytes[off + i])
+    word
+}
+
+fn ghash_blocks(y: &[U64], high: U64, low: U64, data: [U8], count: Int) Never! {
+    off := 0
+    loop off < count {
+        a := U64{0}
+        b := U64{0}
+        loop i in 0..<16 {
+            byte := U64{0}
+            if off + i < count -> byte = U64.from_u8(data[off + i])
+            if i < 8 -> a = (a << 8) | byte else -> b = (b << 8) | byte
         }
-        loop {
-            if block.len() >= 16 -> break
-            &block.push(U8{0})
-        }
-        y = gf128_mul(y ~| be_int(block), h_value)
+        y[0] = y[0] ~| a
+        y[1] = y[1] ~| b
+        gf128_mul(y, high, low)
+        off = off + 16
     }
 }
 
-fn gf128_mul(x: Int, y: Int) -> Int Never! {
-    reduction_poly :: 0xE1000000000000000000000000000000
-    mask :: (1 << 128) - 1
-    z := 0
-    v := y & mask
-    a := x & mask
-    loop i in 0..<128 {
-        bit :: (a >> (127 - i)) & 1
-        if bit == 1 -> z = z ~| v
-        lsb :: v & 1
-        v = v >> 1
-        if lsb == 1 -> v = v ~| reduction_poly
+// D-WRAP-SCOPE1: masks are explicitly wrapping fixed-width subtraction.
+#Arithmetic(.Wrapping)
+fn gf128_mul(x: &[U64], high: U64, low: U64) Never! {
+    a := x[0]
+    b := x[1]
+    vh := high
+    vl := low
+    zh := U64{0}
+    zl := U64{0}
+    loop _ in 0..<128 {
+        mask :: U64{0} - (a >> 63)
+        zh = zh ~| (vh & mask)
+        zl = zl ~| (vl & mask)
+        a = (a << 1) | (b >> 63)
+        b = b << 1
+        reduction :: U64{0} - (vl & U64{1})
+        vl = (vl >> 1) | (vh << 63)
+        vh = (vh >> 1) ~| (U64{0xe100000000000000} & reduction)
     }
-    z & mask
+    x[0] = zh
+    x[1] = zl
 }
 
 fn u8_int(b: U8) -> Int Never! { Int.from_u8(b) }
 
-fn be_int(bytes: [U8]) -> Int Never! {
-    n := 0
-    loop b in bytes -> n = (n << 8) | u8_int(b)
-    n
+
+// Six eight-plane banks, allocated once and reused by every round/block.
+fn aes_workspace() -> [U64] Never! {
+    work := [U64]{}
+    loop _ in 0..<48 -> &work.push(U64{0})
+    work
 }
 
-fn be_bytes(n: Int, width: Int) -> [U8] Never! {
-    out := [U8]{}
-    loop i in 0..<width -> &out.push(U8{0})
-    v := n
-    i := width - 1
-    loop i >= 0 {
-        out[i] = to_u8(v)
-        v = v >> 8
-        i = i - 1
-    }
-    out
+fn aes_workspace_clear(work: &[U64]) Never! {
+    // Best-effort source stores: the byte buffers use the existing zeroizer.
+    loop i in 0..<48 -> work[i] = U64{0}
 }
 
-fn aes256_expand(key: [U8]) -> [Int] Never! {
-    w := [Int]{}
-    loop i in 0..<8 -> &w.push(u32be(key, i * 4))
+fn aes256_expand(key: [U8], state: &[U8], work: &[U64]) -> [U8] Never! {
+    w := [U8]{}
+    loop b in key -> &w.push(b)
     loop i in 8..<60 {
-        t := w[i - 1]
-        if i % 8 == 0 -> t = subword(rotword(t)) ~| (C_AES_RCON[i /% 8 - 1] << 24) else {
-            if i % 8 == 4 -> t = subword(t)
+        loop j in 0..<4 -> state[j] = w[(i - 1) * 4 + j]
+        loop j in 4..<16 -> state[j] = U8{0}
+        if i %% 8 == 0 {
+            first :: state[0]
+            loop j in 0..<3 -> state[j] = state[j + 1]
+            state[3] = first
+            sub_bytes(state, work)
+            state[0] = state[0] ~| C_AES_RCON[i /% 8 - 1]
+        } else {
+            if i %% 8 == 4 -> sub_bytes(state, work)
         }
-        &w.push(wrap32(w[i - 8] ~| t))
+        loop j in 0..<4 -> &w.push(w[(i - 8) * 4 + j] ~| state[j])
     }
     w
 }
 
-fn rotword(w: Int) -> Int Never! { wrap32((w << 8) | ((w >> 24) & 255)) }
-
-fn subword(w: Int) -> Int Never! {
-    b0 :: C_AES_SBOX[(w >> 24) & 255]
-    b1 :: C_AES_SBOX[(w >> 16) & 255]
-    b2 :: C_AES_SBOX[(w >> 8) & 255]
-    b3 :: C_AES_SBOX[w & 255]
-    (b0 << 24) | (b1 << 16) | (b2 << 8) | b3
-}
-
-fn u32be(bytes: [U8], off: Int) -> Int Never! {
-    if off + 3 >= bytes.len() -> return 0
-    ((u8_int(bytes[off]) << 24) | (u8_int(bytes[off + 1]) << 16) | (u8_int(bytes[off + 2]) << 8) | u8_int(bytes[off + 3])) & C_MASK32
-}
-
-fn aes256_encrypt_block(rk: [Int], block: [U8]) -> [U8] Never! {
-    s := [Int]{}
-    loop i in 0..<16 -> &s.push(u8_int(block[i]) & 255)
-    add_round(&s, rk, 0)
+fn aes256_encrypt_block(rk: [U8], block: [U8], s: &[U8], work: &[U64]) Never! {
+    loop i in 0..<16 -> s[i] = block[i]
+    add_round(s, rk, 0)
     loop round in 1..<14 {
-        sub_bytes(&s)
-        shift_rows(&s)
-        mix_columns(&s)
-        add_round(&s, rk, round)
+        sub_bytes(s, work)
+        shift_rows(s)
+        mix_columns(s)
+        add_round(s, rk, round)
     }
-    sub_bytes(&s)
-    shift_rows(&s)
-    add_round(&s, rk, 14)
-    out := [U8]{}
-    loop i in 0..<16 -> &out.push(U8{s[i]})
-    out
+    sub_bytes(s, work)
+    shift_rows(s)
+    add_round(s, rk, 14)
 }
 
-fn add_round(s: &[Int], rk: [Int], round: Int) Never! {
-    loop c in 0..<4 {
-        w :: rk[round * 4 + c]
-        s[4 * c] = s[4 * c] ~| ((w >> 24) & 255)
-        s[4 * c + 1] = s[4 * c + 1] ~| ((w >> 16) & 255)
-        s[4 * c + 2] = s[4 * c + 2] ~| ((w >> 8) & 255)
-        s[4 * c + 3] = s[4 * c + 3] ~| (w & 255)
+fn add_round(s: &[U8], rk: [U8], round: Int) Never! {
+    loop i in 0..<16 -> s[i] = s[i] ~| rk[round * 16 + i]
+}
+
+// Bitsliced AES inverse followed by the FIPS-197 affine transform.
+// All addresses and shifts depend only on public lane/plane indices.
+fn sub_bytes(s: &[U8], w: &[U64]) Never! {
+    loop p in 0..<8 {
+        w[p] = U64{0}
+        loop lane in 0..<16 -> w[p] = w[p] | (((U64.from_u8(s[lane]) >> p) & U64{1}) << lane)
+    }
+    aes_square(w, 0, 8)           // x^2
+    aes_multiply(w, 8, 0, 16)     // x^3
+    aes_square(w, 16, 24)         // x^6
+    aes_square(w, 24, 24)         // x^12
+    aes_multiply(w, 24, 16, 32)   // x^15
+    loop p in 0..<8 -> w[16 + p] = w[32 + p]
+    aes_square(w, 16, 16)         // x^30
+    aes_square(w, 16, 16)         // x^60
+    aes_square(w, 16, 16)         // x^120
+    aes_square(w, 16, 16)         // x^240
+    aes_multiply(w, 16, 24, 32)   // x^252
+    loop p in 0..<8 -> w[16 + p] = w[32 + p]
+    aes_multiply(w, 16, 8, 32)    // x^254 (zero also follows this chain)
+    loop p in 0..<8 {
+        w[p] = w[32 + p] ~| w[32 + ((p + 4) %% 8)] ~| w[32 + ((p + 5) %% 8)] ~| w[32 + ((p + 6) %% 8)] ~| w[32 + ((p + 7) %% 8)]
+        if ((0x63 >> p) & 1) != 0 -> w[p] = w[p] ~| U64{65535}
+    }
+    loop lane in 0..<16 {
+        byte := U64{0}
+        loop p in 0..<8 -> byte = byte | (((w[p] >> lane) & U64{1}) << p)
+        s[lane] = U8{byte}
     }
 }
 
-fn sub_bytes(s: &[Int]) Never! {
-    loop i in 0..<16 -> s[i] = C_AES_SBOX[s[i]]
+// Linear square modulo x^8+x^4+x^3+x+1, with locals permitting aliasing.
+fn aes_square(w: &[U64], src: Int, dst: Int) Never! {
+    a0 :: w[src]
+    a1 :: w[src + 1]
+    a2 :: w[src + 2]
+    a3 :: w[src + 3]
+    a4 :: w[src + 4]
+    a5 :: w[src + 5]
+    a6 :: w[src + 6]
+    a7 :: w[src + 7]
+    w[dst] = a0 ~| a4 ~| a6
+    w[dst + 1] = a4 ~| a6 ~| a7
+    w[dst + 2] = a1 ~| a5
+    w[dst + 3] = a4 ~| a5 ~| a6 ~| a7
+    w[dst + 4] = a2 ~| a4 ~| a7
+    w[dst + 5] = a5 ~| a6
+    w[dst + 6] = a3 ~| a5
+    w[dst + 7] = a6 ~| a7
 }
 
-fn shift_rows(s: &[Int]) Never! {
+// dst is distinct from a/b; bank 40 is the fixed multiply-by-x scratch.
+fn aes_multiply(w: &[U64], a: Int, b: Int, dst: Int) Never! {
+    loop p in 0..<8 {
+        w[40 + p] = w[a + p]
+        w[dst + p] = U64{0}
+    }
+    loop bit in 0..<8 {
+        loop p in 0..<8 -> w[dst + p] = w[dst + p] ~| (w[40 + p] & w[b + bit])
+        high :: w[47]
+        loop p in 0..<7 -> w[47 - p] = w[46 - p]
+        w[40] = high
+        w[41] = w[41] ~| high
+        w[43] = w[43] ~| high
+        w[44] = w[44] ~| high
+    }
+}
+
+fn shift_rows(s: &[U8]) Never! {
     t1 := s[1]
     t5 := s[5]
     t9 := s[9]
@@ -850,33 +929,55 @@ fn shift_rows(s: &[Int]) Never! {
     s[3] = t15
 }
 
-fn mix_columns(s: &[Int]) Never! {
+fn mix_columns(s: &[U8]) Never! {
     loop c in 0..<4 {
         i :: 4 * c
-        a0 := s[i]
-        a1 := s[i + 1]
-        a2 := s[i + 2]
-        a3 := s[i + 3]
-        s[i] = gf8(a0, 2) ~| gf8(a1, 3) ~| a2 ~| a3
-        s[i + 1] = a0 ~| gf8(a1, 2) ~| gf8(a2, 3) ~| a3
-        s[i + 2] = a0 ~| a1 ~| gf8(a2, 2) ~| gf8(a3, 3)
-        s[i + 3] = gf8(a0, 3) ~| a1 ~| a2 ~| gf8(a3, 2)
+        a0 :: s[i]
+        a1 :: s[i + 1]
+        a2 :: s[i + 2]
+        a3 :: s[i + 3]
+        all :: a0 ~| a1 ~| a2 ~| a3
+        s[i] = a0 ~| all ~| xtime(a0 ~| a1)
+        s[i + 1] = a1 ~| all ~| xtime(a1 ~| a2)
+        s[i + 2] = a2 ~| all ~| xtime(a2 ~| a3)
+        s[i + 3] = a3 ~| all ~| xtime(a3 ~| a0)
     }
 }
 
-fn gf8(a: Int, n: Int) -> Int Never! {
-    if n == {
-        1 -> a & 255
-        2 -> xtime(a)
-        3 -> xtime(a) ~| (a & 255)
-        else -> a & 255
-    }
+#Arithmetic(.Wrapping)
+fn xtime(a: U8) -> U8 Never! {
+    (a << 1) ~| (U8{0x1b} & (U8{0} - (a >> 7)))
 }
 
-fn xtime(a: Int) -> Int Never! {
-    v :: (a << 1) & 255
-    if (a & 128) != 0 -> return v ~| 0x1b
-    v
+// NIST FIPS-197 / SP800-38A AES-256 block example:
+// https://csrc.nist.gov/CSRC/media/Projects/Cryptographic-Standards-and-Guidelines/documents/examples/AES_Core256.pdf
+// PDF SHA-256: 8caf33781b8d4b9564c7e95a7690e491ca1d95efe9a31cdea2977deaf4c7b4ce
+// All four outputs also observed from seed aes 0.8.4 (aes/fixtures.json).
+// Private block tests avoid adding a public raw-block API.
+#Test("NIST AES-256 block cipher known answers") {
+    key :: [U8]{0x60, 0x3d, 0xeb, 0x10, 0x15, 0xca, 0x71, 0xbe, 0x2b, 0x73, 0xae, 0xf0, 0x85, 0x7d, 0x77, 0x81, 0x1f, 0x35, 0x2c, 0x07, 0x3b, 0x61, 0x08, 0xd7, 0x2d, 0x98, 0x10, 0xa3, 0x09, 0x14, 0xdf, 0xf4}
+    plain :: [[U8]]{
+        [U8]{0x6b, 0xc1, 0xbe, 0xe2, 0x2e, 0x40, 0x9f, 0x96, 0xe9, 0x3d, 0x7e, 0x11, 0x73, 0x93, 0x17, 0x2a},
+        [U8]{0xae, 0x2d, 0x8a, 0x57, 0x1e, 0x03, 0xac, 0x9c, 0x9e, 0xb7, 0x6f, 0xac, 0x45, 0xaf, 0x8e, 0x51},
+        [U8]{0x30, 0xc8, 0x1c, 0x46, 0xa3, 0x5c, 0xe4, 0x11, 0xe5, 0xfb, 0xc1, 0x19, 0x1a, 0x0a, 0x52, 0xef},
+        [U8]{0xf6, 0x9f, 0x24, 0x45, 0xdf, 0x4f, 0x9b, 0x17, 0xad, 0x2b, 0x41, 0x7b, 0xe6, 0x6c, 0x37, 0x10},
+    }
+    cipher :: [[U8]]{
+        [U8]{0xf3, 0xee, 0xd1, 0xbd, 0xb5, 0xd2, 0xa0, 0x3c, 0x06, 0x4b, 0x5a, 0x7e, 0x3d, 0xb1, 0x81, 0xf8},
+        [U8]{0x59, 0x1c, 0xcb, 0x10, 0xd4, 0x10, 0xed, 0x26, 0xdc, 0x5b, 0xa7, 0x4a, 0x31, 0x36, 0x28, 0x70},
+        [U8]{0xb6, 0xed, 0x21, 0xb9, 0x9c, 0xa6, 0xf4, 0xf9, 0xf1, 0x53, 0xe7, 0xb1, 0xbe, 0xaf, 0xed, 0x1d},
+        [U8]{0x23, 0x30, 0x4b, 0x7a, 0x39, 0xf9, 0xf3, 0xff, 0x06, 0x7d, 0x8d, 0x8f, 0x9e, 0x24, 0xec, 0xc7},
+    }
+    work := aes_workspace()
+    state := zeros16()
+    rk := aes256_expand(key, &state, &work)
+    loop i in 0..<4 {
+        aes256_encrypt_block(rk, plain[i], &state, &work)
+        assert_eq(state, cipher[i])
+    }
+    crypto.__zeroize(^rk)
+    crypto.__zeroize(^state)
+    aes_workspace_clear(&work)
 }
 
 /// RFC 9106 Argon2id.  The portable implementation supports one to eight
