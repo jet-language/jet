@@ -30,6 +30,7 @@ use jet_foundation.[
     TLambda,
     TStmt,
     Type,
+    compiler_transfer_rows,
     diagnostic_with_rights,
     diagnostic_with_source_derived_suggestion,
     symbol_id,
@@ -1910,10 +1911,10 @@ pub fn sema_effects_check_modules(inputs: ^[SemaEffectModuleInput], package_memo
         }
         sema_effect_publish_diagnostics(&diagnostics, &results, module_index, module_row.source_segments, discarded)
     }
-    // All source reads are finished. Transfer each owned list into its result
-    // before stamping solved effects; neither side needs a second list.
+    // All source reads are finished. Transfer whole owning rows through the
+    // shared transport, avoiding a projected move from an indexed container.
     loop module_index in 0..<results.len() {
-        results[module_index].functions = ^inputs[module_index].functions
+        compiler_transfer_rows<TFunc>(&results[module_index].functions, &inputs[module_index].functions)
         loop function_index in 0..<results[module_index].functions.len() {
             node_index :: sema_effect_node_index(node_by_key, results[module_index].functions[function_index].key) ?? next
             results[module_index].functions[function_index].effects = sema_effect_tfacts(nodes[node_index], solved[node_index])

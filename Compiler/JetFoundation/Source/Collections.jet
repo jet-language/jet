@@ -10,6 +10,21 @@
 // `node Tools/agent/gen-core-tables.mjs --write` projects both tables into
 // Docs/spec/reference/core-library.md; `--check` rejects a stale projection.
 
+// Append owning compiler rows in input order, leaving the source empty.
+// Use pops instead of moving an indexed field/list payload out of a borrowed
+// aggregate; both passes transfer whole locals and never clone a row.
+pub fn compiler_transfer_rows<T>(to: &[T], from: &[T]) Never! {
+    reversed := [T]{}
+    loop from.len() > 0 {
+        row := &from.pop() ?? panic("a nonempty compiler row source failed to pop")
+        &reversed.push(^row)
+    }
+    loop reversed.len() > 0 {
+        row := &reversed.pop() ?? panic("a nonempty compiler row buffer failed to pop")
+        &to.push(^row)
+    }
+}
+
 pub enum SemaCollectionKind {
     List(element: Type)
     FixedList(element: Type)

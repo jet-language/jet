@@ -61,6 +61,7 @@ use jet_foundation.[
     compiler_threads_admit,
     compiler_threads_failure_text,
     compiler_threads_partition,
+    compiler_transfer_rows,
     expr_span,
     symbol_id,
     tir_symbol_local,
@@ -1126,19 +1127,28 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
     if returns_value && func.body.len() > 0 && func.body[func.body.len() - 1] == .Switch(_, _, _, table_span) {
         context.value_tail_span = Val(table_span)
     }
-    statements :: sema_check_statements(func.body, Val(effective_return), updated, &scopes, &state, &tail_store, &context, &diagnostics, 0)
+    statements := sema_check_statements(func.body, Val(effective_return), updated, &scopes, &state, &tail_store, &context, &diagnostics, 0)
     context.lost_tail_span = None
     context.value_tail_span = None
     loop site in state.share_found -> &share_found.push(site)
     if !statements.complete -> complete = false
     if !sema_check_never_fallthrough(func, scopes, &diagnostics) -> complete = false
-    body := statements.value
-    if contract.complete && contract.post.len() > 0 {
-        body = [TStmt]{TStmt.ContractScope{pre: [TContract]{}, body: body, post: contract.post, result: contract.result, span: func.span}}
-    }
-    // Rust `check_value_block` over the body (Registration.rs:937-938): a
-    // value body reports E0114 when it can reach its end without a value.
+    // Check the original statement rows before transferring them to the TFunc.
+    // Contracts wrap those rows but must not change the fallthrough check.
     if returns_value && !sema_stmt_check_value_block_end(func.body, statements.value, Val(effective_return), func.span, context.function_name, &diagnostics) -> complete = false
+    reversed := [TStmt]{}
+    loop statements.value.len() > 0 {
+        statement := &statements.value.pop() ?? { break }
+        &reversed.push(^statement)
+    }
+    body := [TStmt]{}
+    loop reversed.len() > 0 {
+        statement := &reversed.pop() ?? { break }
+        &body.push(^statement)
+    }
+    if contract.complete && contract.post.len() > 0 {
+        body = [TStmt]{TStmt.ContractScope{pre: [TContract]{}, body: ^body, post: contract.post, result: contract.result, span: func.span}}
+    }
     sema_ownership_finalize_references(&state, &diagnostics)
     loop fact in context.call_facts -> &call_facts.push(fact)
     loop request in context.comptime_requests -> &comptime_requests.push(request)
@@ -1197,7 +1207,7 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
         memo_unbounded: false,
         is_reactive: func.is_reactive,
         reactive_upgrades: context.reactive_upgrades,
-        body: body,
+        body: ^body,
         is_inline: func.is_inline,
         is_inline_always: func.is_inline_always,
         is_scalar: false,
@@ -4058,9 +4068,11 @@ pub fn sema_finalize_registration_graph(graph: SemaRegistrationGraph, resolved: 
     loop module_index in 0..<modules.len() {
         source_index :: sema_registration_module_index(resolved_graph, modules[module_index].module_identity) ?? next
         source :: resolved_graph.modules[source_index]
+        functions := [TFunc]{}
+        compiler_transfer_rows<TFunc>(&functions, &modules[module_index].functions)
         &effect_inputs.push(SemaEffectModuleInput{
             module_identity: modules[module_index].module_identity,
-            functions: ^modules[module_index].functions,
+            functions: ^functions,
             sources: sema_comptime_effect_sources(source),
             call_facts: modules[module_index].call_facts,
             source_segments: source.source_segments,
@@ -4076,16 +4088,14 @@ pub fn sema_finalize_registration_graph(graph: SemaRegistrationGraph, resolved: 
     if !effects.complete -> complete = false
     loop effect_module_index in 0..<effects.modules.len() {
         effect_index :: sema_registration_module_index(resolved_graph, effects.modules[effect_module_index].module_identity) ?? next
-        modules[effect_index].functions = ^effects.modules[effect_module_index].functions
+        modules[effect_index].functions = [TFunc]{}
+        compiler_transfer_rows<TFunc>(&modules[effect_index].functions, &effects.modules[effect_module_index].functions)
     }
     resolved_compute_facts := [SemaComputeFunctionFacts]{}
-    effect_solved_functions := [TFunc]{}
     loop module_index in 0..<modules.len() {
-        module_result :: modules[module_index]
-        loop function_facts in module_result.compute_facts -> &resolved_compute_facts.push(function_facts)
-        loop function in module_result.functions -> &effect_solved_functions.push(function)
+        loop function_facts in modules[module_index].compute_facts -> &resolved_compute_facts.push(function_facts)
     }
-    compute_diagnostics := sema_compute_validate_autodiff_purity(resolved_compute_facts, effect_solved_functions)
+    compute_diagnostics := sema_compute_validate_autodiff_purity(resolved_compute_facts, modules)
     loop diagnostic in compute_diagnostics {
         if diagnostic.span == {
             .Val(span) -> {

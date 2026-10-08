@@ -62,9 +62,13 @@ fn sema_compute_effects_have_root(effects: [String], root: String) -> Bool Never
     false
 }
 
-fn sema_compute_function(functions: [TFunc], function_key: String) -> TFunc? {
-    loop function in functions {
-        if function.key == function_key -> return Val(function)
+// A borrowed lookup returns only scalar coordinates, never an owning TFunc.
+// Preserve first-match traversal across the globally effect-solved modules.
+fn sema_compute_function(modules: [SemaGraphModuleResult], function_key: String) -> (module_index: Int, row: Int)? {
+    loop module_index in 0..<modules.len() {
+        loop row_index in 0..<modules[module_index].functions.len() {
+            if modules[module_index].functions[row_index].key == function_key -> return Val((module_index: module_index, row: row_index))
+        }
     }
     None
 }
@@ -83,13 +87,13 @@ fn sema_compute_panic_memo(memo: [SemaComputePanicMemo], function_key: String) -
     None
 }
 
-fn sema_compute_panic_sites_are_compute_failures(function_key: String, facts: [SemaComputeFunctionFacts], functions: [TFunc], visiting: &[String], memo: &[SemaComputePanicMemo]) -> Bool Never! {
+fn sema_compute_panic_sites_are_compute_failures(function_key: String, facts: [SemaComputeFunctionFacts], modules: [SemaGraphModuleResult], visiting: &[String], memo: &[SemaComputePanicMemo]) -> Bool Never! {
     if function_key == "__jet_panic__" -> return false
     if sema_compute_panic_memo(memo, function_key) == .Val(value) -> return value
     loop active in visiting {
         if active == function_key -> return false
     }
-    function :: sema_compute_function(functions, function_key) ?? {
+    function :: sema_compute_function(modules, function_key) ?? {
         &memo.push(SemaComputePanicMemo{function_key: function_key, safe: false})
         return false
     }
@@ -98,14 +102,14 @@ fn sema_compute_panic_sites_are_compute_failures(function_key: String, facts: [S
     local_unsafe_panic := body_facts.map((value) -> value.autodiff_unsafe_panic) ?? false
     local_panic := local_safe_panic || local_unsafe_panic
     safe := !local_panic || (local_safe_panic && !local_unsafe_panic)
-    if sema_compute_has_panic_edge(function) && !local_panic -> safe = false
+    if sema_compute_has_panic_edge(modules[function.module_index].functions[function.row]) && !local_panic -> safe = false
     &visiting.push(function_key)
     if safe {
-        loop edge in function.effects.call_edges {
+        loop edge in modules[function.module_index].functions[function.row].effects.call_edges {
             if edge == "__jet_panic__" -> next
-            target :: sema_compute_function(functions, edge) ?? next
-            if !sema_compute_effects_have_root(target.effects.solved, "Panic") -> next
-            if !sema_compute_panic_sites_are_compute_failures(edge, facts, functions, &visiting, &memo) {
+            target :: sema_compute_function(modules, edge) ?? next
+            if !sema_compute_effects_have_root(modules[target.module_index].functions[target.row].effects.solved, "Panic") -> next
+            if !sema_compute_panic_sites_are_compute_failures(edge, facts, modules, &visiting, &memo) {
                 safe = false
                 break
             }
@@ -143,18 +147,18 @@ fn sema_compute_effect_names(effects: [String]) -> String Never! {
     effects.join(", ")
 }
 
-// `functions` must be the globally effect-solved TFuncs, since a named target
-// may be imported or may reach another module. Callers source-locate the
+// `modules` borrow the globally effect-solved TFuncs in their existing owners:
+// named targets may be imported or reach another module. Callers source-locate
 // returned diagnostics with the owning module's source segments.
-pub fn sema_compute_validate_autodiff_purity(facts: [SemaComputeFunctionFacts], functions: [TFunc]) -> [Diagnostic] {
+pub fn sema_compute_validate_autodiff_purity(facts: [SemaComputeFunctionFacts], modules: [SemaGraphModuleResult]) -> [Diagnostic] {
     diagnostics := [Diagnostic]{}
     panic_memo := [SemaComputePanicMemo]{}
     loop function_facts in facts {
         loop obligation in function_facts.autodiff_obligations {
-            target :: sema_compute_function(functions, obligation.target) ?? next
-            forbidden := sema_compute_forbidden_effects(target.effects.solved)
+            target :: sema_compute_function(modules, obligation.target) ?? next
+            forbidden := sema_compute_forbidden_effects(modules[target.module_index].functions[target.row].effects.solved)
             panic_only := sema_compute_panic_only(forbidden)
-            if panic_only && sema_compute_panic_sites_are_compute_failures(obligation.target, facts, functions, [String]{}, &panic_memo) {
+            if panic_only && sema_compute_panic_sites_are_compute_failures(obligation.target, facts, modules, [String]{}, &panic_memo) {
                 filtered := [String]{}
                 loop effect_name in forbidden {
                     if sema_effect_root(effect_name) != "Panic" -> &filtered.push(effect_name)
