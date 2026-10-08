@@ -1832,6 +1832,16 @@ fn run() { print(scale_kind() == .Rational) }
             variants.iter().map(|variant| variant.name.as_str()).collect::<Vec<_>>(),
             expected
         );
+        assert!(
+            mir.functions.iter().flat_map(|function| &function.blocks)
+                .flat_map(|block| &block.instructions)
+                .any(|instruction| matches!(
+                    &instruction.operation,
+                    jet_foundation::MIR::MirOperation::EnumIs { owner, variant, .. }
+                        if *owner == definitions[0].id && variant == "Rational"
+                )),
+            "the typed comparison must retain the reflection enum's canonical owner"
+        );
         let sema_variants = crate::Sema::core_fact_kind_variants("UnitScaleProvenanceKind")
             .expect("canonical reflection sema menu");
         assert_eq!(sema_variants.len(), expected.len());
