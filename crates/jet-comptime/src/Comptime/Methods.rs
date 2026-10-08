@@ -26,7 +26,7 @@ pub use core_calls::{
     HistoryCommandSchema,
 };
 pub(crate) use core_calls::eval_data_describe;
-pub(super) use core_calls::{apply_regex_method, as_float, solver_require};
+pub(super) use core_calls::{apply_regex_method, as_float};
 // I9: the MIR evaluator calls this fake-data kernel too, so it
 // must be reachable from outside this crate. One kernel, every tier.
 pub use core_calls::apply_fake_method;

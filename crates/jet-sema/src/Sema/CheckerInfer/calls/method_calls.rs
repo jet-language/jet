@@ -1625,28 +1625,6 @@ impl<'a> Checker<'a> {
                         *resolved_ret_out = Some(unlock.clone());
                         return Some(unlock);
                     }
-                    // D-SOLVER-LIB1=A: `Solver` is a runtime handle, not a
-                    // declared Core struct, so its constructor must be claimed
-                    // before the generic Core type-item static route below.
-                    if ns == "core.compute.solve" && leaf == Syntax::SOLVER_TYPE && method == "new"
-                    {
-                        if args.len() != 1 {
-                            self.diags.push(Diagnostic::error(
-                                "E0101",
-                                format!("`Solver.new` takes 1 argument, got {}", args.len()),
-                                "solver construction needs one deterministic seed".to_string(),
-                                "write `Solve.Solver.new(seed)`".to_string(),
-                                Some(span),
-                            ));
-                        }
-                        for a in args.iter_mut() {
-                            self.infer(&mut a.expr);
-                        }
-                        let ret = Type::Named(Syntax::SOLVER_TYPE.to_string());
-                        *recv_type_out = Some(Syntax::SOLVER_TYPE.to_string());
-                        *resolved_ret_out = Some(ret.clone());
-                        return Some(ret);
-                    }
                     // `core.game` constructors mint runtime handles (GameScene,
                     // GameReplay, GameBackend) that `game.run` and codegen's
                     // `game_static_type` expect with the module-qualified
@@ -6296,7 +6274,6 @@ impl<'a> Checker<'a> {
                     | crate::Syntax::DETERMINISTIC_WORLD_TYPE
                     | "Fake"
                     | "Duration"
-                    | "Solver"
                     | "TestSuite"
             ) && !source_owned {
                 if let Some(ret) =

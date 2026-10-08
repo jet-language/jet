@@ -14243,14 +14243,6 @@ pub enum THandleOp {
     FakeEmail,
     FakeHost,
     FakeAddress,
-    /// D-SOLVER-LIB1=A: `Solver.new(seed)` → `{root}jet_solver_new(seed)`.
-    SolverNew,
-    /// D-SOLVER-LIB1=A: `solver.require(ok)` → `{root}jet_solver_require(&mut solver, ok)`.
-    SolverRequire,
-    /// D-SOLVER-LIB1=A: `solver.failure_count()` → `{root}jet_solver_failure_count(&solver)`.
-    SolverFailureCount,
-    /// D-SOLVER-LIB1=A: `solver.status()` → `{root}jet_solver_status(&solver)`.
-    SolverStatus,
     GameSceneNew,
     GameReplayRecord,
     GameBackendHeadless,

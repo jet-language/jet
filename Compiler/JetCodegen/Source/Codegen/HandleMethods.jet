@@ -1041,10 +1041,6 @@ fn jet_codegen_general_handle_route(operation: THandleOp, receiver: Type, argume
         .FakeEmail -> return Val(jet_codegen_handle_h("fake.email", "jet_fake_email", [Bool]{true}, Val(Effect.Rand)))
         .FakeHost -> return Val(jet_codegen_handle_h("fake.host", "jet_fake_host", [Bool]{true}, Val(Effect.Rand)))
         .FakeAddress -> return Val(jet_codegen_handle_h("fake.address", "jet_fake_address", [Bool]{true}, Val(Effect.Rand)))
-        .SolverNew -> return Val(jet_codegen_handle_h("solver.new", "jet_solver_new", [Bool]{false}, None))
-        .SolverRequire -> return Val(jet_codegen_handle_h("solver.require", "jet_solver_require", [Bool]{true, false}, None))
-        .SolverFailureCount -> return Val(jet_codegen_handle_h("solver.failure_count", "jet_solver_failure_count", [Bool]{true}, None))
-        .SolverStatus -> return Val(jet_codegen_handle_h("solver.status", "jet_solver_status", [Bool]{true}, None))
         .GameSceneNew -> return Val(jet_codegen_handle_h("game.scene_new", "jet_game_scene_new", [Bool]{true}, None))
         .GameReplayRecord -> return Val(jet_codegen_handle_h("game.replay_record", "jet_game_replay_record", [Bool]{true}, None))
         .GameBackendHeadless -> return Val(jet_codegen_handle_core("core.game", "backend_headless", "jet_game_backend_headless", [Bool]{}, None))
@@ -1348,7 +1344,7 @@ fn jet_codegen_handle_receiver_is_mutating(operation: THandleOp) -> Bool Never! 
     }
     if operation == {
         .StdinReadLine -> true
-        .FileReaderReadLine | .FileReaderRead | .AllocReset | .FileWriterWriteLine | .FileWriterFlush | .FileWriterWriteAll | .FileWriterFsync | .ClockTick | .ClockAdvance | .ClockWait | .FakeName | .FakeEmail | .FakeHost | .FakeAddress | .TCPStreamRead | .TCPStreamWrite | .TCPStreamClose | .TCPStreamReadBytes | .TCPStreamReadBytesDeadline | .TCPStreamReadText | .TCPStreamReadTextDeadline | .TCPStreamWriteBytes | .TCPStreamWriteBytesDeadline | .TCPStreamWriteAllBytes | .TCPStreamWriteAllBytesDeadline | .TCPStreamWriteText | .TCPStreamWriteTextDeadline | .TCPStreamShutdown | .TCPStreamReady | .UnixStreamReadDeadline | .UnixStreamWriteAllDeadline | .UnixStreamClose | .UnixStreamSetTimeout | .TLSStreamReadDeadline | .TLSStreamWriteAllDeadline | .TLSStreamClose | .TLSStreamCloseWrite | .SolverRequire -> true
+        .FileReaderReadLine | .FileReaderRead | .AllocReset | .FileWriterWriteLine | .FileWriterFlush | .FileWriterWriteAll | .FileWriterFsync | .ClockTick | .ClockAdvance | .ClockWait | .FakeName | .FakeEmail | .FakeHost | .FakeAddress | .TCPStreamRead | .TCPStreamWrite | .TCPStreamClose | .TCPStreamReadBytes | .TCPStreamReadBytesDeadline | .TCPStreamReadText | .TCPStreamReadTextDeadline | .TCPStreamWriteBytes | .TCPStreamWriteBytesDeadline | .TCPStreamWriteAllBytes | .TCPStreamWriteAllBytesDeadline | .TCPStreamWriteText | .TCPStreamWriteTextDeadline | .TCPStreamShutdown | .TCPStreamReady | .UnixStreamReadDeadline | .UnixStreamWriteAllDeadline | .UnixStreamClose | .UnixStreamSetTimeout | .TLSStreamReadDeadline | .TLSStreamWriteAllDeadline | .TLSStreamClose | .TLSStreamCloseWrite -> true
         else -> false
     }
 }
@@ -1390,12 +1386,6 @@ fn jet_codegen_lower_general_handle_method(builder: &JetCodegenBuilder, program:
     lowered_receiver := if {
         jet_codegen_handle_receiver_is_mutating(operation) -> {
             jet_codegen_method_receiver_arg(&builder, program, receiver, MIRAccess.Write).value
-        }
-        // `Solver.new(seed)`'s seed is its receiver slot: the kernel takes
-        // the native i64 word, so the exact Int narrows here.
-        operation == THandleOp.SolverNew -> {
-            seed :: jet_codegen_lower_expr(&builder, program, receiver)
-            jet_codegen_builtin_native_int(&builder, program, seed, receiver.ty, receiver.span)
         }
         else -> {
             jet_codegen_lower_expr(&builder, program, receiver)

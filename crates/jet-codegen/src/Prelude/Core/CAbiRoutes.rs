@@ -16459,29 +16459,6 @@ mod jet_c_abi_routes {
         })
     }
 
-    /// core.handle.solver.failure_count
-    #[no_mangle]
-    pub extern "C" fn jet_solver_failure_count(a0: *mut crate::jet_std::Solver) -> i64 {
-        guard(|| crate::jet_std::jet_int_from_i64(crate::jet_solver_failure_count(unsafe { &*a0 })))
-    }
-
-    /// core.handle.solver.new
-    #[no_mangle]
-    pub extern "C" fn jet_solver_new(a0: i64) -> *mut crate::jet_std::Solver {
-        guard(|| Box::into_raw(Box::new(crate::jet_solver_new(a0))))
-    }
-
-    /// core.handle.solver.require
-    #[no_mangle]
-    pub extern "C" fn jet_solver_require(a0: *mut crate::jet_std::Solver, a1: u8) {
-        guard(|| crate::jet_solver_require(unsafe { &mut *a0 }, a1 != 0))
-    }
-
-    /// core.handle.solver.status
-    #[no_mangle]
-    pub extern "C" fn jet_solver_status(a0: *mut crate::jet_std::Solver) -> JetCString {
-        guard(|| handle(crate::jet_solver_status(unsafe { &*a0 })))
-    }
 
     /// core.math.stats.clip
     #[no_mangle]

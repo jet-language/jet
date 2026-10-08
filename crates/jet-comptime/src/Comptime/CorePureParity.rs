@@ -922,42 +922,12 @@ pub(super) fn evaluate_method(
             measurement_arithmetic(recv, method, &args[0], span)
         }
         ("Measurement", "sqrt", 0) => measurement_sqrt(recv, span),
-        // D-SOLVER-LIB1=A: finite solver queries (`.require` mutates in dispatch).
-        ("Solver", "failure_count", 0) => solver_failure_count(recv, span),
-        ("Solver", "status", 0) => solver_status(recv, span),
         _ => return None,
     };
     Some(result)
 }
 
 
-/// D-SOLVER-LIB1=A: `solver.require(ok)` — returns `(Unit, updated_receiver)`.
-pub(super) fn solver_require(
-    recv: &CtValue,
-    args: &[CtValue],
-    span: Span,
-) -> Option<Result<(CtValue, CtValue), Diagnostic>> {
-    let CtValue::Struct { type_name, .. } = recv else {
-        return None;
-    };
-    if type_name != crate::Syntax::SOLVER_TYPE {
-        return None;
-    }
-    jet_foundation::Syntax::core_receiver_method(type_name, "require")?;
-    Some(solver_require_update(recv, args, span).map(|updated| (CtValue::Unit, updated)))
-}
-
-/// D-SOLVER-LIB1=A: `solve.Solver.new(seed)` — same seed/checked/failures layout as AOT.
-pub(super) fn solver_new(args: &[CtValue], span: Span) -> EvalResult {
-    if jet_foundation::Syntax::core_receiver_method(crate::Syntax::SOLVER_TYPE, "new").is_none() {
-        return Err(unsupported(
-            "Solver.new is not in the Core-call registry",
-            span,
-        ));
-    }
-    let seed = as_int(one(args, 0, "Solver", "new", span)?, span)?;
-    Ok(solver_value(super::solver_kernel::jet_solver_new(seed)))
-}
 
 /// D-DBDRIVER1 / I9: the interpreter's `DBValue` carrier needs the exact
 /// `JetShow` projection from `Prelude/CoreLib/JetStd/DBPluginWire.rs`.
@@ -3583,50 +3553,6 @@ fn xml_shape_error(reason: &str) -> CtValue {
 // Email uses the shared Prelude kernel through `EmailAdapter`.
 
 
-// ── D-SOLVER-LIB1=A: CtValue adapter for the shared Prelude kernel ──────────
-
-fn solver_from_value(
-    value: &CtValue,
-    span: Span,
-) -> Result<super::solver_kernel::jet_std::Solver, Diagnostic> {
-    Ok(super::solver_kernel::jet_std::Solver {
-        seed: int_field(value, crate::Syntax::SOLVER_TYPE, "seed", span)?,
-        checked: int_field(value, crate::Syntax::SOLVER_TYPE, "checked", span)?,
-        failures: int_field(value, crate::Syntax::SOLVER_TYPE, "failures", span)?,
-    })
-}
-
-fn solver_value(solver: super::solver_kernel::jet_std::Solver) -> CtValue {
-    structure(
-        crate::Syntax::SOLVER_TYPE,
-        vec![
-            ("seed", CtValue::Int(solver.seed)),
-            ("checked", CtValue::Int(solver.checked)),
-            ("failures", CtValue::Int(solver.failures)),
-        ],
-    )
-}
-
-fn solver_require_update(recv: &CtValue, args: &[CtValue], span: Span) -> EvalResult {
-    let mut solver = solver_from_value(recv, span)?;
-    let ok = as_bool(one(args, 0, "Solver", "require", span)?, span)?;
-    super::solver_kernel::jet_solver_require(&mut solver, ok);
-    Ok(solver_value(solver))
-}
-
-fn solver_failure_count(recv: &CtValue, span: Span) -> EvalResult {
-    let solver = solver_from_value(recv, span)?;
-    Ok(CtValue::Int(
-        super::solver_kernel::jet_solver_failure_count(&solver),
-    ))
-}
-
-fn solver_status(recv: &CtValue, span: Span) -> EvalResult {
-    let solver = solver_from_value(recv, span)?;
-    Ok(CtValue::Str(super::solver_kernel::jet_solver_status(
-        &solver,
-    )))
-}
 
 #[cfg(test)]
 mod tests {
