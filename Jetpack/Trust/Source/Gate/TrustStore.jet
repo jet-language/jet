@@ -95,29 +95,30 @@ pub enum TrustRecord {
 
     // Rust `record_json`.
     fn json(self) -> String Never! {
+        // Every record variant projects only Text leaves and text keys.
         if self == {
             .Hash(hash) -> trust_json_object_text([TrustJSONField]{
                 TrustJSONField{key: "type", value: DataTree.Text("hash")},
                 TrustJSONField{key: "hash", value: DataTree.Text(~hash)},
                 TrustJSONField{key: "revocationKey", value: DataTree.Text("{TRUST_HASH_PREFIX}{hash}")}
-            })
+            }) ?? panic("typed trust hash must be JSON-encodable")
             .Pattern(pattern) -> trust_json_object_text([TrustJSONField]{
                 TrustJSONField{key: "type", value: DataTree.Text("pattern")},
                 TrustJSONField{key: "pattern", value: DataTree.Text(~pattern)},
                 TrustJSONField{key: "revocationKey", value: DataTree.Text("{TRUST_PATTERN_PREFIX}{pattern}")}
-            })
+            }) ?? panic("typed trust pattern must be JSON-encodable")
             .Grant(grant) -> trust_json_object_text([TrustJSONField]{
                 TrustJSONField{key: "type", value: DataTree.Text("grant")},
                 TrustJSONField{key: "authority", value: DataTree.Text(~grant.authority)},
                 TrustJSONField{key: "subject", value: DataTree.Text(~grant.subject)},
                 TrustJSONField{key: "scope", value: DataTree.Text(~grant.scope)},
                 TrustJSONField{key: "revocationKey", value: DataTree.Text(grant.key())}
-            })
+            }) ?? panic("typed trust grant must be JSON-encodable")
             .Raw(line) -> trust_json_object_text([TrustJSONField]{
                 TrustJSONField{key: "type", value: DataTree.Text("raw")},
                 TrustJSONField{key: "line", value: DataTree.Text(~line)},
                 TrustJSONField{key: "revocationKey", value: DataTree.Text(~line)}
-            })
+            }) ?? panic("typed trust record must be JSON-encodable")
         }
     }
 }
