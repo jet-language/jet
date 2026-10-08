@@ -2231,3 +2231,42 @@ reserved lists, empty/duplicate/unicode/embedded-NUL fields, each equality
 field, line boundaries and surviving deep clones after original drop.
 Native execution and MIR/caller/layout admission remain unexercised;
 parser and strict C11 receipts alone do not establish parity.
+
+### Native datetime and zone ownership boundary
+
+`DateZoneABI.jet` defines private align8 DateTime24 (secs, u32 nanos,
+low-byte leap bool), Zone24 (owned E4 name, owned transition/info List24
+pointers), and Zoned16 (owned DateTime/Zone pointers). Table elements are
+16-byte seconds/index pairs or offset/low-byte-DST pairs. Clone normalizes
+u32/bool padding, recursively clones tables/text and owns independent shells.
+DateTime equality is secs, leap, nanos (`Time.rs:729-733`); Zone equality
+is name, transitions, infos (`1159-1169`); Zoned equality is instant and
+zone **name only**, not zone table equality (`1480-1482`).
+The field adapters lend the leap slot/pointees or copy a non-owning E4
+header (`CAbiRoutes.rs:12562,13342-13356`); callers must not drop or mutate
+those borrowed projections. No additional constructor was invented.
+
+DateTime's three render modes omit nanos and emit `date time UTC`
+(`Time.rs:1147-1155`, `Core.rs:127-214`). Zoned render uses the seed's
+upper-bound transition search (last equal timestamp wins), saturation for
+leap timestamps/local offset addition, and `date time name (offset)`
+(`Time.rs:869-872,1316-1340,1680-1688`). Only UTC leap-second rendering
+retains nanos; all other paths construct a local time with nanos zero,
+including ordinary UTC (`1501-1510`). UTC leap rendering bypasses tables.
+The shared Date/LocalTime builder emitters are reused without temporary
+date/time handles or a second padding implementation.
+
+Civil conversion mirrors `Time.rs:51-71` after Euclidean 400-year era
+reduction. Gregorian leap rules repeat every 400 years/146097 days, so
+this preserves negative years while bounding the seed's year correction
+loop. The pinned rustc 1.97.1 oracle compared the verbatim seed algorithm
+with this reduction on 10,131 cases (seconds extremes, era boundaries,
+year zero/negative years, century leap dates and 10,000 random day numbers):
+zero differences. Render goldens include extreme saturation, offsets with
+minutes, transition ties/boundaries and leap-second nanos >= 1e9.
+
+`DateZoneWitness.c` links real Jet objects with `--wrap=jet_rt_free`,
+asserts interception/exact-once recursive frees, every equality field,
+borrowed field identities, normalized padding and deep-clone survival.
+Native execution and MIR/caller/layout admission remain unexercised;
+oracle math comparisons and parser/C11 checks are not native parity proof.
