@@ -504,8 +504,9 @@ fn kit_steps_execute(original_context: KitStepCtx, hooks: KitStepHooks) -> KitOu
             slot :: loops.len() - 1
             if loops[slot].kind == "repeat" && cursor == loops[slot].start + 1 {
                 opening :: plan.steps[loops[slot].start]
-                active :: kit_steps_repeat_active(opening, context, state) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "{err}"))
-                if !active {
+                activity :: kit_steps_repeat_check(opening, context, state)
+                if activity.status != "PASS" && activity.status != "FAIL" -> return kit_steps_finish(state, activity)
+                if activity.status == "FAIL" {
                     state = kit_steps_loop_restore(loops[slot], state)
                     cursor = loops[slot].end + 1
                     loops = loops.slice(0, slot)
@@ -532,6 +533,9 @@ fn kit_steps_execute(original_context: KitStepCtx, hooks: KitStepHooks) -> KitOu
             next
         }
         if original.action == "end when" -> next
+        // Selected nonZ loops/awaits refuse before loop state or PID expansion.
+        // Attached assertions select their own conditions after the command.
+        if ((original.action == "repeat" && kit_steps_process_nonzombie_mode(original.argv[4])) || (original.action == "await" && original.argv[0] == "process" && kit_steps_process_nonzombie_mode(original.argv[2]))) && sys.name() != "linux" -> return kit_steps_finish(state, kit_expect_verdict("REFUSED", "process-state"))
         if original.action == "for" || original.action == "repeat" -> state = kit_steps_loop_initialize(original, state)
         if original.action == "for" {
             values :: kit_steps_loop_values(kit_steps_resolve_step(original, context, state) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "loop token unavailable")), context, state) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "{err}"))
@@ -546,9 +550,10 @@ fn kit_steps_execute(original_context: KitStepCtx, hooks: KitStepHooks) -> KitOu
             next
         }
         if original.action == "repeat" {
-            active :: kit_steps_repeat_active(original, context, state) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "{err}"))
+            activity :: kit_steps_repeat_check(original, context, state)
+            if activity.status != "PASS" && activity.status != "FAIL" -> return kit_steps_finish(state, activity)
             end :: kit_steps_block_end(plan.steps, index)
-            if !active {
+            if activity.status == "FAIL" {
                 cursor = end + 1
                 next
             }
@@ -561,8 +566,9 @@ fn kit_steps_execute(original_context: KitStepCtx, hooks: KitStepHooks) -> KitOu
             state = kit_steps_loop_restore(frame, state)
             if frame.kind == "repeat" {
                 opening :: plan.steps[frame.start]
-                active :: kit_steps_repeat_active(opening, context, state) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "{err}"))
-                if active {
+                activity :: kit_steps_repeat_check(opening, context, state)
+                if activity.status != "PASS" && activity.status != "FAIL" -> return kit_steps_finish(state, activity)
+                if activity.status == "PASS" {
                     if frame.started.elapsed().ns >= (kit_steps_duration_ns(opening.argv[6]) ?? 0) -> return kit_steps_finish(state, kit_expect_verdict("FAIL", opening.argv[10]))
                     remaining :: (kit_steps_duration_ns(opening.argv[6]) ?? 0) - frame.started.elapsed().ns
                     interval :: kit_steps_duration_ns(opening.argv[8]) ?? 0

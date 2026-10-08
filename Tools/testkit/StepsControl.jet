@@ -58,7 +58,7 @@ fn kit_steps_repeat_valid(words: [String], text: String) -> Bool {
     tokens :: kit_steps_tokens(kit_steps_body(text)) ?? return false
     if tokens.len() != 11 || text.bytes()[tokens[10].start] != (U8{34}) -> return false
     if words[2] == "file:" -> return kit_steps_relative_path(words[3]) && kit_expect_named(["exists", "absent"], words[4])
-    words[2] == "process" && words[4] == "alive"
+    words[2] == "process" && (words[4] == "alive" || kit_steps_process_nonzombie_mode(words[4]))
 }
 
 fn kit_steps_loop_values(step: KitStep, context: KitStepCtx, state: KitStepState) -> [String] Err! {
@@ -118,14 +118,15 @@ fn kit_steps_loop_restore(frame: KitLoopFrame, state: KitStepState) -> KitStepSt
     result
 }
 
-fn kit_steps_repeat_active(step: KitStep, context: KitStepCtx, state: KitStepState) -> Bool Err! {
-    path :: kit_steps_runtime_expand(step.argv[3], context, state) ?? return Err("repeat token unavailable")
+fn kit_steps_repeat_check(step: KitStep, context: KitStepCtx, state: KitStepState) -> KitVerdict {
+    path :: kit_steps_runtime_expand(step.argv[3], context, state) ?? return kit_expect_verdict("ERROR", "repeat token unavailable")
     if step.argv[2] == "file:" {
-        location :: kit_steps_work_path(path, context.env, context.work, context.scratch, state.built) ?? return Err("repeat file escapes work")
-        return Ok(files.exists(location) == (step.argv[4] == "exists"))
+        location :: kit_steps_work_path(path, context.env, context.work, context.scratch, state.built) ?? return kit_expect_verdict("ERROR", "repeat file escapes work")
+        return if files.exists(location) == (step.argv[4] == "exists") -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "")
     }
-    pid :: Int.parse(path) ?? return Err("repeat pid is not an integer")
-    Ok(kit_steps_process_alive(pid))
+    pid :: Int.parse(path) ?? return kit_expect_verdict("ERROR", "repeat pid is not an integer")
+    active :: if step.argv[4] == "alive" -> kit_steps_process_alive(pid) else -> kit_steps_process_nonzombie(pid, step.argv[4])
+    if active -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "")
 }
 
 fn kit_steps_process_alive(pid: Int) -> Bool {
@@ -134,6 +135,43 @@ fn kit_steps_process_alive(pid: Int) -> Bool {
         sys.kill(pid, 0) ?? return false
     }
     true
+}
+
+fn kit_steps_process_nonzombie_mode(mode: String) -> Bool {
+    mode == "alive-nonzombie" || mode == "proc-readable-nonzombie"
+}
+
+// Exact services law: last ')' state Z is dead; every other result defers to
+// kill0. Exact agent law: unreadable is dead, last ") " state Z is dead,
+// and every other readable result is live without consulting kill0.
+// None means deferred services kill0, not a false or malformed predicate.
+fn kit_steps_process_nonzombie_probe(stat: String?, mode: String) -> Bool? {
+    readable :: mode == "proc-readable-nonzombie"
+    text :: stat ?? return if readable -> Val(false) else -> None
+    bytes :: text.bytes()
+    end := -1
+    loop (index, byte) in bytes {
+        if byte == (U8{41}) && (!readable || (index + 1 < bytes.len() && bytes[index + 1] == (U8{32}))) -> end = index
+    }
+    if end < 0 -> return if readable -> Val(true) else -> None
+    cursor := end + 1
+    if readable -> cursor += 1
+    loop cursor < bytes.len() {
+        scalar :: kit_steps_scalar(bytes, cursor)
+        if !kit_steps_unicode_space(scalar.value) -> break
+        cursor = scalar.next
+    }
+    if cursor < bytes.len() {
+        scalar :: kit_steps_scalar(bytes, cursor)
+        if scalar.value == 90 && (scalar.next == bytes.len() || kit_steps_unicode_space(kit_steps_scalar(bytes, scalar.next).value)) -> return Val(false)
+    }
+    if readable -> Val(true) else -> None
+}
+
+// Callers guard nonZ modes on Linux before expanding the PID or observing it.
+fn kit_steps_process_nonzombie(pid: Int, mode: String) -> Bool {
+    stat :: files.read("/proc/{pid}/stat") ?? return kit_steps_process_nonzombie_probe(None, mode) ?? kit_steps_process_alive(pid)
+    kit_steps_process_nonzombie_probe(Val(stat), mode) ?? kit_steps_process_alive(pid)
 }
 
 fn kit_steps_loop_initialize(step: KitStep, previous: KitStepState) -> KitStepState {

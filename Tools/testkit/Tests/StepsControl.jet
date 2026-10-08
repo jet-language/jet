@@ -1,4 +1,5 @@
 use core.files as files
+use core.sys as sys
 
 #Test("sorted file loops bind paths names stems and append outer captures from real case text") {
     root :: cases_test_root("control-files")
@@ -80,4 +81,69 @@ use core.files as files
         assert(plan.error.contains("invalid bounded loop"))
     }
     files.remove_all(root) ?? panic("remove line-file scratch")
+}
+
+#Test("non-zombie probes preserve distinct services and agent proc-stat laws") {
+    assert_eq(kit_steps_process_nonzombie_probe(None, "alive-nonzombie"), None)
+    assert_eq(kit_steps_process_nonzombie_probe(None, "proc-readable-nonzombie"), Val(false))
+    loop stat in ["", "malformed", "1 (name)", "1 (name) ", "1 (name) R 0", "1 (name) Zeta 0", "1 (name) ZZ 0", "1 (name) Z) R 0", "1 (name) Z 0) R 0"] {
+        assert_eq(kit_steps_process_nonzombie_probe(Val(stat), "alive-nonzombie"), None)
+        assert_eq(kit_steps_process_nonzombie_probe(Val(stat), "proc-readable-nonzombie"), Val(true))
+    }
+    loop stat in ["1 (name) Z", "1 (name) Z 0", "1 (embedded) name) Z 0", "1 (name) \tZ\n0", "1 (name)  Z 0", "1 (name) Z 0"] {
+        assert_eq(kit_steps_process_nonzombie_probe(Val(stat), "alive-nonzombie"), Val(false))
+        assert_eq(kit_steps_process_nonzombie_probe(Val(stat), "proc-readable-nonzombie"), Val(false))
+    }
+    // The agent separator requires ASCII space immediately after the last ')'.
+    loop stat in ["1 (name)Z", "1 (name)\tZ 0", "1 (name) Z 0"] {
+        assert_eq(kit_steps_process_nonzombie_probe(Val(stat), "alive-nonzombie"), Val(false))
+        assert_eq(kit_steps_process_nonzombie_probe(Val(stat), "proc-readable-nonzombie"), Val(true))
+    }
+}
+
+#Test("repeat accepts only the two canonical non-zombie policies") {
+    loop mode in ["alive", "alive-nonzombie", "proc-readable-nonzombie"] {
+        plan :: kit_steps_parse_case("repeat while process -1 {mode} timeout 1s every 1ms fail \"deadline\"\nend repeat\n")
+        assert_eq(plan.error, "")
+        assert_eq(plan.steps[0].argv[4], mode)
+    }
+    loop mode in ["nonzombie", "non-zombie", "alive-non-zombie", "proc-nonzombie", "proc-readable", "proc-readable-non-zombie"] {
+        assert(kit_steps_parse_case("repeat while process -1 {mode} timeout 1s every 1ms fail \"deadline\"\nend repeat\n").error.contains("invalid bounded loop"))
+    }
+}
+
+#Test("non-zombie repeats observe real children reaping deadlines and absent proc entries") {
+    if sys.name() != "linux" -> return
+    root :: cases_test_root("control-nonzombie")
+    loop mode in ["alive-nonzombie", "proc-readable-nonzombie"] {
+        stopped :: "requires: os-name:linux\nspawn peer: jet -c 'exec sleep 20'\nrepeat while process {{pid:peer}} {mode} timeout 1s every 1ms fail \"process remained alive\"\nsignal peer: KILL\nwait peer timeout 1s\nexit: any # explicit signal is an expected stop\nend repeat\n"
+        assert_eq(cases_test_advanced(root, "stopped", stopped).verdict.status, "PASS")
+        timeout :: "requires: os-name:linux\nspawn peer: jet -c 'exec sleep 20'\nrepeat while process {{pid:peer}} {mode} timeout 2ms every 1ms fail \"process remained alive\"\nend repeat\n"
+        failed :: cases_test_advanced(root, "deadline", timeout)
+        assert_eq(failed.verdict.status, "FAIL")
+        assert_eq(failed.verdict.detail, "process remained alive")
+        absent :: "requires: os-name:linux\nrepeat while process -1 {mode} timeout 1s every 1ms fail \"unreachable\"\nstep: false\nend repeat\nstep: printf done\nstdout: = \"done\"\n"
+        assert_eq(cases_test_advanced(root, "absent", absent).verdict.status, "PASS")
+        malformed :: cases_test_advanced(root, "malformed", "requires: os-name:linux\nrepeat while process invalid {mode} timeout 1s every 1ms fail \"unreachable\"\nend repeat\n")
+        assert_eq(malformed.verdict.status, "ERROR")
+        assert_eq(malformed.verdict.detail, "repeat pid is not an integer")
+        missing :: cases_test_advanced(root, "missing", "requires: os-name:linux\nrepeat while process {{cap:unknown}} {mode} timeout 1s every 1ms fail \"unreachable\"\nend repeat\n")
+        assert_eq(missing.verdict.status, "ERROR")
+        assert_eq(missing.verdict.detail, "repeat token unavailable")
+    }
+    files.remove_all(root) ?? panic("remove nonzombie repeat scratch")
+}
+
+#Test("non-zombie repeat platform refusal follows conditions and precedes PID expansion") {
+    root :: cases_test_root("control-nonzombie-host")
+    loop mode in ["alive-nonzombie", "proc-readable-nonzombie"] {
+        skipped :: "when os-name !{sys.name()}\nrepeat while process {{cap:unknown}} {mode} timeout 1s every 1ms fail \"unreachable\"\ncapture: joined += text stdout\nend repeat\nend when\nwhen captured joined: step: false\nstep: printf done\nstdout: = \"done\"\n"
+        assert_eq(cases_test_advanced(root, "skipped", skipped).verdict.status, "PASS")
+        if sys.name() != "linux" {
+            selected :: cases_test_advanced(root, "selected", "repeat while process {{cap:unknown}} {mode} timeout 1s every 1ms fail \"unreachable\"\ncapture: joined += text stdout\nend repeat\n")
+            assert_eq(selected.verdict.status, "REFUSED")
+            assert_eq(selected.verdict.detail, "process-state")
+        }
+    }
+    files.remove_all(root) ?? panic("remove nonzombie repeat host scratch")
 }

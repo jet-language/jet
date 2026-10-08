@@ -98,7 +98,10 @@ fn kit_steps_resolve_step(original: KitStep, context: KitStepCtx, state: KitStep
         }
     }
     loop i in 0..<step.assertions.len() {
-        step.assertions[i].path = kit_steps_runtime_expand(step.assertions[i].path, context, state) ?? return None
+        // NonZ assertion conditions are selected after the command. Leave its
+        // PID untouched only on unsupported hosts so the checker can refuse
+        // after condition selection, without changing Linux token precedence.
+        if !(step.assertions[i].stream == "process" && kit_steps_process_nonzombie_mode(step.assertions[i].mode) && sys.name() != "linux") -> step.assertions[i].path = kit_steps_runtime_expand(step.assertions[i].path, context, state) ?? return None
         step.assertions[i].json_path = kit_steps_runtime_expand(step.assertions[i].json_path, context, state) ?? return None
         // Keep predicate values unexpanded: the checker chooses raw or normalized
         // matching based on the presence of path tokens in the original value.

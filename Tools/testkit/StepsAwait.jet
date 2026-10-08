@@ -46,7 +46,10 @@ fn kit_steps_await_valid(text: String) -> Bool {
 
 fn kit_steps_process_form(text: String) -> KitAssertion? {
     tokens :: kit_steps_tokens(kit_steps_body(text)) ?? return None
-    if tokens.len() == 1 && kit_expect_named(["alive", "alive-nonzombie"], tokens[0].text) -> return Val(KitAssertion{stream: "process", path: "", mode: tokens[0].text, value: ""})
+    if tokens.len() == 1 {
+        mode :: tokens[0].text
+        if mode == "alive" || kit_steps_process_nonzombie_mode(mode) -> return Val(KitAssertion{stream: "process", path: "", mode: mode, value: ""})
+    }
     if tokens.len() < 3 -> return None
     if tokens[0].text == "state" && kit_expect_named(["in", "not-in"], tokens[1].text) {
         values :: kit_steps_string_array(kit_steps_byte_slice(text, tokens[2].start, tokens[tokens.len() - 1].end)) ?? return None
@@ -57,9 +60,11 @@ fn kit_steps_process_form(text: String) -> KitAssertion? {
 }
 
 fn kit_steps_process_check(assertion: KitAssertion, context: KitStepCtx, state: KitStepState) -> KitVerdict {
+    if kit_steps_process_nonzombie_mode(assertion.mode) && sys.name() != "linux" -> return kit_expect_verdict("REFUSED", "process-state")
     pid_text :: kit_steps_runtime_expand(assertion.path, context, state) ?? return kit_expect_verdict("ERROR", "process PID token unavailable")
     pid :: Int.parse(pid_text) ?? return kit_expect_verdict("FAIL", "process PID is not an integer")
     if assertion.mode == "alive" -> return if kit_steps_process_alive(pid) -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "process is not alive")
+    if kit_steps_process_nonzombie_mode(assertion.mode) -> return if kit_steps_process_nonzombie(pid, assertion.mode) -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "process state predicate failed")
     if sys.name() != "linux" -> return kit_expect_verdict("REFUSED", "process-state")
     if assertion.mode == "executable" {
         actual :: files.canonicalize("/proc/{pid}/exe") ?? return kit_expect_verdict("FAIL", "process executable unavailable")
@@ -75,7 +80,7 @@ fn kit_steps_process_check(assertion: KitAssertion, context: KitStepCtx, state: 
     if end < 0 -> return kit_expect_verdict("FAIL", "process stat malformed")
     words :: kit_steps_whitespace_words(kit_steps_byte_slice(stat, end + 1, stat.count_bytes()))
     if words.len() == 0 -> return kit_expect_verdict("FAIL", "process stat malformed")
-    matches :: if assertion.mode == "alive-nonzombie" -> words[0] != "Z" && kit_steps_process_alive(pid) else -> kit_steps_host_matches(words[0], assertion.value) == (assertion.extra == "in")
+    matches :: kit_steps_host_matches(words[0], assertion.value) == (assertion.extra == "in")
     if matches -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "process state predicate failed")
 }
 
@@ -84,6 +89,7 @@ fn kit_steps_await(step: KitStep, context: KitStepCtx, previous: KitStepState) -
     text :: step.instruction
     tokens :: kit_steps_tokens(kit_steps_body(text)) ?? return kit_steps_action_error(state, "invalid await")
     kind :: tokens[0].text
+    if kind == "process" && kit_steps_process_nonzombie_mode(tokens[2].text) && sys.name() != "linux" -> return KitStepResult{state: state, verdict: kit_expect_verdict("REFUSED", "process-state")}
     raw :: kit_steps_runtime_expand(tokens[1].text, context, state) ?? return kit_steps_action_error(state, "await token unavailable")
     path :: if kind == "process" -> raw else -> kit_steps_work_path(raw, context.env, context.work, context.scratch, state.built) ?? return kit_steps_action_error(state, "await path escapes work")
     loop pending in state.children {
@@ -108,7 +114,7 @@ fn kit_steps_await(step: KitStep, context: KitStepCtx, previous: KitStepState) -
     started :: time.instant()
     if kind == "process" {
         pid :: Int.parse(raw) ?? return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", "process PID is not an integer")}
-        if sys.name() == "linux" && !files.exists("/proc/{pid}") -> return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", "process unavailable")}
+        if !kit_steps_process_nonzombie_mode(tokens[2].text) && sys.name() == "linux" && !files.exists("/proc/{pid}") -> return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", "process unavailable")}
     }
     loop {
         success := false
