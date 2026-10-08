@@ -1,0 +1,78 @@
+
+use app as application
+use core.db as db
+
+fn run() {
+    conn := db.open_memory()
+    policy :: db.policy("tasks", "true") ?? panic("policy")
+    scoped := conn.with_policy(policy, "attacker")
+    _created :: db.migrate(scoped, "tasks-v1", [
+        SQL{"CREATE TABLE tasks (id INTEGER PRIMARY KEY, body TEXT)"}
+    ]) ?? panic("create")
+
+    payload :: "x'); DROP TABLE tasks; --"
+    _inserted :: scoped.execute(
+        SQL{"INSERT INTO tasks (id, body) VALUES (1, {payload})"}
+    ) ?? panic("insert")
+    row :: scoped.query_one(SQL{"SELECT body FROM tasks"}) ?? panic("query")
+    body :: db.row_text(row, "body") ?? panic("missing body")
+    print("interpolation:{body}")
+
+    duplicate :: scoped.query(
+        SQL{"SELECT id FROM tasks WHERE body = {payload} OR body = {payload}"}
+    ) ?? panic("duplicate")
+    print("duplicate:{duplicate.len()}")
+
+    scoped.query(SQL{"SELECT body FROM tasks WHERE body = ?"}) ? _rows -> {
+        print("placeholder:accepted")
+    } ! _error -> {
+        print("placeholder:rejected")
+    }
+    scoped.query(SQL{"SELECT no_such_column FROM tasks"}) ? _rows -> {
+        print("driver:accepted")
+    } ! _error -> {
+        print("driver:rejected")
+    }
+    scoped.query(SQL{"SELECT body FROM other"}) ? _rows -> {
+        print("authority:accepted")
+    } ! _error -> {
+        print("authority:rejected")
+    }
+
+    live :: scoped.live(SQL{"SELECT body FROM tasks"}) ?? panic("live")
+    live_before :: application.live_get(live)
+    print("live-before:{live_before.contains(payload)}")
+    updated :: "updated"
+    _updated :: scoped.execute(SQL{"UPDATE tasks SET body = {updated}"}) ?? panic("update")
+    _invalidated :: application.invalidate("tasks")
+    live_after :: application.live_get(live)
+    print("live-after:{live_after.contains(updated)}")
+
+    tx_body :: "rolled back"
+    tx_count :: db.transaction(scoped, "rollback", [
+        SQL{"INSERT INTO tasks (id, body) VALUES (2, {tx_body})"},
+        SQL{"INSERT INTO tasks (missing_column) VALUES (2)"}
+    ]) ?? -1
+    if {
+        tx_count < 0 -> print("rollback:rejected")
+        else -> print("rollback:accepted")
+    }
+    rollback_rows :: scoped.query(SQL{"SELECT id FROM tasks"}) ?? panic("rollback query")
+    print("rollback-rows:{rollback_rows.len()}")
+    migration_count :: db.migrate(scoped, "broken", [
+        SQL{"CREATE TABLE migration_marker (id INTEGER)"},
+        SQL{"INSERT INTO tasks (missing_column) VALUES (3)"}
+    ]) ?? -1
+    if {
+        migration_count < 0 -> print("migration:rejected")
+        else -> print("migration:accepted")
+    }
+    retry_count :: db.migrate(scoped, "broken", [
+        SQL{"CREATE TABLE migration_marker (id INTEGER)"}
+    ]) ?? -1
+    if {
+        retry_count == 1 -> print("migration-retry:1")
+        else -> print("migration-retry:rejected")
+    }
+    _closed :: scoped.close()
+}

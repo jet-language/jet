@@ -1,0 +1,21 @@
+# HAND-PORT tests/compiler_api.rs:1043-1062 package_views_remain_compile_time_only
+# PENDING-SAME-HEAD runtimeGap=original-assert; PENDING-GRAMMAR, no historical failure captures blessed.
+# Every original operation; exact closed format! source expansion, two separate original diagnostic predicates.
+fixture: package_views_remain_compile_time_only.fixture
+env: NO_COLOR=1
+step: jet check --json manifest/main.jet
+exit: nonzero
+json: stdout doc $.reports[?code="E0956"] #>= 1
+json: stdout doc $.reports[?what~="compile-time only"] #>= 1
+step: jet check --json package/main.jet
+exit: nonzero
+json: stdout doc $.reports[?code="E0956"] #>= 1
+json: stdout doc $.reports[?what~="compile-time only"] #>= 1
+step: jet check --json lock/main.jet
+exit: nonzero
+json: stdout doc $.reports[?code="E0956"] #>= 1
+json: stdout doc $.reports[?what~="compile-time only"] #>= 1
+step: jet check --json profiles/main.jet
+exit: nonzero
+json: stdout doc $.reports[?code="E0956"] #>= 1
+json: stdout doc $.reports[?what~="compile-time only"] #>= 1

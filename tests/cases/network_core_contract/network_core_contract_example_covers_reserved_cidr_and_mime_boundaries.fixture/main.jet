@@ -1,0 +1,16 @@
+use core.net.ip as ip
+use core.net.mime as mime
+
+fn run() {
+    reserved :: ip.parse_ipv4("240.0.0.1") ?? return
+    print("reserved-global:{ip.is_global(reserved)}")
+
+    network :: ip.network("192.0.2.129/24") ?? return
+    print("network:{ip.with_prefixlen(network)}")
+    print("broadcast:{ip.ipv4_to_string(ip.network_broadcast(network))}")
+
+    if mime.parse("text/html; broken") == {
+        .Ok(_) -> print("mime:accepted")
+        .Err(_) -> print("mime:rejected")
+    }
+}
