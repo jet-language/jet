@@ -1,0 +1,8 @@
+Error [E0151]: `Gone` is not a declared state of `Crate`
+  --> tests/ui/typestate/unknown_transition_from_state_is_e0151.jet:4:5
+    |
+  4 |     #Transition(Gone, Full) fn fill() -[]> Crate { return Crate{} }
+    |     ^^^^^^^^^^^^^^^^^^^^^^^
+ Why: Typestate (D-STATE-HOME1=A): `struct Crate { state { … } }` defines the valid state labels; `Gone` is not among them — a typo here would silently create a phantom state that no transition reaches
+ Fix: Add `Gone` inside `struct Crate { state { … } }`, or correct the spelling
+More: jet-lang.dev/e/E0151
