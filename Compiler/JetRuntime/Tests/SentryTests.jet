@@ -6,7 +6,7 @@ fn sentry_test_require(ok: Bool) {
 fn sentry_test_reset() {
     sentry_test_require(sync_load(sentry_root + I64{88}) == I64{0})
     at := I64{40}
-    loop at <= I64{88} {
+    loop at <= (I64{88}) {
         header :: sentry_root + at
         capacity :: sync_load(header + I64{8})
         if (capacity != I64{0}) -> jet_rt_free(sync_load(header + I64{16}), capacity * I64{8}, I64{8})
@@ -102,10 +102,13 @@ fn sentry_test_leave(save: I64) {
     sync_store(value, I64{23})
     sentry_test_gate(save)
     round := I64{0}
-    loop round < I64{10000} {
+    loop round < (I64{10000}) {
         frame = jet_rt_sentry_frame_enter()
         repeat := I64{0}
-        loop repeat < I64{4} { jet_rt_sentry_register_stack_allocation(value, I64{8}); repeat += I64{1} }
+        loop repeat < (I64{4}) {
+            jet_rt_sentry_register_stack_allocation(value, I64{8})
+            repeat += I64{1}
+        }
         sentry_test_require(jet_rt_sentry_check(value, I64{8}, I64{8}, I64{1}) == I64{0})
         jet_rt_sentry_frame_leave(frame)
         round += I64{1}

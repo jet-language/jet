@@ -26,7 +26,7 @@ fn sentry_save(save: I64) { coll_copy(thread_base() + I64{128}, save, I64{56}) }
         depth :: sync_load(base + I64{176})
         if (depth != I64{-1}) -> sync_store(base + I64{176}, wrapping(depth + I64{1}))
     }
-    sync_store(base + I64{128}, if enabled != I64{0} && sentry_available() -> I64{1} else -> I64{0})
+    sync_store(base + I64{128}, if (enabled != I64{0} && sentry_available()) -> I64{1} else -> I64{0})
     sync_store(base + I64{136}, file)
     sync_store(base + I64{144}, file_len)
     sync_store(base + I64{152}, line & I64{4294967295})
@@ -35,7 +35,7 @@ fn sentry_save(save: I64) { coll_copy(thread_base() + I64{128}, save, I64{56}) }
 }
 #Export(c) fn jet_rt_sentry_policy_enter(save: I64, enabled: I64) {
     sentry_save(save)
-    sync_store(thread_base() + I64{128}, if enabled != I64{0} && sentry_available() -> I64{1} else -> I64{0})
+    sync_store(thread_base() + I64{128}, if (enabled != I64{0} && sentry_available()) -> I64{1} else -> I64{0})
 }
 #Export(c) fn jet_rt_sentry_scope_leave(save: I64) { coll_copy(save, thread_base() + I64{128}, I64{56}) }
 fn sentry_sequence() -> I64 {
@@ -123,7 +123,10 @@ fn sentry_expire(start: I64, length: I64, sequence: I64) {
     entries :: sync_load(live + I64{16})
     at = I64{0}
     loop at < sync_load(live) {
-        if (sync_load(entries + at * I64{8}) == frame) { sentry_words_remove(live, at, I64{1}); break }
+        if (sync_load(entries + at * I64{8}) == frame) {
+            sentry_words_remove(live, at, I64{1})
+            break
+        }
         at += I64{1}
     }
     sync_mutex_unlock(sentry_root)
@@ -139,7 +142,7 @@ fn sentry_thread_detach() {
     sync_store(thread_base() + I64{184}, I64{0})
 }
 fn sentry_register(owner: I64, frame: I64, start: I64, bytes: I64) {
-    if !sentry_available() || start == I64{0} -> return
+    if (!sentry_available() || start == I64{0}) -> return
     length :: if (bytes == I64{0}) -> I64{1} else -> bytes
     sync_mutex_lock(sentry_root)
     sequence :: sentry_sequence()
@@ -193,7 +196,7 @@ fn sentry_register(owner: I64, frame: I64, start: I64, bytes: I64) {
     sync_mutex_unlock(sentry_root)
 }
 #Export(c) fn jet_rt_sentry_quarantine(start: I64, bytes: I64) {
-    if !sentry_available() || start == I64{0} -> return
+    if (!sentry_available() || start == I64{0}) -> return
     sync_mutex_lock(sentry_root)
     heap :: sentry_root + I64{40}
     data :: sync_load(heap + I64{16})
@@ -226,7 +229,10 @@ fn sentry_register(owner: I64, frame: I64, start: I64, bytes: I64) {
     }
     if poisoned {
         at = I64{0}
-        loop at < bytes { trap_put(start + at, I64{221}); at += I64{1} }
+        loop at < bytes {
+            trap_put(start + at, I64{221})
+            at += I64{1}
+        }
     }
     sync_mutex_unlock(sentry_root)
 }
@@ -260,7 +266,10 @@ fn sentry_range_end(start: I64, length: I64) -> I64 {
             if inside && !overflow && !world_unsigned_before(limit, end) -> live = true
         } else {
             sequence :: sync_load(row + I64{32})
-            if inside && world_unsigned_before(start, limit) && (expired == I64{0} || world_unsigned_before(newest, sequence)) { expired = I64{2}; newest = sequence }
+            if (inside && world_unsigned_before(start, limit) && (expired == I64{0} || world_unsigned_before(newest, sequence))) {
+                expired = I64{2}
+                newest = sequence
+            }
         }
         at += I64{5}
     }
@@ -290,24 +299,30 @@ fn sentry_range_end(start: I64, length: I64) -> I64 {
         begin :: sync_load(row)
         limit :: sentry_range_end(begin, sync_load(row + I64{8}))
         sequence :: sync_load(row + I64{16})
-        if !world_unsigned_before(start, begin) && world_unsigned_before(start, limit) && (expired == I64{0} || world_unsigned_before(newest, sequence)) { expired = I64{4}; newest = sequence }
+        if (!world_unsigned_before(start, begin) && world_unsigned_before(start, limit) && (expired == I64{0} || world_unsigned_before(newest, sequence))) {
+            expired = I64{4}
+            newest = sequence
+        }
         at += I64{3}
     }
     sync_mutex_unlock(sentry_root)
-    if live -> return if sentry_remainder(start, align) != I64{0} -> I64{3} else -> I64{0}
+    if live -> return if (sentry_remainder(start, align) != I64{0}) -> I64{3} else -> I64{0}
     if (expired != I64{0}) -> return expired
     if starts_live -> return I64{5}
     if (strict != I64{0} || start == I64{0} || overflow) -> return I64{1}
-    if sentry_remainder(start, align) != I64{0} -> I64{3} else -> I64{0}
+    if (sentry_remainder(start, align) != I64{0}) -> I64{3} else -> I64{0}
 }
 #Export(c) fn jet_rt_sentry_read(start: I64, bytes: I64, alignment: I64) -> I64 {
     fault :: jet_rt_sentry_check(start, bytes, alignment, I64{1})
-    if (fault != I64{0}) { sentry_stop(fault, start, alignment, I64{0}, false); return I64{0} }
+    if (fault != I64{0}) {
+        sentry_stop(fault, start, alignment, I64{0}, false)
+        return I64{0}
+    }
     start
 }
 
 fn sentry_remainder(value: I64, divisor: I64) -> I64 {
-    if (divisor & wrapping(divisor - I64{1})) == I64{0} -> return value & wrapping(divisor - I64{1})
+    if ((divisor & wrapping(divisor - I64{1})) == I64{0}) -> return value & wrapping(divisor - I64{1})
     remainder := I64{0}
     shift := I64{63}
     loop {
@@ -315,7 +330,7 @@ fn sentry_remainder(value: I64, divisor: I64) -> I64 {
         gap :: wrapping(divisor - remainder)
         remainder = if !world_unsigned_before(remainder, gap) -> wrapping(remainder - gap) else -> wrapping(remainder + remainder)
         bit :: (value >> shift) & I64{1}
-        remainder = if remainder == wrapping(divisor - I64{1}) && bit != I64{0} -> I64{0} else -> wrapping(remainder + bit)
+        remainder = if (remainder == wrapping(divisor - I64{1}) && bit != I64{0}) -> I64{0} else -> wrapping(remainder + bit)
         if (shift == I64{0}) -> break
         shift -= I64{1}
     }
@@ -337,8 +352,8 @@ fn sentry_hex(text: I64, value: I64) {
     started := false
     loop {
         digit :: (value >> shift) & I64{15}
-        if digit != I64{0} || started || shift == I64{0} {
-            rt_text_push_scalar(text, if digit < I64{10} -> I64{48} + digit else -> I64{87} + digit)
+        if (digit != I64{0} || started || shift == I64{0}) {
+            rt_text_push_scalar(text, if (digit < I64{10}) -> I64{48} + digit else -> I64{87} + digit)
             started = true
         }
         if (shift == I64{0}) -> break
@@ -361,20 +376,20 @@ fn sentry_quote(text: I64, value: I64, json: Bool) {
             }
             (scalar == I64{10} || scalar == I64{13} || scalar == I64{9}) -> {
                 rt_text_push_scalar(text, I64{92})
-                rt_text_push_scalar(text, if scalar == I64{10} -> I64{110} else -> if scalar == I64{13} -> I64{114} else -> I64{116})
+                rt_text_push_scalar(text, if (scalar == I64{10}) -> I64{110} else -> if (scalar == I64{13}) -> I64{114} else -> I64{116})
             }
             (!json && scalar == I64{0}) -> {
                 rt_text_push_scalar(text, I64{92})
                 rt_text_push_scalar(text, I64{48})
             }
-            (scalar < I64{32} || scalar >= I64{127} && scalar <= I64{159}) -> {
+            (scalar < I64{32} || (scalar >= I64{127} && scalar <= I64{159})) -> {
                 rt_text_push_scalar(text, I64{92})
                 rt_text_push_scalar(text, I64{117})
                 if json {
                     shift := I64{12}
                     loop {
                         digit :: (scalar >> shift) & I64{15}
-                        rt_text_push_scalar(text, if digit < I64{10} -> I64{48} + digit else -> I64{87} + digit)
+                        rt_text_push_scalar(text, if (digit < I64{10}) -> I64{48} + digit else -> I64{87} + digit)
                         if (shift == I64{0}) -> break
                         shift -= I64{4}
                     }
@@ -419,7 +434,7 @@ fn sentry_template(text: I64, template: I64, operation: I64, gate: I64, obligati
     jet_rt_string_drop(template)
 }
 fn sentry_code(fault: I64) -> I64 {
-    if fault == I64{2} || fault == I64{4} -> I64{2} else -> if fault == I64{3} -> I64{3} else -> I64{1}
+    if (fault == I64{2} || fault == I64{4}) -> I64{2} else -> if (fault == I64{3}) -> I64{3} else -> I64{1}
 }
 fn sentry_detail(fault: I64, start: I64, alignment: I64) -> I64 {
     if {
@@ -430,7 +445,7 @@ fn sentry_detail(fault: I64, start: I64, alignment: I64) -> I64 {
             text :: services_msg_sentry_address()
             sentry_hex(text, start)
             sentry_append_owned(text, services_msg_sentry_alignment())
-            sentry_append_number(text, if alignment == I64{0} -> I64{1} else -> alignment)
+            sentry_append_number(text, if (alignment == I64{0}) -> I64{1} else -> alignment)
             sentry_append_owned(text, services_msg_sentry_bytes())
             text
         }
@@ -440,7 +455,11 @@ fn sentry_detail(fault: I64, start: I64, alignment: I64) -> I64 {
 fn sentry_report(fault: I64, operation: I64, obligation: I64, component: I64, fenced: Bool, gate: I64) -> I64 {
     code :: sentry_code(fault)
     report :: jet_rt_string_builder_new()
-    what :: if { (code == I64{2}) -> services_msg_sentry_r0802_what(); (code == I64{3}) -> services_msg_sentry_r0803_what(); else -> services_msg_sentry_r0801_what() }
+    what :: if {
+        (code == I64{2}) -> services_msg_sentry_r0802_what()
+        (code == I64{3}) -> services_msg_sentry_r0803_what()
+        else -> services_msg_sentry_r0801_what()
+    }
     sentry_template(report, what, operation, gate, obligation)
     rt_text_push_scalar(report, I64{10})
     base :: thread_base()
@@ -454,10 +473,18 @@ fn sentry_report(fault: I64, operation: I64, obligation: I64, component: I64, fe
         rt_text_push_scalar(report, I64{10})
     }
     sentry_append_owned(report, services_msg_sentry_why())
-    why :: if { (code == I64{2}) -> services_msg_sentry_r0802_why(); (code == I64{3}) -> services_msg_sentry_r0803_why(); else -> services_msg_sentry_r0801_why() }
+    why :: if {
+        (code == I64{2}) -> services_msg_sentry_r0802_why()
+        (code == I64{3}) -> services_msg_sentry_r0803_why()
+        else -> services_msg_sentry_r0801_why()
+    }
     sentry_template(report, why, operation, gate, obligation)
     sentry_append_owned(report, services_msg_sentry_fix())
-    fix :: if { (code == I64{2}) -> services_msg_sentry_r0802_fix(); (code == I64{3}) -> services_msg_sentry_r0803_fix(); else -> services_msg_sentry_r0801_fix() }
+    fix :: if {
+        (code == I64{2}) -> services_msg_sentry_r0802_fix()
+        (code == I64{3}) -> services_msg_sentry_r0803_fix()
+        else -> services_msg_sentry_r0801_fix()
+    }
     sentry_template(report, fix, operation, gate, obligation)
     // This seam's obligation is the native read's canonical valid_ptr fact.
     sentry_append_owned(report, services_msg_sentry_obligation())
@@ -466,7 +493,12 @@ fn sentry_report(fault: I64, operation: I64, obligation: I64, component: I64, fe
         jet_rt_string_builder_push(report, component)
         sentry_append_owned(report, if fenced -> services_msg_sentry_fenced() else -> services_msg_sentry_unfenced())
     }
-    sentry_append_owned(report, if { (code == I64{2}) -> services_msg_sentry_footer2(); (code == I64{3}) -> services_msg_sentry_footer3(); else -> services_msg_sentry_footer1() })
+    footer :: if {
+        (code == I64{2}) -> services_msg_sentry_footer2()
+        (code == I64{3}) -> services_msg_sentry_footer3()
+        else -> services_msg_sentry_footer1()
+    }
+    sentry_append_owned(report, footer)
     report
 }
 fn sentry_stop(fault: I64, start: I64, alignment: I64, component: I64, fenced: Bool) {

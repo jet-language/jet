@@ -10,13 +10,12 @@ fn sentry_inline_dangling() -> *SentryInlinePair {
     value :: SentryInlinePair{first: I64{7}, second: I64{11}}
     *SentryInlinePair{*value}
 }
-#Export(c)
-#Unsafe("an expired inline raw read must stop before any pointee byte is loaded")
+#[Export(c), Unsafe("an expired inline raw read must stop before any pointee byte is loaded")]
 fn jet_rt_sentry_inline_stopped(_env: I64, _out: I64) -> I64 {
     live :: SentryInlinePair{first: I64{17}, second: I64{19}}
     live_pointer :: *SentryInlinePair{*live}
     _ := live_pointer
     stale :: sentry_inline_dangling()
-    pair :: stale.*
+    pair :: (stale.*)
     pair.first
 }
