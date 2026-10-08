@@ -15,6 +15,7 @@ _Static_assert(sizeof(Identity)==32 && _Alignof(Identity)==8 && offsetof(Identit
 _Static_assert(sizeof(Config)==80 && _Alignof(Config)==8 && offsetof(Config,identity)==32 && offsetof(Config,min)==40 && offsetof(Config,max)==48 && offsetof(Config,alpn)==56,"Config ABI");
 extern void jet_rt_alloc_init(void);
 extern void *jet_rt_alloc(int64_t,int64_t);
+extern void jet_rt_free(void *,int64_t,int64_t);
 extern void __real_jet_rt_free(void *,int64_t,int64_t);
 extern int64_t runtime_tls_u8_stride(void);
 extern Text *jet_rt_string_from_static(const char *,int64_t);
@@ -56,7 +57,10 @@ static Bytes bytes(int64_t len,int64_t cap,unsigned erase) {
 }
 static Bytes *secret(int64_t len,int64_t cap) {
     Bytes *input=jet_rt_alloc(24,8); watch(input,24,8,0); *input=bytes(len,cap,1);
-    Bytes *s=jet_rt_secret_from_bytes(input); watch(s,24,8,0); return s;
+    Bytes *s=jet_rt_secret_from_bytes(input); watch(s,24,8,0);
+    /* Secret adopts the buffer and clears, but does not own the donor header. */
+    assert(!input->len && !input->cap && !input->data);
+    jet_rt_free(input,24,8); return s;
 }
 static void identity_watch(Identity *i) {
     watch(i,32,8,0); bytes_watch(&i->chain,0); watch(i->key,24,8,0); bytes_watch(i->key,1);
