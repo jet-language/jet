@@ -51,6 +51,23 @@ boundary's panic-to-TaskFailure catch rather than letting an ordinary native
 task panic abort its whole process. Plain/no-task MIR production uses the
 same false-mode implementation; its output is expected to remain byte-identical.
 
+Native cleanup frames lend TCB64 bit4 through `jet_rt_cleanup_enter/leave`,
+saving/restoring the whole word for nesting. The first owned Stop stays in the
+control slot, while Check/Propagate delivery is masked even inside deferred
+thunks and resource closes. Cancellation and deadlines do not interrupt those
+closes. A new panic during cleanup with a pending Stop is process-fatal (70),
+matching the Rust seed's panic-during-unwinding abort semantics
+(`crates/jet-codegen/src/Prelude/Scheduler.rs:234–244`). No additional TLS state
+or specialized plain cleanup call graph is introduced.
+The Source acceptance runner
+`Compiler/JetBackend/Tests/run-trap-source-fixtures.mjs` reuses the registered
+`defer close(^resource)` examples, checking native task publication, plain
+task/root fatal report parity, LIFO closes exactly once, cancellation held
+through closing and delivered at the next wait, fatal panic inside closing,
+and the plain no-task output against its existing byte golden. Its
+`assemble/lower/link/run` modes require the fresh composed runtime for execution;
+source parsing alone is not a behavioral receipt.
+
 ## Purpose and scope
 
 Core modules own public behavior. A Core API must be useful for real programs,

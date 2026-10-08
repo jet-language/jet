@@ -139,7 +139,7 @@ fn scheduler_control_publish(control: I64, record: I64) -> Bool {
     }
     sync_mutex_lock(control + I64{72})
     old :: sync_load(control + I64{32})
-    accepted :: old == I64{0} || (old == I64{1} && kind == I64{2})
+    accepted :: old == I64{0} || (!scheduler_cleanup_masked() && old == I64{1} && kind == I64{2})
     previous := I64{0}
     if accepted {
         previous = sync_load(control + I64{40})
@@ -152,11 +152,13 @@ fn scheduler_control_publish(control: I64, record: I64) -> Bool {
 }
 
 fn scheduler_native_publish(record: I64) -> Bool { scheduler_control_publish(scheduler_control_current(), record) }
-fn scheduler_shielded() -> Bool { sync_load(thread_base() + I64{24}) > I64{0} }
+fn scheduler_cleanup_masked() -> Bool { (sync_load(thread_base() + I64{64}) & I64{4}) != I64{0} }
+fn scheduler_shielded() -> Bool { scheduler_cleanup_masked() || sync_load(thread_base() + I64{24}) > I64{0} }
 
 // Shield defers cancellation/deadline/interrupt-class stops, never a panic
 // or runtime fault: Rust unwinds those through the shield (D-CANCELMODEL1=C).
 fn scheduler_delivered_status() -> I64 {
+    if scheduler_cleanup_masked() -> return I64{0}
     status :: scheduler_control_status(scheduler_control_current())
     if scheduler_shielded() && !(status >= I64{3} && status <= I64{5}) -> I64{0} else -> status
 }
@@ -220,6 +222,22 @@ fn scheduler_body_leave(saved: I64) { sync_store(thread_base() + I64{64}, saved)
 }
 #Export(c) fn jet_rt_poll_call_leave(saved: I64) {
     sync_store(thread_base() + I64{64}, saved)
+}
+
+// Rust Scheduler.rs:234-244 treats unwinding Drop/close code as a critical
+// section. Keep the first owned Stop in its control slot and mask delivery
+// through nested callable entry Checks as well as Propagate. No extra TLS.
+#Export(c) fn jet_rt_cleanup_enter() -> I64 {
+    cell :: thread_base() + I64{64}
+    saved :: sync_load(cell)
+    sync_store(cell, saved | I64{4})
+    saved
+}
+#Export(c) fn jet_rt_cleanup_leave(saved: I64) {
+    sync_store(thread_base() + I64{64}, saved)
+}
+fn scheduler_cleanup_panic_fatal() -> Bool {
+    scheduler_cleanup_masked() && scheduler_control_status(scheduler_control_current()) != I64{0}
 }
 fn scheduler_task_cancelled() -> Bool {
     control :: scheduler_control_current()
@@ -953,7 +971,7 @@ fn scheduler_fatal(message: I64) {
 }
 
 fn rt_task_panic_publish(message: I64, length: I64, form: I64) -> Bool {
-    if (sync_load(thread_base() + I64{64}) == I64{0} || scheduler_control_current() == I64{0}) -> return false
+    if ((sync_load(thread_base() + I64{64}) & I64{1}) == I64{0} || scheduler_control_current() == I64{0} || scheduler_cleanup_panic_fatal()) -> return false
     if (form == I64{0}) -> test_scope_record_e3001(message, length)
     text :: scheduler_text_new(length)
     coll_copy(message, sync_load(text), length)

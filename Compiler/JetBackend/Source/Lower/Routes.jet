@@ -8,7 +8,7 @@
 // Option or Result result comes back as the adapter's tag word plus one out
 // slot. The lowering builds its own List, Option or Result box from them.
 use jet_foundation.[
-    MIRCallArg, MIRInstruction, MIRPreludeCallID, MIRProgram, MIRType, MIRValueID,
+    MIRCallArg, MIRInstruction, MIRPreludeCall, MIRPreludeCallID, MIRProgram, MIRType, MIRValueID,
     mir_symbol_name, mir_type_display_name,
 ]
 
@@ -126,6 +126,7 @@ fn lower_route_values(p: MIRProgram, m: &LowerModule, f: &LowerFunction, call: M
 // for the call and dropped after it.
 fn lower_route_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, args: [MIRValueID], what: String) Never! {
     row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "{what} names missing Prelude call {call.value}")
+    if lower_cleanup_control_call(p, c, &m, &f, instruction, row, args) -> return
     if lower_lazy_route(p, c, &m, &f, instruction, row, args) -> return
     name :: "{row.module_name}.{row.member}"
     route :: lower_runtime_route(lower_route_symbol(row)) ?? return lower_fail(&m, &f, "{what} {name} has no runtime C-ABI route ({mir_symbol_name(row.symbol)})")
@@ -180,6 +181,31 @@ fn lower_route_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
     loop lent in record_lists {
         lower_call_helper(&m, &f, "list.record_handles_free", lent.ty, [LIRValueID]{lent.buffer, lent.length}, None)
     }
+}
+
+// Compiler-owned native control calls use the runtime's raw word ABI, not a
+// Core value-carrier adapter (the same rail as Poll's session imports).
+fn lower_cleanup_control_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, row: MIRPreludeCall, args: [MIRValueID]) -> Bool Never! {
+    symbol :: lower_route_symbol(row)
+    if symbol != "jet_rt_cleanup_enter" && symbol != "jet_rt_cleanup_leave" -> return false
+    entering :: symbol == "jet_rt_cleanup_enter"
+    if args.len() != (if entering -> 0 else -> 1) {
+        lower_fail(&m, &f, "native cleanup control call has incorrect arity")
+        return true
+    }
+    values := [LIRValueID]{}
+    if !entering {
+        saved :: lower_use(&m, &f, args[0]) ?? return true
+        &values.push(saved)
+    }
+    if entering {
+        saved :: lower_result(p, c, &m, &f, instruction) ?? return true
+        lower_call_runtime(&m, &f, symbol, values, Val(saved))
+    } else {
+        lower_call_runtime(&m, &f, symbol, values, None)
+        lower_alias_absent(&f, instruction)
+    }
+    true
 }
 
 // Result arms are exclusive, so each arm writes to the same payload slot.
