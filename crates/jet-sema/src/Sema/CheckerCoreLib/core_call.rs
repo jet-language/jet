@@ -943,7 +943,7 @@ fn resolved_core_fixed_sig(
                     (AccessConvention::Read, Type::String),
                     (AccessConvention::Read, Type::String),
                 ],
-                Some(Type::Unit),
+                Some(unit_ty()),
             ));
         }
         let parameters = if name == "__channel_bounded" {
@@ -2437,8 +2437,8 @@ impl<'a> Checker<'a> {
             .and_then(jet_foundation::CoreModuleExports::core_source_module_by_alias)
             .is_some_and(|source| source.module == "core.encoding.csv");
         if module == "core.encoding" && matches!(name, "__query_read_bounded" | "__query_validate_fields") && !checked_csv {
-            self.diags.push(Diagnostic::error("E0510", "CSV query leaves are compiler-private",
-                "raw CSV query mechanics are restricted to Core CSV source", "use csv.query<T>", Some(span)));
+            self.diags.push(Diagnostic::error("E0510", "CSV query leaves are compiler-private".to_string(),
+                "raw CSV query mechanics are restricted to Core CSV source".to_string(), "use csv.query<T>".to_string(), Some(span)));
             return None;
         }
         let checked_xml = source_alias
@@ -2470,9 +2470,9 @@ impl<'a> Checker<'a> {
                 .is_some_and(|source| source.module == "core.encoding.json");
             if !vetted || !self.in_unsafe {
                 self.diags.push(Diagnostic::error(
-                    "E0510", "JSON coercion host leaves are compiler-private",
-                    "the existing hidden Time/IO boundary is restricted to audited Core JSON source",
-                    "use the public JSON decoder", Some(span),
+                    "E0510", "JSON coercion host leaves are compiler-private".to_string(),
+                    "the existing hidden Time/IO boundary is restricted to audited Core JSON source".to_string(),
+                    "use the public JSON decoder".to_string(), Some(span),
                 ));
                 return None;
             }

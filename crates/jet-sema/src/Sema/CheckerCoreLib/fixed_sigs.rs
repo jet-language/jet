@@ -2931,7 +2931,7 @@ fn core_fixed_sig_impl(
         )),
         ("core.rt", "__cancel") => Some((
             vec![(AccessConvention::Write, Type::Named("RealtimeStream".to_string()))],
-            Some(Type::Unit),
+            Some(unit_ty()),
         )),
         ("core.rt", "__is_cancelled") => Some((
             vec![(read, Type::Named("RealtimeStream".to_string()))],
@@ -2943,7 +2943,7 @@ fn core_fixed_sig_impl(
         )),
         ("core.tasks", "__condition_notify_one" | "__condition_notify_all") => Some((
             vec![(read, Type::Named("Condition".to_string()))],
-            Some(Type::Unit),
+            Some(unit_ty()),
         )),
         ("core.tasks", "timeout") => Some((
             vec![(read, Type::Named(crate::Syntax::DURATION_TYPE.to_string()))],

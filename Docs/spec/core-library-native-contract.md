@@ -510,3 +510,8 @@ both the selection anchor and focus key in each direction.
 Read-only mapped file storage is shared through the same private `Arc` owner in
 native and comptime paths. Its thread-safety boundary permits immutable reads
 only, keeps each view alive until the final owner drops, and unmaps exactly once.
+
+Core signature checking uses the same canonical Unit type constructor for raw
+receipt, realtime cancellation, and condition-notification leaves as other Core
+rows. Alias resolution reads the owning module's import maps without changing
+their borrow depth or weakening the canonical source-identity check.

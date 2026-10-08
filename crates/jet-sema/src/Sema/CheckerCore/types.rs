@@ -105,7 +105,7 @@ impl<'a> Checker<'a> {
             if let Some(namespace) = namespace.filter(|namespace| !namespace.contains("::")) {
                 let module = self.modules.and_then(|modules| modules.get(owner));
                 let (core_imports, imports) = if owner == self.module_idx {
-                    (&self.core_imports, &self.imports)
+                    (self.core_imports, self.imports)
                 } else if let Some(module) = module {
                     (&module.core_imports, &module.imports)
                 } else {
