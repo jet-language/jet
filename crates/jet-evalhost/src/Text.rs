@@ -58,6 +58,8 @@ pub(crate) mod text_rt {
             Closed(IOContext),
             Protocol(IOContext),
             Other(IOContext),
+            AlreadyExists(IOContext),
+            Unsupported(IOContext),
         }
 
         impl IOError {
@@ -82,7 +84,17 @@ pub(crate) mod text_rt {
                 e.raw_os_error().map(i64::from),
                 Some(e.to_string()),
             );
+            let not_supported = matches!(
+                context.os_code,
+                Some(code) if (cfg!(target_os = "linux") && code == 95)
+                    || (cfg!(target_os = "macos") && (code == 45 || code == 102))
+            );
+            if not_supported {
+                return IOError::Unsupported(context);
+            }
             match e.kind() {
+                std::io::ErrorKind::AlreadyExists => IOError::AlreadyExists(context),
+                std::io::ErrorKind::Unsupported => IOError::Unsupported(context),
                 std::io::ErrorKind::InvalidInput | std::io::ErrorKind::InvalidData => {
                     IOError::InvalidInput(context)
                 }
