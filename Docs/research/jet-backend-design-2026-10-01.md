@@ -2065,3 +2065,25 @@ non-ASCII scalars. `TextDebugWitness.c` links real Jet exports, exercises
 borrowed input preservation and repeated builder appends, and requires
 free interception and exact-once destruction. Its stdout fixture is expected,
 not a native execution receipt; native execution remains unexercised.
+
+### Plugin failure debug and ownership
+
+`PluginError.jet` implements all handle routes for the native carrier in
+`PluginABI.jet`. Clone owns an independent recursive fault; drop releases it
+once. Equality follows `PluginWire.rs:46-50`: variant first, then Budget's
+limit before its fault, ignoring the inactive limit word for other variants.
+Display/show clone the message only (`PluginWire.rs:65-68`,
+`DBPluginWire.rs:4-11`); debug streams the complete derived enum, nested fault
+and ordered inline frame list into one existing builder. String fields use
+the shared Rust-debug mode, not Jet's NUL spelling, and raw i64 offsets use
+the existing signed-decimal builder helper.
+
+`PluginErrorGoldens.h` contains sixteen outputs of the real PluginWire Rust
+derives compiled with pinned rustc 1.97.1
+(`8bab26f4f68e0e26f0bb7960be334d5b520ea452`): all variants, all Budget limits,
+empty/two-frame faults and text/control/Unicode escapes. The offline
+`Tools/agent/gen-plugin-debug-goldens.mjs` packages those oracle outputs for
+`PluginErrorWitness.c`. The C client uses valid native allocations, requires
+free interception, checks recursive clone independence, inactive-word
+behavior, derived equality and separately owned render results. Expected
+stdout is not an execution receipt; native execution remains unexercised.
