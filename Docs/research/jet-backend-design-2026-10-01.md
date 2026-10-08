@@ -2254,3 +2254,35 @@ and civil/duration render goldens at raw integer boundaries.
 `date-overflow`, `period-overflow` and `duration-overflow` must stop at the
 existing native-range boundary. Native execution and MIR/caller/layout
 admission remain unexercised; parse/C11 syntax receipts are not parity proof.
+### Native ProcessSpec value and pure producers
+
+`ProcessSpec.jet` implements the six existing handle exports and the existing
+pure C ABI builders over the single private Spec128 layout in `DataABI.jet`.
+`jet_std_process_cmd` clones borrowed argv into the internal owned producer;
+every `jet_process_spec_*` C builder borrows the parent and returns a deep
+clone. It never mutates or consumes the caller's spec. Command and removed-name
+lists own E4 text; environment pairs use ordered 16-byte tuples, preserving
+duplicates. Nullable text/policy pointers own their nested carriers; nullable
+raw-i64 boxes preserve absent versus present-zero for stdin and limits.
+
+The defaults and transitions follow `ProcessSpec.rs:12-103` and
+`Process.rs:56-101,170-187`. Exact Int limits clamp to 0..i64::MAX without a
+native-conversion stop. Duration arguments remain borrowed handles using the
+canonical `TimeGlueABI.jet` ns word and truncating division by 1,000,000 before
+max(0). Raw stream ordinals are checked with the frozen C ABI's range stop,
+not Int conversion. Terminal defaults are 80x24 Cooked and use the canonical
+TerminalPolicy24 provider. Borrowed Bool field helpers return the address of
+the live normalized byte and allocate nothing.
+
+Show exposes only `ProcessSpec([cmd...])`, using the shared Rust `str` Debug
+renderer (including NUL `\0`), not JSON or Jet string escaping. Equality still
+includes every stored field, including policy wire and environment secrets.
+`ProcessSpecWitness.c` uses real producers, verifies defaults, each builder,
+borrow preservation, optional presence, ordered pairs, recursive independence,
+all equality fields and omitted secrets, limit clamps above both i64 bounds,
+Duration edges, all stream modes, exact render bytes and exact-once frees.
+Separate stdin/stdout/stderr range modes require the native-index stop.
+The expected `.stdout` is not an execution receipt. Native layout/import
+admission and whole-unit seed suppression are required before pack cutover;
+this does not supply Plan/Receipt spawning or public Child lifecycle providers.
+
