@@ -2272,7 +2272,8 @@ canonical `TimeGlueABI.jet` ns word and truncating division by 1,000,000 before
 max(0). Raw stream ordinals are checked with the frozen C ABI's range stop,
 not Int conversion. Terminal defaults are 80x24 Cooked and use the canonical
 TerminalPolicy24 provider. Borrowed Bool field helpers return the address of
-the live normalized byte and allocate nothing.
+the live normalized byte and allocate nothing. Equality masks the low byte
+of each Bool slot; clone normalizes it to a full-word 0/1, ignoring padding.
 
 Show exposes only `ProcessSpec([cmd...])`, using the shared Rust `str` Debug
 renderer (including NUL `\0`), not JSON or Jet string escaping. Equality still

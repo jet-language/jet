@@ -71,6 +71,9 @@ fn process_text_list_push(list: I64, text: I64) {
 #Export(c) fn jet_rt_handle_clone_ProcessSpec(value: I64) -> I64 {
     result :: jet_rt_alloc(PROCESS_SPEC_BYTES, I64{8})
     coll_copy(value, result, PROCESS_SPEC_BYTES)
+    // Field helpers lend Bool bytes, so ignore padding and normalize clone words.
+    encoding_store(result + PROCESS_SPEC_ENV_CLEAR, if ((encoding_word(value + PROCESS_SPEC_ENV_CLEAR) & I64{255}) == I64{0}) -> I64{0} else -> I64{1})
+    encoding_store(result + PROCESS_SPEC_DETACHED, if ((encoding_word(value + PROCESS_SPEC_DETACHED) & I64{255}) == I64{0}) -> I64{0} else -> I64{1})
     encoding_store(result + PROCESS_SPEC_CMD, process_text_list_clone(encoding_word(value + PROCESS_SPEC_CMD), false))
     encoding_store(result + PROCESS_SPEC_CWD, process_optional_text_clone(encoding_word(value + PROCESS_SPEC_CWD)))
     encoding_store(result + PROCESS_SPEC_ENV_SET, process_text_list_clone(encoding_word(value + PROCESS_SPEC_ENV_SET), true))
@@ -105,7 +108,7 @@ fn process_text_list_push(list: I64, text: I64) {
 #Export(c) fn jet_rt_handle_eq_ProcessSpec(a: I64, b: I64) -> Bool {
     if !process_text_list_eq(encoding_word(a + PROCESS_SPEC_CMD), encoding_word(b + PROCESS_SPEC_CMD), false) -> return false
     if !process_optional_text_eq(encoding_word(a + PROCESS_SPEC_CWD), encoding_word(b + PROCESS_SPEC_CWD)) -> return false
-    if encoding_word(a + PROCESS_SPEC_ENV_CLEAR) != encoding_word(b + PROCESS_SPEC_ENV_CLEAR) -> return false
+    if (encoding_word(a + PROCESS_SPEC_ENV_CLEAR) & I64{255}) != (encoding_word(b + PROCESS_SPEC_ENV_CLEAR) & I64{255}) -> return false
     if !process_text_list_eq(encoding_word(a + PROCESS_SPEC_ENV_SET), encoding_word(b + PROCESS_SPEC_ENV_SET), true) -> return false
     if !process_text_list_eq(encoding_word(a + PROCESS_SPEC_ENV_REMOVE), encoding_word(b + PROCESS_SPEC_ENV_REMOVE), false) -> return false
     if !process_optional_raw_eq(encoding_word(a + PROCESS_SPEC_STDIN), encoding_word(b + PROCESS_SPEC_STDIN)) -> return false
@@ -116,7 +119,7 @@ fn process_text_list_push(list: I64, text: I64) {
         if !process_optional_raw_eq(encoding_word(a + field), encoding_word(b + field)) -> return false
         field += DATA_TREE_ELEMENT_BYTES
     }
-    if encoding_word(a + PROCESS_SPEC_DETACHED) != encoding_word(b + PROCESS_SPEC_DETACHED) -> return false
+    if (encoding_word(a + PROCESS_SPEC_DETACHED) & I64{255}) != (encoding_word(b + PROCESS_SPEC_DETACHED) & I64{255}) -> return false
     left :: encoding_word(a + PROCESS_SPEC_TERMINAL)
     right :: encoding_word(b + PROCESS_SPEC_TERMINAL)
     if (left == I64{0} || right == I64{0}) {

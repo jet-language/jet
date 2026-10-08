@@ -119,6 +119,11 @@ static void clone_cases(void) {
     // Same duplicate names: change values' order instead.
     swap=c->env_set->data[1]; c->env_set->data[1]=c->env_set->data[3]; c->env_set->data[3]=swap;
     assert(!jet_rt_handle_eq_ProcessSpec(b,c)); swap=c->env_set->data[1]; c->env_set->data[1]=c->env_set->data[3]; c->env_set->data[3]=swap;
+    c->env_clear|=INT64_C(0x123400); c->detached|=INT64_C(0x567800);
+    assert(jet_rt_handle_eq_ProcessSpec(b,c)); // Byte-lending Bool slots ignore padding.
+    Spec *normalized=jet_rt_handle_clone_ProcessSpec(c);
+    assert(normalized->env_clear==1 && normalized->detached==1 && jet_rt_handle_eq_ProcessSpec(b,normalized));
+    jet_rt_handle_drop_ProcessSpec(normalized); c->env_clear=1; c->detached=1;
     int64_t *words[]={&c->env_clear,c->in,&c->out,&c->err,c->timeout,c->output,c->cpu,c->memory,c->files,&c->detached,&c->terminal->cols,&c->terminal->rows,&c->terminal->mode};
     for(size_t i=0;i<13;++i) { ++*words[i]; assert(!jet_rt_handle_eq_ProcessSpec(b,c)); --*words[i]; }
     int64_t *saved=c->in; c->in=NULL; assert(!jet_rt_handle_eq_ProcessSpec(b,c)); c->in=saved;
