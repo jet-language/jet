@@ -268,7 +268,7 @@ fn alloc_release(requested: I64) {
 
 // Explicit host policy edge: serialize runs outside this call, as the Rust
 // config guard does. Save fact5 (mode) and fact4 (cap) before configuring, and
-// restore them with this same edge. No allocation occurs while configuring.
+// restore them with the distinct restore edge below, retaining run counters.
 #Export(c) fn jet_rt_program_allocator_configure(mode: I64, cap: I64) {
     lock :: wrapping(alloc_root + I64{136})
     alloc_lock(lock)
@@ -280,6 +280,18 @@ fn alloc_release(requested: I64) {
             os_store_i64(wrapping(alloc_root + I64{168}), I64{0})
             os_store_i64(wrapping(alloc_root + I64{184}), I64{0})
         }
+    }
+    alloc_unlock(lock)
+}
+
+// ProgramAllocator.rs126-130: restoration changes policy, never historical
+// counters, even after the final counted allocation has been freed.
+#Export(c) fn jet_rt_program_allocator_restore(mode: I64, cap: I64) {
+    lock :: wrapping(alloc_root + I64{136})
+    alloc_lock(lock)
+    #Unsafe("the policy lock serializes restoration with native reserve and free; tracked blocks remain in the side table") {
+        os_store_i64(wrapping(alloc_root + I64{144}), if (mode == I64{1}) -> I64{1} else -> I64{0})
+        os_store_i64(wrapping(alloc_root + I64{152}), cap)
     }
     alloc_unlock(lock)
 }
