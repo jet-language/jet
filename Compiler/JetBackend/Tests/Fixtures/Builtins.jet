@@ -1,0 +1,69 @@
+use jet_foundation.[
+    MIRBinaryOp, MIRDropKind, MIRFunction,
+    MIROperation, MIRPreludeABI, MIRPreludeFamily, MIRProgram,
+    MIRTerminator, MIRTypeDef, MIRTypeKind, MIRValueID, mir_type_from_kind,
+]
+
+// expect-stdout value-builtins: "true\nfalse\ntrue\nfalse\ntrue\nSome(1)\nNone\nNone\nSome(1)\ntrue\nSome(1)\nNone\ntrue\n"
+// expect-runtime-only value-builtins: native exact/text equality and List/Float value carriers
+fn fx_value_builtins() -> MIRProgram Never! {
+    b := fx_builder()
+    left :: fx_strings_literal(&b, "same")
+    right :: fx_strings_literal(&b, "same")
+    other :: fx_strings_literal(&b, "other")
+    fx_print(&b, fx_list_method(&b, "eq", left, None, [MIRValueID]{right}, fx_bool(), false))
+    fx_print(&b, fx_list_method(&b, "eq", left, None, [MIRValueID]{other}, fx_bool(), false))
+    one :: fx_int_const(&b, 1)
+    two :: fx_int_const(&b, 2)
+    three :: fx_int_const(&b, 3)
+    absent :: fx_int_const(&b, 4)
+    list_ty :: fx_list_type(fx_int())
+    option_int :: mir_type_from_kind(MIRTypeKind.Option{inner: fx_int()})
+    list :: fx_owned(&b, list_ty, MIROperation.BuildList{values: [MIRValueID]{one, two, three}, trait_coercion: None})
+    fx_print(&b, fx_list_method(&b, "contains", list, None, [MIRValueID]{two}, fx_bool(), false))
+    fx_print(&b, fx_list_method(&b, "contains", list, None, [MIRValueID]{absent}, fx_bool(), false))
+    text_list :: fx_owned(&b, fx_list_type(fx_string()), MIROperation.BuildList{values: [MIRValueID]{left, other}, trait_coercion: None})
+    fx_print(&b, fx_list_method(&b, "contains", text_list, None, [MIRValueID]{right}, fx_bool(), false))
+    hit :: fx_list_method(&b, "list_binary_search", list, None, [MIRValueID]{two}, option_int, true)
+    miss :: fx_list_method(&b, "list_binary_search", list, None, [MIRValueID]{absent}, option_int, true)
+    fx_print(&b, hit)
+    fx_print(&b, miss)
+    fx_do(&b, MIROperation.Drop{value: hit, kind: MIRDropKind.Value})
+    fx_do(&b, MIROperation.Drop{value: miss, kind: MIRDropKind.Value})
+    empty :: fx_owned(&b, list_ty, MIROperation.BuildList{values: [], trait_coercion: None})
+    empty_hit :: fx_list_method(&b, "list_binary_search", empty, None, [MIRValueID]{one}, option_int, true)
+    fx_print(&b, empty_hit)
+    fx_do(&b, MIROperation.Drop{value: empty_hit, kind: MIRDropKind.Value})
+    a :: fx_strings_literal(&b, "a")
+    z :: fx_strings_literal(&b, "z")
+    ordered_text :: fx_owned(&b, fx_list_type(fx_string()), MIROperation.BuildList{values: [MIRValueID]{a, z}, trait_coercion: None})
+    text_hit :: fx_list_method(&b, "list_binary_search", ordered_text, None, [MIRValueID]{z}, option_int, true)
+    fx_print(&b, text_hit)
+    fx_do(&b, MIROperation.Drop{value: text_hit, kind: MIRDropKind.Value})
+    float_ty :: mir_type_from_kind(MIRTypeKind.Float)
+    option_float :: mir_type_from_kind(MIRTypeKind.Option{inner: float_ty})
+    nan :: fx_numeric_float_binary(&b, MIRBinaryOp.Div, fx_numeric_float(&b, 0.0), fx_numeric_float(&b, 0.0))
+    floats :: fx_owned(&b, fx_list_type(float_ty), MIROperation.BuildList{values: [MIRValueID]{nan, fx_numeric_float(&b, 1.0), fx_numeric_float(&b, 3.0)}, trait_coercion: None})
+    max :: fx_list_method(&b, "max_float", floats, None, [], option_float, true)
+    max_value :: fx_copy(&b, float_ty, MIROperation.OptionValue{subject: max})
+    fx_print(&b, fx_compare(&b, MIRBinaryOp.Ne, max_value, max_value))
+    min :: fx_list_method(&b, "min_float", floats, None, [], option_float, true)
+    fx_print(&b, min)
+    empty_float :: fx_owned(&b, fx_list_type(float_ty), MIROperation.BuildList{values: [], trait_coercion: None})
+    empty_max :: fx_list_method(&b, "max_float", empty_float, None, [], option_float, true)
+    fx_print(&b, empty_max)
+    // This source has a different ordinary left-fold result (7) from the
+    // fixed eight-lane tree (6): it witnesses the association contract.
+    numbers := [MIRValueID]{}
+    loop value in ([Float]{1e16, 1.0, -1e16, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0}) -> &numbers.push(fx_numeric_float(&b, value))
+    reduction :: fx_owned(&b, fx_list_type(float_ty), MIROperation.BuildList{values: numbers, trait_coercion: None})
+    total :: fx_list_method(&b, "sum_fixed_f64", reduction, None, [], float_ty, false)
+    fx_print(&b, fx_compare(&b, MIRBinaryOp.Eq, total, fx_numeric_float(&b, 6.0)))
+    loop owned in ([MIRValueID]{list, empty, text_list, right, ordered_text, floats, max, min, empty_float, empty_max, reduction}) -> fx_do(&b, MIROperation.Drop{value: owned, kind: MIRDropKind.Value})
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    p := fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, [MIRTypeDef]{})
+    members :: [String]{"eq", "contains", "list_binary_search", "max_float", "min_float", "sum_fixed_f64"}
+    symbols :: [String]{"jet_eq", "jet_list_contains", "jet_list_binary_search", "jet_list_max_float", "jet_list_min_float", "jet_list_sum_fixed_f64"}
+    loop (index, member) in members -> &p.prelude_calls.push(fx_prelude(MIRPreludeFamily.BuiltinMethod, "core.builtin", member, symbols[index], if index < 3 -> 2 else -> 1, MIRPreludeABI.Value))
+    p
+}

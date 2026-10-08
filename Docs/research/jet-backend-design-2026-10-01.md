@@ -228,6 +228,16 @@ Result boxes reserve at least one eight-byte payload word after the tag,
 including zero-sized payloads. Runtime marshaling uses the same minimum,
 alignment and size as native construction and drop glue.
 
+`Lower/Builtins.jet` reuses structural equality for builtin `eq` and List
+membership. Sorted List binary search borrows native-ordered elements and
+returns an optional matching index (not an insertion point or first-duplicate
+promise). Float extrema follow collection sort order: NaN is greatest, ties
+retain the last maximum and first minimum. Float64 sum accumulates source
+item `i` into lane `i & 7` and combines the eight lanes with the fixed
+adjacent-pair tree; no host reduction or reassociation is used. Fallible List
+capacity construction remains a named refusal until the native fallible
+allocation provider honors program-allocator policy and fault injection.
+
 Sizes: a word, handle or box pointer is 8 bytes (align 8), a Bool 1 byte, Unit
 0. An inline aggregate is 8-aligned and padded to whole words, so copies move
 words; a member sits at the next multiple of its alignment, and a recursive
