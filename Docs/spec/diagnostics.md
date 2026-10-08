@@ -144,6 +144,44 @@ the source. Keep one meaning across AOT, `jet run`, the interpreter, LSP,
 machine output, and web. Documentation and rendering changes must not mint a
 new diagnostic or change compiler semantics.
 
+### Running and blessing snapshots
+
+Build the Jet test runner once with `jet build --release Tools/testkit/run.jet`. From
+the checkout root, run the reported artifact as `testkit ui --jet <compiler>`
+to compare UI and lint snapshots; use `--filter <repo-relative-name>` for a
+focused selection, and `--results <file>` for machine-readable verdicts.
+`testkit ui --coverage --jet <compiler>` checks independently derived emitted
+and rendered code sets, owned exclusions in
+`tests/diagnostics_coverage_allowlist.tsv` (lowering-only ceiling: 152), and
+the exact per-plane repair counts in `tests/diagnostics_coverage_baseline.txt`.
+The transitional emission scan reads `Source/**/*.rs` and `crates/**/*.rs`;
+the native compiler cutover moves this scan to its Jet sources.
+
+Plain fixtures run `jet check` and record rendered stderr on failure, or
+exactly `(no errors)` on success, even when advisory lints exist. Lint fixtures
+run `jet check --verbose`: they must succeed and emit at least one warning.
+The lint invocation is admitted only after a same-head comparison against
+Cargo's `lint_snapshots` reports zero `.warn` mismatches; advisory differences
+are not filtered out.
+Only the CLI's final summary/explain envelope and volatile root paths are
+normalized; diagnostic bodies are retained. Group directories are recursive;
+project entries stop recursion. Fixed companions must check clean, build, and
+run on each selected tier. Internal fixture directives without a public CLI
+capability are `REFUSED`, never silently converted to ordinary checks.
+
+After reviewing a compiler change, bless only the affected fixture:
+
+```sh
+testkit ui --jet <compiler> --bless tests/ui/example.jet
+```
+
+Blessing creates or updates that fixture's snapshot from actual tool output.
+A lower diagnostic count is refused unless the reviewed invocation also names
+`--allow-shrink tests/ui/example.jet`. Broad blessing requires
+`--bless-all --reason "<compiler change>"`; blessing with `--shard` is refused.
+Expected files are read-only in ordinary runs.
+
+
 ## Latency and runtime-query boundaries
 
 D-DEV3 is a wall-clock promise: a save gives diagnostic feedback in well under
