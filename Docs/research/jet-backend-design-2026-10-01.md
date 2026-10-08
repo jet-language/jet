@@ -1588,6 +1588,10 @@ Raw Deref is a can-stop MIR operation. Its Propagate is emitted before the
 result is bound into a lexical cleanup frame, including inside Shield; MIR
 legality requires all result reads, projections and drops to be dominated by
 the resume edge. Cleanup never reads or drops an unwritten raw-read result.
+`run-world-sentry-fixtures.mjs` drives real controlled-thread timer ordering,
+all four MemSentry seed unit witnesses, a trivially copied inline Source read
+whose stopped frame is observed as released, and byte-for-byte JSONL parity
+with `jet_mem::jet_memory_ledger_record` from the freshly composed Rust seed.
 
 `JetRuntime/Tests/check-object.mjs` checks exact exports and the audited
 `imports.list`, including the allocator constructor relocation.
