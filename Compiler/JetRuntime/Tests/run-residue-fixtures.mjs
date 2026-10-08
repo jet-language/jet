@@ -22,6 +22,7 @@ function command(bin, args) {
 const cases = [
   ['comptime', 'Compiler/JetRuntime/Tests/comptime-fixture.c'],
   ['numeric', 'Compiler/JetRuntime/Tests/numeric-fixture.c'],
+  ['int-parse', 'Compiler/JetRuntime/Tests/int-parse-fixture.c'],
   ['u32', 'Compiler/JetBackend/Tests/u32-import.c'],
 ];
 if (mode === 'assemble') {
@@ -58,5 +59,5 @@ if (mode === 'assemble') {
     if (!result.stdout.startsWith('CHECK OK — native ') || result.stderr !== '') throw Error(`${name}: unexpected witness output`);
     console.log(result.stdout.trimEnd());
   }
-  console.log('CHECK OK — composed native residue fixtures: comptime, numeric, U32');
+  console.log(`CHECK OK — composed native residue fixtures: ${cases.map(([name])=>name).join(', ')}`);
 }
