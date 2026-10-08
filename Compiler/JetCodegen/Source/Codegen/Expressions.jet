@@ -693,7 +693,7 @@ fn jet_codegen_lower_call_args_for_signature(builder: &JetCodegenBuilder, progra
         // A synthetic rest List borrowed by the callee still belongs to the
         // caller. Its cleanup slot owns the pack, not the lent argument.
         is_pack := slot >= 0 && slot < variadic.len() && variadic[slot] && jet_codegen_collection_owned_temporary(argument.value)
-        if is_pack && formal == .Val(AccessConvention.Read) {
+        if is_pack && conventions[slot] == AccessConvention.Read {
             local := tir_generated_local("variadic_pack_{value.value}", argument.value.span)
             pack_place := jet_codegen_bind_local(&builder, program, local, argument.value.ty, false, None, None, false)
             _ := jet_codegen_emit(&builder, program, argument.value.span, None, MIROperation.WritePlace{place: pack_place, value: value})

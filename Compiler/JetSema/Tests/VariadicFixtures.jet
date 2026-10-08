@@ -47,7 +47,9 @@ fn variadic_fixture_mir(program: MIRProgram, require_coercions: Bool, require_in
                             if fact.ty.kind == .Fn(signature) {
                                 if signature.call_metadata == .Val(metadata) {
                                     variadic := false
-                                    loop flag in metadata.variadic -> if flag -> variadic = true
+                                    loop flag in metadata.variadic {
+                                        if flag -> variadic = true
+                                    }
                                     if variadic {
                                         variadic_fixture_arity(args, signature.params.len())
                                         indirect_calls += 1
@@ -65,7 +67,9 @@ fn variadic_fixture_mir(program: MIRProgram, require_coercions: Bool, require_in
                             loop declaration in program.functions {
                                 if declaration.id.value != id.value -> next
                                 variadic := false
-                                loop parameter in declaration.params -> if parameter.variadic -> variadic = true
+                                loop parameter in declaration.params {
+                                    if parameter.variadic -> variadic = true
+                                }
                                 if variadic {
                                     variadic_fixture_arity(args, declaration.params.len())
                                     variadic_calls += 1
@@ -77,7 +81,9 @@ fn variadic_fixture_mir(program: MIRProgram, require_coercions: Bool, require_in
                                 loop method in declaration.methods {
                                     if method.id.value != id.value -> next
                                     variadic := false
-                                    loop parameter in method.params -> if parameter.variadic -> variadic = true
+                                    loop parameter in method.params {
+                                        if parameter.variadic -> variadic = true
+                                    }
                                     if variadic {
                                         offset :: if method.self_access != None -> 1 else -> 0
                                         variadic_fixture_arity(args, method.params.len() + offset)
@@ -120,7 +126,8 @@ fn run() {
     variadic_fixture_reject("{root}/variadic_non_clone_spread.jet", "E0211")
     variadic_fixture_reject("{root}/variadic_spread_element_mismatch.jet", "E0112")
     examples :: "Examples/features/basics"
-    loop stem in [String]{"variadics_spread", "variadics_owned_lists", "variadics_borrowed_lists", "variadics_mixed_lists", "variadics_eval_order", "variadics_coercions"} -> variadic_fixture_accept("{examples}/{stem}.jet", false)
+    stems :: [String]{"variadics_spread", "variadics_owned_lists", "variadics_borrowed_lists", "variadics_mixed_lists", "variadics_eval_order", "variadics_coercions"}
+    loop stem in stems -> variadic_fixture_accept("{examples}/{stem}.jet", false)
     variadic_fixture_accept("{root}/variadic_slot_coercions.jet", true)
     variadic_fixture_accept("{root}/variadic_time_reordered.jet", false)
     print("checked variadic packing and refusals: passed")
