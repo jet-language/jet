@@ -9,7 +9,7 @@ use jet_foundation.[
 
 fn fx_scan_program(b: FxBuilder) -> MIRProgram Never! {
     p := fx_list_program(b)
-    loop (member, symbol) in [(String, String)]{("text_match", "jet_text_pattern_match"), ("binary_match", "jet_binary_pattern_match")} {
+    loop (member, symbol) in ([(member: String, symbol: String)]{(member: "text_match", symbol: "jet_text_pattern_match"), (member: "binary_match", symbol: "jet_binary_pattern_match")}) {
         row := fx_prelude(MIRPreludeFamily.StaticPrelude, "core.pattern", member, symbol, 2, MIRPreludeABI.Value)
         row.signature.borrow_mask = [Bool]{true, false}
         &p.prelude_calls.push(row)
@@ -47,7 +47,7 @@ fn fx_scan_binary_captures() -> MIRProgram Never! {
     u16 :: fx_narrow(false, 16)
     bytes :: fx_list_type(u8)
     values := [MIRValueID]{}
-    loop byte in [Int]{18, 52, 86, 154, 120, 188, 222} -> &values.push(fx_narrow_const(&b, false, 8, byte))
+    loop byte in ([Int]{18, 52, 86, 154, 120, 188, 222}) -> &values.push(fx_narrow_const(&b, false, 8, byte))
     input :: fx_owned(&b, bytes, MIROperation.BuildList{values: values, trait_coercion: None})
     tuple :: fx_tuple_type("ScanBinary", [MIRTupleField]{MIRTupleField{name: "0", ty: u8}, MIRTupleField{name: "1", ty: u16}, MIRTupleField{name: "2", ty: u16}, MIRTupleField{name: "3", ty: bytes}})
     parts :: [MIRBinaryPatternPart]{
@@ -58,7 +58,7 @@ fn fx_scan_binary_captures() -> MIRProgram Never! {
     }
     matched :: fx_scan_binary(&b, input, tuple, parts)
     fx_scan_test(&b, matched)
-    loop (index, ty) in [MIRType]{u8, u16, u16} -> fx_print(&b, fx_copy(&b, ty, MIROperation.PatternCapture{matched: matched, index: index}))
+    loop (index, ty) in ([MIRType]{u8, u16, u16}) -> fx_print(&b, fx_copy(&b, ty, MIROperation.PatternCapture{matched: matched, index: index}))
     rest :: fx_owned(&b, bytes, MIROperation.PatternCapture{matched: matched, index: 3})
     fx_scan_drop(&b, matched)
     fx_print(&b, rest)
@@ -98,7 +98,7 @@ fn fx_scan_text_captures() -> MIRProgram Never! {
     input :: fx_strings_literal(&b, "9223372036854775807,1.5,true,7,é🙂!")
     matched :: fx_scan_text(&b, input, tuple, parts)
     fx_scan_test(&b, matched)
-    loop (index, ty) in [MIRType]{fx_int(), float, fx_bool(), range} {
+    loop (index, ty) in ([MIRType]{fx_int(), float, fx_bool(), range}) {
         captured :: fx_owned(&b, ty, MIROperation.PatternCapture{matched: matched, index: index})
         fx_print(&b, captured)
         fx_scan_drop(&b, captured)
@@ -200,7 +200,7 @@ fn fx_scan_reader_atomic() -> MIRProgram Never! {
     reader_ty :: fx_named("Reader")
     place :: fx_local(&b, "reader", reader_ty, mir_owned_ownership())
     values := [MIRValueID]{}
-    loop byte in [Int]{18, 52, 86} -> &values.push(fx_narrow_const(&b, false, 8, byte))
+    loop byte in ([Int]{18, 52, 86}) -> &values.push(fx_narrow_const(&b, false, 8, byte))
     input :: fx_owned(&b, bytes, MIROperation.BuildList{values: values, trait_coercion: None})
     reader :: fx_owned(&b, reader_ty, MIROperation.Semantic{operation: MIRSemanticOp.StaticPreludeCall{call: fx_prelude_id("scan.fixture", "jet_reader_over"), args: [MIRCallArg]{fx_arg(input, MIRAccess.Read)}, owner_type_args: [MIRType]{}, type_args: [MIRType]{}}})
     fx_do(&b, MIROperation.WritePlace{place: place, value: reader})
@@ -233,7 +233,7 @@ fn fx_scan_reader_atomic() -> MIRProgram Never! {
     fx_block(&b, 0, MIRTerminator.Return{value: None})
     p := fx_scan_program(b)
     &p.prelude_calls.push(fx_prelude(MIRPreludeFamily.StaticPrelude, "scan.fixture", "jet_reader_over", "jet_reader_over", 1, MIRPreludeABI.Value))
-    loop symbol in [String]{"jet_reader_remaining", "jet_reader_at_end"} {
+    loop symbol in ([String]{"jet_reader_remaining", "jet_reader_at_end"}) {
         row := fx_prelude(MIRPreludeFamily.HandleMethod, "scan.fixture", symbol, symbol, 1, MIRPreludeABI.Value)
         row.signature.borrow_mask = [Bool]{true}
         &p.prelude_calls.push(row)
@@ -250,7 +250,7 @@ fn fx_scan_reader_count_call(b: &FxBuilder, reader: MIRValueID, symbol: String, 
 fn fx_scan_reader_count_program(b: FxBuilder) -> MIRProgram Never! {
     p := fx_scan_program(b)
     &p.prelude_calls.push(fx_prelude(MIRPreludeFamily.StaticPrelude, "scan.fixture", "jet_reader_over", "jet_reader_over", 1, MIRPreludeABI.Value))
-    loop symbol in [String]{"jet_reader_take", "jet_reader_skip", "jet_reader_seek", "jet_reader_remaining"} {
+    loop symbol in ([String]{"jet_reader_take", "jet_reader_skip", "jet_reader_seek", "jet_reader_remaining"}) {
         row := fx_prelude(MIRPreludeFamily.HandleMethod, "scan.fixture", symbol, symbol, if symbol == "jet_reader_remaining" -> 1 else -> 2, MIRPreludeABI.Value)
         row.signature.borrow_mask = if symbol == "jet_reader_remaining" -> [Bool]{true} else -> [Bool]{true, true}
         &p.prelude_calls.push(row)
@@ -260,7 +260,7 @@ fn fx_scan_reader_count_program(b: FxBuilder) -> MIRProgram Never! {
 
 fn fx_scan_reader_count_input(b: &FxBuilder) -> MIRValueID Never! {
     values := [MIRValueID]{}
-    loop byte in [Int]{17, 34, 51} -> &values.push(fx_narrow_const(&b, false, 8, byte))
+    loop byte in ([Int]{17, 34, 51}) -> &values.push(fx_narrow_const(&b, false, 8, byte))
     fx_owned(&b, fx_list_type(fx_narrow(false, 8)), MIROperation.BuildList{values: values, trait_coercion: None})
 }
 
@@ -277,7 +277,7 @@ fn fx_scan_reader_counts() -> MIRProgram Never! {
     input :: fx_scan_reader_count_input(&b)
     reader :: fx_scan_reader_over(&b, input)
     negative :: fx_int_const(&b, -1)
-    loop symbol in [String]{"jet_reader_take", "jet_reader_skip", "jet_reader_seek"} {
+    loop symbol in ([String]{"jet_reader_take", "jet_reader_skip", "jet_reader_seek"}) {
         result :: fx_scan_reader_count_call(&b, reader, symbol, negative)
         error :: fx_owned(&b, fx_string(), MIROperation.ResultValue{subject: result, ok: false})
         fx_print(&b, error)

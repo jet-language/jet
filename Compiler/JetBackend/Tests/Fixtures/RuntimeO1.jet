@@ -101,19 +101,19 @@ fn fx_runtime_o1_effects_check() -> Bool Never! {
     layouts :: loop _ in args -> lir_layout_word()
     parameter_layouts := ~layouts
     &parameter_layouts.push(lir_layout_float())
-    module :: LIRModule{
+    unit :: LIRModule{
         signatures: [LIRSignature]{
             LIRSignature{id: LIRSignatureID{value: 0}, params: parameter_layouts, result: Val(lir_layout_word()), convention: LIRCallConv.SystemV},
             LIRSignature{id: LIRSignatureID{value: 1}, params: [LIRLayout]{}, result: None, convention: LIRCallConv.SystemV},
         },
         functions: [LIRFunction]{lir_builder_finish(b), lir_builder_finish(target)}, data: [LIRData]{},
     }
-    if lir_lint_module(module).len() != 0 -> return false
-    optimized :: lir_optimize_module(module, 1)
+    if lir_lint_module(unit).len() != 0 -> return false
+    optimized :: lir_optimize_module(unit, 1)
     if lir_lint_module(optimized).len() != 0 -> return false
     if optimized.functions.len() != 2 -> return false
-    before :: fx_runtime_o1_effects(module.functions[0])
+    before :: fx_runtime_o1_effects(unit.functions[0])
     after :: fx_runtime_o1_effects(optimized.functions[0])
     if before.len() != 11 || before != after -> return false
-    fx_runtime_o1_effects(module.functions[1]) == fx_runtime_o1_effects(optimized.functions[1])
+    fx_runtime_o1_effects(unit.functions[1]) == fx_runtime_o1_effects(optimized.functions[1])
 }

@@ -1,6 +1,6 @@
 // Raw packed-byte ABI ownership witnesses; no iterator provider is required.
 fn coll_test_require(ok: Bool) {
-    if ok { return }
+    if ok -> return
     trap_exit(I64{1})
     loop {}
 }
@@ -30,7 +30,7 @@ fn coll_test_bytes() {
     loop case < (I64{3}) {
         length :: if (case == I64{0}) -> I64{0} else if (case == I64{1}) -> I64{1} else -> I64{255}
         input :: coll_list_new()
-        if length != I64{0} {
+        if length != (I64{0}) {
             data :: jet_rt_alloc(length, I64{8})
             at = I64{0}
             loop at < length {
@@ -63,7 +63,7 @@ fn coll_test_bytes() {
             coll_test_require(trap_byte(restored) == first && trap_byte(original) == first)
         }
         jet_rt_bytes_free(packed, length)
-        if length != I64{0} {
+        if length != (I64{0}) {
             jet_rt_free(trap_word(input + I64{16}), length, I64{8})
             jet_rt_free(trap_word(output + I64{16}), length, I64{8})
         }

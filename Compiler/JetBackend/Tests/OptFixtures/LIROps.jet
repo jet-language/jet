@@ -49,7 +49,7 @@ fn olops_cse_bitcast(shared: Bool) -> Bool Never! {
     c :: if shared -> olops_float(&b) else -> lir_builder_value(&b, lir_layout_pointer(), LIRDrop.Trivial, None)
     lir_builder_push(&b, LIRInst.Bitcast{dst: a, src: x})
     lir_builder_push(&b, LIRInst.Bitcast{dst: c, src: x})
-    if !shared {
+    if (!shared) {
         function :: ofx_finish(&b, [LIRValueID]{x}, c)
         return olops_unchanged(function, lir_cse_function(function))
     }

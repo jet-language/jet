@@ -6,7 +6,7 @@ use jet_foundation.[
 ]
 
 struct LowerScanPart {
-    pub tag: Int
+    pub descriptor: Int
     pub a: LIRValueID
     pub b: LIRValueID
     pub width: Int
@@ -25,7 +25,7 @@ fn lower_scan_storage(p: MIRProgram, ty: MIRType) -> Int Never! {
     if lower_repr(p, ty) == .FloatBits -> return 2
     if lower_repr(p, ty) == .Flag -> return 3
     if lower_text_type(ty) -> return 4
-    if lower_list_element(ty) == .Val(elem) && elem.kind == .IntN(false, 8) -> return 6
+    if lower_list_element(ty) == .Val(elem) && elem.kind == .IntN(signed, bits) && !signed && bits == 8 -> return 6
     if lower_integer_storage(p, ty) != None -> return 0
     -1
 }
@@ -34,7 +34,7 @@ fn lower_scan_rows(f: &LowerFunction, parts: [LowerScanPart]) -> LIRValueID Neve
     rows :: lower_scan_slot(&f, 64 * parts.len())
     loop (index, part) in parts {
         at :: 64 * index
-        lower_store_word(&f, rows, at, part.tag)
+        lower_store_word(&f, rows, at, part.descriptor)
         lower_emit(&f, LIRInst.Store{base: rows, offset: at + 8, value: part.a})
         lower_emit(&f, LIRInst.Store{base: rows, offset: at + 16, value: part.b})
         lower_store_word(&f, rows, at + 24, part.width)
@@ -67,7 +67,7 @@ fn lower_scan_finish(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
     members :: lower_inline_members(p, payload)
     capture := 0
     loop part in parts {
-        if part.tag == 0 || part.tag == 16 -> next
+        if part.descriptor == 0 || part.descriptor == 16 -> next
         if part.storage == 5 -> next
         member :: members[capture]
         if part.storage == 6 {
@@ -116,7 +116,7 @@ fn lower_scan_binary_parts(p: MIRProgram, m: &LowerModule, f: &LowerFunction, pa
             &m.data.push(LIRData{id: id, bytes: ~bytes, align: 1, relocs: [LIRDataReloc]{}})
             address :: lower_pointer(&f)
             lower_emit(&f, LIRInst.DataAddress{dst: address, data: id})
-            &parts.push(LowerScanPart{tag: 16, a: address, b: lower_const(&f, bytes.len()), width: 0, storage: 0, destination: zero})
+            &parts.push(LowerScanPart{descriptor: 16, a: address, b: lower_const(&f, bytes.len()), width: 0, storage: 0, destination: zero})
             next
         }
         if !discard && capture >= members.len() {
@@ -130,7 +130,7 @@ fn lower_scan_binary_parts(p: MIRProgram, m: &LowerModule, f: &LowerFunction, pa
             storage = lower_scan_storage(p, ty)
             width = if storage == 6 -> lower_list_stride(p, lower_list_element(ty) ?? return None) else -> lower_size(p, ty).size
         }
-        tag := 17
+        descriptor := 17
         a := zero
         b := zero
         if part == {
@@ -143,7 +143,7 @@ fn lower_scan_binary_parts(p: MIRProgram, m: &LowerModule, f: &LowerFunction, pa
                 }
             }
             .Rest(_, _) -> {
-                tag = 18
+                descriptor = 18
                 if !discard && storage != 6 {
                     lower_fail(&m, &f, "binary rest capture requires List<U8> storage")
                     return None
@@ -151,7 +151,7 @@ fn lower_scan_binary_parts(p: MIRProgram, m: &LowerModule, f: &LowerFunction, pa
             }
             else -> return None
         }
-        &parts.push(LowerScanPart{tag: tag, a: a, b: b, width: width, storage: storage, destination: if discard -> zero else -> lower_scan_slot(&f, 8)})
+        &parts.push(LowerScanPart{descriptor: descriptor, a: a, b: b, width: width, storage: storage, destination: if discard -> zero else -> lower_scan_slot(&f, 8)})
         capture += 1
     }
     if !discard && capture != members.len() {
@@ -170,7 +170,7 @@ fn lower_scan_text_parts(p: MIRProgram, m: &LowerModule, f: &LowerFunction, payl
         zero :: lower_const(&f, 0)
         if part == .Literal(text) {
             literal :: lower_static_text(&m, &f, text)
-            &parts.push(LowerScanPart{tag: 0, a: literal[0], b: literal[1], width: 0, storage: 0, destination: zero})
+            &parts.push(LowerScanPart{descriptor: 0, a: literal[0], b: literal[1], width: 0, storage: 0, destination: zero})
             next
         }
         if part == .Hole(kind, _, _) {
@@ -178,7 +178,7 @@ fn lower_scan_text_parts(p: MIRProgram, m: &LowerModule, f: &LowerFunction, payl
                 lower_fail(&m, &f, "text scan captures disagree with its checked tuple")
                 return None
             }
-            tag :: if kind == {
+            descriptor :: if kind == {
                 .Text -> 1
                 .Int -> 2
                 .Float -> 3
@@ -192,11 +192,11 @@ fn lower_scan_text_parts(p: MIRProgram, m: &LowerModule, f: &LowerFunction, payl
                 b = lower_const(&f, hi)
             }
             storage :: if discard -> 5 else -> lower_scan_storage(p, members[capture].ty)
-            if !discard && storage != (if tag == 1 -> 4 else if tag == 3 -> 2 else if tag == 4 -> 3 else -> 1) {
+            if !discard && storage != (if descriptor == 1 -> 4 else if descriptor == 3 -> 2 else if descriptor == 4 -> 3 else -> 1) {
                 lower_fail(&m, &f, "text scan capture representation disagrees with its typed descriptor")
                 return None
             }
-            &parts.push(LowerScanPart{tag: tag, a: a, b: b, width: 0, storage: storage, destination: if discard -> zero else -> lower_scan_slot(&f, 8)})
+            &parts.push(LowerScanPart{descriptor: descriptor, a: a, b: b, width: 0, storage: storage, destination: if discard -> zero else -> lower_scan_slot(&f, 8)})
             capture += 1
         }
     }
@@ -219,9 +219,10 @@ fn lower_scan_take(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFun
     payload :: lower_scan_payload(c, instruction, true) ?? return lower_fail(&m, &f, "take_pattern requires its checked Result<Tuple, String> carrier")
     if payload.kind != .Tuple(_) && lower_repr(p, payload) != .Absent -> return lower_fail(&m, &f, "take_pattern success payload is not a tuple or Unit")
     value :: lower_use(&m, &f, receiver) ?? return
-    parts :: if binary == .Val(pattern) -> lower_scan_binary_parts(p, &m, &f, payload, pattern, true) ?? return
-        else if text == .Val(pattern) -> lower_scan_text_parts(p, &m, &f, payload, pattern, true) ?? return
-        else -> return lower_fail(&m, &f, "take_pattern has no descriptors")
+    if binary == None && text == None -> return lower_fail(&m, &f, "take_pattern has no descriptors")
+    parts :: (if binary == .Val(pattern) -> lower_scan_binary_parts(p, &m, &f, payload, pattern, true)
+        else if text == .Val(pattern) -> lower_scan_text_parts(p, &m, &f, payload, pattern, true)
+        else -> None) ?? return
     rows :: lower_scan_rows(&f, parts)
     error :: lower_scan_slot(&f, 8)
     hit :: lower_word(&f)
@@ -262,11 +263,11 @@ fn lower_scan_match(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
 
 fn lower_pattern_capture(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, matched: MIRValueID, index: Int) Never! {
     ty :: lower_value_type(c, matched) ?? return lower_fail(&m, &f, "pattern capture has no producer type")
-    payload :: if ty.kind == {
-        .Option(inner) -> inner
-        .Result(ok, _) -> ok
-        else -> return lower_fail(&m, &f, "pattern capture producer is not a scan carrier")
-    }
+    payload :: (if ty.kind == {
+        .Option(inner) -> Val(inner)
+        .Result(ok, _) -> Val(ok)
+        else -> None
+    }) ?? return lower_fail(&m, &f, "pattern capture producer is not a scan carrier")
     members :: lower_inline_members(p, payload)
     if payload.kind != .Tuple(_) || index < 0 || index >= members.len() -> return lower_fail(&m, &f, "pattern capture has no typed descriptor at index {index}")
     result_ty :: lower_checked_type(c, instruction) ?? return lower_fail(&m, &f, "pattern capture has no checked result type")

@@ -181,13 +181,13 @@ fn fx_strings_concat() -> MIRProgram Never! {
     empty :: fx_strings_literal(&b, "")
     prefixed :: fx_strings_concat_value(&b, empty, joined)
     suffixed :: fx_strings_concat_value(&b, joined, empty)
-    nul :: fx_strings_literal(&b, "x\u0000")
+    nul :: fx_strings_literal(&b, "x\0")
     tail :: fx_strings_literal(&b, "β")
     binary :: fx_strings_concat_value(&b, nul, tail)
     doubled :: fx_strings_concat_value(&b, joined, joined)
     blank :: fx_strings_concat_value(&b, empty, empty)
-    loop value in [MIRValueID]{joined, empty, nul, tail} -> fx_do(&b, MIROperation.Drop{value: value, kind: MIRDropKind.Value})
-    loop value in [MIRValueID]{prefixed, suffixed, binary, doubled, blank} {
+    loop value in ([MIRValueID]{joined, empty, nul, tail}) -> fx_do(&b, MIROperation.Drop{value: value, kind: MIRDropKind.Value})
+    loop value in ([MIRValueID]{prefixed, suffixed, binary, doubled, blank}) {
         fx_print(&b, value)
         fx_do(&b, MIROperation.Drop{value: value, kind: MIRDropKind.Value})
     }
@@ -207,14 +207,14 @@ fn fx_strings_concat_value(b: &FxBuilder, left: MIRValueID, right: MIRValueID) -
 fn fx_strings_join() -> MIRProgram Never! {
     b := fx_builder()
     values := [MIRValueID]{}
-    loop text in [String]{"λ", "β"} -> &values.push(fx_strings_literal(&b, text))
+    loop text in ([String]{"λ", "β"}) -> &values.push(fx_strings_literal(&b, text))
     names :: fx_owned(&b, fx_list_type(fx_string()), MIROperation.BuildList{values: values, trait_coercion: None})
     solo :: fx_strings_literal(&b, "solo")
     single :: fx_owned(&b, fx_list_type(fx_string()), MIROperation.BuildList{values: [MIRValueID]{solo}, trait_coercion: None})
     empty :: fx_owned(&b, fx_list_type(fx_string()), MIROperation.BuildList{values: [MIRValueID]{}, trait_coercion: None})
     separator :: fx_strings_literal(&b, ",")
     results := [MIRValueID]{}
-    loop list in [MIRValueID]{names, single, empty} {
+    loop list in ([MIRValueID]{names, single, empty}) {
         &results.push(fx_list_method(&b, "join", list, None, [MIRValueID]{separator}, fx_string(), true))
         fx_do(&b, MIROperation.Drop{value: list, kind: MIRDropKind.Value})
     }
