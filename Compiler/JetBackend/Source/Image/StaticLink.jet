@@ -1867,7 +1867,7 @@ fn link_executable_image(names: [String], bufs: ^[[U8]], request: ^X64ResidentLi
     }
     entry_g :: link_resolve_program(&c)
     entry_section :: link_entry_section(&c, entry_g)
-    if entry_section < 0 || c.errors.len() > 0 -> return link_resident_failure(^c.errors)
+    if entry_section < 0 || (request != .None && c.errors.len() > 0) -> return link_resident_failure(^c.errors)
     entries := [Int]{entry_section}
     if request == .Val(wanted) {
         loop symbol in wanted.callable_exports {
