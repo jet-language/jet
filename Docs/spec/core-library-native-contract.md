@@ -200,6 +200,17 @@ with its typed clone glue. Dropping that temporary must not retire the source.
 The `flat-map-owned` and `list-try-collect` lowering fixtures require exact
 output plus linker-observed Jet allocator balance after source/result cleanup.
 
+Implicit process-stream loops retain and call the checked Core
+`__stdout_next_line` / `__stderr_next_line` bodies directly. Their native cursor
+shares the ordinary Iterable cursor's buffered-item, stride, and cleanup
+mechanics; a returned `Result<Option<String>, IOError>` transfers its Option
+payload without cloning it, and read errors use the native panic route with
+the Core diagnostic's Display. Selection requires the authored Core source
+and its checked stream receiver identity, never a guessed MIR function ID.
+Missing native stream clone/drop carriers are lowering errors, not seed
+`Rc<RefCell<BufReader>>` layout assumptions. Native execution of this boundary
+requires the runtime's vetted shared-pipe carrier and raw byte provider.
+
 Lowering witnesses that call canonical kernels absent from the minimal
 freestanding runtime emit relocatable objects and memory images, not a partial
 static executable. Their runtime-only marker requires a real compiled runtime

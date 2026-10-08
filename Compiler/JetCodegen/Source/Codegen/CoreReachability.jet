@@ -4,6 +4,8 @@ use jet_foundation.[
     TExpr,
     TFunc,
     TFuncKind,
+    TStmt,
+    TLambda,
     tir_expr_children,
     tir_stmt_children,
 ]
@@ -19,9 +21,66 @@ fn jet_codegen_core_reach_add(keys: &[String], key: String) Never! {
     if key != "" -> &keys.push(key)
 }
 
+fn jet_codegen_core_reach_lambda_keys(value: TLambda, functions: [TFunc], keys: &[String]) Never! {
+    if value.executable == {
+        .Block(body) | .SharedBlock(body) -> jet_codegen_core_reach_stmt_keys(body, functions, &keys)
+        else -> {}
+    }
+}
+
+// Implicit process loops have no keyed TExpr.Call. Resolve the authored Core
+// helper from the checked function inventory, then retain its dependencies
+// with the ordinary reachability walk. Both streams share cursor mechanics.
+fn jet_codegen_core_reach_one_stmt_keys(statement: TStmt, functions: [TFunc], keys: &[String]) Never! {
+        if statement == {
+            .ForIn(_, _, _, _, collection, _, method, _, _, _, body, _) -> {
+                if method == .Val(kind) && kind == .LinesProcessStream {
+                    name :: if collection.ty == .Named(value) || collection.ty == .Apply(value, _) -> value else -> ""
+                    member :: if name == "ProcessStdoutStream" || name.ends_with("::ProcessStdoutStream") -> "__stdout_next_line" else if name == "ProcessStderrStream" || name.ends_with("::ProcessStderrStream") -> "__stderr_next_line" else -> ""
+                    loop helper in functions {
+                        if member != "" && helper.name == member && helper.module_identity.starts_with("<corelib>/Core/process::") -> jet_codegen_core_reach_add(&keys, helper.key)
+                    }
+                }
+                jet_codegen_core_reach_stmt_keys(body, functions, &keys)
+            }
+            .ContractScope(_, body, _, _, _) | .TaskGroup(_, _, body, _) | .Loop(_, body, _) | .While(_, _, body, _) | .ForRange(_, _, _, _, _, _, body, _, _) | .Range(_, _, _, _, _, _, _, _, body, _) -> jet_codegen_core_reach_stmt_keys(body, functions, &keys)
+            .Inline(body, _) | .DebugOnly(body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Layout(_, _, body, _) | .ContextBlock(_, body, _) | .ScopeMember(_, body, _) | .Transact(_, _, _, body, _) | .Unsafe(_, body) -> jet_codegen_core_reach_stmt_keys(body, functions, &keys)
+            .RefutableBind(_, _, body, _) -> jet_codegen_core_reach_stmt_keys(body, functions, &keys)
+            .If(_, then_body, else_body, _, _) -> {
+                jet_codegen_core_reach_stmt_keys(then_body, functions, &keys)
+                if else_body == .Val(body) -> jet_codegen_core_reach_stmt_keys(body, functions, &keys)
+            }
+            .CountedLoop(_, init, _, step, _, body, _) -> {
+                jet_codegen_core_reach_one_stmt_keys(init, functions, &keys)
+                if step == .Val(value) -> jet_codegen_core_reach_one_stmt_keys(value, functions, &keys)
+                jet_codegen_core_reach_stmt_keys(body, functions, &keys)
+            }
+            .Match(_, arms, _, _) -> loop arm in arms -> jet_codegen_core_reach_stmt_keys(arm.body, functions, &keys)
+            .EnumMatch(_, _, arms, else_body, _, _) -> {
+                loop arm in arms -> jet_codegen_core_reach_stmt_keys(arm.body, functions, &keys)
+                if else_body == .Val(body) -> jet_codegen_core_reach_stmt_keys(body, functions, &keys)
+            }
+            .MixedSwitch(_, _, arms, else_body, _) -> {
+                loop arm in arms -> jet_codegen_core_reach_stmt_keys(arm.body, functions, &keys)
+                if else_body == .Val(body) -> jet_codegen_core_reach_stmt_keys(body, functions, &keys)
+            }
+            .RangeSwitch(_, arms, body, _) -> {
+                loop arm in arms -> jet_codegen_core_reach_stmt_keys(arm.body, functions, &keys)
+                jet_codegen_core_reach_stmt_keys(body, functions, &keys)
+            }
+            .Reactive(value, _) -> jet_codegen_core_reach_lambda_keys(value, functions, &keys)
+            .GCEdit(_, _, _, _, _, edited, _) -> jet_codegen_core_reach_one_stmt_keys(edited, functions, &keys)
+            else -> {}
+        }
+}
+
+fn jet_codegen_core_reach_stmt_keys(statements: [TStmt], functions: [TFunc], keys: &[String]) Never! {
+    loop statement in statements -> jet_codegen_core_reach_one_stmt_keys(statement, functions, &keys)
+}
+
 // The function keys one checked expression names directly. Children are
 // walked by the caller.
-fn jet_codegen_core_reach_expr_keys(expression: TExpr, keys: &[String]) Never! {
+fn jet_codegen_core_reach_expr_keys(expression: TExpr, functions: [TFunc], keys: &[String]) Never! {
     if expression.kind == {
         .Call(callee, _, args) -> {
             jet_codegen_core_reach_add(&keys, callee.key)
@@ -57,14 +116,21 @@ fn jet_codegen_core_reach_expr_keys(expression: TExpr, keys: &[String]) Never! {
         }
         // A function named as a value checks as a constant reference.
         .ConstRef(symbol) -> jet_codegen_core_reach_add(&keys, symbol.key)
+        .InlineBlock(body) -> jet_codegen_core_reach_stmt_keys(body, functions, &keys)
+        .Lambda(value) | .LambdaValue(value) -> jet_codegen_core_reach_lambda_keys(value, functions, &keys)
+        .IfExpr(_, then_body, _, else_body, _) | .ResultHandler(_, _, then_body, _, _, else_body, _, _) -> {
+            jet_codegen_core_reach_stmt_keys(then_body, functions, &keys)
+            jet_codegen_core_reach_stmt_keys(else_body, functions, &keys)
+        }
         else -> {}
     }
 }
 
 // Every function key one checked function body names, including its
 // parameter defaults, which call sites lower from the callee.
-fn jet_codegen_core_reach_function_keys(function: TFunc) -> [String] Never! {
+fn jet_codegen_core_reach_function_keys(function: TFunc, functions: [TFunc]) -> [String] Never! {
     keys := [String]{}
+    jet_codegen_core_reach_stmt_keys(function.body, functions, &keys)
     pending := [TExpr]{}
     loop parameter in function.params {
         if parameter.default == Val(value) -> &pending.push(value)
@@ -74,7 +140,7 @@ fn jet_codegen_core_reach_function_keys(function: TFunc) -> [String] Never! {
     }
     loop pending.len() > 0 {
         expression :: &pending.pop() ?? return keys
-        jet_codegen_core_reach_expr_keys(expression, &keys)
+        jet_codegen_core_reach_expr_keys(expression, functions, &keys)
         loop child in tir_expr_children(expression) -> &pending.push(child)
     }
     keys
@@ -111,7 +177,7 @@ pub fn jet_codegen_reachable_core_rows(functions: [TFunc], candidates: ^[Bool], 
     }
     loop pending.len() > 0 {
         caller :: &pending.pop() ?? { break }
-        loop key in jet_codegen_core_reach_function_keys(functions[caller]) {
+        loop key in jet_codegen_core_reach_function_keys(functions[caller], functions) {
             target :: by_key.get(key) ?? next
             if !reachable[target] {
                 reachable[target] = true
