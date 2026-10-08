@@ -10,7 +10,7 @@ const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../.
 const sourcePath = 'Compiler/JetCodegen/Source/Emit/Functions.jet';
 const args = process.argv.slice(2);
 const flags = Object.fromEntries(args.reduce((pairs, arg, i) => i % 2 ? pairs : [...pairs, [arg, args[i + 1]]], []));
-if (!flags['--reference'] || !flags['--jet'] || !flags['--root']) throw new Error('Usage: fold-slots-proof.mjs --reference REV --jet BINARY --root FRESH_DIR [--rows 512] [--timeout 120]');
+if (!flags['--reference'] || !flags['--root'] || (!flags['--jet'] && flags['--generate-only'] !== 'true')) throw new Error('Usage: fold-slots-proof.mjs --reference REV --root FRESH_DIR (--jet BINARY | --generate-only true) [--rows 512] [--timeout 120]');
 const root = path.resolve(flags['--root']);
 if (fs.existsSync(root)) throw new Error(`Proof directory already exists: ${root}`);
 fs.mkdirSync(root, { recursive: true });
@@ -72,6 +72,10 @@ code.push('}', '');
 const source = code.join('\n');
 fs.writeFileSync(path.join(root, 'main.jet'), source);
 fs.writeFileSync(path.join(root, 'inputs.json'), JSON.stringify({ reference: flags['--reference'], sourcePath, before_sha256: createHash('sha256').update(before).digest('hex'), after_sha256: createHash('sha256').update(after).digest('hex'), fixture_sha256: createHash('sha256').update(source).digest('hex'), rows, cases }, null, 2) + '\n');
+if (flags['--generate-only'] === 'true') {
+  console.log(`Fixture: ${root}; ${cases.length} cases, ${rows} elements; no compiler invoked`);
+  process.exit(0);
+}
 const result = spawnSync(path.resolve(flags['--jet']), ['run', '--interpret', '--color=never', path.join(root, 'main.jet')], {
   cwd: root, env: { ...process.env, JET_STORE_DIR: path.join(root, 'store'), JET_RECEIPT_BYPASS: '1', JET_NO_SCCACHE: '1' }, encoding: 'utf8', timeout: Number(flags['--timeout'] ?? 120) * 1000, maxBuffer: 16 * 1024 * 1024,
 });

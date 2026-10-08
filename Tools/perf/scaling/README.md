@@ -146,6 +146,9 @@ Tools/agent/jet-env node Tools/perf/scaling/fold-slots-proof.mjs \
   --reference REV --jet /path/to/jet --root FRESH_PROOF_DIR --rows 512
 ```
 
+Use `--generate-only true` instead of `--jet` to produce the exact fixture and
+input manifest without invoking a compiler, for trusted parsing and admission.
+
 This interpreted helper comparison proves text equivalence, not compile-speed
 improvement. Performance admission still requires the matched compiler corpus
 receipts and all required scaling cells; helper proof never replaces those.
