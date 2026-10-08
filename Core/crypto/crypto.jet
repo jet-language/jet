@@ -596,7 +596,7 @@ pub fn open(identity: X25519SecretKey, box: Sealed, aad: [U8]) -> [U8] CryptoErr
     open_sealed(identity, box, aad)
 }
 
-pub fn file_seal(recipients: [X25519PublicKey], source: Path, destination: Path) -[FS, Rand]> Bool FileCryptoError! {
+pub fn file_seal(recipients: [X25519PublicKey], source: Path, destination: Path) FileCryptoError! -[FS, Rand]> {
     canonical :: jetc.canonical(recipients)
     parent :: jetc_parent(destination.to_string())
     // The portable oracle deliberately has no race-safe source snapshot.
@@ -630,10 +630,10 @@ pub fn file_seal(recipients: [X25519PublicKey], source: Path, destination: Path)
     jetc_seek(stage.file, .DestinationIO)
     stage_metadata :: jetc_stat(stage.file, .SourceIO)
     jetc_seal_stage(canonical, parent, stage, length, expected, stage_metadata, false)
-    Ok(true)
+    Ok()
 }
 
-pub fn file_open(identity: X25519SecretKey, source: Path, destination: Path) -[FS]> Bool FileCryptoError! {
+pub fn file_open(identity: X25519SecretKey, source: Path, destination: Path) FileCryptoError! -[FS]> {
     input :: jetc_source(source.to_string(), .OpenFailed)
     metadata :: jetc_stat(input, .OpenFailed)
     fixed :: jetc_read_exact(input, 20, "open-input-read", .OpenFailed)
@@ -655,7 +655,7 @@ pub fn file_open(identity: X25519SecretKey, source: Path, destination: Path) -[F
     trailing :: jetc_read(input, 1, "open-input-read", .OpenFailed)
     jetc.finish(reader, trailing.bytes)
     jetc_publish(^output, parent, "open")
-    Ok(true)
+    Ok()
 }
 
 // Internal source-owned migration coordinator, shared with expert.migrate_v1.

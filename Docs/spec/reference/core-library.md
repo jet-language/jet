@@ -1384,7 +1384,7 @@ fn run() {
 | `x25519(secret, public)` / `x25519_shared(secret, public)` | `SharedSecret !CryptoError` | Perform typed X25519 agreement and reject invalid keys. |
 | `x25519_public(secret)` | `X25519PublicKey !CryptoError` | Derive the public key. |
 | `seal(recipients, bytes, aad)` / `open(identity, box, aad)` | `Sealed !CryptoError` / `[U8] !CryptoError` | Use the recipient envelope with internal key and nonce handling. |
-| `file_seal(recipients, source, destination)` / `file_open(identity, source, destination)` | `Bool !FileCryptoError` | Stream authenticated JETC v2 files in bounded 1 MiB chunks, with atomic no-overwrite publication. |
+| `file_seal(recipients, source, destination)` / `file_open(identity, source, destination)` | `FileCryptoError!` (unit success) | Stream authenticated JETC v2 files in bounded 1 MiB chunks, with atomic no-overwrite publication; success has no Boolean payload. |
 | `sign(signing_key, bytes)` / `verify(verify_key, bytes, signature)` | `Signature !CryptoError` / `Bool !CryptoError` | Use nominal Ed25519 signing and verification. |
 | `wrap(secret, recipient)` / `unwrap(identity, wrapped)` | `WrappedKey !CryptoError` / `Secret !CryptoError` | Wrap a nominal Secret for an X25519 recipient. |
 | `password_hash(password)` / `password_verify(password, stored)` | `PasswordHash !CryptoError` / `Bool !CryptoError` | Hash and verify a nominal Secret with the Core password policy. |
