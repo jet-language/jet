@@ -190,7 +190,8 @@ use core.data as core_data
         return pixels
     }
 
-    pub fn plot_png(groups: [Group<String, Int>]) -> [U8] {
+    // PNG compression preserves the archive codec's typed failure contract.
+    pub fn plot_png(groups: [Group<String, Int>]) -> [U8] archive.ArchiveError! {
         ihdr := Bytes.new()
         ihdr.write_u32_be(U32{64})
         ihdr.write_u32_be(U32{32})
@@ -201,7 +202,7 @@ use core.data as core_data
         ihdr.write_u8(U8{0})
 
         raw :: png_rows(groups)
-        compressed :: archive.deflate(raw)
+        compressed :: archive.deflate(raw) ?? return Err(err)
         zlib := Bytes.new()
         zlib.write_bytes([U8]{120, 156})
         zlib.write_bytes(compressed)
@@ -212,7 +213,7 @@ use core.data as core_data
         png.write_bytes(png_chunk("IHDR".bytes(), ihdr.to_bytes()))
         png.write_bytes(png_chunk("IDAT".bytes(), zlib.to_bytes()))
         png.write_bytes(png_chunk("IEND".bytes(), [U8]{}))
-        return png.to_bytes()
+        return Ok(png.to_bytes())
     }
 
     // Native and bridge facts remain authoritative; unavailable bridges are
