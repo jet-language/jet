@@ -417,6 +417,18 @@ class Parser {
   statements(stop = null) {
     const result = [];
     while (this.i < this.tokens.length && (!stop || !this.peek(stop))) {
+      // The kit always builds through Jet; only the Rust-bootstrap availability
+      // guard with an otherwise empty early return is irrelevant to the port.
+      if (this.peek('if')) {
+        const rest = this.tokens.slice(this.i);
+        const qualifier = rest[2]?.value === 'common' ? ['common', '::'] : [];
+        const guard = ['if', '!', ...qualifier, 'have_rustc', '(', ')', '{', 'return', ';', '}'];
+        if (guard.every((value, i) => rest[i]?.kind !== 'string' && rest[i]?.value === value)
+            && rest[guard.length]?.value !== 'else') {
+          this.i += guard.length;
+          continue;
+        }
+      }
       if (this.peek('for')) {
         this.take(); const names = this.binding(); this.need('in');
         const iterable = this.expr(); this.need('{');
