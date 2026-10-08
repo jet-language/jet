@@ -29,6 +29,14 @@ pub struct PolicyOccurrence { pub file: String, pub rule: String, pub site: Stri
 #Error
 pub struct PolicyError { pub message: String }
 
+// Compiler/token offsets and the Rust adapter's slices are UTF-8 byte offsets.
+pub fn policy_slice_bytes(text: String, start: Int, end: Int) -> String {
+    raw :: text.bytes()
+    assert(start >= 0 && end >= start && end <= raw.len(), "valid corpus byte span")
+    if start == end -> return ""
+    String.from_bytes(raw[start..(end - 1)]) ?? panic("corpus byte span must end on UTF-8 boundaries")
+}
+
 pub fn policy_rule_registry() -> [PolicyRuleSpec] {
     [PolicyRuleSpec]{
         PolicyRuleSpec{name: "raw-cli-fixed-shape", why: "maintained beginner programs must use the typed entry shape", replacement: "declare a typed #CLI entry struct and fn run(args: Args)"},
@@ -94,7 +102,7 @@ fn policy_relative_path(path: String) -> String? {
     None
 }
 pub fn policy_selector_path(selector: String) -> String {
-    if selector.starts_with("root:") || selector.starts_with("file:") -> return ~selector.slice(5, selector.len())
+    if selector.starts_with("root:") || selector.starts_with("file:") -> return policy_slice_bytes(selector, 5, selector.bytes().len())
     ~selector
 }
 fn policy_selector_error(value: String) -> String? {
@@ -103,16 +111,16 @@ fn policy_selector_error(value: String) -> String? {
 }
 fn policy_producer_error(value: String) -> String? {
     if !value.starts_with("producer:") -> return Val("producer selector must start with producer: ({value})")
-    parts :: value.slice(9, value.len()).split("#").to_list()
+    parts :: policy_slice_bytes(value, 9, value.bytes().len()).split("#").to_list()
     if parts.len() < 2 -> return Val("producer selector must name a symbol ({value})")
     if policy_relative_path(parts[0]) == .Val(error) -> return Val(~error)
     if parts.len() != 2 || parts[1].is_empty() -> return Val("producer selector must name one non-empty symbol ({value})")
     None
 }
 fn policy_artifact_error(value: String) -> String? {
-    if value.starts_with("path:") -> return policy_relative_path(~value.slice(5, value.len()))
+    if value.starts_with("path:") -> return policy_relative_path(policy_slice_bytes(value, 5, value.bytes().len()))
     if value.starts_with("family:") {
-        family :: value.slice(7, value.len())
+        family :: policy_slice_bytes(value, 7, value.bytes().len())
         if family.is_empty() || family.contains("/") -> return Val("artifact family is not a stable identifier ({value})")
         return None
     }
@@ -130,7 +138,7 @@ fn policy_unsigned(raw: String) -> String? {
         if digits[index] < (U8{48}) || digits[index] > (U8{57}) -> return None
     }
     loop start + 1 < digits.len() && digits[start] == (U8{48}) -> start += 1
-    value :: ~raw.slice(start, raw.len())
+    value :: policy_slice_bytes(raw, start, digits.len())
     if value.len() > 20 || (value.len() == 20 && value > "18446744073709551615") -> return None
     Val(value)
 }
@@ -162,10 +170,10 @@ pub fn policy_parse_manifest(text: String) -> PolicyManifest PolicyError! {
         carriage_return :: U8{13}
         end := bytes.len()
         loop end > 0 && bytes[end - 1] == carriage_return -> end -= 1
-        line :: ~raw.slice(0, end)
+        line :: policy_slice_bytes(raw, 0, end)
         if line.is_empty() || line.starts_with("#") -> next
         if line.starts_with("[") && line.ends_with("]") {
-            section = ~line.slice(1, line.len() - 1)
+            section = policy_slice_bytes(line, 1, line.bytes().len() - 1)
             if section != "source" && section != "scope" && section != "producer" && section != "artifact" && section != "finding" && section != "exception" -> return Err(PolicyError{message: "manifest line {number}: unknown section [{section}]"})
             next
         }
@@ -220,7 +228,7 @@ pub fn policy_source_row(manifest: PolicyManifest, path: String) -> PolicySource
 fn policy_protocol_error(protocol: String) -> String? {
     if protocol == "ordinary-envelope" || protocol == "no-response-protocol" -> return None
     if !protocol.starts_with("override:") -> return Val("generated protocol must be ordinary-envelope, no-response-protocol, or an override ({protocol})")
-    parts :: protocol.slice(9, protocol.len()).split(":").to_list()
+    parts :: policy_slice_bytes(protocol, 9, protocol.bytes().len()).split(":").to_list()
     if parts.len() < 2 -> return Val("generated protocol override must name identity and proof ({protocol})")
     if parts[0].is_empty() || parts[0] == "ordinary-envelope" || parts.len() != 2 || parts[1] != "differs-from-ordinary-envelope" -> return Val("generated protocol override must prove a distinct protocol identity ({protocol})")
     None
@@ -290,7 +298,7 @@ pub fn policy_validate_manifest(manifest: PolicyManifest) -> [String] {
     }
     loop producer in manifest.producers {
         if policy_protocol_error(producer.protocol) == .Val(error) {
-            path :: ~producer.selector.slice(9, producer.selector.len()).split("#").to_list()[0]
+            path :: ~policy_slice_bytes(producer.selector, 9, producer.selector.bytes().len()).split("#").to_list()[0]
             message :: policy_violation(path, "generated-protocol-override", "manifest:generated-protocol@0..0")
             &errors.push("{message} ({error})")
         }
@@ -343,7 +351,7 @@ fn policy_validate_manifest_paths(manifest: PolicyManifest, root: String) -> [St
         if !exists -> &errors.push("manifest source selector does not exist: {source.selector}")
     }
     loop producer in manifest.producers {
-        path :: ~producer.selector.slice(9, producer.selector.len()).split("#").to_list()[0]
+        path :: ~policy_slice_bytes(producer.selector, 9, producer.selector.bytes().len()).split("#").to_list()[0]
         if !policy_files.is_file(policy_join(root, path)) -> &errors.push("manifest producer source does not exist: {producer.selector}")
     }
     loop exception in manifest.exceptions {
@@ -542,15 +550,15 @@ fn policy_exception_failure(manifest: PolicyManifest, path: String, candidates: 
     assert_eq(policy_exception_failure(manifest, selector, [PolicyOccurrence]{}), "file=tests/ui/E-CALL-VALUE_call_result_not_called.jet; rule=entry-implicit; site=fn:run@0..0; why=expected 1 occurrence(s), found 0; replacement=remove the additional occurrence or update the exact reviewed site")
 }
 
-struct PolicyInventoryEntry { path: String, role: String, producer: String? }
-struct PolicyProvenanceEntry { producer: String, artifact: String, protocol: String }
-struct PolicyInventory {
-    files: [PolicyInventoryEntry]
-    producers: [String]
-    artifacts: [String]
-    provenance: [PolicyProvenanceEntry]
+pub struct PolicyInventoryEntry { pub path: String, pub role: String, pub producer: String? }
+pub struct PolicyProvenanceEntry { pub producer: String, pub artifact: String, pub protocol: String }
+pub struct PolicyInventory {
+    pub files: [PolicyInventoryEntry]
+    pub producers: [String]
+    pub artifacts: [String]
+    pub provenance: [PolicyProvenanceEntry]
 }
-struct PolicyDiscovery { paths: [String], config_candidates: [String] }
+pub struct PolicyDiscovery { pub paths: [String], pub config_candidates: [String] }
 
 fn policy_skip_directory(name: String) -> Bool {
     name == ".git" || name == ".claude" || name == ".opencode" || name == ".tmp" ||
@@ -637,12 +645,12 @@ pub fn policy_inventory(manifest: PolicyManifest, root: String) -> PolicyInvento
     }
     loop artifact in manifest.artifacts {
         if !artifact.selector.starts_with("path:") -> next
-        path :: ~artifact.selector.slice(5, artifact.selector.len())
+        path :: policy_slice_bytes(artifact.selector, 5, artifact.selector.bytes().len())
         if !policy_files.is_file(policy_join(root, path)) -> &errors.push("manifest artifact is missing: {path}")
     }
     loop artifact in manifest.artifacts {
         if !artifact.selector.starts_with("path:") -> next
-        path :: ~artifact.selector.slice(5, artifact.selector.len())
+        path :: policy_slice_bytes(artifact.selector, 5, artifact.selector.bytes().len())
         if !path.ends_with(".jet") -> next
         source :: policy_source_row(manifest, path)
         if source == {
@@ -666,11 +674,15 @@ pub fn policy_inventory(manifest: PolicyManifest, root: String) -> PolicyInvento
     if errors.len() > 0 -> return Err(PolicyError{message: errors.join("\n")})
     Ok(PolicyInventory{files: entries, producers: producers, artifacts: artifacts, provenance: provenance})
 }
+// PENDING-SEAM(config-parse): the real corpus contains
+// Examples/features/tooling/compiler_api_package/config. Refuse to approximate
+// PackageFacts::parse_uncomposed until its Jet package is consumable.
 #Test("corpus inventory config exclusion candidate count") {
     discovery :: policy_discover_manifest_files(policy_manifest(), ".") ?? panic("discover manifest corpus")
     print("config-dir exclusion candidate count: {discovery.config_candidates.len()}")
     assert(discovery.config_candidates.len() == 0, "config-dir exclusion requires the uncomposed manifest parse; candidates: {discovery.config_candidates.join(",")}")
 }
+// PENDING-SEAM(config-parse), shared with the candidate-count proof above.
 #Test("inventory_is_manifest_scoped") {
     inventory :: policy_inventory(policy_manifest(), ".") ?? panic("manifest-scoped inventory")
     first_hour := false
@@ -693,4 +705,15 @@ pub fn policy_inventory(manifest: PolicyManifest, root: String) -> PolicyInvento
     assert_eq(policy_unsigned(""), None)
     assert_eq(policy_site_error("fn:run@+0001..18446744073709551615"), None)
     assert_eq(policy_site_error("fn:run@18446744073709551615..1"), Val("site end precedes start (fn:run@18446744073709551615..1)"))
+}
+
+#Test("corpus manifest byte spans retain Unicode fields") {
+    manifest :: policy_parse_manifest("[source]\n1\tfile:案例.jet\tcanonical-teaching\troutine\tdecision\tproof\towner\treason é") ?? panic("Unicode manifest")
+    assert_eq(manifest.sources[0].selector, "file:案例.jet")
+    assert_eq(manifest.sources[0].reason, "reason é")
+    assert_eq(policy_selector_path(manifest.sources[0].selector), "案例.jet")
+    assert_eq(policy_producer_error("producer:例.rs#生成"), None)
+    assert_eq(policy_protocol_error("override:雪:differs-from-ordinary-envelope"), None)
+    assert_eq(policy_manifest_failure("[未知]\n"), "manifest line 1: unknown section [未知]")
+    assert_eq(policy_slice_bytes("é", 0, 0), "")
 }
