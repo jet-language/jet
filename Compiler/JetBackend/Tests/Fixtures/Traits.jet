@@ -16,6 +16,9 @@ fn fx_trait_values() -> MIRProgram Never! {
     text :: fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "payload"}})
     boxed :: fx_owned(&b, ty, MIROperation.TraitBox{value: text, target: mir_type_id("EchoObject")})
     backup :: fx_owned(&b, ty, MIROperation.Copy{value: boxed, fact: MIRCopyFact.Explicit})
+    // The trait clone dispatcher is registered before its String clone
+    // payload helper, and before the nested ordinary glue below. This also
+    // witnesses preservation of glue_base+row function-table identities.
     cloned_arg := fx_arg(backup, MIRAccess.Move)
     cloned_arg.implicit_clone = true
     temporary :: fx_owned(&b, fx_string(), MIROperation.Call{callee: MIRCallee.TraitMethod{method: method, trait_ref: bound, receiver: ty}, args: [MIRCallArg]{cloned_arg}, type_args: []})

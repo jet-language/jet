@@ -400,6 +400,7 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
     // deferred dispatcher once, including newly registered nested helpers.
     cursor := 0
     dispatchers := [Int]{}
+    glue_functions := [LIRFunction?]{}
     emitted := 0
     inventory :: lower_trait_key_count(m)
     loop {
@@ -407,22 +408,30 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
             glue :: ~m.glue[cursor]
             if lower_trait_dispatcher(program, glue) {
                 &dispatchers.push(cursor)
+                &glue_functions.push(None)
             } else if glue.helper != "" {
-                &functions.push(lower_helper_function(program, &m, glue))
+                &glue_functions.push(Val(lower_helper_function(program, &m, glue)))
             } else if glue.clone {
-                &functions.push(lower_clone_glue_function(program, &m, glue))
+                &glue_functions.push(Val(lower_clone_glue_function(program, &m, glue)))
             } else {
-                &functions.push(lower_glue_function(program, &m, glue))
+                &glue_functions.push(Val(lower_glue_function(program, &m, glue)))
             }
             cursor += 1
         }
         if emitted == dispatchers.len() -> break
         glue :: ~m.glue[dispatchers[emitted]]
         function :: if glue.helper != "" -> lower_helper_function(program, &m, glue) else if glue.clone -> lower_clone_glue_function(program, &m, glue) else -> lower_glue_function(program, &m, glue)
-        &functions.push(function)
+        glue_functions[dispatchers[emitted]] = Val(function)
         emitted += 1
     }
     if inventory != lower_trait_key_count(m) -> &m.issues.push(LIRLoweringIssue{function: "trait dispatch", message: "trait key inventory grew after dispatch emission"})
+    // Registration assigns glue_base+row, so emission order must not change
+    // the function table's positional ID contract.
+    loop function in glue_functions -> &functions.push(function ?? panic("deferred trait dispatcher was not emitted"))
+    if functions.len() != m.glue_base + m.glue.len() -> panic("native glue function count does not match its registered rows")
+    loop (index, function) in functions {
+        if function.id.value != index -> panic("native function ID does not match its table index")
+    }
     lowered :: LIRModule{signatures: ~m.signatures, functions: functions, data: ~m.data}
     issues := ~m.issues
     if issues.len() == 0 {
