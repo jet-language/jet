@@ -499,6 +499,14 @@ the existing owned `host_errno_text`/`host_errno_cause` entry points allocate
 one builder and delegate. Composite renderers can therefore append exact
 error text without allocating and copying an intermediate Text owner.
 
+TCP stream field projections are borrowed Bool-slot addresses, not snapshots
+or independent owners. `TCPStreamFields.jet` uses the held Host carrier:
+closed projects the retained FD72's canonical closed slot, while read/write
+shutdown project the parent's Stream56 slots. Their lifetime is the stream's
+lifetime; logical close and shutdown remain visible through those aliases.
+`TCPStreamFieldsWitness.c` uses real canonical owners and tests pointer
+identity, low-byte reads, live shutdown/close updates and parent-only release.
+
 ## Dependency order
 
 Core work follows the dependency graph. These categories describe dependency
