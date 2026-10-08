@@ -18,12 +18,12 @@ use core.files as files
 }
 
 #Test("explicit time and memory limit receipts are FAIL while harness timeouts stay TIMEOUT") {
-    step :: KitStep{argv: ["printf", "x"], stdin: "", exit: "0", assertions: [], limit_time: 1, limit_memory: 1024}
+    step :: kit_steps_parse_case("step: printf x\nlimit: time=1 memory=1024\n").steps[0]
     timeout :: KitRun{stdout: "", stderr: "", code: -1, signal: None, timed_out: true, error: "", limit_hit: "time"}
     memory :: KitRun{stdout: "", stderr: "", code: -1, signal: Val(9), timed_out: false, error: "", limit_hit: "memory"}
     assert_eq((kit_steps_failure(step, timeout) ?? panic("time failure")).status, "FAIL")
     assert_eq((kit_steps_failure(step, memory) ?? panic("memory failure")).status, "FAIL")
-    ordinary :: KitStep{argv: ["printf", "x"], stdin: "", exit: "0", assertions: []}
+    ordinary :: kit_steps_parse_case("step: printf x\n").steps[0]
     assert_eq((kit_steps_failure(ordinary, timeout) ?? panic("harness timeout")).status, "TIMEOUT")
     root :: cases_test_root("explicit-time-limit")
     cases_test_source(root, "time", "step: jet -c 'exec sleep 2'\nlimit: time=1\n")
@@ -41,8 +41,7 @@ use core.files as files
     assertion :: plan.steps[1].assertions[0]
     history :: [KitCapturedStep{label: "first", stdout: "", stderr: "", elapsed_ns: 100}, KitCapturedStep{label: "second", stdout: "", stderr: "", elapsed_ns: 150}]
     assert_eq(kit_steps_elapsed(assertion, history).status, "PASS")
-    tight := assertion
-    tight.ratio = 1.0
+    tight :: kit_steps_parse_case("step first: printf x\nstep second: printf x\nelapsed: second <= 1 * first\n").steps[1].assertions[0]
     assert_eq(kit_steps_elapsed(tight, history).status, "FAIL")
     assert_eq(kit_steps_elapsed(assertion, []).status, "ERROR")
     loop relation in ["second <= 0 * first", "second <= -1 * first", "second <= nope * first", "missing <= 2 * first", "second <= 2 * missing", "second < 2 * first"] {
