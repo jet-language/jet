@@ -217,6 +217,8 @@ and its checked stream receiver identity, never a guessed MIR function ID.
 Missing native stream clone/drop carriers are lowering errors, not seed
 `Rc<RefCell<BufReader>>` layout assumptions. Native execution of this boundary
 requires the runtime's vetted shared-pipe carrier and raw byte provider.
+Stride validation precedes the first source callback, and a read failure keeps
+the Prelude panic location as well as the checked Core diagnostic.
 
 Lowering witnesses that call canonical kernels absent from the minimal
 freestanding runtime emit relocatable objects and memory images, not a partial
