@@ -228,10 +228,13 @@ reservation even after switching back to system mode. Policy facts retain
 historical allocation/request/high-water counters on cancelled heap requests,
 while live bytes and tracker nodes return to zero.
 
-The explicit native host policy edges are `jet_rt_program_allocator_configure`
-and `jet_rt_program_allocator_fact` (allocations, requested, live, high-water,
-cap, mode at indices 0..5). Hosts serialize run configuration and preserve mode
-and cap for restoration. These words carry unsigned source `usize` bits. The
+The explicit native host policy edges are `jet_rt_program_allocator_configure`,
+`jet_rt_program_allocator_restore`, and `jet_rt_program_allocator_fact`
+(allocations, requested, live, high-water, cap, mode at indices 0..5). Hosts
+serialize run configuration, preserve mode and cap, and use the distinct
+restore edge to retain historical counters even after live bytes reach zero.
+Configure resets those counters only when no counted bytes remain live.
+These words carry unsigned source `usize` bits. The
 allocation schedule uses dynamic TLS, not a new task-control slot; its arming,
 fact and clearing edges implement the allocation channel only, not an effect
 path or the full fault-plan loop. `AllocationPolicyTests.jet` is included in
