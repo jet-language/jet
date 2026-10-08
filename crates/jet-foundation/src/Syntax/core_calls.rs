@@ -632,6 +632,8 @@ const fn effect_leaf_for(module: &str, method: &str) -> Option<&'static str> {
                 "__unix_accept",
                 "__unix_read",
                 "__unix_write_all_bytes",
+                "__unix_connect_host",
+                "__unix_connect_deadline_host",
                 "udp_send_to",
                 "udp_recv_from",
                 "udp_send_bytes_to",
@@ -685,6 +687,9 @@ const fn effect_leaf_for(module: &str, method: &str) -> Option<&'static str> {
                 "__read",
                 "__write",
                 "__write_all",
+                "__client_stream",
+                "__client_deadline",
+                "__client_config_deadline",
             ],
         ))
         || (same_text(module, "core.http.client")
@@ -692,7 +697,7 @@ const fn effect_leaf_for(module: &str, method: &str) -> Option<&'static str> {
         || (same_text(module, "core.http")
             && same_text(method, "get"))
         || (same_text(module, "core.http.server")
-            && one_of(method, &["serve", "serve_once", "serve_once_listener", "__serve_once", "__serve_once_listener"]))
+            && one_of(method, &["serve", "serve_once", "serve_once_listener", "__serve_once", "__serve_once_listener", "__serve"]))
     {
         return Some("Time.Wait");
     }
@@ -1542,7 +1547,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 100e2f2b7b4a9c7b1b97f45e65d8cb20acdd4edca072d36d19ac9a15ff807f91
+// Source SHA-256: 17976a4ef9405f65b6d30c4ec8266dd381159814c919b98bed65b89087f39c81
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -1844,6 +1849,10 @@ pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
 pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.data", "__host_path_is_file", "jet_data_host_path_is_file", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.encoding", "__edition", "", false, &[]).with_interpreter_route(CoreCallInterpreterRoute::TypedIntrinsic).without_direct_aot(),
+    CoreCallRecord::new("core.http.server", "__serve", "jet_http_mux_serve", false, &[true, false, false, false]).without_direct_aot(),
+    CoreCallRecord::new("core.http.server", "__bind", "jet_http_server_bind", false, &[true, false, false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).without_direct_aot(),
+    CoreCallRecord::new("core.http.server", "__static_files", "jet_http_srv_static_files_mount_defaulted", false, &[true, true, true, false, false, false]).without_direct_aot(),
+    CoreCallRecord::new("core.http.server", "__middleware", "jet_http_mux_middleware", false, &[true, false]),
     CoreCallRecord::new("core.auth", "__state_load", "jet_auth_store_load", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.auth", "__state_replace", "jet_auth_store_replace", true, &[true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "__read_bytes_os", "jet_files_read_bytes_os", true, &[true]),
@@ -2866,6 +2875,8 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::source_owned("core.net", "unix_write_all_bytes", &[true, true]),
     CoreCallRecord::new("core.net", "__unix_write_all_bytes", "jet_net_unix_write_all_bytes", true, &[true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.net", "unix_connect", "jet_net_unix_connect", true, &[true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.net", "__unix_connect_host", "jet_net_unix_connect", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.net", "__unix_connect_deadline_host", "jet_net_unix_connect_deadline", true, &[true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::source_owned("core.net", "unix_shutdown", &[true, true]),
     CoreCallRecord::new("core.net", "__unix_shutdown", "jet_net_unix_shutdown", true, &[true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::source_owned("core.net", "unix_close", &[true]),
@@ -2889,6 +2900,9 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.net", "__dns_srv_lookup", "jet_net_dns_srv_lookup", true, &[true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.net", "__dns_srv_at_lookup", "jet_net_dns_srv_at_lookup", true, &[true, true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.net.tls", "client", "jet_net_tls_client", false, &[false, true], ) .with_max_arity(4) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .without_direct_aot(),
+    CoreCallRecord::new("core.net.tls", "__client_stream", "jet_net_tls_client", false, &[false, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).without_direct_aot(),
+    CoreCallRecord::new("core.net.tls", "__client_deadline", "jet_net_tls_client_deadline", false, &[false, true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).without_direct_aot(),
+    CoreCallRecord::new("core.net.tls", "__client_config_deadline", "jet_net_tls_client_config_deadline", false, &[false, true, true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).without_direct_aot(),
     CoreCallRecord::source_owned("core.net.tls", "read", &[true, false]),
     CoreCallRecord::new("core.net.tls", "__read", "jet_net_tls_read_bytes", true, &[true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::source_owned("core.net.tls", "write", &[true, true]),
