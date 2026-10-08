@@ -640,10 +640,11 @@ const resultAlias = (type, path) => {
   const full = qualify(application[1], path);
   if (!rustOutcomeAlias(full)) return null;
   const found = declarationOf(full.replace(/^crate::/, ""));
+  if (found?.decls.length !== 1) return null;
   const decl = found.decls[0];
   const parameters = recordBindings(`struct ${application[1].split("::").pop()}<${decl.alias.parameters}>`, splitTop(application[2]), type);
   const qualified = (ty, module) => {
-    if (ty === "()" || ty === "String" || ty === "bool" || ty === "f32" || ty === "f64" || ty === "i64" || ty === "i128" || ty === "u128" || fixedInts.has(ty)) return ty;
+    if (ty === "()" || ty === "String" || ty === "bool" || ty === "f64" || unsupportedRawArguments.has(ty)) return ty;
     const nested = /^([^<]+)<([\s\S]*)>$/.exec(ty);
     if (nested) {
       const base = nested[1] === "Option" || nested[1] === "Result" || nested[1] === "Vec" ? nested[1] : qualify(nested[1], module);
