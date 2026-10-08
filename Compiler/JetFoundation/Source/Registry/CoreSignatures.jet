@@ -528,9 +528,13 @@ fn core_sig_encoding_backing(request: CoreCallSignatureRequest) -> CoreTypedCall
         if snapshot -> &signature.type_parameters.push(core_sig_type_parameter("U", CoreCallTypeConstraint.Any))
         return Val(signature)
     }
-    if module_name == "core.mem" && member == "__query_plan" {
+    if module_name == "core.mem" && (member == "__query_plan" || member == "__track_plan") {
         element :: core_sig_named("T")
         return Val(core_sig_generic(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.List{element: element}, read)}, Val(core_sig_named("__TablePlan")), core_sig_type_parameter("T", CoreCallTypeConstraint.Any)))
+    }
+    if module_name == "core.mem" && member == "__extreme_key_finite" {
+        element :: core_sig_named("T")
+        return Val(core_sig_generic(module_name, member, [CoreCallTypedParameter]{core_sig_positional(element, read)}, Val(Type.Bool), core_sig_type_parameter("T", CoreCallTypeConstraint.Any)))
     }
     if module_name == "core.mem" && member == "__watch_clock" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(Type.Int)))
     if module_name == "core.mem" && core_sig_one_of(member, [String]{"__list_capacity", "__list_reserve_exact", "__type_size"}) {

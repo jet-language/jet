@@ -920,7 +920,7 @@ fn resolved_core_fixed_sig(
         return Some((vec![(AccessConvention::Read, payload)], Some(Type::Int)));
     }
     if module == "core.mem"
-        && matches!(name, "__list_capacity" | "__list_reserve_exact" | "__type_size" | "__query_plan")
+        && matches!(name, "__list_capacity" | "__list_reserve_exact" | "__type_size" | "__query_plan" | "__track_plan" | "__extreme_key_finite")
     {
         let [element] = type_args else {
             diags.push(Diagnostic::error(
@@ -937,6 +937,7 @@ fn resolved_core_fixed_sig(
             parameters.into_iter().map(|(access, ty)| {
                 let ty = match ty {
                     Type::List(_) => Type::List(Box::new(element.clone())),
+                    Type::Named(name) if name == "__element" => element.clone(),
                     ty => ty,
                 };
                 (access, ty)
@@ -2391,7 +2392,7 @@ impl<'a> Checker<'a> {
         args: &mut Vec<crate::AST::CallArg>,
         resolved_ret_out: &mut Option<Type>,
     ) -> Option<Type> {
-        if module == "core.mem" && matches!(name, "__shared_revision" | "__snapshot_revision" | "__query_plan" | "__watch_clock") {
+        if module == "core.mem" && matches!(name, "__shared_revision" | "__snapshot_revision" | "__query_plan" | "__track_plan" | "__extreme_key_finite" | "__watch_clock") {
             let vetted = self.name_ledger.module_alias(self.module_idx)
                 .and_then(jet_foundation::CoreModuleExports::core_source_module_by_alias)
                 .is_some_and(|source| source.module == "core.data");

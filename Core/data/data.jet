@@ -2036,7 +2036,7 @@ struct DataTrackedReader<T> {
     changes: fn(Int) -> [DataTrackedChange<T>] DataError!
     revision: fn() -> Int
     retained_rows: fn() -> Int
-    plan: fn(Int) -> __TablePlan
+    plan: fn([T]) -> __TablePlan
 }
 
 struct DataTrackedMeta {
@@ -2648,4 +2648,102 @@ fn data_watch_core_status<T>(watch: DataWatchCore<T>) -> DataWatchStatus Never! 
     lifecycle.cancelled = true
     assert(!data_watch_lifecycle_begin(&lifecycle, 1))
     assert_eq(data_watch_status_int(18446744073709551615), 9223372036854775807)
+}
+
+struct DataQueryExtremeSelection<K> {
+    value: K
+    order: Int
+}
+
+fn data_query_extreme_select<T, K: Comparable>(entries: [DataWatchEntry<T>], key: fn(T) -> K, maximum: Bool, operation: String) -> DataQueryExtremeSelection<K> DataError! {
+    selected := DataQueryExtremeSelection<K>?{None}
+    loop entry in entries {
+        candidate :: key(entry.value)
+        if !core.mem.__extreme_key_finite<K>(candidate) -> return Err(data_error(.NonFinite, "extreme key must be finite", operation))
+        replace := true
+        if selected == .Val(current) {
+            equal :: candidate == current.value
+            less :: candidate < current.value
+            greater :: candidate > current.value
+            if !equal && !less && !greater -> return Err(data_error(.NonFinite, "extreme key is not ordered", operation))
+            replace = (if maximum -> greater else -> less) || (equal && entry.order < current.order)
+        }
+        if replace -> selected = Val(DataQueryExtremeSelection<K>{value: candidate, order: entry.order})
+    }
+    if selected == .Val(result) -> Ok(result)
+    else -> Err(data_error(.Empty, "empty query has no extreme", operation))
+}
+
+fn data_query_extreme_materialized<T, K: Comparable>(rows: [T], key: fn(T) -> K, maximum: Bool, operation: String) -> [K] DataError! {
+    entries := [DataWatchEntry<T>]{}
+    loop (index, row) in rows -> &entries.push(DataWatchEntry<T>{order: index, key: None, value: row})
+    result :: data_query_extreme_select<T, K>(entries, key, maximum, operation) ?? return Err(err)
+    Ok([K]{result.value})
+}
+
+fn data_watch_extreme_materialize<T, K: Comparable>(materialized: DataWatchMaterialized<T>, key: fn(T) -> K, maximum: Bool, operation: String) -> DataWatchMaterialized<K> DataError! {
+    result :: data_query_extreme_select<T, K>(materialized.entries, key, maximum, operation) ?? return Err(err)
+    Ok(DataWatchMaterialized<K>{entries: [DataWatchEntry<K>]{DataWatchEntry<K>{order: result.order, key: None, value: result.value}}, revision: materialized.revision, mode: materialized.mode, recomputed: materialized.recomputed, changed: materialized.changed, retained_rows: materialized.retained_rows})
+}
+
+fn data_watch_extreme_source<T, K: Comparable>(source: DataWatchSource<T>, key: fn(T) -> K, maximum: Bool, operation: String) -> DataWatchSource<K> Never! {
+    base :: shared [DataWatchEntry<T>]?{None}
+    DataWatchSource<K>{
+        initial: () -> {
+            materialized :: source.initial() ?? return Err(err)
+            result :: data_watch_extreme_materialize<T, K>(materialized, key, maximum, operation) ?? return Err(err)
+            guard := base.guard_edit()
+            guard.value = Val(materialized.entries)
+            Ok(result)
+        },
+        refresh: (revision, prior) -> {
+            previous :: base.capture().value() ?? return Err(data_error(.State, "extreme watch was not initialized", "data.query.watch"))
+            materialized :: source.refresh(revision, previous) ?? return Err(err)
+            if !materialized.changed && materialized.revision == revision -> return Ok(DataWatchMaterialized<K>{entries: prior, revision: materialized.revision, mode: materialized.mode, recomputed: false, changed: false, retained_rows: materialized.retained_rows})
+            result :: data_watch_extreme_materialize<T, K>(materialized, key, maximum, operation) ?? return Err(err)
+            guard := base.guard_edit()
+            guard.value = Val(materialized.entries)
+            Ok(result)
+        },
+    }
+}
+
+fn data_query_state_extreme<T, K: Comparable>(query: DataQueryState<T>, key: fn(T) -> K, maximum: Bool) -> DataQueryState<K> Never! {
+    step :: if maximum -> "max" else -> "min"
+    operation :: "query.{step}"
+    steps := ~query.steps
+    &steps.push(step)
+    result := data_query_state_reducer<K>(query.tracking, steps, () -> {
+        rows :: data_query_state_collect<T>(query) ?? return Err(err)
+        data_query_extreme_materialized<T, K>(rows, key, maximum, operation)
+    })
+    if data_query_maintained_source<T>(query) == .Val(source) -> result.watch_source = Val(data_watch_extreme_source<T, K>(source, key, maximum, operation))
+    result
+}
+
+fn data_track_reader<T, K>(owner: Shared<DataTrackedState<T, K>>) -> DataTrackedReader<T> Never! {
+    DataTrackedReader<T>{
+        rows: () -> data_track_state_rows<T, K>(owner),
+        entries: () -> data_track_state_entries<T, K>(owner),
+        changes: revision -> data_track_state_changes<T, K>(owner, revision),
+        revision: () -> core.mem.__shared_revision<DataTrackedState<T, K>>(owner),
+        retained_rows: () -> owner.guard_read().value.rows.len(),
+        plan: rows -> core.mem.__track_plan<T>(rows),
+    }
+}
+
+#Test("Query min/max preserve finite classification and optional native ordering") {
+    assert(!core.mem.__extreme_key_finite<Float>(Float.NAN))
+    assert(!core.mem.__extreme_key_finite<Float>(Float.INFINITY))
+    assert(!core.mem.__extreme_key_finite<Float>(-Float.INFINITY))
+    assert(core.mem.__extreme_key_finite<Float?>(None))
+    // Native Any classification deliberately does not recursively inspect
+    // options; unordered optional keys fail only when compared.
+    assert(core.mem.__extreme_key_finite<Float?>(Val(Float.NAN)))
+    values :: data_query_extreme_materialized<Int, Int?>([Int]{3, 1, 2}, row -> Val(row), false, "query.min") ?? panic("optional min")
+    assert_eq(values, [Int?]{Val(1)})
+    if data_query_extreme_materialized<Float, Float>([Float]{Float.NAN}, row -> row, false, "query.min") == {
+        .Ok(_) -> panic("NaN extreme accepted")
+        .Err(error) -> assert(error.kind == .NonFinite)
+    }
 }

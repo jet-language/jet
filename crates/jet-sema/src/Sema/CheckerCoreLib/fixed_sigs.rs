@@ -1292,9 +1292,13 @@ fn core_fixed_sig_impl(
             Some(Type::Bool),
         )),
         ("core.mem", "__type_size") => Some((vec![], Some(Type::Int))),
-        ("core.mem", "__query_plan") => Some((
+        ("core.mem", "__query_plan" | "__track_plan") => Some((
             vec![(read, Type::List(Box::new(Type::Named("__element".to_string()))))],
             Some(Type::Named("__TablePlan".to_string())),
+        )),
+        ("core.mem", "__extreme_key_finite") => Some((
+            vec![(read, Type::Named("__element".to_string()))],
+            Some(Type::Bool),
         )),
         ("core.mem", "__watch_clock") => Some((vec![], Some(Type::Int))),
         ("core.mem", "__shared_revision") => Some((

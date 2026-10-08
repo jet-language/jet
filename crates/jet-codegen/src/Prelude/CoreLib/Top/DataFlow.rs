@@ -537,6 +537,14 @@ fn jet_data_raw_query_plan<T>(rows: &Vec<T>) -> JetTablePlan {
         .unwrap_or_else(|error| panic!("invalid compiler query metadata: {error}"))
 }
 
+// Existing DataTrackedReader::plan identity construction (CommonTypes.rs),
+// accepting the snapshot rows only to retain their exact row count.
+fn jet_data_raw_track_plan<T>(rows: &Vec<T>) -> JetTablePlan {
+    let schema = JetTableSchema::new(JetTableTypeId::new(std::any::type_name::<T>()), Vec::new());
+    let source = JetTableSource::new("data.track", schema).with_rows(rows.len() as u128);
+    JetTablePlan::from_source("data.track", source)
+}
+
 #[cfg(test)]
 mod query_plan_leaf_contract {
     use super::*;
