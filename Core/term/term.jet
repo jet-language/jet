@@ -30,10 +30,42 @@ pub struct StdinHandle {
 
 pub struct Stdout {
     pub fd: Int
+
+    pub fn write(&self, text: String) IOError! -[IO]> {
+        stdio_write(text, false, false)
+    }
+    pub fn write_line(&self, text: String) IOError! -[IO]> {
+        stdio_write(text, true, false)
+    }
+    pub fn write_bytes(&self, bytes: [U8]) IOError! -[IO]> {
+        stdio_bytes(bytes, false)
+    }
+    pub fn flush(&self) IOError! -[IO]> {
+        stdio_flush(false)
+    }
+    pub fn is_tty(&self) -> Bool Never! -[IO]> {
+        core.term.__stdout_terminal()
+    }
 }
 
 pub struct Stderr {
     pub fd: Int
+
+    pub fn write(&self, text: String) IOError! -[IO]> {
+        stdio_write(text, false, true)
+    }
+    pub fn write_line(&self, text: String) IOError! -[IO]> {
+        stdio_write(text, true, true)
+    }
+    pub fn write_bytes(&self, bytes: [U8]) IOError! -[IO]> {
+        stdio_bytes(bytes, true)
+    }
+    pub fn flush(&self) IOError! -[IO]> {
+        stdio_flush(true)
+    }
+    pub fn is_tty(&self) -> Bool Never! -[IO]> {
+        core.term.__stderr_terminal()
+    }
 }
 
 // D-TERM1: the one `Key` value `read_key()` answers on every tier.
@@ -99,9 +131,9 @@ pub fn choose(prompt: String, options: [String]) -[IO, Time.Wait]> String IOErro
 
 pub fn stdin() -> StdinHandle Never! { core.term.stdin() }
 
-pub fn stdout() -> Stdout Never! { core.term.stdout() }
+pub fn stdout() -> Stdout Never! { Stdout{fd: 1} }
 
-pub fn stderr() -> Stderr Never! { core.term.stderr() }
+pub fn stderr() -> Stderr Never! { Stderr{fd: 2} }
 
 pub fn buffered() -> StdinHandle Never! { stdin() }
 
@@ -243,6 +275,78 @@ fn parse_int(text: String) -> Int? {
     Val(n)
 }
 
+
+fn stdio_error(operation: IOOperation, resource: String, cause: String) -> IOError Never! {
+    IOError.Other(IOContext{
+        operation: operation,
+        resource: Val(resource),
+        os_code: None,
+        cause: Val(cause),
+    })
+}
+
+fn stdio_checkpoint(operation: IOOperation, resource: String, selector: String) IOError! {
+    if core.term.__stdio_fault(selector) {
+        return Err(stdio_error(operation, resource, "fault injected: {selector}"))
+    }
+    Ok()
+}
+
+fn stdio_result(cause: String?, operation: IOOperation, resource: String) IOError! {
+    if cause == {
+        .Val(text) -> Err(stdio_error(operation, resource, text))
+        .None -> Ok()
+    }
+}
+
+fn stdio_terminal(stderr: Bool) -> Bool Never! {
+    if stderr -> return core.term.__stderr_terminal()
+    core.term.__stdout_terminal()
+}
+
+// Term.rs:152-160,168-176 holds one lock across write_all and flush.
+// The raw operation receives this source decision; it never re-decides it.
+fn stdio_write(text: String, newline: Bool, stderr: Bool) IOError! -[IO]> {
+    resource :: if stderr -> "stderr" else -> "stdout"
+    stdio_checkpoint(.Write, resource, "IO.Write")
+    flush :: text.len() > 0 || newline || stdio_terminal(stderr)
+    stdio_result(core.term.__stdio_write(text, newline, stderr, flush), .Write, resource)
+}
+
+fn stdio_bytes(bytes: [U8], stderr: Bool) IOError! -[IO]> {
+    resource :: if stderr -> "stderr" else -> "stdout"
+    stdio_checkpoint(.Write, resource, "IO.Write")
+    flush :: bytes.len() > 0 || stdio_terminal(stderr)
+    stdio_result(core.term.__stdio_bytes(bytes, stderr, flush), .Write, resource)
+}
+
+fn stdio_flush(stderr: Bool) IOError! -[IO]> {
+    resource :: if stderr -> "stderr" else -> "stdout"
+    stdio_checkpoint(.Flush, resource, "IO.Flush")
+    stdio_result(core.term.__stdio_flush(stderr), .Flush, resource)
+}
+
+#Test("stdio source tokens retain declared fields and record equality") {
+    assert(stdout().fd == 1 && stderr().fd == 2)
+    assert(stdout() == Stdout{fd: 1})
+    assert(stderr() == Stderr{fd: 2})
+    assert(stdout() != Stdout{fd: 9})
+    assert(stderr() != Stderr{fd: 9})
+}
+
+#Test("stdio source errors preserve Other, resource, and verbatim cause") {
+    if stdio_result(Val("custom Windows console error"), .Write, "stdout") == {
+        .Err(error) -> if error == {
+            .Other(context) -> {
+                assert(context.operation == .Write && context.resource == Val("stdout"))
+                assert(context.os_code == None && context.cause == Val("custom Windows console error"))
+            }
+            else -> panic("stdio error kind")
+        }
+        .Ok(_) -> panic("stdio failure must be reported")
+    }
+    stdio_result(None, .Flush, "stderr").drop("successful raw flush")
+}
 
 #Test("confirmation accepts only an ASCII case-insensitive yes") {
     assert(confirm_answer(" y "))

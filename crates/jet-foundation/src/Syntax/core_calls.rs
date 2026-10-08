@@ -273,6 +273,11 @@ const fn effect_for(module: &str, method: &str) -> Option<Effect> {
     if same_text(module, "core.process") {
         return Some(Effect::Exec);
     }
+    if same_text(module, "core.term")
+        && one_of(method, &["__stdio_fault", "__stdout_terminal", "__stderr_terminal"])
+    {
+        return None;
+    }
     if same_text(module, "core.term") {
         return Some(Effect::IO);
     }
