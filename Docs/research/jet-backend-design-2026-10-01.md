@@ -2068,3 +2068,25 @@ ordinals, embedded NUL/UTF-8 text and distinct record fields. Separate
 `width-stop` and `policy-stop` process modes expect the existing E3010 footer
 and exit 70. Syntax/ABI receipts do not claim linking, process execution,
 checked caller layout or native-only admission.
+
+`UiABI.jet` now adapts the historical Node160 contract to the pinned
+`Ui.rs:64-101` fields: no unused refs word or Closure24 ownership, key is an
+optional owned E4 at offset 152, and callback slots at 120/128 are raw i64.
+An absence mask distinguishes `None` from `Some(0)` for IME/callbacks.
+Nullable E4/metadata owners preserve absent versus present-empty values.
+`UiNode.jet` clones, drops and compares in source field order, recursively
+owns ordered child lists, and lends scalar addresses/text headers without
+transferring ownership. Node lists reuse the canonical data sequence helpers
+and depend on their shared exit-101 OOB/capacity stop providers.
+
+`UiMetadata.jet` reuses the historical ordered Accessibility/Shortcut
+ownership algorithms, corrected for byte-wide bool and modifier fields.
+TUI carriers retain IEEE constraint payload equality, byte-masked colors,
+inline optional styles and raw usize list-state/capability fields; FsGrant
+owns E4 root text and embeds byte-compatible Rights8 without normalization.
+Only native-private carriers may cross this boundary; Rust/source record
+allocations are not compatible. `UiCarriersSlice2Witness.c` uses real
+allocation/free observers for exact-once nested ownership, optional presence,
+borrowed lifetimes, bit-width masking and ordered child growth. Its process
+modes require the shared sequence-stop dependencies; syntax or ABI receipts
+do not prove native layout, linking, process parity or pack admission.
