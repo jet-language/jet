@@ -235,6 +235,39 @@ fn method_wave_cache_case(source: String) {
     method_wave_require(final.recomputes > measured.recomputes && final.hits == measured.hits, "generation change prevents a stale replay")
 }
 
+fn method_wave_cache_host_case(source: String) {
+    graph :: method_wave_registration(source, true)
+    serial :: CompilerThreads{cap: Val(1), cores: 2, memory_available: Val(268435456)}
+    parallel :: CompilerThreads{cap: Val(2), cores: 2, memory_available: Val(268435456)}
+    key := ""
+    loop nominal in graph.modules[0].nominals {
+        loop method in nominal.methods {
+            if method.declaration.name == "unit_value" -> key = method.symbol.id.key
+        }
+    }
+    method_wave_require(key != "", "the volatile witness is an actual registered conversion method")
+    cache :: sema_incremental_cache_new()
+    baseline :: method_wave_checked(graph, serial, [SemaComptimeFunctionResult]{})
+    first :: method_wave_cached_checked(graph, parallel, cache)
+    method_wave_require("{baseline:Debug}" == "{first:Debug}", "withheld retry retains identical failed host products")
+    primed :: sema_incremental_cache_stats(cache)
+    first_count := 0
+    loop item in primed.recomputed_items {
+        if item == key -> first_count += 1
+    }
+    method_wave_require(first_count == 1, "worker and owner retry count one actual logical recompute")
+    sema_incremental_cache_clear_measurement(cache)
+    second :: method_wave_cached_checked(graph, serial, cache)
+    method_wave_require("{baseline:Debug}" == "{second:Debug}", "configured None callback never replays a host-dependent product")
+    measured :: sema_incremental_cache_stats(cache)
+    second_count := 0
+    loop item in measured.recomputed_items {
+        if item == key -> second_count += 1
+    }
+    method_wave_require(second_count == 1 && measured.recomputes > primed.recomputes, "host reach remains volatile across requests and thread modes")
+}
+
+
 
 fn run() {
     positive :: method_wave_source(false)
@@ -247,6 +280,7 @@ fn run() {
     method_wave_cache_case(positive)
     unit_source :: "{positive}\n#UnitFamily(WaveLength, base: meter) {{ meter\nfoot(scale: 381/1250) }}\nstruct UnitOwner {{ value: Int\nfn unit_value(&self) -> Meter Never! {{ converted :: Meter{{Foot.from_float(Float{{8.0}})}}\nconverted }}\nfn after_unit(&self) -> Int Never! {{ self.value }} }}\n"
     method_wave_case(unit_source, true, true, false, true)
+    method_wave_cache_host_case(unit_source)
     generated_source :: "{positive}\nderive T.BrokenWave {{ fn generated_value(self) -> Int Never! {{ missing_generated_value }} }}\n#BrokenWave\nstruct GeneratedOwner {{ value: Int }}\n"
     method_wave_case(generated_source, true, true, false, false)
     print("method body wave: real serial/parallel checked and lowered equivalence passed")

@@ -747,19 +747,25 @@ fn sema_incremental_begin(cache: SemaIncrementalCache, graph: SemaRegistrationGr
     permit.value.row_bytes = 0
 }
 
-fn sema_incremental_module_input(environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> String Never! {
+fn sema_incremental_module_input(environment: SemaScopeEnvironment, scopes: &SemaScopeTable) -> String Never! {
     declarations :: loop declaration in environment.declarations -> SemaScopeDeclaration{
         symbol_id: declaration.symbol_id, item: sema_incremental_item_header(declaration.item),
     }
     // The graph is already frozen once by begin. Callable names belong to the
     // per-body input, not whichever summary happened to run last. Everything
     // else read from the environment and the full binding table is exact.
-    "module={environment.module_identity:Debug};package={environment.package_identity:Debug};name={environment.module_name:Debug};file={environment.source_file:Debug};origin={environment.source_origin:Debug};segments={environment.source_segments:Debug};types={environment.checked_types:Debug};type_rows={environment.checked_type_rows:Debug};type_slots={environment.checked_type_name_slots:Debug};type_names={environment.checked_type_name_rows:Debug};boxed={environment.boxed_edges:Debug};declarations={declarations:Debug};generics={environment.generic_params:Debug};comptime={environment.comptime_body_values:Debug};else={environment.else_arms:Debug};fixed_writes={environment.fixed_length_write_params:Debug};debug={environment.debug_sites:Debug};scope={scopes:Debug}"
+    // This owner-only window ends before hooks, checking, publication or task
+    // launch. Move/restore only the transient scalar; never clone the scope.
+    location := ^scopes.location_function
+    scopes.location_function = None
+    input := "module={environment.module_identity:Debug};package={environment.package_identity:Debug};name={environment.module_name:Debug};file={environment.source_file:Debug};origin={environment.source_origin:Debug};segments={environment.source_segments:Debug};types={environment.checked_types:Debug};type_rows={environment.checked_type_rows:Debug};type_slots={environment.checked_type_name_slots:Debug};type_names={environment.checked_type_name_rows:Debug};boxed={environment.boxed_edges:Debug};declarations={declarations:Debug};generics={environment.generic_params:Debug};comptime={environment.comptime_body_values:Debug};else={environment.else_arms:Debug};fixed_writes={environment.fixed_length_write_params:Debug};debug={environment.debug_sites:Debug};scope={scopes:Debug}"
+    scopes.location_function = ^location
+    ^input
 }
 
-fn sema_incremental_module(session: SemaIncrementalCache?, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> SemaModuleMemo? {
+fn sema_incremental_module(session: SemaIncrementalCache?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable) -> SemaModuleMemo? {
     cache :: session ?? return None
-    Val(sema_incremental_freeze_scope(cache, environment.module_identity, sema_incremental_module_input(environment, scopes)))
+    Val(sema_incremental_freeze_scope(cache, environment.module_identity, sema_incremental_module_input(environment, &scopes)))
 }
 
 fn sema_incremental_body_query(memo: SemaModuleMemo?, raw: Func, owner_id: SymbolID, kind: TFuncKind, raw_protocol_return: Bool, memory_plan: SemaFunctionMemoryPlan, memory_owner: String) -> SemaBodyMemoQuery? {
@@ -3068,7 +3074,7 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, owned_environmen
         } else {
             sema_check_view_summaries(graph, source_module, &environment, &scopes, host_hooks, memory_plan, comptime_functions, comptime_rows, counter_phase, trace_sink)
         }
-        if memo == None -> memo = sema_incremental_module(session, environment, scopes)
+        if memo == None -> memo = sema_incremental_module(session, environment, &scopes)
         // Whether a body published a return view that changed the module
         // scope; prepared bodies checked before the change no longer apply.
         scopes_changed := false
@@ -4769,7 +4775,7 @@ fn sema_check_prepare_module(shared_state: Shared<SemaCheckShared>, graph: SemaR
     environment := sema_check_shared_take_environment(shared_state)
     memory_plan := sema_check_shared_take_memory_plan(shared_state)
     scopes := sema_check_module_summary_scopes(graph, &environment, host_hooks, memory_plan, module_index, values, comptime_functions, comptime_rows, counter_phase, trace_sink)
-    memo :: sema_incremental_module(session, environment, scopes)
+    memo :: sema_incremental_module(session, environment, &scopes)
     queries := sema_incremental_job_queries(memo, graph.modules[module_index], memory_plan, jobs)
     sema_check_shared_fill(shared_state, ^environment, ^memory_plan)
     sema_check_bodies_parallel(shared_state, module_index, ^scopes, jobs, weights, workers, memo, ^queries)
