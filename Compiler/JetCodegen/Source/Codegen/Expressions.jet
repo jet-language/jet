@@ -27,6 +27,7 @@ use jet_foundation.[
     MIRConstReport,
     MIRConstant,
     mir_integer_constant,
+    mir_integer_key,
     MIRCopyFact,
     MIRConversion,
     MIRCoreClosureKind,
@@ -1704,7 +1705,11 @@ fn jet_codegen_lower_struct_literal(builder: &JetCodegenBuilder, program: JetCod
 
 fn jet_codegen_lower_comptime_key(value: TComptimeKey) -> MIRConstKey? {
     if value == {
-        .Int(number) -> Val(MIRConstKey.Int{value: number})
+        .Int(number) -> Val(mir_integer_key(number))
+        .BigInt(decimal) -> {
+            number :: Int.parse(decimal) ?? return None
+            Val(mir_integer_key(number))
+        }
         .String(text) -> Val(MIRConstKey.String{value: text})
         .Bool(flag) -> Val(MIRConstKey.Bool{value: flag})
         .Char(character) -> Val(MIRConstKey.Char{value: character})

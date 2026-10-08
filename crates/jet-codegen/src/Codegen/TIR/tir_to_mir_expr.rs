@@ -777,6 +777,7 @@ fn lower_data_plan(
 fn mir_const_key(key: &crate::AST::CtKey) -> MirConstKey {
     match key {
         crate::AST::CtKey::Int(value) => MirConstKey::Int(*value),
+        crate::AST::CtKey::BigInt(value) => MirConstKey::from_bigint(value),
         crate::AST::CtKey::Str(value) => MirConstKey::String(value.clone()),
         crate::AST::CtKey::Bool(value) => MirConstKey::Bool(*value),
         crate::AST::CtKey::Char(value) => MirConstKey::Char(*value),

@@ -3,6 +3,13 @@
 // value (outside the inline range, e.g. a u64 hash >= 2^63) must still match.
 fn parse(text: String) -> Int { Int.parse(text) ?? 0 }
 
+// Uppercase bindings fold at compile time, including keys beyond i64 and u128.
+BAKED_MAP :: [
+    340282366920938463463374607431768211457: "positive",
+    -340282366920938463463374607431768211457: "negative",
+    0: "zero",
+]
+
 fn run() {
     texts :: [
         "12017618986949271521",
@@ -37,4 +44,7 @@ fn run() {
     print("removed {(&m.remove(parse("9223372036854775808"))) ?? "missing"}")
     print("removed again {(&m.remove(parse("9223372036854775808"))) ?? "missing"}")
     print("after {m.keys().to_list()} len {m.len()}")
+    print("baked keys {BAKED_MAP.keys().to_list()}")
+    print("baked positive {BAKED_MAP.get(340282366920938463463374607431768211456 + 1) ?? "missing"}")
+    print("baked negative {BAKED_MAP.get(-340282366920938463463374607431768211456 - 1) ?? "missing"}")
 }

@@ -38,6 +38,7 @@ use jet_foundation.[
     TComptimeEnumArg,
     TComptimeField,
     TComptimeKey,
+    tir_comptime_integer_key,
     TComptimeKeyField,
     TComptimeMapEntry,
     TComptimeReport,
@@ -2841,7 +2842,11 @@ pub fn sema_checked_const_char(text: String) -> Int? {
 
 fn sema_checked_comptime_key(key: CtKey) -> TComptimeKey? {
     if key == {
-        .Int(value) -> Val(TComptimeKey.Int{value: value})
+        .Int(value) -> Val(tir_comptime_integer_key(value))
+        .BigInt(decimal) -> {
+            number :: Int.parse(decimal) ?? return None
+            Val(tir_comptime_integer_key(number))
+        }
         .Str(value) -> Val(TComptimeKey.String{value: value})
         .Bool(value) -> Val(TComptimeKey.Bool{value: value})
         .Char(value) -> sema_checked_const_char("{value}").map((code) -> TComptimeKey.Char{value: code})

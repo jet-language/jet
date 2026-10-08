@@ -997,6 +997,7 @@ codec_struct!(CtBigInt { negative, limbs });
 
 codec_enum!(CtKey {
     0 => Int(value),
+    7 => BigInt(value),
     1 => Str(value),
     2 => Bool(value),
     3 => Char(value),

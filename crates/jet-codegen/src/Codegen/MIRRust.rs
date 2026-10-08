@@ -32641,10 +32641,7 @@ impl<'a> RustEmitter<'a> {
                 MirConstant::Int { value, .. } => {
                     format!("jet_foundation::Numeric::JetInt::from_i64({value})")
                 }
-                MirConstant::BigInt(value) => format!(
-                    "{}jet_std::jet_int_owned_from_str({value:?}).expect(\"MIR Int\")",
-                    self.config.root_prefix
-                ),
+                MirConstant::BigInt(value) => self.bigint_constant(value),
                 _ => self.constant(constant),
             },
             MirTypeKind::InlineRange { base, .. }
@@ -32659,7 +32656,7 @@ impl<'a> RustEmitter<'a> {
                             (*value as u64).to_string()
                         }
                     }
-                    MirConstant::BigInt(value) => value.clone(),
+                    MirConstant::BigInt(value) => return self.bigint_constant_for_type(value, ty),
                     _ => return self.constant(constant),
                 };
                 format!("{value}{}{bits}", if *signed { "i" } else { "u" })
@@ -32710,6 +32707,7 @@ impl<'a> RustEmitter<'a> {
                                 },
                                 key,
                             ),
+                            MirConstKey::BigInt(decimal) => self.bigint_constant_for_type(decimal, key),
                             _ => self.const_key(entry_key),
                         };
                         format!("({key}, {})", self.constant_for_type(entry_value, value))
@@ -32817,10 +32815,7 @@ impl<'a> RustEmitter<'a> {
                     .join(", ")
             ),
             MirConstant::Unit => "()".to_string(),
-            MirConstant::BigInt(value) => format!(
-                "{}jet_std::jet_int_owned_from_str({:?}).expect(\"MIR Int\")",
-                self.config.root_prefix, value
-            ),
+            MirConstant::BigInt(value) => self.bigint_constant(value),
             MirConstant::List(values) => format!(
                 "vec![{}]",
                 values
@@ -32928,9 +32923,29 @@ impl<'a> RustEmitter<'a> {
         }
     }
 
+    fn bigint_constant(&self, decimal: &str) -> String {
+        format!(
+            "{}jet_std::jet_int_owned_from_str({decimal:?}).expect(\"MIR Int\")",
+            self.config.root_prefix,
+        )
+    }
+
+    fn bigint_constant_for_type(&self, decimal: &str, ty: &MirType) -> String {
+        match ty.kind() {
+            MirTypeKind::IntN { signed, bits } => {
+                format!("{decimal}{}{bits}", if *signed { "i" } else { "u" })
+            }
+            MirTypeKind::InlineRange { base, .. }
+            | MirTypeKind::Tagged { inner: base, .. }
+            | MirTypeKind::Quantity { base, .. } => self.bigint_constant_for_type(decimal, base),
+            _ => self.bigint_constant(decimal),
+        }
+    }
+
     fn const_key(&self, key: &MirConstKey) -> String {
         match key {
             MirConstKey::Int(value) => value.to_string(),
+            MirConstKey::BigInt(value) => self.bigint_constant(value),
             MirConstKey::String(value) => {
                 if self.is_core_layer() {
                     format!("{value:?}")

@@ -1070,7 +1070,9 @@ fn emit_enum_converter(
                 .collect::<Vec<_>>();
             (lets, (0..values.len()).map(|index| format!("__host_{index}")).collect())
         };
-        let constructor = if host_variant.fields.is_empty() {
+        let constructor = if definition.name == "MIRConstKey" && source_variant.name == "BigInt" {
+            format!("{}::from_bigint(&::jet_foundation::Numeric::CtBigInt::from_str({})?)", host_path, bindings[0])
+        } else if host_variant.fields.is_empty() {
             format!("{}::{}", host_path, host_variant.name)
         } else if host_variant.fields.iter().all(|field| field.name.is_some()) {
             let fields = host_variant
@@ -2657,6 +2659,29 @@ mod tests {
                 .expect("generated codepoint converter");
             assert!(reverse.contains("u32::from"));
             assert!(!reverse.contains("from_str"));
+        }
+    }
+
+    #[test]
+    fn mir_bigint_key_schema_and_canonical_carrier_agree() {
+        use jet_foundation::MIR::MirConstKey;
+        use jet_foundation::Numeric::CtBigInt;
+        let source = parse_definitions(super::SOURCE_MIR_SCHEMA).expect("source schema");
+        let host = parse_definitions(super::HOST_MIR_SCHEMA).expect("host schema");
+        let source = source.iter().find(|row| row.name == "MIRConstKey").expect("source key");
+        let host = host.iter().find(|row| row.name == "MirConstKey").expect("host key");
+        let (Body::Enum(source), Body::Enum(host)) = (&source.body, &host.body) else {
+            panic!("constant key schemas must be enums");
+        };
+        let source = source.iter().find(|row| row.name == "BigInt").expect("source BigInt");
+        let host = host.iter().find(|row| row.name == "BigInt").expect("host BigInt");
+        assert_eq!(super::align_variant_fields("MIRConstKey", source, host).unwrap(), [Some(0)]);
+        for decimal in ["18446744073709551615", "-9223372036854775809", "999999999999999999999999999999999999999999"] {
+            assert_eq!(MirConstKey::from_bigint(&CtBigInt::from_str(decimal).unwrap()),
+                MirConstKey::BigInt(decimal.to_string()));
+        }
+        for number in [i64::MIN, 0, i64::MAX] {
+            assert_eq!(MirConstKey::from_bigint(&CtBigInt::from_int(number)), MirConstKey::Int(number));
         }
     }
 

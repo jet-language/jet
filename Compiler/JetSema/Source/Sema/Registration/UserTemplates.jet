@@ -9,6 +9,7 @@ use jet_foundation.[
     CtEnumArg,
     CtFloat,
     CtKey,
+    ast_comptime_integer_key,
     CtMapEntry,
     CtReport,
     CtValue,
@@ -54,7 +55,11 @@ pub struct SemaUserMemberSite {
 
 fn sema_user_template_ct_key(key: TComptimeKey) -> CtKey? Never! {
     if key == {
-        .Int(number) -> Val(CtKey.Int{value: number})
+        .Int(number) -> Val(ast_comptime_integer_key(number))
+        .BigInt(decimal) -> {
+            number :: Int.parse(decimal) ?? return None
+            Val(ast_comptime_integer_key(number))
+        }
         .String(text) -> Val(CtKey.Str{value: text})
         .Bool(flag) -> Val(CtKey.Bool{value: flag})
         .Enum(owner, variant) -> Val(CtKey.Enum{type_name: owner, variant: variant})

@@ -26246,6 +26246,7 @@ fn direct_absent_value(
 fn mir_const_key_value(key: &MirConstKey) -> MirEvalValue {
     match key {
         MirConstKey::Int(value) => MirEvalValue::Int(*value),
+        MirConstKey::BigInt(value) => MirEvalValue::BigInt(value.clone()),
         MirConstKey::String(value) => MirEvalValue::String(value.clone()),
         MirConstKey::Bool(value) => MirEvalValue::Bool(*value),
         MirConstKey::Char(value) => MirEvalValue::Char(*value),
@@ -26274,6 +26275,7 @@ fn mir_const_key_value(key: &MirConstKey) -> MirEvalValue {
 fn mir_const_key(value: MirEvalValue, span: Span) -> Result<MirConstKey, Diagnostic> {
     match value {
         MirEvalValue::Int(value) => Ok(MirConstKey::Int(value)),
+        MirEvalValue::BigInt(value) => Ok(MirConstKey::from_bigint(&mir_bigint(&value, span)?)),
         MirEvalValue::String(value) => Ok(MirConstKey::String(value)),
         MirEvalValue::Bool(value) => Ok(MirConstKey::Bool(value)),
         MirEvalValue::Char(value) => Ok(MirConstKey::Char(value)),
@@ -31913,6 +31915,7 @@ fn print_names_match(left: &str, right: &str) -> bool {
 fn mir_print_key(key: &MirConstKey) -> String {
     match key {
         MirConstKey::Int(value) => value.to_string(),
+        MirConstKey::BigInt(value) => value.clone(),
         MirConstKey::String(value) => value.clone(),
         MirConstKey::Bool(value) => value.to_string(),
         MirConstKey::Char(value) => format!("{value:?}"),

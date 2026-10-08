@@ -2798,6 +2798,7 @@ fn lower_constant_value(value: &CtValue) -> Option<MirConstant> {
 fn lower_const_key(key: &CtKey) -> Option<jet_foundation::MIR::MirConstKey> {
     Some(match key {
         CtKey::Int(value) => jet_foundation::MIR::MirConstKey::Int(*value),
+        CtKey::BigInt(value) => jet_foundation::MIR::MirConstKey::from_bigint(value),
         CtKey::Str(value) => jet_foundation::MIR::MirConstKey::String(value.clone()),
         CtKey::Bool(value) => jet_foundation::MIR::MirConstKey::Bool(*value),
         CtKey::Char(value) => jet_foundation::MIR::MirConstKey::Char(*value),

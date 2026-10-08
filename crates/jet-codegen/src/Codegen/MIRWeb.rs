@@ -3055,6 +3055,7 @@ fn js_constant_expression(
 fn js_const_key_expression(key: &MirConstKey) -> Result<String, MirWebError> {
     match key {
         MirConstKey::Int(value) => Ok(format!("BigInt({})", js_string(&value.to_string()))),
+        MirConstKey::BigInt(value) => Ok(format!("BigInt({})", js_string(value))),
         MirConstKey::String(value) => Ok(js_string(value)),
         MirConstKey::Bool(value) => Ok(value.to_string()),
         MirConstKey::Char(value) => Ok(js_string(&value.to_string())),
@@ -8019,6 +8020,7 @@ fn const_report_descriptor(report: &MirConstReport) -> String {
 fn const_key_descriptor(key: &MirConstKey) -> String {
     match key {
         MirConstKey::Int(value) => format!("int:{value}"),
+        MirConstKey::BigInt(value) => format!("bigint:{value}"),
         MirConstKey::String(value) => format!("string:{value}"),
         MirConstKey::Bool(value) => format!("bool:{value}"),
         MirConstKey::Char(value) => format!("char:{}", mir_char_descriptor(*value)),

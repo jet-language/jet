@@ -57,10 +57,20 @@ fn fc_embedded_integer_constants() {
     state := sema_ownership_state_init()
     context := sema_check_context_init()
     diagnostics := [Diagnostic]{}
-    exact_decimals :: [String]{"18446744073709551615", "-9223372036854775809"}
+    exact_decimals :: [String]{"18446744073709551615", "-9223372036854775809", "100000000000000000000000000000000000000000", "-100000000000000000000000000000000000000000"}
     loop decimal in exact_decimals {
         number :: Int.parse(decimal) ?? panic("fixture integer")
         fc_require(mir_integer_constant(number, None, None) == (MIRConstant.BigInt{decimal: decimal}), "ordinary literals share the exact carrier")
+        ast_key :: ast_comptime_key_from_value(CtValue.Int{value: number}) ?? panic("exact Int is not a map key")
+        fc_require(ast_key == (CtKey.BigInt{decimal: decimal}), "AST map key spills only outside i64")
+        fc_require(ast_comptime_key_to_value(ast_key) == (CtValue.BigInt{value: decimal}), "AST exact key roundtrip")
+        typed_key :: sema_checked_comptime_key(ast_key) ?? panic("exact key was not checked")
+        fc_require(typed_key == (TComptimeKey.BigInt{decimal: decimal}), "checked exact key")
+        lowered_key :: jet_codegen_lower_comptime_key(typed_key) ?? panic("exact key was not lowered")
+        fc_require(lowered_key == (MIRConstKey.BigInt{decimal: decimal}), "native exact key")
+        map_value :: TComptimeValue.Map{entries: [TComptimeMapEntry]{TComptimeMapEntry{key: typed_key, value: TComptimeValue.String{value: "found"}}}}
+        lowered_map :: jet_codegen_lower_comptime_value(map_value, [SemaGraphModuleResult]{}, "", [String]{}) ?? panic("exact map was not lowered")
+        fc_require(lowered_map == (MIRConstant.Map{entries: [MIRConstMapEntry]{MIRConstMapEntry{key: lowered_key, value: MIRConstant.String{value: "found"}}}}), "map retains exact key")
         checked :: sema_expr_check_comptime_name("EXACT", span, Val(CtValue.Int{value: number}), None, environment, &scopes, &state, &context, &diagnostics) ?? panic("embedded integer was not checked")
         expected :: TExprKind.CtLit{value: TComptimeValue.BigInt{decimal: decimal}}
         fc_require(checked.ty == Type.Int && checked.kind == expected, "embedded exact integer uses BigInt")
@@ -94,6 +104,11 @@ fn fc_embedded_integer_constants() {
     fc_require(converted, "prepared U64 maximum keeps checked Int-to-fixed conversion")
     native_values :: [Int]{-9223372036854775807 - 1, 0, 9223372036854775807}
     loop number in native_values {
+        ast_key :: ast_comptime_key_from_value(CtValue.BigInt{value: "{number}"}) ?? panic("native spill key")
+        fc_require(ast_key == (CtKey.Int{value: number}), "native spill has one key carrier")
+        typed_key :: sema_checked_comptime_key(ast_key) ?? panic("native key was not checked")
+        fc_require(typed_key == (TComptimeKey.Int{value: number}), "checked native key")
+        fc_require(jet_codegen_lower_comptime_key(typed_key) == (Val(MIRConstKey.Int{value: number})), "native key has one MIR carrier")
         checked :: sema_expr_check_comptime_name("NATIVE", span, Val(CtValue.Int{value: number}), None, environment, &scopes, &state, &context, &diagnostics) ?? panic("native integer was not checked")
         fc_require(checked.kind == (TExprKind.IntLit{value: number, width: None}), "native integer keeps IntLit")
     }

@@ -3307,7 +3307,7 @@ fn to_const_key_expression(
     use MirTypeKind as Kind;
     let key = "::jet_foundation::MIR::MirConstKey";
     Ok(match ty.kind() {
-        Kind::Int => format!("{key}::Int(({source}).to_i64().ok_or_else(|| \"integer map key exceeds i64\".to_string())?)"),
+        Kind::Int => format!("match ({source}).to_i64() {{ Some(value) => {key}::Int(value), None => {key}::from_bigint(&({source}).to_big()) }}"),
         Kind::IntN { .. } => format!("{key}::Int(({source}).to_string().parse::<i64>().map_err(|_| \"fixed-width integer map key exceeds i64\".to_string())?)"),
         Kind::String => format!("{key}::String(({source}).clone())"),
         Kind::Bool => format!("{key}::Bool(*({source}))"),
@@ -3360,7 +3360,7 @@ fn from_const_key_expression(
 ) -> Result<String, BootstrapHostCodecError> {
     use MirTypeKind as Kind;
     Ok(match ty.kind() {
-        Kind::Int => format!("match {key} {{ ::jet_foundation::MIR::MirConstKey::Int(value) => jet_foundation::Numeric::JetInt::from_i64(value), _ => return Err(\"map key does not match checked Int\".to_string()) }}"),
+        Kind::Int => format!("match {key} {{ ::jet_foundation::MIR::MirConstKey::Int(value) => jet_foundation::Numeric::JetInt::from_i64(value), ::jet_foundation::MIR::MirConstKey::BigInt(decimal) => jet_foundation::Numeric::JetInt::from_big(jet_foundation::Numeric::CtBigInt::from_str(&decimal)?), _ => return Err(\"map key does not match checked Int\".to_string()) }}"),
         Kind::IntN { signed, bits } => {
             let target=format!("{}{bits}",if *signed {'i'} else {'u'});
             format!("match {key} {{ ::jet_foundation::MIR::MirConstKey::Int(value) => {target}::try_from(value).map_err(|_| \"map key does not fit checked fixed width\".to_string())?, _ => return Err(\"map key does not match checked fixed width\".to_string()) }}")
@@ -3653,6 +3653,13 @@ fn validate_const_key(program:&MirProgram,ty:&MirType,key_ty:&MirConstKey,depth:
     if depth>=MAX_VALUE_DEPTH{return Err("map key exceeds checked nesting bound".to_string());}
     match (ty.kind(),key_ty){
         (MirTypeKind::Int|MirTypeKind::IntN{..}|MirTypeKind::Measure(_),MirConstKey::Int(_))|(MirTypeKind::String,MirConstKey::String(_))|(MirTypeKind::Bool,MirConstKey::Bool(_))|(MirTypeKind::Char,MirConstKey::Char(_))=>Ok(()),
+        (MirTypeKind::Int,MirConstKey::BigInt(decimal)) => {
+            let value = jet_foundation::Numeric::CtBigInt::from_str(decimal)?;
+            if value.try_i64().is_some() || value.to_string_rep() != *decimal {
+                return Err("map BigInt key is not canonical".to_string());
+            }
+            Ok(())
+        },
         (MirTypeKind::Tuple(types),MirConstKey::Tuple(values)) if types.len()==values.len()=>{for ((name,ty),(actual,key)) in types.iter().zip(values){if name!=actual{return Err("tuple map key names do not match checked type".to_string());}validate_const_key(program,ty,key,depth+1)?;}Ok(())},
         (MirTypeKind::Apply{name,..},MirConstKey::Struct{type_name,fields})=>{let def=program.types.iter().find(|d|d.id==name.id).ok_or_else(||"checked map key type is missing".to_string())?;let MirTypeDefKind::Struct{fields:declared,..}=&def.kind else{return Err("map key is not a checked struct".to_string());};if type_name!=&def.name||declared.len()!=fields.len(){return Err("struct key differs from checked nominal type".to_string());}for (field,(name,key)) in declared.iter().zip(fields){if field.name!=*name{return Err("struct key field order/name mismatch".to_string());}validate_const_key(program,&field.ty,key,depth+1)?;}Ok(())},
         (MirTypeKind::Apply{name,..},MirConstKey::Enum{type_name,variant})=>{let def=program.types.iter().find(|d|d.id==name.id).ok_or_else(||"checked map key type is missing".to_string())?;if type_name!=&def.name{return Err("enum key name mismatch".to_string());}match &def.kind{MirTypeDefKind::Enum{variants,..} if variants.iter().any(|row|row.name==*variant&&matches!(row.payload,MirVariantPayload::Unit))=>Ok(()),MirTypeDefKind::UnitFamily{members} if members.iter().any(|member|member==variant)=>Ok(()),_=>Err("map enum key is not a checked unit variant".to_string())}},

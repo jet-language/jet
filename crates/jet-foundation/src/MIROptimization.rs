@@ -15937,6 +15937,10 @@ fn encode_mir_const_key(writer: &mut CanonicalWriter, key: &MirConstKey) {
             writer.tag("int");
             writer.u64(*value as u64);
         }
+        MirConstKey::BigInt(value) => {
+            writer.tag("bigint");
+            writer.str(value);
+        }
         MirConstKey::String(value) => {
             writer.tag("string");
             writer.str(value);

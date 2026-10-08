@@ -483,6 +483,9 @@ fn conversion_error(message: impl Into<String>, span: Span) -> Diagnostic {
 pub(super) fn mir_to_ct_key(key: &MirConstKey) -> CtKey {
     match key {
         MirConstKey::Int(value) => CtKey::Int(*value),
+        MirConstKey::BigInt(value) => CtKey::from_value(CtValue::BigInt(
+            CtBigInt::from_str(value).expect("canonical MIR integer key"),
+        )).expect("integer key"),
         MirConstKey::String(value) => CtKey::Str(value.clone()),
         MirConstKey::Bool(value) => CtKey::Bool(*value),
         MirConstKey::Char(value) => CtKey::Char(*value),
@@ -509,6 +512,7 @@ pub(super) fn mir_to_ct_key(key: &MirConstKey) -> CtKey {
 pub(super) fn ct_to_mir_key(key: CtKey) -> MirConstKey {
     match key {
         CtKey::Int(value) => MirConstKey::Int(value),
+        CtKey::BigInt(value) => MirConstKey::from_bigint(&value),
         CtKey::Str(value) => MirConstKey::String(value),
         CtKey::Bool(value) => MirConstKey::Bool(value),
         CtKey::Char(value) => MirConstKey::Char(value),

@@ -1307,6 +1307,7 @@ impl PartialEq for ClosureData {
 #[derive(Clone, Debug)]
 pub enum CtKey {
     Int(i64),
+    BigInt(CtBigInt),
     Str(String),
     Bool(bool),
     Char(char),
@@ -1330,6 +1331,10 @@ impl CtKey {
     fn map_key(&self) -> map_key_semantics::JetMapKey {
         match self {
             CtKey::Int(value) => map_key_semantics::JetMapKey::Int(*value),
+            CtKey::BigInt(value) => map_key_semantics::JetMapKey::BigInt {
+                negative: value.negative,
+                limbs: value.limbs.clone(),
+            },
             CtKey::Str(value) => map_key_semantics::JetMapKey::String(value.clone()),
             CtKey::Bool(value) => map_key_semantics::JetMapKey::Bool(*value),
             CtKey::Char(value) => map_key_semantics::JetMapKey::Char(*value),
@@ -1373,7 +1378,10 @@ impl CtKey {
             // Exact Int arithmetic spills values outside the evaluator's
             // fast i64 carrier into BigInt. If the spill still fits i64,
             // canonicalize it to the same key used by direct Int values.
-            CtValue::BigInt(value) => value.try_i64().map(CtKey::Int),
+            CtValue::BigInt(value) => Some(match value.try_i64() {
+                Some(number) => CtKey::Int(number),
+                None => CtKey::BigInt(value),
+            }),
             CtValue::Str(s) => Some(CtKey::Str(s)),
             CtValue::Bool(b) => Some(CtKey::Bool(b)),
             CtValue::Char(c) => Some(CtKey::Char(c)),
@@ -1405,6 +1413,7 @@ impl CtKey {
     pub fn to_value(&self) -> CtValue {
         match self {
             CtKey::Int(n) => CtValue::Int(*n),
+            CtKey::BigInt(value) => CtValue::BigInt(value.clone()),
             CtKey::Str(s) => CtValue::Str(s.clone()),
             CtKey::Bool(b) => CtValue::Bool(*b),
             CtKey::Char(c) => CtValue::Char(*c),
@@ -1431,7 +1440,7 @@ impl CtKey {
     }
     pub(crate) fn jet_type(&self) -> Type {
         match self {
-            CtKey::Int(_) => Type::Int,
+            CtKey::Int(_) | CtKey::BigInt(_) => Type::Int,
             CtKey::Str(_) => Type::String,
             CtKey::Bool(_) => Type::Bool,
             CtKey::Char(_) => Type::Char,
@@ -2109,6 +2118,42 @@ mod tests {
             ["-9223372036854775809", "0", "18446744073709551615"]);
         assert!(matches!(CtKey::from_value(CtValue::BigInt(CtBigInt::from_int(0))),
             Some(CtKey::Int(0))));
+    }
+
+    #[test]
+    fn exact_integer_key_order_and_hash_use_canonical_numeric_values() {
+        use super::CtKey;
+        use crate::MIR::MirConstKey;
+        use crate::Numeric::CtBigInt;
+        use std::collections::{BTreeMap, HashSet};
+        let decimals = [
+            "-100000000000000000000000000000000000000000",
+            "-9223372036854775810", "-9223372036854775809",
+            "-9223372036854775808", "0", "9223372036854775807",
+            "9223372036854775808", "9223372036854775809",
+            "100000000000000000000000000000000000000000",
+        ];
+        let mut ct = BTreeMap::new();
+        let mut mir = BTreeMap::new();
+        for decimal in decimals.iter().rev() {
+            let number = CtBigInt::from_str(decimal).unwrap();
+            let key = CtKey::from_value(CtValue::BigInt(number.clone())).unwrap();
+            let mir_key = MirConstKey::from_bigint(&number);
+            ct.insert(key, *decimal);
+            mir.insert(mir_key, *decimal);
+        }
+        assert_eq!(ct.values().copied().collect::<Vec<_>>(), decimals);
+        assert_eq!(mir.values().copied().collect::<Vec<_>>(), decimals);
+        let canonical = MirConstKey::from_bigint(&CtBigInt::from_str("+0009223372036854775808").unwrap());
+        let mut hash = HashSet::new();
+        assert!(hash.insert(canonical));
+        assert!(!hash.insert(MirConstKey::from_bigint(&CtBigInt::from_str("9223372036854775808").unwrap())));
+        assert_eq!(MirConstKey::from_bigint(&CtBigInt::from_str("-0000").unwrap()), MirConstKey::Int(0));
+        let nested = CtValue::Struct {
+            type_name: "tuple".to_string(),
+            fields: vec![("key".to_string(), CtValue::BigInt(CtBigInt::from_str(decimals[0]).unwrap()))],
+        };
+        assert_eq!(CtKey::from_value(nested.clone()).unwrap().to_value(), nested);
     }
 
     #[test]

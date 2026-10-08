@@ -3887,9 +3887,11 @@ impl MirBinaryOp {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum MirConstKey {
     Int(i64),
+    /// Canonical decimal outside i64; use `from_bigint` at value boundaries.
+    BigInt(String),
     String(String),
     Bool(bool),
     Char(char),
@@ -3902,6 +3904,68 @@ pub enum MirConstKey {
         type_name: String,
         variant: String,
     },
+}
+
+impl MirConstKey {
+    pub fn from_bigint(value: &crate::Numeric::CtBigInt) -> Self {
+        match value.try_i64() {
+            Some(number) => Self::Int(number),
+            None => Self::BigInt(value.to_string_rep()),
+        }
+    }
+
+    fn rank(&self) -> u8 {
+        match self {
+            Self::Int(_) | Self::BigInt(_) => 0,
+            Self::String(_) => 1,
+            Self::Bool(_) => 2,
+            Self::Char(_) => 3,
+            Self::Tuple(_) => 4,
+            Self::Struct { .. } => 5,
+            Self::Enum { .. } => 6,
+        }
+    }
+}
+
+impl PartialOrd for MirConstKey {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for MirConstKey {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        use std::cmp::Ordering;
+        match (self, other) {
+            (Self::Int(left), Self::Int(right)) => left.cmp(right),
+            (Self::BigInt(left), Self::BigInt(right)) => {
+                let left_negative = left.starts_with('-');
+                let right_negative = right.starts_with('-');
+                if left_negative != right_negative {
+                    return right_negative.cmp(&left_negative);
+                }
+                let order = left.len().cmp(&right.len()).then_with(|| left.cmp(right));
+                if left_negative { order.reverse() } else { order }
+            }
+            (Self::BigInt(value), Self::Int(_)) => {
+                if value.starts_with('-') { Ordering::Less } else { Ordering::Greater }
+            }
+            (Self::Int(_), Self::BigInt(value)) => {
+                if value.starts_with('-') { Ordering::Greater } else { Ordering::Less }
+            }
+            (Self::String(left), Self::String(right)) => left.cmp(right),
+            (Self::Bool(left), Self::Bool(right)) => left.cmp(right),
+            (Self::Char(left), Self::Char(right)) => left.cmp(right),
+            (Self::Tuple(left), Self::Tuple(right)) => left.cmp(right),
+            (Self::Struct { type_name: left_name, fields: left }, Self::Struct { type_name: right_name, fields: right }) => {
+                left_name.cmp(right_name).then_with(|| left.cmp(right))
+            }
+            (Self::Enum { type_name: left_name, variant: left }, Self::Enum { type_name: right_name, variant: right }) => {
+                left_name.cmp(right_name).then_with(|| left.cmp(right))
+            }
+            _ => self.rank().cmp(&other.rank()),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
