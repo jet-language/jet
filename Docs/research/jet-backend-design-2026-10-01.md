@@ -2347,3 +2347,23 @@ The first requires the canonical capacity-overflow stop, the next three
 the shared sequence-OOB stop, and the final two the foreign range stop;
 all exit 101. Native execution/fatal snapshots and composed caller
 admission remain required, and syntax checks do not substitute for them.
+
+### Native inline Attachment sequences
+
+`AttachmentSequence.jet` supplies the four typed sequence routes using
+`DataSequences.jet` (`6d4fa9ba6`) and the canonical Attachment40 element
+provider (`MailAttachment.jet`, `7641c13a6`) as composition dependencies.
+List24 owns inline 40-byte elements: filename E4 pointer, MIME E4 pointer,
+then inline packed-byte List24. Get borrows the actual inline slot. Push
+moves the complete initialized element into reserved storage and frees
+only the donor's 40-byte shell, not any fields; length is published last.
+There are no temporary element clones or private helper copies.
+
+`AttachmentSequenceWitness.c` links real Jet objects with free interception.
+It checks shell transfer, exact borrowed addresses, growth at stride40,
+nested packed bytes, embedded NUL text, independent canonical clones and
+clone survival after dropping all original inline fields. Fatal modes are
+`negative-capacity`, `capacity-overflow`, `negative-index`,
+`index-equals-length` and `index-over-length`; these require the shared
+capacity/OOB stops and exit 101. Native/fatal execution and composed caller
+admission remain unexercised; parser and C11 checks are not parity proof.
