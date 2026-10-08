@@ -165,7 +165,9 @@ fn fx_generic_runtime_rejection_checks() -> Bool Never! {
         failure :: lower_runtime_missing_application(ty, &rows) ?? return false
         if failure == .Unsupported(reason) {
             if !reason.contains(mir_type_display_name(ty)) -> return false
-        } else -> return false
+        } else {
+            return false
+        }
     }
     ordinary :: mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref("OrdinaryGeneric"), args: [MIRType]{fx_int()}})
     lower_runtime_missing_application(ordinary, &rows) == None && lower_runtime_missing_application(fx_named("FixtureGeneric"), &rows) == None
