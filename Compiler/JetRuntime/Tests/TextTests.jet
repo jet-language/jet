@@ -1,0 +1,162 @@
+// Runtime-only ownership/UTF-8 witnesses; no String-valued test scaffolding.
+fn text_test_require(ok: Bool) {
+    if ok -> return
+    #Unsafe("a failed text runtime witness terminates only its isolated process") {
+        _ := os_syscall_i64(I64{231}, I64{1}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+    }
+    loop {}
+}
+fn text_test_word(word: I64, len: I64) -> I64 {
+    value :: jet_rt_string_builder_new()
+    rt_text_push_word(value, word, len)
+    value
+}
+fn text_test_piece(state: I64, expected: I64) {
+    slot :: text_iter_pull(state)
+    text_test_require(slot != I64{0})
+    value :: rt_text_word(slot)
+    text_test_require(jet_rt_string_eq(value, expected))
+    jet_rt_string_drop(value)
+    jet_rt_free(slot, I64{8}, I64{8})
+}
+fn text_test_find_reference(data: I64, len: I64, pattern: I64, n: I64, start: I64, last: Bool) -> I64 {
+    if n > len - start -> return I64{-1}
+    at := if last -> len - n else -> start
+    loop at >= start && at <= len - n {
+        if rt_text_equal_bytes(data + at, pattern, n) -> return at
+        if last -> at -= I64{1} else -> at += I64{1}
+    }
+    I64{-1}
+}
+fn text_test_search() {
+    // Exhaust short binary-alphabet haystacks and needles, both directions
+    // and every start offset: exercise periodic/nonperiodic factorization.
+    data :: jet_rt_alloc(I64{6}, I64{1})
+    pattern :: jet_rt_alloc(I64{3}, I64{1})
+    len := I64{0}
+    loop len <= (I64{6}) {
+        bits := I64{0}
+        loop bits < (I64{1} << len) {
+            at := I64{0}
+            loop at < len {
+                rt_text_put(data + at, I64{97} + ((bits >> at) & I64{1}))
+                at += I64{1}
+            }
+            n := I64{0}
+            loop n <= (I64{3}) {
+                needle_bits := I64{0}
+                loop needle_bits < (I64{1} << n) {
+                    at = I64{0}
+                    loop at < n {
+                        rt_text_put(pattern + at, I64{97} + ((needle_bits >> at) & I64{1}))
+                        at += I64{1}
+                    }
+                    start := I64{0}
+                    loop start <= len {
+                        text_test_require(rt_text_find_bytes(data, len, pattern, n, start, false) == text_test_find_reference(data, len, pattern, n, start, false))
+                        text_test_require(rt_text_find_bytes(data, len, pattern, n, start, true) == text_test_find_reference(data, len, pattern, n, start, true))
+                        start += I64{1}
+                    }
+                    needle_bits += I64{1}
+                }
+                n += I64{1}
+            }
+            bits += I64{1}
+        }
+        len += I64{1}
+    }
+    jet_rt_free(pattern, I64{3}, I64{1})
+    jet_rt_free(data, I64{6}, I64{1})
+}
+fn run() {
+    jet_rt_alloc_init()
+    text_test_search()
+    empty :: jet_rt_string_builder_new()
+    text_test_require(rt_text_data(empty) == I64{1} && rt_text_word(empty + I64{16}) == I64{0})
+    text_test_require(jet_string_is_empty(empty) && jet_char_len(empty) == I64{0})
+    word :: text_test_word(I64{6513249}, I64{3}) // abc
+    clone :: jet_rt_string_clone(word)
+    text_test_require(word != clone && rt_text_data(word) != rt_text_data(clone))
+    text_test_require(jet_rt_string_eq(word, clone) && jet_rt_string_compare(word, clone) == I64{0})
+    suffix :: text_test_word(I64{25442}, I64{2}) // bc
+    text_test_require(jet_string_contains(word, suffix) && jet_string_ends_with(word, suffix))
+    text_test_require(!jet_string_starts_with(word, suffix) && jet_string_starts_with(word, empty) && jet_string_ends_with(word, empty))
+    text_test_require(jet_rt_string_compare(word, suffix) == I64{-1} && jet_rt_string_compare(suffix, word) == I64{1})
+    after :: jet_string_after(word, suffix)
+    before :: jet_string_before(word, suffix)
+    text_test_require(jet_string_is_empty(after) && rt_text_len(before) == I64{1} && rt_text_byte(rt_text_data(before)) == I64{97})
+    miss :: text_test_word(I64{122}, I64{1})
+    unchanged :: jet_string_after(word, miss)
+    text_test_require(jet_rt_string_eq(unchanged, word) && unchanged != word)
+    // Self-alias append must work both with and without buffer relocation.
+    jet_rt_string_builder_push(clone, clone)
+    jet_rt_string_builder_push(clone, clone)
+    jet_rt_string_builder_push(clone, clone)
+    text_test_require(rt_text_len(clone) == I64{24} && jet_char_len(clone) == I64{24})
+    at := I64{0}
+    loop at < (I64{24}) {
+        text_test_require(rt_text_byte(rt_text_data(clone) + at) == I64{97} + at % I64{3})
+        at += I64{1}
+    }
+    unicode :: jet_rt_string_builder_new()
+    rt_text_push_scalar(unicode, I64{65})
+    rt_text_push_scalar(unicode, I64{233})
+    rt_text_push_scalar(unicode, I64{8364})
+    rt_text_push_scalar(unicode, I64{128512})
+    text_test_require(jet_char_len(unicode) == I64{4} && rt_text_len(unicode) == I64{10})
+    sliced :: jet_rt_string_slice_range(unicode, I64{1}, I64{3}, U8{1}, I64{1}, I64{0}, I64{0})
+    text_test_require(jet_char_len(sliced) == I64{2} && rt_text_len(sliced) == I64{5})
+    text_test_require(rt_text_decode(rt_text_data(sliced)) == I64{233} && rt_text_decode(rt_text_data(sliced) + I64{2}) == I64{8364})
+    padded :: jet_rt_string_builder_new()
+    rt_text_push_scalar(padded, I64{8195})
+    jet_rt_string_builder_push(padded, unicode)
+    rt_text_push_scalar(padded, I64{160})
+    trimmed :: jet_unicode_trim_view(padded)
+    text_test_require(jet_rt_string_eq(trimmed, unicode))
+    raw :: jet_rt_alloc(I64{5}, I64{1})
+    rt_text_put(raw, I64{240})
+    rt_text_put(raw + I64{1}, I64{144})
+    rt_text_put(raw + I64{2}, I64{65})
+    rt_text_put(raw + I64{3}, I64{226})
+    rt_text_put(raw + I64{4}, I64{130})
+    lossy :: jet_rt_string_from_static(raw, I64{5})
+    text_test_require(jet_char_len(lossy) == I64{3} && rt_text_len(lossy) == I64{7})
+    text_test_require(rt_text_decode(rt_text_data(lossy)) == I64{65533})
+    text_test_require(rt_text_byte(rt_text_data(lossy) + I64{3}) == I64{65})
+    text_test_require(rt_text_decode(rt_text_data(lossy) + I64{4}) == I64{65533})
+    jet_rt_free(raw, I64{5}, I64{1})
+    // Empty delimiter: leading empty, each scalar, trailing empty, then None.
+    state :: text_iter_state(sliced, empty)
+    text_test_piece(state, empty)
+    scalar :: jet_rt_string_builder_new()
+    rt_text_push_scalar(scalar, I64{233})
+    text_test_piece(state, scalar)
+    jet_rt_string_drop(scalar)
+    euro :: jet_rt_string_builder_new()
+    rt_text_push_scalar(euro, I64{8364})
+    text_test_piece(state, euro)
+    text_test_piece(state, empty)
+    text_test_require(text_iter_pull(state) == I64{0} && text_iter_pull(state) == I64{0})
+    text_iter_drop(state)
+    // Nonempty delimiter: trailing empty is preserved and source is cloned.
+    state2 :: text_iter_state(word, suffix)
+    jet_rt_string_drop(word)
+    text_test_piece(state2, before)
+    text_test_piece(state2, empty)
+    text_test_require(text_iter_pull(state2) == I64{0})
+    text_iter_drop(state2)
+    jet_rt_string_drop(euro)
+    jet_rt_string_drop(lossy)
+    jet_rt_string_drop(trimmed)
+    jet_rt_string_drop(padded)
+    jet_rt_string_drop(sliced)
+    jet_rt_string_drop(unicode)
+    jet_rt_string_drop(unchanged)
+    jet_rt_string_drop(miss)
+    jet_rt_string_drop(before)
+    jet_rt_string_drop(after)
+    jet_rt_string_drop(suffix)
+    jet_rt_string_drop(clone)
+    jet_rt_string_drop(empty)
+    jet_rt_string_drop(I64{0})
+}

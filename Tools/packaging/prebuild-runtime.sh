@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Prebuild the Jet runtime rlib for the default build-fact set beside a jet binary,
-# and link the runtime pack the Jet-native dev build links against (#4549).
+# Prebuild the remaining Rust runtime rlib beside a jet binary, then link the
+# Jet-authored runtime object first into the Jet-native runtime pack (#4549).
 #
 # usage: [JET_PACK_MUSL_LIB=<dir with musl's static libc.a>]
+#        [JET_RUNTIME_JET_OBJECT=<already lowered jet_runtime_jet.o>]
 #        Tools/packaging/prebuild-runtime.sh <jet-binary> [<prebuilt-dir>]
 #
 # Builds a seed program with an empty store and JET_RUNTIME_PREBUILD_DIR set, so
@@ -13,9 +14,12 @@
 # entries serve machines with the same rustc and CPU features; any other build
 # falls back to compiling the runtime into the store on demand.
 #
-# The --release profile's rlib, the Rust standard library rlibs of the same rustc,
-# musl's libc.a and libgcc_eh.a/libgcc.a are then linked once by the in-process
-# linker (`x64_link_runtime_pack`, run through Compiler/JetBackend/Tests/run-link.mjs)
+# The Jet runtime library is assembled/lowered by run-runtime.mjs (or supplied
+# through JET_RUNTIME_JET_OBJECT). Its #Export(c) definitions precede the
+# remaining --release Rust runtime, Rust standard libraries, musl and libgcc.
+# Replaced Rust exports must be deleted by their layer owner: duplicate strong
+# definitions are errors, never overridden or stripped at packaging time.
+# The in-process linker (`x64_link_runtime_pack`, run through Tests/run-link.mjs)
 # into <prebuilt-dir>/<key>/jet_runtime.pack.o, and <prebuilt-dir>/native.key
 # names that key: the Jet-hosted `jet build` reads it (Host.jet
 # `jet_cli_runtime_key`) because it has neither rustc nor the runtime's Rust
@@ -52,9 +56,22 @@ mkdir -p "$out/$key"
 count=$(find "$out" -name libjet_runtime.rlib | wc -l)
 echo "prebuild-runtime: $count runtime rlib(s) in $out; pack key $key"
 
-# The runtime archive set, the runtime rlib first.
+# The runtime input set: Jet definitions first, followed by remaining layers.
+runtime_object=${JET_RUNTIME_JET_OBJECT:-}
+if [ -z "$runtime_object" ]; then
+  JET="$jet" node "$repo/Compiler/JetBackend/Tests/run-runtime.mjs" "$work/runtime"
+  runtime_object=$work/runtime/jet_runtime_jet.o
+fi
+[ -f "$runtime_object" ] || { echo "prebuild-runtime: no Jet runtime object at $runtime_object" >&2; exit 1; }
+[ "$runtime_object" -ef "$out/$key/jet_runtime_jet.o" ] || cp "$runtime_object" "$out/$key/jet_runtime_jet.o"
+# Build the full remaining runtime from this tree for the native pack.
+node "$repo/Compiler/JetBackend/Tests/emit-allparts-runtime.mjs" "$jet" "$work/allparts.rs"
+node "$repo/Compiler/JetBackend/Tests/prepare-call-runtime.mjs" "$work/allparts.rs" "$work/native.rs" --allparts
+rustc --edition 2021 --crate-name jet_runtime --crate-type rlib --cfg jet_native_pack -Awarnings \
+  -C opt-level=1 -C codegen-units=16 "$work/native.rs" -o "$out/$key/libjet_runtime_native.rlib"
+node "$repo/Tools/packaging/check-runtime-exports.mjs" "$out/$key/jet_runtime_jet.o" "$out/$key/libjet_runtime_native.rlib"
 sysroot_lib=$(rustc --print sysroot)/lib/rustlib/x86_64-unknown-linux-gnu/lib
-archives=("$out/$key/libjet_runtime.rlib")
+archives=("$out/$key/jet_runtime_jet.o" "$out/$key/libjet_runtime_native.rlib")
 for name in std panic_unwind object memchr addr2line gimli rustc_demangle std_detect hashbrown rustc_std_workspace_alloc miniz_oxide adler2 unwind cfg_if libc alloc rustc_std_workspace_core core compiler_builtins; do
   rlib=("$sysroot_lib"/lib"$name"-*.rlib)
   if [ ! -f "${rlib[0]}" ]; then

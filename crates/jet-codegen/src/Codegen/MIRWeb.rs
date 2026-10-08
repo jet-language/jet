@@ -6768,6 +6768,11 @@ fn emit_js_terminator(
         MirTerminator::Unreachable { reason } => {
             writeln!(out, "        throw new Error({});", js_string(reason)).unwrap();
         }
+        MirTerminator::Poll { .. } | MirTerminator::Stopped => {
+            return Err(MirWebError::InvalidMir {
+                message: format!("MIR function {} has a stop point; stop points are produced only for native host compilations", function.id.0),
+            });
+        }
     }
     Ok(())
 }

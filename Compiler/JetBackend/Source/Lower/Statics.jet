@@ -260,6 +260,8 @@ fn lower_static_tree(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRT
 // OWNER DIRECTION: unlike the Rust accessor, a read borrows frozen data and
 // only an ownership-bearing checked MIR result clones it.
 fn lower_static_global(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, name: String) Never! {
+    // jet_transaction(): a fresh #Transact handle (Transaction.jet).
+    if name == "transaction" && lower_global_definition(p, name) == None -> return lower_transaction_new(p, c, &m, &f, instruction)
     definition :: lower_global_definition(p, name) ?? return lower_fail(&m, &f, "global constant {name} without a definition is not lowered at O0 yet")
     if definition.is_storage {
         // A read of module storage: its current value (lower_static_storage).

@@ -1323,6 +1323,12 @@ fn mir_lint_terminator(ctx: MIRLintContext, block: MIRBasicBlock) -> MIRLintProb
             mir_lint_target(ctx, resume)
         }
         .Unreachable(_) -> None
+        .Poll(_, resume, stop) -> {
+            problem :: mir_lint_target(ctx, resume)
+            if problem != None -> return problem
+            mir_lint_target(ctx, stop)
+        }
+        .Stopped -> None
     }
 }
 

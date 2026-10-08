@@ -522,7 +522,9 @@ fn jet_codegen_call_argument_needs_trait_box(argument: TCallArg) -> Bool Never! 
 fn jet_codegen_call_access(argument: TCallArg, formal: AccessConvention?) -> MIRAccess Never! {
     if argument.mut_borrow -> return MIRAccess.Write
     if jet_codegen_call_argument_needs_trait_box(argument) && argument.borrow && !argument.clone && !argument.arc_clone -> return MIRAccess.Move
-    if argument.widen_to_union != None && !argument.mut_borrow && !argument.clone && !argument.arc_clone && !jet_codegen_is_copy_type(argument.value.ty) -> return MIRAccess.Move
+    if argument.widen_to_union != None && !argument.borrow && !argument.mut_borrow && !argument.clone && !argument.arc_clone && !jet_codegen_is_copy_type(argument.value.ty) {
+        return MIRAccess.Move
+    }
     if argument.clone || argument.arc_clone || jet_codegen_is_move_kind(argument.value.kind) -> return MIRAccess.Move
     if argument.borrow -> return MIRAccess.Read
     convention :: formal ?? AccessConvention.Read
@@ -732,7 +734,11 @@ fn jet_codegen_lower_call_args_for_signature(builder: &JetCodegenBuilder, progra
                 else -> panic("checked call trait-box source is not nominal")
             }
         }
-        owned_last_use := access == MIRAccess.Move || box_as_trait != None
+        // A union wrapper owns its payload even when the callee borrows the
+        // union. A Copy source is copied into the wrapper, never consumed.
+        copy_source :: jet_codegen_is_copy_type(argument.value.ty)
+        clones_union := widen_to_union != None && access == MIRAccess.Read && place != None && !copy_source
+        owned_last_use := access == MIRAccess.Move || box_as_trait != None || (widen_to_union != None && place == .None && !copy_source)
         call_place := place
         if box_as_trait != None || argument.widen_to_union != None || materialize_view_clone -> call_place = None
         &lowered.push(MIRCallArg{
@@ -744,7 +750,7 @@ fn jet_codegen_lower_call_args_for_signature(builder: &JetCodegenBuilder, progra
             source_index: Val(index),
             binder_slot: Val(slot),
             spread: argument.spread,
-            implicit_clone: argument.clone && !materialize_view_clone,
+            implicit_clone: (argument.clone && !materialize_view_clone) || clones_union,
             shared_auto_clone: argument.arc_clone,
             owned_last_use: owned_last_use,
             authority_boundary: false,
@@ -2161,6 +2167,9 @@ fn jet_codegen_emit_math_builtin(builder: &JetCodegenBuilder, program: JetCodege
     }
     borrow_mask := [Bool]{}
     loop _ in values -> &borrow_mask.push(false)
+    if values.len() == 2 && (function == "add" || function == "sub" || function == "mul" || function == "div" || function == "hadamard_mul" || function == "transform" || function == "matmul") {
+        borrow_mask[0] = true
+    }
     call := jet_codegen_intern_route(&builder, program, MIRPreludeFamily.MathBuiltin, module_name, function, symbol, values.len(), borrow_mask, None, carrier, MIRPreludeABI.Value)
     math_type := if type_name == {
         "Int" -> Type.Int
@@ -3678,6 +3687,40 @@ fn jet_codegen_emit_static_prelude_effect(builder: &JetCodegenBuilder, program: 
     args := [MIRCallArg]{}
     loop value in values -> &args.push(jet_codegen_numeric_call_arg(value, span))
     _ := jet_codegen_emit(&builder, program, span, None, MIROperation.Call{callee: MIRCallee.Prelude{call: call}, args: args, type_args: [MIRType]{}})
+}
+
+// Unified host/stop contract (#4720): budget can-stop operations of a
+// compiler callable (program.comptime_budget). Entry spends one level of depth
+// (`jet_rt_comptime_enter`) and each loop continue target one unit of fuel
+// (`jet_rt_comptime_step`). Each is a plain MIR Prelude call, so the Propagate
+// after it (jet_codegen_emit) takes the stop edge when the runtime published a
+// BudgetDepth/BudgetFuel stop. The call carries the site's source span
+// (start, end); Lower prepends the function's owner row in the program it
+// lowers (the dense row the stop record names), which MIR cannot know.
+fn jet_codegen_emit_budget_site(builder: &JetCodegenBuilder, program: JetCodegenProgram, member: String, symbol: String) Never! {
+    if !program.comptime_budget || !jet_codegen_current_is_open(builder, program) -> return
+    span :: builder.current_span
+    offset_type :: Type.IntN{signed: false, bits: 64}
+    start := jet_codegen_emit_value(&builder, program, span, offset_type, MIROperation.Constant{value: MIRConstant.Int{value: span.start, width: Val(MIRIntegerWidth{signed: false, bits: 64}), spelling: None}})
+    end := jet_codegen_emit_value(&builder, program, span, offset_type, MIROperation.Constant{value: MIRConstant.Int{value: span.end, width: Val(MIRIntegerWidth{signed: false, bits: 64}), spelling: None}})
+    route := jet_codegen_static_prelude_call(&builder, program, "core.comptime", member, symbol, [Bool]{false, false}, None, TFailureCarrier.Infallible, false)
+    jet_codegen_emit_static_prelude_effect(&builder, program, span, route, [MIRValueID]{start, end})
+}
+
+// `jet_rt_comptime_leave` before a compiler callable's Return: depth
+// bookkeeping that delivers nothing, so no poll follows it.
+fn jet_codegen_emit_budget_leave(builder: &JetCodegenBuilder, program: JetCodegenProgram, terminator: MIRTerminator) Never! {
+    if !program.comptime_budget || !jet_codegen_current_is_open(builder, program) -> return
+    if terminator == {
+        .Return(_) -> {}
+        else -> return
+    }
+    span :: builder.current_span
+    route := jet_codegen_static_prelude_call(&builder, program, "core.comptime", "leave", "jet_rt_comptime_leave", [Bool]{}, None, TFailureCarrier.Infallible, false)
+    masked :: builder.stop_cleanup_active
+    builder.stop_cleanup_active = true
+    jet_codegen_emit_static_prelude_effect(&builder, program, span, route, [MIRValueID]{})
+    builder.stop_cleanup_active = masked
 }
 
 fn jet_codegen_lower_try_failure_conversion(builder: &JetCodegenBuilder, program: JetCodegenProgram, span: Span, error: MIRValueID, source_error: Type, conversion: TTryConvert, carrier: TFailureCarrier) -> MIRValueID {

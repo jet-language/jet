@@ -745,27 +745,6 @@ fn sema_call_http_core_form_descriptor(field: Field, value_variant: String, cont
     }
 }
 
-fn sema_call_http_expand_type_alias(graph: SemaRegistrationGraph, ty: Type, module_identity: String, active_aliases: [String]) -> Type Never! {
-    resolved := sema_type_resolve_declared(graph, ty, module_identity)
-    alias_row :: sema_type_resolve_nominal_row(graph, resolved, module_identity) ?? return resolved
-    alias_nominal :: graph.modules[alias_row.module_index].nominals[alias_row.row]
-    if alias_nominal.kind != SemaRegistrationNominalKind.TypeAlias -> return resolved
-    loop active in active_aliases { if active == alias_nominal.symbol.id.key -> return resolved }
-    item :: sema_registration_nominal_source_item(alias_nominal.source) ?? return resolved
-    definition :: if item == {
-        .TypeAlias(value) -> value
-        else -> { return resolved }
-    }
-    type_args := if resolved == {.Apply(_, args) -> args else -> [Type]{}}
-    if type_args.len() != alias_nominal.generic_params.len() -> return resolved
-    generic_params := sema_inference_registration_params(alias_nominal.generic_params)
-    substitutions := sema_inference_bindings_for_type_args(generic_params, type_args)
-    target := sema_inference_substitute_type_bindings(definition.target, substitutions)
-    next_active := [String]{}
-    loop active in active_aliases -> &next_active.push(active)
-    &next_active.push(alias_nominal.symbol.id.key)
-    sema_call_http_expand_type_alias(graph, target, alias_nominal.symbol.module_name, next_active)
-}
 
 fn sema_call_http_web_form(record: CoreCallRecord, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck Never! {
     if !sema_call_core_check_type_args(record.module_name, record.member, 0, false, type_args, span, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
@@ -827,7 +806,7 @@ fn sema_call_http_web_form(record: CoreCallRecord, args: [CallArg], type_args: [
         if field.computed != None -> next
         value_variant := ""
         control_variant := ""
-        field_type := sema_call_http_expand_type_alias(graph, field.ty, model_module_identity, [String]{})
+        field_type := sema_type_resolve_declared(graph, field.ty, model_module_identity)
         if {
             field_type == Type.String -> {
                 value_variant = "String"

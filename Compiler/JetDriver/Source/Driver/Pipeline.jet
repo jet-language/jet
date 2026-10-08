@@ -2253,6 +2253,7 @@ fn jet_driver_comptime_stage(
     load: JetDriverLoadResult,
     head: SemaComptimeItemRequest,
     needs_rows: Bool,
+    stop_points: Bool,
     values: [SemaComptimeItemValue],
     checked_functions: [SemaComptimeFunctionResult],
     trace: JetDriverCompileTrace,
@@ -2276,7 +2277,7 @@ fn jet_driver_comptime_stage(
         loop runtime_module in staged_modules {
             if runtime_module.module_identity != graph.canonical_effect_module_identity -> &staging.runtime_modules.push(runtime_module)
         }
-        staging.session = Val(jet_codegen_comptime_session(^staged_modules, load.source_files))
+        staging.session = Val(jet_codegen_comptime_session(^staged_modules, load.source_files, stop_points))
     } else {
         added := [MIRConstantDef]{}
         if &environment.registration_graph == {
@@ -2699,7 +2700,7 @@ fn jet_driver_comptime_flush(
     // entry's check and closure name only constants that landed before the
     // batch (naming a batch constant makes a check wait on it), and rows of
     // constants an item does not name never change its value.
-    staged :: jet_driver_comptime_stage(graph, load, batch.entries[start].request, batch.needs_rows, values, checked_functions, trace, &environment, &staging, &diagnostics)
+    staged :: jet_driver_comptime_stage(graph, load, batch.entries[start].request, batch.needs_rows, request.comptime_stop_points, values, checked_functions, trace, &environment, &staging, &diagnostics)
     if staged == .Val(stopped) {
         flushed.stop = Val(stopped)
         return flushed

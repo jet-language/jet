@@ -1800,6 +1800,9 @@ use column-major storage; they provide `from_array`, `to_array`, addition,
 subtraction, matrix multiplication, `matmul`, `transform`, and `transpose`.
 Reductions use a scalar left-to-right fold, so the reduction order is part of
 the reproducible fixed-array contract (D-LINALG1; `to_array` is the fixed-array bridge, D-FIXARR1).
+Arithmetic results are ordinary math values: lane reads, swizzles, and methods
+operate directly on them, including temporary receivers such as `(a + a).dot(a)`.
+See [`vector_result_values.jet`](../../../Examples/features/lowlevel/vector_result_values.jet).
 
 ```jet
 fn rotate(v: Vec3, transform: Mat3) -> Vec3 {
@@ -2004,6 +2007,11 @@ use bytes. Jet uses its pinned Unicode 17.0.0 tables, not the host's Rust, OS,
 locale, or terminal Unicode version. Empty strings are false for the
 empty-sensitive predicates. `splitn` and `rsplitn` limit the number of
 resulting parts (D-TEXTUNICODE1=A).
+
+The checksum-verifying `Tools/agent/gen-unicode-tables.mjs` owns the pinned
+mapping and property assets, including the native runtime's fixed-word
+lookup functions. Regenerate them from `tests/data/unicode/ucd`; never copy
+host Unicode tables or hand-maintain a native whitespace/casing list.
 
 | Function | Returns | Description |
 | --- | --- | --- |

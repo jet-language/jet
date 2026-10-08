@@ -83,6 +83,9 @@ fn lower_reach_callee(p: MIRProgram, q: &LowerPrepared, callee: MIRCallee, type_
             }
         }
         .Foreign(id) -> {
+            if q.asm_foreign.get(id.value) == .Val(function) {
+                lower_mono_request(p, &q, function, None, [MIRType]{}, parent, site).drop("assembly dependency")
+            }
             row :: q.foreign_rows.get(id.value) ?? return
             if q.foreign_seen.get(id.value) != None -> return
             &q.foreign_seen.add(id.value, true).drop("checked absent above")
@@ -168,6 +171,16 @@ fn lower_reach_operation(p: MIRProgram, q: &LowerPrepared, function: MIRFunction
                 }
             }
         }
+        // A user Iterable source's iter/next run from its cursor (Iterable.jet).
+        .LoopIterInit(_, _, _, _, source_kind) -> {
+            if source_kind == .Iterable(_, _, iter_symbol, next_symbol) {
+                hooks :: [String]{iter_symbol, next_symbol}
+                loop key in hooks {
+                    hook :: lower_function_with_key(p, key) ?? next
+                    lower_mono_request(p, &q, hook.id, None, [MIRType]{}, parent, site).drop("Iterable loop hook")
+                }
+            }
+        }
         .Semantic(semantic) -> lower_reach_semantic(p, &q, function, facts, semantic, parent, site)
         else -> {}
     }
@@ -219,6 +232,7 @@ fn lower_reach_semantic(p: MIRProgram, q: &LowerPrepared, function: MIRFunction,
                 }
             }
         }
+        .TypedTextInterp(_, _, _, holes, _) -> { loop hole in holes -> lower_reach_render_value(&q, function, facts, hole, true, parent) }
         else -> {}
     }
 }

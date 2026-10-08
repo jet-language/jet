@@ -59,6 +59,12 @@ pub enum LIRCallee {
     Value(value: LIRValueID)
 }
 
+LIR_ASM_INPUTS :: prep { [Int]{7, 6, 2, 1, 8, 9, 10} }
+
+pub fn lir_asm_register(reg: Int) -> Bool Never! {
+    reg == 0 || reg == 1 || reg == 2 || reg == 6 || reg == 7 || (reg >= 8 && reg <= 11)
+}
+
 pub enum LIRInst {
     Const(dst: LIRValueID, value: Int)
     Binary(dst: LIRValueID, op: LIRBinaryOp, left: LIRValueID, right: LIRValueID)
@@ -68,6 +74,9 @@ pub enum LIRInst {
     // Duplicate of a trivially destructible value.
     Copy(dst: LIRValueID, src: LIRValueID)
     Call(dst: LIRValueID?, signature: LIRSignatureID, callee: LIRCallee, args: [LIRValueID])
+    // Effectful audited template; inputs bind simultaneously to caller-saved
+    // registers. `result` is -1 exactly when dst is absent.
+    InlineAsm(dst: LIRValueID?, args: [LIRValueID], regs: [Int], result: Int, code: [U8])
     // Runs the value's drop glue; the value is dead afterwards.
     Drop(value: LIRValueID)
     // Bool: whether Add/Sub/Mul overflow signed, or UAdd/USub/UMul unsigned.
@@ -172,6 +181,7 @@ pub fn lir_inst_def(inst: LIRInst) -> LIRValueID? {
         .Move(dst, _) -> Val(dst)
         .Copy(dst, _) -> Val(dst)
         .Call(dst, _, _, _) -> dst
+        .InlineAsm(dst, _, _, _, _) -> dst
         .Drop(_) -> None
         .Overflows(dst, _, _, _) -> Val(dst)
         .Load(dst, _, _) -> Val(dst)
@@ -199,6 +209,7 @@ pub fn lir_inst_uses(inst: LIRInst) -> [LIRValueID] Never! {
             }
             args
         }
+        .InlineAsm(_, args, _, _, _) -> args
         .Drop(value) -> [LIRValueID]{value}
         .Overflows(_, _, left, right) -> [LIRValueID]{left, right}
         .Load(_, base, _) -> [LIRValueID]{base}
