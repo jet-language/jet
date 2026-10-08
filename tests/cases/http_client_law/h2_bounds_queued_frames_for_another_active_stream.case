@@ -1,0 +1,18 @@
+# HAND-PORT tests/http_client_law.rs:3865-4053 h2_bounds_queued_frames_for_another_active_stream
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# Original two active streams1/3, second send on joined thread while first body open; both status200, FIRST stream1 read max65536 exactInvalidFraming; stream3 DATA65536 x up to1024 with break on any write failure,2s write/5s read, exact50ms-read/500ms EOF-or-nonTimeoutErr close flag. Not cumulative response-limit test or single idle-stream substitute.
+fixture: h2_bounds_queued_frames_for_another_active_stream.fixture
+env: NO_COLOR=1
+write: peer/main.jet peer/source.template
+step: jet build peer/main.jet
+exit: 0
+spawn peer: built
+await: file addr.txt timeout 30s
+capture: addr = text file addr.txt
+write: main.jet main.template
+step: jet build main.jet
+exit: 0
+step: built
+exit: 0
+wait: peer
+exit: 0

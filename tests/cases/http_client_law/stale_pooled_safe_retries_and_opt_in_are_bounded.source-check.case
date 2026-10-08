@@ -1,0 +1,9 @@
+# HAND-PORT tests/http_client_law.rs:3310-3685 stale_pooled_safe_retries_and_opt_in_are_bounded
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# COMPILE-ONLY public retry sequence; no runtime PASS claim. All original /warm,/reuse,/retry,/warm2,/unsafePOST(nope),/warm3,/again,/warm4,/deniedPUT,/warm5,/allowedPUT, exact body bytes and reuse flags retained. Deterministic Linux SO_LINGER{1,0} reset and in-client fd scan/pollERR six readiness points, raw roots/drop clones and server sameTCP/five5s accepts/no forbidden dials/PUTcount1 remain full runtime-http-internals seam. No sleeps/fake reset/readiness predicate.
+requires: os:unix
+fixture: stale_pooled_safe_retries_and_opt_in_are_bounded.fixture
+env: NO_COLOR=1
+write: main.jet main.template
+step: jet check main.jet
+exit: 0
