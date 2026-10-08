@@ -56,6 +56,8 @@ owning Jet source function, not a separate Core dispatcher implementation. Host
 operations beneath that source may remain registered raw leaves while their
 runtime layer is ported; this does not create a second implementation of the
 public declaration's policy.
+Directory creation shares the existing `jet_std_fs_create_dir_all_raw` host
+operation; its callers keep their own fault preflight and error resource.
 
 Devtools checked publication constructs its package/module/panel identities
 and ordered, JSON-escaped field envelope in `Core/devtools/devtools.jet`.
