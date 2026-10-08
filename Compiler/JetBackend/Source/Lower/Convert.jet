@@ -373,6 +373,10 @@ fn lower_convert_try_big(m: &LowerModule, f: &LowerFunction, value: LIRValueID, 
 }
 
 fn lower_convert(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, value: MIRValueID, parameters: [MIRValueID], target: MIRType, conversion: MIRConversion) Never! {
+    if lower_value_type(c, value) == .Val(source_type) {
+        if lower_repr(p, source_type) == .Float32Bits -> return lower_fail(&m, &f, "Float32 conversions are not lowered at O0 yet")
+    }
+    if lower_repr(p, target) == .Float32Bits -> return lower_fail(&m, &f, "Float32 conversions are not lowered at O0 yet")
     if conversion == {
         .Transparent -> lower_forward(c, &m, &f, instruction, value)
         .NumericCast -> {
