@@ -1714,6 +1714,10 @@ function translateCoreCallMethod(record, name, args, context) {
     return "core_call_with_ui_capabilities(" + record + ", " +
       translateStringSlice(argument, context) + ")";
   }
+  if (name === "with_source_target") {
+    return "core_call_with_source_target(" + record + ", " +
+      rustStringExpression(argument, context) + ")";
+  }
   if (name === "with_marker") {
     return "core_call_with_marker(" + record + ", " +
       translateMarker(argument, context) + ")";

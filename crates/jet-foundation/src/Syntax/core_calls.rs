@@ -1118,6 +1118,9 @@ pub struct CoreCallRecord {
     pub pure_route: CoreCallPureRoute,
     pub interpreter_route: CoreCallInterpreterRoute,
     pub symbol: CoreCallSymbol,
+    /// Checked Jet export name selected after special-call normalization.
+    /// None means the declaration's member name. Ignored by host-owned rows.
+    pub source_target: Option<&'static str>,
     pub coverage: CoreCallCoverage,
     /// Whether AOT can emit this row as one plain symbol call. Typed rows can
     /// still be canonical records while remaining on their typed emitter.
@@ -1174,6 +1177,7 @@ impl CoreCallRecord {
             } else {
                 CoreCallSymbol::Rust(symbol)
             },
+            source_target: None,
             coverage,
             aot_direct: true,
             native_int_result: false,
@@ -1194,6 +1198,21 @@ impl CoreCallRecord {
         row.interpreter_route = CoreCallInterpreterRoute::None;
         row.aot_direct = false;
         row
+    }
+
+    pub const fn with_source_target(mut self, target: &'static str) -> Self {
+        self.source_target = Some(target);
+        self
+    }
+
+    pub const fn source_member(self) -> Option<&'static str> {
+        if !matches!(self.symbol, CoreCallSymbol::SourceOwned) {
+            return None;
+        }
+        match self.source_target {
+            Some(target) => Some(target),
+            None => Some(self.member),
+        }
     }
 
     /// Construct a row with an explicit consumer projection set. Use this for
@@ -1237,6 +1256,7 @@ impl CoreCallRecord {
             pure_route: CoreCallPureRoute::None,
             interpreter_route: CoreCallInterpreterRoute::TypedIntrinsic,
             symbol: CoreCallSymbol::Rust(""),
+            source_target: None,
             coverage: CoreCallCoverage::compiler_projections()
                 .with_projection(CoreCallCoverage::INTERPRETER),
             aot_direct: false,
