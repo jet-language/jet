@@ -34,7 +34,6 @@ extern "C" {
     fn jet_rt_numeric_stop(file_ptr: *const u8, file_len: usize, line: i64, message_ptr: *const u8, message_len: usize);
     #[cfg(jet_native_pack)]
     fn jet_rt_require_stop(kind: i64, descriptor: *const usize, message: Text, left: Text, right: Text, locals: Text);
-    fn jet_rt_alloc(size: usize, align: usize) -> *mut u8;
 }
 
 const FILE: &str = "main.jet";
