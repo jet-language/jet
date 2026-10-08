@@ -20,13 +20,11 @@ pub struct WebStore<T> {
     pub history_limit: Int
     pub subs: Int
 
-    impl {
-        pub fn set(self, value: T) -> WebStoreTransaction<T> Never! {
-            set<T>(&self, value)
-        }
-        pub fn facts_json(self) -> String Never! {
-            facts_json<T>(self)
-        }
+    pub fn set(self, value: T) -> WebStoreTransaction<T> Never! {
+        set<T>(&self, value)
+    }
+    pub fn facts_json(self) -> String Never! {
+        facts_json<T>(self)
     }
 }
 
@@ -100,7 +98,7 @@ pub fn batch<T>(store: &WebStore<T>, label: String, values: [String], apply: fn(
 pub fn set<T>(store: &WebStore<T>, value: T) -> WebStoreTransaction<T> Never! {
     // WebStore.rs:594-595: one reactive transaction, label set, no changed
     // field names, root replacement; the runtime gate defers reentrant events.
-    core.web.store.__transact(store, "set", [String]{}, fn(state: &T) { state = value })
+    core.web.store.__transact(store, "set", [String]{}, (state) -> state = value)
 }
 
 pub fn set_state<T>(store: &WebStore<T>, value: T) -> WebStoreTransaction<T> Never! { set<T>(&store, value) }
@@ -269,13 +267,13 @@ fn esc_json(text: String) -> String {
         b :: raw[i]
         escaped := ""
         if {
-            b == U8{34} -> escaped = "\\\""
-            b == U8{92} -> escaped = "\\\\"
-            b == U8{10} -> escaped = "\\n"
-            b == U8{13} -> escaped = "\\r"
-            b == U8{9} -> escaped = "\\t"
-            b < U8{32} || b == U8{127} -> escaped = control_escape(Int{b})
-            b == U8{194} && i + 1 < raw.len() && raw[i + 1] >= U8{128} && raw[i + 1] <= U8{159} -> {
+            b == (U8{34}) -> escaped = "\\\""
+            b == (U8{92}) -> escaped = "\\\\"
+            b == (U8{10}) -> escaped = "\\n"
+            b == (U8{13}) -> escaped = "\\r"
+            b == (U8{9}) -> escaped = "\\t"
+            b < (U8{32}) || b == (U8{127}) -> escaped = control_escape(Int{b})
+            b == (U8{194}) && i + 1 < raw.len() && raw[i + 1] >= (U8{128}) && raw[i + 1] <= (U8{159}) -> {
                 escaped = control_escape(Int{raw[i + 1]})
                 i += 1
             }
