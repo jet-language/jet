@@ -7700,8 +7700,6 @@ with a machine-applicable fix, never an alias. Effect denials
 (`-[!Mem.Alloc]>`, `-[!Panic]>`), `?(text)`, `??`, `!x`, `!=`, patterns, and
 narrowing are unchanged, and carriers, layouts, and runtime are identical.
 Parser, formatter, type display, and diagnostics emit only the suffix form.
-An explicit effect ceiling precedes that contract (D-SIG-AFTER1=A):
-`fn save(entry: Entry) -[FS]> SaveError! { … }`. Formatting keeps this order.
 
 **2026-09-30 — D-CALLBACK-ERR1=A shipped** *(card #3708; owner ruling that
 Core declares its failures)*: a type parameter may be a failure domain, so a
@@ -7783,7 +7781,9 @@ handler: fn(Request) -[IO]> Response
 ```
 
 Unit stays `fn run() { }` and `fn announce() -[IO]> { }`. A fallible unit keeps
-the arrowless form. A plain `->` with no type, and `-> Unit`, are illegal.
+the arrowless form; its error contract precedes an optional effect arrow:
+`fn save() IOError! -[FS]> { }` (D-FAIL-UNIT1=A). A plain `->` with no type,
+and `-> Unit`, are illegal.
 Function types read the same way. Control one-liners (`if c -> x`,
 `loop x in xs -> f(x)`, arm tables) and lambdas keep `->` as the body arrow.
 Bare type after the parameter list is a teaching diagnostic (E0068). This

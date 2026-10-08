@@ -75,12 +75,15 @@ fn pc_trait_effect_slots() {
     pc_require(if slots.program.items[0] == .Trait(value) -> value.methods.len() == 3 && value.methods[0].default_body == None && value.methods[1].default_body == None else -> false, "effect-arrow trait slots stay requirements")
     free :: parse_source("fn begin(name: String) Never! -[FS]>\nfn run() {{}}\n".bytes())
     pc_require(free.diagnostics.len() == 1 && free.diagnostics[0].code == "E0081", "a free effect-arrow function without a body is E0081")
-    // D-SIG-AFTER1=A / D-TYPE-SUFFIX1=A: effects precede the error contract.
-    once :: jet_format_source("fn save(path: String) IOError! {{}}\nfn sync() Err! {{}}\nfn bounded() -[FS]> IOError! {{}}\n", false)
+    // D-CALLABLE-ONE1 / D-FAIL-UNIT1: the unit error contract precedes effects.
+    once :: jet_format_source("fn save(path: String) IOError! {{}}\nfn sync() Err! {{}}\nfn bounded() IOError! -[FS]> {{}}\nfn pure() Never! -[]> {{}}\ntrait Sink {{ fn save(self) IOError! -[FS]> }}\n", false)
     pc_require(once.ok, "unit-fallible signatures format")
     pc_require(once.text.contains("fn save(path: String) IOError!"), "unit success omits the plain arrow")
     pc_require(once.text.contains("fn sync() Err!"), "explicit default error suffix")
-    pc_require(once.text.contains("fn bounded() -[FS]> IOError!"), "effect arrow precedes the error suffix")
+    pc_require(once.text.contains("fn bounded() IOError! -[FS]>"), "error suffix precedes the effect arrow")
+    pc_require(once.text.contains("fn pure() Never! -[]>"), "error suffix precedes the pure effect arrow")
+    pc_require(once.text.contains("fn save(self) IOError! -[FS]>"), "trait error suffix precedes the effect arrow")
+    pc_require(parse_source(once.text.bytes()).diagnostics.len() == 0, "formatted unit-fallible declarations parse")
     twice :: jet_format_source(once.text, false)
     pc_require(twice.ok && twice.text == once.text, "unit-fallible signatures format idempotently")
 }
