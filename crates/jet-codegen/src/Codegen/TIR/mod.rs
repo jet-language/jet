@@ -3547,9 +3547,14 @@ fn lower_mir_fragment(
     LowerError,
 > {
     let mut expr = expr.clone();
+    let mut requested_type_facts = std::collections::BTreeSet::new();
+    expr.for_each_expr_mut(|expr| collect_fragment_type_fact(expr, &mut requested_type_facts));
     expr.for_each_expr_mut(lift_receiver_mark);
     let mut stmts = stmts.to_vec();
     lift_body_receiver_marks(&mut stmts);
+    for stmt in &mut stmts {
+        stmt.for_each_expr_mut(|expr| collect_fragment_type_fact(expr, &mut requested_type_facts));
+    }
     let (expr, stmts) = (&expr, stmts.as_slice());
     let module = "__comptime".to_string();
     let name = "__fragment".to_string();
@@ -3970,6 +3975,9 @@ fn lower_mir_fragment(
         for_each_item_body(item, |body| {
             lift_body_receiver_marks(body);
             normalize_fragment_body_patterns(body, &declared_variants);
+            for stmt in body {
+                stmt.for_each_expr_mut(|expr| collect_fragment_type_fact(expr, &mut requested_type_facts));
+            }
         });
     }
     let mut cx = build_cx_items(
@@ -4032,6 +4040,8 @@ fn lower_mir_fragment(
     }
     cx.module_identity = module.clone();
     cx.core_imports = context.core_imports.clone();
+    bind_fragment_type_facts(&mut cx, &items, &requested_type_facts, &context.target_layout);
+    cx.comptime_type_fact_target = Some(context.target_layout.clone());
     let core_source_modules = std::sync::Arc::make_mut(&mut cx.core_source_modules);
     for (alias, module) in &cx.core_imports {
         if let Some(source) = jet_foundation::CoreModuleExports::core_source_module(module) {
@@ -4260,6 +4270,35 @@ fn lower_mir_fragment(
     )
 }
 
+fn collect_fragment_type_fact(
+    expr: &crate::AST::Expr,
+    requested: &mut std::collections::BTreeSet<(String, String)>,
+) {
+    let crate::AST::Expr::Field(receiver, member, _) = expr else { return };
+    if crate::Syntax::compiler_fact_member(member).is_none() {
+        return;
+    }
+    if let Some((_, path)) = lower::compiler_fact_subject_path(receiver) {
+        requested.insert((path, member.clone()));
+    }
+}
+
+fn bind_fragment_type_facts(
+    cx: &mut Cx,
+    items: &[Item],
+    requested: &std::collections::BTreeSet<(String, String)>,
+    target: &jet_foundation::Layout::TargetLayout,
+) {
+    for (path, member) in requested {
+        let Some(read) = crate::Syntax::fact_read_kind(member) else { continue };
+        let identity = cx.local_type_identities.get(path).map(String::as_str).unwrap_or(path);
+        let Some(value) = crate::Comptime::reflect_type_fact_value_with_target_and_graph_and_facts(
+            items, identity, &cx.module_identity, target, None, None, read,
+        ) else { continue };
+        cx.comptime_type_facts.entry(path.clone()).or_default().insert(member.clone(), value);
+    }
+}
+
 /// Build the lowering context of one loaded source module for a comptime
 /// fragment, the way runtime lowering builds it for an imported module: the
 /// module's own functions and imports, its loader alias as the local call
@@ -4289,7 +4328,15 @@ fn fragment_core_source_cx(
         .chain(source.constants.iter().cloned().map(Item::Const))
         .collect::<Vec<_>>();
     let function_count = items.len();
-    if user_module {
+    let mut requested_type_facts = std::collections::BTreeSet::new();
+    for item in &mut items {
+        for_each_item_body(item, |body| {
+            for stmt in body {
+                stmt.for_each_expr_mut(|expr| collect_fragment_type_fact(expr, &mut requested_type_facts));
+            }
+        });
+    }
+    if user_module || !requested_type_facts.is_empty() {
         items.extend(facts.structs.values().cloned().map(Item::Struct));
         items.extend(facts.enums.values().cloned().map(Item::Enum));
     }
@@ -4345,10 +4392,17 @@ fn fragment_core_source_cx(
             &source.import_signatures,
         );
         cx.foreign_types = fragment_cx.foreign_types.clone();
-        cx.local_type_identities
-            .extend(source.nominal_identities.clone());
+        cx.local_type_identities.extend(source.nominal_identities.clone());
         cx.type_names.extend(facts.structs.keys().cloned());
         cx.type_names.extend(facts.enums.keys().cloned());
+    }
+    if !requested_type_facts.is_empty() {
+        cx.local_type_identities.extend(source.nominal_identities.clone());
+        if let Some(target) = &fragment_cx.comptime_type_fact_target {
+            bind_fragment_type_facts(&mut cx, &items, &requested_type_facts, target);
+        }
+    }
+    if user_module || !requested_type_facts.is_empty() {
         // The nominal rows shape this context only; the fragment program
         // declares them once from its own item set.
         items.truncate(function_count);

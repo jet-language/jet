@@ -7423,6 +7423,21 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         kind: TExprKind::ConstRef(key.clone()),
                     };
                 }
+                if Syntax::compiler_fact_member(member).is_some() && !cx.comptime_type_facts.is_empty() {
+                    if let Some((root, path)) = compiler_fact_subject_path(receiver) {
+                        if !env.locals.contains_key(root) {
+                            if let Some(value) = cx.comptime_type_facts
+                                .get(path.as_str())
+                                .and_then(|facts| facts.get(member))
+                            {
+                                let ty = value.jet_type();
+                                let kind = lower_comptime_scalar(Some(value), Some(&ty))
+                                    .unwrap_or_else(|| TExprKind::CtLit(value.clone()));
+                                return TExpr { ty, kind };
+                            }
+                        }
+                    }
+                }
                 if core_module_path_from_receiver(receiver, cx, env).as_deref() == Some("core.math")
                 {
                     // Module fields, not calls. A 0-arg CoreCall left resident
@@ -10107,5 +10122,20 @@ mod source_order_tests {
             panic!("last statement must remain the Core call");
         };
         assert!(matches!(&args[0].kind, TExprKind::Local(local) if local.name == "key"));
+    }
+}
+
+/// The lexical root and source spelling of a nominal fact subject. The root
+/// lets lexical reflected values shadow a same-named nominal intrinsic.
+pub(crate) fn compiler_fact_subject_path(expr: &Expr) -> Option<(&str, String)> {
+    match expr {
+        Expr::Ident(name, _) => Some((name, name.clone())),
+        Expr::Field(base, member, _) => {
+            let (root, mut path) = compiler_fact_subject_path(base)?;
+            path.push('.');
+            path.push_str(member);
+            Some((root, path))
+        }
+        _ => None,
     }
 }
