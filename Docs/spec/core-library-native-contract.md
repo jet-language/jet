@@ -436,6 +436,15 @@ and initialized bytes, ignoring capacity. Null drops are harmless. The
 capacity-sized frees, mutation independence, and projection lifetimes. These
 data operations make no claim about SMTP transport or MIME serialization.
 
+Native network readiness snapshots use two normalized Bool words in
+`NetReadiness.jet`. Getters, clone and equality interpret the low byte of each
+slot, not unrelated upper-byte padding; constructors normalize C U8 inputs.
+Ready-interest and shutdown handles use the canonical scalar-enum ownership
+helpers from `EncodingErrors.jet` (declaration order Read/Write/ReadWrite and
+Read/Write/Both respectively). They do not own socket resources. Null drops
+release nothing. `NetReadinessWitness.c` covers all boolean/ordinal combinations,
+low-byte normalization, independent clones and exact-sized shell deallocation.
+
 ## Dependency order
 
 Core work follows the dependency graph. These categories describe dependency
