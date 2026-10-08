@@ -25,7 +25,7 @@ pub enum CoreLeafKind {
 
 // BEGIN GENERATED CORE DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: c26386b58f26423c53e1f2b4683e314f29b953fa772c2a99f888273efd2942d1
+// Source SHA-256: ea251c5f1f93f0cbaf656cccdbad66b38a38940b489279bae83d108f29b70076
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreModuleDeclaration {
     pub module: &'static str,
@@ -548,7 +548,7 @@ const CORE_MODULE_91_MEMBERS: &[&str] = &["expired", "remaining_ms"];
 const CORE_MODULE_91_TYPES: &[(&str, CoreLeafKind)] = &[];
 const CORE_MODULE_91_DEPENDENCIES: &[&str] = &[];
 
-const CORE_MODULE_92_MEMBERS: &[&str] = &["__null_backend", "aria_role_button", "aria_role_container", "aria_role_label", "aria_role_text_input", "box", "button", "constraint", "desktop", "gtk_backend", "key_event", "mount", "node", "node_accessibility", "node_color", "node_role", "node_shortcut", "null_backend", "phone", "point", "playground", "playgrounds", "preview", "previews", "reactive_render", "rect", "resize_event", "size", "tablet", "text", "text_input", "tui_backend", "UIAriaRole", "UIIMEMode", "UINode", "UIPreview", "UIPreviewDevice", "UIPreviewKind", "UINodeKind", "Point", "Size", "Rect", "SizeConstraint", "UIPreviewViewport", "InputEvent", "NullBackend", "TUIBackend", "GtkBackend", "__node_transfer", "__viewport_transfer", "__accessibility_transfer", "__shortcut_transfer"];
+const CORE_MODULE_92_MEMBERS: &[&str] = &["__tui_backend", "__gtk_backend", "__null_backend", "aria_role_button", "aria_role_container", "aria_role_label", "aria_role_text_input", "box", "button", "constraint", "desktop", "gtk_backend", "key_event", "mount", "node", "node_accessibility", "node_color", "node_role", "node_shortcut", "null_backend", "phone", "point", "playground", "playgrounds", "preview", "previews", "reactive_render", "rect", "resize_event", "size", "tablet", "text", "text_input", "tui_backend", "UIAriaRole", "UIIMEMode", "UINode", "UIPreview", "UIPreviewDevice", "UIPreviewKind", "UINodeKind", "Point", "Size", "Rect", "SizeConstraint", "UIPreviewViewport", "InputEvent", "NullBackend", "TUIBackend", "GtkBackend", "__node_transfer", "__viewport_transfer", "__accessibility_transfer", "__shortcut_transfer"];
 const CORE_MODULE_92_TYPES: &[(&str, CoreLeafKind)] = &[("UIIMEMode", CoreLeafKind::Enum(&["Native", "Disabled"])), ("UIPreview", CoreLeafKind::Plain), ("UIPreviewAccessibility", CoreLeafKind::Plain), ("UIPreviewAuthority", CoreLeafKind::Plain), ("UIPreviewContext", CoreLeafKind::Plain), ("UIPreviewDevice", CoreLeafKind::Enum(&["Phone", "Tablet", "Desktop"])), ("UIPreviewEffect", CoreLeafKind::Plain), ("UIPreviewInputOverride", CoreLeafKind::Plain), ("UIPreviewInputValue", CoreLeafKind::Enum(&["Text", "Bool", "Integer", "Float"])), ("UIPreviewKind", CoreLeafKind::Enum(&["Preview", "Playground"])), ("UIPreviewLifecycle", CoreLeafKind::Plain), ("UIPreviewRegistry", CoreLeafKind::Plain), ("UIPreviewSource", CoreLeafKind::Plain), ("UIPreviewTheme", CoreLeafKind::Plain), ("UIPreviewTraits", CoreLeafKind::Plain), ("UIPreviewViewport", CoreLeafKind::Plain), ("UIAriaRole", CoreLeafKind::Enum(&["Button", "Container", "Label", "TextInput"])), ("UINode", CoreLeafKind::Plain), ("UINodeKind", CoreLeafKind::Enum(&["Custom", "Text", "Box", "Button", "TextInput"])), ("Point", CoreLeafKind::Plain), ("Size", CoreLeafKind::Plain), ("Rect", CoreLeafKind::Plain), ("SizeConstraint", CoreLeafKind::Plain), ("InputEvent", CoreLeafKind::Enum(&["Key", "Resize"])), ("NullBackend", CoreLeafKind::Plain), ("TUIBackend", CoreLeafKind::Plain), ("GtkBackend", CoreLeafKind::Plain)];
 const CORE_MODULE_92_DEPENDENCIES: &[&str] = &["core.text"];
 
@@ -572,11 +572,11 @@ const CORE_MODULE_97_MEMBERS: &[&str] = &["__poll", "poll", "UIDragPhase", "UIDr
 const CORE_MODULE_97_TYPES: &[(&str, CoreLeafKind)] = &[("UIDragPhase", CoreLeafKind::Enum(&["Enter", "Over", "Drop", "Leave", "Cancel"])), ("UIDragOperation", CoreLeafKind::Enum(&["Copy", "Move", "Link"])), ("UIDropItem", CoreLeafKind::Enum(&["Text", "URI", "File"])), ("UIDragEvent", CoreLeafKind::Plain)];
 const CORE_MODULE_97_DEPENDENCIES: &[&str] = &["core.ui.host"];
 
-const CORE_MODULE_98_MEMBERS: &[&str] = &["binding", "dispatch", "register"];
+const CORE_MODULE_98_MEMBERS: &[&str] = &["__register", "__dispatch", "binding", "dispatch", "register"];
 const CORE_MODULE_98_TYPES: &[(&str, CoreLeafKind)] = &[];
 const CORE_MODULE_98_DEPENDENCIES: &[&str] = &["core.ui.host"];
 
-const CORE_MODULE_99_MEMBERS: &[&str] = &["attach", "project"];
+const CORE_MODULE_99_MEMBERS: &[&str] = &["__attach", "__project", "attach", "project"];
 const CORE_MODULE_99_TYPES: &[(&str, CoreLeafKind)] = &[];
 const CORE_MODULE_99_DEPENDENCIES: &[&str] = &["core.ui.host"];
 

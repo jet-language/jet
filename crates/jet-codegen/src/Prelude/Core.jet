@@ -199,7 +199,7 @@ module core.time.calendar exports { isleap, leapdays, weekday, monthrange, month
 source_module core.time.calendar path Core/time/calendar.jet alias core_core_time_calendar owns { day_abbr, day_name, formatmonth, formatyear, isleap, leapdays, month_abbr, month_name, monthcalendar, monthcalendar_start, monthrange, timegm, weekday, weekheader, yearcalendar }
 module core.time.expiring exports { expired, remaining_ms } depends_on []
 source_module core.time.expiring path Core/time/expiring.jet alias core_time_expiring owns { expired, remaining_ms }
-module core.ui exports { __null_backend, aria_role_button, aria_role_container, aria_role_label, aria_role_text_input, box, button, constraint, desktop, gtk_backend, key_event, mount, node, node_accessibility, node_color, node_role, node_shortcut, null_backend, phone, point, playground, playgrounds, preview, previews, reactive_render, rect, resize_event, size, tablet, text, text_input, tui_backend, UIAriaRole, UIIMEMode, UINode, UIPreview, UIPreviewDevice, UIPreviewKind, UINodeKind, Point, Size, Rect, SizeConstraint, UIPreviewViewport, InputEvent, NullBackend, TUIBackend, GtkBackend, __node_transfer, __viewport_transfer, __accessibility_transfer, __shortcut_transfer } types { UIIMEMode:plain(Native|Disabled), UIPreview:plain, UIPreviewAccessibility:plain, UIPreviewAuthority:plain, UIPreviewContext:plain, UIPreviewDevice:plain(Phone|Tablet|Desktop), UIPreviewEffect:plain, UIPreviewInputOverride:plain, UIPreviewInputValue:plain(Text|Bool|Integer|Float), UIPreviewKind:plain(Preview|Playground), UIPreviewLifecycle:plain, UIPreviewRegistry:plain, UIPreviewSource:plain, UIPreviewTheme:plain, UIPreviewTraits:plain, UIPreviewViewport:plain, UIAriaRole:plain(Button|Container|Label|TextInput), UINode:plain, UINodeKind:plain(Custom|Text|Box|Button|TextInput), Point:plain, Size:plain, Rect:plain, SizeConstraint:plain, InputEvent:plain(Key|Resize), NullBackend:plain, TUIBackend:plain, GtkBackend:plain } depends_on [core.text]
+module core.ui exports { __tui_backend, __gtk_backend, __null_backend, aria_role_button, aria_role_container, aria_role_label, aria_role_text_input, box, button, constraint, desktop, gtk_backend, key_event, mount, node, node_accessibility, node_color, node_role, node_shortcut, null_backend, phone, point, playground, playgrounds, preview, previews, reactive_render, rect, resize_event, size, tablet, text, text_input, tui_backend, UIAriaRole, UIIMEMode, UINode, UIPreview, UIPreviewDevice, UIPreviewKind, UINodeKind, Point, Size, Rect, SizeConstraint, UIPreviewViewport, InputEvent, NullBackend, TUIBackend, GtkBackend, __node_transfer, __viewport_transfer, __accessibility_transfer, __shortcut_transfer } types { UIIMEMode:plain(Native|Disabled), UIPreview:plain, UIPreviewAccessibility:plain, UIPreviewAuthority:plain, UIPreviewContext:plain, UIPreviewDevice:plain(Phone|Tablet|Desktop), UIPreviewEffect:plain, UIPreviewInputOverride:plain, UIPreviewInputValue:plain(Text|Bool|Integer|Float), UIPreviewKind:plain(Preview|Playground), UIPreviewLifecycle:plain, UIPreviewRegistry:plain, UIPreviewSource:plain, UIPreviewTheme:plain, UIPreviewTraits:plain, UIPreviewViewport:plain, UIAriaRole:plain(Button|Container|Label|TextInput), UINode:plain, UINodeKind:plain(Custom|Text|Box|Button|TextInput), Point:plain, Size:plain, Rect:plain, SizeConstraint:plain, InputEvent:plain(Key|Resize), NullBackend:plain, TUIBackend:plain, GtkBackend:plain } depends_on [core.text]
 source_module core.ui path Core/ui/ui.jet alias core_core_ui owns { aria_role_button, aria_role_container, aria_role_label, aria_role_text_input, box, constraint, desktop, gtk_backend, key_event, node, node_accessibility, node_color, node_role, node_shortcut, null_backend, phone, point, rect, resize_event, size, tablet, text, tui_backend }
 module core.tui exports { TUICapabilities, TUIColor, TUIColorProfile, TUIConstraint, TUIDirection, TUIEvent, TUIListState, TUIStyle, ascii, capabilities, close_event, color_ansi16, color_ansi256, color_rgb, display_width, fill, focus_event, horizontal, interrupt_event, io_event, key_event, key_event_modifiers, layout, length, list, list_state, list_state_offset, list_state_select, list_state_selected, max, min, percent, resize_event, style, style_background, style_bold, style_dim, style_foreground, style_text, style_underline, table, timer_event, vertical } types { TUIEvent:plain(Key|Resize|Timer|IO|Focus|Interrupt|Close), TUIColorProfile:plain(ANSI16|ANSI256|TrueColor|ASCII), TUIColor:plain(ANSI16|ANSI256|RGB), TUICapabilities:plain, TUIStyle:plain, TUIConstraint:plain(Length|Min|Max|Percent|Fill), TUIDirection:plain(Horizontal|Vertical), TUIListState:plain } depends_on [core.ui]
 source_module core.tui path Core/tui/tui.jet alias core_core_tui owns { ascii, capabilities, close_event, color_ansi16, color_ansi256, color_rgb, display_width, fill, focus_event, horizontal, interrupt_event, io_event, key_event, key_event_modifiers, layout, length, list, list_state, list_state_offset, list_state_select, list_state_selected, max, min, percent, resize_event, style, style_background, style_bold, style_dim, style_foreground, style_text, style_underline, table, timer_event, vertical } types { TUIColor, TUIConstraint, TUIDirection, TUIEvent, TUIListState, TUIStyle }
@@ -211,9 +211,9 @@ module core.ui.host.ime exports { __poll, poll, UIIMEEvent, UIIMEPhase, UIIMECom
 source_module core.ui.host.ime path Core/ui/host/ime.jet alias core_core_ui_host_ime owns { poll }
 module core.ui.host.drag_drop exports { __poll, poll, UIDragPhase, UIDragOperation, UIDropItem, UIDragEvent } types { UIDragPhase:plain(Enter|Over|Drop|Leave|Cancel), UIDragOperation:plain(Copy|Move|Link), UIDropItem:plain(Text|URI|File), UIDragEvent:plain } depends_on [core.ui.host]
 source_module core.ui.host.drag_drop path Core/ui/host/drag_drop.jet alias core_core_ui_host_drag_drop owns { poll }
-module core.ui.host.shortcuts exports { binding, dispatch, register } depends_on [core.ui.host]
+module core.ui.host.shortcuts exports { __register, __dispatch, binding, dispatch, register } depends_on [core.ui.host]
 source_module core.ui.host.shortcuts path Core/ui/host/shortcuts.jet alias core_core_ui_host_shortcuts owns { binding, dispatch, register }
-module core.ui.host.accessibility exports { attach, project } depends_on [core.ui.host]
+module core.ui.host.accessibility exports { __attach, __project, attach, project } depends_on [core.ui.host]
 source_module core.ui.host.accessibility path Core/ui/host/accessibility.jet alias core_core_ui_host_accessibility owns { attach, project }
 module core.units exports { Measurement, abs, add, centi, convert, div, from, giga, kilo, mega, micro, milli, mul, nano, scale, show, si, sub, to_si, meters, kilometers, grams, kilograms, seconds, milliseconds, bytes_of, kibibytes, equals, ratio, is_zero, meter, gram, second, byte_unit, kibibyte, mebibyte, gibibyte, metres, kilometres } types { Measurement:generic(1) } depends_on [core.math]
 source_module core.units path Core/units/units.jet alias core_units owns { from, abs, add, bytes_of, convert, div, equals, grams, is_zero, kibibytes, kilograms, kilometers, meters, milliseconds, mul, ratio, scale, seconds, show, si, sub, to_si, metres, kilometres }
@@ -1414,8 +1414,10 @@ dispatcher_row plain core.perf __read_bits | CoreCallRecord::new("core.perf", "_
 dispatcher_row plain core.perf __write_bits | CoreCallRecord::new("core.perf", "__write_bits", "jet_perf_write_bits", false, &[false]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
 dispatcher_row plain core.ui null_backend | CoreCallRecord::source_owned("core.ui", "null_backend", &[])
 dispatcher_row adapter core.ui __null_backend | CoreCallRecord::new("core.ui", "__null_backend", "jet_ui_null", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
-dispatcher_row plain core.ui tui_backend | CoreCallRecord::new("core.ui", "tui_backend", "jet_ui_tui", true, &[]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
-dispatcher_row plain core.ui gtk_backend | CoreCallRecord::new("core.ui", "gtk_backend", "jet_ui_gtk", true, &[]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+dispatcher_row plain core.ui tui_backend | CoreCallRecord::source_owned("core.ui", "tui_backend", &[])
+dispatcher_row adapter core.ui __tui_backend | CoreCallRecord::new("core.ui", "__tui_backend", "jet_ui_tui", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+dispatcher_row plain core.ui gtk_backend | CoreCallRecord::source_owned("core.ui", "gtk_backend", &[])
+dispatcher_row adapter core.ui __gtk_backend | CoreCallRecord::new("core.ui", "__gtk_backend", "jet_ui_gtk", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
 dispatcher_row plain core.ui preview | CoreCallRecord::new( "core.ui", "preview", "jet_ui_preview_with_viewport", true, &[true, false, false], ) .with_max_arity(3) .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
 dispatcher_row plain core.ui playground | CoreCallRecord::new( "core.ui", "playground", "jet_ui_playground_with_viewport", true, &[true, false, false], ) .with_max_arity(3) .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
 dispatcher_row plain core.ui previews | CoreCallRecord::new("core.ui", "previews", "jet_ui_previews", true, &[true]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
@@ -1445,10 +1447,14 @@ dispatcher_row adapter core.ui.host.ime __poll | CoreCallRecord::new("core.ui.ho
 dispatcher_row plain core.ui.host.drag_drop poll | CoreCallRecord::source_owned("core.ui.host.drag_drop", "poll", &[]).with_ui_capabilities(&["UI.DragDrop"])
 dispatcher_row adapter core.ui.host.drag_drop __poll | CoreCallRecord::new("core.ui.host.drag_drop", "__poll", "jet_ui_host_drag_poll", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).with_ui_capabilities(&["UI.DragDrop"])
 dispatcher_row plain core.ui.host.shortcuts binding | CoreCallRecord::source_owned("core.ui.host.shortcuts", "binding", &[false, true]).with_ui_capabilities(&["UI.Shortcuts"])
-dispatcher_row plain core.ui.host.shortcuts register | CoreCallRecord::new( "core.ui.host.shortcuts", "register", "jet_ui_host_shortcuts_register", true, &[false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_ui_capabilities(&["UI.Shortcuts"])
-dispatcher_row plain core.ui.host.shortcuts dispatch | CoreCallRecord::new( "core.ui.host.shortcuts", "dispatch", "jet_ui_host_shortcuts_dispatch", true, &[false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_ui_capabilities(&["UI.Shortcuts"])
-dispatcher_row plain core.ui.host.accessibility attach | CoreCallRecord::new( "core.ui.host.accessibility", "attach", "jet_ui_host_attach_accessibility", true, &[false, false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_ui_capabilities(&["UI.Accessibility"])
-dispatcher_row plain core.ui.host.accessibility project | CoreCallRecord::new( "core.ui.host.accessibility", "project", "jet_ui_host_project_accessibility", true, &[false, false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_ui_capabilities(&["UI.Accessibility"])
+dispatcher_row plain core.ui.host.shortcuts register | CoreCallRecord::source_owned("core.ui.host.shortcuts", "register", &[false]).with_ui_capabilities(&["UI.Shortcuts"])
+dispatcher_row adapter core.ui.host.shortcuts __register | CoreCallRecord::new("core.ui.host.shortcuts", "__register", "jet_ui_host_shortcuts_register", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).with_ui_capabilities(&["UI.Shortcuts"])
+dispatcher_row plain core.ui.host.shortcuts dispatch | CoreCallRecord::source_owned("core.ui.host.shortcuts", "dispatch", &[false]).with_ui_capabilities(&["UI.Shortcuts"])
+dispatcher_row adapter core.ui.host.shortcuts __dispatch | CoreCallRecord::new("core.ui.host.shortcuts", "__dispatch", "jet_ui_host_shortcuts_dispatch", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).with_ui_capabilities(&["UI.Shortcuts"])
+dispatcher_row plain core.ui.host.accessibility attach | CoreCallRecord::source_owned("core.ui.host.accessibility", "attach", &[false, false]).with_ui_capabilities(&["UI.Accessibility"])
+dispatcher_row adapter core.ui.host.accessibility __attach | CoreCallRecord::new("core.ui.host.accessibility", "__attach", "jet_ui_host_attach_accessibility", true, &[false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).with_ui_capabilities(&["UI.Accessibility"])
+dispatcher_row plain core.ui.host.accessibility project | CoreCallRecord::source_owned("core.ui.host.accessibility", "project", &[false, false]).with_ui_capabilities(&["UI.Accessibility"])
+dispatcher_row adapter core.ui.host.accessibility __project | CoreCallRecord::new("core.ui.host.accessibility", "__project", "jet_ui_host_project_accessibility", true, &[false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).with_ui_capabilities(&["UI.Accessibility"])
 dispatcher_row plain core.web openapi | sema_web_call("core.web", "openapi", "jet_web_openapi", &[true])
 dispatcher_row plain core.web form | sema_web_call("core.web", "form", "jet_web_form", &[true, false])
 dispatcher_row plain core.web.router new | sema_web_call("core.web.router", "new", "jet_web_router_new", &[])
@@ -1978,7 +1984,7 @@ ambient_route core.service endpoint_show
 ambient_route core.service delivery_state_show
 ambient_route core.service delivery_status
 ambient_route core.devtools publish
-ambient_route core.ui gtk_backend
+ambient_route core.ui __gtk_backend
 ambient_route core.log span
 ambient_route core.log critical
 ambient_route core.log enter
@@ -2152,7 +2158,7 @@ ambient_route core.db pool
 ambient_route core.db open
 ambient_route core.db open_memory
 ambient_route core.db policy
-ambient_route core.ui tui_backend
+ambient_route core.ui __tui_backend
 ambient_route core.ui button
 ambient_route core.ui reactive_render
 ambient_route app live_get

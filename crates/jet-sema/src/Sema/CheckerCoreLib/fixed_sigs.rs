@@ -6384,9 +6384,9 @@ fn core_fixed_sig_impl(
         )),
         // D-RENDERTGT2=A (c133 M1): UI geometry constructors.
         ("core.ui", "null_backend" | "__null_backend") => Some((vec![], Some(Type::Named("NullBackend".to_string())))),
-        ("core.ui", "tui_backend") => Some((vec![], Some(Type::Named("TUIBackend".to_string())))),
+        ("core.ui", "tui_backend" | "__tui_backend") => Some((vec![], Some(Type::Named("TUIBackend".to_string())))),
         // D-UIDEVSHELL1=A (c134 Phase 8): native Linux GTK4 backend constructor.
-        ("core.ui", "gtk_backend") => Some((vec![], Some(Type::Named("GtkBackend".to_string())))),
+        ("core.ui", "gtk_backend" | "__gtk_backend") => Some((vec![], Some(Type::Named("GtkBackend".to_string())))),
         ("core.ui", "point") => Some((
             vec![(read, float.clone()), (read, float)],
             Some(Type::Named("Point".to_string())),
@@ -6747,13 +6747,17 @@ fn core_fixed_sig_impl(
             ],
             Some(ui_result(Type::Named("UIShortcutBinding".to_string()))),
         )),
-        ("core.ui.host.shortcuts", "register") => Some((
+        ("core.ui.host.shortcuts", "register" | "__register") => Some((
             vec![(read, Type::Named("UIShortcutBinding".to_string()))],
             Some(ui_result(Type::Named("UIShortcutBinding".to_string()))),
         )),
-        ("core.ui.host.shortcuts", "dispatch") => Some((
+        ("core.ui.host.shortcuts", "dispatch" | "__dispatch") => Some((
             vec![(read, Type::Named("UIShortcut".to_string()))],
             Some(ui_result(Type::Named("UIShortcutDispatch".to_string()))),
+        )),
+        ("core.ui.host.accessibility", "__attach") => Some((
+            vec![(read, Type::Named("UINode".to_string())), (read, Type::Named("UIAccessibility".to_string()))],
+            Some(ui_result(Type::Named("UINode".to_string()))),
         )),
         ("core.ui.host.accessibility", "attach") => Some((
             vec![
@@ -6762,7 +6766,7 @@ fn core_fixed_sig_impl(
             ],
             Some(ui_result(unit.clone())),
         )),
-        ("core.ui.host.accessibility", "project") => Some((
+        ("core.ui.host.accessibility", "project" | "__project") => Some((
             vec![
                 (read, Type::Named("UINode".to_string())),
                 (read, Type::Named("UINodeID".to_string())),

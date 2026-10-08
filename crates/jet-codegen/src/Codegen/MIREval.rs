@@ -2910,7 +2910,7 @@ fn eval_core_call_binding(
                     mir_ui_kernel::jet_ui_null(),
                 )))
             }
-            "tui_backend" => {
+            "__tui_backend" => {
                 return Ok(mir_ui_backend_value(MirUiBackend::Tui(
                     mir_ui_kernel::jet_ui_tui(),
                 )))

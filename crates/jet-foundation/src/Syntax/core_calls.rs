@@ -1547,7 +1547,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: c26386b58f26423c53e1f2b4683e314f29b953fa772c2a99f888273efd2942d1
+// Source SHA-256: ea251c5f1f93f0cbaf656cccdbad66b38a38940b489279bae83d108f29b70076
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -1604,7 +1604,7 @@ pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.service", "delivery_state_show"),
     ("core.service", "delivery_status"),
     ("core.devtools", "publish"),
-    ("core.ui", "gtk_backend"),
+    ("core.ui", "__gtk_backend"),
     ("core.log", "span"),
     ("core.log", "critical"),
     ("core.log", "enter"),
@@ -1778,7 +1778,7 @@ pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.db", "open"),
     ("core.db", "open_memory"),
     ("core.db", "policy"),
-    ("core.ui", "tui_backend"),
+    ("core.ui", "__tui_backend"),
     ("core.ui", "button"),
     ("core.ui", "reactive_render"),
     ("app", "live_get"),
@@ -3003,8 +3003,10 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.perf", "__write_bits", "jet_perf_write_bits", false, &[false]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::source_owned("core.ui", "null_backend", &[]),
     CoreCallRecord::new("core.ui", "__null_backend", "jet_ui_null", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.ui", "tui_backend", "jet_ui_tui", true, &[]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.ui", "gtk_backend", "jet_ui_gtk", true, &[]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::source_owned("core.ui", "tui_backend", &[]),
+    CoreCallRecord::new("core.ui", "__tui_backend", "jet_ui_tui", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::source_owned("core.ui", "gtk_backend", &[]),
+    CoreCallRecord::new("core.ui", "__gtk_backend", "jet_ui_gtk", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.ui", "preview", "jet_ui_preview_with_viewport", true, &[true, false, false], ) .with_max_arity(3) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.ui", "playground", "jet_ui_playground_with_viewport", true, &[true, false, false], ) .with_max_arity(3) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.ui", "previews", "jet_ui_previews", true, &[true]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
@@ -3034,10 +3036,14 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::source_owned("core.ui.host.drag_drop", "poll", &[]).with_ui_capabilities(&["UI.DragDrop"]),
     CoreCallRecord::new("core.ui.host.drag_drop", "__poll", "jet_ui_host_drag_poll", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).with_ui_capabilities(&["UI.DragDrop"]),
     CoreCallRecord::source_owned("core.ui.host.shortcuts", "binding", &[false, true]).with_ui_capabilities(&["UI.Shortcuts"]),
-    CoreCallRecord::new( "core.ui.host.shortcuts", "register", "jet_ui_host_shortcuts_register", true, &[false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_ui_capabilities(&["UI.Shortcuts"]),
-    CoreCallRecord::new( "core.ui.host.shortcuts", "dispatch", "jet_ui_host_shortcuts_dispatch", true, &[false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_ui_capabilities(&["UI.Shortcuts"]),
-    CoreCallRecord::new( "core.ui.host.accessibility", "attach", "jet_ui_host_attach_accessibility", true, &[false, false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_ui_capabilities(&["UI.Accessibility"]),
-    CoreCallRecord::new( "core.ui.host.accessibility", "project", "jet_ui_host_project_accessibility", true, &[false, false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_ui_capabilities(&["UI.Accessibility"]),
+    CoreCallRecord::source_owned("core.ui.host.shortcuts", "register", &[false]).with_ui_capabilities(&["UI.Shortcuts"]),
+    CoreCallRecord::new("core.ui.host.shortcuts", "__register", "jet_ui_host_shortcuts_register", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).with_ui_capabilities(&["UI.Shortcuts"]),
+    CoreCallRecord::source_owned("core.ui.host.shortcuts", "dispatch", &[false]).with_ui_capabilities(&["UI.Shortcuts"]),
+    CoreCallRecord::new("core.ui.host.shortcuts", "__dispatch", "jet_ui_host_shortcuts_dispatch", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).with_ui_capabilities(&["UI.Shortcuts"]),
+    CoreCallRecord::source_owned("core.ui.host.accessibility", "attach", &[false, false]).with_ui_capabilities(&["UI.Accessibility"]),
+    CoreCallRecord::new("core.ui.host.accessibility", "__attach", "jet_ui_host_attach_accessibility", true, &[false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).with_ui_capabilities(&["UI.Accessibility"]),
+    CoreCallRecord::source_owned("core.ui.host.accessibility", "project", &[false, false]).with_ui_capabilities(&["UI.Accessibility"]),
+    CoreCallRecord::new("core.ui.host.accessibility", "__project", "jet_ui_host_project_accessibility", true, &[false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).with_ui_capabilities(&["UI.Accessibility"]),
     sema_web_call("core.web", "openapi", "jet_web_openapi", &[true]),
     sema_web_call("core.web", "form", "jet_web_form", &[true, false]),
     sema_web_call("core.web.router", "new", "jet_web_router_new", &[]),
