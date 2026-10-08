@@ -1,0 +1,17 @@
+# Port of jetpack_tasks.rs::top_level_job_example_uses_one_argv_meaning.
+# ORACLE-LITERAL: original include_str! at jetpack_tasks.rs:453 uses this exact example snapshot.
+fixture: fixtures/top-level
+step: jet deploy --region eu
+stdout: = ../../../Examples/features/expected/script_job/top_level.out
+step: jet --interpret deploy --region eu
+stdout: = ../../../Examples/features/expected/script_job/top_level.out
+step: jet run run.jet -- deploy --region eu
+stdout: = ../../../Examples/features/expected/script_job/top_level.out
+step: jet jobs
+stdout: ~ deploy # original predicate
+step: jet help jobs
+stdout: ~ 'jet [jet flags] <name> [job args...]' # original predicate
+step: jet jobs deploy
+exit: 2
+stderr: ~ E2101 # original predicate
+stderr: ~ 'Run `jet deploy`' # original predicate
