@@ -2010,6 +2010,7 @@ pub fn __jet_bootstrap_compile_with_native(
     }
 
     let __jet_completion_scope = __jet_completion_owner.completion_scope();
+    let __jet_runtime_admission = __jet_completion_owner.parent_runtime_admission()?;
     let __jet_callback_jobs: ::std::sync::Arc<
         dyn ::jet_evalhost::SourceCallbacks::SourceCallbackJobOwner,
     > = __JetBootstrapNativeCallbackJobs::new();
@@ -2125,6 +2126,7 @@ pub fn __jet_bootstrap_compile_with_native(
             __jet_shared_payload_shapes,
             __jet_completion_scope.clone(),
             __jet_callback_jobs.clone(),
+            __jet_runtime_admission,
             __jet_compiler_image.header.artifact,
             __jet_receiver_type,
             __jet_template,

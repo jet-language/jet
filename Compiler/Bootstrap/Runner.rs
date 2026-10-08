@@ -153,6 +153,84 @@ pub(crate) enum BootstrapRunCompletionFinishError {
     Unrouted(jet_evalhost::SourceExecutionCompletion),
 }
 
+/// Private same-producer admission, retained by the outer invocation and every
+/// factory/callback adapter. It is not a Core schema or a user-selected library.
+#[derive(Clone, Copy)]
+pub(crate) struct HostBootstrapRuntimeAdmission {
+    library: &'static jet_codegen::ParentRuntimeLibrary::RuntimeLibrary,
+}
+
+impl HostBootstrapRuntimeAdmission {
+    pub(crate) fn library(&self) -> &'static jet_codegen::ParentRuntimeLibrary::RuntimeLibrary {
+        self.library
+    }
+
+    fn embedded() -> Result<Option<Self>, &'static str> {
+        use jet_codegen::ParentRuntimeLibrary::{self, Refusal};
+        let Some(record) = ParentRuntimeLibrary::embedded_admission() else {
+            return Ok(None);
+        };
+        // Check the two independently embedded producer identities agree before
+        // admit can execute a constructor. Never trust a receipt's self-hash.
+        if jet_foundation::SHA256::sha256(record.receipt_bytes) != record.expected_receipt_sha256 {
+            return Err(Refusal::RuntimeLibraryReceiptHashMismatch.key());
+        }
+        let receipt = jet_foundation::JSON::parse_json(
+            std::str::from_utf8(record.receipt_bytes)
+                .map_err(|_| Refusal::RuntimeLibraryReceiptHashMismatch.key())?,
+        ).map_err(|_| Refusal::RuntimeLibraryReceiptHashMismatch.key())?;
+        let library_hash = receipt.get("librarySHA256")
+            .and_then(|value| value.as_str())
+            .map_err(|_| Refusal::RuntimeLibraryReceiptHashMismatch.key())?;
+        const HEX: &[u8; 16] = b"0123456789abcdef";
+        if library_hash.len() != 64 || record.expected_library_sha256.iter().enumerate().any(|(index, byte)| {
+            library_hash.as_bytes()[index * 2] != HEX[usize::from(byte >> 4)]
+                || library_hash.as_bytes()[index * 2 + 1] != HEX[usize::from(byte & 15)]
+        }) {
+            return Err(Refusal::RuntimeLibraryLibraryHashMismatch.key());
+        }
+        let relative = Path::new(record.library_install_relative);
+        if relative.as_os_str().is_empty()
+            || relative.components().any(|part| !matches!(part, std::path::Component::Normal(_)))
+        {
+            return Err(Refusal::RuntimeLibraryLoadFailed.key());
+        }
+        // The installation root is the running host's directory, not cwd, an
+        // environment override, or a runtime receipt sidecar.
+        let executable = std::env::current_exe()
+            .map_err(|_| Refusal::RuntimeLibraryLoadFailed.key())?;
+        let installation = executable.parent()
+            .ok_or(Refusal::RuntimeLibraryLoadFailed.key())?;
+        let library = ParentRuntimeLibrary::admit(
+            &installation.join(relative), record.receipt_bytes, &record.expected_receipt_sha256,
+        ).map_err(|error| error.key())?;
+        if library.receipt_identity() != &record.expected_receipt_sha256
+            || library.library_identity() != &record.expected_library_sha256
+        {
+            return Err(Refusal::RuntimeLibraryIdentityMismatch.key());
+        }
+        Ok(Some(Self { library }))
+    }
+}
+
+#[cfg(all(test, not(jet_parent_runtime_admission)))]
+mod parent_runtime_admission_tests {
+    use super::*;
+
+    #[test]
+    fn absent_producer_does_not_admit_an_alternate_runtime() {
+        let owner = BootstrapRunCompletionOwner::new(
+            jet_evalhost::SourceExecutionCompletionScope::new(),
+        );
+        assert!(owner.parent_runtime_admission().unwrap().is_none());
+        let callback_owner = owner.clone();
+        assert!(std::sync::Arc::ptr_eq(
+            &owner.runtime_admission, &callback_owner.runtime_admission,
+        ));
+        assert!(callback_owner.parent_runtime_admission().unwrap().is_none());
+    }
+}
+
 #[derive(Default)]
 struct BootstrapRunCallbackJobState {
     complete: bool,
@@ -167,6 +245,7 @@ pub(crate) struct BootstrapRunCompletionOwner {
     callback_jobs: Option<std::sync::Arc<dyn jet_evalhost::SourceCallbacks::SourceCallbackJobOwner>>,
     callback_job_state: std::sync::Arc<std::sync::Mutex<BootstrapRunCallbackJobState>>,
     allow_resource_retirement: bool,
+    runtime_admission: std::sync::Arc<std::sync::OnceLock<Result<Option<HostBootstrapRuntimeAdmission>, &'static str>>>,
 }
 
 impl std::fmt::Debug for BootstrapRunCompletionOwner {
@@ -188,6 +267,7 @@ impl BootstrapRunCompletionOwner {
             callback_jobs: None,
             callback_job_state: std::sync::Arc::default(),
             allow_resource_retirement: false,
+            runtime_admission: std::sync::Arc::default(),
         }
     }
 
@@ -213,6 +293,15 @@ impl BootstrapRunCompletionOwner {
 
     pub(crate) fn completion_scope(&self) -> jet_evalhost::SourceExecutionCompletionScope {
         self.scope.clone()
+    }
+
+    pub(crate) fn parent_runtime_admission(
+        &self,
+    ) -> Result<Option<HostBootstrapRuntimeAdmission>, BootstrapHostCodecError> {
+        self.runtime_admission.get_or_init(HostBootstrapRuntimeAdmission::embedded)
+            .as_ref().copied().map_err(|key| BootstrapHostCodecError::InvalidMetadata(
+                format!("E0956: {key}: parent Jet runtime admission refused"),
+            ))
     }
 
     /// Call after consuming returned runtime values and retiring escaped
