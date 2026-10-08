@@ -1577,6 +1577,16 @@ N-element heap and sorts its selected output, avoiding a full input copy for
 small N. The raw witnesses cover duplicates, empty input, immutable borrowed
 inputs, growth, signed extrema, ordering and per-class allocator balance.
 
+The eight OrderedMap routes and their clone/drop/three rendering rails now
+own paired native List headers containing independent E4 strings. Updates
+preserve insertion order and return fresh owners; lookup and key/value lists
+clone borrowed strings. The raw fixture checks replacement position, missing
+lookup/removal, independent clone, NUL text surviving all input/container drops,
+exact bytes for all three rendering modes and allocator-class balance.
+The retirement predicate fails for these rows: the compiler still pins
+Counter/OrderedMap/Layer/Chain to native carriers (`Emit/Types.jet:2637-2640`),
+so the Jet runtime replaces the existing ABI rather than deleting live routes.
+
 Lazy cursor initialization and advancement may invoke user callbacks. Both
 are can-stop MIR operations: their results are usable only on the immediately
 following Propagate poll's resume edge. Prefetched HasNext/Value operations
