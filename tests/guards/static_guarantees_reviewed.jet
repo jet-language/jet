@@ -1,0 +1,18 @@
+use core.files as files
+
+// Exact live example/diagnostic teaching predicates feature_acceptance.rs634-659.
+fn s3_reviewed_static_guarantee_teaching() {
+    refinements :: files.read("Examples/features/types/refinements.jet") ?? panic("refinements")
+    assert(refinements.contains("distinct Int("))
+    contracts :: files.read("Examples/features/contracts/pre_post.jet") ?? panic("contracts")
+    assert(contracts.contains("#Pre"))
+    taint :: files.read("Examples/features/effects/taint.jet") ?? panic("taint")
+    assert(taint.contains("#Input") && taint.contains("#Scrub(Input)"))
+    budget :: files.read("Examples/features/packages/effect_budget/package.jet") ?? panic("budget")
+    assert(budget.contains("authority:"))
+    replay :: files.read("tests/ui/replayable_reaches_io.stderr") ?? panic("replay")
+    assert(replay.contains("E0725") && replay.contains("Replayable"))
+    bounds :: files.read("tests/ui/fixed_list_index_bounds.stderr") ?? panic("bounds")
+    assert(bounds.contains("E0965"))
+}
+#Test("static guarantee examples and diagnostic teaching stay live") { s3_reviewed_static_guarantee_teaching() }
