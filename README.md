@@ -159,6 +159,11 @@ Rust reference before it is trusted. The Rust-emission and rustc/LLVM
 backends stay. Jet counts as self-hosted only once the Jet
 compiler reproducibly builds itself and becomes the default compiler.
 
+The Jet parser's token entry points carry `TokenTables` alongside tokens:
+spelling names and literal facts belong to the originating lexer tables, not
+to an embedded token payload. Fence and named-marker expansion preserve that
+association, and imported marker tokens are rebased into the receiving tables.
+
 ## Work on Jet
 
 Read [AGENTS.md](AGENTS.md) first: it defines how decisions are made, the

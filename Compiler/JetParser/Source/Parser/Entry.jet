@@ -78,26 +78,14 @@ fn parse_generated_source(source: [U8]) -> ParseResult {
 
 fn parse_source_with_marker_groups(source: [U8], groups: [NamedMarkerGroupTokens]) -> ParseResult {
     lexed := lex(source)
-    lexed.tokens = expand_named_marker_groups(lexed.tokens, groups)
+    lexed.tokens = expand_named_marker_groups(lexed.tokens, &lexed.tables, groups)
     parser_parse_lexed_lines(lexed, source, parser_line_starts(source), false)
 }
 
 fn parse_generated_source_with_marker_groups(source: [U8], groups: [NamedMarkerGroupTokens]) -> ParseResult {
     lexed := lex_generated(source)
-    lexed.tokens = expand_named_marker_groups(lexed.tokens, groups)
+    lexed.tokens = expand_named_marker_groups(lexed.tokens, &lexed.tables, groups)
     parser_parse_lexed_lines(lexed, source, parser_line_starts(source), false)
-}
-
-fn parse_source_with_marker_groups(source: [U8], groups: [NamedMarkerGroupTokens]) -> ParseResult {
-    lexed := lex(source)
-    lexed.tokens = expand_named_marker_groups(lexed.tokens, groups)
-    parser_parse_lexed_lines(lexed, source, parser_line_starts(source))
-}
-
-fn parse_generated_source_with_marker_groups(source: [U8], groups: [NamedMarkerGroupTokens]) -> ParseResult {
-    lexed := lex_generated(source)
-    lexed.tokens = expand_named_marker_groups(lexed.tokens, groups)
-    parser_parse_lexed_lines(lexed, source, parser_line_starts(source))
 }
 
 fn parse_lexed(lexed: Lexed) -> ParseResult {
@@ -125,7 +113,8 @@ fn parser_parse_lexed_lines(input: ^Lexed, source: [U8], line_starts: [Int], all
     source_end :: if lexed.tokens.len() > 0 -> lexed.tokens[lexed.tokens.len() - 1].span.start else -> 0
     tokens := ^lexed.tokens
     lexed.tokens = [Token]{}
-    parser_parse_prepared(parser_prepare_tokens(^tokens), lexed.diagnostics, source_end, line_starts, source, allow_environment_reads)
+    prepared := parser_prepare_tokens(^tokens, &lexed.tables)
+    parser_parse_prepared(^prepared, lexed.diagnostics, source_end, line_starts, source, allow_environment_reads, ^lexed.tables)
 }
 
 fn parser_line_starts(source: [U8]) -> [Int] Never! {
@@ -136,7 +125,7 @@ fn parser_line_starts(source: [U8]) -> [Int] Never! {
     starts
 }
 
-fn parse_tokens(tokens: [Token]) -> ParseResult {
+fn parse_tokens(tokens: [Token], tables: TokenTables) -> ParseResult {
     source_end :: if {
         tokens.len() > 0 -> {
             last :: tokens[tokens.len() - 1]
@@ -144,12 +133,14 @@ fn parse_tokens(tokens: [Token]) -> ParseResult {
         }
         else -> 0
     }
-    parser_parse_prepared(parser_prepare_tokens(~tokens), [Diagnostic]{}, source_end, [Int]{}, [U8]{}, false)
+    owned_tables := tables.copy()
+    prepared := parser_prepare_tokens(tokens.copy(), &owned_tables)
+    parser_parse_prepared(^prepared, [Diagnostic]{}, source_end, [Int]{}, [U8]{}, false, ^owned_tables)
 }
 
 // D-EACH1=C: fence expansion runs before parsing. A fence error stops the
 // parse like any token-level rejection: no partially expanded AST is built.
-fn parser_parse_prepared(input: ^ParserFenceExpansion, lexer_diagnostics: [Diagnostic], source_end: Int, line_starts: [Int], source: [U8], allow_environment_reads: Bool) -> ParseResult {
+fn parser_parse_prepared(input: ^ParserFenceExpansion, lexer_diagnostics: [Diagnostic], source_end: Int, line_starts: [Int], source: [U8], allow_environment_reads: Bool, tables: ^TokenTables) -> ParseResult {
     prepared := ^input
     if prepared.diagnostics.len() > 0 {
         diagnostics := [Diagnostic]{}
@@ -159,7 +150,7 @@ fn parser_parse_prepared(input: ^ParserFenceExpansion, lexer_diagnostics: [Diagn
     }
     tokens := ^prepared.tokens
     prepared.tokens = [Token]{}
-    state := JetParserState{tokens: ^tokens, position: 0, diagnostics: lexer_diagnostics, source_end: source_end, block_spans: [Span]{}, pending_type_gt: false, pending_type_gt_span: Span{start: source_end, end: source_end}, result_handler_depth: 0, statement_start: -1, line_starts: line_starts, source: source, allow_environment_reads: allow_environment_reads}
+    state := JetParserState{tokens: ^tokens, tables: [TokenTables]{^tables}, position: 0, diagnostics: lexer_diagnostics, source_end: source_end, block_spans: [Span]{}, pending_type_gt: false, pending_type_gt_span: Span{start: source_end, end: source_end}, result_handler_depth: 0, statement_start: -1, line_starts: line_starts, source: source, allow_environment_reads: allow_environment_reads}
     program := parser_parse_program(&state)
     program.block_spans = state.block_spans
     program.else_arms = state.else_arms
@@ -325,98 +316,6 @@ fn parser_collect_debug_trace_sites(tokens: [Token], tables: TokenTables, debug:
         if token.kind != TOKEN_IDENT || token.decoded != debug || index + 1 >= tokens.len() || tokens[index + 1].kind != TOKEN_LPAREN -> next
         open :: index + 1
         close :: closes[open]
-        if close < 0 -> next
-        last := close - 1
-        if last > open && tokens[last].kind == TOKEN_COMMA -> last -= 1
-        if last <= open -> next
-        start :: tokens[open + 1].span.start
-        end :: tokens[last].span.end
-        close_end :: tokens[close].span.end
-        if start < 0 || end <= start || close_end > source.len() -> next
-        text :: String.from_bytes(source.slice(start, end)) ?? next
-        &sites.push(DebugTraceSite{name_start: token.span.start, text: text, close_end: close_end})
-    }
-}
-
-// D-DBG1=A: record each `debug(…)` call's argument text as written, so sema
-// can name the traced expression and build the E3405 unwrap edit. The text
-// runs from the first token after `(` to the last one before its matching
-// `)`, leaving out a trailing comma. Interpolations are scanned as well.
-fn parser_debug_trace_sites(tokens: [Token], source: [U8]) -> [DebugTraceSite] Never! {
-    sites := [DebugTraceSite]{}
-    if source.len() == 0 -> return sites
-    debug :: name_find(tables.names, "debug") ?? return sites
-    parser_collect_debug_trace_sites(tokens, tables, debug, source, &sites)
-    sites
-}
-
-fn parser_collect_debug_trace_sites(tokens: [Token], source: [U8], sites: &[DebugTraceSite]) Never! {
-    loop index in 0..<tokens.len() {
-        token :: tokens[index]
-        if token.literal >= 0 {
-            loop part in tables.literals[token.literal].string_parts {
-                if part.kind == STRING_PART_INTERPOLATION -> parser_collect_debug_trace_sites(part.tokens, tables, debug, source, &sites)
-            }
-        }
-        if token.kind != TOKEN_IDENT || token.decoded != debug || index + 1 >= tokens.len() || tokens[index + 1].kind != TOKEN_LPAREN -> next
-        open :: index + 1
-        depth := 0
-        close := -1
-        loop cursor in open..<tokens.len() {
-            kind :: tokens[cursor].kind
-            if kind == TOKEN_LPAREN -> depth += 1
-            if kind == TOKEN_RPAREN {
-                depth -= 1
-                if depth == 0 {
-                    close = cursor
-                    break
-                }
-            }
-        }
-        if close < 0 -> next
-        last := close - 1
-        if last > open && tokens[last].kind == TOKEN_COMMA -> last -= 1
-        if last <= open -> next
-        start :: tokens[open + 1].span.start
-        end :: tokens[last].span.end
-        close_end :: tokens[close].span.end
-        if start < 0 || end <= start || close_end > source.len() -> next
-        text :: String.from_bytes(source.slice(start, end)) ?? next
-        &sites.push(DebugTraceSite{name_start: token.span.start, text: text, close_end: close_end})
-    }
-}
-
-// D-DBG1=A: record each `debug(…)` call's argument text as written, so sema
-// can name the traced expression and build the E3405 unwrap edit. The text
-// runs from the first token after `(` to the last one before its matching
-// `)`, leaving out a trailing comma. Interpolations are scanned as well.
-fn parser_debug_trace_sites(tokens: [Token], source: [U8]) -> [DebugTraceSite] Never! {
-    sites := [DebugTraceSite]{}
-    if source.len() > 0 -> parser_collect_debug_trace_sites(tokens, source, &sites)
-    sites
-}
-
-fn parser_collect_debug_trace_sites(tokens: [Token], source: [U8], sites: &[DebugTraceSite]) Never! {
-    loop index in 0..<tokens.len() {
-        token :: tokens[index]
-        loop part in token.payload.string_parts {
-            if part.kind == STRING_PART_INTERPOLATION -> parser_collect_debug_trace_sites(part.tokens, source, &sites)
-        }
-        if token.kind != TOKEN_IDENT || token.payload.decoded != "debug" || index + 1 >= tokens.len() || tokens[index + 1].kind != TOKEN_LPAREN -> next
-        open :: index + 1
-        depth := 0
-        close := -1
-        loop cursor in open..<tokens.len() {
-            kind :: tokens[cursor].kind
-            if kind == TOKEN_LPAREN -> depth += 1
-            if kind == TOKEN_RPAREN {
-                depth -= 1
-                if depth == 0 {
-                    close = cursor
-                    break
-                }
-            }
-        }
         if close < 0 -> next
         last := close - 1
         if last > open && tokens[last].kind == TOKEN_COMMA -> last -= 1
