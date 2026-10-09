@@ -1,0 +1,32 @@
+// Production parser/load/sema/layout/MIR path; no preconstructed output facts.
+fn output_query_require(ok: Bool, detail: String) Never! {
+    if !ok -> panic("OutputQuery: {detail}")
+}
+fn output_query_request(source: String, triple: String) -> JetDriverCompileRequest {
+    snapshot :: JetDriverAuthorizedSourceSnapshot{roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{canonical_path: "/output-query", identity: "output-root", allow_hardlinks: false, files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: "/output-query/run.jet", relative_path: "run.jet", identity: "output-source", source: source}}, foreign_cache_files: []}}, entry_root_identity: "output-root", entry_path: "/output-query/run.jet"}
+    request := jet_cli_driver_request(snapshot, [], Val(1), JetDriverCompileMode.Doc)
+    request.host_facts.target_triple = Val(triple)
+    request.schema_snapshots = Val([String:SchemaSnapshot]{})
+    request
+}
+fn run() {
+    source :: "APP :: Output.Executable{{name: \"demo\", entry: start}}\nstruct Shape {{ pointer: Usize, number: Int }}\nfn start() {{}}"
+    loop triple in ["x86_64-unknown-linux-gnu", "i686-unknown-linux-gnu"] {
+        result :: jet_driver_output_query(output_query_request(source, triple), None)
+        output_query_require(result.compile.complete && result.compile.internal_problem == None, "checked producer completes")
+        output_query_require(result.outputs.len() == 1 && result.outputs[0].selected, "sole output selected by sema")
+        output :: result.outputs[0]
+        output_query_require(output.address == "APP" && output.source_name == "start" && output.semantic_name == "start" && output.lowered_name == "__jet_start", "checked callable identity retained without renaming")
+        output_query_require(output.failure_contract == .InferredNever(Type.Named{name: "Unit"}), "post-body failure inference retained")
+        output_query_require(result.compile.entry_function != None && result.compile.emitted_source == None, "selected MIR root; no emission or execution")
+        output_query_require(result.layouts.len() > 0 && result.target_triple == triple, "canonical layout rows for selected target")
+        layout :: result.target_layout ?? panic("OutputQuery: missing target layout")
+        output_query_require(layout.pointer_size == (if triple.starts_with("i686") -> 4 else -> 8), "layout never assumes host pointer width")
+    }
+    choices :: "APP :: Output.Executable{{name: \"one\", entry: first}}\nALT :: Output.Service{{name: \"two\", entry: second}}\nfn first() {{}}\nfn second() {{}}"
+    explicit :: jet_driver_output_query(output_query_request(choices, "x86_64-unknown-linux-gnu"), Val("ALT"))
+    output_query_require(explicit.compile.complete && explicit.outputs.filter(output -> output.selected).map(output -> output.address) == ["ALT"], "explicit service address selects exact checked callable")
+    malformed :: jet_driver_output_query(output_query_request("APP :: Output.Executable{{name: \"demo\", entry: \"start\"}}\nfn run() {{}}", "x86_64-unknown-linux-gnu"), None)
+    output_query_require(!malformed.compile.complete && malformed.outputs.len() == 0 && malformed.layouts.len() == 0, "invalid output cannot publish usable facts")
+    output_query_require(malformed.compile.diagnostics.filter(diagnostic -> diagnostic.code == "E1321").len() == 1, "canonical output diagnostic")
+}

@@ -518,5 +518,27 @@ macro_rules! jet_http_client_bridge {
         fn jet_http_client_request_send(req: JetHTTPRequest) -> Result<JetHTTPResponse, JetHTTPError> {
             native_http_request(req)
         }
+
+        fn native_http_build_resolve(host: &String, port: i64) -> Result<Vec<Vec<u8>>, String> {
+            $bridge::jet_http_build_resolve_impl(host, port)
+        }
+        fn native_http_build_get(
+            host: &String, authority: &String, target: &String, secure: bool,
+            addresses: &Vec<Vec<u8>>, port: i64, timeout_ms: i64, limit: i64,
+        ) -> Result<Vec<Vec<u8>>, String> {
+            $bridge::jet_http_build_get_impl(host, authority, target, secure, addresses, port, timeout_ms, limit)
+        }
     };
+}
+
+// Concrete signatures outside the bridge macro are intentional: the canonical
+// C-ABI generator reads these same kernels, for native selected execution.
+fn jet_http_build_resolve(host: &String, port: i64) -> Result<Vec<Vec<u8>>, String> {
+    native_http_build_resolve(host, port)
+}
+fn jet_http_build_get(
+    host: &String, authority: &String, target: &String, secure: bool,
+    addresses: &Vec<Vec<u8>>, port: i64, timeout_ms: i64, limit: i64,
+) -> Result<Vec<Vec<u8>>, String> {
+    native_http_build_get(host, authority, target, secure, addresses, port, timeout_ms, limit)
 }

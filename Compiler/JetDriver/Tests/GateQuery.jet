@@ -1,0 +1,53 @@
+// Assemble with the production Compiler source unit, replacing CLI Entry.
+fn gate_query_require(ok: Bool, detail: String) Never! {
+    if !ok -> panic("GateQuery: {detail}")
+}
+fn gate_query_external(source: String) -> GateEntry Never! {
+    GateEntry{kind: GateKind.TrustGrant, domain: "security", scope: "trust", source: source, span: None, subject: "fixture", reason: None, status: Val("recorded"), detail: "host grant", provenance: [source], operations: []}
+}
+fn gate_query_request(source: String, policy: String?) -> JetDriverCompileRequest {
+    files := [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: "/gates/run.jet", relative_path: "run.jet", identity: "gates-run", source: source}}
+    if policy == .Val(value) -> &files.push(JetDriverAuthorizedSourceFile{path: "/gates/package.jet", relative_path: "package.jet", identity: "gates-package", source: "name: \"gates\"\npolicy: {{ {value} }}\n"})
+    &files.push(JetDriverAuthorizedSourceFile{path: "/gates/helper.jet", relative_path: "helper.jet", identity: "gates-helper", source: "fn helper() {{ undefined_helper() }}"})
+    JetDriverCompileRequest{
+        authorized_sources: JetDriverAuthorizedSourceSnapshot{roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{canonical_path: "/gates", identity: "gates-root", allow_hardlinks: false, files: files, foreign_cache_files: []}}, entry_root_identity: "gates-root", entry_path: "/gates/run.jet"},
+        canonical_effect_source: "", core_sources: [], host_facts: JetDriverHostFacts{target_triple: None, active_os: None, compiler_identity: None}, eval_config: jet_eval_default_config(), target: JetDriverCompileTarget.Native, record_store: None, trace_sink: None, mir_lint_every_pass: false, compiler_threads: compiler_threads_single(),
+    }
+}
+fn run() {
+    request := gate_query_request("use \"helper\"\nfn run() {{ #Unsafe(\"audited fixture\") {{ }} undefined_call() }}", None)
+    request.gate_set = GateSet{build_flag: true}
+    request.external_gate_entries = [gate_query_external("/gates/trust")]
+    result :: jet_driver_gate_query(request)
+    gate_query_require(result.complete && result.diagnostics.len() == 0, "undefined bodies are never checked")
+    names :: result.source.names ?? panic("GateQuery: missing loader ledger")
+    gate_query_require(names.facts.modules.len() == 2 && names.facts.structure_facts.len() == 1, "canonical load module and import facts retained")
+    gate_query_require(name_ledger_declaration(names, result.source.entry_module_index, "run") != None, "declarations share the existing sema name writer")
+    unsafe_count := 0
+    trust_count := 0
+    build_count := 0
+    loop row in result.ledger.rows {
+        if row.kind == GateKind.Unsafe -> unsafe_count += 1
+        if row.kind == GateKind.TrustGrant -> trust_count += 1
+        if row.kind == GateKind.BuildFlag -> build_count += 1
+    }
+    gate_query_require(unsafe_count == 1 && trust_count == 1 && build_count == 1, "source/external/invocation writers collected once")
+    refused :: jet_driver_gate_query(gate_query_request("fn run() {{ #Unsafe(\"fixture\") {{ }} undefined_call() }}", Val("unsafe: .Deny")))
+    gate_query_require(!refused.complete && refused.ledger.rows.len() > 0, "package unsafe policy retained without body checking")
+    found := false
+    loop diagnostic in refused.diagnostics {
+        if diagnostic.code == "E2960" {
+            gate_query_require(diagnostic.source_path == Val("/gates/run.jet"), "physical diagnostic provenance")
+            found = true
+        }
+        gate_query_require(diagnostic.code != "E0102", "no undefined-call diagnostic in load-only seam")
+    }
+    gate_query_require(found, "package ceiling diagnosed by existing unsafe writer")
+    external := gate_query_request("fn run() {{ undefined_call() }}", None)
+    external.external_gate_entries = [gate_query_external("trust store")]
+    external.gate_policies = [JetDriverGatePolicy{package_identity: (jet_driver_source_query(external)).modules[0].package_identity, declarations: [PolicyDeclaration{key: PolicyKey.TrustGrant, value: PolicyValue.Forbid, scope: PolicyScope.Organization, span: Span{start: 0, end: 0}, target: None, source: "organization"}]}]
+    forbidden :: jet_driver_gate_query(external)
+    gate_query_require(!forbidden.complete && forbidden.diagnostics.len() == 1 && forbidden.diagnostics[0].code == "E3415", "external policy diagnostics use entry module fallback")
+    malformed :: jet_driver_gate_query(gate_query_request("fn run( {", None))
+    gate_query_require(!malformed.complete && malformed.diagnostics.len() > 0 && malformed.ledger.rows.len() == 0, "load failure prevents projection")
+}

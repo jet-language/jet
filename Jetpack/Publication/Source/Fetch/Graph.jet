@@ -1,0 +1,170 @@
+// Full package graph policy (Source/Fetch.rs), independent of CLI dispatch.
+struct PackageFetchOptions {
+    locked: Bool{false}
+    update: Bool{false}
+    update_dep: String?{None}
+    resolution: PublicationResolveMode{.Conservative}
+}
+#Error
+struct PackageFetchError { diagnostic: Diagnostic }
+struct PackageFetchResult {
+    lock: LockFile
+    directories: [String: String]
+}
+struct PackageFetchNode {
+    package: LockedPackage
+    directory: String
+}
+struct PackageFetchVersion {
+    version: String
+    chain: [String]
+}
+struct PackageFetchResolver {
+    root: String
+    previous: LockFile?
+    options: PackageFetchOptions
+    policy: PackagePolicy
+    nodes: [String: PackageFetchNode]
+    versions: [String: PackageFetchVersion]
+    visiting: [String]
+    registry_plan: [String: PublicationIndexEntry]
+    update_scope: [String]
+    foreign: [String: ForeignRealization]
+    advisory_loaded: Bool
+    advisory: PublicationAdvisoryPolicy?
+}
+fn pkg_fetch_error(code: String, what: String, why: String, fix: String) -> PackageFetchError Never! {
+    PackageFetchError{diagnostic: diagnostic_from_registry(code, None, what, why, fix)}
+}
+fn pkg_fetch_registry_error(name: String, detail: String) -> PackageFetchError Never! {
+    pkg_fetch_error("E1207", "registry dependency `{name}` cannot be resolved: {detail}", "registry package identity is source-backed and must be verified before it enters the lock", "restore the trusted immutable registry checkpoint and artifact, then run `jet fetch`")
+}
+fn pkg_fetch_lock_error(error: LockError) -> PackageFetchError Never! {
+    if error == .Reported(diagnostic) -> return PackageFetchError{diagnostic: diagnostic}
+    pkg_fetch_error("E1206", error.message(), "the project lock must retain exact package facts", "run `jet fetch` and commit `.jet/lock`")
+}
+fn pkg_fetch_load_manifest(directory: String, name: String) -[FS, Env]> Manifest PackageFetchError! {
+    found :: pkg_manifest_load(directory) ?? return Err(PackageFetchError{diagnostic: err.diagnostic})
+    found ?? return Err(pkg_fetch_error("E1206", "dependency `{name}` has no `{PACKAGE_FILE}`", "every Jet package must have a manifest", "add `{PACKAGE_FILE}` to `{directory}`"))
+}
+fn pkg_fetch_closure(lock: LockFile, target: String) -> [String] Never! {
+    seen := [String]{}
+    pending := [String]{target}
+    loop pending.len() > 0 {
+        name :: &pending.pop() ?? break
+        if seen.contains(name) -> next
+        &seen.push(name)
+        if lock.find_package(name) == .Val(package) {
+            loop dependency in package.dependencies -> &pending.push(dependency)
+        }
+    }
+    &seen.sort()
+    seen
+}
+fn pkg_fetch_update_scope(previous: LockFile?, options: PackageFetchOptions) -> [String] Never! {
+    if !options.update -> return [String]{}
+    if options.update_dep == .Val(target) {
+        scope := if previous == .Val(lock) -> pkg_fetch_closure(lock, target) else -> [String]{}
+        if !scope.contains(target) -> &scope.push(target)
+        return scope
+    }
+    if previous == .Val(lock) -> return loop package in lock.packages -> package.name
+    [String]{}
+}
+fn pkg_fetch_update_requested(resolver: PackageFetchResolver, name: String) -> Bool Never! {
+    resolver.options.update && (resolver.options.update_dep == None || resolver.update_scope.contains(name))
+}
+fn pkg_fetch_previous_package(resolver: PackageFetchResolver, name: String) -> LockedPackage? Never! {
+    lock :: resolver.previous ?? return None
+    lock.find_package(name)
+}
+fn pkg_fetch_registry_config(resolver: PackageFetchResolver, name: String) -[Env]> PublicationRegistryConfig Never! {
+    if !pkg_fetch_update_requested(resolver, name) {
+        if pkg_fetch_previous_package(resolver, name) == .Val(package) {
+            if package.source == .Registry(registry, _, _, _, repository, _, tier, _) {
+                parsed :: publication_parse_tier(tier) ?? PublicationRegistryTier.Core
+                return PublicationRegistryConfig{name: registry, url: repository, mirror: false, require_signed: parsed == .Community, tier: parsed}
+            }
+        }
+    }
+    publication_resolve_publish_registry()
+}
+fn pkg_fetch_check_version(name: String, previous: PackageFetchVersion, version: String, chain: [String]) PackageFetchError! {
+    if previous.version != version {
+        return Err(PackageFetchError{diagnostic: pkg_lock_e1201(name, previous.version, previous.chain, version, chain)})
+    }
+}
+fn pkg_fetch_record_version(resolver: &PackageFetchResolver, name: String, version: String, chain: [String]) PackageFetchError! {
+    if resolver.versions.get(name) == .Val(previous) {
+        pkg_fetch_check_version(name, previous, version, chain)
+    } else {
+        resolver.versions[name] = PackageFetchVersion{version: version, chain: chain}
+    }
+}
+fn pkg_fetch_existing_provenance(resolver: PackageFetchResolver, name: String, version: String, hash: String) -> DependencyProvenance? Never! {
+    package :: pkg_fetch_previous_package(resolver, name) ?? return None
+    if package.version != version || package.provenance_report().integrity.value != hash -> return None
+    package.provenance
+}
+fn pkg_fetch_resolve(verification: &StoreVerification, roots: HangarRoots, context: ProviderCtx, resolver: &PackageFetchResolver, name: String, spec: DepSpec, parent: String, chain: [String]) PackageFetchError! -[FS, Env, Exec, Net, Time, Time.Wait]> {
+    if resolver.nodes.get(name) == .Val(existing) {
+        if resolver.versions.get(name) == .Val(previous) -> pkg_fetch_check_version(name, previous, existing.package.version, chain)
+        return
+    }
+    if resolver.visiting.contains(name) -> return Err(pkg_fetch_error("E1207", "dependency graph contains a cycle at `{name}`", chain.join(" -> "), "remove the recursive package dependency"))
+    &resolver.visiting.push(name)
+    node :: if spec == {
+        .Path(path) -> {
+            absolute :: if path.starts_with("/") -> pkg_fetch_normalize_path(path) else -> pkg_fetch_normalize_path(files.join(parent, path))
+            if parent != resolver.root {
+                if path.starts_with("/") || !(absolute == parent || absolute.starts_with("{parent}/")) -> return Err(pkg_fetch_error("E1206", "path dependency `{name}` escapes its parent package", "the path `{path}` resolves outside `{parent}`", "use a relative path below the declaring package directory"))
+                resolved :: files.canonicalize(absolute) ?? return Err(pkg_fetch_error("E1206", "path dependency `{name}` escapes its parent package", "{err}", "use a relative path below the declaring package directory"))
+                canonical_parent :: files.canonicalize(parent) ?? return Err(pkg_fetch_error("E1206", "could not retain parent package", "{err}", "restore the declaring source directory"))
+                if !(resolved == canonical_parent || resolved.starts_with("{canonical_parent}/")) -> return Err(pkg_fetch_error("E1206", "path dependency `{name}` escapes its parent package", "canonical source is outside the declaring package", "use a relative path below the declaring package directory"))
+            }
+            snapshot :: pkg_source_snapshot_tree(absolute) ?? return Err(PackageFetchError{diagnostic: err.diagnostic})
+            result :: pkg_fetch_source_node(&verification, roots, context, &resolver, name, LockSource.Path(path), None, snapshot, chain)
+            close(^snapshot)
+            result ?? return Err(err)
+        }
+        .Git(url, selector) -> pkg_fetch_git_node(&verification, roots, context, &resolver, name, url, selector, chain)
+        .Registry(requirement) -> pkg_fetch_registry_node(&verification, roots, context, &resolver, name, requirement, chain)
+        .Foreign(language, reference) -> {
+            realization :: resolver.foreign.get(name) ?? return Err(pkg_fetch_error("E1256", "foreign dependency `{name}` has no valid provider projection", "the provider projection was not produced for this dependency", "provide the pinned hash-verified artifact and generated binding"))
+            if realization.language != language || realization.reference != reference -> return Err(pkg_fetch_error("E1256", "foreign dependency `{name}` has no valid provider projection", "provider identity disagrees with package.jet", "regenerate the pinned provider projection"))
+            pkg_fetch_record_version(&resolver, name, realization.entry.version, chain)
+            entry :: realization.entry
+            PackageFetchNode{package: LockedPackage{name: name, version: entry.version, source: .Foreign(language, reference, entry.out), fingerprint: entry.envelope.output_hash, content_hash: Val(entry.envelope.output_hash), envelope: Val(LockEnvelope{output_hash: entry.envelope.output_hash, platform: entry.envelope.platform, signature: entry.envelope.signature, provenance: entry.envelope.provenance}), receipt: if entry.receipt == "" -> None else -> Val(entry.receipt)}, directory: entry.out}
+        }
+    }
+    resolver.nodes[name] = node
+    _ :: &resolver.visiting.pop()
+}
+fn pkg_fetch_source_node(verification: &StoreVerification, roots: HangarRoots, context: ProviderCtx, resolver: &PackageFetchResolver, name: String, source: LockSource, revision: LockedRevision?, snapshot: PackageSourceSnapshot, chain: [String]) -[FS, Env, Exec, Net, Time, Time.Wait]> PackageFetchNode PackageFetchError! {
+    manifest :: pkg_fetch_load_manifest(snapshot.path(), name)
+    pkg_fetch_record_version(&resolver, manifest.package.name, manifest.package.version, chain)
+    dependencies :: pkg_lock_manifest_dependency_names(manifest)
+    fingerprints := [String]{}
+    loop child in dependencies {
+        child_chain := chain
+        &child_chain.push(child)
+        pkg_fetch_resolve(&verification, roots, context, &resolver, child, manifest.dependencies[child], snapshot.path(), child_chain)
+        &fingerprints.push(resolver.nodes[child].package.fingerprint)
+    }
+    fingerprint :: pkg_lock_compute_fingerprint(snapshot.content_hash, fingerprints, pkg_project_capability_digest(snapshot.path()))
+    installed :: pkg_source_store_ensure(name, manifest.package.version, fingerprint, snapshot.directory) ?? return Err(PackageFetchError{diagnostic: err.diagnostic})
+    pkg_source_store_verify(name, installed.path, snapshot.content_hash) ?? return Err(PackageFetchError{diagnostic: err.diagnostic})
+    pkg_source_store_link_into_project(installed.path, files.join(files.join(resolver.root, ".jet/build/deps"), name)) ?? return Err(PackageFetchError{diagnostic: err.diagnostic})
+    Ok(PackageFetchNode{package: LockedPackage{name: name, version: manifest.package.version, source: source, locked: revision, fingerprint: fingerprint, content_hash: Val(installed.content_hash), dependencies: dependencies, provenance: pkg_fetch_existing_provenance(resolver, name, manifest.package.version, installed.content_hash)}, directory: installed.path})
+}
+// Lexical path normalization precedes the separate held/canonical checks.
+fn pkg_fetch_normalize_path(path: String) -> String Never! {
+    parts := [String]{}
+    loop part in path.split("/") {
+        if part == "" || part == "." -> next
+        if part == ".." && parts.len() > 0 && parts[parts.len() - 1] != ".." {
+            _ :: &parts.pop()
+        } else if part != ".." || !path.starts_with("/") -> &parts.push(part)
+    }
+    if path.starts_with("/") -> "/{parts.join("/")}" else -> parts.join("/")
+}

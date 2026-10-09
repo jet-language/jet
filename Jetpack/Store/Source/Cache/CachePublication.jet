@@ -35,7 +35,7 @@ pub struct CacheTransferReport {
     pub bytes: Int
 
     // `jet.status/v1` for a cache transfer operation.
-    fn json(self, operation: String) -> String Never! {
+    fn json(self, operation: String) -> String ReportError! {
         fields :: StatusFields.new().with("operation", DataTree.Text(operation)).with("role", DataTree.Text(self.role)).with("mirror", DataTree.Text(self.mirror)).with("entry", DataTree.Text(self.entry)).with("output_hash", DataTree.Text(self.output_hash)).with("nar_hash", DataTree.Text(self.nar_hash)).with("signed_fingerprint", DataTree.Text(self.signed_fingerprint)).with("builder", DataTree.Text(self.builder)).with("provenance", DataTree.Text(self.provenance)).with("witness", report_optional_text(self.witness)).with("receipt_version", report_optional_int(self.receipt_version)).with("receipt_expires_unix", report_optional_int(self.receipt_expires_unix)).with("credential_provider", report_optional_text(self.credential_provider)).with("bytes", DataTree.Int(self.bytes))
         StatusEnvelope.new(operation, true).with_fields(fields).json()
     }
@@ -48,7 +48,7 @@ pub struct CacheStageReport {
     pub entries: Int
     pub bytes: Int
 
-    fn json(self, operation: String) -> String Never! {
+    fn json(self, operation: String) -> String ReportError! {
         fields :: StatusFields.new().with("operation", DataTree.Text(operation)).with("role", DataTree.Text(self.role)).with("destination", DataTree.Text(self.destination)).with("entries", DataTree.Int(self.entries)).with("bytes", DataTree.Int(self.bytes))
         StatusEnvelope.new(operation, true).with_fields(fields).json()
     }
@@ -640,9 +640,9 @@ pub fn store_cache_admissions_for_explain(roots: HangarRoots, entry: StoreEntry)
     Ok(admissions)
 }
 
-fn store_cache_verify_hangar_endpoint(verification: &StoreVerification, roots: HangarRoots, endpoint: CacheEndpoint, entry: StoreEntry) -> [U8]? StoreError! {
+fn store_cache_fingerprint_for_key(key: TrustKey) -> String Never! {
     "{key.key_id}:{key.algorithm}"
-    if store_try_entry_output_hash(&verification, roots, entry) != entry.envelope.output_hash {
+}
 
 fn store_cache_fingerprint_for_info(info: NarInfo) -> String Never! {
     parts := [String]{}
@@ -650,19 +650,16 @@ fn store_cache_fingerprint_for_info(info: NarInfo) -> String Never! {
     parts.join(",")
 }
 
-fn store_cache_substitute_hangar_endpoint(verification: &StoreVerification, roots: HangarRoots, endpoint: CacheEndpoint, entry: StoreEntry, destination: String) -> [U8]? StoreError! {
-// decode as a canonical NAR.
-    nar :: store_cache_copy_hangar_output(&verification, roots, entry, destination) ?? {
+// Signed NAR size/hash verification precedes structural NAR validation.
+fn store_cache_verify_artifact_bytes(info: NarInfo, nar: [U8]) StoreError! {
     if info.file_size != nar.len() || info.nar_size != nar.len() || !store_nar_hash_matches(info.nar_hash, nar) {
         return Err(StoreError.InvalidData("NAR bytes do not match signed FileSize, NarSize, or NarHash"))
     }
     store_validate_nar(nar)
 }
 
-fn store_cache_copy_hangar_output(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry, destination: String) -> [U8] StoreError! {
-    if store_try_entry_output_hash(&verification, roots, entry) != entry.envelope.output_hash {
-// a different digest over the materialized output tree. Decode only into a
-// private staging path, then remove it on every path.
+// NAR validity/digest prove transport; the Hangar envelope proves the output
+// tree. Decode only into a private staging path and remove it on every path.
 fn store_cache_verify_decoded_output_hash(roots: HangarRoots, expected: StoreEntry, nar: [U8]) StoreError! {
     store_cache_validate_component(expected.id, "cache entry id")
     staging :: files.join(files.join(files.join(roots.root, "cache"), "verify"), "{expected.id}-{store_archive_unique_suffix()}")
@@ -1015,9 +1012,9 @@ fn store_cache_publish_endpoint(endpoint: CacheEndpoint, info: NarInfo, nar: [U8
 }
 
 // The Hangar endpoint verifies the live output and serves its NAR.
-fn store_cache_verify_hangar_endpoint(roots: HangarRoots, endpoint: CacheEndpoint, entry: StoreEntry) -> [U8]? StoreError! {
+fn store_cache_verify_hangar_endpoint(verification: &StoreVerification, roots: HangarRoots, endpoint: CacheEndpoint, entry: StoreEntry) -> [U8]? StoreError! {
     if !endpoint.is_hangar() -> return Ok(None)
-    if store_try_entry_output_hash(roots, entry) != entry.envelope.output_hash {
+    if store_try_entry_output_hash(&verification, roots, entry) != entry.envelope.output_hash {
         return Err(StoreError.InvalidData("local Hangar output hash disagrees with its identity"))
     }
     Ok(Val(store_write_nar(entry.out).bytes))
@@ -1025,17 +1022,17 @@ fn store_cache_verify_hangar_endpoint(roots: HangarRoots, endpoint: CacheEndpoin
 
 // The Hangar endpoint copies the live output to `destination`, seals and
 // re-hashes it, and serves its NAR; a failure removes the copy.
-fn store_cache_substitute_hangar_endpoint(roots: HangarRoots, endpoint: CacheEndpoint, entry: StoreEntry, destination: String) -> [U8]? StoreError! {
+fn store_cache_substitute_hangar_endpoint(verification: &StoreVerification, roots: HangarRoots, endpoint: CacheEndpoint, entry: StoreEntry, destination: String) -> [U8]? StoreError! {
     if !endpoint.is_hangar() -> return Ok(None)
-    nar :: store_cache_copy_hangar_output(roots, entry, destination) ?? {
+    nar :: store_cache_copy_hangar_output(&verification, roots, entry, destination) ?? {
         store_cache_remove_tree(destination).drop("the failed copy may not have created the destination")
         return Err(err)
     }
     Ok(Val(nar))
 }
 
-fn store_cache_copy_hangar_output(roots: HangarRoots, entry: StoreEntry, destination: String) -> [U8] StoreError! {
-    if store_try_entry_output_hash(roots, entry) != entry.envelope.output_hash {
+fn store_cache_copy_hangar_output(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry, destination: String) -> [U8] StoreError! {
+    if store_try_entry_output_hash(&verification, roots, entry) != entry.envelope.output_hash {
         return Err(StoreError.InvalidData("local Hangar output hash disagrees with its identity"))
     }
     store_cache_copy_tree(entry.out, destination)

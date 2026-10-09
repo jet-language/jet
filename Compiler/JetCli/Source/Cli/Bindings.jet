@@ -78,7 +78,7 @@ fn jet_cli_data_bind_prepare(format: String, args: [String], color: Bool) -[FS]>
 }
 
 // selected_root is canonical for a default output and unused for explicit -o.
-fn jet_cli_data_bind_finish(job: JetCLIDataBindJob, selected_root: String) -[FS]> JetCLIPlan Never! {
+fn jet_cli_data_bind_finish(job: JetCLIDataBindJob, selected_root: String) -[FS, Env, Time.Wait]> JetCLIPlan Never! {
     format :: job.format
     input_path :: job.input_path
     output :: job.output
@@ -102,27 +102,24 @@ fn jet_cli_data_bind_finish(job: JetCLIDataBindJob, selected_root: String) -[FS]
     }
     result :: pkg_generate_data(format, input_path, job.input, root_type, command.join(" ")) ?? return jet_cli_fail("E3208", "Could not generate {format} bindings from {input_path}.", "{err.message}.", "provide a well-formed {format} schema and rerun `jet inspect bind {format}`.", color, JET_DRIVER_EXIT_USER_ERROR)
     if output == .None {
-        if binding_files.read(output_path) == {
-            .Ok(existing) -> {
-                if jet_cli_binding_generated_command(result.source) != jet_cli_binding_generated_command(existing) {
-                    return jet_cli_fail("E2104", "the default {format} binding output `{output_path}` is already in use", "sanitizing `{input_path}` produces the same output name as an existing binding", "rerun with `-o <different-output>` to choose an explicit path", color, JET_DRIVER_EXIT_USER_ERROR)
-                }
-            }
-            .Err(error) -> {
-                if error == {
-                    .NotFound(_) -> {}
-                    else -> {
-                        return jet_cli_data_bind_io_error(format, output_path, "inspect", "the existing output could not be checked ({error})", color)
-                    }
-                }
+        held :: JetCLIRootedDirectory.open(selected_root, [String]{".jet", "bindings"}, true) ?? return jet_cli_data_bind_io_error(format, output_path, "create", err.message, color)
+        owner :: held.lock("binding output") ?? return jet_cli_data_bind_io_error(format, output_path, "write", err.message, color)
+        name :: jet_cli_file_name(output_path)
+        prior :: held.read(name, Int.MAX) ?? return jet_cli_data_bind_io_error(format, output_path, "inspect", err.message, color)
+        if prior == .Val(bytes) {
+            existing :: String.from_bytes(bytes) ?? return jet_cli_data_bind_io_error(format, output_path, "inspect", "the existing output is not UTF-8", color)
+            if jet_cli_binding_generated_command(result.source) != jet_cli_binding_generated_command(existing) {
+                return jet_cli_fail("E2104", "the default {format} binding output `{output_path}` is already in use", "sanitizing `{input_path}` produces the same output name as an existing binding", "rerun with `-o <different-output>` to choose an explicit path", color, JET_DRIVER_EXIT_USER_ERROR)
             }
         }
+        held.replace(name, result.source.bytes(), None) ?? return jet_cli_data_bind_io_error(format, output_path, "write", err.message, color)
+    } else {
+        parent :: jet_cli_parent(output_path) ?? ""
+        if parent != "" {
+            binding_files.create_dir_all(parent) ?? return jet_cli_data_bind_io_error(format, output_path, "create", "could not create output directory {parent} ({err})", color)
+        }
+        binding_files.write(output_path, result.source) ?? return jet_cli_data_bind_io_error(format, output_path, "write", "could not write {output_path} ({err})", color)
     }
-    parent :: jet_cli_parent(output_path) ?? ""
-    if parent != "" {
-        binding_files.create_dir_all(parent) ?? return jet_cli_data_bind_io_error(format, output_path, "create", "could not create output directory {parent} ({err})", color)
-    }
-    binding_files.write(output_path, result.source) ?? return jet_cli_data_bind_io_error(format, output_path, "write", "could not write {output_path} ({err})", color)
     plural :: if result.record_count == 1 -> "" else -> "s"
     jet_cli_done("bound {result.record_count} {format} record{plural} from {input_path} → {output_path}\n", "", JET_DRIVER_EXIT_OK)
 }

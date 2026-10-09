@@ -1,0 +1,47 @@
+// Real existing pin/lock writer; no transport or pin resolution mock.
+struct JetCLIPinFixtureRoot { path: String }
+impl JetCLIPinFixtureRoot.Close {
+    fn close(^self) -[FS]> {
+        cli_files.remove_all(self.path).drop("test project cleanup")
+    }
+}
+
+#Test("update jet preserves exact human status and locked version") {
+    root :: cli_files.tmpdir("jet-cli-pin-") ?? panic("temporary pin project")
+    owner :: JetCLIPinFixtureRoot{path: root}
+    defer close(^owner)
+    output :: jet_cli_update_jet_pin(root, Val("0.4"), "0.4.2", false, false, false)
+    assert_eq(output.stdout, "")
+    assert_eq(output.stderr, "jet: pinned toolchain 0.4 → 0.4.0 (locked in .jet/lock)\n")
+    assert_eq(output.exit_code, JET_DRIVER_EXIT_OK)
+    locked :: trust_pin_locked_toolchain(root) ?? panic("real locked toolchain")
+    assert_eq(locked.channel, "0.4")
+    assert_eq(locked.version, "0.4.0")
+}
+
+#Test("update jet suppresses human status in machine and quiet modes") {
+    root :: cli_files.tmpdir("jet-cli-pin-modes-") ?? panic("temporary pin project")
+    owner :: JetCLIPinFixtureRoot{path: root}
+    defer close(^owner)
+    modes :: [(json: Bool, quiet: Bool)]{(json: true, quiet: false), (json: false, quiet: true), (json: true, quiet: true)}
+    loop mode in modes {
+        output :: jet_cli_update_jet_pin(root, Val("0.4.2"), "0.4.2", false, mode.json, mode.quiet)
+        assert_eq(output.stdout, "")
+        assert_eq(output.stderr, "")
+        assert_eq(output.exit_code, JET_DRIVER_EXIT_OK)
+        locked :: trust_pin_locked_toolchain(root) ?? panic("real locked toolchain")
+        assert_eq(locked.channel, "0.4.2")
+        assert_eq(locked.version, "0.4.2")
+    }
+}
+
+#Test("update jet pin diagnostics remain exact stderr in machine quiet mode") {
+    root :: cli_files.tmpdir("jet-cli-pin-invalid-") ?? panic("temporary pin project")
+    owner :: JetCLIPinFixtureRoot{path: root}
+    defer close(^owner)
+    output :: jet_cli_update_jet_pin(root, Val("1"), "0.4.2", false, true, true)
+    assert_eq(output.stdout, "")
+    assert_eq(output.stderr, "Error [E1249]: `1` is not a valid toolchain pin\n Why: the `jet:` field pins which Jet toolchain builds this project — its value is a channel ref, not a version range.\n Fix: write a channel: `jet: 0.4` (track the 0.4 series), `jet: 0.4.2` (exact), or a named channel like `jet: main`.\nMore: jet-lang.dev/e/E1249\n")
+    assert_eq(output.exit_code, JET_DRIVER_EXIT_USER_ERROR)
+    assert(!cli_files.exists(cli_files.join(root, ".jet/lock")))
+}

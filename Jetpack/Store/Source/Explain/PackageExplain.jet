@@ -377,7 +377,7 @@ pub struct PackageExplain {
     pub reports: [ExplainReport]
 
     // The `jet.status/v1` `explain` object; any conflict makes `ok` false.
-    fn to_json(self) -> String Never! {
+    fn to_json(self) -> String ReportError! {
         conflicted := false
         reports := [DataTree]{}
         loop report in self.reports {
@@ -508,7 +508,8 @@ fn store_explain_empty_dash(value: String) -> String Never! {
 // records. None means neither a realized entry nor a recorded build attempt
 // exists for the query. The read-only listing preserves damaged state long
 // enough to report the missing proof instead of replaying recovery.
-pub fn store_explain_package(roots: HangarRoots, query: String, lens: ExplainLens) -> PackageExplain? StoreError! {
+// Lifecycle and output proof use the caller's operation-scoped verifier.
+pub fn store_explain_package(verification: &StoreVerification, roots: HangarRoots, query: String, lens: ExplainLens) -> PackageExplain? StoreError! {
     entries :: store_list_read_only(roots)
     found :: store_explain_find_entry(entries, query)
     entry :: found ?? return store_explain_without_entry(roots, query, lens)
@@ -535,8 +536,8 @@ pub fn store_explain_package(roots: HangarRoots, query: String, lens: ExplainLen
         .None -> {}
     }
     graph_view :: store_explain_graph_projection(entries, entry, graph, &reports)
-    liveness :: store_explain_liveness_projection(roots, entry, graph, &reports)
-    rebuild :: store_explain_rebuild_projection(roots, entry, graph, provider, receipt_ok, &reports)
+    liveness :: store_explain_liveness_projection(&verification, roots, entry, graph, &reports)
+    rebuild :: store_explain_rebuild_projection(&verification, roots, entry, graph, provider, receipt_ok, &reports)
     Ok(Val(PackageExplain{schema: REPORT_SCHEMA, query: query, lens: lens.label(), entry: Val(store_explain_entry_projection(entry)), provider: provider, graph: graph_view, liveness: liveness, rebuild: rebuild, reports: reports}))
 }
 
@@ -683,14 +684,14 @@ fn store_explain_receipt_projection(roots: HangarRoots, entry: StoreEntry, graph
 // between the facts, the producer, and the entry reported.
 fn store_explain_provider_projection(entry: StoreEntry, reports: &[ExplainReport]) -> ExplainProvider? Never! {
     producer :: if ProducerRecord.decode(entry.producer_record) == {
-fn store_explain_liveness_projection(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry, graph: ClosureGraph?, reports: &[ExplainReport]) -> ExplainLiveness Never! {
+        .Ok(decoded) -> decoded
         .Err(error) -> {
             &reports.push(ExplainReport.loss("producer provenance is unavailable: {error.message()}"))
             return None
         }
     }
     facts := ProviderFacts?{None}
-    if store_lifecycle_snapshot(&verification, roots) == {
+    if producer.facts.get("provider-facts") == {
         .Val(raw) -> {
             if ProviderFacts.from_json(raw) == {
                 .Ok(decoded) -> {
@@ -807,7 +808,7 @@ fn store_explain_locked_provider_facts(entry: StoreEntry, reports: &[ExplainRepo
             store_explain_report_provider_validation(facts, "locked", &reports)
         }
         identity_ok := true
-fn store_explain_rebuild_projection(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry, graph: ClosureGraph?, provider: ExplainProvider?, receipt_ok: Bool, reports: &[ExplainReport]) -> ExplainRebuild Never! {
+        if record.future_fields.get("provider-facts-digest") == {
             .Val(expected) -> {
                 actual :: facts.digest()
                 if matches_entry && expected != actual {
@@ -830,7 +831,7 @@ fn store_explain_rebuild_projection(verification: &StoreVerification, roots: Han
                 identity_ok = false
                 &reports.push(ExplainReport.conflict("locked provider identity hash disagrees for {record.identity.exact}: {record.identity.hash} vs {facts.digest()}"))
             }
-        if store_try_entry_output_hash(&verification, roots, entry) == {
+        }
         valid :: if facts.validate() == {
             .Ok(_) -> true
             else -> false
@@ -967,14 +968,14 @@ fn store_explain_owner_label(entries: [StoreEntry], record: ClosureRecord) -> St
 
 // Why the entry is live: the nearest project lock naming it, and every
 // active lifecycle root protecting it or its closure.
-fn store_explain_liveness_projection(roots: HangarRoots, entry: StoreEntry, graph: ClosureGraph?, reports: &[ExplainReport]) -> ExplainLiveness Never! {
+fn store_explain_liveness_projection(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry, graph: ClosureGraph?, reports: &[ExplainReport]) -> ExplainLiveness Never! {
     reasons := [ExplainRoot]{}
     if store_explain_project_lock_matches(entry, &reports) {
         lock :: store_explain_nearest_lock()
         id :: lock ?? "nearest-project-lock"
         &reasons.push(ExplainRoot{kind: "project-lock", id: id, producer: "jetpack.lock", phase: "committed", label: "current project lock", reference: entry.reference, targets: [String]{entry.envelope.output_hash}, reason: "`{id}` names or hashes this package"})
     }
-    if store_lifecycle_snapshot(roots) == {
+    if store_lifecycle_snapshot(&verification, roots) == {
         .Ok(snapshot) -> {
             now :: LifecycleTimestamp.from_unix_seconds(store_broker_now_secs())
             root_ids :: snapshot.roots.keys().to_list()
@@ -1091,7 +1092,7 @@ fn store_explain_provider_is_usable(provider: ExplainProvider) -> Bool Never! {
 
 // Whether the stored output, its digest, the closure action record, the
 // producer provenance, and the receipt still support the realized result.
-fn store_explain_rebuild_projection(roots: HangarRoots, entry: StoreEntry, graph: ClosureGraph?, provider: ExplainProvider?, receipt_ok: Bool, reports: &[ExplainReport]) -> ExplainRebuild Never! {
+fn store_explain_rebuild_projection(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry, graph: ClosureGraph?, provider: ExplainProvider?, receipt_ok: Bool, reports: &[ExplainReport]) -> ExplainRebuild Never! {
     checks := [String: String]{}
     provider_usable :: if provider == {
         .Val(found) -> store_explain_provider_is_usable(found)
@@ -1114,7 +1115,7 @@ fn store_explain_rebuild_projection(roots: HangarRoots, entry: StoreEntry, graph
     // Some(true) matches, Some(false) mismatches, None unverifiable.
     output_digest := Bool?{None}
     if output_exists {
-        if store_try_entry_output_hash(roots, entry) == {
+        if store_try_entry_output_hash(&verification, roots, entry) == {
             .Ok(actual) -> {
                 if actual == entry.envelope.output_hash {
                     checks["output_digest"] = "matches"

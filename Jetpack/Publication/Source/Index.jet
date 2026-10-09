@@ -206,7 +206,7 @@ fn publication_index_atomic_replace(repo: String, path: String, bytes: [U8]) IOE
     info :: files.stat(parent)
     if info.is_symlink || !info.is_dir -> return Err(IOError.InvalidData(publication_index_context(parent, "registry index parent is not a real directory")))
     relative :: files.relative(path, repo)
-    foundation_write_file_nofollow_at_root(repo, relative, bytes, None)
+    foundation_write_file_nofollow_at_root(repo, relative, bytes, None) ?? return Err(err.error)
 }
 
 pub fn publication_write_index_entry(repo: String, entry: PublicationIndexEntry) IOError! -[FS, Env, Time]> {
@@ -258,7 +258,9 @@ pub fn publication_mark_yanked(repo: String, name: String, version: String) -[FS
                 entry.yanked = true
                 found = true
                 &output.push(publication_index_to_jsonl(entry))
-            } else -> &output.push(line)
+            } else {
+                &output.push(line)
+            }
         }
         if found {
             // A final empty item gives join the Rust trailing newline without another copy.

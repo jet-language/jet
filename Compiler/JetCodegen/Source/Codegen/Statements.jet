@@ -3527,7 +3527,7 @@ fn jet_codegen_stability_expr(state: &JetCodegenLetStability, expression: TExpr,
         // receiver is moved (jet_codegen_lower_builtin_receiver).
         .BuiltinMethod(receiver, operation, args) -> {
             jet_codegen_stability_values(&state, args)
-            jet_codegen_stability_expr(&state, receiver, jet_codegen_stability_receiver(jet_codegen_builtin_mutates_receiver(operation) || jet_codegen_builtin_iter_receiver(receiver.ty)))
+            jet_codegen_stability_expr(&state, receiver, jet_codegen_stability_receiver(tir_builtin_mutates_receiver(operation) || jet_codegen_builtin_iter_receiver(receiver.ty)))
         }
         .ClosureMethod(receiver, operation, args) -> {
             jet_codegen_stability_values(&state, args)

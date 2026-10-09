@@ -1,6 +1,6 @@
 // Source/CmdTest.rs: recorded observations use Foundation's sole verdict
-// engine. This leaf exposes the record and binding to the receipt host before
-// rendering; receipt/evidence persistence remains the existing host seam.
+// engine. ComparisonHistory publishes canonical evidence and receipt records
+// without allowing an optional history error to change the comparison verdict.
 use core.files as comparison_files
 use jet_foundation.[ComparisonRecord, ComparisonSample, ComparisonIdentity, ComparisonObservation, ComparisonStatus, ObservationRelation, testing_compare_samples_with_discarded, comparison_status_as_str, observation_relation_as_str, foundation_parse_protocol_json, foundation_json_quote]
 use jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
@@ -285,4 +285,17 @@ fn jet_cli_comparison_read(target: String, args: [String], json: Bool) -[FS]> Je
 
 fn jet_cli_comparison_output(run: JetCLIComparisonRun, json: Bool) -> JetDriverVerbOutput Never! {
     JetDriverVerbOutput{stdout: jet_cli_comparison_render(run.record, json), stderr: "", exit_code: if run.record.status == ComparisonStatus.Matched -> JET_DRIVER_EXIT_OK else -> JET_DRIVER_EXIT_USER_ERROR}
+}
+
+pub fn jet_cli_comparison_run(target: String, argv: [String], json: Bool, terminal: [U8]) -[FS, Env, Time]> JetDriverVerbOutput Never! {
+    if jet_cli_comparison_read(target, argv, json) == {
+        .Failed(output) -> output
+        .Ready(run) -> {
+            output := jet_cli_comparison_output(run, json)
+            if jet_cli_comparison_persist(run, target, argv, terminal) == .Err(error) {
+                output.stderr = jet_cli_comparison_history_notice(error)
+            }
+            output
+        }
+    }
 }

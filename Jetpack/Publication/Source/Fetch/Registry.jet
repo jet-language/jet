@@ -1,0 +1,182 @@
+fn pkg_fetch_registry_edges(manifest: Manifest, metadata: PublicationRegistryPackageMetadata?, name: String) -> [PublicationRegistryDependency] PackageFetchError! {
+    if metadata == .Val(record) {
+        loop child in pkg_lock_manifest_dependency_names(manifest) {
+            if manifest.dependencies[child] == .Registry(_) && !record.contains_dependency(child) -> return Err(pkg_fetch_registry_error(name, "registry.json omits declared dependency `{child}`"))
+        }
+        return Ok(record.active_dependencies())
+    }
+    out := [PublicationRegistryDependency]{}
+    loop child in pkg_lock_manifest_dependency_names(manifest) {
+        if manifest.dependencies[child] == .Registry(requirement) -> &out.push(PublicationRegistryDependency{name: child, requirements: [String]{requirement}, roles: [String]{"normal"}, prefer: [String]{}, reject: [String]{}, strict: false, enabled_by_default: true})
+    }
+    Ok(out)
+}
+fn pkg_fetch_requirement(name: String, raw: String) -> PublicationVersionReq PackageFetchError! {
+    publication_parse_version_req(raw) ?? return Err(pkg_fetch_registry_error(name, "invalid version requirement `{raw}`"))
+}
+fn pkg_fetch_registry_plan(resolver: PackageFetchResolver, manifest: Manifest) -[FS, Env, Exec, Net, Time, Time.Wait]> [String: PublicationIndexEntry] PackageFetchError! {
+    constraints := [PublicationVersionConstraint]{}
+    direct := [String]{}
+    pending := [String]{}
+    owners := [String: [String]]{}
+    loop name in pkg_lock_manifest_dependency_names(manifest) {
+        if manifest.dependencies[name] == .Registry(raw) {
+            &constraints.push(PublicationVersionConstraint{package: name, req: pkg_fetch_requirement(name, raw), from: "{manifest.package.name} (root)"})
+            &direct.push(name)
+            &pending.push(name)
+            owners[name] = [String]{manifest.package.name}
+        }
+    }
+    candidates := [String: [PublicationSolverCandidate]]{}
+    entries := [String: [PublicationIndexEntry]]{}
+    visited := [String]{}
+    loop pending.len() > 0 {
+        &pending.sort()
+        name :: pending[0]
+        pending = pending[1..<pending.len()]
+        if visited.contains(name) -> next
+        &visited.push(name)
+        registry :: pkg_fetch_registry_config(resolver, name)
+        available :: publication_resolve_and_verify_all(registry, name) ?? return Err(PackageFetchError{diagnostic: err.diagnostic})
+        previous :: pkg_fetch_previous_package(resolver, name)
+        locked :: if !pkg_fetch_update_requested(resolver, name) && previous == .Val(package) -> Val(package.version) else -> None
+        choices := [PublicationSolverCandidate]{}
+        indexed := [PublicationIndexEntry]{}
+        loop entry in available.entries {
+            if entry.yanked && locked != Val(entry.version) -> next
+            version :: publication_parse_semver(entry.version) ?? return Err(pkg_fetch_registry_error(name, "registry entry has invalid SemVer `{entry.version}`"))
+            snapshot :: publication_snapshot_verified_artifact(publication_index_repo_path(registry), entry) ?? return Err(pkg_fetch_registry_error(name, "published artifact is unavailable or corrupt: {err}"))
+            dep_manifest :: pkg_fetch_load_manifest(snapshot.path(), name)
+            if dep_manifest.package.name != name || dep_manifest.package.version != entry.version -> return Err(pkg_fetch_registry_error(name, "published source metadata disagrees with its registry index entry"))
+            metadata :: publication_read_registry_package_metadata(snapshot.path(), name, entry.version) ?? return Err(pkg_fetch_registry_error(name, "registry dependency metadata is invalid: {err}"))
+            edges :: pkg_fetch_registry_edges(dep_manifest, metadata, name)
+            _ :: publication_authorize_package_candidate(resolver.policy, name, entry.version, dep_manifest.package.license, registry.name) ?? return Err(PackageFetchError{diagnostic: publication_package_policy_edge_diagnostic((owners.get(name) ?? [String]{manifest.package.name}).join(" | "), "{name}#{entry.version}", registry.name, err)})
+            dependencies := [PublicationVersionConstraint]{}
+            rejected := [String: [PublicationSemVer]]{}
+            preferred := [String: [PublicationVersionReq]]{}
+            strict := [String]{}
+            loop edge in edges {
+                loop raw in edge.requirements -> &dependencies.push(PublicationVersionConstraint{package: edge.name, req: pkg_fetch_requirement(edge.name, raw), from: "{name} {entry.version} ({edge.roles.join(",")})"})
+                preferences := [PublicationVersionReq]{}
+                loop raw in edge.prefer -> &preferences.push(pkg_fetch_requirement(edge.name, raw))
+                preferred[edge.name] = preferences
+                rejects := [PublicationSemVer]{}
+                loop raw in edge.reject -> &rejects.push(publication_parse_semver(raw) ?? return Err(pkg_fetch_registry_error(edge.name, "registry dependency has an invalid reject version")))
+                rejected[edge.name] = rejects
+                if edge.strict -> &strict.push(edge.name)
+                if !pending.contains(edge.name) && !visited.contains(edge.name) -> &pending.push(edge.name)
+                bucket := owners.get(edge.name) ?? [String]{}
+                &bucket.push("{name}#{entry.version}")
+                owners[edge.name] = bucket
+            }
+            close(^snapshot)
+            &indexed.push(entry)
+            &choices.push(PublicationSolverCandidate{version: version, dependencies: dependencies, rejected: rejected, preferred: preferred, strict: strict})
+        }
+        candidates[name] = choices
+        entries[name] = indexed
+    }
+    locked := [String: String]{}
+    if resolver.previous == .Val(lock) {
+        loop package in lock.packages {
+            if package.source == .Registry(_, _, _, _, _, _, _, _) -> locked[package.name] = package.version
+        }
+    }
+    selected :: publication_solve_registry(constraints, candidates, locked, resolver.update_scope, resolver.options.resolution, direct) ?? return Err(PackageFetchError{diagnostic: err.diagnostic})
+    plan := [String: PublicationIndexEntry]{}
+    loop name in selected.keys() {
+        loop entry in entries[name] {
+            parsed :: publication_parse_semver(entry.version)
+            wanted :: Val(selected[name])
+            if parsed == wanted {
+                plan[name] = entry
+                break
+            }
+        }
+        if !plan.has_key(name) -> return Err(pkg_fetch_registry_error(name, "resolver selected a candidate with no immutable index entry"))
+    }
+    Ok(plan)
+}
+fn pkg_fetch_registry_node(verification: &StoreVerification, roots: HangarRoots, context: ProviderCtx, resolver: &PackageFetchResolver, name: String, raw_requirement: String, chain: [String]) -[FS, Env, Exec, Net, Time, Time.Wait]> PackageFetchNode PackageFetchError! {
+    registry :: pkg_fetch_registry_config(resolver, name)
+    selected := PublicationIndexEntry?{resolver.registry_plan.get(name)}
+    if selected == None {
+        available :: publication_resolve_and_verify_all(registry, name) ?? return Err(PackageFetchError{diagnostic: err.diagnostic})
+        requirement :: pkg_fetch_requirement(name, raw_requirement)
+        previous :: pkg_fetch_previous_package(resolver, name)
+        if !pkg_fetch_update_requested(resolver, name) && resolver.options.resolution == .Conservative && previous == .Val(package) {
+            loop entry in available.entries {
+                if entry.version == package.version && publication_parse_semver(entry.version) == .Val(version) && publication_matches(requirement, version) -> selected = Val(entry)
+            }
+        }
+        if selected == None {
+            versions := [PublicationSemVer]{}
+            loop entry in available.entries {
+                if !entry.yanked && publication_parse_semver(entry.version) == .Val(version) && publication_matches(requirement, version) -> &versions.push(version)
+            }
+            mode :: if resolver.options.resolution == .LowestDirect && chain.len() > 2 -> PublicationResolveMode.Latest else -> resolver.options.resolution
+            version :: publication_select_compatible(name, [PublicationVersionConstraint]{PublicationVersionConstraint{package: name, req: requirement, from: chain.join(" -> ")}}, versions, mode) ?? return Err(PackageFetchError{diagnostic: err.diagnostic})
+            loop entry in available.entries { if publication_parse_semver(entry.version) == Val(version) -> selected = Val(entry) }
+        }
+    }
+    entry :: selected ?? return Err(pkg_fetch_registry_error(name, "no published version satisfies `{raw_requirement}`"))
+    requirement :: pkg_fetch_requirement(name, raw_requirement)
+    version :: publication_parse_semver(entry.version) ?? return Err(pkg_fetch_registry_error(name, "invalid selected SemVer"))
+    if !publication_matches(requirement, version) -> return Err(pkg_fetch_registry_error(name, "selected graph version does not satisfy `{raw_requirement}`"))
+    reused :: !pkg_fetch_update_requested(resolver, name) && pkg_fetch_previous_package(resolver, name) == .Val(previous) && previous.version == entry.version
+    exception :: publication_active_source_exception(resolver.policy.exceptions, name, entry.version)
+    if !reused {
+        if !resolver.advisory_loaded {
+            resolver.advisory = publication_load_advisory_policy(resolver.root) ?? return Err(PackageFetchError{diagnostic: err.diagnostic})
+            resolver.advisory_loaded = true
+        }
+        if resolver.advisory == .Val(policy) -> publication_authorize_registry_candidate_with_source_exception(policy, name, entry.version, exception) ?? return Err(PackageFetchError{diagnostic: err.diagnostic})
+    }
+    snapshot :: publication_snapshot_verified_artifact(publication_index_repo_path(registry), entry) ?? return Err(pkg_fetch_registry_error(name, "published artifact is unavailable or corrupt: {err}"))
+    manifest :: pkg_fetch_load_manifest(snapshot.path(), name)
+    if manifest.package.name != name || manifest.package.version != entry.version -> return Err(pkg_fetch_registry_error(name, "published source metadata disagrees with its registry index entry"))
+    metadata :: publication_read_registry_package_metadata(snapshot.path(), name, entry.version) ?? return Err(pkg_fetch_registry_error(name, "invalid dependency metadata: {err}"))
+    edges :: pkg_fetch_registry_edges(manifest, metadata, name)
+    receipt :: publication_authorize_package_candidate(resolver.policy, name, entry.version, manifest.package.license, registry.name) ?? return Err(PackageFetchError{diagnostic: publication_package_policy_edge_diagnostic(chain.join(" -> "), "{name}#{entry.version}", registry.name, err)})
+    if entry.content_hash == "" || entry.fingerprint == "" -> return Err(pkg_fetch_registry_error(name, "published registry metadata has no complete source identity"))
+    pkg_fetch_record_version(&resolver, name, entry.version, chain)
+    specs := manifest.dependencies
+    if metadata == .Val(record) {
+        loop child in pkg_lock_manifest_dependency_names(manifest) {
+            if manifest.dependencies[child] == .Registry(_) && record.contains_dependency(child) -> &specs.remove(child)
+        }
+    }
+    loop edge in edges -> specs[edge.name] = DepSpec.Registry(if edge.requirements.len() > 0 -> edge.requirements[0] else -> "*")
+    dependencies := specs.keys().to_list()
+    &dependencies.sort()
+    fingerprints := [String]{}
+    references := [String]{}
+    loop child in dependencies {
+        child_chain := chain
+        &child_chain.push(child)
+        pkg_fetch_resolve(&verification, roots, context, &resolver, child, specs[child], snapshot.path(), child_chain)
+        node :: resolver.nodes[child]
+        &fingerprints.push(node.package.fingerprint)
+        if node.package.source == .Registry(_, _, _, _, _, _, _, _) {
+            output :: pkg_try_output_hash_of(node.directory) ?? return Err(pkg_fetch_registry_error(child, err.message()))
+            &references.push(output)
+        }
+    }
+    fingerprint :: pkg_lock_compute_fingerprint(entry.content_hash, fingerprints, pkg_project_capability_digest(snapshot.path()))
+    installed :: pkg_fetch_registry_ingest(&verification, roots, resolver, registry, entry, snapshot.path(), references, if reused -> None else -> resolver.advisory, receipt, exception)
+    close(^snapshot)
+    if publication_registry_artifact_hash(installed.out) != .Ok(entry.content_hash) -> return Err(pkg_fetch_registry_error(name, "stored registry artifact failed its content hash"))
+    pkg_source_store_link_into_project(installed.out, files.join(files.join(resolver.root, ".jet/build/deps"), name)) ?? return Err(PackageFetchError{diagnostic: err.diagnostic})
+    provenance := pkg_fetch_existing_provenance(resolver, name, entry.version, entry.content_hash) ?? DependencyProvenance.empty()
+    if entry.public_key != "" && entry.signature != "" -> provenance.publisher = Val("ed25519:{entry.public_key}")
+    Ok(PackageFetchNode{package: LockedPackage{name: name, version: entry.version, source: .Registry(registry.name, "{entry.name}#{entry.version}", installed.out, entry.content_hash, registry.url, "jet-registry-index", publication_tier_label(entry.tier), publication_gate_summary(entry.gate_status)), fingerprint: fingerprint, content_hash: Val(entry.content_hash), dependencies: dependencies, provenance: if provenance.transparency != None || provenance.publisher != None || provenance.build != None -> Val(provenance) else -> None}, directory: installed.out})
+}
+fn pkg_fetch_registry_ingest(verification: &StoreVerification, roots: HangarRoots, resolver: PackageFetchResolver, registry: PublicationRegistryConfig, entry: PublicationIndexEntry, artifact: String, references: [String], advisory: PublicationAdvisoryPolicy?, receipt: PublicationPackagePolicyReceipt, exception: PackagePolicyException?) -[FS, Env, Time]> StoreEntry PackageFetchError! {
+    evidence :: "subject={entry.content_hash};sbom=verified;signature-binding=verified;provenance=verified;reproducibility=verified"
+    provenance := "registry={registry.name};repository={publication_redact_registry_url(registry.url)};package={entry.name}#{entry.version};source-hash={entry.content_hash};fingerprint={entry.fingerprint};publisher={entry.public_key};index-signature={entry.signature};oci-referrers={evidence};package-policy={publication_policy_receipt_summary(receipt)}"
+    if exception == .Val(value) -> provenance = "{provenance};source-policy-exception={value.summary()}"
+    if advisory == .Val(policy) -> provenance = "{provenance};advisory-feed=sequence={policy.receipt.sequence},digest={policy.receipt.digest},key={policy.receipt.key_id},maturity={policy.receipt.maturity_seconds}s"
+    request :: IngestRequest{name: entry.name, version: entry.version, reference: "registry:{registry.name}:{entry.name}#{entry.version}", cache_identity: CacheIdentity{source_fingerprint: entry.content_hash, recipe_fingerprint: entry.fingerprint, policy_fingerprint: receipt.fingerprint, platform: pkg_host_platform()}, references: references, outputs: [String: String]{"out": artifact}, signature: "", provenance: provenance, platform_artifact_kind: ""}
+    ingested :: store_ingest_tree(&verification, roots, request) ?? return Err(pkg_fetch_registry_error(entry.name, err.what()))
+    Ok(ingested.entry)
+}

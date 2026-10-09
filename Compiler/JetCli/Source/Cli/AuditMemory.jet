@@ -178,14 +178,12 @@ fn jet_cli_memory_fail(detail: String, color: Bool, json: Bool) -> JetCLIPlan Ne
     jet_cli_done("", diagnostic_render_all("", "", [Diagnostic]{diagnostic}, color), JET_DRIVER_EXIT_USER_ERROR)
 }
 
-pub fn jet_cli_audit_memory(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
+pub fn jet_cli_audit_memory_at(root: String, args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
     loop argument in args {
         if !argument.starts_with("-") {
             return jet_cli_memory_fail("unexpected audit memory argument `{argument}`", color, json)
         }
     }
-    cwd :: cli_files.cwd() ?? "."
-    root :: jet_cli_inspect_package_root(cwd) ?? cwd
     path :: cli_sys.get("JET_MEMORY_LEDGER") ?? "{root}/.jet/memory/ledger-v1.jsonl"
     rows :: jet_cli_memory_read(path) ?? return jet_cli_memory_fail(err.message, color, json)
     if json {

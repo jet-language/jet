@@ -389,6 +389,16 @@ tiers. `jet cache prune --to <size>` performs an explicit LRU prune, while
 implement filesystem or eviction rules themselves. `jet self doctor` reads the
 same status and reports one artifact-store row.
 
+Source-store Git launches retain their held directory descriptors in the existing
+`ProcessSpec` carrier. Descriptor copies are placed above every requested child
+slot before fork; the child performs only `dup2` and `fchdir`, without reopening
+source paths, allocating, or taking locks. An attached held cwd supersedes the
+lexical cwd; launches without that attachment keep the ordinary cwd behavior.
+The descriptor and attachment rows carry `Int` descriptor/errno facts and the
+existing `ProcessSpec` type, with read-convention inputs. Their named-field type
+projection is not a native-ABI proof: each adapter must also preserve the mapping
+between canonical semantic fields and the kernel's physical tuple slots.
+
 Package-to-JetOS projection stays on this split. jet-pkg-model reads the
 canonical Package outputs and computes the semantic graph identity.
 jet-env-model::ModuleEval::project_package_outputs lowers System and Fleet
@@ -405,8 +415,12 @@ any generation files are published.
 Package splits and folds use the same checked graph and one reversible journal.
 The journal is published before a multi-file mutation, so a stale, corrupt, or
 partially applied transition fails closed and `jet fold` can restore only the
-recorded before/after states. Atomic file publication and the package lock
-protect live bytes from concurrent writers and path escapes.
+recorded before/after states. Journal file states contain the original bytes as
+hex, not content digests; an absent file and an empty file remain distinct.
+Atomic file publication and the package lock protect live bytes from concurrent
+writers and path escapes.
+Host extraction keeps the checked System Output intact and binds the sole-host
+Fleet to that System's name, not to its output-map key.
 
 Environment OCI projection follows the same split. `jet-env-model` owns the
 pure `ImagePlan`; `jetpack::Image` is the one deterministic OCI realization

@@ -1,5 +1,6 @@
 // Canonical lowering for closed TIR builtin-method operations.
 use jet_foundation.[
+    tir_builtin_mutates_receiver,
     Effect,
     MIRAccess,
     MIRCallArg,
@@ -789,7 +790,7 @@ fn jet_codegen_lower_builtin_method(builder: &JetCodegenBuilder, program: JetCod
         else -> {}
     }
     route := jet_codegen_builtin_route_plan(operation, receiver.ty, expression.ty, jet_codegen_failure_carrier_for_type(expression.ty))
-    mutating := jet_codegen_builtin_mutates_receiver(operation)
+    mutating := tir_builtin_mutates_receiver(operation)
     if operation == {
         .AtomicMethod(_) -> {
             mutating = false

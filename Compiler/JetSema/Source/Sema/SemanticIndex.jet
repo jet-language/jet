@@ -1651,7 +1651,11 @@ pub fn sema_compiler_semantic_index_from_checked(registration: SemaRegistrationG
         }
         loop constant in registered_module.constants {
             if constant.declaration.resolved_output == .Val(output) {
-                &outputs.push(sema_compiler_index_output_value(output, constant.declaration, registered_module, registration))
+                solved := output
+                loop fact in graph.outputs {
+                    if fact.address == output.address && fact.module_id == output.module_id && fact.reference == output.reference { solved = fact; break }
+                }
+                &outputs.push(sema_compiler_index_output_value(solved, constant.declaration, registered_module, registration))
             }
         }
         graph_facts := sema_state_graph_facts(registered_module.program.items)

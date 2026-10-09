@@ -1,0 +1,29 @@
+// Canonical compiler edit seam consumed by CLI fix and LSP. Transactions
+// publish this result through their held-root provider, not through the driver.
+fn fix_require(ok: Bool, detail: String) Never! {
+    if !ok -> panic("FixEngine: {detail}")
+}
+fn run() Never! {
+    unchanged :: jet_driver_apply_edits("abc", [TextEdit]{}) ?? panic("empty edits")
+    fix_require(unchanged == "abc", "empty edits preserve bytes")
+    inserted :: jet_driver_apply_edits("abc", [TextEdit]{
+        TextEdit{span: Span{start: 1, end: 1}, new_text: "first"},
+        TextEdit{span: Span{start: 1, end: 1}, new_text: "second"},
+    }) ?? panic("same-point inserts")
+    fix_require(inserted == "afirstsecondbc", "stable insertion order")
+    replaced :: jet_driver_apply_edits("héllo", [TextEdit]{
+        TextEdit{span: Span{start: 5, end: 6}, new_text: "!"},
+        TextEdit{span: Span{start: 1, end: 3}, new_text: "e"},
+    }) ?? panic("ordered UTF-8 replacement")
+    fix_require(replaced == "hell!", "original UTF-8 byte spans, source order")
+    clamped :: jet_driver_apply_edits("abc", [TextEdit]{TextEdit{span: Span{start: 10, end: 20}, new_text: "!"}}) ?? panic("clamped edit")
+    fix_require(clamped == "abc!", "out-of-bounds insertion clamps once")
+    overlap := false
+    if jet_driver_apply_edits("abc", [TextEdit]{
+        TextEdit{span: Span{start: 10, end: 20}, new_text: "first"},
+        TextEdit{span: Span{start: 15, end: 25}, new_text: "second"},
+    }) == .Err(.Overlap(first, second)) {
+        overlap = first == Span{start: 10, end: 20} && second == Span{start: 15, end: 25}
+    }
+    fix_require(overlap, "overlap rejected before bounds clamping")
+}

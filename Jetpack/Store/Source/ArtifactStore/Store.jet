@@ -239,10 +239,22 @@ pub struct ArtifactStore {
             }
             else -> {}
         }
-        lock :: self.acquire_lock()
+        lock :: self.acquire_lock() ?? return Err(err)
         defer close(^lock)
         store_artifact_atomic_write(pointer, object.text().bytes())
         Ok(object)
+    }
+
+    // The last-run pointer belongs to the selected workspace, not the cache.
+    fn publish_last_build_record(self, workspace_root: String, key: String, record: BuildRecord) -[FS, Env, Exec, Time, Rand, Time.Wait]> ObjectHandle ArtifactStoreError! {
+        object :: self.publish_build_record(key, record)
+        store_build_write_last_run(workspace_root, record.program, key)
+        Ok(object)
+    }
+
+    fn last_build_record(self, workspace_root: String, program: String) -[FS, Env, Exec, Time, Rand, Time.Wait]> BuildRecord? ArtifactStoreError! {
+        key :: store_build_last_run(workspace_root, program) ?? return Ok(None)
+        self.build_record(key)
     }
 
     // Load an immutable build record addressed by its content key.
@@ -292,7 +304,7 @@ pub struct ArtifactStore {
         key :: ArtifactEntryKey.Action(action.key())
         encoded :: store_artifact_encode_action(action, record)
         self.ensure_layout()
-        lock :: self.acquire_lock()
+        lock :: self.acquire_lock() ?? return Err(err)
         defer close(^lock)
         if store_artifact_read_file(path) == {
             .Missing -> {}
@@ -385,7 +397,7 @@ pub struct ArtifactStore {
     // Pin `targets` from pruning until the returned lease is closed.
     fn acquire_artifact_lease(self, targets: [LeaseTarget]) -[FS, Env, Time, Rand]> ArtifactLease ArtifactStoreError! {
         self.ensure_layout()
-        lock :: self.acquire_lock()
+        lock :: self.acquire_lock() ?? return Err(err)
         defer close(^lock)
         directory :: files.join(self.root(), "leases")
         path :: files.join(directory, "lease-{self.owner_value.pid()}-{store_artifact_unique_token()}")
@@ -400,7 +412,7 @@ pub struct ArtifactStore {
 
     fn status(self) -[FS, Env, Exec, Time, Rand]> ArtifactStoreStatus ArtifactStoreError! {
         self.ensure_layout()
-        lock :: self.acquire_lock()
+        lock :: self.acquire_lock() ?? return Err(err)
         defer close(^lock)
         self.status_locked()
     }
@@ -424,7 +436,7 @@ pub struct ArtifactStore {
     // Persist or clear the stricter machine-level cap.
     fn set_host_limit(self, limit_bytes: Int?) ArtifactStoreError! -[FS, Env, Time, Rand]> {
         self.ensure_layout()
-        lock :: self.acquire_lock()
+        lock :: self.acquire_lock() ?? return Err(err)
         defer close(^lock)
         path :: self.host_limit_path()
         if limit_bytes == {
@@ -443,7 +455,7 @@ pub struct ArtifactStore {
 
     fn prune(self, target_bytes: Int?) -[FS, Env, Exec, Time, Rand]> ArtifactPruneReport ArtifactStoreError! {
         self.ensure_layout()
-        lock :: self.acquire_lock()
+        lock :: self.acquire_lock() ?? return Err(err)
         defer close(^lock)
         target :: if target_bytes == {
             .Val(bytes) -> bytes
@@ -545,7 +557,7 @@ pub struct ArtifactStore {
             .Missing -> Ok(ArtifactRestore.Missing)
             .Corrupt -> Ok(ArtifactRestore.Corrupt)
             .Hit(artifact) -> {
-                lease :: self.acquire_artifact_lease([LeaseTarget]{LeaseTarget.Action(artifact.action), LeaseTarget.Blob(artifact.object)})
+                lease :: self.acquire_artifact_lease([LeaseTarget]{LeaseTarget.Action(artifact.action), LeaseTarget.Blob(artifact.object)}) ?? return Err(err)
                 defer close(^lease)
                 bytes :: files.read_bytes(artifact.path)
                 store_artifact_atomic_write(destination, bytes)
@@ -557,7 +569,7 @@ pub struct ArtifactStore {
 
     fn publish_data(self, key: ArtifactEntryKey, path: String, bytes: [U8]) ArtifactStoreError! -[FS, Env, Exec, Time, Rand]> {
         self.ensure_layout()
-        lock :: self.acquire_lock()
+        lock :: self.acquire_lock() ?? return Err(err)
         defer close(^lock)
         if store_artifact_read_file(path) == {
             .Missing -> {}

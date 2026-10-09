@@ -1,0 +1,26 @@
+// The checked source bundle is the input of analytical TIR lowering. Capture
+// only the selected invocation's actual module/item order and source identities.
+use jet_foundation.[CanonicalPassJournal, CanonicalPassSnapshot, TFunc, canonical_pass_ast_item_kind, canonical_pass_requested, canonical_pass_record, canonical_pass_tir_snapshot, foundation_json_quote]
+use jet_sema.SemaRegistrationGraph
+
+fn jet_driver_journal_ast_snapshot(graph: SemaRegistrationGraph) -> CanonicalPassSnapshot Never! {
+    modules := [String]{}
+    identities := [String]{}
+    entry := -1
+    loop (index, module_row) in graph.modules {
+        if module_row.module_identity == graph.entry_module_identity -> entry = index
+        items := [String]{}
+        loop (item_index, item) in module_row.program.items -> &items.push("{{\"index\":{item_index},\"kind\":{foundation_json_quote(canonical_pass_ast_item_kind(item))}}}")
+        &modules.push("{{\"display\":{foundation_json_quote(module_row.module_path)},\"alias\":{foundation_json_quote(module_row.module_name)},\"source_length\":{module_row.source.len()},\"items\":[{items.join(",")}]}}")
+        &identities.push("{{\"display\":{foundation_json_quote(module_row.module_path)},\"items\":{module_row.program.items.len()}}}")
+    }
+    if entry < 0 -> panic("canonical checked-program journal lost its registered entry")
+    CanonicalPassSnapshot{representation: "ast", payload: "{{\"representation\":\"ast\",\"entry\":{entry},\"modules\":[{modules.join(",")}]}}", identity: "{{\"representation\":\"ast\",\"entry\":{entry},\"modules\":[{identities.join(",")}]}}"}
+}
+fn jet_driver_journal_checked_program(graph: SemaRegistrationGraph, functions: [TFunc], source_file: String, edition: String, journal: &CanonicalPassJournal) Never! {
+    operation :: "tir.lower-checked-program"
+    if !canonical_pass_requested(journal, operation) -> return
+    input :: jet_driver_journal_ast_snapshot(graph)
+    output :: canonical_pass_tir_snapshot(graph.package_identity, source_file, edition, functions)
+    canonical_pass_record(&journal, "lowering", operation, "crates/jet-codegen/src/Codegen/TIR/mod.rs", input, output, "preserve")
+}

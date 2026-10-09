@@ -5,9 +5,16 @@
 pub fn cli_status_error(theme: Theme, json_output: Bool, action: String, code: String, what: String, why: String, fix: String) -[IO, FS, Env, Time.Wait]> Int Never! {
     if json_output {
         report :: cli_diagnostic_report(code, what, why, fix)
-        term.stdout().write(StatusEnvelope.new(action, false).with_reports([ReportEnvelope]{report}).json_line()).drop("status output is best-effort")
+        line :: StatusEnvelope.new(action, false).with_reports([ReportEnvelope]{report}).json_line() ?? return cli_status_encoding_error(err)
+        term.stdout().write(line).drop("status output is best-effort")
     } else {
         theme.error_coded(code, what, why, fix)
     }
+    EXIT_USAGE
+}
+
+// A status envelope's wire encoder failed before any stdout was written.
+pub fn cli_status_encoding_error(error: ReportError) -[IO]> Int Never! {
+    eprint("status JSON: {error.message}")
     EXIT_USAGE
 }

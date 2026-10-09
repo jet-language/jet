@@ -183,7 +183,7 @@ pub fn publication_write_oci_file(path: String, bytes: [U8], label: String) IOEr
     if foundation_write_file_nofollow_at_root(parent, files.basename(path), bytes, None, FoundationPublicationPolicy{create: .CreateNew, create_root: true}) == {
         .Ok(_) -> {}
         .Err(error) -> {
-            publication_oci_reconcile_winner(authority, path, bytes, label, error)
+            publication_oci_reconcile_winner(authority, path, bytes, label, error.error)
         }
     }
 }

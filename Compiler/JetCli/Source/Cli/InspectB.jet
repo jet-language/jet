@@ -29,7 +29,7 @@ use jet_parser.[
 
 // `argv` is the normalized argv with its `--` tail (main.rs `raw`), `jet_argv`
 // the words before `--`, and `args` their positional words.
-pub fn jet_cli_inspect_b(argv: [String], command: String, jet_argv: [String], args: [String], color: Bool, quiet: Bool, json: Bool, threads: Int?) -[FS, Env]> JetCLIPlan? Never! {
+pub fn jet_cli_inspect_b(argv: [String], command: String, jet_argv: [String], args: [String], color: Bool, quiet: Bool, json: Bool, threads: Int?) -[FS, Env, Time.Wait]> JetCLIPlan? Never! {
     rest :: jet_cli_tail(argv, 1)
     if command == {
         "reserved" -> return Val(jet_cli_reserved(json))
@@ -679,6 +679,8 @@ fn jet_cli_io_error_text(failure: IOError) -> String Never! {
         .Closed(context) -> context.cause
         .Protocol(context) -> context.cause
         .Other(context) -> context.cause
+        .AlreadyExists(context) -> context.cause
+        .Unsupported(context) -> context.cause
         .ResourceLimit(_) -> String?{None}
     }
     if cause == .Val(text) -> return text
@@ -720,29 +722,18 @@ enum JetCLIInspectRoot {
     Refused(plan: JetCLIPlan)
 }
 
-// D-JPK-FILENAME2=B: retired manifest names that teach E1226 instead of the
-// generic missing-manifest line (Loader.rs `stale_manifest_name_message`).
-JET_CLI_RETIRED_MANIFESTS :: [String]{"pkg.jet", "pack.jet", "payload.jet", "jet.toml"}
-
-// main.rs `require_manifest_root`: the nearest `package.jet` root, else
-// `hint` on stderr (exit 1). Inline-package carriers and retired manifest
-// names (Loader.rs `find_inline_package_root_checked`,
-// `stale_manifest_name_message`) are not ported, so a directory that could
-// hold either is refused rather than guessed.
-fn jet_cli_inspect_project_root(command: String, hint: String, color: Bool) -[FS, Env]> JetCLIInspectRoot Never! {
-    cwd :: cli_files.cwd() ?? "."
-    if jet_cli_manifest_root(cwd) == .Val(root) -> return JetCLIInspectRoot.Root{path: root}
-    loop name in JET_CLI_RETIRED_MANIFESTS {
-        if cli_files.exists(jet_cli_authority_path(cwd, name)) -> return JetCLIInspectRoot.Refused{plan: jet_cli_not_ported(command, color)}
-    }
-    current := cwd
-    loop {
-        if cli_files.is_file(jet_cli_authority_path(current, "main.jet")) || cli_files.is_file(jet_cli_authority_path(current, "src/main.jet")) {
-            return JetCLIInspectRoot.Refused{plan: jet_cli_not_ported(command, color)}
+// main.rs `require_manifest_root`: use the same checked Package resolver as
+// compilation. A missing root keeps the command hint; stale-name teaching is
+// a direct, uncolored user error even in machine output mode.
+fn jet_cli_require_inspect_root(start: String, hint: String, color: Bool) -[FS, Env]> JetCLIInspectRoot Never! {
+    cache := WorkspaceDeclarationCache.new()
+    if jet_cli_find_package_root_checked(&cache, start) == {
+        .Ok(found) -> {
+            if found == .Val(root) -> return JetCLIInspectRoot.Root{path: root}
         }
-        current = jet_cli_parent(current) ?? break
-        if current == "/" -> break
+        .Err(error) -> return JetCLIInspectRoot.Refused{plan: JetCLIPlan.Diagnostics{file: JET_CLI_PACKAGE_FILE, source: "", report: error.diagnostic, color: color, notice: ""}}
     }
+    if jet_cli_find_stale_manifest(&cache, start) == .Val(report) -> return JetCLIInspectRoot.Refused{plan: jet_cli_done("", diagnostic_render_all("", "", [Diagnostic]{report}, false), JET_DRIVER_EXIT_USER_ERROR)}
     JetCLIInspectRoot.Refused{plan: jet_cli_done("", "{hint}\n", JET_DRIVER_EXIT_USER_ERROR)}
 }
 
@@ -818,13 +809,15 @@ fn jet_cli_semindex(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIP
 }
 
 // `jet inspect output <file.jet> [<address>]` (CmdInspect.rs `run_output`):
-// Output selection (`ResolvedOutput`, which JetSema does not fill yet) is
-// not ported.
+// the first non-flag word is the entry, the second an optional Output
+// address; the host selects the Output through the canonical query.
 fn jet_cli_inspect_output(args: [String], color: Bool, json: Bool) -> JetCLIPlan Never! {
-    if jet_cli_inspect_first_positional(args) == None {
+    positionals :: loop argument in args if !argument.starts_with("-") -> ~argument
+    if positionals.len() == 0 {
         return jet_cli_inspect_b_fail("E2104", "`jet inspect output` needs an entry file", "run `jet inspect output Examples/features/tooling/output_callable.jet`", color, json, JET_DRIVER_EXIT_USAGE)
     }
-    jet_cli_not_ported("inspect output", color)
+    address :: if positionals.len() > 1 -> Val(~positionals[1]) else -> None
+    JetCLIPlan.Output{file: ~positionals[0], address: address, color: color, json: json}
 }
 
 // `jet inspect expand [--facts <lens>] <file.jet>` (CmdExpand.rs
@@ -839,35 +832,25 @@ fn jet_cli_expand(args: [String], color: Bool, json: Bool, threads: Int?) -[FS, 
 }
 
 // `jet inspect schema status | squash --before <version>` (CmdSchema.rs
-// `run_schema`): the published-schema snapshots (Publish.rs) and the E0910
-// migration diff are not ported.
+// `run_schema`): the host reads the canonical snapshots and the project's
+// authorized load-only source (SchemaCommands.jet).
 fn jet_cli_schema(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
     fix :: "use `jet inspect schema status` to inspect published schemas, or `jet inspect schema squash --before <version>` to re-baseline them"
     verb :: if args.len() > 0 -> args[0] else -> ""
     hint :: "error: no package.jet found — run `jet inspect schema` inside a project"
     if verb == {
         "status" -> {
-            root := ""
-            if jet_cli_inspect_project_root("inspect schema status", hint, color) == {
-                .Root(path) -> root = path
+            if jet_cli_require_inspect_root(cli_files.cwd() ?? ".", hint, color) == {
+                .Root(path) -> return JetCLIPlan.Schema{action: "status", root: path, before: "", color: color, json: json}
                 .Refused(plan) -> return plan
             }
-            // Schema.rs `load_all_snapshots`: `<root>/.jet/cache/schema` (or
-            // `JET_SCHEMA_CACHE_DIR`). With no snapshot the report is fixed;
-            // reading snapshots and the E0910 pending diff are not ported.
-            cache :: cli_sys.get("JET_SCHEMA_CACHE_DIR") ?? jet_cli_authority_path(root, ".jet/cache/schema")
-            names :: cli_files.listdir(cache) ?? [String]{}
-            loop name in names {
-                if name.ends_with(".snapshot") -> return jet_cli_not_ported("inspect schema status", color)
-            }
-            return jet_cli_done("no published schemas yet.\nnote: a `#PublishedSchema` struct is snapshotted into .jet/cache/schema/ on `jet registry publish`.\n", "", JET_DRIVER_EXIT_OK)
         }
         "squash" -> {
-            if jet_cli_option_value(args, "--before") == None {
-                return jet_cli_inspect_b_report("E2104", "`jet inspect schema squash` needs `--before <version>`", "squash re-baselines to the current shape and marks migrations before a version as no longer required, so it needs that cutoff version", "run `jet inspect schema squash --before 2.0.0` (the version whose migrations you want to retire)", color, json, JET_DRIVER_EXIT_USER_ERROR)
+            before :: jet_cli_option_value(args, "--before") ?? return jet_cli_inspect_b_report("E2104", "`jet inspect schema squash` needs `--before <version>`", "squash re-baselines to the current shape and marks migrations before a version as no longer required, so it needs that cutoff version", "run `jet inspect schema squash --before 2.0.0` (the version whose migrations you want to retire)", color, json, JET_DRIVER_EXIT_USER_ERROR)
+            if jet_cli_require_inspect_root(cli_files.cwd() ?? ".", hint, color) == {
+                .Root(path) -> return JetCLIPlan.Schema{action: "squash", root: path, before: before, color: color, json: json}
+                .Refused(plan) -> return plan
             }
-            if jet_cli_inspect_project_root("inspect schema squash", hint, color) == .Refused(plan) -> return plan
-            return jet_cli_not_ported("inspect schema squash", color)
         }
         else -> {}
     }
@@ -904,32 +887,36 @@ fn jet_cli_codemod(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPl
 // right after `require_manifest_root` until D-FSDIR1 (#4697); the host port is
 // in commit bf658e410 (InspectB.jet).
 fn jet_cli_audit(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
-    if args.len() > 0 && args[0] == "memory" -> return jet_cli_audit_memory(jet_cli_tail(args, 1), color, json)
+    if args.len() > 0 && args[0] == "memory" -> return jet_cli_audit_memory_at(jet_cli_selected_root_or_cwd(), jet_cli_tail(args, 1), color, json)
     if args.len() > 0 && (args[0] == "copies" || args[0].ends_with(".jet")) -> return jet_cli_not_ported("inspect audit copies", color)
-    if jet_cli_inspect_project_root("inspect audit", "error: no package.jet found — run `jet inspect audit` inside a project", color) == .Refused(plan) -> return plan
+    if jet_cli_require_inspect_root(cli_files.cwd() ?? ".", "error: no package.jet found — run `jet inspect audit` inside a project", color) == .Refused(plan) -> return plan
     jet_cli_not_ported("inspect audit", color)
 }
 
 // `jet inspect sbom [--cyclonedx]` (CmdSupply.rs `run_sbom`): refused after
 // `require_manifest_root` for the same `package_input` reason as `audit`.
 fn jet_cli_sbom(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
-    if jet_cli_inspect_project_root("inspect sbom", "error: no package.jet found — run `jet inspect sbom` inside a project", color) == .Refused(plan) -> return plan
+    if jet_cli_require_inspect_root(cli_files.cwd() ?? ".", "error: no package.jet found — run `jet inspect sbom` inside a project", color) == .Refused(plan) -> return plan
     jet_cli_not_ported("inspect sbom", color)
 }
 
 // `jet inspect bind …` / `jet bind …` (CmdDevTools.rs `run_bind`): the usage
-// page, and the data-schema binders (`json|csv|sql|xml|proto`, Bindings.jet)
-// with an explicit `-o`. Their default output needs canonical
-// `Loader::selected_project_root` (workspace > repository > package), which
-// the bootstrap host does not have yet; the language binders and the C header
+// page, and the data-schema binders (`json|csv|sql|xml|proto`, Bindings.jet).
+// A default output lands under the selected project root of the input's
+// directory (lib.rs `build_project_root`); a root that cannot be selected is
+// its registered diagnostic, exit 1. The language binders and the C header
 // backend are not ported.
-fn jet_cli_bind(args: [String], color: Bool) -[FS]> JetCLIPlan Never! {
+fn jet_cli_bind(args: [String], color: Bool) -[FS, Env, Time.Wait]> JetCLIPlan Never! {
     if args.len() > 0 && (args[0] == "json" || args[0] == "csv" || args[0] == "sql" || args[0] == "xml" || args[0] == "proto") {
         if jet_cli_data_bind_prepare(args[0], jet_cli_tail(args, 1), color) == {
             .Done(plan) -> return plan
             .Prepared(job) -> {
                 if job.output != None -> return jet_cli_data_bind_finish(job, "")
-                return jet_cli_not_ported("inspect bind {job.format} <default output>", color)
+                cwd :: cli_files.cwd() ?? "."
+                absolute :: if job.input_path.starts_with("/") -> job.input_path else -> jet_cli_entry_join(cwd, job.input_path)
+                cache := WorkspaceDeclarationCache.new()
+                root :: jet_cli_selected_project_root(&cache, jet_cli_parent(absolute) ?? ".") ?? return jet_cli_done("", diagnostic_render_all(job.input_path, job.input, [Diagnostic]{err.diagnostic}, false), JET_DRIVER_EXIT_USER_ERROR)
+                return jet_cli_data_bind_finish(job, root)
             }
         }
     }

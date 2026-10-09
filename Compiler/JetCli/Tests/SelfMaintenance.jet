@@ -1,0 +1,17 @@
+// Assemble separately with the production CLI leaves; do not scan the checkout.
+fn maintenance_require(ok: Bool, label: String) Never! {
+    if !ok -> panic("self maintenance contract: {label}")
+}
+
+fn run() {
+    quoted :: "\"Examples/features/a.jet\" \"Docs/spec/b.md\" \"tests/ui/c.stderr\" \"tests/ui_lint/d.warn\" \"tests/cli/e.txt\" \"tests/release/f.snapshot\""
+    paths :: jet_cli_extract_fixture_paths(quoted)
+    maintenance_require(paths == [String]{"Examples/features/a.jet", "Docs/spec/b.md", "tests/ui/c.stderr", "tests/ui_lint/d.warn", "tests/cli/e.txt", "tests/release/f.snapshot"}, "all prefixes and extensions")
+    excluded :: "\"Examples/features/{name}.jet\" \"Examples/features/a{b.jet\" \"Examples/features/a.rs\" \"docs/spec/b.md\" render_diagnostics(\"tests/ui/shown.jet\" render_all_colored(\"tests/ui/shown.jet\" render_all_json(\"tests/ui/shown.jet\""
+    maintenance_require(jet_cli_extract_fixture_paths(excluded).len() == 0, "templates and display-only paths")
+    maintenance_require(jet_cli_extract_fixture_paths("\"tests/ui/a.jet\" \"tests/ui/a.jet\"").len() == 2, "duplicates count twice")
+    maintenance_require(jet_cli_extract_fixture_paths("\"tests/ui/a.jet") == [String]{"tests/ui/a.jet"}, "unterminated quote uses remainder")
+    maintenance_require(jet_cli_extract_fixture_paths("\"tests/ui/a.jet\\").len() == 0, "trailing escape past EOF")
+    maintenance_require(jet_cli_extract_fixture_paths("ééééééééééééééééééééééé\"tests/ui/a.jet\"") == [String]{"tests/ui/a.jet"}, "UTF8 preceding window")
+    maintenance_require(jet_cli_new_ui_source() == "// TODO: describe what this diagnostic demonstrates.\nfn run() {{\n    print(definitely_undefined_scaffold_symbol)\n}}\n", "exact diagnostic fixture source")
+}

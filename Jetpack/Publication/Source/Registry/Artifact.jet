@@ -1,0 +1,63 @@
+// Registry source objects use every visible regular file, including registry.json.
+// SourceStore's held tree hash has exactly this path/NUL/u64be/content wire form.
+fn publication_artifact_path(repo: String, name: String, version: String) -> String IOError! {
+    publication_validate_index_component(name, "package name")
+    publication_validate_index_component(version, "package version")
+    Ok(files.join(files.join(files.join(repo, "artifacts"), name), version))
+}
+fn publication_ensure_real_directory(path: String, label: String) IOError! -[FS, Env]> {
+    info :: files.stat(path)
+    if info.is_symlink || !info.is_dir -> return Err(IOError.InvalidData(publication_oci_context(path, "{label} is not a real directory")))
+    _ :: foundation_open_directory_authority(path)
+}
+fn publication_load_publish_lock(source: String) -[FS, Env]> LockFile? IOError! {
+    bytes :: foundation_read_file_nofollow_at_root(source, UNIFIED_LOCK_FILE, PKG_MAX_LOCK_BYTES) ?? {
+        if err == .NotFound(_) -> return Ok(None)
+        return Err(err)
+    }
+    text :: String.from_bytes(bytes) ?? return Err(publication_invalid_oci("published lock is not UTF-8"))
+    parsed :: pkg_lock_parse(text) ?? return Err(publication_invalid_oci("published lock is invalid: {err.message()}"))
+    Ok(Val(parsed))
+}
+fn publication_registry_artifact_hash(root: String) -[FS, Env]> String IOError! {
+    held :: foundation_open_directory_authority(root)
+    held.tree_hash()
+}
+struct PublicationArtifactSnapshot {
+    source: PackageSourceSnapshot
+    fn path(self) -> String Never! { self.source.path() }
+}
+impl PublicationArtifactSnapshot.Close {
+    fn close(^self) -[FS]> { close(^self.source) }
+}
+fn publication_snapshot_verified_artifact(repo: String, entry: PublicationIndexEntry) -[FS, Env, Time]> PublicationArtifactSnapshot IOError! {
+    path :: publication_artifact_path(repo, entry.name, entry.version)
+    held :: foundation_open_directory_authority(repo)
+    artifacts :: held.child("artifacts")
+    package :: artifacts.child(entry.name)
+    source :: package.child(entry.version)
+    before :: source.tree_hash()
+    if entry.content_hash != "" && before != entry.content_hash -> return Err(publication_invalid_oci("registry source artifact for {entry.name} {entry.version} failed its content hash"))
+    publication_verify_oci_referrers(repo, entry)
+    // Keep the private snapshot on the checkout's disk rather than /tmp.
+    snapshot :: pkg_source_snapshot_into(source, held) ?? return Err(publication_invalid_oci(err.diagnostic.what))
+    if entry.content_hash != "" && snapshot.content_hash != entry.content_hash {
+        close(^snapshot)
+        return Err(publication_invalid_oci("registry source artifact for {entry.name} {entry.version} changed while being snapshotted"))
+    }
+    // The machine lock is published evidence, not part of the source digest.
+    if publication_load_publish_lock(path) == {
+        .Ok(.Val(lock)) -> {
+            foundation_write_file_nofollow_at_root(snapshot.path(), UNIFIED_LOCK_FILE, pkg_lock_write(lock).bytes(), None) ?? {
+                close(^snapshot)
+                return Err(err.error)
+            }
+        }
+        .Ok(.None) -> {}
+        .Err(error) -> {
+            close(^snapshot)
+            return Err(error)
+        }
+    }
+    Ok(PublicationArtifactSnapshot{source: snapshot})
+}

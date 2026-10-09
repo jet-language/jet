@@ -1,0 +1,107 @@
+// Inspection actions and planes consume the same Package discovery as
+// compilation, including inline roots and the command-specific error channel.
+fn inspection_root_fixture_require_root(start: String, expected: String) {
+    if jet_cli_require_inspect_root(start, "missing package", true) == {
+        .Root(root) -> assert(root == expected)
+        .Refused(_) -> panic("checked inspection Package root")
+    }
+    if jet_cli_inspect_require_root(start, "missing package", true) == {
+        .File(root, notice) -> {
+            assert(root == expected)
+            assert(notice == "")
+        }
+        .Refused(_) -> panic("plane Package root")
+    }
+}
+
+fn inspection_root_fixture_missing(start: String, stale: String?) {
+    action := JetCLIPlan.Done{output: JetDriverVerbOutput{stdout: "", stderr: "", exit_code: 0}}
+    if jet_cli_require_inspect_root(start, "missing package", true) == {
+        .Root(_) -> panic("missing root was invented")
+        .Refused(plan) -> action = plan
+    }
+    plane := JetCLIPlan.Done{output: JetDriverVerbOutput{stdout: "", stderr: "", exit_code: 0}}
+    if jet_cli_inspect_require_root(start, "missing package", true) == {
+        .File(_, _) -> panic("missing plane root was invented")
+        .Refused(plan) -> plane = plan
+    }
+    if action == {
+        .Done(output) -> {
+            assert(output.stdout == "" && output.exit_code == JET_DRIVER_EXIT_USER_ERROR)
+            if stale == .Val(name) {
+                assert(output.stderr.contains("E1226"))
+                assert(output.stderr.contains("`{name}` is not the package manifest name"))
+                cache := WorkspaceDeclarationCache.new()
+                report :: jet_cli_find_stale_manifest(&cache, start) ?? panic("stale filename diagnostic")
+                assert(output.stderr == diagnostic_render_all("", "", [Diagnostic]{report}, false))
+            } else {
+                assert(output.stderr == "missing package\n")
+            }
+            if plane == {
+                .Done(other) -> assert(other.stdout == output.stdout && other.stderr == output.stderr && other.exit_code == output.exit_code)
+                else -> panic("plane and action root error channel differ")
+            }
+        }
+        else -> panic("manifest-required missing/stale root reports directly, not through JSON selection")
+    }
+}
+
+fn inspection_root_fixture_authority_error(start: String) {
+    plan := JetCLIPlan.Done{output: JetDriverVerbOutput{stdout: "", stderr: "", exit_code: 0}}
+    if jet_cli_require_inspect_root(start, "missing package", true) == {
+        .Root(_) -> panic("retired manifest is not a Package root")
+        .Refused(refusal) -> plan = refusal
+    }
+    if plan == {
+        .Diagnostics(file, source, report, color, notice) -> {
+            assert(file == JET_CLI_PACKAGE_FILE && source == "" && report.code == "E1226" && color && notice == "")
+            plain :: jet_cli_diagnostics_output(file, source, report, false, false, notice)
+            colored :: jet_cli_diagnostics_output(file, source, report, true, false, notice)
+            machine :: jet_cli_diagnostics_output(file, source, report, true, true, notice)
+            assert(plain.stdout == "" && plain.stderr == diagnostic_render_all(file, source, [Diagnostic]{report}, false))
+            assert(colored.stdout == "" && colored.stderr == diagnostic_render_all(file, source, [Diagnostic]{report}, true))
+            assert(colored.stderr != plain.stderr)
+            assert(machine.stderr == "" && machine.stdout == jet_cli_reports_status_json("diagnostics", false, jet_cli_report_cwd(), file, source, [Diagnostic]{report}))
+            assert(machine.stdout.contains("\"action\":\"diagnostics\"") && machine.stdout.contains("E1226") && !machine.stdout.contains("\"action\":\"cli\""))
+            assert(plain.exit_code == JET_DRIVER_EXIT_USER_ERROR && colored.exit_code == plain.exit_code && machine.exit_code == plain.exit_code)
+            // The front door, rather than the root query, owns output flags.
+            if jet_cli_front([String]{"inspect", "types", start, "--json"}) == {
+                .Done(output) -> assert(output.stdout == machine.stdout && output.stderr == "" && output.exit_code == machine.exit_code)
+                else -> panic("front diagnostics channel")
+            }
+        }
+        else -> panic("authoritative root errors are reports, not spanless usage or missing-root hints")
+    }
+}
+
+fn run() {
+    root :: "{cli_sys.temp_dir()}/jet-inspection-roots-{cli_process.current_pid()}"
+    cli_files.create_dir_all("{root}/manifest/sub") ?? panic("manifest fixture")
+    cli_files.create_dir_all("{root}/inline/sub") ?? panic("inline fixture")
+    cli_files.create_dir_all("{root}/missing/sub") ?? panic("missing fixture")
+    cli_files.create_dir_all("{root}/stale/sub") ?? panic("stale fixture")
+    cli_files.write("{root}/manifest/package.jet", "package {{ name: \"manifest\" version: \"0.0.0\" edition: \"2026\" outputs: {{}} }}\n") ?? panic("manifest")
+    inspection_root_fixture_require_root("{root}/manifest/sub", "{root}/manifest")
+    cli_files.write("{root}/inline/run.jet", "package {{ name: \"inline\" version: \"0.0.0\" edition: \"2026\" outputs: {{ app: .Executable{{entry: run}} }} }}\nfn run() {{}}\n") ?? panic("inline Package")
+    inspection_root_fixture_require_root("{root}/inline/sub", "{root}/inline")
+    // A loose main.jet is not an inline Package or an excuse to refuse a mode.
+    cli_files.write("{root}/missing/main.jet", "fn run() {{}}\n") ?? panic("loose source")
+    inspection_root_fixture_missing("{root}/missing/sub", None)
+    loop name in JET_CLI_STALE_MANIFEST_NAMES {
+        cli_files.write("{root}/stale/{name}", "retired name\n") ?? panic("stale manifest")
+        inspection_root_fixture_missing("{root}/stale/sub", Val(name))
+        if jet_cli_missing_bare_entry("check", "{root}/stale/sub", false) == {
+            .Refused(report, _, code, _) -> {
+                assert(report.code == "E1226")
+                assert(code == JET_DRIVER_EXIT_USAGE)
+            }
+            else -> panic("bare commands keep their original usage status")
+        }
+        cli_files.remove("{root}/stale/{name}") ?? panic("remove stale manifest")
+    }
+    // pkg.jet is an authoritative resolver error, not the absent-root stale
+    // filename teaching branch used above for pack/payload/jet.toml.
+    cli_files.write("{root}/stale/{JET_CLI_PAYLOAD_FILE}", "package {{ name: \"retired\" version: \"0.0.0\" edition: \"2026\" outputs: {{}} }}\n") ?? panic("retired manifest")
+    inspection_root_fixture_authority_error("{root}/stale/sub")
+    cli_files.remove_all(root) ?? panic("inspection roots cleanup")
+}

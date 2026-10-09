@@ -15,6 +15,8 @@ use jet_foundation.[
     Type,
     ast_program,
 ]
+use jet_foundation.[TAppliedRule, TAppliedRuleArgumentMenu, TAppliedRuleCatalog]
+use jet_sema.sema_comptime_reflection_type_info
 use jet_lexer.[
     Lexed,
     TOKEN_AMP,
@@ -680,6 +682,66 @@ pub fn jet_eval_compiler_services_checked(input: JetCompilerServicesCheckedInput
         TComptimeField{name: "semantic_index", value: semantic_index},
     }}
     JetCompilerServicesCheckedFacts{value: value, semantic_index_complete: !has_errors && index.complete}
+}
+
+// The build context reads this immutable, fully checked whole-program view.
+// Reuse the same TypeInfo, FunctionInfo and semantic-index producers as the
+// compiler API; a missing producer fact refuses the snapshot.
+pub fn jet_eval_compiler_services_program_info(registration: SemaRegistrationGraph, graph: SemaGraphResult, source: String, module_sources: [SemaCompilerModuleSource]) -> TComptimeValue? {
+    if !registration.complete || !graph.complete -> return None
+    index :: sema_compiler_semantic_index_from_checked(registration, graph, source, module_sources)
+    if !index.complete -> return None
+    catalog :: TAppliedRuleCatalog{rows: [TAppliedRule]{}, argument_menus: [TAppliedRuleArgumentMenu]{}}
+    types := [TComptimeValue]{}
+    functions := [TComptimeValue]{}
+    packages := [TComptimeValue]{}
+    loop module in registration.modules {
+        checked := SemaGraphModuleResult?{None}
+        loop candidate in graph.modules { if candidate.module_identity == module.module_identity -> checked = Val(candidate) }
+        if checked == None -> return None
+        package_types := [TComptimeValue]{}
+        package_functions := [TComptimeValue]{}
+        loop item in module.program.items {
+            name := String?{None}
+            if item == {
+                .Struct(definition) -> name = Val(definition.name)
+                .Enum(definition) -> name = Val(definition.name)
+                .Distinct(definition) -> name = Val(definition.name)
+                .Func(function) -> {
+                    if function.name == "build" -> next
+                    key :: jet_eval_compiler_services_function_key(function, module) ?? return None
+                    value :: jet_eval_compiler_services_function_info(function, module, checked, Val(key))
+                    &functions.push(value)
+                    &package_functions.push(value)
+                }
+                else -> {}
+            }
+            if name == .Val(type_name) {
+                value :: sema_comptime_reflection_type_info(registration, module.module_identity, type_name, catalog) ?? return None
+                &types.push(value)
+                &package_types.push(value)
+            }
+        }
+        &packages.push(TComptimeValue.Struct{type_name: "PackageInfo", fields: [TComptimeField]{
+            {name: "name", value: jet_eval_compiler_services_string(module.module_name)},
+            {name: "identity", value: jet_eval_compiler_services_string(module.module_name)},
+            {name: "types", value: TComptimeValue.List{values: package_types}},
+            {name: "functions", value: TComptimeValue.List{values: package_functions}},
+        }})
+    }
+    fields := [TComptimeField]{
+        {name: "types", value: TComptimeValue.List{values: types}},
+        {name: "functions", value: TComptimeValue.List{values: functions}},
+        {name: "packages", value: TComptimeValue.List{values: packages}},
+    }
+    if index.value == .Struct(_, index_fields) {
+        loop name in [String]{"definitions", "references", "calls", "structural_nodes"} {
+            value := TComptimeValue?{None}
+            loop field in index_fields { if field.name == name -> value = Val(field.value) }
+            &fields.push(TComptimeField{name: if name == "calls" -> "call_edges" else -> name, value: value ?? return None})
+        }
+    } else -> return None
+    Val(TComptimeValue.Struct{type_name: "ProgramInfo", fields: fields})
 }
 // Package and build call sites must consume Jetpack's typed host query result;
 // this helper deliberately defines no package view, lock/profile, or graph facts.

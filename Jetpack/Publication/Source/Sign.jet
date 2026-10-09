@@ -73,12 +73,12 @@ pub fn publication_keygen(registry: String, force: Bool) -[FS, Env, Time, Rand]>
 fn publication_sign_write_key_pair(paths: PublicationKeyPaths, seed: [U8], public: String, force: Bool) PublicationDiagnosticError! -[FS, Env, Time]> {
     publication_write_private_seed(paths.seed_path, seed, force)
     public_policy :: FoundationPublicationPolicy{mode: 420, create: .Replace, destination_links: .Refuse, create_root: true}
-    if foundation_write_file_nofollow_at_root(files.dirname(paths.public_key_path), files.basename(paths.public_key_path), public.bytes(), None, public_policy) == .Err(error) -> return Err(publication_sign_io_error("public key", "{error}"))
+    if foundation_write_file_nofollow_at_root(files.dirname(paths.public_key_path), files.basename(paths.public_key_path), public.bytes(), None, public_policy) == .Err(error) -> return Err(publication_sign_io_error("public key", "{error.error}"))
 }
 pub fn publication_write_private_seed(path: String, seed: [U8], force: Bool) PublicationDiagnosticError! -[FS, Env, Time]> {
     if sys.family() != "unix" -> return Err(publication_sign_io_error("signing key permissions", "private signing-key permissions are unavailable on this platform"))
     policy :: FoundationPublicationPolicy{mode: 384, create: if force -> .Replace else -> .CreateNew, destination_links: if force -> .ReplaceBinding else -> .Refuse, create_root: true}
-    if foundation_write_file_nofollow_at_root(files.dirname(path), files.basename(path), seed, None, policy) == .Err(error) -> return Err(publication_sign_io_error("signing key", "{error}"))
+    if foundation_write_file_nofollow_at_root(files.dirname(path), files.basename(path), seed, None, policy) == .Err(error) -> return Err(publication_sign_io_error("signing key", "{error.error}"))
 }
 
 // Rust sign: sign the hash STRING's UTF-8 bytes, not the decoded hash digest.

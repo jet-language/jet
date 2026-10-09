@@ -1971,6 +1971,7 @@ fn core_fixed_sig_raw(
         ("core.term", "stdout") => Some((vec![], Some(Type::Named("Stdout".to_string())))),
         ("core.term", "stderr") => Some((vec![], Some(Type::Named("Stderr".to_string())))),
         ("core.term", "terminal_width" | "terminal_height") => Some((vec![], Some(Type::Int))),
+        ("core.term", "jet_term_is_terminal_raw") => Some((vec![(read, Type::Int)], Some(Type::Bool))),
         ("core.term", "style" | "style_force") => Some((
             vec![(read, Type::String), (read, Type::String)],
             Some(Type::String),
@@ -2309,6 +2310,11 @@ fn core_fixed_sig_raw(
         ("core.process", "cmd") => Some((
             vec![(read, Type::List(Box::new(Type::String)))],
             Some(Type::Named("ProcessSpec".to_string())),
+        )),
+        // Compiler-private raw leaf: the waited child's exact exit display.
+        ("core.process", "jet_process_exit_status_raw") => Some((
+            vec![(read, int)],
+            Some(Type::Option(Box::new(Type::String))),
         )),
         // D-PROCESS1=A: pipeline takes a list of `ProcessSpec` (built via
         // `process.cmd(argv)...`), not raw argv lists — one canonical builder (I8).
@@ -4796,6 +4802,12 @@ fn core_fixed_sig_raw(
         )),
         ("core.files", "__open_reader") => Some((
             vec![(read, Type::Int), (read, Type::String), (read, Type::Int)],
+            Some(result_ty(Type::Named("FileReader".to_string()), io.clone())),
+        )),
+        // Compiler-private raw leaf for `jet self completions --for`: open
+        // without waiting on a FIFO or device peer.
+        ("core.files", "jet_std_files_open_reader_nonblocking") => Some((
+            vec![(read, Type::String)],
             Some(result_ty(Type::Named("FileReader".to_string()), io.clone())),
         )),
         ("core.files", "__open_writer") => Some((
@@ -8108,5 +8120,38 @@ mod tests {
             let (_, ret) = core_fixed_sig(module, name).expect("UI host row must have a signature");
             assert_eq!(ret, Some(result_ty(ok, ui_error.clone())), "{module}::{name}");
         }
+    }
+
+    #[test]
+    fn held_directory_kernel_rows_have_exact_typed_field_projections() {
+        let read = super::AccessConvention::Read;
+        let directory = super::Syntax::core_call("core.files", "__directory_fd")
+            .expect("held-directory descriptor row");
+        assert_eq!(directory.arity(), 1);
+        let (params, ret) = super::core_fixed_sig_for_row(directory).expect("typed directory row");
+        assert_eq!(params, vec![(read, Type::Int)]);
+        let Some(Type::Tuple(mut fields)) = ret else { panic!("directory fact tuple"); };
+        fields.sort_by(|left, right| left.0.cmp(&right.0));
+        assert_eq!(fields, vec![
+            ("available".into(), Box::new(Type::Bool)),
+            ("fd".into(), Box::new(Type::Int)),
+            ("held".into(), Box::new(Type::Bool)),
+        ]);
+        let process = super::Syntax::core_call("core.process", "__with_directory_raw")
+            .expect("existing held-directory ProcessSpec attachment row");
+        assert_eq!(process.arity(), 4);
+        let (params, ret) = super::core_fixed_sig_for_row(process).expect("typed process row");
+        assert_eq!(params, vec![
+            (read, Type::Named("ProcessSpec".into())), (read, Type::Int),
+            (read, Type::Int), (read, Type::Bool),
+        ]);
+        let Some(Type::Tuple(mut fields)) = ret else { panic!("process fact tuple"); };
+        fields.sort_by(|left, right| left.0.cmp(&right.0));
+        assert_eq!(fields, vec![
+            ("assigned_fd".into(), Box::new(Type::Int)),
+            ("available".into(), Box::new(Type::Bool)),
+            ("errno".into(), Box::new(Type::Int)),
+            ("spec".into(), Box::new(Type::Named("ProcessSpec".into()))),
+        ]);
     }
 }

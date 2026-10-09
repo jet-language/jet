@@ -148,12 +148,10 @@ fn publication_oci_test_write_outcome(path: String, payload: String) -[FS, Env, 
     loop attempt in 0..<16 {
         path :: files.join(repo, "blob-{publication_registry_unique_suffix()}-{attempt}")
         left :: task {
-            left_outcome :: publication_oci_test_write_outcome(path, "left")
-            left_outcome
+            return publication_oci_test_write_outcome(path, "left")
         }
         right :: task {
-            right_outcome :: publication_oci_test_write_outcome(path, "right")
-            right_outcome
+            return publication_oci_test_write_outcome(path, "right")
         }
         a :: left.join() ?? panic("join left")
         b :: right.join() ?? panic("join right")
@@ -255,7 +253,10 @@ fn publication_oci_test_evidence(repo: String, entry: PublicationIndexEntry) -[F
         files.write(path, "winner")
     }
     error :: if foundation_write_file_nofollow_at_root(repo, "blob", "loser".bytes(), Val(collide), FoundationPublicationPolicy{create: .CreateNew}) == {
-        .Err(error) -> error
+        .Err(error) -> {
+            assert_eq(error.phase, FoundationPublicationPhase.InspectDestination)
+            error.error
+        }
         .Ok(_) -> panic("CreateNew replaced an appearing winner")
     }
     assert(error == .AlreadyExists(_))
@@ -280,7 +281,13 @@ fn publication_oci_test_evidence(repo: String, entry: PublicationIndexEntry) -[F
         assert_eq("{actual}", "{failure}")
     }
     files.remove(path) ?? panic("remove winner")
-    assert(foundation_write_file_nofollow_at_root(repo, "blob", "winner".bytes(), Val(() -[FS, Env]> { return Err(IOError.Other(publication_oci_context(path, "validation refused after fsync"))) }), FoundationPublicationPolicy{create: .CreateNew}) == .Err(.Other(_)))
+    if foundation_write_file_nofollow_at_root(repo, "blob", "winner".bytes(), Val(() -[FS, Env]> { return Err(IOError.Other(publication_oci_context(path, "validation refused after fsync"))) }), FoundationPublicationPolicy{create: .CreateNew}) == {
+        .Err(error) -> {
+            assert_eq(error.phase, FoundationPublicationPhase.ValidateSource)
+            assert(error.error == .Other(_))
+        }
+        .Ok(_) -> panic("validation refusal must prevent publication")
+    }
     assert(!files.lexists(path))
     files.remove_all(repo) ?? panic("cleanup")
 }

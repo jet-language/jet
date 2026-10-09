@@ -1,0 +1,137 @@
+// Read-only fn-build staging: ordinary Driver checking and MIR execution,
+// followed by Core's checked finish. No action or generated-file write occurs.
+use jet_foundation.[Diagnostic, EffectRowEntry, Item, MIRFunctionID, Span, TComptimeValue]
+use jet_eval.[jet_eval_build_context_value, jet_eval_build_session_input, jet_eval_build_session_diagnostic, jet_eval_comptime_value, jet_eval_function, jet_eval_retire_in_place]
+use jet_eval.jet_eval_build_failed_diagnostic
+
+// This is the selected source declaration, not inferred/transitive effects
+// or a host's grant. An omitted/open/broader row cannot silently enable HTTP.
+fn jet_driver_build_declared_network(declared: [EffectRowEntry]?) -> Bool Never! {
+    effects :: declared ?? return false
+    net := false
+    wait := false
+    loop effect in effects {
+        if effect.name == "Net" -> net = true
+        if effect.name == "Time.Wait" -> wait = true
+    }
+    net && wait
+}
+
+// One command owns this scope across all of its package queries. IDs are
+// invocation-local authority, not cache keys or a process-global counter.
+pub struct JetDriverBuildQueryScope {
+    pub next_session_id: Int{1}
+    pub policy: BuildSessionPolicy{BuildSessionPolicy{legacy_denied: None, plugins_denied: None, plugin_grants: [String:[String]]{}}}
+}
+fn jet_driver_build_next_session_id(scope: &JetDriverBuildQueryScope) -> Int? Never! {
+    id :: scope.next_session_id
+    if id <= 0 || id == 9223372036854775807 -> return None
+    scope.next_session_id += 1
+    Val(id)
+}
+
+pub struct JetDriverBuildQueryResult {
+    pub plan: BuildSessionPlan?
+    pub graph: BuildGraph?
+    pub generated: [BuildSessionGeneratedModule]
+    pub diagnostics: [Diagnostic]
+    pub complete: Bool
+    pub internal_problem: String?
+}
+fn jet_driver_build_query_empty(diagnostics: [Diagnostic], complete: Bool, problem: String?) -> JetDriverBuildQueryResult Never! {
+    {plan: None, graph: None, generated: [], diagnostics: diagnostics, complete: complete, internal_problem: problem}
+}
+pub fn jet_driver_query_build_plan(request: JetDriverCompileRequest, scope: &JetDriverBuildQueryScope) -> JetDriverBuildQueryResult {
+    sources :: jet_driver_source_query(request)
+    if !sources.complete -> return jet_driver_build_query_empty(sources.diagnostics, false, None)
+    if sources.entry_module_index < 0 || sources.entry_module_index >= sources.modules.len() -> return jet_driver_build_query_empty(sources.diagnostics, false, Val("loaded build query has no exact entry module"))
+    package :: sources.modules[sources.entry_module_index].package_identity
+    selected := String?{None}
+    network_declared := false
+    span := Span{start: 0, end: 0}
+    loop loaded_module in sources.modules {
+        if loaded_module.package_identity != package -> next
+        loop item in loaded_module.program.items {
+            if item == .Func(function) && function.name == "build" {
+                if selected != None {
+                    errors := sources.diagnostics
+                    &errors.push(jet_driver_diagnostic_without_span("E3520", "two build entries for the package", "one package has exactly one checked build authority", "keep one fn build in the package"))
+                    return jet_driver_build_query_empty(errors, false, None)
+                }
+                selected = Val(loaded_module.physical_path)
+                span = function.span
+                network_declared = jet_driver_build_declared_network(function.declared_effects)
+            }
+        }
+    }
+    path :: selected ?? {
+        // No build entry still has an ordinary checked source projection.
+        // Loader-only success must not hide type errors in the package.
+        checked_request := request
+        checked_request.mode = JetDriverCompileMode.Doc
+        checked_request.capture_build_program = false
+        checked :: jet_driver_compile_mir(^checked_request)
+        complete :: checked.complete && checked.internal_problem == None && !jet_driver_has_errors(checked.diagnostics)
+        return jet_driver_build_query_empty(checked.diagnostics, complete, checked.internal_problem)
+    }
+    staged := request
+    staged.authorized_sources.entry_path = path
+    staged.mode = JetDriverCompileMode.Interpreter
+    staged.selected_entry = Val("build")
+    staged.capture_build_program = true
+    compiled := jet_driver_compile_mir(^staged)
+    if !compiled.complete || compiled.internal_problem != None -> return jet_driver_build_query_empty(compiled.diagnostics, false, compiled.internal_problem)
+    program :: compiled.build_program ?? return jet_driver_build_query_empty(compiled.diagnostics, false, Val("checked build invocation lost its ProgramInfo"))
+    entry :: compiled.entry_function ?? return jet_driver_build_query_empty(compiled.diagnostics, false, Val("checked build invocation lost its MIR entry"))
+    mir :: compiled.mir ?? return jet_driver_build_query_empty(compiled.diagnostics, false, Val("checked build invocation lost its MIR program"))
+    if request.eval_config.host_adapter == None -> return jet_driver_build_query_empty(compiled.diagnostics, false, Val("build evaluation requires the invocation's host adapter"))
+    session_id :: jet_driver_build_next_session_id(&scope) ?? return jet_driver_build_query_empty(compiled.diagnostics, false, Val("build invocation identity space exhausted"))
+    session := build_session_new(session_id, package, request.host_facts.compiler_identity ?? "", scope.policy)
+    config := request.eval_config
+    // Input services resolve paths against the build file's own directory.
+    config.build_host_adapter = Val(JetDriverBuildAdapter{session: session, inputs: request.build_inputs, http_inputs: request.build_http_inputs, network_declared: network_declared, base_dir: jet_driver_parent_path(path)})
+    evaluated := jet_eval_function(^mir, entry, [TComptimeValue]{jet_eval_build_context_value(session_id, program)}, ^config)
+    returned := jet_eval_comptime_value(&evaluated, span)
+    // The value converter retires a value-owning result. A failed invocation
+    // can have no value, so still drain its actual machine before expiration.
+    retired :: jet_eval_retire_in_place(&evaluated, span) ?? false
+    errors := compiled.diagnostics
+    if evaluated.error == .Val(error) -> &errors.push(error.diagnostic)
+    if evaluated.internal_problem != None || !evaluated.complete || !retired || returned == None {
+        build_session_abort(&session)
+        return jet_driver_build_query_empty(errors, false, evaluated.internal_problem)
+    }
+    if returned == .Val(data) && jet_eval_build_failed_diagnostic(data, span) == .Val(diagnostic) {
+        build_session_abort(&session)
+        &errors.push(diagnostic)
+        return jet_driver_build_query_empty(errors, false, None)
+    }
+    value :: jet_eval_build_session_input(returned ?? panic("checked return lost its data")) ?? {
+        build_session_abort(&session)
+        &errors.push(jet_driver_diagnostic_without_span("E3502", "build must return a BuildPlan from this build context", "a build graph is owned by its active checked invocation", "return b.plan() from the selected build"))
+        return jet_driver_build_query_empty(errors, false, None)
+    }
+    finished :: build_session_finish(&session, value)
+    loop error in finished.diagnostics -> &errors.push(jet_eval_build_session_diagnostic(error))
+    plan :: finished.plan ?? return jet_driver_build_query_empty(errors, false, None)
+    if jet_driver_has_errors(errors) -> return jet_driver_build_query_empty(errors, false, None)
+    generated :: build_plan_selected_generated(plan)
+    if generated.len() > 0 {
+        // Re-enter the ordinary compiler with exact virtual source records;
+        // selected outputs are checked even when no disk file exists.
+        checked_request := staged
+        checked_request.capture_build_program = false
+        loop generated_row in generated {
+            &checked_request.generated_modules.push(JetDriverGeneratedModule{package_identity: package, name: generated_row.name, relative_path: generated_row.path, source: generated_row.source})
+        }
+        checked :: jet_driver_compile_mir(^checked_request)
+        loop error in checked.diagnostics -> &errors.push(error)
+        if !checked.complete || checked.internal_problem != None || jet_driver_has_errors(errors) -> return jet_driver_build_query_empty(errors, false, checked.internal_problem)
+    }
+    {plan: Val(plan), graph: Val(build_plan_graph(plan)), generated: generated, diagnostics: errors, complete: true, internal_problem: None}
+}
+pub fn jet_driver_query_build_nodes(request: JetDriverCompileRequest, scope: &JetDriverBuildQueryScope) -> JetDriverBuildQueryResult {
+    // Nodes are the checked graph's exact compiler facts, never a projection
+    // reconstructed from emitted source, action names or a receipt.
+    jet_driver_query_build_plan(request, &scope)
+}

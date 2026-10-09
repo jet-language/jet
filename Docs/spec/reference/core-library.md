@@ -903,6 +903,10 @@ zero when that sample is unavailable. The directory is the host temporary
 directory (not the logical environment overlay). Its effects include environment
 and clock observation as well as the filesystem surface.
 
+`exists` and `is_dir` follow a final symbolic link; a broken link returns
+false. Their false-on-host-error policy is Jet-owned; the host boundary
+supplies only the following-metadata fact or the host error.
+
 `walk`, `walk_parallel`, and `walk_files` accept the optional `ignore` value;
 `fs.walk(root)` is the convenience form. `DirEntry` has `name`, `path`, and
 `is_dir`. `Stat` has `size`, `kind`, `mode`, `readonly`, `is_file`, `is_dir`,

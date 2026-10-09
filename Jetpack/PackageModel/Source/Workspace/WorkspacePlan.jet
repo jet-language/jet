@@ -72,13 +72,10 @@ pub struct WorkspaceSourceError {
 // than an absent workspace, so callers never fall through to an outer
 // authority or a stale lock. A missing directory is no workspace.
 // The caller shares `cache` with every other discovery scan in its session.
-pub fn pkg_resolve_workspace_source(cache: &WorkspaceDeclarationCache, dir: String) -[FS]> WorkspaceSource? WorkspaceSourceError! {
-    resolver :: if AuthorityResolver.open(dir) == {
-        .Ok(opened) -> opened
-        .Err(error) -> {
-            if error.is_missing() -> return Ok(None)
-            return Err(WorkspaceSourceError{diagnostic: error.workspace_diagnostic()})
-        }
+pub fn pkg_resolve_workspace_source(cache: &WorkspaceDeclarationCache, dir: String) -[FS, Env]> WorkspaceSource? WorkspaceSourceError! {
+    resolver :: AuthorityResolver.open(dir) ?? {
+        if err.is_missing() -> return Ok(None)
+        return Err(WorkspaceSourceError{diagnostic: err.workspace_diagnostic()})
     }
     if resolver.resolve_workspace_source(&cache) == {
         .Ok(source) -> Ok(source)

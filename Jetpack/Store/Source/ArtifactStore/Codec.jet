@@ -162,13 +162,11 @@ fn store_artifact_read_file(path: String) -[FS]> ArtifactRawRead ArtifactStoreEr
         }
     }
     if metadata.is_symlink || !metadata.is_file -> return Ok(ArtifactRawRead.Corrupt("entry is not a regular file"))
-    reader :: if files.open(path) == {
-        .Ok(opened) -> opened
-        .Err(error) -> {
-            if store_artifact_io_missing(error) -> return Ok(ArtifactRawRead.Corrupt("entry disappeared while opening"))
-            return Err(ArtifactStoreError.IO(error))
-        }
+    reader :: files.open(path) ?? {
+        if store_artifact_io_missing(err) -> return Ok(ArtifactRawRead.Corrupt("entry disappeared while opening"))
+        return Err(ArtifactStoreError.IO(err))
     }
+    defer close(^reader)
     held :: reader.stat()
     if !store_artifact_same_file(metadata, held) -> return Ok(ArtifactRawRead.Corrupt("entry changed while opening"))
     bytes := [U8]{}

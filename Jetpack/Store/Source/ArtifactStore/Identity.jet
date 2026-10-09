@@ -74,9 +74,9 @@ pub struct ArtifactDigest {
     }
 }
 
-// SHA-256 of `bytes` through the compiler's canonical hash.
+// SHA-256 of `bytes` through Core's public canonical SHA-256 implementation.
 fn store_artifact_sha256(bytes: [U8]) -> [U8] Never! {
-    mir_sha256_bytes(bytes)
+    crypto.sha256(bytes).as_bytes()
 }
 
 fn store_artifact_hex_value(byte: U8) -> Int? Never! {

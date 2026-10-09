@@ -1,0 +1,62 @@
+// The `jet trust` / `jetpack config trust` command surface over the U19 trust
+// store: record JSON (Rust `record_json`/`records_json`) and grant selector
+// parsing. Kept apart from TrustStore.jet so the store's read path (path,
+// typed records) carries no JSON-writer or TrustError dependency: the
+// compiler unit assembles TrustStore.jet for `jet inspect gates` alone.
+
+// Rust `record_json`.
+pub fn trust_record_json(record: TrustRecord) -> String Never! {
+    if record == {
+        .Hash(hash) -> trust_json_object_text([TrustJSONField]{
+            TrustJSONField{key: "type", value: DataTree.Text("hash")},
+            TrustJSONField{key: "hash", value: DataTree.Text(~hash)},
+            TrustJSONField{key: "revocationKey", value: DataTree.Text("{TRUST_HASH_PREFIX}{hash}")}
+        })
+        .Pattern(pattern) -> trust_json_object_text([TrustJSONField]{
+            TrustJSONField{key: "type", value: DataTree.Text("pattern")},
+            TrustJSONField{key: "pattern", value: DataTree.Text(~pattern)},
+            TrustJSONField{key: "revocationKey", value: DataTree.Text("{TRUST_PATTERN_PREFIX}{pattern}")}
+        })
+        .Grant(grant) -> trust_json_object_text([TrustJSONField]{
+            TrustJSONField{key: "type", value: DataTree.Text("grant")},
+            TrustJSONField{key: "authority", value: DataTree.Text(~grant.authority)},
+            TrustJSONField{key: "subject", value: DataTree.Text(~grant.subject)},
+            TrustJSONField{key: "scope", value: DataTree.Text(~grant.scope)},
+            TrustJSONField{key: "revocationKey", value: DataTree.Text(grant.key())}
+        })
+        .Raw(line) -> trust_json_object_text([TrustJSONField]{
+            TrustJSONField{key: "type", value: DataTree.Text("raw")},
+            TrustJSONField{key: "line", value: DataTree.Text(~line)},
+            TrustJSONField{key: "revocationKey", value: DataTree.Text(~line)}
+        })
+    }
+}
+
+// Rust `records_json`: `{"grants":[...]}`.
+pub fn trust_records_json(records: [TrustRecord]) -> String Never! {
+    rendered := [String]{}
+    loop record in records -> &rendered.push(trust_record_json(record))
+    "{{\"grants\":[{rendered.join(",")}]}}"
+}
+
+// `jet trust grant <selector> [--scope user|repo]`: an explicit
+// `authority:subject` selector, or a bare subject whose authority is
+// inferred.
+pub fn trust_parse_grant_selector(selector: String, scope: String) -> TrustGrant TrustError! {
+    trimmed :: selector.trim()
+    if trimmed == "" -> return Err(TrustError.Grant("grant selector is empty"))
+    if trust_text_split_first(trimmed, TRUST_COLON) == {
+        .Val(parts) -> {
+            if TrustAuthority.parse(parts.before) != None && parts.after.trim() == "" -> return Err(TrustError.Grant("trust grant `{parts.before}:` needs a subject"))
+        }
+        .None -> {}
+    }
+    if scope != TRUST_SCOPE_USER && scope != TRUST_SCOPE_REPO -> return Err(TrustError.Grant("unknown trust scope `{scope}`"))
+    if trust_text_split_first(trimmed, TRUST_COLON) == {
+        .Val(parts) -> {
+            if TrustAuthority.parse(parts.before) != None -> return Ok(TrustGrant{authority: parts.before, subject: parts.after, scope})
+        }
+        .None -> {}
+    }
+    Ok(TrustGrant{authority: TrustAuthority.infer(trimmed).label(), subject: trimmed, scope})
+}

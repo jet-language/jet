@@ -217,7 +217,7 @@ fn cli_nix_index_verify_differential(args: [String]) CLIToolError! -[FS, IO]> {
         "records_compared": DataTree.Int(compared.len()),
         "mismatches": DataTree.Int(mismatches.len()),
         "status": DataTree.Text(status)
-    ]))
+    ])) ?? return Err(CLIToolError.new(err.reason))
     files.write(report_path, "{report}\n") ?? return Err(CLIToolError.new("write differential report: {err}"))
     if mismatches.len() > 0 -> return Err(CLIToolError.new("differential verification failed: {mismatches.len()} mismatches; see {report_path}"))
     print("differential verification passed: all records compared, zero mismatches")

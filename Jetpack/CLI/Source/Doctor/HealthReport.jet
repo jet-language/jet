@@ -97,7 +97,7 @@ pub struct DoctorReport {
         "{out}Result: {self.health().word()}\n"
     }
 
-    fn to_json(self) -> String Never! {
+    fn to_json(self) -> String ReportError! {
         checks := [DataTree]{}
         loop check in self.checks {
             fields := [String: DataTree]{}
@@ -111,7 +111,8 @@ pub struct DoctorReport {
         document["kind"] = DataTree.Text("jetpack.doctor")
         document["status"] = DataTree.Text(self.health().word())
         document["checks"] = DataTree.Array(checks)
-        json.to_string(DataTree.Object(document))
+        text :: json.to_string(DataTree.Object(document)) ?? return Err(ReportError.new(err.reason))
+        Ok(text)
     }
 }
 

@@ -23,6 +23,33 @@ still writes the generated Rust verbatim; its machine mode affects diagnostic
 failures, not the emitted program. C and C++ driver aliases own their raw
 arguments (including `--help` and `--version`) before Jet parses global flags.
 
+`jet self devtools new-ui <name>` writes `tests/ui/<name>.jet` and its
+diagnostic snapshot using the same compiler and renderer as the UI harness.
+Only the source-file collision is refused; an existing `.stderr` is replaced.
+`jet self devtools check-fixture-paths` checks literal fixture paths in
+`tests/**/*.rs`, excluding diagnostic display labels and dynamic templates.
+Both commands retain their direct confirmation output under `--json` and
+`--quiet`; these flags do not hide generated artifacts.
+Missing-path diagnostics use deterministic directory order; Rust's OS directory
+order is unspecified. Path occurrences, including duplicates, remain counted.
+
+`jet inspect schema status` reads published snapshots and runs the canonical
+load-only E0910 advisory diff; an unavailable source bundle does not prevent
+listing its snapshots. `schema squash --before <version>` snapshots the current
+published declarations and records the cutoff without editing source. Only
+successful snapshot writes are counted. These commands keep their direct
+human report under `--json` and `--quiet`; neither mode creates a schema-status
+JSON protocol.
+
+`jet self completions <shell> --for <program>` reads embedded command metadata
+without executing the program. Shell registration uses its basename, with
+shell-specific quoting; only schema-known inputs and commands are candidates.
+The reader opens once without blocking, checks that opened file is regular,
+and bounds the read to 512 MiB before verifying the record format and digest.
+Offset overflow follows the CLI's compile-target pointer layout, not the
+inspected executable's word size. Metadata failures always use direct E2103
+stderr; completion arguments retain their exact command-specific grammar.
+
 ## Project jobs
 
 Write a named chore as `#Job fn deploy(region: String) { … }`, then run
@@ -43,6 +70,69 @@ views remain available. `jet jobs deploy` is an error teaching `jet deploy`,
 not an alias. `jet run <entry> -- deploy` and `<built-program> deploy` use
 the same checked job dispatch.
 
+The compiler request selects a job or generator by its declared callable in
+the authorized entry module. It does not rename that function or manufacture
+`fn run`. Evaluation uses the same selection and checks transitive purity
+through sema's checked call graph before execution.
+
+## Published schemas
+
+`#PublishedSchema` records have a lockfile-style snapshot in
+`.jet/cache/schema/<Type>.snapshot`. The canonical sema codec records the
+format version, type, published version, optional `squashed_before` cutoff,
+and declaration-order field names and types. Field reordering is not breaking.
+Removing a field, changing its type, or adding a required field needs declared
+migration intent; invalid migration operations also report E0910 before
+codegen. A type change requires an inline converter or an `impl Old -> New`.
+
+`inspect schema status` uses the same sema diff over authorized load-only
+declarations, intentionally without a full build's populated trait registry.
+The full-build check remains authoritative. Snapshot reads honor
+`JET_SCHEMA_CACHE_DIR`; publication and squash writes always use the project's
+canonical cache directory. Source-only queries retain the loader's original
+program, physical path, source bytes, and optional selected entry Package
+version; they do not substitute a semantic check or reparse a manifest in the
+CLI. Squash uses that declared version (falling back to `0.0.0` only when it
+is absent).
+
+Inspection planes and schema actions resolve explicit and inline Packages through
+the same checked entry resolver as compilation. When a root is genuinely absent,
+the action retains its own hint; a stale-name lookup uses the shared E1226
+teaching diagnostic. These absent-root hints and stale-name reports are direct,
+uncolored stderr user errors, including under `--json`. An authoritative resolver
+error, including a retired `pkg.jet` manifest, instead retains source diagnostic
+origins and spans, the requested color, and the `diagnostics` machine channel.
+
+## Executable command metadata
+
+Application completion reads the canonical v8 `JetCommandSchema` carrier,
+including input defaults, subcommands, and all job execution metadata. The
+Foundation byte reader recognizes ELF (both classes and byte orders), PE,
+Mach-O (thin and universal), and Wasm custom sections. It verifies the record
+length, digest, version, and field bounds before publishing a schema; missing,
+duplicate, unsupported-format, and malformed records remain distinct errors.
+PE permits zero alignment padding but not another record or nonzero trailing
+bytes. Every universal Mach-O slice must contain the same single record.
+
+The compiler's completion reader performs one nonblocking open and then inspects
+and reads that same handle; it never executes the application. Its private Core
+member `jet_std_files_open_reader_nonblocking` uses the existing runtime symbol
+and `FileReader`/`IOError` carriers. The terminal-context and waited-child facts
+likewise retain the existing `jet_term_is_terminal_raw` and
+`jet_process_exit_status_raw` runtime spellings, rather than reserved
+double-underscore member aliases or alternate host APIs.
+
+Remote builder records accept LF or CRLF line endings, removing only the single
+carriage return immediately before a newline. Extra or interior control bytes
+remain malformed record data, not whitespace to silently normalize.
+
+File-size arithmetic is bounded by `JET_COMPILER_TARGET_USIZE_MAX`, a
+compiler-private constant folded from the selected build target's pointer
+layout. It is not inferred from the inspected executable's ISA and requires
+no runtime pointer-width leaf. The explicit bound in the byte-reader API
+also permits portable boundary fixtures. Completion candidates retain written
+order, positional ordering, and duplicate visible job names; internal jobs do
+not become argv-reachable.
 ## Root command index
 
 The root index below mirrors `target/debug/jet help` in this checkout. It lists
@@ -123,12 +213,125 @@ The `bind` shorthand accepts the explicit binding-plan form shown by help:
 `bind <name> --update --accept <candidate-digest>`. Foreign-header bind-in
 commands remain under `jet inspect bind`.
 
+Normal `jet fix <file|dir>` consumes the same checked diagnostic edits as
+editor code actions. Without `--all`, both the applicability and safety class
+must permit an unattended formatting or behavior-preserving change. Exact
+duplicate edits apply once; overlapping edits are deferred and rechecked for
+at most sixteen rounds. `--dry-run` renders the diff without publishing.
+`--edition=2027` performs the registered JSON/CBOR migrations first, retaining
+written propagation and making panic fallbacks idempotent. Human status is
+suppressed by `--quiet` and `--json`; machine mode does not create a fake fix
+receipt. Publication uses the held codemod transaction and its durable undo
+journal. Rename provenance comes from uniquely matched checked before/after
+definition facts; when those checks cannot establish a rename, the receipt
+records the exact changed byte region instead.
+
+Focused compiler fixtures can be assembled with
+`node Compiler/Bootstrap/assemble.mjs --fixture Compiler/JetCli/Tests/FrontDoor.jet`
+under an isolated `HOME`. The fixture is appended to the full canonical unit
+using its ordinary import and source-provenance rules; this does not make a
+per-file compiler check valid or substitute for running the fixture.
+
 `fix memory` uses exercised runtime witnesses, not whole-program memory proof.
 It applies only a single repair whose original byte span still matches the
 source (or recognizes that the replacement is already present). Overlapping,
 stale, out-of-root, and ambiguous suggestions remain options. `--dry-run`
 reports prospective repairs without writing files; its JSON `changed` fields
 remain false.
+Source repairs preserve permissions and publish by a staged, flushed rename
+relative to the held source directory. Default data-binding outputs are
+published under the selected workspace/repository/package root's
+`.jet/bindings`, with collision checks performed under that directory's lock.
+Root discovery uses checked workspace declarations, not filenames alone,
+then the enclosing repository or package, and finally the source's canonical
+directory. Missing workspace declarations are absence; malformed, ambiguous,
+linked, or unreadable authority metadata remains a diagnostic.
+
+Package-source snapshots hold no-follow directory authorities and copy into
+exclusive private stages before computing their content hash. Consumers use
+the staged bytes, not a later read of the mutable original. Source copying
+preserves empty directories, refuses symbolic and multiply linked source
+files even under ignored names, and omits dot-prefixed entries, `build`, and
+`target` from the package tree. A published source-store entry is selected by
+the full package name, version, and lock fingerprint; a concurrent publisher
+must have the same content hash. Source-store entries are separate from the
+machine-wide artifact store and canonical Hangar.
+
+Fetch resolves the package graph before publishing `.jet/lock`. Package
+fingerprints include sorted dependency fingerprints and the frozen public
+function signatures; release headers do not change the capability component.
+Registry candidates bind the immutable source hash, signed index, OCI evidence,
+dependency-role metadata, source policy and advisory authorization before
+Hangar ingest. A selective update retains unrelated machine and semantic
+records. The machine graph and its resolution rationales are serialized in one
+atomic lock publication, after foreign provider bindings have been verified.
+Locked fetch verifies exact source identities and uses the existing registry
+checkpoint without downloading an index.
+
+Git validates the complete ordered DNS answer set, rejects the whole set if
+any address is non-public, and pins subprocess connections to the validated
+address. Local Git sources and private cache stages are passed as held
+directory descriptors. If the host cannot transfer those descriptors to a
+child, fetch refuses; a pathname is not an equivalent authority.
+
+Checked source transactions hold the project, destination parents, and
+`.jet/codemods` directory. Destinations and staged files must be regular,
+single-link files with the identities observed before publication. The
+schema-2 journal stores exact before/after bytes and staged identities before
+the first source rename. Recovery completes the replay log when every file
+reached its after-state, otherwise restores the recorded before-states;
+unrecorded bytes or substituted identities preserve the journal and refuse.
+Fix logs retain checked rename intent when the structural compiler facts
+establish it uniquely, otherwise the exact changed UTF-8 region is a rewrite.
+Undo verifies each log byte hash and every current after-checkpoint before
+publishing any reversal.
+
+Receipt objects and their append-only section records are immutable,
+content-authenticated files under `.jet/receipts`. The record-index JSONL
+snapshot under `.jet/records` is reloaded while holding its directory lock
+before each mutation and replaced atomically with mode `0600`. FIFO eviction
+removes only unreferenced disposable groups; removed artifacts are cleaned up
+after the new index is published, without following links.
+
+Build-node evidence stays immutable in the machine-wide artifact store. The
+latest record key for each program is workspace state:
+`.jet/last-run/<sha256(program)>`. This pointer uses the authenticated
+`jet.last-run/v1` record codec and binds the program name before resolving
+the content-addressed build record. Missing or malformed pointers are cache
+misses, not execution evidence. Publication holds the workspace directories,
+locks the last-run directory, flushes a staged file, renames it, and flushes
+the directory; separate workspaces do not share latest-run selection.
+The program identity is the invocation's authorized selected entry, made
+absolute and canonical when possible, then relative to the canonical workspace
+root only at a complete path-component prefix. A selected build function does
+not change this identity; neither a package name nor a filename stem substitutes
+for it. Project dependency trees publish from held source handles, with
+hardlinks where supported; Linux/Android `EXDEV`, `EPERM`, and `EOPNOTSUPP`
+permit a byte copy and Darwin uses byte copies. Other hardlink errors refuse
+publication rather than selecting a pathname-based fallback. Existing or
+concurrently published dependency trees must match the source content hash.
+`jet test-compare <corpus.json>` compares recorded reference and candidate
+observations using the shared finite-sample verdict. It records the canonical
+comparison payload as an immutable receipt section, consumes its protected
+evidence report, and publishes comparison/receipt index links together.
+Evidence publication selects the project from the working directory; receipt
+publication selects it from the corpus target. Generated inputs participate
+in receipt invalidation but not the canonical target-input identity. Optional
+history failures do not change the comparison's verdict or exit status.
+
+`jet remote bind`, `list`, and `remove` manage host-owned builder bindings
+under `$XDG_CONFIG_HOME/jet/remote-bindings` (or `$HOME/.config`).
+Registry records contain only a credential-provider path, never its bytes.
+Binding and loading validate the provider through held, no-follow directory
+reads; registry writes are staged, flushed, and atomically replaced with
+mode `0600`. Listing is deterministic and JSON omits unreadable bindings.
+
+`gc report` reads the selected project's bounded, complete GC identity trace
+without running a producer. It rejects missing, stale, unsafe, incompatible,
+oversized, malformed, or incomplete traces with E2110. Counters must match
+unique recorded identities; the report never estimates dropped promotions.
+`JET_GC_TRACE` selects an explicit trace path. `--json` uses the `gc.report`
+status envelope with the same checked sites and identity evidence.
 
 `fill` reads typed goal facts from the checked program. A goal with no known
 expected type reports `(unknown)`; the checker's continuation type does not
@@ -185,6 +388,45 @@ Convention routing reads complete retained directory listings from the
 authorized compiler request, including empty directories. It never invents
 directories from source-file names or reopens ambient filesystem paths.
 
+### Checked build inspection
+
+`inspect build`, `inspect graph`, and `inspect query build` evaluate the
+selected package's checked `fn build` in one invocation-owned context. They
+finish and validate its graph without executing actions or publishing generated
+files. An absent root build entry reports the default pipeline (`build: null`
+in the `inspect.build` status envelope), not an invented empty BuildPlan.
+Target and action explanations use the checked declaration; file explanations
+use its retained ownership, consumers, targets, and generated-source digest.
+Unobserved action-cache status remains `unknown`.
+The default-pipeline path still checks the package semantically. Failed queries
+use the standard `diagnostics` JSON status envelope or human problem-count
+report, with advisory lints shown only under `--verbose`/`-v`; internal query
+failures retain the compiler-error stream and exit status.
+
+Build constructors return typed failed values on fallible calls. Their
+`BuildError` variant, JSON fields, and original source span survive catching
+and propagation; declaration failures do not prematurely terminate an otherwise
+recoverable build. An uncaught returned build error becomes a structured
+diagnostic. Authorization/`#Impure`, argument-shape, and unavailable-service
+failures remain diagnostics rather than fabricated BuildError values.
+
+Execution-node explanations require authenticated build-record evidence for
+duration and rebuild reason. Static graph keys do not certify a `first-run`,
+a duration, or a cache hit. Missing runtime evidence and uncertified comptime
+input coverage remain explicit refusals.
+
+
+## External formatting
+
+`jet fmt --lang nix` selects the realized environment's formatter package.
+Inputs are staged as byte-for-byte copies; the environment child returns to
+Jet before any result is reported or published. Jet reads every staged output
+before writing originals. `--check`, `--diff`, and `--dry-run` leave originals
+unchanged and return a user-error status when formatting would change them.
+Diffs display invalid UTF-8 with replacement characters; writeback preserves
+the actual formatter bytes. `--json` uses the shared `fmt` status envelope for
+clean, dirty, and diff results. A failed formatter never publishes staged
+changes. A later write failure does not undo earlier successful writes.
 
 ## Shared option spellings
 
@@ -234,6 +476,16 @@ into [`CoreSources.jet`](../../../Compiler/JetCli/Source/Cli/CoreSources.jet)
 by `node Compiler/Bootstrap/generate-core-sources.mjs`, which
 `node Tools/agent/check-core-surface-ledger.mjs --write` runs and `--check`
 holds current.
+
+Source snapshots enumerate held no-follow directories and read each source or
+foreign cache through one bounded opened file. File identities include the
+opened object's device, inode, length, and exact modification timestamp;
+directory identities use the stable object, not its changing contents. The
+source walk rejects multiply linked files and changed parent/file identities,
+and enforces the same entry, file, depth, and byte bounds as the bootstrap
+authority. Retained convention listings preserve the provider's Unicode-name
+fact, including a literal U+FFFD in a valid UTF-8 name. Load-only queries and
+checked overlay compilation share this snapshot path.
 
 The native bootstrap host also authorizes loose source roots without creating
 a manifest. A missing `package.jet` preserves the compiler's source-root
@@ -352,6 +604,30 @@ architecture advice and check provenance. Shared-callee and consumer-agreement
 candidates retain definition/call-site spans, effects, behavioral-check
 statuses, and uncertainty; they neither execute user code nor apply a refactor.
 
+The frozen TIR fact channel classifies view materialization, collection
+copy-on-write, exact-integer spill, retained outcome construction, and
+representation fallback. Inline-integer removal is a proof from typed
+operand intervals, not an assumption about the runtime value. The cost query
+first proves callable coverage using sema-owned roots, direct calls and stored
+function references, including source methods and selected outputs. A reachable
+callable without a complete checked body or specialization refuses with E2104;
+it never produces a clean-cost claim. The collector retains nested loop depth
+through control flow and closure bodies. `lint --cost` merges and deduplicates
+L2510 diagnostics, omits optimizer-proven removals, and reports retained costs
+inside loops. View-materialization lints remain sema-owned. Findings exit 1
+on stderr (diagnostic JSON Lines under `--json`); clean invocations exit 0.
+Bare `inspect explain-build <file>` selects the authorized invocation entry
+under its authenticated workspace root, then reads the authenticated last-run
+record. Missing records refuse; static node keys are not execution timings.
+
+Checked build queries use the Driver's invocation-owned build scope and real
+build evaluator; the CLI does not reconstruct a graph from source spellings.
+Build input reads pin the root and every parent directory without following
+links, reject nonregular or multiply linked inputs, and bound reads through
+one opened file. Parent entries and the file's identity, length, and timestamps
+are checked before and after the read. File-URL input reads retain the
+reference's final-link refusal and same-open-file bounds.
+
 `inspect structure` presents the compiler's published name facts and the
 structure slice of its gate ledger; it does not infer missing facts by scanning
 source text. Frontend failures can publish a structure report before the
@@ -378,7 +654,13 @@ registry name and decision only in text mode. Unknown syntax-like queries
 produce E2106 with a nearest registered spelling; package references are not
 classified as syntax typos. Standalone policy essays use the Foundation policy
 registry after syntax lookup. Effective source-site policy and build-fact
-writer-chain queries remain distinct loader-backed operations.
+writer-chain queries remain distinct loader-backed operations. Loaded policy
+queries do not require semantic compilation of callable bodies. The compiler
+prepends the selected entry package's policy declarations to each loaded user
+module and resolves the shared package/module/function/block ladder before
+publishing those facts. Package provenance names the physical `package.jet`
+or inline Package carrier; source-authored provenance names the same relative
+display path as the loaded module (an external module keeps its absolute path).
 
 Unsafe-gate inspection reads the parser's audited regions and scoped policy
 declarations. It retains each low-level operation, its typed obligations
@@ -392,3 +674,180 @@ source strings: security gates sort before knowledge and structure gates,
 duplicate facts merge all provenance, and unsafe rows retain their operation
 proofs and diagnostics. Package policy, invocation choices, and external
 lock/trust/forced-build writers enter through the driver's typed gate inputs.
+
+The hosted `cache status`, `cache prune --to <size>`, and
+`cache limit --host <size>` commands use Jetpack's existing machine-wide
+`ArtifactStore`, including its atomic host policy, verified namespaces, access
+journal, live-owner leases, and deterministic pruning order. Text and
+`jet.status/v1` JSON retain the Rust command's fields and size formatting.
+The CLI does not introduce another store or emulate cache mutation.
+
+Environment inspection's `.Oci` image/package cross-check now uses Jetpack's
+authority-backed `PackageFacts.load` reader, including inline package conflict
+checks and composed manifest facts. A present package is no longer refused by
+a compiler-only loader substitute; absent and malformed package outcomes keep
+the environment model's existing E1267 behavior.
+
+`jet self toolchain` reads the nearest checked package authority and reports
+its toolchain pin, locked version, object identity, and executable realization
+state through Jetpack's shared pin reader. It does not resolve or move a pin.
+The report is a human renderable: `--json` suppresses successful report bytes,
+while missing or malformed package authority remains an error.
+
+Offline `jet explain` queries also project registered fact declarations and
+corpus truths. Fact essays state the row's attachment target, safe direction,
+written loosening gates, and read-only prover where one is declared. Corpus
+truths state their published home, renderers, and single-home guard. Successful
+syntax and standalone policy lookup still win; source-backed build-writer
+queries remain separate and never become a generic registration essay.
+
+Source-file policy and marker-site essays resolve the loaded declarations with
+the shared scoped-policy resolver. Marker locations use UTF-8 byte offsets;
+an out-of-range line selects the end of the source. Their source prerequisite
+is the authorized load-only query, not a full semantic check: an undefined
+function in an otherwise parseable file does not prevent a policy essay.
+
+`jet self devtools new-example <topic>/<name>` writes the feature example and
+its expected output using the golden harness's existing directory layout.
+Existing example source is an error; existing expected output is replaced.
+The two writes are sequential, as in the maintainer command's Rust host.
+Its write confirmations are emitted even under `--json` or `--quiet`.
+
+Load-only gate queries use the same authorized source loader as schema and
+source queries. The loader retains canonical module, declaration, alias, and
+import-edge name facts without checking function bodies. Gate projection reuses
+sema's unsafe-obligation and policy writers, including the owning Package's
+unsafe-path and expert ceilings; external writers are supplied as typed gate
+entries. Diagnostics retain the loaded physical source path. A source that
+loads successfully can therefore be inspected even when a callable body would
+fail a semantic compile.
+
+## Maintainer workflows
+
+`jet self devtools reduce <file> --code <CODE>` minimizes line chunks while
+the compiler still emits the requested error or lint. Without `--code`, the
+oracle requires frontend acceptance and rejection of the generated Rust by
+the hidden backend's metadata-only probe. An unavailable backend is not a
+reproduction. The sibling output is `<stem>.reduced.<extension>`; files
+without an extension use `.jet`. Candidates are compiled from their actual
+temporary files, never by treating diagnostic display text as source input.
+
+`jet self devtools ice-report <file>` writes the original source, generated
+Rust, backend stderr, and both tool versions into a timestamped
+`.jet/ice-report/` directory in the source project. Frontend errors prevent
+publication. Backend acceptance is reported as a note but still permits a
+bundle. Files are published sequentially, so an I/O failure can leave a
+partial bundle.
+
+`jet self devtools bless [target...] --dry-run` lists the selected snapshot
+test commands without launching them or requiring a reason. A real sweep
+requires at least eight UTF-8 bytes in the trimmed `UPDATE_EXPECT_REASON`;
+it sets `UPDATE_EXPECT=1` for each child and inherits its standard streams.
+Requested order and duplicate targets are preserved, and every selected
+target is attempted even if an earlier one fails. These maintainer commands
+own their raw arguments: `reduce` accepts the two-word `--code` form, and
+`bless` treats options other than `--dry-run` as target names.
+
+`jet inspect gates [<entry.jet>] [--kind <kind>] [--scope <scope>]`
+uses the canonical load-only gate query, not semantic body checking or emission.
+Without an explicit file, normal project entry selection still applies. Kind
+aliases follow the gate registry; scope matches the row's scope, domain, or
+source label case-insensitively (`all` selects every row). Filtering does not
+hide loader, obligation, or package-policy diagnostics.
+
+Human output includes provenance and operation proofs. Groups of at least
+16 non-security gates collapse to a count; security groups always retain every
+entry. JSON uses the shared `inspect.gates` status envelope, complete byte spans
+and line/column locations, nullable external locations, and alphabetically
+ordered kind counts. These are direct inspection reports, including under
+`--quiet`. Trust rows project typed records from the actual canonical trust
+store; invocation choices and package/lock facts feed the same ledger before
+its policy checks. No CLI source scan, manifest parser, or invented receipt
+replaces those providers.
+
+Acceleration inspection projects the optimizer's actual loop, vector, and
+acceleration proof rows for the selected profile and machine layout. It does
+not convert a source proof into a runtime measurement. Decision inspection
+materializes the canonical ledger from those MIR producers and semantic
+diagnostic rows. The same authenticated `jet.mir.decisions.v1` payload carries
+the complete source/configuration/profile/target/implementation/artifact/run
+identity and checked derivation references for live snapshots and replay;
+readers reject altered identities, row IDs, derivations, and noncanonical bytes.
+
+The CLI's `inspect.accel` status projects typed authenticated runtime receipt
+rows separately from static vector and gate facts. Missing measurements stay
+null; a source proof alone never marks an acceleration selected. The shared
+D-ACCEL1 evaluator retains the release, parity, proof, measurement, and gain
+checks in their canonical order. `inspect.decisions` projects numeric row IDs,
+flat derivation references, per-kind counts, and the actual compiler journal's
+canonical routes; transport-ledger JSON is not a CLI status envelope.
+
+Runtime rows are read from authenticated current receipts through the held
+RecordIndex. Selection rederives the canonical target input identity, filters
+the current tool version, then chooses recorded sequence and receipt ID in
+descending order. A valid newest receipt with no acceleration rows does not
+reuse older measurements. Typed sections retain full-width integer values and
+reject unknown fields, invalid variants, duplicate numeric row sequences,
+reversed ranges, and values exceeding the compiled target's pointer width.
+
+The shared WatchGraph starts from the compiler loader's actual physical input
+paths, adds checked project sidecars, recursively referenced HTML/CSS/JS assets,
+and literal runtime file/directory inputs. It also requires a certified
+comptime-I/O read set. The current compiler does not expose that set: file-target
+receipt discovery refuses with `#4736`, rather than presenting an approximate
+input identity as authenticated. Directory-target collection uses the separate
+canonical tree policy.
+
+Explicit canonical-pass selections may report `canonical_route_gaps` alongside
+actual `canonical_routes`: these producer-owned operation IDs say `no Jet pass`
+only for absent Jet boundaries. They are availability rows, not execution
+receipts. Ordinary invocations preserve the reference status schema and omit
+the extension when there are no gaps.
+
+Output inspection consumes sema's checked callable links and selection facts,
+including the original source/semantic/machine names, typed parameters, inferred
+failure contract, solved effects, and reference/declaration spans. The driver
+selects a singular runnable Output (or an explicit address) before lowering;
+inspection does not rename a function or reinterpret a text entry. Layout rows
+come from the compiler's target-aware reflection engine, not the inspecting
+host's pointer width. Inspection stops after canonical MIR production and does
+not emit or execute the selected callable.
+
+`inspect.output` reports the selected binding, callable identity, effective
+failure contract and its source, solved required effects, and the canonical
+application authority's granted/denied effects. An explicit address selects
+the checked Output, not an arbitrary function with a matching name.
+
+Canonical-route evidence is opt-in through the existing adapter evidence
+environment (`JET_ADAPTER_MODE` and comma-separated `JET_ADAPTER_OPERATION_IDS`),
+not an additional public compiler flag. The source driver receives these
+choices as typed request options from its host and passes them to an
+invocation-owned journal; ordinary compiles allocate no boundary snapshots.
+Selected pass boundaries retain their actual input/output representations,
+payloads and identities, source provenance, occurrence/order, and preservation
+premises. Decision inspection consumes these captured records directly, never
+reconstructing a route from decision rows, work counters, or a digest.
+Requested Rust boundaries with no separate Jet producer have explicit
+`no Jet pass` availability rows. These are not pass records and do not prove
+whether the language meaning is folded into another Jet pass or is absent.
+
+The source loader also exposes the physical manifests and module paths it
+actually read, including failed-load diagnostics. This is not the full watched
+input closure: embedded Core/generated paths are excluded, and its comptime
+input coverage is explicitly uncertified until actual evaluator reads are
+retained. Receipt consumers must not substitute all authorized sources for
+that missing read set.
+
+Checked build-input HTTP fetches use a build-only transport, not the ordinary
+comptime host adapter. The selected `fn build` must explicitly declare both
+`Net` and `Time.Wait`. Jet checks every DNS answer against the existing public
+destination rule (including IPv4-mapped IPv6) and passes only that checked answer
+set to the connection leaf. The leaf performs no second DNS lookup and retains
+the original host for HTTP Host and TLS SNI/certificate verification.
+
+Fetch policy remains source-owned: a 30-second transport deadline, a 64-MiB
+body bound, SHA-256 verification before UTF-8 decoding, and the existing E3413/
+E3414 diagnostics. Status codes do not change which bytes are pinned: redirects
+are not followed, and the original response body is verified for any status.
+Missing build transport or execution/session providers remains an explicit
+refusal rather than a successful empty response.

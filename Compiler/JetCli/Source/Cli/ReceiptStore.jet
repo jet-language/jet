@@ -1,11 +1,15 @@
-// Pure ReceiptStore operations (Source/ReceiptStore.rs lookup 624-675).
-// The host supplies bytes only after the canonical held-directory reader has
-// authenticated the file. This API never opens paths or publishes an object.
+// Source/ReceiptStore.rs: immutable receipts and append-only section records,
+// held under the selected project root. All store I/O goes through RootedStore.
 pub fn jet_cli_receipt_lookup_bytes(bytes: [U8]?, claim: JetCLIReceiptClaim, observed_inputs: [JetCLIReceiptInput], published_sections: [JetCLIReceiptSectionRecord]) -> JetCLIReceipt? String! {
     if !jet_cli_receipt_is_digest(claim.key) || claim.inputs != observed_inputs -> return Ok(None)
     raw :: bytes ?? return Ok(None)
     receipt := jet_cli_receipt_decode(raw) ?? return Ok(None)
     if receipt.claim != claim -> return Ok(None)
+    Ok(Val(jet_cli_receipt_merge_sections(^receipt, claim, published_sections)))
+}
+
+fn jet_cli_receipt_merge_sections(receipt: ^JetCLIReceipt, claim: JetCLIReceiptClaim, published_sections: [JetCLIReceiptSectionRecord]) -> JetCLIReceipt String! {
+    receipt := ^receipt
     loop record in published_sections {
         if record.claim_key != claim.key || record.parent_digest != receipt.digest {
             return Err("published receipt section has a different parent identity")
@@ -24,7 +28,7 @@ pub fn jet_cli_receipt_lookup_bytes(bytes: [U8]?, claim: JetCLIReceiptClaim, obs
         if !same -> &receipt.sections.push(section)
     }
     receipt.sections = jet_cli_receipt_normalized_sections(receipt.sections)
-    Ok(Val(receipt))
+    Ok(receipt)
 }
 
 pub fn jet_cli_receipt_section(receipt: JetCLIReceipt, name: String) -> JetCLIReceiptSection? String! {
@@ -89,4 +93,131 @@ pub fn jet_cli_receipt_prepare(claim: JetCLIReceiptClaim, status: Int, stdout: [
     // claim field sizes; never return an object publication would refuse.
     _ :: jet_cli_receipt_encode(receipt)
     Ok(receipt)
+}
+
+fn jet_cli_receipt_observe_input(input: JetCLIReceiptInput) -[FS, Time.Wait]> JetCLIReceiptInput String! {
+    if !input.path.starts_with("/") -> return Err("receipt input path is not absolute: {input.path}")
+    parts := [String]{}
+    loop part in input.path.split("/") {
+        if part != "" && part != "." -> &parts.push(part)
+    }
+    name :: &parts.pop() ?? return Err("receipt input has no file name")
+    held :: JetCLIRootedDirectory.open("/", parts, false) ?? return Err(err.message)
+    bytes :: held.read(name, Int.MAX) ?? return Err(err.message)
+    raw :: bytes ?? return Err("receipt input does not exist: {input.path}")
+    Ok(JetCLIReceiptInput{path: input.path, digest: receipt_crypto.sha256(raw).hex()})
+}
+
+pub fn jet_cli_receipt_inputs_current(inputs: [JetCLIReceiptInput]) -[FS, Time.Wait]> Bool Never! {
+    loop input in inputs {
+        observed :: jet_cli_receipt_observe_input(input) ?? return false
+        if observed != input -> return false
+    }
+    true
+}
+
+pub fn jet_cli_receipt_read_section_records(project_root: String, claim_key: String, parent_digest: String, staged: Bool{false}) -[FS, Time.Wait]> [JetCLIReceiptSectionRecord] String! {
+    if !jet_cli_receipt_is_digest(claim_key) -> return Err("receipt section claim digest is malformed")
+    parts :: [String]{".jet", "receipts", if staged -> "staged" else -> "sections", claim_key}
+    present :: JetCLIRootedDirectory.present(project_root, parts) ?? return Err(err.message)
+    if !present -> return Ok([JetCLIReceiptSectionRecord]{})
+    held :: JetCLIRootedDirectory.open(project_root, parts, false) ?? return Err(err.message)
+    entries := held.list() ?? return Err(err.message)
+    records := [JetCLIReceiptSectionRecord]{}
+    loop entry in entries {
+        if entry.name == "" || entry.name.starts_with(".") -> next
+        shown :: jet_cli_rooted_join(held.path, entry.name)
+        if !jet_cli_receipt_is_digest(entry.name) -> return Err("receipt section record has a non-digest name: {shown}")
+        if !entry.is_file -> return Err("receipt section record is not a regular file: {shown}")
+        bytes :: held.read(entry.name, JET_CLI_RECEIPT_SECTION_RECORD_MAX) ?? return Err(err.message)
+        raw :: bytes ?? return Err("receipt section record disappeared: {shown}")
+        record :: jet_cli_receipt_section_record_decode(raw)
+        if jet_cli_receipt_section_record_identity(record) != entry.name -> return Err("receipt section record identity does not match its path: {shown}")
+        if record.claim_key != claim_key || record.parent_digest != parent_digest -> return Err("receipt section record belongs to a different receipt: {shown}")
+        &records.push(record)
+        if records.len() > 256 -> return Err("receipt has too many sections (maximum 256)")
+    }
+    Ok(records)
+}
+
+pub fn jet_cli_receipt_lookup(project_root: String, claim: JetCLIReceiptClaim) -[FS, Time.Wait]> JetCLIReceipt? String! {
+    if !jet_cli_receipt_is_digest(claim.key) || !jet_cli_receipt_inputs_current(claim.inputs) -> return Ok(None)
+    parts :: [String]{".jet", "receipts", "objects"}
+    present :: JetCLIRootedDirectory.present(project_root, parts) ?? return Err(err.message)
+    if !present -> return Ok(None)
+    held :: JetCLIRootedDirectory.open(project_root, parts, false) ?? return Err(err.message)
+    bytes :: held.read(claim.key, JET_CLI_RECEIPT_MAX_BYTES) ?? return Err(err.message)
+    raw :: bytes ?? return Ok(None)
+    receipt :: jet_cli_receipt_decode(raw) ?? return Ok(None)
+    if receipt.claim != claim -> return Ok(None)
+    records :: jet_cli_receipt_read_section_records(project_root, claim.key, receipt.digest)
+    Ok(Val(jet_cli_receipt_merge_sections(^receipt, claim, records)))
+}
+
+// True is a new immutable object; false is an identical publication or a
+// stale input closure. A different object under the same key is never replaced.
+pub fn jet_cli_receipt_publish(project_root: String, receipt: JetCLIReceipt) -[FS, Env, Time.Wait]> Bool String! {
+    if !jet_cli_receipt_is_digest(receipt.claim.key) -> return Err("receipt claim key is not a lowercase SHA-256 digest")
+    bytes :: jet_cli_receipt_encode(receipt)
+    if !jet_cli_receipt_inputs_current(receipt.claim.inputs) -> return Ok(false)
+    held :: JetCLIRootedDirectory.open(project_root, [String]{".jet", "receipts", "objects"}, true) ?? return Err(err.message)
+    Ok(held.publish_immutable(receipt.claim.key, bytes, None, JET_CLI_RECEIPT_MAX_BYTES) ?? return Err(err.message))
+}
+
+pub fn jet_cli_receipt_publish_section(project_root: String, record: JetCLIReceiptSectionRecord) -[FS, Env, Time.Wait]> Bool String! {
+    bytes :: jet_cli_receipt_section_record_encode(record)
+    directory :: if record.parent_digest == "" -> "staged" else -> "sections"
+    held :: JetCLIRootedDirectory.open(project_root, [String]{".jet", "receipts", directory, record.claim_key}, true) ?? return Err(err.message)
+    id :: jet_cli_receipt_section_record_identity(record)
+    Ok(held.publish_immutable(id, bytes, None, JET_CLI_RECEIPT_SECTION_RECORD_MAX) ?? return Err(err.message))
+}
+
+pub fn jet_cli_receipt_adopt_staged_sections(project_root: String, claim: JetCLIReceiptClaim) String! -[FS, Env, Time.Wait]> {
+    receipt :: jet_cli_receipt_lookup(project_root, claim)
+    parent :: receipt ?? return Err("cannot adopt receipt sections before parent publication")
+    records :: jet_cli_receipt_read_section_records(project_root, claim.key, "", true)
+    if records.len() == 0 -> return
+    adopted := [JetCLIReceiptSectionRecord]{}
+    loop record in records {
+        published :: JetCLIReceiptSectionRecord{claim_key: claim.key, parent_digest: parent.digest, section: record.section}
+        &adopted.push(published)
+    }
+    // Validate every conflict before publishing the first append-only record.
+    _ :: jet_cli_receipt_merge_sections(parent, claim, adopted)
+    held :: JetCLIRootedDirectory.open(project_root, [String]{".jet", "receipts", "staged", claim.key}, false) ?? return Err(err.message)
+    loop (index, record) in adopted {
+        _ :: jet_cli_receipt_publish_section(project_root, record)
+        _ :: held.remove(jet_cli_receipt_section_record_identity(records[index])) ?? return Err(err.message)
+    }
+}
+
+pub fn jet_cli_receipt_list(project_root: String) -[FS, Time.Wait]> [JetCLIReceipt] String! {
+    parts :: [String]{".jet", "receipts", "objects"}
+    present :: JetCLIRootedDirectory.present(project_root, parts) ?? return Err(err.message)
+    if !present -> return Ok([JetCLIReceipt]{})
+    held :: JetCLIRootedDirectory.open(project_root, parts, false) ?? return Err(err.message)
+    entries := held.list() ?? return Err(err.message)
+    receipts := [JetCLIReceipt]{}
+    loop entry in entries {
+        if !entry.is_file || !jet_cli_receipt_is_digest(entry.name) -> next
+        bytes :: held.read(entry.name, JET_CLI_RECEIPT_MAX_BYTES) ?? next
+        raw :: bytes ?? next
+        receipt :: jet_cli_receipt_decode(raw) ?? next
+        if receipt.claim.key != entry.name -> next
+        records :: jet_cli_receipt_read_section_records(project_root, entry.name, receipt.digest) ?? next
+        key :: receipt.claim
+        row :: jet_cli_receipt_merge_sections(^receipt, key, records) ?? next
+        &receipts.push(row)
+    }
+    Ok(receipts)
+}
+
+pub fn jet_cli_receipt_list_current(project_root: String) -[FS, Time.Wait]> [JetCLIReceipt] String! {
+    receipts :: jet_cli_receipt_list(project_root)
+    current := [JetCLIReceipt]{}
+    loop receipt in receipts {
+        fresh :: jet_cli_receipt_lookup(project_root, receipt.claim)
+        if fresh == Val(receipt) -> &current.push(receipt)
+    }
+    Ok(current)
 }
