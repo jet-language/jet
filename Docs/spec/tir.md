@@ -73,6 +73,8 @@ scope and exact opaque saved-flags token, including zero; a new Stop during
 cleanup remains visible, and the shared double-panic policy is unchanged.
 The `sort_key_contract` executable example covers deep payload permutations,
 tuple/named/fallible keys, stability, large-list comparison bounds, and boundaries.
+The `sort_comparator_panic` and `sort_key_panic` examples pin unchanged receiver
+payloads at caller Close and initialized owning-key prefix Close on callback Stop.
 
 ## Read-only fact channel
 
