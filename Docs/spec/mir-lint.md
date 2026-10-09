@@ -22,8 +22,10 @@ archived Rust bootstrap compiler does not carry the lint.
 - A failure is an internal compiler error. The report names the pass that
   produced the program, the rule family, the function, and the offending
   operation.
-- The lint is linear in the size of the program. Ownership uses one forward
-  dataflow over flat bit rows per function, with no per-block copies of maps.
+- The lint is linear in the size of the program. Ownership and the safety
+  families share one forward dataflow over flat bit rows per function, with no
+  per-block copies of maps. The safety families add work proportional to a
+  function's views, writing closures, and task-group loans, which are a handful.
 
 Native stop-point lowering and legality verification use the same checked
 Prelude route effects. A route marked `Panic` in
@@ -132,6 +134,79 @@ Every rule belongs to one family. The family name is part of the ICE text.
 | `terminator.typing` | Each of the 8 terminators satisfies its rule below. |
 | `ownership.move` | No value or place is used after it was moved on every path to the use, a value is consumed at most once, and only owned values are consumed. A write to a moved place or its parent restores it. A Bool local that is provably false (or true) on every path removes the branch edge it guards, and the same Bool facts are followed along each path out of a move: a place use is a second move only when some feasible path reaches it from the move without a restoring write (a cleanup move guarded by the drop flag the move cleared runs only where the place was refilled). Failure and unwind drop edges are entry points. |
 | `effect.row` | Every effect in a direct callee's solved row is in the caller's solved row, itself or through a parent effect (`FS` covers `FS.Write`), unless the caller's row is maximal. |
+| `alias.exclusive` | A place that one operation's argument writes, directly or through a closure argument that writes a captured place, overlaps no other argument, receiver, or captured place of that operation. A closure that writes a captured place is not used after another access reached that place while the closure was live. A place lent to a task-group child does not overlap another live child's loan when either writes, and the parent does not read a place a live child writes. |
+| `view.valid` | A view is not used after a path containing its owner was moved, written, or resized. A place lent to a task-group child does not change before the group's scope exits or the child's handle is joined. A returned view points only into a parameter the caller keeps (inside the declared `from` sources, when there are any), a capture, or a static, never into a local, an owned parameter, or a temporary. |
+| `send.boundary` | A sendable closure (`SendFn`) captures no value or place whose type holds a `Cell`, a `View`/`ViewMut`, or a non-sendable `Fn`. Its place captures are allowed only for a task-group child, or for reading in a parallel worker. A write capture, or a non-Copy value read straight out of a place, is allowed only for a task-group child. A channel send carries no such value. |
+
+## Safety families
+
+`alias.exclusive`, `view.valid`, and `send.boundary` are Jet's independent
+second proof of exclusivity, view validity, and sendability. On the Rust path,
+rustc's borrow checker and `Send` checks re-prove them for the generated code.
+The native backend has no such re-check. These families use only facts the
+MIR already carries, never sema's alias graph:
+
+- **Places.** Two places overlap when they share a root and no projection
+  separates them. Different fields are disjoint, and so are index projections
+  that name two distinct `Int` constants. Every other index, range, payload, or
+  dereference may overlap.
+- **Views and SSA generations.** A view origin records every owner in the
+  current direct/indirect callee's `return_view_provenance`; builtin producers
+  derive their owners from every operand place. A narrowed projection is
+  conservatively checked as its owner's whole place. Borrowed carrier origins
+  propagate to a fixed point through def-use edges, including arbitrarily long
+  Move chains and every Phi input. Phi generations take only their selected
+  predecessor's active/stale state. A holder retains its own generation:
+  re-evaluating an origin in a loop cannot refresh an older stored window.
+- **Flow joins.** Move and known guard facts use must-intersection. Active
+  origins, stale generations, holders and outstanding child loans form a
+  separate may-flow and use union: a fact on any incoming edge survives.
+- **Sendable carriers.** Union members and Alias/Distinct targets are traversed
+  recursively, as are nominal fields and variant payloads. Shared data and
+  SendFn values use their explicit sendable representation.
+- **Writing closures.** A closure that is not sendable and captures a place
+  through a write capture parameter keeps a write of that place live. Any other
+  read or write of an overlapping place makes it stale, and a later use of the
+  closure, or of a local holding it, is an `alias.exclusive` failure.
+- **Tasks.** A spawn is a `CoreClosureCall` of kind `Spawn`. It is a task-group
+  child when its values carry the group (three values: group, site, label).
+  Each place the child captures, or reads straight out of as a non-Copy value,
+  is lent until its own TaskGroup scope exits or its uniquely identified task
+  handle is joined. A nested unrelated group cannot clear the loan; joining a
+  replacement handle cannot clear the overwritten child's loan. An ambiguous
+  handle conservatively stays outstanding until its group's scope exits.
+  A parallel worker is joined inside its `para_*` call.
+- **Copy facts.** A value whose ownership mode is `Copy`, or whose layout is a
+  scalar ABI, is copied out of its place and aliases nothing.
+
+The hand-built mutation controls in `LintFixtures.jet` bypass sema entirely:
+each pair feeds clean/planted MIR directly to the independent lint. The named
+diagnostics identify the language checks these MIR shapes back; these are not
+receipts from compiling a checker with sema checks deleted. The programs are
+`projected_write_window_overlap`
+(E0204), `view_owner_changed` (E0212), `ownership_call_consume_provenance`
+(E0121), `task_capture`, `taskgroup_overlapping_write_borrows`, and
+`taskgroup_lent_owner_moved` (E1101), `local_cell_crossing`,
+`string_view_task_capture`, and `unsendable_send` (E1102), and
+`view_outlives_owner` (E2305). The fixtures also cover the closure-laundered
+mutations of #4621.
+The regression matrix additionally covers one-predecessor invalidations and
+loans, Phi-selected generations, twelve-hop Move chains, multiple declared
+owners, Union/Alias/Distinct sendability, nested groups and overwritten handles.
+`run-lint-fixtures.mjs OUT CHECKER` executes the assembled unit and writes a
+strict receipt with source hashes, checker hash, expected/passed case counts
+and failures. A dirty source tree records a null admitted head; only a clean,
+exact-head receipt can be admitted by the standing gate.
+
+Two sema rules have no MIR counterpart, so the lint cannot back them:
+
+- E1113 (a write through a frozen value). `freeze(x)` lowers to an ordinary
+  owned copy, and every capture of it copies again, so a later write races with
+  nothing in the MIR. The lint needs a frozen fact, such as a `Freeze` copy
+  fact, before it can prove the rule.
+- E0204 on a scalar. In `both(&x, x)` with an `Int`, the read argument is
+  copied out before the call. The MIR is memory-safe, and sema's rule is
+  stricter than that.
 
 Source-owned Core declarations remain in sema's registry, but are excluded from
 the executable MIR Core-call projection, including comptime and REPL fragments.

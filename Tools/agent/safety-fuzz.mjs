@@ -40,7 +40,9 @@
 // run-differential, run-sanitized and run-lint-corpus verdicts of the case.
 // The gate (exit 1) fails on model-differs, rust-error, native-diverges, a
 // sanitizer report or sanitized-diverges, lint findings and lint-crash. A
-// failing case reproduces from its seed; the .jet is the repro.
+// failing case reproduces from its seed; the .jet is the repro. Any harness
+// failure (a model error, a tool that did not run) exits 2 and writes no
+// receipt, so it can never read as a gate verdict.
 //
 // usage: [JET=<jet binary>] [JET_RUNTIME_PACK=... | JET_RUNTIME_C_LIB=...] [JET_LOWER_SANITIZE=1]
 //        node Tools/agent/safety-fuzz.mjs <outdir> [--seed N] [--count K]
@@ -59,6 +61,9 @@ const I64_MAX = (1n << 63n) - 1n;
 const I64_MIN = -(1n << 63n);
 const STEP_LIMIT = 20000;
 const OUTPUT_LIMIT = 300;
+// `s += s` in a loop doubles a String; the model discards such programs long
+// before the evaluator's own string limit.
+const STRING_LIMIT = 4096;
 const ATTEMPTS = 200;
 
 class Reject extends Error {}
@@ -533,6 +538,7 @@ class Env {
 
 function checked(v) {
   if (typeof v === "bigint" && (v > I64_MAX || v < I64_MIN)) throw new Reject("overflow");
+  if (typeof v === "string" && v.length > STRING_LIMIT) throw new Reject("string size");
   return v;
 }
 function floorDiv(a, b) {
@@ -589,7 +595,7 @@ class Machine {
     switch (e.k) {
       case "int": case "bool": case "str": return e.v;
       case "copy": return env.get(e.name);
-      case "strfmt": return e.parts.map((part) => (typeof part === "string" ? part : this.show(this.eval(part, env)))).join("");
+      case "strfmt": return checked(e.parts.map((part) => (typeof part === "string" ? part : this.show(this.eval(part, env)))).join(""));
       case "var": return env.get(e.name);
       case "neg": return checked(-this.eval(e.e, env));
       case "not": return !this.eval(e.e, env);
@@ -740,9 +746,59 @@ export function generateCase(seed, index) {
   throw new Error(`seed ${seed} case ${index}: no defined program in ${ATTEMPTS} attempts`);
 }
 
+// Stateful Core/runtime API stress, independently modeled without executing Jet.
+// Keeps all indexes valid; invalid UTF-8 is a defined fallible decode, not UB.
+export function generateCoreCase(seed, index) {
+  const rng = random("jet-core-safety-fuzz", seed, index);
+  const statements = ["m := [String:Int]{}", "xs := [Int]{}"];
+  const output = [];
+  const map = new Map();
+  const list = [];
+  for (let step = 0; step < 64; step++) {
+    const key = `k${Math.floor(rng() * 8)}`;
+    const value = Math.floor(rng() * 1000);
+    switch (step % 4) {
+      case 0:
+        statements.push(`m["${key}"] = ${value}`, `&xs.push(${value})`);
+        map.set(key, value);
+        list.push(value);
+        break;
+      case 1:
+        statements.push(`print(m.get("${key}") ?? -1)`, "print(xs.len())");
+        output.push(map.get(key) ?? -1, list.length);
+        break;
+      case 2:
+        statements.push(`print((&m.pop("${key}")) ?? -1)`, "print((&xs.pop()) ?? -1)");
+        output.push(map.get(key) ?? -1, list.pop() ?? -1);
+        map.delete(key);
+        break;
+      case 3:
+        statements.push(`saved${step} :: ~xs`, `&xs.push(${value})`, `print(saved${step}.len())`, "print(xs.len())");
+        output.push(list.length, list.length + 1);
+        list.push(value);
+        break;
+    }
+  }
+  const bytes = Array.from({ length: 1 + Math.floor(rng() * 32) }, () => 65 + Math.floor(rng() * 26));
+  statements.push(`print(String.from_bytes([U8]{${bytes.join(", ")}}) ?? "bad")`);
+  output.push(String.fromCharCode(...bytes));
+  for (const invalid of [[255], [128], [226, 130], [192, 175], [237, 160, 128], [244, 144, 128, 128]]) {
+    statements.push(`print(String.from_bytes([U8]{${invalid.join(", ")}}) ?? "invalid")`);
+    output.push("invalid");
+  }
+  return {
+    source: `// Core API fuzz: seed ${seed}, case ${index}\nfn run() {\n${statements.map((line) => `    ${line}`).join("\n")}\n}\n`,
+    stdout: output.map((value) => `${value}\n`).join(""),
+  };
+}
+
 // ---------------------------------------------------------------- driver
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  process.on("uncaughtException", (error) => {
+    console.error(error?.stack ?? String(error));
+    process.exit(2);
+  });
   const args = process.argv.slice(2);
   const outDir = args.length ? resolve(args.shift()) : null;
   if (!outDir) {
@@ -762,7 +818,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   }
   const STAGES = ["generate", "goldens", "differential", "lint"];
   const last = STAGES.indexOf(until);
-  if (last < 0 || !Number.isInteger(seed) || !(count > 0)) throw new Error("bad --seed, --count or --until");
+  if (last < 0 || !Number.isSafeInteger(seed) || !Number.isSafeInteger(count) || count < 1) throw new Error("bad --seed, --count or --until");
 
   // 1. Corpus.
   const features = join(outDir, "corpus/Examples/features");
@@ -839,13 +895,16 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
       } else reference = "model-agree";
     } else if (ref && ref.mode === "run") detail = "missing raw reference streams";
     const native = differential.get(stem)?.verdict ?? harness.get(stem)?.verdict ?? "-";
+    if (last >= 2 && native !== "agree") failures.push(`native-incomplete\t${stem}\t${native}`);
     const sanitized = sanitize.get(stem)?.verdict ?? "-";
     const linted = lint.get(stem)?.verdict ?? "-";
     rows.push([stem, reference, native, sanitized, linted, detail || differential.get(stem)?.detail || sanitize.get(stem)?.detail || lint.get(stem)?.detail || ""].join("\t"));
     if (reference === "model-differs" || reference === "rust-error") failures.push(`${reference}\t${stem}\t${detail}`);
     if (native === "native-diverges") failures.push(`native-diverges\t${stem}\t${differential.get(stem).detail}`);
     if (sanitized === "report" || sanitized === "sanitized-diverges") failures.push(`sanitize-${sanitized}\t${stem}\t${sanitize.get(stem).detail}`);
+    if (last >= 2 && sanitizeRuntime && sanitized !== "clean" && sanitized !== "report" && sanitized !== "sanitized-diverges") failures.push(`sanitize-incomplete\t${stem}\t${sanitized}`);
     if (linted === "findings" || linted === "lint-crash") failures.push(`lint-${linted}\t${stem}\t${lint.get(stem).detail}`);
+    if (last >= 3 && linted !== "clean" && linted !== "findings" && linted !== "lint-crash") failures.push(`lint-incomplete\t${stem}\t${linted}`);
   }
   writeFileSync(join(outDir, "fuzz.tsv"), rows.join("\n") + "\n");
   const tally = (column) => {

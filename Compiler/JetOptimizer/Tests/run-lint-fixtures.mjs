@@ -12,13 +12,16 @@
 // registry and parameter-zone items whose files pull in the whole diagnostics
 // registry; their exact definitions are copied out of those files.
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { execFileSync, spawnSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const outDir = process.argv[2];
+const checker = process.argv[3];
 if (!outDir) {
-  console.error("usage: run-lint-fixtures.mjs <outdir>");
+  console.error("usage: run-lint-fixtures.mjs <outdir> [checker]");
   process.exit(64);
 }
 const read = (path) => readFileSync(`${repo}/${path}`, "utf8");
@@ -103,3 +106,35 @@ mkdirSync(outDir, { recursive: true });
 writeFileSync(`${outDir}/unit.jet`, parts.join("\n"));
 writeFileSync(`${outDir}/package.jet`, 'name: "jet_optimizer_lint_fixtures"\nversion: "0.1.0"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n');
 console.log(`${outDir}/unit.jet`);
+if (checker) {
+  const binary = resolve(checker);
+  read("Compiler/JetOptimizer/Tests/run-lint-fixtures.mjs");
+  const expected = [...parts.at(-1).matchAll(/\blf_expect\("/g)].length;
+  const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8" }).trim();
+  const clean = spawnSync("git", ["diff", "--quiet", "HEAD", "--", ...sources.keys()], { cwd: repo });
+  if (clean.error || ![0, 1].includes(clean.status)) throw clean.error ?? new Error("cannot bind fixture sources to HEAD");
+  const run = spawnSync(binary, ["run", resolve(outDir, "unit.jet")], {
+    cwd: resolve(outDir), encoding: "utf8", timeout: 180_000, maxBuffer: 16 * 1024 * 1024,
+  });
+  writeFileSync(`${outDir}/stdout.log`, run.stdout ?? "");
+  writeFileSync(`${outDir}/stderr.log`, run.stderr ?? "");
+  const summary = /(\d+) passed, (\d+) failed/.exec(run.stdout ?? "");
+  const failures = [];
+  if (run.error) failures.push(run.error.message);
+  if (run.status !== 0) failures.push(`checker status ${run.status}, signal ${run.signal}`);
+  if (!summary || Number(summary[1]) !== expected || Number(summary[2]) !== 0 || !run.stdout.includes("all lint fixtures passed")) {
+    failures.push(`fixture summary does not prove all ${expected} controls passed`);
+  }
+  const receipt = {
+    head: clean.status === 0 ? head : null, source_head: head, source_dirty: clean.status !== 0,
+    coverage: "MIR alias.exclusive/view.valid/send.boundary mutation controls", control_kind: "hand-built-mir",
+    checker: binary, checker_sha256: createHash("sha256").update(readFileSync(binary)).digest("hex"),
+    sources: Object.fromEntries(sources), checked_cases: summary ? Number(summary[1]) : 0,
+    expected_cases: expected, verdict: failures.length ? "FAIL" : "PASS", failures,
+    status: run.status, signal: run.signal,
+  };
+  writeFileSync(`${outDir}/receipt.json`, `${JSON.stringify(receipt, null, 2)}\n`);
+  process.stdout.write(run.stdout ?? "");
+  process.stderr.write(run.stderr ?? "");
+  process.exitCode = failures.length ? (run.error ? 2 : 1) : 0;
+}
