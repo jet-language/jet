@@ -510,7 +510,7 @@ fn sema_call_method_checked_from_value(state: &SemaOwnershipState, receiver: Exp
                 .ImplMethod(owner, implementation, index) -> sema_registration_visible(graph.modules[owner].impls[implementation].methods[index].symbol.visibility, environment.module_identity, environment.package_identity, graph.modules[owner].module_identity, graph.modules[owner].package_identity)
             })
         } else if candidate.method.trait_owner == .Val(owner) {
-            row :: sema_type_graph_nominal_row(graph, owner.key) ?? return None
+            row :: sema_type_graph_nominal_row(graph, owner.key) ?? panic("selected trait method has no canonical owner row")
             visible = Val(sema_call_trait_visible(graph, graph.modules[row.module_index].nominals[row.row], environment.module_identity, environment.package_identity))
         } else if candidate.method.mangled {
             panic("selected registered method has no canonical callable row")
