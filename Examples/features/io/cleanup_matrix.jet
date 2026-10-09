@@ -13,7 +13,6 @@ package {
 use core.sys as os
 use core.process as process
 use core.mem.scope as scope
-use core.time as time
 
 struct Resource {
     name: String
@@ -36,7 +35,7 @@ fn stop_process(code: Int) {
     }
 }
 
-fn body(path: String) -> Int CaseFail! {
+fn body(path: String, ready: Sender<Int>?, blocked: Receiver<Int>?) -> Int CaseFail! {
     first := Resource{name: "first"}
     defer close(^first)
     _guard_1 :: scope.guard(() -> print("guard 1"))
@@ -47,7 +46,14 @@ fn body(path: String) -> Int CaseFail! {
     if path == {
         "error" -> return Err(CaseFail.Bad)
         "panic" -> panic("case panic")
-        "cancel" -> time.sleep(5s)
+        "cancel" -> {
+            started :: ready ?? panic("missing cancellation readiness channel")
+            waiting :: blocked ?? panic("missing cancellation blocking channel")
+            started.send(1)
+            // No sender releases this wait. The winner cancels it only after
+            // receiving readiness, so the resources above are provably live.
+            _ :: waiting.receive() ?? panic("cancellation wait was released")
+        }
         "exit" -> process.exit(0)
         "stop" -> stop_process(3) ?? panic("os.stop was refused")
         else -> return Ok(0)
@@ -59,12 +65,12 @@ fn body(path: String) -> Int CaseFail! {
     Ok(1)
 }
 
-fn cancelled_body() -> Int {
-    body("cancel") ?? -1
+fn cancelled_body(ready: Sender<Int>, blocked: Receiver<Int>) -> Int {
+    body("cancel", Val(ready), Val(blocked)) ?? -1
 }
 
-fn quick() -> Int {
-    time.sleep(50ms)
+fn quick(ready: Receiver<Int>) -> Int {
+    _ :: ready.receive() ?? panic("cancellation body did not become ready")
     7
 }
 
@@ -74,11 +80,15 @@ fn child(path: String) CaseFail! {
         os.atexit(() -> print("atexit 2"))
     }
     if path == "cancel" {
-        winner :: task.race {cancelled_body(), quick()} ?? panic("race failed")
+        (ready_tx, ready_rx) :: channel<Int>()
+        (block_tx, block_rx) :: channel<Int>()
+        winner :: task.race {cancelled_body(ready_tx, block_rx), quick(ready_rx)} ?? panic("race failed")
+        // Keep the unreleased wait's sender alive until the loser has drained.
+        block_tx.close()
         print("race winner {winner}")
         return Ok()
     }
-    result :: body(path)
+    result :: body(path, None, None)
     print("result {result}")
     Ok()
 }

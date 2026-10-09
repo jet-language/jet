@@ -25,10 +25,128 @@ fn emit_native_aot(
         &jet::Codegen::MIRRust::MirRustConfig {
             target: jet_foundation::Layout::TargetLayout::host(),
             target_kind: jet::Codegen::MIRRust::MirRustTarget::Native,
-            root_prefix: String::new(),
+            root_prefix: root_prefix.to_string(),
             execution: jet::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact),
         },
     )
+}
+
+#[test]
+fn complex_unit_literals_use_registered_native_root_with_prefix() {
+    let bundle = checked_project(
+        "complex_root_projection",
+        "authority: { holds: { allow: [IO, Mem.Alloc] } }",
+        include_str!("../Examples/features/types/unit_literals.jet"),
+    );
+    let rust = emit_native_aot_with_root_prefix(&bundle, "runtime::");
+    assert!(rust.contains("runtime::JetComplex"), "{rust}");
+    assert!(!rust.contains("runtime::__jet_Complex"), "{rust}");
+}
+
+#[test]
+fn checked_dkim_config_uses_the_native_head_with_any_root_prefix() {
+    let bundle = checked_project(
+        "dkim_carrier_projection",
+        "authority: { holds: { allow: [Mem.Alloc] } }",
+        r#"
+use core.email as email
+fn consume(value: email.DKIMConfig?) {}
+fn run() { consume(None) }
+"#,
+    );
+    for prefix in ["", "runtime::"] {
+        let rust = emit_native_aot_with_root_prefix(&bundle, prefix);
+        assert!(rust.contains(&format!("{prefix}jet_email::DkimConfig<")), "{rust}");
+        assert!(!rust.contains("jet_email::DKIMConfig"), "{rust}");
+    }
+}
+
+#[test]
+fn view_materialization_borrows_the_source_at_the_kernel_boundary() {
+    let bundle = checked_project(
+        "view_copy_supplier",
+        "authority: { holds: { allow: [IO, Mem.Alloc] } }",
+        r#"
+fn copy_read(values: View<Int>) -> [Int] { ~values }
+fn copy_write(values: ViewMut<Int>) -> [Int] { ~values }
+fn copy_text(value: View<str>) -> String { ~value }
+fn run() {
+    fixed :: [Int#3]{1, 2, 3}
+    values := [Int]{4, 5, 6}
+    padded :: " text "
+    print(copy_read(fixed[0..1]))
+    print(copy_read(values[0..1]))
+    print(copy_write(&values[0..1]))
+    print(copy_text(padded.trim()))
+    print(fixed[0])
+    print(values[0])
+    print(padded)
+}
+"#,
+    );
+    let rust = emit_native_aot(&bundle);
+    for kernel in ["jet_view_copy(", "jet_string_view_copy("] {
+        let calls = rust
+            .lines()
+            .filter(|line| line.contains("__jet_v") && line.contains(kernel))
+            .collect::<Vec<_>>();
+        assert!(!calls.is_empty(), "missing {kernel} supplier:\n{rust}");
+        for call in calls {
+            assert!(!call.contains(".clone("), "supplier must not copy before {kernel}: {call}");
+            assert!(
+                call.contains(".as_ref()") || call.contains('&'),
+                "supplier must borrow into {kernel}: {call}"
+            );
+        }
+    }
+}
+
+#[test]
+fn checked_shell_text_uses_argv_carrier_with_any_root_prefix() {
+    let bundle = checked_project(
+        "shell_carrier_projection",
+        "authority: { holds: { allow: [IO, Mem.Alloc] } }",
+        r#"
+fn consume(command: Sh) { print("ready") }
+fn run() {
+    word :: "two words"
+    command :: Sh{"printf {word}"}
+    consume(command)
+}
+"#,
+    );
+    for prefix in ["", "runtime::"] {
+        let rust = emit_native_aot_with_root_prefix(&bundle, prefix);
+        assert!(rust.contains("Vec<String>"), "{rust}");
+        assert!(!rust.contains("jet_std::Sh"), "{rust}");
+        assert!(!rust.contains("__jet_Sh"), "{rust}");
+    }
+    if let Some((exit, stdout)) = aot_output(&bundle, "shell_carrier_projection_aot") {
+        assert_eq!(exit, 0);
+        assert_eq!(stdout, "ready\n");
+    }
+}
+
+#[test]
+fn qualified_user_shell_name_keeps_its_declared_carrier() {
+    let bundle = checked_project(
+        "user_shell_projection",
+        "authority: { holds: { allow: [IO, Mem.Alloc] } }",
+        r#"
+module user {
+    pub struct Sh { pub value: Int }
+}
+fn consume(command: user.Sh) { print(command.value) }
+fn run() { consume(user.Sh{value: 7}) }
+"#,
+    );
+    let rust = emit_native_aot(&bundle);
+    assert!(rust.contains("_c_cSh"), "{rust}");
+    assert!(!rust.contains("jet_std::Sh"), "{rust}");
+    if let Some((exit, stdout)) = aot_output(&bundle, "user_shell_projection_aot") {
+        assert_eq!(exit, 0);
+        assert_eq!(stdout, "7\n");
+    }
 }
 
 /// Number of `impl <rust_trait> for <type>` headers in generated Rust for the

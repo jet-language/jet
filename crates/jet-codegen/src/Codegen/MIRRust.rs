@@ -6015,7 +6015,7 @@ impl<'a> RustEmitter<'a> {
             return format!("JetExpiring<{}>", self.rust_type(&args[0]));
         }
         if let Some(email_name) = crate::Codegen::core_email_rust_type_name(&name.name) {
-            if matches!(email_name, "SMTPAuth" | "DKIMConfig" | "SMTPConfig") && args.is_empty() {
+            if matches!(email_name, "SMTPAuth" | "DkimConfig" | "SMTPConfig") && args.is_empty() {
                 let ffi = self
                     .config
                     .execution
@@ -6030,8 +6030,8 @@ impl<'a> RustEmitter<'a> {
         if let Some(carrier) = crate::Codegen::core_ui_rust_type_name(native_name) {
             return self.rust_root_prelude_type(&carrier, args);
         }
-        // D-TEXTHEAD-TYPE1=A: checked HTML remains the canonical String-backed
-        // Prelude carrier used by interpolation and `.text()`.
+        // D-TEXTHEAD-TYPE1=A: checked text heads keep the interpolation
+        // kernels' carriers, not nominal types in `jet_std`.
         if name.name == jet_foundation::Syntax::TYPE_HTML && args.is_empty() {
             return "String".to_string();
         }
@@ -18091,13 +18091,7 @@ impl<'a> RustEmitter<'a> {
                 .get(index)
                 .copied()
                 .unwrap_or(false),
-            MirCallee::Prelude(call) => self
-                .prelude_row(*call)
-                .signature
-                .borrow_mask
-                .get(index)
-                .copied()
-                .unwrap_or(false),
+            MirCallee::Prelude(call) => self.core_call_argument_borrowed(self.prelude_row(*call), index),
             MirCallee::Foreign(_) => false,
             MirCallee::Indirect(value) => {
                 Self::callable_parameters(self.value_type(function, *value))
@@ -18117,13 +18111,13 @@ impl<'a> RustEmitter<'a> {
             && arg.fn_coercion.is_none()
     }
 
-    fn core_call_argument_borrowed(&self, route: MirPreludeCallId, index: usize) -> bool {
-        self.prelude_row(route)
-            .signature
-            .borrow_mask
-            .get(index)
-            .copied()
-            .unwrap_or(false)
+    fn core_call_argument_borrowed(&self, row: &MirPreludeCall, index: usize) -> bool {
+        // The native UI box retains its owned children. Borrow analysis and
+        // emission must agree so a ReadPlace value is materialized exactly once.
+        if row.symbol.name() == "jet_ui_box" {
+            return false;
+        }
+        row.signature.borrow_mask.get(index).copied().unwrap_or(false)
     }
 
     fn borrowed_operation_use(
@@ -18161,7 +18155,7 @@ impl<'a> RustEmitter<'a> {
                             && !self.borrowed_literal_route(*route);
                         if !self.direct_borrow_call_arg(
                             argument,
-                            self.core_call_argument_borrowed(*route, index),
+                            self.core_call_argument_borrowed(self.prelude_row(*route), index),
                         ) || literal_route
                         {
                             return false;
@@ -18499,7 +18493,7 @@ impl<'a> RustEmitter<'a> {
                     arg.value == value
                         && self.direct_borrow_call_arg(
                             arg,
-                            self.core_call_argument_borrowed(*route, index),
+                            self.core_call_argument_borrowed(self.prelude_row(*route), index),
                         )
                         && self.borrowed_literal_route(*route)
                 }),
@@ -20811,7 +20805,7 @@ impl<'a> RustEmitter<'a> {
                             );
                         }
                     }
-                    format!("{}({})", kind.symbol(), self.value_copy(*value, *fact))
+                    format!("{}({})", kind.symbol(), self.value_borrow(*value))
                 } else if is_allocator_result_type(value_ty) {
                     self.value_move(*value)
                 } else if !matches!(value_ty.kind(), MirTypeKind::Int)
@@ -25660,15 +25654,8 @@ impl<'a> RustEmitter<'a> {
                 // the list query row shares the same checked Core signature.
                 let borrowed = if stream_query && index == 0 {
                     false
-                } else if row.module == "core.ui" && row.member == "box" {
-                    false
                 } else {
-                    route_row
-                        .signature
-                        .borrow_mask
-                        .get(index)
-                        .copied()
-                        .unwrap_or(false)
+                    self.core_call_argument_borrowed(route_row, index)
                 };
                 // `core.reactive.signal` constructs `JetSignal<JetInt>` directly.
                 // Keep its checked Int on the exact carrier; the other native
@@ -26901,12 +26888,24 @@ impl<'a> RustEmitter<'a> {
                             self.borrowed_value_reference(function, value_id, MirAccess::Read)
                         );
                     }
+                    // rng.int borrows tagged exact-Int words, unlike the
+                    // machine-word lengths accepted by bytes/sample. These
+                    // owners stay alive until the entire kernel call ends.
+                    if route.module == "core.handle"
+                        && route.member == "rng.int"
+                        && index > 0
+                        && matches!(self.value_type(function, value_id).kind(), MirTypeKind::Int)
+                    {
+                        return format!("({}).to_raw()", self.value_move(value_id));
+                    }
                     if (route.module == "core.time"
                         || (route.module == "core.handle"
                             && matches!(
                                 route.member.as_str(),
                                 "clock.tick"
                                     | "clock.advance"
+                                    | "rng.bytes"
+                                    | "rng.sample"
                                     | "Match.group_start"
                                     | "Match.group_end"
                                     | "reader.seek"
@@ -26946,6 +26945,9 @@ impl<'a> RustEmitter<'a> {
                                 ));
                         let access = if reader_consumes
                             || (route.module == "core.transaction" && route.member == "commit")
+                            || (index == 0
+                                && route.module == "core.handle"
+                                && route.member.starts_with("rng."))
                         {
                             MirAccess::Write
                         } else {

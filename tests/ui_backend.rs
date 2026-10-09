@@ -231,3 +231,36 @@ fn run() {
     );
     let _ = fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn retained_box_children_materialize_borrowed_parameter() {
+    if !common::have_rustc() {
+        eprintln!("note: skipping retained box children test (need rustc)");
+        return;
+    }
+    let scratch = common::Scratch::new("ui_box_borrowed_children");
+    let (code, stdout, stderr) = build_and_run(
+        &scratch.path,
+        "ui_box_borrowed_children",
+        r#"
+use core.ui as ui
+
+fn boxed(children: [UINode]) -> UINode {
+    return ui.box(children)
+}
+
+fn run() {
+    children := [ui.text("first"), ui.text("second")]
+    first :: boxed(children)
+    second :: boxed(children)
+    _ :: first
+    _ :: second
+    print("ok")
+}
+"#,
+    );
+    // rustc checks the retained child argument's slot is actually defined.
+    // Reusing the source list also exercises its borrowed parameter path.
+    assert_eq!(code, 0, "retained UI box children failed: {stderr}");
+    assert_eq!(stdout, "ok\n");
+}

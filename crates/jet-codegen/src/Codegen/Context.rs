@@ -973,6 +973,8 @@ pub(crate) fn root_prelude_rust_type_name(name: &str) -> Option<&str> {
         "Loadable" => Some("JetLoadable"),
         n if n == Syntax::TYPE_RANGE => Some("JetRange"),
         n if n == Syntax::TYPE_ITER => Some("JetIter"),
+        n if n == Syntax::TYPE_VIEW_ITER => Some("JetViewIter"),
+        n if n == Syntax::TYPE_COMPLEX => Some("JetComplex"),
         "Point" => Some("JetPoint"),
         "Size" => Some("JetSize"),
         "Rect" => Some("JetRect"),
@@ -1389,6 +1391,8 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
 /// compiler-owned declaration rows use the bare leaf. Keep both forms on the
 /// same Rust spelling and do not let arbitrary qualified user names acquire
 /// the Core email carrier by leaf coincidence.
+/// Source `DKIMConfig` selects Rust `DkimConfig`; projection callers supply the
+/// hidden secret type parameter separately.
 pub(crate) fn core_email_rust_type_name(name: &str) -> Option<&'static str> {
     let name = name
         .strip_prefix("<corelib>/Core/email::Core/email/email.jet::")
@@ -1414,7 +1418,7 @@ pub(crate) fn core_email_rust_type_name(name: &str) -> Option<&'static str> {
         "Limits" => Some("Limits"),
         "SMTPAuth" => Some("SMTPAuth"),
         "TLSTrust" => Some("TLSTrust"),
-        "DKIMConfig" => Some("DKIMConfig"),
+        "DKIMConfig" => Some("DkimConfig"),
         "SMTPConfig" => Some("SMTPConfig"),
         "Mailer" => Some("Mailer"),
         _ => None,
@@ -3489,7 +3493,9 @@ impl Cx {
                     && !self.type_names.contains(name) =>
             {
                 let ffi = self.ffi_crate.as_deref().unwrap_or("jet_ffi");
-                format!("{}jet_email::{}<{}::Secret>", self.root_prefix, name, ffi)
+                let rust = core_email_rust_type_name(name)
+                    .expect("compiler-owned email config has a native carrier");
+                format!("{}jet_email::{}<{}::Secret>", self.root_prefix, rust, ffi)
             }
             Type::Named(name)
                 if matches!(name.as_str(), "TLSTrust" | "Mailer")
@@ -3869,13 +3875,6 @@ impl Cx {
                     layout_handle_rust_type(name).unwrap()
                 )
             }
-            // D-TYPE2-IMAG1=A: Complex lives in the shared MathLibPure root,
-            // not in the JetStd namespace used by the older precise numerics.
-            Type::Named(name)
-                if name == Syntax::TYPE_COMPLEX && !self.type_names.contains(name) =>
-            {
-                format!("{}JetComplex", self.root_prefix)
-            }
             Type::Named(name)
                 if root_prelude_rust_type_name(name).is_some()
                     && !self.type_names.contains(name) =>
@@ -3960,9 +3959,11 @@ impl Cx {
                 }
                 if matches!(resolved, "SMTPAuth" | "DKIMConfig" | "SMTPConfig") {
                     let ffi = self.ffi_crate.as_deref().unwrap_or("jet_ffi");
+                    let rust = core_email_rust_type_name(resolved)
+                        .expect("qualified Core email config has a native carrier");
                     return format!(
                         "{}jet_email::{}<{}::Secret>",
-                        self.root_prefix, resolved, ffi
+                        self.root_prefix, rust, ffi
                     );
                 }
                 if resolved == "TLSTrust" || resolved == "Mailer" {
@@ -4338,19 +4339,19 @@ impl Cx {
             Type::Apply { name, args } if name == Syntax::TYPE_PIN && args.len() == 1 => {
                 format!("&mut {}", self.rust_type(&args[0]))
             }
-            // D-ITERTOOLS1=A: Iter<T> → JetIter<T> (must-use move-only lazy view).
-            Type::Apply { name, args } if name == Syntax::TYPE_ITER && args.len() == 1 => {
+            // D-ITERTOOLS1=A / D-FOUND-VIEW1=A: both lazy iterator carriers
+            // use the shared root projection; ViewIter retains its source owner.
+            Type::Apply { name, args }
+                if matches!(name.as_str(), Syntax::TYPE_ITER | Syntax::TYPE_VIEW_ITER)
+                    && args.len() == 1
+                    && !self.type_names.contains(name) =>
+            {
                 format!(
                     "{}{}<{}>",
                     self.root_prefix,
                     root_prelude_rust_type_name(name).expect("registered iterator carrier"),
                     self.rust_type(&args[0])
                 )
-            }
-            // D-FOUND-VIEW1=A: `ViewIter<T>` retains the source owner while
-            // yielding borrowed windows; its carrier is not an eager `Iter`.
-            Type::Apply { name, args } if name == Syntax::TYPE_VIEW_ITER && args.len() == 1 => {
-                format!("JetViewIter<{}>", self.rust_type(&args[0]))
             }
             // D-CORE-SECRETS1=A: generic TTL stays distinct from secret lifecycle.
             Type::Apply { name, args }
@@ -8028,6 +8029,47 @@ mod tests {
             "JetMemoStats"
         );
         assert_eq!(core_rust_type_name(Syntax::TYPE_MEMO_STATS), None);
+    }
+
+    #[test]
+    fn lazy_and_complex_root_carriers_preserve_namespace_and_prefix() {
+        let source = "fn run() {}\n";
+        let (tokens, diagnostics) = crate::Lexer::lex(source);
+        assert!(diagnostics.is_empty());
+        let program = crate::Parser::parse(&tokens).expect("parse");
+        let mut cx = build_cx(&program, source, "test.jet");
+        cx.root_prefix = "runtime::".to_string();
+        assert_eq!(root_prelude_rust_type_name(Syntax::TYPE_COMPLEX), Some("JetComplex"));
+        assert_eq!(root_prelude_rust_type_name(Syntax::TYPE_VIEW_ITER), Some("JetViewIter"));
+        assert_eq!(
+            cx.rust_type(&Type::Named(Syntax::TYPE_COMPLEX.to_string())),
+            "runtime::JetComplex"
+        );
+        assert_eq!(
+            cx.rust_type(&Type::Apply {
+                name: Syntax::TYPE_VIEW_ITER.to_string(),
+                args: vec![Type::Float],
+            }),
+            "runtime::JetViewIter<f64>"
+        );
+        for qualified in ["user::Complex", "user::ViewIter"] {
+            assert_eq!(root_prelude_rust_type_name(qualified), None);
+            cx.type_names.insert(qualified.to_string());
+            let named = cx.rust_type(&Type::Named(qualified.to_string()));
+            let applied = cx.rust_type(&Type::Apply {
+                name: qualified.to_string(),
+                args: vec![Type::Float],
+            });
+            assert!(!named.contains("JetComplex") && !named.contains("JetViewIter"));
+            assert!(!applied.contains("JetComplex") && !applied.contains("JetViewIter"));
+        }
+        cx.type_names.insert(Syntax::TYPE_COMPLEX.to_string());
+        cx.type_names.insert(Syntax::TYPE_VIEW_ITER.to_string());
+        assert!(!cx.rust_type(&Type::Named(Syntax::TYPE_COMPLEX.to_string())).contains("JetComplex"));
+        assert!(!cx.rust_type(&Type::Apply {
+            name: Syntax::TYPE_VIEW_ITER.to_string(),
+            args: vec![Type::Float],
+        }).contains("JetViewIter"));
     }
 
     #[test]
