@@ -5071,13 +5071,6 @@ fn schedule_core_declaration_owners(
         Item::TypeAlias(row) => Some(row.name.as_str()),
         _ => None,
     }).collect::<HashSet<_>>();
-    for item in items {
-        if let Item::CModule(row) = item {
-            if let Some(body) = &row.body {
-                schedule_core_declaration_owners(body, pending, scheduled);
-            }
-        }
-    }
     let mut schedule_name = |name: &str, binders: &[crate::AST::TypeParam]| {
         if owned.contains(name) || binders.iter().any(|binder| binder.name == name)
             || name.contains("::") || name.contains('.')
