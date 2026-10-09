@@ -2515,13 +2515,6 @@ fn refutable_binding_name<'a>(pattern: &'a Pattern, _init: &TExpr) -> Option<&'a
     }
 }
 
-fn is_direct_refutable_pattern(pattern: &Pattern, cx: &Cx) -> bool {
-    matches!(
-        pattern,
-        Pattern::Variant { variant, .. } if cx.fact_variant_owner(variant).is_some()
-    )
-}
-
 fn lower_refutable_fallback(fallback: &OrFallback, cx: &Cx, env: &LowerEnv) -> Vec<TStmt> {
     let mut fallback_env = clone_env(env);
     let unreachable = || {
@@ -2955,8 +2948,10 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
         Stmt::Val(b)
             if matches!(
                 &b.pattern,
-                Some(BindPattern::Refutable { pattern, .. })
-                    if is_direct_refutable_pattern(pattern, cx)
+                Some(BindPattern::Refutable {
+                    pattern: Pattern::Variant { .. },
+                    ..
+                })
             ) =>
         {
             return in_own_frame(|| {
@@ -2983,10 +2978,29 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                         span: pattern.span(),
                     });
                 }
+                let enum_type = match b
+                    .ty
+                    .as_ref()
+                    .ok_or("checked refutable binding is missing its subject type")
+                    .and_then(|ty| super::patterns::resolved_enum_subject_type(cx, ty))
+                {
+                    Ok(owner) => owner,
+                    Err(reason) => {
+                        return LowerStmtPlan::ready(TStmt::InvariantViolation {
+                            construct: reason.to_string(),
+                            span: pattern.span(),
+                        });
+                    }
+                };
                 ready_return!(TStmt::RefutableBind {
-                    pattern: TPattern::binding_with_values(pattern.clone(), |value| lower_expr(
-                        value, cx, env
-                    ),),
+                    pattern: TPattern::from_ast_with_values(
+                        pattern.clone(),
+                        Some(enum_type),
+                        crate::Codegen::TIR::TPatternPosition::Binding,
+                        b.mutable,
+                        false,
+                        |value| lower_expr(value, cx, env),
+                    ),
                     init,
                     fallback,
                 });
