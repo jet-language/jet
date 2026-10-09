@@ -400,6 +400,11 @@ pub fn moved_command(name: &str) -> Option<(&'static CommandSpec, &'static Neste
     if COMMANDS.iter().any(|command| command.name == name) {
         return None;
     }
+    // D-ONCE-RETIRE1=C: a retired bare word hard-errors with its teaching fix;
+    // it never also teaches a grouped move (`report` is retired, not `gc report`).
+    if is_retired_root(name) {
+        return None;
+    }
     if command_groups().any(|group| {
         group
             .actions
@@ -722,7 +727,7 @@ const BASE_FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--lang", help: "With fmt: Delegate non-Jet files to the environment formatter for this language" },
     FlagSpec { long: "--restore-role-files", help: "With init: Restore the exact pre-package.jet role files" },
     FlagSpec { long: "--diff", help: "With fmt --check: Also print unified diffs for each changed file" },
-    FlagSpec { long: "--simplify", help: "With fmt: Rewrite to the simplest ratified spelling" },
+    FlagSpec { long: "--simplify", help: "With fmt: Rewrite to the simplest canonical spelling" },
     FlagSpec { long: "--changed", help: "With fmt: Format only VCS-changed .jet files (requires git)" },
     FlagSpec { long: "--explicit-copies", help: "With fmt: Materialize implicit read-view copies as `~`" },
     FlagSpec { long: "--skipped", help: "With project parts: Show modules omitted from automatic discovery" },
@@ -2341,6 +2346,18 @@ mod tests {
                     assert!(moved_command(action.name).is_none());
                     continue;
                 }
+                // D-ONCE-RETIRE1=C: a retired bare word hard-errors; it never
+                // teaches a grouped move and is never canonical.
+                if is_retired_root(action.name) {
+                    assert!(
+                        !action.also_canonical_top_level,
+                        "retired {} claims canonical",
+                        action.name
+                    );
+                    assert!(!is_canonical_top_level(action.name));
+                    assert!(moved_command(action.name).is_none());
+                    continue;
+                }
                 if action.also_canonical_top_level
                     || COMMANDS.iter().any(|command| command.name == action.name)
                 {
@@ -2377,12 +2394,13 @@ mod tests {
     fn typo_suggestions_never_advertise_moved_bare_actions() {
         for group in command_groups() {
             for action in group.actions {
-                let canonical_bare = COMMANDS.iter().any(|command| {
-                    command.name == action.name
-                        && command.actions.is_empty()
-                        && is_canonical_top_level(command.name)
+                // A canonical top-level command row (bare or group) may be
+                // suggested by its own name: `env` is the canonical front door
+                // even though `inspect env` is a different, nested action.
+                let canonical_top_level = COMMANDS.iter().any(|command| {
+                    command.name == action.name && is_canonical_top_level(command.name)
                 });
-                if !action.also_canonical_top_level && !canonical_bare {
+                if !action.also_canonical_top_level && !canonical_top_level {
                     assert_ne!(closest_command(action.name), Some(action.name));
                 }
             }
@@ -2556,13 +2574,14 @@ fn authority_flags_render_in_registry_completions_and_man() {
         assert!(is_known_flag("--allow-unofficial"));
         assert!(command_group_usage("self").contains("--allow-unofficial"));
         assert!(man_page("0.0.0").contains("--allow-unofficial"));
-        for completion in [
-            completions_bash(),
-            completions_zsh(),
-            completions_fish(),
-            completions_powershell(),
+        // fish declares a long option as `-l <name>`, the other shells as `--<name>`.
+        for (shell, completion, spelling) in [
+            ("bash", completions_bash(), "--allow-unofficial"),
+            ("zsh", completions_zsh(), "--allow-unofficial"),
+            ("fish", completions_fish(), "-l allow-unofficial"),
+            ("powershell", completions_powershell(), "--allow-unofficial"),
         ] {
-            assert!(completion.contains("--allow-unofficial"));
+            assert!(completion.contains(spelling), "{shell} completion lacks {spelling}");
         }
     }
 

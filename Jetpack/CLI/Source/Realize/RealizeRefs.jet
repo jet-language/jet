@@ -305,7 +305,7 @@ pub fn cli_realize_ref_outcome(verification: &StoreVerification, theme: Theme, r
                 cli_stop_spinner(^spinner)
                 cli_clear_live_region(live)
                 env_warn_sandbox_fallback(theme)
-                if trust_gate_build_identity(theme, trust_store_path(), identity, flags.trust) != None -> return RefOutcome.Failed
+                if trust_gate_build_identity(theme, trust_store_path(), project_dir ?? ".", identity, flags.trust) != None -> return RefOutcome.Failed
             }
         }
         .Err(reason) -> {
@@ -459,7 +459,7 @@ pub fn cli_realize_adapter(verification: &StoreVerification, theme: Theme, roots
     if plan.recipe == .Build(recipe) {
         env_warn_sandbox_fallback(theme)
         identity :: provider_adapter_action_identity(plan, recipe, expectation.identity.source_fingerprint, expectation.identity.platform, table)
-        if trust_gate_build_identity(theme, trust_store_path(), identity, flags.trust) != None -> return None
+        if trust_gate_build_identity(theme, trust_store_path(), cli_current_project_dir() ?? ".", identity, flags.trust) != None -> return None
     }
     request :: RealizeRequest.Adapter{plan: plan, table: table, expectation: expectation}
     if store_realize_verified(&verification, roots, ctx, request) == {

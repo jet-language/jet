@@ -3,13 +3,14 @@
 // Every operation retains the original Foundation authority, including the
 // marker's parent, and never reopens a root pathname after acquisition.
 //
-// Authority lives on the canonical managed-root directory inode. Every scope
-// of one root shares that one kernel lock domain, so replacing every name
-// under `.locks` cannot create a second domain; the per-scope marker file is
-// the visible, never-unlinked name a probe inspects. File contents, PID
-// reuse, timestamps and path existence are never liveness evidence.
+// Every scope of one canonical managed root shares `.jetpack.lock`, a regular
+// file outside the replaceable `.locks` marker directory. FILELOCK1 creates it
+// owner-only, refuses a final link and never unlinks it when releasing a claim.
+// Per-scope markers remain the visible names probes inspect. File contents,
+// PID reuse, timestamps and path existence are never liveness evidence.
 
 RUNTIME_LOCK_DIR :: prep { ".locks" }
+RUNTIME_LOCK_OWNER_FILE :: prep { ".jetpack.lock" }
 // Rust LOCK_WAIT: a contended acquire gives up after 30 seconds.
 RUNTIME_LOCK_WAIT_SECONDS :: prep { 30 }
 RUNTIME_LOCK_MARKER_MODE :: prep { 0o600 }
@@ -23,9 +24,9 @@ pub enum RuntimeLockState {
 }
 
 // A held process lock. `owner` is the kernel lock on the canonical managed
-// root; `marker` pins the scope marker inode that `path` must keep naming.
-// Scope exit (or handing `owner` to a child through `keep_open_for`)
-// releases the kernel lock; the marker file always stays on disk.
+// root's dedicated regular file; `marker` pins the scope marker inode that
+// `path` must keep naming. Scope exit (or handing `owner` to a child through
+// `keep_open_for`) releases the kernel lock; both files always stay on disk.
 pub struct RuntimeLock {
     pub path: String
     pub owner_path: String

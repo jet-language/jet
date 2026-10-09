@@ -179,10 +179,10 @@ fn recipe_test_has_stage_leftover(base: String) -[FS]> Bool {
     trust :: files.join(base, "trust")
     recipe :: BuildRecipe{steps: [BuildStep]{BuildStep.Install{src: "a", dest: "a"}}}
     hash :: recipe.recipe_hash()
-    assert(recipe_trust_first_build(hash, trust))
+    assert(recipe_trust_first_build(hash, trust, base) ?? panic("recipe trust grant"))
     assert(trust_is_trusted(trust, base, hash))
     assert_eq(trust_list_entries(trust), [String]{"hash:{hash}"})
-    assert(!recipe_trust_first_build(hash, trust))
+    assert(!(recipe_trust_first_build(hash, trust, base) ?? panic("recipe trust idempotent")))
     files.remove_all(base).drop("test cleanup")
 }
 
