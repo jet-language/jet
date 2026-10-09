@@ -149,6 +149,25 @@ pub const CORE_CRYPTO_CT_SOURCE_PART: CorePrivateSourcePart = CorePrivateSourceP
         impl_types: &[],
     },
 };
+pub const CORE_CRYPTO_JETC_SOURCE_PART: CorePrivateSourcePart = CorePrivateSourcePart {
+    owner: CORE_CRYPTO_JETC_OWNER,
+    source: CoreSourceModule {
+        module: CORE_CRYPTO_JETC_MODULE,
+        alias: CORE_CRYPTO_JETC_ALIAS,
+        path: "Core/crypto/jetc.jet",
+        owned_members: &[],
+    },
+};
+
+pub const CORE_CRYPTO_CT_SOURCE_PART: CorePrivateSourcePart = CorePrivateSourcePart {
+    owner: "core.crypto",
+    source: CoreSourceModule {
+        module: "__core_crypto_ct",
+        alias: "__core_crypto_ct",
+        path: "Core/crypto/expert_ct.jet",
+        owned_members: &[],
+    },
+};
 /// All compiler-private source parts. Keep this separate from
 /// `CoreModuleExports::CORE_SOURCE_MODULES`: adding a row there would make the
 /// part publicly importable.
