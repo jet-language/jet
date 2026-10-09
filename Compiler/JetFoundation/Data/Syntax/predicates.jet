@@ -1,0 +1,166 @@
+// Canonical owner-controlled syntax registry (I7).
+// Mechanically ported by Tools/agent/port-syntax-registry.mjs; edit this Jet home.
+// The reference comparison is temporary and is not a generator dependency.
+
+/// D-META-AUTO1=A: the one structural auto-derive engine vocabulary. `Codable`
+/// is the marker-family spelling for the two codec traits, so it is included
+/// by `is_signed_auto_derive` below rather than duplicated in this trait list.
+STRUCTURAL_AUTO_DERIVE_TRAITS :: [String]{
+    Generics.PRINTABLE,
+    Generics.EQUATABLE,
+    Generics.DEBUG,
+    Generics.COMPARABLE,
+    Generics.ENCODE,
+    Generics.DECODE,
+}
+
+// D-UNITLIT1: unit-suffix numeric literals (`500ms`) are not an enumerable
+// keyword — the lexer resolves a literal's identifier suffix against
+// #UnitFamily members in scope (MARKER_UNIT_FAMILY, D-QUAL3). One fixed rule:
+/// D-UNITLIT1: a literal suffix shaped `e` + digits is reserved for float
+/// exponent notation (`1e5`) and may never resolve as a unit name.
+UNIT_SUFFIX_EXPONENT_RESERVED :: "e" // D-UNITLIT1
+
+/// D-TYPE2-IMAG1=A (ratified 2026-08-06): numeric suffix `i` mints the
+/// imaginary component of Complex through the existing unit-literal path;
+/// bare `i` remains an ordinary identifier.
+UNIT_SUFFIX_IMAGINARY :: "i"
+
+/// The env var that names the active realized toolchain object directory
+/// (D-JPK-TOOLCHAIN1 / #179). Tests set it to a fixture; #179's realizer points
+/// it at the hangar object. The object carries prebuilt ring artifacts under
+/// `<dir>/ring/<name>` (D-JPK-RINGSHIP1=C).
+TOOLCHAIN_OBJECT_ENV :: "JET_TOOLCHAIN_FIXTURE"
+
+/// D-JPK-TOOLCHAIN1=A (#179): re-exec guard marker. Before `jet` execs a
+/// version-pinned toolchain, it sets this env var to the pinned version. The
+/// child, seeing its own version match the marker, runs natively and never
+/// re-realizes or re-execs — this breaks the exec loop and lets the pinned
+/// toolchain run the program directly.
+TOOLCHAIN_EXEC_MARKER_ENV :: "JET_TOOLCHAIN_EXEC"
+
+/// D-EFFBUDGET1 (ratified 2026-07-01): the `effects { allow: […], deny: […] }`
+/// block in `pkg.jet` that turns on whole-dependency-graph effect enforcement.
+/// Manifest keys only — no language grammar (§0.4 DO-NOT).
+MANIFEST_BLOCK_EFFECTS :: "effects" // D-EFFBUDGET1
+
+/// D-EFFBUDGET1: the `allow:` field inside `effects { … }` — the closed list of
+/// effect names the whole dependency graph may use.
+EFFECTS_FIELD_ALLOW :: "allow" // D-EFFBUDGET1
+
+/// D-EFFBUDGET1: the `deny:` field inside `effects { … }` — effect names the
+/// dependency graph must never use.
+EFFECTS_FIELD_DENY :: "deny" // D-EFFBUDGET1
+
+/// D-EFFBUDGET1: the `grants { "dep": [Effect] }` block — an audited
+/// per-dependency escape from the `authority.holds` budget, recorded in the lockfile.
+MANIFEST_BLOCK_GRANTS :: "grants" // D-EFFBUDGET1
+
+/// D-POLICY-WORD1=A: package floors and memory governance live under the
+/// `policy: { … }` block in `package.jet`. Manifest keys only, no language
+/// grammar.
+MANIFEST_BLOCK_POLICY :: "policy" // D-POLICY-WORD1
+
+/// D-MEM-GUARANTEE1=A: package-only dependency containment policy. These
+/// fields intentionally do not enter the source `PolicyKey` registry.
+POLICY_FIELD_CONTAIN :: "contain"
+
+POLICY_FIELD_HARDEN :: "harden"
+
+/// D-TEAMPOLICY1=A: one package policy namespace for team ceilings. These
+/// fields are package-only and therefore never become source policy keys.
+POLICY_FIELD_EFFECTS :: "effects"
+
+POLICY_FIELD_UNSAFE :: "unsafe"
+
+POLICY_FIELD_EXPERT :: "expert"
+
+POLICY_FIELD_DEPS :: "deps"
+
+/// D-GRADE-POLICY1=A: the package claims floor (`.Unchecked` through
+/// `.Proved`) is a package-only policy field.
+POLICY_FIELD_CLAIMS :: "claims"
+
+/// D-JPK-POLICYSURFACE1=D: package license allow-list policy.
+POLICY_FIELD_LICENSES :: "licenses"
+
+/// D-JPK-POLICYSURFACE1=D: package-pattern to source-authority mapping.
+POLICY_FIELD_SOURCES :: "sources"
+
+/// D-JPK-POLICYSURFACE1=D: reviewed, expiring package policy exceptions.
+POLICY_FIELD_EXCEPTIONS :: "exceptions"
+
+/// D-JPK-POLICYSURFACE1=D: typed exception record in `policy.exceptions`.
+POLICY_EXCEPTION_TYPE :: "PolicyException"
+
+POLICY_EXCEPTION_FIELD_ID :: "id"
+
+POLICY_EXCEPTION_FIELD_SCOPE :: "scope"
+
+POLICY_EXCEPTION_FIELD_REASON :: "reason"
+
+POLICY_EXCEPTION_FIELD_EXPIRES :: "expires"
+
+/// D-AUTHORITY-MANIFEST1=A / D-BOUND-PROV1=A: source-reviewed trust and
+/// provider authority live under the one `authority: { … }` block.
+MANIFEST_BLOCK_AUTHORITY :: "authority" // D-AUTHORITY-MANIFEST1
+
+AUTHORITY_FIELD_HOLDS :: "holds" // D-AUTHORITY-MANIFEST1
+
+AUTHORITY_HOLDS_FIELD_ALLOW :: "allow" // D-AUTHORITY-MANIFEST1
+
+AUTHORITY_HOLDS_FIELD_DENY :: "deny" // D-AUTHORITY-MANIFEST1
+
+AUTHORITY_FIELD_GRANTS :: "grants" // D-AUTHORITY-MANIFEST1
+
+/// D-PLUGIN-AUTHORITY1: a guest package declares the capabilities it may
+/// request; hosts provide the tightened authority separately.
+AUTHORITY_FIELD_NEEDS :: "needs"
+
+AUTHORITY_FIELD_TRUST :: "trust" // D-BOUND-PROV1
+
+AUTHORITY_FIELD_PROVIDERS :: "providers" // D-AUTHORITY-MANIFEST1
+
+PROVIDER_FIELD_REGISTRY :: "registry"
+
+PROVIDER_FIELD_ALLOW :: "allow"
+
+PROVIDER_FIELD_DENY :: "deny"
+
+AUTHORITY_TRUST_FIELD_DEFAULT :: "default" // D-AUTHORITY-MANIFEST1
+
+AUTHORITY_TRUST_FIELD_CI :: "ci" // D-AUTHORITY-MANIFEST1
+
+AUTHORITY_TRUST_FIELD_PROMPT :: "prompt" // D-AUTHORITY-MANIFEST1
+
+AUTHORITY_TRUST_FIELD_SERVICES :: "services" // D-AUTHORITY-MANIFEST1
+
+AUTHORITY_TRUST_FIELD_REQUIRE :: "require" // D-BOUND-PROV1
+
+AUTHORITY_TRUST_REQUIRE_NONE :: "none" // D-BOUND-PROV1
+
+AUTHORITY_TRUST_REQUIRE_LOGGED :: "logged" // D-BOUND-PROV1
+
+AUTHORITY_TRUST_REQUIRE_ATTESTED :: "attested" // D-BOUND-PROV1
+
+AUTHORITY_TRUST_DECISION_PROMPT :: "prompt" // D-AUTHORITY-MANIFEST1
+
+AUTHORITY_TRUST_DECISION_DENY :: "deny" // D-AUTHORITY-MANIFEST1
+
+AUTHORITY_TRUST_DECISION_ALLOW :: "allow" // D-AUTHORITY-MANIFEST1
+
+/// D-LINTPOLICY1=A (the override law, card #505): the `policy: { lints: { … } }`
+/// sub-block. Warnings never fail a build by default (I1 memory/type safety is
+/// never in scope here); a team opts into a wall by naming stable lints here.
+/// Manifest keys only, no language grammar.
+POLICY_FIELD_LINTS :: "lints" // D-LINTPOLICY1
+
+/// D-LINTPOLICY1: the `deny:` field inside `policy.lints { … }` — stable lint
+/// names (e.g. `float_money`) that fail the build when they fire, instead of
+/// warning.
+LINTS_FIELD_DENY :: "deny" // D-LINTPOLICY1
+
+/// D-NAME-SIGIL1=A: every compiler-visible generated symbol uses one reserved
+/// machine prefix. Keep this helper below the syntax surface so sema, engines,
+/// tools, and generated Rust share one naming law.
+GENERATED_NAME_PREFIX :: "__jet_"
