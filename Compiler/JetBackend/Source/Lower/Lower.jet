@@ -245,23 +245,25 @@ struct LowerFunction {
 // methods of generic types once per concrete instance) plus their glue.
 pub fn lir_lower_entry(program: MIRProgram, entry: MIRFunctionID) -> LIRLowering Never! {
     intrinsics :: [U64:LowerRuntimeIntrinsic]{}
-    lower_selected(program, [MIRFunctionID]{entry}, true, ^intrinsics)
+    lower_selected(program, [MIRFunctionID]{entry}, true, false, ^intrinsics)
 }
 
 // Compiler and test callbacks retain return carriers; only program entries
 // consume Option/Result success and turn failure into a process exit.
 pub fn lir_lower_callables(program: MIRProgram, roots: [MIRFunctionID]) -> LIRLowering Never! {
     intrinsics :: [U64:LowerRuntimeIntrinsic]{}
-    lower_selected(program, roots, false, ^intrinsics)
+    lower_selected(program, roots, false, false, ^intrinsics)
 }
 
-// RuntimeLibrary validates each exact function ID and its signature.
+// RuntimeLibrary validates each exact function ID and its signature. Every
+// root is a C export, so narrow integer arguments enter through
+// `export.entry` (Callable.jet).
 // No ordinary program/callback lowering enables runtime-only substitution.
 fn lir_lower_runtime_callables(program: MIRProgram, roots: [MIRFunctionID], intrinsics: ^[U64:LowerRuntimeIntrinsic]) -> LIRLowering Never! {
-    lower_selected(program, roots, false, ^intrinsics)
+    lower_selected(program, roots, false, true, ^intrinsics)
 }
 
-fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool, runtime_intrinsics: ^[U64:LowerRuntimeIntrinsic]) -> LIRLowering Never! {
+fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool, c_exports: Bool, runtime_intrinsics: ^[U64:LowerRuntimeIntrinsic]) -> LIRLowering Never! {
     // The frontend may erase browser init functions before native MIR is
     // serialized. Their host requirement survives in the runtime-part facts.
     loop part in program.facts.runtime_parts {
@@ -323,6 +325,10 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
         if !wrap_entry && m.static_fixups.len() > 0 {
             source :: lower_row_source(program, m, row)
             lowered = lower_closure_helper_id(&m, "callable.init", row, source)
+        }
+        if c_exports {
+            source :: lower_row_source(program, m, row)
+            if lower_has_narrow_params(source) -> lowered = lower_closure_helper_id(&m, "export.entry", row, source)
         }
         &callables.add(root.value, lowered).drop("duplicate root has the same concrete callable")
         if lowered_entry == None -> lowered_entry = Val(lowered)
@@ -3222,6 +3228,7 @@ fn lower_helper_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIR
     if glue.helper == "closure.thunk" -> return lower_closure_thunk(&m, glue)
     if glue.helper == "entry" -> return lower_entry_function(p, &m, glue)
     if glue.helper == "callable.init" -> return lower_callable_init(&m, glue)
+    if glue.helper == "export.entry" -> return lower_export_entry(p, &m, glue)
     if glue.helper == "record.in" -> return lower_helper_record_in(p, &m, glue)
     if glue.helper == "record.out" -> return lower_helper_record_out(p, &m, glue)
     if glue.helper == "list.record_handles" -> return lower_helper_record_handles(p, &m, glue)

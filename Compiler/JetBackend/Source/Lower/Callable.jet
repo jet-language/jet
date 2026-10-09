@@ -1,7 +1,7 @@
 // Compiler invocation preserves the callee's checked signature and failure
 // carrier, unlike executable entry normalization. Hidden aggregate output
 // pointers are forwarded unchanged. Each compiler image is invoked serially.
-use jet_foundation.[MIRProgram]
+use jet_foundation.[MIRFunction, MIRProgram]
 
 fn lower_callable_init(m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     signature_id :: ~m.mir_signatures[glue.function]
@@ -28,6 +28,45 @@ fn lower_callable_init(m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     result := LIRValueID?{None}
     if signature.result == .Val(layout) -> result = Val(lower_new_value(&f, layout, LIRDrop.Trivial, None))
     lower_emit(&f, LIRInst.Call{dst: result, signature: signature_id, callee: LIRCallee.Function{id: LIRFunctionID{value: glue.function}}, args: params})
+    lower_seal(&f, LIRTerminator.Return{value: result})
+    lir_builder_finish(f.builder)
+}
+
+fn lower_has_narrow_params(source: MIRFunction) -> Bool Never! {
+    loop param in source.params {
+        if lower_narrow_bits(param.ty) > 0 -> return true
+    }
+    false
+}
+
+// A C export's entry. System V leaves the bits above an I8/U8/I16/U16/I32/U32
+// argument unspecified, while native code keeps every narrow integer sign- or
+// zero-extended in its word (Numeric.jet). The entry normalizes those
+// arguments once, then calls the checked callable (through its static
+// initializer when the callable has one).
+fn lower_export_entry(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    signature_id :: ~m.mir_signatures[glue.function]
+    signature :: ~m.signatures[signature_id.value]
+    source :: lower_row_source(p, m, glue.function)
+    f := lower_helper_start(&m, glue, signature.params, signature.result)
+    params :: ~f.open_params
+    args := [LIRValueID]{}
+    loop (position, value) in params {
+        ty :: source.params[position].ty
+        bits :: lower_narrow_bits(ty)
+        if bits == 0 {
+            &args.push(value)
+            next
+        }
+        normalized :: lower_word(&f)
+        lower_narrow_wrap(&f, normalized, value, lower_narrow_signed(ty), bits)
+        &args.push(normalized)
+    }
+    callee := LIRFunctionID{value: glue.function}
+    if m.glue_rows.get(lower_glue_row_key("h:callable.init", "{glue.function}")) == .Val(row) -> callee = m.glue[row].id
+    result := LIRValueID?{None}
+    if signature.result == .Val(layout) -> result = Val(lower_new_value(&f, layout, LIRDrop.Trivial, None))
+    lower_emit(&f, LIRInst.Call{dst: result, signature: signature_id, callee: LIRCallee.Function{id: callee}, args: args})
     lower_seal(&f, LIRTerminator.Return{value: result})
     lir_builder_finish(f.builder)
 }

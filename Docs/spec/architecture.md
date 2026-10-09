@@ -608,8 +608,11 @@ bridge, descriptor, and native symbol as one mechanism. Where a declaration
 uses D-FFI-CAP1=A, `&` is exclusive for that call and `^` transfers ownership;
 the host must obey that declaration rather than infer ownership from a header.
 
-The native Library surface accepts one homogeneous scalar shape per export:
-every parameter and the return are `Int`, `Float`, `Bool`, or `Text`.
+The native Library surface maps each parameter and the result of an export,
+independently, to one C primitive: `Int` (`int64_t`), `Float` (`double`),
+`Bool`, `Text` (JetText), `I8`–`I64`, `U8`–`U64`, or `F32`; a unit result is
+`void`. The Jet compiler implements this law; the frozen Rust compiler still
+admits only one homogeneous `Int`, `Float`, `Bool`, or `Text` shape.
 Function-valued exports and a Library-wide `init`/`shutdown` protocol are not
 part of this surface. The loader owns mapping and unmapping. The host owns
 process signals, thread creation, and isolation for a failing call.
@@ -620,7 +623,7 @@ process signals, thread creation, and isolation for a failing call.
 | Shutdown | There is no `jet_shutdown`. The host waits for all calls and frees returned values before unmapping. | Unmap while a call or worker is active. | No Jet result is defined; the host violated the loader contract. |
 | Thread entry | Any host thread may call a live scalar export. Calls may run concurrently; the host joins workers before unmapping. | Pass a non-C-safe value or let a worker outlive `dlclose`. | Sema rejects the former; the latter is invalid C/loader use. |
 | TLS | Runtime stack and foreign-failure markers are thread-local; generated call guards restore their depth and markers on normal return. A call does not borrow another thread's state. | Share a call-local capability or use a stale thread-bound value after return. | The declaration is rejected or the host has left the defined contract. |
-| Re-entry | A host function named by `#Import(c)` may call a second live export while the first export is active. The nested call uses the same scalar boundary. | Expect a function-valued `#Export(c)` callback; it is outside the homogeneous Library surface. | Library validation reports `E1341`; no callback ABI is emitted. |
+| Re-entry | A host function named by `#Import(c)` may call a second live export while the first export is active. The nested call uses the same scalar boundary. | Expect a function-valued `#Export(c)` callback; it is outside the primitive Library surface. | Library validation reports `E1341`; no callback ABI is emitted. |
 | Signals | The Library does not install, replace, or restore process signal handlers. Signal policy stays with the host. | Assume a signal handler belongs to the Library or call during unsynchronised host signal mutation. | The host owns the resulting signal behavior; the Library reports no signal protocol. |
 | Allocator ownership | `Text` results are allocated by the Library and are released exactly once with its generated `jet_text_free`, before unmapping. | Call C `free`, double-free, retain after release, or release after `dlclose`. | These are outside the C contract and may be undefined behavior; the host must prevent them. |
 | Panic containment | A panic cannot unwind into C. The boundary emits `Stop [E3001]` and terminates the calling process with status `70`; it never fabricates a scalar success value. | Expect an error return or continued execution in the same process. | The process exits `70`; a host that must continue forks the call and checks the child status. |

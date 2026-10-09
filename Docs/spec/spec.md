@@ -4100,9 +4100,9 @@ fn run() {
 
 `plugin.load(path, authority)` exposes only frozen named exports. Sema checks
 parameter and result contracts before code generation. There is no dynamic
-export lookup or missing-export fallback. Exported functions use a homogeneous
-`Int`, `Float`, `Bool`, or `Text` shape, or a recursively closed Component
-Model shape (E1260).
+export lookup or missing-export fallback. Each parameter and the result of an
+export is `Int`, `Float`, `Bool`, or `Text`, mixed freely across positions, or
+a recursively closed Component Model shape (E1260).
 The `packages/sandbox_mathkit` golden exercises `Bool` results and UTF-8 text
 round trips, including a non-ASCII name; its checked-in interface snapshot
 lists every named export used by the host.
@@ -4133,9 +4133,12 @@ build/toolchain failure, and E1260 an unsupported export shape
 
 ### Embedding artifacts
 
-Native and sandbox artifacts use one top-level `pub fn` export list and one
-scalar lowering table. Each exported function uses one homogeneous `Int`,
-`Float`, `Bool`, or `Text` shape; no separate `#Export` marker is required.
+A native artifact exports the entry module's `#Export(c)` functions; a sandbox
+artifact exports its top-level `pub fn` items. Each parameter and the result of
+a native `#Export(c)` function is, independently, one C primitive: `Int`
+(`int64_t`), `Float` (`double`), `Bool`, `Text` (the JetText pointer/length
+pair), `I8`–`I64` and `U8`–`U64` (`int8_t`–`uint64_t`), or `F32` (`float`); a
+unit result is `void`. A sandbox export uses the Component scalars above.
 
 `jet build --lib` emits a linkable native static or shared library and a C
 header. It needs no Component runtime, but the native artifact is trusted code:

@@ -29,19 +29,13 @@ use jet_backend.[x64_runtime_library]
 
 // The library-object feed: the same checked driver's in-process MIR becomes
 // one relocatable runtime object. Neither an emitted Rust program nor a Rust
-// MIR conversion enters this path; exports come from the checked NativeLibrary
-// artifact or the explicit audited exports.list.
+// MIR conversion enters this path; exports are exactly the checked
+// NativeLibrary artifact's `#Export(c)` rows.
 fn jet_bootstrap_library_object(request: ^JetDriverCompileRequest, prefix: String) -> JetDriverCompileResult Never! {
     result := jet_driver_compile_mir(^request) ?? return jet_driver_compile_escaped_failure("the native front end failed outside every compile stage")
     if !result.complete || result.internal_problem != None -> return result
     program :: result.mir ?? return jet_driver_compile_escaped_failure("the native front end finished without MIR")
-    export_path :: cli_sys.get("JET_FRONT_LIBRARY_EXPORTS") ?? return jet_driver_compile_escaped_failure("runtime library feed requires the explicit audited exports.list path")
-    export_text :: cli_files.read(export_path) ?? return jet_driver_compile_escaped_failure("cannot read runtime exports.list")
-    symbols := [String]{}
-    loop line in export_text.split("\n").to_list() {
-        if line.trim() != "" -> &symbols.push(line.trim())
-    }
-    library :: x64_runtime_library(program, symbols)
+    library :: x64_runtime_library(program)
     if library.object.errors.len() > 0 {
         cli_files.write("{prefix}.issues", library.object.errors.join("\n")) ?? return jet_driver_compile_escaped_failure("cannot write runtime library findings")
         return jet_driver_compile_escaped_failure("runtime library object failed; see {prefix}.issues")

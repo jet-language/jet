@@ -91,7 +91,7 @@ if (until === 1) {
       JET_BOOTSTRAP_MODE: "factory", JET_BOOTSTRAP_FACTORY_TIER: "aot",
       JET_BOOTSTRAP_SOURCE_ROOT: library, JET_BOOTSTRAP_ENTRY: relative(library, join(library, "Source/Runtime.jet")),
       JET_BOOTSTRAP_OUTPUT: join(out, "unused.output"), JET_BOOTSTRAP_RECEIPT: receipt,
-      JET_FRONT_LIBRARY_OBJECT_OUTPUT: prefix, JET_FRONT_LIBRARY_EXPORTS: join(repo, "Compiler/JetRuntime/exports.list"),
+      JET_FRONT_LIBRARY_OBJECT_OUTPUT: prefix,
       JET_STORE_DIR: resolve(process.env.JET_STORE_DIR ?? join(out, "store")), RUST_MIN_STACK: "8388608",
     },
     encoding: "utf8", timeout: Number(process.env.JET_FRONT_TIMEOUT_MS ?? 120000), maxBuffer: 1 << 27,
