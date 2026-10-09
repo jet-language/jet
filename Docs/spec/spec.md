@@ -4305,6 +4305,12 @@ that default.
 Fleet host overrides are typed values evaluated by the same pure comptime
 engine and cycle checks as computed module fields. Results retain exact source,
 dependency, and purity provenance.
+Host-local generic fields take precedence over enclosing comptime values and
+resolve before service and option expressions, independently of declaration
+order. Option values that are unresolved names, dotted symbolic atoms, or
+string literals retain their written spelling; computed option expressions
+retain their evaluated display value. The referenced System plan is unchanged:
+the host keeps its typed override fields alongside the System reference.
 
 ### Compiler and package model APIs
 

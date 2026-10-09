@@ -183,7 +183,8 @@ fn envmodel_evaluate_module(decl: ModuleDecl, src: String, scope: ModuleEvalScop
                 hosts := [HostPlan]?{None}
                 loop field in lit.fields {
                     if field.value == {
-                        .Hosts(host_entries) -> hosts = Val(loop host in host_entries -> HostPlan{name: host.name, system: host.system})
+                        // Rust ModuleEval/System.rs:523-540.
+                        .Hosts(host_entries) -> hosts = Val(envmodel_evaluate_hosts(host_entries, src, scope, globals))
                         .Other(_) -> return Err(envmodel_error("E1244", "`{field.name}` isn't a field of `Fleet`", "fleet deployment remains frozen jetos research; only `hosts` is captured for planning", "remove `{field.name}`; captured fleets use `hosts: {{ … }}`", Val(field.name_span)))
                     }
                 }
@@ -194,7 +195,9 @@ fn envmodel_evaluate_module(decl: ModuleDecl, src: String, scope: ModuleEvalScop
                 hosts := [HostPlan]?{None}
                 loop field in lit.fields {
                     if field.value == {
-                        .Hosts(host_entries) -> hosts = Val(loop host in host_entries -> HostPlan{name: host.name, system: host.system})
+                        // Rust ModuleEval/System.rs:571-588: VM hosts use
+                        // the same override evaluator as fleet hosts.
+                        .Hosts(host_entries) -> hosts = Val(envmodel_evaluate_hosts(host_entries, src, scope, globals))
                         .Run(_) -> {}
                         .Other(_) -> return Err(envmodel_error("E1244", "`{field.name}` isn't a field of `Fleet`", "fleet deployment remains frozen jetos research; only `hosts` is captured for planning", "remove `{field.name}`; captured fleets use `hosts: {{ … }}`", Val(field.name_span)))
                     }
@@ -268,4 +271,156 @@ pub fn envmodel_pkg_ref(pkg: Pkg) -> String Never! {
     if pkg.source == "" && pkg.name.contains(REF_PROVIDER_AT) -> return pkg.name
     source :: if pkg.source == "" -> DEFAULT_SOURCE else -> pkg.source
     "{pkg.name}{REF_PROVIDER_AT}{source}"
+}
+
+// Rust ModuleEval/System.rs:523-540,571-588. Both host namespaces evaluate
+// overrides before capture; an absent tail stays absent, not an empty record.
+fn envmodel_evaluate_hosts(entries: [HostEntry], src: String, scope: ModuleEvalScope, globals: [String: CtValue]) -> [HostPlan] EnvModelEvalError! {
+    captured := [HostPlan]{}
+    bytes :: src.bytes()
+    loop entry in entries {
+        overrides := HostOverride?{None}
+        override_source := String?{None}
+        if entry.overrides == {
+            .Val(span) -> {
+                source :: pkg_bytes_text(bytes, span.start, span.end).trim()
+                overrides = Val(envmodel_evaluate_host_override(source, span, scope, globals))
+                override_source = Val(source)
+            }
+            .None -> {}
+        }
+        &captured.push(HostPlan{name: entry.name, system: entry.system, overrides: overrides, override_source: override_source})
+    }
+    Ok(captured)
+}
+
+// Rust ModuleEval/System.rs:615-753. Reuse the System parser and the pure
+// named-field graph, resolving generic fields before typed nested values.
+// Port reused from 45acf6f8f SystemFleetEval.jet, matched to the current oracle.
+fn envmodel_evaluate_host_override(source: String, original_span: Span, scope: ModuleEvalScope, globals: [String: CtValue]) -> HostOverride EnvModelEvalError! {
+    wrapped :: "module system.fleet_override {source}"
+    program :: envmodel_parse_program(wrapped) ?? {
+        diagnostic := err.diagnostic
+        diagnostic.span = Val(original_span)
+        return Err(EnvModelEvalError{diagnostic: diagnostic})
+    }
+    found := ModuleDecl?{None}
+    loop item in program.items {
+        if item == {
+            .Module(decl) -> {
+                found = Val(decl)
+                break
+            }
+            else -> {}
+        }
+    }
+    decl :: found ?? return Err(envmodel_error("E0003", "host override is not a record", "fleet overrides use the same record evaluator as system fields", "write `.{{ field: value }}` after the system reference", Val(original_span)))
+    if decl.contributions.len() == 0 -> return Err(envmodel_error("E0003", "host override is empty", "a host override must contain at least one typed field", "add a field inside the override record", Val(original_span)))
+    lit :: if decl.contributions[0].value == {
+        .System(lit) -> lit
+        else -> { return Err(envmodel_error("E0003", "host override is not a system record", "fleet overrides use System field semantics", "write named fields inside `.{{ … }}`", Val(original_span))) }
+    }
+    definitions := [String: NamedFieldExpr]{}
+    loop field in lit.fields {
+        if field.value == {
+            .Other(expr) -> definitions[field.name] = NamedFieldExpr{span: field.span, expr: expr}
+            else -> {}
+        }
+    }
+    computed :: envmodel_evaluate_named_fields(definitions, globals, scope, Val(wrapped), "host override values must have a deterministic dependency order", "break the cycle by making one field independent or by moving the shared computation into a pure function")
+    field_names :: definitions.keys().to_list()
+    prefix_len :: wrapped.bytes().len() - source.bytes().len()
+    fields := [(name: String, value: HostOverrideValue)]{}
+    provenance := [HostOverrideProvenance]{}
+    loop field in lit.fields {
+        value :: if field.value == {
+            .Platform(os, arch, span) -> HostOverrideValue.Platform{value: envmodel_check_platform(os, arch, span)}
+            .Packages(expr) -> HostOverrideValue.Packages{values: envmodel_extract_packages(expr, wrapped).packages}
+            .Services(entries) -> {
+                services := [ServicePlan]{}
+                loop entry in entries -> &services.push(envmodel_evaluate_system_service(entry, scope, computed.values))
+                HostOverrideValue.Services{values: services}
+            }
+            .Options(entries) -> {
+                options := [OptionPlan]{}
+                loop entry in entries -> &options.push(OptionPlan{key: entry.key, value: envmodel_evaluate_host_option(entry.value, entry.value_span, source, prefix_len, scope, computed.values)})
+                HostOverrideValue.Options{values: options}
+            }
+            .Other(expr) -> HostOverrideValue.Value{value: envmodel_evaluate_expression(expr, computed.values, scope)}
+        }
+        &fields.push((name: field.name, value: value))
+        common := ComputedFieldProvenance?{None}
+        loop candidate in computed.provenance {
+            if candidate.field == field.name {
+                common = Val(candidate)
+                break
+            }
+        }
+        dependencies := [String]{}
+        pure := true
+        text := ""
+        if common == {
+            .Val(candidate) -> {
+                dependencies = candidate.dependencies
+                pure = candidate.pure
+                text = candidate.source
+            }
+            .None -> dependencies = envmodel_typed_field_dependencies(field.value, field_names)
+        }
+        if text.is_empty() -> text = envmodel_host_field_source(source, field.span, prefix_len)
+        &provenance.push(HostOverrideProvenance{field: field.name, dependencies: dependencies, pure: pure, source: text})
+    }
+    Ok(HostOverride{fields: fields, source: source, provenance: provenance})
+}
+
+// Rust ModuleEval/System.rs:760-778. Symbolic option atoms keep their exact
+// spelling; resolved identifiers and real expressions use the pure evaluator.
+fn envmodel_evaluate_host_option(expr: Expr, span: Span, source: String, prefix_len: Int, scope: ModuleEvalScope, resolved: [String: CtValue]) -> String EnvModelEvalError! {
+    symbolic :: if expr == {
+        .Ident(name, _) -> !resolved.has_key(name)
+        .Field(_, _, _) | .Str(_, _) -> true
+        else -> false
+    }
+    value :: if symbolic -> CtValue.Str{value: envmodel_host_field_source(source, span, prefix_len)} else -> envmodel_evaluate_expression(expr, resolved, scope)
+    Ok(ast_comptime_value_show(value))
+}
+
+// Rust ModuleEval/System.rs:780-784. Parser spans belong to the synthetic
+// module; provenance belongs to the original override record's UTF-8 bytes.
+fn envmodel_host_field_source(source: String, span: Span, prefix_len: Int) -> String Never! {
+    start :: if span.start < prefix_len -> 0 else -> span.start - prefix_len
+    end :: if span.end < prefix_len -> 0 else -> span.end - prefix_len
+    bytes :: source.bytes()
+    text :: if start <= end && end <= bytes.len() -> String.from_bytes(bytes[start..<end]) ?? source else -> source
+    text.trim()
+}
+
+// Rust ModuleEval/System.rs:786-817. Dependencies of typed fields only name
+// generic sibling fields, de-duplicated and sorted regardless of source order.
+fn envmodel_typed_field_dependencies(value: SystemFieldValue, field_names: [String]) -> [String] Never! {
+    dependencies := [String]{}
+    if value == {
+        .Packages(expr) | .Other(expr) -> {
+            dependencies = envmodel_dependencies_for_expression(expr, field_names)
+        }
+        .Services(entries) -> {
+            loop entry in entries {
+                loop field in entry.fields {
+                    loop dependency in envmodel_dependencies_for_expression(field.value, field_names) {
+                        if !dependencies.contains(dependency) -> &dependencies.push(dependency)
+                    }
+                }
+            }
+        }
+        .Options(entries) -> {
+            loop entry in entries {
+                loop dependency in envmodel_dependencies_for_expression(entry.value, field_names) {
+                    if !dependencies.contains(dependency) -> &dependencies.push(dependency)
+                }
+            }
+        }
+        .Platform(_, _, _) -> {}
+    }
+    &dependencies.sort()
+    dependencies
 }

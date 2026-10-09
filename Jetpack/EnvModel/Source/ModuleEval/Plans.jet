@@ -210,6 +210,33 @@ pub struct EvaluatedModule {
 pub struct HostPlan {
     pub name: String
     pub system: String
+    // Rust ModuleEval/Types.rs:491-495: typed copy-with-update facts and
+    // exact record text; source is provenance, never deferred evaluation.
+    pub overrides: HostOverride?
+    pub override_source: String?
+}
+
+// Rust ModuleEval/Types.rs:498-525. Preserve source order and the System
+// field shapes; generic host-local fields use the shared comptime values.
+pub struct HostOverride {
+    pub fields: [(name: String, value: HostOverrideValue)]
+    pub source: String
+    pub provenance: [HostOverrideProvenance]
+}
+
+pub struct HostOverrideProvenance {
+    pub field: String
+    pub dependencies: [String]
+    pub pure: Bool
+    pub source: String
+}
+
+pub enum HostOverrideValue {
+    Platform(value: String)
+    Packages(values: [Pkg])
+    Services(values: [ServicePlan])
+    Options(values: [OptionPlan])
+    Value(value: CtValue)
 }
 
 // U15: a `fleet.<name>:` (or `vmtest.<name>:`) capture; frozen jetos
