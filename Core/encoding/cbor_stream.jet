@@ -124,7 +124,7 @@ struct CBORPull {
         value := U64{0}
         loop _ in 0..<width {
             byte :: &self.required(start, "CBOR argument ended before all bytes were present") ?? return Err(err)
-            value = (value << 8) | U64{Int.from_u8(byte)}
+            value = (value << 8).bit_or(U64{Int.from_u8(byte)})
         }
         Ok(Val(value))
     }
@@ -167,11 +167,11 @@ struct CBORPull {
             }
             if head == (U8{255}) -> break
             byte :: Int.from_u8(head)
-            if (byte >> 5) != major || (byte & 31) == 31 {
+            if (byte >> 5) != major || (byte.bit_and(31)) == 31 {
                 release<U8>(self.allocation, ^out)
                 return Err(error(.Syntax, chunk, self.path(), "indefinite CBOR string contains a wrong or indefinite chunk"))
             }
-            count :: &self.argument(byte & 31, chunk) ?? {
+            count :: &self.argument(byte.bit_and(31), chunk) ?? {
                 release<U8>(self.allocation, ^out)
                 return Err(err)
             }
@@ -264,7 +264,7 @@ struct CBORPull {
             raw_byte :: &self.required(start, "truncated CBOR {name}") ?? return Err(err)
             byte :: Int.from_u8(raw_byte)
             if width == 8 && i == 0 && byte >= 128 -> bits = byte - 256
-            else -> bits = (bits << 8) | byte
+            else -> bits = (bits << 8).bit_or(byte)
         }
         Ok(if width == 2 -> parser.widen_float(bits, 5, 10) else if width == 4 -> parser.widen_float(bits, 8, 23) else -> math.from_bits(bits))
     }

@@ -335,17 +335,17 @@ struct JSONPull {
                 } else if cp >= 56320 && cp <= 57343 -> return Err(stream_error(.Syntax, self.offset - 4, self.line, self.column - 4, "unpaired low surrogate"))
                 if cp < 128 -> &self.append(&bytes, U8{cp}, "string")
                 else if cp < 2048 {
-                    &self.append(&bytes, U8{192 | (cp >> 6)}, "string")
-                    &self.append(&bytes, U8{128 | (cp & 63)}, "string")
+                    &self.append(&bytes, U8{(192).bit_or(cp >> 6)}, "string")
+                    &self.append(&bytes, U8{(128).bit_or(cp.bit_and(63))}, "string")
                 } else if cp < 65536 {
-                    &self.append(&bytes, U8{224 | (cp >> 12)}, "string")
-                    &self.append(&bytes, U8{128 | ((cp >> 6) & 63)}, "string")
-                    &self.append(&bytes, U8{128 | (cp & 63)}, "string")
+                    &self.append(&bytes, U8{(224).bit_or(cp >> 12)}, "string")
+                    &self.append(&bytes, U8{(128).bit_or((cp >> 6).bit_and(63))}, "string")
+                    &self.append(&bytes, U8{(128).bit_or(cp.bit_and(63))}, "string")
                 } else {
-                    &self.append(&bytes, U8{240 | (cp >> 18)}, "string")
-                    &self.append(&bytes, U8{128 | ((cp >> 12) & 63)}, "string")
-                    &self.append(&bytes, U8{128 | ((cp >> 6) & 63)}, "string")
-                    &self.append(&bytes, U8{128 | (cp & 63)}, "string")
+                    &self.append(&bytes, U8{(240).bit_or(cp >> 18)}, "string")
+                    &self.append(&bytes, U8{(128).bit_or((cp >> 12).bit_and(63))}, "string")
+                    &self.append(&bytes, U8{(128).bit_or((cp >> 6).bit_and(63))}, "string")
+                    &self.append(&bytes, U8{(128).bit_or(cp.bit_and(63))}, "string")
                 }
             } else { return Err(stream_error(.Syntax, self.offset - 1, self.line, self.column - 1, "unknown JSON escape")) }
         }

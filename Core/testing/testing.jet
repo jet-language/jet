@@ -199,7 +199,7 @@ struct Fake {
 
     fn locale(self, locale: String) -> Fake Never! {
         code :: if locale == "en" -> 0 else if locale == "de" -> 1 else -> panic("unsupported fake-data locale `{locale}`; supported locales: en, de")
-        Fake{state: self.state ~| (U64{code}.wrapping_mul(U64{15111065706836454659})), locale_code: code}
+        Fake{state: self.state.bit_xor(U64{code}.wrapping_mul(U64{15111065706836454659})), locale_code: code}
     }
 
     fn name(&self) -> String Never! {

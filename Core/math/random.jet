@@ -111,7 +111,7 @@ struct RNG {
     fn bytes(&self, count: Int) -> [U8] Never! {
         length :: Int{I64{count}}
         out := [U8]{}
-        loop _ in 0..<length -> &out.push(U8{seeded_next(&self.state) & U64{255}})
+        loop _ in 0..<length -> &out.push(U8{seeded_next(&self.state).bit_and(U64{255})})
         out
     }
 
