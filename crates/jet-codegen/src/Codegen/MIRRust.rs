@@ -10088,6 +10088,27 @@ impl<'a> RustEmitter<'a> {
             .unwrap_or_else(|_| panic!("MIR function source line {line} exceeds u32"));
         (source.path.clone(), line, source_line)
     }
+    fn function_stack_context(&self, function: &MirFunction) -> (String, u32, String) {
+        let module = self.module_row(function.module_id);
+        let source = self
+            .program
+            .source_files
+            .iter()
+            .find(|source| source.id == module.source_file)
+            .unwrap_or_else(|| panic!("MIR source file {:?} has no row", module.source_file));
+        let (line, _) =
+            jet_foundation::Diagnostics::span_line_col(&source.source, function.span.start);
+        let source_line = source
+            .source
+            .lines()
+            .nth(line.saturating_sub(1))
+            .unwrap_or_default()
+            .trim_end()
+            .to_string();
+        let line = u32::try_from(line)
+            .unwrap_or_else(|_| panic!("MIR function source line {line} exceeds u32"));
+        (source.path.clone(), line, source_line)
+    }
     fn instruction_location(
         &self,
         function: &MirFunction,
@@ -35204,6 +35225,33 @@ impl<'a> RustEmitter<'a> {
                     type_name,
                     path,
                     self.value_owned(*display),
+                    fields,
+                )
+            }
+            MirSemanticOp::ReflectOf {
+                type_name,
+                path,
+                display,
+                fields,
+            } => {
+                let fields = fields
+                    .iter()
+                    .map(|field| {
+                        format!(
+                            "jet_reflect_field_new({:?}.to_string(), jet_reflect_value_from_field(&({}), {:?}, {:?}))",
+                            field.name,
+                            self.value_read(field.value),
+                            field.type_name,
+                            field.path,
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!(
+                    "jet_reflect_value_finish({:?}.to_string(), {:?}.to_string(), {}, vec![{}])",
+                    type_name,
+                    path,
+                    self.value_read(*display),
                     fields,
                 )
             }
