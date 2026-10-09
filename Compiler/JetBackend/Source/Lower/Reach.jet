@@ -401,7 +401,7 @@ fn lower_reach_concrete_type(p: MIRProgram, q: &LowerPrepared, ty: MIRType, pare
 fn lower_reach_render_type(p: MIRProgram, q: &LowerPrepared, ty: MIRType, show: Bool, parent: Int) Never! {
     loop implementation in p.impls {
         if !lower_render_impl_selected(p, implementation, ty, show) -> next
-        id :: lower_render_method(p, implementation, show) ?? return lower_mono_issue(&q, "selected display implementation for {mir_type_display_name(ty)} has no method")
+        id :: lower_render_method(p, implementation, show) ?? return lower_mono_issue_at(&q, parent, "selected display implementation for {mir_type_display_name(ty)} has no method")
         lower_mono_request(p, &q, id, Val(ty), [MIRType]{}, parent, "render of {mir_type_display_name(ty)}").drop("render request")
         return
     }
