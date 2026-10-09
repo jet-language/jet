@@ -78,6 +78,8 @@ pub struct LIRLoweringIssue {
 // `lir` is complete only when `issues` is empty; the lowering lints the
 // module itself and reports lint findings as issues. `entry` is the LIR
 // function of the entry the program was lowered from (None with issues).
+// `finalizer` is a compiler callable's zero-argument Unit static release,
+// run before its image is unmapped, after all native result owners retire.
 pub struct LIRLowering {
     pub lir: LIRModule
     pub issues: [LIRLoweringIssue]
@@ -168,6 +170,8 @@ struct LowerModule {
     pub static_rows: [String:Int]
     // String slots of frozen statics the entry fills first (lower_static_entry).
     pub static_fixups: [LowerStaticFixup]
+    // Callable initialization and finalization share this filled-statics flag.
+    pub static_live: LIRDataID?
     // MIR source file id -> byte offsets of its line starts (Numeric.jet lower_source_line).
     pub line_starts: [U64:[Int]]
     // MIR source file id -> its row in program.source_files.
@@ -318,6 +322,7 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
         data_rows: [String:Int]{},
         static_rows: [String:Int]{},
         static_fixups: [LowerStaticFixup]{},
+        static_live: None,
         line_starts: [U64:[Int]]{},
         source_rows: [U64:Int]{},
         prelude_positions: [U64:Int]{},
@@ -2163,14 +2168,21 @@ fn lower_initialize_uninit(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &
     if !fixed -> return
     if count < 0 || row.projections.len() != 0 || row.base == .Static(_) -> return lower_fail(&m, &f, "uninit {mir_type_display_name(row.ty)} of this shape is not lowered at O0 yet")
     slot :: c.place_slots.get(place.value) ?? return lower_fail(&m, &f, "place {place.value} has no lowered root")
-    if c.slots[slot].cell || c.slots[slot].write_param >= 0 -> return lower_fail(&m, &f, "uninit {mir_type_display_name(row.ty)} in a cell or Write parameter is not lowered at O0 yet")
+    header := LIRValueID?{None}
+    if c.slots[slot].cell {
+        header = ~f.cells[slot]
+    } else if c.slots[slot].write_param >= 0 {
+        header = ~f.params[c.slots[slot].write_param]
+    } else {
+        header = Val(lower_new_storage(p, &f, row.ty))
+    }
+    storage :: header ?? return lower_fail(&m, &f, "uninit {mir_type_display_name(row.ty)} has no checked cell storage")
     length :: lower_const(&f, count)
     data :: lower_list_buffer(&m, &f, length, lower_list_stride(p, elem))
-    header :: lower_new_storage(p, &f, row.ty)
-    lower_emit(&f, LIRInst.Store{base: header, offset: 0, value: length})
-    lower_emit(&f, LIRInst.Store{base: header, offset: 8, value: length})
-    lower_emit(&f, LIRInst.Store{base: header, offset: 16, value: data})
-    lower_set_slot(&f, slot, Val(header))
+    lower_emit(&f, LIRInst.Store{base: storage, offset: 0, value: length})
+    lower_emit(&f, LIRInst.Store{base: storage, offset: 8, value: length})
+    lower_emit(&f, LIRInst.Store{base: storage, offset: 16, value: data})
+    lower_set_slot(&f, slot, Val(storage))
 }
 
 struct LowerFieldAddress {

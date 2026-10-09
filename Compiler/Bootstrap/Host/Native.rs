@@ -2561,6 +2561,7 @@ fn emit_bootstrap_host_factory(
             "            {threads_cores}: jet_foundation::Numeric::JetInt::from_i64(::std::thread::available_parallelism().map(|cores| cores.get() as i64).unwrap_or(1)),\n",
             "            {threads_memory}: ::std::fs::read_to_string(\"/proc/meminfo\").ok().and_then(|text| text.lines().find_map(|line| line.strip_prefix(\"MemAvailable:\").and_then(|rest| rest.trim().trim_end_matches(\"kB\").trim().parse::<i64>().ok()))).map(|kilobytes| {{ let mut free = kilobytes.saturating_mul(1024); if let Some(path) = ::std::fs::read_to_string(\"/proc/self/cgroup\").ok().and_then(|text| text.lines().find_map(|line| line.strip_prefix(\"0::\").map(str::to_string))) {{ let mut dir = ::std::path::PathBuf::from(format!(\"/sys/fs/cgroup{{}}\", path.trim_end_matches('/'))); loop {{ let read = |name: &str| ::std::fs::read_to_string(dir.join(name)).ok().and_then(|value| value.trim().parse::<i64>().ok()); if let (Some(max), Some(current)) = (read(\"memory.max\"), read(\"memory.current\")) {{ free = free.min((max - current).max(0)); }} if dir == ::std::path::Path::new(\"/sys/fs/cgroup\") || !dir.pop() {{ break; }} }} }} jet_foundation::Numeric::JetInt::from_i64(free) }}).ok_or_else(Default::default),\n",
             "        }},\n",
+            "        {request_native_stop_points}: false,\n",
             "    }};\n",
             "    Ok(__jet_request)\n",
             "}}\n",

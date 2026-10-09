@@ -813,13 +813,28 @@ fn jet_rust_prefix_wrapped(state: &JetRustPrefixState, open: String, file: Strin
     "{open}{jet_rust_prefix_foundation(&state, file)}{close}"
 }
 
+// mod.rs `push_embedded_encoding_json`: flatten host-relative includes.
+fn jet_rust_prefix_encoding_json(state: &JetRustPrefixState) -> String Never! {
+    source :: jet_rust_prefix_foundation(&state, "EncodingJson.rs")
+    bytes :: source.bytes()
+    types_marker :: "include!(\"../../jet-codegen/src/Prelude/CoreLib/JetStd/EncodingTypes.rs\");"
+    error_marker :: "include!(\"../../jet-codegen/src/Prelude/Core/EncodingError.rs\");"
+    types_start :: jet_rust_prefix_find(bytes, types_marker.bytes(), 0)
+    error_start :: jet_rust_prefix_find(bytes, error_marker.bytes(), 0)
+    if types_start < 0 || error_start < types_start + types_marker.bytes().len() {
+        jet_rust_prefix_fail(&state, "EncodingJson host include markers missing or out of order")
+        return ""
+    }
+    "\nmod jet_encoding_json {{\n{jet_rust_prefix_slice(bytes, 0, types_start)}{jet_rust_prefix_prelude(&state, "CoreLib/JetStd/EncodingTypes.rs")}{jet_rust_prefix_slice(bytes, types_start + types_marker.bytes().len(), error_start)}{jet_rust_prefix_prelude(&state, "Core/EncodingError.rs")}{jet_rust_prefix_slice(bytes, error_start + error_marker.bytes().len(), bytes.len())}\n}}\n\n#[allow(non_snake_case)]\nmod EncodingJson {{ pub use crate::jet_encoding_json::*; }}\n"
+}
+
 fn jet_rust_prefix_part_source(state: &JetRustPrefixState, name: String) -> String Never! {
     if name == {
         "fixed_allocator" -> "\n// JET_VETTED_UNSAFE_BEGIN: jet_fixed_kernel\npub mod jet_fixed_kernel {{\n{jet_rust_prefix_prelude(&state, "Core/FixedAllocator.rs")}\n}}\n// JET_VETTED_UNSAFE_END: jet_fixed_kernel\n"
         "runtime_diagnostic_core" -> jet_rust_prefix_wrapped(&state, "\npub mod RuntimeDiagnosticCore {{\n", "RuntimeDiagnosticCore.rs", "\n}}\n")
         "encoding_errors" -> jet_rust_prefix_wrapped(&state, "\nmod jet_encoding_errors {{\n", "EncodingErrors.rs", "\n}}\n")
         "json_number" -> jet_rust_prefix_wrapped(&state, "\nmod jet_json_number {{\n", "JSONNumber.rs", "\n}}\n")
-        "encoding_json" -> jet_rust_prefix_wrapped(&state, "\nmod jet_encoding_json {{\n", "EncodingJson.rs", "\n}}\n\n#[allow(non_snake_case)]\nmod EncodingJson {{ pub use crate::jet_encoding_json::*; }}\n")
+        "encoding_json" -> jet_rust_prefix_encoding_json(&state)
         "outcome" -> jet_rust_prefix_outcome(&state)
         "sha256" -> jet_rust_prefix_wrapped(&state, "\n// JET_VETTED_UNSAFE_BEGIN: jet_foundation_sha256\n// AUDIT: this Foundation SHA-256 module owns the bounded hostile-input\n// tree-hash file boundary; its rooted authority uses checked no-follow\n// descriptors and keeps every raw descriptor operation in this module.\n#[allow(non_snake_case)]\nmod SHA256 {{\n", "SHA256.rs", "\n}}\n// JET_VETTED_UNSAFE_END: jet_foundation_sha256\n")
         "performance_budget" -> jet_rust_prefix_wrapped(&state, "\n#[allow(non_snake_case)]\nmod PerformanceBudget {{\n", "PerformanceBudget.rs", "\n}}\n")

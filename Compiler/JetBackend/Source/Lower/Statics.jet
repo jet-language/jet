@@ -3,8 +3,9 @@
 //
 // Runtime-owned words inside a frozen tree (String and spilled exact Int)
 // cannot be frozen at build time. Their slots stay zero until the entry
-// runs the recorded constructor on static text. The resulting owners live
-// for the process; an ownership-bearing Global read clones them.
+// runs the recorded constructor on static text. Program owners live until
+// process exit; callable owners live until image finalization. An
+// ownership-bearing Global read clones them.
 use jet_foundation.[
     MIRConstant, MIRConstantDef, MIRInstruction, MIRPlace, MIRProgram, MIRType, MIRValueID,
     mir_type_display_name,
@@ -361,7 +362,8 @@ fn lower_static_storage(p: MIRProgram, m: &LowerModule, f: &LowerFunction, defin
 }
 
 // Fills every runtime-owned slot of the frozen statics before entry. The
-// handles live as long as the process, like the frozen data holding them.
+// Program handles live until process exit; compiler callable handles live
+// until their image finalizer releases them.
 fn lower_static_fixups(m: &LowerModule, f: &LowerFunction) Never! {
     fixups :: ~m.static_fixups
     loop fixup in fixups {
@@ -374,6 +376,28 @@ fn lower_static_fixups(m: &LowerModule, f: &LowerFunction) Never! {
         object :: lower_pointer(&f)
         lower_emit(&f, LIRInst.DataAddress{dst: object, data: fixup.object})
         lower_emit(&f, LIRInst.Store{base: object, offset: fixup.offset, value: handle})
+    }
+}
+
+// Release canonical String owners created by lower_static_fixups, never frozen
+// storage or borrowed carriers reached through its pointer relocations.
+// Exact-Int fixups have trivial drop at O0, as selected by lower_drop.
+fn lower_static_release(m: &LowerModule, f: &LowerFunction) Never! {
+    cursor := 0
+    loop cursor < m.static_fixups.len() {
+        index :: cursor
+        cursor += 1
+        if m.static_fixups[index].constructor != "jet_rt_string_from_static" -> next
+        object_id :: m.static_fixups[index].object
+        offset :: m.static_fixups[index].offset
+        handle :: lower_pointer(&f)
+        object :: lower_pointer(&f)
+        lower_emit(&f, LIRInst.DataAddress{dst: object, data: object_id})
+        lower_emit(&f, LIRInst.Load{dst: handle, base: object, offset: offset})
+        empty :: lower_pointer(&f)
+        lower_emit(&f, LIRInst.Const{dst: empty, value: 0})
+        lower_emit(&f, LIRInst.Store{base: object, offset: offset, value: empty})
+        lower_call_runtime(&m, &f, "jet_rt_string_drop", [LIRValueID]{handle}, None)
     }
 }
 

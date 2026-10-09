@@ -98,6 +98,19 @@ The front end owns language checks and user-facing compiler diagnostics.
 Backends consume checked facts; a back end that rejects checked MIR has hit an
 internal compiler error, not another language checker.
 
+Native compiler call images retain their runtime and writable static storage
+until all calls and owning argument/result carriers have retired. Scalar
+decoding detaches the compiler value; it does not consume the native owner.
+The host releases each owner using its canonical runtime drop before unloading
+the image. A callable's checked, zero-argument Unit finalizer then releases its
+runtime-owned statics before the loader unmaps code and data. Initialization
+and finalization share a live flag, so repeated calls reuse the same statics
+without duplicating owners. Calls through the x86-64 assembly host boundary
+declare all System V caller-saved vector registers as clobbered.
+The callable lifetime witness in `Compiler/JetBackend/Tests/CallableStatics.jet`
+starts with MIR and uses the admitted runtime's actual constructors and drops,
+observing reuse, live-flag clearing, and reinitialization before loader unload.
+
 ### Build graph and compiler nodes
 
 The checked compiler publishes one `BuildPlan` graph. It contains declared

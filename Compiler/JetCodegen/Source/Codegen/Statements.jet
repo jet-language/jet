@@ -1,6 +1,8 @@
 // Checked statement lowering to MIR CFG. Sema is the only component that
 // decides whether a source statement is legal; this file only projects facts.
 use jet_foundation.[
+    CanonicalPassSnapshot,
+    canonical_pass_debug_snapshot,
     AccessConvention,
     AutoVectorizationFacts,
     BinEndian,
@@ -134,6 +136,16 @@ fn jet_codegen_lower_block(builder: &JetCodegenBuilder, program: JetCodegenProgr
 }
 
 fn jet_codegen_lower_statements(builder: &JetCodegenBuilder, program: JetCodegenProgram, statements: [TStmt]) {
+    input := CanonicalPassSnapshot?{None}
+    if jet_codegen_journal_requested(program, "mir.lower-statements") -> input = Val(canonical_pass_debug_snapshot("tir", "mir.lower-statements", "{statements}"))
+    jet_codegen_lower_statements_inner(&builder, program, statements)
+    if input == .Val(snapshot) {
+        output :: canonical_pass_debug_snapshot("mir", "mir.lower-statements", "{builder.blocks}")
+        jet_codegen_journal_record(program, "mir.lower-statements", "crates/jet-codegen/src/Codegen/TIR/tir_to_mir_stmt.rs", snapshot, output)
+    }
+}
+
+fn jet_codegen_lower_statements_inner(builder: &JetCodegenBuilder, program: JetCodegenProgram, statements: [TStmt]) {
     index := 0
     loop index < statements.len() {
         if !jet_codegen_current_is_open(builder, program) -> return
@@ -1660,7 +1672,7 @@ fn jet_codegen_lower_index_hook_assign(builder: &JetCodegenBuilder, program: Jet
         span: base.span,
         label: None,
         source_index: None,
-        binder_slot: None,
+        binder_slot: Val(0),
         spread: false,
         implicit_clone: false,
         shared_auto_clone: false,
@@ -1678,18 +1690,10 @@ fn jet_codegen_lower_index_hook_assign(builder: &JetCodegenBuilder, program: Jet
     lowered_call_args := if {
         direct_target != None -> {
             target :: direct_target ?? panic("checked IndexMut implementation disappeared")
-            jet_codegen_lower_call_args(&builder, program, call_args, target.params)
+            jet_codegen_lower_instance_args(&builder, program, call_args, target.params)
         } else -> {
             trait_method :: trait_target ?? panic("checked IndexMut trait method disappeared")
-            labels := [String]{}
-            variadic := [Bool]{}
-            conventions := [AccessConvention]{}
-            loop parameter in trait_method.method.params {
-                &labels.push(parameter.public_label)
-                &variadic.push(parameter.variadic)
-                &conventions.push(parameter.access)
-            }
-            jet_codegen_lower_call_args_for_signature(&builder, program, call_args, labels, variadic, conventions)
+            jet_codegen_lower_trait_method_args(&builder, program, call_args, trait_method.method)
         }
     }
     lowered_args := [MIRCallArg]{receiver_arg}

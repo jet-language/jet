@@ -6,6 +6,8 @@
 // usage: node Compiler/JetBackend/Tests/run-lower-fixtures.mjs <outdir>
 // Append --abi to assemble just the ABI/alignment witnesses, or --sanitize
 // for just the sanitize-mode witnesses (Tests/SanitizeFixtures.jet).
+// --callable-statics assembles the production callable lifetime witness:
+// jet run unit.jet <admitted libjet_runtime_c.so> (three "héllo" lines + pass).
 // then:  cd <outdir> && jet run unit.jet        (writes <fixture>.elf files)
 // then:  node Compiler/JetBackend/Tests/check-native-fixtures.mjs <outdir>
 //        (with JET_RUNTIME_C_LIB, it also runs every image through load.jet)
@@ -54,6 +56,7 @@ function body(path) {
   const kept = [];
   let skipping = false;
   for (const line of read(path).split("\n")) {
+    if (callableStatics && path === "Compiler/JetBackend/Tests/LowerFixtures.jet" && line.startsWith("fn run() {")) break;
     if (skipping) {
       if (line.startsWith("]")) skipping = false;
       continue;
@@ -91,6 +94,8 @@ const asmSpans = asmLeaves.map((name) => {
 const asmWitnessSource = `fn fx_asm_os_source() -> String Never! { ${JSON.stringify(osSource).replaceAll("{", "{{").replaceAll("}", "}}")} }\nfn fx_asm_os_span(name: String) -> Span Never! {\n${asmSpans.join("\n")}\n    panic("unknown OS asm witness {name}")\n}\n`;
 const abiOnly = process.argv.includes("--abi");
 const sanitizeOnly = process.argv.includes("--sanitize");
+const callableStatics = process.argv.includes("--callable-statics");
+if (callableStatics && (abiOnly || sanitizeOnly)) throw new Error("--callable-statics cannot be combined with --abi or --sanitize");
 const small = abiOnly || sanitizeOnly;
 const parts = [
   ...(small ? [
@@ -142,6 +147,13 @@ const parts = [
   ...(!small ? [body("Compiler/JetBackend/Source/Image/Memory.jet")] : []),
   ...(sanitizeOnly ? [body("Compiler/JetBackend/Tests/SanitizeFixtures.jet"), "fn run() { sanitize_fixtures() }"] : [body("Compiler/JetBackend/Tests/AbiFixtures.jet")]),
   ...(abiOnly ? ["fn run() { abi_fixtures() }"] : sanitizeOnly ? [] : [body("Compiler/JetBackend/Tests/LowerFixtures.jet"), ...sorted("Compiler/JetBackend/Tests/Fixtures").map(body)]),
+  ...(callableStatics ? [
+    body("Compiler/JetBackend/Source/OS/Linux.jet"),
+    body("Compiler/JetBackend/Source/Image/Loader.jet"),
+    body("Compiler/JetBackend/Source/Image/Calls.jet"),
+    body("Compiler/JetBackend/Tests/CallableStatics.jet"),
+    "fn run() { callable_statics() }",
+  ] : []),
 ];
 mkdirSync(outDir, { recursive: true });
 writeFileSync(`${outDir}/unit.jet`, [...coreUses, "", ...parts].join("\n"));
