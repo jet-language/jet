@@ -618,6 +618,7 @@ fn spawn_exec_child(plan: I64, count: I64, child: I64, scratch: I64, err_read: I
         sync_mutex_lock(child)
         if (result > I64{0}) {
             fd_put(child, I64{24}, fd_word(status, I64{0}) & I64{4294967295})
+            compiler_process_record_exit_status(pid, fd_word(child, I64{24}))
             fd_put(child, I64{16}, I64{1})
         } else { fd_put(child, I64{16}, I64{0}) }
         sync_mutex_unlock(child)

@@ -18,6 +18,18 @@ enum LowerRouteResult {
 struct LowerRoute { symbol: String, export: String, params: [LowerRouteCarrier], result: LowerRouteResult }
 
 LOWER_RUNTIME_ROUTES :: prep { [LowerRoute]{
+    // Source Stopwatch policy uses the existing exact-Int host epoch.
+    LowerRoute{symbol: "jet_scheduler_world_reject_uncontrolled", export: "jet_scheduler_world_reject_uncontrolled", params: [LowerRouteCarrier]{LowerRouteCarrier.Text}, result: LowerRouteResult.Plain{carrier: LowerRouteCarrier.Unit}},
+    LowerRoute{symbol: "jet_time_raw_host_monotonic_ns", export: "jet_time_raw_host_monotonic_ns", params: [LowerRouteCarrier]{}, result: LowerRouteResult.Plain{carrier: LowerRouteCarrier.Word}},
+    // Jet-only compiler FS closure: Core owns policy, runtime owns raw facts.
+    LowerRoute{symbol: "jet_files_read_bytes_os", export: "jet_files_read_bytes_os", params: [LowerRouteCarrier]{LowerRouteCarrier.Text}, result: LowerRouteResult.Result{ok: LowerRouteCarrier.List{elem: LowerRouteCarrier.Word}, err: LowerRouteCarrier.Handle{name: "IOError"}}},
+    LowerRoute{symbol: "jet_files_write_bytes_os", export: "jet_files_write_bytes_os", params: [LowerRouteCarrier]{LowerRouteCarrier.Text, LowerRouteCarrier.List{elem: LowerRouteCarrier.Word}}, result: LowerRouteResult.Result{ok: LowerRouteCarrier.Unit, err: LowerRouteCarrier.Handle{name: "IOError"}}},
+    LowerRoute{symbol: "jet_files_create_dirs_os", export: "jet_files_create_dirs_os", params: [LowerRouteCarrier]{LowerRouteCarrier.Text}, result: LowerRouteResult.Result{ok: LowerRouteCarrier.Unit, err: LowerRouteCarrier.Handle{name: "IOError"}}},
+    LowerRoute{symbol: "jet_files_read_link_os", export: "jet_files_read_link_os", params: [LowerRouteCarrier]{LowerRouteCarrier.Text}, result: LowerRouteResult.Result{ok: LowerRouteCarrier.Text, err: LowerRouteCarrier.Handle{name: "IOError"}}},
+    LowerRoute{symbol: "jet_std_file_reader_read", export: "jet_std_file_reader_read", params: [LowerRouteCarrier]{LowerRouteCarrier.HandleMut{name: "JetFileReader"}, LowerRouteCarrier.Word}, result: LowerRouteResult.Result{ok: LowerRouteCarrier.List{elem: LowerRouteCarrier.Word}, err: LowerRouteCarrier.Handle{name: "IOError"}}},
+    LowerRoute{symbol: "jet_std_file_reader_stat", export: "jet_std_file_reader_stat", params: [LowerRouteCarrier]{LowerRouteCarrier.Handle{name: "JetFileReader"}}, result: LowerRouteResult.Result{ok: LowerRouteCarrier.List{elem: LowerRouteCarrier.Word}, err: LowerRouteCarrier.Handle{name: "IOError"}}},
+    LowerRoute{symbol: "jet_std::jet_std_files_writer_refusal", export: "jet_std_files_writer_refusal", params: [LowerRouteCarrier]{LowerRouteCarrier.Text}, result: LowerRouteResult.Option{some: LowerRouteCarrier.Handle{name: "IOError"}}},
+    LowerRoute{symbol: "jet_std::jet_std_files_map", export: "jet_std_files_map", params: [LowerRouteCarrier]{LowerRouteCarrier.Text}, result: LowerRouteResult.Result{ok: LowerRouteCarrier.Handle{name: "JetMappedFile"}, err: LowerRouteCarrier.Handle{name: "IOError"}}},
     LowerRoute{symbol: "jet_app_auth", export: "jet_app_auth", params: [LowerRouteCarrier]{LowerRouteCarrier.Text}, result: LowerRouteResult.Plain{carrier: LowerRouteCarrier.Handle{name: "JetAuthApp"}}},
     LowerRoute{symbol: "jet_app_auth_oauth", export: "jet_app_auth_oauth", params: [LowerRouteCarrier]{LowerRouteCarrier.Handle{name: "JetAuthApp"}, LowerRouteCarrier.Text}, result: LowerRouteResult.Plain{carrier: LowerRouteCarrier.Handle{name: "JetAuthApp"}}},
     LowerRoute{symbol: "jet_app_auth_routes", export: "jet_app_auth_routes", params: [LowerRouteCarrier]{LowerRouteCarrier.Handle{name: "JetAuthApp"}}, result: LowerRouteResult.Plain{carrier: LowerRouteCarrier.Text}},

@@ -1,0 +1,24 @@
+// Source-owned routes are exercised through Core, not obsolete Rust ABI names.
+use core.files as compiler_route_files
+use core.time as compiler_route_time
+
+#Test("compiler stopwatch route lowers through the shared host epoch") {
+    watch :: compiler_route_time.start()
+    assert(watch.elapsed_millis() >= 0)
+}
+#Test("compiler whole-file source routes retain UTF-8 and fault policy") {
+    root :: compiler_route_files.mktemp("compiler-route-fs")
+    compiler_route_files.create_dir_all(root).expect("create root")
+    nested :: compiler_route_files.join(root, "nested/again")
+    compiler_route_files.create_dir(nested).expect("recursive create_dir")
+    path :: compiler_route_files.join(nested, "bytes")
+    compiler_route_files.write(path, "hello\n").expect("write text")
+    assert_eq(compiler_route_files.read(path).expect("read text"), "hello\n")
+    compiler_route_files.write_bytes(path, [U8]{U8{255}}).expect("invalid UTF-8 file")
+    assert_eq(compiler_route_files.read_bytes(path).expect("read bytes"), [U8]{U8{255}})
+    if compiler_route_files.read(path) == {
+        .Err(.InvalidInput(context)) -> assert_eq(context.cause, Val("stream did not contain valid UTF-8"))
+        else -> assert(false)
+    }
+    compiler_route_files.remove_all(root).expect("cleanup")
+}

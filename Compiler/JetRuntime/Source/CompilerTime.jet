@@ -1,0 +1,14 @@
+// Core.time.start is source-owned (Core/time/time.jet:46-49); do not duplicate
+// Stopwatch or its policy at the obsolete jet_std_time_start handle seam.
+// Scheduler.rs:1575-1586's text-tag seam delegates to the existing World owner.
+#Export(c) fn jet_scheduler_world_reject_uncontrolled(effect_name: I64) {
+    if (world_current() == I64{0}) -> return
+    kind :: if {
+        jet_rt_string_eq(effect_name, rt_static_text("network")) -> I64{1}
+        jet_rt_string_eq(effect_name, rt_static_text("foreign")) -> I64{2}
+        jet_rt_string_eq(effect_name, rt_static_text("entropy")) -> I64{3}
+        jet_rt_string_eq(effect_name, rt_static_text("clock")) -> I64{4}
+        else -> I64{0}
+    }
+    jet_rt_world_reject_uncontrolled(kind)
+}
