@@ -57,7 +57,7 @@ fn arithmetic_policy_is_visible_in_function_reflection() {
         "#Arithmetic(.Wrapping)\npub fn wrapped(value: U8) -> U8 { return value + U8{1} }\nfn run() {}\n",
     )
     .unwrap();
-    let (diagnostics, bundle, effect_facts) =
+    let (diagnostics, bundle, effect_facts, _) =
         jet::Driver::check_file_with_effect_facts(path.to_str().unwrap(), None, false);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     let bundle = bundle.expect("checked bundle");
@@ -113,7 +113,7 @@ fn run() {}
 "#,
     )
     .unwrap();
-    let (diagnostics, bundle, _) =
+    let (diagnostics, bundle, _, _) =
         jet::Driver::check_file_with_effect_facts(path.to_str().unwrap(), None, false);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     let bundle = bundle.expect("checked bundle");

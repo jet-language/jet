@@ -24,7 +24,7 @@ pub fn write_api_snapshot_for_entry(
     version: &str,
 ) -> Option<usize> {
     let mut bundle = crate::Loader::load_entry_with_overlay(entry_file, None, true).ok()?;
-    let (diagnostics, facts) =
+    let (diagnostics, facts, _) =
         crate::Sema::check_bundle_with_effect_facts(&mut bundle, crate::Sema::CompileMode::Check);
     if diagnostics
         .iter()

@@ -37,7 +37,7 @@ pub fn extract_public_api_for_package(src: &str, file: &str, package: &str) -> V
         Ok(b) => b,
         Err(_) => return vec![],
     };
-    let (_, facts) =
+    let (_, facts, _) =
         crate::Sema::check_bundle_with_effect_facts(&mut bundle, crate::Sema::CompileMode::Check);
     let _ = src; // bundle already loaded
 

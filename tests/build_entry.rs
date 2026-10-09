@@ -2528,7 +2528,7 @@ fn run() {
 }
 "#,
     );
-    let (check_diags, _, facts) =
+    let (check_diags, _, facts, _) =
         jet::Driver::check_file_with_effect_facts(entry.to_str().unwrap(), None, false);
     assert!(
         !check_diags

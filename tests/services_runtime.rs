@@ -1086,7 +1086,7 @@ fn run() {}
 "#,
     )
     .unwrap();
-    let (diagnostics, _, facts) =
+    let (diagnostics, _, facts, _) =
         jet::Driver::check_file_with_effect_facts(entry.to_str().unwrap(), None, false);
     assert!(
         !diagnostics

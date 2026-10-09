@@ -17,7 +17,7 @@ fn codes(src: &str) -> Vec<String> {
 fn callbacks_entry_effects_are_only_io() {
     let entry = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("Examples/features/basics/callbacks.jet");
-    let (diagnostics, bundle, facts) =
+    let (diagnostics, bundle, facts, _) =
         jet::Driver::check_file_with_effect_facts(entry.to_str().unwrap(), None, false);
     assert!(
         !diagnostics
@@ -137,7 +137,7 @@ fn cross_module_same_name_effects_keep_qualified_rows() {
     )
     .unwrap();
 
-    let (diagnostics, _, facts) =
+    let (diagnostics, _, facts, _) =
         jet::Driver::check_file_with_effect_facts(entry.to_str().unwrap(), None, false);
     assert!(
         !diagnostics
@@ -161,7 +161,7 @@ fn run() {}
     fs::create_dir_all(&root).unwrap();
     let entry = root.join("main.jet");
     fs::write(&entry, source).unwrap();
-    let (diagnostics, _, facts) =
+    let (diagnostics, _, facts, _) =
         jet::Driver::check_file_with_effect_facts(entry.to_str().unwrap(), None, false);
     assert!(
         facts.summaries["clean"].edges.contains("main::Shape::area"),
@@ -186,7 +186,7 @@ fn strided_source_loop_projects_exact_arena_audit_multiplicity() {
         fs::create_dir_all(&root).unwrap();
         let entry = root.join("main.jet");
         fs::write(&entry, source).unwrap();
-        let (diagnostics, _, facts) =
+        let (diagnostics, _, facts, _) =
             jet::Driver::check_file_with_effect_facts(entry.to_str().unwrap(), None, false);
         (diagnostics, facts)
     };
@@ -359,7 +359,7 @@ fn run() {
     fs::create_dir_all(&root).unwrap();
     let entry = root.join("main.jet");
     fs::write(&entry, source).unwrap();
-    let (diagnostics, _, facts) =
+    let (diagnostics, _, facts, _) =
         jet::Driver::check_file_with_effect_facts(entry.to_str().unwrap(), None, false);
     assert!(
         diagnostics.is_empty(),
@@ -494,7 +494,7 @@ fn run() { top() }
     fs::create_dir_all(&root).unwrap();
     let entry = root.join("main.jet");
     fs::write(&entry, src).unwrap();
-    let (diagnostics, _, facts) =
+    let (diagnostics, _, facts, _) =
         jet::Driver::check_file_with_effect_facts(entry.to_str().unwrap(), None, false);
     assert!(diagnostics
         .iter()
