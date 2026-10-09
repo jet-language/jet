@@ -1001,7 +1001,7 @@ pub fn jet_eval_pure_function(program: ^MIRProgram, function_id: MIRFunctionID, 
     span := jet_eval_empty_span()
     machine := jet_eval_machine(^program, ^config)
     data := TComptimeValue?{None}
-    if jet_eval_find_function(machine.program, function_id) == .Val(function) {
+    if jet_eval_find_function(machine, function_id) == .Val(function) {
         if function.target_applicability.interpreter {
             if jet_eval_invoke(&machine, function_id, [JetEvalRuntimeValue]{}, [JetEvalRuntimeValue]{}, function.span) == .Val(value) {
                 if !jet_eval_has_failure(machine) && !machine.soft_stop -> data = jet_eval_data(value, &machine, span)

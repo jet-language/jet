@@ -919,6 +919,7 @@ fn sema_type_builtin_bound_satisfied(graph: SemaRegistrationGraph, actual_resolv
             if derive.name == bound_name -> return Val(true)
         }
     }
+    if sema_type_graph_inline_impl_matches_trait(graph, nominal, trait_symbol) -> return Val(true)
     if unresolved_impl || !graph.complete -> return None
     Val(false)
 }
