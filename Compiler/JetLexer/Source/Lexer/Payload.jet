@@ -767,7 +767,9 @@ fn decode_char(text: String, source_start: Int, diagnostics: &[Diagnostic]) -> S
     if raw.len() > 2 -> escape_width = utf8_width(raw, 2)
     escape_end := 2 + escape_width
     escaped := -1
-    if escape_width > 0 -> escaped = escape_value(Int.from_u8(raw[2]))
+    if escape_width > 0 {
+        escaped = if Int.from_u8(raw[2]) == 39 -> 39 else -> escape_value(Int.from_u8(raw[2]))
+    }
     if escaped < 0 {
         escape_text :: bytes_text(raw, 2, escape_end)
         what := "`\\{escape_text}` isn't an escape Jet knows"

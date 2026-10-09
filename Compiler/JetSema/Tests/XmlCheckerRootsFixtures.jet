@@ -1,0 +1,21 @@
+// XML checker roots: lexical call precedence, audited value tails, direct read windows.
+fn text(key: String) -> String Never! { key.copy() }
+fn object(key: Int) -> Int Never! { key }
+fn xml_roots_predicate() -> Bool Never! {
+    text :: (key: String) -[]> key == "value"
+    object :: (key: String) -[]> text(key)
+    object("value")
+}
+fn xml_roots_byte() -> U8 Never! {
+    #Unsafe("no raw operations in this regression") { U8{7} }
+}
+fn xml_roots_first(bytes: View<U8>) -> U8 Never! { bytes[0] }
+fn xml_roots_window(bytes: [U8]) -> U8 Never! {
+    xml_roots_first(bytes[0..<bytes.len()])
+}
+fn run() {
+    print(xml_roots_predicate())
+    print(xml_roots_byte())
+    print(xml_roots_window([U8]{9}))
+    print('\'')
+}

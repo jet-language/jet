@@ -350,6 +350,7 @@ fn sema_stmt_value_tail_marker(statements: [Stmt]) -> Span? {
         if last == {
             .Expr(tail) -> return Val(expr_span(tail))
             .Switch(_, _, _, span) -> return Val(span)
+            .Unsafe(_, _, body, _) -> return sema_stmt_value_tail_marker(body)
             else -> return None
         }
     }
@@ -371,6 +372,7 @@ fn sema_stmt_check_value_block_end(statements: [Stmt], checked: [TStmt], expecte
         if seen < statements.len() -> next
         if last == {
             .Expr(_) | .Return(_, _) | .Switch(_, _, _, _) -> return true
+            .Unsafe(_, _, body, span) -> return sema_stmt_check_value_block_end(body, checked, expected, span, function_name, &diagnostics)
             else -> {}
         }
         if !sema_stmt_tir_block_can_fall_through(checked) || sema_stmt_definitely_returns(last) -> return true

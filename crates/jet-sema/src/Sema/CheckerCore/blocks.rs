@@ -368,6 +368,12 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
+            Stmt::Unsafe { body, span, .. } => {
+                let previous = self.in_unsafe;
+                self.in_unsafe = true;
+                self.check_value_block(body, expected, true, *span);
+                self.in_unsafe = previous;
+            }
             _ => {
                 let span = stmt.span();
                 self.check_stmt(stmt);

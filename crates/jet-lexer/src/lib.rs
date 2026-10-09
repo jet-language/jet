@@ -101,6 +101,15 @@ mod raw_head_tests {
     }
 
     #[test]
+    fn escaped_apostrophe_is_one_char_not_a_string_escape() {
+        let (tokens, diagnostics) = Lexer::lex(r"'\''");
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert!(tokens.iter().any(|token| matches!(token.kind, TokKind::Char('\''))));
+        let (_, diagnostics) = Lexer::lex(r#""\'""#);
+        assert!(diagnostics.iter().any(|d| d.what.contains("isn't an escape")));
+    }
+
+    #[test]
     fn plain_string_still_rejects_unknown_escapes() {
         let (_tokens, diagnostics) = Lexer::lex(r#""C:\path""#);
         assert!(

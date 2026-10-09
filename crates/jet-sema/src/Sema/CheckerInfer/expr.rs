@@ -2206,6 +2206,17 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn infer(&mut self, e: &mut Expr) -> Option<Type> {
+        // A ranged place passed directly to a View slot is the same read
+        // window as one bound to a local; argument position must not copy it.
+        if matches!(self.expected_type.as_ref(), Some(Type::Apply { name, args })
+            if name == "View" && args.len() == 1)
+            && matches!(e.without_parens(), Expr::Slice { .. } | Expr::Index { .. })
+            && self.place_from_expr(e).is_some()
+        {
+            let span = e.span();
+            let inner = std::mem::replace(e, Expr::Absent(span));
+            *e = Expr::Place(Box::new(inner), crate::AST::PlaceAccess::Read, span);
+        }
         if let Expr::MethodCall { recv_type: Some(marker), resolved_ret: Some(ret), .. } = e {
             if marker == "__DynOp__" || marker == "__DynField__" {
                 let ret = ret.clone();
@@ -5294,7 +5305,9 @@ impl<'a> Checker<'a> {
                 // projected path with a live window.
                 let suppress = self.suppress_partial_move_root_read;
                 self.suppress_partial_move_root_read = true;
+                let expected = self.expected_type.take();
                 let ty = self.infer(inner);
+                self.expected_type = expected;
                 self.suppress_partial_move_root_read = suppress;
                 let ty = ty?;
                 if matches!(inner.as_ref(), Expr::Slice { .. }) {

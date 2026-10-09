@@ -997,7 +997,10 @@ impl<'a> Lexer<'a> {
         let mut ch = self.at(self.i);
         if ch == '\\' {
             let esc = self.at(self.i + 1);
-            if let Some(&(_, decoded)) = Syntax::ESCAPES.iter().find(|&&(e, _)| e == esc) {
+            if esc == '\'' {
+                ch = '\'';
+                self.i += 2;
+            } else if let Some(&(_, decoded)) = Syntax::ESCAPES.iter().find(|&&(e, _)| e == esc) {
                 ch = decoded;
                 self.i += 2;
             } else {

@@ -65,3 +65,70 @@ fn sort_comparator_early_return_is_local_to_lambda() {
     let found = errors(include_str!("../../../tests/fixtures/lambda_early_return.jet"));
     assert!(found.is_empty(), "unexpected errors: {found:?}");
 }
+
+#[test]
+fn local_lambda_wins_over_same_named_file_function() {
+    let found = errors(
+        "fn text(key: String) -> String Never! { key.copy() }\n\
+         fn object(key: Int) -> Int Never! { key }\n\
+         fn valid() -> Bool Never! {\n\
+             text :: (key: String) -[]> key == \"value\"\n\
+             object :: (key: String) -[]> text(key)\n\
+             object(\"value\")\n\
+         }\nfn run() {}\n",
+    );
+    assert!(found.is_empty(), "unexpected errors: {found:?}");
+}
+
+#[test]
+fn non_callable_local_also_wins_over_file_function() {
+    let found = errors(
+        "fn text() -> Bool Never! { true }\n\
+         fn valid() { text :: 1\n text() }\nfn run() {}\n",
+    );
+    assert!(found.iter().any(|d| d.code == "E0803"), "{found:?}");
+}
+
+#[test]
+fn unsafe_tail_forwards_its_value_contract() {
+    let found = errors(
+        "fn value() -> U8 Never! {\n\
+             #Unsafe(\"no raw operations in this reproduction\") {\n\
+                 #Unsafe(\"nested tail also forwards\") { U8{7} }\n\
+             }\n\
+         }\nfn run() {}\n",
+    );
+    assert!(found.is_empty(), "unexpected errors: {found:?}");
+    let missing = errors(
+        "fn value() -> U8 Never! {\n\
+             #Unsafe(\"empty block still has no value\") {}\n\
+         }\nfn run() {}\n",
+    );
+    assert!(missing.iter().any(|d| d.code == "E0114"), "{missing:?}");
+}
+
+#[test]
+fn direct_slice_argument_is_a_read_view() {
+    let found = errors(
+        "fn first(bytes: View<U8>) -> U8 Never! { bytes[0] }\n\
+         fn value(bytes: [U8]) -> U8 Never! {\n\
+             first(bytes[0..<bytes.len()])\n\
+         }\nfn run() {}\n",
+    );
+    assert!(found.is_empty(), "unexpected errors: {found:?}");
+}
+
+#[test]
+fn char_crossings_and_infallible_list_reserve_do_not_invent_an_api() {
+    for source in [
+        "fn value(n: Int) -> Char Never! { Char{n} }\nfn run() {}\n",
+        "fn value(c: Char) -> Int Never! { Int{c} }\nfn run() {}\n",
+    ] {
+        let found = errors(source);
+        assert!(found.iter().any(|d| d.code == "E0108"), "{found:?}");
+    }
+    let found = errors(
+        "fn value() Never! { bytes := [U8]{}\n &bytes.reserve(4) }\nfn run() {}\n",
+    );
+    assert!(found.iter().any(|d| d.code == "E0311"), "{found:?}");
+}

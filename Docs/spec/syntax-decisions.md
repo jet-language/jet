@@ -435,6 +435,9 @@ writes a return or error type. Its arrow always starts the body, so
 Return and error types come from the expected callable parameter or slot.
 For an explicit full interface, use a named `fn`; typed local bindings are
 not an escape hatch (D-BIND-BARE1/D-BIND-TYPE2). E0399 teaches this boundary.
+Calls resolve a lexical value binding before a same-named file function,
+including when the binding is a lambda. This does not relax the no-shadowing
+rule for two bindings within one function.
 
 See the executable [lambda interface example](../../Examples/features/callable/lambda_interface.jet).
 
@@ -1588,6 +1591,8 @@ D-ONCE-HASH1=B).
 **S20 — Escapes**: `\n` `\t` `\"` `\\`; literal braces `{{` `}}`.
 TOML inline-table fixtures escape their data braces this way, so the
 contents are parsed as TOML rather than Jet interpolation expressions.
+Character literals additionally accept `\'` for the apostrophe delimiter;
+this character-only escape does not extend quoted-text escapes.
 
 **S41 — Char & string length**: `Char` built-in, `'a'` literals; `s.len()`
 counts Unicode scalars; `loop c in s.chars()`; no `s[i]` (E0503).
@@ -8001,8 +8006,10 @@ expected type to the sole final expression. That expression is the block value;
 it is not rewritten into a source `return`. Explicit `return` remains an early
 exit. A semicolon-terminated expression, assignment, declaration, or other
 statement tail produces unit and is diagnosed when a value is required. The
-same law applies to value arm tables and fallback blocks; engines lower the
-checked value through the existing TIR return path.
+same law applies to value arm tables and fallback blocks. A final audited
+`#Unsafe("reason") { … }` region forwards the value expectation to its own
+tail without relaxing the lexical unsafe gate. Engines lower the checked value
+through the existing TIR return path.
 
 **2026-08-20 — D-SIG-SHAPE1=B** *(card #2125)*: the return type sits bare after
 the parameter list, and `->` becomes the one body arrow across the whole

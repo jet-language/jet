@@ -3994,6 +3994,22 @@ fn sema_expr_check_bare_member_chain(expr: Expr, expected: Type?, environment: S
 }
 
 fn sema_check_expression(expr: Expr, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    // A direct ranged argument to a View slot borrows the same place as a local.
+    if expected == .Val(required) {
+        if required == .Apply(name, args) {
+            if name == "View" && args.len() == 1 {
+                ranged := if expr == {
+                    .Slice(_, _, _, _, _) | .Index(_, _, _, _) -> true
+                    else -> false
+                }
+                if ranged && sema_expression_is_place(expr) {
+                    span :: expr_span(expr)
+                    window :: Expr.Place{value: expr, access: PlaceAccess.Read, span: span}
+                    return sema_expr_check_place_expr(window, expr, PlaceAccess.Read, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+                }
+            }
+        }
+    }
     // Only a bare member chain can be handled there; testing that here keeps
     // the chain check's frame off every other expression level.
     if sema_expr_is_bare_member_chain(expr) {

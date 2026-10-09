@@ -1801,27 +1801,32 @@ impl<'a> Checker<'a> {
             return Some(Some(Type::Named("__JetExpect__".to_string())));
         }
 
-        if self.funcs.get(&call.name).is_none() {
-            if let Some(info) = self.lookup(&call.name) {
-                if matches!(info.ty, Type::Fn { .. }) {
-                    let name_span = call.name_span;
-                    let mut callee = Box::new(Expr::Ident(call.name.clone(), name_span));
-                    let mut args = std::mem::take(&mut call.args);
-                    let end = args
-                        .last()
-                        .map(|a| a.expr.span().end)
-                        .unwrap_or(name_span.end);
-                    let span = Span::new(name_span.start, end);
-                    let invalid_reads_before = self.invalid_binding_reads;
-                    let ret = self.infer_call_value(&mut callee, &mut args, span);
-                    call.args = args;
-                    // Its failed initializer already owns the diagnostic.
-                    if ret.is_none() && self.invalid_binding_reads != invalid_reads_before {
-                        return None;
-                    }
-                    return Some(ret);
+        // Lexical value bindings win over file functions and imported calls.
+        if let Some(info) = self.lookup(&call.name) {
+            if !matches!(info.ty, Type::Fn { .. }) {
+                let ty = info.ty.clone();
+                self.diags.push(self.not_callable_value_diagnostic(
+                    &call.name, &ty, call.name_span,
+                ));
+                for arg in &mut call.args {
+                    self.infer(&mut arg.expr);
                 }
+                return None;
             }
+            let name_span = call.name_span;
+            let mut callee = Box::new(Expr::Ident(call.name.clone(), name_span));
+            let mut args = std::mem::take(&mut call.args);
+            let end = args.last().map(|a| a.expr.span().end).unwrap_or(name_span.end);
+            let span = Span::new(name_span.start, end);
+            let invalid_reads_before = self.invalid_binding_reads;
+            let ret = self.infer_call_value(&mut callee, &mut args, span);
+            call.args = args;
+            if ret.is_none() && self.invalid_binding_reads != invalid_reads_before {
+                return None;
+            }
+            return Some(ret);
+        }
+        if self.funcs.get(&call.name).is_none() {
             if let Some((alias, mod_idx, fn_name)) = self.resolve_import_call_path(&call.name) {
                 self.inferred_call_type_args = None;
                 let result = self.infer_import_call(
@@ -2083,22 +2088,6 @@ impl<'a> Checker<'a> {
             return Some(None);
         }
 
-        // D-OP-CALL1=A: parentheses call functions and lambdas only. A value
-        // binding of another type is not "nothing named"; name its type and
-        // the methods it does have.
-        if self.funcs.get(&call.name).is_none() {
-            if let Some(info) = self.lookup(&call.name) {
-                let ty = info.ty.clone();
-                if !matches!(ty, Type::Fn { .. }) {
-                    let diagnostic = self.not_callable_value_diagnostic(&call.name, &ty, call.name_span);
-                    self.diags.push(diagnostic);
-                    for arg in call.args.iter_mut() {
-                        self.infer(&mut arg.expr);
-                    }
-                    return None;
-                }
-            }
-        }
 
         let Some(mut sig) = self.funcs.get(&call.name).cloned() else {
             let mut fix = format!(
