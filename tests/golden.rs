@@ -1148,7 +1148,9 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
         }
         let actual_err = String::from_utf8_lossy(&run.stderr);
         if env.update_expected {
-            fs::write(&err_path, actual_err.as_bytes()).unwrap();
+            if out_path.exists() || !run.stdout.is_empty() {
+                fs::write(&out_path, &run.stdout).unwrap();
+            }
         } else {
             if run.stderr.as_slice() != expected_err.as_bytes() {
                 panic!(
