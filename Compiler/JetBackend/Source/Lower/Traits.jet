@@ -76,7 +76,7 @@ fn lower_trait_arg(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFun
         lower_clone_into(p, &m, &f, value, cloned, ty)
         source = Val(cloned)
     }
-    dst :: lower_new_value(&f, lir_layout_pointer(), lower_drop(&m, f, lower_repr(p, target_ty), arg.access == .Read), target_ty.identity)
+    dst :: lower_new_value(&f, lir_layout_pointer(), lower_drop(&m, lower_repr(p, target_ty), arg.access == .Read), target_ty.identity)
     lower_trait_box_value(p, &m, &f, source, ty, target_ty, dst)
     if f.failed -> None else -> Val(dst)
 }

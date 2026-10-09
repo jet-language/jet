@@ -966,11 +966,12 @@ fn lower_mono_run(p: MIRProgram, q: &LowerPrepared) Never! {
 
 // All explicit roots share the dependency FIFO and monomorphization table.
 fn lower_prepare_callables(program: MIRProgram, roots: [MIRFunctionID], runtime_intrinsics: ^[U64:LowerRuntimeIntrinsic]) -> LowerPrepared Never! {
-    lower_prepare_roots(program, roots, true, ^runtime_intrinsics)
+    lower_prepare_roots(program, roots, true, program.native_pack, [String]{}, ^runtime_intrinsics)
 }
 
-fn lower_prepare_roots(program: MIRProgram, roots: [MIRFunctionID], shared_sites_dynamic: Bool, runtime_intrinsics: ^[U64:LowerRuntimeIntrinsic]) -> LowerPrepared Never! {
+fn lower_prepare_roots(program: MIRProgram, roots: [MIRFunctionID], shared_sites_dynamic: Bool, native_pack: Bool, imports: [String], runtime_intrinsics: ^[U64:LowerRuntimeIntrinsic]) -> LowerPrepared Never! {
     q := lower_mono_empty()
+    q.native_pack = native_pack
     q.runtime_intrinsics = ^runtime_intrinsics
     q.shared_sites_dynamic = shared_sites_dynamic
     lower_mono_index(program, &q)
@@ -981,6 +982,14 @@ fn lower_prepare_roots(program: MIRProgram, roots: [MIRFunctionID], shared_sites
         if requested == .Val(concrete) {
             &q.roots.add(root.value, concrete).drop("checked absent above")
             if q.entry == None && shared_sites_dynamic -> q.entry = Val(concrete)
+        }
+    }
+    if native_pack {
+        loop symbol in imports {
+            row :: lower_native_export(symbol) ?? next
+            if row.op != "handle.display" && row.op != "handle.show" -> next
+            ty :: lower_native_source_type(program, row.jet_name) ?? next
+            lower_reach_render_type(program, &q, ty, row.op == "handle.show", -1)
         }
     }
     lower_mono_run(program, &q)
