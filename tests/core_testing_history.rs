@@ -95,7 +95,7 @@ fn core_testing_histories_error_is_stable_across_i9_tiers() {
         ),
         (
             "forced interpreter",
-            tir_support::interpreter_run("core_testing_histories_invalid_seed", INVALID_SEED_SOURCE),
+            tir_support::default_run("core_testing_histories_invalid_seed", INVALID_SEED_SOURCE),
         ),
     ];
     if tir_support::have_rustc() {
@@ -131,7 +131,7 @@ fn core_testing_histories_generated_int_commands_are_checked_across_i9_tiers() {
         ),
         (
             "forced interpreter",
-            tir_support::interpreter_run("core_testing_histories_int_command", INTEGER_COMMAND_SOURCE),
+            tir_support::default_run("core_testing_histories_int_command", INTEGER_COMMAND_SOURCE),
         ),
     ];
     if tir_support::have_rustc() {
@@ -163,7 +163,7 @@ fn core_testing_histories_callback_failure_becomes_unavailable_across_i9_tiers()
         ),
         (
             "forced interpreter",
-            tir_support::interpreter_run("core_testing_histories_callback_failure", CALLBACK_FAILURE_SOURCE),
+            tir_support::default_run("core_testing_histories_callback_failure", CALLBACK_FAILURE_SOURCE),
         ),
     ];
     if tir_support::have_rustc() {

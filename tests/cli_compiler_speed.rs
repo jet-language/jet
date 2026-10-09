@@ -507,11 +507,7 @@ mod production_path {
             ],
             "dev",
         );
-        let interpreter = invoke(
-            &["run", "--interpret", "run.jet", "--", "seed_data"],
-            "interpreter",
-        );
-        for (label, output) in [("run", &run), ("dev", &dev), ("interpreter", &interpreter)] {
+        for (label, output) in [("run", &run), ("dev", &dev)] {
             assert_eq!(
                 output.status.code(),
                 Some(0),
@@ -524,11 +520,7 @@ mod production_path {
                 "{label} named-job output diverged"
             );
         }
-        assert_eq!(run.stdout, dev.stdout, "JIT/dev named-job output diverged");
-        assert_eq!(
-            run.stdout, interpreter.stdout,
-            "JIT/interpreter named-job output diverged"
-        );
+        assert_eq!(run.stdout, dev.stdout, "run/dev named-job output diverged");
 
         let unknown = invoke(
             &[

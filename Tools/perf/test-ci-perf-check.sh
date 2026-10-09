@@ -261,7 +261,6 @@ assert_dashboard_source 'parity_run_dev_case "edit-$(safe_id "$parity_edit")" "$
 assert_dashboard_source 'job_argument_for_program()'
 assert_dashboard_source 'Examples/features/devloop/job_runner.jet|Tools/perf/edits/job_runner.jet'
 assert_dashboard_source '"$JET_BIN" run run.jet -- seed_data'
-assert_dashboard_source '"$JET_BIN" run --interpret run.jet -- seed_data'
 assert_dashboard_source '"$JET_BIN" jobs'
 assert_dashboard_source 'parity_check_job_runner_case edit Tools/perf/edits/job_runner.jet'
 assert_dashboard_source 'TMP_ROOT=${JET_PERF_SCRATCH_ROOT:-"$HOME/.cache/jet-dev/perf-bench"}'

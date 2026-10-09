@@ -2,86 +2,10 @@ mod common;
 
 use std::fs;
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use std::process::Command;
 
 fn jet() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_jet"))
-}
-
-#[test]
-fn run_interpret_forces_tier_zero_without_watch() {
-    let dir = std::env::temp_dir().join(format!("jet_run_interpret_{}", std::process::id()));
-    let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(&dir).unwrap();
-    fs::write(
-        dir.join("package.jet"),
-        "name: \"run_interpret_tier\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO] } }\n",
-    )
-    .unwrap();
-    let file = dir.join("main.jet");
-    let marker = format!("run-interpreter-{}", std::process::id());
-    fs::write(&file, format!("fn run() {{\n    print(\"{marker}\")\n}}\n")).unwrap();
-
-    let default = Command::new(jet())
-        .args(["run", "main.jet"])
-        .current_dir(&dir)
-        .env("JET_STORE_DIR", dir.join("run-cache"))
-        .env("NO_COLOR", "1")
-        .output()
-        .unwrap();
-    assert_eq!(
-        default.status.code(),
-        Some(0),
-        "{}",
-        String::from_utf8_lossy(&default.stderr)
-    );
-    assert!(
-        !default.stdout.is_empty(),
-        "default tier returned success with empty stdout: {}",
-        String::from_utf8_lossy(&default.stderr)
-    );
-    assert_eq!(default.stdout, format!("{marker}\n").into_bytes());
-
-    let forced = Command::new(jet())
-        .args(["run", "--interpret", "main.jet"])
-        .current_dir(&dir)
-        .env("JET_STORE_DIR", dir.join("run-cache"))
-        .env("NO_COLOR", "1")
-        .output()
-        .unwrap();
-    assert_eq!(
-        forced.status.code(),
-        Some(0),
-        "{}",
-        String::from_utf8_lossy(&forced.stderr)
-    );
-    assert!(!forced.stdout.is_empty());
-    assert_eq!(forced.stdout, default.stdout);
-
-    let _ = fs::remove_dir_all(&dir);
-}
-
-#[test]
-fn run_interpret_rejects_release_profile() {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let output = Command::new(jet())
-        .args([
-            "run",
-            "--interpret",
-            "--release",
-            "Examples/features/errors/result_handler.jet",
-        ])
-        .current_dir(root)
-        .env("NO_COLOR", "1")
-        .output()
-        .unwrap();
-
-    assert_eq!(output.status.code(), Some(2));
-    assert!(output.stdout.is_empty());
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("E2102"), "{stderr}");
-    assert!(stderr.contains("--interpret"), "{stderr}");
 }
 
 /// Card #2250 / I9: one invocation argv and its user-argument projection must
@@ -89,15 +13,15 @@ fn run_interpret_rejects_release_profile() {
 /// program identity, so the observable comparison covers the forwarded
 /// program arguments while the same source proves flags, filenames, Unicode,
 /// an empty value and separator, a value containing --, a bare --, and
-/// --interpret survive the CLI split unchanged.
+/// --release survive the CLI split unchanged.
 #[test]
 fn argv_agrees_on_every_native_tier() {
-    let dir = std::env::temp_dir().join(format!("jet_run_interpret_argv_{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("jet_run_tiers_argv_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     fs::write(
         dir.join("package.jet"),
-        "name: \"run_interpret_argv\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [Exec, IO, Mem.Alloc] } }\n",
+        "name: \"run_tiers_argv\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [Exec, IO, Mem.Alloc] } }\n",
     )
     .unwrap();
     fs::write(
@@ -114,7 +38,7 @@ fn argv_agrees_on_every_native_tier() {
         "",
         "pre--post",
         "--",
-        "--interpret",
+        "--release",
     ];
     let cache = dir.join("cache");
     let run = |label: &str, args: &[&str]| {
@@ -156,7 +80,6 @@ fn argv_agrees_on_every_native_tier() {
         run(label, &args)
     };
     let default = invocation("default", "run", &[]);
-    let interpret = invocation("interpret", "run", &["--interpret"]);
     let release = invocation("release", "run", &["--release"]);
     let dev = {
         let mut args = vec!["dev", "--watch=off", "main.jet", "--"];
@@ -164,7 +87,6 @@ fn argv_agrees_on_every_native_tier() {
         run("dev", &args)
     };
     let empty_default = empty_invocation("empty-default", "run", &[]);
-    let empty_interpret = empty_invocation("empty-interpret", "run", &["--interpret"]);
     let empty_release = empty_invocation("empty-release", "run", &["--release"]);
     let empty_dev = empty_invocation("empty-dev", "dev", &["--watch=off"]);
 
@@ -204,7 +126,6 @@ fn argv_agrees_on_every_native_tier() {
     let empty_aot = aot_run("AOT empty", &[]);
 
     for (label, output) in [
-        ("interpret", interpret),
         ("release", release),
         ("dev", dev),
         ("AOT", aot),
@@ -212,7 +133,7 @@ fn argv_agrees_on_every_native_tier() {
         assert_eq!(output, default, "{label} argv output diverged");
     }
     let expected =
-        "9\n8\n<--flag>\n<--port=50000>\n<report file.jet>\n<Δ>\n<>\n<pre--post>\n<-->\n<--interpret>\n";
+        "9\n8\n<--flag>\n<--port=50000>\n<report file.jet>\n<Δ>\n<>\n<pre--post>\n<-->\n<--release>\n";
     assert_eq!(
         default.as_slice(),
         expected.as_bytes(),
@@ -221,7 +142,6 @@ fn argv_agrees_on_every_native_tier() {
 
     for (label, output) in [
         ("empty default", empty_default),
-        ("empty interpret", empty_interpret),
         ("empty release", empty_release),
         ("empty dev", empty_dev),
         ("empty AOT", empty_aot),
@@ -233,17 +153,17 @@ fn argv_agrees_on_every_native_tier() {
 }
 
 /// An undrained `core.db` pool is released when the run ends, while the
-/// native connection table still exists. Before, both in-process tiers
-/// printed an internal error from thread-local teardown after the program
-/// had finished (exit code 0); AOT never did.
+/// native connection table still exists. Before, in-process tiers printed an
+/// internal error from thread-local teardown after the program had finished
+/// (exit code 0); AOT never did.
 #[test]
-fn undrained_db_pool_exits_cleanly_on_in_process_tiers() {
-    let dir = std::env::temp_dir().join(format!("jet_run_interpret_db_pool_{}", std::process::id()));
+fn undrained_db_pool_exits_cleanly() {
+    let dir = std::env::temp_dir().join(format!("jet_run_tiers_db_pool_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     fs::write(
         dir.join("package.jet"),
-        "name: \"run_interpret_db_pool\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [DB, IO, Mem.Alloc, Time.Wait] } }\n",
+        "name: \"run_tiers_db_pool\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [DB, IO, Mem.Alloc, Time.Wait] } }\n",
     )
     .unwrap();
     fs::write(
@@ -252,10 +172,10 @@ fn undrained_db_pool_exits_cleanly_on_in_process_tiers() {
     )
     .unwrap();
 
-    for (label, extra) in [("default", &[][..]), ("interpret", &["--interpret"][..])] {
+    for label in ["default", "release"] {
         let output = Command::new(jet())
             .arg("run")
-            .args(extra)
+            .args((label == "release").then_some("--release"))
             .arg("main.jet")
             .current_dir(&dir)
             .env("JET_STORE_DIR", dir.join("cache").join(label))
@@ -272,14 +192,13 @@ fn undrained_db_pool_exits_cleanly_on_in_process_tiers() {
 }
 
 #[test]
-fn run_interpret_keeps_unused_c_member_lists_runnable() {
-    let dir =
-        std::env::temp_dir().join(format!("jet_run_interpret_imports_{}", std::process::id()));
+fn unused_c_member_lists_stay_runnable() {
+    let dir = std::env::temp_dir().join(format!("jet_run_tiers_imports_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     fs::write(
         dir.join("package.jet"),
-        "name: \"run_interpret_imports\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO] } }\ndeps: { c: c@system, m: c@system }\n",
+        "name: \"run_tiers_imports\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO] } }\ndeps: { c: c@system, m: c@system }\n",
     )
     .unwrap();
     fs::write(
@@ -288,45 +207,25 @@ fn run_interpret_keeps_unused_c_member_lists_runnable() {
     )
     .unwrap();
 
-    let run = |interpret: bool| {
-        let cache = dir.join(if interpret {
-            "cache-interpreter"
-        } else {
-            "cache-default"
-        });
-        let mut command = Command::new(jet());
-        command
-            .args(["run"])
-            .args(interpret.then_some("--interpret"))
-            .arg("main.jet")
-            .current_dir(&dir)
-            .env("JET_STORE_DIR", cache.join("run"))
-            .env("JET_STORE_DIR", cache.join("build"))
-            .env("NO_COLOR", "1");
-        command.output().unwrap()
-    };
-
-    let default = run(false);
+    let output = Command::new(jet())
+        .args(["run", "main.jet"])
+        .current_dir(&dir)
+        .env("JET_STORE_DIR", dir.join("cache-default"))
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
     assert_eq!(
-        default.status.code(),
+        output.status.code(),
         Some(0),
         "{}",
-        String::from_utf8_lossy(&default.stderr)
+        String::from_utf8_lossy(&output.stderr)
     );
-    let forced = run(true);
-    assert_eq!(
-        forced.status.code(),
-        Some(0),
-        "{}",
-        String::from_utf8_lossy(&forced.stderr)
-    );
-    assert_eq!(forced.stdout, default.stdout);
-    assert!(!String::from_utf8_lossy(&forced.stderr).contains("E2201"));
+    assert_eq!(output.stdout, b"8\n4\n");
     let _ = fs::remove_dir_all(&dir);
 }
 
 #[test]
-fn c_extern_calls_match_aot_and_interpreter() {
+fn c_extern_calls_match_aot() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let project = root.join("Examples/features/lowlevel/cbind");
     let cache = std::env::temp_dir().join(format!("jet_c_extern_parity_{}", std::process::id()));
@@ -335,14 +234,8 @@ fn c_extern_calls_match_aot_and_interpreter() {
     let run = |mode: &str| {
         let mut command = Command::new(jet());
         command.arg("run");
-        match mode {
-            "release" => {
-                command.arg("--release");
-            }
-            "interpret" => {
-                command.arg("--interpret");
-            }
-            _ => {}
+        if mode == "release" {
+            command.arg("--release");
         }
         command
             .arg("run.jet")
@@ -357,11 +250,9 @@ fn c_extern_calls_match_aot_and_interpreter() {
 
     let release = run("release");
     let default = run("default");
-    let interpret = run("interpret");
     for (mode, output) in [
         ("release", &release),
         ("default", &default),
-        ("interpret", &interpret),
     ] {
         assert_eq!(
             output.status.code(),
@@ -380,113 +271,8 @@ fn c_extern_calls_match_aot_and_interpreter() {
     let _ = fs::remove_dir_all(&cache);
 }
 
-fn median_nanos(samples: &mut [u128]) -> u128 {
-    samples.sort_unstable();
-    samples[samples.len() / 2]
-}
-
-/// Card #2864: the real sieve fixture must keep its byte-exact results while
-/// indexed stores scale linearly in the forced interpreter. One 10,000-item
-/// warmup removes cold-cache effects; three measured runs and a median keep
-/// the ratio independent of one noisy process launch.
-#[test]
-fn sieve_scales_linearly() {
-    const MEASURED_SAMPLES: usize = 3;
-    const RUN_TIMEOUT: Duration = Duration::from_secs(30);
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let fixture = root.join("Tools/gauntlet/entries/sieve/jet");
-    let scratch = common::Scratch::new("sieve-scales-linearly");
-    for file in ["package.jet", "run.jet"] {
-        fs::copy(fixture.join(file), scratch.path.join(file))
-            .unwrap_or_else(|error| panic!("copy sieve fixture `{file}`: {error}"));
-    }
-
-    let cases: &[(u32, &[u8])] = &[
-        (10_000, b"count 1229\nlargest 9973\n"),
-        (100_000, b"count 9592\nlargest 99991\n"),
-    ];
-    let run = |n: u32| -> (u128, Vec<u8>) {
-        let n_arg = n.to_string();
-        let started = Instant::now();
-        let mut child = Command::new(jet())
-            .args(["run", "--interpret", "run.jet", "--", &n_arg])
-            .current_dir(&scratch.path)
-            .env("JET_STORE_DIR", scratch.path.join("run-cache"))
-            .env("JET_STORE_DIR", scratch.path.join("store"))
-            .env("NO_COLOR", "1")
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap_or_else(|error| panic!("start sieve n={n}: {error}"));
-        loop {
-            if child
-                .try_wait()
-                .unwrap_or_else(|error| panic!("poll sieve n={n}: {error}"))
-                .is_some()
-            {
-                break;
-            }
-            if started.elapsed() >= RUN_TIMEOUT {
-                let _ = child.kill();
-                let _ = child.wait();
-                panic!("sieve n={n} exceeded {RUN_TIMEOUT:?}");
-            }
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        let output = child
-            .wait_with_output()
-            .unwrap_or_else(|error| panic!("collect sieve n={n}: {error}"));
-        assert_eq!(
-            output.status.code(),
-            Some(0),
-            "sieve n={n} failed:\n{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        assert!(
-            output.stderr.is_empty(),
-            "sieve n={n} wrote stderr: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        (started.elapsed().as_nanos(), output.stdout)
-    };
-
-    let (_, stdout) = run(10_000);
-    assert_eq!(stdout, b"count 1229\nlargest 9973\n", "sieve n=10000 output changed");
-
-    let mut timings = Vec::with_capacity(cases.len());
-    for &(n, expected) in cases {
-        let mut samples = Vec::with_capacity(MEASURED_SAMPLES);
-        for _ in 0..MEASURED_SAMPLES {
-            let (elapsed, stdout) = run(n);
-            assert_eq!(stdout, expected, "sieve n={n} output changed");
-            samples.push(elapsed);
-        }
-        timings.push((n, median_nanos(&mut samples)));
-    }
-
-    let small = timings[0].1;
-    let large = timings[1].1;
-    assert!(small > 0 && large > 0, "sieve timings must be positive");
-    eprintln!(
-        "interpreter sieve scaling: n={} median_ns={} n={} median_ns={} samples={MEASURED_SAMPLES}",
-        timings[0].0, small, timings[1].0, large
-    );
-    assert!(
-        large < small.saturating_mul(10),
-        "interpreter sieve exceeded linear scaling: n={} median_ns={} n={} median_ns={} ratio={:.2}x",
-        timings[0].0,
-        small,
-        timings[1].0,
-        large,
-        large as f64 / small as f64
-    );
-}
-
 /// Cards #2014/#2015 (I9): an example AOT completes must complete identically
-/// on default `jet run` and on the forced tier-0 interpreter — same stdout,
-/// same stderr, same exit code — and the forced run must prove tier 0 answered.
-/// Without the tier proof a silent deopt hands the test the right bytes from
-/// the wrong engine and the interpreter gap stays invisible.
+/// on default `jet run` — same stdout, same stderr, same exit code.
 fn assert_example_tier_parity(tag: &str, example: &str, golden: &str) {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let expected = fs::read_to_string(root.join(golden)).expect("example golden output");
@@ -496,14 +282,8 @@ fn assert_example_tier_parity(tag: &str, example: &str, golden: &str) {
     let run = |mode: &str| {
         let mut command = Command::new(jet());
         command.arg("run");
-        match mode {
-            "release" => {
-                command.arg("--release");
-            }
-            "interpret" => {
-                command.arg("--interpret");
-            }
-            _ => {}
+        if mode == "release" {
+            command.arg("--release");
         }
         command
             .arg(example)
@@ -515,8 +295,8 @@ fn assert_example_tier_parity(tag: &str, example: &str, golden: &str) {
     };
 
     // Byte-exact differential: stderr carries only what the program itself
-    // wrote and the three tiers must agree on all of it.
-    for mode in ["release", "default", "interpret"] {
+    // wrote and both tiers must agree on all of it.
+    for mode in ["release", "default"] {
         let output = run(mode);
         let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
         let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
@@ -536,7 +316,7 @@ fn assert_example_tier_parity(tag: &str, example: &str, golden: &str) {
 }
 
 /// Card #2014: `task.all` over children that borrow disjoint places of an owner
-/// list. The interpreter used to fail the join outright because the child
+/// list. The evaluator once failed the join outright because the child
 /// thread could not name the owner local behind the write window.
 #[test]
 fn scoped_borrow_bands_agrees_on_every_tier() {
@@ -547,8 +327,8 @@ fn scoped_borrow_bands_agrees_on_every_tier() {
     );
 }
 
-/// Card #2015: `data.json<T>` into a user struct. The interpreter used to
-/// answer from a stub instead of the typed decode AOT calls.
+/// Card #2015: `data.json<T>` into a user struct. The evaluator once
+/// answered from a stub instead of the typed decode AOT calls.
 #[test]
 fn data_json_agrees_on_every_tier() {
     assert_example_tier_parity(
@@ -559,23 +339,23 @@ fn data_json_agrees_on_every_tier() {
 }
 
 /// Card #2816 (I9): a spawned task blocked in a Core UDP receive must make
-/// progress while its parent waits in a Core DNS call. The forced interpreter
-/// used to hold the shared program-output sink lock across the parent's DNS
+/// progress while its parent waits in a Core DNS call. An in-process tier
+/// once held the shared program-output sink lock across the parent's DNS
 /// wait, so the responder could not even enter `udp_receive` until the
 /// parent's deadline expired — and the parent then panicked on the timeout.
 /// The DNS deadline inside the program is the pass criterion; the process
-/// bound only turns a wedged interpreter into a failure instead of a hang.
+/// bound only turns a wedged run into a failure instead of a hang.
 #[test]
 fn udp_responder_progresses_under_parent_wait() {
     let dir = std::env::temp_dir().join(format!(
-        "jet_run_interpret_udp_responder_{}",
+        "jet_run_tiers_udp_responder_{}",
         std::process::id()
     ));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     fs::write(
         dir.join("package.jet"),
-        "name: \"run_interpret_udp_responder\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [Exec, IO, Mem.Alloc, Net, Panic] } }\n",
+        "name: \"run_tiers_udp_responder\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [Exec, IO, Mem.Alloc, Net, Panic] } }\n",
     )
     .unwrap();
     fs::write(
@@ -607,7 +387,7 @@ fn run() {
     .unwrap();
 
     let mut child = Command::new(jet())
-        .args(["run", "--interpret", "main.jet"])
+        .args(["run", "main.jet"])
         .current_dir(&dir)
         .env("JET_STORE_DIR", dir.join("run-cache"))
         .env("JET_STORE_DIR", dir.join("store"))
@@ -621,7 +401,7 @@ fn run() {
         if std::time::Instant::now() >= bound {
             let _ = child.kill();
             let _ = child.wait();
-            panic!("forced interpreter wedged: the UDP responder task never progressed");
+            panic!("default `jet run` wedged: the UDP responder task never progressed");
         }
         std::thread::sleep(std::time::Duration::from_millis(20));
     }

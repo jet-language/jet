@@ -179,41 +179,6 @@ pub fn default_run_with_env_args(
     default_run_with_package(name, src, vars, program_args, None)
 }
 
-pub fn interpreter_run(name: &str, src: &str) -> (i32, String, String) {
-    interpreter_run_with_package(name, src, None)
-}
-
-fn interpreter_run_with_package(
-    name: &str,
-    src: &str,
-    package_source: Option<&str>,
-) -> (i32, String, String) {
-    let scratch = crate::common::Scratch::new("jet_interpreter_run");
-    let dir = &scratch.path;
-    let path = dir.join(format!("{name}.jet"));
-    fs::write(&path, src).unwrap();
-    write_test_package(&dir, package_source.unwrap_or(TIR_TEST_PACKAGE));
-    let out = Command::new(env!("CARGO_BIN_EXE_jet"))
-        .arg("run")
-        .arg("--interpret")
-        .arg(&path)
-        .current_dir(&dir)
-        .env("JET_STORE_DIR", dir.join("cache"))
-        .env("JETPACK_ROOT", dir.join("jetpack"))
-        .output()
-        .unwrap();
-    let stderr = normalize_workspace_root_paths(
-        &String::from_utf8_lossy(&out.stderr),
-        &dir,
-    );
-    let _ = fs::remove_dir_all(&dir);
-    (
-        out.status.code().unwrap_or(-1),
-        String::from_utf8_lossy(&out.stdout).into_owned(),
-        stderr,
-    )
-}
-
 /// The same snippet on both tiers, asserting they agree. This is the shape I9
 /// actually asks for: not "AOT prints X", but "every tier prints the same X".
 pub fn assert_tiers_agree(name: &str, src: &str, expected_stdout: &str) {
@@ -263,9 +228,6 @@ pub fn run_plugin_tier_in_package(
             command.arg("--release");
         }
         "default" => {}
-        "interpreter" => {
-            command.arg("--interpret");
-        }
         other => panic!("unknown plugin tier `{other}`"),
     }
     command
@@ -285,8 +247,8 @@ pub fn run_plugin_tier_in_package(
     result
 }
 
-/// Prove one plugin call through release/AOT, default `jet run`, and forced
-/// interpreter with one staged immutable interface contract.
+/// Prove one plugin call through release/AOT and default `jet run` with one
+/// staged immutable interface contract.
 pub fn assert_tiers_agree_with_plugin(
     name: &str,
     src: &str,
@@ -294,13 +256,7 @@ pub fn assert_tiers_agree_with_plugin(
     artifact: &Path,
     api_snapshot: &str,
 ) {
-    let mut runs = vec![
-        ("default", run_plugin_tier(name, src, "default", artifact, api_snapshot)),
-        (
-            "interpreter",
-            run_plugin_tier(name, src, "interpreter", artifact, api_snapshot),
-        ),
-    ];
+    let mut runs = vec![("default", run_plugin_tier(name, src, "default", artifact, api_snapshot))];
     if have_rustc() {
         runs.push((
             "release",
@@ -346,21 +302,6 @@ fn assert_tiers_agree_with_package(
         run_out, expected_stdout,
         "`jet run` disagreed:\n{run_err}"
     );
-    let (interpreter_code, interpreter_out, interpreter_err_raw) =
-        interpreter_run_with_package(name, src, package_source);
-    let interpreter_err = interpreter_err_raw;
-    assert_eq!(
-        interpreter_code, run_code,
-        "forced interpreter and default `jet run` exit codes disagree:\ninterpreter stderr: {interpreter_err}\n`jet run` stderr: {run_err}"
-    );
-    assert_eq!(
-        interpreter_out, run_out,
-        "forced interpreter and default `jet run` stdout disagree:\ninterpreter stderr: {interpreter_err}\n`jet run` stderr: {run_err}"
-    );
-    assert_eq!(
-        interpreter_err, run_err,
-        "forced interpreter and default `jet run` stderr disagree"
-    );
     if have_rustc() {
         let (aot_code, aot_out, aot_err_raw) = build_and_run_full("jet_tir_test", name, src);
         let aot_err = aot_err_raw;
@@ -376,23 +317,11 @@ fn assert_tiers_agree_with_package(
             aot_err, run_err,
             "AOT and `jet run` stderr disagree — one tier re-encoded the rule (I9)"
         );
-        assert_eq!(
-            aot_code, interpreter_code,
-            "AOT and forced interpreter exit codes disagree"
-        );
-        assert_eq!(
-            aot_out, interpreter_out,
-            "AOT and forced interpreter stdout disagree"
-        );
-        assert_eq!(
-            aot_err, interpreter_err,
-            "AOT and forced interpreter stderr disagree"
-        );
     }
 }
 
-/// Run an executable example through the three hosted lenses named by I9:
-/// release/AOT, default `jet run`, and forced TIR interpretation.
+/// Run an executable example through the two hosted lenses named by I9:
+/// release/AOT and default `jet run`.
 pub fn assert_example_cli_tiers_agree(stem: &str, expected_stdout: &str) {
     assert_example_cli_tiers_agree_with(stem, |actual| {
         assert_eq!(actual, expected_stdout);
@@ -446,22 +375,15 @@ pub fn assert_example_cli_tiers_agree_with_package<F>(
         .as_ref()
         .map_or(root.as_path(), |scratch| scratch.path.as_path());
 
-    let modes = [
-        ("release", true, false),
-        ("default", false, false),
-        ("interpret", false, true),
-    ];
+    let modes = [("release", true), ("default", false)];
     let mut baseline = None;
-    for (mode, release, interpret) in modes {
+    for (mode, release) in modes {
         let cache_scratch = crate::common::Scratch::new(&format!("jet_example_{mode}"));
         let cache = &cache_scratch.path;
         let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
         command.arg("run");
         if release {
             command.arg("--release");
-        }
-        if interpret {
-            command.arg("--interpret");
         }
         command
             .arg(&run_source)
@@ -521,13 +443,12 @@ pub fn assert_example_cli_error_tiers_agree(
     );
     let relative = format!("Examples/features/{stem}.jet");
     let modes = [
-        ("debug", Some("--profile=debug"), false),
-        ("release", Some("--release"), false),
-        ("default", None, false),
-        ("interpret", None, true),
+        ("debug", Some("--profile=debug")),
+        ("release", Some("--release")),
+        ("default", None),
     ];
     let mut baseline = None;
-    for (mode, profile, interpret) in modes {
+    for (mode, profile) in modes {
         let cache_scratch =
             crate::common::Scratch::new(&format!("jet_example_error_{mode}"));
         let cache = &cache_scratch.path;
@@ -535,9 +456,6 @@ pub fn assert_example_cli_error_tiers_agree(
         command.arg("run");
         if let Some(profile) = profile {
             command.arg(profile);
-        }
-        if interpret {
-            command.arg("--interpret");
         }
         command
             .arg(&relative)
@@ -733,17 +651,15 @@ pub fn build_release_and_run_multi(
     )
 }
 
-/// Run a scratch program through release AOT, default `jet run`, and the
-/// forced interpreter.
+/// Run a scratch program through release AOT and default `jet run`.
 pub fn assert_release_tiers_agree(name: &str, src: &str, expected_stdout: &str) {
     let files = [("main.jet", src)];
     let runs = [
         build_release_and_run_multi(name, "main.jet", &files),
         run_default_multi(name, "main.jet", &files),
-        run_interpret_multi(name, "main.jet", &files),
     ];
     let baseline = &runs[0];
-    for (mode, result) in ["release AOT", "default jet run", "forced interpreter"]
+    for (mode, result) in ["release AOT", "default jet run"]
         .into_iter()
         .zip(runs.iter())
     {
@@ -753,9 +669,9 @@ pub fn assert_release_tiers_agree(name: &str, src: &str, expected_stdout: &str) 
         assert_eq!(result.1, baseline.1, "{mode} stdout disagreed");
     }
 }
-/// Run a single-file source through release AOT, default `jet run`, and the
-/// forced interpreter. The source is passed by path; a minimal local package
-/// keeps authority discovery inside this fixture.
+/// Run a single-file source through release AOT and default `jet run`. The
+/// source is passed by path; a minimal local package keeps authority
+/// discovery inside this fixture.
 pub fn assert_bare_release_tiers_agree(name: &str, src: &str, expected_stdout: &str) {
     let scratch = crate::common::Scratch::new(&format!("jet_bare_tiers_{name}"));
     let dir = &scratch.path;
@@ -766,10 +682,6 @@ pub fn assert_bare_release_tiers_agree(name: &str, src: &str, expected_stdout: &
     let modes = [
         ("release AOT", vec!["run", "--release", path.as_str()]),
         ("default jet run", vec!["run", path.as_str()]),
-        (
-            "forced interpreter",
-            vec!["run", "--interpret", path.as_str()],
-        ),
     ];
     let mut baseline = None;
     for (mode, args) in modes {
@@ -818,10 +730,6 @@ pub fn assert_release_tier_error_with_application_policy(
     let modes = [
         ("release AOT", vec!["run", "--release", path.as_str()]),
         ("default jet run", vec!["run", path.as_str()]),
-        (
-            "forced interpreter",
-            vec!["run", "--interpret", path.as_str()],
-        ),
     ];
     let mut baseline = None;
     for (mode, args) in modes {
@@ -857,19 +765,18 @@ pub fn assert_release_tier_error_with_application_policy(
     let _ = fs::remove_dir_all(&dir);
 }
 
-/// Assert the stable E3010 code/message across release AOT, default `jet run`, and
-/// forced interpretation while ignoring adapter-specific source locations.
+/// Assert the stable E3010 code/message across release AOT and default
+/// `jet run` while ignoring adapter-specific source locations.
 pub fn assert_release_error_tiers_agree(name: &str, src: &str, expected_message: &str) {
     let files = [("main.jet", src)];
     let runs = [
         build_release_and_run_multi(name, "main.jet", &files),
         run_default_multi(name, "main.jet", &files),
-        run_interpret_multi(name, "main.jet", &files),
     ];
     let expected_prefix = format!("Stop [E3010]: `{expected_message}`");
     let baseline_code = runs[0].0;
     let mut baseline_prefix = None;
-    for (mode, result) in ["release AOT", "default jet run", "forced interpreter"]
+    for (mode, result) in ["release AOT", "default jet run"]
         .into_iter()
         .zip(runs.iter())
     {
@@ -905,42 +812,6 @@ pub fn run_default_multi(name: &str, entry: &str, files: &[(&str, &str)]) -> (i3
     write_test_package(&dir, TIR_TEST_PACKAGE);
     let run = Command::new(env!("CARGO_BIN_EXE_jet"))
         .args(["run", entry])
-        .current_dir(&dir)
-        .env("NO_COLOR", "1")
-        .env("JET_STORE_DIR", dir.join("cache"))
-        .env("JETPACK_ROOT", dir.join("jetpack"))
-        .output()
-        .unwrap();
-    let result = (
-        run.status.code().unwrap_or(1),
-        String::from_utf8_lossy(&run.stdout).into_owned(),
-        String::from_utf8_lossy(&run.stderr).into_owned(),
-    );
-    let _ = fs::remove_dir_all(&dir);
-    result
-}
-
-/// Run a multi-file program through the forced TIR interpreter (`--interpret`).
-/// I9: the default lens can hide a rule that only one engine knows, so a
-/// cross-module fact has to answer on the evaluator lens too.
-#[allow(dead_code)]
-pub fn run_interpret_multi(
-    name: &str,
-    entry: &str,
-    files: &[(&str, &str)],
-) -> (i32, String, String) {
-    let scratch = crate::common::Scratch::new(&format!("jet_interp_multi_{name}"));
-    let dir = &scratch.path;
-    for (rel, src) in files {
-        let path = dir.join(rel);
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).unwrap();
-        }
-        fs::write(&path, src).unwrap();
-    }
-    write_test_package(&dir, TIR_TEST_PACKAGE);
-    let run = Command::new(env!("CARGO_BIN_EXE_jet"))
-        .args(["run", "--interpret", entry])
         .current_dir(&dir)
         .env("NO_COLOR", "1")
         .env("JET_STORE_DIR", dir.join("cache"))

@@ -1427,15 +1427,10 @@ parity_check_job_runner_case() {
     parity_run_process "$parity_case_root/dev-seed.status" "$parity_case_root/dev-seed.stdout" "$parity_case_root/dev-seed.stderr" "$parity_case_root" \
         env JET_STORE_DIR="$parity_case_root/dev-store" NO_COLOR=1 \
         "$JET_BIN" dev run.jet --watch=off --quiet -- seed_data
-    parity_run_process "$parity_case_root/interpreter-seed.status" "$parity_case_root/interpreter-seed.stdout" "$parity_case_root/interpreter-seed.stderr" "$parity_case_root" \
-        env JET_STORE_DIR="$parity_case_root/interpreter-store" NO_COLOR=1 \
-        "$JET_BIN" run --interpret run.jet -- seed_data
     parity_require_status "$(sed -n '1p' "$parity_case_root/run-seed.status")" "$parity_case_id/run-seed"
     parity_require_status "$(sed -n '1p' "$parity_case_root/dev-seed.status")" "$parity_case_id/dev-seed"
-    parity_require_status "$(sed -n '1p' "$parity_case_root/interpreter-seed.status")" "$parity_case_id/interpreter-seed"
     parity_compare "$parity_case_root/expected.out" "$parity_case_root/run-seed.stdout" "$parity_case_id/expected-run-seed"
     parity_compare "$parity_case_root/expected.out" "$parity_case_root/dev-seed.stdout" "$parity_case_id/expected-dev-seed"
-    parity_compare "$parity_case_root/expected.out" "$parity_case_root/interpreter-seed.stdout" "$parity_case_id/expected-interpreter-seed"
 
     parity_run_process "$parity_case_root/release-build.status" "$parity_case_root/release-build.stdout" "$parity_case_root/release-build.stderr" "$parity_case_root" \
         env JET_STORE_DIR="$parity_case_root/release-store" NO_COLOR=1 \

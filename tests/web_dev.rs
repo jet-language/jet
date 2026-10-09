@@ -2597,7 +2597,7 @@ fn jet_dev_web_live_canvas_debug_session_round_trip() {
     let body = String::from_utf8_lossy(&body);
     assert!(body.contains("\"protocol\":\"jet.canvas.debug\""), "{body}");
     assert!(body.contains("\"state\":\"running\""), "{body}");
-    assert!(body.contains("\"tier\":\"jet-dev-interpreter\""), "{body}");
+    assert!(body.contains("\"tier\":\"native-recorded\""), "{body}");
     assert!(!body.contains("\"active_line\":null"), "{body}");
     let session = debug_session_id(&body);
 

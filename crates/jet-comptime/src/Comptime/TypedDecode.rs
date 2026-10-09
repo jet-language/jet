@@ -1088,7 +1088,7 @@ impl<'a> Interp<'a> {
                 if func.params.len() == 1 {
                     let mut frame = std::collections::HashMap::new();
                     frame.insert(func.params[0].name.clone(), value.clone());
-                    return self.call_func(&format!("{type_name}.encode"), func, frame);
+                    return self.call_func(func, frame);
                 }
             }
         }
@@ -1177,7 +1177,7 @@ impl<'a> Interp<'a> {
         let mut frame = std::collections::HashMap::new();
         frame.insert(func.params[0].name.clone(), tree.clone());
         Some(
-            match self.call_func(&format!("{name}.decode"), func, frame) {
+            match self.call_func(func, frame) {
                 Ok(CtValue::Present(value)) => Ok(*value),
                 Ok(CtValue::Failed(CtReport::Told(error))) => Err(*error),
                 Ok(CtValue::Failed(CtReport::Clean(_))) => {
@@ -1426,7 +1426,7 @@ impl<'a> Interp<'a> {
             };
             let mut frame = std::collections::HashMap::new();
             frame.insert(param.name.clone(), decoded.clone());
-            match self.call_func(&format!("{name}.validate"), validate, frame) {
+            match self.call_func(validate, frame) {
                 Ok(CtValue::Present(value)) => return Ok(*value),
                 Ok(CtValue::Failed(CtReport::Told(error))) => return Err(*error),
                 Ok(other) => {
@@ -1538,7 +1538,7 @@ impl<'a> Interp<'a> {
                         )));
                     };
                     let value = self
-                        .call_func(fn_name, func, std::collections::HashMap::new())
+                        .call_func(func, std::collections::HashMap::new())
                         .map_err(|d| decode_error(d.what.clone()))?;
                     let encoded = encode_ct_value(&value, self.structs);
                     pairs.push((key, encoded));
@@ -1576,7 +1576,7 @@ impl<'a> Interp<'a> {
                         frame.insert(param.name.clone(), old_value);
                     }
                     let new_value = self
-                        .call_func(fn_name, func, frame)
+                        .call_func(func, frame)
                         .map_err(|d| decode_error(d.what.clone()))?;
                     pairs[pos].1 = encode_ct_value(&new_value, self.structs);
                 }

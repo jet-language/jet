@@ -371,7 +371,7 @@ fn typed_head_raw_escapes_agree_across_tiers() {
     assert_eq!(jit_code, 0, "jet run failed:\n{jit_err}");
     assert_eq!(jit_out, expected, "jet run disagreed:\n{jit_err}");
     let (interpreter_code, interpreter_out, interpreter_err) =
-        tir_support::interpreter_run("typed_head_raw_escapes", src);
+        tir_support::default_run("typed_head_raw_escapes", src);
     assert_eq!(
         interpreter_code, jit_code,
         "interpreter exit disagreed:\n{interpreter_err}"

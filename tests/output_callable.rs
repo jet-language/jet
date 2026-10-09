@@ -183,7 +183,6 @@ fn aot_dev_and_jit_consume_the_resolved_entry() {
             &bundle,
             &checked_nominals,
             false,
-            jet::Interpreter::InterpreterInvocation::RunInterpret,
             &common::development_policy(),
         ),
         RunOutcome::Ran { exit_code: 0, .. }
@@ -271,7 +270,6 @@ fn qualified_entry_keeps_one_definition_and_effect_identity() {
             &bundle,
             &checked_nominals,
             false,
-            jet::Interpreter::InterpreterInvocation::RunInterpret,
             &common::development_policy(),
         ),
         RunOutcome::Ran { exit_code: 0, .. }
@@ -343,7 +341,6 @@ fn qualified_entry_follows_nested_quoted_import_graph() {
             &bundle,
             &checked_nominals,
             false,
-            jet::Interpreter::InterpreterInvocation::RunInterpret,
             &common::development_policy(),
         ),
         RunOutcome::Ran {

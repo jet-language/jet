@@ -1744,7 +1744,6 @@ fn loader_records_import_edge_facts_and_erases_boundary_policy_before_codegen() 
     for (label, args) in [
         ("aot", vec!["run", "--release", shown]),
         ("jit", vec!["run", shown]),
-        ("interpreter", vec!["run", "--interpret", shown]),
         ("dev", vec!["dev", shown, "--watch=off"]),
     ] {
         let output = Command::new(jet_bin())

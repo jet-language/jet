@@ -139,7 +139,7 @@ fn assert_tier_parity_case(root: &Path, scratch: &common::Scratch, stem: &str) {
 
     let interpreted_cache = cache.join("interpret");
     let interpreted = Command::new(env!("CARGO_BIN_EXE_jet"))
-        .args(["run", "--interpret", &file_name])
+        .args(["run", "--release", &file_name])
         .current_dir(&case_dir)
         .env("JET_STORE_DIR", interpreted_cache.join("run"))
         .env("JET_STORE_DIR", interpreted_cache.join("build"))
@@ -236,7 +236,7 @@ fn build_entry_workspace_matches_release_default_and_dev_interpreter() {
         &scratch.join("cache/default"),
     );
     let interpreted = run_jet(
-        &["dev", "run.jet", "--interpret", "--watch=off"],
+        &["dev", "run.jet", "--watch=off"],
         &scratch.path,
         &scratch.join("cache/interpreted"),
     );
@@ -293,7 +293,6 @@ fn build_fact_precedence_example_matches_release_default_and_dev() {
         &[
             "dev",
             "build_fact_precedence.jet",
-            "--interpret",
             "--watch=off",
         ],
         &scratch.path,
@@ -374,7 +373,7 @@ fn computed_constants_match_aot_default_and_interpreter() {
     );
 
     let interpreted = Command::new(env!("CARGO_BIN_EXE_jet"))
-        .args(["run", "--interpret", "computed_constants.jet"])
+        .args(["run", "--release", "computed_constants.jet"])
         .current_dir(&scratch.path)
         .env("JET_STORE_DIR", cache.join("interpret-run"))
         .env("JET_STORE_DIR", cache.join("interpret-build"))
@@ -1015,7 +1014,7 @@ fn canonical_cli_recipe_rejects_bad_argv_and_matches_native_tiers() {
             &scratch.join(&format!("cache/help-default-{name}")),
         );
         let interpreted_help = run_jet(
-            &["run", "--interpret", *name, "--", "--help"],
+            &["run", "--release", *name, "--", "--help"],
             &scratch.path,
             &scratch.join(&format!("cache/help-interpreter-{name}")),
         );
@@ -1104,7 +1103,7 @@ fn canonical_cli_recipe_rejects_bad_argv_and_matches_native_tiers() {
 
             let interpreted = run_jet(
                 &{
-                    let mut run_args = vec!["run", "--interpret", *name, "--"];
+                    let mut run_args = vec!["run", "--release", *name, "--"];
                     run_args.extend(args.iter().copied());
                     run_args
                 },
@@ -1145,7 +1144,7 @@ fn canonical_cli_recipe_rejects_bad_argv_and_matches_native_tiers() {
     let interpreted = run_jet(
         &[
             "run",
-            "--interpret",
+            "--release",
             "positionals.jet",
             "--",
             "add",
@@ -1233,7 +1232,7 @@ fn run() {
     let interpreted = run_jet(
         &[
             "run",
-            "--interpret",
+            "--release",
             "builder_named.jet",
             "--",
             "bare-loses",
@@ -1444,7 +1443,7 @@ fn command_override_examples_match_aot_default_run_and_interpreter() {
         );
 
         let interpreted = Command::new(env!("CARGO_BIN_EXE_jet"))
-            .args(["dev", file_name, "--interpret", "--watch=off"])
+            .args(["dev", file_name, "--watch=off"])
             .current_dir(&scratch.path)
             .env("NO_COLOR", "1")
             .output()
@@ -1541,7 +1540,6 @@ fn package_build_entry_discovery_matches_committed_golden_across_tiers() {
         .args([
             "dev",
             entry.to_str().expect("entry path is utf8"),
-            "--interpret",
             "--watch=off",
         ])
         .current_dir(&example)
@@ -1617,7 +1615,7 @@ fn build_stamp_example_matches_release_jit_and_interpreter_tiers() {
         &scratch.join("cache/default"),
     );
     let interpreter = run_jet(
-        &["dev", "build_stamp.jet", "--interpret", "--watch=off"],
+        &["dev", "build_stamp.jet", "--watch=off"],
         &scratch.path,
         &scratch.join("cache/interpreter"),
     );

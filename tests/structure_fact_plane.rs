@@ -210,7 +210,6 @@ fn structure_plane_keeps_parser_sema_tir_and_runtime_tier_parity() {
     for (mode, args) in [
         ("release", vec!["run", "--release", shown]),
         ("default", vec!["run", shown]),
-        ("interpret", vec!["run", "--interpret", shown]),
     ] {
         let output = Command::new(env!("CARGO_BIN_EXE_jet"))
             .current_dir(repo())

@@ -4022,7 +4022,6 @@ fn build_entry_program_runs_the_same_on_every_tier() {
         &bundle,
         &checked_nominals,
         true,
-        jet::Interpreter::InterpreterInvocation::RunInterpret,
         &policy,
     ) {
         jet::Interpreter::RunOutcome::Ran {

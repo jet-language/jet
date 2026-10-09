@@ -401,7 +401,6 @@ fn i9_interpreter_runs_the_authority_project() {
         &bundle,
         &checked_nominals,
         true,
-        jet::Interpreter::InterpreterInvocation::RunInterpret,
         &common::development_policy(),
     ) {
         jet::Interpreter::RunOutcome::Ran {

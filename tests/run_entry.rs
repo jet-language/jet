@@ -66,10 +66,6 @@ fn odd(n: Int) -> Bool {
     let outcomes = [
         ("default", crate::common::dev_run(path, false, false)),
         (
-            "interpreter",
-            jet::Interpreter::run_interpreter_once_with_args(path, &[]),
-        ),
-        (
             "dev-interpreter",
             crate::common::dev_run(path, false, true),
         ),
@@ -250,12 +246,10 @@ fn explicit_run_matches_default_run_and_forced_interpreter() {
     std::fs::write(&file, "fn run() { print(\"script entry\") }\n").unwrap();
     let path = file.to_str().unwrap();
     let default_run = crate::common::dev_run(path, false, false);
-    let interpreter = jet::Interpreter::run_interpreter_once_with_args(path, &[]);
     let dev_interpreter = crate::common::dev_run(path, false, true);
     let _ = std::fs::remove_dir_all(&dir);
     for (tier, outcome) in [
         ("default", default_run),
-        ("interpreter", interpreter),
         ("dev-interpreter", dev_interpreter),
     ] {
         let jet::Interpreter::RunOutcome::Ran {

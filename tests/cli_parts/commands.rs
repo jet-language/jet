@@ -1194,7 +1194,7 @@ fn duplicate_authority_right_is_e2102() {
 }
 
 /// `--allow` is invocation authority, not a build or artifact flag: it keeps
-/// the JIT and interpreter engines, and the native build still reaches the
+/// the native execution path at every profile, and the build still reaches the
 /// project-owned `.jet/build` when run from a repository subdirectory.
 #[test]
 fn allow_time_wait_runs_on_every_engine_from_a_repository_subdirectory() {
@@ -1209,7 +1209,6 @@ fn allow_time_wait_runs_on_every_engine_from_a_repository_subdirectory() {
     .unwrap();
     for (engine, flags) in [
         ("default", &[][..]),
-        ("interpreter", &["--interpret"][..]),
         ("aot", &["--release"][..]),
     ] {
         let output = Command::new(jet())

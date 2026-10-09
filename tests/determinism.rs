@@ -158,7 +158,6 @@ fn run() {
     let path = path.to_str().unwrap();
     for args in [
         &["run", path][..],
-        &["run", "--interpret", path][..],
         &["run", "--release", path][..],
     ] {
         let output = common::jet_cli_output_with_stdin(args, "");
@@ -748,14 +747,14 @@ fn run() -[Rand, IO]> {
 "#,
     )
     .unwrap();
-    let first = run_fresh_draw_program(&uuid_dir, &["run", "--interpret", "uuid.jet"]);
-    let second = run_fresh_draw_program(&uuid_dir, &["run", "--interpret", "uuid.jet"]);
+    let first = run_fresh_draw_program(&uuid_dir, &["run", "uuid.jet"]);
+    let second = run_fresh_draw_program(&uuid_dir, &["run", "uuid.jet"]);
     assert_ne!(first.trim(), second.trim(), "uuid.v4 repeated across runs");
     let rust = run_fresh_draw_program(&uuid_dir, &["emit", "--rust", "uuid.jet"]);
     for id in [first.trim(), second.trim()] {
         assert!(!rust.contains(id), "generated Rust contains the drawn UUID {id}");
     }
-    for tier in [&["run", "seeded.jet"][..], &["run", "--interpret", "seeded.jet"]] {
+    for tier in [&["run", "seeded.jet"][..], &["run", "--release", "seeded.jet"]] {
         assert_eq!(
             run_fresh_draw_program(&seeded_dir, tier).trim(),
             "true",
