@@ -25,9 +25,7 @@ if [ -z "$probe_mode" ]; then
   # before any verification work starts.
   node "$repo/Tools/agent/closeout-gate.mjs" check
 fi
-node "$repo/Tools/agent/check-agent-doc-flags.mjs" >&2
 node "$repo/Tools/agent/check-unsafe-ratchet.mjs" >&2
-node "$repo/Tools/agent/core-coverage-census.mjs" --check >&2
 tmp_parent="${JET_VERIFY_TMPDIR:-${TMPDIR:-$HOME/.cache/jet-dev/scratch}}"
 case "$tmp_parent" in
   /tmp|/tmp/*)
@@ -84,6 +82,40 @@ export JET_CI_EVIDENCE_DIR="${JET_CI_EVIDENCE_DIR:-$repo/.tmp/ci-evidence/${JET_
 mkdir -p -- "$JET_CI_EVIDENCE_DIR"
 export JET_TOWER_HYGIENE_REPORT="${JET_TOWER_HYGIENE_REPORT:-$JET_CI_EVIDENCE_DIR/tower-hygiene.txt}"
 
+# Ordinary independent failures accumulate. Logs and the complete status table
+# live outside the temporary tree removed by cleanup.
+verify_status=0
+verify_unsafe=""
+verify_target="-"
+verify_summary="$JET_CI_EVIDENCE_DIR/verify-full-summary.tsv"
+printf 'status\tscope\trc\tprerequisite\tlog\ttarget\n' > "$verify_summary"
+verify_record() {
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" "$5" "$verify_target" >> "$verify_summary"
+  if [ "$1" != PASS ]; then verify_status=1; fi
+}
+verify_run() {
+  local scope=$1 rc log
+  shift
+  log="$JET_CI_EVIDENCE_DIR/$scope.log"
+  if [ -n "$verify_unsafe" ]; then
+    verify_record BLOCKED "$scope" - "$verify_unsafe" "$log"
+    return 1
+  fi
+  if "$@" > "$log" 2>&1; then
+    verify_record PASS "$scope" 0 - "$log"
+    return 0
+  else
+    rc=$?
+    verify_record FAIL "$scope" "$rc" - "$log"
+    # A killed/timed-out command is not an ordinary assertion failure. Do not
+    # launch more children without a trustworthy resource/cleanup boundary.
+    if [ "$rc" -eq 124 ] || [ "$rc" -ge 128 ]; then
+      verify_unsafe="unsafe child exit $rc in $scope"
+    fi
+    return "$rc"
+  fi
+}
+
 case "$probe_mode" in
   exit)
     printf '%s\n' "$TMPDIR" "$TMP" "$TEMP" "$JET_VERIFY_TMPDIR"
@@ -95,6 +127,9 @@ case "$probe_mode" in
     exit 143
     ;;
 esac
+
+verify_run agent-doc-flags node "$repo/Tools/agent/check-agent-doc-flags.mjs" || true
+verify_run core-coverage node "$repo/Tools/agent/core-coverage-census.mjs" --check || true
 
 
 export JET_CANVAS_PREREQUISITES=strict
@@ -136,7 +171,7 @@ done
 if ((${#canvas_missing[@]})); then
   missing_list="$(IFS=', '; echo "${canvas_missing[*]}")"
   echo "error: Canvas interaction tests require Chromium, Firefox/geckodriver, and Node; missing: $missing_list. Run Tools/agent/jet-env full Tools/agent/verify-full.sh." >&2
-  exit 1
+  verify_record BLOCKED canvas-prerequisites - "missing $missing_list" -
 fi
 
 export JET_CANVAS_GECKO_SMOKE=1
@@ -169,7 +204,7 @@ done
 if ((${#cffi_missing[@]})); then
   missing_list="$(IFS=', '; echo "${cffi_missing[*]}")"
   echo "error: the native C ABI matrix requires a C compiler, archiver, and rustc; missing: $missing_list. Run Tools/agent/jet-env full Tools/agent/verify-full.sh." >&2
-  exit 1
+  verify_record BLOCKED cffi-prerequisites - "missing $missing_list" -
 fi
 
 export JET_CFFI_MATRIX_REQUIRED=1
@@ -179,32 +214,54 @@ export JET_CFFI_ABI="${JET_CFFI_ABI:-default}"
 # Focused hostile tests exercise this exact preflight without recursively
 # starting the repository's full test suite.
 if [ "${JET_VERIFY_CANVAS_PREREQUISITES_ONLY:-}" = "1" ]; then
-  exit 0
+  exit "$verify_status"
 fi
 
 # #805 / D-ONCE-LEDGER1=A: Tower is read-only here; Docs/spec is its rendered
 # decision surface. The gate writes only its audit report, never board data.
-bash "$repo/Tools/ci/tower-hygiene-gate.sh"
+verify_run tower-hygiene bash "$repo/Tools/ci/tower-hygiene-gate.sh" || true
 
 # The shell manifest comparison is deliberately independent of Nix. CI runs it
 # before the Nix-backed stop-line so package selection cannot hide a parity gap.
-node "$repo/Tools/agent/verify-jet-shell-parity.js"
+verify_run shell-parity node "$repo/Tools/agent/verify-jet-shell-parity.js" || true
 
 # Live compiler dogfood is deliberately separate from hermetic fixture tests.
 # It downloads real signed closures and builds the compiler in an empty-/nix
 # namespace. The coordinator supplies disk-backed scratch and the shared target.
 if [ "$(uname -s)" = "Linux" ]; then
-  : "${JETPACK_DOGFOOD_ROOT:?set a fresh bounded disk-backed dogfood root}"
-  : "${JETPACK_DOGFOOD_TARGET_DIR:?set the coordinated shared Cargo target}"
-  timeout --kill-after=30s 1800s cargo test --test jetpack_dogfood \
-    jet_repository_env_cold_and_offline_without_nix_host_store_or_fixtures \
-    -- --exact --ignored --nocapture
+  if [ -n "${JETPACK_DOGFOOD_ROOT:-}" ] && [ -n "${JETPACK_DOGFOOD_TARGET_DIR:-}" ]; then
+    verify_run live-dogfood timeout --kill-after=30s 1800s cargo test --no-fail-fast --test jetpack_dogfood \
+      jet_repository_env_cold_and_offline_without_nix_host_store_or_fixtures \
+      -- --exact --ignored --nocapture || true
+  else
+    verify_record BLOCKED live-dogfood - "fresh bounded dogfood root/target absent" -
+  fi
 fi
 
-"$repo/Tools/agent/verify-nix-eval-stopline.sh"
+# Cargo's doctest flag, not the presence of a --lib test target, defines the
+# default documentation inventory. Disabled libraries must stay disabled.
+doc_packages=""
+if [ -z "${JET_TEST_SHARD:-}" ]; then
+  capture_doc_metadata() {
+    cargo metadata --no-deps --format-version 1 > "$JET_CI_EVIDENCE_DIR/doctest-metadata.json"
+  }
+  select_doc_packages() {
+    jq -r '.workspace_members as $members | .packages[] | select(.id as $id | $members | index($id)) | .name as $package | .targets[] | select(.doctest == true) | select(.kind | index("lib") or index("proc-macro") or index("rlib") or index("dylib") or index("cdylib") or index("staticlib")) | $package' \
+      "$JET_CI_EVIDENCE_DIR/doctest-metadata.json" > "$JET_CI_EVIDENCE_DIR/doctest-packages.txt"
+  }
+  if verify_run doctest-metadata capture_doc_metadata && verify_run doctest-inventory select_doc_packages; then
+    doc_packages="$(cat "$JET_CI_EVIDENCE_DIR/doctest-packages.txt")"
+  else
+    verify_unsafe="${verify_unsafe:-doctest input inventory invalid}"
+  fi
+fi
 
-# Compile every selected workspace test target before running tests.
-# A non-compiling target must fail this gate loudly.
+if ! verify_run nix-eval-stopline "$repo/Tools/agent/verify-nix-eval-stopline.sh"; then
+  verify_unsafe="${verify_unsafe:-native Nix authority fence failed}"
+fi
+
+# Compile every selected target independently, retaining all diagnostics. A
+# failed target blocks only its executable, never later independent targets.
 # D-CMD-OVERRIDE1=C: this gate delegates to Cargo; any direct Jet test/bench
 # invocation in verification uses --show-default so a file-scoped override cannot
 # change the repository gate.
@@ -227,40 +284,58 @@ if [ -z "$test_targets" ]; then
   echo "error: test-target inventory selected no targets; refusing a false-green verify-full run" >&2
   exit 1
 fi
+printf '%s\n' "$test_targets" > "$JET_CI_EVIDENCE_DIR/test-targets.txt"
+compiled_targets=()
+target_index=0
 while IFS= read -r test_target; do
   [ -n "$test_target" ] || continue
-  echo "verify-full: compiling test target: cargo test $test_target --no-run" >&2
-  # shellcheck disable=SC2086
-  cargo test $test_target --no-run
-done <<<"$test_targets"
+  target_index=$((target_index + 1))
+  verify_target="$test_target"
+  read -r -a target_args <<< "$test_target"
+  echo "verify-full: compiling test target: cargo test $test_target --no-run --no-fail-fast" >&2
+  if verify_run "compile-$target_index" cargo test "${target_args[@]}" --no-run --no-fail-fast "$@"; then
+    compiled_targets[$target_index]=1
+  fi
+done <<< "$test_targets"
+verify_target="-"
 
 # #670: once a candidate compiler exists, full verification requires the
 # reference-versus-candidate behavioral comparator over the golden, UI and
 # differential corpora. Behavior only; stage artifact identity is #815's.
 # The canary proves the comparator still detects a planted divergence.
 if [ -n "${JET_CANDIDATE_COMPILER:-}" ]; then
-  node "$repo/Tools/agent/compiler-diff.mjs" --canary
-  node "$repo/Tools/agent/compiler-diff.mjs" --candidate "$JET_CANDIDATE_COMPILER" --corpus all
+  verify_run comparator-canary node "$repo/Tools/agent/compiler-diff.mjs" --canary || true
+  verify_run comparator-corpus node "$repo/Tools/agent/compiler-diff.mjs" --candidate "$JET_CANDIDATE_COMPILER" --corpus all --keep-going || true
 fi
 
-# #211 (D-CI1=A): default run covers the complete workspace test-target
-# inventory (`--workspace` — not just the `.`/jet-driver/jetpack-bin/jetos
-# default-members plain `cargo test` silently limited itself to). CI sets
-# JET_TEST_SHARD/JET_TEST_SHARD_COUNT to run one balanced shard of that same
-# inventory per job instead (see Tools/ci/test-shards.sh); local/nightly runs
-# leave them unset and get everything in one pass.
-if [ -n "${JET_TEST_SHARD:-}" ]; then
-  # Plain assignment (not `< <(...)` process substitution, whose failure a
-  # downstream `while read` loop would silently ignore under 0 iterations):
-  # `set -e` aborts this script immediately if test-shards.sh itself fails,
-  # instead of reporting a false-green empty shard.
-  shard_targets="$test_targets"
-  status=0
-  while IFS= read -r shard_args; do
-    # shellcheck disable=SC2086
-    cargo test $shard_args "$@" || status=$?
-  done <<<"$shard_targets"
-  exit "$status"
-else
-  cargo test --workspace "$@"
-fi
+# Both modes execute the canonical complete inventory (all targets for 0/1,
+# the exact selected shard otherwise), even if a sibling did not compile.
+target_index=0
+while IFS= read -r test_target; do
+  [ -n "$test_target" ] || continue
+  target_index=$((target_index + 1))
+  verify_target="$test_target"
+  read -r -a target_args <<< "$test_target"
+  # cfg(test) compilation is not a prerequisite for ordinary library docs.
+  # Their own Cargo invocation builds/checks the correct independent inputs.
+  if [ -z "${JET_TEST_SHARD:-}" ] && [[ "$test_target" == *" --lib" ]]; then
+    case $'\n'"$doc_packages"$'\n' in
+      *$'\n'"${target_args[1]}"$'\n'*) verify_run "doc-$target_index" cargo test -p "${target_args[1]}" --doc --no-fail-fast "$@" || true ;;
+    esac
+  fi
+  if [ -z "${compiled_targets[$target_index]:-}" ]; then
+    verify_record BLOCKED "run-$target_index" - "compile-$target_index did not produce a valid executable" -
+    continue
+  fi
+  # These executable registries explicitly require the unavailable tools.
+  # Do not silently let their internal optional-host paths count as coverage.
+  if ((${#canvas_missing[@]})) && [[ "$test_target" == *" --test canvas_scenarios" ]]; then
+    verify_record BLOCKED "run-$target_index" - canvas-prerequisites -
+  elif ((${#cffi_missing[@]})) && [[ "$test_target" == *" --test cffi_native_matrix" ]]; then
+    verify_record BLOCKED "run-$target_index" - cffi-prerequisites -
+  else
+    verify_run "run-$target_index" cargo test "${target_args[@]}" --no-fail-fast "$@" || true
+  fi
+done <<< "$test_targets"
+echo "verify-full: durable complete summary: $verify_summary (aggregate=$verify_status)" >&2
+exit "$verify_status"
