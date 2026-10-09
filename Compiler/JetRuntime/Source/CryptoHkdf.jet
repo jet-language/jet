@@ -19,15 +19,27 @@ fn rt_crypto_hmac3(key: I64, key_len: I64, left: I64, left_len: I64, right: I64,
         rt_text_put(pad + i, rt_text_byte(pad + i) ~| I64{0x36})
         i += I64{1}
     }
-    rt_sha256_parts4(pad, I64{64}, left, left_len, right, right_len, third, third_len, inner, scratch)
-    i = I64{0}
-    loop {
-        if (i >= I64{64}) -> break
-        rt_text_put(pad + i, rt_text_byte(pad + i) ~| I64{0x36} ~| I64{0x5c})
-        i += I64{1}
-    }
-    rt_sha256_parts(pad, I64{64}, inner, I64{32}, output, scratch)
+    rt_crypto_hmac_pads3(pad, I64{0}, left, left_len, right, right_len, third, third_len, output, scratch)
     rt_crypto_wipe(scratch, I64{672})
+}
+// Prepared pads let repeated PRFs reuse their password normalization. A zero
+// outer_pad reuses/toggles the inner pad for ordinary single HMAC calls.
+// scratch672 is disjoint from prepared pads, except the single-call inner pad
+// may occupy scratch576..640 as it always has. Output can alias message input:
+// both inner-message hashing and key-pad reads finish before output is written.
+fn rt_crypto_hmac_pads3(inner_pad: I64, outer_pad: I64, left: I64, left_len: I64, right: I64, right_len: I64, third: I64, third_len: I64, output: I64, scratch: I64) {
+    inner :: scratch + I64{640}
+    rt_sha256_parts4(inner_pad, I64{64}, left, left_len, right, right_len, third, third_len, inner, scratch)
+    outer := outer_pad
+    if (outer == I64{0}) {
+        outer = inner_pad
+        i := I64{0}
+        loop i < (I64{64}) {
+            rt_text_put(outer + i, rt_text_byte(outer + i) ~| I64{0x36} ~| I64{0x5c})
+            i += I64{1}
+        }
+    }
+    rt_sha256_parts(outer, I64{64}, inner, I64{32}, output, scratch)
 }
 fn rt_crypto_hmac(key: I64, key_len: I64, input: I64, length: I64, output: I64, scratch: I64) {
     rt_crypto_hmac3(key, key_len, input, length, I64{1}, I64{0}, I64{1}, I64{0}, output, scratch)

@@ -1,0 +1,39 @@
+// Native transports for real private public/sign/key-decode/verify entries.
+#Export(c) fn jet_rt_ed25519_signature_fixture(kind: I64, key: I64, message: I64, length: I64, signature: I64, strict: I64) -> I64 {
+    size :: if {
+        (kind == I64{0}) -> I64{4832}
+        (kind == I64{3}) -> I64{4096}
+        else -> I64{5472}
+    }
+    owned :: jet_rt_alloc(size + I64{16}, I64{8})
+    scratch :: owned + I64{8}
+    rt_text_store(owned, I64{0x42})
+    rt_text_store(scratch + size, I64{0x24})
+    at := I64{0}
+    loop at < size {
+        rt_text_put(scratch + at, I64{165})
+        at += I64{1}
+    }
+    result := I64{1}
+    if (kind == I64{0}) {
+        rt_crypto_ed25519_sign(key, message, length, signature, scratch)
+    } else {
+        if (kind == I64{3}) {
+            rt_crypto_ed25519_public(key, signature, scratch)
+        } else {
+            if (kind == I64{1}) {
+                result = if rt_crypto_ed25519_key_valid(key, scratch) -> I64{1} else -> I64{0}
+            } else {
+                result = if rt_crypto_ed25519_verify(key, message, length, signature, strict != I64{0}, scratch) -> I64{1} else -> I64{0}
+            }
+        }
+    }
+    if (rt_text_word(owned) != I64{0x42} || rt_text_word(scratch + size) != I64{0x24}) -> jet_rt_unreachable(I64{0}, I64{0})
+    at = I64{0}
+    loop at < size {
+        if (rt_text_byte(scratch + at) != I64{0}) -> jet_rt_unreachable(I64{0}, I64{0})
+        at += I64{1}
+    }
+    jet_rt_free(owned, size + I64{16}, I64{8})
+    return result
+}

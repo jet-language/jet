@@ -103,20 +103,38 @@ fn rt_sha512_byte(input: I64, length: I64, at: I64, end: I64) -> I64 {
     }
     I64{0}
 }
+fn rt_sha512_parts3_byte(left: I64, left_len: I64, right: I64, right_len: I64, third: I64, length: I64, at: I64, end: I64) -> I64 {
+    if (at < left_len) -> return rt_text_byte(left + at)
+    if (at < left_len + right_len) -> return rt_text_byte(right + at - left_len)
+    if (at < length) -> return rt_text_byte(third + at - left_len - right_len)
+    return rt_sha512_byte(I64{1}, length, at, end)
+}
 #Arithmetic(.Wrapping)
-fn rt_crypto_sha512(input: I64, length: I64, output: I64, scratch: I64) {
-    if (length < I64{0} || length > I64{9223372036854775671}) {
+fn rt_sha2_64_parts3(input: I64, left_len: I64, right: I64, right_len: I64, third: I64, third_len: I64, output: I64, scratch: I64, short: Bool) {
+    if (left_len < I64{0} || right_len < I64{0} || third_len < I64{0} || left_len > I64{9223372036854775671} - right_len || left_len + right_len > I64{9223372036854775671} - third_len) {
         jet_rt_unreachable(I64{0}, I64{0})
         return
     }
-    rt_text_store(scratch, rt_crypto_word64(I64{0x6a09e667}, I64{0xf3bcc908}))
-    rt_text_store(scratch + I64{8}, rt_crypto_word64(I64{0xbb67ae85}, I64{0x84caa73b}))
-    rt_text_store(scratch + I64{16}, rt_crypto_word64(I64{0x3c6ef372}, I64{0xfe94f82b}))
-    rt_text_store(scratch + I64{24}, rt_crypto_word64(I64{0xa54ff53a}, I64{0x5f1d36f1}))
-    rt_text_store(scratch + I64{32}, rt_crypto_word64(I64{0x510e527f}, I64{0xade682d1}))
-    rt_text_store(scratch + I64{40}, rt_crypto_word64(I64{0x9b05688c}, I64{0x2b3e6c1f}))
-    rt_text_store(scratch + I64{48}, rt_crypto_word64(I64{0x1f83d9ab}, I64{0xfb41bd6b}))
-    rt_text_store(scratch + I64{56}, rt_crypto_word64(I64{0x5be0cd19}, I64{0x137e2179}))
+    length :: left_len + right_len + third_len
+    if short {
+        rt_text_store(scratch, rt_crypto_word64(I64{0xcbbb9d5d}, I64{0xc1059ed8}))
+        rt_text_store(scratch + I64{8}, rt_crypto_word64(I64{0x629a292a}, I64{0x367cd507}))
+        rt_text_store(scratch + I64{16}, rt_crypto_word64(I64{0x9159015a}, I64{0x3070dd17}))
+        rt_text_store(scratch + I64{24}, rt_crypto_word64(I64{0x152fecd8}, I64{0xf70e5939}))
+        rt_text_store(scratch + I64{32}, rt_crypto_word64(I64{0x67332667}, I64{0xffc00b31}))
+        rt_text_store(scratch + I64{40}, rt_crypto_word64(I64{0x8eb44a87}, I64{0x68581511}))
+        rt_text_store(scratch + I64{48}, rt_crypto_word64(I64{0xdb0c2e0d}, I64{0x64f98fa7}))
+        rt_text_store(scratch + I64{56}, rt_crypto_word64(I64{0x47b5481d}, I64{0xbefa4fa4}))
+    } else {
+        rt_text_store(scratch, rt_crypto_word64(I64{0x6a09e667}, I64{0xf3bcc908}))
+        rt_text_store(scratch + I64{8}, rt_crypto_word64(I64{0xbb67ae85}, I64{0x84caa73b}))
+        rt_text_store(scratch + I64{16}, rt_crypto_word64(I64{0x3c6ef372}, I64{0xfe94f82b}))
+        rt_text_store(scratch + I64{24}, rt_crypto_word64(I64{0xa54ff53a}, I64{0x5f1d36f1}))
+        rt_text_store(scratch + I64{32}, rt_crypto_word64(I64{0x510e527f}, I64{0xade682d1}))
+        rt_text_store(scratch + I64{40}, rt_crypto_word64(I64{0x9b05688c}, I64{0x2b3e6c1f}))
+        rt_text_store(scratch + I64{48}, rt_crypto_word64(I64{0x1f83d9ab}, I64{0xfb41bd6b}))
+        rt_text_store(scratch + I64{56}, rt_crypto_word64(I64{0x5be0cd19}, I64{0x137e2179}))
+    }
     end :: ((length + I64{16}) / I64{128} + I64{1}) * I64{128}
     schedule :: scratch + I64{64}
     off := I64{0}
@@ -128,7 +146,7 @@ fn rt_crypto_sha512(input: I64, length: I64, output: I64, scratch: I64) {
             j := I64{0}
             loop {
                 if (j >= I64{8}) -> break
-                word = (word << I64{8}) | rt_sha512_byte(input, length, off + t * I64{8} + j, end)
+                word = (word << I64{8}) | rt_sha512_parts3_byte(input, left_len, right, right_len, third, length, off + t * I64{8} + j, end)
                 j += I64{1}
             }
             rt_text_store(schedule + t * I64{8}, word)
@@ -180,11 +198,22 @@ fn rt_crypto_sha512(input: I64, length: I64, output: I64, scratch: I64) {
         off += I64{128}
     }
     at := I64{0}
+    output_length :: if short -> I64{48} else -> I64{64}
     loop {
-        if (at >= I64{64}) -> break
+        if (at >= output_length) -> break
         word :: rt_text_word(scratch + (at / I64{8}) * I64{8})
         rt_text_put(output + at, (word >> (I64{56} - (at % I64{8}) * I64{8})) & I64{255})
         at += I64{1}
     }
     rt_crypto_wipe(scratch, I64{704})
+}
+fn rt_crypto_sha512(input: I64, length: I64, output: I64, scratch: I64) {
+    rt_sha2_64_parts3(input, length, I64{1}, I64{0}, I64{1}, I64{0}, output, scratch, false)
+}
+fn rt_crypto_sha384(input: I64, length: I64, output: I64, scratch: I64) {
+    rt_sha2_64_parts3(input, length, I64{1}, I64{0}, I64{1}, I64{0}, output, scratch, true)
+}
+// Three borrowed spans for Ed25519's prefix||message / R||A||message hashes.
+fn rt_crypto_sha512_parts3(left: I64, left_len: I64, right: I64, right_len: I64, third: I64, third_len: I64, output: I64, scratch: I64) {
+    rt_sha2_64_parts3(left, left_len, right, right_len, third, third_len, output, scratch, false)
 }

@@ -12,7 +12,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const [output, mode] = process.argv.slice(2);
 if (!output || !['assemble', 'lower', 'audit', 'link', 'run'].includes(mode)) throw Error('usage: run-crypto-fixtures.mjs OUT assemble|lower|audit|link|run');
 const out = resolve(output), unit = join(out, 'unit');
-const fixtures = ['Sha256', 'CryptoX25519', 'CryptoEd25519', 'CryptoChaCha', 'CryptoAead', 'CryptoHkdf', 'CryptoArgon', 'AgeCodec', 'AgeV1', 'CryptoEntropy'];
+const fixtures = ['Sha256', 'CryptoX25519', 'CryptoEd25519', 'CryptoChaCha', 'CryptoAead', 'CryptoHkdf', 'CryptoArgon', 'AgeCodec', 'AgeV1', 'CryptoEntropy', 'CryptoHash', 'CryptoPbkdf2', 'CryptoSha3', 'CryptoBlake3', 'CryptoEd25519Signature', 'CryptoZeroize', 'CryptoOsEntropy'];
 function command(name, binary, args, options = {}) {
     const result = spawnSync(binary, args, {cwd: root, encoding: 'utf8', maxBuffer: 1 << 27, ...options});
     writeFileSync(join(out, `${name}.receipt.json`), JSON.stringify({status: result.status, signal: result.signal, error: result.error?.message ?? null, stdout: result.stdout, stderr: result.stderr}, null, 2) + '\n');
@@ -75,12 +75,23 @@ if (mode === 'assemble') {
     const captures = join(out, 'jet-seals');
     mkdirSync(captures, {recursive: true});
     for (const name of fixtures.filter(name => name !== 'AgeV1')) {
-        const result = command(`run-${name}`, join(out, name), [], {timeout: name === 'CryptoArgon' ? 300000 : 60000});
-        if (name === 'CryptoEntropy') {
-            const expected = readFileSync(join(root, 'Compiler/JetRuntime/Tests/CryptoEntropyWitness.stdout'), 'utf8');
-            const metadata = JSON.parse(readFileSync(join(root, 'Compiler/JetRuntime/Tests/CryptoEntropyFixtures.json'), 'utf8'));
-            if (digest(expected) !== metadata.stdoutSha256) throw Error('damaged frozen entropy reference');
-            if (result.stdout !== expected) throw Error('Jet entropy contract differs byte-for-byte from the frozen Rust seed');
+        const result = command(`run-${name}`, join(out, name), [], {timeout: name === 'CryptoArgon' || name === 'CryptoPbkdf2' || name === 'CryptoEd25519Signature' ? 300000 : 60000});
+        if (name === 'CryptoEntropy' || name === 'CryptoHash' || name === 'CryptoPbkdf2' || name === 'CryptoSha3' || name === 'CryptoBlake3' || name === 'CryptoEd25519Signature' || name === 'CryptoZeroize' || name === 'CryptoOsEntropy') {
+            const expected = readFileSync(join(root, `Compiler/JetRuntime/Tests/${name}Witness.stdout`), 'utf8');
+            const metadata = JSON.parse(readFileSync(join(root, `Compiler/JetRuntime/Tests/${name}Fixtures.json`), 'utf8'));
+            if (digest(expected) !== metadata.stdoutSha256) throw Error(`damaged frozen ${name} reference`);
+            if (result.stdout !== expected) throw Error(`Jet ${name} contract differs byte-for-byte from the frozen reference`);
+        }
+        if (name === 'CryptoOsEntropy') {
+            const metadata = JSON.parse(readFileSync(join(root, 'Compiler/JetRuntime/Tests/CryptoOsEntropyFixtures.json'), 'utf8'));
+            const expected = readFileSync(join(root, 'Compiler/JetRuntime/Tests/CryptoOsEntropyWorld.stderr'), 'utf8');
+            if (digest(expected) !== metadata.world.stderrSha256) throw Error('damaged frozen World rejection reference');
+            for (const count of ['0', '-1', '1048577', '7']) {
+                // This is an expected terminal stop, not command()'s success path.
+                const stopped = spawnSync(join(out, name), ['world', count], {cwd: root, encoding: 'utf8', timeout: 60000});
+                writeFileSync(join(out, `run-${name}-world-${count}.receipt.json`), JSON.stringify({status: stopped.status, signal: stopped.signal, error: stopped.error?.message ?? null, stdout: stopped.stdout, stderr: stopped.stderr}, null, 2) + '\n');
+                if (stopped.error || stopped.status !== metadata.world.exitCode || stopped.signal || stopped.stdout !== '' || stopped.stderr !== expected) throw Error(`World entropy stop differs count=${count}`);
+            }
         }
     }
     for (const test of frozen.cases) {

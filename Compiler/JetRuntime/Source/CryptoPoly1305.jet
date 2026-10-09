@@ -139,3 +139,13 @@ fn rt_crypto_equal(a: I64, b: I64, length: I64) -> Bool {
     }
     diff == I64{0}
 }
+// Public lengths may differ; byte values never select a branch or early exit.
+// The same fixed-span engine authenticates AEAD tags, age MACs and Core bytes.
+fn rt_crypto_equal_spans(a: I64, a_length: I64, b: I64, b_length: I64) -> Bool {
+    if (a_length < I64{0} || b_length < I64{0}) {
+        jet_rt_unreachable(I64{0}, I64{0})
+        return false
+    }
+    if (a_length != b_length) -> return false
+    return rt_crypto_equal(a, b, a_length)
+}
