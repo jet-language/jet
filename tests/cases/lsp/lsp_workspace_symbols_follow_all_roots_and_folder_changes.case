@@ -10,21 +10,21 @@ send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{
 recv lsp
 send lsp: "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"workspace/symbol\",\"params\":{\"query\":\"\"}}"
 recv lsp
-stdout: ~ "ClosedFirst"
-stdout: ~ "OpenSecond"
-stdout: !~ "DiskSecond"
-stdout: !~ "AddedThird"
+stdout: ~ "ClosedFirst" # original ed77c235f tests/lsp.rs:1397 contains predicate
+stdout: ~ "OpenSecond" # original ed77c235f tests/lsp.rs:1397 contains predicate
+stdout: !~ "DiskSecond" # original ed77c235f tests/lsp.rs:1400 not contains predicate
+stdout: !~ "AddedThird" # original ed77c235f tests/lsp.rs:1400 not contains predicate
 send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"workspace/didChangeWorkspaceFolders\",\"params\":{\"event\":{\"removed\":[{\"uri\":\"file://{work}/lsp%20multi%20root/first\",\"name\":\"first\"}],\"added\":[{\"uri\":\"file://{work}/lsp%20multi%20root/third\",\"name\":\"third\"}]}}}"
 send lsp: "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"workspace/symbol\",\"params\":{\"query\":\"\"}}"
 recv lsp
-stdout: ~ "OpenSecond"
-stdout: ~ "AddedThird"
-stdout: !~ "ClosedFirst"
+stdout: ~ "OpenSecond" # original ed77c235f tests/lsp.rs:1415 contains predicate
+stdout: ~ "AddedThird" # original ed77c235f tests/lsp.rs:1415 contains predicate
+stdout: !~ "ClosedFirst" # original ed77c235f tests/lsp.rs:1419 not contains predicate
 send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"workspace/didChangeWorkspaceFolders\",\"params\":{\"event\":{\"removed\":[{\"uri\":\"file://{work}/lsp%20multi%20root/second\",\"name\":\"second\"}],\"added\":[]}}}"
 send lsp: "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"workspace/symbol\",\"params\":{\"query\":\"\"}}"
 recv lsp
-stdout: ~ "AddedThird"
-stdout: !~ "OpenSecond"
+stdout: ~ "AddedThird" # original ed77c235f tests/lsp.rs:1436 contains predicate
+stdout: !~ "OpenSecond" # original ed77c235f tests/lsp.rs:1440 not contains predicate
 send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"workspace/didChangeWorkspaceFolders\",\"params\":{\"event\":{\"removed\":[{\"uri\":\"file://{work}/lsp%20multi%20root/third\",\"name\":\"third\"}],\"added\":[]}}}"
 send lsp: "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"workspace/symbol\",\"params\":{\"query\":\"\"}}"
 recv lsp

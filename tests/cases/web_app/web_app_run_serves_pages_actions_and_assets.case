@@ -14,8 +14,8 @@ env: S6_WEB_PATH=/
 env: S6_WEB_RESPONSE={work}/page.http
 exit: 0
 file: page.http ^= "HTTP/1.1 200" # Original starts_with.
-file: page.http: ~ "<title>Home</title>" # Original contains predicate.
-file: page.http: ~ "hello from csr" # Original contains predicate.
+file: page.http ~ "<title>Home</title>" # Original contains predicate.
+file: page.http ~ "hello from csr" # Original contains predicate.
 file: page.http !~ "jet-dev-server-functions" # Original negative predicate.
 file.after_first("\r\n\r\n"): page.http = "{cap:expectedPage}"
 step: jet explain --web-graph --json {root}/Examples/features/web/web_app.jet
@@ -28,8 +28,8 @@ env: S6_WEB_PATH=/actions/save
 env: S6_WEB_RESPONSE={work}/action.http
 exit: 0
 file: action.http ^= "HTTP/1.1 200" # Original starts_with.
-file: action.http: ~ "content-type: application/json" # Original contains predicate.
-file: action.http: ~ "content-security-policy: default-src 'self'" # Original contains predicate.
+file: action.http ~ "content-type: application/json" # Original contains predicate.
+file: action.http ~ "content-security-policy: default-src 'self'" # Original contains predicate.
 file.after_first("\r\n\r\n"): action.http = "\"saved\""
 file: action.http !~ "server function input is missing" # Original negative predicate.
 step: jet run client/request.jet
@@ -39,7 +39,7 @@ env: S6_WEB_PATH=/assets/app.css
 env: S6_WEB_RESPONSE={work}/asset.http
 exit: 0
 file: asset.http ^= "HTTP/1.1 200" # Original starts_with.
-file: asset.http: ~ "font-family" # Original contains predicate.
+file: asset.http ~ "font-family" # Original contains predicate.
 signal server: KILL
 wait: server
 exit: any # Original ServerChild drop kill/wait ignores status.

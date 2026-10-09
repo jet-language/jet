@@ -13,11 +13,11 @@ mkdir: state
 chmod: bin/systemd-run 755
 chmod: bin/systemctl 755
 step: jetpack services up --no-color
-await: file .jet/services/fixture/data/child.pid lines >= 1 timeout 5s every 50ms
-capture: child = text file .jet/services/fixture/data/child.pid.trim
-cap:child: is-u32
-capture: leader = text file .jet/services/fixture/pid.strip_prefix_lines("pid=").line(0)
-cap:leader: is-u32
+await: file .jet/services/fixture/data/child.pid lines >= 1 timeout 5s every 50ms # original ed77c235f tests/jetpack_services.rs:1330 wait_for_file_lines helper610-625 counts lines >=1 with 5s deadline and 50ms sleep
+capture: child = text file.trim .jet/services/fixture/data/child.pid
+cap:child: is-u32 # original ed77c235f tests/jetpack_services.rs:1331-1335 child PID trim then parse::<u32>().unwrap
+capture: leader = text file.strip_prefix_lines("pid=").line(0) .jet/services/fixture/pid
+cap:leader: is-u32 # original ed77c235f tests/jetpack_services.rs:1336-1340 first successful pid= strip_prefix and parse::<u32>().ok then unwrap
 cap:child: != "{cap:leader}"
 process {cap:child}: alive-nonzombie
 step: jetpack services down --no-color

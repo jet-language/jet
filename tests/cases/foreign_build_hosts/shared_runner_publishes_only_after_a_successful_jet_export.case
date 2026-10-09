@@ -12,19 +12,19 @@ file: host-build/loadable.h is-file
 file: host-build/loadable.jetlib is-file
 file: host-build/jet-host.receipt is-file
 file: host-build/jet-host.stamp is-file
-file: host-build/jet-host.receipt ~ "\"schema\":2"
-file: host-build/jet-host.receipt ~ "\"output\":\"core\""
-file: host-build/jet-host.receipt ~ "\"lock\":{\"path\":\".jet/lock\",\"digest\":\"sha256-"
-file: host-build/jet-host.receipt ~ "\"command\":[\"build\",\"--lib\",\"--locked\",\"--output\",\"core\",\"--profile=dev\",\"library.jet\"]"
+file: host-build/jet-host.receipt ~ "\"schema\":2" # original ed77c235f tests/foreign_build_hosts.rs:238 receipt contains schema
+file: host-build/jet-host.receipt ~ "\"output\":\"core\"" # original ed77c235f tests/foreign_build_hosts.rs:239 receipt contains output
+file: host-build/jet-host.receipt ~ "\"lock\":{\"path\":\".jet/lock\",\"digest\":\"sha256-" # original ed77c235f tests/foreign_build_hosts.rs:240 receipt contains lock prefix
+file: host-build/jet-host.receipt ~ "\"command\":[\"build\",\"--lib\",\"--locked\",\"--output\",\"core\",\"--profile=dev\",\"library.jet\"]" # original ed77c235f tests/foreign_build_hosts.rs:241 receipt contains command
 file: .jet/build/.loadable.jet-library.complete is-file
-file: .jet/build/args count-lines = "--lib" >= 1
-file: .jet/build/args count-lines = "--locked" >= 1
-file: .jet/build/args count-lines = "--output" >= 1
-file: .jet/build/args count-lines = "core" >= 1
-file: .jet/build/args count-lines = "library.jet" >= 1
+file: .jet/build/args has-line "--lib" # original ed77c235f tests/foreign_build_hosts.rs:244 invoked.lines().any exact equality
+file: .jet/build/args has-line "--locked" # original ed77c235f tests/foreign_build_hosts.rs:245 invoked.lines().any exact equality
+file: .jet/build/args has-line "--output" # original ed77c235f tests/foreign_build_hosts.rs:246 invoked.lines().any exact equality
+file: .jet/build/args has-line "core" # original ed77c235f tests/foreign_build_hosts.rs:247 invoked.lines().any exact equality
+file: .jet/build/args has-line "library.jet" # original ed77c235f tests/foreign_build_hosts.rs:248 invoked.lines().any exact equality
 step: bash {root}/Tools/foreign-build-hosts/jet-library.sh --jet {work}/fake-jet --project {work} --entry library.jet --output core --library loadable --dest {work}/host-build --kind static --loadable --input library.jet
 env: FAKE_JET_FAIL=1
-exit: != 0
+exit: != 0 # original ed77c235f tests/foreign_build_hosts.rs:256 failed export status is not success
 file: host-build/libloadable.a absent
 file: host-build/loadable.h absent
 file: host-build/loadable.jetlib absent

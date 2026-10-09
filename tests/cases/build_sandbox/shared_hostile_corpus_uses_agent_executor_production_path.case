@@ -15,16 +15,16 @@ capture: port = text file port.txt
 write: main.jet main.template
 step: jet run --release main.jet
 exit: 0
-stdout: lines = 14
-stdout.line(0): = "host-read"
-stdout.line(2): = "host-write"
-stdout.line(4): = "source-symlink"
-stdout.line(6): = "output-symlink"
-stdout.line(8): = "network-exfiltration"
-stdout.line(10): = "child-process"
-stdout.line(12): = "tmpfs-exhaustion"
-when sandbox.stdout+stderr ~ "sandbox: Strong via": stdout.filter(!= "host-read" "host-write" "source-symlink" "output-symlink" "network-exfiltration" "child-process" "tmpfs-exhaustion"): lines = ["blocked","blocked","blocked","blocked","blocked","blocked","blocked"]
-when sandbox.stdout+stderr !~ "sandbox: Strong via": stdout.filter(!= "host-read" "host-write" "source-symlink" "output-symlink" "network-exfiltration" "child-process" "tmpfs-exhaustion"): lines = ["unsupported","unsupported","unsupported","unsupported","unsupported","unsupported","unsupported"]
+stdout: lines = 14 # original ed77c235f tests/build_sandbox.rs:1430-1435 Rust lines count == seven cases * 2
+stdout.line(0): = "host-read" # original ed77c235f tests/build_sandbox.rs:1442-1443 lines[index * 2] == case_id
+stdout.line(2): = "host-write" # original ed77c235f tests/build_sandbox.rs:1442-1443 lines[index * 2] == case_id
+stdout.line(4): = "source-symlink" # original ed77c235f tests/build_sandbox.rs:1442-1443 lines[index * 2] == case_id
+stdout.line(6): = "output-symlink" # original ed77c235f tests/build_sandbox.rs:1442-1443 lines[index * 2] == case_id
+stdout.line(8): = "network-exfiltration" # original ed77c235f tests/build_sandbox.rs:1442-1443 lines[index * 2] == case_id
+stdout.line(10): = "child-process" # original ed77c235f tests/build_sandbox.rs:1442-1443 lines[index * 2] == case_id
+stdout.line(12): = "tmpfs-exhaustion" # original ed77c235f tests/build_sandbox.rs:1442-1443 lines[index * 2] == case_id
+when sandbox.stdout+stderr ~ "sandbox: Strong via": stdout.filter(!= "host-read" "host-write" "source-symlink" "output-symlink" "network-exfiltration" "child-process" "tmpfs-exhaustion"): lines = ["blocked","blocked","blocked","blocked","blocked","blocked","blocked"] # original ed77c235f tests/build_sandbox.rs:1437-1444 Strong per-case result equality
+when sandbox.stdout+stderr !~ "sandbox: Strong via": stdout.filter(!= "host-read" "host-write" "source-symlink" "output-symlink" "network-exfiltration" "child-process" "tmpfs-exhaustion"): lines = ["unsupported","unsupported","unsupported","unsupported","unsupported","unsupported","unsupported"] # original ed77c235f tests/build_sandbox.rs:1437-1444 non-Strong per-case result equality
 wait: observer
 exit: 0
 sleep: 100ms

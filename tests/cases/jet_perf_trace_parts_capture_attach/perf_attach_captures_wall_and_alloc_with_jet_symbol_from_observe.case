@@ -31,20 +31,20 @@ file: capture.jettrace !~ "\"duration_ns\":1," # Original anti-fabrication predi
 file: capture.jettrace !~ "\"count\":0," # Original zero-alloc scrape rejection.
 step: jet perf view capture.jettrace
 exit: 0
-stdout: ~ "sample wall"
-stdout: ~ "alloc count="
-stdout: !~ "alloc count=0 "
-stdout: ~ "tasks count="
-stdout: ~ "children="
-stdout: !~ "tasks count=0 "
-stdout: ~ "locks count="
-stdout: ~ "waiters="
-stdout: !~ "locks count=0 "
-stdout: ~ "io count="
-stdout: !~ "io count=0 "
-stdout: ~ "native process_cpu="
-stdout: ~ "spans unavailable reason="
-stdout: ~ "live.jet#run"
+stdout: ~ "sample wall" # original ed77c235f tests/jet_perf_trace_parts/capture_attach.rs:141 contains predicate
+stdout: ~ "alloc count=" # original ed77c235f tests/jet_perf_trace_parts/capture_attach.rs:142 contains predicate
+stdout: !~ "alloc count=0 " # original ed77c235f tests/jet_perf_trace_parts/capture_attach.rs:143 not contains predicate
+stdout: ~ "tasks count=" # original ed77c235f tests/jet_perf_trace_parts/capture_attach.rs:144 contains predicate
+stdout: ~ "children=" # original ed77c235f tests/jet_perf_trace_parts/capture_attach.rs:145 contains predicate
+stdout: !~ "tasks count=0 " # original ed77c235f tests/jet_perf_trace_parts/capture_attach.rs:146 not contains predicate
+stdout: ~ "locks count=" # original ed77c235f tests/jet_perf_trace_parts/capture_attach.rs:147 contains predicate
+stdout: ~ "waiters=" # original ed77c235f tests/jet_perf_trace_parts/capture_attach.rs:148 contains predicate
+stdout: !~ "locks count=0 " # original ed77c235f tests/jet_perf_trace_parts/capture_attach.rs:149 not contains predicate
+stdout: ~ "io count=" # original ed77c235f tests/jet_perf_trace_parts/capture_attach.rs:150 contains predicate
+stdout: !~ "io count=0 " # original ed77c235f tests/jet_perf_trace_parts/capture_attach.rs:151 not contains predicate
+stdout: ~ "native process_cpu=" # original ed77c235f tests/jet_perf_trace_parts/capture_attach.rs:152 contains predicate
+stdout: ~ "spans unavailable reason=" # original ed77c235f tests/jet_perf_trace_parts/capture_attach.rs:153 contains predicate
+stdout: ~ "live.jet#run" # original ed77c235f tests/jet_perf_trace_parts/capture_attach.rs:154 contains predicate
 signal live: KILL
 close live
 exit: any # Original ChildGuard kill/wait status unasserted; case-sent signal is expected cleanup.

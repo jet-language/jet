@@ -270,45 +270,45 @@ mkdir: keys
 step: git init --bare {work}/project/registry.git
 exit: 0
 step: jet registry keygen
-exit: 0
 cwd: project
 env: JET_KEYS_DIR={work}/keys
-step: jetpack doctor --json --online
 exit: 0
+step: jetpack doctor --json --online
 cwd: project
 env: JET_KEYS_DIR={work}/keys
 env: JET_REGISTRY_URL=file://{work}/project/registry.git
+exit: 0
 json: stdout doc $.status = "healthy"
 remove: keys/jet.ed25519
 step: jetpack doctor --online
-exit: 2
 cwd: project
 env: JET_KEYS_DIR={work}/keys
 env: JET_REGISTRY_URL=http://user:super-secret@example.invalid/index
+exit: 2
 stderr: ~ "[Fail] registry" # original contains predicate
 stderr: ~ "embedded registry credentials" # original contains predicate
 stderr: ~ "[Warn] signing" # original contains predicate
 stderr: $= "Result: broken\n" # original ends_with predicate
 stderr: !~ "super-secret" # original negative contains predicate
 step: jetpack doctor --online
-exit: 2
 cwd: project
 env: JET_KEYS_DIR={work}/keys
 env: JET_REGISTRY_URL=file:///registry.git?access_token=super-secret
+exit: 2
 stderr: ~ "embedded registry credentials" # original contains predicate
 stderr: !~ "super-secret" # original negative contains predicate
 step: jet registry keygen --force
-exit: 0
 cwd: project
 env: JET_KEYS_DIR={work}/keys
+exit: 0
 copy: keys/jet.ed25519.pub matching-public
 step: jet run mismatch-public.jet -- {work}/keys/jet.ed25519.pub
 exit: 0
 step: jetpack doctor --online
-exit: 2
 cwd: project
 env: JET_KEYS_DIR={work}/keys
 env: JET_REGISTRY_URL=http://user:super-secret@example.invalid/index
+exit: 2
 stderr: ~ "does not match its public key" # original contains predicate
 stderr: !~ "super-secret" # original negative contains predicate
 copy: matching-public keys/jet.ed25519.pub
@@ -317,8 +317,8 @@ write: root/owned-output/payload trusted.template
 # store-ingest seam supplies the exact original IngestRequest at 2538-2558;
 # it must NOT use hangar ingest with CacheIdentity.empty() as a substitute.
 step: jetpack explain demo --json --no-color
-exit: 0
 cwd: project
+exit: 0
 capture: id stdout doc $.explain.entry.id
 capture: out stdout doc $.explain.entry.output_path
 capture: old_used file root/hangar/{cap:id}/meta.json doc $.last_used_at
@@ -331,10 +331,10 @@ copy: keys/jet.ed25519.pub before-public
 capture: public_permissions = permissions file keys/jet.ed25519.pub
 capture: payload_permissions = permissions file root/owned-output/payload
 step: jetpack doctor --json --offline
-exit: 2
 cwd: project
 env: JET_KEYS_DIR={work}/keys
 env: JET_REGISTRY_URL=file://{work}/project/missing
+exit: 2
 stdout: ~ "failed its content digest" # original contains predicate
 stdout: ~ "local index missing" # original contains predicate
 stdout: !~ "stale lock" # original negative contains predicate

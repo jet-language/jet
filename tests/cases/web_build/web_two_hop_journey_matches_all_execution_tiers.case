@@ -16,15 +16,15 @@ exit: 0
 step default: jet run web_two_hop_journey.jet
 exit: 1
 stdout: empty
-capture: report = text stderr
-write: native-report.txt = "{cap:report}"
+capture: default_report = text stderr
+write: native-report.txt = "{cap:default_report}"
 step: node verify.mjs native-report.txt 0 native
 exit: 0
 step interpret: jet run --interpret web_two_hop_journey.jet
 exit: 1
 stdout: empty
-capture: report = text stderr
-write: native-report.txt = "{cap:report}"
+capture: interpret_report = text stderr
+write: native-report.txt = "{cap:interpret_report}"
 step: node verify.mjs native-report.txt 0 native
 exit: 0
 step: jet build --target web js/tests/fixtures/web_two_hop_journey.jet
@@ -49,7 +49,7 @@ copy: harness.mjs wasm/.jet/build/two_hop_journey_harness.mjs
 step: node two_hop_journey_harness.mjs
 cwd: wasm/.jet/build
 exit: 0
-capture: transcript = text stdout
-write: wasm-transcript.txt = "{cap:transcript}"
+capture: wasm_transcript = text stdout
+write: wasm-transcript.txt = "{cap:wasm_transcript}"
 step: node verify.mjs wasm-transcript.txt 0 web
 exit: 0

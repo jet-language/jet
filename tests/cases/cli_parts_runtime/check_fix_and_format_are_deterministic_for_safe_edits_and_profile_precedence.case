@@ -11,7 +11,7 @@ env: NO_COLOR=1
 exit: 1
 exit: == absent
 machine: == absent # original predicate
-json: machine doc $ has # original predicate: parse status
+json: machine doc $ valid # original predicate: parse status
 json: machine doc $.reports : array # original pattern
 json: machine doc $.reports[0].applicability = "safe"
 json: machine doc $.reports[0].fix_edits : array # original pattern
@@ -26,7 +26,7 @@ copy: package.jet package.bytes
 step configured: jet check run.jet --json --profile=staging --set marker=cli
 env: NO_COLOR=1
 exit: 1
-json: machine doc $ has # original predicate: parse status
+json: machine doc $ valid # original predicate: parse status
 json: machine doc $.reports : array # original pattern
 json: machine doc $.reports[0].applicability = "safe"
 json: machine doc $.reports[0].fix_edits : array # original pattern
@@ -71,17 +71,17 @@ env: NO_COLOR=1
 exit: 0
 step control: jet run --profile=debug control.jet
 env: NO_COLOR=1
-exit: 0
 env: JET_STORE_DIR={work}/run-cache
+exit: 0
 stdout: = safe.out
 step: jet run --profile=debug run.jet
 env: NO_COLOR=1
-exit: 0
 env: JET_STORE_DIR={work}/run-cache
+exit: 0
 stdout: == control
 step: jet check run.jet --json --profile=staging --set marker=cli
 env: NO_COLOR=1
 exit: 0
-json: machine doc $ has # original predicate: parses
+json: machine doc $ valid # original predicate: parses
 json: machine doc $.provenance.profile = "staging"
 file: package.jet == package.bytes

@@ -6,9 +6,9 @@ env: JETPACK_ROOT={work}/root
 mkdir: root
 mkdir: project
 step: jetpack bridge flake --no-color
-exit: 0
 cwd: project
 env: PATH=
+exit: 0
 stdout: ~ "packages: [fd]" # original contains predicate
 copy: project/.jet/lock before.lock
 file: project/.jet/lock ~ "flake-composition:flake-parts" # original contains predicate
@@ -16,9 +16,9 @@ file: project/.jet/lock ~ "./parts/dev.nix" # original contains predicate
 json: file project/.jet/lock toml $.semantic_record[?kind="adapter-output"][?exact ^= "devShells:"][?rationale[0].reason ~= "./parts/dev.nix"] #>= 1
 write: project/parts/dev.nix changed.template
 step: jetpack bridge flake --no-color
-exit: 1
 cwd: project
 env: PATH=
+exit: 1
 stderr: ~ "E1256" # original contains predicate
 file: project/.jet/lock == before.lock
 

@@ -8,28 +8,28 @@ mkdir: root
 mkdir: project
 when os unix: chmod: remote/pkgs/hello/bin/hello 755
 step: git init
-exit: 0
 cwd: remote
+exit: 0
 step: git config user.email jetpack@example.invalid
-exit: 0
 cwd: remote
+exit: 0
 step: git config user.name "Jet Test"
-exit: 0
 cwd: remote
+exit: 0
 step: git add .
-exit: 0
 cwd: remote
+exit: 0
 step: git commit -m init
-exit: 0
 cwd: remote
+exit: 0
 write: project/env.jet env.template
 step: jetpack run --no-color -- hello
-exit: 0
 cwd: project
-stdout.trim: = core_provider_fetches_remote_git_package_from_env.expected
+exit: 0
+stdout.trim: = core_provider_fetches_remote_git_package_from_env.expected # original ed77c235f tests/jetpack_engine.rs:8030-8033 stdout.trim equals hello from remote jet-pkgs
 file: root/sources is-dir
 step: jetpack build --no-color --offline
-exit: 0
 cwd: project
 unset: JETPACK_FIXTURES
+exit: 0
 

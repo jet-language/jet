@@ -6,7 +6,7 @@ fixture: provenance_policy_none_logged_attested_and_e1204.fixture
 env: JET_PACKAGE_STORE_DIR={work}/store
 step: jet fetch
 exit: 0
-capture: actual = file .jet/lock toml $.package[?name="textkit"][0].content-hash
+capture: actual file .jet/lock toml $.package[?name="textkit"][0].content-hash
 capture: bad_lock = text file.replace("{cap:actual}", "sha256-not-the-tree") .jet/lock
 write: .jet/lock = "{cap:bad_lock}"
 step: jet build --locked run.jet

@@ -146,10 +146,10 @@ mkdir: output/bin
 step: {env:RUSTC|rustc} --edition=2021 -C debuginfo=0 -C opt-level=0 native-jetpack-fixture.rs -o output/bin/jetpack
 exit: 0
 step: jetpack use omp@releases#1.0.0 -y --no-color --offline --fixtures {work}/fixtures -- /bin/sh -c "printf ready > \"$LEASE_READY\"; while [ ! -f \"$LEASE_RELEASE\" ]; do /bin/sleep 0.01; done >/dev/null 2>&1 </dev/null &"
-exit: 0
 env: JETPACK_FIXTURES={work}/fixtures
 env: LEASE_READY={work}/root/descendant-ready
 env: LEASE_RELEASE={work}/root/descendant-release
+exit: 0
 file: root/descendant-ready exists
 capture: lease = first-entry root/leases
 step: jetpack hangar recover --no-color

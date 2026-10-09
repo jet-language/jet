@@ -10,7 +10,7 @@ spawn canvas: jet dev jet_debug_canvas_live_protocol.jet --canvas --canvas-port 
 env: JET_CANVAS_BROWSER=/definitely/missing/canvas-browser
 stdout: file canvas.stdout
 stderr: file canvas.stderr
-await: file canvas.stderr ~ "Canvas: http" timeout 60s every 50ms
+await: file canvas.stderr ~ "Canvas: http" timeout 60s every 50ms # transport readiness bridge: Source/CmdDevTools.rs:777-783 emits the Canvas URL on configured browser launch failure; retain the ported 60s/50ms gate
 capture: url = text file.after_first("Canvas: ").line(0) canvas.stderr
 capture: revision = sha256 file jet_debug_canvas_live_protocol.jet
 capture: original_source = text file jet_debug_canvas_live_protocol.jet

@@ -5,9 +5,9 @@ env: NO_COLOR=1
 step: jet notebook document.jetnb --protocol
 stdin: commands.stdin
 exit: 0
-json: stdout ndjson $[0].body ^= "status=ok;"
-json: stdout ndjson $[1].body ^= "status=ok;"
-stdout.line(1).after_first("text="): ~ "fx"
+json: stdout ndjson $[0].body ^= "status=ok;" # original ed77c235f tests/notebook.rs:150-153 FirstParty a result.ok(); public bridge crates/jet-repl/src/Notebook/protocol.rs:133-141 maps result.ok() to this body prefix
+json: stdout ndjson $[1].body ^= "status=ok;" # original ed77c235f tests/notebook.rs:147-148,154,165 JupyterAdapter b observable_success requires result.ok(); public bridge crates/jet-repl/src/Notebook/protocol.rs:133-141 maps result.ok() to this body prefix
+stdout.line(1).after_first("text="): ~ "fx" # original ed77c235f tests/notebook.rs:147-148,154,165 b bundle.text_plain.contains("fx"); public bridge crates/jet-repl/src/Notebook/protocol.rs:136,141 renders text_plain after text= without turn/count prefix
 capture: broken_reply stdout ndjson $[2].body
 step: jet run --interpret observable.jet -- "{cap:broken_reply}"
 stdin: null

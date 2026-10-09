@@ -6,7 +6,7 @@ env: NO_COLOR=1
 step probe: jet run main.jet
 exit: 0
 capture: probe_error = text stderr
-when env-set JET_REQUIRE_VULKAN: when probe.stdout = "vulkan:unavailable\n": fail "Vulkan production path was not available: {cap:probe_error}"
+when env-set JET_REQUIRE_VULKAN: when probe.stdout = "vulkan:unavailable\n": step: fail "Vulkan production path was not available: {cap:probe_error}"
 when probe.stdout != "vulkan:unavailable\n"
 stdout: = portable_accelerator_vulkan_operations_match_cpu_across_tiers.stdout.expected
 step default: jet run main.jet

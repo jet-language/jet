@@ -7,25 +7,25 @@ env: JETPACK_ROOT={work}/root
 mkdir: home
 mkdir: root
 step: jetpack build --no-color
-exit: any # original predicate: status is not asserted
 env: JETPACK_FAKE_SANDBOX=unavailable
+exit: any # original predicate: status is not asserted
 stderr: !~ "L0205" # original predicate
 stderr: !~ "unsandboxed" # original predicate
 step: jetpack build --json --no-color
-exit: any # original predicate: status is not asserted
 env: JETPACK_FAKE_SANDBOX=unavailable
+exit: any # original predicate: status is not asserted
 stderr: !~ "\"code\": \"L0205\"" # original predicate
 stderr: !~ "unsandboxed" # original predicate
 step: jetpack config sandbox require --no-color
 exit: 0
 step: jetpack build --no-color
-exit: 2
 env: JETPACK_FAKE_SANDBOX=unavailable
+exit: 2
 stderr: ~ "E1275" # original predicate
 stderr: ~ "approved remote builder, or enable the native sandbox" # original predicate
 step: jetpack build --json --no-color
-exit: any # original predicate: status is not asserted
 env: JETPACK_FAKE_SANDBOX=unavailable
+exit: any # original predicate: status is not asserted
 stderr: ~ "\"code\": \"E1275\"" # original predicate
 stderr: ~ "\"severity\": \"error\"" # original predicate
 
