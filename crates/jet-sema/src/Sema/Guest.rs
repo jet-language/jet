@@ -173,7 +173,7 @@ fn export_signature(function: &Func) -> GuestFunction {
         .iter()
         .map(|param| (param.convention, param.ty.clone()))
         .collect::<Vec<_>>();
-    let return_type = function.return_type.clone();
+    let return_type = export_boundary_return_type(function);
     GuestFunction {
         direction: GuestDirection::Export,
         library: None,
@@ -182,6 +182,26 @@ fn export_signature(function: &Func) -> GuestFunction {
         scalar: scalar_shape(&params, return_type.as_ref()),
         params,
         return_type,
+    }
+}
+
+/// The value an export publishes across the guest boundary. Sema's failure-set
+/// solve projects a written `-> T` to its effective `Result` carrier (for
+/// example `Result<T, Never>` once the failure set is proven empty), so the
+/// boundary reads the success value from the one failure fact, exactly as MIR
+/// `Embedding::scalar_signature` does. Optional and `Never` carriers have no
+/// success value to publish and keep their written type.
+fn export_boundary_return_type(function: &Func) -> Option<Type> {
+    function.return_type.as_ref()?;
+    match function.failure_contract() {
+        crate::AST::FailureContract::Default { success, .. }
+        | crate::AST::FailureContract::Explicit { success, .. }
+        | crate::AST::FailureContract::Inferred { success, .. }
+        | crate::AST::FailureContract::Converted { success, .. }
+        | crate::AST::FailureContract::ProvenUnreachable { success }
+        | crate::AST::FailureContract::InferredNever { success } => Some(success),
+        crate::AST::FailureContract::Optional { .. }
+        | crate::AST::FailureContract::DeclaredNever => function.return_type.clone(),
     }
 }
 
@@ -894,7 +914,40 @@ pub(crate) fn check_guest_import_surface(
 
 #[cfg(test)]
 mod tests {
-    use super::snapshot_signature_source;
+    use super::{sandbox_export_signature, snapshot_signature_source, GuestScalar};
+    use crate::AST::{Item, Type};
+
+    fn parsed_function(source: &str) -> crate::AST::Func {
+        let (tokens, lex_diagnostics) = crate::Lexer::lex(source);
+        assert!(lex_diagnostics.is_empty(), "{lex_diagnostics:?}");
+        let program = crate::Parser::parse(&tokens).expect("parse export");
+        program
+            .items
+            .into_iter()
+            .find_map(|item| match item {
+                Item::Func(function) => Some(function),
+                _ => None,
+            })
+            .expect("one function")
+    }
+
+    /// The failure-set solve rewrites `-> String` to `Result<String, Never>`
+    /// without a written span; the sandbox boundary still publishes `String`.
+    #[test]
+    fn sandbox_export_publishes_success_of_solved_failure_carrier() {
+        let written = parsed_function("pub fn probe(path: String) -> String { ~path }\n");
+        let mut solved = written.clone();
+        solved.return_type = Some(Type::Result {
+            ok: Box::new(Type::String),
+            err: Box::new(Type::Named(crate::Syntax::TYPE_NEVER.to_string())),
+        });
+        solved.return_type_span = None;
+        for function in [&written, &solved] {
+            let export = sandbox_export_signature(function).expect("pub sandbox export");
+            assert_eq!(export.scalar, Some(GuestScalar::Text));
+            assert_eq!(export.return_type, Some(Type::String));
+        }
+    }
 
     #[test]
     fn snapshot_source_inserts_return_arrow() {
