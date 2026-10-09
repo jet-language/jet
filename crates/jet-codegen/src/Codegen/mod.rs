@@ -4345,6 +4345,8 @@ fn push_mem_prelude(out: &mut String) {
     out.push_str(MEM_SENTRY_PRELUDE);
     out.push_str("\n    }\n");
     out.push_str(MEM_PRELUDE);
+    // #4566 slice 8: the inline-list storage behind `JetInlineList`.
+    out.push_str(INLINE_LIST_PRELUDE);
     out.push_str("\n}\n");
 }
 

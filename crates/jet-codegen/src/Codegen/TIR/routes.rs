@@ -185,14 +185,15 @@ fn collection_closure_route(
         ))
     })?;
     let (module, member, symbol, arity, borrow_mask) = match (op, kind) {
-        (Map, "list") => ("core.list", "map", "jet_list_map", 2, &[false, false][..]),
+        // #4566 slice 5: the eager list map kernels borrow their source.
+        (Map, "list") => ("core.list", "map", "jet_list_map", 2, &[true, false][..]),
         (Map, "iter") => ("core.iter", "map", "jet_iter_map", 2, &[false, false][..]),
         (MapMut, "list") => (
             "core.list",
             "map_mut",
             "jet_list_map_mut",
             2,
-            &[false, false][..],
+            &[true, false][..],
         ),
         (MapMut, "iter") => (
             "core.iter",

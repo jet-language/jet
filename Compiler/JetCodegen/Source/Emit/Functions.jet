@@ -11,7 +11,12 @@ use jet_foundation.[
     MIRFunctionID,
     MIRGenericParam,
     MIRImplDef,
+    MIRIndexKind,
+    MIRInstruction,
     MIRLocal,
+    MIRLocalID,
+    MIROpID,
+    MIROperation,
     MIRParam,
     MIRPlaceBase,
     MIRPlaceID,
@@ -100,6 +105,12 @@ fn jet_rust_emit_local_declaration(ctx: &JetRustEmitContext, function: MIRFuncti
     }
     // MIRRust: a shared-capture local is one shared cell (S47/M2).
     if jet_rust_emit_local_is_shared(&ctx, local.id) -> return "let {jet_rust_emit_local_slot(local.id)}: std::rc::Rc<std::cell::RefCell<Option<{jet_rust_emit_type(&ctx, local.ty)}>>> = std::rc::Rc::new(std::cell::RefCell::new(None));"
+    // MIRRust emit_slots (#4566 slice 8): a list that never leaves the
+    // function keeps its first values in the frame (jet_rust_emit_plan_inline_lists).
+    if ctx.move_facts.inline_lists.get(local.id.value) == .Val(capacity) {
+        if local.ty.kind == .List(elem) -> return "let mut {jet_rust_emit_local_slot(local.id)}: Option<{ctx.config.root_prefix}jet_mem::JetInlineList<{jet_rust_emit_type(&ctx, elem)}, {capacity}>> = None;"
+        panic("checked MIR inline list local is not a list")
+    }
     // MIRRust emit_slots: a reference binding holds the value it binds in place.
     reference_binding :: ctx.ref_bindings.locals.get(local.id.value) != None
     borrow :: if reference_binding -> "&" else -> ""
@@ -1412,6 +1423,352 @@ fn jet_rust_emit_unwrap_value_slots(lines: [String], start: Int) -> [String] Nev
     rebuilt
 }
 
+// How jet_rust_emit_unwrap_slot_options reads one mention of a function-top
+// `Option` slot: a whole-line `slot = Some(E);` write, an `as_ref`/`as_mut`
+// borrow, or a take.
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::SlotAccess
+enum JetRustEmitSlotAccess { Write Borrow Take }
+
+struct JetRustEmitSlotUse {
+    pub line: Int
+    pub access: JetRustEmitSlotAccess
+}
+
+struct JetRustEmitOptionSlot {
+    pub name: String
+    pub ty: String
+    pub initial: String?
+}
+
+// MIRRust option_slot_declaration: `let mut <slot>: Option<T> = None;`, or
+// `.. = Some(E);` where jet_rust_emit_localize_value_slots declared a slot at
+// its definition, for a numbered local or value slot: the slot, `T`, and the
+// `E` that fills it.
+fn jet_rust_emit_option_slot_declaration(line: String) -> JetRustEmitOptionSlot? Never! {
+    bytes :: line.bytes()
+    statement :: String.from_bytes(~(bytes[jet_rust_emit_fold_indent(bytes)..<bytes.len()])) ?? ""
+    if !statement.starts_with("let mut ") -> return None
+    statement_bytes :: statement.bytes()
+    split :: jet_rust_emit_fold_find(statement_bytes, ": Option<".bytes(), 0)
+    if split < 8 -> return None
+    name :: String.from_bytes(~(statement_bytes[8..<split])) ?? ""
+    if !jet_rust_emit_fold_numbered(name, "__jet_l_", "") && !jet_rust_emit_fold_numbered(name, "__jet_v_", "") -> return None
+    if statement.ends_with("> = None;") {
+        type_end :: statement_bytes.len() - "> = None;".bytes().len()
+        if type_end < split + 9 -> return None
+        return Val(JetRustEmitOptionSlot{name: name, ty: String.from_bytes(~(statement_bytes[split + 9..<type_end])) ?? "", initial: None})
+    }
+    fill :: jet_rust_emit_fold_find(statement_bytes, "> = Some(".bytes(), split + 9)
+    if fill < 0 -> return None
+    payload :: jet_rust_emit_option_slot_write_payload(String.from_bytes(~(statement_bytes[fill + 1..<statement_bytes.len()])) ?? "") ?? return None
+    Val(JetRustEmitOptionSlot{name: name, ty: String.from_bytes(~(statement_bytes[split + 9..<fill])) ?? "", initial: Val(payload)})
+}
+
+// MIRRust option_slot_write_payload: the payload `E` of a whole-line
+// `<slot> = Some(E);` statement, given the text after the slot name; None
+// when `Some(` does not close at the final `)`, or `E` holds a character or
+// label quote this scan does not pair.
+fn jet_rust_emit_option_slot_write_payload(rest: String) -> String? Never! {
+    if !rest.starts_with(" = Some(") || !rest.ends_with(");") -> return None
+    bytes :: rest.bytes()
+    end :: bytes.len() - 2
+    if end < 8 -> return None
+    depth := 0
+    quoted := false
+    escaped := false
+    loop index in 8..<end {
+        code :: Int.from_u8(bytes[index])
+        if quoted {
+            quoted = escaped || code != 34
+            escaped = !escaped && code == 92
+            next
+        }
+        if code == 34 -> quoted = true
+        if code == 39 -> return None
+        if code == 40 -> depth += 1
+        if code == 41 {
+            if depth == 0 -> return None
+            depth -= 1
+        }
+    }
+    if depth != 0 || quoted -> return None
+    Val(String.from_bytes(~(bytes[8..<end])) ?? "")
+}
+
+// MIRRust unwrap_slot_options: for each line, the first later line indented
+// less than it (`inclusive` false: the end of its block) or no deeper
+// (`inclusive` true: the end of the block it opens). Blank lines close nothing.
+fn jet_rust_emit_slot_block_ends(indents: [Int], inclusive: Bool) -> [Int] Never! {
+    blank :: 9223372036854775807
+    ends := [Int]{}
+    loop _ in indents -> &ends.push(indents.len())
+    open := [Int]{}
+    loop (index, indent) in indents {
+        if indent == blank -> next
+        loop open.len() > 0 {
+            top :: open[open.len() - 1]
+            closes :: if inclusive -> indent <= indents[top] else -> indent < indents[top]
+            if !closes -> break
+            ends[top] = index
+            _ := &open.pop()
+        }
+        &open.push(index)
+    }
+    ends
+}
+
+// MIRRust unwrap_slot_options: a take inside the loop `header` opens is
+// refilled when a write in the loop body's own block follows it (the write on
+// the take's own line runs after it) and no `continue` between them skips it.
+fn jet_rust_emit_slot_refilled(body: [String], reach: JetRustEmitSlotReach, body_end: [Int], writes: [Int], taken: Int, header: Int) -> Bool Never! {
+    loop refill in writes {
+        if refill < taken || refill >= body_end[header] || jet_rust_emit_slot_reach_end(body, reach, refill) != body_end[header] -> next
+        skipped := false
+        loop index in taken..<refill + 1 {
+            if body[index].contains("continue") -> skipped = true
+        }
+        if !skipped -> return true
+    }
+    false
+}
+
+// MIRRust unwrap_slot_options: `parent[i]` is the line opening the block that
+// holds line `i` (-1 for none); `jumps_before[i]` counts the lines before `i`
+// that may leave a block early.
+struct JetRustEmitSlotReach {
+    pub parent: [Int]
+    pub jumps_before: [Int]
+    pub scope_end: [Int]
+}
+
+fn jet_rust_emit_slot_reach(body: [String], indents: [Int], scope_end: [Int]) -> JetRustEmitSlotReach Never! {
+    blank :: 9223372036854775807
+    parent := [Int]{}
+    enclosing := [Int]{}
+    jumps_before := [Int]{0}
+    loop (index, line) in body {
+        jumps :: line.contains("break") || line.contains("continue") || line.contains("return")
+        &jumps_before.push(jumps_before[index] + (if jumps -> 1 else -> 0))
+        &parent.push(-1)
+        if indents[index] == blank -> next
+        loop enclosing.len() > 0 && indents[enclosing[enclosing.len() - 1]] >= indents[index] {
+            _ := &enclosing.pop()
+        }
+        if enclosing.len() > 0 -> parent[index] = enclosing[enclosing.len() - 1]
+        &enclosing.push(index)
+    }
+    JetRustEmitSlotReach{parent: parent, jumps_before: jumps_before, scope_end: scope_end}
+}
+
+// MIRRust unwrap_slot_options reach_end: the end of what a write on line
+// `write` initializes for: its own block, widened past each enclosing labeled
+// block (`'label: {`) that always runs the write before control leaves it,
+// which holds when no jump inside that block precedes the write.
+fn jet_rust_emit_slot_reach_end(body: [String], reach: JetRustEmitSlotReach, write: Int) -> Int Never! {
+    current := write
+    loop reach.parent[current] >= 0 {
+        opener :: reach.parent[current]
+        content :: body[opener].trim()
+        labeled :: content.starts_with("'") && content.ends_with(": {{") && !content.ends_with("loop {{")
+        if !labeled || reach.jumps_before[write] > reach.jumps_before[opener + 1] -> break
+        current = opener
+    }
+    reach.scope_end[current]
+}
+
+// MIRRust unwrap_slot_options: the access on line `at` has a dominating write
+// (an earlier write whose reach still holds it) with no take after that write
+// and before it, and no unrefilled take inside a loop entered between them.
+fn jet_rust_emit_slot_use_initialized(body: [String], reach: JetRustEmitSlotReach, body_end: [Int], loops: [Int], writes: [Int], takes: [Int], at: Int) -> Bool Never! {
+    write := -1
+    loop candidate in writes {
+        if candidate < at && jet_rust_emit_slot_reach_end(body, reach, candidate) > at -> write = candidate
+    }
+    if write < 0 -> return false
+    loop taken in takes {
+        if taken > write && taken < at -> return false
+    }
+    loop header in loops {
+        if header <= write || header >= at || body_end[header] <= at -> next
+        loop taken in takes {
+            if taken > header && taken < body_end[header] && !jet_rust_emit_slot_refilled(body, reach, body_end, writes, taken, header) -> return false
+        }
+    }
+    true
+}
+
+// MIRRust unwrap_slot_options: unwraps the function-top `Option` slots
+// (`__jet_l_N`, `__jet_v_N`) that every access finds initialized, so the slot
+// holds its value directly (#4566). `lines[start..]` are the declarations and
+// the structured body. A slot qualifies when every body mention is a
+// whole-line `slot = Some(E);` write or an `as_ref`/`as_mut`/`take` `expect`
+// access outside any closure, and every access has a dominating write
+// (`jet_rust_emit_slot_use_initialized`). Rust then proves the initialization
+// the `expect`s asserted. The declaration keeps its place, so drop order is
+// unchanged: `let mut slot: T;`, a write `slot = E;`, a borrow `(&slot)` or
+// `(&mut slot)`, and a take `slot`.
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::unwrap_slot_options
+fn jet_rust_emit_unwrap_slot_options(lines: [String], start: Int) -> [String] Never! {
+    body := [String]{}
+    loop (index, entry) in lines {
+        if index >= start {
+            loop line in entry.split("\n").to_list() -> &body.push(line)
+        }
+    }
+    names := [String]{}
+    declared := [String:Int]{}
+    types := [String:String]{}
+    repeated := [String:Bool]{}
+    filled := [String:Bool]{}
+    loop (index, line) in body {
+        slot :: jet_rust_emit_option_slot_declaration(line) ?? next
+        if declared.get(slot.name) != None {
+            &repeated.add(slot.name, true).drop("a repeated declaration stays repeated")
+        } else {
+            &names.push(slot.name)
+        }
+        &declared.add(slot.name, index).drop("a repeated declaration is skipped below")
+        &types.add(slot.name, slot.ty).drop("a repeated declaration is skipped below")
+        if slot.initial != None -> &filled.add(slot.name, true).drop("a repeated declaration is skipped below")
+    }
+    if names.len() == repeated.len() -> return ~lines
+    blank :: 9223372036854775807
+    indents := [Int]{}
+    loop line in body {
+        bytes :: line.bytes()
+        &indents.push(if jet_rust_emit_blank_line(bytes) -> blank else -> jet_rust_emit_fold_indent(bytes))
+    }
+    scope_end :: jet_rust_emit_slot_block_ends(indents, false)
+    body_end :: jet_rust_emit_slot_block_ends(indents, true)
+    reach :: jet_rust_emit_slot_reach(body, indents, scope_end)
+    in_closure := [Bool]{}
+    loop _ in body -> &in_closure.push(false)
+    loops := [Int]{}
+    loop (index, line) in body {
+        content :: line.trim()
+        if !content.ends_with("{{") -> next
+        if jet_rust_emit_fold_inside_closure(line.bytes(), line.trim_end().bytes().len() - 1) {
+            loop flagged in index + 1..<body_end[index] -> in_closure[flagged] = true
+        } else if content.ends_with("loop {{") || content.starts_with("while ") || content.starts_with("for ") {
+            &loops.push(index)
+        }
+    }
+    groups := [[JetRustEmitSlotUse]]{}
+    group_of := [String:Int]{}
+    rejected := [String:Bool]{}
+    // A declaration that fills its slot is that slot's first write.
+    loop name in names {
+        if repeated.get(name) != None || filled.get(name) == None -> next
+        &group_of.add(name, groups.len()).drop("each slot opens one group")
+        &groups.push([JetRustEmitSlotUse]{JetRustEmitSlotUse{line: declared.get(name) ?? 0, access: JetRustEmitSlotAccess.Write}})
+    }
+    loop (index, line) in body {
+        bytes :: line.bytes()
+        loop prefix_index in 0..<2 {
+            prefix :: if prefix_index == 0 -> "__jet_l_" else -> "__jet_v_"
+            label :: if prefix_index == 0 -> "MIR local" else -> "MIR value"
+            width :: prefix.bytes().len()
+            loop at in jet_rust_emit_fold_occurrences(bytes, prefix.bytes()) {
+                end := at + width
+                loop end < bytes.len() && Int.from_u8(bytes[end]) >= 48 && Int.from_u8(bytes[end]) <= 57 -> end += 1
+                joined :: (at > 0 && jet_rust_emit_identifier_byte(bytes[at - 1])) || (end < bytes.len() && jet_rust_emit_identifier_byte(bytes[end]))
+                if end == at + width || joined -> next
+                name :: String.from_bytes(~(bytes[at..<end])) ?? ""
+                declared_at :: declared.get(name) ?? next
+                if repeated.get(name) != None || declared_at == index -> next
+                rest :: String.from_bytes(~(bytes[end..<bytes.len()])) ?? ""
+                expect :: ".expect(\"{label}\")"
+                access := JetRustEmitSlotAccess.Write
+                if in_closure[index] || jet_rust_emit_fold_inside_closure(bytes, at) {
+                    &rejected.add(name, true).drop("a rejection repeats")
+                    next
+                }
+                if at == indents[index] && jet_rust_emit_option_slot_write_payload(rest) != None {
+                    access = JetRustEmitSlotAccess.Write
+                } else if (rest.starts_with(".as_ref()") || rest.starts_with(".as_mut()")) && jet_rust_emit_bytes_at(rest.bytes(), expect.bytes(), 9) {
+                    access = JetRustEmitSlotAccess.Borrow
+                } else if rest.starts_with(".take(){expect}") {
+                    access = JetRustEmitSlotAccess.Take
+                } else {
+                    &rejected.add(name, true).drop("a rejection repeats")
+                    next
+                }
+                if group_of.get(name) == None {
+                    &group_of.add(name, groups.len()).drop("each slot opens one group")
+                    &groups.push([JetRustEmitSlotUse]{})
+                }
+                group :: group_of.get(name) ?? 0
+                &groups[group].push(JetRustEmitSlotUse{line: index, access: access})
+            }
+        }
+    }
+    plain := [String:String]{}
+    plain_names := [String]{}
+    loop name in names {
+        if repeated.get(name) != None || rejected.get(name) != None -> next
+        rows := [JetRustEmitSlotUse]{}
+        if group_of.get(name) == .Val(group) -> rows = groups[group]
+        writes := [Int]{}
+        takes := [Int]{}
+        loop row in rows {
+            if row.access == JetRustEmitSlotAccess.Write -> &writes.push(row.line)
+            if row.access == JetRustEmitSlotAccess.Take -> &takes.push(row.line)
+        }
+        initialized := true
+        loop row in rows {
+            if row.access == JetRustEmitSlotAccess.Write -> next
+            if !jet_rust_emit_slot_use_initialized(body, reach, body_end, loops, writes, takes, row.line) {
+                initialized = false
+                break
+            }
+        }
+        if initialized {
+            &plain.add(name, types.get(name) ?? "").drop("slot names are unique")
+            &plain_names.push(name)
+        }
+    }
+    if plain_names.len() == 0 -> return ~lines
+    rebuilt := [String]{}
+    loop (index, entry) in lines {
+        if index >= start -> break
+        &rebuilt.push(entry)
+    }
+    loop line in body {
+        bytes :: line.bytes()
+        indent :: jet_rust_emit_fold_indent(bytes)
+        pad :: String.from_bytes(~(bytes[0..<indent])) ?? ""
+        statement :: String.from_bytes(~(bytes[indent..<bytes.len()])) ?? ""
+        updated := line
+        declared_slot := false
+        if jet_rust_emit_option_slot_declaration(line) == .Val(slot) {
+            if plain.get(slot.name) != None {
+                updated = "{pad}let mut {slot.name}: {slot.ty};"
+                if slot.initial == .Val(payload) -> updated = "{pad}let mut {slot.name}: {slot.ty} = {payload};"
+                declared_slot = true
+            }
+        }
+        if !declared_slot {
+            loop name in plain_names {
+                if !statement.starts_with(name) -> next
+                statement_bytes :: statement.bytes()
+                payload :: jet_rust_emit_option_slot_write_payload(String.from_bytes(~(statement_bytes[name.bytes().len()..<statement_bytes.len()])) ?? "") ?? next
+                updated = "{pad}{name} = {payload};"
+                break
+            }
+        }
+        loop name in plain_names {
+            if !updated.contains(name) -> next
+            label :: if name.starts_with("__jet_l_") -> "MIR local" else -> "MIR value"
+            borrow :: "{name}.as_ref().expect(\"{label}\")"
+            borrow_mut :: "{name}.as_mut().expect(\"{label}\")"
+            updated = updated.replace("({borrow}).clone()", "{name}.clone()").replace("{borrow}.clone()", "{name}.clone()").replace("(*{borrow})", "({name})").replace("(*{borrow_mut})", "({name})")
+            updated = updated.replace(borrow, "(&{name})").replace(borrow_mut, "(&mut {name})").replace("{name}.take().expect(\"{label}\")", name)
+        }
+        &rebuilt.push(updated)
+    }
+    rebuilt
+}
+
 // Byte width of the UTF-8 character starting at `at`, or 0 past the end.
 fn jet_rust_emit_compact_char_width(text: [U8], at: Int) -> Int Never! {
     if at >= text.len() -> return 0
@@ -1447,7 +1804,8 @@ fn jet_rust_emit_compact_numbered(text: [U8], at: Int, prefix: [U8]) -> Int Neve
 // MIRRust compact_function_text: the final text pass over one emitted body
 // (`lines[start..]`). Every slot and label named from a 64-bit MIR id is
 // renamed in first-mention order to a short sequential name (`__jet_v_N` ->
-// `_vK`, `__jet_l_N` -> `_lK`, `__jet_pm_N` -> `_pK`, `'jet_block_N` -> `'bK`,
+// `_vK`, `__jet_l_N` -> `_lK`, `__jet_pm_N` -> `_pK`, the native Int shadows
+// `__jet_vi_N` -> `_nK` and `__jet_li_N` -> `_mK`, `'jet_block_N` -> `'bK`,
 // `'jet_loop_N` -> `'cK`), and leading indentation becomes one space per
 // four-space level, capped at eight. String, raw-string and comment text is
 // never touched, and a line that starts inside a string keeps its
@@ -1460,8 +1818,8 @@ fn jet_rust_emit_compact_function_text(lines: [String], start: Int) -> [String] 
         &text.extend(entry.bytes())
         &text.push(U8{10})
     }
-    prefixes :: [String]{"__jet_v_", "__jet_l_", "__jet_pm_", "'jet_block_", "'jet_loop_"}
-    shorts :: [String]{"_v", "_l", "_p", "'b", "'c"}
+    prefixes :: [String]{"__jet_v_", "__jet_l_", "__jet_pm_", "'jet_block_", "'jet_loop_", "__jet_vi_", "__jet_li_"}
+    shorts :: [String]{"_v", "_l", "_p", "'b", "'c", "_n", "_m"}
     value_prefix :: prefixes[0].bytes()
     local_prefix :: prefixes[1].bytes()
     payload_prefix :: prefixes[2].bytes()
@@ -1625,6 +1983,18 @@ fn jet_rust_emit_compact_function_text(lines: [String], start: Int) -> [String] 
                         if digits > 0 {
                             kind = 2
                             prefix_width = payload_prefix.len()
+                        } else {
+                            digits = jet_rust_emit_compact_numbered(text, index, native_value_prefix)
+                            if digits > 0 {
+                                kind = 5
+                                prefix_width = native_value_prefix.len()
+                            } else {
+                                digits = jet_rust_emit_compact_numbered(text, index, native_local_prefix)
+                                if digits > 0 {
+                                    kind = 6
+                                    prefix_width = native_local_prefix.len()
+                                }
+                            }
                         }
                     }
                 }
@@ -3241,9 +3611,27 @@ fn jet_rust_emit_function(ctx: &JetRustEmitContext, function: MIRFunction) -> [S
     loop local in function.locals -> &lines.push("    {jet_rust_emit_local_declaration(&ctx, local)}")
     values_start :: lines.len()
     loop value in function.values {
+        if return_slot == .Val(slot) {
+            if slot.tail_values.get(value.id.value) != None -> next
+        }
+        if destinations == .Val(planned) {
+            if planned.values.get(value.id.value) != None -> next
+        }
+        if ctx.native_ints.values.get(value.id.value) != None && ctx.native_ints.materialized.get(value.id.value) == None -> next
+        if ctx.move_facts.inline_values.get(value.id.value) != None -> next
         if ctx.ref_bindings.payloads.get(value.id.value) != None || ctx.ref_bindings.collections.get(value.id.value) != None -> next
         // MIRRust emit_slots: a borrowed binding names its place; it has no slot.
         if ctx.body_index.bindings.get(value.id.value) != None -> next
+        // MIRRust emit_slots (#4566 slices 5 and 6): a value
+        // jet_rust_emit_instruction never writes (a fused split, an inlined
+        // callback, a fused adapter, a views split loop's iterator) has no slot.
+        if jet_rust_emit_fused_split_join(ctx, function, value.id).len() == 2 || jet_rust_emit_inline_callback(ctx, function, value.id) != None || jet_rust_emit_fused_adapter_receiver(ctx, function, value.id) || jet_rust_emit_split_loop_collection(ctx, function, value.id) -> next
+        // MIRRust emit_slots (#4566 slice 6): a views split loop cursor
+        // borrows its stable source.
+        if jet_rust_emit_split_loop_cursor(ctx, function, value.id).len() == 2 {
+            &lines.push("    let mut {jet_rust_emit_value_slot(value.id)}: Option<{ctx.config.root_prefix}JetStringSplitCursor<'_>> = None;")
+            next
+        }
         // MIRRust emit_slots: an in-place loop cursor holds the walked list
         // and the next row.
         if ctx.ref_bindings.cursors.get(value.id.value) == .Val(place) {

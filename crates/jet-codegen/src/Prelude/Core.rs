@@ -2684,6 +2684,21 @@ fn jet_index_vec_set<T>(xs: &mut [T], i: i64, value: T, file: &str, line: u32) {
         .unwrap_or_else(|error| jet_arithmetic_stop(file, line, &error.message()));
     xs[index] = value;
 }
+/// #4566: `jet_index_vec_set` into Int storage whose every element is an
+/// inline word (MIRRust `inline_int_storage`): the displaced element owns
+/// no node, so it is overwritten without a release.
+#[inline(always)]
+fn jet_index_int_set_inline(
+    xs: &mut [jet_foundation::Numeric::JetInt],
+    i: i64,
+    value: jet_foundation::Numeric::JetInt,
+    file: &str,
+    line: u32,
+) {
+    let index = jet_fixed_list_index(xs.len(), i, |index| index)
+        .unwrap_or_else(|error| jet_arithmetic_stop(file, line, &error.message()));
+    std::mem::forget(std::mem::replace(&mut xs[index], value));
+}
 
 fn jet_unpack_vec<T: Clone>(xs: &[T], want: usize, i: usize, file: &str, line: u32) -> T {
     if xs.len() != want {

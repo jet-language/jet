@@ -1515,9 +1515,11 @@ fn run() {
 }
 ";
     let rust = compile("tir_eager_container_adapters", src);
+    // #4566 slice 5: a filter whose callback has an effect (it edits a Cell
+    // through a call) does not fuse with the map before it.
     assert!(
-        rust.contains("jet_list_map_filter(("),
-        "adjacent eager adapters did not use the fused Prelude kernel"
+        !rust.contains("jet_list_map_chain("),
+        "an effectful filter callback must not fuse with the map before it"
     );
     assert!(rust.contains("jet_iter_filter("));
     assert!(rust.contains("jet_iter_map("));
