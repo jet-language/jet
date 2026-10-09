@@ -2214,6 +2214,17 @@ the loader unit `load/load.jet` (the image type, `OS/Linux.jet`,
 `Image/Loader.jet` and `Tests/LoadImages.jet`), and the checker runs
 `jet run load/load.jet <name> libjet_runtime_c.so` in `<outdir>`.
 
+The native ownership rail additionally writes `record-int-ownership.o`,
+containing a `BigIntHolder` whose value is `4611686018427387905` (beyond the
+inline Int range). With `JET_RUNTIME_C_LIB`, the checker links that object
+against the real runtime and `Tests/check-record-int-ownership.c`. Linker
+wrappers delegate to the real allocator and Int retain/drop exports, checking
+two retains, three drops, unchanged getter bits, and zero live allocations
+after both record owners and the owned getter result have been dropped.
+Runtime domain initialization is warmed before the counted interval. This
+rail exercises stored-field ownership only: primitive Int SSA ownership is
+unchanged. Inline fields skip the runtime retain/drop call entirely.
+
 Real programs: `Compiler/JetBackend/Tests/run-goldens.mjs <outdir>` takes every
 Examples/features golden with an expected stdout, runs it with `jet run` and
 `JET_DUMP_MIR=<path>` (a debug hook in

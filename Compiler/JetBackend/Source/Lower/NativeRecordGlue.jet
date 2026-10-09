@@ -114,6 +114,7 @@ fn lower_native_record_get_value(p: MIRProgram, m: &LowerModule, f: &LowerFuncti
         return result
     }
     value :: lower_read_at(p, &f, base, offset, ty) ?? panic("a getter leaf has storage")
+    if repr == .Word && lower_is_exact_int(ty) -> return lower_glue_clone_int(&m, &f, value)
     if repr == .Handle(_, clone) {
         if clone == "" {
             lower_fail(&m, &f, "native record getter requires a cloneable stored handle")

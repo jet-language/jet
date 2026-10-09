@@ -290,12 +290,44 @@ fn lower_enum_glue_shape(p: MIRProgram, definition: MIRTypeDef, variant: MIRVari
     LowerGlueShape{selector: lower_discriminant(index), fields: rows}
 }
 
+// Stored Int fields own a reference. Plain Int SSA values retain their
+// existing ownership policy; these helpers are only for owning glue.
+fn lower_glue_clone_int(m: &LowerModule, f: &LowerFunction, value: LIRValueID) -> LIRValueID Never! {
+    result :: lower_word(&f)
+    inline :: lower_inline_test(&f, [LIRValueID]{value})
+    retain :: lower_new_block(&f)
+    done :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: inline, then_target: lower_target(done, [LIRValueID]{value}), else_target: lower_target(retain, [LIRValueID]{})})
+    lower_start(&f, retain, [LIRValueID]{})
+    duplicate :: lower_word(&f)
+    lower_call_runtime(&m, &f, "jet_rt_int_clone", [LIRValueID]{value}, Val(duplicate))
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{duplicate})})
+    lower_start(&f, done, [LIRValueID]{result})
+    result
+}
+
+fn lower_glue_drop_int(m: &LowerModule, f: &LowerFunction, value: LIRValueID) Never! {
+    inline :: lower_inline_test(&f, [LIRValueID]{value})
+    release :: lower_new_block(&f)
+    done :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: inline, then_target: lower_target(done, [LIRValueID]{}), else_target: lower_target(release, [LIRValueID]{})})
+    lower_start(&f, release, [LIRValueID]{})
+    lower_call_runtime(&m, &f, "jet_rt_int_drop", [LIRValueID]{value}, None)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, done, [LIRValueID]{})
+}
+
 // Drops the owned value of `ty` stored at base + offset. Null is an absent
 // split field, never a handle to pass to the runtime; an inline member's
 // glue drops its own members.
 fn lower_drop_stored(p: MIRProgram, m: &LowerModule, f: &LowerFunction, base: LIRValueID, offset: Int, ty: MIRType) Never! {
     repr :: lower_repr(p, ty)
     if repr == .Unsupported(reason) -> return lower_fail(&m, &f, "drop glue field of {reason} is not lowered at O0 yet")
+    if repr == .Word && lower_is_exact_int(ty) {
+        value :: lower_word(&f)
+        lower_emit(&f, LIRInst.Load{dst: value, base: base, offset: offset})
+        return lower_glue_drop_int(&m, &f, value)
+    }
     if repr == .Inline(_) {
         address :: lower_address(&f, base, offset)
         return lower_inline_drop(p, &m, &f, address, ty)
@@ -348,6 +380,13 @@ fn lower_glue_clone_fields(p: MIRProgram, m: &LowerModule, f: &LowerFunction, so
     loop field in fields {
         repr :: lower_repr(p, field.ty)
         if repr == .Unsupported(reason) -> return lower_fail(&m, &f, "clone glue field of {reason} is not lowered at O0 yet")
+        if repr == .Word && lower_is_exact_int(field.ty) {
+            value :: lower_word(&f)
+            lower_emit(&f, LIRInst.Load{dst: value, base: source, offset: field.offset})
+            duplicate :: lower_glue_clone_int(&m, &f, value)
+            lower_emit(&f, LIRInst.Store{base: target, offset: field.offset, value: duplicate})
+            next
+        }
         if repr == .Inline(_) {
             if lower_needs_drop(p, m, field.ty) {
                 from :: lower_address(&f, source, field.offset)
