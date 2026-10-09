@@ -61,7 +61,10 @@ fn sema_policy_materialize(program: &Program, declarations: [UserPolicyDecl], mo
             loop name in names {
                 declaration := UserPolicyDecl?{None}
                 loop candidate in declarations {
-                    if candidate.name == name { declaration = Val(candidate); break }
+                    if candidate.name == name {
+                        declaration = Val(candidate)
+                        break
+                    }
                 }
                 policy :: declaration ?? {
                     &diagnostics.push(sema_error("E0355", target.name_span, "unknown callable policy setting `{name}`", "a callable policy name must be a compiler-owned setting or a public policy declared in this package", "declare `policy {name}(...) {{ wrap(call) {{ … }} }}"))
