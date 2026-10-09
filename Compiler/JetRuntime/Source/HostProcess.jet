@@ -48,6 +48,10 @@ fn host_i32(value: I64) -> I64 {
 #Export(c) fn jet_std_process_exit(code: I64) {
     native :: host_i32(code)
     if (jet_scheduler_native_propagate() != I64{0}) -> return
+    if (jet_rt_stop_domain() == I64{1}) {
+        _ := jet_rt_root_publish_rendered(I64{0}, I64{0}, native)
+        return
+    }
     jet_rt_stdout_flush()
     _ := host_call(I64{231}, native, I64{0}, I64{0})
 }

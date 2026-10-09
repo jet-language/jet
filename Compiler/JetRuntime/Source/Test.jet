@@ -113,6 +113,10 @@ fn test_decimal_bytes(destination: I64, value: I64) -> I64 {
 }
 
 fn test_write_word(fd: I64, word: I64, length: I64) {
+    if (fd == I64{2}) {
+        trap_write_word(word, length)
+        return
+    }
     bytes := word
     remaining := length
     loop remaining > (I64{0}) {
@@ -130,6 +134,10 @@ fn test_write_word(fd: I64, word: I64, length: I64) {
 }
 
 fn test_write(fd: I64, address: I64, length: I64) {
+    if (fd == I64{2}) {
+        trap_write(address, length)
+        return
+    }
     at := I64{0}
     loop at < length {
         written :: trap_syscall(I64{1}, fd, address + at, length - at, I64{0}, I64{0}, I64{0})
@@ -157,8 +165,9 @@ fn test_number(value: I64) {
 // Their single defect message deliberately replaces Rust's per-field invariant
 // panic prose; valid unit outcomes retain byte-identical product reports.
 fn test_invalid() {
+    trap_defect_prepare()
     test_msg_invalid(I64{2})
-    trap_exit(I64{101})
+    trap_defect_exit(I64{101})
 }
 
 // Header parsing is bounded by the borrowed wire, not a sentinel. A record
@@ -246,6 +255,7 @@ fn test_parse_record(data: I64, end: I64, start: I64, record: I64) {
         return
     }
     if (trap_byte(data + at) != I64{45}) {
+        trap_root_prepare()
         test_msg_property_gap(I64{2})
         trap_exit(I64{70})
         return

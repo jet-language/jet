@@ -10,7 +10,7 @@ comptime_root := I64{0}
 // runtime-init: 3
 #Export(c) fn jet_rt_comptime_init() {
     if (comptime_root != I64{0}) -> return
-    comptime_root = jet_rt_alloc(I64{40}, I64{8})
+    comptime_root = alloc_required_valid(I64{40}, I64{8})
     thread_zero(comptime_root, I64{40})
 }
 
@@ -150,7 +150,13 @@ fn comptime_publish_locked(kind: I64, status: I64) {
     // Rust CAbi.rs:256-257 clones under the mutex, then channel_write may
     // block without excluding other budget charges or the next request.
     sync_mutex_unlock(comptime_root)
-    scratch :: jet_rt_alloc(I64{192}, I64{8})
+    comptime_stop_frame_write(status, owner, start, end)
+}
+
+// Borrow actual stop metadata; Root consumption uses precisely this channel
+// frame too, without depending on a separate comptime request's first stop.
+fn comptime_stop_frame_write(status: I64, owner: I64, start: I64, end: I64) -> U32 {
+    scratch :: alloc_required_valid(I64{192}, I64{8})
     sync_store(scratch, I64{4189021028785791611})
     at := I64{0}
     if (status == I64{2}) {
@@ -193,7 +199,7 @@ fn comptime_publish_locked(kind: I64, status: I64) {
         comptime_channel_write(fd, scratch, at)
         _ := trap_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     }
-    jet_rt_free(scratch, I64{192}, I64{8})
+    alloc_release_valid(scratch, I64{192}, I64{8})
     U32{status}
 }
 

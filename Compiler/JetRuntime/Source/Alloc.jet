@@ -75,7 +75,7 @@ fn alloc_map_try(bytes: I64) -> I64 {
 
 fn alloc_map(bytes: I64, failed_size: I64) -> I64 {
     address :: alloc_map_try(bytes)
-    if (address == I64{0}) { alloc_stop(false, failed_size) }
+    if (address == I64{0}) { alloc_out_of_memory(failed_size) }
     address
 }
 
@@ -386,10 +386,11 @@ fn alloc_try(size: I64, align: I64) -> I64 {
 #Export(c) fn jet_rt_alloc_try(size: I64, align: I64) -> I64 { alloc_try(size, align) }
 
 #Export(c) fn jet_rt_alloc(size: I64, align: I64) -> I64 {
-    if !alloc_layout_valid(size, align) -> alloc_stop(true, size)
-    pointer :: alloc_try_reserved(size, align)
-    if (pointer == I64{0}) { alloc_stop(false, if (size == I64{0}) -> I64{1} else -> size) }
-    pointer
+    if !alloc_layout_valid(size, align) {
+        rt_trap_invalid_box_layout()
+        return I64{0}
+    }
+    alloc_required_valid(size, align)
 }
 
 #Export(c) fn jet_rt_free(pointer: I64, size: I64, align: I64) {
@@ -397,7 +398,24 @@ fn alloc_try(size: I64, align: I64) -> I64 {
     if (pointer == I64{0}) {
         return
     }
-    if !alloc_layout_valid(size, align) -> alloc_stop(true, size)
+    if !alloc_layout_valid(size, align) {
+        rt_trap_invalid_box_layout()
+        return
+    }
+    alloc_release(alloc_untrack(pointer))
+    alloc_free_validated(pointer, size, align)
+}
+
+// Private callers prove the layout from literal sizes and exact live-owner
+// layouts. This is the same heap/policy/tracker; only redundant Layout
+// validation is absent. Allocation failure remains terminal SIGABRT.
+fn alloc_required_valid(size: I64, align: I64) -> I64 {
+    pointer :: alloc_try_reserved(size, align)
+    if (pointer == I64{0}) { alloc_out_of_memory(if (size == I64{0}) -> I64{1} else -> size) }
+    pointer
+}
+fn alloc_release_valid(pointer: I64, size: I64, align: I64) {
+    if (pointer == I64{0}) -> return
     alloc_release(alloc_untrack(pointer))
     alloc_free_validated(pointer, size, align)
 }
@@ -468,8 +486,7 @@ fn alloc_write_size(size: I64) {
     }
 }
 
-fn alloc_stop(invalid_layout: Bool, size: I64) {
-    if invalid_layout -> rt_trap_invalid_box_layout()
+fn alloc_out_of_memory(size: I64) {
     // std::alloc::handle_alloc_error: \"memory allocation of N bytes failed\\n\"
     // followed by SIGABRT, not a Jet program-stop exit status.
     alloc_write_word(I64{6998727353336423789}, I64{8})

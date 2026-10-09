@@ -25,6 +25,7 @@ fn parallel_limit(limit: I64, cap: I64) -> I64 {
         remaining :: length - start
         end :: start + (if remaining < (I64{64}) -> remaining else -> I64{64})
         control :: scheduler_control_new()
+        sync_store(control + I64{104}, SCHEDULER_SCOPE_TASK)
         scheduler_control_enter(control, save)
         body :: scheduler_body_enter()
         #Unsafe("checked System V (env,start,end)->Unit callback; env remains borrowed and each range has exclusive output slots") {
@@ -52,10 +53,16 @@ fn parallel_raise(record: I64) {
         return
     }
     if (scheduler_control_current() != I64{0}) {
-        body :: scheduler_body_enter()
-        _ := scheduler_native_publish(record)
-        scheduler_body_leave(body)
-        return
+        if (sync_load(record) == I64{5}) {
+            if (jet_rt_stop_domain() != I64{0}) {
+                _ := scheduler_panic_check()
+                _ := scheduler_panic_publish_record(record)
+                return
+            }
+        } else {
+            _ := scheduler_native_publish(record)
+            return
+        }
     }
     // The process edge has no parent control. Replay the captured diagnostic,
     // not a replacement panic; the owned stop is released before process exit.
@@ -82,11 +89,13 @@ fn parallel_raise(record: I64) {
     }
     chunks :: length / I64{64} + (if (length % I64{64} == I64{0}) -> I64{0} else -> I64{1})
     cap :: scheduler_available_parallelism(I64{1})
+    if (jet_rt_session_propagate() != I64{0}) -> return
     limited :: parallel_limit(limit, cap)
     count :: if limited < chunks -> limited else -> chunks
     // Each worker owns its descriptor and its control save slot through join.
     bytes :: count * I64{112}
     workers :: jet_rt_alloc(bytes, I64{8})
+    if (workers == I64{0} && jet_rt_session_propagate() != I64{0}) -> return
     thread_zero(workers, bytes)
     at := I64{0}
     started := I64{0}
@@ -134,6 +143,10 @@ fn parallel_raise(record: I64) {
         at += I64{1}
     }
     jet_rt_free(workers, bytes, I64{8})
+    if (jet_rt_session_propagate() != I64{0}) {
+        scheduler_stop_drop(first)
+        return
+    }
     if spawn_failed {
         scheduler_stop_drop(first)
         scheduler_fatal(scheduler_msg_start_failed())

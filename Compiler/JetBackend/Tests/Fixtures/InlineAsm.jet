@@ -3,6 +3,10 @@
 // expect-stdout inline-asm-memory: "ok\n682863\n111\n"
 // expect-stdout inline-asm-call: "42\n"
 // expect-stdout inline-asm-call-two: "42\n"
+// expect-stdout inline-asm-call-unit: "42\n73\n"
+// expect-stdout inline-asm-call-one-unit: "4\n73\n"
+// expect-stdout inline-asm-call-two-unit: "42\n73\n"
+// expect-stdout inline-asm-call-three-unit: "421\n73\n"
 // expect-stdout inline-asm-fixed: "ok\nok\n682863\n42\n42\n111\n0\n"
 // expect-stdout inline-asm-int-input: ""
 // expect-exit inline-asm-int-input: 70
@@ -176,6 +180,89 @@ fn fx_inline_asm_call(two: Bool) -> LIRModule Never! {
     p
 }
 
+fn fx_inline_asm_print_word(builder: &LIRFunctionBuilder, value: LIRValueID, print_signature: LIRSignatureID, line_signature: LIRSignatureID) Never! {
+    text :: lir_builder_value(&builder, lir_layout_word(), LIRDrop.Runtime{symbol: "jet_rt_string_drop"}, None)
+    // The runtime's flush parameter is U8: the canonical one-byte Integer layout.
+    flush :: lir_builder_bool(&builder)
+    lir_builder_push(&builder, LIRInst.Const{dst: flush, value: 0})
+    lir_builder_push(&builder, LIRInst.Call{dst: Val(text), signature: print_signature, callee: LIRCallee.Runtime{symbol: "jet_rt_int_to_string"}, args: [LIRValueID]{value}})
+    lir_builder_push(&builder, LIRInst.Call{dst: None, signature: line_signature, callee: LIRCallee.Runtime{symbol: "jet_term_write_stdout_line"}, args: [LIRValueID]{text, flush}})
+    lir_builder_push(&builder, LIRInst.Drop{value: text})
+}
+
+// The exact audited OS Unit leaf calls a real native LIR callback. Its own
+// signature and the callback both have NO result; no incidental RAX is read.
+// Every nonzero arity encodes argument order, while the caller's marker
+// remains live across the call and the callback's actual runtime calls.
+fn fx_inline_asm_call_unit(arity: Int) -> LIRModule Never! {
+    name :: if arity == {
+        0 -> "os_call_address_unit"
+        1 -> "os_call_address_one_unit"
+        2 -> "os_call_address_two_unit"
+        3 -> "os_call_address_three_unit"
+        else -> panic("Unit assembly witness needs arity zero through three")
+    }
+    params := [String]{"address"}
+    if arity >= 1 -> &params.push("first")
+    if arity >= 2 -> &params.push("second")
+    if arity >= 3 -> &params.push("third")
+    lowered :: lir_lower_callables(fx_asm_program([MIRFunction]{fx_asm_leaf(name, params, false)}), [MIRFunctionID]{mir_function_id(name)})
+    if lowered.issues.len() > 0 -> panic("Unit assembly callable refused: {lowered.issues}")
+    p := lowered.lir
+    signature :: lir_signature(p, p.functions[0].signature) ?? panic("Unit assembly callable has no checked signature")
+    if signature.result != None -> panic("Unit assembly callable exposes an incidental result")
+    print_signature :: LIRSignatureID{value: p.signatures.len()}
+    &p.signatures.push(LIRSignature{id: print_signature, convention: LIRCallConv.SystemV, params: [LIRLayout]{lir_layout_word()}, result: Val(lir_layout_word())})
+    line_signature :: LIRSignatureID{value: p.signatures.len()}
+    &p.signatures.push(LIRSignature{id: line_signature, convention: LIRCallConv.SystemV, params: [LIRLayout]{lir_layout_word(), lir_layout_bool()}, result: None})
+    callback_id :: LIRFunctionID{value: p.functions.len()}
+    callback_signature :: LIRSignatureID{value: p.signatures.len()}
+    callback_layouts :: loop _ in 0..<arity -> lir_layout_word()
+    &p.signatures.push(LIRSignature{id: callback_signature, convention: LIRCallConv.SystemV, params: callback_layouts, result: None})
+    callback := lir_builder(callback_id, "asm-unit-callback", callback_signature)
+    callback_args :: loop _ in 0..<arity -> lir_builder_word(&callback)
+    output := if arity == 0 -> lir_builder_word(&callback) else -> callback_args[0]
+    if arity == 0 -> lir_builder_push(&callback, LIRInst.Const{dst: output, value: 42})
+    if arity > 1 {
+        ten :: lir_builder_word(&callback)
+        lir_builder_push(&callback, LIRInst.Const{dst: ten, value: 10})
+        loop index in 1..<arity {
+            prefix :: lir_builder_word(&callback)
+            digit :: lir_builder_word(&callback)
+            lir_builder_push(&callback, LIRInst.Binary{dst: prefix, op: LIRBinaryOp.Mul, left: output, right: ten})
+            lir_builder_push(&callback, LIRInst.Binary{dst: digit, op: LIRBinaryOp.Add, left: prefix, right: callback_args[index]})
+            output = digit
+        }
+    }
+    fx_inline_asm_print_word(&callback, output, print_signature, line_signature)
+    lir_builder_seal(&callback, LIRBlockID{value: 0}, callback_args, LIRTerminator.Return{value: None})
+    &p.functions.push(lir_builder_finish(callback))
+    entry_signature :: LIRSignatureID{value: p.signatures.len()}
+    &p.signatures.push(LIRSignature{id: entry_signature, convention: LIRCallConv.SystemV, params: [LIRLayout]{}, result: None})
+    entry := lir_builder(LIRFunctionID{value: p.functions.len()}, "run", entry_signature)
+    address :: lir_builder_value(&entry, lir_layout_pointer(), LIRDrop.Trivial, None)
+    slot :: lir_builder_value(&entry, lir_layout_pointer(), LIRDrop.Trivial, None)
+    word :: lir_builder_word(&entry)
+    lir_builder_push(&entry, LIRInst.FunctionAddress{dst: address, function: callback_id})
+    lir_builder_push(&entry, LIRInst.StackSlot{dst: slot, size: 8, align: 8})
+    lir_builder_push(&entry, LIRInst.Store{base: slot, offset: 0, value: address})
+    lir_builder_push(&entry, LIRInst.Load{dst: word, base: slot, offset: 0})
+    marker :: lir_builder_word(&entry)
+    lir_builder_push(&entry, LIRInst.Const{dst: marker, value: 73})
+    call_args := [LIRValueID]{word}
+    loop index in 0..<arity {
+        argument :: lir_builder_word(&entry)
+        value :: if index == 0 -> 4 else -> if index == 1 -> 2 else -> 1
+        lir_builder_push(&entry, LIRInst.Const{dst: argument, value: value})
+        &call_args.push(argument)
+    }
+    lir_builder_push(&entry, LIRInst.Call{dst: None, signature: p.functions[0].signature, callee: LIRCallee.Function{id: p.functions[0].id}, args: call_args})
+    fx_inline_asm_print_word(&entry, marker, print_signature, line_signature)
+    lir_builder_seal(&entry, LIRBlockID{value: 0}, [LIRValueID]{}, LIRTerminator.Return{value: None})
+    &p.functions.push(lir_builder_finish(entry))
+    p
+}
+
 fn fx_inline_asm_refusals() -> Bool Never! {
     templates :: [String]{"frobnicate rax ; -> return", "mov rdi, 1\nmov rax, {{value}} ; -> return", "ret", "push rax", "pop rax", "push rax\ncall r11\npop rax", "mov rbx, rax", "mov rax, xmm0 ; -> return", "mov rax, 9223372036854775808 ; -> return", "mov rax, rsp", "mov rax, {{missing}} ; -> return", "mov rax, 1 ; -> return\nmov rax, 2 ; -> return"}
     forbidden :: [String]{
@@ -202,9 +289,56 @@ fn fx_inline_asm_refusals() -> Bool Never! {
     misplaced :: x64_assemble_template("test rax, rax", [String]{}, false)
     if misplaced.error != Val("inline asm: clone child rail requires the audited clone prologue") || misplaced.code.len() != 0 -> return false
     gs :: x64_assemble_template("mov rax, qword ptr gs:[0] ; -> return", [String]{}, true)
-    if gs.error != None || gs.code != [U8]{0x65, 0x48, 0x8b, 0x04, 0x25, 0, 0, 0, 0} -> return false
+    if gs.error != None || (gs.code != [U8]{0x65, 0x48, 0x8b, 0x04, 0x25, 0, 0, 0, 0}) -> return false
     xadd :: x64_assemble_template("lock xadd qword ptr [rcx], rax\nmov rax, rax ; -> return", [String]{}, true)
-    if xadd.error != None || xadd.code.slice(0, 5) != [U8]{0xf0, 0x48, 0x0f, 0xc1, 0x01} -> return false
+    if xadd.error != None || (xadd.code.slice(0, 5) != [U8]{0xf0, 0x48, 0x0f, 0xc1, 0x01}) -> return false
+    // Generic OR uses all admitted 64-bit GP registers, including every REX
+    // source/destination combination; the oracle is the architectural encoding.
+    register_names :: [String]{"rax", "rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11"}
+    register_ids :: [Int]{0, 1, 2, 6, 7, 8, 9, 10, 11}
+    loop (d, destination) in register_ids {
+        loop (r, source_reg) in register_ids {
+            template :: "or {register_names[d]}, {register_names[r]} ; -> return"
+            result :: x64_assemble_template(template, [String]{}, true)
+            rex :: 72 + (if source_reg >= 8 -> 4 else -> 0) + (if destination >= 8 -> 1 else -> 0)
+            modrm :: 192 + ((source_reg & 7) << 3) + (destination & 7)
+            expected_or :: [U8]{U8.from_int(rex) ?? return false, 0x09, U8.from_int(modrm) ?? return false}
+            if result.error != None || result.result != destination || result.code != expected_or -> return false
+        }
+    }
+    or_refusals :: [String]{
+        "or rax", "or rax, rdx, rcx", "or rax, 1", "or rax, qword ptr [rdx]",
+        "or qword ptr [rax], rdx", "or eax, edx", "or al, dl", "or xmm0, rax",
+        "or rsp, rax", "or rbx, rax", "or rax, {{missing}}",
+        "mov rdi, 1\nor {{value}}, rax", "mov rdi, 1\nor rax, {{value}}",
+        "or rax, rdx ; -> return\nmov rax, rax ; -> return",
+    }
+    loop template in or_refusals {
+        result :: x64_assemble_template(template, [String]{"value"}, template.contains("return"))
+        if result.error == None || result.code.len() != 0 -> return false
+    }
+    // XMM declarations describe the real System V clobber set; they do not
+    // authorize XMM operands or change any integer register spelling.
+    xmm_clobbers :: [String]{
+        "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6", "xmm7",
+        "xmm8", "xmm9", "xmm10", "xmm11", "xmm12", "xmm13", "xmm14", "xmm15",
+    }
+    baseline :: x64_assemble_template("mov rax, rax ; -> return", [String]{}, true)
+    if baseline.error != None -> return false
+    loop register in xmm_clobbers {
+        declared :: x64_assemble_template("; clobbers {register}\nmov rax, rax ; -> return", [String]{}, true)
+        if declared.error != None || declared.code != baseline.code || declared.result != baseline.result -> return false
+    }
+    invalid_clobbers :: [String]{"xmm", "xmm-1", "xmm16", "xmm31", "xmm00", "xmm01", "xmm1x", "XMM0", "unknown"}
+    loop register in invalid_clobbers {
+        refused :: x64_assemble_template("; clobbers {register}\nmov rax, rax ; -> return", [String]{}, true)
+        if refused.error != Val("inline asm: unsupported clobber register (line 1: ; clobbers {register})") || refused.code.len() != 0 -> return false
+    }
+    xmm_operands :: [String]{"mov xmm0, rax", "mov rax, xmm0", "or xmm0, rax", "or rax, xmm0"}
+    loop instruction in xmm_operands {
+        refused :: x64_assemble_template("{instruction} ; -> return", [String]{}, true)
+        if refused.error == None || refused.code.len() != 0 -> return false
+    }
     loop template in templates {
         result :: x64_assemble_template(template, [String]{"value"}, template.contains("return"))
         if result.error == .None || result.code.len() != 0 -> return false
