@@ -46,6 +46,14 @@ that its semantic check passed. In Codegen poll and comptime-budget emission,
 `span := builder.current_span` snapshots the source span before write-access to
 `&builder`; `span ::` would retain a builder view across those mutations.
 
+Runtime process-edge fixtures decode the committed Trap/Scheduler report words
+as signed little-endian I64 values through one
+[`report-literals` reader](../../Compiler/JetRuntime/Tests/report-literals.mjs).
+The scheduler fixture writes its complete root-panic golden beside its proof
+receipts, checks exact stderr, exit 70, no signal and no stdout, and does not
+depend on a Rust-tier reference producer. Task-local panics still require
+process survival and empty stderr.
+
 The compiler frontend receipt must retain the full foreign Cargo diagnostics,
 including cached bridge fingerprint output when an inline-FFI error hides
 Cargo's stderr. `os_syscall_stack4_i64` saves and restores the six argument

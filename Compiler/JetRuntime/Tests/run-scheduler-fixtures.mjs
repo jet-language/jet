@@ -8,6 +8,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { candidateJetc0, frontReceipt } from '../../JetBackend/Tests/jet-front.mjs';
 import { parseRuntimeExports, runtimeLifecycleList } from '../../../Tools/agent/runtime-route-abi.mjs';
+import { trapLiteral, schedulerLiteral } from './report-literals.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const [output, mode] = process.argv.slice(2);
 if (!output || !['assemble', 'lower', 'audit', 'link', 'run'].includes(mode)) throw Error('usage: run-scheduler-fixtures.mjs OUT assemble|lower|audit|link|run');
@@ -66,11 +67,14 @@ if (mode === 'assemble') {
     if (result.error || result.status !== 0 || result.stdout !== '' || result.stderr !== '') failures.push(`threads=${threads}: ${result.error?.message ?? result.status}, stderr=${JSON.stringify(result.stderr)}`);
   }
   const panic = spawnSync(join(out, 'scheduler-fixture'), ['root-panic'], { encoding: 'utf8', timeout: 30000 });
-  writeFileSync(join(out, 'root-panic.receipt.json'), JSON.stringify({ status: panic.status, stdout: panic.stdout, stderr: panic.stderr }, null, 2) + '\n');
-  // Compare the root process edge to the canonical L2 stderr golden supplied
-  // by the same proof; the task-panic runs above require absolutely no stderr.
-  const golden = process.env.JET_SCHEDULER_ROOT_PANIC_GOLDEN;
-  if (!golden || !existsSync(golden)) failures.push('JET_SCHEDULER_ROOT_PANIC_GOLDEN must name the freshly rendered Rust-tier reference');
-  else if (panic.error || panic.status !== 70 || panic.stdout !== '' || panic.stderr !== readFileSync(golden, 'utf8')) failures.push('root panic differs from the Rust-tier reference');
+  writeFileSync(join(out, 'root-panic.receipt.json'), JSON.stringify({ status: panic.status, signal: panic.signal,
+    error: panic.error?.message ?? null, stdout: panic.stdout, stderr: panic.stderr }, null, 2) + '\n');
+  // The committed report literals produce the complete golden without a
+  // Rust-tier dependency; task-local panics above must still emit no stderr.
+  const golden = Buffer.concat([trapLiteral('trap_msg_header_panic'),
+    schedulerLiteral('scheduler_msg_cancelled'), trapLiteral('trap_msg_prelude_end'), trapLiteral('trap_footer_e3001')]);
+  writeFileSync(join(out, 'root-panic.golden.stderr'), golden);
+  if (panic.error || panic.signal !== null || panic.status !== 70 || panic.stdout !== '' ||
+      !Buffer.from(panic.stderr ?? '').equals(golden)) failures.push('root panic differs from the canonical process-edge golden');
   if (failures.length) throw Error(failures.join('\n'));
 }

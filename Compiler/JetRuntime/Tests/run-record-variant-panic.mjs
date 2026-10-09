@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 // Execute real C clients linked to the Jet object; the direct jet_panic call
 // is the process-mode golden oracle, not a replacement runtime provider.
-import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join, resolve } from 'node:path';
+import { trapLiteral as literal } from './report-literals.mjs';
 const [output, tree, event, task] = process.argv.slice(2);
 if (!output || !tree || !event || !task || process.argv.length !== 6) {
     throw Error('usage: run-record-variant-panic.mjs OUT DATA_TREE_WITNESS DATA_EVENT_WITNESS TASK_VARIANT_PANIC_WITNESS');
@@ -53,17 +53,6 @@ for (const mode of ['root-panic', 'root-variant']) {
 if (!rootResults[0].equals(rootResults[1])) throw Error('task witness root wrong-variant stderr differs from jet_panic');
 // Frozen generated report bytes are the pre-change root golden, not another
 // provider. This checks the full header/location/footer, not a substring.
-const literals = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../Source/TrapMessages.jet'), 'utf8');
-function literal(name) {
-    const body = literals.match(new RegExp(`^fn ${name}\\(\\) \\{\\n([\\s\\S]*?)^\\}`, 'm'))?.[1];
-    if (!body) throw Error(`missing frozen trap literal ${name}`);
-    const bytes = [];
-    for (const row of body.matchAll(/trap_write_word\(I64\{(\d+)\}, I64\{(\d+)\}\)/g)) {
-        const word = BigInt(row[1]);
-        for (let i = 0; i < Number(row[2]); ++i) bytes.push(Number((word >> BigInt(i * 8)) & 255n));
-    }
-    return Buffer.from(bytes);
-}
 const header = literal('trap_msg_header_numeric'), footer = literal('trap_footer_e3010');
 const prelude = literal('trap_msg_prelude_end');
 function golden(message) { return Buffer.concat([header, Buffer.from(message), prelude, footer]); }
