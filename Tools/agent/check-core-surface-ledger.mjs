@@ -1867,7 +1867,7 @@ function validateDispatcherIdentity(module, member, expression, sourceLine) {
   return actual;
 }
 
-function parseCoreSource(source, readSource = read) {
+function parseCoreSource(source, root = ROOT) {
   const modules = [];
   const sourceModules = [];
   const bootstraps = [];
@@ -2002,7 +2002,7 @@ function parseCoreSource(source, readSource = read) {
         ? []
         : coreList(sourceModule[6], "Core.jet line " + sourceLine);
       // Type-only Core sources may own nominals and static methods without free functions.
-      if (!existsSync(join(ROOT, path))) {
+      if (!existsSync(join(root, path))) {
         throw new Error("Core source module path does not exist at line " + sourceLine + ": " + path);
       }
       seenSourceModules.add(module);

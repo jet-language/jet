@@ -11,7 +11,7 @@ import { CORE, HEADER, RATCHET, REGISTRY, dispatchHash, parseRegistry, physicalL
 const tool = fileURLToPath(new URL("./rust-exit.mjs", import.meta.url));
 const bootstraps = "bootstrap Syntax depends_on []\nbootstrap Effects depends_on [Syntax]\nbootstrap Core depends_on [Effects]\nbootstrap Derives depends_on [Core]\n";
 const dispatch = 'dispatcher_row plain core.demo raw | CoreCallRecord::new("core.demo", "raw", "jet_raw", false, &[], )';
-const core = bootstraps + "module core.demo members {raw} types {} depends_on []\n" + dispatch + "\n";
+const core = bootstraps + "module core.demo exports {raw} types {} depends_on []\n" + dispatch + "\n";
 const row = parseCoreSource(core).dispatcherRows[0];
 const entry = (r) => [rowIdentity(r), "jet_raw", "crates/host.rs:1", "Replace with Jet syscall; remove Rust provider", "test", "leaf", dispatchHash(r)].join("\t");
 

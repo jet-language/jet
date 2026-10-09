@@ -112,8 +112,7 @@ export function main(args = process.argv.slice(2)) {
   // Conservative coverage: a dispatcher with a Jet source wrapper may still
   // reach Rust, so ownership/census credit never exempts it. Unmapped generated
   // and implicit receiver bodies are also registered, not silently dropped.
-  const rows = existsSync(join(root, CORE)) ? parseCoreSource(readFileSync(join(root, CORE), "utf8"),
-    (file) => readFileSync(join(root, file), "utf8")).dispatcherRows : [];
+  const rows = existsSync(join(root, CORE)) ? parseCoreSource(readFileSync(join(root, CORE), "utf8"), root).dispatcherRows : [];
   const table = JSON.parse(readFileSync(join(root, RATCHET), "utf8"));
   const counts = rustCounts(root);
   const errors = [...registryErrors(rows, entries), ...ratchetErrors(counts, table.ceilings)];
