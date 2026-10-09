@@ -2625,6 +2625,16 @@ fallback. Passwords use move-only `Secret` values and are zeroized on failure
 and drop (D-EMAIL1, D-EMAIL-SMTP-SURFACE1, D-EMAIL-SMTP-CONFIG1,
 D-EMAIL-DKIM-CONFIG1).
 
+Core source boundaries preserve their ownership and failure contracts:
+email builders borrow caller values and move explicit owned copies into the
+private carriers; HTTP response construction moves each selected `Body` and
+`Headers` owner once, without flattening streaming bodies. The module loader
+catches provider refusal text at each loading stage and maps it to `ModError`;
+its lexical context still owns cleanup on every early return. Cryptographic
+envelopes reuse the private fixed-limb primitives without exposing new expert
+exports, and data value serialization sorts owned object entries without a
+closure that consumes the object it must subsequently render.
+
 `Query<T>` is the typed carrier for ordinary list results, checked readers, and
 checked SQL. `data.query(rows)` and the SQL form produce the same carrier;
 `collect` materializes an ordinary `[T]`. Query operations retain typed
