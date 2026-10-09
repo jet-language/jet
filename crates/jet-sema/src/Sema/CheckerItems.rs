@@ -2216,6 +2216,15 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn canonical_nominal_name(&self, owner: usize, leaf: &str) -> String {
+        // The original Prelude declarations keep their compiler-owned
+        // spelling in checked types (`Err`, as every default-error rule
+        // reads it); lowering maps that spelling to the owner identity
+        // through the module's checked nominal facts.
+        if self.modules.and_then(|modules| modules.get(self.module_idx))
+            .and_then(|state| state.compiler_builtin_error_owner) == Some(owner)
+        {
+            return leaf.to_string();
+        }
         let identity = self
             .name_ledger
             .nominal_identity(owner, leaf)
