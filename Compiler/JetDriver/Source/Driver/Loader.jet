@@ -2058,7 +2058,7 @@ fn jet_driver_param_default_regions(key: String, params: [Param], last_end: Int,
 
 fn jet_driver_default_key(template: Bool, name: String) -> String Never! {
     if template -> return ""
-    ~name
+    name.copy()
 }
 
 fn jet_driver_func_default_regions(function: Func, template: Bool, module_index: Int, regions: &[JetDriverDefaultRegion]) Never! {
@@ -3240,7 +3240,7 @@ fn jet_driver_load_graph(request: JetDriverCompileRequest, mode: JetDriverLoadMo
     package_policy := [PolicyDeclaration]{}
     loop package in catalog.packages {
         if package.identity == catalog.entry_package_identity {
-            package_policy = ~package.policy_declarations
+            package_policy = package.policy_declarations.copy()
             break
         }
     }
