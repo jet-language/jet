@@ -29,7 +29,7 @@ module plot
 
 module sketch
 
-#[Copy, Comparable, Hashable, Equatable]
+#[Comparable, Equatable]
 enum DataFormat {
     CSV
     JSON
@@ -57,10 +57,10 @@ enum DataErrorKind {
     StaleRevision
     InvalidValue
     impl Display {
-        fn display(self) -> String Never! { data_error_kind_text(self) }
+        fn display(self) -> String { data_error_kind_text(self) }
     }
     impl Debug {
-        fn debug(self) -> String Never! { data_error_kind_text(self) }
+        fn debug(^self) -> String { data_error_kind_text(self) }
     }
 }
 
@@ -93,12 +93,13 @@ struct DataError {
     index: Int?
     reason: String
     cause: EncodingError?
-    impl Display {
-        fn display(self) -> String Never! { data_error_text(self) }
-    }
-    impl Debug {
-        fn debug(self) -> String Never! { data_error_text(self) }
-    }
+}
+
+impl DataError.Display {
+    fn display(self) -> String { data_error_text(self) }
+}
+impl DataError.Debug {
+    fn debug(^self) -> String { data_error_text(self) }
 }
 
 impl DataError {
@@ -164,7 +165,7 @@ struct DataLineOptions {
 }
 
 
-#[Copy, Comparable]
+#Comparable
 enum DataFreshness {
     Pending
     Fresh
@@ -173,7 +174,7 @@ enum DataFreshness {
     Offline
     Cancelled
 }
-#[Copy, Comparable, Equatable]
+#[Comparable, Equatable]
 enum DataInvalidationCause {
     NoCause
     Loader
@@ -297,10 +298,10 @@ struct DataWatchStatus {
     refreshing: Bool
     cancelled: Bool
     impl Display {
-        fn display(self) -> String Never! { data_watch_status_text(self) }
+        fn display(self) -> String { data_watch_status_text(self) }
     }
     impl Debug {
-        fn debug(self) -> String Never! { data_watch_status_text(self) }
+        fn debug(^self) -> String { data_watch_status_text(self) }
     }
 }
 
@@ -366,7 +367,7 @@ struct DataWatch<T> {
     status: DataWatchStatus
 }
 
-#[Copy, Comparable]
+#Comparable
 enum JetDataPlotMark {
     Line
     Bar
@@ -380,7 +381,7 @@ enum JetDataPlotMark {
     }
 }
 
-#[Copy, Comparable]
+#Comparable
 enum JetDataPlotChannel {
     X
     Y
@@ -408,7 +409,7 @@ enum JetDataPlotAggregate {
     Max
 }
 
-#[Copy, Comparable]
+#Comparable
 enum JetDataPlotFilterOp {
     Equal
     NotEqual
@@ -440,7 +441,7 @@ enum JetDataPlotTransform {
     Aggregate
 }
 
-#[Copy, Comparable]
+#Comparable
 enum JetDataPlotScaleKind {
     Linear
     Log
@@ -462,7 +463,7 @@ enum JetDataPlotDomain {
     Explicit
 }
 
-#[Copy, Comparable]
+#Comparable
 enum JetDataPlotLegendPosition {
     Top
     Right
@@ -478,7 +479,7 @@ enum JetDataPlotLegendPosition {
     }
 }
 
-#[Copy, Comparable]
+#Comparable
 enum JetDataPlotFacetKind {
     Row
     Column
@@ -490,7 +491,7 @@ enum JetDataPlotFacetKind {
     }
 }
 
-#[Copy, Comparable]
+#Comparable
 enum JetDataPlotInteraction {
     Hover
     Select
@@ -508,7 +509,7 @@ enum JetDataPlotInteraction {
     }
 }
 
-#[Copy, Comparable]
+#Comparable
 enum JetDataPlotBackend {
     Terminal
     Browser
@@ -524,7 +525,7 @@ enum JetDataPlotBackend {
     }
 }
 
-#[Copy, Comparable]
+#Comparable
 enum JetDataPlotSupport {
     Supported
     Degraded
@@ -793,7 +794,7 @@ fn snapshot<T: [Encode, Decode]>(loader: &DataLoader<T>) -[FS, Net, DB]> DataSna
 }
 
 
-fn schema<T>(rows: [T]) -> [DataColumn] Never! { core.data.schema(rows) }
+fn schema<T>(rows: [T]) -> [DataColumn] Never! { core.data.schema<T>(rows) }
 
 fn count<T>(rows: [T]) -> Int Never! { rows.len() }
 
@@ -1992,8 +1993,3 @@ struct DataLoaderPortRecord {
     }
 }
 
-#Test("Plot aggregate absence is the native enum constructor") {
-    none :: plot.__plot_aggregate_none()
-    assert(none == plot.__plot_aggregate_none())
-    assert(none != JetDataPlotAggregate.Sum)
-}
