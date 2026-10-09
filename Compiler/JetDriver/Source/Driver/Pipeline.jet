@@ -99,6 +99,7 @@ use jet_foundation.[
     jet_target_machine_for_facts,
     jet_target_package_version_from_compiler_identity,
     mir_c_export_signature,
+    mir_component_export_signature,
     mir_module_id,
     mir_empty_optimization_facts,
     mir_program_digest,
@@ -177,11 +178,23 @@ use jet_sema.[
     sema_registration_callable_declaration,
     sema_marker_is_guest_export,
     sema_source_location_at,
+    SemaExportBoundary,
+    SemaPluginFrozenSnapshotInput,
+    sema_export_unsupported_diagnostic,
+    sema_sandbox_export_functions,
+    sema_sandbox_freeze_diagnostics,
+    sema_sandbox_interface_snapshot,
+    sema_sandbox_parse_snapshot,
+    sema_sandbox_snapshot_package,
+    sema_sandbox_snapshot_text,
 ]
 use jet_repl.repl_session_new
 use jet_eval.jet_eval_runtime_config
 use jet_codegen.[
     JetCodegenComptimeSession,
+    JetPluginEmitResult,
+    JetWebTimezoneAsset,
+    jet_rust_emit_plugin,
     JetCodegenForeignArtifacts,
     JetCodegenJobTestArtifacts,
     JetCodegenFunctions,
@@ -1252,7 +1265,7 @@ fn jet_driver_selected_target_machine(
         return None
     }
     web_target := if request.target == {
-        .Native -> false
+        .Native | .Sandbox(_, _, _) -> false
         .Web(_, _, _) -> true
     }
     if web_target && request.eval_config.runtime_execution {
@@ -1308,7 +1321,7 @@ fn jet_driver_package_facts(
         return None
     }
     web_target := if request.target == {
-        .Native -> false
+        .Native | .Sandbox(_, _, _) -> false
         .Web(_, _, _) -> true
     }
     host_os := ""
@@ -3500,6 +3513,61 @@ fn jet_driver_c_exports(graph: SemaRegistrationGraph, entry_module_identity: Str
     exports
 }
 
+// The record types the Component boundary may carry: checked declarations
+// that derive both Encode and Decode (`#Codable` derives both).
+fn jet_driver_codable_keys(checked: SemaGraphResult) -> [String] Never! {
+    keys := [String]{}
+    loop module_row in checked.modules {
+        loop definition in module_row.declarations.type_defs {
+            codable := false
+            encode := false
+            decode := false
+            loop name in definition.derives {
+                if name == "Codable" -> codable = true
+                if name == "Encode" -> encode = true
+                if name == "Decode" -> decode = true
+            }
+            if codable || (encode && decode) -> &keys.push(definition.key)
+        }
+    }
+    keys
+}
+
+// D-PLUGIN-EXPORT1=A: a sandbox exports every top-level `pub` function of
+// its entry module, each a checked MIR function under the Component export
+// law (Rust `artifact_plan::lower_exports` over `Sema::sandbox_export_surface`
+// plus `PluginExport::validate_export_surface`). A function outside the law
+// is E1260, never a silent skip.
+fn jet_driver_sandbox_exports(graph: SemaRegistrationGraph, program: MIRProgram, codable_keys: [String], diagnostics: &[Diagnostic]) -> [MIRExport] Never! {
+    exports := [MIRExport]{}
+    loop declaration in sema_sandbox_export_functions(graph) {
+        key :: symbol_id(SymbolKind.Function, graph.entry_module_identity, "", declaration.name).key
+        exported := false
+        loop function in program.functions {
+            if function.key != key -> next
+            if mir_component_export_signature(program.types, codable_keys, function) != None {
+                &exports.push(MIRExport{symbol: declaration.name, function: function.id, abi: .C})
+                exported = true
+            }
+            break
+        }
+        if !exported -> &diagnostics.push(sema_export_unsupported_diagnostic(SemaExportBoundary.Sandbox, declaration.name, declaration.span))
+    }
+    exports
+}
+
+// The sandbox export name without a manifest `export:` override: the
+// selected package's name, else the entry file's stem.
+fn jet_driver_sandbox_default_export_name(load: JetDriverLoadResult, request: JetDriverCompileRequest) -> String Never! {
+    loop package in load.packages {
+        if package.identity == load.package_identity && package.name != "" -> return package.name
+    }
+    segments :: request.authorized_sources.entry_path.split("/").to_list()
+    file :: segments[segments.len() - 1]
+    stem :: file.split(".").to_list()[0]
+    if stem == "" -> "plugin" else -> stem
+}
+
 // The one native spelling of an exported C symbol (Rust
 // `Sema::Guest::guest_export_native_symbol`).
 fn jet_driver_c_symbol(name: String) -> String Never! {
@@ -3520,6 +3588,9 @@ fn jet_driver_artifact_plan(
     test_harness: MIRHarnessID?,
     // The checked `#Export(c)` rows; only a NativeLibrary artifact carries them.
     c_exports: [MIRExport],
+    // A `Sandbox` compile's checked Component export rows: the artifact is
+    // then a SandboxPlugin that carries exactly them and has no entry.
+    sandbox_exports: [MIRExport]?,
     facts: MIRPackageFacts,
     target_machine: MIRTargetMachine,
     web_profile: MIRArtifactBuildMode?,
@@ -3548,6 +3619,10 @@ fn jet_driver_artifact_plan(
     loop job in program.jobs -> &job_ids.push(job.id)
     entry := MIREntrySpec?{None}
     if {
+        sandbox_exports != None -> {
+            if is_web -> return None
+            artifact_kind = MIRArtifactKind.SandboxPlugin
+        }
         entry_function != None -> {
             function_id :: entry_function
             initialize_environment := if is_web -> true else -> artifact_target == MIRArtifactTarget.RustAOT && !target_machine.no_os
@@ -3585,7 +3660,11 @@ fn jet_driver_artifact_plan(
         links: link_ids,
         jobs: job_ids,
         runtime_parts: facts.runtime_parts,
-        exports: if artifact_kind == MIRArtifactKind.NativeLibrary -> c_exports else -> [MIRExport]{},
+        exports: if artifact_kind == {
+            .NativeLibrary -> c_exports
+            .SandboxPlugin -> sandbox_exports ?? [MIRExport]{}
+            else -> [MIRExport]{}
+        },
         provider_identity: facts.target_dossier.provider_identity,
         closure_identity: facts.target_dossier.closure_identity,
         artifact_identity: "{facts.target_dossier.compiler_identity}:{facts.target_dossier.environment_identity}:{target_machine.triple}",
@@ -4344,7 +4423,11 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
     load.diagnostics = stage_diagnostics
     web_target := if request.target == {
         .Web(_, _, _) -> true
-        .Native -> false
+        .Native | .Sandbox(_, _, _) -> false
+    }
+    sandbox_target := if request.target == {
+        .Sandbox(_, _, _) -> true
+        else -> false
     }
     if entry_function == None && web_target {
         &load.diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the Web compile target requires an explicit package entry function", "WebApplication publication invokes exactly the manifest-selected checked entry", "declare an `outputs.web.entry` function in the selected package"))
@@ -4404,7 +4487,7 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
     }
     program_value := program ?? return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Assemble), false, trace)
     web_profile := if request.target == {
-        .Native -> None
+        .Native | .Sandbox(_, _, _) -> None
         .Web(_, _, profile) -> Val(profile)
     }
     test_harness := MIRHarnessID?{None}
@@ -4415,7 +4498,24 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
         if test_harness == None -> return jet_driver_compile_internal_result(load, trace, "the checked tests lowered to no MIR test harness")
     }
     c_exports :: jet_driver_c_exports(resolved_registration, load.entry_module_identity, program_value.functions)
-    artifact_plan_option := jet_driver_artifact_plan(program_value, entry_function, test_harness, c_exports, package_facts, target_machine, web_profile)
+    // D-PLUGIN-EXPORT1=A / D-PLUGIN-VERSION1=A: a sandbox's export surface is
+    // checked (E1260) and diffed against its frozen interface (E1257) before
+    // anything is optimized or emitted.
+    codable_keys :: jet_driver_codable_keys(checked_graph)
+    sandbox_exports := [MIRExport]?{None}
+    sandbox_snapshot := SemaPluginFrozenSnapshotInput?{None}
+    if request.target == .Sandbox(requested_export, frozen_interface, _) {
+        exports :: jet_driver_sandbox_exports(resolved_registration, program_value, codable_keys, &load.diagnostics)
+        sandbox_exports = Val(exports)
+        export_name :: requested_export ?? jet_driver_sandbox_default_export_name(load, request)
+        current :: sema_sandbox_interface_snapshot(resolved_registration, export_name, (loop export in exports -> export.symbol))
+        prior :: if frozen_interface == .Val(text) -> sema_sandbox_parse_snapshot(text) else -> SemaPluginFrozenSnapshotInput?{None}
+        loop diagnostic in sema_sandbox_freeze_diagnostics(current, prior) -> &load.diagnostics.push(diagnostic)
+        sandbox_snapshot = Val(current)
+        if kg.enabled -> jet_driver_keep_going_diagnostics(&kg, "assemble", load.diagnostics)
+        if jet_driver_has_errors(load.diagnostics) && !kg.enabled -> return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Assemble), false, trace)
+    }
+    artifact_plan_option := jet_driver_artifact_plan(program_value, entry_function, test_harness, c_exports, sandbox_exports, package_facts, target_machine, web_profile)
     if artifact_plan_option == None {
         return jet_driver_compile_internal_result(load, trace, "the compiler could not construct an exact MIR artifact plan for the selected execution target")
     }
@@ -4492,7 +4592,7 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
     }
     if web_target {
         web_config_option := if request.target == {
-            .Native -> None
+            .Native | .Sandbox(_, _, _) -> None
             .Web(assets, release_policy, _) -> Val(JetWebEmitConfig{
                 artifact: artifact_plan.id,
                 layout: jet_target_layout_from_machine(target_machine),
@@ -4589,5 +4689,24 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
         jet_driver_keep_going_flush(&kg, request.trace_sink)
     }
     if !emission_complete -> return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Emit), false, trace)
+    if sandbox_target {
+        snapshot :: sandbox_snapshot ?? return jet_driver_compile_internal_result(load, trace, "the sandbox compile lost its checked interface snapshot")
+        whole_program :: emitted_source ?? return jet_driver_compile_internal_result(load, trace, "the sandbox compile lost its emitted guest source")
+        timezone_data :: if request.target == {
+            .Sandbox(_, _, zones) -> zones
+            else -> [JetWebTimezoneAsset]{}
+        }
+        if jet_rust_emit_plugin(optimized_program, jet_driver_native_emit_config(request.compiler_threads), artifact_plan.id, codable_keys, whole_program, timezone_data) == {
+            .Complete(artifacts) -> {
+                result := jet_driver_compile_result(load, load.diagnostics, entry_function, Val(^optimized_program), emitted_source, emit_manifest, None, true, trace)
+                result.sandbox = Val(JetDriverSandboxOutput{artifacts: artifacts, snapshot_package: snapshot.package, snapshot_text: sema_sandbox_snapshot_text(snapshot, package_facts.package_version)})
+                return result
+            }
+            .Incomplete(failure) -> {
+                &load.diagnostics.push(jet_driver_diagnostic_with_optional_location(failure.code, failure.span, None, failure.message, failure.detail, "resolve the plugin emitter's typed failure before returning a sandbox guest"))
+                return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Emit), false, trace)
+            }
+        }
+    }
     jet_driver_compile_result(load, load.diagnostics, entry_function, Val(^optimized_program), emitted_source, emit_manifest, None, true, trace)
 }

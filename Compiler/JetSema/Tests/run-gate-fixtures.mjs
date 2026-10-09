@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// Assemble production gate inspection/projection with each executable fixture.
+// Assemble the production compiler with each executable fixture (gate
+// inspection/projection and the sandbox/C export boundary).
 // Usage: node Compiler/JetSema/Tests/run-gate-fixtures.mjs OUTDIR
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
@@ -24,6 +25,7 @@ const fixtures = [
     ["unsafe-obligations", "Compiler/JetSema/Tests/UnsafeObligations.jet"],
     ["gate-ledger", "Compiler/JetSema/Tests/GateLedger.jet"],
     ["gate-projection", "Compiler/JetCli/Tests/GateProjection.jet"],
+    ["export-boundary", "Compiler/JetSema/Tests/ExportBoundary.jet"],
 ];
 for (const [name, path] of fixtures) {
     const project = join(out, name);
