@@ -25,12 +25,12 @@ fn run() {
     raw_json :: "{{\"items\":[{{\"price\":3,\"sku\":\"a\"}},{{\"price\":8,\"sku\":\"b\"}},{{\"name\":\"free\"}}]}}"
     document :: json.parse(raw_json) ?? panic("json parse")
     query :: ".items[] | select(.price >= 5) | .price"
-    selected :: filter.run(~document, query) ?? panic("filter parse")
+    selected :: filter.run(document.copy(), query) ?? panic("filter parse")
     assert(selected == [Dyn]{Dyn.Int(8)})
-    projected :: filter.run(~document, ".items[] | .price") ?? panic("projection parse")
+    projected :: filter.run(document.copy(), ".items[] | .price") ?? panic("projection parse")
     assert(projected == [Dyn]{Dyn.Int(3), Dyn.Int(8)})
     assert(filter.parse(".items[] | price") == .None)
-    assert((filter.run(~document, ".missing[]") ?? [Dyn]{}).len() == 0)
+    assert((filter.run(document.copy(), ".missing[]") ?? [Dyn]{}).len() == 0)
     print("filter={selected}")
 
     first_book :: formula.parse("a = 2\none = 1\nb = a + one\ntotal = b + a\nunrelated = 99") ?? panic("formula parse")

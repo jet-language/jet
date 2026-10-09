@@ -125,7 +125,7 @@ fn render_snapshot(id: Int, route_search: OrderSearch, loaded: [Order]) -> Strin
     loaded_markup :: render_order_rows(loaded)
     search_wire :: url.percent_encode(json.to_string(route_search) ?? panic("JSON encode"))
     route_text :: "route=/orders/{id} search={search_wire} loaded={loaded.len()}"
-    search :: ~route_search
+    search :: route_search.copy()
     next_search :: OrderSearch{q: search.q, page: search.page + 1, cart: search.cart, refresh: search.refresh}
     refresh_search :: OrderSearch{q: search.q, page: search.page, cart: search.cart, refresh: search.refresh + 1}
     cart_search :: OrderSearch{q: search.q, page: search.page, cart: search.cart + 1, refresh: search.refresh}

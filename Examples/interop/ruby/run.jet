@@ -4,8 +4,8 @@ use core.encoding.json as json
 fn run() {
     session :: ops.open() ?? panic("Ruby open failed")
     input :: Dyn.Object(["nested": Dyn.Object(["ok": Dyn.Bool(true)]), "list": Dyn.Array([Dyn.Int(1), Dyn.Text("two")]), "scalar": Dyn.Float(3.5), "nothing": Dyn.Null])
-    first :: ops.transform(session, ~input, 5000) ?? panic("first call failed")
-    second :: ops.transform(session, ~input, 5000) ?? panic("second call failed")
+    first :: ops.transform(session, input.copy(), 5000) ?? panic("first call failed")
+    second :: ops.transform(session, input.copy(), 5000) ?? panic("second call failed")
     print(json.canonical(first) ?? panic("value is not canonical JSON"))
     print(json.canonical(second) ?? panic("value is not canonical JSON"))
     failed :: ops.fail_call(session, Dyn.Null, 5000) ?? Dyn.Text("failed")

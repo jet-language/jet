@@ -1,11 +1,11 @@
 // A bounded generic function specialized from inside another bounded generic
 // keeps both functions' bounds: the inner and the outer `>` each resolve to
 // the `Comparable` compare of the concrete type.
-fn max_of<T: Comparable>(left: T, right: T) -> T { if left > right -> ~left else -> ~right }
+fn max_of<T: Comparable>(left: T, right: T) -> T { if left > right -> left.copy() else -> right.copy() }
 
 fn max3<T: Comparable>(first: T, second: T, third: T) -> T {
     best :: max_of(first, second)
-    if best > third -> ~best else -> ~third
+    if best > third -> best.copy() else -> third.copy()
 }
 
 fn run() {

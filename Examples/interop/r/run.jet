@@ -10,8 +10,8 @@ struct Score {
 fn run() {
     session :: ops.open() ?? panic("R open failed")
     input :: Dyn.Object(["nested": Dyn.Object(["ok": Dyn.Bool(true)]), "vector": Dyn.Array([Dyn.Int(1), Dyn.Int(2)]), "scalar": Dyn.Float(3.5), "nothing": Dyn.Null])
-    print(json.canonical(ops.transform(session, ~input, 5000) ?? panic("first call failed")) ?? panic("value is not canonical JSON"))
-    print(json.canonical(ops.transform(session, ~input, 5000) ?? panic("second call failed")) ?? panic("value is not canonical JSON"))
+    print(json.canonical(ops.transform(session, input.copy(), 5000) ?? panic("first call failed")) ?? panic("value is not canonical JSON"))
+    print(json.canonical(ops.transform(session, input.copy(), 5000) ?? panic("second call failed")) ?? panic("value is not canonical JSON"))
     print(json.canonical(ops.double_values(session, Dyn.Array([Dyn.Int(2), Dyn.Int(4)]), 5000) ?? panic("vector call failed")) ?? panic("value is not canonical JSON"))
     scores :: [Score]{{label: "a", score: 1.5}, {label: "b", score: 2.0}}
     scaled :: ops.scale_table_table<Score>(session, scores, 5000) ?? panic("list call failed")
