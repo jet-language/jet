@@ -490,7 +490,7 @@ fn jet_cli_db_run_dynamic_query(source: JetCLIDBLoadedSource, query: db_rows_sql
 // Rust generated_row_item:1853-1867. Setup submits this checked declaration
 // through the ordinary retained-session item API; it does not evaluate text.
 fn jet_cli_db_generated_row_item(columns: [JetCLIDBColumn]) -> String Never! {
-    out := "#Codable\nstruct DbConsoleRow {\n".bytes()
+    out := "#Codable\nstruct DbConsoleRow {{\n".bytes()
     loop column in columns {
         jet_cli_db_rows_append(&out, "    ")
         jet_cli_db_rows_append(&out, column.name)
@@ -499,6 +499,6 @@ fn jet_cli_db_generated_row_item(columns: [JetCLIDBColumn]) -> String Never! {
         if column.nullable -> &out.push(U8{63})
         &out.push(U8{10})
     }
-    jet_cli_db_rows_append(&out, "}\n")
+    jet_cli_db_rows_append(&out, "}}\n")
     jet_cli_db_rows_string(out)
 }

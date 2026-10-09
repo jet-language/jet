@@ -449,7 +449,7 @@ struct Directory {
 
 // Compiler-private process bridge. The borrowed Directory stays live through
 // the raw fd duplication; only the duplicate enters the ProcessSpec carrier.
-#Unsafe("compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor") fn __with_process_directory(spec: ProcessSpec, directory: Directory, child_fd: Int, as_cwd: Bool) -[FS, Exec, Env]> ProcessSpec IOError! {
+#Unsafe("compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor") fn compiler_with_process_directory(spec: ProcessSpec, directory: Directory, child_fd: Int, as_cwd: Bool) -[FS, Exec, Env]> ProcessSpec IOError! {
     context :: IOContext{operation: .Resolve, resource: Val(directory.path), os_code: None, cause: None}
     if child_fd < 3 || child_fd > 2147483646 {
         return Err(IOError.InvalidInput(IOContext{operation: .Resolve, resource: Val(directory.path), os_code: None,
@@ -484,9 +484,9 @@ struct Directory {
         source :: open_directory(source_path) ?? panic("hold source")
         initial :: process.cmd(["sh", "-c", "cat marker.txt; cat /proc/self/fd/199/source.txt"])
             .cwd("/missing-lexical-process-directory")
-        in_destination :: __with_process_directory(initial, destination, 198, true) ?? panic("attach destination")
-        with_source :: __with_process_directory(in_destination, source, 199, false) ?? panic("attach source")
-        assert(__with_process_directory(process.cmd(["sh", "-c", "exit 0"]), destination, 198, true) == .Err(.InvalidInput(_)))
+        in_destination :: compiler_with_process_directory(initial, destination, 198, true) ?? panic("attach destination")
+        with_source :: compiler_with_process_directory(in_destination, source, 199, false) ?? panic("attach source")
+        assert(compiler_with_process_directory(process.cmd(["sh", "-c", "exit 0"]), destination, 198, true) == .Err(.InvalidInput(_)))
         close(^destination)
         close(^source)
         rename(destination_path, join(root, "moved-destination")) ?? panic("rename destination")

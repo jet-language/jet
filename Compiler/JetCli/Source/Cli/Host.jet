@@ -226,8 +226,8 @@ fn jet_cli_eval_result(file: String, source: String, color: Bool, json: Bool, re
     checked :: data ?? return jet_cli_ice("evaluating `run` in `{file}` produced no value")
     value :: sema_user_template_ct_value(checked) ?? return jet_cli_ice("the value of `run` in `{file}` is not compile-time data")
     if json {
-        encoded :: ast_comptime_value_json(value) ?? return JetDriverVerbOutput{
-            stdout: "{jet_cli_status_render("eval", false, [JetCLIStatusField]{jet_cli_status_field("error", jet_cli_status_object([JetCLIStatusField]{
+        encoded :: ast_comptime_value_json(value) ?? {
+            failure :: jet_cli_status_object([JetCLIStatusField]{
                 jet_cli_status_field("format", jet_cli_status_text("JSON")),
                 jet_cli_status_field("kind", jet_cli_status_text("Unsupported")),
                 jet_cli_status_field("byte_offset", jet_cli_status_int(err.byte_offset)),
@@ -236,9 +236,9 @@ fn jet_cli_eval_result(file: String, source: String, color: Bool, json: Bool, re
                 jet_cli_status_field("path", jet_cli_status_text(err.path)),
                 jet_cli_status_field("reason", jet_cli_status_text(err.reason)),
                 jet_cli_status_field("cause", JetCLIStatusValue.Null),
-            }))})}\n",
-            stderr: evaluated.stdout,
-            exit_code: JET_DRIVER_EXIT_USER_ERROR,
+            })
+            rendered :: jet_cli_status_render("eval", false, [JetCLIStatusField]{jet_cli_status_field("error", failure)})
+            return JetDriverVerbOutput{stdout: "{rendered}\n", stderr: evaluated.stdout, exit_code: JET_DRIVER_EXIT_USER_ERROR}
         }
         rendered :: jet_cli_status_value_parse(encoded) ?? return jet_cli_ice("the value of `run` in `{file}` has no JSON form")
         return JetDriverVerbOutput{stdout: "{jet_cli_status_render("eval", true, [JetCLIStatusField]{jet_cli_status_field("value", rendered)})}\n", stderr: evaluated.stdout, exit_code: JET_DRIVER_EXIT_OK}
