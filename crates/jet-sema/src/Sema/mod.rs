@@ -1427,6 +1427,8 @@ struct LoopValueFrame {
     label: Option<String>,
     kind: LoopValueKind,
     ty: Option<Type>,
+    /// Moves already present at entry are not executed by this loop.
+    moved_before: FlowFacts::Facts<FlowFacts::Moved>,
 }
 
 /// D-MEM1 S9 / #649: one source-level fact graph for every borrowed window.
@@ -2355,10 +2357,10 @@ pub(crate) struct Checker<'a> {
     /// Card #1440: NoElse-terminated dispatch chains already coverage-checked
     /// (chain span starts) — every level shares one span, the outermost wins.
     noelse_chains_checked: HashSet<usize>,
-    /// D-RESULT-DECON2=B: the parser keeps one receiver in both fixed Result
-    /// pattern tests. Cache its checked type and elaborated expression by source
-    /// span so sema checks effects and ownership once while both lowered copies
-    /// retain the same resolved call metadata.
+    /// The parser keeps one receiver in every pattern test of a Result or
+    /// owned-subject table. Cache its checked type and elaborated expression by
+    /// source span so effects and ownership are checked once while lowered
+    /// copies retain the same resolved metadata.
     result_handler_subject_types: HashMap<usize, (Type, Expr)>,
     /// D-OUTCOME-SHAPE1=A: subject span starts of value-form pattern chains
     /// that handle a `T? E!` failure themselves; their `.Val`/`.None` levels

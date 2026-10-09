@@ -712,6 +712,9 @@ pub(crate) fn owned_type_for_read_view(ty: &Type) -> Option<Type> {
 /// (`NominalWalk`) enters each named type once; without the cycle guard it
 /// never terminates.
 fn is_cloneable_rec(ty: &Type, registry: &TypeRegistry, walk: &mut NominalWalk<'_>) -> bool {
+    if type_is_copy(ty) {
+        return true;
+    }
     match ty {
         Type::Int | Type::Bool | Type::Float | Type::String | Type::Char => true,
         Type::IntN { .. } | Type::Float32 => true,
@@ -2259,6 +2262,9 @@ pub(crate) fn type_is_copy(ty: &Type) -> bool {
         // is Copy at every runtime tier.
         || matches!(ty, Type::Named(name) if name == crate::Syntax::TYPE_COMPLEX)
         || matches!(ty, Type::Named(name) if name == crate::Syntax::TYPE_RANGE)
+        // The canonical runtime operation is a payload-free Copy enum, even
+        // though only Core source can name it (not a public type export).
+        || matches!(ty, Type::Named(name) if name == crate::Syntax::TYPE_IO_OPERATION)
 }
 
 pub(crate) fn is_task_type(ty: &Type) -> bool {

@@ -268,6 +268,9 @@ impl<'a> Checker<'a> {
             if generic_names.contains(name) || name.contains("::") {
                 return name.to_string();
             }
+            if let Some(identity) = self.owner_qualified_nominal(owner_mod, name) {
+                return identity;
+            }
             if let Some(owner) = self.name_ledger.namespace_owner(owner_mod, name)
                 .or_else(|| self.name_ledger.generated_type_owner(name))
             {
@@ -2000,6 +2003,29 @@ impl<'a> Checker<'a> {
             })
     }
 
+    /// Qualified names in a declaration belong to its lexical import scope,
+    /// not the module reading the declaration's signature or record fields.
+    fn owner_qualified_nominal(&self, owner: usize, name: &str) -> Option<String> {
+        let (namespace, leaf) = Self::split_type_name(name);
+        let namespace = namespace?;
+        let module = self.modules?.get(owner)?;
+        let imported_owner = if let Some(core_module) = module.core_imports.get(namespace) {
+            self.core_source_owner_module(core_module, leaf)?
+        } else {
+            let imported = *module.imports.get(namespace)?;
+            if self.modules?.get(imported)?.registry.contains(leaf) {
+                imported
+            } else {
+                self.name_ledger.namespace_owner(imported, leaf)?
+            }
+        };
+        Some(if imported_owner == self.module_idx {
+            leaf.to_string()
+        } else {
+            self.canonical_nominal_name(imported_owner, leaf)
+        })
+    }
+
 
     /// An imported function signature retains the declaration's nominal
     /// owners, including generated foreign records, implicit package
@@ -2036,6 +2062,9 @@ impl<'a> Checker<'a> {
                     || parameters.is_some_and(|params| params.iter().any(|param| param.name == name))
                 {
                     return None;
+                }
+                if let Some(identity) = self.owner_qualified_nominal(owner, name) {
+                    return Some(identity);
                 }
                 if let Some(imported_leaf) = module.core_item_imports.get(name) {
                     let imported_module = module.core_imports.get(name)?;
@@ -4290,7 +4319,12 @@ impl<'a> Checker<'a> {
         // infer each carrier subject directly instead of reusing that ambiguous
         // key. User source keeps the cache for the existing single-inference
         // behavior.
-        let use_subject_cache = preserve_result_carrier && !self.compiler_generated;
+        // An owned table repeats the same authored `^subject` in each pattern
+        // test too. It transfers the owner once, not once per failed arm.
+        let owned_subject = matches!(subject.without_parens(),
+            Expr::Place(_, crate::AST::PlaceAccess::Take, _));
+        let use_subject_cache = (preserve_result_carrier || owned_subject)
+            && !self.compiler_generated;
         let subject_key = subject.span().start;
         let cached_subject = use_subject_cache
             .then(|| self.result_handler_subject_types.get(&subject_key).cloned())

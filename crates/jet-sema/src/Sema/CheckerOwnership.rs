@@ -5358,7 +5358,13 @@ impl<'a> Checker<'a> {
     /// Reinitialization clears the fact before this point; return and break
     /// paths never visit it. `next` checks its own edge before ending the path.
     pub(crate) fn check_loop_move_backedge(&mut self, depth: usize) {
+        let Some(frame) = depth.checked_sub(1).and_then(|index| self.loop_value_frames.get(index)) else {
+            return;
+        };
         let repeats: Vec<_> = self.flow.moved.iter().filter_map(|(place, origin)| {
+            if frame.moved_before.get(place) == Some(origin) {
+                return None;
+            }
             let root = place.split(['.', '[']).next()?;
             let info = self.lookup(root)?;
             (info.decl_loop_depth < depth)

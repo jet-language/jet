@@ -109,3 +109,92 @@ fn run() {
     assert!(found.iter().any(|d| d.code == "E0121"), "{found:?}");
     assert!(!found.iter().any(|d| d.code == "E0203"), "{found:?}");
 }
+
+#[test]
+fn a_completed_move_before_a_loop_is_not_a_backedge_move() {
+    // stream.jet wire_float: an unsafe block takes shown before scanning bytes.
+    let found = errors(r#"
+fn take(value: ^String) -[]> Int { value.count_bytes() }
+fn run() {
+    shown :: "1.25"
+    count := 0
+    #Unsafe("exercise the source block boundary") { count = take(^shown) }
+    loop i in 0..<count { print(i) }
+}
+"#);
+    assert!(found.is_empty(), "{found:?}");
+}
+
+#[test]
+fn taking_a_parameter_before_nested_loops_is_not_repeated() {
+    // cbor_stream.jet close_frame: input moves at function entry.
+    let found = errors(r#"
+fn consume(input: ^[[Int]]) -[]> Int {
+    frame := ^input
+    total := 0
+    loop item in frame {
+        loop number in item { total += number }
+    }
+    total
+}
+fn run() { print(consume([[1], [2]])) }
+"#);
+    assert!(found.is_empty(), "{found:?}");
+}
+
+#[test]
+fn an_owned_value_table_binds_payloads_and_takes_its_subject_once() {
+    // sys.jet config_insert: a table is a value tail, not statement returns.
+    let found = errors(r#"
+enum Tree { Object([Int]) Text(String) }
+fn rebuild(tree: ^Tree) -[]> Tree {
+    owned := ^tree
+    if ^owned == {
+        .Object(pairs) -> {
+            out := ^pairs
+            loop index in 0..<out.len() { print(index) }
+            Tree.Object(^out)
+        }
+        .Text(text) -> Tree.Text(^text)
+    }
+}
+fn run() { print(rebuild(Tree.Text("owned"))) }
+"#);
+    assert!(found.is_empty(), "{found:?}");
+}
+
+#[test]
+fn an_owned_value_table_can_take_a_collection_payload_in_its_loop_header() {
+    // sys.jet config_tree: the collection move belongs to the header, not body.
+    let found = errors(r#"
+enum Tree { Object([[Int]]) Text(String) }
+fn count(tree: ^Tree) -[]> Int {
+    owned := ^tree
+    if ^owned == {
+        .Text(text) -> text.count_bytes()
+        .Object(pairs) -> {
+            total := 0
+            loop pair in ^pairs { total += pair.len() }
+            total
+        }
+    }
+}
+fn run() { print(count(Tree.Object([[1], [2]]))) }
+"#);
+    assert!(found.is_empty(), "{found:?}");
+}
+
+#[test]
+fn range_and_collection_backedges_still_reject_exact_outer_moves() {
+    for header in ["i in 0..<3", "i in [1, 2, 3]"] {
+        let source = format!(r#"
+fn take(value: ^[Int]) -[]> Int {{ value.len() }}
+fn run() {{
+    current := [1]
+    loop {header} {{ print(take(^current)) }}
+}}
+"#);
+        let found = errors(&source);
+        assert!(found.iter().any(|d| d.code == "E0121"), "{found:?}");
+    }
+}

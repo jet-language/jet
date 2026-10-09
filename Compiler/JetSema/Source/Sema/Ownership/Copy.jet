@@ -185,7 +185,7 @@ fn sema_copy_copyable_scalar(ty: Type) -> Bool Never! {
         .Tagged(_, inner) -> sema_copy_copyable_scalar(inner)
         .InlineRange(base, _, _) -> sema_copy_copyable_scalar(base)
         .Apply(name, args) -> name == "Ptr" && args.len() == 1
-        .Named(name) -> name == "Complex" || name == "Range"
+        .Named(name) -> name == "Complex" || name == "Range" || name == "IOOperation"
         else -> false
     }
 }
@@ -396,6 +396,8 @@ fn sema_copy_named_facts(
     if graph == .Val(registered) {
         if sema_type_resolve_nominal_row(registered, ty, caller_module_identity) == .Val(row) -> return sema_copy_nominal_facts(registered.modules[row.module_index].nominals[row.row], ty, graph, caller_module_identity, generic_params, &walk)
     }
+    // Core-only naming does not remove the runtime enum's Copy capability.
+    if name == "IOOperation" -> return sema_copy_type_facts_known(true, true, false, false, false, false, true)
     if {
         sema_copy_named_is_builtin_resource(name) -> sema_copy_type_facts_known(false, false, false, false, true, false, true)
         name == "Clock" -> sema_copy_type_facts_known(false, true, false, true, false, false, true)

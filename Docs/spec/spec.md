@@ -988,9 +988,13 @@ contract (D-MEM1, D-MEM-COPYSEM1).
 Move facts follow executable control-flow paths. A loop repeats a move only
 when that path reaches its back edge (including `next`); a `return` or `break`
 after a move ends that path instead. Assigning a fresh whole value clears the
-old move fact before another iteration. An owned pattern table such as
+old move fact before another iteration. A move completed before the loop, or
+while evaluating its one-time collection header, is not repeated by the loop
+body. An owned pattern table such as
 `if ^owned == { .Object(entries) -> … }` consumes its subject once and binds
 each arm's payload from that already-checked subject, not by moving it again.
+This includes tables used as value tails: testing the next arm does not
+consume the original subject a second time.
 Owning `Dyn` and `DBValue` constructors accept explicit payload transfers,
 for example `Dyn.Text(^text)`; the payload stays moved and is not copied.
 
@@ -1067,6 +1071,8 @@ syntax; the retired prefix `~x` teaches E0941 (whose Safe fix writes `x.copy()`)
 and the retired `copy x` word teaches E0991. Copying a value that Jet cannot
 duplicate, such as a function or trait value, is E0211. Copying a scalar is
 legal but redundant.
+The Core-only `IOOperation` carrier is a payload-free runtime `Copy` enum;
+its explicit `.copy()` has no allocation and does not make the type a user export.
 
 ```jet
 name :: "vault"
