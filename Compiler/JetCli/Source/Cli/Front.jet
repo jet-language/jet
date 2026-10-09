@@ -45,6 +45,11 @@ pub enum JetCLIPlan {
     // rustc/LLVM backend, otherwise the Jet-native backend builds it;
     // `invocation` holds the `--allow`/`--deny` rows.
     Build(file: String, source: String, color: Bool, release: Bool, threads: Int?, invocation: JetCLIInvocationAuthority?, notice: String)
+    // `jet build --target=sandbox <file>` (D-PLUGIN1=B): compile the entry
+    // module's `pub fn` rows as a WASM Component guest against the frozen
+    // `.jet/cache/api` interface, then build the component with rustc
+    // wasm32 and `wasm-tools` (Source/CmdCompile.rs `write_plugin_artifacts`).
+    BuildSandbox(file: String, source: String, color: Bool, quiet: Bool, threads: Int?, notice: String)
     // `jet run <file>` (or `jet <file>`): build the entry as `jet build`
     // does, then run it with `program_args`. `verbose` (`--verbose`/`-v`
     // before `--`) shows advisory lints (D-LINT-VISIBILITY2=A).
@@ -488,8 +493,35 @@ fn jet_cli_doc(jet_argv: [String], args: [String], color: Bool, quiet: Bool, jso
 
 // Build flags whose Jet port has not landed: refused, never ignored.
 JET_CLI_BUILD_UNPORTED_FLAGS :: [String]{
-    "--lib", "--small", "--target", "--verify", "--sbom", "--import", "--emit-generated", "--set",
+    "--lib", "--small", "--verify", "--sbom", "--import", "--emit-generated", "--set",
     "--builder", "--locked", "-p", "--output", "--gate",
+}
+
+// The one `--target` value the Jet host builds (jetpack_config.rs
+// `TARGET_SANDBOX`); every other machine or triple is refused until ported.
+JET_CLI_TARGET_SANDBOX :: "sandbox"
+
+enum JetCLITargetFlag {
+    Absent
+    // `--target` with no value, or with a flag where the value belongs.
+    Missing
+    Named(name: String)
+}
+
+// Source/main.rs `parse_target_flag`: `--target=<v>` or `--target <v>`.
+fn jet_cli_target_flag(jet_argv: [String]) -> JetCLITargetFlag Never! {
+    loop (index, argument) in jet_argv {
+        if argument.starts_with("--target=") {
+            value :: argument.slice(9..<argument.len())
+            if value == "" -> return JetCLITargetFlag.Missing
+            return JetCLITargetFlag.Named{name: value}
+        }
+        if argument == "--target" {
+            if index + 1 >= jet_argv.len() || jet_argv[index + 1].starts_with("-") -> return JetCLITargetFlag.Missing
+            return JetCLITargetFlag.Named{name: jet_argv[index + 1]}
+        }
+    }
+    JetCLITargetFlag.Absent
 }
 
 enum JetCLIProfile {
@@ -583,8 +615,9 @@ fn jet_cli_authority_flags(jet_argv: [String], color: Bool) -> JetCLIAuthorityFl
     JetCLIAuthorityFlags.Rows{invocation: Val(JetCLIInvocationAuthority{allow: allow, deny: deny})}
 }
 
-// `jet build <file>` through the backend `jet_cli_profile` selects. The
-// flags above are not ported yet.
+// `jet build <file>` through the backend `jet_cli_profile` selects, or as a
+// sandbox WASM Component under `--target=sandbox`. The flags above and the
+// other `--target` machines are not ported yet.
 fn jet_cli_build(jet_argv: [String], args: [String], color: Bool, quiet: Bool, threads: Int?) -[FS, Env]> JetCLIPlan Never! {
     loop argument in jet_argv {
         head :: argument.split("=").to_list()[0]
@@ -600,9 +633,21 @@ fn jet_cli_build(jet_argv: [String], args: [String], color: Bool, quiet: Bool, t
         .Refused(refusal) -> return refusal
         .Selected(selected) -> release = selected
     }
+    sandbox := false
+    if jet_cli_target_flag(jet_argv) == {
+        .Absent -> {}
+        .Missing -> return jet_cli_fail("E2104", "`--target` needs a value", jet_cli_why("E2104"), "write `--target=<triple>` or `--target <triple>` before the source file", color, JET_DRIVER_EXIT_USAGE)
+        .Named(name) -> {
+            if name != JET_CLI_TARGET_SANDBOX -> return jet_cli_not_ported("build --target={name}", color)
+            sandbox = true
+        }
+    }
     entry :: jet_cli_check(jet_argv, args, "build", color, quiet, threads, false)
     if entry == {
-        .Check(file, source, _, _, _, _, notice, _) -> return JetCLIPlan.Build{file: file, source: source, color: color, release: release, threads: threads, invocation: invocation, notice: notice}
+        .Check(file, source, _, _, _, _, notice, _) -> {
+            if sandbox -> return JetCLIPlan.BuildSandbox{file: file, source: source, color: color, quiet: quiet, threads: threads, notice: notice}
+            return JetCLIPlan.Build{file: file, source: source, color: color, release: release, threads: threads, invocation: invocation, notice: notice}
+        }
         else -> {}
     }
     entry

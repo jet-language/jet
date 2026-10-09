@@ -2857,14 +2857,14 @@ fn emit_bootstrap_web_asset_provider(
                     }};
                     Ok(@new.JetDriverCompileTarget.Web@(assets, release_policy, profile))
                 }}
-                @p.JetDriverCompileTarget.Sandbox@(export_name, frozen_interface, _) => {{
+                @p.JetDriverCompileTarget.Sandbox@(export_name, frozen_interfaces, _) => {{
                     let raw = crate::Codegen::canonical_web_raw_assets()
                         .map_err(|error| error.to_string())?;
                     let timezone_data = raw.timezone_data.into_iter().map(|(name, bytes)| {timezone_type} {{
                         {timezone_name}: name,
                         {timezone_bytes}: bytes,
                     }}).collect();
-                    Ok(@new.JetDriverCompileTarget.Sandbox@(export_name, frozen_interface, timezone_data))
+                    Ok(@new.JetDriverCompileTarget.Sandbox@(export_name, frozen_interfaces, timezone_data))
                 }}
             }}
         }}"#,

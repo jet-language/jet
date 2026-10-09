@@ -4504,12 +4504,16 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
     codable_keys :: jet_driver_codable_keys(checked_graph)
     sandbox_exports := [MIRExport]?{None}
     sandbox_snapshot := SemaPluginFrozenSnapshotInput?{None}
-    if request.target == .Sandbox(requested_export, frozen_interface, _) {
+    if request.target == .Sandbox(requested_export, frozen_interfaces, _) {
         exports :: jet_driver_sandbox_exports(resolved_registration, program_value, codable_keys, &load.diagnostics)
         sandbox_exports = Val(exports)
         export_name :: requested_export ?? jet_driver_sandbox_default_export_name(load, request)
         current :: sema_sandbox_interface_snapshot(resolved_registration, export_name, (loop export in exports -> export.symbol))
-        prior :: if frozen_interface == .Val(text) -> sema_sandbox_parse_snapshot(text) else -> SemaPluginFrozenSnapshotInput?{None}
+        prior := SemaPluginFrozenSnapshotInput?{None}
+        loop text in frozen_interfaces {
+            parsed :: sema_sandbox_parse_snapshot(text) ?? next
+            if parsed.package == current.package -> prior = Val(parsed)
+        }
         loop diagnostic in sema_sandbox_freeze_diagnostics(current, prior) -> &load.diagnostics.push(diagnostic)
         sandbox_snapshot = Val(current)
         if kg.enabled -> jet_driver_keep_going_diagnostics(&kg, "assemble", load.diagnostics)

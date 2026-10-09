@@ -365,6 +365,12 @@ fn jet_cli_overlay_outside_walk(root: String, relative: String) -[FS]> Bool Neve
 // walked file, or adds an absent `.jet` file the walk would have read; the
 // source loader and its authorization stay the one in this file.
 pub fn jet_cli_compile_overlays(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, emit_rust: Bool, threads: Int?, mode: JetDriverCompileMode) -> JetCLICompiled {
+    jet_cli_compile_for_target(anchor, entry, overlays, color, emit_rust, threads, mode, JetDriverCompileTarget.Native)
+}
+
+// `jet_cli_compile_overlays` for the compile `target` (`jet build
+// --target=sandbox` asks for a Sandbox guest).
+pub fn jet_cli_compile_for_target(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, emit_rust: Bool, threads: Int?, mode: JetDriverCompileMode, target: JetDriverCompileTarget) -> JetCLICompiled {
     anchor_path :: cli_files.realpath(anchor) ?? return jet_cli_refused("can't securely read the file `{anchor}`", "check the spelling, or run jet from the folder that contains it", color)
     root :: jet_cli_source_root(anchor_path)
     root_stat :: cli_files.stat(root) ?? return jet_cli_refused("can't securely read the source root `{root}`", "check that the directory exists and is readable", color)
@@ -423,6 +429,7 @@ pub fn jet_cli_compile_overlays(anchor: String, entry: String, overlays: [JetCLI
         entry_path: entry_path,
     }
     request := jet_cli_driver_request(snapshot, core_sources, threads, mode)
+    request.target = target
     result :: if emit_rust -> jet_driver_compile(^request) else -> jet_driver_compile_mir(^request)
     JetCLICompiled.Compiled{result: result, snapshot: snapshot}
 }

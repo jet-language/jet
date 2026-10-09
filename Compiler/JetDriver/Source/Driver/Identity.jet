@@ -97,12 +97,14 @@ pub enum JetDriverCompileTarget {
     )
     // `--target=sandbox` (D-PLUGIN1=B): the entry module's `pub fn` rows
     // become a WASM Component guest. `export_name` is the manifest `export:`
-    // name (the package name when absent); `frozen_interface` is the prior
-    // `.jet/cache/api/plugin__<name>.api` text the host read, if any; the
-    // guest embeds `timezone_data` because a sandbox has no host filesystem.
+    // name (the package name when absent); `frozen_interfaces` are the texts
+    // of the `.jet/cache/api/plugin__*.api` snapshots the host read (the
+    // compile diffs against the one whose `package` is `plugin__<name>`, since
+    // only the compile resolves the name); the guest embeds `timezone_data`
+    // because a sandbox has no host filesystem.
     Sandbox(
     export_name: String?,
-    frozen_interface: String?,
+    frozen_interfaces: [String],
     timezone_data: [JetWebTimezoneAsset],
     )
 }
