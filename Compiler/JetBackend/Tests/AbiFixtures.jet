@@ -28,7 +28,7 @@ fn abi_bool_module(stack: Bool) -> LIRModule Never! {
 
 fn abi_write_bool(name: String, stack: Bool, low: Int) {
     compiled :: x64_compile_module(abi_bool_module(stack))
-    assert(compiled.errors.len() == 0)
+    assert_eq(compiled.errors, [String]{})
     code := [U8]{}
     if stack {
         x64_mov_ri(&code, X64_RAX, 0)
@@ -47,7 +47,7 @@ fn abi_write_bool(name: String, stack: Bool, low: Int) {
     functions := [X64CompiledFunction]{start}
     loop function in compiled.functions -> &functions.push(function)
     linked :: x64_link_text(functions, [X64CompiledFunction]{}, [LIRData]{}, false)
-    assert(linked.errors.len() == 0)
+    assert_eq(linked.errors, [String]{})
     files.write_bytes("{name}.elf", elf64_static_executable(linked.text, 0, linked.align, linked.data_offset)) ?? panic("cannot write Bool ABI fixture")
     files.set_mode("{name}.elf", 0o755) ?? panic("cannot make Bool ABI fixture executable")
 }
@@ -71,13 +71,13 @@ fn abi_fixtures() {
     library :: abi_alignment_module(true)
     export :: X64RuntimeExport{function: LIRFunctionID{value: 0}, symbol: "jet_runtime_alignment_fixture", init_priority: -1, fini_priority: -1}
     runtime_object :: x64_runtime_object(library, [X64RuntimeExport]{export})
-    assert(runtime_object.errors.len() == 0)
+    assert_eq(runtime_object.errors, [String]{})
     files.write_bytes("runtime-exports.o", runtime_object.bytes) ?? panic("cannot write runtime export fixture")
     assert(x64_runtime_object(library, [X64RuntimeExport]{export, export}).errors.len() > 0)
     assert(x64_runtime_object(library, [X64RuntimeExport]{X64RuntimeExport{function: LIRFunctionID{value: 99}, symbol: "missing", init_priority: -1, fini_priority: -1}}).errors.len() > 0)
     init :: X64RuntimeExport{function: LIRFunctionID{value: 0}, symbol: "arbitrary_runtime_init", init_priority: 0, fini_priority: -1}
     initialized :: x64_runtime_object(library, [X64RuntimeExport]{init, export})
-    assert(initialized.errors.len() == 0)
+    assert_eq(initialized.errors, [String]{})
     assert(Int.from_u8(initialized.bytes[60]) == 11)
     files.write_bytes("runtime-init.o", initialized.bytes) ?? panic("cannot write runtime initializer fixture")
     assert(x64_runtime_object(abi_bool_module(false), [X64RuntimeExport]{init}).errors.len() > 0)
@@ -92,7 +92,7 @@ fn abi_fixtures() {
     abi_write_bool("bool-stack-false", true, 0)
     abi_write_bool("bool-stack-true", true, 1)
     image :: x64_static_executable(abi_alignment_module(false), LIRFunctionID{value: 0})
-    assert(image.errors.len() == 0)
+    assert_eq(image.errors, [String]{})
     // e_entry is _start at the text origin: preserve the maximum datum alignment.
     assert(Int.from_u8(image.bytes[24]) % 64 == 0)
     code := [U8]{}
@@ -101,10 +101,10 @@ fn abi_fixtures() {
     x64_ret(&code)
     probe :: X64CompiledFunction{id: LIRFunctionID{value: 0}, name: "address_remainder", code: code, relocs: [X64Reloc]{X64Reloc{at: at, target: X64RelocTarget.Data{id: LIRDataID{value: 0}}}}}
     linked :: x64_link_text([X64CompiledFunction]{x64_start_stub(LIRFunctionID{value: 0}, true), probe}, [X64CompiledFunction]{}, abi_alignment_module(false).data, false)
-    assert(linked.errors.len() == 0)
+    assert_eq(linked.errors, [String]{})
     files.write_bytes("align64.elf", elf64_static_executable(linked.text, 0, linked.align, linked.data_offset)) ?? panic("cannot write align64 executable")
     files.set_mode("align64.elf", 0o755) ?? panic("cannot make align64 executable runnable")
     object :: x64_relocatable_object(abi_alignment_module(true), LIRFunctionID{value: 0})
-    assert(object.errors.len() == 0)
+    assert_eq(object.errors, [String]{})
     files.write_bytes("align64.o", object.bytes) ?? panic("cannot write align64 object")
 }
