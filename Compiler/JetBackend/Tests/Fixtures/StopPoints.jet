@@ -22,10 +22,11 @@
 // polls and counts the String the program owns.
 use jet_foundation.[
     MIRAccess, MIRBinaryOp, MIRBlockID, MIRCallArg, MIRCallee, MIRConstant,
-    MIRDropKind, MIRFunction, MIROperation, MIRPollKind, MIRProgram, MIRScope,
+    MIRDropKind, MIRFunction, MIRFunctionID, MIROperation, MIRPollKind, MIRProgram, MIRScope,
     MIRScopeFact, MIRScopeID, MIRScopeKind, MIRTerminator, MIRType, MIRTypeDef, MIRUnsafeGate,
     mir_function_id,
 ]
+use jet_backend.[lir_lower_callables]
 
 // The exact predicate used by Builder and Legality: a raw Source Deref gets
 // Propagate; Shared/ref reads and missing operand metadata do not.
@@ -114,6 +115,8 @@ fn fx_stop_points() -> MIRProgram Never! {
 // A poll can leave nested sentry scopes through either cleanup edge. The
 // function unsafe gate surrounds both. Structural witness needs no substitute
 // static sentry runtime; real-source execution uses the admitted native ABI.
+// Scope witnesses lower explicit callable roots, retaining their checked
+// carriers rather than applying program-entry normalization.
 fn fx_sentry_scopes_check() -> Bool Never! {
     b := fx_builder()
     unsafe_scope :: MIRScopeID{value: U64{700}}
@@ -137,7 +140,7 @@ fn fx_sentry_scopes_check() -> Bool Never! {
         MIRScope{id: policy, kind: MIRScopeKind.Policy, span: fx_span(), name: Val("disabled"), deadline: None, facts: [MIRScopeFact]{MIRScopeFact{key: "sentry_enabled", value: "false"}}},
     }
     program :: fx_program([MIRFunction]{run}, [MIRTypeDef]{})
-    lowered :: lir_lower_callable(program, mir_function_id("run"))
+    lowered :: lir_lower_callables(program, [MIRFunctionID]{run.id})
     if lowered.issues.len() != 0 {
         loop issue in lowered.issues -> print("sentry-scopes: {issue.message}")
         return false
@@ -186,7 +189,7 @@ fn fx_deadline_scopes_check() -> Bool Never! {
         MIRScope{id: outer, kind: MIRScopeKind.Context, span: fx_span(), name: None, deadline: Val(deadline), facts: [MIRScopeFact]{}},
         MIRScope{id: inner, kind: MIRScopeKind.Context, span: fx_span(), name: None, deadline: Val(deadline), facts: [MIRScopeFact]{}},
     }
-    lowered :: lir_lower_callable(fx_program([MIRFunction]{run}, [MIRTypeDef]{}), mir_function_id("run"))
+    lowered :: lir_lower_callables(fx_program([MIRFunction]{run}, [MIRTypeDef]{}), [MIRFunctionID]{run.id})
     if lowered.issues.len() != 0 {
         loop issue in lowered.issues -> print("deadline-scopes: {issue.message}")
         return false

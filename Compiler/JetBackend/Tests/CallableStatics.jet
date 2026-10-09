@@ -1,10 +1,10 @@
-// Real MIR -> lir_lower_callable -> mapped code String-static lifetime witness.
+// Real MIR -> lir_lower_callables -> mapped code String-static lifetime witness.
 // Assembled only by run-lower-fixtures.mjs --callable-statics. The explicit
 // runtime-library argument must name the admitted canonical runtime pack;
 // there is no substitute constructor/drop implementation in this fixture.
 use core.process as process
-use jet_foundation.[MIRConstant, MIRConstantDef, MIRFunction, MIROperation, MIRTerminator, MIRTypeDef, mir_function_id]
-use jet_backend.[LIRData, LIRDataID, LIRDataReloc, LIRFunction, LIRInst, LIRCallee, lir_lower_callable, x64_call_image, x64_call_loaded, x64_load_image, x64_runtime_open, x64_unload_image]
+use jet_foundation.[MIRConstant, MIRConstantDef, MIRFunction, MIRFunctionID, MIROperation, MIRTerminator, MIRTypeDef, mir_function_id]
+use jet_backend.[LIRData, LIRDataID, LIRDataReloc, LIRFunction, LIRInst, LIRCallee, lir_lower_callables, x64_call_image, x64_call_loaded, x64_load_image, x64_runtime_open, x64_unload_image]
 
 fn cs_require(ok: Bool, name: String) {
     if !ok -> panic("native callable statics proof failed: {name}")
@@ -31,10 +31,12 @@ fn callable_statics() {
     fx_block(&reader, 0, MIRTerminator.Return{value: None})
     program := fx_program([MIRFunction]{fx_function("run", reader, fx_unit())}, [MIRTypeDef]{})
     program.constants = [MIRConstantDef]{fx_static_definition("greeting", fx_string(), MIRConstant.String{value: "héllo"})}
-    lowered :: lir_lower_callable(program, mir_function_id("run"))
+    root :: mir_function_id("run")
+    lowered :: lir_lower_callables(program, [MIRFunctionID]{root})
     loop issue in lowered.issues -> print("{issue.function}: {issue.message}")
     cs_require(lowered.issues.len() == 0, "production callable lowering and lint")
-    entry :: lowered.entry ?? panic("missing callable initialization")
+    // Resolve this checked callable's init wrapper from the root inventory.
+    entry :: lowered.callables.get(root.value) ?? panic("missing callable initialization")
     finalizer :: lowered.finalizer ?? panic("missing callable finalization")
     cs_require(entry.value != 0 && finalizer != entry, "generated init and fini surround the MIR reader")
     flag :: cs_first_data(lowered.lir.functions[entry.value])
