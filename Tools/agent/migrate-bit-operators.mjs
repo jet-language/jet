@@ -57,6 +57,20 @@ function contexts(ts, source) {
   const mask = (a, b) => { for (let k = a; k < b; k++) blocked.add(k); };
   for (let n = 0; n < ts.length; n++) {
     if (ts[n].template) blocked.add(n);
+    if (ts[n].text === 'prep' && ts[n - 1]?.text !== '.') {
+      let k = n + 1;
+      while (k < ts.length && !['{', ';'].includes(ts[k].text) && !ts[k].beforeTerminator) k++;
+      if (ts[k]?.text === '{' && ts[k].close !== undefined) {
+        k = ts[k].close + 1;
+        while (ts[k]?.text === 'else') {
+          k++;
+          while (k < ts.length && !['{', ';'].includes(ts[k].text)) k++;
+          if (ts[k]?.close === undefined) break;
+          k = ts[k].close + 1;
+        }
+      }
+      mask(n, k);
+    }
     if (ts[n].text === 'fn') {
       let k = n + 1;
       while (k < ts.length && !['{', ';'].includes(ts[k].text)) {
@@ -138,7 +152,7 @@ function contexts(ts, source) {
 
 export function migrate(source, { caretAt = () => 'pow' } = {}) {
   const ts = tokenize(foreignOpaque(source)), blocked = contexts(ts, source);
-  const sites = [], seen = new Set();
+  const sites = [], unresolved = [], seen = new Set();
   for (const t of ts) if (t.text === '^') t.caretMethod = caretAt(source.slice(0, t.start).split('\n').length);
   const prec = (token) => token.text === '^' && token.caretMethod === 'bit_xor' ? 7 : precedence[token.text];
   const method = (token) => token.text === '^' ? token.caretMethod : methods[token.text];
@@ -185,6 +199,10 @@ export function migrate(source, { caretAt = () => 'pow' } = {}) {
   }
   function collect(node) {
     for (const child of node.children) collect(child);
+    if (node.op?.text === '^' && !node.method && !seen.has(node.op.start)) {
+      seen.add(node.op.start);
+      unresolved.push({ line: source.slice(0, node.op.start).split('\n').length, before: source.slice(node.start, node.end), method: null, reason: 'requires individual caret meaning review' });
+    }
     if (node.method && !seen.has(node.op.start)) {
       seen.add(node.op.start);
       sites.push({ start: node.start, end: node.end, operator: node.op.text, method: node.method, line: source.slice(0, node.op.start).split('\n').length, before: source.slice(node.start, node.end), node });
@@ -233,7 +251,7 @@ export function migrate(source, { caretAt = () => 'pow' } = {}) {
   for (const node of active) attach(node);
   const result = patched(0, source.length, active);
   for (const site of sites) { site.after = renderWithGroups(site.node); delete site.node; }
-  return { source: result, sites: sites.sort((a, b) => a.start - b.start) };
+  return { source: result, sites: sites.sort((a, b) => a.start - b.start), unresolved };
 }
 function filesAt(path) {
   if (!statSync(path).isDirectory()) return path.endsWith('.jet') ? [path] : [];
@@ -253,7 +271,7 @@ function dirtyPaths() {
 function owner(file) {
   if (/JetBackend\/Source\/Lower\/(?:Constants|Statics|Entry|Callable|Test)\.jet/.test(file)) return 'RustLead8';
   if (/JetBackend\/Source\/Lower\/(?:Lower|Dyn\w*|Realtime|Combinators)\.jet/.test(file)) return 'JetCheckLead';
-  if (/JetDriver\/Source\/Driver\/Pipeline.jet/.test(file)) return 'RuntimeLead12';
+  if (/JetDriver\/Source\/Driver\/Pipeline.jet|JetBackend\/Source\/Image\/Object.jet/.test(file)) return 'RuntimeLead12';
   return 'unknown (ask Main)';
 }
 function selfTest() {
@@ -287,6 +305,7 @@ function selfTest() {
     ['f :: (x: Int) -[FS | Net]> x & y', 'f :: (x: Int) -[FS | Net]> x.bit_and(y)'],
     ['v: A | B = f()', 'v: A | B = f()'],
     ['a /* keep */ | b', 'a.bit_or( /* keep */  b)'],
+    ['prep if x { a | b } else { c & d }\nx | y', 'prep if x { a | b } else { c & d }\nx.bit_or(y)'],
   ];
   for (const [input, expected] of cases) {
     assert.equal(migrate(input).source, expected, input);
@@ -300,7 +319,7 @@ function main(args) {
   const mode = args.shift();
   if (!['--check', '--write'].includes(mode) || args.some((a) => a.startsWith('--'))) throw new Error('usage: --check|--write [paths ...] or --self-test');
   const files = [...new Set((args.length ? args : ['Compiler', 'Core', 'Jetpack', 'Tools/testkit', 'Examples']).flatMap((p) => filesAt(resolve(ROOT, p))))].sort();
-  const receipt = { mode, counts: { Compiler: 0, Core: 0, Jetpack: 0, 'Tools/testkit': 0, Examples: 0 }, changed: [], dirty: [], sites: [] }, initialDirty = dirtyPaths();
+  const receipt = { mode, counts: { Compiler: 0, Core: 0, Jetpack: 0, 'Tools/testkit': 0, Examples: 0 }, changed: [], dirty: [], sites: [], unresolved: [] }, initialDirty = dirtyPaths();
   for (const path of files) {
     const file = relative(ROOT, path);
     if (file.startsWith('../')) throw new Error(`outside worktree: ${path}`);
@@ -309,6 +328,10 @@ function main(args) {
     if (existsSync(stderr) && /\bE0398\b/.test(readFileSync(stderr, 'utf8'))) continue;
     const source = readFileSync(path, 'utf8');
     const migrated = migrate(source, { caretAt: (line) => caretDecisions.get(`${file}:${line}`)?.[0] ?? null });
+    for (const site of migrated.unresolved) {
+      receipt.unresolved.push({ file, ...site });
+      console.error(`${file}:${site.line}\tAMBIGUOUS ^\t${site.before}`);
+    }
     if (!migrated.sites.length) continue;
     const area = file.startsWith('Tools/testkit/') ? 'Tools/testkit' : file.split('/')[0];
     receipt.counts[area] = (receipt.counts[area] ?? 0) + migrated.sites.length;
@@ -327,6 +350,6 @@ function main(args) {
   writeFileSync(resolve(SCRATCH, 'caret-sites.tsv'), 'site\texpression\tmethod\treason\tstatus\n' + carets.join(''));
   writeFileSync(resolve(SCRATCH, `${mode.slice(2)}.json`), JSON.stringify(receipt, null, 2) + '\n');
   console.log(JSON.stringify({ counts: receipt.counts, total: receipt.sites.length, changed: receipt.changed.length, dirty: receipt.dirty }));
-  if (mode === '--check' && receipt.sites.length) process.exitCode = 1;
+  if (receipt.unresolved.length || (mode === '--check' && receipt.sites.length)) process.exitCode = 1;
 }
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) main(process.argv.slice(2));
