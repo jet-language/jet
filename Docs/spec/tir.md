@@ -26,6 +26,26 @@ those fields and formats output; it does not re-run semantic decisions such as
 expression typing or overflow classification. `tir_covers` is the coverage
 proof for reachable functions.
 
+Checked statement rows transfer into their completed function after the
+fallthrough check; contract wrapping must not copy the checked body or change
+which rows that check observes. MIR metadata collectors borrow top-level and
+nested function rows separately, sharing their identity sets rather than
+constructing a second owning concatenation. Large canonical MIR row families
+sort scalar index keys with stable merges, then share the compiler-internal
+`compiler_apply_order` permutation. It drains each owning row into one empty
+optional slot and refills the original list allocation, retaining capacity
+without deep-cloning row payloads. Other row comparators borrow their inputs.
+Neither route promises allocation-free sorting: index keys and permutation
+slots are scratch storage. Identity keys and equal-key input order are unchanged.
+The executable canonical-order fixture in
+`Compiler/JetOptimizer/Tests/CanonicalOrderingFixtures.jet` assembles the
+production helpers and checks keys, stability, permutations, idempotence,
+empty input, and singleton input.
+
+Restoring a codegen function snapshot consumes its already-owned non-Copy
+fields into the builder; only scalar Copy facts are read. Saving an enclosing
+function's independent snapshot remains a distinct operation, not a borrowed
+view that could be invalidated when the builder begins a nested function.
 ## Read-only fact channel
 
 The frozen TIR exposes one typed, borrowed `TFactChannel` view. It projects facts
