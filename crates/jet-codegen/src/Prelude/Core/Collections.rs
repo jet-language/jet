@@ -379,6 +379,29 @@ impl<T, const N: usize> JetListPushSurface for jet_mem::JetInlineList<T, N> {
     }
 }
 
+// #4566 slice 8 inline storage: `jet_mem::JetInlineList` (the vetted memory
+// prelude owns its unsafe storage); the list surfaces here are safe code.
+impl<T, const N: usize> JetListSurface for jet_mem::JetInlineList<T, N> {
+    #[inline(always)]
+    fn jet_len(&self) -> i64 {
+        <[T]>::len(self) as i64
+    }
+
+    #[inline(always)]
+    fn jet_is_empty(&self) -> bool {
+        <[T]>::is_empty(self)
+    }
+}
+
+impl<T, const N: usize> JetListPushSurface for jet_mem::JetInlineList<T, N> {
+    type Item = T;
+
+    #[inline(always)]
+    fn jet_push(&mut self, value: Self::Item) {
+        self.push(value);
+    }
+}
+
 
 #[inline(always)]
 fn jet_list_push<C: JetListPushSurface>(xs: &mut C, value: C::Item) {
