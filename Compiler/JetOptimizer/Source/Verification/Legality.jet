@@ -160,23 +160,34 @@ fn mir_pass_validate_program_scan(program: MIRProgram, pass: MIROptimizationPass
         return failures
     }
     tables :: mir_pass_legality_tables(program)
-    seen_functions := [U64:Bool]{}
-    loop function in program.functions {
-        failure := MIROptimizationError?{None}
-        if {
-            function.id.value == 0 -> failure = Val(mir_pass_error(pass, .InvalidSchema, Val(function.id), function.span, "MIR function has a zero stable identity"))
-            seen_functions.get(function.id.value) != None -> failure = Val(mir_pass_error(pass, .InvalidSchema, Val(function.id), function.span, "MIR function identity is duplicated"))
-            else -> {
-                &seen_functions.add(function.id.value, true).drop("checked absent above")
-                failure = mir_pass_validate_function(function, pass, tables)
-            }
-        }
+    identities :: mir_pass_identity_failures(program, pass)
+    loop (position, function) in program.functions {
+        failure := identities[position]
+        if failure == None -> failure = mir_pass_validate_function(function, pass, tables)
         if failure == .Val(error) {
             &failures.push(error)
             if !all -> return failures
         }
     }
     failures
+}
+
+// Per function, in program order: the error that stands in for its
+// validation when its stable identity is zero or repeats an earlier one,
+// else None (the function is validated).
+fn mir_pass_identity_failures(program: MIRProgram, pass: MIROptimizationPassID) -> [MIROptimizationError?] {
+    identities := [MIROptimizationError?]{}
+    seen_functions := [U64:Bool]{}
+    loop function in program.functions {
+        failure := MIROptimizationError?{None}
+        if {
+            function.id.value == 0 -> failure = Val(mir_pass_error(pass, .InvalidSchema, Val(function.id), function.span, "MIR function has a zero stable identity"))
+            seen_functions.get(function.id.value) != None -> failure = Val(mir_pass_error(pass, .InvalidSchema, Val(function.id), function.span, "MIR function identity is duplicated"))
+            else -> &seen_functions.add(function.id.value, true).drop("checked absent above")
+        }
+        &identities.push(failure)
+    }
+    identities
 }
 
 // Rust: crates/jet-foundation/src/MIR.rs::validate_function

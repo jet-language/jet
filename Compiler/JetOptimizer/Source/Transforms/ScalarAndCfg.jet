@@ -103,9 +103,8 @@ fn mir_pass_simplify_cfg_function(function: &MIRFunction) Never! {
     mir_pass_forward_phi_joins(&function)
 }
 
-fn mir_pass_count_use(uses: &[String:Int], value: MIRValueID) Never! {
-    key :: "{value.value}"
-    &uses.add(key, (uses.get(key) ?? 0) + 1).drop("the count replaces the prior count")
+fn mir_pass_count_use(uses: &[U64:Int], value: MIRValueID) Never! {
+    &uses.add(value.value, (uses.get(value.value) ?? 0) + 1).drop("the count replaces the prior count")
 }
 
 // MIROptimization forward_phi_joins: a block that holds only a phi, is
@@ -116,18 +115,19 @@ fn mir_pass_count_use(uses: &[String:Int], value: MIRValueID) Never! {
 // joins. Nothing executes in a bypassed block (a function with `Normal` drop
 // actions runs them on every jump, so it is left alone), and
 // mir_pass_eliminate_unreachable removes the bypassed blocks and their phi
-// values. Linear in the function.
+// values. Linear in the function. Every table is keyed by the raw U64 ID;
+// none is iterated, so the key type does not affect the result.
 // Rust: crates/jet-foundation/src/MIROptimization.rs::forward_phi_joins
 fn mir_pass_forward_phi_joins(function: &MIRFunction) Never! {
-    drop_targets := [String:Bool]{}
+    drop_targets := [U64:Bool]{}
     loop action in function.drops {
         if action.edge == {
             .Normal -> return
             .Return -> {}
-            .Failure(target) | .Unwind(target) -> &drop_targets.add("{target.value}", true).drop("a target may repeat")
+            .Failure(target) | .Unwind(target) -> &drop_targets.add(target.value, true).drop("a target may repeat")
         }
     }
-    uses := [String:Int]{}
+    uses := [U64:Int]{}
     place_rows :: mir_pass_place_rows(function)
     loop place in function.places {
         loop used in mir_pass_place_value_uses(function.places, place_rows, place.id) -> mir_pass_count_use(&uses, used)
@@ -135,8 +135,8 @@ fn mir_pass_forward_phi_joins(function: &MIRFunction) Never! {
     loop scope in function.scopes {
         if scope.deadline == .Val(deadline) -> mir_pass_count_use(&uses, deadline)
     }
-    positions := [String:Int]{}
-    edges := [String:Int]{}
+    positions := [U64:Int]{}
+    edges := [U64:Int]{}
     // Scalar linked rows avoid copying a growing bucket for each source.
     phi_heads := [U64:Int]{}
     phi_next := [Int]{}
@@ -144,7 +144,7 @@ fn mir_pass_forward_phi_joins(function: &MIRFunction) Never! {
     phi_instructions := [Int]{}
     phi_values := [MIRValueID]{}
     loop (position, block) in function.blocks {
-        &positions.add("{block.id.value}", position).drop("block ids are unique")
+        &positions.add(block.id.value, position).drop("block ids are unique")
         loop (instruction_index, instruction) in block.instructions {
             if instruction.operation == {
                 .Phi(incoming) -> {
@@ -164,23 +164,20 @@ fn mir_pass_forward_phi_joins(function: &MIRFunction) Never! {
             }
         }
         loop used in mir_terminator_value_uses(block.terminator) -> mir_pass_count_use(&uses, used)
-        loop target in mir_terminator_targets(block.terminator) {
-            key :: "{target.value}"
-            &edges.add(key, (edges.get(key) ?? 0) + 1).drop("the count replaces the prior count")
-        }
+        loop target in mir_terminator_targets(block.terminator) -> &edges.add(target.value, (edges.get(target.value) ?? 0) + 1).drop("the count replaces the prior count")
     }
     // Bypassed block -> its phi value and the block it jumps to.
-    forward_values := [String:MIRValueID]{}
-    forward_targets := [String:MIRBlockID]{}
+    forward_values := [U64:MIRValueID]{}
+    forward_targets := [U64:MIRBlockID]{}
     loop block in function.blocks {
-        key :: "{block.id.value}"
+        key :: block.id.value
         if block.id == function.entry || drop_targets.get(key) != None || block.instructions.len() != 1 -> next
         instruction :: block.instructions[0]
         value :: instruction.result ?? next
         incoming :: mir_pass_phi_rows(instruction.operation) ?? next
         target :: mir_pass_jump_target(block.terminator) ?? next
-        if target == block.id || (uses.get("{value.value}") ?? 0) != 1 -> next
-        target_position :: positions.get("{target.value}") ?? next
+        if target == block.id || (uses.get(value.value) ?? 0) != 1 -> next
+        target_position :: positions.get(target.value) ?? next
         mentions := 0
         feeds := 0
         row_position := phi_heads.get(block.id.value) ?? -1
@@ -208,10 +205,10 @@ fn mir_pass_forward_phi_joins(function: &MIRFunction) Never! {
         // Every predecessor reaches the block through its own plain jump, once,
         // and the phi names each predecessor once.
         if incoming.len() == 0 || (edges.get(key) ?? 0) != incoming.len() -> next
-        entering := [String:Bool]{}
+        entering := [U64:Bool]{}
         plain := true
         loop row in incoming {
-            source_key :: "{row.block.value}"
+            source_key :: row.block.value
             source :: positions.get(source_key) ?? -1
             if source < 0 || entering.get(source_key) != None {
                 plain = false
@@ -227,16 +224,16 @@ fn mir_pass_forward_phi_joins(function: &MIRFunction) Never! {
     if forward_values.len() == 0 -> return
     // The outermost join each bypassed block reaches, each chain walked once.
     // A jump cycle of phi-only blocks leaves the function alone.
-    finals := [String:MIRBlockID]{}
+    finals := [U64:MIRBlockID]{}
     loop block in function.blocks {
-        start_key :: "{block.id.value}"
+        start_key :: block.id.value
         if forward_targets.get(start_key) == None -> next
-        path := [String]{}
-        on_path := [String:Bool]{}
+        path := [U64]{}
+        on_path := [U64:Bool]{}
         at := block.id
         end := block.id
         loop {
-            at_key :: "{at.value}"
+            at_key :: at.value
             if finals.get(at_key) != None {
                 end = finals.get(at_key) ?? at
                 break
@@ -252,25 +249,25 @@ fn mir_pass_forward_phi_joins(function: &MIRFunction) Never! {
         }
         loop step in path -> &finals.add(step, end).drop("each block is resolved once")
     }
-    inner := [String:[MIRPhiIncoming]]{}
+    inner := [U64:[MIRPhiIncoming]]{}
     loop block_index in 0..<function.blocks.len() {
-        key :: "{function.blocks[block_index].id.value}"
+        key :: function.blocks[block_index].id.value
         if forward_values.get(key) != None {
             rows :: mir_pass_phi_rows(function.blocks[block_index].instructions[0].operation) ?? next
             &inner.add(key, rows).drop("block ids are unique")
             next
         }
         jump :: mir_pass_jump_target(function.blocks[block_index].terminator) ?? next
-        end :: finals.get("{jump.value}") ?? next
+        end :: finals.get(jump.value) ?? next
         function.blocks[block_index].terminator = MIRTerminator.Jump{target: end}
     }
     loop block_index in 0..<function.blocks.len() {
-        if forward_values.get("{function.blocks[block_index].id.value}") != None -> next
+        if forward_values.get(function.blocks[block_index].id.value) != None -> next
         loop instruction_index in 0..<function.blocks[block_index].instructions.len() {
             incoming :: mir_pass_phi_rows(function.blocks[block_index].instructions[instruction_index].operation) ?? next
             bypassed := false
             loop row in incoming {
-                phi :: forward_values.get("{row.block.value}") ?? next
+                phi :: forward_values.get(row.block.value) ?? next
                 if phi == row.value -> bypassed = true
             }
             if !bypassed -> next
@@ -287,7 +284,7 @@ fn mir_pass_forward_phi_joins(function: &MIRFunction) Never! {
                 row_block :: lists[top][cursors[top]].block
                 row_value :: lists[top][cursors[top]].value
                 cursors[top] = cursors[top] + 1
-                row_key :: "{row_block.value}"
+                row_key :: row_block.value
                 bypassed_row := false
                 if forward_values.get(row_key) == .Val(row_phi) -> bypassed_row = row_phi == row_value
                 if bypassed_row && inner.get(row_key) != None {

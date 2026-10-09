@@ -70,28 +70,16 @@ fn mir_digest_u64(writer: &MIRCanonicalWriter, value: U64) Never! {
     }
 }
 
+// Mask of an exact `Int`'s low 64 bits.
+MIR_DIGEST_WORD_MASK :: prep { 0xffffffffffffffff }
+
 // An exact `Int` as its low 64 bits, two's complement, in the same frame as
-// `mir_digest_u64`.
+// `mir_digest_u64`: byte `i` of the masked word is `(value >> 8i) & 255`, so
+// the bytes and every lane state are those of the word. A value already in
+// U64 range (every length and offset) is its own word.
 fn mir_digest_int(writer: &MIRCanonicalWriter, value: Int) Never! {
-    if !writer.hashing {
-        loop index in 0..<8 -> &writer.bytes.push(U8{(value >> (8 * index)) & 255})
-    } else {
-        lane0 := writer.lane0
-        lane1 := writer.lane1
-        lane2 := writer.lane2
-        lane3 := writer.lane3
-        loop index in 0..<8 {
-            byte :: U64.from_u8(U8{(value >> (8 * index)) & 255})
-            lane0 = (lane0 ~| byte).wrapping_mul(U64{0x100000001b3})
-            lane1 = (lane1 ~| byte).wrapping_mul(U64{0x100000001b3})
-            lane2 = (lane2 ~| byte).wrapping_mul(U64{0x100000001b3})
-            lane3 = (lane3 ~| byte).wrapping_mul(U64{0x100000001b3})
-        }
-        writer.lane0 = lane0
-        writer.lane1 = lane1
-        writer.lane2 = lane2
-        writer.lane3 = lane3
-    }
+    word :: U64.from_int(value) ?? (U64.from_int(value & MIR_DIGEST_WORD_MASK) ?? U64{0})
+    mir_digest_u64(&writer, word)
 }
 
 fn mir_digest_len(writer: &MIRCanonicalWriter, value: Int) Never! {
@@ -4285,10 +4273,21 @@ fn mir_digest_app_graph(writer: &MIRCanonicalWriter, value: MIRAppGraph?) Never!
 
 // Rust: crates/jet-foundation/src/MIROptimization.rs::write_mir_program
 // Stable scalar positions: equal keys retain their original input order.
+// An input already in order (the common case: tables the optimizer leaves
+// canonically ordered) is returned as the identity order after one linear
+// check, which is exactly what the stable merge would produce.
 fn mir_digest_order(primary: [U64], secondary: [U64], tertiary: [U64], text: [String], other_text: [String], text_first: Bool) -> [Int] Never! {
     count :: if primary.len() > 0 -> primary.len() else -> text.len()
     order := [Int]{}
     loop index in 0..<count -> &order.push(index)
+    sorted := true
+    loop index in 1..<count {
+        if mir_digest_order_before(primary, secondary, tertiary, text, other_text, text_first, index, index - 1) {
+            sorted = false
+            break
+        }
+    }
+    if sorted -> return order
     width := 1
     loop width < count {
         merged := [Int]{}

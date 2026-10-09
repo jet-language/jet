@@ -2387,7 +2387,7 @@ fn jet_driver_comptime_stage(
         staged_modules := [SemaGraphModuleResult]{}
         if &environment.registration_graph == {
             None -> return Val(jet_driver_comptime_lost_graph(values, checked_functions, trace))
-            .Val(staged_graph) -> staged_modules = sema_comptime_modules_with_values(staged_graph, values)
+            .Val(staged_graph) -> staged_modules = sema_comptime_modules_with_values(staged_graph, values) ?? panic("staging the comptime modules lost the shared pass environment")
         }
         if staged_modules.len() != graph.modules.len() {
             &diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, head.module_identity, "E0003", head.span, "the staged comptime declaration graph lost a registered module", "temporary interpreter MIR retains every module identity from the registered graph", "preserve the complete resolved module set while applying staged values"))
@@ -4522,8 +4522,12 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
         result.comptime_values = comptime_values
         return result
     }
-    resolved_registration := sema_comptime_graph_with_values(registration_graph, comptime_values)
-    if !jet_driver_merge_checked_text_functions(&checked_graph, resolved_registration, comptime_functions) {
+    // The merge reads the registration graph only for name facts (names,
+    // owners, spans, keys and kinds), which no staged value changes: values
+    // only type waiting constants. So the registered graph serves as is, and
+    // the copy with the values applied is built only for the Doc and REPL
+    // modes that read declarations through it.
+    if !jet_driver_merge_checked_text_functions(&checked_graph, registration_graph, comptime_functions) {
         if !kg.enabled -> return jet_driver_compile_internal_result(load, trace, "staged method closure lost its checked function or registered owner")
         jet_driver_keep_going_row(&kg, "comptime.validate", "-", "ICE", "staged method closure lost its checked function or registered owner", "-")
     }
@@ -4807,6 +4811,7 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
             loop function in module_row.functions { if function.key == owner.key -> root = Val(function) }
         }
         checked_root :: root ?? return jet_driver_compile_internal_result(load, trace, "REPL selected root lost its checked TFunc")
+        resolved_registration :: sema_comptime_graph_with_values(registration_graph, comptime_values)
         source :: sema_registration_callable_declaration(resolved_registration, owner) ?? return jet_driver_compile_internal_result(load, trace, "REPL selected root lost its registered declaration")
         session :: repl_session_new(resolved_registration, ^checked_graph.modules, source, checked_root, ^program_value, jet_eval_runtime_config(request.eval_config)) ?? {
             &load.diagnostics.push(jet_driver_diagnostic_without_span("E0003", "REPL session initialization refused the checked root", err.message, "select an empty zero-parameter REPL root"))

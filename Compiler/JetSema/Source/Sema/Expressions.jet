@@ -2066,6 +2066,21 @@ fn sema_expr_comptime_target(environment: SemaScopeEnvironment, scopes: &SemaSco
     None
 }
 
+// Whether sema_expr_comptime_target's target for `symbol` is declared
+// `comptime`, read in place from the graph rows.
+fn sema_expr_comptime_target_declared(environment: SemaScopeEnvironment, scopes: &SemaScopeTable, symbol: SymbolID) -> Bool {
+    if environment.registration_graph == .Val(graph) {
+        row :: graph.callable_rows.get(symbol.key) ?? return false
+        return if row == {
+            .Function(module_index, index) -> graph.modules[module_index].functions[index].declaration.is_comptime
+            .NominalMethod(module_index, owner, index) -> graph.modules[module_index].nominals[owner].methods[index].declaration.is_comptime
+            else -> false
+        }
+    }
+    target :: sema_expr_comptime_target(environment, &scopes, symbol) ?? return false
+    target.declaration.is_comptime
+}
+
 fn sema_expr_comptime_value(value: TExpr) -> TComptimeValue? {
     if value.kind == {
         .IntLit(number, _) -> {
@@ -2139,9 +2154,12 @@ fn sema_expr_record_call_fact(environment: SemaScopeEnvironment, scopes: &SemaSc
         discarded: false,
     })
     symbol :: callee ?? return true
-    target :: sema_expr_comptime_target(environment, &scopes, symbol) ?? return true
-    if !target.declaration.is_comptime -> return true
+    // Every early return here is the same `true`, and the target lookup is
+    // pure, so the cheap tests go first and only a `comptime` target builds
+    // its row (whose declaration copy is the callee's whole body).
     if scopes.comptime_execution_depth > 0 -> return true
+    if !sema_expr_comptime_target_declared(environment, &scopes, symbol) -> return true
+    target :: sema_expr_comptime_target(environment, &scopes, symbol) ?? return true
     args :: sema_expr_comptime_call_args(checked.value) ?? {
         &diagnostics.push(sema_error("E0956", span, "compile-time call `{target.path}` needs compile-time value arguments", "the deferred MIR evaluator receives only canonical TComptimeValue arguments", "pass supported compile-time values to this call"))
         return false
@@ -3856,12 +3874,12 @@ pub fn sema_check_expression(expr: Expr, expected: Type?, environment: SemaScope
         call_value := ^taken_checked ?? return None
         checked = sema_expression_auto_propagate(expr, ^call_value, expected, environment, &scopes, &context, &diagnostics)
     }
-    if checked != None {
-        value :: checked ?? return None
-        if sema_core_type_uses_default_int(value.ty) -> context.exact_int_reachable = true
-        sema_cell_guard_check_construct(expr, value.ty, &diagnostics)
-    }
-    checked
+    // The checked value moves out and back: binding it while `checked` was
+    // still returned copied the whole checked tree at every level.
+    value :: checked ?? return None
+    if sema_core_type_uses_default_int(value.ty) -> context.exact_int_reachable = true
+    sema_cell_guard_check_construct(expr, value.ty, &diagnostics)
+    Val(value)
 }
 
 // Check a carrier consumer's subject (`??`, `?`, an `.Ok`/`.Err` pattern): the
