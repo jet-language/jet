@@ -41,26 +41,23 @@ impl __LoadContext.Close {
 
 fn load(path: String, grant: ModGrant) -[FS, Exec]> Mod ModError! {
     if !core.mod.__supported() ->
-        return Err(ModError.Unsupported("Mod.load is not supported on target `" + core.mod.__os() + "`"))
-    handle :: core.mod.__read_context(path, grant) ? value -> value ! reason -> return Err(mod_error(reason))
+        return Err(ModError.Unsupported("Mod.load is not supported on target `{core.mod.__os()}`"))
+    handle :: core.mod.__read_context(path, grant) ?? return Err(mod_error(err))
     context :: __LoadContext{handle: handle}
-    core.mod.__parse_context(handle) ? unit -> unit ! reason -> return Err(ModError.Invalid(reason))
-    core.mod.__check_context(handle) ? unit -> unit ! reason -> return Err(mod_error(reason))
+    core.mod.__parse_context(handle) ?? return Err(ModError.Invalid(err))
+    core.mod.__check_context(handle) ?? return Err(mod_error(err))
     if !core.mod.__context_digest(handle) ->
-        return Err(ModError.Invalid("cannot map library payload: `" + core.mod.__context_name(handle) + "` has a content digest that does not match its metadata"))
-    core.mod.__stage_context(handle) ? unit -> unit ! reason -> return Err(ModError.Invalid(reason))
-    core.mod.__open_context(handle) ? unit -> unit ! reason ->
-        return Err(ModError.Invalid("cannot map library payload: " + reason))
+        return Err(ModError.Invalid("cannot map library payload: `{core.mod.__context_name(handle)}` has a content digest that does not match its metadata"))
+    core.mod.__stage_context(handle) ?? return Err(ModError.Invalid(err))
+    core.mod.__open_context(handle) ?? return Err(ModError.Invalid("cannot map library payload: {err}"))
     text_exports := false
     loop index in 0..<core.mod.__exports_count(handle) {
         info :: core.mod.__export_info(handle, index)
         text_exports = text_exports || info.text
-        core.mod.__resolve_export(handle, index) ? unit -> unit ! reason ->
-            return Err(ModError.Invalid("E1341: library `" + core.mod.__context_name(handle) + "` metadata names `" + info.name + "`, but the payload has no `" + info.symbol + "` export: " + reason))
+        core.mod.__resolve_export(handle, index) ?? return Err(ModError.Invalid("E1341: library `{core.mod.__context_name(handle)}` metadata names `{info.name}`, but the payload has no `{info.symbol}` export: {err}"))
     }
     if text_exports {
-        core.mod.__resolve_symbol(handle, "jet_text_free") ? unit -> unit ! reason ->
-            return Err(ModError.Invalid("E1341: library `" + core.mod.__context_name(handle) + "` has Text exports but no `jet_text_free` allocator release export: " + reason))
+        core.mod.__resolve_symbol(handle, "jet_text_free") ?? return Err(ModError.Invalid("E1341: library `{core.mod.__context_name(handle)}` has Text exports but no `jet_text_free` allocator release export: {err}"))
     }
     // Finish consumes the raw owner; the lexical Close sees an empty slot.
     Ok(core.mod.__finish_context(handle))
