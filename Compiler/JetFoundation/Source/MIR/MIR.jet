@@ -1959,6 +1959,13 @@ fn mir_value_consumption_transfers(consumption: MIRValueConsumption) -> Bool Nev
     }
 }
 
+fn mir_value_consumption_requires_owner(consumption: MIRValueConsumption) -> Bool Never! {
+    if consumption == {
+        .Yes(requires_owner) -> requires_owner
+        else -> false
+    }
+}
+
 fn mir_call_arg_consumes(arg: MIRCallArg) -> Bool Never! {
     !(arg.implicit_clone || arg.shared_auto_clone || arg.widen_fixed_to_list) && (arg.access == .Move || arg.owned_last_use)
 }

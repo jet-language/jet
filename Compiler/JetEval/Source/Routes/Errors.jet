@@ -368,8 +368,8 @@ fn jet_eval_error_append_metadata(error: TComptimeValue, identity: String?, memb
                 .List(_) -> {}
                 else -> return jet_eval_error_operation_problem(span, "checked default error metadata history is not a list")
             }
-        } else -> return jet_eval_error_operation_problem(span, "checked default error metadata is not canonical")
-    } else -> return jet_eval_error_operation_problem(span, "checked error operation requires the canonical default error carrier")
+        } else { return jet_eval_error_operation_problem(span, "checked default error metadata is not canonical") }
+    } else { return jet_eval_error_operation_problem(span, "checked error operation requires the canonical default error carrier") }
     // One necessary owned result copy; never reconstruct from a Report.
     result := error
     if &result == .Struct(_, fields) {
@@ -381,9 +381,9 @@ fn jet_eval_error_append_metadata(error: TComptimeValue, identity: String?, memb
             }
             if &metadata_fields[member_index].value == .List(items) {
                 &items.push(^item)
-            } else -> return jet_eval_error_operation_problem(span, "checked default error metadata history is not a list")
-        } else -> return jet_eval_error_operation_problem(span, "checked default error metadata is not canonical")
-    } else -> return jet_eval_error_operation_problem(span, "checked error operation requires the canonical default error carrier")
+            } else { return jet_eval_error_operation_problem(span, "checked default error metadata history is not a list") }
+        } else { return jet_eval_error_operation_problem(span, "checked default error metadata is not canonical") }
+    } else { return jet_eval_error_operation_problem(span, "checked error operation requires the canonical default error carrier") }
     JetEvalErrorOperation.Value{value: ^result}
 }
 fn jet_eval_error_apply_conversion(error: TComptimeValue, source: String, target: String, span: Span) -> JetEvalErrorOperation Never! {
