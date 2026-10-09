@@ -12,6 +12,8 @@
 // Collection compaction swaps owned slots and pops tails; projections preserve
 // their insertion order without moving fields out of indexed borrowed storage.
 // Named XML event payloads use the language's labeled brace construction.
+// Token markers borrow text; encoding sniffing compares bounded wire bytes,
+// avoiding temporary owning arrays where a View is required.
 use core.encoding.[Dyn]
 use core.encoding as encoding
 use core.text as unicode
@@ -122,22 +124,6 @@ fn utf8_scalar(bytes: View<U8>, offset: Int) -> UTF8Scalar Never! {
     UTF8Scalar{
         value: (first % 8) * 262144 + (Int{bytes[offset + 1]} % 64) * 4096 +
             (Int{bytes[offset + 2]} % 64) * 64 + Int{bytes[offset + 3]} % 64, width: 4}
-}
-fn byte_prefix(bytes: View<U8>, start: Int, needle: View<U8>) -> Bool Never! {
-    if start < 0 || needle.len() > bytes.len() - start -> return false
-    loop index in 0..<needle.len() {
-        if bytes[start + index] != needle[index] -> return false
-    }
-    true
-}
-fn byte_find(bytes: View<U8>, start: Int, needle: View<U8>) -> Int? Never! {
-    last :: bytes.len() - needle.len()
-    index := start
-    loop index <= last {
-        if byte_prefix(bytes, index, needle) -> return Val(index - start)
-        index += 1
-    }
-    None
 }
 fn text_byte(value: String, index: Int) -> U8 Never! {
     #Unsafe("all callers iterate or check the UTF-8 byte bounds before borrowing this byte") {
@@ -1958,21 +1944,21 @@ impl ByteLexer {
     // Rust: crates/jet-foundation/src/XmlPull.rs:4942
     fn choose_encoding(self: &ByteLexer, final_input: Bool) XMLFault! {
         if self.encoding != None -> return
-        if byte_prefix(self.undecided[0..<self.undecided.len()], 0, [U8]{0xef, 0xbb, 0xbf}[0..<3]) {
+        if self.undecided.len() >= 3 && self.undecided[0] == (U8{0xef}) && self.undecided[1] == (U8{0xbb}) && self.undecided[2] == (U8{0xbf}) {
             self.encoding = Val(WireEncoding.UTF8)
             self.bom = take_bytes(&self.undecided, 3)
             self.wire_offset = 3
-        } else if byte_prefix(self.undecided[0..<self.undecided.len()], 0, [U8]{0xff, 0xfe}[0..<2]) {
+        } else if self.undecided.len() >= 2 && self.undecided[0] == (U8{0xff}) && self.undecided[1] == (U8{0xfe}) {
             self.encoding = Val(WireEncoding.UTF16Le)
             self.bom = take_bytes(&self.undecided, 2)
             self.wire_offset = 2
-        } else if byte_prefix(self.undecided[0..<self.undecided.len()], 0, [U8]{0xfe, 0xff}[0..<2]) {
+        } else if self.undecided.len() >= 2 && self.undecided[0] == (U8{0xfe}) && self.undecided[1] == (U8{0xff}) {
             self.encoding = Val(WireEncoding.UTF16Be)
             self.bom = take_bytes(&self.undecided, 2)
             self.wire_offset = 2
         } else if self.undecided.len() >= 4 {
-            if byte_prefix(self.undecided[0..<self.undecided.len()], 0, [U8]{0, 60, 0, 63}[0..<4]) -> self.encoding = Val(WireEncoding.UTF16Be)
-            else if byte_prefix(self.undecided[0..<self.undecided.len()], 0, [U8]{60, 0, 63, 0}[0..<4]) -> self.encoding = Val(WireEncoding.UTF16Le)
+            if self.undecided[0] == (U8{0}) && self.undecided[1] == (U8{60}) && self.undecided[2] == (U8{0}) && self.undecided[3] == (U8{63}) -> self.encoding = Val(WireEncoding.UTF16Be)
+            else if self.undecided[0] == (U8{60}) && self.undecided[1] == (U8{0}) && self.undecided[2] == (U8{63}) && self.undecided[3] == (U8{0}) -> self.encoding = Val(WireEncoding.UTF16Le)
             else { self.encoding = Val(WireEncoding.UTF8) }
         } else if final_input || self.undecided.len() >= 3 { self.encoding = Val(WireEncoding.UTF8) }
         if self.encoding != None {
@@ -2511,9 +2497,9 @@ fn general_entity_refs(value: String) -> [String] Never! {
     refs := [String]{}
     at := 0
     loop at < bytes.len() {
-        rel :: byte_find(bytes[0..<bytes.len()], at, [U8]{38}[0..<1]) ?? break
+        rel :: byte_find_text(bytes[0..<bytes.len()], at, "&") ?? break
         start :: at + rel
-        end :: byte_find(bytes[0..<bytes.len()], start, [U8]{59}[0..<1]) ?? break
+        end :: byte_find_text(bytes[0..<bytes.len()], start, ";") ?? break
         name :: byte_text(bytes[0..<bytes.len()], start + 1, start + end)
         if !name.is_empty() && !name.starts_with("#") && predefined(name) == None && valid_name(name) -> &refs.push(name.copy())
         at = start + end + 1
@@ -2559,7 +2545,7 @@ fn declared_entity_table(subset: String?) -> DeclaredEntityTable XMLFault! {
     reject_parameter_entity_markup(bytes[0..<bytes.len()], 0) ?? return Err(err)
     search_from := 0
     loop {
-        rel :: byte_find(bytes[0..<bytes.len()], search_from, [U8]{60,33,69,78,84,73,84,89}[0..<8]) ?? break
+        rel :: byte_find_text(bytes[0..<bytes.len()], search_from, "<!ENTITY") ?? break
         start :: search_from + rel
         count += 1
         cursor := start + 8
@@ -2578,14 +2564,14 @@ fn declared_entity_table(subset: String?) -> DeclaredEntityTable XMLFault! {
         if !valid_name(name) -> return Err(XMLFault.at(start, "invalid ENTITY declaration name"))
         skip_ascii_space(bytes[0..<bytes.len()], &cursor)
         kind := DeclaredEntityKind.Internal
-        if byte_prefix(bytes[0..<bytes.len()], cursor, [U8]{83,89,83,84,69,77}[0..<6]) || byte_prefix(bytes[0..<bytes.len()], cursor, [U8]{80,85,66,76,73,67}[0..<6]) {
-            if byte_prefix(bytes[0..<bytes.len()], cursor, [U8]{80,85,66,76,73,67}[0..<6]) {
+        if byte_prefix_text(bytes[0..<bytes.len()], cursor, "SYSTEM") || byte_prefix_text(bytes[0..<bytes.len()], cursor, "PUBLIC") {
+            if byte_prefix_text(bytes[0..<bytes.len()], cursor, "PUBLIC") {
                 cursor += 6
                 _ :: take_entity_literal(bytes[0..<bytes.len()], &cursor) ?? return Err(err)
             } else { cursor += 6 }
             _ :: take_entity_literal(bytes[0..<bytes.len()], &cursor) ?? return Err(err)
             skip_ascii_space(bytes[0..<bytes.len()], &cursor)
-            if byte_prefix(bytes[0..<bytes.len()], cursor, [U8]{78,68,65,84,65}[0..<5]) -> return Err(XMLFault.at_kind(start, Reason.Unsupported, "unparsed external entities are unsupported"))
+            if byte_prefix_text(bytes[0..<bytes.len()], cursor, "NDATA") -> return Err(XMLFault.at_kind(start, Reason.Unsupported, "unparsed external entities are unsupported"))
             kind = DeclaredEntityKind.External
         } else if cursor < bytes.len() && (bytes[cursor] == (U8{39}) || bytes[cursor] == (U8{34})) {
             value :: take_entity_literal(bytes[0..<bytes.len()], &cursor) ?? return Err(err)
@@ -2790,7 +2776,7 @@ impl Scanner {
     // Rust: crates/jet-foundation/src/XmlPull.rs:6102
     fn reference(self: &Scanner) -> Reference XMLFault! {
         start :: self.offset
-        end :: byte_find(self.source[0..<self.source.len()], start, [U8]{59}[0..<1]) ?? return Err(self.fail("unterminated entity reference"))
+        end :: byte_find_text(self.source[0..<self.source.len()], start, ";") ?? return Err(self.fail("unterminated entity reference"))
         name :: byte_text(self.source[0..<self.source.len()], start + 1, start + end)
         if name.is_empty() -> return Err(self.fail("empty entity reference"))
         self.validate_characters(start, start + end + 1) ?? return Err(err)
@@ -2810,7 +2796,7 @@ impl Scanner {
         at := 0
         all := true
         loop at < bytes.len() {
-            if byte_find(bytes[0..<bytes.len()], at, [U8]{38}[0..<1]) == .Val(rel) {
+            if byte_find_text(bytes[0..<bytes.len()], at, "&") == .Val(rel) {
                 if rel > 0 {
                     literal :: byte_text(bytes[0..<bytes.len()], at, at + rel)
                     value :: normalize_attribute_text(literal)
@@ -2818,7 +2804,7 @@ impl Scanner {
                     &parts.push(Part.Text{value: ^value, raw: literal.copy()})
                 }
                 start :: at + rel
-                end :: byte_find(bytes[0..<bytes.len()], start, [U8]{59}[0..<1]) ?? return Err(XMLFault.at(source_base + start, "unterminated entity reference"))
+                end :: byte_find_text(bytes[0..<bytes.len()], start, ";") ?? return Err(XMLFault.at(source_base + start, "unterminated entity reference"))
                 name :: byte_text(bytes[0..<bytes.len()], start + 1, start + end)
                 resolved := if &self.resolve_entity(name) == {
                     .Val(value) -> Val(^value)
@@ -3113,7 +3099,7 @@ impl Scanner {
         }
         if self.starts("</") {
             start :: self.offset
-            rel :: byte_find(self.source[0..<self.source.len()], start, [U8]{62}[0..<1]) ?? return Err(self.fail("unterminated closing tag"))
+            rel :: byte_find_text(self.source[0..<self.source.len()], start, ">") ?? return Err(self.fail("unterminated closing tag"))
             self.validate_characters(start, start + rel + 1) ?? return Err(err)
             raw_name :: byte_text(self.source[0..<self.source.len()], start + 2, start + rel).trim()
             frame :: self.stack.last() ?? return Err(XMLFault.at(start, "closing tag without opener"))
