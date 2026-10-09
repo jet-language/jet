@@ -73,7 +73,7 @@ fn jet_testing_compare(
 ) -> jet_std::JetTestComparison {
     let relation = jet_testing_relation(relation);
     if !relation.supports_plain_callable()
-        && matches!((&relation[..]), "ordered_effects" | "typed_failure")
+        && matches!(relation.as_str(), "ordered_effects" | "typed_failure")
     {
         let record = crate::jet_testing_comparison_foundation::ComparisonRecord::terminal(
             relation,
@@ -135,7 +135,7 @@ fn jet_testing_compare(
             &relation,
             crate::jet_testing_comparison_foundation::ObservationRelation::TypedEquality
         ) {
-            sample = sample.with_declared_equal(jet_std::JetDataTreeAccess::equal_unordered(
+            sample = sample.with_declared_equal(jet_std::JetDynAccess::equal_unordered(
                 &reference_value,
                 &candidate_value,
             ));

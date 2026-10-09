@@ -294,7 +294,8 @@ fn jet_history_dyn_capture(value: &jet_std::Dyn, depth: usize) -> Result<jet_std
         Tree::Float(value) => ("float", Tree::Text(value.to_bits().to_string())),
         Tree::Number(value) => ("number", Tree::Text(value.clone())),
         Tree::Text(value) => ("text", Tree::Text(value.clone())),
-        Tree::Bytes(value) => ("bytes", Tree::Array(value.iter().map(|value| Tree::Int(i64::from(*value))).collect())),
+        Tree::Bytes(value) => ("bytes", Tree::Array(value.iter().map(|value| Tree::Int(i64::from(*value).into())).collect())),
+        Tree::DateTime(value) => ("datetime", Tree::Text(value.to_rfc3339())),
         Tree::Array(values) => ("array", Tree::Array(values.iter().map(|value| {
             jet_history_dyn_capture(value, depth + 1)
         }).collect::<Result<_, _>>()?)),
@@ -343,10 +344,10 @@ fn jet_testing_history_execute<Command>(
     commands: &[Command],
 ) -> Result<
     (
-        jet_std::DataTree,
-        jet_std::DataTree,
-        crate::jet_std::DataTree,
-        crate::jet_std::DataTree,
+        jet_std::Dyn,
+        jet_std::Dyn,
+        jet_std::Dyn,
+        jet_std::Dyn,
     ),
     String,
 >
@@ -635,7 +636,7 @@ where
                 &relation,
                 crate::jet_testing_comparison_foundation::ObservationRelation::TypedEquality
             ) {
-                sample = sample.with_declared_equal(jet_std::JetDataTreeAccess::equal_unordered(
+                sample = sample.with_declared_equal(jet_std::JetDynAccess::equal_unordered(
                     &reference_observed,
                     &candidate_observed,
                 ));
@@ -768,7 +769,9 @@ mod jet_testing_history_web {
 
     fn integer(value: &Tree, name: &str) -> Result<i64, String> {
         match value {
-            Tree::Int(value) => Ok(*value),
+            Tree::Int(value) => value
+                .to_i64()
+                .ok_or_else(|| format!("{name} must be an exact integer")),
             Tree::Number(value) => value
                 .parse::<i64>()
                 .map_err(|_| format!("{name} must be an exact integer")),
@@ -778,8 +781,9 @@ mod jet_testing_history_web {
 
     fn unsigned(value: &Tree, name: &str) -> Result<u64, String> {
         match value {
-            Tree::Int(value) => u64::try_from(*value)
-                .map_err(|_| format!("{name} must be a non-negative exact integer")),
+            Tree::Int(value) => value
+                .to_u64()
+                .ok_or_else(|| format!("{name} must be a non-negative exact integer")),
             Tree::Number(value) => value
                 .parse::<u64>()
                 .map_err(|_| format!("{name} must be a non-negative exact integer")),
@@ -816,11 +820,11 @@ mod jet_testing_history_web {
     }
 
     fn integer_tree(value: i64) -> Tree {
-        Tree::Int(value)
+        Tree::Int(value.into())
     }
 
     fn unsigned_tree(value: u64) -> Tree {
-        Tree::Number(value.to_string())
+        Tree::Int(value.into())
     }
 
     fn id_tree(value: u32) -> Tree {
@@ -980,7 +984,10 @@ mod jet_testing_history_web {
     fn history_value(value: &Tree, label: &str) -> Result<HistoryValue, String> {
         let Tree::Object(_) = value else {
             return match value {
-                Tree::Int(value) => Ok(HistoryValue::Integer(*value)),
+                Tree::Int(value) => value
+                    .to_i64()
+                    .map(HistoryValue::Integer)
+                    .ok_or_else(|| format!("{label} integer is out of range")),
                 Tree::Number(value) => value
                     .parse::<i64>()
                     .map(HistoryValue::Integer)
@@ -1363,7 +1370,7 @@ mod jet_testing_history_web {
                 ("tag".to_string(), Tree::Text("Some".to_string())),
                 (
                     "values".to_string(),
-                    Tree::Array(vec![Tree::Int(value)]),
+                    Tree::Array(vec![Tree::Int(value.into())]),
                 ),
             ]),
             None => Tree::Object(vec![
@@ -1391,7 +1398,7 @@ mod jet_testing_history_web {
             ("candidate".to_string(), Tree::Array(value.candidate)),
             (
                 "first_difference".to_string(),
-                Tree::Int(value.first_difference),
+                Tree::Int(value.first_difference.into()),
             ),
             ("reason".to_string(), Tree::Text(value.reason)),
             (
@@ -1560,8 +1567,8 @@ mod jet_testing_history_web {
         (
             Tree,
             Tree,
-            jet_std::DataTree,
-            jet_std::DataTree,
+            Tree,
+            Tree,
         ),
         String,
     >
@@ -1755,7 +1762,7 @@ mod jet_testing_history_web {
                     crate::jet_testing_comparison_foundation::ObservationRelation::TypedEquality
                 ) {
                     sample =
-                        sample.with_declared_equal(jet_std::JetDataTreeAccess::equal_unordered(
+                        sample.with_declared_equal(jet_std::JetDynAccess::equal_unordered(
                             &reference_observed,
                             &candidate_observed,
                         ));
