@@ -990,6 +990,30 @@ D-CORE-FILELOCK1):
   kernel boundary, including inside `IOError!`; an absent value is not an I/O
   failure, and an actual I/O failure retains its original report.
 
+Store-grade contracts (D-CORE-FILEERROR1, D-CORE-FILEOPEN1, D-CORE-FILESTAT1,
+D-CORE-FILEDIR1, D-CORE-HANDLEFD1, D-CORE-FILERENAME1, D-CORE-FILEXATTR1):
+
+- `IOError.AlreadyExists` reports an existing target a call was asked not to
+  replace (`EEXIST`, `ERROR_FILE_EXISTS`, `ERROR_ALREADY_EXISTS`).
+  `IOError.Unsupported` reports a request this system or file system cannot
+  perform (`ENOTSUP`, `EOPNOTSUPP`, `ENOSYS`, `ERROR_NOT_SUPPORTED`). Both
+  carry the shared `IOContext`; match the kind, never `os_code`.
+- A `Directory` keeps working after its path is renamed or removed. Its
+  methods (`open`, `create`, `open_directory`, `create_directory`, `list`,
+  `stat`, `entry_stat`, `read_link`, `rename(from, to, into:, if_exists:)`,
+  `remove`, `remove_directory`, `fsync`) take a relative name of plain parts
+  separated by `/`. Each part is opened without following a link; `..`, `.`,
+  empty parts, and absolute names are `IOError.InvalidInput`. `create_directory`
+  on an existing name is `AlreadyExists`. The handle is close-on-exec and
+  closes at scope exit.
+- `rename(..., if_exists: .Refuse)` is `AlreadyExists` when the target exists;
+  a file system without no-replace renames falls back to link-then-unlink for
+  files and reports `Unsupported` for folders. `.Swap` exchanges two existing
+  names in one step; a missing name is `NotFound` and a system without
+  exchange is `Unsupported`.
+- Extended attributes on Windows, or on a file system without them, report
+  no names and no values; writes are `Unsupported`.
+
 The retired raw-String `read_dir` helper is not a reserved method name:
 user struct and trait methods named `read_dir` participate in normal resolution.
 
