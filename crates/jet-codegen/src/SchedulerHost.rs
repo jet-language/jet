@@ -429,24 +429,18 @@ mod scheduler_host_tests {
     }
 
     #[test]
-    fn zero_capacity_channel_clamps_to_a_buffer_of_one() {
-        // I9: `channel<T>(0)` must mean the same thing under the JIT as
-        // under the shipped AOT prelude, whose `bounded()` clamps with
-        // `capacity.max(1)`. Capacity is a memory/backpressure bound, not a
-        // rendezvous handshake; no zero-capacity semantics are ratified.
-        let channel = JetSchedulerChannel::bounded(0);
-        let sender = channel.sender();
-        let (done_tx, done_rx) = std::sync::mpsc::sync_channel(1);
-        let worker = std::thread::spawn(move || {
-            assert!(sender.send(7));
-            done_tx.send(()).unwrap();
-        });
-        // A capacity-1 buffer accepts the first send without a receiver.
-        done_rx
-            .recv_timeout(std::time::Duration::from_secs(1))
-            .unwrap();
+    fn capacity_below_one_stops_instead_of_clamping() {
+        for capacity in [0, -1] {
+            let payload = std::panic::catch_unwind(|| JetSchedulerChannel::<i64>::bounded(capacity))
+                .err()
+                .expect("a capacity below 1 must stop");
+            let rendered = payload.downcast_ref::<String>().expect("rendered stop");
+            assert!(rendered.contains("E3001"), "{rendered}");
+            assert!(rendered.contains(&format!("channel capacity must be at least 1, got {capacity}")), "{rendered}");
+        }
+        let channel = JetSchedulerChannel::<i64>::bounded(1);
+        assert!(channel.sender().send(7));
         assert_eq!(channel.receive(), Some(7));
-        worker.join().unwrap();
     }
 
     fn ready_entries_in_reverse_completion_order(

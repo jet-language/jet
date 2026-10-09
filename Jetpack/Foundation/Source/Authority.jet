@@ -25,6 +25,11 @@ AUTHORITY_PACKAGE_DEFAULT :: prep { "package.jet default" }
 // The deny-only stop root (D-PANICROOT1).
 AUTHORITY_PANIC_ROOT :: prep { "Panic" }
 
+pub fn authority_is_deny_only(right: String) -> Bool Never! {
+    root :: authority_root(right)
+    root == "Panic" || root == "Mem" || right == "Time.Wait"
+}
+
 // The one verdict every checkpoint answers.
 pub enum AuthorityVerdict {
     Allowed
@@ -253,22 +258,20 @@ pub struct ApplicationAuthority {
         self.is_application_default() || self.authority.starts_with(AUTHORITY_PACKAGE_DEFAULT)
     }
 
-    // The complete `allow:` row a manifest-less program must declare; `Panic`
-    // is deny-only and never a positive grant.
+    // Deny-only rights never appear in a positive grant.
     fn inline_allow_row(self) -> [String] Never! {
         out := [String]{}
         loop effect_name in self.required_effects {
-            if authority_root(effect_name) != AUTHORITY_PANIC_ROOT -> &out.push(effect_name)
+            if !authority_is_deny_only(effect_name) -> &out.push(effect_name)
         }
         authority_holds(out)
     }
 
-    // Required effects with no policy verdict. `Panic` is not a positive
-    // request; an explicit `Panic` denial is still reported as denied.
+    // Deny-only rights need no grant; explicit denials still apply.
     fn undecided_effects(self) -> [String] Never! {
         out := [String]{}
         loop effect_name in self.required_effects {
-            if authority_root(effect_name) == AUTHORITY_PANIC_ROOT -> next
+            if authority_is_deny_only(effect_name) -> next
             if authority_answer(self.granted_effects, self.denied_effects, effect_name) == AuthorityVerdict.Missing -> &out.push(effect_name)
         }
         authority_holds(out)

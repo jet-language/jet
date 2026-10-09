@@ -7,7 +7,7 @@ function jet_web_closed_result() {
 
 class JetWebChannel {
   constructor(capacity = null, kind = "channel", delayMs = 0) {
-    this.capacity = capacity == null ? null : Number(BigInt(capacity) <= 0n ? 1n : BigInt(capacity));
+    this.capacity = capacity == null ? null : Number(BigInt(capacity));
     this.queue = [];
     this.closed = false;
     this.cancelled = false;
@@ -121,6 +121,9 @@ function jet_channel_new() {
 }
 
 function jet_channel_bounded(capacity) {
+  if (BigInt(capacity) < 1n) {
+    jet_runtime_stop("E3001", "", 0, `channel capacity must be at least 1, got ${BigInt(capacity)}`);
+  }
   const channel = new JetWebChannel(capacity);
   return { sender: new JetWebSender(channel), receiver: new JetWebReceiver(channel) };
 }

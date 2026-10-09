@@ -470,13 +470,16 @@ pub const JET_KEYWORD_LIST: &[&str] = &[
     KW_AS,
     KW_EXTERN,
     KW_MODULE,
+    KW_RUST,
     // Control flow (M1, S19, S23, M1/M2)
     KW_IF,
     KW_ELSE,
     KW_LOOP,
     KW_IN,
     KW_BREAK,
+    KW_NEXT,
     KW_RETURN,
+    KW_YIELD,
     KW_DEFER,
     // Types and declarations (M2, S30, S27, M2, S28, S55, S57, D-DIST1)
     KW_STRUCT,
@@ -489,7 +492,9 @@ pub const JET_KEYWORD_LIST: &[&str] = &[
     KW_TAG,
     KW_EFFECT_DECL,
     KW_DERIVE,
-    // D-VERDICT-1308-1: `comptime` is retired teaching-only (E0374 → `@`).
+    // Preparation and compiler facts (D-PREP-SURFACE2, D-FACTDECL1).
+    KW_PREP,
+    KW_FACT,
     KW_DISTINCT,
     // Schema migrations (D-MIGRATE1 / D-MIGRATE2)
     KW_MIGRATION,
@@ -717,6 +722,7 @@ pub const IMPURE_BUILTINS: &[&str] = &[
 // old comments or docs; check Docs/spec/syntax-decisions.md for the live law
 // before trusting any comment that predates 2026-07-23.
 use super::{
+    KW_PREP, KW_NEXT, KW_FACT, KW_YIELD, KW_RUST,
     BUILTIN_INPUT, BUILTIN_PRINT, CTX_BLOCK, KW_ALIAS, KW_AS, KW_BREAK, KW_CONC_TASK, KW_DEFER,
     KW_DERIVE, KW_EFFECT_DECL, KW_ELSE, KW_ENUM, KW_EXTERN, KW_FN, KW_FREEZE, KW_IF, KW_IMPL,
     KW_IMPURE, KW_IN, KW_IT, KW_JOB, KW_LOOP, KW_MARKER, KW_MODULE, KW_POLICY, KW_PRIV,

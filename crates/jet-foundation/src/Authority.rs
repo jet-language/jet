@@ -34,6 +34,11 @@ pub fn root(right: &str) -> &str {
     right.split('.').next().unwrap_or(right)
 }
 
+/// Ambient allocation and waiting, like Panic, may be denied but need no grant.
+pub fn is_deny_only(right: &str) -> bool {
+    matches!(root(right), "Panic" | "Mem") || right == crate::Syntax::EFFECT_LEAF_TIME_WAIT
+}
+
 /// Resolve one root using the canonical table. Dotted input is accepted only
 /// for its root; leaf declaration remains sema's job.
 pub fn parse_root(right: &str) -> Option<&'static str> {
@@ -341,11 +346,11 @@ impl ApplicationAuthority {
     /// The complete `allow:` row a manifest-less program must declare. An
     /// inline Package replaces the beginner default instead of extending it,
     /// so the row names every required effect, not only the undecided ones.
-    /// `Panic` is a deny-only stop row and is never a positive grant.
+    /// Deny-only rights never appear in a positive grant.
     pub fn inline_allow_row(&self) -> Holds {
         self.required_effects
             .iter()
-            .filter(|effect| root(effect) != Effect::Panic.name())
+            .filter(|effect| !is_deny_only(effect))
             .cloned()
             .collect()
     }
@@ -373,13 +378,12 @@ impl ApplicationAuthority {
     }
 
     /// Required effects with no policy verdict at the application boundary.
-    /// `Panic` is an internal deny-only stop row, not a positive authority
-    /// request. An explicit `Panic` denial is still reported below.
+    /// Deny-only rights need no positive grant; explicit denials still apply.
     pub fn undecided_effects(&self) -> Holds {
         self.required_effects
             .iter()
             .filter(|effect| {
-                root(effect) != Effect::Panic.name()
+                !is_deny_only(effect)
                     && answer(&self.granted_effects, &self.denied_effects, effect)
                         == Verdict::Missing
             })
@@ -1052,7 +1056,7 @@ mod tests {
             authority: "package.jet authority.holds".to_string(),
         };
         let diagnostic = authority.policy_diagnostic().expect("E1803");
-        assert!(diagnostic.fix.contains("allow: [Exec, IO, Mem.Alloc]"));
+        assert!(diagnostic.fix.contains("allow: [Exec, IO]"));
     }
 
     #[test]
@@ -1089,6 +1093,25 @@ mod tests {
             .to_ascii_lowercase()
             .contains("adjust the denial"));
         assert!(!diagnostic.fix.contains("allow: [Panic]"));
+    }
+
+    #[test]
+    fn allocation_and_waiting_need_no_grant_but_respect_denials() {
+        let mut authority = ApplicationAuthority {
+            required_effects: Holds::from(["Mem.Rc".to_string(), "Time.Wait".to_string()]),
+            granted_effects: Holds::new(),
+            denied_effects: Holds::new(),
+            authority: ApplicationAuthority::APPLICATION_DEFAULT.to_string(),
+        };
+        assert!(authority.undecided_effects().is_empty());
+        assert!(authority.inline_allow_row().is_empty());
+        assert!(authority.is_allowed());
+        for right in ["Mem.Rc", "Time.Wait"] {
+            authority.denied_effects.insert(right.to_string());
+            assert!(!authority.is_allowed());
+            assert!(authority.policy_diagnostic().unwrap().what.contains(right));
+            authority.denied_effects.clear();
+        }
     }
 
     #[test]

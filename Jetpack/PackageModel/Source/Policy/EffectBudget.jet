@@ -284,13 +284,9 @@ pub fn pkg_effect_provenance_for(entries: [PackageEffects], name: String) -> [St
     [String]{}
 }
 
-// Rights of one budget row, dropping memory rights and unknown spellings.
+// Budget rows share the authority parser; deny-only rights remain enforceable.
 fn pkg_effect_budget_rights(names: [String]) -> [String] Never! {
-    kept := [String]{}
-    loop name in names {
-        if !pkg_effect_is_memory_right(name) -> &kept.push(name)
-    }
-    authority_parse_rights(kept)
+    authority_parse_rights(names)
 }
 
 // D-EFFBUDGET1 whole-graph enforcement: with `authority.holds` declared,
@@ -310,11 +306,10 @@ pub fn pkg_effect_enforce(entries: [PackageEffects], manifest: PackageFacts) -> 
     loop package in entries {
         granted :: pkg_effect_grant_for(manifest, package.name)
         loop effect_name in package.effects {
-            if authority_root(effect_name) == "Mem" -> next
             is_panic :: authority_root(effect_name) == AUTHORITY_PANIC_ROOT
-            if !is_panic && granted != None && authority_answer(granted, empty, effect_name) == AuthorityVerdict.Allowed -> next
+            if !authority_is_deny_only(effect_name) && granted != None && authority_answer(granted, empty, effect_name) == AuthorityVerdict.Allowed -> next
             outside_allow :: if allow == {
-                .Val(rights) -> !is_panic && authority_answer(rights, empty, effect_name) != AuthorityVerdict.Allowed
+                .Val(rights) -> !authority_is_deny_only(effect_name) && authority_answer(rights, empty, effect_name) != AuthorityVerdict.Allowed
                 .None -> false
             }
             inside_deny :: authority_answer(empty, deny, effect_name) == AuthorityVerdict.Denied

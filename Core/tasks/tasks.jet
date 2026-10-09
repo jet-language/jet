@@ -2,7 +2,7 @@ package {
     name: "core.tasks"
     version: "0.0.1"
     edition: "2026"
-    description: "Tasks, timers, and the current trace id."
+    description: "Timers, cooperative yield, and the current trace id."
     license: "MIT"
     outputs: {
         tasks: .Library{ entry: tasks }
@@ -11,99 +11,8 @@ package {
 use core as core
 use core.time as time
 
-
-// core.tasks — cooperative tasks on the Jet scheduler.
-//
-// `after` is a one-shot timer channel: after the supplied duration it yields
-// `value`. `interval` yields 1, 2, 3, … on the period. `yield_now` returns
-// control without sleeping. The live builtins are generic; this source
-// records the `Int` specialisation used by the convenience wrappers below.
-//
-// Timer creation and channel parking are host scheduler cells; the stateful
-// TaskState helpers remain pure Jet.
-
-
-
-pub struct TaskState {
-    pub values: [Int]
-    pub capacity: Int
-    pub closed: Bool
-    pub locked: Bool
-    pub generation: Int
-}
-
-pub fn channel(capacity: Int) -> TaskState Never! {
-    cap := capacity
-    if cap < 0 -> cap = 0
-    TaskState{values: [Int]{}, capacity: cap, closed: false, locked: false, generation: 0}
-}
-
-pub fn put(state: TaskState, value: Int) -> TaskState Never! {
-    if state.closed -> return ~state
-    if state.capacity > 0 && state.values.len() >= state.capacity -> return ~state
-    values := ~state.values
-    &values.push(value)
-    TaskState{
-        values: values,
-        capacity: state.capacity,
-        closed: state.closed,
-        locked: state.locked,
-        generation: state.generation + 1,
-    }
-}
-
-pub fn clear(state: TaskState) -> TaskState Never! {
-    if state.values.len() == 0 -> return ~state
-    TaskState{values: [Int]{}, capacity: state.capacity, closed: state.closed, locked: state.locked, generation: state.generation + 1}
-}
-
-pub fn shutdown(state: TaskState) -> TaskState Never! {
-    if state.closed -> return ~state
-    TaskState{values: ~state.values, capacity: state.capacity, closed: true, locked: state.locked, generation: state.generation + 1}
-}
-
-pub fn stop(state: TaskState) -> TaskState Never! { shutdown(state) }
-
-pub fn reset(state: TaskState) -> TaskState Never! {
-    TaskState{values: [Int]{}, capacity: state.capacity, closed: false, locked: false, generation: state.generation + 1}
-}
-
-pub fn lock() -> TaskState Never! { channel(1) }
-
-pub fn acquire(state: TaskState) -> TaskState Never! {
-    if state.closed || state.locked -> return ~state
-    TaskState{values: ~state.values, capacity: state.capacity, closed: state.closed, locked: true, generation: state.generation + 1}
-}
-
-pub fn release(state: TaskState) -> TaskState Never! {
-    if !state.locked -> return ~state
-    TaskState{values: ~state.values, capacity: state.capacity, closed: state.closed, locked: false, generation: state.generation + 1}
-}
-
-pub fn notify(state: TaskState) -> TaskState Never! {
-    TaskState{values: ~state.values, capacity: state.capacity, closed: state.closed, locked: state.locked, generation: state.generation + 1}
-}
-
-pub fn start(rx: Receiver<Int>) -> Receiver<Int> Never! { ~rx }
-
-pub fn run() Never! -[Time.Wait]> {
-    yield_now()
-}
-
-pub fn waitall(receivers: [Receiver<Int>]) -[Time.Wait]> [Int] Never! {
-    out := [Int]{}
-    loop rx in receivers -> &out.push(wait(rx))
-    out
-}
-
-pub fn waitany(receivers: [Receiver<Int>]) -[Time.Wait]> Int Never! {
-    if receivers.len() == 0 -> return -1
-    // Receiver readiness is owned by the scheduler's opaque handle. This
-    // convenience rail keeps the deterministic first-arm selection; callers
-    // needing a true race should use the host select surface.
-    wait(receivers[0])
-}
-
+// Timer creation and scheduler identity are host cells. Channels and task
+// groups use the language primitives; sleeping uses core.time.sleep.
 pub fn after(delay: time.Duration, value: Int{0}) -[Time]> Receiver<Int> Never! {
     core.tasks.after(delay, value)
 }

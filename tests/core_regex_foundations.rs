@@ -1,4 +1,4 @@
-//! Source-owned `core.regex` validation and class-boundary behavior across tiers.
+//! Canonical `core.regex` VM validation and class boundaries across tiers.
 
 mod common;
 mod tir_support;
@@ -33,11 +33,37 @@ fn run() {
     digits :: re.compile("[\\d]+") ?? panic("digit class rejected")
     print(re.find(digits, "id=42") ?? "none")
 
-    // Named groups and noncapturing group syntax remain valid source policy.
+    // Named groups and noncapturing groups use the same compiled Regex.
     named :: re.compile("(?<word>(?:[a-z]+))") ?? panic("named group rejected")
     print(re.find(named, "123jet") ?? "none")
 }
 "#,
         "true\ntrue\ntrue\na\n42\njet\n",
+    );
+}
+
+#[test]
+fn core_regex_free_calls_and_methods_share_captures_and_receipts() {
+    tir_support::assert_tiers_agree(
+        "core_regex_shared_surface",
+        r#"use core.regex as re
+fn run() {
+    pattern :: Regex{"(?<word>\w+)"}
+    runtime :: re.compile("(?<word>\\w+)") ?? panic("compile")
+    print(re.find(pattern, "é") == runtime.find("é"))
+    matched :: re.match(pattern, "a é") ?? panic("match")
+    print(matched.name("word") ?? "none")
+    print(re.expand(matched, "${{word}}/$1/$$"))
+    print(re.join(pattern))
+    replaced :: re.subn(pattern, "a é", "[$1]")
+    print(replaced.text)
+    print(replaced.count)
+    re.purge()
+    print(pattern.is_match("é"))
+    recompiled :: re.compile("\\w+") ?? panic("recompile")
+    print(recompiled.is_match("é"))
+}
+"#,
+        "true\na\na/a/$\n(?<word>\\w+)\n[a] [é]\n2\ntrue\ntrue\n",
     );
 }

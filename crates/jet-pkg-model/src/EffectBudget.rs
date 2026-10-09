@@ -23,7 +23,7 @@ use crate::Package::PackageFacts;
 use crate::Sema::{effect_covers, effect_set_has_root, Effect, EffectSet, EffectSummary};
 use crate::AST::{ImportKind, Item, ProgramBundle};
 use jet_foundation::Authority::{
-    answer, parse_right, root as effect_root, ApplicationAuthority, Holds, Verdict,
+    answer, is_deny_only, parse_right, root as effect_root, ApplicationAuthority, Holds, Verdict,
 };
 use jet_foundation::Report::{StatusEnvelope, StatusValue};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -823,7 +823,6 @@ pub fn enforce(entries: &[PackageEffects], manifest: &PackageFacts) -> Vec<Diagn
         .map(|names| {
             names
                 .iter()
-                .filter(|name| !is_memory_right(name))
                 .filter_map(|n| parse_right(n))
                 .collect()
         })
@@ -848,20 +847,16 @@ pub fn enforce(entries: &[PackageEffects], manifest: &PackageFacts) -> Vec<Diagn
     let mut diags = Vec::new();
     for pkg in entries {
         let granted = grants.get(pkg.name.as_str());
-        for effect in pkg
-            .effects
-            .iter()
-            .filter(|effect| effect_root(effect) != "Mem")
-        {
+        for effect in &pkg.effects {
             let is_panic = effect_root(effect) == Effect::Panic.name();
-            // D-PANICROOT1: Panic is deny-only. Omission from `allow` is not
-            // a denial, and an audited positive grant cannot override one.
-            if !is_panic
+            // Deny-only effects require no grant, but an explicit denial wins
+            // even when a dependency has an audited positive grant.
+            if !is_deny_only(effect)
                 && granted.is_some_and(|g| answer(g, &empty, effect) == Verdict::Allowed)
             {
                 continue;
             }
-            let outside_allow = !is_panic
+            let outside_allow = !is_deny_only(effect)
                 && allow
                     .as_ref()
                     .is_some_and(|a| answer(a, &empty, effect) != Verdict::Allowed);

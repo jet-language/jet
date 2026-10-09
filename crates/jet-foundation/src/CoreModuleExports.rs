@@ -485,9 +485,9 @@ const CORE_MODULE_75_MEMBERS: &[&str] = &["of", "ReflectValue", "inspect"];
 const CORE_MODULE_75_TYPES: &[(&str, CoreLeafKind)] = &[("ReflectValue", CoreLeafKind::Plain)];
 const CORE_MODULE_75_DEPENDENCIES: &[&str] = &["core.text"];
 
-const CORE_MODULE_76_MEMBERS: &[&str] = &["compile", "compile_with", "escape", "find", "find_all", "finditer", "flags", "full_match", "is_match", "match", "matches", "purge", "replace", "replace_first", "split", "split_limit", "Match", "Node", "Pattern", "Regex", "RegexFlag", "RegexFlags", "expand", "regex", "join", "search", "findall", "fullmatch", "sub", "subn", "RegexError"];
-const CORE_MODULE_76_TYPES: &[(&str, CoreLeafKind)] = &[("Pattern", CoreLeafKind::Plain), ("RegexFlag", CoreLeafKind::Plain), ("Match", CoreLeafKind::Plain), ("Node", CoreLeafKind::Plain), ("Regex", CoreLeafKind::Plain), ("RegexFlags", CoreLeafKind::Plain), ("RegexError", CoreLeafKind::Enum(&["Syntax", "Cache"]))];
-const CORE_MODULE_76_DEPENDENCIES: &[&str] = &["core.text"];
+const CORE_MODULE_76_MEMBERS: &[&str] = &["compile", "compile_with", "escape", "find", "find_all", "finditer", "flags", "full_match", "is_match", "match", "matches", "purge", "replace", "replace_first", "split", "split_limit", "Match", "Regex", "RegexFlags", "expand", "regex", "join", "search", "findall", "fullmatch", "sub", "subn"];
+const CORE_MODULE_76_TYPES: &[(&str, CoreLeafKind)] = &[("Match", CoreLeafKind::Plain), ("Regex", CoreLeafKind::Plain), ("RegexFlags", CoreLeafKind::Plain)];
+const CORE_MODULE_76_DEPENDENCIES: &[&str] = &[];
 
 const CORE_MODULE_77_MEMBERS: &[&str] = &["callback", "RealtimeStream", "__callback", "__next_deadline", "__receipt", "__cancel", "__is_cancelled"];
 const CORE_MODULE_77_TYPES: &[(&str, CoreLeafKind)] = &[("RealtimeStream", CoreLeafKind::Plain)];

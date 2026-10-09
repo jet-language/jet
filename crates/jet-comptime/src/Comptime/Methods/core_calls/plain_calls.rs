@@ -537,16 +537,6 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
             };
             Ok(exact_int_value(value))
         }
-        ("core.math", "int_pow") => {
-            let base = exact_big(one(0)?)
-                .ok_or_else(|| unsupported("integer power needs whole numbers", span))?;
-            let exponent = exact_big(one(1)?)
-                .ok_or_else(|| unsupported("integer power needs whole numbers", span))?;
-            Ok(exact_int_value(
-                base.pow(&exponent)
-                    .unwrap_or_else(|| crate::Numeric::CtBigInt::from_int(0)),
-            ))
-        }
         ("core.math", method @ ("gcd" | "lcm")) => {
             let left = exact_big(one(0)?)
                 .ok_or_else(|| unsupported("number theory needs whole numbers", span))?;
@@ -1166,7 +1156,7 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
         ("core.handle", "realtime.is_cancelled") => {
             Ok(realtime_stream_field(one(0)?, "cancelled", span)?.clone())
         }
-        ("core.tasks", "timeout") => {
+        ("core.tasks", member) if member == crate::Syntax::INTERNAL_TASK_TIMEOUT_METHOD => {
             let nanos = match one(0)? {
                 CtValue::Struct { type_name, fields }
                     if type_name == crate::Syntax::DURATION_TYPE =>
@@ -1196,13 +1186,13 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
         ("core.regex", "compile" | "compile_with") => regex_compile(args, span),
         ("core.regex", "escape") => regex_escape(args, span),
         ("core.regex", "is_match") => regex_is_match(args, span),
-        ("core.regex", "full_match") => regex_full_match(args, span),
+        ("core.regex", "full_match" | "fullmatch") => regex_full_match(args, span),
         ("core.regex", "find") => regex_find(args, span),
-        ("core.regex", "find_all") => regex_find_all(args, span),
-        ("core.regex", "matches") => regex_matches(args, span),
+        ("core.regex", "find_all" | "findall") => regex_find_all(args, span),
+        ("core.regex", "matches" | "finditer") => regex_matches(args, span),
         ("core.regex", "split") => regex_split(args, span),
         ("core.regex", "split_limit") => regex_split_limit(args, span),
-        ("core.regex", "replace") => regex_replace(args, span),
+        ("core.regex", "replace" | "sub") => regex_replace(args, span),
         ("core.regex", "replace_first") => regex_replace_first(args, span),
         ("core.regex", "match") => regex_match(args, span),
         // Jet owns every transition and distribution. These leaves only

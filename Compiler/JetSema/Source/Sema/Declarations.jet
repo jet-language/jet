@@ -68,6 +68,16 @@ pub fn sema_checked_return_type(return_type: Type?, raw_protocol_return: Bool) -
 pub fn sema_failure_contract_source(return_type: Type?) -> String Never! {
     failure_contract_source(failure_contract_from_return_type(return_type))
 }
+// Guest.rs `export_signature`: failure inference's infallible rail is not
+// a second Component value. Keep genuinely fallible and diverging returns.
+pub fn sema_guest_export_value_type(return_type: Type?) -> Type? Never! {
+    value :: return_type ?? return None
+    if value == .Result(ok, err) && err == .Named(name) && name == "Never" {
+        if ok == .Named(success_name) && success_name == "Never" -> return Val(value)
+        return Val(ok)
+    }
+    Val(value)
+}
 
 fn sema_callable_policy_string_text(parts: [StrPart]) -> String Never! {
     if parts.len() != 1 -> return "<string>"
