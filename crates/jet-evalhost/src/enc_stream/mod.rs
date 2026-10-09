@@ -82,12 +82,9 @@ pub(crate) mod runtime {
     pub(crate) use jet_foundation::CsvKernel as jet_csv_kernel;
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
-    trait JetShow {
-        fn jet_show(&self) -> String;
-    }
-    trait JetDisplay {
-        fn jet_display(&self) -> String;
-    }
+    // Encoding errors retain the crate-wide display/show seams across stream
+    // and web adapters, rather than implementing a stream-local trait copy.
+    use crate::{JetDisplay, JetShow};
 
     pub struct JetFileReader {
         pub(crate) inner: std::io::BufReader<std::fs::File>,
