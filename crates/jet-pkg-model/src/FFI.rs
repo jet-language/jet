@@ -6748,9 +6748,11 @@ mod tests {
         assert_eq!(cache_root, paths.cache_root);
         assert_eq!(link.rlib_path, paths.rlib);
         assert_eq!(link.provenance_path, paths.provenance);
-        let manifest_digest = crate::SHA256::sha256_file_hex(&cache_root.join("Cargo.toml"))
-            .expect("canonical generated manifest");
-        let generated_digest = crate::SHA256::sha256_file_hex(&cache_root.join("src/lib.rs"))
+        let manifest_path = cache_root.join("Cargo.toml");
+        let generated_path = cache_root.join("src/lib.rs");
+        let manifest_digest =
+            crate::SHA256::sha256_file_hex(&manifest_path).expect("canonical generated manifest");
+        let generated_digest = crate::SHA256::sha256_file_hex(&generated_path)
             .expect("canonical generated bridge source");
         let provenance_digest = crate::SHA256::sha256_file_hex(&link.provenance_path)
             .expect("verified canonical bridge provenance");
@@ -6857,7 +6859,35 @@ mod tests {
             link.cache_identity, selected_target, source_digest, manifest_digest, generated_digest,
             provenance_digest, executable.display(), binary_digest, built.mechanism, built.policy,
         );
+        let identities = [
+            (&source, source_digest.as_str()),
+            (&manifest_path, manifest_digest.as_str()),
+            (&generated_path, generated_digest.as_str()),
+            (&link.provenance_path, provenance_digest.as_str()),
+            (&executable, binary_digest.as_str()),
+        ];
+        let mut all_passed = true;
+        let mut block_reason: Option<String> = None;
         for name in TESTS {
+            if block_reason.is_none() {
+                for (path, expected) in identities {
+                    match crate::SHA256::sha256_file_hex(path) {
+                        Ok(actual) if actual == expected => {}
+                        result => {
+                            block_reason = Some(format!(
+                                "unsafe or missing canonical artifact {}: {result:?}",
+                                path.display(),
+                            ));
+                            break;
+                        }
+                    }
+                }
+            }
+            if let Some(reason) = block_reason.as_deref() {
+                println!("canonical bridge test={name} result=BLOCKED cause={reason}");
+                all_passed = false;
+                continue;
+            }
             cargo_args = vec![
                 "test".into(),
                 "--release".into(),
@@ -6871,7 +6901,7 @@ mod tests {
                 "--exact".into(),
                 "--test-threads=1".into(),
             ];
-            let ran = jet_sema::Comptime::Build::run_native_sandboxed_with_mounts(
+            let ran = match jet_sema::Comptime::Build::run_native_sandboxed_with_mounts(
                 &cargo_path,
                 &cargo_args,
                 &cache_root,
@@ -6879,50 +6909,57 @@ mod tests {
                 &sandbox_env,
                 true,
                 &mounts,
-            )
-            .expect("execute the actual generated host producer test in the same sandbox");
-            let stdout = String::from_utf8(ran.output.stdout).expect("real unit stdout UTF-8");
+            ) {
+                Ok(ran) => ran,
+                Err(error) => {
+                    let reason = format!("canonical sandbox unavailable: {error:?}");
+                    println!("canonical bridge test={name} result=FAIL cause={reason}");
+                    block_reason = Some(reason);
+                    all_passed = false;
+                    continue;
+                }
+            };
+            let stdout = String::from_utf8_lossy(&ran.output.stdout);
             let stderr = String::from_utf8_lossy(&ran.output.stderr);
             println!(
                 "canonical bridge test={name} sandbox={}:{} stdout:\n{stdout}",
                 ran.mechanism, ran.policy,
             );
             println!("canonical bridge test={name} stderr:\n{stderr}");
-            assert!(
-                ran.output.status.success(),
-                "real named generated test failed: {name}",
-            );
             let expected_pass = format!("test {name} ... ok");
-            assert_eq!(
-                stdout.lines().filter(|line| *line == expected_pass).count(),
-                1,
-                "actual named PASS required; zero-test success is not proof",
+            let passed = ran.output.status.success()
+                && stdout.lines().filter(|line| *line == expected_pass).count() == 1
+                && stdout.contains("test result: ok. 1 passed; 0 failed; 0 ignored;");
+            println!(
+                "canonical bridge test={name} result={} status={}",
+                if passed { "PASS" } else { "FAIL" },
+                ran.output.status,
             );
-            assert!(
-                stdout.contains("test result: ok. 1 passed; 0 failed; 0 ignored;"),
-                "exact one real test, no ignored or filtered substitute",
-            );
-            assert_eq!(
-                crate::SHA256::sha256_file_hex(&executable).unwrap(),
-                binary_digest,
-                "the realized test binary must not change between rehearsal and the paired test",
-            );
+            if std::str::from_utf8(&ran.output.stdout).is_err()
+                || std::str::from_utf8(&ran.output.stderr).is_err()
+            {
+                println!(
+                    "canonical bridge test={name} raw_stdout={:?} raw_stderr={:?}",
+                    ran.output.stdout, ran.output.stderr,
+                );
+            }
+            all_passed &= passed;
         }
-        assert_eq!(
-            crate::SHA256::sha256_file_hex(&source).unwrap(),
-            source_digest,
-        );
-        assert_eq!(
-            crate::SHA256::sha256_file_hex(&cache_root.join("Cargo.toml")).unwrap(),
-            manifest_digest,
-        );
-        assert_eq!(
-            crate::SHA256::sha256_file_hex(&cache_root.join("src/lib.rs")).unwrap(),
-            generated_digest,
-        );
-        assert_eq!(
-            crate::SHA256::sha256_file_hex(&link.provenance_path).unwrap(),
-            provenance_digest,
+        for (path, expected) in identities {
+            match crate::SHA256::sha256_file_hex(path) {
+                Ok(actual) if actual == expected => {}
+                result => {
+                    println!(
+                        "canonical bridge integrity=FAIL source={} cause={result:?}",
+                        path.display(),
+                    );
+                    all_passed = false;
+                }
+            }
+        }
+        assert!(
+            all_passed,
+            "canonical bridge must execute both named IO tests successfully with unchanged artifacts",
         );
     }
 
