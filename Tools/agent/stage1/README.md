@@ -121,4 +121,12 @@ All standalone/compiler-aggregate registries receive private disk-backed
 `TMPDIR` scratch; fixtures requiring `JET_CLI_FMT_TEST_ROOT` receive that same
 declared root. Missing admitted runtime prerequisites produce explicit blocked
 receipt entries, never successful or skipped outcomes.
+Compiler-needed JSON, URL and math/text raw fixtures use their exported native
+zero-success callbacks through the same C-driver transport. GoldenLower and
+LintCorpus receive every committed feature golden with an output/status oracle:
+the native checked-MIR driver is built once, stages the real feature projects,
+and feeds the complete corpus to the original Jet registry. GoldenLower then
+uses the existing native run-only golden comparator; LintCorpus requires every
+lint count and findings file to be empty. No synthetic input program substitutes
+for either corpus.
 

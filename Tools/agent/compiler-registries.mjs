@@ -103,7 +103,8 @@ function inventory() {
         return existsSync(directory) ? filesUnder(directory).map(path => {
             const source = relative(repo, path), text = readFileSync(path, 'utf8'), masked = codeMask(text);
             const names = testsIn(text), entry = /^fn run\s*\(/m.test(masked);
-            const abiRegistry = /Tests\.jet$/.test(source) && /\bfn\s+[A-Za-z_][A-Za-z0-9_]*\s*\(/.test(masked);
+            const abiRegistry = (/Tests\.jet$/.test(source) && /\bfn\s+[A-Za-z_][A-Za-z0-9_]*\s*\(/.test(masked))
+                || /#Export\s*\(\s*c\s*\)\s+(?:(?:pub|priv)\s+)?fn\b/.test(masked);
             const nestedInput = /\/Tests\/(?:fixtures|Fixtures)\//.test(source);
             return { package: item.name, source, sha256: hash(Buffer.from(text)), names, entry,
                 role: !nestedInput && (names.length || entry || abiRegistry) ? 'registry' : 'support-or-fixture' };
@@ -135,7 +136,7 @@ function testkitInventory() {
     const retiredIds = new Set(retiredCases.map(row => row.path));
     const cases = filesUnder(join(repo, 'tests/cases'), '.case').map(path => relative(repo, path)).filter(path => !retiredIds.has(path));
     const rustToolRequirements = cases.flatMap(path => readFileSync(join(repo, path), 'utf8').split('\n')
-        .flatMap((line, index) => /^(?:requires: tool:|when tool |step: )/.test(line) && /\b(?:cargo|rustc|rustup)\b/.test(line)
+        .flatMap((line, index) => /^(?:requires: tool:|when tool |step(?: [^:]+)?: )/.test(line) && /\b(?:cargo|rustc|rustup)\b/.test(line)
             ? [{ path, line: index + 1, source: line }] : []));
     return { sources: sources.map(path => ({ path, sha256: hash(readFileSync(join(repo, path))) })),
         cases: cases.map(path => ({ path, sha256: hash(readFileSync(join(repo, path))) })), retiredCases, rustToolRequirements };
@@ -197,6 +198,7 @@ function generate() {
         }
         const mode = row.mode;
         let reason = assemblyError;
+        if (!row.entry && !row.names.length) reason = 'hand-ABI fixture has no run or Test entry; its exact native/C witness must be registered';
         if (row.package === 'JetRuntime' && !standalone) reason = 'runtime hand-ABI registries require their native C fixture driver/runtime source assembly; not a compiler Test harness';
         if (row.package === 'JetBackend' && row.entry) reason = 'backend artifact/FFI registry needs its existing run-*.mjs source assembly plus native artifact execution/checker; a returned fn run is not its success verdict';
         const sources = [row.source];

@@ -64,7 +64,7 @@ function specification(id) {
         if (crypto.has(name)) return { type: 'suite', runner: rt + 'run-crypto-fixtures.mjs', modes: ['assemble', 'lower', 'link', 'run'], crypto: true };
         if (plain[name]) return { type: 'plain', name, call: plain[name][0], expected: plain[name][1], runner: rt + 'check-runtime.mjs' };
         if (suites[name]) return { type: 'suite', runner: rt + suites[name][0], modes: suites[name][1], name };
-        if (['EnvironmentLeaves', 'FaultSchedule', 'IterCharge', 'ProgressState', 'HostFault', 'FloatBits', 'TerminalColor', 'TrapReport', 'VaultHooks', 'VaultProvider', 'Thread', 'HostSpawn', 'CompilerEnv', 'CompilerRoutes'].includes(name)) return { type: 'c', name, runner: be + 'run-runtime.mjs' };
+        if (['EnvironmentLeaves', 'FaultSchedule', 'IterCharge', 'ProgressState', 'HostFault', 'FloatBits', 'TerminalColor', 'TrapReport', 'VaultHooks', 'VaultProvider', 'Thread', 'HostSpawn', 'CompilerEnv', 'CompilerRoutes', 'CompilerNeededJSON', 'CompilerNeededURL', 'CompilerNeededMathText'].includes(name)) return { type: 'c', name, runner: be + 'run-runtime.mjs' };
         if (name === 'GenericRouteSchema') return { type: 'direct', runner: 'Compiler/JetRuntime/Tests/GenericRouteSchema.jet', expected: '' };
         return { blocked: `No registered transport for ${id}; the source must not be counted without an exact native verdict` };
     }
@@ -205,7 +205,7 @@ export function planTransport(entry, { jet, repo, runtimePack }) {
 }
 function cSource(name, repo) {
     const head = '#define _GNU_SOURCE\n#include <stdint.h>\n#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n';
-    const exports = { FaultSchedule: 'jet_rt_fault_schedule_fixture', IterCharge: 'jet_rt_iter_charge_fixture', ProgressState: 'jet_rt_progress_state_fixture' };
+    const exports = { FaultSchedule: 'jet_rt_fault_schedule_fixture', IterCharge: 'jet_rt_iter_charge_fixture', ProgressState: 'jet_rt_progress_state_fixture', CompilerNeededJSON: 'jet_rt_compiler_needed_json_fixture', CompilerNeededURL: 'jet_rt_compiler_needed_url_fixture', CompilerNeededMathText: 'jet_rt_compiler_math_text_fixture' };
     if (exports[name]) return head + `extern int64_t ${exports[name]}(void);\nint main(void) { return (int)${exports[name]}(); }\n`;
     if (name === 'EnvironmentLeaves') return head + 'extern char **environ;\nextern int64_t jet_rt_environment_leaves_fixture(int64_t,int64_t,int64_t);\nint main(int argc,char **argv) { char invalid[]="JET_LEAF_INVALID=\\xff"; if (putenv(invalid)||setenv("JET_LEAF_EMPTY","",1)||unsetenv("JET_LEAF_MISSING")) return 100; return (int)jet_rt_environment_leaves_fixture(argc,(intptr_t)argv,(intptr_t)environ); }\n';
     if (name === 'HostFault') return head + 'extern int64_t jet_rt_host_fault_fixture(int64_t,_Bool);\nint main(int argc,char **argv) { (void)argv; return (int)jet_rt_host_fault_fixture((intptr_t)"A",argc>1); }\n';

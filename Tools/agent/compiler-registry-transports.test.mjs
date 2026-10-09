@@ -60,3 +60,18 @@ test('native corpus assemblers retain the real registry and complete MIR decoder
         }
     } finally { rmSync(out, { recursive: true, force: true }); }
 });
+
+test('compiler runtime route plans run the complete C witness variants', () => {
+    for (const name of ['CompilerEnv', 'CompilerRoutes', 'CompilerNeededJSON', 'CompilerNeededURL', 'CompilerNeededMathText']) {
+        const source = `Compiler/JetRuntime/Tests/${name}Tests.jet`;
+        const entry = prepareTransport({ source, package: 'JetRuntime' }, { repo, out: '/native/registries' });
+        assert.equal(entry.transport.type, 'c');
+        assert.equal(entry.transport.name, name);
+        assert.equal(entry.testCount, 1);
+        const plan = planTransport(entry, options);
+        assert.ok(plan.steps.some(step => step.args?.includes('--test') && step.args.at(-1) === name));
+        const runs = plan.steps.filter(step => step.command === join(entry.cwd, 'driver'));
+        assert.deepEqual(runs.map(step => step.args), name === 'CompilerEnv' ? [[], ['empty']] : name === 'CompilerRoutes' ? [[entry.cwd]] : [[]]);
+        if (name === 'CompilerEnv' || name === 'CompilerRoutes') assert.ok(entry.sources.includes(source.replace(/\.jet$/, '.c')));
+    }
+});
