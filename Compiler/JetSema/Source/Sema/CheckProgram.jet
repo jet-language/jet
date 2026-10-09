@@ -753,9 +753,10 @@ fn sema_incremental_module_input(environment: SemaScopeEnvironment, scopes: &Sem
     // else read from the environment and the full binding table is exact.
     // This owner-only window ends before hooks, checking, publication or task
     // launch. Move/restore only the transient scalar; never clone the scope.
+    comptime_input :: sema_comptime_body_values_debug(environment.comptime_body_values)
     location := ^scopes.location_function
     scopes.location_function = None
-    input := "module={environment.module_identity:Debug};package={environment.package_identity:Debug};name={environment.module_name:Debug};file={environment.source_file:Debug};origin={environment.source_origin:Debug};segments={environment.source_segments:Debug};types={environment.checked_types:Debug};type_rows={environment.checked_type_rows:Debug};type_slots={environment.checked_type_name_slots:Debug};type_names={environment.checked_type_name_rows:Debug};boxed={environment.boxed_edges:Debug};declarations={declarations:Debug};generics={environment.generic_params:Debug};comptime={environment.comptime_body_values:Debug};else={environment.else_arms:Debug};fixed_writes={environment.fixed_length_write_params:Debug};debug={environment.debug_sites:Debug};scope={scopes:Debug}"
+    input := "module={environment.module_identity:Debug};package={environment.package_identity:Debug};name={environment.module_name:Debug};file={environment.source_file:Debug};origin={environment.source_origin:Debug};segments={environment.source_segments:Debug};types={environment.checked_types:Debug};type_rows={environment.checked_type_rows:Debug};type_slots={environment.checked_type_name_slots:Debug};type_names={environment.checked_type_name_rows:Debug};boxed={environment.boxed_edges:Debug};declarations={declarations:Debug};generics={environment.generic_params:Debug};comptime={comptime_input};else={environment.else_arms:Debug};fixed_writes={environment.fixed_length_write_params:Debug};debug={environment.debug_sites:Debug};scope={scopes:Debug}"
     scopes.location_function = ^location
     ^input
 }
@@ -1525,8 +1526,10 @@ fn sema_function_check_generics(func: Func, environment: SemaScopeEnvironment) -
 // The checks of one function (sema_function_check): again while share sites
 // are found, then its last pass's reports and facts are kept.
 fn sema_function_check_passes(func: Func, owner_id: SymbolID, function_kind: TFuncKind, raw_protocol_return: Bool, environment: SemaScopeEnvironment, module_scopes: &SemaScopeTable, generics: SemaFunctionCheckGenerics, host_hooks: SemaHostHookAccess?, diagnostics: &[Diagnostic], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact]) -> SemaFunctionResult {
+    sema_comptime_body_values_trace(environment.comptime_body_values, "functions_started")
     share_known := [Span]{}
     loop {
+        sema_comptime_body_values_trace(environment.comptime_body_values, "check_passes_started")
         pass_diagnostics := ~generics.diagnostics
         pass_call_facts := [SemaCallSiteFact]{}
         pass_comptime_requests := [SemaComptimeRequest]{}
@@ -1624,7 +1627,8 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
     if !sema_check_function_failure_contracts(func, updated, generic_names, &diagnostics) -> complete = false
     if !sema_function_header_check_default_forward_refs(func, &diagnostics) -> complete = false
     if !sema_function_header_check_variadic_bound_shape(func, updated, &diagnostics) -> complete = false
-    sema_comptime_body_values_replace(&context, ~updated.comptime_body_values)
+    context.comptime_body_values = updated.comptime_body_values
+    sema_comptime_body_values_trace(context.comptime_body_values, "context_value_carriers_attached")
     unsafe_gate_valid := true
     if func.is_unsafe {
         unsafe_source :: sema_effect_source_from_function_key(func, module_identity, owner_id.key)
@@ -3493,6 +3497,8 @@ fn sema_check_module_summary_scope_init(environment: SemaScopeEnvironment, modul
 
 fn sema_check_module_summary_scopes(environment: &SemaScopeEnvironment, host_hooks: SemaHostHookAccess?, memory_plan: SemaFunctionMemoryPlan, module_index: Int, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], counter_phase: String, trace_sink: CompilerTraceSink?) -> SemaScopeTable {
     scopes := sema_check_module_summary_scope_init(environment, module_index)
+    environment.comptime_trace_sink = trace_sink
+    environment.comptime_trace_phase = counter_phase
     sema_scope_environment_enter_module(&environment, module_index, sema_comptime_body_values_from_items(values))
     sema_check_view_summaries(&environment, &scopes, module_index, host_hooks, memory_plan, comptime_functions, comptime_rows, counter_phase, trace_sink)
     ^scopes
@@ -3635,6 +3641,8 @@ fn sema_check_registration_module(owned_environment: ^SemaScopeEnvironment, host
     module_result := sema_check_registration_module_start(environment, module_index, values, &scopes)
     // The original declaration/header boundary: do not substitute the probe
     // reset, which deliberately clears real else-arm/debug-site source facts.
+    environment.comptime_trace_sink = trace_sink
+    environment.comptime_trace_phase = counter_phase
     sema_scope_environment_enter_module(&environment, module_index, sema_comptime_body_values_from_items(values))
     items_scanned := 0
     functions_checked := 0

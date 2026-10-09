@@ -3,6 +3,7 @@
 // is checked again with that value available.
 use jet_foundation.[
     Expr,
+    CompilerTraceSink,
     Span,
     Type,
 ]
@@ -53,28 +54,65 @@ fn sema_comptime_body_sources_truncate(context: &SemaCheckContext, length: Int) 
     }
 }
 
-fn sema_comptime_body_value_index(context: &SemaCheckContext, row: Int) Never! {
-    slot :: sema_comptime_body_module_slot(&context.comptime_body_value_modules, &context.comptime_body_value_rows, context.comptime_body_values[row].module_identity)
-    if context.comptime_body_value_rows[slot].get(context.comptime_body_values[row].key) == None -> context.comptime_body_value_rows[slot][context.comptime_body_values[row].key] = row
-    else -> context.comptime_body_value_rows[slot][context.comptime_body_values[row].key] = -1
-}
-
-fn sema_comptime_body_values_index(context: &SemaCheckContext) Never! {
-    context.comptime_body_value_modules = [String:Int]{}
-    context.comptime_body_value_rows = [[String:Int]]{}
-    loop row in 0..<context.comptime_body_values.len() -> sema_comptime_body_value_index(&context, row)
+// First and second positions are sufficient for every ordered prefix. A
+// second match at or beyond the visible length is not yet ambiguous; a third
+// match can never change that answer. The row payloads themselves stay owned
+// by the published immutable facts, including equal-key/different-value rows.
+fn sema_comptime_body_values_freeze(values: ^[SemaComptimeBodyValue], trace_sink: CompilerTraceSink?, trace_phase: String) -> SemaComptimeBodyValues Never! {
+    length :: values.len()
+    if trace_sink == .Val(sink) {
+        sink.progress("counters.{trace_phase}.ct_value_publication_rows", length, -1)
+        // Serialized UTF-8 row volume, not a claimed heap allocation size.
+        // This deliberately diagnostic-only work is absent without tracing.
+        rendered :: "{values:Debug}"
+        sink.progress("counters.{trace_phase}.ct_value_row_debug_utf8_bytes", rendered.count_bytes(), -1)
+    }
+    if length == 0 -> return SemaComptimeBodyValues{trace_sink: trace_sink, trace_phase: trace_phase}
+    modules := [String:Int]{}
+    first_rows := [[String:Int]]{}
+    second_rows := [[String:Int]]{}
+    indexed_rows := 0
+    loop row in 0..<length {
+        slot :: sema_comptime_body_module_slot(&modules, &first_rows, values[row].module_identity)
+        if second_rows.len() < first_rows.len() -> &second_rows.push([String:Int]{})
+        if first_rows[slot].get(values[row].key) == None -> first_rows[slot][values[row].key] = row
+        else if second_rows[slot].get(values[row].key) == None -> second_rows[slot][values[row].key] = row
+        indexed_rows += 1
+    }
+    if trace_sink == .Val(sink) {
+        sink.progress("counters.{trace_phase}.ct_value_index_builds", 1, -1)
+        sink.progress("counters.{trace_phase}.ct_value_index_rows_visited", indexed_rows, -1)
+    }
+    SemaComptimeBodyValues{
+        facts: Val(shared SemaComptimeBodyFacts{values: ^values, modules: ^modules, first_rows: ^first_rows, second_rows: ^second_rows, indexed_rows: indexed_rows}),
+        length: length,
+        trace_sink: trace_sink,
+        trace_phase: trace_phase,
+    }
 }
 
 fn sema_comptime_body_values_replace(context: &SemaCheckContext, values: ^[SemaComptimeBodyValue]) Never! {
-    context.comptime_body_values = ^values
-    sema_comptime_body_values_index(&context)
+    context.comptime_body_values = sema_comptime_body_values_freeze(^values, None, "")
 }
 
 fn sema_comptime_body_values_truncate(context: &SemaCheckContext, length: Int) Never! {
-    if context.comptime_body_values.len() <= length -> return
-    loop context.comptime_body_values.len() > length -> _ := &context.comptime_body_values.pop()
-    // Removing a second match can make an ambiguous key unique again.
-    sema_comptime_body_values_index(&context)
+    if context.comptime_body_values.length > length -> context.comptime_body_values.length = length
+}
+
+// Operation events use the existing trace producer. Consumers sum repeated
+// progress events for these names; each event is an executed operation, not a
+// hardwired estimate of a clone or a cache hit.
+fn sema_comptime_body_values_trace(values: SemaComptimeBodyValues, operation: String) {
+    if values.trace_sink == .Val(sink) -> sink.progress("counters.{values.trace_phase}.ct_value_{operation}", 1, -1)
+}
+
+// The module memo observes published row contents, never Shared identity.
+// Environments always expose their complete publication; only contexts can
+// truncate a prefix while checking/rolling back a speculative branch.
+fn sema_comptime_body_values_debug(values: SemaComptimeBodyValues) -> String {
+    facts :: values.facts ?? return "{[SemaComptimeBodyValue]{}:Debug}"
+    permit :: facts.guard_read()
+    "{permit.value.values:Debug}"
 }
 
 pub fn sema_comptime_body_capture(
@@ -117,10 +155,20 @@ pub fn sema_comptime_body_value_find(
     site_span: Span,
 ) -> SemaComptimeBodyValue? {
     key := sema_comptime_body_source_key(module_identity, function_key, source_span, site_span)
-    slot :: context.comptime_body_value_modules.get(module_identity) ?? return None
-    row :: context.comptime_body_value_rows[slot].get(key) ?? return None
-    if row < 0 -> return None
-    Val(context.comptime_body_values[row])
+    sema_comptime_body_values_trace(context.comptime_body_values, "queries")
+    facts :: context.comptime_body_values.facts ?? return None
+    permit :: facts.guard_read()
+    sema_comptime_body_values_trace(context.comptime_body_values, "module_probes")
+    slot :: permit.value.modules.get(module_identity) ?? return None
+    sema_comptime_body_values_trace(context.comptime_body_values, "first_row_probes")
+    row :: permit.value.first_rows[slot].get(key) ?? return None
+    if row >= context.comptime_body_values.length -> return None
+    sema_comptime_body_values_trace(context.comptime_body_values, "second_row_probes")
+    if permit.value.second_rows[slot].get(key) == .Val(second) {
+        if second < context.comptime_body_values.length -> return None
+    }
+    sema_comptime_body_values_trace(context.comptime_body_values, "owned_rows_returned")
+    Val(permit.value.values[row])
 }
 
 pub fn sema_comptime_body_item_source(source: SemaComptimeBodySource) -> SemaComptimeItemSource Never! {

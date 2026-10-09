@@ -25,10 +25,11 @@ fn body_index_value(module_identity: String, function_key: String, source: Span,
     }
 }
 
-fn body_index_linear_value(values: [SemaComptimeBodyValue], module_identity: String, function_key: String, source: Span, site: Span) -> SemaComptimeBodyValue? {
+fn body_index_linear_value(values: [SemaComptimeBodyValue], length: Int, module_identity: String, function_key: String, source: Span, site: Span) -> SemaComptimeBodyValue? {
     key :: sema_comptime_body_source_key(module_identity, function_key, source, site)
     found := SemaComptimeBodyValue?{None}
-    loop value in values {
+    loop index in 0..<length {
+        value :: values[index]
         if value.module_identity == module_identity && value.key == key {
             if found != None -> return None
             found = Val(value)
@@ -39,7 +40,11 @@ fn body_index_linear_value(values: [SemaComptimeBodyValue], module_identity: Str
 
 fn body_index_query(context: SemaCheckContext, module_identity: String, function_key: String, source: Span, site: Span) {
     actual :: sema_comptime_body_value_find(context, module_identity, function_key, source, site)
-    expected :: body_index_linear_value(context.comptime_body_values, module_identity, function_key, source, site)
+    expected := SemaComptimeBodyValue?{None}
+    if context.comptime_body_values.facts == .Val(facts) {
+        permit :: facts.guard_read()
+        expected = body_index_linear_value(permit.value.values, context.comptime_body_values.length, module_identity, function_key, source, site)
+    }
     body_index_require(actual == expected, "indexed value query matches the original first/second-match rule")
 }
 
@@ -86,7 +91,12 @@ fn body_index_identity_and_lifecycle() {
         body_index_value("mod::one", "function::one", source, Span{start: 3, end: 8}, 7),
     }
     sema_comptime_body_values_replace(&context, ~variants)
-    body_index_require(context.comptime_body_value_rows.len() == 2, "module identity is indexed separately from the canonical key")
+    if context.comptime_body_values.facts == .Val(facts) {
+        permit :: facts.guard_read()
+        body_index_require(permit.value.first_rows.len() == 2, "module identity is indexed separately from the canonical key")
+    } else {
+        panic("the nonempty value publication has no facts")
+    }
     body_index_query(context, "mod::one", "function::one", source, site)
     body_index_query(context, "mod::two", "function::one", source, site)
     body_index_query(context, "mod::one", "function::two", source, site)
@@ -106,6 +116,12 @@ fn body_index_identity_and_lifecycle() {
     body_index_query(context, "mod::one", "function::one", source, site)
     sema_comptime_body_values_truncate(&context, 1)
     body_index_require(sema_comptime_body_value_find(context, "mod::one", "function::one", source, site) == Val(repeated), "truncating the second match restores uniqueness")
+    if context.comptime_body_values.facts == .Val(facts) {
+        permit :: facts.guard_read()
+        body_index_require(permit.value.values.len() == 3 && permit.value.indexed_rows == 3, "prefix truncation neither removes published rows nor rebuilds their immutable index")
+    } else {
+        panic("truncation lost the published facts")
+    }
     changed_value :: body_index_value("mod::one", "function::one", source, site, 99)
     sema_comptime_body_values_replace(&context, [SemaComptimeBodyValue]{repeated, changed_value})
     body_index_query(context, "mod::one", "function::one", source, site)
@@ -184,10 +200,64 @@ fn body_index_size(size: Int) {
     body_index_require(sema_comptime_body_value_find(context, "scale::module", "scale::function", Span{start: (size - 1) * 4, end: (size - 1) * 4 + 2}, Span{start: (size - 1) * 4 + 2, end: (size - 1) * 4 + 3}) == None, "scaled second match is ambiguous")
 }
 
+// No read guard crosses a task launch or join. Each task retains the same
+// publication and opens its own lexical read window; replacing or truncating a
+// context cannot mutate that publication or another task's visible prefix.
+fn body_index_shared_read(values: SemaComptimeBodyValues, size: Int) -> Int {
+    context := sema_check_context_init()
+    context.comptime_body_values = values
+    checked := 0
+    loop index in 0..<size {
+        source :: Span{start: index * 4, end: index * 4 + 2}
+        site :: Span{start: index * 4 + 2, end: index * 4 + 3}
+        actual :: sema_comptime_body_value_find(context, "shared::module", "shared::function", source, site)
+        expected :: body_index_value("shared::module", "shared::function", source, site, index)
+        body_index_require(actual == Val(expected), "concurrent reads see the published payload")
+        checked += 1
+    }
+    checked
+}
+
+fn body_index_shared_size(size: Int) {
+    rows := [SemaComptimeBodyValue]{}
+    loop index in 0..<size {
+        &rows.push(body_index_value("shared::module", "shared::function", Span{start: index * 4, end: index * 4 + 2}, Span{start: index * 4 + 2, end: index * 4 + 3}, index))
+    }
+    context := sema_check_context_init()
+    sema_comptime_body_values_replace(&context, ^rows)
+    publication :: context.comptime_body_values
+    child := sema_check_context_snapshot(context)
+    sema_comptime_body_values_truncate(&child, 0)
+    body_index_require(context.comptime_body_values.length == size && child.comptime_body_values.length == 0, "fork truncation changes only its own visible prefix")
+    if publication.facts == .Val(facts) {
+        if child.comptime_body_values.facts == .Val(child_facts) {
+            body_index_require(facts.same(child_facts), "snapshot and truncation retain exactly the original fact cell")
+        } else {
+            panic("snapshot lost the published facts")
+        }
+        permit :: facts.guard_read()
+        body_index_require(permit.value.values.len() == size && permit.value.indexed_rows == size, "N/2N/4N publication visits each canonical value exactly once; forks do not rebuild it")
+    } else {
+        panic("scaled publication has no facts")
+    }
+    task.group body_index_reads {
+        first :: task body_index_shared_read(publication, size)
+        second :: task body_index_shared_read(publication, size)
+        main_reads :: body_index_shared_read(publication, size)
+        first_reads :: first.join() ?? panic("first immutable body-value reader failed")
+        second_reads :: second.join() ?? panic("second immutable body-value reader failed")
+        body_index_require(main_reads == size && first_reads == size && second_reads == size, "three readers complete every indexed query")
+    }
+    body_index_require(body_index_shared_read(context.comptime_body_values, size) == size, "parallel readers leave the parent publication unchanged")
+}
+
 fn run() {
     body_index_source_identity()
     body_index_identity_and_lifecycle()
     body_index_size(64)
     body_index_size(128)
     body_index_size(256)
+    body_index_shared_size(64)
+    body_index_shared_size(128)
+    body_index_shared_size(256)
 }

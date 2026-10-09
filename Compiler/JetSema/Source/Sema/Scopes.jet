@@ -4,6 +4,7 @@
 use jet_foundation.[
     AccessConvention,
     CoreMarkerApplication,
+    CompilerTraceSink,
     Diagnostic,
     DebugTraceSite,
     DistinctDef,
@@ -338,6 +339,24 @@ pub struct SemaComptimeBodyValue {
     pub ty: Type
 }
 
+// Published body values and their derived lookup indexes are immutable. A
+// context keeps only a shared owner and a visible ordered prefix: forks retain
+// the facts instead of copying every value and rebuilding every key index.
+pub struct SemaComptimeBodyFacts {
+    pub values: [SemaComptimeBodyValue]
+    pub modules: [String:Int]
+    pub first_rows: [[String:Int]]
+    pub second_rows: [[String:Int]]
+    pub indexed_rows: Int
+}
+
+pub struct SemaComptimeBodyValues {
+    pub facts: Shared<SemaComptimeBodyFacts>?{None}
+    pub length: Int{0}
+    pub trace_sink: CompilerTraceSink?{None}
+    pub trace_phase: String{""}
+}
+
 pub struct SemaScopeEnvironment {
     pub registration_graph: SemaRegistrationGraph?
     pub module_identity: String
@@ -358,7 +377,10 @@ pub struct SemaScopeEnvironment {
     pub boxed_edges: [String:[String]]{[String:[String]]{}}
     pub declarations: [SemaScopeDeclaration]
     pub generic_params: [TGenericParam]
-    pub comptime_body_values: [SemaComptimeBodyValue]
+    pub comptime_body_values: SemaComptimeBodyValues
+    // Diagnostic work attribution only; no trace means no row serialization.
+    pub comptime_trace_sink: CompilerTraceSink?{None}
+    pub comptime_trace_phase: String{""}
     // L0303 (#3716): the module's dispatch-table `else` arms, from the parser.
     pub else_arms: [ElseArmSpan]{[ElseArmSpan]{}}
     // D-SHAPE-PLACE1=A: the module's proven length-preserving list write
@@ -426,12 +448,10 @@ pub struct SemaCheckContext {
     pub name_references: [SemaNameReferenceFact]
     pub comptime_requests: [SemaComptimeRequest]
     pub comptime_body_sources: [SemaComptimeBodySource]
-    pub comptime_body_values: [SemaComptimeBodyValue]
-    // Derived module/key indexes into the canonical ordered body rows.
+    pub comptime_body_values: SemaComptimeBodyValues
+    // Derived module/key indexes into the canonical ordered source rows.
     pub comptime_body_source_modules: [String:Int]
     pub comptime_body_source_rows: [[String:Int]]
-    pub comptime_body_value_modules: [String:Int]
-    pub comptime_body_value_rows: [[String:Int]]
     pub compute_calls: [SemaComputeCallFact]
     pub autodiff_obligations: [SemaAutodiffObligation]
     pub autodiff_safe_panic: Bool
@@ -621,7 +641,7 @@ pub fn sema_scope_environment_init(graph: ^SemaRegistrationGraph?, module_identi
         boxed_edges: boxed_edges,
         declarations: declarations,
         generic_params: [TGenericParam]{},
-        comptime_body_values: [SemaComptimeBodyValue]{},
+        comptime_body_values: SemaComptimeBodyValues{},
     }
 }
 
@@ -646,7 +666,7 @@ pub fn sema_scope_checked_type_name_rows(environment: SemaScopeEnvironment, name
 // One environment serves every module of a graph pass: the registration
 // graph, checked types and write-parameter facts stay, and the module's own
 // source facts replace the previous module's.
-pub fn sema_scope_environment_enter_module(environment: &SemaScopeEnvironment, module_index: Int, comptime_body_values: [SemaComptimeBodyValue]) Never! {
+pub fn sema_scope_environment_enter_module(environment: &SemaScopeEnvironment, module_index: Int, comptime_body_values: ^[SemaComptimeBodyValue]) Never! {
     // The graph payload loan permits only disjoint module-fact writes.
     if &environment.registration_graph == .Val(graph) {
         environment.module_identity = graph.modules[module_index].module_identity
@@ -657,7 +677,7 @@ pub fn sema_scope_environment_enter_module(environment: &SemaScopeEnvironment, m
         environment.source_segments = graph.modules[module_index].source_segments
         environment.declarations = [SemaScopeDeclaration]{}
         environment.generic_params = [TGenericParam]{}
-        environment.comptime_body_values = comptime_body_values
+        environment.comptime_body_values = sema_comptime_body_values_freeze(^comptime_body_values, environment.comptime_trace_sink, environment.comptime_trace_phase)
         environment.else_arms = graph.modules[module_index].program.else_arms
         environment.debug_sites = graph.modules[module_index].program.debug_sites
         environment.function_name = ""
@@ -672,7 +692,7 @@ pub fn sema_scope_environment_enter_module(environment: &SemaScopeEnvironment, m
 // and source facts replace the previous target's; every other per-module or
 // per-function fact starts empty, as in a newly built probe environment.
 // False when the graph has no such module.
-pub fn sema_scope_environment_enter_probe_module(environment: &SemaScopeEnvironment, module_identity: String, comptime_body_values: [SemaComptimeBodyValue]) -> Bool Never! {
+pub fn sema_scope_environment_enter_probe_module(environment: &SemaScopeEnvironment, module_identity: String, comptime_body_values: ^[SemaComptimeBodyValue]) -> Bool Never! {
     // Pin the payload window, not an owning Option match of the whole graph.
     // Only disjoint context fields are written before this loan closes.
     if &environment.registration_graph == .Val(graph) {
@@ -685,7 +705,7 @@ pub fn sema_scope_environment_enter_probe_module(environment: &SemaScopeEnvironm
         environment.source_segments = graph.modules[module_index].source_segments
         environment.declarations = [SemaScopeDeclaration]{}
         environment.generic_params = [TGenericParam]{}
-        environment.comptime_body_values = comptime_body_values
+        environment.comptime_body_values = sema_comptime_body_values_freeze(^comptime_body_values, environment.comptime_trace_sink, environment.comptime_trace_phase)
         environment.else_arms = [ElseArmSpan]{}
         environment.debug_sites = [DebugTraceSite]{}
         environment.function_name = ""
@@ -739,11 +759,9 @@ pub fn sema_check_context_init() -> SemaCheckContext Never! {
         name_references: [SemaNameReferenceFact]{},
         comptime_requests: [SemaComptimeRequest]{},
         comptime_body_sources: [SemaComptimeBodySource]{},
-        comptime_body_values: [SemaComptimeBodyValue]{},
+        comptime_body_values: SemaComptimeBodyValues{},
         comptime_body_source_modules: [String:Int]{},
         comptime_body_source_rows: [[String:Int]]{},
-        comptime_body_value_modules: [String:Int]{},
-        comptime_body_value_rows: [[String:Int]]{},
         compute_calls: [SemaComputeCallFact]{},
         autodiff_obligations: [SemaAutodiffObligation]{},
         autodiff_safe_panic: false,
@@ -798,11 +816,10 @@ pub fn sema_check_context_snapshot(source: SemaCheckContext) -> SemaCheckContext
         name_references: ~source.name_references,
         comptime_requests: ~source.comptime_requests,
         comptime_body_sources: ~source.comptime_body_sources,
-        comptime_body_values: ~source.comptime_body_values,
+        // Sharing the publication does not visit, copy, or reindex its rows.
+        comptime_body_values: source.comptime_body_values,
         comptime_body_source_modules: [String:Int]{},
         comptime_body_source_rows: [[String:Int]]{},
-        comptime_body_value_modules: [String:Int]{},
-        comptime_body_value_rows: [[String:Int]]{},
         compute_calls: ~source.compute_calls,
         autodiff_obligations: ~source.autodiff_obligations,
         autodiff_safe_panic: source.autodiff_safe_panic,
@@ -842,7 +859,7 @@ pub fn sema_check_context_snapshot(source: SemaCheckContext) -> SemaCheckContext
         host_hooks: source.host_hooks,
     }
     sema_comptime_body_sources_index(&snapshot)
-    sema_comptime_body_values_index(&snapshot)
+    sema_comptime_body_values_trace(source.comptime_body_values, "context_value_snapshots")
     snapshot
 }
 
@@ -891,7 +908,7 @@ pub fn sema_check_context_save(context: SemaCheckContext) -> SemaCheckContextMar
         name_references: context.name_references.len(),
         comptime_requests: context.comptime_requests.len(),
         comptime_body_sources: context.comptime_body_sources.len(),
-        comptime_body_values: context.comptime_body_values.len(),
+        comptime_body_values: context.comptime_body_values.length,
         compute_calls: context.compute_calls.len(),
         autodiff_obligations: context.autodiff_obligations.len(),
         copy_events: context.copy_events.len(),
@@ -922,11 +939,9 @@ pub fn sema_check_context_save(context: SemaCheckContext) -> SemaCheckContextMar
             name_references: [SemaNameReferenceFact]{},
             comptime_requests: [SemaComptimeRequest]{},
             comptime_body_sources: [SemaComptimeBodySource]{},
-            comptime_body_values: [SemaComptimeBodyValue]{},
+            comptime_body_values: SemaComptimeBodyValues{},
             comptime_body_source_modules: [String:Int]{},
             comptime_body_source_rows: [[String:Int]]{},
-            comptime_body_value_modules: [String:Int]{},
-            comptime_body_value_rows: [[String:Int]]{},
             compute_calls: [SemaComputeCallFact]{},
             autodiff_obligations: [SemaAutodiffObligation]{},
             autodiff_safe_panic: context.autodiff_safe_panic,
