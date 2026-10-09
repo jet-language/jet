@@ -250,7 +250,7 @@ fn to_string<T: Encode>(rows: [T]) -> String Never! {
         out = encode_row(header)
         loop i in 0..<rows.len() {
             tree :: if i == 0 -> first else -> rows[i].encode()
-            if tree != Dyn.Object(_) -> panic("csv.to_string needs rows or records")
+            if !(tree == .Object(_)) -> panic("csv.to_string needs rows or records")
             fields := [String]{}
             loop key in header {
                 cell := ""
@@ -902,7 +902,7 @@ struct CSVReader {
                     .Ok(record) -> record
                     .Err(error) -> { return Err(error) }
                 }
-                if row != None -> return Ok(row)
+                if row != None -> return Ok(Val(row))
             } else {
                 self.eof = true
                 if self.pending_cr -> return Err(self.parser_error(.Syntax, self.pending_cr_line, self.pending_cr_column, "bare CR is not a record ending"))
