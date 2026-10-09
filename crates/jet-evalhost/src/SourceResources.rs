@@ -6815,7 +6815,7 @@ mod tests {
         let session = test_shared_interop_session();
         let arena = session.arena();
         let released = Arc::new(AtomicUsize::new(0));
-        let existing = test_native_shared_register(arena, None, &released);
+        let existing = test_native_shared_register(&arena, None, &released);
         let staged_released = Arc::new(AtomicUsize::new(0));
         let error = arena.apply_native_shared_packet(vec![
             SourceNativeSharedAction::RegisterPhysical { root: test_native_shared_root(Some(std::thread::current().id()), &staged_released) },
@@ -6841,7 +6841,7 @@ mod tests {
         let session = test_shared_interop_session();
         let arena = session.arena();
         let released = Arc::new(AtomicUsize::new(0));
-        let capability = test_native_shared_register(arena, Some(std::thread::current().id()), &released);
+        let capability = test_native_shared_register(&arena, Some(std::thread::current().id()), &released);
         let foreign_arena = arena.clone();
         let foreign_capability = capability.clone();
         let refusal = std::thread::spawn(move || {
@@ -6862,7 +6862,7 @@ mod tests {
         let session = test_shared_interop_session();
         let arena = session.arena();
         let released = Arc::new(AtomicUsize::new(0));
-        let capability = test_native_shared_register(arena, Some(std::thread::current().id()), &released);
+        let capability = test_native_shared_register(&arena, Some(std::thread::current().id()), &released);
         let borrowed = arena.borrow_native_shared_slot(&capability, "manifest", "runtime", 0x9600).unwrap();
         let error = arena.apply_native_shared_packet(vec![SourceNativeSharedAction::ReleaseRoot {
             capability: capability.clone(),
@@ -6882,9 +6882,9 @@ mod tests {
         let other_session = test_shared_interop_session();
         let arena = session.arena();
         let released = Arc::new(AtomicUsize::new(0));
-        let capability = test_native_shared_register(arena, None, &released);
+        let capability = test_native_shared_register(&arena, None, &released);
         let other_released = Arc::new(AtomicUsize::new(0));
-        let other = test_native_shared_register(other_session.arena(), None, &other_released);
+        let other = test_native_shared_register(&other_session.arena(), None, &other_released);
         let error = other_session.arena().apply_native_shared_packet(vec![SourceNativeSharedAction::ReleaseRoot {
             capability: capability.clone(),
         }]).expect_err("matching slot indexes cannot forge foreign arena roots");

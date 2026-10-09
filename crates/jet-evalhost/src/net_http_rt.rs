@@ -64,36 +64,12 @@ fn jet_panic(_file: &str, _line: u32, message: &str) -> ! {
     panic!("{message}");
 }
 
-type JetDyn = jet_foundation::Dyn::Dyn;
-
-// Keep the generated Rust codec trait spelling stable; Codegen emits `__jet_Encode`.
-#[allow(non_camel_case_types)]
-trait __jet_Encode {
-    fn jet_encode(&self) -> JetDyn;
-}
-impl __jet_Encode for i64 {
-    fn jet_encode(&self) -> JetDyn {
-        JetDyn::Int((*self).into())
-    }
-}
-// Keep the generated Rust codec trait spelling stable; Codegen emits `__jet_Decode`.
-#[allow(non_camel_case_types)]
-trait __jet_Decode: Sized {
-    fn jet_decode(tree: &JetDyn) -> Result<Self, Vec<jet_std::FieldError>>;
-}
-fn jet_enc_json_to_string<T: __jet_Encode>(v: &T) -> String {
-    crate::Encoding::json_rt::render_dyn_json(&v.jet_encode(), false, 0)
-}
-fn jet_enc_json_decode<T: __jet_Decode>(text: &String) -> Result<T, Vec<jet_std::FieldError>> {
-    let tree = crate::Encoding::json_rt::parse_json_dyn(text).map_err(|error| {
-        let line = error.line.ok().unwrap_or(0);
-        jet_std::FieldError::one(format!(
-            "invalid JSON (line {}): {}",
-            line, error.reason
-        ))
-    })?;
-    T::jet_decode(&tree)
-}
+// HTTP and app dispatch use the same canonical codec traits and fallible JSON
+// helpers; no resident-only renderer bypasses the wire validation.
+use crate::Web::web_rt::{
+    __jet_Decode, __jet_Encode, jet_enc_json_decode, jet_enc_json_error_text,
+    jet_enc_json_to_string,
+};
 struct JetFileReader {
     inner: std::io::BufReader<std::fs::File>,
     path: String

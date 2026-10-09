@@ -94,7 +94,8 @@ mod canonical_mem {
         };
     }
 
-    include!("../../jet-codegen/src/Prelude/Core/ForeignBytes.rs");
+    // Mem.rs supplies both arena ownership and the audited foreign-byte leaves.
+    // Do not include ForeignBytes.rs beside it: those symbols share one owner.
     include!("../../jet-codegen/src/Prelude/Mem.rs");
 }
 

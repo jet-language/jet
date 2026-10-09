@@ -23,6 +23,8 @@
 /// Prelude sees the same types as the compiler/comptime host.
 pub use jet_foundation::Devtools::{JetDevtoolsEvent, JET_DEVTOOLS_MAX_HISTORY};
 pub use jet_foundation::Dyn;
+/// Canonical outcome carriers used by the included Foundation encoding helpers.
+pub use jet_foundation::Outcome;
 
 /// D-JOB-SUBCMD1=C: the evaluator imports the same Prelude selector as
 /// generated AOT mains. Its only extra work is mapping the selected name onto
