@@ -3316,6 +3316,11 @@ The realtime stream extension likewise observes and cancels the same provider
 worker; its source callback constructor rejects nonpositive rates before
 crossing the provider boundary.
 
+The source scheduler-channel constructors preserve that pair rather than
+returning `TaskState`. Bounded scheduler channels clamp capacities below one
+to one. Interval periods truncate to whole milliseconds and clamp to at least
+one millisecond; their first delivered tick is one.
+
 ### `core.prelude` — small compiler-owned helpers
 
 `core.prelude` is available without a separate package import. Its functions
