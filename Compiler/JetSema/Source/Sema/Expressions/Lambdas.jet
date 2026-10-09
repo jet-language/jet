@@ -92,7 +92,9 @@ fn sema_expression_lambda_pattern_use_outer(pattern: Pattern, frame: Int, params
             false
         }
         .Variant(_, slots, _, _) | .List(slots, _, _) -> {
-            loop slot in slots -> if sema_expression_lambda_slot_use_outer(slot, frame, params, &scopes) -> return true
+            loop slot in slots {
+                if sema_expression_lambda_slot_use_outer(slot, frame, params, &scopes) -> return true
+            }
             false
         }
         .Map(entries, _, _) -> {
@@ -1598,8 +1600,8 @@ fn sema_expression_lambda_install_loop_label(lambda: &Lambda, label: NamedSpan) 
 // back, instead of on a copy of the whole table (every module binding) per
 // lambda; no scope state of the lambda flows back to the enclosing table.
 fn sema_expression_lambda_with_host(lambda: Lambda, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], host_callback: Bool, host_write: Bool, host_stored: Bool, open_result: Bool) -> TExpr? {
-    outer_return_type :: ~scopes.return_type
-    outer_failure_carrier :: ~scopes.failure_carrier
+    outer_return_type :: scopes.return_type.copy()
+    outer_failure_carrier :: scopes.failure_carrier.copy()
     lambda_mark :: sema_scope_mark(&scopes)
     checked :: sema_expression_lambda_with_host_in_frame(lambda, expected, environment, program, &scopes, outer_return_type, outer_failure_carrier, &state, &tail_store, &context, &diagnostics, host_callback, host_write, host_stored, open_result)
     sema_scope_rollback(&scopes, lambda_mark)
