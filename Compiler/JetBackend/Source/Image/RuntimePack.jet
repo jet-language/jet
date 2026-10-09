@@ -1,23 +1,12 @@
-// Runtime packs (#4549, #3954): the prebuilt runtime archive set (the
-// compiled runtime rlib, the Rust standard library rlibs, musl's libc.a,
-// libgcc_eh.a and libgcc.a) linked once per toolchain into one
-// self-contained x86-64 ELF relocatable object, written next to the runtime
-// archive. A program link then reads only the program's objects and the
-// pack, never the ~1M-section archives: `x64_link_executable([program.o,
-// pack])`.
+// Runtime packs (#4549, #3954): the checked Jet runtime object plus its
+// C platform dependencies, linked once per toolchain into a self-contained
+// x86-64 ELF relocatable object. No Rust object or standard-library archive
+// participates. A program link reads only its objects and this pack.
 //
-// The pack is the archive set after everything a link can decide without
-// the program has been decided, in the format the linker already reads:
-//
-// - Resolution: every archive member the runtime's C ABI can reach is
-//   pulled; COMDAT groups, weak and common symbols, the allocator shim, the
-//   LFS64 aliases and the libc shims (StaticLink.jet link_shims) are
-//   settled; the linker's startup object (`_start`, `__jet_link_main`) is
-//   included. Only the roots (the runtime's C ABI, `_start`,
-//   `__jet_link_main`, `__tls_get_addr` and the
-//   requested extra names) stay global; every other definition becomes a
-//   local symbol, so the pack's symbol table is its export table plus its
-//   imports (`main`, the linker-defined names, weak references).
+// Public standalone-object definitions and explicit extra roots select the
+// runtime ABI; archives satisfy dependencies, never add exports. The linker
+// includes the platform startup (_start, __jet_link_main). Other definitions
+// become local, leaving only the ABI and program/linker imports global.
 // - Liveness: only the sections reachable from the roots are kept, each as
 //   its own section with its relocations rewritten against the pack's
 //   symbols, so the program link still collects what this program does not
@@ -57,6 +46,14 @@ struct LinkPack {
     r_sym: [Int]
     r_add: [Int]
 }
+fn link_pack_rust_symbol(name: String) -> Bool Never! {
+    if name.starts_with("__rust_") || name.starts_with("__rdl_") -> return true
+    bytes :: name.bytes()
+    if name.starts_with("_R") && bytes.len() > 2 -> return bytes[2] >= U8{65} && bytes[2] <= U8{90}
+    if name.starts_with("_ZN") && bytes.len() > 3 -> return bytes[3] >= U8{48} && bytes[3] <= U8{57}
+    false
+}
+
 
 // Whether `name` is a plain C identifier and not a Rust-mangled name (v0
 // `_R...` or legacy `_ZN...`): the runtime's C ABI.
@@ -438,25 +435,16 @@ fn link_pack_write(c: &LinkContext, exports: [Int]) -> [U8] Never! {
     bytes
 }
 
-// Link runtime objects and archives (names[i] names bufs[i] in reports).
+// Link the Jet runtime objects with their C platform dependencies.
 // Audited Jet exports are defined public globals in standalone objects;
-// private functions and imported symbols are not exports. The roots are
-// those object exports, the first archive's C ABI, and `extra_roots`.
+// private functions and imports are not exports. Archives only satisfy roots.
 fn x64_link_runtime_pack(names: [String], bufs: ^[[U8]], extra_roots: [String]) -> X64ExecutableResult Never! {
     c := link_context(^bufs)
     link_load_inputs(&c, names)
     if c.errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: c.errors}
-    if c.archives.len() == 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"runtime pack: no archive among the inputs"}}
+    if c.obj_name.len() == 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"runtime pack: no Jet runtime object among the inputs"}}
     root_names := [String]{}
     seen := [String:Bool]{}
-    loop name in c.archives[0].symbol_names {
-        if link_pack_c_abi(name) && seen.get(name) == None {
-            &seen.add(name, true).drop("checked absent above")
-            &root_names.push(name)
-        }
-    }
-    // link_load_inputs has loaded only standalone objects at this point.
-    // Archive dependencies pulled during resolution must stay private.
     loop obj in 0..<c.obj_name.len() {
         b :: c.obj_buffer[obj]
         loop k in c.obj_first_global[obj]..<c.obj_sym_count[obj] {
@@ -499,7 +487,7 @@ fn x64_link_runtime_pack(names: [String], bufs: ^[[U8]], extra_roots: [String]) 
         g :: c.g_index.get(name) ?? next
         f :: link_final(c, g)
         if c.g_kind[f] != LINK_G_FILE {
-            if !optional.contains(name) -> link_error(&c, "runtime pack: the archive set does not define the root `{name}`")
+            if !optional.contains(name) -> link_error(&c, "runtime pack: the input objects do not define the root `{name}`")
             next
         }
         if c.g_section[f] >= 0 -> &sections.push(c.g_section[f])
@@ -510,6 +498,9 @@ fn x64_link_runtime_pack(names: [String], bufs: ^[[U8]], extra_roots: [String]) 
     &imports.add("main", true).drop("a fresh map")
     loop name in link_linker_names() -> &imports.add(name, true).drop("names are unique")
     link_collect(&c, sections, imports)
+    loop name in c.g_name {
+        if link_pack_rust_symbol(name) -> link_error(&c, "runtime pack: Rust symbol `{name}` is not an admissible runtime dependency")
+    }
     if c.errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: c.errors}
     bytes :: link_pack_write(&c, exports)
     if c.errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: c.errors}

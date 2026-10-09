@@ -20,11 +20,15 @@ fn pack_roots_defined(c: LinkContext, name: String, binding: Int) Never! {
 }
 
 fn run() {
+    loop name in [String]{"_RNvRustSymbol", "_ZN3old", "__rust_alloc", "__rdl_alloc"} {
+        if !link_pack_rust_symbol(name) -> panic("Rust runtime dependency was not rejected: {name}")
+    }
+    if link_pack_rust_symbol("jet_rt_alloc") || link_pack_rust_symbol("_Rpack_private_helper") -> panic("ordinary fixture/runtime name mistaken for Rust")
     object :: files.read_bytes("runtime.o") ?? panic("read runtime object")
     archive :: files.read_bytes("runtime.a") ?? panic("read runtime archive")
     consumer :: files.read_bytes("consumer.o") ?? panic("read consumer object")
     missing :: files.read_bytes("missing.o") ?? panic("read missing-import object")
-    result :: x64_link_runtime_pack([String]{"runtime.o", "runtime.a"}, ^[[U8]]{object, archive}, [String]{})
+    result :: x64_link_runtime_pack([String]{"runtime.o", "runtime.a"}, ^[[U8]]{object, archive}, [String]{"jet_archive_fixture"})
     if result.errors.len() != 0 -> panic("hybrid pack failed: {result.errors}")
     c := link_context(^[[U8]]{result.bytes})
     link_load_inputs(&c, [String]{"hybrid.pack.o"})
@@ -53,12 +57,15 @@ fn run() {
     if linked.errors.len() != 0 -> panic("consumer link failed: {linked.errors}")
     files.write_bytes("consumer", linked.bytes) ?? panic("write consumer")
     files.set_mode("consumer", 0o755) ?? panic("make consumer executable")
+    archive_object :: files.read_bytes("archive.o") ?? panic("read standalone platform object")
+    object_only :: x64_link_runtime_pack([String]{"runtime.o", "archive.o"}, ^[[U8]]{object, archive_object}, [String]{})
+    if object_only.errors.len() != 0 -> panic("object-only runtime pack required an archive: {object_only.errors}")
+    o := link_context(^[[U8]]{object_only.bytes})
+    link_load_inputs(&o, [String]{"object.pack.o"})
+    if o.errors.len() != 0 -> panic("object-only pack is not a valid object")
+    loop name in public_names -> pack_roots_defined(o, name, 1)
     archive_only :: x64_link_runtime_pack([String]{"runtime.a"}, ^[[U8]]{archive}, [String]{})
-    if archive_only.errors.len() != 0 -> panic("archive-only pack failed: {archive_only.errors}")
-    a := link_context(^[[U8]]{archive_only.bytes})
-    link_load_inputs(&a, [String]{"archive.pack.o"})
-    if a.errors.len() != 0 -> panic("archive pack is not a valid object")
-    pack_roots_defined(a, "jet_archive_fixture", 1)
+    if archive_only.errors.len() == 0 || archive_only.bytes.len() != 0 -> panic("pack accepted an archive without a Jet runtime object")
     broken :: x64_link_runtime_pack([String]{"runtime.o", "missing.o", "runtime.a"}, ^[[U8]]{object, missing, archive}, [String]{})
     found_missing := false
     loop error in broken.errors {

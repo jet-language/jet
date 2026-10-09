@@ -6,12 +6,6 @@
 // opaque state pointer, each retaining one ref and one logical endpoint.
 // WaitNode24: next0, park8, flags16 (linked1, ever-woken2), under lock.
 // Single wake is Vec::pop (LIFO); close walks Vec insertion order (FIFO).
-// Ledgered Observe-only adapter; dies when Observe ports to Jet.
-#Import(c) fn jet_rt_observe_channel_new(bounded: I64, capacity: I64) -> I64 = "jet_rt_observe_channel_new"
-
-#Import(c) fn jet_rt_observe_channel_update(id: I64, depth: I64, send_waiters: I64, recv_waiters: I64, closed: I64) = "jet_rt_observe_channel_update"
-
-#Import(c) fn jet_rt_observe_channel_drop(id: I64) = "jet_rt_observe_channel_drop"
 
 fn channel_update(channel: I64) {
     jet_rt_observe_channel_update(sync_load(channel + I64{136}), sync_load(channel + I64{16}), sync_load(channel + I64{152}), sync_load(channel + I64{144}), sync_load(channel + I64{88}))
@@ -693,7 +687,7 @@ fn channel_fatal(kind: I64) {
 
 #Export(c) fn jet_rt_handle_drop_Closed(_value: I64) {}
 
-#Export(c) fn jet_rt_handle_eq_Closed(_left: I64, _right: I64) -> I64 { I64{1} }
+#Export(c) fn jet_rt_handle_eq_Closed(_left: I64, _right: I64) -> Bool { true }
 
 #Export(c) fn jet_rt_handle_show_Closed(_value: I64) -> I64 {
     text :: scheduler_text_new(I64{6})

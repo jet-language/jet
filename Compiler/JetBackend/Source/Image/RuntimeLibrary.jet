@@ -2,7 +2,27 @@
 // the checked NativeLibrary artifact's `#Export(c)` rows; no list, name
 // heuristic or source scan selects them. Compiler/JetRuntime/lifecycle.list
 // only orders the constructor/destructor hooks among those exports.
-use jet_foundation.[MIRProgram, MIRExport, MIRFunction, MIRFunctionID, MIRType, MIRCPrimitive, mir_c_primitive, mir_c_void, mir_type_display_name]
+use jet_foundation.[MIRProgram, MIRExport, MIRFunction, MIRFunctionID, MIRType, MIRCPrimitive, mir_c_primitive, mir_c_void, mir_type_display_name, foundation_json_quote]
+
+struct CoreSharedRuntimeExportABI {
+    symbol: String
+    parameters: [LIRLayout]
+    result: LIRLayout?
+}
+
+fn runtime_export_layout_json(layout: LIRLayout) -> String Never! {
+    "{{\"size\":{layout.size},\"align\":{layout.align},\"class\":{foundation_json_quote(lir_abi_class_name(layout.class))}}}"
+}
+
+fn x64_runtime_export_abi_json(rows: [CoreSharedRuntimeExportABI]) -> String Never! {
+    encoded := [String]{}
+    loop row in rows {
+        parameters :: loop layout in row.parameters -> runtime_export_layout_json(layout)
+        result :: if row.result == .Val(layout) -> runtime_export_layout_json(layout) else -> "null"
+        &encoded.push("{{\"symbol\":{foundation_json_quote(row.symbol)},\"parameters\":[{parameters.join(",")}],\"result\":{result}}}")
+    }
+    "[{encoded.join(",")}]"
+}
 
 struct X64RuntimeLibraryResult {
     object: X64ExecutableResult
@@ -16,11 +36,6 @@ struct RuntimeExportSpec {
     fini_priority: Int
 }
 
-struct RuntimeExportSpec {
-    int_index_seam: Bool
-    init_priority: Int
-    fini_priority: Int
-}
 
 fn runtime_export_error(message: String) -> X64RuntimeLibraryResult Never! {
     X64RuntimeLibraryResult{object: X64ExecutableResult{bytes: [U8]{}, errors: [String]{message}}, exports: [MIRExport]{}, export_abis: [CoreSharedRuntimeExportABI]{}}
@@ -124,12 +139,6 @@ fn runtime_static_text_signature(function: MIRFunction) -> Bool Never! {
     false
 }
 
-fn runtime_static_text_signature(function: MIRFunction) -> Bool Never! {
-    if function.kind != .Jet || function.form != .TopLevel || function.generic_params.len() != 0 || function.capture_params.len() != 0 || function.failure != .Infallible || function.params.len() != 1 -> return false
-    if function.params[0].access != .Read || function.params[0].ty.kind != .String -> return false
-    if function.return_type.kind == .IntN(signed, bits) -> return signed && bits == 64
-    false
-}
 
 fn runtime_address_target_signature(function: MIRFunction, arity: Int) -> Bool Never! {
     if function.kind != .Jet || function.form != .TopLevel || function.generic_params.len() != 0 || function.capture_params.len() != 0 || function.failure != .Infallible || function.params.len() != arity {
@@ -278,6 +287,9 @@ fn x64_runtime_library(program: MIRProgram, lifecycle_rows: [String]) -> X64Runt
         function :: lowered.callables.get(entry_row.function.value) ?? return runtime_export_error("export {entry_row.symbol} has no lowered callable")
         hook :: lifecycle.get(entry_row.symbol) ?? RuntimeLifecycle{init_priority: -1, fini_priority: -1}
         &globals.push(X64RuntimeExport{function: function, symbol: entry_row.symbol, init_priority: hook.init_priority, fini_priority: hook.fini_priority})
+        signature :: lowered.lir.signatures[lowered.lir.functions[function.value].signature.value]
+        if signature.convention != .SystemV -> return runtime_export_error("export {entry_row.symbol} has no SystemV C signature")
+        &export_abis.push(CoreSharedRuntimeExportABI{symbol: entry_row.symbol, parameters: signature.params, result: signature.result})
     }
     &export_abis.sort_by((a: CoreSharedRuntimeExportABI, b: CoreSharedRuntimeExportABI) -> a.symbol <=> b.symbol)
     // The shared runtime is a build artifact: use the canonical O1 pipeline.

@@ -57,6 +57,12 @@ An aggregate fixture object already contains the full Jet runtime and links
 without a second provider. Standalone C witnesses use `jet_runtime_jet.o`
 exactly once; the startup-bearing `jet_runtime.pack.o` is a program-link input,
 not an additional runtime object for a C program that defines its own `main`.
+Native scan proofs require the current native `scan.cases` receipt and the
+fresh Jet object/pack. Saved reference and evaluator TSVs are optional,
+explicitly named `--frozen-reference` and `--frozen-evaluator` inputs; a live
+retired tier is never a prerequisite for the raw ABI and Float-bit witnesses.
+Official BLAKE3 fixtures regenerate from the team vectors alone, outside the
+immutable proof source, without reading a retired runtime implementation.
 
 The compiler frontend receipt must retain the full foreign Cargo diagnostics,
 including cached bridge fingerprint output when an inline-FFI error hides
@@ -72,9 +78,9 @@ identified separately; the runtime assembly driver is
 The bootstrap completion owner may initiate Source resource retirement after
 its caller consumes the factory result and grants retirement permission; a
 prior request is not required. Callback jobs and retained roots still block
-retirement. The runtime library-object feed requires an observed retirement
-request, retired resources and zero retained roots in its frontend receipt
-before accepting the object.
+retirement. The hosted runtime library-object feed instead consumes the
+driver's checked MIR directly; it has no factory frontend receipt dependency.
+Lowering and linking failures refuse the pack rather than publishing an artifact.
 
 The Rust-debug MIR conversion feed preserves the bootstrap codec's field-name
 mapping for all NameLedger rows, including display paths: the checked Rust
@@ -82,22 +88,32 @@ mapping for all NameLedger rows, including display paths: the checked Rust
 paths remain distinct checked strings; conversion must not infer or discard
 either path.
 
-The seed/native C-ABI fixture declares each allocator export once in its shared
-extern block. Its ABI metadata checks must pass in both configurations before a
-runtime pack is admitted. The transitional Rust producer build retains debug
-information and receives a scoped `RUST_MIN_STACK=67108864` environment setting
-for the large generated compiler units; tool crashes remain failed evidence,
-not a native-runtime semantic verdict.
+The native C-ABI fixtures declare each allocator export once and link the
+same checked Jet runtime object that packaging uses. Actual lowered signature
+layouts are recorded in `runtime.abi.json`; its symbols must match the checked
+export inventory. Compiler crashes and failed ABI witnesses remain failed
+evidence, never a native-runtime semantic verdict.
 
-Runtime-pack roots include the public defined C-ABI globals of standalone
-runtime objects as well as the first runtime archive's indexed C ABI and
-explicit extra roots. The Jet object writer publishes audited exports as
-global symbols and private functions as locals. Packing preserves that
-boundary: undefined symbols, hidden/internal definitions, private functions
-and mangled implementation names do not become object export roots. Archive
-members pulled to satisfy these exports remain implementation dependencies.
+Runtime-pack roots are the public defined C-ABI globals of standalone Jet
+runtime objects and explicit extra roots. The Jet object writer publishes
+checked exports as globals and private functions as locals. Undefined symbols,
+hidden/internal definitions and implementation names do not become export
+roots; C archive members pulled to satisfy exports remain private dependencies.
+Rust-mangled symbols and Rust allocator providers are rejected. A pack requires
+a standalone runtime object, never just archives.
 `Compiler/JetBackend/Tests/run-runtime-pack-roots.mjs` exercises this boundary
 with real objects, an archive and a consumer, including an unreferenced export.
+
+`Tools/packaging/prebuild-runtime.sh <hosted-jet>` assembles the canonical
+`Compiler/JetRuntime/sources.list`, checks it through the Jet-hosted CLI's
+library entry, and lowers its checked exports plus `lifecycle.list` into one
+native object. Jet's linker resolves its permitted musl/libgcc C dependencies;
+no Rust runtime, standard-library rlibs, rustc or system linker participates.
+Packaging writes `jet-runtime/native.key` beside the compiler and installs
+`jet-runtime/<key>/jet_runtime.pack.o`. The key hashes the source inventory,
+checked ABI, lifecycle, backend inputs and C platform archives. The accompanying
+`provenance.json` records each input digest, the pack digest and zero Rust or
+LLVM-generated Jet objects, with permitted C platform archives listed separately.
 
 The all-parts runtime includes `CAbiTest.rs` once through Codegen's canonical
 prelude; the compiler-call preparation step must not append a second copy.

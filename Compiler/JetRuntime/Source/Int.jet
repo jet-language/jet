@@ -3,10 +3,8 @@
 // negative@16 (0/1), limbs_ptr@24, len@32, cap@40. Limbs are u32 base
 // 1e9, least-significant first. Buffer layout is (cap*4,4); cap0 uses ptr4.
 // Nodes published to callers are immutable. Only refs changes atomically;
-// Rust's existing hazard domain still owns final-owner retirement. Private
+// the Jet IntHazard domain owns final-owner retirement. Private
 // arithmetic workspaces have refs1 and never enter an atomic carrier slot.
-#[Unsafe("node has just reached refs0; the shared memory leaf scans the existing hazard domain before freeing or retiring it"), Import(c)]
-fn jet_rt_int_retire_zero(node: I64) = "jet_rt_int_retire_zero"
 
 fn int_load(address: I64) -> I64 {
     #Unsafe("borrow an initialized word in a live exact-Int carrier") {

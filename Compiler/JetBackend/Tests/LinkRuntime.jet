@@ -1,16 +1,16 @@
 // Link relocatable objects with the prebuilt runtime into a static
 // executable with the in-process linker (Image/StaticLink.jet), the way
 // `jet build` does, or build the runtime pack (Image/RuntimePack.jet) from
-// the runtime archive set; report the read, link and write times.
+// the Jet runtime object and C platform dependencies; report read/link/write times.
 // Assembled with its sources into `unit.jet` by run-link.mjs; never listed
 // in Compiler/Bootstrap/sources.list.
 //
 //     jet run unit.jet -- <output> <input>...
-//     jet run unit.jet -- --pack <output> <archive>...
+//     jet run unit.jet -- --pack <output> <Jet object> <C platform input>...
 //
 // Link inputs are relocatable objects (the program's, a runtime pack) and
-// static archives, told apart by their magic bytes. Pack inputs are the
-// archive set, the runtime archive first.
+// static archives, told apart by their magic bytes. Pack inputs require a
+// standalone Jet runtime object; archives only satisfy its C dependencies.
 use jet_backend.[x64_link_executable, x64_link_runtime_pack]
 use core.files as files
 use core.process as process

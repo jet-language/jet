@@ -2,11 +2,12 @@
 // Root16: hazards0, retired8; Hazard16: protectedNode0, next8.
 // Hazard records are append-only PROCESS-LIFETIME; TCB192 lends this thread's
 // record. Numeric nodes use Int.jet's established immutable Node48/limbs ABI.
-// Rust seed keeps its old domain; native Rust numeric sites forward here.
+// Native arithmetic and carrier sites retire nodes through this Jet domain.
 int_hazard_root := I64{0}
 
-// runtime-init: 4. Allocator init0 precedes this root; init-array completion
+// Allocator init0 precedes this root; init-array completion
 // precedes all user code/Int spills (same startup law as Alloc.jet:27-29).
+// runtime-init: 4
 #Export(c) fn jet_rt_int_hazard_init() {
     if (int_hazard_root != I64{0}) -> return
     int_hazard_root = jet_rt_alloc(I64{16}, I64{8})
